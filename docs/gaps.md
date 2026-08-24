@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Dogfood IDE at editor scale
 
-**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches the bundled package (`examples/editor` in a checkout; `SCUZZ_HOME/ide` from a release). The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a project root from `Sys.args`, edits in `View.editor`, saves, runs `scuzz check --message-format=json`, hosts `scuzz lsp` over `Sys.spawn` pipes, and composes a nested file tree, tabs, find/replace, overlay stubs, output, and title. Fuzz overlays `analyze` and `lspCall` with canned JSON.
+**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches the bundled package (`examples/editor` in a checkout; `SCUZZ_HOME/ide` from a release). The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a project root from `Sys.args`, edits in `View.editor`, saves, runs `scuzz check --message-format=json`, hosts `scuzz lsp` over `Sys.spawn` pipes, and composes a nested file tree, extra tabs, find/replace, overlay stubs, output, and title. Fuzz overlays `analyze`, `lspCall`, `runProject`, and `fuzzProject` with canned JSON.
 
 **Unproven.** An editor-scale Scuzz app stays inside Headless-as-peer, one input alphabet, the `pump` frame budget, and `scuzz fuzz` as the verification strategy. A second typer, Desktop-only keys, or a View-per-token tree that Headless cannot dump breaks those locks.
 
@@ -83,17 +83,15 @@ Close:
 
 Today `Json.parse` / `Json.stringify` exist on blessed enum `Null|Bool|Int|Float|Str|Arr|Obj`. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid and attaches stdin/stdout pipes (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`). `Sys.exec` / `Sys.spawn` / child stdio fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. File change detection is a `Clock` plus `Fs` poll (`IO.sleep` / `Clock.monotonic` with `Fs.read` / `Fs.exists` / `Fs.list`). TestRuntime fakes Clock and Fs so Headless can drive that loop. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists.
 
-Live `Sys.exec` / `Sys.spawn` still fail under TestRuntime. Fuzz overlays `analyze` and `lspCall`. Do not add `Fs.watch` or an exec stub map.
+Live `Sys.exec` / `Sys.spawn` still fail under TestRuntime. Fuzz overlays `analyze`, `lspCall`, `runProject`, and `fuzzProject`. Do not add `Fs.watch` or an exec stub map.
 
 #### 4. Chrome around the editor
 
-Today `examples/editor` composes a nested file tree from `Fs.walk`, a basename tab plus dirty mark, a wrapping toolbar, find/replace, completion/hover/palette overlays, an output list that hides when empty, and `Ui.setTitle`. Nested tree rows indent. A dir tap expands or collapses children in place. The tree scrolls in the left pane. `examples/studio` shows pages, lists, and file load/save. `View.stack` / `View.positioned` exist. `View.tooltip` shows its message on hover. TextField and `View.editor` hold focus. A button tap clears that focus. `View.split` is a draggable 0–100 pane. `View.overlay` fills the parent when open; Escape and a backdrop tap dismiss it. Keys go to the open overlay. Ctrl/Cmd+S / F / Shift+F / K / P fire labeled toolbar buttons. Ctrl/Cmd+Shift+P opens Palette. A diagnostic row encodes `line:col|file|message`. A tap opens that file when `file` is set, then jumps the caret. Def opens a definition uri when set. Fix applies the first `newText` from a code action and still appends the title. `[session]` dumps `title=` and `focus=`. `[splits]` / `[overlays]` dump those widgets.
+Today `examples/editor` composes a nested file tree from `Fs.walk`, a tab list of open files with dirty marks, a wrapping toolbar, find/replace, completion/hover/palette overlays, an output list that hides when empty, and `Ui.setTitle`. Nested tree rows indent. A dir tap expands or collapses children in place. The tree scrolls in the left pane. A tree, diagnostic, or def jump adds a tab when that path is not open, then selects it. Tab buttons switch. A close control drops a tab and keeps the last one. Save all writes every dirty tab. Run and Fuzz append captured `scuzz run` / `scuzz fuzz --iterations 0` text and set `showOut`. `examples/studio` shows pages, lists, and file load/save. `View.stack` / `View.positioned` exist. `View.tooltip` shows its message on hover. TextField and `View.editor` hold focus. A button tap clears that focus. `View.split` is a draggable 0–100 pane. `View.overlay` fills the parent when open; Escape and a backdrop tap dismiss it. Keys go to the open overlay. Ctrl/Cmd+S / F / Shift+F / K / P fire labeled toolbar buttons. Ctrl/Cmd+Shift+P opens Palette. A diagnostic row encodes `line:col|file|message`. A tap opens that file when `file` is set, then jumps the caret. Def opens a definition uri when set. Fix applies the first `newText` from a code action and still appends the title. `[session]` dumps `title=` and `focus=`. `[splits]` / `[overlays]` dump those widgets.
 
 Close:
 
-- Extra tabs and save-all. The open path is one tab with a dirty mark.
 - Context-menu chrome.
-- Output panel for captured `run` / `fuzz` text. Format appends `fmt`.
 - File tree and diagnostics list as first-class focus targets. An open overlay takes keys. A button tap clears TextField and editor focus.
 
 In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.

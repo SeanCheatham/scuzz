@@ -6,25 +6,32 @@ str[1] = "hello
 world
 "
 str[2] = "sample.txt"
-str[3] = "sample.txt"
-str[4] = "."
-int[5] = 0
-list[6] = []
-int[7] = 0
-list[8] = ["sample.txt", "scuzz.toml", "src/"]
+str[3] = "."
+int[4] = 0
+list[5] = ["sample.txt"]
+list[6] = ["hello
+world
+"]
+list[7] = ["hello
+world
+"]
+int[8] = 0
 list[9] = []
 int[10] = 0
-str[11] = ""
-str[12] = ""
-int[13] = 28
-int[14] = 0
-int[15] = 0
-int[16] = 0
-str[17] = "hover stub"
-list[18] = []
-list[19] = []
-int[20] = 0
-list[21] = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix"]
+list[11] = ["sample.txt", "scuzz.toml", "src/"]
+list[12] = []
+int[13] = 0
+str[14] = ""
+str[15] = ""
+int[16] = 28
+int[17] = 0
+int[18] = 0
+int[19] = 0
+str[20] = "hover stub"
+list[21] = []
+list[22] = []
+int[23] = 0
+list[24] = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix", "Save all", "Run", "Fuzz"]
 
 [views]
 split:28
@@ -34,7 +41,6 @@ list:list
 button:sample.txt
 button:scuzz.toml
 button:src/
-text:sample.txt
 button:Save
 button:Check
 button:Find
@@ -45,6 +51,12 @@ button:Def
 button:Rename
 button:Fix
 button:Palette
+button:Save all
+button:Run
+button:Fuzz
+list:list
+button:sample.txt
+button:x sample.txt
 editor:editor
 overlay:0
 overlay:0
@@ -55,16 +67,21 @@ overlay:0
 0 sample.txt 36,58 67x32
 1 scuzz.toml 36,98 66x32
 2 src/ 36,138 48x32
-3 Save 364,36 48x32
-4 Check 420,36 49x32
-5 Find 477,36 48x32
-6 Complete 533,36 63x32
-7 Hover 604,36 48x32
-8 Format 660,36 53x32
-9 Def 721,36 48x32
-10 Rename 777,36 58x32
-11 Fix 843,36 48x32
-12 Palette 309,76 52x32
+3 Save 309,36 48x32
+4 Check 365,36 49x32
+5 Find 422,36 48x32
+6 Complete 478,36 63x32
+7 Hover 549,36 48x32
+8 Format 605,36 53x32
+9 Def 666,36 48x32
+10 Rename 722,36 58x32
+11 Fix 788,36 48x32
+12 Palette 844,36 52x32
+13 Save all 309,76 56x32
+14 Run 373,76 48x32
+15 Fuzz 429,76 48x32
+16 sample.txt 321,152 67x32
+17 x sample.txt 396,152 75x32
 
 [fields]
 

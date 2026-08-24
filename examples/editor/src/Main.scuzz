@@ -10,6 +10,18 @@ property hasFind: Bool =
 property hasPalette: Bool =
   Property.a11yHas("button:Palette")
 
+property hasSaveAll: Bool =
+  Property.a11yHas("button:Save all")
+
+property hasRun: Bool =
+  Property.a11yHas("button:Run")
+
+property hasFuzz: Bool =
+  Property.a11yHas("button:Fuzz")
+
+property hasClose: Bool =
+  Property.a11yHas("button:x sample.txt")
+
 property hasEditor: Bool =
   Property.a11yHas("editor:editor")
 
@@ -37,6 +49,20 @@ def analyze(path: String, body: String): IO[String] =
 )
   } yield if (Str.startsWith(got._2, "[")) got._2 else "[]"
 
+def runProject(root: String): IO[String] =
+  for {
+    got <- Sys.exec(Str.concat("scuzz run ", root)).handleErrorWith(_ =>
+  IO.pure((Str.len("x"), "", "run fail"))
+)
+  } yield Chrome.captureOut(got._2, got._3)
+
+def fuzzProject(root: String): IO[String] =
+  for {
+    got <- Sys.exec(Str.concat("scuzz fuzz --iterations 0 ", root)).handleErrorWith(_ =>
+  IO.pure((Str.len("x"), "", "fuzz fail"))
+)
+  } yield Chrome.captureOut(got._2, got._3)
+
 def walkTree(root: String): IO[List[String]] =
   for {
     ents <- Fs.walk(root).handleErrorWith(_ =>
@@ -60,6 +86,17 @@ def walkTree(root: String): IO[List[String]] =
     _ = Property.check("res", Chrome.resolvePath("d", "b") == Fs.join("d", "b"), true)
     _ = Property.check("dfile", Check.diagFile("1:1|a.scuzz|m") == "a.scuzz", true)
     _ = Property.check("dempty", Check.diagFile("1:1||m") == "", true)
+    _ = Property.check("open", Chrome.openPaths(["a"], "b") == ["a", "b"], true)
+    _ = Property.check("reopen", Chrome.openPaths(["a"], "a") == ["a"], true)
+    _ = Property.check("drop", Chrome.dropAt(["a", "b", "c"], 1) == ["a", "c"], true)
+    _ = Property.check("aft", Chrome.afterClose(1, 0, 1) == 0, true)
+    _ = Property.check("keep", Chrome.afterClose(0, 0, 1) == 0, true)
+    _ = Property.check("tl", Chrome.tabLabel("src/Main.scuzz", "x", "x") == "Main.scuzz", true)
+    _ = Property.check("td", Chrome.tabLabel("src/Main.scuzz", "x", "y") == "Main.scuzz *", true)
+    _ = Property.check("cl", Chrome.closeLabel("src/Main.scuzz") == "x Main.scuzz", true)
+    _ = Property.check("cap", Chrome.captureOut("out", "") == "out", true)
+    _ = Property.check("err", Chrome.captureOut("out", "e") == """out
+e""", true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ =>
   IO.pure(Str.len(""))
 )
@@ -73,9 +110,12 @@ def walkTree(root: String): IO[List[String]] =
     buf = Signal.str(raw)
     orig = Signal.str(raw)
     pathSig = Signal.str(file)
-    tabSig = Signal.str(Fs.basename(file))
     dirSig = Signal.str(root)
     dirty = Signal.int(Str.len(""))
+    paths = Signal.list([file])
+    bodies = Signal.list([raw])
+    origs = Signal.list([raw])
+    idx = Signal.int(Str.len(""))
     diags = Signal.list([])
     showDiags = Signal.int(0)
     tree = Signal.list(names)
@@ -91,7 +131,7 @@ def walkTree(root: String): IO[List[String]] =
     comps = Signal.list([])
     openSig = Signal.list([])
     palOpen = Signal.int(Str.len(""))
-    palCmds = Signal.list(["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix"])
+    palCmds = Signal.list(["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix", "Save all", "Run", "Fuzz"])
     _ = Lsp.frame("{}")
     _ = Lsp.parseLen(Str.concat("Content-Length: 2", Str.concat(Lsp.headerBreak(), "{}")))
     _ = Property.check("need", Lsp.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
@@ -116,18 +156,24 @@ def walkTree(root: String): IO[List[String]] =
   body <- Fs.read(next).handleErrorWith(_ =>
   IO.pure("")
 )
-  _ = Signal.setStr(pathSig, next)
-  _ = Signal.setStr(tabSig, Fs.basename(next))
-  _ = Signal.setStr(buf, body)
-  _ = Signal.setStr(orig, body)
-  _ = Signal.set(dirty, Str.len(""))
-  _ <- Ui.setTitle(Fs.basename(next))
+  (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), next, body)
+  _ = Signal.setList(paths, ps)
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.set(idx, i2)
+  _ = Signal.setStr(buf, nextBody)
+  _ = Signal.setStr(orig, nextOrig)
+  _ = Signal.set(dirty, d)
+  _ = Signal.setStr(pathSig, List.at(ps, i2))
+  _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
-} yield ()))))), View.stack(View.column(View.wrap(View.bindText(tabSig), View.showWhen(dirty, Str.len("x"), View.text("*")), View.button("Save", _ => for {
+} yield ()))))), View.stack(View.column(View.wrap(View.button("Save", _ => for {
   _ = Property.sometimes("tappedSave")
   p = Signal.getStr(pathSig)
   _ <- Fs.write(p, Signal.getStr(buf))
   _ = Signal.setStr(orig, Signal.getStr(buf))
+  _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
+  _ = Signal.setList(origs, List.setAt(Signal.getList(origs), Signal.get(idx), Signal.getStr(buf)))
   _ = Signal.set(dirty, Str.len(""))
   _ <- Ui.setTitle(Fs.basename(p))
 } yield ()), View.button("Check", _ => for {
@@ -184,12 +230,16 @@ def walkTree(root: String): IO[List[String]] =
   body <- Fs.read(dest).handleErrorWith(_ =>
   IO.pure("")
 )
-  _ = Signal.setStr(pathSig, dest)
-  _ = Signal.setStr(tabSig, Fs.basename(dest))
-  _ = Signal.setStr(buf, body)
-  _ = Signal.setStr(orig, body)
-  _ = Signal.set(dirty, Str.len(""))
-  _ <- Ui.setTitle(Fs.basename(dest))
+  (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), dest, body)
+  _ = Signal.setList(paths, ps)
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.set(idx, i2)
+  _ = Signal.setStr(buf, nextBody)
+  _ = Signal.setStr(orig, nextOrig)
+  _ = Signal.set(dirty, d)
+  _ = Signal.setStr(pathSig, List.at(ps, i2))
+  _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
   _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
 } yield ()), View.button("Rename", _ => for {
@@ -205,6 +255,7 @@ def walkTree(root: String): IO[List[String]] =
   t = Lsp.fixText(j, "")
   _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t)
   _ = Signal.set(dirty, if (Signal.getStr(buf) == Signal.getStr(orig)) Str.len("") else Str.len("x"))
+  _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
   fixOut = List.append(Signal.getList(output), Lsp.fixTitle(j))
   _ = Signal.setList(output, fixOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fixOut))
@@ -212,24 +263,74 @@ def walkTree(root: String): IO[List[String]] =
 } yield ()), View.button("Palette", _ => for {
   _ = Signal.set(palOpen, Str.len("x"))
   _ <- IO.pure(())
-} yield ())), View.expanded(View.editor(buf)), View.showWhen(showDiags, 1, View.each(diags, s => View.button(s, _ => for {
+} yield ()), View.button("Save all", _ => for {
+  _ = Property.sometimes("tappedSaveAll")
+  bs = List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf))
+  os <- Chrome.writeDirty(Signal.getList(paths), bs, List.setAt(Signal.getList(origs), Signal.get(idx), Signal.getStr(orig)))
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.setStr(orig, List.at(os, Signal.get(idx)))
+  _ = Signal.set(dirty, Str.len(""))
+  _ <- Ui.setTitle(Fs.basename(Signal.getStr(pathSig)))
+} yield ()), View.button("Run", _ => for {
+  _ = Property.sometimes("tappedRun")
+  line <- runProject(Signal.getStr(dirSig))
+  runOut = List.append(Signal.getList(output), line)
+  _ = Signal.setList(output, runOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(runOut))
+} yield ()), View.button("Fuzz", _ => for {
+  _ = Property.sometimes("tappedFuzz")
+  line <- fuzzProject(Signal.getStr(dirSig))
+  fuzzOut = List.append(Signal.getList(output), line)
+  _ = Signal.setList(output, fuzzOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(fuzzOut))
+} yield ())), View.each(paths, p => View.row(View.button(Chrome.tabLabel(p, Chrome.liveSlot(Signal.getList(bodies), Signal.getList(paths), p, Signal.getStr(pathSig), Signal.getStr(buf)), Chrome.liveSlot(Signal.getList(origs), Signal.getList(paths), p, Signal.getStr(pathSig), Signal.getStr(orig))), _ => for {
+  _ = Property.sometimes("tappedTab")
+  (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), p, "")
+  _ = Signal.setList(paths, ps)
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.set(idx, i2)
+  _ = Signal.setStr(buf, nextBody)
+  _ = Signal.setStr(orig, nextOrig)
+  _ = Signal.set(dirty, d)
+  _ = Signal.setStr(pathSig, List.at(ps, i2))
+  _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
+} yield ()), View.button(Chrome.closeLabel(p), _ => for {
+  _ = Property.sometimes("tappedClose")
+  (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyClose(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), p)
+  _ = Signal.setList(paths, ps)
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.set(idx, i2)
+  _ = Signal.setStr(buf, nextBody)
+  _ = Signal.setStr(orig, nextOrig)
+  _ = Signal.set(dirty, d)
+  _ = Signal.setStr(pathSig, List.at(ps, i2))
+  _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
+} yield ()))), View.expanded(View.editor(buf)), View.showWhen(showDiags, 1, View.each(diags, s => View.button(s, _ => for {
   file = Check.diagFile(s)
   _ <- if (Str.isEmpty(file)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.getStr(dirSig), file)
   body <- Fs.read(dest).handleErrorWith(_ =>
   IO.pure("")
 )
-  _ = Signal.setStr(pathSig, dest)
-  _ = Signal.setStr(tabSig, Fs.basename(dest))
-  _ = Signal.setStr(buf, body)
-  _ = Signal.setStr(orig, body)
-  _ = Signal.set(dirty, Str.len(""))
-  _ <- Ui.setTitle(Fs.basename(dest))
+  (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), dest, body)
+  _ = Signal.setList(paths, ps)
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.set(idx, i2)
+  _ = Signal.setStr(buf, nextBody)
+  _ = Signal.setStr(orig, nextOrig)
+  _ = Signal.set(dirty, d)
+  _ = Signal.setStr(pathSig, List.at(ps, i2))
+  _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
   _ <- Check.jumpDiag(s)
 } yield ()))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => Ui.setEditorCaret(Str.len("x"), Str.len("x"))), View.button("Replace", _ => for {
   _ = Signal.setStr(buf, Str.replace(Signal.getStr(buf), Signal.getStr(findQ), Signal.getStr(replQ)))
   _ = Signal.set(dirty, Str.len("x"))
+  _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
   _ <- Ui.setTitle(Str.concat(Fs.basename(Signal.getStr(pathSig)), " *"))
 } yield ()))), View.overlay(compOpen, View.column(View.text("complete"), View.each(comps, s => View.button(s, _ => ())))), View.overlay(hoverOpen, View.bindText(hoverTxt)), View.overlay(palOpen, View.column(View.text("Palette"), View.each(palCmds, s => View.button(s, _ => for {
   _ = Signal.set(palOpen, Str.len(""))
@@ -238,6 +339,8 @@ def walkTree(root: String): IO[List[String]] =
   p = Signal.getStr(pathSig)
   _ <- Fs.write(p, Signal.getStr(buf))
   _ = Signal.setStr(orig, Signal.getStr(buf))
+  _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
+  _ = Signal.setList(origs, List.setAt(Signal.getList(origs), Signal.get(idx), Signal.getStr(buf)))
   _ = Signal.set(dirty, Str.len(""))
   _ <- Ui.setTitle(Fs.basename(p))
 } yield () else if (s == "Check") for {
@@ -294,12 +397,16 @@ def walkTree(root: String): IO[List[String]] =
   body <- Fs.read(dest).handleErrorWith(_ =>
   IO.pure("")
 )
-  _ = Signal.setStr(pathSig, dest)
-  _ = Signal.setStr(tabSig, Fs.basename(dest))
-  _ = Signal.setStr(buf, body)
-  _ = Signal.setStr(orig, body)
-  _ = Signal.set(dirty, Str.len(""))
-  _ <- Ui.setTitle(Fs.basename(dest))
+  (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), dest, body)
+  _ = Signal.setList(paths, ps)
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.set(idx, i2)
+  _ = Signal.setStr(buf, nextBody)
+  _ = Signal.setStr(orig, nextOrig)
+  _ = Signal.set(dirty, d)
+  _ = Signal.setStr(pathSig, List.at(ps, i2))
+  _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
   _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
 } yield () else if (s == "Rename") for {
@@ -315,10 +422,32 @@ def walkTree(root: String): IO[List[String]] =
   t = Lsp.fixText(j, "")
   _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t)
   _ = Signal.set(dirty, if (Signal.getStr(buf) == Signal.getStr(orig)) Str.len("") else Str.len("x"))
+  _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
   fixOut = List.append(Signal.getList(output), Lsp.fixTitle(j))
   _ = Signal.setList(output, fixOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fixOut))
   _ <- IO.pure(())
+} yield () else if (s == "Save all") for {
+  _ = Property.sometimes("tappedSaveAll")
+  bs = List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf))
+  os <- Chrome.writeDirty(Signal.getList(paths), bs, List.setAt(Signal.getList(origs), Signal.get(idx), Signal.getStr(orig)))
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = Signal.setStr(orig, List.at(os, Signal.get(idx)))
+  _ = Signal.set(dirty, Str.len(""))
+  _ <- Ui.setTitle(Fs.basename(Signal.getStr(pathSig)))
+} yield () else if (s == "Run") for {
+  _ = Property.sometimes("tappedRun")
+  line <- runProject(Signal.getStr(dirSig))
+  runOut = List.append(Signal.getList(output), line)
+  _ = Signal.setList(output, runOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(runOut))
+} yield () else if (s == "Fuzz") for {
+  _ = Property.sometimes("tappedFuzz")
+  line <- fuzzProject(Signal.getStr(dirSig))
+  fuzzOut = List.append(Signal.getList(output), line)
+  _ = Signal.setList(output, fuzzOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(fuzzOut))
 } yield () else IO.pure(())
-} yield ())))))))).require(hasSave).require(hasCheck).require(hasFind).require(hasPalette).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
+} yield ())))))))).require(hasSave).require(hasCheck).require(hasFind).require(hasPalette).require(hasSaveAll).require(hasRun).require(hasFuzz).require(hasClose).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
   } yield ()

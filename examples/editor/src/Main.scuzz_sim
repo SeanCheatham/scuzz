@@ -1,3 +1,9 @@
 def analyze(_path: String, _body: String): IO[String] =
   IO.pure("[{\"severity\":\"error\",\"message\":\"x\",\"line\":1,\"column\":1,\"file\":\"sample.txt\"}]")
 
+def runProject(_root: String): IO[String] =
+  IO.pure("run ok")
+
+def fuzzProject(_root: String): IO[String] =
+  IO.pure("fuzz ok")
+
