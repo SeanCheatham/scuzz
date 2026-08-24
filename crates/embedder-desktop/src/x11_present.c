@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "scuzz_embedder.h"
 
 #include <X11/Xatom.h>
@@ -9,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define EVENT_CAP 64
@@ -163,7 +166,12 @@ char *sz_embedder_clipboard_get(void) {
         return g_clip ? clip_dup(g_clip) : NULL;
       }
     }
-    usleep(2000);
+    {
+      struct timespec ts;
+      ts.tv_sec = 0;
+      ts.tv_nsec = 2000000L; /* 2 ms */
+      nanosleep(&ts, NULL);
+    }
   }
   return g_clip ? clip_dup(g_clip) : NULL;
 }
