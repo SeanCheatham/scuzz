@@ -188,15 +188,25 @@ static void script_type(SzUiSession *session, int index, const char *text) {
 }
 
 static void script_key(SzUiSession *session, const char *name, const char *text,
-                       int mods) {
+                       int mods, int repeat) {
   SzInputEvent ev;
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_KEY;
   ev.key = name ? name : "";
   ev.text = text ? text : "";
   ev.key_mods = mods;
+  ev.key_repeat = repeat ? 1 : 0;
   if (!sz_ui_inject_sync(session, &ev))
     fprintf(stderr, "scuzz: script key skipped\n");
+}
+
+static void script_compose(SzUiSession *session, const char *text) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_COMPOSE;
+  ev.text = text ? text : "";
+  if (!sz_ui_inject_sync(session, &ev))
+    fprintf(stderr, "scuzz: script compose skipped\n");
 }
 
 static int script_eq_mod(const char *s, const char *mod) {
@@ -216,14 +226,16 @@ static int script_eq_mod(const char *s, const char *mod) {
   return s[i] == '\0' && mod[i] == '\0';
 }
 
-/* First token is `Name` or `Name+shift+ctrl`. Known pieces: shift, ctrl, cmd,
- * alt. The leftover piece is the key name. */
+/* First token is `Name` or `Name+shift+ctrl+repeat`. Known pieces: shift, ctrl,
+ * cmd, alt, repeat. The leftover piece is the key name. */
 static void script_parse_key_token(const char *tok, char *name, size_t cap,
-                                   int *mods) {
+                                   int *mods, int *repeat) {
   char buf[128];
   char *p;
     char *part;
     *mods = 0;
+  if (repeat)
+    *repeat = 0;
   if (!name || cap == 0)
     return;
   name[0] = '\0';
@@ -252,7 +264,10 @@ static void script_parse_key_token(const char *tok, char *name, size_t cap,
       *mods |= SZ_KEY_CMD;
     else if (script_eq_mod(part, "alt"))
       *mods |= SZ_KEY_ALT;
-    else {
+    else if (script_eq_mod(part, "repeat")) {
+      if (repeat)
+        *repeat = 1;
+    } else {
       size_t n = strlen(part);
       if (n >= cap)
         n = cap - 1;
@@ -357,7 +372,13 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
                         PageUp / PageDown move by the viewport on an editor;
                         Ctrl/Cmd+Z undoes, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redoes;
                         `Name+shift` / `+ctrl` / `+cmd` / `+alt` set modifiers;
-                        live OS keys record this verb
+                        `Name+repeat` is a held-key auto-repeat (same insert / move / delete);
+                        live OS keys record this verb (`+repeat` when the OS repeats)
+     compose <text>  set IME preedit on the starred field or focused editor
+                     (underlined preview; not in the committed buffer)
+     compose         commit preedit into the buffer at the caret (replaces a selection)
+     commit          same as empty `compose`
+     key Escape      cancel preedit when compose is active; else dismiss an overlay
      caret <n>  set the starred TextField or focused-editor caret to byte offset n
      caret <i> <n>  set dump-index i caret to byte offset n
      select <a> <c>  set the starred TextField or focused-editor selection `[a, c)` (caret at c)
@@ -493,6 +514,7 @@ static void play_script_line(SzUiSession *session, char *line) {
     const char *text = "";
     size_t ni = 0;
     int mods = 0;
+    int repeat = 0;
     while (*rest == ' ')
       rest++;
     while (rest[ni] && rest[ni] != ' ' && ni + 1 < sizeof token) {
@@ -502,8 +524,15 @@ static void play_script_line(SzUiSession *session, char *line) {
     token[ni] = '\0';
     if (rest[ni] == ' ')
       text = rest + ni + 1;
-    script_parse_key_token(token, name, sizeof name, &mods);
-    script_key(session, name, text, mods);
+    script_parse_key_token(token, name, sizeof name, &mods, &repeat);
+    script_key(session, name, text, mods, repeat);
+  } else if (strncmp(line, "compose ", 8) == 0 || strcmp(line, "compose") == 0) {
+    const char *rest = len > 7 ? line + 8 : "";
+    while (*rest == ' ')
+      rest++;
+    script_compose(session, rest);
+  } else if (strcmp(line, "commit") == 0) {
+    script_compose(session, "");
   } else if (strncmp(line, "caret ", 6) == 0 || strcmp(line, "caret") == 0) {
     int idx, off;
     script_parse_caret(len > 5 ? line + 6 : "", &idx, &off);

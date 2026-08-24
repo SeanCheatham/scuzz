@@ -74,6 +74,8 @@ struct SzView {
   int caret;
   /* TextField / editor selection anchor (UTF-8 snapped). Collapsed when equal to caret. */
   int sel_anchor;
+  /* IME compose preview. Not in the committed SignalStr until commit. */
+  char *preedit;
   SzEditHist *undo;
   int undo_n;
   int undo_cap;
@@ -782,6 +784,24 @@ const char *sz_view_editor_value(const SzView *view) {
   if (!view || view->kind != SZ_VIEW_EDITOR || !view->sig_str)
     return "";
   return sz_signal_str_get(view->sig_str);
+}
+
+static const char *edit_preedit(const SzView *view) {
+  if (!view || !view->preedit)
+    return "";
+  return view->preedit;
+}
+
+const char *sz_view_text_field_preedit(const SzView *view) {
+  if (!view || view->kind != SZ_VIEW_TEXT_FIELD)
+    return "";
+  return edit_preedit(view);
+}
+
+const char *sz_view_editor_preedit(const SzView *view) {
+  if (!view || view->kind != SZ_VIEW_EDITOR)
+    return "";
+  return edit_preedit(view);
 }
 
 static int view_is_edit(const SzView *v) {
@@ -1496,6 +1516,7 @@ void sz_view_free(SzView *view) {
   sz_free(view->prefix);
   sz_free(view->placeholder);
   sz_free(view->a11y_label);
+  sz_free(view->preedit);
   /* Signals are owned by the demo/session, not the view. */
   sz_release(view->tap_env);
   view->tap_env = NULL;
@@ -3715,6 +3736,19 @@ static void paint_mono_string(SkCanvas *c, const char *s, float x, float y,
   sk_paint_delete(p);
 }
 
+static void paint_preedit_run(SkCanvas *c, const char *s, float x, float y,
+                              float w, uint32_t argb, float font_px, int mono) {
+  if (!s || !s[0] || w < 0.f)
+    return;
+  if (mono)
+    paint_mono_string(c, s, x, y, argb, font_px);
+  else
+    paint_string(c, s, x, y, argb, font_px);
+  if (w < 1.f)
+    w = 1.f;
+  paint_rect(c, x, y, w, 1.f, argb);
+}
+
 static int editor_cols(const char *s, int start, int end) {
   int n = 0;
   int i = start;
@@ -4605,9 +4639,34 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         paint_rect(c, x0, y, x1 - x0, h, theme->accent);
       }
     }
-    paint_string(c, shown, v->frame.x + k_text_field_inset,
-                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
-                 buf[0] ? theme->foreground : theme->muted, theme->font_px);
+    {
+      const char *pre = edit_preedit(v);
+      float base_x = v->frame.x + k_text_field_inset;
+      float base_y = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
+      if (pre[0] && buf[0]) {
+        int caret = field_caret_clamped(v);
+        float left_w = span_width(buf, 0, caret, theme->font_px);
+        float pre_w = text_width(pre, theme->font_px);
+        char left[256];
+        int ln = caret;
+        if (ln >= (int)sizeof left)
+          ln = (int)sizeof left - 1;
+        memcpy(left, buf, (size_t)ln);
+        left[ln] = '\0';
+        paint_string(c, left, base_x, base_y, theme->foreground, theme->font_px);
+        paint_preedit_run(c, pre, base_x + left_w, base_y, pre_w, theme->primary,
+                          theme->font_px, 0);
+        paint_string(c, buf + caret, base_x + left_w + pre_w, base_y,
+                     theme->foreground, theme->font_px);
+      } else if (pre[0]) {
+        float pre_w = text_width(pre, theme->font_px);
+        paint_preedit_run(c, pre, base_x, base_y, pre_w, theme->primary,
+                          theme->font_px, 0);
+      } else {
+        paint_string(c, shown, base_x, base_y,
+                     buf[0] ? theme->foreground : theme->muted, theme->font_px);
+      }
+    }
     if (v->focused) {
       SzRect caret = sz_view_caret_rect(v, theme);
       if (caret.w > 0.f)
@@ -4731,9 +4790,29 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                            theme->primary);
               }
             }
-            paint_editor_line_lsp(c, v, s, line, start, end, base_x,
-                                 top + font_px, font_px, v->scroll_x,
-                                 text_w > 8.f ? text_w : 8.f, theme);
+            {
+              const char *pre = edit_preedit(v);
+              int caret = field_caret_clamped(v);
+              float tw = text_w > 8.f ? text_w : 8.f;
+              if (pre[0] && caret >= start && caret <= end) {
+                float pre_w =
+                    editor_span_width(pre, 0, (int)strlen(pre), font_px);
+                float caret_x =
+                    base_x + editor_span_width(s, start, caret, font_px);
+                paint_editor_line_lsp(c, v, s, line, start, caret, base_x,
+                                     top + font_px, font_px, v->scroll_x, tw,
+                                     theme);
+                paint_preedit_run(c, pre, caret_x, top + font_px, pre_w,
+                                  theme->primary, font_px, 1);
+                paint_editor_line_lsp(c, v, s, line, caret, end, base_x + pre_w,
+                                     top + font_px, font_px, v->scroll_x, tw,
+                                     theme);
+              } else {
+                paint_editor_line_lsp(c, v, s, line, start, end, base_x,
+                                     top + font_px, font_px, v->scroll_x, tw,
+                                     theme);
+              }
+            }
             paint_editor_inlays(c, v, line, base_x, top + font_px, font_px,
                                v->scroll_x, text_w > 8.f ? text_w : 8.f, theme);
           }
@@ -4972,6 +5051,10 @@ static void clear_focus(SzView *v) {
   int i;
   if (!v)
     return;
+  if (view_is_edit(v)) {
+    sz_free(v->preedit);
+    v->preedit = NULL;
+  }
   v->focused = 0;
   for (i = 0; i < v->child_count; i++)
     clear_focus(v->children[i]);
@@ -5288,6 +5371,11 @@ static SzRect editor_caret_rect(SzView *f, const SzTheme *theme) {
     line = line_index_at_off(s, c);
     x = f->frame.x + gutter + inset + editor_span_width(s, ls, c, font_px) -
         f->scroll_x;
+    {
+      const char *pre = edit_preedit(f);
+      if (pre[0])
+        x += editor_span_width(pre, 0, (int)strlen(pre), font_px);
+    }
     y = f->frame.y + inset + (float)editor_vis_row(f, line) * line_h -
         f->scroll_y;
     if (x > f->frame.x + f->frame.w - 2.f)
@@ -5367,6 +5455,11 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   if (c < n)
     buf[c] = '\0';
   x = f->frame.x + k_text_field_inset + text_width(buf, theme->font_px);
+  {
+    const char *pre = edit_preedit(f);
+    if (pre[0])
+      x += text_width(pre, theme->font_px);
+  }
   if (x > f->frame.x + f->frame.w - 2.f)
     x = f->frame.x + f->frame.w - 2.f;
   if (x < f->frame.x + k_text_field_inset)
@@ -5830,6 +5923,8 @@ int sz_view_handle_text(SzView *root, const char *text) {
   const char *s;
   if (!target || !target->sig_str)
     return 0;
+  sz_free(target->preedit);
+  target->preedit = NULL;
   editor_push_undo(target);
   sz_signal_str_set(target->sig_str, text ? text : "");
   s = field_cstr(target);
@@ -5839,6 +5934,42 @@ int sz_view_handle_text(SzView *root, const char *text) {
   if (target->kind == SZ_VIEW_EDITOR)
     editor_scroll_to_caret(target);
   return 1;
+}
+
+static void field_clear_preedit(SzView *t) {
+  if (!t)
+    return;
+  sz_free(t->preedit);
+  t->preedit = NULL;
+}
+
+static void field_set_preedit(SzView *t, const char *text) {
+  if (!t)
+    return;
+  sz_free(t->preedit);
+  t->preedit = sz_strdup(text ? text : "");
+}
+
+static int field_has_preedit(const SzView *t) {
+  return t && t->preedit && t->preedit[0];
+}
+
+static void field_preedit_backspace(SzView *t) {
+  int n, keep;
+  char *p;
+  if (!field_has_preedit(t))
+    return;
+  n = (int)strlen(t->preedit);
+  keep = utf8_prev(t->preedit, n);
+  if (keep <= 0) {
+    field_clear_preedit(t);
+    return;
+  }
+  p = (char *)sz_alloc((size_t)keep + 1);
+  memcpy(p, t->preedit, (size_t)keep);
+  p[keep] = '\0';
+  sz_free(t->preedit);
+  t->preedit = p;
 }
 
 static int field_delete_sel(SzView *t) {
@@ -5887,6 +6018,16 @@ static void field_insert_at_caret(SzView *t, const char *text) {
   sz_free(buf);
   t->caret = c + add;
   t->sel_anchor = t->caret;
+}
+
+static void field_commit_preedit(SzView *t) {
+  char *p;
+  if (!field_has_preedit(t))
+    return;
+  p = t->preedit;
+  t->preedit = NULL;
+  field_insert_at_caret(t, p);
+  sz_free(p);
 }
 
 static void field_backspace_at_caret(SzView *t) {
@@ -6016,6 +6157,12 @@ int sz_view_handle_text_edit(SzView *root, const char *text, int backspace) {
   SzView *target = sz_view_edit_target(root);
   if (!target || !target->sig_str)
     return 0;
+  if (backspace && field_has_preedit(target)) {
+    field_preedit_backspace(target);
+    target->focused = 1;
+    return 1;
+  }
+  field_commit_preedit(target);
   if (backspace)
     field_backspace_at_caret(target);
   else
@@ -6046,11 +6193,18 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
   if (!key)
     key = "";
   overlay = find_open_overlay(root);
-  if (overlay && strcmp(key, "Escape") == 0) {
-    if (overlay->sig_int)
-      sz_signal_int_set(overlay->sig_int, 0);
-    clear_focus(root);
-    return 1;
+  if (strcmp(key, "Escape") == 0) {
+    SzView *focused = find_focused_edit(root);
+    if (field_has_preedit(focused)) {
+      field_clear_preedit(focused);
+      return 1;
+    }
+    if (overlay) {
+      if (overlay->sig_int)
+        sz_signal_int_set(overlay->sig_int, 0);
+      clear_focus(root);
+      return 1;
+    }
   }
   if (!overlay) {
     if (!find_focused_edit(root)) {
@@ -6075,9 +6229,22 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
   target = sz_view_edit_target(root);
   is_ed = target && target->kind == SZ_VIEW_EDITOR;
   if (strcmp(key, "Backspace") == 0) {
+    if (field_has_preedit(target)) {
+      field_preedit_backspace(target);
+      target->focused = 1;
+      return 1;
+    }
     (void)sz_view_handle_text_edit(root, NULL, 1);
     return 1;
   }
+  if (field_has_preedit(target) &&
+      (strcmp(key, "Delete") == 0 || strncmp(key, "Arrow", 5) == 0 ||
+       strcmp(key, "Home") == 0 || strcmp(key, "End") == 0 ||
+       strcmp(key, "PageUp") == 0 || strcmp(key, "PageDown") == 0 ||
+       strcmp(key, "Enter") == 0 || strcmp(key, "Tab") == 0 ||
+       (text && text[0]) || strcmp(key, "Space") == 0 ||
+       key_is_one_code_point(key)))
+    field_commit_preedit(target);
   if (strcmp(key, "Delete") == 0) {
     if (target)
       field_delete_at_caret(target);
@@ -6206,6 +6373,20 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
   }
   if (key_is_one_code_point(key))
     (void)sz_view_handle_text_edit(root, key, 0);
+  return 1;
+}
+
+int sz_view_handle_compose(SzView *root, const char *text) {
+  SzView *target = sz_view_edit_target(root);
+  if (!target || !target->sig_str)
+    return 0;
+  if (!text || !text[0])
+    field_commit_preedit(target);
+  else
+    field_set_preedit(target, text);
+  target->focused = 1;
+  if (target->kind == SZ_VIEW_EDITOR)
+    editor_scroll_to_caret(target);
   return 1;
 }
 

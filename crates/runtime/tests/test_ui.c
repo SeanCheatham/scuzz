@@ -1364,6 +1364,198 @@ static void test_record_live_key(void) {
   remove(record);
 }
 
+static void test_session_inject_key_repeat(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  SzInputEvent ev;
+  const char *path = "/tmp/scuzz_ui_inject_key_repeat.script";
+  const char *dump = "/tmp/scuzz_ui_inject_key_repeat.dump";
+  const char *record = "/tmp/scuzz_ui_record_key_repeat.script";
+  char *body;
+
+  remove(path);
+  remove(dump);
+  remove(record);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+
+  write_stamp(path, "key a a\nkey a+repeat a\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "aa") == 0);
+  assert(sz_view_text_field_caret(field) == 2);
+
+  write_stamp(path, "key Backspace\nkey Backspace+repeat\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "") == 0);
+  assert(sz_view_text_field_caret(field) == 0);
+
+  write_stamp(path, "key b b\nkey c c\nkey ArrowLeft\nkey ArrowLeft+repeat\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "bc") == 0);
+  assert(sz_view_text_field_caret(field) == 0);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "d";
+  ev.text = "d";
+  ev.key_repeat = 1;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(strcmp(sz_signal_str_get(draft), "dbc") == 0);
+
+  assert(sz_ui_session_set_record(session, record));
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "e";
+  ev.text = "e";
+  ev.key_repeat = 1;
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(strcmp(sz_signal_str_get(draft), "debc") == 0);
+  body = slurp_cstr(record);
+  assert(strstr(body, "key e+repeat e") != NULL);
+  free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(path);
+  remove(dump);
+  remove(record);
+}
+
+static void test_session_inject_compose(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field, *ed;
+  SzSignalStr *draft, *buf;
+  SzInputEvent ev;
+  const char *path = "/tmp/scuzz_ui_inject_compose.script";
+  const char *dump = "/tmp/scuzz_ui_inject_compose.dump";
+  const char *record = "/tmp/scuzz_ui_record_compose.script";
+  char *body;
+
+  remove(path);
+  remove(dump);
+  remove(record);
+  draft = sz_signal_str("ab");
+  buf = sz_signal_str("xy");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  ed = sz_view_editor(buf);
+  sz_view_add_child(root, field);
+  sz_view_add_child(root, ed);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 240;
+  cfg.height = 160;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+
+  write_stamp(path, "compose n\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "ab") == 0);
+  assert(strcmp(sz_view_text_field_preedit(field), "n") == 0);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "preedit=\"n\"") != NULL);
+  assert(strstr(body, "item=\"ab\"") != NULL);
+  free(body);
+
+  write_stamp(path, "compose ni\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "ab") == 0);
+  assert(strcmp(sz_view_text_field_preedit(field), "ni") == 0);
+
+  write_stamp(path, "commit\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "abni") == 0);
+  assert(sz_view_text_field_preedit(field)[0] == '\0');
+  body = slurp_cstr(dump);
+  assert(strstr(body, "item=\"abni\"") != NULL);
+  assert(strstr(body, "preedit=") == NULL);
+  free(body);
+
+  write_stamp(path, "compose ja\nkey Escape\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "abni") == 0);
+  assert(sz_view_text_field_preedit(field)[0] == '\0');
+
+  write_stamp(path, "text hi\nselect 0 2\ncompose x\ncompose\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "x") == 0);
+
+  {
+    SzRect fr = sz_view_frame(ed);
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = SZ_INPUT_TAP;
+    ev.x = fr.x + 8.f;
+    ev.y = fr.y + 8.f;
+    assert(sz_ui_inject_sync(session, &ev));
+  }
+  write_stamp(path, "compose ka\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "xy") == 0);
+  assert(strcmp(sz_view_editor_preedit(ed), "ka") == 0);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[editor]") != NULL);
+  assert(strstr(body, "preedit=\"ka\"") != NULL);
+  free(body);
+
+  write_stamp(path, "commit\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strstr(sz_signal_str_get(buf), "ka") != NULL);
+  assert(sz_view_editor_preedit(ed)[0] == '\0');
+
+  write_stamp(path, "key z z\nkey z+repeat z\nkey Backspace+repeat\n");
+  assert(sz_ui_pump_sync(session));
+  {
+    const char *got = sz_signal_str_get(buf);
+    assert(strchr(got, 'z') != NULL);
+  }
+
+  assert(sz_ui_session_set_record(session, record));
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_COMPOSE;
+  ev.text = "ni";
+  assert(sz_ui_session_live_inject(session, &ev));
+  body = slurp_cstr(record);
+  assert(strstr(body, "compose ni") != NULL);
+  free(body);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_COMPOSE;
+  ev.text = "";
+  assert(sz_ui_session_live_inject(session, &ev));
+  body = slurp_cstr(record);
+  assert(strstr(body, "commit") != NULL);
+  free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  sz_signal_str_free(buf);
+  remove(path);
+  remove(dump);
+  remove(record);
+}
+
 static void test_record_live_hover_secondary(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -14210,6 +14402,8 @@ int main(void) {
   test_session_inject_key();
   test_session_inject_key_utf8_backspace();
   test_record_live_key();
+  test_session_inject_key_repeat();
+  test_session_inject_compose();
   test_record_live_hover_secondary();
   test_session_inject_caret();
   test_session_inject_hover_secondary();

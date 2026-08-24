@@ -35,6 +35,9 @@ static int g_q_tail;
 static char g_key_bufs[TEXT_RING][KEY_NAME_LEN];
 static char g_text_bufs[TEXT_RING][TEXT_LEN];
 static int g_text_i;
+static int g_key_repeat_pending;
+static unsigned int g_held_keycode;
+static int g_key_held;
 static char *g_clip;
 static int g_clip_own;
 static Atom g_atom_clipboard;
@@ -285,7 +288,7 @@ static void enqueue_scroll(float x, float y, float dy) {
   q_push(&ev);
 }
 
-static void enqueue_key(const char *name, const char *text, int mods) {
+static void enqueue_key(const char *name, const char *text, int mods, int repeat) {
   SzInputEvent ev;
   const char *k;
   const char *t;
@@ -298,6 +301,7 @@ static void enqueue_key(const char *name, const char *text, int mods) {
   ev.key = k;
   ev.text = t;
   ev.key_mods = mods;
+  ev.key_repeat = repeat ? 1 : 0;
   q_push(&ev);
 }
 
@@ -645,6 +649,20 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
       enqueue_scroll((float)ev.xbutton.x, (float)ev.xbutton.y, 40.f);
     if (ev.type == ButtonPress && ev.xbutton.button == 5)
       enqueue_scroll((float)ev.xbutton.x, (float)ev.xbutton.y, -40.f);
+    if (ev.type == KeyRelease) {
+      if (XEventsQueued(g_dpy, QueuedAfterReading) > 0) {
+        XEvent nev;
+        XPeekEvent(g_dpy, &nev);
+        if (nev.type == KeyPress && nev.xkey.keycode == ev.xkey.keycode &&
+            nev.xkey.time == ev.xkey.time) {
+          g_key_repeat_pending = 1;
+          continue;
+        }
+      }
+      if (g_key_held && ev.xkey.keycode == g_held_keycode)
+        g_key_held = 0;
+      continue;
+    }
     if (ev.type == KeyPress) {
       KeySym unshifted;
       char buf[64];
@@ -652,6 +670,12 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
       char utf8[TEXT_LEN];
       int nkey;
       int mods = 0;
+      int repeat = g_key_repeat_pending;
+      g_key_repeat_pending = 0;
+      if (g_key_held && ev.xkey.keycode == g_held_keycode)
+        repeat = 1;
+      g_held_keycode = ev.xkey.keycode;
+      g_key_held = 1;
       unshifted = XLookupKeysym(&ev.xkey, 0);
       if (x11_is_modifier(unshifted))
         continue;
@@ -674,7 +698,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
         mods |= SZ_KEY_ALT;
       if (ev.xkey.state & Mod4Mask)
         mods |= SZ_KEY_CMD;
-      enqueue_key(name, utf8, mods);
+      enqueue_key(name, utf8, mods, repeat);
     }
   }
   return 1;
@@ -701,6 +725,8 @@ void sz_embedder_shutdown(void) {
   g_ready = 0;
   g_w = g_h = 0;
   g_q_head = g_q_tail = 0;
+  g_key_repeat_pending = 0;
+  g_key_held = 0;
   g_clip_own = 0;
   g_atom_clipboard = g_atom_utf8 = g_atom_targets = g_atom_prop = 0;
   free(g_clip);

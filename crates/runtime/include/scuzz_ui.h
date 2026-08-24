@@ -45,7 +45,8 @@ typedef enum SzInputKind {
   SZ_INPUT_LIFECYCLE = 6, /* pause / resume / stop */
   SZ_INPUT_KEYBOARD = 7,  /* soft keyboard show (1) / hide (0) */
   SZ_INPUT_TEXT_EDIT = 8, /* append text, or backspace if text NULL/empty */
-  SZ_INPUT_KEY = 9        /* named key + optional UTF-8 insert; not KEYBOARD */
+  SZ_INPUT_KEY = 9,       /* named key + optional UTF-8 insert; not KEYBOARD */
+  SZ_INPUT_COMPOSE = 10   /* IME preedit; empty text commits into the buffer */
 } SzInputKind;
 
 /* SZ_INPUT_KEY modifier bits (combine with |). */
@@ -67,6 +68,7 @@ typedef struct SzInputEvent {
   int keyboard_visible;         /* SZ_INPUT_KEYBOARD: 1=show, 0=hide */
   const char *key;              /* SZ_INPUT_KEY name: Enter, Backspace, ArrowLeft, a */
   int key_mods;                 /* SZ_INPUT_KEY: SZ_KEY_SHIFT / CTRL / CMD / ALT */
+  int key_repeat;               /* SZ_INPUT_KEY: 1 = auto-repeat; same path as a discrete key */
   int pointer_button;           /* SZ_INPUT_POINTER: 0 hover, 1 primary, 3 secondary */
 } SzInputEvent;
 
@@ -450,6 +452,10 @@ int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
  * and no-op. */
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods);
+/* IME preedit on the focused TextField or editor. Nonempty `text` sets the
+ * preview and does not enter the committed buffer. Empty `text` commits the
+ * preview at the caret (replaces a selection). Escape cancels. */
+int sz_view_handle_compose(SzView *root, const char *text);
 
 /* Scroll offset + soft keyboard helpers. */
 float sz_view_scroll_x(const SzView *scroll);
@@ -540,6 +546,9 @@ const char *sz_view_editor_value(const SzView *view);
 /* Caret byte offset on a TextField (clamped, UTF-8 snapped). 0 if not a field. */
 int sz_view_text_field_caret(const SzView *view);
 int sz_view_editor_caret(const SzView *view);
+/* IME preedit string, or "" when empty / not a field or editor. */
+const char *sz_view_text_field_preedit(const SzView *view);
+const char *sz_view_editor_preedit(const SzView *view);
 /* Set caret byte offset (clamped, UTF-8 snapped). Collapses the selection.
  * 1 if `view` is a TextField. */
 int sz_view_set_text_field_caret(SzView *view, int offset);
@@ -608,20 +617,26 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace/key
  * target (focused, else first). Lines are `N placeholder="live" caret=B sel=A:C`
  * (star on the target; `B` is the caret byte offset; `A:C` is the selection
- * `[A, C)`). Quoted field values flatten newlines. Editors omit from `[fields]`.
+ * `[A, C)`). `preedit="…"` appends when IME compose is non-empty. Quoted field
+ * values flatten newlines. Editors omit from `[fields]`.
  * [editor] lists `View.editor` nodes (one line each) when any exist:
- * `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S,... tok=N inlay=N fold=N "escaped"`
+ * `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S,... tok=N inlay=N fold=N preedit="…" "escaped"`
  * (star on the focused editor, else first; `sx`/`sy` are viewport pan; `lines`
  * is the buffer line count; `diag` is 1-based line:severity marks; `tok` /
- * `inlay` / `fold` are LSP span counts). `diag` / `tok` / `inlay` / `fold` omit
- * when zero. Editor paint is monospace cells with a gutter.
- * Quotes keep newlines as `\\n` (not a space). `text N s` / `type N s` /
+ * `inlay` / `fold` are LSP span counts). `diag` / `tok` / `inlay` / `fold` /
+ * `preedit=` omit when zero or empty. Editor paint is monospace cells with a
+ * gutter. Quotes keep newlines as `\\n` (not a space). `text N s` / `type N s` /
  * `backspace N k` / `caret N b` / `select N a c` target dump index N.
  * One-token forms still use the starred field, or the focused editor when
- * that is the edit target. `key <name>[+shift|+ctrl|+cmd|+alt] [text]`
- * uses the starred field or focused editor. Shift+arrows extend the selection.
- * Live OS keys record as `key`, not `type`. `caret <n>` sets the starred-field
- * or focused-editor caret. `select <a> <c>` sets that selection. Click-to-caret
+ * that is the edit target. `key <name>[+shift|+ctrl|+cmd|+alt|+repeat] [text]`
+ * uses the starred field or focused editor. `+repeat` is a held-key auto-repeat
+ * (same insert / move / delete as a discrete key). Shift+arrows extend the
+ * selection. Live OS keys record as `key`, not `type`. Desktop maps X11
+ * auto-repeat and Cocoa `isARepeat` into `+repeat`. `compose <text>` sets IME
+ * preedit (underlined preview; not in the committed buffer). `compose` with
+ * no text, or `commit`, inserts the preedit at the caret. `key Escape` cancels
+ * preedit. `caret <n>` sets the starred-field or focused-editor caret.
+ * `select <a> <c>` sets that selection. Click-to-caret
  * uses TAP / `xy` on the field or editor. Pointer drag extends the selection.
  * `copy` / `cut` / `paste` / `paste <s>` are the clipboard verbs. Headless
  * `paste` uses the session clipboard. Desktop/Mobile pull the OS pasteboard
@@ -651,7 +666,7 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
-/* Watch an inject script (tap/xy/text/type/key/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).
+/* Watch an inject script (tap/xy/text/type/key/compose/commit/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).
  * Next pump that sees new contents plays the suffix (append) or the whole file
  * (rewrite). Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
