@@ -5,10 +5,10 @@ use scuzz_compiler::compile_project;
 use scuzz_compiler::driver::load_verify_program;
 use scuzz_compiler::fuzz::{
     corpus_entry_name_fault, corpus_keep, corpus_push, corpus_sorted_names, count_dump_section,
-    decode_fault_seed, drive_line_shrinks, drive_script_lines, dump_push, encode_fault_plan,
-    exhaust_alphabet, fault_seed_key, fuzz_mutate_sites, fuzz_pick_fault, fuzz_pick_sched,
-    fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text, script_text,
-    FaultMode, Repro,
+    decode_fault_seed, decode_sched_seed, drive_line_shrinks, drive_script_lines, dump_push,
+    encode_fault_plan, encode_sched_plan, exhaust_alphabet, fault_seed_key, fuzz_mutate_sites,
+    fuzz_pick_fault, fuzz_pick_sched, fuzz_pick_script, lines_nonempty, missing_from, parse_repro,
+    repro_text, script_text, FaultMode, Repro, PCT_D_MIN, PCT_K_MAX,
 };
 use scuzz_compiler::manifest::load_manifest;
 use scuzz_compiler::mutate::{
@@ -223,8 +223,12 @@ fn fuzz_replay(path: &Path, replay_path: &Path) -> Result<ExitCode> {
         "" | "0" => String::new(),
         f => format!(", fault_seed {f}"),
     };
+    let pct_note = match (repro.pct_d, repro.pct_k) {
+        (Some(d), Some(k)) => format!(", pct_d {d}, pct_k {k}"),
+        _ => String::new(),
+    };
     let sched_note = match &repro.schedule_seed {
-        Some(s) => format!(", schedule_seed {s}{fault_note})"),
+        Some(s) => format!(", schedule_seed {s}{pct_note}{fault_note})"),
         None => {
             if fault_note.is_empty() {
                 ")".into()
@@ -1040,6 +1044,52 @@ fn shrink_fault(
     Ok(cur.to_string())
 }
 
+fn shrink_sched(
+    exe: &Path,
+    fuzz_dir: &Path,
+    is_ui: bool,
+    w: i32,
+    h: i32,
+    schedule_seed: &str,
+    fault_seed: &str,
+    events: &[String],
+) -> Result<String> {
+    if schedule_seed.is_empty() {
+        return Ok(String::new());
+    }
+    let run = |sched: &str| -> Result<i32> {
+        if is_ui {
+            fuzz_exec(exe, fuzz_dir, w, h, events, sched, fault_seed)
+        } else {
+            fuzz_exec_io(exe, fuzz_dir, sched, fault_seed, events)
+        }
+    };
+    let seed: i64 = schedule_seed.parse().unwrap_or(0);
+    let plan = decode_sched_seed(seed);
+    if plan.k > 0 {
+        for k in 0..plan.k {
+            let mut p = plan;
+            p.k = k;
+            let cand = encode_sched_plan(p).to_string();
+            if run(&cand)? != 0 {
+                return Ok(cand);
+            }
+        }
+    }
+    if plan.d > PCT_D_MIN {
+        for d in PCT_D_MIN..plan.d {
+            let mut p = plan;
+            p.d = d;
+            p.k = plan.k.min(d - 1).clamp(0, PCT_K_MAX);
+            let cand = encode_sched_plan(p).to_string();
+            if cand != schedule_seed && run(&cand)? != 0 {
+                return Ok(cand);
+            }
+        }
+    }
+    Ok(schedule_seed.to_string())
+}
+
 fn repro_fault(repro: &Repro) -> String {
     repro
         .fault_seed
@@ -1111,6 +1161,16 @@ fn note_search_fail(
         fault_seed,
         &shrunk,
     )?;
+    let sched = shrink_sched(
+        &ctx.exe,
+        &shrink_dir,
+        ctx.is_ui,
+        ctx.w,
+        ctx.h,
+        &sched,
+        &fault,
+        &shrunk,
+    )?;
     camp.search_failures += 1;
     let first = camp.repro.is_none();
     if first {
@@ -1127,6 +1187,10 @@ fn note_search_fail(
             for ev in &shrunk {
                 println!("  {ev}");
             }
+        }
+        if !sched.is_empty() {
+            let plan = decode_sched_seed(sched.parse().unwrap_or(0));
+            println!("schedule_seed {sched} pct_d {} pct_k {}", plan.d, plan.k);
         }
         if !fault_seed_key(&fault).is_empty() {
             println!("fault_seed {fault}");

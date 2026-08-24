@@ -1839,7 +1839,15 @@ typedef struct Fiber {
   struct Fiber *ready_next;
   struct Fiber *wait_next;
   struct Fiber *all_next;
+  int32_t pct_prio; /* higher wins; PCT demotion goes below every assigned prio */
 } Fiber;
+
+enum {
+  SZ_PCT_D_MIN = 2,
+  SZ_PCT_D_MAX = 5,
+  SZ_PCT_K_MAX = 7,
+  SZ_PCT_STEP_BOUND = 16
+};
 
 typedef struct Sched {
   Fiber *ready_head;
@@ -1852,6 +1860,11 @@ typedef struct Sched {
   Fiber *all_fibers;
   int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
   int32_t sched_rng; /* Lehmer/MINSTD state in 1..2147483646 */
+  int pct_d;         /* race-depth bound (2..5) */
+  int pct_k;         /* change-points used (0..7) */
+  int32_t pct_low;   /* next demotion priority (0, -1, -2, …) */
+  int pct_contention; /* 1-based count of ready_count>1 picks */
+  int pct_change[SZ_PCT_K_MAX];
 } Sched;
 
 static Sched *g_sched = NULL;
@@ -1870,15 +1883,81 @@ static int32_t sched_lcg_next(int32_t s) {
   return (int32_t)(((int64_t)s * (int64_t)SZ_LCG_A) % (int64_t)SZ_LCG_M);
 }
 
+/* Packed SCUZZ_SCHED_SEED: k = s%8, d = 2+(s/8)%4, rng = s/32.
+ * Same mapping as `decode_sched_seed` in crates/compiler/src/fuzz.rs.
+ * SCUZZ_PCT_D / SCUZZ_PCT_K override the decoded pair when set. */
+static void sched_decode_packed(long long packed, int *d, int *k, int32_t *rng) {
+  long long s = packed < 0 ? 0 : packed;
+  int d_span = SZ_PCT_D_MAX - SZ_PCT_D_MIN + 1;
+  *k = (int)(s % (SZ_PCT_K_MAX + 1));
+  s /= (SZ_PCT_K_MAX + 1);
+  *d = SZ_PCT_D_MIN + (int)(s % d_span);
+  s /= d_span;
+  *rng = (int32_t)(s % (long long)SZ_LCG_SEED_MOD);
+}
+
+static void pct_init_changes(Sched *s) {
+  int i;
+  int pts[SZ_PCT_STEP_BOUND];
+  s->pct_contention = 0;
+  s->pct_low = 0;
+  if (s->pct_k < 1)
+    return;
+  for (i = 0; i < SZ_PCT_STEP_BOUND; i++)
+    pts[i] = i + 1;
+  /* Fisher-Yates uses a fixed draw count so shrinking k keeps priorities. */
+  for (i = SZ_PCT_STEP_BOUND - 1; i > 0; i--) {
+    int j = (int)(s->sched_rng % (i + 1));
+    int tmp = pts[i];
+    pts[i] = pts[j];
+    pts[j] = tmp;
+    s->sched_rng = sched_lcg_next(s->sched_rng);
+  }
+  for (i = 0; i < s->pct_k && i < SZ_PCT_K_MAX; i++)
+    s->pct_change[i] = pts[i];
+}
+
 static void sched_arm_from_env(Sched *s) {
   const char *env = getenv("SCUZZ_SCHED_SEED");
+  const char *d_s;
+  const char *k_s;
+  int d;
+  int k;
+  int32_t rng;
+  long long packed;
   s->sched_armed = 0;
   s->sched_rng = 1;
+  s->pct_d = 0;
+  s->pct_k = 0;
+  s->pct_low = 0;
+  s->pct_contention = 0;
   if (!env)
     return;
-  /* Present (including "0") arms seed-driven pick; absent keeps FIFO. */
+  /* Present (including "0") arms PCT; absent keeps FIFO. */
   s->sched_armed = 1;
-  s->sched_rng = sched_lcg_seed((int32_t)atoi(env));
+  packed = strtoll(env, NULL, 10);
+  sched_decode_packed(packed, &d, &k, &rng);
+  d_s = getenv("SCUZZ_PCT_D");
+  k_s = getenv("SCUZZ_PCT_K");
+  if (d_s && d_s[0]) {
+    d = atoi(d_s);
+    if (!k_s || !k_s[0])
+      k = d - 1;
+  }
+  if (k_s && k_s[0])
+    k = atoi(k_s);
+  if (d < SZ_PCT_D_MIN)
+    d = SZ_PCT_D_MIN;
+  if (d > SZ_PCT_D_MAX)
+    d = SZ_PCT_D_MAX;
+  if (k < 0)
+    k = 0;
+  if (k > SZ_PCT_K_MAX)
+    k = SZ_PCT_K_MAX;
+  s->pct_d = d;
+  s->pct_k = k;
+  s->sched_rng = sched_lcg_seed(rng);
+  pct_init_changes(s);
 }
 
 static ContFrame *cont_push_flatmap(ContFrame *stack, SzCont cont, void *env) {
@@ -2117,30 +2196,34 @@ static Fiber *ready_dequeue_fifo(Sched *s) {
   return f;
 }
 
-/* Unlink the k-th ready fiber (0-based). */
-static Fiber *ready_unlink_at(Sched *s, int k) {
-  Fiber *prev = NULL;
-  Fiber *f = s->ready_head;
-  int i;
-  if (k <= 0)
-    return ready_dequeue_fifo(s);
-  for (i = 0; f && i < k; i++) {
-    prev = f;
-    f = f->ready_next;
+static void ready_remove(Sched *s, Fiber *f);
+
+static Fiber *ready_highest(Sched *s) {
+  Fiber *best = s->ready_head;
+  Fiber *f;
+  if (!best)
+    return NULL;
+  for (f = best->ready_next; f; f = f->ready_next) {
+    if (f->pct_prio > best->pct_prio)
+      best = f;
   }
-  if (!f)
-    return ready_dequeue_fifo(s);
-  prev->ready_next = f->ready_next;
-  if (!f->ready_next)
-    s->ready_tail = prev;
-  f->ready_next = NULL;
-  return f;
+  return best;
 }
 
-/* Pick next ready fiber: FIFO when disarmed or n<=1; else seed-driven among n. */
+static int pct_is_change(const Sched *s, int step) {
+  int i;
+  for (i = 0; i < s->pct_k && i < SZ_PCT_K_MAX; i++) {
+    if (s->pct_change[i] == step)
+      return 1;
+  }
+  return 0;
+}
+
+/* Pick next ready fiber: FIFO when disarmed or n<=1; else PCT (highest prio,
+ * with at most k inversions at pre-drawn contention steps). */
 static Fiber *ready_dequeue(Sched *s) {
+  Fiber *f;
   int n;
-  int k;
   if (!s->ready_head)
     return NULL;
   if (!s->sched_armed)
@@ -2148,9 +2231,17 @@ static Fiber *ready_dequeue(Sched *s) {
   n = ready_count(s);
   if (n <= 1)
     return ready_dequeue_fifo(s);
-  k = (int)(s->sched_rng % n);
-  s->sched_rng = sched_lcg_next(s->sched_rng);
-  return ready_unlink_at(s, k);
+  s->pct_contention++;
+  if (pct_is_change(s, s->pct_contention)) {
+    f = ready_highest(s);
+    if (f) {
+      s->pct_low--;
+      f->pct_prio = s->pct_low;
+    }
+  }
+  f = ready_highest(s);
+  ready_remove(s, f);
+  return f;
 }
 
 static void ready_remove(Sched *s, Fiber *f) {
@@ -2344,6 +2435,10 @@ static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
   if (g_sched) {
     f->all_next = g_sched->all_fibers;
     g_sched->all_fibers = f;
+    if (g_sched->sched_armed) {
+      g_sched->sched_rng = sched_lcg_next(g_sched->sched_rng);
+      f->pct_prio = g_sched->sched_rng;
+    }
   }
   return f;
 }

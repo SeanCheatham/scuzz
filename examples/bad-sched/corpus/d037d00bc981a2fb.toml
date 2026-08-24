@@ -1,0 +1,6 @@
+[fuzz]
+seed = 42
+schedule_seed = "1344"
+pct_d = 2
+pct_k = 0
+events = ["drive checkOrder"]

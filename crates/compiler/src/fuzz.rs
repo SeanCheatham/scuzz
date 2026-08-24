@@ -781,22 +781,68 @@ pub fn fuzz_pick_script(
 }
 
 fn fuzz_perturb_sched(base: &str, s: i64) -> String {
-    let n: i64 = base.parse().unwrap_or(0);
-    (n + 1 + lcg_below(s, 16)).to_string()
+    let mut plan = decode_sched_seed(base.parse().unwrap_or(0));
+    plan.rng += 1 + lcg_below(s, 16);
+    encode_sched_plan(plan).to_string()
 }
 
 pub fn fuzz_pick_sched(seed: i64, iter: i64, corpus: &[String]) -> String {
     if corpus.is_empty() {
-        return (seed + iter).to_string();
+        let d = PCT_D_MIN + iter.rem_euclid(PCT_D_MAX - PCT_D_MIN + 1);
+        let k = (d - 1).clamp(0, PCT_K_MAX);
+        return encode_sched_plan(SchedPlan {
+            rng: seed + iter,
+            d,
+            k,
+        })
+        .to_string();
     }
     let s = lcg_next(lcg_seed(seed + iter));
     if lcg_below(s, 2) == 0 {
-        (seed + iter).to_string()
+        let d = PCT_D_MIN + iter.rem_euclid(PCT_D_MAX - PCT_D_MIN + 1);
+        let k = (d - 1).clamp(0, PCT_K_MAX);
+        encode_sched_plan(SchedPlan {
+            rng: seed + iter,
+            d,
+            k,
+        })
+        .to_string()
     } else {
         let s = lcg_next(s);
         let base = &corpus[lcg_below(s, corpus.len() as i64) as usize];
         fuzz_perturb_sched(base, lcg_next(s))
     }
+}
+
+pub const PCT_D_MIN: i64 = 2;
+pub const PCT_D_MAX: i64 = 5;
+pub const PCT_K_MAX: i64 = 7;
+
+/// Packed `SCUZZ_SCHED_SEED`: k = s%8, d = 2+(s/8)%4, rng = s/32.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SchedPlan {
+    pub rng: i64,
+    pub d: i64,
+    pub k: i64,
+}
+
+/// Decode `SCUZZ_SCHED_SEED`. Same mapping as the fiber scheduler.
+pub fn decode_sched_seed(seed: i64) -> SchedPlan {
+    let s = if seed < 0 { 0 } else { seed };
+    let k = s.rem_euclid(PCT_K_MAX + 1);
+    let rest = s / (PCT_K_MAX + 1);
+    let d_span = PCT_D_MAX - PCT_D_MIN + 1;
+    let d = PCT_D_MIN + rest.rem_euclid(d_span);
+    let rng = rest / d_span;
+    SchedPlan { rng, d, k }
+}
+
+/// Inverse of [`decode_sched_seed`].
+pub fn encode_sched_plan(plan: SchedPlan) -> i64 {
+    let k = plan.k.clamp(0, PCT_K_MAX);
+    let d = plan.d.clamp(PCT_D_MIN, PCT_D_MAX);
+    let rng = if plan.rng < 0 { 0 } else { plan.rng };
+    rng * 32 + (d - PCT_D_MIN) * 8 + k
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1107,6 +1153,8 @@ pub struct Repro {
     #[serde(default)]
     pub seed: i64,
     pub schedule_seed: Option<String>,
+    pub pct_d: Option<i64>,
+    pub pct_k: Option<i64>,
     pub fault_seed: Option<String>,
     pub fault_kind: Option<String>,
     pub fault_n: Option<i64>,
@@ -1167,6 +1215,9 @@ pub fn repro_text(seed: i64, schedule_seed: &str, fault_seed: &str, events: &[St
     let mut out = format!("[fuzz]\nseed = {seed}\n");
     if !schedule_seed.is_empty() {
         out.push_str(&format!("schedule_seed = \"{schedule_seed}\"\n"));
+        let plan = decode_sched_seed(schedule_seed.parse().unwrap_or(0));
+        out.push_str(&format!("pct_d = {}\n", plan.d));
+        out.push_str(&format!("pct_k = {}\n", plan.k));
     }
     let fault = fault_seed_key(fault_seed);
     if !fault.is_empty() {
@@ -1287,8 +1338,23 @@ scroll:scroll
         let r = parse_repro(&text).expect("repro toml");
         assert_eq!(r.seed, 7);
         assert_eq!(r.schedule_seed.as_deref(), Some("9"));
+        assert_eq!(r.pct_d, Some(3));
+        assert_eq!(r.pct_k, Some(1));
         assert_eq!(r.fault_seed, None);
         assert_eq!(r.events, vec!["tap 0", "pump 1"]);
+        assert_eq!(decode_sched_seed(9).d, 3);
+        assert_eq!(decode_sched_seed(9).k, 1);
+        assert_eq!(encode_sched_plan(decode_sched_seed(9)), 9);
+        assert_eq!(encode_sched_plan(decode_sched_seed(42)), 42);
+        assert_eq!(
+            fuzz_pick_sched(42, 0, &[]),
+            encode_sched_plan(SchedPlan {
+                rng: 42,
+                d: 2,
+                k: 1
+            })
+            .to_string()
+        );
     }
 
     #[test]
@@ -1338,6 +1404,17 @@ scroll:scroll
             corpus_entry_name_fault("42", "0", &["drive checkNote a".into()]),
             corpus_entry_name("42", &["drive checkNote a".into()])
         );
+    }
+
+    #[test]
+    fn corpus_entry_name_matches_bad_sched_pin() {
+        assert_eq!(
+            corpus_entry_name("1344", &["drive checkOrder".into()]),
+            "d037d00bc981a2fb"
+        );
+        assert_eq!(decode_sched_seed(1344).d, 2);
+        assert_eq!(decode_sched_seed(1344).k, 0);
+        assert_eq!(decode_sched_seed(1344).rng, 42);
     }
 
     #[test]

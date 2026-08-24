@@ -53,7 +53,6 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it. Desktop does not yet emit compose from XIM or Cocoa marked text.
 - **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, compiler tests, hello). Full macOS packaging stays `workflow_dispatch`.
 - **Web apps** — not a current target.
-- **PCT-style schedule exploration** — bound race depth for fiber interleavings. See [`vision.md`](vision.md#open-work).
 - **Oracle idioms in `guide.md`** — model agreement, metamorphic relations, and concrete-fact properties ride the existing property surface. The guide does not yet document them.
 - **First-class model agreement** — a `*.scuzz_model` stem-paired file holds a simplified reference. The fuzzer checks agreement after each driver step. Today this is an idiom on the property surface.
 - **Temporal properties** — `Property.always` / `Property.eventually` over a session. `Property.sometimes` is reachability only.

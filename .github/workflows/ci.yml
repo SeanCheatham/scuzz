@@ -395,6 +395,8 @@ jobs:
           cargo run -p scuzz -- test examples/bad-fault
           cargo run -p scuzz -- check examples/bad-adt
           cargo run -p scuzz -- test examples/bad-adt
+          cargo run -p scuzz -- check examples/bad-sched
+          cargo run -p scuzz -- test examples/bad-sched
           cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '^\[\]$' /tmp/hello-check.json
           cargo run -p scuzz -- lsp --help | tee /tmp/lsp-help.txt
@@ -496,6 +498,9 @@ jobs:
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-adt; then
             echo "corpus-only should pin the bad-adt failure" && exit 1
           fi
+          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-sched; then
+            echo "corpus-only should pin the bad-sched failure" && exit 1
+          fi
           grep -q 'drive areaIsProduct Rect(' examples/bad-adt/corpus/fb9bc145806a3e3d.toml
           grep -q 'square_false' examples/bad-adt/build/fuzz/summary.toml
           grep -q 'wide_false' examples/bad-adt/build/fuzz/summary.toml
@@ -511,6 +516,16 @@ jobs:
           grep -v -e fault_seed -e fault_kind -e fault_n -e fault_mode examples/bad-fault/corpus/f83245e1fbf633a5.toml > /tmp/bad-fault-nofault.toml
           if ! cargo run -p scuzz -- fuzz --replay /tmp/bad-fault-nofault.toml examples/bad-fault; then
             echo "replay without fault_seed should pass" && exit 1
+          fi
+          grep -q 'pct_d = 2' examples/bad-sched/corpus/d037d00bc981a2fb.toml
+          grep -q 'pct_k = 0' examples/bad-sched/corpus/d037d00bc981a2fb.toml
+          grep -q 'drive checkOrder' examples/bad-sched/corpus/d037d00bc981a2fb.toml
+          if cargo run -p scuzz -- fuzz --replay examples/bad-sched/corpus/d037d00bc981a2fb.toml examples/bad-sched; then
+            echo "schedule replay should have reproduced the failure" && exit 1
+          fi
+          grep -v -e schedule_seed -e pct_d -e pct_k examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad-sched-fifo.toml
+          if ! cargo run -p scuzz -- fuzz --replay /tmp/bad-sched-fifo.toml examples/bad-sched; then
+            echo "FIFO replay (no schedule_seed) should pass" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
