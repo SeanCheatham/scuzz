@@ -6,6 +6,9 @@ def lspCall(_root: String, _path: String, _body: String, method: String): IO[Jso
   case "textDocument/formatting" => "{\"result\":[]}"
   case "textDocument/rename" => "{\"result\":{\"newText\":\"\"}}"
   case "textDocument/codeAction" => "{\"result\":[{\"title\":\"fix\",\"edit\":{\"changes\":{\"file://x\":[{\"newText\":\"fixed\"}]}}}]}"
+  case "textDocument/semanticTokens/full" => "{\"result\":{\"data\":[0,0,5,8,0]}}"
+  case "textDocument/inlayHint" => "{\"result\":[{\"position\":{\"line\":0,\"character\":5},\"label\":\"Int\"}]}"
+  case "textDocument/foldingRange" => "{\"result\":[{\"startLine\":0,\"endLine\":1}]}"
   case _ => "{\"result\":{\"data\":[1]}}"
 }))
 

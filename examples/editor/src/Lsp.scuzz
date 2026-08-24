@@ -49,7 +49,7 @@ def requestBody(method: String, uri: String, line: Int, col: Int): String =
   Json.stringify(method match {
   case "textDocument/rename" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: jField("newName", Json.Str("x")) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
   case "textDocument/formatting" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
-  case "textDocument/semanticTokens/full" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
+  case "textDocument/semanticTokens/full" | "textDocument/inlayHint" | "textDocument/foldingRange" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
   case "textDocument/codeAction" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("range", Json.Obj(jField("start", posObj(line, col)) :: jField("end", posObj(line, col)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
   case _ => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
 })
@@ -131,6 +131,53 @@ def tokenCount(j: Json): Int =
     case Json.Arr(xs) => List.len(xs)
     case _ => Str.len("")
   }
+
+def tokenData(j: Json): List[Int] =
+  Check.jsonField(Check.jsonField(j, "result"), "data") match {
+    case Json.Arr(xs) => List.map(xs, Check.jsonInt)
+    case _ => []: List[Int]
+  }
+
+def inlayLabel(j: Json): String =
+  j match {
+    case Json.Str(s) => s
+    case Json.Arr(xs) => List.join(List.map(xs, it => Check.jsonStr(Check.jsonField(it, "value"))), "")
+    case _ => ""
+  }
+
+def inlayHint(item: Json): (Int, Int, String) =
+  (Check.jsonInt(Check.jsonField(Check.jsonField(item, "position"), "line")), Check.jsonInt(Check.jsonField(Check.jsonField(item, "position"), "character")), inlayLabel(Check.jsonField(item, "label")))
+
+def inlayHints(j: Json): List[(Int, Int, String)] =
+  Check.jsonField(j, "result") match {
+    case Json.Arr(xs) => List.map(xs, inlayHint)
+    case _ => []: List[(Int, Int, String)]
+  }
+
+def foldRange(item: Json): (Int, Int) =
+  (Check.jsonInt(Check.jsonField(item, "startLine")), Check.jsonInt(Check.jsonField(item, "endLine")))
+
+def foldRanges(j: Json): List[(Int, Int)] =
+  Check.jsonField(j, "result") match {
+    case Json.Arr(xs) => List.map(xs, foldRange)
+    case _ => []: List[(Int, Int)]
+  }
+
+def paintEditor(root: String, path: String, body: String): IO[Json] =
+  for {
+    tok <- lspCall(root, path, body, "textDocument/semanticTokens/full").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+    inl <- lspCall(root, path, body, "textDocument/inlayHint").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+    fld <- lspCall(root, path, body, "textDocument/foldingRange").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+    _ <- Ui.setEditorTokens(tokenData(tok))
+    _ <- Ui.setEditorInlays(inlayHints(inl))
+    _ <- Ui.setEditorFolds(foldRanges(fld))
+  } yield tok
 
 def readUntil(pid: Int, acc: String, needle: String): IO[String] =
   if (Str.indexOf(acc, needle) >= 0) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else readUntil(pid, Str.concat(acc, c), needle))

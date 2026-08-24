@@ -447,6 +447,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_ui_set_title(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_ui_set_editor_caret(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_ui_set_editor_diagnostics(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_ui_set_editor_tokens(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_ui_set_editor_inlays(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_ui_set_editor_folds(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
@@ -7346,6 +7349,36 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "Ui.setEditorTokens" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_ui_set_editor_tokens(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ui.setEditorInlays" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_ui_set_editor_inlays(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ui.setEditorFolds" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_ui_set_editor_folds(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.icon" => {
             writeln!(
                 code,
@@ -13080,6 +13113,9 @@ enum Color:
   for {
     _ <- Ui.setEditorCaret(1, 1)
     _ <- Ui.setEditorDiagnostics([(1, 1)])
+    _ <- Ui.setEditorTokens([0, 0, 1, 8, 0])
+    _ <- Ui.setEditorInlays([(0, 1, "T")])
+    _ <- Ui.setEditorFolds([(0, 1)])
     _ <- Ui.run(_ => View.editor(Signal.str("x")))
   } yield ()
 "#;
@@ -13093,6 +13129,18 @@ enum Color:
         assert!(
             ir.contains("sz_lang_ui_set_editor_diagnostics"),
             "expected sz_lang_ui_set_editor_diagnostics in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_lang_ui_set_editor_tokens"),
+            "expected sz_lang_ui_set_editor_tokens in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_lang_ui_set_editor_inlays"),
+            "expected sz_lang_ui_set_editor_inlays in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_lang_ui_set_editor_folds"),
+            "expected sz_lang_ui_set_editor_folds in IR:\n{ir}"
         );
     }
 

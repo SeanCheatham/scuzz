@@ -72,11 +72,7 @@ Close:
 
 #### 2. Editor widget
 
-Today `View.textField` is one line (`control_h`). It stores a caret byte offset and a selection range. Insert, Backspace, and Delete edit at the caret, or replace/delete the selection. Shift+arrows and pointer drag extend the selection. Arrows, Home, and End move it. `[fields]` dumps `caret=B sel=A:C` without shifting inject indices. Layout and paint copy the field value through a 256-byte stack buffer. `View.editor` is a multiline buffer on a `SignalStr`. It is not a TextField. Insert includes newline and a two-space soft-tab. Enter and Tab stay no-ops on a TextField. Editor layout, paint, caret, and a11y do not copy through a 256-byte stack. `[editor]` dumps one node: `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S "escaped"` (newlines stay `\\n`; `sx`/`sy` are viewport pan; `diag` is omitted when empty). A11y dumps one `editor:editor` node. The editor pans to the caret. Long lines pan horizontally. A tall file pans vertically. Paint draws visible lines and visible columns on a monospace cell grid (`sk_font_measure_mono_string` / `sk_canvas_draw_mono_string` on every presenter). A gutter paints line numbers and diagnostic marks. Ctrl/Cmd+Z undoes. Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redoes. An in-widget lexer colors keywords, strings, comments, and numbers. `View.fontSize` stays. The editor does not use the proportional UI font. `View.text` wraps at newlines for display, but it is not editable. `View.fontSize` / `View.textColor` wrap `View.text` only. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional for `View.text`.
-
-Close:
-
-- Folding ranges, inlay hints, and bracket match inside the editor viewport. LSP already serves that data. The caret, dump, and in-widget lexer are in.
+Today `View.textField` is one line (`control_h`). It stores a caret byte offset and a selection range. Insert, Backspace, and Delete edit at the caret, or replace/delete the selection. Shift+arrows and pointer drag extend the selection. Arrows, Home, and End move it. `[fields]` dumps `caret=B sel=A:C` without shifting inject indices. Layout and paint copy the field value through a 256-byte stack buffer. `View.editor` is a multiline buffer on a `SignalStr`. It is not a TextField. Insert includes newline and a two-space soft-tab. Enter and Tab stay no-ops on a TextField. Editor layout, paint, caret, and a11y do not copy through a 256-byte stack. `[editor]` dumps one node: `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S tok=N inlay=N fold=N "escaped"` (newlines stay `\\n`; `sx`/`sy` are viewport pan; `diag` is omitted when empty; `tok` / `inlay` / `fold` omit when zero). A11y dumps one `editor:editor` node. The editor pans to the caret. Long lines pan horizontally. A tall file pans vertically. Paint draws visible lines and visible columns on a monospace cell grid (`sk_font_measure_mono_string` / `sk_canvas_draw_mono_string` on every presenter). A gutter paints line numbers, diagnostic marks, and fold marks. Ctrl/Cmd+Z undoes. Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redoes. An in-widget lexer colors keywords, strings, comments, and numbers. LSP semantic tokens paint those spans when `Ui.setEditorTokens` has data. Empty tokens keep the lexer. Inlay hint labels paint in muted color at the cell. A fold mark in the gutter toggles closed interior lines. Bracket match highlights `()` / `[]` / `{}` near the caret. `View.fontSize` stays. The editor does not use the proportional UI font. `View.text` wraps at newlines for display, but it is not editable. `View.fontSize` / `View.textColor` wrap `View.text` only. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional for `View.text`.
 
 #### 3. Kits the IDE process needs
 
@@ -92,15 +88,11 @@ In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi
 
 #### 5. Analyze consumption
 
-`scuzz lsp` already serves hover, completion, definition, diagnostics, format, rename, semantic tokens, inlay hints, folding, code actions, and related methods. The IDE must consume them. It must not parse Scuzz in app code.
-
-Close:
-
-- Paint LSP semantic tokens, inlay hints, and folding in the editor. Token count in the output list is not enough.
+`scuzz lsp` already serves hover, completion, definition, diagnostics, format, rename, semantic tokens, inlay hints, folding, code actions, and related methods. The IDE consumes them. It does not parse Scuzz in app code. Hover and Check decode `textDocument/semanticTokens/full`, `textDocument/inlayHint`, and `textDocument/foldingRange` JSON in `Lsp.scuzz` and pass lists into `Ui.setEditorTokens` / `Ui.setEditorInlays` / `Ui.setEditorFolds`. The editor paints those spans. `[editor]` dumps `tok=` / `inlay=` / `fold=` counts.
 
 #### 6. Headless and verification
 
-Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. `[fields]` dumps `caret=B sel=A:C`. `[editor]` dumps one node with buffer, caret, selection, `sx`/`sy`, `lines`, and `diag` when a `View.editor` is present. `[hover]` and `[last_secondary]` record pointer hover and button-3 hits. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
+Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. `[fields]` dumps `caret=B sel=A:C`. `[editor]` dumps one node with buffer, caret, selection, `sx`/`sy`, `lines`, `diag`, `tok`, `inlay`, and `fold` when a `View.editor` is present. `[hover]` and `[last_secondary]` record pointer hover and button-3 hits. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
 
 Close:
 

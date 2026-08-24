@@ -1106,6 +1106,18 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Ui.setEditorDiagnostics(marks: List[(Int, Int)]): IO[Unit]",
     ),
     (
+        "Ui.setEditorTokens",
+        "Ui.setEditorTokens(data: List[Int]): IO[Unit]",
+    ),
+    (
+        "Ui.setEditorInlays",
+        "Ui.setEditorInlays(hints: List[(Int, Int, String)]): IO[Unit]",
+    ),
+    (
+        "Ui.setEditorFolds",
+        "Ui.setEditorFolds(ranges: List[(Int, Int)]): IO[Unit]",
+    ),
+    (
         "Property.check",
         "Property.check(name: String, ok: Bool, value: T): T",
     ),
@@ -1418,6 +1430,9 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Ui.setTitle",
     "Ui.setEditorCaret",
     "Ui.setEditorDiagnostics",
+    "Ui.setEditorTokens",
+    "Ui.setEditorInlays",
+    "Ui.setEditorFolds",
     "Random.nextInt",
     "Net.serveOnce",
     "Impurity.runKit",
@@ -1763,6 +1778,9 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
                 "Ui.setEditorDiagnostics",
                 "Ui.setEditorDiagnostics([(1, 1)])",
             ),
+            ("Ui.setEditorTokens", "Ui.setEditorTokens([0, 0, 1, 8, 0])"),
+            ("Ui.setEditorInlays", "Ui.setEditorInlays([(0, 1, \"T\")])"),
+            ("Ui.setEditorFolds", "Ui.setEditorFolds([(0, 1)])"),
             ("Random.nextInt", "Random.nextInt(10)"),
             ("Net.serveOnce", "Net.serveOnce(8080, s => IO.pure(s))"),
             ("Impurity.runKit", "Impurity.runKit()"),

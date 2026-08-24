@@ -5580,6 +5580,31 @@ fn infer_call(
             )?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "Ui.setEditorTokens" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::List(Box::new(Type::Int)))?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Ui.setEditorInlays" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(
+                &arg_tys[0],
+                &Type::List(Box::new(Type::Tuple(vec![
+                    Type::Int,
+                    Type::Int,
+                    Type::String,
+                ]))),
+            )?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Ui.setEditorFolds" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(
+                &arg_tys[0],
+                &Type::List(Box::new(Type::Tuple(vec![Type::Int, Type::Int]))),
+            )?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         _ => {
             let f = funs
                 .resolve(callee, current_module)
@@ -13635,11 +13660,17 @@ def note(n: Int where "x"): Unit = ()
     _ <- Ui.setEditorCaret(1, 1)
     _ <- Ui.setEditorDiagnostics([(1, 1)])
     _ <- Ui.setEditorDiagnostics([]: List[(Int, Int)])
+    _ <- Ui.setEditorTokens([0, 0, 1, 8, 0])
+    _ <- Ui.setEditorTokens([]: List[Int])
+    _ <- Ui.setEditorInlays([(0, 1, "T")])
+    _ <- Ui.setEditorInlays([]: List[(Int, Int, String)])
+    _ <- Ui.setEditorFolds([(0, 1)])
+    _ <- Ui.setEditorFolds([]: List[(Int, Int)])
     _ <- Ui.run(_ => View.editor(Signal.str("x")))
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("Ui.setEditorCaret/Diagnostics should typecheck");
+        typecheck(&p).expect("Ui.setEditorCaret/Diagnostics/Tokens should typecheck");
     }
 
     #[test]
