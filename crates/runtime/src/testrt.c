@@ -176,6 +176,150 @@ static SzIo *unwrap_box(void *value, void *env) {
   }
 }
 
+/* Fault plan: SCUZZ_FAULT_KIND + SCUZZ_FAULT_N + SCUZZ_FAULT_MODE, else
+ * SCUZZ_FAULT_SEED. Seed 0 / unset is no fault. Seed k>0 decodes as
+ * kind=(k-1)%3, mode=((k-1)/3)%3, n=(((k-1)/3)/3)%16+1. */
+static int g_fault_kind;
+static int g_fault_mode;
+static int g_fault_n;
+static int g_fault_count_fs;
+static int g_fault_count_net;
+static int g_fault_count_queue;
+static const char *g_fault_fail_msg;
+static int g_idle_have;
+static size_t g_idle_bytes;
+static size_t g_idle_count;
+
+static int fault_kind_from_name(const char *s) {
+  if (!s || !s[0])
+    return 0;
+  if (strcmp(s, "fs") == 0)
+    return SZ_FAULT_FS;
+  if (strcmp(s, "net") == 0)
+    return SZ_FAULT_NET;
+  if (strcmp(s, "queue") == 0)
+    return SZ_FAULT_QUEUE;
+  return 0;
+}
+
+static int fault_mode_from_name(const char *s) {
+  if (!s || !s[0])
+    return SZ_FAULT_FAIL;
+  if (strcmp(s, "drop") == 0)
+    return SZ_FAULT_DROP;
+  if (strcmp(s, "corrupt") == 0)
+    return SZ_FAULT_CORRUPT;
+  return SZ_FAULT_FAIL;
+}
+
+static void fault_decode_seed(int seed) {
+  int idx;
+  int rest;
+  if (seed <= 0) {
+    g_fault_kind = 0;
+    g_fault_mode = SZ_FAULT_FAIL;
+    g_fault_n = 0;
+    return;
+  }
+  idx = seed - 1;
+  g_fault_kind = (idx % 3) + 1;
+  rest = idx / 3;
+  g_fault_mode = rest % 3;
+  g_fault_n = (rest / 3) % 16 + 1;
+}
+
+static void fault_arm_from_env(void) {
+  const char *kind;
+  const char *n_s;
+  const char *seed_s;
+  g_fault_kind = 0;
+  g_fault_mode = SZ_FAULT_FAIL;
+  g_fault_n = 0;
+  g_fault_count_fs = 0;
+  g_fault_count_net = 0;
+  g_fault_count_queue = 0;
+  g_fault_fail_msg = NULL;
+  g_idle_have = 0;
+  g_idle_bytes = 0;
+  g_idle_count = 0;
+  kind = getenv("SCUZZ_FAULT_KIND");
+  n_s = getenv("SCUZZ_FAULT_N");
+  seed_s = getenv("SCUZZ_FAULT_SEED");
+  if (kind && kind[0]) {
+    g_fault_kind = fault_kind_from_name(kind);
+    g_fault_n = n_s && n_s[0] ? atoi(n_s) : 1;
+    if (g_fault_n < 1)
+      g_fault_n = 1;
+    g_fault_mode = fault_mode_from_name(getenv("SCUZZ_FAULT_MODE"));
+    return;
+  }
+  if (seed_s && seed_s[0])
+    fault_decode_seed(atoi(seed_s));
+}
+
+int sz_testrt_fault_tick(int kind) {
+  int *c;
+  if (!g_fault_kind || g_fault_n <= 0 || kind != g_fault_kind)
+    return 0;
+  if (kind == SZ_FAULT_FS)
+    c = &g_fault_count_fs;
+  else if (kind == SZ_FAULT_NET)
+    c = &g_fault_count_net;
+  else if (kind == SZ_FAULT_QUEUE)
+    c = &g_fault_count_queue;
+  else
+    return 0;
+  *c += 1;
+  return *c == g_fault_n;
+}
+
+int sz_testrt_fault_mode(void) { return g_fault_mode; }
+
+void sz_testrt_fault_note(const char *msg) { g_fault_fail_msg = msg; }
+
+const char *sz_testrt_fault_take_msg(void) {
+  const char *m = g_fault_fail_msg;
+  g_fault_fail_msg = NULL;
+  return m;
+}
+
+int sz_testrt_oracles_armed(void) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  return tr && tr[0] == '1';
+}
+
+void sz_testrt_ui_idle_snapshot(void) {
+  sz_alloc_stats(&g_idle_bytes, &g_idle_count);
+  g_idle_have = 1;
+}
+
+void sz_testrt_ui_idle_reset(void) {
+  g_idle_have = 0;
+}
+
+void sz_testrt_ui_idle_check(void) {
+  size_t b = 0;
+  size_t c = 0;
+  if (!sz_testrt_oracles_armed() || !g_idle_have)
+    return;
+  sz_alloc_stats(&b, &c);
+  if (c > g_idle_count || b > g_idle_bytes) {
+    fprintf(stderr,
+            "scuzz: leak: heap grew across idle UI loop (count %zu -> %zu, "
+            "bytes %zu -> %zu)\n",
+            g_idle_count, c, g_idle_bytes, b);
+    sz_panic("leak: heap grew across idle UI loop");
+  }
+}
+
+static int fs_fault(BoxResult *r) {
+  if (!sz_testrt_fault_tick(SZ_FAULT_FS))
+    return 0;
+  r->is_err = 1;
+  r->as.err = sz_error_new(2, "Fs: injected fault");
+  return 1;
+}
+
 static SzString *pack_path(void *env) {
   SzPair *pack = (SzPair *)env;
   return pack ? (SzString *)pack->left : NULL;
@@ -192,8 +336,12 @@ static void *mem_read(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(path_s));
-  MemNode *n = fs_find(path);
+  char *path;
+  MemNode *n;
+  if (fs_fault(r))
+    return r;
+  path = norm_path(sz_string_cstr(path_s));
+  n = fs_find(path);
   sz_free(path);
   if (!n || n->is_dir) {
     r->is_err = 1;
@@ -215,10 +363,14 @@ static void *mem_write(void *env) {
   SzString *path_s = (SzString *)pack->left;
   SzString *contents = (SzString *)pack->right;
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(path_s));
+  char *path;
   char parent[1024];
   MemNode *n;
-  SzString *c = contents ? contents : sz_string_from_cstr("");
+  SzString *c;
+  if (fs_fault(r))
+    return r;
+  path = norm_path(sz_string_cstr(path_s));
+  c = contents ? contents : sz_string_from_cstr("");
 
   if (!parent_path(path, parent, sizeof parent)) {
     sz_free(path);
@@ -300,10 +452,14 @@ static void *mem_list(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(path_s));
-  MemNode *dir = fs_find(path);
+  char *path;
+  MemNode *dir;
   MemNode *n;
   SzList *acc;
+  if (fs_fault(r))
+    return r;
+  path = norm_path(sz_string_cstr(path_s));
+  dir = fs_find(path);
 
   if (!dir || !dir->is_dir) {
     sz_free(path);
@@ -350,8 +506,12 @@ static void *mem_exists(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(path_s));
-  MemNode *n = fs_find(path);
+  char *path;
+  MemNode *n;
+  if (fs_fault(r))
+    return r;
+  path = norm_path(sz_string_cstr(path_s));
+  n = fs_find(path);
   sz_free(path);
   r->is_err = 0;
   r->as.ok = sz_box_i64(n ? 1 : 0);
@@ -388,9 +548,12 @@ static void *mem_delete(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(path_s));
+  char *path;
   MemNode *n;
   MemNode **pp;
+  if (fs_fault(r))
+    return r;
+  path = norm_path(sz_string_cstr(path_s));
   if (!path[0]) {
     sz_free(path);
     r->is_err = 1;
@@ -430,12 +593,16 @@ static void *mem_rename(void *env) {
   SzString *from_s = pack ? (SzString *)pack->left : NULL;
   SzString *to_s = pack ? (SzString *)pack->right : NULL;
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *from = norm_path(sz_string_cstr(from_s));
-  char *to = norm_path(sz_string_cstr(to_s));
+  char *from;
+  char *to;
   char parent[1024];
   MemNode *src;
   MemNode *n;
   size_t from_len;
+  if (fs_fault(r))
+    return r;
+  from = norm_path(sz_string_cstr(from_s));
+  to = norm_path(sz_string_cstr(to_s));
   if (!from[0] || !to[0]) {
     sz_free(from);
     sz_free(to);
@@ -514,11 +681,15 @@ static void *mem_walk(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(path_s));
-  MemNode *dir = fs_find(path);
+  char *path;
+  MemNode *dir;
   MemNode *n;
   SzList *acc;
   size_t dlen;
+  if (fs_fault(r))
+    return r;
+  path = norm_path(sz_string_cstr(path_s));
+  dir = fs_find(path);
   if (!dir || !dir->is_dir) {
     sz_free(path);
     r->is_err = 1;
@@ -565,10 +736,14 @@ static void *mem_mkdirs(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(path_s));
+  char *path;
   char tmp[1024];
-  size_t len = strlen(path);
+  size_t len;
   size_t i;
+  if (fs_fault(r))
+    return r;
+  path = norm_path(sz_string_cstr(path_s));
+  len = strlen(path);
 
   if (len == 0) {
     sz_free(path);
@@ -678,8 +853,11 @@ static void *mem_canonicalize(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
-  char *path = canon_path(sz_string_cstr(path_s));
+  char *path;
   MemNode *n;
+  if (fs_fault(r))
+    return r;
+  path = canon_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.canonicalize: path too deep (mem)");
@@ -824,6 +1002,30 @@ static void *stub_http_get(void *env) {
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   const char *url = sz_string_cstr(url_s);
   NetStub *s;
+  if (sz_testrt_fault_tick(SZ_FAULT_NET)) {
+    int mode = sz_testrt_fault_mode();
+    if (mode == SZ_FAULT_CORRUPT) {
+      for (s = g_stubs; s; s = s->next) {
+        if (strcmp(s->url, url) == 0) {
+          size_t n = strlen(s->body);
+          char *bad = (char *)sz_alloc(n + 2);
+          if (n)
+            memcpy(bad, s->body, n);
+          bad[n] = '!';
+          bad[n + 1] = '\0';
+          r->is_err = 0;
+          r->as.ok = sz_string_from_cstr(bad);
+          sz_free(bad);
+          goto done;
+        }
+      }
+    }
+    r->is_err = 1;
+    r->as.err = sz_error_new(
+        6, mode == SZ_FAULT_DROP ? "Net.httpGet: stub response dropped"
+                                 : "Net.httpGet: injected fault");
+    goto done;
+  }
   for (s = g_stubs; s; s = s->next) {
     if (strcmp(s->url, url) == 0) {
       r->is_err = 0;
@@ -1187,6 +1389,7 @@ int sz_testrt_sys_is_fake(void) { return g_sys_fake; }
 /* --- install / reset ----------------------------------------------------- */
 
 void sz_testrt_install(void) {
+  fault_arm_from_env();
   sz_testrt_clock_install(1);
   sz_testrt_random_install(42);
   sz_testrt_fs_install();
@@ -1195,6 +1398,16 @@ void sz_testrt_install(void) {
 }
 
 void sz_testrt_reset(void) {
+  g_fault_kind = 0;
+  g_fault_mode = SZ_FAULT_FAIL;
+  g_fault_n = 0;
+  g_fault_count_fs = 0;
+  g_fault_count_net = 0;
+  g_fault_count_queue = 0;
+  g_fault_fail_msg = NULL;
+  g_idle_have = 0;
+  g_idle_bytes = 0;
+  g_idle_count = 0;
   sz_testrt_clock_reset_live();
   sz_testrt_random_reset_live();
   sz_testrt_fs_reset_live();
@@ -1276,6 +1489,8 @@ void sz_property_sometimes(SzString *name) {
   copy = (char *)sz_alloc(n + 1);
   memcpy(copy, s, n + 1);
   g_sometimes[g_sometimes_n++] = copy;
+  /* Reachability names stay live. Do not treat that retain as a UI leak. */
+  sz_testrt_ui_idle_reset();
 }
 
 void sz_property_sometimes_flush(void) {
@@ -1422,6 +1637,8 @@ void sz_driver_run_line(const char *spec) {
             r.error ? sz_string_cstr(r.error->message) : "unknown");
     sz_panic("Ui.run: driver failed");
   }
+  /* Driver work runs between pumps. Baseline the next idle frame. */
+  sz_testrt_ui_idle_reset();
 }
 
 void sz_driver_run_script(const char *path) {

@@ -1,0 +1,4 @@
+[package]
+name = "bad-fault"
+version = "0.1.0"
+description = "Known-wrong Fs error handler. scuzz fuzz must fail under fault injection."

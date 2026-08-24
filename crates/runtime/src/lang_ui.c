@@ -441,6 +441,13 @@ static void *thunk_run_rebuild(void *env) {
     live_pump_loop(session, live_still_mobile);
     sz_ui_session_finish(session);
   } else {
+    if (sz_testrt_oracles_armed()) {
+      /* One pump finishes leftover dirty work. The next is idle. */
+      if (!sz_ui_pump_sync(session))
+        sz_panic("Ui.run idle pump failed");
+      if (!sz_ui_pump_sync(session))
+        sz_panic("Ui.run idle pump failed");
+    }
     sz_ui_session_finish(session);
   }
 

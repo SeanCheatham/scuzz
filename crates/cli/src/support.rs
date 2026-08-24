@@ -48,6 +48,7 @@ pub fn run_testrt(
     exe: &Path,
     reached: &Path,
     schedule_seed: &str,
+    fault_seed: &str,
     ui: Option<TestrtUi<'_>>,
     drive_script: Option<&Path>,
 ) -> Result<i32> {
@@ -68,6 +69,9 @@ pub fn run_testrt(
     }
     if !schedule_seed.is_empty() {
         cmd.env("SCUZZ_SCHED_SEED", schedule_seed);
+    }
+    if !fault_seed.is_empty() && fault_seed != "0" {
+        cmd.env("SCUZZ_FAULT_SEED", fault_seed);
     }
     let status = cmd
         .status()

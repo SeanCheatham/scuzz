@@ -1,0 +1,18 @@
+def saveNote(body: String): IO[Unit] =
+  Fs.write("note.txt", body).handleErrorWith(_ =>
+    IO.pure(())
+  )
+
+def loadNote(): IO[String] =
+  Fs.read("note.txt").handleErrorWith(_ =>
+    IO.pure("")
+  )
+
+def roundTrip(body: String): IO[String] =
+  for {
+    _ <- saveNote(body)
+    got <- loadNote()
+  } yield got.require(Str.eq(got, body))
+
+@main def main: IO[Unit] =
+  IO.println("fault-example")

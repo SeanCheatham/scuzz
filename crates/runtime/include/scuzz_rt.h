@@ -779,6 +779,21 @@ void sz_net_test_http_host_header(const char *host, int port, char *out,
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
 void sz_testrt_reset(void);   /* restore live interpreters */
 
+/* Fault injection (TestRuntime). Kind ids match SCUZZ_FAULT_KIND. */
+enum { SZ_FAULT_FS = 1, SZ_FAULT_NET = 2, SZ_FAULT_QUEUE = 3 };
+enum { SZ_FAULT_FAIL = 0, SZ_FAULT_DROP = 1, SZ_FAULT_CORRUPT = 2 };
+/* 1 when this op is the armed Nth op of `kind`. */
+int sz_testrt_fault_tick(int kind);
+int sz_testrt_fault_mode(void);
+/* Delay thunks stash a fail message; the DELAY step consumes it. */
+void sz_testrt_fault_note(const char *msg);
+const char *sz_testrt_fault_take_msg(void);
+/* Implicit oracles under SCUZZ_TESTRT=1. */
+int sz_testrt_oracles_armed(void);
+void sz_testrt_ui_idle_snapshot(void);
+void sz_testrt_ui_idle_check(void);
+void sz_testrt_ui_idle_reset(void);
+
 void sz_testrt_clock_install(int64_t start_ms);
 void sz_testrt_clock_advance(int64_t ms);
 int sz_testrt_clock_is_fake(void);

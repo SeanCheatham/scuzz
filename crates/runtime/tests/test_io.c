@@ -8626,6 +8626,123 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Fault injection: fail the Nth Fs op. */
+  {
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_FAULT_KIND", "fs", 1);
+    setenv("SCUZZ_FAULT_N", "1", 1);
+    sz_testrt_install();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("note.txt"), sz_string_from_cstr("hi")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "injected fault") != NULL);
+    sz_error_free(r.error);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Fault injection: drop a Net stub response. */
+  {
+    SzString *url;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_FAULT_KIND", "net", 1);
+    setenv("SCUZZ_FAULT_N", "1", 1);
+    setenv("SCUZZ_FAULT_MODE", "drop", 1);
+    sz_testrt_install();
+    sz_testrt_net_stub("http://example.test/v1", "ok");
+    url = sz_string_from_cstr("http://example.test/v1");
+    r = sz_io_unsafe_run(sz_net_http_get(url));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "dropped") != NULL);
+    sz_error_free(r.error);
+    sz_release(url);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_MODE");
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Fault injection: corrupt a Net stub body. */
+  {
+    SzString *url;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_FAULT_KIND", "net", 1);
+    setenv("SCUZZ_FAULT_N", "1", 1);
+    setenv("SCUZZ_FAULT_MODE", "corrupt", 1);
+    sz_testrt_install();
+    sz_testrt_net_stub("http://example.test/v1", "ok");
+    url = sz_string_from_cstr("http://example.test/v1");
+    r = sz_io_unsafe_run(sz_net_http_get(url));
+    assert(r.ok);
+    assert(r.value);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok!") == 0);
+    sz_release(r.value);
+    sz_release(url);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_MODE");
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Fault injection: fail the Nth Queue op. */
+  {
+    SzQueue *q;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_FAULT_KIND", "queue", 1);
+    setenv("SCUZZ_FAULT_N", "1", 1);
+    sz_testrt_install();
+    q = sz_queue_make();
+    r = sz_io_unsafe_run(sz_queue_offer_cstr(q, "x"));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "Queue.offer") != NULL);
+    sz_error_free(r.error);
+    sz_queue_free(q);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Deadlock oracle: all fibers parked with no timer pending. */
+  {
+    SzQueue *q = sz_queue_make();
+    r = sz_io_unsafe_run(sz_queue_take(q));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message),
+                  "all fibers parked with no timer pending") != NULL);
+    sz_error_free(r.error);
+    sz_queue_free(q);
+  }
+
+  /* Leak oracle: heap growth across an idle snapshot fails. */
+  {
+    pid_t pid;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      void *p;
+      sz_testrt_ui_idle_snapshot();
+      p = sz_alloc(128);
+      (void)p;
+      sz_testrt_ui_idle_check();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    sz_testrt_ui_idle_snapshot();
+    sz_testrt_ui_idle_check();
+    unsetenv("SCUZZ_TESTRT");
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

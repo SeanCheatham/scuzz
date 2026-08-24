@@ -1,0 +1,8 @@
+[fuzz]
+seed = 42
+schedule_seed = "42"
+fault_seed = "1"
+fault_kind = "fs"
+fault_n = 1
+fault_mode = "fail"
+events = ["drive checkNote a"]

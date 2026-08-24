@@ -391,6 +391,8 @@ jobs:
           cargo run -p scuzz -- check examples/kernel
           cargo run -p scuzz -- check examples/bad-example
           cargo run -p scuzz -- test examples/bad-example
+          cargo run -p scuzz -- check examples/bad-fault
+          cargo run -p scuzz -- test examples/bad-fault
           cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '^\[\]$' /tmp/hello-check.json
           cargo run -p scuzz -- lsp --help | tee /tmp/lsp-help.txt
@@ -485,6 +487,19 @@ jobs:
           fi
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-example; then
             echo "corpus-only should pin the bad-example failure" && exit 1
+          fi
+          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-fault; then
+            echo "corpus-only should pin the bad-fault failure" && exit 1
+          fi
+          test -f examples/bad-fault/build/fuzz/repro.toml
+          grep -q 'fault_seed' examples/bad-fault/build/fuzz/repro.toml
+          grep -q 'fault_kind = "fs"' examples/bad-fault/build/fuzz/repro.toml
+          if cargo run -p scuzz -- fuzz --replay examples/bad-fault/corpus/f83245e1fbf633a5.toml examples/bad-fault; then
+            echo "fault replay should have reproduced the failure" && exit 1
+          fi
+          grep -v -e fault_seed -e fault_kind -e fault_n -e fault_mode examples/bad-fault/corpus/f83245e1fbf633a5.toml > /tmp/bad-fault-nofault.toml
+          if ! cargo run -p scuzz -- fuzz --replay /tmp/bad-fault-nofault.toml examples/bad-fault; then
+            echo "replay without fault_seed should pass" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug

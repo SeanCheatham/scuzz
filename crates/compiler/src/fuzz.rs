@@ -540,6 +540,136 @@ pub fn fuzz_pick_sched(seed: i64, iter: i64, corpus: &[String]) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaultKind {
+    None,
+    Fs,
+    Net,
+    Queue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaultMode {
+    Fail,
+    Drop,
+    Corrupt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FaultPlan {
+    pub kind: FaultKind,
+    pub n: i64,
+    pub mode: FaultMode,
+}
+
+impl FaultPlan {
+    pub fn none() -> Self {
+        Self {
+            kind: FaultKind::None,
+            n: 0,
+            mode: FaultMode::Fail,
+        }
+    }
+
+    pub fn is_none(self) -> bool {
+        self.kind == FaultKind::None || self.n <= 0
+    }
+
+    pub fn kind_str(self) -> &'static str {
+        match self.kind {
+            FaultKind::None => "",
+            FaultKind::Fs => "fs",
+            FaultKind::Net => "net",
+            FaultKind::Queue => "queue",
+        }
+    }
+
+    pub fn mode_str(self) -> &'static str {
+        match self.mode {
+            FaultMode::Fail => "fail",
+            FaultMode::Drop => "drop",
+            FaultMode::Corrupt => "corrupt",
+        }
+    }
+}
+
+/// Decode `SCUZZ_FAULT_SEED`. `0` is no fault. Same mapping as TestRuntime.
+pub fn decode_fault_seed(seed: i64) -> FaultPlan {
+    if seed <= 0 {
+        return FaultPlan::none();
+    }
+    let idx = seed - 1;
+    let kind = match idx.rem_euclid(3) {
+        0 => FaultKind::Fs,
+        1 => FaultKind::Net,
+        _ => FaultKind::Queue,
+    };
+    let rest = idx / 3;
+    let mode = match rest.rem_euclid(3) {
+        0 => FaultMode::Fail,
+        1 => FaultMode::Drop,
+        _ => FaultMode::Corrupt,
+    };
+    let n = (rest / 3).rem_euclid(16) + 1;
+    FaultPlan { kind, n, mode }
+}
+
+/// Inverse of [`decode_fault_seed`]. None encodes as `0`.
+pub fn encode_fault_plan(plan: FaultPlan) -> i64 {
+    if plan.is_none() {
+        return 0;
+    }
+    let k = match plan.kind {
+        FaultKind::None => return 0,
+        FaultKind::Fs => 0,
+        FaultKind::Net => 1,
+        FaultKind::Queue => 2,
+    };
+    let m = match plan.mode {
+        FaultMode::Fail => 0,
+        FaultMode::Drop => 1,
+        FaultMode::Corrupt => 2,
+    };
+    let n = plan.n.clamp(1, 16);
+    k + 3 * (m + 3 * (n - 1)) + 1
+}
+
+fn fuzz_perturb_fault(base: &str, s: i64) -> String {
+    let n: i64 = base.parse().unwrap_or(0);
+    if n <= 0 {
+        return (1 + lcg_below(s, 48)).to_string();
+    }
+    let mut plan = decode_fault_seed(n);
+    plan.n = 1 + lcg_below(s, 16);
+    encode_fault_plan(plan).to_string()
+}
+
+/// Pick a fault seed. Iter `0` is no fault so small budgets stay quiet.
+pub fn fuzz_pick_fault(seed: i64, iter: i64, corpus: &[String]) -> String {
+    if iter <= 0 {
+        return "0".into();
+    }
+    let s = lcg_next(lcg_seed(seed + iter + 91));
+    if !corpus.is_empty() && lcg_below(s, 2) == 0 {
+        let s = lcg_next(s);
+        let base = &corpus[lcg_below(s, corpus.len() as i64) as usize];
+        return fuzz_perturb_fault(base, lcg_next(s));
+    }
+    if lcg_below(s, 3) == 0 {
+        return "0".into();
+    }
+    (1 + lcg_below(lcg_next(s), 48)).to_string()
+}
+
+/// Empty / `"0"` does not join the corpus hash (keeps old stems).
+pub fn fault_seed_key(fault_seed: &str) -> &str {
+    if fault_seed.is_empty() || fault_seed == "0" {
+        ""
+    } else {
+        fault_seed
+    }
+}
+
 pub fn exhaust_alphabet(
     n_buttons: i64,
     n_fields: i64,
@@ -690,6 +820,10 @@ pub struct Repro {
     #[serde(default)]
     pub seed: i64,
     pub schedule_seed: Option<String>,
+    pub fault_seed: Option<String>,
+    pub fault_kind: Option<String>,
+    pub fault_n: Option<i64>,
+    pub fault_mode: Option<String>,
     #[serde(default)]
     pub events: Vec<String>,
 }
@@ -713,14 +847,24 @@ fn fnv1a64(h: &mut u64, bytes: &[u8]) {
     }
 }
 
-/// Content hash of `schedule_seed` plus events. Filename stem is idempotent.
+/// Content hash of `schedule_seed` plus events plus a non-zero fault seed.
+/// Filename stem is idempotent. Fault `"0"` / empty keeps the old hash.
 pub fn corpus_entry_name(schedule_seed: &str, events: &[String]) -> String {
+    corpus_entry_name_fault(schedule_seed, "", events)
+}
+
+pub fn corpus_entry_name_fault(schedule_seed: &str, fault_seed: &str, events: &[String]) -> String {
     let mut h = 0xcbf29ce484222325u64;
     fnv1a64(&mut h, schedule_seed.as_bytes());
     fnv1a64(&mut h, &[0xff]);
     for e in events {
         fnv1a64(&mut h, e.as_bytes());
         fnv1a64(&mut h, &[0xff]);
+    }
+    let fault = fault_seed_key(fault_seed);
+    if !fault.is_empty() {
+        fnv1a64(&mut h, &[0xfe]);
+        fnv1a64(&mut h, fault.as_bytes());
     }
     format!("{h:016x}")
 }
@@ -732,10 +876,20 @@ pub fn corpus_sorted_names(names: impl IntoIterator<Item = String>) -> Vec<Strin
     out
 }
 
-pub fn repro_text(seed: i64, schedule_seed: &str, events: &[String]) -> String {
+pub fn repro_text(seed: i64, schedule_seed: &str, fault_seed: &str, events: &[String]) -> String {
     let mut out = format!("[fuzz]\nseed = {seed}\n");
     if !schedule_seed.is_empty() {
         out.push_str(&format!("schedule_seed = \"{schedule_seed}\"\n"));
+    }
+    let fault = fault_seed_key(fault_seed);
+    if !fault.is_empty() {
+        out.push_str(&format!("fault_seed = \"{fault}\"\n"));
+        let plan = decode_fault_seed(fault.parse().unwrap_or(0));
+        if !plan.is_none() {
+            out.push_str(&format!("fault_kind = \"{}\"\n", plan.kind_str()));
+            out.push_str(&format!("fault_n = {}\n", plan.n));
+            out.push_str(&format!("fault_mode = \"{}\"\n", plan.mode_str()));
+        }
     }
     let quoted: Vec<String> = events.iter().map(|e| format!("\"{e}\"")).collect();
     out.push_str(&format!("events = [{}]\n", quoted.join(", ")));
@@ -842,11 +996,25 @@ scroll:scroll
 
     #[test]
     fn repro_roundtrip() {
-        let text = repro_text(7, "9", &["tap 0".into(), "pump 1".into()]);
+        let text = repro_text(7, "9", "", &["tap 0".into(), "pump 1".into()]);
         let r = parse_repro(&text).expect("repro toml");
         assert_eq!(r.seed, 7);
         assert_eq!(r.schedule_seed.as_deref(), Some("9"));
+        assert_eq!(r.fault_seed, None);
         assert_eq!(r.events, vec!["tap 0", "pump 1"]);
+    }
+
+    #[test]
+    fn repro_roundtrip_fault_plan() {
+        let text = repro_text(7, "9", "1", &["drive checkNote a".into()]);
+        let r = parse_repro(&text).expect("repro toml");
+        assert_eq!(r.fault_seed.as_deref(), Some("1"));
+        assert_eq!(r.fault_kind.as_deref(), Some("fs"));
+        assert_eq!(r.fault_n, Some(1));
+        assert_eq!(r.fault_mode.as_deref(), Some("fail"));
+        assert_eq!(decode_fault_seed(1).kind, FaultKind::Fs);
+        assert_eq!(encode_fault_plan(decode_fault_seed(1)), 1);
+        assert_eq!(fuzz_pick_fault(42, 0, &[]), "0");
     }
 
     #[test]
@@ -874,6 +1042,18 @@ scroll:scroll
     }
 
     #[test]
+    fn corpus_entry_name_matches_bad_fault_pin() {
+        assert_eq!(
+            corpus_entry_name_fault("42", "1", &["drive checkNote a".into()]),
+            "f83245e1fbf633a5"
+        );
+        assert_eq!(
+            corpus_entry_name_fault("42", "0", &["drive checkNote a".into()]),
+            corpus_entry_name("42", &["drive checkNote a".into()])
+        );
+    }
+
+    #[test]
     fn corpus_entry_name_changes_with_seed_or_events() {
         let ev = vec!["tap 0".to_string()];
         let base = corpus_entry_name("1", &ev);
@@ -890,10 +1070,12 @@ scroll:scroll
         let seed = "42";
         let events = vec!["drive bumpIncreases -1".into()];
         let name = corpus_entry_name(seed, &events);
-        let text = repro_text(7, seed, &events);
+        let text = repro_text(7, seed, "", &events);
         let r = parse_repro(&text).expect("repro toml");
         let sched = r.schedule_seed.as_deref().unwrap_or("");
         assert_eq!(corpus_entry_name(sched, &r.events), name);
+        assert_eq!(corpus_entry_name_fault(sched, "0", &r.events), name);
+        assert_ne!(corpus_entry_name_fault(sched, "1", &r.events), name);
     }
 
     #[test]
