@@ -209,7 +209,8 @@ typedef enum SzViewKind {
   SZ_VIEW_EDITOR,             /* multiline SignalStr buffer; not a TextField */
   SZ_VIEW_SPLIT,              /* Signal.int 0-100; two children + drag handle */
   SZ_VIEW_OVERLAY,            /* Signal.int; fills parent when on; Escape dismisses */
-  SZ_VIEW_ON_SECONDARY        /* child + button-3 handler; sizes to the child; not a tap */
+  SZ_VIEW_ON_SECONDARY,       /* child + button-3 handler; sizes to the child; not a tap */
+  SZ_VIEW_FOCUS_GROUP         /* child list of taps; sizes to the child; not a tap */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -284,6 +285,10 @@ SzView *sz_view_tooltip(const char *message, SzView *child);
 /* Sizes to `child`. Button-3 on the child or a descendant runs `on_tap`.
  * Not a tap target. Primary taps still hit the child. */
 SzView *sz_view_on_secondary(SzView *child, SzViewTapFn on_tap, void *env);
+/* Sizes to `child`. A tap on a descendant tap target focuses that list.
+ * ArrowUp / ArrowDown move among sibling taps. Enter / Space activate.
+ * Not a tap target. An open overlay still takes keys. */
+SzView *sz_view_focus_group(SzView *child);
 /* Sizes to `child`. Paints a muted box mark. Not a tap target. */
 SzView *sz_view_placeholder(SzView *child);
 /* Sizes to `child`. `label` is a11y. Not a tap target. */
@@ -316,7 +321,8 @@ int sz_view_collect_splits(SzView *root, SzView **out, int cap);
 int sz_view_collect_overlays(SzView *root, SzView **out, int cap);
 int sz_view_overlay_is_open(const SzView *view);
 int sz_view_split_frac(const SzView *view);
-/* "editor", "field", "overlay", or "none" from the live focus / open overlay. */
+/* "editor", "field", "overlay", "button:<label>", or "none" from the live
+ * focus / open overlay / focused focus-group row. */
 const char *sz_view_focus_kind(SzView *root);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
@@ -434,11 +440,14 @@ int sz_ui_session_paste(SzUiSession *session, const char *text);
  * when backspace != 0. A selection is replaced or deleted. Targets the focused
  * TextField or editor (else the first field, else the first editor). */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
-/* Named key on the focused TextField or editor. Backspace / Delete / arrows /
- * Home / End use the caret. Shift+arrows / Shift+Home / Shift+End extend the
- * selection. On an editor, Enter inserts a newline, Tab inserts two spaces,
- * and ArrowUp / ArrowDown move by line. Nonempty `text` inserts UTF-8
- * (replaces a selection). Unused names inject and no-op. */
+/* Named key on the focused TextField or editor, or on a focused focus-group
+ * row. Backspace / Delete / arrows / Home / End use the caret. Shift+arrows /
+ * Shift+Home / Shift+End extend the selection. On an editor, Enter inserts a
+ * newline, Tab inserts two spaces, and ArrowUp / ArrowDown move by line. With
+ * a focus-group row focused and no overlay, ArrowUp / ArrowDown move among
+ * sibling taps and Enter / Space activate. An open overlay takes keys.
+ * Nonempty `text` inserts UTF-8 (replaces a selection). Unused names inject
+ * and no-op. */
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods);
 
@@ -720,6 +729,8 @@ SzView *sz_lang_view_fab(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_outlined_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_text_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_tooltip(SzString *message, SzView *child);
+SzView *sz_lang_view_on_secondary(SzView *child, SzViewTapFn tap, void *env);
+SzView *sz_lang_view_focus_group(SzView *child);
 SzView *sz_lang_view_placeholder(SzView *child);
 SzView *sz_lang_view_semantics(SzString *label, SzView *child);
 SzView *sz_lang_view_merge_semantics(SzString *label, SzView *child);

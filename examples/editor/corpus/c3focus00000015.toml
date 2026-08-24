@@ -1,0 +1,4 @@
+[fuzz]
+seed = 15
+schedule_seed = "15"
+events = ["tap 0", "key ArrowDown", "key Enter"]

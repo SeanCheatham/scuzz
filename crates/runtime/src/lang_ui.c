@@ -170,6 +170,10 @@ SzView *sz_lang_view_on_secondary(SzView *child, SzViewTapFn tap, void *env) {
   return sz_view_on_secondary(child, tap, env);
 }
 
+SzView *sz_lang_view_focus_group(SzView *child) {
+  return sz_view_focus_group(child);
+}
+
 SzView *sz_lang_view_placeholder(SzView *child) {
   return sz_view_placeholder(child);
 }
