@@ -4,10 +4,11 @@ use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::compile_project;
 use scuzz_compiler::driver::load_verify_program;
 use scuzz_compiler::fuzz::{
-    corpus_entry_name, corpus_keep, corpus_push, corpus_sorted_names, count_dump_section,
-    drive_line_shrinks, drive_script_lines, dump_push, exhaust_alphabet, fuzz_mutate_sites,
-    fuzz_pick_sched, fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text,
-    script_text, Repro,
+    corpus_entry_name_fault, corpus_keep, corpus_push, corpus_sorted_names, count_dump_section,
+    decode_fault_seed, drive_line_shrinks, drive_script_lines, dump_push, encode_fault_plan,
+    exhaust_alphabet, fault_seed_key, fuzz_mutate_sites, fuzz_pick_fault, fuzz_pick_sched,
+    fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text, script_text,
+    FaultMode, Repro,
 };
 use scuzz_compiler::manifest::load_manifest;
 use scuzz_compiler::mutate::{
@@ -69,12 +70,14 @@ impl MutateStats {
 /// Kept IO search: schedule seed plus the drive lines that ran with it.
 struct IoKeep {
     sched: String,
+    fault: String,
     drives: Vec<String>,
 }
 
 /// Kept UI search: schedule seed plus the event prefix that ran with it.
 struct UiKeep {
     sched: String,
+    fault: String,
     events: Vec<String>,
 }
 
@@ -214,9 +217,19 @@ fn fuzz_replay(path: &Path, replay_path: &Path) -> Result<ExitCode> {
     let text = std::fs::read_to_string(replay_path)
         .with_context(|| format!("reading {}", replay_path.display()))?;
     let repro = parse_repro(&text).map_err(|e| anyhow::anyhow!("repro.toml: {e}"))?;
+    let fault_note = match repro_fault(&repro).as_str() {
+        "" | "0" => String::new(),
+        f => format!(", fault_seed {f}"),
+    };
     let sched_note = match &repro.schedule_seed {
-        Some(s) => format!(", schedule_seed {s})"),
-        None => ")".into(),
+        Some(s) => format!(", schedule_seed {s}{fault_note})"),
+        None => {
+            if fault_note.is_empty() {
+                ")".into()
+            } else {
+                format!("{fault_note})")
+            }
+        }
     };
     println!(
         "scuzz fuzz --replay {} ({} events, seed {}{}",
@@ -226,10 +239,19 @@ fn fuzz_replay(path: &Path, replay_path: &Path) -> Result<ExitCode> {
         sched_note
     );
     let sched = repro.schedule_seed.clone().unwrap_or_default();
+    let fault = repro_fault(&repro);
     let code = if ctx.is_ui {
-        fuzz_exec(&ctx.exe, &ctx.fuzz_dir, ctx.w, ctx.h, &repro.events, &sched)?
+        fuzz_exec(
+            &ctx.exe,
+            &ctx.fuzz_dir,
+            ctx.w,
+            ctx.h,
+            &repro.events,
+            &sched,
+            &fault,
+        )?
     } else {
-        fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, &sched, &repro.events)?
+        fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, &sched, &fault, &repro.events)?
     };
     if code == 0 {
         println!("fuzz replay ok (no failure)");
@@ -248,6 +270,7 @@ fn fuzz_ui_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
         ctx.h,
         &[],
         &camp.seed.to_string(),
+        "0",
     )?;
     if code != 0 {
         write_fail_summary(ctx, camp, 0)?;
@@ -303,12 +326,14 @@ fn fuzz_io_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
     replay_stored_corpus(ctx, camp, None, Some(&mut corpus))?;
     for iter in 0..search_budget {
         let sched_corpus: Vec<String> = corpus.iter().map(|k| k.sched.clone()).collect();
+        let fault_corpus: Vec<String> = corpus.iter().map(|k| k.fault.clone()).collect();
         let sched = fuzz_pick_sched(camp.seed, iter, &sched_corpus);
+        let fault = fuzz_pick_fault(camp.seed, iter, &fault_corpus);
         let drives = drive_script_lines(camp.seed + iter, &drivers);
         let old_camp = lines_nonempty(
             &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
         );
-        let code = fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, &sched, &drives)?;
+        let code = fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, &sched, &fault, &drives)?;
         if code != 0 {
             camp.search_used = iter + 1;
             let sched_n: i64 = sched.parse().unwrap_or(0);
@@ -317,6 +342,7 @@ fn fuzz_io_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
                 camp,
                 camp.seed + iter,
                 sched_n,
+                &fault,
                 iter,
                 &drives,
                 corpus.len() as i64,
@@ -328,8 +354,23 @@ fn fuzz_io_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
         );
         if !missing_from(&reached, &old_camp).is_empty() && !corpus.iter().any(|k| k.sched == sched)
         {
-            maybe_promote_coverage(ctx, camp, camp.seed + iter, &sched, &drives, &reached)?;
-            corpus_push(&mut corpus, IoKeep { sched, drives });
+            maybe_promote_coverage(
+                ctx,
+                camp,
+                camp.seed + iter,
+                &sched,
+                &fault,
+                &drives,
+                &reached,
+            )?;
+            corpus_push(
+                &mut corpus,
+                IoKeep {
+                    sched,
+                    fault,
+                    drives,
+                },
+            );
         }
     }
     camp.search_used = search_budget;
@@ -404,6 +445,8 @@ fn consider_ui_script(
     let old_camp = lines_nonempty(
         &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
     );
+    let fault_corpus: Vec<String> = search.prefixes.iter().map(|k| k.fault.clone()).collect();
+    let fault = fuzz_pick_fault(camp.seed, iter, &fault_corpus);
     let code = fuzz_exec(
         &ctx.exe,
         &ctx.fuzz_dir,
@@ -411,6 +454,7 @@ fn consider_ui_script(
         ctx.h,
         events,
         &sched.to_string(),
+        &fault,
     )?;
     camp.search_used += 1;
     if code != 0 {
@@ -419,6 +463,7 @@ fn consider_ui_script(
             camp,
             camp.seed + iter,
             sched,
+            &fault,
             iter,
             events,
             search.prefixes.len() as i64,
@@ -437,6 +482,7 @@ fn consider_ui_script(
             ctx.h,
             events,
             &sched.to_string(),
+            &fault,
         )?;
         if dump2_code != 0 {
             note_search_fail(
@@ -444,6 +490,7 @@ fn consider_ui_script(
                 camp,
                 camp.seed + iter,
                 sched,
+                &fault,
                 iter,
                 events,
                 search.prefixes.len() as i64,
@@ -460,6 +507,7 @@ fn consider_ui_script(
             &mut search.prefixes,
             UiKeep {
                 sched: sched.to_string(),
+                fault: fault.clone(),
                 events: events.to_vec(),
             },
         );
@@ -468,6 +516,7 @@ fn consider_ui_script(
             camp,
             camp.seed + iter,
             &sched.to_string(),
+            &fault,
             events,
             &reached,
         )?;
@@ -783,12 +832,13 @@ fn mutate_exec_ui(
     corpus: &[UiKeep],
     idle_sched: &str,
 ) -> Result<i32> {
-    let code = mutate_exec_ui_events(exe, out_dir, w, h, &[], idle_sched)?;
+    let code = mutate_exec_ui_events(exe, out_dir, w, h, &[], idle_sched, "0")?;
     if code != 0 {
         return Ok(code);
     }
     for keep in corpus {
-        let code = mutate_exec_ui_events(exe, out_dir, w, h, &keep.events, &keep.sched)?;
+        let code =
+            mutate_exec_ui_events(exe, out_dir, w, h, &keep.events, &keep.sched, &keep.fault)?;
         if code != 0 {
             return Ok(code);
         }
@@ -803,6 +853,7 @@ fn mutate_exec_ui_events(
     h: i32,
     events: &[String],
     schedule_seed: &str,
+    fault_seed: &str,
 ) -> Result<i32> {
     let script = out_dir.join("script.txt");
     let dump = out_dir.join("dump.txt");
@@ -814,6 +865,7 @@ fn mutate_exec_ui_events(
         exe,
         &reached,
         schedule_seed,
+        fault_seed,
         Some(TestrtUi {
             script: &script,
             dump: &dump,
@@ -825,12 +877,12 @@ fn mutate_exec_ui_events(
 }
 
 fn mutate_exec_io(exe: &Path, out_dir: &Path, corpus: &[IoKeep], idle_sched: &str) -> Result<i32> {
-    let code = mutate_exec_io_at(exe, out_dir, idle_sched, &[])?;
+    let code = mutate_exec_io_at(exe, out_dir, idle_sched, "0", &[])?;
     if code != 0 {
         return Ok(code);
     }
     for keep in corpus {
-        let code = mutate_exec_io_at(exe, out_dir, &keep.sched, &keep.drives)?;
+        let code = mutate_exec_io_at(exe, out_dir, &keep.sched, &keep.fault, &keep.drives)?;
         if code != 0 {
             return Ok(code);
         }
@@ -842,6 +894,7 @@ fn mutate_exec_io_at(
     exe: &Path,
     out_dir: &Path,
     schedule_seed: &str,
+    fault_seed: &str,
     drives: &[String],
 ) -> Result<i32> {
     let reached = out_dir.join("sometimes.reached");
@@ -853,7 +906,7 @@ fn mutate_exec_io_at(
     } else {
         Some(drive_path.as_path())
     };
-    run_testrt(exe, &reached, schedule_seed, None, drive)
+    run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive)
 }
 
 fn shrink_events(
@@ -863,6 +916,7 @@ fn shrink_events(
     w: i32,
     h: i32,
     schedule_seed: &str,
+    fault_seed: &str,
     events: &[String],
 ) -> Result<Vec<String>> {
     let mut cur = events.to_vec();
@@ -873,9 +927,9 @@ fn shrink_events(
             let mut cand = cur.clone();
             cand.remove(i);
             let code = if is_ui {
-                fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed)?
+                fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed, fault_seed)?
             } else {
-                fuzz_exec_io(exe, fuzz_dir, schedule_seed, &cand)?
+                fuzz_exec_io(exe, fuzz_dir, schedule_seed, fault_seed, &cand)?
             };
             if code != 0 {
                 cur = cand;
@@ -900,6 +954,7 @@ fn shrink_drive_args(
     w: i32,
     h: i32,
     schedule_seed: &str,
+    fault_seed: &str,
     events: &[String],
     specs: &[String],
 ) -> Result<Vec<String>> {
@@ -914,9 +969,9 @@ fn shrink_drive_args(
                 let mut cand = cur.clone();
                 cand[i] = cand_line;
                 let code = if is_ui {
-                    fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed)?
+                    fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed, fault_seed)?
                 } else {
-                    fuzz_exec_io(exe, fuzz_dir, schedule_seed, &cand)?
+                    fuzz_exec_io(exe, fuzz_dir, schedule_seed, fault_seed, &cand)?
                 };
                 if code != 0 {
                     cur = cand;
@@ -934,6 +989,61 @@ fn shrink_drive_args(
         }
     }
     Ok(cur)
+}
+
+fn shrink_fault(
+    exe: &Path,
+    fuzz_dir: &Path,
+    is_ui: bool,
+    w: i32,
+    h: i32,
+    schedule_seed: &str,
+    fault_seed: &str,
+    events: &[String],
+) -> Result<String> {
+    let cur = fault_seed_key(fault_seed);
+    if cur.is_empty() {
+        return Ok("0".into());
+    }
+    let run = |fault: &str| -> Result<i32> {
+        if is_ui {
+            fuzz_exec(exe, fuzz_dir, w, h, events, schedule_seed, fault)
+        } else {
+            fuzz_exec_io(exe, fuzz_dir, schedule_seed, fault, events)
+        }
+    };
+    if run("0")? != 0 {
+        return Ok("0".into());
+    }
+    let seed: i64 = cur.parse().unwrap_or(0);
+    let plan = decode_fault_seed(seed);
+    if plan.n > 1 {
+        for n in 1..plan.n {
+            let mut p = plan;
+            p.n = n;
+            let cand = encode_fault_plan(p).to_string();
+            if run(&cand)? != 0 {
+                return Ok(cand);
+            }
+        }
+    }
+    if plan.mode_str() != "fail" {
+        let mut p = plan;
+        p.mode = FaultMode::Fail;
+        let cand = encode_fault_plan(p).to_string();
+        if run(&cand)? != 0 {
+            return Ok(cand);
+        }
+    }
+    Ok(cur.to_string())
+}
+
+fn repro_fault(repro: &Repro) -> String {
+    repro
+        .fault_seed
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "0".into())
 }
 
 fn write_fail_summary(ctx: &FuzzCtx, camp: &Campaign, corpus: i64) -> Result<()> {
@@ -958,6 +1068,7 @@ fn note_search_fail(
     camp: &mut Campaign,
     script_seed: i64,
     schedule_seed: i64,
+    fault_seed: &str,
     iter: i64,
     events: &[String],
     corpus: i64,
@@ -966,13 +1077,15 @@ fn note_search_fail(
     let shrink_dir = ctx.fuzz_dir.join("shrink");
     std::fs::create_dir_all(&shrink_dir)?;
     std::fs::write(shrink_dir.join("sometimes.campaign"), "")?;
+    let sched = schedule_seed.to_string();
     let shrunk = shrink_events(
         &ctx.exe,
         &shrink_dir,
         ctx.is_ui,
         ctx.w,
         ctx.h,
-        &schedule_seed.to_string(),
+        &sched,
+        fault_seed,
         events,
     )?;
     let shrunk = shrink_drive_args(
@@ -981,18 +1094,26 @@ fn note_search_fail(
         ctx.is_ui,
         ctx.w,
         ctx.h,
-        &schedule_seed.to_string(),
+        &sched,
+        fault_seed,
         &shrunk,
         &read_drivers(&ctx.project_dir),
+    )?;
+    let fault = shrink_fault(
+        &ctx.exe,
+        &shrink_dir,
+        ctx.is_ui,
+        ctx.w,
+        ctx.h,
+        &sched,
+        fault_seed,
+        &shrunk,
     )?;
     camp.search_failures += 1;
     let first = camp.repro.is_none();
     if first {
         let path = ctx.fuzz_dir.join("repro.toml");
-        std::fs::write(
-            &path,
-            repro_text(script_seed, &schedule_seed.to_string(), &shrunk),
-        )?;
+        std::fs::write(&path, repro_text(script_seed, &sched, &fault, &shrunk))?;
         println!(
             "fuzz failure at script {iter} (seed {script_seed}); wrote {} ({} events, shrunk from {})",
             path.display(),
@@ -1004,6 +1125,9 @@ fn note_search_fail(
             for ev in &shrunk {
                 println!("  {ev}");
             }
+        }
+        if !fault_seed_key(&fault).is_empty() {
+            println!("fault_seed {fault}");
         }
         println!(
             "replay: scuzz fuzz {} --replay {}",
@@ -1017,12 +1141,7 @@ fn note_search_fail(
                 println!("  {line}");
             }
         }
-        if promote_to_corpus(
-            &ctx.project_dir,
-            script_seed,
-            &schedule_seed.to_string(),
-            &shrunk,
-        )? {
+        if promote_to_corpus(&ctx.project_dir, script_seed, &sched, &fault, &shrunk)? {
             camp.stored.promoted += 1;
         }
         camp.repro = Some(SearchRepro {
@@ -1087,10 +1206,19 @@ fn replay_stored_corpus(
     }
     for (path, repro) in entries {
         let sched = repro.schedule_seed.clone().unwrap_or_default();
+        let fault = repro_fault(&repro);
         let code = if ctx.is_ui {
-            fuzz_exec(&ctx.exe, &ctx.fuzz_dir, ctx.w, ctx.h, &repro.events, &sched)?
+            fuzz_exec(
+                &ctx.exe,
+                &ctx.fuzz_dir,
+                ctx.w,
+                ctx.h,
+                &repro.events,
+                &sched,
+                &fault,
+            )?
         } else {
-            fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, &sched, &repro.events)?
+            fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, &sched, &fault, &repro.events)?
         };
         let this_reached = lines_nonempty(
             &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
@@ -1142,6 +1270,7 @@ fn replay_stored_corpus(
                 &mut search.prefixes,
                 UiKeep {
                     sched: sched.clone(),
+                    fault: fault.clone(),
                     events: repro.events,
                 },
             );
@@ -1150,6 +1279,7 @@ fn replay_stored_corpus(
                 corpus,
                 IoKeep {
                     sched,
+                    fault,
                     drives: repro.events,
                 },
             );
@@ -1162,15 +1292,19 @@ fn promote_to_corpus(
     project_dir: &Path,
     seed: i64,
     schedule_seed: &str,
+    fault_seed: &str,
     events: &[String],
 ) -> Result<bool> {
     let dir = project_dir.join("corpus");
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.toml", corpus_entry_name(schedule_seed, events)));
+    let path = dir.join(format!(
+        "{}.toml",
+        corpus_entry_name_fault(schedule_seed, fault_seed, events)
+    ));
     if path.exists() {
         return Ok(false);
     }
-    std::fs::write(&path, repro_text(seed, schedule_seed, events))?;
+    std::fs::write(&path, repro_text(seed, schedule_seed, fault_seed, events))?;
     println!("scuzz fuzz: promoted {}", path.display());
     Ok(true)
 }
@@ -1180,6 +1314,7 @@ fn maybe_promote_coverage(
     camp: &mut Campaign,
     script_seed: i64,
     schedule_seed: &str,
+    fault_seed: &str,
     events: &[String],
     reached: &[String],
 ) -> Result<()> {
@@ -1193,7 +1328,13 @@ fn maybe_promote_coverage(
     if camp.declared_count <= 0 || camp.coverage_promoted >= camp.declared_count {
         return Ok(());
     }
-    if !promote_to_corpus(&ctx.project_dir, script_seed, schedule_seed, events)? {
+    if !promote_to_corpus(
+        &ctx.project_dir,
+        script_seed,
+        schedule_seed,
+        fault_seed,
+        events,
+    )? {
         return Ok(());
     }
     camp.stored.promoted += 1;
@@ -1402,6 +1543,7 @@ fn fuzz_exec(
     h: i32,
     events: &[String],
     schedule_seed: &str,
+    fault_seed: &str,
 ) -> Result<i32> {
     let script = fuzz_dir.join("script.txt");
     let dump = fuzz_dir.join("dump.txt");
@@ -1413,6 +1555,7 @@ fn fuzz_exec(
         exe,
         &reached,
         schedule_seed,
+        fault_seed,
         Some(TestrtUi {
             script: &script,
             dump: &dump,
@@ -1429,6 +1572,7 @@ fn fuzz_exec_io(
     exe: &Path,
     fuzz_dir: &Path,
     schedule_seed: &str,
+    fault_seed: &str,
     drives: &[String],
 ) -> Result<i32> {
     let reached = fuzz_dir.join("sometimes.reached");
@@ -1440,7 +1584,7 @@ fn fuzz_exec_io(
     } else {
         Some(drive_path.as_path())
     };
-    let code = run_testrt(exe, &reached, schedule_seed, None, drive)?;
+    let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive)?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
     Ok(code)
 }

@@ -14123,6 +14123,7 @@ static void test_alloc_counter_pump_flat(void) {
 
   session = sz_ui_mount(&cfg, root);
   assert(session);
+  setenv("SCUZZ_TESTRT", "1", 1);
   /* Warm-up: layout + a few taps so map cache / frames settle. */
   assert(sz_ui_pump_sync(session));
   memset(&tap, 0, sizeof(tap));
@@ -14155,6 +14156,7 @@ static void test_alloc_counter_pump_flat(void) {
   sz_view_free(root);
   sz_signal_str_free(label);
   sz_signal_int_free(count);
+  unsetenv("SCUZZ_TESTRT");
 }
 
 /* Headless button with a captured list env: tap still fires after the

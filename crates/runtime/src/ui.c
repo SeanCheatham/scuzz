@@ -1376,6 +1376,16 @@ int sz_ui_pump_sync(SzUiSession *session) {
   }
   sz_alloc_trace_on_pump();
   session->pumps += 1;
+  /* Leak oracle: heap must not grow across consecutive idle pumps. A dirty
+   * frame resets the baseline. */
+  if (sz_testrt_oracles_armed()) {
+    if (need_dump)
+      sz_testrt_ui_idle_reset();
+    else {
+      sz_testrt_ui_idle_check();
+      sz_testrt_ui_idle_snapshot();
+    }
+  }
   if (need_dump && session->debug_dump_path)
     sz_ui_session_write_dump(session, session->debug_dump_path);
   return 1;

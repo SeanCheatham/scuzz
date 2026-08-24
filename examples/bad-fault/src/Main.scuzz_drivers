@@ -1,0 +1,5 @@
+def checkNote(body: String): IO[Unit] =
+  for {
+    _ <- roundTrip(body)
+  } yield ()
+

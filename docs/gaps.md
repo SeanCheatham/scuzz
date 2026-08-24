@@ -53,8 +53,15 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it. Desktop does not yet emit compose from XIM or Cocoa marked text.
 - **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, compiler tests, hello). Full macOS packaging stays `workflow_dispatch`.
 - **Web apps** — not a current target.
-- **Fault injection and schedule exploration** — TestRuntime fakes can fail the Nth operation and drop stub responses. PCT-style schedule exploration bounds race depth for fiber interleavings. See [`vision.md`](vision.md#open-work).
+- **PCT-style schedule exploration** — bound race depth for fiber interleavings. See [`vision.md`](vision.md#open-work).
 - **Oracle idioms in `guide.md`** — model agreement, metamorphic relations, and concrete-fact properties ride the existing property surface. The guide does not yet document them.
+- **Generators for user ADTs** — derive generation and shrinking for records/enums that honor `where`. Parameterized properties and driver args stay Int/String/Bool until this lands.
+- **First-class model agreement** — a `*.scuzz_model` stem-paired file holds a simplified reference. The fuzzer checks agreement after each driver step. Today this is an idiom on the property surface.
+- **Temporal properties** — `Property.always` / `Property.eventually` over a session. `Property.sometimes` is reachability only.
+- **Generation visibility** — `Property.classify` plus coverage in `build/fuzz/summary.toml`. Authors see whether the campaign hit interesting regions.
+- **Stronger mutation operators** — boundary `where` mutations, handler-swap on UI taps, Signal-map identity. Then a mutation score in `summary.toml`.
+- **Swarm testing + corpus hygiene** — vary event-alphabet weights per run. `scuzz fuzz --minimize-corpus` keeps stored entries small.
+- **Nightly deep campaign** — a long-budget run over examples with corpus promotion. CI stays a bounded deterministic campaign.
 
 ### Dogfood IDE
 

@@ -2787,8 +2787,15 @@ static int step_fiber(Sched *s, Fiber *f) {
     }
     {
       void *value = cur->as.delay.thunk(env);
+      const char *fault;
       if (steal)
         delay_env_drop(env);
+      fault = sz_testrt_fault_take_msg();
+      if (fault) {
+        sz_release(value);
+        fiber_fail(s, f, sz_error_new(8, fault));
+        return 0;
+      }
       fiber_set_cur(f, pure_drop(value));
     }
     ready_enqueue(s, f);
@@ -3006,6 +3013,11 @@ static int step_fiber(Sched *s, Fiber *f) {
     cur->as.queue_take = NULL;
     if (!q) {
       fiber_finish(s, f, 0, NULL, sz_error_new(1, "null queue"));
+      return 0;
+    }
+    if (sz_testrt_fault_tick(SZ_FAULT_QUEUE)) {
+      sz_release(q);
+      fiber_fail(s, f, sz_error_new(8, "Queue.take: injected fault"));
       return 0;
     }
     if (q->len > 0) {
@@ -3308,7 +3320,8 @@ static SzIoResult run_io(SzIo *root) {
   } else {
     fiber_cancel(&sched, sched.root);
     result.ok = 0;
-    result.error = sz_error_new(8, "IO deadlock (parked with no wakeup)");
+    result.error =
+        sz_error_new(8, "deadlock: all fibers parked with no timer pending");
   }
 
   g_sched = NULL;
