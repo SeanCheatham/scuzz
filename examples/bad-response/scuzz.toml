@@ -1,0 +1,9 @@
+[package]
+name = "bad-response"
+version = "0.1.0"
+description = "Response claim never holds. scuzz fuzz must fail."
+
+[ui]
+default_runtime = "headless"
+headless_size = [200, 120]
+headless_scale = 1.0

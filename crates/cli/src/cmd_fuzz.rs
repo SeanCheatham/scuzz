@@ -1412,10 +1412,15 @@ fn maybe_promote_coverage(
 }
 
 fn declared_names(project_dir: &Path) -> Vec<String> {
-    lines_nonempty(
+    let mut names = lines_nonempty(
         &std::fs::read_to_string(project_dir.join("build").join("sometimes.declared"))
             .unwrap_or_default(),
-    )
+    );
+    names.extend(lines_nonempty(
+        &std::fs::read_to_string(project_dir.join("build").join("response.declared"))
+            .unwrap_or_default(),
+    ));
+    names
 }
 
 fn reached_names(fuzz_dir: &Path) -> Vec<String> {

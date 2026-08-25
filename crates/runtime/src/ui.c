@@ -1394,6 +1394,8 @@ int sz_ui_pump_sync(SzUiSession *session) {
       sz_property_stash_a11y(sz_string_cstr(views));
       sz_string_free(views);
     }
+    sz_property_stash_last_hit(session->last_hit_seen ? session->last_hit_desc
+                                                      : NULL);
     sz_property_session_step();
   }
   return 1;

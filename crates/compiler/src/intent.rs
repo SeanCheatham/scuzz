@@ -2,7 +2,9 @@
 //! Re-parsed on every check / fuzz compile into in-memory thunks. No generated
 //! `.scuzz`.
 
-use crate::ast::{BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, Param, Program, Type};
+use crate::ast::{
+    BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, IntentResponse, Param, Program, Type, UnOp,
+};
 use crate::overlay::OverlayError;
 use crate::resolve::enum_id;
 use crate::span::{offset_to_line_col, Span};
@@ -132,6 +134,8 @@ pub fn intent_source_from_parts(
 enum SessionClaim {
     Visible { needle: String, eventually: bool },
     Stays { signal: String, n: i64 },
+    Never { needle: String },
+    Response { trigger: String, needle: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -167,6 +171,7 @@ pub fn apply_intents(
 ) -> Result<(), OverlayError> {
     let mut always = Vec::new();
     let mut eventually = Vec::new();
+    let mut responses = Vec::new();
     let mut thunk_i = 0usize;
     let signals = collect_signal_ids(program);
     let mut seen: HashMap<String, (String, Span)> = HashMap::new();
@@ -226,6 +231,35 @@ pub fn apply_intents(
                     let body = stays_pred(*id, n, span);
                     program.defs.push(bool_thunk(&name, body));
                     always.push(name);
+                }
+                SessionClaim::Never { needle } => {
+                    let name = format!("always_{thunk_i}");
+                    thunk_i += 1;
+                    let body = Expr::new(
+                        ExprKind::Unary {
+                            op: UnOp::Not,
+                            expr: Box::new(a11y_has(&needle, span.clone())),
+                        },
+                        span,
+                    );
+                    program.defs.push(bool_thunk(&name, body));
+                    always.push(name);
+                }
+                SessionClaim::Response { trigger, needle } => {
+                    let trig = format!("response_trigger_{thunk_i}");
+                    let resp = format!("response_{thunk_i}");
+                    thunk_i += 1;
+                    program
+                        .defs
+                        .push(bool_thunk(&trig, last_hit_has(&trigger, span.clone())));
+                    program
+                        .defs
+                        .push(bool_thunk(&resp, a11y_has(&needle, span)));
+                    responses.push(IntentResponse {
+                        name: format!("response:{trigger}:{needle}"),
+                        trigger: trig,
+                        response: resp,
+                    });
                 }
             }
         }
@@ -326,6 +360,7 @@ pub fn apply_intents(
     }
     program.intent_always = always;
     program.intent_eventually = eventually;
+    program.intent_response = responses;
     Ok(())
 }
 
@@ -348,6 +383,10 @@ fn session_key(claim: &SessionClaim) -> String {
             format!("visible:{eventually}:{needle}")
         }
         SessionClaim::Stays { signal, n } => format!("stays:{signal}:{n}"),
+        SessionClaim::Never { needle } => format!("never:{needle}"),
+        SessionClaim::Response { trigger, needle } => {
+            format!("response:{trigger}:{needle}")
+        }
     }
 }
 
@@ -465,7 +504,28 @@ fn parse_session_claim(line: &str) -> Option<SessionClaim> {
             eventually: true,
         });
     }
+    if let Some(needle) = strip_quoted(line, "The \"", "\" control is never visible.") {
+        return Some(SessionClaim::Never { needle });
+    }
+    if let Some(claim) = parse_response(line) {
+        return Some(claim);
+    }
     parse_stays(line)
+}
+fn parse_response(line: &str) -> Option<SessionClaim> {
+    const PREFIX: &str = "After a tap on the \"";
+    const MID: &str = "\" control, eventually the \"";
+    const SUFFIX: &str = "\" control is visible.";
+    let rest = line.strip_prefix(PREFIX)?;
+    let (trigger, rest) = rest.split_once(MID)?;
+    let needle = rest.strip_suffix(SUFFIX)?;
+    if trigger.contains('"') || needle.contains('"') || trigger.is_empty() || needle.is_empty() {
+        return None;
+    }
+    Some(SessionClaim::Response {
+        trigger: trigger.to_string(),
+        needle: needle.to_string(),
+    })
 }
 
 fn parse_stays(line: &str) -> Option<SessionClaim> {
@@ -841,6 +901,18 @@ fn a11y_has(needle: &str, span: Span) -> Expr {
     Expr::new(
         ExprKind::Call {
             callee: "Property.a11yHas".into(),
+            args: vec![Expr::new(
+                ExprKind::StrLit(needle.to_string()),
+                span.clone(),
+            )],
+        },
+        span,
+    )
+}
+fn last_hit_has(needle: &str, span: Span) -> Expr {
+    Expr::new(
+        ExprKind::Call {
+            callee: "Property.lastHitHas".into(),
             args: vec![Expr::new(
                 ExprKind::StrLit(needle.to_string()),
                 span.clone(),
@@ -1313,6 +1385,114 @@ mod tests {
             .unwrap();
         assert!(!d.is_driver);
         assert!(matches!(d.ret, Type::Bool));
+    }
+    #[test]
+    fn parses_never_and_response() {
+        let parsed = parse_intent(
+            "The \"text:gone\" control is never visible.\nAfter a tap on the \"button:+1\" control, eventually the \"text:count = 1\" control is visible.\n",
+            "pkg/intent.scuzz_intent",
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.session[0].0,
+            SessionClaim::Never {
+                needle: "text:gone".into()
+            }
+        );
+        assert_eq!(
+            parsed.session[1].0,
+            SessionClaim::Response {
+                trigger: "button:+1".into(),
+                needle: "text:count = 1".into()
+            }
+        );
+    }
+
+    #[test]
+    fn lowers_never_claim() {
+        let mut p = live("");
+        apply(&mut p, "The \"text:gone\" control is never visible.\n").unwrap();
+        assert_eq!(p.intent_always.len(), 1);
+        let d = p
+            .defs
+            .iter()
+            .find(|d| d.module == INTENT_MODULE && d.name == p.intent_always[0])
+            .unwrap();
+        match &d.body.kind {
+            ExprKind::Unary { op, expr } => {
+                assert!(matches!(op, UnOp::Not));
+                match &expr.kind {
+                    ExprKind::Call { callee, .. } => {
+                        assert_eq!(callee, "Property.a11yHas")
+                    }
+                    other => panic!("expected a11yHas call, got {other:?}"),
+                }
+            }
+            other => panic!("expected unary not, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_response_claim() {
+        let mut p = live("");
+        apply(
+            &mut p,
+            "After a tap on the \"button:+1\" control, eventually the \"text:count = 1\" control is visible.\n",
+        )
+        .unwrap();
+        assert_eq!(p.intent_response.len(), 1);
+        let ir = &p.intent_response[0];
+        assert_eq!(ir.name, "response:button:+1:text:count = 1");
+        let trig = p
+            .defs
+            .iter()
+            .find(|d| d.module == INTENT_MODULE && d.name == ir.trigger)
+            .unwrap();
+        assert!(matches!(trig.ret, Type::Bool));
+        match &trig.body.kind {
+            ExprKind::Call { callee, .. } => assert_eq!(callee, "Property.lastHitHas"),
+            other => panic!("expected lastHitHas call, got {other:?}"),
+        }
+        let resp = p
+            .defs
+            .iter()
+            .find(|d| d.module == INTENT_MODULE && d.name == ir.response)
+            .unwrap();
+        match &resp.body.kind {
+            ExprKind::Call { callee, .. } => assert_eq!(callee, "Property.a11yHas"),
+            other => panic!("expected a11yHas call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_response_claim_fails() {
+        let mut p = live("");
+        let err = apply_intents(
+            &mut p,
+            &[
+                pkg_intent(
+                    "After a tap on the \"button:+1\" control, eventually the \"text:a\" control is visible.\n",
+                ),
+                pkg_intent(
+                    "After a tap on the \"button:+1\" control, eventually the \"text:a\" control is visible.\n",
+                ),
+            ],
+            &[main_unit()],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("duplicate claim"), "{err}");
+    }
+
+    #[test]
+    fn response_and_visible_same_needle_do_not_collide() {
+        let mut p = live("");
+        apply(
+            &mut p,
+            "The \"text:count = 1\" control is visible.\nAfter a tap on the \"button:+1\" control, eventually the \"text:count = 1\" control is visible.\n",
+        )
+        .unwrap();
+        assert_eq!(p.intent_always.len(), 1);
+        assert_eq!(p.intent_response.len(), 1);
     }
 
     #[test]

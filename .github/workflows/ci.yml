@@ -400,6 +400,7 @@ jobs:
           cargo run -p scuzz -- test examples/bad-adt
           cargo run -p scuzz -- check examples/bad-sched
           cargo run -p scuzz -- test examples/bad-sched
+          cargo run -p scuzz -- check examples/bad-response
           if cargo run -p scuzz -- check examples/bad-intent; then
             echo "empty intent should fail check" && exit 1
           fi
@@ -532,6 +533,13 @@ jobs:
           grep -v -e schedule_seed -e pct_d -e pct_k examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad-sched-fifo.toml
           if ! cargo run -p scuzz -- fuzz --replay /tmp/bad-sched-fifo.toml examples/bad-sched; then
             echo "FIFO replay (no schedule_seed) should pass" && exit 1
+          fi
+          if cargo run -p scuzz -- fuzz --iterations 8 examples/bad-response; then
+            echo "fuzz should have found the response failure" && exit 1
+          fi
+          test -f examples/bad-response/build/fuzz/repro.toml
+          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-response; then
+            echo "corpus-only should pin the bad-response failure" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
