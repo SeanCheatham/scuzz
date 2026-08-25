@@ -496,12 +496,31 @@ jobs:
           test -f /tmp/scuzz-mine/build/signals.txt
           cargo run -p scuzz -- mine /tmp/scuzz-mine | tee /tmp/mine.out
           grep -q 'The count stays at 0 or more.' /tmp/mine.out
+          grep -q 'min=' /tmp/mine.out
+          grep -q 'max=' /tmp/mine.out
+          grep -q 'kills=' /tmp/mine.out
           mid=$(awk '/count stays at 0 or more/ {print $1; exit}' /tmp/mine.out)
+          cargo run -p scuzz -- mine --json /tmp/scuzz-mine | tee /tmp/mine.json
+          python3 -c 'import json,sys; json.load(open("/tmp/mine.json"))'
+          jid=$(python3 -c 'import json; a=json.load(open("/tmp/mine.json")); print(next(x["id"] for x in a if x.get("sentence") and "stays at 0" in x["sentence"]))')
+          cp /tmp/scuzz-mine/intent.scuzz_intent /tmp/mine-intent.bak
+          cargo run -p scuzz -- mine --dismiss "$jid" /tmp/scuzz-mine
+          grep -q "dismissed: $jid" /tmp/scuzz-mine/intent.scuzz_intent
+          cargo run -p scuzz -- mine /tmp/scuzz-mine | tee /tmp/mine-dismiss.out
+          if grep -q 'count stays at 0' /tmp/mine-dismiss.out; then echo "dismissed candidate should not list" && exit 1; fi
+          mv /tmp/mine-intent.bak /tmp/scuzz-mine/intent.scuzz_intent
           cargo run -p scuzz -- mine --always "$mid" /tmp/scuzz-mine
           grep -q 'The count stays at 0 or more.' /tmp/scuzz-mine/intent.scuzz_intent
           cargo run -p scuzz -- fuzz --iterations 8 /tmp/scuzz-mine
           cargo run -p scuzz -- mine /tmp/scuzz-mine | tee /tmp/mine2.out
           if grep -q 'count stays at 0' /tmp/mine2.out; then echo "accepted claim should not list again" && exit 1; fi
+          rm -rf /tmp/scuzz-mine-neg
+          cp -R /tmp/scuzz-mine /tmp/scuzz-mine-neg
+          grep -v 'stays at 0' /tmp/scuzz-mine-neg/intent.scuzz_intent > /tmp/scuzz-mine-neg/intent.tmp
+          mv /tmp/scuzz-mine-neg/intent.tmp /tmp/scuzz-mine-neg/intent.scuzz_intent
+          python3 -c 'from pathlib import Path; p=Path("/tmp/scuzz-mine-neg/src/Main.scuzz"); t=p.read_text(); t=t.replace("Signal.get(count) + 1","Signal.get(count) - 1"); p.write_text(t)'
+          cargo run -p scuzz -- mine /tmp/scuzz-mine-neg | tee /tmp/mine-neg.out
+          if grep -q 'count stays at 0' /tmp/mine-neg.out; then echo "stale stays-at-0 should not list after decrement probe" && exit 1; fi
           if cargo run -p scuzz -- fuzz --no-fail-fast --iterations 8 examples/bad-example; then
             echo "fuzz should have found the property failure" && exit 1
           fi

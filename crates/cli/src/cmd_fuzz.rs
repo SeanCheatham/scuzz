@@ -19,13 +19,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// Shared fuzz target: executable, output directory, project directory, UI size.
-struct FuzzCtx {
+pub(crate) struct FuzzCtx {
     exe: PathBuf,
     fuzz_dir: PathBuf,
     project_dir: PathBuf,
     w: i32,
     h: i32,
-    is_ui: bool,
+    pub(crate) is_ui: bool,
 }
 
 /// UI elements found by the probe. Drives the event alphabet.
@@ -159,7 +159,8 @@ fn budget_split(n: i64) -> (i64, i64) {
     }
 }
 
-fn prepare_fuzz(path: &Path) -> Result<FuzzCtx> {
+/// Compile the verify graph. Does not clear campaign traces.
+pub(crate) fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
@@ -167,8 +168,6 @@ fn prepare_fuzz(path: &Path) -> Result<FuzzCtx> {
     let out = compile_project(&compile_opts(&project_dir, Path::new("build"), true, true)?)?;
     let fuzz_dir = project_dir.join("build").join("fuzz");
     std::fs::create_dir_all(&fuzz_dir)?;
-    std::fs::write(fuzz_dir.join("sometimes.campaign"), "")?;
-    std::fs::write(fuzz_dir.join("trace.campaign"), "")?;
     let w = manifest.ui.as_ref().map(|u| u.width()).unwrap_or(200);
     let h = manifest.ui.as_ref().map(|u| u.height()).unwrap_or(120);
     Ok(FuzzCtx {
@@ -179,6 +178,85 @@ fn prepare_fuzz(path: &Path) -> Result<FuzzCtx> {
         h: if is_ui { h } else { 0 },
         is_ui,
     })
+}
+
+fn prepare_fuzz(path: &Path) -> Result<FuzzCtx> {
+    let ctx = compile_fuzz_ctx(path)?;
+    std::fs::write(ctx.fuzz_dir.join("sometimes.campaign"), "")?;
+    std::fs::write(ctx.fuzz_dir.join("trace.campaign"), "")?;
+    Ok(ctx)
+}
+
+/// Run a UI event list under TestRuntime. Does not merge campaign traces.
+pub(crate) fn run_mine_ui(ctx: &FuzzCtx, events: &[String]) -> Result<(i32, String)> {
+    let out_dir = ctx.fuzz_dir.join("mine");
+    std::fs::create_dir_all(&out_dir)?;
+    let code = mutate_exec_ui_events(&ctx.exe, &out_dir, ctx.w, ctx.h, events, "0", "0")?;
+    let dump = std::fs::read_to_string(out_dir.join("dump.txt")).unwrap_or_default();
+    Ok((code, dump))
+}
+
+/// Replay program- or oracle-mode mutants at `sites` (idle + stored corpus).
+/// Empty `sites` returns `(0, 0)` and does not compile.
+pub(crate) fn mutate_score_sites(path: &Path, sites: &[i64], oracles: bool) -> Result<(i64, i64)> {
+    if sites.is_empty() {
+        return Ok((0, 0));
+    }
+    let ctx = compile_fuzz_ctx(path)?;
+    let (prog, _) = load_verify_program(&ctx.project_dir)?;
+    let mode = if oracles {
+        MutateMode::Oracles
+    } else {
+        MutateMode::Program
+    };
+    let entries = load_corpus(&ctx.project_dir)?;
+    let idle_sched = "0";
+    let mut killed = 0i64;
+    for site in sites {
+        let out_dir = ctx
+            .project_dir
+            .join("build")
+            .join("fuzz")
+            .join("mine")
+            .join("mutate")
+            .join(site.to_string());
+        std::fs::create_dir_all(&out_dir)?;
+        let mutant = mutate_apply_mode(prog.clone(), *site as i32, mode);
+        let opts = compile_opts(&ctx.project_dir, &out_dir, false, true)?;
+        let compiled = compile_prepared_program(&opts, mutant)?;
+        let code = if ctx.is_ui {
+            let corpus: Vec<UiKeep> = entries
+                .iter()
+                .map(|(_, r)| UiKeep {
+                    sched: r.schedule_seed.clone().unwrap_or_default(),
+                    fault: repro_fault(r),
+                    events: r.events.clone(),
+                })
+                .collect();
+            mutate_exec_ui(
+                &compiled.executable,
+                &out_dir,
+                ctx.w,
+                ctx.h,
+                &corpus,
+                idle_sched,
+            )?
+        } else {
+            let corpus: Vec<IoKeep> = entries
+                .iter()
+                .map(|(_, r)| IoKeep {
+                    sched: r.schedule_seed.clone().unwrap_or_default(),
+                    fault: repro_fault(r),
+                    drives: r.events.clone(),
+                })
+                .collect();
+            mutate_exec_io(&compiled.executable, &out_dir, &corpus, idle_sched)?
+        };
+        if code != 0 {
+            killed += 1;
+        }
+    }
+    Ok((killed, sites.len() as i64))
 }
 
 fn fuzz_run(
