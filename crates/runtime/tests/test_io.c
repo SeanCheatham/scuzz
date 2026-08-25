@@ -8989,6 +8989,34 @@ int main(void) {
     unlink(path);
   }
 
+  /* Unclaimed State field variation dump. */
+  {
+    char path[] = "/tmp/scuzz-state-varied-test.txt";
+    FILE *f;
+    char line[64];
+    int saw_drive = 0;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_STATE_VARIED_DUMP", path, 1);
+    sz_property_session_reset();
+    sz_timeline_set_drive("drive a");
+    sz_property_session_step();
+    sz_timeline_set_drive("drive b");
+    sz_property_session_step();
+    sz_property_session_end();
+    f = fopen(path, "r");
+    assert(f);
+    while (fgets(line, (int)sizeof line, f)) {
+      if (strstr(line, "drive"))
+        saw_drive = 1;
+    }
+    fclose(f);
+    assert(saw_drive);
+    unsetenv("SCUZZ_STATE_VARIED_DUMP");
+    unsetenv("SCUZZ_TESTRT");
+    sz_property_session_reset();
+    unlink(path);
+  }
+
   /* Session always / eventually thunks. */
   {
     pid_t pid;

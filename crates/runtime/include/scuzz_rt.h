@@ -865,6 +865,7 @@ SzIo *sz_property_assert(SzString *name, int64_t ok);
 void sz_property_check(SzString *name, int64_t ok);
 void sz_property_sometimes(SzString *name);
 void sz_property_sometimes_flush(void);
+void sz_timeline_varied_flush(void);
 void sz_property_classify(SzString *name, int64_t hit);
 void sz_property_classify_flush(void);
 void sz_property_always_register(SzString *name, void *fn);
