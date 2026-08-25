@@ -1290,6 +1290,64 @@ static int take_inject(SzUiSession *session, char **out) {
   return 1;
 }
 
+/* Property-mining trace. Under SCUZZ_TESTRT=1 with SCUZZ_TRACE_DUMP set,
+ * every pump appends one block to the named file. The env lookups cache on
+ * the first call. Writes stop at 1 MiB per process. A block that would
+ * cross the cap is dropped whole. */
+#define SZ_TRACE_CAP 1048576
+
+static void trace_pump_dump(SzUiSession *session) {
+  static int env_checked = 0;
+  static int trace_on = 0;
+  static const char *trace_path = NULL;
+  static size_t trace_bytes = 0;
+  SzString *signals;
+  SzString *views;
+  const char *sig_text;
+  const char *view_text;
+  const char *hit;
+  size_t block_len;
+  FILE *f;
+  if (!env_checked) {
+    const char *tr = getenv("SCUZZ_TESTRT");
+    trace_path = getenv("SCUZZ_TRACE_DUMP");
+    trace_on = tr && tr[0] == '1' && trace_path && trace_path[0];
+    env_checked = 1;
+  }
+  if (!trace_on || trace_bytes >= SZ_TRACE_CAP)
+    return;
+  signals = sz_signal_dump();
+  views = session->root ? sz_view_a11y_dump(session->root)
+                        : sz_string_from_cstr("");
+  sig_text = sz_string_cstr(signals);
+  view_text = sz_string_cstr(views);
+  hit = (session->last_hit_seen && session->last_hit_desc)
+            ? session->last_hit_desc
+            : NULL;
+  block_len = strlen("== pump\n[signals]\n") + strlen(sig_text) +
+              strlen("[views]\n") + strlen(view_text) +
+              strlen("[last_hit]\n") + (hit ? strlen(hit) + 1 : 0);
+  if (trace_bytes + block_len > SZ_TRACE_CAP) {
+    sz_string_free(signals);
+    sz_string_free(views);
+    return;
+  }
+  f = fopen(trace_path, "a");
+  if (!f) {
+    sz_string_free(signals);
+    sz_string_free(views);
+    return;
+  }
+  fprintf(f, "== pump\n[signals]\n%s[views]\n%s[last_hit]\n", sig_text,
+          view_text);
+  if (hit)
+    fprintf(f, "%s\n", hit);
+  fclose(f);
+  trace_bytes += block_len;
+  sz_string_free(signals);
+  sz_string_free(views);
+}
+
 int sz_ui_pump_sync(SzUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
@@ -1398,6 +1456,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
                                                       : NULL);
     sz_property_session_step();
   }
+  trace_pump_dump(session);
   return 1;
 }
 

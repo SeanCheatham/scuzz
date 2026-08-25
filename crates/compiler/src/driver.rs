@@ -1,7 +1,9 @@
 use crate::ast::Program;
 use crate::codegen::emit_llvm;
 use crate::fuzz::{classify_declared_text, response_declared_text, sometimes_declared_text};
-use crate::intent::{intent_source_from_parts, place_intent_file, IntentSource, SourceUnit};
+use crate::intent::{
+    intent_source_from_parts, place_intent_file, signal_table_text, IntentSource, SourceUnit,
+};
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
@@ -185,6 +187,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
     let declared = sometimes_declared_text(&program);
     let classify = classify_declared_text(&program);
     let response_declared = response_declared_text(&program);
+    let signals = signal_table_text(&program);
     let mut program = program;
     crate::typ::inject_builtin_enums(&mut program.enums);
     let program = lower_program(program);
@@ -206,6 +209,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
         std::fs::write(opts.out_dir.join("sometimes.declared"), declared)?;
         std::fs::write(opts.out_dir.join("classify.declared"), classify)?;
         std::fs::write(opts.out_dir.join("response.declared"), response_declared)?;
+        std::fs::write(opts.out_dir.join("signals.txt"), signals)?;
     } else {
         let _ = std::fs::remove_file(opts.out_dir.join("drivers.txt"));
     }

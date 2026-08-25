@@ -1771,6 +1771,25 @@ scroll:scroll
             "response:button:+1:text:count = 1\n"
         );
     }
+    #[test]
+    fn signal_table_text_lists_named_signals_by_id() {
+        let p = parse(
+            r#"
+@main def main: IO[Unit] =
+  for {
+    count = Signal.int(0)
+    _ = Signal.int(99)
+    label = Signal.str("x")
+  } yield ()
+"#,
+        )
+        .unwrap();
+        // The unnamed signal still takes id 1, so `label` lands on id 2.
+        assert_eq!(
+            crate::intent::signal_table_text(&p),
+            "0\tcount\tint\n2\tlabel\tother\n"
+        );
+    }
 
     #[test]
     fn classify_declared_first_seen() {

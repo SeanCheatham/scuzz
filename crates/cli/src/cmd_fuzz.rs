@@ -168,7 +168,7 @@ fn prepare_fuzz(path: &Path) -> Result<FuzzCtx> {
     let fuzz_dir = project_dir.join("build").join("fuzz");
     std::fs::create_dir_all(&fuzz_dir)?;
     std::fs::write(fuzz_dir.join("sometimes.campaign"), "")?;
-    std::fs::write(fuzz_dir.join("classify.campaign"), "")?;
+    std::fs::write(fuzz_dir.join("trace.campaign"), "")?;
     let w = manifest.ui.as_ref().map(|u| u.width()).unwrap_or(200);
     let h = manifest.ui.as_ref().map(|u| u.height()).unwrap_or(120);
     Ok(FuzzCtx {
@@ -877,6 +877,7 @@ fn mutate_exec_ui_events(
             dump: &dump,
             width: w,
             height: h,
+            trace: None,
         }),
         None,
     )
@@ -1090,7 +1091,7 @@ fn shrink_sched(
     Ok(schedule_seed.to_string())
 }
 
-fn repro_fault(repro: &Repro) -> String {
+pub(crate) fn repro_fault(repro: &Repro) -> String {
     repro
         .fault_seed
         .clone()
@@ -1354,7 +1355,7 @@ fn replay_stored_corpus(
     Ok(())
 }
 
-fn promote_to_corpus(
+pub(crate) fn promote_to_corpus(
     project_dir: &Path,
     seed: i64,
     schedule_seed: &str,
@@ -1436,6 +1437,18 @@ fn merge_sometimes(reached_path: &Path, campaign_path: &Path) -> Result<()> {
         push_name(&mut camp, n);
     }
     std::fs::write(campaign_path, script_text(&camp))?;
+    Ok(())
+}
+/// Append one run's trace blocks to the campaign trace. `== run` starts a run.
+fn merge_trace(trace_path: &Path, campaign_path: &Path) -> Result<()> {
+    let run = std::fs::read_to_string(trace_path).unwrap_or_default();
+    let mut camp = std::fs::read_to_string(campaign_path).unwrap_or_default();
+    camp.push_str("== run\n");
+    camp.push_str(&run);
+    if !camp.ends_with('\n') {
+        camp.push('\n');
+    }
+    std::fs::write(campaign_path, camp)?;
     Ok(())
 }
 
@@ -1696,9 +1709,11 @@ fn fuzz_exec(
     let script = fuzz_dir.join("script.txt");
     let dump = fuzz_dir.join("dump.txt");
     let reached = fuzz_dir.join("sometimes.reached");
+    let trace = fuzz_dir.join("trace.txt");
     std::fs::write(&script, script_text(events))?;
     std::fs::write(&dump, "")?;
     std::fs::write(&reached, "")?;
+    std::fs::write(&trace, "")?;
     std::fs::write(fuzz_dir.join("classify.dump"), "")?;
     let code = run_testrt(
         exe,
@@ -1710,10 +1725,12 @@ fn fuzz_exec(
             dump: &dump,
             width: w,
             height: h,
+            trace: Some(&trace),
         }),
         None,
     )?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
+    merge_trace(&trace, &fuzz_dir.join("trace.campaign"))?;
     merge_classify(
         &fuzz_dir.join("classify.dump"),
         &fuzz_dir.join("classify.campaign"),
@@ -1745,6 +1762,30 @@ fn fuzz_exec_io(
         &fuzz_dir.join("classify.campaign"),
     )?;
     Ok(code)
+}
+
+/// Replay one UI event list under TestRuntime. Returns the exit code and the
+/// a11y dump path. `scuzz mine` boundary decisions replay truncated scripts here.
+pub fn replay_ui_events(
+    path: &Path,
+    events: &[String],
+    schedule_seed: &str,
+    fault_seed: &str,
+) -> Result<(i32, PathBuf)> {
+    let ctx = prepare_fuzz(path)?;
+    if !ctx.is_ui {
+        bail!("scuzz mine: package has no [ui] section");
+    }
+    let code = fuzz_exec(
+        &ctx.exe,
+        &ctx.fuzz_dir,
+        ctx.w,
+        ctx.h,
+        events,
+        schedule_seed,
+        fault_seed,
+    )?;
+    Ok((code, ctx.fuzz_dir.join("dump.txt")))
 }
 
 fn read_drivers(project_dir: &Path) -> Vec<String> {
