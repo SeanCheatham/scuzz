@@ -1054,6 +1054,16 @@ pub fn corpus_keep(reached: &[String], old_camp: &[String], dump: &str, seen: &[
     !missing_from(reached, old_camp).is_empty() || !seen.iter().any(|d| d == dump)
 }
 
+/// Silent live/verify split: observation differs and no sim overlay declares it.
+pub fn live_verify_split(live: &str, verify: &str, has_sim: bool) -> bool {
+    live != verify && !has_sim
+}
+
+/// Drive lines are verify-only. Skip live/verify dump compare when present.
+pub fn script_has_drive(events: &[String]) -> bool {
+    events.iter().any(|e| e.starts_with("drive "))
+}
+
 pub fn lines_nonempty(text: &str) -> Vec<String> {
     text.lines()
         .filter(|l| !l.is_empty())
@@ -1724,6 +1734,15 @@ scroll:scroll
         uniq.dedup();
         assert_eq!(uniq.len(), 5);
         assert!(sites.iter().all(|s| *s >= 0 && *s < 20));
+    }
+
+    #[test]
+    fn live_verify_split_is_silent_without_sim() {
+        assert!(!live_verify_split("a", "a", false));
+        assert!(!live_verify_split("a", "b", true));
+        assert!(live_verify_split("a", "b", false));
+        assert!(!script_has_drive(&["tap 0".into(), "pump 1".into()]));
+        assert!(script_has_drive(&["tap 0".into(), "drive bump 1".into()]));
     }
 
     #[test]

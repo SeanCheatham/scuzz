@@ -72,6 +72,7 @@ static SzIo *attempt_drop(SzIo *inner) {
  * sz_retain / sz_release can read the header without leaving the block. */
 #define SZ_ALLOC_MAGIC 0x535A414Cu /* 'SZAL' */
 #define SZ_RC_MAGIC 0x535A5243u    /* 'SZRC' */
+#define SZ_RC_TOMB 0x535A544Du     /* 'SZTM' */
 
 typedef struct SzRcHdr {
   uint32_t magic;
@@ -343,11 +344,52 @@ void sz_free(void *ptr) {
   free(raw);
 }
 
+/* Last RC release: drop live stats. Under TestRuntime, keep a tombstone for
+ * pairing kinds so a second release fails. IO and stream nodes still free. */
+static int pairing_kind(uint32_t kind) {
+  return kind == SZ_RC_STRING || kind == SZ_RC_RESOURCE;
+}
+
+static void sz_rc_retire(void *ptr) {
+  SzRcHdr *h;
+  size_t *raw;
+  size_t n;
+  if (!ptr)
+    return;
+  h = sz_rc_hdr(ptr);
+  if (!sz_testrt_oracles_armed() || !pairing_kind(h->kind)) {
+    sz_free(ptr);
+    return;
+  }
+  raw = ((size_t *)h) - 1;
+  n = *raw;
+  live_unlink(h);
+  kind_sub(h->kind, n);
+  if (g_live_count > 0)
+    g_live_count -= 1;
+  if (g_live_bytes >= n)
+    g_live_bytes -= n;
+  else
+    g_live_bytes = 0;
+  h->magic = SZ_RC_TOMB;
+  h->rc = 0;
+}
+
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count) {
   if (live_bytes)
     *live_bytes = g_live_bytes;
   if (live_count)
     *live_count = g_live_count;
+}
+
+uint64_t sz_alloc_rc_sum(void) {
+  uint64_t n = 0;
+  SzRcHdr *h;
+  for (h = g_live; h; h = h->next) {
+    if (h->magic == SZ_RC_MAGIC)
+      n += h->rc;
+  }
+  return n;
 }
 
 void sz_alloc_kind_stats(uint32_t kind, size_t *bytes, size_t *count) {
@@ -440,8 +482,16 @@ void sz_retain(void *ptr) {
 void sz_release(void *ptr) {
   SzRcHdr *h;
   uint32_t kind;
-  if (!sz_is_rc(ptr))
+  if (!sz_is_rc(ptr)) {
+    uintptr_t p = (uintptr_t)ptr;
+    if (sz_testrt_oracles_armed() && ptr && p >= 4096 && (p & 7) == 0 &&
+        sz_hdr_readable(ptr) && sz_rc_hdr(ptr)->magic == SZ_RC_TOMB) {
+      fprintf(stderr, "scuzz: unpaired release: double release (%s)\n",
+              sz_alloc_kind_name(sz_rc_hdr(ptr)->kind));
+      sz_panic("unpaired release: double release");
+    }
     return;
+  }
   h = sz_rc_hdr(ptr);
   if (h->rc > 1) {
     h->rc -= 1;
@@ -466,7 +516,7 @@ void sz_release(void *ptr) {
       xs->head = NULL;
       xs->tail = NULL;
       cell->magic = 0;
-      sz_free(xs);
+      sz_rc_retire(xs);
       sz_release(head);
       if (!sz_is_rc(tail))
         return;
@@ -481,7 +531,7 @@ void sz_release(void *ptr) {
     SzAdt *a = (SzAdt *)ptr;
     void *payload = a->payload;
     a->payload = NULL;
-    sz_free(ptr);
+    sz_rc_retire(ptr);
     sz_release(payload);
     return;
   }
@@ -495,7 +545,7 @@ void sz_release(void *ptr) {
     m->val = NULL;
     m->left = NULL;
     m->right = NULL;
-    sz_free(ptr);
+    sz_rc_retire(ptr);
     sz_release(k);
     sz_release(v);
     sz_release(l);
@@ -594,7 +644,7 @@ void sz_release(void *ptr) {
       st->right = NULL;
       st->env = NULL;
       cell->magic = 0;
-      sz_free(st);
+      sz_rc_retire(st);
       if (tag == SZ_ST_CONS || tag == SZ_ST_EVAL) {
         sz_release(left);
         if (!sz_is_rc(right))
@@ -622,7 +672,7 @@ void sz_release(void *ptr) {
     SzIo *acq = r->acquire;
     r->release_env = NULL;
     r->acquire = NULL;
-    sz_free(ptr);
+    sz_rc_retire(ptr);
     sz_release(env);
     sz_release(acq);
     return;
@@ -631,7 +681,7 @@ void sz_release(void *ptr) {
     SzError *e = (SzError *)ptr;
     SzString *msg = e->message;
     e->message = NULL;
-    sz_free(ptr);
+    sz_rc_retire(ptr);
     sz_release(msg);
     return;
   }
@@ -639,7 +689,7 @@ void sz_release(void *ptr) {
     SzRef *r = (SzRef *)ptr;
     void *v = r->value;
     r->value = NULL;
-    sz_free(ptr);
+    sz_rc_retire(ptr);
     sz_release(v);
     return;
   }
@@ -669,7 +719,7 @@ void sz_release(void *ptr) {
     SzError *err = d->error;
     d->value = NULL;
     d->error = NULL;
-    sz_free(ptr);
+    sz_rc_retire(ptr);
     if (ok)
       sz_release(v);
     else if (bad)
@@ -681,12 +731,12 @@ void sz_release(void *ptr) {
     if (e->is_right) {
       void *v = e->as.right;
       e->as.right = NULL;
-      sz_free(ptr);
+      sz_rc_retire(ptr);
       sz_release(v);
     } else {
       SzError *err = e->as.left;
       e->as.left = NULL;
-      sz_free(ptr);
+      sz_rc_retire(ptr);
       sz_release(err);
     }
     return;
@@ -697,7 +747,7 @@ void sz_release(void *ptr) {
     void *r = p->right;
     p->left = NULL;
     p->right = NULL;
-    sz_free(ptr);
+    sz_rc_retire(ptr);
     sz_release(l);
     sz_release(r);
     return;
@@ -707,7 +757,7 @@ void sz_release(void *ptr) {
   default:
     break;
   }
-  sz_free(ptr);
+  sz_rc_retire(ptr);
 }
 
 /* --- strings ------------------------------------------------------------- */
@@ -2508,9 +2558,16 @@ static void fiber_cancel(Sched *s, Fiber *f) {
     nested = next;
   }
   {
-    SzIo *from_cur = take_unstepped_ensure(f->cur);
+    SzIo *from_cur = sz_testrt_skip_unstepped_ensure()
+                         ? NULL
+                         : take_unstepped_ensure(f->cur);
     SzIo *from_stack = drain_ensure_finalizers(f->stack);
     f->stack = NULL;
+    if (sz_testrt_oracles_armed() && !from_cur && f->cur &&
+        f->cur->tag == SZ_IO_ENSURE && f->cur->as.ensure.finalizer) {
+      fprintf(stderr, "scuzz: skipped finalizer: cancel did not run IO.ensure\n");
+      sz_panic("skipped finalizer: cancel did not run IO.ensure");
+    }
     if (from_cur && from_stack)
       cleanup = fm_drop(from_cur, ignore_then_io, from_stack);
     else
@@ -3393,7 +3450,8 @@ static SzIoResult run_io(SzIo *root) {
       continue;
     }
     if (sched.root->state == FIB_DONE || sched.root->state == FIB_CANCELLED) {
-      cancel_forked_orphans(&sched);
+      if (!sz_testrt_skip_orphan_cancel())
+        cancel_forked_orphans(&sched);
       if (sched.ready_head)
         continue;
       break;
@@ -3404,21 +3462,35 @@ static SzIoResult run_io(SzIo *root) {
     break;
   }
 
-  if (sched.root->state == FIB_DONE && sched.root->result_ok) {
-    result.ok = 1;
-    result.value = sched.root->result_value;
-    sched.root->result_value = NULL;
-  } else if (sched.root->state == FIB_DONE) {
-    result.ok = 0;
-    result.error = sched.root->result_error;
-    sched.root->result_error = NULL;
-    if (!result.error)
-      result.error = sz_error_new(1, "IO failed");
-  } else {
-    fiber_cancel(&sched, sched.root);
-    result.ok = 0;
-    result.error =
-        sz_error_new(8, "deadlock: all fibers parked with no timer pending");
+  {
+    int root_settled = sched.root->state == FIB_DONE ||
+                       sched.root->state == FIB_CANCELLED;
+    if (sched.root->state == FIB_DONE && sched.root->result_ok) {
+      result.ok = 1;
+      result.value = sched.root->result_value;
+      sched.root->result_value = NULL;
+    } else if (sched.root->state == FIB_DONE) {
+      result.ok = 0;
+      result.error = sched.root->result_error;
+      sched.root->result_error = NULL;
+      if (!result.error)
+        result.error = sz_error_new(1, "IO failed");
+    } else {
+      fiber_cancel(&sched, sched.root);
+      result.ok = 0;
+      result.error =
+          sz_error_new(8, "deadlock: all fibers parked with no timer pending");
+    }
+    if (sz_testrt_oracles_armed() && root_settled) {
+      Fiber *f;
+      for (f = sched.all_fibers; f; f = f->all_next) {
+        if (f->state != FIB_DONE && f->state != FIB_CANCELLED) {
+          fprintf(stderr,
+                  "scuzz: leftover park: fiber still parked at quiescence\n");
+          sz_panic("leftover park: fiber still parked at quiescence");
+        }
+      }
+    }
   }
 
   g_sched = NULL;
@@ -3461,8 +3533,9 @@ static void *sz_runtime_main_worker(void *arg) {
     sz_sys_set_args(a->argc, a->argv);
   {
     const char *tr = getenv("SCUZZ_TESTRT");
-    if (tr && tr[0] == '1')
+    if (tr && tr[0] == '1') {
       sz_testrt_install();
+    }
   }
   SzIoResult r = sz_io_unsafe_run(a->program);
   if (!r.ok) {

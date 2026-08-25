@@ -2,13 +2,14 @@ use crate::support::{compile_opts, resolve_dir, run_testrt, TestrtUi};
 use anyhow::{bail, Context, Result};
 use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::compile_project;
-use scuzz_compiler::driver::load_verify_program;
+use scuzz_compiler::driver::{load_verify_program, resolve_project};
 use scuzz_compiler::fuzz::{
     corpus_entry_name_fault, corpus_keep, corpus_push, corpus_sorted_names, count_dump_section,
     decode_fault_seed, decode_sched_seed, drive_line_shrinks, drive_script_lines, dump_push,
     encode_fault_plan, encode_sched_plan, exhaust_alphabet, fault_seed_key, fuzz_mutate_sites,
-    fuzz_pick_fault, fuzz_pick_sched, fuzz_pick_script, lines_nonempty, missing_from, parse_repro,
-    repro_text, script_text, FaultMode, Repro, PCT_D_MIN, PCT_K_MAX,
+    fuzz_pick_fault, fuzz_pick_sched, fuzz_pick_script, lines_nonempty, live_verify_split,
+    missing_from, parse_repro, repro_text, script_has_drive, script_text, FaultMode, Repro,
+    PCT_D_MIN, PCT_K_MAX,
 };
 use scuzz_compiler::manifest::load_manifest;
 use scuzz_compiler::mutate::{
@@ -21,11 +22,13 @@ use std::process::ExitCode;
 /// Shared fuzz target: executable, output directory, project directory, UI size.
 pub(crate) struct FuzzCtx {
     exe: PathBuf,
+    live_exe: PathBuf,
     fuzz_dir: PathBuf,
     project_dir: PathBuf,
     w: i32,
     h: i32,
     pub(crate) is_ui: bool,
+    has_sim: bool,
 }
 
 /// UI elements found by the probe. Drives the event alphabet.
@@ -159,12 +162,19 @@ fn budget_split(n: i64) -> (i64, i64) {
     }
 }
 
-/// Compile the verify graph. Does not clear campaign aggregates.
+/// Compile the live graph, then the verify graph. Does not clear campaign aggregates.
 pub(crate) fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
     let is_ui = manifest.ui.is_some();
+    let has_sim = resolve_project(&project_dir)?.has_sim();
+    let live = compile_project(&compile_opts(
+        &project_dir,
+        Path::new("build/live"),
+        true,
+        false,
+    )?)?;
     let out = compile_project(&compile_opts(&project_dir, Path::new("build"), true, true)?)?;
     let fuzz_dir = project_dir.join("build").join("fuzz");
     std::fs::create_dir_all(&fuzz_dir)?;
@@ -172,11 +182,13 @@ pub(crate) fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
     let h = manifest.ui.as_ref().map(|u| u.height()).unwrap_or(120);
     Ok(FuzzCtx {
         exe: out.executable,
+        live_exe: live.executable,
         fuzz_dir,
         project_dir,
         w: if is_ui { w } else { 0 },
         h: if is_ui { h } else { 0 },
         is_ui,
+        has_sim,
     })
 }
 
@@ -265,6 +277,7 @@ fn fuzz_replay(path: &Path, replay_path: &Path) -> Result<ExitCode> {
         fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, &sched, &fault, &repro.events)?
     };
     if code == 0 {
+        check_live_verify(&ctx, &repro.events, &sched, &fault)?;
         println!("fuzz replay ok (no failure)");
         Ok(ExitCode::SUCCESS)
     } else {
@@ -287,6 +300,7 @@ fn fuzz_ui_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
         write_fail_summary(ctx, camp, 0)?;
         bail!("fuzz probe failed: app fails under TestRuntime before any event");
     }
+    check_live_verify(ctx, &[], &camp.seed.to_string(), "0")?;
     let dump = std::fs::read_to_string(ctx.fuzz_dir.join("dump.txt")).unwrap_or_default();
     let n_taps = count_dump_section(&dump, "[taps]");
     let n_fields = count_dump_section(&dump, "[fields]");
@@ -360,6 +374,7 @@ fn fuzz_io_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
             )?;
             continue;
         }
+        check_live_verify(ctx, &drives, &sched, &fault)?;
         let reached = lines_nonempty(
             &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
         );
@@ -481,6 +496,7 @@ fn consider_ui_script(
         )?;
         return Ok(());
     }
+    check_live_verify(ctx, events, &sched.to_string(), &fault)?;
     let reached = lines_nonempty(
         &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
     );
@@ -1375,6 +1391,7 @@ fn replay_stored_corpus(
             }
             continue;
         }
+        check_live_verify(ctx, &repro.events, &sched, &fault)?;
         if let Some(search) = ui.as_mut() {
             let dump = std::fs::read_to_string(ctx.fuzz_dir.join("dump.txt")).unwrap_or_default();
             dump_push(&mut search.seen, dump);
@@ -1721,6 +1738,32 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
         classify_toml = classify_toml,
     );
     std::fs::write(ctx.fuzz_dir.join("summary.toml"), text)?;
+    Ok(())
+}
+
+fn check_live_verify(ctx: &FuzzCtx, events: &[String], sched: &str, fault: &str) -> Result<()> {
+    if script_has_drive(events) {
+        return Ok(());
+    }
+    let verify_dump = std::fs::read_to_string(ctx.fuzz_dir.join("dump.txt")).unwrap_or_default();
+    let verify_tl = std::fs::read_to_string(ctx.fuzz_dir.join("timeline.txt")).unwrap_or_default();
+    let live_dir = ctx.fuzz_dir.join("live");
+    std::fs::create_dir_all(&live_dir)?;
+    let code = if ctx.is_ui {
+        fuzz_exec(&ctx.live_exe, &live_dir, ctx.w, ctx.h, events, sched, fault)?
+    } else {
+        fuzz_exec_io(&ctx.live_exe, &live_dir, sched, fault, events)?
+    };
+    if code != 0 {
+        bail!("fuzz live/verify split: live graph failed on the same seed");
+    }
+    let live_dump = std::fs::read_to_string(live_dir.join("dump.txt")).unwrap_or_default();
+    let live_tl = std::fs::read_to_string(live_dir.join("timeline.txt")).unwrap_or_default();
+    if live_verify_split(&live_dump, &verify_dump, ctx.has_sim)
+        || live_verify_split(&live_tl, &verify_tl, ctx.has_sim)
+    {
+        bail!("fuzz live/verify split: silent observation mismatch");
+    }
     Ok(())
 }
 

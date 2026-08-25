@@ -738,6 +738,27 @@ void sz_ui_bridge_flush(SzUiSession *session) {
   }
 }
 
+/* Hit/hover strings are host malloc so a tap does not count as heap growth. */
+static char *host_dup(const char *s) {
+  size_t n;
+  char *out;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  out = (char *)malloc(n + 1);
+  if (!out)
+    sz_panic("ui: out of memory");
+  memcpy(out, s, n + 1);
+  return out;
+}
+
+static void host_free(char **p) {
+  if (!p)
+    return;
+  free(*p);
+  *p = NULL;
+}
+
 void sz_ui_unmount(SzUiSession *session) {
   if (!session)
     return;
@@ -768,10 +789,10 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->inject_path);
   sz_free(session->inject_fp);
   sz_free(session->record_path);
-  sz_free(session->last_hit_desc);
-  sz_free(session->hover_desc);
-  sz_free(session->record_hover_desc);
-  sz_free(session->last_secondary_desc);
+  host_free(&session->last_hit_desc);
+  host_free(&session->hover_desc);
+  host_free(&session->record_hover_desc);
+  host_free(&session->last_secondary_desc);
   sz_free(session->clipboard);
   sz_free(session->title_owned);
   sz_free(session);
@@ -922,8 +943,8 @@ static void session_set_last_hit(SzUiSession *session, float x, float y,
   session->last_hit_seen = 1;
   session->last_hit_x = x;
   session->last_hit_y = y;
-  sz_free(session->last_hit_desc);
-  session->last_hit_desc = sz_strdup(desc);
+  host_free(&session->last_hit_desc);
+  session->last_hit_desc = host_dup(desc);
 }
 
 static void session_set_hover(SzUiSession *session, float x, float y,
@@ -935,16 +956,15 @@ static void session_set_hover(SzUiSession *session, float x, float y,
   session->hover_seen = 1;
   session->hover_x = x;
   session->hover_y = y;
-  sz_free(session->hover_desc);
-  session->hover_desc = sz_strdup(desc);
+  host_free(&session->hover_desc);
+  session->hover_desc = host_dup(desc);
 }
 
 static void session_clear_hover(SzUiSession *session) {
   if (!session)
     return;
   session->hover_seen = 0;
-  sz_free(session->hover_desc);
-  session->hover_desc = NULL;
+  host_free(&session->hover_desc);
   if (session->root)
     sz_view_clear_hover(session->root);
 }
@@ -958,8 +978,8 @@ static void session_set_last_secondary(SzUiSession *session, float x, float y,
   session->last_secondary_seen = 1;
   session->last_secondary_x = x;
   session->last_secondary_y = y;
-  sz_free(session->last_secondary_desc);
-  session->last_secondary_desc = sz_strdup(desc);
+  host_free(&session->last_secondary_desc);
+  session->last_secondary_desc = host_dup(desc);
 }
 
 static int find_tap_index_at(SzUiSession *session, float x, float y) {
@@ -1183,8 +1203,8 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
     if (!session->record_hover_desc ||
         strcmp(session->record_hover_desc, desc) != 0) {
       fprintf(f, "hover %.1f %.1f\n", ev->x, ev->y);
-      sz_free(session->record_hover_desc);
-      session->record_hover_desc = sz_strdup(desc);
+      host_free(&session->record_hover_desc);
+      session->record_hover_desc = host_dup(desc);
     }
   } else if (ev->kind == SZ_INPUT_POINTER &&
              ev->pointer_phase == SZ_POINTER_UP && session->pointer_down) {

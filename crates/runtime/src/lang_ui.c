@@ -408,6 +408,7 @@ static void *thunk_run_rebuild(void *env) {
 
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run pump failed");
+  sz_testrt_session_baseline_snapshot();
 
   {
     const char *script = getenv("SCUZZ_UI_SCRIPT");
@@ -446,6 +447,7 @@ static void *thunk_run_rebuild(void *env) {
     sz_ui_session_finish(session);
   }
 
+  sz_testrt_session_baseline_check();
   sz_ui_unmount(session);
   return NULL;
 }

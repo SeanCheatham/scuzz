@@ -1,0 +1,9 @@
+[package]
+name = "bad-split"
+version = "0.1.0"
+description = "Live/verify observation split. scuzz fuzz must fail."
+
+[ui]
+default_runtime = "headless"
+headless_size = [200, 120]
+headless_scale = 1.0
