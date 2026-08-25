@@ -478,65 +478,6 @@ static char *slurp_cstr(const char *path) {
   buf[n] = '\0';
   return buf;
 }
-/* Mining trace: one block per pump under SCUZZ_TESTRT + SCUZZ_TRACE_DUMP.
- * The trace env cache latches on the first pump of the process, so this
- * test runs first in main and the pump work happens in a forked child. */
-static void test_trace_dump(void) {
-  const char *path = "/tmp/scuzz_ui_trace.dump";
-  pid_t pid;
-  int st = 0;
-  char *body;
-  remove(path);
-  fflush(NULL);
-  pid = fork();
-  assert(pid >= 0);
-  if (pid == 0) {
-    SzUiConfig cfg;
-    SzUiSession *session;
-    SzView *root, *btn;
-    SzSignalInt *count;
-    SzInputEvent tap;
-    setenv("SCUZZ_TESTRT", "1", 1);
-    setenv("SCUZZ_TRACE_DUMP", path, 1);
-    count = sz_signal_int(0);
-    root = sz_view_column();
-    btn = sz_view_button("+1", counter_tap, count);
-    sz_view_add_child(root, btn);
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-    cfg.width = 200;
-    cfg.height = 120;
-    cfg.scale = 1.0;
-    session = sz_ui_mount(&cfg, root);
-    assert(session);
-    sz_ui_session_take_root(session);
-    assert(sz_ui_pump_sync(session));
-    memset(&tap, 0, sizeof(tap));
-    tap.kind = SZ_INPUT_TAP;
-    tap.x = sz_view_frame(btn).x + 8.f;
-    tap.y = sz_view_frame(btn).y + 8.f;
-    assert(sz_ui_inject_sync(session, &tap));
-    assert(sz_signal_int_get(count) == 1);
-    assert(sz_ui_pump_sync(session));
-    sz_ui_unmount(session);
-    sz_signal_int_free(count);
-    _exit(0);
-  }
-  assert(waitpid(pid, &st, 0) == pid);
-  assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
-  body = slurp_cstr(path);
-  /* Two blocks, one per pump. */
-  assert(strstr(body, "== pump\n[signals]\nint[0] = 0\n[views]\n") == body);
-  assert(strstr(body, "button:+1") != NULL);
-  /* First block has no hit: the next block follows the header directly. */
-  assert(strstr(body, "[last_hit]\n== pump\n[signals]\nint[0] = 1\n") !=
-         NULL);
-  /* Second block records the tap desc. */
-  assert(strstr(body, "[last_hit]\nbutton:+1\n") != NULL);
-  free(body);
-  remove(path);
-}
-
 static int64_t dump_i64(const char *s, const char *key) {
   const char *p = strstr(s, key);
   assert(p);
@@ -14444,7 +14385,6 @@ static void test_stamp_loads_reload_code(void) {
 }
 
 int main(void) {
-  test_trace_dump();
   test_session_snapshot();
   test_signals_layout_hit();
   test_replace_root_keeps_signals();

@@ -159,7 +159,7 @@ fn budget_split(n: i64) -> (i64, i64) {
     }
 }
 
-/// Compile the verify graph. Does not clear campaign traces.
+/// Compile the verify graph. Does not clear campaign aggregates.
 pub(crate) fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
@@ -183,80 +183,7 @@ pub(crate) fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
 fn prepare_fuzz(path: &Path) -> Result<FuzzCtx> {
     let ctx = compile_fuzz_ctx(path)?;
     std::fs::write(ctx.fuzz_dir.join("sometimes.campaign"), "")?;
-    std::fs::write(ctx.fuzz_dir.join("trace.campaign"), "")?;
     Ok(ctx)
-}
-
-/// Run a UI event list under TestRuntime. Does not merge campaign traces.
-pub(crate) fn run_mine_ui(ctx: &FuzzCtx, events: &[String]) -> Result<(i32, String)> {
-    let out_dir = ctx.fuzz_dir.join("mine");
-    std::fs::create_dir_all(&out_dir)?;
-    let code = mutate_exec_ui_events(&ctx.exe, &out_dir, ctx.w, ctx.h, events, "0", "0")?;
-    let dump = std::fs::read_to_string(out_dir.join("dump.txt")).unwrap_or_default();
-    Ok((code, dump))
-}
-
-/// Replay program- or oracle-mode mutants at `sites` (idle + stored corpus).
-/// Empty `sites` returns `(0, 0)` and does not compile.
-pub(crate) fn mutate_score_sites(path: &Path, sites: &[i64], oracles: bool) -> Result<(i64, i64)> {
-    if sites.is_empty() {
-        return Ok((0, 0));
-    }
-    let ctx = compile_fuzz_ctx(path)?;
-    let (prog, _) = load_verify_program(&ctx.project_dir)?;
-    let mode = if oracles {
-        MutateMode::Oracles
-    } else {
-        MutateMode::Program
-    };
-    let entries = load_corpus(&ctx.project_dir)?;
-    let idle_sched = "0";
-    let mut killed = 0i64;
-    for site in sites {
-        let out_dir = ctx
-            .project_dir
-            .join("build")
-            .join("fuzz")
-            .join("mine")
-            .join("mutate")
-            .join(site.to_string());
-        std::fs::create_dir_all(&out_dir)?;
-        let mutant = mutate_apply_mode(prog.clone(), *site as i32, mode);
-        let opts = compile_opts(&ctx.project_dir, &out_dir, false, true)?;
-        let compiled = compile_prepared_program(&opts, mutant)?;
-        let code = if ctx.is_ui {
-            let corpus: Vec<UiKeep> = entries
-                .iter()
-                .map(|(_, r)| UiKeep {
-                    sched: r.schedule_seed.clone().unwrap_or_default(),
-                    fault: repro_fault(r),
-                    events: r.events.clone(),
-                })
-                .collect();
-            mutate_exec_ui(
-                &compiled.executable,
-                &out_dir,
-                ctx.w,
-                ctx.h,
-                &corpus,
-                idle_sched,
-            )?
-        } else {
-            let corpus: Vec<IoKeep> = entries
-                .iter()
-                .map(|(_, r)| IoKeep {
-                    sched: r.schedule_seed.clone().unwrap_or_default(),
-                    fault: repro_fault(r),
-                    drives: r.events.clone(),
-                })
-                .collect();
-            mutate_exec_io(&compiled.executable, &out_dir, &corpus, idle_sched)?
-        };
-        if code != 0 {
-            killed += 1;
-        }
-    }
-    Ok((killed, sites.len() as i64))
 }
 
 fn fuzz_run(
@@ -955,7 +882,6 @@ fn mutate_exec_ui_events(
             dump: &dump,
             width: w,
             height: h,
-            trace: None,
         }),
         None,
     )
@@ -1551,19 +1477,6 @@ fn merge_sometimes(reached_path: &Path, campaign_path: &Path) -> Result<()> {
     std::fs::write(campaign_path, script_text(&camp))?;
     Ok(())
 }
-/// Append one run's trace blocks to the campaign trace. `== run` starts a run.
-fn merge_trace(trace_path: &Path, campaign_path: &Path) -> Result<()> {
-    let run = std::fs::read_to_string(trace_path).unwrap_or_default();
-    let mut camp = std::fs::read_to_string(campaign_path).unwrap_or_default();
-    camp.push_str("== run\n");
-    camp.push_str(&run);
-    if !camp.ends_with('\n') {
-        camp.push('\n');
-    }
-    std::fs::write(campaign_path, camp)?;
-    Ok(())
-}
-
 fn parse_classify_counts(text: &str) -> Vec<(String, i64, i64)> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -1821,11 +1734,9 @@ fn fuzz_exec(
     let script = fuzz_dir.join("script.txt");
     let dump = fuzz_dir.join("dump.txt");
     let reached = fuzz_dir.join("sometimes.reached");
-    let trace = fuzz_dir.join("trace.txt");
     std::fs::write(&script, script_text(events))?;
     std::fs::write(&dump, "")?;
     std::fs::write(&reached, "")?;
-    std::fs::write(&trace, "")?;
     std::fs::write(fuzz_dir.join("classify.dump"), "")?;
     let code = run_testrt(
         exe,
@@ -1837,12 +1748,10 @@ fn fuzz_exec(
             dump: &dump,
             width: w,
             height: h,
-            trace: Some(&trace),
         }),
         None,
     )?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
-    merge_trace(&trace, &fuzz_dir.join("trace.campaign"))?;
     merge_classify(
         &fuzz_dir.join("classify.dump"),
         &fuzz_dir.join("classify.campaign"),
@@ -1874,30 +1783,6 @@ fn fuzz_exec_io(
         &fuzz_dir.join("classify.campaign"),
     )?;
     Ok(code)
-}
-
-/// Replay one UI event list under TestRuntime. Returns the exit code and the
-/// a11y dump path. `scuzz mine` boundary decisions replay truncated scripts here.
-pub fn replay_ui_events(
-    path: &Path,
-    events: &[String],
-    schedule_seed: &str,
-    fault_seed: &str,
-) -> Result<(i32, PathBuf)> {
-    let ctx = prepare_fuzz(path)?;
-    if !ctx.is_ui {
-        bail!("scuzz mine: package has no [ui] section");
-    }
-    let code = fuzz_exec(
-        &ctx.exe,
-        &ctx.fuzz_dir,
-        ctx.w,
-        ctx.h,
-        events,
-        schedule_seed,
-        fault_seed,
-    )?;
-    Ok((code, ctx.fuzz_dir.join("dump.txt")))
 }
 
 fn read_drivers(project_dir: &Path) -> Vec<String> {

@@ -41,8 +41,6 @@ pub struct TestrtUi<'a> {
     pub dump: &'a Path,
     pub width: i32,
     pub height: i32,
-    /// Per-run trace file. Sets SCUZZ_TRACE_DUMP when Some.
-    pub trace: Option<&'a Path>,
 }
 
 /// Run a verify-graph binary under TestRuntime. `ui` sets Headless + script/dump.
@@ -68,9 +66,6 @@ pub fn run_testrt(
             .env("SCUZZ_FUZZ_DUMP", ui.dump)
             .env("SCUZZ_UI_WIDTH", ui.width.to_string())
             .env("SCUZZ_UI_HEIGHT", ui.height.to_string());
-        if let Some(trace) = ui.trace {
-            cmd.env("SCUZZ_TRACE_DUMP", trace);
-        }
     }
     if let Some(p) = drive_script {
         cmd.env("SCUZZ_DRIVE_SCRIPT", p);

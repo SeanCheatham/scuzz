@@ -715,26 +715,6 @@ fn collect_signal_ids(program: &Program) -> HashMap<String, (i64, SigKind)> {
     walk_signals(&program.main.body, &mut map, &mut next);
     map
 }
-/// Signal table text for `build/signals.txt`: one `id<TAB>name<TAB>kind` line
-/// per named signal, sorted by id ascending. Ids still account for unnamed
-/// signals, so gaps appear where `_ = Signal.int(...)` binds nothing.
-pub fn signal_table_text(program: &Program) -> String {
-    let mut entries: Vec<(i64, String, SigKind)> = collect_signal_ids(program)
-        .into_iter()
-        .map(|(name, (id, kind))| (id, name, kind))
-        .collect();
-    entries.sort_by_key(|(id, _, _)| *id);
-    let mut out = String::new();
-    for (id, name, kind) in entries {
-        let kind = match kind {
-            SigKind::Int => "int",
-            SigKind::Other => "other",
-        };
-        out.push_str(&format!("{id}\t{name}\t{kind}\n"));
-    }
-    out
-}
-
 /// `drive <name> <args>` lines for `build/seeds.txt`. Empty when no Given rows.
 pub fn seed_table_text(program: &Program) -> String {
     let mut out = String::new();
