@@ -127,6 +127,23 @@ impl Diagnostic {
         }
     }
 
+    pub fn info(message: impl Into<String>) -> Self {
+        Self {
+            severity: "info".into(),
+            message: message.into(),
+            file: None,
+            line: None,
+            column: None,
+            end_line: None,
+            end_column: None,
+            related: Vec::new(),
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.severity == "error"
+    }
+
     pub(crate) fn with_file(mut self, file: impl Into<String>) -> Self {
         self.file = Some(file.into());
         self
@@ -664,6 +681,11 @@ fn check_typed_graph(
     }
     for u in unused {
         diags.push(Diagnostic::error(u.message()).with_span(&u.span, named));
+    }
+    if residualize {
+        for item in crate::fuzz::unclaimed_coverage(&program) {
+            diags.push(Diagnostic::info(item.message()).with_span(&item.span, named));
+        }
     }
     match crate::typ::elaborate_generics(program) {
         Ok(_) => diags,
@@ -1619,6 +1641,10 @@ mod tests {
             .join(name)
     }
 
+    fn error_diags(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
+        diags.iter().filter(|d| d.is_error()).collect()
+    }
+
     #[test]
     fn type_error_reports_line_and_column() {
         let src = "\
@@ -1681,15 +1707,24 @@ mod tests {
             json,
             r#"[{"severity":"error","message":"x","line":2,"column":3}]"#
         );
+        let info = format_diagnostics(
+            &[Diagnostic::info("unclaimed def main").with_loc(1, 1)],
+            true,
+        );
+        assert_eq!(
+            info,
+            r#"[{"severity":"info","message":"unclaimed def main","line":1,"column":1}]"#
+        );
     }
 
     #[test]
     fn check_project_reports_unformatted() {
         let diags = check_project(&testdata("fmt/needs_format")).unwrap();
-        assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("formatting"));
-        assert_eq!(diags[0].line, Some(1));
-        assert_eq!(diags[0].column, Some(1));
+        let errs = error_diags(&diags);
+        assert_eq!(errs.len(), 1, "{diags:?}");
+        assert!(errs[0].message.contains("formatting"));
+        assert_eq!(errs[0].line, Some(1));
+        assert_eq!(errs[0].column, Some(1));
         let json = format_diagnostics(&diags, true);
         assert!(json.contains("needs formatting"));
         assert!(json.contains("src/Main.scuzz"));
@@ -1712,7 +1747,7 @@ version = "0.0.0"
         let formatted = crate::format::format_source(src).unwrap();
         fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
         let diags = check_project(root).unwrap();
-        assert!(diags.is_empty(), "{diags:?}");
+        assert!(error_diags(&diags).is_empty(), "{diags:?}");
     }
 
     #[test]
@@ -1750,7 +1785,7 @@ version = "0.0.0"
         let dir = tempdir().unwrap();
         let root = dir.path();
         write_ok_pkg(root);
-        assert!(check_project(root).unwrap().is_empty());
+        assert!(error_diags(&check_project(root).unwrap()).is_empty());
         let mut unsaved = BTreeMap::new();
         unsaved.insert(
             canonicalize_source_path(&root.join("src/Main.scuzz")),
@@ -1763,7 +1798,7 @@ version = "0.0.0"
             "{}",
             diags[0].message
         );
-        assert!(check_project(root).unwrap().is_empty());
+        assert!(error_diags(&check_project(root).unwrap()).is_empty());
     }
 
     #[test]
@@ -1828,7 +1863,7 @@ version = "0.0.0"
             "def title(): String = \"Live\"\n@main def main: IO[Unit] =\n  IO.println(title())\n",
             "def title(): String = \"Sim\"\n",
         );
-        assert!(check_project(root).unwrap().is_empty());
+        assert!(error_diags(&check_project(root).unwrap()).is_empty());
         let mut unsaved = BTreeMap::new();
         unsaved.insert(
             canonicalize_source_path(&root.join("src/Main.scuzz_sim")),
@@ -1923,7 +1958,7 @@ version = "0.0.0"
         let formatted = crate::format::format_source(src).unwrap();
         fs::write(root.join("count.scuzz_verify"), formatted).unwrap();
         let diags = check_project(root).unwrap();
-        assert!(diags.is_empty(), "{diags:?}");
+        assert!(error_diags(&diags).is_empty(), "{diags:?}");
     }
 
     #[test]
@@ -2255,7 +2290,7 @@ def b(): String = 1
         write_ok_pkg(root);
         let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let diags = document_diagnostics_project(root, &BTreeMap::new(), &path).unwrap();
-        assert!(diags.is_empty(), "{diags:?}");
+        assert!(error_diags(&diags).is_empty(), "{diags:?}");
     }
 
     #[test]
@@ -2394,11 +2429,12 @@ def a(): Int = \"x\"
         .unwrap();
         fs::write(root.join("src/Main.scuzz"), &main).unwrap();
         let diags = check_project(root).unwrap();
-        assert_eq!(diags.len(), 1, "{diags:?}");
+        let errs = error_diags(&diags);
+        assert_eq!(errs.len(), 1, "{diags:?}");
         assert!(
-            diags[0].message.contains("unused import A.tag"),
+            errs[0].message.contains("unused import A.tag"),
             "{:?}",
-            diags[0].message
+            errs[0].message
         );
     }
 
@@ -2418,7 +2454,7 @@ def a(): Int = \"x\"
         .unwrap();
         fs::write(root.join("src/Main.scuzz"), &main).unwrap();
         let diags = check_project(root).unwrap();
-        assert!(diags.is_empty(), "{diags:?}");
+        assert!(error_diags(&diags).is_empty(), "{diags:?}");
     }
 
     #[test]
@@ -2432,11 +2468,12 @@ def a(): Int = \"x\"
         .unwrap();
         fs::write(root.join("src/Main.scuzz"), &main).unwrap();
         let diags = check_project(root).unwrap();
-        assert_eq!(diags.len(), 1, "{diags:?}");
+        let errs = error_diags(&diags);
+        assert_eq!(errs.len(), 1, "{diags:?}");
         assert!(
-            diags[0].message.contains("unused local x"),
+            errs[0].message.contains("unused local x"),
             "{:?}",
-            diags[0].message
+            errs[0].message
         );
     }
 
@@ -2451,7 +2488,7 @@ def a(): Int = \"x\"
         .unwrap();
         fs::write(root.join("src/Main.scuzz"), &main).unwrap();
         let diags = check_project(root).unwrap();
-        assert!(diags.is_empty(), "{diags:?}");
+        assert!(error_diags(&diags).is_empty(), "{diags:?}");
     }
 
     #[test]
@@ -2465,11 +2502,12 @@ def a(): Int = \"x\"
         .unwrap();
         fs::write(root.join("src/Main.scuzz"), &main).unwrap();
         let diags = check_project(root).unwrap();
-        assert_eq!(diags.len(), 1, "{diags:?}");
+        let errs = error_diags(&diags);
+        assert_eq!(errs.len(), 1, "{diags:?}");
         assert!(
-            diags[0].message.contains("unused parameter n"),
+            errs[0].message.contains("unused parameter n"),
             "{:?}",
-            diags[0].message
+            errs[0].message
         );
     }
 
@@ -2484,11 +2522,48 @@ def a(): Int = \"x\"
         .unwrap();
         fs::write(root.join("src/Main.scuzz"), &main).unwrap();
         let diags = check_project(root).unwrap();
-        assert_eq!(diags.len(), 1, "{diags:?}");
+        let errs = error_diags(&diags);
+        assert_eq!(errs.len(), 1, "{diags:?}");
         assert!(
-            diags[0].message.contains("unused private def hidden"),
+            errs[0].message.contains("unused private def hidden"),
             "{:?}",
-            diags[0].message
+            errs[0].message
         );
+    }
+
+    #[test]
+    fn check_project_reports_unclaimed_def_signal_control() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"unclaimed\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "\
+def helper(): Int =
+  1
+@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ = helper()
+    _ = View.button(\"Go\", _ => ())
+    _ <- IO.println(Str.fromInt(Signal.get(n)))
+  } yield ()
+";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(error_diags(&diags).is_empty(), "{diags:?}");
+        let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+        assert!(
+            msgs.iter()
+                .any(|m| m.contains("unclaimed def") && m.contains("helper")),
+            "{msgs:?}"
+        );
+        assert!(msgs.contains(&"unclaimed signal 0"), "{msgs:?}");
+        assert!(msgs.contains(&"unclaimed control button:Go"), "{msgs:?}");
+        assert!(diags.iter().all(|d| d.severity == "info"), "{diags:?}");
     }
 }

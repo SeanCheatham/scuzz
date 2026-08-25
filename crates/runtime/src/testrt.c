@@ -1938,6 +1938,48 @@ static void tl_dump_file(void) {
   fclose(f);
 }
 
+static int tl_str_diff(const char *a, const char *b) {
+  if (!a)
+    a = "";
+  if (!b)
+    b = "";
+  return strcmp(a, b) != 0;
+}
+
+void sz_timeline_varied_flush(void) {
+  const char *path = getenv("SCUZZ_STATE_VARIED_DUMP");
+  FILE *f;
+  int i;
+  int sig = 0;
+  int a11y = 0;
+  int hit = 0;
+  int drive = 0;
+  if (!path || !path[0])
+    return;
+  for (i = 1; i < g_tl_n; i++) {
+    if (tl_str_diff(g_tl[i].signals, g_tl[0].signals))
+      sig = 1;
+    if (tl_str_diff(g_tl[i].a11y, g_tl[0].a11y))
+      a11y = 1;
+    if (tl_str_diff(g_tl[i].last_hit, g_tl[0].last_hit))
+      hit = 1;
+    if (tl_str_diff(g_tl[i].drive, g_tl[0].drive))
+      drive = 1;
+  }
+  f = fopen(path, "w");
+  if (!f)
+    return;
+  if (sig)
+    fputs("signals\n", f);
+  if (a11y)
+    fputs("a11y\n", f);
+  if (hit)
+    fputs("last_hit\n", f);
+  if (drive)
+    fputs("drive\n", f);
+  fclose(f);
+}
+
 static void session_register(SzSessionProp *tab, int *n, SzString *name,
                              void *fn) {
   const char *s = name ? sz_string_cstr(name) : "";
@@ -2027,6 +2069,7 @@ void sz_property_session_end(void) {
   if (!tr || tr[0] != '1')
     return;
   tl_dump_file();
+  sz_timeline_varied_flush();
   last = g_tl_n > 0 ? g_tl_n - 1 : 0;
   for (i = 0; i < g_always_n; i++) {
     for (j = 0; j < g_tl_n; j++) {

@@ -110,6 +110,7 @@ struct FuzzSummary<'a> {
     stored: &'a CorpusReport,
     repro: Option<&'a Path>,
     mutate: &'a MutateStats,
+    unclaimed_varied: &'a [String],
 }
 
 struct SearchRepro {
@@ -195,6 +196,7 @@ pub(crate) fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
 fn prepare_fuzz(path: &Path) -> Result<FuzzCtx> {
     let ctx = compile_fuzz_ctx(path)?;
     std::fs::write(ctx.fuzz_dir.join("sometimes.campaign"), "")?;
+    std::fs::write(ctx.fuzz_dir.join("state.campaign"), "")?;
     Ok(ctx)
 }
 
@@ -1533,6 +1535,17 @@ fn merge_classify(dump_path: &Path, campaign_path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn read_unclaimed_varied(project_dir: &Path, fuzz_dir: &Path) -> Vec<String> {
+    let claimed = lines_nonempty(
+        &std::fs::read_to_string(project_dir.join("build").join("claims.fields"))
+            .unwrap_or_default(),
+    );
+    lines_nonempty(&std::fs::read_to_string(fuzz_dir.join("state.campaign")).unwrap_or_default())
+        .into_iter()
+        .filter(|f| !claimed.iter().any(|c| c == f))
+        .collect()
+}
+
 fn read_classify(project_dir: &Path, fuzz_dir: &Path) -> Vec<(String, i64, i64)> {
     let declared = lines_nonempty(
         &std::fs::read_to_string(project_dir.join("build").join("classify.declared"))
@@ -1617,6 +1630,7 @@ fn write_campaign(
     let missing_corpus = sometimes_missing_from(declared, &camp.stored.reached);
     let drivers = read_drivers(&ctx.project_dir);
     let classify = read_classify(&ctx.project_dir, &ctx.fuzz_dir);
+    let unclaimed_varied = read_unclaimed_varied(&ctx.project_dir, &ctx.fuzz_dir);
     let empty: [String; 0] = [];
     let (repro, events): (Option<&Path>, &[String]) = match &camp.repro {
         Some(r) => (Some(r.path.as_path()), r.events.as_slice()),
@@ -1641,6 +1655,7 @@ fn write_campaign(
             stored: &camp.stored,
             repro,
             mutate,
+            unclaimed_varied: &unclaimed_varied,
         },
     )
 }
@@ -1678,6 +1693,9 @@ fn print_report(s: &FuzzSummary<'_>) {
         }
     );
     print_sometimes_missing(s.missing_budget, s.missing_corpus);
+    if !s.unclaimed_varied.is_empty() {
+        println!("unclaimed varied: {}", s.unclaimed_varied.join(", "));
+    }
     if !s.classify.is_empty() {
         let parts: Vec<String> = s
             .classify
@@ -1710,7 +1728,7 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
     };
     let classify_toml = classify_summary_toml(s.classify);
     let text = format!(
-        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nmissing_budget = [{missing_budget}]\nmissing_corpus = [{missing_corpus}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[corpus]\nentries = {entries}\nfailures = {failures}\nreached = [{corpus_reached}]\npromoted = {promoted}\n\n[classify]\n{classify_toml}[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\nsurvivors = [{survivors}]\n",
+        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nmissing_budget = [{missing_budget}]\nmissing_corpus = [{missing_corpus}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[coverage]\nunclaimed_varied = [{unclaimed_varied}]\n\n[corpus]\nentries = {entries}\nfailures = {failures}\nreached = [{corpus_reached}]\npromoted = {promoted}\n\n[classify]\n{classify_toml}[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\nsurvivors = [{survivors}]\n",
         ok = if s.ok { "true" } else { "false" },
         seed = s.seed,
         iterations = s.iterations,
@@ -1723,6 +1741,7 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
         reached = toml_str_array(s.reached),
         missing_budget = toml_str_array(s.missing_budget),
         missing_corpus = toml_str_array(s.missing_corpus),
+        unclaimed_varied = toml_str_array(s.unclaimed_varied),
         repro = repro_path.replace('\\', "\\\\").replace('"', "\\\""),
         replay = replay.replace('\\', "\\\\").replace('"', "\\\""),
         entries = s.stored.entries,
@@ -1784,6 +1803,7 @@ fn fuzz_exec(
     std::fs::write(&reached, "")?;
     std::fs::write(fuzz_dir.join("classify.dump"), "")?;
     std::fs::write(fuzz_dir.join("timeline.txt"), "")?;
+    std::fs::write(fuzz_dir.join("state.varied"), "")?;
     let code = run_testrt(
         exe,
         &reached,
@@ -1802,6 +1822,10 @@ fn fuzz_exec(
         &fuzz_dir.join("classify.dump"),
         &fuzz_dir.join("classify.campaign"),
     )?;
+    merge_sometimes(
+        &fuzz_dir.join("state.varied"),
+        &fuzz_dir.join("state.campaign"),
+    )?;
     Ok(code)
 }
 
@@ -1817,6 +1841,7 @@ fn fuzz_exec_io(
     std::fs::write(&reached, "")?;
     std::fs::write(fuzz_dir.join("classify.dump"), "")?;
     std::fs::write(fuzz_dir.join("timeline.txt"), "")?;
+    std::fs::write(fuzz_dir.join("state.varied"), "")?;
     std::fs::write(&drive_path, script_text(drives))?;
     let drive = if drives.is_empty() {
         None
@@ -1828,6 +1853,10 @@ fn fuzz_exec_io(
     merge_classify(
         &fuzz_dir.join("classify.dump"),
         &fuzz_dir.join("classify.campaign"),
+    )?;
+    merge_sometimes(
+        &fuzz_dir.join("state.varied"),
+        &fuzz_dir.join("state.campaign"),
     )?;
     Ok(code)
 }

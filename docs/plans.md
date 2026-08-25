@@ -1,13 +1,14 @@
 # Next slice
 
-Coverage breadth.
+Coverage strength.
 
-`scuzz check` reports defs, signals, and controls with no claim. The campaign reports reached states that vary in `State` fields no claim reads.
+Mutation survivors that change observable behavior split into weak claims (claimed field) and missing claims (unclaimed field). Survivors with bit-identical replayed timelines are inert and unreported.
 
 Proof:
 
-- `scuzz check` on a package lists unclaimed defs, signals, and controls.
-- A fuzz campaign reports reached states that vary in unclaimed `State` fields.
+- A surviving mutant that changes a claimed `State` field reports a weak claim.
+- A surviving mutant that changes an unclaimed `State` field reports a missing claim.
+- A mutant whose replayed timeline is bit-identical is inert and is not a survivor.
 - `make -C crates/runtime test`, `cargo test -p scuzz-compiler`, `cargo test -p scuzz` pass.
 - `cargo run -p scuzz -- fuzz --iterations 16 examples/counter` stays green.
 

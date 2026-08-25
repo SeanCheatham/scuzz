@@ -1,6 +1,7 @@
 //! Deterministic fuzz alphabet, corpus, and `repro.toml` (CLI search; no runtime machinery).
 
-use crate::ast::{Expr, ExprKind, Program};
+use crate::ast::{Expr, ExprKind, FunDef, Program};
+use crate::span::Span;
 use serde::Deserialize;
 
 const LCG_M: i64 = 2_147_483_647;
@@ -1158,6 +1159,366 @@ fn collect_classify(e: &Expr, acc: &mut Vec<String>) {
     e.for_each_child(|c| collect_classify(c, acc));
 }
 
+/// Kind of unclaimed coverage `check` reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnclaimedKind {
+    Def,
+    Signal,
+    Control,
+}
+
+/// One used def, signal, or control that no claim observes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnclaimedItem {
+    pub kind: UnclaimedKind,
+    pub name: String,
+    pub span: Span,
+}
+
+impl UnclaimedItem {
+    pub fn message(&self) -> String {
+        match self.kind {
+            UnclaimedKind::Def => format!("unclaimed def {}", self.name),
+            UnclaimedKind::Signal => format!("unclaimed signal {}", self.name),
+            UnclaimedKind::Control => format!("unclaimed control {}", self.name),
+        }
+    }
+}
+
+const STATE_FIELDS: [&str; 4] = ["signals", "a11y", "last_hit", "drive"];
+
+const CONTROL_CTORS: &[(&str, usize, &str)] = &[
+    ("View.button", 0, "button"),
+    ("View.iconButton", 0, "iconbutton"),
+    ("View.fab", 0, "fab"),
+    ("View.outlinedButton", 0, "outlined"),
+    ("View.textButton", 0, "textbutton"),
+    ("View.actionChip", 0, "actionchip"),
+    ("View.inkWell", 0, "inkwell"),
+    ("View.checkbox", 1, "checkbox"),
+    ("View.radio", 2, "radio"),
+    ("View.switch", 1, "switch"),
+    ("View.chip", 1, "chip"),
+    ("View.filterChip", 1, "filterchip"),
+    ("View.choiceChip", 2, "choicechip"),
+    ("View.inputChip", 1, "inputchip"),
+    ("View.checkboxListTile", 1, "checktile"),
+    ("View.switchListTile", 1, "switchtile"),
+    ("View.radioListTile", 2, "radiotile"),
+    ("View.expansionTile", 1, "expansion"),
+    ("View.textField", 1, "textfield"),
+];
+
+fn walk_expr(e: &Expr, f: &mut impl FnMut(&Expr)) {
+    f(e);
+    e.for_each_child(|c| walk_expr(c, f));
+}
+
+fn walk_live_exprs(program: &Program, f: &mut impl FnMut(&Expr)) {
+    walk_expr(&program.main.body, f);
+    for d in &program.defs {
+        if d.is_verify || d.is_driver {
+            continue;
+        }
+        walk_expr(&d.body, f);
+        for p in &d.params {
+            if let Some(r) = &p.rfn {
+                walk_expr(r, f);
+            }
+        }
+    }
+}
+
+fn walk_all_exprs(program: &Program, f: &mut impl FnMut(&Expr)) {
+    walk_expr(&program.main.body, f);
+    for d in &program.defs {
+        walk_expr(&d.body, f);
+        for p in &d.params {
+            if let Some(r) = &p.rfn {
+                walk_expr(r, f);
+            }
+        }
+    }
+}
+
+fn is_residual_oracle_callee(callee: &str) -> bool {
+    callee == "Property.check" || callee == "Property.assert" || callee == "Property.sometimes"
+}
+
+fn expr_has_residual_oracle(e: &Expr) -> bool {
+    let here = match &e.kind {
+        ExprKind::Call { callee, .. } => is_residual_oracle_callee(callee),
+        ExprKind::MethodCall { method, .. } => method == "require",
+        _ => false,
+    };
+    if here {
+        return true;
+    }
+    let mut found = false;
+    e.for_each_child(|c| {
+        if !found {
+            found = expr_has_residual_oracle(c);
+        }
+    });
+    found
+}
+
+fn def_has_residual_oracle(d: &FunDef) -> bool {
+    if expr_has_residual_oracle(&d.body) {
+        return true;
+    }
+    d.params.iter().any(|p| p.rfn.is_some())
+}
+
+fn def_label(d: &FunDef) -> String {
+    if d.module.is_empty() {
+        d.name.clone()
+    } else {
+        format!("{}.{}", d.module, d.name)
+    }
+}
+
+fn main_label(program: &Program) -> String {
+    if program.main.module.is_empty() {
+        program.main.name.clone()
+    } else {
+        format!("{}.{}", program.main.module, program.main.name)
+    }
+}
+
+fn verify_mentions_def(callees: &[String], d: &FunDef) -> bool {
+    let qualified = def_label(d);
+    callees
+        .iter()
+        .any(|c| c == &d.name || c == &qualified || c.ends_with(&format!(".{}", d.name)))
+}
+
+fn collect_verify_callees(program: &Program) -> Vec<String> {
+    let mut out = Vec::new();
+    for d in &program.defs {
+        if !d.is_verify {
+            continue;
+        }
+        walk_expr(&d.body, &mut |e| {
+            if let ExprKind::Call { callee, .. } = &e.kind {
+                if !out.iter().any(|c| c == callee) {
+                    out.push(callee.clone());
+                }
+            }
+        });
+    }
+    out
+}
+
+fn lit_arg(args: &[Expr], i: usize) -> Option<&ExprKind> {
+    args.get(i).map(|a| &a.kind)
+}
+
+fn claimed_signal_ids(program: &Program) -> Vec<i64> {
+    let mut ids = Vec::new();
+    walk_all_exprs(program, &mut |e| {
+        let ExprKind::Call { callee, args } = &e.kind else {
+            return;
+        };
+        let id = if callee == "Timeline.signalInt" {
+            lit_arg(args, 2)
+        } else if callee == "Property.signalInt"
+            || callee == "Property.signalStr"
+            || callee == "Property.signalListLen"
+            || callee == "Property.signalListAt"
+        {
+            lit_arg(args, 0)
+        } else {
+            None
+        };
+        if let Some(ExprKind::IntLit(n)) = id {
+            if !ids.contains(n) {
+                ids.push(*n);
+            }
+        }
+    });
+    ids
+}
+
+fn claim_needles(program: &Program) -> Vec<String> {
+    let mut out = Vec::new();
+    walk_all_exprs(program, &mut |e| {
+        let ExprKind::Call { callee, args } = &e.kind else {
+            return;
+        };
+        let lit = if callee == "Timeline.a11yHas"
+            || callee == "Timeline.lastHitHas"
+            || callee == "Property.sometimes"
+        {
+            lit_arg(args, if callee == "Property.sometimes" { 0 } else { 2 })
+        } else if callee == "Property.a11yHas" || callee == "Property.lastHitHas" {
+            lit_arg(args, 0)
+        } else {
+            None
+        };
+        if let Some(ExprKind::StrLit(s)) = lit {
+            if !out.iter().any(|n| n == s) {
+                out.push(s.clone());
+            }
+        }
+    });
+    for d in &program.defs {
+        if !d.is_verify {
+            continue;
+        }
+        walk_expr(&d.body, &mut |e| {
+            if let ExprKind::StrLit(s) = &e.kind {
+                if !s.is_empty() && !out.iter().any(|n| n == s) {
+                    out.push(s.clone());
+                }
+            }
+        });
+    }
+    out
+}
+
+fn needle_claims_control(needles: &[String], role_label: &str) -> bool {
+    needles
+        .iter()
+        .any(|n| n == role_label || n.contains(role_label))
+}
+
+fn is_signal_ctor(callee: &str) -> bool {
+    callee == "Signal.int"
+        || callee == "Signal.str"
+        || callee == "Signal.list"
+        || callee == "Signal.map"
+}
+
+fn control_role_label(callee: &str, args: &[Expr]) -> Option<String> {
+    for (name, idx, role) in CONTROL_CTORS {
+        if callee != *name {
+            continue;
+        }
+        if let Some(ExprKind::StrLit(label)) = lit_arg(args, *idx) {
+            return Some(format!("{role}:{label}"));
+        }
+    }
+    None
+}
+
+fn claimed_field_from_callee(callee: &str) -> Option<&'static str> {
+    match callee {
+        "Timeline.signalInt"
+        | "Property.signalInt"
+        | "Property.signalStr"
+        | "Property.signalListLen"
+        | "Property.signalListAt" => Some("signals"),
+        "Timeline.a11yHas" | "Property.a11yHas" => Some("a11y"),
+        "Timeline.lastHitHas" | "Property.lastHitHas" => Some("last_hit"),
+        _ => None,
+    }
+}
+
+/// State field names that a claim reads. One name per line. Empty when none.
+pub fn claimed_state_fields_text(program: &Program) -> String {
+    let mut fields = Vec::new();
+    walk_all_exprs(program, &mut |e| {
+        let ExprKind::Call { callee, .. } = &e.kind else {
+            return;
+        };
+        if let Some(field) = claimed_field_from_callee(callee) {
+            if !fields.iter().any(|f| f == field) {
+                fields.push(field.to_string());
+            }
+        }
+    });
+    fields.sort_by_key(|f| {
+        STATE_FIELDS
+            .iter()
+            .position(|s| s == f)
+            .unwrap_or(STATE_FIELDS.len())
+    });
+    if fields.is_empty() {
+        String::new()
+    } else {
+        let mut s = fields.join("\n");
+        s.push('\n');
+        s
+    }
+}
+
+/// Used live defs, signals, and controls that no claim observes.
+pub fn unclaimed_coverage(program: &Program) -> Vec<UnclaimedItem> {
+    let mut out = Vec::new();
+    let verify_callees = collect_verify_callees(program);
+    for d in &program.defs {
+        if d.is_verify || d.is_driver || d.is_private {
+            continue;
+        }
+        if crate::resolve::discarded_name(&d.name) {
+            continue;
+        }
+        if !crate::resolve::def_is_called(program, d) {
+            continue;
+        }
+        if def_has_residual_oracle(d) || verify_mentions_def(&verify_callees, d) {
+            continue;
+        }
+        out.push(UnclaimedItem {
+            kind: UnclaimedKind::Def,
+            name: def_label(d),
+            span: d.name_span.clone(),
+        });
+    }
+    if !program.main.name.is_empty() && !expr_has_residual_oracle(&program.main.body) {
+        out.push(UnclaimedItem {
+            kind: UnclaimedKind::Def,
+            name: main_label(program),
+            span: program.main.body.span.clone(),
+        });
+    }
+    let claimed_ids = claimed_signal_ids(program);
+    let mut next_id = 0i64;
+    walk_live_exprs(program, &mut |e| {
+        let ExprKind::Call { callee, .. } = &e.kind else {
+            return;
+        };
+        if !is_signal_ctor(callee) {
+            return;
+        }
+        let id = next_id;
+        next_id += 1;
+        if claimed_ids.contains(&id) {
+            return;
+        }
+        out.push(UnclaimedItem {
+            kind: UnclaimedKind::Signal,
+            name: id.to_string(),
+            span: e.span.clone(),
+        });
+    });
+    let needles = claim_needles(program);
+    walk_live_exprs(program, &mut |e| {
+        let ExprKind::Call { callee, args } = &e.kind else {
+            return;
+        };
+        let Some(role_label) = control_role_label(callee, args) else {
+            return;
+        };
+        if needle_claims_control(&needles, &role_label) {
+            return;
+        }
+        if out
+            .iter()
+            .any(|i| i.kind == UnclaimedKind::Control && i.name == role_label)
+        {
+            return;
+        }
+        out.push(UnclaimedItem {
+            kind: UnclaimedKind::Control,
+            name: role_label,
+            span: e.span.clone(),
+        });
+    });
+    out
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Repro {
     #[serde(default)]
@@ -1772,5 +2133,81 @@ def p(n: Int): Bool =
         )
         .unwrap();
         assert_eq!(classify_declared_text(&p), "square\nwide\n");
+    }
+
+    #[test]
+    fn unclaimed_coverage_lists_used_def_without_oracle() {
+        let p = parse(
+            r#"
+def add(n: Int): Int =
+  n + 1
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(add(1)))
+"#,
+        )
+        .unwrap();
+        let items = unclaimed_coverage(&p);
+        let msgs: Vec<String> = items.iter().map(|i| i.message()).collect();
+        assert!(msgs.contains(&"unclaimed def add".to_string()), "{msgs:?}");
+        assert!(
+            msgs.iter()
+                .any(|m| m.contains("unclaimed def") && m.contains("main")),
+            "{msgs:?}"
+        );
+    }
+
+    #[test]
+    fn unclaimed_coverage_skips_def_with_require() {
+        let p = parse(
+            r#"
+def add(n: Int): Int =
+  (n + 1).require(true)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(add(1)))
+"#,
+        )
+        .unwrap();
+        let items = unclaimed_coverage(&p);
+        let msgs: Vec<String> = items.iter().map(|i| i.message()).collect();
+        assert!(
+            !msgs.iter().any(|m| m.contains("unclaimed def add")),
+            "{msgs:?}"
+        );
+    }
+
+    #[test]
+    fn unclaimed_coverage_lists_signal_and_control() {
+        let p = parse(
+            r#"
+@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ = View.button("Go", _ => ())
+    _ <- IO.println("ok")
+  } yield ()
+"#,
+        )
+        .unwrap();
+        let items = unclaimed_coverage(&p);
+        let msgs: Vec<String> = items.iter().map(|i| i.message()).collect();
+        assert!(msgs.contains(&"unclaimed signal 0".to_string()), "{msgs:?}");
+        assert!(
+            msgs.contains(&"unclaimed control button:Go".to_string()),
+            "{msgs:?}"
+        );
+    }
+
+    #[test]
+    fn claimed_state_fields_from_timeline_kit() {
+        let p = parse(
+            r#"
+def countOk(t: Timeline): Bool =
+  Timeline.forall(t, i => Timeline.signalInt(t, i, 0) >= 0 && Timeline.a11yHas(t, i, "button:+1") && Timeline.lastHitHas(t, i, "button:+1"))
+@main def main: IO[Unit] =
+  IO.println("ok")
+"#,
+        )
+        .unwrap();
+        assert_eq!(claimed_state_fields_text(&p), "signals\na11y\nlast_hit\n");
     }
 }

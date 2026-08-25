@@ -1,6 +1,6 @@
 use crate::ast::Program;
 use crate::codegen::emit_llvm;
-use crate::fuzz::{classify_declared_text, sometimes_declared_text};
+use crate::fuzz::{claimed_state_fields_text, classify_declared_text, sometimes_declared_text};
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
@@ -192,6 +192,11 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
 
     let declared = sometimes_declared_text(&program);
     let classify = classify_declared_text(&program);
+    let claimed_fields = if opts.verify {
+        claimed_state_fields_text(&program)
+    } else {
+        String::new()
+    };
     let seeds = seed_table_text(&program);
     let mut program = program;
     crate::typ::inject_builtin_enums(&mut program.enums);
@@ -213,6 +218,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
         )?;
         std::fs::write(opts.out_dir.join("sometimes.declared"), declared)?;
         std::fs::write(opts.out_dir.join("classify.declared"), classify)?;
+        std::fs::write(opts.out_dir.join("claims.fields"), claimed_fields)?;
         std::fs::write(opts.out_dir.join("seeds.txt"), seeds)?;
     } else {
         let _ = std::fs::remove_file(opts.out_dir.join("drivers.txt"));

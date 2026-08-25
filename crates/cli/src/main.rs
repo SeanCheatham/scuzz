@@ -218,6 +218,7 @@ fn real_main() -> Result<ExitCode> {
         }
         Commands::Check { path } => {
             let diags = scuzz_compiler::check_project(&path)?;
+            let has_error = diags.iter().any(|d| d.severity == "error");
             if diags.is_empty() {
                 if json {
                     println!("[]");
@@ -231,8 +232,15 @@ fn real_main() -> Result<ExitCode> {
                     println!("{out}");
                 } else {
                     eprintln!("{out}");
+                    if !has_error {
+                        eprintln!("scuzz check ok");
+                    }
                 }
-                Ok(ExitCode::FAILURE)
+                if has_error {
+                    Ok(ExitCode::FAILURE)
+                } else {
+                    Ok(ExitCode::SUCCESS)
+                }
             }
         }
         Commands::Lsp { path } => {

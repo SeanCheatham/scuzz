@@ -511,7 +511,7 @@ pub fn unused_names(program: &Program) -> Vec<UnusedName> {
         }
     }
     for d in &program.defs {
-        if d.is_private && !private_def_used(program, d) {
+        if d.is_private && !def_is_called(program, d) {
             out.push(UnusedName {
                 kind: UnusedKind::PrivateDef,
                 name: d.name.clone(),
@@ -773,7 +773,8 @@ fn collect_pattern_binds(p: &Pattern, out: &mut HashSet<String>) {
     }
 }
 
-fn private_def_used(program: &Program, d: &FunDef) -> bool {
+/// True when another def, `@main`, a method, or a refinement calls `d`.
+pub(crate) fn def_is_called(program: &Program, d: &FunDef) -> bool {
     for other in &program.defs {
         if other.module == d.module && other.name == d.name {
             continue;

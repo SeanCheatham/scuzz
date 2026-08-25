@@ -1300,9 +1300,19 @@ fn lsp_diagnostic_json(root: &Path, d: &Diagnostic) -> String {
         format!(r#","relatedInformation":[{}]"#, parts.join(","))
     };
     format!(
-        r#"{{"range":{{"start":{{"line":{line},"character":{col}}},"end":{{"line":{end_line},"character":{end_col}}}}},"severity":1,"message":{}{related}}}"#,
+        r#"{{"range":{{"start":{{"line":{line},"character":{col}}},"end":{{"line":{end_line},"character":{end_col}}}}},"severity":{},"message":{}{related}}}"#,
+        lsp_severity(d),
         json_str(&d.message)
     )
+}
+
+fn lsp_severity(d: &Diagnostic) -> u32 {
+    match d.severity.as_str() {
+        "warning" => 2,
+        "info" => 3,
+        "hint" => 4,
+        _ => 1,
+    }
 }
 
 fn encode_related_information(root: &Path, r: &crate::check::RelatedLoc) -> String {
