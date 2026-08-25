@@ -1,6 +1,7 @@
 #include "scuzz_rt.h"
 #include "scuzz_ui.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -190,6 +191,16 @@ static const char *g_fault_fail_msg;
 static int g_idle_have;
 static size_t g_idle_bytes;
 static size_t g_idle_count;
+static int g_heap_have;
+static size_t g_heap_bytes;
+static size_t g_heap_count;
+static uint64_t g_heap_rc;
+static int g_sess_have;
+static size_t g_sess_bytes;
+static size_t g_sess_count;
+static uint64_t g_sess_rc;
+static int g_skip_orphan_cancel;
+static int g_skip_unstepped_ensure;
 
 static int fault_kind_from_name(const char *s) {
   if (!s || !s[0])
@@ -312,6 +323,72 @@ void sz_testrt_ui_idle_check(void) {
     sz_panic("leak: heap grew across idle UI loop");
   }
 }
+
+static void baseline_fail(const char *kind, size_t base_c, size_t c,
+                          size_t base_b, size_t b, uint64_t base_rc,
+                          uint64_t rc) {
+  if (c > base_c || b > base_b) {
+    fprintf(stderr,
+            "scuzz: heap baseline: %s grew (count %zu -> %zu, bytes %zu -> "
+            "%zu)\n",
+            kind, base_c, c, base_b, b);
+    sz_panic("heap baseline: live heap grew");
+  }
+  if (rc > base_rc) {
+    fprintf(stderr,
+            "scuzz: unpaired acquire: leftover retain (%s rc %llu -> %llu)\n",
+            kind, (unsigned long long)base_rc, (unsigned long long)rc);
+    sz_panic("unpaired acquire: leftover retain");
+  }
+}
+
+void sz_testrt_heap_baseline_snapshot(void) {
+  if (!sz_testrt_oracles_armed())
+    return;
+  sz_alloc_stats(&g_heap_bytes, &g_heap_count);
+  g_heap_rc = sz_alloc_rc_sum();
+  g_heap_have = 1;
+}
+
+void sz_testrt_heap_baseline_check(void) {
+  size_t b = 0;
+  size_t c = 0;
+  uint64_t rc;
+  if (!sz_testrt_oracles_armed() || !g_heap_have)
+    return;
+  sz_alloc_stats(&b, &c);
+  rc = sz_alloc_rc_sum();
+  baseline_fail("process", g_heap_count, c, g_heap_bytes, b, g_heap_rc, rc);
+}
+
+void sz_testrt_session_baseline_snapshot(void) {
+  if (!sz_testrt_oracles_armed())
+    return;
+  sz_alloc_stats(&g_sess_bytes, &g_sess_count);
+  g_sess_rc = sz_alloc_rc_sum();
+  g_sess_have = 1;
+}
+
+void sz_testrt_session_baseline_check(void) {
+  size_t b = 0;
+  size_t c = 0;
+  uint64_t rc;
+  if (!sz_testrt_oracles_armed() || !g_sess_have)
+    return;
+  sz_alloc_stats(&b, &c);
+  rc = sz_alloc_rc_sum();
+  baseline_fail("session", g_sess_count, c, g_sess_bytes, b, g_sess_rc, rc);
+}
+
+void sz_testrt_plant_skip_orphan_cancel(void) { g_skip_orphan_cancel = 1; }
+
+void sz_testrt_plant_skip_unstepped_ensure(void) {
+  g_skip_unstepped_ensure = 1;
+}
+
+int sz_testrt_skip_orphan_cancel(void) { return g_skip_orphan_cancel; }
+
+int sz_testrt_skip_unstepped_ensure(void) { return g_skip_unstepped_ensure; }
 
 static int fs_fault(BoxResult *r) {
   if (!sz_testrt_fault_tick(SZ_FAULT_FS))
@@ -1409,6 +1486,10 @@ void sz_testrt_reset(void) {
   g_idle_have = 0;
   g_idle_bytes = 0;
   g_idle_count = 0;
+  g_heap_have = 0;
+  g_sess_have = 0;
+  g_skip_orphan_cancel = 0;
+  g_skip_unstepped_ensure = 0;
   sz_property_session_reset();
   sz_testrt_clock_reset_live();
   sz_testrt_random_reset_live();
@@ -1428,15 +1509,19 @@ static const char *g_replay_signals;
 
 void sz_property_stash_a11y(const char *dump) {
   size_t n;
+  char *copy;
   if (g_property_a11y) {
-    sz_free(g_property_a11y);
+    free(g_property_a11y);
     g_property_a11y = NULL;
   }
   if (!dump)
     dump = "";
   n = strlen(dump);
-  g_property_a11y = (char *)sz_alloc(n + 1);
-  memcpy(g_property_a11y, dump, n + 1);
+  copy = (char *)malloc(n + 1);
+  if (!copy)
+    sz_panic("timeline: out of memory");
+  memcpy(copy, dump, n + 1);
+  g_property_a11y = copy;
 }
 
 int64_t sz_property_a11y_has(SzString *needle) {
@@ -1449,15 +1534,19 @@ int64_t sz_property_a11y_has(SzString *needle) {
 
 void sz_property_stash_last_hit(const char *desc) {
   size_t n;
+  char *copy;
   if (g_property_last_hit) {
-    sz_free(g_property_last_hit);
+    free(g_property_last_hit);
     g_property_last_hit = NULL;
   }
   if (!desc)
     desc = "";
   n = strlen(desc);
-  g_property_last_hit = (char *)sz_alloc(n + 1);
-  memcpy(g_property_last_hit, desc, n + 1);
+  copy = (char *)malloc(n + 1);
+  if (!copy)
+    sz_panic("timeline: out of memory");
+  memcpy(copy, desc, n + 1);
+  g_property_last_hit = copy;
 }
 
 int64_t sz_property_last_hit_has(SzString *needle) {
@@ -1508,7 +1597,9 @@ static void sometimes_record(const char *s) {
   if (g_sometimes_n >= SZ_SOMETIMES_MAX)
     return;
   n = strlen(s);
-  copy = (char *)sz_alloc(n + 1);
+  copy = (char *)malloc(n + 1);
+  if (!copy)
+    sz_panic("timeline: out of memory");
   memcpy(copy, s, n + 1);
   g_sometimes[g_sometimes_n++] = copy;
   /* Reachability names stay live. Do not treat that retain as a UI leak. */
@@ -1574,7 +1665,9 @@ void sz_property_classify(SzString *name, int64_t hit) {
   if (g_classify_n >= SZ_CLASSIFY_MAX)
     return;
   n = strlen(s);
-  copy = (char *)sz_alloc(n + 1);
+  copy = (char *)malloc(n + 1);
+  if (!copy)
+    sz_panic("timeline: out of memory");
   memcpy(copy, s, n + 1);
   g_classify[g_classify_n].name = copy;
   g_classify[g_classify_n].yes = hit ? 1 : 0;

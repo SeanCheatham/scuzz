@@ -79,6 +79,19 @@ pub struct ResolvedProject {
     pub manifest_paths: Vec<PathBuf>,
 }
 
+impl ResolvedProject {
+    /// True when a `*.scuzz_sim` overlay is in the package graph.
+    pub fn has_sim(&self) -> bool {
+        self.overlays.iter().any(|o| {
+            o.label.contains(".scuzz_sim")
+                || o.path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with(".scuzz_sim"))
+        })
+    }
+}
+
 pub fn apply_resolved_overlays(
     live: Program,
     resolved: &ResolvedProject,

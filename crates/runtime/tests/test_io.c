@@ -8830,6 +8830,112 @@ int main(void) {
     unsetenv("SCUZZ_TESTRT");
   }
 
+  /* Heap baseline: growth vs the session/process snapshot fails. */
+  {
+    pid_t pid;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_heap_baseline_snapshot();
+    sz_testrt_heap_baseline_check();
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      void *p;
+      sz_testrt_heap_baseline_snapshot();
+      p = sz_alloc(128);
+      (void)p;
+      sz_testrt_heap_baseline_check();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      void *p;
+      sz_testrt_session_baseline_snapshot();
+      p = sz_alloc(64);
+      (void)p;
+      sz_testrt_session_baseline_check();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Acquire/release: leftover retain fails; double release fails. */
+  {
+    pid_t pid;
+    SzString *s;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    s = sz_string_from_cstr("pair");
+    sz_testrt_heap_baseline_snapshot();
+    sz_retain(s);
+    sz_release(s);
+    sz_testrt_heap_baseline_check();
+    sz_release(s);
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      SzString *p = sz_string_from_cstr("retain");
+      sz_testrt_heap_baseline_snapshot();
+      sz_retain(p);
+      sz_testrt_heap_baseline_check();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      SzString *p = sz_string_from_cstr("twice");
+      sz_release(p);
+      sz_release(p);
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Finalizer-on-cancel: a skipped unstepped IO.ensure fails. */
+  {
+    pid_t pid;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      SzLangResource *lr;
+      sz_testrt_plant_skip_unstepped_ensure();
+      lr = lang_make_tok();
+      (void)sz_io_unsafe_run(fm_drop(
+          fork_drop(sz_lang_resource_use(lr, lang_use_step, NULL)),
+          fiber_interrupt_direct, NULL));
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* No parked fibers at quiescence: a leftover forked waiter fails. */
+  {
+    pid_t pid;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      SzQueue *q = sz_queue_make();
+      sz_testrt_plant_skip_orphan_cancel();
+      (void)sz_io_unsafe_run(
+          fm_drop(fork_drop(sz_queue_take(q)), after_fork_ignore, NULL));
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    unsetenv("SCUZZ_TESTRT");
+  }
+
   /* Compact drive tokens: ctor / list / fields. */
   {
     char inner[192];

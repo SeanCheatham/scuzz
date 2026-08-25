@@ -57,6 +57,8 @@ void sz_retain(void *ptr);
 void sz_release(void *ptr);
 /* Live heap through sz_alloc/sz_free (user bytes; excludes size header). */
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
+/* Sum of RC counts on live RC blocks. Raw sz_alloc blocks add 0. */
+uint64_t sz_alloc_rc_sum(void);
 /* Live bytes and count for one kind (`SZ_RC_RAW` … `SZ_RC_PAIR`). */
 void sz_alloc_kind_stats(uint32_t kind, size_t *bytes, size_t *count);
 /* Dump key for `kind` (`raw`, `string`, …). Unknown kinds use `raw`. */
@@ -796,6 +798,18 @@ int sz_testrt_oracles_armed(void);
 void sz_testrt_ui_idle_snapshot(void);
 void sz_testrt_ui_idle_check(void);
 void sz_testrt_ui_idle_reset(void);
+/* Heap baseline: live bytes/counts and RC sum vs a snapshot. Growth or a
+ * leftover retain fails. Process snapshot is for C tests. Session snapshot
+ * is after mount, before the workload, and is the UI terminal check. */
+void sz_testrt_heap_baseline_snapshot(void);
+void sz_testrt_heap_baseline_check(void);
+void sz_testrt_session_baseline_snapshot(void);
+void sz_testrt_session_baseline_check(void);
+/* Planted-fail hooks for C tests. Skip orphan cancel or unstepped ensure. */
+void sz_testrt_plant_skip_orphan_cancel(void);
+void sz_testrt_plant_skip_unstepped_ensure(void);
+int sz_testrt_skip_orphan_cancel(void);
+int sz_testrt_skip_unstepped_ensure(void);
 
 void sz_testrt_clock_install(int64_t start_ms);
 void sz_testrt_clock_advance(int64_t ms);

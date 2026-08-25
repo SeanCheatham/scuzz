@@ -401,6 +401,7 @@ jobs:
           cargo run -p scuzz -- check examples/bad-sched
           cargo run -p scuzz -- test examples/bad-sched
           cargo run -p scuzz -- check examples/bad-response
+          cargo run -p scuzz -- check examples/bad-split
           if cargo run -p scuzz -- check examples/bad-intent; then
             echo "empty verify should fail check" && exit 1
           fi
@@ -549,6 +550,9 @@ jobs:
           test -f examples/bad-response/build/fuzz/repro.toml
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-response; then
             echo "corpus-only should pin the bad-response failure" && exit 1
+          fi
+          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-split; then
+            echo "live/verify split should fail the campaign" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
