@@ -75,6 +75,9 @@ pub fn emit_llvm(program: &Program) -> String {
     {
         intern_str(&mut strs, name);
     }
+    for ir in &program.intent_response {
+        intern_str(&mut strs, &ir.name);
+    }
     intern_drive_decode_names(program, &mut strs);
 
     let enum_tags = build_enum_tags(&program.enums);
@@ -466,6 +469,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_property_signal_list_len(i64)").unwrap();
     writeln!(out, "declare ptr @sz_property_signal_list_at(i64, i64)").unwrap();
     writeln!(out, "declare i64 @sz_property_a11y_has(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_property_last_hit_has(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_property_assert(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_property_check(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_property_sometimes(ptr)").unwrap();
@@ -474,6 +478,11 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(
         out,
         "declare void @sz_property_eventually_register(ptr, ptr)"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "declare void @sz_property_response_register(ptr, ptr, ptr)"
     )
     .unwrap();
     writeln!(out, "declare i32 @sz_drive_uncons(ptr, ptr, ptr, i32)").unwrap();
@@ -1224,6 +1233,49 @@ fn emit_intent_registers(out: &mut String, program: &Program, strs: &[String]) {
     for (j, name) in program.intent_eventually.iter().enumerate() {
         emit_one_intent_register(out, program, strs, base + j, name, "eventually");
     }
+    let base = base + program.intent_eventually.len();
+    for (k, ir) in program.intent_response.iter().enumerate() {
+        emit_one_response_register(out, program, strs, base + k, ir);
+    }
+}
+
+fn emit_one_response_register(
+    out: &mut String,
+    program: &Program,
+    strs: &[String],
+    i: usize,
+    ir: &crate::ast::IntentResponse,
+) {
+    let idx = strs
+        .iter()
+        .position(|s| s == &ir.name)
+        .unwrap_or_else(|| panic!("intent name interned: {}", ir.name));
+    let len = ir.name.len() + 1;
+    let thunk_sym = |name: &str| {
+        let d = program
+            .defs
+            .iter()
+            .find(|d| crate::intent::is_intent_module(&d.module) && d.name == name)
+            .expect("intent thunk def");
+        user_symbol(&d.module, &d.name)
+    };
+    let trig = thunk_sym(&ir.trigger);
+    let resp = thunk_sym(&ir.response);
+    writeln!(
+        out,
+        "  %int{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  %int{i}_ss = call ptr @sz_string_from_cstr(ptr %int{i}_gep)"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  call void @sz_property_response_register(ptr %int{i}_ss, ptr @{trig}, ptr @{resp})"
+    )
+    .unwrap();
 }
 
 fn emit_one_intent_register(
@@ -7218,6 +7270,16 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Property.lastHitHas" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_property_last_hit_has(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Property.assert" => {
             writeln!(
                 code,
@@ -7991,7 +8053,27 @@ mod tests {
     }
 
     fn emit_full(src: &str) -> String {
+        emit_full_intent(src, None)
+    }
+
+    fn emit_full_intent(src: &str, intent: Option<&str>) -> String {
         let mut p = parse(src).unwrap();
+        if let Some(text) = intent {
+            let intents = vec![crate::intent::IntentSource {
+                package: "pkg".into(),
+                scope: crate::intent::IntentScopeKind::Package,
+                dir_rel: String::new(),
+                label: "pkg/intent.scuzz_intent".into(),
+                text: text.into(),
+                path: std::path::PathBuf::new(),
+            }];
+            let units = vec![crate::intent::SourceUnit {
+                package: "pkg".into(),
+                module: "Main".into(),
+                rel: "src/Main.scuzz".into(),
+            }];
+            crate::intent::apply_intents(&mut p, &intents, &units).expect("intents");
+        }
         crate::typ::inject_builtin_enums(&mut p.enums);
         let p = crate::lower::lower_program(p);
         let p = crate::typ::expand_impls(p).expect("impls");
@@ -12376,6 +12458,39 @@ record Point(x: Int, y: Int)
         );
         let (at, name) = first_ptr_arg(&ir, "call i64 @sz_property_a11y_has(ptr ");
         assert_release_after(&ir, at, name, "Property.a11yHas needle");
+    }
+
+    #[test]
+    fn emit_intent_response_registers_claim() {
+        let ir = emit_full_intent(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x")
+"#,
+            Some(
+                "After a tap on the \"button:+1\" control, eventually the \"text:count = 1\" control is visible.\n",
+            ),
+        );
+        assert!(
+            ir.contains("declare i64 @sz_property_last_hit_has(ptr)"),
+            "expected last_hit_has declare:\n{ir}"
+        );
+        assert!(
+            ir.contains("declare void @sz_property_response_register(ptr, ptr, ptr)"),
+            "expected response_register declare:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_property_response_register(ptr "),
+            "expected response register call:\n{ir}"
+        );
+        assert!(
+            ir.contains("call i64 @sz_property_last_hit_has(ptr "),
+            "expected trigger thunk to query the last hit:\n{ir}"
+        );
+        assert!(
+            ir.contains("response:button:+1:text:count = 1"),
+            "expected interned claim id:\n{ir}"
+        );
     }
 
     #[test]

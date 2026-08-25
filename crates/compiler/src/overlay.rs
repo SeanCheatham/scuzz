@@ -83,6 +83,7 @@ pub fn apply_verify_overlays(
 pub fn erase_properties(program: &mut Program) {
     program.intent_always.clear();
     program.intent_eventually.clear();
+    program.intent_response.clear();
 }
 
 /// Drop `.require` to the receiver. Live `build` / `run` must not evaluate the predicate.
@@ -1101,9 +1102,15 @@ mod tests {
         .unwrap();
         live.intent_always = vec!["always_0".into()];
         live.intent_eventually = vec!["eventually_0".into()];
+        live.intent_response = vec![crate::ast::IntentResponse {
+            name: "response:button:+1:text:count = 1".into(),
+            trigger: "response_trigger_0".into(),
+            response: "response_0".into(),
+        }];
         erase_properties(&mut live);
         assert!(live.intent_always.is_empty());
         assert!(live.intent_eventually.is_empty());
+        assert!(live.intent_response.is_empty());
     }
 
     #[test]

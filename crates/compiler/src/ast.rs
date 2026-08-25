@@ -22,6 +22,18 @@ pub struct Program {
     pub intent_always: Vec<String>,
     /// Compiler-inserted eventually thunk names (`__intent` module).
     pub intent_eventually: Vec<String>,
+    /// Event-conditioned response claims lowered from intent prose.
+    pub intent_response: Vec<IntentResponse>,
+}
+/// One event-conditioned response claim lowered from intent prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntentResponse {
+    /// Claim id `response:<trigger>:<needle>`: registered name and `response.declared` line.
+    pub name: String,
+    /// Compiler-inserted trigger thunk name (`__intent` module).
+    pub trigger: String,
+    /// Compiler-inserted response thunk name (`__intent` module).
+    pub response: String,
 }
 
 /// `trait Show:` / `trait Get[T]: def getOrElse(default: T): T`

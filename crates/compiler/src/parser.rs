@@ -85,6 +85,7 @@ fn empty_program(file: &str) -> Program {
         driver_names: Vec::new(),
         intent_always: Vec::new(),
         intent_eventually: Vec::new(),
+        intent_response: Vec::new(),
     }
 }
 
@@ -229,6 +230,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         driver_names: Vec::new(),
         intent_always: Vec::new(),
         intent_eventually: Vec::new(),
+        intent_response: Vec::new(),
     })
 }
 
@@ -352,6 +354,7 @@ pub fn parse_sources_recovering(
             driver_names: Vec::new(),
             intent_always: Vec::new(),
             intent_eventually: Vec::new(),
+            intent_response: Vec::new(),
         }),
         errors,
     )
@@ -631,6 +634,7 @@ impl Parser {
                 driver_names: Vec::new(),
                 intent_always: Vec::new(),
                 intent_eventually: Vec::new(),
+                intent_response: Vec::new(),
             },
             errors,
         )

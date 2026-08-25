@@ -855,6 +855,10 @@ void sz_property_classify(SzString *name, int64_t hit);
 void sz_property_classify_flush(void);
 void sz_property_always_register(SzString *name, void *fn);
 void sz_property_eventually_register(SzString *name, void *fn);
+void sz_property_response_register(SzString *name, void *trigger_fn,
+                                   void *response_fn);
+void sz_property_stash_last_hit(const char *desc);
+int64_t sz_property_last_hit_has(SzString *needle);
 int sz_property_session_armed(void);
 void sz_property_session_step(void);
 void sz_property_session_end(void);

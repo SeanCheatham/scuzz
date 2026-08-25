@@ -8924,6 +8924,76 @@ int main(void) {
     unsetenv("SCUZZ_TESTRT");
   }
 
+  /* Response claims: trigger latch, per-run end check, campaign record. */
+  {
+    pid_t pid;
+    SzString *nm;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    /* Trigger never fires: vacuous pass. */
+    sz_property_session_reset();
+    nm = sz_string_from_cstr("response:button:ghost:text:x");
+    sz_property_response_register(nm, (void *)session_fail,
+                                  (void *)session_fail);
+    sz_release(nm);
+    assert(sz_property_session_armed());
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    /* Trigger fires, response holds: clean end, name recorded. */
+    {
+      char path[] = "/tmp/scuzz-response-test.txt";
+      FILE *f;
+      char buf[256];
+      int found = 0;
+      setenv("SCUZZ_SOMETIMES_DUMP", path, 1);
+      nm = sz_string_from_cstr("response:button:+1:text:count = 1");
+      sz_property_response_register(nm, (void *)session_ok,
+                                    (void *)session_ok);
+      sz_release(nm);
+      sz_property_session_step();
+      sz_property_session_end();
+      sz_property_sometimes_flush();
+      sz_property_session_reset();
+      f = fopen(path, "r");
+      assert(f);
+      while (fgets(buf, (int)sizeof buf, f)) {
+        if (strstr(buf, "response:button:+1:text:count = 1"))
+          found = 1;
+      }
+      fclose(f);
+      assert(found);
+      unsetenv("SCUZZ_SOMETIMES_DUMP");
+      unlink(path);
+    }
+    /* Trigger fires, response never holds: end aborts. */
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      setenv("SCUZZ_TESTRT", "1", 1);
+      sz_property_session_reset();
+      nm = sz_string_from_cstr("response:button:+1:text:changed");
+      sz_property_response_register(nm, (void *)session_ok,
+                                    (void *)session_fail);
+      sz_release(nm);
+      sz_property_session_step();
+      sz_property_session_end();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    /* Last-hit stash query. */
+    nm = sz_string_from_cstr("+1");
+    assert(sz_property_last_hit_has(nm) == 0);
+    sz_property_stash_last_hit("button:+1");
+    assert(sz_property_last_hit_has(nm) == 1);
+    sz_release(nm);
+    nm = sz_string_from_cstr("reset");
+    assert(sz_property_last_hit_has(nm) == 0);
+    sz_release(nm);
+    sz_property_stash_last_hit(NULL);
+    unsetenv("SCUZZ_TESTRT");
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

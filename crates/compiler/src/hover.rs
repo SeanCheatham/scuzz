@@ -1141,6 +1141,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Property.signalListAt(id: Int, i: Int): String",
     ),
     ("Property.a11yHas", "Property.a11yHas(needle: String): Bool"),
+    (
+        "Property.lastHitHas",
+        "Property.lastHitHas(needle: String): Bool",
+    ),
     ("Ref.of", "Ref.of(x: A): IO[Ref[A]]"),
     ("Ref.get", "Ref.get(r: Ref[A]): IO[A]"),
     ("Ref.set", "Ref.set(r: Ref[A], x: A): IO[Unit]"),
@@ -1357,6 +1361,7 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Property.signalListLen",
     "Property.signalListAt",
     "Property.a11yHas",
+    "Property.lastHitHas",
     "Fiber.fork",
     "Fiber.join",
     "Ref.of",

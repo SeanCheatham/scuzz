@@ -1439,6 +1439,27 @@ int64_t sz_property_a11y_has(SzString *needle) {
     return 0;
   return strstr(g_property_a11y, n) != NULL ? 1 : 0;
 }
+static char *g_property_last_hit = NULL;
+
+void sz_property_stash_last_hit(const char *desc) {
+  size_t n;
+  if (g_property_last_hit) {
+    sz_free(g_property_last_hit);
+    g_property_last_hit = NULL;
+  }
+  if (!desc)
+    desc = "";
+  n = strlen(desc);
+  g_property_last_hit = (char *)sz_alloc(n + 1);
+  memcpy(g_property_last_hit, desc, n + 1);
+}
+
+int64_t sz_property_last_hit_has(SzString *needle) {
+  const char *n = needle ? sz_string_cstr(needle) : "";
+  if (!g_property_last_hit || !n[0])
+    return 0;
+  return strstr(g_property_last_hit, n) != NULL ? 1 : 0;
+}
 
 SzIo *sz_property_assert(SzString *name, int64_t ok) {
   const char *tr = getenv("SCUZZ_TESTRT");
@@ -1469,17 +1490,10 @@ void sz_property_check(SzString *name, int64_t ok) {
 static char *g_sometimes[SZ_SOMETIMES_MAX];
 static int g_sometimes_n;
 
-void sz_property_sometimes(SzString *name) {
-  const char *tr = getenv("SCUZZ_TESTRT");
-  const char *s;
+static void sometimes_record(const char *s) {
   int i;
   size_t n;
   char *copy;
-  if (!tr || tr[0] != '1')
-    return;
-  s = name ? sz_string_cstr(name) : "";
-  if (!s[0])
-    return;
   for (i = 0; i < g_sometimes_n; i++) {
     if (strcmp(g_sometimes[i], s) == 0)
       return;
@@ -1492,6 +1506,17 @@ void sz_property_sometimes(SzString *name) {
   g_sometimes[g_sometimes_n++] = copy;
   /* Reachability names stay live. Do not treat that retain as a UI leak. */
   sz_testrt_ui_idle_reset();
+}
+
+void sz_property_sometimes(SzString *name) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  const char *s;
+  if (!tr || tr[0] != '1')
+    return;
+  s = name ? sz_string_cstr(name) : "";
+  if (!s[0])
+    return;
+  sometimes_record(s);
 }
 
 void sz_property_sometimes_flush(void) {
@@ -1577,6 +1602,16 @@ static SzSessionProp g_always[SZ_SESSION_MAX];
 static int g_always_n;
 static SzSessionProp g_eventually[SZ_SESSION_MAX];
 static int g_eventually_n;
+typedef struct {
+  char *name;
+  int64_t (*trigger)(void);
+  int64_t (*response)(void);
+  int seen_trigger;
+  int held;
+} SzResponseProp;
+
+static SzResponseProp g_response[SZ_SESSION_MAX];
+static int g_response_n;
 
 static void session_register(SzSessionProp *tab, int *n, SzString *name,
                              void *fn) {
@@ -1603,9 +1638,42 @@ void sz_property_always_register(SzString *name, void *fn) {
 void sz_property_eventually_register(SzString *name, void *fn) {
   session_register(g_eventually, &g_eventually_n, name, fn);
 }
+void sz_property_response_register(SzString *name, void *trigger_fn,
+                                   void *response_fn) {
+  const char *s = name ? sz_string_cstr(name) : "";
+  size_t len;
+  char *copy;
+  if (!trigger_fn || !response_fn || !s[0])
+    return;
+  if (g_response_n >= SZ_SESSION_MAX)
+    sz_panic("sz_property session: too many thunks");
+  len = strlen(s);
+  copy = (char *)sz_alloc(len + 1);
+  memcpy(copy, s, len + 1);
+  g_response[g_response_n].name = copy;
+  g_response[g_response_n].trigger = (int64_t(*)(void))trigger_fn;
+  g_response[g_response_n].response = (int64_t(*)(void))response_fn;
+  g_response[g_response_n].seen_trigger = 0;
+  g_response[g_response_n].held = 0;
+  g_response_n++;
+}
+
+/* Trigger is checked before the response so a response visible on the pump
+   right after the tap counts. */
+static void session_step_response(void) {
+  int i;
+  for (i = 0; i < g_response_n; i++) {
+    if (!g_response[i].seen_trigger && g_response[i].trigger &&
+        g_response[i].trigger())
+      g_response[i].seen_trigger = 1;
+    if (g_response[i].seen_trigger && !g_response[i].held &&
+        g_response[i].response && g_response[i].response())
+      g_response[i].held = 1;
+  }
+}
 
 int sz_property_session_armed(void) {
-  return g_always_n > 0 || g_eventually_n > 0;
+  return g_always_n > 0 || g_eventually_n > 0 || g_response_n > 0;
 }
 
 void sz_property_session_step(void) {
@@ -1626,6 +1694,7 @@ void sz_property_session_step(void) {
     if (g_eventually[i].fn && g_eventually[i].fn())
       g_eventually[i].held = 1;
   }
+  session_step_response();
 }
 
 void sz_property_session_end(void) {
@@ -1640,6 +1709,17 @@ void sz_property_session_end(void) {
       continue;
     snprintf(buf, sizeof buf, "eventually never held: %s",
              g_eventually[i].name ? g_eventually[i].name : "?");
+    fprintf(stderr, "scuzz: %s\n", buf);
+    sz_panic(buf);
+  }
+  for (i = 0; i < g_response_n; i++) {
+    if (!g_response[i].seen_trigger)
+      continue;
+    sometimes_record(g_response[i].name ? g_response[i].name : "?");
+    if (g_response[i].held)
+      continue;
+    snprintf(buf, sizeof buf, "response never held: %s",
+             g_response[i].name ? g_response[i].name : "?");
     fprintf(stderr, "scuzz: %s\n", buf);
     sz_panic(buf);
   }
@@ -1663,6 +1743,16 @@ void sz_property_session_reset(void) {
     g_eventually[i].held = 0;
   }
   g_eventually_n = 0;
+  for (i = 0; i < g_response_n; i++) {
+    if (g_response[i].name)
+      sz_free(g_response[i].name);
+    g_response[i].name = NULL;
+    g_response[i].trigger = NULL;
+    g_response[i].response = NULL;
+    g_response[i].seen_trigger = 0;
+    g_response[i].held = 0;
+  }
+  g_response_n = 0;
 }
 
 /* Matches DRIVE_NAMES_MAX in crates/compiler/src/overlay.rs. Overlay rejects a larger table. */
