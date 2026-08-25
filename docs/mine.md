@@ -1,117 +1,110 @@
-# Property mining
+# Mining and the judgment queue
 
-Status: `scuzz mine` lists invariant, response, and boundary candidates from campaign traces. Candidates qualify on boundary evidence, mutation-kill rank, and directed falsification. `scuzz mine --json` feeds an external assistant. Later slices: model-binding candidates, invariants over list signals, golden approval through the review loop.
+Status: shipped today, `scuzz mine` lists invariant, response, and boundary candidates from `build/fuzz/trace.campaign`, with evidence, `--json`, decision flags (`--always` / `--never` / `--approve` / `--dismiss`), and dismissal suppression. This doc describes the target design: claims are Scuzz predicates over timelines, candidate synthesis runs inside the campaign, and `scuzz mine` is the judgment-queue interface. Sections mark what is shipped.
 
-## Goal
+## The model
 
-`scuzz fuzz` finds candidate properties in observed runs. A human judges each candidate. Accepted candidates become claims in `intent.scuzz_intent`. Approved states become corpus entries. The intent file stays the property store. The machine writes most sentences. The human edits by exception.
+A **claim** is a pure Scuzz predicate over a `Timeline`. A timeline is the recorded linear history of one execution: one branch of the multiverse the campaign explores. Claims quantify over the multiverse.
 
-## Direction
+- **∀ claims** must hold on every explored timeline. Invariants, response claims, and `never` claims are ∀.
+- **∃ claims** must hold on at least one explored timeline. `Property.sometimes` is ∃.
 
-The old direction grew the English grammar so humans could write more claims. This plan stops that direction. Humans judge observed behavior. Machines propose claims. The closed grammar stays small. It is the set of decisions the tool can encode and enforce.
+Most claims pair a trigger with an expectation. The trigger names the states a claim speaks about. The expectation names what those states must contain. An invariant is the degenerate case: the trigger is always true. A metamorphic relation is the one extension: it relates two timelines (a permuted input keeps the total). It stays a distinct claim kind.
 
-Why the English intent mechanism stays:
+Claims judge complete timelines at the terminal point. `scuzz fuzz` constructs that point. When the event budget runs out, the run stops injecting events, injects shutdown where it applies, and pumps until fibers settle or a quiesce budget trips. A pending expectation at a genuine end fails. A truncated run is not possible: quiesce comes first.
 
-- The claim forms are the encoding vocabulary. A mined decision must land in an enforceable sentence. `stays`, `never`, `After a tap`, and the `For` templates already cover the candidate kinds in this plan.
-- `vision.md` locks "No `*.g.scuzz` codegen". Generated claims need a store. The intent file is that store.
-- English sentences are the review surface. A human reads mined claims in a diff. A TOML or Scuzz-def store gives the same information with a worse review step.
-- The mechanism is shipped, tested, and CI-proven. Deleting it buys nothing.
+`.require` stays a live point assertion. It aborts a run the moment a wrong value exists. Timeline claims judge after the run. Two strata: point assertions abort. Timeline claims judge.
 
-## Removal audit
+## State
 
-Remove or stop:
+Each pump records a `State`. A timeline is a list of states. `State` has three sections.
 
-- Stop grammar expansion. Delete the `gaps.md` line that ranks richer always/eventually templates. Mining replaces template growth.
-- Stop the predicate-vocabulary idea for `For` claims (comparatives, quantifiers, `and`/`or` in prose). It was discussed. It never landed. Do not plan it again. Mined invariants take its place.
-- Reframe `docs/guide.md`. Intent files become machine-maintained stores. Hand authoring stays supported. It is no longer the primary flow.
+- **Observation.** Signal store, a11y dump, `[last_hit]`, fields and editor state.
+- **Effect.** The blessed-op log since the last pump (op name, sizes or hashes of args, never payloads), the fiber census (statuses, park reasons, queue depths), heap deltas, and the fault context.
+- **Drive.** Drive args and results.
 
-Keep (with the reason each survives):
+The capture is deterministic. Creation-order ids only. No pointer addresses. No hash-map iteration order. `State` is a versioned schema. A field enters when a second claimant needs it. Claims read only `State`. A claim can judge only what `State` exposes.
 
-- `After a tap` response claims and the runtime latch (`testrt.c`, `ui.c`). They are the encoding for mined trigger-then-response decisions. Mining proposes this claim kind often.
-- `Property.lastHitHas` and the last-hit stash. The response trigger thunk needs them.
-- `response.declared` and the CLI merge. Campaign non-vacuity matters more when a machine writes claims. A mined claim with a dead trigger must fail the campaign.
-- `never` claims. They are the encoding for a rejected boundary state.
-- `The <signal> stays at <n> or more.` It is the encoding for a mined range invariant.
-- `For` templates, `visible` / `eventually`, `Property.sometimes`, goldens, `scuzz test --update`. Each has a live role outside mining. `scuzz test --update` may merge into the review loop later. Not this slice.
+## The campaign
 
-Nothing shipped is dead. The audit found no code to delete. It found plans and doc framing to delete.
+`scuzz fuzz` explores the multiverse one timeline at a time, in memory.
 
-## The loop
+1. Replay `<pkg>/corpus/*.toml`, then `build/seeds.txt` Given rows. Then search.
+2. Each run executes under TestRuntime, reaches its quiesced terminal point, and evaluates every armed claim against the timeline in memory.
+3. Verdicts fold into campaign aggregates. A ∀ claim fails the campaign on one counterexample timeline. An ∃ claim fails the campaign when no timeline satisfies it.
+4. Persist identities and aggregates. Never persist full timelines. A timeline's identity is its seed, event script, and fault plan. Determinism re-derives the recording by replay.
 
-1. `scuzz fuzz` runs a campaign. Each run writes a per-pump trace. The CLI merges traces into `build/fuzz/trace.campaign`.
-2. `scuzz mine <pkg>` reads the trace, `summary.toml`, and the declared artifacts. It emits ranked candidates.
-3. The human picks a decision per candidate: `always`, `never`, `approve`, or `dismiss`.
-4. `always` / `never` append the claim sentence to `intent.scuzz_intent` after validation. `approve` writes a corpus entry after replay. `dismiss` records a comment in the intent file. A dismissed candidate never shows again.
-5. The next campaign runs with the new claims. New candidates surface at the new boundary.
+The corpus stores identities. `repro.toml` stores an identity. `summary.toml` stores aggregates. The judgment queue stores one slice per queued item, or the identity when replay is cheaper.
 
-## Machinery
+## Candidate synthesis
 
-### Trace channel
+Synthesis is a streaming fold over the same timelines the claims judge. Candidates can never be stale. They come from the campaign that just ran. The merged full-trace artifact (`trace.campaign`, shipped) goes away.
 
-- New env `SCUZZ_TRACE_DUMP`. It names a file. Under `SCUZZ_TESTRT=1`, `sz_ui_pump_sync` appends one block per pump: a `== pump` line, the `[signals]` text from `sz_signal_dump`, the `[views]` text from `sz_view_a11y_dump`, and the `[last_hit]` line when set. Reuse the golden dump formatting in `ui.c` (~line 445). Factor it to take a `FILE *`.
-- Cap the trace at 1 MiB per run. Stop appending after the cap. This stays deterministic.
-- `fuzz_exec` in `crates/cli/src/cmd_fuzz.rs` (~line 1687) writes a per-run `trace.txt` path and merges it into `build/fuzz/trace.campaign` after each run. Mirror `merge_sometimes`.
+Four sources:
 
-### Signal name table
+1. **Holds.** Classic mining (shipped). Fold per-signal minima, post-tap row frequencies, and boundary states across all timelines. Emit the candidate as a claim.
+2. **Forks.** Undecided states. Two timelines diverge from a similar prefix, coverage reports a gap, or a reached state varies in a dimension no claim reads. Emit the state as a forced-choice question with its replay identity.
+3. **Complaints.** A human marks a replayed timeline as wrong. Shrink it. Compute the weakest claim that excludes the wrong state and keeps every observed good state. Emit it as a candidate.
+4. **Mutant pairs.** A mutant survives and its replayed timelines diverge from the original under the same seed. Emit the pair as a question: timeline A does X, timeline B does Y, everything else identical. The accepted answer writes a claim that kills the mutant by construction. A mutant with bit-identical replayed timelines is inert. It does not list.
 
-- Candidates name signals, not ids. The compiler writes `build/signals.txt` in the verify build: one `id<TAB>name<TAB>kind` line per top-level `name = Signal.int/str/list(...)` binding, in creation order. This mirrors the id assignment that `stays` lowering uses in `intent.rs`. Written in `driver.rs` next to `response.declared`.
-
-### Candidate kinds
-
-Each candidate is encodable in the shipped grammar. No new sentence forms.
-
-1. **Range invariant.** An Int signal's observed minimum across all trace states. Emit `The <name> stays at <min> or more.` Skip when the minimum equals a value the claim cannot fail on. Evidence: state count, run count, minimum, maximum.
-2. **Response correlation.** A tap label `T` from `[last_hit]`, and an a11y row `R` present in every post-tap state of every run where `T` fired. Emit `After a tap on the "T" control, eventually the "R" control is visible.` Cap at 3 rows per tap label. Evidence: runs where `T` fired, state count.
-3. **Boundary state.** The shrunk failing script of the last campaign, minus its last event. `approve` replays the shorter script and writes it as a corpus entry. `never` finds a dump row unique to that state and emits `The "<row>" control is never visible.` If no unique row exists, the candidate shows as approve-or-dismiss only.
-
-No ML in candidate generation, ranking, validation, or enforcement. Ranking is deterministic: mutation kills first, then boundary states, then response correlations by support, then invariants. Cap at 20 candidates.
-
-### `scuzz mine`
-
-`scuzz mine` lives in `crates/cli` (`cmd_mine.rs`, wired in `main.rs`).
-
-- `scuzz mine <pkg>` lists candidates. One line each: `<id>  <kind>  <sentence>  (<evidence>)`. The id is the first 16 hex of sha1(`kind|sentence`), same style as corpus hashes. Invariant evidence prints minimum, maximum, run count, attainment, decreasing-at-min, mutation kills, and probe count.
-- `scuzz mine <pkg> --always <id>` validates, then appends the sentence to the package `intent.scuzz_intent`. Validation: replay the corpus plus 8 fresh seeds with the claim armed. A failure prints the counterexample repro and leaves the file unchanged.
-- `scuzz mine <pkg> --never <id>` does the same for a `never` encoding.
-- `scuzz mine <pkg> --approve <id>` replays the boundary script and writes `corpus/<hash>.toml` on pass.
-- `scuzz mine <pkg> --dismiss <id>` appends `# dismissed: <id> <sentence>` to `intent.scuzz_intent`. The miner skips a candidate whose id is the first token of a dismissed comment, or whose sentence equals the remainder. Intent comments need no parser change.
-
-An absent `intent.scuzz_intent` is created by the first write. Validation reuses the existing fuzz replay path in `cmd_fuzz.rs`.
+No ML in generation, ranking, validation, or enforcement. Cap the queue at 20 items.
 
 ## Qualification
 
-Knowing which candidate deserves the human's time is the hard job. Make it measurable. A candidate qualifies on three deterministic measures, not on observed frequency.
+Knowing which item deserves the human's time is the hard job. Make it measurable. An item qualifies on deterministic measures, not on observed frequency. (Shipped for holds candidates.)
 
 - **Boundary evidence.** Invariant evidence prints minimum, maximum, run count, and attainment: how many runs reach the minimum, and whether an observed decreasing event fired at the minimum. A minimum reached under pressure is a strong candidate. A minimum the campaign never approached is noise. Skip a candidate no event can fail.
-- **Mutation-kill rank.** Replay each candidate against the surviving mutants of the last campaign. Evidence gains `kills K/N survivors`. Kills become the first rank key. A claim that kills no survivor carries no enforcement weight and ranks last. Mutants already replay the corpus, so this reuses the mutation phase machinery.
+- **Mutation-kill rank.** Replay each candidate against the surviving mutants of the last campaign. Evidence gains `kills K/N survivors`. Kills become the first rank key. A claim that kills no survivor carries no enforcement weight and ranks last.
 - **Directed falsification.** Before a candidate lists, probe it with a short seeded campaign that weights events observed to decrease the signal. A violated candidate does not list. The seed is fixed, so the probe is deterministic on every machine.
+- **Mutation relevance.** Rank fork and coverage items by adjacency to mutation sites. An unclaimed dimension that mutants perturb is a real hole. One that mutants never touch is likely incidental.
 
-### External assistant through `--json`
+## The judgment queue
 
-Validation cannot judge whether observed behavior is intended. The human is that oracle. Semantic triage can help the human: "the count stays at 0 or more" reads as product intent; "the `text:count = 7` control is visible" reads as incidental. That judgment may come from an external assistant, for example a local LLM on the author's GPU.
+`scuzz mine` is the queue interface. (Shipped as the candidate list.)
 
-- `scuzz mine --json` emits the candidate list as JSON: id, kind, sentence, evidence fields. The plain list stays the human surface.
-- The assistant runs outside `scuzz` as a `--json` consumer. It may reorder, annotate, or drive `--dismiss`. It appends a claim only through the validated decision flags.
-- `scuzz` embeds no inference runtime. Generation, ranking, validation, and enforcement stay deterministic and identical on every machine. CI needs no GPU.
-- Semantic (embedding) dump novelty stays out of scope. It breaks campaign reproducibility.
+- `scuzz mine <pkg>` lists queue items. One line each: id, kind, rendered English, evidence. The id is the first 16 hex of sha1(`kind|rendering`), same style as corpus hashes.
+- A human judgment is one forced choice per item: accept, reject, or defer. Each item carries its replay identity and its consequence in one glance: what accepting forbids in all future campaigns. Reject and defer never grant authority. Silence never accepts.
+- An agent accepts only a candidate it can cite. `--always` / `--never` take `--because "<line>"`. The flag names a product-doc intent line or a judgment-log entry that entails the claim. The cited line must already exist. The CLI fails `--because` when it is absent. Intent comes first. Observation comes second. This is preregistration.
+- Validation stays shipped behavior: replay the corpus plus 8 fresh seeds with the claim armed. A failure prints the counterexample repro and leaves the file unchanged. Validation filters false claims, not incidental ones. The human judges intent.
+- `--approve` replays a boundary script and writes `corpus/<hash>.toml` on pass. (Shipped.)
+- `--dismiss` writes a suppression entry with the rendered sentence. A dismissed candidate never shows again. (Shipped.) The suppression stays visible in review.
+- `--json` emits the queue for an external assistant. The assistant may reorder, annotate, or dismiss. It accepts only through the validated decision flags, with `--because`. `scuzz` embeds no inference runtime. CI needs no GPU. Semantic (embedding) novelty stays out of scope. It breaks campaign reproducibility.
 
-### Dismissal provenance
+## Claims as Scuzz source
 
-`--dismiss` writes `# dismissed: <id> <sentence>`. The sentence keeps the intent file readable as a review surface and keeps suppression across id churn. The miner suppresses a candidate whose id or exact sentence appears in a dismissed comment.
+Claims live in `intent.scuzz_intent` as Scuzz predicates over the claim API. The claim API reads `State`: signal store, a11y rows, hit history, effect log, fiber census, drive records. A claim is a single pure expression. No helper defs. A claim that needs helpers belongs in app code or in `.require`.
+
+The closed English grammar stays in the compiler as the **specification of the renderable fragment**. The renderer states each claim in English for the judgment queue and for diffs. The check is a round trip: parse the rendered English and require the original claim AST. A mismatch is a renderer bug and fails the build. If a claim cannot render into a faithful one-glance question, it does not belong in the claims file.
+
+The claims file is tool-maintained Scuzz source. This is the `scuzz fmt` class of tool writes, not `*.g.scuzz` codegen. The codegen lock stands. Humans and agents may also hand-write claims. Hand-written claims need no citation.
+
+## The judgment log
+
+The judgment log is the provenance root. It is structured, append-only, and machine-written. Each entry records the question, the options, the replay identity, the choice, and the resulting claim line. The intent file is a projection of the judgment log. A hand-written claim records as a judgment without a question. Human prose intent lives in product docs. The log cites it.
+
+## Coverage
+
+Three axes measure the oracle net. Each axis feeds the queue.
+
+- **Reachability.** `sometimes` names and claim triggers must fire in the campaign. An unfired trigger fails the campaign.
+- **Breadth.** A claim covers the `State` fields it reads. `scuzz check` reports defs, signals, and controls with no claim, no `sometimes`, and no `.require`. The campaign reports reached states that vary in fields no claim reads.
+- **Strength.** Mutation. A divergent survivor in a claimed field means a weak claim. In an unclaimed field it means a missing claim. Both feed the queue.
 
 ## Proof
 
-- `make -C crates/runtime test` and `cargo test -p scuzz-compiler` and `cargo test -p scuzz` pass.
-- `cargo run -p scuzz -- fuzz --iterations 16 examples/counter` writes `build/fuzz/trace.campaign` and `build/signals.txt`.
-- `cargo run -p scuzz -- mine examples/counter` lists a `stays` candidate for `count` with min/max/kills evidence when that claim is not already in intent.
-- `cargo run -p scuzz -- mine --json examples/counter` emits a JSON array. `--dismiss <id>` writes `# dismissed: <id> <sentence>`. A second list omits that candidate.
-- `cargo run -p scuzz -- mine examples/counter --always <id>` appends the claim. A following `fuzz --iterations 16` stays green.
-- Negative: copy traces from a passing campaign, patch the counter handler from `+ 1` to `- 1`, and run `mine` without a new fuzz. The directed probe drops the stale `stays at 0` candidate. `mine --always` on a stale range candidate fails validation and leaves the intent file unchanged.
-- CI counter loop checks evidence fields, `--json`, dismiss, and the decrement probe. Bounded and deterministic.
+Shipped proofs stay: the counter campaign writes `build/signals.txt`; `mine` lists a `stays` candidate with min/max/kills evidence; `--json` emits an array; `--dismiss` suppresses; `--always` validates and appends; the decrement-probe negative drops a stale candidate.
+
+Direction proofs:
+
+- `scuzz fuzz --iterations 16 examples/counter` ends each run in a quiesce phase. Claims evaluate at terminal points in memory. No `trace.campaign` is written.
+- A rendered claim round-trips through the English grammar to the same AST. A patched renderer fails the build.
+- A seeded mutant with divergent replayed timelines lists as a minimal-pair queue item. Accepting it writes a claim that kills the mutant.
+- A campaign that reaches a state varying only in unclaimed fields lists a breadth item. Dismissing it suppresses that field across campaigns.
 
 ## Contingencies
 
-- Trace size: the 1 MiB cap binds long campaigns. If mining needs more states, trace kept runs only. Decide with data.
-- Sparse states: if `trace.campaign` has too few states for correlation, mine final states only in v1 and note the weaker evidence.
-- Signal table drift: if `build/signals.txt` ids ever disagree with thunk ids, `stays` claims break first. The existing `binds_signal_from_main` test catches the order change. Fix the table, not the claim.
-- Hash churn: candidate ids change when the grammar or a sentence changes. Sentence-bearing dismissal comments keep suppression across id churn. An id-only dismissal still suppresses until the sentence changes.
+- **Aggregates lose per-state detail.** Mining works from folds, not recordings. When a queue item needs a slice, replay the identity. Decide with data which slices to persist.
+- **Signal table drift.** If `build/signals.txt` ids ever disagree with claim evaluation, `stays` claims break first. The existing `binds_signal_from_main` test catches the order change. Fix the table, not the claim.
+- **Hash churn.** Candidate ids change when the rendering changes. Sentence-bearing suppression entries keep suppression across id churn.
+- **Queue ergonomics.** Every item must carry its replay and its consequence in one glance. An item that needs three files of context gets dismissed unread. Gate new question kinds on this.
+- **Equivalent mutants.** The bit-identical replay filter demotes inert mutants on evidence. It is not a proof of equivalence. Expect residue. Rank it last.
