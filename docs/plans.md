@@ -16,10 +16,12 @@ Timeline claim kernel hardening.
 
 - Typed terminal boundary: a run ends settled or quiesce-budget-tripped. A tripped budget fails the run before claims judge.
 - Versioned `State` schema: replays and claims stay stable across compiler releases.
+- Session claims return `Verdict`: valid or invalid. An invalid verdict carries the violating state index and evidence. Drive oracles stay `Bool`.
 
 Proof:
 
 - An expected-fail example parks a fiber past the quiesce budget. The campaign reports the boundary, not a claim verdict.
+- `examples/counter` claims return `Verdict`. A failing claim cites the verdict's state index.
 - `make -C crates/runtime test`, `cargo test -p scuzz-compiler`, `cargo test -p scuzz` pass.
 
 Current locks: [`vision.md`](vision.md). Ranked gaps: [`gaps.md`](gaps.md).
