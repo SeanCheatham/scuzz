@@ -241,9 +241,8 @@ IDE prerequisites run as two tracks. Track A is input and editor (key alphabet, 
 
 Verification next steps, in order:
 
-1. **Mining qualification.** Candidate evidence (minimum, maximum, attainment), mutation-kill rank, directed falsification probes, `scuzz mine --json`. Slice: [`plans.md`](plans.md).
-2. **Seed-table idiom.** Feed known input/output pairs into the fuzz corpus as seeds and arm them as oracles.
-3. **Differential structural dumps.** Compare dumps across render backends.
+1. **Seed-table idiom.** Feed known input/output pairs into the fuzz corpus as seeds and arm them as oracles.
+2. **Differential structural dumps.** Compare dumps across render backends.
 Property mining direction: [`mine.md`](mine.md).
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Device builds stay open.

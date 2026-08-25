@@ -147,7 +147,7 @@ enum Commands {
     /// Mine candidate intent claims from fuzz campaign traces
     #[command(
         group = clap::ArgGroup::new("decision").args(["always", "never", "approve", "dismiss"]).multiple(false),
-        after_help = "Examples:\n  scuzz mine examples/counter\n  scuzz mine --always <id> examples/counter\n  scuzz mine --dismiss <id>\n\nLists candidates mined from build/fuzz/trace.campaign, build/signals.txt, and build/fuzz/repro.toml. `--always`/`--never` append a validated claim to intent.scuzz_intent. `--approve` writes a boundary corpus entry. `--dismiss` records the candidate as dismissed.\n"
+        after_help = "Examples:\n  scuzz mine examples/counter\n  scuzz mine --json examples/counter\n  scuzz mine --always <id> examples/counter\n  scuzz mine --dismiss <id>\n\nLists candidates mined from build/fuzz/trace.campaign, build/signals.txt, and build/fuzz/repro.toml. Evidence includes min/max/runs/attainment, mutation kills, and probe count. Rank is kills, then kind. `--json` emits the same list as a JSON array. `--always`/`--never` append a validated claim to intent.scuzz_intent. `--approve` writes a boundary corpus entry. `--dismiss` records `# dismissed: <id> <sentence>`. `--json` does not combine with a decision flag.\n"
     )]
     Mine {
         #[arg(default_value = ".")]
@@ -161,9 +161,12 @@ enum Commands {
         /// Approve a boundary candidate: replay the truncated script, write a corpus entry
         #[arg(long)]
         approve: Option<String>,
-        /// Dismiss the candidate: append `# dismissed: <id>` to intent.scuzz_intent
+        /// Dismiss the candidate: append `# dismissed: <id> <sentence>` to intent.scuzz_intent
         #[arg(long)]
         dismiss: Option<String>,
+        /// Emit the candidate list as JSON (list only; not with a decision flag)
+        #[arg(long, conflicts_with_all = ["always", "never", "approve", "dismiss"])]
+        json: bool,
     },
     /// Create a new Scuzz Lang project
     #[command(
@@ -401,7 +404,8 @@ version = "0.1.0"
             never,
             approve,
             dismiss,
-        } => cmd_mine::run(&path, always, never, approve, dismiss),
+            json,
+        } => cmd_mine::run(&path, always, never, approve, dismiss, json),
         Commands::Ide {
             path,
             headless,

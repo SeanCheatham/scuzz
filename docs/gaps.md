@@ -54,7 +54,7 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, compiler tests, hello). Full macOS packaging stays `workflow_dispatch`.
 - **Web apps** — not a current target.
 - **Oracle idioms in `guide.md`** — `After tap` response claims and `never` forms are in. Richer always/eventually templates stay ranked.  Metamorphic swap and concrete-fact `.require` are in.
-- **Property mining** — `scuzz mine` proposes claims from fuzz traces. A human accepts or dismisses each candidate. Accepted claims land in `intent.scuzz_intent`. Next: qualification — richer evidence, mutation-kill rank, directed falsification, `--json` ([`plans.md`](plans.md)). ML stays outside `scuzz`; an external assistant consumes `--json` and drives the decision flags. See [`mine.md`](mine.md).
+- **Property mining** — `scuzz mine` proposes claims from fuzz traces. A human accepts or dismisses each candidate. Accepted claims land in `intent.scuzz_intent`. Candidates qualify on evidence, mutation-kill rank, and directed probes. `scuzz mine --json` feeds an external assistant. ML stays outside `scuzz`. See [`mine.md`](mine.md).
 - **Stronger mutation operators** — boundary `where` mutations, handler-swap on UI taps, Signal-map identity. Then a mutation score in `summary.toml`.
 - **Swarm testing + corpus hygiene** — vary event-alphabet weights per run. `scuzz fuzz --minimize-corpus` keeps stored entries small.
 - **Nightly deep campaign** — a long-budget run over examples with corpus promotion. CI stays a bounded deterministic campaign.
