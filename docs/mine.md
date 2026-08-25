@@ -1,6 +1,6 @@
 # Property mining
 
-Status: the first slice is in. The trace channel, the signals table, and `scuzz mine` (invariant, response, and boundary candidates) are live. Later slices: model-binding candidates, invariants over list signals, golden approval through the review loop.
+Status: the first slice is in. The trace channel, the signals table, and `scuzz mine` (invariant, response, and boundary candidates) are live. Next slice: qualification ([`plans.md`](plans.md)). Later slices: model-binding candidates, invariants over list signals, golden approval through the review loop.
 
 ## Goal
 
@@ -64,7 +64,7 @@ Each candidate is encodable in the shipped grammar. No new sentence forms.
 2. **Response correlation.** A tap label `T` from `[last_hit]`, and an a11y row `R` present in every post-tap state of every run where `T` fired. Emit `After a tap on the "T" control, eventually the "R" control is visible.` Cap at 3 rows per tap label. Evidence: runs where `T` fired, state count.
 3. **Boundary state.** The shrunk failing script of the last campaign, minus its last event. `approve` replays the shorter script and writes it as a corpus entry. `never` finds a dump row unique to that state and emits `The "<row>" control is never visible.` If no unique row exists, the candidate shows as approve-or-dismiss only.
 
-No ML. Ranking is deterministic: boundary states first, then response correlations by support, then invariants by state count. Cap at 20 candidates.
+No ML in candidate generation, validation, or enforcement. Ranking is deterministic: boundary states first, then response correlations by support, then invariants by state count. Cap at 20 candidates. The qualification slice moves mutation kills to the front of the rank.
 
 ### `scuzz mine`
 
@@ -78,29 +78,40 @@ New subcommand in `crates/cli` (new `cmd_mine.rs`; wire in `main.rs`).
 
 An absent `intent.scuzz_intent` is created by the first write. Validation reuses the existing fuzz replay path in `cmd_fuzz.rs`.
 
-## Implementation steps
+## Qualification
 
-1. Runtime: factor the golden dump writer in `ui.c` to take `FILE *`. Add the trace append under `SCUZZ_TRACE_DUMP` in `sz_ui_pump_sync`. Declare in `scuzz_rt.h` if a new function crosses files. Test in `test_ui.c`: set the env, pump, read the file, expect `[signals]` and `== pump`.
-2. Compiler: write `build/signals.txt` in the verify branch of `driver.rs`. Unit-test the text format in `fuzz.rs` style.
-3. CLI: `fuzz_exec` writes and merges the per-run trace. Mirror `merge_sometimes`.
-4. CLI: `cmd_mine.rs`. Trace parser, the three miners, ranking, candidate ids, list mode.
-5. CLI: decision flags. Validation through the existing replay path. Intent-file append and dismiss comments.
-6. Docs and removals: delete the `gaps.md` oracle-idioms line and add a mining line. Reframe the `guide.md` intent paragraph (machine-maintained store). Add the mine loop to the `vision.md` verification paragraphs.
-7. Example proof: run the loop on `examples/counter`. Expect a `count` range candidate. Accept it. The intent file gains `The count stays at 0 or more.` Expect a response candidate for `button:+1` and `text:count = 1`. Dismiss it (the hand-written claim already covers it). CI mirrors the loop non-interactively.
+Knowing which candidate deserves the human's time is the hard job. Make it measurable. A candidate qualifies on three deterministic measures, not on observed frequency. Slice steps: [`plans.md`](plans.md).
 
-## Verification
+- **Boundary evidence.** Invariant evidence prints minimum, maximum, run count, and attainment: how many runs reach the minimum, and whether an observed decreasing event fired at the minimum. A minimum reached under pressure is a strong candidate. A minimum the campaign never approached is noise. Skip a candidate no event can fail.
+- **Mutation-kill rank.** Replay each candidate against the surviving mutants of the last campaign. Evidence gains `kills K/N survivors`. Kills become the first rank key. A claim that kills no survivor carries no enforcement weight and ranks last. Mutants already replay the corpus, so this reuses the mutation phase machinery.
+- **Directed falsification.** Before a candidate lists, probe it with a short seeded campaign that weights events observed to decrease the signal. A violated candidate does not list. The seed is fixed, so the probe is deterministic on every machine.
+
+### External assistant through `--json`
+
+Validation cannot judge whether observed behavior is intended. The human is that oracle. Semantic triage can help the human: "the count stays at 0 or more" reads as product intent; "the `text:count = 7` control is visible" reads as incidental. That judgment may come from an external assistant, for example a local LLM on the author's GPU.
+
+- `scuzz mine --json` emits the candidate list as JSON: id, kind, sentence, evidence fields. The plain list stays the human surface.
+- The assistant runs outside `scuzz` as a `--json` consumer. It may reorder, annotate, or drive `--dismiss`. It appends a claim only through the validated decision flags.
+- `scuzz` embeds no inference runtime. Generation, ranking, validation, and enforcement stay deterministic and identical on every machine. CI needs no GPU.
+- Semantic (embedding) dump novelty stays out of scope. It breaks campaign reproducibility.
+
+### Dismissal provenance
+
+`--dismiss` writes `# dismissed: <id> <sentence>`. The sentence keeps the intent file readable as a review surface and keeps suppression across id churn. The miner suppresses a candidate whose id or exact sentence appears in a dismissed comment.
+
+## Proof
 
 - `make -C crates/runtime test` and `cargo test -p scuzz-compiler` and `cargo test -p scuzz` pass.
 - `cargo run -p scuzz -- fuzz --iterations 16 examples/counter` writes `build/fuzz/trace.campaign` and `build/signals.txt`.
 - `cargo run -p scuzz -- mine examples/counter` lists a `stays` candidate for `count`.
 - `cargo run -p scuzz -- mine examples/counter --always <id>` appends the claim. A following `fuzz --iterations 16` stays green.
-- Negative: break the counter handler (`+ 2` mutant). `mine --always` on the stale range candidate fails validation and prints a repro. The intent file is unchanged.
+- Negative: break the counter handler. `mine --always` on the stale range candidate fails validation and prints a repro. The intent file is unchanged.
 - Dismissal persists: dismiss a candidate. A second `mine` run does not list it.
-- CI: add the counter mine loop to `.github/workflows/ci.yml` next to the fuzz block. Bounded and deterministic.
+- CI runs the counter mine loop next to the fuzz block. Bounded and deterministic.
 
 ## Contingencies
 
 - Trace size: the 1 MiB cap binds long campaigns. If mining needs more states, trace kept runs only. Decide with data.
 - Sparse states: if `trace.campaign` has too few states for correlation, mine final states only in v1 and note the weaker evidence.
 - Signal table drift: if `build/signals.txt` ids ever disagree with thunk ids, `stays` claims break first. The existing `binds_signal_from_main` test catches the order change. Fix the table, not the claim.
-- Hash churn: candidate ids change when the grammar or a sentence changes. Old dismissals resurface once. Accept this.
+- Hash churn: candidate ids change when the grammar or a sentence changes. Sentence-bearing dismissal comments keep suppression across id churn. An id-only dismissal from before the qualification slice resurfaces once. Accept this.
