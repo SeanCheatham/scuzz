@@ -484,6 +484,24 @@ jobs:
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
+          # Property mining on a /tmp copy: trace artifacts, candidate list, validated accept.
+          rm -rf /tmp/scuzz-mine /tmp/shared
+          cp -R examples/counter /tmp/scuzz-mine
+          cp -R examples/shared /tmp/shared
+          rm -rf /tmp/scuzz-mine/build /tmp/scuzz-mine/corpus /tmp/shared/build
+          grep -v 'stays at 0' /tmp/scuzz-mine/intent.scuzz_intent > /tmp/scuzz-mine/intent.tmp
+          mv /tmp/scuzz-mine/intent.tmp /tmp/scuzz-mine/intent.scuzz_intent
+          cargo run -p scuzz -- fuzz --iterations 16 /tmp/scuzz-mine
+          test -f /tmp/scuzz-mine/build/fuzz/trace.campaign
+          test -f /tmp/scuzz-mine/build/signals.txt
+          cargo run -p scuzz -- mine /tmp/scuzz-mine | tee /tmp/mine.out
+          grep -q 'The count stays at 0 or more.' /tmp/mine.out
+          mid=$(awk '/count stays at 0 or more/ {print $1; exit}' /tmp/mine.out)
+          cargo run -p scuzz -- mine --always "$mid" /tmp/scuzz-mine
+          grep -q 'The count stays at 0 or more.' /tmp/scuzz-mine/intent.scuzz_intent
+          cargo run -p scuzz -- fuzz --iterations 8 /tmp/scuzz-mine
+          cargo run -p scuzz -- mine /tmp/scuzz-mine | tee /tmp/mine2.out
+          if grep -q 'count stays at 0' /tmp/mine2.out; then echo "accepted claim should not list again" && exit 1; fi
           if cargo run -p scuzz -- fuzz --no-fail-fast --iterations 8 examples/bad-example; then
             echo "fuzz should have found the property failure" && exit 1
           fi

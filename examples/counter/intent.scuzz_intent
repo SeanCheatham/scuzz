@@ -2,3 +2,4 @@ The "button:+1" control is visible.
 The "text:SimCounter" control is visible.
 The "text:count = -1" control is never visible.
 After a tap on the "button:+1" control, eventually the "text:count = 1" control is visible.
+The count stays at 0 or more.

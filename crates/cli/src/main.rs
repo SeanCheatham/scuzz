@@ -1,4 +1,5 @@
 mod cmd_fuzz;
+mod cmd_mine;
 mod support;
 
 use anyhow::{bail, Context, Result};
@@ -142,6 +143,27 @@ enum Commands {
         /// Finish search and still mutate after the first search failure
         #[arg(long)]
         no_fail_fast: bool,
+    },
+    /// Mine candidate intent claims from fuzz campaign traces
+    #[command(
+        group = clap::ArgGroup::new("decision").args(["always", "never", "approve", "dismiss"]).multiple(false),
+        after_help = "Examples:\n  scuzz mine examples/counter\n  scuzz mine --always <id> examples/counter\n  scuzz mine --dismiss <id>\n\nLists candidates mined from build/fuzz/trace.campaign, build/signals.txt, and build/fuzz/repro.toml. `--always`/`--never` append a validated claim to intent.scuzz_intent. `--approve` writes a boundary corpus entry. `--dismiss` records the candidate as dismissed.\n"
+    )]
+    Mine {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Accept the candidate claim after a validation campaign
+        #[arg(long)]
+        always: Option<String>,
+        /// Encode the candidate as a `never visible` claim after validation
+        #[arg(long)]
+        never: Option<String>,
+        /// Approve a boundary candidate: replay the truncated script, write a corpus entry
+        #[arg(long)]
+        approve: Option<String>,
+        /// Dismiss the candidate: append `# dismissed: <id>` to intent.scuzz_intent
+        #[arg(long)]
+        dismiss: Option<String>,
     },
     /// Create a new Scuzz Lang project
     #[command(
@@ -373,6 +395,13 @@ version = "0.1.0"
             oracles,
             no_fail_fast,
         ),
+        Commands::Mine {
+            path,
+            always,
+            never,
+            approve,
+            dismiss,
+        } => cmd_mine::run(&path, always, never, approve, dismiss),
         Commands::Ide {
             path,
             headless,
