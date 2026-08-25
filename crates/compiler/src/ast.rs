@@ -24,6 +24,8 @@ pub struct Program {
     pub intent_eventually: Vec<String>,
     /// Event-conditioned response claims lowered from intent prose.
     pub intent_response: Vec<IntentResponse>,
+    /// `drive <name> <args>` lines from Given intent rows. Verify writes `build/seeds.txt`.
+    pub intent_seeds: Vec<String>,
 }
 /// One event-conditioned response claim lowered from intent prose.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -2,7 +2,8 @@ use crate::ast::Program;
 use crate::codegen::emit_llvm;
 use crate::fuzz::{classify_declared_text, response_declared_text, sometimes_declared_text};
 use crate::intent::{
-    intent_source_from_parts, place_intent_file, signal_table_text, IntentSource, SourceUnit,
+    intent_source_from_parts, place_intent_file, seed_table_text, signal_table_text, IntentSource,
+    SourceUnit,
 };
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
@@ -188,6 +189,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
     let classify = classify_declared_text(&program);
     let response_declared = response_declared_text(&program);
     let signals = signal_table_text(&program);
+    let seeds = seed_table_text(&program);
     let mut program = program;
     crate::typ::inject_builtin_enums(&mut program.enums);
     let program = lower_program(program);
@@ -210,8 +212,10 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
         std::fs::write(opts.out_dir.join("classify.declared"), classify)?;
         std::fs::write(opts.out_dir.join("response.declared"), response_declared)?;
         std::fs::write(opts.out_dir.join("signals.txt"), signals)?;
+        std::fs::write(opts.out_dir.join("seeds.txt"), seeds)?;
     } else {
         let _ = std::fs::remove_file(opts.out_dir.join("drivers.txt"));
+        let _ = std::fs::remove_file(opts.out_dir.join("seeds.txt"));
     }
 
     let _native = NATIVE_LINK_LOCK.lock().unwrap_or_else(|e| e.into_inner());

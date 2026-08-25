@@ -145,6 +145,17 @@ enum ForClaim {
     Identity,
     Swap,
     ProductFields,
+    Given {
+        inputs: Vec<SeedLit>,
+        output: SeedLit,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum SeedLit {
+    Int(i64),
+    Str(String),
+    Bool(bool),
 }
 
 #[derive(Debug)]
@@ -172,6 +183,7 @@ pub fn apply_intents(
     let mut always = Vec::new();
     let mut eventually = Vec::new();
     let mut responses = Vec::new();
+    let mut seeds = Vec::new();
     let mut thunk_i = 0usize;
     let signals = collect_signal_ids(program);
     let mut seen: HashMap<String, (String, Span)> = HashMap::new();
@@ -342,6 +354,13 @@ pub fn apply_intents(
             let pred = lower_for_claim(&item.label, program, &live, &item.claim, &item.span)?;
             let name = format!("{} ({}:{})", live.name, item.label, item.line);
             asserts.push(assert_expr(&name, pred, item.span.clone()));
+            if let ForClaim::Given { inputs, .. } = &item.claim {
+                let mut args = Vec::new();
+                for lit in inputs {
+                    args.push(seed_drive_token(lit, &item.label, &item.span)?);
+                }
+                seeds.push(format!("drive {} {}", live.name, args.join(" ")));
+            }
         }
         let span = live.name_span.clone();
         let body = seq_io(asserts, span.clone());
@@ -358,9 +377,12 @@ pub fn apply_intents(
         }
         program.defs.push(driver);
     }
+    seeds.sort();
+    seeds.dedup();
     program.intent_always = always;
     program.intent_eventually = eventually;
     program.intent_response = responses;
+    program.intent_seeds = seeds;
     Ok(())
 }
 
@@ -415,21 +437,29 @@ fn parse_intent(text: &str, label: &str) -> Result<ParsedIntent, OverlayError> {
             match parse_for_header(line) {
                 Some((module, def)) => {
                     i += 1;
-                    if i >= lines.len() {
-                        return Err(at(
-                            span.clone(),
-                            format!("{label}: For `{module}.{def}` needs a claim sentence"),
-                        ));
+                    let mut got = 0usize;
+                    while i < lines.len() {
+                        let (claim_line, claim_span) = &lines[i];
+                        let Some(claim) = parse_for_claim(claim_line) else {
+                            break;
+                        };
+                        forall.push((module.clone(), def.clone(), claim, claim_span.clone()));
+                        i += 1;
+                        got += 1;
                     }
-                    let (claim_line, claim_span) = &lines[i];
-                    let claim = parse_for_claim(claim_line).ok_or_else(|| {
-                        at(
+                    if got == 0 {
+                        if i >= lines.len() {
+                            return Err(at(
+                                span.clone(),
+                                format!("{label}: For `{module}.{def}` needs a claim sentence"),
+                            ));
+                        }
+                        let (claim_line, claim_span) = &lines[i];
+                        return Err(at(
                             claim_span.clone(),
                             format!("{label}: unknown intent form: {claim_line}"),
-                        )
-                    })?;
-                    forall.push((module, def, claim, claim_span.clone()));
-                    i += 1;
+                        ));
+                    }
                     continue;
                 }
                 None => {
@@ -564,7 +594,86 @@ fn parse_for_claim(line: &str) -> Option<ForClaim> {
     if let Some(n) = strip_prefix_suffix(line, "The result is the input minus ", ".") {
         return n.parse().ok().map(ForClaim::Minus);
     }
-    None
+    parse_given_claim(line)
+}
+
+fn parse_given_claim(line: &str) -> Option<ForClaim> {
+    let rest = line.strip_suffix('.')?;
+    if let Some(rest) = rest.strip_prefix("When the input is ") {
+        let (input, rest) = parse_seed_lit(rest)?;
+        let rest = rest.strip_prefix(" the result is ")?;
+        let (output, rest) = parse_seed_lit(rest)?;
+        if !rest.is_empty() {
+            return None;
+        }
+        return Some(ForClaim::Given {
+            inputs: vec![input],
+            output,
+        });
+    }
+    let rest = rest.strip_prefix("When the inputs are ")?;
+    let (a, rest) = parse_seed_lit(rest)?;
+    if let Some(rest) = rest.strip_prefix(" and ") {
+        let (b, rest) = parse_seed_lit(rest)?;
+        let rest = rest.strip_prefix(" the result is ")?;
+        let (output, rest) = parse_seed_lit(rest)?;
+        if !rest.is_empty() {
+            return None;
+        }
+        return Some(ForClaim::Given {
+            inputs: vec![a, b],
+            output,
+        });
+    }
+    let rest = rest.strip_prefix(", ")?;
+    let (b, rest) = parse_seed_lit(rest)?;
+    let rest = rest.strip_prefix(", and ")?;
+    let (c, rest) = parse_seed_lit(rest)?;
+    let rest = rest.strip_prefix(" the result is ")?;
+    let (output, rest) = parse_seed_lit(rest)?;
+    if !rest.is_empty() {
+        return None;
+    }
+    Some(ForClaim::Given {
+        inputs: vec![a, b, c],
+        output,
+    })
+}
+
+fn parse_seed_lit(s: &str) -> Option<(SeedLit, &str)> {
+    if let Some(rest) = s.strip_prefix("true") {
+        if rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
+            return None;
+        }
+        return Some((SeedLit::Bool(true), rest));
+    }
+    if let Some(rest) = s.strip_prefix("false") {
+        if rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
+            return None;
+        }
+        return Some((SeedLit::Bool(false), rest));
+    }
+    if let Some(rest) = s.strip_prefix('"') {
+        let end = rest.find('"')?;
+        let inner = &rest[..end];
+        if inner.contains('"') {
+            return None;
+        }
+        return Some((SeedLit::Str(inner.to_string()), &rest[end + 1..]));
+    }
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    if bytes.first() == Some(&b'-') {
+        i = 1;
+    }
+    if i >= bytes.len() || !bytes[i].is_ascii_digit() {
+        return None;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    let n: i64 = s[..i].parse().ok()?;
+    Some((SeedLit::Int(n), &s[i..]))
 }
 
 fn strip_quoted(line: &str, prefix: &str, suffix: &str) -> Option<String> {
@@ -622,6 +731,16 @@ pub fn signal_table_text(program: &Program) -> String {
             SigKind::Other => "other",
         };
         out.push_str(&format!("{id}\t{name}\t{kind}\n"));
+    }
+    out
+}
+
+/// `drive <name> <args>` lines for `build/seeds.txt`. Empty when no Given rows.
+pub fn seed_table_text(program: &Program) -> String {
+    let mut out = String::new();
+    for line in &program.intent_seeds {
+        out.push_str(line);
+        out.push('\n');
     }
     out
 }
@@ -730,7 +849,116 @@ fn lower_for_claim(
         ForClaim::Identity => identity_pred(live, pred_span, label, span),
         ForClaim::Swap => swap_pred(live, pred_span, label, span),
         ForClaim::ProductFields => product_pred(program, live, pred_span, label, span),
+        ForClaim::Given { inputs, output } => {
+            given_pred(live, inputs, output, pred_span, label, span)
+        }
     }
+}
+
+fn seed_lit_type(lit: &SeedLit) -> Type {
+    match lit {
+        SeedLit::Int(_) => Type::Int,
+        SeedLit::Str(_) => Type::String,
+        SeedLit::Bool(_) => Type::Bool,
+    }
+}
+
+fn seed_lit_expr(lit: &SeedLit, span: Span) -> Expr {
+    match lit {
+        SeedLit::Int(n) => Expr::new(ExprKind::IntLit(*n), span),
+        SeedLit::Str(s) => Expr::new(ExprKind::StrLit(s.clone()), span),
+        SeedLit::Bool(b) => Expr::new(ExprKind::BoolLit(*b), span),
+    }
+}
+
+fn seed_drive_token(lit: &SeedLit, label: &str, span: &Span) -> Result<String, OverlayError> {
+    match lit {
+        SeedLit::Int(n) => Ok(n.to_string()),
+        SeedLit::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
+        SeedLit::Str(s) => {
+            if s.is_empty()
+                || s.contains(|c: char| c.is_ascii_whitespace() || c == '"' || c == '\\')
+            {
+                return Err(at(
+                    span.clone(),
+                    format!("{label}: Given string must be one drive token"),
+                ));
+            }
+            Ok(s.clone())
+        }
+    }
+}
+
+fn given_pred(
+    live: &FunDef,
+    inputs: &[SeedLit],
+    output: &SeedLit,
+    span: Span,
+    label: &str,
+    err_span: &Span,
+) -> Result<Expr, OverlayError> {
+    if inputs.len() != live.params.len() {
+        return Err(at(
+            err_span.clone(),
+            format!(
+                "{label}: For `{}.{}` Given row needs {} input(s)",
+                live.module,
+                live.name,
+                live.params.len()
+            ),
+        ));
+    }
+    for (p, lit) in live.params.iter().zip(inputs) {
+        if p.ty != seed_lit_type(lit) {
+            return Err(at(
+                err_span.clone(),
+                format!(
+                    "{label}: For `{}.{}` Given input does not match param `{}`",
+                    live.module, live.name, p.name
+                ),
+            ));
+        }
+    }
+    if live.ret != seed_lit_type(output) {
+        return Err(at(
+            err_span.clone(),
+            format!(
+                "{label}: For `{}.{}` Given result does not match the return type",
+                live.module, live.name
+            ),
+        ));
+    }
+    let mut cond: Option<Expr> = None;
+    for (p, lit) in live.params.iter().zip(inputs) {
+        let eq = eq_expr(
+            Expr::new(ExprKind::Var(p.name.clone()), span.clone()),
+            seed_lit_expr(lit, span.clone()),
+            span.clone(),
+        );
+        cond = Some(match cond {
+            None => eq,
+            Some(prev) => Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::And,
+                    left: Box::new(prev),
+                    right: Box::new(eq),
+                },
+                span.clone(),
+            ),
+        });
+    }
+    let cond = cond.expect("Given row has inputs");
+    let call = live_call(live, span.clone());
+    let eq = eq_expr(call, seed_lit_expr(output, span.clone()), span.clone());
+    Ok(Expr::new(
+        ExprKind::If {
+            cond: Box::new(cond),
+            then_branch: Box::new(eq),
+            else_branch: Box::new(Expr::new(ExprKind::BoolLit(true), span.clone())),
+            implicit_else: false,
+        },
+        span,
+    ))
 }
 
 fn unary_live<'a>(live: &'a FunDef, label: &str, span: &Span) -> Result<&'a FunDef, OverlayError> {
@@ -1537,6 +1765,80 @@ mod tests {
         .unwrap();
         apply(&mut p, "The count stays at 0 or more.\n").unwrap();
         assert_eq!(p.intent_always.len(), 1);
+    }
+
+    #[test]
+    fn parses_given_rows_under_one_for() {
+        let parsed = parse_intent(
+            "For Main.vat:\nWhen the input is \"DE\" the result is 19.\nWhen the input is \"FR\" the result is 20.\n",
+            "pkg/intent.scuzz_intent",
+        )
+        .unwrap();
+        assert_eq!(parsed.forall.len(), 2);
+        match &parsed.forall[0].2 {
+            ForClaim::Given { inputs, output } => {
+                assert_eq!(inputs, &[SeedLit::Str("DE".into())]);
+                assert_eq!(output, &SeedLit::Int(19));
+            }
+            other => panic!("expected Given, got {other:?}"),
+        }
+        match &parsed.forall[1].2 {
+            ForClaim::Given { inputs, output } => {
+                assert_eq!(inputs, &[SeedLit::Str("FR".into())]);
+                assert_eq!(output, &SeedLit::Int(20));
+            }
+            other => panic!("expected Given, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_given_two_int_inputs() {
+        let parsed = parse_intent(
+            "For Main.add:\nWhen the inputs are 2 and 3 the result is 5.\n",
+            "pkg/intent.scuzz_intent",
+        )
+        .unwrap();
+        match &parsed.forall[0].2 {
+            ForClaim::Given { inputs, output } => {
+                assert_eq!(inputs, &[SeedLit::Int(2), SeedLit::Int(3)]);
+                assert_eq!(output, &SeedLit::Int(5));
+            }
+            other => panic!("expected Given, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn given_row_writes_seed_and_keeps_swap() {
+        let mut p = live("def add(a: Int, b: Int): Int = a + b\n");
+        apply(
+            &mut p,
+            "For Main.add:\nSwapping the inputs does not change the result.\nWhen the inputs are 2 and 3 the result is 5.\n",
+        )
+        .unwrap();
+        assert_eq!(seed_table_text(&p).trim(), "drive add 2 3");
+        assert!(p.defs.iter().any(|d| d.is_driver && d.name == "add"));
+    }
+
+    #[test]
+    fn given_type_mismatch_fails() {
+        let mut p = live("def add(a: Int, b: Int): Int = a + b\n");
+        let err = apply(
+            &mut p,
+            "For Main.add:\nWhen the inputs are \"a\" and \"b\" the result is 5.\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Given"), "{err}");
+    }
+
+    #[test]
+    fn given_string_seed_token() {
+        let mut p = live("def vat(cc: String): Int = 0\n");
+        apply(
+            &mut p,
+            "For Main.vat:\nWhen the input is \"DE\" the result is 19.\n",
+        )
+        .unwrap();
+        assert_eq!(seed_table_text(&p).trim(), "drive vat DE");
     }
 
     #[test]
