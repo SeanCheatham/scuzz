@@ -491,7 +491,7 @@ jobs:
           fi
           test -f examples/bad-example/build/fuzz/repro.toml
           grep -E '^search_failures = [1-9]' examples/bad-example/build/fuzz/summary.toml
-          grep -E '^survived = [1-9]' examples/bad-example/build/fuzz/summary.toml
+          grep -E '^inert = [1-9]' examples/bad-example/build/fuzz/summary.toml
           grep -E '^ran = [1-9]' examples/bad-example/build/fuzz/summary.toml
           grep -E '^entries = [1-9]' examples/bad-example/build/fuzz/summary.toml
           grep -E '^failures = [1-9]' examples/bad-example/build/fuzz/summary.toml

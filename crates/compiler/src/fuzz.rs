@@ -1443,6 +1443,205 @@ pub fn claimed_state_fields_text(program: &Program) -> String {
     }
 }
 
+/// Strength of a mutation survivor that changed observable State.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurvivorKind {
+    /// Changed a State field that a claim reads.
+    Weak,
+    /// Changed a State field that no claim reads.
+    Missing,
+}
+
+impl SurvivorKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Weak => "weak",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct TlFields {
+    signals: String,
+    a11y: String,
+    last_hit: String,
+    drive: String,
+}
+
+fn timeline_section_bodies(text: &str) -> Vec<&str> {
+    let mut idxs = Vec::new();
+    let mut search = 0usize;
+    while search < text.len() {
+        let Some(rel) = text[search..].find("--- ") else {
+            break;
+        };
+        let i = search + rel;
+        if i == 0 || text.as_bytes()[i - 1] == b'\n' {
+            idxs.push(i);
+        }
+        search = i + 4;
+    }
+    let mut out = Vec::new();
+    for (k, &i) in idxs.iter().enumerate() {
+        let end = idxs.get(k + 1).copied().unwrap_or(text.len());
+        let chunk = &text[i..end];
+        let body = match chunk.find('\n') {
+            Some(nl) => &chunk[nl + 1..],
+            None => "",
+        };
+        out.push(body);
+    }
+    out
+}
+
+fn section_field(body: &str, name: &str) -> String {
+    let header = format!("{name}:\n");
+    let Some(i) = body.find(&header) else {
+        return String::new();
+    };
+    let rest = &body[i + header.len()..];
+    let mut end = rest.len();
+    for n in ["last_hit", "drive", "signals", "a11y"] {
+        if n == name {
+            continue;
+        }
+        let at_start = format!("{n}:\n");
+        if rest.starts_with(&at_start) {
+            end = 0;
+            break;
+        }
+        let mid = format!("\n{n}:\n");
+        if let Some(p) = rest.find(&mid) {
+            end = end.min(p);
+        }
+    }
+    rest[..end].to_string()
+}
+
+fn parse_timeline_states(text: &str) -> Vec<TlFields> {
+    timeline_section_bodies(text)
+        .into_iter()
+        .map(|body| TlFields {
+            last_hit: section_field(body, "last_hit"),
+            drive: section_field(body, "drive"),
+            signals: section_field(body, "signals"),
+            a11y: section_field(body, "a11y"),
+        })
+        .collect()
+}
+
+fn field_series(states: &[TlFields], name: &str) -> String {
+    states
+        .iter()
+        .map(|s| match name {
+            "signals" => s.signals.as_str(),
+            "a11y" => s.a11y.as_str(),
+            "last_hit" => s.last_hit.as_str(),
+            "drive" => s.drive.as_str(),
+            _ => "",
+        })
+        .collect::<Vec<_>>()
+        .join("\n---\n")
+}
+
+/// State field names that differ between two timeline dumps. Empty when none differ.
+pub fn timeline_changed_fields(baseline: &str, mutant: &str) -> Vec<String> {
+    if baseline == mutant {
+        return Vec::new();
+    }
+    let a = parse_timeline_states(baseline);
+    let b = parse_timeline_states(mutant);
+    let mut out = Vec::new();
+    for name in STATE_FIELDS {
+        if field_series(&a, name) != field_series(&b, name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+/// Union of State fields that differ across paired baseline and mutant dumps.
+pub fn timeline_changed_fields_all(baselines: &[String], mutants: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let n = baselines.len().max(mutants.len());
+    for i in 0..n {
+        let b = baselines.get(i).map(String::as_str).unwrap_or("");
+        let m = mutants.get(i).map(String::as_str).unwrap_or("");
+        for f in timeline_changed_fields(b, m) {
+            if !out.contains(&f) {
+                out.push(f);
+            }
+        }
+    }
+    out.sort_by_key(|f| {
+        STATE_FIELDS
+            .iter()
+            .position(|s| s == f)
+            .unwrap_or(STATE_FIELDS.len())
+    });
+    out
+}
+
+/// Classify a surviving mutant. `None` means no State field changed.
+pub fn classify_survivor_strength(
+    changed_fields: &[String],
+    claimed_fields: &[String],
+) -> Option<SurvivorKind> {
+    if changed_fields.is_empty() {
+        return None;
+    }
+    if changed_fields
+        .iter()
+        .any(|f| !claimed_fields.iter().any(|c| c == f))
+    {
+        Some(SurvivorKind::Missing)
+    } else {
+        Some(SurvivorKind::Weak)
+    }
+}
+
+/// Fields to report for a classified survivor.
+pub fn survivor_strength_fields(
+    kind: SurvivorKind,
+    changed_fields: &[String],
+    claimed_fields: &[String],
+) -> Vec<String> {
+    match kind {
+        SurvivorKind::Weak => changed_fields
+            .iter()
+            .filter(|f| claimed_fields.iter().any(|c| c == *f))
+            .cloned()
+            .collect(),
+        SurvivorKind::Missing => changed_fields
+            .iter()
+            .filter(|f| !claimed_fields.iter().any(|c| c == *f))
+            .cloned()
+            .collect(),
+    }
+}
+
+/// Compare replayed mutant timelines to the original. `None` is inert (bit-identical).
+pub fn classify_replay(
+    baselines: &[String],
+    mutants: &[String],
+    claimed_fields: &[String],
+) -> Option<(SurvivorKind, Vec<String>)> {
+    let bit_identical = baselines.len() == mutants.len()
+        && baselines.iter().zip(mutants.iter()).all(|(b, m)| b == m);
+    if bit_identical {
+        return None;
+    }
+    let changed = timeline_changed_fields_all(baselines, mutants);
+    match classify_survivor_strength(&changed, claimed_fields) {
+        Some(kind) => Some((
+            kind,
+            survivor_strength_fields(kind, &changed, claimed_fields),
+        )),
+        None => Some((SurvivorKind::Missing, Vec::new())),
+    }
+}
+
 /// Used live defs, signals, and controls that no claim observes.
 pub fn unclaimed_coverage(program: &Program) -> Vec<UnclaimedItem> {
     let mut out = Vec::new();
@@ -2209,5 +2408,61 @@ def countOk(t: Timeline): Bool =
         )
         .unwrap();
         assert_eq!(claimed_state_fields_text(&p), "signals\na11y\nlast_hit\n");
+    }
+
+    fn tl_dump(states: &[(&str, &str, &str, &str)]) -> String {
+        let mut s = format!("# timeline n={}\n", states.len());
+        for (i, (hit, drive, sig, a11y)) in states.iter().enumerate() {
+            s.push_str(&format!(
+                "--- {i}\nlast_hit:\n{hit}\ndrive:\n{drive}\nsignals:\n{sig}"
+            ));
+            if !sig.is_empty() && !sig.ends_with('\n') {
+                s.push('\n');
+            }
+            s.push_str("a11y:\n");
+            s.push_str(a11y);
+            if !a11y.is_empty() && !a11y.ends_with('\n') {
+                s.push('\n');
+            }
+        }
+        s
+    }
+
+    #[test]
+    fn survivor_inert_when_timelines_match() {
+        let dump = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]);
+        assert!(timeline_changed_fields(&dump, &dump).is_empty());
+        let dumps = [dump];
+        assert_eq!(classify_replay(&dumps, &dumps, &["signals".into()]), None);
+    }
+
+    #[test]
+    fn survivor_weak_when_claimed_field_changes() {
+        let base = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]);
+        let mutant = tl_dump(&[("", "", "int[0] = 1\n", "button:+1")]);
+        let changed = timeline_changed_fields(&base, &mutant);
+        assert_eq!(changed, vec!["signals".to_string()]);
+        assert_eq!(
+            classify_survivor_strength(&changed, &["signals".into()]),
+            Some(SurvivorKind::Weak)
+        );
+        let class = classify_replay(&[base], &[mutant], &["signals".into()]).unwrap();
+        assert_eq!(class.0, SurvivorKind::Weak);
+        assert_eq!(class.1, vec!["signals".to_string()]);
+    }
+
+    #[test]
+    fn survivor_missing_when_unclaimed_field_changes() {
+        let base = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]);
+        let mutant = tl_dump(&[("button:+1", "", "int[0] = 0\n", "button:+1")]);
+        let changed = timeline_changed_fields(&base, &mutant);
+        assert_eq!(changed, vec!["last_hit".to_string()]);
+        assert_eq!(
+            classify_survivor_strength(&changed, &["signals".into()]),
+            Some(SurvivorKind::Missing)
+        );
+        let class = classify_replay(&[base], &[mutant], &["signals".into()]).unwrap();
+        assert_eq!(class.0, SurvivorKind::Missing);
+        assert_eq!(class.1, vec!["last_hit".to_string()]);
     }
 }

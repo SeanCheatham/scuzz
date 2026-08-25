@@ -1,14 +1,12 @@
 # Next slice
 
-Coverage strength.
+Stronger mutation operators.
 
-Mutation survivors that change observable behavior split into weak claims (claimed field) and missing claims (unclaimed field). Survivors with bit-identical replayed timelines are inert and unreported.
+Boundary `where` mutations flip or drop a residual refinement bound so a live call site can pass a value the `where` rejected.
 
 Proof:
 
-- A surviving mutant that changes a claimed `State` field reports a weak claim.
-- A surviving mutant that changes an unclaimed `State` field reports a missing claim.
-- A mutant whose replayed timeline is bit-identical is inert and is not a survivor.
+- A `where n >= 0` residual mutates at the bound (negate or drop).
 - `make -C crates/runtime test`, `cargo test -p scuzz-compiler`, `cargo test -p scuzz` pass.
 - `cargo run -p scuzz -- fuzz --iterations 16 examples/counter` stays green.
 
