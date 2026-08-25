@@ -485,6 +485,7 @@ fn consider_ui_script(
         &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
     );
     let dump = std::fs::read_to_string(ctx.fuzz_dir.join("dump.txt")).unwrap_or_default();
+    let timeline = std::fs::read_to_string(ctx.fuzz_dir.join("timeline.txt")).unwrap_or_default();
     if corpus_keep(&reached, &old_camp, &dump, &search.seen) {
         let dump2_code = fuzz_exec(
             &ctx.exe,
@@ -512,6 +513,12 @@ fn consider_ui_script(
         if dump2 != dump {
             write_fail_summary(ctx, camp, search.prefixes.len() as i64)?;
             bail!("fuzz dump mismatch on replay (nondeterministic Headless dump)");
+        }
+        let timeline2 =
+            std::fs::read_to_string(ctx.fuzz_dir.join("timeline.txt")).unwrap_or_default();
+        if timeline2 != timeline {
+            write_fail_summary(ctx, camp, search.prefixes.len() as i64)?;
+            bail!("fuzz timeline mismatch on replay (nondeterministic Headless timeline)");
         }
         dump_push(&mut search.seen, dump);
         corpus_push(
@@ -1451,15 +1458,10 @@ fn maybe_promote_coverage(
 }
 
 fn declared_names(project_dir: &Path) -> Vec<String> {
-    let mut names = lines_nonempty(
+    lines_nonempty(
         &std::fs::read_to_string(project_dir.join("build").join("sometimes.declared"))
             .unwrap_or_default(),
-    );
-    names.extend(lines_nonempty(
-        &std::fs::read_to_string(project_dir.join("build").join("response.declared"))
-            .unwrap_or_default(),
-    ));
-    names
+    )
 }
 
 fn reached_names(fuzz_dir: &Path) -> Vec<String> {
@@ -1738,6 +1740,7 @@ fn fuzz_exec(
     std::fs::write(&dump, "")?;
     std::fs::write(&reached, "")?;
     std::fs::write(fuzz_dir.join("classify.dump"), "")?;
+    std::fs::write(fuzz_dir.join("timeline.txt"), "")?;
     let code = run_testrt(
         exe,
         &reached,
@@ -1770,6 +1773,7 @@ fn fuzz_exec_io(
     let drive_path = fuzz_dir.join("drive.txt");
     std::fs::write(&reached, "")?;
     std::fs::write(fuzz_dir.join("classify.dump"), "")?;
+    std::fs::write(fuzz_dir.join("timeline.txt"), "")?;
     std::fs::write(&drive_path, script_text(drives))?;
     let drive = if drives.is_empty() {
         None

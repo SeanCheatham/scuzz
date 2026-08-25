@@ -18,24 +18,10 @@ pub struct Program {
     pub imports: Vec<Import>,
     /// Driver def names merged from `*.scuzz_drivers` (empty for live builds).
     pub driver_names: Vec<String>,
-    /// Compiler-inserted always thunk names (`__intent` module).
-    pub intent_always: Vec<String>,
-    /// Compiler-inserted eventually thunk names (`__intent` module).
-    pub intent_eventually: Vec<String>,
-    /// Event-conditioned response claims lowered from intent prose.
-    pub intent_response: Vec<IntentResponse>,
-    /// `drive <name> <args>` lines from Given intent rows. Verify writes `build/seeds.txt`.
-    pub intent_seeds: Vec<String>,
-}
-/// One event-conditioned response claim lowered from intent prose.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IntentResponse {
-    /// Claim id `response:<trigger>:<needle>`: registered name and `response.declared` line.
-    pub name: String,
-    /// Compiler-inserted trigger thunk name (`__intent` module).
-    pub trigger: String,
-    /// Compiler-inserted response thunk name (`__intent` module).
-    pub response: String,
+    /// `drive <name>` lines from zero-argument `*.scuzz_verify` oracles. Verify writes `build/seeds.txt`.
+    pub verify_seeds: Vec<String>,
+    /// Public `Timeline => Bool` predicates from `*.scuzz_verify`.
+    pub verify_preds: Vec<String>,
 }
 
 /// `trait Show:` / `trait Get[T]: def getOrElse(default: T): T`
@@ -154,6 +140,8 @@ pub struct FunDef {
     pub is_private: bool,
     /// Def merged from `*.scuzz_drivers` (verify graph only).
     pub is_driver: bool,
+    /// Public `Timeline => Bool` predicate from `*.scuzz_verify`.
+    pub is_verify: bool,
     /// `def foo[T](…)` — monomorphized before codegen.
     pub type_params: Vec<String>,
     pub params: Vec<Param>,

@@ -1145,6 +1145,27 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Property.lastHitHas",
         "Property.lastHitHas(needle: String): Bool",
     ),
+    ("Timeline.len", "Timeline.len(t: Timeline): Int"),
+    (
+        "Timeline.signalInt",
+        "Timeline.signalInt(t: Timeline, i: Int, id: Int): Int",
+    ),
+    (
+        "Timeline.a11yHas",
+        "Timeline.a11yHas(t: Timeline, i: Int, needle: String): Bool",
+    ),
+    (
+        "Timeline.lastHitHas",
+        "Timeline.lastHitHas(t: Timeline, i: Int, needle: String): Bool",
+    ),
+    (
+        "Timeline.forall",
+        "Timeline.forall(t: Timeline, pred: Int => Bool): Bool",
+    ),
+    (
+        "Timeline.exists",
+        "Timeline.exists(t: Timeline, pred: Int => Bool): Bool",
+    ),
     ("Ref.of", "Ref.of(x: A): IO[Ref[A]]"),
     ("Ref.get", "Ref.get(r: Ref[A]): IO[A]"),
     ("Ref.set", "Ref.set(r: Ref[A], x: A): IO[Unit]"),

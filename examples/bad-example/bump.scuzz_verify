@@ -1,0 +1,3 @@
+def bump(n: Int): Bool =
+  Main.bump(n) == n + 1
+

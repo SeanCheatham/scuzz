@@ -1,4 +1,5 @@
 #include "scuzz_rt.h"
+#include "scuzz_ui.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1419,6 +1420,11 @@ void sz_testrt_reset(void) {
 /* --- residual properties (armed under SCUZZ_TESTRT=1) -------------------------- */
 
 static char *g_property_a11y = NULL;
+static char *g_property_last_hit = NULL;
+static int g_replay;
+static const char *g_replay_a11y;
+static const char *g_replay_last_hit;
+static const char *g_replay_signals;
 
 void sz_property_stash_a11y(const char *dump) {
   size_t n;
@@ -1435,11 +1441,11 @@ void sz_property_stash_a11y(const char *dump) {
 
 int64_t sz_property_a11y_has(SzString *needle) {
   const char *n = needle ? sz_string_cstr(needle) : "";
-  if (!g_property_a11y || !n[0])
+  const char *hay = g_replay ? g_replay_a11y : g_property_a11y;
+  if (!hay || !n[0])
     return 0;
-  return strstr(g_property_a11y, n) != NULL ? 1 : 0;
+  return strstr(hay, n) != NULL ? 1 : 0;
 }
-static char *g_property_last_hit = NULL;
 
 void sz_property_stash_last_hit(const char *desc) {
   size_t n;
@@ -1456,9 +1462,10 @@ void sz_property_stash_last_hit(const char *desc) {
 
 int64_t sz_property_last_hit_has(SzString *needle) {
   const char *n = needle ? sz_string_cstr(needle) : "";
-  if (!g_property_last_hit || !n[0])
+  const char *hay = g_replay ? g_replay_last_hit : g_property_last_hit;
+  if (!hay || !n[0])
     return 0;
-  return strstr(g_property_last_hit, n) != NULL ? 1 : 0;
+  return strstr(hay, n) != NULL ? 1 : 0;
 }
 
 SzIo *sz_property_assert(SzString *name, int64_t ok) {
@@ -1606,12 +1613,237 @@ typedef struct {
   char *name;
   int64_t (*trigger)(void);
   int64_t (*response)(void);
-  int seen_trigger;
-  int held;
 } SzResponseProp;
 
 static SzResponseProp g_response[SZ_SESSION_MAX];
 static int g_response_n;
+
+typedef struct {
+  char *name;
+  int64_t (*fn)(void *);
+} SzVerifyProp;
+
+static SzVerifyProp g_verify[SZ_SESSION_MAX];
+static int g_verify_n;
+
+typedef struct {
+  char *signals;
+  char *a11y;
+  char *last_hit;
+  char *drive;
+} SzTlState;
+
+static SzTlState *g_tl;
+static int g_tl_n;
+static int g_tl_cap;
+static int g_tl_warned;
+static char *g_last_drive;
+
+typedef struct {
+  int n;
+  int fail_index;
+  SzTlState *states;
+} SzTimeline;
+
+static char *tl_copy(const char *s) {
+  size_t n;
+  char *c;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  c = (char *)malloc(n + 1);
+  if (!c)
+    sz_panic("timeline: out of memory");
+  memcpy(c, s, n + 1);
+  return c;
+}
+
+static void tl_free_states(void) {
+  int i;
+  for (i = 0; i < g_tl_n; i++) {
+    free(g_tl[i].signals);
+    free(g_tl[i].a11y);
+    free(g_tl[i].last_hit);
+    free(g_tl[i].drive);
+  }
+  free(g_tl);
+  g_tl = NULL;
+  g_tl_n = 0;
+  g_tl_cap = 0;
+  g_tl_warned = 0;
+}
+
+void sz_timeline_set_drive(const char *line) {
+  free(g_last_drive);
+  g_last_drive = tl_copy(line ? line : "");
+}
+
+static void tl_push(void) {
+  SzString *dump;
+  if (g_tl_n >= 1024) {
+    if (!g_tl_warned) {
+      fprintf(stderr, "scuzz: timeline capped at 1024 states\n");
+      g_tl_warned = 1;
+    }
+    return;
+  }
+  if (g_tl_n >= g_tl_cap) {
+    int ncap = g_tl_cap ? g_tl_cap * 2 : 16;
+    SzTlState *nb = (SzTlState *)malloc((size_t)ncap * sizeof(SzTlState));
+    if (!nb)
+      sz_panic("timeline: out of memory");
+    if (g_tl) {
+      memcpy(nb, g_tl, (size_t)g_tl_n * sizeof(SzTlState));
+      free(g_tl);
+    }
+    g_tl = nb;
+    g_tl_cap = ncap;
+  }
+  dump = sz_signal_dump();
+  g_tl[g_tl_n].signals = tl_copy(dump ? sz_string_cstr(dump) : "");
+  if (dump)
+    sz_string_free(dump);
+  g_tl[g_tl_n].a11y = tl_copy(g_property_a11y);
+  g_tl[g_tl_n].last_hit = tl_copy(g_property_last_hit);
+  g_tl[g_tl_n].drive = tl_copy(g_last_drive);
+  g_tl_n++;
+}
+
+static void tl_restore(int i) {
+  if (i < 0 || i >= g_tl_n) {
+    g_replay = 0;
+    return;
+  }
+  g_replay = 1;
+  g_replay_a11y = g_tl[i].a11y;
+  g_replay_last_hit = g_tl[i].last_hit;
+  g_replay_signals = g_tl[i].signals;
+}
+
+static void tl_restore_clear(void) {
+  g_replay = 0;
+  g_replay_a11y = NULL;
+  g_replay_last_hit = NULL;
+  g_replay_signals = NULL;
+}
+
+int sz_timeline_replaying(void) { return g_replay; }
+
+int64_t sz_timeline_replay_signal_int(int64_t id) {
+  char key[48];
+  const char *p;
+  if (!g_replay_signals)
+    return 0;
+  snprintf(key, sizeof key, "int[%lld] = ", (long long)id);
+  p = strstr(g_replay_signals, key);
+  if (!p)
+    return 0;
+  return (int64_t)atoll(p + strlen(key));
+}
+
+static int64_t tl_parse_signal_int(const char *dump, int64_t id) {
+  char key[48];
+  const char *p;
+  if (!dump)
+    return 0;
+  snprintf(key, sizeof key, "int[%lld] = ", (long long)id);
+  p = strstr(dump, key);
+  if (!p)
+    return 0;
+  return (int64_t)atoll(p + strlen(key));
+}
+
+static SzTlState *tl_at(void *tl, int64_t i) {
+  SzTimeline *t = (SzTimeline *)tl;
+  if (!t || i < 0 || i >= t->n)
+    return NULL;
+  return &t->states[i];
+}
+
+int64_t sz_timeline_len(void *tl) {
+  SzTimeline *t = (SzTimeline *)tl;
+  return t ? t->n : 0;
+}
+
+int64_t sz_timeline_signal_int(void *tl, int64_t i, int64_t id) {
+  SzTlState *s = tl_at(tl, i);
+  return s ? tl_parse_signal_int(s->signals, id) : 0;
+}
+
+int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle) {
+  SzTlState *s = tl_at(tl, i);
+  const char *n = needle ? sz_string_cstr(needle) : "";
+  if (!s || !s->a11y || !n[0])
+    return 0;
+  return strstr(s->a11y, n) != NULL ? 1 : 0;
+}
+
+int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle) {
+  SzTlState *s = tl_at(tl, i);
+  const char *n = needle ? sz_string_cstr(needle) : "";
+  if (!s || !s->last_hit || !n[0])
+    return 0;
+  return strstr(s->last_hit, n) != NULL ? 1 : 0;
+}
+
+int64_t sz_timeline_forall(void *tl, SzListPred pred, void *env) {
+  SzTimeline *t = (SzTimeline *)tl;
+  int i;
+  if (!t || !pred)
+    return 1;
+  for (i = 0; i < t->n; i++) {
+    void *box = sz_box_i64((int64_t)i);
+    int64_t ok = pred(box, env);
+    sz_release(box);
+    if (!ok) {
+      t->fail_index = i;
+      return 0;
+    }
+  }
+  return 1;
+}
+
+int64_t sz_timeline_exists(void *tl, SzListPred pred, void *env) {
+  SzTimeline *t = (SzTimeline *)tl;
+  int i;
+  if (!t || !pred)
+    return 0;
+  for (i = 0; i < t->n; i++) {
+    void *box = sz_box_i64((int64_t)i);
+    int64_t ok = pred(box, env);
+    sz_release(box);
+    if (ok)
+      return 1;
+  }
+  t->fail_index = t->n > 0 ? t->n - 1 : 0;
+  return 0;
+}
+
+static void tl_dump_file(void) {
+  const char *path = getenv("SCUZZ_TIMELINE_DUMP");
+  FILE *f;
+  int i;
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "w");
+  if (!f)
+    return;
+  fprintf(f, "# timeline n=%d\n", g_tl_n);
+  for (i = 0; i < g_tl_n; i++) {
+    fprintf(f, "--- %d\n", i);
+    fprintf(f, "last_hit:\n%s\n", g_tl[i].last_hit ? g_tl[i].last_hit : "");
+    fprintf(f, "drive:\n%s\n", g_tl[i].drive ? g_tl[i].drive : "");
+    fprintf(f, "signals:\n%s", g_tl[i].signals ? g_tl[i].signals : "");
+    if (g_tl[i].signals && g_tl[i].signals[0] &&
+        g_tl[i].signals[strlen(g_tl[i].signals) - 1] != '\n')
+      fputc('\n', f);
+    fprintf(f, "a11y:\n%s", g_tl[i].a11y ? g_tl[i].a11y : "");
+    if (g_tl[i].a11y && g_tl[i].a11y[0] &&
+        g_tl[i].a11y[strlen(g_tl[i].a11y) - 1] != '\n')
+      fputc('\n', f);
+  }
+  fclose(f);
+}
 
 static void session_register(SzSessionProp *tab, int *n, SzString *name,
                              void *fn) {
@@ -1653,76 +1885,114 @@ void sz_property_response_register(SzString *name, void *trigger_fn,
   g_response[g_response_n].name = copy;
   g_response[g_response_n].trigger = (int64_t(*)(void))trigger_fn;
   g_response[g_response_n].response = (int64_t(*)(void))response_fn;
-  g_response[g_response_n].seen_trigger = 0;
-  g_response[g_response_n].held = 0;
   g_response_n++;
 }
 
-/* Trigger is checked before the response so a response visible on the pump
-   right after the tap counts. */
-static void session_step_response(void) {
-  int i;
-  for (i = 0; i < g_response_n; i++) {
-    if (!g_response[i].seen_trigger && g_response[i].trigger &&
-        g_response[i].trigger())
-      g_response[i].seen_trigger = 1;
-    if (g_response[i].seen_trigger && !g_response[i].held &&
-        g_response[i].response && g_response[i].response())
-      g_response[i].held = 1;
-  }
+void sz_verify_register(SzString *name, void *fn) {
+  const char *s = name ? sz_string_cstr(name) : "";
+  size_t len;
+  char *copy;
+  if (!fn || !s[0])
+    return;
+  if (g_verify_n >= SZ_SESSION_MAX)
+    sz_panic("sz_property session: too many verify predicates");
+  len = strlen(s);
+  copy = (char *)sz_alloc(len + 1);
+  memcpy(copy, s, len + 1);
+  g_verify[g_verify_n].name = copy;
+  g_verify[g_verify_n].fn = (int64_t(*)(void *))fn;
+  g_verify_n++;
 }
 
 int sz_property_session_armed(void) {
-  return g_always_n > 0 || g_eventually_n > 0 || g_response_n > 0;
+  return g_always_n > 0 || g_eventually_n > 0 || g_response_n > 0 ||
+         g_verify_n > 0;
 }
 
 void sz_property_session_step(void) {
   const char *tr = getenv("SCUZZ_TESTRT");
-  char buf[256];
-  int i;
   if (!tr || tr[0] != '1')
     return;
-  for (i = 0; i < g_always_n; i++) {
-    if (g_always[i].fn && g_always[i].fn())
-      continue;
-    snprintf(buf, sizeof buf, "always failed: %s",
-             g_always[i].name ? g_always[i].name : "?");
-    fprintf(stderr, "scuzz: %s\n", buf);
-    sz_panic(buf);
-  }
-  for (i = 0; i < g_eventually_n; i++) {
-    if (g_eventually[i].fn && g_eventually[i].fn())
-      g_eventually[i].held = 1;
-  }
-  session_step_response();
+  tl_push();
+}
+
+static void claim_fail(const char *kind, const char *name, int idx) {
+  char buf[256];
+  snprintf(buf, sizeof buf, "%s failed: %s at state %d", kind,
+           name ? name : "?", idx);
+  fprintf(stderr, "scuzz: %s\n", buf);
+  sz_panic(buf);
 }
 
 void sz_property_session_end(void) {
   const char *tr = getenv("SCUZZ_TESTRT");
   char buf[256];
   int i;
+  int j;
+  int last;
+  SzTimeline frozen;
   if (!tr || tr[0] != '1')
     return;
-  sz_property_session_step();
+  tl_dump_file();
+  last = g_tl_n > 0 ? g_tl_n - 1 : 0;
+  for (i = 0; i < g_always_n; i++) {
+    for (j = 0; j < g_tl_n; j++) {
+      tl_restore(j);
+      if (g_always[i].fn && g_always[i].fn())
+        continue;
+      claim_fail("always", g_always[i].name, j);
+    }
+  }
   for (i = 0; i < g_eventually_n; i++) {
-    if (g_eventually[i].held)
-      continue;
-    snprintf(buf, sizeof buf, "eventually never held: %s",
-             g_eventually[i].name ? g_eventually[i].name : "?");
-    fprintf(stderr, "scuzz: %s\n", buf);
-    sz_panic(buf);
+    int held = 0;
+    for (j = 0; j < g_tl_n; j++) {
+      tl_restore(j);
+      if (g_eventually[i].fn && g_eventually[i].fn()) {
+        held = 1;
+        break;
+      }
+    }
+    if (!held)
+      claim_fail("eventually", g_eventually[i].name, last);
   }
   for (i = 0; i < g_response_n; i++) {
-    if (!g_response[i].seen_trigger)
+    int trig = -1;
+    int held = 0;
+    for (j = 0; j < g_tl_n; j++) {
+      tl_restore(j);
+      if (g_response[i].trigger && g_response[i].trigger()) {
+        trig = j;
+        break;
+      }
+    }
+    if (trig < 0)
       continue;
     sometimes_record(g_response[i].name ? g_response[i].name : "?");
-    if (g_response[i].held)
+    for (j = trig; j < g_tl_n; j++) {
+      tl_restore(j);
+      if (g_response[i].response && g_response[i].response()) {
+        held = 1;
+        break;
+      }
+    }
+    if (!held)
+      claim_fail("response", g_response[i].name, last);
+  }
+  frozen.n = g_tl_n;
+  frozen.fail_index = -1;
+  frozen.states = g_tl;
+  for (i = 0; i < g_verify_n; i++) {
+    frozen.fail_index = -1;
+    if (g_verify[i].fn && g_verify[i].fn(&frozen))
       continue;
-    snprintf(buf, sizeof buf, "response never held: %s",
-             g_response[i].name ? g_response[i].name : "?");
+    if (frozen.fail_index >= 0)
+      claim_fail("verify", g_verify[i].name, frozen.fail_index);
+    snprintf(buf, sizeof buf, "verify failed: %s",
+             g_verify[i].name ? g_verify[i].name : "?");
     fprintf(stderr, "scuzz: %s\n", buf);
     sz_panic(buf);
   }
+  tl_restore_clear();
 }
 
 void sz_property_session_reset(void) {
@@ -1749,10 +2019,19 @@ void sz_property_session_reset(void) {
     g_response[i].name = NULL;
     g_response[i].trigger = NULL;
     g_response[i].response = NULL;
-    g_response[i].seen_trigger = 0;
-    g_response[i].held = 0;
   }
   g_response_n = 0;
+  for (i = 0; i < g_verify_n; i++) {
+    if (g_verify[i].name)
+      sz_free(g_verify[i].name);
+    g_verify[i].name = NULL;
+    g_verify[i].fn = NULL;
+  }
+  g_verify_n = 0;
+  tl_free_states();
+  free(g_last_drive);
+  g_last_drive = NULL;
+  tl_restore_clear();
 }
 
 /* Matches DRIVE_NAMES_MAX in crates/compiler/src/overlay.rs. Overlay rejects a larger table. */
@@ -2019,6 +2298,7 @@ void sz_driver_run_line(const char *spec) {
     sz_panic("Ui.run: driver failed");
   }
   /* Driver work runs between pumps. Baseline the next idle frame. */
+  sz_timeline_set_drive(spec);
   sz_testrt_ui_idle_reset();
   sz_property_session_step();
 }

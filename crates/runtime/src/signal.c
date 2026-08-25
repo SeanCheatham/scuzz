@@ -129,6 +129,8 @@ SzString *sz_signal_dump(void) {
 
 int64_t sz_property_signal_int(int64_t id) {
   SigReg *r;
+  if (sz_timeline_replaying())
+    return sz_timeline_replay_signal_int(id);
   for (r = g_sig_head; r; r = r->next) {
     if (r->id == (int)id && r->kind == SIG_INT)
       return sz_signal_int_get((const SzSignalInt *)r->sig);

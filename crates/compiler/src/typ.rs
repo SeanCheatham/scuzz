@@ -627,6 +627,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                 name_span: Span::dummy(),
                 is_private: false,
                 is_driver: false,
+                is_verify: false,
                 type_params: for_en.type_params.clone(),
                 params,
                 ret: method.ret.clone(),
@@ -662,6 +663,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                     name_span: Span::dummy(),
                     is_private: false,
                     is_driver: false,
+                    is_verify: false,
                     type_params: en.type_params.clone(),
                     params,
                     ret: method.ret.clone(),
@@ -2292,6 +2294,7 @@ fn kit_lambda_param_ty_at(
             | "List.distinctBy",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
+        ("Timeline.forall" | "Timeline.exists", 1) => Some(Type::Int),
         ("IO.foreach" | "IO.foreachDiscard", 1) => prior.first().and_then(|t| list_elem(t).ok()),
         ("Ref.update" | "Ref.updateAndGet", 1) => prior
             .first()
@@ -2411,7 +2414,9 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "Map.forall"
             | "Set.filter"
             | "Set.exists"
-            | "Set.forall",
+            | "Set.forall"
+            | "Timeline.forall"
+            | "Timeline.exists",
             1,
         ) => Some(Type::Bool),
         ("List.sortBy" | "List.maxBy" | "List.minBy", 1) => Some(Type::Int),
@@ -5183,6 +5188,37 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Bool)
         }
+        "Timeline.len" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            Ok(Type::Int)
+        }
+        "Timeline.signalInt" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(Type::Int)
+        }
+        "Timeline.a11yHas" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::Bool)
+        }
+        "Timeline.lastHitHas" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::Bool)
+        }
+        "Timeline.forall" | "Timeline.exists" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            Ok(Type::Bool)
+        }
         "Property.assert" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -7270,6 +7306,7 @@ fn mono_expr(
                                 name_span: f.name_span.clone(),
                                 is_private: f.is_private,
                                 is_driver: f.is_driver,
+                                is_verify: f.is_verify,
                                 type_params: Vec::new(),
                                 params: params?,
                                 ret,

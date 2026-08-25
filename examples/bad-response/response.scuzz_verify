@@ -1,0 +1,6 @@
+private def afterHitShows(t: Timeline, hit: String, needle: String): Bool =
+  !Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit)) || Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit) && Timeline.exists(t, j => j >= i && Timeline.a11yHas(t, j, needle)))
+
+def afterPlusChanged(t: Timeline): Bool =
+  afterHitShows(t, "button:+1", "text:changed")
+

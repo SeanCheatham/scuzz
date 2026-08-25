@@ -937,6 +937,7 @@ mod tests {
             name_span: Span::dummy(),
             is_private: false,
             is_driver: false,
+            is_verify: false,
             type_params: vec![],
             params: vec![],
             ret: Type::String,

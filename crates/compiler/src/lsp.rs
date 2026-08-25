@@ -1266,7 +1266,15 @@ fn json_only(body: &str) -> Vec<String> {
 }
 
 fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
-    Ok(collect_fmt_sources(&root.join("src"))?)
+    let mut files = collect_fmt_sources(&root.join("src"))?;
+    if let Ok(verify_paths) = crate::verify::collect_verify_paths(root) {
+        for p in verify_paths {
+            if !files.iter().any(|f| f == &p) {
+                files.push(p);
+            }
+        }
+    }
+    Ok(files)
 }
 
 fn lsp_diagnostic_json(root: &Path, d: &Diagnostic) -> String {

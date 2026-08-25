@@ -8,7 +8,7 @@ use crate::span::{offset_to_line_col, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutateMode {
-    /// Mutate live `def` / `@main` bodies. Skip intent and driver bodies and residual oracle predicates.
+    /// Mutate live `def` / `@main` bodies. Skip verify and driver bodies and residual oracle predicates.
     Program,
     /// Mutate residual `Property.check` / `Property.assert` / `.require` predicates.
     Oracles,
@@ -609,11 +609,8 @@ fn bin_mutant(
     }
 }
 
-fn mutate_def_body(d: &FunDef, mode: MutateMode) -> bool {
-    match mode {
-        MutateMode::Program => !d.is_driver && !crate::intent::is_intent_module(&d.module),
-        MutateMode::Oracles => true,
-    }
+fn mutate_def_body(d: &FunDef) -> bool {
+    !d.is_driver && !d.is_verify
 }
 
 fn mutate_prog_at(
@@ -631,7 +628,7 @@ fn mutate_prog_at(
     };
     let mut seen = 0;
     for d in &mut program.defs {
-        if !mutate_def_body(d, mode) {
+        if !mutate_def_body(d) {
             continue;
         }
         cx.def = d.name.clone();
@@ -667,10 +664,44 @@ pub fn mutate_describe(program: &Program, site: i32, mode: MutateMode) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intent::{apply_intents, IntentScopeKind, IntentSource, SourceUnit};
     use crate::lower::lower_program;
     use crate::overlay::residualize_refinements;
     use crate::parser::{parse, parse_file};
+    use crate::verify::{apply_verifies, VerifySource};
+    use std::path::PathBuf;
+
+    #[test]
+    fn program_mode_skips_verify_helpers() {
+        let mut p = parse(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x")
+"#,
+        )
+        .unwrap();
+        apply_verifies(
+            &mut p,
+            &[VerifySource {
+                label: "pkg/count.scuzz_verify".into(),
+                text: concat!(
+                    "private def afterHitShows(t: Timeline, hit: String, needle: String): Bool =\n",
+                    "  !Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit)) || Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit) && Timeline.exists(t, j => j >= i && Timeline.a11yHas(t, j, needle)))\n",
+                    "def afterPlusShowsOne(t: Timeline): Bool =\n",
+                    "  afterHitShows(t, \"button:+1\", \"text:count = 1\")\n",
+                )
+                .into(),
+                path: PathBuf::new(),
+            }],
+        )
+        .unwrap();
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        for i in 0..n {
+            if let Some(d) = mutate_describe(&p, i, MutateMode::Program) {
+                assert_ne!(d.def, "afterHitShows", "verify helper mutated: {d:?}");
+                assert_ne!(d.def, "afterPlusShowsOne", "verify pred mutated: {d:?}");
+            }
+        }
+    }
 
     #[test]
     fn hello_has_no_oracle_sites() {
@@ -878,20 +909,12 @@ def scale(n: Int): Int =
             "Main.scuzz",
         )
         .unwrap();
-        apply_intents(
+        apply_verifies(
             &mut p,
-            &[IntentSource {
-                package: "pkg".into(),
-                scope: IntentScopeKind::Package,
-                dir_rel: String::new(),
-                label: "pkg/intent.scuzz_intent".into(),
-                text: "For Main.bump:\nThe result is the input plus 1.\n".into(),
+            &[VerifySource {
+                label: "pkg/claim.scuzz_verify".into(),
+                text: "def bump(n: Int): Bool =\n  Main.bump(n) == n + 1\n".into(),
                 path: std::path::PathBuf::new(),
-            }],
-            &[SourceUnit {
-                package: "pkg".into(),
-                module: "Main".into(),
-                rel: "src/Main.scuzz".into(),
             }],
         )
         .unwrap();

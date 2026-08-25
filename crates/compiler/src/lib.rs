@@ -15,7 +15,6 @@ pub(crate) mod highlight;
 pub(crate) mod hover;
 pub(crate) mod implement;
 pub(crate) mod inlay;
-pub(crate) mod intent;
 pub(crate) mod lens;
 pub(crate) mod lexer;
 pub(crate) mod links;
@@ -35,8 +34,10 @@ pub(crate) mod symbols;
 pub(crate) mod tokens;
 pub(crate) mod typ;
 pub(crate) mod typehier;
+pub(crate) mod verify;
 
 pub use check::{check_project, format_diagnostics};
 pub use driver::{compile_prepared_program, compile_project, CompileOutput};
 pub use lsp::run_lsp;
 pub use overlay::collect_fmt_sources;
+pub use verify::collect_verify_paths;

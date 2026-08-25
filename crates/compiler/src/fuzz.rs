@@ -1120,16 +1120,6 @@ fn collect_sometimes(e: &Expr, acc: &mut Vec<String>) {
     e.for_each_child(|c| collect_sometimes(c, acc));
 }
 
-/// One declared response-claim id per line (`response:<trigger>:<needle>`).
-pub fn response_declared_text(program: &Program) -> String {
-    let mut out = String::new();
-    for r in &program.intent_response {
-        out.push_str(&r.name);
-        out.push('\n');
-    }
-    out
-}
-
 pub fn classify_declared_text(program: &Program) -> String {
     let mut names = Vec::new();
     for d in &program.defs {
@@ -1750,26 +1740,6 @@ scroll:scroll
         )
         .unwrap();
         assert_eq!(sometimes_declared_text(&p), "a\nb\n");
-    }
-
-    #[test]
-    fn response_declared_text_lists_claim_ids() {
-        let mut p = parse(
-            r#"
-@main def main: IO[Unit] =
-  IO.println("x")
-"#,
-        )
-        .unwrap();
-        p.intent_response = vec![crate::ast::IntentResponse {
-            name: "response:button:+1:text:count = 1".into(),
-            trigger: "response_trigger_0".into(),
-            response: "response_0".into(),
-        }];
-        assert_eq!(
-            response_declared_text(&p),
-            "response:button:+1:text:count = 1\n"
-        );
     }
     #[test]
     fn classify_declared_first_seen() {

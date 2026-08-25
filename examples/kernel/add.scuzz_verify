@@ -1,0 +1,6 @@
+def add(n: Int, m: Int): Bool =
+  Main.add(n, m) == Main.add(m, n)
+
+def addTwoThree(): Bool =
+  Main.add(2, 3) == 5
+

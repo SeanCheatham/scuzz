@@ -68,15 +68,8 @@ pub fn emit_llvm(program: &Program) -> String {
             }
         }
     }
-    for name in program
-        .intent_always
-        .iter()
-        .chain(program.intent_eventually.iter())
-    {
+    for name in &program.verify_preds {
         intern_str(&mut strs, name);
-    }
-    for ir in &program.intent_response {
-        intern_str(&mut strs, &ir.name);
     }
     intern_drive_decode_names(program, &mut strs);
 
@@ -474,17 +467,13 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare void @sz_property_check(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_property_sometimes(ptr)").unwrap();
     writeln!(out, "declare void @sz_property_classify(ptr, i64)").unwrap();
-    writeln!(out, "declare void @sz_property_always_register(ptr, ptr)").unwrap();
-    writeln!(
-        out,
-        "declare void @sz_property_eventually_register(ptr, ptr)"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "declare void @sz_property_response_register(ptr, ptr, ptr)"
-    )
-    .unwrap();
+    writeln!(out, "declare void @sz_verify_register(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_len(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_signal_int(ptr, i64, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_a11y_has(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_last_hit_has(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_forall(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_exists(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_drive_uncons(ptr, ptr, ptr, i32)").unwrap();
     writeln!(out, "declare i32 @sz_drive_uncons_list(ptr, ptr, i32)").unwrap();
     writeln!(out, "declare i64 @sz_drive_nfields(ptr)").unwrap();
@@ -553,7 +542,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "define i32 @main(i32 %argc, ptr %argv) {{").unwrap();
     writeln!(out, "entry:").unwrap();
     emit_driver_registers(&mut out, program, &strs);
-    emit_intent_registers(&mut out, program, &strs);
+    emit_verify_registers(&mut out, program, &strs);
     out.push_str(&body_expr.code);
     let io_val = ensure_io(
         &mut out,
@@ -1225,93 +1214,35 @@ fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
     }
 }
 
-fn emit_intent_registers(out: &mut String, program: &Program, strs: &[String]) {
-    for (i, name) in program.intent_always.iter().enumerate() {
-        emit_one_intent_register(out, program, strs, i, name, "always");
-    }
-    let base = program.intent_always.len();
-    for (j, name) in program.intent_eventually.iter().enumerate() {
-        emit_one_intent_register(out, program, strs, base + j, name, "eventually");
-    }
-    let base = base + program.intent_eventually.len();
-    for (k, ir) in program.intent_response.iter().enumerate() {
-        emit_one_response_register(out, program, strs, base + k, ir);
-    }
-}
-
-fn emit_one_response_register(
-    out: &mut String,
-    program: &Program,
-    strs: &[String],
-    i: usize,
-    ir: &crate::ast::IntentResponse,
-) {
-    let idx = strs
-        .iter()
-        .position(|s| s == &ir.name)
-        .unwrap_or_else(|| panic!("intent name interned: {}", ir.name));
-    let len = ir.name.len() + 1;
-    let thunk_sym = |name: &str| {
+fn emit_verify_registers(out: &mut String, program: &Program, strs: &[String]) {
+    for (i, name) in program.verify_preds.iter().enumerate() {
+        let idx = strs
+            .iter()
+            .position(|s| s == name)
+            .unwrap_or_else(|| panic!("verify name interned: {name}"));
+        let len = name.len() + 1;
         let d = program
             .defs
             .iter()
-            .find(|d| crate::intent::is_intent_module(&d.module) && d.name == name)
-            .expect("intent thunk def");
-        user_symbol(&d.module, &d.name)
-    };
-    let trig = thunk_sym(&ir.trigger);
-    let resp = thunk_sym(&ir.response);
-    writeln!(
-        out,
-        "  %int{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  %int{i}_ss = call ptr @sz_string_from_cstr(ptr %int{i}_gep)"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  call void @sz_property_response_register(ptr %int{i}_ss, ptr @{trig}, ptr @{resp})"
-    )
-    .unwrap();
-}
-
-fn emit_one_intent_register(
-    out: &mut String,
-    program: &Program,
-    strs: &[String],
-    i: usize,
-    name: &str,
-    kind: &str,
-) {
-    let idx = strs
-        .iter()
-        .position(|s| s == name)
-        .unwrap_or_else(|| panic!("intent name interned: {name}"));
-    let len = name.len() + 1;
-    let d = program
-        .defs
-        .iter()
-        .find(|d| crate::intent::is_intent_module(&d.module) && d.name == name)
-        .expect("intent thunk def");
-    let sym = user_symbol(&d.module, &d.name);
-    writeln!(
-        out,
-        "  %int{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  %int{i}_ss = call ptr @sz_string_from_cstr(ptr %int{i}_gep)"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "  call void @sz_property_{kind}_register(ptr %int{i}_ss, ptr @{sym})"
-    )
-    .unwrap();
+            .find(|d| d.is_verify && d.name == *name)
+            .expect("verify pred def");
+        let sym = user_symbol(&d.module, &d.name);
+        writeln!(
+            out,
+            "  %ver{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  %ver{i}_ss = call ptr @sz_string_from_cstr(ptr %ver{i}_gep)"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  call void @sz_verify_register(ptr %ver{i}_ss, ptr @{sym})"
+        )
+        .unwrap();
+    }
 }
 
 fn emit_property_drive_tramps(out: &mut String, program: &Program, strs: &[String]) {
@@ -4380,6 +4311,37 @@ fn emit_list_pred_i64(
     val_emitted(code, format!("%{prefix}_v"), Kind::Int)
 }
 
+fn emit_timeline_pred(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let rt = if callee == "Timeline.forall" {
+        "sz_timeline_forall"
+    } else {
+        "sz_timeline_exists"
+    };
+    assert!(args.len() == 2, "{callee} expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("{callee} predicate must be a lambda");
+    };
+    let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), Kind::Int);
+    let inner_value = inner.value.clone();
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call i64 @{rt}(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+}
+
 fn emit_list_segment_length(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
@@ -5355,6 +5317,9 @@ fn emit_call(
         if callee == name {
             return emit_list_pred_i64(name, llvm, args, ctx, locals, prefix);
         }
+    }
+    if callee == "Timeline.forall" || callee == "Timeline.exists" {
+        return emit_timeline_pred(callee, args, ctx, locals, prefix);
     }
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
@@ -7280,6 +7245,44 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Timeline.len" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_len(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Timeline.signalInt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_signal_int(ptr {}, i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Timeline.a11yHas" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_a11y_has(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Timeline.lastHitHas" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_last_hit_has(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Property.assert" => {
             writeln!(
                 code,
@@ -8053,27 +8056,7 @@ mod tests {
     }
 
     fn emit_full(src: &str) -> String {
-        emit_full_intent(src, None)
-    }
-
-    fn emit_full_intent(src: &str, intent: Option<&str>) -> String {
         let mut p = parse(src).unwrap();
-        if let Some(text) = intent {
-            let intents = vec![crate::intent::IntentSource {
-                package: "pkg".into(),
-                scope: crate::intent::IntentScopeKind::Package,
-                dir_rel: String::new(),
-                label: "pkg/intent.scuzz_intent".into(),
-                text: text.into(),
-                path: std::path::PathBuf::new(),
-            }];
-            let units = vec![crate::intent::SourceUnit {
-                package: "pkg".into(),
-                module: "Main".into(),
-                rel: "src/Main.scuzz".into(),
-            }];
-            crate::intent::apply_intents(&mut p, &intents, &units).expect("intents");
-        }
         crate::typ::inject_builtin_enums(&mut p.enums);
         let p = crate::lower::lower_program(p);
         let p = crate::typ::expand_impls(p).expect("impls");
@@ -12461,36 +12444,42 @@ record Point(x: Int, y: Int)
     }
 
     #[test]
-    fn emit_intent_response_registers_claim() {
-        let ir = emit_full_intent(
+    fn emit_verify_registers_timeline_pred() {
+        let mut p = parse(
             r#"
 @main def main: IO[Unit] =
   IO.println("x")
 "#,
-            Some(
-                "After a tap on the \"button:+1\" control, eventually the \"text:count = 1\" control is visible.\n",
-            ),
+        )
+        .unwrap();
+        crate::verify::apply_verifies(
+            &mut p,
+            &[crate::verify::VerifySource {
+                label: "pkg/count.scuzz_verify".into(),
+                text: "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => true)\n".into(),
+                path: std::path::PathBuf::new(),
+            }],
+        )
+        .expect("verify");
+        crate::typ::inject_builtin_enums(&mut p.enums);
+        let p = crate::lower::lower_program(p);
+        let p = crate::typ::expand_impls(p).expect("impls");
+        let p = crate::typ::resolve_named_args(p).expect("named");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        let p = crate::typ::monomorphize(p).expect("mono");
+        let p = crate::typ::resolve_field_access(p).expect("fields after mono");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("declare void @sz_verify_register(ptr, ptr)"),
+            "expected verify_register declare:\n{ir}"
         );
         assert!(
-            ir.contains("declare i64 @sz_property_last_hit_has(ptr)"),
-            "expected last_hit_has declare:\n{ir}"
+            ir.contains("call void @sz_verify_register(ptr "),
+            "expected verify register call:\n{ir}"
         );
-        assert!(
-            ir.contains("declare void @sz_property_response_register(ptr, ptr, ptr)"),
-            "expected response_register declare:\n{ir}"
-        );
-        assert!(
-            ir.contains("call void @sz_property_response_register(ptr "),
-            "expected response register call:\n{ir}"
-        );
-        assert!(
-            ir.contains("call i64 @sz_property_last_hit_has(ptr "),
-            "expected trigger thunk to query the last hit:\n{ir}"
-        );
-        assert!(
-            ir.contains("response:button:+1:text:count = 1"),
-            "expected interned claim id:\n{ir}"
-        );
+        assert!(ir.contains("countOk"), "expected interned claim id:\n{ir}");
     }
 
     #[test]

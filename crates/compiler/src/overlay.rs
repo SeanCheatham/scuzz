@@ -1,5 +1,5 @@
-//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays, hierarchical intent
-//! lowering, and `.require` / `where` residualization.
+//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays, `*.scuzz_verify`
+//! claims, and `.require` / `where` residualization.
 
 use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Import, Program, Type, UnOp};
 use crate::parser::{parse_file, ParseError};
@@ -38,20 +38,19 @@ pub struct OverlaySource {
     pub path: PathBuf,
 }
 
-/// Apply same-name sim replacements, then merge `*.scuzz_drivers`, then lower
-/// hierarchical intent files. `.require` is rewritten by type in field
-/// resolution (verify) or erased live.
+/// Apply same-name sim replacements, then merge `*.scuzz_drivers`, then merge
+/// `*.scuzz_verify`. `.require` is rewritten by type in field resolution
+/// (verify) or erased live.
 #[cfg(test)]
 pub fn apply_overlays(live: Program, overlays: &[OverlaySource]) -> Result<Program, OverlayError> {
-    apply_verify_overlays(live, overlays, &[], &[])
+    apply_verify_overlays(live, overlays, &[])
 }
 
-/// Apply sim, drivers, and intent constraints from a resolved package graph.
+/// Apply sim, drivers, and verify predicates from a resolved package graph.
 pub fn apply_verify_overlays(
     mut live: Program,
     overlays: &[OverlaySource],
-    intents: &[crate::intent::IntentSource],
-    units: &[crate::intent::SourceUnit],
+    verifies: &[crate::verify::VerifySource],
 ) -> Result<Program, OverlayError> {
     for sim in overlays {
         if sim.kind != OverlayKind::Sim {
@@ -72,19 +71,17 @@ pub fn apply_verify_overlays(
         }
         apply_driver_overlay(&mut live, ov, &mut driver_names)?;
     }
-    crate::intent::apply_intents(&mut live, intents, units)?;
+    crate::verify::apply_verifies(&mut live, verifies)?;
     check_drive_table(&live)?;
     live.driver_names = driver_names;
     Ok(live)
 }
 
-/// Drop leftover intent thunk names. Live `build` / `run` must not emit intent
-/// thunks (verify overlays are not applied).
+/// Drop leftover verify thunk names. Live `build` / `run` must not emit verify
+/// predicates (verify overlays are not applied).
 pub fn erase_properties(program: &mut Program) {
-    program.intent_always.clear();
-    program.intent_eventually.clear();
-    program.intent_response.clear();
-    program.intent_seeds.clear();
+    program.verify_seeds.clear();
+    program.verify_preds.clear();
 }
 
 /// Drop `.require` to the receiver. Live `build` / `run` must not evaluate the predicate.
@@ -364,8 +361,8 @@ fn check_drive_table(program: &Program) -> Result<(), OverlayError> {
     Ok(())
 }
 
-/// Table lines for `build/drivers.txt`. One line per driver or `For` intent
-/// drive. Kind tokens are `i`, `s`, `b`, `[i]`, `Point(i>=0,i)`, and
+/// Table lines for `build/drivers.txt`. One line per driver or verify drive
+/// oracle. Kind tokens are `i`, `s`, `b`, `[i]`, `Point(i>=0,i)`, and
 /// `e:Some(i)|None`. A simple Int `where` bound joins the `i` token
 /// (`noteDrive i>=0`).
 pub fn driver_table_text(program: &Program) -> String {
@@ -1036,7 +1033,7 @@ pub fn overlay_kind_from_path(path: &std::path::Path) -> Option<(String, Overlay
 pub fn is_fmt_source(path: &std::path::Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("scuzz" | "scuzz_sim" | "scuzz_drivers")
+        Some("scuzz" | "scuzz_sim" | "scuzz_drivers" | "scuzz_verify")
     )
 }
 
@@ -1095,25 +1092,17 @@ mod tests {
     }
 
     #[test]
-    fn erase_drops_intent_thunk_names() {
+    fn erase_drops_verify_names() {
         let mut live = parse_sources(&[(
             "Main.scuzz".into(),
             "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        live.intent_always = vec!["always_0".into()];
-        live.intent_eventually = vec!["eventually_0".into()];
-        live.intent_response = vec![crate::ast::IntentResponse {
-            name: "response:button:+1:text:count = 1".into(),
-            trigger: "response_trigger_0".into(),
-            response: "response_0".into(),
-        }];
-        live.intent_seeds = vec!["drive add 2 3".into()];
+        live.verify_seeds = vec!["drive addTwoThree".into()];
+        live.verify_preds = vec!["countOk".into()];
         erase_properties(&mut live);
-        assert!(live.intent_always.is_empty());
-        assert!(live.intent_eventually.is_empty());
-        assert!(live.intent_response.is_empty());
-        assert!(live.intent_seeds.is_empty());
+        assert!(live.verify_seeds.is_empty());
+        assert!(live.verify_preds.is_empty());
     }
 
     #[test]
@@ -1220,27 +1209,27 @@ mod tests {
     }
 
     #[test]
-    fn empty_intent_fails_apply() {
+    fn empty_verify_fails_apply() {
         let live = parse_sources(&[(
             "Main.scuzz".into(),
             "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let err = apply_intent(live, "# comment only\n").unwrap_err();
-        assert!(err.to_string().contains("empty"), "{err}");
+        let err = apply_verify(live, "\n").unwrap_err();
+        assert!(err.to_string().contains("drive oracle"), "{err}");
     }
 
     #[test]
-    fn for_claim_publishes_drive() {
+    fn verify_oracle_publishes_drive() {
         let live = parse_sources(&[(
             "Main.scuzz".into(),
             "def add(a: Int, b: Int): Int = a + b\n@main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
         .unwrap();
-        let prog = apply_intent(
+        let prog = apply_verify(
             live,
-            "For Main.add:\nSwapping the inputs does not change the result.\n",
+            "def add(a: Int, b: Int): Bool =\n  Main.add(a, b) == Main.add(b, a)\n",
         )
         .unwrap();
         assert_eq!(driver_table_text(&prog).trim(), "add i i");
@@ -1254,7 +1243,11 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog = apply_intent(live, "For Main.noteDrive:\nThe result is the input.\n").unwrap();
+        let prog = apply_verify(
+            live,
+            "def noteDrive(n: Int where n >= 0): Bool =\n  Main.noteDrive(n) == n\n",
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "noteDrive i>=0\n");
 
         let live = parse_sources(&[(
@@ -1263,7 +1256,11 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog = apply_intent(live, "For Main.pos:\nThe result is the input.\n").unwrap();
+        let prog = apply_verify(
+            live,
+            "def pos(n: Int where n > 0): Bool =\n  Main.pos(n) == n\n",
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "pos i>0\n");
 
         let live = parse_sources(&[(
@@ -1272,7 +1269,11 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog = apply_intent(live, "For Main.cap:\nThe result is the input.\n").unwrap();
+        let prog = apply_verify(
+            live,
+            "def cap(n: Int where 10 >= n): Bool =\n  Main.cap(n) == n\n",
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "cap i<=10\n");
 
         let live = parse_sources(&[(
@@ -1281,7 +1282,11 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog = apply_intent(live, "For Main.both:\nThe result is the input.\n").unwrap();
+        let prog = apply_verify(
+            live,
+            "def both(n: Int where n >= 0 && n <= 10): Bool =\n  Main.both(n) == n\n",
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "both i\n");
 
         let live = parse_sources(&[(
@@ -1376,7 +1381,8 @@ mod tests {
             "def bad(x: Float): Float = x\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let err = apply_intent(live, "For Main.bad:\nThe result is the input.\n").unwrap_err();
+        let err =
+            apply_verify(live, "def bad(x: Float): Bool =\n  Main.bad(x) == x\n").unwrap_err();
         assert!(err.to_string().contains("record/enum"), "{}", err);
     }
 
@@ -1405,27 +1411,16 @@ mod tests {
         }]
     }
 
-    fn pkg_intent(text: &str) -> crate::intent::IntentSource {
-        crate::intent::IntentSource {
-            package: "pkg".into(),
-            scope: crate::intent::IntentScopeKind::Package,
-            dir_rel: String::new(),
-            label: "pkg/intent.scuzz_intent".into(),
-            text: text.into(),
-            path: PathBuf::new(),
-        }
-    }
-
-    fn main_unit() -> crate::intent::SourceUnit {
-        crate::intent::SourceUnit {
-            package: "pkg".into(),
-            module: "Main".into(),
-            rel: "src/Main.scuzz".into(),
-        }
-    }
-
-    fn apply_intent(live: Program, text: &str) -> Result<Program, OverlayError> {
-        apply_verify_overlays(live, &[], &[pkg_intent(text)], &[main_unit()])
+    fn apply_verify(live: Program, text: &str) -> Result<Program, OverlayError> {
+        apply_verify_overlays(
+            live,
+            &[],
+            &[crate::verify::VerifySource {
+                label: "pkg/claim.scuzz_verify".into(),
+                text: text.into(),
+                path: PathBuf::new(),
+            }],
+        )
     }
 
     fn live_with(src: &str) -> Program {
@@ -1571,59 +1566,50 @@ mod tests {
     }
 
     #[test]
-    fn drivers_reject_for_drive_name() {
+    fn drivers_reject_verify_drive_name() {
         let live =
             live_with("def p(a: Int): Int = a\n@main def main: IO[Unit] = IO.println(\"x\")\n");
         let err = apply_verify_overlays(
             live,
             &[driver_ov("Main", "def p(n: Int): IO[Unit] = IO.pure(())\n")],
-            &[pkg_intent("For Main.p:\nThe result is the input.\n")],
-            &[main_unit()],
+            &[crate::verify::VerifySource {
+                label: "pkg/claim.scuzz_verify".into(),
+                text: "def p(n: Int): Bool =\n  Main.p(n) == n\n".into(),
+                path: PathBuf::new(),
+            }],
         )
         .unwrap_err();
         assert!(err.to_string().contains("collides"), "{err}");
     }
 
     #[test]
-    fn for_claims_reject_duplicate_drive_name() {
+    fn verify_oracles_reject_duplicate_drive_name() {
         let live = parse_sources(&[
             ("A.scuzz".into(), "def p(a: Int): Int = a\n".into()),
             (
                 "B.scuzz".into(),
-                "def p(a: Int): Int = a\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+                "def q(a: Int): Int = a\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
             ),
         ])
         .unwrap();
-        let units = vec![
-            crate::intent::SourceUnit {
-                package: "pkg".into(),
-                module: "A".into(),
-                rel: "src/A.scuzz".into(),
-            },
-            crate::intent::SourceUnit {
-                package: "pkg".into(),
-                module: "B".into(),
-                rel: "src/B.scuzz".into(),
-            },
-        ];
         let err = apply_verify_overlays(
             live,
             &[],
             &[
-                pkg_intent("For A.p:\nThe result is the input.\n"),
-                crate::intent::IntentSource {
-                    package: "pkg".into(),
-                    scope: crate::intent::IntentScopeKind::Package,
-                    dir_rel: String::new(),
-                    label: "pkg/src/intent.scuzz_intent".into(),
-                    text: "For B.p:\nThe result is the input.\n".into(),
+                crate::verify::VerifySource {
+                    label: "pkg/a.scuzz_verify".into(),
+                    text: "def p(n: Int): Bool =\n  A.p(n) == n\n".into(),
+                    path: PathBuf::new(),
+                },
+                crate::verify::VerifySource {
+                    label: "pkg/b.scuzz_verify".into(),
+                    text: "def p(n: Int): Bool =\n  B.q(n) == n\n".into(),
                     path: PathBuf::new(),
                 },
             ],
-            &units,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("collides"), "{err}");
+        assert!(err.to_string().contains("duplicate"), "{err}");
     }
 
     #[test]
