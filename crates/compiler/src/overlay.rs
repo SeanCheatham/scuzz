@@ -84,6 +84,7 @@ pub fn erase_properties(program: &mut Program) {
     program.intent_always.clear();
     program.intent_eventually.clear();
     program.intent_response.clear();
+    program.intent_seeds.clear();
 }
 
 /// Drop `.require` to the receiver. Live `build` / `run` must not evaluate the predicate.
@@ -1107,10 +1108,12 @@ mod tests {
             trigger: "response_trigger_0".into(),
             response: "response_0".into(),
         }];
+        live.intent_seeds = vec!["drive add 2 3".into()];
         erase_properties(&mut live);
         assert!(live.intent_always.is_empty());
         assert!(live.intent_eventually.is_empty());
         assert!(live.intent_response.is_empty());
+        assert!(live.intent_seeds.is_empty());
     }
 
     #[test]

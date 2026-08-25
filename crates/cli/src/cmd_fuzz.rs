@@ -1308,13 +1308,12 @@ fn note_search_fail(
 
 fn load_corpus(project_dir: &Path) -> Result<Vec<(PathBuf, Repro)>> {
     let dir = project_dir.join("corpus");
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
     let mut names = Vec::new();
-    for ent in std::fs::read_dir(&dir)? {
-        let ent = ent?;
-        names.push(ent.file_name().to_string_lossy().into_owned());
+    if dir.is_dir() {
+        for ent in std::fs::read_dir(&dir)? {
+            let ent = ent?;
+            names.push(ent.file_name().to_string_lossy().into_owned());
+        }
     }
     let mut out = Vec::new();
     for name in corpus_sorted_names(names) {
@@ -1326,6 +1325,34 @@ fn load_corpus(project_dir: &Path) -> Result<Vec<(PathBuf, Repro)>> {
             .with_context(|| format!("reading {}", path.display()))?;
         let repro = parse_repro(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
         out.push((path, repro));
+    }
+    let seeds_path = project_dir.join("build").join("seeds.txt");
+    if seeds_path.is_file() {
+        let text = std::fs::read_to_string(&seeds_path)
+            .with_context(|| format!("reading {}", seeds_path.display()))?;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if out.iter().any(|(_, r)| r.events == [line.to_string()]) {
+                continue;
+            }
+            out.push((
+                seeds_path.clone(),
+                Repro {
+                    seed: 0,
+                    schedule_seed: None,
+                    pct_d: None,
+                    pct_k: None,
+                    fault_seed: None,
+                    fault_kind: None,
+                    fault_n: None,
+                    fault_mode: None,
+                    events: vec![line.to_string()],
+                },
+            ));
+        }
     }
     Ok(out)
 }
@@ -1376,7 +1403,14 @@ fn replay_stored_corpus(
             camp.search_failures += 1;
             if camp.repro.is_none() {
                 stash_dump_fail(&ctx.fuzz_dir)?;
-                std::fs::copy(&path, ctx.fuzz_dir.join("repro.toml"))?;
+                let replay_path = if path.file_name().is_some_and(|n| n == "seeds.txt") {
+                    let dest = ctx.fuzz_dir.join("repro.toml");
+                    std::fs::write(&dest, repro_text(repro.seed, &sched, &fault, &repro.events))?;
+                    dest
+                } else {
+                    std::fs::copy(&path, ctx.fuzz_dir.join("repro.toml"))?;
+                    path.clone()
+                };
                 println!(
                     "fuzz failure on corpus {} ({} events)",
                     path.display(),
@@ -1385,10 +1419,10 @@ fn replay_stored_corpus(
                 println!(
                     "replay: scuzz fuzz {} --replay {}",
                     ctx.project_dir.display(),
-                    path.display()
+                    replay_path.display()
                 );
                 camp.repro = Some(SearchRepro {
-                    path: path.clone(),
+                    path: replay_path,
                     events: repro.events.clone(),
                 });
             } else {
