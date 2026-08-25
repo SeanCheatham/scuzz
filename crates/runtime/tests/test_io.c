@@ -1679,6 +1679,13 @@ static int64_t session_ok(void) { return 1; }
 
 static int64_t session_fail(void) { return 0; }
 
+static int64_t verify_len_ok(void *tl) { return sz_timeline_len(tl) >= 1; }
+
+static int64_t verify_never(void *tl) {
+  (void)tl;
+  return 0;
+}
+
 int main(void) {
   /* delay */
   delay_calls = 0;
@@ -8899,6 +8906,7 @@ int main(void) {
       sz_property_always_register(nm, (void *)session_fail);
       sz_release(nm);
       sz_property_session_step();
+      sz_property_session_end();
       _exit(0);
     }
     assert(wait_aborted(pid));
@@ -8991,6 +8999,36 @@ int main(void) {
     assert(sz_property_last_hit_has(nm) == 0);
     sz_release(nm);
     sz_property_stash_last_hit(NULL);
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Timeline => Bool verify predicates judge at session_end. */
+  {
+    pid_t pid;
+    SzString *nm;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_property_session_reset();
+    nm = sz_string_from_cstr("countOk");
+    sz_verify_register(nm, (void *)verify_len_ok);
+    sz_release(nm);
+    assert(sz_property_session_armed());
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      setenv("SCUZZ_TESTRT", "1", 1);
+      sz_property_session_reset();
+      nm = sz_string_from_cstr("countOk");
+      sz_verify_register(nm, (void *)verify_never);
+      sz_release(nm);
+      sz_property_session_step();
+      sz_property_session_end();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
     unsetenv("SCUZZ_TESTRT");
   }
 

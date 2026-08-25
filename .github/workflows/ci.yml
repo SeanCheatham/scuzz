@@ -402,7 +402,7 @@ jobs:
           cargo run -p scuzz -- test examples/bad-sched
           cargo run -p scuzz -- check examples/bad-response
           if cargo run -p scuzz -- check examples/bad-intent; then
-            echo "empty intent should fail check" && exit 1
+            echo "empty verify should fail check" && exit 1
           fi
           cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '^\[\]$' /tmp/hello-check.json
@@ -500,12 +500,12 @@ jobs:
             echo "corpus-only should pin the bad-example failure" && exit 1
           fi
           cargo run -p scuzz -- fuzz --iterations 0 examples/kernel
-          grep -q 'drive add 2 3' examples/kernel/build/seeds.txt
+          grep -q 'drive addTwoThree' examples/kernel/build/seeds.txt
           rm -rf /tmp/bad-seed
           cp -R examples/bad-example /tmp/bad-seed
           rm -rf /tmp/bad-seed/build /tmp/bad-seed/corpus
           if cargo run -p scuzz -- fuzz --iterations 0 /tmp/bad-seed; then
-            echo "given-row seed should fail bump with no stored corpus" && exit 1
+            echo "zero-arg seed should fail bump with no stored corpus" && exit 1
           fi
           grep -q 'drive bump 0' /tmp/bad-seed/build/fuzz/repro.toml
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-fault; then
@@ -702,7 +702,7 @@ jobs:
           cargo run -p scuzz -- test examples/hello
           cargo run -p scuzz -- check examples/kernel
           if cargo run -p scuzz -- check examples/bad-intent; then
-            echo "empty intent should fail check" && exit 1
+            echo "empty verify should fail check" && exit 1
           fi
 
   # Full macOS packaging. Skip on push/PR.

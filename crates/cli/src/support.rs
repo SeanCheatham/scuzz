@@ -59,6 +59,7 @@ pub fn run_testrt(
         .env("SCUZZ_KIT", "sealed");
     if let Some(parent) = reached.parent() {
         cmd.env("SCUZZ_CLASSIFY_DUMP", parent.join("classify.dump"));
+        cmd.env("SCUZZ_TIMELINE_DUMP", parent.join("timeline.txt"));
     }
     if let Some(ui) = ui {
         cmd.env("SCUZZ_UI_RUNTIME", "headless")

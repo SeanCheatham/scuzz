@@ -1,0 +1,6 @@
+private def visible(t: Timeline, needle: String): Bool =
+  Timeline.forall(t, i => Timeline.a11yHas(t, i, needle))
+
+def chrome(t: Timeline): Bool =
+  visible(t, "button:Save") && visible(t, "button:Check") && visible(t, "button:Find") && visible(t, "button:Palette") && visible(t, "button:Save all") && visible(t, "button:Run") && visible(t, "button:Fuzz") && visible(t, "button:x sample.txt") && visible(t, "editor:editor")
+

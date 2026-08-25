@@ -1,0 +1,6 @@
+private def visible(t: Timeline, needle: String): Bool =
+  Timeline.forall(t, i => Timeline.a11yHas(t, i, needle))
+
+def chrome(t: Timeline): Bool =
+  visible(t, "button:Add") && visible(t, "button:Clear") && visible(t, "radio:Home") && visible(t, "radio:Tasks") && visible(t, "switch:On") && visible(t, "chip:Pin") && visible(t, "badge:") && visible(t, "card:") && visible(t, "divider:") && visible(t, "expansion:") && visible(t, "vdiv:") && visible(t, "circular:") && visible(t, "avatar:") && visible(t, "checktile:") && visible(t, "switchtile:") && visible(t, "radiotile:") && visible(t, "segmented:") && visible(t, "fab:") && visible(t, "tooltip:") && visible(t, "placeholder:") && visible(t, "semantics:") && visible(t, "inkwell:") && visible(t, "visibility:") && visible(t, "offstage:") && visible(t, "unconstrained:")
+

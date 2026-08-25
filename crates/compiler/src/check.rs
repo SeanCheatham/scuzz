@@ -2,7 +2,6 @@
 
 use crate::driver::apply_resolved_overlays;
 use crate::format::format_source;
-use crate::intent::{intent_source_from_parts, place_intent_file};
 use crate::lower::lower_program;
 use crate::overlay::{
     collect_fmt_sources, is_fmt_source, overlay_kind_from_path, residualize_refinements,
@@ -241,8 +240,8 @@ fn named_sources(resolved: &crate::driver::ResolvedProject) -> Vec<(String, Stri
     for ov in &resolved.overlays {
         out.push((ov.label.clone(), ov.text.clone()));
     }
-    for intent in &resolved.intents {
-        out.push((intent.label.clone(), intent.text.clone()));
+    for verify in &resolved.verifies {
+        out.push((verify.label.clone(), verify.text.clone()));
     }
     out
 }
@@ -451,13 +450,13 @@ fn apply_unsaved(
             matched.insert(canonicalize_source_path(&ov.path), ());
         }
     }
-    for intent in &mut resolved.intents {
-        if intent.path.as_os_str().is_empty() {
+    for verify in &mut resolved.verifies {
+        if verify.path.as_os_str().is_empty() {
             continue;
         }
-        if let Some(text) = lookup_unsaved(&intent.path, unsaved) {
-            intent.text = text.clone();
-            matched.insert(canonicalize_source_path(&intent.path), ());
+        if let Some(text) = lookup_unsaved(&verify.path, unsaved) {
+            verify.text = text.clone();
+            matched.insert(canonicalize_source_path(&verify.path), ());
         }
     }
     let root = canonicalize_source_path(project_dir);
@@ -471,11 +470,19 @@ fn apply_unsaved(
         let under_src = key.starts_with(&src_dir);
         let name = key.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if name.ends_with(".scuzz_intent") {
-            if let Ok(Some(placement)) = place_intent_file(&root, &key) {
-                resolved
-                    .intents
-                    .push(intent_source_from_parts(&pkg, placement, key, text.clone()));
-            }
+            continue;
+        }
+        if crate::verify::is_verify_path(&key) {
+            let rel = key
+                .strip_prefix(&root)
+                .unwrap_or(&key)
+                .to_string_lossy()
+                .replace('\\', "/");
+            resolved.verifies.push(crate::verify::VerifySource {
+                label: format!("{pkg}/{rel}"),
+                text: text.clone(),
+                path: key,
+            });
             continue;
         }
         if !under_src {
@@ -517,14 +524,18 @@ fn unsaved_intent_diags(
         if !name.ends_with(".scuzz_intent") {
             continue;
         }
-        if let Err(msg) = place_intent_file(&root, &key) {
-            let rel = key
-                .strip_prefix(&root)
-                .unwrap_or(&key)
-                .display()
-                .to_string();
-            out.push(Diagnostic::error(msg).with_file(rel).with_loc(1, 1));
-        }
+        let rel = key
+            .strip_prefix(&root)
+            .unwrap_or(&key)
+            .display()
+            .to_string();
+        out.push(
+            Diagnostic::error(
+                "intent files are not valid; write the claim in a *.scuzz_verify file",
+            )
+            .with_file(rel)
+            .with_loc(1, 1),
+        );
     }
     out
 }
@@ -534,6 +545,16 @@ fn format_check_src(
     unsaved: &BTreeMap<PathBuf, String>,
 ) -> Result<Vec<Diagnostic>> {
     let mut files = collect_fmt_sources(&project_dir.join("src"))?;
+    if let Ok(verify_paths) = crate::verify::collect_verify_paths(project_dir) {
+        for p in verify_paths {
+            if !files
+                .iter()
+                .any(|f| canonicalize_source_path(f) == canonicalize_source_path(&p))
+            {
+                files.push(p);
+            }
+        }
+    }
     for p in unsaved.keys() {
         if is_fmt_source(p)
             && !files
@@ -566,7 +587,7 @@ fn format_check_src(
     Ok(diags)
 }
 
-/// Format-check `src/`, then parse, lower, and typecheck (live + sim + model twins + in-source properties).
+/// Format-check `src/`, then parse, lower, and typecheck (live + sim + drivers + `*.scuzz_verify` + in-source properties).
 /// No LLVM emit. No link. Format mismatches and type errors share one diagnostic list.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     check_project_with(project_dir, &BTreeMap::new())
@@ -714,14 +735,14 @@ fn load_overlay_file(
             .find(|s| canonicalize_source_path(&s.path) == key)
         {
             Some(s) => (s.label.clone(), s.text.clone()),
-            None => match resolved.intents.iter().find(|i| {
-                !i.path.as_os_str().is_empty() && canonicalize_source_path(&i.path) == key
+            None => match resolved.overlays.iter().find(|o| {
+                !o.path.as_os_str().is_empty() && canonicalize_source_path(&o.path) == key
             }) {
-                Some(i) => (i.label.clone(), i.text.clone()),
-                None => match resolved.overlays.iter().find(|o| {
-                    !o.path.as_os_str().is_empty() && canonicalize_source_path(&o.path) == key
+                Some(o) => (o.label.clone(), o.text.clone()),
+                None => match resolved.verifies.iter().find(|v| {
+                    !v.path.as_os_str().is_empty() && canonicalize_source_path(&v.path) == key
                 }) {
-                    Some(o) => (o.label.clone(), o.text.clone()),
+                    Some(v) => (v.label.clone(), v.text.clone()),
                     None => return Ok(None),
                 },
             },
@@ -1432,6 +1453,11 @@ pub fn workspace_diagnostics_project(
             by_path.entry(canonicalize_source_path(&p)).or_default();
         }
     }
+    if let Ok(verify_paths) = crate::verify::collect_verify_paths(project_dir) {
+        for p in verify_paths {
+            by_path.entry(canonicalize_source_path(&p)).or_default();
+        }
+    }
     for p in unsaved.keys() {
         by_path.entry(canonicalize_source_path(p)).or_default();
     }
@@ -1843,7 +1869,7 @@ version = "0.0.0"
     }
 
     #[test]
-    fn check_project_empty_intent_fails() {
+    fn check_project_leftover_intent_fails() {
         let dir = tempdir().unwrap();
         let root = dir.path();
         write_sim_pkg(
@@ -1852,15 +1878,52 @@ version = "0.0.0"
             "def title(): String = \"Sim\"\n",
         );
         fs::write(
-            root.join(crate::intent::INTENT_FILE_NAME),
-            "# empty on purpose\n",
+            root.join("intent.scuzz_intent"),
+            "The \"button:+1\" control is visible.\n",
         )
         .unwrap();
+        let err = format!("{:#}", check_project(root).unwrap_err());
+        assert!(err.contains("intent files are not valid"), "{err}");
+    }
+
+    #[test]
+    fn check_project_empty_verify_fails() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(root.join("count.scuzz_verify"), "\n").unwrap();
         let diags = check_project(root).unwrap();
         assert!(
-            diags.iter().any(|d| d.message.contains("empty")),
+            diags.iter().any(|d| d.message.contains("drive oracle")),
             "{diags:?}"
         );
+    }
+
+    #[test]
+    fn check_project_verify_wrong_shape_fails() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let src = "def bad(x: Float): Bool = x >= 0.0\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("count.scuzz_verify"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(
+            diags.iter().any(|d| d.message.contains("record/enum")),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn check_project_verify_ok() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let src = "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => i >= 0)\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("count.scuzz_verify"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     #[test]

@@ -4,6 +4,7 @@ mod support;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use scuzz_compiler::collect_fmt_sources;
+use scuzz_compiler::collect_verify_paths;
 use scuzz_compiler::compile_project;
 use scuzz_compiler::driver::{find_runtime_dir, wait_for_source_change};
 use scuzz_compiler::format::format_source;
@@ -43,7 +44,7 @@ enum Commands {
         /// Force a full rebuild (ignore incremental fingerprint)
         #[arg(long)]
         full: bool,
-        /// Apply `*.scuzz_sim` / `*.scuzz_drivers` / `intent.scuzz_intent` + residual `.require` / `where` (TestRuntime / fuzz graph)
+        /// Apply `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_verify` + residual `.require` / `where` (TestRuntime / fuzz graph)
         #[arg(long)]
         verify: bool,
     },
@@ -122,7 +123,7 @@ enum Commands {
     },
     /// Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
     #[command(
-        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --iterations 0\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and replays those entries before search. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). `examples/bad-adt` is an expected fuzz failure (wrong `record` area). `examples/bad-sched` is an expected fuzz failure (lost Queue offer order under PCT). `examples/bad-intent` is an expected check failure (empty `intent.scuzz_intent`). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass on the other expected-fail packages.\n"
+        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --iterations 0\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and replays those entries before search. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). `examples/bad-adt` is an expected fuzz failure (wrong `record` area). `examples/bad-sched` is an expected fuzz failure (lost Queue offer order under PCT). `examples/bad-intent` is an expected check failure (empty `*.scuzz_verify`). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass on the other expected-fail packages.\n"
     )]
     Fuzz {
         #[arg(default_value = ".")]
@@ -710,7 +711,15 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
         bail!("missing src/ in {}", project_dir.display());
     }
     let mut dirty = 0usize;
-    for p in collect_fmt_sources(&src)? {
+    let mut files = collect_fmt_sources(&src)?;
+    if let Ok(verify_paths) = collect_verify_paths(&project_dir) {
+        for p in verify_paths {
+            if !files.iter().any(|f| f == &p) {
+                files.push(p);
+            }
+        }
+    }
+    for p in files {
         let text = std::fs::read_to_string(&p)?;
         let formatted =
             format_source(&text).with_context(|| format!("formatting {}", p.display()))?;

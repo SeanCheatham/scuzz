@@ -1388,7 +1388,8 @@ int sz_ui_pump_sync(SzUiSession *session) {
   }
   if (need_dump && session->debug_dump_path)
     sz_ui_session_write_dump(session, session->debug_dump_path);
-  if (sz_testrt_oracles_armed() && sz_property_session_armed()) {
+  if (sz_testrt_oracles_armed() &&
+      (sz_property_session_armed() || getenv("SCUZZ_TIMELINE_DUMP"))) {
     if (session->root) {
       SzString *views = sz_view_a11y_dump(session->root);
       sz_property_stash_a11y(sz_string_cstr(views));
@@ -2130,6 +2131,26 @@ void sz_ui_resolve_headless_size(int *width, int *height, double *scale) {
     const char *sc = getenv("SCUZZ_UI_SCALE");
     *scale = (sc && atof(sc) > 0.0) ? atof(sc) : 1.0;
   }
+}
+
+void sz_ui_quiesce(SzUiSession *session) {
+  int idle = 0;
+  int n;
+  if (!session)
+    return;
+  for (n = 0; n < 64; n++) {
+    int busy = session->dirty || session->bridge_head != NULL;
+    if (!sz_ui_pump_sync(session))
+      sz_panic("Ui.run quiesce pump failed");
+    if (busy)
+      idle = 0;
+    else {
+      idle++;
+      if (idle >= 2)
+        return;
+    }
+  }
+  fprintf(stderr, "scuzz: quiesce budget tripped (64 pumps)\n");
 }
 
 void sz_ui_session_finish(SzUiSession *session) {

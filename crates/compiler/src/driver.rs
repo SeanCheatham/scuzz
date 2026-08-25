@@ -1,9 +1,6 @@
 use crate::ast::Program;
 use crate::codegen::emit_llvm;
-use crate::fuzz::{classify_declared_text, response_declared_text, sometimes_declared_text};
-use crate::intent::{
-    intent_source_from_parts, place_intent_file, seed_table_text, IntentSource, SourceUnit,
-};
+use crate::fuzz::{classify_declared_text, sometimes_declared_text};
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
@@ -12,6 +9,7 @@ use crate::overlay::{
 };
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
+use crate::verify::{reject_intent_files, seed_table_text, VerifySource};
 use anyhow::{bail, Context, Result};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
@@ -45,7 +43,7 @@ pub struct CompileOptions {
     pub clang: String,
     /// Skip clang link when fingerprint matches (incremental).
     pub incremental: bool,
-    /// Apply `*.scuzz_sim` / `*.scuzz_drivers` / `intent.scuzz_intent` and residual `.require` / `where` (fuzz / TestRuntime builds).
+    /// Apply `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_verify` and residual `.require` / `where` (fuzz / TestRuntime builds).
     pub verify: bool,
 }
 
@@ -73,8 +71,8 @@ pub struct ResolvedProject {
     pub sources: Vec<ResolvedSource>,
     /// Stem-paired sim / driver overlays (not loaded for live `build`/`run`).
     pub overlays: Vec<OverlaySource>,
-    /// Hierarchical intent files (package root and `src/` directories).
-    pub intents: Vec<IntentSource>,
+    /// `*.scuzz_verify` predicates. May sit anywhere in the package.
+    pub verifies: Vec<VerifySource>,
     /// Canonical package directories in visit order (deps first).
     pub package_dirs: Vec<PathBuf>,
     /// Manifest paths in the same order as `package_dirs`.
@@ -85,12 +83,7 @@ pub fn apply_resolved_overlays(
     live: Program,
     resolved: &ResolvedProject,
 ) -> Result<Program, crate::overlay::OverlayError> {
-    let units: Vec<SourceUnit> = resolved
-        .sources
-        .iter()
-        .map(|s| SourceUnit::from_label(&s.label))
-        .collect();
-    apply_verify_overlays(live, &resolved.overlays, &resolved.intents, &units)
+    apply_verify_overlays(live, &resolved.overlays, &resolved.verifies)
 }
 
 fn executable_name(manifest: &Manifest) -> Result<String> {
@@ -186,7 +179,6 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
 
     let declared = sometimes_declared_text(&program);
     let classify = classify_declared_text(&program);
-    let response_declared = response_declared_text(&program);
     let seeds = seed_table_text(&program);
     let mut program = program;
     crate::typ::inject_builtin_enums(&mut program.enums);
@@ -208,7 +200,6 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
         )?;
         std::fs::write(opts.out_dir.join("sometimes.declared"), declared)?;
         std::fs::write(opts.out_dir.join("classify.declared"), classify)?;
-        std::fs::write(opts.out_dir.join("response.declared"), response_declared)?;
         std::fs::write(opts.out_dir.join("seeds.txt"), seeds)?;
     } else {
         let _ = std::fs::remove_file(opts.out_dir.join("drivers.txt"));
@@ -469,9 +460,9 @@ fn fingerprint_resolved_into(resolved: &ResolvedProject, verify: bool, h: &mut D
             ov.label.hash(h);
             ov.text.hash(h);
         }
-        for intent in &resolved.intents {
-            intent.label.hash(h);
-            intent.text.hash(h);
+        for verify in &resolved.verifies {
+            verify.label.hash(h);
+            verify.text.hash(h);
         }
     }
 }
@@ -516,7 +507,7 @@ pub fn resolve_project(project_dir: &Path) -> Result<ResolvedProject> {
         root_manifest,
         sources: state.sources,
         overlays: state.overlays,
-        intents: state.intents,
+        verifies: state.verifies,
         package_dirs: state.package_dirs,
         manifest_paths: state.manifest_paths,
     })
@@ -528,7 +519,7 @@ struct VisitState {
     done: HashSet<PathBuf>,
     sources: Vec<ResolvedSource>,
     overlays: Vec<OverlaySource>,
-    intents: Vec<IntentSource>,
+    verifies: Vec<VerifySource>,
     package_dirs: Vec<PathBuf>,
     manifest_paths: Vec<PathBuf>,
 }
@@ -646,8 +637,9 @@ fn visit_package(
         });
     }
 
-    let pkg_intents = find_intents(&canon, &pkg_name)?;
-    state.intents.extend(pkg_intents);
+    reject_intent_files(&canon, &pkg_name).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pkg_verifies = find_verifies(&canon, &pkg_name)?;
+    state.verifies.extend(pkg_verifies);
 
     state.package_dirs.push(canon.clone());
     state.manifest_paths.push(manifest_path);
@@ -747,56 +739,25 @@ fn collect_overlays(
     Ok(())
 }
 
-fn find_intents(project_dir: &Path, pkg_name: &str) -> Result<Vec<IntentSource>> {
+fn find_verifies(project_dir: &Path, pkg_name: &str) -> Result<Vec<VerifySource>> {
     let mut out = Vec::new();
-    scan_intent_dir(project_dir, project_dir, pkg_name, false, &mut out)?;
-    let src = project_dir.join("src");
-    if src.is_dir() {
-        scan_intent_dir(&src, project_dir, pkg_name, true, &mut out)?;
+    let paths = crate::verify::collect_verify_paths(project_dir)
+        .with_context(|| format!("scanning {} for *.scuzz_verify", project_dir.display()))?;
+    for path in paths {
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let rel = path
+            .strip_prefix(project_dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push(VerifySource {
+            label: format!("{pkg_name}/{rel}"),
+            text,
+            path,
+        });
     }
-    out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
-}
-
-fn scan_intent_dir(
-    dir: &Path,
-    pkg_dir: &Path,
-    pkg_name: &str,
-    recurse: bool,
-    out: &mut Vec<IntentSource>,
-) -> Result<()> {
-    let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|e| e.path());
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            if recurse {
-                scan_intent_dir(&path, pkg_dir, pkg_name, true, out)?;
-            }
-            continue;
-        }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if !name.ends_with(".scuzz_intent") {
-            continue;
-        }
-        match place_intent_file(pkg_dir, &path) {
-            Ok(Some(placement)) => {
-                let text = std::fs::read_to_string(&path)
-                    .with_context(|| format!("reading {}", path.display()))?;
-                out.push(intent_source_from_parts(pkg_name, placement, path, text));
-            }
-            Ok(None) => {}
-            Err(msg) => {
-                let rel = path
-                    .strip_prefix(pkg_dir)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                bail!("{pkg_name}/{rel}: {msg}");
-            }
-        }
-    }
-    Ok(())
 }
 
 fn paths_eq(a: &Path, b: &Path) -> bool {
@@ -931,8 +892,8 @@ fn project_snapshot(project_dir: &Path) -> Result<Vec<(String, u64, u128)>> {
     for ov in &resolved.overlays {
         paths.push(ov.path.clone());
     }
-    for intent in &resolved.intents {
-        paths.push(intent.path.clone());
+    for verify in &resolved.verifies {
+        paths.push(verify.path.clone());
     }
     paths.sort();
     let mut out = Vec::new();
@@ -958,7 +919,6 @@ fn project_snapshot(project_dir: &Path) -> Result<Vec<(String, u64, u128)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intent::INTENT_FILE_NAME;
     use std::fs;
     use tempfile::tempdir;
 
@@ -1024,69 +984,37 @@ mod tests {
     }
 
     #[test]
-    fn discovers_package_and_directory_intent() {
+    fn rejects_leftover_intent_file() {
         let tmp = tempdir().unwrap();
         let app = tmp.path().join("app");
         write_pkg(&app, "app", "", true, "IO.println(\"x\")");
         fs::write(
-            app.join(INTENT_FILE_NAME),
+            app.join("intent.scuzz_intent"),
             "The \"button:+1\" control is visible.\n",
-        )
-        .unwrap();
-        fs::create_dir_all(app.join("src/billing")).unwrap();
-        fs::write(
-            app.join("src/billing/Billing.scuzz"),
-            "def total(n: Int): Int = n\n",
-        )
-        .unwrap();
-        fs::write(
-            app.join("src/billing").join(INTENT_FILE_NAME),
-            "For Billing.total:\nThe result is the input.\n",
-        )
-        .unwrap();
-        let r = resolve_project(&app).unwrap();
-        assert_eq!(r.intents.len(), 2);
-        assert!(r
-            .intents
-            .iter()
-            .any(|i| i.scope == crate::intent::IntentScopeKind::Package));
-        assert!(r.intents.iter().any(|i| {
-            i.scope == crate::intent::IntentScopeKind::Directory && i.dir_rel == "src/billing"
-        }));
-    }
-
-    #[test]
-    fn rejects_legacy_stem_intent_file() {
-        let tmp = tempdir().unwrap();
-        let app = tmp.path().join("app");
-        write_pkg(&app, "app", "", true, "IO.println(\"x\")");
-        fs::write(
-            app.join("src/Main.scuzz_intent"),
-            "For Main.x:\nThe result is the input.\n",
         )
         .unwrap();
         let err = resolve_project(&app).unwrap_err().to_string();
         assert!(
-            err.contains("rename to intent.scuzz_intent"),
+            err.contains("intent files are not valid"),
             "unexpected: {err}"
         );
     }
 
     #[test]
-    fn verify_fingerprint_includes_intent_text() {
+    fn verify_fingerprint_includes_verify_text() {
         let tmp = tempdir().unwrap();
         let app = tmp.path().join("app");
         write_pkg(&app, "app", "", true, "IO.println(\"x\")");
         fs::write(
-            app.join(INTENT_FILE_NAME),
-            "The \"button:+1\" control is visible.\n",
+            app.join("count.scuzz_verify"),
+            "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => i >= 0)\n",
         )
         .unwrap();
         let r1 = resolve_project(&app).unwrap();
         let fp1 = fingerprint_resolved(&r1, true);
         fs::write(
-            app.join(INTENT_FILE_NAME),
-            "The \"button:+2\" control is visible.\n",
+            app.join("count.scuzz_verify"),
+            "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => i >= 1)\n",
         )
         .unwrap();
         let r2 = resolve_project(&app).unwrap();

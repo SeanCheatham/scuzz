@@ -83,10 +83,8 @@ fn empty_program(file: &str) -> Program {
         },
         imports: Vec::new(),
         driver_names: Vec::new(),
-        intent_always: Vec::new(),
-        intent_eventually: Vec::new(),
-        intent_response: Vec::new(),
-        intent_seeds: Vec::new(),
+        verify_seeds: Vec::new(),
+        verify_preds: Vec::new(),
     }
 }
 
@@ -229,10 +227,8 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         main,
         imports,
         driver_names: Vec::new(),
-        intent_always: Vec::new(),
-        intent_eventually: Vec::new(),
-        intent_response: Vec::new(),
-        intent_seeds: Vec::new(),
+        verify_seeds: Vec::new(),
+        verify_preds: Vec::new(),
     })
 }
 
@@ -354,10 +350,8 @@ pub fn parse_sources_recovering(
             main,
             imports,
             driver_names: Vec::new(),
-            intent_always: Vec::new(),
-            intent_eventually: Vec::new(),
-            intent_response: Vec::new(),
-            intent_seeds: Vec::new(),
+            verify_seeds: Vec::new(),
+            verify_preds: Vec::new(),
         }),
         errors,
     )
@@ -635,10 +629,8 @@ impl Parser {
                 main,
                 imports,
                 driver_names: Vec::new(),
-                intent_always: Vec::new(),
-                intent_eventually: Vec::new(),
-                intent_response: Vec::new(),
-                intent_seeds: Vec::new(),
+                verify_seeds: Vec::new(),
+                verify_preds: Vec::new(),
             },
             errors,
         )
@@ -729,6 +721,7 @@ impl Parser {
             name_span,
             is_private,
             is_driver: false,
+            is_verify: false,
             type_params,
             params,
             ret,
@@ -1122,7 +1115,7 @@ impl Parser {
             return Ok(Type::Var(name));
         }
         match name.as_str() {
-            "Unit" | "Int" | "Float" | "String" | "Bool" => {
+            "Unit" | "Int" | "Float" | "String" | "Bool" | "Timeline" => {
                 if matches!(self.peek(), Token::LBracket) {
                     return Err(self.err(format!("{name} takes no type arguments")));
                 }
@@ -1131,7 +1124,8 @@ impl Parser {
                     "Int" => Type::Int,
                     "Float" => Type::Float,
                     "String" => Type::String,
-                    _ => Type::Bool,
+                    "Bool" => Type::Bool,
+                    _ => Type::Opaque("Timeline".into()),
                 })
             }
             "List" => {
@@ -2470,6 +2464,7 @@ impl Parser {
                         | "Stream"
                         | "Map"
                         | "Set"
+                        | "Timeline"
                 ) =>
             {
                 self.bump();
