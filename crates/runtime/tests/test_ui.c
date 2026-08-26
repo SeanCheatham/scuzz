@@ -3,6 +3,7 @@
 #include "sk_capi.h"
 
 #include <assert.h>
+#include <stdatomic.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -466,7 +467,7 @@ static void test_ui_run_rebuild_keepalive(void) {
 typedef struct {
   SzUiSession *session;
   SzSignalInt *sig;
-  volatile int stop;
+  atomic_int stop;
 } QuiescePostEnv;
 
 /* IO -> UI bridge poster: keeps pending bridge work so quiesce never sees
@@ -477,7 +478,7 @@ static void *quiesce_poster(void *arg) {
   /* Post continuously: the pump drains the bridge each frame, and a post is
    * far cheaper than a paint, so pending work is visible at every quiesce
    * sample. */
-  while (!env->stop)
+  while (!atomic_load_explicit(&env->stop, memory_order_relaxed))
     sz_ui_bridge_post_int(env->session, env->sig, v++);
   return NULL;
 }
@@ -524,10 +525,10 @@ static void test_quiesce(void) {
     assert(session);
     env.session = session;
     env.sig = sig;
-    env.stop = 0;
+    atomic_init(&env.stop, 0);
     assert(pthread_create(&th, NULL, quiesce_poster, &env) == 0);
     q = sz_ui_quiesce(session);
-    env.stop = 1;
+    atomic_store_explicit(&env.stop, 1, memory_order_relaxed);
     pthread_join(th, NULL);
     _exit(q == SZ_QUIESCE_BUDGET_TRIPPED ? 0 : 1);
   }

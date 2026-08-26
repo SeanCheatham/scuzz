@@ -690,8 +690,13 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   BridgeItem *it;
   if (!session || !sig)
     return;
-  it = (BridgeItem *)sz_alloc_zero(sizeof(BridgeItem));
+  /* Host malloc: IO threads post while the UI thread pumps, and the
+   * tracked heap is single-threaded. */
+  it = (BridgeItem *)malloc(sizeof(BridgeItem));
+  if (!it)
+    sz_panic("ui: out of memory");
   it->kind = BRIDGE_INT;
+  it->next = NULL;
   it->sig_int = sig;
   it->int_value = value;
   pthread_mutex_lock(&session->bridge_lock);
@@ -717,7 +722,7 @@ void sz_ui_bridge_flush(SzUiSession *session) {
     next = it->next;
     if (it->kind == BRIDGE_INT)
       sz_signal_int_set(it->sig_int, it->int_value);
-    sz_free(it);
+    free(it);
     it = next;
   }
 }
@@ -1307,12 +1312,13 @@ int sz_ui_pump_sync(SzUiSession *session) {
     return 0;
   if (session->lifecycle == SZ_LIFECYCLE_STOP)
     return 0;
-  need_dump = session->dirty || session->bridge_head != NULL;
   /* Pull OS events before the frame (host-driven mobile / desktop shell). */
   drain_mobile_events(session);
   drain_desktop_events(session);
-  if (session->dirty)
-    need_dump = 1;
+  /* Read dirty and the bridge under the lock: IO threads post concurrently. */
+  pthread_mutex_lock(&session->bridge_lock);
+  need_dump = session->dirty || session->bridge_head != NULL;
+  pthread_mutex_unlock(&session->bridge_lock);
   if (stamp_changed(session)) {
     const char *code = getenv("SCUZZ_UI_RELOAD_CODE");
     if (code && code[0])
@@ -1360,7 +1366,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
   if (scale != 1.f)
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
+  pthread_mutex_lock(&session->bridge_lock);
   session->dirty = 0;
+  pthread_mutex_unlock(&session->bridge_lock);
   /* Desktop peer: present to OS surface when embedder is available. */
   if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
     rgba = sk_surface_peek_pixels(session->surface, &nbytes);
