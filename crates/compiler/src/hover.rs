@@ -1151,6 +1151,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Timeline.signalInt(t: Timeline, i: Int, id: Int): Int",
     ),
     (
+        "Timeline.signalListLen",
+        "Timeline.signalListLen(t: Timeline, i: Int, id: Int): Int",
+    ),
+    (
         "Timeline.a11yHas",
         "Timeline.a11yHas(t: Timeline, i: Int, needle: String): Bool",
     ),

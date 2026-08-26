@@ -1,14 +1,14 @@
 # Next slice
 
-Studio heap growth under fuzz.
+Swarm testing + corpus hygiene.
 
-`scuzz fuzz` on `examples/studio` fails the heap-baseline oracle on corpus replay: live count stable, bytes grow by 6 per session. Pre-existing leak in a widget path the studio corpus exercises. Counter and the bad-* examples stay green.
+Today every fuzz run draws from the same event-alphabet weights, so a campaign explores one point of the strategy space. Vary the weights per run (swarm): each run picks a random weighting over taps, text, scrolls, drivers, and fault seeds, so a campaign covers strategies a fixed mix would miss. Then corpus hygiene: `scuzz fuzz --minimize-corpus` rewrites stored entries to their shortest forms that keep the same sometimes coverage.
 
 Proof:
 
-- `cargo run -p scuzz -- fuzz --iterations 8 examples/studio` passes the heap baseline.
-- The leaked allocation is named in the fix commit (widget or kit, not a suppressed oracle).
+- Two same-seed campaigns over `examples/studio` with swarm enabled still replay the stored corpus deterministically; corpus replay stays byte-stable.
+- `--minimize-corpus` on `examples/studio` keeps every declared `sometimes` name reached with entries no longer than before.
 - `make -C crates/runtime test`, `cargo test -p scuzz-compiler`, `cargo test -p scuzz` pass.
-- `cargo run -p scuzz -- fuzz --iterations 16 examples/counter` stays green.
+- `cargo run -p scuzz -- fuzz --iterations 16 examples/counter` and `examples/studio` stay green.
 
 Current locks: [`vision.md`](vision.md). Ranked gaps: [`gaps.md`](gaps.md).

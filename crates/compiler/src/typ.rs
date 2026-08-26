@@ -5203,6 +5203,13 @@ fn infer_call(
             expect_ty(&arg_tys[2], &Type::Int)?;
             Ok(Type::Int)
         }
+        "Timeline.signalListLen" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(Type::Int)
+        }
         "Timeline.a11yHas" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;

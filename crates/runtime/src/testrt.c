@@ -1881,6 +1881,32 @@ int64_t sz_timeline_signal_int(void *tl, int64_t i, int64_t id) {
   return s ? tl_parse_signal_int(s->signals, id) : 0;
 }
 
+/* List length from the signals dump: `list[<id>] = ["a", "b"]` holds one
+ * quoted string per element (no escaping), so quotes pair per element. */
+static int64_t tl_parse_signal_list_len(const char *dump, int64_t id) {
+  char key[48];
+  const char *p;
+  int64_t quotes = 0;
+  if (!dump)
+    return 0;
+  snprintf(key, sizeof key, "list[%lld] = [", (long long)id);
+  p = strstr(dump, key);
+  if (!p)
+    return 0;
+  p += strlen(key);
+  while (*p && *p != ']') {
+    if (*p == '"')
+      quotes += 1;
+    p += 1;
+  }
+  return quotes / 2;
+}
+
+int64_t sz_timeline_signal_list_len(void *tl, int64_t i, int64_t id) {
+  SzTlState *s = tl_at(tl, i);
+  return s ? tl_parse_signal_list_len(s->signals, id) : 0;
+}
+
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle) {
   SzTlState *s = tl_at(tl, i);
   const char *n = needle ? sz_string_cstr(needle) : "";
