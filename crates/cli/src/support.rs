@@ -10,6 +10,14 @@ pub fn resolve_dir(path: &Path) -> Result<PathBuf> {
         Ok(std::env::current_dir()?.join(path))
     }
 }
+/// Resolve `--out-dir` against the project root. Absolute passes through.
+pub fn resolve_out_dir(project_dir: &Path, out_dir: &Path) -> PathBuf {
+    if out_dir.is_absolute() {
+        out_dir.to_path_buf()
+    } else {
+        project_dir.join(out_dir)
+    }
+}
 
 pub fn compile_opts(
     path: &Path,
@@ -18,11 +26,7 @@ pub fn compile_opts(
     verify: bool,
 ) -> Result<CompileOptions> {
     let project_dir = resolve_dir(path)?;
-    let out_dir = if out_dir.is_absolute() {
-        out_dir.to_path_buf()
-    } else {
-        project_dir.join(out_dir)
-    };
+    let out_dir = resolve_out_dir(&project_dir, out_dir);
     let runtime_dir =
         find_runtime_dir(&std::env::current_dir()?).or_else(|_| find_runtime_dir(&project_dir))?;
     let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());

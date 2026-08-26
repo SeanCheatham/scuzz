@@ -76,7 +76,7 @@ test: build/test_io build/test_ui
 
 # Optional ASan. Not part of default `make test` (slow / host-dependent).
 # Skip if -fsanitize=address cannot link. Exit-time leaks are
-# known (see docs/gaps.md Memory residual). LSan stays off so ASan still
+# known (see docs/gaps.md Residuals, Memory). LSan stays off so ASan still
 # catches UAF/OOB without failing the optional CI step on leftover allocs.
 ASAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address -fno-omit-frame-pointer
 test-asan:

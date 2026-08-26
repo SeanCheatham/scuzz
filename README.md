@@ -34,7 +34,7 @@ scuzz new myapp --ui
 cd myapp
 scuzz test --update
 scuzz test
-scuzz run --headless    # Desktop: scuzz run
+scuzz run --headless    # scaffold default; Desktop: default_runtime = "desktop" in scuzz.toml
 scuzz ide --headless .  # bundled editor; Desktop without --headless
 ```
 

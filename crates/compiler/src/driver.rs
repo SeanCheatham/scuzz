@@ -5,7 +5,7 @@ use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
     apply_verify_overlays, driver_table_text, erase_properties, erase_requires,
-    overlay_kind_from_path, residualize_refinements, OverlaySource,
+    overlay_kind_from_path, residualize_refinements, OverlayKind, OverlaySource,
 };
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
@@ -50,7 +50,6 @@ pub struct CompileOptions {
 #[derive(Debug, Clone)]
 pub struct CompileOutput {
     pub executable: PathBuf,
-    pub llvm_ir: PathBuf,
     pub manifest: Manifest,
     pub cache_hit: bool,
 }
@@ -82,13 +81,7 @@ pub struct ResolvedProject {
 impl ResolvedProject {
     /// True when a `*.scuzz_sim` overlay is in the package graph.
     pub fn has_sim(&self) -> bool {
-        self.overlays.iter().any(|o| {
-            o.label.contains(".scuzz_sim")
-                || o.path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.ends_with(".scuzz_sim"))
-        })
+        self.overlays.iter().any(|o| o.kind == OverlayKind::Sim)
     }
 }
 
@@ -160,8 +153,6 @@ fn compile_project_inner(opts: &CompileOptions) -> Result<CompileOutput> {
     std::fs::create_dir_all(&cache_dir)?;
     let fp_path = cache_dir.join(fingerprint_cache_name(opts.verify));
     let exe = opts.out_dir.join(&exe_name);
-    let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
-
     if opts.incremental
         && exe.is_file()
         && fp_path.is_file()
@@ -169,7 +160,6 @@ fn compile_project_inner(opts: &CompileOptions) -> Result<CompileOutput> {
     {
         return Ok(CompileOutput {
             executable: exe,
-            llvm_ir: ll_path,
             manifest,
             cache_hit: true,
         });
@@ -343,7 +333,6 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
 
     Ok(CompileOutput {
         executable: exe,
-        llvm_ir: ll_path,
         manifest,
         cache_hit: false,
     })
