@@ -810,7 +810,8 @@ pub fn fuzz_pick_script(
     }
 }
 
-fn fuzz_perturb_sched(base: &str, s: i64) -> String {
+/// Perturb a packed schedule seed: keep d/k, bump rng by a seeded delta.
+pub fn fuzz_perturb_sched(base: &str, s: i64) -> String {
     let mut plan = decode_sched_seed(base.parse().unwrap_or(0));
     plan.rng += 1 + lcg_below(s, 16);
     encode_sched_plan(plan).to_string()

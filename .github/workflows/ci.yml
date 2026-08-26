@@ -494,6 +494,10 @@ jobs:
         run: |
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
           cargo run -p scuzz -- fuzz --iterations 16 examples/studio
+          cargo run -p scuzz -- fuzz --relate examples/counter
+          if cargo run -p scuzz -- fuzz --relate examples/bad-sched; then
+            echo "relate should have caught the schedule divergence" && exit 1
+          fi
           if cargo run -p scuzz -- fuzz --no-fail-fast --iterations 8 examples/bad-example; then
             echo "fuzz should have found the property failure" && exit 1
           fi

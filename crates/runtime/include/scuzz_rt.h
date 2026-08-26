@@ -895,6 +895,15 @@ SzVerdict *sz_verdict_or(SzVerdict *a, SzVerdict *b);
 SzVerdict *sz_verdict_every(void *tl, void *fnp, void *envp);
 SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp);
 void sz_verify_register(const char *name, SzVerdict *(*fn)(void *));
+/* Relation claim: (Timeline, Timeline) => Verdict over a pair of v1 dumps. */
+void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *));
+/* Parse a v1 timeline dump (SCUZZ_TIMELINE_DUMP output). NULL on error. */
+void *sz_timeline_load(const char *path);
+void sz_timeline_free(void *tl);
+/* Judge mode: spec is "<a.txt>,<b.txt>"; runs every registered relation
+ * claim over the pair. Process exit code: 0 = all valid (or none registered),
+ * 1 = a claim failed, 2 = bad spec or unreadable dump. */
+int sz_judge_rel_main(const char *spec);
 void sz_property_stash_last_hit(const char *desc);
 int64_t sz_property_last_hit_has(SzString *needle);
 int sz_property_session_armed(void);
@@ -906,6 +915,7 @@ int sz_timeline_replaying(void);
 int64_t sz_timeline_replay_signal_int(int64_t id);
 int64_t sz_timeline_len(void *tl);
 int64_t sz_timeline_signal_int(void *tl, int64_t i, int64_t id);
+int64_t sz_timeline_signal_list_len(void *tl, int64_t i, int64_t id);
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_forall(void *tl, SzListPred pred, void *env);

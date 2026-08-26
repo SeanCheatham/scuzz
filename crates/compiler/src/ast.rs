@@ -22,6 +22,8 @@ pub struct Program {
     pub verify_seeds: Vec<String>,
     /// Public `Timeline => Verdict` claims from `*.scuzz_verify`.
     pub verify_preds: Vec<String>,
+    /// Public `(Timeline, Timeline) => Verdict` relation claims from `*.scuzz_verify`.
+    pub verify_rels: Vec<String>,
 }
 
 /// `trait Show:` / `trait Get[T]: def getOrElse(default: T): T`

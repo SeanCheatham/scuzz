@@ -149,6 +149,9 @@ enum Commands {
         /// Greedily minimize corpus/*.toml entries (keep pass/fail + declared sometimes coverage), then exit
         #[arg(long)]
         minimize_corpus: bool,
+        /// Judge (Timeline, Timeline) => Verdict relation claims: replay each corpus entry under its own and a perturbed schedule, then exit
+        #[arg(long)]
+        relate: bool,
     },
     /// Create a new Scuzz Lang project
     #[command(
@@ -392,6 +395,7 @@ version = "0.1.0"
             oracles,
             no_fail_fast,
             minimize_corpus,
+            relate,
         } => cmd_fuzz::cmd_fuzz(
             &path,
             replay.as_deref(),
@@ -400,6 +404,7 @@ version = "0.1.0"
             oracles,
             no_fail_fast,
             minimize_corpus,
+            relate,
         ),
         Commands::Ide {
             path,

@@ -3533,6 +3533,15 @@ static void *sz_runtime_main_worker(void *arg) {
   if (a->argc > 0 && a->argv)
     sz_sys_set_args(a->argc, a->argv);
   {
+    /* Judge mode: registered relation claims judge a pair of v1 timeline
+     * dumps; main does not run. */
+    const char *jr = getenv("SCUZZ_JUDGE_REL");
+    if (jr && jr[0]) {
+      a->rc = sz_judge_rel_main(jr);
+      goto done;
+    }
+  }
+  {
     const char *tr = getenv("SCUZZ_TESTRT");
     if (tr && tr[0] == '1') {
       sz_testrt_install();
@@ -3557,6 +3566,7 @@ static void *sz_runtime_main_worker(void *arg) {
   sz_property_sometimes_flush();
   sz_timeline_varied_flush();
   sz_property_classify_flush();
+done:
 #if defined(__APPLE__)
   g_sz_main_worker_done = 1;
   /* Wake the main CFRunLoop so it notices the done flag promptly. */
