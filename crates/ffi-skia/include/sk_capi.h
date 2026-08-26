@@ -30,6 +30,7 @@ SkSurface *sk_surface_make_raster_n32_premul(int width, int height);
 /* Offscreen GPU presenter. Paint stays CPU; peek uploads and reads back.
  * Returns NULL when OpenGL is missing. */
 SkSurface *sk_surface_make_gpu_n32_premul(int width, int height);
+int sk_gpu_available(void);
 void sk_surface_unref(SkSurface *surface);
 SkCanvas *sk_surface_get_canvas(SkSurface *surface);
 int sk_surface_width(const SkSurface *surface);
