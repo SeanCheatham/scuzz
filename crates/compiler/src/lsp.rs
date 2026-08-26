@@ -13,18 +13,17 @@
 
 use crate::check::{
     canonicalize_source_path, check_project_with, code_actions_project, code_lenses_project,
-    complete_project, declaration_project, definition_project, diagnostic_source_path,
-    document_diagnostics_project, document_links_project, folding_ranges_project,
-    highlights_project, hover_project, implementation_project, incoming_calls_project,
-    inlay_hints_project, json_str, outgoing_calls_project, prepare_call_hierarchy_project,
-    prepare_rename_project, references_project, rename_project, selection_ranges_project,
-    semantic_tokens_project, semantic_tokens_range_project, signature_help_project,
-    symbols_project, type_definition_project, type_items_project, will_rename_files_project,
-    workspace_diagnostics_project, workspace_symbols_project, CallItemLsp, CodeActionLsp,
-    Diagnostic, LspRange, RenameResult, TextEditLsp, TypeItemLsp,
+    collect_check_sources, complete_project, declaration_project, definition_project,
+    diagnostic_source_path, document_diagnostics_project, document_links_project,
+    folding_ranges_project, highlights_project, hover_project, implementation_project,
+    incoming_calls_project, inlay_hints_project, json_str, outgoing_calls_project,
+    prepare_call_hierarchy_project, prepare_rename_project, references_project, rename_project,
+    selection_ranges_project, semantic_tokens_project, semantic_tokens_range_project,
+    signature_help_project, symbols_project, type_definition_project, type_items_project,
+    will_rename_files_project, workspace_diagnostics_project, workspace_symbols_project,
+    CallItemLsp, CodeActionLsp, Diagnostic, LspRange, RenameResult, TextEditLsp, TypeItemLsp,
 };
 use crate::fold::FOLD_REGION;
-use crate::overlay::collect_fmt_sources;
 use crate::tokens::{TOKEN_MODIFIERS, TOKEN_TYPES};
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -277,7 +276,7 @@ fn publish_check<W: Write>(
         Err(e) => vec![Diagnostic::error(e.to_string())],
     };
     let mut by_uri: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for path in src_files(root)? {
+    for path in collect_check_sources(root)? {
         by_uri.entry(file_uri(&path)).or_default();
     }
     for path in open.keys() {
@@ -1265,18 +1264,6 @@ fn json_only(body: &str) -> Vec<String> {
     out
 }
 
-fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = collect_fmt_sources(&root.join("src"))?;
-    if let Ok(verify_paths) = crate::verify::collect_verify_paths(root) {
-        for p in verify_paths {
-            if !files.iter().any(|f| f == &p) {
-                files.push(p);
-            }
-        }
-    }
-    Ok(files)
-}
-
 fn lsp_diagnostic_json(root: &Path, d: &Diagnostic) -> String {
     let line = d.line.unwrap_or(1).saturating_sub(1);
     let col = d.column.unwrap_or(1).saturating_sub(1);
@@ -1328,7 +1315,7 @@ fn encode_related_information(root: &Path, r: &crate::check::RelatedLoc) -> Stri
         end_col = col.saturating_add(1);
     }
     let uri = match &r.file {
-        Some(f) => file_uri(&diag_path(root, f)),
+        Some(f) => file_uri(&diagnostic_source_path(root, f)),
         None => file_uri(root),
     };
     format!(
@@ -1340,13 +1327,9 @@ fn encode_related_information(root: &Path, r: &crate::check::RelatedLoc) -> Stri
 
 fn diag_uri(root: &Path, d: &Diagnostic) -> String {
     match &d.file {
-        Some(f) => file_uri(&diag_path(root, f)),
+        Some(f) => file_uri(&diagnostic_source_path(root, f)),
         None => file_uri(root),
     }
-}
-
-fn diag_path(root: &Path, file: &str) -> PathBuf {
-    diagnostic_source_path(root, file)
 }
 
 fn file_uri(path: &Path) -> String {

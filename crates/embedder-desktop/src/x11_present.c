@@ -200,7 +200,6 @@ int sz_embedder_available(void) {
 }
 
 double sz_embedder_display_scale(void) {
-  /* X11 path stays 1× (CI / typical Linux). HiDPI X11 later. */
   return 1.0;
 }
 
@@ -221,8 +220,6 @@ static int text_slot_queued(const char *slot) {
   for (i = g_q_head; i != g_q_tail; i = (i + 1) % EVENT_CAP) {
     if (g_queue[i].kind == SZ_INPUT_KEY &&
         (g_queue[i].key == slot || g_queue[i].text == slot))
-      return 1;
-    if (g_queue[i].kind == SZ_INPUT_TEXT_EDIT && g_queue[i].text == slot)
       return 1;
   }
   return 0;
@@ -479,8 +476,6 @@ static uint32_t place_chan(uint8_t v, unsigned long mask) {
     m >>= 1;
     bits++;
   }
-  if (bits == 0)
-    return 0;
   if (bits >= 8)
     return ((uint32_t)v << (shift + bits - 8)) & (uint32_t)mask;
   return (((uint32_t)v >> (8 - bits)) << shift) & (uint32_t)mask;

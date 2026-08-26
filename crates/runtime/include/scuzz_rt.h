@@ -76,9 +76,6 @@ void sz_alloc_delta(int64_t *bytes, int64_t *count);
  * bytes written, not counting the NUL. Live debug dumps also write
  * `[live]` through `sz_alloc_format_live`. */
 int sz_alloc_format_heap(char *buf, size_t cap, int mark);
-/* Optional SCUZZ_ALLOC_TRACE=1 sample from sz_ui_pump_sync (every N pumps). */
-void sz_alloc_trace_on_pump(void);
-
 /* --- strings (UTF-8, length-prefixed, null-terminated for C interop) ----- */
 
 typedef struct SzString {

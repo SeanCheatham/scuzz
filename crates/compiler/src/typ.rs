@@ -2255,11 +2255,7 @@ fn rewrite_require(
 }
 
 /// Kit lambdas bind a known item type. Bare lambdas (`View.button` tap) stay Opaque.
-pub(crate) fn kit_lambda_param_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
-    kit_lambda_param_ty_at(callee, arg_i, nargs, &[])
-}
-
-fn kit_lambda_param_ty_at(
+pub(crate) fn kit_lambda_param_ty_at(
     callee: &str,
     arg_i: usize,
     nargs: usize,

@@ -1371,7 +1371,6 @@ int sz_ui_pump_sync(SzUiSession *session) {
     paint_theme.pad *= scale;
     paint_theme.gap *= scale;
     paint_theme.control_h *= scale;
-    paint_theme.radius *= scale;
     paint_theme.px_scale = scale;
     theme = &paint_theme;
   }
@@ -1404,7 +1403,6 @@ int sz_ui_pump_sync(SzUiSession *session) {
                         session->cfg.height, pw, ph, rgba, nbytes);
     }
   }
-  sz_alloc_trace_on_pump();
   session->pumps += 1;
   /* Leak oracle: heap must not grow across consecutive idle pumps. A dirty
    * frame resets the baseline. */

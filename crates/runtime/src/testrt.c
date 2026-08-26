@@ -1061,11 +1061,9 @@ char *sz_testrt_net_pop_request(void) {
 }
 
 static void sz_testrt_net_install(void) {
-  const char *req;
   sz_testrt_net_reset_live();
   g_net_fake = 1;
-  req = getenv("SCUZZ_TESTRT_NET_REQUEST");
-  sz_testrt_net_inject_request(req && req[0] ? req : "/");
+  sz_testrt_net_inject_request("/");
 }
 
 int sz_testrt_net_is_fake(void) { return g_net_fake; }
@@ -1274,37 +1272,6 @@ static void env_copy_host(const char *key) {
     sz_testrt_env_set(key, v);
 }
 
-/* SCUZZ_TESTRT_ENV is comma-separated KEY=val pairs. */
-static void env_parse_spec(const char *spec) {
-  const char *p;
-  if (!spec)
-    return;
-  p = spec;
-  while (*p) {
-    const char *comma = strchr(p, ',');
-    const char *eq;
-    size_t n = comma ? (size_t)(comma - p) : strlen(p);
-    char buf[256];
-    if (n >= sizeof buf)
-      n = sizeof buf - 1;
-    memcpy(buf, p, n);
-    buf[n] = '\0';
-    eq = strchr(buf, '=');
-    if (eq && eq != buf) {
-      char key[128];
-      size_t kn = (size_t)(eq - buf);
-      if (kn >= sizeof key)
-        kn = sizeof key - 1;
-      memcpy(key, buf, kn);
-      key[kn] = '\0';
-      sz_testrt_env_set(key, eq + 1);
-    }
-    if (!comma)
-      break;
-    p = comma + 1;
-  }
-}
-
 static void free_fake_argv(void) {
   int i;
   if (!g_fake_argv)
@@ -1464,20 +1431,12 @@ SzIo *sz_testrt_sys_read(int64_t n) {
 }
 
 static void sz_testrt_sys_install(void) {
-  const char *feed;
-  const char *spec;
   sz_testrt_sys_reset_live();
   g_sys_fake = 1;
-  feed = getenv("SCUZZ_TESTRT_STDIN");
-  if (feed && feed[0])
-    sz_testrt_stdin_feed(feed);
   /* App fixtures the CLI sets. Do not copy PATH/HOME/SCUZZ_TESTRT. */
   env_copy_host("SCUZZ_TODO_PATH");
   env_copy_host("SCUZZ_SERVE");
   env_copy_host("SCUZZ_KIT");
-  spec = getenv("SCUZZ_TESTRT_ENV");
-  if (spec && spec[0])
-    env_parse_spec(spec);
 }
 
 int sz_testrt_sys_is_fake(void) { return g_sys_fake; }

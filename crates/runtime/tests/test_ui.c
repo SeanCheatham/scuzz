@@ -15,7 +15,6 @@
 
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
-int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event);
 
 static int files_equal(const char *a, const char *b) {
@@ -4815,7 +4814,6 @@ static void test_logical_px_match_device_scale(void) {
   device.pad *= 2.f;
   device.gap *= 2.f;
   device.control_h *= 2.f;
-  device.radius *= 2.f;
   device.px_scale = 2.f;
   sz_view_layout(col, 400.f, 800.f, &device);
   y2 = sz_view_frame(btn).y;

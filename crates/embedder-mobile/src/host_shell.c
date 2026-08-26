@@ -7,13 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define EVENT_CAP 64
-
 static int g_keyboard;
 static int g_frames;
-static SzInputEvent g_queue[EVENT_CAP];
-static int g_q_head;
-static int g_q_tail;
 static char *g_clip;
 
 static int shell_enabled(void) {
@@ -38,27 +33,9 @@ static int frame_bytes(int width, int height, size_t *out) {
   return 1;
 }
 
-static int q_push(const SzInputEvent *ev) {
-  int next;
-  if (!ev)
-    return 0;
-  next = (g_q_tail + 1) % EVENT_CAP;
-  if (next == g_q_head)
-    return 0; /* full */
-  /* Text pointers must outlive poll (use literals / stable buffers). */
-  g_queue[g_q_tail] = *ev;
-  g_q_tail = next;
-  return 1;
-}
-
-int sz_mobile_push_event(const SzInputEvent *event) { return q_push(event); }
-
 int sz_mobile_poll_event(SzInputEvent *out) {
-  if (!out || g_q_head == g_q_tail)
-    return 0;
-  *out = g_queue[g_q_head];
-  g_q_head = (g_q_head + 1) % EVENT_CAP;
-  return 1;
+  (void)out;
+  return 0;
 }
 
 /* Host shell stays a single-frame smoke; Ui.run exits the live Mobile loop. */
@@ -94,7 +71,6 @@ int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
 void sz_mobile_shutdown(void) {
   g_keyboard = 0;
   g_frames = 0;
-  g_q_head = g_q_tail = 0;
   free(g_clip);
   g_clip = NULL;
   if (shell_enabled())
