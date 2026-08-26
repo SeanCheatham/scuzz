@@ -19,7 +19,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 
-**Status.** An OpenGL presenter is in (`SCUZZ_SKIA=gpu`): CPU `sk_sw` paint, GPU upload and readback behind `sk_capi`. Headless structural goldens match the CPU path. Impeller and Skia GPU raster stay deferred.
+**Status.** An OpenGL presenter is in (`SCUZZ_SKIA=gpu`): CPU `sk_sw` paint, GPU upload and readback behind `sk_capi`. Headless structural goldens match the CPU path. `scuzz test --differential` compares structural dumps across `skia`, `sk_sw`, and `gpu` per host. Impeller and Skia GPU raster stay deferred.
 
 **Unproven.** A GPU rasterizer (Impeller or Skia GPU) behind `sk_capi` keeps identical structural dumps and tolerance-bounded pixels without a CPU paint pass.
 

@@ -483,6 +483,13 @@ jobs:
           xvfb-run -a env SCUZZ_SKIA=gpu cargo run -p scuzz -- test examples/counter
           make -C crates/ffi-skia clean lib CC=clang
 
+      - name: Differential structural dumps (skia vs sk_sw vs gpu)
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          xvfb-run -a cargo run -p scuzz -- test --differential examples/counter
+          make -C crates/ffi-skia clean lib CC=clang
+
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
