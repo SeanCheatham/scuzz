@@ -82,7 +82,7 @@ enum Commands {
     },
     /// Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
     #[command(
-        after_help = "Examples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels examples/counter\n  scuzz test examples/io\n\n[ui] packages need goldens/. `scuzz test --update` creates goldens/ when it is missing, then seeds dumps. Missing scuzz.toml fails."
+        after_help = "Examples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels examples/counter\n  scuzz test --differential examples/counter\n  scuzz test examples/io\n\n[ui] packages need goldens/. `scuzz test --update` creates goldens/ when it is missing, then seeds dumps. `--differential` compares structural dumps across render backends (skia, sk_sw, gpu). Missing scuzz.toml fails."
     )]
     Test {
         #[arg(default_value = ".")]
@@ -93,6 +93,9 @@ enum Commands {
         /// Also compare / seed PNG pixel goldens
         #[arg(long)]
         pixels: bool,
+        /// Compare structural dumps across render backends (skia, sk_sw, gpu)
+        #[arg(long)]
+        differential: bool,
     },
     /// Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json.
     #[command(
@@ -278,6 +281,7 @@ fn real_main() -> Result<ExitCode> {
             path,
             update,
             pixels,
+            differential,
         } => {
             let project_dir = resolve_dir(&path)?;
             if !project_dir.join("scuzz.toml").is_file() {
@@ -289,7 +293,17 @@ fn real_main() -> Result<ExitCode> {
             let out = build(&path, &PathBuf::from("build"), false, false)?;
             eprintln!("project compile smoke ok");
             if out.manifest.ui.is_none() {
+                if differential {
+                    bail!("--differential needs a [ui] package");
+                }
                 run_io_smoke(&out.executable)?;
+            } else if differential {
+                if update || pixels {
+                    bail!(
+                        "--differential compares backends; --update and --pixels stay golden modes"
+                    );
+                }
+                run_differential(&path, &project_dir)?;
             } else {
                 run_goldens(&project_dir, &out.executable, update, pixels)?;
             }
@@ -978,6 +992,130 @@ fn capture_structural(
     Ok(())
 }
 
+/// Render backends compared by `scuzz test --differential`, in reference order.
+const DIFFERENTIAL_BACKENDS: [&str; 3] = ["skia", "sk_sw", "gpu"];
+
+/// Byte-compare one scenario's structural dumps across two backends.
+fn differential_compare(
+    ref_backend: &str,
+    want: &str,
+    backend: &str,
+    got: &str,
+    scenario: &str,
+) -> Result<()> {
+    if want != got {
+        bail!(
+            "structural dump differs across backends: {scenario} ({ref_backend} vs {backend})\n--- {ref_backend} ---\n{want}--- {backend} ---\n{got}"
+        );
+    }
+    Ok(())
+}
+
+/// Run every golden scenario under each backend and compare dumps across backends.
+fn run_differential(path: &Path, project_dir: &Path) -> Result<()> {
+    let goldens = project_dir.join("goldens");
+    if !goldens.is_dir() {
+        bail!(
+            "missing goldens/ for [ui] package {}. Seed with `scuzz test --update`.",
+            project_dir.display()
+        );
+    }
+    let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
+    let mut stems: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&goldens)? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("dump") {
+            stems.push(
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("golden")
+                    .to_string(),
+            );
+        }
+    }
+    stems.sort();
+    if stems.is_empty() {
+        bail!(
+            "no structural goldens in {}. Seed with `scuzz test --update`.",
+            goldens.display()
+        );
+    }
+
+    let original = std::env::var("SCUZZ_SKIA").ok();
+    let result = run_differential_backends(path, &manifest, project_dir, &stems);
+    match &original {
+        Some(v) => std::env::set_var("SCUZZ_SKIA", v),
+        None => std::env::remove_var("SCUZZ_SKIA"),
+    }
+    // Rebuild so the ambient backend's binary is what stays in build/.
+    if let Err(e) = build(path, &PathBuf::from("build"), false, false) {
+        eprintln!("differential: ambient backend rebuild failed: {e:#}");
+    }
+    result
+}
+
+fn run_differential_backends(
+    path: &Path,
+    manifest: &scuzz_compiler::manifest::Manifest,
+    project_dir: &Path,
+    stems: &[String],
+) -> Result<()> {
+    let mut captured: Vec<(String, Vec<String>)> = Vec::new();
+    for backend in DIFFERENTIAL_BACKENDS {
+        std::env::set_var("SCUZZ_SKIA", backend);
+        let out = match build(path, &PathBuf::from("build"), false, false) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("differential: backend {backend} unavailable: {e:#}");
+                continue;
+            }
+        };
+        let out_dir = out
+            .executable
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
+        let mut dumps = Vec::with_capacity(stems.len());
+        let mut available = true;
+        for stem in stems {
+            let tap = stem.ends_with("_after_tap");
+            let dump = out_dir.join(format!("{stem}.{backend}.dump"));
+            let png = out_dir.join(format!("{stem}.{backend}.png"));
+            if let Err(e) =
+                capture_structural(&out.executable, manifest, project_dir, &dump, png, tap)
+            {
+                eprintln!("differential: backend {backend} unavailable: {e:#}");
+                available = false;
+                break;
+            }
+            dumps.push(std::fs::read_to_string(&dump)?);
+        }
+        if available {
+            eprintln!("differential: captured {backend}");
+            captured.push((backend.to_string(), dumps));
+        }
+    }
+    if captured.len() < 2 {
+        bail!(
+            "differential needs at least two runnable backends; captured {}",
+            captured.len()
+        );
+    }
+    let (ref_backend, ref_dumps) = &captured[0];
+    for (backend, dumps) in &captured[1..] {
+        for (stem, (want, got)) in stems.iter().zip(ref_dumps.iter().zip(dumps)) {
+            differential_compare(ref_backend, want, backend, got, stem)?;
+        }
+        eprintln!("differential ok: {ref_backend} == {backend}");
+    }
+    eprintln!(
+        "differential ok: {} backends agree on {} scenario(s)",
+        captured.len(),
+        stems.len()
+    );
+    Ok(())
+}
+
 fn build(
     path: &Path,
     out_dir: &Path,
@@ -1373,4 +1511,37 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::differential_compare;
+
+    #[test]
+    fn differential_compare_identical_dumps_pass() {
+        assert!(differential_compare(
+            "skia",
+            "[views]\nroot\n",
+            "sk_sw",
+            "[views]\nroot\n",
+            "counter"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn differential_compare_mismatch_names_backends_and_scenario() {
+        let err = differential_compare(
+            "skia",
+            "[views]\nroot\n",
+            "gpu",
+            "[views]\nchanged\n",
+            "counter_after_tap",
+        )
+        .expect_err("differing dumps must fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("counter_after_tap"), "{msg}");
+        assert!(msg.contains("skia vs gpu"), "{msg}");
+        assert!(msg.contains("changed"), "{msg}");
+    }
 }

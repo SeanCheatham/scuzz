@@ -254,8 +254,7 @@ Verify drive oracles take at most three generator-friendly params (`Int` / `Stri
 
 Verification next steps, in order:
 
-1. **Differential structural dumps.** Compare dumps across render backends.
-2. **Stronger mutation operators.** Handler-swap on UI taps, Signal-map identity. Then a mutation score in `summary.toml`.
+1. **Stronger mutation operators.** Handler-swap on UI taps, Signal-map identity. Then a mutation score in `summary.toml`.
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)).
 
