@@ -328,7 +328,7 @@ fn enum_self_ty(en: &EnumDef) -> Type {
 }
 
 /// Expand `type Name = T` in signatures and ascriptions. Idempotent.
-pub fn expand_type_aliases(mut program: Program) -> Result<Program, TypeError> {
+fn expand_type_aliases(mut program: Program) -> Result<Program, TypeError> {
     for a in &program.aliases {
         if program
             .enums
@@ -1013,7 +1013,7 @@ fn bind_named_args_with_defaults(
     args: Vec<Expr>,
 ) -> Result<Vec<Expr>, TypeError> {
     if !has_named_arg(&args) {
-        return pad_defaults(callee, params, defaults, args);
+        return pad_defaults(params, defaults, args);
     }
     if params.is_empty() || params.iter().any(|p| !is_param_ident(p)) {
         return Err(TypeError::Msg(format!(
@@ -1080,7 +1080,6 @@ fn bind_named_args_with_defaults(
 
 /// Fill omitted trailing args from defaults. Leave short required calls for arity check.
 fn pad_defaults(
-    _callee: &str,
     params: &[String],
     defaults: &[Option<Expr>],
     args: Vec<Expr>,
@@ -2894,8 +2893,7 @@ fn infer_bare_ctor(
             "constructor needs an enum type, got {want:?}"
         )));
     };
-    let (en, id) = lookup_enum(enums, eid, current_module)?;
-    let _ = id;
+    let (en, _) = lookup_enum(enums, eid, current_module)?;
     let (ctor_name, args): (&str, &[Expr]) = match &expr.kind {
         ExprKind::Var(name) => (name.as_str(), &[]),
         ExprKind::Call { callee, args } => (callee.as_str(), args.as_slice()),
@@ -3962,11 +3960,7 @@ fn infer_lambda_arg(
 /// After enum specialization, generic `Result` is gone (or re-injected next
 /// to clones). Kit and `.attempt` returns must name the clone when it exists.
 fn applied_enum(enums: &EnumIndex<'_>, name: &str, args: Vec<Type>) -> Type {
-    let mut parts = vec![format!("__gen_{name}")];
-    for a in &args {
-        parts.push(type_mangle(a));
-    }
-    let mangled = parts.join("_");
+    let mangled = gen_mangle(name, args.iter());
     if enums.resolve(&mangled, "").is_ok() {
         Type::Adt(mangled)
     } else {
@@ -7132,6 +7126,14 @@ fn erase_vars(ty: &Type, names: &[String]) -> Type {
     }
 }
 
+/// `__gen_{name}` plus each arg's mangle, joined by `_`.
+fn gen_mangle<'a>(name: &str, args: impl Iterator<Item = &'a Type>) -> String {
+    std::iter::once(format!("__gen_{name}"))
+        .chain(args.map(type_mangle))
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
 fn type_mangle(t: &Type) -> String {
     match t {
         Type::Unit => "Unit".into(),
@@ -7158,12 +7160,12 @@ fn type_mangle(t: &Type) -> String {
 }
 
 fn mono_def_name(def_name: &str, subst: &HashMap<String, Type>, type_params: &[String]) -> String {
-    let mut parts = vec![format!("__gen_{def_name}")];
-    for p in type_params {
-        let t = subst.get(p).expect("subst complete");
-        parts.push(type_mangle(t));
-    }
-    parts.join("_")
+    gen_mangle(
+        def_name,
+        type_params
+            .iter()
+            .map(|p| subst.get(p).expect("subst complete")),
+    )
 }
 
 /// Specialize generic defs at call sites; drop templates.
@@ -9341,11 +9343,7 @@ fn subst_pattern(pat: crate::ast::Pattern, subst: &HashMap<String, Type>) -> cra
 }
 
 fn mono_enum_name(en: &EnumDef, args: &[Type]) -> String {
-    let mut parts = vec![format!("__gen_{}", en.name)];
-    for a in args {
-        parts.push(type_mangle(a));
-    }
-    parts.join("_")
+    gen_mangle(&en.name, args.iter())
 }
 
 /// Collect `(template-id, args)` instantiations from a resolved type.

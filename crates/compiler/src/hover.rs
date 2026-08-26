@@ -18,7 +18,7 @@ pub fn hover_in_source(
     source: &str,
     offset: usize,
 ) -> Option<String> {
-    let (qual, name) = ident_at(source, offset)?;
+    let (qual, name) = ident_at_opts(source, offset, true)?;
     let module = module_id_from_label(file);
     if let Some(q) = qual {
         let callee = format!("{q}.{name}");
@@ -78,10 +78,6 @@ pub fn hover_in_source(
         return Some(MAP_HOVER.into());
     }
     binder_in_program(program, file, &name, offset)
-}
-
-fn ident_at(source: &str, offset: usize) -> Option<(Option<String>, String)> {
-    ident_at_opts(source, offset, true)
 }
 
 /// Ident at `offset`. When `lookahead` is set, `IO` in `IO.println` resolves as `IO.println`.

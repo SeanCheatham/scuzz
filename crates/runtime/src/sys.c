@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
+#include "rt_util.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,31 +14,6 @@
 
 /* Process / args / console kit (Sys.args, IO.println, clang link).
  * TestRuntime rejects Sys.exec / Sys.spawn so sim cannot fork a child. */
-
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
-
-
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
-
-static SzIo *fail_drop(SzError *err) {
-  SzIo *io = sz_io_fail(err);
-  sz_release(err);
-  return io;
-}
-
-static void *rc_box_zero(size_t n) {
-  void *p = sz_rc_alloc(n, SZ_RC_BOX);
-  memset(p, 0, n);
-  return p;
-}
 
 static char **g_argv = NULL;
 static int g_argc = 0;
@@ -385,13 +361,6 @@ typedef struct ExecSt {
   size_t err_len;
   size_t err_cap;
 } ExecSt;
-
-static SzIo *race_drop(SzIo *left, SzIo *right) {
-  SzIo *io = sz_io_race(left, right);
-  sz_release(left);
-  sz_release(right);
-  return io;
-}
 
 static void exec_close_fd(int *fd) {
   if (fd && *fd >= 0) {

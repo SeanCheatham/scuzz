@@ -1,5 +1,6 @@
 #include "scuzz_rt.h"
 #include "scuzz_ui.h"
+#include "rt_util.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -7,31 +8,6 @@
 #include <string.h>
 
 /* TestRuntime: install / reset fake interpreters. */
-
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
-
-
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
-
-static SzIo *fail_drop(SzError *err) {
-  SzIo *io = sz_io_fail(err);
-  sz_release(err);
-  return io;
-}
-
-static void *rc_box_zero(size_t n) {
-  void *p = sz_rc_alloc(n, SZ_RC_BOX);
-  memset(p, 0, n);
-  return p;
-}
 
 void sz_testrt_clock_reset_live(void);
 void sz_testrt_random_reset_live(void);
@@ -414,11 +390,6 @@ static int fs_fault(BoxResult *r) {
   r->is_err = 1;
   r->as.err = sz_error_new(2, "Fs: injected fault");
   return 1;
-}
-
-static SzString *pack_path(void *env) {
-  SzPair *pack = (SzPair *)env;
-  return pack ? (SzString *)pack->left : NULL;
 }
 
 static SzIo *testrt_fs_bind(SzString *path, SzThunk thunk) {

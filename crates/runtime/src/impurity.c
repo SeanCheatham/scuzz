@@ -1,15 +1,10 @@
 #include "scuzz_rt.h"
+#include "rt_util.h"
 
 #include <stdio.h>
 #include <string.h>
 
 /* Impurity kit: Clock / Random / mem FS / stub Net / Sys console under TestRuntime. */
-
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
 
 static SzIo *println_env(void *value, void *env) {
   (void)value;

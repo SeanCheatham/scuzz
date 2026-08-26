@@ -1,20 +1,8 @@
 #include "scuzz_rt.h"
+#include "rt_util.h"
 
 #include <stdint.h>
 #include <string.h>
-
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
-
-
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
 
 static SzStream *st_keep(SzStream *s) {
   if (!s)

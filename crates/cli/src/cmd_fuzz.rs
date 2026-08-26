@@ -170,7 +170,7 @@ fn budget_split(n: i64) -> (i64, i64) {
     if n <= 0 {
         (0, 0)
     } else {
-        let search = (2 * n / 3).max(1).min(n);
+        let search = (2 * n / 3).max(1);
         (search, n - search)
     }
 }
@@ -1850,7 +1850,7 @@ fn read_unclaimed_varied(project_dir: &Path, fuzz_dir: &Path) -> Vec<String> {
     let claimed = read_claimed_fields(project_dir);
     lines_nonempty(&std::fs::read_to_string(fuzz_dir.join("state.campaign")).unwrap_or_default())
         .into_iter()
-        .filter(|f| !claimed.iter().any(|c| c == f))
+        .filter(|f| !claimed.contains(f))
         .collect()
 }
 
@@ -1883,7 +1883,7 @@ fn classify_summary_toml(rows: &[(String, i64, i64)]) -> String {
 }
 
 fn push_name(names: &mut Vec<String>, n: String) {
-    if !names.iter().any(|c| c == &n) {
+    if !names.contains(&n) {
         names.push(n);
     }
 }
@@ -1946,33 +1946,27 @@ fn write_campaign(
         Some(r) => (Some(r.path.as_path()), r.events.as_slice()),
         None => (None, &empty),
     };
-    write_and_print(
-        ctx,
-        &FuzzSummary {
-            seed: camp.seed,
-            iterations: camp.iterations,
-            search: camp.search_used,
-            search_failures: camp.search_failures,
-            corpus,
-            ok,
-            drivers: &drivers,
-            events,
-            declared,
-            reached,
-            missing_budget,
-            missing_corpus: &missing_corpus,
-            classify: &classify,
-            stored: &camp.stored,
-            repro,
-            mutate,
-            unclaimed_varied: &unclaimed_varied,
-        },
-    )
-}
-
-fn write_and_print(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
-    write_fuzz_summary(ctx, s)?;
-    print_report(s);
+    let summary = FuzzSummary {
+        seed: camp.seed,
+        iterations: camp.iterations,
+        search: camp.search_used,
+        search_failures: camp.search_failures,
+        corpus,
+        ok,
+        drivers: &drivers,
+        events,
+        declared,
+        reached,
+        missing_budget,
+        missing_corpus: &missing_corpus,
+        classify: &classify,
+        stored: &camp.stored,
+        repro,
+        mutate,
+        unclaimed_varied: &unclaimed_varied,
+    };
+    write_fuzz_summary(ctx, &summary)?;
+    print_report(&summary);
     Ok(())
 }
 

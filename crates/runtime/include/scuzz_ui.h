@@ -406,8 +406,6 @@ void sz_view_layout(SzView *root, float width, float height, const SzTheme *them
 SzView *sz_view_hit_test(SzView *root, float x, float y);
 /* Innermost View.tooltip whose frame contains (x, y), or NULL. */
 SzView *sz_view_tooltip_at(SzView *root, float x, float y);
-/* Innermost View.onSecondary whose frame contains (x, y), or NULL. */
-SzView *sz_view_on_secondary_at(SzView *root, float x, float y);
 /* Run the innermost onSecondary handler at (x, y). 1 if a handler ran. */
 int sz_view_handle_secondary(SzView *root, float x, float y);
 /* Clear hover marks. Mark the tooltip at (x, y). 1 if a tooltip is hovered. */
@@ -586,8 +584,6 @@ int sz_view_editor_fold_count(const SzView *view);
 /* Set selection: `start` is the anchor, `end` is the caret (both snapped). */
 int sz_view_set_text_field_sel(SzView *view, int start, int end);
 int sz_view_set_editor_sel(SzView *view, int start, int end);
-/* Move the caret to the measured x without collapsing the selection. */
-int sz_view_text_field_extend_to_x(SzView *view, float x);
 /* Move the caret to (x, y) without collapsing the selection. TextField uses x. */
 int sz_view_edit_extend_to_xy(SzView *view, float x, float y);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
@@ -698,8 +694,6 @@ int sz_ui_snapshot_png_sync(SzUiSession *session, const char *path);
 int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_len);
 
 SzUiRuntimeKind sz_ui_session_kind(const SzUiSession *session);
-int sz_ui_session_width(const SzUiSession *session);
-int sz_ui_session_height(const SzUiSession *session);
 SzView *sz_ui_session_root(SzUiSession *session);
 /* Copy `title` into the session. The next present uses it. Headless dumps it. */
 int sz_ui_session_set_title(SzUiSession *session, const char *title);
@@ -717,7 +711,6 @@ unsigned sz_ui_session_pumps(const SzUiSession *session);
 
 /* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value);
-void sz_ui_bridge_post_str(SzUiSession *session, SzSignalStr *sig, const char *value);
 void sz_ui_bridge_flush(SzUiSession *session);
 
 /* --- language-facing View / Signal (Scuzz Lang-authored UI) ----------- */

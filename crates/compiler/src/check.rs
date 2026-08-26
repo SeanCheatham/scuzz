@@ -676,13 +676,7 @@ fn check_typed_graph(
         return diags;
     }
     for im in &unused_imports {
-        let msg = if im.is_wildcard() {
-            format!("unused import {}.{}", im.from_module, im.name)
-        } else if let Some(alias) = &im.alias {
-            format!("unused import {}.{} as {alias}", im.from_module, im.name)
-        } else {
-            format!("unused import {}.{}", im.from_module, im.name)
-        };
+        let msg = im.unused_message();
         diags.push(Diagnostic::error(msg).with_span(&im.span, named));
     }
     for u in unused {
