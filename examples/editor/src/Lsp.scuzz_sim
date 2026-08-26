@@ -1,5 +1,5 @@
 def lspCall(_root: String, _path: String, _body: String, method: String): IO[Json] =
-  IO.pure(Json.parse(method match {
+  IO.pure(parseJson(method match {
   case "textDocument/hover" => "{\"result\":{\"contents\":{\"kind\":\"plaintext\",\"value\":\"hover\"}}}"
   case "textDocument/completion" => "{\"result\":{\"items\":[{\"label\":\"foo\"}]}}"
   case "textDocument/definition" => "{\"result\":[{\"uri\":\"\",\"range\":{\"start\":{\"line\":0,\"character\":0}}}]}"

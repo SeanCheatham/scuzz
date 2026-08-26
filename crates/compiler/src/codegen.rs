@@ -10306,11 +10306,21 @@ def id(m: Map[String, String]): Map[String, String] = m
             "sz_fs_canonicalize",
         );
         assert_owned_ptr_args_released(
-            r#"@main def main: IO[Unit] = IO.println(Json.stringify(Json.parse("null")))"#,
+            r#"@main def main: IO[Unit] =
+  Json.parse("null") match {
+    case Result.Ok(_) => IO.println("ok")
+    case Result.Err(_) => IO.println("err")
+  }
+"#,
             "sz_json_parse",
         );
         assert_owned_ptr_args_released(
-            r#"@main def main: IO[Unit] = IO.println(Json.stringify(Json.parse("null")))"#,
+            r#"@main def main: IO[Unit] =
+  Json.stringify(Json.Null) match {
+    case Result.Ok(s) => IO.println(s)
+    case Result.Err(_) => IO.println("")
+  }
+"#,
             "sz_json_stringify",
         );
         assert_owned_ptr_args_released(
@@ -14077,7 +14087,13 @@ enum Color:
     #[test]
     fn emit_json_parse_stringify() {
         let src = r#"@main def main: IO[Unit] =
-  IO.println(Json.stringify(Json.parse("[1,true]")))
+  Json.parse("[1,true]") match {
+    case Result.Ok(j) => Json.stringify(j) match {
+      case Result.Ok(s) => IO.println(s)
+      case Result.Err(_) => IO.println("")
+    }
+    case Result.Err(_) => IO.println("")
+  }
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
         crate::typ::typecheck(&p).expect("typecheck");

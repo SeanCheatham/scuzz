@@ -685,11 +685,21 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         .map_or(Ok(()), Err)
 }
 
+fn is_builtin_json(e: &EnumDef) -> bool {
+    e.name == "Json"
+        && e.module.is_empty()
+        && e.cases.len() == 7
+        && e.cases
+            .iter()
+            .map(|c| c.name.as_str())
+            .eq(["Null", "Bool", "Int", "Float", "Str", "Arr", "Obj"])
+}
+
 pub fn inject_builtin_enums(enums: &mut Vec<EnumDef>) {
     if !enums.iter().any(|e| e.name == "Result") {
         enums.push(builtin_result_enum());
     }
-    if !enums.iter().any(|e| e.name == "Json") {
+    if !enums.iter().any(is_builtin_json) {
         enums.push(builtin_json_enum());
     }
 }
@@ -780,6 +790,9 @@ pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
     let mut errs = Vec::new();
     let mut enums_storage = program.enums.clone();
     inject_builtin_enums(&mut enums_storage);
+    if enums_storage.iter().filter(|e| e.name == "Json").count() > 1 {
+        return vec![TypeError::Msg("duplicate enum Json".into())];
+    }
     let enums = match EnumIndex::build(&enums_storage, &program.imports) {
         Ok(e) => e,
         Err(e) => {
@@ -3566,8 +3579,9 @@ fn infer(
                 let Type::Io(inner_ty) = it else {
                     return Err(TypeError::Msg("attempt receiver must be IO[_]".into()));
                 };
-                Ok(Type::Io(Box::new(Type::App(
-                    "Result".into(),
+                Ok(Type::Io(Box::new(applied_enum(
+                    enums,
+                    "Result",
                     vec![*inner_ty],
                 ))))
             }
@@ -3945,6 +3959,21 @@ fn infer_lambda_arg(
 }
 
 #[inline(never)]
+/// After enum specialization, generic `Result` is gone (or re-injected next
+/// to clones). Kit and `.attempt` returns must name the clone when it exists.
+fn applied_enum(enums: &EnumIndex<'_>, name: &str, args: Vec<Type>) -> Type {
+    let mut parts = vec![format!("__gen_{name}")];
+    for a in &args {
+        parts.push(type_mangle(a));
+    }
+    let mangled = parts.join("_");
+    if enums.resolve(&mangled, "").is_ok() {
+        Type::Adt(mangled)
+    } else {
+        Type::App(name.to_string(), args)
+    }
+}
+
 fn infer_call(
     callee: &str,
     args: &[Expr],
@@ -4716,12 +4745,16 @@ fn infer_call(
         "Json.parse" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::Adt("Json".into()))
+            Ok(applied_enum(
+                enums,
+                "Result",
+                vec![Type::Adt("Json".into())],
+            ))
         }
         "Json.stringify" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
-            Ok(Type::String)
+            Ok(applied_enum(enums, "Result", vec![Type::String]))
         }
         "Fs.write" | "Fs.rename" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -13825,14 +13858,59 @@ def note(n: Int where "x"): Unit = ()
     fn typechecks_json_parse_stringify() {
         let src = r#"@main def main: IO[Unit] =
   for {
-    j = Json.parse("{\"a\":1}")
+    parsed = Json.parse("{\"a\":1}")
+    j = parsed match {
+      case Result.Ok(v) => v
+      case Result.Err(_) => Json.Null
+    }
     n = Json.Null
-    _ <- IO.println(Json.stringify(j))
-    _ <- IO.println(Json.stringify(n))
+    s = Json.stringify(j) match {
+      case Result.Ok(t) => t
+      case Result.Err(_) => ""
+    }
+    t = Json.stringify(n) match {
+      case Result.Ok(u) => u
+      case Result.Err(_) => ""
+    }
+    _ <- IO.println(s)
+    _ <- IO.println(t)
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Json.parse/stringify should typecheck");
+    }
+
+    #[test]
+    fn mono_json_parse_result_clone() {
+        let src = r#"@main def main: IO[Unit] =
+  Json.parse("null") match {
+    case Result.Ok(_) => IO.println("ok")
+    case Result.Err(_) => IO.println("err")
+  }
+"#;
+        let p = gen_pipeline(src);
+        typecheck(&p).expect("post-mono Json.parse Result match should typecheck");
+        assert!(
+            p.enums.iter().any(|e| e.name.contains("__gen_Result_Json")),
+            "missing Result[Json] clone: {:?}",
+            p.enums.iter().map(|e| &e.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn rejects_user_json_enum() {
+        let src = r#"
+enum Json:
+  case Nope
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse_file(src, "Main.scuzz").unwrap());
+        let err = typecheck(&p).expect_err("user Json should be a duplicate");
+        assert!(
+            err.message().contains("duplicate enum Json"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

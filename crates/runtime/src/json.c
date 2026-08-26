@@ -1,13 +1,23 @@
 #define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#endif
 #include "scuzz_rt.h"
 
+#include <errno.h>
+#include <locale.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __APPLE__
+#include <xlocale.h>
+#endif
 
-/* Blessed Json parse/stringify. Pure, like Str.concat. ADT tags match the
- * injected Json enum: Null | Bool | Int | Float | Str | Arr | Obj. */
+/* Blessed Json parse/stringify. Pure. ADT tags match the injected Json enum:
+ * Null | Bool | Int | Float | Str | Arr | Obj. Both calls return Result
+ * (Err = 0, Ok = 1), same as IO.attempt. */
 
 #define JSON_NULL 0
 #define JSON_BOOL 1
@@ -17,19 +27,63 @@
 #define JSON_ARR 5
 #define JSON_OBJ 6
 #define JSON_DEPTH 256
+#define RESULT_ERR 0
+#define RESULT_OK 1
 
 typedef struct {
   const char *s;
   size_t n;
   size_t i;
   int depth;
+  const char *err;
 } Jp;
 
 typedef struct {
   char *p;
   size_t n;
   size_t cap;
+  int depth;
+  const char *err;
 } Jb;
+
+static locale_t json_c_locale(void) {
+  static locale_t loc;
+  if (!loc)
+    loc = newlocale(LC_ALL_MASK, "C", (locale_t)0);
+  return loc;
+}
+
+static double json_strtod(const char *s, char **end) {
+  locale_t loc = json_c_locale();
+#ifdef __APPLE__
+  if (loc)
+    return strtod_l(s, end, loc);
+#else
+  if (loc) {
+    locale_t old = uselocale(loc);
+    double x = strtod(s, end);
+    uselocale(old);
+    return x;
+  }
+#endif
+  return strtod(s, end);
+}
+
+static int json_fmt_double(char *tmp, size_t n, double x) {
+  locale_t loc = json_c_locale();
+#ifdef __APPLE__
+  if (loc)
+    return snprintf_l(tmp, n, loc, "%.17g", x);
+#else
+  if (loc) {
+    locale_t old = uselocale(loc);
+    int r = snprintf(tmp, n, "%.17g", x);
+    uselocale(old);
+    return r;
+  }
+#endif
+  return snprintf(tmp, n, "%.17g", x);
+}
 
 static void *box_f64(double x) {
   int64_t bits = 0;
@@ -50,6 +104,13 @@ static SzAdt *json_mk(int32_t tag, void *payload) {
   return a;
 }
 
+static SzAdt *result_ok(void *payload) { return json_mk(RESULT_OK, payload); }
+
+static SzAdt *result_err(const char *msg) {
+  SzString *s = sz_string_from_cstr(msg ? msg : "error");
+  return json_mk(RESULT_ERR, s);
+}
+
 static SzAdt *json_null(void) { return sz_adt_new(JSON_NULL, NULL); }
 
 static SzAdt *json_bool(int v) { return json_mk(JSON_BOOL, sz_box_i64(v ? 1 : 0)); }
@@ -61,8 +122,8 @@ static SzAdt *json_float(double x) { return json_mk(JSON_FLOAT, box_f64(x)); }
 static SzAdt *json_str(SzString *s) { return json_mk(JSON_STR, s); }
 
 static void jp_fail(Jp *p, const char *msg) {
-  (void)p;
-  sz_panic(msg);
+  if (p && !p->err)
+    p->err = msg;
 }
 
 static int jp_at(const Jp *p) {
@@ -80,8 +141,10 @@ static void jp_skip(Jp *p) {
 
 static void jp_eat(Jp *p, char c) {
   jp_skip(p);
-  if (jp_at(p) != (unsigned char)c)
+  if (jp_at(p) != (unsigned char)c) {
     jp_fail(p, "Json.parse: unexpected token");
+    return;
+  }
   p->i++;
 }
 
@@ -102,13 +165,51 @@ static int hex_val(char c) {
   return -1;
 }
 
+static int jp_hex4(Jp *p, unsigned *cp) {
+  int i;
+  unsigned v = 0;
+  for (i = 0; i < 4; i++) {
+    int h;
+    if (p->i >= p->n) {
+      jp_fail(p, "Json.parse: bad unicode escape");
+      return 0;
+    }
+    h = hex_val(p->s[p->i++]);
+    if (h < 0) {
+      jp_fail(p, "Json.parse: bad unicode escape");
+      return 0;
+    }
+    v = (v << 4) | (unsigned)h;
+  }
+  *cp = v;
+  return 1;
+}
+
+static int jp_room(char **buf, size_t *cap, size_t n, size_t extra) {
+  size_t nc;
+  char *nb;
+  if (n + extra < *cap)
+    return 1;
+  nc = *cap * 2;
+  while (nc <= n + extra)
+    nc *= 2;
+  nb = (char *)sz_alloc(nc);
+  memcpy(nb, *buf, n);
+  sz_free(*buf);
+  *buf = nb;
+  *cap = nc;
+  return 1;
+}
+
 static SzString *jp_string(Jp *p) {
   char *buf;
   size_t cap = 16;
   size_t n = 0;
   jp_skip(p);
-  if (jp_at(p) != '"')
+  if (jp_at(p) != '"') {
     jp_fail(p, "Json.parse: expected string");
+    return NULL;
+  }
   p->i++;
   buf = (char *)sz_alloc(cap);
   while (p->i < p->n) {
@@ -121,8 +222,11 @@ static SzString *jp_string(Jp *p) {
       return s;
     }
     if (c == '\\') {
-      if (p->i >= p->n)
+      if (p->i >= p->n) {
         jp_fail(p, "Json.parse: bad string escape");
+        sz_free(buf);
+        return NULL;
+      }
       c = (unsigned char)p->s[p->i++];
       switch (c) {
       case '"':
@@ -145,64 +249,76 @@ static SzString *jp_string(Jp *p) {
         c = '\t';
         break;
       case 'u': {
-        int i;
         unsigned cp = 0;
-        for (i = 0; i < 4; i++) {
-          int h;
-          if (p->i >= p->n)
-            jp_fail(p, "Json.parse: bad unicode escape");
-          h = hex_val(p->s[p->i++]);
-          if (h < 0)
-            jp_fail(p, "Json.parse: bad unicode escape");
-          cp = (cp << 4) | (unsigned)h;
+        unsigned char u[4];
+        int nbytes;
+        if (!jp_hex4(p, &cp)) {
+          sz_free(buf);
+          return NULL;
+        }
+        if (cp >= 0xD800 && cp <= 0xDBFF) {
+          unsigned low = 0;
+          if (!(p->i + 2 <= p->n && p->s[p->i] == '\\' && p->s[p->i + 1] == 'u')) {
+            jp_fail(p, "Json.parse: unpaired surrogate");
+            sz_free(buf);
+            return NULL;
+          }
+          p->i += 2;
+          if (!jp_hex4(p, &low)) {
+            sz_free(buf);
+            return NULL;
+          }
+          if (low < 0xDC00 || low > 0xDFFF) {
+            jp_fail(p, "Json.parse: unpaired surrogate");
+            sz_free(buf);
+            return NULL;
+          }
+          cp = 0x10000u + ((cp - 0xD800u) << 10) + (low - 0xDC00u);
+        } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+          jp_fail(p, "Json.parse: unpaired surrogate");
+          sz_free(buf);
+          return NULL;
         }
         if (cp < 0x80) {
           c = (unsigned char)cp;
-        } else if (cp < 0x800) {
-          if (n + 2 >= cap) {
-            size_t nc = cap * 2;
-            char *nb = (char *)sz_alloc(nc);
-            memcpy(nb, buf, n);
-            sz_free(buf);
-            buf = nb;
-            cap = nc;
-          }
-          buf[n++] = (char)(0xC0 | (cp >> 6));
-          buf[n++] = (char)(0x80 | (cp & 0x3F));
-          continue;
-        } else {
-          if (n + 3 >= cap) {
-            size_t nc = cap * 2;
-            char *nb = (char *)sz_alloc(nc);
-            memcpy(nb, buf, n);
-            sz_free(buf);
-            buf = nb;
-            cap = nc;
-          }
-          buf[n++] = (char)(0xE0 | (cp >> 12));
-          buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-          buf[n++] = (char)(0x80 | (cp & 0x3F));
-          continue;
+          break;
         }
-        break;
+        if (cp < 0x800) {
+          nbytes = 2;
+          u[0] = (unsigned char)(0xC0 | (cp >> 6));
+          u[1] = (unsigned char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+          nbytes = 3;
+          u[0] = (unsigned char)(0xE0 | (cp >> 12));
+          u[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+          u[2] = (unsigned char)(0x80 | (cp & 0x3F));
+        } else {
+          nbytes = 4;
+          u[0] = (unsigned char)(0xF0 | (cp >> 18));
+          u[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+          u[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+          u[3] = (unsigned char)(0x80 | (cp & 0x3F));
+        }
+        jp_room(&buf, &cap, n, (size_t)nbytes);
+        memcpy(buf + n, u, (size_t)nbytes);
+        n += (size_t)nbytes;
+        continue;
       }
       default:
         jp_fail(p, "Json.parse: bad string escape");
+        sz_free(buf);
+        return NULL;
       }
     } else if (c < 0x20) {
       jp_fail(p, "Json.parse: control in string");
-    }
-    if (n + 1 >= cap) {
-      size_t nc = cap * 2;
-      char *nb = (char *)sz_alloc(nc);
-      memcpy(nb, buf, n);
       sz_free(buf);
-      buf = nb;
-      cap = nc;
+      return NULL;
     }
+    jp_room(&buf, &cap, n, 1);
     buf[n++] = (char)c;
   }
   jp_fail(p, "Json.parse: unterminated string");
+  sz_free(buf);
   return NULL;
 }
 
@@ -215,8 +331,10 @@ static SzAdt *jp_number(Jp *p) {
   start = p->i;
   if (jp_at(p) == '-')
     p->i++;
-  if (jp_at(p) < '0' || jp_at(p) > '9')
+  if (jp_at(p) < '0' || jp_at(p) > '9') {
     jp_fail(p, "Json.parse: bad number");
+    return NULL;
+  }
   if (jp_at(p) == '0') {
     p->i++;
   } else {
@@ -226,8 +344,10 @@ static SzAdt *jp_number(Jp *p) {
   if (jp_at(p) == '.') {
     is_float = 1;
     p->i++;
-    if (jp_at(p) < '0' || jp_at(p) > '9')
+    if (jp_at(p) < '0' || jp_at(p) > '9') {
       jp_fail(p, "Json.parse: bad number");
+      return NULL;
+    }
     while (jp_at(p) >= '0' && jp_at(p) <= '9')
       p->i++;
   }
@@ -236,27 +356,42 @@ static SzAdt *jp_number(Jp *p) {
     p->i++;
     if (jp_at(p) == '+' || jp_at(p) == '-')
       p->i++;
-    if (jp_at(p) < '0' || jp_at(p) > '9')
+    if (jp_at(p) < '0' || jp_at(p) > '9') {
       jp_fail(p, "Json.parse: bad number");
+      return NULL;
+    }
     while (jp_at(p) >= '0' && jp_at(p) <= '9')
       p->i++;
   }
   len = p->i - start;
-  if (len >= sizeof tmp)
+  if (len >= sizeof tmp) {
     jp_fail(p, "Json.parse: number too long");
+    return NULL;
+  }
   memcpy(tmp, p->s + start, len);
   tmp[len] = '\0';
   if (!is_float) {
     char *end = NULL;
-    long long v = strtoll(tmp, &end, 10);
-    if (end && *end == '\0' && v >= INT64_MIN && v <= INT64_MAX)
-      return json_int((int64_t)v);
+    long long v;
+    errno = 0;
+    v = strtoll(tmp, &end, 10);
+    if (!end || *end != '\0' || errno == ERANGE) {
+      jp_fail(p, "Json.parse: integer overflow");
+      return NULL;
+    }
+    return json_int((int64_t)v);
   }
   {
     char *end = NULL;
-    double x = strtod(tmp, &end);
-    if (!end || *end != '\0')
+    double x = json_strtod(tmp, &end);
+    if (!end || *end != '\0') {
       jp_fail(p, "Json.parse: bad number");
+      return NULL;
+    }
+    if (!isfinite(x)) {
+      jp_fail(p, "Json.parse: non-finite");
+      return NULL;
+    }
     return json_float(x);
   }
 }
@@ -265,12 +400,20 @@ static SzAdt *jp_array(Jp *p) {
   SzList *acc;
   SzAdt *out;
   jp_eat(p, '[');
+  if (p->err)
+    return NULL;
   jp_skip(p);
   acc = sz_list_nil();
   if (jp_at(p) != ']') {
     for (;;) {
       SzAdt *v = jp_value(p);
-      SzList *old = acc;
+      SzList *old;
+      if (p->err) {
+        sz_release(v);
+        sz_release(acc);
+        return NULL;
+      }
+      old = acc;
       acc = sz_list_cons(v, old);
       sz_release(v);
       sz_release(old);
@@ -283,6 +426,10 @@ static SzAdt *jp_array(Jp *p) {
     }
   }
   jp_eat(p, ']');
+  if (p->err) {
+    sz_release(acc);
+    return NULL;
+  }
   {
     SzList *rev = sz_list_reverse(acc);
     sz_release(acc);
@@ -295,6 +442,8 @@ static SzAdt *jp_object(Jp *p) {
   SzList *acc;
   SzAdt *out;
   jp_eat(p, '{');
+  if (p->err)
+    return NULL;
   jp_skip(p);
   acc = sz_list_nil();
   if (jp_at(p) != '}') {
@@ -303,8 +452,24 @@ static SzAdt *jp_object(Jp *p) {
       SzAdt *v;
       SzPair *ent;
       SzList *old;
+      if (p->err) {
+        sz_release(k);
+        sz_release(acc);
+        return NULL;
+      }
       jp_eat(p, ':');
+      if (p->err) {
+        sz_release(k);
+        sz_release(acc);
+        return NULL;
+      }
       v = jp_value(p);
+      if (p->err) {
+        sz_release(k);
+        sz_release(v);
+        sz_release(acc);
+        return NULL;
+      }
       ent = sz_pair_new(k, v);
       sz_release(k);
       sz_release(v);
@@ -321,6 +486,10 @@ static SzAdt *jp_object(Jp *p) {
     }
   }
   jp_eat(p, '}');
+  if (p->err) {
+    sz_release(acc);
+    return NULL;
+  }
   {
     SzList *rev = sz_list_reverse(acc);
     sz_release(acc);
@@ -330,68 +499,73 @@ static SzAdt *jp_object(Jp *p) {
 }
 
 static SzAdt *jp_value(Jp *p) {
+  SzAdt *v = NULL;
   jp_skip(p);
-  if (p->depth > JSON_DEPTH)
-    jp_fail(p, "Json.parse: too deep");
   p->depth++;
+  if (p->depth > JSON_DEPTH) {
+    jp_fail(p, "Json.parse: too deep");
+    p->depth--;
+    return NULL;
+  }
   if (jp_at(p) == '{') {
-    SzAdt *v = jp_object(p);
-    p->depth--;
-    return v;
-  }
-  if (jp_at(p) == '[') {
-    SzAdt *v = jp_array(p);
-    p->depth--;
-    return v;
-  }
-  if (jp_at(p) == '"') {
+    v = jp_object(p);
+  } else if (jp_at(p) == '[') {
+    v = jp_array(p);
+  } else if (jp_at(p) == '"') {
     SzString *s = jp_string(p);
-    p->depth--;
-    return json_str(s);
-  }
-  if (jp_at(p) == '-' || (jp_at(p) >= '0' && jp_at(p) <= '9')) {
-    SzAdt *v = jp_number(p);
-    p->depth--;
-    return v;
-  }
-  if (jp_starts(p, "true")) {
+    if (!p->err)
+      v = json_str(s);
+    else
+      sz_release(s);
+  } else if (jp_at(p) == '-' || (jp_at(p) >= '0' && jp_at(p) <= '9')) {
+    v = jp_number(p);
+  } else if (jp_starts(p, "true")) {
     p->i += 4;
-    p->depth--;
-    return json_bool(1);
-  }
-  if (jp_starts(p, "false")) {
+    v = json_bool(1);
+  } else if (jp_starts(p, "false")) {
     p->i += 5;
-    p->depth--;
-    return json_bool(0);
-  }
-  if (jp_starts(p, "null")) {
+    v = json_bool(0);
+  } else if (jp_starts(p, "null")) {
     p->i += 4;
-    p->depth--;
-    return json_null();
+    v = json_null();
+  } else {
+    jp_fail(p, "Json.parse: unexpected token");
   }
-  jp_fail(p, "Json.parse: unexpected token");
-  return NULL;
+  p->depth--;
+  return v;
 }
 
 SzAdt *sz_json_parse(SzString *s) {
   Jp p;
   SzAdt *v;
   if (!s)
-    sz_panic("Json.parse(null)");
+    return result_err("Json.parse(null)");
   p.s = sz_string_cstr(s);
   p.n = sz_string_len(s);
   p.i = 0;
   p.depth = 0;
+  p.err = NULL;
   v = jp_value(&p);
+  if (p.err) {
+    sz_release(v);
+    return result_err(p.err);
+  }
   jp_skip(&p);
   if (p.i != p.n) {
     sz_release(v);
-    sz_panic("Json.parse: trailing junk");
+    return result_err("Json.parse: trailing junk");
   }
-  return v;
+  return result_ok(v);
+}
+
+static void jb_fail(Jb *b, const char *msg) {
+  if (b && !b->err)
+    b->err = msg;
 }
 
 static void jb_put(Jb *b, const char *s, size_t n) {
+  if (b->err)
+    return;
   if (b->n + n + 1 > b->cap) {
     size_t nc = b->cap ? b->cap * 2 : 64;
     char *np;
@@ -482,8 +656,18 @@ static void jb_object(Jb *b, SzList *xs) {
 }
 
 static void jb_value(Jb *b, const SzAdt *j) {
-  int32_t tag = sz_adt_tag(j);
-  void *pay = sz_adt_payload(j);
+  int32_t tag;
+  void *pay;
+  if (b->err)
+    return;
+  b->depth++;
+  if (b->depth > JSON_DEPTH) {
+    jb_fail(b, "Json.stringify: too deep");
+    b->depth--;
+    return;
+  }
+  tag = sz_adt_tag(j);
+  pay = sz_adt_payload(j);
   switch (tag) {
   case JSON_NULL:
     jb_puts(b, "null");
@@ -499,7 +683,12 @@ static void jb_value(Jb *b, const SzAdt *j) {
   }
   case JSON_FLOAT: {
     char tmp[64];
-    snprintf(tmp, sizeof tmp, "%.17g", unbox_f64(pay));
+    double x = unbox_f64(pay);
+    if (!isfinite(x)) {
+      jb_fail(b, "Json.stringify: non-finite");
+      break;
+    }
+    json_fmt_double(tmp, sizeof tmp, x);
     if (!strchr(tmp, '.') && !strchr(tmp, 'e') && !strchr(tmp, 'E'))
       strcat(tmp, ".0");
     jb_puts(b, tmp);
@@ -515,18 +704,24 @@ static void jb_value(Jb *b, const SzAdt *j) {
     jb_object(b, (SzList *)pay);
     break;
   default:
-    sz_panic("Json.stringify: bad tag");
+    jb_fail(b, "Json.stringify: bad tag");
+    break;
   }
+  b->depth--;
 }
 
-SzString *sz_json_stringify(SzAdt *j) {
+SzAdt *sz_json_stringify(SzAdt *j) {
   Jb b;
   SzString *s;
   if (!j)
-    sz_panic("Json.stringify(null)");
+    return result_err("Json.stringify(null)");
   memset(&b, 0, sizeof b);
   jb_value(&b, j);
+  if (b.err) {
+    sz_free(b.p);
+    return result_err(b.err);
+  }
   s = sz_string_from_bytes(b.p ? b.p : "", b.n);
   sz_free(b.p);
-  return s;
+  return result_ok(s);
 }

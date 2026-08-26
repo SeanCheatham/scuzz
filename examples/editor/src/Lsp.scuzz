@@ -21,6 +21,18 @@ def msgSlice(full: String, start: Int, len: Int): String =
     case s => Property.check("mslice", Str.len(s) >= 0, s)
   }
 
+def parseJson(s: String): Json =
+  Json.parse(s) match {
+    case Result.Ok(j) => j
+    case Result.Err(_) => Json.Null
+  }
+
+def encodeJson(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(s) => s
+    case Result.Err(_) => ""
+  }
+
 def takeIfMatch(j: Json, want: Int): Json =
   if (Check.jsonInt(Check.jsonField(j, "id")) == want) j else Json.Null
 
@@ -37,16 +49,16 @@ def docObj(uri: String): Json =
   Json.Obj(jField("uri", Json.Str(uri)) :: ([]: List[(String, Json)]))
 
 def initBody(rootUri: String): String =
-  Json.stringify(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("x"))) :: jField("method", Json.Str("initialize")) :: jField("params", Json.Obj(jField("rootUri", Json.Str(rootUri)) :: jField("capabilities", emptyObj()) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
+  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("x"))) :: jField("method", Json.Str("initialize")) :: jField("params", Json.Obj(jField("rootUri", Json.Str(rootUri)) :: jField("capabilities", emptyObj()) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
 
 def didOpenBody(uri: String, text: String): String =
-  Json.stringify(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("textDocument/didOpen")) :: jField("params", Json.Obj(jField("textDocument", Json.Obj(jField("uri", Json.Str(uri)) :: jField("languageId", Json.Str("scuzz")) :: jField("version", Json.Int(Str.len("x"))) :: jField("text", Json.Str(text)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
+  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("textDocument/didOpen")) :: jField("params", Json.Obj(jField("textDocument", Json.Obj(jField("uri", Json.Str(uri)) :: jField("languageId", Json.Str("scuzz")) :: jField("version", Json.Int(Str.len("x"))) :: jField("text", Json.Str(text)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
 
 def initializedBody(): String =
-  Json.stringify(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("initialized")) :: jField("params", emptyObj()) :: ([]: List[(String, Json)])))
+  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("initialized")) :: jField("params", emptyObj()) :: ([]: List[(String, Json)])))
 
 def requestBody(method: String, uri: String, line: Int, col: Int): String =
-  Json.stringify(method match {
+  encodeJson(method match {
   case "textDocument/rename" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: jField("newName", Json.Str("x")) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
   case "textDocument/formatting" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
   case "textDocument/semanticTokens/full" | "textDocument/inlayHint" | "textDocument/foldingRange" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
@@ -197,7 +209,7 @@ def readMsg(pid: Int): IO[String] =
 def readResult(pid: Int, want: Int): IO[Json] =
   for {
     raw <- readMsg(pid)
-    j = Json.parse(raw)
+    j = parseJson(raw)
     hit = takeIfMatch(j, want)
     out <- hit match {
   case Json.Null => readResult(pid, want)

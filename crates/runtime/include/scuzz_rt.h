@@ -739,9 +739,10 @@ SzString *sz_fs_join(SzString *a, SzString *b);
 SzString *sz_fs_dirname(SzString *path);
 SzString *sz_fs_basename(SzString *path);
 
-/* Pure Json (follow Str.concat). Enum Null|Bool|Int|Float|Str|Arr|Obj. */
+/* Pure Json. Enum Null|Bool|Int|Float|Str|Arr|Obj.
+ * Both return Result (Err=0 / Ok=1): parse Result[Json], stringify Result[String]. */
 SzAdt *sz_json_parse(SzString *s);
-SzString *sz_json_stringify(SzAdt *j);
+SzAdt *sz_json_stringify(SzAdt *j);
 
 /* Process / args / env / console (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
