@@ -74,6 +74,40 @@ fn is_oracle_callee(callee: &str) -> bool {
     callee == "Property.check" || callee == "Property.assert"
 }
 
+/// Tap-handler widgets whose second argument is the handler lambda.
+const HANDLER_WIDGETS: [&str; 6] = [
+    "View.button",
+    "View.iconButton",
+    "View.outlinedButton",
+    "View.textButton",
+    "View.fab",
+    "View.inkWell",
+];
+
+fn is_handler_widget(callee: &str) -> bool {
+    HANDLER_WIDGETS.contains(&callee)
+}
+
+/// `(label, handler body)` per handler-widget call in `e`, in walk order.
+fn collect_handlers(e: &Expr, out: &mut Vec<(String, Expr)>) {
+    if let ExprKind::Call { callee, args } = &e.kind {
+        if is_handler_widget(callee) && args.len() >= 2 {
+            if let ExprKind::Lambda { body, .. } = &args[1].kind {
+                let label = match &args[0].kind {
+                    ExprKind::StrLit(s) => s.clone(),
+                    _ => String::new(),
+                };
+                out.push((label, (**body).clone()));
+            }
+        }
+    }
+    let e = e.clone();
+    e.map_children(|c| {
+        collect_handlers(&c, out);
+        c
+    });
+}
+
 fn callee_base(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
@@ -324,6 +358,8 @@ struct MutCx<'a> {
     def: String,
     module: String,
     desc: Option<MutantDesc>,
+    handlers: Vec<(String, Expr)>,
+    handler_cursor: usize,
 }
 
 fn note(cx: &mut MutCx<'_>, seen: i32, target: i32, span: &Span, label: String) {
@@ -363,6 +399,16 @@ fn mutate_expr(
         }
         ExprKind::Call { callee, args } if is_oracle_callee(&callee) => {
             mutate_oracle(callee, args, span, target, seen, cx)
+        }
+        ExprKind::Call { callee, args }
+            if is_handler_widget(&callee)
+                && args.len() >= 2
+                && matches!(args[1].kind, ExprKind::Lambda { .. }) =>
+        {
+            handler_mutant(callee, args, span, target, seen, in_oracle, cx)
+        }
+        ExprKind::Call { callee, args } if callee == "Signal.map" && args.len() == 2 => {
+            signal_map_mutant(callee, args, span, target, seen, in_oracle, cx)
         }
         ExprKind::MethodCall {
             receiver,
@@ -515,6 +561,90 @@ fn mutate_oracle(
     )
 }
 
+/// Handler-swap: replace a tap handler's body with the next sibling handler's
+/// body (rotation over the def's handler widgets). Ill-typed transplants fail
+/// at compile and count as killed.
+fn handler_mutant(
+    callee: String,
+    args: Vec<Expr>,
+    span: crate::span::Span,
+    target: i32,
+    seen: i32,
+    in_oracle: bool,
+    cx: &mut MutCx<'_>,
+) -> (Expr, i32) {
+    let idx = cx.handler_cursor;
+    cx.handler_cursor += 1;
+    let total = cx.handlers.len();
+    let active = live_site(cx.mode, in_oracle) && total >= 2;
+    let label = if active {
+        cx.handlers
+            .get(idx)
+            .map(|h| h.0.clone())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let next_body = if active {
+        Some(cx.handlers[(idx + 1) % total].1.clone())
+    } else {
+        None
+    };
+    if active {
+        note(
+            cx,
+            seen,
+            target,
+            &span,
+            format!("swap handler of `{label}` with sibling"),
+        );
+    }
+    let base = seen + i32::from(active);
+    let (mut args, seen_out) = mutate_expr_list(args, target, base, in_oracle, cx);
+    if active && seen == target {
+        if let (Some(next), ExprKind::Lambda { body, .. }) = (next_body, &mut args[1].kind) {
+            **body = next;
+        }
+    }
+    (Expr::new(ExprKind::Call { callee, args }, span), seen_out)
+}
+
+/// Signal-map identity: replace the transform with the identity so a derived
+/// display stops updating. Only named single-param lambdas get a site.
+fn signal_map_mutant(
+    callee: String,
+    args: Vec<Expr>,
+    span: crate::span::Span,
+    target: i32,
+    seen: i32,
+    in_oracle: bool,
+    cx: &mut MutCx<'_>,
+) -> (Expr, i32) {
+    let identity_param = match args.get(1).map(|a| &a.kind) {
+        Some(ExprKind::Lambda {
+            param: Some(p),
+            pat: None,
+            ..
+        }) if p != "_" => Some(p.clone()),
+        _ => None,
+    };
+    let active = live_site(cx.mode, in_oracle) && identity_param.is_some();
+    if active {
+        note(cx, seen, target, &span, "Signal.map identity".into());
+    }
+    let base = seen + i32::from(active);
+    let (mut args, seen_out) = mutate_expr_list(args, target, base, in_oracle, cx);
+    if active && seen == target {
+        if let Some(p) = identity_param {
+            let lspan = args[1].span.clone();
+            if let ExprKind::Lambda { body, .. } = &mut args[1].kind {
+                **body = Expr::new(ExprKind::Var(p), lspan);
+            }
+        }
+    }
+    (Expr::new(ExprKind::Call { callee, args }, span), seen_out)
+}
+
 fn mutate_require(
     receiver: Expr,
     args: Vec<Expr>,
@@ -649,6 +779,8 @@ fn mutate_prog_at(
         def: String::new(),
         module: String::new(),
         desc: None,
+        handlers: Vec::new(),
+        handler_cursor: 0,
     };
     let mut seen = 0;
     for d in &mut program.defs {
@@ -657,6 +789,12 @@ fn mutate_prog_at(
         }
         cx.def = d.name.clone();
         cx.module = d.module.clone();
+        cx.handlers = {
+            let mut h = Vec::new();
+            collect_handlers(&d.body, &mut h);
+            h
+        };
+        cx.handler_cursor = 0;
         let body = std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit));
         let (body, s) = mutate_expr(body, target, seen, false, &mut cx);
         seen = s;
@@ -664,6 +802,12 @@ fn mutate_prog_at(
     }
     cx.def = program.main.name.clone();
     cx.module = program.main.module.clone();
+    cx.handlers = {
+        let mut h = Vec::new();
+        collect_handlers(&program.main.body, &mut h);
+        h
+    };
+    cx.handler_cursor = 0;
     let body = std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit));
     let (body, s) = mutate_expr(body, target, seen, false, &mut cx);
     seen = s;
@@ -787,6 +931,114 @@ def note(n: Int where n >= 0): Int = n
             !dumped.contains("Property.check"),
             "dropped mutant passes the value unchecked: {dumped}"
         );
+    }
+
+    #[test]
+    fn program_mode_swaps_button_handlers() {
+        let p = parse(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.column(View.button("+1", _ => Signal.set(c, 1)), View.button("-1", _ => Signal.set(c, 2))))
+"#,
+        )
+        .unwrap();
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        let mut swap_site = None;
+        let mut saw_sibling = false;
+        for i in 0..n {
+            if let Some(d) = mutate_describe(&p, i, MutateMode::Program) {
+                if d.label == "swap handler of `+1` with sibling" {
+                    swap_site = Some(i);
+                }
+                if d.label == "swap handler of `-1` with sibling" {
+                    saw_sibling = true;
+                }
+            }
+        }
+        assert!(saw_sibling, "second handler gets a swap site too");
+        let site = swap_site.expect("swap site for first handler");
+        let m = mutate_apply_mode(p, site, MutateMode::Program);
+        let dumped = format!("{:?}", m.main.body.kind);
+        assert_eq!(
+            dumped.matches("IntLit(2)").count(),
+            2,
+            "+1 handler now runs the -1 body: {dumped}"
+        );
+        assert_eq!(dumped.matches("IntLit(1)").count(), 0, "{dumped}");
+    }
+
+    #[test]
+    fn program_mode_single_handler_has_no_swap_site() {
+        let p = parse(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.button("+1", _ => Signal.set(c, 1)))
+"#,
+        )
+        .unwrap();
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        for i in 0..n {
+            if let Some(d) = mutate_describe(&p, i, MutateMode::Program) {
+                assert!(
+                    !d.label.starts_with("swap handler"),
+                    "lone handler must not swap: {d:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn program_mode_signal_map_identity() {
+        let p = parse(
+            r#"
+def f(s: Int): Int = s
+
+@main def main: IO[Unit] =
+  for {
+    c = Signal.int(0)
+    label = Signal.map(c, n => f(n))
+    _ <- IO.println("x")
+  } yield ()
+"#,
+        )
+        .unwrap();
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        let mut identity_site = None;
+        for i in 0..n {
+            if let Some(d) = mutate_describe(&p, i, MutateMode::Program) {
+                if d.label == "Signal.map identity" {
+                    identity_site = Some(i);
+                }
+            }
+        }
+        let site = identity_site.expect("Signal.map identity site");
+        let m = mutate_apply_mode(p, site, MutateMode::Program);
+        let dumped = format!("{:?}", m.main.body.kind);
+        assert!(
+            !dumped.contains("\"f\""),
+            "transform replaced by identity: {dumped}"
+        );
+    }
+
+    #[test]
+    fn program_mode_signal_map_placeholder_has_no_identity_site() {
+        let p = parse(
+            r#"
+@main def main: IO[Unit] =
+  for {
+    c = Signal.int(0)
+    label = Signal.map(c, _ => 1)
+    _ <- IO.println("x")
+  } yield ()
+"#,
+        )
+        .unwrap();
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        for i in 0..n {
+            if let Some(d) = mutate_describe(&p, i, MutateMode::Program) {
+                assert_ne!(d.label, "Signal.map identity", "hole lambda: {d:?}");
+            }
+        }
     }
 
     #[test]

@@ -1,13 +1,13 @@
 # Next slice
 
-Stronger mutation operators.
+Studio heap growth under fuzz.
 
-Handler-swap on UI taps rewires a tap handler to a sibling handler so the wrong control fires. Signal-map identity replaces a `Signal.map` transform with the identity so a derived display stops updating. Then a mutation score in `summary.toml`.
+`scuzz fuzz` on `examples/studio` fails the heap-baseline oracle on corpus replay: live count stable, bytes grow by 6 per session. Pre-existing leak in a widget path the studio corpus exercises. Counter and the bad-* examples stay green.
 
 Proof:
 
-- A handler-swap mutant on `examples/counter` fires the wrong handler and is reported with its label.
-- A Signal-map identity mutant makes `View.bindText` stale and is killed by a claim or golden face.
+- `cargo run -p scuzz -- fuzz --iterations 8 examples/studio` passes the heap baseline.
+- The leaked allocation is named in the fix commit (widget or kit, not a suppressed oracle).
 - `make -C crates/runtime test`, `cargo test -p scuzz-compiler`, `cargo test -p scuzz` pass.
 - `cargo run -p scuzz -- fuzz --iterations 16 examples/counter` stays green.
 

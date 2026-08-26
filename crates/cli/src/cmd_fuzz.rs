@@ -858,7 +858,15 @@ fn mutate_phase(
             .join(site.to_string());
         let mutant = mutate_apply_mode(prog.clone(), *site as i32, mode);
         let opts = compile_opts(&ctx.project_dir, &out_dir, false, true)?;
-        let compiled = compile_prepared_program(&opts, mutant)?;
+        let compiled = match compile_prepared_program(&opts, mutant) {
+            Ok(c) => c,
+            Err(_) => {
+                // A mutant that does not compile is trivially detected.
+                println!("  mutant {site}: killed (compile)");
+                killed += 1;
+                continue;
+            }
+        };
         let (code, timelines) = if ctx.is_ui {
             mutate_exec_ui(
                 &compiled.executable,
@@ -1800,6 +1808,17 @@ fn print_report(s: &FuzzSummary<'_>) {
     }
 }
 
+/// Mutation score: killed over mutants that changed observable behavior.
+/// No runnable mutants scores 1.0.
+fn mutation_score(killed: i64, inert: i64, ran: i64) -> f64 {
+    let denom = ran - inert;
+    if denom > 0 {
+        killed as f64 / denom as f64
+    } else {
+        1.0
+    }
+}
+
 fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
     let repro_path = s.repro.map(|p| p.display().to_string()).unwrap_or_default();
     let replay = match s.repro {
@@ -1812,7 +1831,7 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
     };
     let classify_toml = classify_summary_toml(s.classify);
     let text = format!(
-        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nmissing_budget = [{missing_budget}]\nmissing_corpus = [{missing_corpus}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[coverage]\nunclaimed_varied = [{unclaimed_varied}]\n\n[corpus]\nentries = {entries}\nfailures = {failures}\nreached = [{corpus_reached}]\npromoted = {promoted}\n\n[classify]\n{classify_toml}[mutate]\nkilled = {killed}\nsurvived = {survived}\ninert = {inert}\nran = {ran}\nsites = {sites}\noracles = {oracles}\nsurvivors = [{survivors}]\n",
+        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nmissing_budget = [{missing_budget}]\nmissing_corpus = [{missing_corpus}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[coverage]\nunclaimed_varied = [{unclaimed_varied}]\n\n[corpus]\nentries = {entries}\nfailures = {failures}\nreached = [{corpus_reached}]\npromoted = {promoted}\n\n[classify]\n{classify_toml}[mutate]\nkilled = {killed}\nsurvived = {survived}\ninert = {inert}\nran = {ran}\nsites = {sites}\noracles = {oracles}\nscore = {score:.3}\nsurvivors = [{survivors}]\n",
         ok = if s.ok { "true" } else { "false" },
         seed = s.seed,
         iterations = s.iterations,
@@ -1832,6 +1851,7 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
         failures = s.stored.failures,
         corpus_reached = toml_str_array(&s.stored.reached),
         promoted = s.stored.promoted,
+        score = mutation_score(s.mutate.killed, s.mutate.inert, s.mutate.ran),
         killed = s.mutate.killed,
         survived = s.mutate.survived,
         inert = s.mutate.inert,
@@ -2014,5 +2034,12 @@ mod tests {
         let text = toml_survivor_array(&[row]);
         assert!(text.contains("kind = \"missing\""), "{text}");
         assert!(text.contains("fields = [\"drive\"]"), "{text}");
+    }
+
+    #[test]
+    fn mutation_score_excludes_inert() {
+        assert_eq!(mutation_score(3, 0, 3), 1.0);
+        assert!((mutation_score(1, 1, 4) - 1.0 / 3.0).abs() < 1e-9);
+        assert_eq!(mutation_score(0, 0, 0), 1.0, "no runnable mutants");
     }
 }
