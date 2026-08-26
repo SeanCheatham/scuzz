@@ -1519,7 +1519,29 @@ fn section_field(body: &str, name: &str) -> String {
     rest[..end].to_string()
 }
 
+/// Timeline dump format version written by the runtime (`# timeline v=1 n=<n>`).
+pub const TIMELINE_DUMP_VERSION: u32 = 1;
+
+/// Hard-error unless `text` carries a `# timeline v=<TIMELINE_DUMP_VERSION>` header.
+/// Empty text is the missing-dump sentinel in paired comparisons and passes.
+fn check_timeline_header(text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let first = text.lines().next().unwrap_or("");
+    let version = first
+        .strip_prefix("# timeline ")
+        .and_then(|rest| rest.split_whitespace().find_map(|f| f.strip_prefix("v=")))
+        .and_then(|v| v.parse::<u32>().ok());
+    if version != Some(TIMELINE_DUMP_VERSION) {
+        panic!(
+            "unsupported timeline dump version: expected `# timeline v={TIMELINE_DUMP_VERSION} n=<n>` header, got `{first}`"
+        );
+    }
+}
+
 fn parse_timeline_states(text: &str) -> Vec<TlFields> {
+    check_timeline_header(text);
     timeline_section_bodies(text)
         .into_iter()
         .map(|body| TlFields {
@@ -2400,8 +2422,8 @@ def add(n: Int): Int =
     fn claimed_state_fields_from_timeline_kit() {
         let p = parse(
             r#"
-def countOk(t: Timeline): Bool =
-  Timeline.forall(t, i => Timeline.signalInt(t, i, 0) >= 0 && Timeline.a11yHas(t, i, "button:+1") && Timeline.lastHitHas(t, i, "button:+1"))
+def countOk(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, 0) >= 0 && Timeline.a11yHas(t, i, "button:+1") && Timeline.lastHitHas(t, i, "button:+1"))
 @main def main: IO[Unit] =
   IO.println("ok")
 "#,
@@ -2411,7 +2433,7 @@ def countOk(t: Timeline): Bool =
     }
 
     fn tl_dump(states: &[(&str, &str, &str, &str)]) -> String {
-        let mut s = format!("# timeline n={}\n", states.len());
+        let mut s = format!("# timeline v=1 n={}\n", states.len());
         for (i, (hit, drive, sig, a11y)) in states.iter().enumerate() {
             s.push_str(&format!(
                 "--- {i}\nlast_hit:\n{hit}\ndrive:\n{drive}\nsignals:\n{sig}"
@@ -2449,6 +2471,26 @@ def countOk(t: Timeline): Bool =
         let class = classify_replay(&[base], &[mutant], &["signals".into()]).unwrap();
         assert_eq!(class.0, SurvivorKind::Weak);
         assert_eq!(class.1, vec!["signals".to_string()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "unsupported timeline dump version")]
+    fn rejects_unversioned_timeline_dump() {
+        let bad = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]).replacen(
+            "# timeline v=1 n=",
+            "# timeline n=",
+            1,
+        );
+        let good = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]);
+        timeline_changed_fields(&bad, &good);
+    }
+
+    #[test]
+    #[should_panic(expected = "unsupported timeline dump version")]
+    fn rejects_wrong_timeline_dump_version() {
+        let bad = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]).replacen("v=1", "v=2", 1);
+        let good = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]);
+        timeline_changed_fields(&bad, &good);
     }
 
     #[test]

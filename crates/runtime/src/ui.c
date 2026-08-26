@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <dlfcn.h>
 
 static int want_gpu_presenter(void) {
@@ -126,6 +127,7 @@ struct SzUiSession {
   const SzTheme *theme;
   BridgeItem *bridge_head;
   BridgeItem *bridge_tail;
+  pthread_mutex_t bridge_lock; /* IO threads post while the pump flushes */
   SzLifecyclePhase lifecycle;
   int keyboard_visible;
   int pointer_down;
@@ -226,6 +228,7 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
   }
   s->canvas = sk_surface_get_canvas(s->surface);
   s->dirty = 1;
+  pthread_mutex_init(&s->bridge_lock, NULL);
   {
     const char *t = cfg->title;
     if (!t || !t[0])
@@ -694,12 +697,14 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   it->kind = BRIDGE_INT;
   it->sig_int = sig;
   it->int_value = value;
+  pthread_mutex_lock(&session->bridge_lock);
   if (session->bridge_tail)
     session->bridge_tail->next = it;
   else
     session->bridge_head = it;
   session->bridge_tail = it;
   session->dirty = 1;
+  pthread_mutex_unlock(&session->bridge_lock);
 }
 
 void sz_ui_bridge_post_str(SzUiSession *session, SzSignalStr *sig, const char *value) {
@@ -710,21 +715,25 @@ void sz_ui_bridge_post_str(SzUiSession *session, SzSignalStr *sig, const char *v
   it->kind = BRIDGE_STR;
   it->sig_str = sig;
   it->str_value = sz_strdup(value);
+  pthread_mutex_lock(&session->bridge_lock);
   if (session->bridge_tail)
     session->bridge_tail->next = it;
   else
     session->bridge_head = it;
   session->bridge_tail = it;
   session->dirty = 1;
+  pthread_mutex_unlock(&session->bridge_lock);
 }
 
 void sz_ui_bridge_flush(SzUiSession *session) {
   BridgeItem *it, *next;
   if (!session)
     return;
+  pthread_mutex_lock(&session->bridge_lock);
   it = session->bridge_head;
   session->bridge_head = NULL;
   session->bridge_tail = NULL;
+  pthread_mutex_unlock(&session->bridge_lock);
   while (it) {
     next = it->next;
     if (it->kind == BRIDGE_INT)
@@ -765,6 +774,7 @@ void sz_ui_unmount(SzUiSession *session) {
   if (g_live_session == session)
     g_live_session = NULL;
   sz_ui_bridge_flush(session);
+  pthread_mutex_destroy(&session->bridge_lock);
   if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP)
     sz_embedder_shutdown();
   if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE) {
@@ -2153,13 +2163,16 @@ void sz_ui_resolve_headless_size(int *width, int *height, double *scale) {
   }
 }
 
-void sz_ui_quiesce(SzUiSession *session) {
+SzQuiesce sz_ui_quiesce(SzUiSession *session) {
   int idle = 0;
   int n;
   if (!session)
-    return;
+    return SZ_QUIESCE_SETTLED;
   for (n = 0; n < 64; n++) {
-    int busy = session->dirty || session->bridge_head != NULL;
+    int busy;
+    pthread_mutex_lock(&session->bridge_lock);
+    busy = session->dirty || session->bridge_head != NULL;
+    pthread_mutex_unlock(&session->bridge_lock);
     if (!sz_ui_pump_sync(session))
       sz_panic("Ui.run quiesce pump failed");
     if (busy)
@@ -2167,10 +2180,10 @@ void sz_ui_quiesce(SzUiSession *session) {
     else {
       idle++;
       if (idle >= 2)
-        return;
+        return SZ_QUIESCE_SETTLED;
     }
   }
-  fprintf(stderr, "scuzz: quiesce budget tripped (64 pumps)\n");
+  return SZ_QUIESCE_BUDGET_TRIPPED;
 }
 
 void sz_ui_session_finish(SzUiSession *session) {

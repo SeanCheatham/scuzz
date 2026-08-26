@@ -1115,7 +1115,7 @@ impl Parser {
             return Ok(Type::Var(name));
         }
         match name.as_str() {
-            "Unit" | "Int" | "Float" | "String" | "Bool" | "Timeline" => {
+            "Unit" | "Int" | "Float" | "String" | "Bool" | "Timeline" | "Verdict" => {
                 if matches!(self.peek(), Token::LBracket) {
                     return Err(self.err(format!("{name} takes no type arguments")));
                 }
@@ -1125,7 +1125,7 @@ impl Parser {
                     "Float" => Type::Float,
                     "String" => Type::String,
                     "Bool" => Type::Bool,
-                    _ => Type::Opaque("Timeline".into()),
+                    _ => Type::Opaque(name.clone()),
                 })
             }
             "List" => {
@@ -2465,6 +2465,7 @@ impl Parser {
                         | "Map"
                         | "Set"
                         | "Timeline"
+                        | "Verdict"
                 ) =>
             {
                 self.bump();

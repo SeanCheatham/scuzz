@@ -1,21 +1,21 @@
-private def alwaysHas(t: Timeline, needle: String): Bool =
-  Timeline.forall(t, i => Timeline.a11yHas(t, i, needle))
+private def alwaysHas(t: Timeline, needle: String): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, needle))
 
-private def afterHitShows(t: Timeline, hit: String, needle: String): Bool =
-  !Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit)) || Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit) && Timeline.exists(t, j => j >= i && Timeline.a11yHas(t, j, needle)))
+private def afterHitShows(t: Timeline, hit: String, needle: String): Verdict =
+  Verdict.or(Verdict.every(t, i => !Timeline.lastHitHas(t, i, hit)), Verdict.any(t, i => Timeline.lastHitHas(t, i, hit) && Timeline.exists(t, j => j >= i && Timeline.a11yHas(t, j, needle))))
 
-def plusVisible(t: Timeline): Bool =
+def plusVisible(t: Timeline): Verdict =
   alwaysHas(t, "button:+1")
 
-def simTitleVisible(t: Timeline): Bool =
+def simTitleVisible(t: Timeline): Verdict =
   alwaysHas(t, "text:SimCounter")
 
-def neverCountNegOne(t: Timeline): Bool =
-  Timeline.forall(t, i => !Timeline.a11yHas(t, i, "text:count = -1"))
+def neverCountNegOne(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.a11yHas(t, i, "text:count = -1"))
 
-def afterPlusShowsOne(t: Timeline): Bool =
+def afterPlusShowsOne(t: Timeline): Verdict =
   afterHitShows(t, "button:+1", "text:count = 1")
 
-def countStaysNonNeg(t: Timeline): Bool =
-  Timeline.forall(t, i => Timeline.signalInt(t, i, 0) >= 0)
+def countStaysNonNeg(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, 0) >= 0)
 

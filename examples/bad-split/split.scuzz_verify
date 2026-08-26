@@ -1,3 +1,3 @@
-def hasText(t: Timeline): Bool =
-  Timeline.exists(t, i => Timeline.a11yHas(t, i, "text:"))
+def hasText(t: Timeline): Verdict =
+  Verdict.any(t, i => Timeline.a11yHas(t, i, "text:"))
 

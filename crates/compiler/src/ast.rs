@@ -20,7 +20,7 @@ pub struct Program {
     pub driver_names: Vec<String>,
     /// `drive <name>` lines from zero-argument `*.scuzz_verify` oracles. Verify writes `build/seeds.txt`.
     pub verify_seeds: Vec<String>,
-    /// Public `Timeline => Bool` predicates from `*.scuzz_verify`.
+    /// Public `Timeline => Verdict` claims from `*.scuzz_verify`.
     pub verify_preds: Vec<String>,
 }
 
@@ -140,7 +140,7 @@ pub struct FunDef {
     pub is_private: bool,
     /// Def merged from `*.scuzz_drivers` (verify graph only).
     pub is_driver: bool,
-    /// Public `Timeline => Bool` predicate from `*.scuzz_verify`.
+    /// Public `Timeline => Verdict` claim from `*.scuzz_verify`.
     pub is_verify: bool,
     /// `def foo[T](…)` — monomorphized before codegen.
     pub type_params: Vec<String>,

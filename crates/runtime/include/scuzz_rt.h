@@ -872,7 +872,29 @@ void sz_property_always_register(SzString *name, void *fn);
 void sz_property_eventually_register(SzString *name, void *fn);
 void sz_property_response_register(SzString *name, void *trigger_fn,
                                    void *response_fn);
-void sz_verify_register(SzString *name, void *fn);
+/* Session claim verdict: a Timeline => Verdict claim judges the frozen
+ * timeline at session end. `valid` 1 = ok; `index` is the failing state
+ * (-1 = none); `why` is a static or author-owned string (never freed). */
+typedef struct SzVerdict {
+  int64_t valid;
+  int64_t index;
+  const char *why;
+} SzVerdict;
+
+/* Shared static ok verdict; no alloc. */
+SzVerdict *sz_verdict_ok(void);
+/* Host-malloc (not sz_alloc): judge-side memory must not perturb app heap
+ * accounting. Stores `why`; an invalid verdict ends in a claim panic, so it
+ * is never freed. */
+SzVerdict *sz_verdict_fail(int64_t index, const char *why);
+/* First invalid wins; both valid -> ok. */
+SzVerdict *sz_verdict_and(SzVerdict *a, SzVerdict *b);
+/* First valid wins. */
+SzVerdict *sz_verdict_or(SzVerdict *a, SzVerdict *b);
+/* Same lambda calling convention as sz_timeline_forall. */
+SzVerdict *sz_verdict_every(void *tl, void *fnp, void *envp);
+SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp);
+void sz_verify_register(const char *name, SzVerdict *(*fn)(void *));
 void sz_property_stash_last_hit(const char *desc);
 int64_t sz_property_last_hit_has(SzString *needle);
 int sz_property_session_armed(void);

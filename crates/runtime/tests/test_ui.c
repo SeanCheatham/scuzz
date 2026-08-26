@@ -462,6 +462,82 @@ static void test_ui_run_rebuild_keepalive(void) {
   remove(stamp);
   remove(dump);
 }
+/* --- quiesce terminal boundary ------------------------------------------ */
+
+typedef struct {
+  SzUiSession *session;
+  SzSignalInt *sig;
+  volatile int stop;
+} QuiescePostEnv;
+
+/* IO -> UI bridge poster: keeps pending bridge work so quiesce never sees
+ * two consecutive idle pumps. */
+static void *quiesce_poster(void *arg) {
+  QuiescePostEnv *env = (QuiescePostEnv *)arg;
+  int64_t v = 0;
+  /* Post continuously: the pump drains the bridge each frame, and a post is
+   * far cheaper than a paint, so pending work is visible at every quiesce
+   * sample. */
+  while (!env->stop)
+    sz_ui_bridge_post_int(env->session, env->sig, v++);
+  return NULL;
+}
+
+static void test_quiesce(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzSignalInt *sig;
+  SzView *root;
+  pid_t pid;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+
+  assert(sz_ui_quiesce(NULL) == SZ_QUIESCE_SETTLED);
+
+  /* Idle session settles. */
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text_signal_int(sig, "n="));
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  assert(sz_ui_quiesce(session) == SZ_QUIESCE_SETTLED);
+  sz_ui_unmount(session);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+
+  /* Pending bridge work every pump trips the 64-pump budget. Forked: the
+   * poster thread intentionally runs concurrently with pump flushes. */
+  fflush(NULL);
+  pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    QuiescePostEnv env;
+    pthread_t th;
+    SzQuiesce q;
+    sig = sz_signal_int(0);
+    root = sz_view_column();
+    sz_view_add_child(root, sz_view_text_signal_int(sig, "n="));
+    session = sz_ui_mount(&cfg, root);
+    assert(session);
+    env.session = session;
+    env.sig = sig;
+    env.stop = 0;
+    assert(pthread_create(&th, NULL, quiesce_poster, &env) == 0);
+    q = sz_ui_quiesce(session);
+    env.stop = 1;
+    pthread_join(th, NULL);
+    _exit(q == SZ_QUIESCE_BUDGET_TRIPPED ? 0 : 1);
+  }
+  {
+    int st = 0;
+    assert(waitpid(pid, &st, 0) == pid);
+    assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+  }
+}
 
 static char *slurp_cstr(const char *path) {
   FILE *f = fopen(path, "r");
@@ -14941,6 +15017,7 @@ int main(void) {
   test_alloc_each_pump_flat();
   test_tap_env_retain_release();
   test_each_env_retain_release();
+  test_quiesce();
   puts("runtime ui tests ok");
   return 0;
 }

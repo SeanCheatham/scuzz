@@ -474,6 +474,12 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_timeline_last_hit_has(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_forall(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_exists(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_verdict_ok()").unwrap();
+    writeln!(out, "declare ptr @sz_verdict_fail(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_verdict_and(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_verdict_or(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_verdict_every(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_verdict_any(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_drive_uncons(ptr, ptr, ptr, i32)").unwrap();
     writeln!(out, "declare i32 @sz_drive_uncons_list(ptr, ptr, i32)").unwrap();
     writeln!(out, "declare i64 @sz_drive_nfields(ptr)").unwrap();
@@ -1234,12 +1240,7 @@ fn emit_verify_registers(out: &mut String, program: &Program, strs: &[String]) {
         .unwrap();
         writeln!(
             out,
-            "  %ver{i}_ss = call ptr @sz_string_from_cstr(ptr %ver{i}_gep)"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  call void @sz_verify_register(ptr %ver{i}_ss, ptr @{sym})"
+            "  call void @sz_verify_register(ptr %ver{i}_gep, ptr @{sym})"
         )
         .unwrap();
     }
@@ -4342,6 +4343,37 @@ fn emit_timeline_pred(
     val_emitted(code, format!("%{prefix}_v"), Kind::Int)
 }
 
+fn emit_verdict_pred(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let rt = if callee == "Verdict.every" {
+        "sz_verdict_every"
+    } else {
+        "sz_verdict_any"
+    };
+    assert!(args.len() == 2, "{callee} expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("{callee} predicate must be a lambda");
+    };
+    let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), Kind::Int);
+    let inner_value = inner.value.clone();
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @{rt}(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_list_segment_length(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
@@ -5320,6 +5352,9 @@ fn emit_call(
     }
     if callee == "Timeline.forall" || callee == "Timeline.exists" {
         return emit_timeline_pred(callee, args, ctx, locals, prefix);
+    }
+    if callee == "Verdict.every" || callee == "Verdict.any" {
+        return emit_verdict_pred(callee, args, ctx, locals, prefix);
     }
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
@@ -7282,6 +7317,35 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Verdict.ok" => {
+            writeln!(code, "  %{prefix}_v = call ptr @sz_verdict_ok()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Verdict.fail" => {
+            // sz_verdict_fail stores the `why` pointer; the string outlives the call.
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_verdict_fail(i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Verdict.and" | "Verdict.or" => {
+            let rt = if callee == "Verdict.and" {
+                "sz_verdict_and"
+            } else {
+                "sz_verdict_or"
+            };
+            // Verdicts are runtime-owned (shared static or malloc'd); never released here.
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Property.assert" => {
             writeln!(
@@ -12456,7 +12520,8 @@ record Point(x: Int, y: Int)
             &mut p,
             &[crate::verify::VerifySource {
                 label: "pkg/count.scuzz_verify".into(),
-                text: "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => true)\n".into(),
+                text: "def countOk(t: Timeline): Verdict =\n  Verdict.every(t, i => i >= 0)\n"
+                    .into(),
                 path: std::path::PathBuf::new(),
             }],
         )
@@ -12480,6 +12545,53 @@ record Point(x: Int, y: Int)
             "expected verify register call:\n{ir}"
         );
         assert!(ir.contains("countOk"), "expected interned claim id:\n{ir}");
+    }
+
+    #[test]
+    fn emit_verdict_kit_calls() {
+        let mut p = parse(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x")
+"#,
+        )
+        .unwrap();
+        crate::verify::apply_verifies(
+            &mut p,
+            &[crate::verify::VerifySource {
+                label: "pkg/count.scuzz_verify".into(),
+                text: concat!(
+                    "def countOk(t: Timeline): Verdict =\n",
+                    "  Verdict.and(Verdict.every(t, i => i >= 0), Verdict.any(t, i => Timeline.a11yHas(t, i, \"button:+1\")))\n",
+                    "def expl(t: Timeline): Verdict =\n",
+                    "  Verdict.or(Verdict.ok(), Verdict.fail(0, \"boom\"))\n",
+                )
+                .into(),
+                path: std::path::PathBuf::new(),
+            }],
+        )
+        .expect("verify");
+        crate::typ::inject_builtin_enums(&mut p.enums);
+        let p = crate::lower::lower_program(p);
+        let p = crate::typ::expand_impls(p).expect("impls");
+        let p = crate::typ::resolve_named_args(p).expect("named");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        let p = crate::typ::monomorphize(p).expect("mono");
+        let p = crate::typ::resolve_field_access(p).expect("fields after mono");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "declare ptr @sz_verdict_every(ptr, ptr, ptr)",
+            "call ptr @sz_verdict_every(ptr ",
+            "call ptr @sz_verdict_any(ptr ",
+            "call ptr @sz_verdict_and(ptr ",
+            "call ptr @sz_verdict_or(ptr ",
+            "call ptr @sz_verdict_ok()",
+            "call ptr @sz_verdict_fail(i64 ",
+        ] {
+            assert!(ir.contains(needle), "expected `{needle}`:\n{ir}");
+        }
     }
 
     #[test]

@@ -2295,6 +2295,7 @@ fn kit_lambda_param_ty_at(
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("Timeline.forall" | "Timeline.exists", 1) => Some(Type::Int),
+        ("Verdict.every" | "Verdict.any", 1) => Some(Type::Int),
         ("IO.foreach" | "IO.foreachDiscard", 1) => prior.first().and_then(|t| list_elem(t).ok()),
         ("Ref.update" | "Ref.updateAndGet", 1) => prior
             .first()
@@ -2416,7 +2417,9 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "Set.exists"
             | "Set.forall"
             | "Timeline.forall"
-            | "Timeline.exists",
+            | "Timeline.exists"
+            | "Verdict.every"
+            | "Verdict.any",
             1,
         ) => Some(Type::Bool),
         ("List.sortBy" | "List.maxBy" | "List.minBy", 1) => Some(Type::Int),
@@ -5218,6 +5221,27 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
             Ok(Type::Bool)
+        }
+        "Verdict.every" | "Verdict.any" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            Ok(Type::Opaque("Verdict".into()))
+        }
+        "Verdict.ok" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Opaque("Verdict".into()))
+        }
+        "Verdict.fail" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Opaque("Verdict".into()))
+        }
+        "Verdict.and" | "Verdict.or" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Verdict".into()))?;
+            expect_ty(&arg_tys[1], &Type::Opaque("Verdict".into()))?;
+            Ok(Type::Opaque("Verdict".into()))
         }
         "Property.assert" => {
             expect_arity(callee, &arg_tys, 2)?;

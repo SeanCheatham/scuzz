@@ -1958,7 +1958,7 @@ mod tests {
     use scuzz_compiler::fuzz::{classify_replay, SurvivorKind};
 
     fn tl_dump(hit: &str, drive: &str, sig: &str, a11y: &str) -> String {
-        let mut s = String::from("# timeline n=1\n--- 0\nlast_hit:\n");
+        let mut s = String::from("# timeline v=1 n=1\n--- 0\nlast_hit:\n");
         s.push_str(hit);
         s.push_str("\ndrive:\n");
         s.push_str(drive);

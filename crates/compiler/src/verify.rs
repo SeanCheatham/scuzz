@@ -1,4 +1,4 @@
-//! `*.scuzz_verify` files. Author claims of shape `Timeline => Bool`, or
+//! `*.scuzz_verify` files. Author claims of shape `Timeline => Verdict`, or
 //! generator-friendly `Bool` drive oracles. Files may sit anywhere in the
 //! package. They do not pair with live sources.
 
@@ -188,7 +188,7 @@ fn apply_one(
         return Err(at(
             Span::new(&ov.label, 0, 0),
             format!(
-                "{}: verify file needs a Timeline => Bool or a drive oracle; write a claim or delete the file",
+                "{}: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file",
                 ov.label
             ),
         ));
@@ -209,7 +209,7 @@ fn reject_verify_header(prog: &Program, label: &str) -> Result<(), OverlayError>
         || !prog.imports.is_empty()
     {
         return Err(OverlayError::Msg(format!(
-            "{label}: *.scuzz_verify must only define Timeline => Bool predicates or drive oracles"
+            "{label}: *.scuzz_verify must only define Timeline => Verdict claims or drive oracles"
         )));
     }
     Ok(())
@@ -235,7 +235,15 @@ fn check_verify_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
         }
         return Ok(());
     }
-    if !matches!(d.ret, Type::Bool) {
+    let takes_timeline = d.params.iter().any(|p| is_timeline_ty(&p.ty));
+    if takes_timeline {
+        if !is_verdict_ty(&d.ret) {
+            return Err(OverlayError::Msg(format!(
+                "{label}: verify def `{}` takes a Timeline and must return Verdict",
+                d.name
+            )));
+        }
+    } else if !matches!(d.ret, Type::Bool) {
         return Err(OverlayError::Msg(format!(
             "{label}: verify def `{}` must return Bool",
             d.name
@@ -280,7 +288,11 @@ fn check_verify_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
 }
 
 fn is_timeline_pred(d: &FunDef) -> bool {
-    d.params.len() == 1 && is_timeline_ty(&d.params[0].ty) && matches!(d.ret, Type::Bool)
+    d.params.len() == 1 && is_timeline_ty(&d.params[0].ty) && is_verdict_ty(&d.ret)
+}
+
+fn is_verdict_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Opaque(n) if n == "Verdict")
 }
 
 fn is_timeline_ty(ty: &Type) -> bool {
@@ -347,7 +359,7 @@ mod tests {
         apply_verifies(
             &mut live,
             &[src(
-                "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => true)\n",
+                "def countOk(t: Timeline): Verdict =\n  Verdict.every(t, i => i >= 0)\n",
             )],
         )
         .unwrap();
@@ -355,6 +367,27 @@ mod tests {
         let d = live.defs.iter().find(|d| d.name == "countOk").unwrap();
         assert!(d.is_verify);
         assert_eq!(d.module, "count");
+    }
+
+    #[test]
+    fn reject_bool_session_claim() {
+        let mut live = parse("@main def main: IO[Unit] =\n  IO.println(\"x\")\n").unwrap();
+        let err = apply_verifies(
+            &mut live,
+            &[src(
+                "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => true)\n",
+            )],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must return Verdict"), "{err}");
+    }
+
+    #[test]
+    fn reject_verdict_drive_oracle() {
+        let mut live = parse("@main def main: IO[Unit] =\n  IO.println(\"x\")\n").unwrap();
+        let err =
+            apply_verifies(&mut live, &[src("def ok(): Verdict =\n  Verdict.ok()\n")]).unwrap_err();
+        assert!(err.to_string().contains("must return Bool"), "{err}");
     }
 
     #[test]

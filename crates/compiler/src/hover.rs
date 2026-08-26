@@ -1166,6 +1166,24 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Timeline.exists",
         "Timeline.exists(t: Timeline, pred: Int => Bool): Bool",
     ),
+    (
+        "Verdict.every",
+        "Verdict.every(t: Timeline, pred: Int => Bool): Verdict",
+    ),
+    (
+        "Verdict.any",
+        "Verdict.any(t: Timeline, pred: Int => Bool): Verdict",
+    ),
+    ("Verdict.ok", "Verdict.ok(): Verdict"),
+    (
+        "Verdict.fail",
+        "Verdict.fail(at: Int, why: String): Verdict",
+    ),
+    (
+        "Verdict.and",
+        "Verdict.and(a: Verdict, b: Verdict): Verdict",
+    ),
+    ("Verdict.or", "Verdict.or(a: Verdict, b: Verdict): Verdict"),
     ("Ref.of", "Ref.of(x: A): IO[Ref[A]]"),
     ("Ref.get", "Ref.get(r: Ref[A]): IO[A]"),
     ("Ref.set", "Ref.set(r: Ref[A], x: A): IO[Unit]"),
