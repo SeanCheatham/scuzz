@@ -448,8 +448,10 @@ static void *thunk_run_rebuild(void *env) {
     sz_ui_session_finish(session);
   }
 
-  sz_testrt_session_baseline_check();
+  /* Check after unmount: view-owned capture packs pin session values until
+     teardown, so a pre-unmount check cannot tell session state from leaks. */
   sz_ui_unmount(session);
+  sz_testrt_session_baseline_check();
   return NULL;
 }
 

@@ -222,7 +222,7 @@ Keep purity checkable (pure `A` vs `IO` vs session). Total expr core. Signals as
 
 Oracles divide into three tiers by the judgment they need.
 
-- **Universal oracles need no intent.** Panic, `SzError`, and nondeterminism reject a run with no human review. This tier is in: double-run same-seed determinism, heap returns to baseline at the terminal point, acquire/release pairing within a timeline, finalizers run on cancel, no parked fibers at quiescence, live/verify differential. Rules stay mechanical.
+- **Universal oracles need no intent.** Panic, `SzError`, and nondeterminism reject a run with no human review. This tier is in: double-run same-seed determinism, heap block count and retain balance return to baseline after session teardown (byte drift at equal count is retained end-state, not a leak), acquire/release pairing within a timeline, finalizers run on cancel, no parked fibers at quiescence, live/verify differential. Rules stay mechanical.
 - **Claims need stated intent.** Humans and agents write `Timeline => Verdict` predicates and drive oracles in `*.scuzz_verify`. The verify-file diffs are the review checkpoint.
 - **Descriptive observations carry no authority.** Goldens and `classify` counts stay machine-maintained.
 
