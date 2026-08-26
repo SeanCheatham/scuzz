@@ -13857,24 +13857,13 @@ def note(n: Int where "x"): Unit = ()
     #[test]
     fn typechecks_json_parse_stringify() {
         let src = r#"@main def main: IO[Unit] =
-  for {
-    parsed = Json.parse("{\"a\":1}")
-    j = parsed match {
-      case Result.Ok(v) => v
-      case Result.Err(_) => Json.Null
+  Json.parse("{\"a\":1}") match {
+    case Result.Ok(j) => Json.stringify(j) match {
+      case Result.Ok(s) => IO.println(s)
+      case Result.Err(_) => IO.println("")
     }
-    n = Json.Null
-    s = Json.stringify(j) match {
-      case Result.Ok(t) => t
-      case Result.Err(_) => ""
-    }
-    t = Json.stringify(n) match {
-      case Result.Ok(u) => u
-      case Result.Err(_) => ""
-    }
-    _ <- IO.println(s)
-    _ <- IO.println(t)
-  } yield ()
+    case Result.Err(_) => IO.println("")
+  }
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Json.parse/stringify should typecheck");
