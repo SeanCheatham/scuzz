@@ -1679,11 +1679,39 @@ static int64_t session_ok(void) { return 1; }
 
 static int64_t session_fail(void) { return 0; }
 
-static int64_t verify_len_ok(void *tl) { return sz_timeline_len(tl) >= 1; }
+static SzVerdict *verify_len_ok(void *tl) {
+  if (sz_timeline_len(tl) >= 1)
+    return sz_verdict_ok();
+  return sz_verdict_fail(-1, "timeline empty");
+}
 
-static int64_t verify_never(void *tl) {
+static SzVerdict *verify_never(void *tl) {
   (void)tl;
-  return 0;
+  return sz_verdict_fail(0, "never holds");
+}
+
+static int64_t verify_pred_true(void *head, void *env) {
+  (void)head;
+  (void)env;
+  return 1;
+}
+
+static int64_t verify_pred_skip_second(void *head, void *env) {
+  (void)env;
+  return sz_unbox_i64(head) < 1;
+}
+
+/* Verdict.every fails at the first state where the pred is false. */
+static SzVerdict *verify_every_second(void *tl) {
+  return sz_verdict_every(tl, (void *)verify_pred_skip_second, NULL);
+}
+
+/* Kit combo that must stay valid: and(ok, or(ok, fail)). */
+static SzVerdict *verify_kit_combo(void *tl) {
+  SzVerdict *every = sz_verdict_every(tl, (void *)verify_pred_true, NULL);
+  SzVerdict *any = sz_verdict_any(tl, (void *)verify_pred_true, NULL);
+  SzVerdict *fallback = sz_verdict_fail(0, "unused");
+  return sz_verdict_and(every, sz_verdict_or(any, fallback));
 }
 
 int main(void) {
@@ -9136,34 +9164,86 @@ int main(void) {
     unsetenv("SCUZZ_TESTRT");
   }
 
-  /* Timeline => Bool verify predicates judge at session_end. */
+  /* Timeline => Verdict session claims judge at session_end. */
   {
     pid_t pid;
-    SzString *nm;
+    int fds[2];
+    char child_err[4096];
     setenv("SCUZZ_TESTRT", "1", 1);
     sz_property_session_reset();
-    nm = sz_string_from_cstr("countOk");
-    sz_verify_register(nm, (void *)verify_len_ok);
-    sz_release(nm);
+    sz_verify_register("countOk", verify_len_ok);
+    sz_verify_register("kitCombo", verify_kit_combo);
     assert(sz_property_session_armed());
     sz_property_session_step();
     sz_property_session_end();
     sz_property_session_reset();
+    /* Invalid verdict: report carries claim name, state index, and why. */
+    assert(pipe(fds) == 0);
     fflush(NULL);
     pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
+      dup2(fds[1], STDERR_FILENO);
+      close(fds[0]);
+      close(fds[1]);
       setenv("SCUZZ_TESTRT", "1", 1);
       sz_property_session_reset();
-      nm = sz_string_from_cstr("countOk");
-      sz_verify_register(nm, (void *)verify_never);
-      sz_release(nm);
+      sz_verify_register("countOk", verify_never);
       sz_property_session_step();
       sz_property_session_end();
       _exit(0);
     }
+    close(fds[1]);
+    read_fd_all(fds[0], child_err, sizeof child_err);
+    close(fds[0]);
     assert(wait_aborted(pid));
+    assert(strstr(child_err,
+                  "verify failed: countOk at state 0: never holds") != NULL);
+    /* Verdict.every surfaces the first failing state index. */
+    assert(pipe(fds) == 0);
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      dup2(fds[1], STDERR_FILENO);
+      close(fds[0]);
+      close(fds[1]);
+      setenv("SCUZZ_TESTRT", "1", 1);
+      sz_property_session_reset();
+      sz_verify_register("secondFails", verify_every_second);
+      sz_property_session_step();
+      sz_property_session_step();
+      sz_property_session_end();
+      _exit(0);
+    }
+    close(fds[1]);
+    read_fd_all(fds[0], child_err, sizeof child_err);
+    close(fds[0]);
+    assert(wait_aborted(pid));
+    assert(strstr(child_err, "verify failed: secondFails at state 1: "
+                             "predicate false at this state") != NULL);
     unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Timeline dump header carries the schema version. */
+  {
+    const char *path = "/tmp/scuzz_test_io_timeline.dump";
+    char *dump;
+    remove(path);
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_TIMELINE_DUMP", path, 1);
+    sz_property_session_reset();
+    sz_property_session_step();
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    dump = slurp_path(path);
+    assert(dump);
+    assert(strncmp(dump, "# timeline v=1 n=2\n", 19) == 0);
+    free(dump);
+    unsetenv("SCUZZ_TIMELINE_DUMP");
+    unsetenv("SCUZZ_TESTRT");
+    remove(path);
   }
 
   puts("runtime io tests ok");

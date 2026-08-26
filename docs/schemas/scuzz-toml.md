@@ -74,7 +74,7 @@ my-app/
     Other.scuzz             # multi-file packages / enums
     Main.scuzz_sim          # optional: same-name defs under fuzz / TestRuntime
     Main.scuzz_drivers      # optional: oracle-free IO workloads for scuzz fuzz
-  count.scuzz_verify        # optional: Timeline => Bool and drive oracles (anywhere in the package)
+  count.scuzz_verify        # optional: Timeline => Verdict session claims and Bool drive oracles (anywhere in the package)
   .scuzz/
     fingerprint             # incremental compile cache (gitignored through **/.scuzz/)
   build/package/            # emitted by `scuzz package`

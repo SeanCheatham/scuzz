@@ -1,6 +1,3 @@
-private def visible(t: Timeline, needle: String): Bool =
-  Timeline.forall(t, i => Timeline.a11yHas(t, i, needle))
-
-def chrome(t: Timeline): Bool =
-  visible(t, "button:Save") && visible(t, "button:Check") && visible(t, "button:Find") && visible(t, "button:Palette") && visible(t, "button:Save all") && visible(t, "button:Run") && visible(t, "button:Fuzz") && visible(t, "button:x sample.txt") && visible(t, "editor:editor")
+def chrome(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "button:Save") && Timeline.a11yHas(t, i, "button:Check") && Timeline.a11yHas(t, i, "button:Find") && Timeline.a11yHas(t, i, "button:Palette") && Timeline.a11yHas(t, i, "button:Save all") && Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "button:Fuzz") && Timeline.a11yHas(t, i, "button:x sample.txt") && Timeline.a11yHas(t, i, "editor:editor"))
 

@@ -1954,7 +1954,7 @@ version = "0.0.0"
         let dir = tempdir().unwrap();
         let root = dir.path();
         write_ok_pkg(root);
-        let src = "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => i >= 0)\n";
+        let src = "def countOk(t: Timeline): Verdict =\n  Verdict.every(t, i => i >= 0)\n";
         let formatted = crate::format::format_source(src).unwrap();
         fs::write(root.join("count.scuzz_verify"), formatted).unwrap();
         let diags = check_project(root).unwrap();

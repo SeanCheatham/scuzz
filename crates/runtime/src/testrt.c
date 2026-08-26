@@ -1713,7 +1713,7 @@ static int g_response_n;
 
 typedef struct {
   char *name;
-  int64_t (*fn)(void *);
+  SzVerdict *(*fn)(void *);
 } SzVerifyProp;
 
 static SzVerifyProp g_verify[SZ_SESSION_MAX];
@@ -1911,6 +1911,68 @@ int64_t sz_timeline_exists(void *tl, SzListPred pred, void *env) {
   t->fail_index = t->n > 0 ? t->n - 1 : 0;
   return 0;
 }
+SzVerdict *sz_verdict_ok(void) {
+  static SzVerdict ok = {1, -1, NULL};
+  return &ok;
+}
+
+SzVerdict *sz_verdict_fail(int64_t index, const char *why) {
+  /* Plain malloc: judge-side memory must not perturb app heap accounting. */
+  SzVerdict *v = (SzVerdict *)malloc(sizeof(SzVerdict));
+  if (!v)
+    sz_panic("verdict: out of memory");
+  v->valid = 0;
+  v->index = index;
+  v->why = why;
+  return v;
+}
+
+SzVerdict *sz_verdict_and(SzVerdict *a, SzVerdict *b) {
+  if (a && !a->valid)
+    return a;
+  return b;
+}
+
+SzVerdict *sz_verdict_or(SzVerdict *a, SzVerdict *b) {
+  if (a && a->valid)
+    return a;
+  return b;
+}
+
+SzVerdict *sz_verdict_every(void *tl, void *fnp, void *envp) {
+  SzTimeline *t = (SzTimeline *)tl;
+  SzListPred pred = (SzListPred)fnp;
+  int i;
+  if (!t || !pred)
+    return sz_verdict_ok();
+  for (i = 0; i < t->n; i++) {
+    void *box = sz_box_i64((int64_t)i);
+    int64_t ok = pred(box, envp);
+    sz_release(box);
+    if (!ok)
+      return sz_verdict_fail(i, "predicate false at this state");
+  }
+  return sz_verdict_ok();
+}
+
+SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp) {
+  SzTimeline *t = (SzTimeline *)tl;
+  SzListPred pred = (SzListPred)fnp;
+  int i;
+  if (t && pred) {
+    for (i = 0; i < t->n; i++) {
+      void *box = sz_box_i64((int64_t)i);
+      int64_t ok = pred(box, envp);
+      sz_release(box);
+      if (ok)
+        return sz_verdict_ok();
+    }
+  }
+  return sz_verdict_fail(t && t->n > 0 ? t->n - 1 : 0,
+                         "no state satisfied the predicate");
+}
+
+#define SZ_TIMELINE_DUMP_VERSION 1
 
 static void tl_dump_file(void) {
   const char *path = getenv("SCUZZ_TIMELINE_DUMP");
@@ -1921,7 +1983,7 @@ static void tl_dump_file(void) {
   f = fopen(path, "w");
   if (!f)
     return;
-  fprintf(f, "# timeline n=%d\n", g_tl_n);
+  fprintf(f, "# timeline v=%d n=%d\n", SZ_TIMELINE_DUMP_VERSION, g_tl_n);
   for (i = 0; i < g_tl_n; i++) {
     fprintf(f, "--- %d\n", i);
     fprintf(f, "last_hit:\n%s\n", g_tl[i].last_hit ? g_tl[i].last_hit : "");
@@ -2023,8 +2085,8 @@ void sz_property_response_register(SzString *name, void *trigger_fn,
   g_response_n++;
 }
 
-void sz_verify_register(SzString *name, void *fn) {
-  const char *s = name ? sz_string_cstr(name) : "";
+void sz_verify_register(const char *name, SzVerdict *(*fn)(void *)) {
+  const char *s = name ? name : "";
   size_t len;
   char *copy;
   if (!fn || !s[0])
@@ -2035,7 +2097,7 @@ void sz_verify_register(SzString *name, void *fn) {
   copy = (char *)sz_alloc(len + 1);
   memcpy(copy, s, len + 1);
   g_verify[g_verify_n].name = copy;
-  g_verify[g_verify_n].fn = (int64_t(*)(void *))fn;
+  g_verify[g_verify_n].fn = fn;
   g_verify_n++;
 }
 
@@ -2058,10 +2120,28 @@ static void claim_fail(const char *kind, const char *name, int idx) {
   fprintf(stderr, "scuzz: %s\n", buf);
   sz_panic(buf);
 }
+static void claim_fail_verdict(const char *name, const SzVerdict *v) {
+  char buf[256];
+  const char *nm = name ? name : "?";
+  if (v->index >= 0) {
+    if (v->why)
+      snprintf(buf, sizeof buf, "verify failed: %s at state %lld: %s", nm,
+               (long long)v->index, v->why);
+    else
+      snprintf(buf, sizeof buf, "verify failed: %s at state %lld", nm,
+               (long long)v->index);
+  } else {
+    if (v->why)
+      snprintf(buf, sizeof buf, "verify failed: %s: %s", nm, v->why);
+    else
+      snprintf(buf, sizeof buf, "verify failed: %s", nm);
+  }
+  fprintf(stderr, "scuzz: %s\n", buf);
+  sz_panic(buf);
+}
 
 void sz_property_session_end(void) {
   const char *tr = getenv("SCUZZ_TESTRT");
-  char buf[256];
   int i;
   int j;
   int last;
@@ -2118,15 +2198,13 @@ void sz_property_session_end(void) {
   frozen.fail_index = -1;
   frozen.states = g_tl;
   for (i = 0; i < g_verify_n; i++) {
-    frozen.fail_index = -1;
-    if (g_verify[i].fn && g_verify[i].fn(&frozen))
+    SzVerdict *v;
+    if (!g_verify[i].fn)
       continue;
-    if (frozen.fail_index >= 0)
-      claim_fail("verify", g_verify[i].name, frozen.fail_index);
-    snprintf(buf, sizeof buf, "verify failed: %s",
-             g_verify[i].name ? g_verify[i].name : "?");
-    fprintf(stderr, "scuzz: %s\n", buf);
-    sz_panic(buf);
+    v = g_verify[i].fn(&frozen);
+    if (!v || v->valid)
+      continue;
+    claim_fail_verdict(g_verify[i].name, v);
   }
   tl_restore_clear();
 }

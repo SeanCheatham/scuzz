@@ -442,8 +442,9 @@ static void *thunk_run_rebuild(void *env) {
     live_pump_loop(session, live_still_mobile);
     sz_ui_session_finish(session);
   } else {
-    if (sz_testrt_oracles_armed())
-      sz_ui_quiesce(session);
+    if (sz_testrt_oracles_armed() &&
+        sz_ui_quiesce(session) == SZ_QUIESCE_BUDGET_TRIPPED)
+      sz_panic("quiesce budget tripped (64 pumps): timeline not settled");
     sz_ui_session_finish(session);
   }
 

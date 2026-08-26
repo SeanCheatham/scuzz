@@ -687,8 +687,14 @@ void sz_ui_session_finish(SzUiSession *session);
 void sz_ui_resolve_headless_size(int *width, int *height, double *scale);
 
 int sz_ui_pump_sync(SzUiSession *session);
-/* Headless TestRuntime: stop new events and pump until idle or the budget. */
-void sz_ui_quiesce(SzUiSession *session);
+typedef enum SzQuiesce {
+  SZ_QUIESCE_SETTLED = 0,
+  SZ_QUIESCE_BUDGET_TRIPPED = 1
+} SzQuiesce;
+
+/* Headless TestRuntime: stop new events and pump until idle or the budget
+ * (64 pumps); reports which terminal state was reached. */
+SzQuiesce sz_ui_quiesce(SzUiSession *session);
 int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event);
 int sz_ui_snapshot_png_sync(SzUiSession *session, const char *path);
 int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_len);

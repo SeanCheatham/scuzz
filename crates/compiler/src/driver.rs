@@ -1026,14 +1026,14 @@ mod tests {
         write_pkg(&app, "app", "", true, "IO.println(\"x\")");
         fs::write(
             app.join("count.scuzz_verify"),
-            "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => i >= 0)\n",
+            "def countOk(t: Timeline): Verdict =\n  Verdict.every(t, i => i >= 0)\n",
         )
         .unwrap();
         let r1 = resolve_project(&app).unwrap();
         let fp1 = fingerprint_resolved(&r1, true);
         fs::write(
             app.join("count.scuzz_verify"),
-            "def countOk(t: Timeline): Bool =\n  Timeline.forall(t, i => i >= 1)\n",
+            "def countOk(t: Timeline): Verdict =\n  Verdict.every(t, i => i >= 1)\n",
         )
         .unwrap();
         let r2 = resolve_project(&app).unwrap();

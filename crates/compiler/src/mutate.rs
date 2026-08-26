@@ -270,6 +270,20 @@ fn bin_site_count(op: BinOp) -> i32 {
     }
 }
 
+/// A residualized `where` bound: `Property.check("<def>.<param>", pred, Var(param))`.
+/// The dropped mutant passes the value through unchecked.
+fn where_residual_value(callee: &str, args: &[Expr]) -> Option<Expr> {
+    if callee != "Property.check" || args.len() != 3 {
+        return None;
+    }
+    match (&args[0].kind, &args[2].kind) {
+        (ExprKind::StrLit(name), ExprKind::Var(v)) if name.ends_with(&format!(".{v}")) => {
+            Some(args[2].clone())
+        }
+        _ => None,
+    }
+}
+
 fn require_pred_index(args: &[Expr]) -> Option<usize> {
     match args.len() {
         1 => Some(0),
@@ -472,12 +486,22 @@ fn mutate_oracle(
         return (Expr::new(ExprKind::Call { callee, args }, span), seen);
     }
     note(cx, seen, target, &span, "negate predicate".into());
+    let drop_value = where_residual_value(&callee, &args);
+    if drop_value.is_some() {
+        note(cx, seen + 1, target, &span, "drop where bound".into());
+    }
+    let base = seen + 1 + i32::from(drop_value.is_some());
     let mut args = args;
     let rest: Vec<Expr> = args.split_off(2);
     let pred_orig = args[1].clone();
-    let (name_e, seen_n) = mutate_expr(args[0].clone(), target, seen + 1, false, cx);
+    let (name_e, seen_n) = mutate_expr(args[0].clone(), target, base, false, cx);
     let (pred_m, seen_p) = mutate_expr(args[1].clone(), target, seen_n, true, cx);
     let (rest, seen_r) = mutate_expr_list(rest, target, seen_p, false, cx);
+    if let Some(value) = drop_value {
+        if seen + 1 == target {
+            return (value, seen_r);
+        }
+    }
     let pred_out = if seen == target {
         negate_pred(pred_orig)
     } else {
@@ -684,9 +708,9 @@ mod tests {
             &[VerifySource {
                 label: "pkg/count.scuzz_verify".into(),
                 text: concat!(
-                    "private def afterHitShows(t: Timeline, hit: String, needle: String): Bool =\n",
-                    "  !Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit)) || Timeline.exists(t, i => Timeline.lastHitHas(t, i, hit) && Timeline.exists(t, j => j >= i && Timeline.a11yHas(t, j, needle)))\n",
-                    "def afterPlusShowsOne(t: Timeline): Bool =\n",
+                    "private def afterHitShows(t: Timeline, hit: String, needle: String): Verdict =\n",
+                    "  Verdict.any(t, i => Timeline.lastHitHas(t, i, hit) && Timeline.exists(t, j => j >= i && Timeline.a11yHas(t, j, needle)))\n",
+                    "def afterPlusShowsOne(t: Timeline): Verdict =\n",
                     "  afterHitShows(t, \"button:+1\", \"text:count = 1\")\n",
                 )
                 .into(),
@@ -728,6 +752,41 @@ record Point(x: Int where x >= 0, y: Int where y == y)
         .unwrap();
         residualize_refinements(&mut p);
         assert!(mutate_count_mode(&p, MutateMode::Oracles) > 0);
+    }
+
+    #[test]
+    fn oracles_drop_where_bound() {
+        let mut p = parse(
+            r#"
+def note(n: Int where n >= 0): Int = n
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(note(3)))
+"#,
+        )
+        .unwrap();
+        residualize_refinements(&mut p);
+        let n = mutate_count_mode(&p, MutateMode::Oracles);
+        let mut drop_site = None;
+        let mut saw_negate = false;
+        for i in 0..n {
+            if let Some(d) = mutate_describe(&p, i, MutateMode::Oracles) {
+                if d.label == "drop where bound" {
+                    drop_site = Some(i);
+                }
+                if d.label == "negate predicate" {
+                    saw_negate = true;
+                }
+            }
+        }
+        assert!(saw_negate, "negate site still present for the bound");
+        let drop = drop_site.expect("drop where bound site");
+        let m = mutate_apply_mode(p, drop, MutateMode::Oracles);
+        let dumped = format!("{:?}", m.main.body.kind);
+        assert!(
+            !dumped.contains("Property.check"),
+            "dropped mutant passes the value unchecked: {dumped}"
+        );
     }
 
     #[test]
