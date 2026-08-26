@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
 
 jobs:
   rustfmt-clippy:
@@ -18,6 +20,27 @@ jobs:
           components: rustfmt, clippy
       - name: rustfmt + clippy
         run: ./scripts/check-fmt-clippy.sh
+
+  nightly-deep-campaign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang/make + Skia link deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang make zlib1g-dev libbz2-dev
+      - name: Install Rust (stable with rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build CLI
+        run: cargo build -p scuzz
+      - name: Deep campaigns
+        run: |
+          cargo run -p scuzz -- fuzz --iterations 512 examples/counter
+          cargo run -p scuzz -- fuzz --iterations 512 examples/studio
+          cargo run -p scuzz -- fuzz --relate examples/counter
+          cargo run -p scuzz -- fuzz --relate examples/studio
 
   linux-headless:
     runs-on: ubuntu-latest
