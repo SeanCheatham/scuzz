@@ -3125,6 +3125,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       fiber_finish(s, f, 0, NULL, sz_error_new(1, "null queue"));
       return 0;
     }
+    sz_effect_log("queue.take");
     if (sz_testrt_fault_tick(SZ_FAULT_QUEUE)) {
       sz_release(q);
       fiber_fail(s, f, sz_error_new(8, "Queue.take: injected fault"));
@@ -3356,6 +3357,31 @@ static void fiber_release_result(Fiber *f) {
   f->result_error = NULL;
   sz_release(v);
   sz_error_free(err);
+}
+
+void sz_sched_census(int *ready, int *parked) {
+  Fiber *f;
+  int r = 0;
+  int p = 0;
+  if (!g_sched) {
+    if (ready)
+      *ready = 0;
+    if (parked)
+      *parked = 0;
+    return;
+  }
+  for (f = g_sched->all_fibers; f; f = f->all_next) {
+    if (f->state == FIB_READY)
+      r++;
+    else if (f->state == FIB_SLEEP || f->state == FIB_QWAIT ||
+             f->state == FIB_DWAIT || f->state == FIB_POLL ||
+             f->state == FIB_JOIN || f->state == FIB_FWAIT)
+      p++;
+  }
+  if (ready)
+    *ready = r;
+  if (parked)
+    *parked = p;
 }
 
 static void sched_free_fibers(Sched *s) {

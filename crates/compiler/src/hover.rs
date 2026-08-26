@@ -1163,6 +1163,22 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Timeline.lastHitHas(t: Timeline, i: Int, needle: String): Bool",
     ),
     (
+        "Timeline.effectHas",
+        "Timeline.effectHas(t: Timeline, i: Int, needle: String): Bool",
+    ),
+    (
+        "Timeline.fiberReady",
+        "Timeline.fiberReady(t: Timeline, i: Int): Int",
+    ),
+    (
+        "Timeline.fiberParked",
+        "Timeline.fiberParked(t: Timeline, i: Int): Int",
+    ),
+    (
+        "Timeline.faultHas",
+        "Timeline.faultHas(t: Timeline, i: Int, needle: String): Bool",
+    ),
+    (
         "Timeline.forall",
         "Timeline.forall(t: Timeline, pred: Int => Bool): Bool",
     ),

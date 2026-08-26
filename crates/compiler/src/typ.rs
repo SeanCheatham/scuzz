@@ -5255,6 +5255,26 @@ fn infer_call(
             expect_ty(&arg_tys[2], &Type::String)?;
             Ok(Type::Bool)
         }
+        "Timeline.effectHas" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::Bool)
+        }
+        "Timeline.fiberReady" | "Timeline.fiberParked" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Int)
+        }
+        "Timeline.faultHas" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::Bool)
+        }
         "Timeline.forall" | "Timeline.exists" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;

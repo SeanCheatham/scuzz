@@ -1195,7 +1195,15 @@ impl UnclaimedItem {
     }
 }
 
-const STATE_FIELDS: [&str; 4] = ["signals", "a11y", "last_hit", "drive"];
+const STATE_FIELDS: [&str; 7] = [
+    "signals",
+    "a11y",
+    "last_hit",
+    "drive",
+    "effects",
+    "fibers",
+    "fault",
+];
 
 const CONTROL_CTORS: &[(&str, usize, &str)] = &[
     ("View.button", 0, "button"),
@@ -1416,6 +1424,9 @@ fn claimed_field_from_callee(callee: &str) -> Option<&'static str> {
         | "Property.signalListAt" => Some("signals"),
         "Timeline.a11yHas" | "Property.a11yHas" => Some("a11y"),
         "Timeline.lastHitHas" | "Property.lastHitHas" => Some("last_hit"),
+        "Timeline.effectHas" => Some("effects"),
+        "Timeline.fiberReady" | "Timeline.fiberParked" => Some("fibers"),
+        "Timeline.faultHas" => Some("fault"),
         _ => None,
     }
 }
@@ -1472,6 +1483,9 @@ struct TlFields {
     a11y: String,
     last_hit: String,
     drive: String,
+    effects: String,
+    fibers: String,
+    fault: String,
 }
 
 fn timeline_section_bodies(text: &str) -> Vec<&str> {
@@ -1507,7 +1521,7 @@ fn section_field(body: &str, name: &str) -> String {
     };
     let rest = &body[i + header.len()..];
     let mut end = rest.len();
-    for n in ["last_hit", "drive", "signals", "a11y"] {
+    for n in STATE_FIELDS {
         if n == name {
             continue;
         }
@@ -1554,6 +1568,9 @@ fn parse_timeline_states(text: &str) -> Vec<TlFields> {
             drive: section_field(body, "drive"),
             signals: section_field(body, "signals"),
             a11y: section_field(body, "a11y"),
+            effects: section_field(body, "effects"),
+            fibers: section_field(body, "fibers"),
+            fault: section_field(body, "fault"),
         })
         .collect()
 }
@@ -1566,6 +1583,9 @@ fn field_series(states: &[TlFields], name: &str) -> String {
             "a11y" => s.a11y.as_str(),
             "last_hit" => s.last_hit.as_str(),
             "drive" => s.drive.as_str(),
+            "effects" => s.effects.as_str(),
+            "fibers" => s.fibers.as_str(),
+            "fault" => s.fault.as_str(),
             _ => "",
         })
         .collect::<Vec<_>>()
@@ -2469,6 +2489,53 @@ def countOk(t: Timeline): Verdict =
         )
         .unwrap();
         assert_eq!(claimed_state_fields_text(&p), "signals\na11y\nlast_hit\n");
+    }
+
+    #[test]
+    fn claimed_state_fields_from_effect_fiber_fault() {
+        let p = parse(
+            r#"
+def wrote(t: Timeline): Verdict =
+  Verdict.any(t, i => Timeline.effectHas(t, i, "fs.write") && Timeline.fiberParked(t, i) == 0 && Timeline.faultHas(t, i, "kind=none"))
+@main def main: IO[Unit] =
+  IO.println("ok")
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            claimed_state_fields_text(&p),
+            "effects\nfibers\nfault\n"
+        );
+    }
+
+    #[test]
+    fn parse_timeline_optional_obs_sections() {
+        let dump = concat!(
+            "# timeline v=1 n=1\n",
+            "--- 0\n",
+            "last_hit:\n\n",
+            "drive:\n\n",
+            "signals:\n",
+            "a11y:\n",
+            "button:+1\n",
+            "effects:\n",
+            "fs.write n=7\n",
+            "fibers:\n",
+            "ready=0 parked=0\n",
+            "fault:\n",
+            "kind=none\n",
+        );
+        let states = parse_timeline_states(dump);
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].a11y.trim(), "button:+1");
+        assert_eq!(states[0].effects.trim(), "fs.write n=7");
+        assert_eq!(states[0].fibers.trim(), "ready=0 parked=0");
+        assert_eq!(states[0].fault.trim(), "kind=none");
+        assert!(
+            !states[0].a11y.contains("fs.write"),
+            "a11y must not swallow effects:\n{}",
+            states[0].a11y
+        );
     }
 
     fn tl_dump(states: &[(&str, &str, &str, &str)]) -> String {
