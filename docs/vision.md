@@ -252,9 +252,7 @@ IDE prerequisites run as two tracks. Track A is input and editor (key alphabet, 
 
 Verify drive oracles take at most three generator-friendly params (`Int` / `String` / `Bool` / `List` / record / enum). Search shrinks a failing event prefix, then shrinks `drive` args (constructor trees and list elements). Simple Int `where` bounds clamp draws on params and record/enum fields. `Property.classify(name, hit)` records true/false counts in `build/fuzz/summary.toml`. It always returns `true`. A surviving mutant names the enclosing def, the mutation, the nearest residual oracle, and a weak or missing claim. Inert mutants are unreported.
 
-Verification next steps, in order:
-
-1. **Stronger mutation operators.** Handler-swap on UI taps, Signal-map identity. Then a mutation score in `summary.toml`.
+Verification next steps come from [`gaps.md`](gaps.md) (claim-kernel remaining items, swarm testing, nightly campaign).
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)).
 
