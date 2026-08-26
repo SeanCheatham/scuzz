@@ -148,7 +148,11 @@ pub fn cmd_fuzz(
     seed: i64,
     oracles: bool,
     no_fail_fast: bool,
+    minimize_corpus: bool,
 ) -> Result<ExitCode> {
+    if minimize_corpus {
+        return fuzz_minimize_corpus(path);
+    }
     if let Some(replay) = replay {
         return fuzz_replay(path, replay);
     }
@@ -235,6 +239,93 @@ fn fuzz_run(
     } else {
         fuzz_io_campaign(&ctx, &mut camp, search_budget)
     }
+}
+
+/// Greedy single-event-removal minimization of `corpus/*.toml`. Keeps each
+/// entry's pass/fail status and the declared sometimes names it reaches.
+/// Idempotent: a second run accepts no further removals and rewrites nothing.
+fn fuzz_minimize_corpus(path: &Path) -> Result<ExitCode> {
+    let ctx = prepare_fuzz(path)?;
+    let entries = load_corpus(&ctx.project_dir)?;
+    let declared = declared_names(&ctx.project_dir);
+    let mut changed = 0i64;
+    let mut before_total = 0i64;
+    let mut after_total = 0i64;
+    for (path, repro) in entries {
+        if path.file_name().is_some_and(|n| n == "seeds.txt") {
+            continue;
+        }
+        let sched = repro.schedule_seed.clone().unwrap_or_default();
+        let fault = repro_fault(&repro);
+        let (base_fail, base_reached) =
+            minimize_observe(&ctx, &sched, &fault, &repro.events, &declared)?;
+        let mut events = repro.events.clone();
+        before_total += events.len() as i64;
+        let mut i = 0;
+        while i < events.len() {
+            let mut cand = events.clone();
+            cand.remove(i);
+            let (cand_fail, cand_reached) =
+                minimize_observe(&ctx, &sched, &fault, &cand, &declared)?;
+            if minimize_accept(base_fail, &base_reached, cand_fail, &cand_reached) {
+                events = cand;
+            } else {
+                i += 1;
+            }
+        }
+        after_total += events.len() as i64;
+        if events.len() < repro.events.len() {
+            std::fs::write(&path, repro_text(repro.seed, &sched, &fault, &events))?;
+            changed += 1;
+            println!(
+                "minimized {}: {} -> {} events",
+                path.display(),
+                repro.events.len(),
+                events.len()
+            );
+        }
+    }
+    println!(
+        "scuzz fuzz: minimize-corpus: {changed} changed, {before_total} -> {after_total} events"
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Replay events under the corpus env. Report failure and the declared
+/// sometimes names this run reached (sorted, deduped).
+fn minimize_observe(
+    ctx: &FuzzCtx,
+    sched: &str,
+    fault: &str,
+    events: &[String],
+    declared: &[String],
+) -> Result<(bool, Vec<String>)> {
+    let code = if ctx.is_ui {
+        fuzz_exec(&ctx.exe, &ctx.fuzz_dir, ctx.w, ctx.h, events, sched, fault)?
+    } else {
+        fuzz_exec_io(&ctx.exe, &ctx.fuzz_dir, sched, fault, events)?
+    };
+    let reached = lines_nonempty(
+        &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
+    );
+    let mut kept: Vec<String> = reached
+        .into_iter()
+        .filter(|n| declared.iter().any(|d| d == n))
+        .collect();
+    kept.sort();
+    kept.dedup();
+    Ok((code != 0, kept))
+}
+
+/// Accept a minimized candidate when pass/fail status and the reached declared
+/// sometimes names match the baseline exactly.
+fn minimize_accept(
+    base_fail: bool,
+    base_reached: &[String],
+    cand_fail: bool,
+    cand_reached: &[String],
+) -> bool {
+    cand_fail == base_fail && cand_reached == base_reached
 }
 
 fn fuzz_replay(path: &Path, replay_path: &Path) -> Result<ExitCode> {
@@ -2034,6 +2125,29 @@ mod tests {
         let text = toml_survivor_array(&[row]);
         assert!(text.contains("kind = \"missing\""), "{text}");
         assert!(text.contains("fields = [\"drive\"]"), "{text}");
+    }
+
+    #[test]
+    fn minimize_accept_requires_same_status_and_names() {
+        let reached = vec!["a".to_string(), "b".to_string()];
+        assert!(minimize_accept(true, &reached, true, &reached));
+        assert!(minimize_accept(false, &reached, false, &reached));
+        assert!(
+            !minimize_accept(true, &reached, false, &reached),
+            "a failing entry must keep failing"
+        );
+        assert!(
+            !minimize_accept(false, &reached, true, &reached),
+            "a passing entry must keep passing"
+        );
+        assert!(
+            !minimize_accept(true, &reached, true, &["a".to_string()]),
+            "dropped declared name"
+        );
+        assert!(
+            !minimize_accept(true, &[], true, &reached),
+            "gained declared name"
+        );
     }
 
     #[test]
