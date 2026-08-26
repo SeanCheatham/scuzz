@@ -18,7 +18,7 @@ world
 int[8] = 0
 list[9] = []
 int[10] = 0
-list[11] = ["sample.txt", "scuzz.toml", "src/"]
+list[11] = ["chrome.scuzz_verify", "sample.txt", "scuzz.toml", "src/", "src/Check.scuzz", "src/Chrome.scuzz", "src/Lsp.scuzz", "src/Lsp.scuzz_sim", "src/Main.scuzz", "src/Main.scuzz_sim"]
 list[12] = []
 int[13] = 0
 str[14] = ""
@@ -29,7 +29,7 @@ int[18] = 0
 int[19] = 0
 str[20] = "hover stub"
 list[21] = []
-list[22] = []
+list[22] = ["src/"]
 int[23] = 0
 list[24] = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix", "Save all", "Run", "Fuzz"]
 int[25] = 0
@@ -40,9 +40,16 @@ split:28
 text:Files
 scroll:scroll
 list:list
+button:chrome.scuzz_verify
 button:sample.txt
 button:scuzz.toml
 button:src/
+button:    Check.scuzz
+button:    Chrome.scuzz
+button:    Lsp.scuzz
+button:    Lsp.scuzz_sim
+button:    Main.scuzz
+button:    Main.scuzz_sim
 button:Save
 button:Check
 button:Find
@@ -67,24 +74,31 @@ overlay:0
 overlay:0
 
 [taps]
-0 sample.txt 36,58 67x32
-1 scuzz.toml 36,98 66x32
-2 src/ 36,138 48x32
-3 Save 309,36 48x32
-4 Check 365,36 49x32
-5 Find 422,36 48x32
-6 Complete 478,36 63x32
-7 Hover 549,36 48x32
-8 Format 605,36 53x32
-9 Def 666,36 48x32
-10 Rename 722,36 58x32
-11 Fix 788,36 48x32
-12 Palette 844,36 52x32
-13 Save all 309,76 56x32
-14 Run 373,76 48x32
-15 Fuzz 429,76 48x32
-16 sample.txt 321,152 67x32
-17 x sample.txt 396,152 75x32
+0 chrome.scuzz_verify 36,58 105x32
+1 sample.txt 36,98 67x32
+2 scuzz.toml 36,138 66x32
+3 src/ 36,178 48x32
+4     Check.scuzz 36,218 85x32
+5     Chrome.scuzz 36,258 92x32
+6     Lsp.scuzz 36,298 73x32
+7     Lsp.scuzz_sim 36,338 91x32
+8     Main.scuzz 36,378 79x32
+9     Main.scuzz_sim 36,418 97x32
+10 Save 309,36 48x32
+11 Check 365,36 49x32
+12 Find 422,36 48x32
+13 Complete 478,36 63x32
+14 Hover 549,36 48x32
+15 Format 605,36 53x32
+16 Def 666,36 48x32
+17 Rename 722,36 58x32
+18 Fix 788,36 48x32
+19 Palette 844,36 52x32
+20 Save all 309,76 56x32
+21 Run 373,76 48x32
+22 Fuzz 429,76 48x32
+23 sample.txt 321,152 67x32
+24 x sample.txt 396,152 75x32
 
 [fields]
 
@@ -105,4 +119,4 @@ overlay:0
 0 scroll
 
 [last_hit]
-xy 333.1 52.0 -> button:Save
+xy 60.0 194.0 -> button:src/
