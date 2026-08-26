@@ -36,8 +36,6 @@ pub(crate) mod typ;
 pub(crate) mod typehier;
 pub(crate) mod verify;
 
-pub use check::{check_project, format_diagnostics};
+pub use check::{check_project, collect_check_sources, format_diagnostics};
 pub use driver::{compile_prepared_program, compile_project, CompileOutput};
 pub use lsp::run_lsp;
-pub use overlay::collect_fmt_sources;
-pub use verify::collect_verify_paths;

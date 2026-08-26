@@ -19,6 +19,14 @@ pub fn resolve_out_dir(project_dir: &Path, out_dir: &Path) -> PathBuf {
     }
 }
 
+/// Runtime crate dir + `SCUZZ_CLANG` (default `clang`).
+pub fn runtime_dir_and_clang(project_dir: &Path) -> Result<(PathBuf, String)> {
+    let runtime_dir =
+        find_runtime_dir(&std::env::current_dir()?).or_else(|_| find_runtime_dir(project_dir))?;
+    let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
+    Ok((runtime_dir, clang))
+}
+
 pub fn compile_opts(
     path: &Path,
     out_dir: &Path,
@@ -27,9 +35,7 @@ pub fn compile_opts(
 ) -> Result<CompileOptions> {
     let project_dir = resolve_dir(path)?;
     let out_dir = resolve_out_dir(&project_dir, out_dir);
-    let runtime_dir =
-        find_runtime_dir(&std::env::current_dir()?).or_else(|_| find_runtime_dir(&project_dir))?;
-    let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
+    let (runtime_dir, clang) = runtime_dir_and_clang(&project_dir)?;
     Ok(CompileOptions {
         project_dir,
         runtime_dir,

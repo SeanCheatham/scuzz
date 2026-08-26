@@ -1134,39 +1134,19 @@ pub fn script_text(events: &[String]) -> String {
 }
 
 pub fn sometimes_declared_text(program: &Program) -> String {
-    let mut names = Vec::new();
-    for d in &program.defs {
-        collect_sometimes(&d.body, &mut names);
-    }
-    collect_sometimes(&program.main.body, &mut names);
-    if names.is_empty() {
-        String::new()
-    } else {
-        let mut s = names.join("\n");
-        s.push('\n');
-        s
-    }
-}
-
-fn collect_sometimes(e: &Expr, acc: &mut Vec<String>) {
-    if let ExprKind::Call { callee, args } = &e.kind {
-        if callee == "Property.sometimes" {
-            if let Some(ExprKind::StrLit(name)) = args.first().map(|a| &a.kind) {
-                if !acc.iter().any(|n| n == name) {
-                    acc.push(name.clone());
-                }
-            }
-        }
-    }
-    e.for_each_child(|c| collect_sometimes(c, acc));
+    declared_text(program, "Property.sometimes")
 }
 
 pub fn classify_declared_text(program: &Program) -> String {
+    declared_text(program, "Property.classify")
+}
+
+fn declared_text(program: &Program, callee_name: &str) -> String {
     let mut names = Vec::new();
     for d in &program.defs {
-        collect_classify(&d.body, &mut names);
+        collect_declared(&d.body, callee_name, &mut names);
     }
-    collect_classify(&program.main.body, &mut names);
+    collect_declared(&program.main.body, callee_name, &mut names);
     if names.is_empty() {
         String::new()
     } else {
@@ -1176,9 +1156,9 @@ pub fn classify_declared_text(program: &Program) -> String {
     }
 }
 
-fn collect_classify(e: &Expr, acc: &mut Vec<String>) {
+fn collect_declared(e: &Expr, callee_name: &str, acc: &mut Vec<String>) {
     if let ExprKind::Call { callee, args } = &e.kind {
-        if callee == "Property.classify" {
+        if callee == callee_name {
             if let Some(ExprKind::StrLit(name)) = args.first().map(|a| &a.kind) {
                 if !acc.iter().any(|n| n == name) {
                     acc.push(name.clone());
@@ -1186,7 +1166,7 @@ fn collect_classify(e: &Expr, acc: &mut Vec<String>) {
             }
         }
     }
-    e.for_each_child(|c| collect_classify(c, acc));
+    e.for_each_child(|c| collect_declared(c, callee_name, acc));
 }
 
 /// Kind of unclaimed coverage `check` reports.
@@ -1550,7 +1530,7 @@ fn section_field(body: &str, name: &str) -> String {
 }
 
 /// Timeline dump format version written by the runtime (`# timeline v=1 n=<n>`).
-pub const TIMELINE_DUMP_VERSION: u32 = 1;
+const TIMELINE_DUMP_VERSION: u32 = 1;
 
 /// Hard-error unless `text` carries a `# timeline v=<TIMELINE_DUMP_VERSION>` header.
 /// Empty text is the missing-dump sentinel in paired comparisons and passes.
@@ -1598,7 +1578,7 @@ fn field_series(states: &[TlFields], name: &str) -> String {
 }
 
 /// State field names that differ between two timeline dumps. Empty when none differ.
-pub fn timeline_changed_fields(baseline: &str, mutant: &str) -> Vec<String> {
+fn timeline_changed_fields(baseline: &str, mutant: &str) -> Vec<String> {
     if baseline == mutant {
         return Vec::new();
     }
@@ -1614,7 +1594,7 @@ pub fn timeline_changed_fields(baseline: &str, mutant: &str) -> Vec<String> {
 }
 
 /// Union of State fields that differ across paired baseline and mutant dumps.
-pub fn timeline_changed_fields_all(baselines: &[String], mutants: &[String]) -> Vec<String> {
+fn timeline_changed_fields_all(baselines: &[String], mutants: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let n = baselines.len().max(mutants.len());
     for i in 0..n {
@@ -1636,7 +1616,7 @@ pub fn timeline_changed_fields_all(baselines: &[String], mutants: &[String]) -> 
 }
 
 /// Classify a surviving mutant. `None` means no State field changed.
-pub fn classify_survivor_strength(
+fn classify_survivor_strength(
     changed_fields: &[String],
     claimed_fields: &[String],
 ) -> Option<SurvivorKind> {
@@ -1654,7 +1634,7 @@ pub fn classify_survivor_strength(
 }
 
 /// Fields to report for a classified survivor.
-pub fn survivor_strength_fields(
+fn survivor_strength_fields(
     kind: SurvivorKind,
     changed_fields: &[String],
     claimed_fields: &[String],

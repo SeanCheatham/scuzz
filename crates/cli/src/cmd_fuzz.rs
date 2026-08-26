@@ -20,14 +20,14 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// Shared fuzz target: executable, output directory, project directory, UI size.
-pub(crate) struct FuzzCtx {
+struct FuzzCtx {
     exe: PathBuf,
     live_exe: PathBuf,
     fuzz_dir: PathBuf,
     project_dir: PathBuf,
     w: i32,
     h: i32,
-    pub(crate) is_ui: bool,
+    is_ui: bool,
     has_sim: bool,
 }
 
@@ -176,7 +176,7 @@ fn budget_split(n: i64) -> (i64, i64) {
 }
 
 /// Compile the live graph, then the verify graph. Does not clear campaign aggregates.
-pub(crate) fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
+fn compile_fuzz_ctx(path: &Path) -> Result<FuzzCtx> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
@@ -686,9 +686,6 @@ fn fuzz_loop(
 }
 
 fn exhaust_need(alpha: usize, depth: i64) -> Option<i64> {
-    if depth <= 0 || alpha == 0 {
-        return Some(0);
-    }
     (alpha as i64).checked_pow(depth as u32)
 }
 
@@ -1284,11 +1281,7 @@ fn shrink_events(
         while i < cur.len() {
             let mut cand = cur.clone();
             cand.remove(i);
-            let code = if is_ui {
-                fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed, fault_seed)?
-            } else {
-                fuzz_exec_io(exe, fuzz_dir, schedule_seed, fault_seed, &cand)?
-            };
+            let code = fuzz_exec_any(is_ui, exe, fuzz_dir, w, h, &cand, schedule_seed, fault_seed)?;
             if code != 0 {
                 cur = cand;
                 progressed = true;
@@ -1326,11 +1319,8 @@ fn shrink_drive_args(
             for cand_line in cands {
                 let mut cand = cur.clone();
                 cand[i] = cand_line;
-                let code = if is_ui {
-                    fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed, fault_seed)?
-                } else {
-                    fuzz_exec_io(exe, fuzz_dir, schedule_seed, fault_seed, &cand)?
-                };
+                let code =
+                    fuzz_exec_any(is_ui, exe, fuzz_dir, w, h, &cand, schedule_seed, fault_seed)?;
                 if code != 0 {
                     cur = cand;
                     progressed = true;
@@ -1364,11 +1354,7 @@ fn shrink_fault(
         return Ok("0".into());
     }
     let run = |fault: &str| -> Result<i32> {
-        if is_ui {
-            fuzz_exec(exe, fuzz_dir, w, h, events, schedule_seed, fault)
-        } else {
-            fuzz_exec_io(exe, fuzz_dir, schedule_seed, fault, events)
-        }
+        fuzz_exec_any(is_ui, exe, fuzz_dir, w, h, events, schedule_seed, fault)
     };
     if run("0")? != 0 {
         return Ok("0".into());
@@ -1410,11 +1396,7 @@ fn shrink_sched(
         return Ok(String::new());
     }
     let run = |sched: &str| -> Result<i32> {
-        if is_ui {
-            fuzz_exec(exe, fuzz_dir, w, h, events, sched, fault_seed)
-        } else {
-            fuzz_exec_io(exe, fuzz_dir, sched, fault_seed, events)
-        }
+        fuzz_exec_any(is_ui, exe, fuzz_dir, w, h, events, sched, fault_seed)
     };
     let seed: i64 = schedule_seed.parse().unwrap_or(0);
     let plan = decode_sched_seed(seed);
@@ -1442,7 +1424,7 @@ fn shrink_sched(
     Ok(schedule_seed.to_string())
 }
 
-pub(crate) fn repro_fault(repro: &Repro) -> String {
+fn repro_fault(repro: &Repro) -> String {
     repro
         .fault_seed
         .clone()
@@ -1741,7 +1723,7 @@ fn replay_stored_corpus(
     Ok(())
 }
 
-pub(crate) fn promote_to_corpus(
+fn promote_to_corpus(
     project_dir: &Path,
     seed: i64,
     schedule_seed: &str,
@@ -2094,8 +2076,8 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
         missing_budget = toml_str_array(s.missing_budget),
         missing_corpus = toml_str_array(s.missing_corpus),
         unclaimed_varied = toml_str_array(s.unclaimed_varied),
-        repro = repro_path.replace('\\', "\\\\").replace('"', "\\\""),
-        replay = replay.replace('\\', "\\\\").replace('"', "\\\""),
+        repro = toml_escape(&repro_path),
+        replay = toml_escape(&replay),
         entries = s.stored.entries,
         failures = s.stored.failures,
         corpus_reached = toml_str_array(&s.stored.reached),
@@ -2140,6 +2122,47 @@ fn check_live_verify(ctx: &FuzzCtx, events: &[String], sched: &str, fault: &str)
     Ok(())
 }
 
+/// Clear the per-run capture files shared by UI and IO runs.
+fn fuzz_reset_run_files(fuzz_dir: &Path, reached: &Path) -> Result<()> {
+    std::fs::write(reached, "")?;
+    std::fs::write(fuzz_dir.join("classify.dump"), "")?;
+    std::fs::write(fuzz_dir.join("timeline.txt"), "")?;
+    std::fs::write(fuzz_dir.join("state.varied"), "")?;
+    Ok(())
+}
+
+/// Fold one run's captures into the campaign aggregates.
+fn fuzz_merge_campaign(fuzz_dir: &Path, reached: &Path) -> Result<()> {
+    merge_sometimes(reached, &fuzz_dir.join("sometimes.campaign"))?;
+    merge_classify(
+        &fuzz_dir.join("classify.dump"),
+        &fuzz_dir.join("classify.campaign"),
+    )?;
+    merge_sometimes(
+        &fuzz_dir.join("state.varied"),
+        &fuzz_dir.join("state.campaign"),
+    )
+}
+
+/// Run one event/drive list under TestRuntime. `is_ui` selects the protocol.
+#[allow(clippy::too_many_arguments)]
+fn fuzz_exec_any(
+    is_ui: bool,
+    exe: &Path,
+    fuzz_dir: &Path,
+    w: i32,
+    h: i32,
+    events: &[String],
+    schedule_seed: &str,
+    fault_seed: &str,
+) -> Result<i32> {
+    if is_ui {
+        fuzz_exec(exe, fuzz_dir, w, h, events, schedule_seed, fault_seed)
+    } else {
+        fuzz_exec_io(exe, fuzz_dir, schedule_seed, fault_seed, events)
+    }
+}
+
 fn fuzz_exec(
     exe: &Path,
     fuzz_dir: &Path,
@@ -2154,10 +2177,7 @@ fn fuzz_exec(
     let reached = fuzz_dir.join("sometimes.reached");
     std::fs::write(&script, script_text(events))?;
     std::fs::write(&dump, "")?;
-    std::fs::write(&reached, "")?;
-    std::fs::write(fuzz_dir.join("classify.dump"), "")?;
-    std::fs::write(fuzz_dir.join("timeline.txt"), "")?;
-    std::fs::write(fuzz_dir.join("state.varied"), "")?;
+    fuzz_reset_run_files(fuzz_dir, &reached)?;
     let code = run_testrt(
         exe,
         &reached,
@@ -2172,15 +2192,7 @@ fn fuzz_exec(
         None,
         None,
     )?;
-    merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
-    merge_classify(
-        &fuzz_dir.join("classify.dump"),
-        &fuzz_dir.join("classify.campaign"),
-    )?;
-    merge_sometimes(
-        &fuzz_dir.join("state.varied"),
-        &fuzz_dir.join("state.campaign"),
-    )?;
+    fuzz_merge_campaign(fuzz_dir, &reached)?;
     Ok(code)
 }
 
@@ -2193,10 +2205,7 @@ fn fuzz_exec_io(
 ) -> Result<i32> {
     let reached = fuzz_dir.join("sometimes.reached");
     let drive_path = fuzz_dir.join("drive.txt");
-    std::fs::write(&reached, "")?;
-    std::fs::write(fuzz_dir.join("classify.dump"), "")?;
-    std::fs::write(fuzz_dir.join("timeline.txt"), "")?;
-    std::fs::write(fuzz_dir.join("state.varied"), "")?;
+    fuzz_reset_run_files(fuzz_dir, &reached)?;
     std::fs::write(&drive_path, script_text(drives))?;
     let drive = if drives.is_empty() {
         None
@@ -2204,15 +2213,7 @@ fn fuzz_exec_io(
         Some(drive_path.as_path())
     };
     let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive, None)?;
-    merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
-    merge_classify(
-        &fuzz_dir.join("classify.dump"),
-        &fuzz_dir.join("classify.campaign"),
-    )?;
-    merge_sometimes(
-        &fuzz_dir.join("state.varied"),
-        &fuzz_dir.join("state.campaign"),
-    )?;
+    fuzz_merge_campaign(fuzz_dir, &reached)?;
     Ok(code)
 }
 

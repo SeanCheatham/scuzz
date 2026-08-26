@@ -150,9 +150,6 @@ static size_t g_mark_bytes = 0;
 static size_t g_mark_count = 0;
 static size_t g_kind_bytes[SZ_RC_KIND_COUNT];
 static size_t g_kind_count[SZ_RC_KIND_COUNT];
-static unsigned g_trace_pumps = 0;
-enum { SZ_ALLOC_TRACE_EVERY = 32 };
-
 static const char *k_kind_names[SZ_RC_KIND_COUNT] = {
     "raw",      "string", "list",     "adt",      "box",  "map",
     "io",       "stream", "resource", "error",    "ref",  "queue",
@@ -409,7 +406,6 @@ size_t sz_alloc_peak_bytes(void) { return g_peak_bytes; }
 
 void sz_alloc_reset_stats(void) {
   g_peak_bytes = g_live_bytes;
-  g_trace_pumps = 0;
 }
 
 void sz_alloc_mark(void) {
@@ -443,24 +439,6 @@ int sz_alloc_format_heap(char *buf, size_t cap, int mark) {
   if (mark)
     sz_alloc_mark();
   return (int)n;
-}
-
-void sz_alloc_trace_on_pump(void) {
-  static int checked = 0;
-  static int enabled = 0;
-  const char *e;
-  if (!checked) {
-    e = getenv("SCUZZ_ALLOC_TRACE");
-    enabled = (e && strcmp(e, "1") == 0) ? 1 : 0;
-    checked = 1;
-  }
-  if (!enabled)
-    return;
-  g_trace_pumps += 1;
-  if (g_trace_pumps % SZ_ALLOC_TRACE_EVERY != 0)
-    return;
-  fprintf(stderr, "scuzz alloc: pump=%u live_bytes=%zu live_count=%zu peak_bytes=%zu\n",
-          g_trace_pumps, g_live_bytes, g_live_count, g_peak_bytes);
 }
 
 static void delay_env_drop(void *env) {
@@ -1875,7 +1853,6 @@ typedef struct Fiber {
   JoinKind join_kind;
   int child_slot; /* 0 left, 1 right */
   struct Fiber *children[2];
-  int child_ok[2];
   void *child_val[2];
   SzError *child_err[2];
   int children_settled;
@@ -1906,7 +1883,6 @@ typedef struct Sched {
   Fiber *sleepers;
   Fiber *pollers;
   Fiber *root;
-  Fiber *current;
   Fiber *forked_live;
   Fiber *all_fibers;
   int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
@@ -2629,7 +2605,6 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
   slot = child->child_slot;
   if (slot < 0 || slot > 1)
     return;
-  p->child_ok[slot] = ok;
   p->child_val[slot] = val;
   p->child_err[slot] = err;
   p->children_settled += 1;
@@ -2921,8 +2896,6 @@ static int step_fiber(Sched *s, Fiber *f) {
     fiber_finish(s, f, 0, NULL, sz_error_new(1, "null IO"));
     return 0;
   }
-  s->current = f;
-
   switch (cur->tag) {
   case SZ_IO_PURE:
     fiber_clear_qwait(f);

@@ -9,12 +9,10 @@ static const SzTheme k_default_theme = {
     .border = 0xFFB0B0B0u,
     .muted = 0xFF6A6A6Au,
     .accent = 0xFF142850u,
-    .disabled = 0xFF6A6A6Au,
     .pad = 12.f,
     .gap = 8.f,
     .control_h = 32.f,
     .font_px = 8.f,
-    .radius = 0.f,
 };
 
 const SzTheme *sz_theme_default(void) { return &k_default_theme; }

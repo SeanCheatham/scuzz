@@ -73,8 +73,6 @@ static int text_slot_queued(const char *slot) {
     if (g_queue[i].kind == SZ_INPUT_KEY &&
         (g_queue[i].key == slot || g_queue[i].text == slot))
       return 1;
-    if (g_queue[i].kind == SZ_INPUT_TEXT_EDIT && g_queue[i].text == slot)
-      return 1;
   }
   return 0;
 }

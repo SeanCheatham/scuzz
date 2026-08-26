@@ -6,7 +6,7 @@ use crate::ast::{
 };
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
-use crate::typ::kit_lambda_param_ty;
+use crate::typ::kit_lambda_param_ty_at;
 
 const COPY_HOVER: &str = "record.copy(field = value, …): T";
 const MAP_HOVER: &str = "IO[A].map(f: A => B): IO[B]";
@@ -274,7 +274,7 @@ fn collect_kit_locals(expr: &Expr, offset: usize, out: &mut Vec<(String, Type)>)
         ExprKind::Call { callee, args } => {
             let n = args.len();
             for (i, a) in args.iter().enumerate() {
-                if let Some(pty) = kit_lambda_param_ty(callee, i, n) {
+                if let Some(pty) = kit_lambda_param_ty_at(callee, i, n, &[]) {
                     if let ExprKind::Lambda {
                         param: Some(p),
                         body,

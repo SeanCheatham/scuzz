@@ -3,10 +3,9 @@ mod support;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use scuzz_compiler::collect_fmt_sources;
-use scuzz_compiler::collect_verify_paths;
+use scuzz_compiler::collect_check_sources;
 use scuzz_compiler::compile_project;
-use scuzz_compiler::driver::{find_runtime_dir, wait_for_source_change};
+use scuzz_compiler::driver::wait_for_source_change;
 use scuzz_compiler::format::format_source;
 use scuzz_compiler::manifest::load_manifest;
 use std::path::{Path, PathBuf};
@@ -227,7 +226,7 @@ fn real_main() -> Result<ExitCode> {
         }
         Commands::Check { path } => {
             let diags = scuzz_compiler::check_project(&path)?;
-            let has_error = diags.iter().any(|d| d.severity == "error");
+            let has_error = diags.iter().any(|d| d.is_error());
             if diags.is_empty() {
                 if json {
                     println!("[]");
@@ -502,6 +501,18 @@ fn find_ide_dir() -> Result<PathBuf> {
     )
 }
 
+/// `(headless, mobile, desktop)` from the effective runtime name.
+fn runtime_kinds(
+    manifest: &scuzz_compiler::manifest::Manifest,
+    effective: &str,
+) -> (bool, bool, bool) {
+    let use_headless = effective.eq_ignore_ascii_case("headless");
+    let use_mobile = effective.eq_ignore_ascii_case("mobile");
+    let use_desktop = effective.eq_ignore_ascii_case("desktop")
+        || (!use_headless && !use_mobile && manifest.ui.is_some());
+    (use_headless, use_mobile, use_desktop)
+}
+
 fn run_once(
     path: &Path,
     out_dir: &Path,
@@ -519,19 +530,16 @@ fn run_once(
     } else {
         effective_ui_runtime(&manifest, headless)
     };
-    let use_headless = effective.eq_ignore_ascii_case("headless");
-    let use_mobile = effective.eq_ignore_ascii_case("mobile");
-    let use_desktop = effective.eq_ignore_ascii_case("desktop")
-        || (!use_headless && !use_mobile && manifest.ui.is_some());
+    let (use_headless, use_mobile, use_desktop) = runtime_kinds(&manifest, &effective);
 
     let out = build(path, out_dir, true, false)?;
     let mut cmd = Command::new(&out.executable);
-    cmd.current_dir(&project_dir);
     if let Some(open) = open {
+        cmd.current_dir(&project_dir);
         let abs = std::fs::canonicalize(open).unwrap_or_else(|_| open.to_path_buf());
         cmd.arg(abs);
-    } else if project_dir.join("sample.txt").is_file() {
-        cmd.arg("sample.txt");
+    } else {
+        apply_pkg_argv(&mut cmd, &project_dir);
     }
     let verb = if open.is_some() { "ide" } else { "run" };
     if use_headless && (headless || manifest.ui.is_some()) {
@@ -590,10 +598,7 @@ fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
             Ok(out) => eprintln!("rebuilt {}", out.executable.display()),
             Err(e) => eprintln!("scuzz watch build error: {e:#}"),
         }
-        if !wait_for_source_change(&project_dir, 60_000)? {
-            // idle timeout — keep watching
-            continue;
-        }
+        wait_for_source_change(&project_dir, 60_000)?;
     }
 }
 
@@ -701,10 +706,7 @@ fn spawn_ui_keep(
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
     let effective = effective_ui_runtime(&manifest, headless);
-    let use_headless = effective.eq_ignore_ascii_case("headless");
-    let use_mobile = effective.eq_ignore_ascii_case("mobile");
-    let use_desktop = effective.eq_ignore_ascii_case("desktop")
-        || (!use_headless && !use_mobile && manifest.ui.is_some());
+    let (use_headless, use_mobile, use_desktop) = runtime_kinds(&manifest, &effective);
     let out = build(path, out_dir, true, false)?;
     let mut cmd = Command::new(&out.executable);
     let build_dir = resolve_out_dir(&project_dir, out_dir);
@@ -735,14 +737,7 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
         bail!("missing src/ in {}", project_dir.display());
     }
     let mut dirty = 0usize;
-    let mut files = collect_fmt_sources(&src)?;
-    if let Ok(verify_paths) = collect_verify_paths(&project_dir) {
-        for p in verify_paths {
-            if !files.iter().any(|f| f == &p) {
-                files.push(p);
-            }
-        }
-    }
+    let files = collect_check_sources(&project_dir)?;
     for p in files {
         let text = std::fs::read_to_string(&p)?;
         let formatted =
@@ -834,6 +829,19 @@ fn run_io_smoke(exe: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Sorted paths in `dir` with extension `ext`.
+fn sorted_files_with_ext(dir: &Path, ext: &str) -> Result<Vec<PathBuf>> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) == Some(ext) {
+            out.push(path);
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Result<()> {
     let goldens = project_dir.join("goldens");
     if !goldens.is_dir() {
@@ -849,20 +857,7 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
     let name = manifest.package.name.as_str();
     let out_dir = exe.parent().unwrap_or(Path::new("."));
 
-    let mut dumps: Vec<PathBuf> = Vec::new();
-    let mut pngs: Vec<PathBuf> = Vec::new();
-    for entry in std::fs::read_dir(&goldens)? {
-        let entry = entry?;
-        let path = entry.path();
-        match path.extension().and_then(|e| e.to_str()) {
-            Some("dump") => dumps.push(path),
-            Some("png") => pngs.push(path),
-            _ => {}
-        }
-    }
-    dumps.sort();
-    pngs.sort();
-
+    let dumps = sorted_files_with_ext(&goldens, "dump")?;
     if dumps.is_empty() {
         if !update {
             bail!(
@@ -1023,19 +1018,15 @@ fn run_differential(path: &Path, project_dir: &Path) -> Result<()> {
         );
     }
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
-    let mut stems: Vec<String> = Vec::new();
-    for entry in std::fs::read_dir(&goldens)? {
-        let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("dump") {
-            stems.push(
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("golden")
-                    .to_string(),
-            );
-        }
-    }
-    stems.sort();
+    let stems: Vec<String> = sorted_files_with_ext(&goldens, "dump")?
+        .iter()
+        .map(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("golden")
+                .to_string()
+        })
+        .collect();
     if stems.is_empty() {
         bail!(
             "no structural goldens in {}. Seed with `scuzz test --update`.",
@@ -1361,8 +1352,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
     };
     std::fs::create_dir_all(&package_out)?;
 
-    let runtime_dir =
-        find_runtime_dir(&std::env::current_dir()?).or_else(|_| find_runtime_dir(&project_dir))?;
+    let (runtime_dir, clang) = support::runtime_dir_and_clang(&project_dir)?;
     let mobile_dir = runtime_dir
         .parent()
         .map(|p| p.join("embedder-mobile"))
@@ -1380,7 +1370,6 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
     }
 
     let compiled = if want_host {
-        let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
         let status = Command::new("make")
             .arg("-C")
             .arg(&mobile_dir)
@@ -1439,17 +1428,25 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
     Ok(ExitCode::SUCCESS)
 }
 
+#[cfg(unix)]
+fn set_executable(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)?.permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(path, perms)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_executable(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
 fn write_host_package(dest: &Path, exe: &Path, name: &str, bundle_id: &str) -> Result<()> {
     let dest_exe = dest.join(name);
     std::fs::copy(exe, &dest_exe)
         .with_context(|| format!("copying {} into {}", exe.display(), dest_exe.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&dest_exe)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&dest_exe, perms)?;
-    }
+    set_executable(&dest_exe)?;
     let run_sh = dest.join("run.sh");
     std::fs::write(
         &run_sh,
@@ -1464,13 +1461,7 @@ exec "$DIR/{name}" "$@"
 "#
         ),
     )?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&run_sh)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&run_sh, perms)?;
-    }
+    set_executable(&run_sh)?;
     write_package_meta(dest, name, "host", bundle_id)?;
     Ok(())
 }

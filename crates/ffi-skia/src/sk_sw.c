@@ -229,7 +229,7 @@ void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
     canvas->clip_y1 = y1;
 }
 
-/* 8x8 ASCII font — printable 32..126; bits MSB = left. */
+/* 8x8 ASCII font — printable 32..126; bits LSB = left. */
 static const uint8_t FONT8[95][8] = {
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
     {0x18, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x18, 0x00},

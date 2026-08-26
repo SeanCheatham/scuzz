@@ -83,12 +83,10 @@ typedef struct SzTheme {
   uint32_t border;
   uint32_t muted;
   uint32_t accent;
-  uint32_t disabled;
   float pad;
   float gap;
   float control_h;
   float font_px; /* paint/measure size (default 8px) */
-  float radius;  /* 0 = sharp */
   /* Backing scale for View.fontSize / padding / gap / sized and other
    * author px. 0 or 1 = logical points (hit-test). Paint sets this to
    * the device scale so taps match pixels. */

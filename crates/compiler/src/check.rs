@@ -557,10 +557,8 @@ fn unsaved_intent_diags(
     out
 }
 
-fn format_check_src(
-    project_dir: &Path,
-    unsaved: &BTreeMap<PathBuf, String>,
-) -> Result<Vec<Diagnostic>> {
+/// Live `src/` files plus package `*.scuzz_verify` files, deduped by canonical path.
+pub fn collect_check_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = collect_fmt_sources(&project_dir.join("src"))?;
     if let Ok(verify_paths) = crate::verify::collect_verify_paths(project_dir) {
         for p in verify_paths {
@@ -572,6 +570,14 @@ fn format_check_src(
             }
         }
     }
+    Ok(files)
+}
+
+fn format_check_src(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+) -> Result<Vec<Diagnostic>> {
+    let mut files = collect_check_sources(project_dir)?;
     for p in unsaved.keys() {
         if is_fmt_source(p)
             && !files
@@ -1470,13 +1476,8 @@ pub fn workspace_diagnostics_project(
 ) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>> {
     let all = check_project_with(project_dir, unsaved)?;
     let mut by_path: BTreeMap<PathBuf, Vec<Diagnostic>> = BTreeMap::new();
-    if let Ok(files) = collect_fmt_sources(&project_dir.join("src")) {
+    if let Ok(files) = collect_check_sources(project_dir) {
         for p in files {
-            by_path.entry(canonicalize_source_path(&p)).or_default();
-        }
-    }
-    if let Ok(verify_paths) = crate::verify::collect_verify_paths(project_dir) {
-        for p in verify_paths {
             by_path.entry(canonicalize_source_path(&p)).or_default();
         }
     }
