@@ -1915,6 +1915,38 @@ int64_t sz_timeline_signal_list_len(void *tl, int64_t i, int64_t id) {
   return s ? tl_parse_signal_list_len(s->signals, id) : 0;
 }
 
+/* 1 when the `str[<id>] = "<value>"` line in the state's signals dump holds
+ * `needle` as a substring. */
+int64_t sz_timeline_signal_str_has(void *tl, int64_t i, int64_t id,
+                                   SzString *needle) {
+  char key[48];
+  const char *p;
+  const char *end;
+  SzTlState *s = tl_at(tl, i);
+  const char *n = needle ? sz_string_cstr(needle) : "";
+  if (!s || !s->signals || !n[0])
+    return 0;
+  snprintf(key, sizeof key, "str[%lld]", (long long)id);
+  p = strstr(s->signals, key);
+  if (!p)
+    return 0;
+  end = strchr(p, '\n');
+  if (!end)
+    end = p + strlen(p);
+  {
+    size_t len = (size_t)(end - p);
+    size_t m = strlen(n);
+    size_t k;
+    if (m > len)
+      return 0;
+    for (k = 0; k + m <= len; k++) {
+      if (memcmp(p + k, n, m) == 0)
+        return 1;
+    }
+  }
+  return 0;
+}
+
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle) {
   SzTlState *s = tl_at(tl, i);
   const char *n = needle ? sz_string_cstr(needle) : "";

@@ -31,9 +31,21 @@ def flipDoneTwice(): Bool =
 def itemStates(): Bool =
   Tasks.itemDone("#milk") == 1 && Tasks.itemDone("milk") == 0 && Tasks.itemLabel("#milk") == "milk"
 
-def nightStartsOff(t: Timeline): Verdict =
-  Verdict.every(t, i => i != 0 || Timeline.a11yHas(t, i, "radiotile:Night=0"))
+def initialWidgets(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || Timeline.a11yHas(t, i, "radio:Home=1") && Timeline.a11yHas(t, i, "radio:Tasks=0") && Timeline.a11yHas(t, i, "text:count = 0") && Timeline.a11yHas(t, i, "text:page = 0") && Timeline.a11yHas(t, i, "switch:On=0") && Timeline.a11yHas(t, i, "chip:Pin=0") && Timeline.a11yHas(t, i, "checktile:Star=0") && Timeline.a11yHas(t, i, "switchtile:Quiet=0") && Timeline.a11yHas(t, i, "radiotile:Night=0") && Timeline.a11yHas(t, i, "choicechip:Day=1") && Timeline.a11yHas(t, i, "segmented:0") && Timeline.a11yHas(t, i, "filterchip:Tag=0") && Timeline.a11yHas(t, i, "inputchip:In=0") && Timeline.a11yHas(t, i, "expansion:More=0"))
 
-def dayStartsOn(t: Timeline): Verdict =
-  Verdict.every(t, i => i != 0 || Timeline.a11yHas(t, i, "choicechip:Day=1"))
+def plusOneIncrements(t: Timeline): Verdict =
+  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:+1") || Timeline.lastHitHas(t, i - 1, "button:+1") || Timeline.signalInt(t, i, 3) == Timeline.signalInt(t, i - 1, 3) + 1)
+
+def countOnlyMovesOnPlusOne(t: Timeline): Verdict =
+  Verdict.every(t, i => i == 0 || Timeline.signalInt(t, i, 3) == Timeline.signalInt(t, i - 1, 3) || Timeline.lastHitHas(t, i, "button:+1"))
+
+def renameRenames(t: Timeline): Verdict =
+  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Rename") || Timeline.lastHitHas(t, i - 1, "button:Rename") || Timeline.signalListLen(t, i - 1, 1) == 0 || Timeline.a11yHas(t, i, "listtile:oat"))
+
+def addNeedsDraft(t: Timeline): Verdict =
+  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Add") || Timeline.lastHitHas(t, i - 1, "button:Add") || !Timeline.signalStrHas(t, i - 1, 0, "= \"\"") || Timeline.signalListLen(t, i, 1) == Timeline.signalListLen(t, i - 1, 1))
+
+def addGrowsWithDraft(t: Timeline): Verdict =
+  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Add") || Timeline.lastHitHas(t, i - 1, "button:Add") || Timeline.signalStrHas(t, i - 1, 0, "= \"\"") || Timeline.signalListLen(t, i, 1) == Timeline.signalListLen(t, i - 1, 1) + 1)
 

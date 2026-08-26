@@ -479,6 +479,11 @@ pub fn emit_llvm(program: &Program) -> String {
         "declare i64 @sz_timeline_signal_list_len(ptr, i64, i64)"
     )
     .unwrap();
+    writeln!(
+        out,
+        "declare i64 @sz_timeline_signal_str_has(ptr, i64, i64, ptr)"
+    )
+    .unwrap();
     writeln!(out, "declare i64 @sz_timeline_a11y_has(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_last_hit_has(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_forall(ptr, ptr, ptr)").unwrap();
@@ -7339,6 +7344,15 @@ fn emit_call(
                 code,
                 "  %{prefix}_v = call i64 @sz_timeline_signal_list_len(ptr {}, i64 {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Timeline.signalStrHas" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_signal_str_has(ptr {}, i64 {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value, emitted_args[3].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
