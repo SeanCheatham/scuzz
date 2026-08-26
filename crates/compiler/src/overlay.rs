@@ -392,6 +392,13 @@ fn push_drive_spec(out: &mut String, d: &FunDef, program: &Program) {
     out.push('\n');
 }
 
+/// Spec line for one drive oracle, e.g. `bump i` or `area Rect(i>=0,i>=0)`.
+pub(crate) fn drive_spec_line(d: &FunDef, program: &Program) -> String {
+    let mut s = String::new();
+    push_drive_spec(&mut s, d, program);
+    s.trim_end().to_string()
+}
+
 fn int_bound_token(name: &str, rfn: Option<&Expr>) -> String {
     match rfn.and_then(|e| simple_cmp_bound(name, e)) {
         Some((op, k)) => format!("i{op}{k}"),

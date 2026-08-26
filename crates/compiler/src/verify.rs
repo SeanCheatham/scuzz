@@ -146,9 +146,12 @@ pub fn apply_verifies(program: &mut Program, files: &[VerifySource]) -> Result<(
             .find(|d| d.is_verify && d.name == *name)
             .expect("drive oracle def")
             .clone();
-        if d.params.is_empty() {
-            seeds.push(format!("drive {}", d.name));
-        }
+        // Deterministic seed-0 draw: `drive bump` stays bare, `drive bump i`
+        // becomes `drive bump 0`. Pins oracle failures with no stored corpus.
+        seeds.push(crate::fuzz::drive_line(
+            &crate::overlay::drive_spec_line(&d, program),
+            0,
+        ));
         program.defs.push(wrap_drive_oracle(&d));
     }
     seeds.sort();
@@ -474,7 +477,7 @@ mod tests {
         )
         .unwrap();
         assert!(live.verify_preds.is_empty());
-        assert!(live.verify_seeds.is_empty());
+        assert_eq!(live.verify_seeds, vec!["drive bump 0".to_string()]);
         let d = live
             .defs
             .iter()
