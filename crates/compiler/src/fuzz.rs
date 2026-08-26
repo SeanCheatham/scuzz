@@ -357,7 +357,7 @@ fn split_list_tok(tok: &str) -> Option<Vec<String>> {
     }
 }
 
-fn drive_line(spec: &str, mut s: i64) -> String {
+pub(crate) fn drive_line(spec: &str, mut s: i64) -> String {
     let (name, kinds) = drive_spec_kinds(spec);
     if kinds.is_empty() {
         return format!("drive {name}");
