@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
+#include "rt_util.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -14,31 +15,6 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
-
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
-
-
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
-
-static SzIo *fail_drop(SzError *err) {
-  SzIo *io = sz_io_fail(err);
-  sz_release(err);
-  return io;
-}
-
-static void *rc_box_zero(size_t n) {
-  void *p = sz_rc_alloc(n, SZ_RC_BOX);
-  memset(p, 0, n);
-  return p;
-}
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll). DNS takes answer
@@ -1379,13 +1355,6 @@ static SzIo *get_after_write_poll(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   (void)value;
   return fm_drop(sz_io_delay(get_check_write, st), get_unwrap_write, st);
-}
-
-static SzIo *race_drop(SzIo *left, SzIo *right) {
-  SzIo *io = sz_io_race(left, right);
-  sz_release(left);
-  sz_release(right);
-  return io;
 }
 
 static SzIo *handle_drop(SzIo *inner, SzErrorHandler handler, void *env) {

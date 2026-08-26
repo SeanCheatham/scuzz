@@ -3474,10 +3474,6 @@ static SzView *on_secondary_at_node(SzView *v, float x, float y) {
   return v->kind == SZ_VIEW_ON_SECONDARY ? v : NULL;
 }
 
-SzView *sz_view_on_secondary_at(SzView *root, float x, float y) {
-  return on_secondary_at_node(root, x, y);
-}
-
 int sz_view_handle_secondary(SzView *root, float x, float y) {
   SzView *sec = on_secondary_at_node(root, x, y);
   if (!sec || !sec->on_tap)
@@ -6387,13 +6383,6 @@ int sz_view_handle_compose(SzView *root, const char *text) {
   target->focused = 1;
   if (target->kind == SZ_VIEW_EDITOR)
     editor_scroll_to_caret(target);
-  return 1;
-}
-
-int sz_view_text_field_extend_to_x(SzView *view, float x) {
-  if (!view || view->kind != SZ_VIEW_TEXT_FIELD)
-    return 0;
-  view->caret = caret_offset_at_x(view, x);
   return 1;
 }
 

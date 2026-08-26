@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
+#include "rt_util.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -14,31 +15,6 @@
 /* Blessed filesystem IO — live interpreter or TestRuntime mem FS.
  * Fake vs live is chosen when the IO runs (after sz_testrt_install in
  * runtime_main), not when the graph is built. */
-
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
-
-
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
-
-static SzIo *fail_drop(SzError *err) {
-  SzIo *io = sz_io_fail(err);
-  sz_release(err);
-  return io;
-}
-
-static void *rc_box_zero(size_t n) {
-  void *p = sz_rc_alloc(n, SZ_RC_BOX);
-  memset(p, 0, n);
-  return p;
-}
 
 typedef struct {
   int is_err;
@@ -68,11 +44,6 @@ static SzIo *unwrap_fs(void *value, void *env) {
 }
 
 static void *fs_dispatch(void *env);
-
-static SzString *pack_path(void *env) {
-  SzPair *pack = (SzPair *)env;
-  return pack ? (SzString *)pack->left : NULL;
-}
 
 static SzIo *fs_bind(SzString *path, SzCont after) {
   SzPair *pack;

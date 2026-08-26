@@ -1,6 +1,6 @@
 //! Deterministic fuzz alphabet, corpus, and `repro.toml` (CLI search; no runtime machinery).
 
-use crate::ast::{Expr, ExprKind, FunDef, Program};
+use crate::ast::{walk_expr, Expr, ExprKind, FunDef, Program};
 use crate::span::Span;
 use serde::Deserialize;
 
@@ -1218,11 +1218,6 @@ const CONTROL_CTORS: &[(&str, usize, &str)] = &[
     ("View.expansionTile", 1, "expansion"),
     ("View.textField", 1, "textfield"),
 ];
-
-fn walk_expr(e: &Expr, f: &mut impl FnMut(&Expr)) {
-    f(e);
-    e.for_each_child(|c| walk_expr(c, f));
-}
 
 fn walk_live_exprs(program: &Program, f: &mut impl FnMut(&Expr)) {
     walk_expr(&program.main.body, f);

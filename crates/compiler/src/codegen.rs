@@ -2818,9 +2818,8 @@ fn emit_expr(
         ExprKind::Ascribe { expr, ty } => {
             if matches!(ty, Type::Fun(_, _)) {
                 let mut e = emit_fun_arg(ty, expr, ctx, locals, prefix);
-                if let Some((a, b)) = fun_kinds(ty) {
+                if let Some((_, b)) = fun_kinds(ty) {
                     e.elem = b;
-                    let _ = a;
                 }
                 return e;
             }
@@ -8130,7 +8129,7 @@ fn emit_call(
                     arg_parts.push(format!("{lty} {lval}"));
                 }
             } else {
-                for (i, a) in emitted_args.iter().enumerate() {
+                for a in &emitted_args {
                     let (lval, lty) = if a.kind == Kind::Int {
                         (a.value.clone(), "i64")
                     } else if a.kind == Kind::Float {
@@ -8138,7 +8137,6 @@ fn emit_call(
                     } else {
                         (a.value.clone(), "ptr")
                     };
-                    let _ = i;
                     arg_parts.push(format!("{lty} {lval}"));
                 }
             }

@@ -104,16 +104,13 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
 int sz_view_handle_compose(SzView *root, const char *text);
 
 typedef enum {
-  BRIDGE_INT = 1,
-  BRIDGE_STR = 2
+  BRIDGE_INT = 1
 } BridgeKind;
 
 typedef struct BridgeItem {
   BridgeKind kind;
   SzSignalInt *sig_int;
-  SzSignalStr *sig_str;
   int64_t int_value;
-  char *str_value;
   struct BridgeItem *next;
 } BridgeItem;
 
@@ -707,24 +704,6 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   pthread_mutex_unlock(&session->bridge_lock);
 }
 
-void sz_ui_bridge_post_str(SzUiSession *session, SzSignalStr *sig, const char *value) {
-  BridgeItem *it;
-  if (!session || !sig)
-    return;
-  it = (BridgeItem *)sz_alloc_zero(sizeof(BridgeItem));
-  it->kind = BRIDGE_STR;
-  it->sig_str = sig;
-  it->str_value = sz_strdup(value);
-  pthread_mutex_lock(&session->bridge_lock);
-  if (session->bridge_tail)
-    session->bridge_tail->next = it;
-  else
-    session->bridge_head = it;
-  session->bridge_tail = it;
-  session->dirty = 1;
-  pthread_mutex_unlock(&session->bridge_lock);
-}
-
 void sz_ui_bridge_flush(SzUiSession *session) {
   BridgeItem *it, *next;
   if (!session)
@@ -738,10 +717,6 @@ void sz_ui_bridge_flush(SzUiSession *session) {
     next = it->next;
     if (it->kind == BRIDGE_INT)
       sz_signal_int_set(it->sig_int, it->int_value);
-    else if (it->kind == BRIDGE_STR) {
-      sz_signal_str_set(it->sig_str, it->str_value);
-      sz_free(it->str_value);
-    }
     sz_free(it);
     it = next;
   }
@@ -1866,14 +1841,6 @@ int sz_ui_snapshot_png_sync(SzUiSession *session, const char *path) {
 
 SzUiRuntimeKind sz_ui_session_kind(const SzUiSession *session) {
   return session ? session->cfg.kind : (SzUiRuntimeKind)0;
-}
-
-int sz_ui_session_width(const SzUiSession *session) {
-  return session ? session->cfg.width : 0;
-}
-
-int sz_ui_session_height(const SzUiSession *session) {
-  return session ? session->cfg.height : 0;
 }
 
 SzView *sz_ui_session_root(SzUiSession *session) {

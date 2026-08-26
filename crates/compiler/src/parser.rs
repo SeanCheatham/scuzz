@@ -1,18 +1,16 @@
 use crate::ast::{
-    is_for_binder_pat, is_tuple_binder_pat, opaque_tuple_pat, simple_binder_name, BinOp, EnumCase,
+    is_for_binder_pat, is_unpack_binder_pat, opaque_tuple_pat, simple_binder_name, BinOp, EnumCase,
     EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import, InterpPart, MainDef,
     MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type, TypeAlias, UnOp, CASE_LAMBDA,
     MAX_TUPLE_ARITY, TUP_UNPACK,
 };
-use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
+use crate::lexer::{lex, InterpTok, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
 use crate::span::{offset_to_line_col, Span};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ParseError {
-    #[error(transparent)]
-    Lex(#[from] LexError),
     #[error("parse error: {0}")]
     Msg(String),
     #[error("parse error: {msg}")]
@@ -22,7 +20,6 @@ pub enum ParseError {
 impl ParseError {
     pub fn message(&self) -> String {
         match self {
-            ParseError::Lex(e) => e.to_string(),
             ParseError::Msg(m) => m.clone(),
             ParseError::At { msg, .. } => msg.clone(),
         }
@@ -1670,10 +1667,7 @@ impl Parser {
                         1 => args.into_iter().next().unwrap(),
                         n => {
                             self.check_tuple_arity(n)?;
-                            let end = args
-                                .last()
-                                .map(|a| a.span.clone())
-                                .unwrap_or(expr.span.clone());
+                            let end = args.last().unwrap().span.clone();
                             let span = args[0].span.clone().cover(&end);
                             self.mk(ExprKind::Tuple { elems: args }, span)
                         }
@@ -2049,7 +2043,7 @@ impl Parser {
             self.expect(&Token::Arrow)?;
             let body = self.parse_block()?;
             let pat = opaque_tuple_pat(elems);
-            if !is_tuple_binder_pat(&pat) {
+            if !is_unpack_binder_pat(&pat) {
                 return Err(self.err(
                     "tuple lambda must bind names, `_`, nested `(a, b)`, or a constructor pattern",
                 ));
@@ -2069,7 +2063,7 @@ impl Parser {
             };
             return Ok(self.mk_lambda(param, None, None, body, span));
         }
-        if is_tuple_binder_pat(&left) {
+        if is_unpack_binder_pat(&left) {
             return Ok(self.mk_lambda(Some(TUP_UNPACK.into()), None, Some(left), body, span));
         }
         Err(self.err("lambda binder must be a name, `_`, `(a, b)`, or a constructor pattern"))
@@ -2363,7 +2357,7 @@ impl Parser {
                         if args.len() != 1 {
                             return Err(self.err("IO.forever expects 1 arg"));
                         }
-                        let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
+                        let end = args[0].span.clone();
                         Ok(self.mk(
                             ExprKind::Call {
                                 callee: "IO.forever".into(),
@@ -2377,7 +2371,7 @@ impl Parser {
                         if args.len() != 2 {
                             return Err(self.err(format!("IO.{method} expects 2 args")));
                         }
-                        let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
+                        let end = args[1].span.clone();
                         Ok(self.mk(
                             ExprKind::Call {
                                 callee: format!("IO.{method}"),
@@ -2433,23 +2427,10 @@ impl Parser {
                     }
                 }
             }
-            Token::Ident(name) if name == "Ui" => {
-                self.bump();
-                self.expect(&Token::Dot)?;
-                let (method, _) = self.expect_ident()?;
-                let callee = format!("Ui.{method}");
-                let args = if matches!(self.peek(), Token::LParen) {
-                    self.parse_args()?
-                } else {
-                    Vec::new()
-                };
-                let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
-                Ok(self.mk(ExprKind::Call { callee, args }, start.cover(&end)))
-            }
             Token::Ident(name)
                 if matches!(
                     name.as_str(),
-                    "Str"
+                    "Ui" | "Str"
                         | "List"
                         | "Fs"
                         | "Sys"

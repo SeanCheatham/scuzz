@@ -348,10 +348,7 @@ fn definition_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) 
     let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
     let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
     match definition_project(root, open, &path, line, character) {
-        Ok(Some((dest, sl, sc, el, ec))) => format!(
-            r#"{{"uri":{},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}}}"#,
-            json_str(&file_uri(&dest))
-        ),
+        Ok(Some((dest, sl, sc, el, ec))) => encode_location(&file_uri(&dest), sl, sc, el, ec),
         _ => "null".into(),
     }
 }
@@ -363,10 +360,7 @@ fn declaration_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str)
     let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
     let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
     match declaration_project(root, open, &path, line, character) {
-        Ok(Some((dest, sl, sc, el, ec))) => format!(
-            r#"{{"uri":{},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}}}"#,
-            json_str(&file_uri(&dest))
-        ),
+        Ok(Some((dest, sl, sc, el, ec))) => encode_location(&file_uri(&dest), sl, sc, el, ec),
         _ => "null".into(),
     }
 }
@@ -378,10 +372,7 @@ fn type_definition_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &
     let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
     let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
     match type_definition_project(root, open, &path, line, character) {
-        Ok(Some((dest, sl, sc, el, ec))) => format!(
-            r#"{{"uri":{},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}}}"#,
-            json_str(&file_uri(&dest))
-        ),
+        Ok(Some((dest, sl, sc, el, ec))) => encode_location(&file_uri(&dest), sl, sc, el, ec),
         _ => "null".into(),
     }
 }
@@ -1265,17 +1256,7 @@ fn json_only(body: &str) -> Vec<String> {
 }
 
 fn lsp_diagnostic_json(root: &Path, d: &Diagnostic) -> String {
-    let line = d.line.unwrap_or(1).saturating_sub(1);
-    let col = d.column.unwrap_or(1).saturating_sub(1);
-    let mut end_line = d.end_line.unwrap_or(d.line.unwrap_or(1)).saturating_sub(1);
-    let mut end_col = d
-        .end_column
-        .unwrap_or(d.column.unwrap_or(1))
-        .saturating_sub(1);
-    if end_line < line || (end_line == line && end_col <= col) {
-        end_line = line;
-        end_col = col.saturating_add(1);
-    }
+    let (line, col, end_line, end_col) = lsp_range(d.line, d.column, d.end_line, d.end_column);
     let related = if d.related.is_empty() {
         String::new()
     } else {
@@ -1293,6 +1274,27 @@ fn lsp_diagnostic_json(root: &Path, d: &Diagnostic) -> String {
     )
 }
 
+/// 0-based (line, col, end_line, end_col) from 1-based options; the end clamps
+/// to a 1-char range at the start when empty or inverted.
+fn lsp_range(
+    line: Option<u32>,
+    col: Option<u32>,
+    end_line: Option<u32>,
+    end_col: Option<u32>,
+) -> (u32, u32, u32, u32) {
+    let raw_line = line.unwrap_or(1);
+    let raw_col = col.unwrap_or(1);
+    let line = raw_line.saturating_sub(1);
+    let col = raw_col.saturating_sub(1);
+    let mut end_line = end_line.unwrap_or(raw_line).saturating_sub(1);
+    let mut end_col = end_col.unwrap_or(raw_col).saturating_sub(1);
+    if end_line < line || (end_line == line && end_col <= col) {
+        end_line = line;
+        end_col = col.saturating_add(1);
+    }
+    (line, col, end_line, end_col)
+}
+
 fn lsp_severity(d: &Diagnostic) -> u32 {
     match d.severity.as_str() {
         "warning" => 2,
@@ -1303,17 +1305,7 @@ fn lsp_severity(d: &Diagnostic) -> u32 {
 }
 
 fn encode_related_information(root: &Path, r: &crate::check::RelatedLoc) -> String {
-    let line = r.line.unwrap_or(1).saturating_sub(1);
-    let col = r.column.unwrap_or(1).saturating_sub(1);
-    let mut end_line = r.end_line.unwrap_or(r.line.unwrap_or(1)).saturating_sub(1);
-    let mut end_col = r
-        .end_column
-        .unwrap_or(r.column.unwrap_or(1))
-        .saturating_sub(1);
-    if end_line < line || (end_line == line && end_col <= col) {
-        end_line = line;
-        end_col = col.saturating_add(1);
-    }
+    let (line, col, end_line, end_col) = lsp_range(r.line, r.column, r.end_line, r.end_column);
     let uri = match &r.file {
         Some(f) => file_uri(&diagnostic_source_path(root, f)),
         None => file_uri(root),

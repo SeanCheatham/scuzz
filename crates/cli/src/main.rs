@@ -320,7 +320,6 @@ fn real_main() -> Result<ExitCode> {
             let package_name = PathBuf::from(&name)
                 .file_name()
                 .and_then(|s| s.to_str())
-                .filter(|s| !s.is_empty() && *s != "." && *s != "..")
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| name.clone());
             if package_name.contains('/') || package_name.contains('\\') {

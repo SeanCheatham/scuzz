@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
+#include "rt_util.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -27,25 +28,6 @@
 #ifdef SZ_ASAN
 void *__asan_region_is_poisoned(void *beg, size_t size);
 #endif
-
-static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
-  SzIo *io = sz_io_flatmap(inner, cont, env);
-  sz_release(inner);
-  return io;
-}
-
-
-static SzIo *pure_drop(void *value) {
-  SzIo *io = sz_io_pure(value);
-  sz_release(value);
-  return io;
-}
-
-static SzIo *fail_drop(SzError *err) {
-  SzIo *io = sz_io_fail(err);
-  sz_release(err);
-  return io;
-}
 
 static SzEither *either_left_drop(SzError *err) {
   SzEither *e = sz_either_left(err);

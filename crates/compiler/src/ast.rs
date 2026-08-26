@@ -95,6 +95,19 @@ impl Import {
     pub fn is_wildcard(&self) -> bool {
         self.name == "*"
     }
+
+    /// `unused import Module.name [as alias]` diagnostic text.
+    pub fn unused_message(&self) -> String {
+        match &self.alias {
+            Some(alias) if !self.is_wildcard() => {
+                format!(
+                    "unused import {}.{} as {alias}",
+                    self.from_module, self.name
+                )
+            }
+            _ => format!("unused import {}.{}", self.from_module, self.name),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -537,6 +550,12 @@ impl Expr {
     }
 }
 
+/// Pre-order walk of `e` and every descendant, self first.
+pub(crate) fn walk_expr(e: &Expr, f: &mut impl FnMut(&Expr)) {
+    f(e);
+    e.for_each_child(|c| walk_expr(c, f));
+}
+
 /// Binder name for a wrapped `_` hole. Starts with `_` so unused stays quiet.
 pub const PLACEHOLDER_PARAM: &str = "__ph";
 
@@ -824,11 +843,6 @@ impl ForBinder {
 
 /// Name, `_`, tuple, constructor, list, as, or named-field pattern for a binder / lambda.
 /// Nested patterns are allowed. Nested literals are allowed (`Opt.Some(0)`).
-pub fn is_tuple_binder_pat(p: &Pattern) -> bool {
-    is_unpack_binder_pat(p)
-}
-
-/// Same as [`is_tuple_binder_pat`]. Nested literals are allowed.
 pub fn is_unpack_binder_pat(p: &Pattern) -> bool {
     match p {
         Pattern::Wildcard | Pattern::Bind(_) => true,

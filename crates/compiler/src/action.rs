@@ -1,6 +1,6 @@
 //! Code actions from the same parse as `check`. No second typer.
 
-use crate::ast::{Expr, ExprKind, MatchArm, Program};
+use crate::ast::{walk_expr, Expr, ExprKind, MatchArm, Program};
 use crate::format::format_source;
 use crate::hover::KIT_SIGS;
 use crate::lower::lower_program;
@@ -451,13 +451,7 @@ fn unused_import_actions(
             continue;
         }
         let (start, end) = import_line_range(source, im.span.start, im.span.end);
-        let msg = if im.is_wildcard() {
-            format!("unused import {}.{}", im.from_module, im.name)
-        } else if let Some(alias) = &im.alias {
-            format!("unused import {}.{} as {alias}", im.from_module, im.name)
-        } else {
-            format!("unused import {}.{}", im.from_module, im.name)
-        };
+        let msg = im.unused_message();
         out.push(CodeAction {
             title: format!("Remove {msg}"),
             kind: KIND_QUICKFIX.into(),
@@ -506,11 +500,6 @@ fn walk_program(program: &Program, module: &str, f: &mut impl FnMut(&Expr)) {
             }
         }
     }
-}
-
-fn walk_expr(e: &Expr, f: &mut impl FnMut(&Expr)) {
-    f(e);
-    e.for_each_child(|c| walk_expr(c, f));
 }
 
 #[cfg(test)]
