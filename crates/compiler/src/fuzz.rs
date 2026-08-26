@@ -570,6 +570,20 @@ pub fn drive_script_lines(seed: i64, drivers: &[String]) -> Vec<String> {
     out
 }
 
+/// Per-run favored event kind: one kind drawn from the seed, stable for the run.
+fn fuzz_favor_kind(
+    seed: i64,
+    n_fields: i64,
+    n_scrolls: i64,
+    has_drivers: bool,
+    n_editors: i64,
+) -> i64 {
+    lcg_below(
+        lcg_seed(seed) ^ 0x5EED,
+        fuzz_kind_count(n_fields, n_scrolls, has_drivers, n_editors),
+    )
+}
+
 fn fuzz_event(
     s: i64,
     n_buttons: i64,
@@ -577,12 +591,16 @@ fn fuzz_event(
     n_scrolls: i64,
     n_editors: i64,
     drivers: &[String],
+    favor: i64,
 ) -> (String, i64) {
     let s = lcg_next(s);
-    let k = lcg_below(
+    let mut k = lcg_below(
         s,
         fuzz_kind_count(n_fields, n_scrolls, !drivers.is_empty(), n_editors),
     );
+    if favor >= 0 && lcg_below(lcg_next(s), 2) == 0 {
+        k = favor;
+    }
     fuzz_event_kind(s, k, n_buttons, n_scrolls, n_fields, n_editors, drivers)
 }
 
@@ -695,11 +713,12 @@ fn fuzz_script_acc(
     n_scrolls: i64,
     n_editors: i64,
     drivers: &[String],
+    favor: i64,
     mut acc: Vec<String>,
 ) -> Vec<String> {
     let mut left = remaining;
     while left > 0 {
-        let (ev, next) = fuzz_event(s, n_buttons, n_fields, n_scrolls, n_editors, drivers);
+        let (ev, next) = fuzz_event(s, n_buttons, n_fields, n_scrolls, n_editors, drivers, favor);
         acc.push(ev);
         s = next;
         left -= 1;
@@ -714,6 +733,7 @@ fn fuzz_script(
     n_scrolls: i64,
     n_editors: i64,
     drivers: &[String],
+    favor: i64,
 ) -> Vec<String> {
     let s = lcg_next(lcg_seed(seed));
     let len = 1 + lcg_below(s, 12);
@@ -725,6 +745,7 @@ fn fuzz_script(
         n_scrolls,
         n_editors,
         drivers,
+        favor,
         Vec::new(),
     )
 }
@@ -737,6 +758,7 @@ fn fuzz_extend_prefix(
     n_scrolls: i64,
     n_editors: i64,
     drivers: &[String],
+    favor: i64,
 ) -> Vec<String> {
     let extra = 1 + lcg_below(s, 4);
     fuzz_script_acc(
@@ -747,6 +769,7 @@ fn fuzz_extend_prefix(
         n_scrolls,
         n_editors,
         drivers,
+        favor,
         prefix.to_vec(),
     )
 }
@@ -760,12 +783,17 @@ pub fn fuzz_pick_script(
     drivers: &[String],
     corpus: &[Vec<String>],
 ) -> Vec<String> {
+    let favor = fuzz_favor_kind(seed, n_fields, n_scrolls, !drivers.is_empty(), n_editors);
     if corpus.is_empty() {
-        return fuzz_script(seed, n_buttons, n_fields, n_scrolls, n_editors, drivers);
+        return fuzz_script(
+            seed, n_buttons, n_fields, n_scrolls, n_editors, drivers, favor,
+        );
     }
     let s = lcg_next(lcg_seed(seed));
     if lcg_below(s, 2) == 0 {
-        fuzz_script(seed, n_buttons, n_fields, n_scrolls, n_editors, drivers)
+        fuzz_script(
+            seed, n_buttons, n_fields, n_scrolls, n_editors, drivers, favor,
+        )
     } else {
         let s = lcg_next(s);
         let base = &corpus[lcg_below(s, corpus.len() as i64) as usize];
@@ -777,6 +805,7 @@ pub fn fuzz_pick_script(
             n_scrolls,
             n_editors,
             drivers,
+            favor,
         )
     }
 }
@@ -1830,6 +1859,44 @@ pub fn repro_text(seed: i64, schedule_seed: &str, fault_seed: &str, events: &[St
 mod tests {
     use super::*;
     use crate::parser::parse;
+    #[test]
+    fn fuzz_pick_script_same_seed_same_script() {
+        let drivers = vec!["bumpIncreases i".to_string()];
+        assert_eq!(
+            fuzz_pick_script(42, 2, 1, 1, 0, &drivers, &[]),
+            fuzz_pick_script(42, 2, 1, 1, 0, &drivers, &[])
+        );
+        let corpus = vec![vec!["tap 0".to_string()]];
+        assert_eq!(
+            fuzz_pick_script(7, 2, 1, 1, 0, &drivers, &corpus),
+            fuzz_pick_script(7, 2, 1, 1, 0, &drivers, &corpus)
+        );
+    }
+
+    #[test]
+    fn fuzz_favored_kind_is_overrepresented() {
+        // Alphabet where each kind has a distinct textual prefix:
+        // kinds 0,1 -> tap; 2 -> pump; 3 -> scroll; 4 -> backspace; 5 -> type; 6 -> text.
+        const PREFIXES: [&str; 7] = ["tap", "tap", "pump", "scroll", "backspace", "type", "text"];
+        let mut favored = 0i64;
+        let mut total = 0i64;
+        for seed in 0..64 {
+            let favor = fuzz_favor_kind(seed, 1, 1, false, 0);
+            let want = PREFIXES[favor as usize];
+            for ev in fuzz_pick_script(seed, 1, 1, 1, 0, &[], &[]) {
+                total += 1;
+                if ev.starts_with(want) {
+                    favored += 1;
+                }
+            }
+        }
+        // Uniform draws would match the favored class at ~1/7 (tap 2/7);
+        // swarming forces the favored kind on half the draws.
+        assert!(
+            favored * 3 > total,
+            "favored kind underrepresented: {favored}/{total}"
+        );
+    }
 
     #[test]
     fn lcg_is_deterministic() {
@@ -1840,8 +1907,8 @@ mod tests {
 
     #[test]
     fn script_same_seed_same_events() {
-        let a = fuzz_script(42, 2, 1, 0, 0, &[]);
-        let b = fuzz_script(42, 2, 1, 0, 0, &[]);
+        let a = fuzz_script(42, 2, 1, 0, 0, &[], -1);
+        let b = fuzz_script(42, 2, 1, 0, 0, &[], -1);
         assert_eq!(a, b);
         assert!(!a.is_empty());
     }
