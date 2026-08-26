@@ -285,7 +285,7 @@ int sz_testrt_fault_tick(int kind) {
   return *c == g_fault_n;
 }
 
-int sz_testrt_fault_mode(void) { return g_fault_mode; }
+static int sz_testrt_fault_mode(void) { return g_fault_mode; }
 
 void sz_testrt_fault_note(const char *msg) { g_fault_fail_msg = msg; }
 

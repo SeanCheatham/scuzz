@@ -11,7 +11,7 @@ use scuzz_compiler::format::format_source;
 use scuzz_compiler::manifest::load_manifest;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use support::resolve_dir;
+use support::{resolve_dir, resolve_out_dir};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -655,7 +655,7 @@ fn watch_run_ui(
     out_dir: &Path,
     headless: bool,
 ) -> Result<ExitCode> {
-    let stamp = project_dir.join("build").join("reload.stamp");
+    let stamp = resolve_out_dir(project_dir, out_dir).join("reload.stamp");
     if let Some(parent) = stamp.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -707,19 +707,11 @@ fn spawn_ui_keep(
         || (!use_headless && !use_mobile && manifest.ui.is_some());
     let out = build(path, out_dir, true, false)?;
     let mut cmd = Command::new(&out.executable);
+    let build_dir = resolve_out_dir(&project_dir, out_dir);
     cmd.env("SCUZZ_UI_RELOAD_STAMP", stamp);
-    cmd.env(
-        "SCUZZ_UI_RELOAD_CODE",
-        project_dir.join("build").join("reload.dylib"),
-    );
-    cmd.env(
-        "SCUZZ_UI_DEBUG_DUMP",
-        project_dir.join("build").join("debug.dump"),
-    );
-    cmd.env(
-        "SCUZZ_UI_INJECT",
-        project_dir.join("build").join("inject.script"),
-    );
+    cmd.env("SCUZZ_UI_RELOAD_CODE", build_dir.join("reload.dylib"));
+    cmd.env("SCUZZ_UI_DEBUG_DUMP", build_dir.join("debug.dump"));
+    cmd.env("SCUZZ_UI_INJECT", build_dir.join("inject.script"));
     if use_headless {
         cmd.env("SCUZZ_UI_RUNTIME", "headless");
         if let Some(ui) = &manifest.ui {
@@ -1408,7 +1400,6 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         .ui
         .as_ref()
         .map(|u| u.bundle_id.as_str())
-        .filter(|s| !s.is_empty())
         .unwrap_or("dev.scuzz.app");
 
     for t in targets {

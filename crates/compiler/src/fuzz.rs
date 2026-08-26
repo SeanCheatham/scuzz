@@ -846,7 +846,7 @@ pub fn fuzz_pick_sched(seed: i64, iter: i64, corpus: &[String]) -> String {
 }
 
 pub const PCT_D_MIN: i64 = 2;
-pub const PCT_D_MAX: i64 = 5;
+const PCT_D_MAX: i64 = 5;
 pub const PCT_K_MAX: i64 = 7;
 
 /// Packed `SCUZZ_SCHED_SEED`: k = s%8, d = 2+(s/8)%4, rng = s/32.
@@ -1806,10 +1806,6 @@ fn fnv1a64(h: &mut u64, bytes: &[u8]) {
 
 /// Content hash of `schedule_seed` plus events plus a non-zero fault seed.
 /// Filename stem is idempotent. Fault `"0"` / empty keeps the old hash.
-pub fn corpus_entry_name(schedule_seed: &str, events: &[String]) -> String {
-    corpus_entry_name_fault(schedule_seed, "", events)
-}
-
 pub fn corpus_entry_name_fault(schedule_seed: &str, fault_seed: &str, events: &[String]) -> String {
     let mut h = 0xcbf29ce484222325u64;
     fnv1a64(&mut h, schedule_seed.as_bytes());
@@ -2039,8 +2035,8 @@ scroll:scroll
     #[test]
     fn corpus_entry_name_is_idempotent() {
         let events = vec!["drive bumpIncreases 0".into(), "pump 1".into()];
-        let a = corpus_entry_name("9", &events);
-        let b = corpus_entry_name("9", &events);
+        let a = corpus_entry_name_fault("9", "", &events);
+        let b = corpus_entry_name_fault("9", "", &events);
         assert_eq!(a, b);
         assert_eq!(a.len(), 16);
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
@@ -2049,7 +2045,7 @@ scroll:scroll
     #[test]
     fn corpus_entry_name_matches_bad_example_pin() {
         assert_eq!(
-            corpus_entry_name("42", &["drive bumpIncreases 0".into()]),
+            corpus_entry_name_fault("42", "", &["drive bumpIncreases 0".into()]),
             "140caeeb01b1f10a"
         );
     }
@@ -2062,14 +2058,14 @@ scroll:scroll
         );
         assert_eq!(
             corpus_entry_name_fault("42", "0", &["drive checkNote a".into()]),
-            corpus_entry_name("42", &["drive checkNote a".into()])
+            corpus_entry_name_fault("42", "", &["drive checkNote a".into()])
         );
     }
 
     #[test]
     fn corpus_entry_name_matches_bad_sched_pin() {
         assert_eq!(
-            corpus_entry_name("1344", &["drive checkOrder".into()]),
+            corpus_entry_name_fault("1344", "", &["drive checkOrder".into()]),
             "d037d00bc981a2fb"
         );
         assert_eq!(decode_sched_seed(1344).d, 2);
@@ -2080,7 +2076,7 @@ scroll:scroll
     #[test]
     fn corpus_entry_name_matches_bad_model_pin() {
         assert_eq!(
-            corpus_entry_name("42", &["drive step 0".into()]),
+            corpus_entry_name_fault("42", "", &["drive step 0".into()]),
             "38e8b0d55f93c3bb"
         );
     }
@@ -2088,12 +2084,12 @@ scroll:scroll
     #[test]
     fn corpus_entry_name_changes_with_seed_or_events() {
         let ev = vec!["tap 0".to_string()];
-        let base = corpus_entry_name("1", &ev);
-        assert_ne!(base, corpus_entry_name("2", &ev));
-        assert_ne!(base, corpus_entry_name("1", &["tap 1".into()]));
+        let base = corpus_entry_name_fault("1", "", &ev);
+        assert_ne!(base, corpus_entry_name_fault("2", "", &ev));
+        assert_ne!(base, corpus_entry_name_fault("1", "", &["tap 1".into()]));
         assert_ne!(
-            corpus_entry_name("ab", &["c".into()]),
-            corpus_entry_name("a", &["bc".into()])
+            corpus_entry_name_fault("ab", "", &["c".into()]),
+            corpus_entry_name_fault("a", "", &["bc".into()])
         );
     }
 
@@ -2101,11 +2097,11 @@ scroll:scroll
     fn corpus_entry_name_survives_repro_roundtrip() {
         let seed = "42";
         let events = vec!["drive bumpIncreases -1".into()];
-        let name = corpus_entry_name(seed, &events);
+        let name = corpus_entry_name_fault(seed, "", &events);
         let text = repro_text(7, seed, "", &events);
         let r = parse_repro(&text).expect("repro toml");
         let sched = r.schedule_seed.as_deref().unwrap_or("");
-        assert_eq!(corpus_entry_name(sched, &r.events), name);
+        assert_eq!(corpus_entry_name_fault(sched, "", &r.events), name);
         assert_eq!(corpus_entry_name_fault(sched, "0", &r.events), name);
         assert_ne!(corpus_entry_name_fault(sched, "1", &r.events), name);
     }

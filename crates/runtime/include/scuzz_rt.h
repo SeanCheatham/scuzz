@@ -789,7 +789,6 @@ enum { SZ_FAULT_FS = 1, SZ_FAULT_NET = 2, SZ_FAULT_QUEUE = 3 };
 enum { SZ_FAULT_FAIL = 0, SZ_FAULT_DROP = 1, SZ_FAULT_CORRUPT = 2 };
 /* 1 when this op is the armed Nth op of `kind`. */
 int sz_testrt_fault_tick(int kind);
-int sz_testrt_fault_mode(void);
 /* Delay thunks stash a fail message; the DELAY step consumes it. */
 void sz_testrt_fault_note(const char *msg);
 const char *sz_testrt_fault_take_msg(void);
