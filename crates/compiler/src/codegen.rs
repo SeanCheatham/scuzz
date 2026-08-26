@@ -486,6 +486,10 @@ pub fn emit_llvm(program: &Program) -> String {
     .unwrap();
     writeln!(out, "declare i64 @sz_timeline_a11y_has(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_last_hit_has(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_effect_has(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_fiber_ready(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_fiber_parked(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_fault_has(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_forall(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_exists(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_verdict_ok()").unwrap();
@@ -7376,6 +7380,44 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Timeline.effectHas" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_effect_has(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Timeline.fiberReady" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_fiber_ready(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Timeline.fiberParked" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_fiber_parked(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Timeline.faultHas" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_timeline_fault_has(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Verdict.ok" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_verdict_ok()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -12603,6 +12645,59 @@ record Point(x: Int, y: Int)
         );
         let (at, name) = first_ptr_arg(&ir, "call i64 @sz_property_a11y_has(ptr ");
         assert_release_after(&ir, at, name, "Property.a11yHas needle");
+    }
+
+    #[test]
+    fn emit_timeline_obs_kit_drops_needles() {
+        let mut p = parse(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x")
+"#,
+        )
+        .unwrap();
+        crate::verify::apply_verifies(
+            &mut p,
+            &[crate::verify::VerifySource {
+                label: "pkg/fs.scuzz_verify".into(),
+                text: concat!(
+                    "def wrote(t: Timeline): Verdict =\n",
+                    "  Verdict.any(t, i => Timeline.effectHas(t, i, \"fs.write\") && Timeline.fiberParked(t, i) == 0 && Timeline.faultHas(t, i, \"kind=none\"))\n",
+                )
+                .into(),
+                path: std::path::PathBuf::new(),
+            }],
+        )
+        .expect("verify");
+        crate::typ::inject_builtin_enums(&mut p.enums);
+        let p = crate::lower::lower_program(p);
+        let p = crate::typ::expand_impls(p).expect("impls");
+        let p = crate::typ::resolve_named_args(p).expect("named");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        let p = crate::typ::monomorphize(p).expect("mono");
+        let p = crate::typ::resolve_field_access(p).expect("fields after mono");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "call i64 @sz_timeline_effect_has(ptr ",
+            "call i64 @sz_timeline_fiber_parked(ptr ",
+            "call i64 @sz_timeline_fault_has(ptr ",
+        ] {
+            assert!(ir.contains(needle), "expected `{needle}`:\n{ir}");
+        }
+        let at = ir
+            .find("call i64 @sz_timeline_effect_has(")
+            .expect("effect_has");
+        let args = ir[at..].split(')').next().unwrap();
+        let name = args.rsplit("ptr ").next().unwrap().trim();
+        assert_release_after(&ir, at, name, "Timeline.effectHas needle");
+        let at = ir
+            .find("call i64 @sz_timeline_fault_has(")
+            .expect("fault_has");
+        let args = ir[at..].split(')').next().unwrap();
+        let name = args.rsplit("ptr ").next().unwrap().trim();
+        assert_release_after(&ir, at, name, "Timeline.faultHas needle");
     }
 
     #[test]

@@ -57,6 +57,7 @@ static void *queue_offer_thunk(void *env) {
   SzPair *p = (SzPair *)env;
   SzQueue *q = (SzQueue *)p->left;
   void *value = p->right;
+  sz_effect_log("queue.offer");
   if (sz_testrt_fault_tick(SZ_FAULT_QUEUE)) {
     sz_testrt_fault_note("Queue.offer: injected fault");
     return NULL;

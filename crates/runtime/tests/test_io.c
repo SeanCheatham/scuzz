@@ -9427,6 +9427,72 @@ int main(void) {
     remove(b);
   }
 
+  /* Optional effects/fibers/fault sections. Handwritten v=1 without them still loads. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_obs.dump";
+    void *tl;
+    SzString *needle;
+    write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+                     "x\nsignals:\nint[0] = 1\na11y:\nbutton:+1\neffects:\n"
+                     "fs.write n=7\nfibers:\nready=1 parked=2\nfault:\n"
+                     "kind=fs n=1 mode=fail\n");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 1);
+    needle = sz_string_from_cstr("button:+1");
+    assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    needle = sz_string_from_cstr("fs.write");
+    assert(sz_timeline_effect_has(tl, 0, needle) == 1);
+    assert(sz_timeline_a11y_has(tl, 0, needle) == 0);
+    sz_release(needle);
+    assert(sz_timeline_fiber_ready(tl, 0) == 1);
+    assert(sz_timeline_fiber_parked(tl, 0) == 2);
+    needle = sz_string_from_cstr("kind=fs");
+    assert(sz_timeline_fault_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    sz_timeline_free(tl);
+    write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+                     "x\nsignals:\nint[0] = 1\na11y:\nbutton:+1\n");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    needle = sz_string_from_cstr("fs.write");
+    assert(sz_timeline_effect_has(tl, 0, needle) == 0);
+    sz_release(needle);
+    assert(sz_timeline_fiber_ready(tl, 0) == 0);
+    assert(sz_timeline_fiber_parked(tl, 0) == 0);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
+  /* IO-only session_end pushes a terminal state when the effect log is pending. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_pending.dump";
+    void *tl;
+    SzString *needle;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_TIMELINE_DUMP", path, 1);
+    sz_property_session_reset();
+    sz_effect_log("fs.write n=7");
+    sz_property_session_end();
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TIMELINE_DUMP");
+    unsetenv("SCUZZ_TESTRT");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 1);
+    needle = sz_string_from_cstr("fs.write n=7");
+    assert(sz_timeline_effect_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    needle = sz_string_from_cstr("kind=none");
+    assert(sz_timeline_fault_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    assert(sz_timeline_fiber_ready(tl, 0) == 0);
+    assert(sz_timeline_fiber_parked(tl, 0) == 0);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

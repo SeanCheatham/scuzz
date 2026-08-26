@@ -787,6 +787,10 @@ enum { SZ_FAULT_FS = 1, SZ_FAULT_NET = 2, SZ_FAULT_QUEUE = 3 };
 enum { SZ_FAULT_FAIL = 0, SZ_FAULT_DROP = 1, SZ_FAULT_CORRUPT = 2 };
 /* 1 when this op is the armed Nth op of `kind`. */
 int sz_testrt_fault_tick(int kind);
+/* Observation log: one line, op name plus size, never a payload. Cap 2 KiB. */
+void sz_effect_log(const char *line);
+/* Ready vs parked (SLEEP/QWAIT/DWAIT/POLL/JOIN/FWAIT) fiber counts. */
+void sz_sched_census(int *ready, int *parked);
 /* Delay thunks stash a fail message; the DELAY step consumes it. */
 void sz_testrt_fault_note(const char *msg);
 const char *sz_testrt_fault_take_msg(void);
@@ -915,6 +919,10 @@ int64_t sz_timeline_signal_int(void *tl, int64_t i, int64_t id);
 int64_t sz_timeline_signal_list_len(void *tl, int64_t i, int64_t id);
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle);
+int64_t sz_timeline_effect_has(void *tl, int64_t i, SzString *needle);
+int64_t sz_timeline_fiber_ready(void *tl, int64_t i);
+int64_t sz_timeline_fiber_parked(void *tl, int64_t i);
+int64_t sz_timeline_fault_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_forall(void *tl, SzListPred pred, void *env);
 int64_t sz_timeline_exists(void *tl, SzListPred pred, void *env);
 int sz_drive_uncons(const char *tok, const char *name, char *inner, int cap);
