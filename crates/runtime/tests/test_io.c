@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
+#include <math.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
@@ -3417,35 +3418,162 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
-  /* Json.parse / stringify — check diagnostic JSON round-trips compact. */
+  /* Json.parse / stringify — Result[Json] / Result[String]; compact ASCII. */
   {
     const char *sample =
         "[{\"severity\":\"error\",\"message\":\"x\",\"line\":2,\"column\":3}]";
     SzString *in = sz_string_from_cstr(sample);
-    SzAdt *j = sz_json_parse(in);
-    SzString *out = sz_json_stringify(j);
+    SzAdt *pr = sz_json_parse(in);
+    SzAdt *j;
+    SzAdt *sr;
+    SzString *out;
+    assert(sz_adt_tag(pr) == 1);
+    j = (SzAdt *)sz_adt_payload(pr);
+    sr = sz_json_stringify(j);
+    assert(sz_adt_tag(sr) == 1);
+    out = (SzString *)sz_adt_payload(sr);
     assert(strcmp(sz_string_cstr(out), sample) == 0);
-    sz_release(out);
-    sz_release(j);
+    sz_release(sr);
+    sz_release(pr);
     sz_release(in);
     {
       SzString *n = sz_string_from_cstr("null");
-      SzAdt *jn = sz_json_parse(n);
-      SzString *so = sz_json_stringify(jn);
+      SzAdt *pn = sz_json_parse(n);
+      SzAdt *jn;
+      SzAdt *so_r;
+      SzString *so;
+      assert(sz_adt_tag(pn) == 1);
+      jn = (SzAdt *)sz_adt_payload(pn);
       assert(sz_adt_tag(jn) == 0);
+      so_r = sz_json_stringify(jn);
+      assert(sz_adt_tag(so_r) == 1);
+      so = (SzString *)sz_adt_payload(so_r);
       assert(strcmp(sz_string_cstr(so), "null") == 0);
-      sz_release(so);
-      sz_release(jn);
+      sz_release(so_r);
+      sz_release(pn);
       sz_release(n);
     }
     {
       SzString *t = sz_string_from_cstr("{\"ok\":true,\"n\":1,\"s\":\"a\"}");
-      SzAdt *jo = sz_json_parse(t);
-      SzString *so = sz_json_stringify(jo);
+      SzAdt *po = sz_json_parse(t);
+      SzAdt *jo;
+      SzAdt *so_r;
+      SzString *so;
+      assert(sz_adt_tag(po) == 1);
+      jo = (SzAdt *)sz_adt_payload(po);
+      so_r = sz_json_stringify(jo);
+      assert(sz_adt_tag(so_r) == 1);
+      so = (SzString *)sz_adt_payload(so_r);
       assert(strcmp(sz_string_cstr(so), "{\"ok\":true,\"n\":1,\"s\":\"a\"}") == 0);
-      sz_release(so);
-      sz_release(jo);
+      sz_release(so_r);
+      sz_release(po);
       sz_release(t);
+    }
+    {
+      SzString *s = sz_string_from_cstr("9223372036854775808");
+      SzAdt *r = sz_json_parse(s);
+      assert(sz_adt_tag(r) == 0);
+      sz_release(r);
+      sz_release(s);
+    }
+    {
+      SzString *s = sz_string_from_cstr("\"\\uD834\\uDD1E\"");
+      SzAdt *r = sz_json_parse(s);
+      SzAdt *js;
+      SzString *payload;
+      const unsigned char *bytes;
+      assert(sz_adt_tag(r) == 1);
+      js = (SzAdt *)sz_adt_payload(r);
+      assert(sz_adt_tag(js) == 4);
+      payload = (SzString *)sz_adt_payload(js);
+      bytes = (const unsigned char *)sz_string_cstr(payload);
+      assert(sz_string_len(payload) == 4);
+      assert(bytes[0] == 0xF0 && bytes[1] == 0x9D && bytes[2] == 0x84 &&
+             bytes[3] == 0x9E);
+      sz_release(r);
+      sz_release(s);
+    }
+    {
+      SzString *s = sz_string_from_cstr("\"\\uD834\"");
+      SzAdt *r = sz_json_parse(s);
+      assert(sz_adt_tag(r) == 0);
+      sz_release(r);
+      sz_release(s);
+    }
+    {
+      SzString *s = sz_string_from_cstr("\"\\uDD1E\"");
+      SzAdt *r = sz_json_parse(s);
+      assert(sz_adt_tag(r) == 0);
+      sz_release(r);
+      sz_release(s);
+    }
+    {
+      double inf = INFINITY;
+      int64_t bits = 0;
+      void *box;
+      SzAdt *jf;
+      SzAdt *sr2;
+      memcpy(&bits, &inf, sizeof bits);
+      box = sz_box_i64(bits);
+      jf = sz_adt_new(3, box);
+      sz_release(box);
+      sr2 = sz_json_stringify(jf);
+      assert(sz_adt_tag(sr2) == 0);
+      sz_release(sr2);
+      sz_release(jf);
+    }
+    {
+      double nan = NAN;
+      int64_t bits = 0;
+      void *box;
+      SzAdt *jf;
+      SzAdt *sr2;
+      memcpy(&bits, &nan, sizeof bits);
+      box = sz_box_i64(bits);
+      jf = sz_adt_new(3, box);
+      sz_release(box);
+      sr2 = sz_json_stringify(jf);
+      assert(sz_adt_tag(sr2) == 0);
+      sz_release(sr2);
+      sz_release(jf);
+    }
+    {
+      SzString *s = sz_string_from_cstr("1e999");
+      SzAdt *r = sz_json_parse(s);
+      assert(sz_adt_tag(r) == 0);
+      sz_release(r);
+      sz_release(s);
+    }
+    {
+      SzAdt *deep = sz_adt_new(0, NULL);
+      SzAdt *sr2;
+      int i;
+      for (i = 0; i < 257; i++) {
+        SzList *nil = sz_list_nil();
+        SzList *xs = sz_list_cons(deep, nil);
+        sz_release(deep);
+        sz_release(nil);
+        deep = sz_adt_new(5, xs);
+        sz_release(xs);
+      }
+      sr2 = sz_json_stringify(deep);
+      assert(sz_adt_tag(sr2) == 0);
+      sz_release(sr2);
+      sz_release(deep);
+    }
+    {
+      SzString *s = sz_string_from_cstr("{");
+      SzAdt *r = sz_json_parse(s);
+      assert(sz_adt_tag(r) == 0);
+      sz_release(r);
+      sz_release(s);
+    }
+    {
+      SzString *s = sz_string_from_cstr("not-json");
+      SzAdt *r = sz_json_parse(s);
+      assert(sz_adt_tag(r) == 0);
+      sz_release(r);
+      sz_release(s);
     }
   }
 
@@ -3455,11 +3583,32 @@ int main(void) {
     sz_alloc_stats(&base_bytes, &base_count);
     {
       SzString *s = sz_string_from_cstr("[1,true,null]");
-      SzAdt *j = sz_json_parse(s);
-      SzString *out = sz_json_stringify(j);
+      SzAdt *pr = sz_json_parse(s);
+      SzAdt *j;
+      SzAdt *sr;
+      assert(sz_adt_tag(pr) == 1);
+      j = (SzAdt *)sz_adt_payload(pr);
+      sr = sz_json_stringify(j);
+      assert(sz_adt_tag(sr) == 1);
       sz_release(s);
-      sz_release(j);
-      sz_release(out);
+      sz_release(pr);
+      sz_release(sr);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *s = sz_string_from_cstr("{");
+      SzAdt *r = sz_json_parse(s);
+      assert(sz_adt_tag(r) == 0);
+      sz_release(s);
+      sz_release(r);
     }
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
