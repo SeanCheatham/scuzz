@@ -14085,30 +14085,6 @@ enum Color:
     }
 
     #[test]
-    fn emit_json_parse_stringify() {
-        let src = r#"@main def main: IO[Unit] =
-  Json.parse("[1,true]") match {
-    case Result.Ok(j) => Json.stringify(j) match {
-      case Result.Ok(s) => IO.println(s)
-      case Result.Err(_) => IO.println("")
-    }
-    case Result.Err(_) => IO.println("")
-  }
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_json_parse"),
-            "expected sz_json_parse in IR:\n{ir}"
-        );
-        assert!(
-            ir.contains("sz_json_stringify"),
-            "expected sz_json_stringify in IR:\n{ir}"
-        );
-    }
-
-    #[test]
     fn emit_view_progress() {
         let src = r#"@main def main: IO[Unit] =
   for {

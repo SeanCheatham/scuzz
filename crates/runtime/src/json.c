@@ -121,6 +121,22 @@ static SzAdt *json_float(double x) { return json_mk(JSON_FLOAT, box_f64(x)); }
 
 static SzAdt *json_str(SzString *s) { return json_mk(JSON_STR, s); }
 
+static void buf_grow(char **p, size_t n, size_t *cap, size_t need) {
+  size_t nc;
+  char *nb;
+  if (need <= *cap)
+    return;
+  nc = *cap ? *cap * 2 : 64;
+  while (nc < need)
+    nc *= 2;
+  nb = (char *)sz_alloc(nc);
+  if (*p && n)
+    memcpy(nb, *p, n);
+  sz_free(*p);
+  *p = nb;
+  *cap = nc;
+}
+
 static void jp_fail(Jp *p, const char *msg) {
   if (p && !p->err)
     p->err = msg;
@@ -185,20 +201,15 @@ static int jp_hex4(Jp *p, unsigned *cp) {
   return 1;
 }
 
-static int jp_room(char **buf, size_t *cap, size_t n, size_t extra) {
-  size_t nc;
-  char *nb;
-  if (n + extra < *cap)
-    return 1;
-  nc = *cap * 2;
-  while (nc <= n + extra)
-    nc *= 2;
-  nb = (char *)sz_alloc(nc);
-  memcpy(nb, *buf, n);
-  sz_free(*buf);
-  *buf = nb;
-  *cap = nc;
-  return 1;
+static void jp_room(char **buf, size_t *cap, size_t n, size_t extra) {
+  buf_grow(buf, n, cap, n + extra + 1);
+}
+
+static SzString *jp_str_fail(Jp *p, char *buf, const char *msg) {
+  if (msg)
+    jp_fail(p, msg);
+  sz_free(buf);
+  return NULL;
 }
 
 static SzString *jp_string(Jp *p) {
@@ -222,11 +233,8 @@ static SzString *jp_string(Jp *p) {
       return s;
     }
     if (c == '\\') {
-      if (p->i >= p->n) {
-        jp_fail(p, "Json.parse: bad string escape");
-        sz_free(buf);
-        return NULL;
-      }
+      if (p->i >= p->n)
+        return jp_str_fail(p, buf, "Json.parse: bad string escape");
       c = (unsigned char)p->s[p->i++];
       switch (c) {
       case '"':
@@ -252,32 +260,20 @@ static SzString *jp_string(Jp *p) {
         unsigned cp = 0;
         unsigned char u[4];
         int nbytes;
-        if (!jp_hex4(p, &cp)) {
-          sz_free(buf);
-          return NULL;
-        }
+        if (!jp_hex4(p, &cp))
+          return jp_str_fail(p, buf, NULL);
         if (cp >= 0xD800 && cp <= 0xDBFF) {
           unsigned low = 0;
-          if (!(p->i + 2 <= p->n && p->s[p->i] == '\\' && p->s[p->i + 1] == 'u')) {
-            jp_fail(p, "Json.parse: unpaired surrogate");
-            sz_free(buf);
-            return NULL;
-          }
+          if (!(p->i + 2 <= p->n && p->s[p->i] == '\\' && p->s[p->i + 1] == 'u'))
+            return jp_str_fail(p, buf, "Json.parse: unpaired surrogate");
           p->i += 2;
-          if (!jp_hex4(p, &low)) {
-            sz_free(buf);
-            return NULL;
-          }
-          if (low < 0xDC00 || low > 0xDFFF) {
-            jp_fail(p, "Json.parse: unpaired surrogate");
-            sz_free(buf);
-            return NULL;
-          }
+          if (!jp_hex4(p, &low))
+            return jp_str_fail(p, buf, NULL);
+          if (low < 0xDC00 || low > 0xDFFF)
+            return jp_str_fail(p, buf, "Json.parse: unpaired surrogate");
           cp = 0x10000u + ((cp - 0xD800u) << 10) + (low - 0xDC00u);
         } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
-          jp_fail(p, "Json.parse: unpaired surrogate");
-          sz_free(buf);
-          return NULL;
+          return jp_str_fail(p, buf, "Json.parse: unpaired surrogate");
         }
         if (cp < 0x80) {
           c = (unsigned char)cp;
@@ -305,21 +301,15 @@ static SzString *jp_string(Jp *p) {
         continue;
       }
       default:
-        jp_fail(p, "Json.parse: bad string escape");
-        sz_free(buf);
-        return NULL;
+        return jp_str_fail(p, buf, "Json.parse: bad string escape");
       }
     } else if (c < 0x20) {
-      jp_fail(p, "Json.parse: control in string");
-      sz_free(buf);
-      return NULL;
+      return jp_str_fail(p, buf, "Json.parse: control in string");
     }
     jp_room(&buf, &cap, n, 1);
     buf[n++] = (char)c;
   }
-  jp_fail(p, "Json.parse: unterminated string");
-  sz_free(buf);
-  return NULL;
+  return jp_str_fail(p, buf, "Json.parse: unterminated string");
 }
 
 static SzAdt *jp_number(Jp *p) {
@@ -396,9 +386,19 @@ static SzAdt *jp_number(Jp *p) {
   }
 }
 
+static SzAdt *json_rev_list(int32_t tag, SzList *acc, Jp *p) {
+  SzList *rev;
+  if (p->err) {
+    sz_release(acc);
+    return NULL;
+  }
+  rev = sz_list_reverse(acc);
+  sz_release(acc);
+  return json_mk(tag, rev);
+}
+
 static SzAdt *jp_array(Jp *p) {
   SzList *acc;
-  SzAdt *out;
   jp_eat(p, '[');
   if (p->err)
     return NULL;
@@ -426,21 +426,11 @@ static SzAdt *jp_array(Jp *p) {
     }
   }
   jp_eat(p, ']');
-  if (p->err) {
-    sz_release(acc);
-    return NULL;
-  }
-  {
-    SzList *rev = sz_list_reverse(acc);
-    sz_release(acc);
-    out = json_mk(JSON_ARR, rev);
-  }
-  return out;
+  return json_rev_list(JSON_ARR, acc, p);
 }
 
 static SzAdt *jp_object(Jp *p) {
   SzList *acc;
-  SzAdt *out;
   jp_eat(p, '{');
   if (p->err)
     return NULL;
@@ -486,16 +476,7 @@ static SzAdt *jp_object(Jp *p) {
     }
   }
   jp_eat(p, '}');
-  if (p->err) {
-    sz_release(acc);
-    return NULL;
-  }
-  {
-    SzList *rev = sz_list_reverse(acc);
-    sz_release(acc);
-    out = json_mk(JSON_OBJ, rev);
-  }
-  return out;
+  return json_rev_list(JSON_OBJ, acc, p);
 }
 
 static SzAdt *jp_value(Jp *p) {
@@ -566,18 +547,7 @@ static void jb_fail(Jb *b, const char *msg) {
 static void jb_put(Jb *b, const char *s, size_t n) {
   if (b->err)
     return;
-  if (b->n + n + 1 > b->cap) {
-    size_t nc = b->cap ? b->cap * 2 : 64;
-    char *np;
-    while (nc < b->n + n + 1)
-      nc *= 2;
-    np = (char *)sz_alloc(nc);
-    if (b->p && b->n)
-      memcpy(np, b->p, b->n);
-    sz_free(b->p);
-    b->p = np;
-    b->cap = nc;
-  }
+  buf_grow(&b->p, b->n, &b->cap, b->n + n + 1);
   memcpy(b->p + b->n, s, n);
   b->n += n;
   b->p[b->n] = '\0';
