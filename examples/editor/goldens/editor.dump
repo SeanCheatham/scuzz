@@ -18,7 +18,7 @@ world
 int[8] = 0
 list[9] = []
 int[10] = 0
-list[11] = ["sample.txt", "scuzz.toml", "src/"]
+list[11] = ["chrome.scuzz_verify", "sample.txt", "scuzz.toml", "src/"]
 list[12] = []
 int[13] = 0
 str[14] = ""
@@ -40,6 +40,7 @@ split:28
 text:Files
 scroll:scroll
 list:list
+button:chrome.scuzz_verify
 button:sample.txt
 button:scuzz.toml
 button:src/
@@ -67,24 +68,25 @@ overlay:0
 overlay:0
 
 [taps]
-0 sample.txt 36,58 67x32
-1 scuzz.toml 36,98 66x32
-2 src/ 36,138 48x32
-3 Save 309,36 48x32
-4 Check 365,36 49x32
-5 Find 422,36 48x32
-6 Complete 478,36 63x32
-7 Hover 549,36 48x32
-8 Format 605,36 53x32
-9 Def 666,36 48x32
-10 Rename 722,36 58x32
-11 Fix 788,36 48x32
-12 Palette 844,36 52x32
-13 Save all 309,76 56x32
-14 Run 373,76 48x32
-15 Fuzz 429,76 48x32
-16 sample.txt 321,152 67x32
-17 x sample.txt 396,152 75x32
+0 chrome.scuzz_verify 36,58 105x32
+1 sample.txt 36,98 67x32
+2 scuzz.toml 36,138 66x32
+3 src/ 36,178 48x32
+4 Save 309,36 48x32
+5 Check 365,36 49x32
+6 Find 422,36 48x32
+7 Complete 478,36 63x32
+8 Hover 549,36 48x32
+9 Format 605,36 53x32
+10 Def 666,36 48x32
+11 Rename 722,36 58x32
+12 Fix 788,36 48x32
+13 Palette 844,36 52x32
+14 Save all 309,76 56x32
+15 Run 373,76 48x32
+16 Fuzz 429,76 48x32
+17 sample.txt 321,152 67x32
+18 x sample.txt 396,152 75x32
 
 [fields]
 
