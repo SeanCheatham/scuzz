@@ -377,7 +377,25 @@ void sz_testrt_session_baseline_check(void) {
     return;
   sz_alloc_stats(&b, &c);
   rc = sz_alloc_rc_sum();
-  baseline_fail("session", g_sess_count, c, g_sess_bytes, b, g_sess_rc, rc);
+  /* A UI session legitimately ends holding changed state (typed text, added
+     items): a replaced block keeps the count level while bytes drift. Leaks
+     surface as net block-count or retain-sum growth. Byte drift across events
+     is not leakage; the idle-pump leak oracle keeps bytes strict where no
+     events run. */
+  if (c > g_sess_count) {
+    fprintf(stderr,
+            "scuzz: heap baseline: session leaked blocks (count %zu -> %zu, "
+            "bytes %zu -> %zu)\n",
+            g_sess_count, c, g_sess_bytes, b);
+    sz_panic("heap baseline: session leaked live blocks");
+  }
+  if (rc > g_sess_rc) {
+    fprintf(stderr,
+            "scuzz: unpaired acquire: leftover retain (session rc %llu -> "
+            "%llu)\n",
+            (unsigned long long)g_sess_rc, (unsigned long long)rc);
+    sz_panic("unpaired acquire: leftover retain");
+  }
 }
 
 void sz_testrt_plant_skip_orphan_cancel(void) { g_skip_orphan_cancel = 1; }

@@ -1,0 +1,6 @@
+[fuzz]
+seed = 66
+schedule_seed = "64"
+pct_d = 2
+pct_k = 0
+events = ["tap 24"]

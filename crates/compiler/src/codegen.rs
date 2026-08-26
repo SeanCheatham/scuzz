@@ -7183,7 +7183,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Signal.setStr" => {
             writeln!(
@@ -8347,6 +8347,30 @@ record Point(x: Int, y: Int)
         assert!(
             ir[at..].contains("sz_release"),
             "expected last-use release of list temp:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_signal_get_str_copy_released_after_last_use() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    s = Signal.str("a")
+    d = Signal.getStr(s)
+    n = Str.len(d)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = " = call ptr @sz_lang_signal_str_get(ptr ";
+        let at = ir.find(needle).expect("expected sz_lang_signal_str_get");
+        let start = ir[..at].rfind('%').expect("expected result SSA");
+        let name = ir[start..at].trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected release of the owned getStr copy after last use:\n{ir}"
         );
     }
 

@@ -8891,6 +8891,20 @@ int main(void) {
     unsetenv("SCUZZ_TESTRT");
   }
 
+  /* Session baseline: byte drift at equal block count is retained end-state,
+     not a leak. Replacing a block with a larger one must not fail. */
+  {
+    SzString *a;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    a = sz_string_from_cstr("a");
+    sz_testrt_session_baseline_snapshot();
+    sz_release(a);
+    a = sz_string_from_cstr("abcdef");
+    sz_testrt_session_baseline_check();
+    sz_release(a);
+    unsetenv("SCUZZ_TESTRT");
+  }
+
   /* Acquire/release: leftover retain fails; double release fails. */
   {
     pid_t pid;

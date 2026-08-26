@@ -1,0 +1,6 @@
+[fuzz]
+seed = 43
+schedule_seed = "43"
+pct_d = 3
+pct_k = 3
+events = ["drive addItem d", "type 0 dlebqjv", "pump 3", "drive addItem u", "backspace 0 1", "tap 23", "pump 3", "backspace 0 1", "backspace 0 1"]
