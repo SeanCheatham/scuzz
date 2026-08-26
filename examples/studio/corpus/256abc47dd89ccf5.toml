@@ -1,0 +1,10 @@
+[fuzz]
+seed = 64
+schedule_seed = "64"
+pct_d = 2
+pct_k = 0
+fault_seed = "52"
+fault_kind = "fs"
+fault_n = 6
+fault_mode = "corrupt"
+events = ["tap 22"]

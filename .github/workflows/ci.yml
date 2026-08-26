@@ -493,6 +493,7 @@ jobs:
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
+          cargo run -p scuzz -- fuzz --iterations 16 examples/studio
           if cargo run -p scuzz -- fuzz --no-fail-fast --iterations 8 examples/bad-example; then
             echo "fuzz should have found the property failure" && exit 1
           fi
