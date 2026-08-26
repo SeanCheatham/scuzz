@@ -1196,13 +1196,7 @@ impl UnclaimedItem {
 }
 
 const STATE_FIELDS: [&str; 7] = [
-    "signals",
-    "a11y",
-    "last_hit",
-    "drive",
-    "effects",
-    "fibers",
-    "fault",
+    "signals", "a11y", "last_hit", "drive", "effects", "fibers", "fault",
 ];
 
 const CONTROL_CTORS: &[(&str, usize, &str)] = &[
@@ -2502,10 +2496,7 @@ def wrote(t: Timeline): Verdict =
 "#,
         )
         .unwrap();
-        assert_eq!(
-            claimed_state_fields_text(&p),
-            "effects\nfibers\nfault\n"
-        );
+        assert_eq!(claimed_state_fields_text(&p), "effects\nfibers\nfault\n");
     }
 
     #[test]

@@ -1,2 +1,3 @@
 def wroteNote(t: Timeline): Verdict =
   Verdict.any(t, i => Timeline.effectHas(t, i, "fs.write"))
+
