@@ -1,5 +1,9 @@
 def checkOrder(): IO[Unit] =
   for {
-    _ <- leftFirst()
+    order = Signal.int(0)
+    q <- Queue.unbounded()
+    _ <- IO.both(Queue.offer(q, "L"), Queue.offer(q, "R"))
+    first <- Queue.take(q)
+    _ = Signal.set(order, if (Str.eq(first, "L")) 1 else 0)
   } yield ()
 

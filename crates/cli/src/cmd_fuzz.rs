@@ -7,9 +7,9 @@ use scuzz_compiler::fuzz::{
     classify_replay, corpus_entry_name_fault, corpus_keep, corpus_push, corpus_sorted_names,
     count_dump_section, decode_fault_seed, decode_sched_seed, drive_line_shrinks,
     drive_script_lines, dump_push, encode_fault_plan, encode_sched_plan, exhaust_alphabet,
-    fault_seed_key, fuzz_mutate_sites, fuzz_pick_fault, fuzz_pick_sched, fuzz_pick_script,
-    lines_nonempty, live_verify_split, missing_from, parse_repro, repro_text, script_has_drive,
-    script_text, FaultMode, Repro, PCT_D_MIN, PCT_K_MAX,
+    fault_seed_key, fuzz_mutate_sites, fuzz_perturb_sched, fuzz_pick_fault, fuzz_pick_sched,
+    fuzz_pick_script, lines_nonempty, live_verify_split, missing_from, parse_repro, repro_text,
+    script_has_drive, script_text, FaultMode, Repro, PCT_D_MIN, PCT_K_MAX,
 };
 use scuzz_compiler::manifest::load_manifest;
 use scuzz_compiler::mutate::{
@@ -149,7 +149,11 @@ pub fn cmd_fuzz(
     oracles: bool,
     no_fail_fast: bool,
     minimize_corpus: bool,
+    relate: bool,
 ) -> Result<ExitCode> {
+    if relate {
+        return fuzz_relate(path);
+    }
     if minimize_corpus {
         return fuzz_minimize_corpus(path);
     }
@@ -315,6 +319,159 @@ fn minimize_observe(
     kept.sort();
     kept.dedup();
     Ok((code != 0, kept))
+}
+
+/// Deterministic perturb seed for an entry: FNV-1a over the entry content
+/// (label, schedule seed, events) and its index.
+fn relate_seed(label: &str, sched: &str, events: &[String], n: usize) -> i64 {
+    let key = format!("{label}|{sched}|{}", events.join(","));
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in key.bytes().chain(n.to_le_bytes()) {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    (h & 0x7fff_ffff_ffff_ffff) as i64
+}
+
+/// Label for a relate entry: corpus file name, or the seeds.txt drive line.
+fn relate_label(path: &Path, repro: &Repro) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if name == "seeds.txt" {
+        format!(
+            "seeds.txt:{}",
+            repro.events.first().cloned().unwrap_or_default()
+        )
+    } else {
+        name
+    }
+}
+
+/// Replay `events` under the verify graph, dumping the v1 timeline to `out`.
+fn relate_exec(
+    ctx: &FuzzCtx,
+    events: &[String],
+    schedule_seed: &str,
+    fault_seed: &str,
+    out: &Path,
+    tag: &str,
+) -> Result<i32> {
+    let dir = out.parent().expect("relate dir");
+    let reached = dir.join(format!("{tag}.sometimes"));
+    let _ = std::fs::remove_file(out);
+    std::fs::write(&reached, "")?;
+    if ctx.is_ui {
+        let script = dir.join(format!("{tag}.script.txt"));
+        let dump = dir.join(format!("{tag}.dump.txt"));
+        std::fs::write(&script, script_text(events))?;
+        std::fs::write(&dump, "")?;
+        run_testrt(
+            &ctx.exe,
+            &reached,
+            schedule_seed,
+            fault_seed,
+            Some(TestrtUi {
+                script: &script,
+                dump: &dump,
+                width: ctx.w,
+                height: ctx.h,
+            }),
+            None,
+            Some(out),
+        )
+    } else {
+        let drive_path = dir.join(format!("{tag}.drive.txt"));
+        std::fs::write(&drive_path, script_text(events))?;
+        let drive = if events.is_empty() {
+            None
+        } else {
+            Some(drive_path.as_path())
+        };
+        run_testrt(
+            &ctx.exe,
+            &reached,
+            schedule_seed,
+            fault_seed,
+            None,
+            drive,
+            Some(out),
+        )
+    }
+}
+
+/// Judge mode: the verify binary loads the pair and runs every relation claim.
+fn relate_judge(ctx: &FuzzCtx, a: &Path, b: &Path) -> Result<i32> {
+    let status = std::process::Command::new(&ctx.exe)
+        .env(
+            "SCUZZ_JUDGE_REL",
+            format!("{},{}", a.display(), b.display()),
+        )
+        .status()
+        .with_context(|| format!("running {}", ctx.exe.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            eprintln!("scuzz: judge killed by signal {sig}");
+        }
+    }
+    Ok(status.code().unwrap_or(1))
+}
+
+/// `--relate`: replay each corpus entry (and seeds.txt zero-arg oracle) twice —
+/// its own schedule seed and a perturbed one — then judge every registered
+/// (Timeline, Timeline) => Verdict relation claim over the pair of v1 dumps.
+/// Standalone mode: ignores the iteration budget.
+fn fuzz_relate(path: &Path) -> Result<ExitCode> {
+    let ctx = prepare_fuzz(path)?;
+    let entries = load_corpus(&ctx.project_dir)?;
+    let relate_dir = ctx.fuzz_dir.join("relate");
+    std::fs::create_dir_all(&relate_dir)?;
+    if entries.is_empty() {
+        println!("scuzz fuzz: --relate: no corpus entries");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let mut failures = 0i64;
+    for (n, (path, repro)) in entries.iter().enumerate() {
+        let label = relate_label(path, repro);
+        let sched = repro.schedule_seed.clone().unwrap_or_default();
+        let fault = repro_fault(repro);
+        let pert = fuzz_perturb_sched(&sched, relate_seed(&label, &sched, &repro.events, n));
+        let a = relate_dir.join(format!("{n}.a.txt"));
+        let b = relate_dir.join(format!("{n}.b.txt"));
+        let code_a = relate_exec(&ctx, &repro.events, &sched, &fault, &a, &format!("{n}.a"))?;
+        let code_b = relate_exec(&ctx, &repro.events, &pert, &fault, &b, &format!("{n}.b"))?;
+        let mut failed = false;
+        if code_a != 0 {
+            println!("relate failed: {label} (run a exited {code_a})");
+            failed = true;
+        }
+        if code_b != 0 {
+            println!("relate failed: {label} (run b exited {code_b})");
+            failed = true;
+        }
+        if a.is_file() && b.is_file() {
+            let jcode = relate_judge(&ctx, &a, &b)?;
+            if jcode != 0 {
+                failed = true;
+            }
+        }
+        if failed {
+            failures += 1;
+        } else {
+            println!("relate ok: {label}");
+        }
+    }
+    if failures > 0 {
+        bail!(
+            "fuzz --relate: {failures} of {} entries failed",
+            entries.len()
+        );
+    }
+    println!("scuzz fuzz: --relate: {} entries ok", entries.len());
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Accept a minimized candidate when pass/fail status and the reached declared
@@ -1059,6 +1216,7 @@ fn mutate_exec_ui_events(
             height: h,
         }),
         None,
+        None,
     )?;
     let timeline = std::fs::read_to_string(out_dir.join("timeline.txt")).unwrap_or_default();
     Ok((code, timeline))
@@ -1104,7 +1262,7 @@ fn mutate_exec_io_at(
     } else {
         Some(drive_path.as_path())
     };
-    let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive)?;
+    let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive, None)?;
     let timeline = std::fs::read_to_string(out_dir.join("timeline.txt")).unwrap_or_default();
     Ok((code, timeline))
 }
@@ -2012,6 +2170,7 @@ fn fuzz_exec(
             height: h,
         }),
         None,
+        None,
     )?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
     merge_classify(
@@ -2044,7 +2203,7 @@ fn fuzz_exec_io(
     } else {
         Some(drive_path.as_path())
     };
-    let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive)?;
+    let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive, None)?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
     merge_classify(
         &fuzz_dir.join("classify.dump"),

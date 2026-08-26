@@ -85,6 +85,7 @@ fn empty_program(file: &str) -> Program {
         driver_names: Vec::new(),
         verify_seeds: Vec::new(),
         verify_preds: Vec::new(),
+        verify_rels: Vec::new(),
     }
 }
 
@@ -229,6 +230,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         driver_names: Vec::new(),
         verify_seeds: Vec::new(),
         verify_preds: Vec::new(),
+        verify_rels: Vec::new(),
     })
 }
 
@@ -352,6 +354,7 @@ pub fn parse_sources_recovering(
             driver_names: Vec::new(),
             verify_seeds: Vec::new(),
             verify_preds: Vec::new(),
+            verify_rels: Vec::new(),
         }),
         errors,
     )
@@ -631,6 +634,7 @@ impl Parser {
                 driver_names: Vec::new(),
                 verify_seeds: Vec::new(),
                 verify_preds: Vec::new(),
+                verify_rels: Vec::new(),
             },
             errors,
         )

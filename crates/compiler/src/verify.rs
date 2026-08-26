@@ -1,4 +1,5 @@
 //! `*.scuzz_verify` files. Author claims of shape `Timeline => Verdict`, or
+//! `(Timeline, Timeline) => Verdict` relation claims over a pair of runs, or
 //! generator-friendly `Bool` drive oracles. Files may sit anywhere in the
 //! package. They do not pair with live sources.
 
@@ -125,9 +126,17 @@ pub fn seed_table_text(program: &Program) -> String {
 pub fn apply_verifies(program: &mut Program, files: &[VerifySource]) -> Result<(), OverlayError> {
     let mut names = Vec::new();
     let mut timeline = Vec::new();
+    let mut rels = Vec::new();
     let mut drives = Vec::new();
     for ov in files {
-        apply_one(program, ov, &mut names, &mut timeline, &mut drives)?;
+        apply_one(
+            program,
+            ov,
+            &mut names,
+            &mut timeline,
+            &mut rels,
+            &mut drives,
+        )?;
     }
     let mut seeds = Vec::new();
     for name in &drives {
@@ -145,6 +154,7 @@ pub fn apply_verifies(program: &mut Program, files: &[VerifySource]) -> Result<(
     seeds.sort();
     seeds.dedup();
     program.verify_preds = timeline;
+    program.verify_rels = rels;
     program.verify_seeds = seeds;
     Ok(())
 }
@@ -154,6 +164,7 @@ fn apply_one(
     ov: &VerifySource,
     names: &mut Vec<String>,
     timeline: &mut Vec<String>,
+    rels: &mut Vec<String>,
     drives: &mut Vec<String>,
 ) -> Result<(), OverlayError> {
     let prog = parse_file(&ov.text, &ov.label)?;
@@ -178,6 +189,8 @@ fn apply_one(
         names.push(d.name.clone());
         if is_timeline_pred(&d) {
             timeline.push(d.name.clone());
+        } else if is_timeline_rel(&d) {
+            rels.push(d.name.clone());
         } else {
             drives.push(d.name.clone());
         }
@@ -261,18 +274,18 @@ fn check_verify_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
             d.name
         )));
     }
-    if is_timeline_pred(d) {
+    if is_timeline_pred(d) || is_timeline_rel(d) {
         return Ok(());
+    }
+    if d.params.iter().any(|p| is_timeline_ty(&p.ty)) {
+        return Err(OverlayError::Msg(format!(
+            "{label}: verify def `{}` must take one Timeline parameter (session claim) or exactly two (relation claim), and nothing else",
+            d.name
+        )));
     }
     if d.params.len() > 3 {
         return Err(OverlayError::Msg(format!(
             "{label}: verify def `{}` takes at most three generator-friendly params",
-            d.name
-        )));
-    }
-    if d.params.iter().any(|p| is_timeline_ty(&p.ty)) {
-        return Err(OverlayError::Msg(format!(
-            "{label}: verify def `{}` must take one Timeline parameter",
             d.name
         )));
     }
@@ -289,6 +302,10 @@ fn check_verify_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
 
 fn is_timeline_pred(d: &FunDef) -> bool {
     d.params.len() == 1 && is_timeline_ty(&d.params[0].ty) && is_verdict_ty(&d.ret)
+}
+
+fn is_timeline_rel(d: &FunDef) -> bool {
+    d.params.len() == 2 && d.params.iter().all(|p| is_timeline_ty(&p.ty)) && is_verdict_ty(&d.ret)
 }
 
 fn is_verdict_ty(ty: &Type) -> bool {
@@ -367,6 +384,61 @@ mod tests {
         let d = live.defs.iter().find(|d| d.name == "countOk").unwrap();
         assert!(d.is_verify);
         assert_eq!(d.module, "count");
+    }
+
+    #[test]
+    fn apply_relation_claim() {
+        let mut live = parse("@main def main: IO[Unit] =\n  IO.println(\"x\")\n").unwrap();
+        apply_verifies(
+            &mut live,
+            &[src(
+                "def sameOrder(a: Timeline, b: Timeline): Verdict =\n  if (Timeline.len(a) == Timeline.len(b)) Verdict.ok() else Verdict.fail(-1, \"lengths differ\")\n",
+            )],
+        )
+        .unwrap();
+        assert_eq!(live.verify_rels, vec!["sameOrder".to_string()]);
+        assert!(live.verify_preds.is_empty());
+        let d = live.defs.iter().find(|d| d.name == "sameOrder").unwrap();
+        assert!(d.is_verify);
+    }
+
+    #[test]
+    fn reject_bool_relation_claim() {
+        let mut live = parse("@main def main: IO[Unit] =\n  IO.println(\"x\")\n").unwrap();
+        let err = apply_verifies(
+            &mut live,
+            &[src(
+                "def sameOrder(a: Timeline, b: Timeline): Bool =\n  Timeline.len(a) == Timeline.len(b)\n",
+            )],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must return Verdict"), "{err}");
+    }
+
+    #[test]
+    fn reject_relation_extra_param() {
+        let mut live = parse("@main def main: IO[Unit] =\n  IO.println(\"x\")\n").unwrap();
+        let err = apply_verifies(
+            &mut live,
+            &[src(
+                "def sameOrder(a: Timeline, b: Timeline, n: Int): Verdict =\n  Verdict.ok()\n",
+            )],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("relation claim"), "{err}");
+    }
+
+    #[test]
+    fn reject_three_timeline_params() {
+        let mut live = parse("@main def main: IO[Unit] =\n  IO.println(\"x\")\n").unwrap();
+        let err = apply_verifies(
+            &mut live,
+            &[src(
+                "def three(a: Timeline, b: Timeline, c: Timeline): Verdict =\n  Verdict.ok()\n",
+            )],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("relation claim"), "{err}");
     }
 
     #[test]

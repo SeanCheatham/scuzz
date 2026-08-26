@@ -71,6 +71,9 @@ pub fn emit_llvm(program: &Program) -> String {
     for name in &program.verify_preds {
         intern_str(&mut strs, name);
     }
+    for name in &program.verify_rels {
+        intern_str(&mut strs, name);
+    }
     intern_drive_decode_names(program, &mut strs);
 
     let enum_tags = build_enum_tags(&program.enums);
@@ -468,6 +471,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare void @sz_property_sometimes(ptr)").unwrap();
     writeln!(out, "declare void @sz_property_classify(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_verify_register(ptr, ptr)").unwrap();
+    writeln!(out, "declare void @sz_verify_register_rel(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_len(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_signal_int(ptr, i64, i64)").unwrap();
     writeln!(
@@ -554,6 +558,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "entry:").unwrap();
     emit_driver_registers(&mut out, program, &strs);
     emit_verify_registers(&mut out, program, &strs);
+    emit_verify_rel_registers(&mut out, program, &strs);
     out.push_str(&body_expr.code);
     let io_val = ensure_io(
         &mut out,
@@ -1246,6 +1251,32 @@ fn emit_verify_registers(out: &mut String, program: &Program, strs: &[String]) {
         writeln!(
             out,
             "  call void @sz_verify_register(ptr %ver{i}_gep, ptr @{sym})"
+        )
+        .unwrap();
+    }
+}
+
+fn emit_verify_rel_registers(out: &mut String, program: &Program, strs: &[String]) {
+    for (i, name) in program.verify_rels.iter().enumerate() {
+        let idx = strs
+            .iter()
+            .position(|s| s == name)
+            .unwrap_or_else(|| panic!("verify rel name interned: {name}"));
+        let len = name.len() + 1;
+        let d = program
+            .defs
+            .iter()
+            .find(|d| d.is_verify && d.name == *name)
+            .expect("verify rel def");
+        let sym = user_symbol(&d.module, &d.name);
+        writeln!(
+            out,
+            "  %vrl{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  call void @sz_verify_register_rel(ptr %vrl{i}_gep, ptr @{sym})"
         )
         .unwrap();
     }
@@ -7337,11 +7368,18 @@ fn emit_call(
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Verdict.fail" => {
-            // sz_verdict_fail stores the `why` pointer; the string outlives the call.
+            // sz_verdict_fail stores the `why` cstr; the SzString is never
+            // released (judge-side failure path), so the bytes outlive the call.
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_verdict_fail(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
+                "  %{prefix}_why = call ptr @sz_string_cstr(ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_verdict_fail(i64 {}, ptr %{prefix}_why)",
+                emitted_args[0].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -12583,6 +12621,53 @@ record Point(x: Int, y: Int)
             "expected verify register call:\n{ir}"
         );
         assert!(ir.contains("countOk"), "expected interned claim id:\n{ir}");
+    }
+
+    #[test]
+    fn emit_verify_registers_relation_claim() {
+        let mut p = parse(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x")
+"#,
+        )
+        .unwrap();
+        crate::verify::apply_verifies(
+            &mut p,
+            &[crate::verify::VerifySource {
+                label: "pkg/count.scuzz_verify".into(),
+                text: concat!(
+                    "def sameCount(a: Timeline, b: Timeline): Verdict =\n",
+                    "  if (Timeline.signalInt(a, Timeline.len(a) - 1, 0) == Timeline.signalInt(b, Timeline.len(b) - 1, 0)) Verdict.ok() else Verdict.fail(0, \"differs\")\n",
+                )
+                .into(),
+                path: std::path::PathBuf::new(),
+            }],
+        )
+        .expect("verify");
+        assert_eq!(p.verify_rels, vec!["sameCount".to_string()]);
+        crate::typ::inject_builtin_enums(&mut p.enums);
+        let p = crate::lower::lower_program(p);
+        let p = crate::typ::expand_impls(p).expect("impls");
+        let p = crate::typ::resolve_named_args(p).expect("named");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        let p = crate::typ::monomorphize(p).expect("mono");
+        let p = crate::typ::resolve_field_access(p).expect("fields after mono");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("declare void @sz_verify_register_rel(ptr, ptr)"),
+            "expected verify_register_rel declare:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_verify_register_rel(ptr "),
+            "expected verify rel register call:\n{ir}"
+        );
+        assert!(
+            ir.contains("sameCount"),
+            "expected interned claim id:\n{ir}"
+        );
     }
 
     #[test]

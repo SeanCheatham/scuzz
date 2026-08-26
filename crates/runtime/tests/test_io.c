@@ -1653,6 +1653,13 @@ static int wait_aborted(pid_t pid) {
   return WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT;
 }
 
+static void write_text(const char *path, const char *text) {
+  FILE *f = fopen(path, "w");
+  assert(f);
+  fputs(text, f);
+  fclose(f);
+}
+
 static char *slurp_path(const char *path) {
   FILE *f = fopen(path, "r");
   char *buf;
@@ -1712,6 +1719,15 @@ static SzVerdict *verify_kit_combo(void *tl) {
   SzVerdict *any = sz_verdict_any(tl, (void *)verify_pred_true, NULL);
   SzVerdict *fallback = sz_verdict_fail(0, "unused");
   return sz_verdict_and(every, sz_verdict_or(any, fallback));
+}
+
+/* Relation claim: final int signal 0 must match across the pair. */
+static SzVerdict *rel_final_int_eq(void *a, void *b) {
+  int64_t ai = sz_timeline_len(a) - 1;
+  int64_t bi = sz_timeline_len(b) - 1;
+  if (sz_timeline_signal_int(a, ai, 0) == sz_timeline_signal_int(b, bi, 0))
+    return sz_verdict_ok();
+  return sz_verdict_fail(0, "final count differs across schedules");
 }
 
 int main(void) {
@@ -9258,6 +9274,94 @@ int main(void) {
     unsetenv("SCUZZ_TIMELINE_DUMP");
     unsetenv("SCUZZ_TESTRT");
     remove(path);
+  }
+
+  /* v1 timeline dump loader: round-trip through tl_dump_file. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_load.dump";
+    void *tl;
+    SzString *needle;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_TIMELINE_DUMP", path, 1);
+    sz_property_session_reset();
+    sz_property_stash_a11y("button:+1");
+    sz_property_stash_last_hit("button:+1");
+    sz_timeline_set_drive("drive plusN 0");
+    sz_property_session_step();
+    sz_property_stash_a11y("text:count = 1");
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TIMELINE_DUMP");
+    unsetenv("SCUZZ_TESTRT");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 2);
+    needle = sz_string_from_cstr("button:+1");
+    assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
+    assert(sz_timeline_last_hit_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    needle = sz_string_from_cstr("text:count = 1");
+    assert(sz_timeline_a11y_has(tl, 1, needle) == 1);
+    assert(sz_timeline_a11y_has(tl, 0, needle) == 0);
+    sz_release(needle);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
+  /* Loader parses signal lines; bad headers are rejected. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_sig.dump";
+    void *tl;
+    SzString *needle;
+    write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+                     "x\nsignals:\nint[0] = 7\nlist[1] = [\"a\", "
+                     "\"b\"]\na11y:\nbutton:+1\n");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 1);
+    assert(sz_timeline_signal_int(tl, 0, 0) == 7);
+    assert(sz_timeline_signal_list_len(tl, 0, 1) == 2);
+    needle = sz_string_from_cstr("button:+1");
+    assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    sz_timeline_free(tl);
+    write_text(path, "# timeline v=2 n=0\n");
+    assert(sz_timeline_load(path) == NULL);
+    write_text(path, "nonsense\n");
+    assert(sz_timeline_load(path) == NULL);
+    assert(sz_timeline_load("/tmp/scuzz_no_such_timeline_dump.txt") == NULL);
+    remove(path);
+  }
+
+  /* Relation claims judge a pair of dumps in judge mode. */
+  {
+    const char *a = "/tmp/scuzz_test_io_rel_a.dump";
+    const char *b = "/tmp/scuzz_test_io_rel_b.dump";
+    write_text(a, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+                  "x\nsignals:\nint[0] = 1\na11y:\n");
+    write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+                  "x\nsignals:\nint[0] = 1\na11y:\n");
+    sz_property_session_reset();
+    sz_verify_register_rel("sameFinal", rel_final_int_eq);
+    assert(sz_judge_rel_main(
+               "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
+           0);
+    write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+                  "x\nsignals:\nint[0] = 2\na11y:\n");
+    assert(sz_judge_rel_main(
+               "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
+           1);
+    /* No relation claims registered: note, clean exit. */
+    sz_property_session_reset();
+    assert(sz_judge_rel_main(
+               "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
+           0);
+    /* Missing dump is a judge error. */
+    assert(sz_judge_rel_main("/tmp/scuzz_test_io_rel_a.dump,/tmp/"
+                             "scuzz_no_such_b.dump") == 2);
+    remove(a);
+    remove(b);
   }
 
   puts("runtime io tests ok");

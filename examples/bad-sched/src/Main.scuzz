@@ -1,9 +1,2 @@
-def leftFirst(): IO[String] =
-  for {
-    q <- Queue.unbounded()
-    _ <- IO.both(Queue.offer(q, "L"), Queue.offer(q, "R"))
-    first <- Queue.take(q)
-  } yield first.require(Str.eq(first, "L"))
-
 @main def main: IO[Unit] =
   IO.println("sched-example")

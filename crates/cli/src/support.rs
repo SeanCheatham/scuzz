@@ -44,6 +44,7 @@ pub struct TestrtUi<'a> {
 }
 
 /// Run a verify-graph binary under TestRuntime. `ui` sets Headless + script/dump.
+/// `timeline` overrides the SCUZZ_TIMELINE_DUMP target (default: sibling of `reached`).
 pub fn run_testrt(
     exe: &Path,
     reached: &Path,
@@ -51,6 +52,7 @@ pub fn run_testrt(
     fault_seed: &str,
     ui: Option<TestrtUi<'_>>,
     drive_script: Option<&Path>,
+    timeline: Option<&Path>,
 ) -> Result<i32> {
     let mut cmd = Command::new(exe);
     cmd.env("SCUZZ_TESTRT", "1")
@@ -59,8 +61,11 @@ pub fn run_testrt(
         .env("SCUZZ_KIT", "sealed");
     if let Some(parent) = reached.parent() {
         cmd.env("SCUZZ_CLASSIFY_DUMP", parent.join("classify.dump"));
-        cmd.env("SCUZZ_TIMELINE_DUMP", parent.join("timeline.txt"));
         cmd.env("SCUZZ_STATE_VARIED_DUMP", parent.join("state.varied"));
+        let tl = timeline
+            .map(|t| t.to_path_buf())
+            .unwrap_or_else(|| parent.join("timeline.txt"));
+        cmd.env("SCUZZ_TIMELINE_DUMP", tl);
     }
     if let Some(ui) = ui {
         cmd.env("SCUZZ_UI_RUNTIME", "headless")

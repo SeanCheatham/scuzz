@@ -242,6 +242,39 @@ void sz_signal_str_free(SzSignalStr *s) {
   sz_free(s);
 }
 
+/* --- Lang-facing wrappers (kept here so Signal use does not drag in ui.o) -- */
+
+SzSignalInt *sz_lang_signal_int(int64_t initial) { return sz_signal_int(initial); }
+
+int64_t sz_lang_signal_get(SzSignalInt *s) { return sz_signal_int_get(s); }
+
+void *sz_lang_signal_set(SzSignalInt *s, int64_t v) {
+  sz_signal_int_set(s, v);
+  return NULL;
+}
+
+SzSignalStr *sz_lang_signal_str(SzString *initial) {
+  return sz_signal_str(initial ? sz_string_cstr(initial) : "");
+}
+
+SzString *sz_lang_signal_str_get(SzSignalStr *s) {
+  return sz_string_from_cstr(sz_signal_str_get(s));
+}
+
+void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v) {
+  sz_signal_str_set(s, v ? sz_string_cstr(v) : "");
+  return NULL;
+}
+
+SzSignalList *sz_lang_signal_list(SzList *initial) { return sz_signal_list(initial); }
+
+SzList *sz_lang_signal_list_get(SzSignalList *s) { return sz_signal_list_get(s); }
+
+void *sz_lang_signal_list_set(SzSignalList *s, SzList *v) {
+  sz_signal_list_set(s, v);
+  return NULL;
+}
+
 SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env) {
   SzSignalStr *s = (SzSignalStr *)sz_alloc_zero(sizeof(SzSignalStr));
   s->map_src = src;

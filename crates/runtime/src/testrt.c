@@ -1738,6 +1738,14 @@ static SzVerifyProp g_verify[SZ_SESSION_MAX];
 static int g_verify_n;
 
 typedef struct {
+  char *name;
+  SzVerdict *(*fn)(void *, void *);
+} SzVerifyRel;
+
+static SzVerifyRel g_verify_rel[SZ_SESSION_MAX];
+static int g_verify_rel_n;
+
+typedef struct {
   char *signals;
   char *a11y;
   char *last_hit;
@@ -2044,6 +2052,243 @@ static void tl_dump_file(void) {
   fclose(f);
 }
 
+/* --- v1 dump loader + relation judge (SCUZZ_JUDGE_REL) --------------------- */
+
+static void verdict_msg(char *buf, size_t cap, const char *name,
+                        const SzVerdict *v);
+
+static char *tl_read_all(const char *path) {
+  FILE *f = fopen(path, "rb");
+  long n;
+  char *buf;
+  if (!f)
+    return NULL;
+  fseek(f, 0, SEEK_END);
+  n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (n < 0)
+    n = 0;
+  buf = (char *)malloc((size_t)n + 1);
+  if (!buf) {
+    fclose(f);
+    sz_panic("timeline: out of memory");
+  }
+  n = (long)fread(buf, 1, (size_t)n, f);
+  fclose(f);
+  buf[n] = 0;
+  return buf;
+}
+
+static char *tl_copy_n(const char *s, size_t n) {
+  char *c = (char *)malloc(n + 1);
+  if (!c)
+    sz_panic("timeline: out of memory");
+  memcpy(c, s, n);
+  c[n] = 0;
+  return c;
+}
+
+static void tl_cat(char **buf, size_t *len, size_t *cap, const char *s,
+                   size_t n) {
+  if (*len + n + 1 > *cap) {
+    size_t ncap = *cap ? *cap : 64;
+    char *nb;
+    while (*len + n + 1 > ncap)
+      ncap *= 2;
+    nb = (char *)malloc(ncap);
+    if (!nb)
+      sz_panic("timeline: out of memory");
+    if (*buf) {
+      memcpy(nb, *buf, *len);
+      free(*buf);
+    }
+    *buf = nb;
+    *cap = ncap;
+  }
+  memcpy(*buf + *len, s, n);
+  *len += n;
+  (*buf)[*len] = 0;
+}
+
+typedef struct {
+  const char *cur;
+} SzTlScan;
+
+/* Next line without its newline. 0 at EOF. */
+static int tl_scan_line(SzTlScan *s, const char **start, size_t *len) {
+  const char *nl;
+  if (!s->cur || !*s->cur)
+    return 0;
+  nl = strchr(s->cur, '\n');
+  if (!nl) {
+    *start = s->cur;
+    *len = strlen(s->cur);
+    s->cur += *len;
+    return 1;
+  }
+  *start = s->cur;
+  *len = (size_t)(nl - s->cur);
+  s->cur = nl + 1;
+  return 1;
+}
+
+static int tl_scan_peek(SzTlScan *s, const char *prefix) {
+  return s->cur && strncmp(s->cur, prefix, strlen(prefix)) == 0;
+}
+
+static int tl_expect(SzTlScan *scan, const char *want) {
+  const char *line;
+  size_t len;
+  if (!tl_scan_line(scan, &line, &len))
+    return 0;
+  return len == strlen(want) && strncmp(line, want, len) == 0;
+}
+
+void sz_timeline_free(void *tl) {
+  SzTimeline *t = (SzTimeline *)tl;
+  int i;
+  if (!t)
+    return;
+  for (i = 0; i < t->n; i++) {
+    free(t->states[i].signals);
+    free(t->states[i].a11y);
+    free(t->states[i].last_hit);
+    free(t->states[i].drive);
+  }
+  free(t->states);
+  free(t);
+}
+
+/* Parse the exact text tl_dump_file writes: one-line last_hit/drive fields,
+ * then the signals block up to the a11y: marker, then a11y up to the next
+ * state marker or EOF. */
+void *sz_timeline_load(const char *path) {
+  char *buf = tl_read_all(path);
+  SzTlScan scan;
+  const char *line;
+  size_t len;
+  char hdr[64];
+  int v = -1;
+  int n = -1;
+  int i;
+  SzTimeline *t;
+  if (!buf) {
+    fprintf(stderr, "scuzz: judge: cannot read %s\n", path ? path : "?");
+    return NULL;
+  }
+  scan.cur = buf;
+  if (!tl_scan_line(&scan, &line, &len) || len >= sizeof hdr) {
+    fprintf(stderr, "scuzz: judge: %s: missing timeline header\n", path);
+    free(buf);
+    return NULL;
+  }
+  memcpy(hdr, line, len);
+  hdr[len] = 0;
+  if (sscanf(hdr, "# timeline v=%d n=%d", &v, &n) != 2 ||
+      v != SZ_TIMELINE_DUMP_VERSION || n < 0) {
+    fprintf(stderr, "scuzz: judge: %s: expected timeline v=%d dump\n", path,
+            SZ_TIMELINE_DUMP_VERSION);
+    free(buf);
+    return NULL;
+  }
+  t = (SzTimeline *)malloc(sizeof(SzTimeline));
+  if (!t)
+    sz_panic("timeline: out of memory");
+  t->n = n;
+  t->fail_index = -1;
+  t->states = (SzTlState *)calloc((size_t)(n > 0 ? n : 1), sizeof(SzTlState));
+  if (!t->states)
+    sz_panic("timeline: out of memory");
+  for (i = 0; i < n; i++) {
+    char *sig = NULL;
+    char *a11y = NULL;
+    size_t slen = 0, scap = 0, alen = 0, acap = 0;
+    if (!tl_scan_line(&scan, &line, &len) || len < 4 ||
+        strncmp(line, "--- ", 4) != 0)
+      goto malformed;
+    if (!tl_expect(&scan, "last_hit:"))
+      goto malformed;
+    if (!tl_scan_line(&scan, &line, &len))
+      goto malformed;
+    t->states[i].last_hit = tl_copy_n(line, len);
+    if (!tl_expect(&scan, "drive:"))
+      goto malformed;
+    if (!tl_scan_line(&scan, &line, &len))
+      goto malformed;
+    t->states[i].drive = tl_copy_n(line, len);
+    if (!tl_expect(&scan, "signals:"))
+      goto malformed;
+    while (!tl_scan_peek(&scan, "a11y:") && tl_scan_line(&scan, &line, &len)) {
+      tl_cat(&sig, &slen, &scap, line, len);
+      tl_cat(&sig, &slen, &scap, "\n", 1);
+    }
+    if (!tl_expect(&scan, "a11y:"))
+      goto malformed_sig;
+    while (!tl_scan_peek(&scan, "--- ") && tl_scan_line(&scan, &line, &len)) {
+      tl_cat(&a11y, &alen, &acap, line, len);
+      tl_cat(&a11y, &alen, &acap, "\n", 1);
+    }
+    t->states[i].signals = sig ? sig : tl_copy("");
+    t->states[i].a11y = a11y ? a11y : tl_copy("");
+    continue;
+  malformed_sig:
+    free(sig);
+  malformed:
+    fprintf(stderr, "scuzz: judge: %s: malformed dump at state %d\n", path, i);
+    t->n = i;
+    sz_timeline_free(t);
+    free(buf);
+    return NULL;
+  }
+  free(buf);
+  return t;
+}
+
+int sz_judge_rel_main(const char *spec) {
+  char *copy;
+  char *comma;
+  SzTimeline *a;
+  SzTimeline *b;
+  int i;
+  int fails = 0;
+  if (!spec)
+    spec = "";
+  copy = tl_copy(spec);
+  comma = strchr(copy, ',');
+  if (!comma) {
+    fprintf(stderr, "scuzz: judge: SCUZZ_JUDGE_REL expects <a.txt>,<b.txt>\n");
+    free(copy);
+    return 2;
+  }
+  *comma = 0;
+  a = (SzTimeline *)sz_timeline_load(copy);
+  b = (SzTimeline *)sz_timeline_load(comma + 1);
+  if (!a || !b) {
+    sz_timeline_free(a);
+    sz_timeline_free(b);
+    free(copy);
+    return 2;
+  }
+  if (g_verify_rel_n == 0)
+    printf("scuzz: judge: no relation claims registered\n");
+  for (i = 0; i < g_verify_rel_n; i++) {
+    SzVerdict *v;
+    char msg[256];
+    if (!g_verify_rel[i].fn)
+      continue;
+    v = g_verify_rel[i].fn(a, b);
+    if (!v || v->valid)
+      continue;
+    verdict_msg(msg, sizeof msg, g_verify_rel[i].name, v);
+    fprintf(stderr, "scuzz: %s\n", msg);
+    fails++;
+  }
+  sz_timeline_free(a);
+  sz_timeline_free(b);
+  free(copy);
+  return fails ? 1 : 0;
+}
+
 static int tl_str_diff(const char *a, const char *b) {
   if (!a)
     a = "";
@@ -2145,6 +2390,22 @@ void sz_verify_register(const char *name, SzVerdict *(*fn)(void *)) {
   g_verify_n++;
 }
 
+void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *)) {
+  const char *s = name ? name : "";
+  size_t len;
+  char *copy;
+  if (!fn || !s[0])
+    return;
+  if (g_verify_rel_n >= SZ_SESSION_MAX)
+    sz_panic("sz_property session: too many verify relations");
+  len = strlen(s);
+  copy = (char *)sz_alloc(len + 1);
+  memcpy(copy, s, len + 1);
+  g_verify_rel[g_verify_rel_n].name = copy;
+  g_verify_rel[g_verify_rel_n].fn = fn;
+  g_verify_rel_n++;
+}
+
 int sz_property_session_armed(void) {
   return g_always_n > 0 || g_eventually_n > 0 || g_response_n > 0 ||
          g_verify_n > 0;
@@ -2164,22 +2425,27 @@ static void claim_fail(const char *kind, const char *name, int idx) {
   fprintf(stderr, "scuzz: %s\n", buf);
   sz_panic(buf);
 }
-static void claim_fail_verdict(const char *name, const SzVerdict *v) {
-  char buf[256];
+static void verdict_msg(char *buf, size_t cap, const char *name,
+                        const SzVerdict *v) {
   const char *nm = name ? name : "?";
   if (v->index >= 0) {
     if (v->why)
-      snprintf(buf, sizeof buf, "verify failed: %s at state %lld: %s", nm,
+      snprintf(buf, cap, "verify failed: %s at state %lld: %s", nm,
                (long long)v->index, v->why);
     else
-      snprintf(buf, sizeof buf, "verify failed: %s at state %lld", nm,
+      snprintf(buf, cap, "verify failed: %s at state %lld", nm,
                (long long)v->index);
   } else {
     if (v->why)
-      snprintf(buf, sizeof buf, "verify failed: %s: %s", nm, v->why);
+      snprintf(buf, cap, "verify failed: %s: %s", nm, v->why);
     else
-      snprintf(buf, sizeof buf, "verify failed: %s", nm);
+      snprintf(buf, cap, "verify failed: %s", nm);
   }
+}
+
+static void claim_fail_verdict(const char *name, const SzVerdict *v) {
+  char buf[256];
+  verdict_msg(buf, sizeof buf, name, v);
   fprintf(stderr, "scuzz: %s\n", buf);
   sz_panic(buf);
 }
@@ -2286,6 +2552,13 @@ void sz_property_session_reset(void) {
     g_verify[i].fn = NULL;
   }
   g_verify_n = 0;
+  for (i = 0; i < g_verify_rel_n; i++) {
+    if (g_verify_rel[i].name)
+      sz_free(g_verify_rel[i].name);
+    g_verify_rel[i].name = NULL;
+    g_verify_rel[i].fn = NULL;
+  }
+  g_verify_rel_n = 0;
   tl_free_states();
   free(g_last_drive);
   g_last_drive = NULL;

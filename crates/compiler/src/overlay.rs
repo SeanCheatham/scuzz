@@ -82,6 +82,7 @@ pub fn apply_verify_overlays(
 pub fn erase_properties(program: &mut Program) {
     program.verify_seeds.clear();
     program.verify_preds.clear();
+    program.verify_rels.clear();
 }
 
 /// Drop `.require` to the receiver. Live `build` / `run` must not evaluate the predicate.
