@@ -1,0 +1,58 @@
+def srcHi(): String =
+  "@main def main: IO[Unit] =\n  IO.println(\"Hi\")\n"
+
+def wantHi(): String =
+  "@.str0 = private unnamed_addr constant [3 x i8] c\"Hi\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_ss = call ptr @sz_string_from_cstr(ptr %build_gep)\n  %build_io = call ptr @sz_io_println(ptr %build_ss)\n  call void @sz_release(ptr %build_ss)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+
+def srcSum(): String =
+  """@main def main: IO[Unit] =
+  IO.println(Str.fromInt(1 + 2))
+"""
+
+def wantSum(): String =
+  """define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_v = add i64 1, 2
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
+def srcAdd(): String =
+  """def add(n: Int, m: Int): Int =
+  n + m
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(add(1, 2)))
+"""
+
+def wantAdd(): String =
+  """define internal i64 @sz_user_Main_add(i64 %n, i64 %m) {
+entry:
+  %body_v = add i64 %n, %m
+  ret i64 %body_v
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_v = call i64 @sz_user_Main_add(i64 1, i64 2)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
+def irDiff(src: String, want: String): Bool =
+  Emit.emit(src) == want
+
+def irIdem(src: String): Bool =
+  Emit.emit(src) == Emit.emit(src)
+
+def allOk(): Bool =
+  irDiff(srcHi(), wantHi()) && irIdem(srcHi()) && irDiff(srcSum(), wantSum()) && irIdem(srcSum()) && irDiff(srcAdd(), wantAdd()) && irIdem(srcAdd())
+
+@main def main: IO[Unit] =
+  IO.println(if (allOk()) "ir-ok" else "ir-bad")
