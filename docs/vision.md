@@ -12,8 +12,8 @@ Edit this file when a decision or next-step order changes.
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM. No Java interop. No classpath/Maven. Web is not a current target.
 - **UI**: a primary product path, not the only one (Flutter-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Desktop/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Batteries**: the language and standard kits cover common app cases. No ecosystem library sprawl. No Maven, cats, or ZIO ports.
-- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter (`scuzz fmt`). One linter (`scuzz check`: format-verify + typecheck; further lints emit here; no `lint` subcommand). One testing strategy. Mutation, fuzzing, properties, simulation, and determinism are **first-class in the language and `scuzz`**. They are not a third-party harness. Compiler, CLI, and toolchain are **Rust** (`crates/compiler`, `crates/cli`). `scuzz ide` launches a Scuzz `[ui]` app. That app is the dogfood IDE. It is not a self-hosted compiler. Prerequisites: [`gaps.md`](gaps.md).
-- **Language proof**: examples that exercise the surface (`examples/`), not a self-hosted compiler. The dogfood IDE is an app on that same surface.
+- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter (`scuzz fmt`). One linter (`scuzz check`: format-verify + typecheck; further lints emit here; no `lint` subcommand). One testing strategy. Mutation, fuzzing, properties, simulation, and determinism are **first-class in the language and `scuzz`**. They are not a third-party harness. Compiler, CLI, and toolchain are **Rust** today (`crates/compiler`, `crates/cli`). Self-hosting is the long-term direction: staged slices rewrite the tooling in Scuzz after the prerequisites close (see [Self-hosting](#self-hosting)). `scuzz ide` launches a Scuzz `[ui]` app. That app is the dogfood IDE, not the compiler. Prerequisites: [`gaps.md`](gaps.md).
+- **Language proof**: examples that exercise the surface (`examples/`). The dogfood IDE is an app on that same surface. Self-hosted tooling is the long-term proof. It lands in staged slices after the prerequisites close ([Self-hosting](#self-hosting)).
 - **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime. `scuzz watch` only rebuilds. `[ui] run --watch` is hot reload: it stamp-reloads Views, writes `build/debug.dump` (including `[taps]` frames / `[fields]` live strings plus `caret=B sel=A:C` (and `preedit=` when compose is set) / `[editor]` buffer plus `caret=B sel=A:C sx=X sy=Y lines=L` (and `diag=` / `tok=` / `inlay=` / `fold=` / `preedit=` when set) / `[scrolls]` / `[last_hit]` after a TAP / `[hover]` after a no-button MOVE / `[last_secondary]` after a button-3 click, live `View.bindText`, `[session]` kind/size/title/focus (`editor` / `field` / `overlay` / `button:<label>` / `none`)/lifecycle/pumps; `[splits]` / `[overlays]` when present, and `[heap]` alloc stats with kind census, delta, and `[live]` remaining blocks), and plays `build/inject.script` (`tap` / `xy` / `text` / `type` / `key` / `compose` / `commit` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`). `quit` stops the live session. Desktop quit is window close. `resetpeak` sets peak bytes to live and marks the heap delta. Panic prints remaining `[heap]` and `[live]` and writes `*.panic` when a dump path is set. Desktop/Mobile `scuzz run` records live OS input to `build/record.script` and writes `build/debug.dump`. Replay Headless with `scuzz run --headless --script build/record.script --dump build/debug.dump`. `[ui]` build emits `build/reload.dylib`. Stamp-watch `dlopen`s it so a source View-label change appears live (Signals stay). IO-only `run --watch` kills and reruns on source change. `scuzz lsp` wraps `scuzz check` JSON diagnostics. Language-server methods use the same parse (catalog: [Tooling](#tooling)).
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
@@ -31,7 +31,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch. Simulation is hermetic (TestRuntime fakes; no live sockets; `Sys.exec` / `Sys.spawn` fail; `Sys.getenv` sealed; `Sys.alive` / `Sys.kill` fake) |
 | Tests | One built-in strategy: **mutation + fuzz + properties + sim + determinism** (TestRuntime). Claims are pure predicates over recorded **timelines**, judged at the terminal point of each run. Claims live in `*.scuzz_verify` (`Timeline => Verdict` session claims and `Bool` drive oracles) and in live bodies (`.require`, `where`, `Property.sometimes`). **Drivers** are oracle-free workloads the fuzzer composes. No classical unit-test culture. No external test frameworks |
 | Modules | `scuzz.toml` package = crate; `Foo.scuzz` = module (not JVM packages) |
-| Toolchain | Rust (`crates/cli`); one compiler |
+| Toolchain | Rust (`crates/cli`) today; one compiler. Self-hosting lands in staged slices ([Self-hosting](#self-hosting)) |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
 
 ## What Scuzz Lang is not
@@ -46,7 +46,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not Flutter DevTools / VM patching. `[ui] run --watch` is in-process hot reload (stamp-reload Views). A live structural dump and stamp-driven inject are in. `scuzz watch` only rebuilds. IO-only `run --watch` kills and reruns.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
-- Not a self-hosted compiler as a product bar. `scuzz` is Rust. Scuzz programs are apps and examples.
+- Not a big-bang self-hosting rewrite. Self-hosting lands in staged slices behind prerequisites ([Self-hosting](#self-hosting)). The Rust `scuzz` stays the reference until a differential campaign proves each slice. No dual toolchains as a product.
 - Not a second IDE typer. External editors speak `scuzz lsp`. The dogfood IDE is a Scuzz `[ui]` app that consumes `scuzz check` JSON and `scuzz lsp`. It does not grow a parallel analyze frontend.
 
 ## Success bars
@@ -75,6 +75,29 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **Native make:** quiet on success. A failed `make` prints the log. Clang compiles `.ll` without C `-I`. Link uses `-Wno-override-module` (IR has no host triple).
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
 - **`scuzz package`:** Android runs `crates/embedder-mobile/shells/android/build_ndk.sh` and emits `libscuzz.so` (needs the NDK). iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. Not a Gradle/CocoaPods API.
+
+### Self-hosting
+
+The eventual goal is a compiler, CLI, and toolchain written in Scuzz (`HUMANS.md`). The Rust implementation stays the reference until each staged slice proves itself. Do not ship two toolchains. Do not start a rewrite slice before the prerequisites close.
+
+**Prerequisites** (ranked close-list: [`gaps.md`](gaps.md)). Language track:
+
+- **Tail calls.** Codegen lowers a self-tail call to a loop. Deep AST recursion must not overflow the C stack. The Rust compiler needs a 16MB stack hop today; a Scuzz compiler gets no such escape hatch.
+- **Builder.** Assemble a large output string in linear time. `Str.concat` copies, so multi-MiB emission through it is quadratic.
+- **Scale proof.** A Scuzz package of several thousand lines typechecks and runs with usable time and memory. The largest Scuzz program today is about one thousand lines. Measure `Map` at symbol-table scale on that package.
+
+Verification track:
+
+- **Differential oracle under fuzz.** A hermetic campaign compares a Scuzz implementation against the Rust reference on the same inputs. `Sys.exec` fails under TestRuntime by design, so this needs a blessed mechanism, not a shell-out.
+- **Structured generation.** Drive oracles draw well-formed program terms with size control. Shrink keeps terms well-formed.
+- **Mutation at scale.** Site sampling keeps a large package inside a usable campaign budget.
+
+**Staged slices**, in order. Each slice is a Scuzz package with its own campaign. Each slice must pass roundtrip, idempotence, and differential oracles before the next starts:
+
+1. `scuzz fmt` core in Scuzz: lexer, parser, printer. Oracles: parse-print roundtrip, fmt idempotence, differential vs the Rust `scuzz fmt`.
+2. Kernel typechecker in Scuzz. Oracle: differential vs `scuzz check --message-format=json` over `examples/`.
+3. Kernel codegen in Scuzz: LLVM IR text. Oracle: differential program output over `examples/`.
+4. CLI, driver, and the verification stack. The Rust binary retires when the Scuzz toolchain passes the full campaign, compiles `examples/`, and compiles itself.
 
 ### GC (v0)
 
@@ -254,6 +277,8 @@ Verify drive oracles take at most three generator-friendly params (`Int` / `Stri
 
 Verification remaining items come from [`gaps.md`](gaps.md). The claim kernel and differential dumps are in.
 
+Self-hosting is open work. Prerequisites and staged slices: [Self-hosting](#self-hosting) and [`gaps.md`](gaps.md). The language-track prerequisites come first (tail calls, builder, scale proof), then the verification track, then the rewrite slices.
+
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)).
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Device builds stay open.
@@ -283,3 +308,4 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-on
 | Treating UI as the only product | UI is a primary path (Flutter-shaped). CLI/server/desktop/mobile are peers |
 | GC vs frame budget | `pump` boundary. Measure |
 | Mobile packaging | Host Mobile peer first. Device toolchains later |
+| Self-hosting stalls or forks the toolchain | Staged slices behind prerequisites ([Self-hosting](#self-hosting)). Rust stays the reference until differential campaigns pass. No dual toolchains |

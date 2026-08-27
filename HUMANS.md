@@ -20,3 +20,4 @@ This file may be read by AI agents, but it must never be written, edited, or rem
   - `scuzz fuzz --iterations <int>` is the primary entrypoint for testing. It runs the fuzzer with coverage and mutation mixed in, until a desired iteration budget is exhausted. Once exhausted, it outputs property evaluation and coverage results.
 - Scuzz leans on a strong compiler with rigid guardrails and constraints.
 - Scuzz is heavily functional-oriented but isn't overly pedantic or academic; pragmatism matters heavily too.
+- Self-hosting: Although Scuzz's compiler and tooling are written in Rust, the eventual goal is to re-implement them in Scuzz itself.
