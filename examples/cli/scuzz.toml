@@ -1,0 +1,7 @@
+[package]
+name = "cli"
+version = "0.1.0"
+description = "Scuzz CLI: argv parse, help, fmt dispatch"
+
+[dependencies]
+syntax = { path = "../syntax" }
