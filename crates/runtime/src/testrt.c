@@ -1777,8 +1777,10 @@ static char *tl_copy(const char *s) {
 static void tl_free_states(void) {
   int i;
   for (i = 0; i < g_tl_n; i++) {
-    free(g_tl[i].signals);
-    free(g_tl[i].a11y);
+    if (i == 0 || g_tl[i].signals != g_tl[i - 1].signals)
+      free(g_tl[i].signals);
+    if (i == 0 || g_tl[i].a11y != g_tl[i - 1].a11y)
+      free(g_tl[i].a11y);
     free(g_tl[i].last_hit);
     free(g_tl[i].drive);
     free(g_tl[i].effects);
@@ -1819,10 +1821,24 @@ static void tl_push(void) {
     g_tl_cap = ncap;
   }
   dump = sz_signal_dump();
-  g_tl[g_tl_n].signals = tl_copy(dump ? sz_string_cstr(dump) : "");
+  {
+    char *sig = tl_copy(dump ? sz_string_cstr(dump) : "");
+    char *a11y = tl_copy(g_property_a11y);
+    if (g_tl_n > 0 && g_tl[g_tl_n - 1].signals &&
+        strcmp(g_tl[g_tl_n - 1].signals, sig) == 0) {
+      free(sig);
+      sig = g_tl[g_tl_n - 1].signals;
+    }
+    if (g_tl_n > 0 && g_tl[g_tl_n - 1].a11y &&
+        strcmp(g_tl[g_tl_n - 1].a11y, a11y) == 0) {
+      free(a11y);
+      a11y = g_tl[g_tl_n - 1].a11y;
+    }
+    g_tl[g_tl_n].signals = sig;
+    g_tl[g_tl_n].a11y = a11y;
+  }
   if (dump)
     sz_string_free(dump);
-  g_tl[g_tl_n].a11y = tl_copy(g_property_a11y);
   g_tl[g_tl_n].last_hit = tl_copy(g_property_last_hit);
   g_tl[g_tl_n].drive = tl_copy(g_last_drive);
   {

@@ -9,12 +9,132 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include <stddef.h>
+#include <stdlib.h>
+
+static void enqueue_compose(const char *text);
+static void enqueue_text_edit(const char *text);
+static void enqueue_key(const char *name, const char *text, int mods, int repeat);
+
+@interface ScuzzContentView : NSView <NSTextInputClient>
+@end
+
+@implementation ScuzzContentView
+- (BOOL)isFlipped {
+  return YES;
+}
+- (BOOL)acceptsFirstResponder {
+  return YES;
+}
+- (void)viewDidMoveToWindow {
+  if (self.window)
+    [self.window makeFirstResponder:self];
+}
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+  (void)range;
+  if (actualRange)
+    *actualRange = NSMakeRange(0, 0);
+  return NSMakeRect(0, 0, 1, 1);
+}
+- (NSUInteger)characterIndexForPoint:(NSPoint)point {
+  (void)point;
+  return 0;
+}
+- (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange
+         replacementRange:(NSRange)replacementRange {
+  NSString *s = nil;
+  (void)selectedRange;
+  (void)replacementRange;
+  if ([string isKindOfClass:[NSAttributedString class]])
+    s = [(NSAttributedString *)string string];
+  else
+    s = (NSString *)string;
+  enqueue_compose(s ? [s UTF8String] : "");
+}
+- (void)unmarkText {
+  enqueue_compose("");
+}
+- (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
+  NSString *s = nil;
+  (void)replacementRange;
+  if ([string isKindOfClass:[NSAttributedString class]])
+    s = [(NSAttributedString *)string string];
+  else
+    s = (NSString *)string;
+  enqueue_text_edit(s ? [s UTF8String] : "");
+}
+- (void)doCommandBySelector:(SEL)selector {
+  if (selector == @selector(insertNewline:)) {
+    enqueue_key("Enter", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(insertTab:)) {
+    enqueue_key("Tab", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(deleteBackward:)) {
+    enqueue_key("Backspace", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(deleteForward:)) {
+    enqueue_key("Delete", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(moveLeft:)) {
+    enqueue_key("ArrowLeft", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(moveRight:)) {
+    enqueue_key("ArrowRight", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(moveUp:)) {
+    enqueue_key("ArrowUp", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(moveDown:)) {
+    enqueue_key("ArrowDown", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(moveToBeginningOfLine:)) {
+    enqueue_key("Home", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(moveToEndOfLine:)) {
+    enqueue_key("End", "", 0, 0);
+    return;
+  }
+  if (selector == @selector(cancelOperation:)) {
+    enqueue_key("Escape", "", 0, 0);
+    return;
+  }
+  if ([self respondsToSelector:selector])
+    [super doCommandBySelector:selector];
+}
+- (BOOL)hasMarkedText {
+  return NO;
+}
+- (NSRange)markedRange {
+  return NSMakeRange(NSNotFound, 0);
+}
+- (NSRange)selectedRange {
+  return NSMakeRange(0, 0);
+}
+- (void)setSelectedRange:(NSRange)range {
+  (void)range;
+}
+- (NSArray<NSAttributedStringKey> *)validAttributesForMarkedText {
+  return @[];
+}
+@end
+
 #define EVENT_CAP 64
 #define TEXT_RING 64
 #define TEXT_LEN 128
 #define KEY_NAME_LEN 32
 
 static NSWindow *g_win;
+static NSView *g_content;
 static NSImageView *g_view;
 static int g_w;
 static int g_h;
@@ -142,6 +262,47 @@ static void enqueue_scroll(float x, float y, float dy) {
   ev.x = x;
   ev.y = y;
   ev.dy = dy;
+  q_push(&ev);
+}
+
+static void stash_text_only(const char *text, const char **out) {
+  size_t nt;
+  char *tdst;
+  if (!out)
+    return;
+  if (!text)
+    text = "";
+  nt = strlen(text);
+  if (nt >= TEXT_LEN)
+    nt = TEXT_LEN - 1;
+  tdst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  memcpy(tdst, text, nt);
+  tdst[nt] = '\0';
+  *out = tdst;
+}
+
+static void enqueue_compose(const char *text) {
+  SzInputEvent ev;
+  const char *t;
+  if (q_full())
+    return;
+  stash_text_only(text, &t);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_COMPOSE;
+  ev.text = t;
+  q_push(&ev);
+}
+
+static void enqueue_text_edit(const char *text) {
+  SzInputEvent ev;
+  const char *t;
+  if (q_full())
+    return;
+  stash_text_only(text ? text : "", &t);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = t;
   q_push(&ev);
 }
 
@@ -283,6 +444,7 @@ static void shutdown_on_main(void) {
     [g_win close];
     g_win = nil;
   }
+  g_content = nil;
   g_view = nil;
   g_ready = 0;
   g_w = g_h = 0;
@@ -319,10 +481,12 @@ static int ensure_window_on_main(const char *title, int width, int height) {
   [g_win setTitle:nsTitle];
   [g_win setReleasedWhenClosed:NO];
 
+  g_content = [[ScuzzContentView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
   g_view = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
   [g_view setImageScaling:NSImageScaleAxesIndependently];
   [g_view setAnimates:NO];
-  [g_win setContentView:g_view];
+  [g_content addSubview:g_view];
+  [g_win setContentView:g_content];
   [g_win setAcceptsMouseMovedEvents:YES];
   [g_win makeKeyAndOrderFront:nil];
   [NSApp activateIgnoringOtherApps:YES];
@@ -431,31 +595,9 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
         }
 
         if ([ev type] == NSEventTypeKeyDown) {
-          NSString *ign = [ev charactersIgnoringModifiers];
-          NSString *chars = [ev characters];
-          unichar c =
-              (ign && [ign length] > 0) ? [ign characterAtIndex:0] : 0;
-          char name[KEY_NAME_LEN];
-          char utf8[TEXT_LEN];
-          int mods = 0;
-          NSEventModifierFlags flags = [ev modifierFlags];
-          cocoa_key_name(c, name, sizeof name);
-          utf8[0] = '\0';
-          if (!cocoa_key_no_insert(name) && chars && [chars length] > 0) {
-            const char *u = [chars UTF8String];
-            if (u && (unsigned char)u[0] >= 32)
-              snprintf(utf8, sizeof utf8, "%s", u);
-          }
-          if (flags & NSEventModifierFlagShift)
-            mods |= SZ_KEY_SHIFT;
-          if (flags & NSEventModifierFlagControl)
-            mods |= SZ_KEY_CTRL;
-          if (flags & NSEventModifierFlagCommand)
-            mods |= SZ_KEY_CMD;
-          if (flags & NSEventModifierFlagOption)
-            mods |= SZ_KEY_ALT;
-          enqueue_key(name, utf8, mods, [ev isARepeat] ? 1 : 0);
-          continue; /* swallow keydowns (no system beep path) */
+          if (g_content)
+            [(ScuzzContentView *)g_content interpretKeyEvents:@[ev]];
+          continue;
         }
 
         [NSApp sendEvent:ev];

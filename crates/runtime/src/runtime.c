@@ -2922,9 +2922,14 @@ static int step_fiber(Sched *s, Fiber *f) {
     ready_enqueue(s, f);
     return 0;
   }
-  case SZ_IO_SLEEP_MS:
+  case SZ_IO_SLEEP_MS: {
+    char buf[48];
+    snprintf(buf, sizeof buf, "io.sleep ms=%lld",
+             (long long)cur->as.sleep_ms);
+    sz_effect_log(buf);
     park_sleep(s, f, cur->as.sleep_ms);
     return 0;
+  }
   case SZ_IO_FAIL: {
     SzError *err = cur->as.fail;
     if (err)

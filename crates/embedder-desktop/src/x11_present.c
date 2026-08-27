@@ -6,6 +6,12 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#if defined(__has_include)
+#if __has_include(<X11/Xim.h>)
+#include <X11/Xim.h>
+#define SCUZZ_HAVE_XIM 1
+#endif
+#endif
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,6 +53,10 @@ static Atom g_atom_clipboard;
 static Atom g_atom_utf8;
 static Atom g_atom_targets;
 static Atom g_atom_prop;
+#if SCUZZ_HAVE_XIM
+static XIM g_xim;
+static XIC g_xic;
+#endif
 
 static char *clip_dup(const char *s) {
   size_t n;
@@ -292,6 +302,108 @@ static void enqueue_scroll(float x, float y, float dy) {
   ev.dy = dy;
   q_push(&ev);
 }
+
+static void stash_text_only(const char *text, const char **out) {
+  size_t nt;
+  char *tdst;
+  if (!out)
+    return;
+  if (!text)
+    text = "";
+  nt = strlen(text);
+  if (nt >= TEXT_LEN)
+    nt = TEXT_LEN - 1;
+  tdst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  memcpy(tdst, text, nt);
+  tdst[nt] = '\0';
+  *out = tdst;
+}
+
+static int __attribute__((unused)) enqueue_compose(const char *text) {
+  SzInputEvent ev;
+  const char *t;
+  if (q_full())
+    return 0;
+  stash_text_only(text, &t);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_COMPOSE;
+  ev.text = t;
+  return q_push(&ev);
+}
+
+static int __attribute__((unused)) enqueue_text_edit(const char *text) {
+  SzInputEvent ev;
+  const char *t;
+  if (q_full())
+    return 0;
+  stash_text_only(text ? text : "", &t);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = t;
+  return q_push(&ev);
+}
+
+#if SCUZZ_HAVE_XIM
+static void xim_preedit_draw(XIM xim, XPointer client_data, XPointer call_data) {
+  XIMPreeditDrawCallbackStruct *pre;
+  (void)xim;
+  (void)client_data;
+  if (!call_data)
+    return;
+  pre = (XIMPreeditDrawCallbackStruct *)call_data;
+  if (pre->text && pre->text->string.multi_byte)
+    enqueue_compose(pre->text->string.multi_byte);
+  else if (pre->chg_length == 0)
+    enqueue_compose("");
+}
+
+static void xim_preedit_done(XIM xim, XPointer client_data, XPointer call_data) {
+  (void)xim;
+  (void)client_data;
+  (void)call_data;
+  enqueue_compose("");
+}
+
+static void x11_xim_shutdown(void) {
+  if (g_xic) {
+    XDestroyIC(g_xic);
+    g_xic = NULL;
+  }
+  if (g_xim) {
+    XCloseIM(g_xim);
+    g_xim = NULL;
+  }
+}
+
+static void x11_xim_open(void) {
+  XIMCallback draw_cb;
+  XIMCallback done_cb;
+  XVaNestedList preedit;
+  if (!g_dpy || g_xim)
+    return;
+  g_xim = XOpenIM(g_dpy, NULL, NULL, NULL);
+  if (!g_xim)
+    return;
+  draw_cb.callback = (XIMProc)xim_preedit_draw;
+  draw_cb.client_data = NULL;
+  done_cb.callback = (XIMProc)xim_preedit_done;
+  done_cb.client_data = NULL;
+  preedit = XVaCreateNestedList(0, XNPreeditDrawCallback, &draw_cb,
+                                XNPreeditDoneCallback, &done_cb, NULL);
+  g_xic = XCreateIC(g_xim, XNInputStyle, XIMPreeditCallbacks | XIMStatusNothing,
+                    XNClientWindow, g_win, XNFocusWindow, g_win,
+                    XNPreeditAttributes, preedit, NULL);
+  XFree(preedit);
+  if (!g_xic) {
+    XCloseIM(g_xim);
+    g_xim = NULL;
+  }
+}
+#else
+static void x11_xim_shutdown(void) {}
+static void x11_xim_open(void) {}
+#endif
 
 static void enqueue_key(const char *name, const char *text, int mods, int repeat) {
   SzInputEvent ev;
@@ -551,6 +663,7 @@ static int ensure_window(const char *title, int width, int height) {
       break;
   }
 
+  x11_xim_open();
   g_ready = 1;
   fprintf(stderr, "scuzz embedder: X11 window %dx%d\n", width, height);
   return 1;
@@ -668,10 +781,12 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
     }
     if (ev.type == KeyPress) {
       KeySym unshifted;
-      char buf[64];
+      KeySym keysym;
+      Status xstatus = XLookupBoth;
+      char buf[128];
       char name[KEY_NAME_LEN];
       char utf8[TEXT_LEN];
-      int nkey;
+      int nkey = 0;
       int mods = 0;
       int repeat = g_key_repeat_pending;
       g_key_repeat_pending = 0;
@@ -682,12 +797,32 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
       unshifted = XLookupKeysym(&ev.xkey, 0);
       if (x11_is_modifier(unshifted))
         continue;
-      nkey = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, NULL, NULL);
+      buf[0] = '\0';
+#if SCUZZ_HAVE_XIM
+      if (g_xic)
+        nkey = Xutf8LookupString(g_xic, &ev.xkey, buf, (int)sizeof(buf) - 1,
+                                 &keysym, &xstatus);
+      else
+        nkey = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, &keysym,
+                             NULL);
+#else
+      nkey = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, &keysym, NULL);
+      (void)xstatus;
+#endif
       if (nkey < 0)
         nkey = 0;
       buf[nkey] = '\0';
       x11_key_name(unshifted, name, sizeof name);
       utf8[0] = '\0';
+#if SCUZZ_HAVE_XIM
+      if (xstatus == XLookupChars || xstatus == XLookupBoth) {
+        if (buf[0]) {
+          snprintf(utf8, sizeof utf8, "%s", buf);
+          enqueue_text_edit(utf8);
+          continue;
+        }
+      }
+#endif
       if (!x11_key_no_insert(name)) {
         latin1_to_utf8(buf, nkey, utf8, sizeof utf8);
         if (utf8[0] && (unsigned char)utf8[0] < 32)
@@ -708,6 +843,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
 }
 
 void sz_embedder_shutdown(void) {
+  x11_xim_shutdown();
   if (g_img) {
     /* XDestroyImage frees g_img_data */
     g_img->data = g_img_data;
