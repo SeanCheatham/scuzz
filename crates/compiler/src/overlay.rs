@@ -8,7 +8,7 @@ use crate::span::Span;
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// Nested ADT / list depth for generation. Deeper trees pick a nullary case or `[]`.
+/// Nested ADT / list depth for generation. Deeper trees pick a leaf case or `[]`.
 const GEN_DEPTH_MAX: usize = 3;
 
 #[derive(Debug, Error)]
@@ -430,7 +430,7 @@ pub(crate) fn type_is_generator_friendly(
                     return false;
                 }
                 if depth >= GEN_DEPTH_MAX {
-                    return en.cases.iter().any(|c| c.fields.is_empty());
+                    return en.cases.iter().any(|c| case_is_gen_leaf(c, &subst));
                 }
                 en.cases.iter().all(|c| {
                     c.fields.iter().all(|(_, fty)| {
@@ -510,6 +510,16 @@ fn enum_and_subst<'a>(
     }
 }
 
+fn type_is_leaf_field(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::String | Type::Bool)
+}
+
+fn case_is_gen_leaf(c: &crate::ast::EnumCase, subst: &[(String, Type)]) -> bool {
+    c.fields
+        .iter()
+        .all(|(_, fty)| type_is_leaf_field(&apply_field_subst(fty, subst)))
+}
+
 fn apply_field_subst(ty: &Type, subst: &[(String, Type)]) -> Type {
     if subst.is_empty() {
         return ty.clone();
@@ -587,8 +597,8 @@ fn adt_kind_token(ty: &Type, program: &Program, module: &str, depth: usize) -> S
         let cases: Vec<String> = en
             .cases
             .iter()
-            .filter(|c| c.fields.is_empty())
-            .map(|c| c.name.clone())
+            .filter(|c| case_is_gen_leaf(c, &subst))
+            .map(|c| format_enum_case_token(c, &subst, program, module, depth))
             .collect();
         if cases.is_empty() {
             return "i".into();
@@ -598,30 +608,38 @@ fn adt_kind_token(ty: &Type, program: &Program, module: &str, depth: usize) -> S
     let cases: Vec<String> = en
         .cases
         .iter()
-        .map(|c| {
-            if c.fields.is_empty() {
-                c.name.clone()
-            } else {
-                let fs: Vec<String> = c
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (fname, fty))| {
-                        type_kind_token(
-                            &apply_field_subst(fty, &subst),
-                            c.field_rfn(i),
-                            fname,
-                            program,
-                            module,
-                            depth + 1,
-                        )
-                    })
-                    .collect();
-                format!("{}({})", c.name, fs.join(","))
-            }
-        })
+        .map(|c| format_enum_case_token(c, &subst, program, module, depth))
         .collect();
     format!("e:{}", cases.join("|"))
+}
+
+fn format_enum_case_token(
+    c: &crate::ast::EnumCase,
+    subst: &[(String, Type)],
+    program: &Program,
+    module: &str,
+    depth: usize,
+) -> String {
+    if c.fields.is_empty() {
+        c.name.clone()
+    } else {
+        let fs: Vec<String> = c
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, (fname, fty))| {
+                type_kind_token(
+                    &apply_field_subst(fty, subst),
+                    c.field_rfn(i),
+                    fname,
+                    program,
+                    module,
+                    depth + 1,
+                )
+            })
+            .collect();
+        format!("{}({})", c.name, fs.join(","))
+    }
 }
 
 fn simple_cmp_bound(param: &str, e: &Expr) -> Option<(&'static str, i64)> {
@@ -1380,6 +1398,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(driver_table_text(&prog), "sumLen [i]\n");
+
+        let live = parse_sources(&[(
+            "Main.scuzz".into(),
+            "enum Term:\n  case N(n: Int)\n  case Add(a: Term, b: Term)\n\
+             @main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        let prog = apply_overlays(
+            live,
+            &[driver_ov(
+                "Main",
+                "def termDiff(t: Term): IO[Unit] =\n  IO.pure(())\n",
+            )],
+        )
+        .unwrap();
+        let table = driver_table_text(&prog);
+        assert!(
+            table.starts_with("termDiff e:N(i)|Add(") && table.contains("N(i)"),
+            "{table}"
+        );
+        assert!(!table.contains("termDiff i\n"), "{table}");
     }
 
     #[test]

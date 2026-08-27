@@ -1255,6 +1255,13 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("Deferred.get", "Deferred.get(d: Deferred[A]): IO[A]"),
     ("Str.concat", "Str.concat(a: String, b: String): String"),
+    ("Builder.empty", "Builder.empty(): Builder"),
+    (
+        "Builder.append",
+        "Builder.append(b: Builder, s: String): Builder",
+    ),
+    ("Builder.result", "Builder.result(b: Builder): String"),
+    ("Oracle.sumTo", "Oracle.sumTo(n: Int): Int"),
     (
         "List.cons",
         "List.cons(x: T, xs: List[T]): List[T]  (`x :: xs`)",
@@ -3398,6 +3405,31 @@ def apply(f: Int => Int, n: Int): Int = f(n)
             h.contains("Str.split(s: String, sep: String): List[String]"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_builder_kit() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Builder.result(Builder.append(Builder.empty(), "x")))
+"#;
+        let h = hover_src(src, "empty");
+        assert!(h.contains("Builder.empty(): Builder"), "{h}");
+        let h = hover_src(src, "append");
+        assert!(
+            h.contains("Builder.append(b: Builder, s: String): Builder"),
+            "{h}"
+        );
+        let h = hover_src(src, "result");
+        assert!(h.contains("Builder.result(b: Builder): String"), "{h}");
+    }
+
+    #[test]
+    fn hovers_oracle_sum_to() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Oracle.sumTo(4)))
+"#;
+        let h = hover_src(src, "sumTo");
+        assert!(h.contains("Oracle.sumTo(n: Int): Int"), "{h}");
     }
 
     #[test]

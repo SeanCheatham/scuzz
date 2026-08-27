@@ -4,3 +4,12 @@ def add(n: Int, m: Int): Bool =
 def addTwoThree(): Bool =
   Main.add(2, 3) == 5
 
+def sumToDiff(n: Int where n >= 0): Bool =
+  Main.sumTo(n, 0) == Oracle.sumTo(n)
+
+def sumToTen(): Bool =
+  Main.sumTo(10, 0) == 55
+
+def termDiff(t: Term): Bool =
+  Main.termAgrees(t)
+

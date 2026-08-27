@@ -1,4 +1,4 @@
-use crate::support::{compile_opts, resolve_dir, run_testrt, TestrtUi};
+use crate::support::{compile_opts, resolve_dir, run_testrt_limit, TestrtUi, TESTRT_TIMEOUT_CODE};
 use anyhow::{bail, Context, Result};
 use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::compile_project;
@@ -18,6 +18,31 @@ use scuzz_compiler::mutate::{
 };
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
+
+/// Wall-clock cap for one TestRuntime probe. A mutant that infinite-loops dies here.
+const TESTRT_LIMIT: Duration = Duration::from_secs(20);
+
+fn fuzz_probe(
+    exe: &Path,
+    reached: &Path,
+    schedule_seed: &str,
+    fault_seed: &str,
+    ui: Option<TestrtUi<'_>>,
+    drive_script: Option<&Path>,
+    timeline: Option<&Path>,
+) -> Result<i32> {
+    run_testrt_limit(
+        exe,
+        reached,
+        schedule_seed,
+        fault_seed,
+        ui,
+        drive_script,
+        timeline,
+        Some(TESTRT_LIMIT),
+    )
+}
 
 /// Shared fuzz target: executable, output directory, project directory, UI size.
 struct FuzzCtx {
@@ -367,7 +392,7 @@ fn relate_exec(
         let dump = dir.join(format!("{tag}.dump.txt"));
         std::fs::write(&script, script_text(events))?;
         std::fs::write(&dump, "")?;
-        run_testrt(
+        fuzz_probe(
             &ctx.exe,
             &reached,
             schedule_seed,
@@ -389,7 +414,7 @@ fn relate_exec(
         } else {
             Some(drive_path.as_path())
         };
-        run_testrt(
+        fuzz_probe(
             &ctx.exe,
             &reached,
             schedule_seed,
@@ -1142,6 +1167,9 @@ fn mutate_phase(
                     survived += 1;
                 }
             }
+        } else if code == TESTRT_TIMEOUT_CODE {
+            println!("  mutant {site}: killed (timeout)");
+            killed += 1;
         } else {
             println!("  mutant {site}: killed");
             killed += 1;
@@ -1201,7 +1229,7 @@ fn mutate_exec_ui_events(
     std::fs::write(&dump, "")?;
     std::fs::write(&reached, "")?;
     std::fs::write(out_dir.join("timeline.txt"), "")?;
-    let code = run_testrt(
+    let code = fuzz_probe(
         exe,
         &reached,
         schedule_seed,
@@ -1259,7 +1287,7 @@ fn mutate_exec_io_at(
     } else {
         Some(drive_path.as_path())
     };
-    let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive, None)?;
+    let code = fuzz_probe(exe, &reached, schedule_seed, fault_seed, None, drive, None)?;
     let timeline = std::fs::read_to_string(out_dir.join("timeline.txt")).unwrap_or_default();
     Ok((code, timeline))
 }
@@ -2172,7 +2200,7 @@ fn fuzz_exec(
     std::fs::write(&script, script_text(events))?;
     std::fs::write(&dump, "")?;
     fuzz_reset_run_files(fuzz_dir, &reached)?;
-    let code = run_testrt(
+    let code = fuzz_probe(
         exe,
         &reached,
         schedule_seed,
@@ -2206,7 +2234,7 @@ fn fuzz_exec_io(
     } else {
         Some(drive_path.as_path())
     };
-    let code = run_testrt(exe, &reached, schedule_seed, fault_seed, None, drive, None)?;
+    let code = fuzz_probe(exe, &reached, schedule_seed, fault_seed, None, drive, None)?;
     fuzz_merge_campaign(fuzz_dir, &reached)?;
     Ok(code)
 }

@@ -2,6 +2,10 @@ enum Either[L, R]:
   case Left(x: L)
   case Right(y: R)
 
+enum Term:
+  case N(n: Int)
+  case Add(a: Term, b: Term)
+
 record Point(x: Int where x >= 0, y: Int where y + 1 > y && y * 2 > y && y % 2 < 2 && y == y)
 
 type UserId = Int
@@ -82,6 +86,49 @@ def applyInt(f: Int => Int, n: Int): Int =
 
 def add(n: Int, m: Int): Int =
   n + m
+
+def countdown(n: Int): Int =
+  if (n <= 0) 0 else countdown(n - 1)
+
+def countdownMatch(n: Int): Int =
+  n match {
+    case 0 => 0
+    case _ => countdownMatch(n - 1)
+  }
+
+def sumTo(n: Int, acc: Int): Int =
+  if (n <= 0) acc else sumTo(n - 1, acc + n)
+
+def evalTerm(t: Term): Int =
+  t match {
+    case Term.N(n) => n
+    case Term.Add(a, b) => evalTerm(a) + evalTerm(b)
+  }
+
+def _termLeaves(t: Term): List[Int] =
+  t match {
+    case Term.N(n) => [n]
+    case Term.Add(a, b) => List.concat(_termLeaves(a), _termLeaves(b))
+  }
+
+def termAgrees(t: Term): Bool =
+  evalTerm(t) == List.foldLeft(_termLeaves(t), 0, add)
+
+def sumAcc(xs: List[Int], acc: Int): Int =
+  xs match {
+    case [] => acc
+    case n :: t => sumAcc(t, acc + n)
+  }
+
+def fillBuilder(n: Int, b: Builder, chunk: String): Builder =
+  if (n <= 0) b else fillBuilder(n - 1, Builder.append(b, chunk), chunk)
+
+def builderProof(): IO[Unit] =
+  for {
+    chunk = Str.repeat("x", 65536)
+    out = Builder.result(fillBuilder(32, Builder.empty(), chunk))
+    _ <- IO.println(s"build:${Str.fromInt(Str.len(out))}")
+  } yield ()
 
 def applyPair(f: (Int, Int) => Int, x: Int, y: Int): Int =
   f(x, y)
@@ -774,4 +821,9 @@ b"""
     _ <- unpackProof()
     _ <- failProof()
     _ <- mapProof()
+    _ <- IO.println(s"tco:${Str.fromInt(countdown(1000000))}")
+    _ <- IO.println(s"tcom:${Str.fromInt(countdownMatch(1000000))}")
+    _ <- IO.println(s"tcol:${Str.fromInt(sumAcc([1, 2, 3], 0))}")
+    _ <- IO.println(s"diff:${if (sumTo(10, 0) == Oracle.sumTo(10)) "y" else "n"}")
+    _ <- builderProof()
   } yield ()

@@ -1,0 +1,208 @@
+def _s18n00(): Int =
+  0
+
+def _s18n01(): Int =
+  1
+
+def _s18n02(): Int =
+  2
+
+def _s18n03(): Int =
+  3
+
+def _s18n04(): Int =
+  4
+
+def _s18n05(): Int =
+  5
+
+def _s18n06(): Int =
+  6
+
+def _s18n07(): Int =
+  7
+
+def _s18n08(): Int =
+  8
+
+def _s18n09(): Int =
+  9
+
+def _s18n10(): Int =
+  10
+
+def _s18n11(): Int =
+  11
+
+def _s18n12(): Int =
+  12
+
+def _s18n13(): Int =
+  13
+
+def _s18n14(): Int =
+  14
+
+def _s18n15(): Int =
+  15
+
+def _s18n16(): Int =
+  16
+
+def _s18n17(): Int =
+  17
+
+def _s18n18(): Int =
+  18
+
+def _s18n19(): Int =
+  19
+
+def _s18n20(): Int =
+  20
+
+def _s18n21(): Int =
+  21
+
+def _s18n22(): Int =
+  22
+
+def _s18n23(): Int =
+  23
+
+def _s18n24(): Int =
+  24
+
+def _s18n25(): Int =
+  25
+
+def _s18n26(): Int =
+  26
+
+def _s18n27(): Int =
+  27
+
+def _s18n28(): Int =
+  28
+
+def _s18n29(): Int =
+  29
+
+def _s18n30(): Int =
+  30
+
+def _s18n31(): Int =
+  31
+
+def _s18n32(): Int =
+  32
+
+def _s18n33(): Int =
+  33
+
+def _s18n34(): Int =
+  34
+
+def _s18n35(): Int =
+  35
+
+def _s18n36(): Int =
+  36
+
+def _s18n37(): Int =
+  37
+
+def _s18n38(): Int =
+  38
+
+def _s18n39(): Int =
+  39
+
+def _s18n40(): Int =
+  40
+
+def _s18n41(): Int =
+  41
+
+def _s18n42(): Int =
+  42
+
+def _s18n43(): Int =
+  43
+
+def _s18n44(): Int =
+  44
+
+def _s18n45(): Int =
+  45
+
+def _s18n46(): Int =
+  46
+
+def _s18n47(): Int =
+  47
+
+def _s18n48(): Int =
+  48
+
+def _s18n49(): Int =
+  49
+
+def install(m: Map[String, Int]): Map[String, Int] =
+  _step(0, m)
+
+def _step(i: Int, m: Map[String, Int]): Map[String, Int] =
+  i match {
+    case 0 => _step(1, Map.set(m, "s18n00", _s18n00()))
+    case 1 => _step(2, Map.set(m, "s18n01", _s18n01()))
+    case 2 => _step(3, Map.set(m, "s18n02", _s18n02()))
+    case 3 => _step(4, Map.set(m, "s18n03", _s18n03()))
+    case 4 => _step(5, Map.set(m, "s18n04", _s18n04()))
+    case 5 => _step(6, Map.set(m, "s18n05", _s18n05()))
+    case 6 => _step(7, Map.set(m, "s18n06", _s18n06()))
+    case 7 => _step(8, Map.set(m, "s18n07", _s18n07()))
+    case 8 => _step(9, Map.set(m, "s18n08", _s18n08()))
+    case 9 => _step(10, Map.set(m, "s18n09", _s18n09()))
+    case 10 => _step(11, Map.set(m, "s18n10", _s18n10()))
+    case 11 => _step(12, Map.set(m, "s18n11", _s18n11()))
+    case 12 => _step(13, Map.set(m, "s18n12", _s18n12()))
+    case 13 => _step(14, Map.set(m, "s18n13", _s18n13()))
+    case 14 => _step(15, Map.set(m, "s18n14", _s18n14()))
+    case 15 => _step(16, Map.set(m, "s18n15", _s18n15()))
+    case 16 => _step(17, Map.set(m, "s18n16", _s18n16()))
+    case 17 => _step(18, Map.set(m, "s18n17", _s18n17()))
+    case 18 => _step(19, Map.set(m, "s18n18", _s18n18()))
+    case 19 => _step(20, Map.set(m, "s18n19", _s18n19()))
+    case 20 => _step(21, Map.set(m, "s18n20", _s18n20()))
+    case 21 => _step(22, Map.set(m, "s18n21", _s18n21()))
+    case 22 => _step(23, Map.set(m, "s18n22", _s18n22()))
+    case 23 => _step(24, Map.set(m, "s18n23", _s18n23()))
+    case 24 => _step(25, Map.set(m, "s18n24", _s18n24()))
+    case 25 => _step(26, Map.set(m, "s18n25", _s18n25()))
+    case 26 => _step(27, Map.set(m, "s18n26", _s18n26()))
+    case 27 => _step(28, Map.set(m, "s18n27", _s18n27()))
+    case 28 => _step(29, Map.set(m, "s18n28", _s18n28()))
+    case 29 => _step(30, Map.set(m, "s18n29", _s18n29()))
+    case 30 => _step(31, Map.set(m, "s18n30", _s18n30()))
+    case 31 => _step(32, Map.set(m, "s18n31", _s18n31()))
+    case 32 => _step(33, Map.set(m, "s18n32", _s18n32()))
+    case 33 => _step(34, Map.set(m, "s18n33", _s18n33()))
+    case 34 => _step(35, Map.set(m, "s18n34", _s18n34()))
+    case 35 => _step(36, Map.set(m, "s18n35", _s18n35()))
+    case 36 => _step(37, Map.set(m, "s18n36", _s18n36()))
+    case 37 => _step(38, Map.set(m, "s18n37", _s18n37()))
+    case 38 => _step(39, Map.set(m, "s18n38", _s18n38()))
+    case 39 => _step(40, Map.set(m, "s18n39", _s18n39()))
+    case 40 => _step(41, Map.set(m, "s18n40", _s18n40()))
+    case 41 => _step(42, Map.set(m, "s18n41", _s18n41()))
+    case 42 => _step(43, Map.set(m, "s18n42", _s18n42()))
+    case 43 => _step(44, Map.set(m, "s18n43", _s18n43()))
+    case 44 => _step(45, Map.set(m, "s18n44", _s18n44()))
+    case 45 => _step(46, Map.set(m, "s18n45", _s18n45()))
+    case 46 => _step(47, Map.set(m, "s18n46", _s18n46()))
+    case 47 => _step(48, Map.set(m, "s18n47", _s18n47()))
+    case 48 => _step(49, Map.set(m, "s18n48", _s18n48()))
+    case 49 => _step(50, Map.set(m, "s18n49", _s18n49()))
+    case _ => m
+  }
+

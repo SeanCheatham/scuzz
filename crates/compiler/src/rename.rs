@@ -108,6 +108,8 @@ pub fn is_kit_module(name: &str) -> bool {
             | "Stream"
             | "Map"
             | "Set"
+            | "Builder"
+            | "Oracle"
             | "Ui"
             | "Property"
             | "Float"
