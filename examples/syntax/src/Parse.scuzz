@@ -897,15 +897,33 @@ def stampFun(mod: String, d: Fun): Fun =
   }
 
 def stampFuns(mod: String, ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) []: List[Fun] else stampFun(mod, List.head(ds)) :: stampFuns(mod, List.tail(ds))
+  if (List.isEmpty(ds)) noFun() else stampFun(mod, List.head(ds)) :: stampFuns(mod, List.tail(ds))
 
 def stampDefs(mod: String, p: Prog): Prog =
   p match {
     case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, impls, imps, stampFuns(mod, defs), main, body)
   }
 
+def noEn(): List[En] =
+  []
+
+def noAl(): List[Alias] =
+  []
+
+def noTr(): List[Tr] =
+  []
+
+def noIm(): List[Im] =
+  []
+
+def noImp(): List[Imp] =
+  []
+
+def noFun(): List[Fun] =
+  []
+
 def emptyProg(): Prog =
-  Prog("", []: List[En], []: List[Alias], []: List[Tr], []: List[Im], []: List[Imp], []: List[Fun], "", Expr.EVar(""))
+  Prog("", noEn(), noAl(), noTr(), noIm(), noImp(), noFun(), "", Expr.EVar(""))
 
 def merge(a: Prog, b: Prog): Prog =
   a match {
