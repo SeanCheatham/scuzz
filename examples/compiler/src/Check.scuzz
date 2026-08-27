@@ -26,6 +26,9 @@ def bindParams(ps: List[Param], acc: List[(String, String)]): List[(String, Stri
 def findFun(funs: List[Fun], name: String): List[Fun] =
   List.filter(funs, f => f.name == name)
 
+def findFunMod(funs: List[Fun], mod: String, name: String): List[Fun] =
+  List.filter(funs, f => f.name == name && f.mod == mod)
+
 def paramTys(ps: List[Param]): List[String] =
   List.map(ps, p => p.ty)
 
@@ -346,7 +349,10 @@ def inferMethod2(recv: Expr, name: String, args: List[Expr], env: List[(String, 
   }
 
 def inferMethodEn(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (hasEn(ens, en)) inferCtor(en, args, env, funs, ens) else inferCall(Str.concat(".", name), Expr.EVar(en) :: args, env, funs, ens)
+  if (hasEn(ens, en)) inferCtor(en, args, env, funs, ens) else resolveQual(en, name, args, env, funs, ens)
+
+def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  resolveUser(Str.concat(en, Str.concat(".", name)), args, env, funs, ens, Parse.pretty0(Expr.EMethod(Expr.EVar(en), name, args)), findFunMod(funs, en, name))
 
 def inferCtor(en: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   if (List.isEmpty(args)) ok(en) else inferCtorHead(en, List.head(args), List.tail(args), env, funs, ens)
@@ -463,6 +469,17 @@ def diagJson2(o: Out, loc: (Int, Int, Int, Int)): String =
 
 def check(src: String): String =
   check2(src, checkProg(Parse.parse(Lexer.lex(src))))
+
+def checkFiles(files: List[(String, String)]): String =
+  check2(filesSrc(files), checkProg(Parse.parseFiles(files)))
+
+def filesSrc(files: List[(String, String)]): String =
+  if (List.isEmpty(files)) "" else filesSrc2(List.head(files), List.tail(files))
+
+def filesSrc2(f: (String, String), rest: List[(String, String)]): String =
+  f match {
+    case (_, src) => Str.concat(src, filesSrc(rest))
+  }
 
 def check2(src: String, o: Out): String =
   if (hasErr(o)) Str.concat("[", Str.concat(diagJson(src, o), "]")) else "[]"

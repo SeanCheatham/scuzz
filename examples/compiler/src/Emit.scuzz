@@ -473,19 +473,25 @@ def emitUser(f: String, code: String, vals: List[String], owns: List[Bool], pref
   emitUser2(f, code, vals, owns, prefix, findDef(defs, f))
 
 def emitUser2(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, hit: List[Fun]): Slot =
-  if (List.isEmpty(hit)) Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_user_Main_", Str.concat(f, Str.concat("(", Str.concat(i64Args(vals), ")"))))))), pct(prefix, "v"), false) else emitUser3(f, code, vals, owns, prefix, List.head(hit))
+  if (List.isEmpty(hit)) Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_user_Main_", Str.concat(f, Str.concat("(", Str.concat(i64Args(vals), ")"))))))), pct(prefix, "v"), false) else emitUserD(code, vals, owns, prefix, List.head(hit))
 
-def emitUser3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, d: Fun): Slot =
+def emitUserHit(sym: String, code: String, vals: List[String], owns: List[Bool], prefix: String, hit: List[Fun]): Slot =
+  if (List.isEmpty(hit)) Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_user_", Str.concat(sym, Str.concat("(", Str.concat(i64Args(vals), ")"))))))), pct(prefix, "v"), false) else emitUserD(code, vals, owns, prefix, List.head(hit))
+
+def emitUserD(code: String, vals: List[String], owns: List[Bool], prefix: String, d: Fun): Slot =
   d match {
-    case Fun(_, _, _, params, ret, _) => emitUser6(f, code, vals, owns, prefix, params, ret)
+    case Fun(_, name, _, params, ret, _, mod) => emitUser6(symOf(mod, name), code, vals, owns, prefix, params, ret)
   }
+
+def symOf(mod: String, name: String): String =
+  Str.concat(if (mod == "") "Main" else mod, Str.concat("_", name))
 
 def emitUser6(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, params: List[Param], ret: String): Slot =
   emitUser7(f, code, prefix, llvmRet(ret), !isI64Ty(ret), packCall(params, vals, owns))
 
 def emitUser7(f: String, code: String, prefix: String, ty: String, owned: Bool, p: (String, String)): Slot =
   p match {
-    case (args, rel) => Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ", Str.concat(ty, Str.concat(" @sz_user_Main_", Str.concat(f, Str.concat("(", Str.concat(args, ")")))))))), rel)), pct(prefix, "v"), owned)
+    case (args, rel) => Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ", Str.concat(ty, Str.concat(" @sz_user_", Str.concat(f, Str.concat("(", Str.concat(args, ")")))))))), rel)), pct(prefix, "v"), owned)
   }
 
 def packCall(ps: List[Param], vals: List[String], owns: List[Bool]): (String, String) =
@@ -549,9 +555,31 @@ def emitField(recv: Expr, name: String, prefix: String, ens: List[En]): Slot =
 
 def emitCtorCall(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   recv match {
-    case Expr.EVar(en) => emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps)
+    case Expr.EVar(en) => emitCtorOrQual(en, name, args, prefix, strs, defs, ens, ps)
     case _ => Slot("", "0", false)
   }
+
+def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps) else emitQual(en, name, args, prefix, strs, defs, ens, ps)
+
+def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitQual2(en, name, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", []: List[String], []: List[Bool]), prefix, defs)
+
+def emitQual2(en: String, name: String, p: (String, List[String], List[Bool]), prefix: String, defs: List[Fun]): Slot =
+  p match {
+    case (code, vals, owns) => emitUserMod(en, name, code, vals, owns, prefix, defs)
+  }
+
+def findDefMod(funs: List[Fun], mod: String, name: String): List[Fun] =
+  List.filter(funs, f => f.name == name && f.mod == mod)
+
+def userName(d: Fun): String =
+  d match {
+    case Fun(_, name, _, _, _, _, mod) => symOf(mod, name)
+  }
+
+def emitUserMod(en: String, name: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun]): Slot =
+  emitUserHit(Str.concat(en, Str.concat("_", name)), code, vals, owns, prefix, findDefMod(defs, en, name))
 
 def emitPayloadCtor(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   if (List.isEmpty(args)) emitCtor(en, name, prefix, ens) else emitPayloadCtor1(emitExpr(List.head(args), Str.concat(prefix, "_ap"), strs, defs, ens, ps), en, name, prefix, ens)
@@ -944,10 +972,12 @@ def emitDefs(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): 
   if (List.isEmpty(ds)) "" else Str.concat(emitDef(List.head(ds), strs, all, ens), emitDefs(List.tail(ds), strs, all, ens))
 
 def emitDef2(d: Fun, body: Slot): String =
-  emitDef3(llvmRet(d.ret), d.name, defParams(d), body)
+  d match {
+    case Fun(_, name, _, params, ret, _, mod) => emitDef3(llvmRet(ret), symOf(mod, name), defParams2(params), body)
+  }
 
 def emitDef3(ty: String, name: String, params: String, body: Slot): String =
-  Str.concat("define internal ", Str.concat(ty, Str.concat(" @sz_user_Main_", Str.concat(name, emitDefSig(params, ty, body)))))
+  Str.concat("define internal ", Str.concat(ty, Str.concat(" @sz_user_", Str.concat(name, emitDefSig(params, ty, body)))))
 
 def emitDefSig(params: String, ty: String, body: Slot): String =
   Str.concat("(", Str.concat(params, Str.concat(") {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), emitDef4(ty, body)))))))
@@ -1101,6 +1131,20 @@ def emitContsIf3(code: String, p: (String, Int), el: Expr, strs: List[String], d
 
 def emit(src: String): String =
   emitProg(Parse.parse(Lexer.lex(src)), collectToks(Lexer.lex(src), []: List[String]))
+
+def internFiles(files: List[(String, String)], acc: List[String]): List[String] =
+  if (List.isEmpty(files)) acc else internFiles2(List.head(files), List.tail(files), acc)
+
+def internFiles2(f: (String, String), rest: List[(String, String)], acc: List[String]): List[String] =
+  f match {
+    case (_, src) => internFiles(rest, collectToks(Lexer.lex(src), acc))
+  }
+
+def emitFiles(files: List[(String, String)]): String =
+  emitProg(Parse.parseFiles(files), internFiles(files, []: List[String]))
+
+def emitFullFiles(files: List[(String, String)]): String =
+  Str.concat(preamble(), emitFiles(files))
 
 def decl(s: String): String =
   Str.concat("declare ", Str.concat(s, nl()))
