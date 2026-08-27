@@ -51,8 +51,14 @@ def irDiff(src: String, want: String): Bool =
 def irIdem(src: String): Bool =
   Emit.emit(src) == Emit.emit(src)
 
+def srcHello(): String =
+  "@main def main: IO[Unit] =\n  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n"
+
+def wantHello(): String =
+  "@.str0 = private unnamed_addr constant [14 x i8] c\"Hello, Scuzz!\\00\", align 1\n@.str1 = private unnamed_addr constant [7 x i8] c\"ready.\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %c0_gep = getelementptr inbounds [7 x i8], ptr @.str1, i64 0, i64 0\n  %c0_ss = call ptr @sz_string_from_cstr(ptr %c0_gep)\n  %c0_io = call ptr @sz_io_println(ptr %c0_ss)\n  call void @sz_release(ptr %c0_ss)\n  ret ptr %c0_io\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_in_gep = getelementptr inbounds [14 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_ss = call ptr @sz_string_from_cstr(ptr %build_in_gep)\n  %build_in_io = call ptr @sz_io_println(ptr %build_in_ss)\n  call void @sz_release(ptr %build_in_ss)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_io, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %build_in_io)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+
 def allOk(): Bool =
-  irDiff(srcHi(), wantHi()) && irIdem(srcHi()) && irDiff(srcSum(), wantSum()) && irIdem(srcSum()) && irDiff(srcAdd(), wantAdd()) && irIdem(srcAdd())
+  irDiff(srcHi(), wantHi()) && irIdem(srcHi()) && irDiff(srcSum(), wantSum()) && irIdem(srcSum()) && irDiff(srcAdd(), wantAdd()) && irIdem(srcAdd()) && irDiff(srcHello(), wantHello()) && irIdem(srcHello()) && Check.check(srcHello()) == "[]"
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "ir-ok" else "ir-bad")

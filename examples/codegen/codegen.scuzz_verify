@@ -16,3 +16,9 @@ def irIdemSum(): Bool =
 def irIdemAdd(): Bool =
   Main.irIdem(Main.srcAdd())
 
+def irHello(): Bool =
+  Main.irDiff(Main.srcHello(), Main.wantHello())
+
+def irIdemHello(): Bool =
+  Main.irIdem(Main.srcHello())
+

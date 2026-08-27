@@ -164,12 +164,27 @@ def infer(e: Expr, env: List[(String, String)], funs: List[Fun]): Out =
     case Expr.ENamed(_, inner) => infer(inner, env, funs)
     case Expr.EList(xs) => inferList(xs, env, funs)
     case Expr.ETuple(xs) => inferTuple(xs, env, funs)
-    case Expr.EMethod(recv, name, args) => inferCall(Str.concat(".", name), recv :: args, env, funs)
+    case Expr.EMethod(recv, name, args) => inferMethod(recv, name, args, env, funs, e)
     case Expr.EField(recv, _) => infer(recv, env, funs)
     case Expr.ELam(_, body) => infer(body, env, funs)
     case Expr.EMatch(s, _) => infer(s, env, funs)
     case Expr.EFor(_, body) => infer(body, env, funs)
   }
+
+def inferMethod(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], e: Expr): Out =
+  if (name == "flatMap") inferFlatMap(recv, args, env, funs, e) else inferCall(Str.concat(".", name), recv :: args, env, funs)
+
+def isIo(t: String): Bool =
+  Str.startsWith(t, "IO[")
+
+def inferFlatMap(recv: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], e: Expr): Out =
+  inferFlatMap2(infer(recv, env, funs), args, env, funs, e)
+
+def inferFlatMap2(o: Out, args: List[Expr], env: List[(String, String)], funs: List[Fun], e: Expr): Out =
+  if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), Parse.pretty0(e)) else inferFlatMap3(o, infer(List.head(args), env, funs), e)
+
+def inferFlatMap3(recv: Out, body: Out, e: Expr): Out =
+  if (hasErr(body)) body else if (isIo(recv.ty) && isIo(body.ty)) ok(body.ty) else bad(Str.concat("flatMap needs IO, got ", Str.concat(recv.ty, Str.concat(" and ", body.ty))), Parse.pretty0(e))
 
 def inferVar(s: String, env: List[(String, String)]): Out =
   inferVar2(s, getTy(env, s))
