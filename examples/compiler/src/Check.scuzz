@@ -36,10 +36,10 @@ def stripNamed(e: Expr): Expr =
   }
 
 def isKit(f: String): Bool =
-  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result"
+  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result"
 
 def kitParams(f: String): List[String] =
-  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else if (f == "Str.charAt") "String" :: "Int" :: ([]: List[String]) else if (f == "Str.slice") "String" :: "Int" :: "Int" :: ([]: List[String]) else if (f == "Str.toInt") "String" :: "Int" :: ([]: List[String]) else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: ([]: List[String]) else if (f == "List.concat") "List" :: "List" :: ([]: List[String]) else if (f == "List.cons") "Any" :: "List" :: ([]: List[String]) else if (f == "Builder.empty") []: List[String] else if (f == "Builder.append") "Builder" :: "String" :: ([]: List[String]) else if (f == "Builder.result") "Builder" :: ([]: List[String]) else []: List[String]
+  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else if (f == "Str.charAt") "String" :: "Int" :: ([]: List[String]) else if (f == "Str.slice") "String" :: "Int" :: "Int" :: ([]: List[String]) else if (f == "Str.toInt") "String" :: "Int" :: ([]: List[String]) else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: ([]: List[String]) else if (f == "List.concat") "List" :: "List" :: ([]: List[String]) else if (f == "List.cons") "Any" :: "List" :: ([]: List[String]) else if (f == "List.at") "List" :: "Int" :: ([]: List[String]) else if (f == "Builder.empty") []: List[String] else if (f == "Builder.append") "Builder" :: "String" :: ([]: List[String]) else if (f == "Builder.result") "Builder" :: ([]: List[String]) else []: List[String]
 
 def kitRet(f: String): String =
   if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail") "List[Int]" else if (f == "List.head") "Int" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else "String"
@@ -84,10 +84,10 @@ def resolveCall(f: String, args: List[Expr], env: List[(String, String)], funs: 
   resolveCall2(f, args, env, funs, ens, Parse.pretty0(Expr.ECall(f, args)))
 
 def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
-  if (isKit(f)) checkKnown(f, kitParams(f), kitRetOf(f, args, env, funs, ens), args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFun(funs, f))
+  if (isKit(f)) checkKnown(f, kitParams(f), kitRetOf(f, args, env, funs, ens), args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else resolveUser(f, args, env, funs, ens, span, findFun(funs, f))
 
 def kitRetOf(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
-  if (f == "List.head") headRet(args, env, funs, ens) else if (f == "List.tail") tailRet(args, env, funs, ens) else if (f == "List.cons") consRet(args, env, funs, ens) else kitRet(f)
+  if (f == "List.head") headRet(args, env, funs, ens) else if (f == "List.at") headRet(args, env, funs, ens) else if (f == "List.tail") tailRet(args, env, funs, ens) else if (f == "List.cons") consRet(args, env, funs, ens) else kitRet(f)
 
 def consRet(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
   if (List.isEmpty(args)) "List[Int]" else Str.concat("List[", Str.concat(infer(List.head(args), env, funs, ens).ty, "]"))
@@ -237,7 +237,7 @@ def bindPat(pat: String, scrutTy: String, env: List[(String, String)], ens: List
   bindPat2(patBind(pat), pat, scrutTy, env, ens)
 
 def bindPat2(b: String, pat: String, scrutTy: String, env: List[(String, String)], ens: List[En]): List[(String, String)] =
-  if (isTuplePat(pat)) bindTuple(pat, scrutTy, env) else if (b == "") env else (b, bindTy(pat, scrutTy, ens)) :: env
+  if (isTuplePat(pat)) bindTuple(pat, scrutTy, env) else if (hasComma(b)) bindTuple2(splitComma(b), recFieldTys(ens, patCore(pat)), env) else if (b == "") env else (b, bindTy(pat, scrutTy, ens)) :: env
 
 def isTuplePat(pat: String): Bool =
   Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
@@ -299,6 +299,42 @@ def caseFieldTy3(h: EnCase, rest: List[EnCase], ctor: String): String =
 
 def firstFieldTy(ps: List[Param]): String =
   if (List.isEmpty(ps)) "" else List.head(ps).ty
+
+def hasComma(s: String): Bool =
+  commaAt(s, 0) >= 0
+
+def recFieldTys(ens: List[En], core: String): List[String] =
+  recFieldTys2(dotAt(core, 0), core, ens)
+
+def recFieldTys2(dot: Int, core: String, ens: List[En]): List[String] =
+  if (dot < 0) enFieldTys(ens, core) else caseFieldTys(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
+
+def enFieldTys(ens: List[En], name: String): List[String] =
+  if (List.isEmpty(ens)) []: List[String] else enFieldTys1(List.head(ens), List.tail(ens), name)
+
+def enFieldTys1(h: En, rest: List[En], name: String): List[String] =
+  h match {
+    case En(_, n, _, cases) => if (n == name) firstCaseTys(cases) else enFieldTys(rest, name)
+  }
+
+def firstCaseTys(cs: List[EnCase]): List[String] =
+  if (List.isEmpty(cs)) []: List[String] else paramTys(List.head(cs).fields)
+
+def caseFieldTys(ens: List[En], en: String, ctor: String): List[String] =
+  if (List.isEmpty(ens)) []: List[String] else caseFieldTys1(List.head(ens), List.tail(ens), en, ctor)
+
+def caseFieldTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
+  h match {
+    case En(_, name, _, cases) => if (name == en) caseFieldTys2(cases, ctor) else caseFieldTys(rest, en, ctor)
+  }
+
+def caseFieldTys2(cs: List[EnCase], ctor: String): List[String] =
+  if (List.isEmpty(cs)) []: List[String] else caseFieldTys3(List.head(cs), List.tail(cs), ctor)
+
+def caseFieldTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
+  h match {
+    case EnCase(name, fields) => if (name == ctor) paramTys(fields) else caseFieldTys2(rest, ctor)
+  }
 
 def inferMethod(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens)
