@@ -36,13 +36,13 @@ def stripNamed(e: Expr): Expr =
   }
 
 def isKit(f: String): Bool =
-  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty"
+  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result"
 
 def kitParams(f: String): List[String] =
-  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: ([]: List[String]) else if (f == "List.concat") "List" :: "List" :: ([]: List[String]) else []: List[String]
+  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else if (f == "Str.charAt") "String" :: "Int" :: ([]: List[String]) else if (f == "Str.slice") "String" :: "Int" :: "Int" :: ([]: List[String]) else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: ([]: List[String]) else if (f == "List.concat") "List" :: "List" :: ([]: List[String]) else if (f == "List.cons") "Any" :: "List" :: ([]: List[String]) else if (f == "Builder.empty") []: List[String] else if (f == "Builder.append") "Builder" :: "String" :: ([]: List[String]) else if (f == "Builder.result") "Builder" :: ([]: List[String]) else []: List[String]
 
 def kitRet(f: String): String =
-  if (f == "Str.len" || f == "List.len") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail") "List[Int]" else if (f == "List.head") "Int" else if (f == "List.isEmpty") "Bool" else "String"
+  if (f == "Str.len" || f == "List.len" || f == "Str.charAt") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail") "List[Int]" else if (f == "List.head") "Int" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else "String"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
@@ -69,7 +69,7 @@ def zipCheck(callee: String, want: List[String], args: List[Expr], env: List[(St
   if (List.isEmpty(want)) ok("") else zipCheck2(callee, List.head(want), infer(stripNamed(List.head(args)), env, funs, ens), List.tail(want), List.tail(args), env, funs, ens, span)
 
 def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
-  if (hasErr(o)) o else if (o.ty == w || listMatch(w, o.ty)) zipCheck(callee, want, args, env, funs, ens, span) else bad(Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, Str.concat(", got ", o.ty)))), span)
+  if (hasErr(o)) o else if (o.ty == w || listMatch(w, o.ty) || w == "Any") zipCheck(callee, want, args, env, funs, ens, span) else bad(Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, Str.concat(", got ", o.ty)))), span)
 
 def listMatch(w: String, g: String): Bool =
   w == "List" && Str.startsWith(g, "List[")
@@ -87,7 +87,10 @@ def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs:
   if (isKit(f)) checkKnown(f, kitParams(f), kitRetOf(f, args, env, funs, ens), args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFun(funs, f))
 
 def kitRetOf(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
-  if (f == "List.head") headRet(args, env, funs, ens) else if (f == "List.tail") tailRet(args, env, funs, ens) else kitRet(f)
+  if (f == "List.head") headRet(args, env, funs, ens) else if (f == "List.tail") tailRet(args, env, funs, ens) else if (f == "List.cons") consRet(args, env, funs, ens) else kitRet(f)
+
+def consRet(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
+  if (List.isEmpty(args)) "List[Int]" else Str.concat("List[", Str.concat(infer(List.head(args), env, funs, ens).ty, "]"))
 
 def headRet(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
   if (List.isEmpty(args)) "Int" else elemOf(infer(List.head(args), env, funs, ens).ty)
