@@ -27,20 +27,20 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Scuzz at compiler scale (self-hosting)
 
-**Status.** `HUMANS.md` sets self-hosting as the eventual goal: rewrite the compiler, CLI, and tooling in Scuzz. Direction, prerequisites, and staged slices are locked in [`vision.md`](vision.md#self-hosting). The Rust toolchain stays the reference until each slice passes its differential campaign. The Rust compiler is about 68k lines. The largest Scuzz program today is `examples/editor` at about 1k lines.
+**Status.** `HUMANS.md` sets self-hosting as the eventual goal: rewrite the compiler, CLI, and tooling in Scuzz. Direction, prerequisites, and staged slices are locked in [`vision.md`](vision.md#self-hosting). The Rust toolchain stays the reference until each slice passes its differential campaign. The Rust compiler is about 68k lines. The largest Scuzz program today is `examples/scale` at about 4k lines. Tail calls are in: codegen lowers a self-tail call to a loop. `examples/kernel` `countdown` / `countdownMatch` recurse to depth 1,000,000 without stack overflow. Builder is in: `Builder.append` grows in linear time. `examples/kernel` `fillBuilder` builds a 2 MiB string under `scuzz test`. Scale is in: `examples/scale` typechecks in about 0.5 s at about 27 MiB RSS. A live run fills a String-keyed `Map` of 3048 entries (`mapn:3048`, `hit:0:49`). Structured generation is in: `examples/kernel` `termDiff` drives a recursive `Term` with nest depth 3. Mutation sampling is in: `scuzz fuzz --iterations 8 examples/scale` finishes in about 36 s.
 
-**Unproven.** Scuzz at that scale jump. Codegen has no tail calls, so deep AST recursion burns the C stack (the Rust compiler needs a 16MB stack hop to typecheck 500-line programs). `Str.concat` copies, so multi-MiB output assembly through it is quadratic. `Map` is an Int- or String-keyed tree; symbol-table performance at scale is unmeasured. The fuzzer has no differential oracle against a reference binary (`Sys.exec` fails under TestRuntime by design), no size-controlled generation of well-formed program terms, and no mutation-site sampling for large packages.
+**Unproven.** Scuzz at the 68k-line compiler jump.
 
 **Proof.** Close the prerequisites in order, each as its own slice:
 
-1. **Tail calls** — codegen lowers a self-tail call to a loop. A kernel example recurses to depth 1,000,000 and runs without stack overflow.
-2. **Builder** — assemble a multi-MiB string in linear time; an example proves it under `scuzz test`.
-3. **Scale proof** — a Scuzz package of several thousand lines typechecks and runs with usable time and memory; record the measurements.
-4. **Differential oracle** — a hermetic fuzz campaign compares a Scuzz implementation against the Rust reference on the same inputs.
-5. **Structured generation** — drive oracles draw well-formed terms with size control; shrink keeps terms well-formed.
-6. **Mutation sampling** — a large package finishes a campaign inside its iteration budget.
+1. **Tail calls** — in: codegen lowers a self-tail call to a loop. A kernel example recurses to depth 1,000,000 and runs without stack overflow.
+2. **Builder** — in: `Builder.empty` / `Builder.append` / `Builder.result` assemble a multi-MiB string in linear time. `examples/kernel` `fillBuilder` prints `build:2097152` under `scuzz test`.
+3. **Scale proof** — in: `examples/scale` is about 4k lines. `scuzz check` typechecks it in about 0.5 s at about 27 MiB RSS. A live `scuzz run` fills a String-keyed `Map` of 3048 entries (`mapn:3048`, `hit:0:49`). Bind takes about 1 s. Lookup takes about 90 ms.
+4. **Differential oracle** — in: blessed `Oracle.sumTo` is an in-process closed-form Int. `examples/kernel` `sumTo` is a tail loop. Drive `sumToDiff` compares them under TestRuntime. `scuzz fuzz --iterations 16 examples/kernel` runs 10 searches with 0 failures (`diff:y`). The compare does not use `Sys.exec`.
+5. **Structured generation** — in: drive oracles draw well-formed ADT terms. Nest depth is 3. A leaf case is nullary or all Int, String, or Bool fields. Shrink keeps a Term a Term. `examples/kernel` `termDiff` drives `Term`. `scuzz fuzz --iterations 16 examples/kernel` stays green (`diff:y`).
+6. **Mutation sampling** — in: mutation samples a budget slice of live-code sites. A probe that runs longer than 20 s is killed. `scuzz fuzz --iterations 8 examples/scale` finishes in about 36 s (97 sites, 3 mutants, 1 timeout kill).
 
-Then the staged rewrite slices ([`vision.md`](vision.md#self-hosting)): `fmt` core, kernel typechecker, kernel codegen, then CLI and the verification stack. Each slice is a Scuzz package with roundtrip, idempotence, and differential oracles. The Rust binary retires when the Scuzz toolchain passes the full campaign, compiles `examples/`, and compiles itself.
+Then the staged rewrite slices ([`vision.md`](vision.md#self-hosting)): fmt core is in (`examples/fmt`). The kernel typechecker is in (`examples/tyck`). Kernel codegen is in (`examples/codegen`). CLI core is in (`examples/cli`). Next is driver, the verification stack, and Rust retirement. Each slice is a Scuzz package with roundtrip, idempotence, and differential oracles. The Rust binary retires when the Scuzz toolchain passes the full campaign, compiles `examples/`, and compiles itself.
 
 ## Known gaps
 

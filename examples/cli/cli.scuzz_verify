@@ -1,0 +1,33 @@
+def cliHelp(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a1("--help"))), Help.helpRoot())
+
+def cliFmtHelp(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--help"))), Help.helpFmt())
+
+def cliCheckHelp(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a2("check", "--help"))), Help.helpCheck())
+
+def cliFmtArgs(): Bool =
+  Main.cliDiff(Cli.show(Cli.parse(Main.a3("fmt", "--check", "examples/hello"))), "fmt path=examples/hello check=true")
+
+def cliJsonCheck(): Bool =
+  Main.cliDiff(Cli.show(Cli.parse(Main.a2("--message-format=json", "check"))), "check path=. json=true")
+
+def cliUnrec(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a1("nope"))), Main.wantUnrec())
+
+def cliUnexp(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--nope"))), Main.wantUnexp())
+
+def cliJsonOnly(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a2("--message-format=json", "fmt"))), Main.wantJsonOnly())
+
+def cliFuzz(): Bool =
+  Main.cliDiff(Cli.show(Cli.parse(Main.a3("fuzz", "--iterations", "16"))), "fuzz path=. iterations=16 seed=42 replay= oracles=false noFailFast=false minimize=false relate=false")
+
+def cliFmtSrc(): Bool =
+  Main.cliDiff(Cli.fmtSrc(Main.srcHi()), Main.wantHi())
+
+def cliIdemFmt(): Bool =
+  Main.cliIdem(Main.a1("fmt"))
+

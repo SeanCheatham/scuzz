@@ -1,0 +1,212 @@
+def helpRoot(): String =
+  """Scuzz Lang CLI
+
+Usage: scuzz [OPTIONS] <COMMAND>
+
+Commands:
+  build    Compile a Scuzz Lang project to a native executable (LLVM)
+  run      Build and run a Scuzz Lang project
+  watch    Watch sources and rebuild on change (compile loop, not hot reload)
+  test     Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
+  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json
+  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
+  fmt      Format Scuzz Lang sources under src/
+  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
+  new      Create a new Scuzz Lang project
+  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
+  package  Package a project for host, Android, or iOS
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
+
+Examples:
+  scuzz new myapp --ui
+  scuzz check
+  scuzz check --message-format=json
+  scuzz lsp
+  scuzz ide
+  scuzz ide --headless .
+  scuzz test
+  scuzz run --headless
+  scuzz run examples/studio
+  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio
+  scuzz watch
+  scuzz run --watch --headless
+  scuzz fuzz --iterations 16
+
+JSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).
+`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump (includes [heap] kinds, delta, and [live] rows). Live inject: build/inject.script (tap/xy/text/type/key/compose/commit/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak). Desktop quit is window close. Headless `quit` stops the session. Desktop/Mobile record: build/record.script (live keys write `key`; auto-repeat writes `key a+repeat`; Shift+arrows write `key ArrowLeft+shift`; copy/cut/paste write those verbs; hover and right-click write `hover` / `secondary`).
+"""
+
+def helpFmt(): String =
+  """Format Scuzz Lang sources under src/
+
+Usage: scuzz fmt [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --check
+          Check only (nonzero exit if files need reformat)
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz fmt
+  scuzz fmt --check
+  scuzz fmt examples/hello
+"""
+
+def helpCheck(): String =
+  """Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json
+
+Usage: scuzz check [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz check
+  scuzz check examples/kernel
+  scuzz check --message-format=json
+"""
+
+def helpBuild(): String =
+  """Compile a Scuzz Lang project to a native executable (LLVM)
+
+Usage: scuzz build [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  Project directory containing scuzz.toml [default: .]
+
+Options:
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+      --out-dir <OUT_DIR>
+          Output directory [default: build]
+      --full
+          Force a full rebuild (ignore incremental fingerprint)
+      --verify
+          Apply `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_verify` + residual `.require` / `where` (TestRuntime / fuzz graph)
+  -h, --help
+          Print help
+
+Examples:
+  scuzz build
+  scuzz build --full examples/hello
+  scuzz build --verify examples/counter
+"""
+
+def helpRun(): String =
+  """Build and run a Scuzz Lang project
+
+Usage: scuzz run [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --headless
+          Force Headless UiRuntime (no display needed)
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+      --out-dir <OUT_DIR>
+          [default: build]
+      --watch
+          Keep running; [ui] hot-reloads the View tree; IO-only kills and reruns on source change
+      --script <PATH>
+          Inject script path (SCUZZ_UI_SCRIPT); played after the first pump
+      --dump <PATH>
+          Structural dump path at finish (SCUZZ_FUZZ_DUMP)
+  -h, --help
+          Print help
+
+Examples:
+  scuzz run
+  scuzz run --headless
+  scuzz run examples/studio
+  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio
+  scuzz run --watch --headless
+
+Desktop/Mobile `run` writes build/record.script (live OS input; keys as `key`; auto-repeat as `key a+repeat`; Shift+arrows as `key ArrowLeft+shift`; copy/cut/paste as those verbs; hover and right-click as `hover` / `secondary`) and build/debug.dump. Replay Headless with --script and --dump. `[ui] run --watch` is hot reload. `build/inject.script` stays watch playback only (`dump` / `reload` / `quit` / `resetpeak` / `key` / `compose` / `commit` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` included). Desktop quit is window close. Headless `quit` stops the session.
+"""
+
+def helpFuzz(): String =
+  """Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
+
+Usage: scuzz fuzz [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --iterations <ITERATIONS>
+          Iteration budget. Search then mutation. `0` replays corpus/ only [default: 32]
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+      --seed <SEED>
+          Deterministic LCG seed [default: 42]
+      --replay <REPLAY>
+          Replay a repro.toml (events + optional schedule_seed / pct_d / pct_k + optional fault_seed)
+      --oracles
+          Mutate residual Property.check / Property.assert / .require predicates
+      --no-fail-fast
+          Finish search and still mutate after the first search failure
+      --minimize-corpus
+          Greedily minimize corpus/*.toml entries (keep pass/fail + declared sometimes coverage), then exit
+      --relate
+          Judge (Timeline, Timeline) => Verdict relation claims: replay each corpus entry under its own and a perturbed schedule, then exit
+  -h, --help
+          Print help
+
+Examples:
+  scuzz fuzz --iterations 16
+  scuzz fuzz --iterations 16 examples/counter
+  scuzz fuzz --iterations 0
+  scuzz fuzz --oracles examples/counter
+  scuzz fuzz --replay build/fuzz/repro.toml
+  scuzz fuzz --minimize-corpus
+  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example
+
+`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and replays those entries before search. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). `examples/bad-adt` is an expected fuzz failure (wrong `record` area). `examples/bad-sched` is an expected fuzz failure (lost Queue offer order under PCT). `examples/bad-intent` is an expected check failure (empty `*.scuzz_verify`). `examples/bad-split` is an expected fuzz failure (silent live/verify dump mismatch). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass on the other expected-fail packages.
+"""
+
+def helpNew(): String =
+  """Create a new Scuzz Lang project
+
+Usage: scuzz new [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+      --path <PATH>
+          [default: .]
+      --ui
+          Scaffold a Headless UI sample instead of an IO hello
+  -h, --help
+          Print help
+
+Examples:
+  scuzz new mycli
+  scuzz new myapp --ui
+  scuzz new myapp --ui --path /tmp
+"""
+
