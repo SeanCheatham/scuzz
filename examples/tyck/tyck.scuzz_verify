@@ -1,0 +1,36 @@
+def tyckOk(): Bool =
+  Main.tyckDiff(Main.srcOk(), Main.wantOk())
+
+def tyckUnbound(): Bool =
+  Main.tyckDiff(Main.srcUnbound(), Main.wantUnbound())
+
+def tyckArith(): Bool =
+  Main.tyckDiff(Main.srcArith(), Main.wantArith())
+
+def tyckArity(): Bool =
+  Main.tyckDiff(Main.srcArity(), Main.wantArity())
+
+def tyckRet(): Bool =
+  Main.tyckDiff(Main.srcRet(), Main.wantRet())
+
+def tyckPrint(): Bool =
+  Main.tyckDiff(Main.srcPrint(), Main.wantPrint())
+
+def tyckUnk(): Bool =
+  Main.tyckDiff(Main.srcUnk(), Main.wantUnk())
+
+def tyckCmp(): Bool =
+  Main.tyckDiff(Main.srcCmp(), Main.wantCmp())
+
+def tyckMainTy(): Bool =
+  Main.tyckDiff(Main.srcMainTy(), Main.wantMainTy())
+
+def tyckArg(): Bool =
+  Main.tyckDiff(Main.srcArg(), Main.wantArg())
+
+def tyckIdemOk(): Bool =
+  Main.tyckIdem(Main.srcOk())
+
+def tyckIdemUnbound(): Bool =
+  Main.tyckIdem(Main.srcUnbound())
+
