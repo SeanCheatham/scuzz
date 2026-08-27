@@ -40,6 +40,13 @@ static void enqueue_key(const char *name, const char *text, int mods, int repeat
   (void)point;
   return 0;
 }
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range
+                                               actualRange:(NSRangePointer)actualRange {
+  (void)range;
+  if (actualRange)
+    *actualRange = NSMakeRange(0, 0);
+  return nil;
+}
 - (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange
          replacementRange:(NSRange)replacementRange {
   NSString *s = nil;
