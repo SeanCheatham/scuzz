@@ -1,0 +1,28 @@
+record Build(ok: Bool, ir: String, diags: String)
+
+import Manifest.Man
+
+def compileSrc(src: String): Build =
+  compileSrc2(Check.check(src), src)
+
+def compileSrc2(diags: String, src: String): Build =
+  if (diags == "[]") Build(true, Emit.emit(src), diags) else Build(false, "", diags)
+
+def joinSlash(a: String, b: String): String =
+  if (a == "") b else if (Str.charAt(a, Str.len(a) - 1) == 47) Str.concat(a, b) else Str.concat(a, Str.concat("/", b))
+
+def llName(outDir: String, name: String): String =
+  joinSlash(outDir, Str.concat(name, ".ll"))
+
+def exeName(outDir: String, name: String): String =
+  joinSlash(outDir, name)
+
+def linkLine(clang: String, ll: String, lib: String, exe: String): String =
+  Str.concat(clang, Str.concat(" -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -lpthread -o ", exe))))))
+
+def missToml(dir: String): String =
+  Str.concat("missing scuzz.toml in ", dir)
+
+def showMan(m: Man): String =
+  if (!m.ok) Str.concat("err:", m.err) else Str.concat("name=", Str.concat(m.name, Str.concat(" ver=", Str.concat(m.version, Str.concat(" ui=", Str.concat(if (m.hasUi) "true" else "false", Str.concat(" deps=", Str.fromInt(List.len(m.deps)))))))))
+
