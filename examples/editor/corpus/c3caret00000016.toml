@@ -1,0 +1,4 @@
+[fuzz]
+seed = 16
+schedule_seed = "16"
+events = ["caret 0"]

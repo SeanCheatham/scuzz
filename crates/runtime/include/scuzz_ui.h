@@ -806,6 +806,7 @@ SzView *sz_lang_view_split(SzSignalInt *frac, SzView *start, SzView *end);
 SzView *sz_lang_view_overlay(SzSignalInt *open, SzView *child);
 SzIo *sz_lang_ui_set_title(SzString *title);
 SzIo *sz_lang_ui_set_editor_caret(int64_t line, int64_t col);
+SzIo *sz_lang_ui_editor_caret(void);
 SzIo *sz_lang_ui_set_editor_diagnostics(SzList *marks);
 SzIo *sz_lang_ui_set_editor_tokens(SzList *data);
 SzIo *sz_lang_ui_set_editor_inlays(SzList *hints);

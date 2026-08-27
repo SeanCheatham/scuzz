@@ -1097,6 +1097,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Ui.setEditorCaret",
         "Ui.setEditorCaret(line: Int, col: Int): IO[Unit]",
     ),
+    ("Ui.editorCaret", "Ui.editorCaret(): IO[Int]"),
     (
         "Ui.setEditorDiagnostics",
         "Ui.setEditorDiagnostics(marks: List[(Int, Int)]): IO[Unit]",
@@ -1736,6 +1737,7 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Sys.getenv",
     "Ui.setTitle",
     "Ui.setEditorCaret",
+    "Ui.editorCaret",
     "Ui.setEditorDiagnostics",
     "Ui.setEditorTokens",
     "Ui.setEditorInlays",
@@ -2102,6 +2104,7 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             ("Sys.getenv", "Sys.getenv(\"HOME\")"),
             ("Ui.setTitle", "Ui.setTitle(\"Hello\")"),
             ("Ui.setEditorCaret", "Ui.setEditorCaret(1, 1)"),
+            ("Ui.editorCaret", "Ui.editorCaret()"),
             (
                 "Ui.setEditorDiagnostics",
                 "Ui.setEditorDiagnostics([(1, 1)])",

@@ -1934,6 +1934,15 @@ SzIo *sz_lang_ui_set_editor_caret(int64_t line, int64_t col) {
   return io;
 }
 
+static void *thunk_editor_caret(void *env) {
+  SzView *ed;
+  (void)env;
+  ed = live_first_editor();
+  return sz_box_i64(ed ? (int64_t)sz_view_editor_caret(ed) : 0);
+}
+
+SzIo *sz_lang_ui_editor_caret(void) { return sz_io_delay(thunk_editor_caret, NULL); }
+
 static void *thunk_set_editor_diagnostics(void *env) {
   SzList *marks = (SzList *)env;
   SzView *ed = live_first_editor();
