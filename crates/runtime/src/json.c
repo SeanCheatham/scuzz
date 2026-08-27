@@ -710,6 +710,15 @@ static SzList *json_arr_list(SzAdt *j) {
   return (SzList *)sz_adt_payload(j);
 }
 
+/* Cons, then drop the caller's unique ref to `tail`. Accumulators that
+ * reverse later must take the old spine so reverse + release(root) frees
+ * every cell. */
+static SzList *json_cons_take(void *head, SzList *tail) {
+  SzList *n = sz_list_cons(head, tail);
+  sz_release(tail);
+  return n;
+}
+
 static SzList *json_one(void *v) {
   SzList *xs = sz_list_cons(v, sz_list_nil());
   return xs;
@@ -738,7 +747,7 @@ SzList *sz_json_keys(SzAdt *j) {
   SzList *out;
   while (xs && !sz_list_is_empty(xs)) {
     SzPair *ent = (SzPair *)sz_list_head(xs);
-    acc = sz_list_cons(sz_pair_left(ent), acc);
+    acc = json_cons_take(sz_pair_left(ent), acc);
     xs = sz_list_tail(xs);
   }
   out = sz_list_reverse(acc);
@@ -907,15 +916,153 @@ SzAdt *sz_json_merge(SzAdt *a, SzAdt *b) {
     return a;
   }
   for (p = right; p && !sz_list_is_empty(p); p = sz_list_tail(p))
-    acc = sz_list_cons(sz_list_head(p), acc);
+    acc = json_cons_take(sz_list_head(p), acc);
   for (p = left; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
     SzPair *ent = (SzPair *)sz_list_head(p);
     SzString *k = ent ? (SzString *)sz_pair_left(ent) : NULL;
     if (!json_list_has_key(right, k))
-      acc = sz_list_cons(ent, acc);
+      acc = json_cons_take(ent, acc);
   }
   out = sz_list_reverse(acc);
   sz_release(acc);
   j = json_mk(JSON_OBJ, out);
   return j;
+}
+
+double sz_json_float_or(SzAdt *j, double d) {
+  SzList *xs = sz_json_as_float(j);
+  double x;
+  if (!xs) {
+    sz_release(xs);
+    return d;
+  }
+  x = unbox_f64(sz_list_head(xs));
+  sz_release(xs);
+  return x;
+}
+
+double sz_json_get_float(SzAdt *j, SzString *key, double d) {
+  SzList *g = sz_json_get(j, key);
+  double x;
+  if (!g) {
+    sz_release(g);
+    return d;
+  }
+  x = sz_json_float_or((SzAdt *)sz_list_head(g), d);
+  sz_release(g);
+  return x;
+}
+
+SzAdt *sz_json_set(SzAdt *j, SzString *key, SzAdt *v) {
+  SzList *xs = json_obj_list(j);
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
+  SzPair *ent;
+  int replaced = 0;
+  for (p = xs; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
+    SzPair *old = (SzPair *)sz_list_head(p);
+    if (json_key_eq(old, key)) {
+      ent = sz_pair_new(key, v);
+      acc = json_cons_take(ent, acc);
+      sz_release(ent);
+      replaced = 1;
+    } else {
+      acc = json_cons_take(old, acc);
+    }
+  }
+  if (!replaced) {
+    ent = sz_pair_new(key, v);
+    acc = json_cons_take(ent, acc);
+    sz_release(ent);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return json_mk(JSON_OBJ, out);
+}
+
+SzAdt *sz_json_remove(SzAdt *j, SzString *key) {
+  SzList *xs = json_obj_list(j);
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
+  if (!xs) {
+    sz_retain(j);
+    return j;
+  }
+  for (p = xs; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
+    SzPair *ent = (SzPair *)sz_list_head(p);
+    if (!json_key_eq(ent, key))
+      acc = json_cons_take(ent, acc);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return json_mk(JSON_OBJ, out);
+}
+
+SzAdt *sz_json_append(SzAdt *j, SzAdt *v) {
+  SzList *xs = json_arr_list(j);
+  SzList *one = json_one(v);
+  SzList *out;
+  SzAdt *a;
+  if (!xs) {
+    return json_mk(JSON_ARR, one);
+  }
+  out = sz_list_concat(xs, one);
+  sz_release(one);
+  a = json_mk(JSON_ARR, out);
+  return a;
+}
+
+SzAdt *sz_json_prepend(SzAdt *j, SzAdt *v) {
+  SzList *xs = json_arr_list(j);
+  SzList *one = json_one(v);
+  SzList *out;
+  SzAdt *a;
+  if (!xs) {
+    return json_mk(JSON_ARR, one);
+  }
+  out = sz_list_concat(one, xs);
+  sz_release(one);
+  a = json_mk(JSON_ARR, out);
+  return a;
+}
+
+SzAdt *sz_json_set_at(SzAdt *j, int64_t i, SzAdt *v) {
+  SzList *xs = json_arr_list(j);
+  SzList *out;
+  if (!xs) {
+    sz_retain(j);
+    return j;
+  }
+  out = sz_list_set_at(xs, i, v);
+  if (out == xs) {
+    sz_release(out);
+    sz_retain(j);
+    return j;
+  }
+  return json_mk(JSON_ARR, out);
+}
+
+SzAdt *sz_json_drop_at(SzAdt *j, int64_t i) {
+  SzList *xs = json_arr_list(j);
+  SzList *prefix;
+  SzList *suffix;
+  SzList *out;
+  int64_t n;
+  if (!xs || i < 0) {
+    sz_retain(j);
+    return j;
+  }
+  n = sz_list_len(xs);
+  if (i >= n) {
+    sz_retain(j);
+    return j;
+  }
+  prefix = sz_list_take(xs, i);
+  suffix = sz_list_drop(xs, i + 1);
+  out = sz_list_concat(prefix, suffix);
+  sz_release(prefix);
+  sz_release(suffix);
+  return json_mk(JSON_ARR, out);
 }

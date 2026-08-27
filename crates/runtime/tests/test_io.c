@@ -3739,6 +3739,104 @@ int main(void) {
   }
 
   {
+    SzAdt *pr = json_expect_ok("{\"a\":1,\"b\":2}");
+    SzAdt *j = (SzAdt *)sz_adt_payload(pr);
+    SzAdt *vr = json_expect_ok("9");
+    SzAdt *v = (SzAdt *)sz_adt_payload(vr);
+    SzAdt *nr = json_expect_ok("3");
+    SzAdt *nv = (SzAdt *)sz_adt_payload(nr);
+    SzAdt *nl = json_expect_ok("null");
+    SzAdt *fr = json_expect_ok("1.5");
+    SzAdt *fv = (SzAdt *)sz_adt_payload(fr);
+    SzAdt *ar = json_expect_ok("[1,2,3]");
+    SzAdt *arr = (SzAdt *)sz_adt_payload(ar);
+    SzString *ka = sz_string_from_cstr("a");
+    SzString *kb = sz_string_from_cstr("b");
+    SzString *kc = sz_string_from_cstr("c");
+    SzString *kx = sz_string_from_cstr("x");
+    SzAdt *set_a = sz_json_set(j, ka, v);
+    SzAdt *set_c = sz_json_set(j, kc, nv);
+    SzAdt *removed = sz_json_remove(j, ka);
+    SzAdt *drop_miss = sz_json_remove(j, kc);
+    SzAdt *from_null = sz_json_set((SzAdt *)sz_adt_payload(nl), ka, v);
+    SzAdt *app = sz_json_append(arr, nv);
+    SzAdt *pre = sz_json_prepend(arr, nv);
+    SzAdt *sat = sz_json_set_at(arr, 1, nv);
+    SzAdt *dat = sz_json_drop_at(arr, 1);
+    SzAdt *sat_oob = sz_json_set_at(arr, 9, nv);
+    SzAdt *dat_oob = sz_json_drop_at(arr, 9);
+    SzAdt *app_null = sz_json_append((SzAdt *)sz_adt_payload(nl), nv);
+    SzList *app_xs;
+    SzList *app_at;
+    SzList *pre_xs;
+    SzList *pre_at;
+    SzList *sat_at;
+    SzList *dat_xs;
+    SzList *dat_at;
+    SzList *null_xs;
+    assert(sz_json_get_int(set_a, ka, 0) == 9);
+    assert(sz_json_get_int(set_a, kb, 0) == 2);
+    assert(sz_json_get_int(set_c, kc, 0) == 3);
+    assert(sz_json_get_int(set_c, ka, 0) == 1);
+    assert(sz_json_has(removed, ka) == 0);
+    assert(sz_json_get_int(removed, kb, 0) == 2);
+    assert(sz_json_get_int(drop_miss, ka, 0) == 1);
+    assert(sz_json_is_obj(from_null) == 1);
+    assert(sz_json_get_int(from_null, ka, 0) == 9);
+    app_xs = sz_json_arr(app);
+    app_at = sz_json_at(app, 3);
+    pre_xs = sz_json_arr(pre);
+    pre_at = sz_json_at(pre, 0);
+    sat_at = sz_json_at(sat, 1);
+    dat_xs = sz_json_arr(dat);
+    dat_at = sz_json_at(dat, 1);
+    null_xs = sz_json_arr(app_null);
+    assert(sz_list_len(app_xs) == 4);
+    assert(sz_json_int_or((SzAdt *)sz_list_head(app_at), 0) == 3);
+    assert(sz_list_len(pre_xs) == 4);
+    assert(sz_json_int_or((SzAdt *)sz_list_head(pre_at), 0) == 3);
+    assert(sz_json_int_or((SzAdt *)sz_list_head(sat_at), 0) == 3);
+    assert(sz_list_len(dat_xs) == 2);
+    assert(sz_json_int_or((SzAdt *)sz_list_head(dat_at), 0) == 3);
+    assert(sat_oob == arr);
+    assert(dat_oob == arr);
+    assert(sz_json_is_arr(app_null) == 1);
+    assert(sz_list_len(null_xs) == 1);
+    assert(sz_json_float_or(fv, 0.0) > 1.4 && sz_json_float_or(fv, 0.0) < 1.6);
+    assert(sz_json_get_float(j, kx, 2.5) > 2.4 && sz_json_get_float(j, kx, 2.5) < 2.6);
+    sz_release(app_xs);
+    sz_release(app_at);
+    sz_release(pre_xs);
+    sz_release(pre_at);
+    sz_release(sat_at);
+    sz_release(dat_xs);
+    sz_release(dat_at);
+    sz_release(null_xs);
+    sz_release(from_null);
+    sz_release(set_a);
+    sz_release(set_c);
+    sz_release(removed);
+    sz_release(drop_miss);
+    sz_release(app);
+    sz_release(pre);
+    sz_release(sat);
+    sz_release(dat);
+    sz_release(sat_oob);
+    sz_release(dat_oob);
+    sz_release(app_null);
+    sz_release(ka);
+    sz_release(kb);
+    sz_release(kc);
+    sz_release(kx);
+    sz_release(pr);
+    sz_release(vr);
+    sz_release(nr);
+    sz_release(nl);
+    sz_release(fr);
+    sz_release(ar);
+  }
+
+  {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
     sz_alloc_stats(&base_bytes, &base_count);
@@ -3770,6 +3868,42 @@ int main(void) {
       sz_release(merged);
       sz_release(ka);
       sz_release(pr);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzAdt *pr = json_expect_ok("{\"a\":1}");
+      SzAdt *j = (SzAdt *)sz_adt_payload(pr);
+      SzAdt *vr = json_expect_ok("2");
+      SzAdt *v = (SzAdt *)sz_adt_payload(vr);
+      SzAdt *ar = json_expect_ok("[1]");
+      SzAdt *arr = (SzAdt *)sz_adt_payload(ar);
+      SzString *ka = sz_string_from_cstr("a");
+      SzString *kb = sz_string_from_cstr("b");
+      SzAdt *set = sz_json_set(j, kb, v);
+      SzAdt *rem = sz_json_remove(j, ka);
+      SzAdt *app = sz_json_append(arr, v);
+      SzAdt *pre = sz_json_prepend(arr, v);
+      SzAdt *sat = sz_json_set_at(arr, 0, v);
+      SzAdt *dat = sz_json_drop_at(arr, 0);
+      sz_release(set);
+      sz_release(rem);
+      sz_release(app);
+      sz_release(pre);
+      sz_release(sat);
+      sz_release(dat);
+      sz_release(ka);
+      sz_release(kb);
+      sz_release(pr);
+      sz_release(vr);
+      sz_release(ar);
     }
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);

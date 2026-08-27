@@ -20,6 +20,28 @@ private def printMerge(a: Json, b: Json): IO[Unit] =
     _ <- IO.println(s"mergeN:${Str.fromInt(Json.getInt(m, "n", 0))}")
   } yield ()
 
+private def printSet(j: Json): IO[Unit] =
+  for {
+    s = Json.set(j, "n", Json.Int(8))
+    r = Json.remove(s, "ok")
+    _ <- IO.println(s"setN:${Str.fromInt(Json.getInt(s, "n", 0))}")
+    _ <- IO.println(Str.concat("setHasOk:", if (Json.has(r, "ok")) "1" else "0"))
+  } yield ()
+
+private def printArrWrite(): IO[Unit] =
+  for {
+    a = Json.append(Json.Null, Json.Int(1))
+    p = Json.prepend(a, Json.Int(0))
+    u = Json.setAt(p, 1, Json.Int(9))
+    d = Json.dropAt(u, 0)
+    _ <- IO.println(s"arrW:${Str.fromInt(List.len(Json.arr(d)))}")
+    at0 = Json.at(d, 0)
+    _ <- IO.println(s"arrW0:${Str.fromInt(Json.intOr(if (List.isEmpty(at0)) Json.Null else List.head(at0), -1))}")
+  } yield ()
+
+private def printFloat(): IO[Unit] =
+  IO.println(if (Json.floatOr(Json.Float(1.5), 0.0) > 0.0) "float:pos" else "float:z")
+
 private def printStr(j: Json, key: String): IO[Unit] =
   IO.println(Str.concat(s"str:$key:", Json.getStr(j, key, "")))
 
@@ -55,6 +77,8 @@ private def objKit(): IO[Unit] =
         _ <- printAt(inner, 9)
         pairs = Json.pairs(j)
         _ <- IO.println(s"pairs:${Str.fromInt(List.len(pairs))}")
+        _ <- printSet(j)
+        _ <- printFloat()
       } yield ()
   }
 
@@ -82,4 +106,5 @@ def run(): IO[Unit] =
     _ <- objKit()
     _ <- mergeKit()
     _ <- missKit()
+    _ <- printArrWrite()
   } yield ()
