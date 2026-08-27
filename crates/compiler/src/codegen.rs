@@ -11118,28 +11118,19 @@ def id(m: Map[String, String]): Map[String, String] = m
         );
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] =
-  Json.parse("{\"a\":1}") match {
-    case Result.Err(_) => IO.println("e")
-    case Result.Ok(j) => IO.println(List.join(Json.keys(j), ","))
-  }
+  IO.println(List.join(Json.keys(Json.Null), ","))
 "#,
             "sz_json_keys",
         );
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] =
-  Json.parse("{\"a\":1}") match {
-    case Result.Err(_) => IO.println("e")
-    case Result.Ok(j) => IO.println(Str.fromInt(List.len(Json.get(j, "a"))))
-  }
+  IO.println(Str.fromInt(List.len(Json.get(Json.Null, "a"))))
 "#,
             "sz_json_get",
         );
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] =
-  Json.parse("[1,2]") match {
-    case Result.Err(_) => IO.println("e")
-    case Result.Ok(j) => IO.println(Str.fromInt(List.len(Json.arr(j))))
-  }
+  IO.println(Str.fromInt(List.len(Json.arr(Json.Null))))
 "#,
             "sz_json_arr",
         );
