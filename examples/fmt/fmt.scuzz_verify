@@ -1,0 +1,96 @@
+def fmtHi(): Bool =
+  Main.fmtDiff(Main.srcHi(), Main.wantHi())
+
+def fmtPriv(): Bool =
+  Main.fmtDiff(Main.srcPriv(), Main.wantPriv())
+
+def fmtHello(): Bool =
+  Main.fmtDiff(Main.srcHello(), Main.wantHello())
+
+def fmtAdd(): Bool =
+  Main.fmtDiff(Main.srcAdd(), Main.wantAdd())
+
+def fmtEnum(): Bool =
+  Main.fmtDiff(Main.srcEnum(), Main.wantEnum())
+
+def fmtOpt(): Bool =
+  Main.fmtDiff(Main.srcOpt(), Main.wantOpt())
+
+def fmtFor(): Bool =
+  Main.fmtDiff(Main.srcFor(), Main.wantFor())
+
+def fmtIf(): Bool =
+  Main.fmtDiff(Main.srcIf(), Main.wantIf())
+
+def fmtRec(): Bool =
+  Main.fmtDiff(Main.srcRec(), Main.wantRec())
+
+def fmtType(): Bool =
+  Main.fmtDiff(Main.srcType(), Main.wantType())
+
+def fmtImp(): Bool =
+  Main.fmtDiff(Main.srcImp(), Main.wantImp())
+
+def fmtTrait(): Bool =
+  Main.fmtDiff(Main.srcTrait(), Main.wantTrait())
+
+def fmtWhere(): Bool =
+  Main.fmtDiff(Main.srcWhere(), Main.wantWhere())
+
+def fmtFloat(): Bool =
+  Main.fmtDiff(Main.srcFloat(), Main.wantFloat())
+
+def fmtList(): Bool =
+  Main.fmtDiff(Main.srcList(), Main.wantList())
+
+def fmtTup(): Bool =
+  Main.fmtDiff(Main.srcTup(), Main.wantTup())
+
+def fmtGet(): Bool =
+  Main.fmtDiff(Main.srcGet(), Main.wantGet())
+
+def fmtPkg(): Bool =
+  Main.fmtDiff(Main.srcPkg(), Main.wantPkg())
+
+def fmtTriple(): Bool =
+  Main.fmtDiff(Main.srcTriple(), Main.wantTriple())
+
+def fmtCons(): Bool =
+  Main.fmtDiff(Main.srcCons(), Main.wantCons())
+
+def fmtGuard(): Bool =
+  Main.fmtDiff(Main.srcGuard(), Main.wantGuard())
+
+def fmtDefArg(): Bool =
+  Main.fmtDiff(Main.srcDefArg(), Main.wantDefArg())
+
+def fmtTDef(): Bool =
+  Main.fmtDiff(Main.srcTDef(), Main.wantTDef())
+
+def fmtNamed(): Bool =
+  Main.fmtDiff(Main.srcNamed(), Main.wantNamed())
+
+def fmtCopy(): Bool =
+  Main.fmtDiff(Main.srcCopy(), Main.wantCopy())
+
+def fmtOr(): Bool =
+  Main.fmtDiff(Main.srcOr(), Main.wantOr())
+
+def fmtBits(): Bool =
+  Main.fmtDiff(Main.srcBits(), Main.wantBits())
+
+def fmtHex(): Bool =
+  Main.fmtDiff(Main.srcHex(), Main.wantHex())
+
+def fmtIdemHi(): Bool =
+  Main.fmtIdem(Main.srcHi())
+
+def fmtIdemHello(): Bool =
+  Main.fmtIdem(Main.srcHello())
+
+def fmtIdemEnum(): Bool =
+  Main.fmtIdem(Main.srcEnum())
+
+def fmtIdemFor(): Bool =
+  Main.fmtIdem(Main.srcFor())
+

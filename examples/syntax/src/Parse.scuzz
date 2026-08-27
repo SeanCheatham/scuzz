@@ -1,0 +1,892 @@
+enum Expr:
+  case EInt(n: Int)
+  case EBool(b: Bool)
+  case EStr(s: String)
+  case EVar(s: String)
+  case EHole
+  case EUnit
+  case EPrint(e: Expr)
+  case ECall(f: String, args: List[Expr])
+  case EMethod(recv: Expr, name: String, args: List[Expr])
+  case EField(recv: Expr, name: String)
+  case EBin(op: String, l: Expr, r: Expr)
+  case EUn(op: String, e: Expr)
+  case ELam(p: String, body: Expr)
+  case EIf(c: Expr, t: Expr, e: Expr)
+  case EMatch(s: Expr, arms: List[Arm])
+  case EFor(bs: List[Bind], body: Expr)
+  case EFloat(s: String)
+  case EInterp(s: String)
+  case EList(xs: List[Expr])
+  case ETuple(xs: List[Expr])
+  case ENamed(name: String, e: Expr)
+
+record Param(name: String, ty: String, w: String, d: String)
+
+record Fun(priv: Bool, name: String, tparams: List[String], params: List[Param], ret: String, body: Expr)
+
+record Arm(pat: String, g: String, body: Expr)
+
+record Bind(draw: Bool, name: String, value: Expr)
+
+record EnCase(name: String, fields: List[Param])
+
+record En(isRec: Bool, name: String, tparams: List[String], cases: List[EnCase])
+
+record Alias(name: String, tparams: List[String], target: String)
+
+record Imp(mod: String, name: String, alias: String)
+
+record TrMethod(name: String, params: List[Param], ret: String)
+
+record Tr(name: String, tparams: List[String], methods: List[TrMethod])
+
+record Im(tn: String, targs: List[String], forTy: String, methods: List[Fun])
+
+record Prog(pkg: String, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr)
+
+import Lexer.Tok
+
+def _at(toks: List[Tok], i: Int): Tok =
+  List.at(toks, i)
+
+def _is(toks: List[Tok], i: Int, t: Tok): Bool =
+  _at(toks, i) == t
+
+def _identOf(t: Tok): String =
+  t match {
+    case Tok.Ident(s) => s
+    case _ => ""
+  }
+
+def _strOf(t: Tok): String =
+  t match {
+    case Tok.Str(s) => s
+    case _ => ""
+  }
+
+def _intOf(t: Tok): Int =
+  t match {
+    case Tok.Int(n) => n
+    case _ => 0
+  }
+
+def _kit(s: String): Bool =
+  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui"
+
+def _joinComma(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", _joinComma(List.tail(xs))))
+
+def _joinTypes(toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+  _joinTypes2(parseType(toks, i), toks, acc)
+
+def _joinTypes2(p: (String, Int), toks: List[Tok], acc: List[String]): (List[String], Int) =
+  p match {
+    case (t, j) => if (_is(toks, j, Tok.Comma)) _joinTypes(toks, j + 1, t :: acc) else (List.reverse(t :: acc), j)
+  }
+
+def parseType(toks: List[Tok], i: Int): (String, Int) =
+  if (_is(toks, i, Tok.LParen)) parseTypeParen(toks, i + 1) else parseTypeArrow(toks, parseTypeApp(toks, i))
+
+def parseTypeParen(toks: List[Tok], i: Int): (String, Int) =
+  parseTypeParen2(_joinTypes(toks, i, []), toks)
+
+def parseTypeParen2(p: (List[String], Int), toks: List[Tok]): (String, Int) =
+  p match {
+    case (ts, j) => parseTypeArrow(toks, (if (List.len(ts) == 1) List.head(ts) else Str.concat("(", Str.concat(_joinComma(ts), ")")), j + 1))
+  }
+
+def parseTypeApp(toks: List[Tok], i: Int): (String, Int) =
+  parseTypeBrack(toks, i + 1, _identOf(_at(toks, i)))
+
+def parseTypeBrack(toks: List[Tok], i: Int, n: String): (String, Int) =
+  if (_is(toks, i, Tok.LBracket)) parseTypeBrackClose(_joinTypes(toks, i + 1, []), n) else (n, i)
+
+def parseTypeBrackClose(p: (List[String], Int), n: String): (String, Int) =
+  p match {
+    case (ts, j) => (Str.concat(n, Str.concat("[", Str.concat(_joinComma(ts), "]"))), j + 1)
+  }
+
+def parseTypeArrow(toks: List[Tok], p: (String, Int)): (String, Int) =
+  p match {
+    case (left, i) => if (_is(toks, i, Tok.Arrow)) parseTypeArrow2(left, parseType(toks, i + 1)) else (left, i)
+  }
+
+def parseTypeArrow2(left: String, p: (String, Int)): (String, Int) =
+  p match {
+    case (right, j) => (Str.concat(left, Str.concat(" => ", right)), j)
+  }
+
+def parseExpr(toks: List[Tok], i: Int): (Expr, Int) =
+  parseOr(toks, i)
+
+def parseOr(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseAnd(toks, i), "||")
+
+def parseAnd(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseBitOr(toks, i), "&&")
+
+def parseBitOr(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseBitXor(toks, i), "|")
+
+def parseBitXor(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseBitAnd(toks, i), "^")
+
+def parseBitAnd(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseCmp(toks, i), "&")
+
+def parseCmp(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseCons(toks, i), "==")
+
+def parseCons(toks: List[Tok], i: Int): (Expr, Int) =
+  parseConsRest(toks, parseShift(toks, i))
+
+def parseShift(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseAdd(toks, i), "<<")
+
+def parseConsRest(toks: List[Tok], p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (e, i) => if (_is(toks, i, Tok.ColonColon)) parseConsRight(e, parseCons(toks, i + 1)) else (e, i)
+  }
+
+def parseConsRight(left: Expr, p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (r, j) => (Expr.EBin("::", left, r), j)
+  }
+
+def parseAdd(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseMul(toks, i), "+")
+
+def parseMul(toks: List[Tok], i: Int): (Expr, Int) =
+  parseBinRest(toks, parseUnary(toks, i), "*")
+
+def parseUnary(toks: List[Tok], i: Int): (Expr, Int) =
+  if (_is(toks, i, Tok.Minus)) parseUnaryOp("-", parseUnary(toks, i + 1)) else if (_is(toks, i, Tok.Bang)) parseUnaryOp("!", parseUnary(toks, i + 1)) else if (_is(toks, i, Tok.Tilde)) parseUnaryOp("~", parseUnary(toks, i + 1)) else parsePost(toks, parseAtom(toks, i))
+
+def parseUnaryOp(op: String, p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (e, j) => (Expr.EUn(op, e), j)
+  }
+
+def _opTok(t: Tok): String =
+  t match {
+    case Tok.Plus => "+"
+    case Tok.Minus => "-"
+    case Tok.Star => "*"
+    case Tok.Slash => "/"
+    case Tok.Percent => "%"
+    case Tok.EqEq => "=="
+    case Tok.BangEq => "!="
+    case Tok.Lt => "<"
+    case Tok.LtEq => "<="
+    case Tok.Gt => ">"
+    case Tok.GtEq => ">="
+    case Tok.Amp => "&"
+    case Tok.Pipe => "|"
+    case Tok.Caret => "^"
+    case Tok.Shl => "<<"
+    case Tok.Shr => ">>"
+    case Tok.AmpAmp => "&&"
+    case Tok.PipePipe => "||"
+    case _ => ""
+  }
+
+def _opLevel(op: String, want: String): Bool =
+  if (want == "+") op == "+" || op == "-" else if (want == "*") op == "*" || op == "/" || op == "%" else if (want == "<<") op == "<<" || op == ">>" else if (want == "==") op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" else if (want == "&") op == "&" else if (want == "^") op == "^" else if (want == "|") op == "|" else if (want == "&&") op == "&&" else if (want == "||") op == "||" else false
+
+def parseBinRest(toks: List[Tok], p: (Expr, Int), want: String): (Expr, Int) =
+  p match {
+    case (e, i) => parseBinRestOp(toks, e, i, want, _opTok(_at(toks, i)))
+  }
+
+def parseBinRestOp(toks: List[Tok], e: Expr, i: Int, want: String, op: String): (Expr, Int) =
+  if (_opLevel(op, want)) parseBinRest(toks, parseBinNext(toks, e, i + 1, op, want), want) else (e, i)
+
+def parseBinNext(toks: List[Tok], left: Expr, i: Int, op: String, want: String): (Expr, Int) =
+  parseBinNext2(left, op, if (want == "*") parseUnary(toks, i) else if (want == "+") parseMul(toks, i) else if (want == "<<") parseAdd(toks, i) else if (want == "==") parseCons(toks, i) else if (want == "&") parseCmp(toks, i) else if (want == "^") parseBitAnd(toks, i) else if (want == "|") parseBitXor(toks, i) else if (want == "&&") parseBitOr(toks, i) else parseAnd(toks, i))
+
+def parseBinNext2(left: Expr, op: String, p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (r, j) => (Expr.EBin(op, left, r), j)
+  }
+
+def parseAtom(toks: List[Tok], i: Int): (Expr, Int) =
+  _at(toks, i) match {
+    case Tok.Int(n) => (Expr.EInt(n), i + 1)
+    case Tok.True => (Expr.EBool(true), i + 1)
+    case Tok.False => (Expr.EBool(false), i + 1)
+    case Tok.Str(s) => (Expr.EStr(s), i + 1)
+    case Tok.Float(s) => (Expr.EFloat(s), i + 1)
+    case Tok.Interp(s) => (Expr.EInterp(s), i + 1)
+    case Tok.Underscore => parseHole(toks, i)
+    case Tok.LParen => if (_is(toks, i + 1, Tok.RParen)) (Expr.EUnit, i + 2) else parseParen(toks, i + 1)
+    case Tok.LBracket => parseList(toks, i)
+    case Tok.Ident(s) => parseIdentAtom(toks, i, s)
+    case Tok.If => parseIf(toks, i)
+    case Tok.For => parseFor(toks, i)
+    case _ => (Expr.EVar(""), i)
+  }
+
+def parseIf(toks: List[Tok], i: Int): (Expr, Int) =
+  parseIf2(parseExpr(toks, i + 2), toks)
+
+def parseIf2(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+  p match {
+    case (c, j) => parseIf3(c, parseExpr(toks, j + 1), toks)
+  }
+
+def parseIf3(c: Expr, p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+  p match {
+    case (t, j) => parseIf4(c, t, parseExpr(toks, j + 1))
+  }
+
+def parseIf4(c: Expr, t: Expr, p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (e, j) => (Expr.EIf(c, t, e), j)
+  }
+
+def parseFor(toks: List[Tok], i: Int): (Expr, Int) =
+  parseForBinds(toks, i + 2, [])
+
+def parseForBinds(toks: List[Tok], i: Int, acc: List[Bind]): (Expr, Int) =
+  if (_is(toks, i, Tok.RBrace)) parseForYield(toks, i + 1, List.reverse(acc)) else parseForBindsNext(parseForOne(toks, i), toks, acc)
+
+def parseForOne(toks: List[Tok], i: Int): (Bind, Int) =
+  parseForOne2(if (_is(toks, i, Tok.Underscore)) "_" else _identOf(_at(toks, i)), toks, i + 1)
+
+def parseForOne2(name: String, toks: List[Tok], i: Int): (Bind, Int) =
+  parseForOne3(name, _is(toks, i, Tok.LeftArrow), parseExpr(toks, i + 1))
+
+def parseForOne3(name: String, draw: Bool, p: (Expr, Int)): (Bind, Int) =
+  p match {
+    case (v, j) => (Bind(draw, name, v), j)
+  }
+
+def parseForBindsNext(p: (Bind, Int), toks: List[Tok], acc: List[Bind]): (Expr, Int) =
+  p match {
+    case (b, j) => parseForBinds(toks, j, b :: acc)
+  }
+
+def parseForYield(toks: List[Tok], i: Int, bs: List[Bind]): (Expr, Int) =
+  parseForYield2(bs, parseExpr(toks, i + 1))
+
+def parseForYield2(bs: List[Bind], p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (body, j) => (Expr.EFor(bs, body), j)
+  }
+
+def parseHole(toks: List[Tok], i: Int): (Expr, Int) =
+  if (_is(toks, i + 1, Tok.Arrow)) parseLamBody(toks, i + 2, "_") else (Expr.EHole, i + 1)
+
+def parseLamBody(toks: List[Tok], i: Int, p: String): (Expr, Int) =
+  parseLamBody2(p, parseExpr(toks, i))
+
+def parseLamBody2(p: String, q: (Expr, Int)): (Expr, Int) =
+  q match {
+    case (b, j) => (Expr.ELam(p, b), j)
+  }
+
+def parseParen(toks: List[Tok], i: Int): (Expr, Int) =
+  parseParen2(parseExpr(toks, i), toks)
+
+def parseParen2(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+  p match {
+    case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleRest(toks, j + 1, e :: []) else (e, j + 1)
+  }
+
+def parseTupleRest(toks: List[Tok], i: Int, acc: List[Expr]): (Expr, Int) =
+  parseTupleRest2(parseExpr(toks, i), toks, acc)
+
+def parseTupleRest2(p: (Expr, Int), toks: List[Tok], acc: List[Expr]): (Expr, Int) =
+  p match {
+    case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleRest(toks, j + 1, e :: acc) else (Expr.ETuple(List.reverse(e :: acc)), j + 1)
+  }
+
+def parseList(toks: List[Tok], i: Int): (Expr, Int) =
+  if (_is(toks, i + 1, Tok.RBracket)) (Expr.EList([]), i + 2) else parseListElems(toks, i + 1, [])
+
+def parseListElems(toks: List[Tok], i: Int, acc: List[Expr]): (Expr, Int) =
+  if (_is(toks, i, Tok.RBracket)) (Expr.EList(List.reverse(acc)), i + 1) else parseListNext(parseExpr(toks, i), toks, acc)
+
+def parseListNext(p: (Expr, Int), toks: List[Tok], acc: List[Expr]): (Expr, Int) =
+  p match {
+    case (e, j) => if (_is(toks, j, Tok.Comma)) parseListElems(toks, j + 1, e :: acc) else (Expr.EList(List.reverse(e :: acc)), j + 1)
+  }
+
+def parseIdentAtom(toks: List[Tok], i: Int, s: String): (Expr, Int) =
+  if (_is(toks, i + 1, Tok.Arrow)) parseLamBody(toks, i + 2, s) else if (s == "IO" && _is(toks, i + 1, Tok.Dot)) parseIo(toks, i + 2) else if (_kit(s) && _is(toks, i + 1, Tok.Dot)) parseKit(toks, i + 2, s) else (Expr.EVar(s), i + 1)
+
+def parseIo(toks: List[Tok], i: Int): (Expr, Int) =
+  parseIoArgs(toks, i + 1, _identOf(_at(toks, i)))
+
+def parseIoArgs(toks: List[Tok], i: Int, m: String): (Expr, Int) =
+  parseIoArgs2(m, parseCallArgs(toks, i))
+
+def parseIoArgs2(m: String, p: (List[Expr], Int)): (Expr, Int) =
+  p match {
+    case (args, j) => if (m == "println") (Expr.EPrint(List.head(args)), j) else (Expr.ECall(Str.concat("IO.", m), args), j)
+  }
+
+def parseKit(toks: List[Tok], i: Int, kit: String): (Expr, Int) =
+  parseKit2(kit, _identOf(_at(toks, i)), toks, i + 1)
+
+def parseKit2(kit: String, m: String, toks: List[Tok], i: Int): (Expr, Int) =
+  parseKit3(Str.concat(kit, Str.concat(".", m)), parseCallArgs(toks, i))
+
+def parseKit3(f: String, p: (List[Expr], Int)): (Expr, Int) =
+  p match {
+    case (args, j) => (Expr.ECall(f, args), j)
+  }
+
+def parseCallArgs(toks: List[Tok], i: Int): (List[Expr], Int) =
+  if (_is(toks, i, Tok.LParen)) parseArgList(toks, i + 1, []) else ([], i)
+
+def parseArgList(toks: List[Tok], i: Int, acc: List[Expr]): (List[Expr], Int) =
+  if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parseArgListNext(parseArg(toks, i), toks, acc)
+
+def parseArg(toks: List[Tok], i: Int): (Expr, Int) =
+  _at(toks, i) match {
+    case Tok.Ident(s) => if (_is(toks, i + 1, Tok.Eq)) parseNamed(s, parseExpr(toks, i + 2)) else parseExpr(toks, i)
+    case _ => parseExpr(toks, i)
+  }
+
+def parseNamed(name: String, p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (e, j) => (Expr.ENamed(name, e), j)
+  }
+
+def parseArgListNext(p: (Expr, Int), toks: List[Tok], acc: List[Expr]): (List[Expr], Int) =
+  p match {
+    case (e, j) => if (_is(toks, j, Tok.Comma)) parseArgList(toks, j + 1, e :: acc) else (List.reverse(e :: acc), j + 1)
+  }
+
+def parsePost(toks: List[Tok], p: (Expr, Int)): (Expr, Int) =
+  p match {
+    case (e, i) => if (_is(toks, i, Tok.LParen)) parsePost(toks, parsePostCall(e, parseCallArgs(toks, i))) else if (_is(toks, i, Tok.Dot)) parsePost(toks, parsePostDot(toks, e, i + 1)) else if (_is(toks, i, Tok.Match)) parsePost(toks, parseMatch(toks, e, i + 1)) else (e, i)
+  }
+
+def parseMatch(toks: List[Tok], e: Expr, i: Int): (Expr, Int) =
+  parseMatchArms(toks, e, i + 1, [])
+
+def parseMatchArms(toks: List[Tok], e: Expr, i: Int, acc: List[Arm]): (Expr, Int) =
+  if (_is(toks, i, Tok.RBrace)) (Expr.EMatch(e, List.reverse(acc)), i + 1) else if (_is(toks, i, Tok.Case)) parseMatchArmsNext(parseMatchArm(toks, i + 1), toks, e, acc) else (Expr.EMatch(e, List.reverse(acc)), i)
+
+def parseMatchArm(toks: List[Tok], i: Int): (Arm, Int) =
+  parseMatchArm2(parsePat(toks, i), toks)
+
+def parseMatchArm2(p: (String, Int), toks: List[Tok]): (Arm, Int) =
+  p match {
+    case (pat, j) => if (_is(toks, j, Tok.If)) parseMatchArmG(pat, parseExpr(toks, j + 1), toks) else parseMatchArm3(pat, "", parseExpr(toks, j + 1))
+  }
+
+def parseMatchArmG(pat: String, p: (Expr, Int), toks: List[Tok]): (Arm, Int) =
+  p match {
+    case (g, j) => parseMatchArm3(pat, pretty0(g), parseExpr(toks, j + 1))
+  }
+
+def parseMatchArm3(pat: String, g: String, p: (Expr, Int)): (Arm, Int) =
+  p match {
+    case (body, j) => (Arm(pat, g, body), j)
+  }
+
+def parseMatchArmsNext(p: (Arm, Int), toks: List[Tok], e: Expr, acc: List[Arm]): (Expr, Int) =
+  p match {
+    case (a, j) => parseMatchArms(toks, e, j, a :: acc)
+  }
+
+def parsePat(toks: List[Tok], i: Int): (String, Int) =
+  parsePatOr(parsePatPrimary(toks, i), toks)
+
+def parsePatOr(p: (String, Int), toks: List[Tok]): (String, Int) =
+  p match {
+    case (s, j) => if (_is(toks, j, Tok.Pipe)) parsePatOr2(s, parsePatPrimary(toks, j + 1), toks) else (s, j)
+  }
+
+def parsePatOr2(left: String, p: (String, Int), toks: List[Tok]): (String, Int) =
+  p match {
+    case (r, k) => parsePatOr((Str.concat(left, Str.concat(" | ", r)), k), toks)
+  }
+
+def parsePatPrimary(toks: List[Tok], i: Int): (String, Int) =
+  _at(toks, i) match {
+    case Tok.Underscore => ("_", i + 1)
+    case Tok.Int(n) => (Str.fromInt(n), i + 1)
+    case Tok.Minus => parsePatNeg(toks, i + 1)
+    case Tok.True => ("true", i + 1)
+    case Tok.False => ("false", i + 1)
+    case Tok.Str(s) => (quote(s), i + 1)
+    case Tok.Ident(s) => parsePatIdent(toks, i + 1, s)
+    case _ => ("", i)
+  }
+
+def parsePatNeg(toks: List[Tok], i: Int): (String, Int) =
+  (Str.concat("-", Str.fromInt(_intOf(_at(toks, i)))), i + 1)
+
+def parsePatIdent(toks: List[Tok], i: Int, s: String): (String, Int) =
+  if (_is(toks, i, Tok.At)) parsePatAs(s, parsePatPrimary(toks, i + 1)) else if (_is(toks, i, Tok.Dot)) parsePatQual(toks, i + 1, s) else if (_is(toks, i, Tok.LParen)) parsePatCtor(s, toks, i) else (s, i)
+
+def parsePatAs(name: String, p: (String, Int)): (String, Int) =
+  p match {
+    case (inner, j) => (Str.concat(name, Str.concat(" @ ", inner)), j)
+  }
+
+def parsePatQual(toks: List[Tok], i: Int, left: String): (String, Int) =
+  parsePatQual2(Str.concat(left, Str.concat(".", _identOf(_at(toks, i)))), toks, i + 1)
+
+def parsePatQual2(q: String, toks: List[Tok], i: Int): (String, Int) =
+  if (_is(toks, i, Tok.LParen)) parsePatCtor(q, toks, i) else (q, i)
+
+def parsePatCtor(q: String, toks: List[Tok], i: Int): (String, Int) =
+  parsePatCtorClose(q, parsePatArgs(toks, i + 1, []))
+
+def parsePatArgs(toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+  if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parsePatArgsNext(parsePat(toks, i), toks, acc)
+
+def parsePatArgsNext(p: (String, Int), toks: List[Tok], acc: List[String]): (List[String], Int) =
+  p match {
+    case (a, j) => if (_is(toks, j, Tok.Comma)) parsePatArgs(toks, j + 1, a :: acc) else (List.reverse(a :: acc), j + 1)
+  }
+
+def parsePatCtorClose(q: String, p: (List[String], Int)): (String, Int) =
+  p match {
+    case (args, j) => (Str.concat(q, Str.concat("(", Str.concat(_joinComma(args), ")"))), j)
+  }
+
+def parsePostCall(e: Expr, p: (List[Expr], Int)): (Expr, Int) =
+  p match {
+    case (args, j) => e match {
+  case Expr.EVar(s) => (Expr.ECall(s, args), j)
+  case _ => (Expr.EMethod(e, "apply", args), j)
+}
+  }
+
+def parsePostDot(toks: List[Tok], e: Expr, i: Int): (Expr, Int) =
+  parsePostDotName(e, _identOf(_at(toks, i)), toks, i + 1)
+
+def parsePostDotName(e: Expr, m: String, toks: List[Tok], i: Int): (Expr, Int) =
+  if (_is(toks, i, Tok.LParen)) parsePostDot2(e, m, parseCallArgs(toks, i)) else (Expr.EField(e, m), i)
+
+def parsePostDot2(e: Expr, m: String, p: (List[Expr], Int)): (Expr, Int) =
+  p match {
+    case (args, j) => (Expr.EMethod(e, m, args), j)
+  }
+
+def parseParams(toks: List[Tok], i: Int): (List[Param], Int) =
+  if (_is(toks, i, Tok.LParen)) parseParamList(toks, i + 1, []) else ([], i)
+
+def parseParamList(toks: List[Tok], i: Int, acc: List[Param]): (List[Param], Int) =
+  if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parseParamListNext(parseOneParam(toks, i), toks, acc)
+
+def parseOneParam(toks: List[Tok], i: Int): (Param, Int) =
+  parseOneParam2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
+
+def parseOneParam2(name: String, p: (String, Int), toks: List[Tok]): (Param, Int) =
+  p match {
+    case (ty, j) => parseOneParam3(name, ty, toks, j)
+  }
+
+def parseOneParam3(name: String, ty: String, toks: List[Tok], j: Int): (Param, Int) =
+  if (_is(toks, j, Tok.Where)) parseOneParamW(name, ty, parseExpr(toks, j + 1), toks) else parseOneParamD(name, ty, "", toks, j)
+
+def parseOneParamW(name: String, ty: String, p: (Expr, Int), toks: List[Tok]): (Param, Int) =
+  p match {
+    case (e, k) => parseOneParamD(name, ty, pretty0(e), toks, k)
+  }
+
+def parseOneParamD(name: String, ty: String, w: String, toks: List[Tok], j: Int): (Param, Int) =
+  if (_is(toks, j, Tok.Eq)) parseOneParamD2(name, ty, w, parseExpr(toks, j + 1)) else (Param(name, ty, w, ""), j)
+
+def parseOneParamD2(name: String, ty: String, w: String, p: (Expr, Int)): (Param, Int) =
+  p match {
+    case (e, k) => (Param(name, ty, w, pretty0(e)), k)
+  }
+
+def parseParamListNext(p: (Param, Int), toks: List[Tok], acc: List[Param]): (List[Param], Int) =
+  p match {
+    case (par, j) => if (_is(toks, j, Tok.Comma)) parseParamList(toks, j + 1, par :: acc) else (List.reverse(par :: acc), j + 1)
+  }
+
+def parseDef(toks: List[Tok], i: Int, priv: Bool): (Fun, Int) =
+  parseDefTp(priv, _identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+
+def parseDefTp(priv: Bool, name: String, p: (List[String], Int), toks: List[Tok]): (Fun, Int) =
+  p match {
+    case (ts, j) => parseDef2(priv, name, ts, parseParams(toks, j), toks)
+  }
+
+def parseDef2(priv: Bool, name: String, ts: List[String], p: (List[Param], Int), toks: List[Tok]): (Fun, Int) =
+  p match {
+    case (params, j) => parseDef3(priv, name, ts, params, parseType(toks, j + 1), toks)
+  }
+
+def parseDef3(priv: Bool, name: String, ts: List[String], params: List[Param], p: (String, Int), toks: List[Tok]): (Fun, Int) =
+  p match {
+    case (ret, j) => parseDef4(priv, name, ts, params, ret, parseExpr(toks, j + 1))
+  }
+
+def parseDef4(priv: Bool, name: String, ts: List[String], params: List[Param], ret: String, p: (Expr, Int)): (Fun, Int) =
+  p match {
+    case (body, j) => (Fun(priv, name, ts, params, ret, body), j)
+  }
+
+def parseMain(toks: List[Tok], i: Int): (String, Expr, Int) =
+  parseMain2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
+
+def parseMain2(name: String, p: (String, Int), toks: List[Tok]): (String, Expr, Int) =
+  p match {
+    case (_, j) => parseMain3(name, parseExpr(toks, j + 1))
+  }
+
+def parseMain3(name: String, p: (Expr, Int)): (String, Expr, Int) =
+  p match {
+    case (body, j) => (name, body, j)
+  }
+
+def parseTParams(toks: List[Tok], i: Int): (List[String], Int) =
+  if (_is(toks, i, Tok.LBracket)) parseTParamList(toks, i + 1, []) else ([], i)
+
+def parseTParamList(toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+  if (_is(toks, i, Tok.RBracket)) (List.reverse(acc), i + 1) else parseTParamNext(_identOf(_at(toks, i)), toks, i + 1, acc)
+
+def parseTParamNext(name: String, toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+  if (_is(toks, i, Tok.Comma)) parseTParamList(toks, i + 1, name :: acc) else (List.reverse(name :: acc), i + 1)
+
+def parseEnum(toks: List[Tok], i: Int): (En, Int) =
+  parseEnumTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+
+def parseEnumTp(name: String, p: (List[String], Int), toks: List[Tok]): (En, Int) =
+  p match {
+    case (ts, j) => parseEnumCases(name, ts, toks, j + 1, [])
+  }
+
+def parseEnumCases(name: String, ts: List[String], toks: List[Tok], i: Int, acc: List[EnCase]): (En, Int) =
+  if (_is(toks, i, Tok.Case)) parseEnumCasesNext(parseEnumCase(toks, i + 1), name, ts, toks, acc) else (En(false, name, ts, List.reverse(acc)), i)
+
+def parseEnumCase(toks: List[Tok], i: Int): (EnCase, Int) =
+  parseEnumCase2(_identOf(_at(toks, i)), toks, i + 1)
+
+def parseEnumCase2(name: String, toks: List[Tok], i: Int): (EnCase, Int) =
+  if (_is(toks, i, Tok.LParen)) parseEnumCase3(name, parseParamList(toks, i + 1, [])) else (EnCase(name, []), i)
+
+def parseEnumCase3(name: String, p: (List[Param], Int)): (EnCase, Int) =
+  p match {
+    case (fs, j) => (EnCase(name, fs), j)
+  }
+
+def parseEnumCasesNext(p: (EnCase, Int), name: String, ts: List[String], toks: List[Tok], acc: List[EnCase]): (En, Int) =
+  p match {
+    case (c, j) => parseEnumCases(name, ts, toks, j, c :: acc)
+  }
+
+def parseRec(toks: List[Tok], i: Int): (En, Int) =
+  parseRecTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+
+def parseRecTp(name: String, p: (List[String], Int), toks: List[Tok]): (En, Int) =
+  p match {
+    case (ts, j) => parseRecFields(name, ts, parseParamList(toks, j + 1, []))
+  }
+
+def parseRecFields(name: String, ts: List[String], p: (List[Param], Int)): (En, Int) =
+  p match {
+    case (fs, j) => (En(true, name, ts, EnCase(name, fs) :: []), j)
+  }
+
+def parseAlias(toks: List[Tok], i: Int): (Alias, Int) =
+  parseAliasTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+
+def parseAliasTp(name: String, p: (List[String], Int), toks: List[Tok]): (Alias, Int) =
+  p match {
+    case (ts, j) => parseAliasTarget(name, ts, parseType(toks, j + 1))
+  }
+
+def parseAliasTarget(name: String, ts: List[String], p: (String, Int)): (Alias, Int) =
+  p match {
+    case (ty, j) => (Alias(name, ts, ty), j)
+  }
+
+def parseImport(toks: List[Tok], i: Int): (Imp, Int) =
+  parseImportName(_identOf(_at(toks, i)), toks, i + 2)
+
+def parseImportName(mod: String, toks: List[Tok], i: Int): (Imp, Int) =
+  if (_is(toks, i, Tok.Star)) parseImportAs(mod, "*", toks, i + 1) else parseImportAs(mod, _identOf(_at(toks, i)), toks, i + 1)
+
+def parseImportAs(mod: String, name: String, toks: List[Tok], i: Int): (Imp, Int) =
+  if (_identOf(_at(toks, i)) == "as") (Imp(mod, name, _identOf(_at(toks, i + 1))), i + 2) else (Imp(mod, name, ""), i)
+
+def parseTrait(toks: List[Tok], i: Int): (Tr, Int) =
+  parseTraitTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
+
+def parseTraitTp(name: String, p: (List[String], Int), toks: List[Tok]): (Tr, Int) =
+  p match {
+    case (ts, j) => parseTraitMeths(name, ts, toks, j + 1, [])
+  }
+
+def parseTraitMeth(toks: List[Tok], i: Int): (TrMethod, Int) =
+  parseTraitMeth2(_identOf(_at(toks, i)), parseParams(toks, i + 1), toks)
+
+def parseTraitMeth2(name: String, p: (List[Param], Int), toks: List[Tok]): (TrMethod, Int) =
+  p match {
+    case (params, j) => parseTraitMeth3(name, params, parseType(toks, j + 1))
+  }
+
+def parseTraitMeth3(name: String, params: List[Param], p: (String, Int)): (TrMethod, Int) =
+  p match {
+    case (ret, j) => (TrMethod(name, params, ret), j)
+  }
+
+def parseTraitMeths(name: String, ts: List[String], toks: List[Tok], i: Int, acc: List[TrMethod]): (Tr, Int) =
+  if (_is(toks, i, Tok.Def)) parseTraitMethsNext(parseTraitMeth(toks, i + 1), name, ts, toks, acc) else (Tr(name, ts, List.reverse(acc)), i)
+
+def parseTraitMethsNext(p: (TrMethod, Int), name: String, ts: List[String], toks: List[Tok], acc: List[TrMethod]): (Tr, Int) =
+  p match {
+    case (m, j) => parseTraitMeths(name, ts, toks, j, m :: acc)
+  }
+
+def parseImplArgs(toks: List[Tok], i: Int): (List[String], Int) =
+  if (_is(toks, i, Tok.LBracket)) parseImplArgsClose(_joinTypes(toks, i + 1, [])) else ([], i)
+
+def parseImplArgsClose(p: (List[String], Int)): (List[String], Int) =
+  p match {
+    case (ts, j) => (ts, j + 1)
+  }
+
+def parseImpl(toks: List[Tok], i: Int): (Im, Int) =
+  parseImpl2(_identOf(_at(toks, i)), parseImplArgs(toks, i + 1), toks)
+
+def parseImpl2(tn: String, p: (List[String], Int), toks: List[Tok]): (Im, Int) =
+  p match {
+    case (args, j) => parseImplMeths(tn, args, _identOf(_at(toks, j + 1)), toks, j + 3, [])
+  }
+
+def parseImplMeths(tn: String, args: List[String], forTy: String, toks: List[Tok], i: Int, acc: List[Fun]): (Im, Int) =
+  if (_is(toks, i, Tok.Def)) parseImplMethsNext(parseDef(toks, i + 1, false), tn, args, forTy, toks, acc) else (Im(tn, args, forTy, List.reverse(acc)), i)
+
+def parseImplMethsNext(p: (Fun, Int), tn: String, args: List[String], forTy: String, toks: List[Tok], acc: List[Fun]): (Im, Int) =
+  p match {
+    case (d, j) => parseImplMeths(tn, args, forTy, toks, j, d :: acc)
+  }
+
+def parseItems(toks: List[Tok], i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body) else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Private)) parseItemsDef(toks, parseDef(toks, i + 2, true), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs) else Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body)
+
+def parseItemsEn(toks: List[Tok], p: (En, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  p match {
+    case (en, j) => parseItems(toks, j, en :: enums, aliases, traits, impls, imps, defs, main, body)
+  }
+
+def parseItemsAl(toks: List[Tok], p: (Alias, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  p match {
+    case (a, j) => parseItems(toks, j, enums, a :: aliases, traits, impls, imps, defs, main, body)
+  }
+
+def parseItemsTr(toks: List[Tok], p: (Tr, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  p match {
+    case (t, j) => parseItems(toks, j, enums, aliases, t :: traits, impls, imps, defs, main, body)
+  }
+
+def parseItemsIm(toks: List[Tok], p: (Im, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  p match {
+    case (im, j) => parseItems(toks, j, enums, aliases, traits, im :: impls, imps, defs, main, body)
+  }
+
+def parseItemsImp(toks: List[Tok], p: (Imp, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  p match {
+    case (im, j) => parseItems(toks, j, enums, aliases, traits, impls, im :: imps, defs, main, body)
+  }
+
+def parseItemsDef(toks: List[Tok], p: (Fun, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  p match {
+    case (d, j) => parseItems(toks, j, enums, aliases, traits, impls, imps, d :: defs, main, body)
+  }
+
+def parseItemsMain(toks: List[Tok], p: (String, Expr, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun]): Prog =
+  p match {
+    case (name, body, j) => parseItems(toks, j, enums, aliases, traits, impls, imps, defs, name, body)
+  }
+
+def parsePkg(toks: List[Tok], i: Int): (String, Int) =
+  parsePkgRest(_identOf(_at(toks, i)), toks, i + 1)
+
+def parsePkgRest(acc: String, toks: List[Tok], i: Int): (String, Int) =
+  if (_is(toks, i, Tok.Dot)) parsePkgRest(Str.concat(acc, Str.concat(".", _identOf(_at(toks, i + 1)))), toks, i + 2) else (acc, i)
+
+def parse(toks: List[Tok]): Prog =
+  if (_is(toks, 0, Tok.Package)) parsePkgThen(parsePkg(toks, 1), toks) else parseItems(toks, 0, [], [], [], [], [], [], "", Expr.EVar(""))
+
+def parsePkgThen(p: (String, Int), toks: List[Tok]): Prog =
+  p match {
+    case (pkg, j) => withPkg(pkg, parseItems(toks, j, [], [], [], [], [], [], "", Expr.EVar("")))
+  }
+
+def withPkg(pkg: String, p: Prog): Prog =
+  Prog(pkg, p.enums, p.aliases, p.traits, p.impls, p.imps, p.defs, p.main, p.body)
+
+def _pad(n: Int): String =
+  Str.repeat("  ", n)
+
+def _esc1(s: String, i: Int, b: Builder): String =
+  if (i >= Str.len(s)) Builder.result(b) else _esc2(s, i, b, Str.charAt(s, i))
+
+def _esc2(s: String, i: Int, b: Builder, c: Int): String =
+  _esc1(s, i + 1, Builder.append(b, if (c == 10) "\\n" else if (c == 9) "\\t" else if (c == 34) "\\\"" else if (c == 92) "\\\\" else Str.slice(s, i, i + 1)))
+
+def _hasChar(s: String, i: Int, c: Int): Bool =
+  if (i >= Str.len(s)) false else if (Str.charAt(s, i) == c) true else _hasChar(s, i + 1, c)
+
+def quote(s: String): String =
+  if (_hasChar(s, 0, 10) && !_hasChar(s, 0, 34)) Str.concat("\"\"\"", Str.concat(s, "\"\"\"")) else Str.concat("\"", Str.concat(_esc1(s, 0, Builder.empty()), "\""))
+
+def pretty0(e: Expr): String =
+  prettyExpr(e, 0)
+
+def _commaExprs(xs: List[Expr]): String =
+  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) pretty0(List.head(xs)) else Str.concat(pretty0(List.head(xs)), Str.concat(", ", _commaExprs(List.tail(xs))))
+
+def prettyExpr(e: Expr, n: Int): String =
+  e match {
+    case Expr.EInt(k) => Str.concat(_pad(n), Str.fromInt(k))
+    case Expr.EBool(b) => Str.concat(_pad(n), if (b) "true" else "false")
+    case Expr.EStr(s) => Str.concat(_pad(n), quote(s))
+    case Expr.EVar(s) => Str.concat(_pad(n), s)
+    case Expr.EHole => Str.concat(_pad(n), "_")
+    case Expr.EUnit => Str.concat(_pad(n), "()")
+    case Expr.EPrint(inner) => Str.concat(_pad(n), Str.concat("IO.println(", Str.concat(pretty0(inner), ")")))
+    case Expr.ECall(f, args) => Str.concat(_pad(n), Str.concat(f, Str.concat("(", Str.concat(_commaExprs(args), ")"))))
+    case Expr.EMethod(recv, name, args) => Str.concat(_pad(n), Str.concat(pretty0(recv), Str.concat(".", Str.concat(name, Str.concat("(", Str.concat(_commaExprs(args), ")"))))))
+    case Expr.EField(recv, name) => Str.concat(_pad(n), Str.concat(pretty0(recv), Str.concat(".", name)))
+    case Expr.EBin(op, l, r) => if (op == "::") Str.concat(_pad(n), Str.concat(_prettyConsL(l), Str.concat(" :: ", pretty0(r)))) else Str.concat(_pad(n), Str.concat(pretty0(l), Str.concat(" ", Str.concat(op, Str.concat(" ", pretty0(r))))))
+    case Expr.EUn(op, inner) => Str.concat(_pad(n), Str.concat(op, pretty0(inner)))
+    case Expr.ELam(p, body) => Str.concat(_pad(n), Str.concat(p, Str.concat(" => ", pretty0(body))))
+    case Expr.EIf(c, t, el) => Str.concat(_pad(n), Str.concat("if (", Str.concat(pretty0(c), Str.concat(") ", Str.concat(pretty0(t), Str.concat(" else ", pretty0(el)))))))
+    case Expr.EMatch(s, arms) => Str.concat(_pad(n), Str.concat(pretty0(s), Str.concat(""" match {
+""", Str.concat(prettyArms(arms, n + 1), Str.concat(_pad(n), "}")))))
+    case Expr.EFor(bs, body) => Str.concat(_pad(n), Str.concat("""for {
+""", Str.concat(prettyBinds(bs, n + 1), Str.concat(_pad(n), Str.concat("} yield ", pretty0(body))))))
+    case Expr.EFloat(s) => Str.concat(_pad(n), s)
+    case Expr.EInterp(s) => Str.concat(_pad(n), Str.concat("s\"", Str.concat(s, "\"")))
+    case Expr.EList(xs) => Str.concat(_pad(n), Str.concat("[", Str.concat(_commaExprs(xs), "]")))
+    case Expr.ETuple(xs) => Str.concat(_pad(n), Str.concat("(", Str.concat(_commaExprs(xs), ")")))
+    case Expr.ENamed(name, e) => Str.concat(_pad(n), Str.concat(name, Str.concat(" = ", pretty0(e))))
+  }
+
+def _prettyConsL(e: Expr): String =
+  e match {
+    case Expr.EBin(op, _, _) => if (op == "::" || op == "+" || op == "-" || op == "*" || op == "/" || op == "%") pretty0(e) else Str.concat("(", Str.concat(pretty0(e), ")"))
+    case _ => pretty0(e)
+  }
+
+def prettyArm(a: Arm, n: Int): String =
+  if (a.g == "") Str.concat(_pad(n), Str.concat("case ", Str.concat(a.pat, Str.concat(" => ", pretty0(a.body))))) else Str.concat(_pad(n), Str.concat("case ", Str.concat(a.pat, Str.concat(" if ", Str.concat(a.g, Str.concat(" => ", pretty0(a.body)))))))
+
+def prettyArms(xs: List[Arm], n: Int): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyArm(List.head(xs), n), Str.concat("""
+""", prettyArms(List.tail(xs), n)))
+
+def prettyBind(b: Bind, n: Int): String =
+  Str.concat(_pad(n), Str.concat(b.name, Str.concat(if (b.draw) " <- " else " = ", Str.concat(pretty0(b.value), """
+"""))))
+
+def prettyBinds(xs: List[Bind], n: Int): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyBind(List.head(xs), n), prettyBinds(List.tail(xs), n))
+
+def _tparams(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else Str.concat("[", Str.concat(_joinComma(xs), "]"))
+
+def prettyCase(c: EnCase): String =
+  if (List.isEmpty(c.fields)) Str.concat("  case ", Str.concat(c.name, """
+""")) else Str.concat("  case ", Str.concat(c.name, Str.concat("(", Str.concat(_commaParams(c.fields), """)
+"""))))
+
+def prettyCases(xs: List[EnCase]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyCase(List.head(xs)), prettyCases(List.tail(xs)))
+
+def prettyEn(e: En): String =
+  if (e.isRec) Str.concat("record ", Str.concat(e.name, Str.concat(_tparams(e.tparams), Str.concat("(", Str.concat(_commaParams(List.head(e.cases).fields), """)
+"""))))) else Str.concat("enum ", Str.concat(e.name, Str.concat(_tparams(e.tparams), Str.concat(""":
+""", prettyCases(e.cases)))))
+
+def prettyEnums(xs: List[En]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyEn(List.head(xs)), Str.concat("""
+""", prettyEnums(List.tail(xs))))
+
+def _paramStr(p: Param): String =
+  _paramStrD(if (p.w == "") Str.concat(p.name, Str.concat(": ", p.ty)) else Str.concat(p.name, Str.concat(": ", Str.concat(p.ty, Str.concat(" where ", p.w)))), p.d)
+
+def _paramStrD(base: String, d: String): String =
+  if (d == "") base else Str.concat(base, Str.concat(" = ", d))
+
+def _commaParams(xs: List[Param]): String =
+  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) _paramStr(List.head(xs)) else Str.concat(_paramStr(List.head(xs)), Str.concat(", ", _commaParams(List.tail(xs))))
+
+def prettyFun(d: Fun): String =
+  Str.concat(if (d.priv) "private " else "", Str.concat("def ", Str.concat(d.name, Str.concat(_tparams(d.tparams), Str.concat("(", Str.concat(_commaParams(d.params), Str.concat("): ", Str.concat(d.ret, Str.concat(""" =
+""", prettyExpr(d.body, 1))))))))))
+
+def prettyDefs(ds: List[Fun]): String =
+  if (List.isEmpty(ds)) "" else Str.concat(prettyFun(List.head(ds)), Str.concat("""
+
+""", prettyDefs(List.tail(ds))))
+
+def prettyMain(name: String, body: Expr): String =
+  if (name == "") "" else Str.concat("@main def ", Str.concat(name, Str.concat(""": IO[Unit] =
+""", Str.concat(prettyExpr(body, 1), """
+"""))))
+
+def prettyAlias(a: Alias): String =
+  Str.concat("type ", Str.concat(a.name, Str.concat(_tparams(a.tparams), Str.concat(" = ", Str.concat(a.target, """
+""")))))
+
+def prettyAliases(xs: List[Alias]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyAlias(List.head(xs)), prettyAliases(List.tail(xs)))
+
+def prettyImp(im: Imp): String =
+  if (im.alias == "") Str.concat("import ", Str.concat(im.mod, Str.concat(".", Str.concat(im.name, """
+""")))) else Str.concat("import ", Str.concat(im.mod, Str.concat(".", Str.concat(im.name, Str.concat(" as ", Str.concat(im.alias, """
+"""))))))
+
+def prettyImps(xs: List[Imp], rest: Bool): String =
+  if (List.isEmpty(xs)) "" else Str.concat(_prettyImpList(xs), if (rest) """
+""" else "")
+
+def _prettyImpList(xs: List[Imp]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyImp(List.head(xs)), _prettyImpList(List.tail(xs)))
+
+def prettyTrMeth(m: TrMethod): String =
+  Str.concat("  def ", Str.concat(m.name, Str.concat("(", Str.concat(_commaParams(m.params), Str.concat("): ", Str.concat(m.ret, """
+"""))))))
+
+def prettyTrMeths(xs: List[TrMethod]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyTrMeth(List.head(xs)), prettyTrMeths(List.tail(xs)))
+
+def prettyTr(t: Tr): String =
+  Str.concat("trait ", Str.concat(t.name, Str.concat(_tparams(t.tparams), Str.concat(""":
+""", prettyTrMeths(t.methods)))))
+
+def prettyTraits(xs: List[Tr]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyTr(List.head(xs)), Str.concat("""
+""", prettyTraits(List.tail(xs))))
+
+def prettyImplFun(d: Fun): String =
+  Str.concat("  def ", Str.concat(d.name, Str.concat("(", Str.concat(_commaParams(d.params), Str.concat("): ", Str.concat(d.ret, Str.concat(""" =
+""", Str.concat(prettyExpr(d.body, 2), """
+"""))))))))
+
+def prettyImplFuns(xs: List[Fun]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyImplFun(List.head(xs)), prettyImplFuns(List.tail(xs)))
+
+def prettyImDef(im: Im): String =
+  Str.concat("impl ", Str.concat(im.tn, Str.concat(_tparams(im.targs), Str.concat(" for ", Str.concat(im.forTy, Str.concat(""":
+""", prettyImplFuns(im.methods)))))))
+
+def prettyImpls(xs: List[Im]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(prettyImDef(List.head(xs)), Str.concat("""
+""", prettyImpls(List.tail(xs))))
+
+def prettyPkg(pkg: String): String =
+  if (pkg == "") "" else Str.concat("package ", Str.concat(pkg, """
+
+"""))
+
+def pretty(p: Prog): String =
+  Str.concat(prettyPkg(p.pkg), Str.concat(prettyEnums(p.enums), Str.concat(prettyAliases(p.aliases), Str.concat(prettyTraits(p.traits), Str.concat(prettyImpls(p.impls), Str.concat(prettyImps(p.imps, !(List.isEmpty(p.defs) && p.main == "")), Str.concat(prettyDefs(p.defs), prettyMain(p.main, p.body))))))))
+
