@@ -356,6 +356,7 @@ def runCmd(c: Cmd, src: String): String =
     case Cmd.Fmt(_, _) => fmtSrc(src)
     case Cmd.Test(_, _, _, _) => Verify.testOut(Check.check(src) == "[]")
     case Cmd.Fuzz(_, it, seed, _, _, _, _, _) => Verify.fuzzOut(it, seed, 0, 0, 0)
+    case Cmd.Build(_, outDir, _, _) => Drive.showPkg(Drive.compilePkg("[package]\nname = \"hello\"\nversion = \"0.1.0\"\n", src, outDir, "clang", "crates/runtime/build/libscuzz_rt.a"))
     case _ => render(c)
   }
 

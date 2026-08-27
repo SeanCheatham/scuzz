@@ -134,7 +134,7 @@ count.scuzz_verify     # Timeline => Verdict session claims and Bool drive oracl
 | `examples/syntax` | Kernel lexer and parser. Path dep for `examples/fmt` and `examples/compiler` |
 | `examples/compiler` | Kernel typechecker, LLVM emit, `scuzz.toml` parse, compile pipeline, clang argv. Path dep for `examples/tyck`, `examples/codegen`, and `examples/cli` |
 | `examples/tyck` | Kernel typechecker oracles. Drive oracles compare JSON diagnostics to Rust `scuzz check --message-format=json` (`tyck-ok`) |
-| `examples/codegen` | Kernel codegen oracles. Drive oracles compare LLVM IR to Rust `scuzz`, including hello `IO.flatMap` (`ir-ok`) |
+| `examples/codegen` | Kernel codegen oracles. Drive oracles compare LLVM IR to Rust `scuzz`, including hello `IO.flatMap` and a linkable `emitFull` preamble (`ir-ok`) |
 | `examples/cli` | Scuzz CLI core and driver: argv parse, help, fmt dispatch, manifest, compile pipeline, check dispatch, test/fuzz reports. Drive oracles compare to Rust `scuzz` (`cli-ok`) |
 | `examples/bad-example` | Known-wrong `bump` plus `bump.scuzz_verify`. `scuzz fuzz` fails and writes `repro.toml` with shrunk args. `corpus/` pins `drive bump 0`. `--iterations 0` fails before search, including when `corpus/` is absent. `--no-fail-fast` still mutates. An idle `scale` mutant does not change the timeline, so it is inert |
 | `examples/bad-fault` | Known-wrong `Fs.write` handler. `saveNote` swallows the error. `scuzz fuzz` drives `checkNote` and fails only when a fault seed hits `Fs`. `corpus/` pins `drive checkNote a` with `fault_seed = "1"`. Replay without `fault_seed` passes. `scuzz check` and `scuzz test` still pass |

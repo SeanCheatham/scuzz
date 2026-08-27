@@ -70,3 +70,6 @@ def campTest(): Bool =
 def campEmpty(): Bool =
   Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == Main.wantEmptyVerify()
 
+def drvPkg(): Bool =
+  Drive.showPkg(Drive.compilePkg(Main.tomlHello(), Main.srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg()
+

@@ -237,3 +237,12 @@ def emitProg2(p: Prog, strs: List[String]): String =
 def emit(src: String): String =
   emitProg(Parse.parse(Lexer.lex(src)))
 
+def decl(s: String): String =
+  Str.concat("declare ", Str.concat(s, nl()))
+
+def preamble(): String =
+  Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), Str.concat(decl("ptr @sz_string_from_cstr(ptr)"), Str.concat(decl("void @sz_retain(ptr)"), Str.concat(decl("void @sz_release(ptr)"), Str.concat(decl("ptr @sz_string_from_int(i64)"), Str.concat(decl("ptr @sz_io_println(ptr)"), Str.concat(decl("ptr @sz_io_flatmap(ptr, ptr, ptr)"), Str.concat(decl("i32 @sz_runtime_main_args(ptr, i32, ptr)"), nl()))))))))))
+
+def emitFull(src: String): String =
+  Str.concat(preamble(), emit(src))
+
