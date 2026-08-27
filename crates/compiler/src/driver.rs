@@ -166,13 +166,24 @@ fn compile_project_inner(opts: &CompileOptions) -> Result<CompileOutput> {
     }
 
     let program = prepare_program(&resolved, opts.verify)?;
-    let out = compile_prepared_program(opts, program)?;
+    let out = compile_prepared_program_inner(opts, program)?;
     store_compile_fingerprint(&cache_dir, opts.verify, &fingerprint)?;
     Ok(out)
 }
 
 /// Lower, typecheck, emit, and link an already-prepared program (no fingerprint).
+///
+/// Mutation calls this from the CLI main thread. Typecheck of a large factory
+/// overflows the default stack, so this hop matches `compile_project`.
 pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Result<CompileOutput> {
+    let opts = opts.clone();
+    on_compiler_stack(move || compile_prepared_program_inner(&opts, program))
+}
+
+fn compile_prepared_program_inner(
+    opts: &CompileOptions,
+    program: Program,
+) -> Result<CompileOutput> {
     let manifest = load_manifest(&opts.project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", opts.project_dir.display()))?;
     let exe_name = executable_name(&manifest)?;

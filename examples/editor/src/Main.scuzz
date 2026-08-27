@@ -65,6 +65,7 @@ def walkTree(root: String): IO[List[String]] =
     _ = Property.check("err", Chrome.captureOut("out", "e") == """out
 e""", true)
     _ = Property.check("find", Chrome.findNextOffset("ababa", "ba", 0) == 1, true)
+    _ = Property.check("ins", Chrome.insertAt("ab", 1, "x") == "axb", true)
     _ = Property.check("line", Chrome.lineColAt("""a
 bc""", 3)._1 == 1, true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ =>
@@ -114,8 +115,8 @@ bc""", 3)._1 == 1, true)
     _ = Property.check("dobj", Lsp.defUri(Lsp.parseJson("{\"result\":{\"uri\":\"u\"}}")) == "u", true)
     _ <- Ui.setTitle(Fs.basename(file))
     _ <- Fiber.fork(IO.forever(for {
-  _ <- IO.sleep(300)
   _ = Property.sometimes("polledFiles")
+  _ <- IO.sleep(300)
   ps = Signal.getList(paths)
   i = Signal.get(idx)
   curB = Signal.getStr(buf)
@@ -325,15 +326,26 @@ bc""", 3)._1 == 1, true)
 } yield ()
   _ <- Check.jumpDiag(s)
 } yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
-  off = Chrome.findNextOffset(Signal.getStr(buf), Signal.getStr(findQ), 0)
-  lc = Chrome.lineColAt(Signal.getStr(buf), off)
-  _ <- if (off < 0) IO.pure(()) else Ui.setEditorCaret(lc._1, lc._2)
+  off <- Ui.editorCaret()
+  found = Chrome.findNextOffset(Signal.getStr(buf), Signal.getStr(findQ), off + 1)
+  hit = if (found < 0) Chrome.findNextOffset(Signal.getStr(buf), Signal.getStr(findQ), 0) else found
+  lc = Chrome.lineColAt(Signal.getStr(buf), hit)
+  _ <- if (hit < 0) IO.pure(()) else Ui.setEditorCaret(lc._1, lc._2)
 } yield ()), View.button("Replace", _ => for {
   _ = Signal.setStr(buf, Str.replace(Signal.getStr(buf), Signal.getStr(findQ), Signal.getStr(replQ)))
   _ = Signal.set(dirty, Str.len("x"))
   _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
   _ <- Ui.setTitle(Str.concat(Fs.basename(Signal.getStr(pathSig)), " *"))
-} yield ()))), View.overlay(compOpen, View.column(View.text("complete"), View.each(comps, s => View.button(s, _ => ())))), View.overlay(hoverOpen, View.bindText(hoverTxt)), View.overlay(palOpen, View.column(View.text("Palette"), View.each(palCmds, s => View.button(s, _ => for {
+} yield ()))), View.overlay(compOpen, View.column(View.text("complete"), View.each(comps, s => View.button(s, _ => for {
+  _ = Property.sometimes("tappedCompletion")
+  off <- Ui.editorCaret()
+  next = Chrome.insertAt(Signal.getStr(buf), off, s)
+  _ = Signal.setStr(buf, next)
+  _ = Signal.set(dirty, Str.len("x"))
+  _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), next))
+  _ = Signal.set(compOpen, Str.len(""))
+  _ <- Ui.setTitle(Str.concat(Fs.basename(Signal.getStr(pathSig)), " *"))
+} yield ())))), View.overlay(hoverOpen, View.bindText(hoverTxt)), View.overlay(palOpen, View.column(View.text("Palette"), View.each(palCmds, s => View.button(s, _ => for {
   _ = Signal.set(palOpen, Str.len(""))
   _ <- if (s == "Save") for {
   _ = Property.sometimes("tappedSave")

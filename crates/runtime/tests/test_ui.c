@@ -13548,6 +13548,10 @@ static void test_view_editor_undo_gutter(void) {
     SzIoResult r = sz_io_unsafe_run(sz_lang_ui_set_editor_caret(2, 1));
     assert(r.ok);
     assert(sz_view_editor_caret(ed) == 3);
+    r = sz_io_unsafe_run(sz_lang_ui_editor_caret());
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 3);
+    sz_release(r.value);
   }
   {
     void *ln = sz_box_i64(1);

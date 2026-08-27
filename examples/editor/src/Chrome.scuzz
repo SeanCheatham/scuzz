@@ -129,6 +129,9 @@ def lineColAt(body: String, off: Int): (Int, Int) =
 def findNextOffset(body: String, needle: String, start: Int): Int =
   if (Str.isEmpty(needle)) start else if (Str.indexOf(Str.drop(body, if (start < 0) 0 else start), needle) < 0) -1 else start + Str.indexOf(Str.drop(body, if (start < 0) 0 else start), needle)
 
+def insertAt(body: String, off: Int, ins: String): String =
+  if (off <= 0) Str.concat(ins, body) else if (off >= Str.len(body)) Str.concat(body, ins) else Str.concat(Str.take(body, off), Str.concat(ins, Str.drop(body, off)))
+
 def pollTab(path: String, body: String, orig: String, dirty: Int): IO[(String, String, Int)] =
   if (dirty != 0) IO.pure((body, orig, 0)) else Fs.read(path).map(disk => if (disk == orig) (body, orig, 0) else (disk, disk, 1)).handleErrorWith(_ =>
   IO.pure((body, orig, 0))

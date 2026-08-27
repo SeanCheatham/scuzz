@@ -6118,6 +6118,10 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "Ui.editorCaret" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Io(Box::new(Type::Int)))
+        }
         "Ui.setEditorDiagnostics" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(
@@ -14368,6 +14372,7 @@ def note(n: Int where "x"): Unit = ()
         let src = r#"@main def main: IO[Unit] =
   for {
     _ <- Ui.setEditorCaret(1, 1)
+    _ <- Ui.editorCaret()
     _ <- Ui.setEditorDiagnostics([(1, 1)])
     _ <- Ui.setEditorDiagnostics([]: List[(Int, Int)])
     _ <- Ui.setEditorTokens([0, 0, 1, 8, 0])

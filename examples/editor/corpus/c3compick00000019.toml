@@ -1,0 +1,4 @@
+[fuzz]
+seed = 19
+schedule_seed = "19"
+events = ["tap 6", "tap 18"]

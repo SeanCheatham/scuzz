@@ -101,11 +101,7 @@ fn collect_handlers(e: &Expr, out: &mut Vec<(String, Expr)>) {
             }
         }
     }
-    let e = e.clone();
-    e.map_children(|c| {
-        collect_handlers(&c, out);
-        c
-    });
+    e.for_each_child(|c| collect_handlers(c, out));
 }
 
 fn callee_base(name: &str) -> &str {
@@ -817,16 +813,18 @@ fn mutate_prog_at(
 }
 
 pub fn mutate_count_mode(program: &Program, mode: MutateMode) -> i32 {
-    mutate_prog_at(program.clone(), -1, mode).1
+    let program = program.clone();
+    crate::driver::on_compiler_stack(move || mutate_prog_at(program, -1, mode).1)
 }
 
 pub fn mutate_apply_mode(program: Program, target: i32, mode: MutateMode) -> Program {
-    mutate_prog_at(program, target, mode).0
+    crate::driver::on_compiler_stack(move || mutate_prog_at(program, target, mode).0)
 }
 
 /// Describe the mutant at `site` without requiring the mutated program.
 pub fn mutate_describe(program: &Program, site: i32, mode: MutateMode) -> Option<MutantDesc> {
-    mutate_prog_at(program.clone(), site, mode).2
+    let program = program.clone();
+    crate::driver::on_compiler_stack(move || mutate_prog_at(program, site, mode).2)
 }
 
 #[cfg(test)]

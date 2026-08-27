@@ -652,11 +652,14 @@ fn fuzz_field_word(verb: &str, s: i64, n_fields: i64) -> (String, i64) {
 
 fn fuzz_editor_key(s: i64) -> (String, i64) {
     let s = lcg_next(s);
-    let pick = lcg_below(s, 3);
+    let pick = lcg_below(s, 4);
     if pick == 0 {
         (String::from("key Enter"), s)
     } else if pick == 1 {
         (String::from("key Backspace"), s)
+    } else if pick == 2 {
+        let s = lcg_next(s);
+        (format!("caret {}", lcg_below(s, 16)), s)
     } else {
         let (w, s) = fuzz_word("", lcg_next(s), 1);
         (format!("key {w} {w}"), s)
@@ -1024,6 +1027,7 @@ pub fn exhaust_alphabet(
         out.push(format!("backspace {i} 1"));
     }
     if n_editors > 0 {
+        out.push("caret 0".into());
         out.push("key a a".into());
         out.push("key Enter".into());
         out.push("key Backspace".into());
@@ -1953,6 +1957,7 @@ mod tests {
             a,
             vec![
                 "tap 0".to_string(),
+                "caret 0".into(),
                 "key a a".into(),
                 "key Enter".into(),
                 "key Backspace".into(),
