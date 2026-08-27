@@ -258,8 +258,160 @@ entry:
   ret i32 %rc
 }"""
 
+def srcOpt(): String =
+  """enum Opt[T]:
+  case Some(x: T)
+  case None
+def get(o: Opt[Int]): Int =
+  o match {
+    case Opt.Some(n) => n
+    case Opt.None => 0
+  }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(get(Opt.Some(1))))
+"""
+
+def wantOpt(): String =
+  """define internal i64 @sz_user_Main_get(ptr %o) {
+entry:
+  br label %body_try_0_0
+body_try_0_0:
+  %body_p0_0_tg1 = call i32 @sz_adt_tag(ptr %o)
+  %body_p0_0_eq1 = icmp eq i32 %body_p0_0_tg1, 0
+  br i1 %body_p0_0_eq1, label %body_p0_0_m1, label %body_try_0_1
+body_p0_0_m1:
+  %body_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %o)
+  %body_p0_0_f1_b0 = call i64 @sz_unbox_i64(ptr %body_p0_0_f1_pl)
+  br label %body_ok_0_0
+body_try_0_1:
+  %body_p0_1_tg2 = call i32 @sz_adt_tag(ptr %o)
+  %body_p0_1_eq2 = icmp eq i32 %body_p0_1_tg2, 1
+  br i1 %body_p0_1_eq2, label %body_p0_1_m2, label %body_default_0
+body_p0_1_m2:
+  br label %body_ok_0_1
+body_default_0:
+  %body_dflt = add i64 0, 0
+  br label %body_merge_0
+body_ok_0_0:
+  br label %body_aj_0_0
+body_aj_0_0:
+  br label %body_merge_0
+body_ok_0_1:
+  br label %body_aj_0_1
+body_aj_0_1:
+  br label %body_merge_0
+body_merge_0:
+  %body_phi = phi i64 [ %body_p0_0_f1_b0, %body_aj_0_0 ], [ 0, %body_aj_0_1 ], [ %body_dflt, %body_default_0 ]
+  ret i64 %body_phi
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_arg0_box = call ptr @sz_box_i64(i64 1)
+  %build_e_arg0_arg0_adt = call ptr @sz_adt_new(i32 0, ptr %build_e_arg0_arg0_box)
+  call void @sz_release(ptr %build_e_arg0_arg0_box)
+  %build_e_arg0_v = call i64 @sz_user_Main_get(ptr %build_e_arg0_arg0_adt)
+  call void @sz_release(ptr %build_e_arg0_arg0_adt)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
+def srcHead(): String =
+  """@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.head([7])))
+"""
+
+def wantHead(): String =
+  """define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_arg0_0 = call ptr @sz_list_nil()
+  %build_e_arg0_arg0_b0 = call ptr @sz_box_i64(i64 7)
+  %build_e_arg0_arg0_1 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_b0, ptr %build_e_arg0_arg0_0)
+  call void @sz_release(ptr %build_e_arg0_arg0_0)
+  call void @sz_release(ptr %build_e_arg0_arg0_b0)
+  %build_e_arg0_v = call ptr @sz_list_head(ptr %build_e_arg0_arg0_1)
+  call void @sz_retain(ptr %build_e_arg0_v)
+  call void @sz_release(ptr %build_e_arg0_arg0_1)
+  %build_e_arg0_u = call i64 @sz_unbox_i64(ptr %build_e_arg0_v)
+  call void @sz_release(ptr %build_e_arg0_v)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_u)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
+def srcEmptyQ(): String =
+  """@main def main: IO[Unit] =
+  IO.println(Str.fromInt(if (List.isEmpty([])) 1 else 0))
+"""
+
+def wantEmptyQ(): String =
+  """define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_ic_arg0_0 = call ptr @sz_list_nil()
+  %build_e_arg0_ic_i = call i32 @sz_list_is_empty(ptr %build_e_arg0_ic_arg0_0)
+  %build_e_arg0_ic_v = zext i32 %build_e_arg0_ic_i to i64
+  call void @sz_release(ptr %build_e_arg0_ic_arg0_0)
+  %build_e_arg0_cmp = icmp ne i64 %build_e_arg0_ic_v, 0
+  br i1 %build_e_arg0_cmp, label %build_e_arg0_then_0, label %build_e_arg0_else_0
+build_e_arg0_then_0:
+  br label %build_e_arg0_tj_0
+build_e_arg0_tj_0:
+  br label %build_e_arg0_merge_0
+build_e_arg0_else_0:
+  br label %build_e_arg0_ej_0
+build_e_arg0_ej_0:
+  br label %build_e_arg0_merge_0
+build_e_arg0_merge_0:
+  %build_e_arg0_phi = phi i64 [ 1, %build_e_arg0_tj_0 ], [ 0, %build_e_arg0_ej_0 ]
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_phi)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
+def srcTail(): String =
+  """@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(List.tail([1, 2]))))
+"""
+
+def wantTail(): String =
+  """define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_arg0_arg0_0 = call ptr @sz_list_nil()
+  %build_e_arg0_arg0_arg0_b1 = call ptr @sz_box_i64(i64 2)
+  %build_e_arg0_arg0_arg0_2 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg0_b1, ptr %build_e_arg0_arg0_arg0_0)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_0)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_b1)
+  %build_e_arg0_arg0_arg0_b0 = call ptr @sz_box_i64(i64 1)
+  %build_e_arg0_arg0_arg0_1 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg0_b0, ptr %build_e_arg0_arg0_arg0_2)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_2)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_b0)
+  %build_e_arg0_arg0_v = call ptr @sz_list_tail(ptr %build_e_arg0_arg0_arg0_1)
+  call void @sz_retain(ptr %build_e_arg0_arg0_v)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_1)
+  %build_e_arg0_v = call i64 @sz_list_len(ptr %build_e_arg0_arg0_v)
+  call void @sz_release(ptr %build_e_arg0_arg0_v)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
+def srcTok(): String =
+  "enum Tok:\n  case Eof\n  case Ident(s: String)\ndef show(t: Tok): String =\n  t match {\n    case Tok.Ident(s) => s\n    case Tok.Eof => \"e\"\n  }\n@main def main: IO[Unit] =\n  IO.println(show(Tok.Ident(\"x\")))\n"
+
+def wantTok(): String =
+  "@.str0 = private unnamed_addr constant [2 x i8] c\"e\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"x\\00\", align 1\n\ndefine internal ptr @sz_user_Main_show(ptr %t) {\nentry:\n  br label %body_try_0_0\nbody_try_0_0:\n  %body_p0_0_tg1 = call i32 @sz_adt_tag(ptr %t)\n  %body_p0_0_eq1 = icmp eq i32 %body_p0_0_tg1, 1\n  br i1 %body_p0_0_eq1, label %body_p0_0_m1, label %body_try_0_1\nbody_p0_0_m1:\n  %body_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %t)\n  br label %body_ok_0_0\nbody_try_0_1:\n  %body_p0_1_tg2 = call i32 @sz_adt_tag(ptr %t)\n  %body_p0_1_eq2 = icmp eq i32 %body_p0_1_tg2, 0\n  br i1 %body_p0_1_eq2, label %body_p0_1_m2, label %body_default_0\nbody_p0_1_m2:\n  br label %body_ok_0_1\nbody_default_0:\n  br label %body_merge_0\nbody_ok_0_0:\n  call void @sz_retain(ptr %body_p0_0_f1_pl)\n  br label %body_aj_0_0\nbody_aj_0_0:\n  br label %body_merge_0\nbody_ok_0_1:\n  %body_a0_1_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %body_a0_1_s = call ptr @sz_string_from_cstr(ptr %body_a0_1_gep)\n  br label %body_aj_0_1\nbody_aj_0_1:\n  br label %body_merge_0\nbody_merge_0:\n  %body_phi = phi ptr [ %body_p0_0_f1_pl, %body_aj_0_0 ], [ %body_a0_1_s, %body_aj_0_1 ], [ null, %body_default_0 ]\n  ret ptr %body_phi\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_arg0_ap_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %build_e_arg0_ap_s = call ptr @sz_string_from_cstr(ptr %build_e_arg0_ap_gep)\n  %build_e_arg0_adt = call ptr @sz_adt_new(i32 1, ptr %build_e_arg0_ap_s)\n  call void @sz_release(ptr %build_e_arg0_ap_s)\n  %build_e_v = call ptr @sz_user_Main_show(ptr %build_e_arg0_adt)\n  call void @sz_release(ptr %build_e_arg0_adt)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+
 def allOk(): Bool =
-  irDiff(srcHi(), wantHi()) && irIdem(srcHi()) && irDiff(srcSum(), wantSum()) && irIdem(srcSum()) && irDiff(srcAdd(), wantAdd()) && irIdem(srcAdd()) && irDiff(srcHello(), wantHello()) && irIdem(srcHello()) && Check.check(srcHello()) == "[]" && Str.startsWith(Emit.emitFull(srcHello()), "; Scuzz Lang generated LLVM IR") && Str.startsWith(Emit.emitFull(srcHello()), Emit.preamble()) && Emit.emitFull(srcHello()) == Str.concat(Emit.preamble(), wantHello()) && irDiff(srcIf(), wantIf()) && irIdem(srcIf()) && irDiff(srcTag(), wantTag()) && irIdem(srcTag()) && irDiff(srcCat(), wantCat()) && irIdem(srcCat()) && irDiff(srcFmt(), wantFmt()) && irIdem(srcFmt()) && Check.check(srcIf()) == "[]" && Check.check(srcTag()) == "[]" && Check.check(srcCat()) == "[]" && Check.check(srcFmt()) == "[]" && Emit.emitFull(srcFmt()) == Str.concat(Emit.preamble(), wantFmt()) && irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]"
+  irDiff(srcHi(), wantHi()) && irIdem(srcHi()) && irDiff(srcSum(), wantSum()) && irIdem(srcSum()) && irDiff(srcAdd(), wantAdd()) && irIdem(srcAdd()) && irDiff(srcHello(), wantHello()) && irIdem(srcHello()) && Check.check(srcHello()) == "[]" && Str.startsWith(Emit.emitFull(srcHello()), "; Scuzz Lang generated LLVM IR") && Str.startsWith(Emit.emitFull(srcHello()), Emit.preamble()) && Emit.emitFull(srcHello()) == Str.concat(Emit.preamble(), wantHello()) && irDiff(srcIf(), wantIf()) && irIdem(srcIf()) && irDiff(srcTag(), wantTag()) && irIdem(srcTag()) && irDiff(srcCat(), wantCat()) && irIdem(srcCat()) && irDiff(srcFmt(), wantFmt()) && irIdem(srcFmt()) && Check.check(srcIf()) == "[]" && Check.check(srcTag()) == "[]" && Check.check(srcCat()) == "[]" && Check.check(srcFmt()) == "[]" && Emit.emitFull(srcFmt()) == Str.concat(Emit.preamble(), wantFmt()) && irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]" && irDiff(srcOpt(), wantOpt()) && irIdem(srcOpt()) && irDiff(srcHead(), wantHead()) && irIdem(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irIdem(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irIdem(srcTail()) && irDiff(srcTok(), wantTok()) && irIdem(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]"
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "ir-ok" else "ir-bad")
