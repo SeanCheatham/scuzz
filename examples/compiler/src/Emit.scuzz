@@ -41,6 +41,8 @@ def collectExpr(e: Expr, acc: List[String]): List[String] =
     case Expr.EUn(_, inner) => collectExpr(inner, acc)
     case Expr.EIf(c, t, el) => collectExpr(el, collectExpr(t, collectExpr(c, acc)))
     case Expr.ENamed(_, inner) => collectExpr(inner, acc)
+    case Expr.EMethod(recv, _, args) => collectExpr(lamBody(args), collectExpr(recv, acc))
+    case Expr.ELam(_, body) => collectExpr(body, acc)
     case _ => acc
   }
 
@@ -76,6 +78,8 @@ def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun]): Slot
     case Expr.EBin(op, l, r) => emitBin(op, l, r, prefix, strs, defs)
     case Expr.EUn(op, inner) => emitUn(op, inner, prefix, strs, defs)
     case Expr.ENamed(_, inner) => emitExpr(inner, prefix, strs, defs)
+    case Expr.EMethod(recv, name, args) => if (name == "flatMap") emitFm(recv, args, prefix, strs, defs) else Slot("", "0", false)
+    case Expr.ELam(_, body) => emitExpr(body, prefix, strs, defs)
     case _ => Slot("", "0", false)
   }
 
@@ -156,8 +160,79 @@ def emitMain2(s: Slot): String =
 def emitProg(p: Prog): String =
   emitProg2(p, collectProg(p))
 
+def fmCount(e: Expr): Int =
+  e match {
+    case Expr.EMethod(recv, name, args) => if (name == "flatMap") fmCount(recv) + 1 + fmCountArgs(args) else fmCount(recv) + fmCountArgs(args)
+    case Expr.EPrint(inner) => fmCount(inner)
+    case Expr.ELam(_, body) => fmCount(body)
+    case Expr.ECall(_, args) => fmCountArgs(args)
+    case Expr.EBin(_, l, r) => fmCount(l) + fmCount(r)
+    case Expr.EUn(_, inner) => fmCount(inner)
+    case Expr.EIf(c, t, el) => fmCount(c) + fmCount(t) + fmCount(el)
+    case Expr.ENamed(_, inner) => fmCount(inner)
+    case _ => 0
+  }
+
+def fmCountArgs(xs: List[Expr]): Int =
+  if (List.isEmpty(xs)) 0 else fmCount(List.head(xs)) + fmCountArgs(List.tail(xs))
+
+def lamBody(args: List[Expr]): Expr =
+  if (List.isEmpty(args)) Expr.EUnit else lamBody1(List.head(args))
+
+def lamBody1(e: Expr): Expr =
+  e match {
+    case Expr.ELam(_, body) => body
+    case _ => e
+  }
+
+def emitFm(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun]): Slot =
+  emitFm2(emitExpr(recv, Str.concat(prefix, "_in"), strs, defs), prefix, fmCount(recv))
+
+def emitFm2(inner: Slot, prefix: String, id: Int): Slot =
+  Slot(join(inner.code, join(line(Str.concat(tmp(prefix, "fm"), Str.concat("call ptr @sz_io_flatmap(ptr ", Str.concat(inner.val, Str.concat(", ptr @sz_cont_", Str.concat(Str.fromInt(id), ", ptr null)")))))), join(line(Str.concat("call void @sz_release(ptr ", Str.concat(inner.val, ")"))), line("call void @sz_release(ptr null)")))), pct(prefix, "fm"), false)
+
+def emitOneCont(id: Int, body: Expr, strs: List[String], defs: List[Fun]): String =
+  emitOneCont2(id, emitExpr(body, Str.concat("c", Str.fromInt(id)), strs, defs))
+
+def emitOneCont2(id: Int, s: Slot): String =
+  Str.concat("define internal ptr @sz_cont_", Str.concat(Str.fromInt(id), Str.concat("(ptr %value, ptr %env) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(s.code, Str.concat("  ret ptr ", Str.concat(s.val, Str.concat(nl(), Str.concat("}", Str.concat(nl(), nl()))))))))))))
+
+def emitConts(e: Expr, strs: List[String], defs: List[Fun]): String =
+  emitContsAt(e, strs, defs, 0)._1
+
+def emitContsAt(e: Expr, strs: List[String], defs: List[Fun], id: Int): (String, Int) =
+  e match {
+    case Expr.EMethod(recv, name, args) => if (name == "flatMap") emitContsFm(recv, args, strs, defs, id) else emitContsAt(recv, strs, defs, id)
+    case Expr.EPrint(inner) => emitContsAt(inner, strs, defs, id)
+    case Expr.ELam(_, body) => emitContsAt(body, strs, defs, id)
+    case Expr.ECall(_, args) => emitContsArgs(args, strs, defs, id)
+    case Expr.ENamed(_, inner) => emitContsAt(inner, strs, defs, id)
+    case _ => ("", id)
+  }
+
+def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], id: Int): (String, Int) =
+  emitContsFm2(emitContsAt(recv, strs, defs, id), lamBody(args), strs, defs)
+
+def emitContsFm2(p: (String, Int), body: Expr, strs: List[String], defs: List[Fun]): (String, Int) =
+  p match {
+    case (code, id) => (join(code, emitOneCont(id, body, strs, defs)), id + 1)
+  }
+
+def emitContsArgs(xs: List[Expr], strs: List[String], defs: List[Fun], id: Int): (String, Int) =
+  if (List.isEmpty(xs)) ("", id) else emitContsArgs2(emitContsAt(List.head(xs), strs, defs, id), List.tail(xs), strs, defs)
+
+def emitContsArgs2(p: (String, Int), rest: List[Expr], strs: List[String], defs: List[Fun]): (String, Int) =
+  p match {
+    case (code, id) => emitContsArgs3(code, emitContsArgs(rest, strs, defs, id))
+  }
+
+def emitContsArgs3(code: String, p: (String, Int)): (String, Int) =
+  p match {
+    case (rest, id) => (join(code, rest), id)
+  }
+
 def emitProg2(p: Prog, strs: List[String]): String =
-  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), Str.concat(emitDefs(p.defs, strs, p.defs), emitMain(p.body, strs, p.defs))))
+  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), Str.concat(emitConts(p.body, strs, p.defs), Str.concat(emitDefs(p.defs, strs, p.defs), emitMain(p.body, strs, p.defs)))))
 
 def emit(src: String): String =
   emitProg(Parse.parse(Lexer.lex(src)))
