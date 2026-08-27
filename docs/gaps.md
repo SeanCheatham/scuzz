@@ -25,6 +25,23 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 **Proof.** `SCUZZ_SKIA=gpu` renders `examples/counter` with unchanged structural goldens. Pixel goldens match `sk_sw` when `--pixels` is on. Unused GPU stubs do not close the proof.
 
+### 3. Scuzz at compiler scale (self-hosting)
+
+**Status.** `HUMANS.md` sets self-hosting as the eventual goal: rewrite the compiler, CLI, and tooling in Scuzz. Direction, prerequisites, and staged slices are locked in [`vision.md`](vision.md#self-hosting). The Rust toolchain stays the reference until each slice passes its differential campaign. The Rust compiler is about 68k lines. The largest Scuzz program today is `examples/editor` at about 1k lines.
+
+**Unproven.** Scuzz at that scale jump. Codegen has no tail calls, so deep AST recursion burns the C stack (the Rust compiler needs a 16MB stack hop to typecheck 500-line programs). `Str.concat` copies, so multi-MiB output assembly through it is quadratic. `Map` is an Int- or String-keyed tree; symbol-table performance at scale is unmeasured. The fuzzer has no differential oracle against a reference binary (`Sys.exec` fails under TestRuntime by design), no size-controlled generation of well-formed program terms, and no mutation-site sampling for large packages.
+
+**Proof.** Close the prerequisites in order, each as its own slice:
+
+1. **Tail calls** — codegen lowers a self-tail call to a loop. A kernel example recurses to depth 1,000,000 and runs without stack overflow.
+2. **Builder** — assemble a multi-MiB string in linear time; an example proves it under `scuzz test`.
+3. **Scale proof** — a Scuzz package of several thousand lines typechecks and runs with usable time and memory; record the measurements.
+4. **Differential oracle** — a hermetic fuzz campaign compares a Scuzz implementation against the Rust reference on the same inputs.
+5. **Structured generation** — drive oracles draw well-formed terms with size control; shrink keeps terms well-formed.
+6. **Mutation sampling** — a large package finishes a campaign inside its iteration budget.
+
+Then the staged rewrite slices ([`vision.md`](vision.md#self-hosting)): `fmt` core, kernel typechecker, kernel codegen, then CLI and the verification stack. Each slice is a Scuzz package with roundtrip, idempotence, and differential oracles. The Rust binary retires when the Scuzz toolchain passes the full campaign, compiles `examples/`, and compiles itself.
+
 ## Known gaps
 
 ### Residuals
