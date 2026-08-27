@@ -812,7 +812,8 @@ SzString *sz_fs_basename(SzString *path);
 
 /* Pure Json. Enum Null|Bool|Int|Float|Str|Arr|Obj.
  * parse / stringify return Result (Err=0 / Ok=1). Query kits return empty
- * lists on a miss or a wrong tag. `*_or` / `get_*` use the default. */
+ * lists on a miss or a wrong tag. `*_or` / `get_*` use the default.
+ * Write kits copy Obj / Arr cells. A miss keeps the default or retains `j`. */
 SzAdt *sz_json_parse(SzString *s);
 SzAdt *sz_json_stringify(SzAdt *j);
 SzList *sz_json_get(SzAdt *j, SzString *key); /* List[Json]; empty miss */
@@ -838,9 +839,21 @@ SzString *sz_json_str_or(SzAdt *j, SzString *d);
 int64_t sz_json_get_bool(SzAdt *j, SzString *key, int64_t d);
 int64_t sz_json_get_int(SzAdt *j, SzString *key, int64_t d);
 SzString *sz_json_get_str(SzAdt *j, SzString *key, SzString *d);
+double sz_json_float_or(SzAdt *j, double d);
+double sz_json_get_float(SzAdt *j, SzString *key, double d);
 /* Obj merge. Right wins on a duplicate key. Non-obj arguments stay the
  * other obj, or `b` when neither is Obj. */
 SzAdt *sz_json_merge(SzAdt *a, SzAdt *b);
+/* Write kits. `set` / `remove` copy an Obj. A non-Obj `set` becomes a
+ * one-key Obj. `remove` on a non-Obj retains `j`. `append` / `prepend` copy
+ * an Arr; a non-Arr becomes a one-cell Arr. `setAt` / `dropAt` retain `j`
+ * when the index is out of range or `j` is not Arr. */
+SzAdt *sz_json_set(SzAdt *j, SzString *key, SzAdt *v);
+SzAdt *sz_json_remove(SzAdt *j, SzString *key);
+SzAdt *sz_json_append(SzAdt *j, SzAdt *v);
+SzAdt *sz_json_prepend(SzAdt *j, SzAdt *v);
+SzAdt *sz_json_set_at(SzAdt *j, int64_t i, SzAdt *v);
+SzAdt *sz_json_drop_at(SzAdt *j, int64_t i);
 
 /* Process / args / env / console (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);

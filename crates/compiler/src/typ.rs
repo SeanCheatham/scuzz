@@ -5150,8 +5150,8 @@ fn infer_call(
                 Type::Adt("Json".into()),
             ])))
         }
-        "Json.isNull" | "Json.isBool" | "Json.isInt" | "Json.isFloat"
-        | "Json.isStr" | "Json.isArr" | "Json.isObj" => {
+        "Json.isNull" | "Json.isBool" | "Json.isInt" | "Json.isFloat" | "Json.isStr"
+        | "Json.isArr" | "Json.isObj" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
             Ok(Type::Bool)
@@ -5219,6 +5219,51 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
             expect_ty(&arg_tys[1], &Type::Adt("Json".into()))?;
+            Ok(Type::Adt("Json".into()))
+        }
+        "Json.floatOr" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Float)?;
+            Ok(Type::Float)
+        }
+        "Json.getFloat" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::Float)?;
+            Ok(Type::Float)
+        }
+        "Json.set" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::Adt("Json".into()))?;
+            Ok(Type::Adt("Json".into()))
+        }
+        "Json.remove" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Adt("Json".into()))
+        }
+        "Json.append" | "Json.prepend" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Adt("Json".into()))?;
+            Ok(Type::Adt("Json".into()))
+        }
+        "Json.setAt" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::Adt("Json".into()))?;
+            Ok(Type::Adt("Json".into()))
+        }
+        "Json.dropAt" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Adt("Json".into()))
         }
         "Fs.write" | "Fs.rename" => {
@@ -14463,6 +14508,32 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Json arr/at/getBool/pairs should typecheck");
+    }
+
+    #[test]
+    fn typechecks_json_write_kit() {
+        let src = r#"@main def main: IO[Unit] =
+  Json.parse("{\"a\":1,\"xs\":[1,2]}") match {
+    case Result.Err(_) => IO.println("err")
+    case Result.Ok(j) =>
+      for {
+        s = Json.set(j, "a", Json.Int(9))
+        r = Json.remove(s, "a")
+        a = Json.append(Json.Null, Json.Int(1))
+        p = Json.prepend(a, Json.Int(0))
+        u = Json.setAt(p, 1, Json.Int(8))
+        d = Json.dropAt(u, 0)
+        x = Json.floatOr(Json.Null, 1.5)
+        y = Json.getFloat(j, "a", 0.0)
+        _ <- IO.println(if (Json.isObj(r)) "o" else "n")
+        _ <- IO.println(Str.fromInt(List.len(Json.arr(d))))
+        _ <- IO.println(if (x > 0.0) "p" else "z")
+        _ <- IO.println(if (y > 0.0) "q" else "z")
+      } yield ()
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Json write kit should typecheck");
     }
 
     #[test]

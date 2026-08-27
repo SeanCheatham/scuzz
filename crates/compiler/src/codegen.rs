@@ -313,6 +313,14 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_json_get_int(ptr, ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_json_get_str(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_json_merge(ptr, ptr)").unwrap();
+    writeln!(out, "declare double @sz_json_float_or(ptr, double)").unwrap();
+    writeln!(out, "declare double @sz_json_get_float(ptr, ptr, double)").unwrap();
+    writeln!(out, "declare ptr @sz_json_set(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_remove(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_append(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_prepend(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_set_at(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_drop_at(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_fs_mkdirs(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_canonicalize(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_args()").unwrap();
@@ -7142,8 +7150,8 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Json.get" | "Json.keys" | "Json.arr" | "Json.pairs" | "Json.asBool"
-        | "Json.asInt" | "Json.asFloat" | "Json.asStr" => {
+        "Json.get" | "Json.keys" | "Json.arr" | "Json.pairs" | "Json.asBool" | "Json.asInt"
+        | "Json.asFloat" | "Json.asStr" => {
             let rt = match callee {
                 "Json.get" => "sz_json_get",
                 "Json.keys" => "sz_json_keys",
@@ -7195,14 +7203,8 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
         }
-        "Json.has"
-        | "Json.isNull"
-        | "Json.isBool"
-        | "Json.isInt"
-        | "Json.isFloat"
-        | "Json.isStr"
-        | "Json.isArr"
-        | "Json.isObj" => {
+        "Json.has" | "Json.isNull" | "Json.isBool" | "Json.isInt" | "Json.isFloat"
+        | "Json.isStr" | "Json.isArr" | "Json.isObj" => {
             let rt = match callee {
                 "Json.has" => "sz_json_has",
                 "Json.isNull" => "sz_json_is_null",
@@ -7296,6 +7298,87 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Json.floatOr" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call double @sz_json_float_or(ptr {}, double {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Float)
+        }
+        "Json.getFloat" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call double @sz_json_get_float(ptr {}, ptr {}, double {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Float)
+        }
+        "Json.set" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_set(ptr {}, ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Json.remove" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_remove(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Json.append" | "Json.prepend" => {
+            let rt = if callee == "Json.append" {
+                "sz_json_append"
+            } else {
+                "sz_json_prepend"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Json.setAt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_set_at(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Json.dropAt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_drop_at(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
         "Fs.mkdirs" | "Fs.delete" => {
@@ -11065,6 +11148,42 @@ def id(m: Map[String, String]): Map[String, String] = m
   IO.println(if (Json.isNull(Json.merge(Json.Null, Json.Null))) "n" else "o")
 "#,
             "sz_json_merge",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  IO.println(if (Json.isNull(Json.set(Json.Null, "a", Json.Null))) "n" else "o")
+"#,
+            "sz_json_set",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  IO.println(if (Json.isNull(Json.remove(Json.Null, "a"))) "n" else "o")
+"#,
+            "sz_json_remove",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  IO.println(if (Json.isNull(Json.append(Json.Null, Json.Null))) "n" else "o")
+"#,
+            "sz_json_append",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  IO.println(if (Json.isNull(Json.prepend(Json.Null, Json.Null))) "n" else "o")
+"#,
+            "sz_json_prepend",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  IO.println(if (Json.isNull(Json.setAt(Json.Null, 0, Json.Null))) "n" else "o")
+"#,
+            "sz_json_set_at",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  IO.println(if (Json.isNull(Json.dropAt(Json.Null, 0))) "n" else "o")
+"#,
+            "sz_json_drop_at",
         );
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] = Sys.write("x")"#,
