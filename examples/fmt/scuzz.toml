@@ -1,0 +1,7 @@
+[package]
+name = "fmt"
+version = "0.1.0"
+description = "Scuzz fmt core: lexer, parser, printer"
+
+[dependencies]
+syntax = { path = "../syntax" }
