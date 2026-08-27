@@ -35,13 +35,13 @@ def stripNamed(e: Expr): Expr =
   }
 
 def isKit(f: String): Bool =
-  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool"
+  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "List.len" || f == "List.concat" || f == "List.reverse"
 
 def kitParams(f: String): List[String] =
-  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else []: List[String]
+  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else if (f == "List.len") "List" :: ([]: List[String]) else if (f == "List.concat") "List" :: "List" :: ([]: List[String]) else if (f == "List.reverse") "List" :: ([]: List[String]) else []: List[String]
 
 def kitRet(f: String): String =
-  if (f == "Str.len") "Int" else "String"
+  if (f == "Str.len" || f == "List.len") "Int" else if (f == "List.concat" || f == "List.reverse") "List[Int]" else "String"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
@@ -68,7 +68,10 @@ def zipCheck(callee: String, want: List[String], args: List[Expr], env: List[(St
   if (List.isEmpty(want)) ok("") else zipCheck2(callee, List.head(want), infer(stripNamed(List.head(args)), env, funs, ens), List.tail(want), List.tail(args), env, funs, ens, span)
 
 def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
-  if (hasErr(o)) o else if (o.ty == w) zipCheck(callee, want, args, env, funs, ens, span) else bad(Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, Str.concat(", got ", o.ty)))), span)
+  if (hasErr(o)) o else if (o.ty == w || listMatch(w, o.ty)) zipCheck(callee, want, args, env, funs, ens, span) else bad(Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, Str.concat(", got ", o.ty)))), span)
+
+def listMatch(w: String, g: String): Bool =
+  w == "List" && Str.startsWith(g, "List[")
 
 def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
   if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown2(zipCheck(f, want, args, env, funs, ens, span), ret)
