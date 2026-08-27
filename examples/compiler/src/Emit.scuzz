@@ -100,10 +100,35 @@ def emitPrint2(s: Slot, prefix: String): Slot =
   Slot(join(s.code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_println(ptr ", Str.concat(s.val, ")")))), if (s.owned) line(Str.concat("call void @sz_release(ptr ", Str.concat(s.val, ")"))) else "")), pct(prefix, "io"), false)
 
 def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En]): Slot =
-  emitBin2(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens), op, prefix)
+  if (op == "::") emitCall("List.cons", l :: r :: ([]: List[Expr]), prefix, strs, defs, ens) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens) else emitBin2(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens), op, prefix)
 
 def emitBin2(le: Slot, re: Slot, op: String, prefix: String): Slot =
-  if (isCmp(op)) emitCmp(le, re, op, prefix) else Slot(join(le.code, join(re.code, line(Str.concat(tmp(prefix, "v"), Str.concat(llvmBin(op), Str.concat(" i64 ", Str.concat(le.val, Str.concat(", ", re.val)))))))), pct(prefix, "v"), false)
+  if (isCmp(op)) emitBinCmp(le, re, op, prefix) else Slot(join(le.code, join(re.code, line(Str.concat(tmp(prefix, "v"), Str.concat(llvmBin(op), Str.concat(" i64 ", Str.concat(le.val, Str.concat(", ", re.val)))))))), pct(prefix, "v"), false)
+
+def emitBinCmp(le: Slot, re: Slot, op: String, prefix: String): Slot =
+  if (le.owned || re.owned) emitPtrEq(le, re, op, prefix) else emitCmp(le, re, op, prefix)
+
+def emitPtrEq(le: Slot, re: Slot, op: String, prefix: String): Slot =
+  le match {
+    case Slot(lc, lv, lo) => emitPtrEqR(lc, lv, lo, re, op, prefix)
+  }
+
+def emitPtrEqR(lc: String, lv: String, lo: Bool, re: Slot, op: String, prefix: String): Slot =
+  re match {
+    case Slot(rc, rv, ro) => emitPtrEq3(join(lc, rc), lv, lo, rv, ro, op, prefix)
+  }
+
+def emitPtrEq3(code: String, lv: String, lo: Bool, rv: String, ro: Bool, op: String, prefix: String): Slot =
+  Slot(join(code, join(ptrEqCall(prefix, lv, rv), join(ptrEqZext(prefix), join(if (lo) relPtr(lv) else "", join(if (ro) relPtr(rv) else "", if (op == "!=") emitPtrNe(prefix) else ""))))), if (op == "!=") pct(prefix, "nev") else pct(prefix, "eq"), false)
+
+def ptrEqCall(prefix: String, a: String, b: String): String =
+  line(Str.concat(tmp(prefix, "eqi"), Str.concat("call i32 @sz_ptr_eq(ptr ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, ")"))))))
+
+def ptrEqZext(prefix: String): String =
+  line(Str.concat(tmp(prefix, "eq"), Str.concat("zext i32 ", Str.concat(pct(prefix, "eqi"), " to i64"))))
+
+def emitPtrNe(prefix: String): String =
+  join(line(Str.concat(tmp(prefix, "ne"), Str.concat("icmp eq i64 ", Str.concat(pct(prefix, "eq"), ", 0")))), line(Str.concat(tmp(prefix, "nev"), Str.concat("zext i1 ", Str.concat(pct(prefix, "ne"), " to i64")))))
 
 def isCmp(op: String): Bool =
   op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">="
@@ -118,7 +143,10 @@ def emitUn(op: String, inner: Expr, prefix: String, strs: List[String], defs: Li
   emitUn2(emitExpr(inner, Str.concat(prefix, "_u"), strs, defs, ens), op, prefix)
 
 def emitUn2(inner: Slot, op: String, prefix: String): Slot =
-  if (op == "-") Slot(join(inner.code, line(Str.concat(tmp(prefix, "v"), Str.concat("sub i64 0, ", inner.val)))), pct(prefix, "v"), false) else inner
+  if (op == "-") Slot(join(inner.code, line(Str.concat(tmp(prefix, "v"), Str.concat("sub i64 0, ", inner.val)))), pct(prefix, "v"), false) else if (op == "!") emitNot(inner, prefix) else inner
+
+def emitNot(inner: Slot, prefix: String): Slot =
+  Slot(join(inner.code, join(line(Str.concat(tmp(prefix, "z"), Str.concat("icmp eq i64 ", Str.concat(inner.val, ", 0")))), line(Str.concat(tmp(prefix, "v"), Str.concat("zext i1 ", Str.concat(pct(prefix, "z"), " to i64")))))), pct(prefix, "v"), false)
 
 def emitList(xs: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En]): Slot =
   emitListAt(xs, prefix, strs, defs, ens, 0)
@@ -166,7 +194,7 @@ def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, 
   }
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr]): Slot =
-  if (f == "Str.fromInt") emitFromInt(code, vals, prefix) else if (f == "Str.concat") emitConcat(code, vals, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else emitUser(f, code, vals, owns, prefix, defs)
+  if (f == "Str.fromInt") emitFromInt(code, vals, prefix) else if (f == "Str.concat") emitConcat(code, vals, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else emitUser(f, code, vals, owns, prefix, defs)
 
 def emitCall(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En]): Slot =
   emitCall2(f, emitArgList(args, prefix, strs, defs, ens, 0, "", []: List[String], []: List[Bool]), prefix, defs, args)
@@ -194,6 +222,9 @@ def arg0(vals: List[String]): String =
 
 def arg1(vals: List[String]): String =
   if (List.len(vals) < 2) "null" else List.at(vals, 1)
+
+def arg2(vals: List[String]): String =
+  if (List.len(vals) < 3) "0" else List.at(vals, 2)
 
 def emitListLen(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitListLen2(code, arg0(vals), headOwn(owns), prefix)
@@ -263,6 +294,72 @@ def emitListEmpty(code: String, vals: List[String], owns: List[Bool], prefix: St
 
 def emitListEmpty2(code: String, v: String, o: Bool, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "i"), Str.concat("call i32 @sz_list_is_empty(ptr ", Str.concat(v, ")")))), join(line(Str.concat(tmp(prefix, "v"), Str.concat("zext i32 ", Str.concat(pct(prefix, "i"), " to i64")))), if (o) relPtr(v) else ""))), pct(prefix, "v"), false)
+
+def emitStrLen(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitStrLen2(code, arg0(vals), headOwn(owns), prefix)
+
+def emitStrLen2(code: String, v: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_string_len(ptr ", Str.concat(v, ")")))), if (o) relPtr(v) else "")), pct(prefix, "v"), false)
+
+def emitCharAt(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitCharAt2(code, arg0(vals), arg1(vals), headOwn(owns), prefix)
+
+def emitCharAt2(code: String, v: String, i: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_string_char_at(ptr ", Str.concat(v, Str.concat(", i64 ", Str.concat(i, ")")))))), if (o) relPtr(v) else "")), pct(prefix, "v"), false)
+
+def emitSlice(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitSlice2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), prefix)
+
+def emitSlice2(code: String, v: String, a: String, b: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_string_slice(ptr ", Str.concat(v, Str.concat(", i64 ", Str.concat(a, Str.concat(", i64 ", Str.concat(b, ")")))))))), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
+
+def emitConsCall(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitConsCall2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitConsCall2(code: String, h: String, t: String, oh: Bool, ot: Bool, prefix: String): Slot =
+  if (oh) emitConsPtr(code, h, t, ot, prefix) else emitConsInt(code, h, t, ot, prefix)
+
+def emitConsInt(code: String, h: String, t: String, ot: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "hd"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(h, ")")))), join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_cons(ptr ", Str.concat(pct(prefix, "hd"), Str.concat(", ptr ", Str.concat(t, ")")))))), join(relPtr(pct(prefix, "hd")), if (ot) relPtr(t) else "")))), pct(prefix, "v"), true)
+
+def emitConsPtr(code: String, h: String, t: String, ot: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_cons(ptr ", Str.concat(h, Str.concat(", ptr ", Str.concat(t, ")")))))), join(relPtr(h), if (ot) relPtr(t) else ""))), pct(prefix, "v"), true)
+
+def emitBldNew(code: String, prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), "call ptr @sz_builder_new()"))), pct(prefix, "v"), true)
+
+def emitBldApp(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitBldApp2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitBldApp2(code: String, a: String, b: String, oa: Bool, ob: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_builder_append(ptr ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, ")")))))), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), true)
+
+def emitBldRes(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitBldRes2(code, arg0(vals), headOwn(owns), prefix)
+
+def emitBldRes2(code: String, v: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_builder_result(ptr ", Str.concat(v, ")")))), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
+
+def emitSc(isAnd: Bool, l: Expr, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En]): Slot =
+  emitScA(isAnd, emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens), r, prefix, strs, defs, ens)
+
+def emitScA(isAnd: Bool, le: Slot, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En]): Slot =
+  Slot(join(le.code, join(scHead(isAnd, le.val, prefix), emitScB(emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens), prefix, isAnd))), pct(prefix, "v"), false)
+
+def scHead(isAnd: Bool, lv: String, prefix: String): String =
+  join(line(Str.concat("br label %", Str.concat(prefix, "_al_0"))), join(lab(Str.concat(prefix, "_al_0")), join(line(Str.concat(tmp(prefix, "nz0"), Str.concat("icmp ne i64 ", Str.concat(lv, ", 0")))), scBr(isAnd, prefix))))
+
+def scBr(isAnd: Bool, prefix: String): String =
+  if (isAnd) line(Str.concat("br i1 ", Str.concat(pct(prefix, "nz0"), Str.concat(", label %", Str.concat(prefix, Str.concat("_rhs_0, label %", Str.concat(prefix, "_sc_0"))))))) else line(Str.concat("br i1 ", Str.concat(pct(prefix, "nz0"), Str.concat(", label %", Str.concat(prefix, Str.concat("_sc_0, label %", Str.concat(prefix, "_rhs_0")))))))
+
+def emitScB(re: Slot, prefix: String, isAnd: Bool): String =
+  join(lab(Str.concat(prefix, "_rhs_0")), join(re.code, scTail(isAnd, re.val, prefix)))
+
+def scTail(isAnd: Bool, rv: String, prefix: String): String =
+  join(line(Str.concat("br label %", Str.concat(prefix, "_ar_0"))), join(lab(Str.concat(prefix, "_ar_0")), join(line(Str.concat(tmp(prefix, "rnz0"), Str.concat("icmp ne i64 ", Str.concat(rv, ", 0")))), join(line(Str.concat(tmp(prefix, "rb0"), Str.concat("zext i1 ", Str.concat(pct(prefix, "rnz0"), " to i64")))), join(line(Str.concat("br label %", Str.concat(prefix, "_sc_0"))), join(lab(Str.concat(prefix, "_sc_0")), line(Str.concat(tmp(prefix, "v"), scPhi(isAnd, prefix)))))))))
+
+def scPhi(isAnd: Bool, prefix: String): String =
+  Str.concat("phi i64 [ ", Str.concat(if (isAnd) "0" else "1", Str.concat(", %", Str.concat(prefix, Str.concat("_al_0 ], [ ", Str.concat(pct(prefix, "rb0"), Str.concat(", %", Str.concat(prefix, "_ar_0 ]"))))))))
 
 def findDef(funs: List[Fun], name: String): List[Fun] =
   List.filter(funs, f => f.name == name)
@@ -447,33 +544,86 @@ def emitMatch(s: Expr, arms: List[Arm], prefix: String, strs: List[String], defs
 
 def emitMatch1(se: Slot, arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En]): Slot =
   se match {
-    case Slot(sc, sv, _) => emitMatch2(sc, emitTries(arms, prefix, sv, ens, 0), emitOks(arms, prefix, strs, defs, ens, 0), prefix)
+    case Slot(sc, sv, _) => emitMatch2(sc, emitTries(arms, prefix, sv, ens, strs, 0), emitOks(arms, prefix, strs, defs, ens, 0), prefix, isExh(arms))
   }
 
-def emitMatch2(sc: String, tries: String, oks: (String, List[String], Bool), prefix: String): Slot =
+def isExh(arms: List[Arm]): Bool =
+  if (List.isEmpty(arms)) false else isExh2(List.head(arms), List.tail(arms))
+
+def isExh2(h: Arm, t: List[Arm]): Bool =
+  if (List.isEmpty(t)) isWild(h) else isExh(t)
+
+def isWild(arm: Arm): Bool =
+  arm match {
+    case Arm(pat, _, _) => pat == "_"
+  }
+
+def emitMatch2(sc: String, tries: String, oks: (String, List[String], Bool), prefix: String, exh: Bool): Slot =
   oks match {
-    case (okCode, vals, owned) => emitMatch3(sc, tries, okCode, vals, owned, prefix)
+    case (okCode, vals, owned) => emitMatch3(sc, tries, okCode, vals, owned, prefix, exh)
   }
 
-def emitMatch3(sc: String, tries: String, okCode: String, vals: List[String], owned: Bool, prefix: String): Slot =
-  Slot(join(sc, join(brTry(prefix), join(tries, join(emitDefault(prefix, owned), join(okCode, emitMatchPhi(vals, owned, prefix)))))), pct(prefix, "phi"), owned)
+def emitMatch3(sc: String, tries: String, okCode: String, vals: List[String], owned: Bool, prefix: String, exh: Bool): Slot =
+  Slot(join(sc, join(brTry(prefix), join(tries, join(emitDefault(prefix, owned, exh), join(okCode, emitMatchPhi(vals, owned, prefix, exh)))))), pct(prefix, "phi"), owned)
 
 def brTry(prefix: String): String =
   line(Str.concat("br label %", Str.concat(prefix, "_try_0_0")))
 
-def emitDefault(prefix: String, owned: Bool): String =
-  if (owned) join(lab(Str.concat(prefix, "_default_0")), line(Str.concat("br label %", Str.concat(prefix, "_merge_0")))) else join(lab(Str.concat(prefix, "_default_0")), join(line(Str.concat(tmp(prefix, "dflt"), "add i64 0, 0")), line(Str.concat("br label %", Str.concat(prefix, "_merge_0")))))
+def emitDefault(prefix: String, owned: Bool, exh: Bool): String =
+  if (exh) join(lab(Str.concat(prefix, "_default_0")), line("unreachable")) else if (owned) join(lab(Str.concat(prefix, "_default_0")), line(Str.concat("br label %", Str.concat(prefix, "_merge_0")))) else join(lab(Str.concat(prefix, "_default_0")), join(line(Str.concat(tmp(prefix, "dflt"), "add i64 0, 0")), line(Str.concat("br label %", Str.concat(prefix, "_merge_0")))))
 
-def emitTries(arms: List[Arm], prefix: String, scrut: String, ens: List[En], i: Int): String =
-  if (List.isEmpty(arms)) "" else emitTries2(List.head(arms), List.tail(arms), prefix, scrut, ens, i)
+def emitTries(arms: List[Arm], prefix: String, scrut: String, ens: List[En], strs: List[String], i: Int): String =
+  if (List.isEmpty(arms)) "" else emitTries2(List.head(arms), List.tail(arms), prefix, scrut, ens, strs, i)
 
-def emitTries2(arm: Arm, rest: List[Arm], prefix: String, scrut: String, ens: List[En], i: Int): String =
-  if (List.isEmpty(rest)) emitTry1(arm, prefix, scrut, ens, i, true) else join(emitTry1(arm, prefix, scrut, ens, i, false), emitTries(rest, prefix, scrut, ens, i + 1))
+def emitTries2(arm: Arm, rest: List[Arm], prefix: String, scrut: String, ens: List[En], strs: List[String], i: Int): String =
+  if (List.isEmpty(rest)) emitTry1(arm, prefix, scrut, ens, strs, i, true) else join(emitTry1(arm, prefix, scrut, ens, strs, i, false), emitTries(rest, prefix, scrut, ens, strs, i + 1))
 
-def emitTry1(arm: Arm, prefix: String, scrut: String, ens: List[En], i: Int, last: Bool): String =
+def emitTry1(arm: Arm, prefix: String, scrut: String, ens: List[En], strs: List[String], i: Int, last: Bool): String =
   arm match {
-    case Arm(pat, _, _) => join(lab(tryLab(prefix, i)), join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitMatchedPat(pat, prefix, i, scrut, ens))))
+    case Arm(pat, _, _) => join(lab(tryLab(prefix, i)), emitTryPat(pat, prefix, i, scrut, ens, strs, last))
   }
+
+def emitTryPat(pat: String, prefix: String, i: Int, scrut: String, ens: List[En], strs: List[String], last: Bool): String =
+  if (pat == "_") line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (isStrPat(pat)) emitStrTry(pat, prefix, i, scrut, strs, last) else if (isIntPat(pat)) emitIntTry(pat, prefix, i, scrut, last) else join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitMatchedPat(pat, prefix, i, scrut, ens)))
+
+def isStrPat(pat: String): Bool =
+  Str.len(pat) >= 2 && Str.charAt(pat, 0) == 34
+
+def isIntPat(pat: String): Bool =
+  if (Str.len(pat) == 0) false else isIntPat2(pat, if (Str.charAt(pat, 0) == 45) 1 else 0)
+
+def isIntPat2(pat: String, i: Int): Bool =
+  if (i >= Str.len(pat)) i > 0 && (Str.charAt(pat, 0) != 45 || Str.len(pat) > 1) else if (Str.charAt(pat, i) >= 48 && Str.charAt(pat, i) <= 57) isIntPat2(pat, i + 1) else false
+
+def unquote(pat: String): String =
+  Str.slice(pat, 1, Str.len(pat) - 1)
+
+def emitStrTry(pat: String, prefix: String, i: Int, scrut: String, strs: List[String], last: Bool): String =
+  emitStrTry2(unquote(pat), prefix, i, scrut, strs, last)
+
+def emitStrTry2(s: String, prefix: String, i: Int, scrut: String, strs: List[String], last: Bool): String =
+  emitStrTry3(s, prefix, i, scrut, strIndex(strs, s, 0), last)
+
+def emitStrTry3(s: String, prefix: String, i: Int, scrut: String, idx: Int, last: Bool): String =
+  join(strGep(s, prefix, i, idx), join(strLit(prefix, i), join(strEqi(prefix, i, scrut), join(relPtr(pct(ppre(prefix, i), Str.concat("slit", sid(i)))), join(strSeq(prefix, i), strBr(prefix, i, last))))))
+
+def strGep(s: String, prefix: String, i: Int, idx: Int): String =
+  line(Str.concat(tmp(ppre(prefix, i), Str.concat("sgep", sid(i))), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(s) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0"))))))
+
+def strLit(prefix: String, i: Int): String =
+  line(Str.concat(tmp(ppre(prefix, i), Str.concat("slit", sid(i))), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(ppre(prefix, i), Str.concat("sgep", sid(i))), ")"))))
+
+def strEqi(prefix: String, i: Int, scrut: String): String =
+  line(Str.concat(tmp(ppre(prefix, i), Str.concat("seqi", sid(i))), Str.concat("call i32 @sz_string_eq(ptr ", Str.concat(scrut, Str.concat(", ptr ", Str.concat(pct(ppre(prefix, i), Str.concat("slit", sid(i))), ")"))))))
+
+def strSeq(prefix: String, i: Int): String =
+  line(Str.concat(tmp(ppre(prefix, i), Str.concat("seq", sid(i))), Str.concat("icmp ne i32 ", Str.concat(pct(ppre(prefix, i), Str.concat("seqi", sid(i))), ", 0"))))
+
+def strBr(prefix: String, i: Int, last: Bool): String =
+  line(Str.concat("br i1 ", Str.concat(pct(ppre(prefix, i), Str.concat("seq", sid(i))), Str.concat(", label %", Str.concat(prefix, Str.concat("_ok_0_", Str.concat(Str.fromInt(i), Str.concat(", label %", nextLab(prefix, i, last)))))))))
+
+def emitIntTry(pat: String, prefix: String, i: Int, scrut: String, last: Bool): String =
+  join(line(Str.concat(tmp(ppre(prefix, i), Str.concat("ieq", sid(i))), Str.concat("icmp eq i64 ", Str.concat(scrut, Str.concat(", ", pat))))), line(Str.concat("br i1 ", Str.concat(pct(ppre(prefix, i), Str.concat("ieq", sid(i))), Str.concat(", label %", Str.concat(prefix, Str.concat("_ok_0_", Str.concat(Str.fromInt(i), Str.concat(", label %", nextLab(prefix, i, last))))))))))
 
 def tryLab(prefix: String, i: Int): String =
   Str.concat(prefix, Str.concat("_try_0_", Str.fromInt(i)))
@@ -577,11 +727,11 @@ def emitOks2(val: String, owned: Bool, code: String, p: (String, List[String], B
 def emitOkBody(code: String, prefix: String, i: Int): String =
   join(lab(Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i)))), join(code, join(line(Str.concat("br label %", Str.concat(prefix, Str.concat("_aj_0_", Str.fromInt(i))))), join(lab(Str.concat(prefix, Str.concat("_aj_0_", Str.fromInt(i)))), line(Str.concat("br label %", Str.concat(prefix, "_merge_0")))))))
 
-def emitMatchPhi(vals: List[String], owned: Bool, prefix: String): String =
-  join(lab(Str.concat(prefix, "_merge_0")), line(Str.concat(tmp(prefix, "phi"), emitMatchPhi2(vals, owned, prefix))))
+def emitMatchPhi(vals: List[String], owned: Bool, prefix: String, exh: Bool): String =
+  join(lab(Str.concat(prefix, "_merge_0")), line(Str.concat(tmp(prefix, "phi"), emitMatchPhi2(vals, owned, prefix, exh))))
 
-def emitMatchPhi2(vals: List[String], owned: Bool, prefix: String): String =
-  Str.concat("phi ", Str.concat(if (owned) "ptr" else "i64", Str.concat(" ", Str.concat(phiParts(vals, prefix, 0), phiTail(owned, prefix)))))
+def emitMatchPhi2(vals: List[String], owned: Bool, prefix: String, exh: Bool): String =
+  Str.concat("phi ", Str.concat(if (owned) "ptr" else "i64", Str.concat(" ", Str.concat(phiParts(vals, prefix, 0), if (exh) "" else phiTail(owned, prefix)))))
 
 def phiParts(vals: List[String], prefix: String, i: Int): String =
   if (List.isEmpty(vals)) "" else if (List.len(vals) == 1) phiOne(List.head(vals), prefix, i) else Str.concat(phiOne(List.head(vals), prefix, i), Str.concat(", ", phiParts(List.tail(vals), prefix, i + 1)))
@@ -774,7 +924,7 @@ def preamble(): String =
   Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), decls())))
 
 def decls(): String =
-  join(declsA(), join(declsB(), join(declsC(), nl())))
+  join(declsA(), join(declsB(), join(declsC(), join(declsD(), nl()))))
 
 def declsA(): String =
   join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))
@@ -784,6 +934,9 @@ def declsB(): String =
 
 def declsC(): String =
   join(decl("ptr @sz_adt_payload(ptr)"), join(decl("i64 @sz_unbox_i64(ptr)"), join(decl("ptr @sz_list_head(ptr)"), join(decl("ptr @sz_list_tail(ptr)"), decl("i32 @sz_list_is_empty(ptr)")))))
+
+def declsD(): String =
+  join(decl("i32 @sz_string_eq(ptr, ptr)"), join(decl("i32 @sz_ptr_eq(ptr, ptr)"), join(decl("i64 @sz_string_len(ptr)"), join(decl("i64 @sz_string_char_at(ptr, i64)"), join(decl("ptr @sz_string_slice(ptr, i64, i64)"), join(decl("ptr @sz_builder_new()"), join(decl("ptr @sz_builder_append(ptr, ptr)"), decl("ptr @sz_builder_result(ptr)"))))))))
 
 def emitFull(src: String): String =
   Str.concat(preamble(), emit(src))
