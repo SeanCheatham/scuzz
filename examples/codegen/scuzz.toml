@@ -4,4 +4,4 @@ version = "0.1.0"
 description = "Kernel codegen: LLVM IR vs Rust scuzz"
 
 [dependencies]
-syntax = { path = "../syntax" }
+compiler = { path = "../compiler" }

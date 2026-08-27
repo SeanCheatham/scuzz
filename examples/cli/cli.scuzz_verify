@@ -31,3 +31,21 @@ def cliFmtSrc(): Bool =
 def cliIdemFmt(): Bool =
   Main.cliIdem(Main.a1("fmt"))
 
+def drvHello(): Bool =
+  Drive.showMan(Manifest.parse(Main.tomlHello())) == "name=hello ver=0.1.0 ui=false deps=0"
+
+def drvPlugins(): Bool =
+  Drive.showMan(Manifest.parse(Main.tomlPlugins())) == Str.concat("err:", Main.wantPlugins())
+
+def drvIr(): Bool =
+  Drive.compileSrc(Main.srcIrHi()).ir == Main.wantIrHi()
+
+def drvTyck(): Bool =
+  Drive.compileSrc(Main.srcTyUnbound()).diags == Main.wantTyUnbound()
+
+def drvLink(): Bool =
+  Drive.linkLine("clang", Drive.llName("build", "hello"), "crates/runtime/build/libscuzz_rt.a", Drive.exeName("build", "hello")) == Main.wantLink()
+
+def drvIdem(): Bool =
+  Drive.compileSrc(Main.srcIrHi()).ir == Drive.compileSrc(Main.srcIrHi()).ir
+

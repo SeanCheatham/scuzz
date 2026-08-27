@@ -4,4 +4,4 @@ version = "0.1.0"
 description = "Kernel typechecker: JSON diagnostics vs Rust scuzz check"
 
 [dependencies]
-syntax = { path = "../syntax" }
+compiler = { path = "../compiler" }

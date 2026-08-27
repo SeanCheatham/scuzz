@@ -1,10 +1,10 @@
 # Next slice
 
-Self-hosting staged rewrite 4 remainder: **driver, verification stack, and Rust retirement** ([`vision.md`](vision.md#self-hosting)).
+Self-hosting staged rewrite 4 remainder: **verification stack and Rust retirement** ([`vision.md`](vision.md#self-hosting)).
 
-CLI core is in (`examples/cli`, `cli-ok`): argv parse, help, fmt dispatch. The product CLI is still the Rust binary.
+CLI core and driver core are in (`examples/cli`, `examples/compiler`, `cli-ok`): argv parse, help, fmt dispatch, `scuzz.toml` parse, typecheck-then-emit, clang argv. The product CLI is still the Rust binary.
 
-- Finish the slice: driver, verification stack, compile `examples/`, compile itself.
+- Finish the slice: verification stack, compile `examples/`, compile itself.
 - The Rust binary retires when that campaign is green.
 
 Current locks: [`vision.md`](vision.md). Ranked gaps: [`gaps.md`](gaps.md).
