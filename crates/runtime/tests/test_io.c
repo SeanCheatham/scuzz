@@ -9493,6 +9493,19 @@ int main(void) {
     remove(path);
   }
 
+  /* Timeline retention shares identical signals/a11y across consecutive states. */
+  {
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_property_session_reset();
+    sz_property_session_step();
+    sz_property_session_step();
+    assert(g_tl_n == 2);
+    assert(g_tl[0].signals == g_tl[1].signals);
+    assert(g_tl[0].a11y == g_tl[1].a11y);
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TESTRT");
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

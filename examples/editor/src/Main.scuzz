@@ -64,6 +64,9 @@ def walkTree(root: String): IO[List[String]] =
     _ = Property.check("cap", Chrome.captureOut("out", "") == "out", true)
     _ = Property.check("err", Chrome.captureOut("out", "e") == """out
 e""", true)
+    _ = Property.check("find", Chrome.findNextOffset("ababa", "ba", 0) == 1, true)
+    _ = Property.check("line", Chrome.lineColAt("""a
+bc""", 3)._1 == 1, true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ =>
   IO.pure(Str.len(""))
 )
@@ -110,6 +113,26 @@ e""", true)
     _ = Property.check("duri", Lsp.defUri(Lsp.parseJson("{\"result\":[{\"uri\":\"file://x\",\"range\":{\"start\":{\"line\":0,\"character\":0}}}]}")) == "file://x", true)
     _ = Property.check("dobj", Lsp.defUri(Lsp.parseJson("{\"result\":{\"uri\":\"u\"}}")) == "u", true)
     _ <- Ui.setTitle(Fs.basename(file))
+    _ <- Fiber.fork(IO.forever(for {
+  _ <- IO.sleep(300)
+  _ = Property.sometimes("polledFiles")
+  ps = Signal.getList(paths)
+  i = Signal.get(idx)
+  curB = Signal.getStr(buf)
+  curO = Signal.getStr(orig)
+  polled <- Chrome.pollTabs(ps, Signal.getList(bodies), Signal.getList(origs), i, curB, curO)
+  bs = polled._1
+  os = polled._2
+  reloaded = polled._3
+  _ = Signal.setList(bodies, bs)
+  _ = Signal.setList(origs, os)
+  _ = if (reloaded == 1) Signal.setStr(buf, List.at(bs, i))
+  _ = if (reloaded == 1) Signal.setStr(orig, List.at(os, i))
+  _ = if (reloaded == 1) Signal.set(dirty, Str.len(""))
+  dir = Signal.getStr(dirSig)
+  walked <- walkTree(dir)
+  _ = Signal.setList(tree, Chrome.flatten(walked, Signal.getList(openSig)))
+} yield ()))
     _ <- Ui.run(_ => View.split(frac, View.column(View.text("Files"), View.expanded(View.scroll(View.focusGroup(View.each(tree, s => if (Str.endsWith(s, "/")) View.button(Chrome.treeLabel(s), _ => for {
   dir = Signal.getStr(dirSig)
   _ = Property.sometimes("tappedDir")
@@ -301,7 +324,11 @@ e""", true)
   _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
   _ <- Check.jumpDiag(s)
-} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => Ui.setEditorCaret(Str.len("x"), Str.len("x"))), View.button("Replace", _ => for {
+} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+  off = Chrome.findNextOffset(Signal.getStr(buf), Signal.getStr(findQ), 0)
+  lc = Chrome.lineColAt(Signal.getStr(buf), off)
+  _ <- if (off < 0) IO.pure(()) else Ui.setEditorCaret(lc._1, lc._2)
+} yield ()), View.button("Replace", _ => for {
   _ = Signal.setStr(buf, Str.replace(Signal.getStr(buf), Signal.getStr(findQ), Signal.getStr(replQ)))
   _ = Signal.set(dirty, Str.len("x"))
   _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))

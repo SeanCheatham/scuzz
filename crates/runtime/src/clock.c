@@ -52,12 +52,14 @@ int64_t sz_clock_monotonic_ms_sync(void) {
 static void *clock_real_thunk(void *env) {
   (void)env;
   int64_t ms = g_fake ? g_now_ms : live_realtime_ms();
+  sz_effect_log("clock.realTime");
   return sz_box_i64(ms);
 }
 
 static void *clock_mono_thunk(void *env) {
   (void)env;
   int64_t ms = g_fake ? g_now_ms : live_monotonic_ms();
+  sz_effect_log("clock.monotonic");
   return sz_box_i64(ms);
 }
 

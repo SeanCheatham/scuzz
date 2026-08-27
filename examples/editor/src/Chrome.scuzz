@@ -120,3 +120,20 @@ def applyClose(paths: List[String], bodies: List[String], origs: List[String], i
 def writeDirty(paths: List[String], bodies: List[String], origs: List[String]): IO[List[String]] =
   IO.foreach(List.indices(paths), i => if (List.at(bodies, i) == List.at(origs, i)) IO.pure(List.at(origs, i)) else Fs.write(List.at(paths, i), List.at(bodies, i)).map(_ => List.at(bodies, i)))
 
+def lineColFromLines(rows: List[String]): (Int, Int) =
+  if (List.isEmpty(rows)) (0, 0) else (List.len(rows) - 1, Str.len(List.at(rows, List.len(rows) - 1)))
+
+def lineColAt(body: String, off: Int): (Int, Int) =
+  lineColFromLines(Str.lines(Str.take(body, if (off < 0) 0 else off)))
+
+def findNextOffset(body: String, needle: String, start: Int): Int =
+  if (Str.isEmpty(needle)) start else if (Str.indexOf(Str.drop(body, if (start < 0) 0 else start), needle) < 0) -1 else start + Str.indexOf(Str.drop(body, if (start < 0) 0 else start), needle)
+
+def pollTab(path: String, body: String, orig: String, dirty: Int): IO[(String, String, Int)] =
+  if (dirty != 0) IO.pure((body, orig, 0)) else Fs.read(path).map(disk => if (disk == orig) (body, orig, 0) else (disk, disk, 1)).handleErrorWith(_ =>
+  IO.pure((body, orig, 0))
+)
+
+def pollTabs(paths: List[String], bodies: List[String], origs: List[String], idx: Int, curBody: String, curOrig: String): IO[(List[String], List[String], Int)] =
+  IO.foreach(List.indices(paths), i => pollTab(List.at(paths, i), if (i == idx) curBody else List.at(bodies, i), if (i == idx) curOrig else List.at(origs, i), if (i == idx) dirtyFlag(curBody, curOrig) else dirtyFlag(List.at(bodies, i), List.at(origs, i)))).map(rows => (List.map(rows, r => r._1), List.map(rows, r => r._2), if (List.exists(rows, r => r._3 == 1)) 1 else 0))
+
