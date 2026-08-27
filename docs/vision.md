@@ -97,7 +97,7 @@ Verification track:
 1. `scuzz fmt` core in Scuzz. In: `examples/fmt` printer over `examples/syntax`. Oracles: parse-print roundtrip, fmt idempotence, differential vs Rust `scuzz fmt` (`fmt-ok`). `scuzz fuzz --iterations 8 examples/fmt` stays green. Lexer and parser live in `examples/syntax` (path dep).
 2. Kernel typechecker in Scuzz. In: `examples/tyck` typechecks a kernel subset (unbound name, arithmetic mismatch, arity, def body, `IO.println` payload, unknown function, comparison, `@main` body, arg type). Oracles: diagnostic idempotence, differential vs Rust `scuzz check --message-format=json` (`tyck-ok`). `scuzz fuzz --iterations 8 examples/tyck` stays green. Checker lives in `examples/compiler` (path dep).
 3. Kernel codegen in Scuzz: LLVM IR text. In: `examples/codegen` lowers `IO.println`, `Str.fromInt`, Int `+`, and an Int `def`. Oracles: emit idempotence, differential vs Rust `scuzz` LLVM (`ir-ok`). `scuzz fuzz --iterations 8 examples/codegen` stays green. Emit lives in `examples/compiler` (path dep).
-4. CLI, driver, and the verification stack. CLI core is in: `examples/cli` parses argv, emits help, and dispatches fmt through the syntax printer. Driver core is in: `examples/compiler` holds the kernel typechecker, LLVM emit, `scuzz.toml` parse, compile pipeline, and clang argv. Oracles: help/error differential vs Rust `scuzz`, parse idempotence, fmt dispatch, manifest errors, typecheck-then-emit, kernel link line (`cli-ok`). `scuzz fuzz --iterations 8 examples/cli` stays green. The Rust binary stays the product CLI until this slice finishes: verification stack, compile `examples/`, and compile itself.
+4. CLI, driver, and the verification stack. CLI core is in: `examples/cli` parses argv, emits help, and dispatches fmt through the syntax printer. Driver core is in: `examples/compiler` holds the kernel typechecker, LLVM emit, `scuzz.toml` parse, compile pipeline, and clang argv. Check dispatch is in: `Cli.runCmd` emits human or JSON diagnostics (`cli-ok`). `scuzz fuzz --iterations 8 examples/cli` stays green. The Rust binary stays the product CLI until this slice finishes: test/fuzz, compile `examples/`, and compile itself.
 
 ### GC (v0)
 
@@ -277,7 +277,7 @@ Verify drive oracles take at most three generator-friendly params (`Int` / `Stri
 
 Verification remaining items come from [`gaps.md`](gaps.md). The claim kernel and differential dumps are in.
 
-Self-hosting is open work. Prerequisites and staged slices: [Self-hosting](#self-hosting) and [`gaps.md`](gaps.md). Tail calls, Builder, scale proof, the differential oracle, structured generation, mutation sampling, fmt core, the kernel typechecker, kernel codegen, CLI core, and driver core are in. Next is the rest of the CLI slice: verification stack, compile `examples/`, compile itself, and Rust retirement.
+Self-hosting is open work. Prerequisites and staged slices: [Self-hosting](#self-hosting) and [`gaps.md`](gaps.md). Tail calls, Builder, scale proof, the differential oracle, structured generation, mutation sampling, fmt core, the kernel typechecker, kernel codegen, CLI core, and driver core are in. Next is the rest of the CLI slice: test/fuzz, compile `examples/`, compile itself, and Rust retirement.
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)).
 

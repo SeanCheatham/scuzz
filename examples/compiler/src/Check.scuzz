@@ -255,3 +255,15 @@ def check(src: String): String =
 def check2(src: String, o: Out): String =
   if (hasErr(o)) Str.concat("[", Str.concat(diagJson(src, o), "]")) else "[]"
 
+def humanLine(src: String, o: Out): String =
+  humanLine2(o, locOf(src, o.span))
+
+def humanLine2(o: Out, loc: (Int, Int, Int, Int)): String =
+  Str.concat("t/src/Main.scuzz:", Str.concat(Str.fromInt(loc._1), Str.concat(":", Str.concat(Str.fromInt(loc._2), Str.concat(": error: type error: ", o.err)))))
+
+def human(src: String): String =
+  human2(src, checkProg(Parse.parse(Lexer.lex(src))))
+
+def human2(src: String, o: Out): String =
+  if (hasErr(o)) humanLine(src, o) else "scuzz check ok"
+

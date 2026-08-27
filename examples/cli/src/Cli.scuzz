@@ -350,3 +350,10 @@ def parsePkgMsg(p: (String, Int), args: List[String], path: String, outDir: Stri
 def fmtSrc(src: String): String =
   Parse.pretty(Parse.parse(Lexer.lex(src)))
 
+def runCmd(c: Cmd, src: String): String =
+  c match {
+    case Cmd.Check(_, json) => if (json) Check.check(src) else Check.human(src)
+    case Cmd.Fmt(_, _) => fmtSrc(src)
+    case _ => render(c)
+  }
+
