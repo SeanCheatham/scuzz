@@ -6,13 +6,11 @@
 #include <stdatomic.h>
 #include <math.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
@@ -468,6 +466,7 @@ typedef struct {
   SzUiSession *session;
   SzSignalInt *sig;
   atomic_int stop;
+  atomic_int posted;
 } QuiescePostEnv;
 
 /* IO -> UI bridge poster: keeps pending bridge work so quiesce never sees
@@ -478,8 +477,10 @@ static void *quiesce_poster(void *arg) {
   /* Post continuously: the pump drains the bridge each frame, and a post is
    * far cheaper than a paint, so pending work is visible at every quiesce
    * sample. */
-  while (!atomic_load_explicit(&env->stop, memory_order_relaxed))
+  while (!atomic_load_explicit(&env->stop, memory_order_relaxed)) {
     sz_ui_bridge_post_int(env->session, env->sig, v++);
+    atomic_fetch_add_explicit(&env->posted, 1, memory_order_relaxed);
+  }
   return NULL;
 }
 
@@ -488,7 +489,10 @@ static void test_quiesce(void) {
   SzUiSession *session;
   SzSignalInt *sig;
   SzView *root;
-  pid_t pid;
+  QuiescePostEnv env;
+  pthread_t th;
+  SzQuiesce q;
+  int tries;
 
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
@@ -509,34 +513,31 @@ static void test_quiesce(void) {
   sz_view_free(root);
   sz_signal_int_free(sig);
 
-  /* Pending bridge work every pump trips the 64-pump budget. Forked: the
-   * poster thread intentionally runs concurrently with pump flushes. */
-  fflush(NULL);
-  pid = fork();
-  assert(pid >= 0);
-  if (pid == 0) {
-    QuiescePostEnv env;
-    pthread_t th;
-    SzQuiesce q;
-    sig = sz_signal_int(0);
-    root = sz_view_column();
-    sz_view_add_child(root, sz_view_text_signal_int(sig, "n="));
-    session = sz_ui_mount(&cfg, root);
-    assert(session);
-    env.session = session;
-    env.sig = sig;
-    atomic_init(&env.stop, 0);
-    assert(pthread_create(&th, NULL, quiesce_poster, &env) == 0);
+  /* Pending bridge work every pump trips the 64-pump budget. The poster
+   * thread runs at the same time as pump flushes. Wait for the first post
+   * so two idle samples cannot settle before the poster runs. */
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text_signal_int(sig, "n="));
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  env.session = session;
+  env.sig = sig;
+  atomic_init(&env.stop, 0);
+  atomic_init(&env.posted, 0);
+  sz_ui_bridge_post_int(session, sig, 0);
+  assert(pthread_create(&th, NULL, quiesce_poster, &env) == 0);
+  while (atomic_load_explicit(&env.posted, memory_order_relaxed) == 0)
+    sched_yield();
+  q = SZ_QUIESCE_SETTLED;
+  for (tries = 0; tries < 8 && q != SZ_QUIESCE_BUDGET_TRIPPED; tries++)
     q = sz_ui_quiesce(session);
-    atomic_store_explicit(&env.stop, 1, memory_order_relaxed);
-    pthread_join(th, NULL);
-    _exit(q == SZ_QUIESCE_BUDGET_TRIPPED ? 0 : 1);
-  }
-  {
-    int st = 0;
-    assert(waitpid(pid, &st, 0) == pid);
-    assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
-  }
+  atomic_store_explicit(&env.stop, 1, memory_order_relaxed);
+  pthread_join(th, NULL);
+  assert(q == SZ_QUIESCE_BUDGET_TRIPPED);
+  sz_ui_unmount(session);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
 }
 
 static char *slurp_cstr(const char *path) {

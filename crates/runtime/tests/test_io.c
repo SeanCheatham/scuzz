@@ -268,6 +268,75 @@ static int64_t stream_empty(void *v, void *env) {
   return sz_string_len((SzString *)v) == 0;
 }
 
+static void *stream_dup(void *v, void *env) {
+  (void)env;
+  return sz_stream_concat(sz_stream_emit(v), sz_stream_emit(v));
+}
+
+static void *stream_scan_concat(void *pack, void *env) {
+  SzPair *p = (SzPair *)pack;
+  (void)env;
+  return sz_string_concat((SzString *)p->left, (SzString *)p->right);
+}
+
+static void *stream_fold_concat(void *pack, void *env) {
+  return stream_scan_concat(pack, env);
+}
+
+static void *stream_list_dup(void *v, void *env) {
+  SzList *nil = sz_list_nil();
+  SzList *one;
+  SzList *two;
+  (void)env;
+  one = sz_list_cons(v, nil);
+  sz_release(nil);
+  two = sz_list_cons(v, one);
+  sz_release(one);
+  return two;
+}
+
+static void *stream_zip_concat(void *pack, void *env) {
+  SzPair *p = (SzPair *)pack;
+  (void)env;
+  return sz_string_concat((SzString *)p->left, (SzString *)p->right);
+}
+
+static int tap_n;
+
+static SzIo *stream_tap_count(void *v, void *env) {
+  (void)v;
+  (void)env;
+  tap_n += 1;
+  return pure_drop(NULL);
+}
+
+static void *stream_inc(void *v, void *env) {
+  (void)env;
+  return sz_box_i64(sz_unbox_i64(v) + 1);
+}
+
+static void *stream_unfold_step(void *v, void *env) {
+  int64_t n = sz_unbox_i64(v);
+  void *a;
+  void *next;
+  SzPair *p;
+  SzList *nil;
+  SzList *xs;
+  (void)env;
+  if (n >= 3)
+    return sz_list_nil();
+  a = sz_box_i64(n);
+  next = sz_box_i64(n + 1);
+  p = sz_pair_new(a, next);
+  sz_release(a);
+  sz_release(next);
+  nil = sz_list_nil();
+  xs = sz_list_cons(p, nil);
+  sz_release(nil);
+  sz_release(p);
+  return xs;
+}
+
 static SzIo *serve_path_ok(void *path, void *env) {
   SzString *prefix;
   SzString *out;
@@ -3772,6 +3841,360 @@ int main(void) {
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 0);
     assert(delay_calls == 2);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_zip_with_index(sz_stream_emits(xs))));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 2);
+    {
+      SzPair *pair = (SzPair *)sz_list_head((SzList *)r.value);
+      assert(sz_unbox_i64(pair->left) == 0);
+      assert(strcmp(sz_string_cstr((SzString *)pair->right), "a") == 0);
+    }
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_intersperse(sz_stream_emits(xs), sz_string_from_cstr("|"))));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,|,b") == 0);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"),
+                     sz_list_cons(sz_string_from_cstr("c"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_grouped(sz_stream_emits(xs), 2)));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 2);
+    joined = sz_list_join((SzList *)sz_list_head((SzList *)r.value), "");
+    assert(strcmp(sz_string_cstr(joined), "ab") == 0);
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_range(3, 6)));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 3);
+    assert(sz_unbox_i64(sz_list_head((SzList *)r.value)) == 3);
+
+    xs = sz_list_cons(sz_string_from_cstr("x"), sz_list_nil());
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_repeat_n(sz_stream_emits(xs), 3)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "x,x,x") == 0);
+
+    {
+      SzList *as = sz_list_cons(
+          sz_string_from_cstr("a"),
+          sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+      SzList *bs = sz_list_cons(
+          sz_string_from_cstr("1"),
+          sz_list_cons(sz_string_from_cstr("2"),
+                       sz_list_cons(sz_string_from_cstr("3"), sz_list_nil())));
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(
+          sz_stream_zip(sz_stream_emits(as), sz_stream_emits(bs))));
+      assert(r.ok);
+      assert(sz_list_len((SzList *)r.value) == 2);
+    }
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_flatmap(sz_stream_emits(xs), stream_dup, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,a,b,b") == 0);
+
+    {
+      SzList *nested = sz_list_cons(
+          sz_list_cons(sz_string_from_cstr("a"),
+                       sz_list_cons(sz_string_from_cstr("b"), sz_list_nil())),
+          sz_list_cons(sz_list_cons(sz_string_from_cstr("c"), sz_list_nil()),
+                       sz_list_nil()));
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(
+          sz_stream_flatten(sz_stream_emits(nested))));
+      assert(r.ok);
+      joined = sz_list_join((SzList *)r.value, ",");
+      assert(strcmp(sz_string_cstr(joined), "a,b,c") == 0);
+    }
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("a"),
+                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_changes(sz_stream_emits(xs))));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,b") == 0);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_scan(
+        sz_stream_emits(xs), sz_string_from_cstr(""), stream_scan_concat,
+        NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), ",a,ab") == 0);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_fold(sz_stream_emits(xs),
+                                       sz_string_from_cstr(""),
+                                       stream_fold_concat, NULL));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "ab") == 0);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(
+        sz_stream_forall(sz_stream_emits(xs), stream_nonempty, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+    r = sz_io_unsafe_run(sz_stream_forall(
+        sz_stream_emits(sz_list_cons(sz_string_from_cstr(""), sz_list_nil())),
+        stream_nonempty, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_range(5, 5)));
+    assert(r.ok);
+    assert(sz_list_is_empty((SzList *)r.value));
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_repeat_n(sz_stream_emit(sz_string_from_cstr("x")), 0)));
+    assert(r.ok);
+    assert(sz_list_is_empty((SzList *)r.value));
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_grouped(sz_stream_emits(sz_list_nil()), 2)));
+    assert(r.ok);
+    assert(sz_list_is_empty((SzList *)r.value));
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_grouped(sz_stream_emit(sz_string_from_cstr("a")), 0)));
+    assert(r.ok);
+    assert(sz_list_is_empty((SzList *)r.value));
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_zip(sz_stream_nil(), sz_stream_emit(sz_string_from_cstr("a")))));
+    assert(r.ok);
+    assert(sz_list_is_empty((SzList *)r.value));
+
+    r = sz_io_unsafe_run(sz_stream_fold(sz_stream_nil(), sz_string_from_cstr("z"),
+                                       stream_fold_concat, NULL));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "z") == 0);
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_scan(sz_stream_nil(), sz_string_from_cstr("z"),
+                       stream_scan_concat, NULL)));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 1);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head((SzList *)r.value)),
+                  "z") == 0);
+
+    r = sz_io_unsafe_run(
+        sz_stream_forall(sz_stream_nil(), stream_nonempty, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr(""),
+        sz_list_cons(sz_string_from_cstr("a"),
+                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_filter_not(sz_stream_emits(xs), stream_empty, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,b") == 0);
+
+    xs = sz_list_cons(sz_string_from_cstr("a"),
+                      sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_map_concat(sz_stream_emits(xs), stream_list_dup, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,a,b,b") == 0);
+
+    {
+      SzList *as = sz_list_cons(sz_string_from_cstr("a"),
+                               sz_list_cons(sz_string_from_cstr("b"),
+                                            sz_list_nil()));
+      SzList *bs = sz_list_cons(sz_string_from_cstr("1"),
+                               sz_list_cons(sz_string_from_cstr("2"),
+                                            sz_list_nil()));
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_zip_with(
+          sz_stream_emits(as), sz_stream_emits(bs), stream_zip_concat, NULL)));
+      assert(r.ok);
+      joined = sz_list_join((SzList *)r.value, ",");
+      assert(strcmp(sz_string_cstr(joined), "a1,b2") == 0);
+    }
+
+    {
+      SzList *as = sz_list_cons(sz_string_from_cstr("a"), sz_list_nil());
+      SzList *bs = sz_list_cons(
+          sz_string_from_cstr("1"),
+          sz_list_cons(sz_string_from_cstr("2"), sz_list_nil()));
+      SzString *pa = sz_string_from_cstr("x");
+      SzString *pb = sz_string_from_cstr("y");
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(
+          sz_stream_zip_all(sz_stream_emits(as), sz_stream_emits(bs), pa, pb)));
+      assert(r.ok);
+      assert(sz_list_len((SzList *)r.value) == 2);
+    }
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_or_else(
+        sz_stream_nil(), sz_stream_emit(sz_string_from_cstr("z")))));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "z") == 0);
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_or_else(
+        sz_stream_emit(sz_string_from_cstr("a")),
+        sz_stream_emit(sz_string_from_cstr("z")))));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"),
+                     sz_list_cons(sz_string_from_cstr("c"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_sliding(sz_stream_emits(xs), 2)));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 2);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"),
+                     sz_list_cons(sz_string_from_cstr("c"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_take_right(sz_stream_emits(xs), 2)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "b,c") == 0);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"),
+                     sz_list_cons(sz_string_from_cstr("c"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_drop_right(sz_stream_emits(xs), 1)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,b") == 0);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr(""),
+                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_find_last(sz_stream_emits(xs), stream_nonempty, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "b") == 0);
+
+    tap_n = 0;
+    xs = sz_list_cons(sz_string_from_cstr("a"),
+                      sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_evaltap(sz_stream_emits(xs), stream_tap_count, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,b") == 0);
+    assert(tap_n == 2);
+
+    {
+      void *z = sz_box_i64(0);
+      r = sz_io_unsafe_run(
+          sz_stream_compile_to_list(sz_stream_iterate(z, 4, stream_inc, NULL)));
+      assert(r.ok);
+      assert(sz_list_len((SzList *)r.value) == 4);
+      assert(sz_unbox_i64(sz_list_head((SzList *)r.value)) == 0);
+    }
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_iterate(sz_box_i64(0), 0, stream_inc, NULL)));
+    assert(r.ok);
+    assert(sz_list_is_empty((SzList *)r.value));
+
+    {
+      void *z = sz_box_i64(0);
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(
+          sz_stream_unfold(z, stream_unfold_step, NULL)));
+      assert(r.ok);
+      assert(sz_list_len((SzList *)r.value) == 3);
+      assert(sz_unbox_i64(sz_list_head((SzList *)r.value)) == 0);
+    }
+
+    xs = sz_list_cons(sz_string_from_cstr("a"),
+                      sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_head(sz_stream_emits(xs)));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "a") == 0);
+
+    r = sz_io_unsafe_run(sz_stream_head(sz_stream_nil()));
+    assert(!r.ok);
+
+    xs = sz_list_cons(sz_string_from_cstr("a"),
+                      sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_last(sz_stream_emits(xs)));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "b") == 0);
+
+    r = sz_io_unsafe_run(sz_stream_last(sz_stream_nil()));
+    assert(!r.ok);
+
+    xs = sz_list_cons(sz_string_from_cstr("a"),
+                      sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_count(sz_stream_emits(xs)));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 2);
+
+    r = sz_io_unsafe_run(sz_stream_count(sz_stream_nil()));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+
+    xs = sz_list_cons(sz_string_from_cstr(""),
+                      sz_list_cons(sz_string_from_cstr(""), sz_list_nil()));
+    r = sz_io_unsafe_run(
+        sz_stream_none(sz_stream_emits(xs), stream_nonempty, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+
+    xs = sz_list_cons(sz_string_from_cstr(""),
+                      sz_list_cons(sz_string_from_cstr("a"), sz_list_nil()));
+    r = sz_io_unsafe_run(
+        sz_stream_none(sz_stream_emits(xs), stream_nonempty, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_changes(sz_stream_emit(sz_string_from_cstr("a")))));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 1);
+
+    {
+      int64_t live = -1;
+      int64_t ready = -1;
+      int64_t parked = -1;
+      int64_t done = -1;
+      sz_fiber_census(&live, &ready, &parked, &done);
+      assert(live == 0);
+      assert(ready == 0);
+      assert(parked == 0);
+      assert(done == 0);
+    }
 
     {
       size_t base_bytes = 0, base_count = 0;
@@ -9332,7 +9755,10 @@ int main(void) {
     sz_property_session_reset();
     dump = slurp_path(path);
     assert(dump);
-    assert(strncmp(dump, "# timeline v=1 n=2\n", 19) == 0);
+    assert(strncmp(dump, "# timeline v=2 n=2\n", 19) == 0);
+    assert(strstr(dump, "effects:\n") != NULL);
+    assert(strstr(dump, "fibers:\n") != NULL);
+    assert(strstr(dump, "fault:\n") != NULL);
     free(dump);
     unsetenv("SCUZZ_TIMELINE_DUMP");
     unsetenv("SCUZZ_TESTRT");
@@ -9372,6 +9798,130 @@ int main(void) {
     remove(path);
   }
 
+  /* Effect log, fiber census, and fault context round-trip on a v2 dump. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_obs.dump";
+    void *tl;
+    SzString *needle;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_TIMELINE_DUMP", path, 1);
+    sz_testrt_install();
+    sz_property_session_reset();
+    sz_io_unsafe_run(sz_clock_monotonic());
+    sz_timeline_set_drive("drive obs");
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TIMELINE_DUMP");
+    unsetenv("SCUZZ_TESTRT");
+    sz_testrt_reset();
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 1);
+    needle = sz_string_from_cstr("Clock.monotonic");
+    assert(sz_timeline_effect_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    needle = sz_string_from_cstr("drive obs");
+    assert(sz_timeline_drive_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    needle = sz_string_from_cstr("kind=none");
+    assert(sz_timeline_fault_kind_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    assert(sz_timeline_effect_count(tl, 0) >= 1);
+    assert(sz_timeline_fiber_live(tl, 0) >= 0);
+    assert(sz_timeline_fiber_ready(tl, 0) >= 0);
+    assert(sz_timeline_fiber_parked(tl, 0) >= 0);
+    assert(sz_timeline_fiber_done(tl, 0) >= 0);
+    assert(sz_timeline_fault_n(tl, 0) == 0);
+    assert(sz_timeline_checkpoint(tl, 0) == 1);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
+  /* Checkpoint flags persist. Compact drops non-checkpoint states. Replay
+   * restores the nearest checkpoint. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_ckpt.dump";
+    void *tl;
+    SzString *needle;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_TIMELINE_DUMP", path, 1);
+    setenv("SCUZZ_TIMELINE_CHECKPOINT", "2", 1);
+    sz_property_session_reset();
+    sz_property_stash_a11y("s0");
+    sz_property_session_step();
+    sz_property_stash_a11y("s1");
+    sz_property_session_step();
+    sz_property_stash_a11y("s2");
+    sz_property_session_step();
+    sz_property_stash_a11y("s3");
+    sz_property_session_step();
+    sz_timeline_replay_from(1);
+    assert(sz_timeline_replaying());
+    needle = sz_string_from_cstr("s0");
+    assert(sz_property_a11y_has(needle) == 1);
+    sz_release(needle);
+    sz_property_session_end();
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TIMELINE_DUMP");
+    unsetenv("SCUZZ_TIMELINE_CHECKPOINT");
+    unsetenv("SCUZZ_TESTRT");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 4);
+    assert(sz_timeline_checkpoint(tl, 0) == 1);
+    assert(sz_timeline_checkpoint(tl, 1) == 0);
+    assert(sz_timeline_checkpoint(tl, 2) == 1);
+    assert(sz_timeline_checkpoint(tl, 3) == 0);
+    assert(sz_timeline_nearest_checkpoint(tl, 1) == 0);
+    assert(sz_timeline_nearest_checkpoint(tl, 2) == 2);
+    needle = sz_string_from_cstr("s1");
+    assert(sz_timeline_a11y_has(tl, 1, needle) == 1);
+    sz_release(needle);
+    sz_timeline_compact_loaded(tl);
+    assert(sz_timeline_len(tl) == 2);
+    assert(sz_timeline_checkpoint(tl, 0) == 1);
+    assert(sz_timeline_checkpoint(tl, 1) == 1);
+    needle = sz_string_from_cstr("s0");
+    assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
+    sz_release(needle);
+    needle = sz_string_from_cstr("s2");
+    assert(sz_timeline_a11y_has(tl, 1, needle) == 1);
+    sz_release(needle);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
+  /* Compact-before-dump keeps only checkpoint states. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_compact.dump";
+    void *tl;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_TIMELINE_DUMP", path, 1);
+    setenv("SCUZZ_TIMELINE_CHECKPOINT", "2", 1);
+    setenv("SCUZZ_TIMELINE_COMPACT", "1", 1);
+    sz_property_session_reset();
+    sz_property_stash_a11y("c0");
+    sz_property_session_step();
+    sz_property_stash_a11y("c1");
+    sz_property_session_step();
+    sz_property_stash_a11y("c2");
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TIMELINE_DUMP");
+    unsetenv("SCUZZ_TIMELINE_CHECKPOINT");
+    unsetenv("SCUZZ_TIMELINE_COMPACT");
+    unsetenv("SCUZZ_TESTRT");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 2);
+    assert(sz_timeline_checkpoint(tl, 0) == 1);
+    assert(sz_timeline_checkpoint(tl, 1) == 1);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
   /* Loader parses signal lines; bad headers are rejected. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_sig.dump";
@@ -9389,7 +9939,7 @@ int main(void) {
     assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
     sz_release(needle);
     sz_timeline_free(tl);
-    write_text(path, "# timeline v=2 n=0\n");
+    write_text(path, "# timeline v=3 n=0\n");
     assert(sz_timeline_load(path) == NULL);
     write_text(path, "nonsense\n");
     assert(sz_timeline_load(path) == NULL);
@@ -9449,7 +9999,7 @@ int main(void) {
     assert(sz_timeline_fiber_ready(tl, 0) == 1);
     assert(sz_timeline_fiber_parked(tl, 0) == 2);
     needle = sz_string_from_cstr("kind=fs");
-    assert(sz_timeline_fault_has(tl, 0, needle) == 1);
+    assert(sz_timeline_fault_kind_has(tl, 0, needle) == 1);
     sz_release(needle);
     sz_timeline_free(tl);
     write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
@@ -9485,7 +10035,7 @@ int main(void) {
     assert(sz_timeline_effect_has(tl, 0, needle) == 1);
     sz_release(needle);
     needle = sz_string_from_cstr("kind=none");
-    assert(sz_timeline_fault_has(tl, 0, needle) == 1);
+    assert(sz_timeline_fault_kind_has(tl, 0, needle) == 1);
     sz_release(needle);
     assert(sz_timeline_fiber_ready(tl, 0) == 0);
     assert(sz_timeline_fiber_parked(tl, 0) == 0);

@@ -734,7 +734,7 @@ jobs:
       - name: Runtime tests
         run: make -C crates/runtime test CC=clang
       - name: Compiler unit tests
-        run: cargo test -p scuzz-compiler
+        run: RUST_MIN_STACK=8388608 cargo test -p scuzz-compiler
       - name: Hello smoke
         run: |
           cargo build -p scuzz

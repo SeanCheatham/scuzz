@@ -335,6 +335,34 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_stream_dropwhile(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_find(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_exists(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_range(i64, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_repeat_n(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_zip(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_zip_with_index(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_intersperse(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_grouped(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_flatten(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_flatmap(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_scan(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_changes(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_fold(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_forall(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_filter_not(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_map_concat(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_zip_with(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_zip_all(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_or_else(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_sliding(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_take_right(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_drop_right(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_find_last(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_evaltap(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_iterate(ptr, i64, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_unfold(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_head(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_last(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_count(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_none(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_compile_to_list(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_drain(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
@@ -486,10 +514,21 @@ pub fn emit_llvm(program: &Program) -> String {
     .unwrap();
     writeln!(out, "declare i64 @sz_timeline_a11y_has(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_last_hit_has(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_drive_has(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_effect_has(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_effect_count(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_fiber_live(ptr, i64)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_fiber_ready(ptr, i64)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_fiber_parked(ptr, i64)").unwrap();
-    writeln!(out, "declare i64 @sz_timeline_fault_has(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_fiber_done(ptr, i64)").unwrap();
+    writeln!(
+        out,
+        "declare i64 @sz_timeline_fault_kind_has(ptr, i64, ptr)"
+    )
+    .unwrap();
+    writeln!(out, "declare i64 @sz_timeline_fault_n(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_checkpoint(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_timeline_nearest_checkpoint(ptr, i64)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_forall(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_timeline_exists(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_verdict_ok()").unwrap();
@@ -4225,6 +4264,185 @@ fn emit_stream_evalmap(
     owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.payload)
 }
 
+fn emit_stream_evaltap(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "Stream.evalTap expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("Stream.evalTap callback must be a lambda");
+    };
+    let lam = emit_io_cont_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        inner.elem,
+    );
+    let inner_elem = inner.elem;
+    let mut code = String::new();
+    code.push_str(&inner.code);
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_stream_evaltap(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        inner.value
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    drop_owned_ptr(&mut code, &inner);
+    owned_ptr(code, format!("%{prefix}_v")).with_elem(inner_elem)
+}
+
+fn emit_stream_zip_with(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 3, "Stream.zipWith expects 3 args");
+    let left = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let right = emit_expr(&args[1], ctx, locals, &format!("{prefix}_a1"));
+    let lam = emit_smap_pack(
+        &args[2],
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        Kind::Ptr,
+    );
+    let left_owned = left.owned;
+    let left_kind = left.kind;
+    let left_value = left.value.clone();
+    let right_owned = right.owned;
+    let right_kind = right.kind;
+    let right_value = right.value.clone();
+    let mut code = left.code;
+    code.push_str(&right.code);
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_stream_zip_with(ptr {left_value}, ptr {right_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if left_owned && left_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {left_value})").unwrap();
+    }
+    if right_owned && right_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {right_value})").unwrap();
+    }
+    owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.elem)
+}
+
+fn emit_stream_iterate(
+    callee: &str,
+    rt: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 3, "{callee} expects 3 args");
+    let z = emit_expr(&args[0], ctx, locals, &format!("{prefix}_z"));
+    let n = emit_expr(&args[1], ctx, locals, &format!("{prefix}_n"));
+    let ExprKind::Lambda { param, body, .. } = &args[2].kind else {
+        panic!("{callee} step must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        z.kind,
+    );
+    let z_owned = z.owned;
+    let z_kind = z.kind;
+    let z_elem = z.elem;
+    let z_value = z.value.clone();
+    let n_value = n.value.clone();
+    let mut code = z.code;
+    code.push_str(&n.code);
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    let zptr = if z_kind == Kind::Int || z_kind == Kind::Float {
+        box_numeric(&mut code, z_kind, &z_value, &format!("{prefix}_zb"))
+    } else {
+        z_value.clone()
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @{rt}(ptr {zptr}, i64 {n_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if z_kind == Kind::Int || z_kind == Kind::Float {
+        writeln!(code, "  call void @sz_release(ptr {zptr})").unwrap();
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(z_kind)
+    } else {
+        if z_owned && z_kind == Kind::Ptr {
+            writeln!(code, "  call void @sz_release(ptr {z_value})").unwrap();
+        }
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(z_elem)
+    }
+}
+
+fn emit_stream_unfold(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "Stream.unfold expects 2 args");
+    let z = emit_expr(&args[0], ctx, locals, &format!("{prefix}_z"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("Stream.unfold step must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        z.kind,
+    );
+    let z_owned = z.owned;
+    let z_kind = z.kind;
+    let z_value = z.value.clone();
+    let mut code = z.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    let zptr = if z_kind == Kind::Int || z_kind == Kind::Float {
+        box_numeric(&mut code, z_kind, &z_value, &format!("{prefix}_zb"))
+    } else {
+        z_value.clone()
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_stream_unfold(ptr {zptr}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if z_kind == Kind::Int || z_kind == Kind::Float {
+        writeln!(code, "  call void @sz_release(ptr {zptr})").unwrap();
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(z_kind)
+    } else if z_owned && z_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {z_value})").unwrap();
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+    } else {
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+    }
+}
+
 fn emit_io_foreach(
     callee: &str,
     args: &[Expr],
@@ -4537,6 +4755,73 @@ fn emit_stream_map(
         prefix,
         true,
     )
+}
+
+fn emit_stream_fold(
+    callee: &str,
+    rt: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+    as_io: bool,
+) -> Emitted {
+    assert!(args.len() == 3, "{callee} expects 3 args");
+    let xs = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let z = emit_expr(&args[1], ctx, locals, &format!("{prefix}_z"));
+    let ExprKind::Lambda { param, body, .. } = &args[2].kind else {
+        panic!("{callee} folder must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        Kind::Ptr,
+    );
+    let xs_owned = xs.owned;
+    let xs_kind = xs.kind;
+    let xs_value = xs.value.clone();
+    let z_owned = z.owned;
+    let z_kind = z.kind;
+    let z_elem = z.elem;
+    let z_value = z.value.clone();
+    let mut code = xs.code;
+    code.push_str(&z.code);
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    let zptr = if z_kind == Kind::Int || z_kind == Kind::Float {
+        box_numeric(&mut code, z_kind, &z_value, &format!("{prefix}_zb"))
+    } else {
+        z_value.clone()
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @{rt}(ptr {xs_value}, ptr {zptr}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if xs_owned && xs_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {xs_value})").unwrap();
+    }
+    if z_kind == Kind::Int || z_kind == Kind::Float {
+        writeln!(code, "  call void @sz_release(ptr {zptr})").unwrap();
+    } else if z_owned && z_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {z_value})").unwrap();
+    }
+    if as_io {
+        if z_kind == Kind::Int || z_kind == Kind::Float {
+            io_emitted_payload(code, format!("%{prefix}_v"), z_kind, true)
+        } else {
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true).with_elem(z_elem)
+        }
+    } else if z_kind == Kind::Int || z_kind == Kind::Float {
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(z_kind)
+    } else {
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(z_elem)
+    }
 }
 
 fn emit_ptr_map(
@@ -5359,7 +5644,10 @@ fn emit_call(
         ("Stream.takeWhile", "sz_stream_takewhile", false),
         ("Stream.dropWhile", "sz_stream_dropwhile", false),
         ("Stream.find", "sz_stream_find", false),
+        ("Stream.findLast", "sz_stream_find_last", false),
         ("Stream.exists", "sz_stream_exists", true),
+        ("Stream.forall", "sz_stream_forall", true),
+        ("Stream.none", "sz_stream_none", true),
         ("Map.filter", "sz_map_filter", false),
         ("Set.filter", "sz_set_filter", false),
     ];
@@ -5541,8 +5829,82 @@ fn emit_call(
     if callee == "Stream.filter" {
         return emit_stream_filter(args, ctx, locals, prefix);
     }
+    if callee == "Stream.filterNot" {
+        return emit_stream_pred(
+            "Stream.filterNot",
+            "sz_stream_filter_not",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
     if callee == "Stream.map" {
         return emit_stream_map(args, ctx, locals, prefix);
+    }
+    if callee == "Stream.flatMap" {
+        return emit_ptr_map(
+            "Stream.flatMap",
+            "sz_stream_flatmap",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
+    }
+    if callee == "Stream.mapConcat" {
+        return emit_ptr_map(
+            "Stream.mapConcat",
+            "sz_stream_map_concat",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
+    }
+    if callee == "Stream.evalTap" {
+        return emit_stream_evaltap(args, ctx, locals, prefix);
+    }
+    if callee == "Stream.scan" {
+        return emit_stream_fold(
+            "Stream.scan",
+            "sz_stream_scan",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "Stream.fold" {
+        return emit_stream_fold(
+            "Stream.fold",
+            "sz_stream_fold",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
+    }
+    if callee == "Stream.zipWith" {
+        return emit_stream_zip_with(args, ctx, locals, prefix);
+    }
+    if callee == "Stream.iterate" {
+        return emit_stream_iterate(
+            "Stream.iterate",
+            "sz_stream_iterate",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
+    }
+    if callee == "Stream.unfold" {
+        return emit_stream_unfold(args, ctx, locals, prefix);
     }
     if callee == "Net.serveOnce" {
         return emit_net_serve("sz_net_serve_once", args, ctx, locals, prefix);
@@ -7148,11 +7510,16 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[1]);
             owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
-        "Stream.take" | "Stream.drop" => {
-            let rt = if callee == "Stream.take" {
-                "sz_stream_take"
-            } else {
-                "sz_stream_drop"
+        "Stream.take" | "Stream.drop" | "Stream.repeatN" | "Stream.grouped" | "Stream.sliding"
+        | "Stream.takeRight" | "Stream.dropRight" => {
+            let rt = match callee {
+                "Stream.take" => "sz_stream_take",
+                "Stream.drop" => "sz_stream_drop",
+                "Stream.repeatN" => "sz_stream_repeat_n",
+                "Stream.sliding" => "sz_stream_sliding",
+                "Stream.takeRight" => "sz_stream_take_right",
+                "Stream.dropRight" => "sz_stream_drop_right",
+                _ => "sz_stream_grouped",
             };
             writeln!(
                 code,
@@ -7161,13 +7528,112 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            if callee == "Stream.grouped" || callee == "Stream.sliding" {
+                owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+            } else {
+                owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
+            }
+        }
+        "Stream.range" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_range(i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Int)
+        }
+        "Stream.zip" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_zip(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+        }
+        "Stream.orElse" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_or_else(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
-        "Stream.compileToList" | "Stream.drain" => {
-            let rt = if callee == "Stream.compileToList" {
-                "sz_stream_compile_to_list"
+        "Stream.zipAll" => {
+            let (pl, boxed_l) = as_cell_ptr(&mut code, &emitted_args[2], &format!("{prefix}_padl"));
+            let (pr, boxed_r) = as_cell_ptr(&mut code, &emitted_args[3], &format!("{prefix}_padr"));
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_zip_all(ptr {}, ptr {}, ptr {pl}, ptr {pr})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            if boxed_l {
+                writeln!(code, "  call void @sz_release(ptr {pl})").unwrap();
             } else {
-                "sz_stream_drain"
+                drop_owned_ptr(&mut code, &emitted_args[2]);
+            }
+            if boxed_r {
+                writeln!(code, "  call void @sz_release(ptr {pr})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[3]);
+            }
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+        }
+        "Stream.zipWithIndex" | "Stream.flatten" | "Stream.changes" => {
+            let rt = match callee {
+                "Stream.zipWithIndex" => "sz_stream_zip_with_index",
+                "Stream.flatten" => "sz_stream_flatten",
+                _ => "sz_stream_changes",
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            if callee == "Stream.zipWithIndex" {
+                owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+            } else {
+                owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
+            }
+        }
+        "Stream.intersperse" => {
+            let (ptr, boxed) = as_cell_ptr(&mut code, &emitted_args[1], &format!("{prefix}_sep"));
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_intersperse(ptr {}, ptr {ptr})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            if boxed {
+                writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            }
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
+        }
+        "Stream.compileToList"
+        | "Stream.drain"
+        | "Stream.head"
+        | "Stream.last"
+        | "Stream.count" => {
+            let rt = match callee {
+                "Stream.compileToList" => "sz_stream_compile_to_list",
+                "Stream.drain" => "sz_stream_drain",
+                "Stream.head" => "sz_stream_head",
+                "Stream.last" => "sz_stream_last",
+                _ => "sz_stream_count",
             };
             writeln!(
                 code,
@@ -7179,6 +7645,13 @@ fn emit_call(
             if callee == "Stream.compileToList" {
                 io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
                     .with_elem(emitted_args[0].elem)
+            } else if callee == "Stream.head" || callee == "Stream.last" {
+                let owned =
+                    emitted_args[0].elem != Kind::Int && emitted_args[0].elem != Kind::Float;
+                io_emitted_payload(code, format!("%{prefix}_v"), emitted_args[0].elem, owned)
+                    .with_elem(emitted_args[0].elem)
+            } else if callee == "Stream.count" {
+                io_emitted(code, format!("%{prefix}_v"), Kind::Int)
             } else {
                 io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
             }
@@ -7380,42 +7853,45 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Timeline.effectHas" => {
+        "Timeline.driveHas" | "Timeline.effectHas" | "Timeline.faultKindHas" => {
+            let rt = match callee {
+                "Timeline.driveHas" => "sz_timeline_drive_has",
+                "Timeline.effectHas" => "sz_timeline_effect_has",
+                _ => "sz_timeline_fault_kind_has",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_timeline_effect_has(ptr {}, i64 {}, ptr {})",
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, i64 {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Timeline.fiberReady" => {
+        "Timeline.effectCount"
+        | "Timeline.fiberLive"
+        | "Timeline.fiberReady"
+        | "Timeline.fiberParked"
+        | "Timeline.fiberDone"
+        | "Timeline.faultN"
+        | "Timeline.checkpoint"
+        | "Timeline.nearestCheckpoint" => {
+            let rt = match callee {
+                "Timeline.effectCount" => "sz_timeline_effect_count",
+                "Timeline.fiberLive" => "sz_timeline_fiber_live",
+                "Timeline.fiberReady" => "sz_timeline_fiber_ready",
+                "Timeline.fiberParked" => "sz_timeline_fiber_parked",
+                "Timeline.fiberDone" => "sz_timeline_fiber_done",
+                "Timeline.faultN" => "sz_timeline_fault_n",
+                "Timeline.nearestCheckpoint" => "sz_timeline_nearest_checkpoint",
+                _ => "sz_timeline_checkpoint",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_timeline_fiber_ready(ptr {}, i64 {})",
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Timeline.fiberParked" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call i64 @sz_timeline_fiber_parked(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Timeline.faultHas" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call i64 @sz_timeline_fault_has(ptr {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Verdict.ok" => {
@@ -12402,6 +12878,57 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
+    fn emit_stream_zip_releases_both() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.zip(Stream.emit("a"), Stream.emit("b")))
+    _ <- IO.println(Str.fromInt(List.len(xs)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_stream_zip(ptr ";
+        let at = ir.find(needle).expect("expected sz_stream_zip");
+        let rest = &ir[at + needle.len()..];
+        let a = rest.split(',').next().unwrap().trim();
+        let b = rest
+            .split("ptr ")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap()
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {a})")),
+            "expected last-use release of left stream {a} after Stream.zip:\n{ir}"
+        );
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {b})")),
+            "expected last-use release of right stream {b} after Stream.zip:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_stream_intersperse_releases_sep() {
+        let src = r#"
+@main def main: IO[Unit] =
+  Stream.drain(Stream.intersperse(Stream.emit("a"), "|"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_stream_intersperse(ptr ";
+        let at = ir.find(needle).expect("expected sz_stream_intersperse");
+        assert!(
+            ir[at..].contains("call void @sz_release(ptr "),
+            "expected last-use release after Stream.intersperse:\n{ir}"
+        );
+    }
+
+    #[test]
     fn emit_stream_exists_compile() {
         let src = r#"@main def main: IO[Unit] =
   for {
@@ -12414,6 +12941,188 @@ def scale(x: Float): Float = x * 2.0
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_stream_exists"));
         assert!(ir.contains("sz_pred_"));
+    }
+
+    #[test]
+    fn emit_stream_kit_range_zip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    ns <- Stream.compileToList(Stream.range(0, 3))
+    _ <- IO.println(Str.fromInt(List.head(ns)))
+    xs <- Stream.compileToList(Stream.repeatN(Stream.emit("x"), 2))
+    _ <- IO.println(List.join(xs, ","))
+    zs <- Stream.compileToList(Stream.zip(Stream.emit("a"), Stream.emit("b")))
+    _ <- IO.println(Str.fromInt(List.len(zs)))
+    iz <- Stream.compileToList(Stream.zipWithIndex(Stream.emit("a")))
+    _ <- IO.println(Str.fromInt(List.len(iz)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "sz_stream_range",
+            "sz_stream_repeat_n",
+            "sz_stream_zip",
+            "sz_stream_zip_with_index",
+        ] {
+            assert!(ir.contains(needle), "expected {needle}:\n{ir}");
+        }
+    }
+
+    #[test]
+    fn emit_stream_kit_shape() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    ins <- Stream.compileToList(Stream.intersperse(Stream.emits(["a", "b"]), "|"))
+    _ <- IO.println(List.join(ins, ","))
+    gs <- Stream.compileToList(Stream.grouped(Stream.emits(["a", "b", "c"]), 2))
+    _ <- IO.println(Str.fromInt(List.len(gs)))
+    nested = Stream.emits([ ["a", "b"], ["c"] ])
+    flat <- Stream.compileToList(Stream.flatten(nested))
+    _ <- IO.println(List.join(flat, ","))
+    ch <- Stream.compileToList(Stream.changes(Stream.emits(["a", "a", "b"])))
+    _ <- IO.println(List.join(ch, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "sz_stream_intersperse",
+            "sz_stream_grouped",
+            "sz_stream_flatten",
+            "sz_stream_changes",
+        ] {
+            assert!(ir.contains(needle), "expected {needle}:\n{ir}");
+        }
+    }
+
+    #[test]
+    fn emit_stream_kit_fold_flatmap() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    fm <- Stream.compileToList(Stream.flatMap(Stream.emits(["a", "b"]), x => Stream.emit(x)))
+    _ <- IO.println(List.join(fm, ","))
+    sc <- Stream.compileToList(Stream.scan(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x)))
+    _ <- IO.println(List.join(sc, ","))
+    folded <- Stream.fold(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x))
+    _ <- IO.println(folded)
+    all <- Stream.forall(Stream.emits(["a", "b"]), x => Str.len(x) > 0)
+    _ <- IO.println(if (all) "1" else "0")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "sz_stream_flatmap",
+            "sz_stream_scan",
+            "sz_stream_fold",
+            "sz_stream_forall",
+        ] {
+            assert!(ir.contains(needle), "expected {needle}:\n{ir}");
+        }
+    }
+
+    #[test]
+    fn emit_stream_kit_extra_shape() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    kept <- Stream.compileToList(Stream.filterNot(Stream.emits(["", "a"]), x => Str.len(x) == 0))
+    _ <- IO.println(List.join(kept, ","))
+    mc <- Stream.compileToList(Stream.mapConcat(Stream.emit("a"), x => [x]))
+    _ <- IO.println(List.join(mc, ","))
+    zw <- Stream.compileToList(Stream.zipWith(Stream.emit("a"), Stream.emit("1"), (a, b) => Str.concat(a, b)))
+    _ <- IO.println(List.join(zw, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "sz_stream_filter_not",
+            "sz_stream_map_concat",
+            "sz_stream_zip_with",
+        ] {
+            assert!(ir.contains(needle), "expected {needle}:\n{ir}");
+        }
+    }
+
+    #[test]
+    fn emit_stream_kit_gen_io() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    it <- Stream.compileToList(Stream.iterate(0, 3, n => n + 1))
+    _ <- IO.println(Str.fromInt(List.head(it)))
+    h <- Stream.head(Stream.emit("a"))
+    _ <- IO.println(h)
+    n <- Stream.count(Stream.emit("a"))
+    _ <- IO.println(Str.fromInt(n))
+    miss <- Stream.none(Stream.emit("a"), x => false)
+    _ <- IO.println(if (miss) "1" else "0")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "sz_stream_iterate",
+            "sz_stream_head",
+            "sz_stream_count",
+            "sz_stream_none",
+        ] {
+            assert!(ir.contains(needle), "expected {needle}:\n{ir}");
+        }
+    }
+
+    #[test]
+    fn emit_timeline_obs_queries() {
+        let mut p = parse(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x")
+"#,
+        )
+        .unwrap();
+        crate::verify::apply_verifies(
+            &mut p,
+            &[crate::verify::VerifySource {
+                label: "pkg/obs.scuzz_verify".into(),
+                text: concat!(
+                    "def obsOk(t: Timeline): Verdict =\n",
+                    "  Verdict.every(t, i => Timeline.driveHas(t, i, \"drive x\") && Timeline.effectHas(t, i, \"Clock\") && Timeline.faultKindHas(t, i, \"kind=none\") && Timeline.effectCount(t, i) >= 0 && Timeline.fiberLive(t, i) >= 0 && Timeline.fiberReady(t, i) >= 0 && Timeline.fiberParked(t, i) >= 0 && Timeline.fiberDone(t, i) >= 0 && Timeline.faultN(t, i) >= 0 && Timeline.checkpoint(t, i) >= 0 && Timeline.nearestCheckpoint(t, i) >= 0)\n",
+                )
+                .into(),
+                path: std::path::PathBuf::new(),
+            }],
+        )
+        .expect("verify");
+        crate::typ::inject_builtin_enums(&mut p.enums);
+        let p = crate::lower::lower_program(p);
+        let p = crate::typ::expand_impls(p).expect("impls");
+        let p = crate::typ::resolve_named_args(p).expect("named");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        let p = crate::typ::monomorphize(p).expect("mono");
+        let p = crate::typ::resolve_field_access(p).expect("fields after mono");
+        let ir = emit_llvm(&p);
+        for needle in [
+            "sz_timeline_drive_has",
+            "sz_timeline_effect_has",
+            "sz_timeline_fault_kind_has",
+            "sz_timeline_effect_count",
+            "sz_timeline_fiber_live",
+            "sz_timeline_fiber_ready",
+            "sz_timeline_fiber_parked",
+            "sz_timeline_fiber_done",
+            "sz_timeline_fault_n",
+            "sz_timeline_checkpoint",
+            "sz_timeline_nearest_checkpoint",
+        ] {
+            assert!(ir.contains(needle), "expected {needle}:\n{ir}");
+        }
     }
 
     #[test]
@@ -12662,7 +13371,7 @@ record Point(x: Int, y: Int)
                 label: "pkg/fs.scuzz_verify".into(),
                 text: concat!(
                     "def wrote(t: Timeline): Verdict =\n",
-                    "  Verdict.any(t, i => Timeline.effectHas(t, i, \"fs.write\") && Timeline.fiberParked(t, i) == 0 && Timeline.faultHas(t, i, \"kind=none\"))\n",
+                    "  Verdict.any(t, i => Timeline.effectHas(t, i, \"Fs.write\") && Timeline.fiberParked(t, i) == 0 && Timeline.faultKindHas(t, i, \"kind=none\"))\n",
                 )
                 .into(),
                 path: std::path::PathBuf::new(),
@@ -12682,7 +13391,7 @@ record Point(x: Int, y: Int)
         for needle in [
             "call i64 @sz_timeline_effect_has(ptr ",
             "call i64 @sz_timeline_fiber_parked(ptr ",
-            "call i64 @sz_timeline_fault_has(ptr ",
+            "call i64 @sz_timeline_fault_kind_has(ptr ",
         ] {
             assert!(ir.contains(needle), "expected `{needle}`:\n{ir}");
         }
@@ -12693,11 +13402,11 @@ record Point(x: Int, y: Int)
         let name = args.rsplit("ptr ").next().unwrap().trim();
         assert_release_after(&ir, at, name, "Timeline.effectHas needle");
         let at = ir
-            .find("call i64 @sz_timeline_fault_has(")
-            .expect("fault_has");
+            .find("call i64 @sz_timeline_fault_kind_has(")
+            .expect("fault_kind_has");
         let args = ir[at..].split(')').next().unwrap();
         let name = args.rsplit("ptr ").next().unwrap().trim();
-        assert_release_after(&ir, at, name, "Timeline.faultHas needle");
+        assert_release_after(&ir, at, name, "Timeline.faultKindHas needle");
     }
 
     #[test]
@@ -12967,6 +13676,55 @@ record Point(x: Int, y: Int)
 "#,
                 "call ptr @sz_stream_evalmap(",
                 "Stream.evalMap",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.flatMap(Stream.emit("a"), x => Stream.emit(x)))
+"#,
+                "call ptr @sz_stream_flatmap(",
+                "Stream.flatMap",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.scan(Stream.emit("a"), "", (acc, x) => Str.concat(acc, x)))
+"#,
+                "call ptr @sz_stream_scan(",
+                "Stream.scan",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.fold(Stream.emit("a"), "", (acc, x) => Str.concat(acc, x)).flatMap(_ => IO.pure(()))
+"#,
+                "call ptr @sz_stream_fold(",
+                "Stream.fold",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.forall(Stream.emit("a"), x => true).flatMap(_ => IO.pure(()))
+"#,
+                "call ptr @sz_stream_forall(",
+                "Stream.forall",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.filterNot(Stream.emit("a"), x => false))
+"#,
+                "call ptr @sz_stream_filter_not(",
+                "Stream.filterNot",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.mapConcat(Stream.emit("a"), x => [x]))
+"#,
+                "call ptr @sz_stream_map_concat(",
+                "Stream.mapConcat",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.evalTap(Stream.emit("a"), x => IO.println(x)))
+"#,
+                "call ptr @sz_stream_evaltap(",
+                "Stream.evalTap",
             ),
             (
                 r#"@main def main: IO[Unit] =

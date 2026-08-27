@@ -51,7 +51,7 @@ static uint64_t next_u64(void) {
 static void *random_next_thunk(void *env) {
   int64_t bound = sz_unbox_i64(env);
   int64_t n;
-  sz_effect_log("random.nextInt");
+  sz_timeline_log_cstr("Random.nextInt", "");
   if (bound <= 0)
     n = 0;
   else {

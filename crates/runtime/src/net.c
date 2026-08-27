@@ -1490,6 +1490,7 @@ static SzIo *get_after_dispatch(void *value, void *env) {
   SzIo *io;
   if ((intptr_t)value)
     return sz_testrt_net_http_get(url);
+  sz_timeline_log_cstr("Net.httpGet", url ? sz_string_cstr(url) : "");
   st = (GetSt *)sz_rc_alloc(sizeof(GetSt), SZ_RC_BOX);
   memset(st, 0, sizeof(GetSt));
   sz_retain(url);

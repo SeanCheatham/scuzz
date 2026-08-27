@@ -1163,8 +1163,24 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Timeline.lastHitHas(t: Timeline, i: Int, needle: String): Bool",
     ),
     (
+        "Timeline.driveHas",
+        "Timeline.driveHas(t: Timeline, i: Int, needle: String): Bool",
+    ),
+    (
         "Timeline.effectHas",
         "Timeline.effectHas(t: Timeline, i: Int, needle: String): Bool",
+    ),
+    (
+        "Timeline.faultKindHas",
+        "Timeline.faultKindHas(t: Timeline, i: Int, needle: String): Bool",
+    ),
+    (
+        "Timeline.effectCount",
+        "Timeline.effectCount(t: Timeline, i: Int): Int",
+    ),
+    (
+        "Timeline.fiberLive",
+        "Timeline.fiberLive(t: Timeline, i: Int): Int",
     ),
     (
         "Timeline.fiberReady",
@@ -1175,8 +1191,20 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Timeline.fiberParked(t: Timeline, i: Int): Int",
     ),
     (
-        "Timeline.faultHas",
-        "Timeline.faultHas(t: Timeline, i: Int, needle: String): Bool",
+        "Timeline.fiberDone",
+        "Timeline.fiberDone(t: Timeline, i: Int): Int",
+    ),
+    (
+        "Timeline.faultN",
+        "Timeline.faultN(t: Timeline, i: Int): Int",
+    ),
+    (
+        "Timeline.checkpoint",
+        "Timeline.checkpoint(t: Timeline, i: Int): Int",
+    ),
+    (
+        "Timeline.nearestCheckpoint",
+        "Timeline.nearestCheckpoint(t: Timeline, i: Int): Int",
     ),
     (
         "Timeline.forall",
@@ -1398,6 +1426,106 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Stream.exists",
         "Stream.exists(s: Stream[A], pred: A => Bool): IO[Bool]",
     ),
+    (
+        "Stream.forall",
+        "Stream.forall(s: Stream[A], pred: A => Bool): IO[Bool]",
+    ),
+    (
+        "Stream.range",
+        "Stream.range(from: Int, until: Int): Stream[Int]",
+    ),
+    (
+        "Stream.repeatN",
+        "Stream.repeatN(s: Stream[A], n: Int): Stream[A]",
+    ),
+    (
+        "Stream.zip",
+        "Stream.zip(a: Stream[A], b: Stream[B]): Stream[(A, B)]",
+    ),
+    (
+        "Stream.zipWithIndex",
+        "Stream.zipWithIndex(s: Stream[A]): Stream[(Int, A)]",
+    ),
+    (
+        "Stream.intersperse",
+        "Stream.intersperse(s: Stream[A], sep: A): Stream[A]",
+    ),
+    (
+        "Stream.grouped",
+        "Stream.grouped(s: Stream[A], n: Int): Stream[List[A]]",
+    ),
+    (
+        "Stream.flatten",
+        "Stream.flatten(s: Stream[List[A]]): Stream[A]",
+    ),
+    (
+        "Stream.flatMap",
+        "Stream.flatMap(s: Stream[A], f: A => Stream[B]): Stream[B]",
+    ),
+    (
+        "Stream.scan",
+        "Stream.scan(s: Stream[A], z: Z, f: (Z, A) => Z): Stream[Z]",
+    ),
+    (
+        "Stream.fold",
+        "Stream.fold(s: Stream[A], z: Z, f: (Z, A) => Z): IO[Z]",
+    ),
+    ("Stream.changes", "Stream.changes(s: Stream[A]): Stream[A]"),
+    (
+        "Stream.filterNot",
+        "Stream.filterNot(s: Stream[A], pred: A => Bool): Stream[A]",
+    ),
+    (
+        "Stream.mapConcat",
+        "Stream.mapConcat(s: Stream[A], f: A => List[B]): Stream[B]",
+    ),
+    (
+        "Stream.zipWith",
+        "Stream.zipWith(a: Stream[A], b: Stream[B], f: (A, B) => C): Stream[C]",
+    ),
+    (
+        "Stream.zipAll",
+        "Stream.zipAll(a: Stream[A], b: Stream[B], da: A, db: B): Stream[(A, B)]",
+    ),
+    (
+        "Stream.orElse",
+        "Stream.orElse(a: Stream[A], b: Stream[A]): Stream[A]",
+    ),
+    (
+        "Stream.sliding",
+        "Stream.sliding(s: Stream[A], n: Int): Stream[List[A]]",
+    ),
+    (
+        "Stream.takeRight",
+        "Stream.takeRight(s: Stream[A], n: Int): Stream[A]",
+    ),
+    (
+        "Stream.dropRight",
+        "Stream.dropRight(s: Stream[A], n: Int): Stream[A]",
+    ),
+    (
+        "Stream.findLast",
+        "Stream.findLast(s: Stream[A], pred: A => Bool): Stream[A]",
+    ),
+    (
+        "Stream.evalTap",
+        "Stream.evalTap(s: Stream[A], f: A => IO[Unit]): Stream[A]",
+    ),
+    (
+        "Stream.iterate",
+        "Stream.iterate(z: Z, n: Int, f: Z => Z): Stream[Z]",
+    ),
+    (
+        "Stream.unfold",
+        "Stream.unfold(z: Z, f: Z => List[(A, Z)]): Stream[A]",
+    ),
+    ("Stream.head", "Stream.head(s: Stream[A]): IO[A]"),
+    ("Stream.last", "Stream.last(s: Stream[A]): IO[A]"),
+    ("Stream.count", "Stream.count(s: Stream[A]): IO[Int]"),
+    (
+        "Stream.none",
+        "Stream.none(s: Stream[A], pred: A => Bool): IO[Bool]",
+    ),
     ("Stream.drain", "Stream.drain(s: Stream[A]): IO[Unit]"),
     (
         "Stream.compileToList",
@@ -1442,6 +1570,34 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Stream.dropWhile",
     "Stream.find",
     "Stream.exists",
+    "Stream.forall",
+    "Stream.range",
+    "Stream.repeatN",
+    "Stream.zip",
+    "Stream.zipWithIndex",
+    "Stream.intersperse",
+    "Stream.grouped",
+    "Stream.flatten",
+    "Stream.flatMap",
+    "Stream.scan",
+    "Stream.fold",
+    "Stream.changes",
+    "Stream.filterNot",
+    "Stream.mapConcat",
+    "Stream.zipWith",
+    "Stream.zipAll",
+    "Stream.orElse",
+    "Stream.sliding",
+    "Stream.takeRight",
+    "Stream.dropRight",
+    "Stream.findLast",
+    "Stream.evalTap",
+    "Stream.iterate",
+    "Stream.unfold",
+    "Stream.head",
+    "Stream.last",
+    "Stream.count",
+    "Stream.none",
     "Stream.drain",
     "View.bindText",
     "View.sized",
@@ -1896,6 +2052,82 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             (
                 "Stream.exists",
                 "Stream.exists(Stream.emit(\"a\"), s => true)",
+            ),
+            (
+                "Stream.forall",
+                "Stream.forall(Stream.emit(\"a\"), s => true)",
+            ),
+            ("Stream.range", "Stream.range(0, 3)"),
+            ("Stream.repeatN", "Stream.repeatN(Stream.emit(\"a\"), 2)"),
+            (
+                "Stream.zip",
+                "Stream.zip(Stream.emit(\"a\"), Stream.emit(\"b\"))",
+            ),
+            (
+                "Stream.zipWithIndex",
+                "Stream.zipWithIndex(Stream.emit(\"a\"))",
+            ),
+            (
+                "Stream.intersperse",
+                "Stream.intersperse(Stream.emit(\"a\"), \"|\")",
+            ),
+            ("Stream.grouped", "Stream.grouped(Stream.emit(\"a\"), 1)"),
+            ("Stream.flatten", "Stream.flatten(Stream.emit([\"a\"]))"),
+            (
+                "Stream.flatMap",
+                "Stream.flatMap(Stream.emit(\"a\"), s => Stream.emit(s))",
+            ),
+            (
+                "Stream.scan",
+                "Stream.scan(Stream.emit(\"a\"), \"\", (acc, s) => Str.concat(acc, s))",
+            ),
+            (
+                "Stream.fold",
+                "Stream.fold(Stream.emit(\"a\"), \"\", (acc, s) => Str.concat(acc, s))",
+            ),
+            ("Stream.changes", "Stream.changes(Stream.emit(\"a\"))"),
+            (
+                "Stream.filterNot",
+                "Stream.filterNot(Stream.emit(\"a\"), s => false)",
+            ),
+            (
+                "Stream.mapConcat",
+                "Stream.mapConcat(Stream.emit(\"a\"), s => [s])",
+            ),
+            (
+                "Stream.zipWith",
+                "Stream.zipWith(Stream.emit(\"a\"), Stream.emit(\"b\"), (a, b) => Str.concat(a, b))",
+            ),
+            (
+                "Stream.zipAll",
+                "Stream.zipAll(Stream.emit(\"a\"), Stream.emit(\"b\"), \"x\", \"y\")",
+            ),
+            (
+                "Stream.orElse",
+                "Stream.orElse(Stream.emit(\"a\"), Stream.emit(\"b\"))",
+            ),
+            ("Stream.sliding", "Stream.sliding(Stream.emit(\"a\"), 1)"),
+            ("Stream.takeRight", "Stream.takeRight(Stream.emit(\"a\"), 1)"),
+            ("Stream.dropRight", "Stream.dropRight(Stream.emit(\"a\"), 0)"),
+            (
+                "Stream.findLast",
+                "Stream.findLast(Stream.emit(\"a\"), s => true)",
+            ),
+            (
+                "Stream.evalTap",
+                "Stream.evalTap(Stream.emit(\"a\"), s => IO.println(s))",
+            ),
+            ("Stream.iterate", "Stream.iterate(0, 3, n => n + 1)"),
+            (
+                "Stream.unfold",
+                "Stream.unfold(0, n => if (n < 1) [(n, n + 1)] else [])",
+            ),
+            ("Stream.head", "Stream.head(Stream.emit(\"a\"))"),
+            ("Stream.last", "Stream.last(Stream.emit(\"a\"))"),
+            ("Stream.count", "Stream.count(Stream.emit(\"a\"))"),
+            (
+                "Stream.none",
+                "Stream.none(Stream.emit(\"a\"), s => false)",
             ),
             ("Stream.drain", "Stream.drain(Stream.emit(\"a\"))"),
         ];

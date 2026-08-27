@@ -2267,6 +2267,7 @@ fn rewrite_require(
 }
 
 /// Kit lambdas bind a known item type. Bare lambdas (`View.button` tap) stay Opaque.
+#[inline(never)]
 pub(crate) fn kit_lambda_param_ty_at(
     callee: &str,
     arg_i: usize,
@@ -2330,12 +2331,32 @@ pub(crate) fn kit_lambda_param_ty_at(
             Some(Type::Tuple(vec![elem.clone(), elem]))
         }
         (
-            "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
-            | "Stream.find" | "Stream.exists" | "Stream.evalMap",
+            "Stream.filter" | "Stream.filterNot" | "Stream.map" | "Stream.takeWhile"
+            | "Stream.dropWhile" | "Stream.find" | "Stream.findLast" | "Stream.exists"
+            | "Stream.evalMap" | "Stream.forall" | "Stream.none" | "Stream.flatMap"
+            | "Stream.mapConcat" | "Stream.evalTap",
             1,
         ) => prior
             .first()
             .and_then(|t| handle_payload_ty(t, "Stream").ok()),
+        ("Stream.scan" | "Stream.fold", 2) => {
+            let elem = prior
+                .first()
+                .and_then(|t| handle_payload_ty(t, "Stream").ok())?;
+            let z = prior.get(1)?.clone();
+            Some(Type::Tuple(vec![z, elem]))
+        }
+        ("Stream.zipWith", 2) => {
+            let a = prior
+                .first()
+                .and_then(|t| handle_payload_ty(t, "Stream").ok())?;
+            let b = prior
+                .get(1)
+                .and_then(|t| handle_payload_ty(t, "Stream").ok())?;
+            Some(Type::Tuple(vec![a, b]))
+        }
+        ("Stream.iterate", 2) => prior.first().cloned(),
+        ("Stream.unfold", 1) => prior.first().cloned(),
         ("Resource.make", 1) => prior.first().and_then(|t| match t {
             Type::Io(inner) => Some((**inner).clone()),
             _ => None,
@@ -2391,6 +2412,7 @@ fn user_fun_param_ty(
     }
 }
 
+#[inline(never)]
 fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
     match (callee, arg_i) {
         ("Ui.run", 0) => Some(Type::Opaque("View".into())),
@@ -2414,10 +2436,14 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "List.prefixLength"
             | "List.segmentLength"
             | "Stream.filter"
+            | "Stream.filterNot"
             | "Stream.takeWhile"
             | "Stream.dropWhile"
             | "Stream.find"
+            | "Stream.findLast"
             | "Stream.exists"
+            | "Stream.forall"
+            | "Stream.none"
             | "Map.filter"
             | "Map.exists"
             | "Map.forall"
@@ -2431,8 +2457,10 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             1,
         ) => Some(Type::Bool),
         ("List.sortBy" | "List.maxBy" | "List.minBy", 1) => Some(Type::Int),
+        ("Stream.flatMap", 1) => Some(handle_ty("Stream", Type::Opaque("Elem".into()))),
+        ("Stream.mapConcat", 1) => Some(list_of(Type::Opaque("Elem".into()))),
         (
-            "Stream.evalMap" | "Resource.make" | "Resource.use" | "IO.foreach"
+            "Stream.evalMap" | "Stream.evalTap" | "Resource.make" | "Resource.use" | "IO.foreach"
             | "IO.foreachDiscard",
             1,
         ) => Some(Type::Io(Box::new(Type::Opaque("Elem".into())))),
@@ -2445,6 +2473,7 @@ fn kit_ret_label(ty: &Type) -> &'static str {
     match ty {
         Type::Opaque(n) if n == "View" => "View",
         Type::List(_) => "List[_]",
+        Type::App(n, _) if n == "Stream" => "Stream[_]",
         Type::String => "String",
         Type::Bool => "Bool",
         Type::Int => "Int",
@@ -2458,6 +2487,7 @@ fn kit_lambda_body_ok(got: &Type, want: &Type) -> bool {
     match want {
         Type::Opaque(n) if n == "View" => matches!(got, Type::Opaque(g) if g == "View"),
         Type::List(_) => matches!(got, Type::List(_)),
+        Type::App(n, _) if n == "Stream" => matches!(got, Type::App(g, _) if g == "Stream"),
         Type::String => matches!(got, Type::String | Type::Int | Type::Float),
         Type::Bool => matches!(got, Type::Bool),
         Type::Int => matches!(got, Type::Int),
@@ -3968,6 +3998,325 @@ fn applied_enum(enums: &EnumIndex<'_>, name: &str, args: Vec<Type>) -> Type {
     }
 }
 
+#[inline(never)]
+fn infer_stream_call(callee: &str, arg_tys: &[Type]) -> Result<Type, TypeError> {
+    match callee {
+        "Stream.emit" => {
+            expect_arity(callee, arg_tys, 1)?;
+            Ok(handle_ty("Stream", arg_tys[0].clone()))
+        }
+        "Stream.emits" => {
+            expect_arity(callee, arg_tys, 1)?;
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.eval" => {
+            expect_arity(callee, arg_tys, 1)?;
+            let Type::Io(inner) = &arg_tys[0] else {
+                return Err(TypeError::Msg("Stream.eval argument must be IO[_]".into()));
+            };
+            Ok(handle_ty("Stream", (**inner).clone()))
+        }
+        "Stream.concat" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let a = handle_payload_ty(&arg_tys[0], "Stream")?;
+            let b = handle_payload_ty(&arg_tys[1], "Stream")?;
+            let elem = prefer_named(&a, &b, "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.take" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.drop" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.evalMap" => {
+            expect_arity(callee, arg_tys, 2)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => match ret.as_ref() {
+                    Type::Io(inner) => (**inner).clone(),
+                    other => {
+                        return Err(TypeError::Msg(format!(
+                            "Stream.evalMap lambda must return IO[_], got {other:?}"
+                        )));
+                    }
+                },
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => {
+                    return Err(TypeError::Msg(format!(
+                        "Stream.evalMap callback must be a lambda, got {other:?}"
+                    )));
+                }
+            };
+            Ok(handle_ty("Stream", out))
+        }
+        "Stream.filter" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.map" => {
+            expect_arity(callee, arg_tys, 2)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => other.clone(),
+            };
+            Ok(handle_ty("Stream", out))
+        }
+        "Stream.takeWhile" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.dropWhile" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.find" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.exists" => {
+            expect_arity(callee, arg_tys, 2)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(Type::Bool)))
+        }
+        "Stream.forall" => {
+            expect_arity(callee, arg_tys, 2)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(Type::Bool)))
+        }
+        "Stream.range" => {
+            expect_arity(callee, arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(handle_ty("Stream", Type::Int))
+        }
+        "Stream.repeatN" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.zip" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let a = handle_payload_ty(&arg_tys[0], "Stream")?;
+            let b = handle_payload_ty(&arg_tys[1], "Stream")?;
+            Ok(handle_ty("Stream", Type::Tuple(vec![a, b])))
+        }
+        "Stream.zipWithIndex" => {
+            expect_arity(callee, arg_tys, 1)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", Type::Tuple(vec![Type::Int, elem])))
+        }
+        "Stream.intersperse" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty(
+                "Stream",
+                prefer_named(&elem, &arg_tys[1], "Stream")?,
+            ))
+        }
+        "Stream.grouped" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(handle_ty("Stream", list_of(elem)))
+        }
+        "Stream.flatten" => {
+            expect_arity(callee, arg_tys, 1)?;
+            let inner = handle_payload_ty(&arg_tys[0], "Stream")?;
+            let elem = list_elem(&inner)?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.flatMap" => {
+            expect_arity(callee, arg_tys, 2)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => handle_payload_ty(ret, "Stream")?,
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => {
+                    return Err(TypeError::Msg(format!(
+                        "Stream.flatMap lambda must return Stream[_], got {other:?}"
+                    )));
+                }
+            };
+            Ok(handle_ty("Stream", out))
+        }
+        "Stream.scan" => {
+            expect_arity(callee, arg_tys, 3)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let ret = match &arg_tys[2] {
+                Type::Fun(_, r) => (**r).clone(),
+                other => other.clone(),
+            };
+            Ok(handle_ty(
+                "Stream",
+                prefer_named(&arg_tys[1], &ret, "scan accumulator")?,
+            ))
+        }
+        "Stream.fold" => {
+            expect_arity(callee, arg_tys, 3)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let ret = match &arg_tys[2] {
+                Type::Fun(_, r) => (**r).clone(),
+                other => other.clone(),
+            };
+            Ok(Type::Io(Box::new(prefer_named(
+                &arg_tys[1],
+                &ret,
+                "fold accumulator",
+            )?)))
+        }
+        "Stream.changes" => {
+            expect_arity(callee, arg_tys, 1)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.filterNot" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.mapConcat" => {
+            expect_arity(callee, arg_tys, 2)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => list_elem(ret)?,
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => {
+                    return Err(TypeError::Msg(format!(
+                        "Stream.mapConcat lambda must return List[_], got {other:?}"
+                    )));
+                }
+            };
+            Ok(handle_ty("Stream", out))
+        }
+        "Stream.zipWith" => {
+            expect_arity(callee, arg_tys, 3)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            handle_payload_ty(&arg_tys[1], "Stream")?;
+            let out = match &arg_tys[2] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => other.clone(),
+            };
+            Ok(handle_ty("Stream", out))
+        }
+        "Stream.zipAll" => {
+            expect_arity(callee, arg_tys, 4)?;
+            let a = handle_payload_ty(&arg_tys[0], "Stream")?;
+            let b = handle_payload_ty(&arg_tys[1], "Stream")?;
+            Ok(handle_ty(
+                "Stream",
+                Type::Tuple(vec![
+                    prefer_named(&a, &arg_tys[2], "Stream")?,
+                    prefer_named(&b, &arg_tys[3], "Stream")?,
+                ]),
+            ))
+        }
+        "Stream.orElse" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let a = handle_payload_ty(&arg_tys[0], "Stream")?;
+            let b = handle_payload_ty(&arg_tys[1], "Stream")?;
+            Ok(handle_ty("Stream", prefer_named(&a, &b, "Stream")?))
+        }
+        "Stream.sliding" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(handle_ty("Stream", list_of(elem)))
+        }
+        "Stream.takeRight" | "Stream.dropRight" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.findLast" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.evalTap" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
+        }
+        "Stream.iterate" => {
+            expect_arity(callee, arg_tys, 3)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            let ret = match &arg_tys[2] {
+                Type::Fun(_, r) => (**r).clone(),
+                other => other.clone(),
+            };
+            Ok(handle_ty(
+                "Stream",
+                prefer_named(&arg_tys[0], &ret, "iterate seed")?,
+            ))
+        }
+        "Stream.unfold" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => match list_elem(ret) {
+                    Ok(Type::Tuple(ts)) if ts.len() == 2 => ts[0].clone(),
+                    Ok(other) => {
+                        return Err(TypeError::Msg(format!(
+                            "Stream.unfold lambda must return List[(A, Z)], got List of {other:?}"
+                        )));
+                    }
+                    Err(e) => return Err(e),
+                },
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => {
+                    return Err(TypeError::Msg(format!(
+                        "Stream.unfold lambda must return List[(A, Z)], got {other:?}"
+                    )));
+                }
+            };
+            Ok(handle_ty("Stream", out))
+        }
+        "Stream.head" | "Stream.last" => {
+            expect_arity(callee, arg_tys, 1)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(elem)))
+        }
+        "Stream.count" => {
+            expect_arity(callee, arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(Type::Int)))
+        }
+        "Stream.none" => {
+            expect_arity(callee, arg_tys, 2)?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(Type::Bool)))
+        }
+        "Stream.compileToList" => {
+            expect_arity(callee, arg_tys, 1)?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(list_of(elem))))
+        }
+        "Stream.drain" => {
+            expect_arity(callee, arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        _ => Err(TypeError::Msg(format!("unknown function {callee}"))),
+    }
+}
+
+#[inline(never)]
 fn infer_call(
     callee: &str,
     args: &[Expr],
@@ -4013,6 +4362,9 @@ fn infer_call(
                 infer(a, enums, funs, methods, current_module, env)?
             },
         );
+    }
+    if callee.starts_with("Stream.") {
+        return infer_stream_call(callee, &arg_tys);
     }
     match callee {
         "Str.concat" => {
@@ -5029,107 +5381,6 @@ fn infer_call(
             };
             Ok(Type::Io(inner.clone()))
         }
-        "Stream.emit" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(handle_ty("Stream", arg_tys[0].clone()))
-        }
-        "Stream.emits" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            let elem = list_elem(&arg_tys[0])?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.eval" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            let Type::Io(inner) = &arg_tys[0] else {
-                return Err(TypeError::Msg("Stream.eval argument must be IO[_]".into()));
-            };
-            Ok(handle_ty("Stream", (**inner).clone()))
-        }
-        "Stream.concat" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            let a = handle_payload_ty(&arg_tys[0], "Stream")?;
-            let b = handle_payload_ty(&arg_tys[1], "Stream")?;
-            let elem = prefer_named(&a, &b, "Stream")?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.take" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.drop" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.evalMap" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            handle_payload_ty(&arg_tys[0], "Stream")?;
-            let out = match &arg_tys[1] {
-                Type::Fun(_, ret) => match ret.as_ref() {
-                    Type::Io(inner) => (**inner).clone(),
-                    other => {
-                        return Err(TypeError::Msg(format!(
-                            "Stream.evalMap lambda must return IO[_], got {other:?}"
-                        )));
-                    }
-                },
-                Type::Opaque(_) => Type::Opaque("Elem".into()),
-                other => {
-                    return Err(TypeError::Msg(format!(
-                        "Stream.evalMap callback must be a lambda, got {other:?}"
-                    )));
-                }
-            };
-            Ok(handle_ty("Stream", out))
-        }
-        "Stream.filter" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.map" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            handle_payload_ty(&arg_tys[0], "Stream")?;
-            let out = match &arg_tys[1] {
-                Type::Fun(_, ret) => (**ret).clone(),
-                Type::Opaque(_) => Type::Opaque("Elem".into()),
-                other => other.clone(),
-            };
-            Ok(handle_ty("Stream", out))
-        }
-        "Stream.takeWhile" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.dropWhile" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.find" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", elem))
-        }
-        "Stream.exists" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            handle_payload_ty(&arg_tys[0], "Stream")?;
-            Ok(Type::Io(Box::new(Type::Bool)))
-        }
-        "Stream.compileToList" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
-            Ok(Type::Io(Box::new(list_of(elem))))
-        }
-        "Stream.drain" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(Type::Io(Box::new(Type::Unit)))
-        }
         "Signal.int" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -5255,25 +5506,25 @@ fn infer_call(
             expect_ty(&arg_tys[2], &Type::String)?;
             Ok(Type::Bool)
         }
-        "Timeline.effectHas" => {
+        "Timeline.driveHas" | "Timeline.effectHas" | "Timeline.faultKindHas" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             expect_ty(&arg_tys[2], &Type::String)?;
             Ok(Type::Bool)
         }
-        "Timeline.fiberReady" | "Timeline.fiberParked" => {
+        "Timeline.effectCount"
+        | "Timeline.fiberLive"
+        | "Timeline.fiberReady"
+        | "Timeline.fiberParked"
+        | "Timeline.fiberDone"
+        | "Timeline.faultN"
+        | "Timeline.checkpoint"
+        | "Timeline.nearestCheckpoint" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Int)
-        }
-        "Timeline.faultHas" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::Opaque("Timeline".into()))?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            expect_ty(&arg_tys[2], &Type::String)?;
-            Ok(Type::Bool)
         }
         "Timeline.forall" | "Timeline.exists" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -13334,6 +13585,131 @@ def scale(x: Float): Float = x * 2.0
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream.exists should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_kit_range_zip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    ns <- Stream.compileToList(Stream.range(0, 3))
+    _ <- IO.println(Str.fromInt(List.head(ns)))
+    xs <- Stream.compileToList(Stream.repeatN(Stream.emit("x"), 2))
+    _ <- IO.println(List.join(xs, ","))
+    zs <- Stream.compileToList(Stream.zip(Stream.emit("a"), Stream.emit("b")))
+    _ <- IO.println(Str.fromInt(List.len(zs)))
+    iz <- Stream.compileToList(Stream.zipWithIndex(Stream.emit("a")))
+    _ <- IO.println(Str.fromInt(List.len(iz)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream range/zip should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_kit_shape() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    ins <- Stream.compileToList(Stream.intersperse(Stream.emits(["a", "b"]), "|"))
+    _ <- IO.println(List.join(ins, ","))
+    gs <- Stream.compileToList(Stream.grouped(Stream.emits(["a", "b", "c"]), 2))
+    _ <- IO.println(Str.fromInt(List.len(gs)))
+    nested = Stream.emits([ ["a", "b"], ["c"] ])
+    flat <- Stream.compileToList(Stream.flatten(nested))
+    _ <- IO.println(List.join(flat, ","))
+    ch <- Stream.compileToList(Stream.changes(Stream.emits(["a", "a", "b"])))
+    _ <- IO.println(List.join(ch, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream shape combinators should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_kit_fold_flatmap() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    fm <- Stream.compileToList(Stream.flatMap(Stream.emits(["a", "b"]), x => Stream.emit(x)))
+    _ <- IO.println(List.join(fm, ","))
+    sc <- Stream.compileToList(Stream.scan(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x)))
+    _ <- IO.println(List.join(sc, ","))
+    folded <- Stream.fold(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x))
+    _ <- IO.println(folded)
+    nfold <- Stream.fold(Stream.emits([1, 2]), 0, (acc, n) => acc + n)
+    _ <- IO.println(Str.fromInt(nfold))
+    all <- Stream.forall(Stream.emits(["a", "b"]), x => Str.len(x) > 0)
+    _ <- IO.println(if (all) "1" else "0")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream fold/flatMap should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_kit_extra_shape() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    kept <- Stream.compileToList(Stream.filterNot(Stream.emits(["", "a"]), x => Str.len(x) == 0))
+    _ <- IO.println(List.join(kept, ","))
+    mc <- Stream.compileToList(Stream.mapConcat(Stream.emits(["a"]), x => [x, x]))
+    _ <- IO.println(List.join(mc, ","))
+    zw <- Stream.compileToList(Stream.zipWith(Stream.emits(["a"]), Stream.emits(["1"]), (a, b) => Str.concat(a, b)))
+    _ <- IO.println(List.join(zw, ","))
+    za <- Stream.compileToList(Stream.zipAll(Stream.emit("a"), Stream.emits(["1", "2"]), "x", "y"))
+    _ <- IO.println(Str.fromInt(List.len(za)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream extra shape should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_kit_windows_or_else() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    sl <- Stream.compileToList(Stream.sliding(Stream.emits(["a", "b", "c"]), 2))
+    _ <- IO.println(Str.fromInt(List.len(sl)))
+    tr <- Stream.compileToList(Stream.takeRight(Stream.emits(["a", "b", "c"]), 2))
+    _ <- IO.println(List.join(tr, ","))
+    dr <- Stream.compileToList(Stream.dropRight(Stream.emits(["a", "b", "c"]), 1))
+    _ <- IO.println(List.join(dr, ","))
+    oe <- Stream.compileToList(Stream.orElse(Stream.emit("a"), Stream.emit("z")))
+    _ <- IO.println(List.join(oe, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream windows/orElse should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_kit_gen_io() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    it <- Stream.compileToList(Stream.iterate(0, 3, n => n + 1))
+    _ <- IO.println(Str.fromInt(List.head(it)))
+    un <- Stream.compileToList(Stream.unfold(0, n => if (n < 3) [(n, n + 1)] else []))
+    _ <- IO.println(Str.fromInt(List.len(un)))
+    h <- Stream.head(Stream.emit("a"))
+    _ <- IO.println(h)
+    n <- Stream.count(Stream.emits(["a", "b"]))
+    _ <- IO.println(Str.fromInt(n))
+    miss <- Stream.none(Stream.emits(["", ""]), x => Str.len(x) > 0)
+    _ <- IO.println(if (miss) "1" else "0")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream generate/IO should typecheck");
+    }
+
+    #[test]
+    fn typechecks_timeline_obs_queries() {
+        let src = r#"
+def obsOk(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.driveHas(t, i, "drive x") && Timeline.effectHas(t, i, "Clock") && Timeline.faultKindHas(t, i, "kind=none") && Timeline.effectCount(t, i) >= 0 && Timeline.fiberLive(t, i) >= 0 && Timeline.fiberReady(t, i) >= 0 && Timeline.fiberParked(t, i) >= 0 && Timeline.fiberDone(t, i) >= 0 && Timeline.faultN(t, i) >= 0 && Timeline.checkpoint(t, i) >= 0 && Timeline.nearestCheckpoint(t, i) >= 0)
+@main def main: IO[Unit] =
+  IO.println("ok")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Timeline observation queries should typecheck");
     }
 
     #[test]

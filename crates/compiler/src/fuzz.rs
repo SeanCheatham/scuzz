@@ -1355,6 +1355,9 @@ fn claim_needles(program: &Program) -> Vec<String> {
         };
         let lit = if callee == "Timeline.a11yHas"
             || callee == "Timeline.lastHitHas"
+            || callee == "Timeline.driveHas"
+            || callee == "Timeline.effectHas"
+            || callee == "Timeline.faultKindHas"
             || callee == "Property.sometimes"
         {
             lit_arg(args, if callee == "Property.sometimes" { 0 } else { 2 })
@@ -1418,9 +1421,13 @@ fn claimed_field_from_callee(callee: &str) -> Option<&'static str> {
         | "Property.signalListAt" => Some("signals"),
         "Timeline.a11yHas" | "Property.a11yHas" => Some("a11y"),
         "Timeline.lastHitHas" | "Property.lastHitHas" => Some("last_hit"),
-        "Timeline.effectHas" => Some("effects"),
-        "Timeline.fiberReady" | "Timeline.fiberParked" => Some("fibers"),
-        "Timeline.faultHas" => Some("fault"),
+        "Timeline.driveHas" => Some("drive"),
+        "Timeline.effectHas" | "Timeline.effectCount" => Some("effects"),
+        "Timeline.fiberLive"
+        | "Timeline.fiberReady"
+        | "Timeline.fiberParked"
+        | "Timeline.fiberDone" => Some("fibers"),
+        "Timeline.faultKindHas" | "Timeline.faultN" => Some("fault"),
         _ => None,
     }
 }
@@ -1532,11 +1539,14 @@ fn section_field(body: &str, name: &str) -> String {
     rest[..end].to_string()
 }
 
-/// Timeline dump format version written by the runtime (`# timeline v=1 n=<n>`).
-const TIMELINE_DUMP_VERSION: u32 = 1;
+/// Timeline dump format versions the compiler accepts.
+/// The runtime writes `# timeline v=2 n=<n>`. Loaders also accept v=1.
+const TIMELINE_DUMP_VERSION: u32 = 2;
+const TIMELINE_DUMP_VERSION_MIN: u32 = 1;
 
-/// Hard-error unless `text` carries a `# timeline v=<TIMELINE_DUMP_VERSION>` header.
-/// Empty text is the missing-dump sentinel in paired comparisons and passes.
+/// Hard-error unless `text` carries a `# timeline v=<n>` header in the
+/// accepted range. Empty text is the missing-dump sentinel in paired
+/// comparisons and passes.
 fn check_timeline_header(text: &str) {
     if text.is_empty() {
         return;
@@ -1546,10 +1556,11 @@ fn check_timeline_header(text: &str) {
         .strip_prefix("# timeline ")
         .and_then(|rest| rest.split_whitespace().find_map(|f| f.strip_prefix("v=")))
         .and_then(|v| v.parse::<u32>().ok());
-    if version != Some(TIMELINE_DUMP_VERSION) {
-        panic!(
-            "unsupported timeline dump version: expected `# timeline v={TIMELINE_DUMP_VERSION} n=<n>` header, got `{first}`"
-        );
+    match version {
+        Some(v) if (TIMELINE_DUMP_VERSION_MIN..=TIMELINE_DUMP_VERSION).contains(&v) => {}
+        _ => panic!(
+            "unsupported timeline dump version: expected `# timeline v={TIMELINE_DUMP_VERSION_MIN}..{TIMELINE_DUMP_VERSION} n=<n>` header, got `{first}`"
+        ),
     }
 }
 
@@ -2486,11 +2497,28 @@ def countOk(t: Timeline): Verdict =
     }
 
     #[test]
+    fn claimed_state_fields_from_obs_kit() {
+        let p = parse(
+            r#"
+def obsOk(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.driveHas(t, i, "drive x") && Timeline.effectCount(t, i) >= 0 && Timeline.fiberLive(t, i) >= 0 && Timeline.faultN(t, i) >= 0)
+@main def main: IO[Unit] =
+  IO.println("ok")
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            claimed_state_fields_text(&p),
+            "drive\neffects\nfibers\nfault\n"
+        );
+    }
+
+    #[test]
     fn claimed_state_fields_from_effect_fiber_fault() {
         let p = parse(
             r#"
 def wrote(t: Timeline): Verdict =
-  Verdict.any(t, i => Timeline.effectHas(t, i, "fs.write") && Timeline.fiberParked(t, i) == 0 && Timeline.faultHas(t, i, "kind=none"))
+  Verdict.any(t, i => Timeline.effectHas(t, i, "Fs.write") && Timeline.fiberParked(t, i) == 0 && Timeline.faultKindHas(t, i, "kind=none"))
 @main def main: IO[Unit] =
   IO.println("ok")
 "#,
@@ -2585,7 +2613,7 @@ def wrote(t: Timeline): Verdict =
     #[test]
     #[should_panic(expected = "unsupported timeline dump version")]
     fn rejects_wrong_timeline_dump_version() {
-        let bad = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]).replacen("v=1", "v=2", 1);
+        let bad = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]).replacen("v=1", "v=3", 1);
         let good = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]);
         timeline_changed_fields(&bad, &good);
     }
@@ -2603,5 +2631,131 @@ def wrote(t: Timeline): Verdict =
         let class = classify_replay(&[base], &[mutant], &["signals".into()]).unwrap();
         assert_eq!(class.0, SurvivorKind::Missing);
         assert_eq!(class.1, vec!["last_hit".to_string()]);
+    }
+
+    fn tl_dump_v2(states: &[(&str, &str, &str, &str, &str, &str, &str)]) -> String {
+        let mut s = format!("# timeline v=2 n={}\n", states.len());
+        for (i, (hit, drive, sig, a11y, effects, fibers, fault)) in states.iter().enumerate() {
+            s.push_str(&format!(
+                "--- {i}\nlast_hit:\n{hit}\ndrive:\n{drive}\nsignals:\n{sig}"
+            ));
+            if !sig.is_empty() && !sig.ends_with('\n') {
+                s.push('\n');
+            }
+            s.push_str("a11y:\n");
+            s.push_str(a11y);
+            if !a11y.is_empty() && !a11y.ends_with('\n') {
+                s.push('\n');
+            }
+            s.push_str("effects:\n");
+            s.push_str(effects);
+            if !effects.is_empty() && !effects.ends_with('\n') {
+                s.push('\n');
+            }
+            s.push_str(&format!("fibers:\n{fibers}\nfault:\n{fault}"));
+            if !fault.is_empty() && !fault.ends_with('\n') {
+                s.push('\n');
+            }
+        }
+        s
+    }
+
+    #[test]
+    fn accepts_v1_and_v2_timeline_dumps() {
+        let v1 = tl_dump(&[("", "", "int[0] = 0\n", "button:+1")]);
+        let v2 = tl_dump_v2(&[(
+            "",
+            "",
+            "int[0] = 0\n",
+            "button:+1",
+            "Clock.monotonic bytes=0 hash=0000000000000000\n",
+            "live=1 ready=1 parked=0 done=0",
+            "kind=none n=0 mode=fail seed=0",
+        )]);
+        assert!(timeline_changed_fields(&v1, &v1).is_empty());
+        assert!(timeline_changed_fields(&v2, &v2).is_empty());
+        let dumps = [v2.clone()];
+        assert_eq!(classify_replay(&dumps, &dumps, &["effects".into()]), None);
+    }
+
+    #[test]
+    fn survivor_missing_when_effects_change() {
+        let base = tl_dump_v2(&[(
+            "",
+            "",
+            "int[0] = 0\n",
+            "button:+1",
+            "Clock.monotonic bytes=0 hash=0000000000000000\n",
+            "live=1 ready=1 parked=0 done=0",
+            "kind=none n=0 mode=fail seed=0",
+        )]);
+        let mutant = tl_dump_v2(&[(
+            "",
+            "",
+            "int[0] = 0\n",
+            "button:+1",
+            "Fs.write bytes=3 hash=aaaaaaaaaaaaaaaa\n",
+            "live=1 ready=1 parked=0 done=0",
+            "kind=none n=0 mode=fail seed=0",
+        )]);
+        let changed = timeline_changed_fields(&base, &mutant);
+        assert_eq!(changed, vec!["effects".to_string()]);
+        assert_eq!(
+            classify_survivor_strength(&changed, &["signals".into()]),
+            Some(SurvivorKind::Missing)
+        );
+        let class = classify_replay(&[base], &[mutant], &["signals".into()]).unwrap();
+        assert_eq!(class.0, SurvivorKind::Missing);
+        assert_eq!(class.1, vec!["effects".to_string()]);
+    }
+
+    #[test]
+    fn survivor_weak_when_claimed_fibers_change() {
+        let base = tl_dump_v2(&[(
+            "",
+            "",
+            "int[0] = 0\n",
+            "",
+            "",
+            "live=1 ready=1 parked=0 done=0",
+            "kind=none n=0 mode=fail seed=0",
+        )]);
+        let mutant = tl_dump_v2(&[(
+            "",
+            "",
+            "int[0] = 0\n",
+            "",
+            "",
+            "live=2 ready=1 parked=1 done=0",
+            "kind=none n=0 mode=fail seed=0",
+        )]);
+        let class = classify_replay(&[base], &[mutant], &["fibers".into()]).unwrap();
+        assert_eq!(class.0, SurvivorKind::Weak);
+        assert_eq!(class.1, vec!["fibers".to_string()]);
+    }
+
+    #[test]
+    fn survivor_weak_when_claimed_fault_changes() {
+        let base = tl_dump_v2(&[(
+            "",
+            "",
+            "int[0] = 0\n",
+            "",
+            "",
+            "live=1 ready=1 parked=0 done=0",
+            "kind=none n=0 mode=fail seed=0",
+        )]);
+        let mutant = tl_dump_v2(&[(
+            "",
+            "",
+            "int[0] = 0\n",
+            "",
+            "",
+            "live=1 ready=1 parked=0 done=0",
+            "kind=fs n=1 mode=fail seed=1",
+        )]);
+        let class = classify_replay(&[base], &[mutant], &["fault".into()]).unwrap();
+        assert_eq!(class.0, SurvivorKind::Weak);
+        assert_eq!(class.1, vec!["fault".to_string()]);
     }
 }

@@ -618,11 +618,15 @@ void sz_release(void *ptr) {
         continue;
       }
       sz_release(left);
-      if (tag == SZ_ST_CONCAT)
+      if (tag == SZ_ST_CONCAT || tag == SZ_ST_ZIP || tag == SZ_ST_INTERSPERSE ||
+          tag == SZ_ST_ZIPWITH || tag == SZ_ST_ZIPALL || tag == SZ_ST_ORELSE)
         sz_release(right);
-      /* TAKE/DROP store a count in env. Filter and map nodes store a capture
-       * list. Function pointers in right are not RC. */
-      if (tag != SZ_ST_TAKE && tag != SZ_ST_DROP)
+      /* TAKE/DROP/GROUPED/SLIDING/TAKERIGHT/DROPRIGHT store a count in env.
+       * Filter, map, scan, and flatMap nodes store a capture. Function
+       * pointers in right are not RC. */
+      if (tag != SZ_ST_TAKE && tag != SZ_ST_DROP && tag != SZ_ST_GROUPED &&
+          tag != SZ_ST_SLIDING && tag != SZ_ST_TAKERIGHT &&
+          tag != SZ_ST_DROPRIGHT)
         sz_release(env);
       return;
     }
@@ -3407,6 +3411,34 @@ static void sched_free_fibers(Sched *s) {
     sz_free(f);
     f = n;
   }
+}
+
+void sz_fiber_census(int64_t *live, int64_t *ready, int64_t *parked,
+                     int64_t *done) {
+  int64_t l = 0;
+  int64_t r = 0;
+  int64_t p = 0;
+  int64_t d = 0;
+  Fiber *f;
+  if (g_sched) {
+    for (f = g_sched->all_fibers; f; f = f->all_next) {
+      l += 1;
+      if (f->state == FIB_READY)
+        r += 1;
+      else if (f->state == FIB_DONE || f->state == FIB_CANCELLED)
+        d += 1;
+      else
+        p += 1;
+    }
+  }
+  if (live)
+    *live = l;
+  if (ready)
+    *ready = r;
+  if (parked)
+    *parked = p;
+  if (done)
+    *done = d;
 }
 
 static SzIoResult run_io(SzIo *root) {

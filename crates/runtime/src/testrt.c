@@ -160,6 +160,7 @@ static SzIo *unwrap_box(void *value, void *env) {
 static int g_fault_kind;
 static int g_fault_mode;
 static int g_fault_n;
+static int g_fault_seed;
 static int g_fault_count_fs;
 static int g_fault_count_net;
 static int g_fault_count_queue;
@@ -207,8 +208,10 @@ static void fault_decode_seed(int seed) {
     g_fault_kind = 0;
     g_fault_mode = SZ_FAULT_FAIL;
     g_fault_n = 0;
+    g_fault_seed = 0;
     return;
   }
+  g_fault_seed = seed;
   idx = seed - 1;
   g_fault_kind = (idx % 3) + 1;
   rest = idx / 3;
@@ -223,6 +226,7 @@ static void fault_arm_from_env(void) {
   g_fault_kind = 0;
   g_fault_mode = SZ_FAULT_FAIL;
   g_fault_n = 0;
+  g_fault_seed = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -239,6 +243,7 @@ static void fault_arm_from_env(void) {
     if (g_fault_n < 1)
       g_fault_n = 1;
     g_fault_mode = fault_mode_from_name(getenv("SCUZZ_FAULT_MODE"));
+    g_fault_seed = 0;
     return;
   }
   if (seed_s && seed_s[0])
@@ -384,58 +389,14 @@ int sz_testrt_skip_orphan_cancel(void) { return g_skip_orphan_cancel; }
 
 int sz_testrt_skip_unstepped_ensure(void) { return g_skip_unstepped_ensure; }
 
-#define SZ_EFFECT_CAP 2048
-static char g_effect_buf[SZ_EFFECT_CAP];
-static size_t g_effect_len;
-
 void sz_effect_log(const char *line) {
-  size_t n;
-  if (!sz_testrt_oracles_armed())
-    return;
-  if (!line || !line[0])
-    return;
-  n = strlen(line);
-  if (g_effect_len + n + 2 > SZ_EFFECT_CAP)
-    return;
-  memcpy(g_effect_buf + g_effect_len, line, n);
-  g_effect_len += n;
-  g_effect_buf[g_effect_len++] = '\n';
-  g_effect_buf[g_effect_len] = '\0';
-}
-
-static void effect_reset(void) {
-  g_effect_len = 0;
-  g_effect_buf[0] = '\0';
+  sz_timeline_log_cstr(line ? line : "", "");
 }
 
 static void fs_log(const char *op) {
   char buf[48];
-  snprintf(buf, sizeof buf, "fs.%s", op);
-  sz_effect_log(buf);
-}
-
-static void fs_log_n(const char *op, size_t n) {
-  char buf[64];
-  snprintf(buf, sizeof buf, "fs.%s n=%zu", op, n);
-  sz_effect_log(buf);
-}
-
-static const char *fault_kind_name(int k) {
-  if (k == SZ_FAULT_FS)
-    return "fs";
-  if (k == SZ_FAULT_NET)
-    return "net";
-  if (k == SZ_FAULT_QUEUE)
-    return "queue";
-  return "none";
-}
-
-static const char *fault_mode_name(int m) {
-  if (m == SZ_FAULT_DROP)
-    return "drop";
-  if (m == SZ_FAULT_CORRUPT)
-    return "corrupt";
-  return "fail";
+  snprintf(buf, sizeof buf, "Fs.%s", op);
+  sz_timeline_log_cstr(buf, "");
 }
 
 static int fs_fault(BoxResult *r) {
@@ -459,7 +420,7 @@ static void *mem_read(void *env) {
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path;
   MemNode *n;
-  fs_log("read");
+  sz_timeline_log_cstr("Fs.read", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
@@ -489,7 +450,8 @@ static void *mem_write(void *env) {
   char parent[1024];
   MemNode *n;
   SzString *c;
-  fs_log_n("write", contents ? contents->len : 0);
+  sz_timeline_log_bytes("Fs.write", contents ? contents->data : "",
+                        contents ? contents->len : 0);
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
@@ -1130,7 +1092,7 @@ static void *stub_http_get(void *env) {
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   const char *url = sz_string_cstr(url_s);
   NetStub *s;
-  sz_effect_log("net.httpGet");
+  sz_timeline_log_cstr("Net.httpGet", url);
   if (sz_testrt_fault_tick(SZ_FAULT_NET)) {
     int mode = sz_testrt_fault_mode();
     if (mode == SZ_FAULT_CORRUPT) {
@@ -1491,6 +1453,7 @@ void sz_testrt_reset(void) {
   g_fault_kind = 0;
   g_fault_mode = SZ_FAULT_FAIL;
   g_fault_n = 0;
+  g_fault_seed = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -1747,6 +1710,7 @@ typedef struct {
   char *effects;
   char *fibers;
   char *fault;
+  int checkpoint;
 } SzTlState;
 
 static SzTlState *g_tl;
@@ -1761,6 +1725,18 @@ typedef struct {
   SzTlState *states;
 } SzTimeline;
 
+#define SZ_EFFECT_CAP 65536
+static char g_effects[SZ_EFFECT_CAP];
+static size_t g_effects_len;
+
+typedef struct TlIntern {
+  char *s;
+  int rc;
+  struct TlIntern *next;
+} TlIntern;
+
+static TlIntern *g_intern;
+
 static char *tl_copy(const char *s) {
   size_t n;
   char *c;
@@ -1774,24 +1750,162 @@ static char *tl_copy(const char *s) {
   return c;
 }
 
+/* Intern identical observation strings so consecutive equal dumps share
+ * one copy. tl_at is the algebra seam: claims never index g_tl directly. */
+static char *tl_intern(const char *s) {
+  TlIntern *p;
+  size_t n;
+  if (!s)
+    s = "";
+  for (p = g_intern; p; p = p->next) {
+    if (strcmp(p->s, s) == 0) {
+      p->rc += 1;
+      return p->s;
+    }
+  }
+  n = strlen(s);
+  p = (TlIntern *)malloc(sizeof(TlIntern));
+  if (!p)
+    sz_panic("timeline: out of memory");
+  p->s = (char *)malloc(n + 1);
+  if (!p->s)
+    sz_panic("timeline: out of memory");
+  memcpy(p->s, s, n + 1);
+  p->rc = 1;
+  p->next = g_intern;
+  g_intern = p;
+  return p->s;
+}
+
+static void tl_intern_drop(char *s) {
+  TlIntern **pp;
+  if (!s)
+    return;
+  for (pp = &g_intern; *pp; pp = &(*pp)->next) {
+    if ((*pp)->s != s)
+      continue;
+    (*pp)->rc -= 1;
+    if ((*pp)->rc <= 0) {
+      TlIntern *gone = *pp;
+      *pp = gone->next;
+      free(gone->s);
+      free(gone);
+    }
+    return;
+  }
+}
+
+static void tl_intern_drop_state(SzTlState *s) {
+  tl_intern_drop(s->signals);
+  tl_intern_drop(s->a11y);
+  tl_intern_drop(s->last_hit);
+  tl_intern_drop(s->drive);
+  tl_intern_drop(s->effects);
+  tl_intern_drop(s->fibers);
+  tl_intern_drop(s->fault);
+}
+
+static uint64_t tl_hash_bytes(const void *p, size_t n) {
+  const unsigned char *b = (const unsigned char *)p;
+  uint64_t h = 1469598103934665603ULL;
+  size_t i;
+  for (i = 0; i < n; i++) {
+    h ^= b[i];
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+static int tl_log_armed(void) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  const char *dump = getenv("SCUZZ_TIMELINE_DUMP");
+  return (tr && tr[0] == '1') || (dump && dump[0]);
+}
+
+void sz_timeline_log_bytes(const char *op, const void *p, size_t n) {
+  char line[160];
+  int m;
+  uint64_t h;
+  if (!tl_log_armed() || !op || !op[0])
+    return;
+  h = n ? tl_hash_bytes(p, n) : 0;
+  m = snprintf(line, sizeof line, "%s bytes=%lld hash=%016llx\n", op,
+               (long long)n, (unsigned long long)h);
+  if (m < 0)
+    return;
+  if ((size_t)m >= sizeof line)
+    m = (int)sizeof line - 1;
+  if (g_effects_len + (size_t)m >= SZ_EFFECT_CAP)
+    return;
+  memcpy(g_effects + g_effects_len, line, (size_t)m);
+  g_effects_len += (size_t)m;
+  g_effects[g_effects_len] = 0;
+}
+
+void sz_timeline_log_cstr(const char *op, const char *s) {
+  const char *p = s ? s : "";
+  sz_timeline_log_bytes(op, p, strlen(p));
+}
+
+static const char *tl_fault_kind_name(int k) {
+  if (k == SZ_FAULT_FS)
+    return "fs";
+  if (k == SZ_FAULT_NET)
+    return "net";
+  if (k == SZ_FAULT_QUEUE)
+    return "queue";
+  return "none";
+}
+
+static const char *tl_fault_mode_name(int m) {
+  if (m == SZ_FAULT_DROP)
+    return "drop";
+  if (m == SZ_FAULT_CORRUPT)
+    return "corrupt";
+  return "fail";
+}
+
+static void tl_fmt_fibers(char *buf, size_t cap) {
+  int64_t live = 0;
+  int64_t ready = 0;
+  int64_t parked = 0;
+  int64_t done = 0;
+  sz_fiber_census(&live, &ready, &parked, &done);
+  snprintf(buf, cap, "live=%lld ready=%lld parked=%lld done=%lld",
+           (long long)live, (long long)ready, (long long)parked,
+           (long long)done);
+}
+
+static void tl_fmt_fault(char *buf, size_t cap) {
+  snprintf(buf, cap, "kind=%s n=%d mode=%s seed=%d",
+           tl_fault_kind_name(g_fault_kind), g_fault_n,
+           tl_fault_mode_name(g_fault_mode), g_fault_seed);
+}
+
+static int tl_checkpoint_interval(void) {
+  const char *s = getenv("SCUZZ_TIMELINE_CHECKPOINT");
+  int n;
+  if (!s || !s[0])
+    return 0;
+  n = atoi(s);
+  return n < 0 ? 0 : n;
+}
+
+static void tl_effects_reset(void) {
+  g_effects_len = 0;
+  g_effects[0] = 0;
+}
+
 static void tl_free_states(void) {
   int i;
-  for (i = 0; i < g_tl_n; i++) {
-    if (i == 0 || g_tl[i].signals != g_tl[i - 1].signals)
-      free(g_tl[i].signals);
-    if (i == 0 || g_tl[i].a11y != g_tl[i - 1].a11y)
-      free(g_tl[i].a11y);
-    free(g_tl[i].last_hit);
-    free(g_tl[i].drive);
-    free(g_tl[i].effects);
-    free(g_tl[i].fibers);
-    free(g_tl[i].fault);
-  }
+  for (i = 0; i < g_tl_n; i++)
+    tl_intern_drop_state(&g_tl[i]);
   free(g_tl);
   g_tl = NULL;
   g_tl_n = 0;
   g_tl_cap = 0;
   g_tl_warned = 0;
+  tl_effects_reset();
 }
 
 void sz_timeline_set_drive(const char *line) {
@@ -1801,6 +1915,9 @@ void sz_timeline_set_drive(const char *line) {
 
 static void tl_push(void) {
   SzString *dump;
+  char fibers[96];
+  char fault[96];
+  int step;
   if (g_tl_n >= 1024) {
     if (!g_tl_warned) {
       fprintf(stderr, "scuzz: timeline capped at 1024 states\n");
@@ -1821,45 +1938,21 @@ static void tl_push(void) {
     g_tl_cap = ncap;
   }
   dump = sz_signal_dump();
-  {
-    char *sig = tl_copy(dump ? sz_string_cstr(dump) : "");
-    char *a11y = tl_copy(g_property_a11y);
-    if (g_tl_n > 0 && g_tl[g_tl_n - 1].signals &&
-        strcmp(g_tl[g_tl_n - 1].signals, sig) == 0) {
-      free(sig);
-      sig = g_tl[g_tl_n - 1].signals;
-    }
-    if (g_tl_n > 0 && g_tl[g_tl_n - 1].a11y &&
-        strcmp(g_tl[g_tl_n - 1].a11y, a11y) == 0) {
-      free(a11y);
-      a11y = g_tl[g_tl_n - 1].a11y;
-    }
-    g_tl[g_tl_n].signals = sig;
-    g_tl[g_tl_n].a11y = a11y;
-  }
+  g_tl[g_tl_n].signals = tl_intern(dump ? sz_string_cstr(dump) : "");
   if (dump)
     sz_string_free(dump);
-  g_tl[g_tl_n].last_hit = tl_copy(g_property_last_hit);
-  g_tl[g_tl_n].drive = tl_copy(g_last_drive);
-  {
-    char fib[64];
-    char fault[96];
-    int ready = 0;
-    int parked = 0;
-    sz_sched_census(&ready, &parked);
-    snprintf(fib, sizeof fib, "ready=%d parked=%d\n", ready, parked);
-    if (g_fault_kind)
-      snprintf(fault, sizeof fault, "kind=%s n=%d mode=%s\n",
-               fault_kind_name(g_fault_kind), g_fault_n,
-               fault_mode_name(g_fault_mode));
-    else
-      snprintf(fault, sizeof fault, "kind=none\n");
-    g_tl[g_tl_n].effects = tl_copy(g_effect_buf);
-    g_tl[g_tl_n].fibers = tl_copy(fib);
-    g_tl[g_tl_n].fault = tl_copy(fault);
-  }
-  effect_reset();
+  g_tl[g_tl_n].a11y = tl_intern(g_property_a11y);
+  g_tl[g_tl_n].last_hit = tl_intern(g_property_last_hit);
+  g_tl[g_tl_n].drive = tl_intern(g_last_drive);
+  g_tl[g_tl_n].effects = tl_intern(g_effects);
+  tl_fmt_fibers(fibers, sizeof fibers);
+  tl_fmt_fault(fault, sizeof fault);
+  g_tl[g_tl_n].fibers = tl_intern(fibers);
+  g_tl[g_tl_n].fault = tl_intern(fault);
+  step = tl_checkpoint_interval();
+  g_tl[g_tl_n].checkpoint = (step <= 0) || (g_tl_n % step == 0);
   g_tl_n++;
+  tl_effects_reset();
 }
 
 static void tl_restore(int i) {
@@ -1997,15 +2090,41 @@ int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle) {
   return strstr(s->last_hit, n) != NULL ? 1 : 0;
 }
 
-int64_t sz_timeline_effect_has(void *tl, int64_t i, SzString *needle) {
-  SzTlState *s = tl_at(tl, i);
+static int64_t tl_field_has(const char *field, SzString *needle) {
   const char *n = needle ? sz_string_cstr(needle) : "";
-  if (!s || !s->effects || !n[0])
+  if (!field || !n[0])
     return 0;
-  return strstr(s->effects, n) != NULL ? 1 : 0;
+  return strstr(field, n) != NULL ? 1 : 0;
 }
 
-static int64_t tl_parse_tagged_i64(const char *dump, const char *key) {
+int64_t sz_timeline_drive_has(void *tl, int64_t i, SzString *needle) {
+  SzTlState *s = tl_at(tl, i);
+  return s ? tl_field_has(s->drive, needle) : 0;
+}
+
+int64_t sz_timeline_effect_has(void *tl, int64_t i, SzString *needle) {
+  SzTlState *s = tl_at(tl, i);
+  return s ? tl_field_has(s->effects, needle) : 0;
+}
+
+int64_t sz_timeline_effect_count(void *tl, int64_t i) {
+  SzTlState *s = tl_at(tl, i);
+  const char *p;
+  int64_t n = 0;
+  if (!s || !s->effects || !s->effects[0])
+    return 0;
+  p = s->effects;
+  while (*p) {
+    if (*p == '\n')
+      n += 1;
+    p += 1;
+  }
+  if (s->effects[0] && s->effects[strlen(s->effects) - 1] != '\n')
+    n += 1;
+  return n;
+}
+
+static int64_t tl_parse_labeled(const char *dump, const char *key) {
   const char *p;
   if (!dump || !key)
     return 0;
@@ -2015,22 +2134,124 @@ static int64_t tl_parse_tagged_i64(const char *dump, const char *key) {
   return (int64_t)atoll(p + strlen(key));
 }
 
+int64_t sz_timeline_fiber_live(void *tl, int64_t i) {
+  SzTlState *s = tl_at(tl, i);
+  return s ? tl_parse_labeled(s->fibers, "live=") : 0;
+}
+
 int64_t sz_timeline_fiber_ready(void *tl, int64_t i) {
   SzTlState *s = tl_at(tl, i);
-  return s ? tl_parse_tagged_i64(s->fibers, "ready=") : 0;
+  return s ? tl_parse_labeled(s->fibers, "ready=") : 0;
 }
 
 int64_t sz_timeline_fiber_parked(void *tl, int64_t i) {
   SzTlState *s = tl_at(tl, i);
-  return s ? tl_parse_tagged_i64(s->fibers, "parked=") : 0;
+  return s ? tl_parse_labeled(s->fibers, "parked=") : 0;
 }
 
-int64_t sz_timeline_fault_has(void *tl, int64_t i, SzString *needle) {
+int64_t sz_timeline_fiber_done(void *tl, int64_t i) {
   SzTlState *s = tl_at(tl, i);
-  const char *n = needle ? sz_string_cstr(needle) : "";
-  if (!s || !s->fault || !n[0])
-    return 0;
-  return strstr(s->fault, n) != NULL ? 1 : 0;
+  return s ? tl_parse_labeled(s->fibers, "done=") : 0;
+}
+
+int64_t sz_timeline_fault_kind_has(void *tl, int64_t i, SzString *needle) {
+  SzTlState *s = tl_at(tl, i);
+  return s ? tl_field_has(s->fault, needle) : 0;
+}
+
+int64_t sz_timeline_fault_n(void *tl, int64_t i) {
+  SzTlState *s = tl_at(tl, i);
+  return s ? tl_parse_labeled(s->fault, "n=") : 0;
+}
+
+int64_t sz_timeline_checkpoint(void *tl, int64_t i) {
+  SzTlState *s = tl_at(tl, i);
+  return s && s->checkpoint ? 1 : 0;
+}
+
+int64_t sz_timeline_nearest_checkpoint(void *tl, int64_t i) {
+  SzTimeline *t = (SzTimeline *)tl;
+  int j;
+  int n;
+  if (!t || t->n <= 0)
+    return -1;
+  n = t->n;
+  if (i >= n)
+    i = n - 1;
+  if (i < 0)
+    i = 0;
+  for (j = (int)i; j >= 0; j--) {
+    if (t->states[j].checkpoint)
+      return j;
+  }
+  for (j = (int)i; j < n; j++) {
+    if (t->states[j].checkpoint)
+      return j;
+  }
+  return -1;
+}
+
+static void tl_compact_states(SzTlState *states, int *n) {
+  int i;
+  int w = 0;
+  int cap = *n;
+  for (i = 0; i < cap; i++) {
+    if (!states[i].checkpoint) {
+      tl_intern_drop_state(&states[i]);
+      continue;
+    }
+    if (w != i)
+      states[w] = states[i];
+    w += 1;
+  }
+  *n = w;
+}
+
+void sz_timeline_compact(void) {
+  int n = g_tl_n;
+  if (!g_tl || n <= 0)
+    return;
+  tl_compact_states(g_tl, &n);
+  g_tl_n = n;
+}
+
+void sz_timeline_compact_loaded(void *tl) {
+  SzTimeline *t = (SzTimeline *)tl;
+  int i;
+  int w = 0;
+  if (!t || t->n <= 0)
+    return;
+  for (i = 0; i < t->n; i++) {
+    if (!t->states[i].checkpoint) {
+      free(t->states[i].signals);
+      free(t->states[i].a11y);
+      free(t->states[i].last_hit);
+      free(t->states[i].drive);
+      free(t->states[i].effects);
+      free(t->states[i].fibers);
+      free(t->states[i].fault);
+      continue;
+    }
+    if (w != i)
+      t->states[w] = t->states[i];
+    w += 1;
+  }
+  t->n = w;
+}
+
+void sz_timeline_replay_from(int64_t i) {
+  int j;
+  if (i < 0 || i >= g_tl_n) {
+    tl_restore_clear();
+    return;
+  }
+  for (j = (int)i; j >= 0; j--) {
+    if (g_tl[j].checkpoint) {
+      tl_restore(j);
+      return;
+    }
+  }
+  tl_restore((int)i);
 }
 
 int64_t sz_timeline_forall(void *tl, SzListPred pred, void *env) {
@@ -2126,7 +2347,14 @@ SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp) {
                          "no state satisfied the predicate");
 }
 
-#define SZ_TIMELINE_DUMP_VERSION 1
+#define SZ_TIMELINE_DUMP_VERSION 2
+#define SZ_TIMELINE_DUMP_VERSION_MIN 1
+
+static void tl_fputs_block(FILE *f, const char *s) {
+  fputs(s ? s : "", f);
+  if (s && s[0] && s[strlen(s) - 1] != '\n')
+    fputc('\n', f);
+}
 
 static void tl_dump_file(void) {
   const char *path = getenv("SCUZZ_TIMELINE_DUMP");
@@ -2139,29 +2367,17 @@ static void tl_dump_file(void) {
     return;
   fprintf(f, "# timeline v=%d n=%d\n", SZ_TIMELINE_DUMP_VERSION, g_tl_n);
   for (i = 0; i < g_tl_n; i++) {
-    fprintf(f, "--- %d\n", i);
+    fprintf(f, "--- %d checkpoint=%d\n", i, g_tl[i].checkpoint ? 1 : 0);
     fprintf(f, "last_hit:\n%s\n", g_tl[i].last_hit ? g_tl[i].last_hit : "");
     fprintf(f, "drive:\n%s\n", g_tl[i].drive ? g_tl[i].drive : "");
-    fprintf(f, "signals:\n%s", g_tl[i].signals ? g_tl[i].signals : "");
-    if (g_tl[i].signals && g_tl[i].signals[0] &&
-        g_tl[i].signals[strlen(g_tl[i].signals) - 1] != '\n')
-      fputc('\n', f);
-    fprintf(f, "a11y:\n%s", g_tl[i].a11y ? g_tl[i].a11y : "");
-    if (g_tl[i].a11y && g_tl[i].a11y[0] &&
-        g_tl[i].a11y[strlen(g_tl[i].a11y) - 1] != '\n')
-      fputc('\n', f);
-    fprintf(f, "effects:\n%s", g_tl[i].effects ? g_tl[i].effects : "");
-    if (g_tl[i].effects && g_tl[i].effects[0] &&
-        g_tl[i].effects[strlen(g_tl[i].effects) - 1] != '\n')
-      fputc('\n', f);
-    fprintf(f, "fibers:\n%s", g_tl[i].fibers ? g_tl[i].fibers : "");
-    if (g_tl[i].fibers && g_tl[i].fibers[0] &&
-        g_tl[i].fibers[strlen(g_tl[i].fibers) - 1] != '\n')
-      fputc('\n', f);
-    fprintf(f, "fault:\n%s", g_tl[i].fault ? g_tl[i].fault : "");
-    if (g_tl[i].fault && g_tl[i].fault[0] &&
-        g_tl[i].fault[strlen(g_tl[i].fault) - 1] != '\n')
-      fputc('\n', f);
+    fprintf(f, "signals:\n");
+    tl_fputs_block(f, g_tl[i].signals);
+    fprintf(f, "a11y:\n");
+    tl_fputs_block(f, g_tl[i].a11y);
+    fprintf(f, "effects:\n");
+    tl_fputs_block(f, g_tl[i].effects);
+    fprintf(f, "fibers:\n%s\n", g_tl[i].fibers ? g_tl[i].fibers : "");
+    fprintf(f, "fault:\n%s\n", g_tl[i].fault ? g_tl[i].fault : "");
   }
   fclose(f);
 }
@@ -2276,10 +2492,25 @@ void sz_timeline_free(void *tl) {
   free(t);
 }
 
-/* Parse the exact text tl_dump_file writes: one-line last_hit/drive fields,
- * then the signals block up to the a11y: marker, then a11y up to effects:,
- * fibers:, fault:, the next state marker, or EOF. Optional trailing
- * effects/fibers/fault blocks keep handwritten v=1 dumps loadable. */
+static int tl_scan_block(SzTlScan *scan, const char *stop1, const char *stop2,
+                         char **out) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  while (!tl_scan_peek(scan, stop1) &&
+         !(stop2 && tl_scan_peek(scan, stop2))) {
+    const char *line;
+    size_t n;
+    if (!tl_scan_line(scan, &line, &n))
+      break;
+    tl_cat(&buf, &len, &cap, line, n);
+    tl_cat(&buf, &len, &cap, "\n", 1);
+  }
+  *out = buf;
+  return 1;
+}
+
+/* Parse v1 or v2. Optional trailing effects/fibers/fault keep handwritten
+ * v=1 dumps loadable. v=2 dumps always write those blocks. */
 void *sz_timeline_load(const char *path) {
   char *buf = tl_read_all(path);
   SzTlScan scan;
@@ -2303,7 +2534,8 @@ void *sz_timeline_load(const char *path) {
   memcpy(hdr, line, len);
   hdr[len] = 0;
   if (sscanf(hdr, "# timeline v=%d n=%d", &v, &n) != 2 ||
-      v != SZ_TIMELINE_DUMP_VERSION || n < 0) {
+      v < SZ_TIMELINE_DUMP_VERSION_MIN || v > SZ_TIMELINE_DUMP_VERSION ||
+      n < 0) {
     fprintf(stderr, "scuzz: judge: %s: expected timeline v=%d dump\n", path,
             SZ_TIMELINE_DUMP_VERSION);
     free(buf);
@@ -2320,10 +2552,18 @@ void *sz_timeline_load(const char *path) {
   for (i = 0; i < n; i++) {
     char *sig = NULL;
     char *a11y = NULL;
-    size_t slen = 0, scap = 0, alen = 0, acap = 0;
+    size_t alen = 0, acap = 0;
+    int ck = 1;
+    int idx = -1;
     if (!tl_scan_line(&scan, &line, &len) || len < 4 ||
         strncmp(line, "--- ", 4) != 0)
       goto malformed;
+    if (sscanf(line, "--- %d checkpoint=%d", &idx, &ck) != 2) {
+      ck = 1;
+      sscanf(line, "--- %d", &idx);
+    }
+    (void)idx;
+    t->states[i].checkpoint = ck ? 1 : 0;
     if (!tl_expect(&scan, "last_hit:"))
       goto malformed;
     if (!tl_scan_line(&scan, &line, &len))
@@ -2336,10 +2576,8 @@ void *sz_timeline_load(const char *path) {
     t->states[i].drive = tl_copy_n(line, len);
     if (!tl_expect(&scan, "signals:"))
       goto malformed;
-    while (!tl_scan_peek(&scan, "a11y:") && tl_scan_line(&scan, &line, &len)) {
-      tl_cat(&sig, &slen, &scap, line, len);
-      tl_cat(&sig, &slen, &scap, "\n", 1);
-    }
+    if (!tl_scan_block(&scan, "a11y:", NULL, &sig))
+      goto malformed;
     if (!tl_expect(&scan, "a11y:"))
       goto malformed_sig;
     while (!tl_scan_peek(&scan, "--- ") && !tl_scan_peek(&scan, "effects:") &&
@@ -2394,6 +2632,7 @@ void *sz_timeline_load(const char *path) {
     continue;
   malformed_sig:
     free(sig);
+    free(a11y);
   malformed:
     fprintf(stderr, "scuzz: judge: %s: malformed dump at state %d\n", path, i);
     t->n = i;
@@ -2628,14 +2867,18 @@ static void claim_fail_verdict(const char *name, const SzVerdict *v) {
 
 void sz_property_session_end(void) {
   const char *tr = getenv("SCUZZ_TESTRT");
+  const char *compact;
   int i;
   int j;
   int last;
   SzTimeline frozen;
   if (!tr || tr[0] != '1')
     return;
-  if (g_effect_len > 0)
+  if (g_effects_len > 0)
     tl_push();
+  compact = getenv("SCUZZ_TIMELINE_COMPACT");
+  if (compact && compact[0] == '1')
+    sz_timeline_compact();
   tl_dump_file();
   sz_timeline_varied_flush();
   last = g_tl_n > 0 ? g_tl_n - 1 : 0;
@@ -2738,7 +2981,6 @@ void sz_property_session_reset(void) {
   }
   g_verify_rel_n = 0;
   tl_free_states();
-  effect_reset();
   free(g_last_drive);
   g_last_drive = NULL;
   tl_restore_clear();
