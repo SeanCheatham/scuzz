@@ -1,0 +1,110 @@
+import Parse.Fun
+import Parse.Param
+import Parse.Prog
+
+def nl(): String =
+  """
+"""
+
+def findIdx(s: String, needle: String, i: Int): Int =
+  if (Str.len(needle) == 0 || i + Str.len(needle) > Str.len(s)) 0 - 1 else if (Str.slice(s, i, i + Str.len(needle)) == needle) i else findIdx(s, needle, i + 1)
+
+def afterOp(w: String, op: String): String =
+  afterOp2(w, findIdx(w, op, 0), op)
+
+def afterOp2(w: String, i: Int, op: String): String =
+  if (i < 0) "" else Str.slice(w, i + Str.len(op), Str.len(w))
+
+def trimNum(s: String): String =
+  trimNum2(s, 0)
+
+def trimNum2(s: String, i: Int): String =
+  if (i >= Str.len(s)) s else if (Str.charAt(s, i) == 32) trimNum2(s, i + 1) else Str.slice(s, i, Str.len(s))
+
+def kindTok(p: Param): String =
+  if (p.ty == "Int") intTok(p.w) else if (p.ty == "String") "s" else if (p.ty == "Bool") "b" else ""
+
+def intTok(w: String): String =
+  if (w == "") "i" else if (findIdx(w, ">=", 0) >= 0) Str.concat("i>=", trimNum(afterOp(w, ">="))) else if (findIdx(w, "<=", 0) >= 0) Str.concat("i<=", trimNum(afterOp(w, "<="))) else if (findIdx(w, ">", 0) >= 0) Str.concat("i>", trimNum(afterOp(w, ">"))) else if (findIdx(w, "<", 0) >= 0) Str.concat("i<", trimNum(afterOp(w, "<"))) else "i"
+
+def friendly(p: Param): Bool =
+  p.ty == "Int" || p.ty == "String" || p.ty == "Bool"
+
+def allFriendly(ps: List[Param]): Bool =
+  List.isEmpty(ps) || friendly(List.head(ps)) && allFriendly(List.tail(ps))
+
+def isDrive(d: Fun): Bool =
+  d.ret == "Bool" && allFriendly(d.params)
+
+def drives(ds: List[Fun]): List[Fun] =
+  List.filter(ds, d => isDrive(d))
+
+def specOf(d: Fun): String =
+  if (List.isEmpty(d.params)) d.name else Str.concat(d.name, Str.concat(" ", specs(d.params)))
+
+def specs(ps: List[Param]): String =
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) kindTok(List.head(ps)) else Str.concat(kindTok(List.head(ps)), Str.concat(" ", specs(List.tail(ps))))
+
+def seedArg(p: Param): String =
+  if (p.ty == "Int") "0" else if (p.ty == "Bool") "false" else "a"
+
+def seedArgs(ps: List[Param]): String =
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) seedArg(List.head(ps)) else Str.concat(seedArg(List.head(ps)), Str.concat(" ", seedArgs(List.tail(ps))))
+
+def seedOf(d: Fun): String =
+  if (List.isEmpty(d.params)) Str.concat("drive ", d.name) else Str.concat("drive ", Str.concat(d.name, Str.concat(" ", seedArgs(d.params))))
+
+def cmpStr(a: String, b: String): Int =
+  cmpStr2(a, b, 0)
+
+def cmpStr2(a: String, b: String, i: Int): Int =
+  if (i >= Str.len(a) && i >= Str.len(b)) 0 else if (i >= Str.len(a)) 0 - 1 else if (i >= Str.len(b)) 1 else if (Str.charAt(a, i) < Str.charAt(b, i)) 0 - 1 else if (Str.charAt(a, i) > Str.charAt(b, i)) 1 else cmpStr2(a, b, i + 1)
+
+def ins(x: String, ys: List[String]): List[String] =
+  if (List.isEmpty(ys)) x :: ([]: List[String]) else if (cmpStr(x, List.head(ys)) <= 0) x :: ys else List.head(ys) :: ins(x, List.tail(ys))
+
+def sortStrs(xs: List[String]): List[String] =
+  if (List.isEmpty(xs)) xs else ins(List.head(xs), sortStrs(List.tail(xs)))
+
+def nls(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(List.head(xs), Str.concat(nl(), nls(List.tail(xs))))
+
+def parseVerify(src: String): List[Fun] =
+  drives(Parse.parse(Lexer.lex(src)).defs)
+
+def seeds(src: String): String =
+  nls(sortStrs(List.map(parseVerify(src), d => seedOf(d))))
+
+def drivers(src: String): String =
+  nls(List.map(parseVerify(src), d => specOf(d)))
+
+def emptyVerify(file: String): String =
+  Str.concat(file, Str.concat(":1:1: error: ", Str.concat(file, ": verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")))
+
+def checkVerify(src: String, file: String): String =
+  if (List.isEmpty(parseVerify(src))) emptyVerify(file) else "scuzz check ok"
+
+def testOut(checkOk: Bool): String =
+  if (!checkOk) "scuzz test fail" else Str.concat("project compile smoke ok", Str.concat(nl(), Str.concat("IO smoke ok", Str.concat(nl(), "scuzz test ok"))))
+
+def searchN(n: Int): Int =
+  if (n <= 0) 0 else n * 5 / 8
+
+def fuzzHead(iterations: Int, corpus: Int, sites: Int): String =
+  Str.concat(if (iterations <= 0) Str.concat("scuzz fuzz: corpus-only (--iterations 0)", nl()) else "", Str.concat(if (iterations <= 0 && corpus > 0) Str.concat("scuzz fuzz: replay ", Str.concat(Str.fromInt(corpus), Str.concat(" corpus entries", nl()))) else "", if (sites == 0) Str.concat("scuzz fuzz: no live-code mutation sites", nl()) else ""))
+
+def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int): String =
+  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures)
+
+def fuzzStatus(search: Int, failures: Int, seed: Int, corpus: Int): String =
+  Str.concat("scuzz fuzz ", Str.concat(if (failures == 0) "ok" else "fail", Str.concat(" (", Str.concat(Str.fromInt(search), Str.concat(" search, ", Str.concat(Str.fromInt(failures), Str.concat(" search failures, seed ", Str.concat(Str.fromInt(seed), Str.concat(", ", Str.concat(Str.fromInt(corpus), " corpus)"))))))))))
+
+def fuzzCorpus(corpus: Int): String =
+  Str.concat("corpus: ", Str.concat(Str.fromInt(corpus), " stored, 0 failed, 0 promoted"))
+
+def fuzzMut(sites: Int): String =
+  Str.concat("mutate: 0 killed, 0 survived, 0 inert (0 of ", Str.concat(Str.fromInt(sites), " sites)"))
+
+def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, sites: Int, failures: Int): String =
+  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus), Str.concat(nl(), Str.concat(fuzzCorpus(corpus), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), fuzzMut(sites))))))))))
+

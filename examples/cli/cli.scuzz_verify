@@ -58,3 +58,15 @@ def verHuman(): Bool =
 def verOk(): Bool =
   Cli.runCmd(Cli.parse(Main.a1("check")), Main.srcIrHi()) == "scuzz check ok"
 
+def campSeeds(): Bool =
+  Verify.seeds(Main.srcAddVerify()) == Main.wantAddSeeds()
+
+def campFuzz0(): Bool =
+  Verify.fuzzOut(0, 42, 0, 0, 0) == Main.wantFuzzHello0()
+
+def campTest(): Bool =
+  Cli.runCmd(Cli.parse(Main.a1("test")), Main.srcIrHi()) == Main.wantTestOk()
+
+def campEmpty(): Bool =
+  Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == Main.wantEmptyVerify()
+

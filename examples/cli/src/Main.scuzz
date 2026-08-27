@@ -121,8 +121,64 @@ def wantLink(): String =
 def wantHumanUnbound(): String =
   "t/src/Main.scuzz:2:14: error: type error: unbound variable nope"
 
+def srcAddVerify(): String =
+  """def add(n: Int, m: Int): Bool =
+  true
+
+def addTwoThree(): Bool =
+  true
+
+def sumToDiff(n: Int where n >= 0): Bool =
+  true
+
+def sumToTen(): Bool =
+  true
+"""
+
+def wantAddSeeds(): String =
+  """drive add 0 0
+drive addTwoThree
+drive sumToDiff 0
+drive sumToTen
+"""
+
+def wantAddDrivers(): String =
+  """add i i
+addTwoThree
+sumToDiff i>=0
+sumToTen
+"""
+
+def wantFuzzHello0(): String =
+  """scuzz fuzz: corpus-only (--iterations 0)
+scuzz fuzz: no live-code mutation sites
+scuzz fuzz ok (0 search, 0 search failures, seed 42, 0 corpus)
+corpus: 0 stored, 0 failed, 0 promoted
+coverage: (none)
+declared: (none)
+mutate: 0 killed, 0 survived, 0 inert (0 of 0 sites)"""
+
+def wantFuzzHello8(): String =
+  """scuzz fuzz: no live-code mutation sites
+scuzz fuzz ok (5 search, 0 search failures, seed 42, 0 corpus)
+corpus: 0 stored, 0 failed, 0 promoted
+coverage: (none)
+declared: (none)
+mutate: 0 killed, 0 survived, 0 inert (0 of 0 sites)"""
+
+def wantTestOk(): String =
+  """project compile smoke ok
+IO smoke ok
+scuzz test ok"""
+
+def wantEmptyVerify(): String =
+  "bad-intent/empty.scuzz_verify:1:1: error: bad-intent/empty.scuzz_verify: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file"
+
+def campaignOk(): Bool =
+  Verify.seeds(srcAddVerify()) == wantAddSeeds() && Verify.drivers(srcAddVerify()) == wantAddDrivers() && Verify.fuzzOut(0, 42, 0, 0, 0) == wantFuzzHello0() && Verify.fuzzOut(8, 42, 0, 0, 0) == wantFuzzHello8() && Cli.runCmd(Cli.parse(a1("test")), srcIrHi()) == wantTestOk() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "0")), srcIrHi()) == wantFuzzHello0() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "8")), srcIrHi()) == wantFuzzHello8() && Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == wantEmptyVerify() && Verify.checkVerify(srcAddVerify(), "add.scuzz_verify") == "scuzz check ok"
+
 def verifyOk(): Bool =
-  Cli.runCmd(Cli.parse(a2("check", "--message-format=json")), srcTyUnbound()) == wantTyUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcTyUnbound()) == wantHumanUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcIrHi()) == "scuzz check ok" && Cli.runCmd(Cli.parse(a1("fmt")), srcHi()) == wantHi()
+  Cli.runCmd(Cli.parse(a2("check", "--message-format=json")), srcTyUnbound()) == wantTyUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcTyUnbound()) == wantHumanUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcIrHi()) == "scuzz check ok" && Cli.runCmd(Cli.parse(a1("fmt")), srcHi()) == wantHi() && campaignOk()
 
 def driveOk(): Bool =
   Drive.showMan(Manifest.parse(tomlHello())) == "name=hello ver=0.1.0 ui=false deps=0" && Drive.showMan(Manifest.parse(tomlCli())) == "name=cli ver=0.1.0 ui=false deps=2" && Drive.showMan(Manifest.parse(tomlPlugins())) == Str.concat("err:", wantPlugins()) && Drive.showMan(Manifest.parse(tomlLicense())) == Str.concat("err:", wantLicense()) && Drive.showMan(Manifest.parse(tomlStrDep())) == Str.concat("err:", wantStrDep()) && Drive.showMan(Manifest.parse(tomlGit())) == Str.concat("err:", wantGit()) && Drive.showMan(Manifest.parse(tomlNoName())) == Str.concat("err:", wantNoName()) && Drive.showMan(Manifest.parse(tomlEmptyPath())) == Str.concat("err:", wantEmptyPath()) && Drive.showMan(Manifest.parse(tomlNeedPath())) == Str.concat("err:", wantNeedPathToml()) && Drive.compileSrc(srcIrHi()).ok && Drive.compileSrc(srcIrHi()).ir == wantIrHi() && !Drive.compileSrc(srcTyUnbound()).ok && Drive.compileSrc(srcTyUnbound()).diags == wantTyUnbound() && Drive.compileSrc(srcIrHi()).ir == Drive.compileSrc(srcIrHi()).ir && Drive.linkLine("clang", Drive.llName("build", "hello"), "crates/runtime/build/libscuzz_rt.a", Drive.exeName("build", "hello")) == wantLink() && Drive.missToml("/tmp/empty") == "missing scuzz.toml in /tmp/empty"
