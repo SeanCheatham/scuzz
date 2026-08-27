@@ -1,0 +1,18 @@
+def irHi(): Bool =
+  Main.irDiff(Main.srcHi(), Main.wantHi())
+
+def irSum(): Bool =
+  Main.irDiff(Main.srcSum(), Main.wantSum())
+
+def irAdd(): Bool =
+  Main.irDiff(Main.srcAdd(), Main.wantAdd())
+
+def irIdemHi(): Bool =
+  Main.irIdem(Main.srcHi())
+
+def irIdemSum(): Bool =
+  Main.irIdem(Main.srcSum())
+
+def irIdemAdd(): Bool =
+  Main.irIdem(Main.srcAdd())
+
