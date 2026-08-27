@@ -49,3 +49,12 @@ def drvLink(): Bool =
 def drvIdem(): Bool =
   Drive.compileSrc(Main.srcIrHi()).ir == Drive.compileSrc(Main.srcIrHi()).ir
 
+def verJson(): Bool =
+  Cli.runCmd(Cli.parse(Main.a2("check", "--message-format=json")), Main.srcTyUnbound()) == Main.wantTyUnbound()
+
+def verHuman(): Bool =
+  Cli.runCmd(Cli.parse(Main.a1("check")), Main.srcTyUnbound()) == Main.wantHumanUnbound()
+
+def verOk(): Bool =
+  Cli.runCmd(Cli.parse(Main.a1("check")), Main.srcIrHi()) == "scuzz check ok"
+
