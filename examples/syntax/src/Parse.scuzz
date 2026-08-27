@@ -416,8 +416,12 @@ def parsePatPrimary(toks: List[Tok], i: Int): (String, Int) =
     case Tok.False => ("false", i + 1)
     case Tok.Str(s) => (quote(s), i + 1)
     case Tok.Ident(s) => parsePatIdent(toks, i + 1, s)
+    case Tok.LParen => parsePatTuple(toks, i)
     case _ => ("", i)
   }
+
+def parsePatTuple(toks: List[Tok], i: Int): (String, Int) =
+  parsePatCtorClose("", parsePatArgs(toks, i + 1, []))
 
 def parsePatNeg(toks: List[Tok], i: Int): (String, Int) =
   (Str.concat("-", Str.fromInt(_intOf(_at(toks, i)))), i + 1)
