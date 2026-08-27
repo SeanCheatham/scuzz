@@ -1116,7 +1116,7 @@ impl Parser {
             return Ok(Type::Var(name));
         }
         match name.as_str() {
-            "Unit" | "Int" | "Float" | "String" | "Bool" | "Timeline" | "Verdict" => {
+            "Unit" | "Int" | "Float" | "String" | "Bool" | "Timeline" | "Verdict" | "Builder" => {
                 if matches!(self.peek(), Token::LBracket) {
                     return Err(self.err(format!("{name} takes no type arguments")));
                 }
@@ -2447,6 +2447,8 @@ impl Parser {
                         | "Fiber"
                         | "Resource"
                         | "Stream"
+                        | "Builder"
+                        | "Oracle"
                         | "Map"
                         | "Set"
                         | "Timeline"

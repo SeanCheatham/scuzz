@@ -4968,6 +4968,62 @@ int main(void) {
     assert(strcmp(sz_string_cstr(sz_string_from_float(-1.5)), "-1.5") == 0);
   }
 
+  /* Builder: unique grow-in-place, copy-on-write when shared */
+  {
+    SzBuilder *b = sz_builder_new();
+    SzBuilder *n;
+    SzString *x = sz_string_from_cstr("x");
+    SzString *a = sz_string_from_cstr("a");
+    SzString *out;
+    SzBuilder *shared;
+    SzBuilder *c;
+    int i;
+    assert(strcmp(sz_alloc_kind_name(SZ_RC_BUILDER), "builder") == 0);
+    out = sz_builder_result(b);
+    assert(sz_string_len(out) == 0);
+    sz_string_free(out);
+    n = sz_builder_append(b, a);
+    sz_builder_free(b);
+    b = n;
+    out = sz_builder_result(b);
+    assert(strcmp(sz_string_cstr(out), "a") == 0);
+    sz_string_free(out);
+    sz_retain(b);
+    shared = b;
+    c = sz_builder_append(shared, x);
+    out = sz_builder_result(shared);
+    assert(strcmp(sz_string_cstr(out), "a") == 0);
+    sz_string_free(out);
+    out = sz_builder_result(c);
+    assert(strcmp(sz_string_cstr(out), "ax") == 0);
+    sz_string_free(out);
+    sz_builder_free(c);
+    sz_builder_free(shared);
+    sz_builder_free(b);
+    b = sz_builder_new();
+    for (i = 0; i < 2097152; i++) {
+      n = sz_builder_append(b, x);
+      sz_builder_free(b);
+      b = n;
+    }
+    out = sz_builder_result(b);
+    assert(sz_string_len(out) == 2097152);
+    assert(sz_string_cstr(out)[0] == 'x');
+    assert(sz_string_cstr(out)[2097151] == 'x');
+    sz_string_free(out);
+    sz_builder_free(b);
+    sz_string_free(x);
+    sz_string_free(a);
+  }
+
+  /* Closed-form sum vs 0+1+…+n */
+  {
+    assert(sz_oracle_sum_to(-3) == 0);
+    assert(sz_oracle_sum_to(0) == 0);
+    assert(sz_oracle_sum_to(1) == 1);
+    assert(sz_oracle_sum_to(10) == 55);
+  }
+
   /* list */
   {
     SzList *xs = sz_list_cons(sz_string_from_cstr("a"),

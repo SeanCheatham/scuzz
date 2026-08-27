@@ -135,7 +135,7 @@ static size_t g_kind_count[SZ_RC_KIND_COUNT];
 static const char *k_kind_names[SZ_RC_KIND_COUNT] = {
     "raw",      "string", "list",     "adt",      "box",  "map",
     "io",       "stream", "resource", "error",    "ref",  "queue",
-    "deferred", "either", "pair"};
+    "deferred", "either", "pair", "builder"};
 
 static uint32_t kind_idx(uint32_t kind) {
   return kind < SZ_RC_KIND_COUNT ? kind : (uint32_t)SZ_RC_RAW;
@@ -720,6 +720,14 @@ void sz_release(void *ptr) {
   }
   case SZ_RC_BOX:
     break;
+  case SZ_RC_BUILDER: {
+    SzBuilder *b = (SzBuilder *)ptr;
+    sz_free(b->data);
+    b->data = NULL;
+    b->len = 0;
+    b->cap = 0;
+    break;
+  }
   default:
     break;
   }
@@ -762,6 +770,77 @@ SzString *sz_string_concat(const SzString *a, const SzString *b) {
   SzString *out = sz_string_from_bytes(buf, al + bl);
   sz_free(buf);
   return out;
+}
+
+static void builder_append_bytes(SzBuilder *b, const char *p, size_t n) {
+  size_t cap;
+  char *d;
+  if (!b || n == 0)
+    return;
+  if (b->len + n <= b->cap) {
+    memcpy(b->data + b->len, p, n);
+    b->len += n;
+    return;
+  }
+  cap = b->cap ? b->cap : 64;
+  while (cap < b->len + n)
+    cap *= 2;
+  d = (char *)sz_alloc(cap);
+  if (b->len)
+    memcpy(d, b->data, b->len);
+  sz_free(b->data);
+  b->data = d;
+  b->cap = cap;
+  memcpy(b->data + b->len, p, n);
+  b->len += n;
+}
+
+static SzBuilder *builder_clone(const SzBuilder *b) {
+  SzBuilder *c = sz_builder_new();
+  if (b && b->len)
+    builder_append_bytes(c, b->data, b->len);
+  return c;
+}
+
+SzBuilder *sz_builder_new(void) {
+  SzBuilder *b = (SzBuilder *)sz_rc_alloc(sizeof(SzBuilder), SZ_RC_BUILDER);
+  b->data = NULL;
+  b->len = 0;
+  b->cap = 0;
+  return b;
+}
+
+SzBuilder *sz_builder_append(SzBuilder *b, const SzString *s) {
+  size_t n = s && s->data ? s->len : 0;
+  const char *p = s && s->data ? s->data : "";
+  if (!b)
+    b = sz_builder_new();
+  if (sz_is_rc(b) && sz_rc_hdr(b)->rc == 1) {
+    builder_append_bytes(b, p, n);
+    sz_retain(b);
+    return b;
+  }
+  {
+    SzBuilder *c = builder_clone(b);
+    builder_append_bytes(c, p, n);
+    return c;
+  }
+}
+
+SzString *sz_builder_result(const SzBuilder *b) {
+  if (!b || !b->data || b->len == 0)
+    return sz_string_from_cstr("");
+  return sz_string_from_bytes(b->data, b->len);
+}
+
+void sz_builder_free(SzBuilder *b) { sz_release(b); }
+
+int64_t sz_oracle_sum_to(int64_t n) {
+  if (n <= 0)
+    return 0;
+  if (n % 2 == 0)
+    return (n / 2) * (n + 1);
+  return n * ((n + 1) / 2);
 }
 
 int64_t sz_string_len(const SzString *s) {

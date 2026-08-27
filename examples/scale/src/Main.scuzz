@@ -1,0 +1,26 @@
+def _fillExtra(n: Int, m: Map[String, Int]): Map[String, Int] =
+  if (n <= 0) m else _fillExtra(n - 1, Map.set(m, Str.concat("x", Str.fromInt(n)), n))
+
+def _sumExtra(n: Int, m: Map[String, Int], acc: Int): Int =
+  if (n <= 0) acc else _sumExtra(n - 1, m, acc + Map.getOrElse(m, Str.concat("x", Str.fromInt(n)), 0))
+
+def _loadAll(): Map[String, Int] =
+  S19.install(S18.install(S17.install(S16.install(S15.install(S14.install(S13.install(S12.install(S11.install(S10.install(S09.install(S08.install(S07.install(S06.install(S05.install(S04.install(S03.install(S02.install(S01.install(S00.install(Map.empty()))))))))))))))))))))
+
+@main def main: IO[Unit] =
+  for {
+    t0 <- Clock.monotonic()
+    base = _loadAll()
+    m = _fillExtra(2048, base)
+    t1 <- Clock.monotonic()
+    n = Map.size(m)
+    s = _sumExtra(2048, m, 0)
+    a = Map.getOrElse(m, "s00n00", -1)
+    b = Map.getOrElse(m, "s19n49", -1)
+    t2 <- Clock.monotonic()
+    _ <- IO.println(s"mapn:${Str.fromInt(n)}")
+    _ <- IO.println(s"maps:${Str.fromInt(s)}")
+    _ <- IO.println(s"hit:${Str.fromInt(a)}:${Str.fromInt(b)}")
+    _ <- IO.println(s"bindms:${Str.fromInt(t1 - t0)}")
+    _ <- IO.println(s"lookms:${Str.fromInt(t2 - t1)}")
+  } yield ()

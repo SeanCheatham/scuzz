@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
 use scuzz_compiler::driver::{find_runtime_dir, CompileOptions};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus};
+use std::time::{Duration, Instant};
+
+/// Exit code when a TestRuntime probe exceeds its wall-clock limit.
+pub const TESTRT_TIMEOUT_CODE: i32 = 124;
 
 pub fn resolve_dir(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
@@ -55,7 +59,8 @@ pub struct TestrtUi<'a> {
 
 /// Run a verify-graph binary under TestRuntime. `ui` sets Headless + script/dump.
 /// `timeline` overrides the SCUZZ_TIMELINE_DUMP target (default: sibling of `reached`).
-pub fn run_testrt(
+/// When `limit` is set, kill the process when that duration elapses (exit 124).
+pub fn run_testrt_limit(
     exe: &Path,
     reached: &Path,
     schedule_seed: &str,
@@ -63,6 +68,7 @@ pub fn run_testrt(
     ui: Option<TestrtUi<'_>>,
     drive_script: Option<&Path>,
     timeline: Option<&Path>,
+    limit: Option<Duration>,
 ) -> Result<i32> {
     let mut cmd = Command::new(exe);
     cmd.env("SCUZZ_TESTRT", "1")
@@ -93,9 +99,36 @@ pub fn run_testrt(
     if !fault_seed.is_empty() && fault_seed != "0" {
         cmd.env("SCUZZ_FAULT_SEED", fault_seed);
     }
-    let status = cmd
-        .status()
+    let mut child = cmd
+        .spawn()
         .with_context(|| format!("running {}", exe.display()))?;
+    wait_child(&mut child, limit)
+}
+
+fn wait_child(child: &mut Child, limit: Option<Duration>) -> Result<i32> {
+    match limit {
+        None => status_code(child.wait()?),
+        Some(limit) => wait_child_limit(child, limit),
+    }
+}
+
+fn wait_child_limit(child: &mut Child, limit: Duration) -> Result<i32> {
+    let deadline = Instant::now() + limit;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return status_code(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            eprintln!("scuzz: testrt timeout");
+            return Ok(TESTRT_TIMEOUT_CODE);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn status_code(status: ExitStatus) -> Result<i32> {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
@@ -104,4 +137,22 @@ pub fn run_testrt(
         }
     }
     Ok(status.code().unwrap_or(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_child_kills_on_timeout() {
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let t0 = Instant::now();
+        let code = wait_child(&mut child, Some(Duration::from_millis(250))).unwrap();
+        assert!(
+            t0.elapsed() < Duration::from_secs(3),
+            "timeout waited {:?}",
+            t0.elapsed()
+        );
+        assert_eq!(code, TESTRT_TIMEOUT_CODE);
+    }
 }

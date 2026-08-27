@@ -32,7 +32,7 @@ void sz_alloc_set_panic_dump(const char *path);
 /* Registered path, or `SCUZZ_PANIC_DUMP`, or NULL. */
 const char *sz_alloc_panic_dump_path(void);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
- * streams, resources, errors, Ref / Queue / Deferred, Either, pair). List cells retain heads and shared tails. IO
+ * streams, resources, errors, Ref / Queue / Deferred, Either, pair, Builder). List cells retain heads and shared tails. IO
  * constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
 enum {
   SZ_RC_RAW = 0,
@@ -50,7 +50,8 @@ enum {
   SZ_RC_DEFERRED = 12,
   SZ_RC_EITHER = 13,
   SZ_RC_PAIR = 14,
-  SZ_RC_KIND_COUNT = 15
+  SZ_RC_BUILDER = 15,
+  SZ_RC_KIND_COUNT = 16
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
@@ -59,7 +60,7 @@ void sz_release(void *ptr);
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
 /* Sum of RC counts on live RC blocks. Raw sz_alloc blocks add 0. */
 uint64_t sz_alloc_rc_sum(void);
-/* Live bytes and count for one kind (`SZ_RC_RAW` … `SZ_RC_PAIR`). */
+/* Live bytes and count for one kind (`SZ_RC_RAW` … `SZ_RC_BUILDER`). */
 void sz_alloc_kind_stats(uint32_t kind, size_t *bytes, size_t *count);
 /* Dump key for `kind` (`raw`, `string`, …). Unknown kinds use `raw`. */
 const char *sz_alloc_kind_name(uint32_t kind);
@@ -90,6 +91,19 @@ void sz_string_free(SzString *s);
 
 /* String ops for the kernel dialect */
 SzString *sz_string_concat(const SzString *a, const SzString *b);
+
+typedef struct SzBuilder {
+  char *data;
+  size_t len;
+  size_t cap;
+} SzBuilder;
+
+SzBuilder *sz_builder_new(void);
+SzBuilder *sz_builder_append(SzBuilder *b, const SzString *s);
+SzString *sz_builder_result(const SzBuilder *b);
+void sz_builder_free(SzBuilder *b);
+/* Closed-form 0+1+…+n for n >= 0. n < 0 is 0. Independent of a Scuzz loop. */
+int64_t sz_oracle_sum_to(int64_t n);
 int64_t sz_string_len(const SzString *s);
 SzString *sz_string_slice(const SzString *s, int64_t start, int64_t end);
 int sz_string_eq(const SzString *a, const SzString *b);

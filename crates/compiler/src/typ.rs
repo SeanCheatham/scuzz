@@ -4379,6 +4379,26 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::String)
         }
+        "Builder.empty" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Opaque("Builder".into()))
+        }
+        "Builder.append" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Builder".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Opaque("Builder".into()))
+        }
+        "Builder.result" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("Builder".into()))?;
+            Ok(Type::String)
+        }
+        "Oracle.sumTo" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Int)
+        }
         "Str.len" | "Str.charAt" | "Str.indexOf" | "Str.lastIndexOf" => {
             if callee == "Str.len" {
                 expect_arity(callee, &arg_tys, 1)?;
@@ -10405,6 +10425,26 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("payload ADT should typecheck");
+    }
+
+    #[test]
+    fn typechecks_builder_kit() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Builder.result(Builder.append(Builder.empty(), "x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Builder kit should typecheck");
+    }
+
+    #[test]
+    fn typechecks_oracle_sum_to() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Oracle.sumTo(4)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Oracle.sumTo should typecheck");
     }
 
     #[test]

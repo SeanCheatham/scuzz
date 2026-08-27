@@ -1,6 +1,6 @@
 use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, MatchArm, Pattern, Program, Type, UnOp};
 use crate::resolve::{user_symbol, FunIndex};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +96,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare void @sz_release(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_cstr(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_concat(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_builder_new()").unwrap();
+    writeln!(out, "declare ptr @sz_builder_append(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_builder_result(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_oracle_sum_to(i64)").unwrap();
     writeln!(out, "declare i64 @sz_string_len(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_slice(ptr, i64, i64)").unwrap();
     writeln!(out, "declare i32 @sz_string_eq(ptr, ptr)").unwrap();
@@ -620,6 +624,8 @@ pub fn emit_llvm(program: &Program) -> String {
         cont_id: &mut cont_id,
         conts: &mut conts,
         reload_fn: &mut reload_fn,
+        tail: None,
+        in_tail: false,
     };
 
     let mut fundef_ir = String::new();
@@ -670,6 +676,22 @@ pub fn emit_llvm(program: &Program) -> String {
     out
 }
 
+#[derive(Clone)]
+struct TailParam {
+    name: String,
+    ty: Type,
+    slot: String,
+    held: Option<String>,
+}
+
+#[derive(Clone)]
+struct TailLoop {
+    module: String,
+    name: String,
+    loop_label: String,
+    params: Vec<TailParam>,
+}
+
 struct EmitCtx<'a> {
     strs: &'a [String],
     enum_tags: &'a HashMap<(String, String), i32>,
@@ -680,6 +702,157 @@ struct EmitCtx<'a> {
     cont_id: &'a mut usize,
     conts: &'a mut String,
     reload_fn: &'a mut Option<String>,
+    tail: Option<TailLoop>,
+    in_tail: bool,
+}
+
+fn callee_is_def(callee: &str, def: &FunDef) -> bool {
+    callee == def.name || callee == format!("{}.{}", def.module, def.name)
+}
+
+fn expr_has_self_tail(expr: &Expr, def: &FunDef, in_tail: bool) -> bool {
+    match &expr.kind {
+        ExprKind::Call { callee, args } => {
+            in_tail && callee_is_def(callee, def)
+                || args.iter().any(|a| expr_has_self_tail(a, def, false))
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            expr_has_self_tail(cond, def, false)
+                || expr_has_self_tail(then_branch, def, in_tail)
+                || expr_has_self_tail(else_branch, def, in_tail)
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            expr_has_self_tail(scrutinee, def, false)
+                || arms.iter().any(|a| {
+                    a.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_has_self_tail(g, def, false))
+                        || expr_has_self_tail(&a.body, def, in_tail)
+                })
+        }
+        ExprKind::Let { value, body, .. } => {
+            expr_has_self_tail(value, def, false) || expr_has_self_tail(body, def, in_tail)
+        }
+        ExprKind::Ascribe { expr, .. } => expr_has_self_tail(expr, def, in_tail),
+        ExprKind::Lambda { .. } => false,
+        _ => false,
+    }
+}
+
+fn has_self_tail_call(def: &FunDef) -> bool {
+    expr_has_self_tail(&def.body, def, true)
+}
+
+fn is_self_callee(callee: &str, ctx: &EmitCtx<'_>) -> bool {
+    let Some(tail) = &ctx.tail else {
+        return false;
+    };
+    if let Ok(f) = ctx.funs.resolve(callee, ctx.current_module) {
+        return f.module == tail.module && f.name == tail.name;
+    }
+    callee == tail.name || callee == format!("{}.{}", tail.module, tail.name)
+}
+
+fn last_line(code: &str) -> &str {
+    code.trim_end()
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+}
+
+fn code_jumps_to_tail(code: &str, ctx: &EmitCtx<'_>) -> bool {
+    let Some(tail) = &ctx.tail else {
+        return false;
+    };
+    last_line(code) == format!("br label %{}", tail.loop_label)
+}
+
+fn code_already_terminated(code: &str) -> bool {
+    let t = last_line(code);
+    t.starts_with("br ") || t.starts_with("ret ") || t == "unreachable"
+}
+
+fn insert_before_terminator(code: &mut String, extra: &str) {
+    if extra.is_empty() {
+        return;
+    }
+    let trimmed = code.trim_end();
+    let extra = extra.trim_end();
+    let Some(pos) = trimmed.rfind('\n') else {
+        *code = format!("{extra}\n{trimmed}\n");
+        return;
+    };
+    let (head, term) = trimmed.split_at(pos + 1);
+    *code = format!("{head}{extra}\n{term}\n");
+}
+
+fn emit_notail(
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let old = ctx.in_tail;
+    ctx.in_tail = false;
+    let e = emit_expr(expr, ctx, locals, prefix);
+    ctx.in_tail = old;
+    e
+}
+
+fn emit_nested_body(
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let tail = ctx.tail.take();
+    let in_tail = ctx.in_tail;
+    ctx.in_tail = false;
+    let e = emit_expr(expr, ctx, locals, prefix);
+    ctx.tail = tail;
+    ctx.in_tail = in_tail;
+    e
+}
+
+fn drop_owned_locals(code: &mut String, locals: &HashMap<String, Local>) {
+    let mut names: Vec<&String> = locals.keys().collect();
+    names.sort();
+    for name in names {
+        let loc = &locals[name];
+        if loc.owned && loc.kind == Kind::Ptr {
+            writeln!(code, "  call void @sz_release(ptr {})", loc.value).unwrap();
+        }
+        if loc.kind == Kind::Io {
+            writeln!(code, "  call void @sz_release(ptr {})", loc.value).unwrap();
+        }
+    }
+}
+
+fn emit_release_held(out: &mut String, tail: &TailLoop, keep: Option<&str>) {
+    for (i, p) in tail.params.iter().enumerate() {
+        let Some(held) = &p.held else {
+            continue;
+        };
+        let rel = format!("tco_rel_{i}");
+        let skip = format!("tco_skip_{i}");
+        writeln!(out, "  %{held}_v = load i1, ptr %{held}").unwrap();
+        writeln!(out, "  br i1 %{held}_v, label %{rel}, label %{skip}").unwrap();
+        writeln!(out, "{rel}:").unwrap();
+        writeln!(out, "  %{}_old = load ptr, ptr %{}", p.name, p.slot).unwrap();
+        let old = format!("%{}_old", p.name);
+        if keep != Some(old.as_str()) && keep != Some(&format!("%{}", p.name)) {
+            writeln!(out, "  call void @sz_release(ptr {old})").unwrap();
+        }
+        writeln!(out, "  br label %{skip}").unwrap();
+        writeln!(out, "{skip}:").unwrap();
+    }
 }
 
 struct Emitted {
@@ -728,6 +901,14 @@ fn val_emitted(code: String, value: String, kind: Kind) -> Emitted {
         payload_owned: false,
         owned: false,
         elem: Kind::Ptr,
+    }
+}
+
+fn dummy_kind_value(kind: Kind) -> String {
+    match kind {
+        Kind::Int => "0".into(),
+        Kind::Float => "0.000000e+00".into(),
+        Kind::Ptr | Kind::Io => "null".into(),
     }
 }
 
@@ -876,6 +1057,7 @@ fn cell_elem_of_type(ty: &Type) -> Kind {
 fn retain_borrowed_ret(ty: &Type) -> bool {
     match ty {
         Type::String | Type::List(_) | Type::Adt(_) | Type::Tuple(_) | Type::Fun(_, _) => true,
+        Type::Opaque(n) if n == "Builder" => true,
         Type::App(n, _) => !matches!(
             n.as_str(),
             "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
@@ -1161,17 +1343,74 @@ fn llvm_escape(s: &str) -> String {
 fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
     let ret = llvm_type(&def.ret);
     let sym = user_symbol(&def.module, &def.name);
+    let tco = has_self_tail_call(def);
     write!(out, "define internal {ret} @{sym}(").unwrap();
     for (i, p) in def.params.iter().enumerate() {
         if i > 0 {
             write!(out, ", ").unwrap();
         }
-        write!(out, "{} %{}", llvm_type(&p.ty), p.name).unwrap();
+        let pname = if tco {
+            if p.name == "_" {
+                format!("tco_u{i}_in")
+            } else {
+                format!("{}_in", p.name)
+            }
+        } else {
+            p.name.clone()
+        };
+        write!(out, "{} %{pname}", llvm_type(&p.ty)).unwrap();
     }
     writeln!(out, ") {{").unwrap();
     writeln!(out, "entry:").unwrap();
 
     let mut locals: HashMap<String, Local> = HashMap::new();
+    let tail = if tco {
+        let mut params = Vec::new();
+        for (i, p) in def.params.iter().enumerate() {
+            let key = if p.name == "_" {
+                format!("tco_u{i}")
+            } else {
+                p.name.clone()
+            };
+            let slot = format!("{key}_slot");
+            let k = kind_of_type(&p.ty);
+            let lty = llvm_type(&p.ty);
+            writeln!(out, "  %{slot} = alloca {lty}").unwrap();
+            writeln!(out, "  store {lty} %{key}_in, ptr %{slot}").unwrap();
+            let held = if p.name != "_" && (k == Kind::Ptr || k == Kind::Io) {
+                let h = format!("{key}_held");
+                writeln!(out, "  %{h} = alloca i1").unwrap();
+                writeln!(out, "  store i1 false, ptr %{h}").unwrap();
+                Some(h)
+            } else {
+                None
+            };
+            params.push(TailParam {
+                name: p.name.clone(),
+                ty: p.ty.clone(),
+                slot,
+                held,
+            });
+        }
+        writeln!(out, "  br label %tco_loop").unwrap();
+        writeln!(out, "tco_loop:").unwrap();
+        for p in &def.params {
+            if p.name == "_" {
+                continue;
+            }
+            let lty = llvm_type(&p.ty);
+            writeln!(out, "  %{} = load {lty}, ptr %{}_slot", p.name, p.name).unwrap();
+        }
+        Some(TailLoop {
+            module: def.module.clone(),
+            name: def.name.clone(),
+            loop_label: "tco_loop".into(),
+            params,
+        })
+    } else {
+        None
+    };
+
     for p in &def.params {
         if p.name == "_" {
             continue;
@@ -1184,12 +1423,31 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
         );
     }
 
+    ctx.tail = tail;
+    ctx.in_tail = tco;
     let body = if matches!(&def.ret, Type::Fun(_, _)) {
         emit_fun_arg(&def.ret, &def.body, ctx, &mut locals, "body")
     } else {
         emit_expr(&def.body, ctx, &mut locals, "body")
     };
+    let tail = ctx.tail.take();
+    ctx.in_tail = false;
     out.push_str(&body.code);
+
+    if code_already_terminated(&body.code) {
+        writeln!(out, "}}").unwrap();
+        writeln!(out).unwrap();
+        return;
+    }
+
+    if let Some(tail) = &tail {
+        let keep = if body.kind == Kind::Ptr {
+            Some(body.value.as_str())
+        } else {
+            None
+        };
+        emit_release_held(out, tail, keep);
+    }
 
     let ret_kind = kind_of_type(&def.ret);
     match ret_kind {
@@ -1213,13 +1471,19 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
         }
         Kind::Ptr => {
             let v = if body.kind == Kind::Ptr || body.kind == Kind::Io {
-                body.value
+                body.value.clone()
             } else if body.kind == Kind::Int || body.kind == Kind::Float {
                 box_numeric(out, body.kind, &body.value, "ret_box")
             } else {
                 "null".into()
             };
-            if retain_borrowed_ret(&def.ret) && !body.owned {
+            let returning_held_param = tail.as_ref().is_some_and(|t| {
+                t.params.iter().any(|p| {
+                    p.held.is_some()
+                        && (v == format!("%{}", p.name) || body.value == format!("%{}", p.name))
+                })
+            });
+            if retain_borrowed_ret(&def.ret) && !body.owned && !returning_held_param {
                 writeln!(out, "  call void @sz_retain(ptr {v})").unwrap();
             }
             writeln!(out, "  ret ptr {v}").unwrap();
@@ -1244,8 +1508,19 @@ fn pack_param_kinds(params: &[crate::ast::Param]) -> i64 {
     kind
 }
 
+/// Bound matches overlay `GEN_DEPTH_MAX`. Recursive ADT decode stops at leaf cases.
+const DECODE_NEST_MAX: usize = 3;
+
 fn ty_needs_decode(ty: &Type) -> bool {
     !matches!(ty, Type::Int | Type::String | Type::Bool)
+}
+
+fn decode_leaf_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::String | Type::Bool)
+}
+
+fn case_is_decode_leaf(c: &crate::ast::EnumCase) -> bool {
+    c.fields.iter().all(|(_, t)| decode_leaf_ty(t))
 }
 
 fn fun_needs_decode(d: &FunDef) -> bool {
@@ -1270,15 +1545,27 @@ fn intern_drive_decode_names(program: &Program, strs: &mut Vec<String>) {
 }
 
 fn intern_ctor_names_ty(ty: &Type, program: &Program, strs: &mut Vec<String>) {
+    intern_ctor_names_ty_seen(ty, program, strs, &mut HashSet::new());
+}
+
+fn intern_ctor_names_ty_seen(
+    ty: &Type,
+    program: &Program,
+    strs: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
     match ty {
-        Type::List(inner) => intern_ctor_names_ty(inner, program, strs),
+        Type::List(inner) => intern_ctor_names_ty_seen(inner, program, strs, seen),
         Type::Adt(id) | Type::App(id, _) => {
+            if !seen.insert(id.clone()) {
+                return;
+            }
             if let Some(en) = lookup_enum_cg(program, id) {
                 intern_str(strs, &en.name);
                 for c in &en.cases {
                     intern_str(strs, &c.name);
                     for (_, fty) in &c.fields {
-                        intern_ctor_names_ty(fty, program, strs);
+                        intern_ctor_names_ty_seen(fty, program, strs, seen);
                     }
                 }
             }
@@ -1510,7 +1797,7 @@ fn emit_tramp_decode(em: &mut DriveEmit<'_>, d: &FunDef) -> (Vec<String>, Vec<St
             _ => {
                 let c = em.tmp("cs");
                 writeln!(em.out, "  %{c} = call ptr @sz_string_cstr(ptr %a)").unwrap();
-                let dec = emit_decode_tok(em, &format!("%{c}"), ty);
+                let dec = emit_decode_tok(em, &format!("%{c}"), ty, 0);
                 call_args.push(format!("{} {}", dec.llvm_ty, dec.value));
                 if dec.owned {
                     owned.push(dec.value);
@@ -1534,7 +1821,7 @@ fn emit_tramp_decode(em: &mut DriveEmit<'_>, d: &FunDef) -> (Vec<String>, Vec<St
             ty => {
                 let c = em.tmp("cs");
                 writeln!(em.out, "  %{c} = call ptr @sz_string_cstr(ptr %h{i})").unwrap();
-                let dec = emit_decode_tok(em, &format!("%{c}"), ty);
+                let dec = emit_decode_tok(em, &format!("%{c}"), ty, 0);
                 call_args.push(format!("{} {}", dec.llvm_ty, dec.value));
                 if dec.owned {
                     owned.push(dec.value);
@@ -1546,7 +1833,7 @@ fn emit_tramp_decode(em: &mut DriveEmit<'_>, d: &FunDef) -> (Vec<String>, Vec<St
     (call_args, owned)
 }
 
-fn emit_decode_tok(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
+fn emit_decode_tok(em: &mut DriveEmit<'_>, tok: &str, ty: &Type, depth: usize) -> Decoded {
     match ty {
         Type::Int => {
             let t = em.tmp("di");
@@ -1575,8 +1862,8 @@ fn emit_decode_tok(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
                 owned: true,
             }
         }
-        Type::List(inner) => emit_decode_list(em, tok, inner),
-        Type::Adt(_) | Type::App(_, _) => emit_decode_adt(em, tok, ty),
+        Type::List(inner) => emit_decode_list(em, tok, inner, depth),
+        Type::Adt(_) | Type::App(_, _) => emit_decode_adt(em, tok, ty, depth),
         _ => {
             let t = em.tmp("di");
             writeln!(em.out, "  %{t} = call i64 @sz_drive_parse_int(ptr {tok})").unwrap();
@@ -1589,7 +1876,13 @@ fn emit_decode_tok(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
     }
 }
 
-fn emit_decode_field(em: &mut DriveEmit<'_>, inner: &str, i: i64, ty: &Type) -> Decoded {
+fn emit_decode_field(
+    em: &mut DriveEmit<'_>,
+    inner: &str,
+    i: i64,
+    ty: &Type,
+    depth: usize,
+) -> Decoded {
     let fbuf = em.alloca_buf();
     let _ok = em.tmp("fld");
     writeln!(
@@ -1597,10 +1890,10 @@ fn emit_decode_field(em: &mut DriveEmit<'_>, inner: &str, i: i64, ty: &Type) -> 
         "  %{_ok} = call i32 @sz_drive_field(ptr {inner}, i64 {i}, ptr {fbuf}, i32 192)"
     )
     .unwrap();
-    emit_decode_tok(em, &fbuf, ty)
+    emit_decode_tok(em, &fbuf, ty, depth)
 }
 
-fn emit_decode_list(em: &mut DriveEmit<'_>, tok: &str, elem_ty: &Type) -> Decoded {
+fn emit_decode_list(em: &mut DriveEmit<'_>, tok: &str, elem_ty: &Type, depth: usize) -> Decoded {
     let inner = em.alloca_buf();
     let ok = em.tmp("ol");
     writeln!(
@@ -1628,15 +1921,15 @@ fn emit_decode_list(em: &mut DriveEmit<'_>, tok: &str, elem_ty: &Type) -> Decode
     writeln!(em.out, "{e0}:").unwrap();
     writeln!(em.out, "  br label %{join}").unwrap();
     writeln!(em.out, "{l1}:").unwrap();
-    let d0 = emit_decode_field(em, &inner, 0, elem_ty);
+    let d0 = emit_decode_field(em, &inner, 0, elem_ty, depth + 1);
     let c1 = emit_cons_one(em, &d0, "null");
     let e1 = em.tmp("le");
     writeln!(em.out, "  br label %{e1}").unwrap();
     writeln!(em.out, "{e1}:").unwrap();
     writeln!(em.out, "  br label %{join}").unwrap();
     writeln!(em.out, "{l2}:").unwrap();
-    let a0 = emit_decode_field(em, &inner, 0, elem_ty);
-    let a1 = emit_decode_field(em, &inner, 1, elem_ty);
+    let a0 = emit_decode_field(em, &inner, 0, elem_ty, depth + 1);
+    let a1 = emit_decode_field(em, &inner, 1, elem_ty, depth + 1);
     let t2 = emit_cons_one(em, &a1, "null");
     let c2 = emit_cons_one(em, &a0, &t2);
     let e2 = em.tmp("le");
@@ -1644,9 +1937,9 @@ fn emit_decode_list(em: &mut DriveEmit<'_>, tok: &str, elem_ty: &Type) -> Decode
     writeln!(em.out, "{e2}:").unwrap();
     writeln!(em.out, "  br label %{join}").unwrap();
     writeln!(em.out, "{l3}:").unwrap();
-    let b0 = emit_decode_field(em, &inner, 0, elem_ty);
-    let b1 = emit_decode_field(em, &inner, 1, elem_ty);
-    let b2 = emit_decode_field(em, &inner, 2, elem_ty);
+    let b0 = emit_decode_field(em, &inner, 0, elem_ty, depth + 1);
+    let b1 = emit_decode_field(em, &inner, 1, elem_ty, depth + 1);
+    let b2 = emit_decode_field(em, &inner, 2, elem_ty, depth + 1);
     let u1 = emit_cons_one(em, &b2, "null");
     let u2 = emit_cons_one(em, &b1, &u1);
     let c3 = emit_cons_one(em, &b0, &u2);
@@ -1693,20 +1986,26 @@ fn emit_cons_one(em: &mut DriveEmit<'_>, head: &Decoded, tail: &str) -> String {
     format!("%{c}")
 }
 
-fn emit_decode_adt(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
+fn emit_decode_adt(em: &mut DriveEmit<'_>, tok: &str, ty: &Type, depth: usize) -> Decoded {
     let id = match ty {
         Type::Adt(id) | Type::App(id, _) => id.as_str(),
         _ => "?",
     };
     let Some(en) = lookup_enum_cg(em.program, id) else {
-        return emit_decode_tok(em, tok, &Type::Int);
+        return emit_decode_tok(em, tok, &Type::Int, depth);
     };
     let inner = em.alloca_buf();
     let join = em.tmp("aj");
     let fail = em.tmp("af");
+    let cases: Vec<(usize, &crate::ast::EnumCase)> = en
+        .cases
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| depth < DECODE_NEST_MAX || case_is_decode_leaf(c))
+        .collect();
     let mut try_labs = Vec::new();
     let mut case_labs = Vec::new();
-    for _ in &en.cases {
+    for _ in &cases {
         try_labs.push(em.tmp("at"));
         case_labs.push(em.tmp("ac"));
     }
@@ -1716,7 +2015,7 @@ fn emit_decode_adt(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
         writeln!(em.out, "  br label %{}", try_labs[0]).unwrap();
     }
     let mut phi_inc = Vec::new();
-    for (i, c) in en.cases.iter().enumerate() {
+    for (i, (tag, c)) in cases.iter().enumerate() {
         writeln!(em.out, "{}:", try_labs[i]).unwrap();
         let nm = em.intern_gep(&c.name);
         let is = em.tmp("is");
@@ -1727,7 +2026,7 @@ fn emit_decode_adt(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
         .unwrap();
         let h = em.tmp("ih");
         writeln!(em.out, "  %{h} = icmp ne i32 %{is}, 0").unwrap();
-        let next = if i + 1 < en.cases.len() {
+        let next = if i + 1 < cases.len() {
             try_labs[i + 1].clone()
         } else {
             fail.clone()
@@ -1739,7 +2038,7 @@ fn emit_decode_adt(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
         )
         .unwrap();
         writeln!(em.out, "{}:", case_labs[i]).unwrap();
-        let built = emit_construct_case(em, i as i32, c, &inner);
+        let built = emit_construct_case(em, *tag as i32, c, &inner, depth);
         let end = em.tmp("ae");
         writeln!(em.out, "  br label %{end}").unwrap();
         writeln!(em.out, "{end}:").unwrap();
@@ -1775,6 +2074,7 @@ fn emit_construct_case(
     tag: i32,
     case: &crate::ast::EnumCase,
     inner: &str,
+    depth: usize,
 ) -> String {
     if case.fields.is_empty() {
         let a = em.tmp("adt");
@@ -1783,7 +2083,7 @@ fn emit_construct_case(
     }
     let mut decoded = Vec::new();
     for (i, (_, fty)) in case.fields.iter().enumerate() {
-        decoded.push(emit_decode_field(em, inner, i as i64, fty));
+        decoded.push(emit_decode_field(em, inner, i as i64, fty, depth + 1));
     }
     if decoded.len() == 1 {
         let d = &decoded[0];
@@ -2054,6 +2354,14 @@ fn emit_sz_string(
     (se.value, se.owned)
 }
 
+fn pattern_always_matches(pat: &Pattern) -> bool {
+    match pat {
+        Pattern::Wildcard | Pattern::Bind(_) => true,
+        Pattern::As { inner, .. } => pattern_always_matches(inner),
+        _ => false,
+    }
+}
+
 fn emit_match(
     scrutinee: &Expr,
     arms: &[MatchArm],
@@ -2061,7 +2369,7 @@ fn emit_match(
     locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
-    let se = emit_expr(scrutinee, ctx, locals, &format!("{prefix}_sc"));
+    let se = emit_notail(scrutinee, ctx, locals, &format!("{prefix}_sc"));
     let id = *ctx.cont_id;
     *ctx.cont_id += 1;
     let mut code = se.code;
@@ -2111,7 +2419,7 @@ fn emit_match(
         let ge = arm
             .guard
             .as_ref()
-            .map(|g| emit_expr(g, ctx, locals, &format!("{prefix}_g{id}_{i}")));
+            .map(|g| emit_notail(g, ctx, locals, &format!("{prefix}_g{id}_{i}")));
         let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_a{id}_{i}"));
         for b in &bound_names {
             locals.remove(b);
@@ -2132,12 +2440,18 @@ fn emit_match(
 
     writeln!(code, "{default_label}:").unwrap();
     let unpack_miss = arms.iter().any(|a| a.unpack);
+    let last_exhaustive = arms
+        .last()
+        .is_some_and(|a| a.guard.is_none() && pattern_always_matches(&a.pattern));
     let dflt = if unpack_miss {
         writeln!(
             code,
             "  call void @sz_panic(ptr getelementptr inbounds ([14 x i8], ptr @.unpack, i64 0, i64 0))"
         )
         .unwrap();
+        writeln!(code, "  unreachable").unwrap();
+        None
+    } else if last_exhaustive {
         writeln!(code, "  unreachable").unwrap();
         None
     } else {
@@ -2177,7 +2491,18 @@ fn emit_match(
             .unwrap();
             writeln!(code, "{body_l}:").unwrap();
         }
-        code.push_str(&ae.code);
+        let jump = code_jumps_to_tail(&ae.code, ctx);
+        let mut ac = ae.code.clone();
+        if jump && se.owned {
+            insert_before_terminator(
+                &mut ac,
+                &format!("  call void @sz_release(ptr {})", se.value),
+            );
+        }
+        code.push_str(&ac);
+        if jump {
+            continue;
+        }
         if mixed_ptr && !ae.owned {
             writeln!(code, "  call void @sz_retain(ptr {})", ae.value).unwrap();
         }
@@ -2190,8 +2515,32 @@ fn emit_match(
         phi_parts.push((dflt, default_label));
     }
 
-    let ty = llvm_kind_ty(result_kind);
+    if phi_parts.is_empty() {
+        return val_emitted(code, dummy_kind_value(result_kind), result_kind)
+            .with_elem(result_elem);
+    }
+
     writeln!(code, "{merge}:").unwrap();
+    if phi_parts.len() == 1 {
+        let (val, _) = &phi_parts[0];
+        if se.owned {
+            if result_kind == Kind::Ptr && !arms_provide {
+                writeln!(code, "  call void @sz_retain(ptr {val})").unwrap();
+            }
+            writeln!(code, "  call void @sz_release(ptr {})", se.value).unwrap();
+        }
+        return Emitted {
+            code,
+            value: val.clone(),
+            kind: result_kind,
+            payload: result_payload,
+            payload_owned: result_kind == Kind::Io && result_payload_owned,
+            owned: result_kind == Kind::Ptr && (arms_provide || se.owned),
+            elem: result_elem,
+        };
+    }
+
+    let ty = llvm_kind_ty(result_kind);
     write!(code, "  %{prefix}_phi = phi {ty}").unwrap();
     for (i, (val, lab)) in phi_parts.iter().enumerate() {
         if i > 0 {
@@ -2907,7 +3256,10 @@ fn emit_expr(
         }
         ExprKind::Let { name, value, body } => {
             // Nested vals must not reuse the same LLVM name prefix.
+            let old_tail = ctx.in_tail;
+            ctx.in_tail = false;
             let ve = emit_let_value(value, ctx, locals, &format!("{prefix}_lv_{name}"));
+            ctx.in_tail = old_tail;
             if name == "_" {
                 let mut code = ve.code;
                 drop_discarded(&mut code, ve.kind, &ve.value, ve.owned);
@@ -2938,19 +3290,21 @@ fn emit_expr(
             let mut be = emit_expr(body, ctx, locals, &format!("{prefix}_l_{name}"));
             let bound = locals.remove(name);
             code.push_str(&be.code);
-            if let Some(bound) = bound {
-                if bound.owned && bound.kind == Kind::Ptr {
-                    if be.value == bound.value {
-                        be.owned = true;
-                    } else {
-                        if be.kind == Kind::Ptr && !be.owned {
-                            writeln!(code, "  call void @sz_retain(ptr {})", be.value).unwrap();
+            if !code_already_terminated(&be.code) {
+                if let Some(bound) = bound {
+                    if bound.owned && bound.kind == Kind::Ptr {
+                        if be.value == bound.value {
                             be.owned = true;
+                        } else {
+                            if be.kind == Kind::Ptr && !be.owned {
+                                writeln!(code, "  call void @sz_retain(ptr {})", be.value).unwrap();
+                                be.owned = true;
+                            }
+                            writeln!(code, "  call void @sz_release(ptr {})", bound.value).unwrap();
                         }
+                    } else if bound.kind == Kind::Io && !crate::resolve::uses_name(body, name) {
                         writeln!(code, "  call void @sz_release(ptr {})", bound.value).unwrap();
                     }
-                } else if bound.kind == Kind::Io && !crate::resolve::uses_name(body, name) {
-                    writeln!(code, "  call void @sz_release(ptr {})", bound.value).unwrap();
                 }
             }
             Emitted {
@@ -2971,7 +3325,7 @@ fn emit_expr(
         } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
-            let ce = emit_expr(cond, ctx, locals, &format!("{prefix}_ic"));
+            let ce = emit_notail(cond, ctx, locals, &format!("{prefix}_ic"));
             let mut code = ce.code;
             let cond_i64 = as_i64(&mut code, ce.kind, &ce.value, &format!("{prefix}_c0"));
             let then_l = format!("{prefix}_then_{id}");
@@ -2991,34 +3345,74 @@ fn emit_expr(
             let ee = emit_expr(else_branch, ctx, locals, &format!("{prefix}_e{id}"));
             let kind = te.kind;
             let mixed_ptr = kind == Kind::Ptr && te.owned != ee.owned;
+            let then_jump = code_jumps_to_tail(&te.code, ctx);
+            let else_jump = code_jumps_to_tail(&ee.code, ctx);
 
             writeln!(code, "{then_l}:").unwrap();
             code.push_str(&te.code);
-            if mixed_ptr && !te.owned {
-                writeln!(code, "  call void @sz_retain(ptr {})", te.value).unwrap();
+            if !then_jump {
+                if mixed_ptr && !te.owned {
+                    writeln!(code, "  call void @sz_retain(ptr {})", te.value).unwrap();
+                }
+                writeln!(code, "  br label %{then_join}").unwrap();
+                writeln!(code, "{then_join}:").unwrap();
+                writeln!(code, "  br label %{merge}").unwrap();
             }
-            writeln!(code, "  br label %{then_join}").unwrap();
-            writeln!(code, "{then_join}:").unwrap();
-            writeln!(code, "  br label %{merge}").unwrap();
 
             writeln!(code, "{else_l}:").unwrap();
             code.push_str(&ee.code);
-            if mixed_ptr && !ee.owned {
-                writeln!(code, "  call void @sz_retain(ptr {})", ee.value).unwrap();
+            if !else_jump {
+                if mixed_ptr && !ee.owned {
+                    writeln!(code, "  call void @sz_retain(ptr {})", ee.value).unwrap();
+                }
+                writeln!(code, "  br label %{else_join}").unwrap();
+                writeln!(code, "{else_join}:").unwrap();
+                writeln!(code, "  br label %{merge}").unwrap();
             }
-            writeln!(code, "  br label %{else_join}").unwrap();
-            writeln!(code, "{else_join}:").unwrap();
-            writeln!(code, "  br label %{merge}").unwrap();
+
+            if then_jump && else_jump {
+                return val_emitted(code, dummy_kind_value(kind), kind).with_elem(te.elem);
+            }
+
+            writeln!(code, "{merge}:").unwrap();
+            if else_jump {
+                return Emitted {
+                    code,
+                    value: te.value,
+                    kind,
+                    payload: te.payload,
+                    payload_owned: te.payload_owned,
+                    owned: te.owned || mixed_ptr,
+                    elem: te.elem,
+                };
+            }
+            if then_jump {
+                return Emitted {
+                    code,
+                    value: ee.value,
+                    kind,
+                    payload: ee.payload,
+                    payload_owned: ee.payload_owned,
+                    owned: ee.owned || mixed_ptr,
+                    elem: ee.elem,
+                };
+            }
 
             let payload = te.payload;
             let ty = llvm_kind_ty(kind);
-            writeln!(code, "{merge}:").unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_phi = phi {ty} [ {}, %{then_join} ], [ {}, %{else_join} ]",
-                te.value, ee.value
-            )
-            .unwrap();
+            write!(code, "  %{prefix}_phi = phi {ty}").unwrap();
+            let mut first = true;
+            if !then_jump {
+                write!(code, " [ {}, %{then_join} ]", te.value).unwrap();
+                first = false;
+            }
+            if !else_jump {
+                if !first {
+                    write!(code, ",").unwrap();
+                }
+                write!(code, " [ {}, %{else_join} ]", ee.value).unwrap();
+            }
+            writeln!(code).unwrap();
             Emitted {
                 code,
                 value: format!("%{prefix}_phi"),
@@ -3093,7 +3487,7 @@ fn emit_expr(
                 }
             }
 
-            let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("c{id}"));
+            let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("c{id}"));
 
             writeln!(
                 ctx.conts,
@@ -3168,7 +3562,7 @@ fn emit_expr(
                 writeln!(pre, "  %{p}_msg = call ptr @sz_error_message(ptr %err)").unwrap();
                 body_locals.insert(p.clone(), Local::owned(format!("%{p}_msg"), Kind::Ptr));
             }
-            let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
+            let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("e{id}"));
             writeln!(
                 ctx.conts,
                 "define internal ptr @{cont_name}(ptr %err, ptr %env) {{"
@@ -3483,7 +3877,7 @@ fn emit_lambda(
         body_locals.insert(p.clone(), Local::borrow("%self", Kind::Ptr));
     }
 
-    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("t{id}"));
+    let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("t{id}"));
 
     writeln!(
         ctx.conts,
@@ -3557,7 +3951,7 @@ fn emit_map_lambda(
         }
     }
 
-    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("m{id}"));
+    let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("m{id}"));
 
     writeln!(
         ctx.conts,
@@ -3638,7 +4032,7 @@ fn emit_each_lambda(
         }
     }
 
-    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
+    let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("e{id}"));
 
     writeln!(
         ctx.conts,
@@ -3766,7 +4160,7 @@ fn emit_io_cont_lambda(
         }
     }
 
-    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("r{id}"));
+    let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("r{id}"));
 
     writeln!(
         ctx.conts,
@@ -3845,7 +4239,7 @@ fn emit_pred_lambda(
         }
     }
 
-    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("p{id}"));
+    let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("p{id}"));
     assert!(
         body_emitted.kind == Kind::Int,
         "predicate lambda must return Bool/Int"
@@ -3920,7 +4314,7 @@ fn emit_smap_lambda(
         }
     }
 
-    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("sm{id}"));
+    let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("sm{id}"));
 
     writeln!(
         ctx.conts,
@@ -5286,7 +5680,7 @@ fn emit_rebuild_lambda(
         }
     }
 
-    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("u{id}"));
+    let body_emitted = emit_nested_body(body, ctx, &mut body_locals, &format!("u{id}"));
 
     writeln!(ctx.conts, "define internal ptr @{fn_name}(ptr %env) {{").unwrap();
     writeln!(ctx.conts, "entry:").unwrap();
@@ -5657,6 +6051,112 @@ fn emit_view_wrap(llvm: &str, args: String, mut code: String, prefix: &str) -> E
 }
 
 #[inline(never)]
+fn emit_self_tail(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let f = ctx.funs.resolve(callee, ctx.current_module).ok().cloned();
+    let tail = ctx.tail.as_ref().expect("self-tail needs a loop");
+    let loop_label = tail.loop_label.clone();
+    let params = tail.params.clone();
+    let ret_kind = f
+        .as_ref()
+        .map(|fun| kind_of_type(&fun.ret))
+        .unwrap_or(Kind::Int);
+
+    let old = ctx.in_tail;
+    ctx.in_tail = false;
+    let mut emitted_args = Vec::new();
+    for (i, a) in args.iter().enumerate() {
+        if let Some(fun) = f.as_ref() {
+            if let Some(p) = fun.params.get(i) {
+                if matches!(&p.ty, Type::Fun(_, _)) {
+                    emitted_args.push(emit_fun_arg(
+                        &p.ty,
+                        a,
+                        ctx,
+                        locals,
+                        &format!("{prefix}_targ{i}"),
+                    ));
+                    continue;
+                }
+            }
+        }
+        emitted_args.push(emit_expr(a, ctx, locals, &format!("{prefix}_targ{i}")));
+    }
+    ctx.in_tail = old;
+
+    let mut code = String::new();
+    for a in &emitted_args {
+        code.push_str(&a.code);
+    }
+
+    let mut extra_boxes: Vec<String> = Vec::new();
+    let mut stored: Vec<(String, String, Kind)> = Vec::new();
+    for (i, p) in params.iter().enumerate() {
+        let a = &emitted_args[i];
+        let want = kind_of_type(&p.ty);
+        let (lval, _) = match (want, a.kind) {
+            (Kind::Int, Kind::Int) => (a.value.clone(), "i64"),
+            (Kind::Float, Kind::Float) => (a.value.clone(), "double"),
+            (Kind::Int, _) => {
+                let v = as_i64(&mut code, a.kind, &a.value, &format!("{prefix}_ta{i}"));
+                (v, "i64")
+            }
+            (Kind::Float, _) => {
+                let v = as_f64(&mut code, a.kind, &a.value, &format!("{prefix}_ta{i}"));
+                (v, "double")
+            }
+            (_, Kind::Int) | (_, Kind::Float) => {
+                let boxed = box_numeric(&mut code, a.kind, &a.value, &format!("{prefix}_ta{i}"));
+                extra_boxes.push(boxed.clone());
+                (boxed, "ptr")
+            }
+            _ => (a.value.clone(), "ptr"),
+        };
+        stored.push((lval, p.slot.clone(), want));
+    }
+
+    for (i, p) in params.iter().enumerate() {
+        if p.held.is_some() {
+            writeln!(code, "  call void @sz_retain(ptr {})", stored[i].0).unwrap();
+        }
+    }
+    drop_owned_locals(&mut code, locals);
+    for (i, p) in params.iter().enumerate() {
+        if let Some(held) = &p.held {
+            let rel = format!("{prefix}_trel{i}");
+            let skip = format!("{prefix}_tskip{i}");
+            writeln!(code, "  %{prefix}_hv{i} = load i1, ptr %{held}").unwrap();
+            writeln!(code, "  br i1 %{prefix}_hv{i}, label %{rel}, label %{skip}").unwrap();
+            writeln!(code, "{rel}:").unwrap();
+            writeln!(code, "  %{prefix}_old{i} = load ptr, ptr %{}", p.slot).unwrap();
+            writeln!(code, "  call void @sz_release(ptr %{prefix}_old{i})").unwrap();
+            writeln!(code, "  br label %{skip}").unwrap();
+            writeln!(code, "{skip}:").unwrap();
+        }
+    }
+    for (lval, slot, want) in &stored {
+        let lty = llvm_kind_ty(*want);
+        writeln!(code, "  store {lty} {lval}, ptr %{slot}").unwrap();
+    }
+    for (i, p) in params.iter().enumerate() {
+        if let Some(held) = &p.held {
+            let _ = i;
+            writeln!(code, "  store i1 true, ptr %{held}").unwrap();
+        }
+    }
+    drop_owned_ptrs(&mut code, &emitted_args);
+    for b in &extra_boxes {
+        writeln!(code, "  call void @sz_release(ptr {b})").unwrap();
+    }
+    writeln!(code, "  br label %{loop_label}").unwrap();
+    val_emitted(code, dummy_kind_value(ret_kind), ret_kind)
+}
+
 fn emit_call(
     callee: &str,
     args: &[Expr],
@@ -5666,6 +6166,9 @@ fn emit_call(
 ) -> Emitted {
     if locals.contains_key(callee) {
         return emit_fun_apply(callee, args, ctx, locals, prefix);
+    }
+    if ctx.in_tail && is_self_callee(callee, ctx) {
+        return emit_self_tail(callee, args, ctx, locals, prefix);
     }
     const PRED_PTR: &[(&str, &str, bool)] = &[
         ("List.filter", "sz_list_filter", false),
@@ -5975,6 +6478,40 @@ fn emit_call(
     }
 
     match callee {
+        "Oracle.sumTo" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_oracle_sum_to(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Builder.empty" => {
+            writeln!(code, "  %{prefix}_v = call ptr @sz_builder_new()").unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Builder.append" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_builder_append(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Builder.result" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_builder_result(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "Str.concat" => {
             writeln!(
                 code,
@@ -9134,6 +9671,86 @@ mod tests {
         assert!(ir.contains("sz_io_println"));
         assert!(ir.contains("sz_runtime_main_args"));
         assert!(ir.contains("sz_release"));
+    }
+
+    fn fundef_ir<'a>(ir: &'a str, sym: &str) -> &'a str {
+        let needle = format!("define internal ");
+        let mut search = 0usize;
+        while let Some(rel) = ir[search..].find(&needle) {
+            let at = search + rel;
+            let rest = &ir[at..];
+            if rest.contains(&format!("@{sym}(")) {
+                let sig_end = rest.find(") {\n").expect("define body");
+                if rest[..sig_end].contains(&format!("@{sym}(")) {
+                    let body = &rest[sig_end..];
+                    let end = body.find("\n}\n").expect("define end");
+                    return &body[..end];
+                }
+            }
+            search = at + needle.len();
+        }
+        panic!("missing define {sym}:\n{ir}");
+    }
+
+    #[test]
+    fn emit_self_tail_if_lowers_to_loop() {
+        let src = r#"
+def countdown(n: Int): Int =
+  if (n <= 0) 0 else countdown(n - 1)
+@main def main: IO[Unit] = IO.println(Str.fromInt(countdown(3)))
+"#;
+        let ir = emit_full(src);
+        let body = fundef_ir(&ir, "sz_user_countdown");
+        assert!(
+            body.contains("br label %tco_loop"),
+            "expected tail loop:\n{body}"
+        );
+        assert!(
+            !body.contains("call i64 @sz_user_countdown("),
+            "self-tail must not call:\n{body}"
+        );
+        find_user_call(&ir, "sz_user_countdown");
+    }
+
+    #[test]
+    fn emit_self_tail_match_lowers_to_loop() {
+        let src = r#"
+def countdown(n: Int): Int =
+  n match {
+    case 0 => 0
+    case _ => countdown(n - 1)
+  }
+@main def main: IO[Unit] = IO.println(Str.fromInt(countdown(3)))
+"#;
+        let ir = emit_full(src);
+        let body = fundef_ir(&ir, "sz_user_countdown");
+        assert!(
+            body.contains("br label %tco_loop"),
+            "expected tail loop:\n{body}"
+        );
+        assert!(
+            !body.contains("call i64 @sz_user_countdown("),
+            "self-tail must not call:\n{body}"
+        );
+    }
+
+    #[test]
+    fn emit_non_tail_self_call_stays_a_call() {
+        let src = r#"
+def rec(n: Int): Int =
+  if (n <= 0) 0 else rec(n - 1) + 1
+@main def main: IO[Unit] = IO.println(Str.fromInt(rec(2)))
+"#;
+        let ir = emit_full(src);
+        let body = fundef_ir(&ir, "sz_user_rec");
+        assert!(
+            body.contains("call i64 @sz_user_rec("),
+            "non-tail self-call stays a call:\n{body}"
+        );
+        assert!(
+            !body.contains("tco_loop"),
+            "non-tail must not open a loop:\n{body}"
+        );
     }
 
     #[test]
@@ -13084,6 +13701,69 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
+    fn emit_builder_empty_append_result() {
+        let src = r#"
+def fill(n: Int, b: Builder): Builder =
+  if (n <= 0) b else fill(n - 1, Builder.append(b, "x"))
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Str.len(Builder.result(fill(3, Builder.empty())))))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_builder_new"));
+        assert!(ir.contains("sz_builder_append"));
+        assert!(ir.contains("sz_builder_result"));
+        let body = fundef_ir(&ir, "sz_user_fill");
+        assert!(
+            body.contains("br label %tco_loop"),
+            "expected tail loop:\n{body}"
+        );
+        assert!(
+            body.contains("ret ptr %b"),
+            "base case must return the builder param, not a phi:\n{body}"
+        );
+    }
+
+    #[test]
+    fn emit_oracle_sum_to() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Oracle.sumTo(4)))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_oracle_sum_to"),
+            "expected oracle call:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_match_tco_base_returns_held_param() {
+        let src = r#"
+def step(i: Int, m: Map[String, Int]): Map[String, Int] =
+  i match {
+    case 0 => step(1, Map.set(m, "k", 1))
+    case _ => m
+  }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Map.getOrElse(step(0, Map.empty()), "k", -1)))
+"#;
+        let ir = emit_full(src);
+        let body = fundef_ir(&ir, "sz_user_step");
+        assert!(
+            body.contains("br label %tco_loop"),
+            "expected tail loop:\n{body}"
+        );
+        assert!(
+            body.contains("ret ptr %m"),
+            "base case must return the map param, not a phi:\n{body}"
+        );
+    }
+
+    #[test]
     fn emit_str_is_empty_case_repeat() {
         let src = r#"@main def main: IO[Unit] =
   for {
@@ -16946,5 +17626,40 @@ def bits(n: Int, b: Bool): Int =
         assert!(ir.contains("or i64"), "expected |: {ir}");
         assert!(ir.contains("xor i64"), "expected ^ / ~: {ir}");
         assert!(ir.contains("shl i64"), "expected <<: {ir}");
+    }
+
+    #[test]
+    fn emit_recursive_adt_drive_decode_is_bounded() {
+        let live = crate::parser::parse_sources(&[(
+            "Main.scuzz".into(),
+            "enum Term:\n  case N(n: Int)\n  case Add(a: Term, b: Term)\n\
+             @main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        let p = crate::overlay::apply_overlays(
+            live,
+            &[crate::overlay::OverlaySource {
+                stem: "Main".into(),
+                kind: crate::overlay::OverlayKind::Drivers,
+                path: std::path::PathBuf::new(),
+                label: "Main.scuzz_drivers".into(),
+                text: "def termDiff(t: Term): IO[Unit] =\n  IO.pure(())\n".into(),
+            }],
+        )
+        .unwrap();
+        let mut p = p;
+        crate::typ::inject_builtin_enums(&mut p.enums);
+        let p = crate::lower::lower_program(p);
+        let p = crate::typ::expand_impls(p).expect("impls");
+        let p = crate::typ::resolve_named_args(p).expect("named");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        let p = crate::typ::monomorphize(p).expect("mono");
+        let p = crate::typ::resolve_field_access(p).expect("fields after mono");
+        let ir = emit_llvm(&p);
+        let n = ir.matches("sz_drive_uncons").count();
+        assert!(n > 0 && n < 64, "uncons count {n}");
     }
 }

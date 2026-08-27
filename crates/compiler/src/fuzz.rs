@@ -306,18 +306,47 @@ fn pick_enum_case(
     s: i64,
     depth: i64,
 ) -> (String, Vec<DriveArgKind>) {
+    let leaves: Vec<&(String, Vec<DriveArgKind>)> =
+        cases.iter().filter(|(_, fs)| case_is_leaf(fs)).collect();
+    if depth >= GEN_NEST_MAX && !leaves.is_empty() {
+        let i = lcg_below(s, leaves.len() as i64) as usize;
+        return leaves[i].clone();
+    }
     let nullary: Vec<&(String, Vec<DriveArgKind>)> =
         cases.iter().filter(|(_, fs)| fs.is_empty()).collect();
-    if depth >= GEN_NEST_MAX && !nullary.is_empty() {
-        let i = lcg_below(s, nullary.len() as i64) as usize;
-        return nullary[i].clone();
-    }
     if !nullary.is_empty() && lcg_below(s, 2) == 0 {
         let i = lcg_below(lcg_next(s), nullary.len() as i64) as usize;
         return nullary[i].clone();
     }
     let i = lcg_below(lcg_next(s), cases.len() as i64) as usize;
     cases[i].clone()
+}
+
+fn case_is_leaf(fields: &[DriveArgKind]) -> bool {
+    fields.iter().all(kind_is_leaf_field)
+}
+
+fn kind_is_leaf_field(k: &DriveArgKind) -> bool {
+    matches!(
+        k,
+        DriveArgKind::Int(_) | DriveArgKind::String | DriveArgKind::Bool
+    )
+}
+
+fn kind_leaf_default(k: &DriveArgKind) -> String {
+    match k {
+        DriveArgKind::Int(bound) => {
+            let v = bound.lo.unwrap_or(0);
+            if bound.contains(v) {
+                v.to_string()
+            } else {
+                bound.lo.or(bound.hi).unwrap_or(0).to_string()
+            }
+        }
+        DriveArgKind::String => "a".into(),
+        DriveArgKind::Bool => "false".into(),
+        _ => "0".into(),
+    }
 }
 
 fn format_ctor(name: &str, fields: &[String]) -> String {
@@ -486,8 +515,9 @@ fn shrink_enum(cases: &[(String, Vec<DriveArgKind>)], raw: &str) -> Vec<String> 
     };
     let mut out = Vec::new();
     for (name, fields) in cases {
-        if fields.is_empty() && name != &ctor {
-            out.push(name.clone());
+        if case_is_leaf(fields) && name != &ctor {
+            let defaults: Vec<String> = fields.iter().map(kind_leaf_default).collect();
+            out.push(format_ctor(name, &defaults));
         }
     }
     if let Some((_, fields)) = cases.iter().find(|(n, _)| n == &ctor) {
@@ -2328,6 +2358,28 @@ scroll:scroll
         assert!(
             got.contains(&"drive describe Some(0)".to_string()),
             "{got:?}"
+        );
+    }
+
+    #[test]
+    fn drive_line_recursive_enum_stays_a_term() {
+        let spec = "termDiff e:N(i)|Add(e:N(i)|Add(e:N(i),e:N(i)),e:N(i)|Add(e:N(i),e:N(i)))";
+        for seed in 0..32 {
+            let line = drive_line(spec, seed);
+            assert!(
+                line.contains("N(") || line.contains("Add("),
+                "ill-formed term: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn drive_line_shrinks_add_to_leaf() {
+        let specs = vec!["termDiff e:N(i)|Add(e:N(i),e:N(i))".into()];
+        let got = drive_line_shrinks("drive termDiff Add(N(1),N(2))", &specs);
+        assert!(
+            got.iter().any(|s| s.contains("N(0)")),
+            "expected shrink to leaf N(0): {got:?}"
         );
     }
 
