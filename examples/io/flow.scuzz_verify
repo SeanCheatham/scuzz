@@ -1,0 +1,6 @@
+def fibersStayNonNeg(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.fiberLive(t, i) >= 0 && Timeline.fiberReady(t, i) >= 0 && Timeline.fiberParked(t, i) >= 0 && Timeline.fiberDone(t, i) >= 0)
+
+def effectsStayNonNeg(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.effectCount(t, i) >= 0 && Timeline.faultN(t, i) >= 0 && Timeline.checkpoint(t, i) >= 0 && Timeline.nearestCheckpoint(t, i) >= -1)
+

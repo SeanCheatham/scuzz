@@ -1134,6 +1134,7 @@ static void *sys_getenv_result(void *env) {
   SzString *key = p ? (SzString *)p->left : NULL;
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   const char *v;
+  sz_timeline_log_cstr("Sys.getenv", key ? sz_string_cstr(key) : "");
   if (sz_testrt_sys_is_fake())
     v = sz_testrt_env_get(key ? sz_string_cstr(key) : "");
   else

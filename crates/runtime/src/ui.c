@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sched.h>
 #include <dlfcn.h>
 
 static int want_gpu_presenter(void) {
@@ -2148,6 +2149,11 @@ SzQuiesce sz_ui_quiesce(SzUiSession *session) {
     pthread_mutex_unlock(&session->bridge_lock);
     if (!sz_ui_pump_sync(session))
       sz_panic("Ui.run quiesce pump failed");
+    /* Let IO bridge posters run. Count work that arrived during the pump. */
+    sched_yield();
+    pthread_mutex_lock(&session->bridge_lock);
+    busy = busy || session->dirty || session->bridge_head != NULL;
+    pthread_mutex_unlock(&session->bridge_lock);
     if (busy)
       idle = 0;
     else {

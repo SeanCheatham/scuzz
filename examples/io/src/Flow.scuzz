@@ -1,9 +1,13 @@
-def run(): IO[Unit] =
+private def concatKit(): IO[Unit] =
   for {
     s = Stream.concat(Stream.evalMap(Stream.emits(["a", "b"]), x => IO.pure(Str.concat(x, "!"))), Stream.eval(IO.pure("c")))
     xs <- Stream.compileToList(s)
     _ <- IO.println(List.join(xs, ","))
     _ <- Stream.drain(Stream.evalMap(Stream.emit("d"), x => IO.println(s"drain:$x")))
+  } yield ()
+
+private def sliceKit(): IO[Unit] =
+  for {
     taken <- Stream.compileToList(Stream.take(Stream.emits(["x", "y", "z"]), 2))
     _ <- IO.println(Str.concat("take:", List.join(taken, ",")))
     dropped <- Stream.compileToList(Stream.drop(Stream.emits(["x", "y", "z"]), 1))
@@ -12,6 +16,10 @@ def run(): IO[Unit] =
     _ <- IO.println(Str.concat("filter:", List.join(filtered, ",")))
     mapped <- Stream.compileToList(Stream.map(Stream.emits(["a", "b"]), x => Str.concat(x, "!")))
     _ <- IO.println(Str.concat("map:", List.join(mapped, ",")))
+  } yield ()
+
+private def searchKit(): IO[Unit] =
+  for {
     tw <- Stream.compileToList(Stream.takeWhile(Stream.emits(["a", "b", "", "c"]), x => Str.len(x) > 0))
     _ <- IO.println(Str.concat("takeWhile:", List.join(tw, ",")))
     dw <- Stream.compileToList(Stream.dropWhile(Stream.emits(["", "", "a", "b"]), x => Str.len(x) == 0))
@@ -22,6 +30,10 @@ def run(): IO[Unit] =
     _ <- IO.println(Str.concat("exists:", if (hit) "1" else "0"))
     miss <- Stream.exists(Stream.emits(["", ""]), x => Str.len(x) > 0)
     _ <- IO.println(Str.concat("miss:", if (miss) "1" else "0"))
+  } yield ()
+
+private def intKit(): IO[Unit] =
+  for {
     ns <- Stream.compileToList(Stream.map(Stream.emits([1, 2]), n => n + 1))
     _ <- IO.println(s"mapN:${Str.fromInt(List.head(ns))}")
     fs <- Stream.compileToList(Stream.filter(Stream.emit(4), n => n > 0))
@@ -30,5 +42,114 @@ def run(): IO[Unit] =
     _ <- IO.println(s"evalN:${Str.fromInt(List.head(es))}")
     cs <- Stream.compileToList(Stream.concat(Stream.take(Stream.emit(6), 1), Stream.drop(Stream.emit(7), 0)))
     _ <- IO.println(s"concatN:${Str.fromInt(List.head(cs))}")
+  } yield ()
+
+private def rangeKit(): IO[Unit] =
+  for {
+    rng <- Stream.compileToList(Stream.range(3, 6))
+    _ <- IO.println(s"range:${Str.fromInt(List.head(rng))}:${Str.fromInt(List.len(rng))}")
+    repeated <- Stream.compileToList(Stream.repeatN(Stream.emit("x"), 3))
+    _ <- IO.println(Str.concat("repeatN:", List.join(repeated, ",")))
+    zipped <- Stream.compileToList(Stream.zip(Stream.emits(["a", "b"]), Stream.emits(["1", "2", "3"])))
+    _ <- IO.println(s"zip:${Str.fromInt(List.len(zipped))}")
+    indexed <- Stream.compileToList(Stream.zipWithIndex(Stream.emits(["a", "b"])))
+    _ <- IO.println(s"zipWithIndex:${Str.fromInt(List.len(indexed))}")
+  } yield ()
+
+private def shapeKit(): IO[Unit] =
+  for {
+    sprinkled <- Stream.compileToList(Stream.intersperse(Stream.emits(["a", "b"]), "|"))
+    _ <- IO.println(Str.concat("intersperse:", List.join(sprinkled, ",")))
+    chunks <- Stream.compileToList(Stream.grouped(Stream.emits(["a", "b", "c"]), 2))
+    _ <- IO.println(s"grouped:${Str.fromInt(List.len(chunks))}")
+    nested = Stream.emits([["a", "b"], ["c"]])
+    flattened <- Stream.compileToList(Stream.flatten(nested))
+    _ <- IO.println(Str.concat("flatten:", List.join(flattened, ",")))
+    mappedFlat <- Stream.compileToList(Stream.flatMap(Stream.emits(["a", "b"]), x => Stream.repeatN(Stream.emit(x), 2)))
+    _ <- IO.println(Str.concat("flatMap:", List.join(mappedFlat, ",")))
+  } yield ()
+
+private def foldKit(): IO[Unit] =
+  for {
+    scanned <- Stream.compileToList(Stream.scan(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x)))
+    _ <- IO.println(Str.concat("scan:", List.join(scanned, ",")))
+    folded <- Stream.fold(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x))
+    _ <- IO.println(Str.concat("fold:", folded))
+    nfold <- Stream.fold(Stream.range(1, 4), 0, (acc, n) => acc + n)
+    _ <- IO.println(s"foldN:${Str.fromInt(nfold)}")
+    changed <- Stream.compileToList(Stream.changes(Stream.emits(["a", "a", "b"])))
+    _ <- IO.println(Str.concat("changes:", List.join(changed, ",")))
+    all <- Stream.forall(Stream.emits(["a", "b"]), x => Str.len(x) > 0)
+    _ <- IO.println(Str.concat("forall:", if (all) "1" else "0"))
+  } yield ()
+
+private def extraKit(): IO[Unit] =
+  for {
+    kept <- Stream.compileToList(Stream.filterNot(Stream.emits(["", "a", "b"]), x => Str.len(x) == 0))
+    _ <- IO.println(Str.concat("filterNot:", List.join(kept, ",")))
+    mc <- Stream.compileToList(Stream.mapConcat(Stream.emits(["a", "b"]), x => [x, x]))
+    _ <- IO.println(Str.concat("mapConcat:", List.join(mc, ",")))
+    zw <- Stream.compileToList(Stream.zipWith(Stream.emits(["a", "b"]), Stream.emits(["1", "2"]), (a, b) => Str.concat(a, b)))
+    _ <- IO.println(Str.concat("zipWith:", List.join(zw, ",")))
+    za <- Stream.compileToList(Stream.zipAll(Stream.emit("a"), Stream.emits(["1", "2"]), "x", "y"))
+    _ <- IO.println(s"zipAll:${Str.fromInt(List.len(za))}")
+  } yield ()
+
+private def windowKit(): IO[Unit] =
+  for {
+    sl <- Stream.compileToList(Stream.sliding(Stream.emits(["a", "b", "c"]), 2))
+    _ <- IO.println(s"sliding:${Str.fromInt(List.len(sl))}")
+    tr <- Stream.compileToList(Stream.takeRight(Stream.emits(["a", "b", "c"]), 2))
+    _ <- IO.println(Str.concat("takeRight:", List.join(tr, ",")))
+    dr <- Stream.compileToList(Stream.dropRight(Stream.emits(["a", "b", "c"]), 1))
+    _ <- IO.println(Str.concat("dropRight:", List.join(dr, ",")))
+    fl <- Stream.compileToList(Stream.findLast(Stream.emits(["a", "", "b"]), x => Str.len(x) > 0))
+    _ <- IO.println(Str.concat("findLast:", List.join(fl, ",")))
+    oe <- Stream.compileToList(Stream.orElse(Stream.emit("a"), Stream.emit("z")))
+    _ <- IO.println(Str.concat("orElse:", List.join(oe, ",")))
+  } yield ()
+
+private def genKit(): IO[Unit] =
+  for {
+    it <- Stream.compileToList(Stream.iterate(0, 4, n => n + 1))
+    _ <- IO.println(s"iterate:${Str.fromInt(List.head(it))}:${Str.fromInt(List.len(it))}")
+    un <- Stream.compileToList(Stream.unfold(0, n => if (n < 3) [(n, n + 1)] else []))
+    _ <- IO.println(s"unfold:${Str.fromInt(List.len(un))}")
+    tapped <- Stream.compileToList(Stream.evalTap(Stream.emits(["a"]), x => IO.println(Str.concat("tap:", x))))
+    _ <- IO.println(Str.concat("evalTap:", List.join(tapped, ",")))
+  } yield ()
+
+private def pullKit(): IO[Unit] =
+  for {
+    h <- Stream.head(Stream.emits(["a", "b"]))
+    _ <- IO.println(Str.concat("head:", h))
+    last <- Stream.last(Stream.emits(["a", "b"]))
+    _ <- IO.println(Str.concat("last:", last))
+    n <- Stream.count(Stream.emits(["a", "b"]))
+    _ <- IO.println(s"count:${Str.fromInt(n)}")
+    miss <- Stream.none(Stream.emits(["", ""]), x => Str.len(x) > 0)
+    _ <- IO.println(Str.concat("none:", if (miss) "1" else "0"))
+  } yield ()
+
+private def missKit(): IO[Unit] =
+  for {
+    missAll <- Stream.forall(Stream.emits(["a", "z"]), x => Str.eq(x, "a"))
+    _ <- IO.println(Str.concat("forallMiss:", if (missAll) "1" else "0"))
+  } yield ()
+
+def run(): IO[Unit] =
+  for {
+    _ <- concatKit()
+    _ <- sliceKit()
+    _ <- searchKit()
+    _ <- intKit()
+    _ <- rangeKit()
+    _ <- shapeKit()
+    _ <- foldKit()
+    _ <- extraKit()
+    _ <- windowKit()
+    _ <- genKit()
+    _ <- pullKit()
+    _ <- missKit()
   } yield ()
 

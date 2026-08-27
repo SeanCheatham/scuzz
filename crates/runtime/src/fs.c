@@ -62,8 +62,10 @@ static void *fs_read_result(void *env) {
   SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
-  FILE *f = fopen(p, "rb");
+  FILE *f;
   struct stat st;
+  sz_timeline_log_cstr("Fs.read", p);
+  f = fopen(p, "rb");
   if (!f) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.read: cannot open %s: %s", p, strerror(errno));
@@ -135,7 +137,10 @@ static void *fs_write_result(void *env) {
   SzString *contents = (SzString *)pack->right;
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
-  FILE *f = fopen(p, "wb");
+  FILE *f;
+  sz_timeline_log_bytes("Fs.write", contents ? contents->data : "",
+                        contents ? contents->len : 0);
+  f = fopen(p, "wb");
   if (!f) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.write: cannot open %s: %s", p, strerror(errno));

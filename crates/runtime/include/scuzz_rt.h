@@ -355,6 +355,10 @@ void *sz_io_unsafe_run_or_die(SzIo *io);
 /* Called from queue/deferred delay thunks to wake a parked fiber (returns 1 if woke). */
 int sz_fiber_wake_queue(SzQueue *q, void *value);
 void sz_fiber_wake_deferred(SzDeferred *d);
+/* Snapshot the cooperative scheduler. `parked` is every live fiber that is
+ * not READY and not DONE/CANCELLED. NULL out-params are ignored. */
+void sz_fiber_census(int64_t *live, int64_t *ready, int64_t *parked,
+                     int64_t *done);
 
 /* Language Resource.make / use: IO acquire + SzCont release/use. */
 struct SzLangResource {
@@ -433,7 +437,12 @@ void sz_queue_enqueue(SzQueue *q, void *value);
  * Returns 1 if a waiter was cancelled. The value retain transfers like offer. */
 int sz_queue_cancel_ready_handoff(SzQueue *q, void *value);
 
-/* Stream — finite pull: emit / eval / concat / map / evalMap / filter / take / takeWhile / drop / dropWhile / find / exists. */
+/* Stream — finite pull: emit / eval / concat / map / evalMap / filter /
+ * take / takeWhile / drop / dropWhile / find / exists / range / repeatN /
+ * zip / zipWithIndex / intersperse / grouped / flatten / flatMap / scan /
+ * fold / forall / changes / filterNot / mapConcat / zipWith / zipAll /
+ * orElse / sliding / takeRight / dropRight / findLast / evalTap /
+ * iterate / unfold / head / last / count / none. */
 enum {
   SZ_ST_NIL = 0,
   SZ_ST_CONS = 1,
@@ -446,7 +455,26 @@ enum {
   SZ_ST_MAP = 8,
   SZ_ST_TAKEWHILE = 9,
   SZ_ST_DROPWHILE = 10,
-  SZ_ST_FIND = 11
+  SZ_ST_FIND = 11,
+  SZ_ST_FLATMAP = 12,
+  SZ_ST_ZIP = 13,
+  SZ_ST_SCAN = 14,
+  SZ_ST_GROUPED = 15,
+  SZ_ST_INTERSPERSE = 16,
+  SZ_ST_ZIPIDX = 17,
+  SZ_ST_FLATTEN = 18,
+  SZ_ST_CHANGES = 19,
+  SZ_ST_REPEATN = 20,
+  SZ_ST_FILTERNOT = 21,
+  SZ_ST_MAPCONCAT = 22,
+  SZ_ST_ZIPWITH = 23,
+  SZ_ST_ZIPALL = 24,
+  SZ_ST_ORELSE = 25,
+  SZ_ST_SLIDING = 26,
+  SZ_ST_TAKERIGHT = 27,
+  SZ_ST_DROPRIGHT = 28,
+  SZ_ST_FINDLAST = 29,
+  SZ_ST_EVALTAP = 30
 };
 
 struct SzStream {
@@ -470,6 +498,40 @@ SzStream *sz_stream_find(SzStream *inner, SzStreamPred pred, void *env);
 SzIo *sz_stream_exists(SzStream *s, SzStreamPred pred, void *env); /* IO[Bool] */
 SzStream *sz_stream_take(SzStream *inner, int64_t n);
 SzStream *sz_stream_drop(SzStream *inner, int64_t n);
+/* Boxed ints `[from, until)`. Empty when `until` <= `from`. */
+SzStream *sz_stream_range(int64_t from, int64_t until);
+/* Concat `inner` with itself `n` times. `n` <= 0 is empty. */
+SzStream *sz_stream_repeat_n(SzStream *inner, int64_t n);
+SzStream *sz_stream_zip(SzStream *left, SzStream *right); /* pairs; stops at shorter */
+SzStream *sz_stream_zip_with_index(SzStream *inner); /* (Int, A) pairs */
+SzStream *sz_stream_intersperse(SzStream *inner, void *sep);
+SzStream *sz_stream_grouped(SzStream *inner, int64_t n); /* Stream[List[A]] */
+SzStream *sz_stream_flatten(SzStream *inner); /* Stream[List[A]] -> Stream[A] */
+SzStream *sz_stream_flatmap(SzStream *inner, SzStreamMapFn f, void *env);
+SzStream *sz_stream_scan(SzStream *inner, void *z, SzStreamMapFn f, void *env);
+SzStream *sz_stream_changes(SzStream *inner);
+SzIo *sz_stream_fold(SzStream *s, void *z, SzStreamMapFn f, void *env); /* IO[Z] */
+SzIo *sz_stream_forall(SzStream *s, SzStreamPred pred, void *env); /* IO[Bool] */
+SzStream *sz_stream_filter_not(SzStream *inner, SzStreamPred pred, void *env);
+SzStream *sz_stream_map_concat(SzStream *inner, SzStreamMapFn f, void *env);
+SzStream *sz_stream_zip_with(SzStream *left, SzStream *right, SzStreamMapFn f,
+                            void *env);
+SzStream *sz_stream_zip_all(SzStream *left, SzStream *right, void *pad_left,
+                           void *pad_right);
+SzStream *sz_stream_or_else(SzStream *left, SzStream *right);
+SzStream *sz_stream_sliding(SzStream *inner, int64_t n);
+SzStream *sz_stream_take_right(SzStream *inner, int64_t n);
+SzStream *sz_stream_drop_right(SzStream *inner, int64_t n);
+SzStream *sz_stream_find_last(SzStream *inner, SzStreamPred pred, void *env);
+SzStream *sz_stream_evaltap(SzStream *inner, SzCont f, void *env);
+/* Emit `z`, then `f(z)`, n times. n <= 0 is empty. */
+SzStream *sz_stream_iterate(void *z, int64_t n, SzStreamMapFn f, void *env);
+/* `f` returns List of 0 or 1 `(A, Z)` pair. Empty stops. Caps at 65536. */
+SzStream *sz_stream_unfold(void *z, SzStreamMapFn f, void *env);
+SzIo *sz_stream_head(SzStream *s);  /* IO[A]; fails when empty */
+SzIo *sz_stream_last(SzStream *s);  /* IO[A]; fails when empty */
+SzIo *sz_stream_count(SzStream *s); /* IO[Int] */
+SzIo *sz_stream_none(SzStream *s, SzStreamPred pred, void *env); /* IO[Bool] */
 SzIo *sz_stream_compile_to_list(SzStream *s); /* IO[List] */
 SzIo *sz_stream_drain(SzStream *s);           /* IO[Unit] */
 
@@ -787,7 +849,7 @@ enum { SZ_FAULT_FS = 1, SZ_FAULT_NET = 2, SZ_FAULT_QUEUE = 3 };
 enum { SZ_FAULT_FAIL = 0, SZ_FAULT_DROP = 1, SZ_FAULT_CORRUPT = 2 };
 /* 1 when this op is the armed Nth op of `kind`. */
 int sz_testrt_fault_tick(int kind);
-/* Observation log: one line, op name plus size, never a payload. Cap 2 KiB. */
+/* Observation log: one line. Forwards to the interned timeline log. */
 void sz_effect_log(const char *line);
 /* Ready vs parked (SLEEP/QWAIT/DWAIT/POLL/JOIN/FWAIT) fiber counts. */
 void sz_sched_census(int *ready, int *parked);
@@ -896,11 +958,15 @@ SzVerdict *sz_verdict_or(SzVerdict *a, SzVerdict *b);
 SzVerdict *sz_verdict_every(void *tl, void *fnp, void *envp);
 SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp);
 void sz_verify_register(const char *name, SzVerdict *(*fn)(void *));
-/* Relation claim: (Timeline, Timeline) => Verdict over a pair of v1 dumps. */
+/* Relation claim: (Timeline, Timeline) => Verdict over a pair of dumps. */
 void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *));
-/* Parse a v1 timeline dump (SCUZZ_TIMELINE_DUMP output). NULL on error. */
+/* Parse a v1 or v2 timeline dump (SCUZZ_TIMELINE_DUMP output). NULL on error.
+ * Writer emits v=2 (effects / fibers / fault). v=1 loads with those empty. */
 void *sz_timeline_load(const char *path);
 void sz_timeline_free(void *tl);
+/* Record a blessed kit op. Never stores a payload: size plus FNV-1a hash. */
+void sz_timeline_log_bytes(const char *op, const void *p, size_t n);
+void sz_timeline_log_cstr(const char *op, const char *s);
 /* Judge mode: spec is "<a.txt>,<b.txt>"; runs every registered relation
  * claim over the pair. Process exit code: 0 = all valid (or none registered),
  * 1 = a claim failed, 2 = bad spec or unreadable dump. */
@@ -917,12 +983,28 @@ int64_t sz_timeline_replay_signal_int(int64_t id);
 int64_t sz_timeline_len(void *tl);
 int64_t sz_timeline_signal_int(void *tl, int64_t i, int64_t id);
 int64_t sz_timeline_signal_list_len(void *tl, int64_t i, int64_t id);
+int64_t sz_timeline_signal_str_has(void *tl, int64_t i, int64_t id,
+                                  SzString *needle);
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle);
+int64_t sz_timeline_drive_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_effect_has(void *tl, int64_t i, SzString *needle);
+int64_t sz_timeline_effect_count(void *tl, int64_t i);
+int64_t sz_timeline_fiber_live(void *tl, int64_t i);
 int64_t sz_timeline_fiber_ready(void *tl, int64_t i);
 int64_t sz_timeline_fiber_parked(void *tl, int64_t i);
-int64_t sz_timeline_fault_has(void *tl, int64_t i, SzString *needle);
+int64_t sz_timeline_fiber_done(void *tl, int64_t i);
+int64_t sz_timeline_fault_kind_has(void *tl, int64_t i, SzString *needle);
+int64_t sz_timeline_fault_n(void *tl, int64_t i);
+int64_t sz_timeline_checkpoint(void *tl, int64_t i); /* 1 when state i is a checkpoint */
+/* Nearest checkpoint index at or before i, else the next checkpoint, else -1. */
+int64_t sz_timeline_nearest_checkpoint(void *tl, int64_t i);
+/* Drop non-checkpoint states from the live recording. */
+void sz_timeline_compact(void);
+/* Drop non-checkpoint states from a loaded timeline. */
+void sz_timeline_compact_loaded(void *tl);
+/* Restore observation from the nearest checkpoint at or before i. */
+void sz_timeline_replay_from(int64_t i);
 int64_t sz_timeline_forall(void *tl, SzListPred pred, void *env);
 int64_t sz_timeline_exists(void *tl, SzListPred pred, void *env);
 int sz_drive_uncons(const char *tok, const char *name, char *inner, int cap);
