@@ -983,8 +983,22 @@ typedef struct NetStub {
   struct NetStub *next;
 } NetStub;
 
+typedef struct VReqNode {
+  SzPair *vreq; /* (path, Deferred*|NULL) */
+  struct VReqNode *next;
+} VReqNode;
+
+typedef struct PortBox {
+  int64_t port;
+  VReqNode *head;
+  VReqNode *tail;
+  SzDeferred *accept_wait;
+  struct PortBox *next;
+} PortBox;
+
 static int g_net_fake = 0;
 static NetStub *g_stubs = NULL;
+static PortBox *g_ports = NULL;
 enum { NET_REQ_CAP = 16 };
 static char *g_req[NET_REQ_CAP];
 static int g_req_n = 0;
@@ -1009,8 +1023,183 @@ static void net_req_push(const char *path) {
   g_req_n++;
 }
 
+static int host_eq_ci(const char *a, const char *b) {
+  if (!a || !b)
+    return 0;
+  while (*a && *b) {
+    unsigned char ca = (unsigned char)*a;
+    unsigned char cb = (unsigned char)*b;
+    if (ca >= 'A' && ca <= 'Z')
+      ca = (unsigned char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z')
+      cb = (unsigned char)(cb - 'A' + 'a');
+    if (ca != cb)
+      return 0;
+    a++;
+    b++;
+  }
+  return *a == 0 && *b == 0;
+}
+
+int sz_testrt_net_parse_loopback(const char *url, int64_t *port, char *path,
+                                size_t path_cap) {
+  const char *p;
+  char host[256];
+  size_t hn = 0;
+  int64_t po = 80;
+  if (!url || !path || path_cap < 2)
+    return 0;
+  if (strncmp(url, "http://", 7) != 0)
+    return 0;
+  p = url + 7;
+  if (*p == '[') {
+    p++;
+    while (*p && *p != ']' && hn + 1 < sizeof host)
+      host[hn++] = *p++;
+    host[hn] = '\0';
+    if (*p != ']')
+      return 0;
+    p++;
+  } else {
+    while (*p && *p != '/' && *p != ':' && hn + 1 < sizeof host)
+      host[hn++] = *p++;
+    host[hn] = '\0';
+  }
+  if (!host_eq_ci(host, "127.0.0.1") && !host_eq_ci(host, "localhost") &&
+      !host_eq_ci(host, "::1"))
+    return 0;
+  if (*p == ':') {
+    p++;
+    po = 0;
+    if (*p < '0' || *p > '9')
+      return 0;
+    while (*p >= '0' && *p <= '9') {
+      po = po * 10 + (*p - '0');
+      if (po > 65535)
+        return 0;
+      p++;
+    }
+  }
+  if (po < 1)
+    return 0;
+  if (*p == '\0') {
+    path[0] = '/';
+    path[1] = '\0';
+  } else if (*p == '/') {
+    size_t n = strlen(p);
+    if (n + 1 > path_cap)
+      return 0;
+    memcpy(path, p, n + 1);
+  } else
+    return 0;
+  if (port)
+    *port = po;
+  return 1;
+}
+
+static PortBox *mailbox_find(int64_t port) {
+  PortBox *b;
+  for (b = g_ports; b; b = b->next) {
+    if (b->port == port)
+      return b;
+  }
+  return NULL;
+}
+
+static PortBox *mailbox_get(int64_t port) {
+  PortBox *b = mailbox_find(port);
+  if (b)
+    return b;
+  b = (PortBox *)sz_alloc(sizeof(PortBox));
+  memset(b, 0, sizeof(PortBox));
+  b->port = port;
+  b->next = g_ports;
+  g_ports = b;
+  return b;
+}
+
+static int mailbox_len(const PortBox *b) {
+  const VReqNode *n;
+  int c = 0;
+  if (!b)
+    return 0;
+  for (n = b->head; n; n = n->next)
+    c++;
+  return c;
+}
+
+static int mailbox_len_all(void) {
+  PortBox *b;
+  int c = 0;
+  for (b = g_ports; b; b = b->next)
+    c += mailbox_len(b);
+  return c;
+}
+
+static void mailbox_push(PortBox *b, SzPair *vreq) {
+  VReqNode *n = (VReqNode *)sz_alloc(sizeof(VReqNode));
+  n->vreq = vreq;
+  n->next = NULL;
+  if (b->tail)
+    b->tail->next = n;
+  else
+    b->head = n;
+  b->tail = n;
+}
+
+static SzPair *mailbox_pop(PortBox *b) {
+  VReqNode *n;
+  SzPair *vreq;
+  if (!b || !b->head)
+    return NULL;
+  n = b->head;
+  b->head = n->next;
+  if (!b->head)
+    b->tail = NULL;
+  vreq = n->vreq;
+  sz_free(n);
+  return vreq;
+}
+
+static void mailbox_fail_nodes(PortBox *b, SzError *err) {
+  VReqNode *n;
+  if (!b)
+    return;
+  n = b->head;
+  b->head = NULL;
+  b->tail = NULL;
+  while (n) {
+    VReqNode *next = n->next;
+    SzPair *vreq = n->vreq;
+    SzDeferred *d = vreq ? (SzDeferred *)vreq->right : NULL;
+    if (d)
+      sz_deferred_fail_now(d, err);
+    sz_release(vreq);
+    sz_free(n);
+    n = next;
+  }
+}
+
+static void mailbox_reset_all(void) {
+  PortBox *b = g_ports;
+  SzError *err = sz_error_new(6, "Net: TestRuntime reset");
+  while (b) {
+    PortBox *next = b->next;
+    mailbox_fail_nodes(b, err);
+    if (b->accept_wait) {
+      sz_release(b->accept_wait);
+      b->accept_wait = NULL;
+    }
+    sz_free(b);
+    b = next;
+  }
+  g_ports = NULL;
+  sz_release(err);
+}
+
 static void net_clear_serve(void) {
   net_req_clear();
+  mailbox_reset_all();
   sz_free(g_last_serve_body);
   g_last_serve_body = NULL;
 }
@@ -1042,7 +1231,11 @@ void sz_testrt_net_queue_request(const char *path) {
   net_req_push(path);
 }
 
-int sz_testrt_net_serve_pending(void) { return g_req_n; }
+int sz_testrt_net_serve_pending(void) { return g_req_n + mailbox_len_all(); }
+
+int sz_testrt_net_serve_pending_port(int64_t port) {
+  return g_req_n + mailbox_len(mailbox_find(port));
+}
 
 char *sz_testrt_net_pop_request(void) {
   char *p;
@@ -1056,10 +1249,71 @@ char *sz_testrt_net_pop_request(void) {
   return p;
 }
 
+void sz_testrt_net_cancel_accept(int64_t port) {
+  PortBox *b = mailbox_find(port);
+  if (!b || !b->accept_wait)
+    return;
+  sz_release(b->accept_wait);
+  b->accept_wait = NULL;
+}
+
+void sz_testrt_net_fail_mailbox(int64_t port, SzError *err) {
+  PortBox *b = mailbox_find(port);
+  SzError *owned = err;
+  if (!owned)
+    owned = sz_error_new(6, "Net.serve: cancelled");
+  mailbox_fail_nodes(b, owned);
+  if (!err)
+    sz_release(owned);
+}
+
+SzIo *sz_testrt_net_accept(int64_t port) {
+  char *inj = sz_testrt_net_pop_request();
+  PortBox *b;
+  if (inj) {
+    SzString *ps = sz_string_from_cstr(inj);
+    SzPair *vreq = sz_pair_new(ps, NULL);
+    sz_free(inj);
+    sz_release(ps);
+    return pure_drop(vreq);
+  }
+  b = mailbox_get(port);
+  if (b->head) {
+    SzPair *vreq = mailbox_pop(b);
+    return pure_drop(vreq);
+  }
+  {
+    SzDeferred *d = sz_deferred_make();
+    b->accept_wait = d;
+    return sz_deferred_get(d);
+  }
+}
+
+static SzIo *virtual_http_get(int64_t port, const char *path) {
+  SzDeferred *done = sz_deferred_make();
+  SzString *ps = sz_string_from_cstr(path ? path : "/");
+  SzPair *vreq = sz_pair_new(ps, done);
+  PortBox *b = mailbox_get(port);
+  sz_release(ps);
+  if (b->accept_wait) {
+    SzDeferred *w = b->accept_wait;
+    b->accept_wait = NULL;
+    sz_deferred_complete_now(w, vreq);
+    sz_release(w);
+    sz_release(vreq);
+  } else {
+    mailbox_push(b, vreq);
+  }
+  {
+    SzIo *io = sz_deferred_get(done);
+    sz_release(done);
+    return io;
+  }
+}
+
 static void sz_testrt_net_install(void) {
   sz_testrt_net_reset_live();
   g_net_fake = 1;
-  sz_testrt_net_inject_request("/");
 }
 
 int sz_testrt_net_is_fake(void) { return g_net_fake; }
@@ -1130,8 +1384,27 @@ done:
   return r;
 }
 
+static SzIo *after_stub_http(void *value, void *env) {
+  BoxResult *r = (BoxResult *)value;
+  SzString *url = (SzString *)env;
+  if (r && r->is_err && r->as.err) {
+    const char *msg = sz_string_cstr(r->as.err->message);
+    int64_t port = 0;
+    char path[1024];
+    if (msg && strstr(msg, "no stub for URL") &&
+        sz_testrt_net_parse_loopback(sz_string_cstr(url), &port, path,
+                                    sizeof path)) {
+      sz_release(r->as.err);
+      r->as.err = NULL;
+      sz_release(r);
+      return virtual_http_get(port, path);
+    }
+  }
+  return unwrap_box(value, NULL);
+}
+
 SzIo *sz_testrt_net_http_get(SzString *url) {
-  return fm_drop(sz_io_delay(stub_http_get, url), unwrap_box, NULL);
+  return fm_drop(sz_io_delay(stub_http_get, url), after_stub_http, url);
 }
 
 const char *sz_testrt_net_last_serve_body(void) {

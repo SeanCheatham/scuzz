@@ -695,3 +695,227 @@ SzAdt *sz_json_stringify(SzAdt *j) {
   sz_free(b.p);
   return result_ok(s);
 }
+
+static int json_tag(const SzAdt *j) { return j ? sz_adt_tag(j) : -1; }
+
+static SzList *json_obj_list(SzAdt *j) {
+  if (json_tag(j) != JSON_OBJ)
+    return NULL;
+  return (SzList *)sz_adt_payload(j);
+}
+
+static SzList *json_arr_list(SzAdt *j) {
+  if (json_tag(j) != JSON_ARR)
+    return NULL;
+  return (SzList *)sz_adt_payload(j);
+}
+
+static SzList *json_one(void *v) {
+  SzList *xs = sz_list_cons(v, sz_list_nil());
+  return xs;
+}
+
+static int json_key_eq(SzPair *ent, SzString *key) {
+  if (!ent || !key)
+    return 0;
+  return sz_string_eq((SzString *)sz_pair_left(ent), key);
+}
+
+SzList *sz_json_get(SzAdt *j, SzString *key) {
+  SzList *xs = json_obj_list(j);
+  while (xs && !sz_list_is_empty(xs)) {
+    SzPair *ent = (SzPair *)sz_list_head(xs);
+    if (json_key_eq(ent, key))
+      return json_one(sz_pair_right(ent));
+    xs = sz_list_tail(xs);
+  }
+  return sz_list_nil();
+}
+
+SzList *sz_json_keys(SzAdt *j) {
+  SzList *xs = json_obj_list(j);
+  SzList *acc = NULL;
+  SzList *out;
+  while (xs && !sz_list_is_empty(xs)) {
+    SzPair *ent = (SzPair *)sz_list_head(xs);
+    acc = sz_list_cons(sz_pair_left(ent), acc);
+    xs = sz_list_tail(xs);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return out;
+}
+
+SzList *sz_json_arr(SzAdt *j) {
+  SzList *xs = json_arr_list(j);
+  if (!xs)
+    return sz_list_nil();
+  sz_retain(xs);
+  return xs;
+}
+
+SzList *sz_json_at(SzAdt *j, int64_t i) {
+  SzList *xs = json_arr_list(j);
+  int64_t n;
+  int64_t k;
+  if (!xs || i < 0)
+    return sz_list_nil();
+  n = sz_list_len(xs);
+  if (i >= n)
+    return sz_list_nil();
+  for (k = 0; k < i; k++)
+    xs = sz_list_tail(xs);
+  return json_one(sz_list_head(xs));
+}
+
+int64_t sz_json_has(SzAdt *j, SzString *key) {
+  SzList *g = sz_json_get(j, key);
+  int64_t hit = g ? 1 : 0;
+  sz_release(g);
+  return hit;
+}
+
+SzList *sz_json_pairs(SzAdt *j) {
+  SzList *xs = json_obj_list(j);
+  if (!xs)
+    return sz_list_nil();
+  sz_retain(xs);
+  return xs;
+}
+
+int64_t sz_json_is_null(SzAdt *j) { return json_tag(j) == JSON_NULL ? 1 : 0; }
+int64_t sz_json_is_bool(SzAdt *j) { return json_tag(j) == JSON_BOOL ? 1 : 0; }
+int64_t sz_json_is_int(SzAdt *j) { return json_tag(j) == JSON_INT ? 1 : 0; }
+int64_t sz_json_is_float(SzAdt *j) { return json_tag(j) == JSON_FLOAT ? 1 : 0; }
+int64_t sz_json_is_str(SzAdt *j) { return json_tag(j) == JSON_STR ? 1 : 0; }
+int64_t sz_json_is_arr(SzAdt *j) { return json_tag(j) == JSON_ARR ? 1 : 0; }
+int64_t sz_json_is_obj(SzAdt *j) { return json_tag(j) == JSON_OBJ ? 1 : 0; }
+
+static SzList *json_as_payload(SzAdt *j, int tag) {
+  if (json_tag(j) != tag)
+    return sz_list_nil();
+  return json_one(sz_adt_payload(j));
+}
+
+SzList *sz_json_as_bool(SzAdt *j) { return json_as_payload(j, JSON_BOOL); }
+SzList *sz_json_as_int(SzAdt *j) { return json_as_payload(j, JSON_INT); }
+SzList *sz_json_as_float(SzAdt *j) { return json_as_payload(j, JSON_FLOAT); }
+SzList *sz_json_as_str(SzAdt *j) { return json_as_payload(j, JSON_STR); }
+
+int64_t sz_json_bool_or(SzAdt *j, int64_t d) {
+  SzList *xs = sz_json_as_bool(j);
+  int64_t n;
+  if (!xs) {
+    sz_release(xs);
+    return d ? 1 : 0;
+  }
+  n = sz_unbox_i64(sz_list_head(xs)) ? 1 : 0;
+  sz_release(xs);
+  return n;
+}
+
+int64_t sz_json_int_or(SzAdt *j, int64_t d) {
+  SzList *xs = sz_json_as_int(j);
+  int64_t n;
+  if (!xs) {
+    sz_release(xs);
+    return d;
+  }
+  n = sz_unbox_i64(sz_list_head(xs));
+  sz_release(xs);
+  return n;
+}
+
+SzString *sz_json_str_or(SzAdt *j, SzString *d) {
+  SzList *xs = sz_json_as_str(j);
+  SzString *s;
+  if (!xs) {
+    sz_release(xs);
+    sz_retain(d);
+    return d ? d : sz_string_from_cstr("");
+  }
+  s = (SzString *)sz_list_head(xs);
+  sz_retain(s);
+  sz_release(xs);
+  return s;
+}
+
+int64_t sz_json_get_bool(SzAdt *j, SzString *key, int64_t d) {
+  SzList *g = sz_json_get(j, key);
+  int64_t n;
+  if (!g) {
+    sz_release(g);
+    return d ? 1 : 0;
+  }
+  n = sz_json_bool_or((SzAdt *)sz_list_head(g), d);
+  sz_release(g);
+  return n;
+}
+
+int64_t sz_json_get_int(SzAdt *j, SzString *key, int64_t d) {
+  SzList *g = sz_json_get(j, key);
+  int64_t n;
+  if (!g) {
+    sz_release(g);
+    return d;
+  }
+  n = sz_json_int_or((SzAdt *)sz_list_head(g), d);
+  sz_release(g);
+  return n;
+}
+
+SzString *sz_json_get_str(SzAdt *j, SzString *key, SzString *d) {
+  SzList *g = sz_json_get(j, key);
+  SzString *s;
+  if (!g) {
+    sz_release(g);
+    sz_retain(d);
+    return d ? d : sz_string_from_cstr("");
+  }
+  s = sz_json_str_or((SzAdt *)sz_list_head(g), d);
+  sz_release(g);
+  return s;
+}
+
+static int json_list_has_key(SzList *xs, SzString *key) {
+  while (xs && !sz_list_is_empty(xs)) {
+    SzPair *ent = (SzPair *)sz_list_head(xs);
+    if (json_key_eq(ent, key))
+      return 1;
+    xs = sz_list_tail(xs);
+  }
+  return 0;
+}
+
+SzAdt *sz_json_merge(SzAdt *a, SzAdt *b) {
+  SzList *left = json_obj_list(a);
+  SzList *right = json_obj_list(b);
+  SzList *acc = NULL;
+  SzList *out;
+  SzList *p;
+  SzAdt *j;
+  if (!left && !right) {
+    sz_retain(b);
+    return b;
+  }
+  if (!left) {
+    sz_retain(b);
+    return b;
+  }
+  if (!right) {
+    sz_retain(a);
+    return a;
+  }
+  for (p = right; p && !sz_list_is_empty(p); p = sz_list_tail(p))
+    acc = sz_list_cons(sz_list_head(p), acc);
+  for (p = left; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
+    SzPair *ent = (SzPair *)sz_list_head(p);
+    SzString *k = ent ? (SzString *)sz_pair_left(ent) : NULL;
+    if (!json_list_has_key(right, k))
+      acc = sz_list_cons(ent, acc);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  j = json_mk(JSON_OBJ, out);
+  return j;
+}

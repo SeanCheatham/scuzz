@@ -586,6 +586,29 @@ SzList *sz_list_zip(SzList *xs, SzList *ys) {
   return out;
 }
 
+SzList *sz_list_interleave(SzList *xs, SzList *ys) {
+  SzList *acc = NULL;
+  SzList *a = xs;
+  SzList *b = ys;
+  SzList *out;
+  SzList *rest;
+  while (a && b) {
+    acc = sz_list_cons_take(a->head, acc);
+    acc = sz_list_cons_take(b->head, acc);
+    a = a->tail;
+    b = b->tail;
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  rest = a ? a : b;
+  if (rest) {
+    SzList *joined = sz_list_concat(out, rest);
+    sz_release(out);
+    return joined;
+  }
+  return out;
+}
+
 SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y) {
   SzList *acc = NULL;
   SzList *a = xs;

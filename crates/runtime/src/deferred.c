@@ -54,6 +54,50 @@ SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value) {
   return deferred_complete_drop(d, sz_string_from_cstr(value ? value : ""));
 }
 
+void sz_deferred_complete_now(SzDeferred *d, void *value) {
+  if (!d)
+    sz_panic("sz_deferred_complete_now(null)");
+  if (d->completed)
+    return;
+  d->completed = 1;
+  d->ok = 1;
+  sz_retain(value);
+  d->value = value;
+  sz_fiber_wake_deferred(d);
+}
+
+void sz_deferred_fail_now(SzDeferred *d, SzError *err) {
+  if (!d)
+    sz_panic("sz_deferred_fail_now(null)");
+  if (d->completed)
+    return;
+  d->completed = 1;
+  d->ok = 0;
+  if (!err)
+    err = sz_error_new(1, "Deferred.fail");
+  else
+    sz_retain(err);
+  d->error = err;
+  sz_fiber_wake_deferred(d);
+}
+
+static void *deferred_fail_thunk(void *env) {
+  SzPair *p = (SzPair *)env;
+  sz_deferred_fail_now((SzDeferred *)p->left, (SzError *)p->right);
+  return NULL;
+}
+
+SzIo *sz_deferred_fail(SzDeferred *d, SzError *err) {
+  if (!d)
+    sz_panic("sz_deferred_fail(null)");
+  {
+    SzPair *p = sz_pair_new(d, err);
+    SzIo *io = sz_io_delay(deferred_fail_thunk, p);
+    sz_release(p);
+    return io;
+  }
+}
+
 SzIo *sz_deferred_get(SzDeferred *d) {
   if (!d)
     sz_panic("sz_deferred_get(null)");

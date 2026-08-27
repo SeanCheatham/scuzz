@@ -1526,8 +1526,10 @@ SzIo *sz_net_http_get(SzString *url) {
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking. The fiber
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and/or ::1
  * (V6ONLY). Bind succeeds when at least one family works so httpGet literals
- * on the bound loopback match. TestRuntime injects paths and
- * skips sockets. Request read and response write each wait at most 1000ms.
+ * on the bound loopback match. TestRuntime uses a per-port virtual mailbox.
+ * Injected paths are ghost requests. Loopback httpGet parks on a Deferred.
+ * Fake serve parks on an empty mailbox. Write completes that Deferred.
+ * Request read and response write each wait at most 1000ms.
  * A timed-out, malformed, reset, or handler-failed client is dropped.
  * Persistent serve accepts the next. One request is one round that always
  * completes; the next round is built outside handleErrorWith. Error code 6.
@@ -1548,6 +1550,7 @@ typedef struct ServeSt {
   size_t woff;
   int64_t req_deadline_ms;
   int64_t write_deadline_ms;
+  void *vreq_done; /* SzDeferred* for a virtual client; NULL for inject */
 } ServeSt;
 
 static void serve_close_conn(ServeSt *st) {
@@ -1578,6 +1581,15 @@ static void serve_close_fds(ServeSt *st) {
 static void serve_free(ServeSt *st) {
   if (!st)
     return;
+  if (st->vreq_done) {
+    SzError *err = sz_error_new(6, "Net.serve: cancelled");
+    sz_deferred_fail_now((SzDeferred *)st->vreq_done, err);
+    sz_release(err);
+    sz_release(st->vreq_done);
+    st->vreq_done = NULL;
+  }
+  sz_testrt_net_cancel_accept(st->port);
+  sz_testrt_net_fail_mailbox(st->port, NULL);
   serve_close_fds(st);
   sz_release(st->body);
   st->body = NULL;
@@ -1713,10 +1725,8 @@ static void *serve_accept(void *env) {
 
   /* Chosen at step time so SCUZZ_TESTRT=1 install in runtime_main is visible. */
   if (sz_testrt_net_is_fake()) {
-    char *path_s = sz_testrt_net_pop_request();
-    r->is_err = 0;
-    r->as.ok = sz_string_from_cstr(path_s ? path_s : "/");
-    sz_free(path_s);
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: fake accept uses mailbox");
     return r;
   }
   fd = st->listen_fd;
@@ -1828,6 +1838,16 @@ static void *serve_write_close(void *env) {
 
   if (sz_testrt_net_is_fake()) {
     sz_testrt_net_set_last_serve_body(data);
+    if (st->vreq_done) {
+      void *payload = body;
+      if (!payload)
+        payload = sz_string_from_cstr("");
+      sz_deferred_complete_now((SzDeferred *)st->vreq_done, payload);
+      if (!body)
+        sz_release(payload);
+      sz_release(st->vreq_done);
+      st->vreq_done = NULL;
+    }
     r->is_err = 0;
     r->as.ok = NULL;
     return r;
@@ -1903,6 +1923,11 @@ static SzIo *serve_unwrap_accept(void *value, void *env) {
  * server here: that would leave serve_after_path on the stack. */
 static SzIo *serve_drop_conn(ServeSt *st, SzError *err) {
   serve_close_conn(st);
+  if (st->vreq_done) {
+    sz_deferred_fail_now((SzDeferred *)st->vreq_done, err);
+    sz_release(st->vreq_done);
+    st->vreq_done = NULL;
+  }
   if (st->left == 1)
     return fail_drop(err);
   sz_error_free(err);
@@ -2005,12 +2030,26 @@ static SzIo *serve_poll_conn_write(void *value, void *env) {
   return fm_drop(ready, serve_after_conn_write_poll, st);
 }
 
+static SzIo *serve_after_vreq(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  SzPair *p = (SzPair *)value;
+  void *path;
+  if (!p)
+    return sz_io_fail_cstr("Net.serve: null request");
+  path = p->left;
+  st->vreq_done = p->right;
+  sz_retain(path);
+  sz_retain(st->vreq_done);
+  sz_release(p);
+  return serve_after_path(path, st);
+}
+
 static SzIo *serve_after_listen(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   SzIo *io;
   (void)value;
   if (sz_testrt_net_is_fake())
-    return fm_drop(sz_io_delay(serve_accept, st), serve_path_from_net, st);
+    return fm_drop(sz_testrt_net_accept(st->port), serve_after_vreq, st);
   io = serve_poll_then_accept(NULL, st);
   return fm_drop(io, serve_poll_conn_read, st);
 }
@@ -2058,7 +2097,7 @@ static int serve_should_stop(ServeSt *st) {
   if (st->left == 0)
     return 1;
   if (st->left < 0 && sz_testrt_net_is_fake() &&
-      sz_testrt_net_serve_pending() <= 0)
+      sz_testrt_net_serve_pending_port(st->port) <= 0)
     return 1;
   return 0;
 }

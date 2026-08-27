@@ -135,6 +135,10 @@ SzStream *sz_stream_zip(SzStream *left, SzStream *right) {
   return st_new(SZ_ST_ZIP, st_keep(left), st_keep(right), NULL);
 }
 
+SzStream *sz_stream_interleave(SzStream *left, SzStream *right) {
+  return st_new(SZ_ST_INTERLEAVE, st_keep(left), st_keep(right), NULL);
+}
+
 SzStream *sz_stream_zip_with_index(SzStream *inner) {
   return st_new(SZ_ST_ZIPIDX, st_keep(inner), NULL, NULL);
 }
@@ -1129,6 +1133,7 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
     case SZ_ST_ZIP:
     case SZ_ST_ZIPWITH:
     case SZ_ST_ZIPALL:
+    case SZ_ST_INTERLEAVE:
       return zip_into(s, acc, remain);
     case SZ_ST_ORELSE: {
       StConcat *st = (StConcat *)sz_alloc(sizeof(StConcat));
@@ -1367,6 +1372,8 @@ static SzIo *after_zip_right(void *right_acc, void *env) {
     SzPair *pads = (SzPair *)extra;
     zipped = sz_list_zip_all(left, right, pads ? pads->left : NULL,
                              pads ? pads->right : NULL);
+  } else if (tag == SZ_ST_INTERLEAVE) {
+    zipped = sz_list_interleave(left, right);
   } else {
     zipped = sz_list_zip(left, right);
   }
@@ -1386,8 +1393,11 @@ static SzIo *after_zip_right(void *right_acc, void *env) {
 
 static SzIo *after_zip_left(void *left_acc, void *env) {
   StZip *st = (StZip *)env;
+  int64_t inner_remain = st->remain;
   st->left_xs = reverse_take((SzList *)left_acc);
-  return fm_drop(compile_into(st->right, sz_list_nil(), st->remain),
+  if (st->tag == SZ_ST_INTERLEAVE)
+    inner_remain = -1;
+  return fm_drop(compile_into(st->right, sz_list_nil(), inner_remain),
                  after_zip_right, st);
 }
 
@@ -1399,8 +1409,13 @@ static SzIo *zip_into(SzStream *s, SzList *acc, int64_t remain) {
   st->left_xs = NULL;
   st->tag = s->tag;
   st->extra = s->env;
-  return fm_drop(compile_into((SzStream *)s->left, sz_list_nil(), remain),
-                 after_zip_left, st);
+  {
+    int64_t inner_remain = remain;
+    if (s->tag == SZ_ST_INTERLEAVE)
+      inner_remain = -1;
+    return fm_drop(compile_into((SzStream *)s->left, sz_list_nil(), inner_remain),
+                   after_zip_left, st);
+  }
 }
 
 static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,

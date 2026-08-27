@@ -232,6 +232,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_inits(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_tails(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_zip(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_interleave(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_zip_all(ptr, ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_unzip(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_zip_with_index(ptr)").unwrap();
@@ -288,6 +289,30 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_fs_basename(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_json_parse(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_json_stringify(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_get(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_keys(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_arr(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_at(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_json_has(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_pairs(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_is_null(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_is_bool(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_is_int(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_is_float(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_is_str(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_is_arr(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_is_obj(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_as_bool(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_as_int(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_as_float(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_as_str(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_bool_or(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_json_int_or(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_json_str_or(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_json_get_bool(ptr, ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_json_get_int(ptr, ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_json_get_str(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_merge(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_mkdirs(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_canonicalize(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_args()").unwrap();
@@ -338,6 +363,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_stream_range(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_stream_repeat_n(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_stream_zip(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_interleave(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_zip_with_index(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_intersperse(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_grouped(ptr, i64)").unwrap();
@@ -6498,9 +6524,10 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
-        "List.concat" | "List.zip" | "List.diff" | "List.intersect" => {
+        "List.concat" | "List.zip" | "List.interleave" | "List.diff" | "List.intersect" => {
             let rt = match callee {
                 "List.zip" => "sz_list_zip",
+                "List.interleave" => "sz_list_interleave",
                 "List.diff" => "sz_list_diff",
                 "List.intersect" => "sz_list_intersect",
                 _ => "sz_list_concat",
@@ -7115,6 +7142,162 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "Json.get" | "Json.keys" | "Json.arr" | "Json.pairs" | "Json.asBool"
+        | "Json.asInt" | "Json.asFloat" | "Json.asStr" => {
+            let rt = match callee {
+                "Json.get" => "sz_json_get",
+                "Json.keys" => "sz_json_keys",
+                "Json.arr" => "sz_json_arr",
+                "Json.pairs" => "sz_json_pairs",
+                "Json.asBool" => "sz_json_as_bool",
+                "Json.asInt" => "sz_json_as_int",
+                "Json.asFloat" => "sz_json_as_float",
+                _ => "sz_json_as_str",
+            };
+            if callee == "Json.get" {
+                writeln!(
+                    code,
+                    "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr {})",
+                    emitted_args[0].value, emitted_args[1].value
+                )
+                .unwrap();
+                drop_owned_ptr(&mut code, &emitted_args[0]);
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            } else {
+                writeln!(
+                    code,
+                    "  %{prefix}_v = call ptr @{rt}(ptr {})",
+                    emitted_args[0].value
+                )
+                .unwrap();
+                drop_owned_ptr(&mut code, &emitted_args[0]);
+            }
+            let elem = if callee == "Json.keys" || callee == "Json.asStr" {
+                Kind::Ptr
+            } else if callee == "Json.asInt" {
+                Kind::Int
+            } else if callee == "Json.asFloat" {
+                Kind::Float
+            } else if callee == "Json.asBool" {
+                Kind::Int
+            } else {
+                Kind::Ptr
+            };
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(elem)
+        }
+        "Json.at" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_at(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+        }
+        "Json.has"
+        | "Json.isNull"
+        | "Json.isBool"
+        | "Json.isInt"
+        | "Json.isFloat"
+        | "Json.isStr"
+        | "Json.isArr"
+        | "Json.isObj" => {
+            let rt = match callee {
+                "Json.has" => "sz_json_has",
+                "Json.isNull" => "sz_json_is_null",
+                "Json.isBool" => "sz_json_is_bool",
+                "Json.isInt" => "sz_json_is_int",
+                "Json.isFloat" => "sz_json_is_float",
+                "Json.isStr" => "sz_json_is_str",
+                "Json.isArr" => "sz_json_is_arr",
+                _ => "sz_json_is_obj",
+            };
+            if callee == "Json.has" {
+                writeln!(
+                    code,
+                    "  %{prefix}_v = call i64 @{rt}(ptr {}, ptr {})",
+                    emitted_args[0].value, emitted_args[1].value
+                )
+                .unwrap();
+                drop_owned_ptr(&mut code, &emitted_args[0]);
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            } else {
+                writeln!(
+                    code,
+                    "  %{prefix}_v = call i64 @{rt}(ptr {})",
+                    emitted_args[0].value
+                )
+                .unwrap();
+                drop_owned_ptr(&mut code, &emitted_args[0]);
+            }
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Json.boolOr" | "Json.intOr" => {
+            let rt = if callee == "Json.boolOr" {
+                "sz_json_bool_or"
+            } else {
+                "sz_json_int_or"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Json.strOr" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_str_or(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Json.getBool" | "Json.getInt" => {
+            let rt = if callee == "Json.getBool" {
+                "sz_json_get_bool"
+            } else {
+                "sz_json_get_int"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Json.getStr" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_get_str(ptr {}, ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Json.merge" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_json_merge(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "Fs.mkdirs" | "Fs.delete" => {
             let rt = if callee == "Fs.delete" {
                 "sz_fs_delete"
@@ -7553,6 +7736,17 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
             owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
+        }
+        "Stream.interleave" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_interleave(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "Stream.orElse" => {
             writeln!(
@@ -10840,6 +11034,39 @@ def id(m: Map[String, String]): Map[String, String] = m
             "sz_json_stringify",
         );
         assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  Json.parse("{\"a\":1}") match {
+    case Result.Err(_) => IO.println("e")
+    case Result.Ok(j) => IO.println(List.join(Json.keys(j), ","))
+  }
+"#,
+            "sz_json_keys",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  Json.parse("{\"a\":1}") match {
+    case Result.Err(_) => IO.println("e")
+    case Result.Ok(j) => IO.println(Str.fromInt(List.len(Json.get(j, "a"))))
+  }
+"#,
+            "sz_json_get",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  Json.parse("[1,2]") match {
+    case Result.Err(_) => IO.println("e")
+    case Result.Ok(j) => IO.println(Str.fromInt(List.len(Json.arr(j))))
+  }
+"#,
+            "sz_json_arr",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] =
+  IO.println(if (Json.isNull(Json.merge(Json.Null, Json.Null))) "n" else "o")
+"#,
+            "sz_json_merge",
+        );
+        assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] = Sys.write("x")"#,
             "sz_sys_write",
         );
@@ -11851,6 +12078,23 @@ def positive(n: Int): IO[Int] =
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.transpose:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_interleave_releases_both() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.interleave(["a", "c"], ["b"]), ","))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_list_interleave(ptr ";
+        let at = ir.find(needle).expect("interleave");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.interleave:\n{ir}"
         );
     }
 
@@ -12908,6 +13152,40 @@ def scale(x: Float): Float = x * 2.0
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {b})")),
             "expected last-use release of right stream {b} after Stream.zip:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_stream_interleave_releases_both() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.interleave(Stream.emit("a"), Stream.emit("b")))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_stream_interleave(ptr ";
+        let at = ir.find(needle).expect("expected sz_stream_interleave");
+        let rest = &ir[at + needle.len()..];
+        let a = rest.split(',').next().unwrap().trim();
+        let b = rest
+            .split("ptr ")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap()
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {a})")),
+            "expected last-use release of left stream {a} after Stream.interleave:\n{ir}"
+        );
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {b})")),
+            "expected last-use release of right stream {b} after Stream.interleave:\n{ir}"
         );
     }
 

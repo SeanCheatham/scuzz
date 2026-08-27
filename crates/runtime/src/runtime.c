@@ -618,8 +618,9 @@ void sz_release(void *ptr) {
         continue;
       }
       sz_release(left);
-      if (tag == SZ_ST_CONCAT || tag == SZ_ST_ZIP || tag == SZ_ST_INTERSPERSE ||
-          tag == SZ_ST_ZIPWITH || tag == SZ_ST_ZIPALL || tag == SZ_ST_ORELSE)
+      if (tag == SZ_ST_CONCAT || tag == SZ_ST_ZIP || tag == SZ_ST_INTERLEAVE ||
+          tag == SZ_ST_INTERSPERSE || tag == SZ_ST_ZIPWITH ||
+          tag == SZ_ST_ZIPALL || tag == SZ_ST_ORELSE)
         sz_release(right);
       /* TAKE/DROP/GROUPED/SLIDING/TAKERIGHT/DROPRIGHT store a count in env.
        * Filter, map, scan, and flatMap nodes store a capture. Function
