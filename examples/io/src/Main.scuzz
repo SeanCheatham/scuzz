@@ -32,6 +32,7 @@ def envProbe(): IO[Unit] =
     _ <- Concurrency.run()
     _ <- Bracket.run()
     _ <- Flow.run()
+    _ <- Query.run()
     _ <- maybeKit()
     _ <- envProbe()
     _ <- maybeServe()

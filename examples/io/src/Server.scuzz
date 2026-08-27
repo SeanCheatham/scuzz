@@ -4,5 +4,7 @@ def handle(path: String): IO[String] =
   } yield s"ok:$path"
 
 def run(): IO[Unit] =
-  Net.serve(8080, path => handle(path))
-
+  for {
+    (_, body) <- IO.both(Net.serveOnce(8080, path => handle(path)), Net.httpGet("http://127.0.0.1:8080/ping"))
+    _ <- IO.println(s"ping:$body")
+  } yield ()

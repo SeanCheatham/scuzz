@@ -408,6 +408,11 @@ SzIo *sz_deferred_empty(void); /* IO[Deferred] */
 /* Callee retains the value. Caller drops after the call. */
 SzIo *sz_deferred_complete(SzDeferred *d, void *value);
 SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value);
+/* Sync complete. No-op when already completed. Wakes parked gets. */
+void sz_deferred_complete_now(SzDeferred *d, void *value);
+/* Sync fail. Retains `err`. No-op when already completed. Wakes parked gets. */
+void sz_deferred_fail_now(SzDeferred *d, SzError *err);
+SzIo *sz_deferred_fail(SzDeferred *d, SzError *err); /* IO[Unit] */
 /* Get retains the completed value. Caller drops the run result. */
 SzIo *sz_deferred_get(SzDeferred *d); /* IO[A]; parks until complete under the fiber scheduler */
 
@@ -439,10 +444,10 @@ int sz_queue_cancel_ready_handoff(SzQueue *q, void *value);
 
 /* Stream — finite pull: emit / eval / concat / map / evalMap / filter /
  * take / takeWhile / drop / dropWhile / find / exists / range / repeatN /
- * zip / zipWithIndex / intersperse / grouped / flatten / flatMap / scan /
- * fold / forall / changes / filterNot / mapConcat / zipWith / zipAll /
- * orElse / sliding / takeRight / dropRight / findLast / evalTap /
- * iterate / unfold / head / last / count / none. */
+ * zip / zipWithIndex / interleave / intersperse / grouped / flatten /
+ * flatMap / scan / fold / forall / changes / filterNot / mapConcat /
+ * zipWith / zipAll / orElse / sliding / takeRight / dropRight / findLast /
+ * evalTap / iterate / unfold / head / last / count / none. */
 enum {
   SZ_ST_NIL = 0,
   SZ_ST_CONS = 1,
@@ -474,7 +479,8 @@ enum {
   SZ_ST_TAKERIGHT = 27,
   SZ_ST_DROPRIGHT = 28,
   SZ_ST_FINDLAST = 29,
-  SZ_ST_EVALTAP = 30
+  SZ_ST_EVALTAP = 30,
+  SZ_ST_INTERLEAVE = 31
 };
 
 struct SzStream {
@@ -503,6 +509,7 @@ SzStream *sz_stream_range(int64_t from, int64_t until);
 /* Concat `inner` with itself `n` times. `n` <= 0 is empty. */
 SzStream *sz_stream_repeat_n(SzStream *inner, int64_t n);
 SzStream *sz_stream_zip(SzStream *left, SzStream *right); /* pairs; stops at shorter */
+SzStream *sz_stream_interleave(SzStream *left, SzStream *right); /* a0,b0,a1,b1,… */
 SzStream *sz_stream_zip_with_index(SzStream *inner); /* (Int, A) pairs */
 SzStream *sz_stream_intersperse(SzStream *inner, void *sep);
 SzStream *sz_stream_grouped(SzStream *inner, int64_t n); /* Stream[List[A]] */
@@ -638,6 +645,8 @@ SzList *sz_list_inits(SzList *xs);
 SzList *sz_list_tails(SzList *xs);
 /* Matching cells as (A, B) pairs. Stops at the shorter list. */
 SzList *sz_list_zip(SzList *xs, SzList *ys);
+/* x0, y0, x1, y1, … then the leftover tail of the longer list. */
+SzList *sz_list_interleave(SzList *xs, SzList *ys);
 /* Zip and pad the shorter list with `x` or `y`. */
 SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y);
 /* (List[A], List[B]) from List[(A, B)]. A null pair is skipped.
@@ -802,9 +811,36 @@ SzString *sz_fs_dirname(SzString *path);
 SzString *sz_fs_basename(SzString *path);
 
 /* Pure Json. Enum Null|Bool|Int|Float|Str|Arr|Obj.
- * Both return Result (Err=0 / Ok=1): parse Result[Json], stringify Result[String]. */
+ * parse / stringify return Result (Err=0 / Ok=1). Query kits return empty
+ * lists on a miss or a wrong tag. `*_or` / `get_*` use the default. */
 SzAdt *sz_json_parse(SzString *s);
 SzAdt *sz_json_stringify(SzAdt *j);
+SzList *sz_json_get(SzAdt *j, SzString *key); /* List[Json]; empty miss */
+SzList *sz_json_keys(SzAdt *j);               /* List[String]; empty if not Obj */
+SzList *sz_json_arr(SzAdt *j);                /* List[Json]; empty if not Arr */
+SzList *sz_json_at(SzAdt *j, int64_t i);      /* List[Json]; empty if out of range */
+int64_t sz_json_has(SzAdt *j, SzString *key); /* 1 when get is non-empty */
+SzList *sz_json_pairs(SzAdt *j);              /* List[(String, Json)]; empty if not Obj */
+int64_t sz_json_is_null(SzAdt *j);
+int64_t sz_json_is_bool(SzAdt *j);
+int64_t sz_json_is_int(SzAdt *j);
+int64_t sz_json_is_float(SzAdt *j);
+int64_t sz_json_is_str(SzAdt *j);
+int64_t sz_json_is_arr(SzAdt *j);
+int64_t sz_json_is_obj(SzAdt *j);
+SzList *sz_json_as_bool(SzAdt *j); /* List[Bool]; empty if not Bool */
+SzList *sz_json_as_int(SzAdt *j);  /* List[Int]; empty if not Int */
+SzList *sz_json_as_float(SzAdt *j); /* List[Float]; empty if not Float */
+SzList *sz_json_as_str(SzAdt *j);  /* List[String]; empty if not Str */
+int64_t sz_json_bool_or(SzAdt *j, int64_t d);
+int64_t sz_json_int_or(SzAdt *j, int64_t d);
+SzString *sz_json_str_or(SzAdt *j, SzString *d);
+int64_t sz_json_get_bool(SzAdt *j, SzString *key, int64_t d);
+int64_t sz_json_get_int(SzAdt *j, SzString *key, int64_t d);
+SzString *sz_json_get_str(SzAdt *j, SzString *key, SzString *d);
+/* Obj merge. Right wins on a duplicate key. Non-obj arguments stay the
+ * other obj, or `b` when neither is Obj. */
+SzAdt *sz_json_merge(SzAdt *a, SzAdt *b);
 
 /* Process / args / env / console (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
@@ -897,9 +933,16 @@ void sz_testrt_net_stub(const char *url, const char *body);
 void sz_testrt_net_inject_request(const char *path); /* replace queue with one GET path */
 void sz_testrt_net_queue_request(const char *path);  /* append a GET path */
 int sz_testrt_net_serve_pending(void);
+int sz_testrt_net_serve_pending_port(int64_t port); /* injects plus mailbox items */
 char *sz_testrt_net_pop_request(void); /* owned; NULL if empty */
 int sz_testrt_net_is_fake(void);
 SzIo *sz_testrt_net_http_get(SzString *url);
+SzIo *sz_testrt_net_accept(int64_t port); /* IO[(String, Deferred|null)] */
+void sz_testrt_net_cancel_accept(int64_t port);
+void sz_testrt_net_fail_mailbox(int64_t port, SzError *err);
+/* 1 when `url` is http loopback (`127.0.0.1` / `localhost` / `::1`). */
+int sz_testrt_net_parse_loopback(const char *url, int64_t *port, char *path,
+                                size_t path_cap);
 const char *sz_testrt_net_last_serve_body(void);
 void sz_testrt_net_set_last_serve_body(const char *body);
 

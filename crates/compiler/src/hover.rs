@@ -736,6 +736,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.zip(xs: List[A], ys: List[B]): List[(A, B)]",
     ),
     (
+        "List.interleave",
+        "List.interleave(xs: List[T], ys: List[T]): List[T]",
+    ),
+    (
         "List.zipAll",
         "List.zipAll(xs: List[A], ys: List[B], x: A, y: B): List[(A, B)]",
     ),
@@ -1341,6 +1345,42 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("Json.parse", "Json.parse(s: String): Result[Json]"),
     ("Json.stringify", "Json.stringify(j: Json): Result[String]"),
+    ("Json.get", "Json.get(j: Json, key: String): List[Json]"),
+    ("Json.keys", "Json.keys(j: Json): List[String]"),
+    ("Json.arr", "Json.arr(j: Json): List[Json]"),
+    ("Json.at", "Json.at(j: Json, i: Int): List[Json]"),
+    ("Json.has", "Json.has(j: Json, key: String): Bool"),
+    (
+        "Json.pairs",
+        "Json.pairs(j: Json): List[(String, Json)]",
+    ),
+    ("Json.isNull", "Json.isNull(j: Json): Bool"),
+    ("Json.isBool", "Json.isBool(j: Json): Bool"),
+    ("Json.isInt", "Json.isInt(j: Json): Bool"),
+    ("Json.isFloat", "Json.isFloat(j: Json): Bool"),
+    ("Json.isStr", "Json.isStr(j: Json): Bool"),
+    ("Json.isArr", "Json.isArr(j: Json): Bool"),
+    ("Json.isObj", "Json.isObj(j: Json): Bool"),
+    ("Json.asBool", "Json.asBool(j: Json): List[Bool]"),
+    ("Json.asInt", "Json.asInt(j: Json): List[Int]"),
+    ("Json.asFloat", "Json.asFloat(j: Json): List[Float]"),
+    ("Json.asStr", "Json.asStr(j: Json): List[String]"),
+    ("Json.boolOr", "Json.boolOr(j: Json, d: Bool): Bool"),
+    ("Json.intOr", "Json.intOr(j: Json, d: Int): Int"),
+    ("Json.strOr", "Json.strOr(j: Json, d: String): String"),
+    (
+        "Json.getBool",
+        "Json.getBool(j: Json, key: String, d: Bool): Bool",
+    ),
+    (
+        "Json.getInt",
+        "Json.getInt(j: Json, key: String, d: Int): Int",
+    ),
+    (
+        "Json.getStr",
+        "Json.getStr(j: Json, key: String, d: String): String",
+    ),
+    ("Json.merge", "Json.merge(a: Json, b: Json): Json"),
     ("Sys.args", "Sys.args(): IO[List[String]]"),
     ("Sys.readLine", "Sys.readLine(): IO[String]"),
     ("Sys.read", "Sys.read(n: Int): IO[String]"),
@@ -1441,6 +1481,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     (
         "Stream.zip",
         "Stream.zip(a: Stream[A], b: Stream[B]): Stream[(A, B)]",
+    ),
+    (
+        "Stream.interleave",
+        "Stream.interleave(a: Stream[A], b: Stream[A]): Stream[A]",
     ),
     (
         "Stream.zipWithIndex",
@@ -1574,6 +1618,7 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Stream.range",
     "Stream.repeatN",
     "Stream.zip",
+    "Stream.interleave",
     "Stream.zipWithIndex",
     "Stream.intersperse",
     "Stream.grouped",
@@ -1635,8 +1680,34 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Fs.basename",
     "Fs.mkdirs",
     "Fs.canonicalize",
+    "List.zip",
+    "List.interleave",
     "Json.parse",
     "Json.stringify",
+    "Json.get",
+    "Json.keys",
+    "Json.arr",
+    "Json.at",
+    "Json.has",
+    "Json.pairs",
+    "Json.isNull",
+    "Json.isBool",
+    "Json.isInt",
+    "Json.isFloat",
+    "Json.isStr",
+    "Json.isArr",
+    "Json.isObj",
+    "Json.asBool",
+    "Json.asInt",
+    "Json.asFloat",
+    "Json.asStr",
+    "Json.boolOr",
+    "Json.intOr",
+    "Json.strOr",
+    "Json.getBool",
+    "Json.getInt",
+    "Json.getStr",
+    "Json.merge",
     "Sys.read",
     "Sys.write",
     "Sys.exec",
@@ -1982,6 +2053,19 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             ("Fs.canonicalize", "Fs.canonicalize(\".\")"),
             ("Json.parse", "Json.parse(\"null\")"),
             ("Json.stringify", "Json.stringify(Json.Null)"),
+            ("Json.get", "Json.get(Json.Null, \"a\")"),
+            ("Json.keys", "Json.keys(Json.Null)"),
+            ("Json.arr", "Json.arr(Json.Null)"),
+            ("Json.at", "Json.at(Json.Null, 0)"),
+            ("Json.has", "Json.has(Json.Null, \"a\")"),
+            ("Json.pairs", "Json.pairs(Json.Null)"),
+            ("Json.isNull", "Json.isNull(Json.Null)"),
+            ("Json.isObj", "Json.isObj(Json.Null)"),
+            ("Json.asInt", "Json.asInt(Json.Null)"),
+            ("Json.intOr", "Json.intOr(Json.Null, 0)"),
+            ("Json.getInt", "Json.getInt(Json.Null, \"a\", 0)"),
+            ("Json.getStr", "Json.getStr(Json.Null, \"a\", \"z\")"),
+            ("Json.merge", "Json.merge(Json.Null, Json.Null)"),
             ("Sys.read", "Sys.read(4)"),
             ("Sys.write", "Sys.write(\"x\")"),
             ("Sys.exec", "Sys.exec(\"ls\")"),
@@ -2062,6 +2146,10 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             (
                 "Stream.zip",
                 "Stream.zip(Stream.emit(\"a\"), Stream.emit(\"b\"))",
+            ),
+            (
+                "Stream.interleave",
+                "Stream.interleave(Stream.emit(\"a\"), Stream.emit(\"b\"))",
             ),
             (
                 "Stream.zipWithIndex",
@@ -2893,6 +2981,14 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
         let h = hover_src(src, "zip");
         assert!(
             h.contains("List.zip(xs: List[A], ys: List[B]): List[(A, B)]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.interleave(["a", "c"], ["b"]), ","))
+"#;
+        let h = hover_src(src, "interleave");
+        assert!(
+            h.contains("List.interleave(xs: List[T], ys: List[T]): List[T]"),
             "{h}"
         );
         let src = r#"@main def main: IO[Unit] =

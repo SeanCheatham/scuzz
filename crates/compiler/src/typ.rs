@@ -4115,6 +4115,12 @@ fn infer_stream_call(callee: &str, arg_tys: &[Type]) -> Result<Type, TypeError> 
             let b = handle_payload_ty(&arg_tys[1], "Stream")?;
             Ok(handle_ty("Stream", Type::Tuple(vec![a, b])))
         }
+        "Stream.interleave" => {
+            expect_arity(callee, arg_tys, 2)?;
+            let a = handle_payload_ty(&arg_tys[0], "Stream")?;
+            let b = handle_payload_ty(&arg_tys[1], "Stream")?;
+            Ok(handle_ty("Stream", prefer_named(&a, &b, "Stream")?))
+        }
         "Stream.zipWithIndex" => {
             expect_arity(callee, arg_tys, 1)?;
             let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
@@ -4635,6 +4641,12 @@ fn infer_call(
             let b = list_elem(&arg_tys[1])?;
             Ok(list_of(Type::Tuple(vec![a, b])))
         }
+        "List.interleave" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[1])?;
+            Ok(list_of(prefer_named(&a, &b, "List")?))
+        }
         "List.zipAll" => {
             expect_arity(callee, &arg_tys, 4)?;
             let a = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[2])?;
@@ -5101,6 +5113,113 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
             Ok(applied_enum(enums, "Result", vec![Type::String]))
+        }
+        "Json.get" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(list_of(Type::Adt("Json".into())))
+        }
+        "Json.keys" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(list_of(Type::String))
+        }
+        "Json.arr" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(list_of(Type::Adt("Json".into())))
+        }
+        "Json.at" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(list_of(Type::Adt("Json".into())))
+        }
+        "Json.has" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Bool)
+        }
+        "Json.pairs" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(list_of(Type::Tuple(vec![
+                Type::String,
+                Type::Adt("Json".into()),
+            ])))
+        }
+        "Json.isNull" | "Json.isBool" | "Json.isInt" | "Json.isFloat"
+        | "Json.isStr" | "Json.isArr" | "Json.isObj" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(Type::Bool)
+        }
+        "Json.asBool" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(list_of(Type::Bool))
+        }
+        "Json.asInt" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(list_of(Type::Int))
+        }
+        "Json.asFloat" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(list_of(Type::Float))
+        }
+        "Json.asStr" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            Ok(list_of(Type::String))
+        }
+        "Json.boolOr" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Bool)?;
+            Ok(Type::Bool)
+        }
+        "Json.intOr" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Int)
+        }
+        "Json.strOr" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::String)
+        }
+        "Json.getBool" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::Bool)?;
+            Ok(Type::Bool)
+        }
+        "Json.getInt" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(Type::Int)
+        }
+        "Json.getStr" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::String)
+        }
+        "Json.merge" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
+            expect_ty(&arg_tys[1], &Type::Adt("Json".into()))?;
+            Ok(Type::Adt("Json".into()))
         }
         "Fs.write" | "Fs.rename" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -13005,6 +13124,20 @@ enum Opt:
     }
 
     #[test]
+    fn typechecks_list_interleave() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.interleave(["a", "c"], ["b"])
+    _ <- IO.println(List.join(xs, ","))
+    empty = List.interleave([], ["z"])
+    _ <- IO.println(List.join(empty, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.interleave should typecheck");
+    }
+
+    #[test]
     fn typechecks_list_zip_with_index_and_fold() {
         let src = r#"@main def main: IO[Unit] =
   for {
@@ -13603,6 +13736,18 @@ def scale(x: Float): Float = x * 2.0
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream range/zip should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_interleave() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.interleave(Stream.emits(["a", "c"]), Stream.emits(["b"])))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.interleave should typecheck");
     }
 
     #[test]
@@ -14261,6 +14406,63 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Json.parse/stringify should typecheck");
+    }
+
+    #[test]
+    fn typechecks_json_query_kit() {
+        let src = r#"@main def main: IO[Unit] =
+  Json.parse("{\"a\":1,\"b\":[true]}") match {
+    case Result.Err(_) => IO.println("err")
+    case Result.Ok(j) =>
+      for {
+        ks = Json.keys(j)
+        _ <- IO.println(List.join(ks, ","))
+        n = Json.getInt(j, "a", 0)
+        _ <- IO.println(Str.fromInt(n))
+        hit = Json.has(j, "a")
+        _ <- IO.println(if (hit) "1" else "0")
+        m = Json.merge(j, Json.Null)
+        _ <- IO.println(if (Json.isObj(m)) "o" else "n")
+      } yield ()
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Json query kit should typecheck");
+    }
+
+    #[test]
+    fn typechecks_json_query_arr_merge() {
+        let src = r#"@main def main: IO[Unit] =
+  Json.parse("{\"a\":true,\"b\":[1,2],\"s\":\"hi\"}") match {
+    case Result.Err(_) => IO.println("err")
+    case Result.Ok(j) =>
+      for {
+        arr = Json.arr(Json.parse("[1,2,3]") match {
+          case Result.Ok(a) => a
+          case Result.Err(_) => Json.Null
+        })
+        _ <- IO.println(Str.fromInt(List.len(arr)))
+        at = Json.at(Json.parse("[9]") match {
+          case Result.Ok(a) => a
+          case Result.Err(_) => Json.Null
+        }, 0)
+        _ <- IO.println(Str.fromInt(List.len(at)))
+        ok = Json.getBool(j, "a", false)
+        _ <- IO.println(if (ok) "1" else "0")
+        s = Json.getStr(j, "s", "z")
+        _ <- IO.println(s)
+        pairs = Json.pairs(j)
+        _ <- IO.println(Str.fromInt(List.len(pairs)))
+        asb = Json.asBool(Json.parse("true") match {
+          case Result.Ok(v) => v
+          case Result.Err(_) => Json.Null
+        })
+        _ <- IO.println(Str.fromInt(List.len(asb)))
+      } yield ()
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Json arr/at/getBool/pairs should typecheck");
     }
 
     #[test]

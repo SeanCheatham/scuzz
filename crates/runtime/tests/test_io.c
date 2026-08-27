@@ -3165,6 +3165,19 @@ int main(void) {
       assert(strcmp(sz_string_cstr((SzString *)d2->value), "y") == 0);
       sz_deferred_free(d2);
     }
+    {
+      SzDeferred *d3 = sz_deferred_make();
+      SzError *err = sz_error_new(1, "nope");
+      r = sz_io_unsafe_run(sz_deferred_fail(d3, err));
+      sz_release(err);
+      assert(r.ok);
+      r = sz_io_unsafe_run(sz_deferred_get(d3));
+      assert(!r.ok);
+      assert(r.error &&
+             strstr(sz_string_cstr(r.error->message), "nope") != NULL);
+      sz_error_free(r.error);
+      sz_deferred_free(d3);
+    }
     sz_deferred_free(def);
   }
 
@@ -3572,6 +3585,159 @@ int main(void) {
     json_expect_err("not-json");
   }
 
+  /* Json query kit: get / keys / arr / at / has / as* / *Or / merge. */
+  {
+    SzAdt *pr = json_expect_ok("{\"a\":1,\"b\":[true,null],\"s\":\"hi\"}");
+    SzAdt *j = (SzAdt *)sz_adt_payload(pr);
+    SzString *ka = sz_string_from_cstr("a");
+    SzString *kb = sz_string_from_cstr("b");
+    SzString *ks = sz_string_from_cstr("s");
+    SzString *km = sz_string_from_cstr("missing");
+    SzString *dflt = sz_string_from_cstr("z");
+    SzString *got_s;
+    SzList *got;
+    SzList *keys;
+    SzList *bgot;
+    SzList *arr;
+    SzList *at1;
+    SzList *miss;
+    SzAdt *merged;
+    assert(sz_json_is_obj(j) == 1);
+    assert(sz_json_is_null(j) == 0);
+    assert(sz_json_has(j, ka) == 1);
+    assert(sz_json_has(j, km) == 0);
+    assert(sz_json_get_int(j, ka, -1) == 1);
+    assert(sz_json_get_int(j, km, -1) == -1);
+    got_s = sz_json_get_str(j, ks, dflt);
+    assert(strcmp(sz_string_cstr(got_s), "hi") == 0);
+    sz_release(got_s);
+    keys = sz_json_keys(j);
+    assert(sz_list_len(keys) == 3);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(keys)), "a") == 0);
+    got = sz_json_get(j, ka);
+    assert(sz_list_len(got) == 1);
+    assert(sz_json_is_int((SzAdt *)sz_list_head(got)) == 1);
+    assert(sz_json_int_or((SzAdt *)sz_list_head(got), 0) == 1);
+    bgot = sz_json_get(j, kb);
+    arr = sz_json_arr((SzAdt *)sz_list_head(bgot));
+    assert(sz_list_len(arr) == 2);
+    assert(sz_json_is_bool((SzAdt *)sz_list_head(arr)) == 1);
+    assert(sz_json_bool_or((SzAdt *)sz_list_head(arr), 0) == 1);
+    at1 = sz_json_at((SzAdt *)sz_list_head(bgot), 1);
+    assert(sz_json_is_null((SzAdt *)sz_list_head(at1)) == 1);
+    miss = sz_json_at(j, 0);
+    assert(sz_list_is_empty(miss));
+    merged = sz_json_merge(j, j);
+    assert(sz_json_is_obj(merged) == 1);
+    assert(sz_json_get_int(merged, ka, 0) == 1);
+    sz_release(merged);
+    sz_release(keys);
+    sz_release(got);
+    sz_release(bgot);
+    sz_release(arr);
+    sz_release(at1);
+    sz_release(miss);
+    sz_release(ka);
+    sz_release(kb);
+    sz_release(ks);
+    sz_release(km);
+    sz_release(dflt);
+    sz_release(pr);
+  }
+
+  {
+    SzAdt *pr = json_expect_ok("[1,2,3]");
+    SzAdt *j = (SzAdt *)sz_adt_payload(pr);
+    SzString *ka = sz_string_from_cstr("a");
+    SzList *xs;
+    SzList *one;
+    SzList *oob;
+    SzList *keys;
+    SzList *got;
+    assert(sz_json_is_arr(j) == 1);
+    xs = sz_json_arr(j);
+    assert(sz_list_len(xs) == 3);
+    one = sz_json_at(j, 1);
+    assert(sz_json_int_or((SzAdt *)sz_list_head(one), 0) == 2);
+    oob = sz_json_at(j, 9);
+    assert(sz_list_is_empty(oob));
+    keys = sz_json_keys(j);
+    assert(sz_list_is_empty(keys));
+    got = sz_json_get(j, ka);
+    assert(sz_list_is_empty(got));
+    sz_release(xs);
+    sz_release(one);
+    sz_release(oob);
+    sz_release(keys);
+    sz_release(got);
+    sz_release(ka);
+    sz_release(pr);
+  }
+
+  {
+    SzAdt *left_r = json_expect_ok("{\"a\":1,\"b\":2}");
+    SzAdt *right_r = json_expect_ok("{\"b\":9,\"c\":3}");
+    SzAdt *left = (SzAdt *)sz_adt_payload(left_r);
+    SzAdt *right = (SzAdt *)sz_adt_payload(right_r);
+    SzString *ka = sz_string_from_cstr("a");
+    SzString *kb = sz_string_from_cstr("b");
+    SzString *kc = sz_string_from_cstr("c");
+    SzAdt *merged = sz_json_merge(left, right);
+    SzList *pairs;
+    SzList *asb;
+    SzList *asi;
+    SzList *ass;
+    SzAdt *tb;
+    SzAdt *ti;
+    SzAdt *ts;
+    SzAdt *tn;
+    SzString *dflt;
+    SzString *got;
+    assert(sz_json_is_obj(merged) == 1);
+    assert(sz_json_get_int(merged, ka, 0) == 1);
+    assert(sz_json_get_int(merged, kb, 0) == 9);
+    assert(sz_json_get_int(merged, kc, 0) == 3);
+    assert(sz_json_get_bool(merged, ka, 1) == 1);
+    pairs = sz_json_pairs(merged);
+    assert(sz_list_len(pairs) == 3);
+    tb = json_expect_ok("true");
+    ti = json_expect_ok("4");
+    ts = json_expect_ok("\"hi\"");
+    tn = json_expect_ok("null");
+    asb = sz_json_as_bool((SzAdt *)sz_adt_payload(tb));
+    asi = sz_json_as_int((SzAdt *)sz_adt_payload(ti));
+    ass = sz_json_as_str((SzAdt *)sz_adt_payload(ts));
+    assert(sz_list_len(asb) == 1);
+    assert(sz_json_bool_or((SzAdt *)sz_adt_payload(tb), 0) == 1);
+    assert(sz_json_int_or((SzAdt *)sz_adt_payload(ti), 0) == 4);
+    dflt = sz_string_from_cstr("z");
+    got = sz_json_str_or((SzAdt *)sz_adt_payload(ts), dflt);
+    assert(strcmp(sz_string_cstr(got), "hi") == 0);
+    sz_release(got);
+    got = sz_json_str_or((SzAdt *)sz_adt_payload(tn), dflt);
+    assert(strcmp(sz_string_cstr(got), "z") == 0);
+    sz_release(got);
+    assert(sz_json_is_null((SzAdt *)sz_adt_payload(tn)) == 1);
+    assert(sz_json_is_bool((SzAdt *)sz_adt_payload(tb)) == 1);
+    assert(sz_json_is_int((SzAdt *)sz_adt_payload(ti)) == 1);
+    assert(sz_json_is_str((SzAdt *)sz_adt_payload(ts)) == 1);
+    sz_release(asb);
+    sz_release(asi);
+    sz_release(ass);
+    sz_release(tb);
+    sz_release(ti);
+    sz_release(ts);
+    sz_release(tn);
+    sz_release(dflt);
+    sz_release(pairs);
+    sz_release(merged);
+    sz_release(ka);
+    sz_release(kb);
+    sz_release(kc);
+    sz_release(left_r);
+    sz_release(right_r);
+  }
+
   {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
@@ -3582,6 +3748,28 @@ int main(void) {
       assert(sz_adt_tag(sr) == 1);
       sz_release(pr);
       sz_release(sr);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzAdt *pr = json_expect_ok("{\"a\":1,\"b\":[true]}");
+      SzAdt *j = (SzAdt *)sz_adt_payload(pr);
+      SzString *ka = sz_string_from_cstr("a");
+      SzList *keys = sz_json_keys(j);
+      SzList *got = sz_json_get(j, ka);
+      SzAdt *merged = sz_json_merge(j, j);
+      sz_release(keys);
+      sz_release(got);
+      sz_release(merged);
+      sz_release(ka);
+      sz_release(pr);
     }
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
@@ -3901,6 +4089,33 @@ int main(void) {
       assert(sz_list_len((SzList *)r.value) == 2);
     }
 
+    {
+      SzList *as = sz_list_cons(
+          sz_string_from_cstr("a"),
+          sz_list_cons(sz_string_from_cstr("c"), sz_list_nil()));
+      SzList *bs = sz_list_cons(sz_string_from_cstr("b"), sz_list_nil());
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(
+          sz_stream_interleave(sz_stream_emits(as), sz_stream_emits(bs))));
+      assert(r.ok);
+      joined = sz_list_join((SzList *)r.value, ",");
+      assert(strcmp(sz_string_cstr(joined), "a,b,c") == 0);
+    }
+
+    {
+      SzList *as = sz_list_cons(
+          sz_string_from_cstr("a"),
+          sz_list_cons(sz_string_from_cstr("c"), sz_list_nil()));
+      SzList *bs = sz_list_cons(
+          sz_string_from_cstr("b"),
+          sz_list_cons(sz_string_from_cstr("d"),
+                       sz_list_cons(sz_string_from_cstr("e"), sz_list_nil())));
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(
+          sz_stream_interleave(sz_stream_emits(as), sz_stream_emits(bs))));
+      assert(r.ok);
+      joined = sz_list_join((SzList *)r.value, ",");
+      assert(strcmp(sz_string_cstr(joined), "a,b,c,d,e") == 0);
+    }
+
     xs = sz_list_cons(
         sz_string_from_cstr("a"),
         sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
@@ -3988,6 +4203,32 @@ int main(void) {
         sz_stream_zip(sz_stream_nil(), sz_stream_emit(sz_string_from_cstr("a")))));
     assert(r.ok);
     assert(sz_list_is_empty((SzList *)r.value));
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_interleave(
+        sz_stream_nil(), sz_stream_emit(sz_string_from_cstr("a")))));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(sz_stream_interleave(
+        sz_stream_emit(sz_string_from_cstr("a")), sz_stream_nil())));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_take(sz_stream_interleave(sz_stream_emits(sz_list_cons(
+                                               sz_string_from_cstr("a"),
+                                               sz_list_cons(sz_string_from_cstr("c"),
+                                                            sz_list_nil()))),
+                                           sz_stream_emits(sz_list_cons(
+                                               sz_string_from_cstr("b"),
+                                               sz_list_cons(sz_string_from_cstr("d"),
+                                                            sz_list_nil())))),
+                       3)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,b,c") == 0);
 
     r = sz_io_unsafe_run(sz_stream_fold(sz_stream_nil(), sz_string_from_cstr("z"),
                                        stream_fold_concat, NULL));
@@ -4212,6 +4453,26 @@ int main(void) {
       a = sz_string_from_cstr("a");
       st = sz_stream_emit(a);
       sz_release(a);
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(st));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      a = sz_string_from_cstr("a");
+      b = sz_string_from_cstr("b");
+      {
+        SzStream *left = sz_stream_emit(a);
+        SzStream *right = sz_stream_emit(b);
+        st = sz_stream_interleave(left, right);
+        sz_release(left);
+        sz_release(right);
+      }
+      sz_release(a);
+      sz_release(b);
       r = sz_io_unsafe_run(sz_stream_compile_to_list(st));
       assert(r.ok);
       sz_release(r.value);
@@ -5196,6 +5457,105 @@ int main(void) {
            strstr(sz_string_cstr(r.error->message), "port must be 1..65535") !=
                NULL);
     sz_error_free(r.error);
+
+    /* Virtual Net: loopback httpGet parks on a mailbox; serveOnce parks on
+     * accept. Stubs still win. Injects stay ghost requests. */
+    {
+      int64_t port = 0;
+      char path[64];
+      SzPair *pair;
+      SzString *url;
+      char *inj;
+
+      while ((inj = sz_testrt_net_pop_request()) != NULL)
+        sz_free(inj);
+
+      assert(sz_testrt_net_parse_loopback("http://127.0.0.1:8080/ping", &port,
+                                         path, sizeof path) == 1);
+      assert(port == 8080);
+      assert(strcmp(path, "/ping") == 0);
+      assert(sz_testrt_net_parse_loopback("http://localhost/x", &port, path,
+                                         sizeof path) == 1);
+      assert(port == 80);
+      assert(strcmp(path, "/x") == 0);
+      assert(sz_testrt_net_parse_loopback("http://[::1]:9/a", &port, path,
+                                         sizeof path) == 1);
+      assert(port == 9);
+      assert(strcmp(path, "/a") == 0);
+      assert(sz_testrt_net_parse_loopback("http://example.test/x", &port, path,
+                                         sizeof path) == 0);
+      assert(sz_testrt_net_parse_loopback("https://127.0.0.1/x", &port, path,
+                                         sizeof path) == 0);
+      assert(sz_testrt_net_parse_loopback("http://127.0.0.1:99999/x", &port,
+                                         path, sizeof path) == 0);
+
+      sz_testrt_net_set_last_serve_body(NULL);
+      url = sz_string_from_cstr("http://127.0.0.1:8080/ping");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
+                                    sz_net_http_get(url)));
+      sz_release(url);
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/ping") == 0);
+      assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/ping") == 0);
+      assert(sz_testrt_net_serve_pending() == 0);
+      sz_pair_free(pair);
+
+      sz_testrt_net_set_last_serve_body(NULL);
+      url = sz_string_from_cstr("http://127.0.0.1:8080/pong");
+      r = sz_io_unsafe_run(both_drop(sz_net_http_get(url),
+                                    sz_net_serve_once(8080, serve_path_ok, NULL)));
+      sz_release(url);
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->left);
+      assert(strcmp(sz_string_cstr((SzString *)pair->left), "ok:/pong") == 0);
+      sz_pair_free(pair);
+
+      sz_testrt_net_set_last_serve_body(NULL);
+      url = sz_string_from_cstr("http://localhost:8080/hi");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
+                                    sz_net_http_get(url)));
+      sz_release(url);
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/hi") == 0);
+      sz_pair_free(pair);
+
+      sz_testrt_net_set_last_serve_body(NULL);
+      url = sz_string_from_cstr("http://[::1]:8080/v6");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
+                                    sz_net_http_get(url)));
+      sz_release(url);
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/v6") == 0);
+      sz_pair_free(pair);
+
+      sz_testrt_net_stub("http://127.0.0.1:8080/stub", "from-stub");
+      url = sz_string_from_cstr("http://127.0.0.1:8080/stub");
+      r = sz_io_unsafe_run(sz_net_http_get(url));
+      sz_release(url);
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "from-stub") == 0);
+      sz_release(r.value);
+
+      sz_testrt_net_set_last_serve_body(NULL);
+      sz_alloc_stats(&base_bytes, &base_count);
+      url = sz_string_from_cstr("http://127.0.0.1:8080/leak");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
+                                    sz_net_http_get(url)));
+      sz_release(url);
+      assert(r.ok);
+      sz_pair_free((SzPair *)r.value);
+      sz_testrt_net_set_last_serve_body(NULL);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+    }
 
     /* Console: argv override, stdin feed, println capture (+ echo) */
     {
@@ -7598,6 +7958,24 @@ int main(void) {
     assert(sz_list_is_empty(zs));
     zs = sz_list_zip(NULL, NULL);
     assert(sz_list_is_empty(zs));
+    zs = sz_list_interleave(xs, ys);
+    assert(sz_list_len(zs) == 5);
+    assert(sz_list_head(zs) == a);
+    assert(sz_list_at(zs, 1) == one);
+    assert(sz_list_at(zs, 2) == b);
+    assert(sz_list_at(zs, 3) == two);
+    assert(sz_list_at(zs, 4) == c);
+    sz_list_free(zs);
+    zs = sz_list_interleave(NULL, ys);
+    assert(sz_list_len(zs) == 2);
+    assert(sz_list_head(zs) == one);
+    sz_list_free(zs);
+    zs = sz_list_interleave(xs, NULL);
+    assert(sz_list_len(zs) == 3);
+    assert(sz_list_head(zs) == a);
+    sz_list_free(zs);
+    zs = sz_list_interleave(NULL, NULL);
+    assert(sz_list_is_empty(zs));
     zs = sz_list_zip_all(xs, ys, zee, nine);
     assert(sz_list_len(zs) == 3);
     pair = (SzPair *)sz_list_at(zs, 2);
@@ -9302,6 +9680,26 @@ int main(void) {
     sz_release(url);
     sz_testrt_reset();
     unsetenv("SCUZZ_FAULT_MODE");
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+  }
+
+  /* Fault on Net fails before loopback mailbox offer. */
+  {
+    SzString *url;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_FAULT_KIND", "net", 1);
+    setenv("SCUZZ_FAULT_N", "1", 1);
+    sz_testrt_install();
+    url = sz_string_from_cstr("http://127.0.0.1:8080/ping");
+    r = sz_io_unsafe_run(sz_net_http_get(url));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "injected fault") != NULL);
+    sz_error_free(r.error);
+    sz_release(url);
+    sz_testrt_reset();
     unsetenv("SCUZZ_FAULT_KIND");
     unsetenv("SCUZZ_FAULT_N");
     unsetenv("SCUZZ_TESTRT");

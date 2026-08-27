@@ -1,0 +1,85 @@
+private def printKeys(j: Json): IO[Unit] =
+  IO.println(Str.concat("keys:", List.join(Json.keys(j), ",")))
+
+private def printInt(j: Json, key: String): IO[Unit] =
+  IO.println(s"int:$key:${Str.fromInt(Json.getInt(j, key, -1))}")
+
+private def printHas(j: Json, key: String): IO[Unit] =
+  IO.println(Str.concat(s"has:$key:", if (Json.has(j, key)) "1" else "0"))
+
+private def printArr(j: Json): IO[Unit] =
+  IO.println(s"arr:${Str.fromInt(List.len(Json.arr(j)))}")
+
+private def printAt(j: Json, i: Int): IO[Unit] =
+  IO.println(s"at:${Str.fromInt(i)}:${Str.fromInt(List.len(Json.at(j, i)))}")
+
+private def printMerge(a: Json, b: Json): IO[Unit] =
+  for {
+    m = Json.merge(a, b)
+    _ <- IO.println(if (Json.isObj(m)) "merge:obj" else "merge:other")
+    _ <- IO.println(s"mergeN:${Str.fromInt(Json.getInt(m, "n", 0))}")
+  } yield ()
+
+private def printStr(j: Json, key: String): IO[Unit] =
+  IO.println(Str.concat(s"str:$key:", Json.getStr(j, key, "")))
+
+private def printBool(j: Json, key: String): IO[Unit] =
+  IO.println(Str.concat(s"bool:$key:", if (Json.getBool(j, key, false)) "1" else "0"))
+
+private def printTags(j: Json): IO[Unit] =
+  for {
+    _ <- IO.println(Str.concat("null:", if (Json.isNull(j)) "1" else "0"))
+    _ <- IO.println(Str.concat("obj:", if (Json.isObj(j)) "1" else "0"))
+    _ <- IO.println(Str.concat("arr:", if (Json.isArr(j)) "1" else "0"))
+  } yield ()
+
+private def objKit(): IO[Unit] =
+  Json.parse("{\"n\":1,\"ok\":true,\"s\":\"hi\",\"xs\":[2,3]}") match {
+    case Result.Err(_) => IO.println("query:err")
+    case Result.Ok(j) =>
+      for {
+        _ <- printKeys(j)
+        _ <- printInt(j, "n")
+        _ <- printInt(j, "missing")
+        _ <- printHas(j, "ok")
+        _ <- printHas(j, "missing")
+        _ <- printStr(j, "s")
+        _ <- printBool(j, "ok")
+        _ <- printTags(j)
+        _ <- printArr(j)
+        got = Json.get(j, "xs")
+        _ <- IO.println(s"getXs:${Str.fromInt(List.len(got))}")
+        inner = if (List.isEmpty(got)) Json.Null else List.head(got)
+        _ <- printArr(inner)
+        _ <- printAt(inner, 1)
+        _ <- printAt(inner, 9)
+        pairs = Json.pairs(j)
+        _ <- IO.println(s"pairs:${Str.fromInt(List.len(pairs))}")
+      } yield ()
+  }
+
+private def mergeKit(): IO[Unit] =
+  Json.parse("{\"n\":1}") match {
+    case Result.Err(_) => IO.println("merge:err")
+    case Result.Ok(a) =>
+      Json.parse("{\"n\":9,\"k\":2}") match {
+        case Result.Err(_) => IO.println("merge:err")
+        case Result.Ok(b) => printMerge(a, b)
+      }
+  }
+
+private def missKit(): IO[Unit] =
+  for {
+    _ <- printKeys(Json.Null)
+    _ <- printArr(Json.Null)
+    _ <- printAt(Json.Null, 0)
+    _ <- printHas(Json.Null, "a")
+    _ <- IO.println(Str.concat("asInt:", Str.fromInt(List.len(Json.asInt(Json.Null)))))
+  } yield ()
+
+def run(): IO[Unit] =
+  for {
+    _ <- objKit()
+    _ <- mergeKit()
+    _ <- missKit()
+  } yield ()

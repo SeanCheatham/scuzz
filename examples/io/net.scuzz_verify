@@ -1,0 +1,2 @@
+def pingHitsNet(t: Timeline): Verdict =
+  Verdict.any(t, i => Timeline.effectHas(t, i, "Net.httpGet"))
