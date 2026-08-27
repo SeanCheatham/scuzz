@@ -23,7 +23,7 @@ enum Expr:
 
 record Param(name: String, ty: String, w: String, d: String)
 
-record Fun(priv: Bool, name: String, tparams: List[String], params: List[Param], ret: String, body: Expr)
+record Fun(priv: Bool, name: String, tparams: List[String], params: List[Param], ret: String, body: Expr, mod: String)
 
 record Arm(pat: String, g: String, body: Expr)
 
@@ -530,7 +530,7 @@ def parseDef3(priv: Bool, name: String, ts: List[String], params: List[Param], p
 
 def parseDef4(priv: Bool, name: String, ts: List[String], params: List[Param], ret: String, p: (Expr, Int)): (Fun, Int) =
   p match {
-    case (body, j) => (Fun(priv, name, ts, params, ret, body), j)
+    case (body, j) => (Fun(priv, name, ts, params, ret, body, ""), j)
   }
 
 def parseMain(toks: List[Tok], i: Int): (String, Expr, Int) =
@@ -890,6 +890,46 @@ def prettyPkg(pkg: String): String =
   if (pkg == "") "" else Str.concat("package ", Str.concat(pkg, """
 
 """))
+
+def stampFun(mod: String, d: Fun): Fun =
+  d match {
+    case Fun(priv, name, tparams, params, ret, body, _) => Fun(priv, name, tparams, params, ret, body, mod)
+  }
+
+def stampFuns(mod: String, ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) []: List[Fun] else stampFun(mod, List.head(ds)) :: stampFuns(mod, List.tail(ds))
+
+def stampDefs(mod: String, p: Prog): Prog =
+  p match {
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, impls, imps, stampFuns(mod, defs), main, body)
+  }
+
+def emptyProg(): Prog =
+  Prog("", []: List[En], []: List[Alias], []: List[Tr], []: List[Im], []: List[Imp], []: List[Fun], "", Expr.EVar(""))
+
+def merge(a: Prog, b: Prog): Prog =
+  a match {
+    case Prog(ap, ae, aa, at, ai, am, ad, an, ab) => merge2(ap, ae, aa, at, ai, am, ad, an, ab, b)
+  }
+
+def merge2(ap: String, ae: List[En], aa: List[Alias], at: List[Tr], ai: List[Im], am: List[Imp], ad: List[Fun], an: String, ab: Expr, b: Prog): Prog =
+  b match {
+    case Prog(bp, be, ba, bt, bi, bm, bd, bn, bb) => Prog(if (bp == "") ap else bp, List.concat(ae, be), List.concat(aa, ba), List.concat(at, bt), List.concat(ai, bi), List.concat(am, bm), List.concat(ad, bd), if (bn == "") an else bn, if (bn == "") ab else bb)
+  }
+
+def parseFile(stem: String, src: String): Prog =
+  stampDefs(stem, parse(Lexer.lex(src)))
+
+def parseFiles(files: List[(String, String)]): Prog =
+  parseFiles2(files, emptyProg())
+
+def parseFiles2(files: List[(String, String)], acc: Prog): Prog =
+  if (List.isEmpty(files)) acc else parseFiles3(List.head(files), List.tail(files), acc)
+
+def parseFiles3(f: (String, String), rest: List[(String, String)], acc: Prog): Prog =
+  f match {
+    case (stem, src) => parseFiles2(rest, merge(acc, parseFile(stem, src)))
+  }
 
 def pretty(p: Prog): String =
   Str.concat(prettyPkg(p.pkg), Str.concat(prettyEnums(p.enums), Str.concat(prettyAliases(p.aliases), Str.concat(prettyTraits(p.traits), Str.concat(prettyImpls(p.impls), Str.concat(prettyImps(p.imps, !(List.isEmpty(p.defs) && p.main == "")), Str.concat(prettyDefs(p.defs), prettyMain(p.main, p.body))))))))
