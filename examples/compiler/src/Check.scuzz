@@ -39,10 +39,10 @@ def stripNamed(e: Expr): Expr =
   }
 
 def isKit(f: String): Bool =
-  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result"
+  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "Str.repeat" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result"
 
 def kitParams(f: String): List[String] =
-  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else if (f == "Str.charAt") "String" :: "Int" :: ([]: List[String]) else if (f == "Str.slice") "String" :: "Int" :: "Int" :: ([]: List[String]) else if (f == "Str.toInt") "String" :: "Int" :: ([]: List[String]) else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: ([]: List[String]) else if (f == "List.concat") "List" :: "List" :: ([]: List[String]) else if (f == "List.cons") "Any" :: "List" :: ([]: List[String]) else if (f == "List.at") "List" :: "Int" :: ([]: List[String]) else if (f == "Builder.empty") []: List[String] else if (f == "Builder.append") "Builder" :: "String" :: ([]: List[String]) else if (f == "Builder.result") "Builder" :: ([]: List[String]) else []: List[String]
+  if (f == "Str.fromInt") "Int" :: ([]: List[String]) else if (f == "Str.concat") "String" :: "String" :: ([]: List[String]) else if (f == "Str.len") "String" :: ([]: List[String]) else if (f == "Str.fromBool") "Bool" :: ([]: List[String]) else if (f == "Str.charAt") "String" :: "Int" :: ([]: List[String]) else if (f == "Str.slice") "String" :: "Int" :: "Int" :: ([]: List[String]) else if (f == "Str.toInt") "String" :: "Int" :: ([]: List[String]) else if (f == "Str.repeat") "String" :: "Int" :: ([]: List[String]) else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: ([]: List[String]) else if (f == "List.concat") "List" :: "List" :: ([]: List[String]) else if (f == "List.cons") "Any" :: "List" :: ([]: List[String]) else if (f == "List.at") "List" :: "Int" :: ([]: List[String]) else if (f == "Builder.empty") []: List[String] else if (f == "Builder.append") "Builder" :: "String" :: ([]: List[String]) else if (f == "Builder.result") "Builder" :: ([]: List[String]) else []: List[String]
 
 def kitRet(f: String): String =
   if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail") "List[Int]" else if (f == "List.head") "Int" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else "String"
@@ -72,10 +72,34 @@ def zipCheck(callee: String, want: List[String], args: List[Expr], env: List[(St
   if (List.isEmpty(want)) ok("") else zipCheck2(callee, List.head(want), infer(stripNamed(List.head(args)), env, funs, ens), List.tail(want), List.tail(args), env, funs, ens, span)
 
 def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
-  if (hasErr(o)) o else if (o.ty == w || listMatch(w, o.ty) || w == "Any") zipCheck(callee, want, args, env, funs, ens, span) else bad(Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, Str.concat(", got ", o.ty)))), span)
+  if (hasErr(o)) o else if (tyEq(o.ty, w) || w == "Any") zipCheck(callee, want, args, env, funs, ens, span) else bad(Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, Str.concat(", got ", o.ty)))), span)
 
 def listMatch(w: String, g: String): Bool =
-  w == "List" && Str.startsWith(g, "List[")
+  w == "List" && isListTy(g) || g == "List" && isListTy(w)
+
+def isListTy(t: String): Bool =
+  t == "List" || Str.startsWith(t, "List[")
+
+def tyEq(a: String, b: String): Bool =
+  a == b || listMatch(a, b) || tupEq(a, b)
+
+def isTup(t: String): Bool =
+  Str.len(t) > 0 && Str.charAt(t, 0) == 40
+
+def tupEq(a: String, b: String): Bool =
+  isTup(a) && isTup(b) && partsEq(splitComma(tupleInner(a)), splitComma(tupleInner(b)))
+
+def partsEq(xs: List[String], ys: List[String]): Bool =
+  if (List.isEmpty(xs)) List.isEmpty(ys) else if (List.isEmpty(ys)) false else tyEq(List.head(xs), List.head(ys)) && partsEq(List.tail(xs), List.tail(ys))
+
+def prefer(a: String, b: String): String =
+  if (a == b) a else if (a == "List") b else if (b == "List") a else if (isTup(a) && isTup(b)) preferTup(a, b) else a
+
+def preferTup(a: String, b: String): String =
+  Str.concat("(", Str.concat(preferParts(splitComma(tupleInner(a)), splitComma(tupleInner(b))), ")"))
+
+def preferParts(xs: List[String], ys: List[String]): String =
+  if (List.isEmpty(xs) || List.isEmpty(ys)) "" else if (List.len(xs) == 1 || List.len(ys) == 1) prefer(List.head(xs), List.head(ys)) else Str.concat(prefer(List.head(xs), List.head(ys)), Str.concat(", ", preferParts(List.tail(xs), List.tail(ys))))
 
 def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
   if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown2(zipCheck(f, want, args, env, funs, ens, span), ret)
@@ -90,7 +114,16 @@ def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs:
   if (isKit(f)) checkKnown(f, kitParams(f), kitRetOf(f, args, env, funs, ens), args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else resolveUser(f, args, env, funs, ens, span, findFun(funs, f))
 
 def kitRetOf(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
-  if (f == "List.head") headRet(args, env, funs, ens) else if (f == "List.at") headRet(args, env, funs, ens) else if (f == "List.tail") tailRet(args, env, funs, ens) else if (f == "List.cons") consRet(args, env, funs, ens) else kitRet(f)
+  if (f == "List.head") headRet(args, env, funs, ens) else if (f == "List.at") headRet(args, env, funs, ens) else if (f == "List.tail") tailRet(args, env, funs, ens) else if (f == "List.reverse") tailRet(args, env, funs, ens) else if (f == "List.concat") concatRet(args, env, funs, ens) else if (f == "List.cons") consRet(args, env, funs, ens) else kitRet(f)
+
+def concatRet(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
+  if (List.isEmpty(args)) "List[Int]" else concatRet2(infer(List.head(args), env, funs, ens).ty, List.tail(args), env, funs, ens)
+
+def concatRet2(a: String, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
+  if (Str.startsWith(a, "List[")) a else if (List.isEmpty(rest)) a else concatRet3(a, infer(List.head(rest), env, funs, ens).ty)
+
+def concatRet3(a: String, b: String): String =
+  if (Str.startsWith(b, "List[")) b else if (a == "List") b else a
 
 def consRet(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
   if (List.isEmpty(args)) "List[Int]" else Str.concat("List[", Str.concat(infer(List.head(args), env, funs, ens).ty, "]"))
@@ -174,7 +207,7 @@ def inferIf3(to: Out, el: Expr, env: List[(String, String)], funs: List[Fun], en
   if (hasErr(to)) to else inferIf4(to, infer(el, env, funs, ens))
 
 def inferIf4(to: Out, eo: Out): Out =
-  if (hasErr(eo)) eo else if (to.ty == eo.ty) ok(to.ty) else bad(Str.concat("type mismatch: expected ", Str.concat(to.ty, Str.concat(", got ", eo.ty))), "")
+  if (hasErr(eo)) eo else if (tyEq(to.ty, eo.ty)) ok(prefer(to.ty, eo.ty)) else bad(Str.concat("type mismatch: expected ", Str.concat(to.ty, Str.concat(", got ", eo.ty))), "")
 
 def infer(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   e match {
@@ -195,7 +228,7 @@ def infer(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]):
     case Expr.EList(xs) => inferList(xs, env, funs, ens)
     case Expr.ETuple(xs) => inferTuple(xs, env, funs, ens)
     case Expr.EMethod(recv, name, args) => inferMethod(recv, name, args, env, funs, ens, e)
-    case Expr.EField(recv, _) => inferField(recv, env, funs, ens)
+    case Expr.EField(recv, name) => inferField(recv, name, env, funs, ens)
     case Expr.ELam(_, body) => infer(body, env, funs, ens)
     case Expr.EMatch(s, arms) => inferMatch(s, arms, env, funs, ens)
     case Expr.EFor(_, body) => infer(body, env, funs, ens)
@@ -204,10 +237,43 @@ def infer(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]):
 def hasEn(ens: List[En], name: String): Bool =
   if (List.isEmpty(ens)) false else if (List.head(ens).name == name) true else hasEn(List.tail(ens), name)
 
-def inferField(recv: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+def inferField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   recv match {
-    case Expr.EVar(en) => if (hasEn(ens, en)) ok(en) else infer(recv, env, funs, ens)
-    case _ => infer(recv, env, funs, ens)
+    case Expr.EVar(en) => if (hasEn(ens, en)) ok(en) else fieldOf(inferVar(en, env), name, ens)
+    case _ => fieldOf(infer(recv, env, funs, ens), name, ens)
+  }
+
+def fieldOf(o: Out, name: String, ens: List[En]): Out =
+  if (hasErr(o)) o else fieldOf2(o.ty, name, ens)
+
+def fieldOf2(ty: String, name: String, ens: List[En]): Out =
+  fieldOf3(fieldNamed(ens, ty, name), ty)
+
+def fieldOf3(ft: String, ty: String): Out =
+  if (ft == "") ok(ty) else ok(ft)
+
+def fieldNamed(ens: List[En], ty: String, name: String): String =
+  if (List.isEmpty(ens)) "" else fieldNamed1(List.head(ens), List.tail(ens), ty, name)
+
+def fieldNamed1(h: En, rest: List[En], ty: String, name: String): String =
+  h match {
+    case En(_, n, _, cases) => if (n == ty) fieldNamed2(cases, name) else fieldNamed(rest, ty, name)
+  }
+
+def fieldNamed2(cs: List[EnCase], name: String): String =
+  if (List.isEmpty(cs)) "" else fieldNamed3(List.head(cs), List.tail(cs), name)
+
+def fieldNamed3(h: EnCase, rest: List[EnCase], name: String): String =
+  h match {
+    case EnCase(_, fields) => fieldNamed4(fields, name, rest)
+  }
+
+def fieldNamed4(fs: List[Param], name: String, rest: List[EnCase]): String =
+  if (List.isEmpty(fs)) fieldNamed2(rest, name) else fieldNamed5(List.head(fs), List.tail(fs), name, rest)
+
+def fieldNamed5(p: Param, rest: List[Param], name: String, restCs: List[EnCase]): String =
+  p match {
+    case Param(n, ty, _, _) => if (n == name) ty else fieldNamed4(rest, name, restCs)
   }
 
 def inferMatch(s: Expr, arms: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
@@ -396,7 +462,7 @@ def inferVar2(s: String, t: String): Out =
   if (t == "") bad(Str.concat("unbound variable ", s), s) else ok(t)
 
 def inferList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(xs)) ok("List[Int]") else inferList2(infer(List.head(xs), env, funs, ens))
+  if (List.isEmpty(xs)) ok("List") else inferList2(infer(List.head(xs), env, funs, ens))
 
 def inferList2(o: Out): Out =
   if (hasErr(o)) o else ok(Str.concat("List[", Str.concat(o.ty, "]")))
@@ -414,7 +480,7 @@ def checkDef(d: Fun, funs: List[Fun], ens: List[En]): Out =
   checkDef2(d, infer(d.body, bindParams(d.params, []: List[(String, String)]), funs, ens))
 
 def checkDef2(d: Fun, o: Out): Out =
-  if (hasErr(o)) o else if (o.ty == d.ret) o else bad(Str.concat("def ", Str.concat(d.name, Str.concat(" body ", Str.concat(o.ty, Str.concat(" does not match declared ", d.ret))))), Parse.pretty0(d.body))
+  if (hasErr(o)) o else if (tyEq(o.ty, d.ret)) o else bad(Str.concat("def ", Str.concat(d.name, Str.concat(" body ", Str.concat(o.ty, Str.concat(" does not match declared ", d.ret))))), Parse.pretty0(d.body))
 
 def checkDefs(ds: List[Fun], funs: List[Fun], ens: List[En]): Out =
   if (List.isEmpty(ds)) ok("") else checkDefs2(checkDef(List.head(ds), funs, ens), List.tail(ds), funs, ens)
