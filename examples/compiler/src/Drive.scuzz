@@ -1,5 +1,7 @@
 record Build(ok: Bool, ir: String, diags: String)
 
+record PkgOut(ok: Bool, name: String, ll: String, llPath: String, link: String, diags: String)
+
 import Manifest.Man
 
 def compileSrc(src: String): Build =
@@ -25,4 +27,19 @@ def missToml(dir: String): String =
 
 def showMan(m: Man): String =
   if (!m.ok) Str.concat("err:", m.err) else Str.concat("name=", Str.concat(m.name, Str.concat(" ver=", Str.concat(m.version, Str.concat(" ui=", Str.concat(if (m.hasUi) "true" else "false", Str.concat(" deps=", Str.fromInt(List.len(m.deps)))))))))
+
+def compilePkg(toml: String, src: String, outDir: String, clang: String, lib: String): PkgOut =
+  compilePkg2(Manifest.parse(toml), src, outDir, clang, lib)
+
+def compilePkg2(m: Man, src: String, outDir: String, clang: String, lib: String): PkgOut =
+  if (!m.ok) PkgOut(false, "", "", "", "", m.err) else compilePkg3(m, src, compileSrc(src), outDir, clang, lib)
+
+def compilePkg3(m: Man, src: String, b: Build, outDir: String, clang: String, lib: String): PkgOut =
+  if (!b.ok) PkgOut(false, m.name, "", "", "", b.diags) else compilePkg4(m, src, outDir, clang, lib)
+
+def compilePkg4(m: Man, src: String, outDir: String, clang: String, lib: String): PkgOut =
+  PkgOut(true, m.name, Emit.emitFull(src), llName(outDir, m.name), linkLine(clang, llName(outDir, m.name), lib, exeName(outDir, m.name)), "[]")
+
+def showPkg(p: PkgOut): String =
+  if (!p.ok) Str.concat("fail:", p.diags) else Str.concat("ok name=", Str.concat(p.name, Str.concat(" ll=", Str.concat(p.llPath, Str.concat(" link=", p.link)))))
 

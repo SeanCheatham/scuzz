@@ -22,3 +22,6 @@ def irHello(): Bool =
 def irIdemHello(): Bool =
   Main.irIdem(Main.srcHello())
 
+def irFullHello(): Bool =
+  Emit.emitFull(Main.srcHello()) == Str.concat(Emit.preamble(), Main.wantHello())
+
