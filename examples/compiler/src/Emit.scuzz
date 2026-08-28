@@ -9,6 +9,7 @@ import Parse.Arm
 import Parse.Param
 import Lexer.Tok
 import Check.infer
+import Check.getTy
 
 def noStr(): List[String] =
   []
@@ -739,7 +740,12 @@ def isPtrParam(v: String, ps: List[Param]): Bool =
   Str.len(v) > 0 && Str.charAt(v, 0) == 37 && paramKnown(ps, Str.slice(v, 1, Str.len(v))) && !paramIsI64(ps, Str.slice(v, 1, Str.len(v)))
 
 def paramKnown(ps: List[Param], n: String): Bool =
-  if (List.isEmpty(ps)) false else if (List.head(ps).name == n) true else paramKnown(List.tail(ps), n)
+  if (List.isEmpty(ps)) false else paramKnownHd(List.head(ps), List.tail(ps), n)
+
+def paramKnownHd(p: Param, rest: List[Param], n: String): Bool =
+  p match {
+    case Param(name, _, _, _) => if (name == n) true else paramKnown(rest, n)
+  }
 
 def emitIfHead(c: Slot, prefix: String): String =
   c match {
@@ -945,7 +951,12 @@ def caseTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
   }
 
 def firstFieldTy(ps: List[Param]): String =
-  if (List.isEmpty(ps)) "" else List.head(ps).ty
+  if (List.isEmpty(ps)) "" else paramTyOf(List.head(ps))
+
+def paramTyOf(p: Param): String =
+  p match {
+    case Param(_, ty, _, _) => ty
+  }
 
 def bindIsInt(pat: String, ens: List[En]): Bool =
   payloadIntTy(fieldTy(ens, patCore(pat)), ens)
@@ -974,7 +985,7 @@ def patTag2(dot: Int, pat: String, ens: List[En]): Int =
 def emitMatch(s: Expr, arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   s match {
     case Expr.EVar(n) => emitMatchV(n, arms, prefix, strs, defs, ens, ps)
-    case _ => emitMatch1(emitExpr(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps), arms, prefix, strs, defs, ens, ps, tupSlots(infer(s, paramEnv(ps), defs, ens).ty))
+    case _ => emitMatch1(emitExpr(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps), arms, prefix, strs, defs, ens, ps, noStr())
   }
 
 def emitMatchV(n: String, arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
@@ -1622,12 +1633,30 @@ def rwFieldArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[E
 
 def rwField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   recv match {
-    case Expr.EVar(en) => if (hasEn(ens, en)) Expr.EField(recv, name) else rwFieldTy(recv, name, infer(recv, env, funs, ens).ty, ens)
-    case _ => rwFieldTy(recv, name, infer(recv, env, funs, ens).ty, ens)
+    case Expr.EVar(en) => rwFieldVar(en, name, env, ens)
+    case Expr.EMethod(r, m, args) => rwFieldMethod(r, m, args, name, env, funs, ens)
+    case _ => Expr.EField(recv, name)
+  }
+
+def rwFieldVar(en: String, name: String, env: List[(String, String)], ens: List[En]): Expr =
+  if (hasEn(ens, en)) Expr.EField(Expr.EVar(en), name) else rwFieldTy(Expr.EVar(en), name, getTy(env, en), ens)
+
+def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+  r match {
+    case Expr.EVar(mod) => rwFieldQualHit(m, args, name, ens, findDefMod(funs, mod, m))
+    case _ => Expr.EField(Expr.EMethod(r, m, args), name)
+  }
+
+def rwFieldQualHit(m: String, args: List[Expr], name: String, ens: List[En], hit: List[Fun]): Expr =
+  if (List.isEmpty(hit)) Expr.EField(Expr.EMethod(Expr.EVar(""), m, args), name) else rwFieldQualFun(m, args, name, ens, List.head(hit))
+
+def rwFieldQualFun(m: String, args: List[Expr], name: String, ens: List[En], d: Fun): Expr =
+  d match {
+    case Fun(_, _, _, _, ret, _, mod) => rwFieldTy(Expr.EMethod(Expr.EVar(mod), m, args), name, ret, ens)
   }
 
 def rwFieldTy(recv: Expr, name: String, ty: String, ens: List[En]): Expr =
-  if (isTupTy(ty)) tupField(recv, name, ty) else recField(recv, name, recNames(ens, ty), ty, ens)
+  if (isTupTy(ty)) tupField(recv, name, ty) else recField(recv, name, recNames(copyEns(ens), ty), ty, ens)
 
 def isTupTy(ty: String): Bool =
   Str.len(ty) > 0 && Str.charAt(ty, 0) == 40
@@ -1645,7 +1674,7 @@ def recField(recv: Expr, name: String, ns: List[String], ty: String, ens: List[E
   if (List.isEmpty(ns)) Expr.EField(recv, name) else recFieldGo(recv, name, ns, ty, ens)
 
 def recFieldGo(recv: Expr, name: String, ns: List[String], ty: String, ens: List[En]): Expr =
-  recFieldPair(recv, ty, ens, idxLen(ns, name, 0))
+  recFieldPair(recv, name, ty, ens, idxLen(ns, name, 0))
 
 def idxLen(ns: List[String], name: String, i: Int): (Int, Int) =
   idxLenN(ns, name, i, List.len(ns))
@@ -1656,13 +1685,13 @@ def idxLenN(ns: List[String], name: String, i: Int, n: Int): (Int, Int) =
 def idxLenHit(h: String, ns: List[String], name: String, i: Int, n: Int): (Int, Int) =
   if (h == name) (i, n) else idxLenN(ns, name, i + 1, n)
 
-def recFieldPair(recv: Expr, ty: String, ens: List[En], p: (Int, Int)): Expr =
+def recFieldPair(recv: Expr, name: String, ty: String, ens: List[En], p: (Int, Int)): Expr =
   p match {
-    case (idx, n) => recField2(recv, idx, n, ty, recTys(ens, ty))
+    case (idx, n) => recField2(recv, name, idx, n, ty, recTys(ens, ty))
   }
 
-def recField2(recv: Expr, idx: Int, n: Int, ty: String, tys: List[String]): Expr =
-  if (idx < 0) Expr.EInt(0) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys), ")"))), "", Expr.EVar(pickBind(idx, tys))) :: noArm())
+def recField2(recv: Expr, name: String, idx: Int, n: Int, ty: String, tys: List[String]): Expr =
+  if (idx < 0) Expr.EField(recv, name) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys), ")"))), "", Expr.EVar(pickBind(idx, tys))) :: noArm())
 
 def bindsTyped(i: Int, n: Int, tys: List[String]): String =
   if (i >= n) "" else if (i + 1 == n) pickBind(i, tys) else Str.concat(pickBind(i, tys), Str.concat(", ", bindsTyped(i + 1, n, tys)))
@@ -1767,7 +1796,12 @@ def fmCount(e: Expr): Int =
   }
 
 def fmCountArms(arms: List[Arm]): Int =
-  if (List.isEmpty(arms)) 0 else fmCount(List.head(arms).body) + fmCountArms(List.tail(arms))
+  if (List.isEmpty(arms)) 0 else fmCountArm(List.head(arms), List.tail(arms))
+
+def fmCountArm(a: Arm, rest: List[Arm]): Int =
+  a match {
+    case Arm(_, _, body) => fmCount(body) + fmCountArms(rest)
+  }
 
 def fmCountArgs(xs: List[Expr]): Int =
   if (List.isEmpty(xs)) 0 else fmCount(List.head(xs)) + fmCountArgs(List.tail(xs))
@@ -1869,7 +1903,12 @@ def emitOneCont2(id: Int, s: Slot): String =
   Str.concat("define internal ptr @sz_cont_", Str.concat(Str.fromInt(id), Str.concat("(ptr %value, ptr %env) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(s.code, Str.concat("  ret ptr ", Str.concat(s.val, Str.concat(nl(), Str.concat("}", Str.concat(nl(), nl()))))))))))))
 
 def emitConts(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
-  emitContsAt(e, strs, defs, ens, ps, 0)._1
+  emitContsHead(emitContsAt(e, strs, defs, ens, ps, 0))
+
+def emitContsHead(p: (String, Int)): String =
+  p match {
+    case (code, _) => code
+  }
 
 def emitContsAt(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
   e match {
@@ -1905,7 +1944,12 @@ def emitContsMatch2(p: (String, Int), arms: List[Arm], strs: List[String], defs:
   }
 
 def emitContsArmList(arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
-  if (List.isEmpty(arms)) ("", id) else emitContsArmList2(emitContsAt(List.head(arms).body, strs, defs, ens, ps, id), List.tail(arms), strs, defs, ens, ps)
+  if (List.isEmpty(arms)) ("", id) else emitContsArmHd(List.head(arms), List.tail(arms), strs, defs, ens, ps, id)
+
+def emitContsArmHd(a: Arm, rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
+  a match {
+    case Arm(_, _, body) => emitContsArmList2(emitContsAt(body, strs, defs, ens, ps, id), rest, strs, defs, ens, ps)
+  }
 
 def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): (String, Int) =
   p match {
