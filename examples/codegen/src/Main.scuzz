@@ -83,6 +83,51 @@ entry:
   ret i32 %rc
 }"""
 
+def srcTcoMatch(): String =
+  """def countdownMatch(n: Int): Int =
+  n match {
+    case 0 => 0
+    case _ => countdownMatch(n - 1)
+  }
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(countdownMatch(3)))
+"""
+
+def wantTcoMatch(): String =
+  """define internal i64 @sz_user_Main_countdownMatch(i64 %n_in) {
+entry:
+  %n_slot = alloca i64
+  store i64 %n_in, ptr %n_slot
+  br label %tco_loop
+tco_loop:
+  %n = load i64, ptr %n_slot
+  br label %body_try_0_0
+body_try_0_0:
+  %body_p0_0_ieq1 = icmp eq i64 %n, 0
+  br i1 %body_p0_0_ieq1, label %body_ok_0_0, label %body_try_0_1
+body_try_0_1:
+  br label %body_ok_0_1
+body_default_0:
+  unreachable
+body_ok_0_0:
+  ret i64 0
+body_ok_0_1:
+  %body_a0_1_targ0_v = sub i64 %n, 1
+  store i64 %body_a0_1_targ0_v, ptr %n_slot
+  br label %tco_loop
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_v = call i64 @sz_user_Main_countdownMatch(i64 3)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
 def irDiff(src: String, want: String): Bool =
   Emit.emit(src) == want
 
@@ -319,7 +364,6 @@ body_try_0_0:
   br i1 %body_p0_0_eq1, label %body_p0_0_m1, label %body_try_0_1
 body_p0_0_m1:
   %body_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %o)
-  %body_p0_0_f1_b0 = call i64 @sz_unbox_i64(ptr %body_p0_0_f1_pl)
   br label %body_ok_0_0
 body_try_0_1:
   %body_p0_1_tg2 = call i32 @sz_adt_tag(ptr %o)
@@ -328,9 +372,9 @@ body_try_0_1:
 body_p0_1_m2:
   br label %body_ok_0_1
 body_default_0:
-  %body_dflt = add i64 0, 0
   br label %body_merge_0
 body_ok_0_0:
+  call void @sz_retain(ptr %body_p0_0_f1_pl)
   br label %body_aj_0_0
 body_aj_0_0:
   br label %body_merge_0
@@ -339,8 +383,10 @@ body_ok_0_1:
 body_aj_0_1:
   br label %body_merge_0
 body_merge_0:
-  %body_phi = phi i64 [ %body_p0_0_f1_b0, %body_aj_0_0 ], [ 0, %body_aj_0_1 ], [ %body_dflt, %body_default_0 ]
-  ret i64 %body_phi
+  %body_phi = phi ptr [ %body_p0_0_f1_pl, %body_aj_0_0 ], [ null, %body_aj_0_1 ], [ null, %body_default_0 ]
+  %ret_u = call i64 @sz_unbox_i64(ptr %body_phi)
+  call void @sz_release(ptr %body_phi)
+  ret i64 %ret_u
 }
 
 define i32 @main(i32 %argc, ptr %argv) {
@@ -684,7 +730,7 @@ def srcModFiles(): List[(String, String)] =
   ("A", srcA()) :: ("B", srcB()) :: ("Main", srcModMain()) :: []
 
 def wantMod(): String =
-  "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n\ndefine internal ptr @sz_user_A_tag() {\nentry:\n  %body_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %body_s = call ptr @sz_string_from_cstr(ptr %body_gep)\n  ret ptr %body_s\n}\n\ndefine internal ptr @sz_user_B_tag() {\nentry:\n  %body_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %body_s = call ptr @sz_string_from_cstr(ptr %body_gep)\n  ret ptr %body_s\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_arg0_v = call ptr @sz_user_A_tag()\n  %build_e_arg1_v = call ptr @sz_user_B_tag()\n  %build_e_v = call ptr @sz_string_concat(ptr %build_e_arg0_v, ptr %build_e_arg1_v)\n  call void @sz_release(ptr %build_e_arg0_v)\n  call void @sz_release(ptr %build_e_arg1_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+  "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n@.str2 = private unnamed_addr constant [6 x i8] c\"guard\\00\", align 1\n\ndefine internal ptr @sz_user_A_tag() {\nentry:\n  %body_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %body_s = call ptr @sz_string_from_cstr(ptr %body_gep)\n  ret ptr %body_s\n}\n\ndefine internal ptr @sz_user_B_tag() {\nentry:\n  %body_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %body_s = call ptr @sz_string_from_cstr(ptr %body_gep)\n  ret ptr %body_s\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_arg0_v = call ptr @sz_user_A_tag()\n  %build_e_arg1_v = call ptr @sz_user_B_tag()\n  %build_e_v = call ptr @sz_string_concat(ptr %build_e_arg0_v, ptr %build_e_arg1_v)\n  call void @sz_release(ptr %build_e_arg0_v)\n  call void @sz_release(ptr %build_e_arg1_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
 def irDiffFiles(files: List[(String, String)], want: String): Bool =
   Emit.emitFiles(files) == want
@@ -843,7 +889,7 @@ def okIf(): Bool =
   irDiff(srcIf(), wantIf()) && irIdem(srcIf()) && irDiff(srcTag(), wantTag()) && irIdem(srcTag()) && irDiff(srcCat(), wantCat()) && irIdem(srcCat()) && irDiff(srcFmt(), wantFmt()) && irIdem(srcFmt()) && Check.check(srcIf()) == "[]" && Check.check(srcTag()) == "[]" && Check.check(srcCat()) == "[]" && Check.check(srcFmt()) == "[]" && Emit.emitFull(srcFmt()) == Str.concat(Emit.preamble(), wantFmt())
 
 def okCmp(): Bool =
-  irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irIdem(srcTco()) && Check.check(srcTco()) == "[]"
+  irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irIdem(srcTco()) && Check.check(srcTco()) == "[]" && irDiff(srcTcoMatch(), wantTcoMatch()) && irIdem(srcTcoMatch()) && Check.check(srcTcoMatch()) == "[]"
 
 def okList(): Bool =
   irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]"
@@ -920,7 +966,7 @@ def srcFor(): String =
 """
 
 def wantFor(): String =
-  "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %c0_io = call ptr @sz_io_pure(ptr null)\n  ret ptr %c0_io\n}\n\ndefine internal ptr @sz_cont_1(ptr %value, ptr %env) {\nentry:\n  %c1_in_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %c1_in_ss = call ptr @sz_string_from_cstr(ptr %c1_in_gep)\n  %c1_in_io = call ptr @sz_io_println(ptr %c1_in_ss)\n  call void @sz_release(ptr %c1_in_ss)\n  %c1_fm = call ptr @sz_io_flatmap(ptr %c1_in_io, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %c1_in_io)\n  call void @sz_release(ptr null)\n  ret ptr %c1_fm\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_in_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_ss = call ptr @sz_string_from_cstr(ptr %build_in_gep)\n  %build_in_io = call ptr @sz_io_println(ptr %build_in_ss)\n  call void @sz_release(ptr %build_in_ss)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_io, ptr @sz_cont_1, ptr null)\n  call void @sz_release(ptr %build_in_io)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+  "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %c0_io = call ptr @sz_io_pure(ptr null)\n  call void @sz_release(ptr null)\n  ret ptr %c0_io\n}\n\ndefine internal ptr @sz_cont_1(ptr %value, ptr %env) {\nentry:\n  %c1_in_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %c1_in_ss = call ptr @sz_string_from_cstr(ptr %c1_in_gep)\n  %c1_in_io = call ptr @sz_io_println(ptr %c1_in_ss)\n  call void @sz_release(ptr %c1_in_ss)\n  %c1_fm = call ptr @sz_io_flatmap(ptr %c1_in_io, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %c1_in_io)\n  call void @sz_release(ptr null)\n  ret ptr %c1_fm\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_in_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_ss = call ptr @sz_string_from_cstr(ptr %build_in_gep)\n  %build_in_io = call ptr @sz_io_println(ptr %build_in_ss)\n  call void @sz_release(ptr %build_in_ss)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_io, ptr @sz_cont_1, ptr null)\n  call void @sz_release(ptr %build_in_io)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
 def srcInterpQ(): String =
   """@main def main: IO[Unit] =
