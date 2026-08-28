@@ -132,6 +132,9 @@ def llvmBin(op: String): String =
   if (op == "+") "add" else if (op == "-") "sub" else if (op == "*") "mul" else if (op == "/") "sdiv" else if (op == "%") "srem" else if (op == "&") "and" else if (op == "|") "or" else if (op == "^") "xor" else if (op == "<<") "shl" else if (op == ">>") "ashr" else "add"
 
 def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitExprFid(e, prefix, strs, defs, ens, ps, 0)
+
+def emitExprFid(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   e match {
     case Expr.EInt(n) => Slot("", Str.fromInt(n), false)
     case Expr.EBool(b) => Slot("", if (b) "1" else "0", false)
@@ -141,9 +144,9 @@ def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: 
     case Expr.ECall(f, args) => emitCall(f, args, prefix, strs, defs, ens, ps)
     case Expr.EBin(op, l, r) => emitBin(op, l, r, prefix, strs, defs, ens, ps)
     case Expr.EUn(op, inner) => emitUn(op, inner, prefix, strs, defs, ens, ps)
-    case Expr.ENamed(_, inner) => emitExpr(inner, prefix, strs, defs, ens, ps)
-    case Expr.EMethod(recv, name, args) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps)
-    case Expr.ELam(_, body) => emitExpr(body, prefix, strs, defs, ens, ps)
+    case Expr.ENamed(_, inner) => emitExprFid(inner, prefix, strs, defs, ens, ps, fid)
+    case Expr.EMethod(recv, name, args) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps, fid) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps)
+    case Expr.ELam(_, body) => emitExprFid(body, prefix, strs, defs, ens, ps, fid)
     case Expr.EIf(c, t, el) => emitIf(c, t, el, prefix, strs, defs, ens, ps)
     case Expr.EField(recv, name) => emitField(recv, name, prefix, ens)
     case Expr.EMatch(s, arms) => emitMatch(s, arms, prefix, strs, defs, ens, ps)
@@ -151,7 +154,7 @@ def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: 
     case Expr.ETuple(xs) => emitTuple(xs, prefix, strs, defs, ens, ps)
     case Expr.EInterp(s) => emitInterp(s, prefix, strs, defs, ens, ps)
     case Expr.EFloat(s) => emitFloatBits(s, prefix)
-    case Expr.EFor(bs, body) => emitExpr(desugarFor(bs, body), prefix, strs, defs, ens, ps)
+    case Expr.EFor(bs, body) => emitExprFid(desugarFor(bs, body), prefix, strs, defs, ens, ps, fid)
     case Expr.EUnit => Slot("", "null", false)
     case _ => Slot("", "0", false)
   }
@@ -782,7 +785,7 @@ def nethTupTy(body: Expr, rest: List[Param], defs: List[Fun]): String =
   if (exprIsI64(body, rest, defs)) "(Int, Int)" else "(Any, Any)"
 
 def emitNethBind2(bind: String, i64: Bool): String =
-  if (!keepBind(bind)) "" else if (i64) line(Str.concat("%", Str.concat(bind, " = call i64 @sz_unbox_i64(ptr %value)"))) else emitBindAlias(bind)
+  if (!keepBind(bind)) "" else if (i64) line(Str.concat("%", Str.concat(bind, " = call i64 @sz_unbox_i64(ptr %value)"))) else emitBindAliasPtr(bind)
 
 def emitNeth2(prefix: String, pre: String, s: Slot, pred: Bool): String =
   s match {
@@ -1634,7 +1637,13 @@ def emitCtor(en: String, name: String, prefix: String, ens: List[En]): Slot =
   Slot(emitAdtNew(prefix, ctorTag(ens, en, name), "null"), pct(prefix, "adt"), true)
 
 def ctorTag(ens: List[En], en: String, name: String): Int =
-  ctorTagAt(ens, en, name, 0)
+  if (en == "Result") resultTag(name) else if (en == "Json") jsonTag(name) else ctorTagAt(ens, en, name, 0)
+
+def resultTag(name: String): Int =
+  if (name == "Ok") 1 else 0
+
+def jsonTag(name: String): Int =
+  if (name == "Bool") 1 else if (name == "Int") 2 else if (name == "Float") 3 else if (name == "Str") 4 else if (name == "Arr") 5 else if (name == "Obj") 6 else 0
 
 def ctorTagAt(ens: List[En], en: String, name: String, i: Int): Int =
   if (i >= List.len(ens)) 0 else ctorTagHit(List.at(ens, i), ens, en, name, i)
@@ -2714,13 +2723,16 @@ def lamBody1(e: Expr): Expr =
   }
 
 def emitFm(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitFmRt("sz_io_flatmap", recv, args, prefix, strs, defs, ens, ps)
+  emitFmRt("sz_io_flatmap", recv, args, prefix, strs, defs, ens, ps, 0)
 
-def emitFmRt(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitFmA(rt, fmCountArgs(args), recv, prefix, strs, defs, ens, ps)
+def emitFmRt(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
+  emitFmCounted(rt, recv, args, prefix, strs, defs, ens, ps, fid, fmCount(recv) + fmCountArgs(args))
 
-def emitFmA(rt: String, na: Int, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitFm2(rt, emitExpr(recv, Str.concat(prefix, "_in"), strs, defs, ens, ps), prefix, na, ps)
+def emitFmCounted(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int, n: Int): Slot =
+  emitFmA(rt, fid + n, recv, prefix, strs, defs, ens, ps, fid)
+
+def emitFmA(rt: String, na: Int, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
+  emitFm2(rt, emitExprFid(recv, Str.concat(prefix, "_in"), strs, defs, ens, ps, fid), prefix, na, ps)
 
 def emitFm2(rt: String, inner: Slot, prefix: String, id: Int, ps: List[Param]): Slot =
   emitFm3(rt, inner, emitPackEnv(ps, prefix), prefix, id)
@@ -2795,14 +2807,17 @@ def emitUnpackPtr(n: String, i: Int): String =
 def emitUnpackI64(n: String, i: Int): String =
   join(line(Str.concat("%", Str.concat(n, Str.concat("_c = call ptr @sz_list_at(ptr %env, i64 ", Str.concat(Str.fromInt(i), ")"))))), line(Str.concat("%", Str.concat(n, Str.concat(" = call i64 @sz_unbox_i64(ptr %", Str.concat(n, "_c)"))))))
 
-def emitOneCont(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bind: String, nested: Bool): String =
-  if (nested && keepBind(bind)) emitOneContAlias(id, body, strs, defs, ens, ps, bind) else emitOneCont2(id, emitOneCont3(emitUnpack(ps), emitExpr(rewriteBind(body, bind, "value"), Str.concat("c", Str.fromInt(id)), strs, defs, ens, ps)))
+def emitOneCont(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bind: String, nested: Bool, start: Int, bty: String): String =
+  if (keepBind(bind) && (nested || isI64Ty(bty))) emitOneContAlias(id, body, strs, defs, ens, ps, bind, start, bty) else emitOneCont2(id, emitOneCont3(emitUnpack(ps), emitExprFid(rewriteBind(body, bind, "value"), Str.concat("c", Str.fromInt(id)), strs, defs, ens, ps, start)))
 
 def keepBind(bind: String): Bool =
   bind != "" && bind != "_"
 
 def bindPs(bind: String, ps: List[Param]): List[Param] =
-  if (keepBind(bind)) Param(bind, "Any", "", "") :: dropParam(ps, bind) else ps
+  bindPsTy(bind, ps, "Any")
+
+def bindPsTy(bind: String, ps: List[Param], ty: String): List[Param] =
+  if (keepBind(bind)) Param(bind, ty, "", "") :: dropParam(ps, bind) else ps
 
 def dropParam(ps: List[Param], n: String): List[Param] =
   if (List.isEmpty(ps)) ps else dropParam1(List.head(ps), List.tail(ps), n)
@@ -2812,14 +2827,20 @@ def dropParam1(p: Param, rest: List[Param], n: String): List[Param] =
     case Param(pn, _, _, _) => if (pn == n) dropParam(rest, n) else p :: dropParam(rest, n)
   }
 
-def emitBindAlias(n: String): String =
+def emitBindAlias(n: String, ty: String): String =
+  if (isI64Ty(ty)) emitBindAliasI64(n) else emitBindAliasPtr(n)
+
+def emitBindAliasPtr(n: String): String =
   line(Str.concat("%", Str.concat(n, " = bitcast ptr %value to ptr")))
 
-def emitOneContAlias(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bind: String): String =
-  emitOneContAlias2(id, body, strs, defs, ens, dropParam(ps, bind), bind)
+def emitBindAliasI64(n: String): String =
+  join(line(Str.concat("%", Str.concat(n, " = call i64 @sz_unbox_i64(ptr %value)"))), relPtr("%value"))
 
-def emitOneContAlias2(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], rest: List[Param], bind: String): String =
-  emitOneCont2(id, emitOneCont3(join(emitUnpack(rest), emitBindAlias(bind)), emitExpr(body, Str.concat("c", Str.fromInt(id)), strs, defs, ens, Param(bind, "Any", "", "") :: rest)))
+def emitOneContAlias(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bind: String, start: Int, bty: String): String =
+  emitOneContAlias2(id, body, strs, defs, ens, dropParam(ps, bind), bind, start, bty)
+
+def emitOneContAlias2(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], rest: List[Param], bind: String, start: Int, bty: String): String =
+  emitOneCont2(id, emitOneCont3(join(emitUnpack(rest), emitBindAlias(bind, bty)), emitExprFid(body, Str.concat("c", Str.fromInt(id)), strs, defs, ens, Param(bind, bty, "", "") :: rest, start)))
 
 def emitOneCont3(pre: String, s: Slot): Slot =
   s match {
@@ -2885,25 +2906,47 @@ def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], def
   }
 
 def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
-  emitContsFm2(emitContsAt(recv, strs, defs, ens, ps, id), lamArg(args), strs, defs, ens, ps)
+  emitContsFmTy(recvBindTy(recv), recv, args, strs, defs, ens, ps, id)
+
+def recvBindTy(recv: Expr): String =
+  recv match {
+    case Expr.ECall(f, _) => clockInt(f)
+    case Expr.EMethod(r, name, _) => recvBindTyMeth(r, name)
+    case _ => "Any"
+  }
+
+def recvBindTyMeth(r: Expr, name: String): String =
+  if (isFmName(name)) recvBindTy(r) else clockInt(qualRecv(r, name))
+
+def qualRecv(r: Expr, name: String): String =
+  r match {
+    case Expr.EVar(en) => Str.concat(en, Str.concat(".", name))
+    case _ => name
+  }
+
+def clockInt(f: String): String =
+  if (f == "Clock.realTime" || f == "Clock.monotonic") "Int" else "Any"
+
+def emitContsFmTy(bty: String, recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
+  emitContsFm2(emitContsAt(recv, strs, defs, ens, ps, id), lamArg(args), strs, defs, ens, ps, bty)
 
 def lamArg(args: List[Expr]): Expr =
   if (List.isEmpty(args)) Expr.EUnit else List.head(args)
 
-def emitContsFm2(p: (String, Int), lam: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): (String, Int) =
+def emitContsFm2(p: (String, Int), lam: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bty: String): (String, Int) =
   p match {
-    case (code, id) => emitContsFm3(code, id, lam, strs, defs, ens, ps)
+    case (code, id) => emitContsFm3(code, id, lam, strs, defs, ens, ps, bty)
   }
 
-def emitContsFm3(code: String, id: Int, lam: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): (String, Int) =
+def emitContsFm3(code: String, id: Int, lam: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bty: String): (String, Int) =
   lam match {
-    case Expr.ELam(p, body) => emitContsFm4(code, emitContsAt(body, strs, defs, ens, bindPs(p, ps), id), p, body, strs, defs, ens, ps, id)
-    case _ => emitContsFm4(code, emitContsAt(lam, strs, defs, ens, ps, id), "", lam, strs, defs, ens, ps, id)
+    case Expr.ELam(p, body) => emitContsFm4(code, emitContsAt(body, strs, defs, ens, bindPsTy(p, ps, bty), id), p, body, strs, defs, ens, ps, id, bty)
+    case _ => emitContsFm4(code, emitContsAt(lam, strs, defs, ens, ps, id), "", lam, strs, defs, ens, ps, id, bty)
   }
 
-def emitContsFm4(code: String, p: (String, Int), bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id0: Int): (String, Int) =
+def emitContsFm4(code: String, p: (String, Int), bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id0: Int, bty: String): (String, Int) =
   p match {
-    case (inner, id) => (join(code, join(inner, emitOneCont(id, body, strs, defs, ens, ps, bind, id > id0))), id + 1)
+    case (inner, id) => (join(code, join(inner, emitOneCont(id, body, strs, defs, ens, ps, bind, id > id0, id0, bty))), id + 1)
   }
 
 def emitContsArgs(xs: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
