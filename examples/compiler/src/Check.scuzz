@@ -39,6 +39,38 @@ def bindParamsHd(p: Param, rest: List[Param], acc: List[(String, String)]): List
     case Param(n, ty, _, _) => bindParams(rest, (n, ty) :: acc)
   }
 
+def lookupEnv(env: List[(String, String)], n: String): String =
+  if (List.isEmpty(env)) "" else lookupEnv1(List.head(env), List.tail(env), n)
+
+def lookupEnv1(h: (String, String), rest: List[(String, String)], n: String): String =
+  h match {
+    case (k, ty) => if (k == n) ty else lookupEnv(rest, n)
+  }
+
+def isFunTy(t: String): Bool =
+  isFunTyAt(t, 0)
+
+def isFunTyAt(t: String, i: Int): Bool =
+  if (i + 1 >= Str.len(t)) false else isFunTyAt2(t, i)
+
+def isFunTyAt2(t: String, i: Int): Bool =
+  if (Str.charAt(t, i) == 61) isFunTyAt3(t, i) else isFunTyAt(t, i + 1)
+
+def isFunTyAt3(t: String, i: Int): Bool =
+  if (Str.charAt(t, i + 1) == 62) true else isFunTyAt(t, i + 1)
+
+def funRetOf(t: String): String =
+  funRetOfAt(t, 0)
+
+def funRetOfAt(t: String, i: Int): String =
+  if (i + 4 > Str.len(t)) t else funRetOfAt2(t, i)
+
+def funRetOfAt2(t: String, i: Int): String =
+  if (sliceEq(t, i, " => ")) Str.slice(t, i + 4, 8192) else funRetOfAt(t, i + 1)
+
+def sliceEq(t: String, i: Int, w: String): Bool =
+  Str.slice(t, i, i + Str.len(w)) == w
+
 def findFun(funs: List[Fun], name: String): List[Fun] =
   if (List.isEmpty(funs)) [] else findFun1(List.head(funs), List.tail(funs), name)
 
@@ -193,7 +225,19 @@ def resolveCall(f: String, args: List[Expr], env: List[(String, String)], funs: 
   resolveCall2(f, args, env, funs, ens, Parse.pretty0(Expr.ECall(f, args)))
 
 def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
-  if (isKit(f)) checkKnown(f, kitParams(f), kitRet(f), args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else resolveUser(f, args, env, funs, ens, span, findFun(funs, f))
+  if (isKit(f)) checkKnown(f, kitParams(f), kitRet(f), args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
+
+def resolveFunOrUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, ty: String): Out =
+  if (isFunTy(ty)) inferFunApply(ty, args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFun(funs, f))
+
+def inferFunApply(ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
+  inferFunApplyRet(funRetOf(ty), args, env, funs, ens, span)
+
+def inferFunApplyRet(ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
+  if (List.len(args) == 1) inferFunApply1(ret, infer(List.head(args), env, funs, ens), span) else if (List.isEmpty(args)) bad("apply expects 1 arg", span) else inferFunApply1(ret, firstArgErr(args, env, funs, ens), span)
+
+def inferFunApply1(ret: String, o: Out, span: String): Out =
+  if (hasErr(o)) o else ok(ret)
 
 def elemOf(t: String): String =
   elemOf2(brackAt(t, 0), t)
