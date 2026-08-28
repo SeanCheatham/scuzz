@@ -302,8 +302,39 @@ def parseParen(toks: List[Tok], i: Int): (Expr, Int) =
 
 def parseParen2(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
   p match {
-    case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleRest(toks, j + 1, e :: []) else (e, j + 1)
+    case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleLam(parseTupleRest(toks, j + 1, e :: []), toks) else parseOneLam(e, toks, j)
   }
+
+def parseOneLam(e: Expr, toks: List[Tok], j: Int): (Expr, Int) =
+  if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamBody(toks, j + 2, parenBind(e)) else (e, j + 1)
+
+def parenBind(e: Expr): String =
+  e match {
+    case Expr.EVar(s) => s
+    case _ => "_"
+  }
+
+def parseTupleLam(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+  p match {
+    case (e, j) => if (_is(toks, j, Tok.Arrow)) parseTupLamBody(e, parseExpr(toks, j + 1)) else (e, j)
+  }
+
+def parseTupLamBody(patE: Expr, q: (Expr, Int)): (Expr, Int) =
+  q match {
+    case (b, k) => (Expr.ELam("__tup", Expr.EMatch(Expr.EVar("__tup"), Arm(tupPat(patE), "", b) :: [])), k)
+  }
+
+def tupPat(e: Expr): String =
+  e match {
+    case Expr.ETuple(xs) => Str.concat("(", Str.concat(_joinComma(tupNames(xs)), ")"))
+    case _ => "(_,_)"
+  }
+
+def tupNames(xs: List[Expr]): List[String] =
+  if (List.isEmpty(xs)) [] else tupNames2(List.head(xs), List.tail(xs))
+
+def tupNames2(h: Expr, rest: List[Expr]): List[String] =
+  parenBind(h) :: tupNames(rest)
 
 def parseTupleRest(toks: List[Tok], i: Int, acc: List[Expr]): (Expr, Int) =
   parseTupleRest2(parseExpr(toks, i), toks, acc)
