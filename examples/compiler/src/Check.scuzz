@@ -449,7 +449,13 @@ def splitComma(s: String): List[String] =
   splitCommaAt(s, commaAt(s, 0))
 
 def commaAt(s: String, i: Int): Int =
-  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 44) i else commaAt(s, i + 1)
+  commaAtD(s, i, 0)
+
+def commaAtD(s: String, i: Int, d: Int): Int =
+  if (i >= Str.len(s)) 0 - 1 else commaAtC(s, i, d, Str.charAt(s, i))
+
+def commaAtC(s: String, i: Int, d: Int, c: Int): Int =
+  if (c == 40) commaAtD(s, i + 1, d + 1) else if (c == 41) commaAtD(s, i + 1, if (d > 0) d - 1 else 0) else if (c == 44 && d == 0) i else commaAtD(s, i + 1, d)
 
 def splitCommaAt(s: String, c: Int): List[String] =
   if (c < 0) trimName(s) :: noStr() else trimName(Str.slice(s, 0, c)) :: splitComma(Str.slice(s, c + 1, Str.len(s)))
@@ -461,7 +467,10 @@ def trimName2(s: String, a: Int, b: Int): String =
   if (a >= b) "" else if (Str.charAt(s, a) == 32) trimName2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trimName2(s, a, b - 1) else Str.slice(s, a, b)
 
 def bindTuple2(ns: List[String], ts: List[String], env: List[(String, String)]): List[(String, String)] =
-  if (List.isEmpty(ns)) env else (List.head(ns), if (List.isEmpty(ts)) "Int" else List.head(ts)) :: bindTuple2(List.tail(ns), if (List.isEmpty(ts)) ts else List.tail(ts), env)
+  if (List.isEmpty(ns)) env else bindSlot(List.head(ns), if (List.isEmpty(ts)) "Int" else List.head(ts), bindTuple2(List.tail(ns), if (List.isEmpty(ts)) ts else List.tail(ts), env))
+
+def bindSlot(n: String, ty: String, env: List[(String, String)]): List[(String, String)] =
+  if (isTuplePat(n)) bindTuple(n, ty, env) else (n, ty) :: env
 
 def bindTy(pat: String, scrutTy: String, ens: List[En]): String =
   bindTy2(fieldTy(ens, patCore(pat)), scrutTy)
