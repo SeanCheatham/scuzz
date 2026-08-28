@@ -1320,7 +1320,10 @@ def oneParam(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", p.name) else Str.concat("ptr %", p.name)
 
 def emitDefs(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): String =
-  if (List.isEmpty(ds)) "" else Str.concat(emitDef(List.head(ds), strs, all, ens), emitDefs(List.tail(ds), strs, all, ens))
+  if (List.isEmpty(ds)) "" else emitDefsAt(ds, strs, all, ens, 0, "")
+
+def emitDefsAt(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], i: Int, acc: String): String =
+  if (i >= List.len(ds)) acc else emitDefsAt(ds, strs, all, ens, i + 1, Str.concat(acc, emitDef(List.at(ds, i), strs, all, ens)))
 
 def emitDef2(d: Fun, body: Slot): String =
   d match {
@@ -1359,7 +1362,162 @@ def isIoTy(ret: String): Bool =
   Str.len(ret) >= 2 && Str.slice(ret, 0, 2) == "IO"
 
 def emitDefByRet(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  if (isIoTy(ret)) stampCont(Str.concat(emitConts(body, strs, defs, ens, ps), emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps))), contKey(mod, name)) else emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps))
+  if (isIoTy(ret)) stampCont(Str.concat(emitConts(body, strs, defs, ens, ps), emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps))), contKey(mod, name)) else if (hasTailIf(body, name)) emitDefTco(name, mod, ret, ps, body, strs, defs, ens) else emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps))
+
+def hasTailIf(e: Expr, name: String): Bool =
+  e match {
+    case Expr.EIf(_, _, el) => isSelfTail(el, name)
+    case _ => false
+  }
+
+def isSelfTail(e: Expr, name: String): Bool =
+  e match {
+    case Expr.ECall(f, _) => f == name
+    case Expr.EMethod(_, f, _) => f == name
+    case _ => false
+  }
+
+def defParamsTco(ps: List[Param]): String =
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) oneParamTco(List.head(ps)) else Str.concat(oneParamTco(List.head(ps)), Str.concat(", ", defParamsTco(List.tail(ps))))
+
+def oneParamTco(p: Param): String =
+  if (isI64Ty(p.ty)) Str.concat("i64 %", Str.concat(p.name, "_in")) else Str.concat("ptr %", Str.concat(p.name, "_in"))
+
+def emitDefTco(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  body match {
+    case Expr.EIf(c, t, el) => emitDefTcoIf(name, mod, ret, ps, c, t, el, strs, defs, ens)
+    case _ => emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps))
+  }
+
+def emitDefTcoIf(name: String, mod: String, ret: String, ps: List[Param], c: Expr, t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  emitDefTcoIf2(llvmRet(ret), symOf(mod, name), defParamsTco(ps), ps, c, t, el, strs, defs, ens)
+
+def emitDefTcoIf2(ty: String, name: String, params: String, ps: List[Param], c: Expr, t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  emitDefTcoIf3(ty, name, params, join(emitTcoPrep(ps), emitIfTail(c, t, el, "body", strs, defs, ens, ps, ty)))
+
+def emitDefTcoIf3(ty: String, name: String, params: String, body: String): String =
+  Str.concat("define internal ", Str.concat(ty, Str.concat(" @sz_user_", Str.concat(name, emitDefTcoSig(params, body)))))
+
+def emitDefTcoSig(params: String, body: String): String =
+  Str.concat("(", Str.concat(params, Str.concat(") {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(body, Str.concat("}", Str.concat(nl(), nl())))))))))
+
+def emitTcoPrep(ps: List[Param]): String =
+  join(emitTcoAlloc(ps, 0), join(line("br label %tco_loop"), join(lab("tco_loop"), emitTcoLoads(ps, 0))))
+
+def emitTcoAlloc(ps: List[Param], i: Int): String =
+  if (i >= List.len(ps)) "" else emitTcoAllocOne(List.at(ps, i), ps, i)
+
+def emitTcoAllocOne(p: Param, ps: List[Param], i: Int): String =
+  p match {
+    case Param(n, ty, _, _) => join(emitTcoAllocN(n, isI64Ty(ty)), emitTcoAlloc(ps, i + 1))
+  }
+
+def emitTcoAllocN(n: String, i64: Bool): String =
+  if (i64) join(line(Str.concat("%", Str.concat(n, "_slot = alloca i64"))), line(Str.concat("store i64 %", Str.concat(n, Str.concat("_in, ptr %", Str.concat(n, "_slot")))))) else join(line(Str.concat("%", Str.concat(n, "_slot = alloca ptr"))), join(line(Str.concat("store ptr %", Str.concat(n, Str.concat("_in, ptr %", Str.concat(n, "_slot"))))), join(line(Str.concat("%", Str.concat(n, "_held = alloca i1"))), line(Str.concat("store i1 false, ptr %", Str.concat(n, "_held"))))))
+
+def emitTcoLoads(ps: List[Param], i: Int): String =
+  if (i >= List.len(ps)) "" else emitTcoLoadOne(List.at(ps, i), ps, i)
+
+def emitTcoLoadOne(p: Param, ps: List[Param], i: Int): String =
+  p match {
+    case Param(n, ty, _, _) => join(line(Str.concat("%", Str.concat(n, Str.concat(" = load ", Str.concat(if (isI64Ty(ty)) "i64" else "ptr", Str.concat(", ptr %", Str.concat(n, "_slot"))))))), emitTcoLoads(ps, i + 1))
+  }
+
+def emitIfTail(c: Expr, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
+  emitIfTail2(emitExpr(c, Str.concat(prefix, "_ic"), strs, defs, ens, ps), t, el, prefix, strs, defs, ens, ps, ret)
+
+def emitIfTail2(c: Slot, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
+  emitIfTail3(c, emitExpr(t, Str.concat(prefix, "_t0"), strs, defs, ens, ps), el, prefix, strs, defs, ens, ps, ret)
+
+def emitIfTail3(c: Slot, th: Slot, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
+  c match {
+    case Slot(cc, cv, _) => emitIfTail4(cc, cv, th, el, prefix, strs, defs, ens, ps, ret)
+  }
+
+def emitIfTail4(cc: String, cv: String, th: Slot, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
+  th match {
+    case Slot(tc, tv, to) => join(cc, join(emitIfCmp(cv, prefix), join(emitIfBr(prefix), join(emitIfTailThen(tc, tv, to, prefix, ret), emitIfTailElse(el, prefix, strs, defs, ens, ps)))))
+  }
+
+def emitIfTailThen(tc: String, tv: String, to: Bool, prefix: String, ret: String): String =
+  join(lab(Str.concat(prefix, "_then_0")), join(tc, emitTcoRet(ret, tv, to)))
+
+def emitTcoRet(ret: String, tv: String, to: Bool): String =
+  if (ret == "ptr" && !to) join(retPtr(tv), line(Str.concat("ret ptr ", tv))) else if (ret == "ptr") line(Str.concat("ret ptr ", tv)) else line(Str.concat("ret i64 ", tv))
+
+def emitIfTailElse(el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
+  join(lab(Str.concat(prefix, "_else_0")), emitSelfTail(el, prefix, strs, defs, ens, ps))
+
+def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
+  e match {
+    case Expr.ECall(_, args) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, 0, "", noStr())
+    case Expr.EMethod(_, _, args) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, 0, "", noStr())
+    case _ => line("br label %tco_loop")
+  }
+
+def emitSelfTailAcc(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, code: String, vals: List[String]): String =
+  if (List.isEmpty(args)) emitTcoCommit(code, ps, vals) else emitSelfTailOne(List.head(args), List.tail(args), prefix, strs, defs, ens, ps, i, code, vals)
+
+def emitSelfTailOne(a: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, code: String, vals: List[String]): String =
+  emitSelfTailGot(emitExpr(a, Str.concat(prefix, Str.concat("_targ", Str.fromInt(i))), strs, defs, ens, ps), rest, prefix, strs, defs, ens, ps, i, code, vals)
+
+def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, code: String, vals: List[String]): String =
+  s match {
+    case Slot(c, v, _) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, i + 1, join(code, c), List.concat(vals, v :: noStr()))
+  }
+
+def emitTcoCommit(code: String, ps: List[Param], vals: List[String]): String =
+  join(code, join(emitTcoRetains(ps, vals, 0), join(emitTcoReleases(ps, 0), join(emitTcoStores(ps, vals, 0), join(emitTcoHeld(ps, 0), line("br label %tco_loop"))))))
+
+def emitTcoRetains(ps: List[Param], vals: List[String], i: Int): String =
+  if (i >= List.len(ps)) "" else emitTcoRetainOne(List.at(ps, i), List.at(vals, i), ps, vals, i)
+
+def emitTcoRetainOne(p: Param, v: String, ps: List[Param], vals: List[String], i: Int): String =
+  p match {
+    case Param(_, ty, _, _) => join(emitTcoRetainTy(ty, v), emitTcoRetains(ps, vals, i + 1))
+  }
+
+def emitTcoRetainTy(ty: String, v: String): String =
+  if (isI64Ty(ty)) "" else line(Str.concat("call void @sz_retain(ptr ", Str.concat(v, ")")))
+
+def emitTcoReleases(ps: List[Param], i: Int): String =
+  if (i >= List.len(ps)) "" else emitTcoReleaseOne(List.at(ps, i), ps, i)
+
+def emitTcoReleaseOne(p: Param, ps: List[Param], i: Int): String =
+  p match {
+    case Param(n, ty, _, _) => join(if (isI64Ty(ty)) "" else emitTcoReleaseN(n, i), emitTcoReleases(ps, i + 1))
+  }
+
+def emitTcoReleaseN(n: String, i: Int): String =
+  join(emitTcoHv(n, i), join(emitTcoRelBr(i), join(lab(Str.concat("tco_rel_", Str.fromInt(i))), join(emitTcoOld(n, i), join(emitTcoRelCall(i), join(line(Str.concat("br label %tco_skip_", Str.fromInt(i))), lab(Str.concat("tco_skip_", Str.fromInt(i)))))))))
+
+def emitTcoHv(n: String, i: Int): String =
+  line(Str.concat("%", Str.concat("tco_hv", Str.concat(Str.fromInt(i), Str.concat(" = load i1, ptr %", Str.concat(n, "_held"))))))
+
+def emitTcoRelBr(i: Int): String =
+  line(Str.concat("br i1 %", Str.concat("tco_hv", Str.concat(Str.fromInt(i), Str.concat(", label %tco_rel_", Str.concat(Str.fromInt(i), Str.concat(", label %tco_skip_", Str.fromInt(i))))))))
+
+def emitTcoOld(n: String, i: Int): String =
+  line(Str.concat("%", Str.concat("tco_old", Str.concat(Str.fromInt(i), Str.concat(" = load ptr, ptr %", Str.concat(n, "_slot"))))))
+
+def emitTcoRelCall(i: Int): String =
+  line(Str.concat("call void @sz_release(ptr %", Str.concat("tco_old", Str.concat(Str.fromInt(i), ")"))))
+
+def emitTcoStores(ps: List[Param], vals: List[String], i: Int): String =
+  if (i >= List.len(ps)) "" else emitTcoStoreOne(List.at(ps, i), List.at(vals, i), ps, vals, i)
+
+def emitTcoStoreOne(p: Param, v: String, ps: List[Param], vals: List[String], i: Int): String =
+  p match {
+    case Param(n, ty, _, _) => join(line(Str.concat("store ", Str.concat(if (isI64Ty(ty)) "i64 " else "ptr ", Str.concat(v, Str.concat(", ptr %", Str.concat(n, "_slot")))))), emitTcoStores(ps, vals, i + 1))
+  }
+
+def emitTcoHeld(ps: List[Param], i: Int): String =
+  if (i >= List.len(ps)) "" else emitTcoHeldOne(List.at(ps, i), ps, i)
+
+def emitTcoHeldOne(p: Param, ps: List[Param], i: Int): String =
+  p match {
+    case Param(n, ty, _, _) => join(if (isI64Ty(ty)) "" else line(Str.concat("store i1 true, ptr %", Str.concat(n, "_held"))), emitTcoHeld(ps, i + 1))
+  }
 
 def contKey(mod: String, name: String): String =
   if (mod == "") name else Str.concat(mod, Str.concat("_", name))
