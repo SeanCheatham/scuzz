@@ -96,7 +96,12 @@ def zipCheckHd(callee: String, w: String, want: List[String], args: List[Expr], 
   zipCheckArg(callee, w, want, List.head(args), List.tail(args), env, funs, ens, span, acc)
 
 def zipCheckArg(callee: String, w: String, want: List[String], arg: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
-  zipCheck2(callee, w, infer(stripNamed(arg), env, funs, ens), want, args, env, funs, ens, span, acc)
+  if (List.isEmpty(args)) zipCheckLast(infer(stripNamed(arg), env, funs, ens), callee, w, span, acc) else zipCheck2(callee, w, infer(stripNamed(arg), env, funs, ens), want, args, env, funs, ens, span, acc)
+
+def zipCheckLast(o: Out, callee: String, w: String, span: String, acc: String): Out =
+  o match {
+    case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else if (tyEq(ty, w) || w == "Any") ok(if (acc == "") ty else acc) else argMismatch(callee, w, ty, span)
+  }
 
 def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
   o match {
@@ -499,13 +504,24 @@ def inferList2(o: Out): Out =
   if (hasErr(o)) o else ok(Str.concat("List[", Str.concat(o.ty, "]")))
 
 def inferTuple(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(xs)) ok("Unit") else inferTuple2(firstArgErr(xs, env, funs, ens), xs, env, funs, ens)
+  inferTupleAcc(xs, env, funs, ens, "")
 
-def inferTuple2(o: Out, xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (hasErr(o)) o else ok(Str.concat("(", Str.concat(tupleTys(xs, env, funs, ens), ")")))
+def inferTupleAcc(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], acc: String): Out =
+  if (List.isEmpty(xs)) inferTupleDone(acc) else inferTupleHd(List.head(xs), xs, env, funs, ens, acc)
 
-def tupleTys(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
-  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) infer(List.head(xs), env, funs, ens).ty else Str.concat(infer(List.head(xs), env, funs, ens).ty, Str.concat(", ", tupleTys(List.tail(xs), env, funs, ens)))
+def inferTupleDone(acc: String): Out =
+  if (acc == "") ok("Unit") else ok(Str.concat("(", Str.concat(acc, ")")))
+
+def inferTupleHd(h: Expr, xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], acc: String): Out =
+  inferTupleGot(infer(stripNamed(h), env, funs, ens), xs, env, funs, ens, acc)
+
+def inferTupleGot(o: Out, xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], acc: String): Out =
+  o match {
+    case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else inferTupleRest(List.tail(xs), env, funs, ens, if (acc == "") ty else Str.concat(acc, Str.concat(", ", ty)))
+  }
+
+def inferTupleRest(rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], acc: String): Out =
+  inferTupleAcc(rest, env, funs, ens, acc)
 
 def checkDef(d: Fun, funs: List[Fun], ens: List[En]): Out =
   d match {
