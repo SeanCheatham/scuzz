@@ -1,10 +1,9 @@
 # Next slice
 
-Self-hosting staged rewrite 4 remainder: **compile itself, and Rust retirement** ([`vision.md`](vision.md#self-hosting)).
+Self-hosting staged rewrite 4 remainder: **Rust retirement** ([`vision.md`](vision.md#self-hosting)).
 
-CLI core, driver core, test/fuzz core, and hello package compile are in (`examples/cli`, `examples/compiler`, `cli-ok` / `ir-ok`). Hello-shaped IR clang-links against `libscuzz_rt.a`. Scuzz emit of `Drive.emitDir` clang-links and compiles `examples/fmt`, `examples/hello`, `examples/tyck`, `examples/codegen`, `examples/cli`, `examples/io`, `examples/kernel`, `examples/scale`, `examples/counter`, and `examples/studio` from disk. Those IR clang-link. The fmt through cli binaries print `fmt-ok` / `Hello, Scuzz!` / `tyck-ok` / `ir-ok` / `cli-ok`. The io binary runs clock, concurrency, stream, and Json kits. Helpers match a record once. They do not use `.field` on a call. `Emit.emit` lowers if-else and match self-tail to a `tco_loop` (`srcTco` / `srcTcoMatch`). Scuzz-emitted kernel clang-links and prints `tco:0` / `tcom:0` / `build:2097152`. Scuzz-emitted scale clang-links and prints `mapn:3048` / `maps:2098176` / `hit:0:49`. Scuzz-emitted counter clang-links with Skia. A headless two-frame run writes the same structural dump as `examples/counter/goldens/counter.dump`. Scuzz-emitted studio clang-links with Skia. A headless two-frame run writes the same structural dump as `examples/studio/goldens/studio.dump`. `Drive.emitDir` lists `src/` and nested path-dep `src/`. The product CLI is still the Rust binary.
+Compile itself is in. Scuzz-emitted `examples/cli` clang-links and prints `cli-ok`. That binary compiles `examples/hello`, `examples/compiler` (`clang -c`), and `examples/cli` itself. The self-emitted CLI compiles hello. Empty `Sys.args` keeps `cli-ok`. `scuzz build --out-dir` writes `Drive.emitDir`. Nested `else if` self-tails join `tco_loop` (`srcTcoNest`). A library package skips dummy `@main` (`srcLib`). The product CLI is still the Rust binary.
 
-- Finish the slice: compile itself. Scuzz emit packs first-class lambdas as `cons(fn, cons(env, nil))` (`srcLam`; `plusOne()(5)` prints `6`). Kernel through TCO and Builder is in. Scale is in. Counter and studio UI kits are in.
 - Land the last Rust `scuzz` on main, tag it, and ship a GitHub Release. That binary is the bootstrap compiler.
 - The Rust crates retire when that tagged `scuzz` compiles the Scuzz toolchain, and that toolchain compiles `examples/` and itself.
 
