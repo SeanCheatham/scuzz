@@ -135,10 +135,30 @@ def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: List[String], de
   if (op == "::") emitCall("List.cons", l :: r :: noExpr(), prefix, strs, defs, ens, ps) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps) else emitBin2(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps), op, prefix, ps)
 
 def emitBin2(le: Slot, re: Slot, op: String, prefix: String, ps: List[Param]): Slot =
-  if (isCmp(op)) emitBinCmp(le, re, op, prefix, ps) else Slot(join(le.code, join(re.code, line(Str.concat(tmp(prefix, "v"), Str.concat(llvmBin(op), Str.concat(" i64 ", Str.concat(le.val, Str.concat(", ", re.val)))))))), pct(prefix, "v"), false)
+  if (isCmp(op)) emitBinCmp(le, re, op, prefix, ps) else emitBin2L(le, re, op, prefix)
+
+def emitBin2L(le: Slot, re: Slot, op: String, prefix: String): Slot =
+  le match {
+    case Slot(lc, lv, _) => emitBin2R(lc, lv, re, op, prefix)
+  }
+
+def emitBin2R(lc: String, lv: String, re: Slot, op: String, prefix: String): Slot =
+  re match {
+    case Slot(rc, rv, _) => Slot(join(lc, join(rc, line(Str.concat(tmp(prefix, "v"), Str.concat(llvmBin(op), Str.concat(" i64 ", Str.concat(lv, Str.concat(", ", rv)))))))), pct(prefix, "v"), false)
+  }
 
 def emitBinCmp(le: Slot, re: Slot, op: String, prefix: String, ps: List[Param]): Slot =
-  if (le.owned || re.owned || isPtrSlot(le.val, ps) || isPtrSlot(re.val, ps)) emitPtrEq(le, re, op, prefix) else emitCmp(le, re, op, prefix)
+  le match {
+    case Slot(lc, lv, lo) => emitBinCmpR(lc, lv, lo, re, op, prefix, ps)
+  }
+
+def emitBinCmpR(lc: String, lv: String, lo: Bool, re: Slot, op: String, prefix: String, ps: List[Param]): Slot =
+  re match {
+    case Slot(rc, rv, ro) => emitBinCmpHit(lc, lv, lo, rc, rv, ro, op, prefix, ps)
+  }
+
+def emitBinCmpHit(lc: String, lv: String, lo: Bool, rc: String, rv: String, ro: Bool, op: String, prefix: String, ps: List[Param]): Slot =
+  if (lo || ro || isPtrSlot(lv, ps) || isPtrSlot(rv, ps)) emitPtrEq3(join(lc, rc), lv, lo, rv, ro, op, prefix) else emitCmpFrom(lc, lv, rc, rv, op, prefix)
 
 def emitPtrEq(le: Slot, re: Slot, op: String, prefix: String): Slot =
   le match {
@@ -169,7 +189,17 @@ def llvmIcmp(op: String): String =
   if (op == "==") "eq" else if (op == "!=") "ne" else if (op == "<") "slt" else if (op == "<=") "sle" else if (op == ">") "sgt" else "sge"
 
 def emitCmp(le: Slot, re: Slot, op: String, prefix: String): Slot =
-  Slot(join(le.code, join(re.code, join(line(Str.concat(tmp(prefix, "cmp"), Str.concat("icmp ", Str.concat(llvmIcmp(op), Str.concat(" i64 ", Str.concat(le.val, Str.concat(", ", re.val))))))), line(Str.concat(tmp(prefix, "v"), Str.concat("zext i1 ", Str.concat(pct(prefix, "cmp"), " to i64"))))))), pct(prefix, "v"), false)
+  le match {
+    case Slot(lc, lv, _) => emitCmpR(lc, lv, re, op, prefix)
+  }
+
+def emitCmpR(lc: String, lv: String, re: Slot, op: String, prefix: String): Slot =
+  re match {
+    case Slot(rc, rv, _) => emitCmpFrom(lc, lv, rc, rv, op, prefix)
+  }
+
+def emitCmpFrom(lc: String, lv: String, rc: String, rv: String, op: String, prefix: String): Slot =
+  Slot(join(lc, join(rc, join(line(Str.concat(tmp(prefix, "cmp"), Str.concat("icmp ", Str.concat(llvmIcmp(op), Str.concat(" i64 ", Str.concat(lv, Str.concat(", ", rv))))))), line(Str.concat(tmp(prefix, "v"), Str.concat("zext i1 ", Str.concat(pct(prefix, "cmp"), " to i64"))))))), pct(prefix, "v"), false)
 
 def emitUn(op: String, inner: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitUn2(emitExpr(inner, Str.concat(prefix, "_u"), strs, defs, ens, ps), op, prefix)
@@ -320,7 +350,9 @@ def emitArgList(args: List[Expr], prefix: String, strs: List[String], defs: List
   if (List.isEmpty(args)) (code, List.reverse(vals), List.reverse(owns)) else emitArgList2(emitExpr(List.head(args), Str.concat(prefix, Str.concat("_arg", Str.fromInt(i))), strs, defs, ens, ps), List.tail(args), prefix, strs, defs, ens, ps, i, code, vals, owns)
 
 def emitArgList2(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, code: String, vals: List[String], owns: List[Bool]): (String, List[String], List[Bool]) =
-  emitArgList(rest, prefix, strs, defs, ens, ps, i + 1, join(code, s.code), s.val :: vals, s.owned :: owns)
+  s match {
+    case Slot(sc, sv, so) => emitArgList(rest, prefix, strs, defs, ens, ps, i + 1, join(code, sc), sv :: vals, so :: owns)
+  }
 
 def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param]): Slot =
   p match {
