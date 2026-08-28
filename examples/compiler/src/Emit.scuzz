@@ -206,7 +206,12 @@ def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
   }
 
 def paramIsI64(ps: List[Param], s: String): Bool =
-  if (List.isEmpty(ps)) false else if (List.head(ps).name == s) isI64Ty(List.head(ps).ty) else paramIsI64(List.tail(ps), s)
+  if (List.isEmpty(ps)) false else paramIsI64h(List.head(ps), List.tail(ps), s)
+
+def paramIsI64h(p: Param, rest: List[Param], s: String): Bool =
+  p match {
+    case Param(n, ty, _, _) => if (n == s) isI64Ty(ty) else paramIsI64(rest, s)
+  }
 
 def isIntSsa(s: String): Bool =
   hasSub(s, "_tv") || hasSub(s, "_ic_v") || hasDigitStem(s, "_b")
@@ -227,7 +232,12 @@ def callIsI64(f: String, defs: List[Fun]): Bool =
   f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "List.len" || f == "List.isEmpty" || funRetI64(defs, f)
 
 def funRetI64(defs: List[Fun], f: String): Bool =
-  if (List.isEmpty(defs)) false else if (List.head(defs).name == f) isI64Ty(List.head(defs).ret) else funRetI64(List.tail(defs), f)
+  if (List.isEmpty(defs)) false else funRetI64h(List.head(defs), List.tail(defs), f)
+
+def funRetI64h(d: Fun, rest: List[Fun], f: String): Bool =
+  d match {
+    case Fun(_, name, _, _, ret, _, _) => if (name == f) isI64Ty(ret) else funRetI64(rest, f)
+  }
 
 def emitListAt(xs: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
   if (List.isEmpty(xs)) Slot(line(Str.concat(tmp(prefix, "0"), "call ptr @sz_list_nil()")), pct(prefix, "0"), true) else emitListCons(List.head(xs), List.tail(xs), prefix, strs, defs, ens, ps, i)
@@ -664,7 +674,12 @@ def emitCtor(en: String, name: String, prefix: String, ens: List[En]): Slot =
   Slot(emitAdtNew(prefix, ctorTag(ens, en, name), "null"), pct(prefix, "adt"), true)
 
 def ctorTag(ens: List[En], en: String, name: String): Int =
-  if (List.isEmpty(ens)) 0 else if (List.head(ens).name == en) caseTag(List.head(ens).cases, name, 0) else ctorTag(List.tail(ens), en, name)
+  if (List.isEmpty(ens)) 0 else ctorTag1(List.head(ens), List.tail(ens), en, name)
+
+def ctorTag1(h: En, rest: List[En], en: String, name: String): Int =
+  h match {
+    case En(_, n, _, cases) => if (n == en) caseTag(cases, name, 0) else ctorTag(rest, en, name)
+  }
 
 def caseTag(cs: List[EnCase], name: String, i: Int): Int =
   if (List.isEmpty(cs)) 0 else if (List.head(cs).name == name) i else caseTag(List.tail(cs), name, i + 1)
@@ -1152,7 +1167,12 @@ def emitDefSig(params: String, ty: String, body: Slot): String =
   Str.concat("(", Str.concat(params, Str.concat(") {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), emitDef4(ty, body)))))))
 
 def emitDef4(ty: String, body: Slot): String =
-  Str.concat(body.code, Str.concat("  ret ", Str.concat(ty, Str.concat(" ", Str.concat(body.val, Str.concat(nl(), Str.concat("}", Str.concat(nl(), nl()))))))))
+  body match {
+    case Slot(code, val, owned) => emitDef5(ty, code, val, ty == "ptr" && !owned)
+  }
+
+def emitDef5(ty: String, code: String, val: String, keep: Bool): String =
+  Str.concat(code, Str.concat(if (keep) retPtr(val) else "", Str.concat("  ret ", Str.concat(ty, Str.concat(" ", Str.concat(val, Str.concat(nl(), Str.concat("}", Str.concat(nl(), nl())))))))))
 
 def emitFromInt(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_string_from_int(i64 ", Str.concat(if (List.isEmpty(vals)) "0" else List.head(vals), ")"))))), pct(prefix, "v"), true)
