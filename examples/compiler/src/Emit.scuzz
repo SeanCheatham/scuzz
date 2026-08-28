@@ -222,7 +222,23 @@ def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
     case Expr.EBin(op, _, _) => op != "::"
     case Expr.EUn(_, _) => true
     case Expr.ECall(f, _) => callIsI64(f, defs)
+    case Expr.EMethod(recv, name, _) => exprMethodI64(recv, name, defs)
+    case Expr.EMatch(_, arms) => exprIsI64Match(arms, ps, defs)
     case Expr.EIf(_, t, _) => exprIsI64(t, ps, defs)
+    case _ => false
+  }
+
+def exprIsI64Match(arms: List[Arm], ps: List[Param], defs: List[Fun]): Bool =
+  if (List.isEmpty(arms)) false else exprIsI64Arm(List.head(arms), ps, defs)
+
+def exprIsI64Arm(a: Arm, ps: List[Param], defs: List[Fun]): Bool =
+  a match {
+    case Arm(_, _, body) => exprIsI64(body, ps, defs)
+  }
+
+def exprMethodI64(recv: Expr, name: String, defs: List[Fun]): Bool =
+  recv match {
+    case Expr.EVar(_) => callIsI64(name, defs)
     case _ => false
   }
 
@@ -509,7 +525,10 @@ def consHeadInt(args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
   if (List.isEmpty(args)) true else exprIsI64(List.head(args), ps, defs)
 
 def isI64Head(v: String, o: Bool, ps: List[Param]): Bool =
-  !o && v != "null" && !isPtrSlot(v, ps)
+  !o && v != "null" && !isPtrSlot(v, ps) && (isIntSsa(v) || isI64ParamVal(v, ps))
+
+def isI64ParamVal(v: String, ps: List[Param]): Bool =
+  Str.len(v) > 0 && Str.charAt(v, 0) == 37 && paramIsI64(ps, Str.slice(v, 1, Str.len(v)))
 
 def emitConsCall2(code: String, h: String, t: String, oh: Bool, ot: Bool, prefix: String, isInt: Bool): Slot =
   if (isInt) emitConsInt(code, h, t, ot, prefix) else emitConsPtr(code, h, t, oh, ot, prefix)
@@ -1280,7 +1299,7 @@ def emitDefRw(d: Fun, strs: List[String], defs: List[Fun], ens: List[En]): Strin
 
 def rwDef(d: Fun, defs: List[Fun], ens: List[En]): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod) => Fun(priv, name, ts, ps, ret, rwFields(body, paramEnv(ps), defs, ens), mod)
+    case Fun(priv, name, ts, ps, ret, body, mod) => Fun(priv, name, ts, ps, ret, rwFields(body, paramEnv(ps), defs, ens, mod), mod)
   }
 
 def paramEnv(ps: List[Param]): List[(String, String)] =
@@ -1291,33 +1310,36 @@ def paramEnv1(p: Param, rest: List[Param]): List[(String, String)] =
     case Param(n, ty, _, _) => (n, ty) :: paramEnv(rest)
   }
 
-def rwFields(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rwFields(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): Expr =
   e match {
-    case Expr.EPrint(inner) => Expr.EPrint(rwFields(inner, env, funs, ens))
-    case Expr.ECall(f, args) => Expr.ECall(f, rwFieldList(args, env, funs, ens))
-    case Expr.EMethod(recv, name, args) => Expr.EMethod(rwFields(recv, env, funs, ens), name, rwFieldList(args, env, funs, ens))
-    case Expr.EField(recv, name) => rwField(rwFields(recv, env, funs, ens), name, env, funs, ens)
-    case Expr.EBin(op, l, r) => Expr.EBin(op, rwFields(l, env, funs, ens), rwFields(r, env, funs, ens))
-    case Expr.EUn(op, inner) => Expr.EUn(op, rwFields(inner, env, funs, ens))
-    case Expr.ELam(p, body) => Expr.ELam(p, rwFields(body, env, funs, ens))
-    case Expr.EIf(c, t, el) => Expr.EIf(rwFields(c, env, funs, ens), rwFields(t, env, funs, ens), rwFields(el, env, funs, ens))
-    case Expr.EMatch(s, arms) => Expr.EMatch(rwFields(s, env, funs, ens), rwFieldArms(arms, env, funs, ens))
-    case Expr.EList(xs) => Expr.EList(rwFieldList(xs, env, funs, ens))
-    case Expr.ETuple(xs) => Expr.ETuple(rwFieldList(xs, env, funs, ens))
-    case Expr.ENamed(n, inner) => Expr.ENamed(n, rwFields(inner, env, funs, ens))
-    case Expr.EFor(bs, body) => Expr.EFor(bs, rwFields(body, env, funs, ens))
+    case Expr.EPrint(inner) => Expr.EPrint(rwFields(inner, env, funs, ens, mod))
+    case Expr.ECall(f, args) => rwCall(f, rwFieldList(args, env, funs, ens, mod), funs, mod)
+    case Expr.EMethod(recv, name, args) => Expr.EMethod(rwFields(recv, env, funs, ens, mod), name, rwFieldList(args, env, funs, ens, mod))
+    case Expr.EField(recv, name) => rwField(rwFields(recv, env, funs, ens, mod), name, env, funs, ens)
+    case Expr.EBin(op, l, r) => Expr.EBin(op, rwFields(l, env, funs, ens, mod), rwFields(r, env, funs, ens, mod))
+    case Expr.EUn(op, inner) => Expr.EUn(op, rwFields(inner, env, funs, ens, mod))
+    case Expr.ELam(p, body) => Expr.ELam(p, rwFields(body, env, funs, ens, mod))
+    case Expr.EIf(c, t, el) => Expr.EIf(rwFields(c, env, funs, ens, mod), rwFields(t, env, funs, ens, mod), rwFields(el, env, funs, ens, mod))
+    case Expr.EMatch(s, arms) => Expr.EMatch(rwFields(s, env, funs, ens, mod), rwFieldArms(arms, env, funs, ens, mod))
+    case Expr.EList(xs) => Expr.EList(rwFieldList(xs, env, funs, ens, mod))
+    case Expr.ETuple(xs) => Expr.ETuple(rwFieldList(xs, env, funs, ens, mod))
+    case Expr.ENamed(n, inner) => Expr.ENamed(n, rwFields(inner, env, funs, ens, mod))
+    case Expr.EFor(bs, body) => Expr.EFor(bs, rwFields(body, env, funs, ens, mod))
     case _ => e
   }
 
-def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Expr] =
-  if (List.isEmpty(xs)) noExpr() else rwFields(List.head(xs), env, funs, ens) :: rwFieldList(List.tail(xs), env, funs, ens)
+def rwCall(f: String, args: List[Expr], funs: List[Fun], mod: String): Expr =
+  if (List.isEmpty(findDefMod(funs, mod, f))) Expr.ECall(f, args) else Expr.EMethod(Expr.EVar(mod), f, args)
 
-def rwFieldArms(arms: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Arm] =
-  if (List.isEmpty(arms)) noArm() else rwFieldArm(List.head(arms), env, funs, ens) :: rwFieldArms(List.tail(arms), env, funs, ens)
+def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
+  if (List.isEmpty(xs)) noExpr() else rwFields(List.head(xs), env, funs, ens, mod) :: rwFieldList(List.tail(xs), env, funs, ens, mod)
 
-def rwFieldArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[En]): Arm =
+def rwFieldArms(arms: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Arm] =
+  if (List.isEmpty(arms)) noArm() else rwFieldArm(List.head(arms), env, funs, ens, mod) :: rwFieldArms(List.tail(arms), env, funs, ens, mod)
+
+def rwFieldArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): Arm =
   a match {
-    case Arm(pat, g, body) => Arm(pat, g, rwFields(body, env, funs, ens))
+    case Arm(pat, g, body) => Arm(pat, g, rwFields(body, env, funs, ens, mod))
   }
 
 def rwField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
@@ -1327,7 +1349,7 @@ def rwField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fu
   }
 
 def rwFieldTy(recv: Expr, name: String, ty: String, ens: List[En]): Expr =
-  if (isTupTy(ty)) tupField(recv, name, ty) else recField(recv, name, recNames(ens, ty), ty)
+  if (isTupTy(ty)) tupField(recv, name, ty) else recField(recv, name, recNames(ens, ty), ty, ens)
 
 def isTupTy(ty: String): Bool =
   Str.len(ty) > 0 && Str.charAt(ty, 0) == 40
@@ -1341,11 +1363,20 @@ def tupField2(recv: Expr, idx: Int, ns: List[String]): Expr =
 def tupIdx(name: String): Int =
   if (name == "_1") 0 else if (name == "_2") 1 else if (name == "_3") 2 else if (name == "_4") 3 else 1
 
-def recField(recv: Expr, name: String, ns: List[String], ty: String): Expr =
-  if (List.isEmpty(ns)) Expr.EField(recv, name) else recField2(recv, nameIdx(ns, name, 0), List.len(ns), ty)
+def recField(recv: Expr, name: String, ns: List[String], ty: String, ens: List[En]): Expr =
+  if (List.isEmpty(ns)) Expr.EField(recv, name) else recField2(recv, nameIdx(ns, name, 0), List.len(ns), ty, recTys(ens, ty))
 
-def recField2(recv: Expr, idx: Int, n: Int, ty: String): Expr =
-  if (idx < 0) Expr.EInt(0) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsComma(0, n), ")"))), "", Expr.EVar(fakeBind(idx))) :: noArm())
+def recField2(recv: Expr, idx: Int, n: Int, ty: String, tys: List[String]): Expr =
+  if (idx < 0) Expr.EInt(0) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys), ")"))), "", Expr.EVar(pickBind(idx, tys))) :: noArm())
+
+def bindsTyped(i: Int, n: Int, tys: List[String]): String =
+  if (i >= n) "" else if (i + 1 == n) pickBind(i, tys) else Str.concat(pickBind(i, tys), Str.concat(", ", bindsTyped(i + 1, n, tys)))
+
+def pickBind(idx: Int, tys: List[String]): String =
+  if (slotInt(tys, idx)) intBind(idx) else fakeBind(idx)
+
+def intBind(i: Int): String =
+  Str.concat(fakeBind(i), "_b0")
 
 def recNames(ens: List[En], ty: String): List[String] =
   if (List.isEmpty(ens)) noStr() else recNames1(List.head(ens), List.tail(ens), ty)
@@ -1405,7 +1436,7 @@ def bindsComma(i: Int, n: Int): String =
   if (i >= n) "" else if (i + 1 == n) fakeBind(i) else Str.concat(fakeBind(i), Str.concat(", ", bindsComma(i + 1, n)))
 
 def emitMain(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens), "build", strs, defs, ens, noParam()))
+  emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam()))
 
 def emitMain2(s: Slot): String =
   Str.concat("define i32 @main(i32 %argc, ptr %argv) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(s.code, Str.concat("  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(s.val, Str.concat(", i32 %argc, ptr %argv)", Str.concat(nl(), Str.concat("  ret i32 %rc", Str.concat(nl(), "}")))))))))))
