@@ -360,3 +360,15 @@ def runCmd(c: Cmd, src: String): String =
     case _ => render(c)
   }
 
+def dispatch(c: Cmd): IO[Unit] =
+  c match {
+    case Cmd.Build(path, outDir, _, _) => dispatchBuild(path, outDir)
+    case Cmd.Help(t) => IO.println(helpOf(t))
+    case Cmd.Version => IO.println("scuzz 0.1.0")
+    case Cmd.Fail(m) => IO.println(m)
+    case _ => IO.println(show(c))
+  }
+
+def dispatchBuild(path: String, outDir: String): IO[Unit] =
+  Fs.mkdirs(outDir).flatMap(_ => Drive.emitDir(path, outDir))
+
