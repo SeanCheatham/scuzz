@@ -72,7 +72,7 @@ def _intOf(t: Tok): Int =
   }
 
 def _kit(s: String): Bool =
-  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui"
+  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui" || s == "Json"
 
 def _joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", _joinComma(List.tail(xs))))
