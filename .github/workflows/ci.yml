@@ -113,6 +113,9 @@ jobs:
           grep -q "ir-ok" /tmp/codegen.out
           cargo run -p scuzz -- run examples/cli | tee /tmp/cli.out
           grep -q "cli-ok" /tmp/cli.out
+          ./examples/cli/build/cli run --out-dir /tmp/scuzz-cli-hello examples/hello | tee /tmp/cli-hello.out
+          grep -q "Hello, Scuzz!" /tmp/cli-hello.out
+          grep -q "ready." /tmp/cli-hello.out
 
       - name: Kernel + IO kits + incremental build
         run: |
@@ -493,6 +496,11 @@ jobs:
           grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
           scuzz run --headless /tmp/scuzz-release-app
           test -f /tmp/scuzz-release-app/build/snapshot.png
+          scuzz run examples/hello | tee /tmp/rel-hello.out
+          grep -q "Hello, Scuzz!" /tmp/rel-hello.out
+          grep -q "ready." /tmp/rel-hello.out
+          scuzz run examples/cli | tee /tmp/rel-cli.out
+          grep -q "cli-ok" /tmp/rel-cli.out
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -816,6 +824,10 @@ jobs:
           scuzz test /tmp/scuzz-release-app
           grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
           scuzz run --headless /tmp/scuzz-release-app
+          scuzz run examples/hello | tee /tmp/macos-rel-hello.out
+          grep -q "Hello, Scuzz!" /tmp/macos-rel-hello.out
+          scuzz run examples/cli | tee /tmp/macos-rel-cli.out
+          grep -q "cli-ok" /tmp/macos-rel-cli.out
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
