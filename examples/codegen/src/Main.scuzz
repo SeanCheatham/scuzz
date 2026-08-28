@@ -786,6 +786,18 @@ def srcFs(): String =
 def wantFs(): String =
   "@.str0 = private unnamed_addr constant [2 x i8] c\"x\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %c0_io = call ptr @sz_io_println(ptr %value)\n  call void @sz_release(ptr %value)\n  ret ptr %c0_io\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_in_arg0_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_arg0_s = call ptr @sz_string_from_cstr(ptr %build_in_arg0_gep)\n  %build_in_v = call ptr @sz_fs_read(ptr %build_in_arg0_s)\n  call void @sz_release(ptr %build_in_arg0_s)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_v, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %build_in_v)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
+def srcListFs(): String =
+  "@main def main: IO[Unit] =\n  Fs.list(\"x\").flatMap(s => IO.println(Str.fromInt(List.len(s))))\n"
+
+def wantListFs(): String =
+  "@.str0 = private unnamed_addr constant [2 x i8] c\"x\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %c0_e_arg0_v = call i64 @sz_list_len(ptr %value)\n  call void @sz_release(ptr %value)\n  %c0_e_v = call ptr @sz_string_from_int(i64 %c0_e_arg0_v)\n  %c0_io = call ptr @sz_io_println(ptr %c0_e_v)\n  call void @sz_release(ptr %c0_e_v)\n  ret ptr %c0_io\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_in_arg0_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_arg0_s = call ptr @sz_string_from_cstr(ptr %build_in_arg0_gep)\n  %build_in_v = call ptr @sz_fs_list(ptr %build_in_arg0_s)\n  call void @sz_release(ptr %build_in_arg0_s)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_v, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %build_in_v)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+
+def srcPure(): String =
+  "@main def main: IO[Unit] =\n  IO.pure(\"hi\").flatMap(s => IO.println(s))\n"
+
+def wantPure(): String =
+  "@.str0 = private unnamed_addr constant [3 x i8] c\"hi\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %c0_io = call ptr @sz_io_println(ptr %value)\n  call void @sz_release(ptr %value)\n  ret ptr %c0_io\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_in_p_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_p_s = call ptr @sz_string_from_cstr(ptr %build_in_p_gep)\n  %build_in_io = call ptr @sz_io_pure(ptr %build_in_p_s)\n  call void @sz_release(ptr %build_in_p_s)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_io, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %build_in_io)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+
 def okHi(): Bool =
   irDiff(srcHi(), wantHi()) && irIdem(srcHi()) && irDiff(srcSum(), wantSum()) && irIdem(srcSum()) && irDiff(srcAdd(), wantAdd()) && irIdem(srcAdd()) && irDiff(srcHello(), wantHello()) && irIdem(srcHello()) && Check.check(srcHello()) == "[]" && Str.startsWith(Emit.emitFull(srcHello()), "; Scuzz Lang generated LLVM IR") && Str.startsWith(Emit.emitFull(srcHello()), Emit.preamble()) && Emit.emitFull(srcHello()) == Str.concat(Emit.preamble(), wantHello())
 
@@ -814,7 +826,7 @@ def okPtr(): Bool =
   irDiff(srcIfPtr(), wantIfPtr()) && irIdem(srcIfPtr()) && Check.check(srcIfPtr()) == "[]" && irDiff(srcTCons(), wantTCons()) && irIdem(srcTCons()) && Check.check(srcTCons()) == "[]" && irDiff(srcTupPtr(), wantTupPtr()) && irIdem(srcTupPtr()) && Check.check(srcTupPtr()) == "[]" && irDiff(srcT3(), wantT3()) && irIdem(srcT3()) && Check.check(srcT3()) == "[]"
 
 def okFs(): Bool =
-  irDiff(srcFs(), wantFs()) && irIdem(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irIdem(srcIfIo()) && Check.check(srcIfIo()) == "[]"
+  irDiff(srcFs(), wantFs()) && irIdem(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irIdem(srcIfIo()) && Check.check(srcIfIo()) == "[]" && irDiff(srcListFs(), wantListFs()) && irIdem(srcListFs()) && Check.check(srcListFs()) == "[]" && irDiff(srcPure(), wantPure()) && irIdem(srcPure()) && Check.check(srcPure()) == "[]"
 
 def allOk(): Bool =
   okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs()
