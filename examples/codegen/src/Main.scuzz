@@ -930,8 +930,54 @@ def srcInterpQ(): String =
 def wantInterpQ(): String =
   "@.str0 = private unnamed_addr constant [3 x i8] c\"x:\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str2 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_l0_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_l0_s = call ptr @sz_string_from_cstr(ptr %build_e_l0_gep)\n  %build_e_e1_arg0_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %build_e_e1_arg0_s = call ptr @sz_string_from_cstr(ptr %build_e_e1_arg0_gep)\n  %build_e_e1_arg1_gep = getelementptr inbounds [2 x i8], ptr @.str2, i64 0, i64 0\n  %build_e_e1_arg1_s = call ptr @sz_string_from_cstr(ptr %build_e_e1_arg1_gep)\n  %build_e_e1_v = call ptr @sz_string_concat(ptr %build_e_e1_arg0_s, ptr %build_e_e1_arg1_s)\n  call void @sz_release(ptr %build_e_e1_arg0_s)\n  call void @sz_release(ptr %build_e_e1_arg1_s)\n  %build_e_c1_v = call ptr @sz_string_concat(ptr %build_e_l0_s, ptr %build_e_e1_v)\n  call void @sz_release(ptr %build_e_l0_s)\n  call void @sz_release(ptr %build_e_e1_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_c1_v)\n  call void @sz_release(ptr %build_e_c1_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
+def srcLam(): String =
+  """def plusOne(): Int => Int =
+  (n: Int) => n + 1
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(plusOne()(5)))
+"""
+
+def wantLam(): String =
+  """define internal ptr @sz_neth_plusOne_body(ptr %value, ptr %env) {
+entry:
+  %n = bitcast ptr %value to ptr
+  %nbody_bl_u = call i64 @sz_unbox_i64(ptr %n)
+  %nbody_v = add i64 %nbody_bl_u, 1
+  %body_nr = call ptr @sz_box_i64(i64 %nbody_v)
+  ret ptr %body_nr
+}
+define internal ptr @sz_user_Main_plusOne() {
+entry:
+  %body_cl0 = call ptr @sz_list_nil()
+  %body_cl1 = call ptr @sz_list_cons(ptr null, ptr %body_cl0)
+  call void @sz_release(ptr %body_cl0)
+  %body_cl2 = call ptr @sz_list_cons(ptr @sz_neth_plusOne_body, ptr %body_cl1)
+  call void @sz_release(ptr %body_cl1)
+  ret ptr %body_cl2
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_fn_v = call ptr @sz_user_Main_plusOne()
+  %build_e_arg0_fnp = call ptr @sz_list_head(ptr %build_e_arg0_fn_v)
+  %build_e_arg0_fnt = call ptr @sz_list_tail(ptr %build_e_arg0_fn_v)
+  %build_e_arg0_envp = call ptr @sz_list_head(ptr %build_e_arg0_fnt)
+  %build_e_arg0_ab = call ptr @sz_box_i64(i64 5)
+  %build_e_arg0_v = call ptr %build_e_arg0_fnp(ptr %build_e_arg0_ab, ptr %build_e_arg0_envp)
+  call void @sz_release(ptr %build_e_arg0_ab)
+  call void @sz_release(ptr %build_e_arg0_fn_v)
+  %build_e_arg0_u = call i64 @sz_unbox_i64(ptr %build_e_arg0_v)
+  call void @sz_release(ptr %build_e_arg0_v)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_u)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
 def allOk(): Bool =
-  okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs()
+  okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam())
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "ir-ok" else "ir-bad")
