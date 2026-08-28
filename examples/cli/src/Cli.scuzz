@@ -122,7 +122,7 @@ def show(c: Cmd): String =
 def render(c: Cmd): String =
   c match {
     case Cmd.Help(t) => helpOf(t)
-    case Cmd.Version => """scuzz 0.1.0
+    case Cmd.Version => """scuzz 0.2.0
 """
     case Cmd.Fail(m) => m
     case _ => show(c)
@@ -365,7 +365,7 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Build(path, outDir, _, _) => dispatchBuild(path, outDir)
     case Cmd.Run(path, outDir, _, _, _, _) => dispatchRun(path, outDir)
     case Cmd.Help(t) => IO.println(helpOf(t))
-    case Cmd.Version => IO.println("scuzz 0.1.0")
+    case Cmd.Version => IO.println("scuzz 0.2.0")
     case Cmd.Fail(m) => IO.println(m)
     case _ => IO.println(show(c))
   }
