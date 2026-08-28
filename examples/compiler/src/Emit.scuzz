@@ -3868,7 +3868,7 @@ def fmCount(e: Expr): Int =
   }
 
 def fmCountMeth(recv: Expr, name: String, args: List[Expr]): Int =
-  if (isFmName(name)) fmCountFm(recv, args) else fmCount(recv) + fmCountArgs(args)
+  if (isFmName(name) || name == "map") fmCountFm(recv, args) else fmCount(recv) + fmCountArgs(args)
 
 def isFmName(name: String): Bool =
   name == "flatMap" || name == "handleErrorWith"
