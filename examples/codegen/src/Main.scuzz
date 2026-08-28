@@ -869,8 +869,39 @@ def srcJoin(): String =
 def wantJoin(): String =
   "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n@.str2 = private unnamed_addr constant [2 x i8] c\",\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_arg0_0 = call ptr @sz_list_nil()\n  %build_e_arg0_e1_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %build_e_arg0_e1_s = call ptr @sz_string_from_cstr(ptr %build_e_arg0_e1_gep)\n  %build_e_arg0_2 = call ptr @sz_list_cons(ptr %build_e_arg0_e1_s, ptr %build_e_arg0_0)\n  call void @sz_release(ptr %build_e_arg0_0)\n  call void @sz_release(ptr %build_e_arg0_e1_s)\n  %build_e_arg0_e0_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_arg0_e0_s = call ptr @sz_string_from_cstr(ptr %build_e_arg0_e0_gep)\n  %build_e_arg0_1 = call ptr @sz_list_cons(ptr %build_e_arg0_e0_s, ptr %build_e_arg0_2)\n  call void @sz_release(ptr %build_e_arg0_2)\n  call void @sz_release(ptr %build_e_arg0_e0_s)\n  %build_e_arg1_gep = getelementptr inbounds [2 x i8], ptr @.str2, i64 0, i64 0\n  %build_e_arg1_s = call ptr @sz_string_from_cstr(ptr %build_e_arg1_gep)\n  %build_e_sep = call ptr @sz_string_cstr(ptr %build_e_arg1_s)\n  %build_e_v = call ptr @sz_list_join(ptr %build_e_arg0_1, ptr %build_e_sep)\n  call void @sz_release(ptr %build_e_arg0_1)\n  call void @sz_release(ptr %build_e_arg1_s)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
+def srcApply(): String =
+  """def applyInt(f: Int => Int, n: Int): Int =
+  f(n)
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(0))
+"""
+
+def wantApply(): String =
+  """define internal i64 @sz_user_Main_applyInt(ptr %f, i64 %n) {
+entry:
+  %body_fnp = call ptr @sz_list_head(ptr %f)
+  %body_fnt = call ptr @sz_list_tail(ptr %f)
+  %body_envp = call ptr @sz_list_head(ptr %body_fnt)
+  %body_ab = call ptr @sz_box_i64(i64 %n)
+  %body_v = call ptr %body_fnp(ptr %body_ab, ptr %body_envp)
+  call void @sz_release(ptr %body_ab)
+  %body_u = call i64 @sz_unbox_i64(ptr %body_v)
+  call void @sz_release(ptr %body_v)
+  ret i64 %body_u
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_v = call ptr @sz_string_from_int(i64 0)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
 def okFs(): Bool =
-  irDiff(srcFs(), wantFs()) && irIdem(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irIdem(srcIfIo()) && Check.check(srcIfIo()) == "[]" && irDiff(srcListFs(), wantListFs()) && irIdem(srcListFs()) && Check.check(srcListFs()) == "[]" && irDiff(srcPure(), wantPure()) && irIdem(srcPure()) && Check.check(srcPure()) == "[]" && irDiff(srcJoin(), wantJoin()) && irIdem(srcJoin()) && Check.check(srcJoin()) == "[]"
+  irDiff(srcFs(), wantFs()) && irIdem(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irIdem(srcIfIo()) && Check.check(srcIfIo()) == "[]" && irDiff(srcListFs(), wantListFs()) && irIdem(srcListFs()) && Check.check(srcListFs()) == "[]" && irDiff(srcPure(), wantPure()) && irIdem(srcPure()) && Check.check(srcPure()) == "[]" && irDiff(srcJoin(), wantJoin()) && irIdem(srcJoin()) && Check.check(srcJoin()) == "[]" && irDiff(srcApply(), wantApply()) && irIdem(srcApply()) && Check.check(srcApply()) == "[]"
 
 def allOk(): Bool =
   okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs()
