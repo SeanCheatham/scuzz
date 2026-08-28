@@ -4318,7 +4318,17 @@ def rwAliasPrefix(target: String, n: String, t: String): String =
   Str.concat(tyHead(target), Str.slice(t, Str.len(n), Str.len(t)))
 
 def emitBits(body: Expr, defs: List[Fun], strs: List[String], ens: List[En]): String =
-  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), Str.concat(emitConts(body, strs, defs, ens, noParam()), Str.concat(emitDefs(defs, strs, defs, ens), emitMain(body, strs, defs, ens)))))
+  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), Str.concat(emitConts(body, strs, defs, ens, noParam()), Str.concat(emitDefs(defs, strs, defs, ens), emitMainIf(body, strs, defs, ens)))))
+
+def emitMainIf(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  if (isEmptyMain(body)) "" else emitMain(body, strs, defs, ens)
+
+def isEmptyMain(e: Expr): Bool =
+  e match {
+    case Expr.EUnit => true
+    case Expr.EVar(s) => s == ""
+    case _ => false
+  }
 
 def fmCount(e: Expr): Int =
   e match {

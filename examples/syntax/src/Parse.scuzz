@@ -1076,7 +1076,7 @@ def noFun(): List[Fun] =
   []
 
 def emptyProg(): Prog =
-  Prog("", noEn(), noAl(), noTr(), noIm(), noImp(), noFun(), "", Expr.EVar(""))
+  Prog("", noEn(), noAl(), noTr(), noIm(), noImp(), noFun(), "", Expr.EUnit)
 
 def merge(a: Prog, b: Prog): Prog =
   a match {
