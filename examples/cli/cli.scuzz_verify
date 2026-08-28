@@ -73,3 +73,6 @@ def campEmpty(): Bool =
 def drvPkg(): Bool =
   Drive.showPkg(Drive.compilePkg(Main.tomlHello(), Main.srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg()
 
+def drvFiles(): Bool =
+  Drive.showPkg(Drive.compileFiles(Main.tomlHello(), ("Main", Main.srcIrHi()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg()
+

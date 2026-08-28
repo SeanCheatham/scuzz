@@ -60,13 +60,13 @@ def stripNamed(e: Expr): Expr =
   }
 
 def isKit(f: String): Bool =
-  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "Str.repeat" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result" || f == "Fs.read" || f == "Fs.write"
+  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "Str.repeat" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result" || f == "Fs.read" || f == "Fs.write" || f == "Sys.args"
 
 def kitParams(f: String): List[String] =
   if (f == "Str.fromInt") "Int" :: noStr() else if (f == "Str.concat") "String" :: "String" :: noStr() else if (f == "Str.len") "String" :: noStr() else if (f == "Str.fromBool") "Bool" :: noStr() else if (f == "Str.charAt") "String" :: "Int" :: noStr() else if (f == "Str.slice") "String" :: "Int" :: "Int" :: noStr() else if (f == "Str.toInt") "String" :: "Int" :: noStr() else if (f == "Str.repeat") "String" :: "Int" :: noStr() else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: noStr() else if (f == "List.concat") "List" :: "List" :: noStr() else if (f == "List.cons") "Any" :: "List" :: noStr() else if (f == "List.at") "List" :: "Int" :: noStr() else if (f == "Builder.empty") noStr() else if (f == "Builder.append") "Builder" :: "String" :: noStr() else if (f == "Builder.result") "Builder" :: noStr() else if (f == "Fs.read") "String" :: noStr() else if (f == "Fs.write") "String" :: "String" :: noStr() else noStr()
 
 def kitRet(f: String): String =
-  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "List.head" || f == "List.at") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons") "List[Int]" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read") "IO[String]" else if (f == "Fs.write") "IO[Unit]" else "String"
+  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "List.head" || f == "List.at") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons") "List[Int]" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read") "IO[String]" else if (f == "Fs.write") "IO[Unit]" else if (f == "Sys.args") "IO[List[String]]" else "String"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
