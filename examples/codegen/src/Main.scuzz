@@ -80,8 +80,8 @@ tco_loop:
 body_then_0:
   ret i64 0
 body_else_0:
-  %body_targ0_v = sub i64 %n, 1
-  store i64 %body_targ0_v, ptr %n_slot
+  %body_e_targ0_v = sub i64 %n, 1
+  store i64 %body_e_targ0_v, ptr %n_slot
   br label %tco_loop
 }
 
@@ -133,6 +133,68 @@ body_ok_0_1:
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
   %build_e_arg0_v = call i64 @sz_user_Main_countdownMatch(i64 3)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
+def srcTcoNest(): String =
+  "def skipSpace(s: String, i: Int): Int =\n  if (i >= Str.len(s)) i else if (Str.charAt(s, i) == 32) skipSpace(s, i + 1) else i\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(skipSpace(\"  x\", 0)))\n"
+
+def wantTcoNest(): String =
+  """@.str0 = private unnamed_addr constant [4 x i8] c"  x\00", align 1
+
+define internal i64 @sz_user_Main_skipSpace(ptr %s_in, i64 %i_in) {
+entry:
+  %s_slot = alloca ptr
+  store ptr %s_in, ptr %s_slot
+  %s_held = alloca i1
+  store i1 false, ptr %s_held
+  %i_slot = alloca i64
+  store i64 %i_in, ptr %i_slot
+  br label %tco_loop
+tco_loop:
+  %s = load ptr, ptr %s_slot
+  %i = load i64, ptr %i_slot
+  %body_ic_r_v = call i64 @sz_string_len(ptr %s)
+  %body_ic_cmp = icmp sge i64 %i, %body_ic_r_v
+  %body_ic_v = zext i1 %body_ic_cmp to i64
+  %body_cmp = icmp ne i64 %body_ic_v, 0
+  br i1 %body_cmp, label %body_then_0, label %body_else_0
+body_then_0:
+  ret i64 %i
+body_else_0:
+  %body_e_ic_l_v = call i64 @sz_string_char_at(ptr %s, i64 %i)
+  %body_e_ic_cmp = icmp eq i64 %body_e_ic_l_v, 32
+  %body_e_ic_v = zext i1 %body_e_ic_cmp to i64
+  %body_e_cmp = icmp ne i64 %body_e_ic_v, 0
+  br i1 %body_e_cmp, label %body_e_then_0, label %body_e_else_0
+body_e_then_0:
+  %body_e_t_targ1_v = add i64 %i, 1
+  call void @sz_retain(ptr %s)
+  %tco_hv0_body_e_t = load i1, ptr %s_held
+  br i1 %tco_hv0_body_e_t, label %tco_rel_0_body_e_t, label %tco_skip_0_body_e_t
+tco_rel_0_body_e_t:
+  %tco_old0_body_e_t = load ptr, ptr %s_slot
+  call void @sz_release(ptr %tco_old0_body_e_t)
+  br label %tco_skip_0_body_e_t
+tco_skip_0_body_e_t:
+  store ptr %s, ptr %s_slot
+  store i64 %body_e_t_targ1_v, ptr %i_slot
+  store i1 true, ptr %s_held
+  br label %tco_loop
+body_e_else_0:
+  ret i64 %i
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_arg0_gep = getelementptr inbounds [4 x i8], ptr @.str0, i64 0, i64 0
+  %build_e_arg0_arg0_s = call ptr @sz_string_from_cstr(ptr %build_e_arg0_arg0_gep)
+  %build_e_arg0_v = call i64 @sz_user_Main_skipSpace(ptr %build_e_arg0_arg0_s, i64 0)
+  call void @sz_release(ptr %build_e_arg0_arg0_s)
   %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
   %build_io = call ptr @sz_io_println(ptr %build_e_v)
   call void @sz_release(ptr %build_e_v)
@@ -919,7 +981,7 @@ def okIf(): Bool =
   irDiff(srcIf(), wantIf()) && irIdem(srcIf()) && irDiff(srcTag(), wantTag()) && irIdem(srcTag()) && irDiff(srcCat(), wantCat()) && irIdem(srcCat()) && irDiff(srcFmt(), wantFmt()) && irIdem(srcFmt()) && Check.check(srcIf()) == "[]" && Check.check(srcTag()) == "[]" && Check.check(srcCat()) == "[]" && Check.check(srcFmt()) == "[]" && Emit.emitFull(srcFmt()) == Str.concat(Emit.preamble(), wantFmt())
 
 def okCmp(): Bool =
-  irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irIdem(srcTco()) && Check.check(srcTco()) == "[]" && irDiff(srcTcoMatch(), wantTcoMatch()) && irIdem(srcTcoMatch()) && Check.check(srcTcoMatch()) == "[]"
+  irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irIdem(srcTco()) && Check.check(srcTco()) == "[]" && irDiff(srcTcoMatch(), wantTcoMatch()) && irIdem(srcTcoMatch()) && Check.check(srcTcoMatch()) == "[]" && irDiff(srcTcoNest(), wantTcoNest()) && irIdem(srcTcoNest()) && Check.check(srcTcoNest()) == "[]"
 
 def okList(): Bool =
   irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]"

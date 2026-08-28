@@ -3826,7 +3826,7 @@ def emitDefByRet(name: String, mod: String, ret: String, ps: List[Param], body: 
 
 def hasTailIf(e: Expr, name: String): Bool =
   e match {
-    case Expr.EIf(_, _, el) => isSelfTail(el, name)
+    case Expr.EIf(_, t, el) => isSelfTail(t, name) || isSelfTail(el, name) || hasTailIf(t, name) || hasTailIf(el, name)
     case Expr.EMatch(_, arms) => hasTailArm(arms, name)
     case _ => false
   }
@@ -3908,10 +3908,10 @@ def emitTailLeafBind(bind: String, isInt: Bool, body: Expr, strs: List[String], 
   if (bind == "" || bind == "_") emitTailLeaf(body, strs, defs, ens, ps, i) else emitTailLeaf(rewriteBind(body, bind, bindStem("body", i, isInt)), strs, defs, ens, ps, i)
 
 def emitDefTcoIf(name: String, mod: String, ret: String, ps: List[Param], c: Expr, t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  emitDefTcoIf2(llvmRet(ret), symOf(mod, name), defParamsTco(ps), ps, c, t, el, strs, defs, ens)
+  emitDefTcoIf2(llvmRet(ret), symOf(mod, name), name, defParamsTco(ps), ps, c, t, el, strs, defs, ens)
 
-def emitDefTcoIf2(ty: String, name: String, params: String, ps: List[Param], c: Expr, t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  emitDefTcoIf3(ty, name, params, join(emitTcoPrep(ps), emitIfTail(c, t, el, "body", strs, defs, ens, ps, ty)))
+def emitDefTcoIf2(ty: String, sym: String, fname: String, params: String, ps: List[Param], c: Expr, t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  emitDefTcoIf3(ty, sym, params, join(emitTcoPrep(ps), emitIfTail(c, t, el, "body", strs, defs, ens, ps, ty, fname)))
 
 def emitDefTcoIf3(ty: String, name: String, params: String, body: String): String =
   Str.concat("define internal ", Str.concat(ty, Str.concat(" @sz_user_", Str.concat(name, emitDefTcoSig(params, body)))))
@@ -3941,30 +3941,33 @@ def emitTcoLoadOne(p: Param, ps: List[Param], i: Int): String =
     case Param(n, ty, _, _) => join(line(Str.concat("%", Str.concat(n, Str.concat(" = load ", Str.concat(if (isI64Ty(ty)) "i64" else "ptr", Str.concat(", ptr %", Str.concat(n, "_slot"))))))), emitTcoLoads(ps, i + 1))
   }
 
-def emitIfTail(c: Expr, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
-  emitIfTail2(emitExpr(c, Str.concat(prefix, "_ic"), strs, defs, ens, ps), t, el, prefix, strs, defs, ens, ps, ret)
+def emitIfTail(c: Expr, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String, fname: String): String =
+  emitIfTail2(emitExpr(c, Str.concat(prefix, "_ic"), strs, defs, ens, ps), t, el, prefix, strs, defs, ens, ps, ret, fname)
 
-def emitIfTail2(c: Slot, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
-  emitIfTail3(c, emitExpr(t, Str.concat(prefix, "_t0"), strs, defs, ens, ps), el, prefix, strs, defs, ens, ps, ret)
-
-def emitIfTail3(c: Slot, th: Slot, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
+def emitIfTail2(c: Slot, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String, fname: String): String =
   c match {
-    case Slot(cc, cv, _) => emitIfTail4(cc, cv, th, el, prefix, strs, defs, ens, ps, ret)
+    case Slot(cc, cv, _) => join(cc, join(emitIfCmp(cv, prefix), join(emitIfBr(prefix), join(join(lab(Str.concat(prefix, "_then_0")), emitTailArm(t, Str.concat(prefix, "_t"), strs, defs, ens, ps, ret, fname)), join(lab(Str.concat(prefix, "_else_0")), emitTailArm(el, Str.concat(prefix, "_e"), strs, defs, ens, ps, ret, fname))))))
   }
 
-def emitIfTail4(cc: String, cv: String, th: Slot, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
-  th match {
-    case Slot(tc, tv, to) => join(cc, join(emitIfCmp(cv, prefix), join(emitIfBr(prefix), join(emitIfTailThen(tc, tv, to, prefix, ret), emitIfTailElse(el, prefix, strs, defs, ens, ps)))))
+def emitTailArm(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String, fname: String): String =
+  if (isSelfTail(e, fname)) emitSelfTail(e, prefix, strs, defs, ens, ps) else emitTailArmIf(e, prefix, strs, defs, ens, ps, ret, fname)
+
+def emitTailArmIf(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String, fname: String): String =
+  e match {
+    case Expr.EIf(c, t, el) => emitIfTail(c, t, el, prefix, strs, defs, ens, ps, ret, fname)
+    case _ => emitTailBase(e, prefix, strs, defs, ens, ps, ret)
   }
 
-def emitIfTailThen(tc: String, tv: String, to: Bool, prefix: String, ret: String): String =
-  join(lab(Str.concat(prefix, "_then_0")), join(tc, emitTcoRet(ret, tv, to)))
+def emitTailBase(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
+  emitTailBase1(emitExpr(e, Str.concat(prefix, "_b"), strs, defs, ens, ps), ret)
+
+def emitTailBase1(s: Slot, ret: String): String =
+  s match {
+    case Slot(tc, tv, to) => join(tc, emitTcoRet(ret, tv, to))
+  }
 
 def emitTcoRet(ret: String, tv: String, to: Bool): String =
   if (ret == "ptr" && !to) join(retPtr(tv), line(Str.concat("ret ptr ", tv))) else if (ret == "ptr") line(Str.concat("ret ptr ", tv)) else line(Str.concat("ret i64 ", tv))
-
-def emitIfTailElse(el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
-  join(lab(Str.concat(prefix, "_else_0")), emitSelfTail(el, prefix, strs, defs, ens, ps))
 
 def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
   e match {
