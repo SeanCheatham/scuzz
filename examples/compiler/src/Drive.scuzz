@@ -70,10 +70,10 @@ def emitDirMan2(dir: String, outDir: String, ok: Bool, err: String, deps: List[(
   if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitDirListed(dir, outDir, deps, ents))
 
 def emitDirListed(dir: String, outDir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitDirDeps(dir, outDir, deps, own))
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitDirCollected(dir, outDir, deps, own))
 
-def emitDirDeps(dir: String, outDir: String, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  if (List.isEmpty(deps)) emitDirCompile(dir, outDir, own) else emitDirDepGo(dir, outDir, own, deps)
+def emitDirCollected(dir: String, outDir: String, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
+  collectDeps(dir, deps, own).flatMap(files => emitDirCompile(dir, outDir, files))
 
 def emitDirCompile(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirCompiled(toml, own, outDir))
@@ -81,25 +81,76 @@ def emitDirCompile(dir: String, outDir: String, own: List[(String, String)]): IO
 def emitDirCompiled(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
   emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib()))
 
-def emitDirDepGo(dir: String, outDir: String, own: List[(String, String)], deps: List[(String, String)]): IO[Unit] =
-  emitDirDepHead(dir, outDir, own, List.head(deps), deps)
+def collectDeps(dir: String, deps: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  if (List.isEmpty(deps)) IO.pure(acc) else collectDepGo(dir, deps, acc)
 
-def emitDirDepHead(dir: String, outDir: String, own: List[(String, String)], d: (String, String), deps: List[(String, String)]): IO[Unit] =
-  emitDirDep(dir, outDir, own, d, List.tail(deps))
+def collectDepGo(dir: String, deps: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  collectDepHead(dir, List.head(deps), deps, acc)
 
-def emitDirDep(dir: String, outDir: String, own: List[(String, String)], d: (String, String), rest: List[(String, String)]): IO[Unit] =
+def collectDepHead(dir: String, d: (String, String), deps: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  collectDep(dir, d, List.tail(deps), acc)
+
+def collectDep(dir: String, d: (String, String), rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
   d match {
-    case (name, path) => emitDirDep2(dir, outDir, own, rest, joinSlash(joinSlash(dir, path), "src"))
+    case (name, path) => collectDepNamed(dir, name, path, rest, acc)
   }
 
-def emitDirDep2(dir: String, outDir: String, own: List[(String, String)], rest: List[(String, String)], srcDir: String): IO[Unit] =
-  Fs.list(srcDir).flatMap(ents => emitDirDep3(dir, outDir, own, rest, srcDir, ents))
+def collectDepNamed(dir: String, name: String, path: String, rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  collectPkg(joinSlash(dir, path), dir, rest, acc)
 
-def emitDirDep3(dir: String, outDir: String, own: List[(String, String)], rest: List[(String, String)], srcDir: String, ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(srcDir, ents).flatMap(more => emitDirCat(dir, outDir, rest, own, more))
+def collectPkg(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  Fs.read(joinSlash(pkgDir, "scuzz.toml")).flatMap(toml => collectPkgMan(pkgDir, parentDir, rest, acc, Manifest.parse(toml)))
 
-def emitDirCat(dir: String, outDir: String, rest: List[(String, String)], own: List[(String, String)], more: List[(String, String)]): IO[Unit] =
-  emitDirDeps(dir, outDir, rest, List.concat(own, more))
+def collectPkgMan(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], m: Man): IO[List[(String, String)]] =
+  m match {
+    case Man(ok, name, version, hasUi, nested, err) => collectPkgOk(pkgDir, parentDir, rest, acc, ok, nested)
+  }
+
+def collectPkgOk(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], ok: Bool, nested: List[(String, String)]): IO[List[(String, String)]] =
+  if (!ok) collectDeps(parentDir, rest, acc) else Fs.list(joinSlash(pkgDir, "src")).flatMap(ents => collectPkgListed(pkgDir, parentDir, rest, acc, nested, ents))
+
+def collectPkgListed(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], nested: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
+  readSrcFiles(joinSlash(pkgDir, "src"), ents).flatMap(more => collectPkgGot(pkgDir, parentDir, rest, acc, nested, more))
+
+def collectPkgGot(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], nested: List[(String, String)], more: List[(String, String)]): IO[List[(String, String)]] =
+  collectDeps(pkgDir, nested, acc).flatMap(withNested => collectAfterNested(parentDir, rest, withNested, more))
+
+def collectAfterNested(parentDir: String, rest: List[(String, String)], withNested: List[(String, String)], more: List[(String, String)]): IO[List[(String, String)]] =
+  collectDeps(parentDir, rest, appendNew(withNested, more))
+
+def hasStem(xs: List[(String, String)], stem: String): Bool =
+  hasStemAt(xs, stem, 0)
+
+def hasStemAt(xs: List[(String, String)], stem: String, i: Int): Bool =
+  hasStemAt2(xs, stem, i, List.len(xs))
+
+def hasStemAt2(xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
+  if (i >= n) false else hasStemAt3(xs, stem, i, n)
+
+def hasStemAt3(xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
+  hasStemFrom(List.at(xs, i), xs, stem, i, n)
+
+def hasStemFrom(p: (String, String), xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
+  p match {
+    case (name, src) => hasStemName(name, xs, stem, i, n)
+  }
+
+def hasStemName(name: String, xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
+  if (name == stem) true else hasStemAt2(xs, stem, i + 1, n)
+
+def appendNew(acc: List[(String, String)], more: List[(String, String)]): List[(String, String)] =
+  if (List.isEmpty(more)) acc else appendNewGo(acc, List.head(more), more)
+
+def appendNewGo(acc: List[(String, String)], h: (String, String), more: List[(String, String)]): List[(String, String)] =
+  appendNewPick(acc, h, List.tail(more))
+
+def appendNewPick(acc: List[(String, String)], h: (String, String), rest: List[(String, String)]): List[(String, String)] =
+  h match {
+    case (stem, src) => appendNewKnown(acc, stem, src, rest)
+  }
+
+def appendNewKnown(acc: List[(String, String)], stem: String, src: String, rest: List[(String, String)]): List[(String, String)] =
+  if (hasStem(acc, stem)) appendNew(acc, rest) else appendNew((stem, src) :: acc, rest)
 
 def readSrcFiles(srcDir: String, ents: List[(String, Bool)]): IO[List[(String, String)]] =
   readSrcAcc(srcDir, ents, Manifest.noPairs())
