@@ -10,6 +10,27 @@ import Parse.Param
 import Lexer.Tok
 import Check.infer
 
+def noStr(): List[String] =
+  []
+
+def noExpr(): List[Expr] =
+  []
+
+def noBool(): List[Bool] =
+  []
+
+def noEnv(): List[(String, String)] =
+  []
+
+def noParam(): List[Param] =
+  []
+
+def noArm(): List[Arm] =
+  []
+
+def noFun(): List[Fun] =
+  []
+
 def nl(): String =
   """
 """
@@ -39,7 +60,7 @@ def strIndex(xs: List[String], s: String, i: Int): Int =
   if (List.isEmpty(xs)) i else if (List.head(xs) == s) i else strIndex(List.tail(xs), s, i + 1)
 
 def intern(acc: List[String], s: String): List[String] =
-  if (strIndex(acc, s, 0) < List.len(acc)) acc else List.concat(acc, s :: ([]: List[String]))
+  if (strIndex(acc, s, 0) < List.len(acc)) acc else List.concat(acc, s :: noStr())
 
 def collectToks(toks: List[Tok], acc: List[String]): List[String] =
   if (List.isEmpty(toks)) acc else collectTok(List.head(toks), List.tail(toks), acc)
@@ -102,7 +123,7 @@ def emitPrint2(s: Slot, prefix: String): Slot =
   Slot(join(s.code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_println(ptr ", Str.concat(s.val, ")")))), if (s.owned) line(Str.concat("call void @sz_release(ptr ", Str.concat(s.val, ")"))) else "")), pct(prefix, "io"), false)
 
 def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (op == "::") emitCall("List.cons", l :: r :: ([]: List[Expr]), prefix, strs, defs, ens, ps) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps) else emitBin2(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps), op, prefix, ps)
+  if (op == "::") emitCall("List.cons", l :: r :: noExpr(), prefix, strs, defs, ens, ps) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps) else emitBin2(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps), op, prefix, ps)
 
 def emitBin2(le: Slot, re: Slot, op: String, prefix: String, ps: List[Param]): Slot =
   if (isCmp(op)) emitBinCmp(le, re, op, prefix, ps) else Slot(join(le.code, join(re.code, line(Str.concat(tmp(prefix, "v"), Str.concat(llvmBin(op), Str.concat(" i64 ", Str.concat(le.val, Str.concat(", ", re.val)))))))), pct(prefix, "v"), false)
@@ -282,10 +303,10 @@ def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, 
   }
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param]): Slot =
-  if (f == "Str.fromInt") emitFromInt(code, vals, prefix) else if (f == "Str.concat") emitConcat(code, vals, owns, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "Str.toInt") emitToInt(code, vals, owns, prefix) else if (f == "Str.repeat") emitRepeat(code, vals, owns, prefix) else if (f == "Str.startsWith") emitStarts(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix, args, ps, defs) else if (f == "List.at") emitAt(code, vals, owns, prefix, args) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else if (hasEn(ens, f)) emitRec(f, code, vals, owns, prefix, ens, args, ps, defs) else emitUser(f, code, vals, owns, prefix, defs)
+  if (f == "Str.fromInt") emitFromInt(code, vals, prefix) else if (f == "Str.concat") emitConcat(code, vals, owns, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "Str.toInt") emitToInt(code, vals, owns, prefix) else if (f == "Str.repeat") emitRepeat(code, vals, owns, prefix) else if (f == "Str.startsWith") emitStarts(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args, ps) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix, args, ps, defs) else if (f == "List.at") emitAt(code, vals, owns, prefix, args, ps) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else if (hasEn(ens, f)) emitRec(f, code, vals, owns, prefix, ens, args, ps, defs) else emitUser(f, code, vals, owns, prefix, defs)
 
 def emitCall(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", []: List[String], []: List[Bool]), prefix, defs, args, ens, ps)
+  emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs, args, ens, ps)
 
 def emitConcat(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitConcat2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
@@ -303,13 +324,19 @@ def relPtr(p: String): String =
   line(Str.concat("call void @sz_release(ptr ", Str.concat(p, ")")))
 
 def arg0(vals: List[String]): String =
-  if (List.isEmpty(vals)) "null" else List.head(vals)
+  nthStrD(vals, 0, "null")
 
 def arg1(vals: List[String]): String =
-  if (List.len(vals) < 2) "null" else List.at(vals, 1)
+  nthStrD(vals, 1, "null")
 
 def arg2(vals: List[String]): String =
-  if (List.len(vals) < 3) "0" else List.at(vals, 2)
+  nthStrD(vals, 2, "0")
+
+def nthStrD(xs: List[String], i: Int, d: String): String =
+  if (List.isEmpty(xs)) d else nthStr1(List.head(xs), List.tail(xs), i)
+
+def nthStr1(h: String, rest: List[String], i: Int): String =
+  if (i <= 0) h else nthStrD(rest, i - 1, "null")
 
 def emitListLen(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitListLen2(code, arg0(vals), headOwn(owns), prefix)
@@ -341,8 +368,8 @@ def takePtr(v: String, o: Bool, prefix: String): String =
 def hasEn(ens: List[En], name: String): Bool =
   if (List.isEmpty(ens)) false else if (List.head(ens).name == name) true else hasEn(List.tail(ens), name)
 
-def emitAt(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr]): Slot =
-  emitAt2(code, arg0(vals), arg1(vals), headOwn(owns), prefix, headUnbox(args))
+def emitAt(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param]): Slot =
+  emitAt2(code, arg0(vals), arg1(vals), headOwn(owns), prefix, headUnbox(args, ps))
 
 def emitAt2(code: String, v: String, i: String, o: Bool, prefix: String, unbox: Bool): Slot =
   if (unbox) emitAtInt(code, v, i, o, prefix) else emitAtPtr(code, v, i, o, prefix)
@@ -390,17 +417,21 @@ def packCons(prefix: String, i: Int, n: Int, hd: String, tl: String): String =
 def packDrop(v: String, o: Bool, num: Bool, prefix: String, i: Int): String =
   if (num) relPtr(pct(prefix, Str.concat("bx", Str.fromInt(i)))) else if (o) relPtr(v) else ""
 
-def emitListHead(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr]): Slot =
-  emitListHead2(code, arg0(vals), headOwn(owns), prefix, headUnbox(args))
+def emitListHead(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param]): Slot =
+  emitListHead2(code, arg0(vals), headOwn(owns), prefix, headUnbox(args, ps))
 
-def headUnbox(args: List[Expr]): Bool =
-  if (List.isEmpty(args)) false else headUnbox1(List.head(args))
+def headUnbox(args: List[Expr], ps: List[Param]): Bool =
+  if (List.isEmpty(args)) false else headUnbox1(List.head(args), ps)
 
-def headUnbox1(e: Expr): Bool =
+def headUnbox1(e: Expr, ps: List[Param]): Bool =
   e match {
     case Expr.EList(xs) => headUnboxList(xs)
+    case Expr.EVar(s) => isI64ListTy(paramTy(ps, s))
     case _ => false
   }
+
+def isI64ListTy(ty: String): Bool =
+  ty == "List[Bool]" || ty == "List[Int]" || ty == "List"
 
 def headUnboxList(xs: List[Expr]): Bool =
   if (List.isEmpty(xs)) true else headIsInt(xs)
@@ -472,10 +503,13 @@ def emitRepeat2(code: String, v: String, n: String, o: Bool, prefix: String): Sl
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_string_repeat(ptr ", Str.concat(v, Str.concat(", i64 ", Str.concat(n, ")")))))), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
 
 def emitConsCall(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param], defs: List[Fun]): Slot =
-  emitConsCall2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix, consHeadInt(args, ps, defs))
+  emitConsCall2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix, consHeadInt(args, ps, defs) || isI64Head(arg0(vals), headOwn(owns), ps))
 
 def consHeadInt(args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
   if (List.isEmpty(args)) true else exprIsI64(List.head(args), ps, defs)
+
+def isI64Head(v: String, o: Bool, ps: List[Param]): Bool =
+  !o && v != "null" && !isPtrSlot(v, ps)
 
 def emitConsCall2(code: String, h: String, t: String, oh: Bool, ot: Bool, prefix: String, isInt: Bool): Slot =
   if (isInt) emitConsInt(code, h, t, ot, prefix) else emitConsPtr(code, h, t, oh, ot, prefix)
@@ -523,7 +557,12 @@ def scPhi(isAnd: Bool, prefix: String): String =
   Str.concat("phi i64 [ ", Str.concat(if (isAnd) "0" else "1", Str.concat(", %", Str.concat(prefix, Str.concat("_al_0 ], [ ", Str.concat(pct(prefix, "rb0"), Str.concat(", %", Str.concat(prefix, "_ar_0 ]"))))))))
 
 def findDef(funs: List[Fun], name: String): List[Fun] =
-  List.filter(funs, f => f.name == name)
+  if (List.isEmpty(funs)) noFun() else findDef1(List.head(funs), List.tail(funs), name)
+
+def findDef1(h: Fun, rest: List[Fun], name: String): List[Fun] =
+  h match {
+    case Fun(priv, n, ts, ps, ret, body, mod) => if (n == name) Fun(priv, n, ts, ps, ret, body, mod) :: findDef(rest, name) else findDef(rest, name)
+  }
 
 def emitUser(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun]): Slot =
   emitUser2(f, code, vals, owns, prefix, findDef(defs, f))
@@ -640,7 +679,7 @@ def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, s
   if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps) else emitQual(en, name, args, prefix, strs, defs, ens, ps)
 
 def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitQual2(en, name, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", []: List[String], []: List[Bool]), prefix, defs)
+  emitQual2(en, name, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs)
 
 def emitQual2(en: String, name: String, p: (String, List[String], List[Bool]), prefix: String, defs: List[Fun]): Slot =
   p match {
@@ -648,7 +687,12 @@ def emitQual2(en: String, name: String, p: (String, List[String], List[Bool]), p
   }
 
 def findDefMod(funs: List[Fun], mod: String, name: String): List[Fun] =
-  List.filter(funs, f => f.name == name && f.mod == mod)
+  if (List.isEmpty(funs)) noFun() else findDefMod1(List.head(funs), List.tail(funs), mod, name)
+
+def findDefMod1(h: Fun, rest: List[Fun], mod: String, name: String): List[Fun] =
+  h match {
+    case Fun(priv, n, ts, ps, ret, body, m) => if (n == name && m == mod) Fun(priv, n, ts, ps, ret, body, m) :: findDefMod(rest, mod, name) else findDefMod(rest, mod, name)
+  }
 
 def userName(d: Fun): String =
   d match {
@@ -662,7 +706,7 @@ def emitPayloadCtor(en: String, name: String, args: List[Expr], prefix: String, 
   if (List.isEmpty(args)) emitCtor(en, name, prefix, ens) else emitPayloadCtorRest(en, name, List.head(args), List.tail(args), prefix, strs, defs, ens, ps)
 
 def emitPayloadCtorRest(en: String, name: String, h: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (List.isEmpty(rest)) emitPayloadCtor1(emitExpr(h, Str.concat(prefix, "_ap"), strs, defs, ens, ps), en, name, prefix, ens) else emitPayloadCtorN(en, name, emitArgList(h :: rest, prefix, strs, defs, ens, ps, 0, "", []: List[String], []: List[Bool]), h :: rest, prefix, ens, ps, defs)
+  if (List.isEmpty(rest)) emitPayloadCtor1(emitExpr(h, Str.concat(prefix, "_ap"), strs, defs, ens, ps), en, name, prefix, ens) else emitPayloadCtorN(en, name, emitArgList(h :: rest, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), h :: rest, prefix, ens, ps, defs)
 
 def emitPayloadCtorN(en: String, name: String, p: (String, List[String], List[Bool]), args: List[Expr], prefix: String, ens: List[En], ps: List[Param], defs: List[Fun]): Slot =
   p match {
@@ -775,7 +819,7 @@ def payloadTys2(dot: Int, core: String, ens: List[En]): List[String] =
   if (dot < 0) recTys(ens, core) else caseTys(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
 
 def caseTys(ens: List[En], en: String, ctor: String): List[String] =
-  if (List.isEmpty(ens)) []: List[String] else caseTys1(List.head(ens), List.tail(ens), en, ctor)
+  if (List.isEmpty(ens)) noStr() else caseTys1(List.head(ens), List.tail(ens), en, ctor)
 
 def caseTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
@@ -783,7 +827,7 @@ def caseTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   }
 
 def caseTys2(cs: List[EnCase], ctor: String): List[String] =
-  if (List.isEmpty(cs)) []: List[String] else caseTys3(List.head(cs), List.tail(cs), ctor)
+  if (List.isEmpty(cs)) noStr() else caseTys3(List.head(cs), List.tail(cs), ctor)
 
 def caseTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
   h match {
@@ -835,7 +879,7 @@ def paramTy1(p: Param, rest: List[Param], n: String): String =
   }
 
 def tupSlots(ty: String): List[String] =
-  if (!isTupTy(ty)) []: List[String] else splitPat(Str.slice(ty, 1, Str.len(ty) - 1))
+  if (!isTupTy(ty)) noStr() else splitPat(Str.slice(ty, 1, Str.len(ty) - 1))
 
 def slotInt(tys: List[String], k: Int): Bool =
   if (List.isEmpty(tys)) k == 1 else if (k <= 0) isI64Ty(List.head(tys)) else slotInt(List.tail(tys), k - 1)
@@ -1023,7 +1067,7 @@ def emitPayload2(prefix: String, i: Int, scrut: String, isInt: Bool): String =
   join(line(Str.concat(tmp(fpre(prefix, i), "pl"), Str.concat("call ptr @sz_adt_payload(ptr ", Str.concat(scrut, ")")))), if (isInt) line(Str.concat(tmp(fpre(prefix, i), "b0"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(fpre(prefix, i), "pl"), ")")))) else "")
 
 def emitOks(arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String]): (String, List[String], Bool) =
-  if (List.isEmpty(arms)) ("", []: List[String], true) else emitOks0(List.head(arms), List.tail(arms), prefix, strs, defs, ens, ps, i, tys)
+  if (List.isEmpty(arms)) ("", noStr(), true) else emitOks0(List.head(arms), List.tail(arms), prefix, strs, defs, ens, ps, i, tys)
 
 def emitOks0(arm: Arm, rest: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String]): (String, List[String], Bool) =
   arm match {
@@ -1078,7 +1122,7 @@ def commaAt(s: String, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 44) i else commaAt(s, i + 1)
 
 def splitPatAt(s: String, c: Int): List[String] =
-  if (c < 0) trimPat(s) :: ([]: List[String]) else trimPat(Str.slice(s, 0, c)) :: splitPat(Str.slice(s, c + 1, Str.len(s)))
+  if (c < 0) trimPat(s) :: noStr() else trimPat(Str.slice(s, 0, c)) :: splitPat(Str.slice(s, c + 1, Str.len(s)))
 
 def trimPat(s: String): String =
   trimPat2(s, 0, Str.len(s))
@@ -1093,7 +1137,12 @@ def emitOkSlotBind(bind: String, isInt: Bool, body: Expr, prefix: String, strs: 
   if (bind == "") emitOkSlot2(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), true, isInt, prefix, i) else emitOkSlot2(emitExpr(rewriteBind(body, bind, bindStem(prefix, i, isInt)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), false, isInt, prefix, i)
 
 def emitOkSlot2(s: Slot, empty: Bool, isInt: Bool, prefix: String, i: Int): Slot =
-  if (empty || isInt) s else Slot(join(retPtr(Str.concat("%", bindStem(prefix, i, false))), s.code), s.val, true)
+  if (empty || isInt) s else emitOkSlot3(s, Str.concat("%", bindStem(prefix, i, false)))
+
+def emitOkSlot3(s: Slot, bind: String): Slot =
+  s match {
+    case Slot(code, val, owned) => Slot(join(retPtr(bind), code), val, owned || val == bind)
+  }
 
 def rewriteBind(e: Expr, from: String, to: String): Expr =
   if (from == "") e else rewriteBind1(e, from, to)
@@ -1223,7 +1272,7 @@ def rwDef(d: Fun, defs: List[Fun], ens: List[En]): Fun =
   }
 
 def paramEnv(ps: List[Param]): List[(String, String)] =
-  if (List.isEmpty(ps)) []: List[(String, String)] else paramEnv1(List.head(ps), List.tail(ps))
+  if (List.isEmpty(ps)) noEnv() else paramEnv1(List.head(ps), List.tail(ps))
 
 def paramEnv1(p: Param, rest: List[Param]): List[(String, String)] =
   p match {
@@ -1249,10 +1298,10 @@ def rwFields(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En
   }
 
 def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Expr] =
-  if (List.isEmpty(xs)) []: List[Expr] else rwFields(List.head(xs), env, funs, ens) :: rwFieldList(List.tail(xs), env, funs, ens)
+  if (List.isEmpty(xs)) noExpr() else rwFields(List.head(xs), env, funs, ens) :: rwFieldList(List.tail(xs), env, funs, ens)
 
 def rwFieldArms(arms: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Arm] =
-  if (List.isEmpty(arms)) []: List[Arm] else rwFieldArm(List.head(arms), env, funs, ens) :: rwFieldArms(List.tail(arms), env, funs, ens)
+  if (List.isEmpty(arms)) noArm() else rwFieldArm(List.head(arms), env, funs, ens) :: rwFieldArms(List.tail(arms), env, funs, ens)
 
 def rwFieldArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[En]): Arm =
   a match {
@@ -1275,7 +1324,7 @@ def tupField(recv: Expr, name: String, ty: String): Expr =
   tupField2(recv, tupIdx(name), splitPat(Str.slice(ty, 1, Str.len(ty) - 1)))
 
 def tupField2(recv: Expr, idx: Int, ns: List[String]): Expr =
-  if (List.isEmpty(ns)) Expr.EMatch(recv, Arm("(__f0, __f1)", "", Expr.EVar(if (idx == 0) "__f0" else "__f1")) :: ([]: List[Arm])) else Expr.EMatch(recv, Arm(Str.concat("(", Str.concat(bindsComma(0, List.len(ns)), ")")), "", Expr.EVar(fakeBind(idx))) :: ([]: List[Arm]))
+  if (List.isEmpty(ns)) Expr.EMatch(recv, Arm("(__f0, __f1)", "", Expr.EVar(if (idx == 0) "__f0" else "__f1")) :: noArm()) else Expr.EMatch(recv, Arm(Str.concat("(", Str.concat(bindsComma(0, List.len(ns)), ")")), "", Expr.EVar(fakeBind(idx))) :: noArm())
 
 def tupIdx(name: String): Int =
   if (name == "_1") 0 else if (name == "_2") 1 else if (name == "_3") 2 else if (name == "_4") 3 else 1
@@ -1284,10 +1333,10 @@ def recField(recv: Expr, name: String, ns: List[String], ty: String): Expr =
   if (List.isEmpty(ns)) Expr.EField(recv, name) else recField2(recv, nameIdx(ns, name, 0), List.len(ns), ty)
 
 def recField2(recv: Expr, idx: Int, n: Int, ty: String): Expr =
-  if (idx < 0) Expr.EInt(0) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsComma(0, n), ")"))), "", Expr.EVar(fakeBind(idx))) :: ([]: List[Arm]))
+  if (idx < 0) Expr.EInt(0) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsComma(0, n), ")"))), "", Expr.EVar(fakeBind(idx))) :: noArm())
 
 def recNames(ens: List[En], ty: String): List[String] =
-  if (List.isEmpty(ens)) []: List[String] else recNames1(List.head(ens), List.tail(ens), ty)
+  if (List.isEmpty(ens)) noStr() else recNames1(List.head(ens), List.tail(ens), ty)
 
 def recNames1(h: En, rest: List[En], ty: String): List[String] =
   h match {
@@ -1295,7 +1344,7 @@ def recNames1(h: En, rest: List[En], ty: String): List[String] =
   }
 
 def recNames2(cs: List[EnCase]): List[String] =
-  if (List.isEmpty(cs)) []: List[String] else recNames3(List.head(cs))
+  if (List.isEmpty(cs)) noStr() else recNames3(List.head(cs))
 
 def recNames3(c: EnCase): List[String] =
   c match {
@@ -1303,7 +1352,7 @@ def recNames3(c: EnCase): List[String] =
   }
 
 def recTys(ens: List[En], ty: String): List[String] =
-  if (List.isEmpty(ens)) []: List[String] else recTys1(List.head(ens), List.tail(ens), ty)
+  if (List.isEmpty(ens)) noStr() else recTys1(List.head(ens), List.tail(ens), ty)
 
 def recTys1(h: En, rest: List[En], ty: String): List[String] =
   h match {
@@ -1311,7 +1360,7 @@ def recTys1(h: En, rest: List[En], ty: String): List[String] =
   }
 
 def recTys2(cs: List[EnCase]): List[String] =
-  if (List.isEmpty(cs)) []: List[String] else recTys3(List.head(cs))
+  if (List.isEmpty(cs)) noStr() else recTys3(List.head(cs))
 
 def recTys3(c: EnCase): List[String] =
   c match {
@@ -1319,7 +1368,7 @@ def recTys3(c: EnCase): List[String] =
   }
 
 def paramTys(fs: List[Param]): List[String] =
-  if (List.isEmpty(fs)) []: List[String] else paramTys1(List.head(fs), List.tail(fs))
+  if (List.isEmpty(fs)) noStr() else paramTys1(List.head(fs), List.tail(fs))
 
 def paramTys1(p: Param, rest: List[Param]): List[String] =
   p match {
@@ -1327,7 +1376,7 @@ def paramTys1(p: Param, rest: List[Param]): List[String] =
   }
 
 def paramNames(fs: List[Param]): List[String] =
-  if (List.isEmpty(fs)) []: List[String] else paramNames1(List.head(fs), List.tail(fs))
+  if (List.isEmpty(fs)) noStr() else paramNames1(List.head(fs), List.tail(fs))
 
 def paramNames1(p: Param, rest: List[Param]): List[String] =
   p match {
@@ -1344,7 +1393,7 @@ def bindsComma(i: Int, n: Int): String =
   if (i >= n) "" else if (i + 1 == n) fakeBind(i) else Str.concat(fakeBind(i), Str.concat(", ", bindsComma(i + 1, n)))
 
 def emitMain(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  emitMain2(emitExpr(rwFields(body, []: List[(String, String)], defs, ens), "build", strs, defs, ens, []: List[Param]))
+  emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens), "build", strs, defs, ens, noParam()))
 
 def emitMain2(s: Slot): String =
   Str.concat("define i32 @main(i32 %argc, ptr %argv) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(s.code, Str.concat("  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(s.val, Str.concat(", i32 %argc, ptr %argv)", Str.concat(nl(), Str.concat("  ret i32 %rc", Str.concat(nl(), "}")))))))))))
@@ -1449,7 +1498,7 @@ def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun
 
 def emitContsFm2(p: (String, Int), body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): (String, Int) =
   p match {
-    case (code, id) => (join(code, emitOneCont(id, body, strs, defs, ens, []: List[Param])), id + 1)
+    case (code, id) => (join(code, emitOneCont(id, body, strs, defs, ens, noParam())), id + 1)
   }
 
 def emitContsArgs(xs: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], id: Int): (String, Int) =
@@ -1479,7 +1528,7 @@ def emitContsIf3(code: String, p: (String, Int), el: Expr, strs: List[String], d
   }
 
 def emit(src: String): String =
-  emitProg(Parse.parse(Lexer.lex(src)), collectToks(Lexer.lex(src), []: List[String]))
+  emitProg(Parse.parse(Lexer.lex(src)), collectToks(Lexer.lex(src), noStr()))
 
 def internFiles(files: List[(String, String)], acc: List[String]): List[String] =
   if (List.isEmpty(files)) acc else internFiles2(List.head(files), List.tail(files), acc)
@@ -1490,7 +1539,7 @@ def internFiles2(f: (String, String), rest: List[(String, String)], acc: List[St
   }
 
 def emitFiles(files: List[(String, String)]): String =
-  emitProg(Parse.parseFiles(files), internFiles(files, []: List[String]))
+  emitProg(Parse.parseFiles(files), internFiles(files, noStr()))
 
 def emitFullFiles(files: List[(String, String)]): String =
   Str.concat(preamble(), emitFiles(files))
