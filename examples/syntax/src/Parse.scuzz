@@ -72,7 +72,7 @@ def _intOf(t: Tok): Int =
   }
 
 def _kit(s: String): Bool =
-  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity"
+  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property"
 
 def _joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", _joinComma(List.tail(xs))))
@@ -255,12 +255,23 @@ def parseForOne(toks: List[Tok], i: Int): (Bind, Int) =
   parseForOne2(if (_is(toks, i, Tok.Underscore)) "_" else _identOf(_at(toks, i)), toks, i + 1)
 
 def parseForOne2(name: String, toks: List[Tok], i: Int): (Bind, Int) =
-  parseForOne3(name, _is(toks, i, Tok.LeftArrow), parseExpr(toks, i + 1))
+  parseForOne3(name, _is(toks, i, Tok.LeftArrow), parseExpr(toks, i + 1), toks)
 
-def parseForOne3(name: String, draw: Bool, p: (Expr, Int)): (Bind, Int) =
+def parseForOne3(name: String, draw: Bool, p: (Expr, Int), toks: List[Tok]): (Bind, Int) =
   p match {
-    case (v, j) => (Bind(draw, name, v), j)
+    case (v, j) => parseForOne4(name, draw, v, skipAscript(toks, j))
   }
+
+def skipAscript(toks: List[Tok], i: Int): Int =
+  if (_is(toks, i, Tok.Colon)) skipAscript2(parseType(toks, i + 1)) else i
+
+def skipAscript2(p: (String, Int)): Int =
+  p match {
+    case (_, j) => j
+  }
+
+def parseForOne4(name: String, draw: Bool, v: Expr, j: Int): (Bind, Int) =
+  (Bind(draw, name, v), j)
 
 def parseForBindsNext(p: (Bind, Int), toks: List[Tok], acc: List[Bind]): (Expr, Int) =
   p match {

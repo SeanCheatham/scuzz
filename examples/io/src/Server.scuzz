@@ -3,8 +3,10 @@ def handle(path: String): IO[String] =
     _ <- IO.println(s"served:$path")
   } yield s"ok:$path"
 
+def showPing(p: (Unit, String)): IO[Unit] =
+  p match {
+    case (_, body) => IO.println(s"ping:$body")
+  }
+
 def run(): IO[Unit] =
-  for {
-    (_, body) <- IO.both(Net.serveOnce(8080, path => handle(path)), Net.httpGet("http://127.0.0.1:8080/ping"))
-    _ <- IO.println(s"ping:$body")
-  } yield ()
+  IO.both(Net.serveOnce(8080, path => handle(path)), Net.httpGet("http://127.0.0.1:8080/ping")).flatMap(p => showPing(p))
