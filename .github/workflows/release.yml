@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing git tag to publish (e.g. v0.1.0)
+        description: Existing git tag to publish (e.g. v0.2.0)
         required: true
 
 permissions:
@@ -78,6 +78,11 @@ jobs:
           scuzz test --update /tmp/scuzz-release-app
           scuzz test /tmp/scuzz-release-app
           scuzz run --headless /tmp/scuzz-release-app
+          scuzz run examples/hello | tee /tmp/rel-hello.out
+          grep -q "Hello, Scuzz!" /tmp/rel-hello.out
+          grep -q "ready." /tmp/rel-hello.out
+          scuzz run examples/cli | tee /tmp/rel-cli.out
+          grep -q "cli-ok" /tmp/rel-cli.out
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
