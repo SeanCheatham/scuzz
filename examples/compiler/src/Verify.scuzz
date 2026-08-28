@@ -20,6 +20,12 @@ def trimNum(s: String): String =
 def trimNum2(s: String, i: Int): String =
   if (i >= Str.len(s)) s else if (Str.charAt(s, i) == 32) trimNum2(s, i + 1) else Str.slice(s, i, Str.len(s))
 
+def noStr(): List[String] =
+  []
+
+def noFun(): List[Fun] =
+  []
+
 def kindTok(p: Param): String =
   if (p.ty == "Int") intTok(p.w) else if (p.ty == "String") "s" else if (p.ty == "Bool") "b" else ""
 
@@ -36,7 +42,10 @@ def isDrive(d: Fun): Bool =
   d.ret == "Bool" && allFriendly(d.params)
 
 def drives(ds: List[Fun]): List[Fun] =
-  List.filter(ds, d => isDrive(d))
+  if (List.isEmpty(ds)) noFun() else drives1(List.head(ds), List.tail(ds))
+
+def drives1(d: Fun, rest: List[Fun]): List[Fun] =
+  if (isDrive(d)) d :: drives(rest) else drives(rest)
 
 def specOf(d: Fun): String =
   if (List.isEmpty(d.params)) d.name else Str.concat(d.name, Str.concat(" ", specs(d.params)))
@@ -60,7 +69,7 @@ def cmpStr2(a: String, b: String, i: Int): Int =
   if (i >= Str.len(a) && i >= Str.len(b)) 0 else if (i >= Str.len(a)) 0 - 1 else if (i >= Str.len(b)) 1 else if (Str.charAt(a, i) < Str.charAt(b, i)) 0 - 1 else if (Str.charAt(a, i) > Str.charAt(b, i)) 1 else cmpStr2(a, b, i + 1)
 
 def ins(x: String, ys: List[String]): List[String] =
-  if (List.isEmpty(ys)) x :: ([]: List[String]) else if (cmpStr(x, List.head(ys)) <= 0) x :: ys else List.head(ys) :: ins(x, List.tail(ys))
+  if (List.isEmpty(ys)) x :: noStr() else if (cmpStr(x, List.head(ys)) <= 0) x :: ys else List.head(ys) :: ins(x, List.tail(ys))
 
 def sortStrs(xs: List[String]): List[String] =
   if (List.isEmpty(xs)) xs else ins(List.head(xs), sortStrs(List.tail(xs)))
@@ -68,14 +77,20 @@ def sortStrs(xs: List[String]): List[String] =
 def nls(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else Str.concat(List.head(xs), Str.concat(nl(), nls(List.tail(xs))))
 
+def mapSeed(ds: List[Fun]): List[String] =
+  if (List.isEmpty(ds)) noStr() else seedOf(List.head(ds)) :: mapSeed(List.tail(ds))
+
+def mapSpec(ds: List[Fun]): List[String] =
+  if (List.isEmpty(ds)) noStr() else specOf(List.head(ds)) :: mapSpec(List.tail(ds))
+
 def parseVerify(src: String): List[Fun] =
   drives(Parse.parse(Lexer.lex(src)).defs)
 
 def seeds(src: String): String =
-  nls(sortStrs(List.map(parseVerify(src), d => seedOf(d))))
+  nls(sortStrs(mapSeed(parseVerify(src))))
 
 def drivers(src: String): String =
-  nls(List.map(parseVerify(src), d => specOf(d)))
+  nls(mapSpec(parseVerify(src)))
 
 def emptyVerify(file: String): String =
   Str.concat(file, Str.concat(":1:1: error: ", Str.concat(file, ": verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")))

@@ -1,14 +1,17 @@
+def noArgs(): List[String] =
+  []
+
 def a1(a: String): List[String] =
-  a :: ([]: List[String])
+  a :: noArgs()
 
 def a2(a: String, b: String): List[String] =
-  a :: b :: ([]: List[String])
+  a :: b :: noArgs()
 
 def a3(a: String, b: String, c: String): List[String] =
-  a :: b :: c :: ([]: List[String])
+  a :: b :: c :: noArgs()
 
 def a4(a: String, b: String, c: String, d: String): List[String] =
-  a :: b :: c :: d :: ([]: List[String])
+  a :: b :: c :: d :: noArgs()
 
 def srcHi(): String =
   "@main def main: IO[Unit] = IO.println(\"Hi\")"
@@ -194,7 +197,7 @@ def cliIdem(args: List[String]): Bool =
 
 def allOk(): Bool =
   cliDiff(Cli.render(Cli.parse(a1("--help"))), Help.helpRoot()) && cliDiff(Cli.render(Cli.parse(a2("fmt", "--help"))), Help.helpFmt()) && cliDiff(Cli.render(Cli.parse(a2("check", "--help"))), Help.helpCheck()) && cliDiff(Cli.render(Cli.parse(a2("build", "--help"))), Help.helpBuild()) && cliDiff(Cli.render(Cli.parse(a2("run", "--help"))), Help.helpRun()) && cliDiff(Cli.render(Cli.parse(a2("fuzz", "--help"))), Help.helpFuzz()) && cliDiff(Cli.render(Cli.parse(a2("new", "--help"))), Help.helpNew()) && cliDiff(Cli.render(Cli.parse(a1("-V"))), """scuzz 0.1.0
-""") && cliDiff(Cli.show(Cli.parse(a1("fmt"))), "fmt path=. check=false") && cliDiff(Cli.show(Cli.parse(a2("fmt", "--check"))), "fmt path=. check=true") && cliDiff(Cli.show(Cli.parse(a3("fmt", "--check", "examples/hello"))), "fmt path=examples/hello check=true") && cliDiff(Cli.show(Cli.parse(a2("check", "examples/kernel"))), "check path=examples/kernel json=false") && cliDiff(Cli.show(Cli.parse(a2("check", "--message-format=json"))), "check path=. json=true") && cliDiff(Cli.show(Cli.parse(a2("--message-format=json", "check"))), "check path=. json=true") && cliDiff(Cli.show(Cli.parse(a3("build", "--full", "examples/hello"))), "build path=examples/hello out=build full=true verify=false") && cliDiff(Cli.show(Cli.parse(a3("run", "--headless", "examples/studio"))), "run path=examples/studio out=build headless=true watch=false script= dump=") && cliDiff(Cli.show(Cli.parse(a3("fuzz", "--iterations", "16"))), "fuzz path=. iterations=16 seed=42 replay= oracles=false noFailFast=false minimize=false relate=false") && cliDiff(Cli.show(Cli.parse(a4("fuzz", "--iterations", "0", "examples/counter"))), "fuzz path=examples/counter iterations=0 seed=42 replay= oracles=false noFailFast=false minimize=false relate=false") && cliDiff(Cli.show(Cli.parse(a3("new", "myapp", "--ui"))), "new name=myapp path=. ui=true") && cliDiff(Cli.show(Cli.parse(a2("package", "--target=ios"))), "package path=. out=build target=ios") && cliDiff(Cli.show(Cli.parse(a2("ide", "--headless"))), "ide path=. out=build headless=true") && cliDiff(Cli.render(Cli.parse(a1("nope"))), wantUnrec()) && cliDiff(Cli.render(Cli.parse(a2("fmt", "--nope"))), wantUnexp()) && cliDiff(Cli.render(Cli.parse(a2("--message-format=json", "fmt"))), wantJsonOnly()) && cliDiff(Cli.render(Cli.parse(a1("new"))), wantMissName()) && cliDiff(Cli.render(Cli.parse(a2("fuzz", "--iterations"))), wantNeedIter()) && cliDiff(Cli.render(Cli.parse([]: List[String])), Help.helpRoot()) && cliDiff(Cli.fmtSrc(srcHi()), wantHi()) && cliIdem(a1("fmt")) && cliIdem(a2("fuzz", "--oracles")) && driveOk() && verifyOk()
+""") && cliDiff(Cli.show(Cli.parse(a1("fmt"))), "fmt path=. check=false") && cliDiff(Cli.show(Cli.parse(a2("fmt", "--check"))), "fmt path=. check=true") && cliDiff(Cli.show(Cli.parse(a3("fmt", "--check", "examples/hello"))), "fmt path=examples/hello check=true") && cliDiff(Cli.show(Cli.parse(a2("check", "examples/kernel"))), "check path=examples/kernel json=false") && cliDiff(Cli.show(Cli.parse(a2("check", "--message-format=json"))), "check path=. json=true") && cliDiff(Cli.show(Cli.parse(a2("--message-format=json", "check"))), "check path=. json=true") && cliDiff(Cli.show(Cli.parse(a3("build", "--full", "examples/hello"))), "build path=examples/hello out=build full=true verify=false") && cliDiff(Cli.show(Cli.parse(a3("run", "--headless", "examples/studio"))), "run path=examples/studio out=build headless=true watch=false script= dump=") && cliDiff(Cli.show(Cli.parse(a3("fuzz", "--iterations", "16"))), "fuzz path=. iterations=16 seed=42 replay= oracles=false noFailFast=false minimize=false relate=false") && cliDiff(Cli.show(Cli.parse(a4("fuzz", "--iterations", "0", "examples/counter"))), "fuzz path=examples/counter iterations=0 seed=42 replay= oracles=false noFailFast=false minimize=false relate=false") && cliDiff(Cli.show(Cli.parse(a3("new", "myapp", "--ui"))), "new name=myapp path=. ui=true") && cliDiff(Cli.show(Cli.parse(a2("package", "--target=ios"))), "package path=. out=build target=ios") && cliDiff(Cli.show(Cli.parse(a2("ide", "--headless"))), "ide path=. out=build headless=true") && cliDiff(Cli.render(Cli.parse(a1("nope"))), wantUnrec()) && cliDiff(Cli.render(Cli.parse(a2("fmt", "--nope"))), wantUnexp()) && cliDiff(Cli.render(Cli.parse(a2("--message-format=json", "fmt"))), wantJsonOnly()) && cliDiff(Cli.render(Cli.parse(a1("new"))), wantMissName()) && cliDiff(Cli.render(Cli.parse(a2("fuzz", "--iterations"))), wantNeedIter()) && cliDiff(Cli.render(Cli.parse(noArgs())), Help.helpRoot()) && cliDiff(Cli.fmtSrc(srcHi()), wantHi()) && cliIdem(a1("fmt")) && cliIdem(a2("fuzz", "--oracles")) && driveOk() && verifyOk()
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "cli-ok" else "cli-bad")

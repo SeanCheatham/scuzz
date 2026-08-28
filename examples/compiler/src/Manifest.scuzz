@@ -2,8 +2,14 @@ record Man(ok: Bool, name: String, version: String, hasUi: Bool, deps: List[(Str
 
 record St(sec: String, name: String, version: String, hasUi: Bool, deps: List[(String, String)], err: String)
 
+def noPairs(): List[(String, String)] =
+  []
+
+def noLines(): List[String] =
+  []
+
 def fail(msg: String): Man =
-  Man(false, "", "0.0.0", false, []: List[(String, String)], msg)
+  Man(false, "", "0.0.0", false, noPairs(), msg)
 
 def isSpace(c: Int): Bool =
   c == 32 || c == 9
@@ -18,7 +24,7 @@ def trim(s: String): String =
   Str.slice(s, ltrim(s, 0), rtrim(s, Str.len(s)))
 
 def linesOf(s: String): List[String] =
-  linesOf2(s, 0, 0, []: List[String])
+  linesOf2(s, 0, 0, noLines())
 
 def linesOf2(s: String, start: Int, i: Int, acc: List[String]): List[String] =
   if (i >= Str.len(s)) List.reverse(Str.slice(s, start, i) :: acc) else if (Str.charAt(s, i) == 10) linesOf2(s, i + 1, i + 1, Str.slice(s, start, i) :: acc) else linesOf2(s, start, i + 1, acc)
@@ -81,7 +87,7 @@ def missName(): String =
   "missing field `name`"
 
 def start(): St =
-  St("", "", "0.0.0", false, []: List[(String, String)], "")
+  St("", "", "0.0.0", false, noPairs(), "")
 
 def withErr(st: St, msg: String): St =
   St(st.sec, st.name, st.version, st.hasUi, st.deps, msg)
@@ -126,7 +132,7 @@ def innerOf(raw: String): String =
   if (Str.len(raw) >= 2 && Str.charAt(raw, Str.len(raw) - 1) == 125) trim(Str.slice(raw, 1, Str.len(raw) - 1)) else trim(Str.slice(raw, 1, Str.len(raw)))
 
 def parseInline2(name: String, inner: String, rest: List[String], st: St): St =
-  if (inner == "") withErr(st, needPath()) else takePath(name, kvs(inner, []: List[(String, String)]), rest, st)
+  if (inner == "") withErr(st, needPath()) else takePath(name, kvs(inner, noPairs()), rest, st)
 
 def kvs(s: String, acc: List[(String, String)]): List[(String, String)] =
   kvs2(trim(s), acc)
