@@ -1477,14 +1477,24 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
             } else {
                 "null".into()
             };
-            let returning_held_param = tail.as_ref().is_some_and(|t| {
-                t.params.iter().any(|p| {
+            let returning_held = tail.as_ref().and_then(|t| {
+                t.params.iter().find(|p| {
                     p.held.is_some()
                         && (v == format!("%{}", p.name) || body.value == format!("%{}", p.name))
                 })
             });
-            if retain_borrowed_ret(&def.ret) && !body.owned && !returning_held_param {
-                writeln!(out, "  call void @sz_retain(ptr {v})").unwrap();
+            if retain_borrowed_ret(&def.ret) && !body.owned {
+                if let Some(p) = returning_held {
+                    let held = p.held.as_ref().expect("TCO held flag");
+                    writeln!(out, "  %ret_hv = load i1, ptr %{held}").unwrap();
+                    writeln!(out, "  br i1 %ret_hv, label %ret_kept, label %ret_unheld").unwrap();
+                    writeln!(out, "ret_unheld:").unwrap();
+                    writeln!(out, "  call void @sz_retain(ptr {v})").unwrap();
+                    writeln!(out, "  br label %ret_kept").unwrap();
+                    writeln!(out, "ret_kept:").unwrap();
+                } else {
+                    writeln!(out, "  call void @sz_retain(ptr {v})").unwrap();
+                }
             }
             writeln!(out, "  ret ptr {v}").unwrap();
         }
@@ -13737,6 +13747,26 @@ def fill(n: Int, b: Builder): Builder =
         assert!(
             ir.contains("sz_oracle_sum_to"),
             "expected oracle call:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_tco_unheld_param_return_retains() {
+        let src = r#"
+def keep(skip: List[Int], xs: List[String]): List[String] =
+  if (List.isEmpty(skip)) xs else keep(List.tail(skip), xs)
+@main def main: IO[Unit] =
+  IO.println(List.head(keep([], ["ok"])))
+"#;
+        let ir = emit_full(src);
+        let body = fundef_ir(&ir, "sz_user_keep");
+        assert!(
+            body.contains("br label %tco_loop"),
+            "expected tail loop:\n{body}"
+        );
+        assert!(
+            body.contains("ret_unheld") && body.contains("sz_retain"),
+            "unheld TCO param return must retain:\n{body}"
         );
     }
 
