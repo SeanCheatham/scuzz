@@ -557,11 +557,14 @@ def scPhi(isAnd: Bool, prefix: String): String =
   Str.concat("phi i64 [ ", Str.concat(if (isAnd) "0" else "1", Str.concat(", %", Str.concat(prefix, Str.concat("_al_0 ], [ ", Str.concat(pct(prefix, "rb0"), Str.concat(", %", Str.concat(prefix, "_ar_0 ]"))))))))
 
 def findDef(funs: List[Fun], name: String): List[Fun] =
-  if (List.isEmpty(funs)) noFun() else findDef1(List.head(funs), List.tail(funs), name)
+  findDefKeep(funs, name, noFun())
 
-def findDef1(h: Fun, rest: List[Fun], name: String): List[Fun] =
+def findDefKeep(funs: List[Fun], name: String, acc: List[Fun]): List[Fun] =
+  if (List.isEmpty(funs)) acc else findDefKeep1(List.head(funs), List.tail(funs), name, acc)
+
+def findDefKeep1(h: Fun, rest: List[Fun], name: String, acc: List[Fun]): List[Fun] =
   h match {
-    case Fun(priv, n, ts, ps, ret, body, mod) => if (n == name) Fun(priv, n, ts, ps, ret, body, mod) :: findDef(rest, name) else findDef(rest, name)
+    case Fun(priv, n, ts, ps, ret, body, mod) => findDefKeep(rest, name, if (n == name) Fun(priv, n, ts, ps, ret, body, mod) :: noFun() else acc)
   }
 
 def emitUser(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun]): Slot =
@@ -886,8 +889,11 @@ def slotInt(tys: List[String], k: Int): Bool =
 
 def emitMatch1(se: Slot, arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], tys: List[String]): Slot =
   se match {
-    case Slot(sc, sv, _) => emitMatch2(sc, emitTries(arms, prefix, sv, ens, strs, 0, tys), emitOks(arms, prefix, strs, defs, ens, ps, 0, tys), prefix, isExh(arms))
+    case Slot(sc, sv, _) => emitMatchOksFirst(sc, emitOks(arms, prefix, strs, defs, ens, ps, 0, tys), arms, prefix, sv, ens, strs, tys)
   }
+
+def emitMatchOksFirst(sc: String, oks: (String, List[String], Bool), arms: List[Arm], prefix: String, sv: String, ens: List[En], strs: List[String], tys: List[String]): Slot =
+  emitMatch2(sc, emitTries(arms, prefix, sv, ens, strs, 0, tys), oks, prefix, isExh(arms))
 
 def isExh(arms: List[Arm]): Bool =
   if (List.isEmpty(arms)) false else isExh2(List.head(arms), List.tail(arms))
@@ -1078,7 +1084,13 @@ def emitOkSlotPat(pat: String, body: Expr, prefix: String, strs: List[String], d
   if (isTuplePat(pat)) emitOkTuple(pat, body, prefix, strs, defs, ens, ps, i, tys) else if (hasComma(patBind(pat))) emitOkFields(pat, body, prefix, strs, defs, ens, ps, i) else emitOkSlotBind(patBind(pat), bindIsInt(pat, ens), body, prefix, strs, defs, ens, ps, i)
 
 def emitOkFields(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
-  emitOkOwned(emitExpr(rewriteFields(splitPat(patBind(pat)), body, prefix, i, 0, payloadTys(ens, patCore(pat))), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), ps)
+  emitOkOwned(emitOkRetainNs(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), prefix, i, 0, emitExpr(rewriteFields(splitPat(patBind(pat)), body, prefix, i, 0, payloadTys(ens, patCore(pat))), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps)), ps)
+
+def emitOkRetainNs(ns: List[String], fts: List[String], prefix: String, i: Int, k: Int, s: Slot): Slot =
+  if (List.isEmpty(ns)) s else emitOkRetainNs(List.tail(ns), fts, prefix, i, k + 1, emitOkRetainK(fts, prefix, i, k, s))
+
+def emitOkRetainK(fts: List[String], prefix: String, i: Int, k: Int, s: Slot): Slot =
+  if (slotInt(fts, k)) s else emitOkSlot3(s, Str.concat("%", fieldStem(prefix, i, k, false)))
 
 def emitOkOwned(s: Slot, ps: List[Param]): Slot =
   s match {
