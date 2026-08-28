@@ -437,7 +437,17 @@ def parseMatchArmsNext(p: (Arm, Int), toks: List[Tok], e: Expr, acc: List[Arm]):
   }
 
 def parsePat(toks: List[Tok], i: Int): (String, Int) =
-  parsePatOr(parsePatPrimary(toks, i), toks)
+  parsePatOr(parsePatCons(parsePatPrimary(toks, i), toks), toks)
+
+def parsePatCons(p: (String, Int), toks: List[Tok]): (String, Int) =
+  p match {
+    case (s, j) => if (_is(toks, j, Tok.ColonColon)) parsePatCons2(s, parsePat(toks, j + 1)) else (s, j)
+  }
+
+def parsePatCons2(left: String, p: (String, Int)): (String, Int) =
+  p match {
+    case (r, k) => (Str.concat(left, Str.concat(" :: ", r)), k)
+  }
 
 def parsePatOr(p: (String, Int), toks: List[Tok]): (String, Int) =
   p match {
@@ -459,8 +469,12 @@ def parsePatPrimary(toks: List[Tok], i: Int): (String, Int) =
     case Tok.Str(s) => (quote(s), i + 1)
     case Tok.Ident(s) => parsePatIdent(toks, i + 1, s)
     case Tok.LParen => parsePatTuple(toks, i)
+    case Tok.LBracket => parsePatNil(toks, i)
     case _ => ("", i)
   }
+
+def parsePatNil(toks: List[Tok], i: Int): (String, Int) =
+  if (_is(toks, i + 1, Tok.RBracket)) ("[]", i + 2) else ("[]", i)
 
 def parsePatTuple(toks: List[Tok], i: Int): (String, Int) =
   parsePatCtorClose("", parsePatArgs(toks, i + 1, []))

@@ -472,7 +472,7 @@ def paramIsI64h(p: Param, rest: List[Param], s: String): Bool =
   }
 
 def isIntSsa(s: String): Bool =
-  hasSub(s, "_tv") || hasSub(s, "_ic_v") || hasDigitStem(s, "_b")
+  hasSub(s, "_tv") || hasSub(s, "_ic_v") || hasSub(s, "_cu") || hasDigitStem(s, "_b")
 
 def hasDigitStem(s: String, stem: String): Bool =
   hasDigitStemAt(s, stem, 0)
@@ -634,13 +634,13 @@ def isMapKit(f: String): Bool =
   isPredKit(f) || f == "Ref.update" || f == "Ref.updateAndGet" || f == "IO.foreach" || f == "IO.foreachDiscard" || f == "Stream.map" || f == "Stream.evalMap" || f == "Stream.flatMap" || f == "Stream.evalTap" || f == "Stream.mapConcat" || f == "Stream.unfold" || f == "Resource.use" || f == "Resource.make"
 
 def isFoldKit(f: String): Bool =
-  f == "Stream.fold" || f == "Stream.scan" || f == "Stream.zipWith"
+  f == "Stream.fold" || f == "Stream.scan" || f == "Stream.zipWith" || f == "List.foldLeft" || f == "List.foldRight"
 
 def mapKitRt(f: String): String =
   if (f == "Ref.update") "sz_ref_update" else if (f == "Ref.updateAndGet") "sz_ref_update_and_get" else if (f == "IO.foreach") "sz_io_foreach" else if (f == "IO.foreachDiscard") "sz_io_foreach_discard" else if (f == "Stream.map") "sz_stream_map" else if (f == "Stream.filter") "sz_stream_filter" else if (f == "Stream.evalMap") "sz_stream_evalmap" else if (f == "Stream.takeWhile") "sz_stream_takewhile" else if (f == "Stream.dropWhile") "sz_stream_dropwhile" else if (f == "Stream.find") "sz_stream_find" else if (f == "Stream.exists") "sz_stream_exists" else if (f == "Stream.flatMap") "sz_stream_flatmap" else if (f == "Stream.evalTap") "sz_stream_evaltap" else if (f == "Stream.filterNot") "sz_stream_filter_not" else if (f == "Stream.forall") "sz_stream_forall" else if (f == "Stream.none") "sz_stream_none" else if (f == "Stream.findLast") "sz_stream_find_last" else if (f == "Stream.mapConcat") "sz_stream_map_concat" else if (f == "Stream.unfold") "sz_stream_unfold" else if (f == "Resource.make") "sz_lang_resource_make" else "sz_lang_resource_use"
 
 def foldKitRt(f: String): String =
-  if (f == "Stream.fold") "sz_stream_fold" else if (f == "Stream.scan") "sz_stream_scan" else "sz_stream_zip_with"
+  if (f == "Stream.fold") "sz_stream_fold" else if (f == "Stream.scan") "sz_stream_scan" else if (f == "List.foldLeft") "sz_list_fold_left" else if (f == "List.foldRight") "sz_list_fold_right" else "sz_stream_zip_with"
 
 def emitMapKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitMapKitPred(isPredKit(f), mapKitRt(f), args, prefix, strs, defs, ens, ps)
@@ -692,6 +692,19 @@ def emitFoldKit3(rt: String, inner: Slot, a1: Expr, rest: List[Expr], prefix: St
   emitFoldKit4(rt, inner, emitExpr(a1, Str.concat(prefix, "_z"), strs, defs, ens, ps), List.head(rest), prefix, strs, defs, ens, ps)
 
 def emitFoldKit4(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitFoldKit4b(rt, inner, z, foldLam(lam), prefix, strs, defs, ens, ps)
+
+def foldLam(e: Expr): Expr =
+  e match {
+    case Expr.ELam(_, _) => e
+    case Expr.EVar(f) => etaFold(f)
+    case _ => e
+  }
+
+def etaFold(f: String): Expr =
+  Expr.ELam("__tup", Expr.EMatch(Expr.EVar("__tup"), Arm("(a, b)", "", Expr.ECall(f, Expr.EVar("a") :: Expr.EVar("b") :: noExpr())) :: noArm()))
+
+def emitFoldKit4b(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   inner match {
     case Slot(ic, iv, io) => emitFoldKit5(rt, ic, iv, io, z, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps)
   }
@@ -707,7 +720,24 @@ def emitFoldKit6(rt: String, ic: String, iv: String, io: Bool, z: Slot, neth: St
   }
 
 def emitFoldKit7(rt: String, ic: String, iv: String, io: Bool, zc: String, zv: String, zo: Bool, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
-  if (kitBoxLit(zv, zo)) emitFoldKitBox(rt, ic, iv, io, zc, zv, neth, ec, ev, eo, prefix) else emitFoldKitCall(rt, ic, iv, io, zc, zv, zo, neth, ec, ev, eo, prefix)
+  emitFoldKit7b(foldBoxZ(zv, zo), rt, ic, iv, io, zc, zv, zo, neth, ec, ev, eo, prefix)
+
+def emitFoldKit7b(boxz: Bool, rt: String, ic: String, iv: String, io: Bool, zc: String, zv: String, zo: Bool, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
+  emitFoldKit8(boxz && isListFoldRt(rt), if (boxz) emitFoldKitBox(rt, ic, iv, io, zc, zv, neth, ec, ev, eo, prefix) else emitFoldKitCall(rt, ic, iv, io, zc, zv, zo, neth, ec, ev, eo, prefix), prefix)
+
+def foldBoxZ(zv: String, zo: Bool): Bool =
+  !zo && zv != "null" && !isPtrSlot(zv, noParam())
+
+def isListFoldRt(rt: String): Bool =
+  rt == "sz_list_fold_left" || rt == "sz_list_fold_right"
+
+def emitFoldKit8(unbox: Bool, s: Slot, prefix: String): Slot =
+  if (unbox) unboxFold(s, prefix) else s
+
+def unboxFold(s: Slot, prefix: String): Slot =
+  s match {
+    case Slot(c, v, _) => Slot(join(c, join(line(Str.concat(tmp(prefix, "fu"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(v, ")")))), relPtr(v))), pct(prefix, "fu"), false)
+  }
 
 def emitFoldKitBox(rt: String, ic: String, iv: String, io: Bool, zc: String, zv: String, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
   Slot(join(neth, join(ic, join(zc, join(ec, join(line(Str.concat(tmp(prefix, "zb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(zv, ")")))), join(foldCall(rt, iv, pct(prefix, "zb"), prefix, ev), join(if (io) relPtr(iv) else "", join(relPtr(pct(prefix, "zb")), emitFmRel(ev, eo))))))))), pct(prefix, "v"), true)
@@ -1779,7 +1809,13 @@ def emitMatch(s: Expr, arms: List[Arm], prefix: String, strs: List[String], defs
   }
 
 def emitMatchV(n: String, arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitMatch1(emitExpr(Expr.EVar(n), Str.concat(prefix, "_sc"), strs, defs, ens, ps), arms, prefix, strs, defs, ens, ps, tupSlots(paramTy(ps, n)))
+  emitMatch1(emitExpr(Expr.EVar(n), Str.concat(prefix, "_sc"), strs, defs, ens, ps), arms, prefix, strs, defs, ens, ps, matchSlots(paramTy(ps, n)))
+
+def matchSlots(ty: String): List[String] =
+  if (isTupTy(ty)) tupSlots(ty) else listElemSlots(ty)
+
+def listElemSlots(ty: String): List[String] =
+  if (Str.startsWith(ty, "List[") && Str.len(ty) > 6) Str.slice(ty, 5, Str.len(ty) - 1) :: noStr() else noStr()
 
 def paramTy(ps: List[Param], n: String): String =
   if (List.isEmpty(ps)) "" else paramTy1(List.head(ps), List.tail(ps), n)
@@ -1840,7 +1876,37 @@ def emitTry1(arm: Arm, prefix: String, scrut: String, ens: List[En], strs: List[
   }
 
 def emitTryPat(pat: String, prefix: String, i: Int, scrut: String, ens: List[En], strs: List[String], last: Bool, tys: List[String]): String =
-  if (pat == "_") line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (isStrPat(pat)) emitStrTry(pat, prefix, i, scrut, strs, last) else if (isIntPat(pat)) emitIntTry(pat, prefix, i, scrut, last) else if (isTuplePat(pat)) emitTupleTry(prefix, i, scrut, tys) else join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitMatchedPat(pat, prefix, i, scrut, ens)))
+  if (pat == "_") line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (pat == "[]") emitNilTry(prefix, i, scrut, last) else if (isConsPat(pat)) emitConsTry(prefix, i, scrut, last, slotInt(tys, 0)) else if (isStrPat(pat)) emitStrTry(pat, prefix, i, scrut, strs, last) else if (isIntPat(pat)) emitIntTry(pat, prefix, i, scrut, last) else if (isTuplePat(pat)) emitTupleTry(prefix, i, scrut, tys) else join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitMatchedPat(pat, prefix, i, scrut, ens)))
+
+def isConsPat(pat: String): Bool =
+  consAt(pat, 0) >= 0
+
+def consAt(s: String, i: Int): Int =
+  if (i + 4 > Str.len(s)) 0 - 1 else if (Str.slice(s, i, i + 4) == " :: ") i else consAt(s, i + 1)
+
+def consHead(pat: String): String =
+  Str.slice(pat, 0, consAt(pat, 0))
+
+def consTail(pat: String): String =
+  Str.slice(pat, consAt(pat, 0) + 4, Str.len(pat))
+
+def emitNilTry(prefix: String, i: Int, scrut: String, last: Bool): String =
+  join(line(Str.concat(tmp(ppre(prefix, i), "ne"), Str.concat("call i32 @sz_list_is_empty(ptr ", Str.concat(scrut, ")")))), join(line(Str.concat(tmp(ppre(prefix, i), "nc"), Str.concat("icmp ne i32 ", Str.concat(pct(ppre(prefix, i), "ne"), ", 0")))), line(Str.concat("br i1 ", Str.concat(pct(ppre(prefix, i), "nc"), Str.concat(", label %", Str.concat(prefix, Str.concat("_ok_0_", Str.concat(Str.fromInt(i), Str.concat(", label %", nextLab(prefix, i, last)))))))))))
+
+def emitConsTry(prefix: String, i: Int, scrut: String, last: Bool, unbox: Bool): String =
+  join(emitConsEmpty(prefix, i, scrut), join(emitConsBr(prefix, i, last), join(lab(Str.concat(ppre(prefix, i), "_cm")), join(emitConsLoad(prefix, i, scrut, unbox), emitConsOk(prefix, i)))))
+
+def emitConsEmpty(prefix: String, i: Int, scrut: String): String =
+  join(line(Str.concat(tmp(ppre(prefix, i), "ce"), Str.concat("call i32 @sz_list_is_empty(ptr ", Str.concat(scrut, ")")))), line(Str.concat(tmp(ppre(prefix, i), "cc"), Str.concat("icmp eq i32 ", Str.concat(pct(ppre(prefix, i), "ce"), ", 0")))))
+
+def emitConsBr(prefix: String, i: Int, last: Bool): String =
+  line(Str.concat("br i1 ", Str.concat(pct(ppre(prefix, i), "cc"), Str.concat(", label %", Str.concat(ppre(prefix, i), Str.concat("_cm, label %", nextLab(prefix, i, last)))))))
+
+def emitConsLoad(prefix: String, i: Int, scrut: String, unbox: Bool): String =
+  join(line(Str.concat(tmp(ppre(prefix, i), "ch"), Str.concat("call ptr @sz_list_head(ptr ", Str.concat(scrut, ")")))), join(line(Str.concat(tmp(ppre(prefix, i), "ct"), Str.concat("call ptr @sz_list_tail(ptr ", Str.concat(scrut, ")")))), if (unbox) line(Str.concat(tmp(ppre(prefix, i), "cu"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(ppre(prefix, i), "ch"), ")")))) else ""))
+
+def emitConsOk(prefix: String, i: Int): String =
+  line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i)))))
 
 def isTuplePat(pat: String): Bool =
   Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
@@ -1989,7 +2055,25 @@ def emitOks0(arm: Arm, rest: List[Arm], prefix: String, strs: List[String], defs
   }
 
 def emitOkSlotPat(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String]): Slot =
-  if (isTuplePat(pat)) emitOkTuple(pat, body, prefix, strs, defs, ens, ps, i, tys) else if (hasComma(patBind(pat))) emitOkFields(pat, body, prefix, strs, defs, ens, ps, i) else emitOkSlotBind(patBind(pat), bindIsInt(pat, ens), body, prefix, strs, defs, ens, ps, i)
+  if (isConsPat(pat)) emitOkCons(pat, body, prefix, strs, defs, ens, ps, i, tys) else if (isTuplePat(pat)) emitOkTuple(pat, body, prefix, strs, defs, ens, ps, i, tys) else if (hasComma(patBind(pat))) emitOkFields(pat, body, prefix, strs, defs, ens, ps, i) else emitOkSlotBind(patBind(pat), bindIsInt(pat, ens), body, prefix, strs, defs, ens, ps, i)
+
+def emitOkCons(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String]): Slot =
+  emitOkOwned(emitExpr(rewriteCons(pat, body, prefix, i, slotInt(tys, 0)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), ps)
+
+def rewriteCons(pat: String, body: Expr, prefix: String, i: Int, unbox: Bool): Expr =
+  rewriteCons2(consAt(pat, 0), pat, body, prefix, i, unbox)
+
+def rewriteCons2(at: Int, pat: String, body: Expr, prefix: String, i: Int, unbox: Bool): Expr =
+  rewriteCons3(Str.slice(pat, 0, at), pat, at, body, prefix, i, unbox)
+
+def rewriteCons3(h: String, pat: String, at: Int, body: Expr, prefix: String, i: Int, unbox: Bool): Expr =
+  rewriteCons4(h, Str.slice(pat, at + 4, Str.len(pat)), body, prefix, i, unbox)
+
+def rewriteCons4(h: String, t: String, body: Expr, prefix: String, i: Int, unbox: Bool): Expr =
+  rewriteBind(rewriteBind(body, h, consHeadStem(prefix, i, unbox)), t, Str.concat(ppre(prefix, i), "_ct"))
+
+def consHeadStem(prefix: String, i: Int, unbox: Bool): String =
+  Str.concat(ppre(prefix, i), if (unbox) "_cu" else "_ch")
 
 def emitOkFields(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
   emitOkOwned(emitOkRetainNs(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), prefix, i, 0, emitExpr(rewriteFields(splitPat(patBind(pat)), body, prefix, i, 0, payloadTys(ens, patCore(pat))), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps)), ps)
@@ -3059,7 +3143,7 @@ def declsM(): String =
   join(decl("ptr @sz_ref_update(ptr, ptr, ptr)"), join(decl("ptr @sz_ref_update_and_get(ptr, ptr, ptr)"), join(decl("ptr @sz_io_foreach(ptr, ptr, ptr)"), join(decl("ptr @sz_io_foreach_discard(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_map(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_filter(ptr, ptr, ptr)"), join(decl(Str.concat("ptr @sz_stream_e", "valmap(ptr, ptr, ptr)")), join(decl("ptr @sz_stream_takewhile(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_dropwhile(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_find(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_exists(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_flatmap(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_resource_use(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_resource_make(ptr, ptr, ptr)"), decl("ptr @sz_stream_forall(ptr, ptr, ptr)")))))))))))))))
 
 def declsN(): String =
-  join(decl(Str.concat("ptr @sz_stream_e", "valtap(ptr, ptr, ptr)")), join(decl("ptr @sz_stream_filter_not(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_none(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_find_last(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_map_concat(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_scan(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_fold(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_zip_with(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_zip_all(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_list_zip_all(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_iterate(ptr, i64, ptr, ptr)"), decl("ptr @sz_stream_unfold(ptr, ptr, ptr)"))))))))))))
+  join(decl(Str.concat("ptr @sz_stream_e", "valtap(ptr, ptr, ptr)")), join(decl("ptr @sz_stream_filter_not(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_none(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_find_last(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_map_concat(ptr, ptr, ptr)"), join(decl("ptr @sz_stream_scan(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_fold(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_zip_with(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_zip_all(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_list_zip_all(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_stream_iterate(ptr, i64, ptr, ptr)"), join(decl("ptr @sz_stream_unfold(ptr, ptr, ptr)"), join(decl("ptr @sz_list_fold_left(ptr, ptr, ptr, ptr)"), decl("ptr @sz_list_fold_right(ptr, ptr, ptr, ptr)"))))))))))))))
 
 def emitFull(src: String): String =
   Str.concat(preamble(), emit(src))
