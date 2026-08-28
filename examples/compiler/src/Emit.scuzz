@@ -78,8 +78,30 @@ def collectToks(toks: List[Tok], acc: List[String]): List[String] =
 def collectTok(t: Tok, rest: List[Tok], acc: List[String]): List[String] =
   t match {
     case Tok.Str(s) => collectToks(rest, intern(acc, s))
+    case Tok.Interp(s) => collectToks(rest, internInterp(acc, s, 0, ""))
     case _ => collectToks(rest, acc)
   }
+
+def internInterp(acc: List[String], s: String, i: Int, lit: String): List[String] =
+  if (i >= Str.len(s)) internInterpEnd(acc, lit) else internInterpCh(acc, s, i, lit, Str.charAt(s, i))
+
+def internInterpEnd(acc: List[String], lit: String): List[String] =
+  if (lit == "") acc else intern(acc, lit)
+
+def internInterpCh(acc: List[String], s: String, i: Int, lit: String, c: Int): List[String] =
+  if (c == 36) internInterpDollar(acc, s, i, lit) else internInterp(acc, s, i + 1, Str.concat(lit, Str.slice(s, i, i + 1)))
+
+def internInterpDollar(acc: List[String], s: String, i: Int, lit: String): List[String] =
+  if (i + 1 >= Str.len(s)) internInterp(acc, s, i + 1, Str.concat(lit, "$")) else internInterpDollar2(acc, s, i, lit, Str.charAt(s, i + 1))
+
+def internInterpDollar2(acc: List[String], s: String, i: Int, lit: String, n: Int): List[String] =
+  if (n == 123) internInterpBrace(internInterpEnd(acc, lit), s, i) else if (isIdentStart(n)) internInterpSkip(internInterpEnd(acc, lit), s, i + 1) else internInterp(acc, s, i + 1, Str.concat(lit, "$"))
+
+def internInterpSkip(acc: List[String], s: String, i: Int): List[String] =
+  if (i >= Str.len(s)) acc else if (isIdentCont(Str.charAt(s, i))) internInterpSkip(acc, s, i + 1) else internInterp(acc, s, i, "")
+
+def internInterpBrace(acc: List[String], s: String, i: Int): List[String] =
+  internInterp(acc, s, closeBrace(s, i + 2, 1), "")
 
 def emitConsts(xs: List[String], i: Int): String =
   if (List.isEmpty(xs)) "" else Str.concat(strConst(i, List.head(xs)), Str.concat(nl(), emitConsts(List.tail(xs), i + 1)))
@@ -108,8 +130,110 @@ def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: 
     case Expr.EMatch(s, arms) => emitMatch(s, arms, prefix, strs, defs, ens, ps)
     case Expr.EList(xs) => emitList(xs, prefix, strs, defs, ens, ps)
     case Expr.ETuple(xs) => emitTuple(xs, prefix, strs, defs, ens, ps)
+    case Expr.EInterp(s) => emitInterp(s, prefix, strs, defs, ens, ps)
     case _ => Slot("", "0", false)
   }
+
+def emitInterp(s: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitInterpFold(interpParts(s, 0, "", noExpr()), prefix, strs, defs, ens, ps, 0)
+
+def interpParts(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
+  if (i >= Str.len(s)) interpPartsEnd(lit, acc) else interpPartsCh(s, i, lit, acc, Str.charAt(s, i))
+
+def interpPartsEnd(lit: String, acc: List[Expr]): List[Expr] =
+  if (lit == "") List.reverse(acc) else List.reverse(Expr.EStr(lit) :: acc)
+
+def interpPartsCh(s: String, i: Int, lit: String, acc: List[Expr], c: Int): List[Expr] =
+  if (c == 36) interpPartsDollar(s, i, lit, acc) else interpParts(s, i + 1, Str.concat(lit, Str.slice(s, i, i + 1)), acc)
+
+def interpPartsDollar(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
+  if (i + 1 >= Str.len(s)) interpParts(s, i + 1, Str.concat(lit, "$"), acc) else interpPartsDollar2(s, i, lit, acc, Str.charAt(s, i + 1))
+
+def interpPartsDollar2(s: String, i: Int, lit: String, acc: List[Expr], n: Int): List[Expr] =
+  if (n == 123) interpPartsBrace(s, i, lit, acc) else if (isIdentStart(n)) interpPartsIdent(s, i + 1, lit, acc) else interpParts(s, i + 1, Str.concat(lit, "$"), acc)
+
+def isIdentStart(c: Int): Bool =
+  c == 95 || c >= 65 && c <= 90 || c >= 97 && c <= 122
+
+def isIdentCont(c: Int): Bool =
+  isIdentStart(c) || c >= 48 && c <= 57
+
+def interpPartsIdent(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
+  interpPartsIdent2(s, i, i, lit, acc)
+
+def interpPartsIdent2(s: String, i: Int, start: Int, lit: String, acc: List[Expr]): List[Expr] =
+  if (i >= Str.len(s)) interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i)), acc, s, i) else if (isIdentCont(Str.charAt(s, i))) interpPartsIdent2(s, i + 1, start, lit, acc) else interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i)), acc, s, i)
+
+def interpPartsFlush(lit: String, e: Expr, acc: List[Expr], s: String, i: Int): List[Expr] =
+  if (lit == "") interpParts(s, i, "", e :: acc) else interpParts(s, i, "", e :: Expr.EStr(lit) :: acc)
+
+def interpPartsBrace(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
+  interpPartsBrace2(s, closeBrace(s, i + 2, 1), i, lit, acc)
+
+def closeBrace(s: String, i: Int, depth: Int): Int =
+  if (i >= Str.len(s) || depth <= 0) i else closeBraceCh(s, i, depth, Str.charAt(s, i))
+
+def closeBraceCh(s: String, i: Int, depth: Int, c: Int): Int =
+  if (c == 123) closeBrace(s, i + 1, depth + 1) else if (c == 125) closeBrace(s, i + 1, depth - 1) else closeBrace(s, i + 1, depth)
+
+def interpPartsBrace2(s: String, j: Int, i: Int, lit: String, acc: List[Expr]): List[Expr] =
+  interpPartsFlush(lit, snippetExpr(Str.slice(s, i + 2, j - 1)), acc, s, j)
+
+def snippetExpr(src: String): Expr =
+  snippetHd(Parse.parseExpr(Lexer.lex(src), 0))
+
+def snippetHd(p: (Expr, Int)): Expr =
+  p match {
+    case (e, _) => e
+  }
+
+def emitInterpFold(parts: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
+  if (List.isEmpty(parts)) emitStrAs("", prefix, strs, "s") else emitInterpAcc(emitInterpPart(List.head(parts), prefix, i, strs, defs, ens, ps), List.tail(parts), prefix, strs, defs, ens, ps, i + 1)
+
+def emitInterpPart(e: Expr, prefix: String, i: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  e match {
+    case Expr.EStr(s) => emitStrAs(s, Str.concat(prefix, Str.concat("_l", Str.fromInt(i))), strs, "s")
+    case _ => emitInterpExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps)
+  }
+
+def emitInterpExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitInterpExpr2(emitExpr(e, prefix, strs, defs, ens, ps), prefix, exprIsI64(e, ps, defs))
+
+def emitInterpExpr2(s: Slot, prefix: String, i64: Bool): Slot =
+  if (i64) emitInterpI64(s, prefix) else s
+
+def emitInterpI64(s: Slot, prefix: String): Slot =
+  s match {
+    case Slot(c, v, _) => Slot(join(c, line(Str.concat(tmp(prefix, "istr"), Str.concat("call ptr @sz_string_from_int(i64 ", Str.concat(v, ")"))))), pct(prefix, "istr"), true)
+  }
+
+def emitInterpAcc(acc: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
+  if (List.isEmpty(rest)) acc else emitInterpCat(acc, emitInterpPart(List.head(rest), prefix, i, strs, defs, ens, ps), rest, prefix, strs, defs, ens, ps, i)
+
+def emitInterpCat(acc: Slot, nxt: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
+  acc match {
+    case Slot(ac, av, ao) => emitInterpCat2(ac, av, ao, nxt, rest, prefix, strs, defs, ens, ps, i)
+  }
+
+def emitInterpCat2(ac: String, av: String, ao: Bool, nxt: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
+  nxt match {
+    case Slot(nc, nv, no) => emitInterpCat3(join(ac, nc), av, ao, nv, no, rest, prefix, strs, defs, ens, ps, i)
+  }
+
+def emitInterpCat3(code: String, av: String, ao: Bool, nv: String, no: Bool, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
+  emitInterpAcc(emitInterpJoin(code, av, ao, nv, no, prefix, i), List.tail(rest), prefix, strs, defs, ens, ps, i + 1)
+
+def interpCStem(prefix: String, i: Int): String =
+  Str.concat(prefix, Str.concat("_c", Str.fromInt(i)))
+
+def emitInterpJoin(code: String, a: String, oa: Bool, b: String, ob: Bool, prefix: String, i: Int): Slot =
+  emitInterpJoin2(code, a, oa, b, ob, interpCStem(prefix, i))
+
+def emitInterpJoin2(code: String, a: String, oa: Bool, b: String, ob: Bool, stem: String): Slot =
+  Slot(join(code, join(interpConcat(stem, a, b), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(stem, "v"), true)
+
+def interpConcat(stem: String, a: String, b: String): String =
+  line(Str.concat(tmp(stem, "v"), Str.concat("call ptr @sz_string_concat(ptr ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, ")"))))))
 
 def emitStr(s: String, prefix: String, strs: List[String]): Slot =
   emitStrAs(s, prefix, strs, "ss")
@@ -1461,10 +1585,46 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
     case Expr.EBool(b) => Expr.EBool(b)
     case Expr.EStr(s) => Expr.EStr(s)
     case Expr.EFloat(s) => Expr.EFloat(s)
-    case Expr.EInterp(s) => Expr.EInterp(s)
+    case Expr.EInterp(s) => Expr.EInterp(rewriteInterpStr(s, from, to))
     case Expr.EHole => Expr.EHole
     case Expr.EUnit => Expr.EUnit
   }
+
+def rewriteInterpStr(s: String, from: String, to: String): String =
+  rewriteInterpAt(s, 0, "", from, to)
+
+def rewriteInterpAt(s: String, i: Int, acc: String, from: String, to: String): String =
+  if (i >= Str.len(s)) acc else rewriteInterpCh(s, i, acc, from, to, Str.charAt(s, i))
+
+def rewriteInterpCh(s: String, i: Int, acc: String, from: String, to: String, c: Int): String =
+  if (c == 36) rewriteInterpDollar(s, i, acc, from, to) else rewriteInterpAt(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)), from, to)
+
+def rewriteInterpDollar(s: String, i: Int, acc: String, from: String, to: String): String =
+  if (i + 1 >= Str.len(s)) rewriteInterpAt(s, i + 1, Str.concat(acc, "$"), from, to) else rewriteInterpDollar2(s, i, acc, from, to, Str.charAt(s, i + 1))
+
+def rewriteInterpDollar2(s: String, i: Int, acc: String, from: String, to: String, n: Int): String =
+  if (n == 123) rewriteInterpBrace(s, i, acc, from, to) else if (isIdentStart(n)) rewriteInterpIdent(s, i + 1, acc, from, to) else rewriteInterpAt(s, i + 1, Str.concat(acc, "$"), from, to)
+
+def rewriteInterpIdent(s: String, i: Int, acc: String, from: String, to: String): String =
+  rewriteInterpIdent2(s, i, i, acc, from, to)
+
+def rewriteInterpIdent2(s: String, i: Int, start: Int, acc: String, from: String, to: String): String =
+  if (i >= Str.len(s)) rewriteInterpIdent3(s, i, start, acc, from, to) else if (isIdentCont(Str.charAt(s, i))) rewriteInterpIdent2(s, i + 1, start, acc, from, to) else rewriteInterpIdent3(s, i, start, acc, from, to)
+
+def rewriteInterpIdent3(s: String, i: Int, start: Int, acc: String, from: String, to: String): String =
+  rewriteInterpAt(s, i, Str.concat(acc, Str.concat("$", rewriteIdent(Str.slice(s, start, i), from, to))), from, to)
+
+def rewriteIdent(n: String, from: String, to: String): String =
+  if (n == from) to else n
+
+def rewriteInterpBrace(s: String, i: Int, acc: String, from: String, to: String): String =
+  rewriteInterpBrace2(closeBrace(s, i + 2, 1), s, i, acc, from, to)
+
+def rewriteInterpBrace2(j: Int, s: String, i: Int, acc: String, from: String, to: String): String =
+  rewriteInterpAt(s, j, Str.concat(acc, rewriteInterpInner(Str.slice(s, i + 2, j - 1), from, to)), from, to)
+
+def rewriteInterpInner(inner: String, from: String, to: String): String =
+  Str.concat("${", Str.concat(Parse.pretty0(rewriteBind(snippetExpr(inner), from, to)), "}"))
 
 def rewriteBindList(xs: List[Expr], from: String, to: String): List[Expr] =
   if (List.isEmpty(xs)) xs else rewriteBindList2(List.head(xs), List.tail(xs), from, to)
