@@ -1032,4 +1032,4 @@ def allOk(): Bool =
   okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam())
 
 @main def main: IO[Unit] =
-  Fs.mkdirs("/tmp/scuzz-compiler-scuzz-out").flatMap(_ => Drive.emitDir("/home/sean/git/scuzz/examples/compiler", "/tmp/scuzz-compiler-scuzz-out"))
+  IO.println(if (allOk()) "ir-ok" else "ir-bad")
