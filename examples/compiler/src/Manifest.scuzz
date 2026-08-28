@@ -149,7 +149,7 @@ def takePath(name: String, xs: List[(String, String)], rest: List[String], st: S
 def takePath2(name: String, xs: List[(String, String)], path: String, found: Bool, rest: List[String], st: St): St =
   if (List.isEmpty(xs)) takePath3(name, path, found, rest, st) else takePathHd(name, List.head(xs), List.tail(xs), path, found, rest, st)
 
-def takePathHd(name: String, h: (String, String), restXs: List[(String, String)], path: String, found: Bool, rest: List[String], st: St): St =
+def takePathHd(name: String, h: (String, String), restXs: List[(String, String)], _path: String, _found: Bool, rest: List[String], st: St): St =
   h match {
     case (k, v) => if (k != "path") withErr(st, gitDep(k)) else takePath2(name, restXs, unquote(v), true, rest, st)
   }

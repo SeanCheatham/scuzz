@@ -95,7 +95,7 @@ def collectDep(dir: String, d: (String, String), rest: List[(String, String)], a
     case (name, path) => collectDepNamed(dir, name, path, rest, acc)
   }
 
-def collectDepNamed(dir: String, name: String, path: String, rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
+def collectDepNamed(dir: String, _name: String, path: String, rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
   collectPkg(joinSlash(dir, path), dir, rest, acc)
 
 def collectPkg(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
@@ -200,7 +200,7 @@ def afterClang(r: (Int, String, String), exe: String): IO[Unit] =
     case (code, out, err) => afterClang2(code, out, err, exe)
   }
 
-def afterClang2(code: Int, out: String, err: String, exe: String): IO[Unit] =
+def afterClang2(code: Int, _out: String, err: String, exe: String): IO[Unit] =
   if (code != 0) IO.println(err) else runLine(exe).flatMap(r => afterRun(r))
 
 def afterRun(r: (Int, String, String)): IO[Unit] =
