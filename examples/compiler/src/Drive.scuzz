@@ -52,11 +52,74 @@ def compileFiles3(m: Man, ll: String, outDir: String, clang: String, lib: String
 def rtLib(): String =
   "crates/runtime/build/libscuzz_rt.a"
 
-def emitDir(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirSrc(dir, outDir, toml))
+def isScuzz(name: String): Bool =
+  Str.len(name) > 6 && Str.slice(name, Str.len(name) - 6, Str.len(name)) == ".scuzz"
 
-def emitDirSrc(dir: String, outDir: String, toml: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "src/Main.scuzz")).flatMap(src => emitDirOut(compilePkg(toml, src, outDir, "clang", rtLib())))
+def stemOf(name: String): String =
+  Str.slice(name, 0, Str.len(name) - 6)
+
+def emitDir(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirMan(dir, outDir, Manifest.parse(toml)))
+
+def emitDirMan(dir: String, outDir: String, m: Man): IO[Unit] =
+  m match {
+    case Man(ok, name, version, hasUi, deps, err) => emitDirMan2(dir, outDir, ok, err, deps)
+  }
+
+def emitDirMan2(dir: String, outDir: String, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
+  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitDirListed(dir, outDir, deps, ents))
+
+def emitDirListed(dir: String, outDir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitDirDeps(dir, outDir, deps, own))
+
+def emitDirDeps(dir: String, outDir: String, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
+  if (List.isEmpty(deps)) emitDirCompile(dir, outDir, own) else emitDirDepGo(dir, outDir, own, deps)
+
+def emitDirCompile(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirCompiled(toml, own, outDir))
+
+def emitDirCompiled(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
+  emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib()))
+
+def emitDirDepGo(dir: String, outDir: String, own: List[(String, String)], deps: List[(String, String)]): IO[Unit] =
+  emitDirDepHead(dir, outDir, own, List.head(deps), deps)
+
+def emitDirDepHead(dir: String, outDir: String, own: List[(String, String)], d: (String, String), deps: List[(String, String)]): IO[Unit] =
+  emitDirDep(dir, outDir, own, d, List.tail(deps))
+
+def emitDirDep(dir: String, outDir: String, own: List[(String, String)], d: (String, String), rest: List[(String, String)]): IO[Unit] =
+  d match {
+    case (name, path) => emitDirDep2(dir, outDir, own, rest, joinSlash(joinSlash(dir, path), "src"))
+  }
+
+def emitDirDep2(dir: String, outDir: String, own: List[(String, String)], rest: List[(String, String)], srcDir: String): IO[Unit] =
+  Fs.list(srcDir).flatMap(ents => emitDirDep3(dir, outDir, own, rest, srcDir, ents))
+
+def emitDirDep3(dir: String, outDir: String, own: List[(String, String)], rest: List[(String, String)], srcDir: String, ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(srcDir, ents).flatMap(more => emitDirCat(dir, outDir, rest, own, more))
+
+def emitDirCat(dir: String, outDir: String, rest: List[(String, String)], own: List[(String, String)], more: List[(String, String)]): IO[Unit] =
+  emitDirDeps(dir, outDir, rest, List.concat(own, more))
+
+def readSrcFiles(srcDir: String, ents: List[(String, Bool)]): IO[List[(String, String)]] =
+  readSrcAcc(srcDir, ents, Manifest.noPairs())
+
+def readSrcAcc(srcDir: String, ents: List[(String, Bool)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  if (List.isEmpty(ents)) IO.pure(acc) else readSrcAccGo(srcDir, ents, acc)
+
+def readSrcAccGo(srcDir: String, ents: List[(String, Bool)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  readSrcHd(srcDir, List.head(ents), acc, ents)
+
+def readSrcHd(srcDir: String, ent: (String, Bool), acc: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
+  readSrcHd2(srcDir, ent, acc, List.tail(ents))
+
+def readSrcHd2(srcDir: String, ent: (String, Bool), acc: List[(String, String)], rest: List[(String, Bool)]): IO[List[(String, String)]] =
+  ent match {
+    case (name, isDir) => readSrcPick(srcDir, name, isDir, rest, acc)
+  }
+
+def readSrcPick(srcDir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[(String, String)]): IO[List[(String, String)]] =
+  if (isDir) readSrcAcc(srcDir, rest, acc) else if (!isScuzz(name)) readSrcAcc(srcDir, rest, acc) else Fs.read(joinSlash(srcDir, name)).flatMap(src => readSrcAcc(srcDir, rest, (stemOf(name), src) :: acc))
 
 def emitDirOut(p: PkgOut): IO[Unit] =
   p match {
