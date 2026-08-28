@@ -31,6 +31,15 @@ def noArm(): List[Arm] =
 def noFun(): List[Fun] =
   []
 
+def noEn(): List[En] =
+  []
+
+def copyEns(ens: List[En]): List[En] =
+  copyEnsAt(ens, 0)
+
+def copyEnsAt(ens: List[En], i: Int): List[En] =
+  if (i >= List.len(ens)) noEn() else List.at(ens, i) :: copyEnsAt(ens, i + 1)
+
 def nl(): String =
   """
 """
@@ -1399,7 +1408,19 @@ def rwCall(f: String, args: List[Expr], funs: List[Fun], mod: String): Expr =
   if (List.isEmpty(findDefMod(funs, mod, f))) Expr.ECall(f, args) else Expr.EMethod(Expr.EVar(mod), f, args)
 
 def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
-  if (List.isEmpty(xs)) noExpr() else rwFields(List.head(xs), env, funs, ens, mod) :: rwFieldList(List.tail(xs), env, funs, ens, mod)
+  if (List.isEmpty(xs)) noExpr() else rwFieldListGo(xs, env, funs, ens, mod)
+
+def rwFieldListGo(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
+  rwFieldListH(List.head(xs), env, funs, ens, mod, xs)
+
+def rwFieldListH(h: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String, xs: List[Expr]): List[Expr] =
+  rwFieldListT(h, env, funs, ens, mod, List.tail(xs))
+
+def rwFieldListT(h: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String, rest: List[Expr]): List[Expr] =
+  rwFieldListCons(rwFields(h, env, funs, copyEns(ens), mod), rest, env, funs, ens, mod)
+
+def rwFieldListCons(e: Expr, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
+  e :: rwFieldList(rest, env, funs, ens, mod)
 
 def rwFieldArms(arms: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Arm] =
   if (List.isEmpty(arms)) noArm() else rwFieldArm(List.head(arms), env, funs, ens, mod) :: rwFieldArms(List.tail(arms), env, funs, ens, mod)
