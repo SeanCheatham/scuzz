@@ -237,7 +237,7 @@ def parseIf2(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
 
 def parseIf3(c: Expr, p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
   p match {
-    case (t, j) => parseIf4(c, t, parseExpr(toks, j + 1))
+    case (t, j) => if (_is(toks, j, Tok.Else)) parseIf4(c, t, parseExpr(toks, j + 1)) else (Expr.EIf(c, t, Expr.EUnit), j)
   }
 
 def parseIf4(c: Expr, t: Expr, p: (Expr, Int)): (Expr, Int) =
@@ -306,7 +306,7 @@ def parseParen2(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
   }
 
 def parseOneLam(e: Expr, toks: List[Tok], j: Int): (Expr, Int) =
-  if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamBody(toks, j + 2, parenBind(e)) else (e, j + 1)
+  if (_is(toks, j, Tok.Colon)) parseOneLam(e, toks, skipAscript(toks, j)) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamBody(toks, j + 2, parenBind(e)) else (e, j + 1)
 
 def parenBind(e: Expr): String =
   e match {

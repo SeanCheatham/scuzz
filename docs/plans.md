@@ -4,7 +4,7 @@ Self-hosting staged rewrite 4 remainder: **compile the rest of `examples/`, comp
 
 CLI core, driver core, test/fuzz core, and hello package compile are in (`examples/cli`, `examples/compiler`, `cli-ok` / `ir-ok`). Hello-shaped IR clang-links against `libscuzz_rt.a`. Scuzz emit of `Drive.emitDir` clang-links and compiles `examples/fmt`, `examples/hello`, `examples/tyck`, `examples/codegen`, `examples/cli`, and `examples/io` from disk. Those IR clang-link. The fmt through cli binaries print `fmt-ok` / `Hello, Scuzz!` / `tyck-ok` / `ir-ok` / `cli-ok`. The io binary runs clock, concurrency, stream, and Json kits. Helpers match a record once. They do not use `.field` on a call. `Emit.emit` lowers if-else self-tail to a `tco_loop` (`srcTco`; `countdown(1000000)` prints `0`). `Drive.emitDir` lists `src/` and nested path-dep `src/`. The product CLI is still the Rust binary.
 
-- Finish the slice: compile kernel, scale, and UI examples, then itself.
+- Finish the slice: compile kernel, scale, and UI examples, then itself. Scuzz emit packs first-class lambdas as `cons(fn, cons(env, nil))` (`srcLam`; `plusOne()(5)` prints `6`).
 - Land the last Rust `scuzz` on main, tag it, and ship a GitHub Release. That binary is the bootstrap compiler.
 - The Rust crates retire when that tagged `scuzz` compiles the Scuzz toolchain, and that toolchain compiles `examples/` and itself.
 
