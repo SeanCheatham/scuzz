@@ -1837,7 +1837,13 @@ def emitMapSet(code: String, vals: List[String], owns: List[Bool], prefix: Strin
   emitMapSet2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(owns)), headOwn(tailOwn(tailOwn(owns))), prefix)
 
 def emitMapSet2(code: String, m: String, k: String, v: String, om: Bool, ok: Bool, ov: Bool, prefix: String): Slot =
+  if (isNumSlot(v, ov)) emitMapSetNum(code, m, k, v, om, ok, prefix) else emitMapSetPtr(code, m, k, v, om, ok, ov, prefix)
+
+def emitMapSetPtr(code: String, m: String, k: String, v: String, om: Bool, ok: Bool, ov: Bool, prefix: String): Slot =
   Slot(join(code, join(kitMapSetCall(m, k, v, prefix), join(if (om) relPtr(m) else "", join(if (ok) relPtr(k) else "", if (ov) relPtr(v) else "")))), pct(prefix, "v"), true)
+
+def emitMapSetNum(code: String, m: String, k: String, v: String, om: Bool, ok: Bool, prefix: String): Slot =
+  Slot(join(code, join(pairBox(v, true, prefix, "mb"), join(kitMapSetCall(m, k, pct(prefix, "mb"), prefix), join(if (om) relPtr(m) else "", join(if (ok) relPtr(k) else "", relPtr(pct(prefix, "mb"))))))), pct(prefix, "v"), true)
 
 def kitMapSetCall(m: String, k: String, v: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_map_set(ptr ", Str.concat(m, Str.concat(", ptr ", Str.concat(k, Str.concat(", ptr ", Str.concat(v, ", i32 1)"))))))))
@@ -1855,10 +1861,22 @@ def emitMapGetOr(code: String, vals: List[String], owns: List[Bool], prefix: Str
   emitMapGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(owns)), headOwn(tailOwn(tailOwn(owns))), prefix)
 
 def emitMapGetOr2(code: String, m: String, k: String, d: String, om: Bool, ok: Bool, od: Bool, prefix: String): Slot =
+  if (isNumSlot(d, od)) emitMapGetOrNum(code, m, k, d, om, ok, prefix) else emitMapGetOrPtr(code, m, k, d, om, ok, od, prefix)
+
+def emitMapGetOrPtr(code: String, m: String, k: String, d: String, om: Bool, ok: Bool, od: Bool, prefix: String): Slot =
   Slot(join(code, join(kitGetOrCall(m, k, d, prefix), join(if (ok) relPtr(k) else "", getOrAfter(m, d, om, od, pct(prefix, "p"))))), pct(prefix, "p"), om || od)
+
+def emitMapGetOrNum(code: String, m: String, k: String, d: String, om: Bool, ok: Bool, prefix: String): Slot =
+  Slot(join(code, join(pairBox(d, true, prefix, "md"), join(kitGetOrCall(m, k, pct(prefix, "md"), prefix), join(if (ok) relPtr(k) else "", join(getOrAfter(m, pct(prefix, "md"), om, true, pct(prefix, "p")), join(unboxLine(pct(prefix, "p"), prefix), relPtr(pct(prefix, "p")))))))), pct(prefix, "u"), false)
 
 def kitGetOrCall(m: String, k: String, d: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "p"), Str.concat("call ptr @sz_map_get_or(ptr ", Str.concat(m, Str.concat(", ptr ", Str.concat(k, Str.concat(", ptr ", Str.concat(d, ")"))))))))
+
+def isNumSlot(v: String, o: Bool): Bool =
+  isI64Lit(v) || isIntSsa(v) || numSsa(v, o)
+
+def numSsa(v: String, o: Bool): Bool =
+  Str.len(v) > 0 && Str.charAt(v, 0) == 37 && !o && !isPtrSlot(v, noParam()) && !strish(v)
 
 def emitClock(rt: String, code: String, prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, "()"))))), pct(prefix, "v"), false)
@@ -3568,7 +3586,7 @@ def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: List[Fun], e
   }
 
 def emitSelfTailAcc(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, code: String, vals: List[String]): String =
-  if (List.isEmpty(args)) emitTcoCommit(code, ps, vals) else emitSelfTailOne(List.head(args), List.tail(args), prefix, strs, defs, ens, ps, i, code, vals)
+  if (List.isEmpty(args)) emitTcoCommit(code, ps, vals, prefix) else emitSelfTailOne(List.head(args), List.tail(args), prefix, strs, defs, ens, ps, i, code, vals)
 
 def emitSelfTailOne(a: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, code: String, vals: List[String]): String =
   emitSelfTailGot(emitExpr(a, Str.concat(prefix, Str.concat("_targ", Str.fromInt(i))), strs, defs, ens, ps), rest, prefix, strs, defs, ens, ps, i, code, vals)
@@ -3578,8 +3596,8 @@ def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: List[String
     case Slot(c, v, _) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, i + 1, join(code, c), List.concat(vals, v :: noStr()))
   }
 
-def emitTcoCommit(code: String, ps: List[Param], vals: List[String]): String =
-  join(code, join(emitTcoRetains(ps, vals, 0), join(emitTcoReleases(ps, 0), join(emitTcoStores(ps, vals, 0), join(emitTcoHeld(ps, 0), line("br label %tco_loop"))))))
+def emitTcoCommit(code: String, ps: List[Param], vals: List[String], tag: String): String =
+  join(code, join(emitTcoRetains(ps, vals, 0), join(emitTcoReleases(ps, 0, tag), join(emitTcoStores(ps, vals, 0), join(emitTcoHeld(ps, 0), line("br label %tco_loop"))))))
 
 def emitTcoRetains(ps: List[Param], vals: List[String], i: Int): String =
   if (i >= List.len(ps)) "" else emitTcoRetainOne(List.at(ps, i), List.at(vals, i), ps, vals, i)
@@ -3592,28 +3610,34 @@ def emitTcoRetainOne(p: Param, v: String, ps: List[Param], vals: List[String], i
 def emitTcoRetainTy(ty: String, v: String): String =
   if (isI64Ty(ty)) "" else line(Str.concat("call void @sz_retain(ptr ", Str.concat(v, ")")))
 
-def emitTcoReleases(ps: List[Param], i: Int): String =
-  if (i >= List.len(ps)) "" else emitTcoReleaseOne(List.at(ps, i), ps, i)
+def emitTcoReleases(ps: List[Param], i: Int, tag: String): String =
+  if (i >= List.len(ps)) "" else emitTcoReleaseOne(List.at(ps, i), ps, i, tag)
 
-def emitTcoReleaseOne(p: Param, ps: List[Param], i: Int): String =
+def emitTcoReleaseOne(p: Param, ps: List[Param], i: Int, tag: String): String =
   p match {
-    case Param(n, ty, _, _) => join(if (isI64Ty(ty)) "" else emitTcoReleaseN(n, i), emitTcoReleases(ps, i + 1))
+    case Param(n, ty, _, _) => join(if (isI64Ty(ty)) "" else emitTcoReleaseN(n, i, tag), emitTcoReleases(ps, i + 1, tag))
   }
 
-def emitTcoReleaseN(n: String, i: Int): String =
-  join(emitTcoHv(n, i), join(emitTcoRelBr(i), join(lab(Str.concat("tco_rel_", Str.fromInt(i))), join(emitTcoOld(n, i), join(emitTcoRelCall(i), join(line(Str.concat("br label %tco_skip_", Str.fromInt(i))), lab(Str.concat("tco_skip_", Str.fromInt(i)))))))))
+def emitTcoReleaseN(n: String, i: Int, tag: String): String =
+  join(emitTcoHv(n, i, tag), join(emitTcoRelBr(i, tag), join(lab(tcoLab("rel", i, tag)), join(emitTcoOld(n, i, tag), join(emitTcoRelCall(i, tag), join(line(Str.concat("br label %", tcoLab("skip", i, tag))), lab(tcoLab("skip", i, tag))))))))
 
-def emitTcoHv(n: String, i: Int): String =
-  line(Str.concat("%", Str.concat("tco_hv", Str.concat(Str.fromInt(i), Str.concat(" = load i1, ptr %", Str.concat(n, "_held"))))))
+def tcoLab(kind: String, i: Int, tag: String): String =
+  Str.concat("tco_", Str.concat(kind, Str.concat("_", Str.concat(Str.fromInt(i), Str.concat("_", tag)))))
 
-def emitTcoRelBr(i: Int): String =
-  line(Str.concat("br i1 %", Str.concat("tco_hv", Str.concat(Str.fromInt(i), Str.concat(", label %tco_rel_", Str.concat(Str.fromInt(i), Str.concat(", label %tco_skip_", Str.fromInt(i))))))))
+def tcoSsa(kind: String, i: Int, tag: String): String =
+  Str.concat("%tco_", Str.concat(kind, Str.concat(Str.fromInt(i), Str.concat("_", tag))))
 
-def emitTcoOld(n: String, i: Int): String =
-  line(Str.concat("%", Str.concat("tco_old", Str.concat(Str.fromInt(i), Str.concat(" = load ptr, ptr %", Str.concat(n, "_slot"))))))
+def emitTcoHv(n: String, i: Int, tag: String): String =
+  line(Str.concat(tcoSsa("hv", i, tag), Str.concat(" = load i1, ptr %", Str.concat(n, "_held"))))
 
-def emitTcoRelCall(i: Int): String =
-  line(Str.concat("call void @sz_release(ptr %", Str.concat("tco_old", Str.concat(Str.fromInt(i), ")"))))
+def emitTcoRelBr(i: Int, tag: String): String =
+  line(Str.concat("br i1 ", Str.concat(tcoSsa("hv", i, tag), Str.concat(", label %", Str.concat(tcoLab("rel", i, tag), Str.concat(", label %", tcoLab("skip", i, tag)))))))
+
+def emitTcoOld(n: String, i: Int, tag: String): String =
+  line(Str.concat(tcoSsa("old", i, tag), Str.concat(" = load ptr, ptr %", Str.concat(n, "_slot"))))
+
+def emitTcoRelCall(i: Int, tag: String): String =
+  line(Str.concat("call void @sz_release(ptr ", Str.concat(tcoSsa("old", i, tag), ")")))
 
 def emitTcoStores(ps: List[Param], vals: List[String], i: Int): String =
   if (i >= List.len(ps)) "" else emitTcoStoreOne(List.at(ps, i), List.at(vals, i), ps, vals, i)
