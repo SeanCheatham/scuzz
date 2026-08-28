@@ -563,8 +563,8 @@ def emitBinCmpPick(le: Slot, re: Slot, op: String, prefix: String, ps: List[Para
 def cmpPtrSides(le: Slot, re: Slot, ps: List[Param]): Bool =
   le match {
     case Slot(_, lv, lo) => re match {
-    case Slot(_, rv, ro) => lo || ro || strish(lv) || strish(rv) || cmpPtrSlot(lv, rv, ps) || cmpPtrSlot(rv, lv, ps)
-  }
+  case Slot(_, rv, ro) => lo || ro || strish(lv) || strish(rv) || cmpPtrSlot(lv, rv, ps) || cmpPtrSlot(rv, lv, ps)
+}
   }
 
 def cmpPtrSlot(a: String, b: String, ps: List[Param]): Bool =
@@ -759,9 +759,12 @@ def hasSubAt(s: String, sub: String, i: Int): Bool =
   if (i + Str.len(sub) > Str.len(s)) false else if (Str.slice(s, i, i + Str.len(sub)) == sub) true else hasSubAt(s, sub, i + 1)
 
 def callIsI64(f: String, defs: List[Fun]): Bool =
-  f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || funRetI64(defs, f)
+  f == "Signal.get" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || funRetI64(defs, f)
 
 def exprMethodI64(recv: Expr, name: String, defs: List[Fun]): Bool =
+  if (name == "require") exprIsI64(recv, noParam(), defs) else exprMethodI64Go(recv, name, defs)
+
+def exprMethodI64Go(recv: Expr, name: String, defs: List[Fun]): Bool =
   recv match {
     case Expr.EVar(en) => callIsI64(Str.concat(en, Str.concat(".", name)), defs) || callIsI64(name, defs)
     case _ => false
@@ -1309,6 +1312,60 @@ def nethBeg(): String =
 def nethEnd(): String =
   Str.concat(nl(), Str.concat("}", Str.concat(nl(), Str.concat("NETHE", nl()))))
 
+def nethEnvSig(prefix: String): String =
+  Str.concat("ptr @sz_neth_", Str.concat(prefix, Str.concat("(ptr %env) {", Str.concat(nl(), Str.concat("entry:", nl())))))
+
+def nethMapSig(prefix: String): String =
+  Str.concat("ptr @sz_neth_", Str.concat(prefix, Str.concat("(i64 %n, ptr %env) {", Str.concat(nl(), Str.concat("entry:", nl())))))
+
+def emitNethWithSig(prefix: String, pre: String, s: Slot, sig: String): String =
+  s match {
+    case Slot(code, val, o) => emitNethWithSig2(prefix, join(pre, code), nethPtrRet(val, o, prefix), sig)
+  }
+
+def emitNethWithSig2(prefix: String, code: String, p: (String, String), sig: String): String =
+  p match {
+    case (extra, ret) => Str.concat(nethBeg(), Str.concat("define internal ", Str.concat(sig, Str.concat(code, Str.concat(extra, Str.concat(nethRetLine(ret, false), nethEnd()))))))
+  }
+
+def emitRebuildNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
+  emitRebuildNeth2(prefix, dropParam(ps, bind), body, strs, defs, ens)
+
+def emitRebuildNeth2(prefix: String, rest: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  emitNethWithSig(prefix, emitUnpack(rest), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, rest), nethEnvSig(prefix))
+
+def emitMapNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
+  emitMapNeth2(prefix, bind, dropParam(ps, bind), body, strs, defs, ens)
+
+def emitMapNeth2(prefix: String, bind: String, rest: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  emitNethWithSig(prefix, join(emitUnpack(rest), mapBindLine(bind)), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, mapNethPs(bind, rest)), nethMapSig(prefix))
+
+def mapBindLine(bind: String): String =
+  if (!keepBind(bind) || bind == "n") "" else line(Str.concat("%", Str.concat(bind, " = add i64 %n, 0")))
+
+def mapNethPs(bind: String, rest: List[Param]): List[Param] =
+  if (keepBind(bind)) Param(bind, "Int", "", "") :: rest else rest
+
+def emitTapNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
+  emitTapNeth2(prefix, bind, dropParam(ps, bind), body, strs, defs, ens)
+
+def emitTapNeth2(prefix: String, bind: String, rest: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
+  emitTapNeth3(prefix, join(emitUnpack(rest), tapBindLine(bind)), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, tapNethPs(bind, rest)))
+
+def tapBindLine(bind: String): String =
+  if (!keepBind(bind) || bind == "self") "" else line(Str.concat("%", Str.concat(bind, " = bitcast ptr %self to ptr")))
+
+def tapNethPs(bind: String, rest: List[Param]): List[Param] =
+  if (keepBind(bind)) Param(bind, "Any", "", "") :: rest else rest
+
+def emitTapNeth3(prefix: String, pre: String, s: Slot): String =
+  s match {
+    case Slot(code, val, o) => Str.concat(nethBeg(), Str.concat("define internal void @sz_neth_", Str.concat(prefix, Str.concat("(ptr %self, ptr %env) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(join(pre, join(code, tapFinish(val, o, prefix))), Str.concat("  ret void", nethEnd())))))))))
+  }
+
+def tapFinish(val: String, o: Bool, prefix: String): String =
+  if (hasSub(val, "_io")) join(line(Str.concat(tmp(prefix, "ur"), Str.concat("call ptr @sz_io_unsafe_run_or_die(ptr ", Str.concat(val, ")")))), relPtr(pct(prefix, "ur"))) else if (o) relPtr(val) else ""
+
 def emitLam(bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitLamWithCopy(bind, body, prefix, strs, defs, ens, ps, copyPs(ps))
 
@@ -1432,7 +1489,97 @@ def emitJsonNull(code: String, prefix: String): Slot =
   Slot(join(code, emitAdtNew(prefix, 0, "null")), pct(prefix, "adt"), true)
 
 def emitCall3b(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param]): Slot =
-  if (f == "Str.fromInt") emitFromInt(code, vals, prefix, ps, owns, args) else if (f == "Str.concat") emitConcat(code, vals, owns, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "Str.toInt") emitToInt(code, vals, owns, prefix) else if (f == "Str.repeat") emitRepeat(code, vals, owns, prefix) else if (f == "Str.startsWith") emitStarts(code, vals, owns, prefix) else if (f == "Str.eq") emitStrEq(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args, ps) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix, args, ps, defs) else if (f == "List.at") emitAt(code, vals, owns, prefix, args, ps) else if (f == "List.join") emitListJoin(code, vals, owns, prefix) else if (kitUnaryPtr(f) != "") emitKitUnaryPtr(kitUnaryPtr(f), code, vals, owns, prefix) else if (kitUnaryI64(f) != "") emitKitUnaryI64(kitUnaryI64(f), code, vals, owns, prefix) else if (kitPtrI64(f) != "") emitKitPtrI64(kitPtrI64(f), code, vals, owns, prefix) else if (kitBinaryPtr(f) != "") emitKitBinaryPtr(kitBinaryPtr(f), code, vals, owns, prefix) else if (kitBinaryI64(f) != "") emitKitBinaryI64(kitBinaryI64(f), code, vals, owns, prefix) else if (f == "Stream.zipAll") emitZipAllKit("sz_stream_zip_all", code, vals, owns, prefix) else if (f == "List.zipAll") emitZipAllKit("sz_list_zip_all", code, vals, owns, prefix) else if (f == "Str.replace") emitStrReplace(code, vals, owns, prefix) else if (f == "Str.padLeft") emitStrPad("sz_string_pad_left", code, vals, owns, prefix) else if (f == "Str.padRight") emitStrPad("sz_string_pad_right", code, vals, owns, prefix) else if (f == "List.empty") emitListNil(code, prefix) else if (f == "Map.empty" || f == "Set.empty") emitMapEmpty(code, prefix) else if (f == "Map.set") emitMapSet(code, vals, owns, prefix) else if (f == "Set.add") emitSetAdd(code, vals, owns, prefix) else if (f == "Map.getOrElse") emitMapGetOr(code, vals, owns, prefix) else if (f == "Clock.monotonic") emitClock("sz_clock_monotonic", code, prefix) else if (f == "Clock.realTime") emitClock("sz_clock_real_time", code, prefix) else if (f == "Queue.unbounded") emitClock("sz_queue_unbounded", code, prefix) else if (f == "Deferred.empty") emitClock("sz_deferred_empty", code, prefix) else if (f == "Fs.mkdirs") emitFsMkdirs(code, vals, owns, prefix) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else if (f == "Fs.read") emitFsRead(code, vals, owns, prefix) else if (f == "Fs.write") emitFsWrite(code, vals, owns, prefix) else if (f == "Fs.list") emitFsList(code, vals, owns, prefix) else if (f == "Sys.getenv") emitFsReadRt("sz_sys_getenv", code, vals, owns, prefix) else if (f == "Impurity.runKit") emitClock("sz_impurity_run_kit", code, prefix) else if (f == "Sys.args") emitSysArgs(code, prefix) else if (f == "IO.pure") emitIoPure(code, vals, owns, prefix, ps) else if (f == "List.range") emitListRange(code, vals, prefix) else if (f == "List.fill") emitListFill(code, vals, owns, prefix) else if (f == "List.getOrElse") emitListGetOr(code, vals, owns, prefix) else if (f == "List.padTo") emitListPadTo(code, vals, owns, prefix) else if (f == "List.max") emitListAsInt("sz_list_max", code, vals, owns, prefix) else if (f == "List.min") emitListAsInt("sz_list_min", code, vals, owns, prefix) else if (f == "List.sort") emitListAsInt("sz_list_sort", code, vals, owns, prefix) else if (f == "List.toSet") emitListToSet(code, vals, owns, prefix) else if (f == "List.slice") emitListSlice(code, vals, owns, prefix) else if (f == "List.isDefinedAt") emitKitPtrI64I64("sz_list_is_defined_at", code, vals, owns, prefix) else if (f == "List.lengthCompare") emitKitPtrI64I64("sz_list_length_compare", code, vals, owns, prefix) else if (f == "Map.isEmpty" || f == "Set.isEmpty") emitMapSizePred(code, vals, owns, prefix, "eq") else if (f == "Map.nonEmpty" || f == "Set.nonEmpty") emitMapSizePred(code, vals, owns, prefix, "ne") else if (f == "Float.toInt") emitFloatToInt(code, vals, owns, prefix, ps) else if (f == "Float.fromInt") emitFloatFromInt(code, vals, prefix) else if (f == "Oracle.sumTo") emitOracleSumTo(code, vals, prefix) else if (hasEn(ens, f) || isCtorName(f)) emitRec(f, code, vals, owns, prefix, ens, args, ps, defs) else emitUser(f, code, vals, owns, prefix, defs)
+  if (isUiKit(f)) emitUiKit(f, code, vals, owns, prefix) else if (f == "Str.fromInt") emitFromInt(code, vals, prefix, ps, owns, args) else if (f == "Str.concat") emitConcat(code, vals, owns, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "Str.toInt") emitToInt(code, vals, owns, prefix) else if (f == "Str.repeat") emitRepeat(code, vals, owns, prefix) else if (f == "Str.startsWith") emitStarts(code, vals, owns, prefix) else if (f == "Str.eq") emitStrEq(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args, ps) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix, args, ps, defs) else if (f == "List.at") emitAt(code, vals, owns, prefix, args, ps) else if (f == "List.join") emitListJoin(code, vals, owns, prefix) else if (kitUnaryPtr(f) != "") emitKitUnaryPtr(kitUnaryPtr(f), code, vals, owns, prefix) else if (kitUnaryI64(f) != "") emitKitUnaryI64(kitUnaryI64(f), code, vals, owns, prefix) else if (kitPtrI64(f) != "") emitKitPtrI64(kitPtrI64(f), code, vals, owns, prefix) else if (kitBinaryPtr(f) != "") emitKitBinaryPtr(kitBinaryPtr(f), code, vals, owns, prefix) else if (kitBinaryI64(f) != "") emitKitBinaryI64(kitBinaryI64(f), code, vals, owns, prefix) else if (f == "Stream.zipAll") emitZipAllKit("sz_stream_zip_all", code, vals, owns, prefix) else if (f == "List.zipAll") emitZipAllKit("sz_list_zip_all", code, vals, owns, prefix) else if (f == "Str.replace") emitStrReplace(code, vals, owns, prefix) else if (f == "Str.padLeft") emitStrPad("sz_string_pad_left", code, vals, owns, prefix) else if (f == "Str.padRight") emitStrPad("sz_string_pad_right", code, vals, owns, prefix) else if (f == "List.empty") emitListNil(code, prefix) else if (f == "Map.empty" || f == "Set.empty") emitMapEmpty(code, prefix) else if (f == "Map.set") emitMapSet(code, vals, owns, prefix) else if (f == "Set.add") emitSetAdd(code, vals, owns, prefix) else if (f == "Map.getOrElse") emitMapGetOr(code, vals, owns, prefix) else if (f == "Clock.monotonic") emitClock("sz_clock_monotonic", code, prefix) else if (f == "Clock.realTime") emitClock("sz_clock_real_time", code, prefix) else if (f == "Queue.unbounded") emitClock("sz_queue_unbounded", code, prefix) else if (f == "Deferred.empty") emitClock("sz_deferred_empty", code, prefix) else if (f == "Fs.mkdirs") emitFsMkdirs(code, vals, owns, prefix) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else if (f == "Fs.read") emitFsRead(code, vals, owns, prefix) else if (f == "Fs.write") emitFsWrite(code, vals, owns, prefix) else if (f == "Fs.list") emitFsList(code, vals, owns, prefix) else if (f == "Sys.getenv") emitFsReadRt("sz_sys_getenv", code, vals, owns, prefix) else if (f == "Impurity.runKit") emitClock("sz_impurity_run_kit", code, prefix) else if (f == "Sys.args") emitSysArgs(code, prefix) else if (f == "IO.pure") emitIoPure(code, vals, owns, prefix, ps) else if (f == "List.range") emitListRange(code, vals, prefix) else if (f == "List.fill") emitListFill(code, vals, owns, prefix) else if (f == "List.getOrElse") emitListGetOr(code, vals, owns, prefix) else if (f == "List.padTo") emitListPadTo(code, vals, owns, prefix) else if (f == "List.max") emitListAsInt("sz_list_max", code, vals, owns, prefix) else if (f == "List.min") emitListAsInt("sz_list_min", code, vals, owns, prefix) else if (f == "List.sort") emitListAsInt("sz_list_sort", code, vals, owns, prefix) else if (f == "List.toSet") emitListToSet(code, vals, owns, prefix) else if (f == "List.slice") emitListSlice(code, vals, owns, prefix) else if (f == "List.isDefinedAt") emitKitPtrI64I64("sz_list_is_defined_at", code, vals, owns, prefix) else if (f == "List.lengthCompare") emitKitPtrI64I64("sz_list_length_compare", code, vals, owns, prefix) else if (f == "Map.isEmpty" || f == "Set.isEmpty") emitMapSizePred(code, vals, owns, prefix, "eq") else if (f == "Map.nonEmpty" || f == "Set.nonEmpty") emitMapSizePred(code, vals, owns, prefix, "ne") else if (f == "Float.toInt") emitFloatToInt(code, vals, owns, prefix, ps) else if (f == "Float.fromInt") emitFloatFromInt(code, vals, prefix) else if (f == "Oracle.sumTo") emitOracleSumTo(code, vals, prefix) else if (hasEn(ens, f) || isCtorName(f)) emitRec(f, code, vals, owns, prefix, ens, args, ps, defs) else emitUser(f, code, vals, owns, prefix, defs)
+
+def emitUiKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  if (f == "Color.rgb") emitColorRgb(code, vals, prefix) else if (f == "Color.rgba") emitColorRgba(code, vals, prefix) else if (Str.startsWith(f, "Theme.")) emitTheme(f, code, prefix) else if (f == "Ui.run") emitUiRun(code, vals, owns, prefix) else if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (Str.startsWith(f, "Signal.")) emitSignalKit(f, code, vals, owns, prefix) else emitViewKit(f, code, vals, owns, prefix)
+
+def emitColorRgb(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_color_rgb(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", i64 ", Str.concat(arg2(vals), ")"))))))))), pct(prefix, "v"), false)
+
+def emitColorRgba(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_color_rgba(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", i64 ", Str.concat(arg2(vals), Str.concat(", i64 ", Str.concat(arg3(vals), ")"))))))))))), pct(prefix, "v"), false)
+
+def emitTheme(f: String, code: String, prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @", Str.concat(themeRt(f), "()"))))), pct(prefix, "v"), false)
+
+def themeRt(f: String): String =
+  if (f == "Theme.accent") "sz_theme_accent" else if (f == "Theme.primary") "sz_theme_primary" else if (f == "Theme.muted") "sz_theme_muted" else "sz_theme_foreground"
+
+def emitUiRun(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(unpackFnPtr(arg0(vals), prefix), join(uiRunCall(prefix), if (headOwn(owns)) relPtr(arg0(vals)) else ""))), pct(prefix, "v"), false)
+
+def emitPropCheck(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat("call void @sz_property_check(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), arg2(vals), headOwn(tailOwn(tailOwn(owns))))
+
+def emitSignalKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  if (f == "Signal.int") emitSigInt(code, vals, prefix) else if (f == "Signal.get") emitSigGet(code, vals, prefix) else if (f == "Signal.set") emitSigSet(code, vals, prefix) else if (f == "Signal.map") emitSigMap(code, vals, owns, prefix) else if (f == "Signal.getStr") emitSigGetStr(code, vals, prefix) else emitSigInt(code, vals, prefix)
+
+def emitSigInt(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_int(i64 ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
+
+def emitSigGet(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_lang_signal_get(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
+
+def emitSigSet(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_set(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))), pct(prefix, "v"), false)
+
+def emitSigMap(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(unpackFnPtr(arg1(vals), prefix), join(sigMapCall(arg0(vals), prefix), if (headOwn(tailOwn(owns))) relPtr(arg1(vals)) else ""))), pct(prefix, "v"), false)
+
+def emitSigGetStr(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_str_get(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), true)
+
+def emitViewKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  if (f == "View.column" || f == "View.row" || f == "View.stack") emitViewBox(viewBoxRt(f), code, vals, prefix) else if (f == "View.text") emitViewDrop1("sz_lang_view_text", code, vals, owns, prefix) else if (f == "View.bindText") emitViewPtr1("sz_lang_view_bind_text", code, vals, prefix) else if (f == "View.center") emitViewPtr1("sz_lang_view_center", code, vals, prefix) else if (f == "View.button") emitViewButton(code, vals, owns, prefix) else if (f == "View.background") emitViewI64Ptr("sz_lang_view_background", code, vals, prefix) else if (f == "View.minSize") emitViewI64I64Ptr("sz_lang_view_min_size", code, vals, prefix) else if (f == "View.sized") emitViewI64I64Ptr("sz_lang_view_sized", code, vals, prefix) else if (f == "View.positioned") emitViewI64I64Ptr("sz_lang_view_positioned", code, vals, prefix) else if (f == "View.image") emitViewImage(code, vals, owns, prefix) else if (f == "View.icon") emitViewIcon(code, vals, prefix) else emitViewPtr1("sz_lang_view_center", code, vals, prefix)
+
+def viewBoxRt(f: String): String =
+  if (f == "View.column") "sz_lang_view_column" else if (f == "View.row") "sz_lang_view_row" else "sz_lang_view_stack"
+
+def emitViewBox(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, join(viewBoxNew(rt, prefix), emitViewAdds(pct(prefix, "v"), vals, prefix, 0))), pct(prefix, "v"), true)
+
+def viewBoxNew(rt: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, "()"))))
+
+def emitViewAdds(parent: String, xs: List[String], prefix: String, i: Int): String =
+  if (List.isEmpty(xs)) "" else join(viewAddLine(parent, List.head(xs), prefix, i), emitViewAdds(parent, List.tail(xs), prefix, i + 1))
+
+def viewAddLine(parent: String, child: String, prefix: String, i: Int): String =
+  line(Str.concat(tmp(prefix, Str.concat("ac", Str.fromInt(i))), Str.concat("call ptr @sz_lang_view_add_child(ptr ", Str.concat(parent, Str.concat(", ptr ", Str.concat(child, ")"))))))
+
+def uiRunCall(prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_ui_run_rebuild(ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), ")"))))))
+
+def sigMapCall(src: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_map(ptr ", Str.concat(src, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), ")"))))))))
+
+def viewButtonPtr(label: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_button(ptr ", Str.concat(label, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), ")"))))))))
+
+def viewImageCall(vals: List[String], prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_image(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", i64 ", Str.concat(arg2(vals), Str.concat(", ptr ", Str.concat(arg3(vals), ")"))))))))))
+
+def emitViewPtr1(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), ")"))))))), pct(prefix, "v"), true)
+
+def emitViewDrop1(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), ")")))))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), pct(prefix, "v"), true)
+
+def emitViewI64Ptr(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), ")"))))))))), pct(prefix, "v"), true)
+
+def emitViewI64I64Ptr(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")"))))))))))), pct(prefix, "v"), true)
+
+def emitViewButton(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(unpackFnPtr(arg1(vals), prefix), join(viewButtonPtr(arg0(vals), prefix), join(if (headOwn(owns)) relPtr(arg0(vals)) else "", if (headOwn(tailOwn(owns))) relPtr(arg1(vals)) else "")))), pct(prefix, "v"), true)
+
+def emitViewImage(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(viewImageCall(vals, prefix), if (headOwn(tailOwn(tailOwn(tailOwn(owns))))) relPtr(arg3(vals)) else "")), pct(prefix, "v"), true)
+
+def emitViewIcon(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_icon(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))), pct(prefix, "v"), true)
 
 def emitOracleSumTo(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_oracle_sum_to(i64 ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
@@ -1534,7 +1681,59 @@ def isApplyTy(ty: String, f: String, defs: List[Fun]): Bool =
   if (isFunTy(ty)) true else if (ty == "" || isI64Ty(ty)) false else List.isEmpty(findDef(defs, f))
 
 def emitCallKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps) else if (f == "Net.serveOnce" || f == "Net.serve") emitNetServe(f, args, prefix, strs, defs, ens, ps) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps) else emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs, args, ens, ps)
+  if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps) else if (f == "Net.serveOnce" || f == "Net.serve") emitNetServe(f, args, prefix, strs, defs, ens, ps) else if (f == "Ui.run") emitUiRunCall(args, prefix, strs, defs, ens, ps) else if (f == "Signal.map") emitSigMapCall(args, prefix, strs, defs, ens, ps) else if (f == "View.button") emitViewButtonCall(args, prefix, strs, defs, ens, ps) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps) else emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs, args, ens, ps)
+
+def emitUiRunCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitUiRunPack(emitUiRunLam(List.head(args), Str.concat(prefix, "_fn"), strs, defs, ens, ps), prefix)
+
+def emitUiRunLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  e match {
+    case Expr.ELam(p, body) => emitLam2(emitRebuildNeth(prefix, p, body, strs, defs, ens, ps), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+    case _ => emitExpr(e, prefix, strs, defs, ens, ps)
+  }
+
+def emitUiRunPack(pack: Slot, prefix: String): Slot =
+  pack match {
+    case Slot(pc, pv, po) => Slot(join(pc, join(unpackFnPtr(pv, prefix), join(uiRunCall(prefix), if (po) relPtr(pv) else ""))), pct(prefix, "v"), false)
+  }
+
+def emitSigMapCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitSigMapJoin(emitExpr(List.head(args), Str.concat(prefix, "_src"), strs, defs, ens, ps), List.head(List.tail(args)), prefix, strs, defs, ens, ps)
+
+def emitSigMapJoin(src: Slot, fn: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  src match {
+    case Slot(sc, sv, _) => emitSigMapJoin2(sc, sv, emitSigMapLam(fn, Str.concat(prefix, "_fn"), strs, defs, ens, ps), prefix)
+  }
+
+def emitSigMapLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  e match {
+    case Expr.ELam(p, body) => emitLam2(emitMapNeth(prefix, p, body, strs, defs, ens, ps), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+    case _ => emitExpr(e, prefix, strs, defs, ens, ps)
+  }
+
+def emitSigMapJoin2(sc: String, sv: String, pack: Slot, prefix: String): Slot =
+  pack match {
+    case Slot(pc, pv, po) => Slot(join(sc, join(pc, join(unpackFnPtr(pv, prefix), join(sigMapCall(sv, prefix), if (po) relPtr(pv) else "")))), pct(prefix, "v"), false)
+  }
+
+def emitViewButtonCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitViewButtonJoin(emitExpr(List.head(args), Str.concat(prefix, "_arg0"), strs, defs, ens, ps), List.head(List.tail(args)), prefix, strs, defs, ens, ps)
+
+def emitViewButtonJoin(lab: Slot, fn: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  lab match {
+    case Slot(lc, lv, lo) => emitViewButtonJoin2(lc, lv, lo, emitTapLam(fn, Str.concat(prefix, "_fn"), strs, defs, ens, ps), prefix)
+  }
+
+def emitTapLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  e match {
+    case Expr.ELam(p, body) => emitLam2(emitTapNeth(prefix, p, body, strs, defs, ens, ps), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+    case _ => emitExpr(e, prefix, strs, defs, ens, ps)
+  }
+
+def emitViewButtonJoin2(lc: String, lv: String, lo: Bool, pack: Slot, prefix: String): Slot =
+  pack match {
+    case Slot(pc, pv, po) => Slot(join(lc, join(pc, join(unpackFnPtr(pv, prefix), join(viewButtonPtr(lv, prefix), join(if (lo) relPtr(lv) else "", if (po) relPtr(pv) else ""))))), pct(prefix, "v"), true)
+  }
 
 def isFunTy(t: String): Bool =
   hasSub(t, "=>")
@@ -1644,8 +1843,8 @@ def emitApplyRecvFn(fn: Slot, args: List[Expr], ty: String, prefix: String, strs
 def emitApplyRecvArg(fn: Slot, arg: Slot, ty: String, prefix: String): Slot =
   fn match {
     case Slot(fc, fv, fo) => arg match {
-    case Slot(ac, av, ao) => emitApplyRecvK(funBoxUnbox(ty), join(fc, ac), fv, fo, av, ao, prefix)
-  }
+  case Slot(ac, av, ao) => emitApplyRecvK(funBoxUnbox(ty), join(fc, ac), fv, fo, av, ao, prefix)
+}
   }
 
 def emitApplyRecvK(k: Int, code: String, fv: String, fo: Bool, av: String, ao: Bool, prefix: String): Slot =
@@ -2492,7 +2691,10 @@ def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, s
   if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps) else emitQual(en, name, args, prefix, strs, defs, ens, ps)
 
 def isEmitKit(f: String): Bool =
-  f == "List.join" || kitUnaryPtr(f) != "" || kitUnaryI64(f) != "" || kitPtrI64(f) != "" || kitBinaryPtr(f) != "" || kitBinaryI64(f) != "" || isJsonExtra(f) || isRtExtra(f) || isMapKit(f) || f == "Map.empty" || f == "Set.empty" || f == "List.empty" || f == "Str.replace" || f == "Str.padLeft" || f == "Str.padRight" || f == "Map.set" || f == "Set.add" || f == "Map.getOrElse" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Fs.mkdirs" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "IO.pure" || f == "Sys.getenv" || f == "Impurity.runKit" || f == "Net.serveOnce" || f == "Net.serve" || f == "Queue.unbounded" || f == "Deferred.empty" || f == "Float.toInt" || f == "Float.fromInt" || f == "Map.isEmpty" || f == "Set.isEmpty" || f == "Map.nonEmpty" || f == "Set.nonEmpty" || f == "List.range" || f == "List.fill" || f == "List.getOrElse" || f == "List.padTo" || f == "List.max" || f == "List.min" || f == "List.sort" || f == "List.toSet" || f == "List.slice" || f == "List.isDefinedAt" || f == "List.lengthCompare" || f == "List.tabulate" || f == "List.segmentLength" || f == "Oracle.sumTo"
+  isUiKit(f) || f == "List.join" || kitUnaryPtr(f) != "" || kitUnaryI64(f) != "" || kitPtrI64(f) != "" || kitBinaryPtr(f) != "" || kitBinaryI64(f) != "" || isJsonExtra(f) || isRtExtra(f) || isMapKit(f) || f == "Map.empty" || f == "Set.empty" || f == "List.empty" || f == "Str.replace" || f == "Str.padLeft" || f == "Str.padRight" || f == "Map.set" || f == "Set.add" || f == "Map.getOrElse" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Fs.mkdirs" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "IO.pure" || f == "Sys.getenv" || f == "Impurity.runKit" || f == "Net.serveOnce" || f == "Net.serve" || f == "Queue.unbounded" || f == "Deferred.empty" || f == "Float.toInt" || f == "Float.fromInt" || f == "Map.isEmpty" || f == "Set.isEmpty" || f == "Map.nonEmpty" || f == "Set.nonEmpty" || f == "List.range" || f == "List.fill" || f == "List.getOrElse" || f == "List.padTo" || f == "List.max" || f == "List.min" || f == "List.sort" || f == "List.toSet" || f == "List.slice" || f == "List.isDefinedAt" || f == "List.lengthCompare" || f == "List.tabulate" || f == "List.segmentLength" || f == "Oracle.sumTo"
+
+def isUiKit(f: String): Bool =
+  Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || f == "Ui.run" || f == "Property.check"
 
 def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitQual2(en, name, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs)
@@ -4333,7 +4535,7 @@ def firstNethBLimRet(s: String, i: Int, e: Int): Int =
   if (i >= e) 0 - 1 else i
 
 def nestEnd(s: String, i: Int, d: Int): Int =
-  if (i >= Str.len(s) || (nethEndAt(s, i) && d <= 1)) nestEndRet(s, i) else nestEnd(s, i + nethStep(s, i), d + nethDelta(s, i))
+  if (i >= Str.len(s) || nethEndAt(s, i) && d <= 1) nestEndRet(s, i) else nestEnd(s, i + nethStep(s, i), d + nethDelta(s, i))
 
 def nestEndRet(s: String, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else i
@@ -4389,13 +4591,22 @@ def preamble(): String =
   Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), decls())))
 
 def decls(): String =
-  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), nl())))))))))))))))))))
+  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), nl()))))))))))))))))))))
 
 def declsR(): String =
   join(decl("ptr @sz_string_lines(ptr)"), join(decl("ptr @sz_string_to_lower(ptr)"), join(decl("ptr @sz_string_to_upper(ptr)"), join(decl("ptr @sz_string_capitalize(ptr)"), join(decl("ptr @sz_string_reverse(ptr)"), join(decl("i64 @sz_string_is_empty(ptr)"), join(decl("i64 @sz_string_non_empty(ptr)"), join(decl("i64 @sz_string_is_blank(ptr)"), join(decl("ptr @sz_string_split(ptr, ptr)"), join(decl("ptr @sz_string_strip_prefix(ptr, ptr)"), join(decl("ptr @sz_string_strip_suffix(ptr, ptr)"), join(decl("i64 @sz_string_ends_with(ptr, ptr)"), join(decl("i64 @sz_string_index_of(ptr, ptr)"), join(decl("i64 @sz_string_last_index_of(ptr, ptr)"), join(decl("ptr @sz_string_replace(ptr, ptr, ptr)"), join(decl("ptr @sz_string_pad_left(ptr, i64, ptr)"), decl("ptr @sz_string_pad_right(ptr, i64, ptr)")))))))))))))))))
 
 def declsS(): String =
   join(decl("ptr @sz_map_union(ptr, ptr)"), join(decl("ptr @sz_map_intersect(ptr, ptr)"), join(decl("ptr @sz_map_diff(ptr, ptr)"), join(decl("ptr @sz_list_set_at(ptr, i64, ptr)"), join(decl("i64 @sz_list_starts_with(ptr, ptr)"), join(decl("i64 @sz_list_ends_with(ptr, ptr)"), join(decl("i64 @sz_list_same_elements(ptr, ptr)"), join(decl("ptr @sz_list_patch(ptr, i64, ptr, i64)"), join(decl("ptr @sz_json_stringify(ptr)"), join(decl("ptr @sz_fs_exists(ptr)"), join(decl("ptr @sz_fs_delete(ptr)"), join(decl("ptr @sz_fs_rename(ptr, ptr)"), join(decl("ptr @sz_fs_walk(ptr)"), join(decl("ptr @sz_fs_join(ptr, ptr)"), join(decl("ptr @sz_fs_dirname(ptr)"), join(decl("ptr @sz_fs_basename(ptr)"), join(decl("i64 @sz_oracle_sum_to(i64)"), decl("ptr @sz_string_from_float(double)"))))))))))))))))))
+
+def declsT(): String =
+  join(declsT1(), declsT2())
+
+def declsT1(): String =
+  join(decl("i64 @sz_color_rgb(i64, i64, i64)"), join(decl("i64 @sz_color_rgba(i64, i64, i64, i64)"), join(decl("i64 @sz_theme_accent()"), join(decl("i64 @sz_theme_primary()"), join(decl("i64 @sz_theme_muted()"), join(decl("i64 @sz_theme_foreground()"), join(decl("ptr @sz_lang_signal_int(i64)"), join(decl("i64 @sz_lang_signal_get(ptr)"), join(decl("ptr @sz_lang_signal_set(ptr, i64)"), join(decl("ptr @sz_lang_signal_map(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_signal_str_get(ptr)"), join(decl("ptr @sz_ui_run_rebuild(ptr, ptr)"), join(decl("void @sz_property_check(ptr, i64)"), decl("ptr @sz_io_unsafe_run_or_die(ptr)"))))))))))))))
+
+def declsT2(): String =
+  join(decl("ptr @sz_lang_view_text(ptr)"), join(decl("ptr @sz_lang_view_bind_text(ptr)"), join(decl("ptr @sz_lang_view_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_center(ptr)"), join(decl("ptr @sz_lang_view_column()"), join(decl("ptr @sz_lang_view_row()"), join(decl("ptr @sz_lang_view_stack()"), join(decl("ptr @sz_lang_view_add_child(ptr, ptr)"), join(decl("ptr @sz_lang_view_background(i64, ptr)"), join(decl("ptr @sz_lang_view_min_size(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_sized(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_positioned(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_image(i64, i64, i64, ptr)"), decl("ptr @sz_lang_view_icon(i64, i64)"))))))))))))))
 
 def declsA(): String =
   join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))
