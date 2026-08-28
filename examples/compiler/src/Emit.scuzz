@@ -2237,7 +2237,7 @@ def kitGetOrCall(m: String, k: String, d: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "p"), Str.concat("call ptr @sz_map_get_or(ptr ", Str.concat(m, Str.concat(", ptr ", Str.concat(k, Str.concat(", ptr ", Str.concat(d, ")"))))))))
 
 def isNumSlot(v: String, o: Bool): Bool =
-  isI64Lit(v) || isIntSsa(v) || numSsa(v, o)
+  !o && (isI64Lit(v) || isIntSsa(v) || numSsa(v, o))
 
 def numSsa(v: String, o: Bool): Bool =
   Str.len(v) > 0 && Str.charAt(v, 0) == 37 && !o && !isPtrSlot(v, noParam()) && !strish(v)
@@ -2302,7 +2302,7 @@ def emitPack(vals: List[String], owns: List[Bool], args: List[Expr], prefix: Str
 
 def emitPack1(v: String, o: Bool, num: Bool, rest: Slot, prefix: String, i: Int, n: Int): Slot =
   rest match {
-    case Slot(rc, rp, _) => emitPack2(rc, rp, v, o, num || isI64Lit(v) || isIntSsa(v), prefix, i, n)
+    case Slot(rc, rp, _) => emitPack2(rc, rp, v, o, !o && (num || isI64Lit(v) || isIntSsa(v)), prefix, i, n)
   }
 
 def emitPack2(rc: String, rp: String, v: String, o: Bool, num: Bool, prefix: String, i: Int, n: Int): Slot =
@@ -2909,7 +2909,7 @@ def emitPayloadCtor1(arg: Slot, en: String, name: String, prefix: String, ens: L
 
 def payloadIsInt(arg: Slot, ft: String, ps: List[Param]): Bool =
   arg match {
-    case Slot(_, v, o) => isI64Ty(ft) || isIntSsa(v) || isI64ParamVal(v, ps) || !o && Str.len(v) > 0 && Str.charAt(v, 0) != 37 && v != "null"
+    case Slot(_, v, o) => isI64Ty(ft) || !o && (isIntSsa(v) || isI64ParamVal(v, ps) || Str.len(v) > 0 && Str.charAt(v, 0) != 37 && v != "null")
   }
 
 def emitPayloadInt(arg: Slot, en: String, name: String, prefix: String, ens: List[En]): Slot =
