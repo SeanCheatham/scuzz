@@ -60,13 +60,13 @@ def stripNamed(e: Expr): Expr =
   }
 
 def isKit(f: String): Bool =
-  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "Str.repeat" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result"
+  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "Str.repeat" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Builder.empty" || f == "Builder.append" || f == "Builder.result" || f == "Fs.read" || f == "Fs.write"
 
 def kitParams(f: String): List[String] =
-  if (f == "Str.fromInt") "Int" :: noStr() else if (f == "Str.concat") "String" :: "String" :: noStr() else if (f == "Str.len") "String" :: noStr() else if (f == "Str.fromBool") "Bool" :: noStr() else if (f == "Str.charAt") "String" :: "Int" :: noStr() else if (f == "Str.slice") "String" :: "Int" :: "Int" :: noStr() else if (f == "Str.toInt") "String" :: "Int" :: noStr() else if (f == "Str.repeat") "String" :: "Int" :: noStr() else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: noStr() else if (f == "List.concat") "List" :: "List" :: noStr() else if (f == "List.cons") "Any" :: "List" :: noStr() else if (f == "List.at") "List" :: "Int" :: noStr() else if (f == "Builder.empty") noStr() else if (f == "Builder.append") "Builder" :: "String" :: noStr() else if (f == "Builder.result") "Builder" :: noStr() else noStr()
+  if (f == "Str.fromInt") "Int" :: noStr() else if (f == "Str.concat") "String" :: "String" :: noStr() else if (f == "Str.len") "String" :: noStr() else if (f == "Str.fromBool") "Bool" :: noStr() else if (f == "Str.charAt") "String" :: "Int" :: noStr() else if (f == "Str.slice") "String" :: "Int" :: "Int" :: noStr() else if (f == "Str.toInt") "String" :: "Int" :: noStr() else if (f == "Str.repeat") "String" :: "Int" :: noStr() else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: noStr() else if (f == "List.concat") "List" :: "List" :: noStr() else if (f == "List.cons") "Any" :: "List" :: noStr() else if (f == "List.at") "List" :: "Int" :: noStr() else if (f == "Builder.empty") noStr() else if (f == "Builder.append") "Builder" :: "String" :: noStr() else if (f == "Builder.result") "Builder" :: noStr() else if (f == "Fs.read") "String" :: noStr() else if (f == "Fs.write") "String" :: "String" :: noStr() else noStr()
 
 def kitRet(f: String): String =
-  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "List.head" || f == "List.at") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons") "List[Int]" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else "String"
+  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "List.head" || f == "List.at") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons") "List[Int]" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read") "IO[String]" else if (f == "Fs.write") "IO[Unit]" else "String"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
@@ -486,7 +486,19 @@ def inferFlatMap(recv: Expr, args: List[Expr], env: List[(String, String)], funs
   inferFlatMap2(infer(recv, env, funs, ens), args, env, funs, ens, e)
 
 def inferFlatMap2(o: Out, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), Parse.pretty0(e)) else inferFlatMap3(o, infer(List.head(args), env, funs, ens), e)
+  if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), Parse.pretty0(e)) else inferFlatMapLam(o, List.head(args), env, funs, ens, e)
+
+def inferFlatMapLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  lam match {
+    case Expr.ELam(p, body) => inferFlatMap3(recv, infer(body, bindIo(p, recv.ty, env), funs, ens), e)
+    case _ => inferFlatMap3(recv, infer(lam, env, funs, ens), e)
+  }
+
+def bindIo(p: String, ioTy: String, env: List[(String, String)]): List[(String, String)] =
+  if (p == "_" || p == "") env else (p, ioPayload(ioTy)) :: env
+
+def ioPayload(t: String): String =
+  if (isIo(t) && Str.len(t) > 4) Str.slice(t, 3, Str.len(t) - 1) else "Any"
 
 def inferFlatMap3(recv: Out, body: Out, e: Expr): Out =
   if (hasErr(body)) body else if (isIo(recv.ty) && isIo(body.ty)) ok(body.ty) else bad(Str.concat("flatMap needs IO, got ", Str.concat(recv.ty, Str.concat(" and ", body.ty))), Parse.pretty0(e))
