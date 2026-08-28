@@ -24,10 +24,20 @@ def hasErr(o: Out): Bool =
   Str.len(o.err) > 0
 
 def getTy(env: List[(String, String)], name: String): String =
-  if (List.isEmpty(env)) "" else if (List.head(env)._1 == name) List.head(env)._2 else getTy(List.tail(env), name)
+  if (List.isEmpty(env)) "" else getTyHd(List.head(env), List.tail(env), name)
+
+def getTyHd(h: (String, String), rest: List[(String, String)], name: String): String =
+  h match {
+    case (k, v) => if (k == name) v else getTy(rest, name)
+  }
 
 def bindParams(ps: List[Param], acc: List[(String, String)]): List[(String, String)] =
-  if (List.isEmpty(ps)) acc else bindParams(List.tail(ps), (List.head(ps).name, List.head(ps).ty) :: acc)
+  if (List.isEmpty(ps)) acc else bindParamsHd(List.head(ps), List.tail(ps), acc)
+
+def bindParamsHd(p: Param, rest: List[Param], acc: List[(String, String)]): List[(String, String)] =
+  p match {
+    case Param(n, ty, _, _) => bindParams(rest, (n, ty) :: acc)
+  }
 
 def findFun(funs: List[Fun], name: String): List[Fun] =
   if (List.isEmpty(funs)) [] else findFun1(List.head(funs), List.tail(funs), name)
@@ -183,7 +193,12 @@ def elemOf2(b: Int, t: String): String =
   if (b < 0) "Int" else Str.slice(t, b + 1, Str.len(t) - 1)
 
 def resolveUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, hit: List[Fun]): Out =
-  if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else checkKnown(f, paramTys(List.head(hit).params), List.head(hit).ret, args, env, funs, ens, span)
+  if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveUserHit(f, args, env, funs, ens, span, List.head(hit))
+
+def resolveUserHit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, d: Fun): Out =
+  d match {
+    case Fun(_, _, _, ps, ret, _, _) => checkKnown(f, paramTys(ps), ret, args, env, funs, ens, span)
+  }
 
 def inferCall(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   resolveCall(f, args, env, funs, ens)
@@ -409,7 +424,12 @@ def caseFieldTy3(h: EnCase, rest: List[EnCase], ctor: String): String =
   }
 
 def firstFieldTy(ps: List[Param]): String =
-  if (List.isEmpty(ps)) "" else List.head(ps).ty
+  if (List.isEmpty(ps)) "" else paramTyOf(List.head(ps))
+
+def paramTyOf(p: Param): String =
+  p match {
+    case Param(_, ty, _, _) => ty
+  }
 
 def hasComma(s: String): Bool =
   commaAt(s, 0) >= 0
@@ -429,7 +449,12 @@ def enFieldTys1(h: En, rest: List[En], name: String): List[String] =
   }
 
 def firstCaseTys(cs: List[EnCase]): List[String] =
-  if (List.isEmpty(cs)) noStr() else paramTys(List.head(cs).fields)
+  if (List.isEmpty(cs)) noStr() else firstCaseTys1(List.head(cs))
+
+def firstCaseTys1(c: EnCase): List[String] =
+  c match {
+    case EnCase(_, fields) => paramTys(fields)
+  }
 
 def caseFieldTys(ens: List[En], en: String, ctor: String): List[String] =
   if (List.isEmpty(ens)) noStr() else caseFieldTys1(List.head(ens), List.tail(ens), en, ctor)

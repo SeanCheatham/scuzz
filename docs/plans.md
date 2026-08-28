@@ -2,9 +2,9 @@
 
 Self-hosting staged rewrite 4 remainder: **compile the rest of `examples/`, compile itself, and Rust retirement** ([`vision.md`](vision.md#self-hosting)).
 
-CLI core, driver core, test/fuzz core, and hello package compile are in (`examples/cli`, `examples/compiler`, `cli-ok` / `ir-ok`). Hello-shaped IR clang-links against `libscuzz_rt.a`. Scuzz emit of `examples/hello` clang-links and prints `Hello, Scuzz!` / `ready.` Scuzz emit of `examples/codegen` clang-links and prints `ir-ok`. Scuzz emit of `examples/cli` clang-links and prints `cli-ok`. Scuzz emit of `Drive.emitDir` clang-links and compiles `examples/fmt` from disk; that IR clang-links and prints `fmt-ok`. It also compiles `examples/hello` from disk. `Emit.emit` lowers if-else self-tail to a `tco_loop` (`srcTco`; `countdown(1000000)` prints `0`). Rust-compiled `Drive.emitDir` compiles `examples/tyck`, `examples/codegen`, and `examples/cli` from disk (`tyck-ok` / `ir-ok` / `cli-ok`). `Drive.emitDir` lists `src/` and nested path-dep `src/`. The product CLI is still the Rust binary.
+CLI core, driver core, test/fuzz core, and hello package compile are in (`examples/cli`, `examples/compiler`, `cli-ok` / `ir-ok`). Hello-shaped IR clang-links against `libscuzz_rt.a`. Scuzz emit of `Drive.emitDir` clang-links and compiles `examples/fmt`, `examples/hello`, `examples/tyck`, `examples/codegen`, and `examples/cli` from disk. Those IR clang-link and print `fmt-ok` / `Hello, Scuzz!` / `tyck-ok` / `ir-ok` / `cli-ok`. Helpers match a record once. They do not use `.field` on a call. `Emit.emit` lowers if-else self-tail to a `tco_loop` (`srcTco`; `countdown(1000000)` prints `0`). `Drive.emitDir` lists `src/` and nested path-dep `src/`. The product CLI is still the Rust binary.
 
-- Finish the slice: compile the rest of `examples/`, then itself.
+- Finish the slice: compile kernel, io, scale, and UI examples, then itself.
 - Land the last Rust `scuzz` on main, tag it, and ship a GitHub Release. That binary is the bootstrap compiler.
 - The Rust crates retire when that tagged `scuzz` compiles the Scuzz toolchain, and that toolchain compiles `examples/` and itself.
 

@@ -147,7 +147,12 @@ def takePath(name: String, xs: List[(String, String)], rest: List[String], st: S
   takePath2(name, xs, "", false, rest, st)
 
 def takePath2(name: String, xs: List[(String, String)], path: String, found: Bool, rest: List[String], st: St): St =
-  if (List.isEmpty(xs)) takePath3(name, path, found, rest, st) else if (List.head(xs)._1 != "path") withErr(st, gitDep(List.head(xs)._1)) else takePath2(name, List.tail(xs), unquote(List.head(xs)._2), true, rest, st)
+  if (List.isEmpty(xs)) takePath3(name, path, found, rest, st) else takePathHd(name, List.head(xs), List.tail(xs), path, found, rest, st)
+
+def takePathHd(name: String, h: (String, String), restXs: List[(String, String)], path: String, found: Bool, rest: List[String], st: St): St =
+  h match {
+    case (k, v) => if (k != "path") withErr(st, gitDep(k)) else takePath2(name, restXs, unquote(v), true, rest, st)
+  }
 
 def takePath3(name: String, path: String, found: Bool, rest: List[String], st: St): St =
   if (!found) withErr(st, needPath()) else if (path == "") withErr(st, emptyPath()) else parseLines(rest, St(st.sec, st.name, st.version, st.hasUi, (name, path) :: st.deps, st.err))

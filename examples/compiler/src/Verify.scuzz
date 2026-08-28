@@ -1,5 +1,6 @@
 import Parse.Fun
 import Parse.Param
+import Parse.Prog
 
 def nl(): String =
   """
@@ -84,7 +85,12 @@ def mapSpec(ds: List[Fun]): List[String] =
   if (List.isEmpty(ds)) noStr() else specOf(List.head(ds)) :: mapSpec(List.tail(ds))
 
 def parseVerify(src: String): List[Fun] =
-  drives(Parse.parse(Lexer.lex(src)).defs)
+  parseVerifyProg(Parse.parse(Lexer.lex(src)))
+
+def parseVerifyProg(p: Prog): List[Fun] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => drives(defs)
+  }
 
 def seeds(src: String): String =
   nls(sortStrs(mapSeed(parseVerify(src))))
