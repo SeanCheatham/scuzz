@@ -2233,14 +2233,20 @@ def emitIfThen(c: Slot, t: Expr, el: Expr, prefix: String, strs: List[String], d
 
 def emitIfElse(c: Slot, th: Slot, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   th match {
-    case Slot(tc, tv, to) => emitIf2(c, Slot(tc, tv, to), emitUnitElse(el, to || isPtrSlot(tv, ps) || tv == "null", prefix, strs, defs, ens, ps), prefix, ps)
+    case Slot(tc, tv, to) => emitIf2(c, Slot(tc, tv, to), emitUnitElse(el, to || isPtrSlot(tv, ps) || tv == "null", isIoSlot(tv), prefix, strs, defs, ens, ps), prefix, ps)
   }
 
-def emitUnitElse(el: Expr, thenOwned: Bool, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+def isIoSlot(v: String): Bool =
+  hasSub(v, "_io") || hasSub(v, "_fm")
+
+def emitUnitElse(el: Expr, thenOwned: Bool, thenIo: Bool, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   el match {
-    case Expr.EUnit => if (thenOwned) Slot("", "null", true) else Slot("", "0", false)
+    case Expr.EUnit => if (thenIo) emitIoUnit(prefix) else if (thenOwned) Slot("", "null", true) else Slot("", "0", false)
     case _ => emitExpr(el, Str.concat(prefix, "_e0"), strs, defs, ens, ps)
   }
+
+def emitIoUnit(prefix: String): Slot =
+  Slot(line(Str.concat(tmp(prefix, "iu"), "call ptr @sz_io_pure(ptr null)")), pct(prefix, "iu"), false)
 
 def emitIf2(c: Slot, t: Slot, el: Slot, prefix: String, ps: List[Param]): Slot =
   t match {
@@ -4126,36 +4132,36 @@ def emitContsMap(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fu
   }
 
 def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
-  emitContsFmTy(recvBindTy(recv, ens, defs), recv, args, strs, defs, ens, ps, id)
+  emitContsFmTy(recvBindTy(recv, ens, defs, ps), recv, args, strs, defs, ens, ps, id)
 
-def recvBindTy(recv: Expr, ens: List[En], defs: List[Fun]): String =
+def recvBindTy(recv: Expr, ens: List[En], defs: List[Fun], ps: List[Param]): String =
   recv match {
-    case Expr.ECall(f, args) => recvBindTyCall(f, args, ens, defs)
-    case Expr.EMethod(r, name, _) => recvBindTyMeth(r, name, ens, defs)
+    case Expr.ECall(f, args) => recvBindTyCall(f, args, ens, defs, ps)
+    case Expr.EMethod(r, name, _) => recvBindTyMeth(r, name, ens, defs, ps)
     case _ => "Any"
   }
 
-def recvBindTyCall(f: String, args: List[Expr], ens: List[En], defs: List[Fun]): String =
-  if (f == "IO.pure") recvBindTyPure(args, ens, defs) else clockInt(f)
+def recvBindTyCall(f: String, args: List[Expr], ens: List[En], defs: List[Fun], ps: List[Param]): String =
+  if (f == "IO.pure") recvBindTyPure(args, ens, defs, ps) else clockInt(f)
 
-def recvBindTyPure(args: List[Expr], ens: List[En], defs: List[Fun]): String =
-  if (List.isEmpty(args)) "Any" else recvBindTyPure1(List.head(args), ens, defs)
+def recvBindTyPure(args: List[Expr], ens: List[En], defs: List[Fun], ps: List[Param]): String =
+  if (List.isEmpty(args)) "Any" else recvBindTyPure1(List.head(args), ens, defs, ps)
 
-def recvBindTyPure1(e: Expr, ens: List[En], defs: List[Fun]): String =
+def recvBindTyPure1(e: Expr, ens: List[En], defs: List[Fun], ps: List[Param]): String =
   e match {
-    case Expr.ENamed(_, inner) => recvBindTyPure1(inner, ens, defs)
+    case Expr.ENamed(_, inner) => recvBindTyPure1(inner, ens, defs, ps)
     case Expr.ELam(_, _) => "Any"
-    case Expr.ECall(f, _) => recvBindTyNamed(copyEnCall(f, ens, defs), e)
-    case Expr.EMethod(r, name, _) => recvBindTyNamed(copyEn(Expr.EMethod(r, name, noExpr()), ens, defs), e)
-    case Expr.EVar(s) => recvBindTyNamed(ctorHead(s, ens), e)
-    case _ => if (needsPh(e)) "Any" else if (exprIsI64(e, noParam(), noFun())) "Int" else "Any"
+    case Expr.ECall(f, _) => recvBindTyNamed(copyEnCall(f, ens, defs), e, ps, defs)
+    case Expr.EMethod(r, name, _) => recvBindTyNamed(copyEn(Expr.EMethod(r, name, noExpr()), ens, defs), e, ps, defs)
+    case Expr.EVar(s) => if (paramIsI64(ps, s)) "Int" else recvBindTyNamed(ctorHead(s, ens), e, ps, defs)
+    case _ => if (needsPh(e)) "Any" else if (exprIsI64(e, ps, defs)) "Int" else "Any"
   }
 
-def recvBindTyNamed(h: String, e: Expr): String =
-  if (h != "") h else if (exprIsI64(e, noParam(), noFun())) "Int" else "Any"
+def recvBindTyNamed(h: String, e: Expr, ps: List[Param], defs: List[Fun]): String =
+  if (h != "") h else if (exprIsI64(e, ps, defs)) "Int" else "Any"
 
-def recvBindTyMeth(r: Expr, name: String, ens: List[En], defs: List[Fun]): String =
-  if (isFmName(name)) recvBindTy(r, ens, defs) else clockInt(qualRecv(r, name))
+def recvBindTyMeth(r: Expr, name: String, ens: List[En], defs: List[Fun], ps: List[Param]): String =
+  if (isFmName(name)) recvBindTy(r, ens, defs, ps) else clockInt(qualRecv(r, name))
 
 def qualRecv(r: Expr, name: String): String =
   r match {
