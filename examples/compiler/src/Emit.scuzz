@@ -650,7 +650,23 @@ def emitUserMod(en: String, name: String, code: String, vals: List[String], owns
   emitUserHit(Str.concat(en, Str.concat("_", name)), code, vals, owns, prefix, findDefMod(defs, en, name))
 
 def emitPayloadCtor(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (List.isEmpty(args)) emitCtor(en, name, prefix, ens) else emitPayloadCtor1(emitExpr(List.head(args), Str.concat(prefix, "_ap"), strs, defs, ens, ps), en, name, prefix, ens)
+  if (List.isEmpty(args)) emitCtor(en, name, prefix, ens) else emitPayloadCtorRest(en, name, List.head(args), List.tail(args), prefix, strs, defs, ens, ps)
+
+def emitPayloadCtorRest(en: String, name: String, h: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  if (List.isEmpty(rest)) emitPayloadCtor1(emitExpr(h, Str.concat(prefix, "_ap"), strs, defs, ens, ps), en, name, prefix, ens) else emitPayloadCtorN(en, name, emitArgList(h :: rest, prefix, strs, defs, ens, ps, 0, "", []: List[String], []: List[Bool]), h :: rest, prefix, ens, ps, defs)
+
+def emitPayloadCtorN(en: String, name: String, p: (String, List[String], List[Bool]), args: List[Expr], prefix: String, ens: List[En], ps: List[Param], defs: List[Fun]): Slot =
+  p match {
+    case (code, vals, owns) => if (List.len(vals) == 1) emitPayloadCtor1(Slot(code, arg0(vals), headOwn(owns)), en, name, prefix, ens) else emitPayJoin(code, emitPack(vals, owns, args, prefix, 0, List.len(vals), ps, defs), en, name, prefix, ens)
+  }
+
+def emitPayJoin(code: String, pack: Slot, en: String, name: String, prefix: String, ens: List[En]): Slot =
+  pack match {
+    case Slot(pc, pv, _) => emitPay2(join(code, pc), pv, en, name, prefix, ens)
+  }
+
+def emitPay2(pc: String, pv: String, en: String, name: String, prefix: String, ens: List[En]): Slot =
+  Slot(join(pc, join(emitAdtNew(prefix, ctorTag(ens, en, name), pv), relPtr(pv))), pct(prefix, "adt"), true)
 
 def emitPayloadCtor1(arg: Slot, en: String, name: String, prefix: String, ens: List[En]): Slot =
   if (payloadIsInt(arg, fieldTy(ens, Str.concat(en, Str.concat(".", name))))) emitPayloadInt(arg, en, name, prefix, ens) else emitPayloadPtr(arg, en, name, prefix, ens)
