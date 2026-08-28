@@ -50,4 +50,4 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 ## Toolchain
 
-The compiler and CLI are Rust (`crates/compiler`, `crates/cli`) until self-hosting retires them. After retirement, a tagged `scuzz` release compiles the Scuzz toolchain ([vision.md](vision.md#self-hosting)). Kernel surface: [vision.md](vision.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy.
+The compiler and CLI are Rust (`crates/compiler`, `crates/cli`) until a tagged last-Rust GitHub Release. That tag is the cutoff. After the tag, that `scuzz` compiles the Scuzz toolchain ([vision.md](vision.md#self-hosting)). Rust crates leave after that. Kernel surface: [vision.md](vision.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy.

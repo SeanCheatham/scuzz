@@ -1,10 +1,9 @@
 # Next slice
 
-Self-hosting staged rewrite 4 remainder: **Rust retirement** ([`vision.md`](vision.md#self-hosting)).
+Human cutoff tag.
 
-Compile itself is in. Scuzz-emitted `examples/cli` clang-links and prints `cli-ok`. That binary `run`s `examples/hello`, compiles `examples/compiler` (`clang -c`), and compiles `examples/cli` itself. Empty `Sys.args` keeps `cli-ok`. `scuzz build --out-dir` writes `Drive.emitDir`. `scuzz run --out-dir` clang-links and writes child stdout. Nested `else if` self-tails join `tco_loop` (`srcTcoNest`). A library package skips dummy `@main` (`srcLib`). The product CLI is still the Rust binary.
+`v0.1.0` already shipped. Land this branch on main. Tag `v0.2.0`. Push the tag. `release.yml` publishes `linux-x86_64` and `darwin-arm64`.
 
-- Land the last Rust `scuzz` on main, tag it, and ship a GitHub Release. That binary is the bootstrap compiler.
-- The Rust crates retire when that tagged `scuzz` compiles the Scuzz toolchain, and that toolchain compiles `examples/` and itself.
+That tagged Rust `scuzz` is the cutoff compiler. After the tag, that binary compiles the Scuzz toolchain. Do not delete Rust crates before that tag. Do not tag from an agent.
 
 Current locks: [`vision.md`](vision.md). Ranked gaps: [`gaps.md`](gaps.md).
