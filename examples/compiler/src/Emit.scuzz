@@ -3421,7 +3421,16 @@ def emitDefByRet(name: String, mod: String, ret: String, ps: List[Param], body: 
 def hasTailIf(e: Expr, name: String): Bool =
   e match {
     case Expr.EIf(_, _, el) => isSelfTail(el, name)
+    case Expr.EMatch(_, arms) => hasTailArm(arms, name)
     case _ => false
+  }
+
+def hasTailArm(arms: List[Arm], name: String): Bool =
+  !List.isEmpty(arms) && hasTailArm1(List.head(arms), List.tail(arms), name)
+
+def hasTailArm1(a: Arm, rest: List[Arm], name: String): Bool =
+  a match {
+    case Arm(_, _, body) => isSelfTail(body, name) || hasTailArm(rest, name)
   }
 
 def isSelfTail(e: Expr, name: String): Bool =
@@ -3440,8 +3449,57 @@ def oneParamTco(p: Param): String =
 def emitDefTco(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
   body match {
     case Expr.EIf(c, t, el) => emitDefTcoIf(name, mod, ret, ps, c, t, el, strs, defs, ens)
+    case Expr.EMatch(s, arms) => emitDefTcoMatch(name, mod, ret, ps, s, arms, strs, defs, ens)
     case _ => emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps))
   }
+
+def emitDefTcoMatch(name: String, mod: String, ret: String, ps: List[Param], s: Expr, arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En]): String =
+  emitDefTcoIf3(llvmRet(ret), symOf(mod, name), defParamsTco(ps), join(emitTcoPrep(ps), emitMatchTail(s, arms, name, llvmRet(ret), strs, defs, ens, ps)))
+
+def emitMatchTail(s: Expr, arms: List[Arm], fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
+  s match {
+    case Expr.EVar(n) => emitMatchTail1(emitExpr(Expr.EVar(n), "body_sc", strs, defs, ens, ps), arms, fname, tret, strs, defs, ens, ps, matchSlots(paramTy(ps, n)))
+    case _ => emitMatchTail1(emitExpr(s, "body_sc", strs, defs, ens, ps), arms, fname, tret, strs, defs, ens, ps, noStr())
+  }
+
+def emitMatchTail1(se: Slot, arms: List[Arm], fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], tys: List[String]): String =
+  se match {
+    case Slot(sc, sv, _) => join(sc, join(brTry("body"), join(emitTries(arms, "body", sv, ens, strs, 0, tys), join(emitDefault("body", false, true), emitOksTail(arms, fname, tret, strs, defs, ens, ps, 0, tys, sv)))))
+  }
+
+def emitOksTail(arms: List[Arm], fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String], sv: String): String =
+  if (List.isEmpty(arms)) "" else emitOksTail0(List.head(arms), List.tail(arms), fname, tret, strs, defs, ens, ps, i, tys, sv)
+
+def emitOksTail0(arm: Arm, rest: List[Arm], fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String], sv: String): String =
+  arm match {
+    case Arm(pat, _, body) => join(emitOkTailArm(pat, body, fname, tret, strs, defs, ens, ps, i, tys, sv), emitOksTail(rest, fname, tret, strs, defs, ens, ps, i + 1, tys, sv))
+  }
+
+def emitOkTailArm(pat: String, body: Expr, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String], sv: String): String =
+  join(lab(Str.concat("body_ok_0_", Str.fromInt(i))), emitOkTailBody(pat, body, fname, tret, strs, defs, ens, ps, i, tys, sv))
+
+def emitOkTailBody(pat: String, body: Expr, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String], sv: String): String =
+  if (isSelfTail(body, fname)) emitOkTailSlot(pat, body, strs, defs, ens, ps, i, tys, sv).code else emitOkTailBase(emitOkSlotPat(pat, body, "body", strs, defs, ens, ps, i, tys, sv), tret)
+
+def emitOkTailBase(s: Slot, tret: String): String =
+  s match {
+    case Slot(c, v, o) => join(c, emitTcoRet(tret, v, o))
+  }
+
+def emitOkTailSlot(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String], sv: String): Slot =
+  if (isAsPat(pat)) emitOkTailSlot(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), strs, defs, ens, ps, i, tys, sv) else emitOkTailSlot2(pat, body, strs, defs, ens, ps, i, tys)
+
+def emitOkTailSlot2(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String]): Slot =
+  if (isOrPat(pat)) emitOkTailSlot2(orLeft(pat), body, strs, defs, ens, ps, i, tys) else if (isConsPat(pat)) emitOkOwned(emitOkConsNest(consTail(pat), "body", i, emitTailLeaf(rewriteCons(pat, body, "body", i, slotInt(tys, 0)), strs, defs, ens, ps, i)), ps) else emitOkTailSlot3(pat, body, strs, defs, ens, ps, i, tys)
+
+def emitOkTailSlot3(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String]): Slot =
+  if (isTuplePat(pat)) emitTailLeaf(rewriteTuple(pat, body, "body", i, tys), strs, defs, ens, ps, i) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitTailLeaf(rewriteFields(splitPat(patBind(pat)), body, "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat))), strs, defs, ens, ps, i) else emitTailLeafBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, strs, defs, ens, ps, i)
+
+def emitTailLeaf(body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
+  Slot(emitSelfTail(body, Str.concat("body_a0_", Str.fromInt(i)), strs, defs, ens, ps), "tco", false)
+
+def emitTailLeafBind(bind: String, isInt: Bool, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
+  if (bind == "" || bind == "_") emitTailLeaf(body, strs, defs, ens, ps, i) else emitTailLeaf(rewriteBind(body, bind, bindStem("body", i, isInt)), strs, defs, ens, ps, i)
 
 def emitDefTcoIf(name: String, mod: String, ret: String, ps: List[Param], c: Expr, t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
   emitDefTcoIf2(llvmRet(ret), symOf(mod, name), defParamsTco(ps), ps, c, t, el, strs, defs, ens)
