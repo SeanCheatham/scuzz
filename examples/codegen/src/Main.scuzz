@@ -901,7 +901,7 @@ entry:
 }"""
 
 def okFs(): Bool =
-  irDiff(srcFs(), wantFs()) && irIdem(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irIdem(srcIfIo()) && Check.check(srcIfIo()) == "[]" && irDiff(srcListFs(), wantListFs()) && irIdem(srcListFs()) && Check.check(srcListFs()) == "[]" && irDiff(srcPure(), wantPure()) && irIdem(srcPure()) && Check.check(srcPure()) == "[]" && irDiff(srcJoin(), wantJoin()) && irIdem(srcJoin()) && Check.check(srcJoin()) == "[]" && irDiff(srcApply(), wantApply()) && irIdem(srcApply()) && Check.check(srcApply()) == "[]" && irDiff(srcInterp(), wantInterp()) && irIdem(srcInterp()) && Check.check(srcInterp()) == "[]"
+  irDiff(srcFs(), wantFs()) && irIdem(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irIdem(srcIfIo()) && Check.check(srcIfIo()) == "[]" && irDiff(srcListFs(), wantListFs()) && irIdem(srcListFs()) && Check.check(srcListFs()) == "[]" && irDiff(srcPure(), wantPure()) && irIdem(srcPure()) && Check.check(srcPure()) == "[]" && irDiff(srcJoin(), wantJoin()) && irIdem(srcJoin()) && Check.check(srcJoin()) == "[]" && irDiff(srcApply(), wantApply()) && irIdem(srcApply()) && Check.check(srcApply()) == "[]" && irDiff(srcInterp(), wantInterp()) && irIdem(srcInterp()) && Check.check(srcInterp()) == "[]" && irDiff(srcFor(), wantFor()) && irIdem(srcFor()) && Check.check(srcFor()) == "[]" && irDiff(srcInterpQ(), wantInterpQ()) && irIdem(srcInterpQ()) && Check.check(srcInterpQ()) == "[]"
 
 def srcInterp(): String =
   """@main def main: IO[Unit] =
@@ -910,6 +910,25 @@ def srcInterp(): String =
 
 def wantInterp(): String =
   "@.str0 = private unnamed_addr constant [3 x i8] c\"n:\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_l0_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_l0_s = call ptr @sz_string_from_cstr(ptr %build_e_l0_gep)\n  %build_e_e1_v = call ptr @sz_string_from_int(i64 3)\n  %build_e_c1_v = call ptr @sz_string_concat(ptr %build_e_l0_s, ptr %build_e_e1_v)\n  call void @sz_release(ptr %build_e_l0_s)\n  call void @sz_release(ptr %build_e_e1_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_c1_v)\n  call void @sz_release(ptr %build_e_c1_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+
+def srcFor(): String =
+  """@main def main: IO[Unit] =
+  for {
+    _ <- IO.println("a")
+    _ <- IO.println("b")
+  } yield ()
+"""
+
+def wantFor(): String =
+  "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %c0_io = call ptr @sz_io_pure(ptr null)\n  ret ptr %c0_io\n}\n\ndefine internal ptr @sz_cont_1(ptr %value, ptr %env) {\nentry:\n  %c1_in_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %c1_in_ss = call ptr @sz_string_from_cstr(ptr %c1_in_gep)\n  %c1_in_io = call ptr @sz_io_println(ptr %c1_in_ss)\n  call void @sz_release(ptr %c1_in_ss)\n  %c1_fm = call ptr @sz_io_flatmap(ptr %c1_in_io, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %c1_in_io)\n  call void @sz_release(ptr null)\n  ret ptr %c1_fm\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_in_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_ss = call ptr @sz_string_from_cstr(ptr %build_in_gep)\n  %build_in_io = call ptr @sz_io_println(ptr %build_in_ss)\n  call void @sz_release(ptr %build_in_ss)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_io, ptr @sz_cont_1, ptr null)\n  call void @sz_release(ptr %build_in_io)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+
+def srcInterpQ(): String =
+  """@main def main: IO[Unit] =
+  IO.println(s"x:${Str.concat("a", "b")}")
+"""
+
+def wantInterpQ(): String =
+  "@.str0 = private unnamed_addr constant [3 x i8] c\"x:\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str2 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_l0_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_l0_s = call ptr @sz_string_from_cstr(ptr %build_e_l0_gep)\n  %build_e_e1_arg0_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %build_e_e1_arg0_s = call ptr @sz_string_from_cstr(ptr %build_e_e1_arg0_gep)\n  %build_e_e1_arg1_gep = getelementptr inbounds [2 x i8], ptr @.str2, i64 0, i64 0\n  %build_e_e1_arg1_s = call ptr @sz_string_from_cstr(ptr %build_e_e1_arg1_gep)\n  %build_e_e1_v = call ptr @sz_string_concat(ptr %build_e_e1_arg0_s, ptr %build_e_e1_arg1_s)\n  call void @sz_release(ptr %build_e_e1_arg0_s)\n  call void @sz_release(ptr %build_e_e1_arg1_s)\n  %build_e_c1_v = call ptr @sz_string_concat(ptr %build_e_l0_s, ptr %build_e_e1_v)\n  call void @sz_release(ptr %build_e_l0_s)\n  call void @sz_release(ptr %build_e_e1_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_c1_v)\n  call void @sz_release(ptr %build_e_c1_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
 def allOk(): Bool =
   okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs()
