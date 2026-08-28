@@ -45,6 +45,44 @@ entry:
   ret i32 %rc
 }"""
 
+def srcTco(): String =
+  """def countdown(n: Int): Int =
+  if (n <= 0) 0 else countdown(n - 1)
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(countdown(3)))
+"""
+
+def wantTco(): String =
+  """define internal i64 @sz_user_Main_countdown(i64 %n_in) {
+entry:
+  %n_slot = alloca i64
+  store i64 %n_in, ptr %n_slot
+  br label %tco_loop
+tco_loop:
+  %n = load i64, ptr %n_slot
+  %body_ic_cmp = icmp sle i64 %n, 0
+  %body_ic_v = zext i1 %body_ic_cmp to i64
+  %body_cmp = icmp ne i64 %body_ic_v, 0
+  br i1 %body_cmp, label %body_then_0, label %body_else_0
+body_then_0:
+  ret i64 0
+body_else_0:
+  %body_targ0_v = sub i64 %n, 1
+  store i64 %body_targ0_v, ptr %n_slot
+  br label %tco_loop
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_v = call i64 @sz_user_Main_countdown(i64 3)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
 def irDiff(src: String, want: String): Bool =
   Emit.emit(src) == want
 
@@ -805,7 +843,7 @@ def okIf(): Bool =
   irDiff(srcIf(), wantIf()) && irIdem(srcIf()) && irDiff(srcTag(), wantTag()) && irIdem(srcTag()) && irDiff(srcCat(), wantCat()) && irIdem(srcCat()) && irDiff(srcFmt(), wantFmt()) && irIdem(srcFmt()) && Check.check(srcIf()) == "[]" && Check.check(srcTag()) == "[]" && Check.check(srcCat()) == "[]" && Check.check(srcFmt()) == "[]" && Emit.emitFull(srcFmt()) == Str.concat(Emit.preamble(), wantFmt())
 
 def okCmp(): Bool =
-  irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor())
+  irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irIdem(srcTco()) && Check.check(srcTco()) == "[]"
 
 def okList(): Bool =
   irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]"
