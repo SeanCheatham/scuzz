@@ -66,7 +66,7 @@ def kitParams(f: String): List[String] =
   if (f == "Str.fromInt") "Int" :: noStr() else if (f == "Str.concat") "String" :: "String" :: noStr() else if (f == "Str.len") "String" :: noStr() else if (f == "Str.fromBool") "Bool" :: noStr() else if (f == "Str.charAt") "String" :: "Int" :: noStr() else if (f == "Str.slice") "String" :: "Int" :: "Int" :: noStr() else if (f == "Str.toInt") "String" :: "Int" :: noStr() else if (f == "Str.repeat") "String" :: "Int" :: noStr() else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty") "List" :: noStr() else if (f == "List.concat") "List" :: "List" :: noStr() else if (f == "List.cons") "Any" :: "List" :: noStr() else if (f == "List.at") "List" :: "Int" :: noStr() else if (f == "Builder.empty") noStr() else if (f == "Builder.append") "Builder" :: "String" :: noStr() else if (f == "Builder.result") "Builder" :: noStr() else noStr()
 
 def kitRet(f: String): String =
-  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail") "List[Int]" else if (f == "List.head") "Int" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else "String"
+  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "List.head" || f == "List.at") "Int" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons") "List[Int]" else if (f == "List.isEmpty") "Bool" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else "String"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
@@ -561,7 +561,9 @@ def locOf2(src: String, needle: String, i: Int): (Int, Int, Int, Int) =
   if (i < 0) (1, 1, 1, 1) else locOf3(lineCol(src, i, 0, 1, 1), needle)
 
 def locOf3(p: (Int, Int), needle: String): (Int, Int, Int, Int) =
-  locOf4(p._1, p._2, needle)
+  p match {
+    case (line, col) => locOf4(line, col, needle)
+  }
 
 def locOf4(line: Int, col: Int, needle: String): (Int, Int, Int, Int) =
   (line, col, line, if (Str.len(needle) > 0 && Str.charAt(needle, Str.len(needle) - 1) == 41) col + Str.len(needle) - 1 else col + Str.len(needle))
@@ -579,7 +581,12 @@ def diagJson(src: String, o: Out): String =
   diagJson2(o, locOf(src, o.span))
 
 def diagJson2(o: Out, loc: (Int, Int, Int, Int)): String =
-  Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(Str.concat("type error: ", o.err)), Str.concat(",\"file\":\"t/src/Main.scuzz\",\"line\":", Str.concat(Str.fromInt(loc._1), Str.concat(",\"column\":", Str.concat(Str.fromInt(loc._2), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(loc._3), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(loc._4), "}"))))))))))
+  loc match {
+    case (line, col, eline, ecol) => diagJson3(o, line, col, eline, ecol)
+  }
+
+def diagJson3(o: Out, line: Int, col: Int, eline: Int, ecol: Int): String =
+  Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(Str.concat("type error: ", o.err)), Str.concat(",\"file\":\"t/src/Main.scuzz\",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))
 
 def check(src: String): String =
   check2(src, checkProg(Parse.parse(Lexer.lex(src))))
@@ -602,7 +609,12 @@ def humanLine(src: String, o: Out): String =
   humanLine2(o, locOf(src, o.span))
 
 def humanLine2(o: Out, loc: (Int, Int, Int, Int)): String =
-  Str.concat("t/src/Main.scuzz:", Str.concat(Str.fromInt(loc._1), Str.concat(":", Str.concat(Str.fromInt(loc._2), Str.concat(": error: type error: ", o.err)))))
+  loc match {
+    case (line, col, _, _) => humanLine3(o, line, col)
+  }
+
+def humanLine3(o: Out, line: Int, col: Int): String =
+  Str.concat("t/src/Main.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: type error: ", o.err)))))
 
 def human(src: String): String =
   human2(src, checkProg(Parse.parse(Lexer.lex(src))))
