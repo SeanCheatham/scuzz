@@ -55,31 +55,33 @@ private def printTags(j: Json): IO[Unit] =
     _ <- IO.println(Str.concat("arr:", if (Json.isArr(j)) "1" else "0"))
   } yield ()
 
+private def objKitOk(j: Json): IO[Unit] =
+  for {
+    _ <- printKeys(j)
+    _ <- printInt(j, "n")
+    _ <- printInt(j, "missing")
+    _ <- printHas(j, "ok")
+    _ <- printHas(j, "missing")
+    _ <- printStr(j, "s")
+    _ <- printBool(j, "ok")
+    _ <- printTags(j)
+    _ <- printArr(j)
+    got = Json.get(j, "xs")
+    _ <- IO.println(s"getXs:${Str.fromInt(List.len(got))}")
+    inner = if (List.isEmpty(got)) Json.Null else List.head(got)
+    _ <- printArr(inner)
+    _ <- printAt(inner, 1)
+    _ <- printAt(inner, 9)
+    pairs = Json.pairs(j)
+    _ <- IO.println(s"pairs:${Str.fromInt(List.len(pairs))}")
+    _ <- printSet(j)
+    _ <- printFloat()
+  } yield ()
+
 private def objKit(): IO[Unit] =
   Json.parse("{\"n\":1,\"ok\":true,\"s\":\"hi\",\"xs\":[2,3]}") match {
     case Result.Err(_) => IO.println("query:err")
-    case Result.Ok(j) =>
-      for {
-        _ <- printKeys(j)
-        _ <- printInt(j, "n")
-        _ <- printInt(j, "missing")
-        _ <- printHas(j, "ok")
-        _ <- printHas(j, "missing")
-        _ <- printStr(j, "s")
-        _ <- printBool(j, "ok")
-        _ <- printTags(j)
-        _ <- printArr(j)
-        got = Json.get(j, "xs")
-        _ <- IO.println(s"getXs:${Str.fromInt(List.len(got))}")
-        inner = if (List.isEmpty(got)) Json.Null else List.head(got)
-        _ <- printArr(inner)
-        _ <- printAt(inner, 1)
-        _ <- printAt(inner, 9)
-        pairs = Json.pairs(j)
-        _ <- IO.println(s"pairs:${Str.fromInt(List.len(pairs))}")
-        _ <- printSet(j)
-        _ <- printFloat()
-      } yield ()
+    case Result.Ok(j) => objKitOk(j)
   }
 
 private def mergeKit(): IO[Unit] =
