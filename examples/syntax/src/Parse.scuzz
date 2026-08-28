@@ -805,9 +805,28 @@ def prettyCases(xs: List[EnCase]): String =
   if (List.isEmpty(xs)) "" else Str.concat(prettyCase(List.head(xs)), prettyCases(List.tail(xs)))
 
 def prettyEn(e: En): String =
-  if (e.isRec) Str.concat("record ", Str.concat(e.name, Str.concat(_tparams(e.tparams), Str.concat("(", Str.concat(_commaParams(List.head(e.cases).fields), """)
-"""))))) else Str.concat("enum ", Str.concat(e.name, Str.concat(_tparams(e.tparams), Str.concat(""":
-""", prettyCases(e.cases)))))
+  e match {
+    case En(isRec, name, tparams, cases) => prettyEnHit(isRec, name, tparams, cases)
+  }
+
+def prettyEnHit(isRec: Bool, name: String, tparams: List[String], cases: List[EnCase]): String =
+  if (isRec) prettyRec(name, tparams, cases) else prettyEnum(name, tparams, cases)
+
+def prettyRec(name: String, tparams: List[String], cases: List[EnCase]): String =
+  prettyRecHd(name, tparams, List.head(cases))
+
+def prettyRecHd(name: String, tparams: List[String], c: EnCase): String =
+  c match {
+    case EnCase(_, fields) => prettyRecFields(name, tparams, fields)
+  }
+
+def prettyRecFields(name: String, tparams: List[String], fields: List[Param]): String =
+  Str.concat("record ", Str.concat(name, Str.concat(_tparams(tparams), Str.concat("(", Str.concat(_commaParams(fields), """)
+""")))))
+
+def prettyEnum(name: String, tparams: List[String], cases: List[EnCase]): String =
+  Str.concat("enum ", Str.concat(name, Str.concat(_tparams(tparams), Str.concat(""":
+""", prettyCases(cases)))))
 
 def prettyEnums(xs: List[En]): String =
   if (List.isEmpty(xs)) "" else Str.concat(prettyEn(List.head(xs)), Str.concat("""
