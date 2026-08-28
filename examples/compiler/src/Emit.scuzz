@@ -11,7 +11,6 @@ import Parse.Bind
 import Parse.Alias
 import Parse.Im
 import Lexer.Tok
-import Check.infer
 import Check.getTy
 
 def noStr(): List[String] =
@@ -410,7 +409,7 @@ def emitInterpPart(e: Expr, prefix: String, i: Int, strs: List[String], defs: Li
 def emitInterpExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitInterpExpr2(emitExpr(e, prefix, strs, defs, ens, ps), prefix, exprIsI64(e, ps, defs), ps, isFloatExpr(e, ps, defs))
 
-def emitInterpExpr2(s: Slot, prefix: String, i64: Bool, ps: List[Param], fl: Bool): Slot =
+def emitInterpExpr2(s: Slot, prefix: String, i64: Bool, _ps: List[Param], fl: Bool): Slot =
   s match {
     case Slot(_, v, _) => if (fl) emitInterpFloat(s, prefix) else if (i64 || hasSub(v, "_u")) emitInterpI64(s, prefix) else s
   }
@@ -858,7 +857,7 @@ def emitWhen(rt: String, code: String, vals: List[String], owns: List[Bool], pre
 def emitRange(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_stream_range(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))), pct(prefix, "v"), true)
 
-def emitSometimes(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+def emitSometimes(code: String, vals: List[String], owns: List[Bool], _prefix: String): Slot =
   Slot(join(code, join(line(Str.concat("call void @sz_property_sometimes(ptr ", Str.concat(arg0(vals), ")"))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), "null", false)
 
 def emitNetServe(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
@@ -1323,7 +1322,7 @@ def emitNethWithSig(prefix: String, pre: String, s: Slot, sig: String): String =
     case Slot(code, val, o) => emitNethWithSig2(prefix, join(pre, code), nethPtrRet(val, o, prefix), sig)
   }
 
-def emitNethWithSig2(prefix: String, code: String, p: (String, String), sig: String): String =
+def emitNethWithSig2(_prefix: String, code: String, p: (String, String), sig: String): String =
   p match {
     case (extra, ret) => Str.concat(nethBeg(), Str.concat("define internal ", Str.concat(sig, Str.concat(code, Str.concat(extra, Str.concat(nethRetLine(ret, false), nethEnd()))))))
   }
@@ -1518,7 +1517,7 @@ def themeRt(f: String): String =
 def emitUiRun(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   Slot(join(code, join(unpackFnPtr(arg0(vals), prefix), join(uiRunCall(prefix), if (headOwn(owns)) relPtr(arg0(vals)) else ""))), pct(prefix, "v"), false)
 
-def emitPropCheck(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+def emitPropCheck(code: String, vals: List[String], owns: List[Bool], _prefix: String): Slot =
   Slot(join(code, join(line(Str.concat("call void @sz_property_check(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), arg2(vals), headOwn(tailOwn(tailOwn(owns))))
 
 def emitSignalKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
@@ -2585,7 +2584,7 @@ def packCall(ps: List[Param], vals: List[String], owns: List[Bool], prefix: Stri
 def packCall2(p: Param, v: String, o: Bool, ps: List[Param], vals: List[String], owns: List[Bool], prefix: String, i: Int): ((String, String), String) =
   if (!isI64Ty(p.ty) && !o && (isI64Lit(v) || isIntSsa(v))) packCallBox(p, v, o, ps, vals, owns, prefix, i) else packCall3(oneArg(p, v), if (o) relPtr(v) else "", packCall(ps, vals, owns, prefix, i + 1))
 
-def packCallBox(p: Param, v: String, o: Bool, ps: List[Param], vals: List[String], owns: List[Bool], prefix: String, i: Int): ((String, String), String) =
+def packCallBox(_p: Param, v: String, o: Bool, ps: List[Param], vals: List[String], owns: List[Bool], prefix: String, i: Int): ((String, String), String) =
   packCallBox2(pct(prefix, Str.concat("pb", Str.fromInt(i))), v, o, packCall(ps, vals, owns, prefix, i + 1), prefix, i)
 
 def packCallBox2(bx: String, v: String, o: Bool, rest: ((String, String), String), prefix: String, i: Int): ((String, String), String) =
@@ -4148,7 +4147,7 @@ def rwField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fu
 def rwFieldVar(en: String, name: String, env: List[(String, String)], ens: List[En]): Expr =
   if (hasEn(ens, en)) Expr.EField(Expr.EVar(en), name) else rwFieldTy(Expr.EVar(en), name, getTy(env, en), ens)
 
-def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, _env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   r match {
     case Expr.EVar(mod) => rwFieldQualHit(m, args, name, ens, findDefMod(funs, mod, m))
     case _ => Expr.EField(Expr.EMethod(r, m, args), name)
@@ -4431,7 +4430,7 @@ def emitFm(recv: Expr, args: List[Expr], prefix: String, strs: List[String], def
 def emitFmRt(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   emitFmCounted(rt, recv, args, prefix, strs, defs, ens, ps, fid, fmCount(recv) + fmCountArgs(args))
 
-def emitFmCounted(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int, n: Int): Slot =
+def emitFmCounted(rt: String, recv: Expr, _args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int, n: Int): Slot =
   emitFmA(rt, fid + n, recv, prefix, strs, defs, ens, ps, fid)
 
 def emitFmA(rt: String, na: Int, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
@@ -4730,7 +4729,7 @@ def hoistNeth(ir: String): String =
 def hoistNethFrom(s: String, scan: Int, i: Int, neths: String, rest: String): String =
   hoistNethFrom2(s, scan, i, neths, rest, firstNethB(s, scan))
 
-def hoistNethFrom2(s: String, scan: Int, i: Int, neths: String, rest: String, b: Int): String =
+def hoistNethFrom2(s: String, _scan: Int, i: Int, neths: String, rest: String, b: Int): String =
   if (b < 0) Str.concat(neths, Str.concat(rest, Str.slice(s, i, Str.len(s)))) else hoistNethFrom3(s, i, neths, rest, b, nestEnd(s, b, 0))
 
 def hoistNethFrom3(s: String, i: Int, neths: String, rest: String, b: Int, e: Int): String =
@@ -4754,7 +4753,7 @@ def firstNethBRet(s: String, i: Int): Int =
 def firstNethBLim(s: String, i: Int, e: Int): Int =
   if (i >= e || nethBegAt(s, i)) firstNethBLimRet(s, i, e) else firstNethBLim(s, i + nethStep(s, i), e)
 
-def firstNethBLimRet(s: String, i: Int, e: Int): Int =
+def firstNethBLimRet(_s: String, i: Int, e: Int): Int =
   if (i >= e) 0 - 1 else i
 
 def nestEnd(s: String, i: Int, d: Int): Int =

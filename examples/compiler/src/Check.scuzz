@@ -240,7 +240,7 @@ def inferFunApply(ty: String, args: List[Expr], env: List[(String, String)], fun
 def inferFunApplyRet(ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
   if (List.len(args) == 1) inferFunApply1(ret, infer(List.head(args), env, funs, ens), span) else if (List.isEmpty(args)) bad("apply expects 1 arg", span) else inferFunApply1(ret, firstArgErr(args, env, funs, ens), span)
 
-def inferFunApply1(ret: String, o: Out, span: String): Out =
+def inferFunApply1(ret: String, o: Out, _span: String): Out =
   if (hasErr(o)) o else ok(ret)
 
 def elemOf(t: String): String =
