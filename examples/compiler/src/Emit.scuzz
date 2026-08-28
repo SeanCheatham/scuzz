@@ -306,7 +306,7 @@ def hasSubAt(s: String, sub: String, i: Int): Bool =
   if (i + Str.len(sub) > Str.len(s)) false else if (Str.slice(s, i, i + Str.len(sub)) == sub) true else hasSubAt(s, sub, i + 1)
 
 def callIsI64(f: String, defs: List[Fun]): Bool =
-  f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "List.len" || f == "List.isEmpty" || funRetI64(defs, f)
+  f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || funRetI64(defs, f)
 
 def funRetI64(defs: List[Fun], f: String): Bool =
   if (List.isEmpty(defs)) false else funRetI64h(List.head(defs), List.tail(defs), f)
@@ -361,7 +361,7 @@ def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, 
   }
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param]): Slot =
-  if (f == "Str.fromInt") emitFromInt(code, vals, prefix) else if (f == "Str.concat") emitConcat(code, vals, owns, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "Str.toInt") emitToInt(code, vals, owns, prefix) else if (f == "Str.repeat") emitRepeat(code, vals, owns, prefix) else if (f == "Str.startsWith") emitStarts(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args, ps) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix, args, ps, defs) else if (f == "List.at") emitAt(code, vals, owns, prefix, args, ps) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else if (f == "Fs.read") emitFsRead(code, vals, owns, prefix) else if (f == "Fs.write") emitFsWrite(code, vals, owns, prefix) else if (f == "Fs.list") emitFsList(code, vals, owns, prefix) else if (f == "Sys.args") emitSysArgs(code, prefix) else if (f == "IO.pure") emitIoPure(code, vals, owns, prefix) else if (hasEn(ens, f)) emitRec(f, code, vals, owns, prefix, ens, args, ps, defs) else emitUser(f, code, vals, owns, prefix, defs)
+  if (f == "Str.fromInt") emitFromInt(code, vals, prefix) else if (f == "Str.concat") emitConcat(code, vals, owns, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "Str.toInt") emitToInt(code, vals, owns, prefix) else if (f == "Str.repeat") emitRepeat(code, vals, owns, prefix) else if (f == "Str.startsWith") emitStarts(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix, args, ps) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix, args, ps, defs) else if (f == "List.at") emitAt(code, vals, owns, prefix, args, ps) else if (f == "List.join") emitListJoin(code, vals, owns, prefix) else if (kitUnaryPtr(f) != "") emitKitUnaryPtr(kitUnaryPtr(f), code, vals, owns, prefix) else if (kitUnaryI64(f) != "") emitKitUnaryI64(kitUnaryI64(f), code, vals, owns, prefix) else if (kitPtrI64(f) != "") emitKitPtrI64(kitPtrI64(f), code, vals, owns, prefix) else if (kitBinaryPtr(f) != "") emitKitBinaryPtr(kitBinaryPtr(f), code, vals, owns, prefix) else if (kitBinaryI64(f) != "") emitKitBinaryI64(kitBinaryI64(f), code, vals, owns, prefix) else if (f == "Map.empty" || f == "Set.empty") emitMapEmpty(code, prefix) else if (f == "Map.set") emitMapSet(code, vals, owns, prefix) else if (f == "Set.add") emitSetAdd(code, vals, owns, prefix) else if (f == "Map.getOrElse") emitMapGetOr(code, vals, owns, prefix) else if (f == "Clock.monotonic") emitClock("sz_clock_monotonic", code, prefix) else if (f == "Clock.realTime") emitClock("sz_clock_real_time", code, prefix) else if (f == "Fs.mkdirs") emitFsMkdirs(code, vals, owns, prefix) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else if (f == "Fs.read") emitFsRead(code, vals, owns, prefix) else if (f == "Fs.write") emitFsWrite(code, vals, owns, prefix) else if (f == "Fs.list") emitFsList(code, vals, owns, prefix) else if (f == "Sys.args") emitSysArgs(code, prefix) else if (f == "IO.pure") emitIoPure(code, vals, owns, prefix) else if (hasEn(ens, f)) emitRec(f, code, vals, owns, prefix, ens, args, ps, defs) else emitUser(f, code, vals, owns, prefix, defs)
 
 def emitCall(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps) else emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs, args, ens, ps)
@@ -424,6 +424,120 @@ def emitListRev(code: String, vals: List[String], owns: List[Bool], prefix: Stri
 
 def emitListRev2(code: String, v: String, o: Bool, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_reverse(ptr ", Str.concat(v, ")")))), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
+
+def kitUnaryPtr(f: String): String =
+  if (f == "List.init") "sz_list_init" else if (f == "List.last") "sz_list_last" else if (f == "List.flatten") "sz_list_flatten" else if (f == "List.distinct") "sz_list_distinct" else if (f == "Map.keys" || f == "Set.toList") "sz_map_keys" else if (f == "Map.values") "sz_map_values" else if (f == "Map.toList") "sz_map_to_list" else if (f == "Json.keys") "sz_json_keys" else if (f == "Json.parse") "sz_json_parse" else if (f == "Json.arr") "sz_json_arr" else ""
+
+def kitUnaryI64(f: String): String =
+  if (f == "Map.size" || f == "Set.size") "sz_map_size" else ""
+
+def kitPtrI64(f: String): String =
+  if (f == "List.take") "sz_list_take" else if (f == "List.drop") "sz_list_drop" else if (f == "List.takeRight") "sz_list_take_right" else if (f == "List.dropRight") "sz_list_drop_right" else if (f == "List.splitAt") "sz_list_split_at" else ""
+
+def kitBinaryPtr(f: String): String =
+  if (f == "Json.get") "sz_json_get" else if (f == "Json.merge") "sz_json_merge" else if (f == "Set.union") "sz_set_union" else if (f == "Set.intersect") "sz_set_intersect" else if (f == "Set.diff") "sz_set_diff" else if (f == "Map.union") "sz_map_union" else if (f == "Map.intersect") "sz_map_intersect" else if (f == "Map.diff") "sz_map_diff" else if (f == "Map.remove" || f == "Set.remove") "sz_map_remove" else ""
+
+def kitBinaryI64(f: String): String =
+  if (f == "Map.contains" || f == "Set.contains") "sz_map_contains" else if (f == "Json.has") "sz_json_has" else ""
+
+def emitKitUnaryPtr(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitKitUnaryPtr2(rt, code, arg0(vals), headOwn(owns), prefix)
+
+def emitKitUnaryPtr2(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitCallPtr1(rt, v, prefix), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
+
+def kitCallPtr1(rt: String, v: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(v, ")"))))))
+
+def emitKitUnaryI64(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitKitUnaryI642(rt, code, arg0(vals), headOwn(owns), prefix)
+
+def emitKitUnaryI642(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitCallI641(rt, v, prefix), if (o) relPtr(v) else "")), pct(prefix, "v"), false)
+
+def kitCallI641(rt: String, v: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @", Str.concat(rt, Str.concat("(ptr ", Str.concat(v, ")"))))))
+
+def emitKitPtrI64(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitKitPtrI642(rt, code, arg0(vals), arg1(vals), headOwn(owns), prefix)
+
+def emitKitPtrI642(rt: String, code: String, a: String, n: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitCallPtrI64(rt, a, n, prefix), if (o) relPtr(a) else "")), pct(prefix, "v"), true)
+
+def kitCallPtrI64(rt: String, a: String, n: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(a, Str.concat(", i64 ", Str.concat(n, ")"))))))))
+
+def emitKitBinaryPtr(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitKitBinaryPtr2(rt, code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitKitBinaryPtr2(rt: String, code: String, a: String, b: String, oa: Bool, ob: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitCallPtr2(rt, a, b, prefix), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), true)
+
+def kitCallPtr2(rt: String, a: String, b: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, ")"))))))))
+
+def emitKitBinaryI64(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitKitBinaryI642(rt, code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitKitBinaryI642(rt: String, code: String, a: String, b: String, oa: Bool, ob: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitCallI642(rt, a, b, prefix), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), false)
+
+def kitCallI642(rt: String, a: String, b: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @", Str.concat(rt, Str.concat("(ptr ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, ")"))))))))
+
+def emitListJoin(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitListJoin2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitListJoin2(code: String, xs: String, sep: String, ox: Bool, os: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitJoinCstr(sep, prefix), join(kitJoinCall(xs, prefix), join(if (ox) relPtr(xs) else "", if (os) relPtr(sep) else "")))), pct(prefix, "v"), true)
+
+def kitJoinCstr(sep: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "sep"), Str.concat("call ptr @sz_string_cstr(ptr ", Str.concat(sep, ")"))))
+
+def kitJoinCall(xs: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_join(ptr ", Str.concat(xs, Str.concat(", ptr ", Str.concat(pct(prefix, "sep"), ")"))))))
+
+def emitMapEmpty(code: String, prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), "call ptr @sz_map_empty()"))), pct(prefix, "v"), true)
+
+def emitMapSet(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitMapSet2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(owns)), headOwn(tailOwn(tailOwn(owns))), prefix)
+
+def emitMapSet2(code: String, m: String, k: String, v: String, om: Bool, ok: Bool, ov: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitMapSetCall(m, k, v, prefix), join(if (om) relPtr(m) else "", join(if (ok) relPtr(k) else "", if (ov) relPtr(v) else "")))), pct(prefix, "v"), true)
+
+def kitMapSetCall(m: String, k: String, v: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_map_set(ptr ", Str.concat(m, Str.concat(", ptr ", Str.concat(k, Str.concat(", ptr ", Str.concat(v, ", i32 1)"))))))))
+
+def emitSetAdd(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitSetAdd2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitSetAdd2(code: String, m: String, k: String, om: Bool, ok: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitSetAddCall(m, k, prefix), join(if (om) relPtr(m) else "", if (ok) relPtr(k) else ""))), pct(prefix, "v"), true)
+
+def kitSetAddCall(m: String, k: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_map_set(ptr ", Str.concat(m, Str.concat(", ptr ", Str.concat(k, ", ptr null, i32 1)"))))))
+
+def emitMapGetOr(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitMapGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(owns)), headOwn(tailOwn(tailOwn(owns))), prefix)
+
+def emitMapGetOr2(code: String, m: String, k: String, d: String, om: Bool, ok: Bool, od: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitGetOrCall(m, k, d, prefix), join(if (om) relPtr(m) else "", join(if (ok) relPtr(k) else "", if (od) relPtr(d) else "")))), pct(prefix, "p"), true)
+
+def kitGetOrCall(m: String, k: String, d: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "p"), Str.concat("call ptr @sz_map_get_or(ptr ", Str.concat(m, Str.concat(", ptr ", Str.concat(k, Str.concat(", ptr ", Str.concat(d, ")"))))))))
+
+def emitClock(rt: String, code: String, prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, "()"))))), pct(prefix, "v"), false)
+
+def emitFsMkdirs(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitFsReadRt("sz_fs_mkdirs", code, vals, owns, prefix)
+
+def emitFsReadRt(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitFsReadRt2(rt, code, arg0(vals), headOwn(owns), prefix)
+
+def emitFsReadRt2(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitCallPtr1(rt, v, prefix), if (o) relPtr(v) else "")), pct(prefix, "v"), false)
 
 def retPtr(p: String): String =
   line(Str.concat("call void @sz_retain(ptr ", Str.concat(p, ")")))
@@ -786,7 +900,10 @@ def emitCtorCall(recv: Expr, name: String, args: List[Expr], prefix: String, str
   }
 
 def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps) else emitQual(en, name, args, prefix, strs, defs, ens, ps)
+  if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps) else emitQual(en, name, args, prefix, strs, defs, ens, ps)
+
+def isEmitKit(f: String): Bool =
+  f == "List.join" || kitUnaryPtr(f) != "" || kitUnaryI64(f) != "" || kitPtrI64(f) != "" || kitBinaryPtr(f) != "" || kitBinaryI64(f) != "" || f == "Map.empty" || f == "Set.empty" || f == "Map.set" || f == "Set.add" || f == "Map.getOrElse" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Fs.mkdirs" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "IO.pure"
 
 def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitQual2(en, name, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs)
@@ -2028,7 +2145,7 @@ def preamble(): String =
   Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), decls())))
 
 def decls(): String =
-  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), nl()))))))
+  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), nl()))))))))
 
 def declsA(): String =
   join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))
@@ -2046,7 +2163,13 @@ def declsE(): String =
   join(decl("i64 @sz_string_to_int(ptr, i64)"), join(decl("ptr @sz_string_repeat(ptr, i64)"), join(decl("i64 @sz_string_starts_with(ptr, ptr)"), join(decl("ptr @sz_pair_new(ptr, ptr)"), join(decl("ptr @sz_pair_left(ptr)"), decl("ptr @sz_pair_right(ptr)"))))))
 
 def declsF(): String =
-  join(decl("ptr @sz_fs_read(ptr)"), join(decl("ptr @sz_fs_write(ptr, ptr)"), join(decl("ptr @sz_fs_list(ptr)"), join(decl("ptr @sz_sys_args()"), decl("ptr @sz_io_pure(ptr)")))))
+  join(decl("ptr @sz_fs_read(ptr)"), join(decl("ptr @sz_fs_write(ptr, ptr)"), join(decl("ptr @sz_fs_list(ptr)"), join(decl("ptr @sz_sys_args()"), join(decl("ptr @sz_io_pure(ptr)"), join(decl("ptr @sz_string_cstr(ptr)"), join(decl("ptr @sz_list_join(ptr, ptr)"), decl("ptr @sz_map_empty()"))))))))
+
+def declsG(): String =
+  join(decl("ptr @sz_map_set(ptr, ptr, ptr, i32)"), join(decl("ptr @sz_map_keys(ptr)"), join(decl("ptr @sz_map_values(ptr)"), join(decl("i64 @sz_map_size(ptr)"), join(decl("i64 @sz_map_contains(ptr, ptr)"), join(decl("ptr @sz_map_get_or(ptr, ptr, ptr)"), join(decl("ptr @sz_map_remove(ptr, ptr)"), decl("ptr @sz_list_take(ptr, i64)"))))))))
+
+def declsH(): String =
+  join(decl("ptr @sz_list_drop(ptr, i64)"), join(decl("ptr @sz_list_init(ptr)"), join(decl("ptr @sz_list_last(ptr)"), join(decl("ptr @sz_list_flatten(ptr)"), join(decl("ptr @sz_clock_monotonic()"), join(decl("ptr @sz_clock_real_time()"), join(decl("ptr @sz_fs_mkdirs(ptr)"), join(decl("ptr @sz_json_keys(ptr)"), join(decl("ptr @sz_json_get(ptr, ptr)"), join(decl("i64 @sz_json_has(ptr, ptr)"), join(decl("ptr @sz_json_parse(ptr)"), join(decl("ptr @sz_map_to_list(ptr)"), join(decl("ptr @sz_set_union(ptr, ptr)"), join(decl("ptr @sz_set_intersect(ptr, ptr)"), decl("ptr @sz_set_diff(ptr, ptr)")))))))))))))))
 
 def emitFull(src: String): String =
   Str.concat(preamble(), emit(src))
