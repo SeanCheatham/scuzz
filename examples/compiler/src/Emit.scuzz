@@ -146,7 +146,7 @@ def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: 
   emitExprFid(e, prefix, strs, defs, ens, ps, 0)
 
 def emitExprFid(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
-  if (needsPh(e)) emitLam("_ph", rewriteHole(e, "_ph"), prefix, strs, defs, ens, ps) else emitExprGo(e, prefix, strs, defs, ens, ps, fid)
+  if (needsPh(e)) emitLam("_ph", rewriteHole(e, "_ph"), prefix, strs, defs, ens, ps) else emitExprGo(etaKit(e, ps, defs), prefix, strs, defs, ens, ps, fid)
 
 def needsPh(e: Expr): Bool =
   e match {
@@ -934,11 +934,51 @@ def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, str
 
 def emitMapKit2(pred: Bool, rt: String, inner: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   inner match {
-    case Slot(ic, iv, io) => emitMapKit3(pred, rt, ic, iv, io, mapLamBind(wrapPh(lam)), mapLamBody(wrapPh(lam)), prefix, strs, defs, ens, ps)
+    case Slot(ic, iv, io) => emitMapKitPick(pred, rt, ic, iv, io, wrapPh(lam, ps, defs), prefix, strs, defs, ens, ps)
   }
 
-def wrapPh(e: Expr): Expr =
-  if (needsPh(e)) Expr.ELam("_ph", rewriteHole(e, "_ph")) else e
+def emitMapKitPick(pred: Bool, rt: String, ic: String, iv: String, io: Bool, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  lam match {
+    case Expr.EVar(f) => if (!pred && isLocalPack(f, ps)) emitMapKitPack(rt, ic, iv, io, f, prefix) else emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps)
+    case _ => emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps)
+  }
+
+def isLocalPack(f: String, ps: List[Param]): Bool =
+  paramTy(ps, f) != "" && !isI64Ty(paramTy(ps, f))
+
+def emitMapKitPack(rt: String, ic: String, iv: String, io: Bool, f: String, prefix: String): Slot =
+  Slot(join(ic, join(unpackFn(f, prefix), join(line(mapPackCall(rt, iv, prefix)), if (io) relPtr(iv) else ""))), pct(prefix, "v"), mapKitOwned(rt))
+
+def mapPackCall(rt: String, iv: String, prefix: String): String =
+  Str.concat(tmp(prefix, "v"), Str.concat(mapKitCallMid(rt), Str.concat(iv, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), mapKitCallEnd(rt))))))))
+
+def wrapPh(e: Expr, ps: List[Param], defs: List[Fun]): Expr =
+  if (needsPh(e)) Expr.ELam("_ph", rewriteHole(e, "_ph")) else etaKit(e, ps, defs)
+
+def etaKit(e: Expr, ps: List[Param], defs: List[Fun]): Expr =
+  e match {
+    case Expr.ECall(f, args) => if (List.isEmpty(args) && kitEta1(f)) phCall(f) else e
+    case Expr.EVar(f) => if (etaVar(f, ps, defs)) phCall(f) else e
+    case Expr.ENamed(_, inner) => etaKit(inner, ps, defs)
+    case _ => e
+  }
+
+def phCall(f: String): Expr =
+  Expr.ELam("_ph", Expr.ECall(f, Expr.EVar("_ph") :: noExpr()))
+
+def etaVar(f: String, ps: List[Param], defs: List[Fun]): Bool =
+  if (kitEta1(f)) true else paramTy(ps, f) == "" && etaFun1(findDef(defs, f))
+
+def etaFun1(hit: List[Fun]): Bool =
+  !List.isEmpty(hit) && funArity1(List.head(hit))
+
+def funArity1(d: Fun): Bool =
+  d match {
+    case Fun(_, _, _, params, _, _, _) => List.len(params) == 1
+  }
+
+def kitEta1(f: String): Bool =
+  f == "Str.fromInt" || f == "Str.toInt" || f == "Float.fromInt" || f == "Float.toInt"
 
 def mapLamBind(e: Expr): String =
   e match {
@@ -1247,7 +1287,13 @@ def nethPredRet(val: String, o: Bool, prefix: String): (String, String) =
   if (o || ioPurePtr(val) || isPtrSlot(val, noParam())) (line(Str.concat(tmp(prefix, "nr"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(val, ")")))), pct(prefix, "nr")) else ("", val)
 
 def nethPtrRet(val: String, o: Bool, prefix: String): (String, String) =
-  if (o || val == "null" || ioPurePtr(val) || isPtrSlot(val, noParam()) || val == "%_ph") ("", val) else (line(Str.concat(tmp(prefix, "nr"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(val, ")")))), pct(prefix, "nr"))
+  if (o || val == "null") ("", val) else if (nethIsPtr(val)) (retPtr(val), val) else nethBoxI64(val, prefix)
+
+def nethIsPtr(val: String): Bool =
+  ioPurePtr(val) || isPtrSlot(val, noParam()) || val == "%_ph"
+
+def nethBoxI64(val: String, prefix: String): (String, String) =
+  (line(Str.concat(tmp(prefix, "nr"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(val, ")")))), pct(prefix, "nr"))
 
 def emitNeth3(prefix: String, code: String, p: (String, String), pred: Bool): String =
   p match {
