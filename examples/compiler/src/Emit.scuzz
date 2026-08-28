@@ -3188,16 +3188,28 @@ def isTuplePat(pat: String): Bool =
   Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
 
 def emitTupleTry(prefix: String, i: Int, scrut: String, tys: List[String]): String =
-  emitTuplePeel(ppre(prefix, i), i + 1, scrut, tys, prefix, i)
+  emitTuplePeel(ppre(prefix, i), i + 1, scrut, tys, prefix, i, true)
 
-def emitTuplePeel(pre: String, sid: Int, scrut: String, tys: List[String], armPrefix: String, armI: Int): String =
-  join(peelLeft(pre, sid, scrut), join(peelRight(pre, sid, scrut), join(peelBrTn(pre, sid), join(peelTnLab(pre, sid), emitTupleCont(pre, sid, tys, armPrefix, armI)))))
+def emitTuplePeel(pre: String, sid: Int, scrut: String, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
+  join(peelLeft(pre, sid, scrut), join(peelRight(pre, sid, scrut), join(peelBrTn(pre, sid), join(peelTnLab(pre, sid), emitTupleCont(pre, sid, tys, armPrefix, armI, fin)))))
 
-def emitTupleCont(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int): String =
-  join(if (slotInt(tys, 0)) peelUnboxL(pre, sid) else "", emitTupleRest(pre, sid, tys, armPrefix, armI))
+def emitTupleCont(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
+  join(if (slotInt(tys, 0)) peelUnboxL(pre, sid) else "", emitTupleRest(pre, sid, tys, armPrefix, armI, fin))
 
-def emitTupleRest(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int): String =
-  if (List.len(tys) > 2) emitTuplePeel(Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, pct(pre, Str.concat("tr", Str.fromInt(sid))), List.tail(tys), armPrefix, armI) else join(if (slotInt(tys, 1) || List.isEmpty(tys)) peelUnboxR(pre, sid) else "", tupleBrOk(armPrefix, armI))
+def emitTupleRest(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
+  join(emitNest(pre, sid, "tl", headTy(tys), armPrefix, armI), emitTupleRest2(pre, sid, tys, armPrefix, armI, fin))
+
+def emitTupleRest2(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
+  if (List.len(tys) > 2) emitTuplePeel(Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, pct(pre, Str.concat("tr", Str.fromInt(sid))), List.tail(tys), armPrefix, armI, fin) else join(emitNest(pre, sid, "tr", secondTy(tys), armPrefix, armI), join(if (slotInt(tys, 1) || List.isEmpty(tys)) peelUnboxR(pre, sid) else "", if (fin) tupleBrOk(armPrefix, armI) else ""))
+
+def emitNest(pre: String, sid: Int, side: String, ty: String, armPrefix: String, armI: Int): String =
+  if (!isTupTy(ty)) "" else emitTuplePeel(Str.concat(pre, Str.concat(Str.concat("_", side), Str.fromInt(sid))), 1, pct(pre, Str.concat(side, Str.fromInt(sid))), tupSlots(ty), armPrefix, armI, false)
+
+def headTy(tys: List[String]): String =
+  if (List.isEmpty(tys)) "" else List.head(tys)
+
+def secondTy(tys: List[String]): String =
+  if (List.isEmpty(tys) || List.isEmpty(List.tail(tys))) "" else List.head(List.tail(tys))
 
 def peelLeft(pre: String, sid: Int, scrut: String): String =
   line(Str.concat(tmp(pre, Str.concat("tl", Str.fromInt(sid))), Str.concat("call ptr @sz_pair_left(ptr ", Str.concat(scrut, ")"))))
@@ -3507,10 +3519,13 @@ def rewriteTupleAt(ns: List[String], body: Expr, pre: String, sid: Int, tys: Lis
   if (List.isEmpty(ns)) body else rewriteTupleAt1(List.head(ns), List.tail(ns), body, pre, sid, tys)
 
 def rewriteTupleAt1(n: String, rest: List[String], body: Expr, pre: String, sid: Int, tys: List[String]): Expr =
-  if (List.isEmpty(rest)) rewriteBind(body, n, rightStem(pre, sid, tys)) else rewriteTupleAt2(n, List.head(rest), List.tail(rest), body, pre, sid, tys)
+  if (List.isEmpty(rest)) rewriteSlot(n, rightStem(pre, sid, tys), if (List.len(tys) > 1) secondTy(tys) else headTy(tys), body) else rewriteTupleAt2(n, List.head(rest), List.tail(rest), body, pre, sid, tys)
 
 def rewriteTupleAt2(n: String, n2: String, more: List[String], body: Expr, pre: String, sid: Int, tys: List[String]): Expr =
-  if (List.isEmpty(more)) rewriteBind(rewriteBind(body, n, leftStem(pre, sid, tys)), n2, rightStem(pre, sid, tys)) else rewriteTupleAt1(n2, more, rewriteBind(body, n, leftStem(pre, sid, tys)), Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, if (List.isEmpty(tys)) tys else List.tail(tys))
+  if (List.isEmpty(more)) rewriteSlot(n, leftStem(pre, sid, tys), headTy(tys), rewriteSlot(n2, rightStem(pre, sid, tys), secondTy(tys), body)) else rewriteTupleAt1(n2, more, rewriteSlot(n, leftStem(pre, sid, tys), headTy(tys), body), Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, if (List.isEmpty(tys)) tys else List.tail(tys))
+
+def rewriteSlot(n: String, stem: String, ty: String, body: Expr): Expr =
+  if (isTuplePat(n)) rewriteTupleAt(splitPat(Str.slice(n, 1, Str.len(n) - 1)), body, stem, 1, tupSlots(ty)) else rewriteBind(body, n, stem)
 
 def leftStem(pre: String, sid: Int, tys: List[String]): String =
   Str.concat(pre, Str.concat(if (slotInt(tys, 0)) "_tvl" else "_tl", Str.fromInt(sid)))
@@ -3525,7 +3540,13 @@ def splitPat(s: String): List[String] =
   splitPatAt(s, commaAt(s, 0))
 
 def commaAt(s: String, i: Int): Int =
-  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 44) i else commaAt(s, i + 1)
+  commaAtD(s, i, 0)
+
+def commaAtD(s: String, i: Int, d: Int): Int =
+  if (i >= Str.len(s)) 0 - 1 else commaAtC(s, i, d, Str.charAt(s, i))
+
+def commaAtC(s: String, i: Int, d: Int, c: Int): Int =
+  if (c == 40) commaAtD(s, i + 1, d + 1) else if (c == 41) commaAtD(s, i + 1, if (d > 0) d - 1 else 0) else if (c == 44 && d == 0) i else commaAtD(s, i + 1, d)
 
 def splitPatAt(s: String, c: Int): List[String] =
   if (c < 0) trimPat(s) :: noStr() else trimPat(Str.slice(s, 0, c)) :: splitPat(Str.slice(s, c + 1, Str.len(s)))
