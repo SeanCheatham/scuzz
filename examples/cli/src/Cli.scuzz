@@ -393,7 +393,13 @@ def dispatchBuild(path: String, outDir: String, full: Bool): IO[Unit] =
   Fs.mkdirs(outDir).flatMap(_ => Drive.emitDir(path, outDir, full))
 
 def dispatchRun(path: String, outDir: String, headless: Bool): IO[Unit] =
-  Fs.mkdirs(outDir).flatMap(_ => Drive.runDir(path, outDir, if (headless) Drive.headlessEnv() else ""))
+  dispatchRunOut(path, pkgOut(path, outDir), headless)
+
+def pkgOut(path: String, outDir: String): String =
+  if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir)
+
+def dispatchRunOut(path: String, out: String, headless: Bool): IO[Unit] =
+  Fs.mkdirs(out).flatMap(_ => Drive.runDir(path, out, if (headless) Drive.snapEnv(out) else ""))
 
 def dispatchTest(path: String, update: Bool): IO[Unit] =
   Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build"), update))

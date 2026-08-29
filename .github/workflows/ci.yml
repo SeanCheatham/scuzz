@@ -720,13 +720,14 @@ jobs:
 
       - name: v0 new --ui path
         run: |
+          SCUZZ=./examples/cli/build/cli
           rm -rf /tmp/scuzz-v0app
-          cargo run -p scuzz -- new --ui --path /tmp scuzz-v0app
-          cargo run -p scuzz -- test --update /tmp/scuzz-v0app
+          "$SCUZZ" new --ui --path /tmp scuzz-v0app
+          "$SCUZZ" test --update /tmp/scuzz-v0app
           test -f /tmp/scuzz-v0app/goldens/scuzz-v0app.dump
           test -f /tmp/scuzz-v0app/goldens/scuzz-v0app_after_tap.dump
-          cargo run -p scuzz -- test /tmp/scuzz-v0app
-          cargo run -p scuzz -- run --headless /tmp/scuzz-v0app
+          "$SCUZZ" test /tmp/scuzz-v0app
+          "$SCUZZ" run --headless /tmp/scuzz-v0app
           test -f /tmp/scuzz-v0app/build/snapshot.png
 
       - name: Desktop peer + X11 embedder (xvfb)
