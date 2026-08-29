@@ -27,7 +27,7 @@ Scuzz Lang is a language, a runtime, UI, and tooling. Keep a small subset. Ship 
 - **Forwards only.** Do not keep backwards compatibility, migration shims, or legacy paths. Delete and rewrite call sites. Do not keep dual APIs.
 - **Vertical slice over scaffolding.** Prefer a working hello or Counter path to empty module trees and placeholder APIs.
 - **Headless first for UI.** Do not add Desktop-only UI behavior. Headless is a peer runtime. See `vision.md`.
-- **One compiler.** The toolchain is Rust (`crates/cli`). Language proof is `examples/` that exercise the kernel. See `vision.md`.
+- **One compiler.** The toolchain is Scuzz (`examples/cli`). Language proof is `examples/` that exercise the kernel. Bootstrap is tagged `v0.2.0`. See `vision.md`.
 - **No agent- or tool-specific references.** Keep CI, docs, and code owned by the project. Do not tie them to a coding agent, a branch naming scheme, or a vendor workflow.
 - **No history in the tree.** Write docs and comments in present tense. Do not keep phase diaries, landed changelogs, or references to removed paths.
 
