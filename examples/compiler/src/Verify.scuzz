@@ -594,9 +594,10 @@ def forcePred(e: Expr): Expr =
 
 def isIoPred(e: Expr): Bool =
   e match {
-    case Expr.EFor(_, _) => true
+    case Expr.EFor(bs, body) => hasDraw(bs) || isIoPred(body)
     case Expr.ECall(f, _) => Str.startsWith(f, "IO.")
     case Expr.EMethod(_, name, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
+    case Expr.EIf(_, t, el) => isIoPred(t) || isIoPred(el)
     case _ => false
   }
 
