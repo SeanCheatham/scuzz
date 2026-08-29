@@ -2931,7 +2931,15 @@ def packCall(ps: List[Param], vals: List[String], owns: List[Bool], prefix: Stri
   if (List.isEmpty(ps) || List.isEmpty(vals)) (("", ""), "") else packCall2(List.head(ps), List.head(vals), headOwn(owns), List.tail(ps), List.tail(vals), tailOwn(owns), prefix, i)
 
 def packCall2(p: Param, v: String, o: Bool, ps: List[Param], vals: List[String], owns: List[Bool], prefix: String, i: Int): ((String, String), String) =
-  if (!isI64Ty(p.ty) && !o && (isI64Lit(v) || isIntSsa(v))) packCallBox(p, v, o, ps, vals, owns, prefix, i) else packCall3(oneArg(p, v), if (o) relPtr(v) else "", packCall(ps, vals, owns, prefix, i + 1))
+  if (isI64Ty(p.ty) && v == "%value") packCallUnbox(p, v, o, ps, vals, owns, prefix, i) else if (!isI64Ty(p.ty) && !o && (isI64Lit(v) || isIntSsa(v))) packCallBox(p, v, o, ps, vals, owns, prefix, i) else packCall3(oneArg(p, v), if (o) relPtr(v) else "", packCall(ps, vals, owns, prefix, i + 1))
+
+def packCallUnbox(_p: Param, v: String, o: Bool, ps: List[Param], vals: List[String], owns: List[Bool], prefix: String, i: Int): ((String, String), String) =
+  packCallUnbox2(pct(prefix, Str.concat("pu", Str.fromInt(i))), v, o, packCall(ps, vals, owns, prefix, i + 1), prefix, i)
+
+def packCallUnbox2(uv: String, v: String, o: Bool, rest: ((String, String), String), prefix: String, i: Int): ((String, String), String) =
+  rest match {
+    case ((pre, args), rels) => ((join(line(Str.concat(tmp(prefix, Str.concat("pu", Str.fromInt(i))), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(v, ")")))), pre), packArg(Str.concat("i64 ", uv), args)), join(if (o) relPtr(v) else "", rels))
+  }
 
 def packCallBox(_p: Param, v: String, o: Bool, ps: List[Param], vals: List[String], owns: List[Bool], prefix: String, i: Int): ((String, String), String) =
   packCallBox2(pct(prefix, Str.concat("pb", Str.fromInt(i))), v, o, packCall(ps, vals, owns, prefix, i + 1), prefix, i)
