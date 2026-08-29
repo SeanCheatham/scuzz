@@ -513,9 +513,10 @@ jobs:
 
       - name: Headless UI + golden PNGs
         run: |
-          cargo run -p scuzz -- run --headless examples/counter
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" run --headless examples/counter
           test -f examples/counter/build/snapshot.png
-          cargo run -p scuzz -- test examples/counter
+          "$SCUZZ" test examples/counter
           cargo run -p scuzz -- run --headless examples/studio
           test -f examples/studio/build/snapshot.png
           cargo run -p scuzz -- test examples/studio
