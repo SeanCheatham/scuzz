@@ -593,7 +593,7 @@ jobs:
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-adt; then
             echo "corpus-only should pin the bad-adt failure" && exit 1
           fi
-          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-sched; then
+          if "$SCUZZ" fuzz --iterations 0 examples/bad-sched; then
             echo "corpus-only should pin the bad-sched failure" && exit 1
           fi
           grep -q 'drive area Rect(' examples/bad-adt/corpus/209ce82661a8103a.toml
@@ -615,18 +615,18 @@ jobs:
           grep -q 'pct_d = 2' examples/bad-sched/corpus/d037d00bc981a2fb.toml
           grep -q 'pct_k = 0' examples/bad-sched/corpus/d037d00bc981a2fb.toml
           grep -q 'drive checkOrder' examples/bad-sched/corpus/d037d00bc981a2fb.toml
-          if cargo run -p scuzz -- fuzz --replay examples/bad-sched/corpus/d037d00bc981a2fb.toml examples/bad-sched; then
+          if "$SCUZZ" fuzz --replay examples/bad-sched/corpus/d037d00bc981a2fb.toml examples/bad-sched; then
             echo "schedule replay should have reproduced the failure" && exit 1
           fi
           grep -v -e schedule_seed -e pct_d -e pct_k examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad-sched-fifo.toml
-          if ! cargo run -p scuzz -- fuzz --replay /tmp/bad-sched-fifo.toml examples/bad-sched; then
+          if ! "$SCUZZ" fuzz --replay /tmp/bad-sched-fifo.toml examples/bad-sched; then
             echo "FIFO replay (no schedule_seed) should pass" && exit 1
           fi
-          if cargo run -p scuzz -- fuzz --iterations 8 examples/bad-response; then
+          if "$SCUZZ" fuzz --iterations 8 examples/bad-response; then
             echo "fuzz should have found the response failure" && exit 1
           fi
           test -f examples/bad-response/build/fuzz/repro.toml
-          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-response; then
+          if "$SCUZZ" fuzz --iterations 0 examples/bad-response; then
             echo "corpus-only should pin the bad-response failure" && exit 1
           fi
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-split; then

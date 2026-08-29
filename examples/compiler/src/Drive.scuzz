@@ -171,8 +171,34 @@ def fuzzCollectMan2(dir: String, ok: Bool, err: String, deps: List[(String, Stri
 
 def fuzzCollectListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
   readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own =>
-    collectDeps(dir, deps, own).flatMap(files => fuzzReadDrv(joinSlash(dir, "src")).flatMap(drv => fuzzCollectVer(dir, files, drv)))
+    collectDeps(dir, deps, own).flatMap(files => fuzzSimFiles(dir, deps, files).flatMap(simmed => fuzzReadDrv(joinSlash(dir, "src")).flatMap(drv => fuzzCollectVer(dir, simmed, drv))))
   )
+
+def fuzzSimFiles(dir: String, deps: List[(String, String)], files: List[(String, String)]): IO[List[(String, String)]] =
+  if (List.isEmpty(files)) IO.pure(files) else fuzzSimHd(dir, deps, List.head(files), List.tail(files))
+
+def fuzzSimHd(dir: String, deps: List[(String, String)], h: (String, String), rest: List[(String, String)]): IO[List[(String, String)]] =
+  h match {
+    case (stem, src) => fuzzSimOne(dir, deps, stem, src).flatMap(got => fuzzSimFiles(dir, deps, rest).map(more => (stem, got) :: more))
+  }
+
+def fuzzSimOne(dir: String, deps: List[(String, String)], stem: String, src: String): IO[String] =
+  fuzzSimPath(joinSlash(joinSlash(dir, "src"), Str.concat(stem, ".scuzz_sim")), src).handleErrorWith(_ =>
+    fuzzSimDeps(dir, deps, stem, src)
+  )
+
+def fuzzSimPath(path: String, src: String): IO[String] =
+  Fs.read(path).map(sim => Verify.applySim(src, sim))
+
+def fuzzSimDeps(dir: String, deps: List[(String, String)], stem: String, src: String): IO[String] =
+  if (List.isEmpty(deps)) IO.pure(src) else fuzzSimDepHd(dir, List.head(deps), List.tail(deps), stem, src)
+
+def fuzzSimDepHd(dir: String, d: (String, String), rest: List[(String, String)], stem: String, src: String): IO[String] =
+  d match {
+    case (_name, path) => fuzzSimPath(joinSlash(joinSlash(joinSlash(dir, path), "src"), Str.concat(stem, ".scuzz_sim")), src).handleErrorWith(_ =>
+      fuzzSimDeps(dir, rest, stem, src)
+    )
+  }
 
 def fuzzReadDrv(srcDir: String): IO[String] =
   Fs.list(srcDir).flatMap(ents => fuzzDrvGo(srcDir, ents, "")).handleErrorWith(_ =>
@@ -760,6 +786,9 @@ def fuzzDrivePath(outDir: String): String =
 def fuzzWriteSeeds(outDir: String, script: String): IO[Unit] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(joinSlash(outDir, "seeds.txt"), script))
 
+def fuzzDumpPath(outDir: String): String =
+  joinSlash(joinSlash(outDir, "fuzz"), "dump.txt")
+
 def fuzzWriteDrive(outDir: String, script: String): IO[Unit] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(fuzzDrivePath(outDir), script))
 
@@ -786,16 +815,16 @@ def fuzzSearch(exe: String, hasUi: Bool, outDir: String, script: String, n: Int,
 )
 
 def fuzzProbe(exe: String, hasUi: Bool, outDir: String, script: String): IO[Int] =
-  runLine(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), script != "", "", ""), exe)).map(r => fuzzProbeCode(r))
+  runLine(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), script != "", "", ""), exe)).map(r => fuzzProbeCode(r))
 
 def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun): IO[Int] =
-  runLine(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), run.script != "", run.sched, run.fault), exe)).map(r => fuzzProbeCode(r))
+  runLine(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault), exe)).map(r => fuzzProbeCode(r))
 
-def fuzzProbeEnv(hasUi: Bool, scriptPath: String, hasScript: Bool, sched: String, fault: String): String =
-  Str.concat(if (hasUi) headlessEnv() else testEnv(), Str.concat(if (hasScript) fuzzDriveEnv(hasUi, scriptPath) else "", Str.concat(fuzzSchedEnv(sched), fuzzFaultEnv(fault))))
+def fuzzProbeEnv(hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String): String =
+  Str.concat(testEnv(), Str.concat(if (hasUi) headlessEnv() else "", Str.concat(if (hasScript) fuzzDriveEnv(hasUi, scriptPath, dumpPath) else "", Str.concat(fuzzSchedEnv(sched), fuzzFaultEnv(fault)))))
 
-def fuzzDriveEnv(hasUi: Bool, scriptPath: String): String =
-  Str.concat(if (hasUi) "SCUZZ_TESTRT=1 " else "", Str.concat("SCUZZ_DRIVE_SCRIPT=", Str.concat(scriptPath, " ")))
+def fuzzDriveEnv(hasUi: Bool, scriptPath: String, dumpPath: String): String =
+  if (hasUi) Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(scriptPath, Str.concat(" SCUZZ_FUZZ_DUMP=", Str.concat(dumpPath, " ")))) else Str.concat("SCUZZ_DRIVE_SCRIPT=", Str.concat(scriptPath, " "))
 
 def fuzzSchedEnv(sched: String): String =
   if (sched == "") "" else Str.concat("SCUZZ_SCHED_SEED=", Str.concat(sched, " "))
@@ -879,7 +908,7 @@ def fuzzMutClass2(site: Int, code: Int, tl: String, base: String, acc: FuzzMut):
 def fuzzIdleAt(exe: String, hasUi: Bool, mutDir: String): IO[(Int, String)] =
   Fs.mkdirs(mutDir).flatMap(_ =>
     Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ =>
-      runLine(Str.concat(fuzzProbeEnv(hasUi, joinSlash(mutDir, "drive.txt"), false, "", ""), Str.concat(fuzzTlEnv(joinSlash(mutDir, "timeline.txt")), exe))).flatMap(r => fuzzIdleGot(mutDir, r))
+      runLine(Str.concat(fuzzProbeEnv(hasUi, joinSlash(mutDir, "drive.txt"), joinSlash(mutDir, "dump.txt"), false, "", ""), Str.concat(fuzzTlEnv(joinSlash(mutDir, "timeline.txt")), exe))).flatMap(r => fuzzIdleGot(mutDir, r))
     )
   )
 
