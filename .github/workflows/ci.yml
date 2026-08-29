@@ -590,7 +590,7 @@ jobs:
           if "$SCUZZ" fuzz --iterations 0 examples/bad-fault; then
             echo "corpus-only should pin the bad-fault failure" && exit 1
           fi
-          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-adt; then
+          if "$SCUZZ" fuzz --iterations 0 examples/bad-adt; then
             echo "corpus-only should pin the bad-adt failure" && exit 1
           fi
           if "$SCUZZ" fuzz --iterations 0 examples/bad-sched; then
@@ -599,7 +599,7 @@ jobs:
           grep -q 'drive area Rect(' examples/bad-adt/corpus/209ce82661a8103a.toml
           grep -q 'square_false' examples/bad-adt/build/fuzz/summary.toml
           grep -q 'wide_false' examples/bad-adt/build/fuzz/summary.toml
-          if cargo run -p scuzz -- fuzz --replay examples/bad-adt/corpus/209ce82661a8103a.toml examples/bad-adt; then
+          if "$SCUZZ" fuzz --replay examples/bad-adt/corpus/209ce82661a8103a.toml examples/bad-adt; then
             echo "replay should have reproduced the ADT property failure" && exit 1
           fi
           test -f examples/bad-fault/build/fuzz/repro.toml

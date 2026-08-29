@@ -4,6 +4,8 @@ import Parse.Prog
 import Parse.Expr
 import Parse.Arm
 import Parse.Bind
+import Parse.En
+import Parse.EnCase
 import Parse.pretty0
 import Parse.pretty
 
@@ -32,14 +34,114 @@ def noStr(): List[String] =
 def noFun(): List[Fun] =
   []
 
+def noEn(): List[En] =
+  []
+
 def kindTok(p: Param): String =
-  if (p.ty == "Int") intTok(p.w) else if (p.ty == "String") "s" else if (p.ty == "Bool") "b" else ""
+  kindTokE(p, noEn())
+
+def kindTokE(p: Param, ens: List[En]): String =
+  if (p.ty == "Int") intTok(p.w) else if (p.ty == "String") "s" else if (p.ty == "Bool") "b" else if (isListTy(p.ty)) listTok(p.ty, ens, 0) else adtTok(p.ty, ens, 0)
+
+def isListTy(t: String): Bool =
+  Str.len(t) > 6 && Str.slice(t, 0, 5) == "List[" && Str.charAt(t, Str.len(t) - 1) == 93
+
+def listInner(t: String): String =
+  Str.slice(t, 5, Str.len(t) - 1)
+
+def listTok(t: String, ens: List[En], depth: Int): String =
+  Str.concat("[", Str.concat(typeTok(listInner(t), ens, depth + 1), "]"))
+
+def typeTok(t: String, ens: List[En], depth: Int): String =
+  if (t == "Int") "i" else if (t == "String") "s" else if (t == "Bool") "b" else if (isListTy(t)) listTok(t, ens, depth) else adtTok(t, ens, depth)
+
+def adtTok(ty: String, ens: List[En], depth: Int): String =
+  adtTokHit(findEn(ens, tyHead(ty)), ty, ens, depth)
+
+def tyHead(t: String): String =
+  tyHeadAt(t, 0)
+
+def tyHeadAt(t: String, i: Int): String =
+  if (i >= Str.len(t)) t else if (Str.charAt(t, i) == 91) Str.slice(t, 0, i) else tyHeadAt(t, i + 1)
+
+def findEn(ens: List[En], name: String): List[En] =
+  if (List.isEmpty(ens)) noEn() else findEn1(List.head(ens), List.tail(ens), name)
+
+def findEn1(h: En, rest: List[En], name: String): List[En] =
+  h match {
+    case En(_, n, _, _) => if (n == name) h :: noEn() else findEn(rest, name)
+  }
+
+def adtTokHit(hit: List[En], ty: String, ens: List[En], depth: Int): String =
+  if (List.isEmpty(hit)) ty else adtTokEn(List.head(hit), ens, depth)
+
+def adtTokEn(e: En, ens: List[En], depth: Int): String =
+  e match {
+    case En(isRec, name, _, cases) => if (isRec || recLike(name, cases)) recTok(name, cases, ens, depth) else enumTok(cases, ens, depth)
+  }
+
+def recLike(name: String, cs: List[EnCase]): Bool =
+  List.len(cs) == 1 && List.head(cs).name == name
+
+def recTok(name: String, cs: List[EnCase], ens: List[En], depth: Int): String =
+  Str.concat(name, Str.concat("(", Str.concat(caseFields(List.head(cs), ens, depth), ")")))
+
+def caseFields(c: EnCase, ens: List[En], depth: Int): String =
+  c match {
+    case EnCase(_, fs) => fieldToks(fs, ens, depth)
+  }
+
+def fieldToks(fs: List[Param], ens: List[En], depth: Int): String =
+  if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) fieldTok(List.head(fs), ens, depth) else Str.concat(fieldTok(List.head(fs), ens, depth), Str.concat(",", fieldToks(List.tail(fs), ens, depth)))
+
+def fieldTok(p: Param, ens: List[En], depth: Int): String =
+  if (p.ty == "Int") intTok(p.w) else typeTok(p.ty, ens, depth + 1)
+
+def enumTok(cs: List[EnCase], ens: List[En], depth: Int): String =
+  Str.concat("e:", enumCases(if (depth >= 3) leafCases(cs) else cs, ens, depth))
+
+def leafCases(cs: List[EnCase]): List[EnCase] =
+  if (List.isEmpty(cs)) noCase() else leafCases1(List.head(cs), List.tail(cs))
+
+def leafCases1(c: EnCase, rest: List[EnCase]): List[EnCase] =
+  if (isLeafCase(c)) c :: leafCases(rest) else leafCases(rest)
+
+def isLeafCase(c: EnCase): Bool =
+  c match {
+    case EnCase(_, fs) => allLeaf(fs)
+  }
+
+def allLeaf(fs: List[Param]): Bool =
+  List.isEmpty(fs) || leafTy(List.head(fs).ty) && allLeaf(List.tail(fs))
+
+def leafTy(t: String): Bool =
+  t == "Int" || t == "String" || t == "Bool"
+
+def enumCases(cs: List[EnCase], ens: List[En], depth: Int): String =
+  if (List.isEmpty(cs)) "" else if (List.len(cs) == 1) caseTok(List.head(cs), ens, depth) else Str.concat(caseTok(List.head(cs), ens, depth), Str.concat("|", enumCases(List.tail(cs), ens, depth)))
+
+def caseTok(c: EnCase, ens: List[En], depth: Int): String =
+  c match {
+    case EnCase(name, fs) => if (List.isEmpty(fs)) name else Str.concat(name, Str.concat("(", Str.concat(fieldToks(fs, ens, depth), ")")))
+  }
+
+def noCase(): List[EnCase] =
+  []
 
 def intTok(w: String): String =
   if (w == "") "i" else if (findIdx(w, ">=", 0) >= 0) Str.concat("i>=", trimNum(afterOp(w, ">="))) else if (findIdx(w, "<=", 0) >= 0) Str.concat("i<=", trimNum(afterOp(w, "<="))) else if (findIdx(w, ">", 0) >= 0) Str.concat("i>", trimNum(afterOp(w, ">"))) else if (findIdx(w, "<", 0) >= 0) Str.concat("i<", trimNum(afterOp(w, "<"))) else "i"
 
 def friendly(p: Param): Bool =
-  p.ty == "Int" || p.ty == "String" || p.ty == "Bool"
+  p.ty == "Int" || p.ty == "String" || p.ty == "Bool" || isGenTy(p.ty)
+
+def isGenTy(t: String): Bool =
+  if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else if (opaqueTy(t)) false else true
+
+def opaqueTy(t: String): Bool =
+  t == "Fiber" || t == "Ref" || t == "Queue" || t == "Deferred" || t == "Resource" || t == "Stream" || t == "Map" || t == "Set"
+
+def hasSub(s: String, n: String): Bool =
+  findIdx(s, n, 0) >= 0
 
 def allFriendly(ps: List[Param]): Bool =
   List.isEmpty(ps) || friendly(List.head(ps)) && allFriendly(List.tail(ps))
@@ -75,10 +177,13 @@ def rels1(d: Fun, rest: List[Fun]): List[Fun] =
   if (isRel(d)) d :: rels(rest) else rels(rest)
 
 def specOf(d: Fun): String =
-  if (List.isEmpty(d.params)) d.name else Str.concat(d.name, Str.concat(" ", specs(d.params)))
+  specOfE(d, noEn())
 
-def specs(ps: List[Param]): String =
-  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) kindTok(List.head(ps)) else Str.concat(kindTok(List.head(ps)), Str.concat(" ", specs(List.tail(ps))))
+def specOfE(d: Fun, ens: List[En]): String =
+  if (List.isEmpty(d.params)) d.name else Str.concat(d.name, Str.concat(" ", specs(d.params, ens)))
+
+def specs(ps: List[Param], ens: List[En]): String =
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) kindTokE(List.head(ps), ens) else Str.concat(kindTokE(List.head(ps), ens), Str.concat(" ", specs(List.tail(ps), ens)))
 
 def seedArg(p: Param): String =
   if (p.ty == "Int") "0" else if (p.ty == "Bool") "false" else "a"
@@ -164,8 +269,8 @@ def reproSched(sched: String): String =
 def reproFault(fault: String): String =
   if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
 
-def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int): String =
-  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, killed, survived, inert, ran, sites))
+def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, classText: String): String =
+  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, killed, survived, inert, ran, sites, classText))
 
 def summaryFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("""[fuzz]
@@ -176,7 +281,7 @@ search = """, Str.concat(Str.fromInt(search), Str.concat("""
 search_failures = """, Str.concat(Str.fromInt(failures), Str.concat("""
 corpus = """, Str.concat(Str.fromInt(corpus), Str.concat("\ndrivers = []\nevents = []\ndeclared = []\nreachability = []\nmissing_budget = []\nmissing_corpus = []\nrepro = \"", Str.concat(repro, "\"\nreplay = \"\"\n\n"))))))))))))))
 
-def summaryRest(corpus: Int, corpFail: Int, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int): String =
+def summaryRest(corpus: Int, corpFail: Int, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, classText: String): String =
   Str.concat("""[coverage]
 unclaimed_varied = []
 
@@ -187,7 +292,7 @@ reached = []
 promoted = 0
 
 [classify]
-[mutate]
+""", Str.concat(classText, Str.concat("""[mutate]
 killed = """, Str.concat(Str.fromInt(killed), Str.concat("""
 survived = """, Str.concat(Str.fromInt(survived), Str.concat("""
 inert = """, Str.concat(Str.fromInt(inert), Str.concat("""
@@ -196,13 +301,55 @@ sites = """, Str.concat(Str.fromInt(sites), """
 oracles = 0
 score = 1.000
 survivors = []
-"""))))))))))))))
+"""))))))))))))))))
+
+def classToml(text: String): String =
+  classLines(linesOf(text))
+
+def classLines(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(classRow(List.head(xs)), classLines(List.tail(xs)))
+
+def classRow(line: String): String =
+  classRow2(className(line), classNums(line))
+
+def className(line: String): String =
+  classTok(line, 0)
+
+def classNums(line: String): String =
+  Str.slice(line, nextSp(line, 0) + 1, Str.len(line))
+
+def classTok(line: String, i: Int): String =
+  if (i >= Str.len(line) || Str.charAt(line, i) == 32) Str.slice(line, 0, i) else classTok(line, i + 1)
+
+def nextSp(line: String, i: Int): Int =
+  if (i >= Str.len(line)) i else if (Str.charAt(line, i) == 32) i else nextSp(line, i + 1)
+
+def classRow2(name: String, rest: String): String =
+  if (name == "") "" else Str.concat(name, Str.concat("_true = ", Str.concat(classYes(rest), Str.concat("\n", Str.concat(name, Str.concat("_false = ", Str.concat(classNo(rest), "\n")))))))
+
+def classYes(rest: String): String =
+  classTok(rest, 0)
+
+def classNo(rest: String): String =
+  classTok(classNums(rest), 0)
 
 def mapSeed(ds: List[Fun]): List[String] =
-  if (List.isEmpty(ds)) noStr() else seedOf(List.head(ds)) :: mapSeed(List.tail(ds))
+  if (List.isEmpty(ds)) noStr() else seedPick(List.head(ds), List.tail(ds))
+
+def seedPick(d: Fun, rest: List[Fun]): List[String] =
+  if (seedOk(d.params)) seedOf(d) :: mapSeed(rest) else mapSeed(rest)
+
+def seedOk(ps: List[Param]): Bool =
+  List.isEmpty(ps) || seedFriendly(List.head(ps)) && seedOk(List.tail(ps))
+
+def seedFriendly(p: Param): Bool =
+  p.ty == "Int" || p.ty == "String" || p.ty == "Bool"
 
 def mapSpec(ds: List[Fun]): List[String] =
-  if (List.isEmpty(ds)) noStr() else specOf(List.head(ds)) :: mapSpec(List.tail(ds))
+  mapSpecE(ds, noEn())
+
+def mapSpecE(ds: List[Fun], ens: List[En]): List[String] =
+  if (List.isEmpty(ds)) noStr() else specOfE(List.head(ds), ens) :: mapSpecE(List.tail(ds), ens)
 
 def parseVerify(src: String): List[Fun] =
   parseVerifyProg(Parse.parse(Lexer.lex(src)))
@@ -398,6 +545,25 @@ def seeds(src: String): String =
 
 def drivers(src: String): String =
   nls(mapSpec(parseVerify(src)))
+
+def driversFrom(srcs: List[String], ens: List[En]): String =
+  nls(mapSpecE(parseVerifyAll(srcs), ens))
+
+def parseVerifyAll(srcs: List[String]): List[Fun] =
+  if (List.isEmpty(srcs)) noFun() else List.concat(parseVerify(List.head(srcs)), parseVerifyAll(List.tail(srcs)))
+
+def ensOfFiles(files: List[(String, String)]): List[En] =
+  if (List.isEmpty(files)) noEn() else List.concat(ensOfFile(List.head(files)), ensOfFiles(List.tail(files)))
+
+def ensOfFile(h: (String, String)): List[En] =
+  h match {
+    case (_, src) => ensOfProg(Parse.parse(Lexer.lex(src)))
+  }
+
+def ensOfProg(p: Prog): List[En] =
+  p match {
+    case Prog(_, enums, _, _, _, _, _, _, _) => enums
+  }
 
 def emptyVerify(file: String): String =
   Str.concat(file, Str.concat(":1:1: error: ", Str.concat(file, ": verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")))
