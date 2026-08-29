@@ -386,7 +386,8 @@ jobs:
           grep -q "mapn:3048" /tmp/scale.out
           grep -q "maps:2098176" /tmp/scale.out
           grep -q "hit:0:49" /tmp/scale.out
-          cargo run -p scuzz -- run examples/io | tee /tmp/io.out
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out
           grep -q "deferred-ok" /tmp/io.out
@@ -427,11 +428,10 @@ jobs:
           grep -q "mono:" /tmp/io.out
           grep -q "kit:skip" /tmp/io.out
           grep -q "fs:" /tmp/io.out
-          cargo run -p scuzz -- test examples/io | tee /tmp/io-test.out
+          "$SCUZZ" test examples/io | tee /tmp/io-test.out
           grep -q "served:/" /tmp/io-test.out
           grep -q "impurity-ok" /tmp/io-test.out
           grep -q "net:" /tmp/io-test.out
-          SCUZZ=./examples/cli/build/cli
           "$SCUZZ" check examples/hello
           "$SCUZZ" check examples/kernel
           cargo run -p scuzz -- check examples/scale
@@ -443,13 +443,13 @@ jobs:
           cargo run -p scuzz -- check examples/studio
           cargo run -p scuzz -- check examples/editor
           "$SCUZZ" check examples/bad-example
-          cargo run -p scuzz -- test examples/bad-example
+          "$SCUZZ" test examples/bad-example
           cargo run -p scuzz -- check examples/bad-fault
-          cargo run -p scuzz -- test examples/bad-fault
+          "$SCUZZ" test examples/bad-fault
           cargo run -p scuzz -- check examples/bad-adt
-          cargo run -p scuzz -- test examples/bad-adt
+          "$SCUZZ" test examples/bad-adt
           "$SCUZZ" check examples/bad-sched
-          cargo run -p scuzz -- test examples/bad-sched
+          "$SCUZZ" test examples/bad-sched
           "$SCUZZ" check examples/bad-response
           "$SCUZZ" check examples/bad-split
           if "$SCUZZ" check examples/bad-intent; then
