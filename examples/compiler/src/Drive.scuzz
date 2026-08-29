@@ -395,3 +395,139 @@ def testAfterRun2(code: Int, _out: String, err: String): IO[Unit] =
 def showPkg(p: PkgOut): String =
   if (!p.ok) Str.concat("fail:", p.diags) else Str.concat("ok name=", Str.concat(p.name, Str.concat(" ll=", Str.concat(p.llPath, Str.concat(" link=", p.link)))))
 
+def xcodeMiss(): String =
+  "missing Xcode — install Xcode from the App Store, then xcode-select --install"
+
+def ndkMiss(): String =
+  "missing Android NDK — install the NDK, then set ANDROID_NDK_HOME"
+
+def sdkMiss(): String =
+  "missing Android SDK — install the Android SDK, then set ANDROID_HOME"
+
+def badTarget(t: String): String =
+  Str.concat("unknown package target '", Str.concat(t, "' (host|android|ios|all). Example: scuzz package --target host"))
+
+def bundleId(): String =
+  "dev.scuzz.app"
+
+def hostRunSh(name: String): String =
+  Str.concat("#!/usr/bin/env bash\n# Host Mobile shell smoke. Same app binary; Mobile peer + host embedder.\nset -euo pipefail\nDIR=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\nexport SCUZZ_UI_RUNTIME=mobile\nexport SCUZZ_MOBILE_SHELL=1\nexec \"$DIR/", Str.concat(name, "\" \"$@\"\n"))
+
+def hostMeta(name: String): String =
+  Str.concat("[package]\nname = \"", Str.concat(name, Str.concat("\"\ntarget = \"host\"\nbundle_id = \"", Str.concat(bundleId(), "\"\nruntime = \"mobile\"\n"))))
+
+def linkOnly(hasUi: Bool, name: String, outDir: String): IO[Unit] =
+  runLine(linkLineFor(hasUi, "clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => linkOnlyGot(r))
+
+def linkOnlyGot(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("link")) else IO.pure(())
+  }
+
+def compileLinked(dir: String, outDir: String): IO[Unit] =
+  emitDir(dir, outDir).flatMap(_ => compileLinkedMan(dir, outDir))
+
+def compileLinkedMan(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => compileLinkedUi(Manifest.parse(toml), outDir))
+
+def compileLinkedUi(m: Man, outDir: String): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else if (m.hasUi) ensureUi().flatMap(_ => linkOnly(true, m.name, outDir)) else linkOnly(false, m.name, outDir)
+
+def pkgDir(dir: String, outDir: String, target: String): IO[Unit] =
+  if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir) else if (target == "ios") pkgIos(dir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ => pkgAndroid(dir).flatMap(_ => pkgIos(dir))) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
+
+def pkgHost(dir: String, outDir: String): IO[Unit] =
+  compileLinked(dir, outDir).flatMap(_ => pkgHostMan(dir, outDir))
+
+def pkgHostMan(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgHostNamed(Manifest.parse(toml), dir, outDir))
+
+def pkgHostNamed(m: Man, dir: String, outDir: String): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else pkgHostCopy(m.name, exeName(outDir, m.name), joinSlash(joinSlash(outDir, "package"), "host"))
+
+def pkgHostCopy(name: String, exe: String, dest: String): IO[Unit] =
+  Fs.mkdirs(dest).flatMap(_ => pkgHostCp(name, exe, dest))
+
+def pkgHostCp(name: String, exe: String, dest: String): IO[Unit] =
+  runLine(Str.concat("cp ", Str.concat(exe, Str.concat(" ", joinSlash(dest, name))))).flatMap(r => pkgHostChmod(r, name, dest))
+
+def pkgHostChmod(r: (Int, String, String), name: String, dest: String): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("cp")) else runLine(Str.concat("chmod +x ", joinSlash(dest, name))).flatMap(_ => pkgHostWrite(name, dest))
+  }
+
+def pkgHostWrite(name: String, dest: String): IO[Unit] =
+  Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ =>
+    runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ =>
+      Fs.write(joinSlash(dest, "package.toml"), hostMeta(name)).flatMap(_ =>
+        IO.println(Str.concat("packaged host → ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")"))))
+      )
+    )
+  )
+
+def pkgAndroid(dir: String): IO[Unit] =
+  runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_ndk.sh ", dir)).flatMap(r => pkgAndroidNdk(r, dir))
+
+def pkgAndroidNdk(r: (Int, String, String), dir: String): IO[Unit] =
+  r match {
+    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_apk.sh ", dir)).flatMap(r2 => pkgAndroidApk(r2))
+  }
+
+def pkgAndroidApk(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else IO.println("scuzz package ok (android)")
+  }
+
+def pkgAndroidFail(out: String, err: String): IO[Unit] =
+  IO.println(if (Str.len(err) > 0) err else if (Str.len(out) > 0) out else ndkMiss()).flatMap(_ => IO.fail("android"))
+
+def pkgIos(dir: String): IO[Unit] =
+  runLine("xcrun --sdk iphonesimulator --show-sdk-path").flatMap(r => pkgIosGot(r, dir))
+
+def pkgIosGot(r: (Int, String, String), dir: String): IO[Unit] =
+  r match {
+    case (code, _out, _err) => if (code != 0) IO.println(xcodeMiss()).flatMap(_ => IO.fail("ios")) else runLine(Str.concat("bash crates/embedder-mobile/shells/ios/build_sim.sh ", dir)).flatMap(r2 => pkgIosRun(r2))
+  }
+
+def pkgIosRun(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, out, err) => if (code != 0) IO.println(if (Str.len(err) > 0) err else out).flatMap(_ => IO.fail("ios")) else IO.println("scuzz package ok (ios)")
+  }
+
+def fuzzDir(dir: String, outDir: String, iterations: Int, seed: Int): IO[Unit] =
+  compileLinked(dir, outDir).flatMap(_ => fuzzLinked(dir, outDir, iterations, seed))
+
+def fuzzLinked(dir: String, outDir: String, iterations: Int, seed: Int): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzMan(Manifest.parse(toml), dir, outDir, iterations, seed))
+
+def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else fuzzBody(dir, exeName(outDir, m.name), m.hasUi, iterations, seed)
+
+def fuzzBody(dir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int): IO[Unit] =
+  fuzzCorpusN(dir).flatMap(corpus => fuzzSearch(exe, hasUi, Verify.searchN(iterations), 0).flatMap(fail => fuzzDone(iterations, seed, corpus, fail)))
+
+def fuzzCorpusN(dir: String): IO[Int] =
+  Fs.list(joinSlash(dir, "corpus")).map(ents => fuzzCorpusCount(ents, 0)).handleErrorWith(_ => IO.pure(0))
+
+def fuzzCorpusCount(ents: List[(String, Bool)], n: Int): Int =
+  if (List.isEmpty(ents)) n else fuzzCorpusCountHd(List.head(ents), List.tail(ents), n)
+
+def fuzzCorpusCountHd(h: (String, Bool), rest: List[(String, Bool)], n: Int): Int =
+  h match {
+    case (name, isDir) => if (isDir) fuzzCorpusCount(rest, n) else if (Str.endsWith(name, ".toml")) fuzzCorpusCount(rest, n + 1) else fuzzCorpusCount(rest, n)
+  }
+
+def fuzzSearch(exe: String, hasUi: Bool, n: Int, fail: Int): IO[Int] =
+  if (n <= 0) IO.pure(fail) else fuzzProbe(exe, hasUi).flatMap(bad => fuzzSearch(exe, hasUi, n - 1, fail + bad))
+
+def fuzzProbe(exe: String, hasUi: Bool): IO[Int] =
+  runLine(Str.concat(if (hasUi) headlessEnv() else testEnv(), exe)).map(r => fuzzProbeCode(r))
+
+def fuzzProbeCode(r: (Int, String, String)): Int =
+  r match {
+    case (code, _out, _err) => if (code == 0) 0 else 1
+  }
+
+def fuzzDone(iterations: Int, seed: Int, corpus: Int, fail: Int): IO[Unit] =
+  IO.println(Verify.fuzzOut(iterations, seed, corpus, 0, fail)).flatMap(_ => if (fail > 0) IO.fail("scuzz fuzz") else IO.pure(()))
+
