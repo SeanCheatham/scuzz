@@ -657,7 +657,7 @@ def emptyVerify(file: String): String =
   Str.concat(file, Str.concat(":1:1: error: ", Str.concat(file, ": verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")))
 
 def checkVerify(src: String, file: String): String =
-  if (List.isEmpty(parseVerify(src))) emptyVerify(file) else "scuzz check ok"
+  if (List.isEmpty(parseVerify(src)) && List.isEmpty(parseClaims(src))) emptyVerify(file) else "scuzz check ok"
 
 def testOut(checkOk: Bool): String =
   if (!checkOk) "scuzz test fail" else Str.concat("project compile smoke ok", Str.concat(nl(), Str.concat("IO smoke ok", Str.concat(nl(), "scuzz test ok"))))
