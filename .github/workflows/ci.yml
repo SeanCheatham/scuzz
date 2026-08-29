@@ -517,9 +517,9 @@ jobs:
           "$SCUZZ" run --headless examples/counter
           test -f examples/counter/build/snapshot.png
           "$SCUZZ" test examples/counter
-          cargo run -p scuzz -- run --headless examples/studio
+          "$SCUZZ" run --headless examples/studio
           test -f examples/studio/build/snapshot.png
-          cargo run -p scuzz -- test examples/studio
+          "$SCUZZ" test examples/studio
           "$SCUZZ" run --headless examples/editor
           test -f examples/editor/build/snapshot.png
           "$SCUZZ" test examples/editor
