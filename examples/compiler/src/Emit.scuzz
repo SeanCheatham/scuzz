@@ -1424,7 +1424,7 @@ def emitTapNeth(prefix: String, bind: String, body: Expr, strs: List[String], de
   emitTapNeth2(prefix, bind, dropParam(ps, bind), body, strs, defs, ens)
 
 def emitTapNeth2(prefix: String, bind: String, rest: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  nethWithConts(prefix, body, strs, defs, ens, tapNethPs(bind, rest), emitTapNeth3(prefix, join(emitUnpack(rest), tapBindLine(bind)), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, tapNethPs(bind, rest))))
+  nethWithConts(prefix, body, strs, defs, ens, tapNethPs(bind, rest), emitTapNeth3(prefix, join(emitUnpack(rest), tapBindLine(bind)), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, tapNethPs(bind, rest)), isIoPred(body)))
 
 def tapBindLine(bind: String): String =
   if (!keepBind(bind) || bind == "self") "" else line(Str.concat("%", Str.concat(bind, " = bitcast ptr %self to ptr")))
@@ -1432,13 +1432,13 @@ def tapBindLine(bind: String): String =
 def tapNethPs(bind: String, rest: List[Param]): List[Param] =
   if (keepBind(bind)) Param(bind, "Any", "", "") :: rest else rest
 
-def emitTapNeth3(prefix: String, pre: String, s: Slot): String =
+def emitTapNeth3(prefix: String, pre: String, s: Slot, io: Bool): String =
   s match {
-    case Slot(code, val, o) => Str.concat(nethBeg(), Str.concat("define internal void @sz_neth_", Str.concat(prefix, Str.concat("(ptr %self, ptr %env) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(join(pre, join(code, tapFinish(val, o, prefix))), Str.concat("  ret void", nethEnd())))))))))
+    case Slot(code, val, o) => Str.concat(nethBeg(), Str.concat("define internal void @sz_neth_", Str.concat(prefix, Str.concat("(ptr %self, ptr %env) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(join(pre, join(code, tapFinish(val, o, prefix, io))), Str.concat("  ret void", nethEnd())))))))))
   }
 
-def tapFinish(val: String, o: Bool, prefix: String): String =
-  if (val == "null" || val == "") if (o) relPtr(val) else "" else join(line(Str.concat(tmp(prefix, "ur"), Str.concat("call ptr @sz_io_unsafe_run_or_die(ptr ", Str.concat(val, ")")))), relPtr(pct(prefix, "ur")))
+def tapFinish(val: String, o: Bool, prefix: String, io: Bool): String =
+  if (io) join(line(Str.concat(tmp(prefix, "ur"), Str.concat("call ptr @sz_io_unsafe_run_or_die(ptr ", Str.concat(val, ")")))), relPtr(pct(prefix, "ur"))) else if (o) relPtr(val) else ""
 
 def nethWithConts(prefix: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ir: String): String =
   join(nethBeg(), join(stampNethC(stampCont(emitConts(body, strs, defs, ens, ps), prefix), prefix), stampCont(dropNethB(ir), prefix)))
