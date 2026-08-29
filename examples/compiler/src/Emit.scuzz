@@ -363,7 +363,7 @@ def eqIsLet(name: String): Bool =
   name == "_" || keepBind(name) && !isTuplePat(name) && isSimpleBind(name)
 
 def isSimpleBind(n: String): Bool =
-  isTuplePat(n) || n != "" && parenAt(n, 0) < 0 && !isConsPat(n)
+  n != "" && parenAt(n, 0) < 0 && !isConsPat(n)
 
 def emitInterp(s: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitInterpFold(interpParts(s, 0, "", noExpr()), prefix, strs, defs, ens, ps, 0)
@@ -2441,13 +2441,22 @@ def emitKitUnaryPtr(rt: String, code: String, vals: List[String], owns: List[Boo
   emitKitUnaryPtr2(rt, code, arg0(vals), headOwn(owns), prefix)
 
 def emitKitUnaryPtr2(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
-  if (kitBoxVal(v, o)) emitKitUnaryBox(rt, code, v, prefix) else Slot(join(code, join(kitCallPtr1(rt, v, prefix), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
+  if (kitBoxVal(v, o)) emitKitUnaryBox(rt, code, v, prefix) else emitKitUnaryPtr3(rt, code, v, o, prefix)
+
+def emitKitUnaryPtr3(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(kitCallPtr1(rt, v, prefix), kitUnaryRel(rt, v, o))), pct(prefix, "v"), true)
+
+def kitKeepUnaryArg(rt: String): Bool =
+  rt == "sz_ref_of"
+
+def kitUnaryRel(rt: String, v: String, o: Bool): String =
+  if (o && !kitKeepUnaryArg(rt)) relPtr(v) else ""
 
 def kitBoxVal(v: String, o: Bool): Bool =
   !o && v != "null" && !ioPurePtr(v) && !isPtrSlot(v, noParam()) && !hasSub(v, "_v")
 
 def emitKitUnaryBox(rt: String, code: String, v: String, prefix: String): Slot =
-  Slot(join(code, join(line(Str.concat(tmp(prefix, "kb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(v, ")")))), join(kitCallPtr1(rt, pct(prefix, "kb"), prefix), relPtr(pct(prefix, "kb"))))), pct(prefix, "v"), true)
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "kb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(v, ")")))), join(kitCallPtr1(rt, pct(prefix, "kb"), prefix), kitUnaryRel(rt, pct(prefix, "kb"), true)))), pct(prefix, "v"), true)
 
 def kitCallPtr1(rt: String, v: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(v, ")"))))))
@@ -3810,7 +3819,7 @@ def emitOkSlotPat(pat: String, body: Expr, prefix: String, strs: List[String], d
   if (isAsPat(pat)) emitOkSlotPat(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), prefix, strs, defs, ens, ps, i, tys, sv, asI64) else if (isVarPat(pat, ens)) emitOkVar(pat, body, prefix, strs, defs, ens, ps, i, sv, asI64) else emitOkSlotPat2(pat, body, prefix, strs, defs, ens, ps, i, tys)
 
 def isVarPat(pat: String, ens: List[En]): Bool =
-  isSimpleBind(pat) && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
+  isSimpleBind(pat) && !isTuplePat(pat) && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
 
 def emitOkVar(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, sv: String, asI64: Bool): Slot =
   emitOkVar2(bindAliasTy(pat, sv, asI64), emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, Param(pat, if (asI64) "Int" else "Any", "", "") :: dropParam(ps, pat)), asI64)
