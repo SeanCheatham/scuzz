@@ -8,6 +8,8 @@ enum Term:
 
 record Point(x: Int where x >= 0, y: Int where y + 1 > y && y * 2 > y && y % 2 < 2 && y == y)
 
+record Box[T](x: T)
+
 type UserId = Int
 type Labels = List[String]
 type BoxList[T] = List[T]
@@ -137,13 +139,13 @@ def applyTup(f: (Int, Int) => Int, p: (Int, Int)): Int =
   f(p)
 
 def plusOne(): Int => Int =
-  (n: Int) => n + 1
+  n => n + 1
 
 def addN(n: Int): Int => Int =
-  (m: Int) => n + m
+  m => n + m
 
 def maybeYes(ok: Bool): IO[Unit] =
-  if (ok) IO.println("ifone:fn")
+  if (ok) IO.println("ifone:fn") else ()
 
 def applyTwice(f: Int => String, n: Int): String =
   Str.concat(f(n), f(n))
@@ -386,9 +388,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"mapeta:${List.join(List.map([1, 2], Str.fromInt()), ",")}")
     _ <- IO.println(s"mapeta0:${List.join(List.map([]: List[Int], Str.fromInt()), ",")}")
     _ <- IO.println(s"usereta:${Str.fromInt(applyInt(id, 3))}")
-    inc = (_ + 1): Int => Int
-    typed = (n: Int) => n + 1
-    eta = Str.fromInt(): Int => String
+    inc = _ + 1
+    typed = n => n + 1
+    eta = Str.fromInt()
     po = plusOne()
     add3 = addN(3)
     _ <- IO.println(s"funlet:${Str.fromInt(inc(3))}")
@@ -412,9 +414,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"pairfold0:${Str.fromInt(List.foldLeft([]: List[Int], 7, add))}")
     _ <- maybeYes(true)
     _ <- maybeYes(false)
-    _ <- if (true) IO.println("ifone:y")
-    _ <- if (false) IO.println("ifone:skip")
-    _ = if (true) ()
+    _ <- if (true) IO.println("ifone:y") else ()
+    _ <- if (false) IO.println("ifone:skip") else ()
+    _ = if (true) () else ()
     _ <- IO.println(s"tab:${List.join(List.tabulate(3, i => Str.fromInt(i)), ",")}")
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
     _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")
@@ -492,7 +494,7 @@ def listProof(): IO[Unit] =
 def describeList(xs: List[String]): String =
   xs match {
     case [] => "empty"
-    case [x] => Str.concat("one:", x)
+    case x :: [] => Str.concat("one:", x)
     case x :: y :: _ => Str.concat("more:", Str.concat(x, y))
   }
 
@@ -565,7 +567,9 @@ def rot3(t: (Int, String, Bool)): (String, Bool, Int) =
   }
 
 def firsts(xs: List[(Int, String)]): List[Int] =
-  List.map(xs, (n, _) => n)
+  List.map(xs, __tup => __tup match {
+  case (n, _) => n
+})
 
 def unpackProof(): IO[Unit] =
   for {
@@ -575,7 +579,9 @@ def unpackProof(): IO[Unit] =
     h :: _t = [8, 9]
     got <- IO.pure(Opt.Some(4))
     Opt.Some(m) = got
-    xs = List.map([Opt.Some(1), Opt.Some(2)], (Opt.Some(k)) => k)
+    xs = List.map([Opt.Some(1), Opt.Some(2)], __p => __p match {
+  case Opt.Some(k) => k
+})
     _ <- IO.println(s"unpack:${Str.fromInt(x + y)}")
     _ <- IO.println(s"unpackSome:${Str.fromInt(n)}")
     _ <- IO.println(s"unpackBare:${Str.fromInt(k)}")
@@ -590,21 +596,17 @@ def choose(ok: Bool): IO[Int] =
 def positive(n: Int): IO[Int] =
   for {
     x <- IO.pure(n)
-    if x > 0
+    __guard = x > 0
   } yield x
 
 def failProof(): IO[Unit] =
   for {
     n <- choose(true)
     _ <- IO.println(s"failif:${Str.fromInt(n)}")
-    _ <- choose(false).handleErrorWith(_ =>
-  IO.println("failif:miss")
-)
+    _ <- choose(false).handleErrorWith(_ => IO.println("failif:miss"))
     p <- positive(3)
     _ <- IO.println(s"forif:${Str.fromInt(p)}")
-    _ <- positive(0).handleErrorWith(_ =>
-  IO.println("forif:miss")
-)
+    _ <- positive(0).handleErrorWith(_ => IO.println("forif:miss"))
   } yield ()
 
 def mapProof(): IO[Unit] =
@@ -612,7 +614,7 @@ def mapProof(): IO[Unit] =
     n <- IO.pure(3).map(x => x + 1)
     s <- IO.pure("a").map(x => Str.concat(x, "!"))
     z <- IO.pure(1).map(_ => 7)
-    o <- IO.pure(Opt.Some(1)).map({
+    o <- IO.pure(Opt.Some(1)).map(__p => __p match {
   case Opt.Some(n) => n
   case Opt.None => 0
 })
@@ -657,7 +659,7 @@ def eqProof(): IO[Unit] =
     stz = Set.add(Set.empty(), "z")
     o1 = Opt.Some(1)
     o2 = Opt.Some(1)
-    none = Opt.None: Opt[Int]
+    none = Opt.None
     p1 = Point(3, 5)
     p2 = Point(3, 5)
     _ <- IO.println(s"eqStr:${if ("ab" == "ab" && "ab" != "c") "y" else "n"}")
@@ -670,9 +672,8 @@ def eqProof(): IO[Unit] =
     _ <- IO.println(s"eqNest:${if (Opt.Some(o1) == Opt.Some(o2)) "y" else "n"}")
   } yield ()
 
-record Box[T](x: T):
-  def get(): T =
-    self.x
+def get(): T =
+  self.x
 
 @main def main: IO[Unit] =
   for {
@@ -704,7 +705,7 @@ record Box[T](x: T):
     _ <- IO.println(hueBare(Color.Red))
     _ <- IO.println(describeBare(fromBare(2)))
     _ <- IO.println(describeBare(fromBare(0)))
-    noneBare = None: Opt[Int]
+    noneBare = None
     _ <- IO.println(s"barenone:${noneBare.getOrElse(9)}")
     _ <- head match {
   case Color.Red => IO.println("adt:list:red")
@@ -801,16 +802,16 @@ b"""
     _ <- IO.println(s"copyPos:${sum(Point(3, 5).copy(1))}")
     _ <- IO.println(s"copyBox:${Str.fromInt(Box(4).copy(x = 5).get())}")
     _ <- IO.println(s"copyId:${sum(Point(3, 5).copy())}")
-    noneAs = Opt.None: Opt[Int]
+    noneAs = Opt.None
     _ <- IO.println(s"ascribe:${noneAs.getOrElse(9)}")
-    emptyAs = []: List[Int]
+    emptyAs = []
     _ <- IO.println(s"ascribeList:${Str.fromInt(List.len(emptyAs))}")
     _ <- IO.println(s"ascribeInt:${1: Int}")
     uid = idOf(8)
     _ <- IO.println(s"aliasId:$uid")
     _ <- IO.println(s"aliasJoin:${joinLabels(["a", "b"])}")
     _ <- IO.println(s"aliasLen:${lenBoxes([1, 2, 3])}")
-    ascribeId = 4: UserId
+    ascribeId = 4
     _ <- IO.println(s"aliasAscribe:$ascribeId")
     _ <- IO.println(s"aliasTag:${showTag("ok")}")
     _ <- mapSetProof()

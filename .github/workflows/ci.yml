@@ -431,7 +431,9 @@ jobs:
           grep -q "served:/" /tmp/io-test.out
           grep -q "impurity-ok" /tmp/io-test.out
           grep -q "net:" /tmp/io-test.out
-          cargo run -p scuzz -- check examples/kernel
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" check examples/hello
+          "$SCUZZ" check examples/kernel
           cargo run -p scuzz -- check examples/scale
           cargo run -p scuzz -- check examples/fmt
           cargo run -p scuzz -- check examples/tyck
@@ -450,29 +452,29 @@ jobs:
           cargo run -p scuzz -- test examples/bad-sched
           cargo run -p scuzz -- check examples/bad-response
           cargo run -p scuzz -- check examples/bad-split
-          if cargo run -p scuzz -- check examples/bad-intent; then
+          if "$SCUZZ" check examples/bad-intent; then
             echo "empty verify should fail check" && exit 1
           fi
-          cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
+          "$SCUZZ" check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '"severity":"info"' /tmp/hello-check.json
           grep -q 'unclaimed def' /tmp/hello-check.json
-          cargo run -p scuzz -- lsp --help | tee /tmp/lsp-help.txt
+          "$SCUZZ" lsp --help | tee /tmp/lsp-help.txt
           grep -q "scuzz check" /tmp/lsp-help.txt
-          if cargo run -p scuzz -- check testdata/fmt/needs_format 2>/tmp/fmt-check.err; then echo "expected format error" && exit 1; fi
+          if "$SCUZZ" check testdata/fmt/needs_format > /tmp/fmt-check.err 2>&1; then echo "expected format error" && exit 1; fi
           grep -q "needs formatting" /tmp/fmt-check.err
-          cargo run -p scuzz -- build examples/kernel
-          cargo run -p scuzz -- build examples/kernel 2>&1 | tee /tmp/incr.out
+          "$SCUZZ" build examples/kernel
+          "$SCUZZ" build examples/kernel 2>&1 | tee /tmp/incr.out
           grep -q "up-to-date" /tmp/incr.out
           # Path-dep invalidation: a change in a dependency source must rebuild the root.
-          cargo run -p scuzz -- build --full examples/counter
-          cargo run -p scuzz -- build examples/counter 2>&1 | tee /tmp/counter-incr.out
+          "$SCUZZ" build --full examples/counter
+          "$SCUZZ" build examples/counter 2>&1 | tee /tmp/counter-incr.out
           grep -q "up-to-date" /tmp/counter-incr.out
           cp examples/shared/src/Shared.scuzz /tmp/shared-orig.scuzz
           printf 'def counterTitle(): String =\n  "Counter"\n\ndef countLabel(n: Int): String =\n  s"count = $n!"\n' > examples/shared/src/Shared.scuzz
-          cargo run -p scuzz -- build examples/counter 2>&1 | tee /tmp/counter-inval.out
+          "$SCUZZ" build examples/counter 2>&1 | tee /tmp/counter-inval.out
           if grep -q "up-to-date" /tmp/counter-inval.out; then echo "dependency edit should invalidate fingerprint" && exit 1; fi
           cp /tmp/shared-orig.scuzz examples/shared/src/Shared.scuzz
-          cargo run -p scuzz -- build --full examples/counter
+          "$SCUZZ" build --full examples/counter
 
       - name: Package release + install-from-tarball smoke
         run: |
