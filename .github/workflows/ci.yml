@@ -101,19 +101,19 @@ jobs:
 
       - name: Hello world → LLVM → native
         run: |
-          cargo run -p scuzz -- build --full examples/hello
-          ./examples/hello/build/hello | tee /tmp/hello.out
+          cargo run -p scuzz -- run examples/cli | tee /tmp/cli.out
+          grep -q "cli-ok" /tmp/cli.out
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" run examples/hello | tee /tmp/hello.out
           grep -q "Hello, Scuzz!" /tmp/hello.out
           grep -q "ready." /tmp/hello.out
-          cargo run -p scuzz -- run examples/fmt | tee /tmp/fmt.out
+          "$SCUZZ" run examples/fmt | tee /tmp/fmt.out
           grep -q "fmt-ok" /tmp/fmt.out
           cargo run -p scuzz -- run examples/tyck | tee /tmp/tyck.out
           grep -q "tyck-ok" /tmp/tyck.out
           cargo run -p scuzz -- run examples/codegen | tee /tmp/codegen.out
           grep -q "ir-ok" /tmp/codegen.out
-          cargo run -p scuzz -- run examples/cli | tee /tmp/cli.out
-          grep -q "cli-ok" /tmp/cli.out
-          ./examples/cli/build/cli run --out-dir /tmp/scuzz-cli-hello examples/hello | tee /tmp/cli-hello.out
+          "$SCUZZ" run --out-dir /tmp/scuzz-cli-hello examples/hello | tee /tmp/cli-hello.out
           grep -q "Hello, Scuzz!" /tmp/cli-hello.out
           grep -q "ready." /tmp/cli-hello.out
 
