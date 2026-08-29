@@ -389,7 +389,7 @@ def afterClang(r: (Int, String, String), exe: String, env: String): IO[Unit] =
   }
 
 def afterClang2(code: Int, _out: String, err: String, exe: String, env: String): IO[Unit] =
-  if (code != 0) IO.println(err) else runLine(Str.concat(env, exe)).flatMap(r => afterRun(r))
+  if (code != 0) IO.println(err).flatMap(_ => IO.fail("link")) else runLine(Str.concat(env, exe)).flatMap(r => afterRun(r))
 
 def afterRun(r: (Int, String, String)): IO[Unit] =
   r match {
@@ -397,7 +397,7 @@ def afterRun(r: (Int, String, String)): IO[Unit] =
   }
 
 def afterRun2(code: Int, out: String, err: String): IO[Unit] =
-  if (code != 0) IO.println(err) else Sys.write(out)
+  if (code != 0) IO.println(err).flatMap(_ => IO.fail("run")) else Sys.write(out)
 
 def testEnv(): String =
   "SCUZZ_TESTRT=1 SCUZZ_SERVE=1 SCUZZ_KIT=sealed "
