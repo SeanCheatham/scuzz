@@ -368,11 +368,23 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Fmt(path, check) => dispatchFmt(path, check)
     case Cmd.Test(path, update, _, _) => dispatchTest(path, update)
     case Cmd.New(name, path, ui) => dispatchNew(name, path, ui)
+    case Cmd.Package(path, outDir, target) => dispatchPkg(path, outDir, target)
+    case Cmd.Fuzz(path, it, seed, replay, _, _, _, relate) => dispatchFuzz(path, it, seed, replay, relate)
+    case Cmd.Ide(path, outDir, headless) => dispatchIde(path, outDir, headless)
     case Cmd.Help(t) => IO.println(helpOf(t))
     case Cmd.Version => IO.println("scuzz 0.2.0")
     case Cmd.Fail(m) => IO.println(m)
     case _ => IO.println(show(c))
   }
+
+def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
+  Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), target)
+
+def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool): IO[Unit] =
+  if (relate) IO.println("scuzz fuzz --relate is not on this CLI yet").flatMap(_ => IO.fail("fuzz")) else if (replay != "") IO.println("scuzz fuzz --replay is not on this CLI yet").flatMap(_ => IO.fail("fuzz")) else Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed))
+
+def dispatchIde(_path: String, outDir: String, headless: Bool): IO[Unit] =
+  dispatchRun("examples/editor", outDir, headless)
 
 def dispatchBuild(path: String, outDir: String): IO[Unit] =
   Fs.mkdirs(outDir).flatMap(_ => Drive.emitDir(path, outDir))
