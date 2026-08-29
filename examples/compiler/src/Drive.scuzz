@@ -117,7 +117,9 @@ def fpFiles(files: List[(String, String)]): String =
 
 def fpFilesHd(h: (String, String), rest: List[(String, String)]): String =
   h match {
-    case (stem, src) => Str.concat(stem, Str.concat("\n", Str.concat(src, Str.concat("\n", fpFiles(rest)))))
+    case (stem, src) => Str.concat(stem, Str.concat("""
+""", Str.concat(src, Str.concat("""
+""", fpFiles(rest)))))
   }
 
 def emitDirFp(dir: String, outDir: String, full: Bool, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
@@ -368,7 +370,7 @@ def checkDirVerify(dir: String, json: Bool, deps: List[(String, String)], own: L
   Fs.list(dir).flatMap(ents => checkVerifyGo(dir, json, deps, own, ents))
 
 def checkVerifyGo(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  if (List.isEmpty(ents)) collectDeps(dir, deps, own).flatMap(files => checkDirFiles(json, files)) else checkVerifyHd(dir, json, deps, own, List.head(ents), List.tail(ents))
+  if (List.isEmpty(ents)) collectDeps(dir, deps, own).flatMap(files => checkFmtGo(json, files, own)) else checkVerifyHd(dir, json, deps, own, List.head(ents), List.tail(ents))
 
 def checkVerifyHd(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)]): IO[Unit] =
   ent match {
@@ -384,14 +386,25 @@ def checkVerifySrc(dir: String, json: Bool, deps: List[(String, String)], own: L
 def checkVerifyGot(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], rest: List[(String, Bool)], msg: String): IO[Unit] =
   if (msg == "scuzz check ok") checkVerifyGo(dir, json, deps, own, rest) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
 
-def checkDirFiles(json: Bool, files: List[(String, String)]): IO[Unit] =
-  checkDirOut(json, Check.checkFiles(files), Check.humanFiles(files))
+def checkFmtGo(json: Bool, all: List[(String, String)], rest: List[(String, String)]): IO[Unit] =
+  if (List.isEmpty(rest)) checkDirOut(json, Check.checkFiles(all), Check.humanFiles(all), all) else checkFmtHd(json, all, List.head(rest), List.tail(rest))
 
-def checkDirOut(json: Bool, diags: String, human: String): IO[Unit] =
-  if (json) checkDirJson(diags) else checkDirHuman(human)
+def checkFmtHd(json: Bool, all: List[(String, String)], h: (String, String), rest: List[(String, String)]): IO[Unit] =
+  h match {
+    case (stem, src) => checkFmtSrc(json, all, stem, src, rest)
+  }
 
-def checkDirJson(diags: String): IO[Unit] =
-  if (diags == "[]") IO.println("[]") else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))
+def checkFmtSrc(json: Bool, all: List[(String, String)], stem: String, src: String, rest: List[(String, String)]): IO[Unit] =
+  if (Parse.pretty(Parse.parse(Lexer.lex(src))) == src) checkFmtGo(json, all, rest) else checkFmtFail(stem)
+
+def checkFmtFail(stem: String): IO[Unit] =
+  IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail("scuzz check"))
+
+def checkDirOut(json: Bool, diags: String, human: String, files: List[(String, String)]): IO[Unit] =
+  if (json) checkDirJson(diags, files) else checkDirHuman(human)
+
+def checkDirJson(diags: String, files: List[(String, String)]): IO[Unit] =
+  if (diags == "[]") IO.println(Check.unclaimedJson(files)) else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))
 
 def checkDirHuman(human: String): IO[Unit] =
   if (human == "scuzz check ok") IO.println(human) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
@@ -429,9 +442,7 @@ def testUi(dir: String, outDir: String, name: String, exe: String, update: Bool)
   if (update) Fs.mkdirs(joinSlash(dir, "goldens")).flatMap(_ => testUiDumps(dir, outDir, name, exe, update)) else testUiDumps(dir, outDir, name, exe, update)
 
 def testUiDumps(dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
-  testUiDump(dir, outDir, name, exe, update, false).flatMap(_ =>
-    testUiDump(dir, outDir, name, exe, update, true).flatMap(_ => IO.println("scuzz test ok"))
-  )
+  testUiDump(dir, outDir, name, exe, update, false).flatMap(_ => testUiDump(dir, outDir, name, exe, update, true).flatMap(_ => IO.println("scuzz test ok")))
 
 def testUiDump(dir: String, outDir: String, name: String, exe: String, update: Bool, tap: Bool): IO[Unit] =
   testUiRun(exe, uiDumpEnv(uiActual(outDir, name, tap), uiSnap(outDir, name, tap), tap), uiGolden(dir, name, tap), uiActual(outDir, name, tap), update)
@@ -457,11 +468,7 @@ def testUiAfter2(code: Int, _out: String, err: String, golden: String, actual: S
   if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui golden")) else testUiCmp(golden, actual, update)
 
 def testUiCmp(golden: String, actual: String, update: Bool): IO[Unit] =
-  if (update) Fs.read(actual).flatMap(got =>
-  Fs.write(golden, got).flatMap(_ => IO.println(Str.concat("golden updated: ", golden)))
-) else Fs.read(golden).flatMap(want =>
-  Fs.read(actual).flatMap(got => testUiEq(golden, want, got))
-)
+  if (update) Fs.read(actual).flatMap(got => Fs.write(golden, got).flatMap(_ => IO.println(Str.concat("golden updated: ", golden)))) else Fs.read(golden).flatMap(want => Fs.read(actual).flatMap(got => testUiEq(golden, want, got)))
 
 def testUiEq(golden: String, want: String, got: String): IO[Unit] =
   if (want == got) IO.println(Str.concat("golden ok: ", golden)) else IO.println(Str.concat("structural golden mismatch: ", golden)).flatMap(_ => IO.fail("golden"))
@@ -542,13 +549,7 @@ def pkgHostChmod(r: (Int, String, String), name: String, dest: String): IO[Unit]
   }
 
 def pkgHostWrite(name: String, dest: String): IO[Unit] =
-  Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ =>
-    runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ =>
-      Fs.write(joinSlash(dest, "package.toml"), hostMeta(name)).flatMap(_ =>
-        IO.println(Str.concat("packaged host → ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")"))))
-      )
-    )
-  )
+  Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ => runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ => Fs.write(joinSlash(dest, "package.toml"), hostMeta(name)).flatMap(_ => IO.println(Str.concat("packaged host → ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")")))))))
 
 def pkgAndroid(dir: String): IO[Unit] =
   runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_ndk.sh ", dir)).flatMap(r => pkgAndroidNdk(r, dir))

@@ -1014,6 +1014,15 @@ def filesSrc2(f: (String, String), rest: List[(String, String)]): String =
 def check2(src: String, o: Out): String =
   if (hasErr(o)) Str.concat("[", Str.concat(diagJson(src, o), "]")) else "[]"
 
+def unclaimedJson(files: List[(String, String)]): String =
+  unclaimedOf(Parse.parseFiles(files))
+
+def unclaimedOf(p: Prog): String =
+  if (p.main == "") "[]" else Str.concat("[", Str.concat(unclaimedMain(p.main), "]"))
+
+def unclaimedMain(name: String): String =
+  Str.concat("{\"severity\":\"info\",\"message\":\"unclaimed def ", Str.concat(name, "\",\"line\":1,\"column\":1}"))
+
 def humanLine(src: String, o: Out): String =
   humanLine2(o, locOf(src, o.span))
 
