@@ -72,7 +72,7 @@ def _intOf(t: Tok): Int =
   }
 
 def _kit(s: String): Bool =
-  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property"
+  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property" || s == "Float"
 
 def _joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", _joinComma(List.tail(xs))))
@@ -327,9 +327,9 @@ def parseOneLam(e: Expr, toks: List[Tok], j: Int): (Expr, Int) =
 def parseLamFrom(e: Expr, q: (Expr, Int)): (Expr, Int) =
   q match {
     case (b, k) => e match {
-    case Expr.EVar(s) => (Expr.ELam(s, b), k)
-    case _ => (Expr.ELam("__p", Expr.EMatch(Expr.EVar("__p"), Arm(pretty0(e), "", b) :: [])), k)
-  }
+  case Expr.EVar(s) => (Expr.ELam(s, b), k)
+  case _ => (Expr.ELam("__p", Expr.EMatch(Expr.EVar("__p"), Arm(pretty0(e), "", b) :: [])), k)
+}
   }
 
 def parenBind(e: Expr): String =
