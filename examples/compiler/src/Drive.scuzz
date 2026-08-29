@@ -405,6 +405,9 @@ def testEnv(): String =
 def headlessEnv(): String =
   "SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 SCUZZ_UI_SCALE=1 "
 
+def snapEnv(outDir: String): String =
+  Str.concat(headlessEnv(), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(joinSlash(outDir, "snapshot.png"), " ")))
+
 def checkDir(dir: String, json: Bool): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkDirMan(dir, json, Manifest.parse(toml)))
 
