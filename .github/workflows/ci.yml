@@ -439,19 +439,19 @@ jobs:
           cargo run -p scuzz -- check examples/tyck
           cargo run -p scuzz -- check examples/codegen
           cargo run -p scuzz -- check examples/cli
-          cargo run -p scuzz -- check examples/counter
+          "$SCUZZ" check examples/counter
           cargo run -p scuzz -- check examples/studio
           cargo run -p scuzz -- check examples/editor
-          cargo run -p scuzz -- check examples/bad-example
+          "$SCUZZ" check examples/bad-example
           cargo run -p scuzz -- test examples/bad-example
           cargo run -p scuzz -- check examples/bad-fault
           cargo run -p scuzz -- test examples/bad-fault
           cargo run -p scuzz -- check examples/bad-adt
           cargo run -p scuzz -- test examples/bad-adt
-          cargo run -p scuzz -- check examples/bad-sched
+          "$SCUZZ" check examples/bad-sched
           cargo run -p scuzz -- test examples/bad-sched
-          cargo run -p scuzz -- check examples/bad-response
-          cargo run -p scuzz -- check examples/bad-split
+          "$SCUZZ" check examples/bad-response
+          "$SCUZZ" check examples/bad-split
           if "$SCUZZ" check examples/bad-intent; then
             echo "empty verify should fail check" && exit 1
           fi
