@@ -128,22 +128,50 @@ def quoteEv(e: String): String =
   Str.concat("\"", Str.concat(e, "\""))
 
 def reproText(seed: Int, sched: String, fault: String, events: List[String]): String =
-  Str.concat("[fuzz]\nseed = ", Str.concat(Str.fromInt(seed), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), "]\n"))))))
+  Str.concat("""[fuzz]
+seed = """, Str.concat(Str.fromInt(seed), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), """]
+"""))))))
 
 def reproSched(sched: String): String =
-  if (sched == "") "\n" else Str.concat("\nschedule_seed = \"", Str.concat(sched, "\"\n"))
+  if (sched == "") """
+""" else Str.concat("\nschedule_seed = \"", Str.concat(sched, "\"\n"))
 
 def reproFault(fault: String): String =
   if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
 
-def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, repro: String): String =
-  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail))
+def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int): String =
+  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, killed, survived, inert, ran, sites))
 
 def summaryFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
-  Str.concat("[fuzz]\nok = ", Str.concat(if (ok) "true" else "false", Str.concat("\nseed = ", Str.concat(Str.fromInt(seed), Str.concat("\niterations = ", Str.concat(Str.fromInt(iterations), Str.concat("\nsearch = ", Str.concat(Str.fromInt(search), Str.concat("\nsearch_failures = ", Str.concat(Str.fromInt(failures), Str.concat("\ncorpus = ", Str.concat(Str.fromInt(corpus), Str.concat("\ndrivers = []\nevents = []\ndeclared = []\nreachability = []\nmissing_budget = []\nmissing_corpus = []\nrepro = \"", Str.concat(repro, "\"\nreplay = \"\"\n\n"))))))))))))))
+  Str.concat("""[fuzz]
+ok = """, Str.concat(if (ok) "true" else "false", Str.concat("""
+seed = """, Str.concat(Str.fromInt(seed), Str.concat("""
+iterations = """, Str.concat(Str.fromInt(iterations), Str.concat("""
+search = """, Str.concat(Str.fromInt(search), Str.concat("""
+search_failures = """, Str.concat(Str.fromInt(failures), Str.concat("""
+corpus = """, Str.concat(Str.fromInt(corpus), Str.concat("\ndrivers = []\nevents = []\ndeclared = []\nreachability = []\nmissing_budget = []\nmissing_corpus = []\nrepro = \"", Str.concat(repro, "\"\nreplay = \"\"\n\n"))))))))))))))
 
-def summaryRest(corpus: Int, corpFail: Int): String =
-  Str.concat("[coverage]\nunclaimed_varied = []\n\n[corpus]\nentries = ", Str.concat(Str.fromInt(corpus), Str.concat("\nfailures = ", Str.concat(Str.fromInt(corpFail), "\nreached = []\npromoted = 0\n\n[classify]\n[mutate]\nkilled = 0\nsurvived = 0\ninert = 0\nran = 0\nsites = 0\noracles = 0\nscore = 1.000\nsurvivors = []\n"))))
+def summaryRest(corpus: Int, corpFail: Int, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int): String =
+  Str.concat("""[coverage]
+unclaimed_varied = []
+
+[corpus]
+entries = """, Str.concat(Str.fromInt(corpus), Str.concat("""
+failures = """, Str.concat(Str.fromInt(corpFail), Str.concat("""
+reached = []
+promoted = 0
+
+[classify]
+[mutate]
+killed = """, Str.concat(Str.fromInt(killed), Str.concat("""
+survived = """, Str.concat(Str.fromInt(survived), Str.concat("""
+inert = """, Str.concat(Str.fromInt(inert), Str.concat("""
+ran = """, Str.concat(Str.fromInt(ran), Str.concat("""
+sites = """, Str.concat(Str.fromInt(sites), """
+oracles = 0
+score = 1.000
+survivors = []
+"""))))))))))))))
 
 def mapSeed(ds: List[Fun]): List[String] =
   if (List.isEmpty(ds)) noStr() else seedOf(List.head(ds)) :: mapSeed(List.tail(ds))
@@ -168,13 +196,14 @@ def wrapSrc(stem: String, src: String): String =
 def wrapFuns(stem: String, ds: List[Fun]): String =
   if (List.isEmpty(ds)) "" else Str.concat(wrapFun(stem, List.head(ds)), wrapFuns(stem, List.tail(ds)))
 
-def wrapFun(stem: String, d: Fun): String =
+def wrapFun(_stem: String, d: Fun): String =
   d match {
     case Fun(_, name, _, ps, _, body, _) => wrapFun2(name, wrapPs(ps), pretty0(body))
   }
 
 def wrapFun2(name: String, ps: String, body: String): String =
-  Str.concat("def _drv_", Str.concat(name, Str.concat("(", Str.concat(ps, Str.concat("): IO[Unit] =\n  Property.assert(\"", Str.concat(name, Str.concat("\", ", Str.concat(body, ")\n"))))))))
+  Str.concat("def _drv_", Str.concat(name, Str.concat("(", Str.concat(ps, Str.concat("): IO[Unit] =\n  Property.assert(\"", Str.concat(name, Str.concat("\", ", Str.concat(body, """)
+"""))))))))
 
 def wrapPs(ps: List[Param]): String =
   if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) wrapP(List.head(ps)) else Str.concat(wrapP(List.head(ps)), Str.concat(", ", wrapPs(List.tail(ps))))
@@ -210,11 +239,14 @@ def testOut(checkOk: Bool): String =
 def searchN(n: Int): Int =
   if (n <= 0) 0 else n * 5 / 8
 
+def mutateN(n: Int): Int =
+  n - searchN(n)
+
 def fuzzHead(iterations: Int, corpus: Int, sites: Int): String =
   Str.concat(if (iterations <= 0) Str.concat("scuzz fuzz: corpus-only (--iterations 0)", nl()) else "", Str.concat(if (iterations <= 0 && corpus > 0) Str.concat("scuzz fuzz: replay ", Str.concat(Str.fromInt(corpus), Str.concat(" corpus entries", nl()))) else "", if (sites == 0) Str.concat("scuzz fuzz: no live-code mutation sites", nl()) else ""))
 
 def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
-  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures, corpFail)
+  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures, corpFail, fuzzMut(sites))
 
 def fuzzStatus(search: Int, failures: Int, seed: Int, corpus: Int): String =
   Str.concat("scuzz fuzz ", Str.concat(if (failures == 0) "ok" else "fail", Str.concat(" (", Str.concat(Str.fromInt(search), Str.concat(" search, ", Str.concat(Str.fromInt(failures), Str.concat(" search failures, seed ", Str.concat(Str.fromInt(seed), Str.concat(", ", Str.concat(Str.fromInt(corpus), " corpus)"))))))))))
@@ -225,6 +257,6 @@ def fuzzCorpus(corpus: Int, corpFail: Int): String =
 def fuzzMut(sites: Int): String =
   Str.concat("mutate: 0 killed, 0 survived, 0 inert (0 of ", Str.concat(Str.fromInt(sites), " sites)"))
 
-def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
-  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), fuzzMut(sites))))))))))
+def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, _sites: Int, failures: Int, corpFail: Int, mut: String): String =
+  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), mut)))))))))
 

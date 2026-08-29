@@ -547,13 +547,14 @@ jobs:
 
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
+          SCUZZ=./examples/cli/build/cli
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
           cargo run -p scuzz -- fuzz --iterations 16 examples/studio
           cargo run -p scuzz -- fuzz --relate examples/counter
           if cargo run -p scuzz -- fuzz --relate examples/bad-sched; then
             echo "relate should have caught the schedule divergence" && exit 1
           fi
-          if cargo run -p scuzz -- fuzz --no-fail-fast --iterations 8 examples/bad-example; then
+          if "$SCUZZ" fuzz --no-fail-fast --iterations 8 examples/bad-example; then
             echo "fuzz should have found the property failure" && exit 1
           fi
           test -f examples/bad-example/build/fuzz/repro.toml
@@ -562,10 +563,10 @@ jobs:
           grep -E '^ran = [1-9]' examples/bad-example/build/fuzz/summary.toml
           grep -E '^entries = [1-9]' examples/bad-example/build/fuzz/summary.toml
           grep -E '^failures = [1-9]' examples/bad-example/build/fuzz/summary.toml
-          if cargo run -p scuzz -- fuzz --replay examples/bad-example/build/fuzz/repro.toml examples/bad-example; then
+          if "$SCUZZ" fuzz --replay examples/bad-example/build/fuzz/repro.toml examples/bad-example; then
             echo "replay should have reproduced the property failure" && exit 1
           fi
-          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-example; then
+          if "$SCUZZ" fuzz --iterations 0 examples/bad-example; then
             echo "corpus-only should pin the bad-example failure" && exit 1
           fi
           cargo run -p scuzz -- fuzz --iterations 0 examples/kernel

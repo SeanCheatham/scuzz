@@ -6,6 +6,10 @@ record FuzzRun(path: String, src: String, script: String, sched: String, fault: 
 
 record FuzzAcc(fail: Int, corpFail: Int, repro: String)
 
+record FuzzMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int)
+
+record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)])
+
 import Manifest.Man
 
 def compileSrc(src: String): Build =
@@ -126,7 +130,9 @@ def emitDirFp(dir: String, outDir: String, full: Bool, files: List[(String, Stri
   if (full) emitDirFresh(dir, outDir, files, toml, fp) else emitDirHit(dir, outDir, files, toml, fp)
 
 def emitDirHit(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
-  Fs.read(fpPath(dir)).flatMap(old => emitDirHitGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirFresh(dir, outDir, files, toml, fp))
+  Fs.read(fpPath(dir)).flatMap(old => emitDirHitGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ =>
+    emitDirFresh(dir, outDir, files, toml, fp)
+  )
 
 def emitDirHitGot(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String, old: String): IO[Unit] =
   if (old == fp) emitDirUp(outDir, toml) else emitDirFresh(dir, outDir, files, toml, fp)
@@ -150,35 +156,37 @@ def emitDirAlwaysGot(toml: String, own: List[(String, String)], outDir: String):
   emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib())).map(_ => ())
 
 def emitFuzz(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitFuzzMan(dir, outDir, Manifest.parse(toml)))
+  fuzzCollect(dir).flatMap(files => emitDirAlways(dir, outDir, files))
 
-def emitFuzzMan(dir: String, outDir: String, m: Man): IO[Unit] =
+def fuzzCollect(dir: String): IO[List[(String, String)]] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzCollectMan(dir, Manifest.parse(toml)))
+
+def fuzzCollectMan(dir: String, m: Man): IO[List[(String, String)]] =
   m match {
-    case Man(ok, _name, _version, _hasUi, deps, err) => emitFuzzMan2(dir, outDir, ok, err, deps)
+    case Man(ok, _name, _version, _hasUi, deps, err) => fuzzCollectMan2(dir, ok, err, deps)
   }
 
-def emitFuzzMan2(dir: String, outDir: String, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
-  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitFuzzListed(dir, outDir, deps, ents))
+def fuzzCollectMan2(dir: String, ok: Bool, err: String, deps: List[(String, String)]): IO[List[(String, String)]] =
+  if (!ok) IO.println(Str.concat("fail:", err)).flatMap(_ => IO.pure(Manifest.noPairs())) else Fs.list(joinSlash(dir, "src")).flatMap(ents => fuzzCollectListed(dir, deps, ents))
 
-def emitFuzzListed(dir: String, outDir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitFuzzCollected(dir, outDir, deps, own))
+def fuzzCollectListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own =>
+    collectDeps(dir, deps, own).flatMap(files => fuzzCollectVer(dir, files))
+  )
 
-def emitFuzzCollected(dir: String, outDir: String, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  collectDeps(dir, deps, own).flatMap(files => emitFuzzVerify(dir, outDir, files))
+def fuzzCollectVer(dir: String, files: List[(String, String)]): IO[List[(String, String)]] =
+  Fs.list(dir).flatMap(ents => emitFuzzVerGo(dir, files, ents, Manifest.noPairs()))
 
-def emitFuzzVerify(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
-  Fs.list(dir).flatMap(ents => emitFuzzVerGo(dir, outDir, files, ents, Manifest.noPairs()))
+def emitFuzzVerGo(dir: String, files: List[(String, String)], ents: List[(String, Bool)], ver: List[(String, String)]): IO[List[(String, String)]] =
+  if (List.isEmpty(ents)) IO.pure(fuzzFiles(files, ver)) else emitFuzzVerHd(dir, files, List.head(ents), List.tail(ents), ver)
 
-def emitFuzzVerGo(dir: String, outDir: String, files: List[(String, String)], ents: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
-  if (List.isEmpty(ents)) emitDirAlways(dir, outDir, fuzzFiles(files, ver)) else emitFuzzVerHd(dir, outDir, files, List.head(ents), List.tail(ents), ver)
-
-def emitFuzzVerHd(dir: String, outDir: String, files: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
+def emitFuzzVerHd(dir: String, files: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)], ver: List[(String, String)]): IO[List[(String, String)]] =
   ent match {
-    case (name, isDir) => emitFuzzVerPick(dir, outDir, files, name, isDir, rest, ver)
+    case (name, isDir) => emitFuzzVerPick(dir, files, name, isDir, rest, ver)
   }
 
-def emitFuzzVerPick(dir: String, outDir: String, files: List[(String, String)], name: String, isDir: Bool, rest: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
-  if (isDir || !isVerify(name)) emitFuzzVerGo(dir, outDir, files, rest, ver) else Fs.read(joinSlash(dir, name)).flatMap(src => emitFuzzVerGo(dir, outDir, files, rest, (stemVerify(name), src) :: ver))
+def emitFuzzVerPick(dir: String, files: List[(String, String)], name: String, isDir: Bool, rest: List[(String, Bool)], ver: List[(String, String)]): IO[List[(String, String)]] =
+  if (isDir || !isVerify(name)) emitFuzzVerGo(dir, files, rest, ver) else Fs.read(joinSlash(dir, name)).flatMap(src => emitFuzzVerGo(dir, files, rest, (stemVerify(name), src) :: ver))
 
 def stemVerify(name: String): String =
   Str.slice(name, 0, Str.len(name) - 13)
@@ -289,7 +297,9 @@ def emitDirOut(p: PkgOut): IO[Bool] =
   }
 
 def emitDirWrite(ok: Bool, ll: String, llPath: String, diags: String): IO[Bool] =
-  if (!ok) IO.println(Str.concat("fail:", diags)).map(_ => false) else Fs.write(llPath, ll).flatMap(_ => IO.println("ok").map(_ => true))
+  if (!ok) IO.println(Str.concat("fail:", diags)).map(_ => false) else Fs.write(llPath, ll).flatMap(_ =>
+  IO.println("ok").map(_ => true)
+)
 
 def runDir(dir: String, outDir: String, env: String): IO[Unit] =
   emitDir(dir, outDir, true).flatMap(_ => linkRun(dir, outDir, env))
@@ -442,7 +452,9 @@ def testUi(dir: String, outDir: String, name: String, exe: String, update: Bool)
   if (update) Fs.mkdirs(joinSlash(dir, "goldens")).flatMap(_ => testUiDumps(dir, outDir, name, exe, update)) else testUiDumps(dir, outDir, name, exe, update)
 
 def testUiDumps(dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
-  testUiDump(dir, outDir, name, exe, update, false).flatMap(_ => testUiDump(dir, outDir, name, exe, update, true).flatMap(_ => IO.println("scuzz test ok")))
+  testUiDump(dir, outDir, name, exe, update, false).flatMap(_ =>
+    testUiDump(dir, outDir, name, exe, update, true).flatMap(_ => IO.println("scuzz test ok"))
+  )
 
 def testUiDump(dir: String, outDir: String, name: String, exe: String, update: Bool, tap: Bool): IO[Unit] =
   testUiRun(exe, uiDumpEnv(uiActual(outDir, name, tap), uiSnap(outDir, name, tap), tap), uiGolden(dir, name, tap), uiActual(outDir, name, tap), update)
@@ -468,7 +480,11 @@ def testUiAfter2(code: Int, _out: String, err: String, golden: String, actual: S
   if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui golden")) else testUiCmp(golden, actual, update)
 
 def testUiCmp(golden: String, actual: String, update: Bool): IO[Unit] =
-  if (update) Fs.read(actual).flatMap(got => Fs.write(golden, got).flatMap(_ => IO.println(Str.concat("golden updated: ", golden)))) else Fs.read(golden).flatMap(want => Fs.read(actual).flatMap(got => testUiEq(golden, want, got)))
+  if (update) Fs.read(actual).flatMap(got =>
+  Fs.write(golden, got).flatMap(_ => IO.println(Str.concat("golden updated: ", golden)))
+) else Fs.read(golden).flatMap(want =>
+  Fs.read(actual).flatMap(got => testUiEq(golden, want, got))
+)
 
 def testUiEq(golden: String, want: String, got: String): IO[Unit] =
   if (want == got) IO.println(Str.concat("golden ok: ", golden)) else IO.println(Str.concat("structural golden mismatch: ", golden)).flatMap(_ => IO.fail("golden"))
@@ -526,7 +542,9 @@ def compileLinkedUi(m: Man, outDir: String): IO[Unit] =
   if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else if (m.hasUi) ensureUi().flatMap(_ => linkOnly(true, m.name, outDir)) else linkOnly(false, m.name, outDir)
 
 def pkgDir(dir: String, outDir: String, target: String): IO[Unit] =
-  if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir) else if (target == "ios") pkgIos(dir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ => pkgAndroid(dir).flatMap(_ => pkgIos(dir))) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
+  if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir) else if (target == "ios") pkgIos(dir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ =>
+  pkgAndroid(dir).flatMap(_ => pkgIos(dir))
+) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
 
 def pkgHost(dir: String, outDir: String): IO[Unit] =
   compileLinked(dir, outDir).flatMap(_ => pkgHostMan(dir, outDir))
@@ -534,7 +552,7 @@ def pkgHost(dir: String, outDir: String): IO[Unit] =
 def pkgHostMan(dir: String, outDir: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgHostNamed(Manifest.parse(toml), dir, outDir))
 
-def pkgHostNamed(m: Man, dir: String, outDir: String): IO[Unit] =
+def pkgHostNamed(m: Man, _dir: String, outDir: String): IO[Unit] =
   if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else pkgHostCopy(m.name, exeName(outDir, m.name), joinSlash(joinSlash(outDir, "package"), "host"))
 
 def pkgHostCopy(name: String, exe: String, dest: String): IO[Unit] =
@@ -549,7 +567,13 @@ def pkgHostChmod(r: (Int, String, String), name: String, dest: String): IO[Unit]
   }
 
 def pkgHostWrite(name: String, dest: String): IO[Unit] =
-  Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ => runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ => Fs.write(joinSlash(dest, "package.toml"), hostMeta(name)).flatMap(_ => IO.println(Str.concat("packaged host → ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")")))))))
+  Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ =>
+    runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ =>
+      Fs.write(joinSlash(dest, "package.toml"), hostMeta(name)).flatMap(_ =>
+        IO.println(Str.concat("packaged host → ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")"))))
+      )
+    )
+  )
 
 def pkgAndroid(dir: String): IO[Unit] =
   runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_ndk.sh ", dir)).flatMap(r => pkgAndroidNdk(r, dir))
@@ -580,17 +604,21 @@ def pkgIosRun(r: (Int, String, String)): IO[Unit] =
     case (code, out, err) => if (code != 0) IO.println(if (Str.len(err) > 0) err else out).flatMap(_ => IO.fail("ios")) else IO.println("scuzz package ok (ios)")
   }
 
-def fuzzDir(dir: String, outDir: String, iterations: Int, seed: Int, replay: String): IO[Unit] =
-  emitFuzz(dir, outDir).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => fuzzLinked(dir, outDir, iterations, seed, replay)))
+def fuzzDir(dir: String, outDir: String, iterations: Int, seed: Int, replay: String, noFailFast: Bool): IO[Unit] =
+  fuzzCollect(dir).flatMap(files =>
+    emitDirAlways(dir, outDir, files).flatMap(_ =>
+      compileLinkedMan(dir, outDir).flatMap(_ => fuzzLinked(dir, outDir, iterations, seed, replay, files, noFailFast))
+    )
+  )
 
-def fuzzLinked(dir: String, outDir: String, iterations: Int, seed: Int, replay: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzMan(Manifest.parse(toml), dir, outDir, iterations, seed, replay))
+def fuzzLinked(dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], noFailFast: Bool): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzMan(Manifest.parse(toml), dir, outDir, iterations, seed, replay, files, noFailFast))
 
-def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, replay: String): IO[Unit] =
-  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else fuzzMan2(dir, outDir, exeName(outDir, m.name), m.hasUi, iterations, seed, replay)
+def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], noFailFast: Bool): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else fuzzMan2(FuzzJob(dir, outDir, exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files), replay)
 
-def fuzzMan2(dir: String, outDir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int, replay: String): IO[Unit] =
-  if (replay != "") fuzzReplayFile(outDir, exe, hasUi, replay) else fuzzBody(dir, outDir, exe, hasUi, iterations, seed)
+def fuzzMan2(job: FuzzJob, replay: String): IO[Unit] =
+  if (replay != "") fuzzReplayFile(job.outDir, job.exe, job.hasUi, replay) else fuzzBody(job)
 
 def fuzzReplayFile(outDir: String, exe: String, hasUi: Bool, replay: String): IO[Unit] =
   Fs.read(replay).flatMap(src => fuzzReplayGot(outDir, exe, hasUi, replay, src))
@@ -599,7 +627,11 @@ def fuzzReplayGot(outDir: String, exe: String, hasUi: Bool, replay: String, src:
   fuzzReplayRun(outDir, exe, hasUi, replay, fuzzRunOf(replay, src))
 
 def fuzzReplayRun(outDir: String, exe: String, hasUi: Bool, replay: String, run: FuzzRun): IO[Unit] =
-  IO.println(fuzzReplayHead(replay, run)).flatMap(_ => fuzzWriteDrive(outDir, run.script).flatMap(_ => fuzzProbeRun(exe, hasUi, outDir, run).flatMap(bad => fuzzReplayDone(bad))))
+  IO.println(fuzzReplayHead(replay, run)).flatMap(_ =>
+    fuzzWriteDrive(outDir, run.script).flatMap(_ =>
+      fuzzProbeRun(exe, hasUi, outDir, run).flatMap(bad => fuzzReplayDone(bad))
+    )
+  )
 
 def fuzzReplayHead(replay: String, run: FuzzRun): String =
   Str.concat("scuzz fuzz --replay ", Str.concat(replay, Str.concat(" (", Str.concat(Str.fromInt(List.len(Verify.linesOf(run.script))), " events)"))))
@@ -607,23 +639,28 @@ def fuzzReplayHead(replay: String, run: FuzzRun): String =
 def fuzzReplayDone(bad: Int): IO[Unit] =
   if (bad > 0) IO.println("fuzz replay reproduced a failure").flatMap(_ => IO.fail("fuzz")) else IO.println("fuzz replay ok (no failure)")
 
-def fuzzBody(dir: String, outDir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int): IO[Unit] =
-  fuzzSeedText(dir).flatMap(script => fuzzBody2(dir, outDir, exe, hasUi, iterations, seed, script))
+def fuzzBody(job: FuzzJob): IO[Unit] =
+  fuzzSeedText(job.dir).flatMap(script => fuzzBody2(job, script))
 
-def fuzzBody2(dir: String, outDir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int, script: String): IO[Unit] =
-  fuzzWriteSeeds(outDir, script).flatMap(_ => fuzzCorpusFiles(dir).flatMap(runs => fuzzBody3(dir, outDir, exe, hasUi, iterations, seed, script, runs)))
+def fuzzBody2(job: FuzzJob, script: String): IO[Unit] =
+  fuzzWriteSeeds(job.outDir, script).flatMap(_ =>
+    fuzzCorpusFiles(job.dir).flatMap(runs => fuzzBody3(job, script, runs))
+  )
 
-def fuzzBody3(dir: String, outDir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int, script: String, runs: List[FuzzRun]): IO[Unit] =
-  fuzzReplayGo(exe, hasUi, outDir, seed, fuzzAddSeeds(runs, joinSlash(outDir, "seeds.txt"), script), FuzzAcc(0, 0, "")).flatMap(acc => fuzzAfterReplay(dir, outDir, exe, hasUi, iterations, seed, script, List.len(fuzzAddSeeds(runs, joinSlash(outDir, "seeds.txt"), script)), acc))
+def fuzzBody3(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
+  fuzzReplayGo(job.exe, job.hasUi, job.outDir, job.seed, fuzzAddSeeds(runs, joinSlash(job.outDir, "seeds.txt"), script), FuzzAcc(0, 0, "")).flatMap(acc => fuzzAfterReplay(job, script, List.len(fuzzAddSeeds(runs, joinSlash(job.outDir, "seeds.txt"), script)), acc))
 
-def fuzzAfterReplay(dir: String, outDir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int, script: String, corpus: Int, acc: FuzzAcc): IO[Unit] =
-  if (acc.fail > 0) fuzzDone(dir, outDir, iterations, seed, corpus, acc.fail, acc.corpFail, acc.repro) else fuzzSearch(exe, hasUi, outDir, script, Verify.searchN(iterations), 0).flatMap(fail => fuzzAfterSearch(dir, outDir, iterations, seed, script, corpus, acc, fail))
+def fuzzAfterReplay(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc): IO[Unit] =
+  if (acc.fail > 0 && !job.noFailFast) fuzzDone(job, corpus, acc.fail, acc.corpFail, acc.repro, emptyMut(Mutate.countFiles(job.files))) else fuzzSearch(job.exe, job.hasUi, job.outDir, script, Verify.searchN(job.iterations), 0).flatMap(fail => fuzzAfterSearch(job, script, corpus, acc, fail))
 
-def fuzzAfterSearch(dir: String, outDir: String, iterations: Int, seed: Int, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
-  if (fail > 0 && acc.repro == "") fuzzSearchFail(dir, outDir, iterations, seed, script, corpus, acc, fail) else fuzzDone(dir, outDir, iterations, seed, corpus, fail, acc.corpFail, acc.repro)
+def fuzzAfterSearch(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
+  if (fail > 0 && acc.repro == "") fuzzSearchFail(job, script, corpus, acc, fail) else fuzzMutate(job, corpus, fail, acc.corpFail, acc.repro)
 
-def fuzzSearchFail(dir: String, outDir: String, iterations: Int, seed: Int, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
-  fuzzSaveRepro(outDir, seed, FuzzRun(joinSlash(outDir, "seeds.txt"), "", script, "", "")).flatMap(path => fuzzDone(dir, outDir, iterations, seed, corpus, fail, acc.corpFail, path))
+def fuzzSearchFail(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
+  fuzzSaveRepro(job.outDir, job.seed, FuzzRun(joinSlash(job.outDir, "seeds.txt"), "", script, "", "")).flatMap(path => fuzzMutate(job, corpus, fail, acc.corpFail, path))
+
+def emptyMut(sites: Int): FuzzMut =
+  FuzzMut(0, 0, 0, 0, sites)
 
 def noRuns(): List[FuzzRun] =
   []
@@ -632,7 +669,9 @@ def fuzzRunOf(path: String, src: String): FuzzRun =
   FuzzRun(path, src, Verify.nls(Verify.parseEvents(src)), Verify.tomlQuoted(src, "schedule_seed"), Verify.tomlQuoted(src, "fault_seed"))
 
 def fuzzCorpusFiles(dir: String): IO[List[FuzzRun]] =
-  Fs.list(joinSlash(dir, "corpus")).flatMap(ents => fuzzCorpusRead(dir, Verify.sortStrs(fuzzTomlNames(ents, Verify.noStr())))).handleErrorWith(_ => IO.pure(noRuns()))
+  Fs.list(joinSlash(dir, "corpus")).flatMap(ents => fuzzCorpusRead(dir, Verify.sortStrs(fuzzTomlNames(ents, Verify.noStr())))).handleErrorWith(_ =>
+    IO.pure(noRuns())
+  )
 
 def fuzzTomlNames(ents: List[(String, Bool)], acc: List[String]): List[String] =
   if (List.isEmpty(ents)) acc else fuzzTomlNamesHd(List.head(ents), List.tail(ents), acc)
@@ -646,7 +685,9 @@ def fuzzCorpusRead(dir: String, names: List[String]): IO[List[FuzzRun]] =
   if (List.isEmpty(names)) IO.pure(noRuns()) else fuzzCorpusReadHd(dir, List.head(names), List.tail(names))
 
 def fuzzCorpusReadHd(dir: String, name: String, rest: List[String]): IO[List[FuzzRun]] =
-  Fs.read(joinSlash(joinSlash(dir, "corpus"), name)).flatMap(src => fuzzCorpusRead(dir, rest).map(more => fuzzRunOf(joinSlash(joinSlash(dir, "corpus"), name), src) :: more))
+  Fs.read(joinSlash(joinSlash(dir, "corpus"), name)).flatMap(src =>
+    fuzzCorpusRead(dir, rest).map(more => fuzzRunOf(joinSlash(joinSlash(dir, "corpus"), name), src) :: more)
+  )
 
 def fuzzAddSeeds(runs: List[FuzzRun], seedsPath: String, script: String): List[FuzzRun] =
   fuzzAddSeedLines(runs, seedsPath, Verify.linesOf(script))
@@ -670,7 +711,9 @@ def fuzzReplayGo(exe: String, hasUi: Bool, outDir: String, seed: Int, runs: List
   if (List.isEmpty(runs) || acc.fail > 0) IO.pure(acc) else fuzzReplayOne(exe, hasUi, outDir, seed, List.head(runs), List.tail(runs), acc)
 
 def fuzzReplayOne(exe: String, hasUi: Bool, outDir: String, seed: Int, h: FuzzRun, rest: List[FuzzRun], acc: FuzzAcc): IO[FuzzAcc] =
-  fuzzWriteDrive(outDir, h.script).flatMap(_ => fuzzProbeRun(exe, hasUi, outDir, h).flatMap(bad => fuzzReplayNext(exe, hasUi, outDir, seed, rest, acc, h, bad)))
+  fuzzWriteDrive(outDir, h.script).flatMap(_ =>
+    fuzzProbeRun(exe, hasUi, outDir, h).flatMap(bad => fuzzReplayNext(exe, hasUi, outDir, seed, rest, acc, h, bad))
+  )
 
 def fuzzReplayNext(exe: String, hasUi: Bool, outDir: String, seed: Int, rest: List[FuzzRun], acc: FuzzAcc, h: FuzzRun, bad: Int): IO[FuzzAcc] =
   if (bad == 0) fuzzReplayGo(exe, hasUi, outDir, seed, rest, acc) else fuzzNoteFail(outDir, seed, h, acc).flatMap(next => fuzzReplayGo(exe, hasUi, outDir, seed, rest, next))
@@ -678,8 +721,10 @@ def fuzzReplayNext(exe: String, hasUi: Bool, outDir: String, seed: Int, rest: Li
 def fuzzNoteFail(outDir: String, seed: Int, run: FuzzRun, acc: FuzzAcc): IO[FuzzAcc] =
   fuzzSaveRepro(outDir, seed, run).flatMap(path => fuzzNoteFail2(outDir, run, acc, path))
 
-def fuzzNoteFail2(outDir: String, run: FuzzRun, acc: FuzzAcc, path: String): IO[FuzzAcc] =
-  IO.println(Str.concat("fuzz failure on corpus ", Str.concat(run.path, Str.concat(" (", Str.concat(Str.fromInt(List.len(Verify.linesOf(run.script))), " events)"))))).flatMap(_ => IO.println(Str.concat("replay: scuzz fuzz --replay ", path)).flatMap(_ => IO.pure(FuzzAcc(acc.fail + 1, acc.corpFail + 1, path))))
+def fuzzNoteFail2(_outDir: String, run: FuzzRun, acc: FuzzAcc, path: String): IO[FuzzAcc] =
+  IO.println(Str.concat("fuzz failure on corpus ", Str.concat(run.path, Str.concat(" (", Str.concat(Str.fromInt(List.len(Verify.linesOf(run.script))), " events)"))))).flatMap(_ =>
+    IO.println(Str.concat("replay: scuzz fuzz --replay ", path)).flatMap(_ => IO.pure(FuzzAcc(acc.fail + 1, acc.corpFail + 1, path)))
+  )
 
 def fuzzSaveRepro(outDir: String, seed: Int, run: FuzzRun): IO[String] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => fuzzSaveRepro2(outDir, seed, run))
@@ -717,7 +762,9 @@ def fuzzSeedAdd(acc: List[String], src: String): List[String] =
   List.concat(acc, Verify.mapSeed(Verify.parseVerify(src)))
 
 def fuzzSearch(exe: String, hasUi: Bool, outDir: String, script: String, n: Int, fail: Int): IO[Int] =
-  if (n <= 0) IO.pure(fail) else fuzzWriteDrive(outDir, script).flatMap(_ => fuzzProbe(exe, hasUi, outDir, script).flatMap(bad => fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad)))
+  if (n <= 0) IO.pure(fail) else fuzzWriteDrive(outDir, script).flatMap(_ =>
+  fuzzProbe(exe, hasUi, outDir, script).flatMap(bad => fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad))
+)
 
 def fuzzProbe(exe: String, hasUi: Bool, outDir: String, script: String): IO[Int] =
   runLine(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), script != "", "", ""), exe)).map(r => fuzzProbeCode(r))
@@ -742,9 +789,88 @@ def fuzzProbeCode(r: (Int, String, String)): Int =
     case (code, _out, _err) => if (code == 0) 0 else 1
   }
 
-def fuzzDone(dir: String, outDir: String, iterations: Int, seed: Int, corpus: Int, fail: Int, corpFail: Int, repro: String): IO[Unit] =
-  fuzzWriteSummary(outDir, iterations, seed, corpus, fail, corpFail, repro).flatMap(_ => IO.println(Verify.fuzzOut(iterations, seed, corpus, 0, fail, corpFail)).flatMap(_ => if (fail > 0) IO.fail("scuzz fuzz") else IO.pure(())))
+def fuzzDone(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut): IO[Unit] =
+  fuzzWriteSummary(job, corpus, fail, corpFail, repro, mut).flatMap(_ =>
+    IO.println(Verify.fuzzOut2(Verify.fuzzHead(job.iterations, corpus, mut.sites), Verify.searchN(job.iterations), job.seed, corpus, mut.sites, fail, corpFail, Mutate.fuzzMutLine(mut.killed, mut.survived, mut.inert, mut.ran, mut.sites))).flatMap(_ => if (fail > 0 || mut.survived > 0) IO.fail("scuzz fuzz") else IO.pure(()))
+  )
 
-def fuzzWriteSummary(outDir: String, iterations: Int, seed: Int, corpus: Int, fail: Int, corpFail: Int, repro: String): IO[Unit] =
-  Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(joinSlash(joinSlash(outDir, "fuzz"), "summary.toml"), Verify.summaryToml(fail == 0, seed, iterations, Verify.searchN(iterations), fail, corpus, corpFail, repro)))
+def fuzzWriteSummary(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut): IO[Unit] =
+  Fs.mkdirs(joinSlash(job.outDir, "fuzz")).flatMap(_ => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.toml"), Verify.summaryToml(fail == 0 && mut.survived == 0, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites)))
+
+def fuzzMutate(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String): IO[Unit] =
+  fuzzMutate2(job, corpus, fail, corpFail, repro, Mutate.countFiles(job.files))
+
+def fuzzMutate2(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, sites: Int): IO[Unit] =
+  fuzzMutate3(job, corpus, fail, corpFail, repro, sites, if (Verify.mutateN(job.iterations) < sites) Verify.mutateN(job.iterations) else sites)
+
+def fuzzMutate3(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, sites: Int, take: Int): IO[Unit] =
+  if (take <= 0) fuzzDone(job, corpus, fail, corpFail, repro, emptyMut(sites)) else IO.println(Mutate.mutateHead(take, sites)).flatMap(_ =>
+  fuzzMutBase(job).flatMap(base =>
+    fuzzMutGo(job, Mutate.pickSites(job.seed, take, sites), base, emptyMut(sites), take).flatMap(mut => fuzzMutFin(job, corpus, fail, corpFail, repro, mut, take))
+  )
+)
+
+def fuzzMutFin(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut, take: Int): IO[Unit] =
+  IO.println(Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(mut.killed), Str.concat(" killed, ", Str.concat(Str.fromInt(mut.survived), Str.concat(" survived, ", Str.concat(Str.fromInt(mut.inert), Str.concat(" inert (", Str.concat(Str.fromInt(take), " ran)"))))))))).flatMap(_ => fuzzDone(job, corpus, fail, corpFail, repro, FuzzMut(mut.killed, mut.survived, mut.inert, take, mut.sites)))
+
+def fuzzMutBase(job: FuzzJob): IO[String] =
+  fuzzIdleAt(job.exe, job.hasUi, joinSlash(joinSlash(job.outDir, "fuzz"), "mutate/baseline")).map(p => fuzzIdleTl(p))
+
+def fuzzIdleTl(p: (Int, String)): String =
+  p match {
+    case (_code, tl) => tl
+  }
+
+def fuzzMutGo(job: FuzzJob, sites: List[Int], base: String, acc: FuzzMut, take: Int): IO[FuzzMut] =
+  if (List.isEmpty(sites)) IO.pure(acc) else fuzzMutOne(job, List.head(sites), base, acc).flatMap(next => fuzzMutGo(job, List.tail(sites), base, next, take))
+
+def fuzzMutOne(job: FuzzJob, site: Int, base: String, acc: FuzzMut): IO[FuzzMut] =
+  fuzzMutCompile(job, site).flatMap(exe => fuzzMutRun(job, site, exe, base, acc))
+
+def fuzzMutCompile(job: FuzzJob, site: Int): IO[String] =
+  fuzzMutCompile2(job, site, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)), Mutate.applyFiles(job.files, site))
+
+def fuzzMutCompile2(job: FuzzJob, _site: Int, mutDir: String, files: List[(String, String)]): IO[String] =
+  Fs.mkdirs(mutDir).flatMap(_ =>
+    emitDirAlwaysGot(fuzzToml(job), files, mutDir).flatMap(_ => fuzzMutLink(job, mutDir))
+  )
+
+def fuzzToml(job: FuzzJob): String =
+  Str.concat("[package]\nname = \"", Str.concat(job.name, "\"\n"))
+
+def fuzzMutLink(job: FuzzJob, mutDir: String): IO[String] =
+  runLine(linkLineFor(job.hasUi, "clang", llName(mutDir, job.name), rtLib(), exeName(mutDir, job.name))).map(r => fuzzMutLinkGot(r, exeName(mutDir, job.name)))
+
+def fuzzMutLinkGot(r: (Int, String, String), exe: String): String =
+  r match {
+    case (code, _out, _err) => if (code == 0) exe else ""
+  }
+
+def fuzzMutRun(job: FuzzJob, site: Int, exe: String, base: String, acc: FuzzMut): IO[FuzzMut] =
+  if (exe == "") IO.println(Str.concat("  mutant ", Str.concat(Str.fromInt(site), ": killed (compile)"))).map(_ => FuzzMut(acc.killed + 1, acc.survived, acc.inert, acc.ran, acc.sites)) else fuzzIdleAt(exe, job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site))).flatMap(p => fuzzMutClass(site, p, base, acc))
+
+def fuzzMutClass(site: Int, p: (Int, String), base: String, acc: FuzzMut): IO[FuzzMut] =
+  p match {
+    case (code, tl) => fuzzMutClass2(site, code, tl, base, acc)
+  }
+
+def fuzzMutClass2(site: Int, code: Int, tl: String, base: String, acc: FuzzMut): IO[FuzzMut] =
+  if (code != 0) IO.println(Str.concat("  mutant ", Str.concat(Str.fromInt(site), ": killed"))).map(_ => FuzzMut(acc.killed + 1, acc.survived, acc.inert, acc.ran, acc.sites)) else if (tl == base) IO.pure(FuzzMut(acc.killed, acc.survived, acc.inert + 1, acc.ran, acc.sites)) else IO.println(Str.concat("  mutant ", Str.concat(Str.fromInt(site), ": survived"))).map(_ => FuzzMut(acc.killed, acc.survived + 1, acc.inert, acc.ran, acc.sites))
+
+def fuzzIdleAt(exe: String, hasUi: Bool, mutDir: String): IO[(Int, String)] =
+  Fs.mkdirs(mutDir).flatMap(_ =>
+    Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ =>
+      runLine(Str.concat(fuzzProbeEnv(hasUi, joinSlash(mutDir, "drive.txt"), false, "", ""), Str.concat(fuzzTlEnv(joinSlash(mutDir, "timeline.txt")), exe))).flatMap(r => fuzzIdleGot(mutDir, r))
+    )
+  )
+
+def fuzzTlEnv(path: String): String =
+  Str.concat("SCUZZ_TIMELINE_DUMP=", Str.concat(path, " "))
+
+def fuzzIdleGot(mutDir: String, r: (Int, String, String)): IO[(Int, String)] =
+  r match {
+    case (code, _out, _err) => Fs.read(joinSlash(mutDir, "timeline.txt")).handleErrorWith(_ =>
+  IO.pure("")
+).map(tl => (code, tl))
+  }
 
