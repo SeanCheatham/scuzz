@@ -549,7 +549,7 @@ jobs:
         run: |
           SCUZZ=./examples/cli/build/cli
           "$SCUZZ" fuzz --iterations 16 examples/counter
-          cargo run -p scuzz -- fuzz --iterations 16 examples/studio
+          "$SCUZZ" fuzz --iterations 16 examples/studio
           "$SCUZZ" fuzz --relate examples/counter
           if "$SCUZZ" fuzz --relate examples/bad-sched; then
             echo "relate should have caught the schedule divergence" && exit 1
