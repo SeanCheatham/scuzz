@@ -828,7 +828,7 @@ def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, 
   }
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param]): Slot =
-  if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps)
+  if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps)
 
 def isRtExtra(f: String): Bool =
   f == "IO.sleep" || f == "IO.fail" || f == "IO.timeout" || f == "IO.when" || f == "IO.unless" || f == "IO.repeatN" || f == "IO.retryN" || f == "Property.sometimes" || f == "Stream.range"
@@ -850,6 +850,24 @@ def emitTimeout(rt: String, code: String, vals: List[String], owns: List[Bool], 
 
 def emitTimeout2(rt: String, code: String, ms: String, iv: String, o: Bool, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(ms, Str.concat(", ptr ", Str.concat(iv, ")")))))))), if (o) relPtr(iv) else "")), pct(prefix, "io"), false)
+
+def isTlKit(f: String): Bool =
+  f == "Timeline.len" || f == "Timeline.signalInt" || f == "Verdict.ok" || f == "Verdict.fail"
+
+def emitTlKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  if (f == "Timeline.len") emitTlLen(code, vals, prefix) else if (f == "Timeline.signalInt") emitTlSig(code, vals, prefix) else if (f == "Verdict.ok") emitVOk(code, prefix) else emitVFail(code, vals, prefix)
+
+def emitTlLen(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_timeline_len(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
+
+def emitTlSig(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_timeline_signal_int(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", i64 ", Str.concat(arg2(vals), ")"))))))))), pct(prefix, "v"), false)
+
+def emitVOk(code: String, prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "tl"), "call ptr @sz_verdict_ok()"))), pct(prefix, "tl"), true)
+
+def emitVFail(code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "cstr"), Str.concat("call ptr @sz_string_cstr(ptr ", Str.concat(arg1(vals), ")")))), line(Str.concat(tmp(prefix, "tl"), Str.concat("call ptr @sz_verdict_fail(i64 ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(pct(prefix, "cstr"), ")")))))))), pct(prefix, "tl"), true)
 
 def emitWhen(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitTimeout2(rt, code, arg0(vals), arg1(vals), headOwn(tailOwn(owns)), prefix)
@@ -2867,7 +2885,7 @@ def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, s
   if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps) else emitQual(en, name, args, prefix, strs, defs, ens, ps)
 
 def isEmitKit(f: String): Bool =
-  isUiKit(f) || f == "List.setAt" || f == "List.join" || kitUnaryPtr(f) != "" || kitUnaryI64(f) != "" || kitPtrI64(f) != "" || kitBinaryPtr(f) != "" || kitBinaryI64(f) != "" || isJsonExtra(f) || isRtExtra(f) || isMapKit(f) || f == "Map.empty" || f == "Set.empty" || f == "List.empty" || f == "Str.replace" || f == "Str.padLeft" || f == "Str.padRight" || f == "Map.set" || f == "Set.add" || f == "Map.getOrElse" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Fs.mkdirs" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "IO.pure" || f == "Sys.getenv" || f == "Impurity.runKit" || f == "Net.serveOnce" || f == "Net.serve" || f == "Queue.unbounded" || f == "Deferred.empty" || f == "Float.toInt" || f == "Float.fromInt" || f == "Map.isEmpty" || f == "Set.isEmpty" || f == "Map.nonEmpty" || f == "Set.nonEmpty" || f == "List.range" || f == "List.fill" || f == "List.getOrElse" || f == "List.padTo" || f == "List.max" || f == "List.min" || f == "List.sort" || f == "List.toSet" || f == "List.slice" || f == "List.isDefinedAt" || f == "List.lengthCompare" || f == "List.tabulate" || f == "List.segmentLength" || f == "Oracle.sumTo"
+  isUiKit(f) || f == "List.setAt" || f == "List.join" || kitUnaryPtr(f) != "" || kitUnaryI64(f) != "" || kitPtrI64(f) != "" || kitBinaryPtr(f) != "" || kitBinaryI64(f) != "" || isJsonExtra(f) || isRtExtra(f) || isMapKit(f) || f == "Map.empty" || f == "Set.empty" || f == "List.empty" || f == "Str.replace" || f == "Str.padLeft" || f == "Str.padRight" || f == "Map.set" || f == "Set.add" || f == "Map.getOrElse" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Fs.mkdirs" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "IO.pure" || f == "Sys.getenv" || f == "Impurity.runKit" || f == "Net.serveOnce" || f == "Net.serve" || f == "Queue.unbounded" || f == "Deferred.empty" || f == "Float.toInt" || f == "Float.fromInt" || f == "Map.isEmpty" || f == "Set.isEmpty" || f == "Map.nonEmpty" || f == "Set.nonEmpty" || f == "List.range" || f == "List.fill" || f == "List.getOrElse" || f == "List.padTo" || f == "List.max" || f == "List.min" || f == "List.sort" || f == "List.toSet" || f == "List.slice" || f == "List.isDefinedAt" || f == "List.lengthCompare" || f == "List.tabulate" || f == "List.segmentLength" || isTlKit(f) || f == "Oracle.sumTo"
 
 def isUiKit(f: String): Bool =
   Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Property.") || f == "Ui.run"
@@ -4281,10 +4299,10 @@ def emitMain(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): St
   stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam()), defs, strs), "Main")
 
 def emitMain2(s: Slot, defs: List[Fun], strs: List[String]): String =
-  emitMain3(s.code, s.val, drvFuns(defs), strs)
+  emitMain3(s.code, s.val, drvFuns(defs), relFuns(defs), strs)
 
-def emitMain3(code: String, val: String, ds: List[Fun], strs: List[String]): String =
-  Str.concat(emitDrvTramps(ds, 0), emitMain4(code, val, emitDrvRegs(ds, strs, 0)))
+def emitMain3(code: String, val: String, ds: List[Fun], rs: List[Fun], strs: List[String]): String =
+  Str.concat(emitDrvTramps(ds, 0), emitMain4(code, val, Str.concat(emitDrvRegs(ds, strs, 0), emitRelRegs(rs, strs, 0))))
 
 def emitMain4(code: String, val: String, regs: String): String =
   Str.concat("define i32 @main(i32 %argc, ptr %argv) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(regs, Str.concat(code, Str.concat("  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(val, Str.concat(", i32 %argc, ptr %argv)", Str.concat(nl(), Str.concat("  ret i32 %rc", Str.concat(nl(), "}"))))))))))))
@@ -4297,6 +4315,46 @@ def drvFuns1(d: Fun, rest: List[Fun]): List[Fun] =
 
 def isDrv(d: Fun): Bool =
   d.mod == "__verify" && isIoTy(d.ret)
+
+def isRelFun(d: Fun): Bool =
+  d.ret == "Verdict" && List.len(d.params) == 2 && isTlPs(d.params)
+
+def isTlPs(ps: List[Param]): Bool =
+  List.isEmpty(ps) || (List.head(ps).ty == "Timeline" && isTlPs(List.tail(ps)))
+
+def relFuns(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else relFuns1(List.head(ds), List.tail(ds))
+
+def relFuns1(d: Fun, rest: List[Fun]): List[Fun] =
+  if (isRelFun(d)) d :: relFuns(rest) else relFuns(rest)
+
+def internRel(p: Prog, acc: List[String]): List[String] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => internRelDefs(defs, acc)
+  }
+
+def internRelDefs(ds: List[Fun], acc: List[String]): List[String] =
+  if (List.isEmpty(ds)) acc else internRelDefs(List.tail(ds), internRelDef(List.head(ds), acc))
+
+def internRelDef(d: Fun, acc: List[String]): List[String] =
+  if (isRelFun(d)) intern(acc, d.name) else if (isDrv(d)) intern(acc, drvRegName(d.name)) else acc
+
+def emitRelRegs(ds: List[Fun], strs: List[String], i: Int): String =
+  if (List.isEmpty(ds)) "" else Str.concat(emitRelReg(List.head(ds), strs, i), emitRelRegs(List.tail(ds), strs, i + 1))
+
+def emitRelReg(d: Fun, strs: List[String], i: Int): String =
+  d match {
+    case Fun(_, name, _, _, _, _, mod) => emitRelReg2(name, mod, strs, i)
+  }
+
+def emitRelReg2(name: String, mod: String, strs: List[String], i: Int): String =
+  join(relGep(name, strs, i), relCall(name, mod, i))
+
+def relGep(name: String, strs: List[String], i: Int): String =
+  line(Str.concat("%vrl", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(name) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
+
+def relCall(name: String, mod: String, i: Int): String =
+  line(Str.concat("call void @sz_verify_register_rel(ptr %vrl", Str.concat(Str.fromInt(i), Str.concat("_gep, ptr @sz_user_", Str.concat(symOf(mod, name), ")")))))
 
 def emitDrvRegs(ds: List[Fun], strs: List[String], i: Int): String =
   if (List.isEmpty(ds)) "" else Str.concat(emitDrvReg(List.head(ds), strs, i), emitDrvRegs(List.tail(ds), strs, i + 1))
@@ -4886,7 +4944,10 @@ def internFiles2(f: (String, String), rest: List[(String, String)], acc: List[St
   }
 
 def emitFiles(files: List[(String, String)]): String =
-  hoistNeth(emitProg(Parse.parseFiles(files), internFiles(files, noStr())))
+  emitFilesGot(Parse.parseFiles(files), internFiles(files, noStr()))
+
+def emitFilesGot(p: Prog, strs: List[String]): String =
+  hoistNeth(emitProg(p, internRel(p, strs)))
 
 def emitFullFiles(files: List[(String, String)]): String =
   Str.concat(preamble(), emitFiles(files))
@@ -4898,7 +4959,7 @@ def preamble(): String =
   Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), decls())))
 
 def decls(): String =
-  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), nl()))))))))))))))))))))
+  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), nl())))))))))))))))))))))
 
 def declsR(): String =
   join(decl("ptr @sz_string_lines(ptr)"), join(decl("ptr @sz_string_trim(ptr)"), join(decl("ptr @sz_string_to_lower(ptr)"), join(decl("ptr @sz_string_to_upper(ptr)"), join(decl("ptr @sz_string_capitalize(ptr)"), join(decl("ptr @sz_string_reverse(ptr)"), join(decl("i64 @sz_string_is_empty(ptr)"), join(decl("i64 @sz_string_non_empty(ptr)"), join(decl("i64 @sz_string_is_blank(ptr)"), join(decl("ptr @sz_string_split(ptr, ptr)"), join(decl("ptr @sz_string_strip_prefix(ptr, ptr)"), join(decl("ptr @sz_string_strip_suffix(ptr, ptr)"), join(decl("i64 @sz_string_ends_with(ptr, ptr)"), join(decl("i64 @sz_string_index_of(ptr, ptr)"), join(decl("i64 @sz_string_last_index_of(ptr, ptr)"), join(decl("ptr @sz_string_replace(ptr, ptr, ptr)"), join(decl("ptr @sz_string_pad_left(ptr, i64, ptr)"), decl("ptr @sz_string_pad_right(ptr, i64, ptr)"))))))))))))))))))
@@ -4923,6 +4984,9 @@ def declsT4(): String =
 
 def declsT5(): String =
   join(decl("ptr @sz_lang_view_radio(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_choice_chip(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_radio_list_tile(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_show_when(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_segmented(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_expansion_tile(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_ink_well(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_list_tile(ptr, ptr)"), join(decl("ptr @sz_lang_view_avatar(ptr)"), join(decl("ptr @sz_lang_view_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_merge_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_tooltip(ptr, ptr)"), join(decl("ptr @sz_lang_view_badge(ptr, ptr)"), join(decl("ptr @sz_lang_view_visibility(ptr, ptr)"), join(decl("ptr @sz_lang_view_offstage(ptr, ptr)"), join(decl("ptr @sz_lang_view_icon_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_fab(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_outlined_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_text_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_action_chip(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_each(ptr)"), decl("ptr @sz_lang_view_each_map(ptr, ptr, ptr)"))))))))))))))))))))))
+
+def declsU(): String =
+  join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("ptr @sz_verdict_ok()"), decl("ptr @sz_verdict_fail(i64, ptr)")))))
 
 def declsA(): String =
   join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))
