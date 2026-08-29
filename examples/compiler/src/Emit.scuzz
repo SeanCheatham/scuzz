@@ -5505,7 +5505,16 @@ def recvBindTy(recv: Expr, ens: List[En], defs: List[Fun], ps: List[Param]): Str
   }
 
 def recvBindTyCall(f: String, args: List[Expr], ens: List[En], defs: List[Fun], ps: List[Param]): String =
-  if (f == "IO.pure") recvBindTyPure(args, ens, defs, ps) else if (f == "Sys.exec") "(Int, String, String)" else clockInt(f)
+  if (f == "IO.pure") recvBindTyPure(args, ens, defs, ps) else if (f == "Sys.exec") "(Int, String, String)" else recvBindTyIo(funRetStr(defs, f), clockInt(f))
+
+def recvBindTyIo(ret: String, fallback: String): String =
+  if (isIoRet(ret)) ioElem(ret) else if (ret != "") ret else fallback
+
+def isIoRet(ret: String): Bool =
+  Str.startsWith(ret, "IO[") && Str.len(ret) > 4
+
+def ioElem(ret: String): String =
+  Str.slice(ret, 3, Str.len(ret) - 1)
 
 def recvBindTyPure(args: List[Expr], ens: List[En], defs: List[Fun], ps: List[Param]): String =
   if (List.isEmpty(args)) "Any" else recvBindTyPure1(List.head(args), ens, defs, ps)
