@@ -289,13 +289,13 @@ def hasCase1(c: EnCase, rest: List[EnCase], ctor: String): Bool =
   }
 
 def isOpenKit(f: String): Bool =
-  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "Str.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Json.") || Str.startsWith(f, "Float.") || Str.startsWith(f, ".")
+  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "Str.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Json.") || Str.startsWith(f, "Float.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Timeline.") || Str.startsWith(f, "Verdict.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, ".")
 
 def anyParams(n: Int): List[String] =
   if (n <= 0) noStr() else "Any" :: anyParams(n - 1)
 
 def openKitRet(f: String): String =
-  if (openKitBool(f)) "Bool" else if (openKitInt(f)) "Int" else if (openKitAny(f)) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "IO.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, ".")) "Any" else "List"
+  if (openKitBool(f)) "Bool" else if (openKitInt(f) || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")) "Int" else if (f == "Property.sometimes") "Unit" else if (openKitAny(f) || Str.startsWith(f, "Signal.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Property.")) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "IO.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, ".")) "Any" else "List"
 
 def openKitBool(f: String): Bool =
   f == "List.exists" || f == "List.forall" || f == "List.contains" || f == "List.nonEmpty" || f == "List.isEmpty"
