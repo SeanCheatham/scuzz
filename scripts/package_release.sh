@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Assemble a self-contained scuzz release tree + tarball under dist/.
 #
-# The shipped `scuzz` is the Rust CLI (`crates/cli`). Layout matches SCUZZ_HOME
-# (crates/ + scripts/). Host needs clang/make to link apps.
+# The shipped `scuzz` is the Scuzz CLI (`examples/cli`). Tagged `v0.2.0` compiles
+# it. Layout matches SCUZZ_HOME (crates/ + scripts/). Host needs clang/make
+# to link apps.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -12,11 +13,10 @@ DIST_ROOT="${DIST_ROOT:-$ROOT/dist}"
 NAME="scuzz-$TRIPLE"
 OUT="$DIST_ROOT/$NAME"
 TGZ="$DIST_ROOT/$NAME.tar.gz"
-TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 
-echo "==> cargo build --release -p scuzz"
-cargo build --release -p scuzz
-SCUZZ_BIN="$TARGET_DIR/release/scuzz"
+echo "==> bootstrap product CLI"
+"$ROOT/scripts/bootstrap.sh"
+SCUZZ_BIN="${SCUZZ_PRODUCT:-$ROOT/examples/cli/build/cli}"
 test -x "$SCUZZ_BIN"
 
 echo "==> assembling $OUT"

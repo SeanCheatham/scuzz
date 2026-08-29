@@ -6,7 +6,7 @@
 # clang/make. Linux [ui] linking against the packaged Skia CPU prebuilt also
 # needs zlib/bzip2. Rust/cargo is not required when installing from a
 # prebuilt artifact (RELEASE_TGZ / RELEASE_DIR / GitHub Release). From a
-# checkout, `package_release.sh` builds the Rust CLI.
+# checkout, `package_release.sh` compiles `examples/cli` with tagged `v0.2.0`.
 #
 # Sources (first match):
 #   RELEASE_DIR / RELEASE_TGZ — local tree or tarball

@@ -56,9 +56,6 @@ jobs:
           sudo apt-get install -y clang make libx11-dev \
             zlib1g-dev libbz2-dev
 
-      - name: Install Rust (stable with rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Package release + install-from-tarball smoke
         env:
           SCUZZ_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
@@ -129,7 +126,7 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           body: |
-            Rust `scuzz` (`linux-x86_64`, `darwin-arm64`).
+            Scuzz CLI (`linux-x86_64`, `darwin-arm64`). Tagged `v0.2.0` is the bootstrap compiler.
 
             ```bash
             curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sh

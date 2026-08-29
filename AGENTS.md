@@ -51,7 +51,7 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 
 Host setup and prove-host commands: [`docs/developer-environment.md`](docs/developer-environment.md). CI mirror: `.github/workflows/ci.yml` (`linux-headless`).
 
-No long-running app daemons. Develop with `cargo` + `make` + `clang`. Default UI path is headless (`scuzz run --headless`); it does not need `DISPLAY` or X11.
+No long-running app daemons. Develop with `make` + `clang`. Rebuild the product CLI with `./scripts/bootstrap.sh` (tagged `v0.2.0`). `cargo` stays for the in-tree Rust compiler crates until those crates leave. Default UI path is headless (`scuzz run --headless`); it does not need `DISPLAY` or X11.
 
 **Install script** stays `cargo fetch` only. Required host packages (`clang`, `make`, `zlib1g-dev`, `libbz2-dev`) and optional CI slices (ASan `libclang-rt-18-dev`, Desktop `libx11-dev` + `xvfb`, GPU `libegl1-mesa-dev` `libgles2-mesa-dev` `libgl1-mesa-dri`) live in the cloud VM snapshot, not in the install script. Optional slice commands: `make -C crates/runtime test-asan CC=clang`; `xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu …`; `xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 cargo run -p scuzz -- run …`.
 

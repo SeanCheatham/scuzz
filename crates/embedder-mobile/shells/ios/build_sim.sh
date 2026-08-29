@@ -35,13 +35,10 @@ rm -rf "$OUT"
 mkdir -p "$OUT/obj"
 
 if [ -z "${SCUZZ:-}" ] || [ ! -x "$SCUZZ" ]; then
-  SCUZZ="$ROOT/target/release/scuzz"
+  SCUZZ="$ROOT/examples/cli/build/cli"
   if [ ! -x "$SCUZZ" ]; then
-    SCUZZ="$ROOT/target/debug/scuzz"
-  fi
-  if [ ! -x "$SCUZZ" ]; then
-    cargo build --release -p scuzz
-    SCUZZ="$ROOT/target/release/scuzz"
+    "$ROOT/scripts/bootstrap.sh"
+    SCUZZ="$ROOT/examples/cli/build/cli"
   fi
 fi
 # App IR (host binary is a byproduct; the .ll is what this script consumes).
