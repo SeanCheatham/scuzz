@@ -576,7 +576,7 @@ jobs:
           grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
           "$SCUZZ" fuzz --iterations 16 examples/kernel
           cargo run -p scuzz -- fuzz --iterations 8 examples/scale
-          cargo run -p scuzz -- fuzz --iterations 8 examples/fmt
+          "$SCUZZ" fuzz --iterations 8 examples/fmt
           cargo run -p scuzz -- fuzz --iterations 8 examples/tyck
           cargo run -p scuzz -- fuzz --iterations 8 examples/codegen
           cargo run -p scuzz -- fuzz --iterations 8 examples/cli
