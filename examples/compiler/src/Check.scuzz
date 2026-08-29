@@ -753,6 +753,9 @@ def humanLine3(o: Out, line: Int, col: Int): String =
 def human(src: String): String =
   human2(src, checkProg(Parse.parse(Lexer.lex(src))))
 
+def humanFiles(files: List[(String, String)]): String =
+  human2(filesSrc(files), checkProg(Parse.parseFiles(files)))
+
 def human2(src: String, o: Out): String =
   if (hasErr(o)) humanLine(src, o) else "scuzz check ok"
 

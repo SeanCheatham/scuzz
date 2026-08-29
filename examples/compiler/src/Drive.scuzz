@@ -180,28 +180,28 @@ def emitDirOut(p: PkgOut): IO[Unit] =
 def emitDirWrite(ok: Bool, ll: String, llPath: String, diags: String): IO[Unit] =
   if (!ok) IO.println(Str.concat("fail:", diags)) else Fs.write(llPath, ll).flatMap(_ => IO.println("ok"))
 
-def runDir(dir: String, outDir: String): IO[Unit] =
-  emitDir(dir, outDir).flatMap(_ => linkRun(dir, outDir))
+def runDir(dir: String, outDir: String, env: String): IO[Unit] =
+  emitDir(dir, outDir).flatMap(_ => linkRun(dir, outDir, env))
 
-def linkRun(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir))
+def linkRun(dir: String, outDir: String, env: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir, env))
 
-def linkRunMan(m: Man, outDir: String): IO[Unit] =
-  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else linkRunNamed(m.name, outDir)
+def linkRunMan(m: Man, outDir: String, env: String): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else linkRunNamed(m.name, outDir, env)
 
-def linkRunNamed(name: String, outDir: String): IO[Unit] =
-  runLine(linkLine("clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => afterClang(r, exeName(outDir, name)))
+def linkRunNamed(name: String, outDir: String, env: String): IO[Unit] =
+  runLine(linkLine("clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => afterClang(r, exeName(outDir, name), env))
 
 def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
 
-def afterClang(r: (Int, String, String), exe: String): IO[Unit] =
+def afterClang(r: (Int, String, String), exe: String, env: String): IO[Unit] =
   r match {
-    case (code, out, err) => afterClang2(code, out, err, exe)
+    case (code, out, err) => afterClang2(code, out, err, exe, env)
   }
 
-def afterClang2(code: Int, _out: String, err: String, exe: String): IO[Unit] =
-  if (code != 0) IO.println(err) else runLine(exe).flatMap(r => afterRun(r))
+def afterClang2(code: Int, _out: String, err: String, exe: String, env: String): IO[Unit] =
+  if (code != 0) IO.println(err) else runLine(Str.concat(env, exe)).flatMap(r => afterRun(r))
 
 def afterRun(r: (Int, String, String)): IO[Unit] =
   r match {
@@ -210,6 +210,72 @@ def afterRun(r: (Int, String, String)): IO[Unit] =
 
 def afterRun2(code: Int, out: String, err: String): IO[Unit] =
   if (code != 0) IO.println(err) else Sys.write(out)
+
+def testEnv(): String =
+  "SCUZZ_TESTRT=1 SCUZZ_SERVE=1 SCUZZ_KIT=sealed "
+
+def headlessEnv(): String =
+  "SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 SCUZZ_UI_SCALE=1 "
+
+def checkDir(dir: String, json: Bool): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkDirMan(dir, json, Manifest.parse(toml)))
+
+def checkDirMan(dir: String, json: Bool, m: Man): IO[Unit] =
+  m match {
+    case Man(ok, _name, _version, _hasUi, deps, err) => checkDirMan2(dir, json, ok, err, deps)
+  }
+
+def checkDirMan2(dir: String, json: Bool, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
+  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => checkDirListed(dir, json, deps, ents))
+
+def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDirCollected(dir, json, deps, own))
+
+def checkDirCollected(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
+  collectDeps(dir, deps, own).flatMap(files => checkDirFiles(json, files))
+
+def checkDirFiles(json: Bool, files: List[(String, String)]): IO[Unit] =
+  checkDirOut(json, Check.checkFiles(files), Check.humanFiles(files))
+
+def checkDirOut(json: Bool, diags: String, human: String): IO[Unit] =
+  if (json) checkDirJson(diags) else checkDirHuman(human)
+
+def checkDirJson(diags: String): IO[Unit] =
+  if (diags == "[]") IO.println("[]") else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))
+
+def checkDirHuman(human: String): IO[Unit] =
+  if (human == "scuzz check ok") IO.println(human) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
+
+def testDir(dir: String, outDir: String): IO[Unit] =
+  emitDir(dir, outDir).flatMap(_ => testLink(dir, outDir))
+
+def testLink(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testLinkMan(Manifest.parse(toml), outDir))
+
+def testLinkMan(m: Man, outDir: String): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else testLinkNamed(m.name, outDir)
+
+def testLinkNamed(name: String, outDir: String): IO[Unit] =
+  runLine(linkLine("clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => testAfterClang(r, exeName(outDir, name)))
+
+def testAfterClang(r: (Int, String, String), exe: String): IO[Unit] =
+  r match {
+    case (code, out, err) => testAfterClang2(code, out, err, exe)
+  }
+
+def testAfterClang2(code: Int, _out: String, err: String, exe: String): IO[Unit] =
+  if (code != 0) IO.println(err) else IO.println("project compile smoke ok").flatMap(_ => testRun(exe))
+
+def testRun(exe: String): IO[Unit] =
+  runLine(Str.concat(testEnv(), exe)).flatMap(r => testAfterRun(r))
+
+def testAfterRun(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, out, err) => testAfterRun2(code, out, err)
+  }
+
+def testAfterRun2(code: Int, _out: String, err: String): IO[Unit] =
+  if (code != 0) IO.println(err).flatMap(_ => IO.fail("IO smoke")) else IO.println("IO smoke ok").flatMap(_ => IO.println("scuzz test ok"))
 
 def showPkg(p: PkgOut): String =
   if (!p.ok) Str.concat("fail:", p.diags) else Str.concat("ok name=", Str.concat(p.name, Str.concat(" ll=", Str.concat(p.llPath, Str.concat(" link=", p.link)))))
