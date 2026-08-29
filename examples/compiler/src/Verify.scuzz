@@ -1,6 +1,7 @@
 import Parse.Fun
 import Parse.Param
 import Parse.Prog
+import Parse.pretty0
 
 def nl(): String =
   """
@@ -90,6 +91,39 @@ def parseVerify(src: String): List[Fun] =
 def parseVerifyProg(p: Prog): List[Fun] =
   p match {
     case Prog(_, _, _, _, _, _, defs, _, _) => drives(defs)
+  }
+
+def wrapMod(): String =
+  "__verify"
+
+def wrapSrc(stem: String, src: String): String =
+  wrapFuns(stem, parseVerify(src))
+
+def wrapFuns(stem: String, ds: List[Fun]): String =
+  if (List.isEmpty(ds)) "" else Str.concat(wrapFun(stem, List.head(ds)), wrapFuns(stem, List.tail(ds)))
+
+def wrapFun(stem: String, d: Fun): String =
+  d match {
+    case Fun(_, name, _, ps, _, body, _) => wrapFun2(name, wrapPs(ps), pretty0(body))
+  }
+
+def wrapFun2(name: String, ps: String, body: String): String =
+  Str.concat("def _drv_", Str.concat(name, Str.concat("(", Str.concat(ps, Str.concat("): IO[Unit] =\n  Property.assert(\"", Str.concat(name, Str.concat("\", ", Str.concat(body, ")\n"))))))))
+
+def wrapPs(ps: List[Param]): String =
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) wrapP(List.head(ps)) else Str.concat(wrapP(List.head(ps)), Str.concat(", ", wrapPs(List.tail(ps))))
+
+def wrapP(p: Param): String =
+  p match {
+    case Param(n, ty, _, _) => Str.concat(n, Str.concat(": ", ty))
+  }
+
+def wrapFiles(files: List[(String, String)]): String =
+  if (List.isEmpty(files)) "" else wrapFiles2(List.head(files), List.tail(files))
+
+def wrapFiles2(h: (String, String), rest: List[(String, String)]): String =
+  h match {
+    case (stem, src) => Str.concat(wrapSrc(stem, src), wrapFiles(rest))
   }
 
 def seeds(src: String): String =

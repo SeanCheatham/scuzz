@@ -1593,7 +1593,13 @@ def emitViewIcon(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_icon(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))), pct(prefix, "v"), true)
 
 def emitPropKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (f == "Property.a11yHas") emitPropA11y(code, vals, owns, prefix) else if (f == "Property.signalInt") emitPropI64("sz_property_signal_int", code, vals, prefix) else if (f == "Property.signalListLen") emitPropI64("sz_property_signal_list_len", code, vals, prefix) else if (f == "Property.signalStr") emitPropStr(code, vals, prefix) else if (f == "Property.signalListAt") emitPropListAt(code, vals, prefix) else emitPropCheck(code, vals, owns, prefix)
+  if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (f == "Property.assert") emitPropAssert(code, vals, owns, prefix) else if (f == "Property.a11yHas") emitPropA11y(code, vals, owns, prefix) else if (f == "Property.signalInt") emitPropI64("sz_property_signal_int", code, vals, prefix) else if (f == "Property.signalListLen") emitPropI64("sz_property_signal_list_len", code, vals, prefix) else if (f == "Property.signalStr") emitPropStr(code, vals, prefix) else if (f == "Property.signalListAt") emitPropListAt(code, vals, prefix) else emitPropCheck(code, vals, owns, prefix)
+
+def emitPropAssert(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitPropAssert2(code, arg0(vals), arg1(vals), headOwn(owns), prefix)
+
+def emitPropAssert2(code: String, name: String, ok: String, drop: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_property_assert(ptr ", Str.concat(name, Str.concat(", i64 ", Str.concat(ok, ")")))))), if (drop) relPtr(name) else "")), pct(prefix, "v"), false)
 
 def emitPropI64(rt: String, code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @", Str.concat(rt, Str.concat("(i64 ", Str.concat(arg0(vals), ")"))))))), pct(prefix, "v"), false)
@@ -4272,10 +4278,89 @@ def bindsComma(i: Int, n: Int): String =
   if (i >= n) "" else if (i + 1 == n) fakeBind(i) else Str.concat(fakeBind(i), Str.concat(", ", bindsComma(i + 1, n)))
 
 def emitMain(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam())), "Main")
+  stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam()), defs, strs), "Main")
 
-def emitMain2(s: Slot): String =
-  Str.concat("define i32 @main(i32 %argc, ptr %argv) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(s.code, Str.concat("  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(s.val, Str.concat(", i32 %argc, ptr %argv)", Str.concat(nl(), Str.concat("  ret i32 %rc", Str.concat(nl(), "}")))))))))))
+def emitMain2(s: Slot, defs: List[Fun], strs: List[String]): String =
+  emitMain3(s.code, s.val, drvFuns(defs), strs)
+
+def emitMain3(code: String, val: String, ds: List[Fun], strs: List[String]): String =
+  Str.concat(emitDrvTramps(ds, 0), emitMain4(code, val, emitDrvRegs(ds, strs, 0)))
+
+def emitMain4(code: String, val: String, regs: String): String =
+  Str.concat("define i32 @main(i32 %argc, ptr %argv) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(regs, Str.concat(code, Str.concat("  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(val, Str.concat(", i32 %argc, ptr %argv)", Str.concat(nl(), Str.concat("  ret i32 %rc", Str.concat(nl(), "}"))))))))))))
+
+def drvFuns(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else drvFuns1(List.head(ds), List.tail(ds))
+
+def drvFuns1(d: Fun, rest: List[Fun]): List[Fun] =
+  if (isDrv(d)) d :: drvFuns(rest) else drvFuns(rest)
+
+def isDrv(d: Fun): Bool =
+  d.mod == "__verify" && isIoTy(d.ret)
+
+def emitDrvRegs(ds: List[Fun], strs: List[String], i: Int): String =
+  if (List.isEmpty(ds)) "" else Str.concat(emitDrvReg(List.head(ds), strs, i), emitDrvRegs(List.tail(ds), strs, i + 1))
+
+def emitDrvReg(d: Fun, strs: List[String], i: Int): String =
+  d match {
+    case Fun(_, name, _, ps, _, _, mod) => emitDrvReg2(drvRegName(name), name, ps, mod, strs, i)
+  }
+
+def drvRegName(name: String): String =
+  if (Str.startsWith(name, "_drv_")) Str.slice(name, 5, Str.len(name)) else name
+
+def emitDrvReg2(reg: String, name: String, ps: List[Param], mod: String, strs: List[String], i: Int): String =
+  join(drvGep(reg, strs, i), join(drvSs(i), drvCall(name, ps, mod, i)))
+
+def emitDrvTramps(ds: List[Fun], i: Int): String =
+  if (List.isEmpty(ds)) "" else Str.concat(emitDrvTramp(List.head(ds), i), emitDrvTramps(List.tail(ds), i + 1))
+
+def emitDrvTramp(d: Fun, i: Int): String =
+  d match {
+    case Fun(_, name, _, ps, _, _, mod) => if (List.len(ps) <= 1) "" else trampFn(name, ps, mod, i)
+  }
+
+def trampFn(name: String, ps: List[Param], mod: String, i: Int): String =
+  Str.concat("define internal ptr @sz_drv_tramp_", Str.concat(Str.fromInt(i), Str.concat("(ptr %args) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(trampLoads(ps, 0), Str.concat(trampRet(name, ps, mod), Str.concat("}", Str.concat(nl(), nl()))))))))))
+
+def trampLoads(ps: List[Param], k: Int): String =
+  if (List.isEmpty(ps)) "" else Str.concat(trampLoad(List.head(ps), k), trampLoads(List.tail(ps), k + 1))
+
+def trampLoad(p: Param, k: Int): String =
+  join(line(Str.concat("%da", Str.concat(Str.fromInt(k), Str.concat(" = call ptr @sz_list_at(ptr %args, i64 ", Str.concat(Str.fromInt(k), ")"))))), trampUnbox(p, k))
+
+def trampUnbox(p: Param, k: Int): String =
+  if (isI64Ty(p.ty)) line(Str.concat("%dv", Str.concat(Str.fromInt(k), Str.concat(" = call i64 @sz_unbox_i64(ptr %da", Str.concat(Str.fromInt(k), ")"))))) else ""
+
+def trampRet(name: String, ps: List[Param], mod: String): String =
+  join(line(Str.concat("%dio = call ptr @sz_user_", Str.concat(symOf(mod, name), Str.concat("(", Str.concat(trampArgs(ps, 0), ")"))))), line("ret ptr %dio"))
+
+def trampArgs(ps: List[Param], k: Int): String =
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) trampArg(List.head(ps), k) else Str.concat(trampArg(List.head(ps), k), Str.concat(", ", trampArgs(List.tail(ps), k + 1)))
+
+def trampArg(p: Param, k: Int): String =
+  if (isI64Ty(p.ty)) Str.concat("i64 %dv", Str.fromInt(k)) else Str.concat("ptr %da", Str.fromInt(k))
+
+def drvSym(name: String, ps: List[Param], mod: String, i: Int): String =
+  if (List.len(ps) <= 1) Str.concat("@sz_user_", symOf(mod, name)) else Str.concat("@sz_drv_tramp_", Str.fromInt(i))
+
+def drvGep(name: String, strs: List[String], i: Int): String =
+  line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(name) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
+
+def drvSs(i: Int): String =
+  line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_ss = call ptr @sz_string_from_cstr(ptr %drv", Str.concat(Str.fromInt(i), "_gep)")))))
+
+def drvCall(name: String, ps: List[Param], mod: String, i: Int): String =
+  line(Str.concat("call void @sz_driver_register(ptr %drv", Str.concat(Str.fromInt(i), Str.concat("_ss, i64 ", Str.concat(Str.fromInt(List.len(ps)), Str.concat(", i64 ", Str.concat(Str.fromInt(packKind(ps)), Str.concat(", ptr ", Str.concat(drvSym(name, ps, mod, i), ")")))))))))
+
+def packKind(ps: List[Param]): Int =
+  packKindAt(ps, 1, 0)
+
+def packKindAt(ps: List[Param], place: Int, acc: Int): Int =
+  if (List.isEmpty(ps)) acc else packKindAt(List.tail(ps), place * 4, acc + kindOf(List.head(ps)) * place)
+
+def kindOf(p: Param): Int =
+  if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
 def emitProg(p: Prog, strs: List[String]): String =
   p match {
@@ -4825,7 +4910,7 @@ def declsT(): String =
   join(declsT1(), join(declsT2(), join(declsT3(), join(declsT4(), declsT5()))))
 
 def declsT1(): String =
-  join(decl("i64 @sz_color_rgb(i64, i64, i64)"), join(decl("i64 @sz_color_rgba(i64, i64, i64, i64)"), join(decl("i64 @sz_theme_accent()"), join(decl("i64 @sz_theme_primary()"), join(decl("i64 @sz_theme_muted()"), join(decl("i64 @sz_theme_foreground()"), join(decl("ptr @sz_lang_signal_int(i64)"), join(decl("i64 @sz_lang_signal_get(ptr)"), join(decl("ptr @sz_lang_signal_set(ptr, i64)"), join(decl("ptr @sz_lang_signal_map(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_signal_str_get(ptr)"), join(decl("ptr @sz_ui_run_rebuild(ptr, ptr)"), join(decl("void @sz_property_check(ptr, i64)"), decl("ptr @sz_io_unsafe_run_or_die(ptr)"))))))))))))))
+  join(decl("i64 @sz_color_rgb(i64, i64, i64)"), join(decl("i64 @sz_color_rgba(i64, i64, i64, i64)"), join(decl("i64 @sz_theme_accent()"), join(decl("i64 @sz_theme_primary()"), join(decl("i64 @sz_theme_muted()"), join(decl("i64 @sz_theme_foreground()"), join(decl("ptr @sz_lang_signal_int(i64)"), join(decl("i64 @sz_lang_signal_get(ptr)"), join(decl("ptr @sz_lang_signal_set(ptr, i64)"), join(decl("ptr @sz_lang_signal_map(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_signal_str_get(ptr)"), join(decl("ptr @sz_ui_run_rebuild(ptr, ptr)"), join(decl("void @sz_property_check(ptr, i64)"), join(decl("ptr @sz_property_assert(ptr, i64)"), join(decl("void @sz_driver_register(ptr, i64, i64, ptr)"), decl("ptr @sz_io_unsafe_run_or_die(ptr)"))))))))))))))))
 
 def declsT2(): String =
   join(decl("ptr @sz_lang_view_text(ptr)"), join(decl("ptr @sz_lang_view_bind_text(ptr)"), join(decl("ptr @sz_lang_view_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_center(ptr)"), join(decl("ptr @sz_lang_view_column()"), join(decl("ptr @sz_lang_view_row()"), join(decl("ptr @sz_lang_view_stack()"), join(decl("ptr @sz_lang_view_add_child(ptr, ptr)"), join(decl("ptr @sz_lang_view_background(i64, ptr)"), join(decl("ptr @sz_lang_view_min_size(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_sized(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_positioned(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_image(i64, i64, i64, ptr)"), decl("ptr @sz_lang_view_icon(i64, i64)"))))))))))))))

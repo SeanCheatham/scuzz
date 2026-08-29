@@ -61,6 +61,9 @@ def verOk(): Bool =
 def campSeeds(): Bool =
   Verify.seeds(Main.srcAddVerify()) == Main.wantAddSeeds()
 
+def campWrap(): Bool =
+  Verify.wrapSrc("bump", Main.srcBumpVerify()) == Main.wantWrapBump()
+
 def campFuzz0(): Bool =
   Verify.fuzzOut(0, 42, 0, 0, 0) == Main.wantFuzzHello0()
 
