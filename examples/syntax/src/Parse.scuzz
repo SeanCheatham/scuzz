@@ -118,7 +118,17 @@ def parseTypeArrow2(left: String, p: (String, Int)): (String, Int) =
   }
 
 def parseExpr(toks: List[Tok], i: Int): (Expr, Int) =
-  parseOr(toks, i)
+  parseAscribe(parseOr(toks, i), toks)
+
+def parseAscribe(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+  p match {
+    case (e, j) => if (_is(toks, j, Tok.Colon)) parseAscribeKeep(e, parseType(toks, j + 1)) else (e, j)
+  }
+
+def parseAscribeKeep(e: Expr, p: (String, Int)): (Expr, Int) =
+  p match {
+    case (_, k) => (e, k)
+  }
 
 def parseOr(toks: List[Tok], i: Int): (Expr, Int) =
   parseBinRest(toks, parseAnd(toks, i), "||")
