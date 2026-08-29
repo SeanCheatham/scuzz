@@ -591,8 +591,8 @@ def compileLinkedUi(m: Man, outDir: String): IO[Unit] =
   if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else if (m.hasUi) ensureUi().flatMap(_ => linkOnly(true, m.name, outDir)) else linkOnly(false, m.name, outDir)
 
 def pkgDir(dir: String, outDir: String, target: String): IO[Unit] =
-  if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir) else if (target == "ios") pkgIos(dir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ =>
-  pkgAndroid(dir).flatMap(_ => pkgIos(dir))
+  if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir, outDir) else if (target == "ios") pkgIos(dir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ =>
+  pkgAndroid(dir, outDir).flatMap(_ => pkgIos(dir))
 ) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
 
 def pkgHost(dir: String, outDir: String): IO[Unit] =
@@ -624,18 +624,55 @@ def pkgHostWrite(name: String, dest: String): IO[Unit] =
     )
   )
 
-def pkgAndroid(dir: String): IO[Unit] =
-  runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_ndk.sh ", dir)).flatMap(r => pkgAndroidNdk(r, dir))
+def pkgAndroid(dir: String, outDir: String): IO[Unit] =
+  runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_ndk.sh ", dir)).flatMap(r => pkgAndroidNdk(r, dir, outDir))
 
-def pkgAndroidNdk(r: (Int, String, String), dir: String): IO[Unit] =
+def pkgAndroidNdk(r: (Int, String, String), dir: String, outDir: String): IO[Unit] =
   r match {
-    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_apk.sh ", dir)).flatMap(r2 => pkgAndroidApk(r2))
+    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_apk.sh ", dir)).flatMap(r2 => pkgAndroidApk(r2, dir, outDir))
   }
 
-def pkgAndroidApk(r: (Int, String, String)): IO[Unit] =
+def pkgAndroidApk(r: (Int, String, String), dir: String, outDir: String): IO[Unit] =
   r match {
-    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else IO.println("scuzz package ok (android)")
+    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else pkgAndroidStage(dir, outDir)
   }
+
+def pkgAndroidStage(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgAndroidNamed(Manifest.parse(toml), dir, outDir))
+
+def pkgAndroidNamed(m: Man, dir: String, outDir: String): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else pkgAndroidCopy(m.name, dir, joinSlash(joinSlash(outDir, "package"), "android"))
+
+def androidSo(dir: String): String =
+  joinSlash(joinSlash(joinSlash(joinSlash(dir, "build"), "android"), "lib/arm64-v8a"), "libscuzz.so")
+
+def androidApk(dir: String, name: String): String =
+  joinSlash(joinSlash(joinSlash(dir, "build"), "android"), Str.concat(name, ".apk"))
+
+def pkgAndroidCopy(name: String, dir: String, dest: String): IO[Unit] =
+  Fs.mkdirs(joinSlash(dest, "lib/arm64-v8a")).flatMap(_ => pkgAndroidCpSo(name, dir, dest))
+
+def pkgAndroidCpSo(name: String, dir: String, dest: String): IO[Unit] =
+  runLine(Str.concat("cp ", Str.concat(androidSo(dir), Str.concat(" ", joinSlash(joinSlash(dest, "lib/arm64-v8a"), "libscuzz.so"))))).flatMap(r => pkgAndroidCpSoGot(r, name, dir, dest))
+
+def pkgAndroidCpSoGot(r: (Int, String, String), name: String, dir: String, dest: String): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("cp")) else pkgAndroidCpApk(name, dir, dest)
+  }
+
+def pkgAndroidCpApk(name: String, dir: String, dest: String): IO[Unit] =
+  runLine(Str.concat("cp ", Str.concat(androidApk(dir, name), Str.concat(" ", joinSlash(dest, Str.concat(name, ".apk")))))).flatMap(r => pkgAndroidCpApkGot(r, name, dest))
+
+def pkgAndroidCpApkGot(r: (Int, String, String), name: String, dest: String): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("cp")) else pkgAndroidWrite(name, dest)
+  }
+
+def pkgAndroidWrite(name: String, dest: String): IO[Unit] =
+  Fs.write(joinSlash(dest, "package.toml"), androidMeta(name)).flatMap(_ => IO.println("scuzz package ok (android)"))
+
+def androidMeta(name: String): String =
+  Str.concat("[package]\nname = \"", Str.concat(name, Str.concat("\"\ntarget = \"android\"\nbundle_id = \"", Str.concat(bundleId(), "\"\nruntime = \"mobile\"\n"))))
 
 def pkgAndroidFail(out: String, err: String): IO[Unit] =
   IO.println(if (Str.len(err) > 0) err else if (Str.len(out) > 0) out else ndkMiss()).flatMap(_ => IO.fail("android"))
