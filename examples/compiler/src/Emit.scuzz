@@ -3001,7 +3001,7 @@ def emitIf2(c: Slot, t: Slot, el: Slot, prefix: String, ps: List[Param]): Slot =
   }
 
 def emitIf3(c: Slot, tc: String, tv: String, to: Bool, ec: String, ev: String, eo: Bool, prefix: String, ps: List[Param]): Slot =
-  emitIf4(c, tc, tv, to, ec, ev, eo, prefix, to || eo || isPtrSlot(tv, ps) || isPtrSlot(ev, ps) || tv == "null" || ev == "null")
+  emitIf4(c, tc, tv, to, ec, ev, eo, prefix, thenIsPtr(tc, tv, to, ps) || thenIsPtr(ec, ev, eo, ps))
 
 def emitIf4(c: Slot, tc: String, tv: String, to: Bool, ec: String, ev: String, eo: Bool, prefix: String, isPtr: Bool): Slot =
   Slot(join(emitIfHead(c, prefix), join(emitIfArm(tc, tv, to, prefix, "_then_0", "_tj_0", isPtr && !to), join(emitIfArm(ec, ev, eo, prefix, "_else_0", "_ej_0", isPtr && !eo), emitIfPhi(tv, ev, prefix, isPtr)))), pct(prefix, "phi"), isPtr)
