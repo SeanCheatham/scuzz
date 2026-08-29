@@ -599,8 +599,8 @@ def testAfterRun(r: (Int, String, String)): IO[Unit] =
     case (code, out, err) => testAfterRun2(code, out, err)
   }
 
-def testAfterRun2(code: Int, _out: String, err: String): IO[Unit] =
-  if (code != 0) IO.println(err).flatMap(_ => IO.fail("IO smoke")) else IO.println("IO smoke ok").flatMap(_ => IO.println("scuzz test ok"))
+def testAfterRun2(code: Int, out: String, err: String): IO[Unit] =
+  if (code != 0) IO.println(err).flatMap(_ => IO.fail("IO smoke")) else Sys.write(out).flatMap(_ => IO.println("IO smoke ok").flatMap(_ => IO.println("scuzz test ok")))
 
 def showPkg(p: PkgOut): String =
   if (!p.ok) Str.concat("fail:", p.diags) else Str.concat("ok name=", Str.concat(p.name, Str.concat(" ll=", Str.concat(p.llPath, Str.concat(" link=", p.link)))))
