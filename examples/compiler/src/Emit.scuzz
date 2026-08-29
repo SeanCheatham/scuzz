@@ -1,5 +1,9 @@
 record Slot(code: String, val: String, owned: Bool)
 
+record Dec(code: String, val: String, num: Bool, owned: Bool, n: Int)
+
+record Decs(code: String, ds: List[Dec], n: Int)
+
 import Parse.Expr
 import Parse.Fun
 import Parse.Prog
@@ -4403,13 +4407,13 @@ def bindsComma(i: Int, n: Int): String =
   if (i >= n) "" else if (i + 1 == n) fakeBind(i) else Str.concat(fakeBind(i), Str.concat(", ", bindsComma(i + 1, n)))
 
 def emitMain(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
-  stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam()), defs, strs), "Main")
+  stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam()), defs, strs, ens), "Main")
 
-def emitMain2(s: Slot, defs: List[Fun], strs: List[String]): String =
-  emitMain3(s.code, s.val, drvFuns(defs), relFuns(defs), sessFuns(defs), strs)
+def emitMain2(s: Slot, defs: List[Fun], strs: List[String], ens: List[En]): String =
+  emitMain3(s.code, s.val, drvFuns(defs), relFuns(defs), sessFuns(defs), strs, ens)
 
-def emitMain3(code: String, val: String, ds: List[Fun], rs: List[Fun], ss: List[Fun], strs: List[String]): String =
-  Str.concat(emitDrvTramps(ds, 0), emitMain4(code, val, Str.concat(emitDrvRegs(ds, strs, 0), Str.concat(emitRelRegs(rs, strs, 0), emitSessRegs(ss, strs, 0)))))
+def emitMain3(code: String, val: String, ds: List[Fun], rs: List[Fun], ss: List[Fun], strs: List[String], ens: List[En]): String =
+  Str.concat(emitDrvTramps(ds, 0, ens, strs), emitMain4(code, val, Str.concat(emitDrvRegs(ds, strs, 0), Str.concat(emitRelRegs(rs, strs, 0), emitSessRegs(ss, strs, 0)))))
 
 def emitMain4(code: String, val: String, regs: String): String =
   Str.concat("define i32 @main(i32 %argc, ptr %argv) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(regs, Str.concat(code, Str.concat("  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(val, Str.concat(", i32 %argc, ptr %argv)", Str.concat(nl(), Str.concat("  ret i32 %rc", Str.concat(nl(), "}"))))))))))))
@@ -4446,8 +4450,22 @@ def sessFuns1(d: Fun, rest: List[Fun]): List[Fun] =
 
 def internRel(p: Prog, acc: List[String]): List[String] =
   p match {
-    case Prog(_, _, _, _, _, _, defs, _, _) => internRelDefs(defs, acc)
+    case Prog(_, enums, _, _, _, _, defs, _, _) => internRelDefs(defs, internEns(enums, intern(acc, "drive decode failed")))
   }
+
+def internEns(ens: List[En], acc: List[String]): List[String] =
+  if (List.isEmpty(ens)) acc else internEn(List.head(ens), internEns(List.tail(ens), acc))
+
+def internEn(e: En, acc: List[String]): List[String] =
+  e match {
+    case En(_, name, _, cases) => internCases(cases, intern(acc, name))
+  }
+
+def internCases(cs: List[EnCase], acc: List[String]): List[String] =
+  if (List.isEmpty(cs)) acc else internCases(List.tail(cs), internCase(List.head(cs), acc))
+
+def internCase(c: EnCase, acc: List[String]): List[String] =
+  intern(acc, c.name)
 
 def internRelDefs(ds: List[Fun], acc: List[String]): List[String] =
   if (List.isEmpty(ds)) acc else internRelDefs(List.tail(ds), internRelDef(List.head(ds), acc))
@@ -4503,13 +4521,271 @@ def drvRegName(name: String): String =
 def emitDrvReg2(reg: String, name: String, ps: List[Param], mod: String, strs: List[String], i: Int): String =
   join(drvGep(reg, strs, i), join(drvSs(i), drvCall(name, ps, mod, i)))
 
-def emitDrvTramps(ds: List[Fun], i: Int): String =
-  if (List.isEmpty(ds)) "" else Str.concat(emitDrvTramp(List.head(ds), i), emitDrvTramps(List.tail(ds), i + 1))
+def emitDrvTramps(ds: List[Fun], i: Int, ens: List[En], strs: List[String]): String =
+  if (List.isEmpty(ds)) "" else Str.concat(emitDrvTramp(List.head(ds), i, ens, strs), emitDrvTramps(List.tail(ds), i + 1, ens, strs))
 
-def emitDrvTramp(d: Fun, i: Int): String =
+def emitDrvTramp(d: Fun, i: Int, ens: List[En], strs: List[String]): String =
   d match {
-    case Fun(_, name, _, ps, _, _, mod) => if (List.len(ps) <= 1) "" else trampFn(name, ps, mod, i)
+    case Fun(_, name, _, ps, _, _, mod) => emitDrvTramp2(name, ps, mod, i, ens, strs)
   }
+
+def emitDrvTramp2(name: String, ps: List[Param], mod: String, i: Int, ens: List[En], strs: List[String]): String =
+  if (needsDecode(ps)) decodeTramp(name, ps, mod, i, ens, strs) else if (List.len(ps) <= 1) "" else trampFn(name, ps, mod, i)
+
+def needsDecode(ps: List[Param]): Bool =
+  !List.isEmpty(ps) && (needsDecodeP(List.head(ps)) || needsDecode(List.tail(ps)))
+
+def needsDecodeP(p: Param): Bool =
+  p.ty != "Int" && p.ty != "String" && p.ty != "Bool"
+
+def drvSym(name: String, ps: List[Param], mod: String, i: Int): String =
+  if (needsDecode(ps) || List.len(ps) > 1) Str.concat("@sz_drv_tramp_", Str.fromInt(i)) else Str.concat("@sz_user_", symOf(mod, name))
+
+def decodeTramp(name: String, ps: List[Param], mod: String, i: Int, ens: List[En], strs: List[String]): String =
+  if (List.len(ps) != 1) trampFn(name, ps, mod, i) else decodeTramp1(name, List.head(ps), mod, i, ens, strs)
+
+def trampPre(i: Int): String =
+  Str.concat("t", Str.concat(Str.fromInt(i), "_"))
+
+def decodeTramp1(name: String, p: Param, mod: String, i: Int, ens: List[En], strs: List[String]): String =
+  decodeTrampGot(name, mod, i, decodeTok(pct(trampPre(i), "cs"), p.ty, ens, strs, trampPre(i), 0, 0))
+
+def decodeTrampGot(name: String, mod: String, i: Int, d: Dec): String =
+  d match {
+    case Dec(code, val, num, owned, _) => decodeTrampEnd(name, mod, i, code, val, num, owned)
+  }
+
+def decodeTrampEnd(name: String, mod: String, i: Int, code: String, val: String, num: Bool, owned: Bool): String =
+  Str.concat(decodeHeader(i), Str.concat(line(Str.concat(tmp(trampPre(i), "cs"), "call ptr @sz_string_cstr(ptr %a)")), Str.concat(code, Str.concat(decodeCall(name, mod, val, num), Str.concat(if (owned) relPtr(val) else "", Str.concat(line("ret ptr %dio"), Str.concat(Str.concat("}", nl()), nl())))))))
+
+def decodeHeader(i: Int): String =
+  Str.concat("define internal ptr @sz_drv_tramp_", Str.concat(Str.fromInt(i), Str.concat("(ptr %a) {", Str.concat(nl(), Str.concat("entry:", nl())))))
+
+def decodeCall(name: String, mod: String, val: String, num: Bool): String =
+  line(Str.concat("%dio = call ptr @sz_user_", Str.concat(symOf(mod, name), Str.concat("(", Str.concat(if (num) "i64 " else "ptr ", Str.concat(val, ")"))))))
+
+def decId(prefix: String, stem: String, n: Int): String =
+  Str.concat(prefix, Str.concat(stem, Str.fromInt(n)))
+
+def decPct(prefix: String, stem: String, n: Int): String =
+  Str.concat("%", decId(prefix, stem, n))
+
+def decLab(prefix: String, n: Int): String =
+  Str.concat(prefix, Str.fromInt(n))
+
+def decodeTok(tok: String, ty: String, ens: List[En], strs: List[String], prefix: String, n: Int, depth: Int): Dec =
+  if (ty == "Int") decParse("sz_drive_parse_int", tok, prefix, n) else if (ty == "Bool") decParse("sz_drive_parse_bool", tok, prefix, n) else if (ty == "String") decFromCstr(tok, prefix, n) else decodeAdt(tok, ty, ens, strs, prefix, n, depth)
+
+def decParse(rt: String, tok: String, prefix: String, n: Int): Dec =
+  Dec(decParseCode(rt, tok, prefix, n), decPct(prefix, "p", n), true, false, n + 1)
+
+def decParseCode(rt: String, tok: String, prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "p", n), Str.concat(" = call i64 @", Str.concat(rt, Str.concat("(ptr ", Str.concat(tok, ")"))))))
+
+def decFromCstr(tok: String, prefix: String, n: Int): Dec =
+  Dec(decFromCstrCode(tok, prefix, n), decPct(prefix, "s", n), false, true, n + 1)
+
+def decFromCstrCode(tok: String, prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "s", n), Str.concat(" = call ptr @sz_string_from_cstr(ptr ", Str.concat(tok, ")"))))
+
+def decodeAdt(tok: String, ty: String, ens: List[En], strs: List[String], prefix: String, n: Int, depth: Int): Dec =
+  decodeAdtHit(tok, findEnNm(ens, tyHead(ty)), ens, strs, prefix, n, depth)
+
+def findEnNm(ens: List[En], name: String): List[En] =
+  if (List.isEmpty(ens)) noEn() else findEnNm1(List.head(ens), List.tail(ens), name)
+
+def findEnNm1(h: En, rest: List[En], name: String): List[En] =
+  h match {
+    case En(_, n, _, _) => if (n == name) h :: noEn() else findEnNm(rest, name)
+  }
+
+def decodeAdtHit(tok: String, hit: List[En], ens: List[En], strs: List[String], prefix: String, n: Int, depth: Int): Dec =
+  if (List.isEmpty(hit)) decParse("sz_drive_parse_int", tok, prefix, n) else decodeAdtEn(tok, List.head(hit), ens, strs, prefix, n, depth)
+
+def decodeAdtEn(tok: String, e: En, ens: List[En], strs: List[String], prefix: String, n: Int, depth: Int): Dec =
+  e match {
+    case En(isRec, name, _, cases) => decodeAdtBody(tok, pickCases(isRec, name, cases, depth), ens, strs, prefix, n, depth)
+  }
+
+def pickCases(isRec: Bool, name: String, cases: List[EnCase], depth: Int): List[EnCase] =
+  if (depth >= 3) leafDrvCases(cases) else cases
+
+def leafDrvCases(cs: List[EnCase]): List[EnCase] =
+  if (List.isEmpty(cs)) cs else leafDrv1(List.head(cs), List.tail(cs))
+
+def leafDrv1(c: EnCase, rest: List[EnCase]): List[EnCase] =
+  if (drvLeaf(c)) c :: leafDrvCases(rest) else leafDrvCases(rest)
+
+def drvLeaf(c: EnCase): Bool =
+  c match {
+    case EnCase(_, fs) => drvAllLeaf(fs)
+  }
+
+def drvAllLeaf(fs: List[Param]): Bool =
+  List.isEmpty(fs) || drvLeafTy(List.head(fs).ty) && drvAllLeaf(List.tail(fs))
+
+def drvLeafTy(t: String): Bool =
+  t == "Int" || t == "String" || t == "Bool"
+
+def decodeAdtBody(tok: String, cases: List[EnCase], ens: List[En], strs: List[String], prefix: String, n: Int, depth: Int): Dec =
+  decodeAdtBody2(tok, cases, ens, strs, prefix, n, n + 1, n + 2, List.len(cases), depth)
+
+def decodeAdtBody2(tok: String, cases: List[EnCase], ens: List[En], strs: List[String], prefix: String, inner: Int, fail: Int, joinL: Int, k: Int, depth: Int): Dec =
+  decodeTries(tok, cases, 0, k, inner + 3, fail, joinL, prefix, inner + 3 + k + k, "", ens, strs, depth, inner, decAlloca(prefix, inner), if (k == 0) fail else inner + 3)
+
+def decAlloca(prefix: String, inner: Int): String =
+  line(Str.concat(decPct(prefix, "b", inner), " = alloca [192 x i8], align 1"))
+
+def decodeTries(tok: String, cases: List[EnCase], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, code: String, first: Int): Dec =
+  if (i >= k) decodeFailJoin(prefix, fail, joinL, phi, code, first, k, strs) else decodeTry(tok, cases, List.at(cases, i), i, k, base, fail, joinL, prefix, n, phi, ens, strs, depth, inner, code, first)
+
+def decodeTry(tok: String, cases: List[EnCase], c: EnCase, i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, code: String, first: Int): Dec =
+  c match {
+    case EnCase(cname, fs) => decodeTry2(tok, cases, cname, fs, i, k, base, fail, joinL, prefix, n, phi, ens, strs, depth, inner, code, first)
+  }
+
+def decodeTry2(tok: String, cases: List[EnCase], cname: String, fs: List[Param], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, code: String, first: Int): Dec =
+  decodeTry3(internGep(cname, strs, prefix, n), tok, cases, fs, i, k, base, fail, joinL, prefix, n + 1, phi, ens, strs, depth, inner, code, first)
+
+def internGep(s: String, strs: List[String], prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "g", n), internGepRhs(s, strs)))
+
+def internGepRhs(s: String, strs: List[String]): String =
+  Str.concat(" = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(s) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, s, 0)), ", i64 0, i64 0"))))
+
+def decodeTry3(gep: String, tok: String, cases: List[EnCase], fs: List[Param], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, code: String, first: Int): Dec =
+  decodeConstruct(decodeFields(fs, 0, decPct(prefix, "b", inner), ens, strs, prefix, n + 2, depth + 1), tok, cases, i, k, base, fail, joinL, prefix, phi, ens, strs, depth, inner, tryHead(code, gep, tok, i, k, base, fail, prefix, n, inner, first))
+
+def tryHead(code: String, gep: String, tok: String, i: Int, k: Int, base: Int, fail: Int, prefix: String, n: Int, inner: Int, first: Int): String =
+  join(code, join(if (i == 0) decBr(prefix, first) else "", join(lab(decLab(prefix, base + i)), join(gep, join(unconsLine(tok, prefix, n, inner), join(unconsIcmp(prefix, n), unconsBr(prefix, n, base, k, i, fail)))))))
+
+def unconsLine(tok: String, prefix: String, n: Int, inner: Int): String =
+  line(Str.concat(decPct(prefix, "is", n), Str.concat(" = call i32 @sz_drive_uncons(ptr ", Str.concat(tok, Str.concat(", ptr ", Str.concat(decPct(prefix, "g", n - 1), Str.concat(", ptr ", Str.concat(decPct(prefix, "b", inner), ", i32 192)"))))))))
+
+def unconsIcmp(prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "h", n), Str.concat(" = icmp ne i32 ", Str.concat(decPct(prefix, "is", n), ", 0"))))
+
+def unconsBr(prefix: String, n: Int, base: Int, k: Int, i: Int, fail: Int): String =
+  line(Str.concat("br i1 ", Str.concat(decPct(prefix, "h", n), Str.concat(", label %", Str.concat(decLab(prefix, base + k + i), Str.concat(", label %", Str.concat(decLab(prefix, if (i + 1 < k) base + i + 1 else fail), "")))))))
+
+def decBr(prefix: String, dest: Int): String =
+  line(Str.concat("br label %", decLab(prefix, dest)))
+
+def decodeConstruct(fields: Decs, tok: String, cases: List[EnCase], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, head: String): Dec =
+  fields match {
+    case Decs(fc, ds, n2) => decodeConstruct2(buildAdt(i, ds, prefix, n2), tok, cases, i, k, base, fail, joinL, prefix, phi, ens, strs, depth, inner, join(head, join(lab(decLab(prefix, base + k + i)), fc)))
+  }
+
+def decodeConstruct2(built: Dec, tok: String, cases: List[EnCase], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, head: String): Dec =
+  built match {
+    case Dec(bc, bv, _, _, n3) => decodeTries(tok, cases, i + 1, k, base, fail, joinL, prefix, n3 + 1, phiAdd(phi, bv, prefix, n3), ens, strs, depth, inner, join(head, join(bc, join(decBr(prefix, n3), join(lab(decLab(prefix, n3)), decBr(prefix, joinL))))), base)
+  }
+
+def noDec(): List[Dec] =
+  []
+
+def decodeFields(fs: List[Param], i: Int, inner: String, ens: List[En], strs: List[String], prefix: String, n: Int, depth: Int): Decs =
+  if (List.isEmpty(fs)) Decs("", noDec(), n) else decodeFields1(List.head(fs), List.tail(fs), i, inner, ens, strs, prefix, n, depth)
+
+def decodeFields1(p: Param, rest: List[Param], i: Int, inner: String, ens: List[En], strs: List[String], prefix: String, n: Int, depth: Int): Decs =
+  decodeFields2(decodeTok(decPct(prefix, "f", n), p.ty, ens, strs, prefix, n + 1, depth), fieldPrep(inner, prefix, n, i), rest, i, inner, ens, strs, prefix, depth)
+
+def fieldPrep(inner: String, prefix: String, n: Int, i: Int): String =
+  join(line(Str.concat(decPct(prefix, "f", n), " = alloca [192 x i8], align 1")), fieldCall(inner, prefix, n, i))
+
+def fieldCall(inner: String, prefix: String, n: Int, i: Int): String =
+  line(Str.concat(decPct(prefix, "ok", n), Str.concat(" = call i32 @sz_drive_field(ptr ", Str.concat(inner, Str.concat(", i64 ", Str.concat(Str.fromInt(i), Str.concat(", ptr ", Str.concat(decPct(prefix, "f", n), ", i32 192)"))))))))
+
+def decodeFields2(d: Dec, pre: String, rest: List[Param], i: Int, inner: String, ens: List[En], strs: List[String], prefix: String, depth: Int): Decs =
+  d match {
+    case Dec(dc, _, _, _, n2) => decodeFields3(pre, dc, d, decodeFields(rest, i + 1, inner, ens, strs, prefix, n2, depth))
+  }
+
+def decodeFields3(pre: String, dc: String, d: Dec, rest: Decs): Decs =
+  rest match {
+    case Decs(rc, ds, n3) => Decs(join(pre, join(dc, rc)), d :: ds, n3)
+  }
+
+def buildAdt(tag: Int, ds: List[Dec], prefix: String, n: Int): Dec =
+  if (List.isEmpty(ds)) Dec(buildAdtNil(tag, prefix, n), decPct(prefix, "a", n), false, true, n + 1) else if (List.len(ds) == 1) buildAdt1(tag, List.head(ds), prefix, n) else buildAdtN(tag, ds, prefix, n)
+
+def buildAdtNil(tag: Int, prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "a", n), Str.concat(" = call ptr @sz_adt_new(i32 ", Str.concat(Str.fromInt(tag), ", ptr null)"))))
+
+def buildAdt1(tag: Int, d: Dec, prefix: String, n: Int): Dec =
+  d match {
+    case Dec(_, v, num, owned, _) => if (num) buildAdtBox(tag, v, prefix, n) else buildAdtPtr(tag, v, owned, prefix, n)
+  }
+
+def buildAdtBox(tag: Int, v: String, prefix: String, n: Int): Dec =
+  Dec(buildAdtBoxCode(tag, v, prefix, n), decPct(prefix, "a", n), false, true, n + 1)
+
+def buildAdtBoxCode(tag: Int, v: String, prefix: String, n: Int): String =
+  join(boxI64Line(v, prefix, n), join(adtNewPtr(tag, decPct(prefix, "x", n), prefix, n), relPtr(decPct(prefix, "x", n))))
+
+def boxI64Line(v: String, prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "x", n), Str.concat(" = call ptr @sz_box_i64(i64 ", Str.concat(v, ")"))))
+
+def adtNewPtr(tag: Int, payload: String, prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "a", n), Str.concat(" = call ptr @sz_adt_new(i32 ", Str.concat(Str.fromInt(tag), Str.concat(", ptr ", Str.concat(payload, ")"))))))
+
+def buildAdtPtr(tag: Int, v: String, owned: Bool, prefix: String, n: Int): Dec =
+  Dec(buildAdtPtrCode(tag, v, owned, prefix, n), decPct(prefix, "a", n), false, true, n + 1)
+
+def buildAdtPtrCode(tag: Int, v: String, owned: Bool, prefix: String, n: Int): String =
+  join(adtNewPtr(tag, v, prefix, n), if (owned) relPtr(v) else "")
+
+def buildAdtN(tag: Int, ds: List[Dec], prefix: String, n: Int): Dec =
+  buildAdtN2(tag, consFold(List.reverse(ds), decPct(prefix, "nl", n), prefix, n + 1, line(Str.concat(decPct(prefix, "nl", n), " = call ptr @sz_list_nil()"))), prefix)
+
+def consFold(ds: List[Dec], cur: String, prefix: String, n: Int, code: String): Dec =
+  if (List.isEmpty(ds)) Dec(code, cur, false, true, n) else consFold1(List.head(ds), List.tail(ds), cur, prefix, n, code)
+
+def consFold1(h: Dec, rest: List[Dec], cur: String, prefix: String, n: Int, code: String): Dec =
+  h match {
+    case Dec(_, v, num, owned, _) => if (num) consFoldBox(v, rest, cur, prefix, n, code) else consFoldPtr(v, owned, rest, cur, prefix, n, code)
+  }
+
+def consFoldBox(v: String, rest: List[Dec], cur: String, prefix: String, n: Int, code: String): Dec =
+  consFold(rest, decPct(prefix, "c", n), prefix, n + 1, join(code, consBoxCode(v, cur, prefix, n)))
+
+def consBoxCode(v: String, cur: String, prefix: String, n: Int): String =
+  join(boxI64Line(v, prefix, n), join(consLine(decPct(prefix, "x", n), cur, prefix, n), join(relPtr(decPct(prefix, "x", n)), relPtr(cur))))
+
+def consLine(hd: String, tl: String, prefix: String, n: Int): String =
+  line(Str.concat(decPct(prefix, "c", n), Str.concat(" = call ptr @sz_list_cons(ptr ", Str.concat(hd, Str.concat(", ptr ", Str.concat(tl, ")"))))))
+
+def consFoldPtr(v: String, owned: Bool, rest: List[Dec], cur: String, prefix: String, n: Int, code: String): Dec =
+  consFold(rest, decPct(prefix, "c", n), prefix, n + 1, join(code, join(consLine(v, cur, prefix, n), join(if (owned) relPtr(v) else "", relPtr(cur)))))
+
+def buildAdtN2(tag: Int, lst: Dec, prefix: String): Dec =
+  lst match {
+    case Dec(lc, lv, _, _, n) => Dec(buildAdtN2Code(tag, lc, lv, prefix, n), decPct(prefix, "a", n), false, true, n + 1)
+  }
+
+def buildAdtN2Code(tag: Int, lc: String, lv: String, prefix: String, n: Int): String =
+  join(lc, join(adtNewPtr(tag, lv, prefix, n), relPtr(lv)))
+
+def phiAdd(phi: String, v: String, prefix: String, lab: Int): String =
+  if (phi == "") Str.concat("[ ", Str.concat(v, Str.concat(", %", Str.concat(decLab(prefix, lab), " ]")))) else Str.concat(phi, Str.concat(", [ ", Str.concat(v, Str.concat(", %", Str.concat(decLab(prefix, lab), " ]")))))
+
+def decodeFailJoin(prefix: String, fail: Int, joinL: Int, phi: String, code: String, first: Int, k: Int, strs: List[String]): Dec =
+  Dec(decodeFailCode(prefix, fail, joinL, phi, code, k, strs), decPct(prefix, "ap", joinL), false, true, joinL + 1)
+
+def decodeFailCode(prefix: String, fail: Int, joinL: Int, phi: String, code: String, k: Int, strs: List[String]): String =
+  join(code, join(if (k == 0) decBr(prefix, fail) else "", join(lab(decLab(prefix, fail)), join(internGep("drive decode failed", strs, prefix, fail), join(decodePanic(prefix, fail), join(lab(decLab(prefix, joinL)), decodePhi(prefix, joinL, phi)))))))
+
+def decodePanic(prefix: String, fail: Int): String =
+  join(fromCstrLine(prefix, fail), join(panicLine(prefix, fail), line("unreachable")))
+
+def fromCstrLine(prefix: String, fail: Int): String =
+  line(Str.concat(decPct(prefix, "ps", fail), Str.concat(" = call ptr @sz_string_from_cstr(ptr ", Str.concat(decPct(prefix, "g", fail), ")"))))
+
+def panicLine(prefix: String, fail: Int): String =
+  line(Str.concat("call void @sz_panic(ptr ", Str.concat(decPct(prefix, "ps", fail), ")")))
+
+def decodePhi(prefix: String, joinL: Int, phi: String): String =
+  line(Str.concat(decPct(prefix, "ap", joinL), Str.concat(" = phi ptr ", if (phi == "") "[ null, %entry ]" else phi)))
 
 def trampFn(name: String, ps: List[Param], mod: String, i: Int): String =
   Str.concat("define internal ptr @sz_drv_tramp_", Str.concat(Str.fromInt(i), Str.concat("(ptr %args) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(trampLoads(ps, 0), Str.concat(trampRet(name, ps, mod), Str.concat("}", Str.concat(nl(), nl()))))))))))
@@ -4531,9 +4807,6 @@ def trampArgs(ps: List[Param], k: Int): String =
 
 def trampArg(p: Param, k: Int): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %dv", Str.fromInt(k)) else Str.concat("ptr %da", Str.fromInt(k))
-
-def drvSym(name: String, ps: List[Param], mod: String, i: Int): String =
-  if (List.len(ps) <= 1) Str.concat("@sz_user_", symOf(mod, name)) else Str.concat("@sz_drv_tramp_", Str.fromInt(i))
 
 def drvGep(name: String, strs: List[String], i: Int): String =
   line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(name) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
@@ -5092,7 +5365,7 @@ def preamble(): String =
   Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), decls())))
 
 def decls(): String =
-  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), nl())))))))))))))))))))))
+  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), join(declsV(), nl()))))))))))))))))))))))
 
 def declsR(): String =
   join(decl("ptr @sz_string_lines(ptr)"), join(decl("ptr @sz_string_trim(ptr)"), join(decl("ptr @sz_string_to_lower(ptr)"), join(decl("ptr @sz_string_to_upper(ptr)"), join(decl("ptr @sz_string_capitalize(ptr)"), join(decl("ptr @sz_string_reverse(ptr)"), join(decl("i64 @sz_string_is_empty(ptr)"), join(decl("i64 @sz_string_non_empty(ptr)"), join(decl("i64 @sz_string_is_blank(ptr)"), join(decl("ptr @sz_string_split(ptr, ptr)"), join(decl("ptr @sz_string_strip_prefix(ptr, ptr)"), join(decl("ptr @sz_string_strip_suffix(ptr, ptr)"), join(decl("i64 @sz_string_ends_with(ptr, ptr)"), join(decl("i64 @sz_string_index_of(ptr, ptr)"), join(decl("i64 @sz_string_last_index_of(ptr, ptr)"), join(decl("ptr @sz_string_replace(ptr, ptr, ptr)"), join(decl("ptr @sz_string_pad_left(ptr, i64, ptr)"), decl("ptr @sz_string_pad_right(ptr, i64, ptr)"))))))))))))))))))
@@ -5120,6 +5393,9 @@ def declsT5(): String =
 
 def declsU(): String =
   join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("void @sz_verify_register(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("i64 @sz_timeline_a11y_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_last_hit_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_exists(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_ok()"), join(decl("ptr @sz_verdict_fail(i64, ptr)"), join(decl("ptr @sz_verdict_every(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_any(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_and(ptr, ptr)"), join(decl("ptr @sz_verdict_or(ptr, ptr)"), decl("void @sz_property_classify(ptr, i64)"))))))))))))))
+
+def declsV(): String =
+  join(decl("i32 @sz_drive_uncons(ptr, ptr, ptr, i32)"), join(decl("i32 @sz_drive_uncons_list(ptr, ptr, i32)"), join(decl("i64 @sz_drive_nfields(ptr)"), join(decl("i32 @sz_drive_field(ptr, i64, ptr, i32)"), join(decl("i64 @sz_drive_parse_int(ptr)"), join(decl("i64 @sz_drive_parse_bool(ptr)"), decl("void @sz_panic(ptr)")))))))
 
 def declsA(): String =
   join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))
