@@ -488,7 +488,60 @@ def noExpr(): List[Expr] =
   []
 
 def rewriteReqSrc(src: String): String =
-  rewriteReqProg(Parse.parse(Lexer.lex(src)))
+  rewriteReqKeep(src, Parse.parse(Lexer.lex(src)))
+
+def rewriteReqKeep(src: String, p: Prog): String =
+  if (progHasReq(p)) rewriteReqProg(p) else src
+
+def progHasReq(p: Prog): Bool =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, body) => exprHasReq(body) || defsHaveReq(defs)
+  }
+
+def defsHaveReq(ds: List[Fun]): Bool =
+  if (List.isEmpty(ds)) false else funHasReq(List.head(ds)) || defsHaveReq(List.tail(ds))
+
+def funHasReq(d: Fun): Bool =
+  d match {
+    case Fun(_, _, _, _, _, body, _) => exprHasReq(body)
+  }
+
+def exprHasReq(e: Expr): Bool =
+  e match {
+    case Expr.EPrint(inner) => exprHasReq(inner)
+    case Expr.ECall(_, args) => listHasReq(args)
+    case Expr.EMethod(recv, name, args) => name == "require" || exprHasReq(recv) || listHasReq(args)
+    case Expr.EField(recv, _) => exprHasReq(recv)
+    case Expr.EBin(_, l, r) => exprHasReq(l) || exprHasReq(r)
+    case Expr.EUn(_, inner) => exprHasReq(inner)
+    case Expr.ELam(_, body) => exprHasReq(body)
+    case Expr.EIf(c, t, el) => exprHasReq(c) || exprHasReq(t) || exprHasReq(el)
+    case Expr.EMatch(s, arms) => exprHasReq(s) || armsHaveReq(arms)
+    case Expr.EList(xs) => listHasReq(xs)
+    case Expr.ETuple(xs) => listHasReq(xs)
+    case Expr.ENamed(_, inner) => exprHasReq(inner)
+    case Expr.EFor(bs, body) => bindsHaveReq(bs) || exprHasReq(body)
+    case _ => false
+  }
+
+def listHasReq(xs: List[Expr]): Bool =
+  if (List.isEmpty(xs)) false else exprHasReq(List.head(xs)) || listHasReq(List.tail(xs))
+
+def armsHaveReq(xs: List[Arm]): Bool =
+  if (List.isEmpty(xs)) false else armHasReq(List.head(xs)) || armsHaveReq(List.tail(xs))
+
+def armHasReq(a: Arm): Bool =
+  a match {
+    case Arm(_, _, body) => exprHasReq(body)
+  }
+
+def bindsHaveReq(xs: List[Bind]): Bool =
+  if (List.isEmpty(xs)) false else bindHasReq(List.head(xs)) || bindsHaveReq(List.tail(xs))
+
+def bindHasReq(b: Bind): Bool =
+  b match {
+    case Bind(_, _, e) => exprHasReq(e)
+  }
 
 def rewriteReqProg(p: Prog): String =
   p match {
