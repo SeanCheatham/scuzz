@@ -273,11 +273,31 @@ def checkDirMan(dir: String, json: Bool, m: Man): IO[Unit] =
 def checkDirMan2(dir: String, json: Bool, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
   if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => checkDirListed(dir, json, deps, ents))
 
-def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDirCollected(dir, json, deps, own))
+def isVerify(name: String): Bool =
+  Str.len(name) > 13 && Str.slice(name, Str.len(name) - 13, Str.len(name)) == ".scuzz_verify"
 
-def checkDirCollected(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  collectDeps(dir, deps, own).flatMap(files => checkDirFiles(json, files))
+def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDirVerify(dir, json, deps, own))
+
+def checkDirVerify(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
+  Fs.list(dir).flatMap(ents => checkVerifyGo(dir, json, deps, own, ents))
+
+def checkVerifyGo(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  if (List.isEmpty(ents)) collectDeps(dir, deps, own).flatMap(files => checkDirFiles(json, files)) else checkVerifyHd(dir, json, deps, own, List.head(ents), List.tail(ents))
+
+def checkVerifyHd(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)]): IO[Unit] =
+  ent match {
+    case (name, isDir) => checkVerifyPick(dir, json, deps, own, name, isDir, rest)
+  }
+
+def checkVerifyPick(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], name: String, isDir: Bool, rest: List[(String, Bool)]): IO[Unit] =
+  if (isDir || !isVerify(name)) checkVerifyGo(dir, json, deps, own, rest) else Fs.read(joinSlash(dir, name)).flatMap(src => checkVerifySrc(dir, json, deps, own, name, src, rest))
+
+def checkVerifySrc(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], name: String, src: String, rest: List[(String, Bool)]): IO[Unit] =
+  checkVerifyGot(dir, json, deps, own, rest, Verify.checkVerify(src, name))
+
+def checkVerifyGot(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], rest: List[(String, Bool)], msg: String): IO[Unit] =
+  if (msg == "scuzz check ok") checkVerifyGo(dir, json, deps, own, rest) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
 
 def checkDirFiles(json: Bool, files: List[(String, String)]): IO[Unit] =
   checkDirOut(json, Check.checkFiles(files), Check.humanFiles(files))

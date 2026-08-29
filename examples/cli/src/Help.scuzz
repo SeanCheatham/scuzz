@@ -210,3 +210,117 @@ Examples:
   scuzz new myapp --ui --path /tmp
 """
 
+def helpLsp(): String =
+  """Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
+
+Usage: scuzz lsp [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz lsp
+  scuzz lsp examples/hello
+
+JSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check`.
+"""
+
+def helpTest(): String =
+  """Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
+
+Usage: scuzz test [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --update
+          Write Headless dumps into goldens/
+      --pixels
+          Also compare PNG goldens
+      --differential
+          Compare structural dumps across Skia backends
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz test
+  scuzz test --update
+  scuzz test examples/hello
+"""
+
+def helpWatch(): String =
+  """Watch sources and rebuild on change (compile loop, not hot reload)
+
+Usage: scuzz watch [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --out-dir <OUT_DIR>
+          [default: build]
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz watch
+  scuzz watch examples/hello
+"""
+
+def helpIde(): String =
+  """Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
+
+Usage: scuzz ide [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --headless
+          Force Headless UiRuntime
+      --out-dir <OUT_DIR>
+          [default: build]
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz ide
+  scuzz ide --headless .
+"""
+
+def helpPkg(): String =
+  """Package a project for host, Android, or iOS
+
+Usage: scuzz package [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --target <TARGET>
+          host, android, ios, or all [default: host]
+      --out-dir <OUT_DIR>
+          [default: build]
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz package --target host
+  scuzz package --target android examples/counter
+"""
+
