@@ -334,16 +334,50 @@ def classNo(rest: String): String =
   classTok(classNums(rest), 0)
 
 def mapSeed(ds: List[Fun]): List[String] =
-  if (List.isEmpty(ds)) noStr() else seedPick(List.head(ds), List.tail(ds))
+  mapSeedE(ds, noEn())
 
-def seedPick(d: Fun, rest: List[Fun]): List[String] =
-  if (seedOk(d.params)) seedOf(d) :: mapSeed(rest) else mapSeed(rest)
+def mapSeedE(ds: List[Fun], ens: List[En]): List[String] =
+  if (List.isEmpty(ds)) noStr() else seedOfE(List.head(ds), ens) :: mapSeedE(List.tail(ds), ens)
 
-def seedOk(ps: List[Param]): Bool =
-  List.isEmpty(ps) || seedFriendly(List.head(ps)) && seedOk(List.tail(ps))
+def seedOfE(d: Fun, ens: List[En]): String =
+  if (List.isEmpty(d.params)) Str.concat("drive ", d.name) else Str.concat("drive ", Str.concat(d.name, Str.concat(" ", seedArgsE(d.params, ens))))
 
-def seedFriendly(p: Param): Bool =
-  p.ty == "Int" || p.ty == "String" || p.ty == "Bool"
+def seedArgsE(ps: List[Param], ens: List[En]): String =
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) seedArgE(List.head(ps), ens) else Str.concat(seedArgE(List.head(ps), ens), Str.concat(" ", seedArgsE(List.tail(ps), ens)))
+
+def seedArgE(p: Param, ens: List[En]): String =
+  if (p.ty == "Int") "0" else if (p.ty == "Bool") "false" else if (p.ty == "String") "a" else if (isListTy(p.ty)) "[]" else seedAdt(p.ty, ens)
+
+def seedAdt(ty: String, ens: List[En]): String =
+  seedHit(findEn(ens, tyHead(ty)), ty, ens)
+
+def seedHit(hit: List[En], ty: String, ens: List[En]): String =
+  if (List.isEmpty(hit)) "0" else seedEn(List.head(hit), ens)
+
+def seedEn(e: En, ens: List[En]): String =
+  e match {
+    case En(isRec, name, _, cases) => if (isRec || recLike(name, cases)) seedRec(name, cases, ens) else seedEnum(cases, ens)
+  }
+
+def seedRec(name: String, cs: List[EnCase], ens: List[En]): String =
+  if (List.isEmpty(cs)) name else seedCase(List.head(cs), ens)
+
+def seedEnum(cs: List[EnCase], ens: List[En]): String =
+  seedEnumHit(leafCases(cs), cs, ens)
+
+def seedEnumHit(leaf: List[EnCase], all: List[EnCase], ens: List[En]): String =
+  if (List.isEmpty(leaf)) seedCase(List.head(all), ens) else seedCase(List.head(leaf), ens)
+
+def seedCase(c: EnCase, ens: List[En]): String =
+  c match {
+    case EnCase(name, fs) => seedCtor(name, fs, ens)
+  }
+
+def seedCtor(name: String, fs: List[Param], ens: List[En]): String =
+  if (List.isEmpty(fs)) name else Str.concat(name, Str.concat("(", Str.concat(seedFields(fs, ens), ")")))
+
+def seedFields(fs: List[Param], ens: List[En]): String =
+  if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) seedArgE(List.head(fs), ens) else Str.concat(seedArgE(List.head(fs), ens), Str.concat(",", seedFields(List.tail(fs), ens)))
 
 def mapSpec(ds: List[Fun]): List[String] =
   mapSpecE(ds, noEn())

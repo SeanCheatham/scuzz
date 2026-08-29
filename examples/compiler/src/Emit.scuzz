@@ -14,8 +14,10 @@ import Parse.Param
 import Parse.Bind
 import Parse.Alias
 import Parse.Im
+import Parse.Imp
 import Lexer.Tok
 import Check.getTy
+import Check.withImportFuns
 
 def noStr(): List[String] =
   []
@@ -4637,7 +4639,7 @@ def decAlloca(prefix: String, inner: Int): String =
   line(Str.concat(decPct(prefix, "b", inner), " = alloca [192 x i8], align 1"))
 
 def decodeTries(tok: String, cases: List[EnCase], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, code: String, first: Int): Dec =
-  if (i >= k) decodeFailJoin(prefix, fail, joinL, phi, code, first, k, strs) else decodeTry(tok, cases, List.at(cases, i), i, k, base, fail, joinL, prefix, n, phi, ens, strs, depth, inner, code, first)
+  if (i >= k) decodeFailJoin(prefix, fail, joinL, phi, code, first, k, strs, n) else decodeTry(tok, cases, List.at(cases, i), i, k, base, fail, joinL, prefix, n, phi, ens, strs, depth, inner, code, first)
 
 def decodeTry(tok: String, cases: List[EnCase], c: EnCase, i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, code: String, first: Int): Dec =
   c match {
@@ -4769,11 +4771,11 @@ def buildAdtN2Code(tag: Int, lc: String, lv: String, prefix: String, n: Int): St
 def phiAdd(phi: String, v: String, prefix: String, lab: Int): String =
   if (phi == "") Str.concat("[ ", Str.concat(v, Str.concat(", %", Str.concat(decLab(prefix, lab), " ]")))) else Str.concat(phi, Str.concat(", [ ", Str.concat(v, Str.concat(", %", Str.concat(decLab(prefix, lab), " ]")))))
 
-def decodeFailJoin(prefix: String, fail: Int, joinL: Int, phi: String, code: String, first: Int, k: Int, strs: List[String]): Dec =
-  Dec(decodeFailCode(prefix, fail, joinL, phi, code, k, strs), decPct(prefix, "ap", joinL), false, true, joinL + 1)
+def decodeFailJoin(prefix: String, fail: Int, joinL: Int, phi: String, code: String, first: Int, k: Int, strs: List[String], n: Int): Dec =
+  Dec(decodeFailCode(prefix, fail, joinL, phi, code, k, strs, n), decPct(prefix, "ap", joinL), false, true, n + 1)
 
-def decodeFailCode(prefix: String, fail: Int, joinL: Int, phi: String, code: String, k: Int, strs: List[String]): String =
-  join(code, join(if (k == 0) decBr(prefix, fail) else "", join(lab(decLab(prefix, fail)), join(internGep("drive decode failed", strs, prefix, fail), join(decodePanic(prefix, fail), join(lab(decLab(prefix, joinL)), decodePhi(prefix, joinL, phi)))))))
+def decodeFailCode(prefix: String, fail: Int, joinL: Int, phi: String, code: String, k: Int, strs: List[String], n: Int): String =
+  join(code, join(if (k == 0) decBr(prefix, fail) else "", join(lab(decLab(prefix, fail)), join(internGep("drive decode failed", strs, prefix, n), join(decodePanic(prefix, n), join(lab(decLab(prefix, joinL)), decodePhi(prefix, joinL, phi)))))))
 
 def decodePanic(prefix: String, fail: Int): String =
   join(fromCstrLine(prefix, fail), join(panicLine(prefix, fail), line("unreachable")))
@@ -4828,7 +4830,7 @@ def kindOf(p: Param): Int =
 
 def emitProg(p: Prog, strs: List[String]): String =
   p match {
-    case Prog(_, enums, aliases, _, impls, _, defs, _, body) => emitBits(body, rwAliasFuns(implFuns(impls, defs), aliases), strs, enums)
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => emitBits(body, rwAliasFuns(implFuns(impls, withImportFuns(imps, defs)), aliases), strs, enums)
   }
 
 def implFuns(impls: List[Im], defs: List[Fun]): List[Fun] =

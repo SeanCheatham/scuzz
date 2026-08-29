@@ -11,6 +11,7 @@ record FuzzMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int)
 record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)])
 
 import Manifest.Man
+import Parse.En
 
 def compileSrc(src: String): Build =
   compileSrc2(Check.check(src), src)
@@ -730,7 +731,7 @@ def fuzzReplayDone(bad: Int): IO[Unit] =
   if (bad > 0) IO.println("fuzz replay reproduced a failure").flatMap(_ => IO.fail("fuzz")) else IO.println("fuzz replay ok (no failure)")
 
 def fuzzBody(job: FuzzJob): IO[Unit] =
-  fuzzSeedText(job.dir).flatMap(script => fuzzBody2(job, script))
+  fuzzSeedText(job.dir, job.files).flatMap(script => fuzzBody2(job, script))
 
 def fuzzBody2(job: FuzzJob, script: String): IO[Unit] =
   fuzzWriteSeeds(job.outDir, script).flatMap(_ =>
@@ -919,22 +920,22 @@ def fuzzClassPath(outDir: String): String =
 def fuzzWriteDrive(outDir: String, script: String): IO[Unit] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(fuzzDrivePath(outDir), script))
 
-def fuzzSeedText(dir: String): IO[String] =
-  Fs.list(dir).flatMap(ents => fuzzSeedGo(dir, ents, Verify.noStr()))
+def fuzzSeedText(dir: String, files: List[(String, String)]): IO[String] =
+  Fs.list(dir).flatMap(ents => fuzzSeedGo(dir, ents, Verify.noStr(), Verify.ensOfFiles(files)))
 
-def fuzzSeedGo(dir: String, ents: List[(String, Bool)], acc: List[String]): IO[String] =
-  if (List.isEmpty(ents)) IO.pure(Verify.nls(Verify.sortStrs(acc))) else fuzzSeedHd(dir, List.head(ents), List.tail(ents), acc)
+def fuzzSeedGo(dir: String, ents: List[(String, Bool)], acc: List[String], ens: List[En]): IO[String] =
+  if (List.isEmpty(ents)) IO.pure(Verify.nls(Verify.sortStrs(acc))) else fuzzSeedHd(dir, List.head(ents), List.tail(ents), acc, ens)
 
-def fuzzSeedHd(dir: String, ent: (String, Bool), rest: List[(String, Bool)], acc: List[String]): IO[String] =
+def fuzzSeedHd(dir: String, ent: (String, Bool), rest: List[(String, Bool)], acc: List[String], ens: List[En]): IO[String] =
   ent match {
-    case (name, isDir) => fuzzSeedPick(dir, name, isDir, rest, acc)
+    case (name, isDir) => fuzzSeedPick(dir, name, isDir, rest, acc, ens)
   }
 
-def fuzzSeedPick(dir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[String]): IO[String] =
-  if (isDir || !isVerify(name)) fuzzSeedGo(dir, rest, acc) else Fs.read(joinSlash(dir, name)).flatMap(src => fuzzSeedGo(dir, rest, fuzzSeedAdd(acc, src)))
+def fuzzSeedPick(dir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[String], ens: List[En]): IO[String] =
+  if (isDir || !isVerify(name)) fuzzSeedGo(dir, rest, acc, ens) else Fs.read(joinSlash(dir, name)).flatMap(src => fuzzSeedGo(dir, rest, fuzzSeedAdd(acc, src, ens), ens))
 
-def fuzzSeedAdd(acc: List[String], src: String): List[String] =
-  List.concat(acc, Verify.mapSeed(Verify.parseVerify(src)))
+def fuzzSeedAdd(acc: List[String], src: String, ens: List[En]): List[String] =
+  List.concat(acc, Verify.mapSeedE(Verify.parseVerify(src), ens))
 
 def fuzzSearch(exe: String, hasUi: Bool, outDir: String, script: String, n: Int, fail: Int): IO[Int] =
   if (n <= 0) IO.pure(fail) else fuzzWriteDrive(outDir, script).flatMap(_ =>
@@ -1058,18 +1059,18 @@ def fuzzIdleGot(mutDir: String, r: (Int, String, String)): IO[(Int, String)] =
 def fuzzRelate(dir: String, outDir: String): IO[Unit] =
   fuzzCollect(dir).flatMap(files =>
     emitDirAlways(dir, outDir, files).flatMap(_ =>
-      compileLinkedMan(dir, outDir).flatMap(_ => fuzzRelateLinked(dir, outDir))
+      compileLinkedMan(dir, outDir).flatMap(_ => fuzzRelateLinked(dir, outDir, files))
     )
   )
 
-def fuzzRelateLinked(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzRelateMan(Manifest.parse(toml), dir, outDir))
+def fuzzRelateLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzRelateMan(Manifest.parse(toml), dir, outDir, files))
 
-def fuzzRelateMan(m: Man, dir: String, outDir: String): IO[Unit] =
-  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else fuzzRelateJob(exeName(outDir, m.name), m.hasUi, dir, outDir)
+def fuzzRelateMan(m: Man, dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else fuzzRelateJob(exeName(outDir, m.name), m.hasUi, dir, outDir, files)
 
-def fuzzRelateJob(exe: String, hasUi: Bool, dir: String, outDir: String): IO[Unit] =
-  fuzzSeedText(dir).flatMap(script =>
+def fuzzRelateJob(exe: String, hasUi: Bool, dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
+  fuzzSeedText(dir, files).flatMap(script =>
     fuzzWriteSeeds(outDir, script).flatMap(_ =>
       fuzzCorpusFiles(dir).flatMap(runs => fuzzRelateGo(exe, hasUi, outDir, fuzzAddSeeds(runs, joinSlash(outDir, "seeds.txt"), script)))
     )
