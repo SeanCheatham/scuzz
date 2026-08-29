@@ -152,6 +152,12 @@ sumToDiff i>=0
 sumToTen
 """
 
+def srcBumpVerify(): String =
+  "def bump(n: Int): Bool =\n  Main.bump(n) == n + 1\n"
+
+def wantWrapBump(): String =
+  "def _drv_bump(n: Int): IO[Unit] =\n  Property.assert(\"bump\", Main.bump(n) == n + 1)\n"
+
 def wantFuzzHello0(): String =
   """scuzz fuzz: corpus-only (--iterations 0)
 scuzz fuzz: no live-code mutation sites
@@ -178,7 +184,7 @@ def wantEmptyVerify(): String =
   "bad-intent/empty.scuzz_verify:1:1: error: bad-intent/empty.scuzz_verify: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file"
 
 def campaignOk(): Bool =
-  Verify.seeds(srcAddVerify()) == wantAddSeeds() && Verify.drivers(srcAddVerify()) == wantAddDrivers() && Verify.fuzzOut(0, 42, 0, 0, 0) == wantFuzzHello0() && Verify.fuzzOut(8, 42, 0, 0, 0) == wantFuzzHello8() && Cli.runCmd(Cli.parse(a1("test")), srcIrHi()) == wantTestOk() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "0")), srcIrHi()) == wantFuzzHello0() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "8")), srcIrHi()) == wantFuzzHello8() && Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == wantEmptyVerify() && Verify.checkVerify(srcAddVerify(), "add.scuzz_verify") == "scuzz check ok"
+  Verify.seeds(srcAddVerify()) == wantAddSeeds() && Verify.drivers(srcAddVerify()) == wantAddDrivers() && Verify.wrapSrc("bump", srcBumpVerify()) == wantWrapBump() && Verify.fuzzOut(0, 42, 0, 0, 0) == wantFuzzHello0() && Verify.fuzzOut(8, 42, 0, 0, 0) == wantFuzzHello8() && Cli.runCmd(Cli.parse(a1("test")), srcIrHi()) == wantTestOk() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "0")), srcIrHi()) == wantFuzzHello0() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "8")), srcIrHi()) == wantFuzzHello8() && Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == wantEmptyVerify() && Verify.checkVerify(srcAddVerify(), "add.scuzz_verify") == "scuzz check ok"
 
 def verifyOk(): Bool =
   Cli.runCmd(Cli.parse(a2("check", "--message-format=json")), srcTyUnbound()) == wantTyUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcTyUnbound()) == wantHumanUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcIrHi()) == "scuzz check ok" && Cli.runCmd(Cli.parse(a1("fmt")), srcHi()) == wantHi() && campaignOk()

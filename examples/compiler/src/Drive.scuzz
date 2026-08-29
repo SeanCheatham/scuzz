@@ -105,6 +105,49 @@ def emitDirCompile(dir: String, outDir: String, own: List[(String, String)]): IO
 def emitDirCompiled(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
   emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib()))
 
+def emitFuzz(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitFuzzMan(dir, outDir, Manifest.parse(toml)))
+
+def emitFuzzMan(dir: String, outDir: String, m: Man): IO[Unit] =
+  m match {
+    case Man(ok, _name, _version, _hasUi, deps, err) => emitFuzzMan2(dir, outDir, ok, err, deps)
+  }
+
+def emitFuzzMan2(dir: String, outDir: String, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
+  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitFuzzListed(dir, outDir, deps, ents))
+
+def emitFuzzListed(dir: String, outDir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitFuzzCollected(dir, outDir, deps, own))
+
+def emitFuzzCollected(dir: String, outDir: String, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
+  collectDeps(dir, deps, own).flatMap(files => emitFuzzVerify(dir, outDir, files))
+
+def emitFuzzVerify(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
+  Fs.list(dir).flatMap(ents => emitFuzzVerGo(dir, outDir, files, ents, Manifest.noPairs()))
+
+def emitFuzzVerGo(dir: String, outDir: String, files: List[(String, String)], ents: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
+  if (List.isEmpty(ents)) emitDirCompile(dir, outDir, fuzzFiles(files, ver)) else emitFuzzVerHd(dir, outDir, files, List.head(ents), List.tail(ents), ver)
+
+def emitFuzzVerHd(dir: String, outDir: String, files: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
+  ent match {
+    case (name, isDir) => emitFuzzVerPick(dir, outDir, files, name, isDir, rest, ver)
+  }
+
+def emitFuzzVerPick(dir: String, outDir: String, files: List[(String, String)], name: String, isDir: Bool, rest: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
+  if (isDir || !isVerify(name)) emitFuzzVerGo(dir, outDir, files, rest, ver) else Fs.read(joinSlash(dir, name)).flatMap(src => emitFuzzVerGo(dir, outDir, files, rest, (stemVerify(name), src) :: ver))
+
+def stemVerify(name: String): String =
+  Str.slice(name, 0, Str.len(name) - 13)
+
+def fuzzFiles(files: List[(String, String)], ver: List[(String, String)]): List[(String, String)] =
+  List.concat(files, fuzzWrap(ver))
+
+def fuzzWrap(ver: List[(String, String)]): List[(String, String)] =
+  fuzzWrapGot(Verify.wrapFiles(ver))
+
+def fuzzWrapGot(src: String): List[(String, String)] =
+  if (src == "") Manifest.noPairs() else (Verify.wrapMod(), src) :: Manifest.noPairs()
+
 def collectDeps(dir: String, deps: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
   if (List.isEmpty(deps)) IO.pure(acc) else collectDepGo(dir, deps, acc)
 
@@ -495,16 +538,51 @@ def pkgIosRun(r: (Int, String, String)): IO[Unit] =
   }
 
 def fuzzDir(dir: String, outDir: String, iterations: Int, seed: Int): IO[Unit] =
-  compileLinked(dir, outDir).flatMap(_ => fuzzLinked(dir, outDir, iterations, seed))
+  emitFuzz(dir, outDir).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => fuzzLinked(dir, outDir, iterations, seed)))
 
 def fuzzLinked(dir: String, outDir: String, iterations: Int, seed: Int): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzMan(Manifest.parse(toml), dir, outDir, iterations, seed))
 
 def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int): IO[Unit] =
-  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else fuzzBody(dir, exeName(outDir, m.name), m.hasUi, iterations, seed)
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else fuzzBody(dir, outDir, exeName(outDir, m.name), m.hasUi, iterations, seed)
 
-def fuzzBody(dir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int): IO[Unit] =
-  fuzzCorpusN(dir).flatMap(corpus => fuzzSearch(exe, hasUi, Verify.searchN(iterations), 0).flatMap(fail => fuzzDone(iterations, seed, corpus, fail)))
+def fuzzBody(dir: String, outDir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int): IO[Unit] =
+  fuzzSeedText(dir).flatMap(script => fuzzBody2(dir, outDir, exe, hasUi, iterations, seed, script))
+
+def fuzzBody2(dir: String, outDir: String, exe: String, hasUi: Bool, iterations: Int, seed: Int, script: String): IO[Unit] =
+  fuzzCorpusN(dir).flatMap(corpus => fuzzWrite(outDir, script).flatMap(_ => fuzzSearch(exe, hasUi, fuzzDrivePath(outDir), script != "", fuzzProbeN(iterations, script), 0).flatMap(fail => fuzzDone(iterations, seed, corpus, fail))))
+
+def fuzzProbeN(it: Int, script: String): Int =
+  fuzzProbeN2(Verify.searchN(it), script)
+
+def fuzzProbeN2(n: Int, script: String): Int =
+  if (n > 0) n else if (script == "") 0 else 1
+
+def fuzzDrivePath(outDir: String): String =
+  joinSlash(joinSlash(outDir, "fuzz"), "drive.txt")
+
+def fuzzWrite(outDir: String, script: String): IO[Unit] =
+  if (script == "") IO.pure(()) else Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => fuzzWrite2(outDir, script))
+
+def fuzzWrite2(outDir: String, script: String): IO[Unit] =
+  Fs.write(joinSlash(outDir, "seeds.txt"), script).flatMap(_ => Fs.write(fuzzDrivePath(outDir), script))
+
+def fuzzSeedText(dir: String): IO[String] =
+  Fs.list(dir).flatMap(ents => fuzzSeedGo(dir, ents, Verify.noStr()))
+
+def fuzzSeedGo(dir: String, ents: List[(String, Bool)], acc: List[String]): IO[String] =
+  if (List.isEmpty(ents)) IO.pure(Verify.nls(Verify.sortStrs(acc))) else fuzzSeedHd(dir, List.head(ents), List.tail(ents), acc)
+
+def fuzzSeedHd(dir: String, ent: (String, Bool), rest: List[(String, Bool)], acc: List[String]): IO[String] =
+  ent match {
+    case (name, isDir) => fuzzSeedPick(dir, name, isDir, rest, acc)
+  }
+
+def fuzzSeedPick(dir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[String]): IO[String] =
+  if (isDir || !isVerify(name)) fuzzSeedGo(dir, rest, acc) else Fs.read(joinSlash(dir, name)).flatMap(src => fuzzSeedGo(dir, rest, fuzzSeedAdd(acc, src)))
+
+def fuzzSeedAdd(acc: List[String], src: String): List[String] =
+  List.concat(acc, Verify.mapSeed(Verify.parseVerify(src)))
 
 def fuzzCorpusN(dir: String): IO[Int] =
   Fs.list(joinSlash(dir, "corpus")).map(ents => fuzzCorpusCount(ents, 0)).handleErrorWith(_ => IO.pure(0))
@@ -517,11 +595,17 @@ def fuzzCorpusCountHd(h: (String, Bool), rest: List[(String, Bool)], n: Int): In
     case (name, isDir) => if (isDir) fuzzCorpusCount(rest, n) else if (Str.endsWith(name, ".toml")) fuzzCorpusCount(rest, n + 1) else fuzzCorpusCount(rest, n)
   }
 
-def fuzzSearch(exe: String, hasUi: Bool, n: Int, fail: Int): IO[Int] =
-  if (n <= 0) IO.pure(fail) else fuzzProbe(exe, hasUi).flatMap(bad => fuzzSearch(exe, hasUi, n - 1, fail + bad))
+def fuzzSearch(exe: String, hasUi: Bool, scriptPath: String, hasScript: Bool, n: Int, fail: Int): IO[Int] =
+  if (n <= 0) IO.pure(fail) else fuzzProbe(exe, hasUi, scriptPath, hasScript).flatMap(bad => fuzzSearch(exe, hasUi, scriptPath, hasScript, n - 1, fail + bad))
 
-def fuzzProbe(exe: String, hasUi: Bool): IO[Int] =
-  runLine(Str.concat(if (hasUi) headlessEnv() else testEnv(), exe)).map(r => fuzzProbeCode(r))
+def fuzzProbe(exe: String, hasUi: Bool, scriptPath: String, hasScript: Bool): IO[Int] =
+  runLine(Str.concat(fuzzProbeEnv(hasUi, scriptPath, hasScript), exe)).map(r => fuzzProbeCode(r))
+
+def fuzzProbeEnv(hasUi: Bool, scriptPath: String, hasScript: Bool): String =
+  Str.concat(if (hasUi) headlessEnv() else testEnv(), if (hasScript) fuzzDriveEnv(hasUi, scriptPath) else "")
+
+def fuzzDriveEnv(hasUi: Bool, scriptPath: String): String =
+  Str.concat(if (hasUi) "SCUZZ_TESTRT=1 " else "", Str.concat("SCUZZ_DRIVE_SCRIPT=", Str.concat(scriptPath, " ")))
 
 def fuzzProbeCode(r: (Int, String, String)): Int =
   r match {
