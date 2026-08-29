@@ -269,8 +269,8 @@ def reproSched(sched: String): String =
 def reproFault(fault: String): String =
   if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
 
-def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, classText: String): String =
-  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, killed, survived, inert, ran, sites, classText))
+def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
+  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, killed, survived, inert, ran, sites, oracles, classText))
 
 def summaryFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("""[fuzz]
@@ -281,7 +281,7 @@ search = """, Str.concat(Str.fromInt(search), Str.concat("""
 search_failures = """, Str.concat(Str.fromInt(failures), Str.concat("""
 corpus = """, Str.concat(Str.fromInt(corpus), Str.concat("\ndrivers = []\nevents = []\ndeclared = []\nreachability = []\nmissing_budget = []\nmissing_corpus = []\nrepro = \"", Str.concat(repro, "\"\nreplay = \"\"\n\n"))))))))))))))
 
-def summaryRest(corpus: Int, corpFail: Int, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, classText: String): String =
+def summaryRest(corpus: Int, corpFail: Int, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
   Str.concat("""[coverage]
 unclaimed_varied = []
 
@@ -297,11 +297,11 @@ killed = """, Str.concat(Str.fromInt(killed), Str.concat("""
 survived = """, Str.concat(Str.fromInt(survived), Str.concat("""
 inert = """, Str.concat(Str.fromInt(inert), Str.concat("""
 ran = """, Str.concat(Str.fromInt(ran), Str.concat("""
-sites = """, Str.concat(Str.fromInt(sites), """
-oracles = 0
+sites = """, Str.concat(Str.fromInt(sites), Str.concat("""
+oracles = """, Str.concat(if (oracles) "true" else "false", """
 score = 1.000
 survivors = []
-"""))))))))))))))))
+"""))))))))))))))))))
 
 def classToml(text: String): String =
   classLines(linesOf(text))

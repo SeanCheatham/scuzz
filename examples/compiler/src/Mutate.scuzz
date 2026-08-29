@@ -24,8 +24,11 @@ def noInts(): List[Int] =
 def noExprs(): List[Expr] =
   []
 
-def live(inO: Bool): Bool =
-  !inO
+def live(inO: Bool, o: Bool): Bool =
+  if (o) inO else !inO
+
+def progSite(inO: Bool, o: Bool): Bool =
+  !o && live(inO, o)
 
 def isOracle(f: String): Bool =
   f == "Property.check" || f == "Property.assert"
@@ -78,80 +81,80 @@ def pickSites(seed: Int, take: Int, sites: Int): List[Int] =
 def pickSitesGo(seed: Int, take: Int, sites: Int, i: Int, acc: List[Int]): List[Int] =
   if (i >= take) acc else pickSitesGo(seed, take, sites, i + 1, List.concat(acc, pickSite(seed, i, sites, acc) :: noInts()))
 
-def countFiles(files: List[(String, String)]): Int =
-  if (List.isEmpty(files)) 0 else countFilesHd(List.head(files), List.tail(files))
+def countFiles(files: List[(String, String)], o: Bool): Int =
+  if (List.isEmpty(files)) 0 else countFilesHd(List.head(files), List.tail(files), o)
 
-def countFilesHd(h: (String, String), rest: List[(String, String)]): Int =
+def countFilesHd(h: (String, String), rest: List[(String, String)], o: Bool): Int =
   h match {
-    case (stem, src) => countFilesPick(stem, src, rest)
+    case (stem, src) => countFilesPick(stem, src, rest, o)
   }
 
-def countFilesPick(stem: String, src: String, rest: List[(String, String)]): Int =
-  if (stem == wrapStem()) countFiles(rest) else countProg(Parse.parseFile(stem, src)) + countFiles(rest)
+def countFilesPick(stem: String, src: String, rest: List[(String, String)], o: Bool): Int =
+  if (stem == wrapStem()) countFiles(rest, o) else countProg(Parse.parseFile(stem, src), o) + countFiles(rest, o)
 
-def countProg(p: Prog): Int =
+def countProg(p: Prog, o: Bool): Int =
   p match {
-    case Prog(_, _, _, _, _, _, defs, _, body) => countFuns(defs, 0) + countExpr(body)
+    case Prog(_, _, _, _, _, _, defs, _, body) => countFuns(defs, 0, o) + countExpr(body, o)
   }
 
-def countFuns(ds: List[Fun], n: Int): Int =
-  if (List.isEmpty(ds)) n else countFunsHd(List.head(ds), List.tail(ds), n)
+def countFuns(ds: List[Fun], n: Int, o: Bool): Int =
+  if (List.isEmpty(ds)) n else countFunsHd(List.head(ds), List.tail(ds), n, o)
 
-def countFunsHd(d: Fun, rest: List[Fun], n: Int): Int =
+def countFunsHd(d: Fun, rest: List[Fun], n: Int, o: Bool): Int =
   d match {
-    case Fun(_, _, _, _, _, body, _) => countFuns(rest, n + countExpr(body))
+    case Fun(_, _, _, _, _, body, _) => countFuns(rest, n + countExpr(body, o), o)
   }
 
-def countExpr(e: Expr): Int =
-  walk(e, 0 - 1, 0, false, noExprs(), 0).n
+def countExpr(e: Expr, o: Bool): Int =
+  walk(e, 0 - 1, 0, false, noExprs(), 0, o).n
 
-def applyFiles(files: List[(String, String)], site: Int): List[(String, String)] =
-  applyFilesGo(files, site, 0)
+def applyFiles(files: List[(String, String)], site: Int, o: Bool): List[(String, String)] =
+  applyFilesGo(files, site, 0, o)
 
-def applyFilesGo(files: List[(String, String)], site: Int, base: Int): List[(String, String)] =
-  if (List.isEmpty(files)) files else applyFilesHd(List.head(files), List.tail(files), site, base)
+def applyFilesGo(files: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  if (List.isEmpty(files)) files else applyFilesHd(List.head(files), List.tail(files), site, base, o)
 
-def applyFilesHd(h: (String, String), rest: List[(String, String)], site: Int, base: Int): List[(String, String)] =
+def applyFilesHd(h: (String, String), rest: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
   h match {
-    case (stem, src) => applyFilesPick(stem, src, rest, site, base)
+    case (stem, src) => applyFilesPick(stem, src, rest, site, base, o)
   }
 
-def applyFilesPick(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int): List[(String, String)] =
-  if (stem == wrapStem()) (stem, src) :: applyFilesGo(rest, site, base) else applyFilesLive(stem, src, rest, site, base)
+def applyFilesPick(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  if (stem == wrapStem()) (stem, src) :: applyFilesGo(rest, site, base, o) else applyFilesLive(stem, src, rest, site, base, o)
 
-def applyFilesLive(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int): List[(String, String)] =
-  applyFilesLive2(stem, src, rest, site, base, Parse.parseFile(stem, src))
+def applyFilesLive(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  applyFilesLive2(stem, src, rest, site, base, o, Parse.parseFile(stem, src))
 
-def applyFilesLive2(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, p: Prog): List[(String, String)] =
-  applyFilesLive3(stem, src, rest, site, base, p, countProg(p))
+def applyFilesLive2(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool, p: Prog): List[(String, String)] =
+  applyFilesLive3(stem, src, rest, site, base, o, p, countProg(p, o))
 
-def applyFilesLive3(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, p: Prog, n: Int): List[(String, String)] =
-  if (site >= base && site < base + n) (stem, Parse.pretty(applyProg(p, site - base))) :: rest else (stem, src) :: applyFilesGo(rest, site, base + n)
+def applyFilesLive3(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool, p: Prog, n: Int): List[(String, String)] =
+  if (site >= base && site < base + n) (stem, Parse.pretty(applyProg(p, site - base, o))) :: rest else (stem, src) :: applyFilesGo(rest, site, base + n, o)
 
-def applyProg(p: Prog, site: Int): Prog =
+def applyProg(p: Prog, site: Int, o: Bool): Prog =
   p match {
-    case Prog(pkg, ens, als, trs, ims, imps, defs, main, body) => applyFuns(defs, site, 0) match {
-  case FunWalk(ds, n) => walk(body, site, n, false, collectHs(body, noExprs()), 0) match {
+    case Prog(pkg, ens, als, trs, ims, imps, defs, main, body) => applyFuns(defs, site, 0, o) match {
+  case FunWalk(ds, n) => walk(body, site, n, false, collectHs(body, noExprs()), 0, o) match {
   case Walk(b, _, _) => Prog(pkg, ens, als, trs, ims, imps, ds, main, b)
 }
 }
   }
 
-def applyFuns(ds: List[Fun], site: Int, seen: Int): FunWalk =
-  if (List.isEmpty(ds)) FunWalk(Parse.noFun(), seen) else applyFunsHd(List.head(ds), List.tail(ds), site, seen)
+def applyFuns(ds: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+  if (List.isEmpty(ds)) FunWalk(Parse.noFun(), seen) else applyFunsHd(List.head(ds), List.tail(ds), site, seen, o)
 
-def applyFunsHd(d: Fun, rest: List[Fun], site: Int, seen: Int): FunWalk =
+def applyFunsHd(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
   d match {
-    case Fun(priv, name, tps, ps, ret, body, mod) => applyFunBody(priv, name, tps, ps, ret, body, mod, rest, site, seen)
+    case Fun(priv, name, tps, ps, ret, body, mod) => applyFunBody(priv, name, tps, ps, ret, body, mod, rest, site, seen, o)
   }
 
-def applyFunBody(priv: Bool, name: String, tps: List[String], ps: List[Param], ret: String, body: Expr, mod: String, rest: List[Fun], site: Int, seen: Int): FunWalk =
-  walk(body, site, seen, false, collectHs(body, noExprs()), 0) match {
-    case Walk(b, n, _) => applyFunsRest(Fun(priv, name, tps, ps, ret, b, mod), rest, site, n)
+def applyFunBody(priv: Bool, name: String, tps: List[String], ps: List[Param], ret: String, body: Expr, mod: String, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+  walk(body, site, seen, false, collectHs(body, noExprs()), 0, o) match {
+    case Walk(b, n, _) => applyFunsRest(Fun(priv, name, tps, ps, ret, b, mod), rest, site, n, o)
   }
 
-def applyFunsRest(d: Fun, rest: List[Fun], site: Int, seen: Int): FunWalk =
-  applyFuns(rest, site, seen) match {
+def applyFunsRest(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+  applyFuns(rest, site, seen, o) match {
     case FunWalk(ds, n) => FunWalk(d :: ds, n)
   }
 
@@ -213,48 +216,48 @@ def collectHsBindsHd(b: Bind, rest: List[Bind], acc: List[Expr]): List[Expr] =
     case Bind(_, _, v) => collectHsBinds(rest, collectHs(v, acc))
   }
 
-def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
+def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   e match {
-    case Expr.EInt(k) => walkInt(k, target, seen, inO, hi)
-    case Expr.EBin(op, l, r) => walkBin(op, l, r, target, seen, inO, hs, hi)
-    case Expr.EIf(c, t, el) => walkIf(c, t, el, target, seen, inO, hs, hi)
-    case Expr.ECall(f, args) => walkCall(f, args, target, seen, inO, hs, hi)
-    case Expr.EPrint(inner) => walkPrint(inner, target, seen, inO, hs, hi)
-    case Expr.EMethod(recv, name, args) => walkMethod(recv, name, args, target, seen, inO, hs, hi)
-    case Expr.EField(recv, name) => walkField(recv, name, target, seen, inO, hs, hi)
-    case Expr.EUn(op, inner) => walkUn(op, inner, target, seen, inO, hs, hi)
-    case Expr.ELam(p, body) => walkLam(p, body, target, seen, inO, hs, hi)
-    case Expr.EMatch(s, arms) => walkMatch(s, arms, target, seen, inO, hs, hi)
-    case Expr.EFor(bs, body) => walkFor(bs, body, target, seen, inO, hs, hi)
-    case Expr.EList(xs) => walkListExpr(xs, target, seen, inO, hs, hi)
-    case Expr.ETuple(xs) => walkTuple(xs, target, seen, inO, hs, hi)
-    case Expr.ENamed(name, inner) => walkNamed(name, inner, target, seen, inO, hs, hi)
+    case Expr.EInt(k) => walkInt(k, target, seen, inO, hi, o)
+    case Expr.EBin(op, l, r) => walkBin(op, l, r, target, seen, inO, hs, hi, o)
+    case Expr.EIf(c, t, el) => walkIf(c, t, el, target, seen, inO, hs, hi, o)
+    case Expr.ECall(f, args) => walkCall(f, args, target, seen, inO, hs, hi, o)
+    case Expr.EPrint(inner) => walkPrint(inner, target, seen, inO, hs, hi, o)
+    case Expr.EMethod(recv, name, args) => walkMethod(recv, name, args, target, seen, inO, hs, hi, o)
+    case Expr.EField(recv, name) => walkField(recv, name, target, seen, inO, hs, hi, o)
+    case Expr.EUn(op, inner) => walkUn(op, inner, target, seen, inO, hs, hi, o)
+    case Expr.ELam(p, body) => walkLam(p, body, target, seen, inO, hs, hi, o)
+    case Expr.EMatch(s, arms) => walkMatch(s, arms, target, seen, inO, hs, hi, o)
+    case Expr.EFor(bs, body) => walkFor(bs, body, target, seen, inO, hs, hi, o)
+    case Expr.EList(xs) => walkListExpr(xs, target, seen, inO, hs, hi, o)
+    case Expr.ETuple(xs) => walkTuple(xs, target, seen, inO, hs, hi, o)
+    case Expr.ENamed(name, inner) => walkNamed(name, inner, target, seen, inO, hs, hi, o)
     case _ => Walk(e, seen, hi)
   }
 
-def walkInt(k: Int, target: Int, seen: Int, inO: Bool, hi: Int): Walk =
-  if ((k == 0 || k == 1) && live(inO)) Walk(Expr.EInt(if (seen == target) 1 - k else k), seen + 1, hi) else Walk(Expr.EInt(k), seen, hi)
+def walkInt(k: Int, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
+  if ((k == 0 || k == 1) && live(inO, o)) Walk(Expr.EInt(if (seen == target) 1 - k else k), seen + 1, hi) else Walk(Expr.EInt(k), seen, hi)
 
-def walkBin(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  if (live(inO) && binN(op) > 0) walkBinHit(op, l, r, target, seen, inO, hs, hi) else walkBinKids(op, l, r, target, seen, inO, hs, hi)
+def walkBin(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (live(inO, o) && binN(op) > 0) walkBinHit(op, l, r, target, seen, inO, hs, hi, o) else walkBinKids(op, l, r, target, seen, inO, hs, hi, o)
 
-def walkBinHit(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(l, target, seen + binN(op), inO, hs, hi) match {
-    case Walk(l2, n1, h1) => walkBinHitR(op, l2, r, target, seen, inO, hs, n1, h1)
+def walkBinHit(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(l, target, seen + binN(op), inO, hs, hi, o) match {
+    case Walk(l2, n1, h1) => walkBinHitR(op, l2, r, target, seen, inO, hs, n1, h1, o)
   }
 
-def walkBinHitR(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int): Walk =
-  walk(r, target, n1, inO, hs, h1) match {
+def walkBinHitR(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int, o: Bool): Walk =
+  walk(r, target, n1, inO, hs, h1, o) match {
     case Walk(r2, n2, h2) => Walk(binOut(op, l, r2, target, seen), n2, h2)
   }
 
-def walkBinKids(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(l, target, seen, inO, hs, hi) match {
-    case Walk(l2, n1, h1) => walkBinKidsR(op, l2, r, target, inO, hs, n1, h1)
+def walkBinKids(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(l, target, seen, inO, hs, hi, o) match {
+    case Walk(l2, n1, h1) => walkBinKidsR(op, l2, r, target, inO, hs, n1, h1, o)
   }
 
-def walkBinKidsR(op: String, l: Expr, r: Expr, target: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int): Walk =
-  walk(r, target, n1, inO, hs, h1) match {
+def walkBinKidsR(op: String, l: Expr, r: Expr, target: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int, o: Bool): Walk =
+  walk(r, target, n1, inO, hs, h1, o) match {
     case Walk(r2, n2, h2) => Walk(Expr.EBin(op, l, r2), n2, h2)
   }
 
@@ -264,48 +267,48 @@ def binOut(op: String, l: Expr, r: Expr, target: Int, seen: Int): Expr =
 def binOut2(op: String, l: Expr, r: Expr, target: Int, seen: Int): Expr =
   if (op == "&&" && seen + 1 == target) l else if (op == "&&" && seen + 2 == target) r else if (seen == target && flipArith(op) != "") Expr.EBin(flipArith(op), l, r) else Expr.EBin(op, l, r)
 
-def walkIf(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  if (live(inO)) walkIfHit(c, t, el, target, seen, hs, hi) else walkIfKids(c, t, el, target, seen, inO, hs, hi)
+def walkIf(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (progSite(inO, o)) walkIfHit(c, t, el, target, seen, hs, hi, o) else walkIfKids(c, t, el, target, seen, inO, hs, hi, o)
 
-def walkIfHit(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, hs: List[Expr], hi: Int): Walk =
-  walk(c, target, seen + 1, false, hs, hi) match {
-    case Walk(c2, n1, h1) => walkIfThen(c2, t, el, target, seen, n1, h1, hs)
+def walkIfHit(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(c, target, seen + 1, false, hs, hi, o) match {
+    case Walk(c2, n1, h1) => walkIfThen(c2, t, el, target, seen, n1, h1, hs, o)
   }
 
-def walkIfThen(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, n1: Int, h1: Int, hs: List[Expr]): Walk =
-  walk(t, target, n1, false, hs, h1) match {
-    case Walk(t2, n2, h2) => walkIfElse(c, t2, el, target, seen, n2, h2, hs)
+def walkIfThen(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, n1: Int, h1: Int, hs: List[Expr], o: Bool): Walk =
+  walk(t, target, n1, false, hs, h1, o) match {
+    case Walk(t2, n2, h2) => walkIfElse(c, t2, el, target, seen, n2, h2, hs, o)
   }
 
-def walkIfElse(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, n2: Int, h2: Int, hs: List[Expr]): Walk =
-  walk(el, target, n2, false, hs, h2) match {
+def walkIfElse(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, n2: Int, h2: Int, hs: List[Expr], o: Bool): Walk =
+  walk(el, target, n2, false, hs, h2, o) match {
     case Walk(e2, n3, h3) => Walk(if (seen == target) Expr.EIf(c, e2, t) else Expr.EIf(c, t, e2), n3, h3)
   }
 
-def walkIfKids(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(c, target, seen, inO, hs, hi) match {
-    case Walk(c2, n1, h1) => walkIfKidsT(c2, t, el, target, inO, hs, n1, h1)
+def walkIfKids(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(c, target, seen, inO, hs, hi, o) match {
+    case Walk(c2, n1, h1) => walkIfKidsT(c2, t, el, target, inO, hs, n1, h1, o)
   }
 
-def walkIfKidsT(c: Expr, t: Expr, el: Expr, target: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int): Walk =
-  walk(t, target, n1, inO, hs, h1) match {
-    case Walk(t2, n2, h2) => walkIfKidsE(c, t2, el, target, inO, hs, n2, h2)
+def walkIfKidsT(c: Expr, t: Expr, el: Expr, target: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int, o: Bool): Walk =
+  walk(t, target, n1, inO, hs, h1, o) match {
+    case Walk(t2, n2, h2) => walkIfKidsE(c, t2, el, target, inO, hs, n2, h2, o)
   }
 
-def walkIfKidsE(c: Expr, t: Expr, el: Expr, target: Int, inO: Bool, hs: List[Expr], n2: Int, h2: Int): Walk =
-  walk(el, target, n2, inO, hs, h2) match {
+def walkIfKidsE(c: Expr, t: Expr, el: Expr, target: Int, inO: Bool, hs: List[Expr], n2: Int, h2: Int, o: Bool): Walk =
+  walk(el, target, n2, inO, hs, h2, o) match {
     case Walk(e2, n3, h3) => Walk(Expr.EIf(c, t, e2), n3, h3)
   }
 
-def walkCall(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  if (isOracle(f)) walkArgs(args, target, seen, true, hs, hi) match {
+def walkCall(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (isOracle(f)) walkArgs(args, target, seen, true, hs, hi, o) match {
   case Walks(xs, n, h) => Walk(Expr.ECall(f, xs), n, h)
-} else if (f == "Signal.map") walkMap(f, args, target, seen, inO, hs, hi) else if (isHandler(f)) walkHandler(f, args, target, seen, inO, hs, hi) else walkArgs(args, target, seen, inO, hs, hi) match {
+} else if (f == "Signal.map") walkMap(f, args, target, seen, inO, hs, hi, o) else if (isHandler(f)) walkHandler(f, args, target, seen, inO, hs, hi, o) else walkArgs(args, target, seen, inO, hs, hi, o) match {
   case Walks(xs, n, h) => Walk(Expr.ECall(f, xs), n, h)
 }
 
-def walkMap(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  if (live(inO) && mapParam(args) != "") walkMapHit(f, args, target, seen, inO, hs, hi, mapParam(args)) else walkArgs(args, target, seen, inO, hs, hi) match {
+def walkMap(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (progSite(inO, o) && mapParam(args) != "") walkMapHit(f, args, target, seen, inO, hs, hi, o, mapParam(args)) else walkArgs(args, target, seen, inO, hs, hi, o) match {
   case Walks(xs, n, h) => Walk(Expr.ECall(f, xs), n, h)
 }
 
@@ -318,8 +321,8 @@ def mapParamAt(e: Expr): String =
     case _ => ""
   }
 
-def walkMapHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, p: String): Walk =
-  walkArgs(args, target, seen + 1, inO, hs, hi) match {
+def walkMapHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, p: String): Walk =
+  walkArgs(args, target, seen + 1, inO, hs, hi, o) match {
     case Walks(xs, n, h) => Walk(Expr.ECall(f, if (seen == target) mapIdent(xs, p) else xs), n, h)
   }
 
@@ -332,13 +335,13 @@ def mapIdentLam(e: Expr, p: String): Expr =
     case _ => e
   }
 
-def walkHandler(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  if (live(inO) && List.len(hs) >= 2) walkHandlerHit(f, args, target, seen, inO, hs, hi) else walkArgs(args, target, seen, inO, hs, hi) match {
+def walkHandler(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (progSite(inO, o) && List.len(hs) >= 2) walkHandlerHit(f, args, target, seen, inO, hs, hi, o) else walkArgs(args, target, seen, inO, hs, hi, o) match {
   case Walks(xs, n, h) => Walk(Expr.ECall(f, xs), n, h)
 }
 
-def walkHandlerHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walkArgs(args, target, seen + 1, inO, hs, hi + 1) match {
+def walkHandlerHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walkArgs(args, target, seen + 1, inO, hs, hi + 1, o) match {
     case Walks(xs, n, h) => Walk(Expr.ECall(f, if (seen == target) swapHandler(xs, hs, hi) else xs), n, h)
   }
 
@@ -357,124 +360,124 @@ def swapHandlerLam(e: Expr, body: Expr): Expr =
     case _ => e
   }
 
-def walkPrint(inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(inner, target, seen, inO, hs, hi) match {
+def walkPrint(inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(inner, target, seen, inO, hs, hi, o) match {
     case Walk(e2, n, h) => Walk(Expr.EPrint(e2), n, h)
   }
 
-def walkMethod(recv: Expr, name: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  if (name == "require") walkRequire(recv, args, target, seen, hs, hi) else walkMethodGo(recv, name, args, target, seen, inO, hs, hi)
+def walkMethod(recv: Expr, name: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (name == "require") walkRequire(recv, args, target, seen, hs, hi, o) else walkMethodGo(recv, name, args, target, seen, inO, hs, hi, o)
 
-def walkRequire(recv: Expr, args: List[Expr], target: Int, seen: Int, hs: List[Expr], hi: Int): Walk =
-  walk(recv, target, seen, false, hs, hi) match {
-    case Walk(r2, n1, h1) => walkArgs(args, target, n1, true, hs, h1) match {
+def walkRequire(recv: Expr, args: List[Expr], target: Int, seen: Int, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(recv, target, seen, false, hs, hi, o) match {
+    case Walk(r2, n1, h1) => walkArgs(args, target, n1, true, hs, h1, o) match {
   case Walks(xs, n2, h2) => Walk(Expr.EMethod(r2, "require", xs), n2, h2)
 }
   }
 
-def walkMethodGo(recv: Expr, name: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(recv, target, seen, inO, hs, hi) match {
-    case Walk(r2, n1, h1) => walkArgs(args, target, n1, inO, hs, h1) match {
+def walkMethodGo(recv: Expr, name: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(recv, target, seen, inO, hs, hi, o) match {
+    case Walk(r2, n1, h1) => walkArgs(args, target, n1, inO, hs, h1, o) match {
   case Walks(xs, n2, h2) => Walk(Expr.EMethod(r2, name, xs), n2, h2)
 }
   }
 
-def walkField(recv: Expr, name: String, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(recv, target, seen, inO, hs, hi) match {
+def walkField(recv: Expr, name: String, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(recv, target, seen, inO, hs, hi, o) match {
     case Walk(r2, n, h) => Walk(Expr.EField(r2, name), n, h)
   }
 
-def walkUn(op: String, inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(inner, target, seen, inO, hs, hi) match {
+def walkUn(op: String, inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(inner, target, seen, inO, hs, hi, o) match {
     case Walk(e2, n, h) => Walk(Expr.EUn(op, e2), n, h)
   }
 
-def walkLam(p: String, body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(body, target, seen, inO, hs, hi) match {
+def walkLam(p: String, body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(body, target, seen, inO, hs, hi, o) match {
     case Walk(b, n, h) => Walk(Expr.ELam(p, b), n, h)
   }
 
-def walkMatch(s: Expr, arms: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(s, target, seen, inO, hs, hi) match {
-    case Walk(s2, n1, h1) => walkArms(arms, target, n1, inO, hs, h1) match {
+def walkMatch(s: Expr, arms: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(s, target, seen, inO, hs, hi, o) match {
+    case Walk(s2, n1, h1) => walkArms(arms, target, n1, inO, hs, h1, o) match {
   case ArmWalk(xs, n2, h2) => Walk(Expr.EMatch(s2, xs), n2, h2)
 }
   }
 
-def walkFor(bs: List[Bind], body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walkBinds(bs, target, seen, inO, hs, hi) match {
-    case BindWalk(xs, n1, h1) => walk(body, target, n1, inO, hs, h1) match {
+def walkFor(bs: List[Bind], body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walkBinds(bs, target, seen, inO, hs, hi, o) match {
+    case BindWalk(xs, n1, h1) => walk(body, target, n1, inO, hs, h1, o) match {
   case Walk(b, n2, h2) => Walk(Expr.EFor(xs, b), n2, h2)
 }
   }
 
-def walkListExpr(xs: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walkArgs(xs, target, seen, inO, hs, hi) match {
+def walkListExpr(xs: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walkArgs(xs, target, seen, inO, hs, hi, o) match {
     case Walks(ys, n, h) => Walk(Expr.EList(ys), n, h)
   }
 
-def walkTuple(xs: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walkArgs(xs, target, seen, inO, hs, hi) match {
+def walkTuple(xs: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walkArgs(xs, target, seen, inO, hs, hi, o) match {
     case Walks(ys, n, h) => Walk(Expr.ETuple(ys), n, h)
   }
 
-def walkNamed(name: String, inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walk =
-  walk(inner, target, seen, inO, hs, hi) match {
+def walkNamed(name: String, inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(inner, target, seen, inO, hs, hi, o) match {
     case Walk(e2, n, h) => Walk(Expr.ENamed(name, e2), n, h)
   }
 
-def walkArgs(xs: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walks =
-  if (List.isEmpty(xs)) Walks(noExprs(), seen, hi) else walkArgsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi)
+def walkArgs(xs: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walks =
+  if (List.isEmpty(xs)) Walks(noExprs(), seen, hi) else walkArgsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi, o)
 
-def walkArgsHd(h: Expr, rest: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walks =
-  walk(h, target, seen, inO, hs, hi) match {
-    case Walk(e2, n1, h1) => walkArgsRest(e2, rest, target, n1, inO, hs, h1)
+def walkArgsHd(h: Expr, rest: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walks =
+  walk(h, target, seen, inO, hs, hi, o) match {
+    case Walk(e2, n1, h1) => walkArgsRest(e2, rest, target, n1, inO, hs, h1, o)
   }
 
-def walkArgsRest(e: Expr, rest: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): Walks =
-  walkArgs(rest, target, seen, inO, hs, hi) match {
+def walkArgsRest(e: Expr, rest: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walks =
+  walkArgs(rest, target, seen, inO, hs, hi, o) match {
     case Walks(xs, n, h) => Walks(e :: xs, n, h)
   }
 
 def noArms(): List[Arm] =
   []
 
-def walkArms(xs: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): ArmWalk =
-  if (List.isEmpty(xs)) ArmWalk(noArms(), seen, hi) else walkArmsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi)
+def walkArms(xs: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): ArmWalk =
+  if (List.isEmpty(xs)) ArmWalk(noArms(), seen, hi) else walkArmsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi, o)
 
-def walkArmsHd(a: Arm, rest: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): ArmWalk =
+def walkArmsHd(a: Arm, rest: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): ArmWalk =
   a match {
-    case Arm(pat, g, body) => walk(body, target, seen, inO, hs, hi) match {
-  case Walk(b, n1, h1) => walkArmsRest(Arm(pat, g, b), rest, target, n1, inO, hs, h1)
+    case Arm(pat, g, body) => walk(body, target, seen, inO, hs, hi, o) match {
+  case Walk(b, n1, h1) => walkArmsRest(Arm(pat, g, b), rest, target, n1, inO, hs, h1, o)
 }
   }
 
-def walkArmsRest(a: Arm, rest: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): ArmWalk =
-  walkArms(rest, target, seen, inO, hs, hi) match {
+def walkArmsRest(a: Arm, rest: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): ArmWalk =
+  walkArms(rest, target, seen, inO, hs, hi, o) match {
     case ArmWalk(xs, n, h) => ArmWalk(a :: xs, n, h)
   }
 
 def noBinds(): List[Bind] =
   []
 
-def walkBinds(xs: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): BindWalk =
-  if (List.isEmpty(xs)) BindWalk(noBinds(), seen, hi) else walkBindsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi)
+def walkBinds(xs: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
+  if (List.isEmpty(xs)) BindWalk(noBinds(), seen, hi) else walkBindsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi, o)
 
-def walkBindsHd(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): BindWalk =
+def walkBindsHd(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
   b match {
-    case Bind(draw, name, v) => walk(v, target, seen, inO, hs, hi) match {
-  case Walk(v2, n1, h1) => walkBindsRest(Bind(draw, name, v2), rest, target, n1, inO, hs, h1)
+    case Bind(draw, name, v) => walk(v, target, seen, inO, hs, hi, o) match {
+  case Walk(v2, n1, h1) => walkBindsRest(Bind(draw, name, v2), rest, target, n1, inO, hs, h1, o)
 }
   }
 
-def walkBindsRest(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int): BindWalk =
-  walkBinds(rest, target, seen, inO, hs, hi) match {
+def walkBindsRest(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
+  walkBinds(rest, target, seen, inO, hs, hi, o) match {
     case BindWalk(xs, n, h) => BindWalk(b :: xs, n, h)
   }
 
 def fuzzMutLine(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int): String =
   Str.concat("mutate: ", Str.concat(Str.fromInt(killed), Str.concat(" killed, ", Str.concat(Str.fromInt(survived), Str.concat(" survived, ", Str.concat(Str.fromInt(inert), Str.concat(" inert (", Str.concat(Str.fromInt(ran), Str.concat(" of ", Str.concat(Str.fromInt(sites), " sites)"))))))))))
 
-def mutateHead(take: Int, sites: Int): String =
-  Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(take), Str.concat(" of ", Str.concat(Str.fromInt(sites), " live-code sites (flip/if/0-1/sibling); idle + corpus replay"))))
+def mutateHead(take: Int, sites: Int, o: Bool): String =
+  Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(take), Str.concat(" of ", Str.concat(Str.fromInt(sites), if (o) " residual oracle sites (negate/flip/0-1/arith/drop); idle + corpus replay" else " live-code sites (flip/if/0-1/sibling); idle + corpus replay"))))
 

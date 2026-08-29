@@ -369,7 +369,7 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Test(path, update, _, _) => dispatchTest(path, update)
     case Cmd.New(name, path, ui) => dispatchNew(name, path, ui)
     case Cmd.Package(path, outDir, target) => dispatchPkg(path, outDir, target)
-    case Cmd.Fuzz(path, it, seed, replay, _, noFailFast, _, relate) => dispatchFuzz(path, it, seed, replay, relate, noFailFast)
+    case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, _, relate) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles)
     case Cmd.Ide(path, outDir, headless) => dispatchIde(path, outDir, headless)
     case Cmd.Help(t) => IO.println(helpOf(t))
     case Cmd.Version => IO.println("scuzz 0.2.0")
@@ -380,11 +380,11 @@ def dispatch(c: Cmd): IO[Unit] =
 def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
   Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), target)
 
-def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool): IO[Unit] =
-  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => dispatchFuzz2(path, it, seed, replay, relate, noFailFast))
+def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool): IO[Unit] =
+  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => dispatchFuzz2(path, it, seed, replay, relate, noFailFast, oracles))
 
-def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool): IO[Unit] =
-  if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast)
+def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool): IO[Unit] =
+  if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast, oracles)
 
 def dispatchIde(_path: String, outDir: String, headless: Bool): IO[Unit] =
   dispatchRun("examples/editor", outDir, headless)
