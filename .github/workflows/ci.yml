@@ -569,12 +569,12 @@ jobs:
           if "$SCUZZ" fuzz --iterations 0 examples/bad-example; then
             echo "corpus-only should pin the bad-example failure" && exit 1
           fi
-          cargo run -p scuzz -- fuzz --iterations 0 examples/kernel
+          "$SCUZZ" fuzz --iterations 0 examples/kernel
           grep -q 'drive addTwoThree' examples/kernel/build/seeds.txt
           grep -q 'drive sumToTen' examples/kernel/build/seeds.txt
           grep -q 'drive termDiff' examples/kernel/build/seeds.txt
           grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
-          cargo run -p scuzz -- fuzz --iterations 16 examples/kernel
+          "$SCUZZ" fuzz --iterations 16 examples/kernel
           cargo run -p scuzz -- fuzz --iterations 8 examples/scale
           cargo run -p scuzz -- fuzz --iterations 8 examples/fmt
           cargo run -p scuzz -- fuzz --iterations 8 examples/tyck
