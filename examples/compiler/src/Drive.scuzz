@@ -86,28 +86,66 @@ def isScuzz(name: String): Bool =
 def stemOf(name: String): String =
   Str.slice(name, 0, Str.len(name) - 6)
 
-def emitDir(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirMan(dir, outDir, Manifest.parse(toml)))
+def emitDir(dir: String, outDir: String, full: Bool): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirMan(dir, outDir, full, Manifest.parse(toml)))
 
-def emitDirMan(dir: String, outDir: String, m: Man): IO[Unit] =
+def emitDirMan(dir: String, outDir: String, full: Bool, m: Man): IO[Unit] =
   m match {
-    case Man(ok, name, version, hasUi, deps, err) => emitDirMan2(dir, outDir, ok, err, deps)
+    case Man(ok, name, version, hasUi, deps, err) => emitDirMan2(dir, outDir, full, ok, err, deps)
   }
 
-def emitDirMan2(dir: String, outDir: String, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
-  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitDirListed(dir, outDir, deps, ents))
+def emitDirMan2(dir: String, outDir: String, full: Bool, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
+  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitDirListed(dir, outDir, full, deps, ents))
 
-def emitDirListed(dir: String, outDir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitDirCollected(dir, outDir, deps, own))
+def emitDirListed(dir: String, outDir: String, full: Bool, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitDirCollected(dir, outDir, full, deps, own))
 
-def emitDirCollected(dir: String, outDir: String, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  collectDeps(dir, deps, own).flatMap(files => emitDirCompile(dir, outDir, files))
+def emitDirCollected(dir: String, outDir: String, full: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
+  collectDeps(dir, deps, own).flatMap(files => emitDirReady(dir, outDir, full, files))
 
-def emitDirCompile(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirCompiled(toml, own, outDir))
+def emitDirReady(dir: String, outDir: String, full: Bool, files: List[(String, String)]): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirFp(dir, outDir, full, files, toml, fpText(toml, files)))
 
-def emitDirCompiled(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
-  emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib()))
+def fpPath(dir: String): String =
+  joinSlash(joinSlash(dir, ".scuzz"), "fingerprint")
+
+def fpText(toml: String, files: List[(String, String)]): String =
+  Str.concat(toml, fpFiles(files))
+
+def fpFiles(files: List[(String, String)]): String =
+  if (List.isEmpty(files)) "" else fpFilesHd(List.head(files), List.tail(files))
+
+def fpFilesHd(h: (String, String), rest: List[(String, String)]): String =
+  h match {
+    case (stem, src) => Str.concat(stem, Str.concat("\n", Str.concat(src, Str.concat("\n", fpFiles(rest)))))
+  }
+
+def emitDirFp(dir: String, outDir: String, full: Bool, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
+  if (full) emitDirFresh(dir, outDir, files, toml, fp) else emitDirHit(dir, outDir, files, toml, fp)
+
+def emitDirHit(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
+  Fs.read(fpPath(dir)).flatMap(old => emitDirHitGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirFresh(dir, outDir, files, toml, fp))
+
+def emitDirHitGot(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String, old: String): IO[Unit] =
+  if (old == fp) emitDirUp(outDir, toml) else emitDirFresh(dir, outDir, files, toml, fp)
+
+def emitDirUp(outDir: String, toml: String): IO[Unit] =
+  emitDirUpMan(outDir, Manifest.parse(toml))
+
+def emitDirUpMan(outDir: String, m: Man): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else IO.println(Str.concat("up-to-date ", exeName(outDir, m.name)))
+
+def emitDirFresh(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
+  emitDirOut(compileFiles(toml, files, outDir, "clang", rtLib())).flatMap(ok => emitDirStored(dir, fp, ok))
+
+def emitDirStored(dir: String, fp: String, ok: Bool): IO[Unit] =
+  if (!ok) IO.pure(()) else Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpPath(dir), fp))
+
+def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir))
+
+def emitDirAlwaysGot(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
+  emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib())).map(_ => ())
 
 def emitFuzz(dir: String, outDir: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitFuzzMan(dir, outDir, Manifest.parse(toml)))
@@ -130,7 +168,7 @@ def emitFuzzVerify(dir: String, outDir: String, files: List[(String, String)]): 
   Fs.list(dir).flatMap(ents => emitFuzzVerGo(dir, outDir, files, ents, Manifest.noPairs()))
 
 def emitFuzzVerGo(dir: String, outDir: String, files: List[(String, String)], ents: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
-  if (List.isEmpty(ents)) emitDirCompile(dir, outDir, fuzzFiles(files, ver)) else emitFuzzVerHd(dir, outDir, files, List.head(ents), List.tail(ents), ver)
+  if (List.isEmpty(ents)) emitDirAlways(dir, outDir, fuzzFiles(files, ver)) else emitFuzzVerHd(dir, outDir, files, List.head(ents), List.tail(ents), ver)
 
 def emitFuzzVerHd(dir: String, outDir: String, files: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)], ver: List[(String, String)]): IO[Unit] =
   ent match {
@@ -243,16 +281,16 @@ def readSrcHd2(srcDir: String, ent: (String, Bool), acc: List[(String, String)],
 def readSrcPick(srcDir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[(String, String)]): IO[List[(String, String)]] =
   if (isDir) readSrcAcc(srcDir, rest, acc) else if (!isScuzz(name)) readSrcAcc(srcDir, rest, acc) else Fs.read(joinSlash(srcDir, name)).flatMap(src => readSrcAcc(srcDir, rest, (stemOf(name), src) :: acc))
 
-def emitDirOut(p: PkgOut): IO[Unit] =
+def emitDirOut(p: PkgOut): IO[Bool] =
   p match {
     case PkgOut(ok, name, ll, llPath, link, diags) => emitDirWrite(ok, ll, llPath, diags)
   }
 
-def emitDirWrite(ok: Bool, ll: String, llPath: String, diags: String): IO[Unit] =
-  if (!ok) IO.println(Str.concat("fail:", diags)) else Fs.write(llPath, ll).flatMap(_ => IO.println("ok"))
+def emitDirWrite(ok: Bool, ll: String, llPath: String, diags: String): IO[Bool] =
+  if (!ok) IO.println(Str.concat("fail:", diags)).map(_ => false) else Fs.write(llPath, ll).flatMap(_ => IO.println("ok").map(_ => true))
 
 def runDir(dir: String, outDir: String, env: String): IO[Unit] =
-  emitDir(dir, outDir).flatMap(_ => linkRun(dir, outDir, env))
+  emitDir(dir, outDir, true).flatMap(_ => linkRun(dir, outDir, env))
 
 def linkRun(dir: String, outDir: String, env: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir, env))
@@ -359,7 +397,7 @@ def checkDirHuman(human: String): IO[Unit] =
   if (human == "scuzz check ok") IO.println(human) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
 
 def testDir(dir: String, outDir: String, update: Bool): IO[Unit] =
-  emitDir(dir, outDir).flatMap(_ => testLink(dir, outDir, update))
+  emitDir(dir, outDir, true).flatMap(_ => testLink(dir, outDir, update))
 
 def testLink(dir: String, outDir: String, update: Bool): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testLinkMan(dir, Manifest.parse(toml), outDir, update))
@@ -472,7 +510,7 @@ def linkOnlyGot(r: (Int, String, String)): IO[Unit] =
   }
 
 def compileLinked(dir: String, outDir: String): IO[Unit] =
-  emitDir(dir, outDir).flatMap(_ => compileLinkedMan(dir, outDir))
+  emitDir(dir, outDir, true).flatMap(_ => compileLinkedMan(dir, outDir))
 
 def compileLinkedMan(dir: String, outDir: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => compileLinkedUi(Manifest.parse(toml), outDir))

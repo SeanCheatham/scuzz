@@ -362,7 +362,7 @@ def runCmd(c: Cmd, src: String): String =
 
 def dispatch(c: Cmd): IO[Unit] =
   c match {
-    case Cmd.Build(path, outDir, _, _) => dispatchBuild(path, outDir)
+    case Cmd.Build(path, outDir, full, _) => dispatchBuild(path, outDir, full)
     case Cmd.Run(path, outDir, headless, _, _, _) => dispatchRun(path, outDir, headless)
     case Cmd.Check(path, json) => Drive.checkDir(path, json)
     case Cmd.Fmt(path, check) => dispatchFmt(path, check)
@@ -386,8 +386,8 @@ def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool)
 def dispatchIde(_path: String, outDir: String, headless: Bool): IO[Unit] =
   dispatchRun("examples/editor", outDir, headless)
 
-def dispatchBuild(path: String, outDir: String): IO[Unit] =
-  Fs.mkdirs(outDir).flatMap(_ => Drive.emitDir(path, outDir))
+def dispatchBuild(path: String, outDir: String, full: Bool): IO[Unit] =
+  Fs.mkdirs(outDir).flatMap(_ => Drive.emitDir(path, outDir, full))
 
 def dispatchRun(path: String, outDir: String, headless: Bool): IO[Unit] =
   Fs.mkdirs(outDir).flatMap(_ => Drive.runDir(path, outDir, if (headless) Drive.headlessEnv() else ""))
