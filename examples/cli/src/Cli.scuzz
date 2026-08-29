@@ -381,7 +381,10 @@ def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
   Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), target)
 
 def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool): IO[Unit] =
-  if (relate) IO.println("scuzz fuzz --relate is not on this CLI yet").flatMap(_ => IO.fail("fuzz")) else Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast))
+  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => dispatchFuzz2(path, it, seed, replay, relate, noFailFast))
+
+def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool): IO[Unit] =
+  if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast)
 
 def dispatchIde(_path: String, outDir: String, headless: Bool): IO[Unit] =
   dispatchRun("examples/editor", outDir, headless)

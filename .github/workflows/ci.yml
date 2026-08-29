@@ -550,8 +550,8 @@ jobs:
           SCUZZ=./examples/cli/build/cli
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
           cargo run -p scuzz -- fuzz --iterations 16 examples/studio
-          cargo run -p scuzz -- fuzz --relate examples/counter
-          if cargo run -p scuzz -- fuzz --relate examples/bad-sched; then
+          "$SCUZZ" fuzz --relate examples/counter
+          if "$SCUZZ" fuzz --relate examples/bad-sched; then
             echo "relate should have caught the schedule divergence" && exit 1
           fi
           if "$SCUZZ" fuzz --no-fail-fast --iterations 8 examples/bad-example; then
