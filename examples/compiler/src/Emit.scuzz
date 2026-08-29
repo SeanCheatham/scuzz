@@ -767,7 +767,10 @@ def hasSubAt(s: String, sub: String, i: Int): Bool =
   if (i + Str.len(sub) > Str.len(s)) false else if (Str.slice(s, i, i + Str.len(sub)) == sub) true else hasSubAt(s, sub, i + 1)
 
 def callIsI64(f: String, defs: List[Fun]): Bool =
-  f == "Signal.get" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || funRetI64(defs, f)
+  f == "Signal.get" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
+
+def isTlI64Call(f: String): Bool =
+  f == "Timeline.len" || f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Timeline.signalStrHas" || tlHasRt(f) != "" || tlI64Rt(f) != ""
 
 def exprMethodI64(recv: Expr, name: String, defs: List[Fun]): Bool =
   if (name == "require") exprIsI64(recv, noParam(), defs) else exprMethodI64Go(recv, name, defs)
@@ -861,16 +864,34 @@ def emitTimeout2(rt: String, code: String, ms: String, iv: String, o: Bool, pref
   Slot(join(code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(ms, Str.concat(", ptr ", Str.concat(iv, ")")))))))), if (o) relPtr(iv) else "")), pct(prefix, "io"), false)
 
 def isTlKit(f: String): Bool =
-  f == "Timeline.len" || f == "Timeline.signalInt" || f == "Timeline.a11yHas" || f == "Timeline.lastHitHas" || f == "Verdict.ok" || f == "Verdict.fail" || f == "Verdict.and" || f == "Verdict.or"
+  f == "Timeline.len" || f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Timeline.signalStrHas" || tlHasRt(f) != "" || tlI64Rt(f) != "" || f == "Verdict.ok" || f == "Verdict.fail" || f == "Verdict.and" || f == "Verdict.or"
+
+def tlHasRt(f: String): String =
+  if (f == "Timeline.a11yHas") "sz_timeline_a11y_has" else if (f == "Timeline.lastHitHas") "sz_timeline_last_hit_has" else if (f == "Timeline.driveHas") "sz_timeline_drive_has" else if (f == "Timeline.effectHas") "sz_timeline_effect_has" else if (f == "Timeline.faultKindHas") "sz_timeline_fault_kind_has" else ""
+
+def tlI64Rt(f: String): String =
+  if (f == "Timeline.effectCount") "sz_timeline_effect_count" else if (f == "Timeline.fiberLive") "sz_timeline_fiber_live" else if (f == "Timeline.fiberReady") "sz_timeline_fiber_ready" else if (f == "Timeline.fiberParked") "sz_timeline_fiber_parked" else if (f == "Timeline.fiberDone") "sz_timeline_fiber_done" else if (f == "Timeline.faultN") "sz_timeline_fault_n" else if (f == "Timeline.checkpoint") "sz_timeline_checkpoint" else if (f == "Timeline.nearestCheckpoint") "sz_timeline_nearest_checkpoint" else ""
 
 def emitTlKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "Timeline.len") emitTlLen(code, vals, prefix) else if (f == "Timeline.signalInt") emitTlSig(code, vals, prefix) else if (f == "Timeline.a11yHas") emitTlHas("sz_timeline_a11y_has", code, vals, owns, prefix) else if (f == "Timeline.lastHitHas") emitTlHas("sz_timeline_last_hit_has", code, vals, owns, prefix) else if (f == "Verdict.ok") emitVOk(code, prefix) else if (f == "Verdict.fail") emitVFail(code, vals, prefix) else if (f == "Verdict.and") emitVBin("sz_verdict_and", code, vals, prefix) else emitVBin("sz_verdict_or", code, vals, prefix)
+  if (f == "Timeline.len") emitTlLen(code, vals, prefix) else if (f == "Timeline.signalInt" || f == "Timeline.signalListLen") emitTlSigRt(tlSigRt(f), code, vals, prefix) else if (f == "Timeline.signalStrHas") emitTlStrHas(code, vals, owns, prefix) else if (tlHasRt(f) != "") emitTlHas(tlHasRt(f), code, vals, owns, prefix) else if (tlI64Rt(f) != "") emitTlI64(tlI64Rt(f), code, vals, prefix) else if (f == "Verdict.ok") emitVOk(code, prefix) else if (f == "Verdict.fail") emitVFail(code, vals, prefix) else if (f == "Verdict.and") emitVBin("sz_verdict_and", code, vals, prefix) else emitVBin("sz_verdict_or", code, vals, prefix)
+
+def tlSigRt(f: String): String =
+  if (f == "Timeline.signalListLen") "sz_timeline_signal_list_len" else "sz_timeline_signal_int"
 
 def emitTlLen(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_timeline_len(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
 
-def emitTlSig(code: String, vals: List[String], prefix: String): Slot =
-  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_timeline_signal_int(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", i64 ", Str.concat(arg2(vals), ")"))))))))), pct(prefix, "v"), false)
+def emitTlSigRt(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", i64 ", Str.concat(arg2(vals), ")"))))))))))), pct(prefix, "v"), false)
+
+def emitTlI64(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))))), pct(prefix, "v"), false)
+
+def emitTlStrHas(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitTlStrHas2(code, arg0(vals), arg1(vals), arg2(vals), arg3(vals), headOwn(tailOwn(tailOwn(tailOwn(owns)))), prefix)
+
+def emitTlStrHas2(code: String, tl: String, i: String, id: String, needle: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_timeline_signal_str_has(ptr ", Str.concat(tl, Str.concat(", i64 ", Str.concat(i, Str.concat(", i64 ", Str.concat(id, Str.concat(", ptr ", Str.concat(needle, ")")))))))))), if (o) relPtr(needle) else "")), pct(prefix, "v"), false)
 
 def emitVOk(code: String, prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "tl"), "call ptr @sz_verdict_ok()"))), pct(prefix, "tl"), true)
@@ -5433,7 +5454,13 @@ def declsT5(): String =
   join(decl("ptr @sz_lang_view_radio(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_choice_chip(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_radio_list_tile(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_show_when(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_segmented(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_expansion_tile(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_ink_well(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_list_tile(ptr, ptr)"), join(decl("ptr @sz_lang_view_avatar(ptr)"), join(decl("ptr @sz_lang_view_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_merge_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_tooltip(ptr, ptr)"), join(decl("ptr @sz_lang_view_badge(ptr, ptr)"), join(decl("ptr @sz_lang_view_visibility(ptr, ptr)"), join(decl("ptr @sz_lang_view_offstage(ptr, ptr)"), join(decl("ptr @sz_lang_view_icon_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_fab(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_outlined_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_text_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_action_chip(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_each(ptr)"), decl("ptr @sz_lang_view_each_map(ptr, ptr, ptr)"))))))))))))))))))))))
 
 def declsU(): String =
-  join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("void @sz_verify_register(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("i64 @sz_timeline_a11y_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_last_hit_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_exists(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_ok()"), join(decl("ptr @sz_verdict_fail(i64, ptr)"), join(decl("ptr @sz_verdict_every(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_any(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_and(ptr, ptr)"), join(decl("ptr @sz_verdict_or(ptr, ptr)"), decl("void @sz_property_classify(ptr, i64)"))))))))))))))
+  join(declsU1(), declsU2())
+
+def declsU1(): String =
+  join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("void @sz_verify_register(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("i64 @sz_timeline_signal_list_len(ptr, i64, i64)"), join(decl("i64 @sz_timeline_signal_str_has(ptr, i64, i64, ptr)"), join(decl("i64 @sz_timeline_a11y_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_last_hit_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_drive_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_effect_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_exists(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_ok()"), join(decl("ptr @sz_verdict_fail(i64, ptr)"), join(decl("ptr @sz_verdict_every(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_any(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_and(ptr, ptr)"), join(decl("ptr @sz_verdict_or(ptr, ptr)"), decl("void @sz_property_classify(ptr, i64)"))))))))))))))))))
+
+def declsU2(): String =
+  join(decl("i64 @sz_timeline_effect_count(ptr, i64)"), join(decl("i64 @sz_timeline_fiber_live(ptr, i64)"), join(decl("i64 @sz_timeline_fiber_ready(ptr, i64)"), join(decl("i64 @sz_timeline_fiber_parked(ptr, i64)"), join(decl("i64 @sz_timeline_fiber_done(ptr, i64)"), join(decl("i64 @sz_timeline_fault_kind_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_fault_n(ptr, i64)"), join(decl("i64 @sz_timeline_checkpoint(ptr, i64)"), decl("i64 @sz_timeline_nearest_checkpoint(ptr, i64)")))))))))
 
 def declsV(): String =
   join(decl("i32 @sz_drive_uncons(ptr, ptr, ptr, i32)"), join(decl("i32 @sz_drive_uncons_list(ptr, ptr, i32)"), join(decl("i64 @sz_drive_nfields(ptr)"), join(decl("i32 @sz_drive_field(ptr, i64, ptr, i32)"), join(decl("i64 @sz_drive_parse_int(ptr)"), join(decl("i64 @sz_drive_parse_bool(ptr)"), decl("void @sz_panic(ptr)")))))))
