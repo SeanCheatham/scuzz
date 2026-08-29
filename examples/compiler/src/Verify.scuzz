@@ -2,6 +2,7 @@ import Parse.Fun
 import Parse.Param
 import Parse.Prog
 import Parse.pretty0
+import Parse.pretty
 
 def nl(): String =
   """
@@ -51,6 +52,12 @@ def allTl(ps: List[Param]): Bool =
 
 def isRel(d: Fun): Bool =
   d.ret == "Verdict" && List.len(d.params) == 2 && allTl(d.params)
+
+def isClaim(d: Fun): Bool =
+  d.ret == "Verdict"
+
+def isSess(d: Fun): Bool =
+  d.ret == "Verdict" && List.len(d.params) == 1 && allTl(d.params)
 
 def drives(ds: List[Fun]): List[Fun] =
   if (List.isEmpty(ds)) noFun() else drives1(List.head(ds), List.tail(ds))
@@ -210,11 +217,25 @@ def parseRelsProg(p: Prog): List[Fun] =
     case Prog(_, _, _, _, _, _, defs, _, _) => rels(defs)
   }
 
+def parseClaims(src: String): List[Fun] =
+  parseClaimsProg(Parse.parse(Lexer.lex(src)))
+
+def parseClaimsProg(p: Prog): List[Fun] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => claims(defs)
+  }
+
+def claims(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else claims1(List.head(ds), List.tail(ds))
+
+def claims1(d: Fun, rest: List[Fun]): List[Fun] =
+  if (isClaim(d)) d :: claims(rest) else claims(rest)
+
 def wrapMod(): String =
   "__verify"
 
 def wrapSrc(stem: String, src: String): String =
-  Str.concat(wrapFuns(stem, parseVerify(src)), wrapRelFuns(parseRels(src)))
+  Str.concat(wrapFuns(stem, parseVerify(src)), wrapRelFuns(parseClaims(src)))
 
 def wrapFuns(stem: String, ds: List[Fun]): String =
   if (List.isEmpty(ds)) "" else Str.concat(wrapFun(stem, List.head(ds)), wrapFuns(stem, List.tail(ds)))
@@ -256,6 +277,28 @@ def wrapFiles2(h: (String, String), rest: List[(String, String)]): String =
   h match {
     case (stem, src) => Str.concat(wrapSrc(stem, src), wrapFiles(rest))
   }
+
+def applySim(live: String, sim: String): String =
+  applySimProg(Parse.parse(Lexer.lex(live)), Parse.parse(Lexer.lex(sim)))
+
+def applySimProg(live: Prog, sim: Prog): String =
+  sim match {
+    case Prog(_, _, _, _, _, _, sdefs, _, _) => applySimLive(live, sdefs)
+  }
+
+def applySimLive(live: Prog, sdefs: List[Fun]): String =
+  live match {
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, swapDefs(defs, sdefs), main, body))
+  }
+
+def swapDefs(ds: List[Fun], sim: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) ds else pickSim(List.head(ds), sim) :: swapDefs(List.tail(ds), sim)
+
+def pickSim(d: Fun, sim: List[Fun]): Fun =
+  if (List.isEmpty(sim)) d else pickSim1(d, List.head(sim), List.tail(sim))
+
+def pickSim1(d: Fun, s: Fun, rest: List[Fun]): Fun =
+  if (d.name == s.name) s else pickSim(d, rest)
 
 def seeds(src: String): String =
   nls(sortStrs(mapSeed(parseVerify(src))))

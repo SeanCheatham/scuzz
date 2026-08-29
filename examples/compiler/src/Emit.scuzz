@@ -852,10 +852,10 @@ def emitTimeout2(rt: String, code: String, ms: String, iv: String, o: Bool, pref
   Slot(join(code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(ms, Str.concat(", ptr ", Str.concat(iv, ")")))))))), if (o) relPtr(iv) else "")), pct(prefix, "io"), false)
 
 def isTlKit(f: String): Bool =
-  f == "Timeline.len" || f == "Timeline.signalInt" || f == "Verdict.ok" || f == "Verdict.fail"
+  f == "Timeline.len" || f == "Timeline.signalInt" || f == "Timeline.a11yHas" || f == "Timeline.lastHitHas" || f == "Verdict.ok" || f == "Verdict.fail" || f == "Verdict.and" || f == "Verdict.or"
 
 def emitTlKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "Timeline.len") emitTlLen(code, vals, prefix) else if (f == "Timeline.signalInt") emitTlSig(code, vals, prefix) else if (f == "Verdict.ok") emitVOk(code, prefix) else emitVFail(code, vals, prefix)
+  if (f == "Timeline.len") emitTlLen(code, vals, prefix) else if (f == "Timeline.signalInt") emitTlSig(code, vals, prefix) else if (f == "Timeline.a11yHas") emitTlHas("sz_timeline_a11y_has", code, vals, owns, prefix) else if (f == "Timeline.lastHitHas") emitTlHas("sz_timeline_last_hit_has", code, vals, owns, prefix) else if (f == "Verdict.ok") emitVOk(code, prefix) else if (f == "Verdict.fail") emitVFail(code, vals, prefix) else if (f == "Verdict.and") emitVBin("sz_verdict_and", code, vals, prefix) else emitVBin("sz_verdict_or", code, vals, prefix)
 
 def emitTlLen(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_timeline_len(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
@@ -868,6 +868,15 @@ def emitVOk(code: String, prefix: String): Slot =
 
 def emitVFail(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "cstr"), Str.concat("call ptr @sz_string_cstr(ptr ", Str.concat(arg1(vals), ")")))), line(Str.concat(tmp(prefix, "tl"), Str.concat("call ptr @sz_verdict_fail(i64 ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(pct(prefix, "cstr"), ")")))))))), pct(prefix, "tl"), true)
+
+def emitTlHas(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitTlHas2(rt, code, arg0(vals), arg1(vals), arg2(vals), headOwn(tailOwn(tailOwn(owns))), prefix)
+
+def emitTlHas2(rt: String, code: String, tl: String, i: String, needle: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @", Str.concat(rt, Str.concat("(ptr ", Str.concat(tl, Str.concat(", i64 ", Str.concat(i, Str.concat(", ptr ", Str.concat(needle, ")")))))))))), if (o) relPtr(needle) else "")), pct(prefix, "v"), false)
+
+def emitVBin(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, line(Str.concat(tmp(prefix, "tl"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), ")"))))))))), pct(prefix, "tl"), true)
 
 def emitWhen(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitTimeout2(rt, code, arg0(vals), arg1(vals), headOwn(tailOwn(owns)), prefix)
@@ -929,10 +938,10 @@ def methodPtr(recv: Expr, name: String): String =
   }
 
 def isPredKit(f: String): Bool =
-  f == "Stream.filter" || f == "Stream.takeWhile" || f == "Stream.dropWhile" || f == "Stream.find" || f == "Stream.exists" || f == "Stream.filterNot" || f == "Stream.forall" || f == "Stream.none" || f == "Stream.findLast" || f == "List.filter" || f == "List.filterNot" || f == "List.takeWhile" || f == "List.dropWhile" || f == "List.partition" || f == "Map.filter" || f == "Set.filter" || f == "List.find" || f == "List.findLast" || f == "List.span"
+  f == "Stream.filter" || f == "Stream.takeWhile" || f == "Stream.dropWhile" || f == "Stream.find" || f == "Stream.exists" || f == "Stream.filterNot" || f == "Stream.forall" || f == "Stream.none" || f == "Stream.findLast" || f == "List.filter" || f == "List.filterNot" || f == "List.takeWhile" || f == "List.dropWhile" || f == "List.partition" || f == "Map.filter" || f == "Set.filter" || f == "List.find" || f == "List.findLast" || f == "List.span" || f == "Verdict.every" || f == "Verdict.any"
 
 def isPredI64(f: String): Bool =
-  f == "List.exists" || f == "List.forall" || f == "List.indexWhere" || f == "List.lastIndexWhere" || f == "List.count" || f == "List.prefixLength" || f == "Map.exists" || f == "Map.forall" || f == "Set.exists" || f == "Set.forall"
+  f == "List.exists" || f == "List.forall" || f == "List.indexWhere" || f == "List.lastIndexWhere" || f == "List.count" || f == "List.prefixLength" || f == "Map.exists" || f == "Map.forall" || f == "Set.exists" || f == "Set.forall" || f == "Timeline.exists"
 
 def isMapKit(f: String): Bool =
   isPredKit(f) || isPredI64(f) || f == "Ref.update" || f == "Ref.updateAndGet" || f == "IO.foreach" || f == "IO.foreachDiscard" || f == "Stream.map" || f == "Stream.evalMap" || f == "Stream.flatMap" || f == "Stream.evalTap" || f == "Stream.mapConcat" || f == "Stream.unfold" || f == "Resource.use" || f == "Resource.make" || f == "List.map" || f == "List.flatMap" || f == "Map.mapValues" || f == "Set.map" || f == "List.groupBy" || f == "List.distinctBy" || f == "List.sortBy" || f == "List.maxBy" || f == "List.minBy" || f == "List.reduceLeft" || f == "List.reduceRight"
@@ -941,7 +950,7 @@ def isFoldKit(f: String): Bool =
   f == "Stream.fold" || f == "Stream.scan" || f == "Stream.zipWith" || f == "List.foldLeft" || f == "List.foldRight" || f == "List.scanLeft" || f == "List.scanRight"
 
 def mapKitRt(f: String): String =
-  if (f == "Ref.update") "sz_ref_update" else if (f == "Ref.updateAndGet") "sz_ref_update_and_get" else if (f == "IO.foreach") "sz_io_foreach" else if (f == "IO.foreachDiscard") "sz_io_foreach_discard" else if (f == "Stream.map") "sz_stream_map" else if (f == "Stream.filter") "sz_stream_filter" else if (f == "Stream.evalMap") "sz_stream_evalmap" else if (f == "Stream.takeWhile") "sz_stream_takewhile" else if (f == "Stream.dropWhile") "sz_stream_dropwhile" else if (f == "Stream.find") "sz_stream_find" else if (f == "Stream.exists") "sz_stream_exists" else if (f == "Stream.flatMap") "sz_stream_flatmap" else if (f == "Stream.evalTap") "sz_stream_evaltap" else if (f == "Stream.filterNot") "sz_stream_filter_not" else if (f == "Stream.forall") "sz_stream_forall" else if (f == "Stream.none") "sz_stream_none" else if (f == "Stream.findLast") "sz_stream_find_last" else if (f == "Stream.mapConcat") "sz_stream_map_concat" else if (f == "Stream.unfold") "sz_stream_unfold" else if (f == "Resource.make") "sz_lang_resource_make" else if (f == "List.map") "sz_list_map" else if (f == "List.flatMap") "sz_list_flat_map" else if (f == "Map.mapValues") "sz_map_map_values" else if (f == "Set.map") "sz_set_map" else if (f == "List.exists") "sz_list_exists" else if (f == "List.forall") "sz_list_forall" else if (f == "List.indexWhere") "sz_list_index_where" else if (f == "List.lastIndexWhere") "sz_list_last_index_where" else if (f == "List.count") "sz_list_count" else if (f == "List.prefixLength") "sz_list_prefix_length" else if (f == "Map.exists") "sz_map_exists" else if (f == "Map.forall") "sz_map_forall" else if (f == "Set.exists") "sz_set_exists" else if (f == "Set.forall") "sz_set_forall" else if (f == "List.filter") "sz_list_filter" else if (f == "List.filterNot") "sz_list_filter_not" else if (f == "List.takeWhile") "sz_list_takewhile" else if (f == "List.dropWhile") "sz_list_dropwhile" else if (f == "List.partition") "sz_list_partition" else if (f == "Map.filter") "sz_map_filter" else if (f == "Set.filter") "sz_set_filter" else if (f == "List.find") "sz_list_find" else if (f == "List.findLast") "sz_list_find_last" else if (f == "List.span") "sz_list_span" else if (f == "List.groupBy") "sz_list_group_by" else if (f == "List.distinctBy") "sz_list_distinct_by" else if (f == "List.sortBy") "sz_list_sort_by" else if (f == "List.maxBy") "sz_list_max_by" else if (f == "List.minBy") "sz_list_max_by_min" else if (f == "List.reduceLeft") "sz_list_reduce_left" else if (f == "List.reduceRight") "sz_list_reduce_right" else "sz_lang_resource_use"
+  if (f == "Verdict.every") "sz_verdict_every" else if (f == "Verdict.any") "sz_verdict_any" else if (f == "Timeline.exists") "sz_timeline_exists" else if (f == "Ref.update") "sz_ref_update" else if (f == "Ref.updateAndGet") "sz_ref_update_and_get" else if (f == "IO.foreach") "sz_io_foreach" else if (f == "IO.foreachDiscard") "sz_io_foreach_discard" else if (f == "Stream.map") "sz_stream_map" else if (f == "Stream.filter") "sz_stream_filter" else if (f == "Stream.evalMap") "sz_stream_evalmap" else if (f == "Stream.takeWhile") "sz_stream_takewhile" else if (f == "Stream.dropWhile") "sz_stream_dropwhile" else if (f == "Stream.find") "sz_stream_find" else if (f == "Stream.exists") "sz_stream_exists" else if (f == "Stream.flatMap") "sz_stream_flatmap" else if (f == "Stream.evalTap") "sz_stream_evaltap" else if (f == "Stream.filterNot") "sz_stream_filter_not" else if (f == "Stream.forall") "sz_stream_forall" else if (f == "Stream.none") "sz_stream_none" else if (f == "Stream.findLast") "sz_stream_find_last" else if (f == "Stream.mapConcat") "sz_stream_map_concat" else if (f == "Stream.unfold") "sz_stream_unfold" else if (f == "Resource.make") "sz_lang_resource_make" else if (f == "List.map") "sz_list_map" else if (f == "List.flatMap") "sz_list_flat_map" else if (f == "Map.mapValues") "sz_map_map_values" else if (f == "Set.map") "sz_set_map" else if (f == "List.exists") "sz_list_exists" else if (f == "List.forall") "sz_list_forall" else if (f == "List.indexWhere") "sz_list_index_where" else if (f == "List.lastIndexWhere") "sz_list_last_index_where" else if (f == "List.count") "sz_list_count" else if (f == "List.prefixLength") "sz_list_prefix_length" else if (f == "Map.exists") "sz_map_exists" else if (f == "Map.forall") "sz_map_forall" else if (f == "Set.exists") "sz_set_exists" else if (f == "Set.forall") "sz_set_forall" else if (f == "List.filter") "sz_list_filter" else if (f == "List.filterNot") "sz_list_filter_not" else if (f == "List.takeWhile") "sz_list_takewhile" else if (f == "List.dropWhile") "sz_list_dropwhile" else if (f == "List.partition") "sz_list_partition" else if (f == "Map.filter") "sz_map_filter" else if (f == "Set.filter") "sz_set_filter" else if (f == "List.find") "sz_list_find" else if (f == "List.findLast") "sz_list_find_last" else if (f == "List.span") "sz_list_span" else if (f == "List.groupBy") "sz_list_group_by" else if (f == "List.distinctBy") "sz_list_distinct_by" else if (f == "List.sortBy") "sz_list_sort_by" else if (f == "List.maxBy") "sz_list_max_by" else if (f == "List.minBy") "sz_list_max_by_min" else if (f == "List.reduceLeft") "sz_list_reduce_left" else if (f == "List.reduceRight") "sz_list_reduce_right" else "sz_lang_resource_use"
 
 def foldKitRt(f: String): String =
   if (f == "Stream.fold") "sz_stream_fold" else if (f == "Stream.scan") "sz_stream_scan" else if (f == "List.foldLeft") "sz_list_fold_left" else if (f == "List.foldRight") "sz_list_fold_right" else if (f == "List.scanLeft") "sz_list_scan_left" else if (f == "List.scanRight") "sz_list_scan_right" else "sz_stream_zip_with"
@@ -1013,7 +1022,16 @@ def mapLamBody(e: Expr): Expr =
   }
 
 def emitMapKit3(pred: Bool, rt: String, ic: String, iv: String, io: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitMapKit4(rt, ic, iv, io, emitNeth(prefix, bind, body, strs, defs, ens, ps, pred), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
+  emitMapKit4(rt, ic, iv, io, emitNethTy(rt, prefix, bind, body, strs, defs, ens, ps, pred), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
+
+def emitNethTy(rt: String, prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], pred: Bool): String =
+  emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, pred, mapNethBindTy(rt, bind, body, dropParam(ps, bind), defs))
+
+def mapNethBindTy(rt: String, bind: String, body: Expr, rest: List[Param], defs: List[Fun]): String =
+  if (nethIdxPred(rt)) "Int" else nethBindTy(bind, body, rest, defs)
+
+def nethIdxPred(rt: String): Bool =
+  rt == "sz_verdict_every" || rt == "sz_verdict_any" || rt == "sz_timeline_exists"
 
 def emitMapKit4(rt: String, ic: String, iv: String, io: Bool, neth: String, env: Slot, prefix: String): Slot =
   env match {
@@ -1036,7 +1054,7 @@ def mapKitRet(rt: String): String =
   if (isPredI64Rt(rt)) "i64" else "ptr"
 
 def isPredI64Rt(rt: String): Bool =
-  rt == "sz_list_exists" || rt == "sz_list_forall" || rt == "sz_list_index_where" || rt == "sz_list_last_index_where" || rt == "sz_list_count" || rt == "sz_list_prefix_length" || rt == "sz_map_exists" || rt == "sz_map_forall" || rt == "sz_set_exists" || rt == "sz_set_forall"
+  rt == "sz_list_exists" || rt == "sz_list_forall" || rt == "sz_list_index_where" || rt == "sz_list_last_index_where" || rt == "sz_list_count" || rt == "sz_list_prefix_length" || rt == "sz_map_exists" || rt == "sz_map_forall" || rt == "sz_set_exists" || rt == "sz_set_forall" || rt == "sz_timeline_exists"
 
 def mapKitCall(rt: String, iv: String, prefix: String, ev: String): String =
   Str.concat(tmp(prefix, "v"), Str.concat(mapKitCallMid(rt), Str.concat(iv, Str.concat(", ptr @sz_neth_", Str.concat(prefix, Str.concat(", ptr ", Str.concat(ev, mapKitCallEnd(rt))))))))
@@ -1217,10 +1235,13 @@ def emitNethGo(prefix: String, bind: String, body: Expr, rest: List[Param], strs
   emitNethGoTy(prefix, bind, body, rest, strs, defs, ens, pred, nethBindTy(bind, body, rest, defs))
 
 def emitNethGoTy(prefix: String, bind: String, body: Expr, rest: List[Param], strs: List[String], defs: List[Fun], ens: List[En], pred: Bool, bty: String): String =
-  nethWithConts(prefix, body, strs, defs, ens, nethPs(bind, body, rest, defs), emitNeth2(prefix, join(emitUnpack(rest), emitNethBind2(bind, isI64Ty(bty))), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, nethPs(bind, body, rest, defs)), pred))
+  nethWithConts(prefix, body, strs, defs, ens, nethPsTy(bind, bty, rest), emitNeth2(prefix, join(emitUnpack(rest), emitNethBind2(bind, isI64Ty(bty))), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, nethPsTy(bind, bty, rest)), pred))
 
 def nethPs(bind: String, body: Expr, rest: List[Param], defs: List[Fun]): List[Param] =
-  if (keepBind(bind)) Param(bind, nethBindTy(bind, body, rest, defs), "", "") :: rest else rest
+  nethPsTy(bind, nethBindTy(bind, body, rest, defs), rest)
+
+def nethPsTy(bind: String, bty: String, rest: List[Param]): List[Param] =
+  if (keepBind(bind)) Param(bind, bty, "", "") :: rest else rest
 
 def nethBindTy(bind: String, body: Expr, rest: List[Param], defs: List[Fun]): String =
   if (bind == "__tup") nethTupTy(body, rest, defs) else if (bind == "_ph") phBindTy(body) else if (bind == "__p") matchLamBindTy(body) else "Any"
@@ -4299,10 +4320,10 @@ def emitMain(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): St
   stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam()), defs, strs), "Main")
 
 def emitMain2(s: Slot, defs: List[Fun], strs: List[String]): String =
-  emitMain3(s.code, s.val, drvFuns(defs), relFuns(defs), strs)
+  emitMain3(s.code, s.val, drvFuns(defs), relFuns(defs), sessFuns(defs), strs)
 
-def emitMain3(code: String, val: String, ds: List[Fun], rs: List[Fun], strs: List[String]): String =
-  Str.concat(emitDrvTramps(ds, 0), emitMain4(code, val, Str.concat(emitDrvRegs(ds, strs, 0), emitRelRegs(rs, strs, 0))))
+def emitMain3(code: String, val: String, ds: List[Fun], rs: List[Fun], ss: List[Fun], strs: List[String]): String =
+  Str.concat(emitDrvTramps(ds, 0), emitMain4(code, val, Str.concat(emitDrvRegs(ds, strs, 0), Str.concat(emitRelRegs(rs, strs, 0), emitSessRegs(ss, strs, 0)))))
 
 def emitMain4(code: String, val: String, regs: String): String =
   Str.concat("define i32 @main(i32 %argc, ptr %argv) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(regs, Str.concat(code, Str.concat("  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(val, Str.concat(", i32 %argc, ptr %argv)", Str.concat(nl(), Str.concat("  ret i32 %rc", Str.concat(nl(), "}"))))))))))))
@@ -4319,6 +4340,9 @@ def isDrv(d: Fun): Bool =
 def isRelFun(d: Fun): Bool =
   d.ret == "Verdict" && List.len(d.params) == 2 && isTlPs(d.params)
 
+def isSessFun(d: Fun): Bool =
+  d.ret == "Verdict" && List.len(d.params) == 1 && isTlPs(d.params)
+
 def isTlPs(ps: List[Param]): Bool =
   List.isEmpty(ps) || (List.head(ps).ty == "Timeline" && isTlPs(List.tail(ps)))
 
@@ -4327,6 +4351,12 @@ def relFuns(ds: List[Fun]): List[Fun] =
 
 def relFuns1(d: Fun, rest: List[Fun]): List[Fun] =
   if (isRelFun(d)) d :: relFuns(rest) else relFuns(rest)
+
+def sessFuns(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else sessFuns1(List.head(ds), List.tail(ds))
+
+def sessFuns1(d: Fun, rest: List[Fun]): List[Fun] =
+  if (isSessFun(d)) d :: sessFuns(rest) else sessFuns(rest)
 
 def internRel(p: Prog, acc: List[String]): List[String] =
   p match {
@@ -4337,7 +4367,7 @@ def internRelDefs(ds: List[Fun], acc: List[String]): List[String] =
   if (List.isEmpty(ds)) acc else internRelDefs(List.tail(ds), internRelDef(List.head(ds), acc))
 
 def internRelDef(d: Fun, acc: List[String]): List[String] =
-  if (isRelFun(d)) intern(acc, d.name) else if (isDrv(d)) intern(acc, drvRegName(d.name)) else acc
+  if (isRelFun(d) || isSessFun(d)) intern(acc, d.name) else if (isDrv(d)) intern(acc, drvRegName(d.name)) else acc
 
 def emitRelRegs(ds: List[Fun], strs: List[String], i: Int): String =
   if (List.isEmpty(ds)) "" else Str.concat(emitRelReg(List.head(ds), strs, i), emitRelRegs(List.tail(ds), strs, i + 1))
@@ -4355,6 +4385,23 @@ def relGep(name: String, strs: List[String], i: Int): String =
 
 def relCall(name: String, mod: String, i: Int): String =
   line(Str.concat("call void @sz_verify_register_rel(ptr %vrl", Str.concat(Str.fromInt(i), Str.concat("_gep, ptr @sz_user_", Str.concat(symOf(mod, name), ")")))))
+
+def emitSessRegs(ds: List[Fun], strs: List[String], i: Int): String =
+  if (List.isEmpty(ds)) "" else Str.concat(emitSessReg(List.head(ds), strs, i), emitSessRegs(List.tail(ds), strs, i + 1))
+
+def emitSessReg(d: Fun, strs: List[String], i: Int): String =
+  d match {
+    case Fun(_, name, _, _, _, _, mod) => emitSessReg2(name, mod, strs, i)
+  }
+
+def emitSessReg2(name: String, mod: String, strs: List[String], i: Int): String =
+  join(sessGep(name, strs, i), sessCall(name, mod, i))
+
+def sessGep(name: String, strs: List[String], i: Int): String =
+  line(Str.concat("%ver", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(name) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
+
+def sessCall(name: String, mod: String, i: Int): String =
+  line(Str.concat("call void @sz_verify_register(ptr %ver", Str.concat(Str.fromInt(i), Str.concat("_gep, ptr @sz_user_", Str.concat(symOf(mod, name), ")")))))
 
 def emitDrvRegs(ds: List[Fun], strs: List[String], i: Int): String =
   if (List.isEmpty(ds)) "" else Str.concat(emitDrvReg(List.head(ds), strs, i), emitDrvRegs(List.tail(ds), strs, i + 1))
@@ -4986,7 +5033,7 @@ def declsT5(): String =
   join(decl("ptr @sz_lang_view_radio(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_choice_chip(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_radio_list_tile(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_show_when(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_segmented(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_expansion_tile(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_ink_well(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_list_tile(ptr, ptr)"), join(decl("ptr @sz_lang_view_avatar(ptr)"), join(decl("ptr @sz_lang_view_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_merge_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_tooltip(ptr, ptr)"), join(decl("ptr @sz_lang_view_badge(ptr, ptr)"), join(decl("ptr @sz_lang_view_visibility(ptr, ptr)"), join(decl("ptr @sz_lang_view_offstage(ptr, ptr)"), join(decl("ptr @sz_lang_view_icon_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_fab(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_outlined_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_text_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_action_chip(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_each(ptr)"), decl("ptr @sz_lang_view_each_map(ptr, ptr, ptr)"))))))))))))))))))))))
 
 def declsU(): String =
-  join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("ptr @sz_verdict_ok()"), decl("ptr @sz_verdict_fail(i64, ptr)")))))
+  join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("void @sz_verify_register(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("i64 @sz_timeline_a11y_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_last_hit_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_exists(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_ok()"), join(decl("ptr @sz_verdict_fail(i64, ptr)"), join(decl("ptr @sz_verdict_every(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_any(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_and(ptr, ptr)"), decl("ptr @sz_verdict_or(ptr, ptr)")))))))))))))
 
 def declsA(): String =
   join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))
