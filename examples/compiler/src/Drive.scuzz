@@ -22,6 +22,30 @@ def exeName(outDir: String, name: String): String =
 def linkLine(clang: String, ll: String, lib: String, exe: String): String =
   Str.concat(clang, Str.concat(" -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -lpthread -o ", exe))))))
 
+def skiaLib(): String =
+  "crates/ffi-skia/build/libsk_capi.a"
+
+def deskLib(): String =
+  "crates/embedder-desktop/build/libscuzz_embedder.a"
+
+def mobLib(): String =
+  "crates/embedder-mobile/build/libscuzz_mobile.a"
+
+def uiFlags1(): String =
+  " -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive "
+
+def uiFlags2(): String =
+  " -Wl,--no-whole-archive -lX11 -Wl,--whole-archive "
+
+def uiFlags3(): String =
+  " -Wl,--no-whole-archive -lpthread -rdynamic -o "
+
+def linkLineUi(clang: String, ll: String, lib: String, exe: String): String =
+  Str.concat(clang, Str.concat(" -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(), Str.concat(uiFlags1(), Str.concat(deskLib(), Str.concat(uiFlags2(), Str.concat(mobLib(), Str.concat(uiFlags3(), exe))))))))))))
+
+def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String): String =
+  if (hasUi) linkLineUi(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
+
 def missToml(dir: String): String =
   Str.concat("missing scuzz.toml in ", dir)
 
@@ -187,10 +211,31 @@ def linkRun(dir: String, outDir: String, env: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir, env))
 
 def linkRunMan(m: Man, outDir: String, env: String): IO[Unit] =
-  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else linkRunNamed(m.name, outDir, env)
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else linkRunUi(m.hasUi, m.name, outDir, env)
 
-def linkRunNamed(name: String, outDir: String, env: String): IO[Unit] =
-  runLine(linkLine("clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => afterClang(r, exeName(outDir, name), env))
+def linkRunUi(hasUi: Bool, name: String, outDir: String, env: String): IO[Unit] =
+  if (hasUi) ensureUi().flatMap(_ => linkRunNamed(true, name, outDir, env)) else linkRunNamed(false, name, outDir, env)
+
+def ensureUi(): IO[Unit] =
+  runLine("make -C crates/ffi-skia lib CC=clang").flatMap(r => ensureUiDesk(r))
+
+def ensureUiDesk(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err) else runLine("make -C crates/embedder-desktop lib CC=clang").flatMap(r2 => ensureUiMob(r2))
+  }
+
+def ensureUiMob(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err) else runLine("make -C crates/embedder-mobile lib CC=clang").flatMap(r2 => ensureUiDone(r2))
+  }
+
+def ensureUiDone(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err) else IO.pure(())
+  }
+
+def linkRunNamed(hasUi: Bool, name: String, outDir: String, env: String): IO[Unit] =
+  runLine(linkLineFor(hasUi, "clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => afterClang(r, exeName(outDir, name), env))
 
 def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
@@ -246,25 +291,75 @@ def checkDirJson(diags: String): IO[Unit] =
 def checkDirHuman(human: String): IO[Unit] =
   if (human == "scuzz check ok") IO.println(human) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
 
-def testDir(dir: String, outDir: String): IO[Unit] =
-  emitDir(dir, outDir).flatMap(_ => testLink(dir, outDir))
+def testDir(dir: String, outDir: String, update: Bool): IO[Unit] =
+  emitDir(dir, outDir).flatMap(_ => testLink(dir, outDir, update))
 
-def testLink(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testLinkMan(Manifest.parse(toml), outDir))
+def testLink(dir: String, outDir: String, update: Bool): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testLinkMan(dir, Manifest.parse(toml), outDir, update))
 
-def testLinkMan(m: Man, outDir: String): IO[Unit] =
-  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else testLinkNamed(m.name, outDir)
+def testLinkMan(dir: String, m: Man, outDir: String, update: Bool): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else testLinkUi(m.hasUi, dir, m.name, outDir, update)
 
-def testLinkNamed(name: String, outDir: String): IO[Unit] =
-  runLine(linkLine("clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => testAfterClang(r, exeName(outDir, name)))
+def testLinkUi(hasUi: Bool, dir: String, name: String, outDir: String, update: Bool): IO[Unit] =
+  if (hasUi) ensureUi().flatMap(_ => testLinkNamed(true, dir, name, outDir, update)) else testLinkNamed(false, dir, name, outDir, update)
 
-def testAfterClang(r: (Int, String, String), exe: String): IO[Unit] =
+def testLinkNamed(hasUi: Bool, dir: String, name: String, outDir: String, update: Bool): IO[Unit] =
+  runLine(linkLineFor(hasUi, "clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => testAfterClang(r, exeName(outDir, name), dir, outDir, name, hasUi, update))
+
+def testAfterClang(r: (Int, String, String), exe: String, dir: String, outDir: String, name: String, hasUi: Bool, update: Bool): IO[Unit] =
   r match {
-    case (code, out, err) => testAfterClang2(code, out, err, exe)
+    case (code, out, err) => testAfterClang2(code, out, err, exe, dir, outDir, name, hasUi, update)
   }
 
-def testAfterClang2(code: Int, _out: String, err: String, exe: String): IO[Unit] =
-  if (code != 0) IO.println(err) else IO.println("project compile smoke ok").flatMap(_ => testRun(exe))
+def testAfterClang2(code: Int, _out: String, err: String, exe: String, dir: String, outDir: String, name: String, hasUi: Bool, update: Bool): IO[Unit] =
+  if (code != 0) IO.println(err) else IO.println("project compile smoke ok").flatMap(_ => testAfterSmoke(hasUi, dir, outDir, name, exe, update))
+
+def testAfterSmoke(hasUi: Bool, dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
+  if (hasUi) testUi(dir, outDir, name, exe, update) else testRun(exe)
+
+def uiDumpEnv(dump: String, snap: String, tap: Bool): String =
+  Str.concat(headlessEnv(), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(snap, Str.concat(" SCUZZ_FUZZ_DUMP=", Str.concat(dump, if (tap) " SCUZZ_UI_TAP=1 " else " ")))))
+
+def testUi(dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
+  if (update) Fs.mkdirs(joinSlash(dir, "goldens")).flatMap(_ => testUiDumps(dir, outDir, name, exe, update)) else testUiDumps(dir, outDir, name, exe, update)
+
+def testUiDumps(dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
+  testUiDump(dir, outDir, name, exe, update, false).flatMap(_ =>
+    testUiDump(dir, outDir, name, exe, update, true).flatMap(_ => IO.println("scuzz test ok"))
+  )
+
+def testUiDump(dir: String, outDir: String, name: String, exe: String, update: Bool, tap: Bool): IO[Unit] =
+  testUiRun(exe, uiDumpEnv(uiActual(outDir, name, tap), uiSnap(outDir, name, tap), tap), uiGolden(dir, name, tap), uiActual(outDir, name, tap), update)
+
+def uiGolden(dir: String, name: String, tap: Bool): String =
+  joinSlash(joinSlash(dir, "goldens"), if (tap) Str.concat(name, "_after_tap.dump") else Str.concat(name, ".dump"))
+
+def uiActual(outDir: String, name: String, tap: Bool): String =
+  joinSlash(outDir, if (tap) Str.concat(name, "_after_tap.actual.dump") else Str.concat(name, ".actual.dump"))
+
+def uiSnap(outDir: String, name: String, tap: Bool): String =
+  joinSlash(outDir, if (tap) Str.concat(name, "_after_tap.actual.png") else Str.concat(name, ".actual.png"))
+
+def testUiRun(exe: String, env: String, golden: String, actual: String, update: Bool): IO[Unit] =
+  runLine(Str.concat(env, exe)).flatMap(r => testUiAfter(r, golden, actual, update))
+
+def testUiAfter(r: (Int, String, String), golden: String, actual: String, update: Bool): IO[Unit] =
+  r match {
+    case (code, out, err) => testUiAfter2(code, out, err, golden, actual, update)
+  }
+
+def testUiAfter2(code: Int, _out: String, err: String, golden: String, actual: String, update: Bool): IO[Unit] =
+  if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui golden")) else testUiCmp(golden, actual, update)
+
+def testUiCmp(golden: String, actual: String, update: Bool): IO[Unit] =
+  if (update) Fs.read(actual).flatMap(got =>
+  Fs.write(golden, got).flatMap(_ => IO.println(Str.concat("golden updated: ", golden)))
+) else Fs.read(golden).flatMap(want =>
+  Fs.read(actual).flatMap(got => testUiEq(golden, want, got))
+)
+
+def testUiEq(golden: String, want: String, got: String): IO[Unit] =
+  if (want == got) IO.println(Str.concat("golden ok: ", golden)) else IO.println(Str.concat("structural golden mismatch: ", golden)).flatMap(_ => IO.fail("golden"))
 
 def testRun(exe: String): IO[Unit] =
   runLine(Str.concat(testEnv(), exe)).flatMap(r => testAfterRun(r))
