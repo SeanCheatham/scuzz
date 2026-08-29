@@ -1363,7 +1363,7 @@ def emitTapNeth3(prefix: String, pre: String, s: Slot): String =
   }
 
 def tapFinish(val: String, o: Bool, prefix: String): String =
-  if (hasSub(val, "_io")) join(line(Str.concat(tmp(prefix, "ur"), Str.concat("call ptr @sz_io_unsafe_run_or_die(ptr ", Str.concat(val, ")")))), relPtr(pct(prefix, "ur"))) else if (o) relPtr(val) else ""
+  if (val == "null" || val == "") if (o) relPtr(val) else "" else join(line(Str.concat(tmp(prefix, "ur"), Str.concat("call ptr @sz_io_unsafe_run_or_die(ptr ", Str.concat(val, ")")))), relPtr(pct(prefix, "ur")))
 
 def nethWithConts(prefix: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ir: String): String =
   join(nethBeg(), join(stampNethC(stampCont(emitConts(body, strs, defs, ens, ps), prefix), prefix), stampCont(dropNethB(ir), prefix)))
