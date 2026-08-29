@@ -1,6 +1,9 @@
 import Parse.Fun
 import Parse.Param
 import Parse.Prog
+import Parse.Expr
+import Parse.Arm
+import Parse.Bind
 import Parse.pretty0
 import Parse.pretty
 
@@ -299,6 +302,96 @@ def pickSim(d: Fun, sim: List[Fun]): Fun =
 
 def pickSim1(d: Fun, s: Fun, rest: List[Fun]): Fun =
   if (d.name == s.name) s else pickSim(d, rest)
+
+def noExpr(): List[Expr] =
+  []
+
+def rewriteReqSrc(src: String): String =
+  rewriteReqProg(Parse.parse(Lexer.lex(src)))
+
+def rewriteReqProg(p: Prog): String =
+  p match {
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, rewriteReqDefs(defs), main, rewriteReq(body)))
+  }
+
+def rewriteReqDefs(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) ds else rewriteReqFun(List.head(ds)) :: rewriteReqDefs(List.tail(ds))
+
+def rewriteReqFun(d: Fun): Fun =
+  d match {
+    case Fun(priv, name, tparams, params, ret, body, mod) => Fun(priv, name, tparams, params, ret, rewriteReq(body), mod)
+  }
+
+def rewriteReq(e: Expr): Expr =
+  e match {
+    case Expr.EPrint(inner) => Expr.EPrint(rewriteReq(inner))
+    case Expr.ECall(f, args) => Expr.ECall(f, rewriteReqList(args))
+    case Expr.EMethod(recv, name, args) => rewriteReqMeth(rewriteReq(recv), name, rewriteReqList(args))
+    case Expr.EField(recv, name) => Expr.EField(rewriteReq(recv), name)
+    case Expr.EBin(op, l, r) => Expr.EBin(op, rewriteReq(l), rewriteReq(r))
+    case Expr.EUn(op, inner) => Expr.EUn(op, rewriteReq(inner))
+    case Expr.ELam(p, body) => Expr.ELam(p, rewriteReq(body))
+    case Expr.EIf(c, t, el) => Expr.EIf(rewriteReq(c), rewriteReq(t), rewriteReq(el))
+    case Expr.EMatch(s, arms) => Expr.EMatch(rewriteReq(s), rewriteReqArms(arms))
+    case Expr.EList(xs) => Expr.EList(rewriteReqList(xs))
+    case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs))
+    case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteReq(inner))
+    case Expr.EFor(bs, body) => Expr.EFor(rewriteReqBinds(bs), rewriteReq(body))
+    case _ => e
+  }
+
+def rewriteReqMeth(recv: Expr, name: String, args: List[Expr]): Expr =
+  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: (reqPredE(args) :: (recv :: noExpr()))) else Expr.EMethod(recv, name, args)
+
+def reqNameE(args: List[Expr]): Expr =
+  if (List.len(args) < 2) Expr.EStr("require") else reqNameHit(List.head(args))
+
+def reqNameHit(e: Expr): Expr =
+  e match {
+    case Expr.EStr(s) => Expr.EStr(s)
+    case _ => Expr.EStr("require")
+  }
+
+def reqPredE(args: List[Expr]): Expr =
+  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) forcePred(List.head(args)) else forcePred(List.head(List.tail(args)))
+
+def forcePred(e: Expr): Expr =
+  if (isIoPred(e)) Expr.ECall("Property.force", e :: noExpr()) else e
+
+def isIoPred(e: Expr): Bool =
+  e match {
+    case Expr.EFor(_, _) => true
+    case Expr.ECall(f, _) => Str.startsWith(f, "IO.")
+    case Expr.EMethod(_, name, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
+    case _ => false
+  }
+
+def rewriteReqList(xs: List[Expr]): List[Expr] =
+  if (List.isEmpty(xs)) xs else rewriteReq(List.head(xs)) :: rewriteReqList(List.tail(xs))
+
+def rewriteReqArms(xs: List[Arm]): List[Arm] =
+  if (List.isEmpty(xs)) xs else rewriteReqArm(List.head(xs)) :: rewriteReqArms(List.tail(xs))
+
+def rewriteReqArm(a: Arm): Arm =
+  a match {
+    case Arm(pat, g, body) => Arm(pat, g, rewriteReq(body))
+  }
+
+def rewriteReqBinds(xs: List[Bind]): List[Bind] =
+  if (List.isEmpty(xs)) xs else rewriteReqBind(List.head(xs)) :: rewriteReqBinds(List.tail(xs))
+
+def rewriteReqBind(b: Bind): Bind =
+  b match {
+    case Bind(draw, name, value) => Bind(draw, name, rewriteReq(value))
+  }
+
+def rewriteReqFiles(files: List[(String, String)]): List[(String, String)] =
+  if (List.isEmpty(files)) files else rewriteReqHd(List.head(files), List.tail(files))
+
+def rewriteReqHd(h: (String, String), rest: List[(String, String)]): List[(String, String)] =
+  h match {
+    case (stem, src) => (stem, rewriteReqSrc(src)) :: rewriteReqFiles(rest)
+  }
 
 def seeds(src: String): String =
   nls(sortStrs(mapSeed(parseVerify(src))))
