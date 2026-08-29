@@ -1635,7 +1635,13 @@ def emitViewIcon(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_icon(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))), pct(prefix, "v"), true)
 
 def emitPropKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (f == "Property.assert") emitPropAssert(code, vals, owns, prefix) else if (f == "Property.force") emitPropForce(code, vals, owns, prefix) else if (f == "Property.a11yHas") emitPropA11y(code, vals, owns, prefix) else if (f == "Property.signalInt") emitPropI64("sz_property_signal_int", code, vals, prefix) else if (f == "Property.signalListLen") emitPropI64("sz_property_signal_list_len", code, vals, prefix) else if (f == "Property.signalStr") emitPropStr(code, vals, prefix) else if (f == "Property.signalListAt") emitPropListAt(code, vals, prefix) else emitPropCheck(code, vals, owns, prefix)
+  if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (f == "Property.assert") emitPropAssert(code, vals, owns, prefix) else if (f == "Property.force") emitPropForce(code, vals, owns, prefix) else if (f == "Property.classify") emitPropClass(code, vals, owns, prefix) else if (f == "Property.a11yHas") emitPropA11y(code, vals, owns, prefix) else if (f == "Property.signalInt") emitPropI64("sz_property_signal_int", code, vals, prefix) else if (f == "Property.signalListLen") emitPropI64("sz_property_signal_list_len", code, vals, prefix) else if (f == "Property.signalStr") emitPropStr(code, vals, prefix) else if (f == "Property.signalListAt") emitPropListAt(code, vals, prefix) else emitPropCheck(code, vals, owns, prefix)
+
+def emitPropClass(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitPropClass2(code, arg0(vals), arg1(vals), headOwn(owns), prefix)
+
+def emitPropClass2(code: String, name: String, hit: String, drop: Bool, _prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat("call void @sz_property_classify(ptr ", Str.concat(name, Str.concat(", i64 ", Str.concat(hit, ")"))))), if (drop) relPtr(name) else "")), "1", false)
 
 def emitPropForce(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitPropForce2(code, arg0(vals), headOwn(owns), prefix)
@@ -1899,7 +1905,78 @@ def isApplyTy(ty: String, f: String, defs: List[Fun]): Bool =
   if (isFunTy(ty)) true else if (ty == "" || isI64Ty(ty)) false else List.isEmpty(findDef(defs, f))
 
 def emitCallKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps) else if (f == "Net.serveOnce" || f == "Net.serve") emitNetServe(f, args, prefix, strs, defs, ens, ps) else if (f == "Ui.run") emitUiRunCall(args, prefix, strs, defs, ens, ps) else if (f == "Signal.map") emitSigMapCall(args, prefix, strs, defs, ens, ps) else if (tapViewRt(f) != "") emitTapViewCall(tapViewRt(f), args, prefix, strs, defs, ens, ps) else if (f == "View.each") emitViewEachCall(args, prefix, strs, defs, ens, ps) else if (f == "View.inkWell") emitInkWellCall(args, prefix, strs, defs, ens, ps) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps) else emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs, args, ens, ps)
+  if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps) else if (f == "Net.serveOnce" || f == "Net.serve") emitNetServe(f, args, prefix, strs, defs, ens, ps) else if (f == "Ui.run") emitUiRunCall(args, prefix, strs, defs, ens, ps) else if (f == "Signal.map") emitSigMapCall(args, prefix, strs, defs, ens, ps) else if (tapViewRt(f) != "") emitTapViewCall(tapViewRt(f), args, prefix, strs, defs, ens, ps) else if (f == "View.each") emitViewEachCall(args, prefix, strs, defs, ens, ps) else if (f == "View.inkWell") emitInkWellCall(args, prefix, strs, defs, ens, ps) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps) else emitCallKit2(f, args, prefix, strs, defs, ens, ps)
+
+def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps) else emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, 0, "", noStr(), noBool()), prefix, defs, args, ens, ps)
+
+def emitPropCheckCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitPropCheckCall2(nthE(args, 0), nthE(args, 1), nthE(args, 2), prefix, strs, defs, ens, ps)
+
+def nthE(xs: List[Expr], i: Int): Expr =
+  if (List.isEmpty(xs)) Expr.EUnit else if (i <= 0) List.head(xs) else nthE(List.tail(xs), i - 1)
+
+def emitPropCheckCall2(name: Expr, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  emitPropCheckJoin(emitExpr(name, Str.concat(prefix, "_n"), strs, defs, ens, ps), emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps), pred, recv, prefix, strs, defs, ens, ps)
+
+def emitPropCheckJoin(ns: Slot, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  ns match {
+    case Slot(nc, nv, no) => emitPropCheckJoin2(nc, nv, no, rs, pred, recv, prefix, strs, defs, ens, ps)
+  }
+
+def emitPropCheckJoin2(nc: String, nv: String, no: Bool, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  rs match {
+    case Slot(rc, rv, ro) => emitPropCheckPred(join(nc, join(rc, if (ro && exprMentions(pred, recv)) retPtr(rv) else "")), nv, no, rv, ro, emitExpr(pred, Str.concat(prefix, "_p"), strs, defs, ens, ps))
+  }
+
+def emitPropCheckPred(code: String, nv: String, no: Bool, rv: String, ro: Bool, pred: Slot): Slot =
+  pred match {
+    case Slot(pc, pv, _) => Slot(join(code, join(pc, join(line(Str.concat("call void @sz_property_check(ptr ", Str.concat(nv, Str.concat(", i64 ", Str.concat(pv, ")"))))), if (no) relPtr(nv) else ""))), rv, ro)
+  }
+
+def exprMentions(e: Expr, recv: Expr): Bool =
+  recv match {
+    case Expr.EVar(s) => exprHasVar(e, s)
+    case _ => false
+  }
+
+def exprHasVar(e: Expr, s: String): Bool =
+  e match {
+    case Expr.EVar(n) => n == s
+    case Expr.EPrint(inner) => exprHasVar(inner, s)
+    case Expr.ECall(_, args) => listHasVar(args, s)
+    case Expr.EMethod(recv, _, args) => exprHasVar(recv, s) || listHasVar(args, s)
+    case Expr.EField(recv, _) => exprHasVar(recv, s)
+    case Expr.EBin(_, l, r) => exprHasVar(l, s) || exprHasVar(r, s)
+    case Expr.EUn(_, inner) => exprHasVar(inner, s)
+    case Expr.ELam(_, body) => exprHasVar(body, s)
+    case Expr.EIf(c, t, el) => exprHasVar(c, s) || exprHasVar(t, s) || exprHasVar(el, s)
+    case Expr.EMatch(sc, arms) => exprHasVar(sc, s) || armsHasVar(arms, s)
+    case Expr.EList(xs) => listHasVar(xs, s)
+    case Expr.ETuple(xs) => listHasVar(xs, s)
+    case Expr.ENamed(_, inner) => exprHasVar(inner, s)
+    case Expr.EFor(bs, body) => bindsHasVar(bs, s) || exprHasVar(body, s)
+    case _ => false
+  }
+
+def listHasVar(xs: List[Expr], s: String): Bool =
+  !List.isEmpty(xs) && (exprHasVar(List.head(xs), s) || listHasVar(List.tail(xs), s))
+
+def armsHasVar(xs: List[Arm], s: String): Bool =
+  !List.isEmpty(xs) && armsHasVar1(List.head(xs), List.tail(xs), s)
+
+def armsHasVar1(a: Arm, rest: List[Arm], s: String): Bool =
+  a match {
+    case Arm(_, _, body) => exprHasVar(body, s) || armsHasVar(rest, s)
+  }
+
+def bindsHasVar(xs: List[Bind], s: String): Bool =
+  !List.isEmpty(xs) && bindsHasVar1(List.head(xs), List.tail(xs), s)
+
+def bindsHasVar1(b: Bind, rest: List[Bind], s: String): Bool =
+  b match {
+    case Bind(_, _, value) => exprHasVar(value, s) || bindsHasVar(rest, s)
+  }
 
 def emitUiRunCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   emitUiRunPack(emitUiRunLam(List.head(args), Str.concat(prefix, "_fn"), strs, defs, ens, ps), prefix)
@@ -5042,7 +5119,7 @@ def declsT5(): String =
   join(decl("ptr @sz_lang_view_radio(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_choice_chip(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_radio_list_tile(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_show_when(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_segmented(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_expansion_tile(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_ink_well(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_list_tile(ptr, ptr)"), join(decl("ptr @sz_lang_view_avatar(ptr)"), join(decl("ptr @sz_lang_view_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_merge_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_tooltip(ptr, ptr)"), join(decl("ptr @sz_lang_view_badge(ptr, ptr)"), join(decl("ptr @sz_lang_view_visibility(ptr, ptr)"), join(decl("ptr @sz_lang_view_offstage(ptr, ptr)"), join(decl("ptr @sz_lang_view_icon_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_fab(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_outlined_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_text_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_action_chip(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_each(ptr)"), decl("ptr @sz_lang_view_each_map(ptr, ptr, ptr)"))))))))))))))))))))))
 
 def declsU(): String =
-  join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("void @sz_verify_register(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("i64 @sz_timeline_a11y_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_last_hit_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_exists(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_ok()"), join(decl("ptr @sz_verdict_fail(i64, ptr)"), join(decl("ptr @sz_verdict_every(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_any(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_and(ptr, ptr)"), decl("ptr @sz_verdict_or(ptr, ptr)")))))))))))))
+  join(decl("void @sz_verify_register_rel(ptr, ptr)"), join(decl("void @sz_verify_register(ptr, ptr)"), join(decl("i64 @sz_timeline_len(ptr)"), join(decl("i64 @sz_timeline_signal_int(ptr, i64, i64)"), join(decl("i64 @sz_timeline_a11y_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_last_hit_has(ptr, i64, ptr)"), join(decl("i64 @sz_timeline_exists(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_ok()"), join(decl("ptr @sz_verdict_fail(i64, ptr)"), join(decl("ptr @sz_verdict_every(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_any(ptr, ptr, ptr)"), join(decl("ptr @sz_verdict_and(ptr, ptr)"), join(decl("ptr @sz_verdict_or(ptr, ptr)"), decl("void @sz_property_classify(ptr, i64)"))))))))))))))
 
 def declsA(): String =
   join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))
