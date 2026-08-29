@@ -716,7 +716,7 @@ jobs:
           fi
           "$SCUZZ" fuzz --iterations 1 examples/io
           "$SCUZZ" fuzz --iterations 4 examples/hello
-          cargo run -p scuzz -- fuzz --iterations 4 --oracles examples/counter
+          "$SCUZZ" fuzz --iterations 4 --oracles examples/counter
 
       - name: v0 new --ui path
         run: |
