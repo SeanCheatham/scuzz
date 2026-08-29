@@ -520,9 +520,9 @@ jobs:
           cargo run -p scuzz -- run --headless examples/studio
           test -f examples/studio/build/snapshot.png
           cargo run -p scuzz -- test examples/studio
-          cargo run -p scuzz -- run --headless examples/editor
+          "$SCUZZ" run --headless examples/editor
           test -f examples/editor/build/snapshot.png
-          cargo run -p scuzz -- test examples/editor
+          "$SCUZZ" test examples/editor
 
       - name: Pixel goldens (sk_sw software backend)
         run: |
