@@ -3819,7 +3819,7 @@ def emitOkSlotPat(pat: String, body: Expr, prefix: String, strs: List[String], d
   if (isAsPat(pat)) emitOkSlotPat(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), prefix, strs, defs, ens, ps, i, tys, sv, asI64) else if (isVarPat(pat, ens)) emitOkVar(pat, body, prefix, strs, defs, ens, ps, i, sv, asI64) else emitOkSlotPat2(pat, body, prefix, strs, defs, ens, ps, i, tys)
 
 def isVarPat(pat: String, ens: List[En]): Bool =
-  isSimpleBind(pat) && !isTuplePat(pat) && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
+  isSimpleBind(pat) && !isTuplePat(pat) && dotAt(pat, 0) < 0 && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
 
 def emitOkVar(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, sv: String, asI64: Bool): Slot =
   emitOkVar2(bindAliasTy(pat, sv, asI64), emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, Param(pat, if (asI64) "Int" else "Any", "", "") :: dropParam(ps, pat)), asI64)
