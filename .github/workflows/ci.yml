@@ -629,7 +629,7 @@ jobs:
           if "$SCUZZ" fuzz --iterations 0 examples/bad-response; then
             echo "corpus-only should pin the bad-response failure" && exit 1
           fi
-          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-split; then
+          if "$SCUZZ" fuzz --iterations 0 examples/bad-split; then
             echo "live/verify split should fail the campaign" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug

@@ -718,7 +718,7 @@ def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
     case Expr.EVar(s) => paramIsI64(ps, s) || isIntSsa(s)
     case Expr.EBin(op, _, _) => op != "::"
     case Expr.EUn(_, _) => true
-    case Expr.ECall(f, _) => callIsI64(f, defs)
+    case Expr.ECall(f, args) => if (f == "Property.check") exprIsI64Recv(args, ps, defs) else callIsI64(f, defs)
     case Expr.EMethod(recv, name, _) => exprMethodI64(recv, name, defs)
     case Expr.EMatch(_, arms) => exprIsI64Match(arms, ps, defs)
     case Expr.EIf(_, t, _) => exprIsI64(t, ps, defs)
@@ -728,6 +728,9 @@ def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
 
 def exprIsI64Match(arms: List[Arm], ps: List[Param], defs: List[Fun]): Bool =
   if (List.isEmpty(arms)) false else exprIsI64Arm(List.head(arms), ps, defs)
+
+def exprIsI64Recv(args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+  if (List.len(args) < 3) false else exprIsI64(List.head(List.tail(List.tail(args))), ps, defs)
 
 def exprIsI64Arm(a: Arm, ps: List[Param], defs: List[Fun]): Bool =
   a match {
@@ -1632,7 +1635,13 @@ def emitViewIcon(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_icon(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))), pct(prefix, "v"), true)
 
 def emitPropKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (f == "Property.assert") emitPropAssert(code, vals, owns, prefix) else if (f == "Property.a11yHas") emitPropA11y(code, vals, owns, prefix) else if (f == "Property.signalInt") emitPropI64("sz_property_signal_int", code, vals, prefix) else if (f == "Property.signalListLen") emitPropI64("sz_property_signal_list_len", code, vals, prefix) else if (f == "Property.signalStr") emitPropStr(code, vals, prefix) else if (f == "Property.signalListAt") emitPropListAt(code, vals, prefix) else emitPropCheck(code, vals, owns, prefix)
+  if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (f == "Property.assert") emitPropAssert(code, vals, owns, prefix) else if (f == "Property.force") emitPropForce(code, vals, owns, prefix) else if (f == "Property.a11yHas") emitPropA11y(code, vals, owns, prefix) else if (f == "Property.signalInt") emitPropI64("sz_property_signal_int", code, vals, prefix) else if (f == "Property.signalListLen") emitPropI64("sz_property_signal_list_len", code, vals, prefix) else if (f == "Property.signalStr") emitPropStr(code, vals, prefix) else if (f == "Property.signalListAt") emitPropListAt(code, vals, prefix) else emitPropCheck(code, vals, owns, prefix)
+
+def emitPropForce(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitPropForce2(code, arg0(vals), headOwn(owns), prefix)
+
+def emitPropForce2(code: String, iv: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "fr"), Str.concat("call ptr @sz_io_unsafe_run_or_die(ptr ", Str.concat(iv, ")")))), join(line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(prefix, "fr"), ")")))), join(relPtr(pct(prefix, "fr")), if (o) relPtr(iv) else "")))), pct(prefix, "v"), false)
 
 def emitPropAssert(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitPropAssert2(code, arg0(vals), arg1(vals), headOwn(owns), prefix)
