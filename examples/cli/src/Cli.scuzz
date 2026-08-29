@@ -366,7 +366,7 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Run(path, outDir, headless, _, _, _) => dispatchRun(path, outDir, headless)
     case Cmd.Check(path, json) => Drive.checkDir(path, json)
     case Cmd.Fmt(path, check) => dispatchFmt(path, check)
-    case Cmd.Test(path, _, _, _) => dispatchTest(path)
+    case Cmd.Test(path, update, _, _) => dispatchTest(path, update)
     case Cmd.New(name, path, ui) => dispatchNew(name, path, ui)
     case Cmd.Help(t) => IO.println(helpOf(t))
     case Cmd.Version => IO.println("scuzz 0.2.0")
@@ -380,11 +380,13 @@ def dispatchBuild(path: String, outDir: String): IO[Unit] =
 def dispatchRun(path: String, outDir: String, headless: Bool): IO[Unit] =
   Fs.mkdirs(outDir).flatMap(_ => Drive.runDir(path, outDir, if (headless) Drive.headlessEnv() else ""))
 
-def dispatchTest(path: String): IO[Unit] =
-  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build")))
+def dispatchTest(path: String, update: Bool): IO[Unit] =
+  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build"), update))
 
 def dispatchFmt(path: String, check: Bool): IO[Unit] =
-  Fs.list(Drive.joinSlash(path, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0)))
+  Fs.list(Drive.joinSlash(path, "src")).flatMap(ents =>
+    Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0))
+  )
 
 def fmtFiles(dir: String, check: Bool, files: List[(String, String)], dirty: Int): IO[Unit] =
   if (List.isEmpty(files)) fmtDone(check, dirty) else fmtFilesGo(dir, check, List.head(files), files, dirty)
@@ -401,7 +403,9 @@ def fmtOnePath(check: Bool, path: String, src: String): IO[Int] =
   fmtOneGot(check, path, src, fmtSrc(src))
 
 def fmtOneGot(check: Bool, path: String, src: String, pretty: String): IO[Int] =
-  if (pretty == src) IO.pure(0) else if (check) IO.println(Str.concat("would reformat ", path)).map(_ => 1) else Fs.write(path, pretty).flatMap(_ => IO.println(Str.concat("formatted ", path)).map(_ => 1))
+  if (pretty == src) IO.pure(0) else if (check) IO.println(Str.concat("would reformat ", path)).map(_ => 1) else Fs.write(path, pretty).flatMap(_ =>
+  IO.println(Str.concat("formatted ", path)).map(_ => 1)
+)
 
 def fmtDone(check: Bool, dirty: Int): IO[Unit] =
   if (check && dirty > 0) IO.println(Str.concat(Str.fromInt(dirty), " file(s) need formatting")).flatMap(_ => IO.fail("scuzz fmt")) else IO.println("scuzz fmt ok")
@@ -413,22 +417,10 @@ def newTomlIo(name: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, "\"\nversion = \"0.1.0\"\n"))
 
 def newMainUi(): String =
-  """@main def main: IO[Unit] =
-  for {
-    count = Signal.int(0)
-    label = Signal.map(count, n => s"count = $n")
-    _ <- Ui.run(_ => View.column(
-      View.text("Counter"),
-      View.bindText(label),
-      View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
-    ))
-  } yield ()
-"""
+  "@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    ))\n  } yield ()\n"
 
 def newMainIo(): String =
-  """@main def main: IO[Unit] =
-  IO.println("Hello, Scuzz!").flatMap(_ => IO.println("ready."))
-"""
+  "@main def main: IO[Unit] =\n  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n"
 
 def dispatchNew(name: String, path: String, ui: Bool): IO[Unit] =
   dispatchNewDir(Drive.joinSlash(path, name), name, ui)
@@ -437,9 +429,8 @@ def dispatchNewDir(dir: String, name: String, ui: Bool): IO[Unit] =
   Fs.mkdirs(Drive.joinSlash(dir, "src")).flatMap(_ => writeNew(dir, name, ui))
 
 def writeNew(dir: String, name: String, ui: Bool): IO[Unit] =
-  Fs.write(Drive.joinSlash(dir, "scuzz.toml"), if (ui) newTomlUi(name) else newTomlIo(name)).flatMap(_ => writeNewMain(dir, name, ui))
+  Fs.write(Drive.joinSlash(dir, "scuzz.toml"), if (ui) newTomlUi(name) else newTomlIo(name)).flatMap(_ => writeNewMain(dir, ui))
 
-def writeNewMain(dir: String, name: String, ui: Bool): IO[Unit] =
+def writeNewMain(dir: String, ui: Bool): IO[Unit] =
   Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "src"), "Main.scuzz"), if (ui) newMainUi() else newMainIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) — next: scuzz test --update && scuzz test && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " — next: scuzz test && scuzz run"))))
-
 
