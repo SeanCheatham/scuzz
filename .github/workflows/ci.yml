@@ -587,7 +587,7 @@ jobs:
             echo "zero-arg seed should fail bump with no stored corpus" && exit 1
           fi
           grep -q 'drive bump 0' /tmp/bad-seed/build/fuzz/repro.toml
-          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-fault; then
+          if "$SCUZZ" fuzz --iterations 0 examples/bad-fault; then
             echo "corpus-only should pin the bad-fault failure" && exit 1
           fi
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-adt; then
@@ -605,11 +605,11 @@ jobs:
           test -f examples/bad-fault/build/fuzz/repro.toml
           grep -q 'fault_seed' examples/bad-fault/build/fuzz/repro.toml
           grep -q 'fault_kind = "fs"' examples/bad-fault/build/fuzz/repro.toml
-          if cargo run -p scuzz -- fuzz --replay examples/bad-fault/corpus/f83245e1fbf633a5.toml examples/bad-fault; then
+          if "$SCUZZ" fuzz --replay examples/bad-fault/corpus/f83245e1fbf633a5.toml examples/bad-fault; then
             echo "fault replay should have reproduced the failure" && exit 1
           fi
           grep -v -e fault_seed -e fault_kind -e fault_n -e fault_mode examples/bad-fault/corpus/f83245e1fbf633a5.toml > /tmp/bad-fault-nofault.toml
-          if ! cargo run -p scuzz -- fuzz --replay /tmp/bad-fault-nofault.toml examples/bad-fault; then
+          if ! "$SCUZZ" fuzz --replay /tmp/bad-fault-nofault.toml examples/bad-fault; then
             echo "replay without fault_seed should pass" && exit 1
           fi
           grep -q 'pct_d = 2' examples/bad-sched/corpus/d037d00bc981a2fb.toml
