@@ -3945,7 +3945,21 @@ def fieldStem(prefix: String, i: Int, k: Int, isInt: Bool): String =
   Str.concat(fpre(prefix, i), Str.concat(if (isInt) "_b" else "_c", Str.fromInt(k)))
 
 def emitOkTuple(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String]): Slot =
-  emitOkOwned(emitExpr(rewriteTuple(pat, body, prefix, i, tys), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), ps)
+  emitOkOwned(emitOkTupleJoin(tupleAliasCode(pat, prefix, i, tys), emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, bindTupPsTy(tupBindNs(pat), tys, ps))), ps)
+
+def emitOkTupleJoin(pre: String, s: Slot): Slot =
+  s match {
+    case Slot(code, val, owned) => Slot(join(pre, code), val, owned)
+  }
+
+def tupleAliasCode(pat: String, prefix: String, i: Int, tys: List[String]): String =
+  tupleAliasAt(splitPat(Str.slice(pat, 1, Str.len(pat) - 1)), ppre(prefix, i), i + 1, tys)
+
+def tupleAliasAt(ns: List[String], pre: String, sid: Int, tys: List[String]): String =
+  if (List.len(ns) < 2) "" else if (List.len(ns) == 2) join(tupleAliasSlot(List.head(ns), leftStem(pre, sid, tys), slotInt(tys, 0)), tupleAliasSlot(List.head(List.tail(ns)), rightStem(pre, sid, tys), slotInt(tys, 1) || List.isEmpty(tys))) else join(tupleAliasSlot(List.head(ns), leftStem(pre, sid, tys), slotInt(tys, 0)), tupleAliasAt(List.tail(ns), Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, if (List.isEmpty(tys)) tys else List.tail(tys)))
+
+def tupleAliasSlot(n: String, stem: String, i64: Bool): String =
+  if (!keepBind(n) || isTuplePat(n)) "" else if (i64) line(Str.concat("%", Str.concat(n, Str.concat(" = add i64 %", Str.concat(stem, ", 0"))))) else line(Str.concat("%", Str.concat(n, Str.concat(" = bitcast ptr %", Str.concat(stem, " to ptr")))))
 
 def rewriteTuple(pat: String, body: Expr, prefix: String, i: Int, tys: List[String]): Expr =
   rewriteTupleAt(splitPat(Str.slice(pat, 1, Str.len(pat) - 1)), body, ppre(prefix, i), i + 1, tys)
@@ -5488,8 +5502,11 @@ def emitContsArmList(arms: List[Arm], strs: List[String], defs: List[Fun], ens: 
 
 def emitContsArmHd(a: Arm, rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
   a match {
-    case Arm(_, _, body) => emitContsArmList2(emitContsAt(body, strs, defs, ens, ps, id), rest, strs, defs, ens, ps)
+    case Arm(pat, _, body) => emitContsArmList2(emitContsAt(body, strs, defs, ens, bindPatPs(pat, ps), id), rest, strs, defs, ens, ps)
   }
+
+def bindPatPs(pat: String, ps: List[Param]): List[Param] =
+  if (isTuplePat(pat)) bindTupPsTy(tupBindNs(pat), noStr(), ps) else ps
 
 def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): (String, Int) =
   p match {
