@@ -99,7 +99,7 @@ def takeVal3(args: List[String], j: Int): (String, Int) =
   if (j >= List.len(args)) ("", 0 - 1) else (arg(args, j), j + 1)
 
 def helpOf(topic: String): String =
-  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else unrec(topic)
+  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "test") Help.helpTest() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else unrec(topic)
 
 def show(c: Cmd): String =
   c match {
