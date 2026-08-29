@@ -548,7 +548,7 @@ jobs:
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
           SCUZZ=./examples/cli/build/cli
-          cargo run -p scuzz -- fuzz --iterations 16 examples/counter
+          "$SCUZZ" fuzz --iterations 16 examples/counter
           cargo run -p scuzz -- fuzz --iterations 16 examples/studio
           "$SCUZZ" fuzz --relate examples/counter
           if "$SCUZZ" fuzz --relate examples/bad-sched; then
