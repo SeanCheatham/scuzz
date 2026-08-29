@@ -1696,13 +1696,13 @@ def emitSigGetStr(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_str_get(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), true)
 
 def emitViewKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "View.column" || f == "View.row" || f == "View.stack") emitViewBox(viewBoxRt(f), code, vals, prefix) else if (f == "View.grid") emitViewGrid(code, vals, prefix) else if (f == "View.divider") emitViewNil("sz_lang_view_divider", code, prefix) else if (f == "View.verticalDivider") emitViewNil("sz_lang_view_vertical_divider", code, prefix) else if (viewWrap1Rt(f) != "") emitViewPtr1(viewWrap1Rt(f), code, vals, prefix) else if (viewDrop1Rt(f) != "") emitViewDrop1(viewDrop1Rt(f), code, vals, owns, prefix) else if (viewI64PtrRt(f) != "") emitViewI64Ptr(viewI64PtrRt(f), code, vals, prefix) else if (viewI64I64PtrRt(f) != "") emitViewI64I64Ptr(viewI64I64PtrRt(f), code, vals, prefix) else if (tapViewRt(f) != "") emitViewTap(tapViewRt(f), code, vals, owns, prefix) else emitViewKit2(f, code, vals, owns, prefix)
+  if (f == "View.column" || f == "View.row" || f == "View.stack" || f == "View.wrap") emitViewBox(viewBoxRt(f), code, vals, prefix) else if (f == "View.grid") emitViewGrid(code, vals, prefix) else if (f == "View.divider") emitViewNil("sz_lang_view_divider", code, prefix) else if (f == "View.verticalDivider") emitViewNil("sz_lang_view_vertical_divider", code, prefix) else if (viewWrap1Rt(f) != "") emitViewPtr1(viewWrap1Rt(f), code, vals, prefix) else if (viewDrop1Rt(f) != "") emitViewDrop1(viewDrop1Rt(f), code, vals, owns, prefix) else if (viewI64PtrRt(f) != "") emitViewI64Ptr(viewI64PtrRt(f), code, vals, prefix) else if (viewI64I64PtrRt(f) != "") emitViewI64I64Ptr(viewI64I64PtrRt(f), code, vals, prefix) else if (tapViewRt(f) != "") emitViewTap(tapViewRt(f), code, vals, owns, prefix) else emitViewKit2(f, code, vals, owns, prefix)
 
 def emitViewKit2(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (viewPtr2Drop1Rt(f) != "") emitViewPtr2(viewPtr2Drop1Rt(f), false, true, code, vals, owns, prefix) else if (viewPtr2Drop0Rt(f) != "") emitViewPtr2(viewPtr2Drop0Rt(f), true, false, code, vals, owns, prefix) else if (viewPtr2Rt(f) != "") emitViewPtr2(viewPtr2Rt(f), false, false, code, vals, owns, prefix) else if (viewRadioRt(f) != "") emitViewRadio(viewRadioRt(f), code, vals, owns, prefix) else if (f == "View.showWhen") emitViewShowWhen(code, vals, prefix) else if (f == "View.segmented") emitViewSeg(code, vals, owns, prefix) else if (f == "View.expansionTile") emitViewExp(code, vals, owns, prefix) else if (f == "View.inkWell") emitViewInk(code, vals, owns, prefix) else if (f == "View.listTile") emitViewListTile(code, vals, owns, prefix) else if (f == "View.image") emitViewImage(code, vals, owns, prefix) else if (f == "View.icon") emitViewIcon(code, vals, prefix) else emitViewPtr1("sz_lang_view_center", code, vals, prefix)
+  if (viewPtr2Drop1Rt(f) != "") emitViewPtr2(viewPtr2Drop1Rt(f), false, true, code, vals, owns, prefix) else if (viewPtr2Drop0Rt(f) != "") emitViewPtr2(viewPtr2Drop0Rt(f), true, false, code, vals, owns, prefix) else if (viewPtr2Rt(f) != "") emitViewPtr2(viewPtr2Rt(f), false, false, code, vals, owns, prefix) else if (viewRadioRt(f) != "") emitViewRadio(viewRadioRt(f), code, vals, owns, prefix) else if (f == "View.showWhen") emitViewShowWhen(code, vals, prefix) else if (f == "View.split") emitViewPtr3("sz_lang_view_split", code, vals, prefix) else if (f == "View.segmented") emitViewSeg(code, vals, owns, prefix) else if (f == "View.expansionTile") emitViewExp(code, vals, owns, prefix) else if (f == "View.inkWell") emitViewInk(code, vals, owns, prefix) else if (f == "View.listTile") emitViewListTile(code, vals, owns, prefix) else if (f == "View.image") emitViewImage(code, vals, owns, prefix) else if (f == "View.icon") emitViewIcon(code, vals, prefix) else emitViewPtr1("sz_lang_view_center", code, vals, prefix)
 
 def viewBoxRt(f: String): String =
-  if (f == "View.column") "sz_lang_view_column" else if (f == "View.row") "sz_lang_view_row" else "sz_lang_view_stack"
+  if (f == "View.column") "sz_lang_view_column" else if (f == "View.row") "sz_lang_view_row" else if (f == "View.wrap") "sz_lang_view_wrap" else "sz_lang_view_stack"
 
 def emitViewBox(rt: String, code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, join(viewBoxNew(rt, prefix), emitViewAdds(pct(prefix, "v"), vals, prefix, 0))), pct(prefix, "v"), true)
@@ -1789,7 +1789,7 @@ def emitSigSetPtr(rt: String, code: String, vals: List[String], owns: List[Bool]
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), ")")))))))), if (headOwn(tailOwn(owns))) relPtr(arg1(vals)) else "")), pct(prefix, "v"), false)
 
 def emitSigGetList(code: String, vals: List[String], prefix: String): Slot =
-  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_list_get(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), true)
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_list_get(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
 
 def emitListSetAt(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   Slot(join(code, join(listSetAtCall(vals, prefix), join(if (headOwn(owns)) relPtr(arg0(vals)) else "", if (headOwn(tailOwn(tailOwn(owns)))) relPtr(arg2(vals)) else ""))), pct(prefix, "v"), true)
@@ -1798,10 +1798,10 @@ def listSetAtCall(vals: List[String], prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_set_at(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")"))))))))
 
 def tapViewRt(f: String): String =
-  if (f == "View.button") "sz_lang_view_button" else if (f == "View.iconButton") "sz_lang_view_icon_button" else if (f == "View.fab") "sz_lang_view_fab" else if (f == "View.outlinedButton") "sz_lang_view_outlined_button" else if (f == "View.textButton") "sz_lang_view_text_button" else if (f == "View.actionChip") "sz_lang_view_action_chip" else ""
+  if (f == "View.button") "sz_lang_view_button" else if (f == "View.iconButton") "sz_lang_view_icon_button" else if (f == "View.fab") "sz_lang_view_fab" else if (f == "View.outlinedButton") "sz_lang_view_outlined_button" else if (f == "View.textButton") "sz_lang_view_text_button" else if (f == "View.actionChip") "sz_lang_view_action_chip" else if (f == "View.onSecondary") "sz_lang_view_on_secondary" else ""
 
 def viewWrap1Rt(f: String): String =
-  if (f == "View.bindText") "sz_lang_view_bind_text" else if (f == "View.center") "sz_lang_view_center" else if (f == "View.scroll") "sz_lang_view_scroll" else if (f == "View.scrollH") "sz_lang_view_scroll_h" else if (f == "View.expanded") "sz_lang_view_expanded" else if (f == "View.card") "sz_lang_view_card" else if (f == "View.placeholder") "sz_lang_view_placeholder" else if (f == "View.unconstrainedBox") "sz_lang_view_unconstrained_box" else if (f == "View.slider") "sz_lang_view_slider" else if (f == "View.progress") "sz_lang_view_progress" else if (f == "View.circularProgress") "sz_lang_view_circular_progress" else ""
+  if (f == "View.bindText") "sz_lang_view_bind_text" else if (f == "View.center") "sz_lang_view_center" else if (f == "View.scroll") "sz_lang_view_scroll" else if (f == "View.scrollH") "sz_lang_view_scroll_h" else if (f == "View.expanded") "sz_lang_view_expanded" else if (f == "View.card") "sz_lang_view_card" else if (f == "View.placeholder") "sz_lang_view_placeholder" else if (f == "View.unconstrainedBox") "sz_lang_view_unconstrained_box" else if (f == "View.slider") "sz_lang_view_slider" else if (f == "View.progress") "sz_lang_view_progress" else if (f == "View.circularProgress") "sz_lang_view_circular_progress" else if (f == "View.focusGroup") "sz_lang_view_focus_group" else if (f == "View.editor") "sz_lang_view_editor" else ""
 
 def viewDrop1Rt(f: String): String =
   if (f == "View.text") "sz_lang_view_text" else if (f == "View.avatar") "sz_lang_view_avatar" else ""
@@ -1819,7 +1819,7 @@ def viewPtr2Drop0Rt(f: String): String =
   if (f == "View.semantics") "sz_lang_view_semantics" else if (f == "View.mergeSemantics") "sz_lang_view_merge_semantics" else if (f == "View.tooltip") "sz_lang_view_tooltip" else ""
 
 def viewPtr2Rt(f: String): String =
-  if (f == "View.badge") "sz_lang_view_badge" else if (f == "View.visibility") "sz_lang_view_visibility" else if (f == "View.offstage") "sz_lang_view_offstage" else ""
+  if (f == "View.badge") "sz_lang_view_badge" else if (f == "View.visibility") "sz_lang_view_visibility" else if (f == "View.offstage") "sz_lang_view_offstage" else if (f == "View.overlay") "sz_lang_view_overlay" else ""
 
 def viewRadioRt(f: String): String =
   if (f == "View.radio") "sz_lang_view_radio" else if (f == "View.choiceChip") "sz_lang_view_choice_chip" else if (f == "View.radioListTile") "sz_lang_view_radio_list_tile" else ""
@@ -1850,6 +1850,12 @@ def viewRadioCall(rt: String, vals: List[String], prefix: String): String =
 
 def emitViewShowWhen(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_show_when(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")"))))))))), pct(prefix, "v"), true)
+
+def emitViewPtr3(rt: String, code: String, vals: List[String], prefix: String): Slot =
+  Slot(join(code, viewPtr3Call(rt, vals, prefix)), pct(prefix, "v"), true)
+
+def viewPtr3Call(rt: String, vals: List[String], prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")"))))))))))
 
 def emitViewSeg(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   Slot(join(code, join(viewSegCall(vals, prefix), join(if (headOwn(tailOwn(owns))) relPtr(arg1(vals)) else "", if (headOwn(tailOwn(tailOwn(owns)))) relPtr(arg2(vals)) else ""))), pct(prefix, "v"), true)
@@ -5682,7 +5688,7 @@ def declsS(): String =
   join(decl("ptr @sz_map_union(ptr, ptr)"), join(decl("ptr @sz_map_intersect(ptr, ptr)"), join(decl("ptr @sz_map_diff(ptr, ptr)"), join(decl("ptr @sz_list_set_at(ptr, i64, ptr)"), join(decl("i64 @sz_list_starts_with(ptr, ptr)"), join(decl("i64 @sz_list_ends_with(ptr, ptr)"), join(decl("i64 @sz_list_same_elements(ptr, ptr)"), join(decl("ptr @sz_list_patch(ptr, i64, ptr, i64)"), join(decl("ptr @sz_json_stringify(ptr)"), join(decl("ptr @sz_fs_exists(ptr)"), join(decl("ptr @sz_fs_delete(ptr)"), join(decl("ptr @sz_fs_rename(ptr, ptr)"), join(decl("ptr @sz_fs_walk(ptr)"), join(decl("ptr @sz_fs_join(ptr, ptr)"), join(decl("ptr @sz_fs_dirname(ptr)"), join(decl("ptr @sz_fs_basename(ptr)"), join(decl("i64 @sz_oracle_sum_to(i64)"), decl("ptr @sz_string_from_float(double)"))))))))))))))))))
 
 def declsT(): String =
-  join(declsT1(), join(declsT2(), join(declsT3(), join(declsT4(), declsT5()))))
+  join(declsT1(), join(declsT2(), join(declsT3(), join(declsT4(), join(declsT5(), declsT6())))))
 
 def declsT1(): String =
   join(decl("i64 @sz_color_rgb(i64, i64, i64)"), join(decl("i64 @sz_color_rgba(i64, i64, i64, i64)"), join(decl("i64 @sz_theme_accent()"), join(decl("i64 @sz_theme_primary()"), join(decl("i64 @sz_theme_muted()"), join(decl("i64 @sz_theme_foreground()"), join(decl("ptr @sz_lang_signal_int(i64)"), join(decl("i64 @sz_lang_signal_get(ptr)"), join(decl("ptr @sz_lang_signal_set(ptr, i64)"), join(decl("ptr @sz_lang_signal_map(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_signal_str_get(ptr)"), join(decl("ptr @sz_ui_run_rebuild(ptr, ptr)"), join(decl("void @sz_property_check(ptr, i64)"), join(decl("ptr @sz_property_assert(ptr, i64)"), join(decl("void @sz_driver_register(ptr, i64, i64, ptr)"), decl("ptr @sz_io_unsafe_run_or_die(ptr)"))))))))))))))))
@@ -5698,6 +5704,9 @@ def declsT4(): String =
 
 def declsT5(): String =
   join(decl("ptr @sz_lang_view_radio(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_choice_chip(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_radio_list_tile(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_show_when(ptr, i64, ptr)"), join(decl("ptr @sz_lang_view_segmented(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_expansion_tile(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_ink_well(ptr, ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_list_tile(ptr, ptr)"), join(decl("ptr @sz_lang_view_avatar(ptr)"), join(decl("ptr @sz_lang_view_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_merge_semantics(ptr, ptr)"), join(decl("ptr @sz_lang_view_tooltip(ptr, ptr)"), join(decl("ptr @sz_lang_view_badge(ptr, ptr)"), join(decl("ptr @sz_lang_view_visibility(ptr, ptr)"), join(decl("ptr @sz_lang_view_offstage(ptr, ptr)"), join(decl("ptr @sz_lang_view_icon_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_fab(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_outlined_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_text_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_action_chip(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_each(ptr)"), decl("ptr @sz_lang_view_each_map(ptr, ptr, ptr)"))))))))))))))))))))))
+
+def declsT6(): String =
+  join(decl("ptr @sz_lang_view_wrap()"), join(decl("ptr @sz_lang_view_focus_group(ptr)"), join(decl("ptr @sz_lang_view_editor(ptr)"), join(decl("ptr @sz_lang_view_split(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_overlay(ptr, ptr)"), decl("ptr @sz_lang_view_on_secondary(ptr, ptr, ptr)"))))))
 
 def declsU(): String =
   join(declsU1(), declsU2())
