@@ -405,6 +405,47 @@ def testEnv(): String =
 def headlessEnv(): String =
   "SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 SCUZZ_UI_SCALE=1 "
 
+def skipSp(s: String, i: Int): Int =
+  if (i >= Str.len(s)) i else if (Str.charAt(s, i) == 32 || Str.charAt(s, i) == 9 || Str.charAt(s, i) == 61 || Str.charAt(s, i) == 91 || Str.charAt(s, i) == 44) skipSp(s, i + 1) else i
+
+def takeDigits(s: String, i: Int): String =
+  takeDigits2(s, i, i)
+
+def takeDigits2(s: String, i: Int, j: Int): String =
+  if (j >= Str.len(s) || Str.charAt(s, j) < 48 || Str.charAt(s, j) > 57) Str.slice(s, i, j) else takeDigits2(s, i, j + 1)
+
+def sizePair(toml: String): (String, String) =
+  sizePairAt(toml, Str.indexOf(toml, "headless_size"))
+
+def sizePairAt(toml: String, i: Int): (String, String) =
+  if (i < 0) ("200", "120") else sizePair2(toml, skipSp(toml, i + 13))
+
+def sizePair2(toml: String, i: Int): (String, String) =
+  sizePair3(toml, takeDigits(toml, i), i)
+
+def sizePair3(toml: String, w: String, i: Int): (String, String) =
+  if (w == "") ("200", "120") else sizePair4(toml, w, skipSp(toml, i + Str.len(w)))
+
+def sizePair4(toml: String, w: String, j: Int): (String, String) =
+  sizePair5(w, takeDigits(toml, j))
+
+def sizePair5(w: String, h: String): (String, String) =
+  if (h == "") (w, "120") else (w, h)
+
+def headlessEnvOf(toml: String): String =
+  sizePair(toml) match {
+    case (w, h) => Str.concat("SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=", Str.concat(w, Str.concat(" SCUZZ_UI_HEIGHT=", Str.concat(h, " SCUZZ_UI_SCALE=1 "))))
+  }
+
+def tapNOf(toml: String): String =
+  tapNAt(toml, Str.indexOf(toml, "tap_button"))
+
+def tapNAt(toml: String, i: Int): String =
+  if (i < 0) "" else takeDigits(toml, skipSp(toml, i + 10))
+
+def tapNEnv(toml: String, tap: Bool): String =
+  if (!tap || tapNOf(toml) == "") "" else Str.concat("SCUZZ_UI_TAP_N=", Str.concat(tapNOf(toml), " "))
+
 def snapEnv(outDir: String): String =
   Str.concat(headlessEnv(), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(joinSlash(outDir, "snapshot.png"), " ")))
 
@@ -494,19 +535,31 @@ def testAfterClang2(code: Int, _out: String, err: String, exe: String, dir: Stri
 def testAfterSmoke(hasUi: Bool, dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
   if (hasUi) testUi(dir, outDir, name, exe, update) else testRun(exe)
 
-def uiDumpEnv(dump: String, snap: String, tap: Bool): String =
-  Str.concat(headlessEnv(), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(snap, Str.concat(" SCUZZ_FUZZ_DUMP=", Str.concat(dump, if (tap) " SCUZZ_UI_TAP=1 " else " ")))))
+def uiDumpEnvOf(toml: String, dump: String, snap: String, tap: Bool): String =
+  Str.concat(headlessEnvOf(toml), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(snap, Str.concat(" SCUZZ_FUZZ_DUMP=", Str.concat(dump, Str.concat(if (tap) " SCUZZ_UI_TAP=1 " else " ", tapNEnv(toml, tap)))))))
 
-def testUi(dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
-  if (update) Fs.mkdirs(joinSlash(dir, "goldens")).flatMap(_ => testUiDumps(dir, outDir, name, exe, update)) else testUiDumps(dir, outDir, name, exe, update)
+def testUi(dir: String, outDir: String, name: String, _exe: String, update: Bool): IO[Unit] =
+  if (update) Fs.mkdirs(joinSlash(dir, "goldens")).flatMap(_ => testUiToml(dir, outDir, name, update)) else testUiToml(dir, outDir, name, update)
 
-def testUiDumps(dir: String, outDir: String, name: String, exe: String, update: Bool): IO[Unit] =
-  testUiDump(dir, outDir, name, exe, update, false).flatMap(_ =>
-    testUiDump(dir, outDir, name, exe, update, true).flatMap(_ => IO.println("scuzz test ok"))
+def testUiToml(dir: String, outDir: String, name: String, update: Bool): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testUiHit(dir, outDir, name, toml, update))
+
+def testUiHit(dir: String, outDir: String, name: String, toml: String, update: Bool): IO[Unit] =
+  Fs.exists(joinSlash(dir, "sample.txt")).flatMap(hit => testUiDumps(dir, outDir, name, toml, if (hit) " sample.txt" else "", update))
+
+def testUiDumps(dir: String, outDir: String, name: String, toml: String, arg: String, update: Bool): IO[Unit] =
+  testUiDump(dir, outDir, name, toml, arg, update, false).flatMap(_ =>
+    testUiDump(dir, outDir, name, toml, arg, update, true).flatMap(_ => IO.println("scuzz test ok"))
   )
 
-def testUiDump(dir: String, outDir: String, name: String, exe: String, update: Bool, tap: Bool): IO[Unit] =
-  testUiRun(exe, uiDumpEnv(uiActual(outDir, name, tap), uiSnap(outDir, name, tap), tap), uiGolden(dir, name, tap), uiActual(outDir, name, tap), update)
+def testUiDump(dir: String, outDir: String, name: String, toml: String, arg: String, update: Bool, tap: Bool): IO[Unit] =
+  testUiRun(dir, name, uiDumpEnvOf(toml, uiDumpRel(name, tap), uiSnapRel(name, tap), tap), uiGolden(dir, name, tap), uiActual(outDir, name, tap), update, arg)
+
+def uiDumpRel(name: String, tap: Bool): String =
+  joinSlash("build", if (tap) Str.concat(name, "_after_tap.actual.dump") else Str.concat(name, ".actual.dump"))
+
+def uiSnapRel(name: String, tap: Bool): String =
+  joinSlash("build", if (tap) Str.concat(name, "_after_tap.actual.png") else Str.concat(name, ".actual.png"))
 
 def uiGolden(dir: String, name: String, tap: Bool): String =
   joinSlash(joinSlash(dir, "goldens"), if (tap) Str.concat(name, "_after_tap.dump") else Str.concat(name, ".dump"))
@@ -517,8 +570,8 @@ def uiActual(outDir: String, name: String, tap: Bool): String =
 def uiSnap(outDir: String, name: String, tap: Bool): String =
   joinSlash(outDir, if (tap) Str.concat(name, "_after_tap.actual.png") else Str.concat(name, ".actual.png"))
 
-def testUiRun(exe: String, env: String, golden: String, actual: String, update: Bool): IO[Unit] =
-  runLine(Str.concat(env, exe)).flatMap(r => testUiAfter(r, golden, actual, update))
+def testUiRun(dir: String, name: String, env: String, golden: String, actual: String, update: Bool, arg: String): IO[Unit] =
+  runLine(Str.concat("cd ", Str.concat(dir, Str.concat(" && ", Str.concat(env, Str.concat(joinSlash("build", name), arg)))))).flatMap(r => testUiAfter(r, golden, actual, update))
 
 def testUiAfter(r: (Int, String, String), golden: String, actual: String, update: Bool): IO[Unit] =
   r match {
