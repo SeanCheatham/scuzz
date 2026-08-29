@@ -79,6 +79,72 @@ def sortStrs(xs: List[String]): List[String] =
 def nls(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else Str.concat(List.head(xs), Str.concat(nl(), nls(List.tail(xs))))
 
+def linesOf(s: String): List[String] =
+  linesFrom(s, 0)
+
+def linesFrom(s: String, start: Int): List[String] =
+  if (start >= Str.len(s)) noStr() else linesFrom2(s, start, nextNl(s, start))
+
+def nextNl(s: String, i: Int): Int =
+  if (i >= Str.len(s)) i else if (Str.charAt(s, i) == 10) i else nextNl(s, i + 1)
+
+def linesFrom2(s: String, start: Int, nl: Int): List[String] =
+  if (nl >= Str.len(s)) lineRest(s, start, nl) else Str.slice(s, start, nl) :: linesFrom(s, nl + 1)
+
+def lineRest(s: String, start: Int, i: Int): List[String] =
+  if (start >= i) noStr() else Str.slice(s, start, i) :: noStr()
+
+def eventsKey(): String =
+  "events = ["
+
+def parseEvents(src: String): List[String] =
+  parseEventsAt(src, findIdx(src, eventsKey(), 0))
+
+def parseEventsAt(src: String, i: Int): List[String] =
+  if (i < 0) noStr() else parseEvSkip(src, i + Str.len(eventsKey()))
+
+def parseEvSkip(src: String, i: Int): List[String] =
+  if (i >= Str.len(src)) noStr() else parseEvCh(src, i, Str.charAt(src, i))
+
+def parseEvCh(src: String, i: Int, c: Int): List[String] =
+  if (c == 32 || c == 10 || c == 13 || c == 9 || c == 44) parseEvSkip(src, i + 1) else if (c == 93) noStr() else if (c == 34) parseEvStr(src, i + 1, i + 1) else parseEvSkip(src, i + 1)
+
+def parseEvStr(src: String, start: Int, i: Int): List[String] =
+  if (i >= Str.len(src)) noStr() else if (Str.charAt(src, i) == 34) Str.slice(src, start, i) :: parseEvSkip(src, i + 1) else parseEvStr(src, start, i + 1)
+
+def tomlQuoted(src: String, key: String): String =
+  tomlQuotedAt(src, findIdx(src, Str.concat(key, " = \""), 0), Str.len(key) + 4)
+
+def tomlQuotedAt(src: String, i: Int, skip: Int): String =
+  if (i < 0) "" else tomlQuotedEnd(src, i + skip, i + skip)
+
+def tomlQuotedEnd(src: String, start: Int, i: Int): String =
+  if (i >= Str.len(src) || Str.charAt(src, i) == 34) Str.slice(src, start, i) else tomlQuotedEnd(src, start, i + 1)
+
+def quoteEvents(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) quoteEv(List.head(xs)) else Str.concat(quoteEv(List.head(xs)), Str.concat(", ", quoteEvents(List.tail(xs))))
+
+def quoteEv(e: String): String =
+  Str.concat("\"", Str.concat(e, "\""))
+
+def reproText(seed: Int, sched: String, fault: String, events: List[String]): String =
+  Str.concat("[fuzz]\nseed = ", Str.concat(Str.fromInt(seed), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), "]\n"))))))
+
+def reproSched(sched: String): String =
+  if (sched == "") "\n" else Str.concat("\nschedule_seed = \"", Str.concat(sched, "\"\n"))
+
+def reproFault(fault: String): String =
+  if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
+
+def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, repro: String): String =
+  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail))
+
+def summaryFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
+  Str.concat("[fuzz]\nok = ", Str.concat(if (ok) "true" else "false", Str.concat("\nseed = ", Str.concat(Str.fromInt(seed), Str.concat("\niterations = ", Str.concat(Str.fromInt(iterations), Str.concat("\nsearch = ", Str.concat(Str.fromInt(search), Str.concat("\nsearch_failures = ", Str.concat(Str.fromInt(failures), Str.concat("\ncorpus = ", Str.concat(Str.fromInt(corpus), Str.concat("\ndrivers = []\nevents = []\ndeclared = []\nreachability = []\nmissing_budget = []\nmissing_corpus = []\nrepro = \"", Str.concat(repro, "\"\nreplay = \"\"\n\n"))))))))))))))
+
+def summaryRest(corpus: Int, corpFail: Int): String =
+  Str.concat("[coverage]\nunclaimed_varied = []\n\n[corpus]\nentries = ", Str.concat(Str.fromInt(corpus), Str.concat("\nfailures = ", Str.concat(Str.fromInt(corpFail), "\nreached = []\npromoted = 0\n\n[classify]\n[mutate]\nkilled = 0\nsurvived = 0\ninert = 0\nran = 0\nsites = 0\noracles = 0\nscore = 1.000\nsurvivors = []\n"))))
+
 def mapSeed(ds: List[Fun]): List[String] =
   if (List.isEmpty(ds)) noStr() else seedOf(List.head(ds)) :: mapSeed(List.tail(ds))
 
@@ -147,18 +213,18 @@ def searchN(n: Int): Int =
 def fuzzHead(iterations: Int, corpus: Int, sites: Int): String =
   Str.concat(if (iterations <= 0) Str.concat("scuzz fuzz: corpus-only (--iterations 0)", nl()) else "", Str.concat(if (iterations <= 0 && corpus > 0) Str.concat("scuzz fuzz: replay ", Str.concat(Str.fromInt(corpus), Str.concat(" corpus entries", nl()))) else "", if (sites == 0) Str.concat("scuzz fuzz: no live-code mutation sites", nl()) else ""))
 
-def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int): String =
-  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures)
+def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
+  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures, corpFail)
 
 def fuzzStatus(search: Int, failures: Int, seed: Int, corpus: Int): String =
   Str.concat("scuzz fuzz ", Str.concat(if (failures == 0) "ok" else "fail", Str.concat(" (", Str.concat(Str.fromInt(search), Str.concat(" search, ", Str.concat(Str.fromInt(failures), Str.concat(" search failures, seed ", Str.concat(Str.fromInt(seed), Str.concat(", ", Str.concat(Str.fromInt(corpus), " corpus)"))))))))))
 
-def fuzzCorpus(corpus: Int): String =
-  Str.concat("corpus: ", Str.concat(Str.fromInt(corpus), " stored, 0 failed, 0 promoted"))
+def fuzzCorpus(corpus: Int, corpFail: Int): String =
+  Str.concat("corpus: ", Str.concat(Str.fromInt(corpus), Str.concat(" stored, ", Str.concat(Str.fromInt(corpFail), " failed, 0 promoted"))))
 
 def fuzzMut(sites: Int): String =
   Str.concat("mutate: 0 killed, 0 survived, 0 inert (0 of ", Str.concat(Str.fromInt(sites), " sites)"))
 
-def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, sites: Int, failures: Int): String =
-  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus), Str.concat(nl(), Str.concat(fuzzCorpus(corpus), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), fuzzMut(sites))))))))))
+def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
+  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), fuzzMut(sites))))))))))
 

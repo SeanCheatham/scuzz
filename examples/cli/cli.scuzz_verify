@@ -65,7 +65,10 @@ def campWrap(): Bool =
   Verify.wrapSrc("bump", Main.srcBumpVerify()) == Main.wantWrapBump()
 
 def campFuzz0(): Bool =
-  Verify.fuzzOut(0, 42, 0, 0, 0) == Main.wantFuzzHello0()
+  Verify.fuzzOut(0, 42, 0, 0, 0, 0) == Main.wantFuzzHello0()
+
+def campEvents(): Bool =
+  Verify.nls(Verify.parseEvents(Main.srcBumpRepro())) == Main.wantBumpEvents()
 
 def campTest(): Bool =
   Cli.runCmd(Cli.parse(Main.a1("test")), Main.srcIrHi()) == Main.wantTestOk()
