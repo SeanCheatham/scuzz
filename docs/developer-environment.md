@@ -8,14 +8,15 @@ Fail on the first missing tool with one install line.
 
 | Tool | Role |
 | --- | --- |
-| Rust stable (`cargo`, `rustc`, `rustfmt`, `clippy`) | compiler + CLI (`rust-toolchain.toml`) |
 | `clang` | C11 runtime, Skia ABI, embedders, LLVM IR link |
 | `make` | `crates/runtime`, `ffi-skia`, embedders |
+| `curl` | fetch tagged `v0.2.0` `scuzz` (`scripts/bootstrap.sh`) |
 | `zlib` + `bzip2` | Linux Skia CPU prebuilt |
+| Rust stable (`cargo`, `rustc`, `rustfmt`, `clippy`) | in-tree Rust compiler crates (`crates/compiler`, `crates/cli`) |
 
 ```bash
 # Debian/Ubuntu
-sudo apt-get install -y clang make zlib1g-dev libbz2-dev
+sudo apt-get install -y clang make curl zlib1g-dev libbz2-dev
 ```
 
 If `clang` cannot find libstdc++ when it links Skia:
@@ -45,12 +46,12 @@ A pre-commit hook checks conflict markers. When you stage `.rs`, it runs `./scri
 ## Prove the host
 
 ```bash
-./scripts/check-fmt-clippy.sh
+./scripts/bootstrap.sh
+./examples/cli/build/cli test examples/hello
 make -C crates/runtime test CC=clang
 make -C crates/runtime test-asan CC=clang   # skip if ASan cannot link
+./scripts/check-fmt-clippy.sh
 cargo test -p scuzz-compiler
-cargo build -p scuzz
-cargo run -p scuzz -- test examples/hello
 ```
 
 Full Linux job: `.github/workflows/ci.yml` (`linux-headless`).
