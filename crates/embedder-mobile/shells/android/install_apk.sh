@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Install a packaged APK when adb sees a device. No device is not a failure.
+# A USB serial wins over an emulator so a hardware run does not hit the emulator.
 #
 #   shells/android/install_apk.sh APK
 set -euo pipefail
@@ -28,20 +29,30 @@ find_adb() {
   return 1
 }
 
+pick_serial() {
+  local s
+  s="$("$ADB" devices | awk 'NR>1 && $2=="device" && $1 !~ /^emulator-/ { print $1; exit }')"
+  if [ -n "$s" ]; then
+    echo "$s"
+    return
+  fi
+  "$ADB" devices | awk 'NR>1 && $2=="device" { print $1; exit }'
+}
+
 ADB="$(find_adb || true)"
 if [ -z "$ADB" ]; then
   echo "$MISS $APK"
   exit 0
 fi
 
-n="$("$ADB" devices | awk 'NR>1 && $2=="device" {c++} END {print c+0}')"
-if [ "$n" -eq 0 ]; then
+serial="$(pick_serial || true)"
+if [ -z "$serial" ]; then
   echo "$MISS $APK"
   exit 0
 fi
 
-if ! "$ADB" install -r "$APK" >/dev/null 2>&1; then
+if ! "$ADB" -s "$serial" install -r "$APK" >/dev/null 2>&1; then
   echo "adb install failed: $APK" >&2
   exit 1
 fi
-echo "installed $APK"
+echo "installed $APK on $serial"
