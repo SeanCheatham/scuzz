@@ -4607,6 +4607,7 @@ def rwField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fu
   recv match {
     case Expr.EVar(en) => rwFieldVar(en, name, env, ens)
     case Expr.EMethod(r, m, args) => rwFieldMethod(r, m, args, name, env, funs, ens)
+    case Expr.ECall(f, args) => rwFieldTy(Expr.ECall(f, args), name, copyEnCall(f, ens, funs), ens)
     case _ => Expr.EField(recv, name)
   }
 
@@ -4616,7 +4617,7 @@ def rwFieldVar(en: String, name: String, env: List[(String, String)], ens: List[
 def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, _env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   r match {
     case Expr.EVar(mod) => rwFieldQualHit(m, args, name, ens, findDefMod(funs, mod, m))
-    case _ => Expr.EField(Expr.EMethod(r, m, args), name)
+    case _ => rwFieldTy(Expr.EMethod(r, m, args), name, copyEn(Expr.EMethod(r, m, args), ens, funs), ens)
   }
 
 def rwFieldQualHit(m: String, args: List[Expr], name: String, ens: List[En], hit: List[Fun]): Expr =

@@ -901,6 +901,68 @@ entry:
   ret i32 %rc
 }"""
 
+def srcFieldCall(): String =
+  """record Pt(x: Int, y: Int)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Pt(3, 5).copy(y = 9).x))
+"""
+
+def wantFieldCall(): String =
+  """define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_sc_cr_pl0 = call ptr @sz_list_nil()
+  %build_e_arg0_sc_cr_bx1 = call ptr @sz_box_i64(i64 5)
+  %build_e_arg0_sc_cr_pl1 = call ptr @sz_list_cons(ptr %build_e_arg0_sc_cr_bx1, ptr %build_e_arg0_sc_cr_pl0)
+  call void @sz_release(ptr %build_e_arg0_sc_cr_pl0)
+  call void @sz_release(ptr %build_e_arg0_sc_cr_bx1)
+  %build_e_arg0_sc_cr_bx0 = call ptr @sz_box_i64(i64 3)
+  %build_e_arg0_sc_cr_pl2 = call ptr @sz_list_cons(ptr %build_e_arg0_sc_cr_bx0, ptr %build_e_arg0_sc_cr_pl1)
+  call void @sz_release(ptr %build_e_arg0_sc_cr_pl1)
+  call void @sz_release(ptr %build_e_arg0_sc_cr_bx0)
+  %build_e_arg0_sc_cr_adt = call ptr @sz_adt_new(i32 0, ptr %build_e_arg0_sc_cr_pl2)
+  call void @sz_release(ptr %build_e_arg0_sc_cr_pl2)
+  %build_e_arg0_sc_pl = call ptr @sz_adt_payload(ptr %build_e_arg0_sc_cr_adt)
+  %build_e_arg0_sc_k0 = call ptr @sz_list_at(ptr %build_e_arg0_sc_pl, i64 0)
+  %build_e_arg0_sc_ub1 = call ptr @sz_box_i64(i64 9)
+  %build_e_arg0_sc_pl0 = call ptr @sz_list_nil()
+  %build_e_arg0_sc_pl1 = call ptr @sz_list_cons(ptr %build_e_arg0_sc_ub1, ptr %build_e_arg0_sc_pl0)
+  call void @sz_release(ptr %build_e_arg0_sc_pl0)
+  call void @sz_release(ptr %build_e_arg0_sc_ub1)
+  %build_e_arg0_sc_pl2 = call ptr @sz_list_cons(ptr %build_e_arg0_sc_k0, ptr %build_e_arg0_sc_pl1)
+  call void @sz_release(ptr %build_e_arg0_sc_pl1)
+  %build_e_arg0_sc_adt = call ptr @sz_adt_new(i32 0, ptr %build_e_arg0_sc_pl2)
+  call void @sz_release(ptr %build_e_arg0_sc_pl2)
+  call void @sz_release(ptr %build_e_arg0_sc_cr_adt)
+  br label %build_e_arg0_try_0_0
+build_e_arg0_try_0_0:
+  %build_e_arg0_p0_0_tg1 = call i32 @sz_adt_tag(ptr %build_e_arg0_sc_adt)
+  %build_e_arg0_p0_0_eq1 = icmp eq i32 %build_e_arg0_p0_0_tg1, 0
+  br i1 %build_e_arg0_p0_0_eq1, label %build_e_arg0_p0_0_m1, label %build_e_arg0_default_0
+build_e_arg0_p0_0_m1:
+  %build_e_arg0_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %build_e_arg0_sc_adt)
+  %build_e_arg0_p0_0_f1_c0 = call ptr @sz_list_at(ptr %build_e_arg0_p0_0_f1_pl, i64 0)
+  %build_e_arg0_p0_0_f1_b0 = call i64 @sz_unbox_i64(ptr %build_e_arg0_p0_0_f1_c0)
+  %build_e_arg0_p0_0_f1_c1 = call ptr @sz_list_at(ptr %build_e_arg0_p0_0_f1_pl, i64 1)
+  %build_e_arg0_p0_0_f1_b1 = call i64 @sz_unbox_i64(ptr %build_e_arg0_p0_0_f1_c1)
+  br label %build_e_arg0_p0_0_n1_0
+build_e_arg0_p0_0_n1_0:
+  br label %build_e_arg0_ok_0_0
+build_e_arg0_default_0:
+  %build_e_arg0_dflt = add i64 0, 0
+  br label %build_e_arg0_merge_0
+build_e_arg0_ok_0_0:
+  br label %build_e_arg0_aj_0_0
+build_e_arg0_aj_0_0:
+  br label %build_e_arg0_merge_0
+build_e_arg0_merge_0:
+  %build_e_arg0_phi = phi i64 [ %build_e_arg0_p0_0_f1_b0, %build_e_arg0_aj_0_0 ], [ %build_e_arg0_dflt, %build_e_arg0_default_0 ]
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_phi)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
 def srcRep(): String =
   "@main def main: IO[Unit] =\n  IO.println(Str.repeat(\"a\", 2))\n"
 
@@ -1032,7 +1094,7 @@ def okPair(): Bool =
   irDiff(srcToInt(), wantToInt()) && irIdem(srcToInt()) && irDiff(srcPair(), wantPair()) && irIdem(srcPair()) && Check.check(srcToInt()) == "[]" && Check.check(srcPair()) == "[]" && irDiff(srcAt(), wantAt()) && irIdem(srcAt()) && irDiff(srcRec(), wantRec()) && irIdem(srcRec()) && Check.check(srcAt()) == "[]" && Check.check(srcRec()) == "[]"
 
 def okMod(): Bool =
-  irDiffFiles(srcModFiles(), wantMod()) && irIdemFiles(srcModFiles()) && Check.checkFiles(srcModFiles()) == "[]" && Check.check(srcNil()) == "[]" && Check.check(srcFld()) == "[]" && irDiff(srcFld(), wantFld()) && irIdem(srcFld()) && irDiff(srcCopyFld(), wantCopyFld()) && irIdem(srcCopyFld()) && Check.check(srcCopyFld()) == "[]" && irDiff(srcCopyRec(), wantCopyRec()) && irIdem(srcCopyRec()) && Check.check(srcCopyRec()) == "[]" && irDiff(srcRep(), wantRep()) && irIdem(srcRep()) && Check.check(srcRep()) == "[]"
+  irDiffFiles(srcModFiles(), wantMod()) && irIdemFiles(srcModFiles()) && Check.checkFiles(srcModFiles()) == "[]" && Check.check(srcNil()) == "[]" && Check.check(srcFld()) == "[]" && irDiff(srcFld(), wantFld()) && irIdem(srcFld()) && irDiff(srcCopyFld(), wantCopyFld()) && irIdem(srcCopyFld()) && Check.check(srcCopyFld()) == "[]" && irDiff(srcCopyRec(), wantCopyRec()) && irIdem(srcCopyRec()) && Check.check(srcCopyRec()) == "[]" && irDiff(srcFieldCall(), wantFieldCall()) && irIdem(srcFieldCall()) && Check.check(srcFieldCall()) == "[]" && irDiff(srcRep(), wantRep()) && irIdem(srcRep()) && Check.check(srcRep()) == "[]"
 
 def okPtr(): Bool =
   irDiff(srcIfPtr(), wantIfPtr()) && irIdem(srcIfPtr()) && Check.check(srcIfPtr()) == "[]" && irDiff(srcTCons(), wantTCons()) && irIdem(srcTCons()) && Check.check(srcTCons()) == "[]" && irDiff(srcTupPtr(), wantTupPtr()) && irIdem(srcTupPtr()) && Check.check(srcTupPtr()) == "[]" && irDiff(srcT3(), wantT3()) && irIdem(srcT3()) && Check.check(srcT3()) == "[]" && irDiff(srcIfTup(), wantIfTup()) && irIdem(srcIfTup()) && Check.check(srcIfTup()) == "[]" && irDiff(srcNestTup(), wantNestTup()) && irIdem(srcNestTup()) && Check.check(srcNestTup()) == "[]"
