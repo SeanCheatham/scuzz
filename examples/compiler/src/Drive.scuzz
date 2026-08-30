@@ -581,7 +581,13 @@ def testAfterClang(r: (Int, String, String), exe: String, dir: String, outDir: S
   }
 
 def testAfterClang2(code: Int, _out: String, err: String, exe: String, dir: String, outDir: String, name: String, hasUi: Bool, update: Bool, pixels: Bool): IO[Unit] =
-  if (code != 0) IO.println(err) else IO.println("project compile smoke ok").flatMap(_ => testAfterSmoke(hasUi, dir, outDir, name, exe, update, pixels))
+  if (code != 0) testClangFail(err) else testClangOk(hasUi, dir, outDir, name, exe, update, pixels)
+
+def testClangFail(err: String): IO[Unit] =
+  IO.println(err).flatMap(_ => IO.fail("clang"))
+
+def testClangOk(hasUi: Bool, dir: String, outDir: String, name: String, exe: String, update: Bool, pixels: Bool): IO[Unit] =
+  IO.println("project compile smoke ok").flatMap(_ => testAfterSmoke(hasUi, dir, outDir, name, exe, update, pixels))
 
 def testAfterSmoke(hasUi: Bool, dir: String, outDir: String, name: String, exe: String, update: Bool, pixels: Bool): IO[Unit] =
   if (hasUi) testUi(dir, outDir, name, exe, update, pixels) else testRun(exe)
