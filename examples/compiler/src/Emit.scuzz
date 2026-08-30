@@ -315,8 +315,7 @@ def hasDraw(bs: List[Bind]): Bool =
 
 def bindIsDraw(b: Bind): Bool =
   b match {
-    case Bind(true, _, _) => true
-    case _ => false
+    case Bind(draw, _, _) => draw
   }
 
 def desugarForRev(bs: List[Bind], body: Expr): Expr =
@@ -333,10 +332,11 @@ def wrapBindHeld(_held: List[Bind], b: Bind, body: Expr): Expr =
 
 def wrapBind(b: Bind, body: Expr): Expr =
   b match {
-    case Bind(true, name, v) => wrapDraw(name, v, body)
-    case Bind(false, "__guard", v) => wrapGuard(v, body)
-    case Bind(false, name, v) => wrapEq(name, v, body)
+    case Bind(draw, name, v) => wrapBindGo(draw, name, v, body)
   }
+
+def wrapBindGo(draw: Bool, name: String, v: Expr, body: Expr): Expr =
+  if (draw) wrapDraw(name, v, body) else if (name == "__guard") wrapGuard(v, body) else wrapEq(name, v, body)
 
 def wrapGuard(c: Expr, body: Expr): Expr =
   Expr.EIf(c, body, Expr.ECall("IO.fail", Expr.EStr("guard") :: noExpr()))
