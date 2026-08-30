@@ -628,7 +628,10 @@ def testUiAfter(r: (Int, String, String), golden: String, actual: String, update
   }
 
 def testUiAfter2(code: Int, _out: String, err: String, golden: String, actual: String, update: Bool, pixels: Bool, tap: Bool, dir: String, outDir: String, name: String): IO[Unit] =
-  if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui golden")) else testUiCmp(golden, actual, update).flatMap(_ => testPng(dir, outDir, name, tap, update, pixels))
+  if (code != 0) testUiFail(err) else testUiCmp(golden, actual, update).flatMap(_ => testPng(dir, outDir, name, tap, update, pixels))
+
+def testUiFail(err: String): IO[Unit] =
+  IO.println(err).flatMap(_ => IO.fail("ui golden"))
 
 def testPng(dir: String, outDir: String, name: String, tap: Bool, update: Bool, pixels: Bool): IO[Unit] =
   if (!pixels) IO.pure(()) else testPngCmp(uiPngGolden(dir, name, tap), uiSnap(outDir, name, tap), update)
@@ -780,8 +783,14 @@ def pkgHostCp(name: String, exe: String, dest: String): IO[Unit] =
 
 def pkgHostChmod(r: (Int, String, String), name: String, dest: String): IO[Unit] =
   r match {
-    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("cp")) else runLine(Str.concat("chmod +x ", joinSlash(dest, name))).flatMap(_ => pkgHostWrite(name, dest))
+    case (code, _out, err) => if (code != 0) pkgHostCpFail(err) else pkgHostChmodOk(name, dest)
   }
+
+def pkgHostCpFail(err: String): IO[Unit] =
+  IO.println(err).flatMap(_ => IO.fail("cp"))
+
+def pkgHostChmodOk(name: String, dest: String): IO[Unit] =
+  runLine(Str.concat("chmod +x ", joinSlash(dest, name))).flatMap(_ => pkgHostWrite(name, dest))
 
 def pkgHostWrite(name: String, dest: String): IO[Unit] =
   Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ => runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ => Fs.write(joinSlash(dest, "package.toml"), hostMeta(name)).flatMap(_ => IO.println(Str.concat("packaged host → ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")")))))))
@@ -858,8 +867,14 @@ def pkgIos(dir: String): IO[Unit] =
 
 def pkgIosGot(r: (Int, String, String), dir: String): IO[Unit] =
   r match {
-    case (code, _out, _err) => if (code != 0) IO.println(xcodeMiss()).flatMap(_ => IO.fail("ios")) else runLine(Str.concat("bash crates/embedder-mobile/shells/ios/build_sim.sh ", dir)).flatMap(r2 => pkgIosRun(r2))
+    case (code, _out, _err) => if (code != 0) pkgIosMiss() else pkgIosBuild(dir)
   }
+
+def pkgIosMiss(): IO[Unit] =
+  IO.println(xcodeMiss()).flatMap(_ => IO.fail("ios"))
+
+def pkgIosBuild(dir: String): IO[Unit] =
+  runLine(Str.concat("bash crates/embedder-mobile/shells/ios/build_sim.sh ", dir)).flatMap(r2 => pkgIosRun(r2))
 
 def pkgIosRun(r: (Int, String, String)): IO[Unit] =
   r match {
