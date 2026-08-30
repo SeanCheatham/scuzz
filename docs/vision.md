@@ -271,7 +271,7 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Device packaging and Impeller / Skia GPU raster stay deferred. The dogfood IDE host path is in. `scuzz fuzz --iterations N examples/editor` mutates and compiles on the compiler stack.
+Unknowns and known gaps: [`gaps.md`](gaps.md). `scuzz package --target ios` and `--target android` drive the platform shells. `scuzz package --target android` installs the APK when `adb` lists a device. No device is not a failure. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Hardware device runs and Impeller / Skia GPU raster stay deferred. The dogfood IDE host path is in. `scuzz fuzz --iterations N examples/editor` mutates and compiles on the compiler stack.
 
 IDE prerequisites run as two tracks. Track A is input and editor (key alphabet, caret, hover, selection, `View.editor`, viewport, undo, chrome primitives). Track B is kits (Fs entries, paths, delete/rename/walk, `Sys.exec` capture is in, Json parse/stringify, query, and write are in, Clock+Fs poll not `Fs.watch`, child stdio is in). Headless is part of every UI slice. `scuzz ide` launches the bundled `[ui]` package (`examples/editor` / `SCUZZ_HOME/ide`). Close-lists: [`gaps.md`](gaps.md). `scuzz test --differential` compares structural dumps across render backends.
 
@@ -283,7 +283,7 @@ Self-hosting staged slices are in. Prerequisites and remaining device/GPU unknow
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)).
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Device builds stay open.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present, and installs it when adb lists a device. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Hardware device runs stay open.
 
 ## Risks
 

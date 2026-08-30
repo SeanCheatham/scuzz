@@ -81,6 +81,7 @@ my-app/
     host/run.sh
     android/<name>.apk                 # debug APK (`scuzz package --target android`)
     android/lib/arm64-v8a/libscuzz.so  # NDK link (same command)
+    android/lib/x86_64/libscuzz.so     # emulator ABI when that NDK clang is present
     ios/<name>.app          # signed sim bundle (`scuzz package --target ios`)
 ```
 

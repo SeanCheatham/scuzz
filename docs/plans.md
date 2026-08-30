@@ -1,8 +1,8 @@
 # Next slice
 
-Real-device packaging.
+Hardware device run.
 
-iOS simulator and Android emulator proofs are in. A hardware device run stays open (provisioning). Impeller / Skia GPU raster stays deferred.
+`scuzz package --target android` packs the debug APK and installs it when adb lists a device. iOS simulator and Android emulator proofs are in. A USB hardware run stays open (provisioning). Impeller / Skia GPU raster stays deferred.
 
 Do not implement items deferred by decision.
 

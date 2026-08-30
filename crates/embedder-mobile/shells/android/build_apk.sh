@@ -101,6 +101,9 @@ cp "$STAGE/base.apk" "$STAGE/unaligned.apk"
 (
   cd "$OUT"
   zip -q -X -0 "$STAGE/unaligned.apk" lib/arm64-v8a/libscuzz.so
+  if [ -f lib/x86_64/libscuzz.so ]; then
+    zip -q -X -0 "$STAGE/unaligned.apk" lib/x86_64/libscuzz.so
+  fi
 )
 
 "$BT/zipalign" -f -p 4 "$STAGE/unaligned.apk" "$STAGE/aligned.apk"
@@ -116,5 +119,5 @@ fi
   --out "$APK" "$STAGE/aligned.apk"
 
 echo "built $APK"
-echo "run: adb install -r $APK"
-echo "     adb shell am start -n $BUNDLE_ID/dev.scuzz.app.MainActivity"
+bash "$(dirname "$0")/install_apk.sh" "$APK"
+echo "run: adb shell am start -n $BUNDLE_ID/dev.scuzz.app.MainActivity"
