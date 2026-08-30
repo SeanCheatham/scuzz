@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Scuzz at compiler scale (self-hosting)
 
-**Status.** in. `HUMANS.md` sets self-hosting as the eventual goal: rewrite the compiler, CLI, and tooling in Scuzz. Direction, prerequisites, and staged slices are locked in [`vision.md`](vision.md#self-hosting). `v0.2.0` is the last-Rust cutoff. The product CLI is the Scuzz-emitted binary. Rust compiler crates are gone. `examples/jump` generates about 68k lines of kernel defs. `scuzz check examples/jump` typechecks in about 7 s at about 62 MiB RSS. `examples/scale` stays the live Map-fill proof at about 4k lines (`mapn:3048`, `hit:0:49`). Tail calls, Builder, the differential oracle, structured generation, and mutation sampling are in.
+**Status.** in. `HUMANS.md` sets self-hosting as the eventual goal: rewrite the compiler, CLI, and tooling in Scuzz. Direction, prerequisites, and staged slices are locked in [`vision.md`](vision.md#self-hosting). `v0.2.0` is the last-Rust cutoff. The product CLI is the Scuzz-emitted binary. Rust compiler crates are gone. `examples/jump` generates about 68k lines of kernel defs. `scuzz check examples/jump` typechecks in about 7 s at about 600 MiB RSS. `examples/scale` stays the live Map-fill proof at about 4k lines (`mapn:3048`, `hit:0:49`). Tail calls, Builder, the differential oracle, structured generation, and mutation sampling are in.
 
 **Unproven.** none. The 68k-line compiler jump is closed.
 
