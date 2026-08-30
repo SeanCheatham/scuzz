@@ -251,7 +251,7 @@ def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens
     case Expr.ENamed(_, inner) => emitExprFid(inner, prefix, strs, defs, ens, ps, fid)
     case Expr.EMethod(recv, name, args) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps, fid) else if (name == "apply") emitApplyRecv(recv, args, prefix, strs, defs, ens, ps, fid) else if (name == "map") emitIoMap(recv, args, prefix, strs, defs, ens, ps, fid) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps)
     case Expr.ELam(p, body) => emitLam(p, body, prefix, strs, defs, ens, ps)
-    case Expr.EIf(c, t, el) => emitIf(c, t, el, prefix, strs, defs, ens, ps)
+    case Expr.EIf(c, t, el) => emitIfFid(c, t, el, prefix, strs, defs, ens, ps, fid)
     case Expr.EField(recv, name) => emitField(recv, name, prefix, ens, ps)
     case Expr.EMatch(s, arms) => emitMatch(s, arms, prefix, strs, defs, ens, ps)
     case Expr.EList(xs) => emitList(xs, prefix, strs, defs, ens, ps)
@@ -2970,20 +2970,23 @@ def lab(s: String): String =
   Str.concat(s, Str.concat(":", nl()))
 
 def emitIf(c: Expr, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitIfThen(unboxBin(emitExpr(c, Str.concat(prefix, "_ic"), strs, defs, ens, ps), ps, Str.concat(prefix, "_iu")), t, el, prefix, strs, defs, ens, ps)
+  emitIfFid(c, t, el, prefix, strs, defs, ens, ps, 0)
 
-def emitIfThen(c: Slot, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitIfElse(c, emitLiftUnitIo(t, el, Str.concat(prefix, "_t0"), strs, defs, ens, ps), el, prefix, strs, defs, ens, ps)
+def emitIfFid(c: Expr, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
+  emitIfThen(unboxBin(emitExprFid(c, Str.concat(prefix, "_ic"), strs, defs, ens, ps, fid), ps, Str.concat(prefix, "_iu")), t, el, prefix, strs, defs, ens, ps, fid + fmCount(c))
 
-def emitLiftUnitIo(t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+def emitIfThen(c: Slot, t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
+  emitIfElse(c, emitLiftUnitIo(t, el, Str.concat(prefix, "_t0"), strs, defs, ens, ps, fid), el, prefix, strs, defs, ens, ps, fid + fmCount(t))
+
+def emitLiftUnitIo(t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   t match {
-    case Expr.EUnit => if (isIoPred(el)) emitIoUnit(prefix) else emitExpr(t, prefix, strs, defs, ens, ps)
-    case _ => emitExpr(t, prefix, strs, defs, ens, ps)
+    case Expr.EUnit => if (isIoPred(el)) emitIoUnit(prefix) else emitExprFid(t, prefix, strs, defs, ens, ps, fid)
+    case _ => emitExprFid(t, prefix, strs, defs, ens, ps, fid)
   }
 
-def emitIfElse(c: Slot, th: Slot, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+def emitIfElse(c: Slot, th: Slot, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   th match {
-    case Slot(tc, tv, to) => emitIf2(c, Slot(tc, tv, to), emitUnitElse(el, thenIsPtr(tc, tv, to, ps), isIoSlot(tv), prefix, strs, defs, ens, ps), prefix, ps)
+    case Slot(tc, tv, to) => emitIf2(c, Slot(tc, tv, to), emitUnitElse(el, thenIsPtr(tc, tv, to, ps), isIoSlot(tv), prefix, strs, defs, ens, ps, fid), prefix, ps)
   }
 
 def thenIsPtr(code: String, v: String, o: Bool, ps: List[Param]): Bool =
@@ -2992,10 +2995,10 @@ def thenIsPtr(code: String, v: String, o: Bool, ps: List[Param]): Bool =
 def isIoSlot(v: String): Bool =
   hasSub(v, "_io") || hasSub(v, "_fm")
 
-def emitUnitElse(el: Expr, thenOwned: Bool, thenIo: Bool, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+def emitUnitElse(el: Expr, thenOwned: Bool, thenIo: Bool, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   el match {
     case Expr.EUnit => if (thenIo) emitIoUnit(prefix) else if (thenOwned) Slot("", "null", true) else Slot("", "0", false)
-    case _ => emitExpr(el, Str.concat(prefix, "_e0"), strs, defs, ens, ps)
+    case _ => emitExprFid(el, Str.concat(prefix, "_e0"), strs, defs, ens, ps, fid)
   }
 
 def emitIoUnit(prefix: String): Slot =

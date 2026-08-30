@@ -74,7 +74,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **Fingerprint** (incremental): miss → rebuild. The fingerprint includes compiler/runtime identity, native sources, target, clang version, Skia backend, and verify mode. Live (`fingerprint`) and verify (`fingerprint.verify`) share `build/` artifacts. A compile writes its mode file and deletes the sibling so a later switch rebuilds. No `scuzz clean` ritual.
 - **Native make:** quiet on success. A failed `make` prints the log. Clang compiles `.ll` without C `-I`. Link uses `-Wno-override-module` (IR has no host triple).
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
-- **`scuzz package`:** Android runs `crates/embedder-mobile/shells/android/build_ndk.sh` and emits `libscuzz.so` (needs the NDK). iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. Not a Gradle/CocoaPods API.
+- **`scuzz package`:** Android runs `crates/embedder-mobile/shells/android/build_ndk.sh` and emits `libscuzz.so` (needs the NDK). The same command installs the APK when `adb` lists a device. No device is not a failure. iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. Not a Gradle/CocoaPods API.
 
 ### Self-hosting
 
