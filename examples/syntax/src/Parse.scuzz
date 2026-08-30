@@ -51,7 +51,7 @@ def _at(toks: List[Tok], i: Int): Tok =
   List.at(toks, i)
 
 def _is(toks: List[Tok], i: Int, t: Tok): Bool =
-  _at(toks, i) == t
+  Lexer.kind(_at(toks, i)) == Lexer.kind(t)
 
 def _identOf(t: Tok): String =
   t match {
@@ -902,7 +902,7 @@ def prettyExpr(e: Expr, n: Int): String =
     case Expr.ECall(f, args) => Str.concat(_pad(n), Str.concat(f, Str.concat("(", Str.concat(_commaExprs(args), ")"))))
     case Expr.EMethod(recv, name, args) => Str.concat(_pad(n), Str.concat(pretty0(recv), Str.concat(".", Str.concat(name, Str.concat("(", Str.concat(_commaExprs(args), ")"))))))
     case Expr.EField(recv, name) => Str.concat(_pad(n), Str.concat(pretty0(recv), Str.concat(".", name)))
-    case Expr.EBin(op, l, r) => if (op == "::") Str.concat(_pad(n), Str.concat(_prettyConsL(l), Str.concat(" :: ", pretty0(r)))) else Str.concat(_pad(n), Str.concat(pretty0(l), Str.concat(" ", Str.concat(op, Str.concat(" ", pretty0(r))))))
+    case Expr.EBin(op, l, r) => Str.concat(_pad(n), prettyBin(op, l, r))
     case Expr.EUn(op, inner) => Str.concat(_pad(n), Str.concat(op, pretty0(inner)))
     case Expr.ELam(p, body) => Str.concat(_pad(n), Str.concat(p, Str.concat(" => ", pretty0(body))))
     case Expr.EIf(c, t, el) => Str.concat(_pad(n), Str.concat("if (", Str.concat(pretty0(c), Str.concat(") ", Str.concat(pretty0(t), Str.concat(" else ", pretty0(el)))))))
@@ -915,6 +915,24 @@ def prettyExpr(e: Expr, n: Int): String =
     case Expr.EList(xs) => Str.concat(_pad(n), Str.concat("[", Str.concat(_commaExprs(xs), "]")))
     case Expr.ETuple(xs) => Str.concat(_pad(n), Str.concat("(", Str.concat(_commaExprs(xs), ")")))
     case Expr.ENamed(name, e) => Str.concat(_pad(n), Str.concat(name, Str.concat(" = ", pretty0(e))))
+  }
+
+def prettyBin(op: String, l: Expr, r: Expr): String =
+  if (op == "::") Str.concat(_prettyConsL(l), Str.concat(" :: ", pretty0(r))) else Str.concat(_prettyBinL(op, l), Str.concat(" ", Str.concat(op, Str.concat(" ", _prettyBinR(op, r)))))
+
+def binPrec(op: String): Int =
+  if (op == "||") 1 else if (op == "&&") 2 else if (op == "|") 3 else if (op == "^") 4 else if (op == "&") 5 else if (op == "<<" || op == ">>") 7 else if (op == "+" || op == "-") 8 else if (op == "*" || op == "/" || op == "%") 9 else if (op == "::") 10 else 6
+
+def _prettyBinL(op: String, e: Expr): String =
+  e match {
+    case Expr.EBin(o2, _, _) => if (binPrec(o2) < binPrec(op)) Str.concat("(", Str.concat(pretty0(e), ")")) else pretty0(e)
+    case _ => pretty0(e)
+  }
+
+def _prettyBinR(op: String, e: Expr): String =
+  e match {
+    case Expr.EBin(o2, _, _) => if (binPrec(o2) <= binPrec(op)) Str.concat("(", Str.concat(pretty0(e), ")")) else pretty0(e)
+    case _ => pretty0(e)
   }
 
 def _prettyConsL(e: Expr): String =
@@ -990,9 +1008,12 @@ def prettyFun(d: Fun): String =
 """, prettyExpr(d.body, 1))))))))))
 
 def prettyDefs(ds: List[Fun]): String =
-  if (List.isEmpty(ds)) "" else Str.concat(prettyFun(List.head(ds)), Str.concat("""
+  if (List.isEmpty(ds)) "" else Builder.result(prettyDefsGo(ds, Builder.empty()))
 
-""", prettyDefs(List.tail(ds))))
+def prettyDefsGo(ds: List[Fun], b: Builder): Builder =
+  if (List.isEmpty(ds)) b else prettyDefsGo(List.tail(ds), Builder.append(Builder.append(b, prettyFun(List.head(ds))), """
+
+"""))
 
 def prettyMain(name: String, body: Expr): String =
   if (name == "") "" else Str.concat("@main def ", Str.concat(name, Str.concat(""": IO[Unit] =
@@ -1113,5 +1134,5 @@ def parseFiles3(f: (String, String), rest: List[(String, String)], acc: Prog): P
   }
 
 def pretty(p: Prog): String =
-  Str.concat(prettyPkg(p.pkg), Str.concat(prettyEnums(p.enums), Str.concat(prettyAliases(p.aliases), Str.concat(prettyTraits(p.traits), Str.concat(prettyImpls(p.impls), Str.concat(prettyImps(p.imps, !(List.isEmpty(p.defs) && p.main == "")), Str.concat(prettyDefs(p.defs), prettyMain(p.main, p.body))))))))
+  Str.concat(prettyPkg(p.pkg), Str.concat(prettyEnums(p.enums), Str.concat(prettyAliases(p.aliases), Str.concat(prettyTraits(p.traits), Str.concat(prettyImpls(p.impls), Str.concat(prettyImps(p.imps, !List.isEmpty(p.defs) && p.main == ""), Str.concat(prettyDefs(p.defs), prettyMain(p.main, p.body))))))))
 

@@ -1962,7 +1962,7 @@ typedef struct Sched {
 
 static Sched *g_sched = NULL;
 
-/* Same LCG as `scuzz fuzz` schedule search (`crates/compiler/src/fuzz.rs`). */
+/* Same LCG as `scuzz fuzz` schedule search. */
 enum { SZ_LCG_M = 2147483647, SZ_LCG_A = 48271, SZ_LCG_SEED_MOD = 2147483646 };
 
 static int32_t sched_lcg_seed(int32_t seed) {
@@ -1977,7 +1977,7 @@ static int32_t sched_lcg_next(int32_t s) {
 }
 
 /* Packed SCUZZ_SCHED_SEED: k = s%8, d = 2+(s/8)%4, rng = s/32.
- * Same mapping as `decode_sched_seed` in crates/compiler/src/fuzz.rs.
+ * Packed seed decode matches `scuzz fuzz` schedule search.
  * SCUZZ_PCT_D / SCUZZ_PCT_K override the decoded pair when set. */
 static void sched_decode_packed(long long packed, int *d, int *k, int32_t *rng) {
   long long s = packed < 0 ? 0 : packed;

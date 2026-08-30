@@ -12,7 +12,6 @@ Fail on the first missing tool with one install line.
 | `make` | `crates/runtime`, `ffi-skia`, embedders |
 | `curl` | fetch tagged `v0.2.0` `scuzz` (`scripts/bootstrap.sh`) |
 | `zlib` + `bzip2` | Linux Skia CPU prebuilt |
-| Rust stable (`cargo`, `rustc`, `rustfmt`, `clippy`) | in-tree Rust compiler crates (`crates/compiler`, `crates/cli`) |
 
 ```bash
 # Debian/Ubuntu
@@ -41,7 +40,7 @@ ASan skips when the ASan runtime cannot link. GPU needs `LIBGL_ALWAYS_SOFTWARE=1
 ./scripts/install-githooks.sh
 ```
 
-A pre-commit hook checks conflict markers. When you stage `.rs`, it runs `./scripts/check-fmt-clippy.sh` (same rustfmt + clippy gate as CI). When you stage runtime, ffi-skia, or embedder `.c`, it compiles with `-Werror`. Bypass with `git commit --no-verify`.
+A pre-commit hook checks conflict markers. When you stage runtime, ffi-skia, or embedder `.c`, it compiles with `-Werror`. Bypass with `git commit --no-verify`.
 
 ## Prove the host
 
@@ -50,8 +49,6 @@ A pre-commit hook checks conflict markers. When you stage `.rs`, it runs `./scri
 ./examples/cli/build/cli test examples/hello
 make -C crates/runtime test CC=clang
 make -C crates/runtime test-asan CC=clang   # skip if ASan cannot link
-./scripts/check-fmt-clippy.sh
-cargo test -p scuzz-compiler
 ```
 
 Full Linux job: `.github/workflows/ci.yml` (`linux-headless`).

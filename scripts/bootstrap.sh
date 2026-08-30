@@ -65,12 +65,14 @@ download_bootstrap() {
   url="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
   sums_url="https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS"
   echo "==> downloading $url" >&2
-  fetch "$tgz" "$url" || die "no bootstrap $ASSET for $TAG" \
-    "tried: $url" \
-    "shipped triples: linux-x86_64, darwin-arm64" \
-    "or set SCUZZ_BOOTSTRAP to that tagged binary"
-  fetch "$sums" "$sums_url" || die "SHA256SUMS missing for $TAG" \
-    "tried: $sums_url"
+  if ! fetch "$tgz" "$url"; then
+    rm -rf "$work"
+    return 1
+  fi
+  if ! fetch "$sums" "$sums_url"; then
+    rm -rf "$work"
+    return 1
+  fi
   expected="$(awk -v f="$ASSET" '$2 == f || $2 == ("./" f) || $2 == ("*" f) { print $1; exit }' "$sums")"
   if [ -z "$expected" ]; then
     die "SHA256SUMS has no entry for $ASSET" \
@@ -110,7 +112,10 @@ resolve_bootstrap() {
   fi
   bin="$CACHE/$TAG/scuzz"
   if [ ! -x "$bin" ]; then
-    download_bootstrap
+    if ! download_bootstrap; then
+      die "no bootstrap $ASSET for $TAG" \
+        "publish $TAG or set SCUZZ_BOOTSTRAP to that tagged binary"
+    fi
   fi
   printf '%s\n' "$bin"
 }

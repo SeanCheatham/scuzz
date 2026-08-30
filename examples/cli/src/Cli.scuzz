@@ -14,6 +14,8 @@ enum Cmd:
   case Ide(path: String, outDir: String, headless: Bool)
   case Package(path: String, outDir: String, target: String)
 
+import Manifest.Man
+
 def arg(xs: List[String], i: Int): String =
   if (i < 0 || i >= List.len(xs)) "" else List.at(xs, i)
 
@@ -363,18 +365,19 @@ def runCmd(c: Cmd, src: String): String =
 def dispatch(c: Cmd): IO[Unit] =
   c match {
     case Cmd.Build(path, outDir, full, _) => dispatchBuild(path, outDir, full)
-    case Cmd.Run(path, outDir, headless, _, _, _) => dispatchRun(path, outDir, headless)
+    case Cmd.Run(path, outDir, headless, watch, script, dump) => dispatchRunCmd(path, outDir, headless, watch, script, dump)
+    case Cmd.Watch(path, outDir) => dispatchWatch(path, outDir)
     case Cmd.Check(path, json) => Drive.checkDir(path, json)
     case Cmd.Fmt(path, check) => dispatchFmt(path, check)
-    case Cmd.Test(path, update, _, _) => dispatchTest(path, update)
+    case Cmd.Test(path, update, pixels, differential) => dispatchTest(path, update, pixels, differential)
     case Cmd.New(name, path, ui) => dispatchNew(name, path, ui)
     case Cmd.Package(path, outDir, target) => dispatchPkg(path, outDir, target)
     case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, _, relate) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles)
     case Cmd.Ide(path, outDir, headless) => dispatchIde(path, outDir, headless)
+    case Cmd.Lsp(path) => Lsp.run(path)
     case Cmd.Help(t) => IO.println(helpOf(t))
     case Cmd.Version => IO.println("scuzz 0.2.0")
     case Cmd.Fail(m) => IO.println(m)
-    case _ => IO.println(show(c))
   }
 
 def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
@@ -387,27 +390,90 @@ def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool
   if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast, oracles)
 
 def dispatchIde(_path: String, outDir: String, headless: Bool): IO[Unit] =
-  dispatchRun("examples/editor", outDir, headless)
+  dispatchRun("examples/editor", outDir, headless, "", "")
 
 def dispatchBuild(path: String, outDir: String, full: Bool): IO[Unit] =
   Fs.mkdirs(outDir).flatMap(_ => Drive.emitDir(path, outDir, full))
 
-def dispatchRun(path: String, outDir: String, headless: Bool): IO[Unit] =
-  dispatchRunOut(path, pkgOut(path, outDir), headless)
+def dispatchRunCmd(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String): IO[Unit] =
+  if (watch && script != "" || dump != "") IO.println("scuzz run --watch does not accept --script or --dump. Run without --watch: scuzz run --headless --script PATH --dump PATH") else if (watch) dispatchRunWatch(path, outDir, headless) else dispatchRun(path, outDir, headless, script, dump)
+
+def dispatchWatch(path: String, outDir: String): IO[Unit] =
+  IO.println(Str.concat("scuzz watch ", Str.concat(path, " (rebuild on change; not hot reload)"))).flatMap(_ => watchBuild(path, pkgOut(path, outDir)))
+
+def watchBuild(path: String, out: String): IO[Unit] =
+  Fs.mkdirs(out).flatMap(_ => Drive.emitDir(path, out, false).flatMap(_ => IO.sleep(400).flatMap(_ => watchBuild(path, out))))
+
+def dispatchRunWatch(path: String, outDir: String, headless: Bool): IO[Unit] =
+  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => dispatchRunWatchMan(path, pkgOut(path, outDir), headless, Manifest.parse(toml)))
+
+def dispatchRunWatchMan(path: String, out: String, headless: Bool, m: Man): IO[Unit] =
+  if (!m.ok) IO.println(m.err) else if (m.hasUi) watchUi(path, out, headless, m.name) else watchIo(path, out, m.name)
+
+def watchIo(path: String, out: String, name: String): IO[Unit] =
+  IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (rebuild and rerun on source change; kills a still-running process; not hot reload)"))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name)))))
+
+def watchIoLoop(path: String, out: String, name: String): IO[Unit] =
+  Sys.spawn(Drive.exeName(out, name)).flatMap(pid => watchIoPoll(path, out, name, pid))
+
+def watchIoPoll(path: String, out: String, name: String, pid: Int): IO[Unit] =
+  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => IO.sleep(400).flatMap(_ => watchIoTick(path, out, name, pid, old)))
+
+def watchIoTick(path: String, out: String, name: String, pid: Int, old: String): IO[Unit] =
+  Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchIoTick2(path, out, name, pid, old, now)))
+
+def watchIoTick2(path: String, out: String, name: String, pid: Int, old: String, now: String): IO[Unit] =
+  Sys.alive(pid).flatMap(live => watchIoTick3(path, out, name, pid, old, now, live))
+
+def watchIoTick3(path: String, out: String, name: String, pid: Int, old: String, now: String, live: Int): IO[Unit] =
+  if (now != old) Sys.kill(pid).flatMap(_ => Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name))) else if (live == 0) IO.sleep(60000).flatMap(_ => watchIoLoop(path, out, name)) else watchIoPoll(path, out, name, pid)
+
+def watchUi(path: String, out: String, headless: Bool, name: String): IO[Unit] =
+  IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (hot reload: recompiles build/reload.dylib then stamp-reloads View tree)"))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), """0
+""").flatMap(_ => watchUiBoot(path, out, headless, name, 0))))
+
+def watchUiBoot(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
+  Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out).flatMap(_ => watchUiSpawn(path, out, headless, name, gen))))
+
+def watchUiSpawn(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
+  Sys.spawn(Str.concat(watchUiEnv(out, headless), Drive.exeName(out, name))).flatMap(pid => watchUiPoll(path, out, headless, name, gen, pid))
+
+def watchUiEnv(out: String, headless: Bool): String =
+  Str.concat(if (headless) Drive.snapEnv(out) else "", Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.joinSlash(out, "reload.stamp"), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.joinSlash(out, "reload.dylib"), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.joinSlash(out, "debug.dump"), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.joinSlash(out, "inject.script"), " ")))))))))
+
+def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
+  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => IO.sleep(400).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
+
+def watchUiTick(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String): IO[Unit] =
+  Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, headless, name, gen, pid, old, now)))
+
+def watchUiTick2(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String): IO[Unit] =
+  Sys.alive(pid).flatMap(live => watchUiTick3(path, out, headless, name, gen, pid, old, now, live))
+
+def watchUiTick3(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String, live: Int): IO[Unit] =
+  if (live == 0) watchUiBoot(path, out, headless, name, gen) else if (now != old) watchUiReload(path, out, headless, name, gen + 1, pid) else watchUiPoll(path, out, headless, name, gen, pid)
+
+def watchUiReload(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
+  Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), Str.concat(Str.fromInt(gen), """
+""")).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, headless, name, gen, pid)))))
+
+def dispatchRun(path: String, outDir: String, headless: Bool, script: String, dump: String): IO[Unit] =
+  dispatchRunOut(path, pkgOut(path, outDir), headless, script, dump)
 
 def pkgOut(path: String, outDir: String): String =
   if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir)
 
-def dispatchRunOut(path: String, out: String, headless: Bool): IO[Unit] =
-  Fs.mkdirs(out).flatMap(_ => Drive.runDir(path, out, if (headless) Drive.snapEnv(out) else ""))
+def dispatchRunOut(path: String, out: String, headless: Bool, script: String, dump: String): IO[Unit] =
+  Fs.mkdirs(out).flatMap(_ => Drive.runDir(path, out, runEnv(out, headless, script, dump)))
 
-def dispatchTest(path: String, update: Bool): IO[Unit] =
-  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build"), update))
+def runEnv(out: String, headless: Bool, script: String, dump: String): String =
+  Str.concat(if (headless) Drive.snapEnv(out) else "", Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(script, " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " "))))
+
+def dispatchTest(path: String, update: Bool, pixels: Bool, differential: Bool): IO[Unit] =
+  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build"), update, pixels, differential))
 
 def dispatchFmt(path: String, check: Bool): IO[Unit] =
-  Fs.list(Drive.joinSlash(path, "src")).flatMap(ents =>
-    Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0))
-  )
+  Fs.list(Drive.joinSlash(path, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0)))
 
 def fmtFiles(dir: String, check: Bool, files: List[(String, String)], dirty: Int): IO[Unit] =
   if (List.isEmpty(files)) fmtDone(check, dirty) else fmtFilesGo(dir, check, List.head(files), files, dirty)
@@ -424,9 +490,7 @@ def fmtOnePath(check: Bool, path: String, src: String): IO[Int] =
   fmtOneGot(check, path, src, fmtSrc(src))
 
 def fmtOneGot(check: Bool, path: String, src: String, pretty: String): IO[Int] =
-  if (pretty == src) IO.pure(0) else if (check) IO.println(Str.concat("would reformat ", path)).map(_ => 1) else Fs.write(path, pretty).flatMap(_ =>
-  IO.println(Str.concat("formatted ", path)).map(_ => 1)
-)
+  if (pretty == src) IO.pure(0) else if (check) IO.println(Str.concat("would reformat ", path)).map(_ => 1) else Fs.write(path, pretty).flatMap(_ => IO.println(Str.concat("formatted ", path)).map(_ => 1))
 
 def fmtDone(check: Bool, dirty: Int): IO[Unit] =
   if (check && dirty > 0) IO.println(Str.concat(Str.fromInt(dirty), " file(s) need formatting")).flatMap(_ => IO.fail("scuzz fmt")) else IO.println("scuzz fmt ok")

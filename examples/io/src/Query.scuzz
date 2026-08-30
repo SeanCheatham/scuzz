@@ -30,7 +30,7 @@ private def printSet(j: Json): IO[Unit] =
 
 private def printArrWrite(): IO[Unit] =
   for {
-    a = Json.append(Json.Null, Json.Int(1))
+    a = Json.append(Json.Null(), Json.Int(1))
     p = Json.prepend(a, Json.Int(0))
     u = Json.setAt(p, 1, Json.Int(9))
     d = Json.dropAt(u, 0)
@@ -68,7 +68,7 @@ private def objKitOk(j: Json): IO[Unit] =
     _ <- printArr(j)
     got = Json.get(j, "xs")
     _ <- IO.println(s"getXs:${Str.fromInt(List.len(got))}")
-    inner = if (List.isEmpty(got)) Json.Null else List.head(got)
+    inner = if (List.isEmpty(got)) Json.Null() else List.head(got)
     _ <- printArr(inner)
     _ <- printAt(inner, 1)
     _ <- printAt(inner, 9)
@@ -87,20 +87,19 @@ private def objKit(): IO[Unit] =
 private def mergeKit(): IO[Unit] =
   Json.parse("{\"n\":1}") match {
     case Result.Err(_) => IO.println("merge:err")
-    case Result.Ok(a) =>
-      Json.parse("{\"n\":9,\"k\":2}") match {
-        case Result.Err(_) => IO.println("merge:err")
-        case Result.Ok(b) => printMerge(a, b)
-      }
+    case Result.Ok(a) => Json.parse("{\"n\":9,\"k\":2}") match {
+  case Result.Err(_) => IO.println("merge:err")
+  case Result.Ok(b) => printMerge(a, b)
+}
   }
 
 private def missKit(): IO[Unit] =
   for {
-    _ <- printKeys(Json.Null)
-    _ <- printArr(Json.Null)
-    _ <- printAt(Json.Null, 0)
-    _ <- printHas(Json.Null, "a")
-    _ <- IO.println(Str.concat("asInt:", Str.fromInt(List.len(Json.asInt(Json.Null)))))
+    _ <- printKeys(Json.Null())
+    _ <- printArr(Json.Null())
+    _ <- printAt(Json.Null(), 0)
+    _ <- printHas(Json.Null(), "a")
+    _ <- IO.println(Str.concat("asInt:", Str.fromInt(List.len(Json.asInt(Json.Null())))))
   } yield ()
 
 def run(): IO[Unit] =
@@ -110,3 +109,4 @@ def run(): IO[Unit] =
     _ <- missKit()
     _ <- printArrWrite()
   } yield ()
+

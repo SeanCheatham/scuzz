@@ -10,3 +10,4 @@ def showPing(p: (Unit, String)): IO[Unit] =
 
 def run(): IO[Unit] =
   IO.both(Net.serveOnce(8080, path => handle(path)), Net.httpGet("http://127.0.0.1:8080/ping")).flatMap(p => showPing(p))
+

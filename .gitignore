@@ -1,9 +1,8 @@
-/target/
-**/*.rs.bk
 *.o
 *.ll
 *.bc
 /dist/
+examples/jump/src/
 .bootstrap/
 build/
 **/.scuzz/

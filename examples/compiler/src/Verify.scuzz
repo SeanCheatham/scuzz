@@ -325,7 +325,9 @@ def nextSp(line: String, i: Int): Int =
   if (i >= Str.len(line)) i else if (Str.charAt(line, i) == 32) i else nextSp(line, i + 1)
 
 def classRow2(name: String, rest: String): String =
-  if (name == "") "" else Str.concat(name, Str.concat("_true = ", Str.concat(classYes(rest), Str.concat("\n", Str.concat(name, Str.concat("_false = ", Str.concat(classNo(rest), "\n")))))))
+  if (name == "") "" else Str.concat(name, Str.concat("_true = ", Str.concat(classYes(rest), Str.concat("""
+""", Str.concat(name, Str.concat("_false = ", Str.concat(classNo(rest), """
+""")))))))
 
 def classYes(rest: String): String =
   classTok(rest, 0)
@@ -450,7 +452,8 @@ def wrapRel(d: Fun): String =
   }
 
 def wrapRel2(name: String, ps: String, body: String): String =
-  Str.concat("def ", Str.concat(name, Str.concat("(", Str.concat(ps, Str.concat("): Verdict =\n  ", Str.concat(body, """
+  Str.concat("def ", Str.concat(name, Str.concat("(", Str.concat(ps, Str.concat("""): Verdict =
+  """, Str.concat(body, """
 
 """))))))
 

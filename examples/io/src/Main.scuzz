@@ -1,16 +1,8 @@
 def liveClock(): IO[Unit] =
-  Clock.realTime().flatMap(t =>
-    IO.println(s"real:$t").flatMap(_ =>
-      Clock.monotonic().flatMap(m => IO.println(s"mono:$m"))
-    )
-  )
+  Clock.realTime().flatMap(t => IO.println(s"real:$t").flatMap(_ => Clock.monotonic().flatMap(m => IO.println(s"mono:$m"))))
 
 def liveFs(): IO[Unit] =
-  Fs.mkdirs("examples/io/build").flatMap(_ =>
-    Fs.write("examples/io/build/note.txt", "fs-note").flatMap(_ =>
-      Fs.read("examples/io/build/note.txt").flatMap(s => IO.println(s"fs:$s"))
-    )
-  )
+  Fs.mkdirs("examples/io/build").flatMap(_ => Fs.write("examples/io/build/note.txt", "fs-note").flatMap(_ => Fs.read("examples/io/build/note.txt").flatMap(s => IO.println(s"fs:$s"))))
 
 def maybeKit(): IO[Unit] =
   Sys.getenv("SCUZZ_KIT").flatMap(t => if (Str.len(t) == 0) IO.println("kit:skip") else Impurity.runKit())
@@ -19,11 +11,7 @@ def maybeServe(): IO[Unit] =
   Sys.getenv("SCUZZ_SERVE").flatMap(t => if (Str.len(t) == 0) IO.println("serve:skip") else Server.run())
 
 def envProbe(): IO[Unit] =
-  Sys.getenv("HOME").flatMap(h =>
-    IO.println(s"env:home:$h").flatMap(_ =>
-      Sys.getenv("SCUZZ_KIT").flatMap(k => IO.println(s"env:kit:$k"))
-    )
-  )
+  Sys.getenv("HOME").flatMap(h => IO.println(s"env:home:$h").flatMap(_ => Sys.getenv("SCUZZ_KIT").flatMap(k => IO.println(s"env:kit:$k"))))
 
 @main def main: IO[Unit] =
   for {

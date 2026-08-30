@@ -1,10 +1,10 @@
 def jsonField(obj: Json, key: String): Json =
   obj match {
     case Json.Obj(pairs) => List.find(pairs, p => p._1 == key) match {
-  case [] => Json.Null
+  case [] => Json.Null()
   case x :: _ => x._2
 }
-    case _ => Json.Null
+    case _ => Json.Null()
   }
 
 def jsonStr(j: Json): String =
@@ -31,7 +31,7 @@ def diagFile(s: String): String =
 def diagRows(j: Json): List[String] =
   j match {
     case Json.Arr(xs) => List.map(xs, diagRow)
-    case _ => []: List[String]
+    case _ => []
   }
 
 def diagMark(item: Json): (Int, Int) =
@@ -40,7 +40,7 @@ def diagMark(item: Json): (Int, Int) =
 def diagMarks(j: Json): List[(Int, Int)] =
   j match {
     case Json.Arr(xs) => List.map(xs, diagMark)
-    case _ => []: List[(Int, Int)]
+    case _ => []
   }
 
 def jumpDiag(s: String): IO[Unit] =

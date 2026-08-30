@@ -60,6 +60,70 @@ enum Tok:
   case Float(s: String)
   case Interp(s: String)
 
+def kind(t: Tok): Int =
+  t match {
+    case Tok.Eof => 0
+    case Tok.AtMain => 1
+    case Tok.At => 2
+    case Tok.Package => 3
+    case Tok.Enum => 4
+    case Tok.Record => 5
+    case Tok.TypeKw => 6
+    case Tok.Trait => 7
+    case Tok.Impl => 8
+    case Tok.Case => 9
+    case Tok.Match => 10
+    case Tok.Def => 11
+    case Tok.Where => 12
+    case Tok.Private => 13
+    case Tok.Import => 14
+    case Tok.For => 15
+    case Tok.Yield => 16
+    case Tok.If => 17
+    case Tok.Else => 18
+    case Tok.True => 19
+    case Tok.False => 20
+    case Tok.Colon => 21
+    case Tok.ColonColon => 22
+    case Tok.Eq => 23
+    case Tok.Dot => 24
+    case Tok.Comma => 25
+    case Tok.LParen => 26
+    case Tok.RParen => 27
+    case Tok.LBrace => 28
+    case Tok.RBrace => 29
+    case Tok.LBracket => 30
+    case Tok.RBracket => 31
+    case Tok.Arrow => 32
+    case Tok.LeftArrow => 33
+    case Tok.Underscore => 34
+    case Tok.Plus => 35
+    case Tok.Minus => 36
+    case Tok.Star => 37
+    case Tok.Slash => 38
+    case Tok.Percent => 39
+    case Tok.EqEq => 40
+    case Tok.BangEq => 41
+    case Tok.Bang => 42
+    case Tok.Lt => 43
+    case Tok.LtEq => 44
+    case Tok.Gt => 45
+    case Tok.GtEq => 46
+    case Tok.AmpAmp => 47
+    case Tok.Amp => 48
+    case Tok.Pipe => 49
+    case Tok.PipePipe => 50
+    case Tok.Caret => 51
+    case Tok.Tilde => 52
+    case Tok.Shl => 53
+    case Tok.Shr => 54
+    case Tok.Ident(_) => 55
+    case Tok.Str(_) => 56
+    case Tok.Int(_) => 57
+    case Tok.Float(_) => 58
+    case Tok.Interp(_) => 59
+  }
+
 def _ch(src: String, i: Int): Int =
   Str.charAt(src, i)
 
@@ -173,28 +237,28 @@ def _hexVal(c: Int): Int =
   if (_isDigit(c)) c - 48 else if (c >= 97) c - 87 else c - 55
 
 def _lexInt(src: String, i: Int, acc: List[Tok]): List[Tok] =
-  if (i + 1 < Str.len(src) && _ch(src, i) == 48 && (_ch(src, i + 1) == 120 || _ch(src, i + 1) == 88)) _lexHex(src, i + 2, 0, acc) else if (i + 1 < Str.len(src) && _ch(src, i) == 48 && (_ch(src, i + 1) == 98 || _ch(src, i + 1) == 66)) _lexBin(src, i + 2, 0, acc) else _lexDec(src, i, i, 0, acc)
+  if (i + 1 < Str.len(src) && _ch(src, i) == 48 && _ch(src, i + 1) == 120 || _ch(src, i + 1) == 88) _lexHex(src, i + 2, 0, acc) else if (i + 1 < Str.len(src) && _ch(src, i) == 48 && _ch(src, i + 1) == 98 || _ch(src, i + 1) == 66) _lexBin(src, i + 2, 0, acc) else _lexDec(src, i, i, 0, acc)
 
 def _lexHex(src: String, i: Int, n: Int, acc: List[Tok]): List[Tok] =
   if (i < Str.len(src) && _isHex(_ch(src, i))) _lexHex(src, i + 1, n * 16 + _hexVal(_ch(src, i)), acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _isHex(_ch(src, i + 1))) _lexHex(src, i + 1, n, acc) else lexAt(src, i, Tok.Int(n) :: acc)
 
 def _lexBin(src: String, i: Int, n: Int, acc: List[Tok]): List[Tok] =
-  if (i < Str.len(src) && (_ch(src, i) == 48 || _ch(src, i) == 49)) _lexBin(src, i + 1, n * 2 + (_ch(src, i) - 48), acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && (_ch(src, i + 1) == 48 || _ch(src, i + 1) == 49)) _lexBin(src, i + 1, n, acc) else lexAt(src, i, Tok.Int(n) :: acc)
+  if (i < Str.len(src) && _ch(src, i) == 48 || _ch(src, i) == 49) _lexBin(src, i + 1, n * 2 + _ch(src, i) - 48, acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _ch(src, i + 1) == 48 || _ch(src, i + 1) == 49) _lexBin(src, i + 1, n, acc) else lexAt(src, i, Tok.Int(n) :: acc)
 
 def _lexDec(src: String, start: Int, i: Int, n: Int, acc: List[Tok]): List[Tok] =
-  if (i < Str.len(src) && _isDigit(_ch(src, i))) _lexDec(src, start, i + 1, n * 10 + (_ch(src, i) - 48), acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _isDigit(_ch(src, i + 1))) _lexDec(src, start, i + 1, n, acc) else _lexNumFracVal(src, start, i, n, acc)
+  if (i < Str.len(src) && _isDigit(_ch(src, i))) _lexDec(src, start, i + 1, n * 10 + _ch(src, i) - 48, acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _isDigit(_ch(src, i + 1))) _lexDec(src, start, i + 1, n, acc) else _lexNumFracVal(src, start, i, n, acc)
 
 def _lexNumFracVal(src: String, start: Int, j: Int, n: Int, acc: List[Tok]): List[Tok] =
-  if (j < Str.len(src) && _ch(src, j) == 46 && j + 1 < Str.len(src) && _isDigit(_ch(src, j + 1))) _lexNumExp(src, start, _skipDigits(src, j + 1), true, acc) else if (j < Str.len(src) && (_ch(src, j) == 101 || _ch(src, j) == 69)) _lexNumExp2(src, start, j, acc) else lexAt(src, j, Tok.Int(n) :: acc)
+  if (j < Str.len(src) && _ch(src, j) == 46 && j + 1 < Str.len(src) && _isDigit(_ch(src, j + 1))) _lexNumExp(src, start, _skipDigits(src, j + 1), true, acc) else if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, acc) else lexAt(src, j, Tok.Int(n) :: acc)
 
 def _lexNumFrac(src: String, start: Int, j: Int, acc: List[Tok]): List[Tok] =
   if (j < Str.len(src) && _ch(src, j) == 46 && j + 1 < Str.len(src) && _isDigit(_ch(src, j + 1))) _lexNumExp(src, start, _skipDigits(src, j + 1), true, acc) else _lexNumExp(src, start, j, false, acc)
 
 def _lexNumExp(src: String, start: Int, j: Int, isF: Bool, acc: List[Tok]): List[Tok] =
-  if (j < Str.len(src) && (_ch(src, j) == 101 || _ch(src, j) == 69)) _lexNumExp2(src, start, j, acc) else if (isF) lexAt(src, j, Tok.Float(Str.slice(src, start, j)) :: acc) else lexAt(src, j, Tok.Int(Str.toInt(Str.slice(src, start, j), 0)) :: acc)
+  if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, acc) else if (isF) lexAt(src, j, Tok.Float(Str.slice(src, start, j)) :: acc) else lexAt(src, j, Tok.Int(Str.toInt(Str.slice(src, start, j), 0)) :: acc)
 
 def _lexNumExp2(src: String, start: Int, j: Int, acc: List[Tok]): List[Tok] =
-  _lexNumExp3(src, start, j, if (j + 1 < Str.len(src) && (_ch(src, j + 1) == 43 || _ch(src, j + 1) == 45)) j + 2 else j + 1, acc)
+  _lexNumExp3(src, start, j, if (j + 1 < Str.len(src) && _ch(src, j + 1) == 43 || _ch(src, j + 1) == 45) j + 2 else j + 1, acc)
 
 def _lexNumExp3(src: String, start: Int, e: Int, k: Int, acc: List[Tok]): List[Tok] =
   if (k < Str.len(src) && _isDigit(_ch(src, k))) lexAt(src, _skipDigits(src, k), Tok.Float(Str.slice(src, start, _skipDigits(src, k))) :: acc) else if (e > start) lexAt(src, e, Tok.Int(Str.toInt(Str.slice(src, start, e), 0)) :: acc) else lexAt(src, e, Tok.Int(Str.toInt(Str.slice(src, start, e), 0)) :: acc)

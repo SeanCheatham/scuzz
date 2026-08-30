@@ -7,8 +7,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 HOOKS_PATH=scripts/githooks
-chmod +x "$HOOKS_PATH/pre-commit" scripts/check-fmt-clippy.sh
+chmod +x "$HOOKS_PATH/pre-commit"
 
 git config core.hooksPath "$HOOKS_PATH"
 echo "core.hooksPath → $HOOKS_PATH"
-echo "pre-commit checks: conflict markers, rustfmt+clippy when you stage .rs, -Werror compile on staged runtime/ffi/embedder .c"
+echo "pre-commit checks: conflict markers, -Werror compile on staged runtime/ffi/embedder .c"

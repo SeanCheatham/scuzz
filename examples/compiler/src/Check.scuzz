@@ -77,6 +77,15 @@ def funRetOfAt2(t: String, i: Int): String =
 def sliceEq(t: String, i: Int, w: String): Bool =
   Str.slice(t, i, i + Str.len(w)) == w
 
+def findFunPrefer(funs: List[Fun], name: String, env: List[(String, String)]): List[Fun] =
+  findFunPrefer2(funs, name, getTy(env, "#mod"))
+
+def findFunPrefer2(funs: List[Fun], name: String, mod: String): List[Fun] =
+  if (mod == "") findFun(funs, name) else findFunPrefer3(findFunMod(funs, mod, name), funs, name)
+
+def findFunPrefer3(hit: List[Fun], funs: List[Fun], name: String): List[Fun] =
+  if (List.isEmpty(hit)) findFun(funs, name) else hit
+
 def findFun(funs: List[Fun], name: String): List[Fun] =
   if (List.isEmpty(funs)) [] else findFun1(List.head(funs), List.tail(funs), name)
 
@@ -108,28 +117,31 @@ def stripNamed(e: Expr): Expr =
   }
 
 def isKit(f: String): Bool =
-  isKitA(f) || isKitB(f) || isKitC(f)
+  isKitA(f) || isKitB(f) || isKitC(f) || isKitD(f)
 
 def isKitA(f: String): Bool =
-  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "Str.repeat" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "List.join" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.last" || f == "List.flatten"
+  f == "Str.fromInt" || f == "Str.concat" || f == "Str.len" || f == "Str.fromBool" || f == "Str.charAt" || f == "Str.slice" || f == "Str.toInt" || f == "Str.repeat" || f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "List.join" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.last" || f == "List.flatten"
 
 def isKitB(f: String): Bool =
-  f == "Builder.empty" || f == "Builder.append" || f == "Builder.result" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "Fs.mkdirs" || f == "Sys.args" || f == "Sys.getenv" || f == "Sys.write" || f == "Impurity.runKit" || f == "IO.pure" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Map.empty" || f == "Map.set" || f == "Map.keys" || f == "Map.values" || f == "Map.size" || f == "Map.contains" || f == "Map.getOrElse" || f == "Map.remove" || f == "Map.toList"
+  f == "Builder.empty" || f == "Builder.append" || f == "Builder.result" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "Fs.mkdirs" || f == "Sys.args" || f == "Sys.getenv" || f == "Sys.write" || f == "Sys.read" || f == "Sys.readLine" || f == "Sys.spawn" || f == "Sys.alive" || f == "Sys.kill" || f == "Impurity.runKit" || f == "IO.pure" || f == "IO.println" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Map.empty" || f == "Map.set" || f == "Map.keys" || f == "Map.values" || f == "Map.size" || f == "Map.contains" || f == "Map.getOrElse" || f == "Map.remove" || f == "Map.toList"
 
 def isKitC(f: String): Bool =
-  f == "Set.empty" || f == "Set.add" || f == "Set.toList" || f == "Set.size" || f == "Set.contains" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff" || f == "Json.keys" || f == "Json.get" || f == "Json.has" || f == "Json.parse" || f == "Json.getStr" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.arr" || f == "Json.at" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Json.pairs" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat" || f == "Json.Float" || f == "Json.floatOr" || isSysProc(f)
+  f == "Set.empty" || f == "Set.add" || f == "Set.toList" || f == "Set.size" || f == "Set.contains" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff" || f == "Json.keys" || f == "Json.get" || f == "Json.has" || f == "Json.parse" || f == "Json.getStr" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.arr" || f == "Json.at" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Json.pairs" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat" || f == "Json.Float" || f == "Json.floatOr" || f == "Json.Obj" || f == "Json.Str" || f == "Json.Bool" || f == "Json.Arr" || isSysProc(f)
+
+def isKitD(f: String): Bool =
+  f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank" || f == "Str.lines" || f == "Str.trim" || f == "Str.indexOf" || f == "Str.lastIndexOf" || f == "Str.take" || f == "Str.drop" || f == "Str.takeRight" || f == "Str.dropRight" || f == "Str.stripPrefix" || f == "Str.stripSuffix" || f == "Str.split" || f == "Fs.join" || f == "Fs.dirname" || f == "Fs.basename"
 
 def isSysProc(f: String): Bool =
   Str.startsWith(f, "Sys.e") && f != "Sys.error"
 
 def kitParams(f: String): List[String] =
-  if (f == "Str.fromInt") "Int" :: noStr() else if (f == "Str.concat") "String" :: "String" :: noStr() else if (f == "Str.len") "String" :: noStr() else if (f == "Str.fromBool") "Bool" :: noStr() else if (f == "Str.charAt") "String" :: "Int" :: noStr() else if (f == "Str.slice") "String" :: "Int" :: "Int" :: noStr() else if (f == "Str.toInt") "String" :: "Int" :: noStr() else if (f == "Str.repeat") "String" :: "Int" :: noStr() else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.init" || f == "List.last" || f == "List.flatten") "List" :: noStr() else if (f == "List.concat") "List" :: "List" :: noStr() else if (f == "List.join") "Any" :: "String" :: noStr() else if (f == "List.cons") "Any" :: "List" :: noStr() else if (f == "List.at" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight") "List" :: "Int" :: noStr() else if (f == "Builder.empty" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Map.empty" || f == "Set.empty" || f == "Impurity.runKit") noStr() else if (f == "Builder.append") "Builder" :: "String" :: noStr() else if (f == "Builder.result") "Builder" :: noStr() else if (f == "Fs.read" || f == "Fs.list" || f == "Fs.mkdirs" || f == "Sys.getenv" || f == "Sys.write" || isSysProc(f)) "String" :: noStr() else if (f == "Fs.write") "String" :: "String" :: noStr() else if (f == "IO.pure") "Any" :: noStr() else kitParams2(f)
+  if (f == "Str.fromInt") "Int" :: noStr() else if (f == "Str.concat") "String" :: "String" :: noStr() else if (f == "Str.len") "String" :: noStr() else if (f == "Str.fromBool") "Bool" :: noStr() else if (f == "Str.charAt") "String" :: "Int" :: noStr() else if (f == "Str.slice") "String" :: "Int" :: "Int" :: noStr() else if (f == "Str.toInt") "String" :: "Int" :: noStr() else if (f == "Str.repeat") "String" :: "Int" :: noStr() else if (f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.indexOf" || f == "Str.lastIndexOf") "String" :: "String" :: noStr() else if (f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank" || f == "Str.lines" || f == "Str.trim") "String" :: noStr() else if (f == "Str.take" || f == "Str.drop" || f == "Str.takeRight" || f == "Str.dropRight") "String" :: "Int" :: noStr() else if (f == "Str.stripPrefix" || f == "Str.stripSuffix" || f == "Str.split" || f == "Fs.join") "String" :: "String" :: noStr() else if (f == "Fs.dirname" || f == "Fs.basename") "String" :: noStr() else if (f == "List.len" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.init" || f == "List.last" || f == "List.flatten") "List" :: noStr() else if (f == "List.concat") "List" :: "List" :: noStr() else if (f == "List.join") "Any" :: "String" :: noStr() else if (f == "List.cons") "Any" :: "List" :: noStr() else if (f == "List.at" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight") "List" :: "Int" :: noStr() else if (f == "Builder.empty" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Map.empty" || f == "Set.empty" || f == "Impurity.runKit" || f == "Sys.readLine") noStr() else if (f == "Sys.read" || f == "Sys.alive" || f == "Sys.kill") "Int" :: noStr() else if (f == "Sys.spawn") "String" :: noStr() else if (f == "Builder.append") "Builder" :: "String" :: noStr() else if (f == "Builder.result") "Builder" :: noStr() else if (f == "Fs.read" || f == "Fs.list" || f == "Fs.mkdirs" || f == "Sys.getenv" || f == "Sys.write" || isSysProc(f)) "String" :: noStr() else if (f == "Fs.write") "String" :: "String" :: noStr() else if (f == "IO.pure") "Any" :: noStr() else kitParams2(f)
 
 def kitParams2(f: String): List[String] =
-  if (f == "Map.set") "Map" :: "String" :: "Any" :: noStr() else if (f == "Map.keys" || f == "Map.values" || f == "Map.size" || f == "Map.toList") "Map" :: noStr() else if (f == "Map.contains" || f == "Map.remove") "Map" :: "String" :: noStr() else if (f == "Map.getOrElse") "Map" :: "String" :: "Any" :: noStr() else if (f == "Set.add" || f == "Set.contains" || f == "Set.remove") "Set" :: "String" :: noStr() else if (f == "Set.toList" || f == "Set.size") "Set" :: noStr() else if (f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" :: "Set" :: noStr() else if (f == "Json.keys" || f == "Json.parse" || f == "Json.arr" || f == "Json.pairs" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "Any" :: noStr() else if (f == "Json.get" || f == "Json.has" || f == "Json.remove") "Any" :: "String" :: noStr() else if (f == "Json.getStr") "Any" :: "String" :: "String" :: noStr() else if (f == "Json.getBool") "Any" :: "String" :: "Bool" :: noStr() else if (f == "Json.getInt") "Any" :: "String" :: "Int" :: noStr() else if (f == "Json.intOr" || f == "Json.at" || f == "Json.dropAt") "Any" :: "Int" :: noStr() else if (f == "Json.set") "Any" :: "String" :: "Any" :: noStr() else if (f == "Json.append" || f == "Json.prepend" || f == "Json.merge") "Any" :: "Any" :: noStr() else if (f == "Json.setAt") "Any" :: "Int" :: "Any" :: noStr() else if (f == "Json.Int" || f == "Json.Float") "Int" :: noStr() else if (f == "Json.floatOr") "Any" :: "Int" :: noStr() else if (f == "Json.Null") noStr() else noStr()
+  if (f == "IO.println") "String" :: noStr() else if (f == "Map.set") "Map" :: "String" :: "Any" :: noStr() else if (f == "Map.keys" || f == "Map.values" || f == "Map.size" || f == "Map.toList") "Map" :: noStr() else if (f == "Map.contains" || f == "Map.remove") "Map" :: "String" :: noStr() else if (f == "Map.getOrElse") "Map" :: "String" :: "Any" :: noStr() else if (f == "Set.add" || f == "Set.contains" || f == "Set.remove") "Set" :: "String" :: noStr() else if (f == "Set.toList" || f == "Set.size") "Set" :: noStr() else if (f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" :: "Set" :: noStr() else if (f == "Json.keys" || f == "Json.parse" || f == "Json.arr" || f == "Json.pairs" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "Any" :: noStr() else if (f == "Json.get" || f == "Json.has" || f == "Json.remove") "Any" :: "String" :: noStr() else if (f == "Json.getStr") "Any" :: "String" :: "String" :: noStr() else if (f == "Json.getBool") "Any" :: "String" :: "Bool" :: noStr() else if (f == "Json.getInt") "Any" :: "String" :: "Int" :: noStr() else if (f == "Json.intOr" || f == "Json.at" || f == "Json.dropAt") "Any" :: "Int" :: noStr() else if (f == "Json.set") "Any" :: "String" :: "Any" :: noStr() else if (f == "Json.append" || f == "Json.prepend" || f == "Json.merge") "Any" :: "Any" :: noStr() else if (f == "Json.setAt") "Any" :: "Int" :: "Any" :: noStr() else if (f == "Json.Int") "Int" :: noStr() else if (f == "Json.Float") "Float" :: noStr() else if (f == "Json.floatOr") "Any" :: "Float" :: noStr() else if (f == "Json.Obj" || f == "Json.Arr") "List" :: noStr() else if (f == "Json.Str") "String" :: noStr() else if (f == "Json.Bool") "Bool" :: noStr() else if (f == "Json.Null") noStr() else noStr()
 
 def kitRet(f: String): String =
-  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "List.head" || f == "List.at" || f == "Map.size" || f == "Set.size" || f == "Json.getInt" || f == "Json.intOr") "Int" else if (f == "List.isEmpty" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr") "Bool" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons") "List[Int]" else if (f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.last" || f == "List.flatten" || f == "Map.keys" || f == "Map.values" || f == "Map.toList" || f == "Set.toList" || f == "Json.keys" || f == "Json.arr" || f == "Json.at" || f == "Json.pairs" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "List" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read" || f == "Sys.getenv") "IO[String]" else if (f == "Fs.write" || f == "Fs.mkdirs" || f == "Impurity.runKit" || f == "Sys.write") "IO[Unit]" else if (f == "Fs.list") "IO[List[(String, Bool)]]" else if (f == "Sys.args") "IO[List[String]]" else if (isSysProc(f)) "IO[(Int, String, String)]" else if (f == "IO.pure") "IO[Any]" else if (f == "Clock.monotonic" || f == "Clock.realTime") "IO[Int]" else if (f == "Map.empty" || f == "Map.set" || f == "Map.remove") "Map" else if (f == "Set.empty" || f == "Set.add" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" else if (f == "Json.parse" || f == "Json.get" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float") "Any" else "String"
+  if (f == "Str.len" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.indexOf" || f == "Str.lastIndexOf" || f == "Map.size" || f == "Set.size" || f == "Json.getInt" || f == "Json.intOr") "Int" else if (f == "List.head" || f == "List.at" || f == "List.last" || f == "Map.getOrElse") "Any" else if (f == "List.isEmpty" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank") "Bool" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.flatten" || f == "Str.lines" || f == "Str.split") "List" else if (f == "Json.floatOr" || f == "Json.Float" || f == "Json.asFloat") "Float" else if (f == "Map.keys" || f == "Map.values" || f == "Map.toList" || f == "Set.toList" || f == "Json.keys" || f == "Json.arr" || f == "Json.at" || f == "Json.pairs" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "List" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read" || f == "Sys.getenv" || f == "Sys.read" || f == "Sys.readLine") "IO[String]" else if (f == "Fs.write" || f == "Fs.mkdirs" || f == "Impurity.runKit" || f == "Sys.write" || f == "Sys.kill" || f == "IO.println") "IO[Unit]" else if (f == "Fs.list") "IO[List[(String, Bool)]]" else if (f == "Sys.args") "IO[List[String]]" else if (f == "Sys.spawn" || f == "Sys.alive") "IO[Int]" else if (isSysProc(f)) "IO[(Int, String, String)]" else if (f == "IO.pure") "IO[Any]" else if (f == "Clock.monotonic" || f == "Clock.realTime") "IO[Int]" else if (f == "Map.empty" || f == "Map.set" || f == "Map.remove") "Map" else if (f == "Set.empty" || f == "Set.add" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" else if (f == "Json.parse" || f == "Json.get" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float" || f == "Json.Obj" || f == "Json.Str" || f == "Json.Bool" || f == "Json.Arr") "Any" else "Any"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
@@ -181,7 +193,7 @@ def argMismatch(callee: String, w: String, got: String, span: String): Out =
   bad(argMismatchMsg(argMismatchWant(callee, w), got), span)
 
 def argMismatchWant(callee: String, w: String): String =
-  Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, ", got ")))
+  if (callee == "IO.println") "expected String, got " else Str.concat(callee, Str.concat(" arg type mismatch: expected ", Str.concat(w, ", got ")))
 
 def argMismatchMsg(prefix: String, got: String): String =
   Str.concat(prefix, got)
@@ -289,13 +301,13 @@ def hasCase1(c: EnCase, rest: List[EnCase], ctor: String): Bool =
   }
 
 def isOpenKit(f: String): Bool =
-  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "Str.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Json.") || Str.startsWith(f, "Float.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Timeline.") || Str.startsWith(f, "Verdict.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, ".")
+  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "Str.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Json.") || Str.startsWith(f, "Float.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Timeline.") || Str.startsWith(f, "Verdict.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Sys.") || Str.startsWith(f, "Fs.") || Str.startsWith(f, "Net.") || Str.startsWith(f, "Clock.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Deferred.") || Str.startsWith(f, "Stream.") || Str.startsWith(f, "Resource.") || Str.startsWith(f, "Random.") || Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".")
 
 def anyParams(n: Int): List[String] =
   if (n <= 0) noStr() else "Any" :: anyParams(n - 1)
 
 def openKitRet(f: String): String =
-  if (openKitBool(f)) "Bool" else if (openKitInt(f) || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")) "Int" else if (f == "Property.sometimes") "Unit" else if (openKitAny(f) || Str.startsWith(f, "Signal.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Property.")) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "IO.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, ".")) "Any" else "List"
+  if (openKitBool(f)) "Bool" else if (openKitInt(f) || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")) "Int" else if (f == "Property.sometimes") "Unit" else if (openKitAny(f) || Str.startsWith(f, "Signal.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "Json.")) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "IO.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Sys.") || Str.startsWith(f, "Fs.") || Str.startsWith(f, "Net.") || Str.startsWith(f, "Clock.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Deferred.") || Str.startsWith(f, "Stream.") || Str.startsWith(f, "Resource.") || Str.startsWith(f, "Random.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".")) "Any" else "Any"
 
 def openKitBool(f: String): Bool =
   f == "List.exists" || f == "List.forall" || f == "List.contains" || f == "List.nonEmpty" || f == "List.isEmpty"
@@ -307,7 +319,7 @@ def openKitAny(f: String): Bool =
   f == "List.foldLeft" || f == "List.foldRight" || f == "List.reduceLeft" || f == "List.reduceRight" || f == "List.getOrElse" || f == "List.head" || f == "List.last" || f == "List.at"
 
 def resolveFunOrUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, ty: String): Out =
-  if (isFunTy(ty)) inferFunApply(ty, args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFun(funs, f))
+  if (isFunTy(ty)) inferFunApply(ty, args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFunPrefer(funs, f, env))
 
 def inferFunApply(ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
   inferFunApplyRet(funRetOf(ty), args, env, funs, ens, span)
@@ -325,7 +337,7 @@ def brackAt(s: String, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 91) i else brackAt(s, i + 1)
 
 def elemOf2(b: Int, t: String): String =
-  if (b < 0) "Int" else Str.slice(t, b + 1, Str.len(t) - 1)
+  if (b < 0) "Any" else Str.slice(t, b + 1, Str.len(t) - 1)
 
 def resolveUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, hit: List[Fun]): Out =
   if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveUserHit(f, args, env, funs, ens, span, List.head(hit))
@@ -342,7 +354,9 @@ def inferPrint(inner: Expr, env: List[(String, String)], funs: List[Fun], ens: L
   inferPrint2(infer(inner, env, funs, ens), e)
 
 def inferPrint2(o: Out, e: Expr): Out =
-  if (hasErr(o)) o else ok("IO[Unit]")
+  o match {
+    case Out(ty, err, sp) => if (Str.len(err) > 0) o else if (ty == "String" || ty == "Any") ok("IO[Unit]") else bad(Str.concat("expected String, got ", ty), Parse.pretty0(e))
+  }
 
 def inferBin(op: String, l: Expr, r: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   inferBin2(op, infer(l, env, funs, ens), r, env, funs, ens, e)
@@ -369,7 +383,10 @@ def inferOrd(lt: String, rt: String, span: String): Out =
   if (numTy(lt) && numTy(rt)) ok("Bool") else bad("ordered compare needs Int or Float", span)
 
 def inferLogic(lt: String, rt: String, span: String): Out =
-  if (lt == "Bool" && rt == "Bool") ok("Bool") else bad(Str.concat("logic needs Bool, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
+  if (logicTy(lt) && logicTy(rt)) ok("Bool") else bad(Str.concat("logic needs Bool, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
+
+def logicTy(t: String): Bool =
+  t == "Bool" || t == "Any"
 
 def inferBit(lt: String, rt: String, span: String): Out =
   if (lt == "Int" && rt == "Int") ok("Int") else bad(Str.concat("bitwise needs Int, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
@@ -381,7 +398,7 @@ def inferUn2(op: String, o: Out, e: Expr): Out =
   if (hasErr(o)) o else if (op == "!") inferUnBool(o, e) else inferUnInt(o, e)
 
 def inferUnBool(o: Out, e: Expr): Out =
-  if (o.ty == "Bool") ok("Bool") else bad(Str.concat("expected Bool, got ", o.ty), Parse.pretty0(e))
+  if (o.ty == "Bool" || o.ty == "Any") ok("Bool") else bad(Str.concat("expected Bool, got ", o.ty), Parse.pretty0(e))
 
 def inferUnInt(o: Out, e: Expr): Out =
   if (o.ty == "Int" || o.ty == "Any") ok("Int") else bad(Str.concat("expected Int, got ", o.ty), Parse.pretty0(e))
@@ -471,15 +488,33 @@ def hasEnHit(h: En, ens: List[En], name: String, i: Int): Bool =
 
 def inferField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   recv match {
-    case Expr.EVar(en) => if (hasEn(ens, en)) ok(en) else fieldOf(inferVar(en, env, funs, ens), name, ens)
+    case Expr.EVar(en) => if (hasEn(ens, en)) ok(en) else inferFieldVar(en, name, env, funs, ens)
     case _ => fieldOf(infer(recv, env, funs, ens), name, ens)
   }
+
+def inferFieldVar(en: String, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  inferFieldHit(findFunMod(funs, en, name), en, name, env, funs, ens)
+
+def inferFieldHit(hit: List[Fun], en: String, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens), name, ens) else ok(funTyOf(List.head(hit)))
 
 def fieldOf(o: Out, name: String, ens: List[En]): Out =
   if (hasErr(o)) o else fieldOf2(o.ty, name, ens)
 
 def fieldOf2(ty: String, name: String, ens: List[En]): Out =
-  fieldOf3(fieldNamed(ens, ty, name), ty)
+  if (isTup(ty) && isTupField(name)) tupFieldOf(ty, name) else fieldOf3(fieldNamed(ens, ty, name), ty)
+
+def isTupField(name: String): Bool =
+  name == "_1" || name == "_2" || name == "_3" || name == "_4"
+
+def tupFieldOf(ty: String, name: String): Out =
+  tupFieldAt(splitComma(tupleInner(ty)), tupIdx(name))
+
+def tupIdx(name: String): Int =
+  if (name == "_1") 0 else if (name == "_2") 1 else if (name == "_3") 2 else 3
+
+def tupFieldAt(parts: List[String], i: Int): Out =
+  if (i < 0 || i >= List.len(parts)) ok("Any") else ok(List.at(parts, i))
 
 def fieldOf3(ft: String, ty: String): Out =
   if (ft == "") ok(ty) else ok(ft)
@@ -550,7 +585,7 @@ def bindPat(pat: String, scrutTy: String, env: List[(String, String)], ens: List
   bindPat2(patBind(pat), pat, scrutTy, env, ens)
 
 def bindPat2(b: String, pat: String, scrutTy: String, env: List[(String, String)], ens: List[En]): List[(String, String)] =
-  if (asAt(pat, 0) >= 0) bindAs(pat, scrutTy, env, ens) else if (consAt(pat, 0) >= 0) bindCons(pat, scrutTy, env, ens) else if (isTuplePat(pat)) bindTuple(pat, scrutTy, env) else if (hasComma(b)) bindTuple2(splitComma(b), recFieldTys(ens, patCore(pat)), env) else if (asAt(b, 0) >= 0) bindAs(b, bindTy(pat, scrutTy, ens), env, ens) else if (eqAt(b, 0) >= 0) bindEq(b, bindTy(pat, scrutTy, ens), env, ens) else if (b == "") bindBare(pat, scrutTy, env) else (b, bindTy(pat, scrutTy, ens)) :: env
+  if (asAt(pat, 0) >= 0) bindAs(pat, scrutTy, env, ens) else if (consAt(pat, 0) >= 0) bindCons(pat, scrutTy, env, ens) else if (isTuplePat(pat)) bindTuple(pat, scrutTy, env) else if (hasComma(b)) bindTuple2(splitComma(b), recFieldTys(ens, patCore(pat)), env) else if (asAt(b, 0) >= 0) bindAs(b, bindTy(pat, scrutTy, ens), env, ens) else if (eqAt(b, 0) >= 0) bindEq(b, bindTy(pat, scrutTy, ens), env, ens) else if (consAt(b, 0) >= 0) bindCons(b, bindTy(pat, scrutTy, ens), env, ens) else if (b == "") bindBare(pat, scrutTy, env) else (b, bindTy(pat, scrutTy, ens)) :: env
 
 def eqAt(s: String, i: Int): Int =
   eqAtD(s, i, 0)
@@ -562,7 +597,10 @@ def bindEq(b: String, ty: String, env: List[(String, String)], ens: List[En]): L
   bindPat(Str.slice(b, eqAt(b, 0) + 3, Str.len(b)), ty, env, ens)
 
 def consAt(s: String, i: Int): Int =
-  if (i + 4 > Str.len(s)) 0 - 1 else if (Str.slice(s, i, i + 4) == " :: ") i else consAt(s, i + 1)
+  consAtD(s, i, 0)
+
+def consAtD(s: String, i: Int, d: Int): Int =
+  if (i + 4 > Str.len(s)) 0 - 1 else if (d == 0 && Str.slice(s, i, i + 4) == " :: ") i else consAtD(s, i + 1, asDepth(s, i, d))
 
 def bindCons(pat: String, scrutTy: String, env: List[(String, String)], ens: List[En]): List[(String, String)] =
   bindConsAt(consAt(pat, 0), pat, scrutTy, env, ens)
@@ -628,7 +666,7 @@ def trimName2(s: String, a: Int, b: Int): String =
   if (a >= b) "" else if (Str.charAt(s, a) == 32) trimName2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trimName2(s, a, b - 1) else Str.slice(s, a, b)
 
 def bindTuple2(ns: List[String], ts: List[String], env: List[(String, String)]): List[(String, String)] =
-  if (List.isEmpty(ns)) env else bindSlot(List.head(ns), if (List.isEmpty(ts)) "Int" else List.head(ts), bindTuple2(List.tail(ns), if (List.isEmpty(ts)) ts else List.tail(ts), env))
+  if (List.isEmpty(ns)) env else bindSlot(List.head(ns), if (List.isEmpty(ts)) "Any" else List.head(ts), bindTuple2(List.tail(ns), if (List.isEmpty(ts)) ts else List.tail(ts), env))
 
 def bindSlot(n: String, ty: String, env: List[(String, String)]): List[(String, String)] =
   if (isTuplePat(n)) bindTuple(n, ty, env) else (n, ty) :: env
@@ -637,7 +675,7 @@ def bindTy(pat: String, scrutTy: String, ens: List[En]): String =
   bindTyGot(patCore(pat), fieldTy(ens, patCore(pat)), scrutTy)
 
 def bindTyGot(core: String, ft: String, scrutTy: String): String =
-  if (ft == "Int" || ft == "Bool" || ft == "String" || ft == "Float") ft else ctorElem(core, scrutTy)
+  if (ft == "") ctorElem(core, scrutTy) else ft
 
 def ctorElem(core: String, scrutTy: String): String =
   ctorElem2(ctorName(core), splitComma(elemOf(scrutTy)))
@@ -649,7 +687,7 @@ def ctorName2(d: Int, core: String): String =
   if (d < 0) core else Str.slice(core, d + 1, Str.len(core))
 
 def ctorElem2(name: String, args: List[String]): String =
-  if (List.isEmpty(args)) "Int" else if (name == "Right" || name == "Err") ctorSecond(args) else List.head(args)
+  if (List.isEmpty(args)) "Any" else if (name == "Right" || name == "Err") ctorSecond(args) else List.head(args)
 
 def ctorSecond(args: List[String]): String =
   if (List.isEmpty(List.tail(args))) List.head(args) else List.head(List.tail(args))
@@ -744,7 +782,10 @@ def inferMethodQual(q: String, en: String, name: String, args: List[Expr], env: 
   if (isKit(q) || isOpenKit(q)) inferCall(q, args, env, funs, ens) else if (hasEn(ens, en)) inferCtor(en, args, env, funs, ens) else resolveQual(en, name, args, env, funs, ens)
 
 def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  resolveUser(Str.concat(en, Str.concat(".", name)), args, env, funs, ens, Parse.pretty0(Expr.EMethod(Expr.EVar(en), name, args)), findFunMod(funs, en, name))
+  resolveQualHit(en, name, args, env, funs, ens, findFunMod(funs, en, name))
+
+def resolveQualHit(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], hit: List[Fun]): Out =
+  if (List.isEmpty(hit)) checkKnown(Str.concat(en, Str.concat(".", name)), anyParams(List.len(args)), "Any", args, env, funs, ens, Parse.pretty0(Expr.EMethod(Expr.EVar(en), name, args))) else resolveUser(Str.concat(en, Str.concat(".", name)), args, env, funs, ens, Parse.pretty0(Expr.EMethod(Expr.EVar(en), name, args)), hit)
 
 def inferCtor(en: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   if (List.isEmpty(args)) ok(en) else inferCtorHead(en, List.head(args), List.tail(args), env, funs, ens)
@@ -791,13 +832,13 @@ def ioPayload(t: String): String =
   if (isIo(t) && Str.len(t) > 4) Str.slice(t, 3, Str.len(t) - 1) else "Any"
 
 def inferFlatMap3(recv: Out, body: Out, e: Expr): Out =
-  if (hasErr(body)) body else if (isIo(recv.ty) && isIo(body.ty)) ok(body.ty) else bad(Str.concat("flatMap needs IO, got ", Str.concat(recv.ty, Str.concat(" and ", body.ty))), Parse.pretty0(e))
+  if (hasErr(body)) body else if (isIo(recv.ty) && isIo(body.ty)) ok(body.ty) else if (isIo(recv.ty) && body.ty == "Any") ok(recv.ty) else if (recv.ty == "Any") ok(if (isIo(body.ty)) body.ty else "IO[Any]") else bad(Str.concat("flatMap needs IO, got ", Str.concat(recv.ty, Str.concat(" and ", body.ty))), Parse.pretty0(e))
 
 def inferVar(s: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  inferVar2(s, getTy(env, s), funs, ens)
+  inferVar2(s, getTy(env, s), env, funs, ens)
 
-def inferVar2(s: String, t: String, funs: List[Fun], ens: List[En]): Out =
-  if (t == "") inferVarFun(s, findFun(funs, s), ens) else ok(t)
+def inferVar2(s: String, t: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  if (t == "") inferVarFun(s, findFunPrefer(funs, s, env), ens) else ok(t)
 
 def inferVarFun(s: String, hit: List[Fun], ens: List[En]): Out =
   if (List.isEmpty(hit)) inferVarCase(s, ens) else ok(funTyOf(List.head(hit)))
@@ -844,7 +885,7 @@ def inferTupleRest(rest: List[Expr], env: List[(String, String)], funs: List[Fun
 
 def checkDef(d: Fun, funs: List[Fun], ens: List[En]): Out =
   d match {
-    case Fun(_, name, _, ps, ret, body, _) => checkDefWrap(name, ret, body, infer(body, bindParams(ps, ("self", "Any") :: noEnv()), funs, ens))
+    case Fun(_, name, _, ps, ret, body, mod) => checkDefWrap(name, ret, body, infer(body, bindParams(ps, ("self", "Any") :: ("#mod", mod) :: noEnv()), funs, ens))
   }
 
 def checkDefWrap(name: String, ret: String, body: Expr, o: Out): Out =
@@ -857,12 +898,15 @@ def funBodyEq(got: String, ret: String): Bool =
   isFunTy(ret) && tyEq(got, funRetOf(ret))
 
 def checkProg(p: Prog): Out =
+  checkProgOwn(p, [])
+
+def checkProgOwn(p: Prog, stems: List[String]): Out =
   p match {
-    case Prog(_, enums, aliases, _, _, imps, defs, main, body) => checkProgGo(expandDefs(withImportFuns(imps, defs), aliases), enums, main, body)
+    case Prog(_, enums, aliases, _, _, imps, defs, main, body) => checkProgGo(expandDefs(withImportFuns(imps, defs), aliases), enums, main, body, stems)
   }
 
-def checkProgGo(ds: List[Fun], enums: List[En], main: String, body: Expr): Out =
-  checkDefsAt(ds, enums, main, body, 0, List.len(ds))
+def checkProgGo(ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
+  checkDefsRest(ds, ds, enums, main, body, stems)
 
 def withImportFuns(imps: List[Imp], defs: List[Fun]): List[Fun] =
   List.concat(importFuns(imps, defs), defs)
@@ -887,7 +931,10 @@ def renameFun(d: Fun, alias: String): Fun =
   }
 
 def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
-  if (List.isEmpty(defs)) defs else expandDef(List.head(defs), als) :: expandDefs(List.tail(defs), als)
+  List.reverse(expandDefsGo(defs, als, []))
+
+def expandDefsGo(defs: List[Fun], als: List[Alias], acc: List[Fun]): List[Fun] =
+  if (List.isEmpty(defs)) acc else expandDefsGo(List.tail(defs), als, expandDef(List.head(defs), als) :: acc)
 
 def expandDef(d: Fun, als: List[Alias]): Fun =
   d match {
@@ -937,17 +984,22 @@ def tyBoundR(s: String, i: Int): Bool =
 def isTyChar(c: Int): Bool =
   c >= 65 && c <= 90 || c >= 97 && c <= 122 || c >= 48 && c <= 57 || c == 95
 
-def checkDefsAt(defs: List[Fun], enums: List[En], main: String, body: Expr, i: Int, n: Int): Out =
-  if (i >= n) checkMain(main, body, defs, enums) else checkDefsGo(defs, enums, main, body, i, n)
+def inStems(stems: List[String], mod: String): Bool =
+  List.isEmpty(stems) || hasStem(stems, mod)
 
-def checkDefsGo(defs: List[Fun], enums: List[En], main: String, body: Expr, i: Int, n: Int): Out =
-  checkDefsHit(List.at(defs, i), defs, enums, main, body, i, n)
+def hasStem(stems: List[String], mod: String): Bool =
+  if (List.isEmpty(stems)) false else if (List.head(stems) == mod) true else hasStem(List.tail(stems), mod)
 
-def checkDefsHit(d: Fun, defs: List[Fun], enums: List[En], main: String, body: Expr, i: Int, n: Int): Out =
-  checkDefsAfter(checkDef(d, defs, enums), defs, enums, main, body, i, n)
+def checkDefsRest(all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
+  if (List.isEmpty(rest)) checkMain(main, body, all, enums) else checkDefsHit(List.head(rest), all, List.tail(rest), enums, main, body, stems)
 
-def checkDefsAfter(o: Out, defs: List[Fun], enums: List[En], main: String, body: Expr, i: Int, n: Int): Out =
-  if (hasErr(o)) o else checkDefsAt(defs, enums, main, body, i + 1, n)
+def checkDefsHit(d: Fun, all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
+  d match {
+    case Fun(_, _, _, _, _, _, mod) => if (inStems(stems, mod)) checkDefsAfter(checkDef(d, all, enums), all, rest, enums, main, body, stems) else checkDefsRest(all, rest, enums, main, body, stems)
+  }
+
+def checkDefsAfter(o: Out, all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
+  if (hasErr(o)) o else checkDefsRest(all, rest, enums, main, body, stems)
 
 def checkMain(name: String, body: Expr, funs: List[Fun], ens: List[En]): Out =
   if (name == "") ok("IO[Unit]") else checkMainGot(infer(body, noEnv(), funs, ens))
@@ -1001,7 +1053,10 @@ def check(src: String): String =
   check2(src, checkProg(Parse.parse(Lexer.lex(src))))
 
 def checkFiles(files: List[(String, String)]): String =
-  check2(filesSrc(files), checkProg(Parse.parseFiles(files)))
+  checkFilesOwn(files, [])
+
+def checkFilesOwn(files: List[(String, String)], stems: List[String]): String =
+  check2(filesSrc(files), checkProgOwn(Parse.parseFiles(files), stems))
 
 def filesSrc(files: List[(String, String)]): String =
   if (List.isEmpty(files)) "" else filesSrc2(List.head(files), List.tail(files))
@@ -1038,7 +1093,10 @@ def human(src: String): String =
   human2(src, checkProg(Parse.parse(Lexer.lex(src))))
 
 def humanFiles(files: List[(String, String)]): String =
-  human2(filesSrc(files), checkProg(Parse.parseFiles(files)))
+  humanFilesOwn(files, [])
+
+def humanFilesOwn(files: List[(String, String)], stems: List[String]): String =
+  human2(filesSrc(files), checkProgOwn(Parse.parseFiles(files), stems))
 
 def human2(src: String, o: Out): String =
   if (hasErr(o)) humanLine(src, o) else "scuzz check ok"
