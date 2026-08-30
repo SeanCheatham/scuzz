@@ -377,7 +377,13 @@ def afterClang(r: (Int, String, String), exe: String, runEnv: String): IO[Unit] 
   }
 
 def afterClang2(code: Int, _out: String, err: String, exe: String, runEnv: String): IO[Unit] =
-  if (code != 0) IO.println(err).flatMap(_ => IO.fail("link")) else runLine(Str.concat(runEnv, exe)).flatMap(r => afterRun(r))
+  if (code != 0) afterClangFail(err) else afterClangRun(exe, runEnv)
+
+def afterClangFail(err: String): IO[Unit] =
+  IO.println(err).flatMap(_ => IO.fail("link"))
+
+def afterClangRun(exe: String, runEnv: String): IO[Unit] =
+  runLine(Str.concat(runEnv, exe)).flatMap(r => afterRun(r))
 
 def afterRun(r: (Int, String, String)): IO[Unit] =
   r match {
@@ -832,11 +838,14 @@ def pkgAndroidAdb(name: String, dest: String): IO[Unit] =
 
 def pkgAndroidAdbGot(r: (Int, String, String), dest: String): IO[Unit] =
   r match {
-    case (code, out, err) => pkgAndroidAdbOut(code, out, err, dest)
+    case (code, out, err) => if (code != 0) pkgAndroidAdbFail(out, err) else pkgAndroidAdbOk(out, dest)
   }
 
-def pkgAndroidAdbOut(code: Int, out: String, err: String, dest: String): IO[Unit] =
-  if (code != 0) IO.println(if (Str.len(err) > 0) err else out).flatMap(_ => IO.fail("android")) else IO.println(if (Str.len(out) > 0) out else "").flatMap(_ => IO.println(Str.concat("scuzz package ok (android) → ", dest)))
+def pkgAndroidAdbFail(out: String, err: String): IO[Unit] =
+  IO.println(if (Str.len(err) > 0) err else out).flatMap(_ => IO.fail("android"))
+
+def pkgAndroidAdbOk(out: String, dest: String): IO[Unit] =
+  IO.println(if (Str.len(out) > 0) out else "").flatMap(_ => IO.println(Str.concat("scuzz package ok (android) → ", dest)))
 
 def androidMeta(name: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, Str.concat("\"\ntarget = \"android\"\nbundle_id = \"", Str.concat(bundleId(), "\"\nruntime = \"mobile\"\n"))))
