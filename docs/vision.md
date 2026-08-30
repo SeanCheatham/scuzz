@@ -84,7 +84,7 @@ The eventual goal is a compiler, CLI, and toolchain written in Scuzz (`HUMANS.md
 
 - **Tail calls.** In: codegen lowers a self-tail call in a `def` body to a loop (`match` and `if` arms included). Proof: `examples/kernel` `countdown` / `countdownMatch` recurse to depth 1,000,000 without stack overflow.
 - **Builder.** In: blessed `Builder.empty` / `Builder.append` / `Builder.result` assemble a string in linear time (copy-on-write grow-in-place when unique). Proof: `examples/kernel` `fillBuilder` builds a 2 MiB string (`build:2097152`) under `scuzz test`.
-- **Scale proof.** In: `examples/scale` is about 4k lines. `scuzz check` typechecks it in about 0.5 s at about 27 MiB RSS. A live `scuzz run` fills a String-keyed `Map` of 3048 entries (`mapn:3048`, `hit:0:49`). Bind takes about 1 s. Lookup takes about 90 ms. The 68k-line jump is in: `examples/jump` generates about 68k lines of kernel defs. `scuzz check examples/jump` typechecks in about 7 s at about 62 MiB RSS.
+- **Scale proof.** In: `examples/scale` is about 4k lines. `scuzz check` typechecks it in about 0.5 s at about 27 MiB RSS. A live `scuzz run` fills a String-keyed `Map` of 3048 entries (`mapn:3048`, `hit:0:49`). Bind takes about 1 s. Lookup takes about 90 ms. The 68k-line jump is in: `examples/jump` generates about 68k lines of kernel defs. `scuzz check examples/jump` typechecks in about 7 s at about 600 MiB RSS.
 
 Verification track:
 
@@ -271,7 +271,7 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). `scuzz package --target ios` and `--target android` drive the platform shells. `scuzz package --target android` installs the APK when `adb` lists a device. No device is not a failure. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Hardware device runs and Impeller / Skia GPU raster stay deferred. The dogfood IDE host path is in. `scuzz fuzz --iterations N examples/editor` mutates and compiles on the compiler stack.
+Unknowns and known gaps: [`gaps.md`](gaps.md). `scuzz package --target ios` and `--target android` drive the platform shells. `scuzz package --target android` installs the APK when `adb` lists a device. No device is not a failure. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. The dogfood IDE host path is in. `scuzz fuzz --iterations N examples/editor` mutates and compiles on the compiler stack.
 
 IDE prerequisites run as two tracks. Track A is input and editor (key alphabet, caret, hover, selection, `View.editor`, viewport, undo, chrome primitives). Track B is kits (Fs entries, paths, delete/rename/walk, `Sys.exec` capture is in, Json parse/stringify, query, and write are in, Clock+Fs poll not `Fs.watch`, child stdio is in). Headless is part of every UI slice. `scuzz ide` launches the bundled `[ui]` package (`examples/editor` / `SCUZZ_HOME/ide`). Close-lists: [`gaps.md`](gaps.md). `scuzz test --differential` compares structural dumps across render backends.
 
