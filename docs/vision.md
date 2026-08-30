@@ -283,7 +283,7 @@ Self-hosting staged slices are in. Prerequisites and remaining device/GPU unknow
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)).
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present, and installs it when adb lists a device. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Hardware device runs stay open.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present, and installs it when adb lists a device. A USB serial wins over an emulator. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Hardware device runs stay open.
 
 ## Risks
 
