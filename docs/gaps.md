@@ -11,7 +11,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 1. Mobile on real devices
 
-**Status.** iOS simulator proven: `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh` and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim. The iOS shell feeds typed insert and backspace into `SZ_INPUT_TEXT_EDIT`. Android emulator proven: `scuzz package --target android` packs a debug APK (`arm64-v8a`, plus `x86_64` when that NDK clang is present) and installs it when `adb` lists a device. No device is not a failure. SurfaceView taps become `SZ_INPUT_POINTER`. A hidden `EditText` maps insert and backspace to `SZ_INPUT_TEXT_EDIT`. Missing NDK or SDK fails with one install line. Hardware devices stay open (provisioning).
+**Status.** iOS simulator proven: `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh` and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim. The iOS shell feeds typed insert and backspace into `SZ_INPUT_TEXT_EDIT`. Android emulator proven: `scuzz package --target android` packs a debug APK (`arm64-v8a`, plus `x86_64` when that NDK clang is present) and installs it when `adb` lists a device. No device is not a failure. After install, JNI loads `libscuzz.so` and presents frames (`scuzz android: present`). SurfaceView taps become `SZ_INPUT_POINTER`. A hidden `EditText` maps insert and backspace to `SZ_INPUT_TEXT_EDIT`. Missing NDK or SDK fails with one install line. Hardware devices stay open (provisioning).
 
 **Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware.
 

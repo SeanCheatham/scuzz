@@ -309,5 +309,5 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-on
 | Desktop-only features | Headless peer rule. Editor keys, caret, selection, clipboard, compose, and inject verbs share one input alphabet |
 | Treating UI as the only product | UI is a primary path (Flutter-shaped). CLI/server/desktop/mobile are peers |
 | GC vs frame budget | `pump` boundary. Measure |
-| Mobile packaging | Host Mobile peer first. Device toolchains later |
+| Mobile packaging | Host Mobile peer first. `scuzz package` drives Android/iOS shells. Hardware USB later |
 | Self-hosting stalls or forks the toolchain | Staged slices behind prerequisites ([Self-hosting](#self-hosting)). Tagged `v0.2.0` is the bootstrap. The Scuzz CLI is the product. No dual toolchains |
