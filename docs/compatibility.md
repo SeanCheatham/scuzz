@@ -34,7 +34,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Diagnostics | `scuzz check` is the linter (`--message-format=json`); `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `lint` subcommand; `*.g.scuzz` codegen |
 | Dogfood IDE | `scuzz ide` launches the bundled `[ui]` package. The app consumes `check` / `lsp`. Headless is a peer. Prerequisites: [`gaps.md`](gaps.md) | A compiler inside the IDE app; second typer; Desktop-only editor; a `scuzz-ide` binary |
 | Self-hosting | Staged rewrite slices behind prerequisites ([`vision.md`](vision.md#self-hosting)); tagged `v0.2.0` is the bootstrap `scuzz`; `package_release.sh` compiles `examples/cli` with that tagged binary; product CLI is Scuzz; Rust compiler crates are gone | Big-bang rewrite; dual shipped product CLIs; keep `cargo` as the product compiler after retirement |
-| Packaging | Android debug APK through `scuzz package --target android`; iOS sim `.app` through `scuzz package --target ios` | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
+| Packaging | Android debug APK through `scuzz package --target android` (installs when adb lists a device); iOS sim `.app` through `scuzz package --target ios` | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
 
 ## Platforms (Headless first)
 

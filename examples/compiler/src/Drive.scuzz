@@ -799,17 +799,17 @@ def pkgAndroidStage(dir: String, outDir: String): IO[Unit] =
 def pkgAndroidNamed(m: Man, dir: String, outDir: String): IO[Unit] =
   if (!m.ok) IO.println(Str.concat("fail:", m.err)).flatMap(_ => IO.fail("toml")) else pkgAndroidCopy(m.name, dir, joinSlash(joinSlash(outDir, "package"), "android"))
 
-def androidSo(dir: String): String =
-  joinSlash(joinSlash(joinSlash(joinSlash(dir, "build"), "android"), "lib/arm64-v8a"), "libscuzz.so")
+def androidLib(dir: String): String =
+  joinSlash(joinSlash(joinSlash(dir, "build"), "android"), "lib")
 
 def androidApk(dir: String, name: String): String =
   joinSlash(joinSlash(joinSlash(dir, "build"), "android"), Str.concat(name, ".apk"))
 
 def pkgAndroidCopy(name: String, dir: String, dest: String): IO[Unit] =
-  Fs.mkdirs(joinSlash(dest, "lib/arm64-v8a")).flatMap(_ => pkgAndroidCpSo(name, dir, dest))
+  Fs.mkdirs(dest).flatMap(_ => pkgAndroidCpSo(name, dir, dest))
 
 def pkgAndroidCpSo(name: String, dir: String, dest: String): IO[Unit] =
-  runLine(Str.concat("cp ", Str.concat(androidSo(dir), Str.concat(" ", joinSlash(joinSlash(dest, "lib/arm64-v8a"), "libscuzz.so"))))).flatMap(r => pkgAndroidCpSoGot(r, name, dir, dest))
+  runLine(Str.concat("rm -rf ", Str.concat(joinSlash(dest, "lib"), Str.concat(" && cp -a ", Str.concat(androidLib(dir), Str.concat(" ", joinSlash(dest, "lib"))))))).flatMap(r => pkgAndroidCpSoGot(r, name, dir, dest))
 
 def pkgAndroidCpSoGot(r: (Int, String, String), name: String, dir: String, dest: String): IO[Unit] =
   r match {
@@ -825,7 +825,18 @@ def pkgAndroidCpApkGot(r: (Int, String, String), name: String, dest: String): IO
   }
 
 def pkgAndroidWrite(name: String, dest: String): IO[Unit] =
-  Fs.write(joinSlash(dest, "package.toml"), androidMeta(name)).flatMap(_ => IO.println("scuzz package ok (android)"))
+  Fs.write(joinSlash(dest, "package.toml"), androidMeta(name)).flatMap(_ => pkgAndroidAdb(name, dest))
+
+def pkgAndroidAdb(name: String, dest: String): IO[Unit] =
+  runLine(Str.concat("bash crates/embedder-mobile/shells/android/install_apk.sh ", joinSlash(dest, Str.concat(name, ".apk")))).flatMap(r => pkgAndroidAdbGot(r, dest))
+
+def pkgAndroidAdbGot(r: (Int, String, String), dest: String): IO[Unit] =
+  r match {
+    case (code, out, err) => pkgAndroidAdbOut(code, out, err, dest)
+  }
+
+def pkgAndroidAdbOut(code: Int, out: String, err: String, dest: String): IO[Unit] =
+  if (code != 0) IO.println(if (Str.len(err) > 0) err else out).flatMap(_ => IO.fail("android")) else IO.println(if (Str.len(out) > 0) out else "").flatMap(_ => IO.println(Str.concat("scuzz package ok (android) → ", dest)))
 
 def androidMeta(name: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, Str.concat("\"\ntarget = \"android\"\nbundle_id = \"", Str.concat(bundleId(), "\"\nruntime = \"mobile\"\n"))))
