@@ -4108,7 +4108,12 @@ def rewriteInterpBrace2(j: Int, s: String, i: Int, acc: String, from: String, to
   rewriteInterpAt(s, j, Str.concat(acc, rewriteInterpInner(Str.slice(s, i + 2, j - 1), from, to)), from, to)
 
 def rewriteInterpInner(inner: String, from: String, to: String): String =
-  Str.concat("${", Str.concat(Parse.pretty0(rewriteBind(snippetExpr(inner), from, to)), "}"))
+  rewriteInterpInner2(Parse.parseExpr(Lexer.lex(inner), 0), from, to)
+
+def rewriteInterpInner2(p: (Expr, Int), from: String, to: String): String =
+  p match {
+    case (e, _) => Str.concat("${", Str.concat(Parse.pretty0(rewriteBind(e, from, to)), "}"))
+  }
 
 def rewriteBindList(xs: List[Expr], from: String, to: String): List[Expr] =
   if (List.isEmpty(xs)) xs else rewriteBindList2(List.head(xs), List.tail(xs), from, to)
