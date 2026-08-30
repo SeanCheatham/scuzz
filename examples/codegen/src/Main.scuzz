@@ -817,6 +817,90 @@ def srcCopyFld(): String =
 def wantCopyFld(): String =
   "@.str0 = private unnamed_addr constant [2 x i8] c\"a\\00\", align 1\n@.str1 = private unnamed_addr constant [2 x i8] c\"b\\00\", align 1\n\ndefine internal ptr @sz_user_Main_copy(ptr %b) {\nentry:\n  br label %body_arg0_try_0_0\nbody_arg0_try_0_0:\n  %body_arg0_p0_0_tg1 = call i32 @sz_adt_tag(ptr %b)\n  %body_arg0_p0_0_eq1 = icmp eq i32 %body_arg0_p0_0_tg1, 0\n  br i1 %body_arg0_p0_0_eq1, label %body_arg0_p0_0_m1, label %body_arg0_default_0\nbody_arg0_p0_0_m1:\n  %body_arg0_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %b)\n  %body_arg0_p0_0_f1_c0 = call ptr @sz_list_at(ptr %body_arg0_p0_0_f1_pl, i64 0)\n  %body_arg0_p0_0_f1_c1 = call ptr @sz_list_at(ptr %body_arg0_p0_0_f1_pl, i64 1)\n  br label %body_arg0_p0_0_n1_0\nbody_arg0_p0_0_n1_0:\n  br label %body_arg0_ok_0_0\nbody_arg0_default_0:\n  br label %body_arg0_merge_0\nbody_arg0_ok_0_0:\n  call void @sz_retain(ptr %body_arg0_p0_0_f1_c1)\n  call void @sz_retain(ptr %body_arg0_p0_0_f1_c0)\n  br label %body_arg0_aj_0_0\nbody_arg0_aj_0_0:\n  br label %body_arg0_merge_0\nbody_arg0_merge_0:\n  %body_arg0_phi = phi ptr [ %body_arg0_p0_0_f1_c0, %body_arg0_aj_0_0 ], [ null, %body_arg0_default_0 ]\n  br label %body_arg1_try_0_0\nbody_arg1_try_0_0:\n  %body_arg1_p0_0_tg1 = call i32 @sz_adt_tag(ptr %b)\n  %body_arg1_p0_0_eq1 = icmp eq i32 %body_arg1_p0_0_tg1, 0\n  br i1 %body_arg1_p0_0_eq1, label %body_arg1_p0_0_m1, label %body_arg1_default_0\nbody_arg1_p0_0_m1:\n  %body_arg1_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %b)\n  %body_arg1_p0_0_f1_c0 = call ptr @sz_list_at(ptr %body_arg1_p0_0_f1_pl, i64 0)\n  %body_arg1_p0_0_f1_c1 = call ptr @sz_list_at(ptr %body_arg1_p0_0_f1_pl, i64 1)\n  br label %body_arg1_p0_0_n1_0\nbody_arg1_p0_0_n1_0:\n  br label %body_arg1_ok_0_0\nbody_arg1_default_0:\n  br label %body_arg1_merge_0\nbody_arg1_ok_0_0:\n  call void @sz_retain(ptr %body_arg1_p0_0_f1_c1)\n  call void @sz_retain(ptr %body_arg1_p0_0_f1_c0)\n  br label %body_arg1_aj_0_0\nbody_arg1_aj_0_0:\n  br label %body_arg1_merge_0\nbody_arg1_merge_0:\n  %body_arg1_phi = phi ptr [ %body_arg1_p0_0_f1_c1, %body_arg1_aj_0_0 ], [ null, %body_arg1_default_0 ]\n  %body_pl0 = call ptr @sz_list_nil()\n  %body_pl1 = call ptr @sz_list_cons(ptr %body_arg1_phi, ptr %body_pl0)\n  call void @sz_release(ptr %body_pl0)\n  call void @sz_release(ptr %body_arg1_phi)\n  %body_pl2 = call ptr @sz_list_cons(ptr %body_arg0_phi, ptr %body_pl1)\n  call void @sz_release(ptr %body_pl1)\n  call void @sz_release(ptr %body_arg0_phi)\n  %body_adt = call ptr @sz_adt_new(i32 0, ptr %body_pl2)\n  call void @sz_release(ptr %body_pl2)\n  ret ptr %body_adt\n}\n\ndefine internal ptr @sz_user_Main_get(ptr %b) {\nentry:\n  br label %body_try_0_0\nbody_try_0_0:\n  %body_p0_0_tg1 = call i32 @sz_adt_tag(ptr %b)\n  %body_p0_0_eq1 = icmp eq i32 %body_p0_0_tg1, 0\n  br i1 %body_p0_0_eq1, label %body_p0_0_m1, label %body_default_0\nbody_p0_0_m1:\n  %body_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %b)\n  %body_p0_0_f1_c0 = call ptr @sz_list_at(ptr %body_p0_0_f1_pl, i64 0)\n  %body_p0_0_f1_c1 = call ptr @sz_list_at(ptr %body_p0_0_f1_pl, i64 1)\n  br label %body_p0_0_n1_0\nbody_p0_0_n1_0:\n  br label %body_ok_0_0\nbody_default_0:\n  br label %body_merge_0\nbody_ok_0_0:\n  call void @sz_retain(ptr %body_p0_0_f1_c1)\n  call void @sz_retain(ptr %body_p0_0_f1_c0)\n  br label %body_aj_0_0\nbody_aj_0_0:\n  br label %body_merge_0\nbody_merge_0:\n  %body_phi = phi ptr [ %body_p0_0_f1_c0, %body_aj_0_0 ], [ null, %body_default_0 ]\n  ret ptr %body_phi\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_arg0_arg0_arg0_gep = getelementptr inbounds [2 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_arg0_arg0_arg0_s = call ptr @sz_string_from_cstr(ptr %build_e_arg0_arg0_arg0_gep)\n  %build_e_arg0_arg0_arg1_gep = getelementptr inbounds [2 x i8], ptr @.str1, i64 0, i64 0\n  %build_e_arg0_arg0_arg1_s = call ptr @sz_string_from_cstr(ptr %build_e_arg0_arg0_arg1_gep)\n  %build_e_arg0_arg0_pl0 = call ptr @sz_list_nil()\n  %build_e_arg0_arg0_pl1 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg1_s, ptr %build_e_arg0_arg0_pl0)\n  call void @sz_release(ptr %build_e_arg0_arg0_pl0)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg1_s)\n  %build_e_arg0_arg0_pl2 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg0_s, ptr %build_e_arg0_arg0_pl1)\n  call void @sz_release(ptr %build_e_arg0_arg0_pl1)\n  call void @sz_release(ptr %build_e_arg0_arg0_arg0_s)\n  %build_e_arg0_arg0_adt = call ptr @sz_adt_new(i32 0, ptr %build_e_arg0_arg0_pl2)\n  call void @sz_release(ptr %build_e_arg0_arg0_pl2)\n  %build_e_arg0_v = call ptr @sz_user_Main_copy(ptr %build_e_arg0_arg0_adt)\n  call void @sz_release(ptr %build_e_arg0_arg0_adt)\n  %build_e_v = call ptr @sz_user_Main_get(ptr %build_e_arg0_v)\n  call void @sz_release(ptr %build_e_arg0_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
+def srcCopyRec(): String =
+  """enum Color:
+  case Red
+  case Blue
+record Pt(x: Int, y: Int)
+def bump(p: Pt): Pt =
+  p.copy(x = 1)
+def get(p: Pt): Int =
+  p match {
+    case Pt(x, y) => x
+  }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(get(bump(Pt(0, 0)))))
+"""
+
+def wantCopyRec(): String =
+  """define internal ptr @sz_user_Main_bump(ptr %p) {
+entry:
+  %body_pl = call ptr @sz_adt_payload(ptr %p)
+  %body_ub0 = call ptr @sz_box_i64(i64 1)
+  %body_k1 = call ptr @sz_list_at(ptr %body_pl, i64 1)
+  %body_pl0 = call ptr @sz_list_nil()
+  %body_pl1 = call ptr @sz_list_cons(ptr %body_k1, ptr %body_pl0)
+  call void @sz_release(ptr %body_pl0)
+  %body_pl2 = call ptr @sz_list_cons(ptr %body_ub0, ptr %body_pl1)
+  call void @sz_release(ptr %body_pl1)
+  call void @sz_release(ptr %body_ub0)
+  %body_adt = call ptr @sz_adt_new(i32 0, ptr %body_pl2)
+  call void @sz_release(ptr %body_pl2)
+  ret ptr %body_adt
+}
+
+define internal i64 @sz_user_Main_get(ptr %p) {
+entry:
+  br label %body_try_0_0
+body_try_0_0:
+  %body_p0_0_tg1 = call i32 @sz_adt_tag(ptr %p)
+  %body_p0_0_eq1 = icmp eq i32 %body_p0_0_tg1, 0
+  br i1 %body_p0_0_eq1, label %body_p0_0_m1, label %body_default_0
+body_p0_0_m1:
+  %body_p0_0_f1_pl = call ptr @sz_adt_payload(ptr %p)
+  %body_p0_0_f1_c0 = call ptr @sz_list_at(ptr %body_p0_0_f1_pl, i64 0)
+  %body_p0_0_f1_b0 = call i64 @sz_unbox_i64(ptr %body_p0_0_f1_c0)
+  %body_p0_0_f1_c1 = call ptr @sz_list_at(ptr %body_p0_0_f1_pl, i64 1)
+  %body_p0_0_f1_b1 = call i64 @sz_unbox_i64(ptr %body_p0_0_f1_c1)
+  br label %body_p0_0_n1_0
+body_p0_0_n1_0:
+  br label %body_ok_0_0
+body_default_0:
+  %body_dflt = add i64 0, 0
+  br label %body_merge_0
+body_ok_0_0:
+  br label %body_aj_0_0
+body_aj_0_0:
+  br label %body_merge_0
+body_merge_0:
+  %body_phi = phi i64 [ %body_p0_0_f1_b0, %body_aj_0_0 ], [ %body_dflt, %body_default_0 ]
+  ret i64 %body_phi
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %build_e_arg0_arg0_arg0_pl0 = call ptr @sz_list_nil()
+  %build_e_arg0_arg0_arg0_bx1 = call ptr @sz_box_i64(i64 0)
+  %build_e_arg0_arg0_arg0_pl1 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg0_bx1, ptr %build_e_arg0_arg0_arg0_pl0)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_pl0)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_bx1)
+  %build_e_arg0_arg0_arg0_bx0 = call ptr @sz_box_i64(i64 0)
+  %build_e_arg0_arg0_arg0_pl2 = call ptr @sz_list_cons(ptr %build_e_arg0_arg0_arg0_bx0, ptr %build_e_arg0_arg0_arg0_pl1)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_pl1)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_bx0)
+  %build_e_arg0_arg0_arg0_adt = call ptr @sz_adt_new(i32 0, ptr %build_e_arg0_arg0_arg0_pl2)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_pl2)
+  %build_e_arg0_arg0_v = call ptr @sz_user_Main_bump(ptr %build_e_arg0_arg0_arg0_adt)
+  call void @sz_release(ptr %build_e_arg0_arg0_arg0_adt)
+  %build_e_arg0_v = call i64 @sz_user_Main_get(ptr %build_e_arg0_arg0_v)
+  call void @sz_release(ptr %build_e_arg0_arg0_v)
+  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)
+  %build_io = call ptr @sz_io_println(ptr %build_e_v)
+  call void @sz_release(ptr %build_e_v)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
+
 def srcRep(): String =
   "@main def main: IO[Unit] =\n  IO.println(Str.repeat(\"a\", 2))\n"
 
@@ -948,7 +1032,7 @@ def okPair(): Bool =
   irDiff(srcToInt(), wantToInt()) && irIdem(srcToInt()) && irDiff(srcPair(), wantPair()) && irIdem(srcPair()) && Check.check(srcToInt()) == "[]" && Check.check(srcPair()) == "[]" && irDiff(srcAt(), wantAt()) && irIdem(srcAt()) && irDiff(srcRec(), wantRec()) && irIdem(srcRec()) && Check.check(srcAt()) == "[]" && Check.check(srcRec()) == "[]"
 
 def okMod(): Bool =
-  irDiffFiles(srcModFiles(), wantMod()) && irIdemFiles(srcModFiles()) && Check.checkFiles(srcModFiles()) == "[]" && Check.check(srcNil()) == "[]" && Check.check(srcFld()) == "[]" && irDiff(srcFld(), wantFld()) && irIdem(srcFld()) && irDiff(srcCopyFld(), wantCopyFld()) && irIdem(srcCopyFld()) && Check.check(srcCopyFld()) == "[]" && irDiff(srcRep(), wantRep()) && irIdem(srcRep()) && Check.check(srcRep()) == "[]"
+  irDiffFiles(srcModFiles(), wantMod()) && irIdemFiles(srcModFiles()) && Check.checkFiles(srcModFiles()) == "[]" && Check.check(srcNil()) == "[]" && Check.check(srcFld()) == "[]" && irDiff(srcFld(), wantFld()) && irIdem(srcFld()) && irDiff(srcCopyFld(), wantCopyFld()) && irIdem(srcCopyFld()) && Check.check(srcCopyFld()) == "[]" && irDiff(srcCopyRec(), wantCopyRec()) && irIdem(srcCopyRec()) && Check.check(srcCopyRec()) == "[]" && irDiff(srcRep(), wantRep()) && irIdem(srcRep()) && Check.check(srcRep()) == "[]"
 
 def okPtr(): Bool =
   irDiff(srcIfPtr(), wantIfPtr()) && irIdem(srcIfPtr()) && Check.check(srcIfPtr()) == "[]" && irDiff(srcTCons(), wantTCons()) && irIdem(srcTCons()) && Check.check(srcTCons()) == "[]" && irDiff(srcTupPtr(), wantTupPtr()) && irIdem(srcTupPtr()) && Check.check(srcTupPtr()) == "[]" && irDiff(srcT3(), wantT3()) && irIdem(srcT3()) && Check.check(srcT3()) == "[]" && irDiff(srcIfTup(), wantIfTup()) && irIdem(srcIfTup()) && Check.check(srcIfTup()) == "[]" && irDiff(srcNestTup(), wantNestTup()) && irIdem(srcNestTup()) && Check.check(srcNestTup()) == "[]"
