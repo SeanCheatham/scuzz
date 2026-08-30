@@ -3148,8 +3148,25 @@ def copyEn(recv: Expr, ens: List[En], defs: List[Fun]): String =
     case Expr.ECall(f, _) => copyEnOr(copyEnCall(f, ens, defs), ens)
     case Expr.EMethod(r, name, _) => copyEnMeth(r, name, ens, defs)
     case Expr.EVar(s) => copyEnOr(ctorHead(s, ens), ens)
+    case Expr.EIf(_, t, _) => copyEn(t, ens, defs)
+    case Expr.EMatch(_, arms) => copyEnMatch(arms, ens, defs)
+    case Expr.ETuple(xs) => tupLitTy(List.len(xs))
     case _ => copyEnFirst(ens)
   }
+
+def copyEnMatch(arms: List[Arm], ens: List[En], defs: List[Fun]): String =
+  if (List.isEmpty(arms)) copyEnFirst(ens) else copyEnMatch1(List.head(arms), ens, defs)
+
+def copyEnMatch1(a: Arm, ens: List[En], defs: List[Fun]): String =
+  a match {
+    case Arm(_, _, body) => copyEn(body, ens, defs)
+  }
+
+def tupLitTy(n: Int): String =
+  if (n <= 0) "()" else Str.concat("(", Str.concat(tupLitSlots(n), ")"))
+
+def tupLitSlots(n: Int): String =
+  if (n == 1) "Int" else Str.concat("Int, ", tupLitSlots(n - 1))
 
 def copyEnCall(f: String, ens: List[En], defs: List[Fun]): String =
   if (ctorHead(f, ens) != "") ctorHead(f, ens) else tyHead(funRetStr(defs, f))
@@ -4608,7 +4625,7 @@ def rwField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fu
     case Expr.EVar(en) => rwFieldVar(en, name, env, ens)
     case Expr.EMethod(r, m, args) => rwFieldMethod(r, m, args, name, env, funs, ens)
     case Expr.ECall(f, args) => rwFieldTy(Expr.ECall(f, args), name, copyEnCall(f, ens, funs), ens)
-    case _ => Expr.EField(recv, name)
+    case _ => rwFieldTy(recv, name, copyEn(recv, ens, funs), ens)
   }
 
 def rwFieldVar(en: String, name: String, env: List[(String, String)], ens: List[En]): Expr =
