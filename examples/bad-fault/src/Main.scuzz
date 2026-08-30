@@ -1,12 +1,8 @@
 def saveNote(body: String): IO[Unit] =
-  Fs.write("note.txt", body).handleErrorWith(_ =>
-    IO.pure(())
-  )
+  Fs.write("note.txt", body).handleErrorWith(_ => IO.pure(()))
 
 def loadNote(): IO[String] =
-  Fs.read("note.txt").handleErrorWith(_ =>
-    IO.pure("")
-  )
+  Fs.read("note.txt").handleErrorWith(_ => IO.pure(""))
 
 def roundTrip(body: String): IO[String] =
   for {

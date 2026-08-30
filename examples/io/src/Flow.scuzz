@@ -75,11 +75,17 @@ private def shapeKit(): IO[Unit] =
 
 private def foldKit(): IO[Unit] =
   for {
-    scanned <- Stream.compileToList(Stream.scan(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x)))
+    scanned <- Stream.compileToList(Stream.scan(Stream.emits(["a", "b"]), "", __tup => __tup match {
+  case (acc, x) => Str.concat(acc, x)
+}))
     _ <- IO.println(Str.concat("scan:", List.join(scanned, ",")))
-    folded <- Stream.fold(Stream.emits(["a", "b"]), "", (acc, x) => Str.concat(acc, x))
+    folded <- Stream.fold(Stream.emits(["a", "b"]), "", __tup => __tup match {
+  case (acc, x) => Str.concat(acc, x)
+})
     _ <- IO.println(Str.concat("fold:", folded))
-    nfold <- Stream.fold(Stream.range(1, 4), 0, (acc, n) => acc + n)
+    nfold <- Stream.fold(Stream.range(1, 4), 0, __tup => __tup match {
+  case (acc, n) => acc + n
+})
     _ <- IO.println(s"foldN:${Str.fromInt(nfold)}")
     changed <- Stream.compileToList(Stream.changes(Stream.emits(["a", "a", "b"])))
     _ <- IO.println(Str.concat("changes:", List.join(changed, ",")))
@@ -93,7 +99,9 @@ private def extraKit(): IO[Unit] =
     _ <- IO.println(Str.concat("filterNot:", List.join(kept, ",")))
     mc <- Stream.compileToList(Stream.mapConcat(Stream.emits(["a", "b"]), x => [x, x]))
     _ <- IO.println(Str.concat("mapConcat:", List.join(mc, ",")))
-    zw <- Stream.compileToList(Stream.zipWith(Stream.emits(["a", "b"]), Stream.emits(["1", "2"]), (a, b) => Str.concat(a, b)))
+    zw <- Stream.compileToList(Stream.zipWith(Stream.emits(["a", "b"]), Stream.emits(["1", "2"]), __tup => __tup match {
+  case (a, b) => Str.concat(a, b)
+}))
     _ <- IO.println(Str.concat("zipWith:", List.join(zw, ",")))
     za <- Stream.compileToList(Stream.zipAll(Stream.emit("a"), Stream.emits(["1", "2"]), "x", "y"))
     _ <- IO.println(s"zipAll:${Str.fromInt(List.len(za))}")

@@ -3259,7 +3259,7 @@ void sz_property_session_reset(void) {
   tl_restore_clear();
 }
 
-/* Matches DRIVE_NAMES_MAX in crates/compiler/src/overlay.rs. Overlay rejects a larger table. */
+/* Drive table cap. Overlay rejects a larger table. */
 #define SZ_DRIVERS_MAX 32
 typedef struct {
   char *name;

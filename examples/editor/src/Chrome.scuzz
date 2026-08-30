@@ -14,13 +14,9 @@ def pickSource(dir: String): IO[String] =
   for {
     main = Fs.join(dir, Fs.join("src", "Main.scuzz"))
     hasMain <- Fs.exists(main)
-    srcEnts <- Fs.list(Fs.join(dir, "src")).handleErrorWith(_ =>
-  IO.pure([]: List[(String, Bool)])
-)
+    srcEnts <- Fs.list(Fs.join(dir, "src")).handleErrorWith(_ => IO.pure([]))
     srcHits = scuzzNames(srcEnts)
-    topEnts <- Fs.list(dir).handleErrorWith(_ =>
-  IO.pure([]: List[(String, Bool)])
-)
+    topEnts <- Fs.list(dir).handleErrorWith(_ => IO.pure([]))
     topHits = scuzzNames(topEnts)
   } yield Fs.join(dir, preferredRel(hasMain, srcHits, topHits))
 
@@ -64,17 +60,11 @@ def toggleOpen(open: List[String], path: String): List[String] =
 
 def seedWorkspace(): IO[Unit] =
   for {
-    _ <- Fs.mkdirs("src").handleErrorWith(_ =>
-  IO.pure(())
-)
-    _ <- Fs.read("sample.txt").flatMap(_ => IO.pure(())).handleErrorWith(_ =>
-  Fs.write("sample.txt", """hello
+    _ <- Fs.mkdirs("src").handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.read("sample.txt").flatMap(_ => IO.pure(())).handleErrorWith(_ => Fs.write("sample.txt", """hello
 world
-""")
-)
-    _ <- Fs.read("scuzz.toml").flatMap(_ => IO.pure(())).handleErrorWith(_ =>
-  Fs.write("scuzz.toml", "")
-)
+"""))
+    _ <- Fs.read("scuzz.toml").flatMap(_ => IO.pure(())).handleErrorWith(_ => Fs.write("scuzz.toml", ""))
   } yield ()
 
 def dirtyFlag(body: String, orig: String): Int =
@@ -133,9 +123,7 @@ def insertAt(body: String, off: Int, ins: String): String =
   if (off <= 0) Str.concat(ins, body) else if (off >= Str.len(body)) Str.concat(body, ins) else Str.concat(Str.take(body, off), Str.concat(ins, Str.drop(body, off)))
 
 def pollTab(path: String, body: String, orig: String, dirty: Int): IO[(String, String, Int)] =
-  if (dirty != 0) IO.pure((body, orig, 0)) else Fs.read(path).map(disk => if (disk == orig) (body, orig, 0) else (disk, disk, 1)).handleErrorWith(_ =>
-  IO.pure((body, orig, 0))
-)
+  if (dirty != 0) IO.pure((body, orig, 0)) else Fs.read(path).map(disk => if (disk == orig) (body, orig, 0) else (disk, disk, 1)).handleErrorWith(_ => IO.pure((body, orig, 0)))
 
 def pollTabs(paths: List[String], bodies: List[String], origs: List[String], idx: Int, curBody: String, curOrig: String): IO[(List[String], List[String], Int)] =
   IO.foreach(List.indices(paths), i => pollTab(List.at(paths, i), if (i == idx) curBody else List.at(bodies, i), if (i == idx) curOrig else List.at(origs, i), if (i == idx) dirtyFlag(curBody, curOrig) else dirtyFlag(List.at(bodies, i), List.at(origs, i)))).map(rows => (List.map(rows, r => r._1), List.map(rows, r => r._2), if (List.exists(rows, r => r._3 == 1)) 1 else 0))

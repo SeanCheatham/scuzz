@@ -1,0 +1,352 @@
+record Open(path: String, src: String)
+
+import Parse.Fun
+import Parse.Param
+
+def lf(): String =
+  """
+"""
+
+def headerEnd(): String =
+  Str.concat(lf(), lf())
+
+def frame(body: String): String =
+  Str.concat("Content-Length: ", Str.concat(Str.fromInt(Str.len(body)), Str.concat(headerEnd(), body)))
+
+def jObj(j: Json): List[(String, Json)] =
+  j match {
+    case Json.Obj(ps) => ps
+    case _ => []
+  }
+
+def jGet(j: Json, k: String): Json =
+  List.find(jObj(j), p => p._1 == k) match {
+    case p :: _ => p._2
+    case [] => Json.Null()
+  }
+
+def jStr(j: Json): String =
+  j match {
+    case Json.Str(s) => s
+    case _ => ""
+  }
+
+def jInt(j: Json): Int =
+  j match {
+    case Json.Int(n) => n
+    case _ => 0
+  }
+
+def jArr(j: Json): List[Json] =
+  j match {
+    case Json.Arr(xs) => xs
+    case _ => []
+  }
+
+def parseJson(s: String): Json =
+  Json.parse(s) match {
+    case Result.Ok(j) => j
+    case Result.Err(_) => Json.Null()
+  }
+
+def methodOf(j: Json): String =
+  jStr(jGet(j, "method"))
+
+def idJson(j: Json): String =
+  jGet(j, "id") match {
+    case Json.Int(n) => Str.fromInt(n)
+    case Json.Str(s) => Check.jsonStr(s)
+    case _ => "null"
+  }
+
+def paramsOf(j: Json): Json =
+  jGet(j, "params")
+
+def uriOf(j: Json): String =
+  jStr(jGet(jGet(jGet(paramsOf(j), "textDocument"), "uri"), "uri")) match {
+    case s => if (Str.nonEmpty(s)) s else jStr(jGet(jGet(paramsOf(j), "textDocument"), "uri"))
+  }
+
+def posLine(j: Json): Int =
+  jInt(jGet(jGet(paramsOf(j), "position"), "line"))
+
+def posCol(j: Json): Int =
+  jInt(jGet(jGet(paramsOf(j), "position"), "character"))
+
+def newNameOf(j: Json): String =
+  jStr(jGet(paramsOf(j), "newName"))
+
+def pathOfUri(uri: String): String =
+  if (Str.startsWith(uri, "file://")) Str.drop(uri, 7) else uri
+
+def uriOfPath(path: String): String =
+  Str.concat("file://", path)
+
+def offsetOf(src: String, line: Int, col: Int): Int =
+  offsetGo(src, 0, 0, line, col)
+
+def offsetGo(src: String, i: Int, ln: Int, want: Int, col: Int): Int =
+  if (ln == want) i + col else if (i >= Str.len(src)) Str.len(src) else if (Str.charAt(src, i) == 10) offsetGo(src, i + 1, ln + 1, want, col) else offsetGo(src, i + 1, ln, want, col)
+
+def isIdentCh(c: Int): Bool =
+  c >= 65 && c <= 90 || c >= 97 && c <= 122 || c >= 48 && c <= 57 || c == 95
+
+def identStart(src: String, i: Int): Int =
+  if (i <= 0) 0 else if (isIdentCh(Str.charAt(src, i - 1))) identStart(src, i - 1) else i
+
+def identEnd(src: String, i: Int): Int =
+  if (i >= Str.len(src)) i else if (isIdentCh(Str.charAt(src, i))) identEnd(src, i + 1) else i
+
+def identAt(src: String, off: Int): String =
+  identAt2(src, identStart(src, if (off > Str.len(src)) Str.len(src) else off))
+
+def identAt2(src: String, a: Int): String =
+  identAt3(src, a, identEnd(src, a))
+
+def identAt3(src: String, a: Int, b: Int): String =
+  if (b <= a) "" else Str.slice(src, a, b)
+
+def qualIdentAt(src: String, off: Int): String =
+  qualIdentAt2(src, identAt(src, off), identStart(src, off))
+
+def qualIdentAt2(src: String, name: String, a: Int): String =
+  if (name == "") name else if (a >= 2 && Str.charAt(src, a - 1) == 46) Str.concat(identAt(src, a - 2), Str.concat(".", name)) else name
+
+def showFun(d: Fun): String =
+  d match {
+    case Fun(_, name, _, ps, ret, _, _) => Str.concat("def ", Str.concat(name, Str.concat("(", Str.concat(showParams(ps), Str.concat("): ", ret)))))
+  }
+
+def showParams(ps: List[Param]): String =
+  if (List.isEmpty(ps)) "" else showParamsHd(List.head(ps), List.tail(ps))
+
+def showParamsHd(p: Param, rest: List[Param]): String =
+  p match {
+    case Param(name, ty, _, _) => if (List.isEmpty(rest)) Str.concat(name, Str.concat(": ", ty)) else Str.concat(name, Str.concat(": ", Str.concat(ty, Str.concat(", ", showParams(rest)))))
+  }
+
+def findFun(ds: List[Fun], name: String): String =
+  if (List.isEmpty(ds)) "" else findFunHd(List.head(ds), List.tail(ds), name)
+
+def findFunHd(d: Fun, rest: List[Fun], name: String): String =
+  d match {
+    case Fun(_, n, _, _, _, _, _) => if (n == name) showFun(d) else findFun(rest, name)
+  }
+
+def kitHover(f: String): String =
+  if (Check.isKit(f)) Str.concat(f, Str.concat(": ", Check.kitRet(f))) else ""
+
+def hoverAt(src: String, line: Int, col: Int): String =
+  hoverName(src, qualIdentAt(src, offsetOf(src, line, col)))
+
+def hoverName(src: String, name: String): String =
+  if (name == "") hoverName(src, Parse.parse(Lexer.lex(src)).main) else hoverName2(src, name, kitHover(name))
+
+def hoverName2(src: String, name: String, kit: String): String =
+  if (Str.nonEmpty(kit)) kit else hoverName3(src, name, findFun(Parse.parse(Lexer.lex(src)).defs, name))
+
+def hoverName3(_src: String, name: String, hit: String): String =
+  if (Str.nonEmpty(hit)) hit else if (name == "") "" else name
+
+def hoverJson(text: String): String =
+  if (text == "") "null" else Str.concat("{\"contents\":{\"kind\":\"plaintext\",\"value\":", Str.concat(Check.jsonStr(text), "}}"))
+
+def completeNames(src: String): List[String] =
+  completeNames2(Parse.parse(Lexer.lex(src)).defs, "IO.println" :: "Str.concat" :: "List.len" :: "Sys.args" :: "Fs.read" :: [])
+
+def completeNames2(ds: List[Fun], acc: List[String]): List[String] =
+  if (List.isEmpty(ds)) acc else completeNamesHd(List.head(ds), List.tail(ds), acc)
+
+def completeNamesHd(d: Fun, rest: List[Fun], acc: List[String]): List[String] =
+  d match {
+    case Fun(_, name, _, _, _, _, _) => completeNames2(rest, name :: acc)
+  }
+
+def completeJson(src: String): String =
+  Str.concat("{\"isIncomplete\":false,\"items\":[", Str.concat(completeItems(completeNames(src)), "]}"))
+
+def completeItems(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else completeItemsHd(List.head(xs), List.tail(xs))
+
+def completeItemsHd(h: String, rest: List[String]): String =
+  if (List.isEmpty(rest)) completeItem(h) else Str.concat(completeItem(h), Str.concat(",", completeItems(rest)))
+
+def completeItem(name: String): String =
+  Str.concat("{\"label\":", Str.concat(Check.jsonStr(name), "}"))
+
+def defJson(uri: String, src: String, line: Int, col: Int): String =
+  defJson2(uri, identAt(src, offsetOf(src, line, col)))
+
+def defJson2(uri: String, name: String): String =
+  if (name == "") "null" else Str.concat("[{\"uri\":", Str.concat(Check.jsonStr(uri), ",\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":1}}}]"))
+
+def formatJson(src: String): String =
+  Str.concat("[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":", Str.concat(Str.fromInt(lineCount(src)), Str.concat(",\"character\":0}},\"newText\":", Str.concat(Check.jsonStr(Parse.pretty(Parse.parse(Lexer.lex(src)))), "}]"))))
+
+def lineCount(src: String): Int =
+  lineCountGo(src, 0, 1)
+
+def lineCountGo(src: String, i: Int, n: Int): Int =
+  if (i >= Str.len(src)) n else if (Str.charAt(src, i) == 10) lineCountGo(src, i + 1, n + 1) else lineCountGo(src, i + 1, n)
+
+def renameJson(src: String, line: Int, col: Int, nu: String): String =
+  renameJson2(src, identAt(src, offsetOf(src, line, col)), nu)
+
+def renameJson2(src: String, name: String, nu: String): String =
+  if (name == "" || nu == "") "null" else Str.concat("{\"changes\":{},\"newText\":", Str.concat(Check.jsonStr(Str.replace(src, name, nu)), "}"))
+
+def emptyArr(): String =
+  "[]"
+
+def tokensJson(_src: String): String =
+  Str.concat("{\"data\":", Str.concat(emptyArr(), "}"))
+
+def caps(): String =
+  "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"declarationProvider\":true,\"documentSymbolProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":{\"prepareProvider\":true},\"foldingRangeProvider\":true,\"inlayHintProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true,\"range\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"source.formatDocument\"],\"resolveProvider\":true}}}"
+
+def resultMsg(id: String, result: String): String =
+  Str.concat("{\"jsonrpc\":\"2.0\",\"id\":", Str.concat(id, Str.concat(",\"result\":", Str.concat(result, "}"))))
+
+def notifyMsg(method: String, params: String): String =
+  Str.concat("{\"jsonrpc\":\"2.0\",\"method\":", Str.concat(Check.jsonStr(method), Str.concat(",\"params\":", Str.concat(params, "}"))))
+
+def diagLsp(d: Json): String =
+  Str.concat(diagRange(d), Str.concat(diagSev(d), diagMsg(d)))
+
+def diagRange(d: Json): String =
+  Str.concat("{\"range\":{\"start\":{\"line\":", Str.concat(Str.fromInt(jInt(jGet(d, "line")) - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(jInt(jGet(d, "column")) - 1), Str.concat("},\"end\":{\"line\":", Str.concat(Str.fromInt(jInt(jGet(d, "end_line")) - 1), Str.concat(",\"character\":", Str.concat(Str.fromInt(jInt(jGet(d, "end_column")) - 1), "}}"))))))))
+
+def diagSev(d: Json): String =
+  Str.concat(",\"severity\":", if (jStr(jGet(d, "severity")) == "error") "1" else "3")
+
+def diagMsg(d: Json): String =
+  Str.concat(",\"message\":", Str.concat(Check.jsonStr(jStr(jGet(d, "message"))), "}"))
+
+def diagsArr(xs: List[Json]): String =
+  if (List.isEmpty(xs)) "" else diagsArrHd(List.head(xs), List.tail(xs))
+
+def diagsArrHd(h: Json, rest: List[Json]): String =
+  if (List.isEmpty(rest)) diagLsp(h) else Str.concat(diagLsp(h), Str.concat(",", diagsArr(rest)))
+
+def publishDiags(uri: String, raw: String): String =
+  publishDiags2(uri, parseJson(raw))
+
+def publishDiags2(uri: String, j: Json): String =
+  notifyMsg("textDocument/publishDiagnostics", Str.concat("{\"uri\":", Str.concat(Check.jsonStr(uri), Str.concat(",\"diagnostics\":[", Str.concat(diagsArr(jArr(j)), "]}")))))
+
+def overlayGet(open: List[Open], path: String): String =
+  if (List.isEmpty(open)) "" else overlayGetHd(List.head(open), List.tail(open), path)
+
+def overlayGetHd(h: Open, rest: List[Open], path: String): String =
+  h match {
+    case Open(p, src) => if (p == path) src else overlayGet(rest, path)
+  }
+
+def overlayPut(open: List[Open], path: String, src: String): List[Open] =
+  Open(path, src) :: overlayDrop(open, path)
+
+def overlayDrop(open: List[Open], path: String): List[Open] =
+  if (List.isEmpty(open)) [] else overlayDropHd(List.head(open), List.tail(open), path)
+
+def overlayDropHd(h: Open, rest: List[Open], path: String): List[Open] =
+  h match {
+    case Open(p, _) => if (p == path) overlayDrop(rest, path) else h :: overlayDrop(rest, path)
+  }
+
+def srcOf(open: List[Open], path: String): IO[String] =
+  srcOf2(path, overlayGet(open, path))
+
+def srcOf2(path: String, hit: String): IO[String] =
+  if (Str.nonEmpty(hit)) IO.pure(hit) else Fs.read(path).handleErrorWith(_ => IO.pure(""))
+
+def handle(root: String, open: List[Open], body: String): IO[List[Open]] =
+  handleJ(root, open, parseJson(body), body)
+
+def handleJ(root: String, open: List[Open], j: Json, _body: String): IO[List[Open]] =
+  handleM(root, open, j, methodOf(j), idJson(j))
+
+def handleM(root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
+  if (method == "initialize") reply(id, caps()).map(_ => open) else if (method == "shutdown") reply(id, "null").map(_ => open) else if (method == "exit") IO.pure(open) else if (method == "initialized") IO.pure(open) else if (method == "textDocument/didOpen" || method == "textDocument/didChange") didOpen(root, open, j) else if (method == "textDocument/didClose") IO.pure(overlayDrop(open, pathOfUri(uriOf(j)))) else if (method == "textDocument/hover") hover(open, j, id) else if (method == "textDocument/completion") complete(open, j, id) else if (method == "textDocument/definition" || method == "textDocument/declaration" || method == "textDocument/typeDefinition" || method == "textDocument/implementation") definition(open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(open, j, id) else if (method == "textDocument/semanticTokens/full" || method == "textDocument/semanticTokens/range") reply(id, tokensJson("")).map(_ => open) else if (method == "textDocument/inlayHint" || method == "textDocument/foldingRange" || method == "textDocument/codeAction" || method == "textDocument/documentSymbol" || method == "textDocument/references" || method == "textDocument/documentHighlight" || method == "textDocument/selectionRange" || method == "textDocument/codeLens" || method == "textDocument/documentLink") reply(id, emptyArr()).map(_ => open) else if (id == "null") IO.pure(open) else reply(id, "null").map(_ => open)
+
+def reply(id: String, result: String): IO[Unit] =
+  Sys.write(frame(resultMsg(id, result)))
+
+def notify(body: String): IO[Unit] =
+  Sys.write(frame(body))
+
+def didOpen(root: String, open: List[Open], j: Json): IO[List[Open]] =
+  didOpen2(root, open, pathOfUri(uriOf(j)), jStr(jGet(jGet(jGet(paramsOf(j), "textDocument"), "text"), "text")) match {
+  case s => if (Str.nonEmpty(s)) s else jStr(jGet(jGet(paramsOf(j), "textDocument"), "text"))
+})
+
+def didOpen2(root: String, open: List[Open], path: String, src: String): IO[List[Open]] =
+  didOpen3(root, overlayPut(open, path, src), path, src)
+
+def didOpen3(_root: String, open: List[Open], path: String, src: String): IO[List[Open]] =
+  notify(publishDiags(uriOfPath(path), Check.check(src))).map(_ => open)
+
+def hover(open: List[Open], j: Json, id: String): IO[List[Open]] =
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, hoverJson(hoverAt(src, posLine(j), posCol(j)))).map(_ => open))
+
+def complete(open: List[Open], j: Json, id: String): IO[List[Open]] =
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, completeJson(src)).map(_ => open))
+
+def definition(open: List[Open], j: Json, id: String): IO[List[Open]] =
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, defJson(uriOf(j), src, posLine(j), posCol(j))).map(_ => open))
+
+def format(open: List[Open], j: Json, id: String): IO[List[Open]] =
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, formatJson(src)).map(_ => open))
+
+def rename(open: List[Open], j: Json, id: String): IO[List[Open]] =
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, renameJson(src, posLine(j), posCol(j), newNameOf(j))).map(_ => open))
+
+def headerBody(acc: String): Int =
+  headerBodyGo(acc, 0, 0)
+
+def headerBodyGo(acc: String, i: Int, nl: Int): Int =
+  if (i >= Str.len(acc)) 0 - 1 else if (Str.charAt(acc, i) == 13) headerBodyGo(acc, i + 1, nl) else if (Str.charAt(acc, i) == 10) headerBodyNl(acc, i, nl) else headerBodyGo(acc, i + 1, 0)
+
+def headerBodyNl(acc: String, i: Int, nl: Int): Int =
+  if (nl == 1) i + 1 else headerBodyGo(acc, i + 1, 1)
+
+def readUntilHeader(acc: String): IO[String] =
+  if (headerBody(acc) >= 0) IO.pure(acc) else Sys.read(256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else readUntilHeader(Str.concat(acc, c)))
+
+def fillTo(acc: String, need: Int): IO[String] =
+  if (Str.len(acc) >= need) IO.pure(acc) else Sys.read(256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(Str.concat(acc, c), need))
+
+def parseLen(head: String): Int =
+  parseLenGo(head, Str.indexOf(head, "Content-Length:") + 15)
+
+def parseLenGo(head: String, i: Int): Int =
+  if (i < 0 || i >= Str.len(head)) 0 else if (Str.charAt(head, i) == 32 || Str.charAt(head, i) == 9) parseLenGo(head, i + 1) else parseLenDigits(head, i, i)
+
+def parseLenDigits(head: String, a: Int, b: Int): Int =
+  if (b >= Str.len(head) || Str.charAt(head, b) < 48 || Str.charAt(head, b) > 57) Str.toInt(Str.slice(head, a, b), 0) else parseLenDigits(head, a, b + 1)
+
+def readMsg(acc: String): IO[(String, String)] =
+  readUntilHeader(acc).flatMap(got => readMsgGot(got, headerBody(got)))
+
+def readMsgGot(acc: String, start: Int): IO[(String, String)] =
+  if (start < 0) IO.pure(("", "")) else readMsg4(acc, parseLen(acc), start)
+
+def readMsg4(acc: String, len: Int, start: Int): IO[(String, String)] =
+  fillTo(acc, start + len).map(full => (Str.slice(full, start, start + len), Str.drop(full, start + len)))
+
+def serve(root: String, open: List[Open], acc: String): IO[Unit] =
+  readMsg(acc).flatMap(p => servePair(root, open, p))
+
+def servePair(root: String, open: List[Open], p: (String, String)): IO[Unit] =
+  p match {
+    case (body, rest) => serveGot(root, open, body, rest)
+  }
+
+def serveGot(root: String, open: List[Open], body: String, rest: String): IO[Unit] =
+  if (Str.isEmpty(body)) IO.pure(()) else handle(root, open, body).flatMap(nxt => serveStop(root, nxt, parseJson(body), rest))
+
+def serveStop(root: String, open: List[Open], j: Json, rest: String): IO[Unit] =
+  if (methodOf(j) == "exit") IO.pure(()) else serve(root, open, rest)
+
+def run(root: String): IO[Unit] =
+  serve(root, [], "")
+

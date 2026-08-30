@@ -24,7 +24,7 @@ def msgSlice(full: String, start: Int, len: Int): String =
 def parseJson(s: String): Json =
   Json.parse(s) match {
     case Result.Ok(j) => j
-    case Result.Err(_) => Json.Null
+    case Result.Err(_) => Json.Null()
   }
 
 def encodeJson(j: Json): String =
@@ -34,36 +34,36 @@ def encodeJson(j: Json): String =
   }
 
 def takeIfMatch(j: Json, want: Int): Json =
-  if (Check.jsonInt(Check.jsonField(j, "id")) == want) j else Json.Null
+  if (Check.jsonInt(Check.jsonField(j, "id")) == want) j else Json.Null()
 
 def emptyObj(): Json =
-  Json.Obj([]: List[(String, Json)])
+  Json.Obj([])
 
 def jField(k: String, v: Json): (String, Json) =
   (k, v)
 
 def posObj(line: Int, col: Int): Json =
-  Json.Obj(jField("line", Json.Int(line)) :: jField("character", Json.Int(col)) :: ([]: List[(String, Json)]))
+  Json.Obj(jField("line", Json.Int(line)) :: jField("character", Json.Int(col)) :: [])
 
 def docObj(uri: String): Json =
-  Json.Obj(jField("uri", Json.Str(uri)) :: ([]: List[(String, Json)]))
+  Json.Obj(jField("uri", Json.Str(uri)) :: [])
 
 def initBody(rootUri: String): String =
-  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("x"))) :: jField("method", Json.Str("initialize")) :: jField("params", Json.Obj(jField("rootUri", Json.Str(rootUri)) :: jField("capabilities", emptyObj()) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
+  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("x"))) :: jField("method", Json.Str("initialize")) :: jField("params", Json.Obj(jField("rootUri", Json.Str(rootUri)) :: jField("capabilities", emptyObj()) :: [])) :: []))
 
 def didOpenBody(uri: String, text: String): String =
-  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("textDocument/didOpen")) :: jField("params", Json.Obj(jField("textDocument", Json.Obj(jField("uri", Json.Str(uri)) :: jField("languageId", Json.Str("scuzz")) :: jField("version", Json.Int(Str.len("x"))) :: jField("text", Json.Str(text)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
+  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("textDocument/didOpen")) :: jField("params", Json.Obj(jField("textDocument", Json.Obj(jField("uri", Json.Str(uri)) :: jField("languageId", Json.Str("scuzz")) :: jField("version", Json.Int(Str.len("x"))) :: jField("text", Json.Str(text)) :: [])) :: [])) :: []))
 
 def initializedBody(): String =
-  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("initialized")) :: jField("params", emptyObj()) :: ([]: List[(String, Json)])))
+  encodeJson(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("initialized")) :: jField("params", emptyObj()) :: []))
 
 def requestBody(method: String, uri: String, line: Int, col: Int): String =
   encodeJson(method match {
-  case "textDocument/rename" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: jField("newName", Json.Str("x")) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
-  case "textDocument/formatting" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
-  case "textDocument/semanticTokens/full" | "textDocument/inlayHint" | "textDocument/foldingRange" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
-  case "textDocument/codeAction" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("range", Json.Obj(jField("start", posObj(line, col)) :: jField("end", posObj(line, col)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
-  case _ => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
+  case "textDocument/rename" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: jField("newName", Json.Str("x")) :: [])) :: [])
+  case "textDocument/formatting" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: [])) :: [])
+  case "textDocument/semanticTokens/full" | "textDocument/inlayHint" | "textDocument/foldingRange" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: [])) :: [])
+  case "textDocument/codeAction" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("range", Json.Obj(jField("start", posObj(line, col)) :: jField("end", posObj(line, col)) :: [])) :: [])) :: [])
+  case _ => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: [])) :: [])
 })
 
 def hoverText(j: Json): String =
@@ -74,7 +74,7 @@ def hoverText(j: Json): String =
 def completeLabels(j: Json): List[String] =
   Check.jsonField(Check.jsonField(j, "result"), "items") match {
     case Json.Arr(xs) => List.map(xs, it => Check.jsonStr(Check.jsonField(it, "label")))
-    case _ => []: List[String]
+    case _ => []
   }
 
 def defLoc(j: Json): Json =
@@ -147,7 +147,7 @@ def tokenCount(j: Json): Int =
 def tokenData(j: Json): List[Int] =
   Check.jsonField(Check.jsonField(j, "result"), "data") match {
     case Json.Arr(xs) => List.map(xs, Check.jsonInt)
-    case _ => []: List[Int]
+    case _ => []
   }
 
 def inlayLabel(j: Json): String =
@@ -163,7 +163,7 @@ def inlayHint(item: Json): (Int, Int, String) =
 def inlayHints(j: Json): List[(Int, Int, String)] =
   Check.jsonField(j, "result") match {
     case Json.Arr(xs) => List.map(xs, inlayHint)
-    case _ => []: List[(Int, Int, String)]
+    case _ => []
   }
 
 def foldRange(item: Json): (Int, Int) =
@@ -172,20 +172,14 @@ def foldRange(item: Json): (Int, Int) =
 def foldRanges(j: Json): List[(Int, Int)] =
   Check.jsonField(j, "result") match {
     case Json.Arr(xs) => List.map(xs, foldRange)
-    case _ => []: List[(Int, Int)]
+    case _ => []
   }
 
 def paintEditor(root: String, path: String, body: String): IO[Json] =
   for {
-    tok <- lspCall(root, path, body, "textDocument/semanticTokens/full").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
-    inl <- lspCall(root, path, body, "textDocument/inlayHint").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
-    fld <- lspCall(root, path, body, "textDocument/foldingRange").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+    tok <- lspCall(root, path, body, "textDocument/semanticTokens/full").handleErrorWith(_ => IO.pure(Json.Null()))
+    inl <- lspCall(root, path, body, "textDocument/inlayHint").handleErrorWith(_ => IO.pure(Json.Null()))
+    fld <- lspCall(root, path, body, "textDocument/foldingRange").handleErrorWith(_ => IO.pure(Json.Null()))
     _ <- Ui.setEditorTokens(tokenData(tok))
     _ <- Ui.setEditorInlays(inlayHints(inl))
     _ <- Ui.setEditorFolds(foldRanges(fld))
@@ -220,12 +214,8 @@ def readResult(pid: Int, want: Int): IO[Json] =
 def lspCall(root: String, path: String, body: String, method: String): IO[Json] =
   for {
     pid <- Sys.spawn("scuzz lsp")
-    abs <- Fs.canonicalize(path).handleErrorWith(_ =>
-  IO.pure(path)
-)
-    rootAbs <- Fs.canonicalize(root).handleErrorWith(_ =>
-  IO.pure(root)
-)
+    abs <- Fs.canonicalize(path).handleErrorWith(_ => IO.pure(path))
+    rootAbs <- Fs.canonicalize(root).handleErrorWith(_ => IO.pure(root))
     uri = Str.concat("file://", abs)
     rootUri = Str.concat("file://", rootAbs)
     _ <- Sys.childWrite(pid, frame(initBody(rootUri)))

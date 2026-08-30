@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local gate: conflict markers, rustfmt+clippy on staged .rs, -Werror on staged C.
+# Local gate: conflict markers, -Werror on staged C.
 # Install: ./scripts/install-githooks.sh
 set -euo pipefail
 
@@ -23,20 +23,6 @@ while IFS= read -r path; do
     fail=1
   fi
 done <<<"$STAGED"
-
-# --- rustfmt + clippy (same gate as CI rustfmt-clippy) ---
-RS=()
-while IFS= read -r path; do
-  [[ "$path" == *.rs && -f "$path" ]] || continue
-  RS+=("$path")
-done <<<"$STAGED"
-
-if [[ ${#RS[@]} -gt 0 ]]; then
-  if ! "$ROOT/scripts/check-fmt-clippy.sh"; then
-    echo "pre-commit: rustfmt/clippy failed (run: ./scripts/check-fmt-clippy.sh)" >&2
-    fail=1
-  fi
-fi
 
 # --- compile-only -Werror for staged C under crates/{runtime,ffi-skia,embedder-*} ---
 # Catches undeclared APIs (for example usleep under POSIX.1-2008) without linking Skia.

@@ -1,0 +1,4 @@
+[package]
+name = "jump"
+version = "0.1.0"
+description = "68k-line compiler-scale typecheck"

@@ -49,7 +49,6 @@ import A.tag
 import A.Msg
 import A.one as fromA
 import A.Tag
-
 def id[T](x: T): T =
   x
 

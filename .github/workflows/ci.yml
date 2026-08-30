@@ -9,18 +9,6 @@ on:
   #   - cron: '17 4 * * *'
 
 jobs:
-  rustfmt-clippy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust (stable with rustfmt + clippy)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - name: rustfmt + clippy
-        run: ./scripts/check-fmt-clippy.sh
-
   # nightly-deep-campaign:
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 120
@@ -31,16 +19,15 @@ jobs:
   #       run: |
   #         sudo apt-get update
   #         sudo apt-get install -y clang make zlib1g-dev libbz2-dev
-  #     - name: Install Rust (stable with rust-toolchain.toml)
-  #       uses: dtolnay/rust-toolchain@stable
-  #     - name: Build CLI
-  #       run: cargo build -p scuzz
+  #     - name: Bootstrap product CLI
+  #       run: ./scripts/bootstrap.sh
   #     - name: Deep campaigns
   #       run: |
-  #         cargo run -p scuzz -- fuzz --iterations 512 examples/counter
-  #         cargo run -p scuzz -- fuzz --iterations 512 examples/studio
-  #         cargo run -p scuzz -- fuzz --relate examples/counter
-  #         cargo run -p scuzz -- fuzz --relate examples/studio
+  #         export SCUZZ=./examples/cli/build/cli
+  #         "$SCUZZ" fuzz --iterations 512 examples/counter
+  #         "$SCUZZ" fuzz --iterations 512 examples/studio
+  #         "$SCUZZ" fuzz --relate examples/counter
+  #         "$SCUZZ" fuzz --relate examples/studio
 
   linux-headless:
     runs-on: ubuntu-latest
@@ -74,9 +61,6 @@ jobs:
             zlib1g-dev libbz2-dev libegl1-mesa-dev libgles2-mesa-dev \
             libgl1-mesa-dri
 
-      - name: Install Rust (stable with rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Runtime + UI tests
         run: make -C crates/runtime test CC=clang
 
@@ -93,15 +77,13 @@ jobs:
           make -C crates/embedder-desktop lib CC=clang
           make -C crates/embedder-mobile lib CC=clang
 
-      - name: Build CLI
-        run: cargo build -p scuzz
-
-      - name: Compiler unit tests
-        run: cargo test -p scuzz-compiler
+      - name: Bootstrap product CLI
+        run: ./scripts/bootstrap.sh
 
       - name: Hello world → LLVM → native
         run: |
-          cargo run -p scuzz -- run examples/cli | tee /tmp/cli.out
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" run examples/cli | tee /tmp/cli.out
           grep -q "cli-ok" /tmp/cli.out
           SCUZZ=./examples/cli/build/cli
           "$SCUZZ" run examples/hello | tee /tmp/hello.out
@@ -109,9 +91,9 @@ jobs:
           grep -q "ready." /tmp/hello.out
           "$SCUZZ" run examples/fmt | tee /tmp/fmt.out
           grep -q "fmt-ok" /tmp/fmt.out
-          cargo run -p scuzz -- run examples/tyck | tee /tmp/tyck.out
+          "$SCUZZ" run examples/tyck | tee /tmp/tyck.out
           grep -q "tyck-ok" /tmp/tyck.out
-          cargo run -p scuzz -- run examples/codegen | tee /tmp/codegen.out
+          "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
           grep -q "ir-ok" /tmp/codegen.out
           "$SCUZZ" run --out-dir /tmp/scuzz-cli-hello examples/hello | tee /tmp/cli-hello.out
           grep -q "Hello, Scuzz!" /tmp/cli-hello.out
@@ -119,7 +101,8 @@ jobs:
 
       - name: Kernel + IO kits + incremental build
         run: |
-          cargo run -p scuzz -- run examples/kernel | tee /tmp/kernel.out
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" run examples/kernel | tee /tmp/kernel.out
           grep -q "adt:red" /tmp/kernel.out
           grep -q "bare:42" /tmp/kernel.out
           grep -q "bare:none" /tmp/kernel.out
@@ -382,7 +365,7 @@ jobs:
           grep -q "tcol:6" /tmp/kernel.out
           grep -q "diff:y" /tmp/kernel.out
           grep -q "build:2097152" /tmp/kernel.out
-          cargo run -p scuzz -- run examples/scale | tee /tmp/scale.out
+          "$SCUZZ" run examples/scale | tee /tmp/scale.out
           grep -q "mapn:3048" /tmp/scale.out
           grep -q "maps:2098176" /tmp/scale.out
           grep -q "hit:0:49" /tmp/scale.out
@@ -434,19 +417,21 @@ jobs:
           grep -q "net:" /tmp/io-test.out
           "$SCUZZ" check examples/hello
           "$SCUZZ" check examples/kernel
-          cargo run -p scuzz -- check examples/scale
-          cargo run -p scuzz -- check examples/fmt
-          cargo run -p scuzz -- check examples/tyck
-          cargo run -p scuzz -- check examples/codegen
-          cargo run -p scuzz -- check examples/cli
+          "$SCUZZ" check examples/scale
+          ./examples/jump/gen.sh
+          "$SCUZZ" check examples/jump
+          "$SCUZZ" check examples/fmt
+          "$SCUZZ" check examples/tyck
+          "$SCUZZ" check examples/codegen
+          "$SCUZZ" check examples/cli
           "$SCUZZ" check examples/counter
-          cargo run -p scuzz -- check examples/studio
-          cargo run -p scuzz -- check examples/editor
+          "$SCUZZ" check examples/studio
+          "$SCUZZ" check examples/editor
           "$SCUZZ" check examples/bad-example
           "$SCUZZ" test examples/bad-example
-          cargo run -p scuzz -- check examples/bad-fault
+          "$SCUZZ" check examples/bad-fault
           "$SCUZZ" test examples/bad-fault
-          cargo run -p scuzz -- check examples/bad-adt
+          "$SCUZZ" check examples/bad-adt
           "$SCUZZ" test examples/bad-adt
           "$SCUZZ" check examples/bad-sched
           "$SCUZZ" test examples/bad-sched
@@ -526,9 +511,10 @@ jobs:
 
       - name: Pixel goldens (sk_sw software backend)
         run: |
+          SCUZZ=./examples/cli/build/cli
           SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib CC=clang
           rm -rf examples/counter/build
-          SCUZZ_SKIA=sk_sw cargo run -p scuzz -- test --pixels examples/counter
+          SCUZZ_SKIA=sk_sw "$SCUZZ" test --pixels examples/counter
           make -C crates/ffi-skia clean lib CC=clang
 
       - name: GPU presenter (OpenGL readback)
@@ -536,14 +522,16 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           xvfb-run -a env SCUZZ_SKIA=gpu make -C crates/ffi-skia test CC=clang
-          xvfb-run -a env SCUZZ_SKIA=gpu cargo run -p scuzz -- test examples/counter
+          SCUZZ=./examples/cli/build/cli
+          xvfb-run -a env SCUZZ_SKIA=gpu "$SCUZZ" test examples/counter
           make -C crates/ffi-skia clean lib CC=clang
 
       - name: Differential structural dumps (skia vs sk_sw vs gpu)
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
-          xvfb-run -a cargo run -p scuzz -- test --differential examples/counter
+          SCUZZ=./examples/cli/build/cli
+          xvfb-run -a "$SCUZZ" test --differential examples/counter
           make -C crates/ffi-skia clean lib CC=clang
 
       - name: Deterministic fuzz (bounded) + repro replay
@@ -576,15 +564,15 @@ jobs:
           grep -q 'drive termDiff' examples/kernel/build/seeds.txt
           grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
           "$SCUZZ" fuzz --iterations 16 examples/kernel
-          cargo run -p scuzz -- fuzz --iterations 8 examples/scale
+          "$SCUZZ" fuzz --iterations 8 examples/scale
           "$SCUZZ" fuzz --iterations 8 examples/fmt
-          cargo run -p scuzz -- fuzz --iterations 8 examples/tyck
-          cargo run -p scuzz -- fuzz --iterations 8 examples/codegen
-          cargo run -p scuzz -- fuzz --iterations 8 examples/cli
+          "$SCUZZ" fuzz --iterations 8 examples/tyck
+          "$SCUZZ" fuzz --iterations 8 examples/codegen
+          "$SCUZZ" fuzz --iterations 8 examples/cli
           rm -rf /tmp/bad-seed
           cp -R examples/bad-example /tmp/bad-seed
           rm -rf /tmp/bad-seed/build /tmp/bad-seed/corpus
-          if cargo run -p scuzz -- fuzz --iterations 0 /tmp/bad-seed; then
+          if "$SCUZZ" fuzz --iterations 0 /tmp/bad-seed; then
             echo "zero-arg seed should fail bump with no stored corpus" && exit 1
           fi
           grep -q 'drive bump 0' /tmp/bad-seed/build/fuzz/repro.toml
@@ -634,7 +622,7 @@ jobs:
             echo "live/verify split should fail the campaign" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug
-          cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
+          "$SCUZZ" new --ui --path /tmp scuzz-fuzzbug
           cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -647,13 +635,13 @@ jobs:
               ))
             } yield ()
           EOF
-          if cargo run -p scuzz -- fuzz --iterations 8 /tmp/scuzz-fuzzbug; then
+          if "$SCUZZ" fuzz --iterations 8 /tmp/scuzz-fuzzbug; then
             echo "fuzz should have found the failure" && exit 1
           fi
           test -f /tmp/scuzz-fuzzbug/build/fuzz/repro.toml
           test -n "$(ls /tmp/scuzz-fuzzbug/corpus/*.toml 2>/dev/null)"
           grep -E '^promoted = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
-          if cargo run -p scuzz -- fuzz --replay /tmp/scuzz-fuzzbug/build/fuzz/repro.toml /tmp/scuzz-fuzzbug; then
+          if "$SCUZZ" fuzz --replay /tmp/scuzz-fuzzbug/build/fuzz/repro.toml /tmp/scuzz-fuzzbug; then
             echo "replay should have reproduced the failure" && exit 1
           fi
           cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
@@ -668,7 +656,7 @@ jobs:
               ))
             } yield ()
           EOF
-          if ! cargo run -p scuzz -- fuzz --iterations 0 /tmp/scuzz-fuzzbug; then
+          if ! "$SCUZZ" fuzz --iterations 0 /tmp/scuzz-fuzzbug; then
             echo "corpus-only should pass after the source fix" && exit 1
           fi
           grep -E '^entries = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
@@ -685,14 +673,14 @@ jobs:
               ))
             } yield ()
           EOF
-          if cargo run -p scuzz -- fuzz --iterations 0 /tmp/scuzz-fuzzbug; then
+          if "$SCUZZ" fuzz --iterations 0 /tmp/scuzz-fuzzbug; then
             echo "corpus-only should pin the reintroduced bug" && exit 1
           fi
           grep -E '^entries = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
           grep -E '^failures = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
           grep -E '^promoted = 0' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
           rm -rf /tmp/scuzz-schedbug
-          cargo run -p scuzz -- new --path /tmp scuzz-schedbug
+          "$SCUZZ" new --path /tmp scuzz-schedbug
           cat > /tmp/scuzz-schedbug/src/Main.scuzz <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -702,17 +690,17 @@ jobs:
               _ <- if (Str.eq(first, "L")) IO.pure(()) else IO.fail("expected L first")
             } yield ()
           EOF
-          cargo run -p scuzz -- test /tmp/scuzz-schedbug
-          if cargo run -p scuzz -- fuzz --iterations 12 /tmp/scuzz-schedbug; then
+          "$SCUZZ" test /tmp/scuzz-schedbug
+          if "$SCUZZ" fuzz --iterations 12 /tmp/scuzz-schedbug; then
             echo "schedule fuzz should have found the interleaving bug" && exit 1
           fi
           test -f /tmp/scuzz-schedbug/build/fuzz/repro.toml
           grep -q 'schedule_seed' /tmp/scuzz-schedbug/build/fuzz/repro.toml
-          if cargo run -p scuzz -- fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro.toml /tmp/scuzz-schedbug; then
+          if "$SCUZZ" fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro.toml /tmp/scuzz-schedbug; then
             echo "schedule replay should have reproduced the failure" && exit 1
           fi
           grep -v schedule_seed /tmp/scuzz-schedbug/build/fuzz/repro.toml > /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml
-          if ! cargo run -p scuzz -- fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
+          if ! "$SCUZZ" fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
             echo "FIFO replay (no schedule_seed) should pass" && exit 1
           fi
           "$SCUZZ" fuzz --iterations 1 examples/io
@@ -774,19 +762,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust (stable with rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@stable
       - name: Runtime tests
         run: make -C crates/runtime test CC=clang
-      - name: Compiler unit tests
-        run: RUST_MIN_STACK=8388608 cargo test -p scuzz-compiler
+      - name: Bootstrap product CLI
+        run: ./scripts/bootstrap.sh
       - name: Hello smoke
         run: |
-          cargo build -p scuzz
-          cargo run -p scuzz -- build --full examples/hello
-          cargo run -p scuzz -- test examples/hello
-          cargo run -p scuzz -- check examples/kernel
-          if cargo run -p scuzz -- check examples/bad-intent; then
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" build --full examples/hello
+          "$SCUZZ" test examples/hello
+          "$SCUZZ" check examples/kernel
+          if "$SCUZZ" check examples/bad-intent; then
             echo "empty verify should fail check" && exit 1
           fi
 
@@ -798,19 +784,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (stable with rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Runtime + UI tests
         run: make -C crates/runtime test CC=clang
 
-      - name: Build CLI + embedders
+      - name: Build embedders
         run: |
           make -C crates/ffi-skia lib CC=clang
           grep -qx skia crates/ffi-skia/build/sk_capi_backend
           make -C crates/embedder-desktop lib CC=clang
           make -C crates/embedder-mobile lib CC=clang
-          cargo build -p scuzz
 
       - name: Package release + install smoke
         run: |
@@ -844,13 +826,15 @@ jobs:
 
       - name: Golden PNG tests
         run: |
-          cargo run -p scuzz -- test examples/counter
-          cargo run -p scuzz -- test examples/studio
-          cargo run -p scuzz -- test examples/editor
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" test examples/counter
+          "$SCUZZ" test examples/studio
+          "$SCUZZ" test examples/editor
 
       - name: Pixel goldens (sk_sw software backend)
         run: |
+          SCUZZ=./examples/cli/build/cli
           SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib
           rm -rf examples/counter/build
-          SCUZZ_SKIA=sk_sw cargo run -p scuzz -- test --pixels examples/counter
+          SCUZZ_SKIA=sk_sw "$SCUZZ" test --pixels examples/counter
           make -C crates/ffi-skia clean lib

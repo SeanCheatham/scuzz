@@ -2,39 +2,29 @@ def analyze(path: String, body: String): IO[String] =
   for {
     _ <- Fs.write(path, body)
     start = Fs.dirname(path)
-    here <- Fs.canonicalize(start).handleErrorWith(_ =>
-  IO.pure(start)
-)
+    here <- Fs.canonicalize(start).handleErrorWith(_ => IO.pure(start))
     hit <- Fs.exists(Fs.join(here, "scuzz.toml"))
     parent = Fs.dirname(here)
     up <- Fs.exists(Fs.join(parent, "scuzz.toml"))
     above = Fs.dirname(parent)
     up2 <- Fs.exists(Fs.join(above, "scuzz.toml"))
     root = if (hit) here else if (up) parent else if (up2) above else here
-    got <- Sys.exec(Str.concat("scuzz check --message-format=json ", root)).handleErrorWith(_ =>
-  IO.pure((Str.len("x"), "[]", ""))
-)
+    got <- Sys.exec(Str.concat("scuzz check --message-format=json ", root)).handleErrorWith(_ => IO.pure((Str.len("x"), "[]", "")))
   } yield if (Str.startsWith(got._2, "[")) got._2 else "[]"
 
 def runProject(root: String): IO[String] =
   for {
-    got <- Sys.exec(Str.concat("scuzz run ", root)).handleErrorWith(_ =>
-  IO.pure((Str.len("x"), "", "run fail"))
-)
+    got <- Sys.exec(Str.concat("scuzz run ", root)).handleErrorWith(_ => IO.pure((Str.len("x"), "", "run fail")))
   } yield Chrome.captureOut(got._2, got._3)
 
 def fuzzProject(root: String): IO[String] =
   for {
-    got <- Sys.exec(Str.concat("scuzz fuzz --iterations 0 ", root)).handleErrorWith(_ =>
-  IO.pure((Str.len("x"), "", "fuzz fail"))
-)
+    got <- Sys.exec(Str.concat("scuzz fuzz --iterations 0 ", root)).handleErrorWith(_ => IO.pure((Str.len("x"), "", "fuzz fail")))
   } yield Chrome.captureOut(got._2, got._3)
 
 def walkTree(root: String): IO[List[String]] =
   for {
-    ents <- Fs.walk(root).handleErrorWith(_ =>
-  IO.pure([]: List[(String, Bool)])
-)
+    ents <- Fs.walk(root).handleErrorWith(_ => IO.pure([]))
   } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepWalk(s)))
 
 @main def main: IO[Unit] =
@@ -42,7 +32,7 @@ def walkTree(root: String): IO[List[String]] =
     _ <- Chrome.seedWorkspace()
     args <- Sys.args()
     arg = if (List.isEmpty(args)) "sample.txt" else List.head(args)
-    _ = Property.check("rel", Chrome.preferredRel(true, []: List[String], []: List[String]) == Fs.join("src", "Main.scuzz"), true)
+    _ = Property.check("rel", Chrome.preferredRel(true, [], []) == Fs.join("src", "Main.scuzz"), true)
     _ = Property.check("flat", Chrome.flatten(["a.txt", "b/", "b/c.scuzz"], []) == ["a.txt", "b/"], true)
     _ = Property.check("exp", Chrome.flatten(["a.txt", "b/", "b/c.scuzz"], ["b/"]) == ["a.txt", "b/", "b/c.scuzz"], true)
     _ = Property.check("tog", Chrome.toggleOpen([], "b/") == ["b/"], true)
@@ -68,14 +58,10 @@ e""", true)
     _ = Property.check("ins", Chrome.insertAt("ab", 1, "x") == "axb", true)
     _ = Property.check("line", Chrome.lineColAt("""a
 bc""", 3)._1 == 1, true)
-    argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ =>
-  IO.pure(Str.len(""))
-)
+    argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ => IO.pure(Str.len("")))
     file <- Chrome.openBuffer(arg, argListed)
     root = if (argListed == 0) Fs.dirname(file) else arg
-    raw <- Fs.read(file).handleErrorWith(_ =>
-  IO.pure("")
-)
+    raw <- Fs.read(file).handleErrorWith(_ => IO.pure(""))
     walked <- walkTree(root)
     names = Chrome.flatten(walked, [])
     buf = Signal.str(raw)
@@ -127,9 +113,9 @@ bc""", 3)._1 == 1, true)
   reloaded = polled._3
   _ = Signal.setList(bodies, bs)
   _ = Signal.setList(origs, os)
-  _ = if (reloaded == 1) Signal.setStr(buf, List.at(bs, i))
-  _ = if (reloaded == 1) Signal.setStr(orig, List.at(os, i))
-  _ = if (reloaded == 1) Signal.set(dirty, Str.len(""))
+  _ = if (reloaded == 1) Signal.setStr(buf, List.at(bs, i)) else ()
+  _ = if (reloaded == 1) Signal.setStr(orig, List.at(os, i)) else ()
+  _ = if (reloaded == 1) Signal.set(dirty, Str.len("")) else ()
   dir = Signal.getStr(dirSig)
   walked <- walkTree(dir)
   _ = Signal.setList(tree, Chrome.flatten(walked, Signal.getList(openSig)))
@@ -148,9 +134,7 @@ bc""", 3)._1 == 1, true)
   _ = Property.sometimes("tappedTree")
   _ = Property.sometimes("focusedList")
   next = Chrome.joinChild(dir, s)
-  body <- Fs.read(next).handleErrorWith(_ =>
-  IO.pure("")
-)
+  body <- Fs.read(next).handleErrorWith(_ => IO.pure(""))
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), next, body)
   _ = Signal.setList(paths, ps)
   _ = Signal.setList(bodies, bs)
@@ -190,17 +174,13 @@ bc""", 3)._1 == 1, true)
   _ <- IO.pure(())
 } yield ()), View.button("Complete", _ => for {
   _ = Property.sometimes("tappedComplete")
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/completion").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/completion").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.setList(comps, Lsp.completeLabels(j))
   _ = Signal.set(compOpen, Str.len("x"))
   _ <- IO.pure(())
 } yield ()), View.button("Hover", _ => for {
   _ = Property.sometimes("tappedHover")
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/hover").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/hover").handleErrorWith(_ => IO.pure(Json.Null()))
   tok <- Lsp.paintEditor(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf))
   _ = Signal.setStr(hoverTxt, Lsp.hoverText(j))
   hoverOut = List.append(Signal.getList(output), Str.concat("tok", Str.fromInt(Lsp.tokenCount(tok))))
@@ -210,24 +190,18 @@ bc""", 3)._1 == 1, true)
   _ <- IO.pure(())
 } yield ()), View.button("Format", _ => for {
   _ = Property.sometimes("tappedFormat")
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/formatting").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/formatting").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.setStr(buf, Lsp.formatText(j, Signal.getStr(buf)))
   fmtOut = List.append(Signal.getList(output), "fmt")
   _ = Signal.setList(output, fmtOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fmtOut))
   _ <- IO.pure(())
 } yield ()), View.button("Def", _ => for {
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/definition").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/definition").handleErrorWith(_ => IO.pure(Json.Null()))
   uri = Lsp.defUri(j)
   _ <- if (Str.isEmpty(uri)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.getStr(dirSig), uri)
-  body <- Fs.read(dest).handleErrorWith(_ =>
-  IO.pure("")
-)
+  body <- Fs.read(dest).handleErrorWith(_ => IO.pure(""))
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), dest, body)
   _ = Signal.setList(paths, ps)
   _ = Signal.setList(bodies, bs)
@@ -241,17 +215,13 @@ bc""", 3)._1 == 1, true)
 } yield ()
   _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
 } yield ()), View.button("Rename", _ => for {
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/rename").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/rename").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.setStr(buf, Lsp.renameText(j, Signal.getStr(buf)))
   _ <- IO.pure(())
 } yield ()), View.button("Fix", _ => for {
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/codeAction").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/codeAction").handleErrorWith(_ => IO.pure(Json.Null()))
   t = Lsp.fixText(j, "")
-  _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t)
+  _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t) else ()
   _ = Signal.set(dirty, if (Signal.getStr(buf) == Signal.getStr(orig)) Str.len("") else Str.len("x"))
   _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
   fixOut = List.append(Signal.getList(output), Lsp.fixTitle(j))
@@ -310,9 +280,7 @@ bc""", 3)._1 == 1, true)
   file = Check.diagFile(s)
   _ <- if (Str.isEmpty(file)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.getStr(dirSig), file)
-  body <- Fs.read(dest).handleErrorWith(_ =>
-  IO.pure("")
-)
+  body <- Fs.read(dest).handleErrorWith(_ => IO.pure(""))
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), dest, body)
   _ = Signal.setList(paths, ps)
   _ = Signal.setList(bodies, bs)
@@ -371,17 +339,13 @@ bc""", 3)._1 == 1, true)
   _ <- IO.pure(())
 } yield () else if (s == "Complete") for {
   _ = Property.sometimes("tappedComplete")
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/completion").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/completion").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.setList(comps, Lsp.completeLabels(j))
   _ = Signal.set(compOpen, Str.len("x"))
   _ <- IO.pure(())
 } yield () else if (s == "Hover") for {
   _ = Property.sometimes("tappedHover")
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/hover").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/hover").handleErrorWith(_ => IO.pure(Json.Null()))
   tok <- Lsp.paintEditor(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf))
   _ = Signal.setStr(hoverTxt, Lsp.hoverText(j))
   hoverOut = List.append(Signal.getList(output), Str.concat("tok", Str.fromInt(Lsp.tokenCount(tok))))
@@ -391,24 +355,18 @@ bc""", 3)._1 == 1, true)
   _ <- IO.pure(())
 } yield () else if (s == "Format") for {
   _ = Property.sometimes("tappedFormat")
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/formatting").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/formatting").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.setStr(buf, Lsp.formatText(j, Signal.getStr(buf)))
   fmtOut = List.append(Signal.getList(output), "fmt")
   _ = Signal.setList(output, fmtOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fmtOut))
   _ <- IO.pure(())
 } yield () else if (s == "Def") for {
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/definition").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/definition").handleErrorWith(_ => IO.pure(Json.Null()))
   uri = Lsp.defUri(j)
   _ <- if (Str.isEmpty(uri)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.getStr(dirSig), uri)
-  body <- Fs.read(dest).handleErrorWith(_ =>
-  IO.pure("")
-)
+  body <- Fs.read(dest).handleErrorWith(_ => IO.pure(""))
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), dest, body)
   _ = Signal.setList(paths, ps)
   _ = Signal.setList(bodies, bs)
@@ -422,17 +380,13 @@ bc""", 3)._1 == 1, true)
 } yield ()
   _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
 } yield () else if (s == "Rename") for {
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/rename").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/rename").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.setStr(buf, Lsp.renameText(j, Signal.getStr(buf)))
   _ <- IO.pure(())
 } yield () else if (s == "Fix") for {
-  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/codeAction").handleErrorWith(_ =>
-  IO.pure(Json.Null)
-)
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/codeAction").handleErrorWith(_ => IO.pure(Json.Null()))
   t = Lsp.fixText(j, "")
-  _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t)
+  _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t) else ()
   _ = Signal.set(dirty, if (Signal.getStr(buf) == Signal.getStr(orig)) Str.len("") else Str.len("x"))
   _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
   fixOut = List.append(Signal.getList(output), Lsp.fixTitle(j))
@@ -465,9 +419,7 @@ bc""", 3)._1 == 1, true)
   _ = Property.sometimes("contextOpen")
   dir = Signal.getStr(dirSig)
   next = Chrome.joinChild(dir, Signal.getStr(ctxPath))
-  body <- Fs.read(next).handleErrorWith(_ =>
-  IO.pure("")
-)
+  body <- Fs.read(next).handleErrorWith(_ => IO.pure(""))
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), next, body)
   _ = Signal.setList(paths, ps)
   _ = Signal.setList(bodies, bs)
@@ -482,9 +434,7 @@ bc""", 3)._1 == 1, true)
 } yield ()), View.button("Delete", _ => for {
   dir = Signal.getStr(dirSig)
   next = Chrome.joinChild(dir, Signal.getStr(ctxPath))
-  _ <- Fs.delete(next).handleErrorWith(_ =>
-  IO.pure(())
-)
+  _ <- Fs.delete(next).handleErrorWith(_ => IO.pure(()))
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyClose(Signal.getList(paths), Signal.getList(bodies), Signal.getList(origs), Signal.get(idx), Signal.getStr(buf), Signal.getStr(orig), next)
   _ = Signal.setList(paths, ps)
   _ = Signal.setList(bodies, bs)

@@ -153,7 +153,9 @@ sumToTen
 """
 
 def srcBumpVerify(): String =
-  "def bump(n: Int): Bool =\n  Main.bump(n) == n + 1\n"
+  """def bump(n: Int): Bool =
+  Main.bump(n) == n + 1
+"""
 
 def wantWrapBump(): String =
   "def _drv_bump(n: Int): IO[Unit] =\n  Property.assert(\"bump\", Main.bump(n) == n + 1)\n"
@@ -184,11 +186,7 @@ def wantEmptyVerify(): String =
   "bad-intent/empty.scuzz_verify:1:1: error: bad-intent/empty.scuzz_verify: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file"
 
 def srcBumpRepro(): String =
-  """[fuzz]
-seed = 42
-schedule_seed = "42"
-events = ["drive bump 0"]
-"""
+  "[fuzz]\nseed = 42\nschedule_seed = \"42\"\nevents = [\"drive bump 0\"]\n"
 
 def wantBumpEvents(): String =
   """drive bump 0
@@ -212,8 +210,16 @@ def cliDiff(got: String, want: String): Bool =
 def cliIdem(args: List[String]): Bool =
   Cli.show(Cli.parse(args)) == Cli.show(Cli.parse(args))
 
+def lspSrc(): String =
+  """def foo(x: Int): Int =
+  x
+"""
+
+def lspOk(): Bool =
+  Lsp.identAt(lspSrc(), 4) == "foo" && Lsp.hoverAt(lspSrc(), 0, 4) == "def foo(x: Int): Int" && Lsp.qualIdentAt("IO.println(1)", 3) == "IO.println"
+
 def allOk(): Bool =
-  cliDiff(Cli.render(Cli.parse(a1("--help"))), Help.helpRoot()) && cliDiff(Cli.render(Cli.parse(a2("fmt", "--help"))), Help.helpFmt()) && cliDiff(Cli.render(Cli.parse(a2("check", "--help"))), Help.helpCheck()) && cliDiff(Cli.render(Cli.parse(a2("build", "--help"))), Help.helpBuild()) && cliDiff(Cli.render(Cli.parse(a2("run", "--help"))), Help.helpRun()) && cliDiff(Cli.render(Cli.parse(a2("fuzz", "--help"))), Help.helpFuzz()) && cliDiff(Cli.render(Cli.parse(a2("new", "--help"))), Help.helpNew()) && cliDiff(Cli.render(Cli.parse(a1("-V"))), """scuzz 0.2.0
+  lspOk() && cliDiff(Cli.render(Cli.parse(a1("--help"))), Help.helpRoot()) && cliDiff(Cli.render(Cli.parse(a2("fmt", "--help"))), Help.helpFmt()) && cliDiff(Cli.render(Cli.parse(a2("check", "--help"))), Help.helpCheck()) && cliDiff(Cli.render(Cli.parse(a2("build", "--help"))), Help.helpBuild()) && cliDiff(Cli.render(Cli.parse(a2("run", "--help"))), Help.helpRun()) && cliDiff(Cli.render(Cli.parse(a2("fuzz", "--help"))), Help.helpFuzz()) && cliDiff(Cli.render(Cli.parse(a2("new", "--help"))), Help.helpNew()) && cliDiff(Cli.render(Cli.parse(a1("-V"))), """scuzz 0.2.0
 """) && cliDiff(Cli.show(Cli.parse(a1("fmt"))), "fmt path=. check=false") && cliDiff(Cli.show(Cli.parse(a2("fmt", "--check"))), "fmt path=. check=true") && cliDiff(Cli.show(Cli.parse(a3("fmt", "--check", "examples/hello"))), "fmt path=examples/hello check=true") && cliDiff(Cli.show(Cli.parse(a2("check", "examples/kernel"))), "check path=examples/kernel json=false") && cliDiff(Cli.show(Cli.parse(a2("check", "--message-format=json"))), "check path=. json=true") && cliDiff(Cli.show(Cli.parse(a2("--message-format=json", "check"))), "check path=. json=true") && cliDiff(Cli.show(Cli.parse(a3("build", "--full", "examples/hello"))), "build path=examples/hello out=build full=true verify=false") && cliDiff(Cli.show(Cli.parse(a3("run", "--headless", "examples/studio"))), "run path=examples/studio out=build headless=true watch=false script= dump=") && cliDiff(Cli.show(Cli.parse(a3("fuzz", "--iterations", "16"))), "fuzz path=. iterations=16 seed=42 replay= oracles=false noFailFast=false minimize=false relate=false") && cliDiff(Cli.show(Cli.parse(a4("fuzz", "--iterations", "0", "examples/counter"))), "fuzz path=examples/counter iterations=0 seed=42 replay= oracles=false noFailFast=false minimize=false relate=false") && cliDiff(Cli.show(Cli.parse(a3("new", "myapp", "--ui"))), "new name=myapp path=. ui=true") && cliDiff(Cli.show(Cli.parse(a2("package", "--target=ios"))), "package path=. out=build target=ios") && cliDiff(Cli.show(Cli.parse(a2("ide", "--headless"))), "ide path=. out=build headless=true") && cliDiff(Cli.render(Cli.parse(a1("nope"))), wantUnrec()) && cliDiff(Cli.render(Cli.parse(a2("fmt", "--nope"))), wantUnexp()) && cliDiff(Cli.render(Cli.parse(a2("--message-format=json", "fmt"))), wantJsonOnly()) && cliDiff(Cli.render(Cli.parse(a1("new"))), wantMissName()) && cliDiff(Cli.render(Cli.parse(a2("fuzz", "--iterations"))), wantNeedIter()) && cliDiff(Cli.render(Cli.parse(noArgs())), Help.helpRoot()) && cliDiff(Cli.fmtSrc(srcHi()), wantHi()) && cliIdem(a1("fmt")) && cliIdem(a2("fuzz", "--oracles")) && driveOk() && verifyOk()
 
 def go(args: List[String]): IO[Unit] =
