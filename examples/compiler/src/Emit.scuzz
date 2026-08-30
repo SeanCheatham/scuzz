@@ -2261,8 +2261,32 @@ def exprRetTy(e: Expr, defs: List[Fun], ps: List[Param]): String =
     case Expr.ECall(f, _) => nonemptyTy(funRetStr(defs, f), e, defs, ps)
     case Expr.EMethod(r, name, _) => nonemptyTy(funRetStr(defs, qualRecv(r, name)), e, defs, ps)
     case Expr.EVar(s) => nonemptyTy(paramTy(ps, s), e, defs, ps)
+    case Expr.ETuple(xs) => tupExprTy(xs, defs, ps)
+    case Expr.EIf(_, t, _) => exprRetTy(t, defs, ps)
+    case Expr.EMatch(_, arms) => exprRetTyMatch(arms, defs, ps)
+    case Expr.EInt(_) => "Int"
+    case Expr.EBool(_) => "Bool"
+    case Expr.EStr(_) => "String"
+    case Expr.EInterp(_) => "String"
     case _ => if (exprIsI64(e, ps, defs)) "Int" else "Any"
   }
+
+def exprRetTyMatch(arms: List[Arm], defs: List[Fun], ps: List[Param]): String =
+  if (List.isEmpty(arms)) "Any" else exprRetTyMatch1(List.head(arms), defs, ps)
+
+def exprRetTyMatch1(a: Arm, defs: List[Fun], ps: List[Param]): String =
+  a match {
+    case Arm(_, _, body) => exprRetTy(body, defs, ps)
+  }
+
+def tupExprTy(xs: List[Expr], defs: List[Fun], ps: List[Param]): String =
+  if (List.isEmpty(xs)) "()" else Str.concat("(", Str.concat(tupExprSlots(xs, defs, ps), ")"))
+
+def tupExprSlots(xs: List[Expr], defs: List[Fun], ps: List[Param]): String =
+  if (List.isEmpty(xs)) "" else tupExprSlots1(List.head(xs), List.tail(xs), defs, ps)
+
+def tupExprSlots1(h: Expr, rest: List[Expr], defs: List[Fun], ps: List[Param]): String =
+  if (List.isEmpty(rest)) exprRetTy(h, defs, ps) else Str.concat(exprRetTy(h, defs, ps), Str.concat(", ", tupExprSlots(rest, defs, ps)))
 
 def nonemptyTy(ty: String, e: Expr, defs: List[Fun], ps: List[Param]): String =
   if (ty != "") ty else if (exprIsI64(e, ps, defs)) "Int" else "Any"
@@ -3150,7 +3174,7 @@ def copyEn(recv: Expr, ens: List[En], defs: List[Fun]): String =
     case Expr.EVar(s) => copyEnOr(ctorHead(s, ens), ens)
     case Expr.EIf(_, t, _) => copyEn(t, ens, defs)
     case Expr.EMatch(_, arms) => copyEnMatch(arms, ens, defs)
-    case Expr.ETuple(xs) => tupLitTy(List.len(xs))
+    case Expr.ETuple(xs) => tupExprTy(xs, defs, noParam())
     case _ => copyEnFirst(ens)
   }
 
@@ -3161,12 +3185,6 @@ def copyEnMatch1(a: Arm, ens: List[En], defs: List[Fun]): String =
   a match {
     case Arm(_, _, body) => copyEn(body, ens, defs)
   }
-
-def tupLitTy(n: Int): String =
-  if (n <= 0) "()" else Str.concat("(", Str.concat(tupLitSlots(n), ")"))
-
-def tupLitSlots(n: Int): String =
-  if (n == 1) "Int" else Str.concat("Int, ", tupLitSlots(n - 1))
 
 def copyEnCall(f: String, ens: List[En], defs: List[Fun]): String =
   if (ctorHead(f, ens) != "") ctorHead(f, ens) else tyHead(funRetStr(defs, f))
