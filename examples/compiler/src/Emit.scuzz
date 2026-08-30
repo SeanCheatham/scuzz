@@ -5673,11 +5673,11 @@ def emitContsFm3Body(code: String, id: Int, p: String, body: Expr, strs: List[St
   emitContsFm3Held(code, id, p, body :: noExpr(), strs, defs, ens, ps, bty)
 
 def emitContsFm3Held(code: String, id: Int, p: String, held: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bty: String): (String, Int) =
-  emitContsFm3Join(join(code, emitOneCont(id, List.head(held), strs, defs, ens, ps, p, false, id, bty)), emitContsAt(List.head(held), strs, defs, ens, bindPsTy(p, ps, bty), id + 1))
+  emitContsFm3After(code, id, p, held, strs, defs, ens, ps, bty, emitContsAt(List.head(held), strs, defs, ens, bindPsTy(p, ps, bty), id))
 
-def emitContsFm3Join(code: String, q: (String, Int)): (String, Int) =
-  q match {
-    case (rest, id) => (join(code, rest), id)
+def emitContsFm3After(code: String, id: Int, p: String, held: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bty: String, nested: (String, Int)): (String, Int) =
+  nested match {
+    case (ncode, id2) => (join(code, join(ncode, emitOneCont(id2, List.head(held), strs, defs, ens, ps, p, false, id, bty))), id2 + 1)
   }
 
 def emitContsArgs(xs: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
