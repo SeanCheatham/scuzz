@@ -3177,9 +3177,11 @@ def copyEnFirst(ens: List[En]): String =
 
 def copyEnFirstH(h: En, rest: List[En]): String =
   h match {
-    case En(true, n, _, _) => n
-    case En(_, _, _, _) => copyEnFirst(rest)
+    case En(isRec, n, _, _) => copyEnFirstGo(isRec, n, rest)
   }
+
+def copyEnFirstGo(isRec: Bool, n: String, rest: List[En]): String =
+  if (isRec) n else copyEnFirst(rest)
 
 def emitCopyGo(r: Slot, args: List[Expr], prefix: String, en: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   if (List.isEmpty(args)) r else emitCopyUpd(r, args, prefix, en, recNames(ens, en), strs, defs, ens, ps)
