@@ -151,7 +151,13 @@ def emitDirHit(dir: String, outDir: String, files: List[(String, String)], toml:
   Fs.read(fpPath(dir)).flatMap(old => emitDirHitGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirFresh(dir, outDir, files, toml, fp))
 
 def emitDirHitGot(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String, old: String): IO[Unit] =
-  if (old == fp) emitDirUp(outDir, toml) else emitDirFresh(dir, outDir, files, toml, fp)
+  if (old == fp) emitDirHitArt(dir, outDir, files, toml, fp) else emitDirFresh(dir, outDir, files, toml, fp)
+
+def emitDirHitArt(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
+  emitDirHitArtMan(dir, outDir, files, toml, fp, Manifest.parse(toml))
+
+def emitDirHitArtMan(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String, m: Man): IO[Unit] =
+  if (!m.ok) IO.println(Str.concat("fail:", m.err)) else Fs.exists(llName(outDir, m.name)).flatMap(hit => if (hit) emitDirUp(outDir, toml) else emitDirFresh(dir, outDir, files, toml, fp))
 
 def emitDirUp(outDir: String, toml: String): IO[Unit] =
   emitDirUpMan(outDir, Manifest.parse(toml))
