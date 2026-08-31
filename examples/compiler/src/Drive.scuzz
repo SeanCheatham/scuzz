@@ -52,14 +52,20 @@ def uiFlags1(): String =
 def uiFlags2(): String =
   " -Wl,--no-whole-archive -lX11 -Wl,--whole-archive "
 
-def uiFlags3(): String =
-  " -Wl,--no-whole-archive -lpthread -rdynamic -o "
+def uiFlags3(gpu: Bool, mac: Bool): String =
+  Str.concat(" -Wl,--no-whole-archive", Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -rdynamic -o "))
 
-def linkLineUi(clang: String, ll: String, lib: String, exe: String, h: String): String =
-  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(h), Str.concat(uiFlags1(), Str.concat(deskLib(h), Str.concat(uiFlags2(), Str.concat(mobLib(h), Str.concat(uiFlags3(), exe))))))))))))
+def gpuLibs(mac: Bool): String =
+  if (mac) " -framework OpenGL" else " -lEGL -lGLESv2"
+
+def linkGpu(h: String): IO[Bool] =
+  Fs.read(crateAt(h, "crates/ffi-skia/build/sk_capi_backend")).map(s => Str.trim(s) == "gpu").handleErrorWith(_ => IO.pure(false))
+
+def linkLineUi(clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool, mac: Bool): String =
+  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(h), Str.concat(uiFlags1(), Str.concat(deskLib(h), Str.concat(uiFlags2(), Str.concat(mobLib(h), Str.concat(uiFlags3(gpu, mac), exe))))))))))))
 
 def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String, h: String): String =
-  if (hasUi) linkLineUi(clang, ll, lib, exe, h) else linkLine(clang, ll, lib, exe)
+  if (hasUi) linkLineUi(clang, ll, lib, exe, h, false, false) else linkLine(clang, ll, lib, exe)
 
 def hostMac(): IO[Bool] =
   Sys.exec("uname -s").map(r => Str.trim(r._2) == "Darwin")
@@ -67,11 +73,11 @@ def hostMac(): IO[Bool] =
 def linkLineMac(clang: String, ll: String, lib: String, exe: String): String =
   Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -lpthread -o ", exe))))))
 
-def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String, h: String): String =
-  if (hasUi) linkLineUi(clang, ll, lib, exe, h) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
+def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool): String =
+  if (hasUi) linkLineUi(clang, ll, lib, exe, h, gpu, mac) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
 
 def runLinkLine(hasUi: Bool, dir: String, name: String): IO[(Int, String, String)] =
-  crateHome().flatMap(h => ensureRtMade(h).flatMap(_ => hostMac().flatMap(mac => runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(h), exeName(dir, name), h)))))
+  crateHome().flatMap(h => ensureRtMade(h).flatMap(_ => hostMac().flatMap(mac => linkGpu(h).flatMap(gpu => runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(h), exeName(dir, name), h, gpu))))))
 
 def ensureRtMade(h: String): IO[Unit] =
   runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/runtime"), " lib CC=clang"))).flatMap(r => ensureRtGot(r))
