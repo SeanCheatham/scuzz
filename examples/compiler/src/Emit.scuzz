@@ -4246,10 +4246,10 @@ def oneParam(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", p.name) else Str.concat("ptr %", p.name)
 
 def emitDefs(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): String =
-  if (List.isEmpty(ds)) "" else emitDefsAt(ds, strs, all, ens, 0, "")
+  if (List.isEmpty(ds)) "" else Builder.result(emitDefsAt(ds, strs, all, ens, 0, Builder.empty()))
 
-def emitDefsAt(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], i: Int, acc: String): String =
-  if (i >= List.len(ds)) acc else emitDefsAt(ds, strs, all, ens, i + 1, Str.concat(acc, emitDef(List.at(ds, i), strs, all, ens)))
+def emitDefsAt(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], i: Int, b: Builder): Builder =
+  if (i >= List.len(ds)) b else emitDefsAt(ds, strs, all, ens, i + 1, Builder.append(b, emitDef(List.at(ds, i), strs, all, ens)))
 
 def emitDef2(d: Fun, body: Slot): String =
   d match {
@@ -4807,7 +4807,7 @@ def isSessFun(d: Fun): Bool =
   d.ret == "Verdict" && List.len(d.params) == 1 && isTlPs(d.params)
 
 def isTlPs(ps: List[Param]): Bool =
-  List.isEmpty(ps) || (List.head(ps).ty == "Timeline" && isTlPs(List.tail(ps)))
+  List.isEmpty(ps) || List.head(ps).ty == "Timeline" && isTlPs(List.tail(ps))
 
 def relFuns(ds: List[Fun]): List[Fun] =
   if (List.isEmpty(ds)) noFun() else relFuns1(List.head(ds), List.tail(ds))
