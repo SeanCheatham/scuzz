@@ -1019,10 +1019,13 @@ def fuzzBody3(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
   fuzzSplit(job).flatMap(_ => fuzzReplayGo(job.exe, job.hasUi, job.outDir, job.seed, fuzzAddSeeds(runs, joinSlash(job.outDir, "seeds.txt"), script), FuzzAcc(0, 0, "")).flatMap(acc => fuzzAfterReplay(job, script, List.len(fuzzAddSeeds(runs, joinSlash(job.outDir, "seeds.txt"), script)), acc)))
 
 def fuzzAfterReplay(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc): IO[Unit] =
-  if (acc.fail > 0 && !job.noFailFast) fuzzDone(job, corpus, acc.fail, acc.corpFail, acc.repro, emptyMut(Mutate.countFiles(job.files, job.oracles))) else fuzzSearch(job.exe, job.hasUi, job.outDir, script, Verify.searchN(job.iterations), 0).flatMap(fail => fuzzAfterSearch(job, script, corpus, acc, fail))
+  if (acc.fail > 0 && !job.noFailFast) fuzzDone(job, corpus, acc.fail, acc.corpFail, acc.repro, emptyMut(Mutate.countFiles(job.files, job.oracles))) else fuzzSearch(job.exe, job.hasUi, job.outDir, script, Verify.searchN(job.iterations), 0, 1, job.seed).flatMap(fail => fuzzAfterSearch(job, script, corpus, acc, fail))
 
 def fuzzAfterSearch(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
-  if (fail > 0 && acc.repro == "") fuzzSearchFail(job, script, corpus, acc, fail) else fuzzMutate(job, corpus, fail, acc.corpFail, acc.repro)
+  if (fail > 0 && acc.repro == "") fuzzAfterSearchFail(job, script, corpus, acc, fail) else fuzzMutate(job, corpus, fail, acc.corpFail, acc.repro)
+
+def fuzzAfterSearchFail(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
+  if (job.hasUi) fuzzSearchFail(job, script, corpus, acc, fail) else fuzzMutate(job, corpus, fail, acc.corpFail, joinSlash(joinSlash(job.outDir, "fuzz"), "repro.toml"))
 
 def fuzzSearchFail(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
   fuzzSaveRepro(job.outDir, job.seed, FuzzRun(joinSlash(job.outDir, "seeds.txt"), "", fuzzFailScript(job, script), "", "")).flatMap(path => fuzzSearchFail2(job, script, corpus, acc, fail, path))
@@ -1197,8 +1200,11 @@ def fuzzSeedPick(dir: String, name: String, isDir: Bool, rest: List[(String, Boo
 def fuzzSeedAdd(acc: List[String], src: String, ens: List[En]): List[String] =
   List.concat(acc, Verify.mapSeedE(Verify.parseVerify(src), ens))
 
-def fuzzSearch(exe: String, hasUi: Bool, outDir: String, script: String, n: Int, fail: Int): IO[Int] =
-  if (n <= 0) IO.pure(fail) else fuzzWriteDrive(outDir, script).flatMap(_ => fuzzProbe(exe, hasUi, outDir, script).flatMap(bad => fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad)))
+def fuzzSearch(exe: String, hasUi: Bool, outDir: String, script: String, n: Int, fail: Int, i: Int, seed: Int): IO[Int] =
+  if (n <= 0) IO.pure(fail) else fuzzWriteDrive(outDir, script).flatMap(_ => fuzzProbeRun(exe, hasUi, outDir, FuzzRun("", "", script, Str.fromInt(i), "")).flatMap(bad => fuzzSearchHit(exe, hasUi, outDir, script, n, fail, i, seed, bad)))
+
+def fuzzSearchHit(exe: String, hasUi: Bool, outDir: String, script: String, n: Int, fail: Int, i: Int, seed: Int, bad: Int): IO[Int] =
+  if (bad > 0 && fail == 0) fuzzSaveRepro(outDir, seed, FuzzRun(joinSlash(outDir, "seeds.txt"), "", script, Str.fromInt(i), "")).flatMap(_ => fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad, i + 1, seed)) else fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad, i + 1, seed)
 
 def fuzzProbe(exe: String, hasUi: Bool, outDir: String, script: String): IO[Int] =
   runProbe(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), script != "", "", "", outDir), exe)).map(r => fuzzProbeCode(r))
