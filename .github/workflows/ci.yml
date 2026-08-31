@@ -57,6 +57,9 @@ jobs:
           printf '%s\n' '"tag_name": "skia-cpu-v0.1"' '"tag_name": "v0.1.0-rc.1"' '"tag_name": "v9.9.9"' > /tmp/releases.json
           SCUZZ_RELEASES_JSON=/tmp/releases.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-tag.out
           grep -q 'tag=v9.9.9' /tmp/install-tag.out
+          printf '%s' '[{"tag_name":"skia-cpu-v0.1"},{"tag_name":"v0.1.0-rc.1"},{"tag_name":"v9.9.9"}]' > /tmp/releases-compact.json
+          SCUZZ_RELEASES_JSON=/tmp/releases-compact.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-compact.out
+          grep -q 'tag=v9.9.9' /tmp/install-compact.out
 
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |

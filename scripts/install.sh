@@ -124,6 +124,18 @@ is_latest_version() {
 
 # Skia CPU releases share this repo. Pick the newest tag matching v[0-9]*.
 # Do not use GitHub's /releases/latest (it may be skia-cpu-v*).
+# Compact one-line JSON and pretty fixtures both work.
+pick_v_release_tag() {
+  tr '"' '\n' < "$1" | awk '
+    $0 == "tag_name" { n=1; next }
+    n==1 { n=2; next }
+    n==2 {
+      if ($0 ~ /^v[0-9][^-]*$/) { print; exit }
+      n=0
+    }
+  '
+}
+
 resolve_release_tag() {
   if ! is_latest_version; then
     TAG="$SCUZZ_VERSION"
@@ -139,9 +151,7 @@ resolve_release_tag() {
     fetch "$json" "$api" || die "could not list GitHub releases" \
       "tried: $api"
   fi
-  TAG="$(awk -F'"' '/"tag_name":/ {
-    if ($4 ~ /^v[0-9][^-]*$/) { print $4; exit }
-  }' "$json")"
+  TAG="$(pick_v_release_tag "$json")"
   if [ -z "$TAG" ]; then
     die "no GitHub Release tag matching v[0-9]* in $SCUZZ_REPO" \
       "publish with: git tag v0.1.0 && git push origin v0.1.0"

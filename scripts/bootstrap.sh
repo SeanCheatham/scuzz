@@ -75,8 +75,20 @@ fetch() {
   fi
 }
 
-# Skia CPU releases share this repo. Pick the newest tag matching v[0-9]*.
-# Do not use GitHub's /releases/latest (it may be skia-cpu-v*).
+# Print the newest GitHub tag_name matching v[0-9]* with no hyphen.
+# Skia CPU tags (skia-cpu-v*) and rc tags (v0.1.0-rc.1) do not match.
+# Compact one-line JSON and pretty fixtures both work.
+pick_v_release_tag() {
+  tr '"' '\n' < "$1" | awk '
+    $0 == "tag_name" { n=1; next }
+    n==1 { n=2; next }
+    n==2 {
+      if ($0 ~ /^v[0-9][^-]*$/) { print; exit }
+      n=0
+    }
+  '
+}
+
 resolve_bootstrap_tag() {
   if [ -n "${SCUZZ_BOOTSTRAP:-}" ]; then
     TAG="${SCUZZ_BOOTSTRAP_TAG:-local}"
@@ -99,9 +111,7 @@ resolve_bootstrap_tag() {
         "or set SCUZZ_BOOTSTRAP_TAG"
     fi
   fi
-  TAG="$(awk -F'"' '/"tag_name":/ {
-    if ($4 ~ /^v[0-9][^-]*$/) { print $4; exit }
-  }' "$json")"
+  TAG="$(pick_v_release_tag "$json")"
   if [ -z "$TAG" ]; then
     die "no GitHub Release tag matching v[0-9]* in $REPO" \
       "or set SCUZZ_BOOTSTRAP_TAG"
