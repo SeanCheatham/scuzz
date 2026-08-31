@@ -3274,7 +3274,29 @@ def emitPairUnbox(scrut: String, left: Bool, prefix: String): Slot =
   Slot(join(line(Str.concat(tmp(prefix, "p"), Str.concat("call ptr @", Str.concat(pairRt(left), Str.concat("(ptr ", Str.concat(scrut, ")")))))), line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(prefix, "p"), ")"))))), pct(prefix, "v"), false)
 
 def emitCtorCall(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (name == "copy") emitCopy(recv, args, prefix, strs, defs, ens, ps) else if (name == "require") emitExpr(recv, prefix, strs, defs, ens, ps) else emitCtorCall2(recv, name, args, prefix, strs, defs, ens, ps)
+  if (name == "copy") emitCopy(recv, args, prefix, strs, defs, ens, ps) else if (name == "require") emitRequire(recv, args, prefix, strs, defs, ens, ps) else emitCtorCall2(recv, name, args, prefix, strs, defs, ens, ps)
+
+def emitRequire(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
+  if (requirePredIo(requirePred(args))) emitExpr(recv, prefix, strs, defs, ens, ps) else emitRequireJoin(emitExpr(requirePred(args), Str.concat(prefix, "rq"), strs, defs, ens, ps), emitExpr(recv, prefix, strs, defs, ens, ps))
+
+def requirePred(args: List[Expr]): Expr =
+  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) List.head(args) else List.head(List.tail(args))
+
+def requirePredIo(e: Expr): Bool =
+  e match {
+    case Expr.EFor(_, _) => true
+    case Expr.ECall(f, _) => Str.startsWith(f, "IO.")
+    case Expr.EMethod(_, name, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
+    case Expr.EIf(_, t, el) => requirePredIo(t) || requirePredIo(el)
+    case _ => false
+  }
+
+def emitRequireJoin(pred: Slot, body: Slot): Slot =
+  pred match {
+    case Slot(pc, pv, po) => body match {
+      case Slot(code, v, o) => Slot(join(pc, join(if (po) relPtr(pv) else "", code)), v, o)
+    }
+  }
 
 def emitCtorCall2(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   recv match {
