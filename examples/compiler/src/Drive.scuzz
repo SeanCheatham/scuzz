@@ -46,23 +46,26 @@ def deskLib(h: String): String =
 def mobLib(h: String): String =
   crateAt(h, "crates/embedder-mobile/build/libscuzz_mobile.a")
 
-def uiFlags1(): String =
-  " -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive "
+def uiFlags1(mac: Bool): String =
+  if (mac) " -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon " else " -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive "
 
-def uiFlags2(): String =
-  " -Wl,--no-whole-archive -lX11 -Wl,--whole-archive "
+def uiFlags2(mac: Bool): String =
+  if (mac) " -framework Cocoa -lobjc " else " -Wl,--no-whole-archive -lX11 -Wl,--whole-archive "
 
 def uiFlags3(gpu: Bool, mac: Bool): String =
-  Str.concat(" -Wl,--no-whole-archive", Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -rdynamic -o "))
+  if (mac) Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -o ") else Str.concat(" -Wl,--no-whole-archive", Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -rdynamic -o "))
 
 def gpuLibs(mac: Bool): String =
   if (mac) " -framework OpenGL" else " -lEGL -lGLESv2"
+
+def forceLoad(mac: Bool, lib: String): String =
+  if (mac) Str.concat("-Wl,-force_load,", lib) else lib
 
 def linkGpu(h: String): IO[Bool] =
   Fs.read(crateAt(h, "crates/ffi-skia/build/sk_capi_backend")).map(s => Str.trim(s) == "gpu").handleErrorWith(_ => IO.pure(false))
 
 def linkLineUi(clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool, mac: Bool): String =
-  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(h), Str.concat(uiFlags1(), Str.concat(deskLib(h), Str.concat(uiFlags2(), Str.concat(mobLib(h), Str.concat(uiFlags3(gpu, mac), exe))))))))))))
+  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(h), Str.concat(uiFlags1(mac), Str.concat(forceLoad(mac, deskLib(h)), Str.concat(uiFlags2(mac), Str.concat(forceLoad(mac, mobLib(h)), Str.concat(uiFlags3(gpu, mac), exe))))))))))))
 
 def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String, h: String): String =
   if (hasUi) linkLineUi(clang, ll, lib, exe, h, false, false) else linkLine(clang, ll, lib, exe)

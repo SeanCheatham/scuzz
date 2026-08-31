@@ -6,7 +6,7 @@ OS presentation and input for `UiRuntime.Mobile`. Headless remains the CI peer f
 
 `libscuzz_mobile.a` (`src/host_shell.c`) logs present and keyboard lines to stderr when
 `SCUZZ_MOBILE_SHELL=1` (pixels stay offscreen on the host). Linked when
-present (`--whole-archive` so strong symbols override weak stubs in `libscuzz_rt.a`).
+present (`--whole-archive` on Linux, `-force_load` on Darwin, so strong symbols override weak stubs in `libscuzz_rt.a`).
 
 - Touch / lifecycle / soft-keyboard: `sz_mobile_push_event` → polled on `pump`
 - Without `SCUZZ_MOBILE_SHELL`, Mobile stays offscreen (same paint path)
