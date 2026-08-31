@@ -1,5 +1,8 @@
-# Publish scuzz tarballs to a GitHub Release.
-# Push a v* tag (or Run workflow with that tag). Not part of default CI.
+# Cut a Scuzz release: bump VERSION, commit, tag, package, publish.
+#
+# Run workflow: version = patch | minor | major | 0.2.2
+# Dry-run prints the plan and stops. Replace moves an existing tag.
+# Pushing a v* tag still packages that tag (no bump).
 name: release
 
 on:
@@ -8,19 +11,105 @@ on:
       - "v[0-9]*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing git tag to publish (e.g. v0.2.0)
+      version:
+        description: patch, minor, major, or 0.2.2
         required: true
+        default: patch
+      replace:
+        description: Move an existing tag and overwrite the GitHub Release
+        type: boolean
+        default: false
+      dry_run:
+        description: Bump in the runner only. Do not commit, tag, or publish.
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: scuzz-release-${{ github.event.inputs.tag || github.ref }}
+  group: scuzz-release
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.cut.outputs.skip }}
+      tag: ${{ steps.cut.outputs.tag }}
+      ref: ${{ steps.cut.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Cut version tag
+        id: cut
+        env:
+          EVENT: ${{ github.event_name }}
+          VERSION_SPEC: ${{ github.event.inputs.version }}
+          REPLACE: ${{ github.event.inputs.replace }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TAG_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+            echo "ref=$SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --tags --force origin
+          if [ "$DRY_RUN" = "true" ]; then
+            out="$(./scripts/bump_version.sh --dry-run "$VERSION_SPEC")"
+            printf '%s\n' "$out"
+            tag="$(printf '%s\n' "$out" | awk -F= '/^tag=/{print $2; exit}')"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "ref=$SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ./scripts/bump_version.sh "$VERSION_SPEC"
+          # shellcheck source=../../../VERSION
+          . ./VERSION
+          tag="v${product}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION examples/cli/src/Version.scuzz
+          if git diff --staged --quiet; then
+            echo "VERSION already product=$product"
+          else
+            git commit -m "Set product version to ${product} so scuzz -V matches the release tag."
+            git push origin "HEAD:${DEFAULT_BRANCH}"
+          fi
+          head="$(git rev-parse HEAD)"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            existing="$(git rev-parse "${tag}^{commit}")"
+            if [ "$existing" = "$head" ]; then
+              echo "tag $tag already points at HEAD"
+            elif [ "$REPLACE" = "true" ]; then
+              git tag -f "$tag"
+              git push --force origin "refs/tags/$tag"
+            else
+              echo "tag $tag exists at $existing" >&2
+              echo "re-run with replace=true to move it" >&2
+              exit 1
+            fi
+          else
+            git tag "$tag"
+            git push origin "refs/tags/$tag"
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=$head" >> "$GITHUB_OUTPUT"
+
   package:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -34,11 +123,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - name: Require a version tag
         env:
-          SCUZZ_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+          SCUZZ_VERSION: ${{ needs.prepare.outputs.tag }}
         run: |
           case "$SCUZZ_VERSION" in
             v[0-9]*) ;;
@@ -47,6 +136,12 @@ jobs:
               exit 1
               ;;
           esac
+          # shellcheck source=../../../VERSION
+          . ./VERSION
+          if [ "$SCUZZ_VERSION" != "v${product}" ]; then
+            echo "VERSION product=$product does not match tag $SCUZZ_VERSION" >&2
+            exit 1
+          fi
 
       - name: Install clang/make + X11 + Skia link deps
         if: runner.os == 'Linux'
@@ -58,7 +153,7 @@ jobs:
 
       - name: Package release + install-from-tarball smoke
         env:
-          SCUZZ_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+          SCUZZ_VERSION: ${{ needs.prepare.outputs.tag }}
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
           ./scripts/package_release.sh
@@ -80,6 +175,8 @@ jobs:
           grep -q "ready." /tmp/rel-hello.out
           scuzz run examples/cli | tee /tmp/rel-cli.out
           grep -q "cli-ok" /tmp/rel-cli.out
+          scuzz -V | tee /tmp/rel-ver.out
+          grep -q "^scuzz ${SCUZZ_VERSION#v}$" /tmp/rel-ver.out
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -89,12 +186,13 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: package
+    needs: [prepare, package]
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.ref }}
 
       - name: Download packaged tarballs
         uses: actions/download-artifact@v4
@@ -115,8 +213,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
           files: |
             dist/scuzz-*.tar.gz
             dist/install.sh
@@ -124,13 +222,13 @@ jobs:
           fail_on_unmatched_files: true
           make_latest: "true"
           generate_release_notes: true
-          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
+          prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
           body: |
-            Scuzz CLI (`linux-x86_64`, `darwin-arm64`). Tagged `v0.2.0` is the bootstrap compiler.
+            Scuzz CLI (`linux-x86_64`, `darwin-arm64`).
 
             ```bash
             curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sh
             ```
 
-            Pin a tag with `SCUZZ_VERSION=${{ github.event.inputs.tag || github.ref_name }}`.
+            Pin a tag with `SCUZZ_VERSION=${{ needs.prepare.outputs.tag }}`.
             Apps need `clang` + `make`. Linux `[ui]` also needs `zlib1g-dev libbz2-dev`.

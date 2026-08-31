@@ -14,6 +14,7 @@
 | [`docs/developer-environment.md`](docs/developer-environment.md) | Checkout host setup |
 | [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
 | [`README.md`](README.md) | Pitch, install, one example |
+| [`VERSION`](VERSION) | Product version (`scuzz -V`). Cut a release with the GitHub `release` workflow. |
 
 If a decision or next-step order changes, edit `vision.md`. Keep `vision.md` aligned with `HUMANS.md`.
 
@@ -27,7 +28,7 @@ Scuzz Lang is a language, a runtime, UI, and tooling. Keep a small subset. Ship 
 - **Forwards only.** Do not keep backwards compatibility, migration shims, or legacy paths. Delete and rewrite call sites. Do not keep dual APIs.
 - **Vertical slice over scaffolding.** Prefer a working hello or Counter path to empty module trees and placeholder APIs.
 - **Headless first for UI.** Do not add Desktop-only UI behavior. Headless is a peer runtime. See `vision.md`.
-- **One compiler.** The toolchain is Scuzz (`examples/cli`). Language proof is `examples/` that exercise the kernel. Bootstrap is tagged `v0.2.0`. See `vision.md`.
+- **One compiler.** The toolchain is Scuzz (`examples/cli`). Language proof is `examples/` that exercise the kernel. Product version lives in `VERSION`. Bootstrap fetches the newest GitHub `v*` release. See `vision.md`.
 - **No agent- or tool-specific references.** Keep CI, docs, and code owned by the project. Do not tie them to a coding agent, a branch naming scheme, or a vendor workflow.
 - **No history in the tree.** Write docs and comments in present tense. Do not keep phase diaries, landed changelogs, or references to removed paths.
 
@@ -51,7 +52,7 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 
 Host setup and prove-host commands: [`docs/developer-environment.md`](docs/developer-environment.md). CI mirror: `.github/workflows/ci.yml` (`linux-headless`).
 
-No long-running app daemons. Develop with `make` + `clang`. Rebuild the product CLI with `./scripts/bootstrap.sh` (tagged `v0.2.0`). Default UI path is headless (`scuzz run --headless`); it does not need `DISPLAY` or X11.
+No long-running app daemons. Develop with `make` + `clang`. Rebuild the product CLI with `./scripts/bootstrap.sh` (newest GitHub `v*` release, or `SCUZZ_BOOTSTRAP_TAG`). Default UI path is headless (`scuzz run --headless`); it does not need `DISPLAY` or `X11`.
 
 **Install script** does not install host packages. Required host packages (`clang`, `make`, `zlib1g-dev`, `libbz2-dev`) and optional CI slices (ASan `libclang-rt-18-dev`, Desktop `libx11-dev` + `xvfb`, GPU `libegl1-mesa-dev` `libgles2-mesa-dev` `libgl1-mesa-dri`) live in the cloud VM snapshot, not in the install script. Optional slice commands: `make -C crates/runtime test-asan CC=clang`; `xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu …`; `xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 ./examples/cli/build/cli run …`.
 

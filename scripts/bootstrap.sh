@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-# Compile the product CLI (`examples/cli`) with tagged last-Rust `scuzz`.
+# Compile the product CLI (`examples/cli`) with tagged `scuzz`.
 #
 # Writes examples/cli/build/cli (override with SCUZZ_PRODUCT).
-# Default tag is v0.2.0. Override with SCUZZ_BOOTSTRAP_TAG.
-# Point SCUZZ_BOOTSTRAP at a local tagged binary to skip the download.
+# Default tag is the newest GitHub Release matching v[0-9]*.
+# Override with SCUZZ_BOOTSTRAP_TAG. Point SCUZZ_BOOTSTRAP at a local
+# binary to skip the download.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-
-TAG="${SCUZZ_BOOTSTRAP_TAG:-v0.2.0}"
-REPO="${SCUZZ_REPO:-SeanCheatham/scuzz}"
-PRODUCT="${SCUZZ_PRODUCT:-$ROOT/examples/cli/build/cli}"
-CACHE="${SCUZZ_BOOTSTRAP_DIR:-$ROOT/.bootstrap}"
-TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-ASSET="scuzz-${TRIPLE}.tar.gz"
 
 die() {
   echo "Error: $1" >&2
@@ -23,6 +17,30 @@ die() {
   done
   exit 1
 }
+
+# shellcheck source=../VERSION
+. "$ROOT/VERSION"
+if [ -z "${product:-}" ]; then
+  die "VERSION must set product="
+fi
+got="$(awk '
+  $0 == "def product(): String =" { getline; gsub(/^[[:space:]]+"/, ""); gsub(/"$/, ""); print; exit }
+  $0 ~ /^def product\(\): String = "/ {
+    sub(/^def product\(\): String = "/, "")
+    sub(/"$/, "")
+    print
+    exit
+  }
+' "$ROOT/examples/cli/src/Version.scuzz")"
+if [ "$got" != "$product" ]; then
+  die "Version.scuzz product() does not match VERSION product=$product" \
+    "got: $got"
+fi
+REPO="${SCUZZ_REPO:-SeanCheatham/scuzz}"
+PRODUCT="${SCUZZ_PRODUCT:-$ROOT/examples/cli/build/cli}"
+CACHE="${SCUZZ_BOOTSTRAP_DIR:-$ROOT/.bootstrap}"
+TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+ASSET="scuzz-${TRIPLE}.tar.gz"
 
 file_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -51,9 +69,42 @@ fetch() {
       wget -q -U scuzz-bootstrap -O "$dest" "$url" || return 1
     fi
   else
-    die "curl is required to download tagged scuzz $TAG." \
+    die "curl is required to download tagged scuzz ${TAG:-}." \
       "Debian/Ubuntu: sudo apt-get install curl" \
       "or set SCUZZ_BOOTSTRAP to that tagged binary"
+  fi
+}
+
+# Skia CPU releases share this repo. Pick the newest tag matching v[0-9]*.
+# Do not use GitHub's /releases/latest (it may be skia-cpu-v*).
+resolve_bootstrap_tag() {
+  if [ -n "${SCUZZ_BOOTSTRAP:-}" ]; then
+    TAG="${SCUZZ_BOOTSTRAP_TAG:-local}"
+    return
+  fi
+  if [ -n "${SCUZZ_BOOTSTRAP_TAG:-}" ]; then
+    TAG="$SCUZZ_BOOTSTRAP_TAG"
+    return
+  fi
+  mkdir -p "$CACHE"
+  json="$CACHE/releases.json"
+  if [ -n "${SCUZZ_RELEASES_JSON:-}" ]; then
+    json="$SCUZZ_RELEASES_JSON"
+  else
+    api="https://api.github.com/repos/${REPO}/releases?per_page=100"
+    echo "==> listing $api" >&2
+    if ! fetch "$json" "$api"; then
+      die "could not list GitHub releases" \
+        "tried: $api" \
+        "or set SCUZZ_BOOTSTRAP_TAG"
+    fi
+  fi
+  TAG="$(awk -F'"' '/"tag_name":/ {
+    if ($4 ~ /^v[0-9][^-]*$/) { print $4; exit }
+  }' "$json")"
+  if [ -z "$TAG" ]; then
+    die "no GitHub Release tag matching v[0-9]* in $REPO" \
+      "or set SCUZZ_BOOTSTRAP_TAG"
   fi
 }
 
@@ -120,6 +171,7 @@ resolve_bootstrap() {
   printf '%s\n' "$bin"
 }
 
+resolve_bootstrap_tag
 BOOTSTRAP="$(resolve_bootstrap)"
 echo "==> bootstrap $BOOTSTRAP ($TAG)" >&2
 # The checkout runtime must win. Do not inherit a packaged SCUZZ_HOME.

@@ -10,7 +10,7 @@ Fail on the first missing tool with one install line.
 | --- | --- |
 | `clang` | C11 runtime, Skia ABI, embedders, LLVM IR link |
 | `make` | `crates/runtime`, `ffi-skia`, embedders |
-| `curl` | fetch tagged `v0.2.0` `scuzz` (`scripts/bootstrap.sh`) |
+| `curl` | fetch tagged bootstrap `scuzz` (`scripts/bootstrap.sh`; newest GitHub `v*` release) |
 | `zlib` + `bzip2` | Linux Skia CPU prebuilt |
 
 ```bash

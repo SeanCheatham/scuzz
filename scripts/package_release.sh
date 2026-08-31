@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Assemble a self-contained scuzz release tree + tarball under dist/.
 #
-# The shipped `scuzz` is the Scuzz CLI (`examples/cli`). Tagged `v0.2.0` compiles
-# it. Layout matches SCUZZ_HOME (crates/ + scripts/). Host needs clang/make
-# to link apps.
+# The shipped `scuzz` is the Scuzz CLI (`examples/cli`). bootstrap.sh compiles
+# it with the newest GitHub `v*` scuzz. Layout matches SCUZZ_HOME (crates/ +
+# scripts/). Host needs clang/make to link apps.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

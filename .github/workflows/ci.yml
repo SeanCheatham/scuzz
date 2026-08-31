@@ -49,9 +49,14 @@ jobs:
           cat scripts/install.sh | sh -s -- --dry-run | tee /tmp/install-pipe.out
           grep -q 'source=github SeanCheatham/scuzz latest' /tmp/install-pipe.out
           grep -q 'api.github.com/repos/SeanCheatham/scuzz/releases' /tmp/install-pipe.out
-          printf '%s\n' '"tag_name": "skia-cpu-v0.1"' '"tag_name": "v0.1.0-rc.1"' '"tag_name": "v0.2.0"' > /tmp/releases.json
+          ./scripts/bump_version.sh --help
+          ./scripts/bump_version.sh --dry-run patch | tee /tmp/bump.out
+          grep -Eq '^tag=v[0-9]+\.[0-9]+\.[0-9]+$' /tmp/bump.out
+          grep -q 'dry-run=1' /tmp/bump.out
+          git diff --exit-code -- VERSION examples/cli/src/Version.scuzz
+          printf '%s\n' '"tag_name": "skia-cpu-v0.1"' '"tag_name": "v0.1.0-rc.1"' '"tag_name": "v9.9.9"' > /tmp/releases.json
           SCUZZ_RELEASES_JSON=/tmp/releases.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-tag.out
-          grep -q 'tag=v0.2.0' /tmp/install-tag.out
+          grep -q 'tag=v9.9.9' /tmp/install-tag.out
 
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |

@@ -27,7 +27,7 @@ The script installs `scuzz` under `~/.local/share/scuzz`. It puts a wrapper at `
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Apps need `clang` and `make`. Linux `[ui]` linking also needs zlib and bzip2 (`zlib1g-dev libbz2-dev`). Pin a release with `SCUZZ_VERSION=v0.1.0` on the same `curl | sh` line. From a checkout, `./scripts/install.sh` compiles `examples/cli` with tagged `v0.2.0` `scuzz` and installs the tree.
+Apps need `clang` and `make`. Linux `[ui]` linking also needs zlib and bzip2 (`zlib1g-dev libbz2-dev`). Pin a release with `SCUZZ_VERSION=v0.2.1` on the same `curl | sh` line. From a checkout, `./scripts/install.sh` compiles `examples/cli` with the newest GitHub `v*` bootstrap and installs the tree.
 
 ```bash
 scuzz new myapp --ui

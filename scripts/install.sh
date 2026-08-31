@@ -6,7 +6,7 @@
 # clang/make. Linux [ui] linking against the packaged Skia CPU prebuilt also
 # needs zlib/bzip2. Rust/cargo is not required when installing from a
 # prebuilt artifact (RELEASE_TGZ / RELEASE_DIR / GitHub Release). From a
-# checkout, `package_release.sh` compiles `examples/cli` with tagged `v0.2.0`.
+# checkout, `package_release.sh` compiles `examples/cli` with tagged bootstrap.
 #
 # Sources (first match):
 #   RELEASE_DIR / RELEASE_TGZ — local tree or tarball
@@ -55,7 +55,7 @@ Env:
 
 Examples:
   curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh
-  SCUZZ_VERSION=v0.1.0 curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh
+  SCUZZ_VERSION=v0.2.1 curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh
   PREFIX=/usr/local ./scripts/install.sh
   RELEASE_TGZ=dist/scuzz-${TRIPLE}.tar.gz ./scripts/install.sh
   SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh

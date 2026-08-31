@@ -1,0 +1,13 @@
+def product(): String =
+  "0.2.1"
+
+def banner(): String =
+  Str.concat("scuzz ", product())
+
+def nl(): String =
+  """
+"""
+
+def line(): String =
+  Str.concat(banner(), nl())
+

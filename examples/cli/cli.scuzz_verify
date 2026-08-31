@@ -1,3 +1,6 @@
+def cliVersion(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a1("-V"))), Version.line())
+
 def cliHelp(): Bool =
   Main.cliDiff(Cli.render(Cli.parse(Main.a1("--help"))), Help.helpRoot())
 
