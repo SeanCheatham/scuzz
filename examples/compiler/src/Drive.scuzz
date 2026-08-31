@@ -31,14 +31,20 @@ def exeName(outDir: String, name: String): String =
 def linkLine(clang: String, ll: String, lib: String, exe: String): String =
   Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -lpthread -o ", exe))))))
 
-def skiaLib(): String =
-  "crates/ffi-skia/build/libsk_capi.a"
+def crateHome(): IO[String] =
+  Sys.getenv("SCUZZ_HOME").map(h => if (Str.len(h) == 0) "." else h)
 
-def deskLib(): String =
-  "crates/embedder-desktop/build/libscuzz_embedder.a"
+def crateAt(h: String, rel: String): String =
+  joinSlash(h, rel)
 
-def mobLib(): String =
-  "crates/embedder-mobile/build/libscuzz_mobile.a"
+def skiaLib(h: String): String =
+  crateAt(h, "crates/ffi-skia/build/libsk_capi.a")
+
+def deskLib(h: String): String =
+  crateAt(h, "crates/embedder-desktop/build/libscuzz_embedder.a")
+
+def mobLib(h: String): String =
+  crateAt(h, "crates/embedder-mobile/build/libscuzz_mobile.a")
 
 def uiFlags1(): String =
   " -lstdc++ -lm -lz -lbz2 -Wl,--whole-archive "
@@ -49,11 +55,11 @@ def uiFlags2(): String =
 def uiFlags3(): String =
   " -Wl,--no-whole-archive -lpthread -rdynamic -o "
 
-def linkLineUi(clang: String, ll: String, lib: String, exe: String): String =
-  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(), Str.concat(uiFlags1(), Str.concat(deskLib(), Str.concat(uiFlags2(), Str.concat(mobLib(), Str.concat(uiFlags3(), exe))))))))))))
+def linkLineUi(clang: String, ll: String, lib: String, exe: String, h: String): String =
+  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(h), Str.concat(uiFlags1(), Str.concat(deskLib(h), Str.concat(uiFlags2(), Str.concat(mobLib(h), Str.concat(uiFlags3(), exe))))))))))))
 
-def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String): String =
-  if (hasUi) linkLineUi(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
+def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String, h: String): String =
+  if (hasUi) linkLineUi(clang, ll, lib, exe, h) else linkLine(clang, ll, lib, exe)
 
 def hostMac(): IO[Bool] =
   Sys.exec("uname -s").map(r => Str.trim(r._2) == "Darwin")
@@ -61,11 +67,19 @@ def hostMac(): IO[Bool] =
 def linkLineMac(clang: String, ll: String, lib: String, exe: String): String =
   Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -lpthread -o ", exe))))))
 
-def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String): String =
-  if (hasUi) linkLineUi(clang, ll, lib, exe) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
+def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String, h: String): String =
+  if (hasUi) linkLineUi(clang, ll, lib, exe, h) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
 
 def runLinkLine(hasUi: Bool, dir: String, name: String): IO[(Int, String, String)] =
-  hostMac().flatMap(mac => runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(), exeName(dir, name))))
+  crateHome().flatMap(h => ensureRtMade(h).flatMap(_ => hostMac().flatMap(mac => runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(h), exeName(dir, name), h)))))
+
+def ensureRtMade(h: String): IO[Unit] =
+  runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/runtime"), " lib CC=clang"))).flatMap(r => ensureRtGot(r))
+
+def ensureRtGot(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("runtime")) else IO.pure(())
+  }
 
 def missToml(dir: String): String =
   Str.concat("missing scuzz.toml in ", dir)
@@ -94,8 +108,8 @@ def compileFiles2(m: Man, files: List[(String, String)], outDir: String, clang: 
 def compileFiles3(m: Man, ll: String, outDir: String, clang: String, lib: String): PkgOut =
   PkgOut(true, m.name, ll, llName(outDir, m.name), linkLine(clang, llName(outDir, m.name), lib, exeName(outDir, m.name)), "[]")
 
-def rtLib(): String =
-  "crates/runtime/build/libscuzz_rt.a"
+def rtLib(h: String): String =
+  crateAt(h, "crates/runtime/build/libscuzz_rt.a")
 
 def isScuzz(name: String): Bool =
   Str.len(name) > 6 && Str.slice(name, Str.len(name) - 6, Str.len(name)) == ".scuzz"
@@ -166,7 +180,7 @@ def emitDirUpMan(outDir: String, m: Man): IO[Unit] =
   if (!m.ok) IO.println(Str.concat("fail:", m.err)) else IO.println(Str.concat("up-to-date ", exeName(outDir, m.name)))
 
 def emitDirFresh(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
-  emitDirOut(compileFiles(toml, files, outDir, "clang", rtLib())).flatMap(ok => emitDirStored(dir, fp, ok))
+  crateHome().flatMap(h => emitDirOut(compileFiles(toml, files, outDir, "clang", rtLib(h))).flatMap(ok => emitDirStored(dir, fp, ok)))
 
 def emitDirStored(dir: String, fp: String, ok: Bool): IO[Unit] =
   if (!ok) IO.pure(()) else Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpPath(dir), fp))
@@ -175,7 +189,7 @@ def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir))
 
 def emitDirAlwaysGot(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
-  emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib())).map(_ => ())
+  crateHome().flatMap(h => emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib(h))).map(_ => ()))
 
 def emitFuzz(dir: String, outDir: String): IO[Unit] =
   fuzzCollect(dir).flatMap(files => emitDirAlways(dir, outDir, files))
@@ -371,16 +385,16 @@ def linkRunUi(hasUi: Bool, name: String, outDir: String, runEnv: String): IO[Uni
   if (hasUi) ensureUi().flatMap(_ => linkRunNamed(true, name, outDir, runEnv)) else linkRunNamed(false, name, outDir, runEnv)
 
 def ensureUi(): IO[Unit] =
-  runLine("make -C crates/ffi-skia lib CC=clang").flatMap(r => ensureUiDesk(r))
+  crateHome().flatMap(h => runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/ffi-skia"), " lib CC=clang"))).flatMap(r => ensureUiDesk(h, r)))
 
-def ensureUiDesk(r: (Int, String, String)): IO[Unit] =
+def ensureUiDesk(h: String, r: (Int, String, String)): IO[Unit] =
   r match {
-    case (code, _out, err) => if (code != 0) IO.println(err) else runLine("make -C crates/embedder-desktop lib CC=clang").flatMap(r2 => ensureUiMob(r2))
+    case (code, _out, err) => if (code != 0) IO.println(err) else runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/embedder-desktop"), " lib CC=clang"))).flatMap(r2 => ensureUiMob(h, r2))
   }
 
-def ensureUiMob(r: (Int, String, String)): IO[Unit] =
+def ensureUiMob(h: String, r: (Int, String, String)): IO[Unit] =
   r match {
-    case (code, _out, err) => if (code != 0) IO.println(err) else runLine("make -C crates/embedder-mobile lib CC=clang").flatMap(r2 => ensureUiDone(r2))
+    case (code, _out, err) => if (code != 0) IO.println(err) else runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/embedder-mobile"), " lib CC=clang"))).flatMap(r2 => ensureUiDone(r2))
   }
 
 def ensureUiDone(r: (Int, String, String)): IO[Unit] =
@@ -702,7 +716,7 @@ def testDiffOne(dir: String, outDir: String, name: String, backend: String, rest
   skiaMake(backend).flatMap(ok => if (!ok) testDiffBackends(dir, outDir, name, rest, dumps) else emitDir(dir, outDir, true).flatMap(_ => testDiffLink(dir, outDir, name, backend, rest, dumps)))
 
 def skiaMake(backend: String): IO[Bool] =
-  runLine(Str.concat("SCUZZ_SKIA=", Str.concat(backend, " make -C crates/ffi-skia lib CC=clang"))).flatMap(r => skiaMakeGot(r, backend))
+  crateHome().flatMap(h => runLine(Str.concat("SCUZZ_SKIA=", Str.concat(backend, Str.concat(" make -C ", Str.concat(crateAt(h, "crates/ffi-skia"), " lib CC=clang"))))).flatMap(r => skiaMakeGot(r, backend)))
 
 def skiaMakeGot(r: (Int, String, String), backend: String): IO[Bool] =
   r match {
@@ -825,11 +839,11 @@ def pkgHostWrite(name: String, dest: String): IO[Unit] =
   Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ => runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ => Fs.write(joinSlash(dest, "package.toml"), hostMeta(name)).flatMap(_ => IO.println(Str.concat("packaged host → ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")")))))))
 
 def pkgAndroid(dir: String, outDir: String): IO[Unit] =
-  runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_ndk.sh ", dir)).flatMap(r => pkgAndroidNdk(r, dir, outDir))
+  crateHome().flatMap(h => runLine(Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/android/build_ndk.sh"), Str.concat(" ", dir)))).flatMap(r => pkgAndroidNdk(h, r, dir, outDir)))
 
-def pkgAndroidNdk(r: (Int, String, String), dir: String, outDir: String): IO[Unit] =
+def pkgAndroidNdk(h: String, r: (Int, String, String), dir: String, outDir: String): IO[Unit] =
   r match {
-    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else runLine(Str.concat("bash crates/embedder-mobile/shells/android/build_apk.sh ", dir)).flatMap(r2 => pkgAndroidApk(r2, dir, outDir))
+    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else runLine(Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/android/build_apk.sh"), Str.concat(" ", dir)))).flatMap(r2 => pkgAndroidApk(r2, dir, outDir))
   }
 
 def pkgAndroidApk(r: (Int, String, String), dir: String, outDir: String): IO[Unit] =
@@ -872,7 +886,7 @@ def pkgAndroidWrite(name: String, dest: String): IO[Unit] =
   Fs.write(joinSlash(dest, "package.toml"), androidMeta(name)).flatMap(_ => pkgAndroidAdb(name, dest))
 
 def pkgAndroidAdb(name: String, dest: String): IO[Unit] =
-  runLine(Str.concat("bash crates/embedder-mobile/shells/android/install_apk.sh ", joinSlash(dest, Str.concat(name, ".apk")))).flatMap(r => pkgAndroidAdbGot(r, dest))
+  crateHome().flatMap(h => runLine(Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/android/install_apk.sh"), Str.concat(" ", joinSlash(dest, Str.concat(name, ".apk")))))).flatMap(r => pkgAndroidAdbGot(r, dest)))
 
 def pkgAndroidAdbGot(r: (Int, String, String), dest: String): IO[Unit] =
   r match {
@@ -903,7 +917,7 @@ def pkgIosMiss(): IO[Unit] =
   IO.println(xcodeMiss()).flatMap(_ => IO.fail("ios"))
 
 def pkgIosBuild(dir: String): IO[Unit] =
-  runLine(Str.concat("bash crates/embedder-mobile/shells/ios/build_sim.sh ", dir)).flatMap(r2 => pkgIosRun(r2))
+  crateHome().flatMap(h => runLine(Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/ios/build_sim.sh"), Str.concat(" ", dir)))).flatMap(r2 => pkgIosRun(r2)))
 
 def pkgIosRun(r: (Int, String, String)): IO[Unit] =
   r match {
