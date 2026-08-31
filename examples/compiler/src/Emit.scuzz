@@ -1034,7 +1034,7 @@ def emitMapKit(f: String, args: List[Expr], prefix: String, strs: List[String], 
   emitMapKitPred(isPredKit(f) || isPredI64(f), mapKitRt(f), args, prefix, strs, defs, ens, ps)
 
 def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitMapKit2(pred, rt, emitExpr(List.head(args), Str.concat(prefix, "_a0"), strs, defs, ens, ps), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.head(List.tail(args)), prefix, strs, defs, ens, ps, isIntElem(List.head(args)))
+  emitMapKit2(pred, rt, emitExpr(List.head(args), Str.concat(prefix, "_a0"), strs, defs, ens, ps), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.head(List.tail(args)), prefix, strs, defs, ens, ps, mapElemTy(List.head(args), defs, ps))
 
 def isIntElem(e: Expr): Bool =
   e match {
@@ -1043,15 +1043,21 @@ def isIntElem(e: Expr): Bool =
     case _ => false
   }
 
-def emitMapKit2(pred: Bool, rt: String, inner: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], intElem: Bool): Slot =
+def mapElemTy(e: Expr, defs: List[Fun], ps: List[Param]): String =
+  if (isIntElem(e)) "Int" else listElemTy(exprRetTy(e, defs, ps))
+
+def listElemTy(ty: String): String =
+  if (Str.startsWith(ty, "List[") && Str.len(ty) > 6) Str.slice(ty, 5, Str.len(ty) - 1) else "Any"
+
+def emitMapKit2(pred: Bool, rt: String, inner: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], elemTy: String): Slot =
   inner match {
-    case Slot(ic, iv, io) => emitMapKitPick(pred, rt, ic, iv, io, wrapPh(lam, ps, defs), prefix, strs, defs, ens, ps, intElem)
+    case Slot(ic, iv, io) => emitMapKitPick(pred, rt, ic, iv, io, wrapPh(lam, ps, defs), prefix, strs, defs, ens, ps, elemTy)
   }
 
-def emitMapKitPick(pred: Bool, rt: String, ic: String, iv: String, io: Bool, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], intElem: Bool): Slot =
+def emitMapKitPick(pred: Bool, rt: String, ic: String, iv: String, io: Bool, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], elemTy: String): Slot =
   lam match {
-    case Expr.EVar(f) => if (!pred && isLocalPack(f, ps)) emitMapKitPack(rt, ic, iv, io, f, prefix) else emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, intElem)
-    case _ => emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, intElem)
+    case Expr.EVar(f) => if (!pred && isLocalPack(f, ps)) emitMapKitPack(rt, ic, iv, io, f, prefix) else emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, elemTy)
+    case _ => emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, elemTy)
   }
 
 def isLocalPack(f: String, ps: List[Param]): Bool =
@@ -1103,14 +1109,14 @@ def mapLamBody(e: Expr): Expr =
     case _ => e
   }
 
-def emitMapKit3(pred: Bool, rt: String, ic: String, iv: String, io: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], intElem: Bool): Slot =
-  emitMapKit4(rt, ic, iv, io, emitNethTy(rt, prefix, bind, body, strs, defs, ens, ps, pred, intElem), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
+def emitMapKit3(pred: Bool, rt: String, ic: String, iv: String, io: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], elemTy: String): Slot =
+  emitMapKit4(rt, ic, iv, io, emitNethTy(rt, prefix, bind, body, strs, defs, ens, ps, pred, elemTy), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
-def emitNethTy(rt: String, prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], pred: Bool, intElem: Bool): String =
-  emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, pred, mapNethBindTy(rt, bind, body, dropParam(ps, bind), defs, intElem))
+def emitNethTy(rt: String, prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], pred: Bool, elemTy: String): String =
+  emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, pred, mapNethBindTy(rt, bind, body, dropParam(ps, bind), defs, elemTy))
 
-def mapNethBindTy(rt: String, bind: String, body: Expr, rest: List[Param], defs: List[Fun], intElem: Bool): String =
-  if (nethIdxPred(rt) || intElem) "Int" else nethBindTy(bind, body, rest, defs)
+def mapNethBindTy(rt: String, bind: String, body: Expr, rest: List[Param], defs: List[Fun], elemTy: String): String =
+  if (nethIdxPred(rt)) "Int" else if (elemTy != "" && elemTy != "Any") elemTy else nethBindTy(bind, body, rest, defs)
 
 def nethIdxPred(rt: String): Bool =
   rt == "sz_verdict_every" || rt == "sz_verdict_any" || rt == "sz_timeline_exists"
