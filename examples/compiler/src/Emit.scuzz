@@ -3277,7 +3277,7 @@ def emitCtorCall(recv: Expr, name: String, args: List[Expr], prefix: String, str
   if (name == "copy") emitCopy(recv, args, prefix, strs, defs, ens, ps) else if (name == "require") emitRequire(recv, args, prefix, strs, defs, ens, ps) else emitCtorCall2(recv, name, args, prefix, strs, defs, ens, ps)
 
 def emitRequire(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (requirePredIo(requirePred(args))) emitExpr(recv, prefix, strs, defs, ens, ps) else emitRequireJoin(emitExpr(requirePred(args), Str.concat(prefix, "rq"), strs, defs, ens, ps), emitExpr(recv, prefix, strs, defs, ens, ps))
+  if (requirePredIo(requirePred(args))) emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps) else emitRequireJoin(emitExpr(requirePred(args), Str.concat(prefix, "_p"), strs, defs, ens, ps), emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps))
 
 def requirePred(args: List[Expr]): Expr =
   if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) List.head(args) else List.head(List.tail(args))
