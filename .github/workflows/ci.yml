@@ -83,7 +83,7 @@ jobs:
       - name: Hello world → LLVM → native
         run: |
           SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" run examples/cli | tee /tmp/cli.out
+          "$SCUZZ" run --out-dir /tmp/scuzz-cli-self examples/cli | tee /tmp/cli.out
           grep -q "cli-ok" /tmp/cli.out
           SCUZZ=./examples/cli/build/cli
           "$SCUZZ" run examples/hello | tee /tmp/hello.out
@@ -505,7 +505,7 @@ jobs:
           scuzz run examples/hello | tee /tmp/rel-hello.out
           grep -q "Hello, Scuzz!" /tmp/rel-hello.out
           grep -q "ready." /tmp/rel-hello.out
-          scuzz run examples/cli | tee /tmp/rel-cli.out
+          scuzz run --out-dir /tmp/scuzz-rel-cli examples/cli | tee /tmp/rel-cli.out
           grep -q "cli-ok" /tmp/rel-cli.out
 
       - name: Upload release artifact
@@ -833,7 +833,7 @@ jobs:
           scuzz run --headless /tmp/scuzz-release-app
           scuzz run examples/hello | tee /tmp/macos-rel-hello.out
           grep -q "Hello, Scuzz!" /tmp/macos-rel-hello.out
-          scuzz run examples/cli | tee /tmp/macos-rel-cli.out
+          scuzz run --out-dir /tmp/scuzz-macos-rel-cli examples/cli | tee /tmp/macos-rel-cli.out
           grep -q "cli-ok" /tmp/macos-rel-cli.out
 
       - name: Upload release artifact
