@@ -423,6 +423,9 @@ def linkRunNamed(hasUi: Bool, name: String, outDir: String, runEnv: String): IO[
 def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
 
+def runProbe(cmd: String): IO[(Int, String, String)] =
+  runLine(Str.concat("timeout --kill-after=2s 20s env ", cmd))
+
 def afterClang(r: (Int, String, String), exe: String, runEnv: String): IO[Unit] =
   r match {
     case (code, out, err) => afterClang2(code, out, err, exe, runEnv)
@@ -1071,7 +1074,7 @@ def fuzzSplitLive(job: FuzzJob): IO[Unit] =
   fuzzSplitProbe(fuzzLiveExe(job), job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.txt"), joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "timeline.txt")).flatMap(cl => if (cl != 0) IO.println("fuzz live/verify split: live graph failed on the same seed").flatMap(_ => IO.fail("scuzz fuzz")) else fuzzSplitCmp(job))
 
 def fuzzSplitProbe(exe: String, hasUi: Bool, dump: String, tl: String): IO[Int] =
-  runLine(Str.concat(fuzzSplitEnv(hasUi, dump, tl), exe)).map(r => fuzzProbeCode(r))
+  runProbe(Str.concat(fuzzSplitEnv(hasUi, dump, tl), exe)).map(r => fuzzProbeCode(r))
 
 def fuzzSplitEnv(hasUi: Bool, dump: String, tl: String): String =
   Str.concat(testEnv(), Str.concat(if (hasUi) headlessEnv() else "", Str.concat(Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " ")), fuzzTlEnv(tl))))
@@ -1186,10 +1189,10 @@ def fuzzSearch(exe: String, hasUi: Bool, outDir: String, script: String, n: Int,
   if (n <= 0) IO.pure(fail) else fuzzWriteDrive(outDir, script).flatMap(_ => fuzzProbe(exe, hasUi, outDir, script).flatMap(bad => fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad)))
 
 def fuzzProbe(exe: String, hasUi: Bool, outDir: String, script: String): IO[Int] =
-  runLine(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), script != "", "", "", outDir), exe)).map(r => fuzzProbeCode(r))
+  runProbe(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), script != "", "", "", outDir), exe)).map(r => fuzzProbeCode(r))
 
 def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun): IO[Int] =
-  runLine(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, outDir), exe)).map(r => fuzzProbeCode(r))
+  runProbe(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, outDir), exe)).map(r => fuzzProbeCode(r))
 
 def fuzzProbeEnv(hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String, outDir: String): String =
   Str.concat(testEnv(), Str.concat(if (hasUi) headlessEnv() else "", Str.concat(if (hasScript) fuzzDriveEnv(hasUi, scriptPath, dumpPath) else "", Str.concat(fuzzSchedEnv(sched), Str.concat(fuzzFaultEnv(fault), fuzzClassEnv(outDir))))))
@@ -1274,7 +1277,7 @@ def fuzzMutClass2(site: Int, code: Int, tl: String, base: String, acc: FuzzMut):
   if (code != 0) IO.println(Str.concat("  mutant ", Str.concat(Str.fromInt(site), ": killed"))).map(_ => FuzzMut(acc.killed + 1, acc.survived, acc.inert, acc.ran, acc.sites)) else if (tl == base) IO.pure(FuzzMut(acc.killed, acc.survived, acc.inert + 1, acc.ran, acc.sites)) else IO.println(Str.concat("  mutant ", Str.concat(Str.fromInt(site), ": survived"))).map(_ => FuzzMut(acc.killed, acc.survived + 1, acc.inert, acc.ran, acc.sites))
 
 def fuzzIdleAt(exe: String, hasUi: Bool, mutDir: String): IO[(Int, String)] =
-  Fs.mkdirs(mutDir).flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => runLine(Str.concat(fuzzProbeEnv(hasUi, joinSlash(mutDir, "drive.txt"), joinSlash(mutDir, "dump.txt"), false, "", "", mutDir), Str.concat(fuzzTlEnv(joinSlash(mutDir, "timeline.txt")), exe))).flatMap(r => fuzzIdleGot(mutDir, r))))
+  Fs.mkdirs(mutDir).flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => runProbe(Str.concat(fuzzProbeEnv(hasUi, joinSlash(mutDir, "drive.txt"), joinSlash(mutDir, "dump.txt"), false, "", "", mutDir), Str.concat(fuzzTlEnv(joinSlash(mutDir, "timeline.txt")), exe))).flatMap(r => fuzzIdleGot(mutDir, r))))
 
 def fuzzTlEnv(path: String): String =
   Str.concat("SCUZZ_TIMELINE_DUMP=", Str.concat(path, " "))
@@ -1351,7 +1354,7 @@ def relateExec(exe: String, hasUi: Bool, relDir: String, out: String, tag: Strin
   relateExec2(exe, hasUi, relDir, out, tag, script, sched, fault, joinSlash(relDir, Str.concat(tag, ".script.txt")), joinSlash(relDir, Str.concat(tag, ".sometimes")))
 
 def relateExec2(exe: String, hasUi: Bool, relDir: String, out: String, tag: String, script: String, sched: String, fault: String, scriptPath: String, reached: String): IO[Int] =
-  Fs.write(out, "").flatMap(_ => Fs.write(reached, "").flatMap(_ => Fs.write(scriptPath, script).flatMap(_ => Fs.write(joinSlash(relDir, Str.concat(tag, ".dump.txt")), "").flatMap(_ => runLine(Str.concat(relateEnv(hasUi, scriptPath, joinSlash(relDir, Str.concat(tag, ".dump.txt")), script != "", out, reached, sched, fault), exe)).flatMap(r => relateExecGot(r))))))
+  Fs.write(out, "").flatMap(_ => Fs.write(reached, "").flatMap(_ => Fs.write(scriptPath, script).flatMap(_ => Fs.write(joinSlash(relDir, Str.concat(tag, ".dump.txt")), "").flatMap(_ => runProbe(Str.concat(relateEnv(hasUi, scriptPath, joinSlash(relDir, Str.concat(tag, ".dump.txt")), script != "", out, reached, sched, fault), exe)).flatMap(r => relateExecGot(r))))))
 
 def relateExecGot(r: (Int, String, String)): IO[Int] =
   r match {
