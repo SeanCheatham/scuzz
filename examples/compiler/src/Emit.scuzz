@@ -150,6 +150,15 @@ def emitConstsAt(xs: List[String], i: Int, b: Builder): Builder =
 def join(a: String, b: String): String =
   Str.concat(a, b)
 
+def cat3(a: String, b: String, c: String): String =
+  Builder.result(Builder.append(Builder.append(Builder.append(Builder.empty(), a), b), c))
+
+def cat4(a: String, b: String, c: String, d: String): String =
+  Builder.result(Builder.append(Builder.append(Builder.append(Builder.append(Builder.empty(), a), b), c), d))
+
+def cat6(a: String, b: String, c: String, d: String, e: String, f: String): String =
+  Builder.result(Builder.append(Builder.append(Builder.append(Builder.append(Builder.append(Builder.append(Builder.empty(), a), b), c), d), e), f))
+
 def llvmBin(op: String): String =
   if (op == "+") "add" else if (op == "-") "sub" else if (op == "*") "mul" else if (op == "/") "sdiv" else if (op == "%") "srem" else if (op == "&") "and" else if (op == "|") "or" else if (op == "^") "xor" else if (op == "<<") "shl" else if (op == ">>") "ashr" else "add"
 
@@ -791,7 +800,7 @@ def hasSub(s: String, sub: String): Bool =
   hasSubAt(s, sub, 0)
 
 def hasSubAt(s: String, sub: String, i: Int): Bool =
-  if (i + Str.len(sub) > Str.len(s)) false else if (Str.slice(s, i, i + Str.len(sub)) == sub) true else hasSubAt(s, sub, i + 1)
+  if (i + Str.len(sub) > Str.len(s)) false else if (startsAt(s, i, sub)) true else hasSubAt(s, sub, i + 1)
 
 def callIsI64(f: String, defs: List[Fun]): Bool =
   f == "Signal.get" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
@@ -2910,7 +2919,7 @@ def emitSc(isAnd: Bool, l: Expr, r: Expr, prefix: String, strs: List[String], de
   emitScA(isAnd, emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps), r, prefix, strs, defs, ens, ps)
 
 def emitScA(isAnd: Bool, le: Slot, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  Slot(join(le.code, join(scHead(isAnd, le.val, prefix), emitScB(emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps), prefix, isAnd))), pct(prefix, "v"), false)
+  Slot(cat3(le.code, scHead(isAnd, le.val, prefix), emitScB(emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps), prefix, isAnd)), pct(prefix, "v"), false)
 
 def scHead(isAnd: Bool, lv: String, prefix: String): String =
   join(line(Str.concat("br label %", Str.concat(prefix, "_al_0"))), join(lab(Str.concat(prefix, "_al_0")), join(line(Str.concat(tmp(prefix, "nz0"), Str.concat("icmp ne i64 ", Str.concat(lv, ", 0")))), scBr(isAnd, prefix))))
@@ -2919,7 +2928,7 @@ def scBr(isAnd: Bool, prefix: String): String =
   if (isAnd) line(Str.concat("br i1 ", Str.concat(pct(prefix, "nz0"), Str.concat(", label %", Str.concat(prefix, Str.concat("_rhs_0, label %", Str.concat(prefix, "_sc_0"))))))) else line(Str.concat("br i1 ", Str.concat(pct(prefix, "nz0"), Str.concat(", label %", Str.concat(prefix, Str.concat("_sc_0, label %", Str.concat(prefix, "_rhs_0")))))))
 
 def emitScB(re: Slot, prefix: String, isAnd: Bool): String =
-  join(lab(Str.concat(prefix, "_rhs_0")), join(re.code, scTail(isAnd, re.val, prefix)))
+  cat3(lab(Str.concat(prefix, "_rhs_0")), re.code, scTail(isAnd, re.val, prefix))
 
 def scTail(isAnd: Bool, rv: String, prefix: String): String =
   join(line(Str.concat("br label %", Str.concat(prefix, "_ar_0"))), join(lab(Str.concat(prefix, "_ar_0")), join(line(Str.concat(tmp(prefix, "rnz0"), Str.concat("icmp ne i64 ", Str.concat(rv, ", 0")))), join(line(Str.concat(tmp(prefix, "rb0"), Str.concat("zext i1 ", Str.concat(pct(prefix, "rnz0"), " to i64")))), join(line(Str.concat("br label %", Str.concat(prefix, "_sc_0"))), join(lab(Str.concat(prefix, "_sc_0")), line(Str.concat(tmp(prefix, "v"), scPhi(isAnd, prefix)))))))))
@@ -3051,7 +3060,7 @@ def emitIf3(c: Slot, tc: String, tv: String, to: Bool, ec: String, ev: String, e
   emitIf4(c, tc, tv, to, ec, ev, eo, prefix, thenIsPtr(tc, tv, to, ps) || thenIsPtr(ec, ev, eo, ps))
 
 def emitIf4(c: Slot, tc: String, tv: String, to: Bool, ec: String, ev: String, eo: Bool, prefix: String, isPtr: Bool): Slot =
-  Slot(join(emitIfHead(c, prefix), join(emitIfArm(tc, tv, to, prefix, "_then_0", "_tj_0", isPtr && !to), join(emitIfArm(ec, ev, eo, prefix, "_else_0", "_ej_0", isPtr && !eo), emitIfPhi(tv, ev, prefix, isPtr)))), pct(prefix, "phi"), isPtr)
+  Slot(cat4(emitIfHead(c, prefix), emitIfArm(tc, tv, to, prefix, "_then_0", "_tj_0", isPtr && !to), emitIfArm(ec, ev, eo, prefix, "_else_0", "_ej_0", isPtr && !eo), emitIfPhi(tv, ev, prefix, isPtr)), pct(prefix, "phi"), isPtr)
 
 def isPtrSlot(v: String, ps: List[Param]): Bool =
   isPtrParam(v, ps) || hasDigitStem(v, "_c") || hasSub(v, "_tl") || hasSub(v, "_tr") || hasSub(v, "_pl") || hasSub(v, "_io") || hasSub(v, "_fm") || hasSub(v, "_ch") || hasSub(v, "_ct") || v == "%_ph"
@@ -3069,7 +3078,7 @@ def paramKnownHd(p: Param, rest: List[Param], n: String): Bool =
 
 def emitIfHead(c: Slot, prefix: String): String =
   c match {
-    case Slot(code, val, _) => join(code, join(emitIfCmp(val, prefix), emitIfBr(prefix)))
+    case Slot(code, val, _) => cat3(code, emitIfCmp(val, prefix), emitIfBr(prefix))
   }
 
 def emitIfCmp(v: String, prefix: String): String =
@@ -3079,7 +3088,7 @@ def emitIfBr(prefix: String): String =
   line(Str.concat("br i1 ", Str.concat(pct(prefix, "cmp"), Str.concat(", label %", Str.concat(prefix, Str.concat("_then_0, label %", Str.concat(prefix, "_else_0")))))))
 
 def emitIfArm(code: String, val: String, owned: Bool, prefix: String, enter: String, joinLab: String, keep: Bool): String =
-  join(lab(Str.concat(prefix, enter)), join(code, join(if (!owned && keep) retPtr(val) else "", join(emitIfJmp(prefix, joinLab), join(lab(Str.concat(prefix, joinLab)), emitIfJmp(prefix, "_merge_0"))))))
+  cat6(lab(Str.concat(prefix, enter)), code, if (!owned && keep) retPtr(val) else "", emitIfJmp(prefix, joinLab), lab(Str.concat(prefix, joinLab)), emitIfJmp(prefix, "_merge_0"))
 
 def emitIfJmp(prefix: String, dest: String): String =
   line(Str.concat("br label %", Str.concat(prefix, dest)))
@@ -4258,10 +4267,10 @@ def oneParam(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", p.name) else Str.concat("ptr %", p.name)
 
 def emitDefs(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): String =
-  if (List.isEmpty(ds)) "" else Builder.result(emitDefsAt(ds, strs, all, ens, 0, Builder.empty()))
+  if (List.isEmpty(ds)) "" else Builder.result(emitDefsAt(ds, strs, all, ens, Builder.empty()))
 
-def emitDefsAt(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], i: Int, b: Builder): Builder =
-  if (i >= List.len(ds)) b else emitDefsAt(ds, strs, all, ens, i + 1, Builder.append(b, emitDef(List.at(ds, i), strs, all, ens)))
+def emitDefsAt(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], b: Builder): Builder =
+  if (List.isEmpty(ds)) b else emitDefsAt(List.tail(ds), strs, all, ens, Builder.append(b, emitDef(List.head(ds), strs, all, ens)))
 
 def emitDef2(d: Fun, body: Slot): String =
   d match {

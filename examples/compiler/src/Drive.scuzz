@@ -130,13 +130,18 @@ def fpText(toml: String, files: List[(String, String)]): String =
   Str.concat(toml, fpFiles(files))
 
 def fpFiles(files: List[(String, String)]): String =
-  if (List.isEmpty(files)) "" else fpFilesHd(List.head(files), List.tail(files))
+  Builder.result(fpFilesAt(files, Builder.empty()))
 
-def fpFilesHd(h: (String, String), rest: List[(String, String)]): String =
+def fpNl(): String =
+  """
+"""
+
+def fpFilesAt(files: List[(String, String)], b: Builder): Builder =
+  if (List.isEmpty(files)) b else fpFilesHd(List.head(files), List.tail(files), b)
+
+def fpFilesHd(h: (String, String), rest: List[(String, String)], b: Builder): Builder =
   h match {
-    case (stem, src) => Str.concat(stem, Str.concat("""
-""", Str.concat(src, Str.concat("""
-""", fpFiles(rest)))))
+    case (stem, src) => fpFilesAt(rest, Builder.append(Builder.append(Builder.append(Builder.append(b, stem), fpNl()), src), fpNl()))
   }
 
 def emitDirFp(dir: String, outDir: String, full: Bool, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
