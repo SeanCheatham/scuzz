@@ -3645,21 +3645,27 @@ static void *sz_runtime_main_worker(void *arg) {
       sz_testrt_install();
     }
   }
-  SzIoResult r = sz_io_unsafe_run(a->program);
-  if (!r.ok) {
-    fprintf(stderr, "scuzz: IO failed: %s\n",
-            r.error ? sz_string_cstr(r.error->message) : "unknown");
-    if (r.error)
-      sz_error_free(r.error);
-    a->rc = 1;
-  } else {
-    {
-      const char *ds = getenv("SCUZZ_DRIVE_SCRIPT");
-      if (ds && ds[0])
-        sz_driver_run_script(ds);
+  {
+    /* Drive-script mode: registered oracles run; @main does not.
+     * Fuzz probes of a large @main (cli-ok) must not double-release. */
+    const char *ds = getenv("SCUZZ_DRIVE_SCRIPT");
+    if (ds && ds[0]) {
+      sz_driver_run_script(ds);
+      sz_property_session_end();
+      a->rc = 0;
+    } else {
+      SzIoResult r = sz_io_unsafe_run(a->program);
+      if (!r.ok) {
+        fprintf(stderr, "scuzz: IO failed: %s\n",
+                r.error ? sz_string_cstr(r.error->message) : "unknown");
+        if (r.error)
+          sz_error_free(r.error);
+        a->rc = 1;
+      } else {
+        sz_property_session_end();
+        a->rc = 0;
+      }
     }
-    sz_property_session_end();
-    a->rc = 0;
   }
   sz_property_sometimes_flush();
   sz_timeline_varied_flush();
