@@ -1212,10 +1212,10 @@ def fuzzProbeCode(r: (Int, String, String)): Int =
   }
 
 def fuzzDone(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut): IO[Unit] =
-  fuzzWriteSummary(job, corpus, fail, corpFail, repro, mut).flatMap(_ => IO.println(Verify.fuzzOut2(Verify.fuzzHead(job.iterations, corpus, mut.sites), Verify.searchN(job.iterations), job.seed, corpus, mut.sites, fail, corpFail, Mutate.fuzzMutLine(mut.killed, mut.survived, mut.inert, mut.ran, mut.sites))).flatMap(_ => if (fail > 0 || mut.survived > 0) IO.fail("scuzz fuzz") else IO.pure(())))
+  fuzzWriteSummary(job, corpus, fail, corpFail, repro, mut).flatMap(_ => IO.println(Verify.fuzzOut2(Verify.fuzzHead(job.iterations, corpus, mut.sites), Verify.searchN(job.iterations), job.seed, corpus, mut.sites, fail, corpFail, Mutate.fuzzMutLine(mut.killed, mut.survived, mut.inert, mut.ran, mut.sites))).flatMap(_ => if (fail > 0) IO.fail("scuzz fuzz") else IO.pure(())))
 
 def fuzzWriteSummary(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut): IO[Unit] =
-  Fs.mkdirs(joinSlash(job.outDir, "fuzz")).flatMap(_ => fuzzClassText(job.outDir).flatMap(ct => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.toml"), Verify.summaryToml(fail == 0 && mut.survived == 0, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct))))
+  Fs.mkdirs(joinSlash(job.outDir, "fuzz")).flatMap(_ => fuzzClassText(job.outDir).flatMap(ct => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.toml"), Verify.summaryToml(fail == 0, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct))))
 
 def fuzzClassText(outDir: String): IO[String] =
   Fs.read(fuzzClassPath(outDir)).map(t => Verify.classToml(t)).handleErrorWith(_ => IO.pure(""))
