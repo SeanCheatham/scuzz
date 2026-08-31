@@ -353,7 +353,7 @@ def emitDirWrite(ok: Bool, ll: String, llPath: String, diags: String): IO[Bool] 
   if (!ok) IO.println(Str.concat("fail:", diags)).map(_ => false) else Fs.write(llPath, ll).flatMap(_ => IO.println("ok").map(_ => true))
 
 def runDir(dir: String, outDir: String, runEnv: String): IO[Unit] =
-  emitDir(dir, outDir, true).flatMap(_ => linkRun(dir, outDir, runEnv))
+  emitDir(dir, outDir, false).flatMap(_ => linkRun(dir, outDir, runEnv))
 
 def linkRun(dir: String, outDir: String, runEnv: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir, runEnv))
