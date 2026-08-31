@@ -79,14 +79,16 @@ fetch() {
 # Skia CPU tags (skia-cpu-v*) and rc tags (v0.1.0-rc.1) do not match.
 # Compact one-line JSON and pretty fixtures both work.
 pick_v_release_tag() {
-  tr '"' '\n' < "$1" | awk '
-    $0 == "tag_name" { n=1; next }
-    n==1 { n=2; next }
-    n==2 {
-      if ($0 ~ /^v[0-9][^-]*$/) { print; exit }
-      n=0
+  awk -F '"' '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "tag_name" && (i + 2) <= NF && $(i + 2) ~ /^v[0-9][^-]*$/) {
+          print $(i + 2)
+          exit
+        }
+      }
     }
-  '
+  ' "$1"
 }
 
 resolve_bootstrap_tag() {
@@ -191,16 +193,15 @@ export SCUZZ_RUNTIME="$ROOT/crates/runtime"
 echo "==> $BOOTSTRAP build examples/cli" >&2
 "$BOOTSTRAP" build examples/cli
 SRC="$ROOT/examples/cli/build/cli"
-if [ ! -x "$SRC" ]; then
-  die "bootstrap build did not produce $SRC"
-fi
 LL="$ROOT/examples/cli/build/cli.ll"
 RT="$ROOT/crates/runtime/build/libscuzz_rt.a"
 if [ ! -f "$LL" ]; then
   die "bootstrap build did not write $LL"
 fi
+echo "==> make -C crates/runtime lib" >&2
+make -C "$ROOT/crates/runtime" lib CC=clang
 if [ ! -f "$RT" ]; then
-  die "bootstrap build did not write $RT"
+  die "runtime make did not write $RT"
 fi
 echo "==> clang -O2 $LL" >&2
 if [ "$(uname -s)" = Darwin ]; then

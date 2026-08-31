@@ -126,14 +126,16 @@ is_latest_version() {
 # Do not use GitHub's /releases/latest (it may be skia-cpu-v*).
 # Compact one-line JSON and pretty fixtures both work.
 pick_v_release_tag() {
-  tr '"' '\n' < "$1" | awk '
-    $0 == "tag_name" { n=1; next }
-    n==1 { n=2; next }
-    n==2 {
-      if ($0 ~ /^v[0-9][^-]*$/) { print; exit }
-      n=0
+  awk -F '"' '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "tag_name" && (i + 2) <= NF && $(i + 2) ~ /^v[0-9][^-]*$/) {
+          print $(i + 2)
+          exit
+        }
+      }
     }
-  '
+  ' "$1"
 }
 
 resolve_release_tag() {
