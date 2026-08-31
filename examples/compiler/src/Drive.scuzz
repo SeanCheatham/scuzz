@@ -77,7 +77,16 @@ def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String,
   if (hasUi) linkLineUi(clang, ll, lib, exe, h, gpu, mac) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
 
 def runLinkLine(hasUi: Bool, dir: String, name: String): IO[(Int, String, String)] =
-  crateHome().flatMap(h => ensureRtMade(h).flatMap(_ => hostMac().flatMap(mac => linkGpu(h).flatMap(gpu => runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(h), exeName(dir, name), h, gpu))))))
+  crateHome().flatMap(h => ensureRtMade(h).flatMap(_ => runLinkHost(hasUi, dir, name, h)))
+
+def runLinkHost(hasUi: Bool, dir: String, name: String, h: String): IO[(Int, String, String)] =
+  hostMac().flatMap(mac => runLinkGpu(hasUi, dir, name, h, mac))
+
+def runLinkGpu(hasUi: Bool, dir: String, name: String, h: String, mac: Bool): IO[(Int, String, String)] =
+  linkGpu(h).flatMap(gpu => runLinkGot(hasUi, dir, name, h, mac, gpu))
+
+def runLinkGot(hasUi: Bool, dir: String, name: String, h: String, mac: Bool, gpu: Bool): IO[(Int, String, String)] =
+  runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(h), exeName(dir, name), h, gpu))
 
 def ensureRtMade(h: String): IO[Unit] =
   runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/runtime"), " lib CC=clang"))).flatMap(r => ensureRtGot(r))
