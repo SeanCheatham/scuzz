@@ -632,7 +632,7 @@ def tupleProof(): IO[Unit] =
     _ <- IO.println(s"tup:$n")
     _ <- IO.println(s"tup:$s")
     _ <- q match {
-  case (a, m) => IO.println(s"swap:$a:$m")
+  case (a, m) => IO.println(s"swap:$a:${Str.fromInt(m)}")
 }
     _ <- IO.println(s"eqTup:${if ((n, s) == (42, "ok") && (1, "x") != (2, "x")) "y" else "n"}")
     _ <- IO.println(s"both:$bothS")
