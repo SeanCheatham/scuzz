@@ -269,7 +269,7 @@ def reproSched(sched: String): String =
 def reproFault(fault: String): String =
   if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
 
-def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: Int, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
+def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
   Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, promo, killed, survived, inert, ran, sites, oracles, classText))
 
 def summaryFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
@@ -281,7 +281,7 @@ search = """, Str.concat(Str.fromInt(search), Str.concat("""
 search_failures = """, Str.concat(Str.fromInt(failures), Str.concat("""
 corpus = """, Str.concat(Str.fromInt(corpus), Str.concat("\ndrivers = []\nevents = []\ndeclared = []\nreachability = []\nmissing_budget = []\nmissing_corpus = []\nrepro = \"", Str.concat(repro, "\"\nreplay = \"\"\n\n"))))))))))))))
 
-def summaryRest(corpus: Int, corpFail: Int, promo: Int, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
+def summaryRest(corpus: Int, corpFail: Int, promo: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
   Str.concat("""[coverage]
 unclaimed_varied = []
 
@@ -289,7 +289,7 @@ unclaimed_varied = []
 entries = """, Str.concat(Str.fromInt(corpus), Str.concat("""
 failures = """, Str.concat(Str.fromInt(corpFail), Str.concat("""
 reached = []
-promoted = """, Str.concat(Str.fromInt(promo), Str.concat("""
+promoted = """, Str.concat(promo, Str.concat("""
 
 [classify]
 """, Str.concat(classText, Str.concat("""[mutate]

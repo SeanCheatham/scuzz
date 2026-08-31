@@ -1025,16 +1025,16 @@ def fuzzAfterSearch(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fai
   if (fail > 0 && acc.repro == "") fuzzSearchFail(job, script, corpus, acc, fail) else fuzzMutate(job, corpus, fail, acc.corpFail, acc.repro)
 
 def fuzzSearchFail(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fail: Int): IO[Unit] =
-  fuzzSaveRepro(job.outDir, job.seed, FuzzRun(joinSlash(job.outDir, "seeds.txt"), "", fuzzFailScript(job, script), "", "")).flatMap(path => fuzzPromote(job, script).flatMap(n => fuzzMutate(job, corpus + n, fail, acc.corpFail, path)))
+  fuzzSaveRepro(job.outDir, job.seed, FuzzRun(joinSlash(job.outDir, "seeds.txt"), "", fuzzFailScript(job, script), "", "")).flatMap(path => fuzzSearchFail2(job, script, corpus, acc, fail, path))
+
+def fuzzSearchFail2(job: FuzzJob, script: String, corpus: Int, acc: FuzzAcc, fail: Int, path: String): IO[Unit] =
+  if (!job.hasUi || script != "") fuzzMutate(job, corpus, fail, acc.corpFail, path) else fuzzPromoteTap(job).flatMap(_ => fuzzMutate(job, corpus + 1, fail, acc.corpFail, path))
 
 def fuzzFailScript(job: FuzzJob, script: String): String =
   if (job.hasUi && script == "") "tap 0\n" else script
 
-def fuzzPromote(job: FuzzJob, script: String): IO[Int] =
-  if (!job.hasUi || script != "") IO.pure(0) else fuzzPromoteTap(job)
-
-def fuzzPromoteTap(job: FuzzJob): IO[Int] =
-  Fs.mkdirs(joinSlash(job.dir, "corpus")).flatMap(_ => Fs.write(joinSlash(joinSlash(job.dir, "corpus"), "tap0.toml"), Verify.reproText(job.seed, "", "", "tap 0" :: Verify.noStr())).flatMap(_ => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "promo"), "1").map(_ => 1)))
+def fuzzPromoteTap(job: FuzzJob): IO[Unit] =
+  Fs.mkdirs(joinSlash(job.dir, "corpus")).flatMap(_ => Fs.write(joinSlash(joinSlash(job.dir, "corpus"), "tap0.toml"), Verify.reproText(job.seed, "", "", "tap 0" :: Verify.noStr())).flatMap(_ => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "promo"), "1")))
 
 def emptyMut(sites: Int): FuzzMut =
   FuzzMut(0, 0, 0, 0, sites)
@@ -1235,8 +1235,8 @@ def fuzzDone(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String,
 def fuzzWriteSummary(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut): IO[Unit] =
   Fs.mkdirs(joinSlash(job.outDir, "fuzz")).flatMap(_ => fuzzPromoOf(job.outDir).flatMap(promo => fuzzClassText(job.outDir).flatMap(ct => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.toml"), Verify.summaryToml(fail == 0, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, promo, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct)))))
 
-def fuzzPromoOf(outDir: String): IO[Int] =
-  Fs.read(joinSlash(joinSlash(outDir, "fuzz"), "promo")).map(_ => 1).handleErrorWith(_ => IO.pure(0))
+def fuzzPromoOf(outDir: String): IO[String] =
+  Fs.read(joinSlash(joinSlash(outDir, "fuzz"), "promo")).map(_ => "1").handleErrorWith(_ => IO.pure("0"))
 
 def fuzzClassText(outDir: String): IO[String] =
   Fs.read(fuzzClassPath(outDir)).map(t => Verify.classToml(t)).handleErrorWith(_ => IO.pure(""))
