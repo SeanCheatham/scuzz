@@ -154,6 +154,7 @@ jobs:
       - name: Package release + install-from-tarball smoke
         env:
           SCUZZ_VERSION: ${{ needs.prepare.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
           ./scripts/package_release.sh

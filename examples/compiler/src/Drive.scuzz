@@ -136,24 +136,30 @@ def stemOf(name: String): String =
   Str.slice(name, 0, Str.len(name) - 6)
 
 def emitDir(dir: String, outDir: String, full: Bool): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirMan(dir, outDir, full, Manifest.parse(toml)))
+  if (full) emitDirBump(dir, outDir) else emitDirLive(dir, outDir)
 
-def emitDirMan(dir: String, outDir: String, full: Bool, m: Man): IO[Unit] =
+def emitDirBump(dir: String, outDir: String): IO[Unit] =
+  Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpPath(dir), "").flatMap(_ => emitDirLive(dir, outDir)))
+
+def emitDirLive(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirMan(dir, outDir, Manifest.parse(toml)))
+
+def emitDirMan(dir: String, outDir: String, m: Man): IO[Unit] =
   m match {
-    case Man(ok, name, version, hasUi, deps, err) => emitDirMan2(dir, outDir, full, ok, err, deps)
+    case Man(ok, name, version, hasUi, deps, err) => emitDirMan2(dir, outDir, ok, err, deps)
   }
 
-def emitDirMan2(dir: String, outDir: String, full: Bool, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
-  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitDirListed(dir, outDir, full, deps, ents))
+def emitDirMan2(dir: String, outDir: String, ok: Bool, err: String, deps: List[(String, String)]): IO[Unit] =
+  if (!ok) IO.println(Str.concat("fail:", err)) else Fs.list(joinSlash(dir, "src")).flatMap(ents => emitDirListed(dir, outDir, deps, ents))
 
-def emitDirListed(dir: String, outDir: String, full: Bool, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitDirCollected(dir, outDir, full, deps, own))
+def emitDirListed(dir: String, outDir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => emitDirCollected(dir, outDir, deps, own))
 
-def emitDirCollected(dir: String, outDir: String, full: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  collectDeps(dir, deps, own).flatMap(files => emitDirReady(dir, outDir, full, files))
+def emitDirCollected(dir: String, outDir: String, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
+  collectDeps(dir, deps, own).flatMap(files => emitDirReady(dir, outDir, files))
 
-def emitDirReady(dir: String, outDir: String, full: Bool, files: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirFp(dir, outDir, full, files, toml, fpText(toml, files)))
+def emitDirReady(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirHit(dir, outDir, files, toml, fpText(toml, files)))
 
 def fpPath(dir: String): String =
   joinSlash(joinSlash(dir, ".scuzz"), "fingerprint")
@@ -175,9 +181,6 @@ def fpFilesHd(h: (String, String), rest: List[(String, String)], b: Builder): Bu
   h match {
     case (stem, src) => fpFilesAt(rest, Builder.append(Builder.append(Builder.append(Builder.append(b, stem), fpNl()), src), fpNl()))
   }
-
-def emitDirFp(dir: String, outDir: String, full: Bool, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
-  if (full) emitDirFresh(dir, outDir, files, toml, fp) else emitDirHit(dir, outDir, files, toml, fp)
 
 def emitDirHit(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
   Fs.read(fpPath(dir)).flatMap(old => emitDirHitGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirFresh(dir, outDir, files, toml, fp))
