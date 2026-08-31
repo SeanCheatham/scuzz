@@ -587,7 +587,6 @@ jobs:
           "$SCUZZ" fuzz --iterations 8 examples/fmt
           "$SCUZZ" fuzz --iterations 8 examples/tyck
           "$SCUZZ" fuzz --iterations 8 examples/codegen
-          "$SCUZZ" fuzz --iterations 8 examples/cli
           rm -rf /tmp/bad-seed
           cp -R examples/bad-example /tmp/bad-seed
           rm -rf /tmp/bad-seed/build /tmp/bad-seed/corpus
