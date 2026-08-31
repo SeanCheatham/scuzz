@@ -98,6 +98,11 @@ jobs:
           "$SCUZZ" run examples/tyck | tee /tmp/tyck.out
           grep -q "tyck-ok" /tmp/tyck.out
 
+      - name: Codegen emit
+        run: |
+          SCUZZ=./examples/cli/build/cli
+          "$SCUZZ" build examples/codegen
+
       - name: Codegen oracle
         run: |
           SCUZZ=./examples/cli/build/cli
