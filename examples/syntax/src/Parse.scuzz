@@ -62,10 +62,16 @@ def indexToksDone(n: Int, cur: List[Tok], acc: List[List[Tok]], total: Int): Tok
   Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total)
 
 def _at(toks: Toks, i: Int): Tok =
-  if (i < 0 || i >= toks.n) Tok.Eof else _atHit(toks.chunks, i)
+  if (i < 0 || i >= toks.n) Tok.Eof else _atGo(toks.chunks, i)
 
-def _atHit(chunks: List[List[Tok]], i: Int): Tok =
-  List.at(List.at(chunks, i / tokChunk()), i % tokChunk())
+def _atGo(chunks: List[List[Tok]], i: Int): Tok =
+  if (List.isEmpty(chunks)) Tok.Eof else _atGo1(List.head(chunks), List.tail(chunks), i)
+
+def _atGo1(chunk: List[Tok], rest: List[List[Tok]], i: Int): Tok =
+  if (i < tokChunk()) _atOff(chunk, i) else _atGo(rest, i - tokChunk())
+
+def _atOff(chunk: List[Tok], i: Int): Tok =
+  if (List.isEmpty(chunk)) Tok.Eof else if (i <= 0) List.head(chunk) else _atOff(List.tail(chunk), i - 1)
 
 def _is(toks: Toks, i: Int, t: Tok): Bool =
   Lexer.kind(_at(toks, i)) == Lexer.kind(t)
