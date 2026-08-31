@@ -29,7 +29,7 @@ def exeName(outDir: String, name: String): String =
   joinSlash(outDir, name)
 
 def linkLine(clang: String, ll: String, lib: String, exe: String): String =
-  Str.concat(clang, Str.concat(" -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -lpthread -o ", exe))))))
+  Str.concat(clang, Str.concat(" -O2 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -lpthread -o ", exe))))))
 
 def skiaLib(): String =
   "crates/ffi-skia/build/libsk_capi.a"
@@ -50,7 +50,7 @@ def uiFlags3(): String =
   " -Wl,--no-whole-archive -lpthread -rdynamic -o "
 
 def linkLineUi(clang: String, ll: String, lib: String, exe: String): String =
-  Str.concat(clang, Str.concat(" -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(), Str.concat(uiFlags1(), Str.concat(deskLib(), Str.concat(uiFlags2(), Str.concat(mobLib(), Str.concat(uiFlags3(), exe))))))))))))
+  Str.concat(clang, Str.concat(" -O2 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(), Str.concat(uiFlags1(), Str.concat(deskLib(), Str.concat(uiFlags2(), Str.concat(mobLib(), Str.concat(uiFlags3(), exe))))))))))))
 
 def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String): String =
   if (hasUi) linkLineUi(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
@@ -59,7 +59,7 @@ def hostMac(): IO[Bool] =
   Sys.exec("uname -s").map(r => Str.trim(r._2) == "Darwin")
 
 def linkLineMac(clang: String, ll: String, lib: String, exe: String): String =
-  Str.concat(clang, Str.concat(" -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -lpthread -o ", exe))))))
+  Str.concat(clang, Str.concat(" -O2 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -lpthread -o ", exe))))))
 
 def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String): String =
   if (hasUi) linkLineUi(clang, ll, lib, exe) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
@@ -765,7 +765,7 @@ def linkOnly(hasUi: Bool, name: String, outDir: String): IO[Unit] =
   runLinkLine(hasUi, outDir, name).flatMap(r => linkOnlyGot(r))
 
 def linkReload(ll: String, outDir: String): IO[Unit] =
-  runLine(Str.concat("clang -Wno-override-module -shared -fPIC ", Str.concat(ll, Str.concat(" -o ", joinSlash(outDir, "reload.dylib"))))).flatMap(r => linkOnlyGot(r))
+  runLine(Str.concat("clang -O2 -Wno-override-module -shared -fPIC ", Str.concat(ll, Str.concat(" -o ", joinSlash(outDir, "reload.dylib"))))).flatMap(r => linkOnlyGot(r))
 
 def linkOnlyGot(r: (Int, String, String)): IO[Unit] =
   r match {

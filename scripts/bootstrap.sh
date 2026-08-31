@@ -132,6 +132,23 @@ SRC="$ROOT/examples/cli/build/cli"
 if [ ! -x "$SRC" ]; then
   die "bootstrap build did not produce $SRC"
 fi
+LL="$ROOT/examples/cli/build/cli.ll"
+RT="$ROOT/crates/runtime/build/libscuzz_rt.a"
+if [ ! -f "$LL" ]; then
+  die "bootstrap build did not write $LL"
+fi
+if [ ! -f "$RT" ]; then
+  die "bootstrap build did not write $RT"
+fi
+echo "==> clang -O2 $LL" >&2
+if [ "$(uname -s)" = Darwin ]; then
+  clang -O2 -Wno-override-module "$LL" "$RT" -framework CoreFoundation -lpthread -o "$SRC"
+else
+  clang -O2 -Wno-override-module "$LL" "$RT" -lpthread -o "$SRC"
+fi
+if [ ! -x "$SRC" ]; then
+  die "clang -O2 did not produce $SRC"
+fi
 mkdir -p "$(dirname "$PRODUCT")"
 if [ "$PRODUCT" != "$SRC" ]; then
   cp -f "$SRC" "$PRODUCT"
