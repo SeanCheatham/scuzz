@@ -32,7 +32,7 @@ def linkLine(clang: String, ll: String, lib: String, exe: String): String =
   Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -lpthread -o ", exe))))))
 
 def crateHome(): IO[String] =
-  Sys.getenv("SCUZZ_HOME").map(h => if (Str.len(h) == 0) "." else h)
+  Sys.getenv("SCUZZ_HOME").map(h => joinSlash(h, "."))
 
 def crateAt(h: String, rel: String): String =
   joinSlash(h, rel)
