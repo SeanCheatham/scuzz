@@ -3035,7 +3035,16 @@ def emitIfElse(c: Slot, th: Slot, el: Expr, prefix: String, strs: List[String], 
   }
 
 def thenIsPtr(code: String, v: String, o: Bool, ps: List[Param]): Bool =
-  o || isPtrSlot(v, ps) || v == "null" || hasSub(code, Str.concat(v, " = call ptr @")) && !hasSub(code, Str.concat(v, " = call i64 @"))
+  o || isPtrSlot(v, ps) || v == "null" || thenCallPtr(code, v)
+
+def thenCallPtr(code: String, v: String): Bool =
+  if (skipCallScan(v)) false else hasSubTail(code, Str.concat(v, " = call ptr @")) && !hasSubTail(code, Str.concat(v, " = call i64 @"))
+
+def skipCallScan(v: String): Bool =
+  Str.len(v) == 0 || Str.charAt(v, 0) != 37 || isIntSsa(v) || isI64Lit(v)
+
+def hasSubTail(s: String, sub: String): Bool =
+  hasSubAt(s, sub, if (Str.len(s) > 4096) Str.len(s) - 4096 else 0)
 
 def isIoSlot(v: String): Bool =
   hasSub(v, "_io") || hasSub(v, "_fm")
@@ -4586,7 +4595,19 @@ def stampFrom(s: String, old: String, neu: String): String =
   Builder.result(stampFromB(s, old, neu, 0, Builder.empty()))
 
 def stampFromB(s: String, old: String, neu: String, i: Int, b: Builder): Builder =
-  if (i >= Str.len(s)) b else if (startsAt(s, i, old)) stampFromB(s, old, neu, i + Str.len(old), Builder.append(b, neu)) else stampFromB(s, old, neu, i + 1, Builder.append(b, Str.slice(s, i, i + 1)))
+  if (i >= Str.len(s)) b else stampFromAt(s, old, neu, i, findSub(s, old, i), b)
+
+def stampFromAt(s: String, old: String, neu: String, i: Int, j: Int, b: Builder): Builder =
+  if (j >= Str.len(s)) stampFromEnd(s, i, b) else stampFromB(s, old, neu, j + Str.len(old), Builder.append(Builder.append(b, stampGap(s, i, j)), neu))
+
+def stampFromEnd(s: String, i: Int, b: Builder): Builder =
+  if (i >= Str.len(s)) b else Builder.append(b, if (i == 0) s else Str.slice(s, i, Str.len(s)))
+
+def stampGap(s: String, i: Int, j: Int): String =
+  if (j <= i) "" else Str.slice(s, i, j)
+
+def findSub(s: String, sub: String, i: Int): Int =
+  if (i + Str.len(sub) > Str.len(s)) Str.len(s) else if (startsAt(s, i, sub)) i else findSub(s, sub, i + 1)
 
 def startsAt(s: String, i: Int, old: String): Bool =
   i + Str.len(old) <= Str.len(s) && startsAtGo(s, i, old, 0)

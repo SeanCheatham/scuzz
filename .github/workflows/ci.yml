@@ -91,10 +91,22 @@ jobs:
           grep -q "ready." /tmp/hello.out
           "$SCUZZ" run examples/fmt | tee /tmp/fmt.out
           grep -q "fmt-ok" /tmp/fmt.out
+
+      - name: Typecheck oracle
+        run: |
+          SCUZZ=./examples/cli/build/cli
           "$SCUZZ" run examples/tyck | tee /tmp/tyck.out
           grep -q "tyck-ok" /tmp/tyck.out
+
+      - name: Codegen oracle
+        run: |
+          SCUZZ=./examples/cli/build/cli
           "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
           grep -q "ir-ok" /tmp/codegen.out
+
+      - name: Hello via out-dir
+        run: |
+          SCUZZ=./examples/cli/build/cli
           "$SCUZZ" run --out-dir /tmp/scuzz-cli-hello examples/hello | tee /tmp/cli-hello.out
           grep -q "Hello, Scuzz!" /tmp/cli-hello.out
           grep -q "ready." /tmp/cli-hello.out
