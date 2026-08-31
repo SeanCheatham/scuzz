@@ -101,7 +101,9 @@ jobs:
       - name: Codegen emit
         run: |
           SCUZZ=./examples/cli/build/cli
+          echo "codegen emit start"
           "$SCUZZ" build examples/codegen
+          echo "codegen emit done"
 
       - name: Codegen oracle
         run: |
