@@ -739,8 +739,8 @@ def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
     case Expr.EVar(s) => paramIsI64(ps, s) || isIntSsa(s)
     case Expr.EBin(op, _, _) => op != "::"
     case Expr.EUn(_, _) => true
-    case Expr.ECall(f, args) => if (f == "Property.check") exprIsI64Recv(args, ps, defs) else callIsI64(f, defs)
-    case Expr.EMethod(recv, name, _) => exprMethodI64(recv, name, defs)
+    case Expr.ECall(f, args) => exprCallI64(f, args, ps, defs)
+    case Expr.EMethod(recv, name, _) => exprMethI64(recv, name, ps, defs)
     case Expr.EMatch(_, arms) => exprIsI64Match(arms, ps, defs)
     case Expr.EIf(_, t, _) => exprIsI64(t, ps, defs)
     case Expr.ENamed(_, inner) => exprIsI64(inner, ps, defs)
@@ -749,6 +749,12 @@ def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
 
 def exprIsI64Match(arms: List[Arm], ps: List[Param], defs: List[Fun]): Bool =
   if (List.isEmpty(arms)) false else exprIsI64Arm(List.head(arms), ps, defs)
+
+def exprCallI64(f: String, args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+  if (f == "Property.check") exprIsI64Recv(args, ps, defs) else if (f == "List.head" || f == "List.at") headUnbox(args, ps) else callIsI64(f, defs)
+
+def exprMethI64(recv: Expr, name: String, ps: List[Param], defs: List[Fun]): Bool =
+  if (name == "head" || name == "at") headUnbox1(recv, ps) else exprMethodI64(recv, name, defs)
 
 def exprIsI64Recv(args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
   if (List.len(args) < 3) false else exprIsI64(List.head(List.tail(List.tail(args))), ps, defs)

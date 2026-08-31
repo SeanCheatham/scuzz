@@ -428,6 +428,14 @@ def srcHead(): String =
   IO.println(Str.fromInt(List.head([7])))
 """
 
+def srcHeadPair(): String =
+  """def pack(xs: List[Int], i: Int): (Int, Int) =
+  (List.head(xs), i)
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(0))
+"""
+
 def wantHead(): String =
   """define i32 @main(i32 %argc, ptr %argv) {
 entry:
@@ -1339,7 +1347,13 @@ def okList(): Bool =
   irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]"
 
 def okOpt(): Bool =
-  irDiff(srcOpt(), wantOpt()) && irIdem(srcOpt()) && irDiff(srcHead(), wantHead()) && irIdem(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irIdem(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irIdem(srcTail()) && irDiff(srcTok(), wantTok()) && irIdem(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]"
+  irDiff(srcOpt(), wantOpt()) && irIdem(srcOpt()) && irDiff(srcHead(), wantHead()) && irIdem(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irIdem(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irIdem(srcTail()) && irDiff(srcTok(), wantTok()) && irIdem(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]" && okHeadPair()
+
+def okHeadPair(): Bool =
+  Check.check(srcHeadPair()) == "[]" && hasHeadPairBox(Emit.emit(srcHeadPair()))
+
+def hasHeadPairBox(ir: String): Bool =
+  Str.contains(ir, "call i64 @sz_unbox_i64(ptr %body_0_l_v)") && Str.contains(ir, "call ptr @sz_box_i64(i64 %body_0_l_u)") && Str.contains(ir, "call ptr @sz_pair_new(ptr %body_0_lb, ptr %body_0_rb)")
 
 def okKw(): Bool =
   irDiff(srcKw(), wantKw()) && irIdem(srcKw()) && irDiff(srcPunct(), wantPunct()) && irIdem(srcPunct()) && irDiff(srcCons(), wantCons()) && irIdem(srcCons()) && irDiff(srcCh(), wantCh()) && irIdem(srcCh()) && irDiff(srcSl(), wantSl()) && irIdem(srcSl()) && irDiff(srcBld(), wantBld()) && irIdem(srcBld()) && Check.check(srcKw()) == "[]" && Check.check(srcPunct()) == "[]" && Check.check(srcCons()) == "[]" && Check.check(srcCh()) == "[]" && Check.check(srcSl()) == "[]" && Check.check(srcBld()) == "[]"
