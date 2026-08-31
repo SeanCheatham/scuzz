@@ -1400,10 +1400,40 @@ def wantInterp(): String =
   "@.str0 = private unnamed_addr constant [3 x i8] c\"n:\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %build_e_l0_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_e_l0_s = call ptr @sz_string_from_cstr(ptr %build_e_l0_gep)\n  %build_e_e1_v = call ptr @sz_string_from_int(i64 3)\n  %build_e_c1_v = call ptr @sz_string_concat(ptr %build_e_l0_s, ptr %build_e_e1_v)\n  call void @sz_release(ptr %build_e_l0_s)\n  call void @sz_release(ptr %build_e_e1_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_c1_v)\n  call void @sz_release(ptr %build_e_c1_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
 
 def srcForEq(): String =
-  "@main def main: IO[Unit] =\n  for {\n    x = 1\n    _ <- IO.println(Str.fromInt(x))\n  } yield ()\n"
+  """@main def main: IO[Unit] =
+  for {
+    x = 1
+    _ <- IO.println(Str.fromInt(x))
+  } yield ()
+"""
 
 def wantForEq(): String =
-  "define internal ptr @sz_cont_0(ptr %value, ptr %env) {\nentry:\n  %x_c = call ptr @sz_list_at(ptr %env, i64 0)\n  %x = call i64 @sz_unbox_i64(ptr %x_c)\n  %c0_io = call ptr @sz_io_pure(ptr null)\n  call void @sz_release(ptr null)\n  ret ptr %c0_io\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %x = add i64 1, 0\n  %build_l_in_e_v = call ptr @sz_string_from_int(i64 %x)\n  %build_l_in_io = call ptr @sz_io_println(ptr %build_l_in_e_v)\n  call void @sz_release(ptr %build_l_in_e_v)\n  %build_l_cap0 = call ptr @sz_list_nil()\n  %build_l_bx0 = call ptr @sz_box_i64(i64 %x)\n  %build_l_cap1 = call ptr @sz_list_cons(ptr %build_l_bx0, ptr %build_l_cap0)\n  call void @sz_release(ptr %build_l_cap0)\n  call void @sz_release(ptr %build_l_bx0)\n  %build_l_fm = call ptr @sz_io_flatmap(ptr %build_l_in_io, ptr @sz_cont_0, ptr %build_l_cap1)\n  call void @sz_release(ptr %build_l_in_io)\n  call void @sz_release(ptr %build_l_cap1)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_l_fm, i32 %argc, ptr %argv)\n  ret i32 %rc\n}"
+  """define internal ptr @sz_cont_0(ptr %value, ptr %env) {
+entry:
+  %x_c = call ptr @sz_list_at(ptr %env, i64 0)
+  %x = call i64 @sz_unbox_i64(ptr %x_c)
+  %c0_io = call ptr @sz_io_pure(ptr null)
+  call void @sz_release(ptr null)
+  ret ptr %c0_io
+}
+
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %x = add i64 1, 0
+  %build_l_in_e_v = call ptr @sz_string_from_int(i64 %x)
+  %build_l_in_io = call ptr @sz_io_println(ptr %build_l_in_e_v)
+  call void @sz_release(ptr %build_l_in_e_v)
+  %build_l_cap0 = call ptr @sz_list_nil()
+  %build_l_bx0 = call ptr @sz_box_i64(i64 %x)
+  %build_l_cap1 = call ptr @sz_list_cons(ptr %build_l_bx0, ptr %build_l_cap0)
+  call void @sz_release(ptr %build_l_cap0)
+  call void @sz_release(ptr %build_l_bx0)
+  %build_l_fm = call ptr @sz_io_flatmap(ptr %build_l_in_io, ptr @sz_cont_0, ptr %build_l_cap1)
+  call void @sz_release(ptr %build_l_in_io)
+  call void @sz_release(ptr %build_l_cap1)
+  %rc = call i32 @sz_runtime_main_args(ptr %build_l_fm, i32 %argc, ptr %argv)
+  ret i32 %rc
+}"""
 
 def srcFor(): String =
   "@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(\"a\")\n    _ <- IO.println(\"b\")\n  } yield ()\n"
@@ -1467,4 +1497,5 @@ def allOk(): Bool =
   okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam())
 
 @main def main: IO[Unit] =
-  if (allOk()) IO.println("ir-ok") else IO.println(Str.concat("ir-bad\n", Emit.emit(srcTup3())))
+  if (allOk()) IO.println("ir-ok") else IO.println(Str.concat("""ir-bad
+""", Emit.emit(srcTup3())))

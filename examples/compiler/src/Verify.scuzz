@@ -578,7 +578,7 @@ def rewriteReq(e: Expr): Expr =
   }
 
 def rewriteReqMeth(recv: Expr, name: String, args: List[Expr]): Expr =
-  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: (reqPredE(args) :: (recv :: noExpr()))) else Expr.EMethod(recv, name, args)
+  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: reqPredE(args) :: recv :: noExpr()) else Expr.EMethod(recv, name, args)
 
 def reqNameE(args: List[Expr]): Expr =
   if (List.len(args) < 2) Expr.EStr("require") else reqNameHit(List.head(args))

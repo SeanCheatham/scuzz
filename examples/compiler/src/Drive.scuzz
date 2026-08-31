@@ -55,6 +55,18 @@ def linkLineUi(clang: String, ll: String, lib: String, exe: String): String =
 def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String): String =
   if (hasUi) linkLineUi(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
 
+def hostMac(): IO[Bool] =
+  Sys.exec("uname -s").map(r => Str.trim(r._2) == "Darwin")
+
+def linkLineMac(clang: String, ll: String, lib: String, exe: String): String =
+  Str.concat(clang, Str.concat(" -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -lpthread -o ", exe))))))
+
+def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String): String =
+  if (hasUi) linkLineUi(clang, ll, lib, exe) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
+
+def runLinkLine(hasUi: Bool, dir: String, name: String): IO[(Int, String, String)] =
+  hostMac().flatMap(mac => runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(), exeName(dir, name))))
+
 def missToml(dir: String): String =
   Str.concat("missing scuzz.toml in ", dir)
 
@@ -366,7 +378,7 @@ def ensureUiDone(r: (Int, String, String)): IO[Unit] =
   }
 
 def linkRunNamed(hasUi: Bool, name: String, outDir: String, runEnv: String): IO[Unit] =
-  runLine(linkLineFor(hasUi, "clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => afterClang(r, exeName(outDir, name), runEnv))
+  runLinkLine(hasUi, outDir, name).flatMap(r => afterClang(r, exeName(outDir, name), runEnv))
 
 def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
@@ -573,7 +585,7 @@ def testLinkUi(hasUi: Bool, dir: String, name: String, outDir: String, update: B
   if (hasUi) ensureUi().flatMap(_ => testLinkNamed(true, dir, name, outDir, update, pixels)) else testLinkNamed(false, dir, name, outDir, update, pixels)
 
 def testLinkNamed(hasUi: Bool, dir: String, name: String, outDir: String, update: Bool, pixels: Bool): IO[Unit] =
-  runLine(linkLineFor(hasUi, "clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => testAfterClang(r, exeName(outDir, name), dir, outDir, name, hasUi, update, pixels))
+  runLinkLine(hasUi, outDir, name).flatMap(r => testAfterClang(r, exeName(outDir, name), dir, outDir, name, hasUi, update, pixels))
 
 def testAfterClang(r: (Int, String, String), exe: String, dir: String, outDir: String, name: String, hasUi: Bool, update: Bool, pixels: Bool): IO[Unit] =
   r match {
@@ -687,7 +699,7 @@ def skiaMakeGot(r: (Int, String, String), backend: String): IO[Bool] =
   }
 
 def testDiffLink(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String]): IO[Unit] =
-  runLine(linkLineFor(true, "clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => testDiffLinked(r, dir, outDir, name, backend, rest, dumps))
+  runLinkLine(true, outDir, name).flatMap(r => testDiffLinked(r, dir, outDir, name, backend, rest, dumps))
 
 def testDiffLinked(r: (Int, String, String), dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String]): IO[Unit] =
   r match {
@@ -750,7 +762,7 @@ def hostMeta(name: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, Str.concat("\"\ntarget = \"host\"\nbundle_id = \"", Str.concat(bundleId(), "\"\nruntime = \"mobile\"\n"))))
 
 def linkOnly(hasUi: Bool, name: String, outDir: String): IO[Unit] =
-  runLine(linkLineFor(hasUi, "clang", llName(outDir, name), rtLib(), exeName(outDir, name))).flatMap(r => linkOnlyGot(r))
+  runLinkLine(hasUi, outDir, name).flatMap(r => linkOnlyGot(r))
 
 def linkReload(ll: String, outDir: String): IO[Unit] =
   runLine(Str.concat("clang -Wno-override-module -shared -fPIC ", Str.concat(ll, Str.concat(" -o ", joinSlash(outDir, "reload.dylib"))))).flatMap(r => linkOnlyGot(r))
@@ -1205,7 +1217,7 @@ def fuzzToml(job: FuzzJob): String =
   Str.concat("[package]\nname = \"", Str.concat(job.name, "\"\n"))
 
 def fuzzMutLink(job: FuzzJob, mutDir: String): IO[String] =
-  runLine(linkLineFor(job.hasUi, "clang", llName(mutDir, job.name), rtLib(), exeName(mutDir, job.name))).map(r => fuzzMutLinkGot(r, exeName(mutDir, job.name)))
+  runLinkLine(job.hasUi, mutDir, job.name).map(r => fuzzMutLinkGot(r, exeName(mutDir, job.name)))
 
 def fuzzMutLinkGot(r: (Int, String, String), exe: String): String =
   r match {
