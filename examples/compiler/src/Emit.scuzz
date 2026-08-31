@@ -87,19 +87,22 @@ def strIndex(xs: List[String], s: String, i: Int): Int =
   if (List.isEmpty(xs)) i else if (List.head(xs) == s) i else strIndex(List.tail(xs), s, i + 1)
 
 def intern(acc: List[String], s: String): List[String] =
-  internGo(acc, s)
+  internHit(acc, s, acc)
 
-def internGo(acc: List[String], s: String): List[String] =
-  acc match {
-    case h :: rest => if (h == s) internKeep(h, rest) else internCons(h, intern(rest, s))
-    case [] => s :: noStr()
+def internHit(cur: List[String], s: String, orig: List[String]): List[String] =
+  cur match {
+    case h :: rest => if (h == s) orig else internHit(rest, s, orig)
+    case [] => internSnoc(orig, s)
   }
 
-def internKeep(h: String, rest: List[String]): List[String] =
-  h :: rest
+def internSnoc(xs: List[String], s: String): List[String] =
+  internSnocGo(xs, s, noStr())
 
-def internCons(h: String, rest: List[String]): List[String] =
-  h :: rest
+def internSnocGo(xs: List[String], s: String, acc: List[String]): List[String] =
+  if (List.isEmpty(xs)) internSnocRev(acc, s :: noStr()) else internSnocGo(List.tail(xs), s, List.head(xs) :: acc)
+
+def internSnocRev(acc: List[String], out: List[String]): List[String] =
+  if (List.isEmpty(acc)) out else internSnocRev(List.tail(acc), List.head(acc) :: out)
 
 def collectToks(toks: List[Tok], acc: List[String]): List[String] =
   if (List.isEmpty(toks)) acc else collectTok(List.head(toks), List.tail(toks), acc)
@@ -139,7 +142,10 @@ def internHole(acc: List[String], inner: String): List[String] =
   collectToks(Lexer.lex(inner), acc)
 
 def emitConsts(xs: List[String], i: Int): String =
-  if (List.isEmpty(xs)) "" else Str.concat(strConst(i, List.head(xs)), Str.concat(nl(), emitConsts(List.tail(xs), i + 1)))
+  Builder.result(emitConstsAt(xs, i, Builder.empty()))
+
+def emitConstsAt(xs: List[String], i: Int, b: Builder): Builder =
+  if (List.isEmpty(xs)) b else emitConstsAt(List.tail(xs), i + 1, Builder.append(b, Str.concat(strConst(i, List.head(xs)), nl())))
 
 def join(a: String, b: String): String =
   Str.concat(a, b)
