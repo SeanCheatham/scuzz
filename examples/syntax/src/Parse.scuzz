@@ -47,10 +47,27 @@ record Prog(pkg: String, enums: List[En], aliases: List[Alias], traits: List[Tr]
 
 import Lexer.Tok
 
-def _at(toks: List[Tok], i: Int): Tok =
-  List.at(toks, i)
+record Toks(chunks: List[List[Tok]], n: Int)
 
-def _is(toks: List[Tok], i: Int, t: Tok): Bool =
+def tokChunk(): Int =
+  64
+
+def indexToks(toks: List[Tok]): Toks =
+  indexToksGo(toks, 0, [], [], 0)
+
+def indexToksGo(toks: List[Tok], n: Int, cur: List[Tok], acc: List[List[Tok]], total: Int): Toks =
+  if (List.isEmpty(toks)) indexToksDone(n, cur, acc, total) else if (n >= tokChunk()) indexToksGo(toks, 0, [], List.reverse(cur) :: acc, total) else indexToksGo(List.tail(toks), n + 1, List.head(toks) :: cur, acc, total + 1)
+
+def indexToksDone(n: Int, cur: List[Tok], acc: List[List[Tok]], total: Int): Toks =
+  Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total)
+
+def _at(toks: Toks, i: Int): Tok =
+  if (i < 0 || i >= toks.n) Tok.Eof else _atHit(toks.chunks, i)
+
+def _atHit(chunks: List[List[Tok]], i: Int): Tok =
+  List.at(List.at(chunks, i / tokChunk()), i % tokChunk())
+
+def _is(toks: Toks, i: Int, t: Tok): Bool =
   Lexer.kind(_at(toks, i)) == Lexer.kind(t)
 
 def _identOf(t: Tok): String =
@@ -77,29 +94,29 @@ def _kit(s: String): Bool =
 def _joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", _joinComma(List.tail(xs))))
 
-def _joinTypes(toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+def _joinTypes(toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
   _joinTypes2(parseType(toks, i), toks, acc)
 
-def _joinTypes2(p: (String, Int), toks: List[Tok], acc: List[String]): (List[String], Int) =
+def _joinTypes2(p: (String, Int), toks: Toks, acc: List[String]): (List[String], Int) =
   p match {
     case (t, j) => if (_is(toks, j, Tok.Comma)) _joinTypes(toks, j + 1, t :: acc) else (List.reverse(t :: acc), j)
   }
 
-def parseType(toks: List[Tok], i: Int): (String, Int) =
+def parseType(toks: Toks, i: Int): (String, Int) =
   if (_is(toks, i, Tok.LParen)) parseTypeParen(toks, i + 1) else parseTypeArrow(toks, parseTypeApp(toks, i))
 
-def parseTypeParen(toks: List[Tok], i: Int): (String, Int) =
+def parseTypeParen(toks: Toks, i: Int): (String, Int) =
   parseTypeParen2(_joinTypes(toks, i, []), toks)
 
-def parseTypeParen2(p: (List[String], Int), toks: List[Tok]): (String, Int) =
+def parseTypeParen2(p: (List[String], Int), toks: Toks): (String, Int) =
   p match {
     case (ts, j) => parseTypeArrow(toks, (if (List.len(ts) == 1) List.head(ts) else Str.concat("(", Str.concat(_joinComma(ts), ")")), j + 1))
   }
 
-def parseTypeApp(toks: List[Tok], i: Int): (String, Int) =
+def parseTypeApp(toks: Toks, i: Int): (String, Int) =
   parseTypeBrack(toks, i + 1, _identOf(_at(toks, i)))
 
-def parseTypeBrack(toks: List[Tok], i: Int, n: String): (String, Int) =
+def parseTypeBrack(toks: Toks, i: Int, n: String): (String, Int) =
   if (_is(toks, i, Tok.LBracket)) parseTypeBrackClose(_joinTypes(toks, i + 1, []), n) else (n, i)
 
 def parseTypeBrackClose(p: (List[String], Int), n: String): (String, Int) =
@@ -107,7 +124,7 @@ def parseTypeBrackClose(p: (List[String], Int), n: String): (String, Int) =
     case (ts, j) => (Str.concat(n, Str.concat("[", Str.concat(_joinComma(ts), "]"))), j + 1)
   }
 
-def parseTypeArrow(toks: List[Tok], p: (String, Int)): (String, Int) =
+def parseTypeArrow(toks: Toks, p: (String, Int)): (String, Int) =
   p match {
     case (left, i) => if (_is(toks, i, Tok.Arrow)) parseTypeArrow2(left, parseType(toks, i + 1)) else (left, i)
   }
@@ -117,10 +134,13 @@ def parseTypeArrow2(left: String, p: (String, Int)): (String, Int) =
     case (right, j) => (Str.concat(left, Str.concat(" => ", right)), j)
   }
 
-def parseExpr(toks: List[Tok], i: Int): (Expr, Int) =
+def parseExpr(toks: Toks, i: Int): (Expr, Int) =
   parseAscribe(parseOr(toks, i), toks)
 
-def parseAscribe(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+def parseExprList(toks: List[Tok], i: Int): (Expr, Int) =
+  parseExpr(indexToks(toks), i)
+
+def parseAscribe(p: (Expr, Int), toks: Toks): (Expr, Int) =
   p match {
     case (e, j) => if (_is(toks, j, Tok.Colon)) parseAscribeKeep(e, parseType(toks, j + 1)) else (e, j)
   }
@@ -130,31 +150,31 @@ def parseAscribeKeep(e: Expr, p: (String, Int)): (Expr, Int) =
     case (_, k) => (e, k)
   }
 
-def parseOr(toks: List[Tok], i: Int): (Expr, Int) =
+def parseOr(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseAnd(toks, i), "||")
 
-def parseAnd(toks: List[Tok], i: Int): (Expr, Int) =
+def parseAnd(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseBitOr(toks, i), "&&")
 
-def parseBitOr(toks: List[Tok], i: Int): (Expr, Int) =
+def parseBitOr(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseBitXor(toks, i), "|")
 
-def parseBitXor(toks: List[Tok], i: Int): (Expr, Int) =
+def parseBitXor(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseBitAnd(toks, i), "^")
 
-def parseBitAnd(toks: List[Tok], i: Int): (Expr, Int) =
+def parseBitAnd(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseCmp(toks, i), "&")
 
-def parseCmp(toks: List[Tok], i: Int): (Expr, Int) =
+def parseCmp(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseCons(toks, i), "==")
 
-def parseCons(toks: List[Tok], i: Int): (Expr, Int) =
+def parseCons(toks: Toks, i: Int): (Expr, Int) =
   parseConsRest(toks, parseShift(toks, i))
 
-def parseShift(toks: List[Tok], i: Int): (Expr, Int) =
+def parseShift(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseAdd(toks, i), "<<")
 
-def parseConsRest(toks: List[Tok], p: (Expr, Int)): (Expr, Int) =
+def parseConsRest(toks: Toks, p: (Expr, Int)): (Expr, Int) =
   p match {
     case (e, i) => if (_is(toks, i, Tok.ColonColon)) parseConsRight(e, parseCons(toks, i + 1)) else (e, i)
   }
@@ -164,13 +184,13 @@ def parseConsRight(left: Expr, p: (Expr, Int)): (Expr, Int) =
     case (r, j) => (Expr.EBin("::", left, r), j)
   }
 
-def parseAdd(toks: List[Tok], i: Int): (Expr, Int) =
+def parseAdd(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseMul(toks, i), "+")
 
-def parseMul(toks: List[Tok], i: Int): (Expr, Int) =
+def parseMul(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseUnary(toks, i), "*")
 
-def parseUnary(toks: List[Tok], i: Int): (Expr, Int) =
+def parseUnary(toks: Toks, i: Int): (Expr, Int) =
   if (_is(toks, i, Tok.Minus)) parseUnaryOp("-", parseUnary(toks, i + 1)) else if (_is(toks, i, Tok.Bang)) parseUnaryOp("!", parseUnary(toks, i + 1)) else if (_is(toks, i, Tok.Tilde)) parseUnaryOp("~", parseUnary(toks, i + 1)) else parsePost(toks, parseAtom(toks, i))
 
 def parseUnaryOp(op: String, p: (Expr, Int)): (Expr, Int) =
@@ -204,15 +224,15 @@ def _opTok(t: Tok): String =
 def _opLevel(op: String, want: String): Bool =
   if (want == "+") op == "+" || op == "-" else if (want == "*") op == "*" || op == "/" || op == "%" else if (want == "<<") op == "<<" || op == ">>" else if (want == "==") op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" else if (want == "&") op == "&" else if (want == "^") op == "^" else if (want == "|") op == "|" else if (want == "&&") op == "&&" else if (want == "||") op == "||" else false
 
-def parseBinRest(toks: List[Tok], p: (Expr, Int), want: String): (Expr, Int) =
+def parseBinRest(toks: Toks, p: (Expr, Int), want: String): (Expr, Int) =
   p match {
     case (e, i) => parseBinRestOp(toks, e, i, want, _opTok(_at(toks, i)))
   }
 
-def parseBinRestOp(toks: List[Tok], e: Expr, i: Int, want: String, op: String): (Expr, Int) =
+def parseBinRestOp(toks: Toks, e: Expr, i: Int, want: String, op: String): (Expr, Int) =
   if (_opLevel(op, want)) parseBinRest(toks, parseBinNext(toks, e, i + 1, op, want), want) else (e, i)
 
-def parseBinNext(toks: List[Tok], left: Expr, i: Int, op: String, want: String): (Expr, Int) =
+def parseBinNext(toks: Toks, left: Expr, i: Int, op: String, want: String): (Expr, Int) =
   parseBinNext2(left, op, if (want == "*") parseUnary(toks, i) else if (want == "+") parseMul(toks, i) else if (want == "<<") parseAdd(toks, i) else if (want == "==") parseCons(toks, i) else if (want == "&") parseCmp(toks, i) else if (want == "^") parseBitAnd(toks, i) else if (want == "|") parseBitXor(toks, i) else if (want == "&&") parseBitOr(toks, i) else parseAnd(toks, i))
 
 def parseBinNext2(left: Expr, op: String, p: (Expr, Int)): (Expr, Int) =
@@ -220,7 +240,7 @@ def parseBinNext2(left: Expr, op: String, p: (Expr, Int)): (Expr, Int) =
     case (r, j) => (Expr.EBin(op, left, r), j)
   }
 
-def parseAtom(toks: List[Tok], i: Int): (Expr, Int) =
+def parseAtom(toks: Toks, i: Int): (Expr, Int) =
   _at(toks, i) match {
     case Tok.Int(n) => (Expr.EInt(n), i + 1)
     case Tok.True => (Expr.EBool(true), i + 1)
@@ -238,7 +258,7 @@ def parseAtom(toks: List[Tok], i: Int): (Expr, Int) =
     case _ => (Expr.EVar(""), i)
   }
 
-def parseMatchLam(toks: List[Tok], i: Int): (Expr, Int) =
+def parseMatchLam(toks: Toks, i: Int): (Expr, Int) =
   parseMatchLam2(parseMatch(toks, Expr.EVar("__p"), i))
 
 def parseMatchLam2(p: (Expr, Int)): (Expr, Int) =
@@ -246,15 +266,15 @@ def parseMatchLam2(p: (Expr, Int)): (Expr, Int) =
     case (e, j) => (Expr.ELam("__p", e), j)
   }
 
-def parseIf(toks: List[Tok], i: Int): (Expr, Int) =
+def parseIf(toks: Toks, i: Int): (Expr, Int) =
   parseIf2(parseExpr(toks, i + 2), toks)
 
-def parseIf2(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+def parseIf2(p: (Expr, Int), toks: Toks): (Expr, Int) =
   p match {
     case (c, j) => parseIf3(c, parseExpr(toks, j + 1), toks)
   }
 
-def parseIf3(c: Expr, p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+def parseIf3(c: Expr, p: (Expr, Int), toks: Toks): (Expr, Int) =
   p match {
     case (t, j) => if (_is(toks, j, Tok.Else)) parseIf4(c, t, parseExpr(toks, j + 1)) else (Expr.EIf(c, t, Expr.EUnit), j)
   }
@@ -264,13 +284,13 @@ def parseIf4(c: Expr, t: Expr, p: (Expr, Int)): (Expr, Int) =
     case (e, j) => (Expr.EIf(c, t, e), j)
   }
 
-def parseFor(toks: List[Tok], i: Int): (Expr, Int) =
-  parseForBinds(toks, i + 2, [])
+def parseFor(toks: Toks, i: Int): (Expr, Int) =
+  if (_is(toks, i + 1, Tok.LBrace)) parseForBinds(toks, i + 2, []) else (Expr.EFor([], Expr.EUnit), i + 1)
 
-def parseForBinds(toks: List[Tok], i: Int, acc: List[Bind]): (Expr, Int) =
+def parseForBinds(toks: Toks, i: Int, acc: List[Bind]): (Expr, Int) =
   if (_is(toks, i, Tok.RBrace)) parseForYield(toks, i + 1, List.reverse(acc)) else parseForBindsNext(parseForOne(toks, i), toks, acc)
 
-def parseForOne(toks: List[Tok], i: Int): (Bind, Int) =
+def parseForOne(toks: Toks, i: Int): (Bind, Int) =
   if (_is(toks, i, Tok.If)) parseForGuard(parseExpr(toks, i + 1)) else parseForPat(parsePat(toks, i), toks)
 
 def parseForGuard(p: (Expr, Int)): (Bind, Int) =
@@ -278,17 +298,17 @@ def parseForGuard(p: (Expr, Int)): (Bind, Int) =
     case (cond, j) => (Bind(false, "__guard", cond), j)
   }
 
-def parseForPat(p: (String, Int), toks: List[Tok]): (Bind, Int) =
+def parseForPat(p: (String, Int), toks: Toks): (Bind, Int) =
   p match {
     case (pat, j) => parseForOne3(pat, _is(toks, j, Tok.LeftArrow), parseExpr(toks, j + 1), toks)
   }
 
-def parseForOne3(name: String, draw: Bool, p: (Expr, Int), toks: List[Tok]): (Bind, Int) =
+def parseForOne3(name: String, draw: Bool, p: (Expr, Int), toks: Toks): (Bind, Int) =
   p match {
     case (v, j) => parseForOne4(name, draw, v, skipAscript(toks, j))
   }
 
-def skipAscript(toks: List[Tok], i: Int): Int =
+def skipAscript(toks: Toks, i: Int): Int =
   if (_is(toks, i, Tok.Colon)) skipAscript2(parseType(toks, i + 1)) else i
 
 def skipAscript2(p: (String, Int)): Int =
@@ -299,12 +319,12 @@ def skipAscript2(p: (String, Int)): Int =
 def parseForOne4(name: String, draw: Bool, v: Expr, j: Int): (Bind, Int) =
   (Bind(draw, name, v), j)
 
-def parseForBindsNext(p: (Bind, Int), toks: List[Tok], acc: List[Bind]): (Expr, Int) =
+def parseForBindsNext(p: (Bind, Int), toks: Toks, acc: List[Bind]): (Expr, Int) =
   p match {
     case (b, j) => parseForBinds(toks, j, b :: acc)
   }
 
-def parseForYield(toks: List[Tok], i: Int, bs: List[Bind]): (Expr, Int) =
+def parseForYield(toks: Toks, i: Int, bs: List[Bind]): (Expr, Int) =
   parseForYield2(bs, parseExpr(toks, i + 1))
 
 def parseForYield2(bs: List[Bind], p: (Expr, Int)): (Expr, Int) =
@@ -312,10 +332,10 @@ def parseForYield2(bs: List[Bind], p: (Expr, Int)): (Expr, Int) =
     case (body, j) => (Expr.EFor(bs, body), j)
   }
 
-def parseHole(toks: List[Tok], i: Int): (Expr, Int) =
+def parseHole(toks: Toks, i: Int): (Expr, Int) =
   if (_is(toks, i + 1, Tok.Arrow)) parseLamBody(toks, i + 2, "_") else (Expr.EHole, i + 1)
 
-def parseLamBody(toks: List[Tok], i: Int, p: String): (Expr, Int) =
+def parseLamBody(toks: Toks, i: Int, p: String): (Expr, Int) =
   parseLamBody2(p, parseExpr(toks, i))
 
 def parseLamBody2(p: String, q: (Expr, Int)): (Expr, Int) =
@@ -323,15 +343,15 @@ def parseLamBody2(p: String, q: (Expr, Int)): (Expr, Int) =
     case (b, j) => (Expr.ELam(p, b), j)
   }
 
-def parseParen(toks: List[Tok], i: Int): (Expr, Int) =
+def parseParen(toks: Toks, i: Int): (Expr, Int) =
   parsePost(toks, parseParen2(parseExpr(toks, i), toks))
 
-def parseParen2(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+def parseParen2(p: (Expr, Int), toks: Toks): (Expr, Int) =
   p match {
     case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleLam(parseTupleRest(toks, j + 1, e :: []), toks) else parseOneLam(e, toks, j)
   }
 
-def parseOneLam(e: Expr, toks: List[Tok], j: Int): (Expr, Int) =
+def parseOneLam(e: Expr, toks: Toks, j: Int): (Expr, Int) =
   if (_is(toks, j, Tok.Colon)) parseOneLam(e, toks, skipAscript(toks, j)) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFrom(e, parseExpr(toks, j + 2)) else if (_is(toks, j, Tok.RParen)) (e, j + 1) else (e, j)
 
 def parseLamFrom(e: Expr, q: (Expr, Int)): (Expr, Int) =
@@ -348,7 +368,7 @@ def parenBind(e: Expr): String =
     case _ => "_"
   }
 
-def parseTupleLam(p: (Expr, Int), toks: List[Tok]): (Expr, Int) =
+def parseTupleLam(p: (Expr, Int), toks: Toks): (Expr, Int) =
   p match {
     case (e, j) => if (_is(toks, j, Tok.Arrow)) parseTupLamBody(e, parseExpr(toks, j + 1)) else (e, j)
   }
@@ -370,32 +390,32 @@ def tupNames(xs: List[Expr]): List[String] =
 def tupNames2(h: Expr, rest: List[Expr]): List[String] =
   parenBind(h) :: tupNames(rest)
 
-def parseTupleRest(toks: List[Tok], i: Int, acc: List[Expr]): (Expr, Int) =
+def parseTupleRest(toks: Toks, i: Int, acc: List[Expr]): (Expr, Int) =
   parseTupleRest2(parseExpr(toks, i), toks, acc)
 
-def parseTupleRest2(p: (Expr, Int), toks: List[Tok], acc: List[Expr]): (Expr, Int) =
+def parseTupleRest2(p: (Expr, Int), toks: Toks, acc: List[Expr]): (Expr, Int) =
   p match {
     case (e, j) => if (_is(toks, j, Tok.Comma)) parseTupleRest(toks, j + 1, e :: acc) else (Expr.ETuple(List.reverse(e :: acc)), j + 1)
   }
 
-def parseList(toks: List[Tok], i: Int): (Expr, Int) =
+def parseList(toks: Toks, i: Int): (Expr, Int) =
   if (_is(toks, i + 1, Tok.RBracket)) (Expr.EList([]), i + 2) else parseListElems(toks, i + 1, [])
 
-def parseListElems(toks: List[Tok], i: Int, acc: List[Expr]): (Expr, Int) =
+def parseListElems(toks: Toks, i: Int, acc: List[Expr]): (Expr, Int) =
   if (_is(toks, i, Tok.RBracket)) (Expr.EList(List.reverse(acc)), i + 1) else parseListNext(parseExpr(toks, i), toks, acc)
 
-def parseListNext(p: (Expr, Int), toks: List[Tok], acc: List[Expr]): (Expr, Int) =
+def parseListNext(p: (Expr, Int), toks: Toks, acc: List[Expr]): (Expr, Int) =
   p match {
     case (e, j) => if (_is(toks, j, Tok.Comma)) parseListElems(toks, j + 1, e :: acc) else (Expr.EList(List.reverse(e :: acc)), j + 1)
   }
 
-def parseIdentAtom(toks: List[Tok], i: Int, s: String): (Expr, Int) =
+def parseIdentAtom(toks: Toks, i: Int, s: String): (Expr, Int) =
   if (_is(toks, i + 1, Tok.Arrow)) parseLamBody(toks, i + 2, s) else if (s == "IO" && _is(toks, i + 1, Tok.Dot)) parseIo(toks, i + 2) else if (_kit(s) && _is(toks, i + 1, Tok.Dot)) parseKit(toks, i + 2, s) else (Expr.EVar(s), i + 1)
 
-def parseIo(toks: List[Tok], i: Int): (Expr, Int) =
+def parseIo(toks: Toks, i: Int): (Expr, Int) =
   parseIoArgs(toks, i + 1, _identOf(_at(toks, i)))
 
-def parseIoArgs(toks: List[Tok], i: Int, m: String): (Expr, Int) =
+def parseIoArgs(toks: Toks, i: Int, m: String): (Expr, Int) =
   parseIoArgs2(m, parseCallArgs(toks, i))
 
 def parseIoArgs2(m: String, p: (List[Expr], Int)): (Expr, Int) =
@@ -403,10 +423,10 @@ def parseIoArgs2(m: String, p: (List[Expr], Int)): (Expr, Int) =
     case (args, j) => if (m == "println") (Expr.EPrint(List.head(args)), j) else (Expr.ECall(Str.concat("IO.", m), args), j)
   }
 
-def parseKit(toks: List[Tok], i: Int, kit: String): (Expr, Int) =
+def parseKit(toks: Toks, i: Int, kit: String): (Expr, Int) =
   parseKit2(kit, _identOf(_at(toks, i)), toks, i + 1)
 
-def parseKit2(kit: String, m: String, toks: List[Tok], i: Int): (Expr, Int) =
+def parseKit2(kit: String, m: String, toks: Toks, i: Int): (Expr, Int) =
   parseKit3(Str.concat(kit, Str.concat(".", m)), parseCallArgs(toks, i))
 
 def parseKit3(f: String, p: (List[Expr], Int)): (Expr, Int) =
@@ -414,13 +434,13 @@ def parseKit3(f: String, p: (List[Expr], Int)): (Expr, Int) =
     case (args, j) => (Expr.ECall(f, args), j)
   }
 
-def parseCallArgs(toks: List[Tok], i: Int): (List[Expr], Int) =
+def parseCallArgs(toks: Toks, i: Int): (List[Expr], Int) =
   if (_is(toks, i, Tok.LParen)) parseArgList(toks, i + 1, []) else ([], i)
 
-def parseArgList(toks: List[Tok], i: Int, acc: List[Expr]): (List[Expr], Int) =
+def parseArgList(toks: Toks, i: Int, acc: List[Expr]): (List[Expr], Int) =
   if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parseArgListNext(parseArg(toks, i), toks, acc)
 
-def parseArg(toks: List[Tok], i: Int): (Expr, Int) =
+def parseArg(toks: Toks, i: Int): (Expr, Int) =
   _at(toks, i) match {
     case Tok.Ident(s) => if (_is(toks, i + 1, Tok.Eq)) parseNamed(s, parseExpr(toks, i + 2)) else parseExpr(toks, i)
     case _ => parseExpr(toks, i)
@@ -431,58 +451,58 @@ def parseNamed(name: String, p: (Expr, Int)): (Expr, Int) =
     case (e, j) => (Expr.ENamed(name, e), j)
   }
 
-def parseArgListNext(p: (Expr, Int), toks: List[Tok], acc: List[Expr]): (List[Expr], Int) =
+def parseArgListNext(p: (Expr, Int), toks: Toks, acc: List[Expr]): (List[Expr], Int) =
   p match {
     case (e, j) => parseArgListSep(e, skipAscript(toks, j), toks, acc)
   }
 
-def parseArgListSep(e: Expr, j: Int, toks: List[Tok], acc: List[Expr]): (List[Expr], Int) =
+def parseArgListSep(e: Expr, j: Int, toks: Toks, acc: List[Expr]): (List[Expr], Int) =
   if (_is(toks, j, Tok.LParen) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) parseArgListSep2(parsePost(toks, (e, j)), toks, acc) else if (_is(toks, j, Tok.Comma)) parseArgList(toks, j + 1, e :: acc) else (List.reverse(e :: acc), j + 1)
 
-def parseArgListSep2(p: (Expr, Int), toks: List[Tok], acc: List[Expr]): (List[Expr], Int) =
+def parseArgListSep2(p: (Expr, Int), toks: Toks, acc: List[Expr]): (List[Expr], Int) =
   p match {
     case (e, j) => parseArgListSep(e, skipAscript(toks, j), toks, acc)
   }
 
-def parsePost(toks: List[Tok], p: (Expr, Int)): (Expr, Int) =
+def parsePost(toks: Toks, p: (Expr, Int)): (Expr, Int) =
   p match {
     case (e, i) => if (_is(toks, i, Tok.LParen) && !forBindAfter(toks, i)) parsePost(toks, parsePostCall(e, parseCallArgs(toks, i))) else if (_is(toks, i, Tok.Dot)) parsePost(toks, parsePostDot(toks, e, i + 1)) else if (_is(toks, i, Tok.Match)) parsePost(toks, parseMatch(toks, e, i + 1)) else (e, i)
   }
 
-def forBindAfter(toks: List[Tok], i: Int): Bool =
+def forBindAfter(toks: Toks, i: Int): Bool =
   forBindAt(toks, afterParen(toks, i))
 
-def forBindAt(toks: List[Tok], j: Int): Bool =
+def forBindAt(toks: Toks, j: Int): Bool =
   _is(toks, j, Tok.Eq) || _is(toks, j, Tok.LeftArrow)
 
-def afterParen(toks: List[Tok], i: Int): Int =
+def afterParen(toks: Toks, i: Int): Int =
   if (_is(toks, i, Tok.LParen)) afterParenD(toks, i + 1, 1) else i
 
-def afterParenD(toks: List[Tok], i: Int, d: Int): Int =
-  if (d <= 0) i else if (i >= List.len(toks)) i else afterParenTok(_at(toks, i), toks, i, d)
+def afterParenD(toks: Toks, i: Int, d: Int): Int =
+  if (d <= 0) i else if (i >= toks.n) i else afterParenTok(_at(toks, i), toks, i, d)
 
-def afterParenTok(t: Tok, toks: List[Tok], i: Int, d: Int): Int =
+def afterParenTok(t: Tok, toks: Toks, i: Int, d: Int): Int =
   t match {
     case Tok.LParen => afterParenD(toks, i + 1, d + 1)
     case Tok.RParen => afterParenD(toks, i + 1, d - 1)
     case _ => afterParenD(toks, i + 1, d)
   }
 
-def parseMatch(toks: List[Tok], e: Expr, i: Int): (Expr, Int) =
+def parseMatch(toks: Toks, e: Expr, i: Int): (Expr, Int) =
   parseMatchArms(toks, e, i + 1, [])
 
-def parseMatchArms(toks: List[Tok], e: Expr, i: Int, acc: List[Arm]): (Expr, Int) =
+def parseMatchArms(toks: Toks, e: Expr, i: Int, acc: List[Arm]): (Expr, Int) =
   if (_is(toks, i, Tok.RBrace)) (Expr.EMatch(e, List.reverse(acc)), i + 1) else if (_is(toks, i, Tok.Case)) parseMatchArmsNext(parseMatchArm(toks, i + 1), toks, e, acc) else (Expr.EMatch(e, List.reverse(acc)), i)
 
-def parseMatchArm(toks: List[Tok], i: Int): (Arm, Int) =
+def parseMatchArm(toks: Toks, i: Int): (Arm, Int) =
   parseMatchArm2(parsePat(toks, i), toks)
 
-def parseMatchArm2(p: (String, Int), toks: List[Tok]): (Arm, Int) =
+def parseMatchArm2(p: (String, Int), toks: Toks): (Arm, Int) =
   p match {
     case (pat, j) => if (_is(toks, j, Tok.If)) parseMatchArmG(pat, parseExpr(toks, j + 1), toks) else parseMatchArm3(pat, "", parseExpr(toks, j + 1))
   }
 
-def parseMatchArmG(pat: String, p: (Expr, Int), toks: List[Tok]): (Arm, Int) =
+def parseMatchArmG(pat: String, p: (Expr, Int), toks: Toks): (Arm, Int) =
   p match {
     case (g, j) => parseMatchArm3(pat, pretty0(g), parseExpr(toks, j + 1))
   }
@@ -492,15 +512,15 @@ def parseMatchArm3(pat: String, g: String, p: (Expr, Int)): (Arm, Int) =
     case (body, j) => (Arm(pat, g, body), j)
   }
 
-def parseMatchArmsNext(p: (Arm, Int), toks: List[Tok], e: Expr, acc: List[Arm]): (Expr, Int) =
+def parseMatchArmsNext(p: (Arm, Int), toks: Toks, e: Expr, acc: List[Arm]): (Expr, Int) =
   p match {
     case (a, j) => parseMatchArms(toks, e, j, a :: acc)
   }
 
-def parsePat(toks: List[Tok], i: Int): (String, Int) =
+def parsePat(toks: Toks, i: Int): (String, Int) =
   parsePatOr(parsePatCons(parsePatPrimary(toks, i), toks), toks)
 
-def parsePatCons(p: (String, Int), toks: List[Tok]): (String, Int) =
+def parsePatCons(p: (String, Int), toks: Toks): (String, Int) =
   p match {
     case (s, j) => if (_is(toks, j, Tok.ColonColon)) parsePatCons2(s, parsePat(toks, j + 1)) else (s, j)
   }
@@ -510,17 +530,17 @@ def parsePatCons2(left: String, p: (String, Int)): (String, Int) =
     case (r, k) => (Str.concat(left, Str.concat(" :: ", r)), k)
   }
 
-def parsePatOr(p: (String, Int), toks: List[Tok]): (String, Int) =
+def parsePatOr(p: (String, Int), toks: Toks): (String, Int) =
   p match {
     case (s, j) => if (_is(toks, j, Tok.Pipe)) parsePatOr2(s, parsePatPrimary(toks, j + 1), toks) else (s, j)
   }
 
-def parsePatOr2(left: String, p: (String, Int), toks: List[Tok]): (String, Int) =
+def parsePatOr2(left: String, p: (String, Int), toks: Toks): (String, Int) =
   p match {
     case (r, k) => parsePatOr((Str.concat(left, Str.concat(" | ", r)), k), toks)
   }
 
-def parsePatPrimary(toks: List[Tok], i: Int): (String, Int) =
+def parsePatPrimary(toks: Toks, i: Int): (String, Int) =
   _at(toks, i) match {
     case Tok.Underscore => ("_", i + 1)
     case Tok.Int(n) => (Str.fromInt(n), i + 1)
@@ -534,13 +554,13 @@ def parsePatPrimary(toks: List[Tok], i: Int): (String, Int) =
     case _ => ("", i)
   }
 
-def parsePatNil(toks: List[Tok], i: Int): (String, Int) =
+def parsePatNil(toks: Toks, i: Int): (String, Int) =
   if (_is(toks, i + 1, Tok.RBracket)) ("[]", i + 2) else parsePatListRest(toks, i + 1, [])
 
-def parsePatListRest(toks: List[Tok], i: Int, acc: List[String]): (String, Int) =
+def parsePatListRest(toks: Toks, i: Int, acc: List[String]): (String, Int) =
   if (_is(toks, i, Tok.RBracket)) (listPatOf(List.reverse(acc)), i + 1) else parsePatListNext(parsePatPrimary(toks, i), toks, acc)
 
-def parsePatListNext(p: (String, Int), toks: List[Tok], acc: List[String]): (String, Int) =
+def parsePatListNext(p: (String, Int), toks: Toks, acc: List[String]): (String, Int) =
   p match {
     case (a, j) => if (_is(toks, j, Tok.Comma)) parsePatListRest(toks, j + 1, a :: acc) else (listPatOf(List.reverse(a :: acc)), j + 1)
   }
@@ -548,13 +568,13 @@ def parsePatListNext(p: (String, Int), toks: List[Tok], acc: List[String]): (Str
 def listPatOf(xs: List[String]): String =
   if (List.isEmpty(xs)) "[]" else Str.concat(List.head(xs), Str.concat(" :: ", listPatOf(List.tail(xs))))
 
-def parsePatTuple(toks: List[Tok], i: Int): (String, Int) =
+def parsePatTuple(toks: Toks, i: Int): (String, Int) =
   parsePatCtorClose("", parsePatArgs(toks, i + 1, []))
 
-def parsePatNeg(toks: List[Tok], i: Int): (String, Int) =
+def parsePatNeg(toks: Toks, i: Int): (String, Int) =
   (Str.concat("-", Str.fromInt(_intOf(_at(toks, i)))), i + 1)
 
-def parsePatIdent(toks: List[Tok], i: Int, s: String): (String, Int) =
+def parsePatIdent(toks: Toks, i: Int, s: String): (String, Int) =
   if (_is(toks, i, Tok.At)) parsePatAs(s, parsePatPrimary(toks, i + 1)) else if (_is(toks, i, Tok.Dot)) parsePatQual(toks, i + 1, s) else if (_is(toks, i, Tok.LParen)) parsePatCtor(s, toks, i) else (s, i)
 
 def parsePatAs(name: String, p: (String, Int)): (String, Int) =
@@ -562,24 +582,24 @@ def parsePatAs(name: String, p: (String, Int)): (String, Int) =
     case (inner, j) => (Str.concat(name, Str.concat(" @ ", inner)), j)
   }
 
-def parsePatQual(toks: List[Tok], i: Int, left: String): (String, Int) =
+def parsePatQual(toks: Toks, i: Int, left: String): (String, Int) =
   parsePatQual2(Str.concat(left, Str.concat(".", _identOf(_at(toks, i)))), toks, i + 1)
 
-def parsePatQual2(q: String, toks: List[Tok], i: Int): (String, Int) =
+def parsePatQual2(q: String, toks: Toks, i: Int): (String, Int) =
   if (_is(toks, i, Tok.LParen)) parsePatCtor(q, toks, i) else (q, i)
 
-def parsePatCtor(q: String, toks: List[Tok], i: Int): (String, Int) =
+def parsePatCtor(q: String, toks: Toks, i: Int): (String, Int) =
   parsePatCtorClose(q, parsePatArgs(toks, i + 1, []))
 
-def parsePatArgs(toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+def parsePatArgs(toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
   if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parsePatArgsNext(parsePat(toks, i), toks, acc)
 
-def parsePatArgsNext(p: (String, Int), toks: List[Tok], acc: List[String]): (List[String], Int) =
+def parsePatArgsNext(p: (String, Int), toks: Toks, acc: List[String]): (List[String], Int) =
   p match {
     case (a, j) => if (_is(toks, j, Tok.Eq)) parsePatArgsEq(a, parsePatPrimary(toks, j + 1), toks, acc) else if (_is(toks, j, Tok.Comma)) parsePatArgs(toks, j + 1, a :: acc) else (List.reverse(a :: acc), j + 1)
   }
 
-def parsePatArgsEq(field: String, p: (String, Int), toks: List[Tok], acc: List[String]): (List[String], Int) =
+def parsePatArgsEq(field: String, p: (String, Int), toks: Toks, acc: List[String]): (List[String], Int) =
   p match {
     case (rhs, k) => if (_is(toks, k, Tok.Comma)) parsePatArgs(toks, k + 1, namedField(field, rhs) :: acc) else (List.reverse(namedField(field, rhs) :: acc), k + 1)
   }
@@ -600,13 +620,13 @@ def parsePostCall(e: Expr, p: (List[Expr], Int)): (Expr, Int) =
 }
   }
 
-def parsePostDot(toks: List[Tok], e: Expr, i: Int): (Expr, Int) =
+def parsePostDot(toks: Toks, e: Expr, i: Int): (Expr, Int) =
   parsePostDotName(e, _identOf(_at(toks, i)), toks, i + 1)
 
-def parsePostDotName(e: Expr, m: String, toks: List[Tok], i: Int): (Expr, Int) =
+def parsePostDotName(e: Expr, m: String, toks: Toks, i: Int): (Expr, Int) =
   if (_is(toks, i, Tok.LParen)) parsePostDot2(e, m, parseCallArgs(toks, i)) else if (_is(toks, i, Tok.LBrace) && _is(toks, i + 1, Tok.Case)) parsePostDot2(e, m, parseBraceArg(toks, i)) else (Expr.EField(e, m), i)
 
-def parseBraceArg(toks: List[Tok], i: Int): (List[Expr], Int) =
+def parseBraceArg(toks: Toks, i: Int): (List[Expr], Int) =
   parseBraceArg2(parseMatchLam(toks, i))
 
 def parseBraceArg2(p: (Expr, Int)): (List[Expr], Int) =
@@ -619,29 +639,29 @@ def parsePostDot2(e: Expr, m: String, p: (List[Expr], Int)): (Expr, Int) =
     case (args, j) => (Expr.EMethod(e, m, args), j)
   }
 
-def parseParams(toks: List[Tok], i: Int): (List[Param], Int) =
+def parseParams(toks: Toks, i: Int): (List[Param], Int) =
   if (_is(toks, i, Tok.LParen)) parseParamList(toks, i + 1, []) else ([], i)
 
-def parseParamList(toks: List[Tok], i: Int, acc: List[Param]): (List[Param], Int) =
+def parseParamList(toks: Toks, i: Int, acc: List[Param]): (List[Param], Int) =
   if (_is(toks, i, Tok.RParen)) (List.reverse(acc), i + 1) else parseParamListNext(parseOneParam(toks, i), toks, acc)
 
-def parseOneParam(toks: List[Tok], i: Int): (Param, Int) =
+def parseOneParam(toks: Toks, i: Int): (Param, Int) =
   parseOneParam2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
 
-def parseOneParam2(name: String, p: (String, Int), toks: List[Tok]): (Param, Int) =
+def parseOneParam2(name: String, p: (String, Int), toks: Toks): (Param, Int) =
   p match {
     case (ty, j) => parseOneParam3(name, ty, toks, j)
   }
 
-def parseOneParam3(name: String, ty: String, toks: List[Tok], j: Int): (Param, Int) =
+def parseOneParam3(name: String, ty: String, toks: Toks, j: Int): (Param, Int) =
   if (_is(toks, j, Tok.Where)) parseOneParamW(name, ty, parseExpr(toks, j + 1), toks) else parseOneParamD(name, ty, "", toks, j)
 
-def parseOneParamW(name: String, ty: String, p: (Expr, Int), toks: List[Tok]): (Param, Int) =
+def parseOneParamW(name: String, ty: String, p: (Expr, Int), toks: Toks): (Param, Int) =
   p match {
     case (e, k) => parseOneParamD(name, ty, pretty0(e), toks, k)
   }
 
-def parseOneParamD(name: String, ty: String, w: String, toks: List[Tok], j: Int): (Param, Int) =
+def parseOneParamD(name: String, ty: String, w: String, toks: Toks, j: Int): (Param, Int) =
   if (_is(toks, j, Tok.Eq)) parseOneParamD2(name, ty, w, parseExpr(toks, j + 1)) else (Param(name, ty, w, ""), j)
 
 def parseOneParamD2(name: String, ty: String, w: String, p: (Expr, Int)): (Param, Int) =
@@ -649,25 +669,25 @@ def parseOneParamD2(name: String, ty: String, w: String, p: (Expr, Int)): (Param
     case (e, k) => (Param(name, ty, w, pretty0(e)), k)
   }
 
-def parseParamListNext(p: (Param, Int), toks: List[Tok], acc: List[Param]): (List[Param], Int) =
+def parseParamListNext(p: (Param, Int), toks: Toks, acc: List[Param]): (List[Param], Int) =
   p match {
     case (par, j) => if (_is(toks, j, Tok.Comma)) parseParamList(toks, j + 1, par :: acc) else (List.reverse(par :: acc), j + 1)
   }
 
-def parseDef(toks: List[Tok], i: Int, priv: Bool): (Fun, Int) =
+def parseDef(toks: Toks, i: Int, priv: Bool): (Fun, Int) =
   parseDefTp(priv, _identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
-def parseDefTp(priv: Bool, name: String, p: (List[String], Int), toks: List[Tok]): (Fun, Int) =
+def parseDefTp(priv: Bool, name: String, p: (List[String], Int), toks: Toks): (Fun, Int) =
   p match {
     case (ts, j) => parseDef2(priv, name, ts, parseParams(toks, j), toks)
   }
 
-def parseDef2(priv: Bool, name: String, ts: List[String], p: (List[Param], Int), toks: List[Tok]): (Fun, Int) =
+def parseDef2(priv: Bool, name: String, ts: List[String], p: (List[Param], Int), toks: Toks): (Fun, Int) =
   p match {
     case (params, j) => parseDef3(priv, name, ts, params, parseType(toks, j + 1), toks)
   }
 
-def parseDef3(priv: Bool, name: String, ts: List[String], params: List[Param], p: (String, Int), toks: List[Tok]): (Fun, Int) =
+def parseDef3(priv: Bool, name: String, ts: List[String], params: List[Param], p: (String, Int), toks: Toks): (Fun, Int) =
   p match {
     case (ret, j) => parseDef4(priv, name, ts, params, ret, parseExpr(toks, j + 1))
   }
@@ -677,10 +697,10 @@ def parseDef4(priv: Bool, name: String, ts: List[String], params: List[Param], r
     case (body, j) => (Fun(priv, name, ts, params, ret, body, ""), j)
   }
 
-def parseMain(toks: List[Tok], i: Int): (String, Expr, Int) =
+def parseMain(toks: Toks, i: Int): (String, Expr, Int) =
   parseMain2(_identOf(_at(toks, i)), parseType(toks, i + 2), toks)
 
-def parseMain2(name: String, p: (String, Int), toks: List[Tok]): (String, Expr, Int) =
+def parseMain2(name: String, p: (String, Int), toks: Toks): (String, Expr, Int) =
   p match {
     case (_, j) => parseMain3(name, parseExpr(toks, j + 1))
   }
@@ -690,30 +710,30 @@ def parseMain3(name: String, p: (Expr, Int)): (String, Expr, Int) =
     case (body, j) => (name, body, j)
   }
 
-def parseTParams(toks: List[Tok], i: Int): (List[String], Int) =
+def parseTParams(toks: Toks, i: Int): (List[String], Int) =
   if (_is(toks, i, Tok.LBracket)) parseTParamList(toks, i + 1, []) else ([], i)
 
-def parseTParamList(toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+def parseTParamList(toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
   if (_is(toks, i, Tok.RBracket)) (List.reverse(acc), i + 1) else parseTParamNext(_identOf(_at(toks, i)), toks, i + 1, acc)
 
-def parseTParamNext(name: String, toks: List[Tok], i: Int, acc: List[String]): (List[String], Int) =
+def parseTParamNext(name: String, toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
   if (_is(toks, i, Tok.Comma)) parseTParamList(toks, i + 1, name :: acc) else (List.reverse(name :: acc), i + 1)
 
-def parseEnum(toks: List[Tok], i: Int): (En, Int) =
+def parseEnum(toks: Toks, i: Int): (En, Int) =
   parseEnumTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
-def parseEnumTp(name: String, p: (List[String], Int), toks: List[Tok]): (En, Int) =
+def parseEnumTp(name: String, p: (List[String], Int), toks: Toks): (En, Int) =
   p match {
     case (ts, j) => parseEnumCases(name, ts, toks, j + 1, [])
   }
 
-def parseEnumCases(name: String, ts: List[String], toks: List[Tok], i: Int, acc: List[EnCase]): (En, Int) =
+def parseEnumCases(name: String, ts: List[String], toks: Toks, i: Int, acc: List[EnCase]): (En, Int) =
   if (_is(toks, i, Tok.Case)) parseEnumCasesNext(parseEnumCase(toks, i + 1), name, ts, toks, acc) else (En(false, name, ts, List.reverse(acc)), i)
 
-def parseEnumCase(toks: List[Tok], i: Int): (EnCase, Int) =
+def parseEnumCase(toks: Toks, i: Int): (EnCase, Int) =
   parseEnumCase2(_identOf(_at(toks, i)), toks, i + 1)
 
-def parseEnumCase2(name: String, toks: List[Tok], i: Int): (EnCase, Int) =
+def parseEnumCase2(name: String, toks: Toks, i: Int): (EnCase, Int) =
   if (_is(toks, i, Tok.LParen)) parseEnumCase3(name, parseParamList(toks, i + 1, [])) else (EnCase(name, []), i)
 
 def parseEnumCase3(name: String, p: (List[Param], Int)): (EnCase, Int) =
@@ -721,15 +741,15 @@ def parseEnumCase3(name: String, p: (List[Param], Int)): (EnCase, Int) =
     case (fs, j) => (EnCase(name, fs), j)
   }
 
-def parseEnumCasesNext(p: (EnCase, Int), name: String, ts: List[String], toks: List[Tok], acc: List[EnCase]): (En, Int) =
+def parseEnumCasesNext(p: (EnCase, Int), name: String, ts: List[String], toks: Toks, acc: List[EnCase]): (En, Int) =
   p match {
     case (c, j) => parseEnumCases(name, ts, toks, j, c :: acc)
   }
 
-def parseRec(toks: List[Tok], i: Int): (En, Int) =
+def parseRec(toks: Toks, i: Int): (En, Int) =
   parseRecTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
-def parseRecTp(name: String, p: (List[String], Int), toks: List[Tok]): (En, Int) =
+def parseRecTp(name: String, p: (List[String], Int), toks: Toks): (En, Int) =
   p match {
     case (ts, j) => parseRecFields(name, ts, parseParamList(toks, j + 1, []))
   }
@@ -739,10 +759,10 @@ def parseRecFields(name: String, ts: List[String], p: (List[Param], Int)): (En, 
     case (fs, j) => (En(true, name, ts, EnCase(name, fs) :: []), j)
   }
 
-def parseAlias(toks: List[Tok], i: Int): (Alias, Int) =
+def parseAlias(toks: Toks, i: Int): (Alias, Int) =
   parseAliasTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
-def parseAliasTp(name: String, p: (List[String], Int), toks: List[Tok]): (Alias, Int) =
+def parseAliasTp(name: String, p: (List[String], Int), toks: Toks): (Alias, Int) =
   p match {
     case (ts, j) => parseAliasTarget(name, ts, parseType(toks, j + 1))
   }
@@ -752,27 +772,27 @@ def parseAliasTarget(name: String, ts: List[String], p: (String, Int)): (Alias, 
     case (ty, j) => (Alias(name, ts, ty), j)
   }
 
-def parseImport(toks: List[Tok], i: Int): (Imp, Int) =
+def parseImport(toks: Toks, i: Int): (Imp, Int) =
   parseImportName(_identOf(_at(toks, i)), toks, i + 2)
 
-def parseImportName(mod: String, toks: List[Tok], i: Int): (Imp, Int) =
+def parseImportName(mod: String, toks: Toks, i: Int): (Imp, Int) =
   if (_is(toks, i, Tok.Star)) parseImportAs(mod, "*", toks, i + 1) else parseImportAs(mod, _identOf(_at(toks, i)), toks, i + 1)
 
-def parseImportAs(mod: String, name: String, toks: List[Tok], i: Int): (Imp, Int) =
+def parseImportAs(mod: String, name: String, toks: Toks, i: Int): (Imp, Int) =
   if (_identOf(_at(toks, i)) == "as") (Imp(mod, name, _identOf(_at(toks, i + 1))), i + 2) else (Imp(mod, name, ""), i)
 
-def parseTrait(toks: List[Tok], i: Int): (Tr, Int) =
+def parseTrait(toks: Toks, i: Int): (Tr, Int) =
   parseTraitTp(_identOf(_at(toks, i)), parseTParams(toks, i + 1), toks)
 
-def parseTraitTp(name: String, p: (List[String], Int), toks: List[Tok]): (Tr, Int) =
+def parseTraitTp(name: String, p: (List[String], Int), toks: Toks): (Tr, Int) =
   p match {
     case (ts, j) => parseTraitMeths(name, ts, toks, j + 1, [])
   }
 
-def parseTraitMeth(toks: List[Tok], i: Int): (TrMethod, Int) =
+def parseTraitMeth(toks: Toks, i: Int): (TrMethod, Int) =
   parseTraitMeth2(_identOf(_at(toks, i)), parseParams(toks, i + 1), toks)
 
-def parseTraitMeth2(name: String, p: (List[Param], Int), toks: List[Tok]): (TrMethod, Int) =
+def parseTraitMeth2(name: String, p: (List[Param], Int), toks: Toks): (TrMethod, Int) =
   p match {
     case (params, j) => parseTraitMeth3(name, params, parseType(toks, j + 1))
   }
@@ -782,15 +802,15 @@ def parseTraitMeth3(name: String, params: List[Param], p: (String, Int)): (TrMet
     case (ret, j) => (TrMethod(name, params, ret), j)
   }
 
-def parseTraitMeths(name: String, ts: List[String], toks: List[Tok], i: Int, acc: List[TrMethod]): (Tr, Int) =
+def parseTraitMeths(name: String, ts: List[String], toks: Toks, i: Int, acc: List[TrMethod]): (Tr, Int) =
   if (_is(toks, i, Tok.Def)) parseTraitMethsNext(parseTraitMeth(toks, i + 1), name, ts, toks, acc) else (Tr(name, ts, List.reverse(acc)), i)
 
-def parseTraitMethsNext(p: (TrMethod, Int), name: String, ts: List[String], toks: List[Tok], acc: List[TrMethod]): (Tr, Int) =
+def parseTraitMethsNext(p: (TrMethod, Int), name: String, ts: List[String], toks: Toks, acc: List[TrMethod]): (Tr, Int) =
   p match {
     case (m, j) => parseTraitMeths(name, ts, toks, j, m :: acc)
   }
 
-def parseImplArgs(toks: List[Tok], i: Int): (List[String], Int) =
+def parseImplArgs(toks: Toks, i: Int): (List[String], Int) =
   if (_is(toks, i, Tok.LBracket)) parseImplArgsClose(_joinTypes(toks, i + 1, [])) else ([], i)
 
 def parseImplArgsClose(p: (List[String], Int)): (List[String], Int) =
@@ -798,70 +818,73 @@ def parseImplArgsClose(p: (List[String], Int)): (List[String], Int) =
     case (ts, j) => (ts, j + 1)
   }
 
-def parseImpl(toks: List[Tok], i: Int): (Im, Int) =
+def parseImpl(toks: Toks, i: Int): (Im, Int) =
   parseImpl2(_identOf(_at(toks, i)), parseImplArgs(toks, i + 1), toks)
 
-def parseImpl2(tn: String, p: (List[String], Int), toks: List[Tok]): (Im, Int) =
+def parseImpl2(tn: String, p: (List[String], Int), toks: Toks): (Im, Int) =
   p match {
     case (args, j) => parseImplMeths(tn, args, _identOf(_at(toks, j + 1)), toks, j + 3, [])
   }
 
-def parseImplMeths(tn: String, args: List[String], forTy: String, toks: List[Tok], i: Int, acc: List[Fun]): (Im, Int) =
+def parseImplMeths(tn: String, args: List[String], forTy: String, toks: Toks, i: Int, acc: List[Fun]): (Im, Int) =
   if (_is(toks, i, Tok.Def)) parseImplMethsNext(parseDef(toks, i + 1, false), tn, args, forTy, toks, acc) else (Im(tn, args, forTy, List.reverse(acc)), i)
 
-def parseImplMethsNext(p: (Fun, Int), tn: String, args: List[String], forTy: String, toks: List[Tok], acc: List[Fun]): (Im, Int) =
+def parseImplMethsNext(p: (Fun, Int), tn: String, args: List[String], forTy: String, toks: Toks, acc: List[Fun]): (Im, Int) =
   p match {
     case (d, j) => parseImplMeths(tn, args, forTy, toks, j, d :: acc)
   }
 
-def parseItems(toks: List[Tok], i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+def parseItems(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body) else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Private)) parseItemsDef(toks, parseDef(toks, i + 2, true), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs) else if (_is(toks, i, Tok.Colon)) parseItems(toks, i + 1, enums, aliases, traits, impls, imps, defs, main, body) else Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body)
 
-def parseItemsEn(toks: List[Tok], p: (En, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+def parseItemsEn(toks: Toks, p: (En, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
     case (en, j) => parseItems(toks, j, en :: enums, aliases, traits, impls, imps, defs, main, body)
   }
 
-def parseItemsAl(toks: List[Tok], p: (Alias, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+def parseItemsAl(toks: Toks, p: (Alias, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
     case (a, j) => parseItems(toks, j, enums, a :: aliases, traits, impls, imps, defs, main, body)
   }
 
-def parseItemsTr(toks: List[Tok], p: (Tr, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+def parseItemsTr(toks: Toks, p: (Tr, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
     case (t, j) => parseItems(toks, j, enums, aliases, t :: traits, impls, imps, defs, main, body)
   }
 
-def parseItemsIm(toks: List[Tok], p: (Im, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+def parseItemsIm(toks: Toks, p: (Im, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
     case (im, j) => parseItems(toks, j, enums, aliases, traits, im :: impls, imps, defs, main, body)
   }
 
-def parseItemsImp(toks: List[Tok], p: (Imp, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+def parseItemsImp(toks: Toks, p: (Imp, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
     case (im, j) => parseItems(toks, j, enums, aliases, traits, impls, im :: imps, defs, main, body)
   }
 
-def parseItemsDef(toks: List[Tok], p: (Fun, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+def parseItemsDef(toks: Toks, p: (Fun, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
     case (d, j) => parseItems(toks, j, enums, aliases, traits, impls, imps, d :: defs, main, body)
   }
 
-def parseItemsMain(toks: List[Tok], p: (String, Expr, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun]): Prog =
+def parseItemsMain(toks: Toks, p: (String, Expr, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun]): Prog =
   p match {
     case (name, body, j) => parseItems(toks, j, enums, aliases, traits, impls, imps, defs, name, body)
   }
 
-def parsePkg(toks: List[Tok], i: Int): (String, Int) =
+def parsePkg(toks: Toks, i: Int): (String, Int) =
   parsePkgRest(_identOf(_at(toks, i)), toks, i + 1)
 
-def parsePkgRest(acc: String, toks: List[Tok], i: Int): (String, Int) =
+def parsePkgRest(acc: String, toks: Toks, i: Int): (String, Int) =
   if (_is(toks, i, Tok.Dot)) parsePkgRest(Str.concat(acc, Str.concat(".", _identOf(_at(toks, i + 1)))), toks, i + 2) else (acc, i)
 
 def parse(toks: List[Tok]): Prog =
+  parseGo(indexToks(toks))
+
+def parseGo(toks: Toks): Prog =
   if (_is(toks, 0, Tok.Package)) parsePkgThen(parsePkg(toks, 1), toks) else parseItems(toks, 0, [], [], [], [], [], [], "", Expr.EVar(""))
 
-def parsePkgThen(p: (String, Int), toks: List[Tok]): Prog =
+def parsePkgThen(p: (String, Int), toks: Toks): Prog =
   p match {
     case (pkg, j) => withPkg(pkg, parseItems(toks, j, [], [], [], [], [], [], "", Expr.EVar("")))
   }
