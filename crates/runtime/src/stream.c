@@ -1,7 +1,6 @@
 #include "scuzz_rt.h"
 #include "rt_util.h"
 
-#include <stdint.h>
 #include <string.h>
 
 static SzStream *st_keep(SzStream *s) {

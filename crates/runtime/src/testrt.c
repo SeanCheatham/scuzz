@@ -2,7 +2,6 @@
 #include "scuzz_ui.h"
 #include "rt_util.h"
 
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

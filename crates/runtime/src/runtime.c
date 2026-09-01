@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 #if defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
