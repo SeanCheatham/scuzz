@@ -1067,6 +1067,8 @@ SzVerdict *sz_verdict_or(SzVerdict *a, SzVerdict *b);
 /* Same lambda calling convention as sz_timeline_forall. */
 SzVerdict *sz_verdict_every(void *tl, void *fnp, void *envp);
 SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp);
+SzVerdict *sz_verdict_always_has(void *tl, SzString *needle);
+SzVerdict *sz_verdict_after_hit(void *tl, SzString *hit, SzString *needle);
 void sz_verify_register(const char *name, SzVerdict *(*fn)(void *));
 /* Relation claim: (Timeline, Timeline) => Verdict over a pair of dumps. */
 void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *));
@@ -1089,11 +1091,11 @@ void sz_property_session_end(void);
 void sz_property_session_reset(void);
 void sz_timeline_set_drive(const char *line);
 int sz_timeline_replaying(void);
-int64_t sz_timeline_replay_signal_int(int64_t id);
+int64_t sz_timeline_replay_signal_int(const char *name);
 int64_t sz_timeline_len(void *tl);
-int64_t sz_timeline_signal_int(void *tl, int64_t i, int64_t id);
-int64_t sz_timeline_signal_list_len(void *tl, int64_t i, int64_t id);
-int64_t sz_timeline_signal_str_has(void *tl, int64_t i, int64_t id,
+int64_t sz_timeline_signal_int(void *tl, int64_t i, SzString *name);
+int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name);
+int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
                                   SzString *needle);
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle);

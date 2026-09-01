@@ -1,39 +1,39 @@
 [signals]
-str[0] = "hello
+str[0] buf = "hello
 world
 "
-str[1] = "hello
+str[1] orig = "hello
 world
 "
-str[2] = "sample.txt"
-str[3] = "."
-int[4] = 0
-list[5] = ["sample.txt"]
-list[6] = ["hello
+str[2] pathSig = "sample.txt"
+str[3] dirSig = "."
+int[4] dirty = 0
+list[5] paths = ["sample.txt"]
+list[6] bodies = ["hello
 world
 "]
-list[7] = ["hello
+list[7] origs = ["hello
 world
 "]
-int[8] = 0
-list[9] = []
-int[10] = 0
-list[11] = ["chrome.scuzz_verify", "sample.txt", "scuzz.toml", "src/"]
-list[12] = []
-int[13] = 0
-str[14] = ""
-str[15] = ""
-int[16] = 28
-int[17] = 0
-int[18] = 0
-int[19] = 0
-str[20] = "hover stub"
-list[21] = []
-list[22] = []
-int[23] = 0
-list[24] = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix", "Save all", "Run", "Fuzz"]
-int[25] = 0
-str[26] = ""
+int[8] idx = 0
+list[9] diags = []
+int[10] showDiags = 0
+list[11] tree = ["chrome.scuzz_verify", "sample.txt", "scuzz.toml", "src/"]
+list[12] output = []
+int[13] showOut = 0
+str[14] findQ = ""
+str[15] replQ = ""
+int[16] frac = 28
+int[17] findOpen = 0
+int[18] compOpen = 0
+int[19] hoverOpen = 0
+str[20] hoverTxt = "hover stub"
+list[21] comps = []
+list[22] openSig = []
+int[23] palOpen = 0
+list[24] palCmds = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix", "Save all", "Run", "Fuzz"]
+int[25] ctxOpen = 0
+str[26] ctxPath = ""
 
 [views]
 split:28

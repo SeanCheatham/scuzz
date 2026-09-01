@@ -128,10 +128,12 @@ void sz_signal_list_free(SzSignalList *s);
    order (fuzz oracle; caller frees SzString). */
 SzString *sz_signal_dump(void);
 /* Property observation: signal store by creation-order id (TestRuntime / fuzz). */
-int64_t sz_property_signal_int(int64_t id);
-SzString *sz_property_signal_str(int64_t id);
-int64_t sz_property_signal_list_len(int64_t id);
-SzString *sz_property_signal_list_at(int64_t id, int64_t index);
+void sz_signal_name(const void *sig, const char *name);
+
+int64_t sz_property_signal_int(SzString *name);
+SzString *sz_property_signal_str(SzString *name);
+int64_t sz_property_signal_list_len(SzString *name);
+SzString *sz_property_signal_list_at(SzString *name, int64_t index);
 
 /* --- declarative View tree ----------------------------------------------- */
 
@@ -714,13 +716,13 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
 
 /* --- language-facing View / Signal (Scuzz Lang-authored UI) ----------- */
 
-SzSignalInt *sz_lang_signal_int(int64_t initial);
+SzSignalInt *sz_lang_signal_int(int64_t initial, SzString *name);
 int64_t sz_lang_signal_get(SzSignalInt *s);
 void *sz_lang_signal_set(SzSignalInt *s, int64_t v);
-SzSignalStr *sz_lang_signal_str(SzString *initial);
+SzSignalStr *sz_lang_signal_str(SzString *initial, SzString *name);
 SzString *sz_lang_signal_str_get(SzSignalStr *s);
 void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v);
-SzSignalList *sz_lang_signal_list(SzList *initial);
+SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name);
 SzList *sz_lang_signal_list_get(SzSignalList *s);
 void *sz_lang_signal_list_set(SzSignalList *s, SzList *v);
 
@@ -804,7 +806,8 @@ SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 
 /* Derived Signal.str from Signal.int (recomputed on get / dump). */
 typedef SzString *(*SzSignalMapIntFn)(int64_t v, void *env);
-SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env);
+SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn,
+                                void *env, SzString *name);
 SzView *sz_lang_view_bind_text(SzSignalStr *sig);
 
 /* Mount factory View → pump → optional scripted tap → snapshot → unmount.

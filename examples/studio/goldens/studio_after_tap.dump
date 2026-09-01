@@ -1,18 +1,18 @@
 [signals]
-str[0] = ""
-list[1] = ["milk"]
-int[2] = 1
-int[3] = 0
-int[4] = 40
-int[5] = 0
-int[6] = 0
-int[7] = 0
-int[8] = 0
-int[9] = 0
-int[10] = 0
-int[11] = 0
-str[12] = "count = 0"
-str[13] = "page = 1"
+str[0] draft = ""
+list[1] items = ["milk"]
+int[2] page = 1
+int[3] count = 0
+int[4] level = 40
+int[5] live = 0
+int[6] pin = 0
+int[7] more = 0
+int[8] star = 0
+int[9] quiet = 0
+int[10] mode = 0
+int[11] seg = 0
+str[12] countLabel = "count = 0"
+str[13] pageLabel = "page = 1"
 
 [views]
 radio:Home=0

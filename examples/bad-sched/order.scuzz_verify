@@ -1,6 +1,6 @@
 def leftFirstObserved(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, 0) == 1)
+  Verdict.every(t, i => Timeline.signalInt(t, i, "order") == 1)
 
 def sameOrderAcrossSchedules(a: Timeline, b: Timeline): Verdict =
-  if (Timeline.signalInt(a, Timeline.len(a) - 1, 0) == Timeline.signalInt(b, Timeline.len(b) - 1, 0)) Verdict.ok() else Verdict.fail(Timeline.len(a) - 1, "offer order differs across schedules")
+  if (Timeline.signalInt(a, Timeline.len(a) - 1, "order") == Timeline.signalInt(b, Timeline.len(b) - 1, "order")) Verdict.ok() else Verdict.fail(Timeline.len(a) - 1, "offer order differs across schedules")
 
