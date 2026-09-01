@@ -12,10 +12,11 @@ Fail on the first missing tool with one install line.
 | `make` | `crates/runtime`, `ffi-skia`, embedders |
 | `curl` | fetch tagged bootstrap `scuzz` (`scripts/bootstrap.sh`; newest GitHub `v*` release) |
 | `zlib` + `bzip2` | Linux Skia CPU prebuilt |
+| OpenSSL | Live `https://` on the blessed HTTP kit |
 
 ```bash
 # Debian/Ubuntu
-sudo apt-get install -y clang make curl zlib1g-dev libbz2-dev
+sudo apt-get install -y clang make curl zlib1g-dev libbz2-dev libssl-dev
 ```
 
 If `clang` cannot find libstdc++ when it links Skia:

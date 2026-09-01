@@ -2,8 +2,4 @@
 
 No current slice.
 
-Hardware device run stays Unknown #1 in [`gaps.md`](gaps.md). It waits on a device. Impeller / Skia GPU raster stays deferred.
-
-Do not implement items deferred by decision.
-
-Current locks: [`vision.md`](vision.md). Ranked gaps: [`gaps.md`](gaps.md).
+HTTPS `Net.serve`, `0.0.0.0` bind, and HTTP status as a success value stay later. See [`gaps.md`](gaps.md). Hardware device run stays Unknown #1. Impeller / Skia GPU raster stays deferred.

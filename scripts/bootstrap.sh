@@ -205,9 +205,9 @@ if [ ! -f "$RT" ]; then
 fi
 echo "==> clang -O2 $LL" >&2
 if [ "$(uname -s)" = Darwin ]; then
-  clang -O2 -Wno-override-module "$LL" "$RT" -framework CoreFoundation -lpthread -o "$SRC"
+  clang -O2 -Wno-override-module "$LL" "$RT" -framework CoreFoundation -lpthread -lssl -lcrypto -o "$SRC"
 else
-  clang -O2 -Wno-override-module "$LL" "$RT" -lpthread -o "$SRC"
+  clang -O2 -Wno-override-module "$LL" "$RT" -lpthread -lssl -lcrypto -o "$SRC"
 fi
 if [ ! -x "$SRC" ]; then
   die "clang -O2 did not produce $SRC"

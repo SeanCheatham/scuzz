@@ -6,6 +6,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,16 +18,17 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
- * Live hostnames query A and AAAA together (park on poll). DNS takes answer
- * RRs whose owner matches the query name (ASCII case-insensitive). CNAME
- * chains re-query both (cap 5). UDP replies must match the nameserver
- * address. Query IDs are not sequential. When both addresses exist, start
- * AAAA first and wait 250ms from connect start before the A connect so
- * working IPv6 wins (one A and one AAAA). DNS, connect, write, and the
- * response read each wait at most 1000ms. A 2xx response finishes on
- * Content-Length or EOF. Bodies cap at 1 MiB. Chunked encoding fails.
- * IPv4 literals and `http://[::1]/` skip DNS. Failures use SzError code 6. */
+/* Blessed Net HTTP/1.0 client and serve. Live hostnames query A and AAAA
+ * together (park on poll). DNS takes answer RRs whose owner matches the
+ * query name (ASCII case-insensitive). CNAME chains re-query both (cap 5).
+ * UDP replies must match the nameserver address. Query IDs are not
+ * sequential. When both addresses exist, start AAAA first and wait 250ms
+ * from connect start before the A connect so working IPv6 wins (one A and
+ * one AAAA). DNS, connect, TLS handshake, write, and the response read each
+ * wait at most 1000ms. A 2xx response finishes on Content-Length or EOF.
+ * HEAD finishes at the header. Bodies cap at 1 MiB. Chunked encoding fails.
+ * IPv4 literals and `[::1]` skip DNS. `https://` uses OpenSSL with the
+ * system trust store. Handshake parks on poll. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -98,23 +101,29 @@ static int parse_port_digits(const char *s, const char **end, int *port) {
 }
 
 static int parse_http_url(const char *url, char *host, size_t host_sz, char *path,
-                          size_t path_sz, int *port, int *is_v6) {
+                          size_t path_sz, int *port, int *is_v6, int *tls) {
   const char *p;
   const char *slash;
   const char *rb;
   const char *rest;
   size_t hlen;
   size_t ulen;
-  if (!url || !host || !path || !port || !is_v6)
+  if (!url || !host || !path || !port || !is_v6 || !tls)
     return 0;
   ulen = strlen(url);
   if (url_has_bad_bytes(url, ulen))
     return 0;
-  if (strncmp(url, "http://", 7) != 0)
-    return 0;
+  *tls = 0;
   *is_v6 = 0;
   *port = 80;
-  p = url + 7;
+  if (strncmp(url, "https://", 8) == 0) {
+    *tls = 1;
+    *port = 443;
+    p = url + 8;
+  } else if (strncmp(url, "http://", 7) == 0) {
+    p = url + 7;
+  } else
+    return 0;
   if (p[0] == '[') {
     rb = strchr(p, ']');
     if (!rb)
@@ -183,6 +192,12 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
 
 typedef struct GetSt {
   SzString *url;
+  SzString *req_body;
+  char method[16];
+  int tls;
+  int tls_up;
+  int tls_want; /* 1 readable, 2 writable */
+  SSL *ssl;
   int fd;
   int fd4;
   int fd6;
@@ -615,6 +630,12 @@ static void get_free(GetSt *st) {
     close(st->dns_fd);
     st->dns_fd = -1;
   }
+  if (st->ssl) {
+    SSL_free(st->ssl);
+    st->ssl = NULL;
+  }
+  sz_release(st->req_body);
+  st->req_body = NULL;
   sz_free(st->req);
   st->req = NULL;
   sz_free(st->acc);
@@ -635,18 +656,14 @@ static void *get_start(void *env) {
   const char *url = sz_string_cstr(st->url);
   int port = 80;
   int is_v6 = 0;
+  int tls = 0;
   struct sockaddr_in *a4;
   struct sockaddr_in6 *a6;
 
   int url_ok;
 
-  if (strncmp(url ? url : "", "http://", 7) != 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: only http:// URLs supported");
-    return r;
-  }
   url_ok = parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
-                          &port, &is_v6);
+                          &port, &is_v6, &tls);
   if (url_ok < 0) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: invalid port");
@@ -658,6 +675,7 @@ static void *get_start(void *env) {
     return r;
   }
   st->http_port = port;
+  st->tls = tls;
   memset(&st->peer, 0, sizeof st->peer);
   if (is_v6) {
     a6 = (struct sockaddr_in6 *)&st->peer;
@@ -825,14 +843,17 @@ static int tcp_begin(const struct sockaddr *sa, socklen_t len) {
   return fd;
 }
 
-/* RFC 9110: omit the port when it is the default for the scheme (80). */
-static void http_fmt_hosthdr(char *dst, size_t cap, const char *host, int port) {
+/* RFC 9110: omit the port when it is the default for the scheme. */
+static void http_fmt_hosthdr(char *dst, size_t cap, const char *host, int port,
+                            int def_port) {
   int v6 = host && strchr(host, ':') != NULL;
   if (!dst || cap == 0)
     return;
   if (!host)
     host = "";
-  if (port != 80) {
+  if (def_port <= 0)
+    def_port = 80;
+  if (port != def_port) {
     if (v6)
       snprintf(dst, cap, "[%s]:%d", host, port);
     else
@@ -847,27 +868,114 @@ static void http_fmt_hosthdr(char *dst, size_t cap, const char *host, int port) 
 
 void sz_net_test_http_host_header(const char *host, int port, char *out,
                                  size_t cap) {
-  http_fmt_hosthdr(out, cap, host, port);
+  http_fmt_hosthdr(out, cap, host, port, 80);
 }
 
 static void get_build_req(GetSt *st) {
-  char req[2048];
   char hosthdr[300];
+  const char *method = st->method[0] ? st->method : "GET";
+  const char *body = st->req_body ? sz_string_cstr(st->req_body) : "";
+  size_t blen = st->req_body ? (size_t)sz_string_len(st->req_body) : 0;
+  int has_body = strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0 ||
+                 strcmp(method, "PATCH") == 0;
+  char hdr[2048];
+  int hn;
   size_t nreq;
-  http_fmt_hosthdr(hosthdr, sizeof hosthdr, st->host, st->http_port);
-  nreq = (size_t)snprintf(req, sizeof req,
-                          "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
-                          st->path, hosthdr);
-  if (nreq >= sizeof req)
-    nreq = sizeof req - 1;
+  http_fmt_hosthdr(hosthdr, sizeof hosthdr, st->host, st->http_port,
+                   st->tls ? 443 : 80);
+  if (has_body)
+    hn = snprintf(hdr, sizeof hdr,
+                  "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n"
+                  "Content-Length: %zu\r\n\r\n",
+                  method, st->path, hosthdr, blen);
+  else
+    hn = snprintf(hdr, sizeof hdr,
+                  "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+                  method, st->path, hosthdr);
+  if (hn < 0)
+    hn = 0;
+  nreq = (size_t)hn + (has_body ? blen : 0);
   st->req = (char *)sz_alloc(nreq + 1);
-  memcpy(st->req, req, nreq + 1);
+  memcpy(st->req, hdr, (size_t)hn);
+  if (has_body && blen)
+    memcpy(st->req + (size_t)hn, body, blen);
+  st->req[nreq] = '\0';
   st->req_len = nreq;
   st->req_off = 0;
   st->acc = (char *)sz_alloc(1);
   st->acc[0] = '\0';
   st->acc_cap = 1;
   st->total = 0;
+}
+
+static SSL_CTX *g_http_ssl_ctx;
+
+static SSL_CTX *http_ssl_ctx(void) {
+  if (g_http_ssl_ctx)
+    return g_http_ssl_ctx;
+  g_http_ssl_ctx = SSL_CTX_new(TLS_client_method());
+  if (!g_http_ssl_ctx)
+    return NULL;
+  SSL_CTX_set_verify(g_http_ssl_ctx, SSL_VERIFY_PEER, NULL);
+  SSL_CTX_set_default_verify_paths(g_http_ssl_ctx);
+  SSL_CTX_set_min_proto_version(g_http_ssl_ctx, TLS1_2_VERSION);
+  return g_http_ssl_ctx;
+}
+
+static int http_tls_want(SSL *ssl, int n) {
+  int e = SSL_get_error(ssl, n);
+  if (e == SSL_ERROR_WANT_READ)
+    return 1;
+  if (e == SSL_ERROR_WANT_WRITE)
+    return 2;
+  return 0;
+}
+
+static void *http_tls_step(GetSt *st, NetResult *r) {
+  int n;
+  int want;
+  SSL_CTX *ctx;
+  if (!st->ssl) {
+    ctx = http_ssl_ctx();
+    if (!ctx) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: TLS failed");
+      return r;
+    }
+    st->ssl = SSL_new(ctx);
+    if (!st->ssl || SSL_set_fd(st->ssl, st->fd) != 1) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: TLS failed");
+      return r;
+    }
+    SSL_set_connect_state(st->ssl);
+    SSL_set_tlsext_host_name(st->ssl, st->host);
+    SSL_set1_host(st->ssl, st->host);
+    SSL_set_mode(st->ssl, SSL_MODE_ENABLE_PARTIAL_WRITE |
+                              SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+  }
+  n = SSL_connect(st->ssl);
+  if (n == 1) {
+    st->tls_up = 1;
+    st->tls_want = 0;
+    r->is_err = 0;
+    r->retry = 1;
+    return r;
+  }
+  want = http_tls_want(st->ssl, n);
+  if (want) {
+    if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: TLS timed out");
+      return r;
+    }
+    st->tls_want = want;
+    r->retry = 1;
+    return r;
+  }
+  r->is_err = 1;
+  r->as.err = sz_error_new(6, "Net.httpGet: TLS failed");
+  return r;
 }
 
 static void *get_tcp_connect(void *env) {
@@ -994,11 +1102,13 @@ static void *get_check_write(void *env) {
   int so = 0;
   socklen_t sl = sizeof so;
   ssize_t n;
+  int need_out;
 
   if (st->fd < 0)
     return get_he_pick(st);
   r = (NetResult *)rc_box_zero(sizeof(NetResult));
-  if (!fd_pollout(st->fd)) {
+  need_out = !(st->tcp_up && st->tls && !st->tls_up && st->tls_want == 1);
+  if (need_out && !fd_pollout(st->fd)) {
     int64_t dl = st->tcp_up ? st->write_deadline_ms : st->connect_deadline_ms;
     const char *msg = st->tcp_up ? "Net.httpGet: write timed out"
                                  : "Net.httpGet: connect timed out";
@@ -1020,24 +1130,46 @@ static void *get_check_write(void *env) {
     st->tcp_up = 1;
     st->write_deadline_ms = sz_clock_monotonic_ms_sync() + HE_WRITE_MS;
   }
-#ifdef MSG_NOSIGNAL
-  n = send(st->fd, st->req + st->req_off, st->req_len - st->req_off, MSG_NOSIGNAL);
-#else
-  n = write(st->fd, st->req + st->req_off, st->req_len - st->req_off);
-#endif
-  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-    if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+  if (st->tls && !st->tls_up)
+    return http_tls_step(st, r);
+  if (st->ssl) {
+    n = SSL_write(st->ssl, st->req + st->req_off, (int)(st->req_len - st->req_off));
+    if (n <= 0) {
+      int want = http_tls_want(st->ssl, n);
+      if (want) {
+        if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+          r->is_err = 1;
+          r->as.err = sz_error_new(6, "Net.httpGet: write timed out");
+          return r;
+        }
+        st->tls_want = want;
+        r->retry = 1;
+        return r;
+      }
       r->is_err = 1;
-      r->as.err = sz_error_new(6, "Net.httpGet: write timed out");
+      r->as.err = sz_error_new(6, "Net.httpGet: write failed");
       return r;
     }
-    r->retry = 1;
-    return r;
-  }
-  if (n <= 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: write failed");
-    return r;
+  } else {
+#ifdef MSG_NOSIGNAL
+    n = send(st->fd, st->req + st->req_off, st->req_len - st->req_off, MSG_NOSIGNAL);
+#else
+    n = write(st->fd, st->req + st->req_off, st->req_len - st->req_off);
+#endif
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+        r->is_err = 1;
+        r->as.err = sz_error_new(6, "Net.httpGet: write timed out");
+        return r;
+      }
+      r->retry = 1;
+      return r;
+    }
+    if (n <= 0) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: write failed");
+      return r;
+    }
   }
   st->req_off += (size_t)n;
   if (st->req_off < st->req_len) {
@@ -1048,6 +1180,7 @@ static void *get_check_write(void *env) {
     }
     r->retry = 1;
   }
+  st->tls_want = 0;
   return r;
 }
 
@@ -1225,6 +1358,11 @@ static int get_try_complete(GetSt *st, NetResult *r, int eof) {
     r->as.err = sz_error_new(6, "Net.httpGet: HTTP error");
     return 1;
   }
+  if (strcmp(st->method, "HEAD") == 0) {
+    r->is_err = 0;
+    r->as.ok = sz_string_from_cstr("");
+    return 1;
+  }
   if (http_header_present(st->acc, hdr, "Transfer-Encoding")) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: chunked encoding unsupported");
@@ -1268,20 +1406,46 @@ static void *get_read(void *env) {
   char buf[4096];
   ssize_t n;
 
-  n = read(st->fd, buf, sizeof buf);
-  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-    if (sz_clock_monotonic_ms_sync() >= st->read_deadline_ms) {
-      r->is_err = 1;
-      r->as.err = sz_error_new(6, "Net.httpGet: read timed out");
+  if (st->ssl) {
+    n = SSL_read(st->ssl, buf, (int)sizeof buf);
+    if (n <= 0) {
+      int want = http_tls_want(st->ssl, (int)n);
+      int e = SSL_get_error(st->ssl, (int)n);
+      if (want) {
+        if (sz_clock_monotonic_ms_sync() >= st->read_deadline_ms) {
+          r->is_err = 1;
+          r->as.err = sz_error_new(6, "Net.httpGet: read timed out");
+          return r;
+        }
+        st->tls_want = want;
+        r->retry = 1;
+        return r;
+      }
+      if (e == SSL_ERROR_ZERO_RETURN || n == 0) {
+        n = 0;
+      } else {
+        r->is_err = 1;
+        r->as.err = sz_error_new(6, "Net.httpGet: read failed");
+        return r;
+      }
+    } else
+      st->tls_want = 0;
+  } else {
+    n = read(st->fd, buf, sizeof buf);
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      if (sz_clock_monotonic_ms_sync() >= st->read_deadline_ms) {
+        r->is_err = 1;
+        r->as.err = sz_error_new(6, "Net.httpGet: read timed out");
+        return r;
+      }
+      r->retry = 1;
       return r;
     }
-    r->retry = 1;
-    return r;
-  }
-  if (n < 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: read failed");
-    return r;
+    if (n < 0) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: read failed");
+      return r;
+    }
   }
   if (n > 0) {
     size_t add = (size_t)n;
@@ -1367,9 +1531,14 @@ static SzIo *get_poll_write(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   SzIo *ready;
   (void)value;
-  if (st->fd >= 0)
-    ready = sz_io_poll_writable(st->fd);
-  else if (st->he_wait4 && st->fd6 >= 0 && st->fd4 < 0) {
+  if (st->fd >= 0) {
+    if (st->tcp_up && st->tls && !st->tls_up && st->tls_want == 1)
+      ready = sz_io_poll_readable(st->fd);
+    else if (st->ssl && st->tls_want == 1)
+      ready = sz_io_poll_readable(st->fd);
+    else
+      ready = sz_io_poll_writable(st->fd);
+  } else if (st->he_wait4 && st->fd6 >= 0 && st->fd4 < 0) {
     int64_t delay = st->he_v4_at_ms - sz_clock_monotonic_ms_sync();
     if (delay < 1) {
       he_start_v4(st);
@@ -1413,7 +1582,10 @@ static SzIo *get_poll_read(void *value, void *env) {
   left = st->read_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
-  ready = race_drop(sz_io_poll_readable(st->fd), sz_io_sleep_ms(left));
+  if (st->ssl && st->tls_want == 2)
+    ready = race_drop(sz_io_poll_writable(st->fd), sz_io_sleep_ms(left));
+  else
+    ready = race_drop(sz_io_poll_readable(st->fd), sz_io_sleep_ms(left));
   return fm_drop(ready, get_after_read_poll, st);
 }
 
@@ -1485,16 +1657,32 @@ static void *get_dispatch(void *env) {
 
 static SzIo *get_after_dispatch(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
-  SzString *url = (SzString *)pack->left;
+  SzString *url = pack ? (SzString *)pack->left : NULL;
+  SzPair *inner = pack ? (SzPair *)pack->right : NULL;
+  SzString *ms = inner ? (SzString *)inner->left : NULL;
+  SzString *body = inner ? (SzString *)inner->right : NULL;
+  const char *method = ms ? sz_string_cstr(ms) : "GET";
   GetSt *st;
   SzIo *io;
+  const char *op;
   if ((intptr_t)value)
-    return sz_testrt_net_http_get(url);
-  sz_timeline_log_cstr("Net.httpGet", url ? sz_string_cstr(url) : "");
+    return sz_testrt_net_http_req(method, url, body);
+  op = strcmp(method, "POST") == 0 ? "Net.httpPost"
+       : strcmp(method, "PUT") == 0 ? "Net.httpPut"
+       : strcmp(method, "PATCH") == 0 ? "Net.httpPatch"
+       : strcmp(method, "DELETE") == 0 ? "Net.httpDelete"
+       : strcmp(method, "HEAD") == 0 ? "Net.httpHead"
+       : "Net.httpGet";
+  sz_timeline_log_cstr(op, url ? sz_string_cstr(url) : "");
   st = (GetSt *)sz_rc_alloc(sizeof(GetSt), SZ_RC_BOX);
   memset(st, 0, sizeof(GetSt));
   sz_retain(url);
   st->url = url;
+  if (body) {
+    sz_retain(body);
+    st->req_body = body;
+  }
+  strncpy(st->method, method, sizeof st->method - 1);
   st->fd = -1;
   st->fd4 = -1;
   st->fd6 = -1;
@@ -1511,30 +1699,62 @@ static SzIo *get_after_dispatch(void *value, void *env) {
   }
 }
 
-SzIo *sz_net_http_get(SzString *url) {
+static SzIo *sz_net_http_req(const char *method, SzString *url, SzString *body) {
+  SzString *ms;
+  SzPair *inner;
   SzPair *pack;
+  SzIo *io;
   if (!url)
-    sz_panic("sz_net_http_get(null)");
-  pack = sz_pair_new(url, NULL);
-  {
-    SzIo *io = fm_drop(sz_io_delay(get_dispatch, NULL), get_after_dispatch, pack);
-    sz_release(pack);
-    return io;
-  }
+    sz_panic("sz_net_http_req(null)");
+  ms = sz_string_from_cstr(method ? method : "GET");
+  inner = sz_pair_new(ms, body);
+  pack = sz_pair_new(url, inner);
+  sz_release(ms);
+  sz_release(inner);
+  io = fm_drop(sz_io_delay(get_dispatch, pack), get_after_dispatch, pack);
+  sz_release(pack);
+  return io;
 }
 
-/* HTTP/1.0 GET server. Listen and connection fds are nonblocking. The fiber
+SzIo *sz_net_http_get(SzString *url) { return sz_net_http_req("GET", url, NULL); }
+
+SzIo *sz_net_http_post(SzString *url, SzString *body) {
+  if (!url || !body)
+    sz_panic("sz_net_http_post(null)");
+  return sz_net_http_req("POST", url, body);
+}
+
+SzIo *sz_net_http_put(SzString *url, SzString *body) {
+  if (!url || !body)
+    sz_panic("sz_net_http_put(null)");
+  return sz_net_http_req("PUT", url, body);
+}
+
+SzIo *sz_net_http_patch(SzString *url, SzString *body) {
+  if (!url || !body)
+    sz_panic("sz_net_http_patch(null)");
+  return sz_net_http_req("PATCH", url, body);
+}
+
+SzIo *sz_net_http_delete(SzString *url) {
+  return sz_net_http_req("DELETE", url, NULL);
+}
+
+SzIo *sz_net_http_head(SzString *url) { return sz_net_http_req("HEAD", url, NULL); }
+
+/* HTTP/1.0 server. Listen and connection fds are nonblocking. The fiber
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and/or ::1
- * (V6ONLY). Bind succeeds when at least one family works so httpGet literals
- * on the bound loopback match. TestRuntime uses a per-port virtual mailbox.
- * Injected paths are ghost requests. Loopback httpGet parks on a Deferred.
- * Fake serve parks on an empty mailbox. Write completes that Deferred.
- * Request read and response write each wait at most 1000ms.
+ * (V6ONLY). Bind succeeds when at least one family works so http client
+ * literals on the bound loopback match. TestRuntime uses a per-port virtual
+ * mailbox. Injected paths are ghost requests. Loopback http client parks on
+ * a Deferred. Fake serve parks on an empty mailbox. Write completes that
+ * Deferred. Request read and response write each wait at most 1000ms.
  * A timed-out, malformed, reset, or handler-failed client is dropped.
  * Persistent serve accepts the next. One request is one round that always
  * completes; the next round is built outside handleErrorWith. Error code 6.
  * serveOnce is one request. serve keeps the
- * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
+ * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty).
+ * The handler receives (path, method, body). HEAD writes no body. */
 
 typedef struct ServeSt {
   int64_t port;
@@ -1545,11 +1765,13 @@ typedef struct ServeSt {
   SzCont handler;
   void *henv;
   void *body;
-  char rbuf[4096];
+  char rbuf[65536];
   size_t rlen;
   size_t woff;
   int64_t req_deadline_ms;
   int64_t write_deadline_ms;
+  int head_resp;
+  char method[16];
   void *vreq_done; /* SzDeferred* for a virtual client; NULL for inject */
 } ServeSt;
 
@@ -1602,24 +1824,52 @@ static void *serve_cleanup(void *env) {
   return NULL;
 }
 
-static int parse_get_path(const char *req, char *path, size_t path_sz) {
-  const char *p;
+static int parse_http_req_line(const char *req, char *method, size_t method_sz,
+                              char *path, size_t path_sz) {
+  const char *sp;
   const char *end;
+  size_t mn;
   size_t n;
-  if (!req || strncmp(req, "GET ", 4) != 0)
+  if (!req || !method || !path || method_sz < 2 || path_sz < 2)
     return 0;
-  p = req + 4;
-  end = strchr(p, ' ');
+  sp = strchr(req, ' ');
+  if (!sp)
+    return 0;
+  mn = (size_t)(sp - req);
+  if (mn == 0 || mn + 1 > method_sz)
+    return 0;
+  memcpy(method, req, mn);
+  method[mn] = '\0';
+  if (strcmp(method, "GET") != 0 && strcmp(method, "POST") != 0 &&
+      strcmp(method, "PUT") != 0 && strcmp(method, "PATCH") != 0 &&
+      strcmp(method, "DELETE") != 0 && strcmp(method, "HEAD") != 0)
+    return 0;
+  sp++;
+  end = strchr(sp, ' ');
   if (!end)
-    end = strstr(p, "\r\n");
+    end = strstr(sp, "\r\n");
   if (!end)
     return 0;
-  n = (size_t)(end - p);
+  n = (size_t)(end - sp);
   if (n == 0 || n + 1 > path_sz)
     return 0;
-  memcpy(path, p, n);
+  memcpy(path, sp, n);
   path[n] = '\0';
   return 1;
+}
+
+static SzPair *pack_http_tuple(const char *path, const char *method,
+                              const char *body, size_t blen) {
+  SzString *ps = sz_string_from_cstr(path ? path : "/");
+  SzString *ms = sz_string_from_cstr(method ? method : "GET");
+  SzString *bs = sz_string_from_bytes(body ? body : "", blen);
+  SzPair *inner = sz_pair_new(ms, bs);
+  SzPair *outer = sz_pair_new(ps, inner);
+  sz_release(ps);
+  sz_release(ms);
+  sz_release(bs);
+  sz_release(inner);
+  return outer;
 }
 
 static int serve_bind_v4(int port) {
@@ -1722,6 +1972,8 @@ static void *serve_accept(void *env) {
   st->rlen = 0;
   st->woff = 0;
   st->write_deadline_ms = 0;
+  st->head_resp = 0;
+  st->method[0] = '\0';
 
   /* Chosen at step time so SCUZZ_TESTRT=1 install in runtime_main is visible. */
   if (sz_testrt_net_is_fake()) {
@@ -1775,6 +2027,12 @@ static void *serve_read_req(void *env) {
   NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   ssize_t n;
   char path[1024];
+  char method[16];
+  size_t hdr;
+  size_t clen = 0;
+  int has_cl;
+  const char *body;
+  size_t blen;
 
   n = read(st->conn_fd, st->rbuf + st->rlen, sizeof st->rbuf - 1 - st->rlen);
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -1790,16 +2048,17 @@ static void *serve_read_req(void *env) {
   if (n <= 0) {
     r->is_err = 1;
     r->drop = 1;
-    r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
+    r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
     return r;
   }
   st->rlen += (size_t)n;
   st->rbuf[st->rlen] = '\0';
-  if (!strstr(st->rbuf, "\r\n\r\n")) {
+  hdr = http_hdr_len(st->rbuf, st->rlen);
+  if (hdr == 0) {
     if (st->rlen + 1 >= sizeof st->rbuf) {
       r->is_err = 1;
       r->drop = 1;
-      r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
+      r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
       return r;
     }
     if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
@@ -1811,14 +2070,38 @@ static void *serve_read_req(void *env) {
     r->retry = 1;
     return r;
   }
-  if (!parse_get_path(st->rbuf, path, sizeof path)) {
+  if (!parse_http_req_line(st->rbuf, method, sizeof method, path, sizeof path)) {
     r->is_err = 1;
     r->drop = 1;
-    r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
+    r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
     return r;
   }
+  has_cl = 0;
+  if (http_header_present(st->rbuf, hdr, "Content-Length")) {
+    if (!http_content_length(st->rbuf, hdr, &clen)) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
+      return r;
+    }
+    has_cl = 1;
+  }
+  if (has_cl && st->rlen < hdr + clen) {
+    if (hdr + clen + 1 > sizeof st->rbuf) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
+      return r;
+    }
+    r->retry = 1;
+    return r;
+  }
+  body = st->rbuf + hdr;
+  blen = has_cl ? clen : 0;
+  strncpy(st->method, method, sizeof st->method - 1);
+  st->head_resp = strcmp(method, "HEAD") == 0;
   r->is_err = 0;
-  r->as.ok = sz_string_from_cstr(path);
+  r->as.ok = pack_http_tuple(path, method, body, blen);
   return r;
 }
 
@@ -1853,6 +2136,8 @@ static void *serve_write_close(void *env) {
     return r;
   }
 
+  if (st->head_resp)
+    len = 0;
   hn = snprintf(hdr, sizeof hdr,
                 "HTTP/1.0 200 OK\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
                 len);
