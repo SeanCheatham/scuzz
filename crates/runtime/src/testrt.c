@@ -358,11 +358,9 @@ void sz_testrt_session_baseline_check(void) {
     return;
   sz_alloc_stats(&b, &c);
   rc = sz_alloc_rc_sum();
-  /* A UI session legitimately ends holding changed state (typed text, added
-     items): a replaced block keeps the count level while bytes drift. Leaks
-     surface as net block-count or retain-sum growth. Byte drift across events
-     is not leakage; the idle-pump leak oracle keeps bytes strict where no
-     events run. */
+  /* Session teardown: block-count or retain-sum growth is a leak. Byte
+   * drift from replaced state is not. The idle-pump oracle keeps bytes
+   * strict when no events run. */
   if (c > g_sess_count) {
     fprintf(stderr,
             "scuzz: heap baseline: session leaked blocks (count %zu -> %zu, "

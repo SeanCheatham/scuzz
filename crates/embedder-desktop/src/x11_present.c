@@ -12,13 +12,10 @@
 #define SCUZZ_HAVE_XIM 1
 #endif
 #endif
-#include <limits.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 #define EVENT_CAP 64
 #define TEXT_RING 64

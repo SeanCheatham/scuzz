@@ -3,8 +3,6 @@
  */
 #include "sk_capi.h"
 
-#include <stdlib.h>
-
 void *scuzz_skia_surface_make(int width, int height);
 void scuzz_skia_surface_unref(void *surface);
 void *scuzz_skia_surface_get_canvas(void *surface);

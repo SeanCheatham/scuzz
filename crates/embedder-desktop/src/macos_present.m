@@ -9,9 +9,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#include <stddef.h>
-#include <stdlib.h>
-
 static void enqueue_compose(const char *text);
 static void enqueue_text_edit(const char *text);
 static void enqueue_key(const char *name, const char *text, int mods, int repeat);

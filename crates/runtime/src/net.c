@@ -1743,19 +1743,12 @@ SzIo *sz_net_http_delete(SzString *url) {
 
 SzIo *sz_net_http_head(SzString *url) { return sz_net_http_req("HEAD", url, NULL); }
 
-/* HTTP/1.0 server. Listen and connection fds are nonblocking. The fiber
- * parks on poll so other IO can run. Live listen is 127.0.0.1 and/or ::1
- * (V6ONLY). Bind succeeds when at least one family works so http client
- * literals on the bound loopback match. TestRuntime uses a per-port virtual
- * mailbox. Injected paths are ghost requests. Loopback http client parks on
- * a Deferred. Fake serve parks on an empty mailbox. Write completes that
- * Deferred. Request read and response write each wait at most 1000ms.
- * A timed-out, malformed, reset, or handler-failed client is dropped.
- * Persistent serve accepts the next. One request is one round that always
- * completes; the next round is built outside handleErrorWith. Error code 6.
- * serveOnce is one request. serve keeps the
- * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty).
- * The handler receives (path, method, body). HEAD writes no body. */
+/* HTTP/1.0 server. Listen and conn fds are nonblocking. Live bind is
+ * 127.0.0.1 and/or ::1. TestRuntime uses a per-port mailbox. Read and
+ * write wait at most 1000ms. Error code 6. serveOnce is one request.
+ * serve keeps listen (n<=0 forever live, or until the TestRuntime queue
+ * is empty). The handler receives (path, method, body). HEAD writes no
+ * body. */
 
 typedef struct ServeSt {
   int64_t port;
