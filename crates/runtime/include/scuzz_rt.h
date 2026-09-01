@@ -322,7 +322,6 @@ SzIo *sz_io_println_cstr(const char *msg);
 SzIo *sz_io_handle_error_with(SzIo *inner, SzErrorHandler handler, void *env);
 SzIo *sz_io_attempt(SzIo *inner);
 SzIo *sz_io_attempt_as_result(SzIo *inner);
-SzAdt *sz_either_to_result(SzEither *e);
 SzIo *sz_io_sleep_ms(int64_t ms);
 SzIo *sz_io_race(SzIo *left, SzIo *right);
 SzIo *sz_io_both(SzIo *left, SzIo *right);
@@ -841,7 +840,6 @@ SzList *sz_json_pairs(SzAdt *j);              /* List[(String, Json)]; empty if 
 int64_t sz_json_is_null(SzAdt *j);
 int64_t sz_json_is_bool(SzAdt *j);
 int64_t sz_json_is_int(SzAdt *j);
-int64_t sz_json_is_float(SzAdt *j);
 int64_t sz_json_is_str(SzAdt *j);
 int64_t sz_json_is_arr(SzAdt *j);
 int64_t sz_json_is_obj(SzAdt *j);
@@ -943,8 +941,6 @@ enum { SZ_FAULT_FAIL = 0, SZ_FAULT_DROP = 1, SZ_FAULT_CORRUPT = 2 };
 int sz_testrt_fault_tick(int kind);
 /* Observation log: one line. Forwards to the interned timeline log. */
 void sz_effect_log(const char *line);
-/* Ready vs parked (SLEEP/QWAIT/DWAIT/POLL/JOIN/FWAIT) fiber counts. */
-void sz_sched_census(int *ready, int *parked);
 /* Delay thunks stash a fail message; the DELAY step consumes it. */
 void sz_testrt_fault_note(const char *msg);
 const char *sz_testrt_fault_take_msg(void);

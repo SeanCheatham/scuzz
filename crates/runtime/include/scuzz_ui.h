@@ -711,7 +711,6 @@ unsigned sz_ui_session_pumps(const SzUiSession *session);
 
 /* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value);
-void sz_ui_bridge_flush(SzUiSession *session);
 
 /* --- language-facing View / Signal (Scuzz Lang-authored UI) ----------- */
 

@@ -710,7 +710,7 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   pthread_mutex_unlock(&session->bridge_lock);
 }
 
-void sz_ui_bridge_flush(SzUiSession *session) {
+static void sz_ui_bridge_flush(SzUiSession *session) {
   BridgeItem *it, *next;
   if (!session)
     return;

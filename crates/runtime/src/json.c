@@ -794,7 +794,6 @@ SzList *sz_json_pairs(SzAdt *j) {
 int64_t sz_json_is_null(SzAdt *j) { return json_tag(j) == JSON_NULL ? 1 : 0; }
 int64_t sz_json_is_bool(SzAdt *j) { return json_tag(j) == JSON_BOOL ? 1 : 0; }
 int64_t sz_json_is_int(SzAdt *j) { return json_tag(j) == JSON_INT ? 1 : 0; }
-int64_t sz_json_is_float(SzAdt *j) { return json_tag(j) == JSON_FLOAT ? 1 : 0; }
 int64_t sz_json_is_str(SzAdt *j) { return json_tag(j) == JSON_STR ? 1 : 0; }
 int64_t sz_json_is_arr(SzAdt *j) { return json_tag(j) == JSON_ARR ? 1 : 0; }
 int64_t sz_json_is_obj(SzAdt *j) { return json_tag(j) == JSON_OBJ ? 1 : 0; }
