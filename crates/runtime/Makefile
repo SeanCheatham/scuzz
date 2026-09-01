@@ -9,7 +9,7 @@ SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/str
 	src/theme.c src/signal.c src/view.c src/ui.c \
 	src/ui_script.c src/lang_ui.c \
 	src/list.c src/map.c src/fs.c src/sys.c src/clock.c src/random.c src/net.c \
-	src/json.c src/testrt.c src/impurity.c
+	src/net_sock.c src/json.c src/testrt.c src/impurity.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
 .PHONY: all clean test test-asan lib ffi-skia
@@ -64,11 +64,11 @@ build/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | build
 
 build/test_io: tests/test_io.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+		-lscuzz_rt -lsk_capi -lpthread -lssl -lcrypto $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
 build/test_ui: tests/test_ui.c build/libscuzz_rt.a build/reload_a.$(RELOAD_EXT) build/reload_b.$(RELOAD_EXT) | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
+		-lscuzz_rt -lsk_capi -lpthread -lssl -lcrypto $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
 test: build/test_io build/test_ui
 	./build/test_io

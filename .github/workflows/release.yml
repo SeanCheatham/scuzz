@@ -149,7 +149,7 @@ jobs:
           sudo apt-get update
           # libx11-dev: [ui] apps compile embedder-desktop (x11_present.c).
           sudo apt-get install -y clang make libx11-dev \
-            zlib1g-dev libbz2-dev
+            zlib1g-dev libbz2-dev libssl-dev
 
       - name: Package release + install-from-tarball smoke
         env:

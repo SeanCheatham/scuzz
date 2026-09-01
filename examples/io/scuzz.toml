@@ -1,4 +1,4 @@
 [package]
 name = "io"
 version = "0.1.0"
-description = "Blessed IO kits: Clock, Fs, impurity, concurrency, Resource, Stream, Json query and write, Net.serve"
+description = "Blessed IO kits: Clock, Fs, impurity, concurrency, Resource, Stream, Json query and write, Net HTTP/TCP/UDP"

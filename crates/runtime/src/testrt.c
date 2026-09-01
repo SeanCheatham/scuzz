@@ -14,6 +14,7 @@ void sz_testrt_random_reset_live(void);
 static void sz_testrt_fs_reset_live(void);
 static void sz_testrt_net_reset_live(void);
 static void sz_testrt_net_install(void);
+static void fake_sock_reset(void);
 
 /* --- mem FS -------------------------------------------------------------- */
 
@@ -1000,27 +1001,66 @@ static int g_net_fake = 0;
 static NetStub *g_stubs = NULL;
 static PortBox *g_ports = NULL;
 enum { NET_REQ_CAP = 16 };
-static char *g_req[NET_REQ_CAP];
+typedef struct InjReq {
+  char *method;
+  char *path;
+  char *body;
+} InjReq;
+static InjReq g_req[NET_REQ_CAP];
 static int g_req_n = 0;
 static char *g_last_serve_body = NULL;
 
+static char *dup_cstr(const char *s) {
+  size_t n;
+  char *o;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  o = (char *)sz_alloc(n + 1);
+  memcpy(o, s, n + 1);
+  return o;
+}
+
 static void net_req_clear(void) {
   int i;
-  for (i = 0; i < g_req_n; i++)
-    sz_free(g_req[i]);
+  for (i = 0; i < g_req_n; i++) {
+    sz_free(g_req[i].method);
+    sz_free(g_req[i].path);
+    sz_free(g_req[i].body);
+    g_req[i].method = NULL;
+    g_req[i].path = NULL;
+    g_req[i].body = NULL;
+  }
   g_req_n = 0;
 }
 
-static void net_req_push(const char *path) {
-  size_t n;
+static void net_req_push3(const char *method, const char *path, const char *body) {
   if (g_req_n >= NET_REQ_CAP)
     sz_panic("Net: too many injected requests");
+  if (!method || !method[0])
+    method = "GET";
   if (!path || !path[0])
     path = "/";
-  n = strlen(path);
-  g_req[g_req_n] = (char *)sz_alloc(n + 1);
-  memcpy(g_req[g_req_n], path, n + 1);
+  if (!body)
+    body = "";
+  g_req[g_req_n].method = dup_cstr(method);
+  g_req[g_req_n].path = dup_cstr(path);
+  g_req[g_req_n].body = dup_cstr(body);
   g_req_n++;
+}
+
+static SzPair *pack_http_tuple(const char *path, const char *method,
+                              const char *body) {
+  SzString *ps = sz_string_from_cstr(path ? path : "/");
+  SzString *ms = sz_string_from_cstr(method ? method : "GET");
+  SzString *bs = sz_string_from_cstr(body ? body : "");
+  SzPair *inner = sz_pair_new(ms, bs);
+  SzPair *outer = sz_pair_new(ps, inner);
+  sz_release(ps);
+  sz_release(ms);
+  sz_release(bs);
+  sz_release(inner);
+  return outer;
 }
 
 static int host_eq_ci(const char *a, const char *b) {
@@ -1049,9 +1089,13 @@ int sz_testrt_net_parse_loopback(const char *url, int64_t *port, char *path,
   int64_t po = 80;
   if (!url || !path || path_cap < 2)
     return 0;
-  if (strncmp(url, "http://", 7) != 0)
+  if (strncmp(url, "https://", 8) == 0) {
+    p = url + 8;
+    po = 443;
+  } else if (strncmp(url, "http://", 7) == 0) {
+    p = url + 7;
+  } else
     return 0;
-  p = url + 7;
   if (*p == '[') {
     p++;
     while (*p && *p != ']' && hn + 1 < sizeof host)
@@ -1215,20 +1259,31 @@ static void sz_testrt_net_reset_live(void) {
   }
   g_stubs = NULL;
   net_clear_serve();
+  fake_sock_reset();
   g_net_fake = 0;
 }
 
 void sz_testrt_net_inject_request(const char *path) {
-  if (!g_net_fake)
-    sz_testrt_net_install();
-  net_req_clear();
-  net_req_push(path);
+  sz_testrt_net_inject_http("GET", path, "");
 }
 
 void sz_testrt_net_queue_request(const char *path) {
+  sz_testrt_net_queue_http("GET", path, "");
+}
+
+void sz_testrt_net_inject_http(const char *method, const char *path,
+                              const char *body) {
   if (!g_net_fake)
     sz_testrt_net_install();
-  net_req_push(path);
+  net_req_clear();
+  net_req_push3(method, path, body);
+}
+
+void sz_testrt_net_queue_http(const char *method, const char *path,
+                             const char *body) {
+  if (!g_net_fake)
+    sz_testrt_net_install();
+  net_req_push3(method, path, body);
 }
 
 int sz_testrt_net_serve_pending(void) { return g_req_n + mailbox_len_all(); }
@@ -1242,11 +1297,29 @@ char *sz_testrt_net_pop_request(void) {
   int i;
   if (g_req_n <= 0)
     return NULL;
-  p = g_req[0];
+  p = g_req[0].path;
+  g_req[0].path = NULL;
+  sz_free(g_req[0].method);
+  sz_free(g_req[0].body);
   for (i = 1; i < g_req_n; i++)
     g_req[i - 1] = g_req[i];
   g_req_n--;
+  memset(&g_req[g_req_n], 0, sizeof g_req[g_req_n]);
   return p;
+}
+
+static int net_req_pop3(char **method, char **path, char **body) {
+  int i;
+  if (g_req_n <= 0)
+    return 0;
+  *method = g_req[0].method;
+  *path = g_req[0].path;
+  *body = g_req[0].body;
+  for (i = 1; i < g_req_n; i++)
+    g_req[i - 1] = g_req[i];
+  g_req_n--;
+  memset(&g_req[g_req_n], 0, sizeof g_req[g_req_n]);
+  return 1;
 }
 
 void sz_testrt_net_cancel_accept(int64_t port) {
@@ -1268,13 +1341,17 @@ void sz_testrt_net_fail_mailbox(int64_t port, SzError *err) {
 }
 
 SzIo *sz_testrt_net_accept(int64_t port) {
-  char *inj = sz_testrt_net_pop_request();
+  char *method = NULL;
+  char *path = NULL;
+  char *body = NULL;
   PortBox *b;
-  if (inj) {
-    SzString *ps = sz_string_from_cstr(inj);
-    SzPair *vreq = sz_pair_new(ps, NULL);
-    sz_free(inj);
-    sz_release(ps);
+  if (net_req_pop3(&method, &path, &body)) {
+    SzPair *req = pack_http_tuple(path, method, body);
+    SzPair *vreq = sz_pair_new(req, NULL);
+    sz_free(method);
+    sz_free(path);
+    sz_free(body);
+    sz_release(req);
     return pure_drop(vreq);
   }
   b = mailbox_get(port);
@@ -1289,12 +1366,13 @@ SzIo *sz_testrt_net_accept(int64_t port) {
   }
 }
 
-static SzIo *virtual_http_get(int64_t port, const char *path) {
+static SzIo *virtual_http_req(int64_t port, const char *method, const char *path,
+                             const char *body) {
   SzDeferred *done = sz_deferred_make();
-  SzString *ps = sz_string_from_cstr(path ? path : "/");
-  SzPair *vreq = sz_pair_new(ps, done);
+  SzPair *req = pack_http_tuple(path, method, body);
+  SzPair *vreq = sz_pair_new(req, done);
   PortBox *b = mailbox_get(port);
-  sz_release(ps);
+  sz_release(req);
   if (b->accept_wait) {
     SzDeferred *w = b->accept_wait;
     b->accept_wait = NULL;
@@ -1342,7 +1420,8 @@ void sz_testrt_net_stub(const char *url, const char *body) {
 }
 
 static void *stub_http_get(void *env) {
-  SzString *url_s = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *url_s = pack ? (SzString *)pack->left : NULL;
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   const char *url = sz_string_cstr(url_s);
   NetStub *s;
@@ -1386,7 +1465,9 @@ done:
 
 static SzIo *after_stub_http(void *value, void *env) {
   BoxResult *r = (BoxResult *)value;
-  SzString *url = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *url = pack ? (SzString *)pack->left : NULL;
+  SzPair *inner = pack ? (SzPair *)pack->right : NULL;
   if (r && r->is_err && r->as.err) {
     const char *msg = sz_string_cstr(r->as.err->message);
     int64_t port = 0;
@@ -1394,17 +1475,36 @@ static SzIo *after_stub_http(void *value, void *env) {
     if (msg && strstr(msg, "no stub for URL") &&
         sz_testrt_net_parse_loopback(sz_string_cstr(url), &port, path,
                                     sizeof path)) {
+      const char *method = inner && inner->left ? sz_string_cstr((SzString *)inner->left) : "GET";
+      const char *body = inner && inner->right ? sz_string_cstr((SzString *)inner->right) : "";
       sz_release(r->as.err);
       r->as.err = NULL;
       sz_release(r);
-      return virtual_http_get(port, path);
+      return virtual_http_req(port, method, path, body);
     }
   }
   return unwrap_box(value, NULL);
 }
 
+SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzString *body) {
+  SzString *ms;
+  SzPair *inner;
+  SzPair *pack;
+  SzIo *io;
+  if (!url)
+    sz_panic("sz_testrt_net_http_req(null)");
+  ms = sz_string_from_cstr(method ? method : "GET");
+  inner = sz_pair_new(ms, body);
+  pack = sz_pair_new(url, inner);
+  sz_release(ms);
+  sz_release(inner);
+  io = fm_drop(sz_io_delay(stub_http_get, pack), after_stub_http, pack);
+  sz_release(pack);
+  return io;
+}
+
 SzIo *sz_testrt_net_http_get(SzString *url) {
-  return fm_drop(sz_io_delay(stub_http_get, url), after_stub_http, url);
+  return sz_testrt_net_http_req("GET", url, NULL);
 }
 
 const char *sz_testrt_net_last_serve_body(void) {
@@ -1420,6 +1520,750 @@ void sz_testrt_net_set_last_serve_body(const char *body) {
   n = strlen(body);
   g_last_serve_body = (char *)sz_alloc(n + 1);
   memcpy(g_last_serve_body, body, n + 1);
+}
+
+
+enum { FAKE_CAP = 64 };
+enum { FK_TCP = 1, FK_LISTEN = 2, FK_UDP = 3 };
+
+typedef struct FakeDgram {
+  char *host;
+  int64_t port;
+  char *data;
+  size_t len;
+  struct FakeDgram *next;
+} FakeDgram;
+
+typedef struct FakeSock {
+  int id;
+  int kind;
+  int peer_id;
+  int64_t port;
+  int closed;
+  int used;
+  char *buf;
+  size_t len;
+  size_t cap;
+  SzDeferred *read_wait;
+  SzDeferred *accept_wait;
+  int accept_q[16];
+  int accept_n;
+  FakeDgram *dgrams;
+  SzDeferred *recv_wait;
+} FakeSock;
+
+typedef struct ConnectPark {
+  int64_t port;
+  SzDeferred *wait;
+  struct ConnectPark *next;
+} ConnectPark;
+
+static FakeSock g_fsock[FAKE_CAP];
+static int g_next_fid = 1;
+static ConnectPark *g_cpark;
+
+static FakeSock *fake_by_id(int id) {
+  int i;
+  if (id <= 0)
+    return NULL;
+  for (i = 0; i < FAKE_CAP; i++) {
+    if (g_fsock[i].used && g_fsock[i].id == id)
+      return &g_fsock[i];
+  }
+  return NULL;
+}
+
+static FakeSock *fake_listen_port(int64_t port) {
+  int i;
+  for (i = 0; i < FAKE_CAP; i++) {
+    if (g_fsock[i].used && !g_fsock[i].closed && g_fsock[i].kind == FK_LISTEN &&
+        g_fsock[i].port == port)
+      return &g_fsock[i];
+  }
+  return NULL;
+}
+
+static FakeSock *fake_udp_port(int64_t port) {
+  int i;
+  for (i = 0; i < FAKE_CAP; i++) {
+    if (g_fsock[i].used && !g_fsock[i].closed && g_fsock[i].kind == FK_UDP &&
+        g_fsock[i].port == port)
+      return &g_fsock[i];
+  }
+  return NULL;
+}
+
+static FakeSock *fake_alloc(int kind, int64_t port) {
+  int i;
+  for (i = 0; i < FAKE_CAP; i++) {
+    if (!g_fsock[i].used) {
+      memset(&g_fsock[i], 0, sizeof g_fsock[i]);
+      g_fsock[i].used = 1;
+      g_fsock[i].id = g_next_fid++;
+      g_fsock[i].kind = kind;
+      g_fsock[i].port = port;
+      return &g_fsock[i];
+    }
+  }
+  return NULL;
+}
+
+static SzNetSock *fake_wrap(FakeSock *f) {
+  SzNetSock *s = (SzNetSock *)sz_rc_alloc(sizeof(SzNetSock), SZ_RC_NETSOCK);
+  s->fd = -1;
+  s->fd6 = -1;
+  s->kind = f->kind;
+  s->fake_id = f->id;
+  s->port = f->port;
+  return s;
+}
+
+static void fake_dgram_free(FakeDgram *d) {
+  while (d) {
+    FakeDgram *n = d->next;
+    sz_free(d->host);
+    sz_free(d->data);
+    sz_free(d);
+    d = n;
+  }
+}
+
+static void fake_fail_wait(SzDeferred **dp, const char *msg) {
+  SzDeferred *d = *dp;
+  SzError *err;
+  if (!d)
+    return;
+  *dp = NULL;
+  err = sz_error_new(6, msg);
+  sz_deferred_fail_now(d, err);
+  sz_release(err);
+  sz_release(d);
+}
+
+static void fake_slot_clear(FakeSock *f) {
+  int i;
+  if (!f || !f->used)
+    return;
+  fake_fail_wait(&f->read_wait, "Net: TestRuntime reset");
+  fake_fail_wait(&f->accept_wait, "Net: TestRuntime reset");
+  fake_fail_wait(&f->recv_wait, "Net: TestRuntime reset");
+  fake_dgram_free(f->dgrams);
+  sz_free(f->buf);
+  memset(f, 0, sizeof *f);
+  (void)i;
+}
+
+static void fake_sock_reset(void) {
+  int i;
+  ConnectPark *p = g_cpark;
+  SzError *err = sz_error_new(6, "Net: TestRuntime reset");
+  while (p) {
+    ConnectPark *n = p->next;
+    if (p->wait) {
+      sz_deferred_fail_now(p->wait, err);
+      sz_release(p->wait);
+    }
+    sz_free(p);
+    p = n;
+  }
+  g_cpark = NULL;
+  sz_release(err);
+  for (i = 0; i < FAKE_CAP; i++)
+    fake_slot_clear(&g_fsock[i]);
+  g_next_fid = 1;
+}
+
+void sz_testrt_net_sock_gone(SzNetSock *s) {
+  FakeSock *f;
+  FakeSock *peer;
+  if (!s || s->fake_id <= 0)
+    return;
+  f = fake_by_id(s->fake_id);
+  if (!f)
+    return;
+  f->closed = 1;
+  peer = fake_by_id(f->peer_id);
+  fake_fail_wait(&f->read_wait, "Net: socket closed");
+  fake_fail_wait(&f->accept_wait, "Net: socket closed");
+  fake_fail_wait(&f->recv_wait, "Net: socket closed");
+  if (peer) {
+    fake_fail_wait(&peer->read_wait, "Net: socket closed");
+    peer->closed = 1;
+  }
+}
+
+static void fake_append(FakeSock *f, const char *data, size_t n) {
+  size_t need;
+  if (!f || !data || n == 0)
+    return;
+  need = f->len + n;
+  if (need > f->cap) {
+    size_t cap = f->cap ? f->cap : 64;
+    char *nb;
+    while (cap < need)
+      cap *= 2;
+    nb = (char *)sz_alloc(cap);
+    if (f->len)
+      memcpy(nb, f->buf, f->len);
+    sz_free(f->buf);
+    f->buf = nb;
+    f->cap = cap;
+  }
+  memcpy(f->buf + f->len, data, n);
+  f->len += n;
+}
+
+static SzString *fake_take(FakeSock *f, size_t n) {
+  SzString *s;
+  if (!f || f->len == 0 || n == 0)
+    return sz_string_from_cstr("");
+  if (n > f->len)
+    n = f->len;
+  s = sz_string_from_bytes(f->buf, n);
+  if (n < f->len)
+    memmove(f->buf, f->buf + n, f->len - n);
+  f->len -= n;
+  return s;
+}
+
+static void fake_pair(FakeSock *a, FakeSock *b) {
+  a->peer_id = b->id;
+  b->peer_id = a->id;
+  a->kind = FK_TCP;
+  b->kind = FK_TCP;
+}
+
+static SzNetSock *fake_take_accept(FakeSock *ln) {
+  int id;
+  int i;
+  FakeSock *srv;
+  if (!ln || ln->accept_n <= 0)
+    return NULL;
+  id = ln->accept_q[0];
+  for (i = 1; i < ln->accept_n; i++)
+    ln->accept_q[i - 1] = ln->accept_q[i];
+  ln->accept_n--;
+  srv = fake_by_id(id);
+  if (!srv)
+    return NULL;
+  return fake_wrap(srv);
+}
+
+static void fake_deliver_accept(FakeSock *ln, FakeSock *server) {
+  if (!ln || !server)
+    return;
+  if (ln->accept_wait) {
+    SzNetSock *wrap = fake_wrap(server);
+    SzDeferred *w = ln->accept_wait;
+    ln->accept_wait = NULL;
+    sz_deferred_complete_now(w, wrap);
+    sz_release(w);
+    sz_release(wrap);
+    return;
+  }
+  if (ln->accept_n >= 16)
+    return;
+  ln->accept_q[ln->accept_n++] = server->id;
+}
+
+static void fake_flush_connects(FakeSock *ln) {
+  ConnectPark **pp = &g_cpark;
+  while (*pp) {
+    ConnectPark *p = *pp;
+    if (p->port != ln->port) {
+      pp = &p->next;
+      continue;
+    }
+    *pp = p->next;
+    {
+      FakeSock *cli = fake_alloc(FK_TCP, ln->port);
+      FakeSock *srv = fake_alloc(FK_TCP, ln->port);
+      SzNetSock *wrap;
+      if (!cli || !srv) {
+        sz_deferred_fail_now(p->wait, sz_error_new(6, "Net.tcpConnect: full"));
+        sz_release(p->wait);
+        sz_free(p);
+        continue;
+      }
+      fake_pair(cli, srv);
+      wrap = fake_wrap(cli);
+      sz_deferred_complete_now(p->wait, wrap);
+      sz_release(p->wait);
+      sz_release(wrap);
+      fake_deliver_accept(ln, srv);
+    }
+    sz_free(p);
+  }
+}
+
+static BoxResult *box_ok(void *ok) {
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
+  r->is_err = 0;
+  r->as.ok = ok;
+  return r;
+}
+
+static BoxResult *box_err(const char *msg) {
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
+  r->is_err = 1;
+  r->as.err = sz_error_new(6, msg);
+  return r;
+}
+
+static BoxResult *fake_connect_pair(int64_t port) {
+  FakeSock *ln = fake_listen_port(port);
+  FakeSock *cli;
+  FakeSock *srv;
+  if (!ln)
+    return NULL;
+  cli = fake_alloc(FK_TCP, port);
+  srv = fake_alloc(FK_TCP, port);
+  if (!cli || !srv)
+    return box_err("Net.tcpConnect: connect failed");
+  fake_pair(cli, srv);
+  fake_deliver_accept(ln, srv);
+  return box_ok(fake_wrap(cli));
+}
+
+static void *tcp_listen_now(void *env) {
+  int64_t port = *(int64_t *)env;
+  FakeSock *ln;
+  if (port < 1 || port > 65535)
+    return box_err("Net.tcpListen: port must be 1..65535");
+  if (fake_listen_port(port))
+    return box_err("Net.tcpListen: bind/listen failed");
+  ln = fake_alloc(FK_LISTEN, port);
+  if (!ln)
+    return box_err("Net.tcpListen: bind/listen failed");
+  fake_flush_connects(ln);
+  return box_ok(fake_wrap(ln));
+}
+
+SzIo *sz_testrt_net_tcp_listen(int64_t port) {
+  int64_t *box = (int64_t *)rc_box_zero(sizeof(int64_t));
+  *box = port;
+  sz_timeline_log_cstr("Net.tcpListen", "");
+  {
+    SzIo *io = fm_drop(sz_io_delay(tcp_listen_now, box), unwrap_box, NULL);
+    sz_release(box);
+    return io;
+  }
+}
+
+typedef struct TcpConnPack {
+  SzString *host;
+  int64_t port;
+} TcpConnPack;
+
+static void *tcp_connect_now(void *env) {
+  TcpConnPack *p = (TcpConnPack *)env;
+  BoxResult *got;
+  const char *host = p && p->host ? sz_string_cstr(p->host) : "";
+  if (!p || p->port < 1 || p->port > 65535)
+    return box_err("Net.tcpConnect: invalid port");
+  if (!host_eq_ci(host, "127.0.0.1") && !host_eq_ci(host, "localhost") &&
+      !host_eq_ci(host, "::1"))
+    return box_err("Net.tcpConnect: host must be an IP literal");
+  got = fake_connect_pair(p->port);
+  if (got)
+    return got;
+  return NULL;
+}
+
+static SzIo *after_tcp_connect(void *value, void *env) {
+  TcpConnPack *p = (TcpConnPack *)env;
+  BoxResult *got;
+  ConnectPark *c;
+  int64_t port = p ? p->port : 0;
+  if (p) {
+    sz_release(p->host);
+    p->host = NULL;
+  }
+  if (value)
+    return unwrap_box(value, NULL);
+  got = fake_connect_pair(port);
+  if (got)
+    return unwrap_box(got, NULL);
+  c = (ConnectPark *)sz_alloc(sizeof(ConnectPark));
+  c->port = port;
+  c->wait = sz_deferred_make();
+  c->next = g_cpark;
+  g_cpark = c;
+  return sz_deferred_get(c->wait);
+}
+
+SzIo *sz_testrt_net_tcp_connect(SzString *host, int64_t port) {
+  TcpConnPack *p;
+  if (!host)
+    sz_panic("sz_testrt_net_tcp_connect(null)");
+  sz_timeline_log_cstr("Net.tcpConnect", sz_string_cstr(host));
+  p = (TcpConnPack *)sz_rc_alloc(sizeof(TcpConnPack), SZ_RC_BOX);
+  memset(p, 0, sizeof(TcpConnPack));
+  sz_retain(host);
+  p->host = host;
+  p->port = port;
+  {
+    SzIo *io = fm_drop(sz_io_delay(tcp_connect_now, p), after_tcp_connect, p);
+    sz_release(p);
+    return io;
+  }
+}
+
+static void *tcp_accept_now(void *env) {
+  SzNetSock *ln = (SzNetSock *)env;
+  FakeSock *f = ln ? fake_by_id(ln->fake_id) : NULL;
+  SzNetSock *wrap;
+  if (!f || f->kind != FK_LISTEN || f->closed)
+    return box_err("Net.tcpAccept: not a listener");
+  wrap = fake_take_accept(f);
+  if (wrap)
+    return box_ok(wrap);
+  return NULL;
+}
+
+static SzIo *after_tcp_accept(void *value, void *env) {
+  SzNetSock *ln = (SzNetSock *)env;
+  FakeSock *f;
+  SzNetSock *wrap;
+  SzDeferred *d;
+  if (value)
+    return unwrap_box(value, NULL);
+  f = ln ? fake_by_id(ln->fake_id) : NULL;
+  if (!f || f->kind != FK_LISTEN || f->closed)
+    return sz_io_fail_cstr("Net.tcpAccept: not a listener");
+  wrap = fake_take_accept(f);
+  if (wrap)
+    return pure_drop(wrap);
+  d = sz_deferred_make();
+  f->accept_wait = d;
+  wrap = fake_take_accept(f);
+  if (wrap) {
+    f->accept_wait = NULL;
+    sz_release(d);
+    return pure_drop(wrap);
+  }
+  return sz_deferred_get(d);
+}
+
+SzIo *sz_testrt_net_tcp_accept(void *listener) {
+  if (!listener)
+    sz_panic("sz_testrt_net_tcp_accept(null)");
+  sz_timeline_log_cstr("Net.tcpAccept", "");
+  return fm_drop(sz_io_delay(tcp_accept_now, listener), after_tcp_accept,
+                 listener);
+}
+
+typedef struct TcpRW {
+  SzNetSock *sock;
+  SzString *data;
+  int64_t n;
+} TcpRW;
+
+static void *tcp_read_now(void *env) {
+  TcpRW *op = (TcpRW *)env;
+  FakeSock *f = op && op->sock ? fake_by_id(op->sock->fake_id) : NULL;
+  size_t want;
+  if (!f || f->closed)
+    return box_err("Net.tcpRead: closed");
+  want = op->n > 0 ? (size_t)op->n : 0;
+  if (want == 0)
+    return box_ok(sz_string_from_cstr(""));
+  if (f->len > 0)
+    return box_ok(fake_take(f, want));
+  return NULL;
+}
+
+static SzIo *after_tcp_read(void *value, void *env) {
+  TcpRW *op = (TcpRW *)env;
+  FakeSock *f;
+  SzDeferred *d;
+  size_t want;
+  if (value)
+    return unwrap_box(value, NULL);
+  f = op && op->sock ? fake_by_id(op->sock->fake_id) : NULL;
+  if (!f || f->closed)
+    return sz_io_fail_cstr("Net.tcpRead: closed");
+  want = op->n > 0 ? (size_t)op->n : 0;
+  if (f->len > 0)
+    return unwrap_box(box_ok(fake_take(f, want)), NULL);
+  d = sz_deferred_make();
+  f->read_wait = d;
+  if (f->len > 0) {
+    SzString *got = fake_take(f, want);
+    f->read_wait = NULL;
+    sz_release(d);
+    return pure_drop(got);
+  }
+  return sz_deferred_get(d);
+}
+
+SzIo *sz_testrt_net_tcp_read(void *conn, int64_t n) {
+  TcpRW *op;
+  if (!conn)
+    sz_panic("sz_testrt_net_tcp_read(null)");
+  sz_timeline_log_cstr("Net.tcpRead", "");
+  op = (TcpRW *)sz_rc_alloc(sizeof(TcpRW), SZ_RC_BOX);
+  memset(op, 0, sizeof(TcpRW));
+  sz_retain(conn);
+  op->sock = (SzNetSock *)conn;
+  op->n = n;
+  {
+    SzIo *io = fm_drop(sz_io_delay(tcp_read_now, op), after_tcp_read, op);
+    sz_release(op);
+    return io;
+  }
+}
+
+static void *tcp_write_now(void *env) {
+  TcpRW *op = (TcpRW *)env;
+  FakeSock *f = op && op->sock ? fake_by_id(op->sock->fake_id) : NULL;
+  FakeSock *peer;
+  const char *data;
+  size_t n;
+  if (!f || f->closed)
+    return box_err("Net.tcpWrite: closed");
+  peer = fake_by_id(f->peer_id);
+  if (!peer || peer->closed)
+    return box_err("Net.tcpWrite: closed");
+  data = op->data ? sz_string_cstr(op->data) : "";
+  n = op->data ? (size_t)sz_string_len(op->data) : 0;
+  fake_append(peer, data, n);
+  if (peer->read_wait) {
+    SzDeferred *w = peer->read_wait;
+    SzString *got;
+    size_t want = n;
+    peer->read_wait = NULL;
+    got = fake_take(peer, want);
+    sz_deferred_complete_now(w, got);
+    sz_release(w);
+    sz_release(got);
+  }
+  sz_release(op->sock);
+  op->sock = NULL;
+  sz_release(op->data);
+  op->data = NULL;
+  return box_ok(NULL);
+}
+
+SzIo *sz_testrt_net_tcp_write(void *conn, SzString *s) {
+  TcpRW *op;
+  if (!conn || !s)
+    sz_panic("sz_testrt_net_tcp_write(null)");
+  sz_timeline_log_cstr("Net.tcpWrite", sz_string_cstr(s));
+  op = (TcpRW *)sz_rc_alloc(sizeof(TcpRW), SZ_RC_BOX);
+  memset(op, 0, sizeof(TcpRW));
+  sz_retain(conn);
+  sz_retain(s);
+  op->sock = (SzNetSock *)conn;
+  op->data = s;
+  {
+    SzIo *io = fm_drop(sz_io_delay(tcp_write_now, op), unwrap_box, NULL);
+    sz_release(op);
+    return io;
+  }
+}
+
+static void *tcp_close_now(void *env) {
+  SzNetSock *s = (SzNetSock *)env;
+  sz_testrt_net_sock_gone(s);
+  return box_ok(NULL);
+}
+
+SzIo *sz_testrt_net_tcp_close(void *sock) {
+  if (!sock)
+    sz_panic("sz_testrt_net_tcp_close(null)");
+  sz_timeline_log_cstr("Net.tcpClose", "");
+  return fm_drop(sz_io_delay(tcp_close_now, sock), unwrap_box, NULL);
+}
+
+static void *udp_bind_now(void *env) {
+  int64_t port = *(int64_t *)env;
+  FakeSock *f;
+  if (port < 0 || port > 65535)
+    return box_err("Net.udpBind: port must be 0..65535");
+  if (port != 0 && fake_udp_port(port))
+    return box_err("Net.udpBind: bind failed");
+  f = fake_alloc(FK_UDP, port);
+  if (!f)
+    return box_err("Net.udpBind: bind failed");
+  if (f->port == 0)
+    f->port = 40000 + f->id;
+  return box_ok(fake_wrap(f));
+}
+
+SzIo *sz_testrt_net_udp_bind(int64_t port) {
+  int64_t *box = (int64_t *)rc_box_zero(sizeof(int64_t));
+  *box = port;
+  sz_timeline_log_cstr("Net.udpBind", "");
+  {
+    SzIo *io = fm_drop(sz_io_delay(udp_bind_now, box), unwrap_box, NULL);
+    sz_release(box);
+    return io;
+  }
+}
+
+typedef struct UdpSendPack {
+  SzNetSock *sock;
+  SzString *host;
+  SzString *data;
+  int64_t port;
+} UdpSendPack;
+
+static void *udp_send_now(void *env) {
+  UdpSendPack *p = (UdpSendPack *)env;
+  FakeSock *src = p && p->sock ? fake_by_id(p->sock->fake_id) : NULL;
+  FakeSock *dst;
+  FakeDgram *d;
+  const char *data;
+  size_t n;
+  if (!src || src->kind != FK_UDP || src->closed)
+    return box_err("Net.udpSend: closed");
+  if (p->port < 1 || p->port > 65535)
+    return box_err("Net.udpSend: host must be an IP literal");
+  dst = fake_udp_port(p->port);
+  if (!dst)
+    return box_err("Net.udpSend: send failed");
+  data = p->data ? sz_string_cstr(p->data) : "";
+  n = p->data ? (size_t)sz_string_len(p->data) : 0;
+  d = (FakeDgram *)sz_alloc(sizeof(FakeDgram));
+  memset(d, 0, sizeof(FakeDgram));
+  d->host = dup_cstr("127.0.0.1");
+  d->port = src->port;
+  d->data = (char *)sz_alloc(n + 1);
+  if (n)
+    memcpy(d->data, data, n);
+  d->data[n] = 0;
+  d->len = n;
+  if (dst->recv_wait) {
+    SzDeferred *w = dst->recv_wait;
+    SzString *hs = sz_string_from_cstr(d->host);
+    void *pn = sz_box_i64(d->port);
+    SzString *ds = sz_string_from_bytes(d->data, d->len);
+    SzPair *inner = sz_pair_new(pn, ds);
+    SzPair *outer = sz_pair_new(hs, inner);
+    dst->recv_wait = NULL;
+    sz_release(hs);
+    sz_release(pn);
+    sz_release(ds);
+    sz_release(inner);
+    sz_deferred_complete_now(w, outer);
+    sz_release(w);
+    sz_release(outer);
+    fake_dgram_free(d);
+  } else {
+    d->next = dst->dgrams;
+    dst->dgrams = d;
+  }
+  return box_ok(NULL);
+}
+
+SzIo *sz_testrt_net_udp_send(void *sock, SzString *host, int64_t port,
+                            SzString *data) {
+  UdpSendPack *p;
+  if (!sock || !host || !data)
+    sz_panic("sz_testrt_net_udp_send(null)");
+  sz_timeline_log_cstr("Net.udpSend", sz_string_cstr(host));
+  p = (UdpSendPack *)sz_rc_alloc(sizeof(UdpSendPack), SZ_RC_BOX);
+  memset(p, 0, sizeof(UdpSendPack));
+  sz_retain(sock);
+  sz_retain(host);
+  sz_retain(data);
+  p->sock = (SzNetSock *)sock;
+  p->host = host;
+  p->port = port;
+  p->data = data;
+  {
+    SzIo *io = fm_drop(sz_io_delay(udp_send_now, p), unwrap_box, NULL);
+    sz_release(p);
+    return io;
+  }
+}
+
+typedef struct UdpRecvPack {
+  SzNetSock *sock;
+  int64_t n;
+} UdpRecvPack;
+
+static void *udp_recv_now(void *env) {
+  UdpRecvPack *p = (UdpRecvPack *)env;
+  FakeSock *f = p && p->sock ? fake_by_id(p->sock->fake_id) : NULL;
+  FakeDgram *d;
+  SzString *hs;
+  void *pn;
+  SzString *ds;
+  SzPair *inner;
+  SzPair *outer;
+  size_t n;
+  if (!f || f->kind != FK_UDP || f->closed)
+    return box_err("Net.udpRecv: closed");
+  if (!f->dgrams)
+    return NULL;
+  d = f->dgrams;
+  f->dgrams = d->next;
+  n = d->len;
+  if (p->n > 0 && (size_t)p->n < n)
+    n = (size_t)p->n;
+  hs = sz_string_from_cstr(d->host);
+  pn = sz_box_i64(d->port);
+  ds = sz_string_from_bytes(d->data, n);
+  inner = sz_pair_new(pn, ds);
+  outer = sz_pair_new(hs, inner);
+  sz_release(hs);
+  sz_release(pn);
+  sz_release(ds);
+  sz_release(inner);
+  d->next = NULL;
+  fake_dgram_free(d);
+  return box_ok(outer);
+}
+
+static SzIo *after_udp_recv(void *value, void *env) {
+  UdpRecvPack *p = (UdpRecvPack *)env;
+  FakeSock *f;
+  SzDeferred *d;
+  if (value)
+    return unwrap_box(value, NULL);
+  f = p && p->sock ? fake_by_id(p->sock->fake_id) : NULL;
+  if (!f || f->kind != FK_UDP || f->closed)
+    return sz_io_fail_cstr("Net.udpRecv: closed");
+  if (f->dgrams) {
+    void *box = udp_recv_now(p);
+    return unwrap_box(box, NULL);
+  }
+  d = sz_deferred_make();
+  f->recv_wait = d;
+  if (f->dgrams) {
+    void *box;
+    f->recv_wait = NULL;
+    sz_release(d);
+    box = udp_recv_now(p);
+    return unwrap_box(box, NULL);
+  }
+  return sz_deferred_get(d);
+}
+
+SzIo *sz_testrt_net_udp_recv(void *sock, int64_t n) {
+  UdpRecvPack *p;
+  if (!sock)
+    sz_panic("sz_testrt_net_udp_recv(null)");
+  sz_timeline_log_cstr("Net.udpRecv", "");
+  p = (UdpRecvPack *)sz_rc_alloc(sizeof(UdpRecvPack), SZ_RC_BOX);
+  memset(p, 0, sizeof(UdpRecvPack));
+  sz_retain(sock);
+  p->sock = (SzNetSock *)sock;
+  p->n = n;
+  {
+    SzIo *io = fm_drop(sz_io_delay(udp_recv_now, p), after_udp_recv, p);
+    sz_release(p);
+    return io;
+  }
+}
+
+SzIo *sz_testrt_net_udp_close(void *sock) {
+  if (!sock)
+    sz_panic("sz_testrt_net_udp_close(null)");
+  sz_timeline_log_cstr("Net.udpClose", "");
+  return fm_drop(sz_io_delay(tcp_close_now, sock), unwrap_box, NULL);
 }
 
 /* --- sys / console ------------------------------------------------------- */

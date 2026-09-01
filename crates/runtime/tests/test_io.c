@@ -337,14 +337,31 @@ static void *stream_unfold_step(void *v, void *env) {
   return xs;
 }
 
+static SzString *serve_req_path(void *req) {
+  SzPair *p = (SzPair *)req;
+  return p && p->left ? (SzString *)p->left : (SzString *)req;
+}
+
 static SzIo *serve_path_ok(void *path, void *env) {
   SzString *prefix;
   SzString *out;
   (void)env;
   prefix = sz_string_from_cstr("ok:");
-  out = sz_string_concat(prefix, (SzString *)path);
+  out = sz_string_concat(prefix, serve_req_path(path));
   sz_release(prefix);
   return pure_drop(out);
+}
+
+static SzIo *serve_echo_req(void *req, void *env) {
+  SzPair *p = (SzPair *)req;
+  SzPair *inner = p ? (SzPair *)p->right : NULL;
+  const char *path = p && p->left ? sz_string_cstr((SzString *)p->left) : "";
+  const char *method = inner && inner->left ? sz_string_cstr((SzString *)inner->left) : "";
+  const char *body = inner && inner->right ? sz_string_cstr((SzString *)inner->right) : "";
+  char buf[2048];
+  (void)env;
+  snprintf(buf, sizeof buf, "%s:%s:%s", method, path, body);
+  return pure_drop(sz_string_from_cstr(buf));
 }
 
 static int g_serve_fail_n;
@@ -354,7 +371,7 @@ static SzIo *serve_fail_then_ok(void *path, void *env) {
   if (g_serve_fail_n++ == 0)
     return sz_io_fail_cstr("handler boom");
   return pure_drop(
-      sz_string_concat(sz_string_from_cstr("ok:"), (SzString *)path));
+      sz_string_concat(sz_string_from_cstr("ok:"), serve_req_path(path)));
 }
 
 static SzIo *serve_big_ok(void *path, void *env) {
@@ -5675,7 +5692,9 @@ int main(void) {
       assert(sz_testrt_net_parse_loopback("http://example.test/x", &port, path,
                                          sizeof path) == 0);
       assert(sz_testrt_net_parse_loopback("https://127.0.0.1/x", &port, path,
-                                         sizeof path) == 0);
+                                         sizeof path) == 1);
+      assert(port == 443);
+      assert(strcmp(path, "/x") == 0);
       assert(sz_testrt_net_parse_loopback("http://127.0.0.1:99999/x", &port,
                                          path, sizeof path) == 0);
 
@@ -5745,6 +5764,119 @@ int main(void) {
       sz_alloc_stats(&live_bytes, &live_count);
       assert(live_count == base_count);
       assert(live_bytes == base_bytes);
+    }
+
+    /* HTTP verbs, HTTPS stubs, TCP, and UDP under TestRuntime. */
+    {
+      SzString *url;
+      SzString *body;
+      SzPair *pair;
+      SzNetSock *ln;
+      SzNetSock *a;
+      SzNetSock *b;
+      sz_testrt_net_stub("http://example.test/post", "posted");
+      url = sz_string_from_cstr("http://example.test/post");
+      body = sz_string_from_cstr("abc");
+      r = sz_io_unsafe_run(sz_net_http_post(url, body));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "posted") == 0);
+      sz_release(url);
+      sz_release(body);
+      sz_release(r.value);
+
+      sz_testrt_net_stub("https://example.test/s", "tls-ok");
+      url = sz_string_from_cstr("https://example.test/s");
+      r = sz_io_unsafe_run(sz_net_http_get(url));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "tls-ok") == 0);
+      sz_release(url);
+      sz_release(r.value);
+
+      url = sz_string_from_cstr("http://127.0.0.1:8080/echo");
+      body = sz_string_from_cstr("xyz");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_echo_req, NULL),
+                                    sz_net_http_post(url, body)));
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(strcmp(sz_string_cstr((SzString *)pair->right), "POST:/echo:xyz") == 0);
+      sz_release(url);
+      sz_release(body);
+      sz_pair_free(pair);
+
+      url = sz_string_from_cstr("http://127.0.0.1:8080/h");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_echo_req, NULL),
+                                    sz_net_http_head(url)));
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(strcmp(sz_string_cstr((SzString *)pair->right), "HEAD:/h:") == 0);
+      sz_release(url);
+      sz_pair_free(pair);
+
+      r = sz_io_unsafe_run(sz_net_tcp_listen(19091));
+      assert(r.ok);
+      ln = (SzNetSock *)r.value;
+      {
+        SzString *host = sz_string_from_cstr("127.0.0.1");
+        r = sz_io_unsafe_run(both_drop(sz_net_tcp_accept(ln),
+                                      sz_net_tcp_connect(host, 19091)));
+        sz_release(host);
+        assert(r.ok);
+        pair = (SzPair *)r.value;
+        a = (SzNetSock *)pair->left;
+        b = (SzNetSock *)pair->right;
+        sz_retain(a);
+        sz_retain(b);
+        sz_pair_free(pair);
+        body = sz_string_from_cstr("hi");
+        r = sz_io_unsafe_run(sz_net_tcp_write(b, body));
+        assert(r.ok);
+        sz_release(body);
+        r = sz_io_unsafe_run(sz_net_tcp_read(a, 8));
+        assert(r.ok);
+        assert(strcmp(sz_string_cstr((SzString *)r.value), "hi") == 0);
+        sz_release(r.value);
+        r = sz_io_unsafe_run(sz_net_tcp_close(a));
+        assert(r.ok);
+        r = sz_io_unsafe_run(sz_net_tcp_close(b));
+        assert(r.ok);
+        r = sz_io_unsafe_run(sz_net_tcp_close(ln));
+        assert(r.ok);
+        sz_release(a);
+        sz_release(b);
+        sz_release(ln);
+      }
+
+      r = sz_io_unsafe_run(sz_net_udp_bind(19092));
+      assert(r.ok);
+      a = (SzNetSock *)r.value;
+      r = sz_io_unsafe_run(sz_net_udp_bind(19093));
+      assert(r.ok);
+      b = (SzNetSock *)r.value;
+      {
+        SzString *host = sz_string_from_cstr("127.0.0.1");
+        SzString *msg = sz_string_from_cstr("ping");
+        r = sz_io_unsafe_run(sz_net_udp_send(a, host, 19093, msg));
+        assert(r.ok);
+        sz_release(host);
+        sz_release(msg);
+        r = sz_io_unsafe_run(sz_net_udp_recv(b, 32));
+        assert(r.ok);
+        pair = (SzPair *)r.value;
+        {
+          SzPair *inner = (SzPair *)pair->right;
+          assert(strcmp(sz_string_cstr((SzString *)inner->right), "ping") == 0);
+          assert(sz_unbox_i64(inner->left) == 19092);
+        }
+        sz_pair_free(pair);
+        r = sz_io_unsafe_run(sz_net_udp_close(a));
+        assert(r.ok);
+        r = sz_io_unsafe_run(sz_net_udp_close(b));
+        assert(r.ok);
+        sz_release(a);
+        sz_release(b);
+      }
     }
 
     /* Console: argv override, stdin feed, println capture (+ echo) */
@@ -6484,6 +6616,34 @@ int main(void) {
     assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }
 
+  /* Live POST: handler reads the request body. */
+  {
+    SzString *url = sz_string_from_cstr("http://127.0.0.1:18483/echo");
+    SzString *body = sz_string_from_cstr("hi");
+    SzPair *pair;
+    r = sz_io_unsafe_run(both_drop(sz_net_serve_once(18483, serve_echo_req, NULL),
+                                  sz_net_http_post(url, body)));
+    sz_release(url);
+    sz_release(body);
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(pair && pair->right);
+    assert(strcmp(sz_string_cstr((SzString *)pair->right), "POST:/echo:hi") == 0);
+    sz_pair_free(pair);
+  }
+
+  /* Live HTTPS against a plain HTTP server fails the handshake. */
+  {
+    SzString *url = sz_string_from_cstr("https://127.0.0.1:18484/x");
+    r = sz_io_unsafe_run(both_drop(sz_net_serve_once(18484, serve_path_ok, NULL),
+                                  sz_net_http_get(url)));
+    sz_release(url);
+    assert(!r.ok);
+    assert(r.error);
+    assert(!strstr(sz_string_cstr(r.error->message), "only http"));
+    sz_error_free(r.error);
+  }
+
   /* Client connects and never sends GET: serve fails in ~1s instead of hanging. */
   {
     pthread_t th;
@@ -6526,7 +6686,7 @@ int main(void) {
     r = sz_io_unsafe_run(sz_net_serve_once(port, serve_path_ok, NULL));
     pthread_join(th, NULL);
     assert(!r.ok);
-    assert(r.error && strstr(sz_string_cstr(r.error->message), "expected HTTP GET"));
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "expected HTTP request"));
     sz_error_free(r.error);
   }
 

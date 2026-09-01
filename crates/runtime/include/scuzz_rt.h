@@ -33,7 +33,8 @@ void sz_alloc_set_panic_dump(const char *path);
 const char *sz_alloc_panic_dump_path(void);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
  * streams, resources, errors, Ref / Queue / Deferred, Either, pair, Builder). List cells retain heads and shared tails. IO
- * constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
+ * constructors take child IO nodes. Non-RC sz_alloc pointers no-op.
+ * Net sockets use SZ_RC_NETSOCK. */
 enum {
   SZ_RC_RAW = 0,
   SZ_RC_STRING = 1,
@@ -51,7 +52,8 @@ enum {
   SZ_RC_EITHER = 13,
   SZ_RC_PAIR = 14,
   SZ_RC_BUILDER = 15,
-  SZ_RC_KIND_COUNT = 16
+  SZ_RC_NETSOCK = 16,
+  SZ_RC_KIND_COUNT = 17
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
@@ -60,7 +62,7 @@ void sz_release(void *ptr);
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
 /* Sum of RC counts on live RC blocks. Raw sz_alloc blocks add 0. */
 uint64_t sz_alloc_rc_sum(void);
-/* Live bytes and count for one kind (`SZ_RC_RAW` … `SZ_RC_BUILDER`). */
+/* Live bytes and count for one kind (`SZ_RC_RAW` … `SZ_RC_NETSOCK`). */
 void sz_alloc_kind_stats(uint32_t kind, size_t *bytes, size_t *count);
 /* Dump key for `kind` (`raw`, `string`, …). Unknown kinds use `raw`. */
 const char *sz_alloc_kind_name(uint32_t kind);
@@ -891,9 +893,35 @@ int64_t sz_clock_monotonic_ms_sync(void); /* sync read for UI pump dt */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 
-SzIo *sz_net_http_get(SzString *url); /* IO[String] body; 2xx; 1 MiB; A+AAAA answer RRs */
-SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one GET; 1s req/write; 127.0.0.1 and/or ::1 */
+SzIo *sz_net_http_get(SzString *url); /* IO[String] body; 2xx; 1 MiB; http:// or https:// */
+SzIo *sz_net_http_post(SzString *url, SzString *body);
+SzIo *sz_net_http_put(SzString *url, SzString *body);
+SzIo *sz_net_http_patch(SzString *url, SzString *body);
+SzIo *sz_net_http_delete(SzString *url);
+SzIo *sz_net_http_head(SzString *url);
+SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one request; handler gets (path, method, body) */
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; drop bad clients/handlers */
+/* Blessed TCP. Listen is localhost. Connect takes IPv4/IPv6 literals or localhost. */
+SzIo *sz_net_tcp_connect(SzString *host, int64_t port); /* IO[SzNetSock] */
+SzIo *sz_net_tcp_listen(int64_t port);                  /* IO[SzNetSock] */
+SzIo *sz_net_tcp_accept(void *listener);                /* IO[SzNetSock] */
+SzIo *sz_net_tcp_read(void *conn, int64_t n);           /* IO[String] */
+SzIo *sz_net_tcp_write(void *conn, SzString *s);        /* IO[Unit] */
+SzIo *sz_net_tcp_close(void *sock);                     /* IO[Unit] */
+/* Blessed UDP. Bind 0 picks an ephemeral port. Recv is (host, port, data). */
+SzIo *sz_net_udp_bind(int64_t port); /* IO[SzNetSock] */
+SzIo *sz_net_udp_send(void *sock, SzString *host, int64_t port, SzString *data);
+SzIo *sz_net_udp_recv(void *sock, int64_t n); /* IO[(String, Int, String)] */
+SzIo *sz_net_udp_close(void *sock);
+typedef struct SzNetSock {
+  int fd;
+  int fd6;
+  int kind; /* 1 tcp, 2 listen, 3 udp */
+  int fake_id;
+  int64_t port;
+} SzNetSock;
+void sz_net_sock_on_free(SzNetSock *s);
+void sz_testrt_net_sock_gone(SzNetSock *s);
 /* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
 /* Test-only: Host header value for httpGet (RFC 9110). */
@@ -957,14 +985,30 @@ SzIo *sz_testrt_fs_mkdirs(SzString *path);
 SzIo *sz_testrt_fs_canonicalize(SzString *path);
 
 void sz_testrt_net_stub(const char *url, const char *body);
-void sz_testrt_net_inject_request(const char *path); /* replace queue with one GET path */
-void sz_testrt_net_queue_request(const char *path);  /* append a GET path */
+void sz_testrt_net_inject_request(const char *path); /* GET path, empty body */
+void sz_testrt_net_queue_request(const char *path);
+void sz_testrt_net_inject_http(const char *method, const char *path,
+                              const char *body);
+void sz_testrt_net_queue_http(const char *method, const char *path,
+                             const char *body);
 int sz_testrt_net_serve_pending(void);
 int sz_testrt_net_serve_pending_port(int64_t port); /* injects plus mailbox items */
 char *sz_testrt_net_pop_request(void); /* owned; NULL if empty */
 int sz_testrt_net_is_fake(void);
 SzIo *sz_testrt_net_http_get(SzString *url);
-SzIo *sz_testrt_net_accept(int64_t port); /* IO[(String, Deferred|null)] */
+SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzString *body);
+SzIo *sz_testrt_net_accept(int64_t port); /* IO[(req, Deferred|null)] */
+SzIo *sz_testrt_net_tcp_connect(SzString *host, int64_t port);
+SzIo *sz_testrt_net_tcp_listen(int64_t port);
+SzIo *sz_testrt_net_tcp_accept(void *listener);
+SzIo *sz_testrt_net_tcp_read(void *conn, int64_t n);
+SzIo *sz_testrt_net_tcp_write(void *conn, SzString *s);
+SzIo *sz_testrt_net_tcp_close(void *sock);
+SzIo *sz_testrt_net_udp_bind(int64_t port);
+SzIo *sz_testrt_net_udp_send(void *sock, SzString *host, int64_t port,
+                            SzString *data);
+SzIo *sz_testrt_net_udp_recv(void *sock, int64_t n);
+SzIo *sz_testrt_net_udp_close(void *sock);
 void sz_testrt_net_cancel_accept(int64_t port);
 void sz_testrt_net_fail_mailbox(int64_t port, SzError *err);
 /* 1 when `url` is http loopback (`127.0.0.1` / `localhost` / `::1`). */

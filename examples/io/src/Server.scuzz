@@ -1,13 +1,62 @@
-def handle(path: String): IO[String] =
-  for {
-    _ <- IO.println(s"served:$path")
-  } yield s"ok:$path"
+def handle(req: (String, String, String)): IO[String] =
+  req match {
+    case (path, method, body) => for {
+  _ <- IO.println(s"served:$method:$path:$body")
+} yield s"ok:$path"
+  }
 
 def showPing(p: (Unit, String)): IO[Unit] =
   p match {
     case (_, body) => IO.println(s"ping:$body")
   }
 
+def runHttp(): IO[Unit] =
+  IO.both(Net.serveOnce(8080, handle), Net.httpPost("http://127.0.0.1:8080/ping", "hi")).flatMap(p => showPing(p))
+
+def echoServer(ln: Any): IO[Unit] =
+  for {
+    c <- Net.tcpAccept(ln)
+    s <- Net.tcpRead(c, 16)
+    _ <- Net.tcpWrite(c, s)
+    _ <- Net.tcpClose(c)
+  } yield ()
+
+def echoClient(): IO[Unit] =
+  for {
+    c <- Net.tcpConnect("127.0.0.1", 9090)
+    _ <- Net.tcpWrite(c, "hi")
+    s <- Net.tcpRead(c, 16)
+    _ <- Net.tcpClose(c)
+    _ <- IO.println(s"tcp:$s")
+  } yield ()
+
+def runTcp(): IO[Unit] =
+  for {
+    ln <- Net.tcpListen(9090)
+    sock = Resource.make(IO.pure(ln), s => Net.tcpClose(s))
+    _ <- Resource.use(sock, s => IO.both(echoServer(s), echoClient()))
+  } yield ()
+
+def showUdp(got: (String, Int, String)): IO[Unit] =
+  got match {
+    case (_, _, data) => IO.println(s"udp:$data")
+  }
+
+def runUdp(): IO[Unit] =
+  for {
+    a <- Net.udpBind(19091)
+    b <- Net.udpBind(19092)
+    _ <- Net.udpSend(a, "127.0.0.1", 19092, "pong")
+    got <- Net.udpRecv(b, 16)
+    _ <- showUdp(got)
+    _ <- Net.udpClose(a)
+    _ <- Net.udpClose(b)
+  } yield ()
+
 def run(): IO[Unit] =
-  IO.both(Net.serveOnce(8080, path => handle(path)), Net.httpGet("http://127.0.0.1:8080/ping")).flatMap(p => showPing(p))
+  for {
+    _ <- runHttp()
+    _ <- runTcp()
+    _ <- runUdp()
+  } yield ()
 
