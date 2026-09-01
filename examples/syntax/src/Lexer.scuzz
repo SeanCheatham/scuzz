@@ -251,9 +251,6 @@ def _lexDec(src: String, start: Int, i: Int, n: Int, acc: List[Tok]): List[Tok] 
 def _lexNumFracVal(src: String, start: Int, j: Int, n: Int, acc: List[Tok]): List[Tok] =
   if (j < Str.len(src) && _ch(src, j) == 46 && j + 1 < Str.len(src) && _isDigit(_ch(src, j + 1))) _lexNumExp(src, start, _skipDigits(src, j + 1), true, acc) else if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, acc) else lexAt(src, j, Tok.Int(n) :: acc)
 
-def _lexNumFrac(src: String, start: Int, j: Int, acc: List[Tok]): List[Tok] =
-  if (j < Str.len(src) && _ch(src, j) == 46 && j + 1 < Str.len(src) && _isDigit(_ch(src, j + 1))) _lexNumExp(src, start, _skipDigits(src, j + 1), true, acc) else _lexNumExp(src, start, j, false, acc)
-
 def _lexNumExp(src: String, start: Int, j: Int, isF: Bool, acc: List[Tok]): List[Tok] =
   if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, acc) else if (isF) lexAt(src, j, Tok.Float(Str.slice(src, start, j)) :: acc) else lexAt(src, j, Tok.Int(Str.toInt(Str.slice(src, start, j), 0)) :: acc)
 

@@ -36,9 +36,6 @@ def noFun(): List[Fun] =
 def noEn(): List[En] =
   []
 
-def kindTok(p: Param): String =
-  kindTokE(p, noEn())
-
 def kindTokE(p: Param, ens: List[En]): String =
   if (p.ty == "Int") intTok(p.w) else if (p.ty == "String") "s" else if (p.ty == "Bool") "b" else if (isListTy(p.ty)) listTok(p.ty, ens, 0) else adtTok(p.ty, ens, 0)
 
@@ -148,20 +145,8 @@ def allFriendly(ps: List[Param]): Bool =
 def isDrive(d: Fun): Bool =
   d.ret == "Bool" && allFriendly(d.params)
 
-def isTlP(p: Param): Bool =
-  p.ty == "Timeline"
-
-def allTl(ps: List[Param]): Bool =
-  List.isEmpty(ps) || isTlP(List.head(ps)) && allTl(List.tail(ps))
-
-def isRel(d: Fun): Bool =
-  d.ret == "Verdict" && List.len(d.params) == 2 && allTl(d.params)
-
 def isClaim(d: Fun): Bool =
   d.ret == "Verdict"
-
-def isSess(d: Fun): Bool =
-  d.ret == "Verdict" && List.len(d.params) == 1 && allTl(d.params)
 
 def drives(ds: List[Fun]): List[Fun] =
   if (List.isEmpty(ds)) noFun() else drives1(List.head(ds), List.tail(ds))
@@ -169,29 +154,11 @@ def drives(ds: List[Fun]): List[Fun] =
 def drives1(d: Fun, rest: List[Fun]): List[Fun] =
   if (isDrive(d)) d :: drives(rest) else drives(rest)
 
-def rels(ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) noFun() else rels1(List.head(ds), List.tail(ds))
-
-def rels1(d: Fun, rest: List[Fun]): List[Fun] =
-  if (isRel(d)) d :: rels(rest) else rels(rest)
-
-def specOf(d: Fun): String =
-  specOfE(d, noEn())
-
 def specOfE(d: Fun, ens: List[En]): String =
   if (List.isEmpty(d.params)) d.name else Str.concat(d.name, Str.concat(" ", specs(d.params, ens)))
 
 def specs(ps: List[Param], ens: List[En]): String =
   if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) kindTokE(List.head(ps), ens) else Str.concat(kindTokE(List.head(ps), ens), Str.concat(" ", specs(List.tail(ps), ens)))
-
-def seedArg(p: Param): String =
-  if (p.ty == "Int") "0" else if (p.ty == "Bool") "false" else "a"
-
-def seedArgs(ps: List[Param]): String =
-  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) seedArg(List.head(ps)) else Str.concat(seedArg(List.head(ps)), Str.concat(" ", seedArgs(List.tail(ps))))
-
-def seedOf(d: Fun): String =
-  if (List.isEmpty(d.params)) Str.concat("drive ", d.name) else Str.concat("drive ", Str.concat(d.name, Str.concat(" ", seedArgs(d.params))))
 
 def cmpStr(a: String, b: String): Int =
   cmpStr2(a, b, 0)
@@ -392,14 +359,6 @@ def parseVerify(src: String): List[Fun] =
 def parseVerifyProg(p: Prog): List[Fun] =
   p match {
     case Prog(_, _, _, _, _, _, defs, _, _) => drives(defs)
-  }
-
-def parseRels(src: String): List[Fun] =
-  parseRelsProg(Parse.parse(Lexer.lex(src)))
-
-def parseRelsProg(p: Prog): List[Fun] =
-  p match {
-    case Prog(_, _, _, _, _, _, defs, _, _) => rels(defs)
   }
 
 def parseClaims(src: String): List[Fun] =

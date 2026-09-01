@@ -76,12 +76,6 @@ def _identOf(t: Tok): String =
     case _ => ""
   }
 
-def _strOf(t: Tok): String =
-  t match {
-    case Tok.Str(s) => s
-    case _ => ""
-  }
-
 def _intOf(t: Tok): Int =
   t match {
     case Tok.Int(n) => n

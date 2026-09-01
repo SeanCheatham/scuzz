@@ -67,9 +67,6 @@ def linkGpu(h: String): IO[Bool] =
 def linkLineUi(clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool, mac: Bool): String =
   Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(h), Str.concat(uiFlags1(mac), Str.concat(forceLoad(mac, deskLib(h)), Str.concat(uiFlags2(mac), Str.concat(forceLoad(mac, mobLib(h)), Str.concat(uiFlags3(gpu, mac), exe))))))))))))
 
-def linkLineFor(hasUi: Bool, clang: String, ll: String, lib: String, exe: String, h: String): String =
-  if (hasUi) linkLineUi(clang, ll, lib, exe, h, false, false) else linkLine(clang, ll, lib, exe)
-
 def hostMac(): IO[Bool] =
   Sys.exec("uname -s").map(r => Str.trim(r._2) == "Darwin")
 
@@ -211,9 +208,6 @@ def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[
 
 def emitDirAlwaysGot(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
   crateHome().flatMap(h => emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib(h))).flatMap(_ => IO.pure(())))
-
-def emitFuzz(dir: String, outDir: String): IO[Unit] =
-  fuzzCollect(dir).flatMap(files => emitDirAlways(dir, outDir, files))
 
 def fuzzCollect(dir: String): IO[List[(String, String)]] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzCollectMan(dir, Manifest.parse(toml)))
@@ -803,9 +797,6 @@ def xcodeMiss(): String =
 
 def ndkMiss(): String =
   "missing Android NDK — install the NDK, then set ANDROID_NDK_HOME"
-
-def sdkMiss(): String =
-  "missing Android SDK — install the Android SDK, then set ANDROID_HOME"
 
 def badTarget(t: String): String =
   Str.concat("unknown package target '", Str.concat(t, "' (host|android|ios|all). Example: scuzz package --target host"))
