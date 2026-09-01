@@ -1,6 +1,4 @@
-/* Thin C bridge: sk_capi.h ↔ Skia helpers in sk_capi_skia.cpp.
- * Keeps opaque Sk* typedefs out of the Skia C++ translation unit.
- */
+/* C wrappers for sk_capi_skia.cpp. Opaque Sk* stays out of the C++ TU. */
 #include "sk_capi.h"
 
 void *scuzz_skia_surface_make(int width, int height);

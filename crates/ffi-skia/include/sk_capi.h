@@ -1,8 +1,6 @@
-/* Thin Skia-shaped C ABI for Scuzz Lang.
- *
- * Default backend is a fetched Skia CPU prebuilt (third_party/skia/PIN).
- * In-tree sk_sw stays available with SCUZZ_SKIA=sk_sw for offline/exotic
- * hosts (see third_party/skia/README.md). Callers depend only on this header.
+/* Thin Skia-shaped C ABI. Default is the pinned CPU prebuilt
+ * (third_party/skia/PIN). SCUZZ_SKIA=sk_sw uses in-tree software.
+ * Callers depend only on this header.
  */
 #ifndef SK_CAPI_H
 #define SK_CAPI_H
@@ -59,10 +57,8 @@ float sk_paint_get_text_size(const SkPaint *paint);
 
 /* Advance width of UTF-8 text at font_px (sk_sw: monospace n * font_px). */
 float sk_font_measure_string(const char *text, float font_px);
-/* Monospace cell and advance. Cell is max(measure("M"), measure("W")).
- * Measure is code-point count times cell. Draw places each code point on that
- * grid. View.editor uses these so click-to-caret columns match on every
- * presenter (sk_sw, Skia CPU, GPU). View.text stays proportional. */
+/* Monospace cell = max(measure("M"), measure("W")). Measure/draw use that
+ * grid so editor caret columns match every presenter. View.text stays proportional. */
 float sk_font_mono_cell(float font_px);
 float sk_font_measure_mono_string(const char *text, float font_px);
 void sk_canvas_draw_mono_string(SkCanvas *canvas, const char *text, float x,
