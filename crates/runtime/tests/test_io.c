@@ -4956,6 +4956,50 @@ int main(void) {
           sz_string_free(rev);
           sz_string_free(empty);
         }
+        {
+          /* UTF-8 code-point ops: "a\xc3\xa9z" is a, e-acute, z. */
+          const char *acute = "a\xc3\xa9z";
+          SzString *u = sz_string_from_cstr(acute);
+          SzString *sl = sz_string_uslice(u, 1, 2);
+          SzString *tk = sz_string_utake(u, 2);
+          SzString *dr = sz_string_udrop(u, 2);
+          SzString *tr = sz_string_utake_right(u, 2);
+          SzString *drr = sz_string_udrop_right(u, 2);
+          SzString *rv = sz_string_ureverse(u);
+          SzString *ndl = sz_string_from_cstr("z");
+          assert(sz_string_len(u) == 4);      /* bytes stay bytes */
+          assert(sz_string_ulen(u) == 3);
+          assert(sz_string_uchar_at(u, 0) == 'a');
+          assert(sz_string_uchar_at(u, 1) == 0xE9);
+          assert(sz_string_uchar_at(u, 2) == 'z');
+          assert(sz_string_uchar_at(u, 3) == -1);
+          assert(sz_string_len(sl) == 2 && memcmp(sz_string_cstr(sl), "\xc3\xa9", 2) == 0);
+          assert(sz_string_ulen(tk) == 2 && sz_string_uchar_at(tk, 1) == 0xE9);
+          assert(strcmp(sz_string_cstr(dr), "z") == 0);
+          assert(sz_string_ulen(tr) == 2 && sz_string_uchar_at(tr, 0) == 0xE9);
+          assert(strcmp(sz_string_cstr(drr), "a") == 0);
+          assert(sz_string_ulen(rv) == 3 && sz_string_uchar_at(rv, 0) == 'z' && sz_string_uchar_at(rv, 1) == 0xE9);
+          assert(sz_string_uindex_of(u, ndl) == 2);
+          assert(sz_string_ulast_index_of(u, ndl) == 2);
+          assert(sz_string_uindex_of(u, u) == 0);
+          sz_string_free(u);
+          sz_string_free(sl);
+          sz_string_free(tk);
+          sz_string_free(dr);
+          sz_string_free(tr);
+          sz_string_free(drr);
+          sz_string_free(rv);
+          sz_string_free(ndl);
+        }
+        {
+          /* ASCII strings take the byte fast path with identical results. */
+          SzString *a = sz_string_from_cstr("ab");
+          assert(a->is_ascii == 1);
+          assert(sz_string_ulen(a) == 2);
+          assert(sz_string_uchar_at(a, 1) == 'b');
+          assert(strcmp(sz_string_cstr(sz_string_uslice(a, 0, 1)), "a") == 0);
+          sz_string_free(a);
+        }
         sz_string_free(t);
         sz_string_free(d);
         sz_string_free(t0);

@@ -84,6 +84,7 @@ int sz_alloc_format_heap(char *buf, size_t cap, int mark);
 typedef struct SzString {
   size_t len;
   char *data; /* len bytes + trailing NUL */
+  uint8_t is_ascii;
 } SzString;
 
 SzString *sz_string_from_cstr(const char *cstr);
@@ -106,7 +107,7 @@ SzString *sz_builder_result(const SzBuilder *b);
 void sz_builder_free(SzBuilder *b);
 /* Closed-form 0+1+…+n for n >= 0. n < 0 is 0. Independent of a Scuzz loop. */
 int64_t sz_oracle_sum_to(int64_t n);
-int64_t sz_string_len(const SzString *s);
+int64_t sz_string_len(const SzString *s); /* byte count (internal buffers; `Str.byteLen`) */
 SzString *sz_string_slice(const SzString *s, int64_t start, int64_t end);
 int sz_string_eq(const SzString *a, const SzString *b);
 int64_t sz_string_char_at(const SzString *s, int64_t index); /* byte as i64; -1 OOB */
@@ -114,6 +115,19 @@ SzString *sz_string_from_int(int64_t n);
 SzString *sz_string_from_float(double x);
 int64_t sz_string_index_of(const SzString *s, const SzString *needle);
 int64_t sz_string_last_index_of(const SzString *s, const SzString *needle);
+
+/* UTF-8 code-point ops: the language `Str.*` surface. ASCII strings take the
+ * byte fast path. */
+int64_t sz_string_ulen(const SzString *s);
+int64_t sz_string_uchar_at(const SzString *s, int64_t index); /* code point; -1 OOB */
+SzString *sz_string_uslice(const SzString *s, int64_t start, int64_t end);
+SzString *sz_string_utake(const SzString *s, int64_t n);
+SzString *sz_string_udrop(const SzString *s, int64_t n);
+SzString *sz_string_utake_right(const SzString *s, int64_t n);
+SzString *sz_string_udrop_right(const SzString *s, int64_t n);
+SzString *sz_string_ureverse(const SzString *s);
+int64_t sz_string_uindex_of(const SzString *s, const SzString *needle);
+int64_t sz_string_ulast_index_of(const SzString *s, const SzString *needle);
 /* First `n` bytes. `n` <= 0 is empty. */
 SzString *sz_string_take(const SzString *s, int64_t n);
 /* Skip `n` bytes. `n` <= 0 copies `s`. */
