@@ -1,17 +1,15 @@
 # Next slice
 
-UTF-8 `String`: `Str.*` indexes Unicode code points, not bytes.
+Migrate LSP framing to the byte kits (release-gated).
 
-Today `Str.charAt` returns a byte, `Str.len` counts bytes, and `Str.slice` / `take` / `drop` / `takeRight` / `dropRight` / `reverse` / `indexOf` / `lastIndexOf` work in bytes. Direction: code points. Gap 2: [`gaps.md`](gaps.md). Lock: [`vision.md`](vision.md#signal-string-and-errors).
+`Str.len` now counts code points. The LSP framing in `examples/compiler/src/Lsp.scuzz` and `examples/editor/src/Lsp.scuzz` still uses `Str.len` / `Str.slice` for `Content-Length`, which is a byte count. The bootstrap compiler is the newest GitHub release, so the sources cannot name `Str.byteLen` / `Str.byteSlice` until a release carries them.
 
 ## Done when
 
-- `Str.len` counts code points. `Str.charAt` returns the code point at a code-point index (`-1` out of range). `Str.slice` / `take` / `drop` / `takeRight` / `dropRight` take code-point indices. `Str.reverse` reverses code points. `Str.indexOf` / `lastIndexOf` report code-point indices.
-- New kit `Str.byteLen` keeps the byte count for protocol framing. Editor and compiler LSP `Content-Length` use it.
-- Runtime byte ops stay for internal C (HTTP, sockets, JSON buffers).
-- ASCII text behaves identically. A non-ASCII proof: an example or scratch package slices and counts a multibyte string.
-- `scuzz check` / `test` / `fuzz --iterations 0` on the example suite match the pre-slice host baseline. Toolchain self-compile stays green.
+- A `v*` release exists whose `scuzz` emits the UTF-8 kits.
+- `frame()` uses `Str.byteLen(body)`. The read paths use `Str.byteLen` for `fillTo` and `Str.byteSlice` for the body cut.
+- `scuzz check` on the toolchain stays green before and after.
 
 ## Out of slice
 
-Case mapping stays ASCII (`Str.toLower` / `toUpper` / `capitalize`). TextField / editor caret stays byte offsets. Grapheme clusters, normalization, and collation are not kits.
+Everything else. Do not start thesis-critical gap work from this note; gap order lives in [`gaps.md`](gaps.md).

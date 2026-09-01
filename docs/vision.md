@@ -186,7 +186,7 @@ Close these before more widgets or Net surface.
 
 - **Named Signals.** In: a Signal publishes its `for` binder name (`count = Signal.int(0)` → `"count"`). Claims and `Property.signal*` read that name. `Verdict.alwaysHas` and `Verdict.afterHit` cover the always-visible and after-hit-shows folds. Dump slot ids stay an implementation detail. The integer-id kit is gone.
 - **`Signal[T]`.** In: `Signal.list` holds `List[T]` over records and enums; `View.each` binds the element type (record fields work in the body). A record list dumps its count only (`list[N] name = <count>`). Direction: one generic cell (`Signal.map` stays `Int => String`; no non-list `Signal[T]` cell yet). Encoded strings as domain values are not.
-- **UTF-8 `String`.** Direction: `Str.*` indexes Unicode, not bytes. Current ops are bytes. Close this before more text-field or editor features.
+- **UTF-8 `String`.** In: `Str.*` indexes Unicode code points (`len` / `charAt` / `slice` / `take` / `drop` / `takeRight` / `dropRight` / `reverse` / `indexOf` / `lastIndexOf`). `Str.byteLen` / `Str.byteSlice` keep bytes for protocol framing. Case maps stay ASCII. TextField and editor caret offsets stay bytes. ASCII strings take a byte fast path in the runtime.
 - **Typed fail.** Current `IO[T]` fails with a `String` message. Direction: typed `E` without `R`. Do not add environment `R`. Do not add user FFI.
 
 ### Modules and source shape
@@ -276,7 +276,7 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ## Open work
 
-Close thesis-critical gaps in this order: `Signal[T]`, UTF-8 `String`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). Next slice: [`plans.md`](plans.md).
+Close thesis-critical gaps in this order: `Signal[T]`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). Next slice: [`plans.md`](plans.md).
 
 Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. `scuzz ide` launches the bundled `[ui]` package (`examples/editor` / `SCUZZ_HOME/ide`). Headless is part of every UI slice. `scuzz test --differential` compares structural dumps across render backends.
 

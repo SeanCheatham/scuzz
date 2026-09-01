@@ -740,11 +740,19 @@ void sz_release(void *ptr) {
 
 SzString *sz_string_from_bytes(const char *bytes, size_t len) {
   SzString *s = (SzString *)sz_rc_alloc(sizeof(SzString), SZ_RC_STRING);
+  size_t i;
   s->len = len;
   s->data = (char *)sz_alloc(len + 1);
   if (len)
     memcpy(s->data, bytes, len);
   s->data[len] = '\0';
+  s->is_ascii = 1;
+  for (i = 0; i < len; i++) {
+    if (((unsigned char)s->data[i]) >= 0x80) {
+      s->is_ascii = 0;
+      break;
+    }
+  }
   return s;
 }
 
@@ -979,6 +987,196 @@ SzString *sz_string_reverse(const SzString *s) {
   out = sz_string_from_bytes(buf, n);
   sz_free(buf);
   return out;
+}
+
+/* --- UTF-8 code-point views (the language `Str.*` ops) --------------------- */
+/* Byte ops above stay for internal buffers (HTTP, sockets, JSON). An ASCII
+ * string takes the byte fast path everywhere below. */
+
+static int utf8_cont(unsigned char c) { return (c & 0xC0) == 0x80; }
+
+/* Decode the code point whose leader is at p. Invalid bytes decode as the
+ * byte itself and advance one byte. */
+static uint32_t utf8_decode(const char *p, size_t left, size_t *used) {
+  unsigned char c = (unsigned char)p[0];
+  if (c < 0x80) {
+    *used = 1;
+    return c;
+  }
+  if ((c & 0xE0) == 0xC0 && left >= 2 && utf8_cont((unsigned char)p[1])) {
+    *used = 2;
+    return ((uint32_t)(c & 0x1F) << 6) | (uint32_t)(p[1] & 0x3F);
+  }
+  if ((c & 0xF0) == 0xE0 && left >= 3 && utf8_cont((unsigned char)p[1]) &&
+      utf8_cont((unsigned char)p[2])) {
+    *used = 3;
+    return ((uint32_t)(c & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) |
+           (uint32_t)(p[2] & 0x3F);
+  }
+  if ((c & 0xF8) == 0xF0 && left >= 4 && utf8_cont((unsigned char)p[1]) &&
+      utf8_cont((unsigned char)p[2]) && utf8_cont((unsigned char)p[3])) {
+    *used = 4;
+    return ((uint32_t)(c & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12) |
+           ((uint32_t)(p[2] & 0x3F) << 6) | (uint32_t)(p[3] & 0x3F);
+  }
+  *used = 1;
+  return c;
+}
+
+int64_t sz_string_ulen(const SzString *s) {
+  size_t i;
+  int64_t n = 0;
+  if (!s)
+    return 0;
+  if (s->is_ascii)
+    return (int64_t)s->len;
+  for (i = 0; i < s->len; i++) {
+    if (!utf8_cont((unsigned char)s->data[i]))
+      n++;
+  }
+  return n;
+}
+
+/* Byte offset of code-point index `cp`. Returns s->len when `cp` is the
+ * code-point count (one past the end), or -1 when out of range. */
+static int64_t utf8_cp_off(const SzString *s, int64_t cp) {
+  size_t i;
+  int64_t k = 0;
+  if (cp < 0)
+    return -1;
+  if (s->is_ascii)
+    return cp <= (int64_t)s->len ? cp : -1;
+  for (i = 0; i < s->len; i++) {
+    if (!utf8_cont((unsigned char)s->data[i])) {
+      if (k == cp)
+        return (int64_t)i;
+      k++;
+    }
+  }
+  return k == cp ? (int64_t)s->len : -1;
+}
+
+int64_t sz_string_uchar_at(const SzString *s, int64_t index) {
+  int64_t off;
+  size_t used;
+  if (!s || index < 0)
+    return -1;
+  off = utf8_cp_off(s, index);
+  if (off < 0 || (size_t)off >= s->len)
+    return -1;
+  return (int64_t)utf8_decode(s->data + off, s->len - (size_t)off, &used);
+}
+
+SzString *sz_string_uslice(const SzString *s, int64_t start, int64_t end) {
+  int64_t ulen;
+  int64_t a;
+  int64_t b;
+  if (!s || !s->data)
+    return sz_string_from_cstr("");
+  ulen = sz_string_ulen(s);
+  if (start < 0)
+    start = 0;
+  if (end > ulen)
+    end = ulen;
+  if (start > end)
+    start = end;
+  if (start == end)
+    return sz_string_from_cstr("");
+  if (s->is_ascii)
+    return sz_string_from_bytes(s->data + start, (size_t)(end - start));
+  a = utf8_cp_off(s, start);
+  b = utf8_cp_off(s, end);
+  if (a < 0)
+    a = (int64_t)s->len;
+  if (b < 0)
+    b = (int64_t)s->len;
+  if (a > b)
+    a = b;
+  return sz_string_from_bytes(s->data + a, (size_t)(b - a));
+}
+
+SzString *sz_string_utake(const SzString *s, int64_t n) {
+  if (n <= 0)
+    return sz_string_from_cstr("");
+  return sz_string_uslice(s, 0, n);
+}
+
+SzString *sz_string_udrop(const SzString *s, int64_t n) {
+  int64_t len = sz_string_ulen(s);
+  if (n <= 0)
+    return sz_string_uslice(s, 0, len);
+  return sz_string_uslice(s, n, len);
+}
+
+SzString *sz_string_utake_right(const SzString *s, int64_t n) {
+  int64_t len = sz_string_ulen(s);
+  if (n <= 0)
+    return sz_string_from_cstr("");
+  if (n >= len)
+    return sz_string_uslice(s, 0, len);
+  return sz_string_uslice(s, len - n, len);
+}
+
+SzString *sz_string_udrop_right(const SzString *s, int64_t n) {
+  int64_t len = sz_string_ulen(s);
+  if (n <= 0)
+    return sz_string_uslice(s, 0, len);
+  if (n >= len)
+    return sz_string_from_cstr("");
+  return sz_string_uslice(s, 0, len - n);
+}
+
+SzString *sz_string_ureverse(const SzString *s) {
+  size_t n;
+  size_t i = 0;
+  size_t w;
+  char *buf;
+  SzString *out;
+  if (!s || s->is_ascii)
+    return sz_string_reverse(s);
+  n = s->len;
+  w = n;
+  buf = (char *)sz_alloc(n + 1);
+  while (i < n) {
+    size_t used;
+    (void)utf8_decode(s->data + i, n - i, &used);
+    w -= used;
+    memcpy(buf + w, s->data + i, used);
+    i += used;
+  }
+  buf[n] = '\0';
+  out = sz_string_from_bytes(buf, n);
+  sz_free(buf);
+  return out;
+}
+
+/* Code-point count of the byte range [0, byte_end). */
+static int64_t utf8_cp_before(const SzString *s, int64_t byte_end) {
+  int64_t i;
+  int64_t k = 0;
+  for (i = 0; i < byte_end && i < (int64_t)s->len; i++) {
+    if (!utf8_cont((unsigned char)s->data[i]))
+      k++;
+  }
+  return k;
+}
+
+int64_t sz_string_uindex_of(const SzString *s, const SzString *needle) {
+  int64_t at = sz_string_index_of(s, needle);
+  if (at < 0 || !s || s->is_ascii)
+    return at;
+  return utf8_cp_before(s, at);
+}
+
+int64_t sz_string_ulast_index_of(const SzString *s, const SzString *needle) {
+  if (needle && needle->len == 0)
+    return sz_string_ulen(s);
+  {
+    int64_t at = sz_string_last_index_of(s, needle);
+    if (at < 0 || !s || s->is_ascii)
+      return at;
+    return utf8_cp_before(s, at);
+  }
 }
 
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix) {

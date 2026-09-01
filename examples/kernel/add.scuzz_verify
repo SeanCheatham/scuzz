@@ -13,3 +13,5 @@ def sumToTen(): Bool =
 def termDiff(t: Term): Bool =
   Main.termAgrees(t)
 
+def utf8Ops(): Bool =
+  Main.utf8Check() == 1

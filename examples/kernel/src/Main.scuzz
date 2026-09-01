@@ -675,6 +675,12 @@ def eqProof(): IO[Unit] =
 def get(): T =
   self.x
 
+def utf8Check(): Int =
+  if (Str.len("aéz日") == 4 && Str.byteLen("aéz日") == 7 && Str.charAt("aéz日", 1) == 233 && Str.charAt("aéz日", 3) == 26085 && Str.eq(Str.slice("aéz日", 2, 3), "z") && Str.eq(Str.reverse("aéz日"), "日zéa") && Str.eq(Str.take("aéz日", 2), "aé") && Str.eq(Str.drop("aéz日", 3), "日") && Str.eq(Str.takeRight("aéz日", 2), "z日") && Str.eq(Str.dropRight("aéz日", 2), "aé") && Str.indexOf("aéz日", "z") == 2 && Str.lastIndexOf("aéz日", "日") == 3) 1 else 0
+
+def utf8Proof(): IO[Unit] =
+  IO.println(s"utf8:${Str.fromInt(utf8Check())}")
+
 @main def main: IO[Unit] =
   for {
     c = Color.Red
@@ -827,4 +833,5 @@ b"""
     _ <- IO.println(s"tcol:${Str.fromInt(sumAcc([1, 2, 3], 0))}")
     _ <- IO.println(s"diff:${if (sumTo(10, 0) == Oracle.sumTo(10)) "y" else "n"}")
     _ <- builderProof()
+    _ <- utf8Proof()
   } yield ()

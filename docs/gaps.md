@@ -35,7 +35,7 @@ These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
 1. **`Signal[T]` and `View.each` over records** — In: `Signal.list` holds `List[T]` over records and enums; `View.each` binds the element type; studio keeps tasks as `List[Item]`; a record list dumps `list[N] name = <count>`. Open: one generic cell — `Signal.map` stays `Int => String` and there is no non-list `Signal[T]` cell. Direction: one generic cell and `View.each` over the element type.
 
-2. **UTF-8 `String`** — `Str.charAt` is a byte. Case maps ASCII. Reverse reverses bytes. Direction: UTF-8. Close this before more TextField or editor features.
+2. **UTF-8 `String`** — In: `Str.*` indexes code points; `Str.byteLen` / `Str.byteSlice` keep bytes for framing; the kernel `utf8Ops` drive oracle proves multibyte ops. Case maps stay ASCII by design. Caret offsets in TextField/editor stay bytes. LSP framing in `examples/compiler` / `examples/editor` still uses `Str.len` (correct while the bootstrap release predates the byte kits); migrate to `Str.byteLen` / `Str.byteSlice` after a release carries them.
 
 3. **Scuzz spans on panic and LSP** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Definition jumps to line 0. Rename is whole-file replace. Semantic tokens are empty. Panic does not print a Scuzz file and line. Goto-def, rename, hover, and completion must land on the right span. The dogfood IDE consumes that schema. It does not replace it.
 
