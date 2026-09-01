@@ -1,7 +1,7 @@
 [package]
 name = "tyck"
 version = "0.1.0"
-description = "Kernel typechecker: JSON diagnostics vs Rust scuzz check"
+description = "Kernel typechecker: JSON diagnostic oracles"
 
 [dependencies]
 compiler = { path = "../compiler" }
