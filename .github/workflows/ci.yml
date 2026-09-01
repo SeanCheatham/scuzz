@@ -416,6 +416,7 @@ jobs:
           grep -q "defN:8" /tmp/io.out
           grep -q "forkN:9" /tmp/io.out
           grep -q "fs:fs-note" /tmp/io.out
+          grep -q "rand:ok" /tmp/io.out
           grep -q "use:token" /tmp/io.out
           grep -q "release:token" /tmp/io.out
           grep -q "release:token2" /tmp/io.out
@@ -434,6 +435,7 @@ jobs:
           grep -q "exists:1" /tmp/io.out
           grep -q "miss:0" /tmp/io.out
           grep -q "fs:fs-note" /tmp/io.out
+          grep -q "rand:ok" /tmp/io.out
           grep -q "real:" /tmp/io.out
           grep -q "mono:" /tmp/io.out
           grep -q "kit:skip" /tmp/io.out

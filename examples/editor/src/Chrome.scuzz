@@ -18,7 +18,7 @@ def pickSource(dir: String): IO[String] =
     srcHits = scuzzNames(srcEnts)
     topEnts <- Fs.list(dir).handleErrorWith(_ => IO.pure([]))
     topHits = scuzzNames(topEnts)
-  } yield Fs.join(dir, preferredRel(hasMain, srcHits, topHits))
+  } yield Fs.join(dir, preferredRel(hasMain != 0, srcHits, topHits))
 
 def openBuffer(arg: String, isDir: Int): IO[String] =
   if (isDir == 0) IO.pure(arg) else pickSource(arg)

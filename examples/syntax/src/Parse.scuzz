@@ -45,9 +45,9 @@ record Im(tn: String, targs: List[String], forTy: String, methods: List[Fun])
 
 record Prog(pkg: String, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr)
 
-import Lexer.Tok
-
 record Toks(chunks: List[List[Tok]], n: Int)
+
+import Lexer.Tok
 
 def tokChunk(): Int =
   64
@@ -89,7 +89,7 @@ def _intOf(t: Tok): Int =
   }
 
 def _kit(s: String): Bool =
-  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property" || s == "Float"
+  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "Random" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property" || s == "Float"
 
 def _joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", _joinComma(List.tail(xs))))

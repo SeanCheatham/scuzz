@@ -28,6 +28,9 @@ def tyckMainTy(): Bool =
 def tyckArg(): Bool =
   Main.tyckDiff(Main.srcArg(), Main.wantArg())
 
+def tyckWatch(): Bool =
+  Main.tyckDiff(Main.srcWatch(), Main.wantWatch())
+
 def tyckIdemOk(): Bool =
   Main.tyckIdem(Main.srcOk())
 

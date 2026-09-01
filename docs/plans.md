@@ -1,8 +1,8 @@
 # Next slice
 
-Hardware device run.
+No current slice.
 
-`scuzz package --target android` packs the debug APK and installs it when adb lists a device. A USB serial wins over an emulator. iOS simulator and Android emulator proofs are in. A USB hardware run stays open (provisioning). Impeller / Skia GPU raster stays deferred.
+Hardware device run stays Unknown #1 in [`gaps.md`](gaps.md). It waits on a device. Impeller / Skia GPU raster stays deferred.
 
 Do not implement items deferred by decision.
 

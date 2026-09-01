@@ -286,19 +286,19 @@ def didOpen3(_root: String, open: List[Open], path: String, src: String): IO[Lis
   notify(publishDiags(uriOfPath(path), Check.check(src))).map(_ => open)
 
 def hover(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, hoverJson(hoverAt(src, posLine(j), posCol(j)))).map(_ => open))
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, hoverJson(hoverAt(src, posLine(j), posCol(j)))).flatMap(_ => IO.pure(open)))
 
 def complete(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, completeJson(src)).map(_ => open))
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, completeJson(src)).flatMap(_ => IO.pure(open)))
 
 def definition(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, defJson(uriOf(j), src, posLine(j), posCol(j))).map(_ => open))
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, defJson(uriOf(j), src, posLine(j), posCol(j))).flatMap(_ => IO.pure(open)))
 
 def format(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, formatJson(src)).map(_ => open))
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, formatJson(src)).flatMap(_ => IO.pure(open)))
 
 def rename(open: List[Open], j: Json, id: String): IO[List[Open]] =
-  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, renameJson(src, posLine(j), posCol(j), newNameOf(j))).map(_ => open))
+  srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, renameJson(src, posLine(j), posCol(j), newNameOf(j))).flatMap(_ => IO.pure(open)))
 
 def headerBody(acc: String): Int =
   headerBodyGo(acc, 0, 0)

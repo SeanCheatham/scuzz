@@ -6,7 +6,6 @@ import Parse.Arm
 import Parse.Bind
 import Parse.En
 import Parse.EnCase
-import Parse.pretty0
 import Parse.pretty
 
 def nl(): String =
@@ -428,7 +427,7 @@ def wrapFuns(stem: String, ds: List[Fun]): String =
 
 def wrapFun(_stem: String, d: Fun): String =
   d match {
-    case Fun(_, name, _, ps, _, body, _) => wrapFun2(name, wrapPs(ps), pretty0(body))
+    case Fun(_, name, _, ps, _, body, _) => wrapFun2(name, wrapPs(ps), Parse.pretty0(body))
   }
 
 def wrapFun2(name: String, ps: String, body: String): String =
@@ -448,7 +447,7 @@ def wrapRelFuns(ds: List[Fun]): String =
 
 def wrapRel(d: Fun): String =
   d match {
-    case Fun(_, name, _, ps, _, body, _) => wrapRel2(name, wrapPs(ps), pretty0(body))
+    case Fun(_, name, _, ps, _, body, _) => wrapRel2(name, wrapPs(ps), Parse.pretty0(body))
   }
 
 def wrapRel2(name: String, ps: String, body: String): String =

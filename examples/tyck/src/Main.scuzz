@@ -76,6 +76,14 @@ def srcArg(): String =
 def wantArg(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: add arg type mismatch: expected Int, got String\",\"file\":\"t/src/Main.scuzz\",\"line\":5,\"column\":26,\"end_line\":5,\"end_column\":36}]"
 
+def srcWatch(): String =
+  """@main def main: IO[Unit] =
+  Fs.watch(1)
+"""
+
+def wantWatch(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Fs.watch\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":13}]"
+
 def tyckDiff(src: String, want: String): Bool =
   Check.check(src) == want
 
@@ -83,7 +91,7 @@ def tyckIdem(src: String): Bool =
   Check.check(src) == Check.check(src)
 
 def allOk(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg())
+  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch())
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else "tyck-bad")
