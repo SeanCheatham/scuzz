@@ -51,56 +51,14 @@ Path deps only (`Manifest.scuzz`). Git, versioned, and hosted artifacts are dire
 
 ### Dogfood IDE
 
-A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling).
+A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling). Proof: `examples/editor` and the SDK `ide/` tree.
 
-`scuzz ide` launches the bundled package. Close-lists below stay the bar for that app. Headless is part of every UI slice. `examples/editor` is the proof and the SDK `ide/` tree.
-
-#### 1. Input and embedder
-
-Today Desktop (X11 and Cocoa) quit is window close. Live keys are `SZ_INPUT_KEY` (name, UTF-8 insert, Shift / Ctrl / Cmd / Alt, `key_repeat`). Headless `key <name>[+shift|+ctrl|+cmd|+alt|+repeat] [text]` matches `record.script`. Insert is UTF-8 at the TextField or focused-editor caret. A `+repeat` key uses the same session path as a discrete key: a held letter inserts again; Arrow / Backspace / Delete move or delete again. Desktop maps X11 auto-repeat and Cocoa `isARepeat` into that flag. Backspace and Delete chop a UTF-8 code point at the caret, or delete a selection. Arrows, Home, and End move the caret. On `View.editor`, Enter inserts a newline, Tab inserts two spaces, and ArrowUp / ArrowDown move by line. Shift+arrows and Shift+Home/End extend the selection. A TAP / `xy` on a TextField or editor sets the caret from measured advance. Pointer drag extends the selection. Headless `caret <n>` sets the byte offset. `select <a> <c>` sets the selection. Focused TextField and `View.editor` hold an IME **preedit** string. Headless `compose <text>` sets that preview (underlined; not in the committed buffer). `compose` with no text, or `commit`, inserts it at the caret (replaces a selection). `key Escape` cancels preedit. `[fields]` / `[editor]` dump `preedit="..."` when it is non-empty. `type` / `text` / `backspace` stay agent sugar through `SZ_INPUT_TEXT_EDIT`. `SZ_INPUT_KEYBOARD` is mobile soft-keyboard show/hide, not a key. Mobile IME may still send `TEXT_EDIT`. Pointer MOVE with no button is hover. `SzInputEvent` carries `pointer_button` (0 hover, 1 primary, 3 secondary). Headless `hover x y` and `secondary N` / `secondary x y` match Desktop record. `View.tooltip` shows its message on hover. `View.onSecondary` runs its handler on button 3. Session clipboard plus script `copy` / `cut` / `paste`; Headless `paste` is first-class. Desktop/Mobile sync the OS pasteboard in the embedder when present. OS IME candidate windows stay deferred (see above). Desktop X11 maps XIM preedit draw/done into `SZ_INPUT_COMPOSE`. Desktop Cocoa maps `NSTextInputClient` marked text and `insertText` into compose and text-edit events.
-
-Close:
+Open and deferred:
 
 - OS IME candidate-window placement stays deferred.
-
-#### 2. Editor widget
-
-Today `View.textField` is one line (`control_h`). It stores a caret byte offset and a selection range. Insert, Backspace, and Delete edit at the caret, or replace/delete the selection. Shift+arrows and pointer drag extend the selection. Arrows, Home, and End move it. `[fields]` dumps `caret=B sel=A:C` without shifting inject indices, plus `preedit=` when IME compose is set. Layout and paint copy the field value through a 256-byte stack buffer. `View.editor` is a multiline buffer on a `SignalStr`. It is not a TextField. Insert includes newline and a two-space soft-tab. Enter and Tab stay no-ops on a TextField. Editor layout, paint, caret, and a11y do not copy through a 256-byte stack. `[editor]` dumps one node: `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S tok=N inlay=N fold=N preedit="…" "escaped"` (newlines stay `\\n`; `sx`/`sy` are viewport pan; `diag` is omitted when empty; `tok` / `inlay` / `fold` / `preedit=` omit when zero or empty). A11y dumps one `editor:editor` node. The editor pans to the caret. Long lines pan horizontally. A tall file pans vertically. Paint draws visible lines and visible columns on a monospace cell grid (`sk_font_measure_mono_string` / `sk_canvas_draw_mono_string` on every presenter). A gutter paints line numbers, diagnostic marks, and fold marks. Ctrl/Cmd+Z undoes. Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redoes. An in-widget lexer colors keywords, strings, comments, and numbers. LSP semantic tokens paint those spans when `Ui.setEditorTokens` has data. Empty tokens keep the lexer. Inlay hint labels paint in muted color at the cell. A fold mark in the gutter toggles closed interior lines. Bracket match highlights `()` / `[]` / `{}` near the caret. `View.fontSize` stays. The editor does not use the proportional UI font. `View.text` wraps at newlines for display, but it is not editable. `View.fontSize` / `View.textColor` wrap `View.text` only. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional for `View.text`.
-
-#### 3. Kits the IDE process needs
-
-Today `Json.parse` is `Result[Json]` and `Json.stringify` is `Result[String]` on blessed enum `Null|Bool|Int|Float|Str|Arr|Obj`. Query kits read that value: `Json.get` / `Json.keys` / `Json.arr` / `Json.at` / `Json.has` / `Json.pairs` / `Json.is*` / `Json.as*` / `Json.*Or` / `Json.getBool` / `Json.getInt` / `Json.getStr` / `Json.getFloat` / `Json.merge`. A miss or a wrong tag is an empty list. `*_or` / `get_*` use the default. Obj merge keeps the right value on a duplicate key. Write kits copy: `Json.set` / `Json.remove` / `Json.append` / `Json.prepend` / `Json.setAt` / `Json.dropAt`. `set` on a non-Obj is a one-key Obj. `append` / `prepend` on a non-Arr is a one-cell Arr. `setAt` / `dropAt` keep `j` when the index is out of range. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid and attaches stdin/stdout pipes (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`). `Sys.exec` / `Sys.spawn` / child stdio fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. Check names those kits plus `Clock.monotonic` / `Clock.realTime`, `Random.nextInt`, and `Sys` process/stdio kits. Unknown `Fs` / `Sys` / `Clock` / `Random` names fail `scuzz check`. Emit lowers `Fs.rename` and `Random.nextInt`. There is no `Fs.watch`. File change detection is a `Clock` plus `Fs` poll (`IO.sleep` / `Clock.monotonic` with `Fs.read` / `Fs.exists` / `Fs.list`). `examples/editor` forks a poll loop that reloads clean tabs when disk content changes and refreshes the tree. TestRuntime fakes Clock and Fs so Headless can drive that loop. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists. Proof: `examples/io` rename roundtrip plus `Random.nextInt` bound check; `examples/tyck` `Fs.watch` unknown-function oracle.
-
-Live `Sys.exec` / `Sys.spawn` still fail under TestRuntime. Fuzz overlays `analyze`, `lspCall`, `runProject`, and `fuzzProject`. Do not add `Fs.watch` or an exec stub map.
-
-#### 4. Chrome around the editor
-
-Today `examples/editor` composes a nested file tree from `Fs.walk`, a tab list of open files with dirty marks, a wrapping toolbar, find/replace, completion/hover/palette overlays, a Context overlay on a tree-file button-3 click (Open / Delete), an output list that hides when empty, and `Ui.setTitle`. Search-plus-mutate `scuzz fuzz --iterations N` compiles mutants on the compiler stack. Nested tree rows indent. A dir tap expands or collapses children in place. The tree scrolls in the left pane. A completion tap inserts the label at the editor caret. A tree, diagnostic, or def jump adds a tab when that path is not open, then selects it. Tab buttons switch. A close control drops a tab and keeps the last one. Save all writes every dirty tab. Run and Fuzz append captured `scuzz run` / `scuzz fuzz --iterations 0` text and set `showOut`. `examples/studio` shows pages, lists, and file load/save. `View.stack` / `View.positioned` exist. `View.tooltip` shows its message on hover. `View.onSecondary` runs an IO/unit handler on button 3. TextField and `View.editor` hold focus. A button tap clears that focus. Tree and diagnostic rows wrap in `View.focusGroup`. A tap on a row focuses that list (`[session]` `focus=button:<label>`). ArrowUp / ArrowDown move among sibling rows when no overlay is open. Enter / Space activate the focused row. An open overlay still takes keys. `View.split` is a draggable 0–100 pane. `View.overlay` fills the parent when open; Escape and a backdrop tap dismiss it. Keys go to the open overlay. Ctrl/Cmd+S / F / Shift+F / K / P fire labeled toolbar buttons. Ctrl/Cmd+Shift+P opens Palette. A diagnostic row encodes `line:col|file|message`. A tap opens that file when `file` is set, then jumps the caret. Def opens a definition uri when set. Fix applies the first `newText` from a code action and still appends the title. `[session]` dumps `title=` and `focus=`. `[splits]` / `[overlays]` dump those widgets.
-
-In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
-
-#### 5. Analyze consumption
-
-`scuzz lsp` already serves hover, completion, definition, diagnostics, format, rename, semantic tokens, inlay hints, folding, code actions, and related methods. The IDE consumes them. It does not parse Scuzz in app code. Hover and Check decode `textDocument/semanticTokens/full`, `textDocument/inlayHint`, and `textDocument/foldingRange` JSON in `Lsp.scuzz` and pass lists into `Ui.setEditorTokens` / `Ui.setEditorInlays` / `Ui.setEditorFolds`. The editor paints those spans. `[editor]` dumps `tok=` / `inlay=` / `fold=` counts.
-
-#### 6. Headless and verification
-
-Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `compose` / `commit` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. `[fields]` dumps `caret=B sel=A:C` and `preedit=` when compose is set. `[editor]` dumps one node with buffer, caret, selection, `sx`/`sy`, `lines`, `diag`, `tok`, `inlay`, `fold`, and `preedit=` when a `View.editor` is present. `[hover]` and `[last_secondary]` record pointer hover and button-3 hits. Fuzz composes taps, fields, scrolls, and drivers. Search-plus-mutate of `examples/editor` runs on the compiler stack. A whole-file a11y dump of an editor is the wrong oracle.
-
-Close:
-
+- Do not add `Fs.watch` or an exec stub map. File change detection stays Clock plus Fs poll.
+- Live `Sys.exec` / `Sys.spawn` still fail under TestRuntime. Fuzz overlays `analyze`, `lspCall`, `runProject`, and `fuzzProject`.
 - Every new editor or chrome widget has a Headless path. No Desktop-only shortcut.
-
-#### 7. CLI and ship
-
-Today `scuzz ide [path]` launches the bundled `[ui]` package with Desktop. `--headless` stays. `install.sh` ships the CLI plus SDK (`SCUZZ_HOME/ide`). `scuzz run examples/studio` opens Desktop when `[ui].default_runtime = "desktop"`.
-
-#### Not a prerequisite for the first real IDE
-
-These stay later. They do not block the list above:
-
-- Multi-window, native menus, native file picker, drag-and-drop from the OS
-- Multi-cursor, minimap, Git UI, debugger, plugin host
-- Custom canvas kit from Scuzz source
-- Windows desktop embedder, web target
-- Flutter DevTools / VM patching (explicit non-goal)
+- In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
+- Multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit, Windows desktop embedder, and web stay later.
+- Flutter DevTools / VM patching is an explicit non-goal.
