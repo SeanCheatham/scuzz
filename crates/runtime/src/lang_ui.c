@@ -193,11 +193,7 @@ SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env) {
 SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
 SzView *sz_lang_view_scroll_h(SzView *child) { return sz_view_scroll_h(child); }
 SzView *sz_lang_view_expanded(SzView *child) { return sz_view_expanded(child); }
-SzView *sz_lang_view_stretch(SzView *child) { return sz_view_stretch(child); }
 SzView *sz_lang_view_center(SzView *child) { return sz_view_center(child); }
-SzView *sz_lang_view_align(int64_t ax, int64_t ay, SzView *child) {
-  return sz_view_align((int)ax, (int)ay, child);
-}
 SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child) {
   return sz_view_positioned((int)x, (int)y, child);
 }
@@ -210,40 +206,11 @@ SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child) {
 SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child) {
   return sz_view_min_size((int)w, (int)h, child);
 }
-SzView *sz_lang_view_max_size(int64_t w, int64_t h, SzView *child) {
-  return sz_view_max_size((int)w, (int)h, child);
-}
-SzView *sz_lang_view_clip(SzView *child) { return sz_view_clip(child); }
-SzView *sz_lang_view_opacity(int64_t pct, SzView *child) {
-  return sz_view_opacity((int)pct, child);
-}
-SzView *sz_lang_view_max_lines(int64_t n, SzView *child) {
-  return sz_view_max_lines((int)n, child);
-}
-SzView *sz_lang_view_ignore_pointer(SzView *child) {
-  return sz_view_ignore_pointer(child);
-}
-SzView *sz_lang_view_absorb_pointer(SzView *child) {
-  return sz_view_absorb_pointer(child);
-}
-SzView *sz_lang_view_exclude_semantics(SzView *child) {
-  return sz_view_exclude_semantics(child);
-}
-SzView *sz_lang_view_ellipsis(SzView *child) { return sz_view_ellipsis(child); }
 SzView *sz_lang_view_text_color(int64_t argb, SzView *child) {
   return sz_view_text_color((uint32_t)argb, child);
 }
-SzView *sz_lang_view_gap(int64_t n, SzView *child) {
-  return sz_view_gap((int)n, child);
-}
 SzView *sz_lang_view_font_size(int64_t n, SzView *child) {
   return sz_view_font_size((int)n, child);
-}
-SzView *sz_lang_view_border(int64_t n, int64_t argb, SzView *child) {
-  return sz_view_border((int)n, (uint32_t)argb, child);
-}
-SzView *sz_lang_view_radius(int64_t n, SzView *child) {
-  return sz_view_radius((int)n, child);
 }
 SzView *sz_lang_view_background(int64_t argb, SzView *child) {
   return sz_view_background((uint32_t)argb, child);
