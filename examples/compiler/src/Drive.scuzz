@@ -1213,9 +1213,6 @@ def fuzzSearch(exe: String, hasUi: Bool, outDir: String, script: String, n: Int,
 def fuzzSearchHit(exe: String, hasUi: Bool, outDir: String, script: String, n: Int, fail: Int, i: Int, seed: Int, bad: Int): IO[Int] =
   if (bad > 0 && fail == 0) fuzzSaveRepro(outDir, seed, FuzzRun(joinSlash(outDir, "seeds.txt"), "", script, Str.fromInt(i), "")).flatMap(_ => fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad, i + 1, seed)) else fuzzSearch(exe, hasUi, outDir, script, n - 1, fail + bad, i + 1, seed)
 
-def fuzzProbe(exe: String, hasUi: Bool, outDir: String, script: String): IO[Int] =
-  runProbe(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), script != "", "", "", outDir), exe)).map(r => fuzzProbeCode(r))
-
 def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun): IO[Int] =
   runProbe(Str.concat(fuzzProbeEnv(hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, outDir), exe)).map(r => fuzzProbeCode(r))
 

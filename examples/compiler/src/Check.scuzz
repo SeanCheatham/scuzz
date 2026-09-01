@@ -1113,9 +1113,6 @@ def humanLine3(o: Out, line: Int, col: Int): String =
 def human(src: String): String =
   human2(src, checkProg(Parse.parse(Lexer.lex(src))))
 
-def humanFiles(files: List[(String, String)]): String =
-  humanFilesOwn(files, [])
-
 def humanFilesOwn(files: List[(String, String)], stems: List[String]): String =
   human2(filesSrc(files), checkProgOwn(Parse.parseFiles(files), stems))
 
