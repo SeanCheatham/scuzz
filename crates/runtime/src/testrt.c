@@ -1419,13 +1419,32 @@ void sz_testrt_net_stub(const char *url, const char *body) {
   g_stubs = s;
 }
 
-static void *stub_http_get(void *env) {
+static const char *http_op(const char *method) {
+  if (method && strcmp(method, "POST") == 0)
+    return "Net.httpPost";
+  if (method && strcmp(method, "PUT") == 0)
+    return "Net.httpPut";
+  if (method && strcmp(method, "PATCH") == 0)
+    return "Net.httpPatch";
+  if (method && strcmp(method, "DELETE") == 0)
+    return "Net.httpDelete";
+  if (method && strcmp(method, "HEAD") == 0)
+    return "Net.httpHead";
+  return "Net.httpGet";
+}
+
+static void *stub_http_req(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *url_s = pack ? (SzString *)pack->left : NULL;
+  SzPair *inner = pack ? (SzPair *)pack->right : NULL;
+  const char *method =
+      inner && inner->left ? sz_string_cstr((SzString *)inner->left) : "GET";
+  const char *op = http_op(method);
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   const char *url = sz_string_cstr(url_s);
   NetStub *s;
-  sz_timeline_log_cstr("Net.httpGet", url);
+  char err[96];
+  sz_timeline_log_cstr(op, url);
   if (sz_testrt_fault_tick(SZ_FAULT_NET)) {
     int mode = sz_testrt_fault_mode();
     if (mode == SZ_FAULT_CORRUPT) {
@@ -1445,9 +1464,9 @@ static void *stub_http_get(void *env) {
       }
     }
     r->is_err = 1;
-    r->as.err = sz_error_new(
-        6, mode == SZ_FAULT_DROP ? "Net.httpGet: stub response dropped"
-                                 : "Net.httpGet: injected fault");
+    snprintf(err, sizeof err, "%s: %s", op,
+             mode == SZ_FAULT_DROP ? "stub response dropped" : "injected fault");
+    r->as.err = sz_error_new(6, err);
     goto done;
   }
   for (s = g_stubs; s; s = s->next) {
@@ -1458,7 +1477,8 @@ static void *stub_http_get(void *env) {
     }
   }
   r->is_err = 1;
-  r->as.err = sz_error_new(6, "Net.httpGet: no stub for URL");
+  snprintf(err, sizeof err, "%s: no stub for URL", op);
+  r->as.err = sz_error_new(6, err);
 done:
   return r;
 }
@@ -1498,13 +1518,9 @@ SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzString *body) 
   pack = sz_pair_new(url, inner);
   sz_release(ms);
   sz_release(inner);
-  io = fm_drop(sz_io_delay(stub_http_get, pack), after_stub_http, pack);
+  io = fm_drop(sz_io_delay(stub_http_req, pack), after_stub_http, pack);
   sz_release(pack);
   return io;
-}
-
-SzIo *sz_testrt_net_http_get(SzString *url) {
-  return sz_testrt_net_http_req("GET", url, NULL);
 }
 
 const char *sz_testrt_net_last_serve_body(void) {
@@ -1945,7 +1961,7 @@ static SzIo *after_tcp_accept(void *value, void *env) {
   return sz_deferred_get(d);
 }
 
-SzIo *sz_testrt_net_tcp_accept(void *listener) {
+SzIo *sz_testrt_net_tcp_accept(SzNetSock *listener) {
   if (!listener)
     sz_panic("sz_testrt_net_tcp_accept(null)");
   sz_timeline_log_cstr("Net.tcpAccept", "");
@@ -1997,7 +2013,7 @@ static SzIo *after_tcp_read(void *value, void *env) {
   return sz_deferred_get(d);
 }
 
-SzIo *sz_testrt_net_tcp_read(void *conn, int64_t n) {
+SzIo *sz_testrt_net_tcp_read(SzNetSock *conn, int64_t n) {
   TcpRW *op;
   if (!conn)
     sz_panic("sz_testrt_net_tcp_read(null)");
@@ -2005,7 +2021,7 @@ SzIo *sz_testrt_net_tcp_read(void *conn, int64_t n) {
   op = (TcpRW *)sz_rc_alloc(sizeof(TcpRW), SZ_RC_BOX);
   memset(op, 0, sizeof(TcpRW));
   sz_retain(conn);
-  op->sock = (SzNetSock *)conn;
+  op->sock = conn;
   op->n = n;
   {
     SzIo *io = fm_drop(sz_io_delay(tcp_read_now, op), after_tcp_read, op);
@@ -2045,7 +2061,7 @@ static void *tcp_write_now(void *env) {
   return box_ok(NULL);
 }
 
-SzIo *sz_testrt_net_tcp_write(void *conn, SzString *s) {
+SzIo *sz_testrt_net_tcp_write(SzNetSock *conn, SzString *s) {
   TcpRW *op;
   if (!conn || !s)
     sz_panic("sz_testrt_net_tcp_write(null)");
@@ -2054,7 +2070,7 @@ SzIo *sz_testrt_net_tcp_write(void *conn, SzString *s) {
   memset(op, 0, sizeof(TcpRW));
   sz_retain(conn);
   sz_retain(s);
-  op->sock = (SzNetSock *)conn;
+  op->sock = conn;
   op->data = s;
   {
     SzIo *io = fm_drop(sz_io_delay(tcp_write_now, op), unwrap_box, NULL);
@@ -2069,7 +2085,7 @@ static void *tcp_close_now(void *env) {
   return box_ok(NULL);
 }
 
-SzIo *sz_testrt_net_tcp_close(void *sock) {
+SzIo *sz_testrt_net_tcp_close(SzNetSock *sock) {
   if (!sock)
     sz_panic("sz_testrt_net_tcp_close(null)");
   sz_timeline_log_cstr("Net.tcpClose", "");
@@ -2157,7 +2173,7 @@ static void *udp_send_now(void *env) {
   return box_ok(NULL);
 }
 
-SzIo *sz_testrt_net_udp_send(void *sock, SzString *host, int64_t port,
+SzIo *sz_testrt_net_udp_send(SzNetSock *sock, SzString *host, int64_t port,
                             SzString *data) {
   UdpSendPack *p;
   if (!sock || !host || !data)
@@ -2168,7 +2184,7 @@ SzIo *sz_testrt_net_udp_send(void *sock, SzString *host, int64_t port,
   sz_retain(sock);
   sz_retain(host);
   sz_retain(data);
-  p->sock = (SzNetSock *)sock;
+  p->sock = sock;
   p->host = host;
   p->port = port;
   p->data = data;
@@ -2242,7 +2258,7 @@ static SzIo *after_udp_recv(void *value, void *env) {
   return sz_deferred_get(d);
 }
 
-SzIo *sz_testrt_net_udp_recv(void *sock, int64_t n) {
+SzIo *sz_testrt_net_udp_recv(SzNetSock *sock, int64_t n) {
   UdpRecvPack *p;
   if (!sock)
     sz_panic("sz_testrt_net_udp_recv(null)");
@@ -2250,7 +2266,7 @@ SzIo *sz_testrt_net_udp_recv(void *sock, int64_t n) {
   p = (UdpRecvPack *)sz_rc_alloc(sizeof(UdpRecvPack), SZ_RC_BOX);
   memset(p, 0, sizeof(UdpRecvPack));
   sz_retain(sock);
-  p->sock = (SzNetSock *)sock;
+  p->sock = sock;
   p->n = n;
   {
     SzIo *io = fm_drop(sz_io_delay(udp_recv_now, p), after_udp_recv, p);
@@ -2259,7 +2275,7 @@ SzIo *sz_testrt_net_udp_recv(void *sock, int64_t n) {
   }
 }
 
-SzIo *sz_testrt_net_udp_close(void *sock) {
+SzIo *sz_testrt_net_udp_close(SzNetSock *sock) {
   if (!sock)
     sz_panic("sz_testrt_net_udp_close(null)");
   sz_timeline_log_cstr("Net.udpClose", "");

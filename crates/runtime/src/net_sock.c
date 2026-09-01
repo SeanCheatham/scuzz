@@ -6,9 +6,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -568,7 +565,7 @@ static SzIo *accept_poll(void *value, void *env) {
   return fm_drop(ready, accept_after_poll, st);
 }
 
-SzIo *sz_net_tcp_accept(void *listener) {
+SzIo *sz_net_tcp_accept(SzNetSock *listener) {
   AcceptSt *st;
   if (!listener)
     sz_panic("sz_net_tcp_accept(null)");
@@ -578,7 +575,7 @@ SzIo *sz_net_tcp_accept(void *listener) {
   st = (AcceptSt *)sz_rc_alloc(sizeof(AcceptSt), SZ_RC_BOX);
   memset(st, 0, sizeof(AcceptSt));
   sz_retain(listener);
-  st->ln = (SzNetSock *)listener;
+  st->ln = listener;
   {
     SzIo *io = accept_poll(NULL, st);
     SzIo *fin = sz_io_delay(accept_cleanup, st);
@@ -653,7 +650,7 @@ static SzIo *read_poll(void *value, void *env) {
   return fm_drop(ready, read_after_poll, op);
 }
 
-SzIo *sz_net_tcp_read(void *conn, int64_t n) {
+SzIo *sz_net_tcp_read(SzNetSock *conn, int64_t n) {
   ConnOp *op;
   if (!conn)
     sz_panic("sz_net_tcp_read(null)");
@@ -663,7 +660,7 @@ SzIo *sz_net_tcp_read(void *conn, int64_t n) {
   op = (ConnOp *)sz_rc_alloc(sizeof(ConnOp), SZ_RC_BOX);
   memset(op, 0, sizeof(ConnOp));
   sz_retain(conn);
-  op->sock = (SzNetSock *)conn;
+  op->sock = conn;
   op->n = n;
   return sock_ensure(read_poll(NULL, op), op);
 }
@@ -732,7 +729,7 @@ static SzIo *write_poll(void *value, void *env) {
   return fm_drop(ready, write_after_poll, op);
 }
 
-SzIo *sz_net_tcp_write(void *conn, SzString *s) {
+SzIo *sz_net_tcp_write(SzNetSock *conn, SzString *s) {
   ConnOp *op;
   if (!conn || !s)
     sz_panic("sz_net_tcp_write(null)");
@@ -743,7 +740,7 @@ SzIo *sz_net_tcp_write(void *conn, SzString *s) {
   memset(op, 0, sizeof(ConnOp));
   sz_retain(conn);
   sz_retain(s);
-  op->sock = (SzNetSock *)conn;
+  op->sock = conn;
   op->data = s;
   return sock_ensure(write_poll(NULL, op), op);
 }
@@ -763,7 +760,7 @@ static void *close_now(void *env) {
   return NULL;
 }
 
-SzIo *sz_net_tcp_close(void *sock) {
+SzIo *sz_net_tcp_close(SzNetSock *sock) {
   if (!sock)
     sz_panic("sz_net_tcp_close(null)");
   if (sz_testrt_net_is_fake())
@@ -860,7 +857,7 @@ static void *udp_send_now(void *env) {
   return r;
 }
 
-SzIo *sz_net_udp_send(void *sock, SzString *host, int64_t port, SzString *data) {
+SzIo *sz_net_udp_send(SzNetSock *sock, SzString *host, int64_t port, SzString *data) {
   UdpSendSt *st;
   if (!sock || !host || !data)
     sz_panic("sz_net_udp_send(null)");
@@ -872,7 +869,7 @@ SzIo *sz_net_udp_send(void *sock, SzString *host, int64_t port, SzString *data) 
   sz_retain(sock);
   sz_retain(host);
   sz_retain(data);
-  st->sock = (SzNetSock *)sock;
+  st->sock = sock;
   st->host = host;
   st->port = port;
   st->data = data;
@@ -989,7 +986,7 @@ static SzIo *udp_recv_poll(void *value, void *env) {
   return fm_drop(ready, udp_recv_after_poll, st);
 }
 
-SzIo *sz_net_udp_recv(void *sock, int64_t n) {
+SzIo *sz_net_udp_recv(SzNetSock *sock, int64_t n) {
   UdpRecvSt *st;
   if (!sock)
     sz_panic("sz_net_udp_recv(null)");
@@ -999,7 +996,7 @@ SzIo *sz_net_udp_recv(void *sock, int64_t n) {
   st = (UdpRecvSt *)sz_rc_alloc(sizeof(UdpRecvSt), SZ_RC_BOX);
   memset(st, 0, sizeof(UdpRecvSt));
   sz_retain(sock);
-  st->sock = (SzNetSock *)sock;
+  st->sock = sock;
   st->n = n;
   {
     SzIo *io = udp_recv_poll(NULL, st);
@@ -1012,7 +1009,7 @@ SzIo *sz_net_udp_recv(void *sock, int64_t n) {
   }
 }
 
-SzIo *sz_net_udp_close(void *sock) {
+SzIo *sz_net_udp_close(SzNetSock *sock) {
   if (!sock)
     sz_panic("sz_net_udp_close(null)");
   if (sz_testrt_net_is_fake())

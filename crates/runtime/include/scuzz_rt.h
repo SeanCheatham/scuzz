@@ -32,9 +32,9 @@ void sz_alloc_set_panic_dump(const char *path);
 /* Registered path, or `SCUZZ_PANIC_DUMP`, or NULL. */
 const char *sz_alloc_panic_dump_path(void);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
- * streams, resources, errors, Ref / Queue / Deferred, Either, pair, Builder). List cells retain heads and shared tails. IO
- * constructors take child IO nodes. Non-RC sz_alloc pointers no-op.
- * Net sockets use SZ_RC_NETSOCK. */
+ * streams, resources, errors, Ref / Queue / Deferred, Either, pair,
+ * Builder, Net sockets). List cells retain heads and shared tails.
+ * IO constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
 enum {
   SZ_RC_RAW = 0,
   SZ_RC_STRING = 1,
@@ -901,18 +901,6 @@ SzIo *sz_net_http_delete(SzString *url);
 SzIo *sz_net_http_head(SzString *url);
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one request; handler gets (path, method, body) */
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; drop bad clients/handlers */
-/* Blessed TCP. Listen is localhost. Connect takes IPv4/IPv6 literals or localhost. */
-SzIo *sz_net_tcp_connect(SzString *host, int64_t port); /* IO[SzNetSock] */
-SzIo *sz_net_tcp_listen(int64_t port);                  /* IO[SzNetSock] */
-SzIo *sz_net_tcp_accept(void *listener);                /* IO[SzNetSock] */
-SzIo *sz_net_tcp_read(void *conn, int64_t n);           /* IO[String] */
-SzIo *sz_net_tcp_write(void *conn, SzString *s);        /* IO[Unit] */
-SzIo *sz_net_tcp_close(void *sock);                     /* IO[Unit] */
-/* Blessed UDP. Bind 0 picks an ephemeral port. Recv is (host, port, data). */
-SzIo *sz_net_udp_bind(int64_t port); /* IO[SzNetSock] */
-SzIo *sz_net_udp_send(void *sock, SzString *host, int64_t port, SzString *data);
-SzIo *sz_net_udp_recv(void *sock, int64_t n); /* IO[(String, Int, String)] */
-SzIo *sz_net_udp_close(void *sock);
 typedef struct SzNetSock {
   int fd;
   int fd6;
@@ -920,11 +908,24 @@ typedef struct SzNetSock {
   int fake_id;
   int64_t port;
 } SzNetSock;
+/* Blessed TCP. Listen is localhost. Connect takes IPv4/IPv6 literals or localhost. */
+SzIo *sz_net_tcp_connect(SzString *host, int64_t port); /* IO[SzNetSock] */
+SzIo *sz_net_tcp_listen(int64_t port);                  /* IO[SzNetSock] */
+SzIo *sz_net_tcp_accept(SzNetSock *listener);           /* IO[SzNetSock] */
+SzIo *sz_net_tcp_read(SzNetSock *conn, int64_t n);      /* IO[String] */
+SzIo *sz_net_tcp_write(SzNetSock *conn, SzString *s);   /* IO[Unit] */
+SzIo *sz_net_tcp_close(SzNetSock *sock);                /* IO[Unit] */
+/* Blessed UDP. Bind 0 picks an ephemeral port. Recv is (host, port, data). */
+SzIo *sz_net_udp_bind(int64_t port); /* IO[SzNetSock] */
+SzIo *sz_net_udp_send(SzNetSock *sock, SzString *host, int64_t port,
+                     SzString *data);
+SzIo *sz_net_udp_recv(SzNetSock *sock, int64_t n); /* IO[(String, Int, String)] */
+SzIo *sz_net_udp_close(SzNetSock *sock);
 void sz_net_sock_on_free(SzNetSock *s);
 void sz_testrt_net_sock_gone(SzNetSock *s);
-/* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */
+/* Test-only: UDP nameserver for live HTTP DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
-/* Test-only: Host header value for httpGet (RFC 9110). */
+/* Test-only: Host header value for HTTP (RFC 9110). */
 void sz_net_test_http_host_header(const char *host, int port, char *out,
                                  size_t cap);
 
@@ -995,20 +996,19 @@ int sz_testrt_net_serve_pending(void);
 int sz_testrt_net_serve_pending_port(int64_t port); /* injects plus mailbox items */
 char *sz_testrt_net_pop_request(void); /* owned; NULL if empty */
 int sz_testrt_net_is_fake(void);
-SzIo *sz_testrt_net_http_get(SzString *url);
 SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzString *body);
 SzIo *sz_testrt_net_accept(int64_t port); /* IO[(req, Deferred|null)] */
 SzIo *sz_testrt_net_tcp_connect(SzString *host, int64_t port);
 SzIo *sz_testrt_net_tcp_listen(int64_t port);
-SzIo *sz_testrt_net_tcp_accept(void *listener);
-SzIo *sz_testrt_net_tcp_read(void *conn, int64_t n);
-SzIo *sz_testrt_net_tcp_write(void *conn, SzString *s);
-SzIo *sz_testrt_net_tcp_close(void *sock);
+SzIo *sz_testrt_net_tcp_accept(SzNetSock *listener);
+SzIo *sz_testrt_net_tcp_read(SzNetSock *conn, int64_t n);
+SzIo *sz_testrt_net_tcp_write(SzNetSock *conn, SzString *s);
+SzIo *sz_testrt_net_tcp_close(SzNetSock *sock);
 SzIo *sz_testrt_net_udp_bind(int64_t port);
-SzIo *sz_testrt_net_udp_send(void *sock, SzString *host, int64_t port,
+SzIo *sz_testrt_net_udp_send(SzNetSock *sock, SzString *host, int64_t port,
                             SzString *data);
-SzIo *sz_testrt_net_udp_recv(void *sock, int64_t n);
-SzIo *sz_testrt_net_udp_close(void *sock);
+SzIo *sz_testrt_net_udp_recv(SzNetSock *sock, int64_t n);
+SzIo *sz_testrt_net_udp_close(SzNetSock *sock);
 void sz_testrt_net_cancel_accept(int64_t port);
 void sz_testrt_net_fail_mailbox(int64_t port, SzError *err);
 /* 1 when `url` is http loopback (`127.0.0.1` / `localhost` / `::1`). */
