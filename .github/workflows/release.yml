@@ -155,11 +155,9 @@ jobs:
         env:
           SCUZZ_VERSION: ${{ needs.prepare.outputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.2.1 linux emit of examples/cli does not finish. Last-Rust v0.2.0 does.
+          SCUZZ_BOOTSTRAP_TAG: v0.2.0
         run: |
-          # Keep log output so a silent emit is not SIGTERM'd (~60s on linux).
-          ( while sleep 15; do echo "[package running]"; done ) &
-          hb=$!
-          trap 'kill $hb 2>/dev/null || true' EXIT
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
           ./scripts/package_release.sh
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
