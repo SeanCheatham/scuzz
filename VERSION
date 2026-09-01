@@ -1,4 +1,4 @@
 # Product version. `scuzz -V` prints this string.
 # Keep `examples/cli/src/Version.scuzz` product() equal to product=.
 # Cut a release with the GitHub release workflow.
-product=0.2.1
+product=0.2.2
