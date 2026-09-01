@@ -5,7 +5,7 @@ What is unproven or missing, ranked by how much it threatens the thesis in [`vis
 - **Unknowns** — claims not yet shown within our constraints. A bad outcome invalidates later work.
 - **Known gaps** — settled design. Work is unfinished or deferred on purpose.
 
-When a gap closes or its assessment changes, update this file. If direction changes, also update `vision.md`.
+When a gap closes or its assessment changes, update this file. If direction changes, also update `vision.md`. Next slice: [`plans.md`](plans.md).
 
 ## Unknowns
 
@@ -27,31 +27,56 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ## Known gaps
 
-### Residuals
+Close thesis-critical gaps before table-stakes kits. Close table-stakes before later items. Locks: [`vision.md`](vision.md).
 
-- **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
+### Thesis-critical
+
+These gaps keep the distinctive claims kernel-shaped. Close them in this order.
+
+1. **Named Timeline observations** — Session claims and `Property.signal*` use integer dump slots (`Timeline.signalInt(t, i, 0)`). `alwaysHas` / `afterHitShows` copy across verify files. A Signal must publish its binder name. Claims read that name. Two `Verdict` helpers cover always-visible and after-hit-shows. Dump slot ids stay behind the algebra. Forwards only: drop the integer-id author kit. `tap N` in fuzz scripts stays until stable inject keys. Next slice: [`plans.md`](plans.md).
+
+2. **`Signal[T]` and `View.each` over records** — The kit is `Signal.int` / `Signal.str` / `Signal.list` of String. `View.each` binds String. Studio stores tasks as encoded strings. Direction: one generic cell and `View.each` over the element type.
+
+3. **UTF-8 `String`** — `Str.charAt` is a byte. Case maps ASCII. Reverse reverses bytes. Direction: UTF-8. Close this before more TextField or editor features.
+
+4. **Scuzz spans on panic and LSP** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Definition jumps to line 0. Rename is whole-file replace. Semantic tokens are empty. Panic does not print a Scuzz file and line. Goto-def, rename, hover, and completion must land on the right span. The dogfood IDE consumes that schema. It does not replace it.
+
+5. **Typed fail `E`** — `IO[T]` fails with a `String` message. Direction: typed `E` without environment `R`. Do not add `ZIO[R, E, A]`. Do not add user `IO.delay`.
+
+6. **Typed agent session schema** — Live debug is `build/debug.dump`, `inject.script`, `record.script`, `repro.toml`, and `summary.toml`. `--message-format=json` applies to `check` only. Direction: one JSON schema for dump, inject, fuzz verdict, and coverage. Text dump and script stay until that schema ships.
+
+7. **Source-region coverage** — Campaign coverage is `Property.sometimes` names plus dump novelty. Direction: report source-region coverage of live `def` bodies in `summary.toml`. `sometimes` stays a path marker.
+
+### Table-stakes
+
+Needed before a real CLI, server, or desktop app stays.
+
+- **HTTP as a server** — Client kits return a body on 2xx (1 MiB cap). Live serve is localhost plaintext. Handler is `(path, method, body) => String`. Status, headers, and `0.0.0.0` bind stay out. HTTPS `Net.serve` stays out. POSIX sockets stay inside the runtime. Expand `Net` on this HTTP/1.0 stack. Do not add a second client.
+- **Missing kits** — No calendar time, regex, hash, hex/base64, or UUID. `Map` / `Set` keys are `Int` or `String`. Expand blessed kits. No user FFI.
+- **`scuzz eval`** — No worksheet. A one-file eval helps humans and agents try one def.
+- **Kit docs** — No `scuzz doc`. Hover must show the same text as generated kit docs.
+- **Generators** — Drivers take 0 or 1 generator-friendly param. Direction: `Gen[T]` combinators and shrinking that keeps `where` bounds. Stateful model generators stay later.
+- **Scheduler lock** — Cooperative fibers on one thread are the scheduler for CLI, server, and UI. OS threads and supervision trees stay later.
+
+### Later
+
+Do not start these before thesis-critical gaps close.
+
+- **Stable inject keys** — `tap N` / `scroll N` follow a11y preorder. A refactor can miss a stored corpus entry. Named control keys for inject stay after named claim observations.
+- **Simulation world** — TestRuntime seals the wire (no live sockets; Nth Fs / Net / Queue fault; PCT on fibers; Clock and Fs fakes). Clock skew, partitions, and a model to relate against stay later.
+- **Mutation depth** — Mutation flips ops, swaps `if` arms, and replaces an ADT construct with a sibling. Inert mutants stay unreported. Semantic mutants stay later.
 - **Memory** — Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated until panic sweep or process exit. No cycle collector.
-- **LSP for external editors** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. The dogfood IDE consumes that schema. It does not replace it. Prerequisites: [Dogfood IDE](#dogfood-ide).
-
-### Dependency forms beyond `path`
-
-Path deps only (`Manifest.scuzz`). Git, versioned, and hosted artifacts are direction. There is no registry.
-
-**Deferred (last on purpose).** Do not add ecosystem theater before there is an ecosystem. Revisit after path deps and file-as-module are the proven reuse story.
-
-### Deferred by decision
-
+- **Dependency forms beyond `path`** — Path deps only (`Manifest.scuzz`). Git, versioned, and hosted artifacts are direction. There is no registry. Revisit after path deps and file-as-module stay the reuse story. A lockfile identity can land before a registry.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not place OS IME candidate UI from it. Desktop already maps XIM preedit and Cocoa marked text into `SZ_INPUT_COMPOSE`.
 - **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, hello). Full macOS packaging stays `workflow_dispatch`. A Darwin UI link uses `-lc++`, `-framework Cocoa -lobjc`, `-force_load`, and the Skia frameworks.
 - **Web apps** — not a current target.
-- **HTTPS serve** — HTTP client kits take `https://` with OpenSSL and the system trust store. Handshake parks on poll. TestRuntime stubs `https://` like `http://`. There is no HTTPS `Net.serve`. Cert file load and self-signed serve would add product surface. Live serve stays plaintext HTTP on localhost.
-- **Net bind and status** — Live listen is localhost. There is no `0.0.0.0` bind. Client kits fail on non-2xx. Status is not a success value. Chunked encoding and HTTP/1.1 keep-alive stay out. POSIX sockets stay inside the runtime.
+- **HKT and environment `R`** — Thin generics. No `F[_]` beyond `IO`. No `ZIO[R, E, A]`.
 - **Oracle idioms in `guide.md`** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work. Authors write `Timeline => Verdict` and drive oracles in `*.scuzz_verify`.
 
 ### Dogfood IDE
 
-A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling). Proof: `examples/editor` and the SDK `ide/` tree.
+A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling). Proof: `examples/editor` and the SDK `ide/` tree. LSP span quality is thesis-critical gap 4.
 
 Open and deferred:
 
