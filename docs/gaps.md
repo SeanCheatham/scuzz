@@ -31,7 +31,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
 - **Memory** — Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated until panic sweep or process exit. No cycle collector.
-- **LSP for external editors** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Method catalog: [`vision.md`](vision.md#tooling). The dogfood IDE consumes that schema. It does not replace it. Prerequisites: [Dogfood IDE](#dogfood-ide).
+- **LSP for external editors** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. The dogfood IDE consumes that schema. It does not replace it. Prerequisites: [Dogfood IDE](#dogfood-ide).
 
 ### Dependency forms beyond `path`
 
