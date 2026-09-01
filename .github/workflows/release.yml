@@ -155,8 +155,6 @@ jobs:
         env:
           SCUZZ_VERSION: ${{ needs.prepare.outputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # v0.2.1 linux emit of examples/cli does not finish. Last-Rust v0.2.0 does.
-          SCUZZ_BOOTSTRAP_TAG: v0.2.0
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
           ./scripts/package_release.sh
@@ -176,6 +174,14 @@ jobs:
           scuzz run examples/hello | tee /tmp/rel-hello.out
           grep -q "Hello, Scuzz!" /tmp/rel-hello.out
           grep -q "ready." /tmp/rel-hello.out
+          # Packaged scuzz must emit the CLI so the next cut can bootstrap from this tag.
+          # Drop the fingerprint from bootstrap emit. Cap Linux address space so a leak fails here.
+          rm -rf examples/cli/.scuzz
+          if [ "$(uname -s)" = Linux ]; then
+            ulimit -v 3145728
+          fi
+          scuzz build examples/cli
+          test -f examples/cli/build/cli.ll
           scuzz run examples/cli | tee /tmp/rel-cli.out
           grep -q "cli-ok" /tmp/rel-cli.out
           scuzz -V | tee /tmp/rel-ver.out
