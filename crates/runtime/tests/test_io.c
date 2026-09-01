@@ -10681,7 +10681,7 @@ int main(void) {
     SzString *needle;
     write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
                      "x\nsignals:\nint[0] count = 7\nlist[1] items = [\"a\", "
-                     "\"b\"]\na11y:\nbutton:+1\n");
+                     "\"b\"]\nlist[2] tasks = <3>\na11y:\nbutton:+1\n");
     tl = sz_timeline_load(path);
     assert(tl);
     assert(sz_timeline_len(tl) == 1);
@@ -10690,6 +10690,9 @@ int main(void) {
     sz_release(needle);
     needle = sz_string_from_cstr("items");
     assert(sz_timeline_signal_list_len(tl, 0, needle) == 2);
+    sz_release(needle);
+    needle = sz_string_from_cstr("tasks");
+    assert(sz_timeline_signal_list_len(tl, 0, needle) == 3);
     sz_release(needle);
     /* An unnamed line or an unknown name reads as 0. */
     needle = sz_string_from_cstr("missing");

@@ -33,7 +33,7 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
-1. **`Signal[T]` and `View.each` over records** — The kit is `Signal.int` / `Signal.str` / `Signal.list` of String. `View.each` binds String. Studio stores tasks as encoded strings. Direction: one generic cell and `View.each` over the element type.
+1. **`Signal[T]` and `View.each` over records** — In: `Signal.list` holds `List[T]` over records and enums; `View.each` binds the element type; studio keeps tasks as `List[Item]`; a record list dumps `list[N] name = <count>`. Open: one generic cell — `Signal.map` stays `Int => String` and there is no non-list `Signal[T]` cell. Direction: one generic cell and `View.each` over the element type.
 
 2. **UTF-8 `String`** — `Str.charAt` is a byte. Case maps ASCII. Reverse reverses bytes. Direction: UTF-8. Close this before more TextField or editor features.
 

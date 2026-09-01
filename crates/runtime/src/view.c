@@ -1232,10 +1232,12 @@ static void sync_each(SzView *v) {
       SzView *row = v->each_fn(s, v->each_env);
       if (row)
         sz_view_add_child(v, row);
-    } else {
+    } else if (sz_signal_list_elem_str(v->each_sig)) {
       char line[256];
       snprintf(line, sizeof line, "- %s", s ? sz_string_cstr(s) : "");
       sz_view_add_child(v, sz_view_text(line));
+    } else {
+      sz_view_add_child(v, sz_view_text("- <item>"));
     }
   }
   v->each_seen = xs;

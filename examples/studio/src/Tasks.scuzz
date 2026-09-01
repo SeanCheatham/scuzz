@@ -25,6 +25,15 @@ def itemLabel(s: String): String =
 def flipDone(s: String): String =
   encodeItem(Item(if (itemDone(s) == 1) 0 else 1, itemLabel(s)))
 
+def flipItem(item: Item): Item =
+  Item(if (item.done == 1) 0 else 1, item.label)
+
+def loadItems(text: String): List[Item] =
+  List.map(loadList(text), s => parseItem(s))
+
+def saveItems(xs: List[Item]): String =
+  saveBody(List.map(xs, x => encodeItem(x)))
+
 def noteAdd(_s: String): Unit =
   Property.sometimes("droveAdd")
 

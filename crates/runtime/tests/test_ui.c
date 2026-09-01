@@ -13130,6 +13130,31 @@ static void test_property_signal_int(void) {
   sz_signal_int_free(count);
 }
 
+static void test_signal_list_record_dump(void) {
+  SzSignalList *items;
+  SzList *xs;
+  SzString *dump;
+  SzString *name;
+  SzString *got;
+  const char *s;
+
+  xs = sz_list_cons(sz_box_i64(1), sz_list_cons(sz_box_i64(2), sz_list_nil()));
+  items = sz_lang_signal_list(xs, sz_string_from_cstr("rows"), 0);
+  dump = sz_signal_dump();
+  s = strstr(sz_string_cstr(dump), "list[");
+  assert(s);
+  /* Non-String elements dump the count only. */
+  assert(strstr(s, "rows = <2>"));
+  name = sz_string_from_cstr("rows");
+  assert(sz_property_signal_list_len(name) == 2);
+  got = sz_property_signal_list_at(name, 0);
+  assert(strcmp(sz_string_cstr(got), "") == 0);
+  sz_string_free(got);
+  sz_release(name);
+  sz_string_free(dump);
+  sz_signal_list_free(items);
+}
+
 static void test_property_signal_str(void) {
   SzSignalStr *draft;
   SzString *got;
@@ -15044,6 +15069,7 @@ int main(void) {
   test_property_signal_list_len();
   test_property_signal_list_at();
   test_property_signal_int();
+  test_signal_list_record_dump();
   test_property_signal_str();
   test_text_field_edit();
   test_view_editor();

@@ -126,7 +126,7 @@ One failure channel: `SzError` on `IO[T]`. The fail payload is a `String` messag
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Desktop/Mobile — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`. No UI feature without a Headless path. Prefer `Signal` + `View.each`. Derived display through `Signal.map` + `View.bindText`. Direction: `Signal[T]` and `View.each` over the element type. The current kit is `Signal.int` / `Signal.str` / `Signal.list` of String. Nested declarative construction only. `Ui.run(_ => view)` is the session. Create Signals outside the factory so they stay. Desktop/Mobile records live input to `build/record.script`. Headless replays through `--script`. Dump and script verbs: [`guide.md`](guide.md).
+Headless is a **peer** of Desktop/Mobile — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`. No UI feature without a Headless path. Prefer `Signal` + `View.each`. Derived display through `Signal.map` + `View.bindText`. Direction: `Signal[T]` and `View.each` over the element type. The current kit is `Signal.int` / `Signal.str` / `Signal.list` of `List[T]` (String or record elements). Nested declarative construction only. `Ui.run(_ => view)` is the session. Create Signals outside the factory so they stay. Desktop/Mobile records live input to `build/record.script`. Headless replays through `--script`. Dump and script verbs: [`guide.md`](guide.md).
 
 ### IO apps vs Headless
 
@@ -185,7 +185,7 @@ Clear-dense, not cryptic-dense: nested declarative `View`s, inference, single-ex
 Close these before more widgets or Net surface.
 
 - **Named Signals.** In: a Signal publishes its `for` binder name (`count = Signal.int(0)` → `"count"`). Claims and `Property.signal*` read that name. `Verdict.alwaysHas` and `Verdict.afterHit` cover the always-visible and after-hit-shows folds. Dump slot ids stay an implementation detail. The integer-id kit is gone.
-- **`Signal[T]`.** Direction: one generic cell and `View.each` over the element type. Records in lists are in scope. Encoded strings as domain values are not.
+- **`Signal[T]`.** In: `Signal.list` holds `List[T]` over records and enums; `View.each` binds the element type (record fields work in the body). A record list dumps its count only (`list[N] name = <count>`). Direction: one generic cell (`Signal.map` stays `Int => String`; no non-list `Signal[T]` cell yet). Encoded strings as domain values are not.
 - **UTF-8 `String`.** Direction: `Str.*` indexes Unicode, not bytes. Current ops are bytes. Close this before more text-field or editor features.
 - **Typed fail.** Current `IO[T]` fails with a `String` message. Direction: typed `E` without `R`. Do not add environment `R`. Do not add user FFI.
 
