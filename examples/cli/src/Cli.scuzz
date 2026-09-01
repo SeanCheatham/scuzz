@@ -398,7 +398,7 @@ def dispatchBuildOut(path: String, out: String, full: Bool): IO[Unit] =
   Fs.mkdirs(out).flatMap(_ => Drive.emitDir(path, out, full))
 
 def dispatchRunCmd(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String): IO[Unit] =
-  if (watch && script != "" || dump != "") IO.println("scuzz run --watch does not accept --script or --dump. Run without --watch: scuzz run --headless --script PATH --dump PATH") else if (watch) dispatchRunWatch(path, outDir, headless) else dispatchRun(path, outDir, headless, script, dump)
+  if (watch && (script != "" || dump != "")) IO.println("scuzz run --watch does not accept --script or --dump. Run without --watch: scuzz run --headless --script PATH --dump PATH") else if (watch) dispatchRunWatch(path, outDir, headless) else dispatchRun(path, outDir, headless, script, dump)
 
 def dispatchWatch(path: String, outDir: String): IO[Unit] =
   IO.println(Str.concat("scuzz watch ", Str.concat(path, " (rebuild on change; not hot reload)"))).flatMap(_ => watchBuild(path, pkgOut(path, outDir)))

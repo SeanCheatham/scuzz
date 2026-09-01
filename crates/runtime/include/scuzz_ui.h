@@ -120,6 +120,8 @@ const char *sz_signal_str_get(const SzSignalStr *s);
 void sz_signal_str_free(SzSignalStr *s);
 
 SzSignalList *sz_signal_list(SzList *initial);
+/* 1 when the list signal holds String elements, 0 for other element types. */
+int sz_signal_list_elem_str(const SzSignalList *s);
 void sz_signal_list_set(SzSignalList *s, SzList *v);
 SzList *sz_signal_list_get(const SzSignalList *s);
 void sz_signal_list_free(SzSignalList *s);
@@ -224,6 +226,8 @@ typedef struct SzUiSession SzUiSession;
 
 typedef void (*SzViewTapFn)(SzView *self, void *env);
 /* Mapper must not free `item`. The list owns the string. */
+/* The item is the list element pointer: an SzString for String lists, the
+ * element value (for example an SzAdt record) otherwise. */
 typedef SzView *(*SzViewEachFn)(SzString *item, void *env);
 
 SzView *sz_view_text(const char *text);
@@ -335,7 +339,7 @@ SzView *sz_view_stack(void);
 SzView *sz_view_list(void);
 /* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
 SzView *sz_view_each(SzSignalList *sig);
-/* Like `sz_view_each`, but `fn` builds each child from the item string. */
+/* Like `sz_view_each`, but `fn` builds each child from the element. */
 SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
 SzView *sz_view_scroll(SzView *child);
 /* Like `sz_view_scroll`, but the pan axis is x (unbounded child width). */
@@ -722,7 +726,8 @@ void *sz_lang_signal_set(SzSignalInt *s, int64_t v);
 SzSignalStr *sz_lang_signal_str(SzString *initial, SzString *name);
 SzString *sz_lang_signal_str_get(SzSignalStr *s);
 void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v);
-SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name);
+SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name,
+                                  int64_t elem_str);
 SzList *sz_lang_signal_list_get(SzSignalList *s);
 void *sz_lang_signal_list_set(SzSignalList *s, SzList *v);
 

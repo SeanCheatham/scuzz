@@ -2,7 +2,6 @@
   Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath => for {
   path = if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
   draft = Signal.str("")
-  items = Signal.list([])
   page = Signal.int(0)
   count = Signal.int(0)
   level = Signal.int(40)
@@ -16,25 +15,24 @@
   countLabel = Signal.map(count, n => s"count = $n")
   pageLabel = Signal.map(page, n => s"page = $n")
   text <- Fs.read(path).handleErrorWith(_ => IO.pure(""))
-  loaded = Tasks.loadList(text)
-  _ = Signal.setList(items, loaded)
+  items = Signal.list(Tasks.loadItems(text))
   _ <- Ui.run(_ => View.column(View.grid(3, View.radio(page, 0, "Home"), View.bindText(pageLabel), View.radio(page, 1, "Tasks")), View.showWhen(page, 0, View.padding(8, View.column(View.aspectRatio(6, 1, View.background(Color.rgb(61, 126, 166), View.center(View.mergeSemantics("logo", View.icon(43, Theme.accent()))))), View.fraction(50, 0, View.background(Color.rgb(230, 240, 248), View.padding(4, View.icon(43, Theme.accent())))), View.fontSize(18, View.textColor(Color.rgb(20, 40, 60), View.text("Studio"))), View.bindText(countLabel), View.scrollH(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))), View.slider(level), View.progress(level), View.text("Close the window to quit")))), View.row(View.textField(draft, "item"), View.button("Add", _ => for {
   _ = Property.sometimes("tappedAdd")
   d = Str.trim(Signal.getStr(draft))
   n = Str.len(d)
 } yield if (n == 0) () else for {
-  xs = List.append(Signal.getList(items), d)
+  xs = List.append(Signal.getList(items), Tasks.parseItem(d))
   _ = Signal.setList(items, xs)
 } yield Signal.setStr(draft, "")), View.verticalDivider(), View.circularProgress(level), View.switch(live, "On"), View.badge(count, View.chip(pin, "Pin")), View.button("Rename", _ => for {
   xs = Signal.getList(items)
-  ys = List.setAt(xs, 0, "oat milk")
-} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.card(View.column(View.divider(), View.unconstrainedBox(View.offstage(level, View.visibility(level, View.semantics("mark", View.placeholder(View.tooltip("Sean", View.inkWell("face", _ => (), View.avatar("S")))))))), View.checkboxListTile(star, "Star"), View.switchListTile(quiet, "Quiet"), View.radioListTile(mode, 1, "Night"), View.segmented(seg, "List", "Grid"), View.fab("+", _ => ()), View.expansionTile(more, "More", View.text("hint")), View.each(items, s => View.listTile(Tasks.itemLabel(s), View.row(View.iconButton("i", _ => ()), View.outlinedButton("Edit", _ => ()), View.textButton("Open", _ => ()), View.filterChip(star, "Tag"), View.choiceChip(mode, 0, "Day"), View.actionChip("Go", _ => ()), View.inputChip(star, "In"), View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
+  ys = List.setAt(xs, 0, Item(0, "oat milk"))
+} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.card(View.column(View.divider(), View.unconstrainedBox(View.offstage(level, View.visibility(level, View.semantics("mark", View.placeholder(View.tooltip("Sean", View.inkWell("face", _ => (), View.avatar("S")))))))), View.checkboxListTile(star, "Star"), View.switchListTile(quiet, "Quiet"), View.radioListTile(mode, 1, "Night"), View.segmented(seg, "List", "Grid"), View.fab("+", _ => ()), View.expansionTile(more, "More", View.text("hint")), View.each(items, item => View.listTile(item.label, View.row(View.iconButton("i", _ => ()), View.outlinedButton("Edit", _ => ()), View.textButton("Open", _ => ()), View.filterChip(star, "Tag"), View.choiceChip(mode, 0, "Day"), View.actionChip("Go", _ => ()), View.inputChip(star, "In"), View.button(if (item.done == 1) "Undo" else "Done", _ => for {
   _ = Property.sometimes("tappedDone")
-} yield Signal.setList(items, List.map(Signal.getList(items), x => if (x == s) Tasks.flipDone(x) else x))), View.button("Del", _ => for {
+} yield Signal.setList(items, List.map(Signal.getList(items), x => if (x == item) Tasks.flipItem(x) else x))), View.button("Del", _ => for {
   _ = Property.sometimes("tappedDel")
-} yield Signal.setList(items, List.filter(Signal.getList(items), x => x != s)))))))))), View.button("Save", _ => for {
+} yield Signal.setList(items, List.filter(Signal.getList(items), x => x != item)))))))))), View.button("Save", _ => for {
   xs = Signal.getList(items)
-  body = Tasks.saveBody(xs)
+  body = Tasks.saveItems(xs)
   _ <- Fs.write(path, body).handleErrorWith(_ => IO.pure(()))
 } yield ()), View.button("Clear", _ => for {
   _ = Property.sometimes("tappedClear")

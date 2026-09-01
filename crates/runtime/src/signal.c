@@ -31,6 +31,7 @@ typedef struct SigReg {
   SigKind kind;
   int id;
   char *name;
+  int elem_str;
   const void *sig;
   struct SigReg *next;
 } SigReg;
@@ -44,6 +45,7 @@ static void sig_register(SigKind kind, const void *sig) {
   r->kind = kind;
   r->id = g_sig_next_id++;
   r->name = sz_strdup("");
+  r->elem_str = 1;
   r->sig = sig;
   if (g_sig_tail)
     g_sig_tail->next = r;
@@ -94,6 +96,18 @@ static SigReg *sig_find(SigKind kind, const char *name) {
   return NULL;
 }
 
+/* Mark a list signal's element kind: 1 = String (dump prints elements),
+ * 0 = other (dump prints the count only). */
+static void sig_set_elem_str(const void *sig, int64_t elem_str) {
+  SigReg *r;
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->sig == sig) {
+      r->elem_str = elem_str ? 1 : 0;
+      return;
+    }
+  }
+}
+
 static void dump_append(char **buf, size_t *len, size_t *cap, const char *s) {
   size_t n = strlen(s);
   if (*len + n + 1 > *cap) {
@@ -140,6 +154,12 @@ SzString *sz_signal_dump(void) {
       break;
     case SIG_LIST: {
       SzList *p = sz_signal_list_get((const SzSignalList *)r->sig);
+      if (!r->elem_str) {
+        snprintf(line, sizeof line, "list[%d] %s= <%lld>\n", r->id, tag,
+                 (long long)sz_list_len(p));
+        dump_append(&buf, &len, &cap, line);
+        break;
+      }
       snprintf(line, sizeof line, "list[%d] %s= [", r->id, tag);
       dump_append(&buf, &len, &cap, line);
       for (; p; p = p->tail) {
@@ -190,7 +210,7 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   if (index < 0)
     return sz_string_from_cstr("");
   r = sig_find(SIG_LIST, name ? sz_string_cstr(name) : "");
-  if (r) {
+  if (r && r->elem_str) {
     p = sz_signal_list_get((const SzSignalList *)r->sig);
     i = 0;
     while (p) {
@@ -297,8 +317,19 @@ void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v) {
   return NULL;
 }
 
-SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name) {
+int sz_signal_list_elem_str(const SzSignalList *s) {
+  SigReg *r;
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->sig == (const void *)s)
+      return r->elem_str;
+  }
+  return 1;
+}
+
+SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name,
+                                  int64_t elem_str) {
   SzSignalList *s = sz_signal_list(initial);
+  sig_set_elem_str(s, elem_str);
   if (name)
     sz_signal_name(s, sz_string_cstr(name));
   return s;

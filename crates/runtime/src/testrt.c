@@ -3167,7 +3167,12 @@ static int64_t tl_parse_signal_list_len(const char *dump, const char *name) {
   const char *sep = tl_sig_line(dump, "list", name);
   const char *p;
   int64_t quotes = 0;
-  if (!sep || memcmp(sep, " = [", 4) != 0)
+  if (!sep)
+    return 0;
+  /* Record lists dump the count only: `list[<id>] <name> = <n>`. */
+  if (memcmp(sep, " = <", 4) == 0)
+    return (int64_t)atoll(sep + 4);
+  if (memcmp(sep, " = [", 4) != 0)
     return 0;
   p = sep + 4;
   while (*p && *p != ']' && *p != '\n') {
