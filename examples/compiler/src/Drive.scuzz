@@ -234,8 +234,11 @@ def fuzzSimFiles(dir: String, deps: List[(String, String)], files: List[(String,
 
 def fuzzSimHd(dir: String, deps: List[(String, String)], h: (String, String), rest: List[(String, String)]): IO[List[(String, String)]] =
   h match {
-    case (stem, src) => fuzzSimOne(dir, deps, stem, src).flatMap(got => fuzzSimFiles(dir, deps, rest).map(more => (stem, got) :: more))
+    case (stem, src) => fuzzSimPair(dir, deps, stem, src, rest)
   }
+
+def fuzzSimPair(dir: String, deps: List[(String, String)], stem: String, src: String, rest: List[(String, String)]): IO[List[(String, String)]] =
+  fuzzSimOne(dir, deps, stem, src).flatMap(got => fuzzSimFiles(dir, deps, rest).map(more => (stem, got) :: more))
 
 def fuzzSimOne(dir: String, deps: List[(String, String)], stem: String, src: String): IO[String] =
   fuzzSimPath(joinSlash(joinSlash(dir, "src"), Str.concat(stem, ".scuzz_sim")), src).handleErrorWith(_ => fuzzSimDeps(dir, deps, stem, src))
@@ -719,7 +722,7 @@ def testPngEq(golden: String, want: String, got: String): IO[Unit] =
   if (want == got) IO.println(Str.concat("pixel golden ok: ", golden)) else IO.println(Str.concat("pixel golden mismatch: ", golden)).flatMap(_ => IO.fail("pixels"))
 
 def testDiff(dir: String, outDir: String): IO[Unit] =
-  Fs.exists(joinSlash(dir, "goldens")).flatMap(ok => if (!ok) IO.println("missing goldens/ for [ui] package. Seed with `scuzz test --update`.").flatMap(_ => IO.fail("differential")) else testDiffUi(dir, outDir))
+  Fs.exists(joinSlash(dir, "goldens")).flatMap(ok => if (!ok) failMsg("missing goldens/ for [ui] package. Seed with `scuzz test --update`.", "differential") else testDiffUi(dir, outDir))
 
 def testDiffUi(dir: String, outDir: String): IO[Unit] =
   ensureUi().flatMap(_ => Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testDiffMan(dir, outDir, Manifest.parse(toml))))
@@ -737,7 +740,13 @@ def testDiffEq(ref: String, rest: List[String]): IO[Unit] =
   if (List.isEmpty(rest)) IO.println("differential ok") else if (ref == List.head(rest)) testDiffEq(ref, List.tail(rest)) else IO.println("structural dump differs across backends").flatMap(_ => IO.fail("differential"))
 
 def testDiffOne(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String]): IO[Unit] =
-  skiaMake(backend).flatMap(ok => if (!ok) testDiffBackends(dir, outDir, name, rest, dumps) else emitDir(dir, outDir, true).flatMap(_ => testDiffLink(dir, outDir, name, backend, rest, dumps)))
+  skiaMake(backend).flatMap(ok => if (!ok) testDiffBackends(dir, outDir, name, rest, dumps) else testDiffEmit(dir, outDir, name, backend, rest, dumps))
+
+def testDiffEmit(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String]): IO[Unit] =
+  emitDir(dir, outDir, true).flatMap(_ => testDiffLink(dir, outDir, name, backend, rest, dumps))
+
+def failMsg(msg: String, tag: String): IO[Unit] =
+  IO.println(msg).flatMap(_ => IO.fail(tag))
 
 def skiaMake(backend: String): IO[Bool] =
   crateHome().flatMap(h => runLine(Str.concat("SCUZZ_SKIA=", Str.concat(backend, Str.concat(" make -C ", Str.concat(crateAt(h, "crates/ffi-skia"), " lib CC=clang"))))).flatMap(r => skiaMakeGot(r, backend)))
@@ -1086,13 +1095,13 @@ def fuzzSplitGo(job: FuzzJob): IO[Unit] =
   Fs.mkdirs(joinSlash(job.outDir, "fuzz")).flatMap(_ => Fs.mkdirs(joinSlash(joinSlash(job.outDir, "fuzz"), "live")).flatMap(_ => fuzzSplitRun(job)))
 
 def fuzzSplitRun(job: FuzzJob): IO[Unit] =
-  fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir)).flatMap(cv => if (cv != 0) IO.println("fuzz probe failed: app fails under TestRuntime before any event").flatMap(_ => IO.fail("scuzz fuzz")) else fuzzSplitLive(job))
+  fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir)).flatMap(cv => if (cv != 0) failMsg("fuzz probe failed: app fails under TestRuntime before any event", "scuzz fuzz") else fuzzSplitLive(job))
 
 def fuzzTlPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "timeline.txt")
 
 def fuzzSplitLive(job: FuzzJob): IO[Unit] =
-  fuzzSplitProbe(fuzzLiveExe(job), job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.txt"), joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "timeline.txt")).flatMap(cl => if (cl != 0) IO.println("fuzz live/verify split: live graph failed on the same seed").flatMap(_ => IO.fail("scuzz fuzz")) else fuzzSplitCmp(job))
+  fuzzSplitProbe(fuzzLiveExe(job), job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.txt"), joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "timeline.txt")).flatMap(cl => if (cl != 0) failMsg("fuzz live/verify split: live graph failed on the same seed", "scuzz fuzz") else fuzzSplitCmp(job))
 
 def fuzzSplitProbe(exe: String, hasUi: Bool, dump: String, tl: String): IO[Int] =
   runProbe(Str.concat(fuzzSplitEnv(hasUi, dump, tl), exe)).map(r => fuzzProbeCode(r))
@@ -1314,8 +1323,11 @@ def fuzzTlEnv(path: String): String =
 
 def fuzzIdleGot(mutDir: String, r: (Int, String, String)): IO[(Int, String)] =
   r match {
-    case (code, _out, _err) => Fs.read(joinSlash(mutDir, "timeline.txt")).handleErrorWith(_ => IO.pure("")).map(tl => (code, tl))
+    case (code, _out, _err) => fuzzIdleRead(mutDir, code)
   }
+
+def fuzzIdleRead(mutDir: String, code: Int): IO[(Int, String)] =
+  Fs.read(joinSlash(mutDir, "timeline.txt")).handleErrorWith(_ => IO.pure("")).map(tl => (code, tl))
 
 def fuzzRelate(dir: String, outDir: String): IO[Unit] =
   fuzzCollect(dir).flatMap(files => emitDirAlways(dir, outDir, files).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => fuzzRelateLinked(dir, outDir, files))))
@@ -1388,8 +1400,11 @@ def relateExec2(exe: String, hasUi: Bool, relDir: String, out: String, tag: Stri
 
 def relateExecGot(r: (Int, String, String)): IO[Int] =
   r match {
-    case (code, out, err) => if (code == 0) IO.pure(0) else IO.println(if (Str.len(err) > 0) err else out).map(_ => code)
+    case (code, out, err) => relateExecCode(code, out, err)
   }
+
+def relateExecCode(code: Int, out: String, err: String): IO[Int] =
+  if (code == 0) IO.pure(0) else IO.println(if (Str.len(err) > 0) err else out).map(_ => code)
 
 def relateEnv(hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, tl: String, reached: String, sched: String, fault: String): String =
   Str.concat(relateBaseEnv(hasUi), Str.concat(relateScriptEnv(hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzTlEnv(tl), Str.concat(Str.concat("SCUZZ_SOMETIMES_DUMP=", Str.concat(reached, " ")), Str.concat(fuzzSchedEnv(sched), fuzzFaultEnv(fault))))))

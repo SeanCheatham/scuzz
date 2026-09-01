@@ -142,10 +142,10 @@ def internHole(acc: List[String], inner: String): List[String] =
   collectToks(Lexer.lex(inner), acc)
 
 def emitConsts(xs: List[String], i: Int): String =
-  Builder.result(emitConstsAt(xs, i, Builder.empty()))
+  List.join(emitConstsList(xs, i), "")
 
-def emitConstsAt(xs: List[String], i: Int, b: Builder): Builder =
-  if (List.isEmpty(xs)) b else emitConstsAt(List.tail(xs), i + 1, Builder.append(b, Str.concat(strConst(i, List.head(xs)), nl())))
+def emitConstsList(xs: List[String], i: Int): List[String] =
+  if (List.isEmpty(xs)) noStr() else Str.concat(strConst(i, List.head(xs)), nl()) :: emitConstsList(List.tail(xs), i + 1)
 
 def join(a: String, b: String): String =
   Str.concat(a, b)
@@ -4060,7 +4060,10 @@ def isVarPat(pat: String, ens: List[En]): Bool =
   isSimpleBind(pat) && !isOrPat(pat) && !isTuplePat(pat) && dotAt(pat, 0) < 0 && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
 
 def emitOkVar(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, sv: String, asI64: Bool): Slot =
-  emitOkVar2(bindAliasTy(pat, sv, asI64), emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, Param(pat, if (asI64) "Int" else "Any", "", "") :: dropParam(ps, pat)), asI64)
+  emitOkVarBps(pat, body, prefix, strs, defs, ens, Param(pat, if (asI64) "Int" else "Any", "", "") :: dropParam(ps, pat), i, sv, asI64)
+
+def emitOkVarBps(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], bps: List[Param], i: Int, sv: String, asI64: Bool): Slot =
+  emitOkVar2(bindAliasTy(pat, sv, asI64), emitOkOwned(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, bps), bps), asI64)
 
 def emitOkVar2(alias: String, s: Slot, asI64: Bool): Slot =
   s match {
@@ -4178,7 +4181,7 @@ def emitOkTuple(pat: String, body: Expr, prefix: String, strs: List[String], def
   emitOkTuple2(pat, rewriteTuple(pat, body, prefix, i, tys), prefix, strs, defs, ens, i, stemBps(pat, prefix, i, tys, ps))
 
 def emitOkTuple2(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], i: Int, bps: List[Param]): Slot =
-  emitOkOwned(emitOkTupleJoin(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, bps), exprIsI64(body, bps, defs)), bps)
+  emitOkTupleJoin(emitOkOwned(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, bps), bps), exprIsI64(body, bps, defs))
 
 def emitOkTupleJoin(s: Slot, asI64: Bool): Slot =
   s match {
@@ -4255,10 +4258,10 @@ def tupleNameAt(xs: List[String], n: Int): String =
   if (List.isEmpty(xs)) "" else if (n == 0) List.head(xs) else tupleNameAt(List.tail(xs), n - 1)
 
 def emitOkSlotBind(bind: String, isInt: Bool, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int): Slot =
-  if (isAsPat(bind)) emitOkSlotBind(asName(bind), isInt, body, prefix, strs, defs, ens, ps, i) else if (bind == "") emitOkSlot2(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), true, isInt, prefix, i) else emitOkSlot2(emitExpr(rewriteBind(body, bind, bindStem(prefix, i, isInt)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), false, isInt, prefix, i)
+  if (isAsPat(bind)) emitOkSlotBind(asName(bind), isInt, body, prefix, strs, defs, ens, ps, i) else if (bind == "") emitOkSlot2(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), true, isInt, prefix, i, ps) else emitOkSlot2(emitExpr(rewriteBind(body, bind, bindStem(prefix, i, isInt)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps), false, isInt, prefix, i, ps)
 
-def emitOkSlot2(s: Slot, empty: Bool, isInt: Bool, prefix: String, i: Int): Slot =
-  if (empty || isInt) s else emitOkSlot3(s, Str.concat("%", bindStem(prefix, i, false)))
+def emitOkSlot2(s: Slot, empty: Bool, isInt: Bool, prefix: String, i: Int, ps: List[Param]): Slot =
+  if (isInt) s else if (empty) emitOkOwned(s, ps) else emitOkOwned(emitOkSlot3(s, Str.concat("%", bindStem(prefix, i, false))), ps)
 
 def emitOkSlot3(s: Slot, bind: String): Slot =
   s match {
@@ -4383,8 +4386,11 @@ def parseGuard(g: String): Expr =
 
 def parseGuard1(p: (Expr, Int)): Expr =
   p match {
-    case (e, _) => e
+    case (e, _) => guardExpr(e)
   }
+
+def guardExpr(e: Expr): Expr =
+  e
 
 def emitOkBodyGuard(gs: Slot, code: String, prefix: String, i: Int, last: Bool): String =
   gs match {
@@ -4439,10 +4445,10 @@ def oneParam(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", p.name) else Str.concat("ptr %", p.name)
 
 def emitDefs(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): String =
-  if (List.isEmpty(ds)) "" else Builder.result(emitDefsAt(ds, strs, all, ens, Builder.empty()))
+  if (List.isEmpty(ds)) "" else List.join(emitDefsList(ds, strs, all, ens), "")
 
-def emitDefsAt(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], b: Builder): Builder =
-  if (List.isEmpty(ds)) b else emitDefsAt(List.tail(ds), strs, all, ens, Builder.append(b, emitDef(List.head(ds), strs, all, ens)))
+def emitDefsList(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): List[String] =
+  if (List.isEmpty(ds)) noStr() else emitDef(List.head(ds), strs, all, ens) :: emitDefsList(List.tail(ds), strs, all, ens)
 
 def emitDef2(d: Fun, body: Slot): String =
   d match {
@@ -4584,11 +4590,11 @@ def emitOkTailArm(pat: String, body: Expr, fname: String, tret: String, strs: Li
   join(lab(Str.concat("body_ok_0_", Str.fromInt(i))), emitOkTailBody(pat, body, fname, tret, strs, defs, ens, ps, i, tys, sv))
 
 def emitOkTailBody(pat: String, body: Expr, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String], sv: String): String =
-  if (isSelfTail(body, fname)) emitOkTailSlot(pat, body, strs, defs, ens, ps, i, tys, sv).code else emitOkTailBase(emitOkSlotPat(pat, body, "body", strs, defs, ens, ps, i, tys, sv, false), tret)
+  if (isSelfTail(body, fname)) emitOkTailSlot(pat, body, strs, defs, ens, ps, i, tys, sv).code else emitOkTailBase(emitOkSlotPat(pat, body, "body", strs, defs, ens, ps, i, tys, sv, false), tret, ps, i)
 
-def emitOkTailBase(s: Slot, tret: String): String =
+def emitOkTailBase(s: Slot, tret: String, ps: List[Param], i: Int): String =
   s match {
-    case Slot(c, v, o) => join(c, emitTcoRet(tret, v, o))
+    case Slot(c, v, o) => join(c, emitTcoRetSlots(tret, v, o, ps, Str.concat("ok_", Str.fromInt(i))))
   }
 
 def emitOkTailSlot(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, tys: List[String], sv: String): Slot =
@@ -4658,15 +4664,15 @@ def emitTailArmIf(e: Expr, prefix: String, strs: List[String], defs: List[Fun], 
   }
 
 def emitTailBase(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], ret: String): String =
-  emitTailBase1(emitExpr(e, Str.concat(prefix, "_b"), strs, defs, ens, ps), ret)
+  emitTailBase1(emitExpr(e, Str.concat(prefix, "_b"), strs, defs, ens, ps), ret, ps, prefix)
 
-def emitTailBase1(s: Slot, ret: String): String =
+def emitTailBase1(s: Slot, ret: String, ps: List[Param], tag: String): String =
   s match {
-    case Slot(tc, tv, to) => join(tc, emitTcoRet(ret, tv, to))
+    case Slot(tc, tv, to) => join(tc, emitTcoRetSlots(ret, tv, to, ps, tag))
   }
 
-def emitTcoRet(ret: String, tv: String, to: Bool): String =
-  if (ret == "ptr" && !to) join(retPtr(tv), line(Str.concat("ret ptr ", tv))) else if (ret == "ptr") line(Str.concat("ret ptr ", tv)) else line(Str.concat("ret i64 ", tv))
+def emitTcoRetSlots(ret: String, tv: String, to: Bool, ps: List[Param], tag: String): String =
+  join(if (ret == "ptr" && !to) retPtr(tv) else "", join(emitTcoReleases(ps, 0, Str.concat(tag, "_rb")), line(Str.concat(if (ret == "ptr") "ret ptr " else "ret i64 ", tv))))
 
 def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
   e match {
@@ -4683,18 +4689,24 @@ def emitSelfTailOne(a: Expr, rest: List[Expr], prefix: String, strs: List[String
 
 def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], i: Int, code: String, vals: List[String]): String =
   s match {
-    case Slot(c, v, _) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, i + 1, join(code, c), List.concat(vals, v :: noStr()))
+    case Slot(c, v, o) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, i + 1, join(code, c), List.concat(vals, tcoMark(v, o) :: noStr()))
   }
 
+def tcoMark(v: String, o: Bool): String =
+  if (o) Str.concat("~", v) else v
+
+def tcoVal(v: String): String =
+  if (Str.startsWith(v, "~")) Str.slice(v, 1, Str.len(v)) else v
+
 def emitTcoCommit(code: String, ps: List[Param], vals: List[String], tag: String): String =
-  join(code, join(emitTcoRetains(ps, vals, 0), join(emitTcoReleases(ps, 0, tag), join(emitTcoStores(ps, vals, 0), join(emitTcoHeld(ps, 0), line("br label %tco_loop"))))))
+  join(code, join(emitTcoRetains(ps, vals, 0), join(emitTcoReleases(ps, 0, tag), join(emitTcoStores(ps, vals, 0), join(emitTcoHeld(ps, 0), join(emitTcoTempRels(ps, vals, 0), line("br label %tco_loop")))))))
 
 def emitTcoRetains(ps: List[Param], vals: List[String], i: Int): String =
   if (i >= List.len(ps) || i >= List.len(vals)) "" else emitTcoRetainOne(List.at(ps, i), List.at(vals, i), ps, vals, i)
 
 def emitTcoRetainOne(p: Param, v: String, ps: List[Param], vals: List[String], i: Int): String =
   p match {
-    case Param(_, ty, _, _) => join(emitTcoRetainTy(ty, v), emitTcoRetains(ps, vals, i + 1))
+    case Param(_, ty, _, _) => join(emitTcoRetainTy(ty, tcoVal(v)), emitTcoRetains(ps, vals, i + 1))
   }
 
 def emitTcoRetainTy(ty: String, v: String): String =
@@ -4734,8 +4746,19 @@ def emitTcoStores(ps: List[Param], vals: List[String], i: Int): String =
 
 def emitTcoStoreOne(p: Param, v: String, ps: List[Param], vals: List[String], i: Int): String =
   p match {
-    case Param(n, ty, _, _) => join(line(Str.concat("store ", Str.concat(if (isI64Ty(ty)) "i64 " else "ptr ", Str.concat(v, Str.concat(", ptr %", Str.concat(n, "_slot")))))), emitTcoStores(ps, vals, i + 1))
+    case Param(n, ty, _, _) => join(line(Str.concat("store ", Str.concat(if (isI64Ty(ty)) "i64 " else "ptr ", Str.concat(tcoVal(v), Str.concat(", ptr %", Str.concat(n, "_slot")))))), emitTcoStores(ps, vals, i + 1))
   }
+
+def emitTcoTempRels(ps: List[Param], vals: List[String], i: Int): String =
+  if (i >= List.len(ps) || i >= List.len(vals)) "" else emitTcoTempRelOne(List.at(ps, i), List.at(vals, i), ps, vals, i)
+
+def emitTcoTempRelOne(p: Param, v: String, ps: List[Param], vals: List[String], i: Int): String =
+  p match {
+    case Param(_, ty, _, _) => join(if (isI64Ty(ty)) "" else emitTcoTempRel(v), emitTcoTempRels(ps, vals, i + 1))
+  }
+
+def emitTcoTempRel(v: String): String =
+  if (Str.startsWith(v, "~")) line(Str.concat("call void @sz_release(ptr ", Str.concat(tcoVal(v), ")"))) else ""
 
 def emitTcoHeld(ps: List[Param], i: Int): String =
   if (i >= List.len(ps)) "" else emitTcoHeldOne(List.at(ps, i), ps, i)
@@ -5711,7 +5734,7 @@ def bindTupPsTy(ns: List[String], tys: List[String], ps: List[Param]): List[Para
   if (List.isEmpty(ns)) ps else bindTupPsTy1(List.head(ns), List.tail(ns), tys, ps)
 
 def bindTupPsTy1(n: String, rest: List[String], tys: List[String], ps: List[Param]): List[Param] =
-  bindTupPsTy(rest, tailOrEmpty(tys), if (keepBind(n)) Param(n, headOrAny(tys), "", "") :: dropParam(ps, n) else ps)
+  if (keepBind(n)) Param(n, headOrAny(tys), "", "") :: dropParam(bindTupPsTy(rest, tailOrEmpty(tys), ps), n) else bindTupPsTy(rest, tailOrEmpty(tys), ps)
 
 def headOrAny(tys: List[String]): String =
   if (List.isEmpty(tys)) "Any" else List.head(tys)
