@@ -1808,11 +1808,15 @@ static SzVerdict *verify_kit_combo(void *tl) {
   return sz_verdict_and(every, sz_verdict_or(any, fallback));
 }
 
-/* Relation claim: final int signal 0 must match across the pair. */
+/* Relation claim: final int signal "count" must match across the pair. */
 static SzVerdict *rel_final_int_eq(void *a, void *b) {
   int64_t ai = sz_timeline_len(a) - 1;
   int64_t bi = sz_timeline_len(b) - 1;
-  if (sz_timeline_signal_int(a, ai, 0) == sz_timeline_signal_int(b, bi, 0))
+  SzString *name = sz_string_from_cstr("count");
+  int64_t av = sz_timeline_signal_int(a, ai, name);
+  int64_t bv = sz_timeline_signal_int(b, bi, name);
+  sz_release(name);
+  if (av == bv)
     return sz_verdict_ok();
   return sz_verdict_fail(0, "final count differs across schedules");
 }
@@ -10676,13 +10680,21 @@ int main(void) {
     void *tl;
     SzString *needle;
     write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                     "x\nsignals:\nint[0] = 7\nlist[1] = [\"a\", "
+                     "x\nsignals:\nint[0] count = 7\nlist[1] items = [\"a\", "
                      "\"b\"]\na11y:\nbutton:+1\n");
     tl = sz_timeline_load(path);
     assert(tl);
     assert(sz_timeline_len(tl) == 1);
-    assert(sz_timeline_signal_int(tl, 0, 0) == 7);
-    assert(sz_timeline_signal_list_len(tl, 0, 1) == 2);
+    needle = sz_string_from_cstr("count");
+    assert(sz_timeline_signal_int(tl, 0, needle) == 7);
+    sz_release(needle);
+    needle = sz_string_from_cstr("items");
+    assert(sz_timeline_signal_list_len(tl, 0, needle) == 2);
+    sz_release(needle);
+    /* An unnamed line or an unknown name reads as 0. */
+    needle = sz_string_from_cstr("missing");
+    assert(sz_timeline_signal_int(tl, 0, needle) == 0);
+    sz_release(needle);
     needle = sz_string_from_cstr("button:+1");
     assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
     sz_release(needle);
@@ -10695,21 +10707,64 @@ int main(void) {
     remove(path);
   }
 
+  /* Verdict.alwaysHas / Verdict.afterHit fold a11y and last-hit fields. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_vfold.dump";
+    void *tl;
+    SzString *hit;
+    SzString *needle;
+    SzVerdict *v;
+    write_text(path, "# timeline v=2 n=2\n--- 0\nlast_hit:\n\ndrive:\n\n"
+                     "signals:\n\na11y:\nbutton:+1\n--- 1\nlast_hit:\n"
+                     "button:+1\ndrive:\n\nsignals:\n\na11y:\nbutton:+1\n"
+                     "text:count = 1\n");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 2);
+    needle = sz_string_from_cstr("button:+1");
+    v = sz_verdict_always_has(tl, needle);
+    assert(v->valid);
+    sz_release(needle);
+    needle = sz_string_from_cstr("text:count = 1");
+    v = sz_verdict_always_has(tl, needle);
+    assert(!v->valid);
+    assert(v->index == 0);
+    hit = sz_string_from_cstr("button:+1");
+    v = sz_verdict_after_hit(tl, hit, needle);
+    assert(v->valid);
+    sz_release(needle);
+    needle = sz_string_from_cstr("text:count = 2");
+    v = sz_verdict_after_hit(tl, hit, needle);
+    assert(!v->valid);
+    assert(v->index == 1);
+    sz_release(needle);
+    sz_release(hit);
+    /* No hit at all stays valid. */
+    hit = sz_string_from_cstr("button:-1");
+    needle = sz_string_from_cstr("text:anything");
+    v = sz_verdict_after_hit(tl, hit, needle);
+    assert(v->valid);
+    sz_release(needle);
+    sz_release(hit);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
   /* Relation claims judge a pair of dumps in judge mode. */
   {
     const char *a = "/tmp/scuzz_test_io_rel_a.dump";
     const char *b = "/tmp/scuzz_test_io_rel_b.dump";
     write_text(a, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                  "x\nsignals:\nint[0] = 1\na11y:\n");
+                  "x\nsignals:\nint[0] count = 1\na11y:\n");
     write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                  "x\nsignals:\nint[0] = 1\na11y:\n");
+                  "x\nsignals:\nint[0] count = 1\na11y:\n");
     sz_property_session_reset();
     sz_verify_register_rel("sameFinal", rel_final_int_eq);
     assert(sz_judge_rel_main(
                "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
            0);
     write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                  "x\nsignals:\nint[0] = 2\na11y:\n");
+                  "x\nsignals:\nint[0] count = 2\na11y:\n");
     assert(sz_judge_rel_main(
                "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
            1);

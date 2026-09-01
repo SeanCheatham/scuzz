@@ -3105,28 +3105,42 @@ static void tl_restore_clear(void) {
 
 int sz_timeline_replaying(void) { return g_replay; }
 
-int64_t sz_timeline_replay_signal_int(int64_t id) {
-  char key[48];
-  const char *p;
-  if (!g_replay_signals)
-    return 0;
-  snprintf(key, sizeof key, "int[%lld] = ", (long long)id);
-  p = strstr(g_replay_signals, key);
-  if (!p)
-    return 0;
-  return (int64_t)atoll(p + strlen(key));
+/* Find the signals-dump line for `kind` (`int` / `str` / `list`) with the
+ * given signal name. Lines are `<kind>[<id>] <name> = <value>`, or
+ * `<kind>[<id>] = <value>` for an unnamed signal. Returns a pointer at the
+ * ` = ` separator, or NULL. */
+static const char *tl_sig_line(const char *dump, const char *kind,
+                               const char *name) {
+  size_t klen = strlen(kind);
+  size_t nlen = name ? strlen(name) : 0;
+  const char *p = dump;
+  if (!p || !nlen)
+    return NULL;
+  while (p && *p) {
+    const char *eol = strchr(p, '\n');
+    size_t line_len = eol ? (size_t)(eol - p) : strlen(p);
+    const char *bracket;
+    if (line_len > klen + 2 && memcmp(p, kind, klen) == 0 &&
+        p[klen] == '[') {
+      bracket = (const char *)memchr(p, ']', line_len);
+      if (bracket && (size_t)(bracket + 1 - p) + 1 + nlen + 3 <= line_len &&
+          bracket[1] == ' ' && memcmp(bracket + 2, name, nlen) == 0 &&
+          memcmp(bracket + 2 + nlen, " = ", 3) == 0)
+        return bracket + 2 + nlen;
+    }
+    p = eol ? eol + 1 : NULL;
+  }
+  return NULL;
 }
 
-static int64_t tl_parse_signal_int(const char *dump, int64_t id) {
-  char key[48];
-  const char *p;
-  if (!dump)
-    return 0;
-  snprintf(key, sizeof key, "int[%lld] = ", (long long)id);
-  p = strstr(dump, key);
-  if (!p)
-    return 0;
-  return (int64_t)atoll(p + strlen(key));
+int64_t sz_timeline_replay_signal_int(const char *name) {
+  const char *sep = tl_sig_line(g_replay_signals, "int", name);
+  return sep ? (int64_t)atoll(sep + 3) : 0;
+}
+
+static int64_t tl_parse_signal_int(const char *dump, const char *name) {
+  const char *sep = tl_sig_line(dump, "int", name);
+  return sep ? (int64_t)atoll(sep + 3) : 0;
 }
 
 static SzTlState *tl_at(void *tl, int64_t i) {
@@ -3141,25 +3155,22 @@ int64_t sz_timeline_len(void *tl) {
   return t ? t->n : 0;
 }
 
-int64_t sz_timeline_signal_int(void *tl, int64_t i, int64_t id) {
+int64_t sz_timeline_signal_int(void *tl, int64_t i, SzString *name) {
   SzTlState *s = tl_at(tl, i);
-  return s ? tl_parse_signal_int(s->signals, id) : 0;
+  return s ? tl_parse_signal_int(s->signals, name ? sz_string_cstr(name) : "")
+           : 0;
 }
 
-/* List length from the signals dump: `list[<id>] = ["a", "b"]` holds one
- * quoted string per element (no escaping), so quotes pair per element. */
-static int64_t tl_parse_signal_list_len(const char *dump, int64_t id) {
-  char key[48];
+/* List length from the signals dump: `list[<id>] <name> = ["a", "b"]` holds
+ * one quoted string per element (no escaping), so quotes pair per element. */
+static int64_t tl_parse_signal_list_len(const char *dump, const char *name) {
+  const char *sep = tl_sig_line(dump, "list", name);
   const char *p;
   int64_t quotes = 0;
-  if (!dump)
+  if (!sep || memcmp(sep, " = [", 4) != 0)
     return 0;
-  snprintf(key, sizeof key, "list[%lld] = [", (long long)id);
-  p = strstr(dump, key);
-  if (!p)
-    return 0;
-  p += strlen(key);
-  while (*p && *p != ']') {
+  p = sep + 4;
+  while (*p && *p != ']' && *p != '\n') {
     if (*p == '"')
       quotes += 1;
     p += 1;
@@ -3167,24 +3178,25 @@ static int64_t tl_parse_signal_list_len(const char *dump, int64_t id) {
   return quotes / 2;
 }
 
-int64_t sz_timeline_signal_list_len(void *tl, int64_t i, int64_t id) {
+int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name) {
   SzTlState *s = tl_at(tl, i);
-  return s ? tl_parse_signal_list_len(s->signals, id) : 0;
+  return s ? tl_parse_signal_list_len(s->signals,
+                                      name ? sz_string_cstr(name) : "")
+           : 0;
 }
 
-/* 1 when the `str[<id>] = "<value>"` line in the state's signals dump holds
- * `needle` as a substring. */
-int64_t sz_timeline_signal_str_has(void *tl, int64_t i, int64_t id,
+/* 1 when the `str[<id>] <name> = "<value>"` line in the state's signals dump
+ * holds `needle` as a substring, searched from the ` = ` separator so the
+ * name cannot false-match. */
+int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
                                    SzString *needle) {
-  char key[48];
   const char *p;
   const char *end;
   SzTlState *s = tl_at(tl, i);
   const char *n = needle ? sz_string_cstr(needle) : "";
   if (!s || !s->signals || !n[0])
     return 0;
-  snprintf(key, sizeof key, "str[%lld]", (long long)id);
-  p = strstr(s->signals, key);
+  p = tl_sig_line(s->signals, "str", name ? sz_string_cstr(name) : "");
   if (!p)
     return 0;
   end = strchr(p, '\n');
@@ -3475,6 +3487,43 @@ SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp) {
   }
   return sz_verdict_fail(t && t->n > 0 ? t->n - 1 : 0,
                          "no state satisfied the predicate");
+}
+
+/* Fold: the needle stays visible in the a11y dump at every state. */
+SzVerdict *sz_verdict_always_has(void *tl, SzString *needle) {
+  SzTimeline *t = (SzTimeline *)tl;
+  int i;
+  if (!t)
+    return sz_verdict_ok();
+  for (i = 0; i < t->n; i++) {
+    if (!sz_timeline_a11y_has(tl, i, needle))
+      return sz_verdict_fail(i, "needle not visible at this state");
+  }
+  return sz_verdict_ok();
+}
+
+/* Fold: once a hit lands, the needle shows in the a11y dump at that state or
+ * a later one. A timeline with no hit stays valid. */
+SzVerdict *sz_verdict_after_hit(void *tl, SzString *hit, SzString *needle) {
+  SzTimeline *t = (SzTimeline *)tl;
+  int hits = 0;
+  int i;
+  int j;
+  if (!t)
+    return sz_verdict_ok();
+  for (i = 0; i < t->n; i++) {
+    if (!sz_timeline_last_hit_has(tl, i, hit))
+      continue;
+    hits = 1;
+    for (j = i; j < t->n; j++) {
+      if (sz_timeline_a11y_has(tl, j, needle))
+        return sz_verdict_ok();
+    }
+  }
+  if (!hits)
+    return sz_verdict_ok();
+  return sz_verdict_fail(t->n > 0 ? t->n - 1 : 0,
+                         "hit never showed the needle");
 }
 
 #define SZ_TIMELINE_DUMP_VERSION 2

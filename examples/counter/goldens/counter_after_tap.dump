@@ -1,6 +1,6 @@
 [signals]
-int[0] = 1
-str[1] = "count = 1"
+int[0] count = 1
+str[1] label = "count = 1"
 
 [views]
 text:Counter

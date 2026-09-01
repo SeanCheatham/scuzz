@@ -184,7 +184,7 @@ Clear-dense, not cryptic-dense: nested declarative `View`s, inference, single-ex
 
 Close these before more widgets or Net surface.
 
-- **Named Signals.** A Signal publishes the binder name (`count = Signal.int(0)` → `"count"`). Claims and `Property.signal*` read that name. Integer dump slots are not the author surface. Forwards only: drop the integer-id kit from authors.
+- **Named Signals.** In: a Signal publishes its `for` binder name (`count = Signal.int(0)` → `"count"`). Claims and `Property.signal*` read that name. `Verdict.alwaysHas` and `Verdict.afterHit` cover the always-visible and after-hit-shows folds. Dump slot ids stay an implementation detail. The integer-id kit is gone.
 - **`Signal[T]`.** Direction: one generic cell and `View.each` over the element type. Records in lists are in scope. Encoded strings as domain values are not.
 - **UTF-8 `String`.** Direction: `Str.*` indexes Unicode, not bytes. Current ops are bytes. Close this before more text-field or editor features.
 - **Typed fail.** Current `IO[T]` fails with a `String` message. Direction: typed `E` without `R`. Do not add environment `R`. Do not add user FFI.
@@ -276,7 +276,7 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ## Open work
 
-Close thesis-critical gaps in this order: named Timeline observations, `Signal[T]`, UTF-8 `String`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). Next slice: [`plans.md`](plans.md).
+Close thesis-critical gaps in this order: `Signal[T]`, UTF-8 `String`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). Next slice: [`plans.md`](plans.md).
 
 Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. `scuzz ide` launches the bundled `[ui]` package (`examples/editor` / `SCUZZ_HOME/ide`). Headless is part of every UI slice. `scuzz test --differential` compares structural dumps across render backends.
 

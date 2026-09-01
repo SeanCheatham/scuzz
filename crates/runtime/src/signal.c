@@ -30,6 +30,7 @@ typedef enum { SIG_INT = 1, SIG_STR = 2, SIG_LIST = 3 } SigKind;
 typedef struct SigReg {
   SigKind kind;
   int id;
+  char *name;
   const void *sig;
   struct SigReg *next;
 } SigReg;
@@ -42,12 +43,25 @@ static void sig_register(SigKind kind, const void *sig) {
   SigReg *r = (SigReg *)sz_alloc_zero(sizeof(SigReg));
   r->kind = kind;
   r->id = g_sig_next_id++;
+  r->name = sz_strdup("");
   r->sig = sig;
   if (g_sig_tail)
     g_sig_tail->next = r;
   else
     g_sig_head = r;
   g_sig_tail = r;
+}
+
+/* Publish the author-facing name of a signal (its `for` binder name). */
+void sz_signal_name(const void *sig, const char *name) {
+  SigReg *r;
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->sig == sig) {
+      sz_free(r->name);
+      r->name = sz_strdup(name);
+      return;
+    }
+  }
 }
 
 static void sig_unregister(const void *sig) {
@@ -61,11 +75,23 @@ static void sig_unregister(const void *sig) {
         while (g_sig_tail && g_sig_tail->next)
           g_sig_tail = g_sig_tail->next;
       }
+      sz_free(dead->name);
       sz_free(dead);
       return;
     }
     p = &(*p)->next;
   }
+}
+
+static SigReg *sig_find(SigKind kind, const char *name) {
+  SigReg *r;
+  if (!name || !name[0])
+    return NULL;
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->kind == kind && strcmp(r->name, name) == 0)
+      return r;
+  }
+  return NULL;
 }
 
 static void dump_append(char **buf, size_t *len, size_t *cap, const char *s) {
@@ -92,24 +118,29 @@ SzString *sz_signal_dump(void) {
   char *buf = NULL;
   size_t len = 0, cap = 0;
   char line[512];
+  char tag[256];
   SigReg *r;
   SzString *out;
   dump_append(&buf, &len, &cap, "");
   for (r = g_sig_head; r; r = r->next) {
+    if (r->name && r->name[0])
+      snprintf(tag, sizeof tag, "%s ", r->name);
+    else
+      tag[0] = '\0';
     switch (r->kind) {
     case SIG_INT:
-      snprintf(line, sizeof line, "int[%d] = %lld\n", r->id,
+      snprintf(line, sizeof line, "int[%d] %s= %lld\n", r->id, tag,
                (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
       dump_append(&buf, &len, &cap, line);
       break;
     case SIG_STR:
-      snprintf(line, sizeof line, "str[%d] = \"%s\"\n", r->id,
+      snprintf(line, sizeof line, "str[%d] %s= \"%s\"\n", r->id, tag,
                sz_signal_str_get((const SzSignalStr *)r->sig));
       dump_append(&buf, &len, &cap, line);
       break;
     case SIG_LIST: {
       SzList *p = sz_signal_list_get((const SzSignalList *)r->sig);
-      snprintf(line, sizeof line, "list[%d] = [", r->id);
+      snprintf(line, sizeof line, "list[%d] %s= [", r->id, tag);
       dump_append(&buf, &len, &cap, line);
       for (; p; p = p->tail) {
         const SzString *s = (const SzString *)p->head;
@@ -127,56 +158,48 @@ SzString *sz_signal_dump(void) {
   return out;
 }
 
-int64_t sz_property_signal_int(int64_t id) {
+int64_t sz_property_signal_int(SzString *name) {
+  const char *n = name ? sz_string_cstr(name) : "";
   SigReg *r;
   if (sz_timeline_replaying())
-    return sz_timeline_replay_signal_int(id);
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->id == (int)id && r->kind == SIG_INT)
-      return sz_signal_int_get((const SzSignalInt *)r->sig);
-  }
-  return 0;
+    return sz_timeline_replay_signal_int(n);
+  r = sig_find(SIG_INT, n);
+  return r ? sz_signal_int_get((const SzSignalInt *)r->sig) : 0;
 }
 
-SzString *sz_property_signal_str(int64_t id) {
-  SigReg *r;
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->id == (int)id && r->kind == SIG_STR)
-      return sz_string_from_cstr(
-          sz_signal_str_get((const SzSignalStr *)r->sig));
-  }
+SzString *sz_property_signal_str(SzString *name) {
+  SigReg *r = sig_find(SIG_STR, name ? sz_string_cstr(name) : "");
+  if (r)
+    return sz_string_from_cstr(
+        sz_signal_str_get((const SzSignalStr *)r->sig));
   return sz_string_from_cstr("");
 }
 
-int64_t sz_property_signal_list_len(int64_t id) {
-  SigReg *r;
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->id == (int)id && r->kind == SIG_LIST)
-      return (int64_t)sz_list_len(
-          sz_signal_list_get((const SzSignalList *)r->sig));
-  }
+int64_t sz_property_signal_list_len(SzString *name) {
+  SigReg *r = sig_find(SIG_LIST, name ? sz_string_cstr(name) : "");
+  if (r)
+    return (int64_t)sz_list_len(
+        sz_signal_list_get((const SzSignalList *)r->sig));
   return 0;
 }
 
-SzString *sz_property_signal_list_at(int64_t id, int64_t index) {
+SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   SigReg *r;
   const SzList *p;
   int64_t i;
   if (index < 0)
     return sz_string_from_cstr("");
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->id == (int)id && r->kind == SIG_LIST) {
-      p = sz_signal_list_get((const SzSignalList *)r->sig);
-      i = 0;
-      while (p) {
-        if (i == index) {
-          SzString *h = (SzString *)p->head;
-          return sz_string_from_cstr(h ? sz_string_cstr(h) : "");
-        }
-        p = p->tail;
-        i++;
+  r = sig_find(SIG_LIST, name ? sz_string_cstr(name) : "");
+  if (r) {
+    p = sz_signal_list_get((const SzSignalList *)r->sig);
+    i = 0;
+    while (p) {
+      if (i == index) {
+        SzString *h = (SzString *)p->head;
+        return sz_string_from_cstr(h ? sz_string_cstr(h) : "");
       }
-      return sz_string_from_cstr("");
+      p = p->tail;
+      i++;
     }
   }
   return sz_string_from_cstr("");
@@ -244,7 +267,12 @@ void sz_signal_str_free(SzSignalStr *s) {
 
 /* --- Lang-facing wrappers (kept here so Signal use does not drag in ui.o) -- */
 
-SzSignalInt *sz_lang_signal_int(int64_t initial) { return sz_signal_int(initial); }
+SzSignalInt *sz_lang_signal_int(int64_t initial, SzString *name) {
+  SzSignalInt *s = sz_signal_int(initial);
+  if (name)
+    sz_signal_name(s, sz_string_cstr(name));
+  return s;
+}
 
 int64_t sz_lang_signal_get(SzSignalInt *s) { return sz_signal_int_get(s); }
 
@@ -253,8 +281,11 @@ void *sz_lang_signal_set(SzSignalInt *s, int64_t v) {
   return NULL;
 }
 
-SzSignalStr *sz_lang_signal_str(SzString *initial) {
-  return sz_signal_str(initial ? sz_string_cstr(initial) : "");
+SzSignalStr *sz_lang_signal_str(SzString *initial, SzString *name) {
+  SzSignalStr *s = sz_signal_str(initial ? sz_string_cstr(initial) : "");
+  if (name)
+    sz_signal_name(s, sz_string_cstr(name));
+  return s;
 }
 
 SzString *sz_lang_signal_str_get(SzSignalStr *s) {
@@ -266,7 +297,12 @@ void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v) {
   return NULL;
 }
 
-SzSignalList *sz_lang_signal_list(SzList *initial) { return sz_signal_list(initial); }
+SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name) {
+  SzSignalList *s = sz_signal_list(initial);
+  if (name)
+    sz_signal_name(s, sz_string_cstr(name));
+  return s;
+}
 
 SzList *sz_lang_signal_list_get(SzSignalList *s) { return sz_signal_list_get(s); }
 
@@ -275,7 +311,8 @@ void *sz_lang_signal_list_set(SzSignalList *s, SzList *v) {
   return NULL;
 }
 
-SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env) {
+SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn,
+                                void *env, SzString *name) {
   SzSignalStr *s = (SzSignalStr *)sz_alloc_zero(sizeof(SzSignalStr));
   s->map_src = src;
   s->map_fn = fn;
@@ -283,6 +320,8 @@ SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env
   s->map_env = env;
   s->value = sz_strdup("");
   sig_register(SIG_STR, s);
+  if (name)
+    sz_signal_name(s, sz_string_cstr(name));
   /* Prime cached value. */
   (void)sz_signal_str_get(s);
   return s;

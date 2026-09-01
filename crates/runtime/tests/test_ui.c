@@ -13046,20 +13046,25 @@ static void test_property_signal_list_len(void) {
   SzSignalList *items;
   SzList *xs;
   SzString *dump;
+  SzString *name;
   const char *s;
-  int id;
 
   xs = sz_list_cons(sz_string_from_cstr("a"),
                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
   items = sz_signal_list(xs);
+  sz_signal_name(items, "items");
   dump = sz_signal_dump();
   s = strstr(sz_string_cstr(dump), "list[");
   assert(s);
-  id = atoi(s + 5);
-  assert(sz_property_signal_list_len(id) == 2);
+  assert(strstr(s, "items = "));
+  name = sz_string_from_cstr("items");
+  assert(sz_property_signal_list_len(name) == 2);
   sz_signal_list_set(items, sz_list_nil());
-  assert(sz_property_signal_list_len(id) == 0);
-  assert(sz_property_signal_list_len(99999) == 0);
+  assert(sz_property_signal_list_len(name) == 0);
+  sz_release(name);
+  name = sz_string_from_cstr("missing");
+  assert(sz_property_signal_list_len(name) == 0);
+  sz_release(name);
   sz_string_free(dump);
   sz_signal_list_free(items);
 }
@@ -13069,57 +13074,89 @@ static void test_property_signal_list_at(void) {
   SzList *xs;
   SzString *got;
   SzString *dump;
+  SzString *name;
   const char *s;
-  int id;
 
   xs = sz_list_cons(sz_string_from_cstr("a"),
                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
   items = sz_signal_list(xs);
+  sz_signal_name(items, "items");
   dump = sz_signal_dump();
   s = strstr(sz_string_cstr(dump), "list[");
   assert(s);
-  id = atoi(s + 5);
-  got = sz_property_signal_list_at(id, 0);
+  name = sz_string_from_cstr("items");
+  got = sz_property_signal_list_at(name, 0);
   assert(strcmp(sz_string_cstr(got), "a") == 0);
   sz_string_free(got);
-  got = sz_property_signal_list_at(id, 1);
+  got = sz_property_signal_list_at(name, 1);
   assert(strcmp(sz_string_cstr(got), "b") == 0);
   sz_string_free(got);
-  got = sz_property_signal_list_at(id, 2);
+  got = sz_property_signal_list_at(name, 2);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
-  got = sz_property_signal_list_at(id, -1);
+  got = sz_property_signal_list_at(name, -1);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
-  got = sz_property_signal_list_at(99999, 0);
+  sz_release(name);
+  name = sz_string_from_cstr("missing");
+  got = sz_property_signal_list_at(name, 0);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
+  sz_release(name);
   sz_string_free(dump);
   sz_signal_list_free(items);
+}
+
+static void test_property_signal_int(void) {
+  SzSignalInt *count;
+  SzString *dump;
+  SzString *name;
+  const char *s;
+
+  count = sz_signal_int(7);
+  dump = sz_signal_dump();
+  s = strstr(sz_string_cstr(dump), "int[");
+  assert(s);
+  /* Unnamed signals dump with no name and read as 0 by name. */
+  assert(strstr(s, " = 7"));
+  name = sz_string_from_cstr("count");
+  assert(sz_property_signal_int(name) == 0);
+  sz_signal_name(count, "count");
+  assert(sz_property_signal_int(name) == 7);
+  sz_signal_int_set(count, 9);
+  assert(sz_property_signal_int(name) == 9);
+  sz_release(name);
+  sz_string_free(dump);
+  sz_signal_int_free(count);
 }
 
 static void test_property_signal_str(void) {
   SzSignalStr *draft;
   SzString *got;
   SzString *dump;
+  SzString *name;
   const char *s;
-  int id;
 
   draft = sz_signal_str("milk");
+  sz_signal_name(draft, "draft");
   dump = sz_signal_dump();
   s = strstr(sz_string_cstr(dump), "str[");
   assert(s);
-  id = atoi(s + 4);
-  got = sz_property_signal_str(id);
+  assert(strstr(s, "draft = "));
+  name = sz_string_from_cstr("draft");
+  got = sz_property_signal_str(name);
   assert(strcmp(sz_string_cstr(got), "milk") == 0);
   sz_string_free(got);
   sz_signal_str_set(draft, "oat");
-  got = sz_property_signal_str(id);
+  got = sz_property_signal_str(name);
   assert(strcmp(sz_string_cstr(got), "oat") == 0);
   sz_string_free(got);
-  got = sz_property_signal_str(99999);
+  sz_release(name);
+  name = sz_string_from_cstr("missing");
+  got = sz_property_signal_str(name);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
+  sz_release(name);
   sz_string_free(dump);
   sz_signal_str_free(draft);
 }
@@ -14198,7 +14235,7 @@ static void test_alloc_counter_pump_flat(void) {
   cfg.scale = 1.0;
 
   count = sz_signal_int(0);
-  label = sz_lang_signal_map(count, map_count_label, NULL);
+  label = sz_lang_signal_map(count, map_count_label, NULL, NULL);
   root = sz_view_column();
   sz_view_add_child(root, sz_lang_view_bind_text(label));
   btn = sz_view_button("+", counter_tap, count);
@@ -15006,6 +15043,7 @@ int main(void) {
   test_signal_list_spine_collect();
   test_property_signal_list_len();
   test_property_signal_list_at();
+  test_property_signal_int();
   test_property_signal_str();
   test_text_field_edit();
   test_view_editor();

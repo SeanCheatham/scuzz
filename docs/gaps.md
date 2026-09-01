@@ -5,7 +5,7 @@ What is unproven or missing, ranked by how much it threatens the thesis in [`vis
 - **Unknowns** — claims not yet shown within our constraints. A bad outcome invalidates later work.
 - **Known gaps** — settled design. Work is unfinished or deferred on purpose.
 
-When a gap closes or its assessment changes, update this file. If direction changes, also update `vision.md`. Next slice: [`plans.md`](plans.md).
+When a gap closes or its assessment changes, update this file. If direction changes, also update `vision.md`.
 
 ## Unknowns
 
@@ -33,19 +33,17 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
-1. **Named Timeline observations** — Session claims and `Property.signal*` use integer dump slots (`Timeline.signalInt(t, i, 0)`). `alwaysHas` / `afterHitShows` copy across verify files. A Signal must publish its binder name. Claims read that name. Two `Verdict` helpers cover always-visible and after-hit-shows. Dump slot ids stay behind the algebra. Forwards only: drop the integer-id author kit. `tap N` in fuzz scripts stays until stable inject keys. Next slice: [`plans.md`](plans.md).
+1. **`Signal[T]` and `View.each` over records** — The kit is `Signal.int` / `Signal.str` / `Signal.list` of String. `View.each` binds String. Studio stores tasks as encoded strings. Direction: one generic cell and `View.each` over the element type.
 
-2. **`Signal[T]` and `View.each` over records** — The kit is `Signal.int` / `Signal.str` / `Signal.list` of String. `View.each` binds String. Studio stores tasks as encoded strings. Direction: one generic cell and `View.each` over the element type.
+2. **UTF-8 `String`** — `Str.charAt` is a byte. Case maps ASCII. Reverse reverses bytes. Direction: UTF-8. Close this before more TextField or editor features.
 
-3. **UTF-8 `String`** — `Str.charAt` is a byte. Case maps ASCII. Reverse reverses bytes. Direction: UTF-8. Close this before more TextField or editor features.
+3. **Scuzz spans on panic and LSP** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Definition jumps to line 0. Rename is whole-file replace. Semantic tokens are empty. Panic does not print a Scuzz file and line. Goto-def, rename, hover, and completion must land on the right span. The dogfood IDE consumes that schema. It does not replace it.
 
-4. **Scuzz spans on panic and LSP** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Definition jumps to line 0. Rename is whole-file replace. Semantic tokens are empty. Panic does not print a Scuzz file and line. Goto-def, rename, hover, and completion must land on the right span. The dogfood IDE consumes that schema. It does not replace it.
+4. **Typed fail `E`** — `IO[T]` fails with a `String` message. Direction: typed `E` without environment `R`. Do not add `ZIO[R, E, A]`. Do not add user `IO.delay`.
 
-5. **Typed fail `E`** — `IO[T]` fails with a `String` message. Direction: typed `E` without environment `R`. Do not add `ZIO[R, E, A]`. Do not add user `IO.delay`.
+5. **Typed agent session schema** — Live debug is `build/debug.dump`, `inject.script`, `record.script`, `repro.toml`, and `summary.toml`. `--message-format=json` applies to `check` only. Direction: one JSON schema for dump, inject, fuzz verdict, and coverage. Text dump and script stay until that schema ships.
 
-6. **Typed agent session schema** — Live debug is `build/debug.dump`, `inject.script`, `record.script`, `repro.toml`, and `summary.toml`. `--message-format=json` applies to `check` only. Direction: one JSON schema for dump, inject, fuzz verdict, and coverage. Text dump and script stay until that schema ships.
-
-7. **Source-region coverage** — Campaign coverage is `Property.sometimes` names plus dump novelty. Direction: report source-region coverage of live `def` bodies in `summary.toml`. `sometimes` stays a path marker.
+6. **Source-region coverage** — Campaign coverage is `Property.sometimes` names plus dump novelty. Direction: report source-region coverage of live `def` bodies in `summary.toml`. `sometimes` stays a path marker.
 
 ### Table-stakes
 
@@ -76,7 +74,7 @@ Do not start these before thesis-critical gaps close.
 
 ### Dogfood IDE
 
-A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling). Proof: `examples/editor` and the SDK `ide/` tree. LSP span quality is thesis-critical gap 4.
+A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling). Proof: `examples/editor` and the SDK `ide/` tree. LSP span quality is thesis-critical gap 3.
 
 Open and deferred:
 
