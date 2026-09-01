@@ -4,9 +4,8 @@
 # Installs a self-contained release tree under $PREFIX/share/scuzz and a
 # wrapper at $PREFIX/bin/scuzz that sets SCUZZ_HOME. App builds need
 # clang/make. Linux [ui] linking against the packaged Skia CPU prebuilt also
-# needs zlib/bzip2. Rust/cargo is not required when installing from a
-# prebuilt artifact (RELEASE_TGZ / RELEASE_DIR / GitHub Release). From a
-# checkout, `package_release.sh` compiles `examples/cli` with tagged bootstrap.
+# needs zlib/bzip2. From a checkout, `package_release.sh` compiles
+# `examples/cli` with tagged bootstrap.
 #
 # Sources (first match):
 #   RELEASE_DIR / RELEASE_TGZ — local tree or tarball

@@ -1,7 +1,5 @@
-/* Monospace measure/draw on every sk_capi presenter.
- * Cell is max(measure("M"), measure("W")) so click-to-caret columns match
- * paint on Skia (proportional DejaVu Sans) and on sk_sw (8×8 cells).
- * The editor uses these; View.text stays on sk_font_measure_string. */
+/* Monospace measure/draw. Cell is max(measure("M"), measure("W")) so
+ * editor caret columns match Skia and sk_sw. View.text stays proportional. */
 #include "sk_capi.h"
 
 #include <string.h>
