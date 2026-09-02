@@ -99,7 +99,7 @@ def parse(text: String): Man =
   finish(parseLines(linesOf(text), start()))
 
 def parseLines(xs: List[String], st: St): St =
-  if (Str.len(st.err) > 0) st else if (List.isEmpty(xs)) st else parseLine(trim(List.head(xs)), List.tail(xs), st)
+  if (Str.len(st.err) > 0) st else if (List.isEmpty(xs)) st else parseLine(trim(List.at(xs, 0)), List.tail(xs), st)
 
 def parseLine(line: String, rest: List[String], st: St): St =
   if (line == "" || Str.startsWith(line, "#")) parseLines(rest, st) else if (Str.startsWith(line, "[")) parseSec(tableOf(line), rest, st) else parseKey(line, rest, st)
@@ -147,7 +147,7 @@ def takePath(name: String, xs: List[(String, String)], rest: List[String], st: S
   takePath2(name, xs, "", false, rest, st)
 
 def takePath2(name: String, xs: List[(String, String)], path: String, found: Bool, rest: List[String], st: St): St =
-  if (List.isEmpty(xs)) takePath3(name, path, found, rest, st) else takePathHd(name, List.head(xs), List.tail(xs), path, found, rest, st)
+  if (List.isEmpty(xs)) takePath3(name, path, found, rest, st) else takePathHd(name, List.at(xs, 0), List.tail(xs), path, found, rest, st)
 
 def takePathHd(name: String, h: (String, String), restXs: List[(String, String)], _path: String, _found: Bool, rest: List[String], st: St): St =
   h match {

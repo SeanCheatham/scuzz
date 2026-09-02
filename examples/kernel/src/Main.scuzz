@@ -77,6 +77,18 @@ def showTag(t: Tag): String =
 def noneInt(): Opt[Int] =
   Opt.None
 
+def optStr(o: Option[String]): String =
+  o match {
+    case Option.Some(s) => s
+    case Option.None => ""
+  }
+
+def optInt(o: Option[Int]): String =
+  o match {
+    case Option.Some(n) => Str.fromInt(n)
+    case Option.None => "0"
+  }
+
 def applyOptStr(f: Opt[Int] => String, o: Opt[Int]): String =
   f(o)
 
@@ -179,8 +191,8 @@ def describe(o: Opt[Int]): String =
 
 def describeBare(o: Opt[Int]): String =
   o match {
-    case Some(n) => Str.concat("bare:", Str.fromInt(n))
-    case None => "bare:none"
+    case Opt.Some(n) => Str.concat("bare:", Str.fromInt(n))
+    case Opt.None => "bare:none"
   }
 
 def hueBare(c: Color): String =
@@ -189,7 +201,7 @@ def hueBare(c: Color): String =
   }
 
 def fromBare(n: Int): Opt[Int] =
-  if (n > 0) Some(n) else None
+  if (n > 0) Opt.Some(n) else Opt.None
 
 def describePos(o: Opt[Int]): String =
   o match {
@@ -344,7 +356,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"count:${Str.fromInt(List.count(xs, x => x != "b"))}")
     _ <- IO.println(s"fnot:${List.join(List.filterNot(xs, x => x == "b"), ",")}")
     _ <- IO.println(s"llen:${Str.fromInt(List.len(xs))}")
-    _ <- IO.println(s"head:${List.head(xs)}")
+    _ <- IO.println(s"head:${optStr(List.head(xs))}")
     _ <- IO.println(s"at:${List.at(xs, 1)}")
     _ <- IO.println(s"tail:${List.join(List.tail(xs), ",")}")
     _ <- IO.println(s"fmap:${List.join(List.flatMap(["a", "b"], x => [x, x]), ",")}")
@@ -361,8 +373,8 @@ def listProof(): IO[Unit] =
   case Opt.None => "n"
 }), ",")}")
     _ <- IO.println(s"caselambare:${List.join(List.map([Opt.Some(1), noneInt()], {
-  case Some(n) => Str.fromInt(n)
-  case None => "n"
+  case Opt.Some(n) => Str.fromInt(n)
+  case Opt.None => "n"
 }), ",")}")
     _ <- IO.println(s"caselam0:${List.join(List.map([]: List[Opt[Int]], {
   case Opt.Some(n) => Str.fromInt(n)
@@ -575,7 +587,7 @@ def unpackProof(): IO[Unit] =
   for {
     Point(x, y) = Point(3, 5)
     Opt.Some(n) = Opt.Some(7)
-    Some(k) = Opt.Some(6)
+    Opt.Some(k) = Opt.Some(6)
     h :: _t = [8, 9]
     got <- IO.pure(Opt.Some(4))
     Opt.Some(m) = got
@@ -587,7 +599,7 @@ def unpackProof(): IO[Unit] =
     _ <- IO.println(s"unpackBare:${Str.fromInt(k)}")
     _ <- IO.println(s"unpackCons:${Str.fromInt(h)}")
     _ <- IO.println(s"unpackDraw:${Str.fromInt(m)}")
-    _ <- IO.println(s"unpackLam:${Str.fromInt(List.head(xs))}")
+    _ <- IO.println(s"unpackLam:${optInt(List.head(xs))}")
   } yield ()
 
 def choose(ok: Bool): IO[Int] =
@@ -636,7 +648,7 @@ def tupleProof(): IO[Unit] =
 }
     _ <- IO.println(s"eqTup:${if ((n, s) == (42, "ok") && (1, "x") != (2, "x")) "y" else "n"}")
     _ <- IO.println(s"both:$bothS")
-    _ <- IO.println(s"first:${Str.fromInt(List.head(firsts([(9, "z")])))}")
+    _ <- IO.println(s"first:${optInt(List.head(firsts([(9, "z")])))}")
     (tn, ts, tok) = (1, "x", true)
     r3 = rot3((tn, ts, tok))
     _ <- IO.println(s"tri:${Str.fromInt(tn)}")
@@ -689,7 +701,7 @@ def utf8Proof(): IO[Unit] =
     flipped = flip(c)
     desc = describe(o)
     xs = Color.Blue :: List.empty()
-    head = List.head(xs)
+    ocol = List.head(xs)
     _ <- c match {
   case Color.Red => IO.println("adt:red")
   case Color.Blue => IO.println("adt:blue")
@@ -711,11 +723,14 @@ def utf8Proof(): IO[Unit] =
     _ <- IO.println(hueBare(Color.Red))
     _ <- IO.println(describeBare(fromBare(2)))
     _ <- IO.println(describeBare(fromBare(0)))
-    noneBare = None
+    noneBare = Opt.None
     _ <- IO.println(s"barenone:${noneBare.getOrElse(9)}")
-    _ <- head match {
+    _ <- ocol match {
+  case Option.Some(c) => c match {
   case Color.Red => IO.println("adt:list:red")
   case Color.Blue => IO.println("adt:list:blue")
+}
+  case Option.None => IO.println("adt:list:none")
 }
     _ <- Color.Red match {
   case Color.Red if false => IO.println("guard:skip")

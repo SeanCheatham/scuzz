@@ -33,6 +33,12 @@ void *sz_list_head(const SzList *xs) {
   return xs->head;
 }
 
+void *sz_list_head_opt(const SzList *xs) {
+  if (!xs)
+    return sz_adt_new(0, NULL);
+  return sz_adt_new(1, xs->head);
+}
+
 SzList *sz_list_tail(const SzList *xs) {
   if (!xs)
     sz_panic("List.tail on empty");

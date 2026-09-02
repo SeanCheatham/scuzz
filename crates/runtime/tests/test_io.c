@@ -1867,6 +1867,28 @@ static void json_expect_stringify_err(SzAdt *j) {
 }
 
 int main(void) {
+  /* List.head_opt: None on empty, Some payload on a cell. C List.head still panics. */
+  {
+    SzList *xs;
+    void *box;
+    SzAdt *none;
+    SzAdt *some;
+    none = (SzAdt *)sz_list_head_opt(sz_list_nil());
+    assert(none);
+    assert(sz_adt_tag(none) == 0);
+    assert(sz_adt_payload(none) == NULL);
+    sz_release(none);
+    box = sz_box_i64(7);
+    xs = sz_list_cons(box, sz_list_nil());
+    sz_release(box);
+    some = (SzAdt *)sz_list_head_opt(xs);
+    assert(some);
+    assert(sz_adt_tag(some) == 1);
+    assert(sz_unbox_i64(sz_adt_payload(some)) == 7);
+    sz_release(some);
+    sz_release(xs);
+  }
+
   /* delay */
   delay_calls = 0;
   SzIo *d = sz_io_delay(delay_inc, NULL);

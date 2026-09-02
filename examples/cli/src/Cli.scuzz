@@ -478,7 +478,7 @@ def dispatchFmt(path: String, check: Bool): IO[Unit] =
   Fs.list(Drive.joinSlash(path, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0)))
 
 def fmtFiles(dir: String, check: Bool, files: List[(String, String)], dirty: Int): IO[Unit] =
-  if (List.isEmpty(files)) fmtDone(check, dirty) else fmtFilesGo(dir, check, List.head(files), files, dirty)
+  if (List.isEmpty(files)) fmtDone(check, dirty) else fmtFilesGo(dir, check, List.at(files, 0), files, dirty)
 
 def fmtFilesGo(dir: String, check: Bool, h: (String, String), files: List[(String, String)], dirty: Int): IO[Unit] =
   fmtOne(dir, check, h).flatMap(n => fmtFiles(dir, check, List.tail(files), dirty + n))
@@ -519,5 +519,5 @@ def writeNew(dir: String, name: String, ui: Bool): IO[Unit] =
   Fs.write(Drive.joinSlash(dir, "scuzz.toml"), if (ui) newTomlUi(name) else newTomlIo(name)).flatMap(_ => writeNewMain(dir, ui))
 
 def writeNewMain(dir: String, ui: Bool): IO[Unit] =
-  Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "src"), "Main.scuzz"), if (ui) newMainUi() else newMainIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) — next: scuzz test --update && scuzz test && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " — next: scuzz test && scuzz run"))))
+  Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "src"), "Main.scuzz"), if (ui) newMainUi() else newMainIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz test --update && scuzz test && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz test && scuzz run"))))
 

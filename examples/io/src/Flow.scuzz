@@ -1,3 +1,9 @@
+private def headInt(xs: List[Int]): String =
+  List.head(xs) match {
+    case Option.Some(n) => Str.fromInt(n)
+    case Option.None => "0"
+  }
+
 private def concatKit(): IO[Unit] =
   for {
     s = Stream.concat(Stream.evalMap(Stream.emits(["a", "b"]), x => IO.pure(Str.concat(x, "!"))), Stream.eval(IO.pure("c")))
@@ -35,19 +41,19 @@ private def searchKit(): IO[Unit] =
 private def intKit(): IO[Unit] =
   for {
     ns <- Stream.compileToList(Stream.map(Stream.emits([1, 2]), n => n + 1))
-    _ <- IO.println(s"mapN:${Str.fromInt(List.head(ns))}")
+    _ <- IO.println(s"mapN:${headInt(ns)}")
     fs <- Stream.compileToList(Stream.filter(Stream.emit(4), n => n > 0))
-    _ <- IO.println(s"filterN:${Str.fromInt(List.head(fs))}")
+    _ <- IO.println(s"filterN:${headInt(fs)}")
     es <- Stream.compileToList(Stream.evalMap(Stream.eval(IO.pure(5)), n => IO.pure(n + 1)))
-    _ <- IO.println(s"evalN:${Str.fromInt(List.head(es))}")
+    _ <- IO.println(s"evalN:${headInt(es)}")
     cs <- Stream.compileToList(Stream.concat(Stream.take(Stream.emit(6), 1), Stream.drop(Stream.emit(7), 0)))
-    _ <- IO.println(s"concatN:${Str.fromInt(List.head(cs))}")
+    _ <- IO.println(s"concatN:${headInt(cs)}")
   } yield ()
 
 private def rangeKit(): IO[Unit] =
   for {
     rng <- Stream.compileToList(Stream.range(3, 6))
-    _ <- IO.println(s"range:${Str.fromInt(List.head(rng))}:${Str.fromInt(List.len(rng))}")
+    _ <- IO.println(s"range:${headInt(rng)}:${Str.fromInt(List.len(rng))}")
     repeated <- Stream.compileToList(Stream.repeatN(Stream.emit("x"), 3))
     _ <- IO.println(Str.concat("repeatN:", List.join(repeated, ",")))
     zipped <- Stream.compileToList(Stream.zip(Stream.emits(["a", "b"]), Stream.emits(["1", "2", "3"])))
@@ -124,7 +130,7 @@ private def windowKit(): IO[Unit] =
 private def genKit(): IO[Unit] =
   for {
     it <- Stream.compileToList(Stream.iterate(0, 4, n => n + 1))
-    _ <- IO.println(s"iterate:${Str.fromInt(List.head(it))}:${Str.fromInt(List.len(it))}")
+    _ <- IO.println(s"iterate:${headInt(it)}:${Str.fromInt(List.len(it))}")
     un <- Stream.compileToList(Stream.unfold(0, n => if (n < 3) [(n, n + 1)] else []))
     _ <- IO.println(s"unfold:${Str.fromInt(List.len(un))}")
     tapped <- Stream.compileToList(Stream.evalTap(Stream.emits(["a"]), x => IO.println(Str.concat("tap:", x))))

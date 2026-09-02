@@ -126,7 +126,7 @@ def showFun(d: Fun): String =
   }
 
 def showParams(ps: List[Param]): String =
-  if (List.isEmpty(ps)) "" else showParamsHd(List.head(ps), List.tail(ps))
+  if (List.isEmpty(ps)) "" else showParamsHd(List.at(ps, 0), List.tail(ps))
 
 def showParamsHd(p: Param, rest: List[Param]): String =
   p match {
@@ -134,7 +134,7 @@ def showParamsHd(p: Param, rest: List[Param]): String =
   }
 
 def findFun(ds: List[Fun], name: String): String =
-  if (List.isEmpty(ds)) "" else findFunHd(List.head(ds), List.tail(ds), name)
+  if (List.isEmpty(ds)) "" else findFunHd(List.at(ds, 0), List.tail(ds), name)
 
 def findFunHd(d: Fun, rest: List[Fun], name: String): String =
   d match {
@@ -163,7 +163,7 @@ def completeNames(src: String): List[String] =
   completeNames2(Parse.parse(Lexer.lex(src)).defs, "IO.println" :: "Str.concat" :: "List.len" :: "Sys.args" :: "Fs.read" :: [])
 
 def completeNames2(ds: List[Fun], acc: List[String]): List[String] =
-  if (List.isEmpty(ds)) acc else completeNamesHd(List.head(ds), List.tail(ds), acc)
+  if (List.isEmpty(ds)) acc else completeNamesHd(List.at(ds, 0), List.tail(ds), acc)
 
 def completeNamesHd(d: Fun, rest: List[Fun], acc: List[String]): List[String] =
   d match {
@@ -174,7 +174,7 @@ def completePref(xs: List[String], p: String): List[String] =
   if (p == "") xs else completePrefGo(xs, p)
 
 def completePrefGo(xs: List[String], p: String): List[String] =
-  if (List.isEmpty(xs)) [] else completePrefHd(List.head(xs), List.tail(xs), p)
+  if (List.isEmpty(xs)) [] else completePrefHd(List.at(xs, 0), List.tail(xs), p)
 
 def completePrefHd(h: String, rest: List[String], p: String): List[String] =
   if (Str.startsWith(h, p)) h :: completePrefGo(rest, p) else completePrefGo(rest, p)
@@ -183,7 +183,7 @@ def completeJson(src: String, prefix: String): String =
   Str.concat("{\"isIncomplete\":false,\"items\":[", Str.concat(completeItems(completePref(completeNames(src), prefix)), "]}"))
 
 def completeItems(xs: List[String]): String =
-  if (List.isEmpty(xs)) "" else completeItemsHd(List.head(xs), List.tail(xs))
+  if (List.isEmpty(xs)) "" else completeItemsHd(List.at(xs, 0), List.tail(xs))
 
 def completeItemsHd(h: String, rest: List[String]): String =
   if (List.isEmpty(rest)) completeItem(h) else Str.concat(completeItem(h), Str.concat(",", completeItems(rest)))
@@ -201,7 +201,7 @@ def defJsonOff(uri: String, src: String, name: String, off: Int): String =
   if (name == "" || off < 0) "null" else Str.concat("[{\"uri\":", Str.concat(Check.jsonStr(uri), Str.concat(",\"range\":", Str.concat(rangeOf(src, off), "}]"))))
 
 def findFunOff(ds: List[Fun], name: String): Int =
-  if (List.isEmpty(ds)) 0 - 1 else findFunOffHd(List.head(ds), List.tail(ds), name)
+  if (List.isEmpty(ds)) 0 - 1 else findFunOffHd(List.at(ds, 0), List.tail(ds), name)
 
 def findFunOffHd(d: Fun, rest: List[Fun], name: String): Int =
   d match {
@@ -238,7 +238,7 @@ def renameIdents(src: String, name: String, nu: String): String =
   Builder.result(renameToks(Lexer.lex(src), src, name, nu, 0, Builder.empty()))
 
 def renameToks(toks: List[SpTok], src: String, name: String, nu: String, prev: Int, b: Builder): Builder =
-  if (List.isEmpty(toks)) Builder.append(b, Str.slice(src, prev, Str.len(src))) else renameTokHd(List.head(toks), List.tail(toks), src, name, nu, prev, b)
+  if (List.isEmpty(toks)) Builder.append(b, Str.slice(src, prev, Str.len(src))) else renameTokHd(List.at(toks, 0), List.tail(toks), src, name, nu, prev, b)
 
 def renameTokHd(sp: SpTok, rest: List[SpTok], src: String, name: String, nu: String, prev: Int, b: Builder): Builder =
   sp match {
@@ -270,7 +270,7 @@ def tokLen(t: Tok, src: String, off: Int): Int =
   }
 
 def tokenInts(toks: List[SpTok], src: String, pl: Int, pc: Int, acc: List[Int]): List[Int] =
-  if (List.isEmpty(toks)) acc else tokenIntsHd(List.head(toks), List.tail(toks), src, pl, pc, acc)
+  if (List.isEmpty(toks)) acc else tokenIntsHd(List.at(toks, 0), List.tail(toks), src, pl, pc, acc)
 
 def tokenIntsHd(sp: SpTok, rest: List[SpTok], src: String, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   sp match {
@@ -298,7 +298,10 @@ def tokensJoin(xs: List[Int]): String =
   if (List.isEmpty(xs)) "" else tokensJoinGo(xs, Builder.empty())
 
 def tokensJoinGo(xs: List[Int], b: Builder): String =
-  if (List.isEmpty(xs)) Builder.result(b) else if (List.isEmpty(List.tail(xs))) Builder.result(Builder.append(b, Str.fromInt(List.head(xs)))) else tokensJoinGo(List.tail(xs), Builder.append(Builder.append(b, Str.fromInt(List.head(xs))), ","))
+  if (List.isEmpty(xs)) Builder.result(b) else tokensJoinHd(List.at(xs, 0), List.tail(xs), b)
+
+def tokensJoinHd(n: Int, rest: List[Int], b: Builder): String =
+  if (List.isEmpty(rest)) Builder.result(Builder.append(b, Str.fromInt(n))) else tokensJoinGo(rest, Builder.append(Builder.append(b, Str.fromInt(n)), ","))
 
 def caps(): String =
   "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"declarationProvider\":true,\"documentSymbolProvider\":true,\"documentFormattingProvider\":true,\"renameProvider\":{\"prepareProvider\":true},\"foldingRangeProvider\":true,\"inlayHintProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"keyword\",\"function\",\"string\",\"number\"],\"tokenModifiers\":[]},\"full\":true,\"range\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\",\"source.formatDocument\"],\"resolveProvider\":true}}}"
@@ -322,7 +325,7 @@ def diagMsg(d: Json): String =
   Str.concat(",\"message\":", Str.concat(Check.jsonStr(jStr(jGet(d, "message"))), "}"))
 
 def diagsArr(xs: List[Json]): String =
-  if (List.isEmpty(xs)) "" else diagsArrHd(List.head(xs), List.tail(xs))
+  if (List.isEmpty(xs)) "" else diagsArrHd(List.at(xs, 0), List.tail(xs))
 
 def diagsArrHd(h: Json, rest: List[Json]): String =
   if (List.isEmpty(rest)) diagLsp(h) else Str.concat(diagLsp(h), Str.concat(",", diagsArr(rest)))
@@ -334,7 +337,7 @@ def publishDiags2(uri: String, j: Json): String =
   notifyMsg("textDocument/publishDiagnostics", Str.concat("{\"uri\":", Str.concat(Check.jsonStr(uri), Str.concat(",\"diagnostics\":[", Str.concat(diagsArr(jArr(j)), "]}")))))
 
 def overlayGet(open: List[Open], path: String): String =
-  if (List.isEmpty(open)) "" else overlayGetHd(List.head(open), List.tail(open), path)
+  if (List.isEmpty(open)) "" else overlayGetHd(List.at(open, 0), List.tail(open), path)
 
 def overlayGetHd(h: Open, rest: List[Open], path: String): String =
   h match {
@@ -345,7 +348,7 @@ def overlayPut(open: List[Open], path: String, src: String): List[Open] =
   Open(path, src) :: overlayDrop(open, path)
 
 def overlayDrop(open: List[Open], path: String): List[Open] =
-  if (List.isEmpty(open)) [] else overlayDropHd(List.head(open), List.tail(open), path)
+  if (List.isEmpty(open)) [] else overlayDropHd(List.at(open, 0), List.tail(open), path)
 
 def overlayDropHd(h: Open, rest: List[Open], path: String): List[Open] =
   h match {
