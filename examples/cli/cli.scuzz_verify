@@ -91,3 +91,6 @@ def drvPkg(): Bool =
 def drvFiles(): Bool =
   Drive.showPkg(Drive.compileFiles(Main.tomlHello(), ("Main", Main.srcIrHi()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg()
 
+def lspDef(): Bool =
+  Main.lspOk()
+

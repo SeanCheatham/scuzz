@@ -4,7 +4,7 @@ def headerBreak(): String =
 """
 
 def frame(body: String): String =
-  Str.concat("Content-Length: ", Str.concat(Str.fromInt(Str.len(body)), Str.concat(headerBreak(), body))) match {
+  Str.concat("Content-Length: ", Str.concat(Str.fromInt(Str.byteLen(body)), Str.concat(headerBreak(), body))) match {
     case s => Property.check("frame", Str.contains(s, "Content-Length: ") && Str.contains(s, body), s)
   }
 
@@ -17,7 +17,7 @@ def needLen(start: Int, len: Int): Int =
   start + len
 
 def msgSlice(full: String, start: Int, len: Int): String =
-  Str.slice(full, start, needLen(start, len)) match {
+  Str.byteSlice(full, start, needLen(start, len)) match {
     case s => Property.check("mslice", Str.len(s) >= 0, s)
   }
 
@@ -189,7 +189,7 @@ def readUntil(pid: Int, acc: String, needle: String): IO[String] =
   if (Str.indexOf(acc, needle) >= 0) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else readUntil(pid, Str.concat(acc, c), needle))
 
 def fillTo(pid: Int, acc: String, need: Int): IO[String] =
-  if (Str.len(acc) >= need) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(pid, Str.concat(acc, c), need))
+  if (Str.byteLen(acc) >= need) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(pid, Str.concat(acc, c), need))
 
 def readMsg(pid: Int): IO[String] =
   for {
