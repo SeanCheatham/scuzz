@@ -94,3 +94,6 @@ def drvFiles(): Bool =
 def lspDef(): Bool =
   Main.lspOk()
 
+def panicSrc(): Bool =
+  Main.panicOk()
+

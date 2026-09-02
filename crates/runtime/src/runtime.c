@@ -68,6 +68,9 @@ static SzRcHdr *g_live = NULL;
 static int g_in_panic = 0;
 static char g_panic_dump[1024];
 enum { SZ_LIVE_DUMP_ROWS = 32, SZ_LIVE_PANIC_ROWS = 64 };
+enum { SZ_PANIC_SRC_MAX = 64 };
+static const char *g_panic_src[SZ_PANIC_SRC_MAX];
+static int g_panic_src_n = 0;
 
 static size_t hdr_bytes(const SzRcHdr *h) { return *(((size_t *)h) - 1); }
 
@@ -254,15 +257,32 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg) {
   size_t n = 0;
   char heap[1536];
   char live[4096];
+  const char *loc;
   if (!buf || cap == 0)
     return 0;
   buf[0] = '\0';
-  heap_append(buf, cap, &n, "scuzz panic: %s\n", msg ? msg : "(null)");
+  loc = g_panic_src_n > 0 ? g_panic_src[g_panic_src_n - 1] : NULL;
+  if (loc && loc[0])
+    heap_append(buf, cap, &n, "scuzz panic: %s: %s\n", loc, msg ? msg : "(null)");
+  else
+    heap_append(buf, cap, &n, "scuzz panic: %s\n", msg ? msg : "(null)");
   sz_alloc_format_heap(heap, sizeof heap, 0);
   heap_append(buf, cap, &n, "[heap]\n%s", heap);
   sz_alloc_format_live(live, sizeof live, SZ_LIVE_PANIC_ROWS);
   heap_append(buf, cap, &n, "[live]\n%s", live);
   return (int)n;
+}
+
+void sz_panic_push_src(const char *loc) {
+  if (!loc || !loc[0])
+    return;
+  if (g_panic_src_n < SZ_PANIC_SRC_MAX)
+    g_panic_src[g_panic_src_n++] = loc;
+}
+
+void sz_panic_pop_src(void) {
+  if (g_panic_src_n > 0)
+    g_panic_src_n--;
 }
 
 void sz_alloc_sweep(void) {

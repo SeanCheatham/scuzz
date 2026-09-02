@@ -2174,6 +2174,13 @@ int main(void) {
 
     sz_alloc_format_panic(panic, sizeof panic, "probe");
     assert(strstr(panic, "scuzz panic: probe") != NULL);
+    sz_panic_push_src("Main.scuzz:2:14");
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: Main.scuzz:2:14: probe") != NULL);
+    sz_panic_pop_src();
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: probe") != NULL);
+    assert(strstr(panic, "Main.scuzz:2:14") == NULL);
     assert(strstr(panic, "[heap]") != NULL);
     assert(strstr(panic, "live_bytes=") != NULL);
     assert(strstr(panic, "[live]") != NULL);
