@@ -39,7 +39,7 @@ These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
 3. **Scuzz spans on panic and LSP** — In: `check` JSON diagnostics use recorded file stem, line, and column. No substring search. No hardcoded file. Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Goto-def uses `Fun.off`. Rename replaces lexer ident tokens. Hover names the ident under the caret. Completion filters by the caret prefix. Semantic tokens come from the lexer. Panic prints `scuzz panic: Main.scuzz:2:14: <msg>` from that def's file, line, and column. The dogfood IDE consumes that schema. It does not replace it.
 
-4. **Typed fail `E`** — `IO[T]` fails with a `String` message. Direction: typed `E` without environment `R`. Do not add `ZIO[R, E, A]`. Do not add user `IO.delay`.
+4. **Typed fail `E`** — In: check encodes `IO[E, A]`. `IO[A]` means `IO[String, A]`. `IO.fail(e)` takes `E`. `handleErrorWith` binds `E`. `flatMap` keeps one `E`. Kits still fail with `String`. Open: the C `SzError` wire is still a string. Do not add `ZIO[R, E, A]`. Do not add user `IO.delay`.
 
 5. **Typed agent session schema** — Live debug is `build/debug.dump`, `inject.script`, `record.script`, `repro.toml`, and `summary.toml`. `--message-format=json` applies to `check` only. Direction: one JSON schema for dump, inject, fuzz verdict, and coverage. Text dump and script stay until that schema ships.
 

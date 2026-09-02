@@ -118,6 +118,30 @@ def srcDup(): String =
 def wantDup(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: unbound variable nope\",\"file\":\"Main.scuzz\",\"line\":5,\"column\":14,\"end_line\":5,\"end_column\":18}]"
 
+def srcFailOk(): String =
+  """enum Err:
+  case Boom
+def boom(): IO[Err, Int] =
+  IO.fail(Err.Boom)
+@main def main: IO[Unit] =
+  IO.println("ok")
+"""
+
+def wantFailOk(): String =
+  "[]"
+
+def srcFailMis(): String =
+  """enum Err:
+  case Boom
+def boom(): IO[Err, Int] =
+  IO.fail("nope")
+@main def main: IO[Unit] =
+  IO.println("ok")
+"""
+
+def wantFailMis(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: def boom body IO[Any] does not match declared IO[Err, Int]\",\"file\":\"Main.scuzz\",\"line\":4,\"column\":3,\"end_line\":4,\"end_column\":10}]"
+
 def srcUtil(): String =
   "def bad(): Int =\n  1 + \"x\"\n"
 
@@ -131,7 +155,7 @@ def tyckFiles(): Bool =
   Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []) == wantUtil()
 
 def allOk(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckFiles()
+  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis()) && tyckFiles()
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else "tyck-bad")
