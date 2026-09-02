@@ -10,9 +10,9 @@ enum Expr:
   case EMethod(recv: Expr, name: String, args: List[Expr], off: Int)
   case EField(recv: Expr, name: String, off: Int)
   case EBin(op: String, l: Expr, r: Expr, off: Int)
-  case EUn(op: String, e: Expr)
+  case EUn(op: String, e: Expr, off: Int)
   case ELam(p: String, body: Expr)
-  case EIf(c: Expr, t: Expr, e: Expr)
+  case EIf(c: Expr, t: Expr, e: Expr, off: Int)
   case EMatch(s: Expr, arms: List[Arm], off: Int)
   case EFor(bs: List[Bind], body: Expr, off: Int)
   case EFloat(s: String)
@@ -84,6 +84,8 @@ def spanOf(e: Expr): (String, Int) =
     case Expr.EMethod(_, _, _, off) => ("", off)
     case Expr.EField(_, _, off) => ("", off)
     case Expr.EBin(_, _, _, off) => ("", off)
+    case Expr.EUn(_, _, off) => ("", off)
+    case Expr.EIf(_, _, _, off) => ("", off)
     case Expr.EMatch(_, _, off) => ("", off)
     case Expr.EFor(_, _, off) => ("", off)
     case _ => ("", 0 - 1)
@@ -212,11 +214,11 @@ def parseMul(toks: Toks, i: Int): (Expr, Int) =
   parseBinRest(toks, parseUnary(toks, i), "*")
 
 def parseUnary(toks: Toks, i: Int): (Expr, Int) =
-  if (_is(toks, i, Tok.Minus)) parseUnaryOp("-", parseUnary(toks, i + 1)) else if (_is(toks, i, Tok.Bang)) parseUnaryOp("!", parseUnary(toks, i + 1)) else if (_is(toks, i, Tok.Tilde)) parseUnaryOp("~", parseUnary(toks, i + 1)) else parsePost(toks, parseAtom(toks, i))
+  if (_is(toks, i, Tok.Minus)) parseUnaryOp("-", parseUnary(toks, i + 1), _off(toks, i)) else if (_is(toks, i, Tok.Bang)) parseUnaryOp("!", parseUnary(toks, i + 1), _off(toks, i)) else if (_is(toks, i, Tok.Tilde)) parseUnaryOp("~", parseUnary(toks, i + 1), _off(toks, i)) else parsePost(toks, parseAtom(toks, i))
 
-def parseUnaryOp(op: String, p: (Expr, Int)): (Expr, Int) =
+def parseUnaryOp(op: String, p: (Expr, Int), off: Int): (Expr, Int) =
   p match {
-    case (e, j) => (Expr.EUn(op, e), j)
+    case (e, j) => (Expr.EUn(op, e, off), j)
   }
 
 def _opTok(t: Tok): String =
@@ -288,21 +290,21 @@ def parseMatchLam2(p: (Expr, Int)): (Expr, Int) =
   }
 
 def parseIf(toks: Toks, i: Int): (Expr, Int) =
-  parseIf2(parseExpr(toks, i + 2), toks)
+  parseIf2(parseExpr(toks, i + 2), toks, _off(toks, i))
 
-def parseIf2(p: (Expr, Int), toks: Toks): (Expr, Int) =
+def parseIf2(p: (Expr, Int), toks: Toks, off: Int): (Expr, Int) =
   p match {
-    case (c, j) => parseIf3(c, parseExpr(toks, j + 1), toks)
+    case (c, j) => parseIf3(c, parseExpr(toks, j + 1), toks, off)
   }
 
-def parseIf3(c: Expr, p: (Expr, Int), toks: Toks): (Expr, Int) =
+def parseIf3(c: Expr, p: (Expr, Int), toks: Toks, off: Int): (Expr, Int) =
   p match {
-    case (t, j) => if (_is(toks, j, Tok.Else)) parseIf4(c, t, parseExpr(toks, j + 1)) else (Expr.EIf(c, t, Expr.EUnit), j)
+    case (t, j) => if (_is(toks, j, Tok.Else)) parseIf4(c, t, parseExpr(toks, j + 1), off) else (Expr.EIf(c, t, Expr.EUnit, off), j)
   }
 
-def parseIf4(c: Expr, t: Expr, p: (Expr, Int)): (Expr, Int) =
+def parseIf4(c: Expr, t: Expr, p: (Expr, Int), off: Int): (Expr, Int) =
   p match {
-    case (e, j) => (Expr.EIf(c, t, e), j)
+    case (e, j) => (Expr.EIf(c, t, e, off), j)
   }
 
 def parseFor(toks: Toks, i: Int): (Expr, Int) =
@@ -947,9 +949,9 @@ def prettyExpr(e: Expr, n: Int): String =
     case Expr.EMethod(recv, name, args, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(recv), Str.concat(".", Str.concat(name, Str.concat("(", Str.concat(_commaExprs(args), ")"))))))
     case Expr.EField(recv, name, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(recv), Str.concat(".", name)))
     case Expr.EBin(op, l, r, _) => Str.concat(_pad(n), prettyBin(op, l, r))
-    case Expr.EUn(op, inner) => Str.concat(_pad(n), Str.concat(op, _prettyUn(inner)))
+    case Expr.EUn(op, inner, _) => Str.concat(_pad(n), Str.concat(op, _prettyUn(inner)))
     case Expr.ELam(p, body) => Str.concat(_pad(n), Str.concat(p, Str.concat(" => ", pretty0(body))))
-    case Expr.EIf(c, t, el) => Str.concat(_pad(n), Str.concat("if (", Str.concat(pretty0(c), Str.concat(") ", Str.concat(pretty0(t), Str.concat(" else ", pretty0(el)))))))
+    case Expr.EIf(c, t, el, _) => Str.concat(_pad(n), Str.concat("if (", Str.concat(pretty0(c), Str.concat(") ", Str.concat(pretty0(t), Str.concat(" else ", pretty0(el)))))))
     case Expr.EMatch(s, arms, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(s), Str.concat(""" match {
 """, Str.concat(prettyArms(arms, n + 1), Str.concat(_pad(n), "}")))))
     case Expr.EFor(bs, body, _) => Str.concat(_pad(n), Str.concat("""for {
@@ -970,7 +972,7 @@ def binPrec(op: String): Int =
 def _prettyUn(e: Expr): String =
   e match {
     case Expr.EBin(_, _, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
-    case Expr.EIf(_, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
+    case Expr.EIf(_, _, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
     case Expr.EMatch(_, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
     case Expr.EFor(_, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
     case _ => pretty0(e)
@@ -982,7 +984,7 @@ def _parenPretty(e: Expr): String =
 def _prettyBinL(op: String, e: Expr): String =
   e match {
     case Expr.EBin(o2, _, _, _) => if (binPrec(o2) < binPrec(op)) _parenPretty(e) else pretty0(e)
-    case Expr.EIf(_, _, _) => _parenPretty(e)
+    case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
     case Expr.ELam(_, _) => _parenPretty(e)
     case _ => pretty0(e)
@@ -991,7 +993,7 @@ def _prettyBinL(op: String, e: Expr): String =
 def _prettyBinR(op: String, e: Expr): String =
   e match {
     case Expr.EBin(o2, _, _, _) => if (binPrec(o2) <= binPrec(op)) _parenPretty(e) else pretty0(e)
-    case Expr.EIf(_, _, _) => _parenPretty(e)
+    case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
     case Expr.ELam(_, _) => _parenPretty(e)
     case _ => pretty0(e)
@@ -1000,7 +1002,7 @@ def _prettyBinR(op: String, e: Expr): String =
 def _prettyConsL(e: Expr): String =
   e match {
     case Expr.EBin(op, _, _, _) => if (op == "::" || op == "+" || op == "-" || op == "*" || op == "/" || op == "%") pretty0(e) else _parenPretty(e)
-    case Expr.EIf(_, _, _) => _parenPretty(e)
+    case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EMatch(_, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
     case Expr.ELam(_, _) => _parenPretty(e)
@@ -1009,7 +1011,7 @@ def _prettyConsL(e: Expr): String =
 
 def _prettyConsR(e: Expr): String =
   e match {
-    case Expr.EIf(_, _, _) => _parenPretty(e)
+    case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EMatch(_, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
     case Expr.ELam(_, _) => _parenPretty(e)
@@ -1019,8 +1021,8 @@ def _prettyConsR(e: Expr): String =
 def _prettyRecv(e: Expr): String =
   e match {
     case Expr.EBin(_, _, _, _) => _parenPretty(e)
-    case Expr.EUn(_, _) => _parenPretty(e)
-    case Expr.EIf(_, _, _) => _parenPretty(e)
+    case Expr.EUn(_, _, _) => _parenPretty(e)
+    case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
     case Expr.ELam(_, _) => _parenPretty(e)
     case _ => pretty0(e)
