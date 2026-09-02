@@ -37,3 +37,9 @@ def tyckIdemOk(): Bool =
 def tyckIdemUnbound(): Bool =
   Main.tyckIdem(Main.srcUnbound())
 
+def tyckDup(): Bool =
+  Main.tyckDiff(Main.srcDup(), Main.wantDup())
+
+def tyckFiles(): Bool =
+  Main.tyckFiles()
+
