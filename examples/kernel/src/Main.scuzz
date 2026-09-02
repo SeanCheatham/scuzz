@@ -674,7 +674,10 @@ def eqProof(): IO[Unit] =
     none = Opt.None
     p1 = Point(3, 5)
     p2 = Point(3, 5)
+    a = Str.concat("a", "b")
+    b = Str.concat("a", "b")
     _ <- IO.println(s"eqStr:${if ("ab" == "ab" && "ab" != "c") "y" else "n"}")
+    _ <- IO.println(s"eqOwned:${if (a == b && a != "c") "y" else "n"}")
     _ <- IO.println(s"eqList:${if (xs == ys && xs != zs) "y" else "n"}")
     _ <- IO.println(s"eqAdt:${if (Color.Red == Color.Red && Color.Red != Color.Blue) "y" else "n"}")
     _ <- IO.println(s"eqOpt:${if (o1 == o2 && o1 != none) "y" else "n"}")
@@ -725,6 +728,7 @@ def utf8Proof(): IO[Unit] =
     _ <- IO.println(describeBare(fromBare(0)))
     noneBare = Opt.None
     _ <- IO.println(s"barenone:${noneBare.getOrElse(9)}")
+    _ <- IO.println(s"optbare:${optInt(Some(1))},${optInt(None)}")
     _ <- ocol match {
   case Option.Some(c) => c match {
   case Color.Red => IO.println("adt:list:red")

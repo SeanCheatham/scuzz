@@ -85,8 +85,12 @@ int sz_alloc_format_heap(char *buf, size_t cap, int mark);
 
 typedef struct SzString {
   size_t len;
+  int64_t ulen; /* code-point count; Str.len reads this */
   char *data; /* len bytes + trailing NUL */
   uint8_t is_ascii;
+  /* UTF-8 walk cursor. A later code-point index continues from here. */
+  int64_t cp_hint;
+  int64_t off_hint;
 } SzString;
 
 SzString *sz_string_from_cstr(const char *cstr);

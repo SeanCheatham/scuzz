@@ -767,11 +767,15 @@ SzString *sz_string_from_bytes(const char *bytes, size_t len) {
     memcpy(s->data, bytes, len);
   s->data[len] = '\0';
   s->is_ascii = 1;
+  s->ulen = 0;
+  s->cp_hint = 0;
+  s->off_hint = 0;
   for (i = 0; i < len; i++) {
-    if (((unsigned char)s->data[i]) >= 0x80) {
+    unsigned char c = (unsigned char)s->data[i];
+    if (c >= 0x80)
       s->is_ascii = 0;
-      break;
-    }
+    if ((c & 0xC0) != 0x80)
+      s->ulen++;
   }
   return s;
 }
@@ -1044,36 +1048,46 @@ static uint32_t utf8_decode(const char *p, size_t left, size_t *used) {
 }
 
 int64_t sz_string_ulen(const SzString *s) {
-  size_t i;
-  int64_t n = 0;
   if (!s)
     return 0;
-  if (s->is_ascii)
-    return (int64_t)s->len;
-  for (i = 0; i < s->len; i++) {
-    if (!utf8_cont((unsigned char)s->data[i]))
-      n++;
-  }
-  return n;
+  return s->ulen;
 }
 
 /* Byte offset of code-point index `cp`. Returns s->len when `cp` is the
- * code-point count (one past the end), or -1 when out of range. */
+ * code-point count (one past the end), or -1 when out of range.
+ * A forward walk reuses cp_hint so sequential Str.charAt stays linear. */
 static int64_t utf8_cp_off(const SzString *s, int64_t cp) {
+  SzString *mut;
   size_t i;
-  int64_t k = 0;
+  int64_t k;
   if (cp < 0)
     return -1;
   if (s->is_ascii)
     return cp <= (int64_t)s->len ? cp : -1;
-  for (i = 0; i < s->len; i++) {
+  mut = (SzString *)s;
+  if (s->cp_hint >= 0 && cp >= s->cp_hint) {
+    i = (size_t)s->off_hint;
+    k = s->cp_hint;
+  } else {
+    i = 0;
+    k = 0;
+  }
+  for (; i < s->len; i++) {
     if (!utf8_cont((unsigned char)s->data[i])) {
-      if (k == cp)
+      if (k == cp) {
+        mut->cp_hint = cp;
+        mut->off_hint = (int64_t)i;
         return (int64_t)i;
+      }
       k++;
     }
   }
-  return k == cp ? (int64_t)s->len : -1;
+  if (k == cp) {
+    mut->cp_hint = cp;
+    mut->off_hint = (int64_t)s->len;
+    return (int64_t)s->len;
+  }
+  return -1;
 }
 
 int64_t sz_string_uchar_at(const SzString *s, int64_t index) {

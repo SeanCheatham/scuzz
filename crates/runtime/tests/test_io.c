@@ -5008,6 +5008,18 @@ int main(void) {
           assert(sz_string_ulen(tr) == 2 && sz_string_uchar_at(tr, 0) == 0xE9);
           assert(strcmp(sz_string_cstr(drr), "a") == 0);
           assert(sz_string_ulen(rv) == 3 && sz_string_uchar_at(rv, 0) == 'z' && sz_string_uchar_at(rv, 1) == 0xE9);
+          {
+            /* Sequential walk, then a lower index. Leading non-ASCII must stay O(n). */
+            SzString *fwd = sz_string_from_cstr("\xc3\xa9" "abcdefghijklmnopqrstuvwxyz");
+            int64_t i;
+            assert(sz_string_ulen(fwd) == 27);
+            assert(sz_string_uchar_at(fwd, 0) == 0xE9);
+            for (i = 1; i < 27; i++)
+              assert(sz_string_uchar_at(fwd, i) == (int64_t)('a' + (int)(i - 1)));
+            assert(sz_string_uchar_at(fwd, 0) == 0xE9);
+            assert(sz_string_uchar_at(fwd, 26) == 'z');
+            sz_string_free(fwd);
+          }
           assert(sz_string_uindex_of(u, ndl) == 2);
           assert(sz_string_ulast_index_of(u, ndl) == 2);
           assert(sz_string_uindex_of(u, u) == 0);

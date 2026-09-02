@@ -2877,7 +2877,7 @@ def emitAtPtr(code: String, v: String, i: String, o: Bool, prefix: String): Slot
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_at(ptr ", Str.concat(v, Str.concat(", i64 ", Str.concat(i, ")")))))), takePtr(v, o, prefix))), pct(prefix, "v"), o)
 
 def emitRec(en: String, code: String, vals: List[String], owns: List[Bool], prefix: String, ens: List[En], args: List[Expr], ps: List[Param], defs: List[Fun]): Slot =
-  if (List.len(vals) == 1) emitRecOne(en, code, vals, owns, prefix, ens, ps) else emitRecJoin(code, emitPack(vals, owns, args, prefix, 0, List.len(vals), ps, defs), en, prefix, ens)
+  if (List.isEmpty(vals)) emitCtor(recEn(en, ens), en, prefix, ens) else if (List.len(vals) == 1) emitRecOne(en, code, vals, owns, prefix, ens, ps) else emitRecJoin(code, emitPack(vals, owns, args, prefix, 0, List.len(vals), ps, defs), en, prefix, ens)
 
 def emitRecJoin(code: String, pack: Slot, en: String, prefix: String, ens: List[En]): Slot =
   pack match {
@@ -2885,10 +2885,13 @@ def emitRecJoin(code: String, pack: Slot, en: String, prefix: String, ens: List[
   }
 
 def emitRecOne(en: String, code: String, vals: List[String], owns: List[Bool], prefix: String, ens: List[En], ps: List[Param]): Slot =
-  emitPayloadCtor1(Slot(code, arg0(vals), headOwn(owns)), en, en, prefix, ens, ps)
+  emitPayloadCtor1(Slot(code, arg0(vals), headOwn(owns)), recEn(en, ens), en, prefix, ens, ps)
 
 def emitRec2(pc: String, pv: String, en: String, prefix: String, ens: List[En]): Slot =
-  Slot(join(pc, join(emitAdtNew(prefix, ctorTag(ens, en, en), pv), relPtr(pv))), pct(prefix, "adt"), true)
+  Slot(join(pc, join(emitAdtNew(prefix, ctorTag(ens, recEn(en, ens), en), pv), relPtr(pv))), pct(prefix, "adt"), true)
+
+def recEn(en: String, ens: List[En]): String =
+  if (hasEn(ens, en)) en else enOfCase(ens, en)
 
 def emitPack(vals: List[String], owns: List[Bool], args: List[Expr], prefix: String, i: Int, n: Int, ps: List[Param], defs: List[Fun]): Slot =
   if (List.isEmpty(vals)) Slot(line(Str.concat(tmp(prefix, "pl0"), "call ptr @sz_list_nil()")), pct(prefix, "pl0"), true) else emitPack1(List.at(vals, 0), headOwn(owns), exprIsI64(List.at(args, 0), ps, defs), emitPack(List.tail(vals), List.tail(owns), List.tail(args), prefix, i + 1, n, ps, defs), prefix, i, n)
