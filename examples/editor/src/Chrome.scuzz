@@ -8,7 +8,13 @@ def scuzzNames(ents: List[(String, Bool)]): List[String] =
   List.filter(filesOf(ents), s => Str.endsWith(s, ".scuzz"))
 
 def preferredRel(hasMain: Bool, srcHits: List[String], topHits: List[String]): String =
-  if (hasMain) Fs.join("src", "Main.scuzz") else if (List.nonEmpty(srcHits)) Fs.join("src", List.head(srcHits)) else if (List.nonEmpty(topHits)) List.head(topHits) else Fs.join("src", "Main.scuzz")
+  if (hasMain) Fs.join("src", "Main.scuzz") else List.head(srcHits) match {
+  case Option.Some(h) => Fs.join("src", h)
+  case Option.None => List.head(topHits) match {
+  case Option.Some(h) => h
+  case Option.None => Fs.join("src", "Main.scuzz")
+}
+}
 
 def pickSource(dir: String): IO[String] =
   for {

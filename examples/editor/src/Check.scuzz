@@ -47,8 +47,15 @@ def jumpDiag(s: String): IO[Unit] =
   for {
     _ = Property.sometimes("tappedDiag")
     _ = Property.sometimes("focusedList")
-    head = List.head(Str.split(s, "|"))
+    head = List.head(Str.split(s, "|")) match {
+  case Option.Some(h) => h
+  case Option.None => s
+}
     lc = Str.split(head, ":")
-    _ <- Ui.setEditorCaret(Str.toInt(List.head(lc), Str.len("")), Str.toInt(List.at(lc, Str.len("x")), Str.len("")))
+    lineN = List.head(lc) match {
+  case Option.Some(c) => Str.toInt(c, Str.len(""))
+  case Option.None => 0
+}
+    _ <- Ui.setEditorCaret(lineN, Str.toInt(List.at(lc, Str.len("x")), Str.len("")))
   } yield ()
 

@@ -36,7 +36,11 @@ private def printArrWrite(): IO[Unit] =
     d = Json.dropAt(u, 0)
     _ <- IO.println(s"arrW:${Str.fromInt(List.len(Json.arr(d)))}")
     at0 = Json.at(d, 0)
-    _ <- IO.println(s"arrW0:${Str.fromInt(Json.intOr(if (List.isEmpty(at0)) Json.Null else List.head(at0), -1))}")
+    j0 = List.head(at0) match {
+  case Option.Some(j) => j
+  case Option.None => Json.Null()
+}
+    _ <- IO.println(s"arrW0:${Str.fromInt(Json.intOr(j0, -1))}")
   } yield ()
 
 private def printFloat(): IO[Unit] =
@@ -68,7 +72,10 @@ private def objKitOk(j: Json): IO[Unit] =
     _ <- printArr(j)
     got = Json.get(j, "xs")
     _ <- IO.println(s"getXs:${Str.fromInt(List.len(got))}")
-    inner = if (List.isEmpty(got)) Json.Null() else List.head(got)
+    inner = List.head(got) match {
+  case Option.Some(j) => j
+  case Option.None => Json.Null()
+}
     _ <- printArr(inner)
     _ <- printAt(inner, 1)
     _ <- printAt(inner, 9)

@@ -36,7 +36,7 @@ def hasErr(o: Out): Bool =
   Str.len(o.err) > 0
 
 def getTy(env: List[(String, String)], name: String): String =
-  if (List.isEmpty(env)) "" else getTyHd(List.head(env), List.tail(env), name)
+  if (List.isEmpty(env)) "" else getTyHd(List.at(env, 0), List.tail(env), name)
 
 def getTyHd(h: (String, String), rest: List[(String, String)], name: String): String =
   h match {
@@ -44,7 +44,7 @@ def getTyHd(h: (String, String), rest: List[(String, String)], name: String): St
   }
 
 def bindParams(ps: List[Param], acc: List[(String, String)]): List[(String, String)] =
-  if (List.isEmpty(ps)) acc else bindParamsHd(List.head(ps), List.tail(ps), acc)
+  if (List.isEmpty(ps)) acc else bindParamsHd(List.at(ps, 0), List.tail(ps), acc)
 
 def bindParamsHd(p: Param, rest: List[Param], acc: List[(String, String)]): List[(String, String)] =
   p match {
@@ -55,7 +55,7 @@ def bindLam(p: String, env: List[(String, String)]): List[(String, String)] =
   if (p == "") env else (p, "Any") :: env
 
 def lookupEnv(env: List[(String, String)], n: String): String =
-  if (List.isEmpty(env)) "" else lookupEnv1(List.head(env), List.tail(env), n)
+  if (List.isEmpty(env)) "" else lookupEnv1(List.at(env, 0), List.tail(env), n)
 
 def lookupEnv1(h: (String, String), rest: List[(String, String)], n: String): String =
   h match {
@@ -96,7 +96,7 @@ def findFunPrefer3(hit: List[Fun], funs: List[Fun], name: String): List[Fun] =
   if (List.isEmpty(hit)) findFun(funs, name) else hit
 
 def findFun(funs: List[Fun], name: String): List[Fun] =
-  if (List.isEmpty(funs)) [] else findFun1(List.head(funs), List.tail(funs), name)
+  if (List.isEmpty(funs)) [] else findFun1(List.at(funs, 0), List.tail(funs), name)
 
 def findFun1(h: Fun, rest: List[Fun], name: String): List[Fun] =
   h match {
@@ -104,7 +104,7 @@ def findFun1(h: Fun, rest: List[Fun], name: String): List[Fun] =
   }
 
 def findFunMod(funs: List[Fun], mod: String, name: String): List[Fun] =
-  if (List.isEmpty(funs)) [] else findFunMod1(List.head(funs), List.tail(funs), mod, name)
+  if (List.isEmpty(funs)) [] else findFunMod1(List.at(funs, 0), List.tail(funs), mod, name)
 
 def findFunMod1(h: Fun, rest: List[Fun], mod: String, name: String): List[Fun] =
   h match {
@@ -112,7 +112,7 @@ def findFunMod1(h: Fun, rest: List[Fun], mod: String, name: String): List[Fun] =
   }
 
 def paramTys(ps: List[Param]): List[String] =
-  if (List.isEmpty(ps)) [] else paramTys1(List.head(ps), List.tail(ps))
+  if (List.isEmpty(ps)) [] else paramTys1(List.at(ps, 0), List.tail(ps))
 
 def paramTys1(p: Param, rest: List[Param]): List[String] =
   p match {
@@ -177,7 +177,7 @@ def kitParams4(f: String): List[String] =
   if (f == "Timeline.signalInt" || f == "Timeline.signalListLen") "Timeline" :: "Int" :: "String" :: noStr() else if (f == "Timeline.signalStrHas") "Timeline" :: "Int" :: "String" :: "String" :: noStr() else if (f == "Property.signalInt" || f == "Property.signalStr" || f == "Property.signalListLen") "String" :: noStr() else if (f == "Property.signalListAt") "String" :: "Int" :: noStr() else if (f == "Verdict.alwaysHas") "Timeline" :: "String" :: noStr() else if (f == "Verdict.afterHit") "Timeline" :: "String" :: "String" :: noStr() else noStr()
 
 def kitRet(f: String): String =
-  if (f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Property.signalInt" || f == "Property.signalListLen") "Int" else if (f == "Timeline.signalStrHas") "Bool" else if (f == "Property.signalStr" || f == "Property.signalListAt") "String" else if (f == "Verdict.alwaysHas" || f == "Verdict.afterHit") "Verdict" else if (f == "Str.len" || f == "Str.byteLen" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.indexOf" || f == "Str.lastIndexOf" || f == "Map.size" || f == "Set.size" || f == "Json.getInt" || f == "Json.intOr") "Int" else if (f == "List.head" || f == "List.at" || f == "List.last" || f == "Map.getOrElse") "Any" else if (f == "List.isEmpty" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank") "Bool" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.flatten" || f == "Str.lines" || f == "Str.split") "List" else if (f == "Json.floatOr" || f == "Json.Float" || f == "Json.asFloat") "Float" else if (f == "Map.keys" || f == "Map.values" || f == "Map.toList" || f == "Set.toList" || f == "Json.keys" || f == "Json.arr" || f == "Json.at" || f == "Json.pairs" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "List" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read" || f == "Sys.getenv" || f == "Sys.read" || f == "Sys.readLine" || f == "Fs.canonicalize" || f == "Sys.childRead" || isNetHttp(f) || f == "Net.tcpRead") "IO[String]" else if (f == "Fs.write" || f == "Fs.mkdirs" || f == "Fs.delete" || f == "Fs.rename" || f == "Impurity.runKit" || f == "Sys.write" || f == "Sys.kill" || f == "Sys.childWrite" || f == "Sys.childClose" || f == "IO.println" || isNetServe(f) || f == "Net.tcpWrite" || f == "Net.tcpClose" || f == "Net.udpSend" || f == "Net.udpClose") "IO[Unit]" else if (f == "Fs.list" || f == "Fs.walk") "IO[List[(String, Bool)]]" else if (f == "Sys.args") "IO[List[String]]" else if (f == "Sys.spawn" || f == "Sys.alive" || f == "Fs.exists" || f == "Random.nextInt") "IO[Int]" else if (isSysProc(f)) "IO[(Int, String, String)]" else if (f == "Net.udpRecv") "IO[(String, Int, String)]" else if (f == "Net.tcpConnect" || f == "Net.tcpListen" || f == "Net.tcpAccept" || f == "Net.udpBind") "IO[Any]" else if (f == "IO.pure") "IO[Any]" else if (f == "Clock.monotonic" || f == "Clock.realTime") "IO[Int]" else if (f == "Map.empty" || f == "Map.set" || f == "Map.remove") "Map" else if (f == "Set.empty" || f == "Set.add" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" else if (f == "Json.parse" || f == "Json.get" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float" || f == "Json.Obj" || f == "Json.Str" || f == "Json.Bool" || f == "Json.Arr") "Any" else "Any"
+  if (f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Property.signalInt" || f == "Property.signalListLen") "Int" else if (f == "Timeline.signalStrHas") "Bool" else if (f == "Property.signalStr" || f == "Property.signalListAt") "String" else if (f == "Verdict.alwaysHas" || f == "Verdict.afterHit") "Verdict" else if (f == "Str.len" || f == "Str.byteLen" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.indexOf" || f == "Str.lastIndexOf" || f == "Map.size" || f == "Set.size" || f == "Json.getInt" || f == "Json.intOr") "Int" else if (f == "List.head") "Option" else if (f == "List.at" || f == "List.last" || f == "Map.getOrElse") "Any" else if (f == "List.isEmpty" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank") "Bool" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.flatten" || f == "Str.lines" || f == "Str.split") "List" else if (f == "Json.floatOr" || f == "Json.Float" || f == "Json.asFloat") "Float" else if (f == "Map.keys" || f == "Map.values" || f == "Map.toList" || f == "Set.toList" || f == "Json.keys" || f == "Json.arr" || f == "Json.at" || f == "Json.pairs" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "List" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read" || f == "Sys.getenv" || f == "Sys.read" || f == "Sys.readLine" || f == "Fs.canonicalize" || f == "Sys.childRead" || isNetHttp(f) || f == "Net.tcpRead") "IO[String]" else if (f == "Fs.write" || f == "Fs.mkdirs" || f == "Fs.delete" || f == "Fs.rename" || f == "Impurity.runKit" || f == "Sys.write" || f == "Sys.kill" || f == "Sys.childWrite" || f == "Sys.childClose" || f == "IO.println" || isNetServe(f) || f == "Net.tcpWrite" || f == "Net.tcpClose" || f == "Net.udpSend" || f == "Net.udpClose") "IO[Unit]" else if (f == "Fs.list" || f == "Fs.walk") "IO[List[(String, Bool)]]" else if (f == "Sys.args") "IO[List[String]]" else if (f == "Sys.spawn" || f == "Sys.alive" || f == "Fs.exists" || f == "Random.nextInt") "IO[Int]" else if (isSysProc(f)) "IO[(Int, String, String)]" else if (f == "Net.udpRecv") "IO[(String, Int, String)]" else if (f == "Net.tcpConnect" || f == "Net.tcpListen" || f == "Net.tcpAccept" || f == "Net.udpBind") "IO[Any]" else if (f == "IO.pure") "IO[Any]" else if (f == "Clock.monotonic" || f == "Clock.realTime") "IO[Int]" else if (f == "Map.empty" || f == "Map.set" || f == "Map.remove") "Map" else if (f == "Set.empty" || f == "Set.add" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" else if (f == "Json.parse" || f == "Json.get" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float" || f == "Json.Obj" || f == "Json.Str" || f == "Json.Bool" || f == "Json.Arr") "Any" else "Any"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
@@ -195,16 +195,16 @@ def isBit(op: String): Bool =
   op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>"
 
 def firstArgErr(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(args)) ok("") else firstArgErr2(infer(stripNamed(List.head(args)), env, funs, ens), List.tail(args), env, funs, ens)
+  if (List.isEmpty(args)) ok("") else firstArgErr2(infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens)
 
 def firstArgErr2(o: Out, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   if (hasErr(o)) o else firstArgErr(rest, env, funs, ens)
 
 def zipCheck(callee: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
-  if (List.isEmpty(want)) ok(acc) else zipCheckHd(callee, List.head(want), List.tail(want), args, env, funs, ens, span, acc)
+  if (List.isEmpty(want)) ok(acc) else zipCheckHd(callee, List.at(want, 0), List.tail(want), args, env, funs, ens, span, acc)
 
 def zipCheckHd(callee: String, w: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
-  zipCheckArg(callee, w, want, List.head(args), List.tail(args), env, funs, ens, span, acc)
+  zipCheckArg(callee, w, want, List.at(args, 0), List.tail(args), env, funs, ens, span, acc)
 
 def zipCheckArg(callee: String, w: String, want: List[String], arg: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
   if (List.isEmpty(args)) zipCheckLast(infer(stripNamed(arg), env, funs, ens), callee, w, span, acc) else zipCheck2(callee, w, infer(stripNamed(arg), env, funs, ens), want, args, env, funs, ens, span, acc)
@@ -259,7 +259,7 @@ def argsTail(xs: List[String], ys: List[String]): Bool =
   if (List.isEmpty(xs)) true else if (List.isEmpty(ys)) false else if (partsEq(xs, ys)) true else argsTail(xs, List.tail(ys))
 
 def argsPrefix(xs: List[String], ys: List[String]): Bool =
-  if (List.isEmpty(xs)) true else if (List.isEmpty(ys)) false else tyEq(List.head(xs), List.head(ys)) && argsPrefix(List.tail(xs), List.tail(ys))
+  if (List.isEmpty(xs)) true else if (List.isEmpty(ys)) false else tyEq(List.at(xs, 0), List.at(ys, 0)) && argsPrefix(List.tail(xs), List.tail(ys))
 
 def funEq(a: String, b: String): Bool =
   isFunTy(a) && isFunTy(b) && tyEq(funArgOf(a), funArgOf(b)) && tyEq(funRetOf(a), funRetOf(b))
@@ -283,7 +283,7 @@ def tupEq(a: String, b: String): Bool =
   isTup(a) && isTup(b) && partsEq(splitComma(tupleInner(a)), splitComma(tupleInner(b)))
 
 def partsEq(xs: List[String], ys: List[String]): Bool =
-  if (List.isEmpty(xs)) List.isEmpty(ys) else if (List.isEmpty(ys)) false else tyEq(List.head(xs), List.head(ys)) && partsEq(List.tail(xs), List.tail(ys))
+  if (List.isEmpty(xs)) List.isEmpty(ys) else if (List.isEmpty(ys)) false else tyEq(List.at(xs, 0), List.at(ys, 0)) && partsEq(List.tail(xs), List.tail(ys))
 
 def prefer(a: String, b: String): String =
   if (a == b) a else if (isAppOf(a, b)) b else if (isAppOf(b, a)) a else if (a == "List") b else if (b == "List") a else if (isTup(a) && isTup(b)) preferTup(a, b) else a
@@ -292,7 +292,7 @@ def preferTup(a: String, b: String): String =
   Str.concat("(", Str.concat(preferParts(splitComma(tupleInner(a)), splitComma(tupleInner(b))), ")"))
 
 def preferParts(xs: List[String], ys: List[String]): String =
-  if (List.isEmpty(xs) || List.isEmpty(ys)) "" else if (List.len(xs) == 1 || List.len(ys) == 1) prefer(List.head(xs), List.head(ys)) else Str.concat(prefer(List.head(xs), List.head(ys)), Str.concat(", ", preferParts(List.tail(xs), List.tail(ys))))
+  if (List.isEmpty(xs) || List.isEmpty(ys)) "" else if (List.len(xs) == 1 || List.len(ys) == 1) prefer(List.at(xs, 0), List.at(ys, 0)) else Str.concat(prefer(List.at(xs, 0), List.at(ys, 0)), Str.concat(", ", preferParts(List.tail(xs), List.tail(ys))))
 
 def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, ""), ret)
@@ -303,7 +303,10 @@ def checkKnownRet(f: String, o: Out, ret: String): Out =
   }
 
 def kitRetFromTy(f: String, ty: String, ret: String): String =
-  if (f == "List.head" || f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") Str.concat("IO[", Str.concat(ty, "]")) else ret
+  if (f == "List.head") kitRetOption(ty) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") Str.concat("IO[", Str.concat(ty, "]")) else ret
+
+def kitRetOption(ty: String): String =
+  Str.concat("Option[", Str.concat(elemOf(ty), "]"))
 
 def kitRetList(ty: String, ret: String): String =
   if (isListTy(ty)) ty else ret
@@ -321,7 +324,7 @@ def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: L
   if (List.isEmpty(args) && isKit(f) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (isKit(f)) checkKnown(f, kitParams(f), kitRet(f), args, env, funs, ens, span) else checkKnown(f, anyParams(List.len(args)), openKitRet(f), args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
-  if (List.isEmpty(ens)) "" else enOfCase1(List.head(ens), List.tail(ens), ctor)
+  if (List.isEmpty(ens)) "" else enOfCase1(List.at(ens, 0), List.tail(ens), ctor)
 
 def enOfCase1(h: En, rest: List[En], ctor: String): String =
   h match {
@@ -329,7 +332,7 @@ def enOfCase1(h: En, rest: List[En], ctor: String): String =
   }
 
 def hasCase(cs: List[EnCase], ctor: String): Bool =
-  if (List.isEmpty(cs)) false else hasCase1(List.head(cs), List.tail(cs), ctor)
+  if (List.isEmpty(cs)) false else hasCase1(List.at(cs, 0), List.tail(cs), ctor)
 
 def hasCase1(c: EnCase, rest: List[EnCase], ctor: String): Bool =
   c match {
@@ -352,7 +355,7 @@ def openKitInt(f: String): Bool =
   f == "List.count" || f == "List.indexWhere" || f == "List.lastIndexWhere" || f == "List.indexOf" || f == "List.lastIndexOf" || f == "Float.toInt"
 
 def openKitAny(f: String): Bool =
-  f == "List.foldLeft" || f == "List.foldRight" || f == "List.reduceLeft" || f == "List.reduceRight" || f == "List.getOrElse" || f == "List.head" || f == "List.last" || f == "List.at"
+  f == "List.foldLeft" || f == "List.foldRight" || f == "List.reduceLeft" || f == "List.reduceRight" || f == "List.getOrElse" || f == "List.last" || f == "List.at"
 
 def resolveFunOrUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), ty: String): Out =
   if (isFunTy(ty)) inferFunApply(ty, args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFunPrefer(funs, f, env))
@@ -361,7 +364,7 @@ def inferFunApply(ty: String, args: List[Expr], env: List[(String, String)], fun
   inferFunApplyRet(funRetOf(ty), args, env, funs, ens, span)
 
 def inferFunApplyRet(ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (List.len(args) == 1) inferFunApply1(ret, infer(List.head(args), env, funs, ens), span) else if (List.isEmpty(args)) bad("apply expects 1 arg", span) else inferFunApply1(ret, firstArgErr(args, env, funs, ens), span)
+  if (List.len(args) == 1) inferFunApply1(ret, infer(List.at(args, 0), env, funs, ens), span) else if (List.isEmpty(args)) bad("apply expects 1 arg", span) else inferFunApply1(ret, firstArgErr(args, env, funs, ens), span)
 
 def inferFunApply1(ret: String, o: Out, _span: (String, Int)): Out =
   if (hasErr(o)) o else ok(ret)
@@ -376,7 +379,7 @@ def elemOf2(b: Int, t: String): String =
   if (b < 0) "Any" else Str.slice(t, b + 1, Str.len(t) - 1)
 
 def resolveUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), hit: List[Fun]): Out =
-  if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveUserHit(f, args, env, funs, ens, span, List.head(hit))
+  if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveUserHit(f, args, env, funs, ens, span, List.at(hit, 0))
 
 def resolveUserHit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), d: Fun): Out =
   d match {
@@ -489,7 +492,7 @@ def inferFor(bs: List[Bind], body: Expr, env: List[(String, String)], funs: List
   inferForGo(bs, body, env, funs, ens)
 
 def inferForGo(bs: List[Bind], body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(bs)) inferFor2(infer(body, env, funs, ens)) else inferForBind(List.head(bs), List.tail(bs), body, env, funs, ens)
+  if (List.isEmpty(bs)) inferFor2(infer(body, env, funs, ens)) else inferForBind(List.at(bs, 0), List.tail(bs), body, env, funs, ens)
 
 def inferForBind(b: Bind, rest: List[Bind], body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   b match {
@@ -506,7 +509,7 @@ def inferFor2(o: Out): Out =
   if (hasErr(o)) o else ok(Str.concat("IO[", Str.concat(o.ty, "]")))
 
 def forHasDraw(bs: List[Bind]): Bool =
-  if (List.isEmpty(bs)) false else forHasDraw1(List.head(bs), List.tail(bs))
+  if (List.isEmpty(bs)) false else forHasDraw1(List.at(bs, 0), List.tail(bs))
 
 def forHasDraw1(b: Bind, rest: List[Bind]): Bool =
   b match {
@@ -532,7 +535,7 @@ def inferFieldVar(en: String, name: String, env: List[(String, String)], funs: L
   inferFieldHit(findFunMod(funs, en, name), en, name, env, funs, ens)
 
 def inferFieldHit(hit: List[Fun], en: String, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens, noSpan()), name, ens) else ok(funTyOf(List.head(hit)))
+  if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens, noSpan()), name, ens) else ok(funTyOf(List.at(hit, 0)))
 
 def fieldOf(o: Out, name: String, ens: List[En]): Out =
   if (hasErr(o)) o else fieldOf2(o.ty, name, ens)
@@ -556,7 +559,7 @@ def fieldOf3(ft: String, ty: String): Out =
   if (ft == "") ok(ty) else ok(ft)
 
 def fieldNamed(ens: List[En], ty: String, name: String): String =
-  if (List.isEmpty(ens)) "" else fieldNamed1(List.head(ens), List.tail(ens), ty, name)
+  if (List.isEmpty(ens)) "" else fieldNamed1(List.at(ens, 0), List.tail(ens), ty, name)
 
 def fieldNamed1(h: En, rest: List[En], ty: String, name: String): String =
   h match {
@@ -564,7 +567,7 @@ def fieldNamed1(h: En, rest: List[En], ty: String, name: String): String =
   }
 
 def fieldNamed2(cs: List[EnCase], name: String): String =
-  if (List.isEmpty(cs)) "" else fieldNamed3(List.head(cs), List.tail(cs), name)
+  if (List.isEmpty(cs)) "" else fieldNamed3(List.at(cs, 0), List.tail(cs), name)
 
 def fieldNamed3(h: EnCase, rest: List[EnCase], name: String): String =
   h match {
@@ -572,7 +575,7 @@ def fieldNamed3(h: EnCase, rest: List[EnCase], name: String): String =
   }
 
 def fieldNamed4(fs: List[Param], name: String, rest: List[EnCase]): String =
-  if (List.isEmpty(fs)) fieldNamed2(rest, name) else fieldNamed5(List.head(fs), List.tail(fs), name, rest)
+  if (List.isEmpty(fs)) fieldNamed2(rest, name) else fieldNamed5(List.at(fs, 0), List.tail(fs), name, rest)
 
 def fieldNamed5(p: Param, rest: List[Param], name: String, restCs: List[EnCase]): String =
   p match {
@@ -583,7 +586,7 @@ def inferMatch(s: Expr, arms: List[Arm], env: List[(String, String)], funs: List
   inferMatch2(infer(s, env, funs, ens), arms, env, funs, ens)
 
 def inferMatch2(o: Out, arms: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (hasErr(o)) o else if (List.isEmpty(arms)) o else inferMatchArm(List.head(arms), o.ty, env, funs, ens)
+  if (hasErr(o)) o else if (List.isEmpty(arms)) o else inferMatchArm(List.at(arms, 0), o.ty, env, funs, ens)
 
 def inferMatchArm(arm: Arm, scrutTy: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   arm match {
@@ -702,7 +705,7 @@ def trimName2(s: String, a: Int, b: Int): String =
   if (a >= b) "" else if (Str.charAt(s, a) == 32) trimName2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trimName2(s, a, b - 1) else Str.slice(s, a, b)
 
 def bindTuple2(ns: List[String], ts: List[String], env: List[(String, String)]): List[(String, String)] =
-  if (List.isEmpty(ns)) env else bindSlot(List.head(ns), if (List.isEmpty(ts)) "Any" else List.head(ts), bindTuple2(List.tail(ns), if (List.isEmpty(ts)) ts else List.tail(ts), env))
+  if (List.isEmpty(ns)) env else bindSlot(List.at(ns, 0), if (List.isEmpty(ts)) "Any" else List.at(ts, 0), bindTuple2(List.tail(ns), if (List.isEmpty(ts)) ts else List.tail(ts), env))
 
 def bindSlot(n: String, ty: String, env: List[(String, String)]): List[(String, String)] =
   if (isTuplePat(n)) bindTuple(n, ty, env) else (n, ty) :: env
@@ -723,10 +726,10 @@ def ctorName2(d: Int, core: String): String =
   if (d < 0) core else Str.slice(core, d + 1, Str.len(core))
 
 def ctorElem2(name: String, args: List[String]): String =
-  if (List.isEmpty(args)) "Any" else if (name == "Right" || name == "Err") ctorSecond(args) else List.head(args)
+  if (List.isEmpty(args)) "Any" else if (name == "Right" || name == "Err") ctorSecond(args) else List.at(args, 0)
 
 def ctorSecond(args: List[String]): String =
-  if (List.isEmpty(List.tail(args))) List.head(args) else List.head(List.tail(args))
+  if (List.isEmpty(List.tail(args))) List.at(args, 0) else List.at(List.tail(args), 0)
 
 def fieldTy(ens: List[En], core: String): String =
   fieldTy2(dotAt(core, 0), core, ens)
@@ -738,7 +741,7 @@ def fieldTy2(dot: Int, core: String, ens: List[En]): String =
   if (dot < 0) "" else caseFieldTy(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
 
 def caseFieldTy(ens: List[En], en: String, ctor: String): String =
-  if (List.isEmpty(ens)) "" else caseFieldTy1(List.head(ens), List.tail(ens), en, ctor)
+  if (List.isEmpty(ens)) "" else caseFieldTy1(List.at(ens, 0), List.tail(ens), en, ctor)
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
@@ -746,7 +749,7 @@ def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   }
 
 def caseFieldTy2(cs: List[EnCase], ctor: String): String =
-  if (List.isEmpty(cs)) "" else caseFieldTy3(List.head(cs), List.tail(cs), ctor)
+  if (List.isEmpty(cs)) "" else caseFieldTy3(List.at(cs, 0), List.tail(cs), ctor)
 
 def caseFieldTy3(h: EnCase, rest: List[EnCase], ctor: String): String =
   h match {
@@ -754,7 +757,7 @@ def caseFieldTy3(h: EnCase, rest: List[EnCase], ctor: String): String =
   }
 
 def firstFieldTy(ps: List[Param]): String =
-  if (List.isEmpty(ps)) "" else paramTyOf(List.head(ps))
+  if (List.isEmpty(ps)) "" else paramTyOf(List.at(ps, 0))
 
 def paramTyOf(p: Param): String =
   p match {
@@ -771,7 +774,7 @@ def recFieldTys2(dot: Int, core: String, ens: List[En]): List[String] =
   if (dot < 0) enFieldTys(ens, core) else caseFieldTys(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
 
 def enFieldTys(ens: List[En], name: String): List[String] =
-  if (List.isEmpty(ens)) noStr() else enFieldTys1(List.head(ens), List.tail(ens), name)
+  if (List.isEmpty(ens)) noStr() else enFieldTys1(List.at(ens, 0), List.tail(ens), name)
 
 def enFieldTys1(h: En, rest: List[En], name: String): List[String] =
   h match {
@@ -779,7 +782,7 @@ def enFieldTys1(h: En, rest: List[En], name: String): List[String] =
   }
 
 def firstCaseTys(cs: List[EnCase]): List[String] =
-  if (List.isEmpty(cs)) noStr() else firstCaseTys1(List.head(cs))
+  if (List.isEmpty(cs)) noStr() else firstCaseTys1(List.at(cs, 0))
 
 def firstCaseTys1(c: EnCase): List[String] =
   c match {
@@ -787,7 +790,7 @@ def firstCaseTys1(c: EnCase): List[String] =
   }
 
 def caseFieldTys(ens: List[En], en: String, ctor: String): List[String] =
-  if (List.isEmpty(ens)) noStr() else caseFieldTys1(List.head(ens), List.tail(ens), en, ctor)
+  if (List.isEmpty(ens)) noStr() else caseFieldTys1(List.at(ens, 0), List.tail(ens), en, ctor)
 
 def caseFieldTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
@@ -795,7 +798,7 @@ def caseFieldTys1(h: En, rest: List[En], en: String, ctor: String): List[String]
   }
 
 def caseFieldTys2(cs: List[EnCase], ctor: String): List[String] =
-  if (List.isEmpty(cs)) noStr() else caseFieldTys3(List.head(cs), List.tail(cs), ctor)
+  if (List.isEmpty(cs)) noStr() else caseFieldTys3(List.at(cs, 0), List.tail(cs), ctor)
 
 def caseFieldTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
   h match {
@@ -824,7 +827,7 @@ def resolveQualHit(en: String, name: String, args: List[Expr], env: List[(String
   if (List.isEmpty(hit)) checkKnown(Str.concat(en, Str.concat(".", name)), anyParams(List.len(args)), "Any", args, env, funs, ens, exprSpan(env, e)) else resolveUser(Str.concat(en, Str.concat(".", name)), args, env, funs, ens, exprSpan(env, e), hit)
 
 def inferCtor(en: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(args)) ok(en) else inferCtorHead(en, List.head(args), List.tail(args), env, funs, ens)
+  if (List.isEmpty(args)) ok(en) else inferCtorHead(en, List.at(args, 0), List.tail(args), env, funs, ens)
 
 def inferCtorHead(en: String, h: Expr, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   inferCtorFrom(en, infer(h, env, funs, ens), rest, env, funs, ens)
@@ -839,7 +842,7 @@ def inferCtor2(en: String, o: Out, ens: List[En]): Out =
   if (hasErr(o)) o else if (enHasParams(ens, en)) ok(Str.concat(en, Str.concat("[", Str.concat(o.ty, "]")))) else ok(en)
 
 def enHasParams(ens: List[En], name: String): Bool =
-  if (List.isEmpty(ens)) false else enHasParams1(List.head(ens), List.tail(ens), name)
+  if (List.isEmpty(ens)) false else enHasParams1(List.at(ens, 0), List.tail(ens), name)
 
 def enHasParams1(h: En, rest: List[En], name: String): Bool =
   h match {
@@ -853,7 +856,7 @@ def inferFlatMap(recv: Expr, args: List[Expr], env: List[(String, String)], funs
   inferFlatMap2(infer(recv, env, funs, ens), args, env, funs, ens, e)
 
 def inferFlatMap2(o: Out, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), exprSpan(env, e)) else inferFlatMapLam(o, List.head(args), env, funs, ens, e)
+  if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), exprSpan(env, e)) else inferFlatMapLam(o, List.at(args, 0), env, funs, ens, e)
 
 def inferFlatMapLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   lam match {
@@ -877,7 +880,7 @@ def inferVar2(s: String, t: String, env: List[(String, String)], funs: List[Fun]
   if (t == "") inferVarFun(s, findFunPrefer(funs, s, env), ens, span) else ok(t)
 
 def inferVarFun(s: String, hit: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (List.isEmpty(hit)) inferVarCase(s, ens, span) else ok(funTyOf(List.head(hit)))
+  if (List.isEmpty(hit)) inferVarCase(s, ens, span) else ok(funTyOf(List.at(hit, 0)))
 
 def inferVarCase(s: String, ens: List[En], span: (String, Int)): Out =
   if (enOfCase(ens, s) == "") bad(Str.concat("unbound variable ", s), span) else ok(enOfCase(ens, s))
@@ -888,13 +891,13 @@ def funTyOf(d: Fun): String =
   }
 
 def funTyFrom(ps: List[String], ret: String): String =
-  if (List.isEmpty(ps)) ret else if (List.len(ps) == 1) Str.concat(List.head(ps), Str.concat(" => ", ret)) else Str.concat("(", Str.concat(joinComma(ps), Str.concat(") => ", ret)))
+  if (List.isEmpty(ps)) ret else if (List.len(ps) == 1) Str.concat(List.at(ps, 0), Str.concat(" => ", ret)) else Str.concat("(", Str.concat(joinComma(ps), Str.concat(") => ", ret)))
 
 def joinComma(ps: List[String]): String =
-  if (List.isEmpty(ps)) "" else if (List.isEmpty(List.tail(ps))) List.head(ps) else Str.concat(List.head(ps), Str.concat(", ", joinComma(List.tail(ps))))
+  if (List.isEmpty(ps)) "" else if (List.isEmpty(List.tail(ps))) List.at(ps, 0) else Str.concat(List.at(ps, 0), Str.concat(", ", joinComma(List.tail(ps))))
 
 def inferList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(xs)) ok("List") else inferList2(infer(List.head(xs), env, funs, ens))
+  if (List.isEmpty(xs)) ok("List") else inferList2(infer(List.at(xs, 0), env, funs, ens))
 
 def inferList2(o: Out): Out =
   if (hasErr(o)) o else ok(Str.concat("List[", Str.concat(o.ty, "]")))
@@ -903,7 +906,7 @@ def inferTuple(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens
   inferTupleAcc(xs, env, funs, ens, "")
 
 def inferTupleAcc(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], acc: String): Out =
-  if (List.isEmpty(xs)) inferTupleDone(acc) else inferTupleHd(List.head(xs), xs, env, funs, ens, acc)
+  if (List.isEmpty(xs)) inferTupleDone(acc) else inferTupleHd(List.at(xs, 0), xs, env, funs, ens, acc)
 
 def inferTupleDone(acc: String): Out =
   if (acc == "") ok("Unit") else ok(Str.concat("(", Str.concat(acc, ")")))
@@ -945,7 +948,7 @@ def checkProg(p: Prog): Out =
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
   p match {
-    case Prog(_, enums, aliases, _, _, imps, defs, main, body) => checkProgGo(expandDefs(withImportFuns(imps, defs), aliases), enums, main, body, stems)
+    case Prog(_, enums, aliases, _, _, imps, defs, main, body) => checkProgGo(expandDefs(withImportFuns(imps, defs), aliases), Parse.builtins(enums), main, body, stems)
   }
 
 def checkProgGo(ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
@@ -955,7 +958,7 @@ def withImportFuns(imps: List[Imp], defs: List[Fun]): List[Fun] =
   List.concat(importFuns(imps, defs), defs)
 
 def importFuns(imps: List[Imp], defs: List[Fun]): List[Fun] =
-  if (List.isEmpty(imps)) [] else importFunsGo(List.head(imps), List.tail(imps), defs)
+  if (List.isEmpty(imps)) [] else importFunsGo(List.at(imps, 0), List.tail(imps), defs)
 
 def importFunsGo(h: Imp, rest: List[Imp], defs: List[Fun]): List[Fun] =
   List.concat(importFun1(h, defs), importFuns(rest, defs))
@@ -966,7 +969,7 @@ def importFun1(h: Imp, defs: List[Fun]): List[Fun] =
   }
 
 def renameHits(hit: List[Fun], alias: String): List[Fun] =
-  if (List.isEmpty(hit)) [] else renameFun(List.head(hit), alias) :: []
+  if (List.isEmpty(hit)) [] else renameFun(List.at(hit, 0), alias) :: []
 
 def renameFun(d: Fun, alias: String): Fun =
   d match {
@@ -977,7 +980,7 @@ def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
   List.reverse(expandDefsGo(defs, als, []))
 
 def expandDefsGo(defs: List[Fun], als: List[Alias], acc: List[Fun]): List[Fun] =
-  if (List.isEmpty(defs)) acc else expandDefsGo(List.tail(defs), als, expandDef(List.head(defs), als) :: acc)
+  if (List.isEmpty(defs)) acc else expandDefsGo(List.tail(defs), als, expandDef(List.at(defs, 0), als) :: acc)
 
 def expandDef(d: Fun, als: List[Alias]): Fun =
   d match {
@@ -985,7 +988,7 @@ def expandDef(d: Fun, als: List[Alias]): Fun =
   }
 
 def expandParams(ps: List[Param], als: List[Alias]): List[Param] =
-  if (List.isEmpty(ps)) ps else expandParam(List.head(ps), als) :: expandParams(List.tail(ps), als)
+  if (List.isEmpty(ps)) ps else expandParam(List.at(ps, 0), als) :: expandParams(List.tail(ps), als)
 
 def expandParam(p: Param, als: List[Alias]): Param =
   p match {
@@ -993,7 +996,7 @@ def expandParam(p: Param, als: List[Alias]): Param =
   }
 
 def expandTy(t: String, als: List[Alias]): String =
-  if (List.isEmpty(als)) t else expandTyGo(t, List.head(als), als)
+  if (List.isEmpty(als)) t else expandTyGo(t, List.at(als, 0), als)
 
 def expandTyGo(t: String, h: Alias, als: List[Alias]): String =
   h match {
@@ -1001,7 +1004,7 @@ def expandTyGo(t: String, h: Alias, als: List[Alias]): String =
   }
 
 def expandTyHit(t: String, name: String, tps: List[String], target: String, als: List[Alias]): String =
-  if (t == name && List.isEmpty(tps)) target else if (isTyApp(t, name) && !List.isEmpty(tps)) expandTy(substTy(target, List.head(tps), tyAppArg(t, name)), List.tail(als)) else expandTy(t, List.tail(als))
+  if (t == name && List.isEmpty(tps)) target else if (isTyApp(t, name) && !List.isEmpty(tps)) expandTy(substTy(target, List.at(tps, 0), tyAppArg(t, name)), List.tail(als)) else expandTy(t, List.tail(als))
 
 def isTyApp(t: String, name: String): Bool =
   Str.len(t) > Str.len(name) + 1 && Str.slice(t, 0, Str.len(name) + 1) == Str.concat(name, "[") && Str.charAt(t, Str.len(t) - 1) == 93
@@ -1031,10 +1034,10 @@ def inStems(stems: List[String], mod: String): Bool =
   List.isEmpty(stems) || hasStem(stems, mod)
 
 def hasStem(stems: List[String], mod: String): Bool =
-  if (List.isEmpty(stems)) false else if (List.head(stems) == mod) true else hasStem(List.tail(stems), mod)
+  if (List.isEmpty(stems)) false else if (List.at(stems, 0) == mod) true else hasStem(List.tail(stems), mod)
 
 def checkDefsRest(all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
-  if (List.isEmpty(rest)) checkMain(main, body, all, enums, mainFile(stems)) else checkDefsHit(List.head(rest), all, List.tail(rest), enums, main, body, stems)
+  if (List.isEmpty(rest)) checkMain(main, body, all, enums, mainFile(stems)) else checkDefsHit(List.at(rest, 0), all, List.tail(rest), enums, main, body, stems)
 
 def checkDefsHit(d: Fun, all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
   d match {
@@ -1045,7 +1048,7 @@ def checkDefsAfter(o: Out, all: List[Fun], rest: List[Fun], enums: List[En], mai
   if (hasErr(o)) o else checkDefsRest(all, rest, enums, main, body, stems)
 
 def mainFile(stems: List[String]): String =
-  if (List.isEmpty(stems)) "Main" else if (hasStem(stems, "Main")) "Main" else List.head(stems)
+  if (List.isEmpty(stems)) "Main" else if (hasStem(stems, "Main")) "Main" else List.at(stems, 0)
 
 def checkMain(name: String, body: Expr, funs: List[Fun], ens: List[En], file: String): Out =
   if (name == "") ok("IO[Unit]") else checkMainGot(infer(body, ("#mod", file) :: noEnv(), funs, ens), body, file)
@@ -1103,7 +1106,7 @@ def fileOf(stem: String): String =
   if (stem == "") "Main.scuzz" else Str.concat(stem, ".scuzz")
 
 def srcOfStem(files: List[(String, String)], stem: String): String =
-  if (List.isEmpty(files)) "" else srcOfStemHd(List.head(files), List.tail(files), stem)
+  if (List.isEmpty(files)) "" else srcOfStemHd(List.at(files, 0), List.tail(files), stem)
 
 def srcOfStemHd(h: (String, String), rest: List[(String, String)], stem: String): String =
   h match {

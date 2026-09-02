@@ -1,7 +1,6 @@
 def handle(req: (String, String, String)): IO[String] =
   req match {
-    case (path, method, body) =>
-      IO.println(s"served:$method:$path:$body").map(_ => s"ok:$path")
+    case (path, method, body) => IO.println(s"served:$method:$path:$body").map(_ => s"ok:$path")
   }
 
 def showPing(p: (Unit, String)): IO[Unit] =

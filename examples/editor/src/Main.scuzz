@@ -31,7 +31,10 @@ def walkTree(root: String): IO[List[String]] =
   for {
     _ <- Chrome.seedWorkspace()
     args <- Sys.args()
-    arg = if (List.isEmpty(args)) "sample.txt" else List.head(args)
+    arg = List.head(args) match {
+  case Option.Some(s) => s
+  case Option.None => "sample.txt"
+}
     _ = Property.check("rel", Chrome.preferredRel(true, [], []) == Fs.join("src", "Main.scuzz"), true)
     _ = Property.check("flat", Chrome.flatten(["a.txt", "b/", "b/c.scuzz"], []) == ["a.txt", "b/"], true)
     _ = Property.check("exp", Chrome.flatten(["a.txt", "b/", "b/c.scuzz"], ["b/"]) == ["a.txt", "b/", "b/c.scuzz"], true)

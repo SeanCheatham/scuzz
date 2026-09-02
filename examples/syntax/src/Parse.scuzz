@@ -57,7 +57,7 @@ def indexToks(toks: List[SpTok]): Toks =
   indexToksGo(toks, 0, [], [], 0)
 
 def indexToksGo(toks: List[SpTok], n: Int, cur: List[SpTok], acc: List[List[SpTok]], total: Int): Toks =
-  if (List.isEmpty(toks)) indexToksDone(n, cur, acc, total) else if (n >= tokChunk()) indexToksGo(toks, 0, [], List.reverse(cur) :: acc, total) else indexToksGo(List.tail(toks), n + 1, List.head(toks) :: cur, acc, total + 1)
+  if (List.isEmpty(toks)) indexToksDone(n, cur, acc, total) else if (n >= tokChunk()) indexToksGo(toks, 0, [], List.reverse(cur) :: acc, total) else indexToksGo(List.tail(toks), n + 1, List.at(toks, 0) :: cur, acc, total + 1)
 
 def indexToksDone(n: Int, cur: List[SpTok], acc: List[List[SpTok]], total: Int): Toks =
   Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total)
@@ -66,7 +66,7 @@ def _sp(toks: Toks, i: Int): SpTok =
   if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "") else _spOff(List.at(toks.chunks, i / tokChunk()), i % tokChunk())
 
 def _spOff(chunk: List[SpTok], i: Int): SpTok =
-  if (List.isEmpty(chunk)) SpTok(Tok.Eof, 0, "") else if (i <= 0) List.head(chunk) else _spOff(List.tail(chunk), i - 1)
+  if (List.isEmpty(chunk)) SpTok(Tok.Eof, 0, "") else if (i <= 0) List.at(chunk, 0) else _spOff(List.tail(chunk), i - 1)
 
 def _at(toks: Toks, i: Int): Tok =
   _sp(toks, i).tok
@@ -115,7 +115,7 @@ def _kit(s: String): Bool =
   s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "Random" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property" || s == "Float"
 
 def _joinComma(xs: List[String]): String =
-  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", _joinComma(List.tail(xs))))
+  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.at(xs, 0) else Str.concat(List.at(xs, 0), Str.concat(", ", _joinComma(List.tail(xs))))
 
 def _joinTypes(toks: Toks, i: Int, acc: List[String]): (List[String], Int) =
   _joinTypes2(parseType(toks, i), toks, acc)
@@ -133,7 +133,7 @@ def parseTypeParen(toks: Toks, i: Int): (String, Int) =
 
 def parseTypeParen2(p: (List[String], Int), toks: Toks): (String, Int) =
   p match {
-    case (ts, j) => parseTypeArrow(toks, (if (List.len(ts) == 1) List.head(ts) else Str.concat("(", Str.concat(_joinComma(ts), ")")), j + 1))
+    case (ts, j) => parseTypeArrow(toks, (if (List.len(ts) == 1) List.at(ts, 0) else Str.concat("(", Str.concat(_joinComma(ts), ")")), j + 1))
   }
 
 def parseTypeApp(toks: Toks, i: Int): (String, Int) =
@@ -408,7 +408,7 @@ def tupPat(e: Expr): String =
   }
 
 def tupNames(xs: List[Expr]): List[String] =
-  if (List.isEmpty(xs)) [] else tupNames2(List.head(xs), List.tail(xs))
+  if (List.isEmpty(xs)) [] else tupNames2(List.at(xs, 0), List.tail(xs))
 
 def tupNames2(h: Expr, rest: List[Expr]): List[String] =
   parenBind(h) :: tupNames(rest)
@@ -443,7 +443,7 @@ def parseIoArgs(toks: Toks, i: Int, m: String, off: Int): (Expr, Int) =
 
 def parseIoArgs2(m: String, p: (List[Expr], Int), off: Int): (Expr, Int) =
   p match {
-    case (args, j) => if (m == "println") (Expr.EPrint(List.head(args), off), j) else (Expr.ECall(Str.concat("IO.", m), args, off), j)
+    case (args, j) => if (m == "println") (Expr.EPrint(List.at(args, 0), off), j) else (Expr.ECall(Str.concat("IO.", m), args, off), j)
   }
 
 def parseKit(toks: Toks, i: Int, kit: String, off: Int): (Expr, Int) =
@@ -589,7 +589,7 @@ def parsePatListNext(p: (String, Int), toks: Toks, acc: List[String]): (String, 
   }
 
 def listPatOf(xs: List[String]): String =
-  if (List.isEmpty(xs)) "[]" else Str.concat(List.head(xs), Str.concat(" :: ", listPatOf(List.tail(xs))))
+  if (List.isEmpty(xs)) "[]" else Str.concat(List.at(xs, 0), Str.concat(" :: ", listPatOf(List.tail(xs))))
 
 def parsePatTuple(toks: Toks, i: Int): (String, Int) =
   parsePatCtorClose("", parsePatArgs(toks, i + 1, []))
@@ -934,7 +934,7 @@ def pretty0(e: Expr): String =
   prettyExpr(e, 0)
 
 def _commaExprs(xs: List[Expr]): String =
-  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) pretty0(List.head(xs)) else Str.concat(pretty0(List.head(xs)), Str.concat(", ", _commaExprs(List.tail(xs))))
+  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) pretty0(List.at(xs, 0)) else Str.concat(pretty0(List.at(xs, 0)), Str.concat(", ", _commaExprs(List.tail(xs))))
 
 def prettyExpr(e: Expr, n: Int): String =
   e match {
@@ -1032,7 +1032,7 @@ def prettyArm(a: Arm, n: Int): String =
   if (a.g == "") Str.concat(_pad(n), Str.concat("case ", Str.concat(a.pat, Str.concat(" => ", pretty0(a.body))))) else Str.concat(_pad(n), Str.concat("case ", Str.concat(a.pat, Str.concat(" if ", Str.concat(a.g, Str.concat(" => ", pretty0(a.body)))))))
 
 def prettyArms(xs: List[Arm], n: Int): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyArm(List.head(xs), n), Str.concat("""
+  if (List.isEmpty(xs)) "" else Str.concat(prettyArm(List.at(xs, 0), n), Str.concat("""
 """, prettyArms(List.tail(xs), n)))
 
 def prettyBind(b: Bind, n: Int): String =
@@ -1040,7 +1040,7 @@ def prettyBind(b: Bind, n: Int): String =
 """))))
 
 def prettyBinds(xs: List[Bind], n: Int): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyBind(List.head(xs), n), prettyBinds(List.tail(xs), n))
+  if (List.isEmpty(xs)) "" else Str.concat(prettyBind(List.at(xs, 0), n), prettyBinds(List.tail(xs), n))
 
 def _tparams(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else Str.concat("[", Str.concat(_joinComma(xs), "]"))
@@ -1051,7 +1051,7 @@ def prettyCase(c: EnCase): String =
 """))))
 
 def prettyCases(xs: List[EnCase]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyCase(List.head(xs)), prettyCases(List.tail(xs)))
+  if (List.isEmpty(xs)) "" else Str.concat(prettyCase(List.at(xs, 0)), prettyCases(List.tail(xs)))
 
 def prettyEn(e: En): String =
   e match {
@@ -1062,7 +1062,7 @@ def prettyEnHit(isRec: Bool, name: String, tparams: List[String], cases: List[En
   if (isRec) prettyRec(name, tparams, cases) else prettyEnum(name, tparams, cases)
 
 def prettyRec(name: String, tparams: List[String], cases: List[EnCase]): String =
-  prettyRecHd(name, tparams, List.head(cases))
+  prettyRecHd(name, tparams, List.at(cases, 0))
 
 def prettyRecHd(name: String, tparams: List[String], c: EnCase): String =
   c match {
@@ -1078,7 +1078,7 @@ def prettyEnum(name: String, tparams: List[String], cases: List[EnCase]): String
 """, prettyCases(cases)))))
 
 def prettyEnums(xs: List[En]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyEn(List.head(xs)), Str.concat("""
+  if (List.isEmpty(xs)) "" else Str.concat(prettyEn(List.at(xs, 0)), Str.concat("""
 """, prettyEnums(List.tail(xs))))
 
 def _paramStr(p: Param): String =
@@ -1088,7 +1088,7 @@ def _paramStrD(base: String, d: String): String =
   if (d == "") base else Str.concat(base, Str.concat(" = ", d))
 
 def _commaParams(xs: List[Param]): String =
-  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) _paramStr(List.head(xs)) else Str.concat(_paramStr(List.head(xs)), Str.concat(", ", _commaParams(List.tail(xs))))
+  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) _paramStr(List.at(xs, 0)) else Str.concat(_paramStr(List.at(xs, 0)), Str.concat(", ", _commaParams(List.tail(xs))))
 
 def prettyFun(d: Fun): String =
   Str.concat(if (d.priv) "private " else "", Str.concat("def ", Str.concat(d.name, Str.concat(_tparams(d.tparams), Str.concat("(", Str.concat(_commaParams(d.params), Str.concat("): ", Str.concat(d.ret, Str.concat(""" =
@@ -1098,7 +1098,7 @@ def prettyDefs(ds: List[Fun]): String =
   if (List.isEmpty(ds)) "" else Builder.result(prettyDefsGo(ds, Builder.empty()))
 
 def prettyDefsGo(ds: List[Fun], b: Builder): Builder =
-  if (List.isEmpty(ds)) b else prettyDefsGo(List.tail(ds), Builder.append(Builder.append(b, prettyFun(List.head(ds))), """
+  if (List.isEmpty(ds)) b else prettyDefsGo(List.tail(ds), Builder.append(Builder.append(b, prettyFun(List.at(ds, 0))), """
 
 """))
 
@@ -1112,7 +1112,7 @@ def prettyAlias(a: Alias): String =
 """)))))
 
 def prettyAliases(xs: List[Alias]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyAlias(List.head(xs)), prettyAliases(List.tail(xs)))
+  if (List.isEmpty(xs)) "" else Str.concat(prettyAlias(List.at(xs, 0)), prettyAliases(List.tail(xs)))
 
 def prettyImp(im: Imp): String =
   if (im.alias == "") Str.concat("import ", Str.concat(im.mod, Str.concat(".", Str.concat(im.name, """
@@ -1124,21 +1124,21 @@ def prettyImps(xs: List[Imp], rest: Bool): String =
 """ else "")
 
 def _prettyImpList(xs: List[Imp]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyImp(List.head(xs)), _prettyImpList(List.tail(xs)))
+  if (List.isEmpty(xs)) "" else Str.concat(prettyImp(List.at(xs, 0)), _prettyImpList(List.tail(xs)))
 
 def prettyTrMeth(m: TrMethod): String =
   Str.concat("  def ", Str.concat(m.name, Str.concat("(", Str.concat(_commaParams(m.params), Str.concat("): ", Str.concat(m.ret, """
 """))))))
 
 def prettyTrMeths(xs: List[TrMethod]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyTrMeth(List.head(xs)), prettyTrMeths(List.tail(xs)))
+  if (List.isEmpty(xs)) "" else Str.concat(prettyTrMeth(List.at(xs, 0)), prettyTrMeths(List.tail(xs)))
 
 def prettyTr(t: Tr): String =
   Str.concat("trait ", Str.concat(t.name, Str.concat(_tparams(t.tparams), Str.concat(""":
 """, prettyTrMeths(t.methods)))))
 
 def prettyTraits(xs: List[Tr]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyTr(List.head(xs)), Str.concat("""
+  if (List.isEmpty(xs)) "" else Str.concat(prettyTr(List.at(xs, 0)), Str.concat("""
 """, prettyTraits(List.tail(xs))))
 
 def prettyImplFun(d: Fun): String =
@@ -1147,14 +1147,14 @@ def prettyImplFun(d: Fun): String =
 """))))))))
 
 def prettyImplFuns(xs: List[Fun]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyImplFun(List.head(xs)), prettyImplFuns(List.tail(xs)))
+  if (List.isEmpty(xs)) "" else Str.concat(prettyImplFun(List.at(xs, 0)), prettyImplFuns(List.tail(xs)))
 
 def prettyImDef(im: Im): String =
   Str.concat("impl ", Str.concat(im.tn, Str.concat(_tparams(im.targs), Str.concat(" for ", Str.concat(im.forTy, Str.concat(""":
 """, prettyImplFuns(im.methods)))))))
 
 def prettyImpls(xs: List[Im]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(prettyImDef(List.head(xs)), Str.concat("""
+  if (List.isEmpty(xs)) "" else Str.concat(prettyImDef(List.at(xs, 0)), Str.concat("""
 """, prettyImpls(List.tail(xs))))
 
 def prettyPkg(pkg: String): String =
@@ -1168,7 +1168,7 @@ def stampFun(mod: String, d: Fun): Fun =
   }
 
 def stampFuns(mod: String, ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) noFun() else stampFun(mod, List.head(ds)) :: stampFuns(mod, List.tail(ds))
+  if (List.isEmpty(ds)) noFun() else stampFun(mod, List.at(ds, 0)) :: stampFuns(mod, List.tail(ds))
 
 def stampDefs(mod: String, p: Prog): Prog =
   p match {
@@ -1196,6 +1196,20 @@ def noFun(): List[Fun] =
 def emptyProg(): Prog =
   Prog("", noEn(), noAl(), noTr(), noIm(), noImp(), noFun(), "", Expr.EUnit)
 
+def optionEn(): En =
+  En(false, "Option", "T" :: [], EnCase("None", []) :: EnCase("Some", Param("x", "T", "", "") :: []) :: [])
+
+def builtins(ens: List[En]): List[En] =
+  if (hasEnName(ens, "Option")) ens else optionEn() :: ens
+
+def hasEnName(ens: List[En], name: String): Bool =
+  if (List.isEmpty(ens)) false else hasEnName1(List.at(ens, 0), List.tail(ens), name)
+
+def hasEnName1(h: En, rest: List[En], name: String): Bool =
+  h match {
+    case En(_, n, _, _) => n == name || hasEnName(rest, name)
+  }
+
 def merge(a: Prog, b: Prog): Prog =
   a match {
     case Prog(ap, ae, aa, at, ai, am, ad, an, ab) => merge2(ap, ae, aa, at, ai, am, ad, an, ab, b)
@@ -1213,7 +1227,7 @@ def parseFiles(files: List[(String, String)]): Prog =
   parseFiles2(files, emptyProg())
 
 def parseFiles2(files: List[(String, String)], acc: Prog): Prog =
-  if (List.isEmpty(files)) acc else parseFiles3(List.head(files), List.tail(files), acc)
+  if (List.isEmpty(files)) acc else parseFiles3(List.at(files, 0), List.tail(files), acc)
 
 def parseFiles3(f: (String, String), rest: List[(String, String)], acc: Prog): Prog =
   f match {

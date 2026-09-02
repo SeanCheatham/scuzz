@@ -58,7 +58,7 @@ def lcgNext(s: Int): Int =
   remEuclid(s * 48271, 2147483647)
 
 def hasInt(xs: List[Int], n: Int): Bool =
-  if (List.isEmpty(xs)) false else hasIntHd(List.head(xs), List.tail(xs), n)
+  if (List.isEmpty(xs)) false else hasIntHd(List.at(xs, 0), List.tail(xs), n)
 
 def hasIntHd(h: Int, rest: List[Int], n: Int): Bool =
   h == n || hasInt(rest, n)
@@ -82,7 +82,7 @@ def pickSitesGo(seed: Int, take: Int, sites: Int, i: Int, acc: List[Int]): List[
   if (i >= take) acc else pickSitesGo(seed, take, sites, i + 1, List.concat(acc, pickSite(seed, i, sites, acc) :: noInts()))
 
 def countFiles(files: List[(String, String)], o: Bool): Int =
-  if (List.isEmpty(files)) 0 else countFilesHd(List.head(files), List.tail(files), o)
+  if (List.isEmpty(files)) 0 else countFilesHd(List.at(files, 0), List.tail(files), o)
 
 def countFilesHd(h: (String, String), rest: List[(String, String)], o: Bool): Int =
   h match {
@@ -98,7 +98,7 @@ def countProg(p: Prog, o: Bool): Int =
   }
 
 def countFuns(ds: List[Fun], n: Int, o: Bool): Int =
-  if (List.isEmpty(ds)) n else countFunsHd(List.head(ds), List.tail(ds), n, o)
+  if (List.isEmpty(ds)) n else countFunsHd(List.at(ds, 0), List.tail(ds), n, o)
 
 def countFunsHd(d: Fun, rest: List[Fun], n: Int, o: Bool): Int =
   d match {
@@ -112,7 +112,7 @@ def applyFiles(files: List[(String, String)], site: Int, o: Bool): List[(String,
   applyFilesGo(files, site, 0, o)
 
 def applyFilesGo(files: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
-  if (List.isEmpty(files)) files else applyFilesHd(List.head(files), List.tail(files), site, base, o)
+  if (List.isEmpty(files)) files else applyFilesHd(List.at(files, 0), List.tail(files), site, base, o)
 
 def applyFilesHd(h: (String, String), rest: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
   h match {
@@ -141,7 +141,7 @@ def applyProg(p: Prog, site: Int, o: Bool): Prog =
   }
 
 def applyFuns(ds: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
-  if (List.isEmpty(ds)) FunWalk(Parse.noFun(), seen) else applyFunsHd(List.head(ds), List.tail(ds), site, seen, o)
+  if (List.isEmpty(ds)) FunWalk(Parse.noFun(), seen) else applyFunsHd(List.at(ds, 0), List.tail(ds), site, seen, o)
 
 def applyFunsHd(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
   d match {
@@ -198,10 +198,10 @@ def handlerBodyAt(e: Expr): Expr =
   }
 
 def collectHsList(xs: List[Expr], acc: List[Expr]): List[Expr] =
-  if (List.isEmpty(xs)) acc else collectHsList(List.tail(xs), collectHs(List.head(xs), acc))
+  if (List.isEmpty(xs)) acc else collectHsList(List.tail(xs), collectHs(List.at(xs, 0), acc))
 
 def collectHsArms(xs: List[Arm], acc: List[Expr]): List[Expr] =
-  if (List.isEmpty(xs)) acc else collectHsArmsHd(List.head(xs), List.tail(xs), acc)
+  if (List.isEmpty(xs)) acc else collectHsArmsHd(List.at(xs, 0), List.tail(xs), acc)
 
 def collectHsArmsHd(a: Arm, rest: List[Arm], acc: List[Expr]): List[Expr] =
   a match {
@@ -209,7 +209,7 @@ def collectHsArmsHd(a: Arm, rest: List[Arm], acc: List[Expr]): List[Expr] =
   }
 
 def collectHsBinds(xs: List[Bind], acc: List[Expr]): List[Expr] =
-  if (List.isEmpty(xs)) acc else collectHsBindsHd(List.head(xs), List.tail(xs), acc)
+  if (List.isEmpty(xs)) acc else collectHsBindsHd(List.at(xs, 0), List.tail(xs), acc)
 
 def collectHsBindsHd(b: Bind, rest: List[Bind], acc: List[Expr]): List[Expr] =
   b match {
@@ -327,7 +327,7 @@ def walkMapHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, h
   }
 
 def mapIdent(args: List[Expr], p: String): List[Expr] =
-  if (List.len(args) != 2) args else List.head(args) :: mapIdentLam(List.at(args, 1), p) :: noExprs()
+  if (List.len(args) != 2) args else List.at(args, 0) :: mapIdentLam(List.at(args, 1), p) :: noExprs()
 
 def mapIdentLam(e: Expr, p: String): Expr =
   e match {
@@ -346,7 +346,7 @@ def walkHandlerHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Boo
   }
 
 def swapHandler(args: List[Expr], hs: List[Expr], hi: Int): List[Expr] =
-  if (List.len(args) < 2) args else List.head(args) :: swapHandlerLam(List.at(args, 1), nextH(hs, hi)) :: drop2(args)
+  if (List.len(args) < 2) args else List.at(args, 0) :: swapHandlerLam(List.at(args, 1), nextH(hs, hi)) :: drop2(args)
 
 def drop2(args: List[Expr]): List[Expr] =
   if (List.isEmpty(args) || List.isEmpty(List.tail(args))) noExprs() else List.tail(List.tail(args))
@@ -427,7 +427,7 @@ def walkNamed(name: String, inner: Expr, target: Int, seen: Int, inO: Bool, hs: 
   }
 
 def walkArgs(xs: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walks =
-  if (List.isEmpty(xs)) Walks(noExprs(), seen, hi) else walkArgsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi, o)
+  if (List.isEmpty(xs)) Walks(noExprs(), seen, hi) else walkArgsHd(List.at(xs, 0), List.tail(xs), target, seen, inO, hs, hi, o)
 
 def walkArgsHd(h: Expr, rest: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walks =
   walk(h, target, seen, inO, hs, hi, o) match {
@@ -443,7 +443,7 @@ def noArms(): List[Arm] =
   []
 
 def walkArms(xs: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): ArmWalk =
-  if (List.isEmpty(xs)) ArmWalk(noArms(), seen, hi) else walkArmsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi, o)
+  if (List.isEmpty(xs)) ArmWalk(noArms(), seen, hi) else walkArmsHd(List.at(xs, 0), List.tail(xs), target, seen, inO, hs, hi, o)
 
 def walkArmsHd(a: Arm, rest: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): ArmWalk =
   a match {
@@ -461,7 +461,7 @@ def noBinds(): List[Bind] =
   []
 
 def walkBinds(xs: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
-  if (List.isEmpty(xs)) BindWalk(noBinds(), seen, hi) else walkBindsHd(List.head(xs), List.tail(xs), target, seen, inO, hs, hi, o)
+  if (List.isEmpty(xs)) BindWalk(noBinds(), seen, hi) else walkBindsHd(List.at(xs, 0), List.tail(xs), target, seen, inO, hs, hi, o)
 
 def walkBindsHd(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
   b match {

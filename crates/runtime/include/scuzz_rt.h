@@ -599,6 +599,8 @@ SzList *sz_list_nil(void);
 int sz_list_is_empty(const SzList *xs);
 SzList *sz_list_cons(void *head, SzList *tail);
 void *sz_list_head(const SzList *xs);
+/* Option: None (tag 0) on empty, Some (tag 1) with the head payload. */
+void *sz_list_head_opt(const SzList *xs);
 SzList *sz_list_tail(const SzList *xs);
 int64_t sz_list_len(const SzList *xs);
 void *sz_list_at(const SzList *xs, int64_t index);

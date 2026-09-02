@@ -61,7 +61,7 @@ def tyHeadAt(t: String, i: Int): String =
   if (i >= Str.len(t)) t else if (Str.charAt(t, i) == 91) Str.slice(t, 0, i) else tyHeadAt(t, i + 1)
 
 def findEn(ens: List[En], name: String): List[En] =
-  if (List.isEmpty(ens)) noEn() else findEn1(List.head(ens), List.tail(ens), name)
+  if (List.isEmpty(ens)) noEn() else findEn1(List.at(ens, 0), List.tail(ens), name)
 
 def findEn1(h: En, rest: List[En], name: String): List[En] =
   h match {
@@ -69,7 +69,7 @@ def findEn1(h: En, rest: List[En], name: String): List[En] =
   }
 
 def adtTokHit(hit: List[En], ty: String, ens: List[En], depth: Int): String =
-  if (List.isEmpty(hit)) ty else adtTokEn(List.head(hit), ens, depth)
+  if (List.isEmpty(hit)) ty else adtTokEn(List.at(hit, 0), ens, depth)
 
 def adtTokEn(e: En, ens: List[En], depth: Int): String =
   e match {
@@ -77,10 +77,10 @@ def adtTokEn(e: En, ens: List[En], depth: Int): String =
   }
 
 def recLike(name: String, cs: List[EnCase]): Bool =
-  List.len(cs) == 1 && List.head(cs).name == name
+  List.len(cs) == 1 && List.at(cs, 0).name == name
 
 def recTok(name: String, cs: List[EnCase], ens: List[En], depth: Int): String =
-  Str.concat(name, Str.concat("(", Str.concat(caseFields(List.head(cs), ens, depth), ")")))
+  Str.concat(name, Str.concat("(", Str.concat(caseFields(List.at(cs, 0), ens, depth), ")")))
 
 def caseFields(c: EnCase, ens: List[En], depth: Int): String =
   c match {
@@ -88,7 +88,7 @@ def caseFields(c: EnCase, ens: List[En], depth: Int): String =
   }
 
 def fieldToks(fs: List[Param], ens: List[En], depth: Int): String =
-  if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) fieldTok(List.head(fs), ens, depth) else Str.concat(fieldTok(List.head(fs), ens, depth), Str.concat(",", fieldToks(List.tail(fs), ens, depth)))
+  if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) fieldTok(List.at(fs, 0), ens, depth) else Str.concat(fieldTok(List.at(fs, 0), ens, depth), Str.concat(",", fieldToks(List.tail(fs), ens, depth)))
 
 def fieldTok(p: Param, ens: List[En], depth: Int): String =
   if (p.ty == "Int") intTok(p.w) else typeTok(p.ty, ens, depth + 1)
@@ -97,7 +97,7 @@ def enumTok(cs: List[EnCase], ens: List[En], depth: Int): String =
   Str.concat("e:", enumCases(if (depth >= 3) leafCases(cs) else cs, ens, depth))
 
 def leafCases(cs: List[EnCase]): List[EnCase] =
-  if (List.isEmpty(cs)) noCase() else leafCases1(List.head(cs), List.tail(cs))
+  if (List.isEmpty(cs)) noCase() else leafCases1(List.at(cs, 0), List.tail(cs))
 
 def leafCases1(c: EnCase, rest: List[EnCase]): List[EnCase] =
   if (isLeafCase(c)) c :: leafCases(rest) else leafCases(rest)
@@ -108,13 +108,13 @@ def isLeafCase(c: EnCase): Bool =
   }
 
 def allLeaf(fs: List[Param]): Bool =
-  List.isEmpty(fs) || leafTy(List.head(fs).ty) && allLeaf(List.tail(fs))
+  List.isEmpty(fs) || leafTy(List.at(fs, 0).ty) && allLeaf(List.tail(fs))
 
 def leafTy(t: String): Bool =
   t == "Int" || t == "String" || t == "Bool"
 
 def enumCases(cs: List[EnCase], ens: List[En], depth: Int): String =
-  if (List.isEmpty(cs)) "" else if (List.len(cs) == 1) caseTok(List.head(cs), ens, depth) else Str.concat(caseTok(List.head(cs), ens, depth), Str.concat("|", enumCases(List.tail(cs), ens, depth)))
+  if (List.isEmpty(cs)) "" else if (List.len(cs) == 1) caseTok(List.at(cs, 0), ens, depth) else Str.concat(caseTok(List.at(cs, 0), ens, depth), Str.concat("|", enumCases(List.tail(cs), ens, depth)))
 
 def caseTok(c: EnCase, ens: List[En], depth: Int): String =
   c match {
@@ -140,7 +140,7 @@ def hasSub(s: String, n: String): Bool =
   findIdx(s, n, 0) >= 0
 
 def allFriendly(ps: List[Param]): Bool =
-  List.isEmpty(ps) || friendly(List.head(ps)) && allFriendly(List.tail(ps))
+  List.isEmpty(ps) || friendly(List.at(ps, 0)) && allFriendly(List.tail(ps))
 
 def isDrive(d: Fun): Bool =
   d.ret == "Bool" && allFriendly(d.params)
@@ -149,7 +149,7 @@ def isClaim(d: Fun): Bool =
   d.ret == "Verdict"
 
 def drives(ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) noFun() else drives1(List.head(ds), List.tail(ds))
+  if (List.isEmpty(ds)) noFun() else drives1(List.at(ds, 0), List.tail(ds))
 
 def drives1(d: Fun, rest: List[Fun]): List[Fun] =
   if (isDrive(d)) d :: drives(rest) else drives(rest)
@@ -158,7 +158,7 @@ def specOfE(d: Fun, ens: List[En]): String =
   if (List.isEmpty(d.params)) d.name else Str.concat(d.name, Str.concat(" ", specs(d.params, ens)))
 
 def specs(ps: List[Param], ens: List[En]): String =
-  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) kindTokE(List.head(ps), ens) else Str.concat(kindTokE(List.head(ps), ens), Str.concat(" ", specs(List.tail(ps), ens)))
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) kindTokE(List.at(ps, 0), ens) else Str.concat(kindTokE(List.at(ps, 0), ens), Str.concat(" ", specs(List.tail(ps), ens)))
 
 def cmpStr(a: String, b: String): Int =
   cmpStr2(a, b, 0)
@@ -167,13 +167,13 @@ def cmpStr2(a: String, b: String, i: Int): Int =
   if (i >= Str.len(a) && i >= Str.len(b)) 0 else if (i >= Str.len(a)) 0 - 1 else if (i >= Str.len(b)) 1 else if (Str.charAt(a, i) < Str.charAt(b, i)) 0 - 1 else if (Str.charAt(a, i) > Str.charAt(b, i)) 1 else cmpStr2(a, b, i + 1)
 
 def ins(x: String, ys: List[String]): List[String] =
-  if (List.isEmpty(ys)) x :: noStr() else if (cmpStr(x, List.head(ys)) <= 0) x :: ys else List.head(ys) :: ins(x, List.tail(ys))
+  if (List.isEmpty(ys)) x :: noStr() else if (cmpStr(x, List.at(ys, 0)) <= 0) x :: ys else List.at(ys, 0) :: ins(x, List.tail(ys))
 
 def sortStrs(xs: List[String]): List[String] =
-  if (List.isEmpty(xs)) xs else ins(List.head(xs), sortStrs(List.tail(xs)))
+  if (List.isEmpty(xs)) xs else ins(List.at(xs, 0), sortStrs(List.tail(xs)))
 
 def nls(xs: List[String]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(List.head(xs), Str.concat(nl(), nls(List.tail(xs))))
+  if (List.isEmpty(xs)) "" else Str.concat(List.at(xs, 0), Str.concat(nl(), nls(List.tail(xs))))
 
 def linesOf(s: String): List[String] =
   linesFrom(s, 0)
@@ -218,7 +218,7 @@ def tomlQuotedEnd(src: String, start: Int, i: Int): String =
   if (i >= Str.len(src) || Str.charAt(src, i) == 34) Str.slice(src, start, i) else tomlQuotedEnd(src, start, i + 1)
 
 def quoteEvents(xs: List[String]): String =
-  if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) quoteEv(List.head(xs)) else Str.concat(quoteEv(List.head(xs)), Str.concat(", ", quoteEvents(List.tail(xs))))
+  if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) quoteEv(List.at(xs, 0)) else Str.concat(quoteEv(List.at(xs, 0)), Str.concat(", ", quoteEvents(List.tail(xs))))
 
 def quoteEv(e: String): String =
   Str.concat("\"", Str.concat(e, "\""))
@@ -273,7 +273,7 @@ def classToml(text: String): String =
   classLines(linesOf(text))
 
 def classLines(xs: List[String]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(classRow(List.head(xs)), classLines(List.tail(xs)))
+  if (List.isEmpty(xs)) "" else Str.concat(classRow(List.at(xs, 0)), classLines(List.tail(xs)))
 
 def classRow(line: String): String =
   classRow2(className(line), classNums(line))
@@ -305,13 +305,13 @@ def mapSeed(ds: List[Fun]): List[String] =
   mapSeedE(ds, noEn())
 
 def mapSeedE(ds: List[Fun], ens: List[En]): List[String] =
-  if (List.isEmpty(ds)) noStr() else seedOfE(List.head(ds), ens) :: mapSeedE(List.tail(ds), ens)
+  if (List.isEmpty(ds)) noStr() else seedOfE(List.at(ds, 0), ens) :: mapSeedE(List.tail(ds), ens)
 
 def seedOfE(d: Fun, ens: List[En]): String =
   if (List.isEmpty(d.params)) Str.concat("drive ", d.name) else Str.concat("drive ", Str.concat(d.name, Str.concat(" ", seedArgsE(d.params, ens))))
 
 def seedArgsE(ps: List[Param], ens: List[En]): String =
-  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) seedArgE(List.head(ps), ens) else Str.concat(seedArgE(List.head(ps), ens), Str.concat(" ", seedArgsE(List.tail(ps), ens)))
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) seedArgE(List.at(ps, 0), ens) else Str.concat(seedArgE(List.at(ps, 0), ens), Str.concat(" ", seedArgsE(List.tail(ps), ens)))
 
 def seedArgE(p: Param, ens: List[En]): String =
   if (p.ty == "Int") "0" else if (p.ty == "Bool") "false" else if (p.ty == "String") "a" else if (isListTy(p.ty)) "[]" else seedAdt(p.ty, ens)
@@ -320,7 +320,7 @@ def seedAdt(ty: String, ens: List[En]): String =
   seedHit(findEn(ens, tyHead(ty)), ty, ens)
 
 def seedHit(hit: List[En], ty: String, ens: List[En]): String =
-  if (List.isEmpty(hit)) "0" else seedEn(List.head(hit), ens)
+  if (List.isEmpty(hit)) "0" else seedEn(List.at(hit, 0), ens)
 
 def seedEn(e: En, ens: List[En]): String =
   e match {
@@ -328,13 +328,13 @@ def seedEn(e: En, ens: List[En]): String =
   }
 
 def seedRec(name: String, cs: List[EnCase], ens: List[En]): String =
-  if (List.isEmpty(cs)) name else seedCase(List.head(cs), ens)
+  if (List.isEmpty(cs)) name else seedCase(List.at(cs, 0), ens)
 
 def seedEnum(cs: List[EnCase], ens: List[En]): String =
   seedEnumHit(leafCases(cs), cs, ens)
 
 def seedEnumHit(leaf: List[EnCase], all: List[EnCase], ens: List[En]): String =
-  if (List.isEmpty(leaf)) seedCase(List.head(all), ens) else seedCase(List.head(leaf), ens)
+  if (List.isEmpty(leaf)) seedCase(List.at(all, 0), ens) else seedCase(List.at(leaf, 0), ens)
 
 def seedCase(c: EnCase, ens: List[En]): String =
   c match {
@@ -345,13 +345,13 @@ def seedCtor(name: String, fs: List[Param], ens: List[En]): String =
   if (List.isEmpty(fs)) name else Str.concat(name, Str.concat("(", Str.concat(seedFields(fs, ens), ")")))
 
 def seedFields(fs: List[Param], ens: List[En]): String =
-  if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) seedArgE(List.head(fs), ens) else Str.concat(seedArgE(List.head(fs), ens), Str.concat(",", seedFields(List.tail(fs), ens)))
+  if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) seedArgE(List.at(fs, 0), ens) else Str.concat(seedArgE(List.at(fs, 0), ens), Str.concat(",", seedFields(List.tail(fs), ens)))
 
 def mapSpec(ds: List[Fun]): List[String] =
   mapSpecE(ds, noEn())
 
 def mapSpecE(ds: List[Fun], ens: List[En]): List[String] =
-  if (List.isEmpty(ds)) noStr() else specOfE(List.head(ds), ens) :: mapSpecE(List.tail(ds), ens)
+  if (List.isEmpty(ds)) noStr() else specOfE(List.at(ds, 0), ens) :: mapSpecE(List.tail(ds), ens)
 
 def parseVerify(src: String): List[Fun] =
   parseVerifyProg(Parse.parse(Lexer.lex(src)))
@@ -370,7 +370,7 @@ def parseClaimsProg(p: Prog): List[Fun] =
   }
 
 def claims(ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) noFun() else claims1(List.head(ds), List.tail(ds))
+  if (List.isEmpty(ds)) noFun() else claims1(List.at(ds, 0), List.tail(ds))
 
 def claims1(d: Fun, rest: List[Fun]): List[Fun] =
   if (isClaim(d)) d :: claims(rest) else claims(rest)
@@ -382,7 +382,7 @@ def wrapSrc(stem: String, src: String): String =
   Str.concat(wrapFuns(stem, parseVerify(src)), wrapRelFuns(parseClaims(src)))
 
 def wrapFuns(stem: String, ds: List[Fun]): String =
-  if (List.isEmpty(ds)) "" else Str.concat(wrapFun(stem, List.head(ds)), wrapFuns(stem, List.tail(ds)))
+  if (List.isEmpty(ds)) "" else Str.concat(wrapFun(stem, List.at(ds, 0)), wrapFuns(stem, List.tail(ds)))
 
 def wrapFun(_stem: String, d: Fun): String =
   d match {
@@ -394,7 +394,7 @@ def wrapFun2(name: String, ps: String, body: String): String =
 """))))))))
 
 def wrapPs(ps: List[Param]): String =
-  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) wrapP(List.head(ps)) else Str.concat(wrapP(List.head(ps)), Str.concat(", ", wrapPs(List.tail(ps))))
+  if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) wrapP(List.at(ps, 0)) else Str.concat(wrapP(List.at(ps, 0)), Str.concat(", ", wrapPs(List.tail(ps))))
 
 def wrapP(p: Param): String =
   p match {
@@ -402,7 +402,7 @@ def wrapP(p: Param): String =
   }
 
 def wrapRelFuns(ds: List[Fun]): String =
-  if (List.isEmpty(ds)) "" else Str.concat(wrapRel(List.head(ds)), wrapRelFuns(List.tail(ds)))
+  if (List.isEmpty(ds)) "" else Str.concat(wrapRel(List.at(ds, 0)), wrapRelFuns(List.tail(ds)))
 
 def wrapRel(d: Fun): String =
   d match {
@@ -416,7 +416,7 @@ def wrapRel2(name: String, ps: String, body: String): String =
 """))))))
 
 def wrapFiles(files: List[(String, String)]): String =
-  if (List.isEmpty(files)) "" else wrapFiles2(List.head(files), List.tail(files))
+  if (List.isEmpty(files)) "" else wrapFiles2(List.at(files, 0), List.tail(files))
 
 def wrapFiles2(h: (String, String), rest: List[(String, String)]): String =
   h match {
@@ -437,10 +437,10 @@ def applySimLive(live: Prog, sdefs: List[Fun]): String =
   }
 
 def swapDefs(ds: List[Fun], sim: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) ds else pickSim(List.head(ds), sim) :: swapDefs(List.tail(ds), sim)
+  if (List.isEmpty(ds)) ds else pickSim(List.at(ds, 0), sim) :: swapDefs(List.tail(ds), sim)
 
 def pickSim(d: Fun, sim: List[Fun]): Fun =
-  if (List.isEmpty(sim)) d else pickSim1(d, List.head(sim), List.tail(sim))
+  if (List.isEmpty(sim)) d else pickSim1(d, List.at(sim, 0), List.tail(sim))
 
 def pickSim1(d: Fun, s: Fun, rest: List[Fun]): Fun =
   if (d.name == s.name) s else pickSim(d, rest)
@@ -460,7 +460,7 @@ def progHasReq(p: Prog): Bool =
   }
 
 def defsHaveReq(ds: List[Fun]): Bool =
-  if (List.isEmpty(ds)) false else funHasReq(List.head(ds)) || defsHaveReq(List.tail(ds))
+  if (List.isEmpty(ds)) false else funHasReq(List.at(ds, 0)) || defsHaveReq(List.tail(ds))
 
 def funHasReq(d: Fun): Bool =
   d match {
@@ -486,10 +486,10 @@ def exprHasReq(e: Expr): Bool =
   }
 
 def listHasReq(xs: List[Expr]): Bool =
-  if (List.isEmpty(xs)) false else exprHasReq(List.head(xs)) || listHasReq(List.tail(xs))
+  if (List.isEmpty(xs)) false else exprHasReq(List.at(xs, 0)) || listHasReq(List.tail(xs))
 
 def armsHaveReq(xs: List[Arm]): Bool =
-  if (List.isEmpty(xs)) false else armHasReq(List.head(xs)) || armsHaveReq(List.tail(xs))
+  if (List.isEmpty(xs)) false else armHasReq(List.at(xs, 0)) || armsHaveReq(List.tail(xs))
 
 def armHasReq(a: Arm): Bool =
   a match {
@@ -497,7 +497,7 @@ def armHasReq(a: Arm): Bool =
   }
 
 def bindsHaveReq(xs: List[Bind]): Bool =
-  if (List.isEmpty(xs)) false else bindHasReq(List.head(xs)) || bindsHaveReq(List.tail(xs))
+  if (List.isEmpty(xs)) false else bindHasReq(List.at(xs, 0)) || bindsHaveReq(List.tail(xs))
 
 def bindHasReq(b: Bind): Bool =
   b match {
@@ -510,7 +510,7 @@ def rewriteReqProg(p: Prog): String =
   }
 
 def rewriteReqDefs(ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) ds else rewriteReqFun(List.head(ds)) :: rewriteReqDefs(List.tail(ds))
+  if (List.isEmpty(ds)) ds else rewriteReqFun(List.at(ds, 0)) :: rewriteReqDefs(List.tail(ds))
 
 def rewriteReqFun(d: Fun): Fun =
   d match {
@@ -539,7 +539,7 @@ def rewriteReqMeth(recv: Expr, name: String, args: List[Expr]): Expr =
   if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: reqPredE(args) :: recv :: noExpr(), 0) else Expr.EMethod(recv, name, args, 0)
 
 def reqNameE(args: List[Expr]): Expr =
-  if (List.len(args) < 2) Expr.EStr("require", 0) else reqNameHit(List.head(args))
+  if (List.len(args) < 2) Expr.EStr("require", 0) else reqNameHit(List.at(args, 0))
 
 def reqNameHit(e: Expr): Expr =
   e match {
@@ -548,7 +548,7 @@ def reqNameHit(e: Expr): Expr =
   }
 
 def reqPredE(args: List[Expr]): Expr =
-  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) forcePred(List.head(args)) else forcePred(List.head(List.tail(args)))
+  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) forcePred(List.at(args, 0)) else forcePred(List.at(List.tail(args), 0))
 
 def forcePred(e: Expr): Expr =
   if (isIoPred(e)) Expr.ECall("Property.force", e :: noExpr(), 0) else e
@@ -563,10 +563,10 @@ def isIoPred(e: Expr): Bool =
   }
 
 def rewriteReqList(xs: List[Expr]): List[Expr] =
-  if (List.isEmpty(xs)) xs else rewriteReq(List.head(xs)) :: rewriteReqList(List.tail(xs))
+  if (List.isEmpty(xs)) xs else rewriteReq(List.at(xs, 0)) :: rewriteReqList(List.tail(xs))
 
 def rewriteReqArms(xs: List[Arm]): List[Arm] =
-  if (List.isEmpty(xs)) xs else rewriteReqArm(List.head(xs)) :: rewriteReqArms(List.tail(xs))
+  if (List.isEmpty(xs)) xs else rewriteReqArm(List.at(xs, 0)) :: rewriteReqArms(List.tail(xs))
 
 def rewriteReqArm(a: Arm): Arm =
   a match {
@@ -574,7 +574,7 @@ def rewriteReqArm(a: Arm): Arm =
   }
 
 def rewriteReqBinds(xs: List[Bind]): List[Bind] =
-  if (List.isEmpty(xs)) xs else rewriteReqBind(List.head(xs)) :: rewriteReqBinds(List.tail(xs))
+  if (List.isEmpty(xs)) xs else rewriteReqBind(List.at(xs, 0)) :: rewriteReqBinds(List.tail(xs))
 
 def rewriteReqBind(b: Bind): Bind =
   b match {
@@ -582,7 +582,7 @@ def rewriteReqBind(b: Bind): Bind =
   }
 
 def rewriteReqFiles(files: List[(String, String)]): List[(String, String)] =
-  if (List.isEmpty(files)) files else rewriteReqHd(List.head(files), List.tail(files))
+  if (List.isEmpty(files)) files else rewriteReqHd(List.at(files, 0), List.tail(files))
 
 def rewriteReqHd(h: (String, String), rest: List[(String, String)]): List[(String, String)] =
   h match {
@@ -599,10 +599,10 @@ def driversFrom(srcs: List[String], ens: List[En]): String =
   nls(mapSpecE(parseVerifyAll(srcs), ens))
 
 def parseVerifyAll(srcs: List[String]): List[Fun] =
-  if (List.isEmpty(srcs)) noFun() else List.concat(parseVerify(List.head(srcs)), parseVerifyAll(List.tail(srcs)))
+  if (List.isEmpty(srcs)) noFun() else List.concat(parseVerify(List.at(srcs, 0)), parseVerifyAll(List.tail(srcs)))
 
 def ensOfFiles(files: List[(String, String)]): List[En] =
-  if (List.isEmpty(files)) noEn() else List.concat(ensOfFile(List.head(files)), ensOfFiles(List.tail(files)))
+  if (List.isEmpty(files)) noEn() else List.concat(ensOfFile(List.at(files, 0)), ensOfFiles(List.tail(files)))
 
 def ensOfFile(h: (String, String)): List[En] =
   h match {
