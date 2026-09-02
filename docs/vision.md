@@ -276,7 +276,7 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ## Open work
 
-Close thesis-critical gaps in this order: `Signal[T]`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). `check` diagnostics and LSP goto-def, rename, hover, completion, and tokens use recorded spans. Panic still prints no Scuzz file and line.
+Close thesis-critical gaps in this order: `Signal[T]`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). `check` diagnostics, LSP goto-def, rename, hover, completion, tokens, and panic use recorded spans.
 
 Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. `scuzz ide` launches the bundled `[ui]` package (`examples/editor` / `SCUZZ_HOME/ide`). Headless is part of every UI slice. `scuzz test --differential` compares structural dumps across render backends.
 
@@ -297,7 +297,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-on
 | Properties become brittle dump goldens | Named observations on Signals and controls. Two `Verdict` helpers for the repeated folds. Strict sim/live pairing in `check`. Mutation kills weak oracles. `scuzz test` goldens stay regression pins |
 | `String` as bytes mangles UI text | UTF-8 `String` before more text features ([`gaps.md`](gaps.md)) |
 | `Signal.list` of String blocks domain UI | `Signal[T]` and `View.each` over records ([`gaps.md`](gaps.md)) |
-| LSP span misses the token | One JSON schema. Check diagnostics and LSP goto-def, rename, hover, completion, and tokens use recorded spans. Panic still needs that span. The dogfood IDE consumes that schema |
+| LSP span misses the token | One JSON schema. Check diagnostics and LSP goto-def, rename, hover, completion, and tokens use recorded spans. Panic prints the enclosing def file and line. The dogfood IDE consumes that schema |
 | Sim becomes Mockito | Only top-level same-name overlays. No stubbing pure `View`/`Signal`. Kits stay TestRuntime |
 | Drivers become integration tests | `check` rejects `Property.*` in driver files. Correctness lives in `*.scuzz_verify` and live-module `.require` |
 | Drivers pass vacuously | `Property.sometimes` reachability fails the campaign when declared states are never reached |
