@@ -114,7 +114,7 @@ def qualIdentAt2(src: String, name: String, a: Int): String =
 
 def showFun(d: Fun): String =
   d match {
-    case Fun(_, name, _, ps, ret, _, _) => Str.concat("def ", Str.concat(name, Str.concat("(", Str.concat(showParams(ps), Str.concat("): ", ret)))))
+    case Fun(_, name, _, ps, ret, _, _, _) => Str.concat("def ", Str.concat(name, Str.concat("(", Str.concat(showParams(ps), Str.concat("): ", ret)))))
   }
 
 def showParams(ps: List[Param]): String =
@@ -130,7 +130,7 @@ def findFun(ds: List[Fun], name: String): String =
 
 def findFunHd(d: Fun, rest: List[Fun], name: String): String =
   d match {
-    case Fun(_, n, _, _, _, _, _) => if (n == name) showFun(d) else findFun(rest, name)
+    case Fun(_, n, _, _, _, _, _, _) => if (n == name) showFun(d) else findFun(rest, name)
   }
 
 def kitHover(f: String): String =
@@ -159,7 +159,7 @@ def completeNames2(ds: List[Fun], acc: List[String]): List[String] =
 
 def completeNamesHd(d: Fun, rest: List[Fun], acc: List[String]): List[String] =
   d match {
-    case Fun(_, name, _, _, _, _, _) => completeNames2(rest, name :: acc)
+    case Fun(_, name, _, _, _, _, _, _) => completeNames2(rest, name :: acc)
   }
 
 def completeJson(src: String): String =

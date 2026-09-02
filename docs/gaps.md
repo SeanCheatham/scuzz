@@ -37,7 +37,7 @@ These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
 2. **UTF-8 `String`** — In: `Str.*` indexes code points; `Str.byteLen` / `Str.byteSlice` keep bytes for framing; the kernel `utf8Ops` drive oracle proves multibyte ops. Case maps stay ASCII by design. Caret offsets in TextField/editor stay bytes. LSP framing in `examples/compiler` / `examples/editor` still uses `Str.len` (correct while the bootstrap release predates the byte kits); migrate to `Str.byteLen` / `Str.byteSlice` after a release carries them.
 
-3. **Scuzz spans on panic and LSP** — Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Definition jumps to line 0. Rename is whole-file replace. Semantic tokens are empty. Panic does not print a Scuzz file and line. Goto-def, rename, hover, and completion must land on the right span. The dogfood IDE consumes that schema. It does not replace it.
+3. **Scuzz spans on panic and LSP** — In: `check` JSON diagnostics use recorded file stem, line, and column. No substring search. No hardcoded file. Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Open: definition jumps to line 0. Rename is whole-file replace. Semantic tokens are empty. Panic does not print a Scuzz file and line. Goto-def, rename, hover, and completion must land on the right span. The dogfood IDE consumes that schema. It does not replace it.
 
 4. **Typed fail `E`** — `IO[T]` fails with a `String` message. Direction: typed `E` without environment `R`. Do not add `ZIO[R, E, A]`. Do not add user `IO.delay`.
 

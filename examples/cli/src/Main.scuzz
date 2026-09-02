@@ -68,7 +68,7 @@ def srcTyUnbound(): String =
 """
 
 def wantTyUnbound(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unbound variable nope\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":18}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: unbound variable nope\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":18}]"
 
 def tomlHello(): String =
   "[package]\nname = \"hello\"\nversion = \"0.1.0\"\ndescription = \"IO hello world\"\n"
@@ -128,7 +128,7 @@ def wantLinkMacUi(): String =
   "clang -O0 -Wno-override-module a.ll rt.a ./crates/ffi-skia/build/libsk_capi.a -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon -Wl,-force_load,./crates/embedder-desktop/build/libscuzz_embedder.a -framework Cocoa -lobjc -Wl,-force_load,./crates/embedder-mobile/build/libscuzz_mobile.a -lpthread -lssl -lcrypto -o app"
 
 def wantHumanUnbound(): String =
-  "t/src/Main.scuzz:2:14: error: type error: unbound variable nope"
+  "Main.scuzz:2:14: error: type error: unbound variable nope"
 
 def srcAddVerify(): String =
   """def add(n: Int, m: Int): Bool =

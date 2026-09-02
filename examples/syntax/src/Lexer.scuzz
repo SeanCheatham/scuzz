@@ -60,6 +60,11 @@ enum Tok:
   case Float(s: String)
   case Interp(s: String)
 
+record SpTok(tok: Tok, off: Int, stem: String)
+
+def _put(t: Tok, off: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  SpTok(t, off, stem) :: acc
+
 def kind(t: Tok): Int =
   t match {
     case Tok.Eof => 0
@@ -188,15 +193,15 @@ def _readStr(src: String, i: Int, b: Builder): (Builder, Int) =
 def _atMain(src: String, i: Int): Bool =
   Str.len(src) >= i + 5 && Str.slice(src, i + 1, i + 5) == "main" && !_isAlnum(_ch(src, i + 5))
 
-def _lexStr(src: String, i: Int, acc: List[Tok]): List[Tok] =
-  if (i + 2 < Str.len(src) && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) _lexTriple(src, i + 3, Builder.empty(), acc) else _lexStr2(_readStr(src, i + 1, Builder.empty()), src, acc)
+def _lexStr(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (i + 2 < Str.len(src) && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) _lexTriple(src, i + 3, Builder.empty(), i, stem, acc) else _lexStr2(_readStr(src, i + 1, Builder.empty()), src, i, stem, acc)
 
-def _lexTriple(src: String, i: Int, b: Builder, acc: List[Tok]): List[Tok] =
-  if (i + 2 < Str.len(src) && _ch(src, i) == 34 && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) lexAt(src, i + 3, Tok.Str(Builder.result(b)) :: acc) else if (i >= Str.len(src)) lexAt(src, i, Tok.Str(Builder.result(b)) :: acc) else _lexTriple(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), acc)
+def _lexTriple(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (i + 2 < Str.len(src) && _ch(src, i) == 34 && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) lexAt(src, i + 3, stem, _put(Tok.Str(Builder.result(b)), start, stem, acc)) else if (i >= Str.len(src)) lexAt(src, i, stem, _put(Tok.Str(Builder.result(b)), start, stem, acc)) else _lexTriple(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), start, stem, acc)
 
-def _lexStr2(p: (Builder, Int), src: String, acc: List[Tok]): List[Tok] =
+def _lexStr2(p: (Builder, Int), src: String, start: Int, stem: String, acc: List[SpTok]): List[SpTok] =
   p match {
-    case (b, j) => lexAt(src, j, Tok.Str(Builder.result(b)) :: acc)
+    case (b, j) => lexAt(src, j, stem, _put(Tok.Str(Builder.result(b)), start, stem, acc))
   }
 
 def _punct(c: Int): Tok =
@@ -236,69 +241,72 @@ def _isHex(c: Int): Bool =
 def _hexVal(c: Int): Int =
   if (_isDigit(c)) c - 48 else if (c >= 97) c - 87 else c - 55
 
-def _lexInt(src: String, i: Int, acc: List[Tok]): List[Tok] =
-  if (i + 1 < Str.len(src) && _ch(src, i) == 48 && _ch(src, i + 1) == 120 || _ch(src, i + 1) == 88) _lexHex(src, i + 2, 0, acc) else if (i + 1 < Str.len(src) && _ch(src, i) == 48 && _ch(src, i + 1) == 98 || _ch(src, i + 1) == 66) _lexBin(src, i + 2, 0, acc) else _lexDec(src, i, i, 0, acc)
+def _lexInt(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (i + 1 < Str.len(src) && _ch(src, i) == 48 && _ch(src, i + 1) == 120 || _ch(src, i + 1) == 88) _lexHex(src, i + 2, 0, i, stem, acc) else if (i + 1 < Str.len(src) && _ch(src, i) == 48 && _ch(src, i + 1) == 98 || _ch(src, i + 1) == 66) _lexBin(src, i + 2, 0, i, stem, acc) else _lexDec(src, i, i, 0, stem, acc)
 
-def _lexHex(src: String, i: Int, n: Int, acc: List[Tok]): List[Tok] =
-  if (i < Str.len(src) && _isHex(_ch(src, i))) _lexHex(src, i + 1, n * 16 + _hexVal(_ch(src, i)), acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _isHex(_ch(src, i + 1))) _lexHex(src, i + 1, n, acc) else lexAt(src, i, Tok.Int(n) :: acc)
+def _lexHex(src: String, i: Int, n: Int, start: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (i < Str.len(src) && _isHex(_ch(src, i))) _lexHex(src, i + 1, n * 16 + _hexVal(_ch(src, i)), start, stem, acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _isHex(_ch(src, i + 1))) _lexHex(src, i + 1, n, start, stem, acc) else lexAt(src, i, stem, _put(Tok.Int(n), start, stem, acc))
 
-def _lexBin(src: String, i: Int, n: Int, acc: List[Tok]): List[Tok] =
-  if (i < Str.len(src) && _ch(src, i) == 48 || _ch(src, i) == 49) _lexBin(src, i + 1, n * 2 + _ch(src, i) - 48, acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _ch(src, i + 1) == 48 || _ch(src, i + 1) == 49) _lexBin(src, i + 1, n, acc) else lexAt(src, i, Tok.Int(n) :: acc)
+def _lexBin(src: String, i: Int, n: Int, start: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (i < Str.len(src) && _ch(src, i) == 48 || _ch(src, i) == 49) _lexBin(src, i + 1, n * 2 + _ch(src, i) - 48, start, stem, acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _ch(src, i + 1) == 48 || _ch(src, i + 1) == 49) _lexBin(src, i + 1, n, start, stem, acc) else lexAt(src, i, stem, _put(Tok.Int(n), start, stem, acc))
 
-def _lexDec(src: String, start: Int, i: Int, n: Int, acc: List[Tok]): List[Tok] =
-  if (i < Str.len(src) && _isDigit(_ch(src, i))) _lexDec(src, start, i + 1, n * 10 + _ch(src, i) - 48, acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _isDigit(_ch(src, i + 1))) _lexDec(src, start, i + 1, n, acc) else _lexNumFracVal(src, start, i, n, acc)
+def _lexDec(src: String, start: Int, i: Int, n: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (i < Str.len(src) && _isDigit(_ch(src, i))) _lexDec(src, start, i + 1, n * 10 + _ch(src, i) - 48, stem, acc) else if (i < Str.len(src) && _ch(src, i) == 95 && i + 1 < Str.len(src) && _isDigit(_ch(src, i + 1))) _lexDec(src, start, i + 1, n, stem, acc) else _lexNumFracVal(src, start, i, n, stem, acc)
 
-def _lexNumFracVal(src: String, start: Int, j: Int, n: Int, acc: List[Tok]): List[Tok] =
-  if (j < Str.len(src) && _ch(src, j) == 46 && j + 1 < Str.len(src) && _isDigit(_ch(src, j + 1))) _lexNumExp(src, start, _skipDigits(src, j + 1), true, acc) else if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, acc) else lexAt(src, j, Tok.Int(n) :: acc)
+def _lexNumFracVal(src: String, start: Int, j: Int, n: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (j < Str.len(src) && _ch(src, j) == 46 && j + 1 < Str.len(src) && _isDigit(_ch(src, j + 1))) _lexNumExp(src, start, _skipDigits(src, j + 1), true, stem, acc) else if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, stem, acc) else lexAt(src, j, stem, _put(Tok.Int(n), start, stem, acc))
 
-def _lexNumExp(src: String, start: Int, j: Int, isF: Bool, acc: List[Tok]): List[Tok] =
-  if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, acc) else if (isF) lexAt(src, j, Tok.Float(Str.slice(src, start, j)) :: acc) else lexAt(src, j, Tok.Int(Str.toInt(Str.slice(src, start, j), 0)) :: acc)
+def _lexNumExp(src: String, start: Int, j: Int, isF: Bool, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (j < Str.len(src) && _ch(src, j) == 101 || _ch(src, j) == 69) _lexNumExp2(src, start, j, stem, acc) else if (isF) lexAt(src, j, stem, _put(Tok.Float(Str.slice(src, start, j)), start, stem, acc)) else lexAt(src, j, stem, _put(Tok.Int(Str.toInt(Str.slice(src, start, j), 0)), start, stem, acc))
 
-def _lexNumExp2(src: String, start: Int, j: Int, acc: List[Tok]): List[Tok] =
-  _lexNumExp3(src, start, j, if (j + 1 < Str.len(src) && _ch(src, j + 1) == 43 || _ch(src, j + 1) == 45) j + 2 else j + 1, acc)
+def _lexNumExp2(src: String, start: Int, j: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  _lexNumExp3(src, start, j, if (j + 1 < Str.len(src) && _ch(src, j + 1) == 43 || _ch(src, j + 1) == 45) j + 2 else j + 1, stem, acc)
 
-def _lexNumExp3(src: String, start: Int, e: Int, k: Int, acc: List[Tok]): List[Tok] =
-  if (k < Str.len(src) && _isDigit(_ch(src, k))) lexAt(src, _skipDigits(src, k), Tok.Float(Str.slice(src, start, _skipDigits(src, k))) :: acc) else if (e > start) lexAt(src, e, Tok.Int(Str.toInt(Str.slice(src, start, e), 0)) :: acc) else lexAt(src, e, Tok.Int(Str.toInt(Str.slice(src, start, e), 0)) :: acc)
+def _lexNumExp3(src: String, start: Int, e: Int, k: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (k < Str.len(src) && _isDigit(_ch(src, k))) lexAt(src, _skipDigits(src, k), stem, _put(Tok.Float(Str.slice(src, start, _skipDigits(src, k))), start, stem, acc)) else if (e > start) lexAt(src, e, stem, _put(Tok.Int(Str.toInt(Str.slice(src, start, e), 0)), start, stem, acc)) else lexAt(src, e, stem, _put(Tok.Int(Str.toInt(Str.slice(src, start, e), 0)), start, stem, acc))
 
-def _lexName(src: String, i: Int, acc: List[Tok]): List[Tok] =
-  _lexName2(src, i, _skipIdent(src, i), acc)
+def _lexName(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  _lexName2(src, i, _skipIdent(src, i), stem, acc)
 
-def _lexName2(src: String, i: Int, j: Int, acc: List[Tok]): List[Tok] =
-  if (Str.slice(src, i, j) == "s" && j < Str.len(src) && _ch(src, j) == 34) _lexInterp(src, j + 1, Builder.empty(), acc) else lexAt(src, j, _kw(Str.slice(src, i, j)) :: acc)
+def _lexName2(src: String, i: Int, j: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (Str.slice(src, i, j) == "s" && j < Str.len(src) && _ch(src, j) == 34) _lexInterp(src, j + 1, Builder.empty(), i, stem, acc) else lexAt(src, j, stem, _put(_kw(Str.slice(src, i, j)), i, stem, acc))
 
-def _lexInterp(src: String, i: Int, b: Builder, acc: List[Tok]): List[Tok] =
-  _lexInterpD(src, i, b, acc, 0)
+def _lexInterp(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  _lexInterpD(src, i, b, start, stem, acc, 0)
 
-def _lexInterpD(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int): List[Tok] =
-  if (i >= Str.len(src)) lexAt(src, i, Tok.Interp(Builder.result(b)) :: acc) else _lexInterpCh(src, i, b, acc, depth, _ch(src, i))
+def _lexInterpD(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int): List[SpTok] =
+  if (i >= Str.len(src)) lexAt(src, i, stem, _put(Tok.Interp(Builder.result(b)), start, stem, acc)) else _lexInterpCh(src, i, b, start, stem, acc, depth, _ch(src, i))
 
-def _lexInterpCh(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int, c: Int): List[Tok] =
-  if (depth == 0 && c == 34) lexAt(src, i + 1, Tok.Interp(Builder.result(b)) :: acc) else _lexInterpCh2(src, i, b, acc, depth, c)
+def _lexInterpCh(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
+  if (depth == 0 && c == 34) lexAt(src, i + 1, stem, _put(Tok.Interp(Builder.result(b)), start, stem, acc)) else _lexInterpCh2(src, i, b, start, stem, acc, depth, c)
 
-def _lexInterpCh2(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int, c: Int): List[Tok] =
-  if (c == 92 && i + 1 < Str.len(src)) _lexInterpD(src, i + 2, Builder.append(Builder.append(b, "\\"), Str.slice(src, i + 1, i + 2)), acc, depth) else _lexInterpCh3(src, i, b, acc, depth, c)
+def _lexInterpCh2(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
+  if (c == 92 && i + 1 < Str.len(src)) _lexInterpD(src, i + 2, Builder.append(Builder.append(b, "\\"), Str.slice(src, i + 1, i + 2)), start, stem, acc, depth) else _lexInterpCh3(src, i, b, start, stem, acc, depth, c)
 
-def _lexInterpCh3(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int, c: Int): List[Tok] =
-  if (depth == 0 && c == 36 && i + 1 < Str.len(src) && _ch(src, i + 1) == 123) _lexInterpD(src, i + 2, Builder.append(b, "${"), acc, 1) else _lexInterpCh4(src, i, b, acc, depth, c)
+def _lexInterpCh3(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
+  if (depth == 0 && c == 36 && i + 1 < Str.len(src) && _ch(src, i + 1) == 123) _lexInterpD(src, i + 2, Builder.append(b, "${"), start, stem, acc, 1) else _lexInterpCh4(src, i, b, start, stem, acc, depth, c)
 
-def _lexInterpCh4(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int, c: Int): List[Tok] =
-  if (depth > 0 && c == 34) _lexInterpInStr(src, i + 1, Builder.append(b, "\""), acc, depth) else _lexInterpCh5(src, i, b, acc, depth, c)
+def _lexInterpCh4(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
+  if (depth > 0 && c == 34) _lexInterpInStr(src, i + 1, Builder.append(b, "\""), start, stem, acc, depth) else _lexInterpCh5(src, i, b, start, stem, acc, depth, c)
 
-def _lexInterpCh5(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int, c: Int): List[Tok] =
-  if (depth > 0 && c == 123) _lexInterpD(src, i + 1, Builder.append(b, "{"), acc, depth + 1) else if (depth > 0 && c == 125) _lexInterpD(src, i + 1, Builder.append(b, "}"), acc, depth - 1) else _lexInterpD(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), acc, depth)
+def _lexInterpCh5(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
+  if (depth > 0 && c == 123) _lexInterpD(src, i + 1, Builder.append(b, "{"), start, stem, acc, depth + 1) else if (depth > 0 && c == 125) _lexInterpD(src, i + 1, Builder.append(b, "}"), start, stem, acc, depth - 1) else _lexInterpD(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), start, stem, acc, depth)
 
-def _lexInterpInStr(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int): List[Tok] =
-  if (i >= Str.len(src)) _lexInterpD(src, i, b, acc, depth) else _lexInterpInStrCh(src, i, b, acc, depth, _ch(src, i))
+def _lexInterpInStr(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int): List[SpTok] =
+  if (i >= Str.len(src)) _lexInterpD(src, i, b, start, stem, acc, depth) else _lexInterpInStrCh(src, i, b, start, stem, acc, depth, _ch(src, i))
 
-def _lexInterpInStrCh(src: String, i: Int, b: Builder, acc: List[Tok], depth: Int, c: Int): List[Tok] =
-  if (c == 34) _lexInterpD(src, i + 1, Builder.append(b, "\""), acc, depth) else if (c == 92 && i + 1 < Str.len(src)) _lexInterpInStr(src, i + 2, Builder.append(Builder.append(b, "\\"), Str.slice(src, i + 1, i + 2)), acc, depth) else _lexInterpInStr(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), acc, depth)
+def _lexInterpInStrCh(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
+  if (c == 34) _lexInterpD(src, i + 1, Builder.append(b, "\""), start, stem, acc, depth) else if (c == 92 && i + 1 < Str.len(src)) _lexInterpInStr(src, i + 2, Builder.append(Builder.append(b, "\\"), Str.slice(src, i + 1, i + 2)), start, stem, acc, depth) else _lexInterpInStr(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), start, stem, acc, depth)
 
-def _lexUnder(src: String, i: Int, acc: List[Tok]): List[Tok] =
-  lexAt(src, _skipIdent(src, i), Tok.Ident(Str.slice(src, i, _skipIdent(src, i))) :: acc)
+def _lexUnder(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  lexAt(src, _skipIdent(src, i), stem, _put(Tok.Ident(Str.slice(src, i, _skipIdent(src, i))), i, stem, acc))
 
-def lexAt(src: String, i: Int, acc: List[Tok]): List[Tok] =
-  if (i >= Str.len(src)) acc else if (_isSpace(_ch(src, i))) lexAt(src, i + 1, acc) else if (_two(src, i, 47, 47)) lexAt(src, _lineEnd(src, i + 2), acc) else if (_ch(src, i) == 64) if (_atMain(src, i)) lexAt(src, i + 5, Tok.AtMain :: acc) else lexAt(src, i + 1, Tok.At :: acc) else if (_ch(src, i) == 34) _lexStr(src, i, acc) else if (_two(src, i, 58, 58)) lexAt(src, i + 2, Tok.ColonColon :: acc) else if (_two(src, i, 61, 62)) lexAt(src, i + 2, Tok.Arrow :: acc) else if (_two(src, i, 61, 61)) lexAt(src, i + 2, Tok.EqEq :: acc) else if (_two(src, i, 33, 61)) lexAt(src, i + 2, Tok.BangEq :: acc) else if (_two(src, i, 60, 45)) lexAt(src, i + 2, Tok.LeftArrow :: acc) else if (_two(src, i, 60, 61)) lexAt(src, i + 2, Tok.LtEq :: acc) else if (_two(src, i, 60, 60)) lexAt(src, i + 2, Tok.Shl :: acc) else if (_two(src, i, 62, 61)) lexAt(src, i + 2, Tok.GtEq :: acc) else if (_two(src, i, 62, 62)) lexAt(src, i + 2, Tok.Shr :: acc) else if (_two(src, i, 38, 38)) lexAt(src, i + 2, Tok.AmpAmp :: acc) else if (_two(src, i, 124, 124)) lexAt(src, i + 2, Tok.PipePipe :: acc) else if (_isDigit(_ch(src, i))) _lexInt(src, i, acc) else if (_ch(src, i) == 95 && _isAlnum(_ch(src, i + 1))) _lexUnder(src, i, acc) else if (_isAlpha(_ch(src, i))) _lexName(src, i, acc) else lexAt(src, i + 1, _punct(_ch(src, i)) :: acc)
+def lexAt(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
+  if (i >= Str.len(src)) acc else if (_isSpace(_ch(src, i))) lexAt(src, i + 1, stem, acc) else if (_two(src, i, 47, 47)) lexAt(src, _lineEnd(src, i + 2), stem, acc) else if (_ch(src, i) == 64) if (_atMain(src, i)) lexAt(src, i + 5, stem, _put(Tok.AtMain, i, stem, acc)) else lexAt(src, i + 1, stem, _put(Tok.At, i, stem, acc)) else if (_ch(src, i) == 34) _lexStr(src, i, stem, acc) else if (_two(src, i, 58, 58)) lexAt(src, i + 2, stem, _put(Tok.ColonColon, i, stem, acc)) else if (_two(src, i, 61, 62)) lexAt(src, i + 2, stem, _put(Tok.Arrow, i, stem, acc)) else if (_two(src, i, 61, 61)) lexAt(src, i + 2, stem, _put(Tok.EqEq, i, stem, acc)) else if (_two(src, i, 33, 61)) lexAt(src, i + 2, stem, _put(Tok.BangEq, i, stem, acc)) else if (_two(src, i, 60, 45)) lexAt(src, i + 2, stem, _put(Tok.LeftArrow, i, stem, acc)) else if (_two(src, i, 60, 61)) lexAt(src, i + 2, stem, _put(Tok.LtEq, i, stem, acc)) else if (_two(src, i, 60, 60)) lexAt(src, i + 2, stem, _put(Tok.Shl, i, stem, acc)) else if (_two(src, i, 62, 61)) lexAt(src, i + 2, stem, _put(Tok.GtEq, i, stem, acc)) else if (_two(src, i, 62, 62)) lexAt(src, i + 2, stem, _put(Tok.Shr, i, stem, acc)) else if (_two(src, i, 38, 38)) lexAt(src, i + 2, stem, _put(Tok.AmpAmp, i, stem, acc)) else if (_two(src, i, 124, 124)) lexAt(src, i + 2, stem, _put(Tok.PipePipe, i, stem, acc)) else if (_isDigit(_ch(src, i))) _lexInt(src, i, stem, acc) else if (_ch(src, i) == 95 && _isAlnum(_ch(src, i + 1))) _lexUnder(src, i, stem, acc) else if (_isAlpha(_ch(src, i))) _lexName(src, i, stem, acc) else lexAt(src, i + 1, stem, _put(_punct(_ch(src, i)), i, stem, acc))
 
-def lex(src: String): List[Tok] =
-  List.concat(List.reverse(lexAt(src, 0, [])), [Tok.Eof])
+def lex(src: String): List[SpTok] =
+  lexStem(src, "")
+
+def lexStem(src: String, stem: String): List[SpTok] =
+  List.concat(List.reverse(lexAt(src, 0, stem, [])), [SpTok(Tok.Eof, Str.len(src), stem)])
 

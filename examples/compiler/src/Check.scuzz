@@ -1,4 +1,4 @@
-record Out(ty: String, err: String, span: String)
+record Out(ty: String, err: String, span: (String, Int))
 
 import Parse.Expr
 import Parse.Fun
@@ -17,10 +17,13 @@ def noStr(): List[String] =
 def noEnv(): List[(String, String)] =
   []
 
-def ok(ty: String): Out =
-  Out(ty, "", "")
+def noSpan(): (String, Int) =
+  ("", 0 - 1)
 
-def bad(err: String, span: String): Out =
+def ok(ty: String): Out =
+  Out(ty, "", noSpan())
+
+def bad(err: String, span: (String, Int)): Out =
   Out("", err, span)
 
 def hasErr(o: Out): Bool =
@@ -91,7 +94,7 @@ def findFun(funs: List[Fun], name: String): List[Fun] =
 
 def findFun1(h: Fun, rest: List[Fun], name: String): List[Fun] =
   h match {
-    case Fun(priv, n, ts, ps, ret, body, mod) => if (n == name) Fun(priv, n, ts, ps, ret, body, mod) :: findFun(rest, name) else findFun(rest, name)
+    case Fun(priv, n, ts, ps, ret, body, mod, off) => if (n == name) Fun(priv, n, ts, ps, ret, body, mod, off) :: findFun(rest, name) else findFun(rest, name)
   }
 
 def findFunMod(funs: List[Fun], mod: String, name: String): List[Fun] =
@@ -99,7 +102,7 @@ def findFunMod(funs: List[Fun], mod: String, name: String): List[Fun] =
 
 def findFunMod1(h: Fun, rest: List[Fun], mod: String, name: String): List[Fun] =
   h match {
-    case Fun(priv, n, ts, ps, ret, body, m) => if (n == name && m == mod) Fun(priv, n, ts, ps, ret, body, m) :: findFunMod(rest, mod, name) else findFunMod(rest, mod, name)
+    case Fun(priv, n, ts, ps, ret, body, m, off) => if (n == name && m == mod) Fun(priv, n, ts, ps, ret, body, m, off) :: findFunMod(rest, mod, name) else findFunMod(rest, mod, name)
   }
 
 def paramTys(ps: List[Param]): List[String] =
@@ -191,32 +194,32 @@ def firstArgErr(args: List[Expr], env: List[(String, String)], funs: List[Fun], 
 def firstArgErr2(o: Out, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   if (hasErr(o)) o else firstArgErr(rest, env, funs, ens)
 
-def zipCheck(callee: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
+def zipCheck(callee: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
   if (List.isEmpty(want)) ok(acc) else zipCheckHd(callee, List.head(want), List.tail(want), args, env, funs, ens, span, acc)
 
-def zipCheckHd(callee: String, w: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
+def zipCheckHd(callee: String, w: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
   zipCheckArg(callee, w, want, List.head(args), List.tail(args), env, funs, ens, span, acc)
 
-def zipCheckArg(callee: String, w: String, want: List[String], arg: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
+def zipCheckArg(callee: String, w: String, want: List[String], arg: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
   if (List.isEmpty(args)) zipCheckLast(infer(stripNamed(arg), env, funs, ens), callee, w, span, acc) else zipCheck2(callee, w, infer(stripNamed(arg), env, funs, ens), want, args, env, funs, ens, span, acc)
 
-def zipCheckLast(o: Out, callee: String, w: String, span: String, acc: String): Out =
+def zipCheckLast(o: Out, callee: String, w: String, span: (String, Int), acc: String): Out =
   o match {
     case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else if (tyEq(ty, w) || w == "Any") ok(if (acc == "") ty else acc) else argMismatch(callee, w, ty, span)
   }
 
-def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
+def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
   o match {
     case Out(ty, err, sp) => zipCheckErr(callee, w, ty, err, sp, want, args, env, funs, ens, span, acc)
   }
 
-def zipCheckErr(callee: String, w: String, ty: String, err: String, sp: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
+def zipCheckErr(callee: String, w: String, ty: String, err: String, sp: (String, Int), want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
   if (Str.len(err) > 0) Out(ty, err, sp) else zipCheckEq(callee, w, ty, want, args, env, funs, ens, span, acc)
 
-def zipCheckEq(callee: String, w: String, got: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, acc: String): Out =
+def zipCheckEq(callee: String, w: String, got: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
   if (tyEq(got, w) || w == "Any") zipCheck(callee, want, args, env, funs, ens, span, if (acc == "") got else acc) else argMismatch(callee, w, got, span)
 
-def argMismatch(callee: String, w: String, got: String, span: String): Out =
+def argMismatch(callee: String, w: String, got: String, span: (String, Int)): Out =
   bad(argMismatchMsg(argMismatchWant(callee, w), got), span)
 
 def argMismatchWant(callee: String, w: String): String =
@@ -285,7 +288,7 @@ def preferTup(a: String, b: String): String =
 def preferParts(xs: List[String], ys: List[String]): String =
   if (List.isEmpty(xs) || List.isEmpty(ys)) "" else if (List.len(xs) == 1 || List.len(ys) == 1) prefer(List.head(xs), List.head(ys)) else Str.concat(prefer(List.head(xs), List.head(ys)), Str.concat(", ", preferParts(List.tail(xs), List.tail(ys))))
 
-def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
+def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, ""), ret)
 
 def checkKnownRet(f: String, o: Out, ret: String): Out =
@@ -302,13 +305,13 @@ def kitRetList(ty: String, ret: String): String =
 def kitRetCons(ty: String, ret: String): String =
   if (ty == "") ret else Str.concat("List[", Str.concat(ty, "]"))
 
-def resolveCall(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  resolveCall2(f, args, env, funs, ens, Parse.pretty0(Expr.ECall(f, args)))
+def resolveCall(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  resolveCall2(f, args, env, funs, ens, span)
 
-def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
+def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (isKit(f) || isOpenKit(f)) resolveKit(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else if (enOfCase(ens, f) != "") inferCtor(enOfCase(ens, f), args, env, funs, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
 
-def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
+def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(args) && isKit(f) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (isKit(f)) checkKnown(f, kitParams(f), kitRet(f), args, env, funs, ens, span) else checkKnown(f, anyParams(List.len(args)), openKitRet(f), args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
@@ -345,16 +348,16 @@ def openKitInt(f: String): Bool =
 def openKitAny(f: String): Bool =
   f == "List.foldLeft" || f == "List.foldRight" || f == "List.reduceLeft" || f == "List.reduceRight" || f == "List.getOrElse" || f == "List.head" || f == "List.last" || f == "List.at"
 
-def resolveFunOrUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, ty: String): Out =
+def resolveFunOrUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), ty: String): Out =
   if (isFunTy(ty)) inferFunApply(ty, args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFunPrefer(funs, f, env))
 
-def inferFunApply(ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
+def inferFunApply(ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   inferFunApplyRet(funRetOf(ty), args, env, funs, ens, span)
 
-def inferFunApplyRet(ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String): Out =
+def inferFunApplyRet(ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.len(args) == 1) inferFunApply1(ret, infer(List.head(args), env, funs, ens), span) else if (List.isEmpty(args)) bad("apply expects 1 arg", span) else inferFunApply1(ret, firstArgErr(args, env, funs, ens), span)
 
-def inferFunApply1(ret: String, o: Out, _span: String): Out =
+def inferFunApply1(ret: String, o: Out, _span: (String, Int)): Out =
   if (hasErr(o)) o else ok(ret)
 
 def elemOf(t: String): String =
@@ -366,23 +369,23 @@ def brackAt(s: String, i: Int): Int =
 def elemOf2(b: Int, t: String): String =
   if (b < 0) "Any" else Str.slice(t, b + 1, Str.len(t) - 1)
 
-def resolveUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, hit: List[Fun]): Out =
+def resolveUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), hit: List[Fun]): Out =
   if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveUserHit(f, args, env, funs, ens, span, List.head(hit))
 
-def resolveUserHit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: String, d: Fun): Out =
+def resolveUserHit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), d: Fun): Out =
   d match {
-    case Fun(_, _, _, ps, ret, _, _) => checkKnown(f, paramTys(ps), ret, args, env, funs, ens, span)
+    case Fun(_, _, _, ps, ret, _, _, _) => checkKnown(f, paramTys(ps), ret, args, env, funs, ens, span)
   }
 
-def inferCall(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  resolveCall(f, args, env, funs, ens)
+def inferCall(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  resolveCall(f, args, env, funs, ens, span)
 
 def inferPrint(inner: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   inferPrint2(infer(inner, env, funs, ens), e)
 
 def inferPrint2(o: Out, e: Expr): Out =
   o match {
-    case Out(ty, err, sp) => if (Str.len(err) > 0) o else if (ty == "String" || ty == "Any") ok("IO[Unit]") else bad(Str.concat("expected String, got ", ty), Parse.pretty0(e))
+    case Out(ty, err, sp) => if (Str.len(err) > 0) o else if (ty == "String" || ty == "Any") ok("IO[Unit]") else bad(Str.concat("expected String, got ", ty), Parse.spanOf(e))
   }
 
 def inferBin(op: String, l: Expr, r: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
@@ -392,30 +395,30 @@ def inferBin2(op: String, lo: Out, r: Expr, env: List[(String, String)], funs: L
   if (hasErr(lo)) lo else inferBin3(op, lo, infer(r, env, funs, ens), e)
 
 def inferBin3(op: String, lo: Out, ro: Out, e: Expr): Out =
-  if (hasErr(ro)) ro else inferBin4(op, lo.ty, ro.ty, Parse.pretty0(e))
+  if (hasErr(ro)) ro else inferBin4(op, lo.ty, ro.ty, Parse.spanOf(e))
 
-def inferBin4(op: String, lt: String, rt: String, span: String): Out =
+def inferBin4(op: String, lt: String, rt: String, span: (String, Int)): Out =
   if (isArith(op)) inferArith(lt, rt, span) else if (isEq(op)) inferEq(lt, rt, span) else if (isOrd(op)) inferOrd(lt, rt, span) else if (isLogic(op)) inferLogic(lt, rt, span) else if (isBit(op)) inferBit(lt, rt, span) else if (op == "::") ok(Str.concat("List[", Str.concat(lt, "]"))) else ok(lt)
 
-def inferArith(lt: String, rt: String, span: String): Out =
+def inferArith(lt: String, rt: String, span: (String, Int)): Out =
   if (numTy(lt) && numTy(rt)) ok(if (lt == "Float" || rt == "Float") "Float" else "Int") else bad(Str.concat("arithmetic needs Int or Float, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
 
 def numTy(t: String): Bool =
   t == "Int" || t == "Float" || t == "Any"
 
-def inferEq(lt: String, rt: String, span: String): Out =
+def inferEq(lt: String, rt: String, span: (String, Int)): Out =
   if (tyEq(lt, rt)) ok("Bool") else bad(Str.concat("comparison type mismatch ", Str.concat(lt, Str.concat(" vs ", rt))), span)
 
-def inferOrd(lt: String, rt: String, span: String): Out =
+def inferOrd(lt: String, rt: String, span: (String, Int)): Out =
   if (numTy(lt) && numTy(rt)) ok("Bool") else bad("ordered compare needs Int or Float", span)
 
-def inferLogic(lt: String, rt: String, span: String): Out =
+def inferLogic(lt: String, rt: String, span: (String, Int)): Out =
   if (logicTy(lt) && logicTy(rt)) ok("Bool") else bad(Str.concat("logic needs Bool, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
 
 def logicTy(t: String): Bool =
   t == "Bool" || t == "Any"
 
-def inferBit(lt: String, rt: String, span: String): Out =
+def inferBit(lt: String, rt: String, span: (String, Int)): Out =
   if (lt == "Int" && rt == "Int") ok("Int") else bad(Str.concat("bitwise needs Int, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
 
 def inferUn(op: String, inner: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
@@ -425,10 +428,10 @@ def inferUn2(op: String, o: Out, e: Expr): Out =
   if (hasErr(o)) o else if (op == "!") inferUnBool(o, e) else inferUnInt(o, e)
 
 def inferUnBool(o: Out, e: Expr): Out =
-  if (o.ty == "Bool" || o.ty == "Any") ok("Bool") else bad(Str.concat("expected Bool, got ", o.ty), Parse.pretty0(e))
+  if (o.ty == "Bool" || o.ty == "Any") ok("Bool") else bad(Str.concat("expected Bool, got ", o.ty), Parse.spanOf(e))
 
 def inferUnInt(o: Out, e: Expr): Out =
-  if (o.ty == "Int" || o.ty == "Any") ok("Int") else bad(Str.concat("expected Int, got ", o.ty), Parse.pretty0(e))
+  if (o.ty == "Int" || o.ty == "Any") ok("Int") else bad(Str.concat("expected Int, got ", o.ty), Parse.spanOf(e))
 
 def inferIf(c: Expr, t: Expr, el: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   inferIf2(infer(c, env, funs, ens), t, el, env, funs, ens)
@@ -440,7 +443,7 @@ def inferIf3(to: Out, el: Expr, env: List[(String, String)], funs: List[Fun], en
   if (hasErr(to)) to else inferIf4(to, infer(el, env, funs, ens))
 
 def inferIf4(to: Out, eo: Out): Out =
-  if (hasErr(eo)) eo else if (tyEq(to.ty, eo.ty)) ok(prefer(to.ty, eo.ty)) else if (ifIoUnit(to.ty, eo.ty)) ok(ifIoPick(to.ty, eo.ty)) else bad(Str.concat("type mismatch: expected ", Str.concat(to.ty, Str.concat(", got ", eo.ty))), "")
+  if (hasErr(eo)) eo else if (tyEq(to.ty, eo.ty)) ok(prefer(to.ty, eo.ty)) else if (ifIoUnit(to.ty, eo.ty)) ok(ifIoPick(to.ty, eo.ty)) else bad(Str.concat("type mismatch: expected ", Str.concat(to.ty, Str.concat(", got ", eo.ty))), noSpan())
 
 def ifIoUnit(a: String, b: String): Bool =
   isIo(a) && b == "Unit" || isIo(b) && a == "Unit"
@@ -450,27 +453,27 @@ def ifIoPick(a: String, b: String): String =
 
 def infer(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   e match {
-    case Expr.EInt(_) => ok("Int")
+    case Expr.EInt(_, _, _) => ok("Int")
     case Expr.EBool(_) => ok("Bool")
-    case Expr.EStr(_) => ok("String")
+    case Expr.EStr(_, _, _) => ok("String")
     case Expr.EFloat(_) => ok("Float")
     case Expr.EInterp(_) => ok("String")
     case Expr.EUnit => ok("Unit")
     case Expr.EHole => ok("Int")
-    case Expr.EVar(s) => inferVar(s, env, funs, ens)
-    case Expr.EPrint(inner) => inferPrint(inner, env, funs, ens, e)
-    case Expr.ECall(f, args) => inferCall(f, args, env, funs, ens)
-    case Expr.EBin(op, l, r) => inferBin(op, l, r, env, funs, ens, e)
+    case Expr.EVar(s, off, stem) => inferVar(s, env, funs, ens, (stem, off))
+    case Expr.EPrint(inner, _, _) => inferPrint(inner, env, funs, ens, e)
+    case Expr.ECall(f, args, off, stem) => inferCall(f, args, env, funs, ens, (stem, off))
+    case Expr.EBin(op, l, r, _, _) => inferBin(op, l, r, env, funs, ens, e)
     case Expr.EUn(op, inner) => inferUn(op, inner, env, funs, ens, e)
     case Expr.EIf(c, t, el) => inferIf(c, t, el, env, funs, ens)
     case Expr.ENamed(_, inner) => infer(inner, env, funs, ens)
     case Expr.EList(xs) => inferList(xs, env, funs, ens)
     case Expr.ETuple(xs) => inferTuple(xs, env, funs, ens)
-    case Expr.EMethod(recv, name, args) => inferMethod(recv, name, args, env, funs, ens, e)
-    case Expr.EField(recv, name) => inferField(recv, name, env, funs, ens)
+    case Expr.EMethod(recv, name, args, _, _) => inferMethod(recv, name, args, env, funs, ens, e)
+    case Expr.EField(recv, name, _, _) => inferField(recv, name, env, funs, ens)
     case Expr.ELam(p, body) => inferLam(infer(body, bindLam(p, env), funs, ens))
-    case Expr.EMatch(s, arms) => inferMatch(s, arms, env, funs, ens)
-    case Expr.EFor(bs, body) => inferFor(bs, body, env, funs, ens)
+    case Expr.EMatch(s, arms, _, _) => inferMatch(s, arms, env, funs, ens)
+    case Expr.EFor(bs, body, _, _) => inferFor(bs, body, env, funs, ens)
   }
 
 def inferLam(o: Out): Out =
@@ -515,7 +518,7 @@ def hasEnHit(h: En, ens: List[En], name: String, i: Int): Bool =
 
 def inferField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   recv match {
-    case Expr.EVar(en) => if (hasEn(ens, en)) ok(en) else inferFieldVar(en, name, env, funs, ens)
+    case Expr.EVar(en, _, _) => if (hasEn(ens, en)) ok(en) else inferFieldVar(en, name, env, funs, ens)
     case _ => fieldOf(infer(recv, env, funs, ens), name, ens)
   }
 
@@ -523,7 +526,7 @@ def inferFieldVar(en: String, name: String, env: List[(String, String)], funs: L
   inferFieldHit(findFunMod(funs, en, name), en, name, env, funs, ens)
 
 def inferFieldHit(hit: List[Fun], en: String, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens), name, ens) else ok(funTyOf(List.head(hit)))
+  if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens, noSpan()), name, ens) else ok(funTyOf(List.head(hit)))
 
 def fieldOf(o: Out, name: String, ens: List[En]): Out =
   if (hasErr(o)) o else fieldOf2(o.ty, name, ens)
@@ -794,25 +797,25 @@ def caseFieldTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
   }
 
 def inferMethod(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens)
+  if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens, e)
 
-def inferMethod2(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+def inferMethod2(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   recv match {
-    case Expr.EVar(en) => if (getTy(env, en) != "") inferCall(Str.concat(".", name), recv :: args, env, funs, ens) else inferMethodEn(en, name, args, env, funs, ens)
-    case _ => inferCall(Str.concat(".", name), recv :: args, env, funs, ens)
+    case Expr.EVar(en, _, _) => if (getTy(env, en) != "") inferCall(Str.concat(".", name), recv :: args, env, funs, ens, Parse.spanOf(e)) else inferMethodEn(en, name, args, env, funs, ens, e)
+    case _ => inferCall(Str.concat(".", name), recv :: args, env, funs, ens, Parse.spanOf(e))
   }
 
-def inferMethodEn(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  inferMethodQual(Str.concat(en, Str.concat(".", name)), en, name, args, env, funs, ens)
+def inferMethodEn(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  inferMethodQual(Str.concat(en, Str.concat(".", name)), en, name, args, env, funs, ens, e)
 
-def inferMethodQual(q: String, en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (isKit(q) || isOpenKit(q)) inferCall(q, args, env, funs, ens) else if (hasEn(ens, en)) inferCtor(en, args, env, funs, ens) else resolveQual(en, name, args, env, funs, ens)
+def inferMethodQual(q: String, en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (isKit(q) || isOpenKit(q)) inferCall(q, args, env, funs, ens, Parse.spanOf(e)) else if (hasEn(ens, en)) inferCtor(en, args, env, funs, ens) else resolveQual(en, name, args, env, funs, ens, e)
 
-def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  resolveQualHit(en, name, args, env, funs, ens, findFunMod(funs, en, name))
+def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  resolveQualHit(en, name, args, env, funs, ens, findFunMod(funs, en, name), e)
 
-def resolveQualHit(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], hit: List[Fun]): Out =
-  if (List.isEmpty(hit)) checkKnown(Str.concat(en, Str.concat(".", name)), anyParams(List.len(args)), "Any", args, env, funs, ens, Parse.pretty0(Expr.EMethod(Expr.EVar(en), name, args))) else resolveUser(Str.concat(en, Str.concat(".", name)), args, env, funs, ens, Parse.pretty0(Expr.EMethod(Expr.EVar(en), name, args)), hit)
+def resolveQualHit(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], hit: List[Fun], e: Expr): Out =
+  if (List.isEmpty(hit)) checkKnown(Str.concat(en, Str.concat(".", name)), anyParams(List.len(args)), "Any", args, env, funs, ens, Parse.spanOf(e)) else resolveUser(Str.concat(en, Str.concat(".", name)), args, env, funs, ens, Parse.spanOf(e), hit)
 
 def inferCtor(en: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   if (List.isEmpty(args)) ok(en) else inferCtorHead(en, List.head(args), List.tail(args), env, funs, ens)
@@ -844,7 +847,7 @@ def inferFlatMap(recv: Expr, args: List[Expr], env: List[(String, String)], funs
   inferFlatMap2(infer(recv, env, funs, ens), args, env, funs, ens, e)
 
 def inferFlatMap2(o: Out, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), Parse.pretty0(e)) else inferFlatMapLam(o, List.head(args), env, funs, ens, e)
+  if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), Parse.spanOf(e)) else inferFlatMapLam(o, List.head(args), env, funs, ens, e)
 
 def inferFlatMapLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   lam match {
@@ -859,23 +862,23 @@ def ioPayload(t: String): String =
   if (isIo(t) && Str.len(t) > 4) Str.slice(t, 3, Str.len(t) - 1) else "Any"
 
 def inferFlatMap3(recv: Out, body: Out, e: Expr): Out =
-  if (hasErr(body)) body else if (isIo(recv.ty) && isIo(body.ty)) ok(body.ty) else if (isIo(recv.ty) && body.ty == "Any") ok(recv.ty) else if (recv.ty == "Any") ok(if (isIo(body.ty)) body.ty else "IO[Any]") else bad(Str.concat("flatMap needs IO, got ", Str.concat(recv.ty, Str.concat(" and ", body.ty))), Parse.pretty0(e))
+  if (hasErr(body)) body else if (isIo(recv.ty) && isIo(body.ty)) ok(body.ty) else if (isIo(recv.ty) && body.ty == "Any") ok(recv.ty) else if (recv.ty == "Any") ok(if (isIo(body.ty)) body.ty else "IO[Any]") else bad(Str.concat("flatMap needs IO, got ", Str.concat(recv.ty, Str.concat(" and ", body.ty))), Parse.spanOf(e))
 
-def inferVar(s: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  inferVar2(s, getTy(env, s), env, funs, ens)
+def inferVar(s: String, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  inferVar2(s, getTy(env, s), env, funs, ens, span)
 
-def inferVar2(s: String, t: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (t == "") inferVarFun(s, findFunPrefer(funs, s, env), ens) else ok(t)
+def inferVar2(s: String, t: String, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (t == "") inferVarFun(s, findFunPrefer(funs, s, env), ens, span) else ok(t)
 
-def inferVarFun(s: String, hit: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(hit)) inferVarCase(s, ens) else ok(funTyOf(List.head(hit)))
+def inferVarFun(s: String, hit: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(hit)) inferVarCase(s, ens, span) else ok(funTyOf(List.head(hit)))
 
-def inferVarCase(s: String, ens: List[En]): Out =
-  if (enOfCase(ens, s) == "") bad(Str.concat("unbound variable ", s), s) else ok(enOfCase(ens, s))
+def inferVarCase(s: String, ens: List[En], span: (String, Int)): Out =
+  if (enOfCase(ens, s) == "") bad(Str.concat("unbound variable ", s), span) else ok(enOfCase(ens, s))
 
 def funTyOf(d: Fun): String =
   d match {
-    case Fun(_, _, _, ps, ret, _, _) => funTyFrom(paramTys(ps), ret)
+    case Fun(_, _, _, ps, ret, _, _, _) => funTyFrom(paramTys(ps), ret)
   }
 
 def funTyFrom(ps: List[String], ret: String): String =
@@ -912,14 +915,19 @@ def inferTupleRest(rest: List[Expr], env: List[(String, String)], funs: List[Fun
 
 def checkDef(d: Fun, funs: List[Fun], ens: List[En]): Out =
   d match {
-    case Fun(_, name, _, ps, ret, body, mod) => checkDefWrap(name, ret, body, infer(body, bindParams(ps, ("self", "Any") :: ("#mod", mod) :: noEnv()), funs, ens))
+    case Fun(_, name, _, ps, ret, body, mod, off) => checkDefWrap(name, ret, body, infer(body, bindParams(ps, ("self", "Any") :: ("#mod", mod) :: noEnv()), funs, ens), (mod, off))
   }
 
-def checkDefWrap(name: String, ret: String, body: Expr, o: Out): Out =
-  if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o)
+def checkDefWrap(name: String, ret: String, body: Expr, o: Out, span: (String, Int)): Out =
+  if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o, span)
 
-def checkDefGot(name: String, ret: String, body: Expr, o: Out): Out =
-  if (hasErr(o)) o else if (tyEq(o.ty, ret) || funBodyEq(o.ty, ret)) o else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(o.ty, Str.concat(" does not match declared ", ret))))), Parse.pretty0(body))
+def checkDefGot(name: String, ret: String, body: Expr, o: Out, span: (String, Int)): Out =
+  if (hasErr(o)) o else if (tyEq(o.ty, ret) || funBodyEq(o.ty, ret)) o else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(o.ty, Str.concat(" does not match declared ", ret))))), spanPick(Parse.spanOf(body), span))
+
+def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
+  a match {
+    case (_, off) => if (off < 0) b else a
+  }
 
 def funBodyEq(got: String, ret: String): Bool =
   isFunTy(ret) && tyEq(got, funRetOf(ret))
@@ -954,7 +962,7 @@ def renameHits(hit: List[Fun], alias: String): List[Fun] =
 
 def renameFun(d: Fun, alias: String): Fun =
   d match {
-    case Fun(priv, _, ts, ps, ret, body, mod) => Fun(priv, alias, ts, ps, ret, body, mod)
+    case Fun(priv, _, ts, ps, ret, body, mod, off) => Fun(priv, alias, ts, ps, ret, body, mod, off)
   }
 
 def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
@@ -965,7 +973,7 @@ def expandDefsGo(defs: List[Fun], als: List[Alias], acc: List[Fun]): List[Fun] =
 
 def expandDef(d: Fun, als: List[Alias]): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod) => Fun(priv, name, ts, expandParams(ps, als), expandTy(ret, als), body, mod)
+    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, expandParams(ps, als), expandTy(ret, als), body, mod, off)
   }
 
 def expandParams(ps: List[Param], als: List[Alias]): List[Param] =
@@ -1022,39 +1030,54 @@ def checkDefsRest(all: List[Fun], rest: List[Fun], enums: List[En], main: String
 
 def checkDefsHit(d: Fun, all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
   d match {
-    case Fun(_, _, _, _, _, _, mod) => if (inStems(stems, mod)) checkDefsAfter(checkDef(d, all, enums), all, rest, enums, main, body, stems) else checkDefsRest(all, rest, enums, main, body, stems)
+    case Fun(_, _, _, _, _, _, mod, _) => if (inStems(stems, mod)) checkDefsAfter(checkDef(d, all, enums), all, rest, enums, main, body, stems) else checkDefsRest(all, rest, enums, main, body, stems)
   }
 
 def checkDefsAfter(o: Out, all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
   if (hasErr(o)) o else checkDefsRest(all, rest, enums, main, body, stems)
 
 def checkMain(name: String, body: Expr, funs: List[Fun], ens: List[En]): Out =
-  if (name == "") ok("IO[Unit]") else checkMainGot(infer(body, noEnv(), funs, ens))
+  if (name == "") ok("IO[Unit]") else checkMainGot(infer(body, noEnv(), funs, ens), body)
 
-def checkMainGot(o: Out): Out =
+def checkMainGot(o: Out, body: Expr): Out =
   o match {
-    case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else if (ty == "IO[Unit]") Out(ty, err, sp) else bad(Str.concat("@main body must be IO[Unit], got ", ty), if (Str.len(sp) > 0) sp else "1")
+    case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else if (ty == "IO[Unit]") Out(ty, err, sp) else bad(Str.concat("@main body must be IO[Unit], got ", ty), spanPick(sp, Parse.spanOf(body)))
   }
-
-def findIdx(src: String, needle: String, i: Int): Int =
-  if (Str.len(needle) == 0 || i + Str.len(needle) > Str.len(src)) 0 - 1 else if (Str.slice(src, i, i + Str.len(needle)) == needle) i else findIdx(src, needle, i + 1)
 
 def lineCol(src: String, i: Int, j: Int, line: Int, col: Int): (Int, Int) =
-  if (j >= i) (line, col) else if (Str.charAt(src, j) == 10) lineCol(src, i, j + 1, line + 1, 1) else lineCol(src, i, j + 1, line, col + 1)
+  if (j >= i) (line, col) else if (j >= Str.len(src)) (line, col) else if (Str.charAt(src, j) == 10) lineCol(src, i, j + 1, line + 1, 1) else lineCol(src, i, j + 1, line, col + 1)
 
-def locOf(src: String, needle: String): (Int, Int, Int, Int) =
-  locOf2(src, needle, findIdx(src, needle, 0))
+def isIdentCh(c: Int): Bool =
+  c >= 65 && c <= 90 || c >= 97 && c <= 122 || c >= 48 && c <= 57 || c == 95
 
-def locOf2(src: String, needle: String, i: Int): (Int, Int, Int, Int) =
-  if (i < 0) (1, 1, 1, 1) else locOf3(lineCol(src, i, 0, 1, 1), needle)
+def skipIdent(src: String, i: Int): Int =
+  if (i >= Str.len(src)) i else if (isIdentCh(Str.charAt(src, i))) skipIdent(src, i + 1) else i
 
-def locOf3(p: (Int, Int), needle: String): (Int, Int, Int, Int) =
+def skipQual(src: String, i: Int): Int =
+  skipQual2(src, skipIdent(src, i))
+
+def skipQual2(src: String, j: Int): Int =
+  if (j < Str.len(src) && Str.charAt(src, j) == 46 && j + 1 < Str.len(src) && isIdentCh(Str.charAt(src, j + 1))) skipQual(src, j + 1) else j
+
+def skipStr(src: String, i: Int): Int =
+  if (i >= Str.len(src)) i else if (Str.charAt(src, i) == 34) i + 1 else if (Str.charAt(src, i) == 92 && i + 1 < Str.len(src)) skipStr(src, i + 2) else skipStr(src, i + 1)
+
+def tokenEnd(src: String, off: Int): Int =
+  if (off < 0 || off >= Str.len(src)) off else tokenEndCh(src, off, Str.charAt(src, off))
+
+def tokenEndCh(src: String, off: Int, c: Int): Int =
+  if (c == 34) skipStr(src, off + 1) else if (isIdentCh(c)) skipQual(src, off) else off + 1
+
+def locOf(src: String, off: Int): (Int, Int, Int, Int) =
+  if (off < 0 || src == "") (1, 1, 1, 1) else locOf2(lineCol(src, off, 0, 1, 1), src, off)
+
+def locOf2(p: (Int, Int), src: String, off: Int): (Int, Int, Int, Int) =
   p match {
-    case (line, col) => locOf4(line, col, needle)
+    case (line, col) => locOf3(line, col, tokenEnd(src, off) - off)
   }
 
-def locOf4(line: Int, col: Int, needle: String): (Int, Int, Int, Int) =
-  (line, col, line, if (Str.len(needle) > 0 && Str.charAt(needle, Str.len(needle) - 1) == 41) col + Str.len(needle) - 1 else col + Str.len(needle))
+def locOf3(line: Int, col: Int, n: Int): (Int, Int, Int, Int) =
+  (line, col, line, col + (if (n < 1) 1 else n))
 
 def jsonStr(s: String): String =
   Str.concat("\"", Str.concat(_esc(s, 0, Builder.empty()), "\""))
@@ -1065,36 +1088,44 @@ def _esc(s: String, i: Int, b: Builder): String =
 def _esc2(s: String, i: Int, b: Builder, c: Int): String =
   _esc(s, i + 1, Builder.append(b, if (c == 34) "\\\"" else if (c == 92) "\\\\" else if (c == 10) "\\n" else Str.slice(s, i, i + 1)))
 
-def diagJson(src: String, o: Out): String =
-  diagJson2(o, locOf(src, o.span))
+def fileOf(stem: String): String =
+  if (stem == "") "Main.scuzz" else Str.concat(stem, ".scuzz")
 
-def diagJson2(o: Out, loc: (Int, Int, Int, Int)): String =
-  loc match {
-    case (line, col, eline, ecol) => diagJson3(o, line, col, eline, ecol)
+def srcOfStem(files: List[(String, String)], stem: String): String =
+  if (List.isEmpty(files)) "" else srcOfStemHd(List.head(files), List.tail(files), stem)
+
+def srcOfStemHd(h: (String, String), rest: List[(String, String)], stem: String): String =
+  h match {
+    case (s, src) => if (s == stem || stem == "" && s == "Main") src else srcOfStem(rest, stem)
   }
 
-def diagJson3(o: Out, line: Int, col: Int, eline: Int, ecol: Int): String =
-  Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(Str.concat("type error: ", o.err)), Str.concat(",\"file\":\"t/src/Main.scuzz\",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))
+def diagJson(files: List[(String, String)], o: Out): String =
+  diagJsonSp(files, o, o.span)
+
+def diagJsonSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
+  sp match {
+    case (stem, off) => diagJson2(o, fileOf(stem), locOf(srcOfStem(files, stem), off))
+  }
+
+def diagJson2(o: Out, file: String, loc: (Int, Int, Int, Int)): String =
+  loc match {
+    case (line, col, eline, ecol) => diagJson3(o, file, line, col, eline, ecol)
+  }
+
+def diagJson3(o: Out, file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
+  Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(Str.concat("type error: ", o.err)), Str.concat(",\"file\":", Str.concat(jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))))
 
 def check(src: String): String =
-  check2(src, checkProg(Parse.parse(Lexer.lex(src))))
+  checkFiles(("Main", src) :: [])
 
 def checkFiles(files: List[(String, String)]): String =
   checkFilesOwn(files, [])
 
 def checkFilesOwn(files: List[(String, String)], stems: List[String]): String =
-  check2(filesSrc(files), checkProgOwn(Parse.parseFiles(files), stems))
+  check3(files, checkProgOwn(Parse.parseFiles(files), stems))
 
-def filesSrc(files: List[(String, String)]): String =
-  if (List.isEmpty(files)) "" else filesSrc2(List.head(files), List.tail(files))
-
-def filesSrc2(f: (String, String), rest: List[(String, String)]): String =
-  f match {
-    case (_, src) => Str.concat(src, filesSrc(rest))
-  }
-
-def check2(src: String, o: Out): String =
-  if (hasErr(o)) Str.concat("[", Str.concat(diagJson(src, o), "]")) else "[]"
+def check3(files: List[(String, String)], o: Out): String =
+  if (hasErr(o)) Str.concat("[", Str.concat(diagJson(files, o), "]")) else "[]"
 
 def unclaimedJson(files: List[(String, String)]): String =
   unclaimedOf(Parse.parseFiles(files))
@@ -1105,23 +1136,31 @@ def unclaimedOf(p: Prog): String =
 def unclaimedMain(name: String): String =
   Str.concat("{\"severity\":\"info\",\"message\":\"unclaimed def ", Str.concat(name, "\",\"line\":1,\"column\":1}"))
 
-def humanLine(src: String, o: Out): String =
-  humanLine2(o, locOf(src, o.span))
+def humanLine(files: List[(String, String)], o: Out): String =
+  humanLineSp(files, o, o.span)
 
-def humanLine2(o: Out, loc: (Int, Int, Int, Int)): String =
-  loc match {
-    case (line, col, _, _) => humanLine3(o, line, col)
+def humanLineSp(files: List[(String, String)], o: Out, sp: (String, Int)): String =
+  sp match {
+    case (stem, off) => humanLine2(o, fileOf(stem), locOf(srcOfStem(files, stem), off))
   }
 
-def humanLine3(o: Out, line: Int, col: Int): String =
-  Str.concat("t/src/Main.scuzz:", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: type error: ", o.err)))))
+def humanLine2(o: Out, file: String, loc: (Int, Int, Int, Int)): String =
+  loc match {
+    case (line, col, _, _) => humanLine3(o, file, line, col)
+  }
+
+def humanLine3(o: Out, file: String, line: Int, col: Int): String =
+  Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: type error: ", o.err))))))
 
 def human(src: String): String =
-  human2(src, checkProg(Parse.parse(Lexer.lex(src))))
+  humanFiles(("Main", src) :: [])
+
+def humanFiles(files: List[(String, String)]): String =
+  humanFilesOwn(files, [])
 
 def humanFilesOwn(files: List[(String, String)], stems: List[String]): String =
-  human2(filesSrc(files), checkProgOwn(Parse.parseFiles(files), stems))
+  human3(files, checkProgOwn(Parse.parseFiles(files), stems))
 
-def human2(src: String, o: Out): String =
-  if (hasErr(o)) humanLine(src, o) else "scuzz check ok"
+def human3(files: List[(String, String)], o: Out): String =
+  if (hasErr(o)) humanLine(files, o) else "scuzz check ok"
 

@@ -15,13 +15,13 @@ def srcUnbound(): String =
 """
 
 def wantUnbound(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unbound variable nope\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":18}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: unbound variable nope\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":18}]"
 
 def srcArith(): String =
   "@main def main: IO[Unit] =\n  IO.println(1 + \"x\")\n"
 
 def wantArith(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: arithmetic needs Int or Float, got Int and String\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":21}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: arithmetic needs Int or Float, got Int and String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":15}]"
 
 def srcArity(): String =
   """def add(n: Int, m: Int): Int =
@@ -32,13 +32,13 @@ def srcArity(): String =
 """
 
 def wantArity(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: add expects 2 args, got 1\",\"file\":\"t/src/Main.scuzz\",\"line\":5,\"column\":26,\"end_line\":5,\"end_column\":31}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: add expects 2 args, got 1\",\"file\":\"Main.scuzz\",\"line\":5,\"column\":26,\"end_line\":5,\"end_column\":29}]"
 
 def srcRet(): String =
   "def add(n: Int, m: Int): Int =\n  \"x\"\n\n@main def main: IO[Unit] =\n  IO.println(\"x\")\n"
 
 def wantRet(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: def add body String does not match declared Int\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":6}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: def add body String does not match declared Int\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":6}]"
 
 def srcPrint(): String =
   """@main def main: IO[Unit] =
@@ -46,7 +46,7 @@ def srcPrint(): String =
 """
 
 def wantPrint(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: expected String, got Int\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":15}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: expected String, got Int\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":13}]"
 
 def srcUnk(): String =
   """@main def main: IO[Unit] =
@@ -54,13 +54,13 @@ def srcUnk(): String =
 """
 
 def wantUnk(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unknown function foo\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":19}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: unknown function foo\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":17}]"
 
 def srcCmp(): String =
   "@main def main: IO[Unit] =\n  IO.println(if (1 == \"x\") \"a\" else \"b\")\n"
 
 def wantCmp(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: comparison type mismatch Int vs String\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":18,\"end_line\":2,\"end_column\":26}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: comparison type mismatch Int vs String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":18,\"end_line\":2,\"end_column\":19}]"
 
 def srcMainTy(): String =
   """@main def main: IO[Unit] =
@@ -68,13 +68,13 @@ def srcMainTy(): String =
 """
 
 def wantMainTy(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: @main body must be IO[Unit], got Int\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":4}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: @main body must be IO[Unit], got Int\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":4}]"
 
 def srcArg(): String =
   "def add(n: Int, m: Int): Int =\n  n + m\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1, \"x\")))\n"
 
 def wantArg(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: add arg type mismatch: expected Int, got String\",\"file\":\"t/src/Main.scuzz\",\"line\":5,\"column\":26,\"end_line\":5,\"end_column\":36}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: add arg type mismatch: expected Int, got String\",\"file\":\"Main.scuzz\",\"line\":5,\"column\":26,\"end_line\":5,\"end_column\":29}]"
 
 def srcWatch(): String =
   """@main def main: IO[Unit] =
@@ -82,7 +82,7 @@ def srcWatch(): String =
 """
 
 def wantWatch(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Fs.watch\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":13}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Fs.watch\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":11}]"
 
 def srcNope(): String =
   """@main def main: IO[Unit] =
@@ -90,7 +90,7 @@ def srcNope(): String =
 """
 
 def wantNope(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Net.nope\",\"file\":\"t/src/Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":13}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Net.nope\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":11}]"
 
 def tyckDiff(src: String, want: String): Bool =
   Check.check(src) == want
@@ -98,8 +98,26 @@ def tyckDiff(src: String, want: String): Bool =
 def tyckIdem(src: String): Bool =
   Check.check(src) == Check.check(src)
 
+def srcDup(): String =
+  "def f(): String =\n  \"nope\"\n\n@main def main: IO[Unit] =\n  IO.println(nope)\n"
+
+def wantDup(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unbound variable nope\",\"file\":\"Main.scuzz\",\"line\":5,\"column\":14,\"end_line\":5,\"end_column\":18}]"
+
+def srcUtil(): String =
+  "def bad(): Int =\n  1 + \"x\"\n"
+
+def srcMainOk(): String =
+  "@main def main: IO[Unit] =\n  IO.println(\"ok\")\n"
+
+def wantUtil(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: in bad: arithmetic needs Int or Float, got Int and String\",\"file\":\"Util.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":4}]"
+
+def tyckFiles(): Bool =
+  Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []) == wantUtil()
+
 def allOk(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope())
+  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else "tyck-bad")
