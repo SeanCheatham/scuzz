@@ -160,16 +160,16 @@ def applyFunsRest(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWa
 
 def collectHs(e: Expr, acc: List[Expr]): List[Expr] =
   e match {
-    case Expr.ECall(f, args, _, _) => collectHsCall(f, args, acc, e)
-    case Expr.EPrint(inner, _, _) => collectHs(inner, acc)
-    case Expr.EMethod(recv, _, args, _, _) => collectHsList(args, collectHs(recv, acc))
-    case Expr.EField(recv, _, _, _) => collectHs(recv, acc)
-    case Expr.EBin(_, l, r, _, _) => collectHs(r, collectHs(l, acc))
+    case Expr.ECall(f, args, _) => collectHsCall(f, args, acc, e)
+    case Expr.EPrint(inner, _) => collectHs(inner, acc)
+    case Expr.EMethod(recv, _, args, _) => collectHsList(args, collectHs(recv, acc))
+    case Expr.EField(recv, _, _) => collectHs(recv, acc)
+    case Expr.EBin(_, l, r, _) => collectHs(r, collectHs(l, acc))
     case Expr.EUn(_, inner) => collectHs(inner, acc)
     case Expr.ELam(_, body) => collectHs(body, acc)
     case Expr.EIf(c, t, el) => collectHs(el, collectHs(t, collectHs(c, acc)))
-    case Expr.EMatch(s, arms, _, _) => collectHsArms(arms, collectHs(s, acc))
-    case Expr.EFor(bs, body, _, _) => collectHs(body, collectHsBinds(bs, acc))
+    case Expr.EMatch(s, arms, _) => collectHsArms(arms, collectHs(s, acc))
+    case Expr.EFor(bs, body, _) => collectHs(body, collectHsBinds(bs, acc))
     case Expr.EList(xs) => collectHsList(xs, acc)
     case Expr.ETuple(xs) => collectHsList(xs, acc)
     case Expr.ENamed(_, inner) => collectHs(inner, acc)
@@ -218,17 +218,17 @@ def collectHsBindsHd(b: Bind, rest: List[Bind], acc: List[Expr]): List[Expr] =
 
 def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   e match {
-    case Expr.EInt(k, _, _) => walkInt(k, target, seen, inO, hi, o)
-    case Expr.EBin(op, l, r, _, _) => walkBin(op, l, r, target, seen, inO, hs, hi, o)
+    case Expr.EInt(k, _) => walkInt(k, target, seen, inO, hi, o)
+    case Expr.EBin(op, l, r, _) => walkBin(op, l, r, target, seen, inO, hs, hi, o)
     case Expr.EIf(c, t, el) => walkIf(c, t, el, target, seen, inO, hs, hi, o)
-    case Expr.ECall(f, args, _, _) => walkCall(f, args, target, seen, inO, hs, hi, o)
-    case Expr.EPrint(inner, _, _) => walkPrint(inner, target, seen, inO, hs, hi, o)
-    case Expr.EMethod(recv, name, args, _, _) => walkMethod(recv, name, args, target, seen, inO, hs, hi, o)
-    case Expr.EField(recv, name, _, _) => walkField(recv, name, target, seen, inO, hs, hi, o)
+    case Expr.ECall(f, args, _) => walkCall(f, args, target, seen, inO, hs, hi, o)
+    case Expr.EPrint(inner, _) => walkPrint(inner, target, seen, inO, hs, hi, o)
+    case Expr.EMethod(recv, name, args, _) => walkMethod(recv, name, args, target, seen, inO, hs, hi, o)
+    case Expr.EField(recv, name, _) => walkField(recv, name, target, seen, inO, hs, hi, o)
     case Expr.EUn(op, inner) => walkUn(op, inner, target, seen, inO, hs, hi, o)
     case Expr.ELam(p, body) => walkLam(p, body, target, seen, inO, hs, hi, o)
-    case Expr.EMatch(s, arms, _, _) => walkMatch(s, arms, target, seen, inO, hs, hi, o)
-    case Expr.EFor(bs, body, _, _) => walkFor(bs, body, target, seen, inO, hs, hi, o)
+    case Expr.EMatch(s, arms, _) => walkMatch(s, arms, target, seen, inO, hs, hi, o)
+    case Expr.EFor(bs, body, _) => walkFor(bs, body, target, seen, inO, hs, hi, o)
     case Expr.EList(xs) => walkListExpr(xs, target, seen, inO, hs, hi, o)
     case Expr.ETuple(xs) => walkTuple(xs, target, seen, inO, hs, hi, o)
     case Expr.ENamed(name, inner) => walkNamed(name, inner, target, seen, inO, hs, hi, o)
@@ -236,7 +236,7 @@ def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o:
   }
 
 def walkInt(k: Int, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
-  if ((k == 0 || k == 1) && live(inO, o)) Walk(Expr.EInt(if (seen == target) 1 - k else k, 0, ""), seen + 1, hi) else Walk(Expr.EInt(k, 0, ""), seen, hi)
+  if ((k == 0 || k == 1) && live(inO, o)) Walk(Expr.EInt(if (seen == target) 1 - k else k, 0), seen + 1, hi) else Walk(Expr.EInt(k, 0), seen, hi)
 
 def walkBin(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   if (live(inO, o) && binN(op) > 0) walkBinHit(op, l, r, target, seen, inO, hs, hi, o) else walkBinKids(op, l, r, target, seen, inO, hs, hi, o)
@@ -258,14 +258,14 @@ def walkBinKids(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool,
 
 def walkBinKidsR(op: String, l: Expr, r: Expr, target: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int, o: Bool): Walk =
   walk(r, target, n1, inO, hs, h1, o) match {
-    case Walk(r2, n2, h2) => Walk(Expr.EBin(op, l, r2, 0, ""), n2, h2)
+    case Walk(r2, n2, h2) => Walk(Expr.EBin(op, l, r2, 0), n2, h2)
   }
 
 def binOut(op: String, l: Expr, r: Expr, target: Int, seen: Int): Expr =
-  if (seen == target && flipRel(op) != "") Expr.EBin(flipRel(op), l, r, 0, "") else binOut2(op, l, r, target, seen)
+  if (seen == target && flipRel(op) != "") Expr.EBin(flipRel(op), l, r, 0) else binOut2(op, l, r, target, seen)
 
 def binOut2(op: String, l: Expr, r: Expr, target: Int, seen: Int): Expr =
-  if (op == "&&" && seen + 1 == target) l else if (op == "&&" && seen + 2 == target) r else if (seen == target && flipArith(op) != "") Expr.EBin(flipArith(op), l, r, 0, "") else Expr.EBin(op, l, r, 0, "")
+  if (op == "&&" && seen + 1 == target) l else if (op == "&&" && seen + 2 == target) r else if (seen == target && flipArith(op) != "") Expr.EBin(flipArith(op), l, r, 0) else Expr.EBin(op, l, r, 0)
 
 def walkIf(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   if (progSite(inO, o)) walkIfHit(c, t, el, target, seen, hs, hi, o) else walkIfKids(c, t, el, target, seen, inO, hs, hi, o)
@@ -302,14 +302,14 @@ def walkIfKidsE(c: Expr, t: Expr, el: Expr, target: Int, inO: Bool, hs: List[Exp
 
 def walkCall(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   if (isOracle(f)) walkArgs(args, target, seen, true, hs, hi, o) match {
-  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0, ""), n, h)
+  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0), n, h)
 } else if (f == "Signal.map") walkMap(f, args, target, seen, inO, hs, hi, o) else if (isHandler(f)) walkHandler(f, args, target, seen, inO, hs, hi, o) else walkArgs(args, target, seen, inO, hs, hi, o) match {
-  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0, ""), n, h)
+  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0), n, h)
 }
 
 def walkMap(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   if (progSite(inO, o) && mapParam(args) != "") walkMapHit(f, args, target, seen, inO, hs, hi, o, mapParam(args)) else walkArgs(args, target, seen, inO, hs, hi, o) match {
-  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0, ""), n, h)
+  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0), n, h)
 }
 
 def mapParam(args: List[Expr]): String =
@@ -323,7 +323,7 @@ def mapParamAt(e: Expr): String =
 
 def walkMapHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool, p: String): Walk =
   walkArgs(args, target, seen + 1, inO, hs, hi, o) match {
-    case Walks(xs, n, h) => Walk(Expr.ECall(f, if (seen == target) mapIdent(xs, p) else xs, 0, ""), n, h)
+    case Walks(xs, n, h) => Walk(Expr.ECall(f, if (seen == target) mapIdent(xs, p) else xs, 0), n, h)
   }
 
 def mapIdent(args: List[Expr], p: String): List[Expr] =
@@ -331,18 +331,18 @@ def mapIdent(args: List[Expr], p: String): List[Expr] =
 
 def mapIdentLam(e: Expr, p: String): Expr =
   e match {
-    case Expr.ELam(q, _) => Expr.ELam(q, Expr.EVar(p, 0, ""))
+    case Expr.ELam(q, _) => Expr.ELam(q, Expr.EVar(p, 0))
     case _ => e
   }
 
 def walkHandler(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   if (progSite(inO, o) && List.len(hs) >= 2) walkHandlerHit(f, args, target, seen, inO, hs, hi, o) else walkArgs(args, target, seen, inO, hs, hi, o) match {
-  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0, ""), n, h)
+  case Walks(xs, n, h) => Walk(Expr.ECall(f, xs, 0), n, h)
 }
 
 def walkHandlerHit(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walkArgs(args, target, seen + 1, inO, hs, hi + 1, o) match {
-    case Walks(xs, n, h) => Walk(Expr.ECall(f, if (seen == target) swapHandler(xs, hs, hi) else xs, 0, ""), n, h)
+    case Walks(xs, n, h) => Walk(Expr.ECall(f, if (seen == target) swapHandler(xs, hs, hi) else xs, 0), n, h)
   }
 
 def swapHandler(args: List[Expr], hs: List[Expr], hi: Int): List[Expr] =
@@ -362,7 +362,7 @@ def swapHandlerLam(e: Expr, body: Expr): Expr =
 
 def walkPrint(inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(inner, target, seen, inO, hs, hi, o) match {
-    case Walk(e2, n, h) => Walk(Expr.EPrint(e2, 0, ""), n, h)
+    case Walk(e2, n, h) => Walk(Expr.EPrint(e2, 0), n, h)
   }
 
 def walkMethod(recv: Expr, name: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
@@ -371,20 +371,20 @@ def walkMethod(recv: Expr, name: String, args: List[Expr], target: Int, seen: In
 def walkRequire(recv: Expr, args: List[Expr], target: Int, seen: Int, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(recv, target, seen, false, hs, hi, o) match {
     case Walk(r2, n1, h1) => walkArgs(args, target, n1, true, hs, h1, o) match {
-  case Walks(xs, n2, h2) => Walk(Expr.EMethod(r2, "require", xs, 0, ""), n2, h2)
+  case Walks(xs, n2, h2) => Walk(Expr.EMethod(r2, "require", xs, 0), n2, h2)
 }
   }
 
 def walkMethodGo(recv: Expr, name: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(recv, target, seen, inO, hs, hi, o) match {
     case Walk(r2, n1, h1) => walkArgs(args, target, n1, inO, hs, h1, o) match {
-  case Walks(xs, n2, h2) => Walk(Expr.EMethod(r2, name, xs, 0, ""), n2, h2)
+  case Walks(xs, n2, h2) => Walk(Expr.EMethod(r2, name, xs, 0), n2, h2)
 }
   }
 
 def walkField(recv: Expr, name: String, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(recv, target, seen, inO, hs, hi, o) match {
-    case Walk(r2, n, h) => Walk(Expr.EField(r2, name, 0, ""), n, h)
+    case Walk(r2, n, h) => Walk(Expr.EField(r2, name, 0), n, h)
   }
 
 def walkUn(op: String, inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
@@ -400,14 +400,14 @@ def walkLam(p: String, body: Expr, target: Int, seen: Int, inO: Bool, hs: List[E
 def walkMatch(s: Expr, arms: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(s, target, seen, inO, hs, hi, o) match {
     case Walk(s2, n1, h1) => walkArms(arms, target, n1, inO, hs, h1, o) match {
-  case ArmWalk(xs, n2, h2) => Walk(Expr.EMatch(s2, xs, 0, ""), n2, h2)
+  case ArmWalk(xs, n2, h2) => Walk(Expr.EMatch(s2, xs, 0), n2, h2)
 }
   }
 
 def walkFor(bs: List[Bind], body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walkBinds(bs, target, seen, inO, hs, hi, o) match {
     case BindWalk(xs, n1, h1) => walk(body, target, n1, inO, hs, h1, o) match {
-  case Walk(b, n2, h2) => Walk(Expr.EFor(xs, b, 0, ""), n2, h2)
+  case Walk(b, n2, h2) => Walk(Expr.EFor(xs, b, 0), n2, h2)
 }
   }
 

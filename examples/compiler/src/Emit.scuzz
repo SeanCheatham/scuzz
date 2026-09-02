@@ -81,8 +81,11 @@ def _escLl(s: String, i: Int, b: Builder): String =
 def _escLl2(s: String, i: Int, b: Builder, c: Int): String =
   _escLl(s, i + 1, Builder.append(b, if (c == 34) "\\22" else if (c == 92) "\\\\" else if (c == 10) "\\0A" else Str.slice(s, i, i + 1)))
 
+def strArr(s: String): Int =
+  Str.byteLen(s) + 1
+
 def strConst(i: Int, s: String): String =
-  Str.concat("@.str", Str.concat(Str.fromInt(i), Str.concat(" = private unnamed_addr constant [", Str.concat(Str.fromInt(Str.len(s) + 1), Str.concat(" x i8] ", Str.concat(llvmC(s), ", align 1"))))))
+  Str.concat("@.str", Str.concat(Str.fromInt(i), Str.concat(" = private unnamed_addr constant [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8] ", Str.concat(llvmC(s), ", align 1"))))))
 
 def strIndex(xs: List[String], s: String, i: Int): Int =
   if (List.isEmpty(xs)) i else if (List.head(xs) == s) i else strIndex(List.tail(xs), s, i + 1)
@@ -148,10 +151,10 @@ def internHole(acc: List[String], inner: String): List[String] =
   collectToks(Lexer.lex(inner), acc)
 
 def emitConsts(xs: List[String], i: Int): String =
-  List.join(emitConstsList(xs, i), "")
+  Builder.result(emitConstsB(xs, i, Builder.empty()))
 
-def emitConstsList(xs: List[String], i: Int): List[String] =
-  if (List.isEmpty(xs)) noStr() else Str.concat(strConst(i, List.head(xs)), nl()) :: emitConstsList(List.tail(xs), i + 1)
+def emitConstsB(xs: List[String], i: Int, b: Builder): Builder =
+  if (List.isEmpty(xs)) b else emitConstsB(List.tail(xs), i + 1, Builder.append(b, Str.concat(strConst(i, List.head(xs)), nl())))
 
 def join(a: String, b: String): String =
   Str.concat(a, b)
@@ -178,11 +181,11 @@ def needsPh(e: Expr): Bool =
   e match {
     case Expr.ELam(_, _) => false
     case Expr.EHole => true
-    case Expr.EBin(_, l, r, _, _) => hasHole(l) || hasHole(r)
+    case Expr.EBin(_, l, r, _) => hasHole(l) || hasHole(r)
     case Expr.EUn(_, inner) => hasHole(inner)
-    case Expr.ECall(f, args, _, _) => needsPhCall(f, args)
-    case Expr.EMethod(recv, _, args, _, _) => needsPhMethod(recv, args)
-    case Expr.EField(recv, _, _, _) => isBareHole(recv)
+    case Expr.ECall(f, args, _) => needsPhCall(f, args)
+    case Expr.EMethod(recv, _, args, _) => needsPhMethod(recv, args)
+    case Expr.EField(recv, _, _) => isBareHole(recv)
     case _ => false
   }
 
@@ -213,15 +216,15 @@ def hasCompoundPhArg(xs: List[Expr]): Bool =
 def hasHole(e: Expr): Bool =
   e match {
     case Expr.EHole => true
-    case Expr.EPrint(inner, _, _) => hasHole(inner)
-    case Expr.ECall(_, args, _, _) => hasHoleList(args)
-    case Expr.EMethod(recv, _, args, _, _) => hasHole(recv) || hasHoleList(args)
-    case Expr.EField(recv, _, _, _) => hasHole(recv)
-    case Expr.EBin(_, l, r, _, _) => hasHole(l) || hasHole(r)
+    case Expr.EPrint(inner, _) => hasHole(inner)
+    case Expr.ECall(_, args, _) => hasHoleList(args)
+    case Expr.EMethod(recv, _, args, _) => hasHole(recv) || hasHoleList(args)
+    case Expr.EField(recv, _, _) => hasHole(recv)
+    case Expr.EBin(_, l, r, _) => hasHole(l) || hasHole(r)
     case Expr.EUn(_, inner) => hasHole(inner)
     case Expr.ELam(_, body) => hasHole(body)
     case Expr.EIf(c, t, el) => hasHole(c) || hasHole(t) || hasHole(el)
-    case Expr.EMatch(s, arms, _, _) => hasHole(s) || hasHoleArms(arms)
+    case Expr.EMatch(s, arms, _) => hasHole(s) || hasHoleArms(arms)
     case Expr.EList(xs) => hasHoleList(xs)
     case Expr.ETuple(xs) => hasHoleList(xs)
     case Expr.ENamed(_, inner) => hasHole(inner)
@@ -241,12 +244,12 @@ def hasHoleArm(a: Arm): Bool =
 
 def rewriteHole(e: Expr, n: String): Expr =
   e match {
-    case Expr.EHole => Expr.EVar(n, 0, "")
-    case Expr.EPrint(inner, _, _) => Expr.EPrint(rewriteHole(inner, n), 0, "")
-    case Expr.ECall(f, args, _, _) => Expr.ECall(f, rewriteHoleList(args, n), 0, "")
-    case Expr.EMethod(recv, name, args, _, _) => Expr.EMethod(rewriteHole(recv, n), name, rewriteHoleList(args, n), 0, "")
-    case Expr.EField(recv, name, _, _) => Expr.EField(rewriteHole(recv, n), name, 0, "")
-    case Expr.EBin(op, l, r, _, _) => Expr.EBin(op, rewriteHole(l, n), rewriteHole(r, n), 0, "")
+    case Expr.EHole => Expr.EVar(n, 0)
+    case Expr.EPrint(inner, _) => Expr.EPrint(rewriteHole(inner, n), 0)
+    case Expr.ECall(f, args, _) => Expr.ECall(f, rewriteHoleList(args, n), 0)
+    case Expr.EMethod(recv, name, args, _) => Expr.EMethod(rewriteHole(recv, n), name, rewriteHoleList(args, n), 0)
+    case Expr.EField(recv, name, _) => Expr.EField(rewriteHole(recv, n), name, 0)
+    case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteHole(l, n), rewriteHole(r, n), 0)
     case Expr.EUn(op, inner) => Expr.EUn(op, rewriteHole(inner, n))
     case Expr.ELam(p, body) => Expr.ELam(p, rewriteHole(body, n))
     case Expr.EIf(c, t, el) => Expr.EIf(rewriteHole(c, n), rewriteHole(t, n), rewriteHole(el, n))
@@ -261,25 +264,25 @@ def rewriteHoleList(xs: List[Expr], n: String): List[Expr] =
 
 def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   e match {
-    case Expr.EInt(n, _, _) => Slot("", Str.fromInt(n), false)
+    case Expr.EInt(n, _) => Slot("", Str.fromInt(n), false)
     case Expr.EBool(b) => Slot("", if (b) "1" else "0", false)
-    case Expr.EVar(s, _, _) => emitVar(s, prefix, ens, ps, strs, defs)
-    case Expr.EStr(s, _, _) => emitStrAs(s, prefix, strs, "s")
-    case Expr.EPrint(inner, _, _) => emitPrint(inner, prefix, strs, defs, ens, ps)
-    case Expr.ECall(f, args, _, _) => emitCall(f, args, prefix, strs, defs, ens, ps)
-    case Expr.EBin(op, l, r, _, _) => emitBin(op, l, r, prefix, strs, defs, ens, ps)
+    case Expr.EVar(s, _) => emitVar(s, prefix, ens, ps, strs, defs)
+    case Expr.EStr(s, _) => emitStrAs(s, prefix, strs, "s")
+    case Expr.EPrint(inner, _) => emitPrint(inner, prefix, strs, defs, ens, ps)
+    case Expr.ECall(f, args, _) => emitCall(f, args, prefix, strs, defs, ens, ps)
+    case Expr.EBin(op, l, r, _) => emitBin(op, l, r, prefix, strs, defs, ens, ps)
     case Expr.EUn(op, inner) => emitUn(op, inner, prefix, strs, defs, ens, ps)
     case Expr.ENamed(_, inner) => emitExprFid(inner, prefix, strs, defs, ens, ps, fid)
-    case Expr.EMethod(recv, name, args, _, _) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps, fid) else if (name == "apply") emitApplyRecv(recv, args, prefix, strs, defs, ens, ps, fid) else if (name == "map") emitIoMap(recv, args, prefix, strs, defs, ens, ps, fid) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps)
+    case Expr.EMethod(recv, name, args, _) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps, fid) else if (name == "apply") emitApplyRecv(recv, args, prefix, strs, defs, ens, ps, fid) else if (name == "map") emitIoMap(recv, args, prefix, strs, defs, ens, ps, fid) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps)
     case Expr.ELam(p, body) => emitLam(p, body, prefix, strs, defs, ens, ps)
     case Expr.EIf(c, t, el) => emitIfFid(c, t, el, prefix, strs, defs, ens, ps, fid)
-    case Expr.EField(recv, name, _, _) => emitField(recv, name, prefix, ens, ps)
-    case Expr.EMatch(s, arms, _, _) => emitMatch(s, arms, prefix, strs, defs, ens, ps)
+    case Expr.EField(recv, name, _) => emitField(recv, name, prefix, ens, ps)
+    case Expr.EMatch(s, arms, _) => emitMatch(s, arms, prefix, strs, defs, ens, ps)
     case Expr.EList(xs) => emitList(xs, prefix, strs, defs, ens, ps)
     case Expr.ETuple(xs) => emitTuple(xs, prefix, strs, defs, ens, ps)
     case Expr.EInterp(s) => emitInterp(s, prefix, strs, defs, ens, ps)
     case Expr.EFloat(s) => emitFloatBits(s, prefix)
-    case Expr.EFor(bs, body, _, _) => emitExprFid(desugarFor(bs, body), prefix, strs, defs, ens, ps, fid)
+    case Expr.EFor(bs, body, _) => emitExprFid(desugarFor(bs, body), prefix, strs, defs, ens, ps, fid)
     case Expr.EUnit => Slot("", "null", true)
     case _ => Slot("", "0", false)
   }
@@ -299,11 +302,11 @@ def emitFunRef(d: Fun, prefix: String, strs: List[String], defs: List[Fun], ens:
   }
 
 def emitFunRef2(name: String, params: List[Param], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  if (List.len(params) == 2) emitExpr(etaFold(name), prefix, strs, defs, ens, ps) else if (List.isEmpty(params)) emitLam("_", Expr.ECall(name, noExpr(), 0, ""), prefix, strs, defs, ens, ps) else emitFunRef1(name, List.head(params), prefix, strs, defs, ens, ps)
+  if (List.len(params) == 2) emitExpr(etaFold(name), prefix, strs, defs, ens, ps) else if (List.isEmpty(params)) emitLam("_", Expr.ECall(name, noExpr(), 0), prefix, strs, defs, ens, ps) else emitFunRef1(name, List.head(params), prefix, strs, defs, ens, ps)
 
 def emitFunRef1(name: String, p: Param, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   p match {
-    case Param(n, _, _, _) => emitLam(n, Expr.ECall(name, Expr.EVar(n, 0, "") :: noExpr(), 0, ""), prefix, strs, defs, ens, ps)
+    case Param(n, _, _, _) => emitLam(n, Expr.ECall(name, Expr.EVar(n, 0) :: noExpr(), 0), prefix, strs, defs, ens, ps)
   }
 
 def emitBareCtor(s: String, prefix: String, ens: List[En]): Slot =
@@ -329,7 +332,7 @@ def desugarFor(bs: List[Bind], body: Expr): Expr =
   desugarForRev(List.reverse(bs), forYield(bs, body))
 
 def forYield(bs: List[Bind], body: Expr): Expr =
-  if (hasDraw(bs)) Expr.ECall("IO.pure", body :: noExpr(), 0, "") else body
+  if (hasDraw(bs)) Expr.ECall("IO.pure", body :: noExpr(), 0) else body
 
 def hasDraw(bs: List[Bind]): Bool =
   if (List.isEmpty(bs)) false else bindIsDraw(List.head(bs)) || hasDraw(List.tail(bs))
@@ -360,19 +363,19 @@ def wrapBindGo(draw: Bool, name: String, v: Expr, body: Expr): Expr =
   if (draw) wrapDraw(name, v, body) else if (name == "__guard") wrapGuard(v, body) else wrapEq(name, v, body)
 
 def wrapGuard(c: Expr, body: Expr): Expr =
-  Expr.EIf(c, body, Expr.ECall("IO.fail", Expr.EStr("guard", 0, "") :: noExpr(), 0, ""))
+  Expr.EIf(c, body, Expr.ECall("IO.fail", Expr.EStr("guard", 0) :: noExpr(), 0))
 
 def wrapDraw(name: String, v: Expr, body: Expr): Expr =
-  if (isSimpleBind(name)) Expr.EMethod(v, "flatMap", Expr.ELam(name, body) :: noExpr(), 0, "") else wrapPatDraw(name, v, body)
+  if (isSimpleBind(name)) Expr.EMethod(v, "flatMap", Expr.ELam(name, body) :: noExpr(), 0) else wrapPatDraw(name, v, body)
 
 def wrapPatDraw(pat: String, v: Expr, body: Expr): Expr =
-  Expr.EMethod(Expr.EMethod(v, "flatMap", Expr.ELam("__p", Expr.ECall("IO.pure", Expr.EMatch(Expr.EVar("__p", 0, ""), Arm(pat, "", patResult(pat)) :: noArm(), 0, "") :: noExpr(), 0, "")) :: noExpr(), 0, ""), "flatMap", Expr.ELam(patBindName(pat), body) :: noExpr(), 0, "")
+  Expr.EMethod(Expr.EMethod(v, "flatMap", Expr.ELam("__p", Expr.ECall("IO.pure", Expr.EMatch(Expr.EVar("__p", 0), Arm(pat, "", patResult(pat)) :: noArm(), 0) :: noExpr(), 0)) :: noExpr(), 0), "flatMap", Expr.ELam(patBindName(pat), body) :: noExpr(), 0)
 
 def patResult(pat: String): Expr =
-  if (isConsPat(pat)) Expr.EVar(consHead(pat), 0, "") else if (hasComma(patBind(pat))) Expr.ETuple(patEVars(splitPat(patBind(pat)))) else Expr.EVar(fieldBind(patBind(pat)), 0, "")
+  if (isConsPat(pat)) Expr.EVar(consHead(pat), 0) else if (hasComma(patBind(pat))) Expr.ETuple(patEVars(splitPat(patBind(pat)))) else Expr.EVar(fieldBind(patBind(pat)), 0)
 
 def patEVars(ns: List[String]): List[Expr] =
-  if (List.isEmpty(ns)) noExpr() else Expr.EVar(fieldBind(List.head(ns)), 0, "") :: patEVars(List.tail(ns))
+  if (List.isEmpty(ns)) noExpr() else Expr.EVar(fieldBind(List.head(ns)), 0) :: patEVars(List.tail(ns))
 
 def patBindName(pat: String): String =
   if (isConsPat(pat)) consHead(pat) else if (hasComma(patBind(pat))) Str.concat("(", Str.concat(joinComma(splitPat(patBind(pat))), ")")) else fieldBind(patBind(pat))
@@ -381,14 +384,14 @@ def joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) List.head(xs) else Str.concat(List.head(xs), Str.concat(", ", joinComma(List.tail(xs))))
 
 def wrapEq(name: String, v: Expr, body: Expr): Expr =
-  if (eqIsLet(name)) Expr.EMethod(Expr.ELam(name, body), "apply", nameSig(name, v) :: noExpr(), 0, "") else wrapDraw(name, Expr.ECall("IO.pure", v :: noExpr(), 0, ""), body)
+  if (eqIsLet(name)) Expr.EMethod(Expr.ELam(name, body), "apply", nameSig(name, v) :: noExpr(), 0) else wrapDraw(name, Expr.ECall("IO.pure", v :: noExpr(), 0), body)
 
 def nameSig(name: String, v: Expr): Expr =
   if (name == "_" || !isSimpleBind(name)) v else nameSigGo(name, v)
 
 def nameSigGo(name: String, v: Expr): Expr =
   v match {
-    case Expr.ECall(f, args, _, _) => if (sigCtorKit(f)) Expr.ECall(Str.concat(f, "N"), Expr.EStr(name, 0, "") :: args, 0, "") else v
+    case Expr.ECall(f, args, _) => if (sigCtorKit(f)) Expr.ECall(Str.concat(f, "N"), Expr.EStr(name, 0) :: args, 0) else v
     case _ => v
   }
 
@@ -408,7 +411,7 @@ def interpParts(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
   if (i >= Str.len(s)) interpPartsEnd(lit, acc) else interpPartsCh(s, i, lit, acc, Str.charAt(s, i))
 
 def interpPartsEnd(lit: String, acc: List[Expr]): List[Expr] =
-  if (lit == "") List.reverse(acc) else List.reverse(Expr.EStr(lit, 0, "") :: acc)
+  if (lit == "") List.reverse(acc) else List.reverse(Expr.EStr(lit, 0) :: acc)
 
 def interpPartsCh(s: String, i: Int, lit: String, acc: List[Expr], c: Int): List[Expr] =
   if (c == 36) interpPartsDollar(s, i, lit, acc) else interpParts(s, i + 1, Str.concat(lit, Str.slice(s, i, i + 1)), acc)
@@ -429,10 +432,10 @@ def interpPartsIdent(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr
   interpPartsIdent2(s, i, i, lit, acc)
 
 def interpPartsIdent2(s: String, i: Int, start: Int, lit: String, acc: List[Expr]): List[Expr] =
-  if (i >= Str.len(s)) interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i), 0, ""), acc, s, i) else if (isIdentCont(Str.charAt(s, i))) interpPartsIdent2(s, i + 1, start, lit, acc) else interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i), 0, ""), acc, s, i)
+  if (i >= Str.len(s)) interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i) else if (isIdentCont(Str.charAt(s, i))) interpPartsIdent2(s, i + 1, start, lit, acc) else interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i)
 
 def interpPartsFlush(lit: String, e: Expr, acc: List[Expr], s: String, i: Int): List[Expr] =
-  if (lit == "") interpParts(s, i, "", e :: acc) else interpParts(s, i, "", e :: Expr.EStr(lit, 0, "") :: acc)
+  if (lit == "") interpParts(s, i, "", e :: acc) else interpParts(s, i, "", e :: Expr.EStr(lit, 0) :: acc)
 
 def interpPartsBrace(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
   interpPartsBrace2(s, closeBrace(s, i + 2, 1), i, lit, acc)
@@ -456,7 +459,7 @@ def emitInterpFold(parts: List[Expr], prefix: String, strs: List[String], defs: 
 
 def emitInterpPart(e: Expr, prefix: String, i: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   e match {
-    case Expr.EStr(s, _, _) => emitStrAs(s, Str.concat(prefix, Str.concat("_l", Str.fromInt(i))), strs, "s")
+    case Expr.EStr(s, _) => emitStrAs(s, Str.concat(prefix, Str.concat("_l", Str.fromInt(i))), strs, "s")
     case _ => emitInterpExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps)
   }
 
@@ -516,7 +519,7 @@ def emitStr(s: String, prefix: String, strs: List[String]): Slot =
   emitStrAs(s, prefix, strs, "ss")
 
 def emitStrAs(s: String, prefix: String, strs: List[String], stem: String): Slot =
-  emitStr2(prefix, strIndex(strs, s, 0), Str.len(s) + 1, stem)
+  emitStr2(prefix, strIndex(strs, s, 0), strArr(s), stem)
 
 def emitStr2(prefix: String, idx: Int, len: Int, stem: String): Slot =
   Slot(join(line(Str.concat(tmp(prefix, "gep"), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(len), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0")))))), line(Str.concat(tmp(prefix, stem), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(prefix, "gep"), ")"))))), pct(prefix, stem), true)
@@ -526,7 +529,7 @@ def emitPrint(inner: Expr, prefix: String, strs: List[String], defs: List[Fun], 
 
 def emitSzString(inner: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   inner match {
-    case Expr.EStr(s, _, _) => emitStr(s, prefix, strs)
+    case Expr.EStr(s, _) => emitStr(s, prefix, strs)
     case _ => emitExpr(inner, Str.concat(prefix, "_e"), strs, defs, ens, ps)
   }
 
@@ -539,10 +542,10 @@ def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: List[String], de
 def isFloatExpr(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
   e match {
     case Expr.EFloat(_) => true
-    case Expr.EVar(s, _, _) => paramTy(ps, s) == "Float"
-    case Expr.ECall(f, _, _, _) => funRetStr(defs, f) == "Float" || f == "Float.fromInt"
-    case Expr.EMethod(r, n, _, _, _) => isFloatMeth(r, n) || isFloatExpr(r, ps, defs)
-    case Expr.EBin(_, a, b, _, _) => isFloatExpr(a, ps, defs) || isFloatExpr(b, ps, defs)
+    case Expr.EVar(s, _) => paramTy(ps, s) == "Float"
+    case Expr.ECall(f, _, _) => funRetStr(defs, f) == "Float" || f == "Float.fromInt"
+    case Expr.EMethod(r, n, _, _) => isFloatMeth(r, n) || isFloatExpr(r, ps, defs)
+    case Expr.EBin(_, a, b, _) => isFloatExpr(a, ps, defs) || isFloatExpr(b, ps, defs)
     case Expr.EUn(_, inner) => isFloatExpr(inner, ps, defs)
     case Expr.ENamed(_, inner) => isFloatExpr(inner, ps, defs)
     case _ => false
@@ -603,7 +606,7 @@ def llvmFCmp(op: String): String =
 
 def isFloatMeth(r: Expr, n: String): Bool =
   r match {
-    case Expr.EVar(m, _, _) => m == "Float" && n == "fromInt"
+    case Expr.EVar(m, _) => m == "Float" && n == "fromInt"
     case _ => false
   }
 
@@ -757,14 +760,14 @@ def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
 
 def exprIsI64Go(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
   e match {
-    case Expr.EInt(_, _, _) => true
+    case Expr.EInt(_, _) => true
     case Expr.EBool(_) => true
-    case Expr.EVar(s, _, _) => paramIsI64(ps, s) || isIntSsa(s)
-    case Expr.EBin(op, _, _, _, _) => op != "::"
+    case Expr.EVar(s, _) => paramIsI64(ps, s) || isIntSsa(s)
+    case Expr.EBin(op, _, _, _) => op != "::"
     case Expr.EUn(_, _) => true
-    case Expr.ECall(f, args, _, _) => exprCallI64(f, args, ps, defs)
-    case Expr.EMethod(recv, name, args, _, _) => exprMethI64(recv, name, args, ps, defs)
-    case Expr.EMatch(_, arms, _, _) => exprIsI64Match(arms, ps, defs)
+    case Expr.ECall(f, args, _) => exprCallI64(f, args, ps, defs)
+    case Expr.EMethod(recv, name, args, _) => exprMethI64(recv, name, args, ps, defs)
+    case Expr.EMatch(_, arms, _) => exprIsI64Match(arms, ps, defs)
     case Expr.EIf(_, t, _) => exprIsI64(t, ps, defs)
     case Expr.ENamed(_, inner) => exprIsI64(inner, ps, defs)
     case _ => false
@@ -824,7 +827,7 @@ def exprMethodI64(recv: Expr, name: String, defs: List[Fun]): Bool =
 
 def exprMethodI64Go(recv: Expr, name: String, defs: List[Fun]): Bool =
   recv match {
-    case Expr.EVar(en, _, _) => callIsI64(Str.concat(en, Str.concat(".", name)), defs) || callIsI64(name, defs)
+    case Expr.EVar(en, _) => callIsI64(Str.concat(en, Str.concat(".", name)), defs) || callIsI64(name, defs)
     case _ => false
   }
 
@@ -984,16 +987,16 @@ def emitNetServe2(rt: String, port: Slot, fn: Expr, prefix: String, defs: List[F
 def netServePtr(e: Expr, defs: List[Fun]): String =
   e match {
     case Expr.ELam(p, body) => netServePtrLam(p, body, defs)
-    case Expr.EVar(f, _, _) => funPtr(defs, f)
-    case Expr.EMethod(recv, name, _, _, _) => methodPtr(recv, name)
-    case Expr.ECall(f, _, _, _) => funPtr(defs, f)
+    case Expr.EVar(f, _) => funPtr(defs, f)
+    case Expr.EMethod(recv, name, _, _) => methodPtr(recv, name)
+    case Expr.ECall(f, _, _) => funPtr(defs, f)
     case _ => "null"
   }
 
 def netServePtrLam(p: String, body: Expr, defs: List[Fun]): String =
   body match {
-    case Expr.ECall(f, args, _, _) => if (etaOne(p, args)) funPtr(defs, f) else "null"
-    case Expr.EMethod(recv, name, args, _, _) => if (etaOne(p, args)) methodPtr(recv, name) else "null"
+    case Expr.ECall(f, args, _) => if (etaOne(p, args)) funPtr(defs, f) else "null"
+    case Expr.EMethod(recv, name, args, _) => if (etaOne(p, args)) methodPtr(recv, name) else "null"
     case _ => "null"
   }
 
@@ -1002,7 +1005,7 @@ def etaOne(p: String, args: List[Expr]): Bool =
 
 def isVarName(e: Expr, n: String): Bool =
   e match {
-    case Expr.EVar(s, _, _) => s == n
+    case Expr.EVar(s, _) => s == n
     case _ => false
   }
 
@@ -1019,7 +1022,7 @@ def symOfHit(d: Fun): String =
 
 def methodPtr(recv: Expr, name: String): String =
   recv match {
-    case Expr.EVar(mod, _, _) => Str.concat("@sz_user_", Str.concat(if (mod == "") "Main" else mod, Str.concat("_", name)))
+    case Expr.EVar(mod, _) => Str.concat("@sz_user_", Str.concat(if (mod == "") "Main" else mod, Str.concat("_", name)))
     case _ => "null"
   }
 
@@ -1049,8 +1052,8 @@ def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, str
 
 def isIntElem(e: Expr): Bool =
   e match {
-    case Expr.ECall(f, _, _, _) => f == "List.indices" || f == "List.range"
-    case Expr.EMethod(_, name, _, _, _) => name == "indices" || name == "range"
+    case Expr.ECall(f, _, _) => f == "List.indices" || f == "List.range"
+    case Expr.EMethod(_, name, _, _) => name == "indices" || name == "range"
     case _ => false
   }
 
@@ -1067,7 +1070,7 @@ def emitMapKit2(pred: Bool, rt: String, inner: Slot, lam: Expr, prefix: String, 
 
 def emitMapKitPick(pred: Bool, rt: String, ic: String, iv: String, io: Bool, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], elemTy: String): Slot =
   lam match {
-    case Expr.EVar(f, _, _) => if (!pred && isLocalPack(f, ps)) emitMapKitPack(rt, ic, iv, io, f, prefix) else emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, elemTy)
+    case Expr.EVar(f, _) => if (!pred && isLocalPack(f, ps)) emitMapKitPack(rt, ic, iv, io, f, prefix) else emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, elemTy)
     case _ => emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, elemTy)
   }
 
@@ -1085,14 +1088,14 @@ def wrapPh(e: Expr, ps: List[Param], defs: List[Fun]): Expr =
 
 def etaKit(e: Expr, ps: List[Param], defs: List[Fun]): Expr =
   e match {
-    case Expr.ECall(f, args, _, _) => if (List.isEmpty(args) && kitEta1(f)) phCall(f) else e
-    case Expr.EVar(f, _, _) => if (etaVar(f, ps, defs)) phCall(f) else e
+    case Expr.ECall(f, args, _) => if (List.isEmpty(args) && kitEta1(f)) phCall(f) else e
+    case Expr.EVar(f, _) => if (etaVar(f, ps, defs)) phCall(f) else e
     case Expr.ENamed(_, inner) => etaKit(inner, ps, defs)
     case _ => e
   }
 
 def phCall(f: String): Expr =
-  Expr.ELam("_ph", Expr.ECall(f, Expr.EVar("_ph", 0, "") :: noExpr(), 0, ""))
+  Expr.ELam("_ph", Expr.ECall(f, Expr.EVar("_ph", 0) :: noExpr(), 0))
 
 def etaVar(f: String, ps: List[Param], defs: List[Fun]): Bool =
   if (kitEta1(f)) true else paramTy(ps, f) == "" && etaFun1(findDef(defs, f))
@@ -1188,12 +1191,12 @@ def emitFoldKit4(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, st
 def foldLam(e: Expr): Expr =
   e match {
     case Expr.ELam(_, _) => e
-    case Expr.EVar(f, _, _) => etaFold(f)
+    case Expr.EVar(f, _) => etaFold(f)
     case _ => e
   }
 
 def etaFold(f: String): Expr =
-  Expr.ELam("__tup", Expr.EMatch(Expr.EVar("__tup", 0, ""), Arm("(a, b)", "", Expr.ECall(f, Expr.EVar("a", 0, "") :: Expr.EVar("b", 0, "") :: noExpr(), 0, "")) :: noArm(), 0, ""))
+  Expr.ELam("__tup", Expr.EMatch(Expr.EVar("__tup", 0), Arm("(a, b)", "", Expr.ECall(f, Expr.EVar("a", 0) :: Expr.EVar("b", 0) :: noExpr(), 0)) :: noArm(), 0))
 
 def emitFoldKit4b(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   inner match {
@@ -1350,18 +1353,18 @@ def nethBindTy(bind: String, body: Expr, rest: List[Param], defs: List[Fun]): St
 
 def nameIntUse(e: Expr, n: String): Bool =
   e match {
-    case Expr.ECall(f, args, _, _) => nameIntCall(f, args, n) || nameIntUseList(args, n)
-    case Expr.EMethod(r, name, args, _, _) => nameIntCall(name, args, n) || nameIntUse(r, n) || nameIntUseList(args, n)
-    case Expr.EBin(op, l, r, _, _) => nameIntUse(l, n) || nameIntUse(r, n)
+    case Expr.ECall(f, args, _) => nameIntCall(f, args, n) || nameIntUseList(args, n)
+    case Expr.EMethod(r, name, args, _) => nameIntCall(name, args, n) || nameIntUse(r, n) || nameIntUseList(args, n)
+    case Expr.EBin(op, l, r, _) => nameIntUse(l, n) || nameIntUse(r, n)
     case Expr.EUn(_, inner) => nameIntUse(inner, n)
     case Expr.EIf(c, t, el) => nameIntUse(c, n) || nameIntUse(t, n) || nameIntUse(el, n)
     case Expr.ELam(p, body) => if (p == n) false else nameIntUse(body, n)
-    case Expr.EMatch(s, arms, _, _) => nameIntUse(s, n) || nameIntUseArms(arms, n)
-    case Expr.EFor(bs, body, _, _) => nameIntUseBinds(bs, n) || nameIntUse(body, n)
+    case Expr.EMatch(s, arms, _) => nameIntUse(s, n) || nameIntUseArms(arms, n)
+    case Expr.EFor(bs, body, _) => nameIntUseBinds(bs, n) || nameIntUse(body, n)
     case Expr.EList(xs) => nameIntUseList(xs, n)
     case Expr.ETuple(xs) => nameIntUseList(xs, n)
     case Expr.ENamed(_, inner) => nameIntUse(inner, n)
-    case Expr.EPrint(inner, _, _) => nameIntUse(inner, n)
+    case Expr.EPrint(inner, _) => nameIntUse(inner, n)
     case _ => false
   }
 
@@ -1373,7 +1376,7 @@ def nameIsVarAt(args: List[Expr], k: Int, n: String): Bool =
 
 def nameIsVar(e: Expr, n: String): Bool =
   e match {
-    case Expr.EVar(s, _, _) => s == n
+    case Expr.EVar(s, _) => s == n
     case _ => false
   }
 
@@ -1398,8 +1401,8 @@ def nameIntUseBind(b: Bind, n: String): Bool =
 
 def matchLamBindTy(e: Expr): String =
   e match {
-    case Expr.EMatch(_, arms, _, _) => if (armsIntScrut(arms)) "Int" else "Any"
-    case Expr.ECall(f, args, _, _) => if (f == "IO.pure" && !List.isEmpty(args)) matchLamBindTy(List.head(args)) else "Any"
+    case Expr.EMatch(_, arms, _) => if (armsIntScrut(arms)) "Int" else "Any"
+    case Expr.ECall(f, args, _) => if (f == "IO.pure" && !List.isEmpty(args)) matchLamBindTy(List.head(args)) else "Any"
     case _ => "Any"
   }
 
@@ -1419,10 +1422,10 @@ def phBindTy(e: Expr): String =
 
 def phUsedAsInt(e: Expr): Bool =
   e match {
-    case Expr.EBin(op, l, r, _, _) => phBinInt(op, l, r)
+    case Expr.EBin(op, l, r, _) => phBinInt(op, l, r)
     case Expr.EUn(_, _) => true
-    case Expr.ECall(f, args, _, _) => phCallInt(f, args)
-    case Expr.EMethod(_, name, args, _, _) => phCallInt(name, args)
+    case Expr.ECall(f, args, _) => phCallInt(f, args)
+    case Expr.EMethod(_, name, args, _) => phCallInt(name, args)
     case Expr.ENamed(_, inner) => phUsedAsInt(inner)
     case _ => false
   }
@@ -1435,7 +1438,7 @@ def phCmpInt(l: Expr, r: Expr): Bool =
 
 def phPtrSide(e: Expr): Bool =
   e match {
-    case Expr.EStr(_, _, _) => true
+    case Expr.EStr(_, _) => true
     case Expr.EList(_) => true
     case Expr.EUnit => true
     case _ => false
@@ -1456,7 +1459,7 @@ def phUsedAsIntArgs(xs: List[Expr]): Bool =
 def isPhExpr(e: Expr): Bool =
   e match {
     case Expr.EHole => true
-    case Expr.EVar(s, _, _) => s == "_ph"
+    case Expr.EVar(s, _) => s == "_ph"
     case _ => false
   }
 
@@ -2093,7 +2096,7 @@ def listAsIntOf(args: List[Expr], ps: List[Param], defs: List[Fun]): String =
 def listAsIntExpr(e: Expr, ps: List[Param], defs: List[Fun]): String =
   e match {
     case Expr.EList(xs) => if (List.isEmpty(xs) || exprIsI64(List.head(xs), ps, defs)) "1" else "0"
-    case Expr.EVar(s, _, _) => if (paramIsI64List(ps, s)) "1" else "0"
+    case Expr.EVar(s, _) => if (paramIsI64List(ps, s)) "1" else "0"
     case _ => "0"
   }
 
@@ -2240,26 +2243,26 @@ def emitPropCheckPred(code: String, nv: String, no: Bool, rv: String, ro: Bool, 
 
 def exprMentions(e: Expr, recv: Expr): Bool =
   recv match {
-    case Expr.EVar(s, _, _) => exprHasVar(e, s)
+    case Expr.EVar(s, _) => exprHasVar(e, s)
     case _ => false
   }
 
 def exprHasVar(e: Expr, s: String): Bool =
   e match {
-    case Expr.EVar(n, _, _) => n == s
-    case Expr.EPrint(inner, _, _) => exprHasVar(inner, s)
-    case Expr.ECall(_, args, _, _) => listHasVar(args, s)
-    case Expr.EMethod(recv, _, args, _, _) => exprHasVar(recv, s) || listHasVar(args, s)
-    case Expr.EField(recv, _, _, _) => exprHasVar(recv, s)
-    case Expr.EBin(_, l, r, _, _) => exprHasVar(l, s) || exprHasVar(r, s)
+    case Expr.EVar(n, _) => n == s
+    case Expr.EPrint(inner, _) => exprHasVar(inner, s)
+    case Expr.ECall(_, args, _) => listHasVar(args, s)
+    case Expr.EMethod(recv, _, args, _) => exprHasVar(recv, s) || listHasVar(args, s)
+    case Expr.EField(recv, _, _) => exprHasVar(recv, s)
+    case Expr.EBin(_, l, r, _) => exprHasVar(l, s) || exprHasVar(r, s)
     case Expr.EUn(_, inner) => exprHasVar(inner, s)
     case Expr.ELam(_, body) => exprHasVar(body, s)
     case Expr.EIf(c, t, el) => exprHasVar(c, s) || exprHasVar(t, s) || exprHasVar(el, s)
-    case Expr.EMatch(sc, arms, _, _) => exprHasVar(sc, s) || armsHasVar(arms, s)
+    case Expr.EMatch(sc, arms, _) => exprHasVar(sc, s) || armsHasVar(arms, s)
     case Expr.EList(xs) => listHasVar(xs, s)
     case Expr.ETuple(xs) => listHasVar(xs, s)
     case Expr.ENamed(_, inner) => exprHasVar(inner, s)
-    case Expr.EFor(bs, body, _, _) => bindsHasVar(bs, s) || exprHasVar(body, s)
+    case Expr.EFor(bs, body, _) => bindsHasVar(bs, s) || exprHasVar(body, s)
     case _ => false
   }
 
@@ -2405,7 +2408,7 @@ def emitApply5(unbox: Bool, code: String, prefix: String): Slot =
 def emitApplyRecv(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   recv match {
     case Expr.ELam(p, body) => emitApplyLam(p, body, args, prefix, strs, defs, ens, ps, fid)
-    case Expr.EMatch(_, arms, _, _) => emitMatch(applyScrut(args), arms, prefix, strs, defs, ens, ps)
+    case Expr.EMatch(_, arms, _) => emitMatch(applyScrut(args), arms, prefix, strs, defs, ens, ps)
     case _ => emitApplyRecvTy(funTyRecv(recv, defs, ps), recv, args, prefix, strs, defs, ens, ps)
   }
 
@@ -2434,23 +2437,23 @@ def applyBindTyHit(ty: String, argE: Expr): String =
 
 def ctorTyOf(e: Expr): String =
   e match {
-    case Expr.ECall(f, _, _, _) => if (isCtorName(f)) f else "Any"
-    case Expr.EVar(s, _, _) => if (isCtorName(s)) s else "Any"
+    case Expr.ECall(f, _, _) => if (isCtorName(f)) f else "Any"
+    case Expr.EVar(s, _) => if (isCtorName(s)) s else "Any"
     case _ => "Any"
   }
 
 def exprRetTy(e: Expr, defs: List[Fun], ps: List[Param]): String =
   e match {
-    case Expr.ECall(f, args, _, _) => exprCallTy(callRetTy(f, funRetStr(defs, f), args, defs, ps), f, e, defs, ps)
-    case Expr.EMethod(r, name, _, _, _) => nonemptyTy(funRetStr(defs, qualRecv(r, name)), e, defs, ps)
-    case Expr.EVar(s, _, _) => nonemptyTy(paramTy(ps, s), e, defs, ps)
+    case Expr.ECall(f, args, _) => exprCallTy(callRetTy(f, funRetStr(defs, f), args, defs, ps), f, e, defs, ps)
+    case Expr.EMethod(r, name, _, _) => nonemptyTy(funRetStr(defs, qualRecv(r, name)), e, defs, ps)
+    case Expr.EVar(s, _) => nonemptyTy(paramTy(ps, s), e, defs, ps)
     case Expr.ETuple(xs) => tupExprTy(xs, defs, ps)
     case Expr.EList(xs) => listLitTy(xs, defs, ps)
     case Expr.EIf(_, t, _) => exprRetTy(t, defs, ps)
-    case Expr.EMatch(_, arms, _, _) => exprRetTyMatch(arms, defs, ps)
-    case Expr.EInt(_, _, _) => "Int"
+    case Expr.EMatch(_, arms, _) => exprRetTyMatch(arms, defs, ps)
+    case Expr.EInt(_, _) => "Int"
     case Expr.EBool(_) => "Bool"
-    case Expr.EStr(_, _, _) => "String"
+    case Expr.EStr(_, _) => "String"
     case Expr.EInterp(_) => "String"
     case _ => if (exprIsI64(e, ps, defs)) "Int" else "Any"
   }
@@ -2540,8 +2543,8 @@ def bindAlias(p: String, av: String): String =
 
 def funTyRecv(recv: Expr, defs: List[Fun], ps: List[Param]): String =
   recv match {
-    case Expr.EVar(s, _, _) => funTyVar(s, defs, ps)
-    case Expr.ECall(f, _, _, _) => funRetStr(defs, f)
+    case Expr.EVar(s, _) => funTyVar(s, defs, ps)
+    case Expr.ECall(f, _, _) => funRetStr(defs, f)
     case Expr.ELam(p, _) => if (p == "__tup") "(Any, Any) => Int" else "Int => Int"
     case _ => "Any"
   }
@@ -2906,7 +2909,7 @@ def headUnbox(args: List[Expr], ps: List[Param]): Bool =
 def headUnbox1(e: Expr, ps: List[Param]): Bool =
   e match {
     case Expr.EList(xs) => headUnboxList(xs)
-    case Expr.EVar(s, _, _) => isI64ListTy(paramTy(ps, s))
+    case Expr.EVar(s, _) => isI64ListTy(paramTy(ps, s))
     case _ => false
   }
 
@@ -2918,7 +2921,7 @@ def headUnboxList(xs: List[Expr]): Bool =
 
 def headIsInt(xs: List[Expr]): Bool =
   List.head(xs) match {
-    case Expr.EInt(_, _, _) => true
+    case Expr.EInt(_, _) => true
     case _ => false
   }
 
@@ -3327,7 +3330,7 @@ def isTupField(name: String): Bool =
 
 def emitFieldEn(recv: Expr, name: String, prefix: String, ens: List[En], ps: List[Param]): Slot =
   recv match {
-    case Expr.EVar(en, _, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else emitCtor(en, name, prefix, ens)
+    case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else emitCtor(en, name, prefix, ens)
     case _ => Slot("", "0", false)
   }
 
@@ -3351,7 +3354,7 @@ def emitRecFieldMaybeUnbox(code: String, v: String, prefix: String, unbox: Bool)
 
 def emitTupField(recv: Expr, name: String, prefix: String, ps: List[Param]): Slot =
   recv match {
-    case Expr.EVar(s, _, _) => emitTupSel(Str.concat("%", s), tupSlots(paramTy(ps, s)), tupIdx(name), prefix, 0)
+    case Expr.EVar(s, _) => emitTupSel(Str.concat("%", s), tupSlots(paramTy(ps, s)), tupIdx(name), prefix, 0)
     case _ => Slot("", "0", false)
   }
 
@@ -3389,9 +3392,9 @@ def requirePred(args: List[Expr]): Expr =
 
 def requirePredIo(e: Expr): Bool =
   e match {
-    case Expr.EFor(_, _, _, _) => true
-    case Expr.ECall(f, _, _, _) => Str.startsWith(f, "IO.")
-    case Expr.EMethod(_, name, _, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
+    case Expr.EFor(_, _, _) => true
+    case Expr.ECall(f, _, _) => Str.startsWith(f, "IO.")
+    case Expr.EMethod(_, name, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
     case Expr.EIf(_, t, el) => requirePredIo(t) || requirePredIo(el)
     case _ => false
   }
@@ -3405,7 +3408,7 @@ def emitRequireJoin(pred: Slot, body: Slot): Slot =
 
 def emitCtorCall2(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   recv match {
-    case Expr.EVar(en, _, _) => if (paramTy(ps, en) != "") emitMethodVal(recv, name, args, prefix, recvEn(en, ps, ens, defs, name), strs, defs, ens, ps) else emitCtorOrQual(en, name, args, prefix, strs, defs, ens, ps)
+    case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitMethodVal(recv, name, args, prefix, recvEn(en, ps, ens, defs, name), strs, defs, ens, ps) else emitCtorOrQual(en, name, args, prefix, strs, defs, ens, ps)
     case _ => emitMethodVal(recv, name, args, prefix, copyEn(recv, ens, defs), strs, defs, ens, ps)
   }
 
@@ -3447,11 +3450,11 @@ def emitCopy(recv: Expr, args: List[Expr], prefix: String, strs: List[String], d
 
 def copyEn(recv: Expr, ens: List[En], defs: List[Fun]): String =
   recv match {
-    case Expr.ECall(f, _, _, _) => copyEnOr(copyEnCall(f, ens, defs), ens)
-    case Expr.EMethod(r, name, _, _, _) => copyEnMeth(r, name, ens, defs)
-    case Expr.EVar(s, _, _) => copyEnOr(ctorHead(s, ens), ens)
+    case Expr.ECall(f, _, _) => copyEnOr(copyEnCall(f, ens, defs), ens)
+    case Expr.EMethod(r, name, _, _) => copyEnMeth(r, name, ens, defs)
+    case Expr.EVar(s, _) => copyEnOr(ctorHead(s, ens), ens)
     case Expr.EIf(_, t, _) => copyEn(t, ens, defs)
-    case Expr.EMatch(_, arms, _, _) => copyEnMatch(arms, ens, defs)
+    case Expr.EMatch(_, arms, _) => copyEnMatch(arms, ens, defs)
     case Expr.ETuple(xs) => tupExprTy(xs, defs, noParam())
     case _ => copyEnFirst(ens)
   }
@@ -3469,7 +3472,7 @@ def copyEnCall(f: String, ens: List[En], defs: List[Fun]): String =
 
 def copyEnMeth(r: Expr, name: String, ens: List[En], defs: List[Fun]): String =
   r match {
-    case Expr.EVar(mod, _, _) => copyEnOr(if (hasEn(ens, mod)) mod else ctorHead(name, ens), ens)
+    case Expr.EVar(mod, _) => copyEnOr(if (hasEn(ens, mod)) mod else ctorHead(name, ens), ens)
     case _ => copyEn(r, ens, defs)
   }
 
@@ -3541,7 +3544,7 @@ def emitCopyDone2(code: String, pack: Slot, en: String, prefix: String, ens: Lis
   }
 
 def copyKeepArgs(n: Int): List[Expr] =
-  if (n <= 0) noExpr() else Expr.EVar("_", 0, "") :: copyKeepArgs(n - 1)
+  if (n <= 0) noExpr() else Expr.EVar("_", 0) :: copyKeepArgs(n - 1)
 
 def emitCopyPackK(code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], vals: List[String], owns: List[Bool]): Slot =
   emitCopyPackHit(copyOverride(args, k, List.at(names, k)), code, args, prefix, en, names, k, strs, defs, ens, ps, vals, owns)
@@ -3813,12 +3816,12 @@ def patTag2(dot: Int, pat: String, ens: List[En]): Int =
 
 def emitMatch(s: Expr, arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
   s match {
-    case Expr.EVar(n, _, _) => emitMatchV(n, arms, prefix, strs, defs, ens, ps)
+    case Expr.EVar(n, _) => emitMatchV(n, arms, prefix, strs, defs, ens, ps)
     case _ => emitMatch1(emitExpr(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps), arms, prefix, strs, defs, ens, ps, matchSlots(exprRetTy(s, defs, ps)), exprIsI64(s, ps, defs))
   }
 
 def emitMatchV(n: String, arms: List[Arm], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): Slot =
-  emitMatch1(emitExpr(Expr.EVar(n, 0, ""), Str.concat(prefix, "_sc"), strs, defs, ens, ps), arms, prefix, strs, defs, ens, ps, matchSlots(paramTy(ps, n)), paramIsI64(ps, n))
+  emitMatch1(emitExpr(Expr.EVar(n, 0), Str.concat(prefix, "_sc"), strs, defs, ens, ps), arms, prefix, strs, defs, ens, ps, matchSlots(paramTy(ps, n)), paramIsI64(ps, n))
 
 def matchSlots(ty: String): List[String] =
   if (isTupTy(ty)) tupSlots(ty) else listElemSlots(ty)
@@ -4068,7 +4071,7 @@ def emitStrTry3(s: String, prefix: String, i: Int, tag: String, scrut: String, i
   join(strGep(s, prefix, i, tag, idx), join(strLit(prefix, i, tag), join(strEqi(prefix, i, tag, scrut), join(relPtr(pct(ppre(prefix, i), Str.concat("slit", Str.concat(sid(i), tag)))), join(strSeq(prefix, i, tag), strBrTo(prefix, i, tag, fail))))))
 
 def strGep(s: String, prefix: String, i: Int, tag: String, idx: Int): String =
-  line(Str.concat(tmp(ppre(prefix, i), Str.concat("sgep", Str.concat(sid(i), tag))), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(s) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0"))))))
+  line(Str.concat(tmp(ppre(prefix, i), Str.concat("sgep", Str.concat(sid(i), tag))), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0"))))))
 
 def strLit(prefix: String, i: Int, tag: String): String =
   line(Str.concat(tmp(ppre(prefix, i), Str.concat("slit", Str.concat(sid(i), tag))), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(ppre(prefix, i), Str.concat("sgep", Str.concat(sid(i), tag))), ")"))))
@@ -4349,23 +4352,23 @@ def rewriteBind(e: Expr, from: String, to: String): Expr =
 
 def rewriteBind1(e: Expr, from: String, to: String): Expr =
   e match {
-    case Expr.EVar(s, _, _) => if (s == from) Expr.EVar(to, 0, "") else Expr.EVar(s, 0, "")
-    case Expr.EPrint(inner, _, _) => Expr.EPrint(rewriteBind(inner, from, to), 0, "")
-    case Expr.ECall(f, args, _, _) => Expr.ECall(f, rewriteBindList(args, from, to), 0, "")
-    case Expr.EMethod(recv, name, args, _, _) => Expr.EMethod(rewriteBind(recv, from, to), name, rewriteBindList(args, from, to), 0, "")
-    case Expr.EField(recv, name, _, _) => Expr.EField(rewriteBind(recv, from, to), name, 0, "")
-    case Expr.EBin(op, l, r, _, _) => Expr.EBin(op, rewriteBind(l, from, to), rewriteBind(r, from, to), 0, "")
+    case Expr.EVar(s, _) => if (s == from) Expr.EVar(to, 0) else Expr.EVar(s, 0)
+    case Expr.EPrint(inner, _) => Expr.EPrint(rewriteBind(inner, from, to), 0)
+    case Expr.ECall(f, args, _) => Expr.ECall(f, rewriteBindList(args, from, to), 0)
+    case Expr.EMethod(recv, name, args, _) => Expr.EMethod(rewriteBind(recv, from, to), name, rewriteBindList(args, from, to), 0)
+    case Expr.EField(recv, name, _) => Expr.EField(rewriteBind(recv, from, to), name, 0)
+    case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteBind(l, from, to), rewriteBind(r, from, to), 0)
     case Expr.EUn(op, inner) => Expr.EUn(op, rewriteBind(inner, from, to))
     case Expr.ELam(p, body) => Expr.ELam(p, rewriteBind(body, from, to))
     case Expr.EIf(c, t, el) => Expr.EIf(rewriteBind(c, from, to), rewriteBind(t, from, to), rewriteBind(el, from, to))
-    case Expr.EMatch(s, arms, _, _) => Expr.EMatch(rewriteBind(s, from, to), rewriteBindArms(arms, from, to), 0, "")
+    case Expr.EMatch(s, arms, _) => Expr.EMatch(rewriteBind(s, from, to), rewriteBindArms(arms, from, to), 0)
     case Expr.EList(xs) => Expr.EList(rewriteBindList(xs, from, to))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteBindList(xs, from, to))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteBind(inner, from, to))
-    case Expr.EFor(bs, body, _, _) => Expr.EFor(rewriteBindBinds(bs, from, to), rewriteBind(body, from, to), 0, "")
-    case Expr.EInt(n, _, _) => Expr.EInt(n, 0, "")
+    case Expr.EFor(bs, body, _) => Expr.EFor(rewriteBindBinds(bs, from, to), rewriteBind(body, from, to), 0)
+    case Expr.EInt(n, _) => Expr.EInt(n, 0)
     case Expr.EBool(b) => Expr.EBool(b)
-    case Expr.EStr(s, _, _) => Expr.EStr(s, 0, "")
+    case Expr.EStr(s, _) => Expr.EStr(s, 0)
     case Expr.EFloat(s) => Expr.EFloat(s)
     case Expr.EInterp(s) => Expr.EInterp(rewriteInterpStr(s, from, to))
     case Expr.EHole => Expr.EHole
@@ -4513,10 +4516,10 @@ def oneParam(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", p.name) else Str.concat("ptr %", p.name)
 
 def emitDefs(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): String =
-  if (List.isEmpty(ds)) "" else List.join(emitDefsList(ds, strs, all, ens), "")
+  Builder.result(emitDefsB(ds, strs, all, ens, Builder.empty()))
 
-def emitDefsList(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En]): List[String] =
-  if (List.isEmpty(ds)) noStr() else emitDef(List.head(ds), strs, all, ens) :: emitDefsList(List.tail(ds), strs, all, ens)
+def emitDefsB(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], b: Builder): Builder =
+  if (List.isEmpty(ds)) b else emitDefsB(List.tail(ds), strs, all, ens, Builder.append(b, emitDef(List.head(ds), strs, all, ens)))
 
 def emitDef3(ty: String, name: String, params: String, body: Slot): String =
   Str.concat("define internal ", Str.concat(ty, Str.concat(" @sz_user_", Str.concat(name, emitDefSig(params, ty, body)))))
@@ -4546,8 +4549,8 @@ def fromIntHead(args: List[Expr]): Bool =
 
 def fromIntHead1(e: Expr): Bool =
   e match {
-    case Expr.ECall(f, xs, _, _) => f == "List.at" && !headUnbox(xs, noParam())
-    case Expr.EMethod(_, name, xs, _, _) => name == "at" && !headUnbox(xs, noParam())
+    case Expr.ECall(f, xs, _) => f == "List.at" && !headUnbox(xs, noParam())
+    case Expr.EMethod(_, name, xs, _) => name == "at" && !headUnbox(xs, noParam())
     case _ => false
   }
 
@@ -4592,7 +4595,7 @@ def emitDefByRet(name: String, mod: String, ret: String, ps: List[Param], body: 
 def hasTailIf(e: Expr, name: String): Bool =
   e match {
     case Expr.EIf(_, t, el) => isSelfTail(t, name) || isSelfTail(el, name) || hasTailIf(t, name) || hasTailIf(el, name)
-    case Expr.EMatch(_, arms, _, _) => hasTailArm(arms, name)
+    case Expr.EMatch(_, arms, _) => hasTailArm(arms, name)
     case _ => false
   }
 
@@ -4606,8 +4609,8 @@ def hasTailArm1(a: Arm, rest: List[Arm], name: String): Bool =
 
 def isSelfTail(e: Expr, name: String): Bool =
   e match {
-    case Expr.ECall(f, _, _, _) => f == name
-    case Expr.EMethod(_, f, _, _, _) => f == name
+    case Expr.ECall(f, _, _) => f == name
+    case Expr.EMethod(_, f, _, _) => f == name
     case _ => false
   }
 
@@ -4620,7 +4623,7 @@ def oneParamTco(p: Param): String =
 def emitDefTco(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
   body match {
     case Expr.EIf(c, t, el) => emitDefTcoIf(name, mod, ret, ps, c, t, el, strs, defs, ens)
-    case Expr.EMatch(s, arms, _, _) => emitDefTcoMatch(name, mod, ret, ps, s, arms, strs, defs, ens)
+    case Expr.EMatch(s, arms, _) => emitDefTcoMatch(name, mod, ret, ps, s, arms, strs, defs, ens)
     case _ => emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps))
   }
 
@@ -4629,7 +4632,7 @@ def emitDefTcoMatch(name: String, mod: String, ret: String, ps: List[Param], s: 
 
 def emitMatchTail(s: Expr, arms: List[Arm], fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
   s match {
-    case Expr.EVar(n, _, _) => emitMatchTail1(emitExpr(Expr.EVar(n, 0, ""), "body_sc", strs, defs, ens, ps), arms, fname, tret, strs, defs, ens, ps, matchSlots(paramTy(ps, n)))
+    case Expr.EVar(n, _) => emitMatchTail1(emitExpr(Expr.EVar(n, 0), "body_sc", strs, defs, ens, ps), arms, fname, tret, strs, defs, ens, ps, matchSlots(paramTy(ps, n)))
     case _ => emitMatchTail1(emitExpr(s, "body_sc", strs, defs, ens, ps), arms, fname, tret, strs, defs, ens, ps, noStr())
   }
 
@@ -4736,8 +4739,8 @@ def emitTcoRetSlots(ret: String, tv: String, to: Bool, ps: List[Param], tag: Str
 
 def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param]): String =
   e match {
-    case Expr.ECall(_, args, _, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, 0, "", noStr())
-    case Expr.EMethod(_, _, args, _, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, 0, "", noStr())
+    case Expr.ECall(_, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, 0, "", noStr())
+    case Expr.EMethod(_, _, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, 0, "", noStr())
     case _ => line("br label %tco_loop")
   }
 
@@ -4876,24 +4879,24 @@ def paramEnv1(p: Param, rest: List[Param]): List[(String, String)] =
 
 def rwFields(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): Expr =
   e match {
-    case Expr.EPrint(inner, _, _) => Expr.EPrint(rwFields(inner, env, funs, ens, mod), 0, "")
-    case Expr.ECall(f, args, _, _) => rwCall(f, rwFieldList(args, env, funs, ens, mod), funs, mod)
-    case Expr.EMethod(recv, name, args, _, _) => Expr.EMethod(rwFields(recv, env, funs, ens, mod), name, rwFieldList(args, env, funs, ens, mod), 0, "")
-    case Expr.EField(recv, name, _, _) => rwField(rwFields(recv, env, funs, ens, mod), name, env, funs, ens)
-    case Expr.EBin(op, l, r, _, _) => Expr.EBin(op, rwFields(l, env, funs, ens, mod), rwFields(r, env, funs, ens, mod), 0, "")
+    case Expr.EPrint(inner, _) => Expr.EPrint(rwFields(inner, env, funs, ens, mod), 0)
+    case Expr.ECall(f, args, _) => rwCall(f, rwFieldList(args, env, funs, ens, mod), funs, mod)
+    case Expr.EMethod(recv, name, args, _) => Expr.EMethod(rwFields(recv, env, funs, ens, mod), name, rwFieldList(args, env, funs, ens, mod), 0)
+    case Expr.EField(recv, name, _) => rwField(rwFields(recv, env, funs, ens, mod), name, env, funs, ens)
+    case Expr.EBin(op, l, r, _) => Expr.EBin(op, rwFields(l, env, funs, ens, mod), rwFields(r, env, funs, ens, mod), 0)
     case Expr.EUn(op, inner) => Expr.EUn(op, rwFields(inner, env, funs, ens, mod))
     case Expr.ELam(p, body) => Expr.ELam(p, rwFields(body, env, funs, ens, mod))
     case Expr.EIf(c, t, el) => Expr.EIf(rwFields(c, env, funs, ens, mod), rwFields(t, env, funs, ens, mod), rwFields(el, env, funs, ens, mod))
-    case Expr.EMatch(s, arms, _, _) => Expr.EMatch(rwFields(s, env, funs, ens, mod), rwFieldArms(arms, env, funs, ens, mod), 0, "")
+    case Expr.EMatch(s, arms, _) => Expr.EMatch(rwFields(s, env, funs, ens, mod), rwFieldArms(arms, env, funs, ens, mod), 0)
     case Expr.EList(xs) => Expr.EList(rwFieldList(xs, env, funs, ens, mod))
     case Expr.ETuple(xs) => Expr.ETuple(rwFieldList(xs, env, funs, ens, mod))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rwFields(inner, env, funs, ens, mod))
-    case Expr.EFor(bs, body, _, _) => Expr.EFor(rwForBinds(bs, env, funs, ens, mod), rwFields(body, env, funs, ens, mod), 0, "")
+    case Expr.EFor(bs, body, _) => Expr.EFor(rwForBinds(bs, env, funs, ens, mod), rwFields(body, env, funs, ens, mod), 0)
     case _ => e
   }
 
 def rwCall(f: String, args: List[Expr], funs: List[Fun], mod: String): Expr =
-  if (List.isEmpty(findDefMod(funs, mod, f))) Expr.ECall(f, args, 0, "") else Expr.EMethod(Expr.EVar(mod, 0, ""), f, args, 0, "")
+  if (List.isEmpty(findDefMod(funs, mod, f))) Expr.ECall(f, args, 0) else Expr.EMethod(Expr.EVar(mod, 0), f, args, 0)
 
 def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
   if (List.isEmpty(xs)) noExpr() else rwFieldListGo(xs, env, funs, ens, mod)
@@ -4934,27 +4937,27 @@ def rwFieldArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[E
 
 def rwField(recv: Expr, name: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   recv match {
-    case Expr.EVar(en, _, _) => rwFieldVar(en, name, env, ens)
-    case Expr.EMethod(r, m, args, _, _) => rwFieldMethod(r, m, args, name, env, funs, ens)
-    case Expr.ECall(f, args, _, _) => rwFieldTy(Expr.ECall(f, args, 0, ""), name, copyEnCall(f, ens, funs), ens)
+    case Expr.EVar(en, _) => rwFieldVar(en, name, env, ens)
+    case Expr.EMethod(r, m, args, _) => rwFieldMethod(r, m, args, name, env, funs, ens)
+    case Expr.ECall(f, args, _) => rwFieldTy(Expr.ECall(f, args, 0), name, copyEnCall(f, ens, funs), ens)
     case _ => rwFieldTy(recv, name, copyEn(recv, ens, funs), ens)
   }
 
 def rwFieldVar(en: String, name: String, env: List[(String, String)], ens: List[En]): Expr =
-  if (hasEn(ens, en)) Expr.EField(Expr.EVar(en, 0, ""), name, 0, "") else rwFieldTy(Expr.EVar(en, 0, ""), name, getTy(env, en), ens)
+  if (hasEn(ens, en)) Expr.EField(Expr.EVar(en, 0), name, 0) else rwFieldTy(Expr.EVar(en, 0), name, getTy(env, en), ens)
 
 def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, _env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   r match {
-    case Expr.EVar(mod, _, _) => rwFieldQualHit(m, args, name, ens, findDefMod(funs, mod, m))
-    case _ => rwFieldTy(Expr.EMethod(r, m, args, 0, ""), name, copyEn(Expr.EMethod(r, m, args, 0, ""), ens, funs), ens)
+    case Expr.EVar(mod, _) => rwFieldQualHit(m, args, name, ens, findDefMod(funs, mod, m))
+    case _ => rwFieldTy(Expr.EMethod(r, m, args, 0), name, copyEn(Expr.EMethod(r, m, args, 0), ens, funs), ens)
   }
 
 def rwFieldQualHit(m: String, args: List[Expr], name: String, ens: List[En], hit: List[Fun]): Expr =
-  if (List.isEmpty(hit)) Expr.EField(Expr.EMethod(Expr.EVar("", 0, ""), m, args, 0, ""), name, 0, "") else rwFieldQualFun(m, args, name, ens, List.head(hit))
+  if (List.isEmpty(hit)) Expr.EField(Expr.EMethod(Expr.EVar("", 0), m, args, 0), name, 0) else rwFieldQualFun(m, args, name, ens, List.head(hit))
 
 def rwFieldQualFun(m: String, args: List[Expr], name: String, ens: List[En], d: Fun): Expr =
   d match {
-    case Fun(_, _, _, _, ret, _, mod, _) => rwFieldTy(Expr.EMethod(Expr.EVar(mod, 0, ""), m, args, 0, ""), name, ret, ens)
+    case Fun(_, _, _, _, ret, _, mod, _) => rwFieldTy(Expr.EMethod(Expr.EVar(mod, 0), m, args, 0), name, ret, ens)
   }
 
 def rwFieldTy(recv: Expr, name: String, ty: String, ens: List[En]): Expr =
@@ -4967,13 +4970,13 @@ def tupField(recv: Expr, name: String, ty: String): Expr =
   tupField2(recv, tupIdx(name), splitPat(Str.slice(ty, 1, Str.len(ty) - 1)))
 
 def tupField2(recv: Expr, idx: Int, ns: List[String]): Expr =
-  if (List.isEmpty(ns)) Expr.EMatch(recv, Arm(if (idx == 0) "(__f0, _)" else "(_, __f1)", "", Expr.EVar(if (idx == 0) "__f0" else "__f1", 0, "")) :: noArm(), 0, "") else Expr.EMatch(recv, Arm(Str.concat("(", Str.concat(bindsSelect(0, List.len(ns), idx), ")")), "", Expr.EVar(fakeBind(idx), 0, "")) :: noArm(), 0, "")
+  if (List.isEmpty(ns)) Expr.EMatch(recv, Arm(if (idx == 0) "(__f0, _)" else "(_, __f1)", "", Expr.EVar(if (idx == 0) "__f0" else "__f1", 0)) :: noArm(), 0) else Expr.EMatch(recv, Arm(Str.concat("(", Str.concat(bindsSelect(0, List.len(ns), idx), ")")), "", Expr.EVar(fakeBind(idx), 0)) :: noArm(), 0)
 
 def tupIdx(name: String): Int =
   if (name == "_1") 0 else if (name == "_2") 1 else if (name == "_3") 2 else if (name == "_4") 3 else 1
 
 def recField(recv: Expr, name: String, ns: List[String], ty: String, ens: List[En]): Expr =
-  if (List.isEmpty(ns)) Expr.EField(recv, name, 0, "") else recFieldGo(recv, name, ns, ty, ens)
+  if (List.isEmpty(ns)) Expr.EField(recv, name, 0) else recFieldGo(recv, name, ns, ty, ens)
 
 def recFieldGo(recv: Expr, name: String, ns: List[String], ty: String, ens: List[En]): Expr =
   recFieldPair(recv, name, ty, ens, idxLen(ns, name, 0))
@@ -4993,7 +4996,7 @@ def recFieldPair(recv: Expr, name: String, ty: String, ens: List[En], p: (Int, I
   }
 
 def recField2(recv: Expr, name: String, idx: Int, n: Int, ty: String, tys: List[String]): Expr =
-  if (idx < 0) Expr.EField(recv, name, 0, "") else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys), ")"))), "", Expr.EVar(pickBind(idx, tys), 0, "")) :: noArm(), 0, "")
+  if (idx < 0) Expr.EField(recv, name, 0) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys), ")"))), "", Expr.EVar(pickBind(idx, tys), 0)) :: noArm(), 0)
 
 def bindsTyped(i: Int, n: Int, tys: List[String]): String =
   if (i >= n) "" else if (i + 1 == n) pickBind(i, tys) else Str.concat(pickBind(i, tys), Str.concat(", ", bindsTyped(i + 1, n, tys)))
@@ -5180,22 +5183,22 @@ def internSigName(draw: Bool, name: String, v: Expr, acc: List[String]): List[St
 
 def internSigNameGo(name: String, v: Expr, acc: List[String]): List[String] =
   v match {
-    case Expr.ECall(f, _, _, _) => if (sigCtorKit(f)) intern(acc, name) else acc
+    case Expr.ECall(f, _, _) => if (sigCtorKit(f)) intern(acc, name) else acc
     case _ => acc
   }
 
 def internSigExpr(e: Expr, acc: List[String]): List[String] =
   e match {
-    case Expr.EFor(bs, body, _, _) => internSigExpr(body, internSigBinds(bs, acc))
-    case Expr.ECall(_, args, _, _) => internSigList(args, acc)
-    case Expr.EMethod(recv, _, args, _, _) => internSigList(args, internSigExpr(recv, acc))
-    case Expr.EField(recv, _, _, _) => internSigExpr(recv, acc)
-    case Expr.EPrint(inner, _, _) => internSigExpr(inner, acc)
-    case Expr.EBin(_, l, r, _, _) => internSigExpr(r, internSigExpr(l, acc))
+    case Expr.EFor(bs, body, _) => internSigExpr(body, internSigBinds(bs, acc))
+    case Expr.ECall(_, args, _) => internSigList(args, acc)
+    case Expr.EMethod(recv, _, args, _) => internSigList(args, internSigExpr(recv, acc))
+    case Expr.EField(recv, _, _) => internSigExpr(recv, acc)
+    case Expr.EPrint(inner, _) => internSigExpr(inner, acc)
+    case Expr.EBin(_, l, r, _) => internSigExpr(r, internSigExpr(l, acc))
     case Expr.EUn(_, inner) => internSigExpr(inner, acc)
     case Expr.ELam(_, body) => internSigExpr(body, acc)
     case Expr.EIf(c, t, el) => internSigExpr(el, internSigExpr(t, internSigExpr(c, acc)))
-    case Expr.EMatch(s, arms, _, _) => internSigArms(arms, internSigExpr(s, acc))
+    case Expr.EMatch(s, arms, _) => internSigArms(arms, internSigExpr(s, acc))
     case Expr.EList(xs) => internSigList(xs, acc)
     case Expr.ETuple(xs) => internSigList(xs, acc)
     case Expr.ENamed(_, inner) => internSigExpr(inner, acc)
@@ -5225,7 +5228,7 @@ def emitRelReg2(name: String, mod: String, strs: List[String], i: Int): String =
   join(relGep(name, strs, i), relCall(name, mod, i))
 
 def relGep(name: String, strs: List[String], i: Int): String =
-  line(Str.concat("%vrl", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(name) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
+  line(Str.concat("%vrl", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(strArr(name)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
 
 def relCall(name: String, mod: String, i: Int): String =
   line(Str.concat("call void @sz_verify_register_rel(ptr %vrl", Str.concat(Str.fromInt(i), Str.concat("_gep, ptr @sz_user_", Str.concat(symOf(mod, name), ")")))))
@@ -5242,7 +5245,7 @@ def emitSessReg2(name: String, mod: String, strs: List[String], i: Int): String 
   join(sessGep(name, strs, i), sessCall(name, mod, i))
 
 def sessGep(name: String, strs: List[String], i: Int): String =
-  line(Str.concat("%ver", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(name) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
+  line(Str.concat("%ver", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(strArr(name)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
 
 def sessCall(name: String, mod: String, i: Int): String =
   line(Str.concat("call void @sz_verify_register(ptr %ver", Str.concat(Str.fromInt(i), Str.concat("_gep, ptr @sz_user_", Str.concat(symOf(mod, name), ")")))))
@@ -5391,7 +5394,7 @@ def internGep(s: String, strs: List[String], prefix: String, n: Int): String =
   line(Str.concat(decPct(prefix, "g", n), internGepRhs(s, strs)))
 
 def internGepRhs(s: String, strs: List[String]): String =
-  Str.concat(" = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(s) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, s, 0)), ", i64 0, i64 0"))))
+  Str.concat(" = getelementptr inbounds [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, s, 0)), ", i64 0, i64 0"))))
 
 def decodeTry3(gep: String, tok: String, cases: List[EnCase], fs: List[Param], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: List[String], depth: Int, inner: Int, code: String, first: Int): Dec =
   decodeConstruct(decodeFields(fs, 0, decPct(prefix, "b", inner), ens, strs, prefix, n + 2, depth + 1), tok, cases, i, k, base, fail, joinL, prefix, phi, ens, strs, depth, inner, tryHead(code, gep, tok, i, k, base, fail, prefix, n, inner, first))
@@ -5549,7 +5552,7 @@ def trampArg(p: Param, k: Int): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %dv", Str.fromInt(k)) else Str.concat("ptr %da", Str.fromInt(k))
 
 def drvGep(name: String, strs: List[String], i: Int): String =
-  line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(Str.len(name) + 1), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
+  line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(strArr(name)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
 
 def drvSs(i: Int): String =
   line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_ss = call ptr @sz_string_from_cstr(ptr %drv", Str.concat(Str.fromInt(i), "_gep)")))))
@@ -5567,7 +5570,10 @@ def kindOf(p: Param): Int =
   if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
 def emitProg(p: Prog, strs: List[String]): String =
-  emitBits(p.body, withSelfFuns(rwAliasFuns(implFuns(p.impls, withImportFuns(p.imps, p.defs)), p.aliases)), strs, p.enums)
+  emitBits(p.body, prepDefs(p), strs, p.enums)
+
+def prepDefs(p: Prog): List[Fun] =
+  withSelfFuns(rwAliasFuns(implFuns(p.impls, withImportFuns(p.imps, p.defs)), p.aliases))
 
 def withSelfFuns(ds: List[Fun]): List[Fun] =
   if (List.isEmpty(ds)) ds else withSelfFun(List.head(ds)) :: withSelfFuns(List.tail(ds))
@@ -5630,7 +5636,7 @@ def emitBitsFromConts(conts: String, held: List[Expr], defs: List[Fun], strs: Li
   emitBitsJoin(emitMainIf(List.head(held), strs, defs, ens), conts, defs, strs, ens)
 
 def emitBitsJoin(main: String, conts: String, defs: List[Fun], strs: List[String], ens: List[En]): String =
-  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), Str.concat(conts, Str.concat(emitDefs(defs, strs, defs, ens), main))))
+  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), hoistNeth(Str.concat(conts, Str.concat(emitDefs(defs, strs, defs, ens), main)))))
 
 def emitMainIf(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): String =
   if (isEmptyMain(body)) "" else emitMain(body, strs, defs, ens)
@@ -5638,24 +5644,24 @@ def emitMainIf(body: Expr, strs: List[String], defs: List[Fun], ens: List[En]): 
 def isEmptyMain(e: Expr): Bool =
   e match {
     case Expr.EUnit => true
-    case Expr.EVar(s, _, _) => s == ""
+    case Expr.EVar(s, _) => s == ""
     case _ => false
   }
 
 def fmCount(e: Expr): Int =
   e match {
-    case Expr.EMethod(recv, name, args, _, _) => fmCountMeth(recv, name, args)
-    case Expr.EPrint(inner, _, _) => fmCount(inner)
+    case Expr.EMethod(recv, name, args, _) => fmCountMeth(recv, name, args)
+    case Expr.EPrint(inner, _) => fmCount(inner)
     case Expr.ELam(_, body) => fmCount(body)
-    case Expr.ECall(_, args, _, _) => fmCountSkipLam(args)
-    case Expr.EBin(_, l, r, _, _) => fmCount(l) + fmCount(r)
+    case Expr.ECall(_, args, _) => fmCountSkipLam(args)
+    case Expr.EBin(_, l, r, _) => fmCount(l) + fmCount(r)
     case Expr.EUn(_, inner) => fmCount(inner)
     case Expr.EIf(c, t, el) => fmCount(c) + fmCount(t) + fmCount(el)
     case Expr.ENamed(_, inner) => fmCount(inner)
-    case Expr.EMatch(s, arms, _, _) => fmCount(s) + fmCountArms(arms)
+    case Expr.EMatch(s, arms, _) => fmCount(s) + fmCountArms(arms)
     case Expr.EList(xs) => fmCountArgs(xs)
     case Expr.ETuple(xs) => fmCountArgs(xs)
-    case Expr.EFor(bs, body, _, _) => fmCount(desugarFor(bs, body))
+    case Expr.EFor(bs, body, _) => fmCount(desugarFor(bs, body))
     case _ => 0
   }
 
@@ -5664,7 +5670,7 @@ def fmCountMeth(recv: Expr, name: String, args: List[Expr]): Int =
 
 def fmCountMap(recv: Expr, args: List[Expr]): Int =
   recv match {
-    case Expr.EVar(_, _, _) => fmCount(recv) + fmCountSkipLam(args)
+    case Expr.EVar(_, _) => fmCount(recv) + fmCountSkipLam(args)
     case _ => fmCountFm(recv, args)
   }
 
@@ -5712,7 +5718,7 @@ def fmCountArgsHit(xs: List[Expr]): Int =
 
 def emitIoMap(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
   recv match {
-    case Expr.EVar(_, _, _) => emitCtorCall(recv, "map", args, prefix, strs, defs, ens, ps)
+    case Expr.EVar(_, _) => emitCtorCall(recv, "map", args, prefix, strs, defs, ens, ps)
     case _ => emitFmRt("sz_io_flatmap", recv, wrapIoMapArgs(args), prefix, strs, defs, ens, ps, fid)
   }
 
@@ -5721,9 +5727,9 @@ def wrapIoMapArgs(args: List[Expr]): List[Expr] =
 
 def wrapIoMapLam(e: Expr): Expr =
   e match {
-    case Expr.ELam(p, body) => Expr.ELam(p, Expr.ECall("IO.pure", body :: noExpr(), 0, ""))
-    case Expr.EMatch(s, arms, _, _) => Expr.ELam("__p", Expr.ECall("IO.pure", Expr.EMatch(s, arms, 0, "") :: noExpr(), 0, ""))
-    case _ => Expr.ECall("IO.pure", e :: noExpr(), 0, "")
+    case Expr.ELam(p, body) => Expr.ELam(p, Expr.ECall("IO.pure", body :: noExpr(), 0))
+    case Expr.EMatch(s, arms, _) => Expr.ELam("__p", Expr.ECall("IO.pure", Expr.EMatch(s, arms, 0) :: noExpr(), 0))
+    case _ => Expr.ECall("IO.pure", e :: noExpr(), 0)
   }
 
 def emitFmRt(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], fid: Int): Slot =
@@ -5824,8 +5830,8 @@ def nameUnBool(e: Expr, n: String): Bool =
   e match {
     case Expr.EUn(_, inner) => nameIsVar(inner, n) || nameUnBool(inner, n)
     case Expr.EIf(c, t, el) => nameUnBool(c, n) || nameUnBool(t, n) || nameUnBool(el, n)
-    case Expr.ECall(_, args, _, _) => nameUnBoolList(args, n)
-    case Expr.EMethod(r, _, args, _, _) => nameUnBool(r, n) || nameUnBoolList(args, n)
+    case Expr.ECall(_, args, _) => nameUnBoolList(args, n)
+    case Expr.EMethod(r, _, args, _) => nameUnBool(r, n) || nameUnBoolList(args, n)
     case Expr.ELam(p, body) => if (p == n) false else nameUnBool(body, n)
     case _ => false
   }
@@ -5922,19 +5928,19 @@ def emitContsHead(p: (String, Int)): String =
 
 def emitContsAt(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
   e match {
-    case Expr.EMethod(recv, name, args, _, _) => if (isFmName(name)) emitContsFm(recv, args, strs, defs, ens, ps, id) else if (name == "map") emitContsMap(recv, args, strs, defs, ens, ps, id) else if (name == "apply") emitContsApply(recv, args, strs, defs, ens, ps, id) else emitContsCtor(recv, args, strs, defs, ens, ps, id)
-    case Expr.EPrint(inner, _, _) => emitContsAtGo(inner, strs, defs, ens, ps, id)
+    case Expr.EMethod(recv, name, args, _) => if (isFmName(name)) emitContsFm(recv, args, strs, defs, ens, ps, id) else if (name == "map") emitContsMap(recv, args, strs, defs, ens, ps, id) else if (name == "apply") emitContsApply(recv, args, strs, defs, ens, ps, id) else emitContsCtor(recv, args, strs, defs, ens, ps, id)
+    case Expr.EPrint(inner, _) => emitContsAtGo(inner, strs, defs, ens, ps, id)
     case Expr.ELam(_, _) => ("", id)
-    case Expr.ECall(_, args, _, _) => emitContsArgs(args, strs, defs, ens, ps, id)
+    case Expr.ECall(_, args, _) => emitContsArgs(args, strs, defs, ens, ps, id)
     case Expr.EIf(c, t, el) => emitContsIf(c, t, el, strs, defs, ens, ps, id)
     case Expr.ENamed(_, inner) => emitContsAtGo(inner, strs, defs, ens, ps, id)
-    case Expr.EBin(_, l, r, _, _) => emitContsIf(l, r, Expr.EUnit, strs, defs, ens, ps, id)
+    case Expr.EBin(_, l, r, _) => emitContsIf(l, r, Expr.EUnit, strs, defs, ens, ps, id)
     case Expr.EUn(_, inner) => emitContsAtGo(inner, strs, defs, ens, ps, id)
-    case Expr.EField(recv, _, _, _) => emitContsAtGo(recv, strs, defs, ens, ps, id)
-    case Expr.EMatch(s, arms, _, _) => emitContsMatch(s, arms, strs, defs, ens, ps, id)
+    case Expr.EField(recv, _, _) => emitContsAtGo(recv, strs, defs, ens, ps, id)
+    case Expr.EMatch(s, arms, _) => emitContsMatch(s, arms, strs, defs, ens, ps, id)
     case Expr.EList(xs) => emitContsArgs(xs, strs, defs, ens, ps, id)
     case Expr.ETuple(xs) => emitContsArgs(xs, strs, defs, ens, ps, id)
-    case Expr.EFor(bs, body, _, _) => emitContsAtGo(desugarFor(bs, body), strs, defs, ens, ps, id)
+    case Expr.EFor(bs, body, _) => emitContsAtGo(desugarFor(bs, body), strs, defs, ens, ps, id)
     case _ => ("", id)
   }
 
@@ -5984,7 +5990,7 @@ def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], def
 
 def emitContsMap(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], id: Int): (String, Int) =
   recv match {
-    case Expr.EVar(_, _, _) => emitContsCtor(recv, args, strs, defs, ens, ps, id)
+    case Expr.EVar(_, _) => emitContsCtor(recv, args, strs, defs, ens, ps, id)
     case _ => emitContsFm(recv, wrapIoMapArgs(args), strs, defs, ens, ps, id)
   }
 
@@ -5993,8 +5999,8 @@ def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun
 
 def recvBindTy(recv: Expr, ens: List[En], defs: List[Fun], ps: List[Param]): String =
   recv match {
-    case Expr.ECall(f, args, _, _) => recvBindTyCall(f, args, ens, defs, ps)
-    case Expr.EMethod(r, name, args, _, _) => recvBindTyMeth(r, name, args, ens, defs, ps)
+    case Expr.ECall(f, args, _) => recvBindTyCall(f, args, ens, defs, ps)
+    case Expr.EMethod(r, name, args, _) => recvBindTyMeth(r, name, args, ens, defs, ps)
     case _ => "Any"
   }
 
@@ -6017,9 +6023,9 @@ def recvBindTyPure1(e: Expr, ens: List[En], defs: List[Fun], ps: List[Param]): S
   e match {
     case Expr.ENamed(_, inner) => recvBindTyPure1(inner, ens, defs, ps)
     case Expr.ELam(_, _) => "Any"
-    case Expr.ECall(f, _, _, _) => recvBindTyNamed(recvCallTy(f, ens, defs), e, ps, defs)
-    case Expr.EMethod(r, name, _, _, _) => recvBindTyPureMeth(r, name, e, ens, defs, ps)
-    case Expr.EVar(s, _, _) => if (paramIsI64(ps, s)) "Int" else recvBindTyNamed(ctorHead(s, ens), e, ps, defs)
+    case Expr.ECall(f, _, _) => recvBindTyNamed(recvCallTy(f, ens, defs), e, ps, defs)
+    case Expr.EMethod(r, name, _, _) => recvBindTyPureMeth(r, name, e, ens, defs, ps)
+    case Expr.EVar(s, _) => if (paramIsI64(ps, s)) "Int" else recvBindTyNamed(ctorHead(s, ens), e, ps, defs)
     case Expr.ETuple(xs) => tupExprTy(xs, defs, ps)
     case _ => if (needsPh(e)) "Any" else exprRetTy(e, defs, ps)
   }
@@ -6035,8 +6041,8 @@ def recvCallTy2(ret: String, f: String, ens: List[En], defs: List[Fun]): String 
 
 def recvBindTyPureMeth(r: Expr, name: String, e: Expr, ens: List[En], defs: List[Fun], ps: List[Param]): String =
   r match {
-    case Expr.EVar(mod, _, _) => recvBindTyNamed(recvCallTy(Str.concat(mod, Str.concat(".", name)), ens, defs), e, ps, defs)
-    case _ => recvBindTyNamed(copyEn(Expr.EMethod(r, name, noExpr(), 0, ""), ens, defs), e, ps, defs)
+    case Expr.EVar(mod, _) => recvBindTyNamed(recvCallTy(Str.concat(mod, Str.concat(".", name)), ens, defs), e, ps, defs)
+    case _ => recvBindTyNamed(copyEn(Expr.EMethod(r, name, noExpr(), 0), ens, defs), e, ps, defs)
   }
 
 def recvBindTyMeth(r: Expr, name: String, args: List[Expr], ens: List[En], defs: List[Fun], ps: List[Param]): String =
@@ -6044,7 +6050,7 @@ def recvBindTyMeth(r: Expr, name: String, args: List[Expr], ens: List[En], defs:
 
 def qualRecv(r: Expr, name: String): String =
   r match {
-    case Expr.EVar(en, _, _) => Str.concat(en, Str.concat(".", name))
+    case Expr.EVar(en, _) => Str.concat(en, Str.concat(".", name))
     case _ => name
   }
 
@@ -6178,7 +6184,7 @@ def emit(src: String): String =
   emitOne(Parse.parse(Lexer.lex(src)), collectToks(Lexer.lex(src), noStr()))
 
 def emitOne(p: Prog, strs: List[String]): String =
-  hoistNeth(emitProg(p, internSigProg(p, strs)))
+  emitProg(p, internSigProg(p, strs))
 
 def internFiles(files: List[(String, String)], acc: List[String]): List[String] =
   if (List.isEmpty(files)) intern(acc, "guard") else internFiles2(List.head(files), List.tail(files), acc)
@@ -6192,7 +6198,7 @@ def emitFiles(files: List[(String, String)]): String =
   emitFilesGot(Parse.parseFiles(files), internFiles(files, noStr()))
 
 def emitFilesGot(p: Prog, strs: List[String]): String =
-  hoistNeth(emitProg(p, internSigProg(p, internRel(p, strs))))
+  emitProg(p, internSigProg(p, internRel(p, strs)))
 
 def emitFullFiles(files: List[(String, String)]): String =
   Str.concat(preamble(), emitFiles(files))

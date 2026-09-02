@@ -469,19 +469,19 @@ def funHasReq(d: Fun): Bool =
 
 def exprHasReq(e: Expr): Bool =
   e match {
-    case Expr.EPrint(inner, _, _) => exprHasReq(inner)
-    case Expr.ECall(_, args, _, _) => listHasReq(args)
-    case Expr.EMethod(recv, name, args, _, _) => name == "require" || exprHasReq(recv) || listHasReq(args)
-    case Expr.EField(recv, _, _, _) => exprHasReq(recv)
-    case Expr.EBin(_, l, r, _, _) => exprHasReq(l) || exprHasReq(r)
+    case Expr.EPrint(inner, _) => exprHasReq(inner)
+    case Expr.ECall(_, args, _) => listHasReq(args)
+    case Expr.EMethod(recv, name, args, _) => name == "require" || exprHasReq(recv) || listHasReq(args)
+    case Expr.EField(recv, _, _) => exprHasReq(recv)
+    case Expr.EBin(_, l, r, _) => exprHasReq(l) || exprHasReq(r)
     case Expr.EUn(_, inner) => exprHasReq(inner)
     case Expr.ELam(_, body) => exprHasReq(body)
     case Expr.EIf(c, t, el) => exprHasReq(c) || exprHasReq(t) || exprHasReq(el)
-    case Expr.EMatch(s, arms, _, _) => exprHasReq(s) || armsHaveReq(arms)
+    case Expr.EMatch(s, arms, _) => exprHasReq(s) || armsHaveReq(arms)
     case Expr.EList(xs) => listHasReq(xs)
     case Expr.ETuple(xs) => listHasReq(xs)
     case Expr.ENamed(_, inner) => exprHasReq(inner)
-    case Expr.EFor(bs, body, _, _) => bindsHaveReq(bs) || exprHasReq(body)
+    case Expr.EFor(bs, body, _) => bindsHaveReq(bs) || exprHasReq(body)
     case _ => false
   }
 
@@ -519,45 +519,45 @@ def rewriteReqFun(d: Fun): Fun =
 
 def rewriteReq(e: Expr): Expr =
   e match {
-    case Expr.EPrint(inner, _, _) => Expr.EPrint(rewriteReq(inner), 0, "")
-    case Expr.ECall(f, args, _, _) => Expr.ECall(f, rewriteReqList(args), 0, "")
-    case Expr.EMethod(recv, name, args, _, _) => rewriteReqMeth(rewriteReq(recv), name, rewriteReqList(args))
-    case Expr.EField(recv, name, _, _) => Expr.EField(rewriteReq(recv), name, 0, "")
-    case Expr.EBin(op, l, r, _, _) => Expr.EBin(op, rewriteReq(l), rewriteReq(r), 0, "")
+    case Expr.EPrint(inner, _) => Expr.EPrint(rewriteReq(inner), 0)
+    case Expr.ECall(f, args, _) => Expr.ECall(f, rewriteReqList(args), 0)
+    case Expr.EMethod(recv, name, args, _) => rewriteReqMeth(rewriteReq(recv), name, rewriteReqList(args))
+    case Expr.EField(recv, name, _) => Expr.EField(rewriteReq(recv), name, 0)
+    case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteReq(l), rewriteReq(r), 0)
     case Expr.EUn(op, inner) => Expr.EUn(op, rewriteReq(inner))
     case Expr.ELam(p, body) => Expr.ELam(p, rewriteReq(body))
     case Expr.EIf(c, t, el) => Expr.EIf(rewriteReq(c), rewriteReq(t), rewriteReq(el))
-    case Expr.EMatch(s, arms, _, _) => Expr.EMatch(rewriteReq(s), rewriteReqArms(arms), 0, "")
+    case Expr.EMatch(s, arms, _) => Expr.EMatch(rewriteReq(s), rewriteReqArms(arms), 0)
     case Expr.EList(xs) => Expr.EList(rewriteReqList(xs))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteReq(inner))
-    case Expr.EFor(bs, body, _, _) => Expr.EFor(rewriteReqBinds(bs), rewriteReq(body), 0, "")
+    case Expr.EFor(bs, body, _) => Expr.EFor(rewriteReqBinds(bs), rewriteReq(body), 0)
     case _ => e
   }
 
 def rewriteReqMeth(recv: Expr, name: String, args: List[Expr]): Expr =
-  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: reqPredE(args) :: recv :: noExpr(), 0, "") else Expr.EMethod(recv, name, args, 0, "")
+  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: reqPredE(args) :: recv :: noExpr(), 0) else Expr.EMethod(recv, name, args, 0)
 
 def reqNameE(args: List[Expr]): Expr =
-  if (List.len(args) < 2) Expr.EStr("require", 0, "") else reqNameHit(List.head(args))
+  if (List.len(args) < 2) Expr.EStr("require", 0) else reqNameHit(List.head(args))
 
 def reqNameHit(e: Expr): Expr =
   e match {
-    case Expr.EStr(s, _, _) => Expr.EStr(s, 0, "")
-    case _ => Expr.EStr("require", 0, "")
+    case Expr.EStr(s, _) => Expr.EStr(s, 0)
+    case _ => Expr.EStr("require", 0)
   }
 
 def reqPredE(args: List[Expr]): Expr =
   if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) forcePred(List.head(args)) else forcePred(List.head(List.tail(args)))
 
 def forcePred(e: Expr): Expr =
-  if (isIoPred(e)) Expr.ECall("Property.force", e :: noExpr(), 0, "") else e
+  if (isIoPred(e)) Expr.ECall("Property.force", e :: noExpr(), 0) else e
 
 def isIoPred(e: Expr): Bool =
   e match {
-    case Expr.EFor(bs, body, _, _) => hasDraw(bs) || isIoPred(body)
-    case Expr.ECall(f, _, _, _) => Str.startsWith(f, "IO.")
-    case Expr.EMethod(_, name, _, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
+    case Expr.EFor(bs, body, _) => hasDraw(bs) || isIoPred(body)
+    case Expr.ECall(f, _, _) => Str.startsWith(f, "IO.")
+    case Expr.EMethod(_, name, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
     case Expr.EIf(_, t, el) => isIoPred(t) || isIoPred(el)
     case _ => false
   }
