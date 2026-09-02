@@ -43,3 +43,9 @@ def tyckDup(): Bool =
 def tyckFiles(): Bool =
   Main.tyckFiles()
 
+def tyckUnBool(): Bool =
+  Main.tyckDiff(Main.srcUnBool(), Main.wantUnBool())
+
+def tyckIfMis(): Bool =
+  Main.tyckDiff(Main.srcIfMis(), Main.wantIfMis())
+

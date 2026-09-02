@@ -92,6 +92,20 @@ def srcNope(): String =
 def wantNope(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: unknown function Net.nope\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":11}]"
 
+def srcUnBool(): String =
+  """@main def main: IO[Unit] =
+  IO.println(!1)
+"""
+
+def wantUnBool(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: expected Bool, got Int\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":15}]"
+
+def srcIfMis(): String =
+  "@main def main: IO[Unit] =\n  IO.println(if (true) 1 else \"x\")\n"
+
+def wantIfMis(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: type mismatch: expected Int, got String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":16}]"
+
 def tyckDiff(src: String, want: String): Bool =
   Check.check(src) == want
 
@@ -117,7 +131,7 @@ def tyckFiles(): Bool =
   Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []) == wantUtil()
 
 def allOk(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
+  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckFiles()
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else "tyck-bad")

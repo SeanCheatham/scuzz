@@ -439,17 +439,17 @@ def inferUnBool(o: Out, env: List[(String, String)], e: Expr): Out =
 def inferUnInt(o: Out, env: List[(String, String)], e: Expr): Out =
   if (o.ty == "Int" || o.ty == "Any") ok("Int") else bad(Str.concat("expected Int, got ", o.ty), exprSpan(env, e))
 
-def inferIf(c: Expr, t: Expr, el: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  inferIf2(infer(c, env, funs, ens), t, el, env, funs, ens)
+def inferIf(c: Expr, t: Expr, el: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  inferIf2(infer(c, env, funs, ens), t, el, env, funs, ens, e)
 
-def inferIf2(co: Out, t: Expr, el: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (hasErr(co)) co else inferIf3(infer(t, env, funs, ens), el, env, funs, ens)
+def inferIf2(co: Out, t: Expr, el: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(co)) co else inferIf3(infer(t, env, funs, ens), el, env, funs, ens, e)
 
-def inferIf3(to: Out, el: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (hasErr(to)) to else inferIf4(to, infer(el, env, funs, ens))
+def inferIf3(to: Out, el: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(to)) to else inferIf4(to, infer(el, env, funs, ens), env, e)
 
-def inferIf4(to: Out, eo: Out): Out =
-  if (hasErr(eo)) eo else if (tyEq(to.ty, eo.ty)) ok(prefer(to.ty, eo.ty)) else if (ifIoUnit(to.ty, eo.ty)) ok(ifIoPick(to.ty, eo.ty)) else bad(Str.concat("type mismatch: expected ", Str.concat(to.ty, Str.concat(", got ", eo.ty))), noSpan())
+def inferIf4(to: Out, eo: Out, env: List[(String, String)], e: Expr): Out =
+  if (hasErr(eo)) eo else if (tyEq(to.ty, eo.ty)) ok(prefer(to.ty, eo.ty)) else if (ifIoUnit(to.ty, eo.ty)) ok(ifIoPick(to.ty, eo.ty)) else bad(Str.concat("type mismatch: expected ", Str.concat(to.ty, Str.concat(", got ", eo.ty))), exprSpan(env, e))
 
 def ifIoUnit(a: String, b: String): Bool =
   isIo(a) && b == "Unit" || isIo(b) && a == "Unit"
@@ -470,8 +470,8 @@ def infer(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]):
     case Expr.EPrint(inner, _) => inferPrint(inner, env, funs, ens, e)
     case Expr.ECall(f, args, off) => inferCall(f, args, env, funs, ens, (modFile(env), off))
     case Expr.EBin(op, l, r, _) => inferBin(op, l, r, env, funs, ens, e)
-    case Expr.EUn(op, inner) => inferUn(op, inner, env, funs, ens, e)
-    case Expr.EIf(c, t, el) => inferIf(c, t, el, env, funs, ens)
+    case Expr.EUn(op, inner, _) => inferUn(op, inner, env, funs, ens, e)
+    case Expr.EIf(c, t, el, _) => inferIf(c, t, el, env, funs, ens, e)
     case Expr.ENamed(_, inner) => infer(inner, env, funs, ens)
     case Expr.EList(xs) => inferList(xs, env, funs, ens)
     case Expr.ETuple(xs) => inferTuple(xs, env, funs, ens)

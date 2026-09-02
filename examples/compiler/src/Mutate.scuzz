@@ -145,12 +145,12 @@ def applyFuns(ds: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
 
 def applyFunsHd(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
   d match {
-    case Fun(priv, name, tps, ps, ret, body, mod, _) => applyFunBody(priv, name, tps, ps, ret, body, mod, rest, site, seen, o)
+    case Fun(priv, name, tps, ps, ret, body, mod, off) => applyFunBody(priv, name, tps, ps, ret, body, mod, off, rest, site, seen, o)
   }
 
-def applyFunBody(priv: Bool, name: String, tps: List[String], ps: List[Param], ret: String, body: Expr, mod: String, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+def applyFunBody(priv: Bool, name: String, tps: List[String], ps: List[Param], ret: String, body: Expr, mod: String, off: Int, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
   walk(body, site, seen, false, collectHs(body, noExprs()), 0, o) match {
-    case Walk(b, n, _) => applyFunsRest(Fun(priv, name, tps, ps, ret, b, mod, 0), rest, site, n, o)
+    case Walk(b, n, _) => applyFunsRest(Fun(priv, name, tps, ps, ret, b, mod, off), rest, site, n, o)
   }
 
 def applyFunsRest(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
@@ -165,9 +165,9 @@ def collectHs(e: Expr, acc: List[Expr]): List[Expr] =
     case Expr.EMethod(recv, _, args, _) => collectHsList(args, collectHs(recv, acc))
     case Expr.EField(recv, _, _) => collectHs(recv, acc)
     case Expr.EBin(_, l, r, _) => collectHs(r, collectHs(l, acc))
-    case Expr.EUn(_, inner) => collectHs(inner, acc)
+    case Expr.EUn(_, inner, _) => collectHs(inner, acc)
     case Expr.ELam(_, body) => collectHs(body, acc)
-    case Expr.EIf(c, t, el) => collectHs(el, collectHs(t, collectHs(c, acc)))
+    case Expr.EIf(c, t, el, _) => collectHs(el, collectHs(t, collectHs(c, acc)))
     case Expr.EMatch(s, arms, _) => collectHsArms(arms, collectHs(s, acc))
     case Expr.EFor(bs, body, _) => collectHs(body, collectHsBinds(bs, acc))
     case Expr.EList(xs) => collectHsList(xs, acc)
@@ -220,12 +220,12 @@ def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o:
   e match {
     case Expr.EInt(k, _) => walkInt(k, target, seen, inO, hi, o)
     case Expr.EBin(op, l, r, _) => walkBin(op, l, r, target, seen, inO, hs, hi, o)
-    case Expr.EIf(c, t, el) => walkIf(c, t, el, target, seen, inO, hs, hi, o)
+    case Expr.EIf(c, t, el, off) => walkIf(c, t, el, off, target, seen, inO, hs, hi, o)
     case Expr.ECall(f, args, _) => walkCall(f, args, target, seen, inO, hs, hi, o)
     case Expr.EPrint(inner, _) => walkPrint(inner, target, seen, inO, hs, hi, o)
     case Expr.EMethod(recv, name, args, _) => walkMethod(recv, name, args, target, seen, inO, hs, hi, o)
     case Expr.EField(recv, name, _) => walkField(recv, name, target, seen, inO, hs, hi, o)
-    case Expr.EUn(op, inner) => walkUn(op, inner, target, seen, inO, hs, hi, o)
+    case Expr.EUn(op, inner, off) => walkUn(op, inner, off, target, seen, inO, hs, hi, o)
     case Expr.ELam(p, body) => walkLam(p, body, target, seen, inO, hs, hi, o)
     case Expr.EMatch(s, arms, _) => walkMatch(s, arms, target, seen, inO, hs, hi, o)
     case Expr.EFor(bs, body, _) => walkFor(bs, body, target, seen, inO, hs, hi, o)
@@ -267,37 +267,37 @@ def binOut(op: String, l: Expr, r: Expr, target: Int, seen: Int): Expr =
 def binOut2(op: String, l: Expr, r: Expr, target: Int, seen: Int): Expr =
   if (op == "&&" && seen + 1 == target) l else if (op == "&&" && seen + 2 == target) r else if (seen == target && flipArith(op) != "") Expr.EBin(flipArith(op), l, r, 0) else Expr.EBin(op, l, r, 0)
 
-def walkIf(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
-  if (progSite(inO, o)) walkIfHit(c, t, el, target, seen, hs, hi, o) else walkIfKids(c, t, el, target, seen, inO, hs, hi, o)
+def walkIf(c: Expr, t: Expr, el: Expr, off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (progSite(inO, o)) walkIfHit(c, t, el, off, target, seen, hs, hi, o) else walkIfKids(c, t, el, off, target, seen, inO, hs, hi, o)
 
-def walkIfHit(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, hs: List[Expr], hi: Int, o: Bool): Walk =
+def walkIfHit(c: Expr, t: Expr, el: Expr, off: Int, target: Int, seen: Int, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(c, target, seen + 1, false, hs, hi, o) match {
-    case Walk(c2, n1, h1) => walkIfThen(c2, t, el, target, seen, n1, h1, hs, o)
+    case Walk(c2, n1, h1) => walkIfThen(c2, t, el, off, target, seen, n1, h1, hs, o)
   }
 
-def walkIfThen(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, n1: Int, h1: Int, hs: List[Expr], o: Bool): Walk =
+def walkIfThen(c: Expr, t: Expr, el: Expr, off: Int, target: Int, seen: Int, n1: Int, h1: Int, hs: List[Expr], o: Bool): Walk =
   walk(t, target, n1, false, hs, h1, o) match {
-    case Walk(t2, n2, h2) => walkIfElse(c, t2, el, target, seen, n2, h2, hs, o)
+    case Walk(t2, n2, h2) => walkIfElse(c, t2, el, off, target, seen, n2, h2, hs, o)
   }
 
-def walkIfElse(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, n2: Int, h2: Int, hs: List[Expr], o: Bool): Walk =
+def walkIfElse(c: Expr, t: Expr, el: Expr, off: Int, target: Int, seen: Int, n2: Int, h2: Int, hs: List[Expr], o: Bool): Walk =
   walk(el, target, n2, false, hs, h2, o) match {
-    case Walk(e2, n3, h3) => Walk(if (seen == target) Expr.EIf(c, e2, t) else Expr.EIf(c, t, e2), n3, h3)
+    case Walk(e2, n3, h3) => Walk(if (seen == target) Expr.EIf(c, e2, t, off) else Expr.EIf(c, t, e2, off), n3, h3)
   }
 
-def walkIfKids(c: Expr, t: Expr, el: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+def walkIfKids(c: Expr, t: Expr, el: Expr, off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(c, target, seen, inO, hs, hi, o) match {
-    case Walk(c2, n1, h1) => walkIfKidsT(c2, t, el, target, inO, hs, n1, h1, o)
+    case Walk(c2, n1, h1) => walkIfKidsT(c2, t, el, off, target, inO, hs, n1, h1, o)
   }
 
-def walkIfKidsT(c: Expr, t: Expr, el: Expr, target: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int, o: Bool): Walk =
+def walkIfKidsT(c: Expr, t: Expr, el: Expr, off: Int, target: Int, inO: Bool, hs: List[Expr], n1: Int, h1: Int, o: Bool): Walk =
   walk(t, target, n1, inO, hs, h1, o) match {
-    case Walk(t2, n2, h2) => walkIfKidsE(c, t2, el, target, inO, hs, n2, h2, o)
+    case Walk(t2, n2, h2) => walkIfKidsE(c, t2, el, off, target, inO, hs, n2, h2, o)
   }
 
-def walkIfKidsE(c: Expr, t: Expr, el: Expr, target: Int, inO: Bool, hs: List[Expr], n2: Int, h2: Int, o: Bool): Walk =
+def walkIfKidsE(c: Expr, t: Expr, el: Expr, off: Int, target: Int, inO: Bool, hs: List[Expr], n2: Int, h2: Int, o: Bool): Walk =
   walk(el, target, n2, inO, hs, h2, o) match {
-    case Walk(e2, n3, h3) => Walk(Expr.EIf(c, t, e2), n3, h3)
+    case Walk(e2, n3, h3) => Walk(Expr.EIf(c, t, e2, off), n3, h3)
   }
 
 def walkCall(f: String, args: List[Expr], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
@@ -387,9 +387,9 @@ def walkField(recv: Expr, name: String, target: Int, seen: Int, inO: Bool, hs: L
     case Walk(r2, n, h) => Walk(Expr.EField(r2, name, 0), n, h)
   }
 
-def walkUn(op: String, inner: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+def walkUn(op: String, inner: Expr, off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(inner, target, seen, inO, hs, hi, o) match {
-    case Walk(e2, n, h) => Walk(Expr.EUn(op, e2), n, h)
+    case Walk(e2, n, h) => Walk(Expr.EUn(op, e2, off), n, h)
   }
 
 def walkLam(p: String, body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =

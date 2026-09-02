@@ -474,9 +474,9 @@ def exprHasReq(e: Expr): Bool =
     case Expr.EMethod(recv, name, args, _) => name == "require" || exprHasReq(recv) || listHasReq(args)
     case Expr.EField(recv, _, _) => exprHasReq(recv)
     case Expr.EBin(_, l, r, _) => exprHasReq(l) || exprHasReq(r)
-    case Expr.EUn(_, inner) => exprHasReq(inner)
+    case Expr.EUn(_, inner, _) => exprHasReq(inner)
     case Expr.ELam(_, body) => exprHasReq(body)
-    case Expr.EIf(c, t, el) => exprHasReq(c) || exprHasReq(t) || exprHasReq(el)
+    case Expr.EIf(c, t, el, _) => exprHasReq(c) || exprHasReq(t) || exprHasReq(el)
     case Expr.EMatch(s, arms, _) => exprHasReq(s) || armsHaveReq(arms)
     case Expr.EList(xs) => listHasReq(xs)
     case Expr.ETuple(xs) => listHasReq(xs)
@@ -514,7 +514,7 @@ def rewriteReqDefs(ds: List[Fun]): List[Fun] =
 
 def rewriteReqFun(d: Fun): Fun =
   d match {
-    case Fun(priv, name, tparams, params, ret, body, mod, _) => Fun(priv, name, tparams, params, ret, rewriteReq(body), mod, 0)
+    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body), mod, off)
   }
 
 def rewriteReq(e: Expr): Expr =
@@ -524,9 +524,9 @@ def rewriteReq(e: Expr): Expr =
     case Expr.EMethod(recv, name, args, _) => rewriteReqMeth(rewriteReq(recv), name, rewriteReqList(args))
     case Expr.EField(recv, name, _) => Expr.EField(rewriteReq(recv), name, 0)
     case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteReq(l), rewriteReq(r), 0)
-    case Expr.EUn(op, inner) => Expr.EUn(op, rewriteReq(inner))
+    case Expr.EUn(op, inner, _) => Expr.EUn(op, rewriteReq(inner), 0)
     case Expr.ELam(p, body) => Expr.ELam(p, rewriteReq(body))
-    case Expr.EIf(c, t, el) => Expr.EIf(rewriteReq(c), rewriteReq(t), rewriteReq(el))
+    case Expr.EIf(c, t, el, _) => Expr.EIf(rewriteReq(c), rewriteReq(t), rewriteReq(el), 0)
     case Expr.EMatch(s, arms, _) => Expr.EMatch(rewriteReq(s), rewriteReqArms(arms), 0)
     case Expr.EList(xs) => Expr.EList(rewriteReqList(xs))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs))
@@ -558,7 +558,7 @@ def isIoPred(e: Expr): Bool =
     case Expr.EFor(bs, body, _) => hasDraw(bs) || isIoPred(body)
     case Expr.ECall(f, _, _) => Str.startsWith(f, "IO.")
     case Expr.EMethod(_, name, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
-    case Expr.EIf(_, t, el) => isIoPred(t) || isIoPred(el)
+    case Expr.EIf(_, t, el, _) => isIoPred(t) || isIoPred(el)
     case _ => false
   }
 
