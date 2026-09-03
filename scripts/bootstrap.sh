@@ -205,7 +205,11 @@ if [ ! -f "$RT" ]; then
 fi
 echo "==> clang -O2 $LL" >&2
 if [ "$(uname -s)" = Darwin ]; then
-  clang -O2 -Wno-override-module "$LL" "$RT" -framework CoreFoundation -lpthread -lssl -lcrypto -o "$SRC"
+  ssl_lib=""
+  if command -v brew >/dev/null 2>&1 && brew --prefix openssl@3 >/dev/null 2>&1; then
+    ssl_lib="-L$(brew --prefix openssl@3)/lib"
+  fi
+  clang -O2 -Wno-override-module "$LL" "$RT" -framework CoreFoundation $ssl_lib -lpthread -lssl -lcrypto -o "$SRC"
 else
   clang -O2 -Wno-override-module "$LL" "$RT" -lpthread -lssl -lcrypto -o "$SRC"
 fi

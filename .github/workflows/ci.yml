@@ -421,7 +421,7 @@ jobs:
           grep -q "kit:skip" /tmp/io.out
           grep -q "fs:" /tmp/io.out
           "$SCUZZ" test examples/io | tee /tmp/io-test.out
-          grep -q "served:/" /tmp/io-test.out
+          grep -q "served:POST:/ping:hi" /tmp/io-test.out
           grep -q "impurity-ok" /tmp/io-test.out
           grep -q "net:" /tmp/io-test.out
           "$SCUZZ" check examples/hello
@@ -770,6 +770,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Install OpenSSL
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
       - name: Runtime tests
         run: make -C crates/runtime test CC=clang
       - name: Bootstrap product CLI
@@ -791,6 +793,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install OpenSSL
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
 
       - name: Runtime + UI tests
         run: make -C crates/runtime test CC=clang

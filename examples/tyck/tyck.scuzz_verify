@@ -49,3 +49,6 @@ def tyckUnBool(): Bool =
 def tyckIfMis(): Bool =
   Main.tyckDiff(Main.srcIfMis(), Main.wantIfMis())
 
+def tyckMapHandle(): Bool =
+  Main.tyckDiff(Main.srcMapHandle(), Main.wantMapHandle())
+

@@ -53,7 +53,7 @@ def uiFlags2(mac: Bool): String =
   if (mac) " -framework Cocoa -lobjc " else " -Wl,--no-whole-archive -lX11 -Wl,--whole-archive "
 
 def uiFlags3(gpu: Bool, mac: Bool): String =
-  if (mac) Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -lssl -lcrypto -o ") else Str.concat(" -Wl,--no-whole-archive", Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -lssl -lcrypto -rdynamic -o "))
+  if (mac) Str.concat(if (gpu) gpuLibs(mac) else "", " -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o ") else Str.concat(" -Wl,--no-whole-archive", Str.concat(if (gpu) gpuLibs(mac) else "", " -lpthread -lssl -lcrypto -rdynamic -o "))
 
 def gpuLibs(mac: Bool): String =
   if (mac) " -framework OpenGL" else " -lEGL -lGLESv2"
@@ -71,7 +71,7 @@ def hostMac(): IO[Bool] =
   Sys.exec("uname -s").map(r => Str.trim(r._2) == "Darwin")
 
 def linkLineMac(clang: String, ll: String, lib: String, exe: String): String =
-  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -lpthread -lssl -lcrypto -o ", exe))))))
+  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o ", exe))))))
 
 def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool): String =
   if (hasUi) linkLineUi(clang, ll, lib, exe, h, gpu, mac) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
