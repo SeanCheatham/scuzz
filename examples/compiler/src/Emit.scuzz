@@ -85,7 +85,7 @@ def _escLl2(s: String, i: Int, b: Builder, c: Int): String =
   _escLl(s, i + 1, Builder.append(b, if (c == 34) "\\22" else if (c == 92) "\\\\" else if (c == 10) "\\0A" else Str.slice(s, i, i + 1)))
 
 def strArr(s: String): Int =
-  Str.len(s) + 1
+  Str.byteLen(s) + 1
 
 def strConst(i: Int, s: String): String =
   Str.concat("@.str", Str.concat(Str.fromInt(i), Str.concat(" = private unnamed_addr constant [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8] ", Str.concat(llvmC(s), ", align 1"))))))

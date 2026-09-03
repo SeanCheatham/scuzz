@@ -246,7 +246,7 @@ def food(): Int =
 """
 
 def lspOk(): Bool =
-  Lsp.identAt(lspSrc(), 4) == "foo" && Lsp.hoverAt(lspSrc(), 0, 4) == "def foo(x: Int): Int" && Lsp.qualIdentAt("IO.println(1)", 3) == "IO.println" && Lsp.hoverAt(lspSrc(), 1, 0) == "" && Str.contains(Lsp.defJson("file://x", lspSrc(), 0, 4), "\"character\":4") && Str.contains(Lsp.defJson("file://x", lspSrc(), 0, 4), "\"character\":7") && Str.contains(Lsp.defJson("file://x", lspUseSrc(), 4, 2), "\"character\":4") && Lsp.renameIdents(lspRenameSrc(), "foo", "bar") == lspRenameWant() && Str.contains(Lsp.completeJson(lspSrc(), "fo"), "foo") && Lsp.completeJson(lspSrc(), "zzz") == "{\"isIncomplete\":false,\"items\":[]}" && Str.contains(Lsp.tokensJson(lspSrc()), "0,0,3,0,0")
+  Lsp.identAt(lspSrc(), 4) == "foo" && Lsp.hoverAt(lspSrc(), 0, 4) == "def foo(x: Int): Int" && Lsp.qualIdentAt("IO.println(1)", 3) == "IO.println" && Lsp.hoverAt(lspSrc(), 1, 0) == "" && Str.contains(Lsp.defJson("file://x", lspSrc(), 0, 4), "\"character\":4") && Str.contains(Lsp.defJson("file://x", lspSrc(), 0, 4), "\"character\":7") && Str.contains(Lsp.defJson("file://x", lspUseSrc(), 4, 2), "\"character\":4") && Lsp.renameIdents(lspRenameSrc(), "foo", "bar") == lspRenameWant() && Str.contains(Lsp.completeJson(lspSrc(), "fo"), "foo") && Lsp.completeJson(lspSrc(), "zzz") == "{\"isIncomplete\":false,\"items\":[]}" && Str.contains(Lsp.tokensJson(lspSrc()), "0,0,3,0,0") && Str.contains(Lsp.frame("é"), "Content-Length: 2")
 
 def srcPanic(): String =
   """def boom(): Int =
