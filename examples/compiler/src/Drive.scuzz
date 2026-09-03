@@ -201,10 +201,16 @@ def emitDirFresh(dir: String, outDir: String, files: List[(String, String)], tom
   crateHome().flatMap(h => emitDirOut(compileFiles(toml, files, outDir, "clang", rtLib(h))).flatMap(ok => emitDirStored(dir, fp, ok)))
 
 def emitDirStored(dir: String, fp: String, ok: Bool): IO[Unit] =
-  if (!ok) IO.pure(()) else Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpPath(dir), fp))
+  if (!ok) IO.pure(()) else Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpPath(dir), fp).flatMap(_ => Fs.delete(fpVerifyPath(dir)).handleErrorWith(_ => IO.pure(()))))
 
 def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir).flatMap(_ => emitVerifyStamp(dir, toml, own)))
+
+def emitVerifyStamp(dir: String, toml: String, own: List[(String, String)]): IO[Unit] =
+  Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpVerifyPath(dir), fpText(toml, own)).flatMap(_ => Fs.delete(fpPath(dir)).handleErrorWith(_ => IO.pure(()))))
+
+def fpVerifyPath(dir: String): String =
+  Str.concat(fpPath(dir), ".verify")
 
 def emitDirAlwaysGot(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
   crateHome().flatMap(h => emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib(h))).flatMap(_ => IO.pure(())))
