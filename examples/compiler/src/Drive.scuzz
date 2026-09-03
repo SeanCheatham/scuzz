@@ -1087,13 +1087,19 @@ def fuzzSplitGo(job: FuzzJob): IO[Unit] =
   Fs.mkdirs(joinSlash(job.outDir, "fuzz")).flatMap(_ => Fs.mkdirs(joinSlash(joinSlash(job.outDir, "fuzz"), "live")).flatMap(_ => fuzzSplitRun(job)))
 
 def fuzzSplitRun(job: FuzzJob): IO[Unit] =
-  fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir)).flatMap(cv => if (cv != 0) failMsg("fuzz probe failed: app fails under TestRuntime before any event", "scuzz fuzz") else fuzzSplitLive(job))
+  fuzzSplitProbe(job.exe, job.hasUi, fuzzDumpPath(job.outDir), fuzzTlPath(job.outDir)).flatMap(cv => fuzzSplitRunGo(job, cv))
+
+def fuzzSplitRunGo(job: FuzzJob, cv: Int): IO[Unit] =
+  if (cv != 0) failMsg("fuzz probe failed: app fails under TestRuntime before any event", "scuzz fuzz") else fuzzSplitLive(job)
 
 def fuzzTlPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "timeline.txt")
 
 def fuzzSplitLive(job: FuzzJob): IO[Unit] =
-  fuzzSplitProbe(fuzzLiveExe(job), job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.txt"), joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "timeline.txt")).flatMap(cl => if (cl != 0) failMsg("fuzz live/verify split: live graph failed on the same seed", "scuzz fuzz") else fuzzSplitCmp(job))
+  fuzzSplitProbe(fuzzLiveExe(job), job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "dump.txt"), joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "live"), "timeline.txt")).flatMap(cl => fuzzSplitLiveGo(job, cl))
+
+def fuzzSplitLiveGo(job: FuzzJob, cl: Int): IO[Unit] =
+  if (cl != 0) failMsg("fuzz live/verify split: live graph failed on the same seed", "scuzz fuzz") else fuzzSplitCmp(job)
 
 def fuzzSplitProbe(exe: String, hasUi: Bool, dump: String, tl: String): IO[Int] =
   runProbe(Str.concat(fuzzSplitEnv(hasUi, dump, tl), exe)).map(r => fuzzProbeCode(r))

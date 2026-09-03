@@ -35,7 +35,7 @@ These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
 1. **`Signal[T]` and `View.each` over records** — In: `Signal.list` holds `List[T]` over records and enums; `View.each` binds the element type; studio keeps tasks as `List[Item]`; a record list dumps `list[N] name = <count>`. Open: one generic cell — `Signal.map` stays `Int => String` and there is no non-list `Signal[T]` cell. Direction: one generic cell and `View.each` over the element type.
 
-2. **UTF-8 `String`** — In: `Str.*` indexes code points; `Str.byteLen` / `Str.byteSlice` keep bytes for framing; the kernel `utf8Ops` drive oracle proves multibyte ops. Case maps stay ASCII by design. Caret offsets in TextField/editor stay bytes. LSP `Content-Length` uses `Str.byteLen` / `Str.byteSlice`.
+2. **UTF-8 `String`** — In: `Str.*` indexes code points; `Str.byteLen` / `Str.byteSlice` keep bytes for framing; the kernel `utf8Ops` drive oracle proves multibyte ops. Case maps stay ASCII by design. Caret offsets in TextField/editor stay bytes. The editor LSP framing uses `Str.byteLen` / `Str.byteSlice`. The toolchain's own LSP framing adopts them after the next bootstrap release ([`plans.md`](plans.md)).
 
 3. **Scuzz spans on panic and LSP** — In: `check` JSON diagnostics use recorded file stem, line, and column. No substring search. No hardcoded file. Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Goto-def uses `Fun.off`. Rename replaces lexer ident tokens. Hover names the ident under the caret. Completion filters by the caret prefix. Semantic tokens come from the lexer. Panic prints `scuzz panic: Main.scuzz:2:14: <msg>` from that def's file, line, and column. The dogfood IDE consumes that schema. It does not replace it.
 
@@ -71,6 +71,7 @@ Do not start these before thesis-critical gaps close.
 - **Web apps** — not a current target.
 - **HKT and environment `R`** — Thin generics. No `F[_]` beyond `IO`. No `ZIO[R, E, A]`.
 - **Oracle idioms in `guide.md`** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work. Authors write `Timeline => Verdict` and drive oracles in `*.scuzz_verify`.
+- **Field access on call results** — `List.at(xs, 0).field` reads through a first-record heuristic and mis-emits when that record lacks the field. `io.map(r => r._1)` does not box the Int result. Toolchain sources destructure payloads through `match` instead. Direction: resolve the receiver type from the checker, not from `copyEnFirst`.
 
 ### Dogfood IDE
 
