@@ -5123,7 +5123,12 @@ def isSessFun(d: Fun): Bool =
   d.ret == "Verdict" && List.len(d.params) == 1 && isTlPs(d.params)
 
 def isTlPs(ps: List[Param]): Bool =
-  List.isEmpty(ps) || List.at(ps, 0).ty == "Timeline" && isTlPs(List.tail(ps))
+  if (List.isEmpty(ps)) true else isTlPsGo(List.at(ps, 0), List.tail(ps))
+
+def isTlPsGo(h: Param, rest: List[Param]): Bool =
+  h match {
+    case Param(_, ty, _, _) => ty == "Timeline" && isTlPs(rest)
+  }
 
 def relFuns(ds: List[Fun]): List[Fun] =
   if (List.isEmpty(ds)) noFun() else relFuns1(List.at(ds, 0), List.tail(ds))
@@ -5384,7 +5389,12 @@ def drvLeaf(c: EnCase): Bool =
   }
 
 def drvAllLeaf(fs: List[Param]): Bool =
-  List.isEmpty(fs) || drvLeafTy(List.at(fs, 0).ty) && drvAllLeaf(List.tail(fs))
+  if (List.isEmpty(fs)) true else drvAllLeafGo(List.at(fs, 0), List.tail(fs))
+
+def drvAllLeafGo(h: Param, rest: List[Param]): Bool =
+  h match {
+    case Param(_, ty, _, _) => drvLeafTy(ty) && drvAllLeaf(rest)
+  }
 
 def drvLeafTy(t: String): Bool =
   t == "Int" || t == "String" || t == "Bool"

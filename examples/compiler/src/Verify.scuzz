@@ -77,7 +77,12 @@ def adtTokEn(e: En, ens: List[En], depth: Int): String =
   }
 
 def recLike(name: String, cs: List[EnCase]): Bool =
-  List.len(cs) == 1 && List.at(cs, 0).name == name
+  List.len(cs) == 1 && recLikeName(List.at(cs, 0), name)
+
+def recLikeName(c: EnCase, name: String): Bool =
+  c match {
+    case EnCase(n, _) => n == name
+  }
 
 def recTok(name: String, cs: List[EnCase], ens: List[En], depth: Int): String =
   Str.concat(name, Str.concat("(", Str.concat(caseFields(List.at(cs, 0), ens, depth), ")")))
@@ -108,7 +113,12 @@ def isLeafCase(c: EnCase): Bool =
   }
 
 def allLeaf(fs: List[Param]): Bool =
-  List.isEmpty(fs) || leafTy(List.at(fs, 0).ty) && allLeaf(List.tail(fs))
+  if (List.isEmpty(fs)) true else allLeafGo(List.at(fs, 0), List.tail(fs))
+
+def allLeafGo(h: Param, rest: List[Param]): Bool =
+  h match {
+    case Param(_, ty, _, _) => leafTy(ty) && allLeaf(rest)
+  }
 
 def leafTy(t: String): Bool =
   t == "Int" || t == "String" || t == "Bool"
