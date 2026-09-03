@@ -628,8 +628,8 @@ def emitBinCmpPick(le: Slot, re: Slot, op: String, prefix: String, ps: List[Para
 
 def cmpPtrSides(le: Slot, re: Slot, ps: List[Param]): Bool =
   le match {
-    case Slot(_, lv, lo) => re match {
-  case Slot(_, rv, ro) => lo || ro || strish(lv) || strish(rv) || cmpPtrSlot(lv, rv, ps) || cmpPtrSlot(rv, lv, ps)
+    case Slot(lc, lv, lo) => re match {
+  case Slot(rc, rv, ro) => lo || ro || strish(lv) || strish(rv) || cmpPtrSlot(lv, rv, ps) || cmpPtrSlot(rv, lv, ps) || thenCallPtr(lc, lv) || thenCallPtr(rc, rv)
 }
   }
 

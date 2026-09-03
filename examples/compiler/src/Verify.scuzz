@@ -627,6 +627,53 @@ def ensOfProg(p: Prog): List[En] =
 def emptyVerify(file: String): String =
   Str.concat(file, Str.concat(":1:1: error: ", Str.concat(file, ": verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")))
 
+def ioRet(d: Fun): Bool =
+  Str.len(d.ret) >= 2 && Str.slice(d.ret, 0, 2) == "IO"
+
+def drvNames(srcs: List[String]): List[String] =
+  if (List.isEmpty(srcs)) noStr() else List.concat(drvFileNames(List.at(srcs, 0)), drvNames(List.tail(srcs)))
+
+def drvFileNames(src: String): List[String] =
+  drvFileNamesGo(Parse.parse(Lexer.lex(src)))
+
+def drvFileNamesGo(p: Prog): List[String] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => ioDefNames(defs)
+  }
+
+def ioDefNames(ds: List[Fun]): List[String] =
+  if (List.isEmpty(ds)) noStr() else ioDefNamesHd(List.at(ds, 0), List.tail(ds))
+
+def ioDefNamesHd(d: Fun, rest: List[Fun]): List[String] =
+  if (ioRet(d)) d.name :: ioDefNames(rest) else ioDefNames(rest)
+
+def oracleNames(srcs: List[String]): List[String] =
+  funNames(parseVerifyAll(srcs))
+
+def funNames(ds: List[Fun]): List[String] =
+  if (List.isEmpty(ds)) noStr() else funNamesHd(List.at(ds, 0), List.tail(ds))
+
+def funNamesHd(d: Fun, rest: List[Fun]): List[String] =
+  d.name :: funNames(rest)
+
+def dupName(xs: List[String]): String =
+  if (List.isEmpty(xs) || List.isEmpty(List.tail(xs))) "" else dupName2(List.at(xs, 0), List.at(xs, 1), List.tail(xs))
+
+def dupName2(a: String, b: String, rest: List[String]): String =
+  if (a == b) a else dupName(rest)
+
+def driveCapMsg(n: Int): String =
+  Str.concat("scuzz.toml:1:1: error: package declares ", Str.concat(Str.fromInt(n), " drive names; at most 32 drive names are allowed"))
+
+def driveDupMsg(name: String): String =
+  Str.concat("scuzz.toml:1:1: error: drive name ", Str.concat(name, " is declared more than once"))
+
+def driveRule(names: List[String]): String =
+  if (List.len(names) > 32) driveCapMsg(List.len(names)) else driveDupMsgGo(dupName(sortStrs(names)))
+
+def driveDupMsgGo(dup: String): String =
+  if (dup == "") "" else driveDupMsg(dup)
+
 def checkVerify(src: String, file: String): String =
   if (List.isEmpty(parseVerify(src)) && List.isEmpty(parseClaims(src))) emptyVerify(file) else "scuzz check ok"
 

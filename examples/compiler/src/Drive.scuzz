@@ -525,7 +525,30 @@ def isVerify(name: String): Bool =
   Str.len(name) > 13 && Str.slice(name, Str.len(name) - 13, Str.len(name)) == ".scuzz_verify"
 
 def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDirVerify(dir, json, deps, own))
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDriveNames(dir, json, deps, own, ents))
+
+def checkDriveNames(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  drvSrcsOf(joinSlash(dir, "src"), ents).flatMap(drvs => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGot(dir, json, deps, own, List.concat(Verify.oracleNames(vers), Verify.drvNames(drvs)))))
+
+def checkDriveNamesGot(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], names: List[String]): IO[Unit] =
+  checkDriveNamesRule(dir, json, deps, own, Verify.driveRule(names))
+
+def checkDriveNamesRule(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], msg: String): IO[Unit] =
+  if (msg == "") checkDirVerify(dir, json, deps, own) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
+
+def drvSrcsOf(srcDir: String, ents: List[(String, Bool)]): IO[List[String]] =
+  if (List.isEmpty(ents)) IO.pure(Verify.noStr()) else drvSrcsHd(srcDir, List.at(ents, 0), List.tail(ents))
+
+def drvSrcsHd(srcDir: String, ent: (String, Bool), rest: List[(String, Bool)]): IO[List[String]] =
+  ent match {
+    case (name, isDir) => drvSrcsPick(srcDir, name, isDir, rest)
+  }
+
+def drvSrcsPick(srcDir: String, name: String, isDir: Bool, rest: List[(String, Bool)]): IO[List[String]] =
+  if (isDir || !isDrivers(name)) drvSrcsOf(srcDir, rest) else Fs.read(joinSlash(srcDir, name)).flatMap(src => drvSrcsCons(src, srcDir, rest))
+
+def drvSrcsCons(src: String, srcDir: String, rest: List[(String, Bool)]): IO[List[String]] =
+  drvSrcsOf(srcDir, rest).flatMap(names => IO.pure(src :: names))
 
 def checkDirVerify(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
   Fs.list(dir).flatMap(ents => checkVerifyGo(dir, json, deps, own, ents))
