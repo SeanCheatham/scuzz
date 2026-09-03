@@ -1103,12 +1103,10 @@ static void *child_close_try(void *env) {
   ChildSlot *c;
   child_gc();
   c = child_find((pid_t)pid);
-  if (!c) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(3, "Sys.childClose: unknown pid");
-    return r;
-  }
-  exec_close_fd(&c->in_fd);
+  /* A child that already exited is reclaimed by child_gc. Its stdin is
+   * closed, so close succeeds. Sys.kill tolerates ESRCH the same way. */
+  if (c)
+    exec_close_fd(&c->in_fd);
   r->is_err = 0;
   r->as.ok = NULL;
   return r;
