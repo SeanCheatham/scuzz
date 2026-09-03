@@ -16,11 +16,8 @@ def cliFmtArgs(): Bool =
 def cliJsonCheck(): Bool =
   Main.cliDiff(Cli.show(Cli.parse(Main.a2("--message-format=json", "check"))), "check path=. json=true")
 
-def cliUnrec(): Bool =
-  Main.cliDiff(Cli.render(Cli.parse(Main.a1("nope"))), Main.wantUnrec())
-
-def cliUnexp(): Bool =
-  Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--nope"))), Main.wantUnexp())
+def cliErrs(): Bool =
+  Main.cliDiff(Cli.render(Cli.parse(Main.a1("nope"))), Main.wantUnrec()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--nope"))), Main.wantUnexp())
 
 def cliJsonOnly(): Bool =
   Main.cliDiff(Cli.render(Cli.parse(Main.a2("--message-format=json", "fmt"))), Main.wantJsonOnly())
