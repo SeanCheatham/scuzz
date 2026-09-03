@@ -71,7 +71,7 @@ Do not start these before thesis-critical gaps close.
 - **Web apps** — not a current target.
 - **HKT and environment `R`** — Thin generics. No `F[_]` beyond `IO`. No `ZIO[R, E, A]`.
 - **Oracle idioms in `guide.md`** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work. Authors write `Timeline => Verdict` and drive oracles in `*.scuzz_verify`.
-- **Field access on call results** — `List.at(xs, 0).field` reads through a first-record heuristic and mis-emits when that record lacks the field. `io.map(r => r._1)` does not box the Int result. Toolchain sources destructure payloads through `match` instead. Direction: resolve the receiver type from the checker, not from `copyEnFirst`.
+- **Type heuristics on SSA names** — In: `==` on ptr-producing call results compares by value (`sz_ptr_eq`); the i64 unbox path no longer eats string/list/ADT comparisons. Open: `List.at(xs, 0).field` reads through a first-record heuristic and mis-emits when that record lacks the field. `io.map(r => r._1)` does not box the Int result. `strish` and friends still guess operand types from SSA name substrings. Toolchain sources destructure payloads through `match` and bind call results before comparing. Direction: resolve the receiver type from the checker, not from `copyEnFirst` or name substrings.
 
 ### Dogfood IDE
 
