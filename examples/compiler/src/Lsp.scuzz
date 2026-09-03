@@ -13,7 +13,7 @@ def headerEnd(): String =
   Str.concat(lf(), lf())
 
 def frame(body: String): String =
-  Str.concat("Content-Length: ", Str.concat(Str.fromInt(Str.byteLen(body)), Str.concat(headerEnd(), body)))
+  Str.concat("Content-Length: ", Str.concat(Str.fromInt(Str.len(body)), Str.concat(headerEnd(), body)))
 
 def jObj(j: Json): List[(String, Json)] =
   j match {
@@ -424,7 +424,7 @@ def readUntilHeader(acc: String): IO[String] =
   if (headerBody(acc) >= 0) IO.pure(acc) else Sys.read(256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else readUntilHeader(Str.concat(acc, c)))
 
 def fillTo(acc: String, need: Int): IO[String] =
-  if (Str.byteLen(acc) >= need) IO.pure(acc) else Sys.read(256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(Str.concat(acc, c), need))
+  if (Str.len(acc) >= need) IO.pure(acc) else Sys.read(256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(Str.concat(acc, c), need))
 
 def parseLen(head: String): Int =
   parseLenGo(head, Str.indexOf(head, "Content-Length:") + 15)
@@ -445,7 +445,7 @@ def readMsg4(acc: String, len: Int, start: Int): IO[(String, String)] =
   fillTo(acc, start + len).map(full => readMsg5(full, start, len))
 
 def readMsg5(full: String, start: Int, len: Int): (String, String) =
-  (Str.byteSlice(full, start, start + len), Str.byteSlice(full, start + len, Str.byteLen(full)))
+  (Str.slice(full, start, start + len), Str.drop(full, start + len))
 
 def serve(root: String, open: List[Open], acc: String): IO[Unit] =
   readMsg(acc).flatMap(p => servePair(root, open, p))

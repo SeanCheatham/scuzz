@@ -17,6 +17,9 @@ Fail on the first missing tool with one install line.
 ```bash
 # Debian/Ubuntu
 sudo apt-get install -y clang make curl zlib1g-dev libbz2-dev libssl-dev
+
+# macOS (Homebrew keeps OpenSSL keg-only; the Makefiles and link lines use its prefix)
+brew install openssl@3
 ```
 
 If `clang` cannot find libstdc++ when it links Skia:

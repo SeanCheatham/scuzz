@@ -615,10 +615,10 @@ def failProof(): IO[Unit] =
   for {
     n <- choose(true)
     _ <- IO.println(s"failif:${Str.fromInt(n)}")
-    _ <- choose(false).handleErrorWith(_ => IO.println("failif:miss"))
+    _ <- choose(false).handleErrorWith(_ => IO.println("failif:miss").map(_ => 0))
     p <- positive(3)
     _ <- IO.println(s"forif:${Str.fromInt(p)}")
-    _ <- positive(0).handleErrorWith(_ => IO.println("forif:miss"))
+    _ <- positive(0).handleErrorWith(_ => IO.println("forif:miss").map(_ => 0))
   } yield ()
 
 def mapProof(): IO[Unit] =

@@ -812,7 +812,7 @@ def caseFieldTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
   }
 
 def inferMethod(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else if (name == "handleErrorWith") inferHandle(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens, e)
+  if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else if (name == "handleErrorWith") inferHandle(recv, args, env, funs, ens, e) else if (name == "map") inferIoMap(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens, e)
 
 def inferMethod2(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   recv match {
@@ -884,6 +884,21 @@ def unifyErr(a: String, b: String, span: (String, Int)): Out =
 
 def inferFlatMap(recv: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   inferFlatMap2(infer(recv, env, funs, ens), args, env, funs, ens, e)
+
+def inferIoMap(recv: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  inferIoMap2(infer(recv, env, funs, ens), recv, args, env, funs, ens, e)
+
+def inferIoMap2(o: Out, recv: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(o)) o else if (!isIo(o.ty)) inferMethod2(recv, "map", args, env, funs, ens, e) else if (List.len(args) != 1) bad(Str.concat("map expects 1 args, got ", Str.fromInt(List.len(args))), exprSpan(env, e)) else inferIoMapLam(o, List.at(args, 0), env, funs, ens, e)
+
+def inferIoMapLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  lam match {
+    case Expr.ELam(p, body) => inferIoMap3(recv, infer(body, bindIo(p, recv.ty, env), funs, ens), env, e)
+    case _ => inferIoMap3(recv, infer(lam, env, funs, ens), env, e)
+  }
+
+def inferIoMap3(recv: Out, body: Out, env: List[(String, String)], e: Expr): Out =
+  if (hasErr(body)) body else ok(ioTy(ioErr(recv.ty), body.ty))
 
 def inferFlatMap2(o: Out, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   if (hasErr(o)) o else if (List.len(args) != 1) bad(Str.concat("flatMap expects 1 args, got ", Str.fromInt(List.len(args))), exprSpan(env, e)) else inferFlatMapLam(o, List.at(args, 0), env, funs, ens, e)
