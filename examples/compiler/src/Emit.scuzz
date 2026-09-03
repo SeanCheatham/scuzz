@@ -629,9 +629,12 @@ def emitBinCmpPick(le: Slot, re: Slot, op: String, prefix: String, ps: List[Para
 def cmpPtrSides(le: Slot, re: Slot, ps: List[Param]): Bool =
   le match {
     case Slot(lc, lv, lo) => re match {
-  case Slot(rc, rv, ro) => lo || ro || strish(lv) || strish(rv) || cmpPtrSlot(lv, rv, ps) || cmpPtrSlot(rv, lv, ps) || thenCallPtr(lc, lv) || thenCallPtr(rc, rv)
+  case Slot(rc, rv, ro) => lo || ro || strish(lv) || strish(rv) || cmpPtrSlot(lv, rv, ps) || cmpPtrSlot(rv, lv, ps) || cmpPtrCall(lc, lv, rc, rv, ro, ps) || cmpPtrCall(rc, rv, lc, lv, lo, ps)
 }
   }
+
+def cmpPtrCall(ac: String, a: String, bc: String, b: String, bo: Bool, ps: List[Param]): Bool =
+  thenCallPtr(ac, a) && (bo || strish(b) || isPtrSlot(b, ps) || thenCallPtr(bc, b) || b == "null")
 
 def cmpPtrSlot(a: String, b: String, ps: List[Param]): Bool =
   isPtrSlot(a, ps) && !isI64Lit(b)
