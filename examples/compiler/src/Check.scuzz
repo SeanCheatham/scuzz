@@ -176,6 +176,30 @@ def kitParams3(f: String): List[String] =
 def kitParams4(f: String): List[String] =
   if (f == "Timeline.signalInt" || f == "Timeline.signalListLen") "Timeline" :: "Int" :: "String" :: noStr() else if (f == "Timeline.signalStrHas") "Timeline" :: "Int" :: "String" :: "String" :: noStr() else if (f == "Property.signalInt" || f == "Property.signalStr" || f == "Property.signalListLen") "String" :: noStr() else if (f == "Property.signalListAt") "String" :: "Int" :: noStr() else if (f == "Verdict.alwaysHas") "Timeline" :: "String" :: noStr() else if (f == "Verdict.afterHit") "Timeline" :: "String" :: "String" :: noStr() else noStr()
 
+def kitNames(): List[String] =
+  List.concat(kitNamesA(), List.concat(kitNamesB(), List.concat(kitNamesC(), List.concat(kitNamesD(), List.concat(kitNamesE(), List.concat(kitNamesF(), kitNamesG()))))))
+
+def kitNamesA(): List[String] =
+  "Str.fromInt" :: "Str.concat" :: "Str.len" :: "Str.byteLen" :: "Str.byteSlice" :: "Str.fromBool" :: "Str.charAt" :: "Str.slice" :: "Str.toInt" :: "Str.repeat" :: "List.len" :: "List.concat" :: "List.reverse" :: "List.head" :: "List.tail" :: "List.isEmpty" :: "List.cons" :: "List.at" :: "List.join" :: "List.take" :: "List.drop" :: "List.takeRight" :: "List.dropRight" :: "List.init" :: "List.last" :: "List.flatten" :: noStr()
+
+def kitNamesB(): List[String] =
+  "Builder.empty" :: "Builder.append" :: "Builder.result" :: "Fs.read" :: "Fs.write" :: "Fs.list" :: "Fs.mkdirs" :: "Sys.args" :: "Sys.getenv" :: "Sys.write" :: "Sys.read" :: "Sys.readLine" :: "Sys.spawn" :: "Sys.alive" :: "Sys.kill" :: "Impurity.runKit" :: "IO.pure" :: "IO.println" :: "Clock.monotonic" :: "Clock.realTime" :: "Map.empty" :: "Map.set" :: "Map.keys" :: "Map.values" :: "Map.size" :: "Map.contains" :: "Map.getOrElse" :: "Map.remove" :: "Map.toList" :: noStr()
+
+def kitNamesC(): List[String] =
+  "Set.empty" :: "Set.add" :: "Set.toList" :: "Set.size" :: "Set.contains" :: "Set.remove" :: "Set.union" :: "Set.intersect" :: "Set.diff" :: "Json.keys" :: "Json.get" :: "Json.has" :: "Json.parse" :: "Json.getStr" :: "Json.getBool" :: "Json.getInt" :: "Json.intOr" :: "Json.arr" :: "Json.at" :: "Json.isNull" :: "Json.isObj" :: "Json.isArr" :: "Json.pairs" :: "Json.set" :: "Json.remove" :: "Json.append" :: "Json.prepend" :: "Json.setAt" :: "Json.dropAt" :: "Json.merge" :: "Json.Int" :: "Json.Null" :: "Json.asInt" :: "Json.asBool" :: "Json.asStr" :: "Json.asFloat" :: "Json.Float" :: "Json.floatOr" :: "Json.Obj" :: "Json.Str" :: "Json.Bool" :: "Json.Arr" :: noStr()
+
+def kitNamesD(): List[String] =
+  "Str.startsWith" :: "Str.endsWith" :: "Str.contains" :: "Str.eq" :: "Str.isEmpty" :: "Str.nonEmpty" :: "Str.isBlank" :: "Str.lines" :: "Str.trim" :: "Str.indexOf" :: "Str.lastIndexOf" :: "Str.take" :: "Str.drop" :: "Str.takeRight" :: "Str.dropRight" :: "Str.stripPrefix" :: "Str.stripSuffix" :: "Str.split" :: "Fs.join" :: "Fs.dirname" :: "Fs.basename" :: noStr()
+
+def kitNamesE(): List[String] =
+  "Fs.exists" :: "Fs.delete" :: "Fs.walk" :: "Fs.canonicalize" :: "Fs.rename" :: "Random.nextInt" :: "Sys.childWrite" :: "Sys.childRead" :: "Sys.childClose" :: noStr()
+
+def kitNamesF(): List[String] =
+  "Net.httpGet" :: "Net.httpPost" :: "Net.httpPut" :: "Net.httpPatch" :: "Net.httpDelete" :: "Net.httpHead" :: "Net.serve" :: "Net.serveOnce" :: "Net.tcpConnect" :: "Net.tcpListen" :: "Net.tcpAccept" :: "Net.tcpRead" :: "Net.tcpWrite" :: "Net.tcpClose" :: "Net.udpBind" :: "Net.udpSend" :: "Net.udpRecv" :: "Net.udpClose" :: noStr()
+
+def kitNamesG(): List[String] =
+  "Timeline.signalInt" :: "Timeline.signalListLen" :: "Timeline.signalStrHas" :: "Property.signalInt" :: "Property.signalStr" :: "Property.signalListLen" :: "Property.signalListAt" :: "Verdict.alwaysHas" :: "Verdict.afterHit" :: noStr()
+
 def kitRet(f: String): String =
   if (f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Property.signalInt" || f == "Property.signalListLen") "Int" else if (f == "Timeline.signalStrHas") "Bool" else if (f == "Property.signalStr" || f == "Property.signalListAt") "String" else if (f == "Verdict.alwaysHas" || f == "Verdict.afterHit") "Verdict" else if (f == "Str.len" || f == "Str.byteLen" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.indexOf" || f == "Str.lastIndexOf" || f == "Map.size" || f == "Set.size" || f == "Json.getInt" || f == "Json.intOr") "Int" else if (f == "List.head") "Option" else if (f == "List.at" || f == "List.last" || f == "Map.getOrElse") "Any" else if (f == "List.isEmpty" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank") "Bool" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.flatten" || f == "Str.lines" || f == "Str.split") "List" else if (f == "Json.floatOr" || f == "Json.Float" || f == "Json.asFloat") "Float" else if (f == "Map.keys" || f == "Map.values" || f == "Map.toList" || f == "Set.toList" || f == "Json.keys" || f == "Json.arr" || f == "Json.at" || f == "Json.pairs" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "List" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read" || f == "Sys.getenv" || f == "Sys.read" || f == "Sys.readLine" || f == "Fs.canonicalize" || f == "Sys.childRead" || isNetHttp(f) || f == "Net.tcpRead") "IO[String]" else if (f == "Fs.write" || f == "Fs.mkdirs" || f == "Fs.delete" || f == "Fs.rename" || f == "Impurity.runKit" || f == "Sys.write" || f == "Sys.kill" || f == "Sys.childWrite" || f == "Sys.childClose" || f == "IO.println" || isNetServe(f) || f == "Net.tcpWrite" || f == "Net.tcpClose" || f == "Net.udpSend" || f == "Net.udpClose") "IO[Unit]" else if (f == "Fs.list" || f == "Fs.walk") "IO[List[(String, Bool)]]" else if (f == "Sys.args") "IO[List[String]]" else if (f == "Sys.spawn" || f == "Sys.alive" || f == "Fs.exists" || f == "Random.nextInt") "IO[Int]" else if (isSysProc(f)) "IO[(Int, String, String)]" else if (f == "Net.udpRecv") "IO[(String, Int, String)]" else if (f == "Net.tcpConnect" || f == "Net.tcpListen" || f == "Net.tcpAccept" || f == "Net.udpBind") "IO[Any]" else if (f == "IO.pure") "IO[Any]" else if (f == "Clock.monotonic" || f == "Clock.realTime") "IO[Int]" else if (f == "Map.empty" || f == "Map.set" || f == "Map.remove") "Map" else if (f == "Set.empty" || f == "Set.add" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" else if (f == "Json.parse" || f == "Json.get" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float" || f == "Json.Obj" || f == "Json.Str" || f == "Json.Bool" || f == "Json.Arr") "Any" else "Any"
 
@@ -1168,6 +1192,12 @@ def locOf2(p: (Int, Int), src: String, off: Int): (Int, Int, Int, Int) =
 def locOf3(line: Int, col: Int, n: Int): (Int, Int, Int, Int) =
   (line, col, line, col + (if (n < 1) 1 else n))
 
+def hexDigit(n: Int): String =
+  Str.slice("0123456789abcdef", n, n + 1)
+
+def hex2(n: Int): String =
+  Str.concat(hexDigit(n / 16), hexDigit(n % 16))
+
 def jsonStr(s: String): String =
   Str.concat("\"", Str.concat(_esc(s, 0, Builder.empty()), "\""))
 
@@ -1175,7 +1205,7 @@ def _esc(s: String, i: Int, b: Builder): String =
   if (i >= Str.len(s)) Builder.result(b) else _esc2(s, i, b, Str.charAt(s, i))
 
 def _esc2(s: String, i: Int, b: Builder, c: Int): String =
-  _esc(s, i + 1, Builder.append(b, if (c == 34) "\\\"" else if (c == 92) "\\\\" else if (c == 10) "\\n" else Str.slice(s, i, i + 1)))
+  _esc(s, i + 1, Builder.append(b, if (c == 34) "\\\"" else if (c == 92) "\\\\" else if (c == 10) "\\n" else if (c == 13) "\\r" else if (c == 9) "\\t" else if (c < 32) Str.concat("\\u00", hex2(c)) else Str.slice(s, i, i + 1)))
 
 def fileOf(stem: String): String =
   if (stem == "") "Main.scuzz" else Str.concat(stem, ".scuzz")
