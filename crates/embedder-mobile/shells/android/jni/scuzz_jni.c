@@ -22,12 +22,23 @@ int scuzz_android_push_lifecycle(int phase);
 int scuzz_android_keyboard_visible(void);
 
 static int g_started;
+static int g_joinable;
+static pthread_t g_tid;
 
 static void *scuzz_app_thread(void *unused) {
   char *args[] = {(char *)"scuzz", NULL};
   (void)unused;
   scuzz_app_main(1, args);
   return NULL;
+}
+
+static void scuzz_android_join_worker(void) {
+  if (!g_joinable)
+    return;
+  scuzz_android_set_alive(0);
+  pthread_join(g_tid, NULL);
+  g_joinable = 0;
+  g_started = 0;
 }
 
 void scuzz_android_set_vm(JavaVM *vm);
@@ -41,6 +52,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
 JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
   (void)vm;
   (void)reserved;
+  scuzz_android_join_worker();
   sz_mobile_shutdown();
 }
 
@@ -48,7 +60,6 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeStart(
     JNIEnv *env, jobject thiz, jstring dump_path, jint width, jint height,
     jfloat scale) {
   const char *dump;
-  pthread_t tid;
   char wbuf[16];
   char hbuf[16];
   char sbuf[32];
@@ -75,12 +86,12 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeStart(
   if (dump_path && dump)
     (*env)->ReleaseStringUTFChars(env, dump_path, dump);
   scuzz_android_set_alive(1);
-  if (pthread_create(&tid, NULL, scuzz_app_thread, NULL) != 0) {
+  if (pthread_create(&g_tid, NULL, scuzz_app_thread, NULL) != 0) {
     scuzz_android_set_alive(0);
     g_started = 0;
     return;
   }
-  pthread_detach(tid);
+  g_joinable = 1;
 }
 
 JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeFrameWidth(
@@ -156,7 +167,10 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeSetAlive(
     JNIEnv *env, jobject thiz, jint alive) {
   (void)env;
   (void)thiz;
-  scuzz_android_set_alive((int)alive);
+  if (alive)
+    scuzz_android_set_alive(1);
+  else
+    scuzz_android_join_worker();
 }
 
 JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeKeyboardVisible(

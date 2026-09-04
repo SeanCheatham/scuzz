@@ -27,6 +27,9 @@ if [ -z "$NAME" ]; then
   echo "missing package name in $PROJ/scuzz.toml" >&2
   exit 1
 fi
+if [ -z "${SCUZZ_BUNDLE_ID:-}" ]; then
+  SCUZZ_BUNDLE_ID="$(sed -n 's/^bundle_id = "\(.*\)"/\1/p' "$PROJ/scuzz.toml" | head -1)"
+fi
 BUNDLE_ID="${SCUZZ_BUNDLE_ID:-dev.scuzz.app}"
 
 OUT="$PROJ/build/ios-sim"
@@ -49,17 +52,30 @@ SCUZZ_SKIA=sk_sw "$SCUZZ" build "$PROJ"
 # the entry define i32 @main(...); rewrite a copy so the host .ll stays intact.
 sed 's/define i32 @main(/define i32 @scuzz_app_main(/' \
   "$PROJ/build/$NAME.ll" > "$OUT/app.ios.ll"
+if ! grep -q 'define i32 @scuzz_app_main(' "$OUT/app.ios.ll"; then
+  echo "missing scuzz_app_main — IR main rename failed" >&2
+  exit 1
+fi
+# net.c needs OpenSSL. This target does not ship it. Fail if the app calls Net.
+if grep -E 'call [^@]*@sz_net_' "$OUT/app.ios.ll" >/dev/null; then
+  echo "mobile package cannot link Net — this target has no OpenSSL" >&2
+  exit 1
+fi
 "${CLANG[@]}" "${CFLAGS[@]}" -c "$OUT/app.ios.ll" -o "$OUT/obj/app.o"
 
-# Runtime (C) for the sim SDK.
+# Runtime (C) for the sim SDK. Skip net.c (OpenSSL) and impurity.c (calls Net).
 for src in "$ROOT"/crates/runtime/src/*.c; do
+  base="$(basename "$src")"
+  if [ "$base" = "net.c" ] || [ "$base" = "impurity.c" ]; then
+    continue
+  fi
   obj="$OUT/obj/rt_$(basename "${src%.c}").o"
   "${CLANG[@]}" "${CFLAGS[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" -o "$obj"
 done
 
 # sk_sw backend (CPU raster; the mobile renderer).
 for src in "$ROOT"/crates/ffi-skia/src/sk_sw.c "$ROOT"/crates/ffi-skia/src/png_enc.c \
-           "$ROOT"/crates/ffi-skia/src/sk_mono.c; do
+           "$ROOT"/crates/ffi-skia/src/sk_gpu_none.c "$ROOT"/crates/ffi-skia/src/sk_mono.c; do
   obj="$OUT/obj/sk_$(basename "${src%.c}").o"
   "${CLANG[@]}" "${CFLAGS[@]}" -std=c11 \
     -I"$ROOT"/crates/ffi-skia/include -I"$ROOT"/crates/ffi-skia/src -c "$src" -o "$obj"

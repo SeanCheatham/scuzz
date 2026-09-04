@@ -55,6 +55,9 @@ if [ -z "$NAME" ]; then
   echo "missing package name in $PROJ/scuzz.toml" >&2
   exit 1
 fi
+if [ -z "${SCUZZ_BUNDLE_ID:-}" ]; then
+  SCUZZ_BUNDLE_ID="$(sed -n 's/^bundle_id = "\(.*\)"/\1/p' "$PROJ/scuzz.toml" | head -1)"
+fi
 BUNDLE_ID="${SCUZZ_BUNDLE_ID:-dev.scuzz.app}"
 
 OUT="$PROJ/build/android"
@@ -119,5 +122,4 @@ fi
   --out "$APK" "$STAGE/aligned.apk"
 
 echo "built $APK"
-bash "$(dirname "$0")/install_apk.sh" "$APK"
 echo "run: adb shell am start -n $BUNDLE_ID/dev.scuzz.app.MainActivity"

@@ -13,7 +13,6 @@
 
 #define EVENT_CAP 64
 #define TEXT_RING 64
-#define TEXT_LEN 64
 
 /* --- Event queue (main thread pushes, worker thread polls) --------------- */
 
@@ -22,9 +21,9 @@ static int g_q_head;
 static int g_q_tail;
 static os_unfair_lock g_q_lock = OS_UNFAIR_LOCK_INIT;
 static _Atomic int g_alive;
-static char g_text_bufs[TEXT_RING][TEXT_LEN];
+static char *g_text_bufs[TEXT_RING];
 static int g_text_i;
-static char g_poll_text[TEXT_LEN];
+static char *g_poll_text;
 static int g_soft_keyboard;
 static UIView *g_hidden_input;
 
@@ -39,22 +38,20 @@ static int text_slot_queued(const char *slot) {
   return 0;
 }
 
-static void copy_text(char *dst, const char *s) {
+static const char *stash_text(const char *s) {
+  char **slot = &g_text_bufs[g_text_i];
   size_t n;
+  char *p;
   if (!s)
     s = "";
   n = strlen(s);
-  if (n >= TEXT_LEN)
-    n = TEXT_LEN - 1;
-  memcpy(dst, s, n);
-  dst[n] = '\0';
-}
-
-static const char *stash_text(const char *s) {
-  char *dst = g_text_bufs[g_text_i];
+  p = (char *)realloc(*slot, n + 1);
+  if (!p)
+    return NULL;
+  memcpy(p, s, n + 1);
+  *slot = p;
   g_text_i = (g_text_i + 1) % TEXT_RING;
-  copy_text(dst, s);
-  return dst;
+  return p;
 }
 
 static int frame_bytes(int width, int height, size_t *out) {
@@ -74,14 +71,20 @@ static int frame_bytes(int width, int height, size_t *out) {
 
 static void enqueue_text_edit(const char *text) {
   SzInputEvent ev;
+  const char *stored;
   os_unfair_lock_lock(&g_q_lock);
   if (q_full() || text_slot_queued(g_text_bufs[g_text_i])) {
     os_unfair_lock_unlock(&g_q_lock);
     return;
   }
+  stored = stash_text(text);
+  if (!stored) {
+    os_unfair_lock_unlock(&g_q_lock);
+    return;
+  }
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = stash_text(text);
+  ev.text = stored;
   g_queue[g_q_tail] = ev;
   g_q_tail = (g_q_tail + 1) % EVENT_CAP;
   os_unfair_lock_unlock(&g_q_lock);
@@ -104,13 +107,35 @@ void scuzz_ios_push_lifecycle(int phase) {
   sz_mobile_push_event(&ev);
 }
 
-void sz_mobile_shutdown(void) { scuzz_ios_set_alive(0); }
+void sz_mobile_shutdown(void) {
+  int i;
+  scuzz_ios_set_alive(0);
+  os_unfair_lock_lock(&g_q_lock);
+  for (i = 0; i < TEXT_RING; i++) {
+    free(g_text_bufs[i]);
+    g_text_bufs[i] = NULL;
+  }
+  free(g_poll_text);
+  g_poll_text = NULL;
+  os_unfair_lock_unlock(&g_q_lock);
+}
 
 int sz_mobile_push_event(const SzInputEvent *event) {
   int next;
+  int last;
   if (!event)
     return 0;
   os_unfair_lock_lock(&g_q_lock);
+  if (event->kind == SZ_INPUT_POINTER &&
+      event->pointer_phase == SZ_POINTER_MOVE && g_q_head != g_q_tail) {
+    last = (g_q_tail + EVENT_CAP - 1) % EVENT_CAP;
+    if (g_queue[last].kind == SZ_INPUT_POINTER &&
+        g_queue[last].pointer_phase == SZ_POINTER_MOVE) {
+      g_queue[last] = *event;
+      os_unfair_lock_unlock(&g_q_lock);
+      return 1;
+    }
+  }
   next = (g_q_tail + 1) % EVENT_CAP;
   if (next == g_q_head) {
     os_unfair_lock_unlock(&g_q_lock);
@@ -123,6 +148,8 @@ int sz_mobile_push_event(const SzInputEvent *event) {
 }
 
 int sz_mobile_poll_event(SzInputEvent *out) {
+  size_t n;
+  char *p;
   if (!out)
     return 0;
   os_unfair_lock_lock(&g_q_lock);
@@ -133,8 +160,15 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   *out = g_queue[g_q_head];
   g_q_head = (g_q_head + 1) % EVENT_CAP;
   if (out->kind == SZ_INPUT_TEXT_EDIT) {
-    copy_text(g_poll_text, out->text);
-    out->text = g_poll_text;
+    if (!out->text)
+      out->text = "";
+    n = strlen(out->text);
+    p = (char *)realloc(g_poll_text, n + 1);
+    if (p) {
+      memcpy(p, out->text, n + 1);
+      g_poll_text = p;
+      out->text = g_poll_text;
+    }
   }
   os_unfair_lock_unlock(&g_q_lock);
   return 1;

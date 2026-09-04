@@ -86,6 +86,9 @@ def emptyPath(): String =
 def missName(): String =
   "missing field `name`"
 
+def emptyBundle(): String =
+  "bundle_id must not be empty"
+
 def start(): St =
   St("", "", "0.0.0", false, noPairs(), "")
 
@@ -111,13 +114,13 @@ def parseKey(line: String, rest: List[String], st: St): St =
   parseKey2(splitEq(line), rest, st)
 
 def parseKey2(kv: (String, String), rest: List[String], st: St): St =
-  if (st.sec == "package") parsePkg(kv._1, kv._2, rest, st) else if (st.sec == "dependencies") parseDep(kv._1, kv._2, rest, st) else if (st.sec == "ui") parseUi(kv._1, rest, st) else withErr(st, unkTable(st.sec))
+  if (st.sec == "package") parsePkg(kv._1, kv._2, rest, st) else if (st.sec == "dependencies") parseDep(kv._1, kv._2, rest, st) else if (st.sec == "ui") parseUi(kv._1, kv._2, rest, st) else withErr(st, unkTable(st.sec))
 
 def parsePkg(k: String, v: String, rest: List[String], st: St): St =
   if (!pkgKey(k)) withErr(st, unkPkg(k)) else if (k == "name") parseLines(rest, St(st.sec, unquote(v), st.version, st.hasUi, st.deps, st.err)) else if (k == "version") parseLines(rest, St(st.sec, st.name, unquote(v), st.hasUi, st.deps, st.err)) else parseLines(rest, st)
 
-def parseUi(k: String, rest: List[String], st: St): St =
-  if (!uiKey(k)) withErr(st, unkUi(k)) else parseLines(rest, st)
+def parseUi(k: String, v: String, rest: List[String], st: St): St =
+  if (!uiKey(k)) withErr(st, unkUi(k)) else if (k == "bundle_id" && unquote(v) == "") withErr(st, emptyBundle()) else parseLines(rest, st)
 
 def parseDep(name: String, raw: String, rest: List[String], st: St): St =
   parseDep2(name, trim(raw), rest, st)

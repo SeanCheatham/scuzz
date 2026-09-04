@@ -62,6 +62,15 @@ SCUZZ_SKIA=sk_sw "$SCUZZ" build --out-dir "$PROJ/build" "$PROJ"
 
 sed 's/define i32 @main(/define i32 @scuzz_app_main(/' \
   "$PROJ/build/$NAME.ll" > "$OUT/app.android.ll"
+if ! grep -q 'define i32 @scuzz_app_main(' "$OUT/app.android.ll"; then
+  echo "missing scuzz_app_main — IR main rename failed" >&2
+  exit 1
+fi
+# net.c needs OpenSSL. This target does not ship it. Fail if the app calls Net.
+if grep -E 'call [^@]*@sz_net_' "$OUT/app.android.ll" >/dev/null; then
+  echo "mobile package cannot link Net — this target has no OpenSSL" >&2
+  exit 1
+fi
 
 INCLUDES=(-I"$ROOT"/crates/runtime/include -I"$ROOT"/crates/ffi-skia/include
           -I"$ROOT"/crates/embedder-desktop/include -I"$ROOT"/crates/embedder-mobile/include)
@@ -72,7 +81,7 @@ build_abi() {
   local clang="$PRE/${triple}-clang"
   local so="$OUT/lib/${abi}/libscuzz.so"
   local obj="$OUT/obj/${abi}"
-  local src
+  local src base
   if [ ! -x "$clang" ]; then
     return 1
   fi
@@ -80,6 +89,11 @@ build_abi() {
   local cflags=(-target "$triple" -fPIC -O2 -Wall -Wextra)
   "$clang" "${cflags[@]}" -c "$OUT/app.android.ll" -o "$obj/app.o"
   for src in "$ROOT"/crates/runtime/src/*.c; do
+    base="$(basename "$src")"
+    # net.c needs OpenSSL. impurity.c calls sz_net_http_get.
+    if [ "$base" = "net.c" ] || [ "$base" = "impurity.c" ]; then
+      continue
+    fi
     "$clang" "${cflags[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" \
       -o "$obj/rt_$(basename "${src%.c}").o"
   done

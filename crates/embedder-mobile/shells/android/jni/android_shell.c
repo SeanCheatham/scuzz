@@ -1,4 +1,6 @@
-/* Android sz_mobile_* shell. Strong defs override the weak runtime stubs. */
+/* Android sz_mobile_* shell. Strong defs override the weak runtime stubs.
+ * Clipboard stays in-process (g_clip). The OS clipboard needs a main-looper
+ * hop this shell does not take. */
 
 #include "scuzz_mobile.h"
 
@@ -12,7 +14,6 @@
 
 #define EVENT_CAP 64
 #define TEXT_RING 64
-#define TEXT_LEN 64
 
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
@@ -26,13 +27,12 @@ static int g_h;
 static _Atomic int g_keyboard;
 static uint8_t *g_rgba;
 static size_t g_rgba_cap;
-static char g_text_bufs[TEXT_RING][TEXT_LEN];
+static char *g_text_bufs[TEXT_RING];
 static int g_text_i;
-static char g_poll_text[TEXT_LEN];
-static JavaVM *g_vm;
+static char *g_poll_text;
 static char *g_clip;
 
-void scuzz_android_set_vm(JavaVM *vm) { g_vm = vm; }
+void scuzz_android_set_vm(JavaVM *vm) { (void)vm; }
 
 int sz_mobile_available(void) { return 1; }
 
@@ -41,12 +41,19 @@ int sz_mobile_alive(void) { return atomic_load(&g_alive); }
 void scuzz_android_set_alive(int alive) { atomic_store(&g_alive, alive ? 1 : 0); }
 
 void sz_mobile_shutdown(void) {
+  int i;
   pthread_mutex_lock(&g_frame_lock);
   free(g_rgba);
   g_rgba = NULL;
   g_rgba_cap = 0;
   g_w = g_h = 0;
   pthread_mutex_unlock(&g_frame_lock);
+  for (i = 0; i < TEXT_RING; i++) {
+    free(g_text_bufs[i]);
+    g_text_bufs[i] = NULL;
+  }
+  free(g_poll_text);
+  g_poll_text = NULL;
   free(g_clip);
   g_clip = NULL;
   scuzz_android_set_alive(0);
@@ -63,22 +70,20 @@ static int text_slot_queued(const char *slot) {
   return 0;
 }
 
-static void copy_text(char *dst, const char *s) {
+static const char *stash_text(const char *s) {
+  char **slot = &g_text_bufs[g_text_i];
   size_t n;
+  char *p;
   if (!s)
     s = "";
   n = strlen(s);
-  if (n >= TEXT_LEN)
-    n = TEXT_LEN - 1;
-  memcpy(dst, s, n);
-  dst[n] = '\0';
-}
-
-static const char *stash_text(const char *s) {
-  char *dst = g_text_bufs[g_text_i];
+  p = (char *)realloc(*slot, n + 1);
+  if (!p)
+    return NULL;
+  memcpy(p, s, n + 1);
+  *slot = p;
   g_text_i = (g_text_i + 1) % TEXT_RING;
-  copy_text(dst, s);
-  return dst;
+  return p;
 }
 
 static int frame_bytes(int width, int height, size_t *out) {
@@ -98,9 +103,20 @@ static int frame_bytes(int width, int height, size_t *out) {
 
 int sz_mobile_push_event(const SzInputEvent *event) {
   int next;
+  int last;
   if (!event)
     return 0;
   pthread_mutex_lock(&g_q_lock);
+  if (event->kind == SZ_INPUT_POINTER &&
+      event->pointer_phase == SZ_POINTER_MOVE && g_q_head != g_q_tail) {
+    last = (g_q_tail + EVENT_CAP - 1) % EVENT_CAP;
+    if (g_queue[last].kind == SZ_INPUT_POINTER &&
+        g_queue[last].pointer_phase == SZ_POINTER_MOVE) {
+      g_queue[last] = *event;
+      pthread_mutex_unlock(&g_q_lock);
+      return 1;
+    }
+  }
   next = (g_q_tail + 1) % EVENT_CAP;
   if (next == g_q_head) {
     pthread_mutex_unlock(&g_q_lock);
@@ -113,6 +129,8 @@ int sz_mobile_push_event(const SzInputEvent *event) {
 }
 
 int sz_mobile_poll_event(SzInputEvent *out) {
+  size_t n;
+  char *p;
   if (!out)
     return 0;
   pthread_mutex_lock(&g_q_lock);
@@ -123,8 +141,15 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   *out = g_queue[g_q_head];
   g_q_head = (g_q_head + 1) % EVENT_CAP;
   if (out->kind == SZ_INPUT_TEXT_EDIT) {
-    copy_text(g_poll_text, out->text);
-    out->text = g_poll_text;
+    if (!out->text)
+      out->text = "";
+    n = strlen(out->text);
+    p = (char *)realloc(g_poll_text, n + 1);
+    if (p) {
+      memcpy(p, out->text, n + 1);
+      g_poll_text = p;
+      out->text = g_poll_text;
+    }
   }
   pthread_mutex_unlock(&g_q_lock);
   return 1;
@@ -145,14 +170,20 @@ int scuzz_android_push_pointer(float x, float y, int phase) {
 
 int scuzz_android_push_text_edit(const char *text) {
   SzInputEvent ev;
+  const char *stored;
   pthread_mutex_lock(&g_q_lock);
   if (q_full() || text_slot_queued(g_text_bufs[g_text_i])) {
     pthread_mutex_unlock(&g_q_lock);
     return 0;
   }
+  stored = stash_text(text);
+  if (!stored) {
+    pthread_mutex_unlock(&g_q_lock);
+    return 0;
+  }
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = stash_text(text);
+  ev.text = stored;
   g_queue[g_q_tail] = ev;
   g_q_tail = (g_q_tail + 1) % EVENT_CAP;
   pthread_mutex_unlock(&g_q_lock);
@@ -275,149 +306,10 @@ static char *clip_dup(const char *s) {
   return out;
 }
 
-static JNIEnv *android_env(int *need_detach) {
-  JNIEnv *env = NULL;
-  *need_detach = 0;
-  if (!g_vm)
-    return NULL;
-  if ((*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_6) == JNI_OK)
-    return env;
-  if ((*g_vm)->AttachCurrentThread(g_vm, &env, NULL) == 0) {
-    *need_detach = 1;
-    return env;
-  }
-  return NULL;
-}
-
-static void android_clear_exn(JNIEnv *env) {
-  if (env && (*env)->ExceptionCheck(env))
-    (*env)->ExceptionClear(env);
-}
-
-static jobject android_clipboard(JNIEnv *env) {
-  jclass at;
-  jmethodID current;
-  jobject app;
-  jclass ctx;
-  jmethodID get_sys;
-  jstring name;
-  jobject cm;
-  if (!env)
-    return NULL;
-  at = (*env)->FindClass(env, "android/app/ActivityThread");
-  if (!at) {
-    android_clear_exn(env);
-    return NULL;
-  }
-  current = (*env)->GetStaticMethodID(env, at, "currentApplication",
-                                      "()Landroid/app/Application;");
-  if (!current) {
-    android_clear_exn(env);
-    return NULL;
-  }
-  app = (*env)->CallStaticObjectMethod(env, at, current);
-  android_clear_exn(env);
-  if (!app)
-    return NULL;
-  ctx = (*env)->GetObjectClass(env, app);
-  get_sys = (*env)->GetMethodID(env, ctx, "getSystemService",
-                               "(Ljava/lang/String;)Ljava/lang/Object;");
-  if (!get_sys) {
-    android_clear_exn(env);
-    return NULL;
-  }
-  name = (*env)->NewStringUTF(env, "clipboard");
-  cm = (*env)->CallObjectMethod(env, app, get_sys, name);
-  android_clear_exn(env);
-  return cm;
-}
-
 int sz_mobile_clipboard_set(const char *text) {
-  int detach = 0;
-  JNIEnv *env;
-  jobject cm;
   free(g_clip);
   g_clip = clip_dup(text ? text : "");
-  env = android_env(&detach);
-  cm = android_clipboard(env);
-  if (env && cm) {
-    jclass clip_cls = (*env)->FindClass(env, "android/content/ClipData");
-    jmethodID neu;
-    jstring label;
-    jstring body;
-    jobject clip;
-    jclass cm_cls;
-    jmethodID set_clip;
-    if (clip_cls) {
-      neu = (*env)->GetStaticMethodID(
-          env, clip_cls, "newPlainText",
-          "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/"
-          "ClipData;");
-      label = (*env)->NewStringUTF(env, "scuzz");
-      body = (*env)->NewStringUTF(env, text ? text : "");
-      if (neu) {
-        clip = (*env)->CallStaticObjectMethod(env, clip_cls, neu, label, body);
-        android_clear_exn(env);
-        cm_cls = (*env)->GetObjectClass(env, cm);
-        set_clip = (*env)->GetMethodID(env, cm_cls, "setPrimaryClip",
-                                       "(Landroid/content/ClipData;)V");
-        if (set_clip && clip)
-          (*env)->CallVoidMethod(env, cm, set_clip, clip);
-        android_clear_exn(env);
-      }
-    }
-  }
-  if (detach && g_vm)
-    (*g_vm)->DetachCurrentThread(g_vm);
   return g_clip ? 1 : 0;
 }
 
-char *sz_mobile_clipboard_get(void) {
-  int detach = 0;
-  JNIEnv *env = android_env(&detach);
-  jobject cm = android_clipboard(env);
-  char *out = NULL;
-  if (env && cm) {
-    jclass cm_cls = (*env)->GetObjectClass(env, cm);
-    jmethodID get_clip = (*env)->GetMethodID(
-        env, cm_cls, "getPrimaryClip", "()Landroid/content/ClipData;");
-    jobject clip = get_clip ? (*env)->CallObjectMethod(env, cm, get_clip) : NULL;
-    android_clear_exn(env);
-    if (clip) {
-      jclass clip_cls = (*env)->GetObjectClass(env, clip);
-      jmethodID get_item = (*env)->GetMethodID(
-          env, clip_cls, "getItemAt", "(I)Landroid/content/ClipData$Item;");
-      jobject item =
-          get_item ? (*env)->CallObjectMethod(env, clip, get_item, 0) : NULL;
-      android_clear_exn(env);
-      if (item) {
-        jclass item_cls = (*env)->GetObjectClass(env, item);
-        jmethodID get_text = (*env)->GetMethodID(
-            env, item_cls, "getText", "()Ljava/lang/CharSequence;");
-        jobject cs =
-            get_text ? (*env)->CallObjectMethod(env, item, get_text) : NULL;
-        android_clear_exn(env);
-        if (cs) {
-          jmethodID cs_str = (*env)->GetMethodID(
-              env, (*env)->GetObjectClass(env, cs), "toString",
-              "()Ljava/lang/String;");
-          jstring js = cs_str
-                           ? (jstring)(*env)->CallObjectMethod(env, cs, cs_str)
-                           : NULL;
-          const char *utf;
-          android_clear_exn(env);
-          utf = js ? (*env)->GetStringUTFChars(env, js, NULL) : NULL;
-          if (utf) {
-            out = clip_dup(utf);
-            (*env)->ReleaseStringUTFChars(env, js, utf);
-          }
-        }
-      }
-    }
-  }
-  if (detach && g_vm)
-    (*g_vm)->DetachCurrentThread(g_vm);
-  if (!out && g_clip)
-    out = clip_dup(g_clip);
-  return out;
-}
+char *sz_mobile_clipboard_get(void) { return g_clip ? clip_dup(g_clip) : NULL; }

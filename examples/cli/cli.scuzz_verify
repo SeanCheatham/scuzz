@@ -32,7 +32,7 @@ def cliIdemFmt(): Bool =
   Main.cliIdem(Main.a1("fmt"))
 
 def drvHello(): Bool =
-  Drive.showMan(Manifest.parse(Main.tomlHello())) == "name=hello ver=0.1.0 ui=false deps=0"
+  Drive.showMan(Manifest.parse(Main.tomlHello())) == "name=hello ver=0.1.0 ui=false deps=0" && Drive.bundleIdOf(Main.tomlHello()) == "dev.scuzz.app" && Drive.bundleIdOf(Main.tomlBundle()) == "dev.scuzz.hello" && Drive.showMan(Manifest.parse(Main.tomlEmptyBundle())) == Str.concat("err:", Main.wantEmptyBundle())
 
 def drvPlugins(): Bool =
   Drive.showMan(Manifest.parse(Main.tomlPlugins())) == Str.concat("err:", Main.wantPlugins())

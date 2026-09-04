@@ -11,11 +11,11 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 1. Mobile on real devices
 
-**Status.** iOS simulator proven: `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh` and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim. The iOS shell feeds typed insert and backspace into `SZ_INPUT_TEXT_EDIT`. Android emulator proven: `scuzz package --target android` packs a debug APK (`arm64-v8a`, plus `x86_64` when that NDK clang is present) and installs it when `adb` lists a device. A USB serial wins over an emulator. No device is not a failure. After install, JNI loads `libscuzz.so` and presents frames (`scuzz android: present`). SurfaceView taps become `SZ_INPUT_POINTER`. A hidden `EditText` maps insert and backspace to `SZ_INPUT_TEXT_EDIT`. Missing NDK or SDK fails with one install line. Hardware devices stay open (provisioning).
+**Status.** `scuzz package --target android` runs `crates/embedder-mobile/shells/android/build_ndk.sh` then `build_apk.sh`. `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh`. Both skip `net.c` (OpenSSL) and `impurity.c`. A package whose IR calls `sz_net_*` fails with one line. UI apps that do not call Net can link. Missing NDK, SDK, or Xcode fails with one install line. Android copies the APK to `build/package/android/`. iOS copies the signed sim `.app` to `build/package/ios/`. `[ui].bundle_id` is the Android package and iOS `CFBundleIdentifier` (`dev.scuzz.app` when the key is absent). Empty `bundle_id` fails load. Hardware devices stay open (provisioning).
 
-**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware.
+**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. OpenSSL on Android NDK or iOS (do not vendor OpenSSL-for-iOS). iOS sim and Android emulator UI packaging still need Xcode or the NDK on the host.
 
-**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. iOS sim meets that bar. Android meets the emulator present + tap/TextField bar. Hardware device runs stay open.
+**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. That bar stays host-gated. Hardware device runs stay open.
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 
