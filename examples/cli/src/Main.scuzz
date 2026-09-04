@@ -151,6 +151,7 @@ def sumToDiff(n: Int where n >= 0): Bool =
 
 def sumToTen(): Bool =
   true
+
 """
 
 def wantAddSeeds(): String =
@@ -198,7 +199,25 @@ IO smoke ok
 scuzz test ok"""
 
 def wantEmptyVerify(): String =
-  "bad-intent/empty.scuzz_verify:1:1: error: bad-intent/empty.scuzz_verify: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file"
+  "bad-intent/empty.scuzz_verify:1:1: error: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file"
+
+def srcBadDrive(): String =
+  """def notADrive(n: Int): Int =
+  n
+
+"""
+
+def wantBadDrive(): String =
+  "bad.scuzz_verify:1:5: error: public def notADrive is not a drive oracle or a Timeline => Verdict claim"
+
+def srcOpaqueDrive(): String =
+  """def hold(r: Ref[Int]): Bool =
+  true
+
+"""
+
+def wantOpaqueDrive(): String =
+  "bad.scuzz_verify:1:5: error: drive hold params must be generator-friendly (at most 3; ADT or List only as the sole param)"
 
 def srcBumpRepro(): String =
   "[fuzz]\nseed = 42\nschedule_seed = \"42\"\nevents = [\"drive bump 0\"]\n"
@@ -207,8 +226,17 @@ def wantBumpEvents(): String =
   """drive bump 0
 """
 
+def srcQuoteEv(): List[String] =
+  "drive bump \"x\"" :: Verify.noStr()
+
+def wantQuoteEv(): String =
+  "drive bump \"x\"\n"
+
+def campReproOk(): Bool =
+  Verify.searchN(8) == 5 && Verify.mutateN(8) == 3 && Verify.decodeD(Verify.parseSeed("1344")) == 2 && Verify.decodeK(Verify.parseSeed("1344")) == 0 && Str.contains(Verify.reproText(42, "1344", "", srcQuoteEv()), "pct_d = 2") && Str.contains(Verify.reproText(42, "1344", "", srcQuoteEv()), "pct_k = 0") && Verify.nls(Verify.parseEvents(Verify.reproText(42, "1344", "", srcQuoteEv()))) == wantQuoteEv()
+
 def campaignOk(): Bool =
-  Verify.seeds(srcAddVerify()) == wantAddSeeds() && Verify.drivers(srcAddVerify()) == wantAddDrivers() && Verify.wrapSrc("bump", srcBumpVerify()) == wantWrapBump() && Verify.nls(Verify.parseEvents(srcBumpRepro())) == wantBumpEvents() && Verify.nls(Verify.linesOf(wantBumpEvents())) == wantBumpEvents() && Verify.tomlQuoted(srcBumpRepro(), "schedule_seed") == "42" && Verify.fuzzOut(0, 42, 0, 0, 0, 0) == wantFuzzHello0() && Verify.fuzzOut(8, 42, 0, 0, 0, 0) == wantFuzzHello8() && Cli.runCmd(Cli.parse(a1("test")), srcIrHi()) == wantTestOk() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "0")), srcIrHi()) == wantFuzzHello0() && Cli.runCmd(Cli.parse(a3("fuzz", "--iterations", "8")), srcIrHi()) == wantFuzzHello8() && Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == wantEmptyVerify() && Verify.checkVerify(srcAddVerify(), "add.scuzz_verify") == "scuzz check ok"
+  Verify.seeds(srcAddVerify()) == wantAddSeeds() && Verify.drivers(srcAddVerify()) == wantAddDrivers() && Verify.wrapSrc("bump", srcBumpVerify()) == wantWrapBump() && Verify.nls(Verify.parseEvents(srcBumpRepro())) == wantBumpEvents() && Verify.nls(Verify.linesOf(wantBumpEvents())) == wantBumpEvents() && Verify.tomlQuoted(srcBumpRepro(), "schedule_seed") == "42" && campReproOk() && Cli.runCmd(Cli.parse(a1("test")), srcIrHi()) == wantTestOk() && Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == wantEmptyVerify() && Verify.checkVerify(srcAddVerify(), "add.scuzz_verify") == "scuzz check ok" && Verify.checkVerify(srcBadDrive(), "bad.scuzz_verify") == wantBadDrive() && Verify.checkVerify(srcOpaqueDrive(), "bad.scuzz_verify") == wantOpaqueDrive() && Verify.checkVerify("nope", "junk.scuzz_verify") != wantEmptyVerify()
 
 def verifyOk(): Bool =
   Cli.runCmd(Cli.parse(a2("check", "--message-format=json")), srcTyUnbound()) == wantTyUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcTyUnbound()) == wantHumanUnbound() && Cli.runCmd(Cli.parse(a1("check")), srcIrHi()) == "scuzz check ok" && Cli.runCmd(Cli.parse(a1("fmt")), srcHi()) == wantHi() && campaignOk()

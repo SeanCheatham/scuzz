@@ -9,3 +9,4 @@ def afterCheckShowsDiag(t: Timeline): Verdict =
 
 def afterCompleteShowsItem(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Complete", "button:foo")
+

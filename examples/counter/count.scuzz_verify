@@ -15,3 +15,4 @@ def countStaysNonNeg(t: Timeline): Verdict =
 
 def countMatchesAcrossSchedules(a: Timeline, b: Timeline): Verdict =
   if (Timeline.signalInt(a, Timeline.len(a) - 1, "count") == Timeline.signalInt(b, Timeline.len(b) - 1, "count")) Verdict.ok() else Verdict.fail(0, "final count differs across schedules")
+
