@@ -4,6 +4,8 @@ record Walks(xs: List[Expr], n: Int, hi: Int)
 
 record FunWalk(ds: List[Fun], n: Int)
 
+record ImplWalk(xs: List[Im], n: Int)
+
 record ArmWalk(xs: List[Arm], n: Int, hi: Int)
 
 record BindWalk(xs: List[Bind], n: Int, hi: Int)
@@ -14,6 +16,7 @@ import Parse.Prog
 import Parse.Arm
 import Parse.Bind
 import Parse.Param
+import Parse.Im
 
 def wrapStem(): String =
   "__verify"
@@ -31,10 +34,10 @@ def progSite(inO: Bool, o: Bool): Bool =
   !o && live(inO, o)
 
 def isOracle(f: String): Bool =
-  f == "Property.check" || f == "Property.assert"
+  f == "Property.check" || f == "Property.assert" || f == "Property.force"
 
 def isHandler(f: String): Bool =
-  f == "View.button" || f == "View.iconButton" || f == "View.outlinedButton" || f == "View.textButton" || f == "View.fab" || f == "View.inkWell"
+  f == "View.button" || f == "View.iconButton" || f == "View.fab" || f == "View.outlinedButton" || f == "View.textButton" || f == "View.actionChip" || f == "View.onSecondary"
 
 def flipRel(op: String): String =
   if (op == "==") "!=" else if (op == "!=") "==" else if (op == "<") ">=" else if (op == "<=") ">" else if (op == ">") "<=" else if (op == ">=") "<" else if (op == "&&") "||" else if (op == "||") "&&" else ""
@@ -94,7 +97,15 @@ def countFilesPick(stem: String, src: String, rest: List[(String, String)], o: B
 
 def countProg(p: Prog, o: Bool): Int =
   p match {
-    case Prog(_, _, _, _, _, _, defs, _, body) => countFuns(defs, 0, o) + countExpr(body, o)
+    case Prog(_, _, _, _, impls, _, defs, _, body) => countImpls(impls, 0, o) + countFuns(defs, 0, o) + countExpr(body, o)
+  }
+
+def countImpls(xs: List[Im], n: Int, o: Bool): Int =
+  if (List.isEmpty(xs)) n else countImplsHd(List.at(xs, 0), List.tail(xs), n, o)
+
+def countImplsHd(im: Im, rest: List[Im], n: Int, o: Bool): Int =
+  im match {
+    case Im(_, _, _, methods) => countImpls(rest, countFuns(methods, n, o), o)
   }
 
 def countFuns(ds: List[Fun], n: Int, o: Bool): Int =
@@ -106,7 +117,7 @@ def countFunsHd(d: Fun, rest: List[Fun], n: Int, o: Bool): Int =
   }
 
 def countExpr(e: Expr, o: Bool): Int =
-  walk(e, 0 - 1, 0, false, noExprs(), 0, o).n
+  walk(e, 0 - 1, 0, false, collectHs(e, noExprs()), 0, o).n
 
 def applyFiles(files: List[(String, String)], site: Int, o: Bool): List[(String, String)] =
   applyFilesGo(files, site, 0, o)
@@ -133,11 +144,28 @@ def applyFilesLive3(stem: String, src: String, rest: List[(String, String)], sit
 
 def applyProg(p: Prog, site: Int, o: Bool): Prog =
   p match {
-    case Prog(pkg, ens, als, trs, ims, imps, defs, main, body) => applyFuns(defs, site, 0, o) match {
+    case Prog(pkg, ens, als, trs, impls, imps, defs, main, body) => applyImpls(impls, site, 0, o) match {
+  case ImplWalk(ims, n0) => applyFuns(defs, site, n0, o) match {
   case FunWalk(ds, n) => walk(body, site, n, false, collectHs(body, noExprs()), 0, o) match {
   case Walk(b, _, _) => Prog(pkg, ens, als, trs, ims, imps, ds, main, b)
 }
 }
+}
+  }
+
+def applyImpls(xs: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
+  if (List.isEmpty(xs)) ImplWalk(Parse.noIm(), seen) else applyImplsHd(List.at(xs, 0), List.tail(xs), site, seen, o)
+
+def applyImplsHd(im: Im, rest: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
+  im match {
+    case Im(tn, targs, forTy, methods) => applyFuns(methods, site, seen, o) match {
+  case FunWalk(ms, n) => applyImplsRest(Im(tn, targs, forTy, ms), rest, site, n, o)
+}
+  }
+
+def applyImplsRest(im: Im, rest: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
+  applyImpls(rest, site, seen, o) match {
+    case ImplWalk(xs, n) => ImplWalk(im :: xs, n)
   }
 
 def applyFuns(ds: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
@@ -178,7 +206,7 @@ def collectHs(e: Expr, acc: List[Expr]): List[Expr] =
   }
 
 def collectHsCall(f: String, args: List[Expr], acc: List[Expr], _e: Expr): List[Expr] =
-  collectHsList(args, if (isHandler(f) && isLamAt(args, 1)) handlerBody(args) :: acc else acc)
+  collectHsList(args, if (isHandler(f) && isLamAt(args, 1)) List.concat(acc, handlerBody(args) :: noExprs()) else acc)
 
 def isLamAt(args: List[Expr], i: Int): Bool =
   if (List.len(args) <= i) false else isLam(List.at(args, i))
@@ -220,6 +248,7 @@ def collectHsBindsHd(b: Bind, rest: List[Bind], acc: List[Expr]): List[Expr] =
 def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   e match {
     case Expr.EInt(k, _) => walkInt(k, target, seen, inO, hi, o)
+    case Expr.EBool(b) => walkBool(b, target, seen, inO, hi, o)
     case Expr.EBin(op, l, r, _) => walkBin(op, l, r, target, seen, inO, hs, hi, o)
     case Expr.EIf(c, t, el, off) => walkIf(c, t, el, off, target, seen, inO, hs, hi, o)
     case Expr.ECall(f, args, _) => walkCall(f, args, target, seen, inO, hs, hi, o)
@@ -239,6 +268,9 @@ def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o:
 
 def walkInt(k: Int, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
   if ((k == 0 || k == 1) && live(inO, o)) Walk(Expr.EInt(if (seen == target) 1 - k else k, 0), seen + 1, hi) else Walk(Expr.EInt(k, 0), seen, hi)
+
+def walkBool(b: Bool, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
+  if (live(inO, o)) Walk(Expr.EBool(if (seen == target) !b else b), seen + 1, hi) else Walk(Expr.EBool(b), seen, hi)
 
 def walkBin(op: String, l: Expr, r: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   if (live(inO, o) && binN(op) > 0) walkBinHit(op, l, r, target, seen, inO, hs, hi, o) else walkBinKids(op, l, r, target, seen, inO, hs, hi, o)
@@ -390,6 +422,14 @@ def walkField(recv: Expr, name: String, target: Int, seen: Int, inO: Bool, hs: L
   }
 
 def walkUn(op: String, inner: Expr, off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  if (op == "!" && live(inO, o)) walkUnNot(inner, off, target, seen, inO, hs, hi, o) else walkUnGo(op, inner, off, target, seen, inO, hs, hi, o)
+
+def walkUnNot(inner: Expr, off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(inner, target, seen + 1, inO, hs, hi, o) match {
+    case Walk(e2, n, h) => Walk(if (seen == target) e2 else Expr.EUn("!", e2, off), n, h)
+  }
+
+def walkUnGo(op: String, inner: Expr, off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(inner, target, seen, inO, hs, hi, o) match {
     case Walk(e2, n, h) => Walk(Expr.EUn(op, e2, off), n, h)
   }
@@ -486,5 +526,40 @@ def fuzzMutLine(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int): S
   Str.concat("mutate: ", Str.concat(Str.fromInt(killed), Str.concat(" killed, ", Str.concat(Str.fromInt(survived), Str.concat(" survived, ", Str.concat(Str.fromInt(inert), Str.concat(" inert (", Str.concat(Str.fromInt(ran), Str.concat(" of ", Str.concat(Str.fromInt(sites), " sites)"))))))))))
 
 def mutateHead(take: Int, sites: Int, o: Bool): String =
-  Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(take), Str.concat(" of ", Str.concat(Str.fromInt(sites), if (o) " residual oracle sites (negate/flip/0-1/arith/drop); idle + corpus replay" else " live-code sites (flip/if/0-1/sibling); idle + corpus replay"))))
+  Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(take), Str.concat(" of ", Str.concat(Str.fromInt(sites), if (o) " residual oracle sites (negate/flip/0-1/arith/drop); idle + corpus replay" else " live-code sites (flip/if/0-1/map/handler); idle + corpus replay"))))
+
+def noFiles(): List[(String, String)] =
+  []
+
+def oneSrc(src: String): List[(String, String)] =
+  ("Main", src) :: noFiles()
+
+def srcTwoBtn(): String =
+  "@main def main: IO[Unit] =\n  Ui.run(_ => View.column(View.button(\"A\", _ => Signal.set(a, 3)), View.button(\"B\", _ => Signal.set(b, 4))))\n"
+
+def srcArithBtn(): String =
+  "@main def main: IO[Unit] =\n  Ui.run(_ => View.column(View.button(\"A\", _ => Signal.set(a, Signal.get(a) + 3)), View.button(\"B\", _ => Signal.set(b, 4))))\n"
+
+def fileSrc(files: List[(String, String)]): String =
+  if (List.isEmpty(files)) "" else fileSrcHd(List.at(files, 0))
+
+def fileSrcHd(h: (String, String)): String =
+  h match {
+    case (_, src) => src
+  }
+
+def sitesOk(): Bool =
+  twoBtnOk() && arithBtnOk()
+
+def twoBtnOk(): Bool =
+  countFiles(oneSrc(srcTwoBtn()), false) == 2 && twoBtnSwap()
+
+def twoBtnSwap(): Bool =
+  Str.contains(fileSrc(applyFiles(oneSrc(srcTwoBtn()), 0, false)), "View.button(\"A\", _ => Signal.set(b, 4))") && !Str.contains(fileSrc(applyFiles(oneSrc(srcTwoBtn()), 0, false)), "Signal.set(a, 3)")
+
+def arithBtnOk(): Bool =
+  countFiles(oneSrc(srcArithBtn()), false) == 3 && arithBtnOp()
+
+def arithBtnOp(): Bool =
+  Str.contains(fileSrc(applyFiles(oneSrc(srcArithBtn()), 1, false)), "Signal.get(a) - 3") && Str.contains(fileSrc(applyFiles(oneSrc(srcArithBtn()), 1, false)), "Signal.set(a,") && Str.contains(fileSrc(applyFiles(oneSrc(srcArithBtn()), 1, false)), "Signal.set(b, 4)")
 
