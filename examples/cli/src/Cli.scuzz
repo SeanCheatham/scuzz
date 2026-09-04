@@ -160,11 +160,8 @@ def showFlagGot(p: (Bool, Int)): String =
 def resolveIdeDir(ideEnv: String, homeIde: String, checkout: String): String =
   if (ideEnv != "") ideEnv else if (homeIde != "") homeIde else checkout
 
-def shQuote(s: String): String =
-  Str.concat("'", Str.concat(Str.replace(s, "'", "'\\''"), "'"))
-
 def runExtra(path: String): String =
-  Str.concat(" ", shQuote(orDot(path)))
+  Str.concat(" ", Drive.shQuote(orDot(path)))
 
 def okPkgName(s: String): Bool =
   s != "" && okNameStart(Str.charAt(s, 0)) && okNameRest(s, 1)
@@ -442,8 +439,11 @@ def parsePkgTok(args: List[String], i: Int, json: Bool, path: String, outDir: St
 
 def parsePkgTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--target")) else parsePkg(args, n, json, path, outDir, v)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--target")) else parsePkgTargetVal(v, n, args, json, path, outDir)
   }
+
+def parsePkgTargetVal(v: String, n: Int, args: List[String], json: Bool, path: String, outDir: String): Cmd =
+  if (v == "host" || v == "android" || v == "ios" || v == "all") parsePkg(args, n, json, path, outDir, v) else Cmd.Fail(Drive.badTarget(v))
 
 def parsePkgOut(p: (String, Int), args: List[String], json: Bool, path: String, target: String): Cmd =
   p match {

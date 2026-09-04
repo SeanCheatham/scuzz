@@ -23,6 +23,9 @@ def compileSrc2(diags: String, src: String): Build =
 def joinSlash(a: String, b: String): String =
   if (a == "") b else if (Str.charAt(a, Str.len(a) - 1) == 47) Str.concat(a, b) else Str.concat(a, Str.concat("/", b))
 
+def shQuote(s: String): String =
+  Str.concat("'", Str.concat(Str.replace(s, "'", "'\\''"), "'"))
+
 def llName(outDir: String, name: String): String =
   joinSlash(outDir, Str.concat(name, ".ll"))
 
@@ -1000,7 +1003,7 @@ def pkgHostCopy(name: String, exe: String, dest: String, id: String): IO[Unit] =
   Fs.mkdirs(dest).flatMap(_ => pkgHostCp(name, exe, dest, id))
 
 def pkgHostCp(name: String, exe: String, dest: String, id: String): IO[Unit] =
-  runLine(Str.concat("cp ", Str.concat(exe, Str.concat(" ", joinSlash(dest, name))))).flatMap(r => pkgHostChmod(r, name, dest, id))
+  runLine(Str.concat("cp ", Str.concat(shQuote(exe), Str.concat(" ", shQuote(joinSlash(dest, name)))))).flatMap(r => pkgHostChmod(r, name, dest, id))
 
 def pkgHostChmod(r: (Int, String, String), name: String, dest: String, id: String): IO[Unit] =
   r match {
@@ -1011,13 +1014,31 @@ def pkgHostCpFail(err: String): IO[Unit] =
   IO.println(err).flatMap(_ => IO.fail("cp"))
 
 def pkgHostChmodOk(name: String, dest: String, id: String): IO[Unit] =
-  runLine(Str.concat("chmod +x ", joinSlash(dest, name))).flatMap(_ => pkgHostWrite(name, dest, id))
+  runLine(Str.concat("chmod +x ", shQuote(joinSlash(dest, name)))).flatMap(_ => pkgHostWrite(name, dest, id))
 
 def pkgHostWrite(name: String, dest: String, id: String): IO[Unit] =
-  Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ => runLine(Str.concat("chmod +x ", joinSlash(dest, "run.sh"))).flatMap(_ => Fs.write(joinSlash(dest, "package.toml"), hostMeta(name, id)).flatMap(_ => IO.println(Str.concat("packaged host -> ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")")))))))
+  Fs.write(joinSlash(dest, "run.sh"), hostRunSh(name)).flatMap(_ => runLine(Str.concat("chmod +x ", shQuote(joinSlash(dest, "run.sh")))).flatMap(_ => Fs.write(joinSlash(dest, "package.toml"), hostMeta(name, id)).flatMap(_ => IO.println(Str.concat("packaged host -> ", dest)).flatMap(_ => IO.println(Str.concat("scuzz package ok (", Str.concat(dest, ")")))))))
+
+def pkgScuzzEnv(h: String): String =
+  if (h == "") "" else Str.concat("SCUZZ=", Str.concat(shQuote(joinSlash(h, "bin/scuzz")), " "))
 
 def pkgEnvId(id: String): String =
-  Str.concat("SCUZZ_BUNDLE_ID=", Str.concat(id, " "))
+  Str.concat("SCUZZ_BUNDLE_ID=", Str.concat(shQuote(id), " "))
+
+def pkgBash(h: String, rel: String, dir: String, id: String): String =
+  Str.concat(pkgScuzzEnv(h), Str.concat(pkgEnvId(id), Str.concat("bash ", Str.concat(shQuote(crateAt(h, rel)), Str.concat(" ", shQuote(dir))))))
+
+def pkgAndroidCmd(h: String, dir: String, id: String): String =
+  pkgBash(h, "crates/embedder-mobile/shells/android/build_ndk.sh", dir, id)
+
+def pkgAndroidApkCmd(h: String, dir: String, id: String): String =
+  pkgBash(h, "crates/embedder-mobile/shells/android/build_apk.sh", dir, id)
+
+def pkgIosCmd(h: String, dir: String, id: String): String =
+  pkgBash(h, "crates/embedder-mobile/shells/ios/build_sim.sh", dir, id)
+
+def pkgAndroidAdbCmd(h: String, apk: String): String =
+  Str.concat("bash ", Str.concat(shQuote(crateAt(h, "crates/embedder-mobile/shells/android/install_apk.sh")), Str.concat(" ", shQuote(apk))))
 
 def pkgAndroid(dir: String, outDir: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgAndroidMan(dir, outDir, Manifest.parse(toml)))
@@ -1026,11 +1047,11 @@ def pkgAndroidMan(dir: String, outDir: String, m: Man): IO[Unit] =
   manNeed(m).flatMap(_ => pkgAndroidGo(dir, outDir, Manifest.uiBundle(Manifest.manUi(m))))
 
 def pkgAndroidGo(dir: String, outDir: String, id: String): IO[Unit] =
-  crateHome().flatMap(h => runLine(Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/android/build_ndk.sh"), Str.concat(" ", dir)))).flatMap(r => pkgAndroidNdk(h, r, dir, outDir, id)))
+  Sys.getenv("SCUZZ_HOME").flatMap(h => runLine(pkgAndroidCmd(h, dir, id)).flatMap(r => pkgAndroidNdk(h, r, dir, outDir, id)))
 
 def pkgAndroidNdk(h: String, r: (Int, String, String), dir: String, outDir: String, id: String): IO[Unit] =
   r match {
-    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else runLine(Str.concat(pkgEnvId(id), Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/android/build_apk.sh"), Str.concat(" ", dir))))).flatMap(r2 => pkgAndroidApk(r2, dir, outDir))
+    case (code, out, err) => if (code != 0) pkgAndroidFail(out, err) else runLine(pkgAndroidApkCmd(h, dir, id)).flatMap(r2 => pkgAndroidApk(r2, dir, outDir))
   }
 
 def pkgAndroidApk(r: (Int, String, String), dir: String, outDir: String): IO[Unit] =
@@ -1054,7 +1075,7 @@ def pkgAndroidCopy(name: String, dir: String, dest: String, id: String): IO[Unit
   Fs.mkdirs(dest).flatMap(_ => pkgAndroidCpSo(name, dir, dest, id))
 
 def pkgAndroidCpSo(name: String, dir: String, dest: String, id: String): IO[Unit] =
-  runLine(Str.concat("rm -rf ", Str.concat(joinSlash(dest, "lib"), Str.concat(" && cp -a ", Str.concat(androidLib(dir), Str.concat(" ", joinSlash(dest, "lib"))))))).flatMap(r => pkgAndroidCpSoGot(r, name, dir, dest, id))
+  runLine(Str.concat("rm -rf ", Str.concat(shQuote(joinSlash(dest, "lib")), Str.concat(" && cp -a ", Str.concat(shQuote(androidLib(dir)), Str.concat(" ", shQuote(joinSlash(dest, "lib")))))))).flatMap(r => pkgAndroidCpSoGot(r, name, dir, dest, id))
 
 def pkgAndroidCpSoGot(r: (Int, String, String), name: String, dir: String, dest: String, id: String): IO[Unit] =
   r match {
@@ -1062,7 +1083,7 @@ def pkgAndroidCpSoGot(r: (Int, String, String), name: String, dir: String, dest:
   }
 
 def pkgAndroidCpApk(name: String, dir: String, dest: String, id: String): IO[Unit] =
-  runLine(Str.concat("cp ", Str.concat(androidApk(dir, name), Str.concat(" ", joinSlash(dest, Str.concat(name, ".apk")))))).flatMap(r => pkgAndroidCpApkGot(r, name, dest, id))
+  runLine(Str.concat("cp ", Str.concat(shQuote(androidApk(dir, name)), Str.concat(" ", shQuote(joinSlash(dest, Str.concat(name, ".apk"))))))).flatMap(r => pkgAndroidCpApkGot(r, name, dest, id))
 
 def pkgAndroidCpApkGot(r: (Int, String, String), name: String, dest: String, id: String): IO[Unit] =
   r match {
@@ -1073,7 +1094,7 @@ def pkgAndroidWrite(name: String, dest: String, id: String): IO[Unit] =
   Fs.write(joinSlash(dest, "package.toml"), androidMeta(name, id)).flatMap(_ => pkgAndroidAdb(name, dest))
 
 def pkgAndroidAdb(name: String, dest: String): IO[Unit] =
-  crateHome().flatMap(h => runLine(Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/android/install_apk.sh"), Str.concat(" ", joinSlash(dest, Str.concat(name, ".apk")))))).flatMap(r => pkgAndroidAdbGot(r, dest)))
+  Sys.getenv("SCUZZ_HOME").flatMap(h => runLine(pkgAndroidAdbCmd(h, joinSlash(dest, Str.concat(name, ".apk")))).flatMap(r => pkgAndroidAdbGot(r, dest)))
 
 def pkgAndroidAdbGot(r: (Int, String, String), dest: String): IO[Unit] =
   r match {
@@ -1110,7 +1131,7 @@ def pkgIosMan(dir: String, outDir: String, m: Man): IO[Unit] =
   manNeed(m).flatMap(_ => pkgIosBuild(dir, outDir, Manifest.uiBundle(Manifest.manUi(m))))
 
 def pkgIosBuild(dir: String, outDir: String, id: String): IO[Unit] =
-  crateHome().flatMap(h => runLine(Str.concat(pkgEnvId(id), Str.concat("bash ", Str.concat(crateAt(h, "crates/embedder-mobile/shells/ios/build_sim.sh"), Str.concat(" ", dir))))).flatMap(r2 => pkgIosRun(r2, dir, outDir)))
+  Sys.getenv("SCUZZ_HOME").flatMap(h => runLine(pkgIosCmd(h, dir, id)).flatMap(r2 => pkgIosRun(r2, dir, outDir)))
 
 def pkgIosRun(r: (Int, String, String), dir: String, outDir: String): IO[Unit] =
   r match {
@@ -1133,7 +1154,7 @@ def pkgIosCopy(name: String, dir: String, dest: String, id: String): IO[Unit] =
   Fs.mkdirs(dest).flatMap(_ => pkgIosCp(name, dir, dest, id))
 
 def pkgIosCp(name: String, dir: String, dest: String, id: String): IO[Unit] =
-  runLine(Str.concat("rm -rf ", Str.concat(joinSlash(dest, Str.concat(name, ".app")), Str.concat(" && cp -a ", Str.concat(iosApp(dir, name), Str.concat(" ", joinSlash(dest, Str.concat(name, ".app")))))))).flatMap(r => pkgIosCpGot(r, name, dest, id))
+  runLine(Str.concat("rm -rf ", Str.concat(shQuote(joinSlash(dest, Str.concat(name, ".app"))), Str.concat(" && cp -a ", Str.concat(shQuote(iosApp(dir, name)), Str.concat(" ", shQuote(joinSlash(dest, Str.concat(name, ".app"))))))))).flatMap(r => pkgIosCpGot(r, name, dest, id))
 
 def pkgIosCpGot(r: (Int, String, String), name: String, dest: String, id: String): IO[Unit] =
   r match {
