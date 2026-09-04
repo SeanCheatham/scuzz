@@ -60,6 +60,8 @@ enum {
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
 void sz_release(void *ptr);
+/* RC kind of `ptr`. A non-RC pointer is `SZ_RC_KIND_COUNT`. */
+uint32_t sz_rc_kind(const void *ptr);
 /* Live heap through sz_alloc/sz_free (user bytes; excludes size header). */
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
 /* Sum of RC counts on live RC blocks. Raw sz_alloc blocks add 0. */
@@ -760,7 +762,8 @@ int64_t sz_list_segment_length(SzList *xs, SzListPred pred, void *env, int64_t f
 int64_t sz_list_is_defined_at(SzList *xs, int64_t index);
 /* Negative when len < n, 0 when equal, positive when len > n. */
 int64_t sz_list_length_compare(SzList *xs, int64_t n);
-/* `as_int` 1 orders boxed Int, else String. `want_max` 1 is max. Empty max panics. */
+/* Kind comes from the first non-null head (boxed Int or String).
+ * `as_int` is unused. Empty max panics. */
 SzList *sz_list_sort(SzList *xs, int64_t as_int);
 SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env);
 void *sz_list_max(SzList *xs, int64_t as_int);
@@ -776,7 +779,8 @@ int64_t sz_list_sum(SzList *xs);
 int64_t sz_list_product(SzList *xs);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
-SzString *sz_list_join(const SzList *xs, const char *sep);
+/* Join string cells with `sep`. A null cell is empty. Other heads panic. */
+SzString *sz_list_join(const SzList *xs, const SzString *sep);
 
 /* Persistent Map / Set (NULL = empty). key_kind 0 = boxed i64, 1 = String. */
 struct SzMap {

@@ -459,6 +459,12 @@ void sz_retain(void *ptr) {
   sz_rc_hdr(ptr)->rc += 1;
 }
 
+uint32_t sz_rc_kind(const void *ptr) {
+  if (!sz_is_rc(ptr))
+    return SZ_RC_KIND_COUNT;
+  return sz_rc_hdr(ptr)->kind;
+}
+
 void sz_release(void *ptr) {
   SzRcHdr *h;
   uint32_t kind;

@@ -48,10 +48,13 @@ static SzIo *do_read_line(void *value, void *env) {
 
 static SzIo *after_args(void *value, void *env) {
   SzList *xs = (SzList *)value;
+  SzString *sep;
   SzString *joined;
   SzIo *io;
   (void)env;
-  joined = sz_list_join(xs, ",");
+  sep = sz_string_from_cstr(",");
+  joined = sz_list_join(xs, sep);
+  sz_release(sep);
   sz_release(xs);
   io = labeled("args:", joined);
   sz_release(joined);
