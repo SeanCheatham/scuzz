@@ -648,11 +648,12 @@ void sz_release(void *ptr) {
           tag == SZ_ST_ZIPALL || tag == SZ_ST_ORELSE)
         sz_release(right);
       /* TAKE/DROP/GROUPED/SLIDING/TAKERIGHT/DROPRIGHT store a count in env.
+       * RANGE stores from in env and until in right. Those are not RC.
        * Filter, map, scan, and flatMap nodes store a capture. Function
        * pointers in right are not RC. */
       if (tag != SZ_ST_TAKE && tag != SZ_ST_DROP && tag != SZ_ST_GROUPED &&
           tag != SZ_ST_SLIDING && tag != SZ_ST_TAKERIGHT &&
-          tag != SZ_ST_DROPRIGHT)
+          tag != SZ_ST_DROPRIGHT && tag != SZ_ST_RANGE)
         sz_release(env);
       return;
     }

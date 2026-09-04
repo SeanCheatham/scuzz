@@ -506,7 +506,7 @@ enum {
   SZ_ST_ZIPIDX = 17,
   SZ_ST_FLATTEN = 18,
   SZ_ST_CHANGES = 19,
-  SZ_ST_REPEATN = 20,
+  SZ_ST_RANGE = 20,
   SZ_ST_FILTERNOT = 21,
   SZ_ST_MAPCONCAT = 22,
   SZ_ST_ZIPWITH = 23,
@@ -517,7 +517,9 @@ enum {
   SZ_ST_DROPRIGHT = 28,
   SZ_ST_FINDLAST = 29,
   SZ_ST_EVALTAP = 30,
-  SZ_ST_INTERLEAVE = 31
+  SZ_ST_INTERLEAVE = 31,
+  SZ_ST_ITERATE = 32,
+  SZ_ST_UNFOLD = 33
 };
 
 struct SzStream {
@@ -541,7 +543,7 @@ SzStream *sz_stream_find(SzStream *inner, SzStreamPred pred, void *env);
 SzIo *sz_stream_exists(SzStream *s, SzStreamPred pred, void *env); /* IO[Bool] */
 SzStream *sz_stream_take(SzStream *inner, int64_t n);
 SzStream *sz_stream_drop(SzStream *inner, int64_t n);
-/* Boxed ints `[from, until)`. Empty when `until` <= `from`. */
+/* Boxed ints `[from, until)`. Empty when `until` <= `from`. Pulls one box. */
 SzStream *sz_stream_range(int64_t from, int64_t until);
 /* Concat `inner` with itself `n` times. `n` <= 0 is empty. */
 SzStream *sz_stream_repeat_n(SzStream *inner, int64_t n);
@@ -568,9 +570,9 @@ SzStream *sz_stream_take_right(SzStream *inner, int64_t n);
 SzStream *sz_stream_drop_right(SzStream *inner, int64_t n);
 SzStream *sz_stream_find_last(SzStream *inner, SzStreamPred pred, void *env);
 SzStream *sz_stream_evaltap(SzStream *inner, SzCont f, void *env);
-/* Emit `z`, then `f(z)`, n times. n <= 0 is empty. */
+/* Emit `z`, then `f(z)`, n times. n <= 0 is empty. Pulls one value. */
 SzStream *sz_stream_iterate(void *z, int64_t n, SzStreamMapFn f, void *env);
-/* `f` returns List of 0 or 1 `(A, Z)` pair. Empty stops. Caps at 65536. */
+/* `f` returns List of 0 or 1 `(A, Z)` pair. Empty stops. Cap 65536 pulled steps. */
 SzStream *sz_stream_unfold(void *z, SzStreamMapFn f, void *env);
 SzIo *sz_stream_head(SzStream *s);  /* IO[A]; fails when empty */
 SzIo *sz_stream_last(SzStream *s);  /* IO[A]; fails when empty */

@@ -475,7 +475,10 @@ def anyParams(n: Int): List[String] =
   if (n <= 0) noStr() else "Any" :: anyParams(n - 1)
 
 def openKitRet(f: String): String =
-  if (openKitBool(f)) "Bool" else if (openKitInt(f) || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")) "Int" else if (f == "Property.sometimes") "Unit" else if (openKitAny(f) || Str.startsWith(f, "Signal.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "Json.")) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "IO.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Deferred.") || Str.startsWith(f, "Stream.") || Str.startsWith(f, "Resource.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".")) "Any" else "Any"
+  if (openKitBool(f)) "Bool" else if (openKitInt(f) || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")) "Int" else if (f == "Property.sometimes") "Unit" else if (openKitAny(f) || Str.startsWith(f, "Signal.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "Json.")) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "Stream.")) streamKitRet(f) else if (Str.startsWith(f, "IO.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Deferred.") || Str.startsWith(f, "Resource.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".")) "Any" else "Any"
+
+def streamKitRet(f: String): String =
+  if (f == "Stream.exists" || f == "Stream.forall" || f == "Stream.none") "IO[Bool]" else if (f == "Stream.count") "IO[Int]" else if (f == "Stream.compileToList" || f == "Stream.drain" || f == "Stream.head" || f == "Stream.last" || f == "Stream.fold") "IO[Any]" else "Stream"
 
 def openKitBool(f: String): Bool =
   f == "List.exists" || f == "List.forall" || f == "List.contains" || f == "List.nonEmpty" || f == "List.isEmpty"
@@ -640,7 +643,7 @@ def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, 
   if (hasErr(vo)) vo else if (d) inferForDraw(name, vo.ty, rest, body, env, funs, ens, errTy, span) else inferForGo(rest, body, bindFor(false, name, vo.ty, env, ens), funs, ens, errTy)
 
 def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], errTy: String, span: (String, Int)): Out =
-  inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span))
+  if (Str.startsWith(ty, "Stream")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span))
 
 def inferForDraw2(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], u: Out): Out =
   if (hasErr(u)) u else inferForGo(rest, body, bindFor(true, name, ty, env, ens), funs, ens, u.ty)
