@@ -16,3 +16,15 @@ def termDiff(t: Term): Bool =
 def utf8Ops(): Bool =
   Main.utf8Check() == 1
 
+def mixedDefault(): Bool =
+  Main.addDefault(3, m = 4) == 7
+
+def mixedGreet(): Bool =
+  Main.greet("hi", punct = "?") == "hi?"
+
+def tupFive(): Bool =
+  (1, 2, 3, 4, 5)._5 == 5
+
+def tupEight(): Bool =
+  (1, 2, 3, 4, 5, 6, 7, 8)._8 == 8
+

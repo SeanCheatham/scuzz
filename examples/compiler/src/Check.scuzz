@@ -10,6 +10,7 @@ import Parse.Arm
 import Parse.Bind
 import Parse.Alias
 import Parse.Imp
+import Lexer.lex
 
 def noStr(): List[String] =
   []
@@ -124,6 +125,110 @@ def stripNamed(e: Expr): Expr =
     case Expr.ENamed(_, inner) => inner
     case _ => e
   }
+
+def noExpr(): List[Expr] =
+  []
+
+def hasNamedArg(xs: List[Expr]): Bool =
+  !List.isEmpty(xs) && (isNamedArg(List.at(xs, 0)) || hasNamedArg(List.tail(xs)))
+
+def isNamedArg(e: Expr): Bool =
+  e match {
+    case Expr.ENamed(_, _) => true
+    case _ => false
+  }
+
+def dfltExpr(d: String): Expr =
+  dfltExprOf(Parse.parseExprList(lex(d), 0))
+
+def dfltExprOf(p: (Expr, Int)): Expr =
+  p match {
+    case (e, _) => e
+  }
+
+def namedHas(n: String, args: List[Expr]): Bool =
+  !List.isEmpty(args) && namedHas1(List.at(args, 0), List.tail(args), n)
+
+def namedHas1(h: Expr, rest: List[Expr], n: String): Bool =
+  h match {
+    case Expr.ENamed(nm, _) => nm == n || namedHas(n, rest)
+    case _ => namedHas(n, rest)
+  }
+
+def namedLookup(n: String, args: List[Expr]): Expr =
+  if (List.isEmpty(args)) Expr.EUnit else namedLookup1(List.at(args, 0), List.tail(args), n)
+
+def namedLookup1(h: Expr, rest: List[Expr], n: String): Expr =
+  h match {
+    case Expr.ENamed(nm, inner) => if (nm == n) inner else namedLookup(n, rest)
+    case _ => namedLookup(n, rest)
+  }
+
+def paramHasName(ps: List[Param], n: String): Bool =
+  if (List.isEmpty(ps)) false else paramHasName1(List.at(ps, 0), List.tail(ps), n)
+
+def paramHasName1(p: Param, rest: List[Param], n: String): Bool =
+  p match {
+    case Param(nm, _, _, _) => nm == n || paramHasName(rest, n)
+  }
+
+def alignCall(ps: List[Param], args: List[Expr]): (List[Expr], String) =
+  if (List.isEmpty(ps)) (args, "") else alignAfterSplit(ps, alignSplit(args, noExpr(), noExpr(), false))
+
+def alignSplit(args: List[Expr], pos: List[Expr], named: List[Expr], seenN: Bool): (List[Expr], List[Expr], String) =
+  if (List.isEmpty(args)) (List.reverse(pos), List.reverse(named), "") else alignSplit1(List.at(args, 0), List.tail(args), pos, named, seenN)
+
+def alignSplit1(h: Expr, rest: List[Expr], pos: List[Expr], named: List[Expr], seenN: Bool): (List[Expr], List[Expr], String) =
+  h match {
+    case Expr.ENamed(_, _) => alignSplit(rest, pos, h :: named, true)
+    case _ => if (seenN) (List.reverse(pos), List.reverse(named), "positional argument after named argument") else alignSplit(rest, h :: pos, named, false)
+  }
+
+def alignAfterSplit(ps: List[Param], sp: (List[Expr], List[Expr], String)): (List[Expr], String) =
+  sp match {
+    case (pos, named, err) => if (err != "") (noExpr(), err) else alignAfterUnknown(ps, pos, named, alignUnknown(named, ps))
+  }
+
+def alignUnknown(named: List[Expr], ps: List[Param]): String =
+  if (List.isEmpty(named)) "" else alignUnknown1(List.at(named, 0), List.tail(named), ps)
+
+def alignUnknown1(h: Expr, rest: List[Expr], ps: List[Param]): String =
+  h match {
+    case Expr.ENamed(nm, _) => if (paramHasName(ps, nm)) alignUnknown(rest, ps) else Str.concat("unknown argument ", nm)
+    case _ => alignUnknown(rest, ps)
+  }
+
+def alignAfterUnknown(ps: List[Param], pos: List[Expr], named: List[Expr], err: String): (List[Expr], String) =
+  if (err != "") (noExpr(), err) else alignFillPs(ps, pos, named, 0, noExpr())
+
+def alignFillPs(ps: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+  if (List.isEmpty(ps)) alignDone(pos, i, acc) else alignFillHd(List.at(ps, 0), List.tail(ps), pos, named, i, acc)
+
+def alignDone(pos: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+  if (i < List.len(pos)) (List.reverse(acc), "too many arguments") else (List.reverse(acc), "")
+
+def alignFillHd(p: Param, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+  p match {
+    case Param(n, _, _, d) => alignFillOne(n, d, rest, pos, named, i, acc)
+  }
+
+def alignFillOne(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+  if (i < List.len(pos)) alignFillPos(n, rest, pos, named, i, acc) else alignFillNamed(n, d, rest, pos, named, i, acc)
+
+def alignFillPos(n: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+  if (namedHas(n, named)) (noExpr(), Str.concat("duplicate argument ", n)) else alignFillPs(rest, pos, named, i + 1, List.at(pos, i) :: acc)
+
+def alignFillNamed(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+  if (namedHas(n, named)) alignFillPs(rest, pos, named, i, namedLookup(n, named) :: acc) else alignFillDflt(n, d, rest, pos, named, i, acc)
+
+def alignFillDflt(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+  if (d != "") alignFillPs(rest, pos, named, i, dfltExpr(d) :: acc) else (noExpr(), Str.concat("missing argument ", n))
+
+def alignErr(f: String, err: String, ps: List[Param], args: List[Expr]): String =
+  if (arityErr(err, args)) Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(ps)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))) else err
+
+def arityErr(err: String, args: List[Expr]): Bool =
+  (err == "too many arguments" || Str.startsWith(err, "missing argument ")) && !hasNamedArg(args)
 
 def isKit(f: String): Bool =
   isKitA(f) || isKitB(f) || isKitC(f) || isKitD(f) || isKitE(f) || isKitF(f) || isKitG(f)
@@ -407,7 +512,15 @@ def resolveUser(f: String, args: List[Expr], env: List[(String, String)], funs: 
 
 def resolveUserHit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), d: Fun): Out =
   d match {
-    case Fun(_, _, _, ps, ret, _, _, _) => checkKnown(f, paramTys(ps), ret, args, env, funs, ens, span)
+    case Fun(_, _, _, ps, ret, _, _, _) => checkUser(f, ps, ret, args, env, funs, ens, span)
+  }
+
+def checkUser(f: String, ps: List[Param], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  checkUserAl(f, ps, ret, args, env, funs, ens, span, alignCall(ps, args))
+
+def checkUserAl(f: String, ps: List[Param], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), al: (List[Expr], String)): Out =
+  al match {
+    case (xs, err) => if (err != "") bad(alignErr(f, err, ps, args), span) else checkKnown(f, paramTys(ps), ret, xs, env, funs, ens, span)
   }
 
 def inferCall(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
@@ -568,22 +681,25 @@ def inferFieldHit(hit: List[Fun], en: String, name: String, env: List[(String, S
   if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens, noSpan()), name, ens) else ok(funTyOf(List.at(hit, 0)))
 
 def fieldOf(o: Out, name: String, ens: List[En]): Out =
-  if (hasErr(o)) o else fieldOf2(o.ty, name, ens)
+  if (hasErr(o)) o else fieldOf2(o.ty, name, ens, o.span)
 
-def fieldOf2(ty: String, name: String, ens: List[En]): Out =
-  if (isTup(ty) && isTupField(name)) tupFieldOf(ty, name) else fieldOf3(fieldNamed(ens, ty, name), ty)
+def fieldOf2(ty: String, name: String, ens: List[En], span: (String, Int)): Out =
+  if (isTup(ty) && isTupField(name)) tupFieldAt(splitComma(tupleInner(ty)), tupIdx(name), name, span) else if (isTup(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else fieldOf3(fieldNamed(ens, ty, name), ty)
 
 def isTupField(name: String): Bool =
-  name == "_1" || name == "_2" || name == "_3" || name == "_4"
-
-def tupFieldOf(ty: String, name: String): Out =
-  tupFieldAt(splitComma(tupleInner(ty)), tupIdx(name))
+  tupIdx(name) >= 0
 
 def tupIdx(name: String): Int =
-  if (name == "_1") 0 else if (name == "_2") 1 else if (name == "_3") 2 else 3
+  if (Str.len(name) == 2 && Str.charAt(name, 0) == 95) tupIdxDig(Str.charAt(name, 1)) else 0 - 1
 
-def tupFieldAt(parts: List[String], i: Int): Out =
-  if (i < 0 || i >= List.len(parts)) ok("Any") else ok(List.at(parts, i))
+def tupIdxDig(c: Int): Int =
+  if (c >= 49 && c <= 56) c - 49 else 0 - 1
+
+def tupBadName(name: String): Bool =
+  Str.len(name) >= 2 && Str.charAt(name, 0) == 95 && Str.charAt(name, 1) >= 48 && Str.charAt(name, 1) <= 57
+
+def tupFieldAt(parts: List[String], i: Int, name: String, span: (String, Int)): Out =
+  if (i < 0 || i >= List.len(parts)) bad(Str.concat("tuple has no field ", name), span) else ok(List.at(parts, i))
 
 def fieldOf3(ft: String, ty: String): Out =
   if (ft == "") ok(ty) else ok(ft)
@@ -918,7 +1034,8 @@ def inferIoMap2(o: Out, recv: Expr, args: List[Expr], env: List[(String, String)
 def inferIoMapLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   lam match {
     case Expr.ELam(p, body) => inferIoMap3(recv, infer(body, bindIo(p, recv.ty, env), funs, ens), env, e)
-    case _ => inferIoMap3(recv, infer(lam, env, funs, ens), env, e)
+    case Expr.EMatch(_, _, _) => inferIoMap3(recv, infer(lam, env, funs, ens), env, e)
+    case _ => bad("map needs a lambda", exprSpan(env, e))
   }
 
 def inferIoMap3(recv: Out, body: Out, env: List[(String, String)], e: Expr): Out =
