@@ -64,6 +64,8 @@ void sz_deferred_complete_now(SzDeferred *d, void *value) {
   sz_retain(value);
   d->value = value;
   sz_fiber_wake_deferred(d);
+  if (d->waiters)
+    sz_panic("sz_deferred_complete_now: waiters remain");
 }
 
 void sz_deferred_fail_now(SzDeferred *d, SzError *err) {
@@ -79,6 +81,8 @@ void sz_deferred_fail_now(SzDeferred *d, SzError *err) {
     sz_retain(err);
   d->error = err;
   sz_fiber_wake_deferred(d);
+  if (d->waiters)
+    sz_panic("sz_deferred_fail_now: waiters remain");
 }
 
 static void *deferred_fail_thunk(void *env) {

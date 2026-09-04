@@ -710,6 +710,8 @@ void sz_release(void *ptr) {
     int bad = d->completed && !d->ok;
     void *v = d->value;
     SzError *err = d->error;
+    if (d->waiters)
+      sz_panic("sz_deferred_free: waiters remain");
     d->value = NULL;
     d->error = NULL;
     sz_rc_retire(ptr);
@@ -2723,8 +2725,11 @@ static void queue_waiter_remove(SzQueue *q, Fiber *f) {
 }
 
 static void def_waiter_add(SzDeferred *d, Fiber *f) {
-  f->wait_next = (Fiber *)d->waiters;
-  d->waiters = f;
+  Fiber **pp = (Fiber **)&d->waiters;
+  f->wait_next = NULL;
+  while (*pp)
+    pp = &(*pp)->wait_next;
+  *pp = f;
 }
 
 static void def_waiter_remove(SzDeferred *d, Fiber *f) {
@@ -3807,6 +3812,11 @@ static void sched_free_fibers(Sched *s) {
     if (f->qwait) {
       sz_release(f->qwait);
       f->qwait = NULL;
+    }
+    if (f->dwait) {
+      def_waiter_remove(f->dwait, f);
+      sz_release(f->dwait);
+      f->dwait = NULL;
     }
     cont_free_all(f->stack);
     f->stack = NULL;

@@ -438,7 +438,7 @@ struct SzDeferred {
   int ok;
   void *value;
   SzError *error;
-  void *waiters; /* runtime Fiber* list while get is parked */
+  void *waiters; /* FIFO Fiber* list while get is parked */
 };
 
 SzDeferred *sz_deferred_make(void);

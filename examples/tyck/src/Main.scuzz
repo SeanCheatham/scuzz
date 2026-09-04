@@ -178,6 +178,20 @@ def srcResUnk(): String =
 def wantResUnk(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: unknown function Resource.foo\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":15}]"
 
+def srcDefUnk(): String =
+  """@main def main: IO[Unit] =
+  Deferred.foo(1)
+"""
+
+def wantDefUnk(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Deferred.foo\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":15}]"
+
+def srcDefMis(): String =
+  "@main def main: IO[Unit] =\n  Deferred.complete(\"nope\", 1)\n"
+
+def wantDefMis(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: Deferred.complete arg type mismatch: expected Deferred, got String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":21,\"end_line\":2,\"end_column\":27}]"
+
 def srcJsonUnk(): String =
   """@main def main: IO[Unit] =
   Json.notAKit(1, 2, 3)
@@ -276,7 +290,7 @@ def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit())
 
 def tyckRes(): Bool =
-  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk())
+  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis())
 
 def tyckFail(): Bool =
   tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis())
