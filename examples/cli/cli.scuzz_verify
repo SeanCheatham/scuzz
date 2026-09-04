@@ -17,7 +17,7 @@ def cliJsonCheck(): Bool =
   Main.cliDiff(Cli.show(Cli.parse(Main.a2("--message-format=json", "check"))), "check path=. json=true")
 
 def cliErrs(): Bool =
-  Main.cliDiff(Cli.render(Cli.parse(Main.a1("nope"))), Main.wantUnrec()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--nope"))), Main.wantUnexp()) && Main.cliDiff(Cli.render(Cli.parse(Main.a3("fuzz", "--iterations", "abc"))), Main.wantBadIter()) && Main.cliDiff(Cli.render(Cli.parse(Main.a3("check", "examples/hello", "examples/cli"))), Main.wantExtra()) && Main.cliDiff(Cli.render(Cli.parse(Main.a4("fuzz", "--relate", "--iterations", "8"))), Main.wantRelate()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("new", "123app"))), Main.wantBadName())
+  Main.cliDiff(Cli.render(Cli.parse(Main.a1("nope"))), Main.wantUnrec()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--nope"))), Main.wantUnexp()) && Main.cliDiff(Cli.render(Cli.parse(Main.a3("fuzz", "--iterations", "abc"))), Main.wantBadIter()) && Main.cliDiff(Cli.render(Cli.parse(Main.a3("check", "examples/hello", "examples/cli"))), Main.wantExtra()) && Main.cliDiff(Cli.render(Cli.parse(Main.a4("fuzz", "--relate", "--iterations", "8"))), Main.wantRelate()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("new", "123app"))), Main.wantBadName()) && Main.pkgParseOk()
 
 def cliJsonOnly(): Bool =
   Main.cliDiff(Cli.render(Cli.parse(Main.a2("--message-format=json", "fmt"))), Main.wantJsonOnly())
@@ -83,7 +83,7 @@ def campEmpty(): Bool =
   Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == Main.wantEmptyVerify() && Verify.checkVerify(Main.srcBadDrive(), "bad.scuzz_verify") == Main.wantBadDrive() && Verify.checkVerify(Main.srcOpaqueDrive(), "bad.scuzz_verify") == Main.wantOpaqueDrive() && Verify.checkVerify("nope", "junk.scuzz_verify") != Main.wantEmptyVerify() && Verify.intentMsg("nested/stale.scuzz_intent") == "nested/stale.scuzz_intent:1:1: error: leftover *.scuzz_intent; rename to *.scuzz_verify or delete the file"
 
 def drvPkg(): Bool =
-  Drive.showPkg(Drive.compilePkg(Main.tomlHello(), Main.srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg()
+  Drive.showPkg(Drive.compilePkg(Main.tomlHello(), Main.srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg() && Main.pkgEnvOk() && Main.pkgIdOk() && Main.pkgAndroidCmdOk()
 
 def drvFiles(): Bool =
   Drive.showPkg(Drive.compileFiles(Main.tomlHello(), ("Main", Main.srcIrHi()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg() && !Drive.compileFiles(Main.tomlHello(), ("Main", Main.srcTyUnbound()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a").ok && Mutate.sitesOk()
