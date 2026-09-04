@@ -151,11 +151,41 @@ def srcJoinMis(): String =
 def wantJoinMis(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: List.join arg type mismatch: expected List[String], got List[Int]\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":23}]"
 
+def srcResArity(): String =
+  "@main def main: IO[Unit] =\n  for {\n    r = Resource.make(IO.pure(1))\n    _ <- IO.println(\"x\")\n  } yield ()\n"
+
+def wantResArity(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: Resource.make expects 2 args, got 1\",\"file\":\"Main.scuzz\",\"line\":3,\"column\":9,\"end_line\":3,\"end_column\":22}]"
+
+def srcResDraw(): String =
+  """@main def main: IO[Unit] =
+  for {
+    _ <- Resource.make(IO.pure(1), r => IO.pure(r))
+  } yield ()
+"""
+
+def wantResDraw(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: <- needs IO, got Resource[Int]\",\"file\":\"Main.scuzz\",\"line\":3,\"column\":10,\"end_line\":3,\"end_column\":23}]"
+
+def srcResLam(): String =
+  "@main def main: IO[Unit] =\n  for {\n    r = Resource.make(IO.pure(1), n => n + 1)\n    _ <- IO.println(\"x\")\n  } yield ()\n"
+
+def wantResLam(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: Resource.make needs IO, got IO[Any, Int] and Int\",\"file\":\"Main.scuzz\",\"line\":3,\"column\":9,\"end_line\":3,\"end_column\":22}]"
+
+def srcResUnk(): String =
+  """@main def main: IO[Unit] =
+  Resource.foo(1)
+"""
+
+def wantResUnk(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Resource.foo\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":15}]"
+
 def tyckFiles(): Bool =
   Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []) == wantUtil()
 
 def allOk(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckFiles()
+  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckFiles()
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else "tyck-bad")

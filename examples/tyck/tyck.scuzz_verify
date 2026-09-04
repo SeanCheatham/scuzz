@@ -55,3 +55,15 @@ def tyckMapHandle(): Bool =
 def tyckJoinMis(): Bool =
   Main.tyckDiff(Main.srcJoinMis(), Main.wantJoinMis())
 
+def tyckResArity(): Bool =
+  Main.tyckDiff(Main.srcResArity(), Main.wantResArity())
+
+def tyckResDraw(): Bool =
+  Main.tyckDiff(Main.srcResDraw(), Main.wantResDraw())
+
+def tyckResLam(): Bool =
+  Main.tyckDiff(Main.srcResLam(), Main.wantResLam())
+
+def tyckResUnk(): Bool =
+  Main.tyckDiff(Main.srcResUnk(), Main.wantResUnk())
+
