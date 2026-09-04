@@ -213,7 +213,7 @@ def emitExprFid(e: Expr, prefix: String, strs: List[String], defs: List[Fun], en
 
 def needsPh(e: Expr): Bool =
   e match {
-    case Expr.ELam(_, _) => false
+    case Expr.ELam(_, _, _) => false
     case Expr.EHole => true
     case Expr.EBin(_, l, r, _) => hasHole(l) || hasHole(r)
     case Expr.EUn(_, inner, _) => hasHole(inner)
@@ -256,12 +256,13 @@ def hasHole(e: Expr): Bool =
     case Expr.EField(recv, _, _) => hasHole(recv)
     case Expr.EBin(_, l, r, _) => hasHole(l) || hasHole(r)
     case Expr.EUn(_, inner, _) => hasHole(inner)
-    case Expr.ELam(_, body) => hasHole(body)
+    case Expr.ELam(_, _, body) => hasHole(body)
     case Expr.EIf(c, t, el, _) => hasHole(c) || hasHole(t) || hasHole(el)
     case Expr.EMatch(s, arms, _) => hasHole(s) || hasHoleArms(arms)
     case Expr.EList(xs) => hasHoleList(xs)
     case Expr.ETuple(xs) => hasHoleList(xs)
     case Expr.ENamed(_, inner) => hasHole(inner)
+    case Expr.EAscribe(inner, _, _) => hasHole(inner)
     case _ => false
   }
 
@@ -285,9 +286,10 @@ def rewriteHole(e: Expr, n: String): Expr =
     case Expr.EField(recv, name, _) => Expr.EField(rewriteHole(recv, n), name, 0)
     case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteHole(l, n), rewriteHole(r, n), 0)
     case Expr.EUn(op, inner, _) => Expr.EUn(op, rewriteHole(inner, n), 0)
-    case Expr.ELam(p, body) => Expr.ELam(p, rewriteHole(body, n))
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteHole(body, n))
     case Expr.EIf(c, t, el, _) => Expr.EIf(rewriteHole(c, n), rewriteHole(t, n), rewriteHole(el, n), 0)
     case Expr.ENamed(nm, inner) => Expr.ENamed(nm, rewriteHole(inner, n))
+    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteHole(inner, n), ty, off)
     case Expr.EList(xs) => Expr.EList(rewriteHoleList(xs, n))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteHoleList(xs, n))
     case _ => e
@@ -308,7 +310,7 @@ def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens
     case Expr.EUn(op, inner, _) => emitUn(op, inner, prefix, strs, defs, ens, ps, loc)
     case Expr.ENamed(_, inner) => emitExprFid(inner, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EMethod(recv, name, args, _) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps, loc, fid) else if (name == "apply") emitApplyRecv(recv, args, prefix, strs, defs, ens, ps, loc, fid) else if (name == "map") emitIoMap(recv, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps, loc)
-    case Expr.ELam(p, body) => emitLam(p, body, prefix, strs, defs, ens, ps, loc)
+    case Expr.ELam(p, _, body) => emitLam(p, body, prefix, strs, defs, ens, ps, loc)
     case Expr.EIf(c, t, el, _) => emitIfFid(c, t, el, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EField(recv, name, _) => emitField(recv, name, prefix, ens, ps)
     case Expr.EMatch(s, arms, _) => emitMatch(s, arms, prefix, strs, defs, ens, ps, loc)
@@ -317,6 +319,7 @@ def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens
     case Expr.EInterp(s) => emitInterp(s, prefix, strs, defs, ens, ps, loc)
     case Expr.EFloat(s) => emitFloatBits(s, prefix)
     case Expr.EFor(bs, body, _) => emitExprFid(desugarFor(bs, body), prefix, strs, defs, ens, ps, loc, fid)
+    case Expr.EAscribe(inner, _, _) => emitExprFid(inner, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EUnit => Slot("", "null", true)
     case _ => emitStuck()
   }
@@ -395,10 +398,10 @@ def wrapGuard(c: Expr, body: Expr): Expr =
   Expr.EIf(c, body, Expr.ECall("IO.fail", Expr.EStr("guard", 0) :: noExpr(), 0), 0)
 
 def wrapDraw(name: String, v: Expr, body: Expr): Expr =
-  if (isSimpleBind(name)) Expr.EMethod(v, "flatMap", Expr.ELam(name, body) :: noExpr(), 0) else wrapPatDraw(name, v, body)
+  if (isSimpleBind(name)) Expr.EMethod(v, "flatMap", Expr.ELam(name, "", body) :: noExpr(), 0) else wrapPatDraw(name, v, body)
 
 def wrapPatDraw(pat: String, v: Expr, body: Expr): Expr =
-  Expr.EMethod(Expr.EMethod(v, "flatMap", Expr.ELam("__p", Expr.ECall("IO.pure", Expr.EMatch(Expr.EVar("__p", 0), Arm(pat, "", patResult(pat)) :: noArm(), 0) :: noExpr(), 0)) :: noExpr(), 0), "flatMap", Expr.ELam(patBindName(pat), body) :: noExpr(), 0)
+  Expr.EMethod(Expr.EMethod(v, "flatMap", Expr.ELam("__p", "", Expr.ECall("IO.pure", Expr.EMatch(Expr.EVar("__p", 0), Arm(pat, "", patResult(pat)) :: noArm(), 0) :: noExpr(), 0)) :: noExpr(), 0), "flatMap", Expr.ELam(patBindName(pat), "", body) :: noExpr(), 0)
 
 def patResult(pat: String): Expr =
   if (isConsPat(pat)) Expr.EVar(consHead(pat), 0) else if (hasComma(patBind(pat))) Expr.ETuple(patEVars(splitPat(patBind(pat)))) else Expr.EVar(fieldBind(patBind(pat)), 0)
@@ -413,7 +416,7 @@ def joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) List.at(xs, 0) else Str.concat(List.at(xs, 0), Str.concat(", ", joinComma(List.tail(xs))))
 
 def wrapEq(name: String, v: Expr, body: Expr): Expr =
-  if (eqIsLet(name)) Expr.EMethod(Expr.ELam(name, body), "apply", nameSig(name, v) :: noExpr(), 0) else wrapDraw(name, Expr.ECall("IO.pure", v :: noExpr(), 0), body)
+  if (eqIsLet(name)) Expr.EMethod(Expr.ELam(name, "", body), "apply", nameSig(name, v) :: noExpr(), 0) else wrapDraw(name, Expr.ECall("IO.pure", v :: noExpr(), 0), body)
 
 def nameSig(name: String, v: Expr): Expr =
   if (name == "_" || !isSimpleBind(name)) v else nameSigGo(name, v)
@@ -583,6 +586,7 @@ def isFloatExpr(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
     case Expr.EBin(_, a, b, _) => isFloatExpr(a, ps, defs) || isFloatExpr(b, ps, defs)
     case Expr.EUn(_, inner, _) => isFloatExpr(inner, ps, defs)
     case Expr.ENamed(_, inner) => isFloatExpr(inner, ps, defs)
+    case Expr.EAscribe(inner, _, _) => isFloatExpr(inner, ps, defs)
     case _ => false
   }
 
@@ -808,6 +812,7 @@ def exprIsI64Go(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
     case Expr.EMatch(_, arms, _) => exprIsI64Match(arms, ps, defs)
     case Expr.EIf(_, t, _, _) => exprIsI64(t, ps, defs)
     case Expr.ENamed(_, inner) => exprIsI64(inner, ps, defs)
+    case Expr.EAscribe(inner, _, _) => exprIsI64(inner, ps, defs)
     case _ => false
   }
 
@@ -1024,7 +1029,7 @@ def emitNetServe2(rt: String, port: Slot, fn: Expr, prefix: String, defs: List[F
 
 def netServePtr(e: Expr, defs: List[Fun], mod: String): String =
   e match {
-    case Expr.ELam(p, body) => netServePtrLam(p, body, defs, mod)
+    case Expr.ELam(p, _, body) => netServePtrLam(p, body, defs, mod)
     case Expr.EVar(f, _) => funPtr(defs, f, mod)
     case Expr.EMethod(recv, name, _, _) => methodPtr(recv, name)
     case Expr.ECall(f, _, _) => funPtr(defs, f, mod)
@@ -1122,18 +1127,19 @@ def mapPackCall(rt: String, iv: String, prefix: String): String =
   Str.concat(tmp(prefix, "v"), Str.concat(mapKitCallMid(rt), Str.concat(iv, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), mapKitCallEnd(rt))))))))
 
 def wrapPh(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
-  if (needsPh(e)) Expr.ELam("_ph", rewriteHole(e, "_ph")) else etaKit(e, ps, defs, mod)
+  if (needsPh(e)) Expr.ELam("_ph", "", rewriteHole(e, "_ph")) else etaKit(e, ps, defs, mod)
 
 def etaKit(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
   e match {
     case Expr.ECall(f, args, _) => if (List.isEmpty(args) && kitEta1(f)) phCall(f) else e
     case Expr.EVar(f, _) => if (etaVar(f, ps, defs, mod)) phCall(f) else e
     case Expr.ENamed(_, inner) => etaKit(inner, ps, defs, mod)
+    case Expr.EAscribe(inner, _, _) => etaKit(inner, ps, defs, mod)
     case _ => e
   }
 
 def phCall(f: String): Expr =
-  Expr.ELam("_ph", Expr.ECall(f, Expr.EVar("_ph", 0) :: noExpr(), 0))
+  Expr.ELam("_ph", "", Expr.ECall(f, Expr.EVar("_ph", 0) :: noExpr(), 0))
 
 def etaVar(f: String, ps: List[Param], defs: List[Fun], mod: String): Bool =
   if (kitEta1(f)) true else paramTy(ps, f) == "" && etaFun1(findDefPrefer(defs, f, mod))
@@ -1151,13 +1157,13 @@ def kitEta1(f: String): Bool =
 
 def mapLamBind(e: Expr): String =
   e match {
-    case Expr.ELam(p, _) => p
+    case Expr.ELam(p, _, _) => p
     case _ => "_"
   }
 
 def mapLamBody(e: Expr): Expr =
   e match {
-    case Expr.ELam(_, body) => body
+    case Expr.ELam(_, _, body) => body
     case _ => e
   }
 
@@ -1228,13 +1234,13 @@ def emitFoldKit4(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, st
 
 def foldLam(e: Expr): Expr =
   e match {
-    case Expr.ELam(_, _) => e
+    case Expr.ELam(_, _, _) => e
     case Expr.EVar(f, _) => etaFold(f)
     case _ => e
   }
 
 def etaFold(f: String): Expr =
-  Expr.ELam("__tup", Expr.EMatch(Expr.EVar("__tup", 0), Arm("(a, b)", "", Expr.ECall(f, Expr.EVar("a", 0) :: Expr.EVar("b", 0) :: noExpr(), 0)) :: noArm(), 0))
+  Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", 0), Arm("(a, b)", "", Expr.ECall(f, Expr.EVar("a", 0) :: Expr.EVar("b", 0) :: noExpr(), 0)) :: noArm(), 0))
 
 def emitFoldKit4b(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   inner match {
@@ -1396,12 +1402,13 @@ def nameIntUse(e: Expr, n: String): Bool =
     case Expr.EBin(op, l, r, _) => nameIntUse(l, n) || nameIntUse(r, n)
     case Expr.EUn(_, inner, _) => nameIntUse(inner, n)
     case Expr.EIf(c, t, el, _) => nameIntUse(c, n) || nameIntUse(t, n) || nameIntUse(el, n)
-    case Expr.ELam(p, body) => if (p == n) false else nameIntUse(body, n)
+    case Expr.ELam(p, _, body) => if (p == n) false else nameIntUse(body, n)
     case Expr.EMatch(s, arms, _) => nameIntUse(s, n) || nameIntUseArms(arms, n)
     case Expr.EFor(bs, body, _) => nameIntUseBinds(bs, n) || nameIntUse(body, n)
     case Expr.EList(xs) => nameIntUseList(xs, n)
     case Expr.ETuple(xs) => nameIntUseList(xs, n)
     case Expr.ENamed(_, inner) => nameIntUse(inner, n)
+    case Expr.EAscribe(inner, _, _) => nameIntUse(inner, n)
     case Expr.EPrint(inner, _) => nameIntUse(inner, n)
     case _ => false
   }
@@ -1465,6 +1472,7 @@ def phUsedAsInt(e: Expr): Bool =
     case Expr.ECall(f, args, _) => phCallInt(f, args)
     case Expr.EMethod(_, name, args, _) => phCallInt(name, args)
     case Expr.ENamed(_, inner) => phUsedAsInt(inner)
+    case Expr.EAscribe(inner, _, _) => phUsedAsInt(inner)
     case _ => false
   }
 
@@ -2026,7 +2034,7 @@ def emitViewEachJoin(src: Slot, fn: Expr, elemTy: String, prefix: String, strs: 
 
 def emitEachLamTy(e: Expr, elemTy: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
-    case Expr.ELam(p, body) => emitLam2(emitNethGoTy(prefix, p, body, dropParam(ps, p), strs, defs, ens, loc, false, eachBindTy(p, body, dropParam(ps, p), defs, elemTy)), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+    case Expr.ELam(p, _, body) => emitLam2(emitNethGoTy(prefix, p, body, dropParam(ps, p), strs, defs, ens, loc, false, eachBindTy(p, body, dropParam(ps, p), defs, elemTy)), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
   }
 
@@ -2264,12 +2272,13 @@ def exprHasVar(e: Expr, s: String): Bool =
     case Expr.EField(recv, _, _) => exprHasVar(recv, s)
     case Expr.EBin(_, l, r, _) => exprHasVar(l, s) || exprHasVar(r, s)
     case Expr.EUn(_, inner, _) => exprHasVar(inner, s)
-    case Expr.ELam(_, body) => exprHasVar(body, s)
+    case Expr.ELam(_, _, body) => exprHasVar(body, s)
     case Expr.EIf(c, t, el, _) => exprHasVar(c, s) || exprHasVar(t, s) || exprHasVar(el, s)
     case Expr.EMatch(sc, arms, _) => exprHasVar(sc, s) || armsHasVar(arms, s)
     case Expr.EList(xs) => listHasVar(xs, s)
     case Expr.ETuple(xs) => listHasVar(xs, s)
     case Expr.ENamed(_, inner) => exprHasVar(inner, s)
+    case Expr.EAscribe(inner, _, _) => exprHasVar(inner, s)
     case Expr.EFor(bs, body, _) => bindsHasVar(bs, s) || exprHasVar(body, s)
     case _ => false
   }
@@ -2298,7 +2307,7 @@ def emitUiRunCall(args: List[Expr], prefix: String, strs: List[String], defs: Li
 
 def emitUiRunLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
-    case Expr.ELam(p, body) => emitLam2(emitRebuildNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+    case Expr.ELam(p, _, body) => emitLam2(emitRebuildNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
   }
 
@@ -2332,7 +2341,7 @@ def emitSigMapJoin(src: Slot, fn: Expr, prefix: String, strs: List[String], defs
 
 def emitSigMapLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
-    case Expr.ELam(p, body) => emitLam2(emitMapNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+    case Expr.ELam(p, _, body) => emitLam2(emitMapNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
   }
 
@@ -2351,7 +2360,7 @@ def emitTapViewJoin(rt: String, lab: Slot, fn: Expr, prefix: String, strs: List[
 
 def emitTapLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
-    case Expr.ELam(p, body) => emitLam2(emitTapNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+    case Expr.ELam(p, _, body) => emitLam2(emitTapNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
   }
 
@@ -2415,7 +2424,7 @@ def emitApply5(unbox: Bool, code: String, prefix: String): Slot =
 
 def emitApplyRecv(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   recv match {
-    case Expr.ELam(p, body) => emitApplyLam(p, body, args, prefix, strs, defs, ens, ps, loc, fid)
+    case Expr.ELam(p, _, body) => emitApplyLam(p, body, args, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EMatch(_, arms, _) => emitMatch(applyScrut(args), arms, prefix, strs, defs, ens, ps, loc)
     case _ => emitApplyRecvTy(funTyRecv(recv, defs, ps), recv, args, prefix, strs, defs, ens, ps, loc)
   }
@@ -2553,7 +2562,7 @@ def funTyRecv(recv: Expr, defs: List[Fun], ps: List[Param]): String =
   recv match {
     case Expr.EVar(s, _) => funTyVar(s, defs, ps)
     case Expr.ECall(f, _, _) => funRetStr(defs, f)
-    case Expr.ELam(p, _) => if (p == "__tup") "(Any, Any) => Int" else "Int => Int"
+    case Expr.ELam(p, _, _) => if (p == "__tup") "(Any, Any) => Int" else "Int => Int"
     case _ => "Any"
   }
 
@@ -4373,12 +4382,13 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
     case Expr.EField(recv, name, _) => Expr.EField(rewriteBind(recv, from, to), name, 0)
     case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteBind(l, from, to), rewriteBind(r, from, to), 0)
     case Expr.EUn(op, inner, _) => Expr.EUn(op, rewriteBind(inner, from, to), 0)
-    case Expr.ELam(p, body) => Expr.ELam(p, rewriteBind(body, from, to))
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteBind(body, from, to))
     case Expr.EIf(c, t, el, _) => Expr.EIf(rewriteBind(c, from, to), rewriteBind(t, from, to), rewriteBind(el, from, to), 0)
     case Expr.EMatch(s, arms, _) => Expr.EMatch(rewriteBind(s, from, to), rewriteBindArms(arms, from, to), 0)
     case Expr.EList(xs) => Expr.EList(rewriteBindList(xs, from, to))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteBindList(xs, from, to))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteBind(inner, from, to))
+    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteBind(inner, from, to), ty, off)
     case Expr.EFor(bs, body, _) => Expr.EFor(rewriteBindBinds(bs, from, to), rewriteBind(body, from, to), 0)
     case Expr.EInt(n, _) => Expr.EInt(n, 0)
     case Expr.EBool(b) => Expr.EBool(b)
@@ -4899,12 +4909,13 @@ def rwFields(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En
     case Expr.EField(recv, name, _) => rwField(rwFields(recv, env, funs, ens, mod), name, env, funs, ens)
     case Expr.EBin(op, l, r, _) => Expr.EBin(op, rwFields(l, env, funs, ens, mod), rwFields(r, env, funs, ens, mod), 0)
     case Expr.EUn(op, inner, _) => Expr.EUn(op, rwFields(inner, env, funs, ens, mod), 0)
-    case Expr.ELam(p, body) => Expr.ELam(p, rwFields(body, env, funs, ens, mod))
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rwFields(body, env, funs, ens, mod))
     case Expr.EIf(c, t, el, _) => Expr.EIf(rwFields(c, env, funs, ens, mod), rwFields(t, env, funs, ens, mod), rwFields(el, env, funs, ens, mod), 0)
     case Expr.EMatch(s, arms, _) => Expr.EMatch(rwFields(s, env, funs, ens, mod), rwFieldArms(arms, env, funs, ens, mod), 0)
     case Expr.EList(xs) => Expr.EList(rwFieldList(xs, env, funs, ens, mod))
     case Expr.ETuple(xs) => Expr.ETuple(rwFieldList(xs, env, funs, ens, mod))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rwFields(inner, env, funs, ens, mod))
+    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rwFields(inner, env, funs, ens, mod), ty, off)
     case Expr.EFor(bs, body, _) => Expr.EFor(rwForBinds(bs, env, funs, ens, mod), rwFields(body, env, funs, ens, mod), 0)
     case _ => e
   }
@@ -5212,12 +5223,13 @@ def internSigExpr(e: Expr, acc: List[String]): List[String] =
     case Expr.EPrint(inner, _) => internSigExpr(inner, acc)
     case Expr.EBin(_, l, r, _) => internSigExpr(r, internSigExpr(l, acc))
     case Expr.EUn(_, inner, _) => internSigExpr(inner, acc)
-    case Expr.ELam(_, body) => internSigExpr(body, acc)
+    case Expr.ELam(_, _, body) => internSigExpr(body, acc)
     case Expr.EIf(c, t, el, _) => internSigExpr(el, internSigExpr(t, internSigExpr(c, acc)))
     case Expr.EMatch(s, arms, _) => internSigArms(arms, internSigExpr(s, acc))
     case Expr.EList(xs) => internSigList(xs, acc)
     case Expr.ETuple(xs) => internSigList(xs, acc)
     case Expr.ENamed(_, inner) => internSigExpr(inner, acc)
+    case Expr.EAscribe(inner, _, _) => internSigExpr(inner, acc)
     case _ => acc
   }
 
@@ -5673,12 +5685,13 @@ def fmCount(e: Expr): Int =
   e match {
     case Expr.EMethod(recv, name, args, _) => fmCountMeth(recv, name, args)
     case Expr.EPrint(inner, _) => fmCount(inner)
-    case Expr.ELam(_, body) => fmCount(body)
+    case Expr.ELam(_, _, body) => fmCount(body)
     case Expr.ECall(_, args, _) => fmCountSkipLam(args)
     case Expr.EBin(_, l, r, _) => fmCount(l) + fmCount(r)
     case Expr.EUn(_, inner, _) => fmCount(inner)
     case Expr.EIf(c, t, el, _) => fmCount(c) + fmCount(t) + fmCount(el)
     case Expr.ENamed(_, inner) => fmCount(inner)
+    case Expr.EAscribe(inner, _, _) => fmCount(inner)
     case Expr.EMatch(s, arms, _) => fmCount(s) + fmCountArms(arms)
     case Expr.EList(xs) => fmCountArgs(xs)
     case Expr.ETuple(xs) => fmCountArgs(xs)
@@ -5700,7 +5713,7 @@ def fmCountSkipLam(xs: List[Expr]): Int =
 
 def fmCountSkipLam1(e: Expr): Int =
   e match {
-    case Expr.ELam(_, _) => 0
+    case Expr.ELam(_, _, _) => 0
     case _ => fmCount(e)
   }
 
@@ -5751,9 +5764,9 @@ def wrapIoMapLam(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
 
 def wrapIoMapLam1(e: Expr): Expr =
   e match {
-    case Expr.ELam(p, body) => Expr.ELam(p, Expr.ECall("IO.pure", body :: noExpr(), 0))
-    case Expr.EMatch(s, arms, _) => Expr.ELam("__p", Expr.ECall("IO.pure", Expr.EMatch(s, arms, 0) :: noExpr(), 0))
-    case _ => Expr.ELam("_ph", Expr.ECall("IO.pure", e :: noExpr(), 0))
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, Expr.ECall("IO.pure", body :: noExpr(), 0))
+    case Expr.EMatch(s, arms, _) => Expr.ELam("__p", "", Expr.ECall("IO.pure", Expr.EMatch(s, arms, 0) :: noExpr(), 0))
+    case _ => Expr.ELam("_ph", "", Expr.ECall("IO.pure", e :: noExpr(), 0))
   }
 
 def wrapIoMapCont(args: List[Expr]): List[Expr] =
@@ -5859,7 +5872,7 @@ def nameUnBool(e: Expr, n: String): Bool =
     case Expr.EIf(c, t, el, _) => nameUnBool(c, n) || nameUnBool(t, n) || nameUnBool(el, n)
     case Expr.ECall(_, args, _) => nameUnBoolList(args, n)
     case Expr.EMethod(r, _, args, _) => nameUnBool(r, n) || nameUnBoolList(args, n)
-    case Expr.ELam(p, body) => if (p == n) false else nameUnBool(body, n)
+    case Expr.ELam(p, _, body) => if (p == n) false else nameUnBool(body, n)
     case _ => false
   }
 
@@ -5957,10 +5970,11 @@ def emitContsAt(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps:
   e match {
     case Expr.EMethod(recv, name, args, _) => if (isFmName(name)) emitContsFm(recv, args, strs, defs, ens, ps, loc, id) else if (name == "map") emitContsMap(recv, args, strs, defs, ens, ps, loc, id) else if (name == "apply") emitContsApply(recv, args, strs, defs, ens, ps, loc, id) else emitContsCtor(recv, args, strs, defs, ens, ps, loc, id)
     case Expr.EPrint(inner, _) => emitContsAtGo(inner, strs, defs, ens, ps, loc, id)
-    case Expr.ELam(_, _) => ("", id)
+    case Expr.ELam(_, _, _) => ("", id)
     case Expr.ECall(_, args, _) => emitContsArgs(args, strs, defs, ens, ps, loc, id)
     case Expr.EIf(c, t, el, _) => emitContsIf(c, t, el, strs, defs, ens, ps, loc, id)
     case Expr.ENamed(_, inner) => emitContsAtGo(inner, strs, defs, ens, ps, loc, id)
+    case Expr.EAscribe(inner, _, _) => emitContsAtGo(inner, strs, defs, ens, ps, loc, id)
     case Expr.EBin(_, l, r, _) => emitContsIf(l, r, Expr.EUnit, strs, defs, ens, ps, loc, id)
     case Expr.EUn(_, inner, _) => emitContsAtGo(inner, strs, defs, ens, ps, loc, id)
     case Expr.EField(recv, _, _) => emitContsAtGo(recv, strs, defs, ens, ps, loc, id)
@@ -5976,7 +5990,7 @@ def emitContsAtGo(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], p
 
 def emitContsApply(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   recv match {
-    case Expr.ELam(p, body) => emitContsApplyLam(p, body, args, strs, defs, ens, ps, loc, id)
+    case Expr.ELam(p, _, body) => emitContsApplyLam(p, body, args, strs, defs, ens, ps, loc, id)
     case _ => emitContsCtor(recv, args, strs, defs, ens, ps, loc, id)
   }
 
@@ -6049,7 +6063,8 @@ def recvBindTyPure(args: List[Expr], ens: List[En], defs: List[Fun], ps: List[Pa
 def recvBindTyPure1(e: Expr, ens: List[En], defs: List[Fun], ps: List[Param]): String =
   e match {
     case Expr.ENamed(_, inner) => recvBindTyPure1(inner, ens, defs, ps)
-    case Expr.ELam(_, _) => "Any"
+    case Expr.EAscribe(inner, _, _) => recvBindTyPure1(inner, ens, defs, ps)
+    case Expr.ELam(_, _, _) => "Any"
     case Expr.ECall(f, _, _) => recvBindTyNamed(recvCallTy(f, ens, defs), e, ps, defs)
     case Expr.EMethod(r, name, _, _) => recvBindTyPureMeth(r, name, e, ens, defs, ps)
     case Expr.EVar(s, _) => if (paramIsI64(ps, s)) "Int" else recvBindTyNamed(ctorHead(s, ens), e, ps, defs)
@@ -6097,7 +6112,7 @@ def emitContsFm2(p: (String, Int), lam: Expr, strs: List[String], defs: List[Fun
 
 def emitContsFm3(code: String, id: Int, lam: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
   lam match {
-    case Expr.ELam(p, body) => emitContsFm3Body(code, id, p, body, strs, defs, ens, ps, loc, bty)
+    case Expr.ELam(p, _, body) => emitContsFm3Body(code, id, p, body, strs, defs, ens, ps, loc, bty)
     case _ => (code, id)
   }
 

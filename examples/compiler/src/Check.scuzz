@@ -52,8 +52,11 @@ def bindParamsHd(p: Param, rest: List[Param], acc: List[(String, String)]): List
     case Param(n, ty, _, _) => bindParams(rest, (n, ty) :: acc)
   }
 
-def bindLam(p: String, env: List[(String, String)]): List[(String, String)] =
-  if (p == "") env else (p, "Any") :: env
+def bindLam(p: String, ty: String, env: List[(String, String)]): List[(String, String)] =
+  if (p == "") env else (p, if (ty == "") "Any" else ty) :: env
+
+def annOk(ann: String, expect: String, span: (String, Int)): Out =
+  if (ann == "" || tyEq(ann, expect)) ok(expect) else bad(Str.concat("type mismatch: expected ", Str.concat(ann, Str.concat(", got ", expect))), span)
 
 def lookupEnv(env: List[(String, String)], n: String): String =
   if (List.isEmpty(env)) "" else lookupEnv1(List.at(env, 0), List.tail(env), n)
@@ -509,10 +512,16 @@ def resolveResUse(ao: Out, lam: Expr, env: List[(String, String)], funs: List[Fu
 
 def resolveResLam(recv: String, bind: String, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), makeRet: String): Out =
   lam match {
-    case Expr.ELam(p, body) => resolveResBody(recv, infer(body, bindRes(p, bind, env), funs, ens), span, makeRet)
+    case Expr.ELam(p, ty, body) => resolveResAnn(annOk(ty, bind, span), recv, p, body, env, funs, ens, span, makeRet)
     case Expr.ENamed(_, inner) => resolveResLam(recv, bind, inner, env, funs, ens, span, makeRet)
     case _ => bad(Str.concat(if (makeRet == "") "Resource.use" else "Resource.make", " needs a lambda"), span)
   }
+
+def resolveResAnn(a: Out, recv: String, p: String, body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), makeRet: String): Out =
+  if (hasErr(a)) a else resolveResBody(recv, infer(body, bindRes(p, bindOfAnn(a), env), funs, ens), span, makeRet)
+
+def bindOfAnn(a: Out): String =
+  a.ty
 
 def resolveResBody(recv: String, body: Out, span: (String, Int), makeRet: String): Out =
   if (hasErr(body)) body else if (isIo(body.ty) || body.ty == "Any") ok(if (makeRet != "") makeRet else if (isIo(body.ty)) body.ty else "IO[Any]") else bad(Str.concat(if (makeRet == "") "Resource.use" else "Resource.make", Str.concat(" needs IO, got ", Str.concat(recv, Str.concat(" and ", body.ty)))), span)
@@ -657,13 +666,20 @@ def infer(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]):
     case Expr.ETuple(xs) => inferTuple(xs, env, funs, ens)
     case Expr.EMethod(recv, name, args, _) => inferMethod(recv, name, args, env, funs, ens, e)
     case Expr.EField(recv, name, _) => inferField(recv, name, env, funs, ens)
-    case Expr.ELam(p, body) => inferLam(infer(body, bindLam(p, env), funs, ens))
+    case Expr.ELam(p, ty, body) => inferLam(ty, infer(body, bindLam(p, ty, env), funs, ens))
     case Expr.EMatch(s, arms, _) => inferMatch(s, arms, env, funs, ens)
     case Expr.EFor(bs, body, _) => inferFor(bs, body, env, funs, ens)
+    case Expr.EAscribe(inner, ty, off) => inferAscribe(inner, ty, off, env, funs, ens)
   }
 
-def inferLam(o: Out): Out =
-  if (hasErr(o)) o else ok(Str.concat("Any => ", o.ty))
+def inferAscribe(inner: Expr, ty: String, off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  inferAscribe2(infer(inner, env, funs, ens), ty, (modFile(env), off))
+
+def inferAscribe2(o: Out, ty: String, span: (String, Int)): Out =
+  if (hasErr(o)) o else if (tyEq(o.ty, ty)) ok(prefer(ty, o.ty)) else bad(Str.concat("type mismatch: expected ", Str.concat(ty, Str.concat(", got ", o.ty))), span)
+
+def inferLam(ty: String, o: Out): Out =
+  if (hasErr(o)) o else ok(Str.concat(if (ty == "") "Any" else ty, Str.concat(" => ", o.ty)))
 
 def inferFor(bs: List[Bind], body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   inferForGo(bs, body, env, funs, ens, "")
@@ -1073,10 +1089,13 @@ def inferIoMap2(o: Out, recv: Expr, args: List[Expr], env: List[(String, String)
 
 def inferIoMapLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   lam match {
-    case Expr.ELam(p, body) => inferIoMap3(recv, infer(body, bindIo(p, recv.ty, env), funs, ens), env, e)
+    case Expr.ELam(p, ty, body) => inferIoMapAnn(annOk(ty, ioPayload(recv.ty), exprSpan(env, e)), recv, p, body, env, funs, ens, e)
     case Expr.EMatch(_, _, _) => inferIoMap3(recv, infer(lam, env, funs, ens), env, e)
     case _ => bad("map needs a lambda", exprSpan(env, e))
   }
+
+def inferIoMapAnn(a: Out, recv: Out, p: String, body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(a)) a else inferIoMap3(recv, infer(body, bindIo(p, recv.ty, env), funs, ens), env, e)
 
 def inferIoMap3(recv: Out, body: Out, env: List[(String, String)], e: Expr): Out =
   if (hasErr(body)) body else ok(ioTy(ioErr(recv.ty), body.ty))
@@ -1086,9 +1105,12 @@ def inferFlatMap2(o: Out, args: List[Expr], env: List[(String, String)], funs: L
 
 def inferFlatMapLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   lam match {
-    case Expr.ELam(p, body) => inferFlatMap3(recv, infer(body, bindIo(p, recv.ty, env), funs, ens), env, e)
+    case Expr.ELam(p, ty, body) => inferFlatMapAnn(annOk(ty, ioPayload(recv.ty), exprSpan(env, e)), recv, p, body, env, funs, ens, e)
     case _ => inferFlatMap3(recv, infer(lam, env, funs, ens), env, e)
   }
+
+def inferFlatMapAnn(a: Out, recv: Out, p: String, body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(a)) a else inferFlatMap3(recv, infer(body, bindIo(p, recv.ty, env), funs, ens), env, e)
 
 def bindIo(p: String, ioTy: String, env: List[(String, String)]): List[(String, String)] =
   if (p == "_" || p == "") env else (p, ioPayload(ioTy)) :: env
@@ -1116,9 +1138,12 @@ def inferHandle2(o: Out, args: List[Expr], env: List[(String, String)], funs: Li
 
 def inferHandleLam(recv: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   lam match {
-    case Expr.ELam(p, body) => inferHandle3(recv, infer(body, bindHandle(p, recv.ty, env), funs, ens), env, e)
+    case Expr.ELam(p, ty, body) => inferHandleAnn(annOk(ty, ioErr(recv.ty), exprSpan(env, e)), recv, p, body, env, funs, ens, e)
     case _ => inferHandle3(recv, infer(lam, env, funs, ens), env, e)
   }
+
+def inferHandleAnn(a: Out, recv: Out, p: String, body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(a)) a else inferHandle3(recv, infer(body, bindHandle(p, recv.ty, env), funs, ens), env, e)
 
 def bindHandle(p: String, ioTy: String, env: List[(String, String)]): List[(String, String)] =
   if (p == "_" || p == "") env else (p, ioErr(ioTy)) :: env
@@ -1133,7 +1158,7 @@ def inferVar(s: String, env: List[(String, String)], funs: List[Fun], ens: List[
   inferVar2(s, getTy(env, s), env, funs, ens, span)
 
 def inferVar2(s: String, t: String, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (t == "") inferVarFun(s, findFunPrefer(funs, s, env), ens, span) else ok(t)
+  if (s == "") bad("unexpected token", span) else if (t == "") inferVarFun(s, findFunPrefer(funs, s, env), ens, span) else ok(t)
 
 def inferVarFun(s: String, hit: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(hit)) inferVarCase(s, ens, span) else ok(funTyOf(List.at(hit, 0)))
@@ -1240,7 +1265,45 @@ def expandDefsGo(defs: List[Fun], als: List[Alias], acc: List[Fun]): List[Fun] =
 
 def expandDef(d: Fun, als: List[Alias]): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, expandParams(ps, als), expandTy(ret, als), body, mod, off)
+    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, expandParams(ps, als), expandTy(ret, als), expandExpr(body, als), mod, off)
+  }
+
+def expandExpr(e: Expr, als: List[Alias]): Expr =
+  e match {
+    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(expandExpr(inner, als), expandTy(ty, als), off)
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, expandTy(ty, als), expandExpr(body, als))
+    case Expr.EPrint(inner, off) => Expr.EPrint(expandExpr(inner, als), off)
+    case Expr.ECall(f, args, off) => Expr.ECall(f, expandExprs(args, als), off)
+    case Expr.EMethod(recv, name, args, off) => Expr.EMethod(expandExpr(recv, als), name, expandExprs(args, als), off)
+    case Expr.EField(recv, name, off) => Expr.EField(expandExpr(recv, als), name, off)
+    case Expr.EBin(op, l, r, off) => Expr.EBin(op, expandExpr(l, als), expandExpr(r, als), off)
+    case Expr.EUn(op, inner, off) => Expr.EUn(op, expandExpr(inner, als), off)
+    case Expr.EIf(c, t, el, off) => Expr.EIf(expandExpr(c, als), expandExpr(t, als), expandExpr(el, als), off)
+    case Expr.EMatch(s, arms, off) => Expr.EMatch(expandExpr(s, als), expandArms(arms, als), off)
+    case Expr.EFor(bs, body, off) => Expr.EFor(expandBinds(bs, als), expandExpr(body, als), off)
+    case Expr.EList(xs) => Expr.EList(expandExprs(xs, als))
+    case Expr.ETuple(xs) => Expr.ETuple(expandExprs(xs, als))
+    case Expr.ENamed(n, inner) => Expr.ENamed(n, expandExpr(inner, als))
+    case _ => e
+  }
+
+def expandExprs(xs: List[Expr], als: List[Alias]): List[Expr] =
+  if (List.isEmpty(xs)) xs else expandExpr(List.at(xs, 0), als) :: expandExprs(List.tail(xs), als)
+
+def expandArms(xs: List[Arm], als: List[Alias]): List[Arm] =
+  if (List.isEmpty(xs)) xs else expandArm(List.at(xs, 0), als) :: expandArms(List.tail(xs), als)
+
+def expandArm(a: Arm, als: List[Alias]): Arm =
+  a match {
+    case Arm(pat, g, body) => Arm(pat, g, expandExpr(body, als))
+  }
+
+def expandBinds(xs: List[Bind], als: List[Alias]): List[Bind] =
+  if (List.isEmpty(xs)) xs else expandBind(List.at(xs, 0), als) :: expandBinds(List.tail(xs), als)
+
+def expandBind(b: Bind, als: List[Alias]): Bind =
+  b match {
+    case Bind(d, name, v) => Bind(d, name, expandExpr(v, als))
   }
 
 def expandParams(ps: List[Param], als: List[Alias]): List[Param] =
@@ -1297,7 +1360,7 @@ def checkDefsRest(all: List[Fun], rest: List[Fun], enums: List[En], main: String
 
 def checkDefsHit(d: Fun, all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
   d match {
-    case Fun(_, _, _, _, _, _, mod, _) => if (inStems(stems, mod)) checkDefsAfter(checkDef(d, all, enums), all, rest, enums, main, body, stems) else checkDefsRest(all, rest, enums, main, body, stems)
+    case Fun(_, name, _, _, _, _, mod, off) => if (name == "#parse") bad("unexpected token", (mod, off)) else if (inStems(stems, mod)) checkDefsAfter(checkDef(d, all, enums), all, rest, enums, main, body, stems) else checkDefsRest(all, rest, enums, main, body, stems)
   }
 
 def checkDefsAfter(o: Out, all: List[Fun], rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =

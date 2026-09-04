@@ -80,7 +80,7 @@ def fmtBits(): Bool =
   Main.fmtDiff(Main.srcBits(), Main.wantBits())
 
 def fmtHex(): Bool =
-  Main.fmtDiff(Main.srcHex(), Main.wantHex())
+  Main.fmtDiff(Main.srcHex(), Main.wantHex()) && Main.fmtDiff(Main.srcAsc(), Main.wantAsc()) && Main.fmtDiff(Main.srcLamTy(), Main.wantLamTy()) && Main.format(Main.srcBinBad()) != Main.wantBinWrong()
 
 def fmtIdemHi(): Bool =
   Main.fmtIdem(Main.srcHi())

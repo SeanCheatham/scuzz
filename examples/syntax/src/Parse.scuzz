@@ -11,7 +11,7 @@ enum Expr:
   case EField(recv: Expr, name: String, off: Int)
   case EBin(op: String, l: Expr, r: Expr, off: Int)
   case EUn(op: String, e: Expr, off: Int)
-  case ELam(p: String, body: Expr)
+  case ELam(p: String, ty: String, body: Expr)
   case EIf(c: Expr, t: Expr, e: Expr, off: Int)
   case EMatch(s: Expr, arms: List[Arm], off: Int)
   case EFor(bs: List[Bind], body: Expr, off: Int)
@@ -20,6 +20,7 @@ enum Expr:
   case EList(xs: List[Expr])
   case ETuple(xs: List[Expr])
   case ENamed(name: String, e: Expr)
+  case EAscribe(e: Expr, ty: String, off: Int)
 
 record Param(name: String, ty: String, w: String, d: String)
 
@@ -88,6 +89,7 @@ def spanOf(e: Expr): (String, Int) =
     case Expr.EIf(_, _, _, off) => ("", off)
     case Expr.EMatch(_, _, off) => ("", off)
     case Expr.EFor(_, _, off) => ("", off)
+    case Expr.EAscribe(_, _, off) => ("", off)
     case _ => ("", 0 - 1)
   }
 
@@ -165,12 +167,12 @@ def parseExprList(toks: List[SpTok], i: Int): (Expr, Int) =
 
 def parseAscribe(p: (Expr, Int), toks: Toks): (Expr, Int) =
   p match {
-    case (e, j) => if (_is(toks, j, Tok.Colon)) parseAscribeKeep(e, parseType(toks, j + 1)) else (e, j)
+    case (e, j) => if (_is(toks, j, Tok.Colon)) parseAscribeKeep(e, parseType(toks, j + 1), _off(toks, j)) else (e, j)
   }
 
-def parseAscribeKeep(e: Expr, p: (String, Int)): (Expr, Int) =
+def parseAscribeKeep(e: Expr, p: (String, Int), off: Int): (Expr, Int) =
   p match {
-    case (_, k) => (e, k)
+    case (ty, k) => (Expr.EAscribe(e, ty, spanOff(e, off)), k)
   }
 
 def parseOr(toks: Toks, i: Int): (Expr, Int) =
@@ -286,7 +288,7 @@ def parseMatchLam(toks: Toks, i: Int): (Expr, Int) =
 
 def parseMatchLam2(p: (Expr, Int)): (Expr, Int) =
   p match {
-    case (e, j) => (Expr.ELam("__p", e), j)
+    case (e, j) => (Expr.ELam("__p", "", e), j)
   }
 
 def parseIf(toks: Toks, i: Int): (Expr, Int) =
@@ -363,7 +365,7 @@ def parseLamBody(toks: Toks, i: Int, p: String): (Expr, Int) =
 
 def parseLamBody2(p: String, q: (Expr, Int)): (Expr, Int) =
   q match {
-    case (b, j) => (Expr.ELam(p, b), j)
+    case (b, j) => (Expr.ELam(p, "", b), j)
   }
 
 def parseParen(toks: Toks, i: Int): (Expr, Int) =
@@ -375,13 +377,24 @@ def parseParen2(p: (Expr, Int), toks: Toks): (Expr, Int) =
   }
 
 def parseOneLam(e: Expr, toks: Toks, j: Int): (Expr, Int) =
-  if (_is(toks, j, Tok.Colon)) parseOneLam(e, toks, skipAscript(toks, j)) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFrom(e, parseExpr(toks, j + 2)) else if (_is(toks, j, Tok.RParen)) (e, j + 1) else (e, j)
+  if (_is(toks, j, Tok.Colon)) parseOneLamTy(e, parseType(toks, j + 1), toks) else if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFromAsc(e, parseExpr(toks, j + 2)) else if (_is(toks, j, Tok.RParen)) (e, j + 1) else (e, j)
 
-def parseLamFrom(e: Expr, q: (Expr, Int)): (Expr, Int) =
+def parseLamFromAsc(e: Expr, q: (Expr, Int)): (Expr, Int) =
+  e match {
+    case Expr.EAscribe(inner, ty, _) => parseLamFrom(inner, ty, q)
+    case _ => parseLamFrom(e, "", q)
+  }
+
+def parseOneLamTy(e: Expr, p: (String, Int), toks: Toks): (Expr, Int) =
+  p match {
+    case (ty, j) => if (_is(toks, j, Tok.RParen) && _is(toks, j + 1, Tok.Arrow)) parseLamFrom(e, ty, parseExpr(toks, j + 2)) else parseOneLam(e, toks, j)
+  }
+
+def parseLamFrom(e: Expr, ty: String, q: (Expr, Int)): (Expr, Int) =
   q match {
     case (b, k) => e match {
-  case Expr.EVar(s, _) => (Expr.ELam(s, b), k)
-  case _ => (Expr.ELam("__p", Expr.EMatch(Expr.EVar("__p", 0), Arm(pretty0(e), "", b) :: [], 0)), k)
+  case Expr.EVar(s, _) => (Expr.ELam(s, ty, b), k)
+  case _ => (Expr.ELam("__p", ty, Expr.EMatch(Expr.EVar("__p", 0), Arm(pretty0(e), "", b) :: [], 0)), k)
 }
   }
 
@@ -398,7 +411,7 @@ def parseTupleLam(p: (Expr, Int), toks: Toks): (Expr, Int) =
 
 def parseTupLamBody(patE: Expr, q: (Expr, Int)): (Expr, Int) =
   q match {
-    case (b, k) => (Expr.ELam("__tup", Expr.EMatch(Expr.EVar("__tup", 0), Arm(tupPat(patE), "", b) :: [], 0)), k)
+    case (b, k) => (Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", 0), Arm(tupPat(patE), "", b) :: [], 0)), k)
   }
 
 def tupPat(e: Expr): String =
@@ -443,7 +456,7 @@ def parseIoArgs(toks: Toks, i: Int, m: String, off: Int): (Expr, Int) =
 
 def parseIoArgs2(m: String, p: (List[Expr], Int), off: Int): (Expr, Int) =
   p match {
-    case (args, j) => if (m == "println") (Expr.EPrint(List.at(args, 0), off), j) else (Expr.ECall(Str.concat("IO.", m), args, off), j)
+    case (args, j) => if (m == "println" && List.len(args) == 1) (Expr.EPrint(List.at(args, 0), off), j) else (Expr.ECall(Str.concat("IO.", m), args, off), j)
   }
 
 def parseKit(toks: Toks, i: Int, kit: String, off: Int): (Expr, Int) =
@@ -480,7 +493,7 @@ def parseArgListNext(p: (Expr, Int), toks: Toks, acc: List[Expr]): (List[Expr], 
   }
 
 def parseArgListSep(e: Expr, j: Int, toks: Toks, acc: List[Expr]): (List[Expr], Int) =
-  if (_is(toks, j, Tok.LParen) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) parseArgListSep2(parsePost(toks, (e, j)), toks, acc) else if (_is(toks, j, Tok.Comma)) parseArgList(toks, j + 1, e :: acc) else (List.reverse(e :: acc), j + 1)
+  if (_is(toks, j, Tok.LParen) || _is(toks, j, Tok.Dot) || _is(toks, j, Tok.Match)) parseArgListSep2(parsePost(toks, (e, j)), toks, acc) else if (_is(toks, j, Tok.Comma)) parseArgList(toks, j + 1, e :: acc) else if (_is(toks, j, Tok.RParen)) (List.reverse(e :: acc), j + 1) else (List.reverse(e :: acc), j)
 
 def parseArgListSep2(p: (Expr, Int), toks: Toks, acc: List[Expr]): (List[Expr], Int) =
   p match {
@@ -555,7 +568,7 @@ def parsePatCons2(left: String, p: (String, Int)): (String, Int) =
 
 def parsePatOr(p: (String, Int), toks: Toks): (String, Int) =
   p match {
-    case (s, j) => if (_is(toks, j, Tok.Pipe)) parsePatOr2(s, parsePatPrimary(toks, j + 1), toks) else (s, j)
+    case (s, j) => if (_is(toks, j, Tok.Pipe)) parsePatOr2(s, parsePat(toks, j + 1), toks) else (s, j)
   }
 
 def parsePatOr2(left: String, p: (String, Int), toks: Toks): (String, Int) =
@@ -858,7 +871,10 @@ def parseImplMethsNext(p: (Fun, Int), tn: String, args: List[String], forTy: Str
   }
 
 def parseItems(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
-  if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body) else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Private)) parseItemsDef(toks, parseDef(toks, i + 2, true), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs) else if (_is(toks, i, Tok.Colon)) parseItems(toks, i + 1, enums, aliases, traits, impls, imps, defs, main, body) else Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body)
+  if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body) else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Private)) parseItemsDef(toks, parseDef(toks, i + 2, true), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs) else parseItemsFail(toks, i, enums, aliases, traits, impls, imps, defs, main, body)
+
+def parseItemsFail(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), Fun(false, "#parse", [], [], "Unit", Expr.EUnit, "", _off(toks, i)) :: List.reverse(defs), main, body)
 
 def parseItemsEn(toks: Toks, p: (En, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
@@ -946,11 +962,11 @@ def prettyExpr(e: Expr, n: Int): String =
     case Expr.EUnit => Str.concat(_pad(n), "()")
     case Expr.EPrint(inner, _) => Str.concat(_pad(n), Str.concat("IO.println(", Str.concat(pretty0(inner), ")")))
     case Expr.ECall(f, args, _) => Str.concat(_pad(n), Str.concat(f, Str.concat("(", Str.concat(_commaExprs(args), ")"))))
-    case Expr.EMethod(recv, name, args, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(recv), Str.concat(".", Str.concat(name, Str.concat("(", Str.concat(_commaExprs(args), ")"))))))
+    case Expr.EMethod(recv, name, args, _) => Str.concat(_pad(n), prettyMethod(recv, name, args))
     case Expr.EField(recv, name, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(recv), Str.concat(".", name)))
     case Expr.EBin(op, l, r, _) => Str.concat(_pad(n), prettyBin(op, l, r))
     case Expr.EUn(op, inner, _) => Str.concat(_pad(n), Str.concat(op, _prettyUn(inner)))
-    case Expr.ELam(p, body) => Str.concat(_pad(n), Str.concat(p, Str.concat(" => ", pretty0(body))))
+    case Expr.ELam(p, ty, body) => Str.concat(_pad(n), prettyLam(p, ty, body))
     case Expr.EIf(c, t, el, _) => Str.concat(_pad(n), Str.concat("if (", Str.concat(pretty0(c), Str.concat(") ", Str.concat(pretty0(t), Str.concat(" else ", pretty0(el)))))))
     case Expr.EMatch(s, arms, _) => Str.concat(_pad(n), Str.concat(_prettyRecv(s), Str.concat(""" match {
 """, Str.concat(prettyArms(arms, n + 1), Str.concat(_pad(n), "}")))))
@@ -961,6 +977,22 @@ def prettyExpr(e: Expr, n: Int): String =
     case Expr.EList(xs) => Str.concat(_pad(n), Str.concat("[", Str.concat(_commaExprs(xs), "]")))
     case Expr.ETuple(xs) => Str.concat(_pad(n), Str.concat("(", Str.concat(_commaExprs(xs), ")")))
     case Expr.ENamed(name, e) => Str.concat(_pad(n), Str.concat(name, Str.concat(" = ", pretty0(e))))
+    case Expr.EAscribe(inner, ty, _) => Str.concat(_pad(n), Str.concat(prettyAsc(inner), Str.concat(": ", ty)))
+  }
+
+def prettyMethod(recv: Expr, name: String, args: List[Expr]): String =
+  if (name == "apply") Str.concat(_prettyRecv(recv), Str.concat("(", Str.concat(_commaExprs(args), ")"))) else Str.concat(_prettyRecv(recv), Str.concat(".", Str.concat(name, Str.concat("(", Str.concat(_commaExprs(args), ")")))))
+
+def prettyLam(p: String, ty: String, body: Expr): String =
+  if (ty == "") Str.concat(p, Str.concat(" => ", pretty0(body))) else Str.concat("(", Str.concat(p, Str.concat(": ", Str.concat(ty, Str.concat(") => ", pretty0(body))))))
+
+def prettyAsc(e: Expr): String =
+  e match {
+    case Expr.EBin(_, _, _, _) => _parenPretty(e)
+    case Expr.EIf(_, _, _, _) => _parenPretty(e)
+    case Expr.ELam(_, _, _) => _parenPretty(e)
+    case Expr.EAscribe(_, _, _) => _parenPretty(e)
+    case _ => pretty0(e)
   }
 
 def prettyBin(op: String, l: Expr, r: Expr): String =
@@ -975,6 +1007,7 @@ def _prettyUn(e: Expr): String =
     case Expr.EIf(_, _, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
     case Expr.EMatch(_, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
     case Expr.EFor(_, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
+    case Expr.EAscribe(_, _, _) => Str.concat("(", Str.concat(pretty0(e), ")"))
     case _ => pretty0(e)
   }
 
@@ -986,7 +1019,8 @@ def _prettyBinL(op: String, e: Expr): String =
     case Expr.EBin(o2, _, _, _) => if (binPrec(o2) < binPrec(op)) _parenPretty(e) else pretty0(e)
     case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
-    case Expr.ELam(_, _) => _parenPretty(e)
+    case Expr.ELam(_, _, _) => _parenPretty(e)
+    case Expr.EAscribe(_, _, _) => _parenPretty(e)
     case _ => pretty0(e)
   }
 
@@ -995,7 +1029,8 @@ def _prettyBinR(op: String, e: Expr): String =
     case Expr.EBin(o2, _, _, _) => if (binPrec(o2) <= binPrec(op)) _parenPretty(e) else pretty0(e)
     case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
-    case Expr.ELam(_, _) => _parenPretty(e)
+    case Expr.ELam(_, _, _) => _parenPretty(e)
+    case Expr.EAscribe(_, _, _) => _parenPretty(e)
     case _ => pretty0(e)
   }
 
@@ -1005,7 +1040,8 @@ def _prettyConsL(e: Expr): String =
     case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EMatch(_, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
-    case Expr.ELam(_, _) => _parenPretty(e)
+    case Expr.ELam(_, _, _) => _parenPretty(e)
+    case Expr.EAscribe(_, _, _) => _parenPretty(e)
     case _ => pretty0(e)
   }
 
@@ -1014,7 +1050,8 @@ def _prettyConsR(e: Expr): String =
     case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EMatch(_, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
-    case Expr.ELam(_, _) => _parenPretty(e)
+    case Expr.ELam(_, _, _) => _parenPretty(e)
+    case Expr.EAscribe(_, _, _) => _parenPretty(e)
     case _ => pretty0(e)
   }
 
@@ -1024,7 +1061,8 @@ def _prettyRecv(e: Expr): String =
     case Expr.EUn(_, _, _) => _parenPretty(e)
     case Expr.EIf(_, _, _, _) => _parenPretty(e)
     case Expr.EFor(_, _, _) => _parenPretty(e)
-    case Expr.ELam(_, _) => _parenPretty(e)
+    case Expr.ELam(_, _, _) => _parenPretty(e)
+    case Expr.EAscribe(_, _, _) => _parenPretty(e)
     case _ => pretty0(e)
   }
 
