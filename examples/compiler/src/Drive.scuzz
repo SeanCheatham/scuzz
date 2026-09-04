@@ -115,7 +115,36 @@ def missToml(dir: String): String =
   Str.concat("missing scuzz.toml in ", dir)
 
 def showMan(m: Man): String =
-  if (!m.ok) Str.concat("err:", m.err) else Str.concat("name=", Str.concat(m.name, Str.concat(" ver=", Str.concat(m.version, Str.concat(" ui=", Str.concat(if (m.hasUi) "true" else "false", Str.concat(" deps=", Str.fromInt(List.len(m.deps)))))))))
+  if (!m.ok) Str.concat("err:", m.err) else showManUi(m, Manifest.manUi(m))
+
+def showManUi(m: Man, ui: UiMan): String =
+  Str.concat("name=", Str.concat(m.name, Str.concat(" ver=", Str.concat(m.version, Str.concat(" ui=", Str.concat(if (m.hasUi) "true" else "false", showManRest(m, ui)))))))
+
+def showManRest(m: Man, ui: UiMan): String =
+  Str.concat(" runtime=", Str.concat(Manifest.uiRuntime(ui), Str.concat(" size=", Str.concat(Manifest.uiWidth(ui), Str.concat("x", Str.concat(Manifest.uiHeight(ui), Str.concat(" scale=", Str.concat(Manifest.uiScale(ui), showManTap(m, ui)))))))))
+
+def showManTap(m: Man, ui: UiMan): String =
+  Str.concat(" tap=", Str.concat(Manifest.uiTap(ui), Str.concat(" bundle=", Str.concat(Manifest.uiBundle(ui), Str.concat(" deps=", showDeps(m.deps))))))
+
+def showDeps(xs: List[(String, String)]): String =
+  if (List.isEmpty(xs)) "" else showDepsGo(List.at(xs, 0), List.tail(xs), "")
+
+def showDepsGo(h: (String, String), rest: List[(String, String)], acc: String): String =
+  h match {
+    case (n, p) => showDepsMore(rest, if (acc == "") Str.concat(n, Str.concat("=", p)) else Str.concat(acc, Str.concat(",", Str.concat(n, Str.concat("=", p)))))
+  }
+
+def showDepsMore(rest: List[(String, String)], acc: String): String =
+  if (List.isEmpty(rest)) acc else showDepsGo(List.at(rest, 0), List.tail(rest), acc)
+
+def seenHas(xs: List[String], d: String): Bool =
+  if (List.isEmpty(xs)) false else if (List.at(xs, 0) == d) true else seenHas(List.tail(xs), d)
+
+def cycleErr(dir: String): String =
+  Str.concat("dependency cycle: ", dir)
+
+def depDir(dir: String, path: String): String =
+  if (path == ".") dir else joinSlash(dir, path)
 
 def compilePkg(toml: String, src: String, outDir: String, clang: String, lib: String): PkgOut =
   compilePkg2(Manifest.parse(toml), src, outDir, clang, lib)
@@ -361,36 +390,39 @@ def fuzzWrapGot(src: String): List[(String, String)] =
   if (src == "") Manifest.noPairs() else (Verify.wrapMod(), src) :: Manifest.noPairs()
 
 def collectDeps(dir: String, deps: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
-  if (List.isEmpty(deps)) IO.pure(acc) else collectDepGo(dir, deps, acc)
+  collectDepsSeen(dir, deps, acc, Manifest.noLines())
 
-def collectDepGo(dir: String, deps: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
-  collectDepHead(dir, List.at(deps, 0), deps, acc)
+def collectDepsSeen(dir: String, deps: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  if (List.isEmpty(deps)) IO.pure(acc) else collectDepGo(dir, deps, acc, seen)
 
-def collectDepHead(dir: String, d: (String, String), deps: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
-  collectDep(dir, d, List.tail(deps), acc)
+def collectDepGo(dir: String, deps: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  collectDepHead(dir, List.at(deps, 0), deps, acc, seen)
 
-def collectDep(dir: String, d: (String, String), rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
+def collectDepHead(dir: String, d: (String, String), deps: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  collectDep(dir, d, List.tail(deps), acc, seen)
+
+def collectDep(dir: String, d: (String, String), rest: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
   d match {
-    case (name, path) => collectDepNamed(dir, name, path, rest, acc)
+    case (name, path) => collectDepNamed(dir, name, path, rest, acc, seen)
   }
 
-def collectDepNamed(dir: String, _name: String, path: String, rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
-  collectPkg(joinSlash(dir, path), dir, rest, acc)
+def collectDepNamed(dir: String, _name: String, path: String, rest: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  collectPkg(depDir(dir, path), dir, rest, acc, seen)
 
-def collectPkg(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)]): IO[List[(String, String)]] =
-  Fs.read(joinSlash(pkgDir, "scuzz.toml")).flatMap(toml => collectPkgMan(pkgDir, parentDir, rest, acc, Manifest.parse(toml)))
+def collectPkg(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  if (seenHas(seen, pkgDir)) IO.println(cycleErr(pkgDir)).flatMap(_ => IO.fail("toml")) else Fs.read(joinSlash(pkgDir, "scuzz.toml")).flatMap(toml => collectPkgMan(pkgDir, parentDir, rest, acc, Manifest.parse(toml), seen))
 
-def collectPkgMan(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], m: Man): IO[List[(String, String)]] =
-  manNeed(m).flatMap(_ => Fs.list(joinSlash(pkgDir, "src")).flatMap(ents => collectPkgListed(pkgDir, parentDir, rest, acc, m.deps, ents)))
+def collectPkgMan(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], m: Man, seen: List[String]): IO[List[(String, String)]] =
+  manNeed(m).flatMap(_ => Fs.list(joinSlash(pkgDir, "src")).flatMap(ents => collectPkgListed(pkgDir, parentDir, rest, acc, m.deps, ents, seen)))
 
-def collectPkgListed(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], nested: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
-  readSrcFiles(joinSlash(pkgDir, "src"), ents).flatMap(more => collectPkgGot(pkgDir, parentDir, rest, acc, nested, more))
+def collectPkgListed(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], nested: List[(String, String)], ents: List[(String, Bool)], seen: List[String]): IO[List[(String, String)]] =
+  readSrcFiles(joinSlash(pkgDir, "src"), ents).flatMap(more => collectPkgGot(pkgDir, parentDir, rest, acc, nested, more, seen))
 
-def collectPkgGot(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], nested: List[(String, String)], more: List[(String, String)]): IO[List[(String, String)]] =
-  collectDeps(pkgDir, nested, acc).flatMap(withNested => collectAfterNested(parentDir, rest, withNested, more))
+def collectPkgGot(pkgDir: String, parentDir: String, rest: List[(String, String)], acc: List[(String, String)], nested: List[(String, String)], more: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  collectDepsSeen(pkgDir, nested, acc, pkgDir :: seen).flatMap(withNested => collectAfterNested(parentDir, rest, withNested, more, seen))
 
-def collectAfterNested(parentDir: String, rest: List[(String, String)], withNested: List[(String, String)], more: List[(String, String)]): IO[List[(String, String)]] =
-  collectDeps(parentDir, rest, appendNew(withNested, more))
+def collectAfterNested(parentDir: String, rest: List[(String, String)], withNested: List[(String, String)], more: List[(String, String)], seen: List[String]): IO[List[(String, String)]] =
+  collectDepsSeen(parentDir, rest, appendNew(withNested, more), seen)
 
 def hasStem(xs: List[(String, String)], stem: String): Bool =
   hasStemAt(xs, stem, 0)
@@ -518,17 +550,26 @@ def afterRun2(code: Int, out: String, err: String): IO[Unit] =
 def testEnv(): String =
   "SCUZZ_TESTRT=1 SCUZZ_SERVE=1 SCUZZ_KIT=sealed "
 
-def headlessEnv(): String =
-  "SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 SCUZZ_UI_SCALE=1 "
+def uiEnvKind(headless: Bool, rt: String): String =
+  if (headless) "headless" else rt
+
+def uiEnvUi(ui: UiMan, headless: Bool): String =
+  Str.concat("SCUZZ_UI_RUNTIME=", Str.concat(uiEnvKind(headless, Manifest.uiRuntime(ui)), Str.concat(" SCUZZ_UI_WIDTH=", Str.concat(Manifest.uiWidth(ui), Str.concat(" SCUZZ_UI_HEIGHT=", Str.concat(Manifest.uiHeight(ui), Str.concat(" SCUZZ_UI_SCALE=", Str.concat(Manifest.uiScale(ui), " "))))))))
+
+def uiEnvMan(m: Man, headless: Bool): String =
+  uiEnvUi(Manifest.manUi(m), headless)
+
+def uiEnvOf(toml: String, headless: Bool): String =
+  uiEnvMan(Manifest.parse(toml), headless)
 
 def headlessEnvMan(m: Man): String =
-  headlessEnvUi(Manifest.manUi(m))
-
-def headlessEnvUi(ui: UiMan): String =
-  Str.concat("SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=", Str.concat(Manifest.uiWidth(ui), Str.concat(" SCUZZ_UI_HEIGHT=", Str.concat(Manifest.uiHeight(ui), Str.concat(" SCUZZ_UI_SCALE=", Str.concat(Manifest.uiScale(ui), " "))))))
+  uiEnvMan(m, true)
 
 def headlessEnvOf(toml: String): String =
-  headlessEnvMan(Manifest.parse(toml))
+  uiEnvOf(toml, true)
+
+def runEnvOf(outDir: String, headless: Bool, toml: String): String =
+  Str.concat(uiEnvOf(toml, headless), if (headless) Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(joinSlash(outDir, "snapshot.png"), " ")) else "")
 
 def tapNEnv(toml: String, tap: Bool): String =
   tapNEnvMan(Manifest.parse(toml), tap)
@@ -537,10 +578,10 @@ def tapNEnvMan(m: Man, tap: Bool): String =
   if (!tap || Manifest.uiTap(Manifest.manUi(m)) == "") "" else Str.concat("SCUZZ_UI_TAP_N=", Str.concat(Manifest.uiTap(Manifest.manUi(m)), " "))
 
 def snapEnv(outDir: String): String =
-  Str.concat(headlessEnv(), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(joinSlash(outDir, "snapshot.png"), " ")))
+  runEnvOf(outDir, true, "")
 
 def snapEnvOf(outDir: String, toml: String): String =
-  Str.concat(headlessEnvOf(toml), Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(joinSlash(outDir, "snapshot.png"), " ")))
+  runEnvOf(outDir, true, toml)
 
 def checkDir(dir: String, json: Bool): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkDirMan(dir, json, Manifest.parse(toml)))
