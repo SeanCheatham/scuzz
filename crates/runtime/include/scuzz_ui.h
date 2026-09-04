@@ -126,10 +126,10 @@ void sz_signal_list_set(SzSignalList *s, SzList *v);
 SzList *sz_signal_list_get(const SzSignalList *s);
 void sz_signal_list_free(SzSignalList *s);
 
-/* Signal store dump: one "kind[id] = value" line per live signal, in creation
-   order (fuzz oracle; caller frees SzString). */
+/* Signal store dump: one "kind[id] name = value" line per live signal.
+ * String values use the editor dump escape dialect. Caller frees SzString. */
 SzString *sz_signal_dump(void);
-/* Property observation: signal store by creation-order id (TestRuntime / fuzz). */
+/* Publish the for-binder name. Property and Timeline kits read that name. */
 void sz_signal_name(const void *sig, const char *name);
 
 int64_t sz_property_signal_int(SzString *name);
@@ -677,8 +677,9 @@ int sz_ui_session_set_record(SzUiSession *session, const char *path);
 int sz_ui_session_reload(SzUiSession *session);
 /* dlopen `path` (copied to a unique sibling so the OS does not keep a stale
  * image) and set the rebuild factory from exported `sz_ui_reload_rebuild`.
- * Signals stay in `rebuild_env`. Does not rebuild until reload/stamp.
- * Stamp-watch loads `SCUZZ_UI_RELOAD_CODE` (if set) before rebuild. */
+ * Unlink the copy after dlopen. Signals stay in `rebuild_env`. Does not
+ * rebuild until reload/stamp. Stamp-watch loads `SCUZZ_UI_RELOAD_CODE` (if
+ * set) before rebuild. */
 int sz_ui_session_load_code(SzUiSession *session, const char *path);
 void sz_ui_unmount(SzUiSession *session);
 /* Snapshot PNG / structural dump from SCUZZ_SNAPSHOT_PATH / SCUZZ_FUZZ_DUMP. */

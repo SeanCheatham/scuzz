@@ -55,7 +55,7 @@ struct SzView {
 
   /* View.each: rebuild children from Signal.list at layout (pull). */
   SzSignalList *each_sig;
-  SzList *each_seen; /* last synced list pointer (not owned) */
+  SzList *each_seen; /* last synced list (retained; sentinel 1 = never synced) */
   SzViewEachFn each_fn;
   void *each_env;
 
@@ -1090,9 +1090,9 @@ static const char *a11y_role_name(SzA11yRole role) {
   }
 }
 
-static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
+static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
   int i;
-  if (!v || !buf || !len || !view_is_shown(v))
+  if (!v || !buf || !len || !cap || !view_is_shown(v))
     return;
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return;
@@ -1100,7 +1100,6 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
     char line[256];
     char live[256];
     const char *label = v->a11y_label ? v->a11y_label : "";
-    int n;
     if (v->kind == SZ_VIEW_TEXT && (v->sig_int || v->sig_str)) {
       resolve_text(v, live, sizeof live);
       label = live;
@@ -1156,13 +1155,9 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       snprintf(live, sizeof live, "%d", view_overlay_open(v) ? 1 : 0);
       label = live;
     }
-    n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
-                 label);
-    if (n > 0 && *len + (size_t)n < cap) {
-      memcpy(buf + *len, line, (size_t)n);
-      *len += (size_t)n;
-      buf[*len] = '\0';
-    }
+    snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
+             label);
+    sz_dump_append(buf, len, cap, line);
   }
   if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
     return;
@@ -1173,15 +1168,18 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
   if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return;
   for (i = 0; i < v->child_count; i++)
-    a11y_dump_node(v->children[i], buf, cap, len);
+    a11y_dump_node(v->children[i], buf, len, cap);
 }
 
 SzString *sz_view_a11y_dump(SzView *root) {
-  char buf[4096];
-  size_t len = 0;
-  buf[0] = '\0';
-  a11y_dump_node(root, buf, sizeof buf, &len);
-  return sz_string_from_cstr(buf);
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  SzString *out;
+  sz_dump_append(&buf, &len, &cap, "");
+  a11y_dump_node(root, &buf, &len, &cap);
+  out = sz_string_from_cstr(buf);
+  sz_free(buf);
+  return out;
 }
 
 SzView *sz_view_column(void) { return view_new(SZ_VIEW_COLUMN); }
@@ -1217,6 +1215,20 @@ SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env) {
   return v;
 }
 
+static int each_seen_is_sentinel(SzList *p) {
+  return p == (SzList *)(uintptr_t)1;
+}
+
+static void each_seen_set(SzView *v, SzList *xs) {
+  if (!v)
+    return;
+  if (v->each_seen && !each_seen_is_sentinel(v->each_seen))
+    sz_release(v->each_seen);
+  if (xs)
+    sz_retain(xs);
+  v->each_seen = xs;
+}
+
 static void sync_each(SzView *v) {
   SzList *xs;
   SzList *p;
@@ -1240,7 +1252,7 @@ static void sync_each(SzView *v) {
       sz_view_add_child(v, sz_view_text("- <item>"));
     }
   }
-  v->each_seen = xs;
+  each_seen_set(v, xs);
 }
 
 SzView *sz_view_scroll(SzView *child) {
@@ -1523,6 +1535,9 @@ void sz_view_free(SzView *view) {
   view->tap_env = NULL;
   sz_release(view->each_env);
   view->each_env = NULL;
+  if (view->each_seen && view->each_seen != (SzList *)(uintptr_t)1)
+    sz_release(view->each_seen);
+  view->each_seen = NULL;
   {
     int u;
     for (u = 0; u < view->undo_n; u++)
