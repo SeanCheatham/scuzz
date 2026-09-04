@@ -734,7 +734,8 @@ SzList *sz_list_distinct_by(SzList *xs, SzListMapFn fn, void *env,
  * pair is skipped. Empty is empty. Key kind is boxed Int or String. */
 SzMap *sz_list_to_map(SzList *pairs);
 /* Set from `List[Int]` or `List[String]`. Duplicate cells collapse.
- * Empty is empty. `key_kind` is 0 for boxed Int, 1 for String. */
+ * Empty is empty. A non-empty list infers kind from the first cell.
+ * `key_kind` is unused then. */
 SzMap *sz_list_to_set(SzList *xs, int32_t key_kind);
 /* Cells of `xs` that are missing from `ys`. Empty `xs` is empty. */
 SzList *sz_list_diff(SzList *xs, SzList *ys);
@@ -796,6 +797,8 @@ struct SzMap {
   int32_t key_kind;
 };
 SzMap *sz_map_empty(void);
+/* Empty insert infers kind from `key`. A non-empty tree keeps
+ * `m->key_kind`. `key_kind` is unused. */
 SzMap *sz_map_set(SzMap *m, void *key, void *val, int32_t key_kind);
 void *sz_map_get_or(SzMap *m, void *key, void *dflt);
 /* 0–1 list of the value. Miss is empty. Cons retains the value. */
@@ -829,8 +832,9 @@ int64_t sz_map_exists(SzMap *m, SzListPred pred, void *env);
 int64_t sz_map_forall(SzMap *m, SzListPred pred, void *env);
 /* Keep keys that match `pred`. Empty stays empty. */
 SzMap *sz_set_filter(SzMap *s, SzListPred pred, void *env);
-/* Map each key. Mapper returns +1. `key_kind` is 0 for boxed Int, 1 for
- * String. Duplicate keys collapse. Empty stays empty. */
+/* Map each key. Mapper returns +1. Kind comes from the first mapped
+ * key. `key_kind` is unused then. Duplicate keys collapse. Empty stays
+ * empty. */
 SzMap *sz_set_map(SzMap *s, SzListMapFn fn, void *env, int32_t key_kind);
 /* 1 when any key matches `pred`. Empty is 0. */
 int64_t sz_set_exists(SzMap *s, SzListPred pred, void *env);

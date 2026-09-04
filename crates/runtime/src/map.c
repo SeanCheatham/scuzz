@@ -48,16 +48,19 @@ static SzMap *map_take_right(void *k, void *v, SzMap *l, SzMap *r, int32_t kind)
 
 SzMap *sz_map_set(SzMap *m, void *k, void *v, int32_t kind) {
   int c;
+  int32_t knd;
+  (void)kind;
   if (!m)
-    return map_node(k, v, NULL, NULL, kind);
+    return map_node(k, v, NULL, NULL, sz_map_infer_key_kind(k));
+  knd = m->key_kind;
   c = map_cmp(m, k);
   if (c == 0)
-    return map_node(k, v, m->left, m->right, m->key_kind);
+    return map_node(k, v, m->left, m->right, knd);
   if (c > 0)
-    return map_take_left(m->key, m->val, sz_map_set(m->left, k, v, kind), m->right,
-                         m->key_kind);
-  return map_take_right(m->key, m->val, m->left, sz_map_set(m->right, k, v, kind),
-                        m->key_kind);
+    return map_take_left(m->key, m->val, sz_map_set(m->left, k, v, knd), m->right,
+                         knd);
+  return map_take_right(m->key, m->val, m->left, sz_map_set(m->right, k, v, knd),
+                        knd);
 }
 
 void *sz_map_get_or(SzMap *m, void *k, void *dflt) {
@@ -348,6 +351,8 @@ SzMap *sz_set_map(SzMap *s, SzListMapFn fn, void *env, int32_t key_kind) {
   SzMap *out = NULL;
   SzMap *next;
   void *nk;
+  int32_t kind = key_kind;
+  int got = 0;
   if (!fn)
     sz_panic("sz_set_map(null fn)");
   if (!s)
@@ -356,7 +361,11 @@ SzMap *sz_set_map(SzMap *s, SzListMapFn fn, void *env, int32_t key_kind) {
   for (p = keys; p; p = p->tail) {
     /* Mapper returns +1. Set retains. Drop the mapper ref. */
     nk = fn(p->head, env);
-    next = sz_map_set(out, nk, NULL, key_kind);
+    if (!got) {
+      kind = sz_map_infer_key_kind(nk);
+      got = 1;
+    }
+    next = sz_map_set(out, nk, NULL, kind);
     sz_release(nk);
     sz_release(out);
     out = next;
