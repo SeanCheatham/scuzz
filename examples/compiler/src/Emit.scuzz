@@ -860,7 +860,7 @@ def hasSubAt(s: String, sub: String, i: Int): Bool =
   if (i + Str.len(sub) > Str.len(s)) false else if (startsAt(s, i, sub)) true else hasSubAt(s, sub, i + 1)
 
 def callIsI64(f: String, defs: List[Fun]): Bool =
-  f == "Signal.get" || f == "Str.byteLen" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
+  f == "Signal.get" || f == "Str.byteLen" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.boolOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
 
 def isTlI64Call(f: String): Bool =
   f == "Timeline.len" || f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Timeline.signalStrHas" || tlHasRt(f) != "" || tlI64Rt(f) != ""
@@ -1651,10 +1651,10 @@ def nethRetLine(ret: String, pred: Bool): String =
   Str.concat(panicPop(), Str.concat(if (pred) "  ret i64 " else "  ret ptr ", ret))
 
 def isJsonExtra(f: String): Bool =
-  f == "Json.getInt" || f == "Json.getBool" || f == "Json.getStr" || f == "Json.intOr" || f == "Json.set" || f == "Json.setAt" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float" || f == "Json.floatOr"
+  f == "Json.getInt" || f == "Json.getBool" || f == "Json.getStr" || f == "Json.intOr" || f == "Json.set" || f == "Json.setAt" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float" || f == "Json.floatOr" || f == "Json.getFloat" || f == "Json.boolOr" || f == "Json.strOr"
 
 def emitJsonExtra(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "Json.getInt") emitJsonGetI64("sz_json_get_int", code, vals, owns, prefix) else if (f == "Json.getBool") emitJsonGetI64("sz_json_get_bool", code, vals, owns, prefix) else if (f == "Json.getStr") emitJsonGetStr(code, vals, owns, prefix) else if (f == "Json.intOr") emitJsonIntOr(code, vals, owns, prefix) else if (f == "Json.set") emitJsonSet(code, vals, owns, prefix) else if (f == "Json.setAt") emitJsonSetAt(code, vals, owns, prefix) else if (f == "Json.Int") emitJsonInt(code, vals, prefix) else if (f == "Json.Float") emitJsonFloat(code, vals, prefix) else if (f == "Json.floatOr") emitJsonFloatOr(code, vals, owns, prefix) else emitJsonNull(code, prefix)
+  if (f == "Json.getInt") emitJsonGetI64("sz_json_get_int", code, vals, owns, prefix) else if (f == "Json.getBool") emitJsonGetI64("sz_json_get_bool", code, vals, owns, prefix) else if (f == "Json.getStr") emitJsonGetStr(code, vals, owns, prefix) else if (f == "Json.intOr") emitJsonIntOr(code, vals, owns, prefix) else if (f == "Json.set") emitJsonSet(code, vals, owns, prefix) else if (f == "Json.setAt") emitJsonSetAt(code, vals, owns, prefix) else if (f == "Json.Int") emitJsonInt(code, vals, prefix) else if (f == "Json.Float") emitJsonFloat(code, vals, prefix) else if (f == "Json.floatOr") emitJsonFloatOr(code, vals, owns, prefix) else if (f == "Json.getFloat") emitJsonGetFloat(code, vals, owns, prefix) else if (f == "Json.boolOr") emitJsonBoolOr(code, vals, owns, prefix) else if (f == "Json.strOr") emitJsonStrOr(code, vals, owns, prefix) else emitJsonNull(code, prefix)
 
 def emitJsonFloat(code: String, vals: List[String], prefix: String): Slot =
   emitJsonFloat2(code, arg0(vals), prefix)
@@ -1679,6 +1679,36 @@ def jsonFloatOrFr(a: String, prefix: String): String =
 
 def jsonFloatOrV(prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("bitcast double ", Str.concat(pct(prefix, "fr"), " to i64"))))
+
+def emitJsonGetFloat(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitJsonGetFloat2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitJsonGetFloat2(code: String, a: String, b: String, n: String, oa: Bool, ob: Bool, prefix: String): Slot =
+  Slot(join(code, join(jsonGetFloatCall(a, b, n, prefix), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), false)
+
+def jsonGetFloatCall(a: String, b: String, n: String, prefix: String): String =
+  join(jsonFloatOrFd(n, prefix), join(jsonGetFloatFr(a, b, prefix), jsonFloatOrV(prefix)))
+
+def jsonGetFloatFr(a: String, b: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "fr"), Str.concat("call double @sz_json_get_float(ptr ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, Str.concat(", double ", Str.concat(pct(prefix, "fd"), ")"))))))))
+
+def emitJsonBoolOr(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitJsonBoolOr2(code, arg0(vals), arg1(vals), headOwn(owns), prefix)
+
+def emitJsonBoolOr2(code: String, a: String, n: String, o: Bool, prefix: String): Slot =
+  Slot(join(code, join(jsonBoolOrCall(a, n, prefix), if (o) relPtr(a) else "")), pct(prefix, "v"), false)
+
+def jsonBoolOrCall(a: String, n: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_json_bool_or(ptr ", Str.concat(a, Str.concat(", i64 ", Str.concat(n, ")"))))))
+
+def emitJsonStrOr(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  emitJsonStrOr2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
+
+def emitJsonStrOr2(code: String, a: String, d: String, oa: Bool, od: Bool, prefix: String): Slot =
+  Slot(join(code, join(jsonStrOrCall(a, d, prefix), join(if (oa) relPtr(a) else "", if (od) relPtr(d) else ""))), pct(prefix, "v"), true)
+
+def jsonStrOrCall(a: String, d: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_json_str_or(ptr ", Str.concat(a, Str.concat(", ptr ", Str.concat(d, ")"))))))
 
 def emitJsonGetI64(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitJsonGetI642(rt, code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
@@ -2684,7 +2714,7 @@ def netHttpUnaryRt(f: String): String =
   if (f == "Net.httpDelete") "sz_net_http_delete" else if (f == "Net.httpHead") "sz_net_http_head" else "sz_net_http_get"
 
 def kitUnaryI64(f: String): String =
-  if (f == "Map.size" || f == "Set.size") "sz_map_size" else if (f == "Json.isNull") "sz_json_is_null" else if (f == "Json.isObj") "sz_json_is_obj" else if (f == "Json.isArr") "sz_json_is_arr" else if (f == "List.sum") "sz_list_sum" else if (f == "List.product") "sz_list_product" else if (f == "List.nonEmpty") "sz_list_non_empty" else if (f == "Str.isEmpty") "sz_string_is_empty" else if (f == "Str.nonEmpty") "sz_string_non_empty" else if (f == "Str.isBlank") "sz_string_is_blank" else ""
+  if (f == "Map.size" || f == "Set.size") "sz_map_size" else if (f == "Json.isNull") "sz_json_is_null" else if (f == "Json.isObj") "sz_json_is_obj" else if (f == "Json.isArr") "sz_json_is_arr" else if (f == "Json.isBool") "sz_json_is_bool" else if (f == "Json.isInt") "sz_json_is_int" else if (f == "Json.isStr") "sz_json_is_str" else if (f == "Json.isFloat") "sz_json_is_float" else if (f == "List.sum") "sz_list_sum" else if (f == "List.product") "sz_list_product" else if (f == "List.nonEmpty") "sz_list_non_empty" else if (f == "Str.isEmpty") "sz_string_is_empty" else if (f == "Str.nonEmpty") "sz_string_non_empty" else if (f == "Str.isBlank") "sz_string_is_blank" else ""
 
 def kitPtrI64(f: String): String =
   if (f == "List.take") "sz_list_take" else if (f == "List.drop") "sz_list_drop" else if (f == "List.takeRight") "sz_list_take_right" else if (f == "List.dropRight") "sz_list_drop_right" else if (f == "List.splitAt") "sz_list_split_at" else if (f == "List.grouped") "sz_list_grouped" else if (f == "List.sliding") "sz_list_sliding" else if (f == "Str.take") "sz_string_utake" else if (f == "Str.drop") "sz_string_udrop" else if (f == "Str.takeRight") "sz_string_utake_right" else if (f == "Str.dropRight") "sz_string_udrop_right" else if (f == "Json.at") "sz_json_at" else if (f == "Json.dropAt") "sz_json_drop_at" else if (f == "Stream.take") "sz_stream_take" else if (f == "Stream.drop") "sz_stream_drop" else if (f == "Stream.repeatN") "sz_stream_repeat_n" else if (f == "Stream.grouped") "sz_stream_grouped" else if (f == "Stream.takeRight") "sz_stream_take_right" else if (f == "Stream.dropRight") "sz_stream_drop_right" else if (f == "Stream.sliding") "sz_stream_sliding" else ""
@@ -6258,7 +6288,7 @@ def declsR(): String =
   join(decl("ptr @sz_string_lines(ptr)"), join(decl("ptr @sz_string_trim(ptr)"), join(decl("ptr @sz_string_to_lower(ptr)"), join(decl("ptr @sz_string_to_upper(ptr)"), join(decl("ptr @sz_string_capitalize(ptr)"), join(decl("ptr @sz_string_ureverse(ptr)"), join(decl("i64 @sz_string_is_empty(ptr)"), join(decl("i64 @sz_string_non_empty(ptr)"), join(decl("i64 @sz_string_is_blank(ptr)"), join(decl("ptr @sz_string_split(ptr, ptr)"), join(decl("ptr @sz_string_strip_prefix(ptr, ptr)"), join(decl("ptr @sz_string_strip_suffix(ptr, ptr)"), join(decl("i64 @sz_string_ends_with(ptr, ptr)"), join(decl("i64 @sz_string_uindex_of(ptr, ptr)"), join(decl("i64 @sz_string_ulast_index_of(ptr, ptr)"), join(decl("ptr @sz_string_replace(ptr, ptr, ptr)"), join(decl("ptr @sz_string_pad_left(ptr, i64, ptr)"), decl("ptr @sz_string_pad_right(ptr, i64, ptr)"))))))))))))))))))
 
 def declsS(): String =
-  join(decl("ptr @sz_map_union(ptr, ptr)"), join(decl("ptr @sz_map_intersect(ptr, ptr)"), join(decl("ptr @sz_map_diff(ptr, ptr)"), join(decl("ptr @sz_list_set_at(ptr, i64, ptr)"), join(decl("i64 @sz_list_starts_with(ptr, ptr)"), join(decl("i64 @sz_list_ends_with(ptr, ptr)"), join(decl("i64 @sz_list_same_elements(ptr, ptr)"), join(decl("ptr @sz_list_patch(ptr, i64, ptr, i64)"), join(decl("ptr @sz_json_stringify(ptr)"), join(decl("ptr @sz_fs_exists(ptr)"), join(decl("ptr @sz_fs_delete(ptr)"), join(decl("ptr @sz_fs_rename(ptr, ptr)"), join(decl("ptr @sz_fs_walk(ptr)"), join(decl("ptr @sz_fs_join(ptr, ptr)"), join(decl("ptr @sz_fs_dirname(ptr)"), join(decl("ptr @sz_fs_basename(ptr)"), join(decl("i64 @sz_oracle_sum_to(i64)"), decl("ptr @sz_string_from_float(double)"))))))))))))))))))
+  join(decl("ptr @sz_map_union(ptr, ptr)"), join(decl("ptr @sz_map_intersect(ptr, ptr)"), join(decl("ptr @sz_map_diff(ptr, ptr)"), join(decl("ptr @sz_list_set_at(ptr, i64, ptr)"), join(decl("i64 @sz_list_starts_with(ptr, ptr)"), join(decl("i64 @sz_list_ends_with(ptr, ptr)"), join(decl("i64 @sz_list_same_elements(ptr, ptr)"), join(decl("ptr @sz_list_patch(ptr, i64, ptr, i64)"), join(decl("ptr @sz_json_stringify(ptr)"), join(decl("i64 @sz_json_is_bool(ptr)"), join(decl("i64 @sz_json_is_int(ptr)"), join(decl("i64 @sz_json_is_str(ptr)"), join(decl("i64 @sz_json_is_float(ptr)"), join(decl("i64 @sz_json_bool_or(ptr, i64)"), join(decl("ptr @sz_json_str_or(ptr, ptr)"), join(decl("double @sz_json_get_float(ptr, ptr, double)"), join(decl("ptr @sz_fs_exists(ptr)"), join(decl("ptr @sz_fs_delete(ptr)"), join(decl("ptr @sz_fs_rename(ptr, ptr)"), join(decl("ptr @sz_fs_walk(ptr)"), join(decl("ptr @sz_fs_join(ptr, ptr)"), join(decl("ptr @sz_fs_dirname(ptr)"), join(decl("ptr @sz_fs_basename(ptr)"), join(decl("i64 @sz_oracle_sum_to(i64)"), decl("ptr @sz_string_from_float(double)")))))))))))))))))))))))))
 
 def declsT(): String =
   join(declsT1(), join(declsT2(), join(declsT3(), join(declsT4(), join(declsT5(), declsT6())))))

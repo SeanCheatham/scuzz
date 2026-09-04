@@ -68,6 +68,8 @@ private def objKitOk(j: Json): IO[Unit] =
     _ <- printHas(j, "missing")
     _ <- printStr(j, "s")
     _ <- printBool(j, "ok")
+    _ <- IO.println(Str.concat("isBool:", if (Json.isBool(j)) "1" else "0"))
+    _ <- IO.println(if (Json.getFloat(j, "x", 0.0) > 1.0) "getFloat:pos" else "getFloat:z")
     _ <- printTags(j)
     _ <- printArr(j)
     got = Json.get(j, "xs")
@@ -86,7 +88,7 @@ private def objKitOk(j: Json): IO[Unit] =
   } yield ()
 
 private def objKit(): IO[Unit] =
-  Json.parse("{\"n\":1,\"ok\":true,\"s\":\"hi\",\"xs\":[2,3]}") match {
+  Json.parse("{\"n\":1,\"ok\":true,\"s\":\"hi\",\"x\":1.5,\"xs\":[2,3]}") match {
     case Result.Err(_) => IO.println("query:err")
     case Result.Ok(j) => objKitOk(j)
   }
@@ -107,13 +109,22 @@ private def missKit(): IO[Unit] =
     _ <- printAt(Json.Null(), 0)
     _ <- printHas(Json.Null(), "a")
     _ <- IO.println(Str.concat("asInt:", Str.fromInt(List.len(Json.asInt(Json.Null())))))
+    _ <- IO.println(Str.concat("asFloat:", Str.fromInt(List.len(Json.asFloat(Json.Float(1.5))))))
+    _ <- IO.println(Str.concat("asFloatMiss:", Str.fromInt(List.len(Json.asFloat(Json.Null())))))
   } yield ()
+
+private def parseErr(): IO[Unit] =
+  Json.parse("{") match {
+    case Result.Err(_) => IO.println("parse:err")
+    case Result.Ok(_) => IO.println("parse:ok")
+  }
 
 def run(): IO[Unit] =
   for {
     _ <- objKit()
     _ <- mergeKit()
     _ <- missKit()
+    _ <- parseErr()
     _ <- printArrWrite()
   } yield ()
 

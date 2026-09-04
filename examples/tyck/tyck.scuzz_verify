@@ -67,6 +67,9 @@ def tyckResLam(): Bool =
 def tyckResUnk(): Bool =
   Main.tyckDiff(Main.srcResUnk(), Main.wantResUnk())
 
+def tyckJsonUnk(): Bool =
+  Main.tyckDiff(Main.srcJsonUnk(), Main.wantJsonUnk())
+
 def tyckLeftover(): Bool =
   Main.tyckDiff(Main.srcLeftover(), Main.wantLeftover())
 
