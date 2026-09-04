@@ -62,7 +62,7 @@ Do not start these before thesis-critical gaps close.
 
 - **Stable inject keys** — `tap N` / `scroll N` follow a11y preorder. A refactor can miss a stored corpus entry. Named control keys for inject stay after named claim observations.
 - **Simulation world** — TestRuntime seals the wire (no live sockets; Nth Fs / Net / Queue fault; PCT on fibers; Clock and Fs fakes). Clock skew, partitions, and a model to relate against stay later.
-- **Mutation depth** — Mutation flips ops, swaps `if` arms, and replaces an ADT construct with a sibling. Inert mutants stay unreported. Semantic mutants stay later.
+- **Mutation depth** — Mutation flips ops, swaps `if` arms, swaps tap handler bodies, and walks impl methods. Inert mutants stay unreported. Semantic mutants stay later.
 - **Memory** — Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated until panic sweep or process exit. No cycle collector.
 - **Dependency forms beyond `path`** — Path deps only (`Manifest.scuzz`). Git, versioned, and hosted artifacts are direction. There is no registry. Revisit after path deps and file-as-module stay the reuse story. A lockfile identity can land before a registry.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
