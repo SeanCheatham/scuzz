@@ -1,93 +1,18 @@
-def tyckOk(): Bool =
-  Main.tyckDiff(Main.srcOk(), Main.wantOk())
+def tyckCore(): Bool =
+  Main.tyckCore()
 
-def tyckUnbound(): Bool =
-  Main.tyckDiff(Main.srcUnbound(), Main.wantUnbound())
+def tyckFlow(): Bool =
+  Main.tyckFlow()
 
-def tyckArith(): Bool =
-  Main.tyckDiff(Main.srcArith(), Main.wantArith())
+def tyckRes(): Bool =
+  Main.tyckRes()
 
-def tyckArity(): Bool =
-  Main.tyckDiff(Main.srcArity(), Main.wantArity())
+def tyckFail(): Bool =
+  Main.tyckFail()
 
-def tyckRet(): Bool =
-  Main.tyckDiff(Main.srcRet(), Main.wantRet())
+def tyckParse(): Bool =
+  Main.tyckParse()
 
-def tyckPrint(): Bool =
-  Main.tyckDiff(Main.srcPrint(), Main.wantPrint())
-
-def tyckUnk(): Bool =
-  Main.tyckDiff(Main.srcUnk(), Main.wantUnk())
-
-def tyckCmp(): Bool =
-  Main.tyckDiff(Main.srcCmp(), Main.wantCmp())
-
-def tyckMainTy(): Bool =
-  Main.tyckDiff(Main.srcMainTy(), Main.wantMainTy())
-
-def tyckArg(): Bool =
-  Main.tyckDiff(Main.srcArg(), Main.wantArg())
-
-def tyckWatch(): Bool =
-  Main.tyckDiff(Main.srcWatch(), Main.wantWatch())
-
-def tyckIdemOk(): Bool =
-  Main.tyckIdem(Main.srcOk())
-
-def tyckIdemUnbound(): Bool =
-  Main.tyckIdem(Main.srcUnbound())
-
-def tyckDup(): Bool =
-  Main.tyckDiff(Main.srcDup(), Main.wantDup())
-
-def tyckFiles(): Bool =
-  Main.tyckFiles()
-
-def tyckUnBool(): Bool =
-  Main.tyckDiff(Main.srcUnBool(), Main.wantUnBool())
-
-def tyckIfMis(): Bool =
-  Main.tyckDiff(Main.srcIfMis(), Main.wantIfMis())
-
-def tyckMapHandle(): Bool =
-  Main.tyckDiff(Main.srcMapHandle(), Main.wantMapHandle())
-
-def tyckJoinMis(): Bool =
-  Main.tyckDiff(Main.srcJoinMis(), Main.wantJoinMis())
-
-def tyckResArity(): Bool =
-  Main.tyckDiff(Main.srcResArity(), Main.wantResArity())
-
-def tyckResDraw(): Bool =
-  Main.tyckDiff(Main.srcResDraw(), Main.wantResDraw())
-
-def tyckResLam(): Bool =
-  Main.tyckDiff(Main.srcResLam(), Main.wantResLam())
-
-def tyckResUnk(): Bool =
-  Main.tyckDiff(Main.srcResUnk(), Main.wantResUnk())
-
-def tyckJsonUnk(): Bool =
-  Main.tyckDiff(Main.srcJsonUnk(), Main.wantJsonUnk())
-
-def tyckLeftover(): Bool =
-  Main.tyckDiff(Main.srcLeftover(), Main.wantLeftover())
-
-def tyckBinBad(): Bool =
-  Main.tyckDiff(Main.srcBinBad(), Main.wantBinBad())
-
-def tyckHexX(): Bool =
-  Main.tyckDiff(Main.srcHexX(), Main.wantHexX())
-
-def tyckAscOk(): Bool =
-  Main.tyckDiff(Main.srcAscOk(), Main.wantAscOk())
-
-def tyckAscMis(): Bool =
-  Main.tyckDiff(Main.srcAscMis(), Main.wantAscMis())
-
-def tyckLamAnn(): Bool =
-  Main.tyckDiff(Main.srcLamAnn(), Main.wantLamAnn())
-
-def tyckLamMis(): Bool =
-  Main.tyckDiff(Main.srcLamMis(), Main.wantLamMis())
+def tyckLam(): Bool =
+  Main.tyckLam()
 

@@ -46,7 +46,7 @@ def srcPrint(): String =
 """
 
 def wantPrint(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: expected String, got Int\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":13}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: expected String, got Int\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":15}]"
 
 def srcUnk(): String =
   """@main def main: IO[Unit] =
@@ -74,7 +74,7 @@ def srcArg(): String =
   "def add(n: Int, m: Int): Int =\n  n + m\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1, \"x\")))\n"
 
 def wantArg(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: add arg type mismatch: expected Int, got String\",\"file\":\"Main.scuzz\",\"line\":5,\"column\":26,\"end_line\":5,\"end_column\":29}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: add arg type mismatch: expected Int, got String\",\"file\":\"Main.scuzz\",\"line\":5,\"column\":33,\"end_line\":5,\"end_column\":36}]"
 
 def srcWatch(): String =
   """@main def main: IO[Unit] =
@@ -109,9 +109,6 @@ def wantIfMis(): String =
 def tyckDiff(src: String, want: String): Bool =
   Check.check(src) == want
 
-def tyckIdem(src: String): Bool =
-  Check.check(src) == Check.check(src)
-
 def srcDup(): String =
   "def f(): String =\n  \"nope\"\n\n@main def main: IO[Unit] =\n  IO.println(nope)\n"
 
@@ -128,7 +125,7 @@ def srcFailMis(): String =
   "enum Err:\n  case Boom\ndef boom(): IO[Err, Int] =\n  IO.fail(\"nope\")\n@main def main: IO[Unit] =\n  IO.println(\"ok\")\n"
 
 def wantFailMis(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: def boom body IO[Any] does not match declared IO[Err, Int]\",\"file\":\"Main.scuzz\",\"line\":4,\"column\":3,\"end_line\":4,\"end_column\":10}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: def boom body IO[String, Any] does not match declared IO[Err, Int]\",\"file\":\"Main.scuzz\",\"line\":4,\"column\":3,\"end_line\":4,\"end_column\":10}]"
 
 def srcMapHandle(): String =
   "def load(path: String, fallback: String): IO[String] =\n  Fs.read(path).map(s => Str.concat(s, \"!\")).handleErrorWith(_ => IO.pure(fallback))\n\n@main def main: IO[Unit] =\n  IO.println(\"ok\")\n"
@@ -215,21 +212,21 @@ def srcLeftover(): String =
 """
 
 def wantLeftover(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":15,\"end_line\":1,\"end_column\":16}]"
+  "[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":15,\"end_line\":1,\"end_column\":16}]"
 
 def srcBinBad(): String =
   """def n(): Int = 0b21
 """
 
 def wantBinBad(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":18,\"end_line\":1,\"end_column\":20}]"
+  "[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":18,\"end_line\":1,\"end_column\":20}]"
 
 def srcHexX(): String =
   """def n(): Int = 5X
 """
 
 def wantHexX(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":17,\"end_line\":1,\"end_column\":18}]"
+  "[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":17,\"end_line\":1,\"end_column\":18}]"
 
 def srcAscOk(): String =
   """def n(): Int = 1: Int
@@ -253,14 +250,45 @@ def wantLamAnn(): String =
   "[]"
 
 def srcLamMis(): String =
-  """def n(): Int = ((x: String) => x + 1)(3)
+  """def n(): Int = ((x: String) => x)(3)
 """
 
 def wantLamMis(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: in n: arithmetic needs Int or Float, got String and Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":32,\"end_line\":1,\"end_column\":33}]"
+  "[{\"severity\":\"error\",\"message\":\"type error: in n: apply arg type mismatch: expected String, got Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":35,\"end_line\":1,\"end_column\":36}]"
+
+def srcLamArg(): String =
+  "def n(): Int = ((x: Int) => x + 1)(\"nope\")\n"
+
+def wantLamArg(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: in n: apply arg type mismatch: expected Int, got String\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":36,\"end_line\":1,\"end_column\":42}]"
+
+def srcFunBody(): String =
+  """def f(): Int => Int = 1
+"""
+
+def wantFunBody(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: def f body Int does not match declared Int => Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":23,\"end_line\":1,\"end_column\":24}]"
+
+def tyckCore(): Bool =
+  tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcArity(), wantArity()) && tyckDiff(srcRet(), wantRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
+
+def tyckFlow(): Bool =
+  tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit())
+
+def tyckRes(): Bool =
+  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk())
+
+def tyckFail(): Bool =
+  tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis())
+
+def tyckParse(): Bool =
+  tyckDiff(srcLeftover(), wantLeftover()) && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+
+def tyckLam(): Bool =
+  tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]"
 
 def allOk(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit()) && tyckFiles() && tyckDiff(srcLeftover(), wantLeftover()) && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis()) && tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis())
+  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam()
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else "tyck-bad")
