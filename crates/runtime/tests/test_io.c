@@ -3357,6 +3357,20 @@ int main(void) {
       sz_error_free(r.error);
       sz_deferred_free(d3);
     }
+    {
+      size_t kb0 = 0, kc0 = 0, kb1 = 0, kc1 = 0;
+      SzDeferred *dc;
+      sz_alloc_kind_stats(SZ_RC_DEFERRED, &kb0, &kc0);
+      dc = sz_deferred_make();
+      r = sz_io_unsafe_run(fm_drop(
+          fork_drop(sz_deferred_get(dc)), fiber_interrupt_then_join, NULL));
+      assert(r.ok);
+      sz_deferred_free(dc);
+      sz_alloc_kind_stats(SZ_RC_DEFERRED, &kb1, &kc1);
+      assert(kc1 == kc0);
+      (void)kb0;
+      (void)kb1;
+    }
     sz_deferred_free(def);
   }
 
@@ -6744,6 +6758,24 @@ int main(void) {
       assert(p);
       assert(strcmp(sz_string_cstr((SzString *)p->left), "go") == 0);
       sz_pair_free(p);
+    }
+    sz_deferred_free(def);
+
+    /* Two parked gets both wake. Oldest waiter is first in the list. */
+    def = sz_deferred_make();
+    r = sz_io_unsafe_run(both_drop(
+        both_drop(sz_deferred_get(def), sz_deferred_get(def)),
+        sz_deferred_complete_cstr(def, "go")));
+    assert(r.ok);
+    {
+      SzPair *outer = (SzPair *)r.value;
+      SzPair *gets;
+      assert(outer);
+      gets = (SzPair *)outer->left;
+      assert(gets);
+      assert(strcmp(sz_string_cstr((SzString *)gets->left), "go") == 0);
+      assert(strcmp(sz_string_cstr((SzString *)gets->right), "go") == 0);
+      sz_pair_free(outer);
     }
     sz_deferred_free(def);
 
