@@ -54,34 +54,40 @@ static locale_t json_c_locale(void) {
 
 static double json_strtod(const char *s, char **end) {
   locale_t loc = json_c_locale();
+  if (!loc) {
+    if (end)
+      *end = (char *)s;
+    return 0.0;
+  }
 #ifdef __APPLE__
-  if (loc)
-    return strtod_l(s, end, loc);
+  return strtod_l(s, end, loc);
 #else
-  if (loc) {
+  {
     locale_t old = uselocale(loc);
     double x = strtod(s, end);
     uselocale(old);
     return x;
   }
 #endif
-  return strtod(s, end);
 }
 
 static int json_fmt_double(char *tmp, size_t n, double x) {
   locale_t loc = json_c_locale();
+  if (!loc) {
+    if (n)
+      tmp[0] = '\0';
+    return -1;
+  }
 #ifdef __APPLE__
-  if (loc)
-    return snprintf_l(tmp, n, loc, "%.17g", x);
+  return snprintf_l(tmp, n, loc, "%.17g", x);
 #else
-  if (loc) {
+  {
     locale_t old = uselocale(loc);
     int r = snprintf(tmp, n, "%.17g", x);
     uselocale(old);
     return r;
   }
 #endif
-  return snprintf(tmp, n, "%.17g", x);
 }
 
 static void *box_f64(double x) {
@@ -518,6 +524,8 @@ static SzAdt *jp_value(Jp *p) {
 SzAdt *sz_json_parse(SzString *s) {
   Jp p;
   SzAdt *v;
+  if (!json_c_locale())
+    return result_err("C locale");
   if (!s)
     return result_err("Json.parse(null)");
   p.s = sz_string_cstr(s);
@@ -682,6 +690,8 @@ static void jb_value(Jb *b, const SzAdt *j) {
 SzAdt *sz_json_stringify(SzAdt *j) {
   Jb b;
   SzString *s;
+  if (!json_c_locale())
+    return result_err("C locale");
   if (!j)
     return result_err("Json.stringify(null)");
   memset(&b, 0, sizeof b);
