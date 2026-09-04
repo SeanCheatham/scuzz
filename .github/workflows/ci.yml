@@ -466,15 +466,16 @@ jobs:
           grep -q "needs formatting" /tmp/fmt-check.err
           "$SCUZZ" build examples/kernel
           "$SCUZZ" build examples/kernel 2>&1 | tee /tmp/incr.out
-          grep -q "up-to-date" /tmp/incr.out
+          if grep -q "^ok$" /tmp/incr.out; then echo "fingerprint hit should not rebuild" && exit 1; fi
+          test -x examples/kernel/build/kernel
           # Path-dep invalidation: a change in a dependency source must rebuild the root.
           "$SCUZZ" build --full examples/counter
           "$SCUZZ" build examples/counter 2>&1 | tee /tmp/counter-incr.out
-          grep -q "up-to-date" /tmp/counter-incr.out
+          if grep -q "^ok$" /tmp/counter-incr.out; then echo "fingerprint hit should not rebuild" && exit 1; fi
           cp examples/shared/src/Shared.scuzz /tmp/shared-orig.scuzz
           printf 'def counterTitle(): String =\n  "Counter"\n\ndef countLabel(n: Int): String =\n  s"count = $n!"\n' > examples/shared/src/Shared.scuzz
           "$SCUZZ" build examples/counter 2>&1 | tee /tmp/counter-inval.out
-          if grep -q "up-to-date" /tmp/counter-inval.out; then echo "dependency edit should invalidate fingerprint" && exit 1; fi
+          if ! grep -q "^ok$" /tmp/counter-inval.out; then echo "dependency edit should invalidate fingerprint" && exit 1; fi
           cp /tmp/shared-orig.scuzz examples/shared/src/Shared.scuzz
           "$SCUZZ" build --full examples/counter
 

@@ -88,6 +88,102 @@ For more information, try '--help'.
 def missCmd(): String =
   Help.helpRoot()
 
+def extraArg(a: String, usage: String): String =
+  Str.concat("error: unexpected argument '", Str.concat(a, Str.concat("""' found
+
+Usage: """, Str.concat(usage, """
+
+For more information, try '--help'.
+"""))))
+
+def badInt(name: String, v: String): String =
+  Str.concat("error: invalid value '", Str.concat(v, Str.concat("' for '", Str.concat(name, """'
+
+For more information, try '--help'.
+"""))))
+
+def relateOnly(): String =
+  """error: --relate does not accept --iterations, --seed, --replay, --oracles, or --no-fail-fast
+
+Usage: scuzz fuzz [OPTIONS] [PATH]
+
+For more information, try '--help'.
+"""
+
+def badName(name: String): String =
+  Str.concat("error: invalid project name '", Str.concat(name, """'; use [A-Za-z_][A-Za-z0-9_]*
+
+For more information, try '--help'.
+"""))
+
+def missIde(): String =
+  "scuzz ide: editor package not found (set SCUZZ_IDE, or SCUZZ_HOME/ide, or run from a checkout with examples/editor)"
+
+def existNew(dir: String): String =
+  Str.concat("scuzz new: ", Str.concat(Drive.joinSlash(dir, "scuzz.toml"), " already exists"))
+
+def orDot(path: String): String =
+  if (path == "") "." else path
+
+def isDigits(s: String): Bool =
+  s != "" && Manifest.allDigits(s, 0)
+
+def parseFlagNat(s: String): (Bool, Int) =
+  if (!isDigits(s)) (false, 0) else parseFlagNatGot(s, Str.toInt(s, 0))
+
+def parseFlagNatGot(s: String, n: Int): (Bool, Int) =
+  if (Str.fromInt(n) != s) (false, 0) else (true, n)
+
+def parseFlagInt(s: String): (Bool, Int) =
+  if (s == "") (false, 0) else if (Str.charAt(s, 0) == 45) parseFlagNeg(s) else parseFlagNat(s)
+
+def parseFlagNeg(s: String): (Bool, Int) =
+  if (Str.len(s) < 2) (false, 0) else parseFlagNegRest(s, Str.slice(s, 1, Str.len(s)))
+
+def parseFlagNegRest(s: String, rest: String): (Bool, Int) =
+  if (!isDigits(rest)) (false, 0) else parseFlagNegGot(s, Str.toInt(s, 0))
+
+def parseFlagNegGot(s: String, n: Int): (Bool, Int) =
+  if (Str.fromInt(n) != s) (false, 0) else (true, n)
+
+def showFlagNat(s: String): String =
+  showFlagGot(parseFlagNat(s))
+
+def showFlagInt(s: String): String =
+  showFlagGot(parseFlagInt(s))
+
+def showFlagGot(p: (Bool, Int)): String =
+  p match {
+    case (ok, n) => if (!ok) "fail" else Str.fromInt(n)
+  }
+
+def resolveIdeDir(ideEnv: String, homeIde: String, checkout: String): String =
+  if (ideEnv != "") ideEnv else if (homeIde != "") homeIde else checkout
+
+def shQuote(s: String): String =
+  Str.concat("'", Str.concat(Str.replace(s, "'", "'\\''"), "'"))
+
+def runExtra(path: String): String =
+  Str.concat(" ", shQuote(orDot(path)))
+
+def okPkgName(s: String): Bool =
+  s != "" && okNameStart(Str.charAt(s, 0)) && okNameRest(s, 1)
+
+def okNameStart(c: Int): Bool =
+  c >= 65 && c <= 90 || c >= 97 && c <= 122 || c == 95
+
+def okNameRest(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) true else okNameChar(Str.charAt(s, i)) && okNameRest(s, i + 1)
+
+def okNameChar(c: Int): Bool =
+  okNameStart(c) || c >= 48 && c <= 57
+
+def fuzzHasCamp(args: List[String], i: Int): Bool =
+  if (i >= List.len(args)) false else fuzzCampTok(arg(args, i)) || fuzzHasCamp(args, i + 1)
+
+def fuzzCampTok(a: String): Bool =
+  a == "--oracles" || a == "--no-fail-fast" || a == "--iterations" || flagPref(a, "--iterations") || a == "--seed" || flagPref(a, "--seed") || a == "--replay" || flagPref(a, "--replay")
+
 def flagPref(a: String, name: String): Bool =
   Str.startsWith(a, Str.concat(name, "="))
 
@@ -162,13 +258,13 @@ def parseHelp(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Help(""), json) else if (isCmd(arg(args, i)) || arg(args, i) == "") gateJson(Cmd.Help(arg(args, i)), json) else gateJson(Cmd.Fail(unrec(arg(args, i))), json)
 
 def parseCmd(args: List[String], cmd: String, i: Int, json: Bool): Cmd =
-  if (cmd == "fmt") parseFmt(args, i, json, ".", false) else if (cmd == "check") parseCheck(args, i, json, ".") else if (cmd == "build") parseBuild(args, i, json, ".", "build", false, false) else if (cmd == "run") parseRun(args, i, json, ".", "build", false, false, "", "") else if (cmd == "watch") parseWatch(args, i, json, ".", "build") else if (cmd == "test") parseTest(args, i, json, ".", false, false, false) else if (cmd == "lsp") parseLsp(args, i, json, ".") else if (cmd == "fuzz") parseFuzz(args, i, json, ".", 32, 42, "", false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, ".", "build", false) else parsePkg(args, i, json, ".", "build", "host")
+  if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "test") parseTest(args, i, json, "", false, false, false) else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else parsePkg(args, i, json, "", "build", "host")
 
 def parseFmt(args: List[String], i: Int, json: Bool, path: String, check: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Fmt(path, check), json) else parseFmtTok(args, i, json, path, check, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Fmt(orDot(path), check), json) else parseFmtTok(args, i, json, path, check, arg(args, i))
 
 def parseFmtTok(args: List[String], i: Int, json: Bool, path: String, check: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("fmt"), json) else if (a == "--check") parseFmt(args, i + 1, json, path, true) else if (a == "--message-format" || flagPref(a, "--message-format")) parseFmtMsg(takeVal(args, i, "--message-format"), args, path, check) else if (a == "--") parseFmtPos(args, i + 1, json, path, check) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz fmt [OPTIONS] [PATH]")) else parseFmt(args, i + 1, json, a, check)
+  if (isHelp(a)) gateJson(Cmd.Help("fmt"), json) else if (a == "--check") parseFmt(args, i + 1, json, path, true) else if (a == "--message-format" || flagPref(a, "--message-format")) parseFmtMsg(takeVal(args, i, "--message-format"), args, path, check) else if (a == "--") parseFmtPos(args, i + 1, json, path, check) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz fmt [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz fmt [OPTIONS] [PATH]")) else parseFmt(args, i + 1, json, a, check)
 
 def parseFmtMsg(p: (String, Int), args: List[String], path: String, check: Bool): Cmd =
   p match {
@@ -176,13 +272,13 @@ def parseFmtMsg(p: (String, Int), args: List[String], path: String, check: Bool)
   }
 
 def parseFmtPos(args: List[String], i: Int, json: Bool, path: String, check: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Fmt(path, check), json) else parseFmt(args, i + 1, json, arg(args, i), check)
+  if (i >= List.len(args)) gateJson(Cmd.Fmt(orDot(path), check), json) else if (path != "") Cmd.Fail(extraArg(arg(args, i), "scuzz fmt [OPTIONS] [PATH]")) else parseFmt(args, i + 1, json, arg(args, i), check)
 
 def parseCheck(args: List[String], i: Int, json: Bool, path: String): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Check(path, json), json) else parseCheckTok(args, i, json, path, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Check(orDot(path), json), json) else parseCheckTok(args, i, json, path, arg(args, i))
 
 def parseCheckTok(args: List[String], i: Int, json: Bool, path: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("check"), json) else if (a == "--message-format" || flagPref(a, "--message-format")) parseCheckMsg(takeVal(args, i, "--message-format"), args, path) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz check [OPTIONS] [PATH]")) else parseCheck(args, i + 1, json, a)
+  if (isHelp(a)) gateJson(Cmd.Help("check"), json) else if (a == "--message-format" || flagPref(a, "--message-format")) parseCheckMsg(takeVal(args, i, "--message-format"), args, path) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz check [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz check [OPTIONS] [PATH]")) else parseCheck(args, i + 1, json, a)
 
 def parseCheckMsg(p: (String, Int), args: List[String], path: String): Cmd =
   p match {
@@ -190,10 +286,10 @@ def parseCheckMsg(p: (String, Int), args: List[String], path: String): Cmd =
   }
 
 def parseBuild(args: List[String], i: Int, json: Bool, path: String, outDir: String, full: Bool, verify: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Build(path, outDir, full, verify), json) else parseBuildTok(args, i, json, path, outDir, full, verify, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Build(orDot(path), outDir, full, verify), json) else parseBuildTok(args, i, json, path, outDir, full, verify, arg(args, i))
 
 def parseBuildTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, full: Bool, verify: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("build"), json) else if (a == "--full") parseBuild(args, i + 1, json, path, outDir, true, verify) else if (a == "--verify") parseBuild(args, i + 1, json, path, outDir, full, true) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseBuildOut(takeVal(args, i, "--out-dir"), args, json, path, full, verify) else if (a == "--message-format" || flagPref(a, "--message-format")) parseBuildMsg(takeVal(args, i, "--message-format"), args, path, outDir, full, verify) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz build [OPTIONS] [PATH]")) else parseBuild(args, i + 1, json, a, outDir, full, verify)
+  if (isHelp(a)) gateJson(Cmd.Help("build"), json) else if (a == "--full") parseBuild(args, i + 1, json, path, outDir, true, verify) else if (a == "--verify") parseBuild(args, i + 1, json, path, outDir, full, true) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseBuildOut(takeVal(args, i, "--out-dir"), args, json, path, full, verify) else if (a == "--message-format" || flagPref(a, "--message-format")) parseBuildMsg(takeVal(args, i, "--message-format"), args, path, outDir, full, verify) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz build [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz build [OPTIONS] [PATH]")) else parseBuild(args, i + 1, json, a, outDir, full, verify)
 
 def parseBuildOut(p: (String, Int), args: List[String], json: Bool, path: String, full: Bool, verify: Bool): Cmd =
   p match {
@@ -206,10 +302,10 @@ def parseBuildMsg(p: (String, Int), args: List[String], path: String, outDir: St
   }
 
 def parseRun(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Run(path, outDir, headless, watch, script, dump), json) else parseRunTok(args, i, json, path, outDir, headless, watch, script, dump, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Run(orDot(path), outDir, headless, watch, script, dump), json) else parseRunTok(args, i, json, path, outDir, headless, watch, script, dump, arg(args, i))
 
 def parseRunTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("run"), json) else if (a == "--headless") parseRun(args, i + 1, json, path, outDir, true, watch, script, dump) else if (a == "--watch") parseRun(args, i + 1, json, path, outDir, headless, true, script, dump) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseRunOut(takeVal(args, i, "--out-dir"), args, json, path, headless, watch, script, dump) else if (a == "--script" || flagPref(a, "--script")) parseRunScript(takeVal(args, i, "--script"), args, json, path, outDir, headless, watch, dump) else if (a == "--dump" || flagPref(a, "--dump")) parseRunDump(takeVal(args, i, "--dump"), args, json, path, outDir, headless, watch, script) else if (a == "--message-format" || flagPref(a, "--message-format")) parseRunMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless, watch, script, dump) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz run [OPTIONS] [PATH]")) else parseRun(args, i + 1, json, a, outDir, headless, watch, script, dump)
+  if (isHelp(a)) gateJson(Cmd.Help("run"), json) else if (a == "--headless") parseRun(args, i + 1, json, path, outDir, true, watch, script, dump) else if (a == "--watch") parseRun(args, i + 1, json, path, outDir, headless, true, script, dump) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseRunOut(takeVal(args, i, "--out-dir"), args, json, path, headless, watch, script, dump) else if (a == "--script" || flagPref(a, "--script")) parseRunScript(takeVal(args, i, "--script"), args, json, path, outDir, headless, watch, dump) else if (a == "--dump" || flagPref(a, "--dump")) parseRunDump(takeVal(args, i, "--dump"), args, json, path, outDir, headless, watch, script) else if (a == "--message-format" || flagPref(a, "--message-format")) parseRunMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless, watch, script, dump) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz run [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz run [OPTIONS] [PATH]")) else parseRun(args, i + 1, json, a, outDir, headless, watch, script, dump)
 
 def parseRunOut(p: (String, Int), args: List[String], json: Bool, path: String, headless: Bool, watch: Bool, script: String, dump: String): Cmd =
   p match {
@@ -232,10 +328,10 @@ def parseRunMsg(p: (String, Int), args: List[String], path: String, outDir: Stri
   }
 
 def parseWatch(args: List[String], i: Int, json: Bool, path: String, outDir: String): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Watch(path, outDir), json) else parseWatchTok(args, i, json, path, outDir, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Watch(orDot(path), outDir), json) else parseWatchTok(args, i, json, path, outDir, arg(args, i))
 
 def parseWatchTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("watch"), json) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseWatchOut(takeVal(args, i, "--out-dir"), args, json, path) else if (a == "--message-format" || flagPref(a, "--message-format")) parseWatchMsg(takeVal(args, i, "--message-format"), args, path, outDir) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz watch [OPTIONS] [PATH]")) else parseWatch(args, i + 1, json, a, outDir)
+  if (isHelp(a)) gateJson(Cmd.Help("watch"), json) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseWatchOut(takeVal(args, i, "--out-dir"), args, json, path) else if (a == "--message-format" || flagPref(a, "--message-format")) parseWatchMsg(takeVal(args, i, "--message-format"), args, path, outDir) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz watch [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz watch [OPTIONS] [PATH]")) else parseWatch(args, i + 1, json, a, outDir)
 
 def parseWatchOut(p: (String, Int), args: List[String], json: Bool, path: String): Cmd =
   p match {
@@ -248,10 +344,10 @@ def parseWatchMsg(p: (String, Int), args: List[String], path: String, outDir: St
   }
 
 def parseTest(args: List[String], i: Int, json: Bool, path: String, update: Bool, pixels: Bool, differential: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Test(path, update, pixels, differential), json) else parseTestTok(args, i, json, path, update, pixels, differential, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Test(orDot(path), update, pixels, differential), json) else parseTestTok(args, i, json, path, update, pixels, differential, arg(args, i))
 
 def parseTestTok(args: List[String], i: Int, json: Bool, path: String, update: Bool, pixels: Bool, differential: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("test"), json) else if (a == "--update") parseTest(args, i + 1, json, path, true, pixels, differential) else if (a == "--pixels") parseTest(args, i + 1, json, path, update, true, differential) else if (a == "--differential") parseTest(args, i + 1, json, path, update, pixels, true) else if (a == "--message-format" || flagPref(a, "--message-format")) parseTestMsg(takeVal(args, i, "--message-format"), args, path, update, pixels, differential) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz test [OPTIONS] [PATH]")) else parseTest(args, i + 1, json, a, update, pixels, differential)
+  if (isHelp(a)) gateJson(Cmd.Help("test"), json) else if (a == "--update") parseTest(args, i + 1, json, path, true, pixels, differential) else if (a == "--pixels") parseTest(args, i + 1, json, path, update, true, differential) else if (a == "--differential") parseTest(args, i + 1, json, path, update, pixels, true) else if (a == "--message-format" || flagPref(a, "--message-format")) parseTestMsg(takeVal(args, i, "--message-format"), args, path, update, pixels, differential) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz test [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz test [OPTIONS] [PATH]")) else parseTest(args, i + 1, json, a, update, pixels, differential)
 
 def parseTestMsg(p: (String, Int), args: List[String], path: String, update: Bool, pixels: Bool, differential: Bool): Cmd =
   p match {
@@ -259,25 +355,38 @@ def parseTestMsg(p: (String, Int), args: List[String], path: String, update: Boo
   }
 
 def parseLsp(args: List[String], i: Int, json: Bool, path: String): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Lsp(path), json) else parseLspTok(args, i, json, path, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Lsp(orDot(path)), json) else parseLspTok(args, i, json, path, arg(args, i))
 
 def parseLspTok(args: List[String], i: Int, json: Bool, path: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("lsp"), json) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz lsp [OPTIONS] [PATH]")) else parseLsp(args, i + 1, json, a)
+  if (isHelp(a)) gateJson(Cmd.Help("lsp"), json) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz lsp [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz lsp [OPTIONS] [PATH]")) else parseLsp(args, i + 1, json, a)
 
 def parseFuzz(args: List[String], i: Int, json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Fuzz(path, iterations, seed, replay, oracles, noFailFast, relate), json) else parseFuzzTok(args, i, json, path, iterations, seed, replay, oracles, noFailFast, relate, arg(args, i))
+  if (i >= List.len(args)) fuzzDone(args, json, path, iterations, seed, replay, oracles, noFailFast, relate) else parseFuzzTok(args, i, json, path, iterations, seed, replay, oracles, noFailFast, relate, arg(args, i))
+
+def fuzzDone(args: List[String], json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+  if (relate && fuzzHasCamp(args, 0)) Cmd.Fail(relateOnly()) else gateJson(Cmd.Fuzz(orDot(path), iterations, seed, replay, oracles, noFailFast, relate), json)
 
 def parseFuzzTok(args: List[String], i: Int, json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("fuzz"), json) else if (a == "--oracles") parseFuzz(args, i + 1, json, path, iterations, seed, replay, true, noFailFast, relate) else if (a == "--no-fail-fast") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, true, relate) else if (a == "--relate") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, noFailFast, true) else if (a == "--iterations" || flagPref(a, "--iterations")) parseFuzzIter(takeVal(args, i, "--iterations"), args, json, path, seed, replay, oracles, noFailFast, relate) else if (a == "--seed" || flagPref(a, "--seed")) parseFuzzSeed(takeVal(args, i, "--seed"), args, json, path, iterations, replay, oracles, noFailFast, relate) else if (a == "--replay" || flagPref(a, "--replay")) parseFuzzReplay(takeVal(args, i, "--replay"), args, json, path, iterations, seed, oracles, noFailFast, relate) else if (a == "--message-format" || flagPref(a, "--message-format")) parseFuzzMsg(takeVal(args, i, "--message-format"), args, path, iterations, seed, replay, oracles, noFailFast, relate) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz fuzz [OPTIONS] [PATH]")) else parseFuzz(args, i + 1, json, a, iterations, seed, replay, oracles, noFailFast, relate)
+  if (isHelp(a)) gateJson(Cmd.Help("fuzz"), json) else if (a == "--oracles") parseFuzz(args, i + 1, json, path, iterations, seed, replay, true, noFailFast, relate) else if (a == "--no-fail-fast") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, true, relate) else if (a == "--relate") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, noFailFast, true) else if (a == "--iterations" || flagPref(a, "--iterations")) parseFuzzIter(takeVal(args, i, "--iterations"), args, json, path, seed, replay, oracles, noFailFast, relate) else if (a == "--seed" || flagPref(a, "--seed")) parseFuzzSeed(takeVal(args, i, "--seed"), args, json, path, iterations, replay, oracles, noFailFast, relate) else if (a == "--replay" || flagPref(a, "--replay")) parseFuzzReplay(takeVal(args, i, "--replay"), args, json, path, iterations, seed, oracles, noFailFast, relate) else if (a == "--message-format" || flagPref(a, "--message-format")) parseFuzzMsg(takeVal(args, i, "--message-format"), args, path, iterations, seed, replay, oracles, noFailFast, relate) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz fuzz [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz fuzz [OPTIONS] [PATH]")) else parseFuzz(args, i + 1, json, a, iterations, seed, replay, oracles, noFailFast, relate)
 
 def parseFuzzIter(p: (String, Int), args: List[String], json: Bool, path: String, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--iterations")) else parseFuzz(args, n, json, path, Str.toInt(v, 32), seed, replay, oracles, noFailFast, relate)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--iterations")) else parseFuzzIterGot(parseFlagNat(v), v, n, args, json, path, seed, replay, oracles, noFailFast, relate)
+  }
+
+def parseFuzzIterGot(p: (Bool, Int), v: String, n: Int, args: List[String], json: Bool, path: String, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+  p match {
+    case (ok, it) => if (!ok) Cmd.Fail(badInt("--iterations", v)) else parseFuzz(args, n, json, path, it, seed, replay, oracles, noFailFast, relate)
   }
 
 def parseFuzzSeed(p: (String, Int), args: List[String], json: Bool, path: String, iterations: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--seed")) else parseFuzz(args, n, json, path, iterations, Str.toInt(v, 42), replay, oracles, noFailFast, relate)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--seed")) else parseFuzzSeedGot(parseFlagInt(v), v, n, args, json, path, iterations, replay, oracles, noFailFast, relate)
+  }
+
+def parseFuzzSeedGot(p: (Bool, Int), v: String, n: Int, args: List[String], json: Bool, path: String, iterations: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+  p match {
+    case (ok, seed) => if (!ok) Cmd.Fail(badInt("--seed", v)) else parseFuzz(args, n, json, path, iterations, seed, replay, oracles, noFailFast, relate)
   }
 
 def parseFuzzReplay(p: (String, Int), args: List[String], json: Bool, path: String, iterations: Int, seed: Int, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
@@ -291,10 +400,13 @@ def parseFuzzMsg(p: (String, Int), args: List[String], path: String, iterations:
   }
 
 def parseNew(args: List[String], i: Int, json: Bool, name: String, path: String, ui: Bool): Cmd =
-  if (i >= List.len(args)) if (name == "") Cmd.Fail(missName()) else gateJson(Cmd.New(name, path, ui), json) else parseNewTok(args, i, json, name, path, ui, arg(args, i))
+  if (i >= List.len(args)) newDone(json, name, path, ui) else parseNewTok(args, i, json, name, path, ui, arg(args, i))
+
+def newDone(json: Bool, name: String, path: String, ui: Bool): Cmd =
+  if (name == "") Cmd.Fail(missName()) else if (!okPkgName(name)) Cmd.Fail(badName(name)) else gateJson(Cmd.New(name, path, ui), json)
 
 def parseNewTok(args: List[String], i: Int, json: Bool, name: String, path: String, ui: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("new"), json) else if (a == "--ui") parseNew(args, i + 1, json, name, path, true) else if (a == "--path" || flagPref(a, "--path")) parseNewPath(takeVal(args, i, "--path"), args, json, name, ui) else if (a == "--message-format" || flagPref(a, "--message-format")) parseNewMsg(takeVal(args, i, "--message-format"), args, name, path, ui) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz new [OPTIONS] <NAME>")) else parseNew(args, i + 1, json, a, path, ui)
+  if (isHelp(a)) gateJson(Cmd.Help("new"), json) else if (a == "--ui") parseNew(args, i + 1, json, name, path, true) else if (a == "--path" || flagPref(a, "--path")) parseNewPath(takeVal(args, i, "--path"), args, json, name, ui) else if (a == "--message-format" || flagPref(a, "--message-format")) parseNewMsg(takeVal(args, i, "--message-format"), args, name, path, ui) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz new [OPTIONS] <NAME>")) else if (name != "") Cmd.Fail(extraArg(a, "scuzz new [OPTIONS] <NAME>")) else parseNew(args, i + 1, json, a, path, ui)
 
 def parseNewPath(p: (String, Int), args: List[String], json: Bool, name: String, ui: Bool): Cmd =
   p match {
@@ -307,10 +419,10 @@ def parseNewMsg(p: (String, Int), args: List[String], name: String, path: String
   }
 
 def parseIde(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Ide(path, outDir, headless), json) else parseIdeTok(args, i, json, path, outDir, headless, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Ide(orDot(path), outDir, headless), json) else parseIdeTok(args, i, json, path, outDir, headless, arg(args, i))
 
 def parseIdeTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--headless") parseIde(args, i + 1, json, path, outDir, true) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, headless) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, headless)
+  if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--headless") parseIde(args, i + 1, json, path, outDir, true) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, headless) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, headless)
 
 def parseIdeOut(p: (String, Int), args: List[String], json: Bool, path: String, headless: Bool): Cmd =
   p match {
@@ -323,10 +435,10 @@ def parseIdeMsg(p: (String, Int), args: List[String], path: String, outDir: Stri
   }
 
 def parsePkg(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Package(path, outDir, target), json) else parsePkgTok(args, i, json, path, outDir, target, arg(args, i))
+  if (i >= List.len(args)) gateJson(Cmd.Package(orDot(path), outDir, target), json) else parsePkgTok(args, i, json, path, outDir, target, arg(args, i))
 
 def parsePkgTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("package"), json) else if (a == "--target" || flagPref(a, "--target")) parsePkgTarget(takeVal(args, i, "--target"), args, json, path, outDir) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parsePkgOut(takeVal(args, i, "--out-dir"), args, json, path, target) else if (a == "--message-format" || flagPref(a, "--message-format")) parsePkgMsg(takeVal(args, i, "--message-format"), args, path, outDir, target) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz package [OPTIONS] [PATH]")) else parsePkg(args, i + 1, json, a, outDir, target)
+  if (isHelp(a)) gateJson(Cmd.Help("package"), json) else if (a == "--target" || flagPref(a, "--target")) parsePkgTarget(takeVal(args, i, "--target"), args, json, path, outDir) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parsePkgOut(takeVal(args, i, "--out-dir"), args, json, path, target) else if (a == "--message-format" || flagPref(a, "--message-format")) parsePkgMsg(takeVal(args, i, "--message-format"), args, path, outDir, target) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz package [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz package [OPTIONS] [PATH]")) else parsePkg(args, i + 1, json, a, outDir, target)
 
 def parsePkgTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String): Cmd =
   p match {
@@ -371,7 +483,7 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Lsp(path) => Lsp.run(path)
     case Cmd.Help(t) => IO.println(helpOf(t))
     case Cmd.Version => IO.println(Version.banner())
-    case Cmd.Fail(m) => IO.println(m)
+    case Cmd.Fail(m) => IO.println(m).flatMap(_ => IO.fail("scuzz"))
   }
 
 def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
@@ -383,8 +495,17 @@ def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool,
 def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool): IO[Unit] =
   if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast, oracles)
 
-def dispatchIde(_path: String, outDir: String, headless: Bool): IO[Unit] =
-  dispatchRun("examples/editor", outDir, headless, "", "")
+def dispatchIde(path: String, outDir: String, headless: Bool): IO[Unit] =
+  Sys.getenv("SCUZZ_IDE").flatMap(ide => Sys.getenv("SCUZZ_HOME").flatMap(home => dispatchIdeEnv(path, outDir, headless, ide, home)))
+
+def dispatchIdeEnv(path: String, outDir: String, headless: Bool, ide: String, home: String): IO[Unit] =
+  homeIdeOf(home).flatMap(homeIde => Fs.exists("examples/editor/scuzz.toml").flatMap(co => dispatchIdeGot(path, outDir, headless, resolveIdeDir(ide, homeIde, if (co != 0) "examples/editor" else ""))))
+
+def homeIdeOf(home: String): IO[String] =
+  if (home == "") IO.pure("") else Fs.exists(Drive.joinSlash(Drive.joinSlash(home, "ide"), "scuzz.toml")).flatMap(hit => IO.pure(if (hit != 0) Drive.joinSlash(home, "ide") else ""))
+
+def dispatchIdeGot(path: String, outDir: String, headless: Bool, ideDir: String): IO[Unit] =
+  if (ideDir == "") IO.println(missIde()).flatMap(_ => IO.fail("scuzz")) else Fs.exists(Drive.joinSlash(ideDir, "scuzz.toml")).flatMap(hit => if (hit != 0) dispatchRun(ideDir, outDir, headless, "", "", runExtra(path)) else IO.println(missIde()).flatMap(_ => IO.fail("scuzz")))
 
 def dispatchBuild(path: String, outDir: String, full: Bool, verify: Bool): IO[Unit] =
   dispatchBuildOut(path, pkgOut(path, outDir), full, verify)
@@ -396,7 +517,7 @@ def dispatchBuildVerify(path: String, out: String): IO[Unit] =
   Drive.fuzzCollect(path).flatMap(files => Drive.emitDirAlways(path, out, files))
 
 def dispatchRunCmd(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String): IO[Unit] =
-  if (watch && (script != "" || dump != "")) IO.println("scuzz run --watch does not accept --script or --dump. Run without --watch: scuzz run --headless --script PATH --dump PATH") else if (watch) dispatchRunWatch(path, outDir, headless) else dispatchRun(path, outDir, headless, script, dump)
+  if (watch && (script != "" || dump != "")) IO.println("scuzz run --watch does not accept --script or --dump. Run without --watch: scuzz run --headless --script PATH --dump PATH") else if (watch) dispatchRunWatch(path, outDir, headless) else dispatchRun(path, outDir, headless, script, dump, "")
 
 def dispatchWatch(path: String, outDir: String): IO[Unit] =
   IO.println(Str.concat("scuzz watch ", Str.concat(path, " (rebuild on change; not hot reload)"))).flatMap(_ => watchBuild(path, pkgOut(path, outDir)))
@@ -417,7 +538,13 @@ def watchIoLoop(path: String, out: String, name: String): IO[Unit] =
   Sys.spawn(Drive.exeName(out, name)).flatMap(pid => watchIoPoll(path, out, name, pid))
 
 def watchIoPoll(path: String, out: String, name: String, pid: Int): IO[Unit] =
-  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => IO.sleep(400).flatMap(_ => watchIoTick(path, out, name, pid, old)))
+  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchIoTick(path, out, name, pid, old)))
+
+def watchIoDrain(pid: Int): IO[Unit] =
+  IO.timeout(400, Sys.childRead(pid, 4096)).flatMap(s => Sys.write(s).flatMap(_ => watchIoDrainMore(pid, s))).handleErrorWith(_ => IO.pure(()))
+
+def watchIoDrainMore(pid: Int, s: String): IO[Unit] =
+  if (Str.byteLen(s) < 4096) IO.pure(()) else IO.timeout(50, Sys.childRead(pid, 4096)).flatMap(t => Sys.write(t).flatMap(_ => watchIoDrainMore(pid, t))).handleErrorWith(_ => IO.pure(()))
 
 def watchIoTick(path: String, out: String, name: String, pid: Int, old: String): IO[Unit] =
   Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchIoTick2(path, out, name, pid, old, now)))
@@ -426,7 +553,13 @@ def watchIoTick2(path: String, out: String, name: String, pid: Int, old: String,
   Sys.alive(pid).flatMap(live => watchIoTick3(path, out, name, pid, old, now, live))
 
 def watchIoTick3(path: String, out: String, name: String, pid: Int, old: String, now: String, live: Int): IO[Unit] =
-  if (now != old) Sys.kill(pid).flatMap(_ => Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name))) else if (live == 0) IO.sleep(60000).flatMap(_ => watchIoLoop(path, out, name)) else watchIoPoll(path, out, name, pid)
+  if (now != old) Sys.kill(pid).flatMap(_ => Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name))) else if (live == 0) watchIoIdle(path, out, name) else watchIoPoll(path, out, name, pid)
+
+def watchIoIdle(path: String, out: String, name: String): IO[Unit] =
+  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => IO.sleep(400).flatMap(_ => Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchIoIdle2(path, out, name, old, now)))))
+
+def watchIoIdle2(path: String, out: String, name: String, old: String, now: String): IO[Unit] =
+  if (now != old) Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name)) else watchIoIdle(path, out, name)
 
 def watchUi(path: String, out: String, headless: Bool, name: String): IO[Unit] =
   IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (hot reload: recompiles build/reload.dylib then stamp-reloads View tree)"))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), """0
@@ -442,7 +575,7 @@ def watchUiEnv(out: String, headless: Bool): String =
   Str.concat(if (headless) Drive.snapEnv(out) else "", Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.joinSlash(out, "reload.stamp"), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.joinSlash(out, "reload.dylib"), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.joinSlash(out, "debug.dump"), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.joinSlash(out, "inject.script"), " ")))))))))
 
 def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
-  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => IO.sleep(400).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
+  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
 
 def watchUiTick(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String): IO[Unit] =
   Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, headless, name, gen, pid, old, now)))
@@ -457,17 +590,17 @@ def watchUiReload(path: String, out: String, headless: Bool, name: String, gen: 
   Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), Str.concat(Str.fromInt(gen), """
 """)).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, headless, name, gen, pid)))))
 
-def dispatchRun(path: String, outDir: String, headless: Bool, script: String, dump: String): IO[Unit] =
-  dispatchRunOut(path, pkgOut(path, outDir), headless, script, dump)
+def dispatchRun(path: String, outDir: String, headless: Bool, script: String, dump: String, extra: String): IO[Unit] =
+  dispatchRunOut(path, pkgOut(path, outDir), headless, script, dump, extra)
 
 def pkgOut(path: String, outDir: String): String =
   if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir)
 
-def dispatchRunOut(path: String, out: String, headless: Bool, script: String, dump: String): IO[Unit] =
-  Fs.mkdirs(out).flatMap(_ => Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => dispatchRunEnv(path, out, runEnvOf(out, headless, script, dump, toml))))
+def dispatchRunOut(path: String, out: String, headless: Bool, script: String, dump: String, extra: String): IO[Unit] =
+  Fs.mkdirs(out).flatMap(_ => Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => dispatchRunEnv(path, out, runEnvOf(out, headless, script, dump, toml), extra)))
 
-def dispatchRunEnv(path: String, out: String, env: String): IO[Unit] =
-  Drive.runDir(path, out, env)
+def dispatchRunEnv(path: String, out: String, env: String, extra: String): IO[Unit] =
+  Drive.runDir(path, out, env, extra)
 
 def runEnvOf(out: String, headless: Bool, script: String, dump: String, toml: String): String =
   Str.concat(if (headless) Drive.snapEnvOf(out, toml) else "", Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(script, " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " "))))
@@ -526,7 +659,7 @@ def dispatchNew(name: String, path: String, ui: Bool): IO[Unit] =
   dispatchNewDir(Drive.joinSlash(path, name), name, ui)
 
 def dispatchNewDir(dir: String, name: String, ui: Bool): IO[Unit] =
-  Fs.mkdirs(Drive.joinSlash(dir, "src")).flatMap(_ => writeNew(dir, name, ui))
+  Fs.exists(Drive.joinSlash(dir, "scuzz.toml")).flatMap(hit => if (hit != 0) IO.println(existNew(dir)).flatMap(_ => IO.fail("scuzz")) else Fs.mkdirs(Drive.joinSlash(dir, "src")).flatMap(_ => writeNew(dir, name, ui)))
 
 def writeNew(dir: String, name: String, ui: Bool): IO[Unit] =
   Fs.write(Drive.joinSlash(dir, "scuzz.toml"), if (ui) newTomlUi(name) else newTomlIo(name)).flatMap(_ => writeNewMain(dir, ui))

@@ -253,8 +253,8 @@ def emitDirHitArtMan(dir: String, outDir: String, files: List[(String, String)],
 def emitDirUp(outDir: String, toml: String): IO[Unit] =
   emitDirUpMan(outDir, Manifest.parse(toml))
 
-def emitDirUpMan(outDir: String, m: Man): IO[Unit] =
-  manNeed(m).flatMap(_ => IO.println(Str.concat("up-to-date ", exeName(outDir, m.name))))
+def emitDirUpMan(_outDir: String, m: Man): IO[Unit] =
+  manNeed(m)
 
 def emitDirFresh(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
   crateHome().flatMap(h => emitDirOut(compileFiles(toml, files, outDir, "clang", rtLib(h))).flatMap(ok => emitDirStored(dir, fp, ok)))
@@ -454,17 +454,17 @@ def emitDirOut(p: PkgOut): IO[Bool] =
 def emitDirWrite(ok: Bool, ll: String, llPath: String, diags: String): IO[Bool] =
   if (!ok) IO.println(Str.concat("fail:", diags)).flatMap(_ => IO.pure(false)) else Fs.write(llPath, ll).flatMap(_ => IO.println("ok").flatMap(_ => IO.pure(true)))
 
-def runDir(dir: String, outDir: String, runEnv: String): IO[Unit] =
-  emitDir(dir, outDir, false).flatMap(_ => linkRun(dir, outDir, runEnv))
+def runDir(dir: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
+  emitDir(dir, outDir, false).flatMap(_ => linkRun(dir, outDir, runEnv, extra))
 
-def linkRun(dir: String, outDir: String, runEnv: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir, runEnv))
+def linkRun(dir: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir, runEnv, extra))
 
-def linkRunMan(m: Man, outDir: String, runEnv: String): IO[Unit] =
-  manNeed(m).flatMap(_ => linkRunUi(m.hasUi, m.name, outDir, runEnv))
+def linkRunMan(m: Man, outDir: String, runEnv: String, extra: String): IO[Unit] =
+  manNeed(m).flatMap(_ => linkRunUi(m.hasUi, m.name, outDir, runEnv, extra))
 
-def linkRunUi(hasUi: Bool, name: String, outDir: String, runEnv: String): IO[Unit] =
-  if (hasUi) ensureUi().flatMap(_ => linkRunNamed(true, name, outDir, runEnv)) else linkRunNamed(false, name, outDir, runEnv)
+def linkRunUi(hasUi: Bool, name: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
+  if (hasUi) ensureUi().flatMap(_ => linkRunNamed(true, name, outDir, runEnv, extra)) else linkRunNamed(false, name, outDir, runEnv, extra)
 
 def ensureUi(): IO[Unit] =
   crateHome().flatMap(h => runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/ffi-skia"), " lib CC=clang"))).flatMap(r => ensureUiDesk(h, r)))
@@ -484,8 +484,8 @@ def ensureUiDone(r: (Int, String, String)): IO[Unit] =
     case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui")) else IO.pure(())
   }
 
-def linkRunNamed(hasUi: Bool, name: String, outDir: String, runEnv: String): IO[Unit] =
-  runLinkLine(hasUi, outDir, name).flatMap(r => afterClang(r, exeName(outDir, name), runEnv))
+def linkRunNamed(hasUi: Bool, name: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
+  runLinkLine(hasUi, outDir, name).flatMap(r => afterClang(r, exeName(outDir, name), runEnv, extra))
 
 def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
@@ -493,19 +493,19 @@ def runLine(cmd: String): IO[(Int, String, String)] =
 def runProbe(cmd: String): IO[(Int, String, String)] =
   runLine(Str.concat("timeout --kill-after=2s 20s env ", cmd))
 
-def afterClang(r: (Int, String, String), exe: String, runEnv: String): IO[Unit] =
+def afterClang(r: (Int, String, String), exe: String, runEnv: String, extra: String): IO[Unit] =
   r match {
-    case (code, out, err) => afterClang2(code, out, err, exe, runEnv)
+    case (code, out, err) => afterClang2(code, out, err, exe, runEnv, extra)
   }
 
-def afterClang2(code: Int, _out: String, err: String, exe: String, runEnv: String): IO[Unit] =
-  if (code != 0) afterClangFail(err) else afterClangRun(exe, runEnv)
+def afterClang2(code: Int, _out: String, err: String, exe: String, runEnv: String, extra: String): IO[Unit] =
+  if (code != 0) afterClangFail(err) else afterClangRun(exe, runEnv, extra)
 
 def afterClangFail(err: String): IO[Unit] =
   IO.println(err).flatMap(_ => IO.fail("link"))
 
-def afterClangRun(exe: String, runEnv: String): IO[Unit] =
-  runLine(Str.concat(runEnv, exe)).flatMap(r => afterRun(r))
+def afterClangRun(exe: String, runEnv: String, extra: String): IO[Unit] =
+  runLine(Str.concat(runEnv, Str.concat(exe, extra))).flatMap(r => afterRun(r))
 
 def afterRun(r: (Int, String, String)): IO[Unit] =
   r match {

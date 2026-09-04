@@ -294,6 +294,8 @@ Options:
 Examples:
   scuzz ide
   scuzz ide --headless .
+
+The CLI uses SCUZZ_IDE, else SCUZZ_HOME/ide when that package exists, else examples/editor. It passes PATH to the editor as Sys.args. There is no scuzz-ide binary.
 """
 
 def helpPkg(): String =
