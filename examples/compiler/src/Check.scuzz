@@ -339,23 +339,26 @@ def zipCheckHd(callee: String, w: String, want: List[String], args: List[Expr], 
   zipCheckArg(callee, w, want, List.at(args, 0), List.tail(args), env, funs, ens, span, acc)
 
 def zipCheckArg(callee: String, w: String, want: List[String], arg: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
-  if (List.isEmpty(args)) zipCheckLast(infer(stripNamed(arg), env, funs, ens), callee, w, span, acc) else zipCheck2(callee, w, infer(stripNamed(arg), env, funs, ens), want, args, env, funs, ens, span, acc)
+  zipCheckGo(callee, w, want, arg, args, env, funs, ens, span, acc, spanPick(exprSpan(env, stripNamed(arg)), span))
+
+def zipCheckGo(callee: String, w: String, want: List[String], arg: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
+  if (List.isEmpty(args)) zipCheckLast(infer(stripNamed(arg), env, funs, ens), callee, w, asp, acc) else zipCheck2(callee, w, infer(stripNamed(arg), env, funs, ens), want, args, env, funs, ens, span, acc, asp)
 
 def zipCheckLast(o: Out, callee: String, w: String, span: (String, Int), acc: String): Out =
   o match {
     case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else if (tyEq(ty, w) || w == "Any") ok(if (acc == "") ty else acc) else argMismatch(callee, w, ty, span)
   }
 
-def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
+def zipCheck2(callee: String, w: String, o: Out, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
   o match {
-    case Out(ty, err, sp) => zipCheckErr(callee, w, ty, err, sp, want, args, env, funs, ens, span, acc)
+    case Out(ty, err, sp) => zipCheckErr(callee, w, ty, err, sp, want, args, env, funs, ens, span, acc, asp)
   }
 
-def zipCheckErr(callee: String, w: String, ty: String, err: String, sp: (String, Int), want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
-  if (Str.len(err) > 0) Out(ty, err, sp) else zipCheckEq(callee, w, ty, want, args, env, funs, ens, span, acc)
+def zipCheckErr(callee: String, w: String, ty: String, err: String, sp: (String, Int), want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
+  if (Str.len(err) > 0) Out(ty, err, sp) else zipCheckEq(callee, w, ty, want, args, env, funs, ens, span, acc, asp)
 
-def zipCheckEq(callee: String, w: String, got: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String): Out =
-  if (tyEq(got, w) || w == "Any") zipCheck(callee, want, args, env, funs, ens, span, if (acc == "") got else acc) else argMismatch(callee, w, got, span)
+def zipCheckEq(callee: String, w: String, got: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
+  if (tyEq(got, w) || w == "Any") zipCheck(callee, want, args, env, funs, ens, span, if (acc == "") got else acc) else argMismatch(callee, w, got, asp)
 
 def argMismatch(callee: String, w: String, got: String, span: (String, Int)): Out =
   bad(argMismatchMsg(argMismatchWant(callee, w), got), span)
@@ -435,7 +438,7 @@ def checkKnownRet(f: String, o: Out, ret: String): Out =
   }
 
 def kitRetFromTy(f: String, ty: String, ret: String): String =
-  if (f == "List.head") kitRetOption(ty) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat" || f == "List.last" || f == "List.find" || f == "List.findLast") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") ioTy("Any", ty) else if (f == "IO.fail") ioTy(ty, "Any") else ret
+  if (f == "List.head") kitRetOption(ty) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat" || f == "List.last" || f == "List.find" || f == "List.findLast") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") ioTy("Any", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", Any]")) else ret
 
 def kitRetOption(ty: String): String =
   Str.concat("Option[", Str.concat(elemOf(ty), "]"))
@@ -472,7 +475,7 @@ def hasCase1(c: EnCase, rest: List[EnCase], ctor: String): Bool =
   }
 
 def isOpenKit(f: String): Bool =
-  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Float.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Timeline.") || Str.startsWith(f, "Verdict.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Deferred.") || Str.startsWith(f, "Stream.") || Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".")
+  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Float.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Timeline.") || Str.startsWith(f, "Verdict.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Deferred.") || Str.startsWith(f, "Stream.") || Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".") && f != ".apply"
 
 def anyParams(n: Int): List[String] =
   if (n <= 0) noStr() else "Any" :: anyParams(n - 1)
@@ -542,13 +545,10 @@ def resolveFunOrUser(f: String, args: List[Expr], env: List[(String, String)], f
   if (isFunTy(ty)) inferFunApply(ty, args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFunPrefer(funs, f, env))
 
 def inferFunApply(ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  inferFunApplyRet(funRetOf(ty), args, env, funs, ens, span)
+  if (List.isEmpty(args)) bad("apply expects 1 arg", span) else if (List.len(args) == 1) inferFunApply1(ty, infer(List.at(args, 0), env, funs, ens), spanPick(exprSpan(env, List.at(args, 0)), span)) else inferFunApply1(ty, inferTuple(args, env, funs, ens), span)
 
-def inferFunApplyRet(ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (List.len(args) == 1) inferFunApply1(ret, infer(List.at(args, 0), env, funs, ens), span) else if (List.isEmpty(args)) bad("apply expects 1 arg", span) else inferFunApply1(ret, firstArgErr(args, env, funs, ens), span)
-
-def inferFunApply1(ret: String, o: Out, _span: (String, Int)): Out =
-  if (hasErr(o)) o else ok(ret)
+def inferFunApply1(ty: String, o: Out, span: (String, Int)): Out =
+  if (hasErr(o)) o else if (tyEq(o.ty, funArgOf(ty))) ok(funRetOf(ty)) else argMismatch("apply", funArgOf(ty), o.ty, span)
 
 def elemOf(t: String): String =
   elemOf2(brackAt(t, 0), t)
@@ -579,11 +579,11 @@ def inferCall(f: String, args: List[Expr], env: List[(String, String)], funs: Li
   resolveCall(f, args, env, funs, ens, span)
 
 def inferPrint(inner: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  inferPrint2(infer(inner, env, funs, ens), env, e)
+  inferPrint2(infer(inner, env, funs, ens), env, inner, e)
 
-def inferPrint2(o: Out, env: List[(String, String)], e: Expr): Out =
+def inferPrint2(o: Out, env: List[(String, String)], inner: Expr, e: Expr): Out =
   o match {
-    case Out(ty, err, sp) => if (Str.len(err) > 0) o else if (ty == "String" || ty == "Any") ok("IO[Unit]") else bad(Str.concat("expected String, got ", ty), exprSpan(env, e))
+    case Out(ty, err, sp) => if (Str.len(err) > 0) o else if (ty == "String" || ty == "Any") ok("IO[Unit]") else bad(Str.concat("expected String, got ", ty), spanPick(exprSpan(env, inner), exprSpan(env, e)))
   }
 
 def inferBin(op: String, l: Expr, r: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
@@ -1011,7 +1011,13 @@ def caseFieldTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
   }
 
 def inferMethod(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else if (name == "handleErrorWith") inferHandle(recv, args, env, funs, ens, e) else if (name == "map") inferIoMap(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens, e)
+  if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else if (name == "handleErrorWith") inferHandle(recv, args, env, funs, ens, e) else if (name == "map") inferIoMap(recv, args, env, funs, ens, e) else if (name == "apply") inferApply(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens, e)
+
+def inferApply(recv: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  inferApply2(infer(recv, env, funs, ens), args, env, funs, ens, e)
+
+def inferApply2(o: Out, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(o)) o else if (isFunTy(o.ty) || o.ty == "Any") inferFunApply(o.ty, args, env, funs, ens, exprSpan(env, e)) else bad(Str.concat("apply needs a function, got ", o.ty), exprSpan(env, e))
 
 def inferMethod2(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   recv match {
@@ -1215,7 +1221,7 @@ def checkDefWrap(name: String, ret: String, body: Expr, o: Out, span: (String, I
   if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o, span)
 
 def checkDefGot(name: String, ret: String, body: Expr, o: Out, span: (String, Int)): Out =
-  if (hasErr(o)) o else if (tyEq(o.ty, ret) || funBodyEq(o.ty, ret)) o else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(o.ty, Str.concat(" does not match declared ", ret))))), spanPick(Parse.spanOf(body), span))
+  if (hasErr(o)) o else if (tyEq(o.ty, ret)) o else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(o.ty, Str.concat(" does not match declared ", ret))))), spanPick(Parse.spanOf(body), span))
 
 def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   a match {
@@ -1223,9 +1229,6 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   case (sb, _) => if (oa < 0) b else (if (sa == "") sb else sa, oa)
 }
   }
-
-def funBodyEq(got: String, ret: String): Bool =
-  isFunTy(ret) && tyEq(got, funRetOf(ret))
 
 def checkProg(p: Prog): Out =
   checkProgOwn(p, [])
@@ -1454,8 +1457,11 @@ def diagJson2(o: Out, file: String, loc: (Int, Int, Int, Int)): String =
     case (line, col, eline, ecol) => diagJson3(o, file, line, col, eline, ecol)
   }
 
+def errMsg(o: Out): String =
+  if (o.err == "unexpected token") o.err else Str.concat("type error: ", o.err)
+
 def diagJson3(o: Out, file: String, line: Int, col: Int, eline: Int, ecol: Int): String =
-  Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(Str.concat("type error: ", o.err)), Str.concat(",\"file\":", Str.concat(jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))))
+  Str.concat("{\"severity\":\"error\",\"message\":", Str.concat(jsonStr(errMsg(o)), Str.concat(",\"file\":", Str.concat(jsonStr(file), Str.concat(",\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"column\":", Str.concat(Str.fromInt(col), Str.concat(",\"end_line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"end_column\":", Str.concat(Str.fromInt(ecol), "}"))))))))))))
 
 def check(src: String): String =
   checkFiles(("Main", src) :: [])
@@ -1492,7 +1498,7 @@ def humanLine2(o: Out, file: String, loc: (Int, Int, Int, Int)): String =
   }
 
 def humanLine3(o: Out, file: String, line: Int, col: Int): String =
-  Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: type error: ", o.err))))))
+  Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: ", errMsg(o)))))))
 
 def human(src: String): String =
   humanFiles(("Main", src) :: [])
