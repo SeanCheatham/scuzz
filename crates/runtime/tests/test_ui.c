@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
@@ -1003,6 +1004,56 @@ static void test_session_inject_script(void) {
   remove(path);
 }
 
+static void test_session_inject_grows_past_4k(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn;
+  SzSignalInt *count;
+  const char *path = "/tmp/scuzz_ui_inject_4k.script";
+  FILE *f;
+  int i;
+
+  remove(path);
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  btn = sz_view_button("+", counter_tap, count);
+  sz_view_add_child(root, btn);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 0);
+
+  f = fopen(path, "w");
+  assert(f);
+  fputc('#', f);
+  for (i = 0; i < 4200; i++)
+    fputc('x', f);
+  fputc('\n', f);
+  fputs("tap 0\n", f);
+  fclose(f);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 1);
+
+  f = fopen(path, "a");
+  assert(f);
+  fputs("tap 0\n", f);
+  fclose(f);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 2);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  remove(path);
+}
+
 static void test_session_inject_control(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -1295,6 +1346,10 @@ static void test_session_inject_type(void) {
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
 
+  write_stamp(path, "text x\ntype a\\nb\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "xa\nb") == 0);
+
   sz_ui_unmount(session);
   sz_signal_str_free(draft);
   remove(path);
@@ -1438,6 +1493,46 @@ static void test_record_live_key(void) {
   assert(strstr(body, "key Backspace") != NULL);
   assert(strstr(body, "backspace") == NULL);
   free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(record);
+}
+
+static void test_record_type_escapes(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  SzInputEvent ev;
+  const char *record = "/tmp/scuzz_ui_record_type_esc.script";
+  char *body;
+
+  remove(record);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = "a\nb";
+  assert(sz_ui_session_live_inject(session, &ev));
+  body = slurp_cstr(record);
+  assert(strstr(body, "type a\\nb") != NULL);
+  free(body);
+  assert(strcmp(sz_signal_str_get(draft), "a\nb") == 0);
 
   sz_ui_unmount(session);
   sz_signal_str_free(draft);
@@ -12318,6 +12413,49 @@ static void test_slider_pointer_drag(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_replace_root_drops_pointer(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root1, *root2, *sl;
+  SzSignalInt *sig;
+  SzInputEvent ev;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int64_t v0;
+
+  sig = sz_signal_int(0);
+  sl = sz_view_slider(sig);
+  root1 = sz_view_column();
+  sz_view_add_child(root1, sl);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root1);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_view_layout(root1, 200.f, 80.f, theme);
+  f = sz_view_frame(sl);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.x = f.x + 4.f;
+  ev.y = f.y + f.h * 0.5f;
+  assert(sz_ui_inject_sync(session, &ev));
+  v0 = sz_signal_int_get(sig);
+  root2 = sz_view_column();
+  sz_view_add_child(root2, sz_view_text("after"));
+  assert(sz_ui_session_replace_root(session, root2));
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.x = f.x + f.w * 0.8f;
+  (void)sz_ui_inject_sync(session, &ev);
+  assert(sz_signal_int_get(sig) == v0);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+}
+
 static void test_slider_live_records_xy(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -12845,6 +12983,28 @@ static void test_a11y(void) {
   }
 }
 
+static void test_a11y_dump_grows_past_4k(void) {
+  SzView *col;
+  SzString *dump;
+  char lab[64];
+  int i;
+  const char *s;
+
+  col = sz_view_column();
+  for (i = 0; i < 80; i++) {
+    snprintf(lab, sizeof lab, "L%02d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+             i);
+    sz_view_add_child(col, sz_view_button(lab, NULL, NULL));
+  }
+  sz_view_add_child(col, sz_view_button("TAIL", NULL, NULL));
+  dump = sz_view_a11y_dump(col);
+  s = sz_string_cstr(dump);
+  assert(strlen(s) > 4096);
+  assert(strstr(s, "button:TAIL") != NULL);
+  sz_string_free(dump);
+  sz_view_free(col);
+}
+
 static void test_clear_children(void) {
   SzView *list;
   SzString *dump;
@@ -12889,6 +13049,39 @@ static void test_view_each(void) {
   assert(strstr(sz_string_cstr(sz_view_a11y_dump(list)), "text:- eggs") != NULL);
   assert(strstr(sz_string_cstr(sz_view_a11y_dump(list)), "text:- milk") != NULL);
 
+  sz_view_free(list);
+  sz_signal_list_free(items);
+}
+
+static void test_view_each_setlist_rebuilds(void) {
+  SzSignalList *items;
+  SzView *list;
+  const SzTheme *theme = sz_theme_default();
+  SzList *xs;
+  SzString *dump;
+  int i;
+
+  xs = sz_list_cons(sz_string_from_cstr("old"), sz_list_nil());
+  items = sz_signal_list(xs);
+  sz_release(xs);
+  list = sz_view_each(items);
+  sz_view_layout(list, 200.f, 120.f, theme);
+  dump = sz_view_a11y_dump(list);
+  assert(strstr(sz_string_cstr(dump), "text:- old") != NULL);
+  sz_string_free(dump);
+
+  xs = sz_list_cons(sz_string_from_cstr("new"), sz_list_nil());
+  sz_signal_list_set(items, xs);
+  sz_release(xs);
+  for (i = 0; i < 64; i++) {
+    SzList *t = sz_list_cons(sz_string_from_cstr("churn"), sz_list_nil());
+    sz_release(t);
+  }
+  sz_view_layout(list, 200.f, 120.f, theme);
+  dump = sz_view_a11y_dump(list);
+  assert(strstr(sz_string_cstr(dump), "text:- new") != NULL);
+  assert(strstr(sz_string_cstr(dump), "text:- old") == NULL);
+  sz_string_free(dump);
   sz_view_free(list);
   sz_signal_list_free(items);
 }
@@ -13184,6 +13377,119 @@ static void test_property_signal_str(void) {
   sz_release(name);
   sz_string_free(dump);
   sz_signal_str_free(draft);
+}
+
+static void test_signal_dump_escapes(void) {
+  SzSignalStr *s;
+  SzSignalList *items;
+  SzList *xs;
+  SzString *dump;
+  SzString *name;
+  SzString *got;
+  const char *d;
+  char big[2001];
+  int i;
+
+  s = sz_signal_str("a\"b");
+  sz_signal_name(s, "q");
+  dump = sz_signal_dump();
+  d = sz_string_cstr(dump);
+  assert(strstr(d, "a\\\"b") != NULL);
+  sz_string_free(dump);
+
+  sz_signal_str_set(s, "a\nb");
+  dump = sz_signal_dump();
+  d = sz_string_cstr(dump);
+  assert(strstr(d, "a\\nb") != NULL);
+  sz_string_free(dump);
+
+  for (i = 0; i < 2000; i++)
+    big[i] = 'x';
+  big[2000] = '\0';
+  sz_signal_str_set(s, big);
+  dump = sz_signal_dump();
+  d = sz_string_cstr(dump);
+  assert(strlen(d) > 2000);
+  assert(strstr(d, big) != NULL);
+  sz_string_free(dump);
+  sz_signal_str_free(s);
+
+  xs = sz_list_cons(sz_string_from_cstr("a\"b"),
+                    sz_list_cons(sz_string_from_cstr("a\nb"), sz_list_nil()));
+  items = sz_signal_list(xs);
+  sz_signal_name(items, "xs");
+  dump = sz_signal_dump();
+  d = sz_string_cstr(dump);
+  assert(strstr(d, "a\\\"b") != NULL);
+  assert(strstr(d, "a\\nb") != NULL);
+  name = sz_string_from_cstr("xs");
+  assert(sz_property_signal_list_len(name) == 2);
+  got = sz_property_signal_list_at(name, 0);
+  assert(strcmp(sz_string_cstr(got), "a\"b") == 0);
+  sz_string_free(got);
+  got = sz_property_signal_list_at(name, 1);
+  assert(strcmp(sz_string_cstr(got), "a\nb") == 0);
+  sz_string_free(got);
+  sz_release(name);
+  sz_string_free(dump);
+  sz_signal_list_free(items);
+}
+
+static void test_signal_name_last_wins(void) {
+  SzSignalInt *a;
+  SzSignalInt *b;
+  SzString *name;
+
+  a = sz_signal_int(1);
+  b = sz_signal_int(2);
+  sz_signal_name(a, "n");
+  sz_signal_name(b, "n");
+  name = sz_string_from_cstr("n");
+  assert(sz_property_signal_int(name) == 2);
+  sz_release(name);
+  sz_signal_int_free(a);
+  sz_signal_int_free(b);
+}
+
+static void test_property_replay_str_list(void) {
+  SzSignalStr *draft;
+  SzSignalList *items;
+  SzList *xs;
+  SzString *name;
+  SzString *got;
+
+  setenv("SCUZZ_TESTRT", "1", 1);
+  sz_property_session_reset();
+  draft = sz_signal_str("old");
+  sz_signal_name(draft, "draft");
+  xs = sz_list_cons(sz_string_from_cstr("a"),
+                    sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+  items = sz_signal_list(xs);
+  sz_signal_name(items, "items");
+  sz_property_session_step();
+  sz_signal_str_set(draft, "new");
+  sz_signal_list_set(items, sz_list_nil());
+  name = sz_string_from_cstr("draft");
+  got = sz_property_signal_str(name);
+  assert(strcmp(sz_string_cstr(got), "new") == 0);
+  sz_string_free(got);
+  sz_timeline_replay_from(0);
+  got = sz_property_signal_str(name);
+  assert(strcmp(sz_string_cstr(got), "old") == 0);
+  sz_string_free(got);
+  sz_release(name);
+  name = sz_string_from_cstr("items");
+  assert(sz_property_signal_list_len(name) == 2);
+  got = sz_property_signal_list_at(name, 1);
+  assert(strcmp(sz_string_cstr(got), "b") == 0);
+  sz_string_free(got);
+  sz_timeline_replay_from(-1);
+  assert(sz_property_signal_list_len(name) == 0);
+  sz_release(name);
+  sz_property_session_reset();
+  unsetenv("SCUZZ_TESTRT");
+  sz_signal_str_free(draft);
+  sz_signal_list_free(items);
 }
 
 static void test_signal_list_spine_collect(void) {
@@ -14428,6 +14734,13 @@ static void test_session_load_code(void) {
   sz_ui_session_take_root(session);
   sz_ui_session_set_rebuild(session, NULL, count);
   assert(sz_ui_session_load_code(session, RELOAD_A));
+  {
+    char staged[128];
+    FILE *st;
+    snprintf(staged, sizeof staged, "%s.load-1", RELOAD_A);
+    st = fopen(staged, "rb");
+    assert(st == NULL);
+  }
   assert(sz_ui_session_reload(session));
   a11y = sz_view_a11y_dump(sz_ui_session_root(session));
   assert(strstr(sz_string_cstr(a11y), "text:A") != NULL);
@@ -14541,6 +14854,7 @@ int main(void) {
   test_record_live_scroll();
   test_studio_shaped_xy();
   test_session_inject_script();
+  test_session_inject_grows_past_4k();
   test_session_inject_control();
   test_session_dump_now_needs_path();
   test_session_inject_scroll();
@@ -14549,6 +14863,7 @@ int main(void) {
   test_session_inject_key();
   test_session_inject_key_utf8_backspace();
   test_record_live_key();
+  test_record_type_escapes();
   test_session_inject_key_repeat();
   test_session_inject_compose();
   test_record_live_hover_secondary();
@@ -15035,6 +15350,7 @@ int main(void) {
   test_slider_paint_fill();
   test_slider_in_taps_dump();
   test_slider_pointer_drag();
+  test_replace_root_drops_pointer();
   test_slider_live_records_xy();
   test_progress_sizes();
   test_progress_unbounded_width();
@@ -15060,8 +15376,10 @@ int main(void) {
   test_button_does_not_wrap();
   test_text_blank_line_from_newline();
   test_a11y();
+  test_a11y_dump_grows_past_4k();
   test_clear_children();
   test_view_each();
+  test_view_each_setlist_rebuilds();
   test_view_each_map_text();
   test_view_each_map_button();
   test_each_expanded_row_in_scroll();
@@ -15071,6 +15389,9 @@ int main(void) {
   test_property_signal_int();
   test_signal_list_record_dump();
   test_property_signal_str();
+  test_signal_dump_escapes();
+  test_signal_name_last_wins();
+  test_property_replay_str_list();
   test_text_field_edit();
   test_view_editor();
   test_view_editor_viewport();

@@ -3146,9 +3146,91 @@ int64_t sz_timeline_replay_signal_int(const char *name) {
   return sep ? (int64_t)atoll(sep + 3) : 0;
 }
 
+static const char *tl_sig_payload(const char *sep) {
+  if (!sep || memcmp(sep, " = ", 3) != 0)
+    return NULL;
+  return sep + 3;
+}
+
+static SzString *tl_parse_quoted_str(const char *sep) {
+  const char *p = tl_sig_payload(sep);
+  char *val = NULL;
+  SzString *out;
+  if (!p || *p != '"')
+    return sz_string_from_cstr("");
+  if (!sz_dump_parse_quoted(p, &val) || !val)
+    return sz_string_from_cstr("");
+  out = sz_string_from_cstr(val);
+  sz_free(val);
+  return out;
+}
+
+static int64_t tl_count_quoted_list(const char *p) {
+  int64_t n = 0;
+  if (!p)
+    return 0;
+  while (*p && *p != ']' && *p != '\n') {
+    while (*p == ' ' || *p == ',')
+      p++;
+    if (*p != '"')
+      break;
+    p = sz_dump_parse_quoted(p, NULL);
+    if (!p)
+      break;
+    n++;
+  }
+  return n;
+}
+
 static int64_t tl_parse_signal_int(const char *dump, const char *name) {
   const char *sep = tl_sig_line(dump, "int", name);
   return sep ? (int64_t)atoll(sep + 3) : 0;
+}
+
+SzString *sz_timeline_replay_signal_str(const char *name) {
+  return tl_parse_quoted_str(tl_sig_line(g_replay_signals, "str", name));
+}
+
+int64_t sz_timeline_replay_signal_list_len(const char *name) {
+  const char *sep = tl_sig_line(g_replay_signals, "list", name);
+  const char *p;
+  if (!sep)
+    return 0;
+  if (memcmp(sep, " = <", 4) == 0)
+    return (int64_t)atoll(sep + 4);
+  if (memcmp(sep, " = [", 4) != 0)
+    return 0;
+  p = sep + 4;
+  return tl_count_quoted_list(p);
+}
+
+SzString *sz_timeline_replay_signal_list_at(const char *name, int64_t index) {
+  const char *sep = tl_sig_line(g_replay_signals, "list", name);
+  const char *p;
+  int64_t i = 0;
+  if (index < 0 || !sep || memcmp(sep, " = [", 4) != 0)
+    return sz_string_from_cstr("");
+  p = sep + 4;
+  while (*p && *p != ']' && *p != '\n') {
+    char *val = NULL;
+    while (*p == ' ' || *p == ',')
+      p++;
+    if (*p != '"')
+      break;
+    p = sz_dump_parse_quoted(p, &val);
+    if (!p) {
+      sz_free(val);
+      break;
+    }
+    if (i == index) {
+      SzString *out = sz_string_from_cstr(val ? val : "");
+      sz_free(val);
+      return out;
+    }
+    sz_free(val);
+    i++;
+  }
+  return sz_string_from_cstr("");
 }
 
 static SzTlState *tl_at(void *tl, int64_t i) {
@@ -3169,12 +3251,11 @@ int64_t sz_timeline_signal_int(void *tl, int64_t i, SzString *name) {
            : 0;
 }
 
-/* List length from the signals dump: `list[<id>] <name> = ["a", "b"]` holds
- * one quoted string per element (no escaping), so quotes pair per element. */
+/* List length from the signals dump: `list[<id>] <name> = ["a", "b"]`
+ * counts quoted strings with the dump escape dialect. */
 static int64_t tl_parse_signal_list_len(const char *dump, const char *name) {
   const char *sep = tl_sig_line(dump, "list", name);
   const char *p;
-  int64_t quotes = 0;
   if (!sep)
     return 0;
   /* Record lists dump the count only: `list[<id>] <name> = <n>`. */
@@ -3183,12 +3264,7 @@ static int64_t tl_parse_signal_list_len(const char *dump, const char *name) {
   if (memcmp(sep, " = [", 4) != 0)
     return 0;
   p = sep + 4;
-  while (*p && *p != ']' && *p != '\n') {
-    if (*p == '"')
-      quotes += 1;
-    p += 1;
-  }
-  return quotes / 2;
+  return tl_count_quoted_list(p);
 }
 
 int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name) {
@@ -3198,35 +3274,26 @@ int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name) {
            : 0;
 }
 
-/* 1 when the `str[<id>] <name> = "<value>"` line in the state's signals dump
- * holds `needle` as a substring, searched from the ` = ` separator so the
- * name cannot false-match. */
+/* 1 when the unescaped `str[<id>] <name> = "<value>"` holds `needle`. */
 int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
                                    SzString *needle) {
-  const char *p;
-  const char *end;
   SzTlState *s = tl_at(tl, i);
   const char *n = needle ? sz_string_cstr(needle) : "";
+  const char *sep;
+  const char *p;
+  char *val = NULL;
+  int64_t hit = 0;
   if (!s || !s->signals || !n[0])
     return 0;
-  p = tl_sig_line(s->signals, "str", name ? sz_string_cstr(name) : "");
-  if (!p)
+  sep = tl_sig_line(s->signals, "str", name ? sz_string_cstr(name) : "");
+  p = tl_sig_payload(sep);
+  if (!p || *p != '"')
     return 0;
-  end = strchr(p, '\n');
-  if (!end)
-    end = p + strlen(p);
-  {
-    size_t len = (size_t)(end - p);
-    size_t m = strlen(n);
-    size_t k;
-    if (m > len)
-      return 0;
-    for (k = 0; k + m <= len; k++) {
-      if (memcmp(p + k, n, m) == 0)
-        return 1;
-    }
-  }
-  return 0;
+  if (!sz_dump_parse_quoted(p, &val) || !val)
+    return 0;
+  hit = strstr(val, n) != NULL ? 1 : 0;
+  sz_free(val);
+  return hit;
 }
 
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle) {

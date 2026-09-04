@@ -10850,6 +10850,22 @@ int main(void) {
     assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
     sz_release(needle);
     sz_timeline_free(tl);
+    write_text(path, "# timeline v=2 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
+                     "signals:\nlist[1] q = [\"a\\\"b\", \"a\\nb\"]\n"
+                     "str[2] draft = \"a\\\"b\"\na11y:\n\n");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    needle = sz_string_from_cstr("q");
+    assert(sz_timeline_signal_list_len(tl, 0, needle) == 2);
+    sz_release(needle);
+    needle = sz_string_from_cstr("draft");
+    {
+      SzString *want = sz_string_from_cstr("a\"b");
+      assert(sz_timeline_signal_str_has(tl, 0, needle, want) == 1);
+      sz_release(want);
+    }
+    sz_release(needle);
+    sz_timeline_free(tl);
     write_text(path, "# timeline v=3 n=0\n");
     assert(sz_timeline_load(path) == NULL);
     write_text(path, "nonsense\n");

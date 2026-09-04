@@ -1,6 +1,7 @@
 #include "ui_script.h"
 
 #include "scuzz_rt.h"
+#include "rt_util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -506,7 +507,9 @@ static void play_script_line(SzUiSession *session, char *line) {
   } else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0) {
     int idx;
     const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
-    script_type(session, idx, payload);
+    char *raw = sz_dump_unescape(payload);
+    script_type(session, idx, raw);
+    sz_free(raw);
   } else if (strncmp(line, "key ", 4) == 0 || strcmp(line, "key") == 0) {
     const char *rest = len > 3 ? line + 4 : "";
     char token[96];
@@ -528,9 +531,12 @@ static void play_script_line(SzUiSession *session, char *line) {
     script_key(session, name, text, mods, repeat);
   } else if (strncmp(line, "compose ", 8) == 0 || strcmp(line, "compose") == 0) {
     const char *rest = len > 7 ? line + 8 : "";
+    char *raw;
     while (*rest == ' ')
       rest++;
-    script_compose(session, rest);
+    raw = sz_dump_unescape(rest);
+    script_compose(session, raw);
+    sz_free(raw);
   } else if (strcmp(line, "commit") == 0) {
     script_compose(session, "");
   } else if (strncmp(line, "caret ", 6) == 0 || strcmp(line, "caret") == 0) {
@@ -559,10 +565,16 @@ static void play_script_line(SzUiSession *session, char *line) {
       fprintf(stderr, "scuzz: script cut skipped (no text field)\n");
   } else if (strncmp(line, "paste ", 6) == 0 || strcmp(line, "paste") == 0) {
     const char *payload = NULL;
+    char *raw = NULL;
     if (len > 6 && line[5] == ' ' && line[6])
       payload = line + 6;
+    if (payload) {
+      raw = sz_dump_unescape(payload);
+      payload = raw;
+    }
     if (!sz_ui_session_paste(session, payload))
       fprintf(stderr, "scuzz: script paste skipped (no text field)\n");
+    sz_free(raw);
   } else if (strncmp(line, "drag ", 5) == 0) {
     float x1 = 0.f, y1 = 0.f, x2 = 0.f, y2 = 0.f;
     if (sscanf(line + 5, "%f %f %f %f", &x1, &y1, &x2, &y2) == 4)

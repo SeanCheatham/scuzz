@@ -13,6 +13,8 @@
 #include <pthread.h>
 #include <sched.h>
 #include <dlfcn.h>
+#include <unistd.h>
+#include <stdint.h>
 
 static int want_gpu_presenter(void) {
   const char *e = getenv("SCUZZ_SKIA");
@@ -170,6 +172,9 @@ struct SzUiSession {
 static SzUiSession *g_live_session;
 static char *g_pending_title;
 
+static void host_free(char **p);
+static void session_drop_pointer(SzUiSession *session);
+
 static int runtime_kind_ok(SzUiRuntimeKind kind) {
   return kind == SZ_UI_RUNTIME_HEADLESS || kind == SZ_UI_RUNTIME_DESKTOP ||
          kind == SZ_UI_RUNTIME_MOBILE;
@@ -265,6 +270,7 @@ void sz_ui_session_take_root(SzUiSession *session) {
 int sz_ui_session_replace_root(SzUiSession *session, SzView *root) {
   if (!session || !root)
     return 0;
+  session_drop_pointer(session);
   if (session->owns_view)
     sz_view_free(session->root);
   session->root = root;
@@ -273,21 +279,65 @@ int sz_ui_session_replace_root(SzUiSession *session, SzView *root) {
   return 1;
 }
 
-enum { SZ_UI_STAMP_CAP = 4096 };
-
-static char *stamp_snapshot(const char *path) {
+/* Whole-file read for inject playback (prefix-extend). Grows like signal dump. */
+static char *read_file_all(const char *path) {
   FILE *f;
-  char buf[SZ_UI_STAMP_CAP];
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  char tmp[4096];
   size_t n;
   if (!path)
     return sz_strdup("");
   f = fopen(path, "rb");
   if (!f)
     return sz_strdup("");
-  n = fread(buf, 1, sizeof(buf) - 1, f);
+  while ((n = fread(tmp, 1, sizeof tmp, f)) > 0) {
+    if (len + n + 1 > cap) {
+      size_t ncap = cap ? cap : 256;
+      char *nb;
+      while (len + n + 1 > ncap)
+        ncap *= 2;
+      nb = (char *)sz_alloc(ncap);
+      if (buf) {
+        memcpy(nb, buf, len);
+        sz_free(buf);
+      }
+      buf = nb;
+      cap = ncap;
+    }
+    memcpy(buf + len, tmp, n);
+    len += n;
+  }
   fclose(f);
-  buf[n] = '\0';
-  return sz_strdup(buf);
+  if (!buf)
+    return sz_strdup("");
+  buf[len] = '\0';
+  return buf;
+}
+
+/* Small watch stamp: length plus FNV-1a of the whole file. */
+static char *watch_stamp(const char *path) {
+  FILE *f;
+  unsigned char tmp[4096];
+  size_t n, total = 0;
+  uint32_t h = 2166136261u;
+  char out[64];
+  if (!path)
+    return sz_strdup("0:0");
+  f = fopen(path, "rb");
+  if (!f)
+    return sz_strdup("0:0");
+  while ((n = fread(tmp, 1, sizeof tmp, f)) > 0) {
+    size_t i;
+    total += n;
+    for (i = 0; i < n; i++) {
+      h ^= tmp[i];
+      h *= 16777619u;
+    }
+  }
+  fclose(f);
+  snprintf(out, sizeof out, "%zu:%08x", total, h);
+  return sz_strdup(out);
 }
 
 static int stamp_changed(SzUiSession *session) {
@@ -295,7 +345,7 @@ static int stamp_changed(SzUiSession *session) {
   int changed;
   if (!session || !session->watch_path)
     return 0;
-  now = stamp_snapshot(session->watch_path);
+  now = watch_stamp(session->watch_path);
   changed = !session->watch_fp || strcmp(session->watch_fp, now) != 0;
   if (changed) {
     sz_free(session->watch_fp);
@@ -322,7 +372,7 @@ int sz_ui_session_watch(SzUiSession *session, const char *path) {
   sz_free(session->watch_path);
   sz_free(session->watch_fp);
   session->watch_path = sz_strdup(path);
-  session->watch_fp = stamp_snapshot(path);
+  session->watch_fp = watch_stamp(path);
   return 1;
 }
 
@@ -344,7 +394,7 @@ int sz_ui_session_set_inject(SzUiSession *session, const char *path) {
   sz_free(session->inject_path);
   sz_free(session->inject_fp);
   session->inject_path = sz_strdup(path);
-  session->inject_fp = stamp_snapshot(path);
+  session->inject_fp = read_file_all(path);
   return 1;
 }
 
@@ -381,26 +431,30 @@ static void fputs_dump_quoted(FILE *f, const char *s) {
 }
 
 /* Editor dump: keep newlines as \\n so a file buffer stays one node. */
-static void fputs_dump_escaped(FILE *f, const char *s) {
+static void fputs_escaped_body(FILE *f, const char *s) {
   const char *p;
-  fputc('"', f);
-  if (s) {
-    for (p = s; *p; p++) {
-      unsigned char c = (unsigned char)*p;
-      if (c == '\\')
-        fputs("\\\\", f);
-      else if (c == '"')
-        fputs("\\\"", f);
-      else if (c == '\n')
-        fputs("\\n", f);
-      else if (c == '\r')
-        fputs("\\r", f);
-      else if (c == '\t')
-        fputs("\\t", f);
-      else
-        fputc(*p, f);
-    }
+  if (!s)
+    return;
+  for (p = s; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c == '\\')
+      fputs("\\\\", f);
+    else if (c == '"')
+      fputs("\\\"", f);
+    else if (c == '\n')
+      fputs("\\n", f);
+    else if (c == '\r')
+      fputs("\\r", f);
+    else if (c == '\t')
+      fputs("\\t", f);
+    else
+      fputc(*p, f);
   }
+}
+
+static void fputs_dump_escaped(FILE *f, const char *s) {
+  fputc('"', f);
+  fputs_escaped_body(f, s);
   fputc('"', f);
 }
 
@@ -671,16 +725,22 @@ int sz_ui_session_load_code(SzUiSession *session, const char *path) {
   if (snprintf(staged, sizeof staged, "%s.load-%d", path, session->code_gen) >=
       (int)sizeof staged)
     return 0;
-  if (!copy_file(path, staged))
+  if (!copy_file(path, staged)) {
+    unlink(staged);
     return 0;
+  }
   h = dlopen(staged, RTLD_NOW | RTLD_LOCAL);
-  if (!h)
+  if (!h) {
+    unlink(staged);
     return 0;
+  }
   fn = (SzUiRebuildFn)dlsym(h, "sz_ui_reload_rebuild");
   if (!fn) {
     dlclose(h);
+    unlink(staged);
     return 0;
   }
+  unlink(staged);
   session->code_stale = session->code_handle;
   session->code_handle = h;
   session->rebuild = fn;
@@ -749,11 +809,31 @@ static void host_free(char **p) {
   *p = NULL;
 }
 
+static void session_drop_pointer(SzUiSession *session) {
+  if (!session)
+    return;
+  session->pointer_down = 0;
+  session->pointer_button = 0;
+  session->pointer_scroll = NULL;
+  session->pointer_slider = NULL;
+  session->pointer_field = NULL;
+  session->hover_seen = 0;
+  host_free(&session->hover_desc);
+  session->last_hit_seen = 0;
+  host_free(&session->last_hit_desc);
+  session->last_secondary_seen = 0;
+  host_free(&session->last_secondary_desc);
+  host_free(&session->record_hover_desc);
+  if (session->root)
+    sz_view_clear_hover(session->root);
+}
+
 void sz_ui_unmount(SzUiSession *session) {
   if (!session)
     return;
   if (g_live_session == session)
     g_live_session = NULL;
+  session_drop_pointer(session);
   sz_ui_bridge_flush(session);
   pthread_mutex_destroy(&session->bridge_lock);
   if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP)
@@ -1128,9 +1208,11 @@ static void record_clipboard_verb(SzUiSession *session, int op) {
     fputs("copy\n", f);
   else if (op == 2)
     fputs("cut\n", f);
-  else if (session->clipboard && session->clipboard[0])
-    fprintf(f, "paste %s\n", session->clipboard);
-  else
+  else if (session->clipboard && session->clipboard[0]) {
+    fputs("paste ", f);
+    fputs_escaped_body(f, session->clipboard);
+    fputc('\n', f);
+  } else
     fputs("paste\n", f);
   fclose(f);
 }
@@ -1171,15 +1253,20 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
     if (!clipboard_chord(ev->key, ev->key_mods))
       record_key_line(f, ev);
   } else if (ev->kind == SZ_INPUT_COMPOSE) {
-    if (ev->text && ev->text[0])
-      fprintf(f, "compose %s\n", ev->text);
-    else
+    if (ev->text && ev->text[0]) {
+      fputs("compose ", f);
+      fputs_escaped_body(f, ev->text);
+      fputc('\n', f);
+    } else
       fputs("commit\n", f);
   } else if (ev->kind == SZ_INPUT_TEXT_EDIT) {
     if (!ev->text || !ev->text[0])
       fputs("backspace\n", f);
-    else
-      fprintf(f, "type %s\n", ev->text);
+    else {
+      fputs("type ", f);
+      fputs_escaped_body(f, ev->text);
+      fputc('\n', f);
+    }
   } else if (ev->kind == SZ_INPUT_POINTER &&
              ev->pointer_phase == SZ_POINTER_MOVE && !session->pointer_down) {
     SzView *tip;
@@ -1279,7 +1366,7 @@ static int take_inject(SzUiSession *session, char **out) {
   if (!session || !session->inject_path || !out)
     return 0;
   *out = NULL;
-  now = stamp_snapshot(session->inject_path);
+  now = read_file_all(session->inject_path);
   if (session->inject_fp && strcmp(session->inject_fp, now) == 0) {
     sz_free(now);
     return 0;

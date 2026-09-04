@@ -54,16 +54,24 @@ static void sig_register(SigKind kind, const void *sig) {
   g_sig_tail = r;
 }
 
-/* Publish the author-facing name of a signal (its `for` binder name). */
+/* Publish the author-facing name of a signal (its `for` binder name).
+ * Last non-empty name wins: a later bind clears the same name on others. */
 void sz_signal_name(const void *sig, const char *name) {
   SigReg *r;
+  SigReg *mine = NULL;
+  const char *n = name ? name : "";
   for (r = g_sig_head; r; r = r->next) {
-    if (r->sig == sig) {
+    if (r->sig == sig)
+      mine = r;
+    else if (n[0] && r->name && strcmp(r->name, n) == 0) {
       sz_free(r->name);
-      r->name = sz_strdup(name);
-      return;
+      r->name = sz_strdup("");
     }
   }
+  if (!mine)
+    return;
+  sz_free(mine->name);
+  mine->name = sz_strdup(n);
 }
 
 static void sig_unregister(const void *sig) {
@@ -108,26 +116,6 @@ static void sig_set_elem_str(const void *sig, int64_t elem_str) {
   }
 }
 
-static void dump_append(char **buf, size_t *len, size_t *cap, const char *s) {
-  size_t n = strlen(s);
-  if (*len + n + 1 > *cap) {
-    size_t ncap = *cap ? *cap : 256;
-    char *nb;
-    while (*len + n + 1 > ncap)
-      ncap *= 2;
-    nb = (char *)sz_alloc(ncap);
-    if (*buf) {
-      memcpy(nb, *buf, *len);
-      sz_free(*buf);
-    }
-    *buf = nb;
-    *cap = ncap;
-  }
-  memcpy(*buf + *len, s, n);
-  *len += n;
-  (*buf)[*len] = '\0';
-}
-
 SzString *sz_signal_dump(void) {
   char *buf = NULL;
   size_t len = 0, cap = 0;
@@ -135,7 +123,7 @@ SzString *sz_signal_dump(void) {
   char tag[256];
   SigReg *r;
   SzString *out;
-  dump_append(&buf, &len, &cap, "");
+  sz_dump_append(&buf, &len, &cap, "");
   for (r = g_sig_head; r; r = r->next) {
     if (r->name && r->name[0])
       snprintf(tag, sizeof tag, "%s ", r->name);
@@ -145,30 +133,33 @@ SzString *sz_signal_dump(void) {
     case SIG_INT:
       snprintf(line, sizeof line, "int[%d] %s= %lld\n", r->id, tag,
                (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
-      dump_append(&buf, &len, &cap, line);
+      sz_dump_append(&buf, &len, &cap, line);
       break;
     case SIG_STR:
-      snprintf(line, sizeof line, "str[%d] %s= \"%s\"\n", r->id, tag,
-               sz_signal_str_get((const SzSignalStr *)r->sig));
-      dump_append(&buf, &len, &cap, line);
+      snprintf(line, sizeof line, "str[%d] %s= \"", r->id, tag);
+      sz_dump_append(&buf, &len, &cap, line);
+      sz_dump_append_escaped(&buf, &len, &cap,
+                             sz_signal_str_get((const SzSignalStr *)r->sig));
+      sz_dump_append(&buf, &len, &cap, "\"\n");
       break;
     case SIG_LIST: {
       SzList *p = sz_signal_list_get((const SzSignalList *)r->sig);
       if (!r->elem_str) {
         snprintf(line, sizeof line, "list[%d] %s= <%lld>\n", r->id, tag,
                  (long long)sz_list_len(p));
-        dump_append(&buf, &len, &cap, line);
+        sz_dump_append(&buf, &len, &cap, line);
         break;
       }
       snprintf(line, sizeof line, "list[%d] %s= [", r->id, tag);
-      dump_append(&buf, &len, &cap, line);
+      sz_dump_append(&buf, &len, &cap, line);
       for (; p; p = p->tail) {
         const SzString *s = (const SzString *)p->head;
-        snprintf(line, sizeof line, "\"%s\"%s", s ? sz_string_cstr(s) : "",
-                 p->tail ? ", " : "");
-        dump_append(&buf, &len, &cap, line);
+        sz_dump_append(&buf, &len, &cap, "\"");
+        sz_dump_append_escaped(&buf, &len, &cap,
+                               s ? sz_string_cstr(s) : "");
+        sz_dump_append(&buf, &len, &cap, p->tail ? "\", " : "\"");
       }
-      dump_append(&buf, &len, &cap, "]\n");
+      sz_dump_append(&buf, &len, &cap, "]\n");
       break;
     }
     }
@@ -188,7 +179,11 @@ int64_t sz_property_signal_int(SzString *name) {
 }
 
 SzString *sz_property_signal_str(SzString *name) {
-  SigReg *r = sig_find(SIG_STR, name ? sz_string_cstr(name) : "");
+  const char *n = name ? sz_string_cstr(name) : "";
+  SigReg *r;
+  if (sz_timeline_replaying())
+    return sz_timeline_replay_signal_str(n);
+  r = sig_find(SIG_STR, n);
   if (r)
     return sz_string_from_cstr(
         sz_signal_str_get((const SzSignalStr *)r->sig));
@@ -196,7 +191,11 @@ SzString *sz_property_signal_str(SzString *name) {
 }
 
 int64_t sz_property_signal_list_len(SzString *name) {
-  SigReg *r = sig_find(SIG_LIST, name ? sz_string_cstr(name) : "");
+  const char *n = name ? sz_string_cstr(name) : "";
+  SigReg *r;
+  if (sz_timeline_replaying())
+    return sz_timeline_replay_signal_list_len(n);
+  r = sig_find(SIG_LIST, n);
   if (r)
     return (int64_t)sz_list_len(
         sz_signal_list_get((const SzSignalList *)r->sig));
@@ -207,9 +206,12 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   SigReg *r;
   const SzList *p;
   int64_t i;
+  const char *n = name ? sz_string_cstr(name) : "";
   if (index < 0)
     return sz_string_from_cstr("");
-  r = sig_find(SIG_LIST, name ? sz_string_cstr(name) : "");
+  if (sz_timeline_replaying())
+    return sz_timeline_replay_signal_list_at(n, index);
+  r = sig_find(SIG_LIST, n);
   if (r && r->elem_str) {
     p = sz_signal_list_get((const SzSignalList *)r->sig);
     i = 0;
