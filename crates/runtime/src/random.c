@@ -4,7 +4,8 @@
 #include <stdio.h>
 #include <time.h>
 
-/* Blessed Random — live entropy or TestRuntime seeded LCG. */
+/* Blessed Random. Live seeds once from /dev/urandom then LCG.
+ * TestRuntime is a seeded LCG. */
 
 static int g_fake = 0;
 static uint64_t g_state = 1;
@@ -50,25 +51,24 @@ static uint64_t next_u64(void) {
 
 static void *random_next_thunk(void *env) {
   int64_t bound = sz_unbox_i64(env);
+  uint64_t u;
+  uint64_t lim;
   int64_t n;
   sz_timeline_log_cstr("Random.nextInt", "");
-  if (bound <= 0)
-    n = 0;
-  else {
-    uint64_t lim = (uint64_t)bound;
-    uint64_t zone = UINT64_MAX - (UINT64_MAX % lim);
-    uint64_t u;
-    do {
-      u = next_u64();
-    } while (u >= zone);
-    n = (int64_t)(u % lim);
-  }
+  lim = (uint64_t)bound;
+  u = next_u64();
+  /* Lemire 2019: map through high bits. LCG bit 0 has period 2. */
+  n = (int64_t)(((__uint128_t)u * lim) >> 64);
   return sz_box_i64(n);
 }
 
 SzIo *sz_random_next_int(int64_t bound) {
-  void *b = sz_box_i64(bound);
-  SzIo *io = sz_io_delay(random_next_thunk, b);
+  void *b;
+  SzIo *io;
+  if (bound <= 0)
+    return sz_io_fail_cstr("Random.nextInt: bound <= 0");
+  b = sz_box_i64(bound);
+  io = sz_io_delay(random_next_thunk, b);
   sz_release(b);
   return io;
 }
