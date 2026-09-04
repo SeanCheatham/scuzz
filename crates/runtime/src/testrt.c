@@ -2468,12 +2468,6 @@ void sz_testrt_proc_kill(int64_t pid) {
   }
 }
 
-static void env_copy_host(const char *key) {
-  const char *v = getenv(key);
-  if (v && v[0])
-    sz_testrt_env_set(key, v);
-}
-
 static void free_fake_argv(void) {
   int i;
   if (!g_fake_argv)
@@ -2635,10 +2629,6 @@ SzIo *sz_testrt_sys_read(int64_t n) {
 static void sz_testrt_sys_install(void) {
   sz_testrt_sys_reset_live();
   g_sys_fake = 1;
-  /* App fixtures the CLI sets. Do not copy PATH/HOME/SCUZZ_TESTRT. */
-  env_copy_host("SCUZZ_TODO_PATH");
-  env_copy_host("SCUZZ_SERVE");
-  env_copy_host("SCUZZ_KIT");
 }
 
 int sz_testrt_sys_is_fake(void) { return g_sys_fake; }

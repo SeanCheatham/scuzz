@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -35,6 +36,92 @@ static void sleep_us(long us) {
   ts.tv_nsec = (us % 1000000L) * 1000L;
   nanosleep(&ts, NULL);
 }
+
+static int pid_is_zombie(pid_t pid) {
+#ifdef __linux__
+  char path[64];
+  char buf[512];
+  FILE *f;
+  char *rp;
+  if (pid <= 0)
+    return 0;
+  snprintf(path, sizeof path, "/proc/%d/stat", (int)pid);
+  f = fopen(path, "r");
+  if (!f)
+    return 0;
+  if (!fgets(buf, (int)sizeof buf, f)) {
+    fclose(f);
+    return 0;
+  }
+  fclose(f);
+  rp = strrchr(buf, ')');
+  return rp && rp[1] == ' ' && rp[2] == 'Z';
+#else
+  (void)pid;
+  return 0;
+#endif
+}
+
+#ifdef __linux__
+static int kill_reap_sleep_children(void) {
+  DIR *d;
+  struct dirent *ent;
+  pid_t self = getpid();
+  int killed = 0;
+  d = opendir("/proc");
+  if (!d)
+    return 0;
+  while ((ent = readdir(d))) {
+    pid_t pid;
+    char path[64];
+    char buf[512];
+    char line[256];
+    FILE *f;
+    char *rp;
+    int ppid = 0;
+    size_t n;
+    size_t i;
+    if (ent->d_name[0] < '0' || ent->d_name[0] > '9')
+      continue;
+    pid = (pid_t)atoi(ent->d_name);
+    if (pid <= 0 || pid == self)
+      continue;
+    snprintf(path, sizeof path, "/proc/%d/stat", (int)pid);
+    f = fopen(path, "r");
+    if (!f)
+      continue;
+    if (!fgets(buf, (int)sizeof buf, f)) {
+      fclose(f);
+      continue;
+    }
+    fclose(f);
+    rp = strrchr(buf, ')');
+    if (!rp || sscanf(rp + 2, "%*c %d", &ppid) != 1 || ppid != (int)self)
+      continue;
+    snprintf(path, sizeof path, "/proc/%d/cmdline", (int)pid);
+    f = fopen(path, "r");
+    if (!f)
+      continue;
+    n = fread(line, 1, sizeof line - 1, f);
+    fclose(f);
+    line[n] = '\0';
+    for (i = 0; i < n; i++) {
+      if (line[i] == '\0')
+        line[i] = ' ';
+    }
+    if (!strstr(line, "sleep"))
+      continue;
+    (void)kill(pid, SIGKILL);
+    {
+      int st = 0;
+      (void)waitpid(pid, &st, 0);
+    }
+    killed++;
+  }
+  closedir(d);
+  return killed;
+}
+#endif
 
 static uint16_t test_rd16(const uint8_t *p) {
   return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
@@ -6880,6 +6967,42 @@ int main(void) {
     assert(sz_unbox_i64(r.value) == 0);
   }
 
+  /* Sys.kill reaps without Sys.alive. Watch kills then spawns. */
+  {
+    SzIoResult r;
+    SzIoResult sr;
+    int64_t pid;
+    int64_t pid2;
+    int i;
+    int status = 0;
+    int st2 = 0;
+    pid_t w;
+    r = sz_io_unsafe_run(sz_sys_spawn(sz_string_from_cstr("exec sleep 5")));
+    assert(r.ok);
+    pid = sz_unbox_i64(r.value);
+    sz_release(r.value);
+    assert(pid > 0);
+    r = sz_io_unsafe_run(sz_sys_kill(pid));
+    assert(r.ok);
+    for (i = 0; i < 50; i++) {
+      if (pid_is_zombie((pid_t)pid))
+        break;
+      if (kill((pid_t)pid, 0) != 0 && errno == ESRCH)
+        break;
+      sleep_us(20000);
+    }
+    sr = sz_io_unsafe_run(sz_sys_spawn(sz_string_from_cstr("true")));
+    assert(sr.ok);
+    pid2 = sz_unbox_i64(sr.value);
+    sz_release(sr.value);
+    assert(waitpid((pid_t)pid2, &st2, 0) == (pid_t)pid2);
+    assert(!pid_is_zombie((pid_t)pid));
+    w = waitpid((pid_t)pid, &status, WNOHANG);
+    assert(w == (pid_t)pid || (w < 0 && errno == ECHILD));
+    (void)sz_io_unsafe_run(sz_sys_alive(pid2));
+    (void)sz_io_unsafe_run(sz_sys_alive(pid));
+  }
+
   /* Sys.spawn pipes: write stdin, read stdout (dd copies five bytes). */
   {
     SzIoResult pr;
@@ -6929,19 +7052,24 @@ int main(void) {
     assert(pr.ok);
     pr = sz_io_unsafe_run(sz_sys_child_close(pid));
     assert(pr.ok);
-    pr = sz_io_unsafe_run(sz_sys_child_read(pid, 2));
+    pr = sz_io_unsafe_run(sz_sys_child_read(pid, 3));
     assert(pr.ok);
     got = (SzString *)pr.value;
     assert(got && got->len == 2);
     assert(memcmp(sz_string_cstr(got), "xy", 2) == 0);
     sz_release(got);
-    pr = sz_io_unsafe_run(sz_sys_child_read(pid, 1));
-    assert(pr.ok);
-    got = (SzString *)pr.value;
-    assert(got && got->len == 0);
-    sz_release(got);
     pr = sz_io_unsafe_run(sz_sys_kill(pid));
     assert(pr.ok);
+  }
+
+  /* Sys.childRead on an unknown pid fails like Sys.childWrite. */
+  {
+    SzIoResult pr;
+    pr = sz_io_unsafe_run(sz_sys_child_read(999999, 1));
+    assert(!pr.ok);
+    assert(pr.error &&
+           strstr(sz_string_cstr(pr.error->message), "unknown pid") != NULL);
+    sz_error_free(pr.error);
   }
 
   /* Child read parks; a peer fiber writes before the copy finishes. */
@@ -7023,6 +7151,7 @@ int main(void) {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
     int status = 0;
+    (void)sz_io_unsafe_run(sz_sys_alive(0));
     sz_alloc_stats(&base_bytes, &base_count);
     {
       SzString *cmd = sz_string_from_cstr("true");
@@ -7124,6 +7253,35 @@ int main(void) {
       assert(sz_unbox_i64(got->left) == 0);
     }
     assert(g_peer_flag == 1);
+  }
+
+  /* Cancel of a long child reaps it. */
+  {
+    SzString *cmd = sz_string_from_cstr("exec sleep 30");
+    r = sz_io_unsafe_run(race_drop(
+        sz_sys_exec (cmd),
+        sz_io_sleep_ms(1000)));
+    sz_release(cmd);
+    assert(r.ok);
+    if (r.value)
+      sz_release(r.value);
+#ifdef __linux__
+    {
+      int leftover = kill_reap_sleep_children();
+      assert(leftover == 0);
+    }
+#endif
+  }
+
+  /* Capture over 1 MiB fails. */
+  {
+    SzString *cmd = sz_string_from_cstr("dd if=/dev/zero bs=1024 count=2048 2>/dev/null");
+    r = sz_io_unsafe_run(sz_sys_exec (cmd));
+    sz_release(cmd);
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "1 MiB") != NULL);
+    sz_error_free(r.error);
   }
 
   /* Live Net.serveOnce: client thread GET while this fiber accepts. */
