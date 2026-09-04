@@ -17,13 +17,13 @@ def cliJsonCheck(): Bool =
   Main.cliDiff(Cli.show(Cli.parse(Main.a2("--message-format=json", "check"))), "check path=. json=true")
 
 def cliErrs(): Bool =
-  Main.cliDiff(Cli.render(Cli.parse(Main.a1("nope"))), Main.wantUnrec()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--nope"))), Main.wantUnexp())
+  Main.cliDiff(Cli.render(Cli.parse(Main.a1("nope"))), Main.wantUnrec()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("fmt", "--nope"))), Main.wantUnexp()) && Main.cliDiff(Cli.render(Cli.parse(Main.a3("fuzz", "--iterations", "abc"))), Main.wantBadIter()) && Main.cliDiff(Cli.render(Cli.parse(Main.a3("check", "examples/hello", "examples/cli"))), Main.wantExtra()) && Main.cliDiff(Cli.render(Cli.parse(Main.a4("fuzz", "--relate", "--iterations", "8"))), Main.wantRelate()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("new", "123app"))), Main.wantBadName())
 
 def cliJsonOnly(): Bool =
   Main.cliDiff(Cli.render(Cli.parse(Main.a2("--message-format=json", "fmt"))), Main.wantJsonOnly())
 
 def cliFuzz(): Bool =
-  Main.cliDiff(Cli.show(Cli.parse(Main.a3("fuzz", "--iterations", "16"))), "fuzz path=. iterations=16 seed=42 replay= oracles=false noFailFast=false relate=false")
+  Main.cliDiff(Cli.show(Cli.parse(Main.a3("fuzz", "--iterations", "16"))), "fuzz path=. iterations=16 seed=42 replay= oracles=false noFailFast=false relate=false") && Cli.showFlagNat("16") == "16" && Cli.showFlagNat("abc") == "fail" && Cli.showFlagNat("-1") == "fail" && Cli.showFlagInt("-7") == "-7" && Cli.showFlagInt("nope") == "fail" && Cli.resolveIdeDir("/opt/ide", "/home/ide", "examples/editor") == "/opt/ide" && Cli.resolveIdeDir("", "/home/ide", "examples/editor") == "/home/ide" && Cli.resolveIdeDir("", "", "examples/editor") == "examples/editor" && Cli.resolveIdeDir("", "", "") == ""
 
 def cliFmtSrc(): Bool =
   Main.cliDiff(Cli.fmtSrc(Main.srcHi()), Main.wantHi())
