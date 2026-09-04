@@ -1,5 +1,4 @@
-/* Canvas clip against in-tree sk_sw. The pinned Skia archive does not
- * export save/clip/restore. */
+/* Canvas clip against the archive `make lib` actually built. */
 #include "sk_capi.h"
 
 #include <assert.h>
@@ -25,7 +24,7 @@ int main(void) {
   sk_canvas_restore(canvas);
   px = sk_surface_peek_pixels(surf, &px_len);
   assert(px && px_len == 32 * 32 * 4);
-  /* Inside clip: fill. Outside: clear color. */
+  /* Inside clip: fill. Outside: clear color. Peek is RGBA. */
   assert(px[(10 * 32 + 10) * 4] == 240);
   assert(px[(10 * 32 + 10) * 4 + 1] == 240);
   assert(px[(10 * 32 + 10) * 4 + 2] == 240);

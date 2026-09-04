@@ -1,5 +1,6 @@
 #include "png_enc.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -159,8 +160,10 @@ uint8_t *sz_png_encode_rgba(const uint8_t *pixels, int width, int height,
     return NULL;
   if (stride <= 0)
     stride = width * 4;
+  if ((size_t)width > (SIZE_MAX - 1u) / 4u)
+    return NULL;
 
-  filt_len = (size_t)(width * 4 + 1) * (size_t)height;
+  filt_len = ((size_t)width * 4u + 1u) * (size_t)height;
   filt = (uint8_t *)malloc(filt_len);
   if (!filt)
     return NULL;

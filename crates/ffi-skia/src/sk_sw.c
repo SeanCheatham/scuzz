@@ -187,8 +187,12 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
 }
 
 void sk_canvas_save(SkCanvas *canvas) {
-  if (!canvas || canvas->save_n >= SK_CLIP_STACK)
+  if (!canvas)
     return;
+  if (canvas->save_n >= SK_CLIP_STACK) {
+    fputs("sk_capi: clip save stack is full\n", stderr);
+    abort();
+  }
   canvas->save_x0[canvas->save_n] = canvas->clip_x0;
   canvas->save_y0[canvas->save_n] = canvas->clip_y0;
   canvas->save_x1[canvas->save_n] = canvas->clip_x1;
@@ -328,12 +332,36 @@ static const uint8_t FONT8[95][8] = {
     {0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 };
 
+/* Same walk as sk_mono.c: one Unicode code point is one cell. */
+static int sw_utf8_clen(const char *s) {
+  unsigned char c;
+  if (!s || !s[0])
+    return 0;
+  c = (unsigned char)s[0];
+  if (c < 0x80)
+    return 1;
+  if ((c & 0xe0) == 0xc0)
+    return s[1] ? 2 : 1;
+  if ((c & 0xf0) == 0xe0)
+    return (s[1] && s[2]) ? 3 : 1;
+  if ((c & 0xf8) == 0xf0)
+    return (s[1] && s[2] && s[3]) ? 4 : 1;
+  return 1;
+}
+
 float sk_font_measure_string(const char *text, float font_px) {
-  size_t n;
+  const char *p;
+  int n = 0;
   float px = font_px > 0.f ? font_px : 8.f;
   if (!text)
     return 0.f;
-  n = strlen(text);
+  for (p = text; *p;) {
+    int clen = sw_utf8_clen(p);
+    if (clen < 1)
+      clen = 1;
+    p += clen;
+    n++;
+  }
   return (float)n * px;
 }
 
@@ -353,10 +381,13 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
   if (baseline < 0)
     baseline = 0;
   cx = (int)x;
-  for (p = text; *p; p++) {
+  for (p = text; *p;) {
+    int clen = sw_utf8_clen(p);
     unsigned char ch = (unsigned char)*p;
     const uint8_t *glyph;
     int gy = (int)y - baseline;
+    if (clen < 1)
+      clen = 1;
     if (ch < 32 || ch > 126)
       ch = '?';
     glyph = FONT8[ch - 32];
@@ -384,6 +415,7 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
       }
     }
     cx += advance;
+    p += clen;
   }
 }
 
@@ -448,7 +480,7 @@ int sk_encode_png_to_file(const SkSurface *surface, const char *path) {
   size_t len = 0;
   FILE *f;
   size_t n;
-  if (!sk_encode_png(surface, &bytes, &len))
+  if (!path || !sk_encode_png(surface, &bytes, &len))
     return 0;
   f = fopen(path, "wb");
   if (!f) {
