@@ -659,6 +659,8 @@ def tupleProof(): IO[Unit] =
     _ <- IO.println(s"tri:${if (tok) "y" else "n"}")
     _ <- IO.println(s"rot:${r3._1}")
     _ <- IO.println(s"rot:${Str.fromInt(r3._3)}")
+    _ <- IO.println(Str.concat("t5:", Str.fromInt((1, 2, 3, 4, 5)._5)))
+    _ <- IO.println(Str.concat("t8:", Str.fromInt((1, 2, 3, 4, 5, 6, 7, 8)._8)))
   } yield ()
 
 def eqProof(): IO[Unit] =
@@ -824,8 +826,10 @@ b"""
     _ <- IO.println(s"defarg:${addDefault(3)}")
     _ <- IO.println(s"defargN:${addDefault(n = 3)}")
     _ <- IO.println(s"defarg2:${addDefault(3, 4)}")
+    _ <- IO.println(s"defargM:${addDefault(3, m = 4)}")
     _ <- IO.println(s"greet:${greet("hi")}")
     _ <- IO.println(s"greetQ:${greet("hi", "?")}")
+    _ <- IO.println(s"greetP:${greet("hi", punct = "?")}")
     _ <- IO.println(s"copy:${sum(Point(3, 5).copy(y = 9))}")
     _ <- IO.println(s"copyPos:${sum(Point(3, 5).copy(1))}")
     _ <- IO.println(s"copyBox:${Str.fromInt(Box(4).copy(x = 5).get())}")

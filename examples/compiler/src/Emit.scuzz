@@ -22,6 +22,9 @@ import Check.withImportFuns
 import Check.fileOf
 import Check.locOf
 import Check.srcOfStem
+import Check.alignCall
+import Check.isTupField
+import Check.tupIdx
 
 def noStr(): List[String] =
   []
@@ -82,7 +85,22 @@ def _escLl(s: String, i: Int, b: Builder): String =
   if (i >= Str.len(s)) Builder.result(b) else _escLl2(s, i, b, Str.charAt(s, i))
 
 def _escLl2(s: String, i: Int, b: Builder, c: Int): String =
-  _escLl(s, i + 1, Builder.append(b, if (c == 34) "\\22" else if (c == 92) "\\\\" else if (c == 10) "\\0A" else Str.slice(s, i, i + 1)))
+  _escLl(s, i + 1, Builder.append(b, escLlCp(s, i, c)))
+
+def escLlCp(s: String, i: Int, c: Int): String =
+  if (c == 34) "\\22" else if (c == 92) "\\\\" else if (c >= 32 && c <= 126) Str.slice(s, i, i + 1) else escUtf8(c)
+
+def escUtf8(c: Int): String =
+  if (c < 128) escByte(c) else if (c < 2048) Str.concat(escByte(192 + c / 64), escByte(128 + c % 64)) else if (c < 65536) Str.concat(escByte(224 + c / 4096), Str.concat(escByte(128 + c / 64 % 64), escByte(128 + c % 64))) else Str.concat(escByte(240 + c / 262144), Str.concat(escByte(128 + c / 4096 % 64), Str.concat(escByte(128 + c / 64 % 64), escByte(128 + c % 64))))
+
+def escByte(n: Int): String =
+  Str.concat("\\", hexU2(n))
+
+def hexU2(n: Int): String =
+  Str.concat(hexU(n / 16), hexU(n % 16))
+
+def hexU(n: Int): String =
+  Str.slice("0123456789ABCDEF", n, n + 1)
 
 def strArr(s: String): Int =
   Str.byteLen(s) + 1
@@ -182,7 +200,10 @@ def cat6(a: String, b: String, c: String, d: String, e: String, f: String): Stri
   Builder.result(Builder.append(Builder.append(Builder.append(Builder.append(Builder.append(Builder.append(Builder.empty(), a), b), c), d), e), f))
 
 def llvmBin(op: String): String =
-  if (op == "+") "add" else if (op == "-") "sub" else if (op == "*") "mul" else if (op == "/") "sdiv" else if (op == "%") "srem" else if (op == "&") "and" else if (op == "|") "or" else if (op == "^") "xor" else if (op == "<<") "shl" else if (op == ">>") "ashr" else "add"
+  if (op == "+") "add" else if (op == "-") "sub" else if (op == "*") "mul" else if (op == "/") "sdiv" else if (op == "%") "srem" else if (op == "&") "and" else if (op == "|") "or" else if (op == "^") "xor" else if (op == "<<") "shl" else if (op == ">>") "ashr" else stuckStr()
+
+def stuckStr(): String =
+  stuckStr()
 
 def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   emitExprFid(e, prefix, strs, defs, ens, ps, loc, 0)
@@ -297,8 +318,11 @@ def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens
     case Expr.EFloat(s) => emitFloatBits(s, prefix)
     case Expr.EFor(bs, body, _) => emitExprFid(desugarFor(bs, body), prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EUnit => Slot("", "null", true)
-    case _ => Slot("", "0", false)
+    case _ => emitStuck()
   }
+
+def emitStuck(): Slot =
+  emitStuck()
 
 def emitFloatBits(s: String, prefix: String): Slot =
   Slot(line(Str.concat(tmp(prefix, "fb"), Str.concat("bitcast double ", Str.concat(s, " to i64")))), pct(prefix, "fb"), false)
@@ -449,7 +473,13 @@ def closeBrace(s: String, i: Int, depth: Int): Int =
   if (i >= Str.len(s) || depth <= 0) i else closeBraceCh(s, i, depth, Str.charAt(s, i))
 
 def closeBraceCh(s: String, i: Int, depth: Int, c: Int): Int =
-  if (c == 123) closeBrace(s, i + 1, depth + 1) else if (c == 125) closeBrace(s, i + 1, depth - 1) else closeBrace(s, i + 1, depth)
+  if (c == 34) closeBrace(s, skipQuoted(s, i + 1), depth) else if (c == 123) closeBrace(s, i + 1, depth + 1) else if (c == 125) closeBrace(s, i + 1, depth - 1) else closeBrace(s, i + 1, depth)
+
+def skipQuoted(s: String, i: Int): Int =
+  if (i >= Str.len(s)) i else skipQuotedCh(s, i, Str.charAt(s, i))
+
+def skipQuotedCh(s: String, i: Int, c: Int): Int =
+  if (c == 34) i + 1 else if (c == 92 && i + 1 < Str.len(s)) skipQuoted(s, i + 2) else skipQuoted(s, i + 1)
 
 def interpPartsBrace2(s: String, j: Int, i: Int, lit: String, acc: List[Expr]): List[Expr] =
   interpPartsBrace3(Parse.parseExprList(Lexer.lex(Str.slice(s, i + 2, j - 1)), 0), lit, acc, s, j)
@@ -2170,44 +2200,15 @@ def emitCallKit(f: String, args: List[Expr], prefix: String, strs: List[String],
 def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps, loc) else emitCall2(f, emitArgList(alignArgs(f, args, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), prefix, defs, alignArgs(f, args, defs, modOfLoc(loc)), ens, ps, modOfLoc(loc))
 
-def hasNamedArg(xs: List[Expr]): Bool =
-  !List.isEmpty(xs) && (isNamedArg(List.at(xs, 0)) || hasNamedArg(List.tail(xs)))
-
-def isNamedArg(e: Expr): Bool =
-  e match {
-    case Expr.ENamed(_, _) => true
-    case _ => false
-  }
-
 def alignArgs(f: String, args: List[Expr], defs: List[Fun], mod: String): List[Expr] =
   alignFill(funParamsOf(defs, f, mod), args)
 
 def alignFill(ps: List[Param], args: List[Expr]): List[Expr] =
-  if (List.isEmpty(ps)) args else if (hasNamedArg(args)) alignByParams(ps, args) else fillTail(ps, args, List.len(args))
+  alignFillGot(alignCall(ps, args))
 
-def fillTail(ps: List[Param], args: List[Expr], i: Int): List[Expr] =
-  if (i >= List.len(ps)) args else fillTail(ps, List.concat(args, paramDflt(List.at(ps, i)) :: noExpr()), i + 1)
-
-def paramDflt(p: Param): Expr =
+def alignFillGot(p: (List[Expr], String)): List[Expr] =
   p match {
-    case Param(_, _, _, d) => if (d == "") Expr.EUnit else dfltExpr(d)
-  }
-
-def dfltExpr(d: String): Expr =
-  dfltExprOf(Parse.parseExprList(Lexer.lex(d), 0))
-
-def dfltExprOf(p: (Expr, Int)): Expr =
-  p match {
-    case (e, _) => e
-  }
-
-def namedHas(n: String, args: List[Expr]): Bool =
-  !List.isEmpty(args) && namedHas1(List.at(args, 0), List.tail(args), n)
-
-def namedHas1(h: Expr, rest: List[Expr], n: String): Bool =
-  h match {
-    case Expr.ENamed(nm, _) => nm == n || namedHas(n, rest)
-    case _ => namedHas(n, rest)
+    case (xs, _) => xs
   }
 
 def funParamsOf(defs: List[Fun], f: String, mod: String): List[Param] =
@@ -2219,23 +2220,6 @@ def funParamsOfHit(hit: List[Fun]): List[Param] =
 def funParamsOfD(d: Fun): List[Param] =
   d match {
     case Fun(_, _, _, ps, _, _, _, _) => ps
-  }
-
-def alignByParams(ps: List[Param], args: List[Expr]): List[Expr] =
-  if (List.isEmpty(ps)) noExpr() else namedOrDflt(List.at(ps, 0), args) :: alignByParams(List.tail(ps), args)
-
-def namedOrDflt(p: Param, args: List[Expr]): Expr =
-  p match {
-    case Param(n, _, _, d) => if (d == "" || namedHas(n, args)) namedLookup(n, args) else dfltExpr(d)
-  }
-
-def namedLookup(n: String, args: List[Expr]): Expr =
-  if (List.isEmpty(args)) Expr.EUnit else namedLookup1(List.at(args, 0), List.tail(args), n)
-
-def namedLookup1(h: Expr, rest: List[Expr], n: String): Expr =
-  h match {
-    case Expr.ENamed(nm, inner) => if (nm == n) inner else namedLookup(n, rest)
-    case _ => namedLookup(n, rest)
   }
 
 def emitPropCheckCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
@@ -3282,7 +3266,7 @@ def skipCallScan(v: String): Bool =
   Str.len(v) == 0 || Str.charAt(v, 0) != 37 || isIntSsa(v) || isI64Lit(v)
 
 def hasSubTail(s: String, sub: String): Bool =
-  hasSubAt(s, sub, if (Str.len(s) > 4096) Str.len(s) - 4096 else 0)
+  hasSub(s, sub)
 
 def isIoSlot(v: String): Bool =
   hasSub(v, "_io") || hasSub(v, "_fm")
@@ -3352,9 +3336,6 @@ def emitIfPhi3(prefix: String): String =
 def emitField(recv: Expr, name: String, prefix: String, ens: List[En], ps: List[Param]): Slot =
   if (isTupField(name)) emitTupField(recv, name, prefix, ps) else emitFieldEn(recv, name, prefix, ens, ps)
 
-def isTupField(name: String): Bool =
-  name == "_1" || name == "_2" || name == "_3" || name == "_4"
-
 def emitFieldEn(recv: Expr, name: String, prefix: String, ens: List[En], ps: List[Param]): Slot =
   recv match {
     case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else emitCtor(en, name, prefix, ens)
@@ -3382,7 +3363,7 @@ def emitRecFieldMaybeUnbox(code: String, v: String, prefix: String, unbox: Bool)
 def emitTupField(recv: Expr, name: String, prefix: String, ps: List[Param]): Slot =
   recv match {
     case Expr.EVar(s, _) => emitTupSel(Str.concat("%", s), tupSlots(paramTy(ps, s)), tupIdx(name), prefix, 0)
-    case _ => Slot("", "0", false)
+    case _ => emitStuck()
   }
 
 def emitTupSel(scrut: String, tys: List[String], k: Int, prefix: String, i: Int): Slot =
@@ -5002,9 +4983,6 @@ def tupField(recv: Expr, name: String, ty: String): Expr =
 def tupField2(recv: Expr, idx: Int, ns: List[String]): Expr =
   if (List.isEmpty(ns)) Expr.EMatch(recv, Arm(if (idx == 0) "(__f0, _)" else "(_, __f1)", "", Expr.EVar(if (idx == 0) "__f0" else "__f1", 0)) :: noArm(), 0) else Expr.EMatch(recv, Arm(Str.concat("(", Str.concat(bindsSelect(0, List.len(ns), idx), ")")), "", Expr.EVar(fakeBind(idx), 0)) :: noArm(), 0)
 
-def tupIdx(name: String): Int =
-  if (name == "_1") 0 else if (name == "_2") 1 else if (name == "_3") 2 else if (name == "_4") 3 else 1
-
 def recField(recv: Expr, name: String, ns: List[String], ty: String, ens: List[En]): Expr =
   if (List.isEmpty(ns)) Expr.EField(recv, name, 0) else recFieldGo(recv, name, ns, ty, ens)
 
@@ -5759,18 +5737,24 @@ def fmCountArgsHit(xs: List[Expr]): Int =
 def emitIoMap(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   recv match {
     case Expr.EVar(_, _) => emitCtorCall(recv, "map", args, prefix, strs, defs, ens, ps, loc)
-    case _ => emitFmRt("sz_io_flatmap", recv, wrapIoMapArgs(args), prefix, strs, defs, ens, ps, loc, fid)
+    case _ => emitFmRt("sz_io_flatmap", recv, wrapIoMapArgs(args, ps, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, fid)
   }
 
-def wrapIoMapArgs(args: List[Expr]): List[Expr] =
-  if (List.isEmpty(args)) args else wrapIoMapLam(List.at(args, 0)) :: List.tail(args)
+def wrapIoMapArgs(args: List[Expr], ps: List[Param], defs: List[Fun], mod: String): List[Expr] =
+  if (List.isEmpty(args)) args else wrapIoMapLam(List.at(args, 0), ps, defs, mod) :: List.tail(args)
 
-def wrapIoMapLam(e: Expr): Expr =
+def wrapIoMapLam(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
+  wrapIoMapLam1(wrapPh(e, ps, defs, mod))
+
+def wrapIoMapLam1(e: Expr): Expr =
   e match {
     case Expr.ELam(p, body) => Expr.ELam(p, Expr.ECall("IO.pure", body :: noExpr(), 0))
     case Expr.EMatch(s, arms, _) => Expr.ELam("__p", Expr.ECall("IO.pure", Expr.EMatch(s, arms, 0) :: noExpr(), 0))
-    case _ => Expr.ECall("IO.pure", e :: noExpr(), 0)
+    case _ => Expr.ELam("_ph", Expr.ECall("IO.pure", e :: noExpr(), 0))
   }
+
+def wrapIoMapCont(args: List[Expr]): List[Expr] =
+  if (List.isEmpty(args)) args else wrapIoMapLam1(List.at(args, 0)) :: List.tail(args)
 
 def emitFmRt(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitFmCounted(rt, recv, args, prefix, strs, defs, ens, ps, loc, fid, fmCount(recv) + fmCountArgs(args))
@@ -6031,7 +6015,7 @@ def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], def
 def emitContsMap(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   recv match {
     case Expr.EVar(_, _) => emitContsCtor(recv, args, strs, defs, ens, ps, loc, id)
-    case _ => emitContsFm(recv, wrapIoMapArgs(args), strs, defs, ens, ps, loc, id)
+    case _ => emitContsFm(recv, wrapIoMapCont(args), strs, defs, ens, ps, loc, id)
   }
 
 def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
