@@ -3717,11 +3717,6 @@ static void paint_ring_frac(SkCanvas *c, SzRect f, float t, float frac,
 static void paint_string(SkCanvas *c, const char *s, float x, float y,
                          uint32_t argb, float font_px) {
   SkPaint *p;
-  if (g_clip_on) {
-    if (x >= g_clip.x + g_clip.w || y < g_clip.y ||
-        y - font_px > g_clip.y + g_clip.h)
-      return;
-  }
   p = sk_paint_new();
   if (!p)
     return;
@@ -3734,11 +3729,6 @@ static void paint_string(SkCanvas *c, const char *s, float x, float y,
 static void paint_mono_string(SkCanvas *c, const char *s, float x, float y,
                               uint32_t argb, float font_px) {
   SkPaint *p;
-  if (g_clip_on) {
-    if (x >= g_clip.x + g_clip.w || y < g_clip.y ||
-        y - font_px > g_clip.y + g_clip.h)
-      return;
-  }
   p = sk_paint_new();
   if (!p)
     return;
@@ -4055,8 +4045,11 @@ static void paint_children_clipped(SzView *v, SkCanvas *c, const SzTheme *theme)
     g_clip = v->frame;
     g_clip_on = 1;
   }
+  sk_canvas_save(c);
+  sk_canvas_clip_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h);
   for (i = 0; i < v->child_count; i++)
     paint_node(v->children[i], c, theme);
+  sk_canvas_restore(c);
   g_clip = prev;
   g_clip_on = prev_on;
 }
@@ -4713,6 +4706,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       g_clip = v->frame;
       g_clip_on = 1;
     }
+    sk_canvas_save(c);
+    sk_canvas_clip_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     if (gutter > 0.f)
       paint_rect(c, v->frame.x, v->frame.y, gutter, v->frame.h, theme->background);
@@ -4841,6 +4836,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       if (caret.w > 0.f)
         paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->primary);
     }
+    sk_canvas_restore(c);
     g_clip = prev_clip;
     g_clip_on = prev_on;
     break;

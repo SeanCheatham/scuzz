@@ -68,8 +68,8 @@ extern "C" {
 void *scuzz_skia_surface_make(int width, int height) {
   if (width <= 0 || height <= 0)
     return nullptr;
-  sk_sp<SkSurface> surf =
-      SkSurfaces::Raster(SkImageInfo::MakeN32Premul(width, height));
+  sk_sp<SkSurface> surf = SkSurfaces::Raster(SkImageInfo::Make(
+      width, height, kRGBA_8888_SkColorType, kPremul_SkAlphaType));
   if (!surf)
     return nullptr;
   auto *out = new CapSurface();
@@ -246,6 +246,8 @@ int scuzz_skia_encode_png(const void *surface, uint8_t **out_bytes,
 int scuzz_skia_encode_png_to_file(const void *surface, const char *path) {
   uint8_t *bytes = nullptr;
   size_t len = 0;
+  if (!path)
+    return 0;
   if (!scuzz_skia_encode_png(surface, &bytes, &len))
     return 0;
   SkFILEWStream stream(path);

@@ -113,7 +113,7 @@ IO constructors retain inner nodes and drop the caller ref after the call. Delay
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** is the pinned Skia CPU prebuilt (`third_party/skia/PIN` → `scripts/fetch_skia.sh`). App link uses host zlib/bz2, not brotli. In-tree `sk_sw` is the explicit opt-out (`SCUZZ_SKIA=sk_sw`). `SCUZZ_SKIA=gpu` paints with `sk_sw` and presents through OpenGL (must not change `Ui` session or logical goldens). Impeller / Skia GPU raster stay deferred. Callers depend only on `sk_capi.h`.
+No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** is the pinned Skia CPU prebuilt (`third_party/skia/PIN` → `scripts/fetch_skia.sh`). `make lib` compiles the in-tree shim into that archive so save/clip/restore and RGBA peek match `sk_capi.h`. App link uses host zlib/bz2, not brotli. In-tree `sk_sw` is the explicit opt-out (`SCUZZ_SKIA=sk_sw`). `SCUZZ_SKIA=gpu` paints with `sk_sw` and presents through OpenGL (must not change `Ui` session or logical goldens). Impeller / Skia GPU raster stay deferred. Callers depend only on `sk_capi.h`.
 
 ### IO and impurity
 

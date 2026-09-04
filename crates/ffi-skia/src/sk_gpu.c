@@ -106,16 +106,36 @@ static int gpu_make_current(void) {
   }
   if (!gpu_init_display())
     return 0;
-  if (!eglChooseConfig(g_dpy, cfg_attr, &cfg, 1, &n) || n < 1)
+  if (!eglChooseConfig(g_dpy, cfg_attr, &cfg, 1, &n) || n < 1) {
+    eglTerminate(g_dpy);
+    g_dpy = EGL_NO_DISPLAY;
     return 0;
+  }
   g_surf = eglCreatePbufferSurface(g_dpy, cfg, pb_attr);
-  if (g_surf == EGL_NO_SURFACE)
+  if (g_surf == EGL_NO_SURFACE) {
+    eglTerminate(g_dpy);
+    g_dpy = EGL_NO_DISPLAY;
     return 0;
+  }
   eglBindAPI(EGL_OPENGL_ES_API);
   g_ctx = eglCreateContext(g_dpy, cfg, EGL_NO_CONTEXT, ctx_attr);
-  if (g_ctx == EGL_NO_CONTEXT)
+  if (g_ctx == EGL_NO_CONTEXT) {
+    eglDestroySurface(g_dpy, g_surf);
+    g_surf = EGL_NO_SURFACE;
+    eglTerminate(g_dpy);
+    g_dpy = EGL_NO_DISPLAY;
     return 0;
-  return eglMakeCurrent(g_dpy, g_surf, g_surf, g_ctx) == EGL_TRUE;
+  }
+  if (eglMakeCurrent(g_dpy, g_surf, g_surf, g_ctx) != EGL_TRUE) {
+    eglDestroyContext(g_dpy, g_ctx);
+    eglDestroySurface(g_dpy, g_surf);
+    g_ctx = EGL_NO_CONTEXT;
+    g_surf = EGL_NO_SURFACE;
+    eglTerminate(g_dpy);
+    g_dpy = EGL_NO_DISPLAY;
+    return 0;
+  }
+  return 1;
 }
 
 #endif
