@@ -1,6 +1,8 @@
-record Man(ok: Bool, name: String, version: String, hasUi: Bool, deps: List[(String, String)], err: String)
+record UiMan(width: String, height: String, scale: String, tapN: String, bundleId: String)
 
-record St(sec: String, name: String, version: String, hasUi: Bool, deps: List[(String, String)], err: String)
+record Man(ok: Bool, name: String, version: String, hasUi: Bool, deps: List[(String, String)], ui: UiMan, err: String)
+
+record St(sec: String, name: String, version: String, hasUi: Bool, deps: List[(String, String)], ui: UiMan, err: String)
 
 def noPairs(): List[(String, String)] =
   []
@@ -8,8 +10,11 @@ def noPairs(): List[(String, String)] =
 def noLines(): List[String] =
   []
 
+def defUi(): UiMan =
+  UiMan("200", "120", "1", "", "dev.scuzz.app")
+
 def fail(msg: String): Man =
-  Man(false, "", "0.0.0", false, noPairs(), msg)
+  Man(false, "", "0.0.0", false, noPairs(), defUi(), msg)
 
 def isSpace(c: Int): Bool =
   c == 32 || c == 9
@@ -60,7 +65,7 @@ def pkgKey(k: String): Bool =
   k == "name" || k == "version" || k == "description"
 
 def uiKey(k: String): Bool =
-  k == "default_runtime" || k == "headless_size" || k == "headless_scale" || k == "tap_button" || k == "tap_text" || k == "bundle_id"
+  k == "default_runtime" || k == "headless_size" || k == "headless_scale" || k == "tap_button" || k == "bundle_id"
 
 def unkTable(t: String): String =
   Str.concat("unknown scuzz.toml table [", Str.concat(t, "]; known tables: package, dependencies, ui"))
@@ -69,7 +74,7 @@ def unkPkg(k: String): String =
   Str.concat("unknown scuzz.toml key `", Str.concat(k, "` in [package]; known keys: name, version, description"))
 
 def unkUi(k: String): String =
-  Str.concat("unknown scuzz.toml key `", Str.concat(k, "` in [ui]; known keys: default_runtime, headless_size, headless_scale, tap_button, tap_text, bundle_id"))
+  Str.concat("unknown scuzz.toml key `", Str.concat(k, "` in [ui]; known keys: default_runtime, headless_size, headless_scale, tap_button, bundle_id"))
 
 def strDep(): String =
   "string dependencies are unsupported; use `{ path = \"...\" }`"
@@ -89,14 +94,61 @@ def missName(): String =
 def emptyBundle(): String =
   "bundle_id must not be empty"
 
+def badRuntime(): String =
+  "default_runtime must be headless, desktop, or mobile"
+
+def badSize(): String =
+  "headless_size must be a pair of positive integers"
+
+def badScale(): String =
+  "headless_scale must be positive"
+
 def start(): St =
-  St("", "", "0.0.0", false, noPairs(), "")
+  St("", "", "0.0.0", false, noPairs(), defUi(), "")
 
 def withErr(st: St, msg: String): St =
-  St(st.sec, st.name, st.version, st.hasUi, st.deps, msg)
+  St(st.sec, st.name, st.version, st.hasUi, st.deps, stUi(st), msg)
+
+def withUi(st: St, ui: UiMan): St =
+  St(st.sec, st.name, st.version, st.hasUi, st.deps, ui, st.err)
+
+def stUi(st: St): UiMan =
+  st match {
+    case St(_sec, _name, _ver, _has, _deps, ui, _err) => ui
+  }
+
+def manUi(m: Man): UiMan =
+  m match {
+    case Man(_ok, _name, _ver, _has, _deps, ui, _err) => ui
+  }
+
+def uiWidth(ui: UiMan): String =
+  ui match {
+    case UiMan(w, _h, _sc, _t, _id) => w
+  }
+
+def uiHeight(ui: UiMan): String =
+  ui match {
+    case UiMan(_w, h, _sc, _t, _id) => h
+  }
+
+def uiScale(ui: UiMan): String =
+  ui match {
+    case UiMan(_w, _h, sc, _t, _id) => sc
+  }
+
+def uiTap(ui: UiMan): String =
+  ui match {
+    case UiMan(_w, _h, _sc, t, _id) => t
+  }
+
+def uiBundle(ui: UiMan): String =
+  ui match {
+    case UiMan(_w, _h, _sc, _t, id) => id
+  }
 
 def finish(st: St): Man =
-  if (Str.len(st.err) > 0) fail(st.err) else if (st.name == "") fail(missName()) else Man(true, st.name, st.version, st.hasUi, List.reverse(st.deps), "")
+  if (Str.len(st.err) > 0) fail(st.err) else if (st.name == "") fail(missName()) else Man(true, st.name, st.version, st.hasUi, List.reverse(st.deps), stUi(st), "")
 
 def parse(text: String): Man =
   finish(parseLines(linesOf(text), start()))
@@ -108,7 +160,7 @@ def parseLine(line: String, rest: List[String], st: St): St =
   if (line == "" || Str.startsWith(line, "#")) parseLines(rest, st) else if (Str.startsWith(line, "[")) parseSec(tableOf(line), rest, st) else parseKey(line, rest, st)
 
 def parseSec(t: String, rest: List[String], st: St): St =
-  if (t == "") withErr(st, unkTable(t)) else if (!knownTable(t)) withErr(st, unkTable(t)) else parseLines(rest, St(t, st.name, st.version, st.hasUi || t == "ui", st.deps, st.err))
+  if (t == "") withErr(st, unkTable(t)) else if (!knownTable(t)) withErr(st, unkTable(t)) else parseLines(rest, St(t, st.name, st.version, st.hasUi || t == "ui", st.deps, stUi(st), st.err))
 
 def parseKey(line: String, rest: List[String], st: St): St =
   parseKey2(splitEq(line), rest, st)
@@ -117,10 +169,63 @@ def parseKey2(kv: (String, String), rest: List[String], st: St): St =
   if (st.sec == "package") parsePkg(kv._1, kv._2, rest, st) else if (st.sec == "dependencies") parseDep(kv._1, kv._2, rest, st) else if (st.sec == "ui") parseUi(kv._1, kv._2, rest, st) else withErr(st, unkTable(st.sec))
 
 def parsePkg(k: String, v: String, rest: List[String], st: St): St =
-  if (!pkgKey(k)) withErr(st, unkPkg(k)) else if (k == "name") parseLines(rest, St(st.sec, unquote(v), st.version, st.hasUi, st.deps, st.err)) else if (k == "version") parseLines(rest, St(st.sec, st.name, unquote(v), st.hasUi, st.deps, st.err)) else parseLines(rest, st)
+  if (!pkgKey(k)) withErr(st, unkPkg(k)) else if (k == "name") parseLines(rest, St(st.sec, unquote(v), st.version, st.hasUi, st.deps, stUi(st), st.err)) else if (k == "version") parseLines(rest, St(st.sec, st.name, unquote(v), st.hasUi, st.deps, stUi(st), st.err)) else parseLines(rest, st)
 
 def parseUi(k: String, v: String, rest: List[String], st: St): St =
-  if (!uiKey(k)) withErr(st, unkUi(k)) else if (k == "bundle_id" && unquote(v) == "") withErr(st, emptyBundle()) else parseLines(rest, st)
+  if (!uiKey(k)) withErr(st, unkUi(k)) else parseUiVal(k, v, rest, st)
+
+def parseUiVal(k: String, v: String, rest: List[String], st: St): St =
+  if (k == "default_runtime") parseRuntime(unquote(v), rest, st) else if (k == "headless_size") parseSize(v, rest, st) else if (k == "headless_scale") parseScale(trim(v), rest, st) else if (k == "tap_button") parseTap(trim(v), rest, st) else parseBundle(unquote(v), rest, st)
+
+def parseRuntime(v: String, rest: List[String], st: St): St =
+  if (v == "headless" || v == "desktop" || v == "mobile") parseLines(rest, st) else withErr(st, badRuntime())
+
+def parseSize(raw: String, rest: List[String], st: St): St =
+  parseSizeGot(sizePairVal(trim(raw)), rest, st)
+
+def parseSizeGot(wh: (Bool, String, String), rest: List[String], st: St): St =
+  wh match {
+    case (ok, w, h) => if (!ok) withErr(st, badSize()) else parseLines(rest, withUi(st, UiMan(w, h, uiScale(stUi(st)), uiTap(stUi(st)), uiBundle(stUi(st)))))
+  }
+
+def sizePairVal(v: String): (Bool, String, String) =
+  if (Str.len(v) < 5 || Str.charAt(v, 0) != 91 || Str.charAt(v, Str.len(v) - 1) != 93) (false, "", "") else sizePairInner(trim(Str.slice(v, 1, Str.len(v) - 1)))
+
+def sizePairInner(inner: String): (Bool, String, String) =
+  sizePairComma(inner, findComma(inner, 0))
+
+def sizePairComma(inner: String, c: Int): (Bool, String, String) =
+  if (c < 0) (false, "", "") else sizePairWH(trim(Str.slice(inner, 0, c)), trim(Str.slice(inner, c + 1, Str.len(inner))))
+
+def sizePairWH(w: String, h: String): (Bool, String, String) =
+  if (!isPosInt(w) || !isPosInt(h)) (false, "", "") else (true, w, h)
+
+def isPosInt(s: String): Bool =
+  s != "" && allDigits(s, 0) && Str.toInt(s, 0) > 0
+
+def allDigits(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) true else if (Str.charAt(s, i) < 48 || Str.charAt(s, i) > 57) false else allDigits(s, i + 1)
+
+def parseScale(v: String, rest: List[String], st: St): St =
+  if (!isPosScale(v)) withErr(st, badScale()) else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), v, uiTap(stUi(st)), uiBundle(stUi(st)))))
+
+def isPosScale(s: String): Bool =
+  if (s == "" || Str.charAt(s, 0) == 45) false else scaleChars(s, 0) && hasNonZero(s, 0)
+
+def scaleChars(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) i > 0 else scaleChar(Str.charAt(s, i), s, i)
+
+def scaleChar(c: Int, s: String, i: Int): Bool =
+  if (c == 46 || c >= 48 && c <= 57) scaleChars(s, i + 1) else false
+
+def hasNonZero(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) false else if (Str.charAt(s, i) >= 49 && Str.charAt(s, i) <= 57) true else hasNonZero(s, i + 1)
+
+def parseTap(v: String, rest: List[String], st: St): St =
+  if (!allDigits(v, 0) || v == "") withErr(st, "tap_button must be a non-negative integer") else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), uiScale(stUi(st)), v, uiBundle(stUi(st)))))
+
+def parseBundle(v: String, rest: List[String], st: St): St =
+  if (v == "") withErr(st, emptyBundle()) else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), uiScale(stUi(st)), uiTap(stUi(st)), v)))
 
 def parseDep(name: String, raw: String, rest: List[String], st: St): St =
   parseDep2(name, trim(raw), rest, st)
@@ -158,5 +263,5 @@ def takePathHd(name: String, h: (String, String), restXs: List[(String, String)]
   }
 
 def takePath3(name: String, path: String, found: Bool, rest: List[String], st: St): St =
-  if (!found) withErr(st, needPath()) else if (path == "") withErr(st, emptyPath()) else parseLines(rest, St(st.sec, st.name, st.version, st.hasUi, (name, path) :: st.deps, st.err))
+  if (!found) withErr(st, needPath()) else if (path == "") withErr(st, emptyPath()) else parseLines(rest, St(st.sec, st.name, st.version, st.hasUi, (name, path) :: st.deps, stUi(st), st.err))
 
