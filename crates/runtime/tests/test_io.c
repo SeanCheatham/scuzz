@@ -6092,6 +6092,38 @@ int main(void) {
         assert(r.ok);
         assert(strcmp(sz_string_cstr((SzString *)r.value), "hi") == 0);
         sz_release(r.value);
+        {
+          char blob[32];
+          SzString *body32;
+          memset(blob, 'x', 32);
+          body32 = sz_string_from_bytes(blob, 32);
+          r = sz_io_unsafe_run(both_drop(sz_net_tcp_read(a, 8),
+                                        sz_net_tcp_write(b, body32)));
+          sz_release(body32);
+          assert(r.ok);
+          pair = (SzPair *)r.value;
+          assert(sz_string_len((SzString *)pair->left) == 8);
+          sz_pair_free(pair);
+          r = sz_io_unsafe_run(sz_net_tcp_read(a, 24));
+          assert(r.ok);
+          assert(sz_string_len((SzString *)r.value) == 24);
+          sz_release(r.value);
+        }
+        {
+          char *blob = (char *)malloc(10000);
+          SzString *big;
+          assert(blob);
+          memset(blob, 'y', 10000);
+          big = sz_string_from_bytes(blob, 10000);
+          free(blob);
+          r = sz_io_unsafe_run(sz_net_tcp_write(b, big));
+          sz_release(big);
+          assert(r.ok);
+          r = sz_io_unsafe_run(sz_net_tcp_read(a, 10000));
+          assert(r.ok);
+          assert(sz_string_len((SzString *)r.value) == 10000);
+          sz_release(r.value);
+        }
         r = sz_io_unsafe_run(sz_net_tcp_close(a));
         assert(r.ok);
         r = sz_io_unsafe_run(sz_net_tcp_close(b));
@@ -6125,6 +6157,48 @@ int main(void) {
           assert(sz_unbox_i64(inner->left) == 19092);
         }
         sz_pair_free(pair);
+        {
+          SzString *host = sz_string_from_cstr("127.0.0.1");
+          SzString *ma = sz_string_from_cstr("a");
+          SzString *mb = sz_string_from_cstr("b");
+          r = sz_io_unsafe_run(sz_net_udp_send(a, host, 19093, ma));
+          assert(r.ok);
+          r = sz_io_unsafe_run(sz_net_udp_send(a, host, 19093, mb));
+          assert(r.ok);
+          sz_release(ma);
+          sz_release(mb);
+          r = sz_io_unsafe_run(sz_net_udp_recv(b, 32));
+          assert(r.ok);
+          pair = (SzPair *)r.value;
+          assert(strcmp(sz_string_cstr((SzString *)((SzPair *)pair->right)->right),
+                        "a") == 0);
+          sz_pair_free(pair);
+          r = sz_io_unsafe_run(sz_net_udp_recv(b, 32));
+          assert(r.ok);
+          pair = (SzPair *)r.value;
+          assert(strcmp(sz_string_cstr((SzString *)((SzPair *)pair->right)->right),
+                        "b") == 0);
+          sz_pair_free(pair);
+          {
+            SzString *bad = sz_string_from_cstr("nope");
+            SzString *msg = sz_string_from_cstr("x");
+            r = sz_io_unsafe_run(sz_net_udp_send(a, bad, 19093, msg));
+            assert(!r.ok);
+            assert(r.error &&
+                   strstr(sz_string_cstr(r.error->message), "IP literal") != NULL);
+            sz_error_free(r.error);
+            sz_release(bad);
+            bad = sz_string_from_cstr("::1");
+            r = sz_io_unsafe_run(sz_net_udp_send(a, bad, 19093, msg));
+            assert(!r.ok);
+            assert(r.error &&
+                   strstr(sz_string_cstr(r.error->message), "send failed") != NULL);
+            sz_error_free(r.error);
+            sz_release(bad);
+            sz_release(msg);
+          }
+          sz_release(host);
+        }
         r = sz_io_unsafe_run(sz_net_udp_close(a));
         assert(r.ok);
         r = sz_io_unsafe_run(sz_net_udp_close(b));
@@ -6897,6 +6971,91 @@ int main(void) {
     assert(r.error);
     assert(!strstr(sz_string_cstr(r.error->message), "only http"));
     sz_error_free(r.error);
+  }
+
+  /* Live TCP echo and a 10000-byte read (drain until n, not a 4096 cap). */
+  {
+    SzNetSock *ln;
+    SzNetSock *a;
+    SzNetSock *b;
+    SzPair *pair;
+    SzString *host = sz_string_from_cstr("127.0.0.1");
+    SzString *hi = sz_string_from_cstr("hello");
+    r = sz_io_unsafe_run(sz_net_tcp_listen(19111));
+    assert(r.ok);
+    ln = (SzNetSock *)r.value;
+    r = sz_io_unsafe_run(both_drop(sz_net_tcp_accept(ln),
+                                  sz_net_tcp_connect(host, 19111)));
+    sz_release(host);
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    a = (SzNetSock *)pair->left;
+    b = (SzNetSock *)pair->right;
+    sz_retain(a);
+    sz_retain(b);
+    sz_pair_free(pair);
+    r = sz_io_unsafe_run(sz_net_tcp_write(b, hi));
+    sz_release(hi);
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_net_tcp_read(a, 16));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "hello") == 0);
+    sz_release(r.value);
+    {
+      char *blob = (char *)malloc(10000);
+      SzString *big;
+      assert(blob);
+      memset(blob, 'z', 10000);
+      big = sz_string_from_bytes(blob, 10000);
+      free(blob);
+      r = sz_io_unsafe_run(sz_net_tcp_write(b, big));
+      sz_release(big);
+      assert(r.ok);
+      r = sz_io_unsafe_run(sz_net_tcp_read(a, 10000));
+      assert(r.ok);
+      assert(sz_string_len((SzString *)r.value) == 10000);
+      sz_release(r.value);
+    }
+    r = sz_io_unsafe_run(sz_net_tcp_close(a));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_net_tcp_close(b));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_net_tcp_close(ln));
+    assert(r.ok);
+    sz_release(a);
+    sz_release(b);
+    sz_release(ln);
+  }
+
+  /* Live UDP ping on IPv4 localhost. */
+  {
+    SzNetSock *a;
+    SzNetSock *b;
+    SzPair *pair;
+    SzString *host = sz_string_from_cstr("127.0.0.1");
+    SzString *msg = sz_string_from_cstr("ping");
+    r = sz_io_unsafe_run(sz_net_udp_bind(19112));
+    assert(r.ok);
+    a = (SzNetSock *)r.value;
+    r = sz_io_unsafe_run(sz_net_udp_bind(19113));
+    assert(r.ok);
+    b = (SzNetSock *)r.value;
+    r = sz_io_unsafe_run(sz_net_udp_send(a, host, 19113, msg));
+    sz_release(host);
+    sz_release(msg);
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_net_udp_recv(b, 32));
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(strcmp(sz_string_cstr((SzString *)((SzPair *)pair->right)->right),
+                  "ping") == 0);
+    sz_pair_free(pair);
+    r = sz_io_unsafe_run(sz_net_udp_close(a));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_net_udp_close(b));
+    assert(r.ok);
+    sz_release(a);
+    sz_release(b);
   }
 
   /* Client connects and never sends GET: serve fails in ~1s instead of hanging. */

@@ -881,7 +881,7 @@ void sz_net_test_http_host_header(const char *host, int port, char *out,
   http_fmt_hosthdr(out, cap, host, port, 80);
 }
 
-static void http_build_req(HttpSt *st) {
+static int http_build_req(HttpSt *st) {
   char hosthdr[300];
   const char *method = st->method[0] ? st->method : "GET";
   const char *body = st->req_body ? sz_string_cstr(st->req_body) : "";
@@ -902,8 +902,8 @@ static void http_build_req(HttpSt *st) {
     hn = snprintf(hdr, sizeof hdr,
                   "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
                   method, st->path, hosthdr);
-  if (hn < 0)
-    hn = 0;
+  if (hn < 0 || (size_t)hn >= sizeof hdr)
+    return 0;
   nreq = (size_t)hn + (has_body ? blen : 0);
   st->req = (char *)sz_alloc(nreq + 1);
   memcpy(st->req, hdr, (size_t)hn);
@@ -916,6 +916,7 @@ static void http_build_req(HttpSt *st) {
   st->acc[0] = '\0';
   st->acc_cap = 1;
   st->total = 0;
+  return 1;
 }
 
 static SSL_CTX *g_http_ssl_ctx;
@@ -1011,7 +1012,11 @@ static void *http_tcp_connect(void *env) {
       st->fd4 = -1;
       st->fd6 = -1;
     }
-    http_build_req(st);
+    if (!http_build_req(st)) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "request failed");
+      return r;
+    }
     st->connect_deadline_ms = sz_clock_monotonic_ms_sync() + HE_CONNECT_MS;
     if (st->he_wait4)
       st->he_v4_at_ms = sz_clock_monotonic_ms_sync() + HE_A_DELAY_MS;
@@ -1025,7 +1030,11 @@ static void *http_tcp_connect(void *env) {
     return r;
   }
   st->fd = fd;
-  http_build_req(st);
+  if (!http_build_req(st)) {
+    r->is_err = 1;
+    r->as.err = http_err(st, "request failed");
+    return r;
+  }
   st->connect_deadline_ms = sz_clock_monotonic_ms_sync() + HE_CONNECT_MS;
   r->is_err = 0;
   return r;
@@ -1914,7 +1923,7 @@ static int serve_bind_v6(int port) {
 
 static int serve_accept_wait(int err) {
   return err == EAGAIN || err == EWOULDBLOCK || err == ECONNABORTED ||
-         err == EMFILE || err == ENFILE || err == EINTR;
+         err == EINTR;
 }
 
 static void *serve_ensure_listen(void *env) {
@@ -2085,6 +2094,12 @@ static void *serve_read_req(void *env) {
       r->is_err = 1;
       r->drop = 1;
       r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
+      return r;
+    }
+    if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: request timed out");
       return r;
     }
     r->retry = 1;

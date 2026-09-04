@@ -12,8 +12,8 @@
 #include <unistd.h>
 
 /* Blessed TCP and UDP. Listen/bind is localhost. Connect takes IPv4/IPv6
- * literals or localhost. No DNS. Fibers park on poll. TestRuntime uses a
- * mailbox. Opaque SzNetSock owns the fds. */
+ * literals or localhost. UDP bind is IPv4 only. No DNS. Fibers park on poll.
+ * TestRuntime uses a mailbox. Opaque SzNetSock owns the fds. */
 
 enum { NS_TCP = 1, NS_LISTEN = 2, NS_UDP = 3 };
 enum { NS_IO_MS = 1000 };
@@ -143,6 +143,28 @@ static int parse_tcp_host(const char *host, struct sockaddr_storage *ss,
     a6->sin6_port = htons((uint16_t)port);
     *len = sizeof(*a6);
     return 1;
+  }
+  return 0;
+}
+
+int sz_net_host_family(const char *host, char *canon, size_t canon_cap) {
+  struct sockaddr_storage ss;
+  socklen_t len = 0;
+  if (canon && canon_cap)
+    canon[0] = '\0';
+  if (!parse_tcp_host(host, &ss, &len, 1))
+    return 0;
+  if (ss.ss_family == AF_INET) {
+    struct sockaddr_in *a = (struct sockaddr_in *)&ss;
+    if (canon && canon_cap)
+      inet_ntop(AF_INET, &a->sin_addr, canon, (socklen_t)canon_cap);
+    return 4;
+  }
+  if (ss.ss_family == AF_INET6) {
+    struct sockaddr_in6 *a = (struct sockaddr_in6 *)&ss;
+    if (canon && canon_cap)
+      inet_ntop(AF_INET6, &a->sin6_addr, canon, (socklen_t)canon_cap);
+    return 6;
   }
   return 0;
 }
@@ -492,7 +514,7 @@ static void *accept_cleanup(void *env) {
 
 static int accept_wait_err(int err) {
   return err == EAGAIN || err == EWOULDBLOCK || err == ECONNABORTED ||
-         err == EMFILE || err == ENFILE || err == EINTR;
+         err == EINTR;
 }
 
 static void *accept_try(void *env) {
@@ -587,11 +609,39 @@ SzIo *sz_net_tcp_accept(SzNetSock *listener) {
   }
 }
 
+static int read_acc_append(ConnOp *op, const char *p, size_t n) {
+  size_t need;
+  if (!op || !p || n == 0)
+    return 1;
+  need = op->acc_len + n;
+  if (need > op->acc_cap) {
+    size_t cap = op->acc_cap ? op->acc_cap : 64;
+    char *nb;
+    while (cap < need)
+      cap *= 2;
+    if (cap > NS_READ_MAX)
+      cap = NS_READ_MAX;
+    if (need > cap)
+      n = cap - op->acc_len;
+    if (n == 0)
+      return 1;
+    need = op->acc_len + n;
+    nb = (char *)sz_alloc(cap);
+    if (op->acc_len)
+      memcpy(nb, op->acc, op->acc_len);
+    sz_free(op->acc);
+    op->acc = nb;
+    op->acc_cap = cap;
+  }
+  memcpy(op->acc + op->acc_len, p, n);
+  op->acc_len += n;
+  return 1;
+}
+
 static void *read_try(void *env) {
   ConnOp *op = (ConnOp *)env;
   SockResult *r = (SockResult *)rc_box_zero(sizeof(SockResult));
   char buf[4096];
-  ssize_t n;
   size_t want;
   if (!op->sock || op->sock->fd < 0) {
     r->is_err = 1;
@@ -605,22 +655,41 @@ static void *read_try(void *env) {
   }
   if (want > NS_READ_MAX)
     want = NS_READ_MAX;
-  n = read(op->sock->fd, buf, want < sizeof buf ? want : sizeof buf);
-  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-    if (sz_clock_monotonic_ms_sync() >= op->deadline_ms) {
-      r->is_err = 1;
-      r->as.err = sz_error_new(6, "Net.tcpRead: timed out");
+  for (;;) {
+    size_t room;
+    ssize_t n;
+    if (op->acc_len >= want)
+      break;
+    room = want - op->acc_len;
+    if (room > sizeof buf)
+      room = sizeof buf;
+    n = read(op->sock->fd, buf, room);
+    if (n > 0) {
+      read_acc_append(op, buf, (size_t)n);
+      continue;
+    }
+    if (n == 0) {
+      r->as.ok = sz_string_from_bytes(op->acc ? op->acc : "", op->acc_len);
       return r;
     }
-    r->retry = 1;
-    return r;
-  }
-  if (n < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      if (op->acc_len > 0) {
+        r->as.ok = sz_string_from_bytes(op->acc, op->acc_len);
+        return r;
+      }
+      if (sz_clock_monotonic_ms_sync() >= op->deadline_ms) {
+        r->is_err = 1;
+        r->as.err = sz_error_new(6, "Net.tcpRead: timed out");
+        return r;
+      }
+      r->retry = 1;
+      return r;
+    }
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.tcpRead: read failed");
     return r;
   }
-  r->as.ok = sz_string_from_bytes(buf, (size_t)n);
+  r->as.ok = sz_string_from_bytes(op->acc, op->acc_len);
   return r;
 }
 

@@ -1552,6 +1552,7 @@ void sz_testrt_net_set_last_serve_body(const char *body) {
 
 enum { FAKE_CAP = 64 };
 enum { FK_TCP = 1, FK_LISTEN = 2, FK_UDP = 3 };
+enum { FAKE_READ_MAX = 1024u * 1024u };
 
 typedef struct FakeDgram {
   char *host;
@@ -1572,10 +1573,12 @@ typedef struct FakeSock {
   size_t len;
   size_t cap;
   SzDeferred *read_wait;
+  size_t read_want;
   SzDeferred *accept_wait;
   int accept_q[16];
   int accept_n;
   FakeDgram *dgrams;
+  FakeDgram *dgrams_tail;
   SzDeferred *recv_wait;
 } FakeSock;
 
@@ -1776,9 +1779,9 @@ static SzNetSock *fake_take_accept(FakeSock *ln) {
   return fake_wrap(srv);
 }
 
-static void fake_deliver_accept(FakeSock *ln, FakeSock *server) {
+static int fake_deliver_accept(FakeSock *ln, FakeSock *server) {
   if (!ln || !server)
-    return;
+    return 0;
   if (ln->accept_wait) {
     SzNetSock *wrap = fake_wrap(server);
     SzDeferred *w = ln->accept_wait;
@@ -1786,11 +1789,12 @@ static void fake_deliver_accept(FakeSock *ln, FakeSock *server) {
     sz_deferred_complete_now(w, wrap);
     sz_release(w);
     sz_release(wrap);
-    return;
+    return 1;
   }
   if (ln->accept_n >= 16)
-    return;
+    return 0;
   ln->accept_q[ln->accept_n++] = server->id;
+  return 1;
 }
 
 static void fake_flush_connects(FakeSock *ln) {
@@ -1804,20 +1808,35 @@ static void fake_flush_connects(FakeSock *ln) {
     *pp = p->next;
     {
       FakeSock *cli = fake_alloc(FK_TCP, ln->port);
-      FakeSock *srv = fake_alloc(FK_TCP, ln->port);
+      FakeSock *srv;
       SzNetSock *wrap;
-      if (!cli || !srv) {
+      if (!cli) {
+        sz_deferred_fail_now(p->wait, sz_error_new(6, "Net.tcpConnect: full"));
+        sz_release(p->wait);
+        sz_free(p);
+        continue;
+      }
+      srv = fake_alloc(FK_TCP, ln->port);
+      if (!srv) {
+        fake_slot_clear(cli);
         sz_deferred_fail_now(p->wait, sz_error_new(6, "Net.tcpConnect: full"));
         sz_release(p->wait);
         sz_free(p);
         continue;
       }
       fake_pair(cli, srv);
+      if (!fake_deliver_accept(ln, srv)) {
+        fake_slot_clear(cli);
+        fake_slot_clear(srv);
+        sz_deferred_fail_now(p->wait, sz_error_new(6, "Net.tcpConnect: connect failed"));
+        sz_release(p->wait);
+        sz_free(p);
+        continue;
+      }
       wrap = fake_wrap(cli);
       sz_deferred_complete_now(p->wait, wrap);
       sz_release(p->wait);
       sz_release(wrap);
-      fake_deliver_accept(ln, srv);
     }
     sz_free(p);
   }
@@ -1844,11 +1863,19 @@ static BoxResult *fake_connect_pair(int64_t port) {
   if (!ln)
     return NULL;
   cli = fake_alloc(FK_TCP, port);
-  srv = fake_alloc(FK_TCP, port);
-  if (!cli || !srv)
+  if (!cli)
     return box_err("Net.tcpConnect: connect failed");
+  srv = fake_alloc(FK_TCP, port);
+  if (!srv) {
+    fake_slot_clear(cli);
+    return box_err("Net.tcpConnect: connect failed");
+  }
   fake_pair(cli, srv);
-  fake_deliver_accept(ln, srv);
+  if (!fake_deliver_accept(ln, srv)) {
+    fake_slot_clear(cli);
+    fake_slot_clear(srv);
+    return box_err("Net.tcpConnect: connect failed");
+  }
   return box_ok(fake_wrap(cli));
 }
 
@@ -1993,6 +2020,8 @@ static void *tcp_read_now(void *env) {
   if (!f || f->closed)
     return box_err("Net.tcpRead: closed");
   want = op->n > 0 ? (size_t)op->n : 0;
+  if (want > FAKE_READ_MAX)
+    want = FAKE_READ_MAX;
   if (want == 0)
     return box_ok(sz_string_from_cstr(""));
   if (f->len > 0)
@@ -2011,13 +2040,17 @@ static SzIo *after_tcp_read(void *value, void *env) {
   if (!f || f->closed)
     return sz_io_fail_cstr("Net.tcpRead: closed");
   want = op->n > 0 ? (size_t)op->n : 0;
+  if (want > FAKE_READ_MAX)
+    want = FAKE_READ_MAX;
   if (f->len > 0)
     return unwrap_box(box_ok(fake_take(f, want)), NULL);
   d = sz_deferred_make();
   f->read_wait = d;
+  f->read_want = want;
   if (f->len > 0) {
     SzString *got = fake_take(f, want);
     f->read_wait = NULL;
+    f->read_want = 0;
     sz_release(d);
     return pure_drop(got);
   }
@@ -2058,8 +2091,9 @@ static void *tcp_write_now(void *env) {
   if (peer->read_wait) {
     SzDeferred *w = peer->read_wait;
     SzString *got;
-    size_t want = n;
+    size_t want = peer->read_want;
     peer->read_wait = NULL;
+    peer->read_want = 0;
     got = fake_take(peer, want);
     sz_deferred_complete_now(w, got);
     sz_release(w);
@@ -2136,17 +2170,46 @@ typedef struct UdpSendPack {
   int64_t port;
 } UdpSendPack;
 
+static void fake_dgram_push(FakeSock *dst, FakeDgram *d) {
+  d->next = NULL;
+  if (dst->dgrams_tail)
+    dst->dgrams_tail->next = d;
+  else
+    dst->dgrams = d;
+  dst->dgrams_tail = d;
+}
+
+static FakeDgram *fake_dgram_pop(FakeSock *f) {
+  FakeDgram *d = f->dgrams;
+  if (!d)
+    return NULL;
+  f->dgrams = d->next;
+  if (!f->dgrams)
+    f->dgrams_tail = NULL;
+  d->next = NULL;
+  return d;
+}
+
 static void *udp_send_now(void *env) {
   UdpSendPack *p = (UdpSendPack *)env;
   FakeSock *src = p && p->sock ? fake_by_id(p->sock->fake_id) : NULL;
   FakeSock *dst;
   FakeDgram *d;
   const char *data;
+  const char *h;
   size_t n;
+  char canon[64];
+  int fam;
   if (!src || src->kind != FK_UDP || src->closed)
     return box_err("Net.udpSend: closed");
   if (p->port < 1 || p->port > 65535)
     return box_err("Net.udpSend: host must be an IP literal");
+  h = p->host ? sz_string_cstr(p->host) : "";
+  fam = sz_net_host_family(h, canon, sizeof canon);
+  if (!fam)
+    return box_err("Net.udpSend: host must be an IP literal");
+  if (fam == 6)
+    return box_err("Net.udpSend: send failed");
   dst = fake_udp_port(p->port);
   if (!dst)
     return box_err("Net.udpSend: send failed");
@@ -2154,7 +2217,7 @@ static void *udp_send_now(void *env) {
   n = p->data ? (size_t)sz_string_len(p->data) : 0;
   d = (FakeDgram *)sz_alloc(sizeof(FakeDgram));
   memset(d, 0, sizeof(FakeDgram));
-  d->host = dup_cstr("127.0.0.1");
+  d->host = dup_cstr(canon[0] ? canon : "127.0.0.1");
   d->port = src->port;
   d->data = (char *)sz_alloc(n + 1);
   if (n)
@@ -2178,8 +2241,7 @@ static void *udp_send_now(void *env) {
     sz_release(outer);
     fake_dgram_free(d);
   } else {
-    d->next = dst->dgrams;
-    dst->dgrams = d;
+    fake_dgram_push(dst, d);
   }
   return box_ok(NULL);
 }
@@ -2225,8 +2287,7 @@ static void *udp_recv_now(void *env) {
     return box_err("Net.udpRecv: closed");
   if (!f->dgrams)
     return NULL;
-  d = f->dgrams;
-  f->dgrams = d->next;
+  d = fake_dgram_pop(f);
   n = d->len;
   if (p->n > 0 && (size_t)p->n < n)
     n = (size_t)p->n;
