@@ -166,13 +166,14 @@ def collectHs(e: Expr, acc: List[Expr]): List[Expr] =
     case Expr.EField(recv, _, _) => collectHs(recv, acc)
     case Expr.EBin(_, l, r, _) => collectHs(r, collectHs(l, acc))
     case Expr.EUn(_, inner, _) => collectHs(inner, acc)
-    case Expr.ELam(_, body) => collectHs(body, acc)
+    case Expr.ELam(_, _, body) => collectHs(body, acc)
     case Expr.EIf(c, t, el, _) => collectHs(el, collectHs(t, collectHs(c, acc)))
     case Expr.EMatch(s, arms, _) => collectHsArms(arms, collectHs(s, acc))
     case Expr.EFor(bs, body, _) => collectHs(body, collectHsBinds(bs, acc))
     case Expr.EList(xs) => collectHsList(xs, acc)
     case Expr.ETuple(xs) => collectHsList(xs, acc)
     case Expr.ENamed(_, inner) => collectHs(inner, acc)
+    case Expr.EAscribe(inner, _, _) => collectHs(inner, acc)
     case _ => acc
   }
 
@@ -184,7 +185,7 @@ def isLamAt(args: List[Expr], i: Int): Bool =
 
 def isLam(e: Expr): Bool =
   e match {
-    case Expr.ELam(_, _) => true
+    case Expr.ELam(_, _, _) => true
     case _ => false
   }
 
@@ -193,7 +194,7 @@ def handlerBody(args: List[Expr]): Expr =
 
 def handlerBodyAt(e: Expr): Expr =
   e match {
-    case Expr.ELam(_, body) => body
+    case Expr.ELam(_, _, body) => body
     case _ => Expr.EUnit
   }
 
@@ -226,12 +227,13 @@ def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o:
     case Expr.EMethod(recv, name, args, _) => walkMethod(recv, name, args, target, seen, inO, hs, hi, o)
     case Expr.EField(recv, name, _) => walkField(recv, name, target, seen, inO, hs, hi, o)
     case Expr.EUn(op, inner, off) => walkUn(op, inner, off, target, seen, inO, hs, hi, o)
-    case Expr.ELam(p, body) => walkLam(p, body, target, seen, inO, hs, hi, o)
+    case Expr.ELam(p, ty, body) => walkLam(p, ty, body, target, seen, inO, hs, hi, o)
     case Expr.EMatch(s, arms, _) => walkMatch(s, arms, target, seen, inO, hs, hi, o)
     case Expr.EFor(bs, body, _) => walkFor(bs, body, target, seen, inO, hs, hi, o)
     case Expr.EList(xs) => walkListExpr(xs, target, seen, inO, hs, hi, o)
     case Expr.ETuple(xs) => walkTuple(xs, target, seen, inO, hs, hi, o)
     case Expr.ENamed(name, inner) => walkNamed(name, inner, target, seen, inO, hs, hi, o)
+    case Expr.EAscribe(inner, ty, off) => walkAscribe(inner, ty, off, target, seen, inO, hs, hi, o)
     case _ => Walk(e, seen, hi)
   }
 
@@ -317,7 +319,7 @@ def mapParam(args: List[Expr]): String =
 
 def mapParamAt(e: Expr): String =
   e match {
-    case Expr.ELam(p, _) => if (p == "_") "" else p
+    case Expr.ELam(p, _, _) => if (p == "_") "" else p
     case _ => ""
   }
 
@@ -331,7 +333,7 @@ def mapIdent(args: List[Expr], p: String): List[Expr] =
 
 def mapIdentLam(e: Expr, p: String): Expr =
   e match {
-    case Expr.ELam(q, _) => Expr.ELam(q, Expr.EVar(p, 0))
+    case Expr.ELam(q, ty, _) => Expr.ELam(q, ty, Expr.EVar(p, 0))
     case _ => e
   }
 
@@ -356,7 +358,7 @@ def nextH(hs: List[Expr], hi: Int): Expr =
 
 def swapHandlerLam(e: Expr, body: Expr): Expr =
   e match {
-    case Expr.ELam(p, _) => Expr.ELam(p, body)
+    case Expr.ELam(p, ty, _) => Expr.ELam(p, ty, body)
     case _ => e
   }
 
@@ -392,9 +394,14 @@ def walkUn(op: String, inner: Expr, off: Int, target: Int, seen: Int, inO: Bool,
     case Walk(e2, n, h) => Walk(Expr.EUn(op, e2, off), n, h)
   }
 
-def walkLam(p: String, body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+def walkLam(p: String, ty: String, body: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
   walk(body, target, seen, inO, hs, hi, o) match {
-    case Walk(b, n, h) => Walk(Expr.ELam(p, b), n, h)
+    case Walk(b, n, h) => Walk(Expr.ELam(p, ty, b), n, h)
+  }
+
+def walkAscribe(inner: Expr, ty: String, off: Int, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =
+  walk(inner, target, seen, inO, hs, hi, o) match {
+    case Walk(e2, n, h) => Walk(Expr.EAscribe(e2, ty, off), n, h)
   }
 
 def walkMatch(s: Expr, arms: List[Arm], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): Walk =

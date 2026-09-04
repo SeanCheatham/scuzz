@@ -67,3 +67,24 @@ def tyckResLam(): Bool =
 def tyckResUnk(): Bool =
   Main.tyckDiff(Main.srcResUnk(), Main.wantResUnk())
 
+def tyckLeftover(): Bool =
+  Main.tyckDiff(Main.srcLeftover(), Main.wantLeftover())
+
+def tyckBinBad(): Bool =
+  Main.tyckDiff(Main.srcBinBad(), Main.wantBinBad())
+
+def tyckHexX(): Bool =
+  Main.tyckDiff(Main.srcHexX(), Main.wantHexX())
+
+def tyckAscOk(): Bool =
+  Main.tyckDiff(Main.srcAscOk(), Main.wantAscOk())
+
+def tyckAscMis(): Bool =
+  Main.tyckDiff(Main.srcAscMis(), Main.wantAscMis())
+
+def tyckLamAnn(): Bool =
+  Main.tyckDiff(Main.srcLamAnn(), Main.wantLamAnn())
+
+def tyckLamMis(): Bool =
+  Main.tyckDiff(Main.srcLamMis(), Main.wantLamMis())
+

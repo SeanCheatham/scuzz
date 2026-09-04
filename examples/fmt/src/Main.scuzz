@@ -314,8 +314,28 @@ def wantIfOp(): String =
   IO.println(Str.fromInt((if (1 < 2) 3 else 4) / 2))
 """
 
+def srcAsc(): String =
+  "def n(): Int = 1: Int\n@main def main: IO[Unit] = IO.println(\"x\")"
+
+def wantAsc(): String =
+  "def n(): Int =\n  1: Int\n\n@main def main: IO[Unit] =\n  IO.println(\"x\")\n"
+
+def srcLamTy(): String =
+  "@main def main: IO[Unit] = IO.println(Str.fromInt(((n: Int) => n + 1)(3)))"
+
+def wantLamTy(): String =
+  """@main def main: IO[Unit] =
+  IO.println(Str.fromInt(((n: Int) => n + 1)(3)))
+"""
+
+def srcBinBad(): String =
+  "def n(): Int = 0b21\n@main def main: IO[Unit] = IO.println(\"x\")"
+
+def wantBinWrong(): String =
+  "def n(): Int =\n  1\n\n@main def main: IO[Unit] =\n  IO.println(\"x\")\n"
+
 def allOk(): Bool =
-  fmtDiff(srcHi(), wantHi()) && fmtIdem(srcHi()) && fmtDiff(srcPriv(), wantPriv()) && fmtIdem(srcPriv()) && fmtDiff(srcHello(), wantHello()) && fmtIdem(srcHello()) && fmtDiff(srcAdd(), wantAdd()) && fmtIdem(srcAdd()) && fmtDiff(srcEnum(), wantEnum()) && fmtIdem(srcEnum()) && fmtDiff(srcOpt(), wantOpt()) && fmtIdem(srcOpt()) && fmtDiff(srcFor(), wantFor()) && fmtIdem(srcFor()) && fmtDiff(srcIf(), wantIf()) && fmtIdem(srcIf()) && fmtDiff(srcRec(), wantRec()) && fmtIdem(srcRec()) && fmtDiff(srcType(), wantType()) && fmtIdem(srcType()) && fmtDiff(srcImp(), wantImp()) && fmtIdem(srcImp()) && fmtDiff(srcTrait(), wantTrait()) && fmtIdem(srcTrait()) && fmtDiff(srcWhere(), wantWhere()) && fmtIdem(srcWhere()) && fmtDiff(srcFloat(), wantFloat()) && fmtIdem(srcFloat()) && fmtDiff(srcList(), wantList()) && fmtIdem(srcList()) && fmtDiff(srcTup(), wantTup()) && fmtIdem(srcTup()) && fmtDiff(srcGet(), wantGet()) && fmtIdem(srcGet()) && fmtDiff(srcPkg(), wantPkg()) && fmtIdem(srcPkg()) && fmtDiff(srcTriple(), wantTriple()) && fmtIdem(srcTriple()) && fmtDiff(srcCons(), wantCons()) && fmtIdem(srcCons()) && fmtDiff(srcGuard(), wantGuard()) && fmtIdem(srcGuard()) && fmtDiff(srcDefArg(), wantDefArg()) && fmtIdem(srcDefArg()) && fmtDiff(srcTDef(), wantTDef()) && fmtIdem(srcTDef()) && fmtDiff(srcCons2(), wantCons2()) && fmtIdem(srcCons2()) && fmtDiff(srcNamed(), wantNamed()) && fmtIdem(srcNamed()) && fmtDiff(srcCopy(), wantCopy()) && fmtIdem(srcCopy()) && fmtDiff(srcOr(), wantOr()) && fmtIdem(srcOr()) && fmtDiff(srcOr2(), wantOr2()) && fmtIdem(srcOr2()) && fmtDiff(srcBits(), wantBits()) && fmtIdem(srcBits()) && fmtDiff(srcHex(), wantHex()) && fmtIdem(srcHex()) && fmtDiff(srcAs(), wantAs()) && fmtIdem(srcAs()) && fmtDiff(srcAnd(), wantAnd()) && fmtIdem(srcAnd()) && fmtDiff(srcUn(), wantUn()) && fmtIdem(srcUn()) && fmtDiff(srcIfOp(), wantIfOp()) && fmtIdem(srcIfOp())
+  fmtDiff(srcHi(), wantHi()) && fmtIdem(srcHi()) && fmtDiff(srcPriv(), wantPriv()) && fmtIdem(srcPriv()) && fmtDiff(srcHello(), wantHello()) && fmtIdem(srcHello()) && fmtDiff(srcAdd(), wantAdd()) && fmtIdem(srcAdd()) && fmtDiff(srcEnum(), wantEnum()) && fmtIdem(srcEnum()) && fmtDiff(srcOpt(), wantOpt()) && fmtIdem(srcOpt()) && fmtDiff(srcFor(), wantFor()) && fmtIdem(srcFor()) && fmtDiff(srcIf(), wantIf()) && fmtIdem(srcIf()) && fmtDiff(srcRec(), wantRec()) && fmtIdem(srcRec()) && fmtDiff(srcType(), wantType()) && fmtIdem(srcType()) && fmtDiff(srcImp(), wantImp()) && fmtIdem(srcImp()) && fmtDiff(srcTrait(), wantTrait()) && fmtIdem(srcTrait()) && fmtDiff(srcWhere(), wantWhere()) && fmtIdem(srcWhere()) && fmtDiff(srcFloat(), wantFloat()) && fmtIdem(srcFloat()) && fmtDiff(srcList(), wantList()) && fmtIdem(srcList()) && fmtDiff(srcTup(), wantTup()) && fmtIdem(srcTup()) && fmtDiff(srcGet(), wantGet()) && fmtIdem(srcGet()) && fmtDiff(srcPkg(), wantPkg()) && fmtIdem(srcPkg()) && fmtDiff(srcTriple(), wantTriple()) && fmtIdem(srcTriple()) && fmtDiff(srcCons(), wantCons()) && fmtIdem(srcCons()) && fmtDiff(srcGuard(), wantGuard()) && fmtIdem(srcGuard()) && fmtDiff(srcDefArg(), wantDefArg()) && fmtIdem(srcDefArg()) && fmtDiff(srcTDef(), wantTDef()) && fmtIdem(srcTDef()) && fmtDiff(srcCons2(), wantCons2()) && fmtIdem(srcCons2()) && fmtDiff(srcNamed(), wantNamed()) && fmtIdem(srcNamed()) && fmtDiff(srcCopy(), wantCopy()) && fmtIdem(srcCopy()) && fmtDiff(srcOr(), wantOr()) && fmtIdem(srcOr()) && fmtDiff(srcOr2(), wantOr2()) && fmtIdem(srcOr2()) && fmtDiff(srcBits(), wantBits()) && fmtIdem(srcBits()) && fmtDiff(srcHex(), wantHex()) && fmtIdem(srcHex()) && fmtDiff(srcAs(), wantAs()) && fmtIdem(srcAs()) && fmtDiff(srcAnd(), wantAnd()) && fmtIdem(srcAnd()) && fmtDiff(srcUn(), wantUn()) && fmtIdem(srcUn()) && fmtDiff(srcIfOp(), wantIfOp()) && fmtIdem(srcIfOp()) && fmtDiff(srcAsc(), wantAsc()) && fmtIdem(srcAsc()) && fmtDiff(srcLamTy(), wantLamTy()) && fmtIdem(srcLamTy()) && format(srcBinBad()) != wantBinWrong()
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "fmt-ok" else "fmt-bad")

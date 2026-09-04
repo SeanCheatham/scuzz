@@ -184,8 +184,57 @@ def wantResUnk(): String =
 def tyckFiles(): Bool =
   Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []) == wantUtil()
 
+def srcLeftover(): String =
+  """def a: Int = 1; def b: Int = 2
+"""
+
+def wantLeftover(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":15,\"end_line\":1,\"end_column\":16}]"
+
+def srcBinBad(): String =
+  """def n(): Int = 0b21
+"""
+
+def wantBinBad(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":18,\"end_line\":1,\"end_column\":20}]"
+
+def srcHexX(): String =
+  """def n(): Int = 5X
+"""
+
+def wantHexX(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":17,\"end_line\":1,\"end_column\":18}]"
+
+def srcAscOk(): String =
+  """def n(): Int = 1: Int
+"""
+
+def wantAscOk(): String =
+  "[]"
+
+def srcAscMis(): String =
+  """def n(): Int = 1: String
+"""
+
+def wantAscMis(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: in n: type mismatch: expected String, got Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":16,\"end_line\":1,\"end_column\":17}]"
+
+def srcLamAnn(): String =
+  """def n(): Int = ((x: Int) => x + 1)(3)
+"""
+
+def wantLamAnn(): String =
+  "[]"
+
+def srcLamMis(): String =
+  """def n(): Int = ((x: String) => x + 1)(3)
+"""
+
+def wantLamMis(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: in n: arithmetic needs Int or Float, got String and Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":32,\"end_line\":1,\"end_column\":33}]"
+
 def allOk(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckFiles()
+  tyckDiff(srcOk(), wantOk()) && tyckIdem(srcOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckIdem(srcUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckIdem(srcArith()) && tyckDiff(srcArity(), wantArity()) && tyckIdem(srcArity()) && tyckDiff(srcRet(), wantRet()) && tyckIdem(srcRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckIdem(srcPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckIdem(srcUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckIdem(srcCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckIdem(srcMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckIdem(srcArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckIdem(srcWatch()) && tyckDiff(srcNope(), wantNope()) && tyckIdem(srcNope()) && tyckDiff(srcDup(), wantDup()) && tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckFiles() && tyckDiff(srcLeftover(), wantLeftover()) && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis()) && tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis())
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else "tyck-bad")
