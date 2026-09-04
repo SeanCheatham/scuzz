@@ -346,6 +346,7 @@ SzIo *sz_sys_write(SzString *s) {
 }
 
 #define EXEC_CAP (1024 * 1024)
+#define EXEC_FD_MAX 256
 
 typedef struct ExecSt {
   SzString *cmd;
@@ -353,6 +354,7 @@ typedef struct ExecSt {
   int err_fd;
   pid_t pid;
   int status;
+  int overflow;
   char *out_buf;
   size_t out_len;
   size_t out_cap;
@@ -368,20 +370,43 @@ static void exec_close_fd(int *fd) {
   }
 }
 
-static void exec_free(ExecSt *st) {
+static void exec_close_extra_fds(void) {
+  int fd;
+  for (fd = 3; fd < EXEC_FD_MAX; fd++)
+    (void)close(fd);
+}
+
+static void exec_reap_pid(pid_t pid) {
   int status = 0;
+  pid_t w;
+  if (pid <= 0)
+    return;
+  (void)kill(pid, SIGKILL);
+  do {
+    w = waitpid(pid, &status, 0);
+  } while (w < 0 && errno == EINTR);
+}
+
+static void exec_free(ExecSt *st) {
   if (!st)
     return;
   exec_close_fd(&st->out_fd);
   exec_close_fd(&st->err_fd);
-  if (st->pid > 0)
-    (void)waitpid(st->pid, &status, WNOHANG);
+  if (st->pid > 0) {
+    exec_reap_pid(st->pid);
+    st->pid = 0;
+  }
   sz_free(st->out_buf);
   sz_free(st->err_buf);
   st->out_buf = NULL;
   st->err_buf = NULL;
   sz_release(st->cmd);
   st->cmd = NULL;
+}
+
+static void *exec_cleanup(void *env) {
+  exec_free((ExecSt *)env);
+  return NULL;
 }
 
 static void exec_set_cloexec_nb(int fd) {
@@ -393,13 +418,14 @@ static void exec_set_cloexec_nb(int fd) {
 }
 
 static int exec_append(char **buf, size_t *len, size_t *cap, const char *src,
-                       size_t n) {
-  size_t room;
-  if (*len >= EXEC_CAP)
+                       size_t n, int *overflow) {
+  if (*len >= EXEC_CAP || n > EXEC_CAP - *len) {
+    if (overflow) {
+      *overflow = 1;
+      return 0;
+    }
     return 1;
-  room = EXEC_CAP - *len;
-  if (n > room)
-    n = room;
+  }
   if (!n)
     return 1;
   if (*len + n + 1 > *cap) {
@@ -422,14 +448,16 @@ static int exec_append(char **buf, size_t *len, size_t *cap, const char *src,
   return 1;
 }
 
-static int exec_drain_fd(int *fd, char **buf, size_t *len, size_t *cap) {
+static int exec_drain_fd(int *fd, char **buf, size_t *len, size_t *cap,
+                         int *overflow) {
   char tmp[4096];
   if (!fd || *fd < 0)
     return 1;
   for (;;) {
     ssize_t n = read(*fd, tmp, sizeof tmp);
     if (n > 0) {
-      exec_append(buf, len, cap, tmp, (size_t)n);
+      if (!exec_append(buf, len, cap, tmp, (size_t)n, overflow))
+        return 0;
       continue;
     }
     if (n == 0) {
@@ -485,6 +513,7 @@ static void *sys_exec_start(void *env) {
       close(out_fds[1]);
     if (err_fds[1] != STDERR_FILENO && err_fds[1] != STDOUT_FILENO)
       close(err_fds[1]);
+    exec_close_extra_fds();
     execl("/bin/sh", "sh", "-c", c, (char *)NULL);
     _exit(127);
   }
@@ -535,9 +564,14 @@ static SzIo *exec_after_poll(void *value, void *env) {
   int status = 0;
   pid_t w = 0;
   (void)value;
-  if (!exec_drain_fd(&st->out_fd, &st->out_buf, &st->out_len, &st->out_cap) ||
-      !exec_drain_fd(&st->err_fd, &st->err_buf, &st->err_len, &st->err_cap))
+  if (!exec_drain_fd(&st->out_fd, &st->out_buf, &st->out_len, &st->out_cap,
+                     &st->overflow) ||
+      !exec_drain_fd(&st->err_fd, &st->err_buf, &st->err_len, &st->err_cap,
+                     &st->overflow)) {
+    if (st->overflow)
+      return sz_io_fail_cstr("Sys.exec: output exceeds 1 MiB");
     return sz_io_fail_cstr("Sys.exec: read failed");
+  }
   if (st->pid > 0) {
     do {
       w = waitpid(st->pid, &status, WNOHANG);
@@ -551,13 +585,10 @@ static SzIo *exec_after_poll(void *value, void *env) {
   if (st->out_fd >= 0 || st->err_fd >= 0)
     return exec_wait_ready(st);
   if (st->pid > 0) {
-    do {
-      w = waitpid(st->pid, &status, 0);
-    } while (w < 0 && errno == EINTR);
+    if (w == 0)
+      return fm_drop(sz_io_sleep_ms(1), exec_after_poll, st);
     if (w < 0)
       return sz_io_fail_cstr("Sys.exec: wait failed");
-    st->status = status;
-    st->pid = 0;
   }
   return unwrap_sys(sys_exec_pack(st, exec_exit_code(st->status)), NULL);
 }
@@ -576,31 +607,13 @@ static SzIo *exec_wait_ready(ExecSt *st) {
   return fm_drop(ready, exec_after_poll, st);
 }
 
-static SzIo *exec_finish(void *code, void *env) {
-  exec_free((ExecSt *)env);
-  return pure_drop(code);
-}
-
-static SzIo *exec_on_err(SzError *err, void *env) {
-  exec_free((ExecSt *)env);
-  return fail_drop(err);
-}
-
 static SzIo *exec_after_start(void *value, void *env) {
   ExecSt *st = (ExecSt *)env;
   SysResult *r = (SysResult *)value;
-  SzIo *io;
   if (!r || r->is_err)
     return unwrap_sys(value, NULL);
   sz_release(r);
-  io = exec_wait_ready(st);
-  return fm_drop(io, exec_finish, st);
-}
-
-static SzIo *exec_keep_pair(void *value, void *env) {
-  (void)value;
-  (void)env;
-  return pure_drop(NULL);
+  return exec_wait_ready(st);
 }
 
 static SzIo *exec_after_kick(void *ignored, void *env) {
@@ -615,10 +628,12 @@ static SzIo *exec_after_kick(void *ignored, void *env) {
   st->err_fd = -1;
   io = fm_drop(sz_io_delay(sys_exec_start, st), exec_after_start, st);
   {
-    SzIo *handled = sz_io_handle_error_with(io, exec_on_err, st);
+    SzIo *fin = sz_io_delay(exec_cleanup, st);
+    SzIo *ens = sz_io_ensure(io, fin);
     sz_release(io);
+    sz_release(fin);
     sz_release(st);
-    return handled;
+    return ens;
   }
 }
 
@@ -630,8 +645,7 @@ static void *sys_proc_dispatch(void *env) {
 static SzIo *sys_after_exec_dispatch(void *value, void *env) {
   SzPair *p = (SzPair *)env;
   if ((intptr_t)value)
-    return fm_drop(sz_io_fail_cstr("Sys.exec: rejected under TestRuntime"),
-                   exec_keep_pair, p);
+    return sz_io_fail_cstr("Sys.exec: rejected under TestRuntime");
   return fm_drop(sz_io_pure(NULL), exec_after_kick, p);
 }
 
@@ -705,7 +719,7 @@ static void child_clear(ChildSlot *c) {
 static int child_drain(ChildSlot *c) {
   if (!c)
     return 1;
-  return exec_drain_fd(&c->out_fd, &c->buf, &c->len, &c->cap);
+  return exec_drain_fd(&c->out_fd, &c->buf, &c->len, &c->cap, NULL);
 }
 
 static void child_gc(void) {
@@ -721,9 +735,10 @@ static void child_gc(void) {
     } while (w < 0 && errno == EINTR);
     if (w == 0)
       continue;
-    if (!child_drain(c))
-      continue;
-    if (c->len == 0 && c->out_fd < 0)
+    (void)child_drain(c);
+    exec_close_fd(&c->in_fd);
+    exec_close_fd(&c->out_fd);
+    if (c->len == 0)
       child_clear(c);
   }
 }
@@ -787,6 +802,7 @@ static void *sys_spawn_result(void *env) {
       close(out_fds[0]);
     if (out_fds[1] != STDOUT_FILENO && out_fds[1] != STDIN_FILENO)
       close(out_fds[1]);
+    exec_close_extra_fds();
     execl("/bin/sh", "sh", "-c", c, (char *)NULL);
     _exit(127);
   }
@@ -808,8 +824,7 @@ static void *sys_spawn_result(void *env) {
 static SzIo *sys_after_spawn_dispatch(void *value, void *env) {
   SzPair *p = (SzPair *)env;
   if ((intptr_t)value)
-    return fm_drop(sz_io_fail_cstr("Sys.spawn: rejected under TestRuntime"),
-                   exec_keep_pair, p);
+    return sz_io_fail_cstr("Sys.spawn: rejected under TestRuntime");
   return fm_drop(sz_io_delay(sys_spawn_result, p), unwrap_sys, NULL);
 }
 
@@ -867,7 +882,20 @@ static void *sys_kill_result(void *env) {
     r->as.err = sz_error_new(3, "Sys.kill: kill failed");
     return r;
   }
-  child_drop_pid((pid_t)pid);
+  {
+    ChildSlot *c = child_find((pid_t)pid);
+    int status = 0;
+    pid_t w = 0;
+    if (c)
+      exec_close_fd(&c->in_fd);
+    if (pid > 0) {
+      do {
+        w = waitpid((pid_t)pid, &status, WNOHANG);
+      } while (w < 0 && errno == EINTR);
+    }
+    if (w > 0 || (w < 0 && errno == ECHILD) || pid <= 0)
+      child_drop_pid((pid_t)pid);
+  }
   return r;
 }
 
@@ -1029,7 +1057,9 @@ static SzIo *child_read_after_try(void *value, void *env) {
     sz_release(r);
     child_gc();
     c = child_find((pid_t)st->pid);
-    if (!c || c->out_fd < 0)
+    if (!c)
+      return sz_io_fail_cstr("Sys.childRead: unknown pid");
+    if (c->out_fd < 0)
       return child_read_pump(NULL, st);
     return fm_drop(sz_io_poll_readable(c->out_fd), child_read_pump, st);
   }
@@ -1043,8 +1073,8 @@ static void *child_read_try(void *env) {
   child_gc();
   c = child_find((pid_t)st->pid);
   if (!c) {
-    r->is_err = 0;
-    r->as.ok = sz_string_from_cstr("");
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.childRead: unknown pid");
     return r;
   }
   if (!child_drain(c)) {
