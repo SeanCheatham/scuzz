@@ -107,7 +107,7 @@ def formatText(j: Json, fallback: String): String =
   }
 
 def renameText(j: Json, fallback: String): String =
-  Check.jsonStr(Check.jsonField(Check.jsonField(j, "result"), "newText")) match {
+  firstNewText(Check.jsonField(Check.jsonField(j, "result"), "changes")) match {
     case t => if (Str.isEmpty(t)) fallback else t
   }
 

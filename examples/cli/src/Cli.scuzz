@@ -262,12 +262,7 @@ def parseLsp(args: List[String], i: Int, json: Bool, path: String): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Lsp(path), json) else parseLspTok(args, i, json, path, arg(args, i))
 
 def parseLspTok(args: List[String], i: Int, json: Bool, path: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("lsp"), json) else if (a == "--message-format" || flagPref(a, "--message-format")) parseLspMsg(takeVal(args, i, "--message-format"), args, path) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz lsp [OPTIONS] [PATH]")) else parseLsp(args, i + 1, json, a)
-
-def parseLspMsg(p: (String, Int), args: List[String], path: String): Cmd =
-  p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseLsp(args, n, true, path) else if (v == "human") parseLsp(args, n, false, path) else Cmd.Fail(badFmt(v))
-  }
+  if (isHelp(a)) gateJson(Cmd.Help("lsp"), json) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz lsp [OPTIONS] [PATH]")) else parseLsp(args, i + 1, json, a)
 
 def parseFuzz(args: List[String], i: Int, json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, minimize: Bool, relate: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Fuzz(path, iterations, seed, replay, oracles, noFailFast, minimize, relate), json) else parseFuzzTok(args, i, json, path, iterations, seed, replay, oracles, noFailFast, minimize, relate, arg(args, i))

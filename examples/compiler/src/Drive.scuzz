@@ -647,6 +647,53 @@ def checkDirJson(diags: String, files: List[(String, String)]): IO[Unit] =
 def checkDirHuman(human: String): IO[Unit] =
   if (human == "scuzz check ok") IO.println(human) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
 
+def overlayStemHit(overlays: List[(String, String)], stem: String): (Bool, String) =
+  overlayStemHitGo(overlays, Str.concat(stem, ".scuzz"))
+
+def overlayStemHitGo(overlays: List[(String, String)], name: String): (Bool, String) =
+  if (List.isEmpty(overlays)) (false, "") else overlayStemHitHd(List.at(overlays, 0), List.tail(overlays), name)
+
+def overlayStemHitHd(h: (String, String), rest: List[(String, String)], name: String): (Bool, String) =
+  h match {
+    case (path, src) => if (overlayPathHit(path, name)) (true, src) else overlayStemHitGo(rest, name)
+  }
+
+def overlayPathHit(path: String, name: String): Bool =
+  path == name || Str.endsWith(path, Str.concat("/", name))
+
+def substOverlay(files: List[(String, String)], overlays: List[(String, String)]): List[(String, String)] =
+  if (List.isEmpty(files)) Manifest.noPairs() else substOverlayHd(List.at(files, 0), List.tail(files), overlays)
+
+def substOverlayHd(h: (String, String), rest: List[(String, String)], overlays: List[(String, String)]): List[(String, String)] =
+  h match {
+    case (stem, src) => substOverlayPick(stem, src, rest, overlays, overlayStemHit(overlays, stem))
+  }
+
+def substOverlayPick(stem: String, src: String, rest: List[(String, String)], overlays: List[(String, String)], hit: (Bool, String)): List[(String, String)] =
+  hit match {
+    case (found, over) => (stem, if (found) over else src) :: substOverlay(rest, overlays)
+  }
+
+def checkOverlay(dir: String, overlays: List[(String, String)]): IO[String] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkOverlayMan(dir, overlays, Manifest.parse(toml))).handleErrorWith(_ => IO.pure("[]"))
+
+def checkOverlayMan(dir: String, overlays: List[(String, String)], m: Man): IO[String] =
+  m match {
+    case Man(ok, _name, _version, _hasUi, deps, _err) => checkOverlayMan2(dir, overlays, ok, deps)
+  }
+
+def checkOverlayMan2(dir: String, overlays: List[(String, String)], ok: Bool, deps: List[(String, String)]): IO[String] =
+  if (!ok) IO.pure("[]") else Fs.list(joinSlash(dir, "src")).flatMap(ents => checkOverlayListed(dir, overlays, deps, ents))
+
+def checkOverlayListed(dir: String, overlays: List[(String, String)], deps: List[(String, String)], ents: List[(String, Bool)]): IO[String] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkOverlayOwn(dir, overlays, deps, own))
+
+def checkOverlayOwn(dir: String, overlays: List[(String, String)], deps: List[(String, String)], own: List[(String, String)]): IO[String] =
+  collectDeps(dir, deps, own).flatMap(files => IO.pure(checkOverlayGot(files, fileStems(own), overlays)))
+
+def checkOverlayGot(files: List[(String, String)], stems: List[String], overlays: List[(String, String)]): String =
+  Check.checkFilesOwn(sigFiles(substOverlay(files, overlays), stems), stems)
+
 def testDir(dir: String, outDir: String, update: Bool, pixels: Bool, differential: Bool): IO[Unit] =
   if (differential) testDiff(dir, outDir) else emitDir(dir, outDir, true).flatMap(_ => testLink(dir, outDir, update, pixels))
 

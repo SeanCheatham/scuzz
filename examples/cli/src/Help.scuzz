@@ -219,8 +219,6 @@ Arguments:
   [PATH]  [default: .]
 
 Options:
-      --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
