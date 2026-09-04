@@ -996,10 +996,10 @@ def prettyAsc(e: Expr): String =
   }
 
 def prettyBin(op: String, l: Expr, r: Expr): String =
-  if (op == "::") Str.concat(_prettyConsL(l), Str.concat(" :: ", _prettyConsR(r))) else Str.concat(_prettyBinL(op, l), Str.concat(" ", Str.concat(op, Str.concat(" ", _prettyBinR(op, r)))))
+  if (op == "::") Str.concat(_prettyBinR(op, l), Str.concat(" :: ", _prettyBinL(op, r))) else Str.concat(_prettyBinL(op, l), Str.concat(" ", Str.concat(op, Str.concat(" ", _prettyBinR(op, r)))))
 
 def binPrec(op: String): Int =
-  if (op == "||") 1 else if (op == "&&") 2 else if (op == "|") 3 else if (op == "^") 4 else if (op == "&") 5 else if (op == "<<" || op == ">>") 7 else if (op == "+" || op == "-") 8 else if (op == "*" || op == "/" || op == "%") 9 else if (op == "::") 10 else 6
+  if (op == "||") 1 else if (op == "&&") 2 else if (op == "|") 3 else if (op == "^") 4 else if (op == "&") 5 else if (op == "::") 7 else if (op == "<<" || op == ">>") 8 else if (op == "+" || op == "-") 9 else if (op == "*" || op == "/" || op == "%") 10 else 6
 
 def _prettyUn(e: Expr): String =
   e match {
@@ -1034,27 +1034,6 @@ def _prettyBinR(op: String, e: Expr): String =
     case _ => pretty0(e)
   }
 
-def _prettyConsL(e: Expr): String =
-  e match {
-    case Expr.EBin(op, _, _, _) => if (op == "::" || op == "+" || op == "-" || op == "*" || op == "/" || op == "%") pretty0(e) else _parenPretty(e)
-    case Expr.EIf(_, _, _, _) => _parenPretty(e)
-    case Expr.EMatch(_, _, _) => _parenPretty(e)
-    case Expr.EFor(_, _, _) => _parenPretty(e)
-    case Expr.ELam(_, _, _) => _parenPretty(e)
-    case Expr.EAscribe(_, _, _) => _parenPretty(e)
-    case _ => pretty0(e)
-  }
-
-def _prettyConsR(e: Expr): String =
-  e match {
-    case Expr.EIf(_, _, _, _) => _parenPretty(e)
-    case Expr.EMatch(_, _, _) => _parenPretty(e)
-    case Expr.EFor(_, _, _) => _parenPretty(e)
-    case Expr.ELam(_, _, _) => _parenPretty(e)
-    case Expr.EAscribe(_, _, _) => _parenPretty(e)
-    case _ => pretty0(e)
-  }
-
 def _prettyRecv(e: Expr): String =
   e match {
     case Expr.EBin(_, _, _, _) => _parenPretty(e)
@@ -1074,7 +1053,8 @@ def prettyArms(xs: List[Arm], n: Int): String =
 """, prettyArms(List.tail(xs), n)))
 
 def prettyBind(b: Bind, n: Int): String =
-  Str.concat(_pad(n), Str.concat(b.name, Str.concat(if (b.draw) " <- " else " = ", Str.concat(pretty0(b.value), """
+  if (b.name == "__guard") Str.concat(_pad(n), Str.concat("if ", Str.concat(pretty0(b.value), """
+"""))) else Str.concat(_pad(n), Str.concat(b.name, Str.concat(if (b.draw) " <- " else " = ", Str.concat(pretty0(b.value), """
 """))))
 
 def prettyBinds(xs: List[Bind], n: Int): String =

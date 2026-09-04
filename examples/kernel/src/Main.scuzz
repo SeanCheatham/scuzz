@@ -611,7 +611,7 @@ def choose(ok: Bool): IO[Int] =
 def positive(n: Int): IO[Int] =
   for {
     x <- IO.pure(n)
-    __guard = x > 0
+    if x > 0
   } yield x
 
 def failProof(): IO[Unit] =

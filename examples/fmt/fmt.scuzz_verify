@@ -17,7 +17,7 @@ def fmtOpt(): Bool =
   Main.fmtDiff(Main.srcOpt(), Main.wantOpt())
 
 def fmtFor(): Bool =
-  Main.fmtDiff(Main.srcFor(), Main.wantFor())
+  Main.fmtDiff(Main.srcFor(), Main.wantFor()) && Main.fmtDiff(Main.srcForIf(), Main.wantForIf()) && Main.fmtIdem(Main.srcForIf())
 
 def fmtIf(): Bool =
   Main.fmtDiff(Main.srcIf(), Main.wantIf())
@@ -56,7 +56,7 @@ def fmtTriple(): Bool =
   Main.fmtDiff(Main.srcTriple(), Main.wantTriple())
 
 def fmtCons(): Bool =
-  Main.fmtDiff(Main.srcCons(), Main.wantCons())
+  Main.fmtDiff(Main.srcCons(), Main.wantCons()) && Main.fmtDiff(Main.srcConsL(), Main.wantConsL()) && Main.fmtIdem(Main.srcConsL()) && Main.fmtDiff(Main.srcConsEq(), Main.wantConsEq()) && Main.fmtIdem(Main.srcConsEq()) && Main.fmtDiff(Main.srcConsMul(), Main.wantConsMul()) && Main.fmtIdem(Main.srcConsMul())
 
 def fmtGuard(): Bool =
   Main.fmtDiff(Main.srcGuard(), Main.wantGuard())
