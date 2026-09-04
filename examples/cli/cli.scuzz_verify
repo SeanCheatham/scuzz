@@ -71,7 +71,7 @@ def campWrap(): Bool =
   Verify.wrapSrc("bump", Main.srcBumpVerify()) == Main.wantWrapBump()
 
 def campFuzz0(): Bool =
-  Verify.fuzzOut(0, 42, 0, 0, 0, 0) == Main.wantFuzzHello0()
+  Main.campReproOk()
 
 def campEvents(): Bool =
   Verify.nls(Verify.parseEvents(Main.srcBumpRepro())) == Main.wantBumpEvents()
@@ -80,7 +80,7 @@ def campTest(): Bool =
   Cli.runCmd(Cli.parse(Main.a1("test")), Main.srcIrHi()) == Main.wantTestOk()
 
 def campEmpty(): Bool =
-  Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == Main.wantEmptyVerify()
+  Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == Main.wantEmptyVerify() && Verify.checkVerify(Main.srcBadDrive(), "bad.scuzz_verify") == Main.wantBadDrive() && Verify.checkVerify(Main.srcOpaqueDrive(), "bad.scuzz_verify") == Main.wantOpaqueDrive() && Verify.checkVerify("nope", "junk.scuzz_verify") != Main.wantEmptyVerify() && Verify.intentMsg("nested/stale.scuzz_intent") == "nested/stale.scuzz_intent:1:1: error: leftover *.scuzz_intent; rename to *.scuzz_verify or delete the file"
 
 def drvPkg(): Bool =
   Drive.showPkg(Drive.compilePkg(Main.tomlHello(), Main.srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == Main.wantPkg()

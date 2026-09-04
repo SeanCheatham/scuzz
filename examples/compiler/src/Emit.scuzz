@@ -347,14 +347,6 @@ def desugarFor(bs: List[Bind], body: Expr): Expr =
 def forYield(bs: List[Bind], body: Expr): Expr =
   if (hasDraw(bs)) Expr.ECall("IO.pure", body :: noExpr(), 0) else body
 
-def hasDraw(bs: List[Bind]): Bool =
-  if (List.isEmpty(bs)) false else bindIsDraw(List.at(bs, 0)) || hasDraw(List.tail(bs))
-
-def bindIsDraw(b: Bind): Bool =
-  b match {
-    case Bind(draw, _, _) => draw
-  }
-
 def desugarForRev(bs: List[Bind], body: Expr): Expr =
   if (List.isEmpty(bs)) body else desugarForRevHit(bs, body)
 

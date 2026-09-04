@@ -137,11 +137,11 @@ def noCase(): List[EnCase] =
 def intTok(w: String): String =
   if (w == "") "i" else if (findIdx(w, ">=", 0) >= 0) Str.concat("i>=", trimNum(afterOp(w, ">="))) else if (findIdx(w, "<=", 0) >= 0) Str.concat("i<=", trimNum(afterOp(w, "<="))) else if (findIdx(w, ">", 0) >= 0) Str.concat("i>", trimNum(afterOp(w, ">"))) else if (findIdx(w, "<", 0) >= 0) Str.concat("i<", trimNum(afterOp(w, "<"))) else "i"
 
-def friendly(p: Param): Bool =
-  p.ty == "Int" || p.ty == "String" || p.ty == "Bool" || isGenTy(p.ty)
+def friendly(p: Param, ens: List[En]): Bool =
+  friendlyTy(p.ty, ens)
 
-def isGenTy(t: String): Bool =
-  if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else if (opaqueTy(t)) false else true
+def friendlyTy(t: String, ens: List[En]): Bool =
+  if (t == "Int" || t == "String" || t == "Bool") true else if (isListTy(t)) friendlyTy(listInner(t), ens) else if (opaqueTy(tyHead(t))) false else if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else !List.isEmpty(findEn(ens, tyHead(t)))
 
 def opaqueTy(t: String): Bool =
   t == "Fiber" || t == "Ref" || t == "Queue" || t == "Deferred" || t == "Resource" || t == "Stream" || t == "Map" || t == "Set"
@@ -149,20 +149,51 @@ def opaqueTy(t: String): Bool =
 def hasSub(s: String, n: String): Bool =
   findIdx(s, n, 0) >= 0
 
-def allFriendly(ps: List[Param]): Bool =
-  List.isEmpty(ps) || friendly(List.at(ps, 0)) && allFriendly(List.tail(ps))
+def allFriendly(ps: List[Param], ens: List[En]): Bool =
+  List.isEmpty(ps) || friendly(List.at(ps, 0), ens) && allFriendly(List.tail(ps), ens)
 
-def isDrive(d: Fun): Bool =
-  d.ret == "Bool" && allFriendly(d.params)
+def isAdtOrList(p: Param): Bool =
+  isListTy(p.ty) || !(p.ty == "Int" || p.ty == "String" || p.ty == "Bool")
+
+def hasAdtOrList(ps: List[Param]): Bool =
+  if (List.isEmpty(ps)) false else isAdtOrList(List.at(ps, 0)) || hasAdtOrList(List.tail(ps))
+
+def unaryAdtOk(ps: List[Param]): Bool =
+  List.len(ps) <= 1 || !hasAdtOrList(ps)
+
+def simpleWhere(w: String): Bool =
+  w == "" || !hasSub(w, "&&") && !hasSub(w, "||")
+
+def allSimpleWhere(ps: List[Param]): Bool =
+  if (List.isEmpty(ps)) true else allSimpleWhere1(List.at(ps, 0), List.tail(ps))
+
+def allSimpleWhere1(p: Param, rest: List[Param]): Bool =
+  p match {
+    case Param(_, _, w, _) => simpleWhere(w) && allSimpleWhere(rest)
+  }
+
+def isDrive(d: Fun, ens: List[En]): Bool =
+  !d.priv && d.ret == "Bool" && List.len(d.params) <= 3 && allFriendly(d.params, ens) && unaryAdtOk(d.params) && allSimpleWhere(d.params)
 
 def isClaim(d: Fun): Bool =
-  d.ret == "Verdict"
+  !d.priv && d.ret == "Verdict" && claimPs(d.params)
 
-def drives(ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) noFun() else drives1(List.at(ds, 0), List.tail(ds))
+def claimPs(ps: List[Param]): Bool =
+  (List.len(ps) == 1 || List.len(ps) == 2) && allTimeline(ps)
 
-def drives1(d: Fun, rest: List[Fun]): List[Fun] =
-  if (isDrive(d)) d :: drives(rest) else drives(rest)
+def allTimeline(ps: List[Param]): Bool =
+  if (List.isEmpty(ps)) true else allTimeline1(List.at(ps, 0), List.tail(ps))
+
+def allTimeline1(p: Param, rest: List[Param]): Bool =
+  p match {
+    case Param(_, ty, _, _) => ty == "Timeline" && allTimeline(rest)
+  }
+
+def drives(ds: List[Fun], ens: List[En]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else drives1(List.at(ds, 0), List.tail(ds), ens)
+
+def drives1(d: Fun, rest: List[Fun], ens: List[En]): List[Fun] =
+  if (isDrive(d, ens)) d :: drives(rest, ens) else drives(rest, ens)
 
 def specOfE(d: Fun, ens: List[En]): String =
   if (List.isEmpty(d.params)) d.name else Str.concat(d.name, Str.concat(" ", specs(d.params, ens)))
@@ -213,10 +244,16 @@ def parseEvSkip(src: String, i: Int): List[String] =
   if (i >= Str.len(src)) noStr() else parseEvCh(src, i, Str.charAt(src, i))
 
 def parseEvCh(src: String, i: Int, c: Int): List[String] =
-  if (c == 32 || c == 10 || c == 13 || c == 9 || c == 44) parseEvSkip(src, i + 1) else if (c == 93) noStr() else if (c == 34) parseEvStr(src, i + 1, i + 1) else parseEvSkip(src, i + 1)
+  if (c == 32 || c == 10 || c == 13 || c == 9 || c == 44) parseEvSkip(src, i + 1) else if (c == 93) noStr() else if (c == 34) parseEvStr(src, i + 1, "") else parseEvSkip(src, i + 1)
 
-def parseEvStr(src: String, start: Int, i: Int): List[String] =
-  if (i >= Str.len(src)) noStr() else if (Str.charAt(src, i) == 34) Str.slice(src, start, i) :: parseEvSkip(src, i + 1) else parseEvStr(src, start, i + 1)
+def parseEvStr(src: String, i: Int, acc: String): List[String] =
+  if (i >= Str.len(src)) noStr() else parseEvStrCh(src, i, Str.charAt(src, i), acc)
+
+def parseEvStrCh(src: String, i: Int, c: Int, acc: String): List[String] =
+  if (c == 92) parseEvEsc(src, i + 1, acc) else if (c == 34) acc :: parseEvSkip(src, i + 1) else parseEvStr(src, i + 1, Str.concat(acc, Str.slice(src, i, i + 1)))
+
+def parseEvEsc(src: String, i: Int, acc: String): List[String] =
+  if (i >= Str.len(src)) acc :: noStr() else parseEvStr(src, i + 1, Str.concat(acc, Str.slice(src, i, i + 1)))
 
 def tomlQuoted(src: String, key: String): String =
   tomlQuotedAt(src, findIdx(src, Str.concat(key, " = \""), 0), Str.len(key) + 4)
@@ -231,7 +268,13 @@ def quoteEvents(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) quoteEv(List.at(xs, 0)) else Str.concat(quoteEv(List.at(xs, 0)), Str.concat(", ", quoteEvents(List.tail(xs))))
 
 def quoteEv(e: String): String =
-  Str.concat("\"", Str.concat(e, "\""))
+  Str.concat("\"", Str.concat(escEv(e, 0, Builder.empty()), "\""))
+
+def escEv(s: String, i: Int, b: Builder): String =
+  if (i >= Str.len(s)) Builder.result(b) else escEv(s, i + 1, Builder.append(b, escEvCh(Str.charAt(s, i), s, i)))
+
+def escEvCh(c: Int, s: String, i: Int): String =
+  if (c == 92) "\\\\" else if (c == 34) "\\\"" else Str.slice(s, i, i + 1)
 
 def reproText(seed: Int, sched: String, fault: String, events: List[String]): String =
   Str.concat("""[fuzz]
@@ -239,8 +282,12 @@ seed = """, Str.concat(Str.fromInt(seed), Str.concat(reproSched(sched), Str.conc
 """))))))
 
 def reproSched(sched: String): String =
-  if (sched == "") """
-""" else Str.concat("\nschedule_seed = \"", Str.concat(sched, "\"\n"))
+  if (sched == "") nl() else Str.concat("\nschedule_seed = \"", Str.concat(sched, Str.concat("\"\n", pctLines(sched))))
+
+def pctLines(sched: String): String =
+  Str.concat("pct_d = ", Str.concat(Str.fromInt(decodeD(parseSeed(sched))), Str.concat("""
+pct_k = """, Str.concat(Str.fromInt(decodeK(parseSeed(sched))), """
+"""))))
 
 def reproFault(fault: String): String =
   if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
@@ -248,36 +295,54 @@ def reproFault(fault: String): String =
 def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
   Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, promo, killed, survived, inert, ran, sites, oracles, classText))
 
+def kv(k: String, v: String): String =
+  Str.concat(k, Str.concat(" = ", v))
+
+def kvn(k: String, v: String): String =
+  Str.concat(kv(k, v), nl())
+
+def quote1(s: String): String =
+  Str.concat("\"", Str.concat(s, "\""))
+
 def summaryFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("""[fuzz]
-ok = """, Str.concat(if (ok) "true" else "false", Str.concat("""
-seed = """, Str.concat(Str.fromInt(seed), Str.concat("""
-iterations = """, Str.concat(Str.fromInt(iterations), Str.concat("""
-search = """, Str.concat(Str.fromInt(search), Str.concat("""
-search_failures = """, Str.concat(Str.fromInt(failures), Str.concat("""
-corpus = """, Str.concat(Str.fromInt(corpus), Str.concat("\ndrivers = []\nevents = []\ndeclared = []\nreachability = []\nmissing_budget = []\nmissing_corpus = []\nrepro = \"", Str.concat(repro, "\"\nreplay = \"\"\n\n"))))))))))))))
+""", Str.concat(kvn("ok", if (ok) "true" else "false"), summaryFuzzNums(seed, iterations, search, failures, corpus, repro)))
+
+def summaryFuzzNums(seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
+  Str.concat(kvn("seed", Str.fromInt(seed)), Str.concat(kvn("iterations", Str.fromInt(iterations)), Str.concat(kvn("search", Str.fromInt(search)), Str.concat(kvn("search_failures", Str.fromInt(failures)), Str.concat(kvn("corpus", Str.fromInt(corpus)), summaryRepro(repro))))))
+
+def summaryRepro(repro: String): String =
+  if (repro == "") "" else kvn("repro", quote1(repro))
 
 def summaryRest(corpus: Int, corpFail: Int, promo: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
-  Str.concat("""[coverage]
-unclaimed_varied = []
+  Str.concat(summaryCorpus(corpus, corpFail, promo), Str.concat(summaryClass(classText), summaryMut(killed, survived, inert, ran, sites, oracles)))
 
+def summaryCorpus(corpus: Int, corpFail: Int, promo: String): String =
+  Str.concat("""
 [corpus]
-entries = """, Str.concat(Str.fromInt(corpus), Str.concat("""
-failures = """, Str.concat(Str.fromInt(corpFail), Str.concat("""
-reached = []
-promoted = """, Str.concat(promo, Str.concat("""
+""", Str.concat(kvn("entries", Str.fromInt(corpus)), Str.concat(kvn("failures", Str.fromInt(corpFail)), kvn("promoted", promo))))
 
+def summaryClass(classText: String): String =
+  if (classText == "") "" else Str.concat("""
 [classify]
-""", Str.concat(classText, Str.concat("""[mutate]
-killed = """, Str.concat(Str.fromInt(killed), Str.concat("""
-survived = """, Str.concat(Str.fromInt(survived), Str.concat("""
-inert = """, Str.concat(Str.fromInt(inert), Str.concat("""
-ran = """, Str.concat(Str.fromInt(ran), Str.concat("""
-sites = """, Str.concat(Str.fromInt(sites), Str.concat("""
-oracles = """, Str.concat(if (oracles) "true" else "false", """
-score = 1.000
-survivors = []
-"""))))))))))))))))))))
+""", classText)
+
+def summaryMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool): String =
+  Str.concat("""
+[mutate]
+""", Str.concat(kvn("killed", Str.fromInt(killed)), Str.concat(kvn("survived", Str.fromInt(survived)), Str.concat(kvn("inert", Str.fromInt(inert)), Str.concat(kvn("ran", Str.fromInt(ran)), Str.concat(kvn("sites", Str.fromInt(sites)), Str.concat(kvn("oracles", if (oracles) "true" else "false"), summaryScore(killed, sites))))))))
+
+def summaryScore(killed: Int, sites: Int): String =
+  if (sites <= 0) "" else kvn("score", score3(killed, sites))
+
+def score3(killed: Int, sites: Int): String =
+  score3n(killed * 1000 / sites)
+
+def score3n(n: Int): String =
+  Str.concat(Str.fromInt(n / 1000), Str.concat(".", pad3(n % 1000)))
+
+def pad3(n: Int): String =
+  if (n < 10) Str.concat("00", Str.fromInt(n)) else if (n < 100) Str.concat("0", Str.fromInt(n)) else Str.fromInt(n)
 
 def classToml(text: String): String =
   classLines(linesOf(text))
@@ -364,11 +429,14 @@ def mapSpecE(ds: List[Fun], ens: List[En]): List[String] =
   if (List.isEmpty(ds)) noStr() else specOfE(List.at(ds, 0), ens) :: mapSpecE(List.tail(ds), ens)
 
 def parseVerify(src: String): List[Fun] =
-  parseVerifyProg(Parse.parse(Lexer.lex(src)))
+  parseVerifyEns(src, noEn())
 
-def parseVerifyProg(p: Prog): List[Fun] =
+def parseVerifyEns(src: String, ens: List[En]): List[Fun] =
+  parseVerifyProg(Parse.parse(Lexer.lex(src)), ens)
+
+def parseVerifyProg(p: Prog, ens: List[En]): List[Fun] =
   p match {
-    case Prog(_, _, _, _, _, _, defs, _, _) => drives(defs)
+    case Prog(_, _, _, _, _, _, defs, _, _) => drives(defs, ens)
   }
 
 def parseClaims(src: String): List[Fun] =
@@ -389,7 +457,10 @@ def wrapMod(): String =
   "__verify"
 
 def wrapSrc(stem: String, src: String): String =
-  Str.concat(wrapFuns(stem, parseVerify(src)), wrapRelFuns(parseClaims(src)))
+  wrapSrcEns(stem, src, noEn())
+
+def wrapSrcEns(stem: String, src: String, ens: List[En]): String =
+  Str.concat(wrapFuns(stem, parseVerifyEns(src, ens)), wrapRelFuns(parseClaims(src)))
 
 def wrapFuns(stem: String, ds: List[Fun]): String =
   if (List.isEmpty(ds)) "" else Str.concat(wrapFun(stem, List.at(ds, 0)), wrapFuns(stem, List.tail(ds)))
@@ -426,11 +497,14 @@ def wrapRel2(name: String, ps: String, body: String): String =
 """))))))
 
 def wrapFiles(files: List[(String, String)]): String =
-  if (List.isEmpty(files)) "" else wrapFiles2(List.at(files, 0), List.tail(files))
+  wrapFilesEns(files, noEn())
 
-def wrapFiles2(h: (String, String), rest: List[(String, String)]): String =
+def wrapFilesEns(files: List[(String, String)], ens: List[En]): String =
+  if (List.isEmpty(files)) "" else wrapFilesEns2(List.at(files, 0), List.tail(files), ens)
+
+def wrapFilesEns2(h: (String, String), rest: List[(String, String)], ens: List[En]): String =
   h match {
-    case (stem, src) => Str.concat(wrapSrc(stem, src), wrapFiles(rest))
+    case (stem, src) => Str.concat(wrapSrcEns(stem, src, ens), wrapFilesEns(rest, ens))
   }
 
 def applySim(live: String, sim: String): String =
@@ -529,24 +603,24 @@ def rewriteReqFun(d: Fun): Fun =
 
 def rewriteReq(e: Expr): Expr =
   e match {
-    case Expr.EPrint(inner, _) => Expr.EPrint(rewriteReq(inner), 0)
-    case Expr.ECall(f, args, _) => Expr.ECall(f, rewriteReqList(args), 0)
-    case Expr.EMethod(recv, name, args, _) => rewriteReqMeth(rewriteReq(recv), name, rewriteReqList(args))
-    case Expr.EField(recv, name, _) => Expr.EField(rewriteReq(recv), name, 0)
-    case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteReq(l), rewriteReq(r), 0)
-    case Expr.EUn(op, inner, _) => Expr.EUn(op, rewriteReq(inner), 0)
+    case Expr.EPrint(inner, off) => Expr.EPrint(rewriteReq(inner), off)
+    case Expr.ECall(f, args, off) => Expr.ECall(f, rewriteReqList(args), off)
+    case Expr.EMethod(recv, name, args, off) => rewriteReqMeth(rewriteReq(recv), name, rewriteReqList(args), off)
+    case Expr.EField(recv, name, off) => Expr.EField(rewriteReq(recv), name, off)
+    case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteReq(l), rewriteReq(r), off)
+    case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteReq(inner), off)
     case Expr.ELam(p, body) => Expr.ELam(p, rewriteReq(body))
-    case Expr.EIf(c, t, el, _) => Expr.EIf(rewriteReq(c), rewriteReq(t), rewriteReq(el), 0)
-    case Expr.EMatch(s, arms, _) => Expr.EMatch(rewriteReq(s), rewriteReqArms(arms), 0)
+    case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteReq(c), rewriteReq(t), rewriteReq(el), off)
+    case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteReq(s), rewriteReqArms(arms), off)
     case Expr.EList(xs) => Expr.EList(rewriteReqList(xs))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteReq(inner))
-    case Expr.EFor(bs, body, _) => Expr.EFor(rewriteReqBinds(bs), rewriteReq(body), 0)
+    case Expr.EFor(bs, body, off) => Expr.EFor(rewriteReqBinds(bs), rewriteReq(body), off)
     case _ => e
   }
 
-def rewriteReqMeth(recv: Expr, name: String, args: List[Expr]): Expr =
-  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: reqPredE(args) :: recv :: noExpr(), 0) else Expr.EMethod(recv, name, args, 0)
+def rewriteReqMeth(recv: Expr, name: String, args: List[Expr], off: Int): Expr =
+  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: reqPredE(args) :: recv :: noExpr(), off) else Expr.EMethod(recv, name, args, off)
 
 def reqNameE(args: List[Expr]): Expr =
   if (List.len(args) < 2) Expr.EStr("require", 0) else reqNameHit(List.at(args, 0))
@@ -566,10 +640,21 @@ def forcePred(e: Expr): Expr =
 def isIoPred(e: Expr): Bool =
   e match {
     case Expr.EFor(bs, body, _) => hasDraw(bs) || isIoPred(body)
-    case Expr.ECall(f, _, _) => Str.startsWith(f, "IO.")
+    case Expr.ECall(f, _, _) => ioCall(f)
     case Expr.EMethod(_, name, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
     case Expr.EIf(_, t, el, _) => isIoPred(t) || isIoPred(el)
     case _ => false
+  }
+
+def ioCall(f: String): Bool =
+  Str.startsWith(f, "IO.") || Str.startsWith(f, "Fs.") || Str.startsWith(f, "Net.") || Str.startsWith(f, "Sys.") || Str.startsWith(f, "Clock.") || Str.startsWith(f, "Random.")
+
+def hasDraw(bs: List[Bind]): Bool =
+  if (List.isEmpty(bs)) false else bindIsDraw(List.at(bs, 0)) || hasDraw(List.tail(bs))
+
+def bindIsDraw(b: Bind): Bool =
+  b match {
+    case Bind(draw, _, _) => draw
   }
 
 def rewriteReqList(xs: List[Expr]): List[Expr] =
@@ -606,10 +691,13 @@ def drivers(src: String): String =
   nls(mapSpec(parseVerify(src)))
 
 def driversFrom(srcs: List[String], ens: List[En]): String =
-  nls(mapSpecE(parseVerifyAll(srcs), ens))
+  nls(mapSpecE(parseVerifyAllEns(srcs, ens), ens))
 
 def parseVerifyAll(srcs: List[String]): List[Fun] =
-  if (List.isEmpty(srcs)) noFun() else List.concat(parseVerify(List.at(srcs, 0)), parseVerifyAll(List.tail(srcs)))
+  parseVerifyAllEns(srcs, noEn())
+
+def parseVerifyAllEns(srcs: List[String], ens: List[En]): List[Fun] =
+  if (List.isEmpty(srcs)) noFun() else List.concat(parseVerifyEns(List.at(srcs, 0), ens), parseVerifyAllEns(List.tail(srcs), ens))
 
 def ensOfFiles(files: List[(String, String)]): List[En] =
   if (List.isEmpty(files)) noEn() else List.concat(ensOfFile(List.at(files, 0)), ensOfFiles(List.tail(files)))
@@ -625,7 +713,7 @@ def ensOfProg(p: Prog): List[En] =
   }
 
 def emptyVerify(file: String): String =
-  Str.concat(file, Str.concat(":1:1: error: ", Str.concat(file, ": verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")))
+  Str.concat(file, ":1:1: error: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")
 
 def ioRet(d: Fun): Bool =
   Str.len(d.ret) >= 2 && Str.slice(d.ret, 0, 2) == "IO"
@@ -648,7 +736,10 @@ def ioDefNamesHd(d: Fun, rest: List[Fun]): List[String] =
   if (ioRet(d)) d.name :: ioDefNames(rest) else ioDefNames(rest)
 
 def oracleNames(srcs: List[String]): List[String] =
-  funNames(parseVerifyAll(srcs))
+  oracleNamesEns(srcs, noEn())
+
+def oracleNamesEns(srcs: List[String], ens: List[En]): List[String] =
+  funNames(parseVerifyAllEns(srcs, ens))
 
 def funNames(ds: List[Fun]): List[String] =
   if (List.isEmpty(ds)) noStr() else funNamesHd(List.at(ds, 0), List.tail(ds))
@@ -674,8 +765,115 @@ def driveRule(names: List[String]): String =
 def driveDupMsgGo(dup: String): String =
   if (dup == "") "" else driveDupMsg(dup)
 
+def intentMsg(file: String): String =
+  Str.concat(file, ":1:1: error: leftover *.scuzz_intent; rename to *.scuzz_verify or delete the file")
+
+def isBlank(s: String): Bool =
+  isBlankAt(s, 0)
+
+def isBlankAt(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) true else if (isWs(Str.charAt(s, i))) isBlankAt(s, i + 1) else false
+
+def isWs(c: Int): Bool =
+  c == 32 || c == 9 || c == 10 || c == 13
+
+def firstTokOff(src: String): Int =
+  firstTokOffAt(src, 0)
+
+def firstTokOffAt(src: String, i: Int): Int =
+  if (i >= Str.len(src)) 0 else if (isWs(Str.charAt(src, i))) firstTokOffAt(src, i + 1) else i
+
+def atLoc(file: String, src: String, off: Int, msg: String): String =
+  atLoc2(file, Check.locOf(src, off), msg)
+
+def atLoc2(file: String, loc: (Int, Int, Int, Int), msg: String): String =
+  loc match {
+    case (line, col, _, _) => Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.concat(Str.fromInt(col), Str.concat(": error: ", msg))))))
+  }
+
+def fmtMsg(file: String): String =
+  Str.concat(file, ":1:1: error: needs formatting (run scuzz fmt)")
+
+def leftoverMsg(file: String, src: String): String =
+  atLoc(file, src, firstTokOff(src), "leftover tokens after parse")
+
 def checkVerify(src: String, file: String): String =
-  if (List.isEmpty(parseVerify(src)) && List.isEmpty(parseClaims(src))) emptyVerify(file) else "scuzz check ok"
+  checkVerifyEns(src, file, noEn())
+
+def checkVerifyEns(src: String, file: String, ens: List[En]): String =
+  if (isBlank(src)) emptyVerify(file) else checkVerifyProg(src, file, ens, Parse.parse(Lexer.lex(src)))
+
+def checkVerifyProg(src: String, file: String, ens: List[En], p: Prog): String =
+  if (List.isEmpty(p.defs) && p.main == "") leftoverMsg(file, src) else checkVerifyShape(src, file, ens, p)
+
+def checkVerifyShape(src: String, file: String, ens: List[En], p: Prog): String =
+  if (p.main != "") Str.concat(file, ":1:1: error: verify file must not define @main") else if (!List.isEmpty(p.enums)) Str.concat(file, ":1:1: error: verify file must not define enums") else if (!List.isEmpty(p.aliases)) Str.concat(file, ":1:1: error: verify file must not define aliases") else if (!List.isEmpty(p.traits)) Str.concat(file, ":1:1: error: verify file must not define traits") else if (!List.isEmpty(p.impls)) Str.concat(file, ":1:1: error: verify file must not define impls") else if (!List.isEmpty(p.imps)) Str.concat(file, ":1:1: error: verify file must not define imports") else checkVerifyBody(src, file, ens, p)
+
+def checkVerifyBody(src: String, file: String, ens: List[En], p: Prog): String =
+  if (defsHaveForbid(p.defs) || exprHasForbid(p.body)) Str.concat(file, ":1:1: error: verify bodies must not call Property.* or .require") else checkVerifyDefs(src, file, ens, p)
+
+def checkVerifyDefs(src: String, file: String, ens: List[En], p: Prog): String =
+  checkVerifyDefsGo(src, file, ens, p, p.defs)
+
+def checkVerifyDefsGo(src: String, file: String, ens: List[En], p: Prog, ds: List[Fun]): String =
+  if (List.isEmpty(ds)) checkVerifyEmpty(src, file, ens, p) else checkVerifyDefHit(src, file, ens, p, List.at(ds, 0), List.tail(ds))
+
+def checkVerifyDefHit(src: String, file: String, ens: List[En], p: Prog, d: Fun, rest: List[Fun]): String =
+  if (d.priv) checkVerifyDefsGo(src, file, ens, p, rest) else if (isDrive(d, ens)) checkVerifyDefsGo(src, file, ens, p, rest) else if (isClaim(d)) checkVerifyDefsGo(src, file, ens, p, rest) else defFail(d, file, src)
+
+def defFail(d: Fun, file: String, src: String): String =
+  if (d.ret == "Bool") atLoc(file, src, d.off, Str.concat("drive ", Str.concat(d.name, " params must be generator-friendly (at most 3; ADT or List only as the sole param)"))) else if (d.ret == "Verdict") atLoc(file, src, d.off, Str.concat("claim ", Str.concat(d.name, " must take 1 or 2 Timeline params"))) else atLoc(file, src, d.off, Str.concat("public def ", Str.concat(d.name, " is not a drive oracle or a Timeline => Verdict claim")))
+
+def checkVerifyEmpty(src: String, file: String, ens: List[En], p: Prog): String =
+  if (List.isEmpty(drives(p.defs, ens)) && List.isEmpty(claims(p.defs))) emptyVerify(file) else checkVerifyFmt(src, file, p)
+
+def checkVerifyFmt(src: String, file: String, p: Prog): String =
+  if (Parse.pretty(p) == src) "scuzz check ok" else fmtMsg(file)
+
+def defsHaveForbid(ds: List[Fun]): Bool =
+  if (List.isEmpty(ds)) false else funHasForbid(List.at(ds, 0)) || defsHaveForbid(List.tail(ds))
+
+def funHasForbid(d: Fun): Bool =
+  d match {
+    case Fun(_, _, _, _, _, body, _, _) => exprHasForbid(body)
+  }
+
+def exprHasForbid(e: Expr): Bool =
+  e match {
+    case Expr.EPrint(inner, _) => exprHasForbid(inner)
+    case Expr.ECall(f, args, _) => Str.startsWith(f, "Property.") || listHasForbid(args)
+    case Expr.EMethod(recv, name, args, _) => name == "require" || exprHasForbid(recv) || listHasForbid(args)
+    case Expr.EField(recv, _, _) => exprHasForbid(recv)
+    case Expr.EBin(_, l, r, _) => exprHasForbid(l) || exprHasForbid(r)
+    case Expr.EUn(_, inner, _) => exprHasForbid(inner)
+    case Expr.ELam(_, body) => exprHasForbid(body)
+    case Expr.EIf(c, t, el, _) => exprHasForbid(c) || exprHasForbid(t) || exprHasForbid(el)
+    case Expr.EMatch(s, arms, _) => exprHasForbid(s) || armsHaveForbid(arms)
+    case Expr.EList(xs) => listHasForbid(xs)
+    case Expr.ETuple(xs) => listHasForbid(xs)
+    case Expr.ENamed(_, inner) => exprHasForbid(inner)
+    case Expr.EFor(bs, body, _) => bindsHaveForbid(bs) || exprHasForbid(body)
+    case _ => false
+  }
+
+def listHasForbid(xs: List[Expr]): Bool =
+  if (List.isEmpty(xs)) false else exprHasForbid(List.at(xs, 0)) || listHasForbid(List.tail(xs))
+
+def armsHaveForbid(xs: List[Arm]): Bool =
+  if (List.isEmpty(xs)) false else armHasForbid(List.at(xs, 0)) || armsHaveForbid(List.tail(xs))
+
+def armHasForbid(a: Arm): Bool =
+  a match {
+    case Arm(_, _, body) => exprHasForbid(body)
+  }
+
+def bindsHaveForbid(xs: List[Bind]): Bool =
+  if (List.isEmpty(xs)) false else bindHasForbid(List.at(xs, 0)) || bindsHaveForbid(List.tail(xs))
+
+def bindHasForbid(b: Bind): Bool =
+  b match {
+    case Bind(_, _, e) => exprHasForbid(e)
+  }
 
 def testOut(checkOk: Bool): String =
   if (!checkOk) "scuzz test fail" else Str.concat("project compile smoke ok", Str.concat(nl(), Str.concat("IO smoke ok", Str.concat(nl(), "scuzz test ok"))))
