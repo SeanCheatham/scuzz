@@ -313,6 +313,12 @@ def toSetFacts(s: Set): Bool =
 def toSetFromVarOk(): Bool =
   toSetFacts(List.toSet(dupInts()))
 
+def mapGetEmptyOk(): Bool =
+  mapGetEmptyAt(Map.set(Map.empty(), "e", []: List[String]))
+
+def mapGetEmptyAt(m: Map): Bool =
+  Map.contains(m, "e") && Map.get(m, "e") == Option.Some([]: List[String]) && Map.get(m, "z") == (Option.None: Option[List[String]])
+
 def mapSetProof(): IO[Unit] =
   for {
     mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
@@ -334,8 +340,12 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"sempty:${if (Set.isEmpty(Set.empty())) "y" else "n"}")
     _ <- IO.println(s"mne:${if (Map.nonEmpty(mp)) "y" else "n"}")
     _ <- IO.println(s"sne:${if (Set.nonEmpty(st)) "y" else "n"}")
-    _ <- IO.println(s"mget:${List.join(Map.get(mp, "a"), ",")}")
-    _ <- IO.println(s"mmiss:${List.join(Map.get(mp, "z"), ",")}")
+    _ <- IO.println(s"mget:${optStr(Map.get(mp, "a"))}")
+    _ <- IO.println(s"mmiss:${optStr(Map.get(mp, "z"))}")
+    empty = Map.set(Map.empty(), "e", []: List[String])
+    _ <- IO.println(s"ehas:${if (Map.contains(empty, "e")) "y" else "n"}")
+    _ <- IO.println(s"eget:${if (Map.get(empty, "e") == Option.Some([]: List[String])) "Some([])" else "?"}")
+    _ <- IO.println(s"emiss:${if (Map.get(empty, "z") == (Option.None: Option[List[String]])) "None" else "?"}")
     _ <- IO.println(s"union:${List.join(Set.toList(Set.union(st, Set.add(Set.empty(), "z"))), ",")}")
     _ <- IO.println(s"isect:${List.join(Set.toList(Set.intersect(st, Set.add(Set.add(Set.empty(), "y"), "z"))), ",")}")
     _ <- IO.println(s"sdiff:${List.join(Set.toList(Set.diff(st, Set.add(Set.add(Set.empty(), "y"), "z"))), ",")}")

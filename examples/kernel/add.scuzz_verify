@@ -43,3 +43,6 @@ def scollapse(): Bool =
 def tosetVar(): Bool =
   Main.toSetFromVarOk()
 
+def mapEmptyGet(): Bool =
+  Main.mapGetEmptyOk()
+

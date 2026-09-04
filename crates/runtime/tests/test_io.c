@@ -10294,16 +10294,36 @@ int main(void) {
     assert(sz_map_contains(m1, kb) == 0);
     assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(m2, ka, NULL)), "1") == 0);
     {
-      SzList *hit = sz_map_get(m2, ka);
-      SzList *miss = sz_map_get(m1, kb);
+      SzAdt *hit = (SzAdt *)sz_map_get(m2, ka);
+      SzAdt *miss = (SzAdt *)sz_map_get(m1, kb);
       SzString *kz = sz_string_from_cstr("z");
-      SzList *absent = sz_map_get(m2, kz);
-      assert(sz_list_len(hit) == 1);
-      assert(strcmp(sz_string_cstr((SzString *)hit->head), "1") == 0);
-      assert(sz_list_is_empty(miss));
-      assert(sz_list_is_empty(absent));
-      sz_list_free(hit);
+      SzAdt *absent = (SzAdt *)sz_map_get(m2, kz);
+      assert(sz_adt_tag(hit) == 1);
+      assert(strcmp(sz_string_cstr((SzString *)sz_adt_payload(hit)), "1") == 0);
+      assert(sz_adt_tag(miss) == 0);
+      assert(sz_adt_tag(absent) == 0);
+      sz_release(hit);
+      sz_release(miss);
+      sz_release(absent);
       sz_string_free(kz);
+    }
+    {
+      SzString *ke = sz_string_from_cstr("e");
+      SzMap *empty = sz_map_set(NULL, ke, NULL, 1);
+      SzAdt *some;
+      SzString *kz = sz_string_from_cstr("z");
+      SzAdt *none;
+      assert(sz_map_contains(empty, ke) == 1);
+      some = (SzAdt *)sz_map_get(empty, ke);
+      none = (SzAdt *)sz_map_get(empty, kz);
+      assert(sz_adt_tag(some) == 1);
+      assert(sz_adt_payload(some) == NULL);
+      assert(sz_adt_tag(none) == 0);
+      sz_release(some);
+      sz_release(none);
+      sz_string_free(kz);
+      sz_release(empty);
+      sz_string_free(ke);
     }
     sz_release(m2);
     sz_release(m1);

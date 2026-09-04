@@ -801,8 +801,8 @@ SzMap *sz_map_empty(void);
  * `m->key_kind`. `key_kind` is unused. */
 SzMap *sz_map_set(SzMap *m, void *key, void *val, int32_t key_kind);
 void *sz_map_get_or(SzMap *m, void *key, void *dflt);
-/* 0–1 list of the value. Miss is empty. Cons retains the value. */
-SzList *sz_map_get(SzMap *m, void *key);
+/* Option of the value. A miss is None. A hit is Some, including null. */
+void *sz_map_get(SzMap *m, void *key);
 int64_t sz_map_contains(SzMap *m, void *key);
 /* Drop `key` if present. Missing key retains `m`. */
 SzMap *sz_map_remove(SzMap *m, void *key);

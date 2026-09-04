@@ -75,11 +75,16 @@ void *sz_map_get_or(SzMap *m, void *k, void *dflt) {
   return sz_map_get_or(m->right, k, dflt);
 }
 
-SzList *sz_map_get(SzMap *m, void *k) {
-  void *v = sz_map_get_or(m, k, NULL);
-  if (!v)
-    return NULL;
-  return sz_list_cons(v, NULL);
+void *sz_map_get(SzMap *m, void *k) {
+  int c;
+  if (!m)
+    return sz_adt_new(0, NULL);
+  c = map_cmp(m, k);
+  if (c == 0)
+    return sz_adt_new(1, m->val);
+  if (c > 0)
+    return sz_map_get(m->left, k);
+  return sz_map_get(m->right, k);
 }
 
 int64_t sz_map_contains(SzMap *m, void *k) {
