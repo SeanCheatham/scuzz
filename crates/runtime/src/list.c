@@ -926,8 +926,11 @@ SzMap *sz_list_to_map(SzList *pairs) {
 SzMap *sz_list_to_set(SzList *xs, int32_t key_kind) {
   SzMap *acc = NULL;
   SzList *p;
+  int32_t kind = key_kind;
+  if (xs && xs->head)
+    kind = sz_map_infer_key_kind(xs->head);
   for (p = xs; p; p = p->tail) {
-    SzMap *next = sz_map_set(acc, p->head, NULL, key_kind);
+    SzMap *next = sz_map_set(acc, p->head, NULL, kind);
     sz_release(acc);
     acc = next;
   }

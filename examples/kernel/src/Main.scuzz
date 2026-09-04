@@ -289,6 +289,30 @@ def scale(x: Float): Float =
 def trunc(x: Float): Int =
   Float.toInt(x)
 
+def bangKeys(): Set =
+  Set.map(Set.add(Set.add(Set.empty(), "x"), "y"), x => Str.concat(x, "!"))
+
+def mapSetSizeOk(): Bool =
+  Set.size(bangKeys()) == 2
+
+def mapSetHasOk(): Bool =
+  Set.contains(bangKeys(), "x!") && Set.contains(bangKeys(), "y!")
+
+def mapSetEqOk(): Bool =
+  bangKeys() == Set.add(Set.add(Set.empty(), "x!"), "y!")
+
+def mapSetCollapseOk(): Bool =
+  Set.size(Set.map(List.toSet(["aa", "ab"]), s => Str.take(s, 1))) == 1
+
+def dupInts(): List[Int] =
+  [2, 1, 2]
+
+def toSetFacts(s: Set): Bool =
+  Set.size(s) == 2 && Set.contains(s, 1) && Set.contains(s, 2) && s == List.toSet([1, 2])
+
+def toSetFromVarOk(): Bool =
+  toSetFacts(List.toSet(dupInts()))
+
 def mapSetProof(): IO[Unit] =
   for {
     mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
@@ -327,6 +351,11 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"mfa:${if (Map.forall(mp, v => v != "z")) "y" else "n"}")
     _ <- IO.println(s"sfil:${List.join(Set.toList(Set.filter(st, x => x != "y")), ",")}")
     _ <- IO.println(s"smap:${List.join(Set.toList(Set.map(st, x => Str.concat(x, "!"))), ",")}")
+    mapped = Set.map(st, x => Str.concat(x, "!"))
+    _ <- IO.println(s"smapN:${Set.size(mapped)}")
+    _ <- IO.println(s"smapHas:${if (Set.contains(mapped, "x!") && Set.contains(mapped, "y!")) "y" else "n"}")
+    _ <- IO.println(s"smapEq:${if (mapped == Set.add(Set.add(Set.empty(), "x!"), "y!")) "y" else "n"}")
+    _ <- IO.println(s"scollapse:${Set.size(Set.map(List.toSet(["aa", "ab"]), s => Str.take(s, 1)))}")
     _ <- IO.println(s"sex:${if (Set.exists(st, x => x == "x")) "y" else "n"}")
     _ <- IO.println(s"sfa:${if (Set.forall(st, x => x != "z")) "y" else "n"}")
     _ <- IO.println(s"tolist:${List.join(List.map(Map.toList(mp), (k, v) => s"$k:$v"), "|")}")
@@ -471,6 +500,11 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"tomap0:${Map.size(List.toMap([]: List[(String, Int)]))}")
     _ <- IO.println(s"toset:${List.join(Set.toList(List.toSet(["b", "a", "b"])), ",")}")
     _ <- IO.println(s"tosetN:${List.join(List.map(Set.toList(List.toSet([2, 1, 2])), Str.fromInt(_)), ",")}")
+    nums = [2, 1, 2]
+    numSet = List.toSet(nums)
+    _ <- IO.println(s"tosetVar:${Set.size(numSet)}")
+    _ <- IO.println(s"tosetHas:${if (Set.contains(numSet, 1) && Set.contains(numSet, 2)) "y" else "n"}")
+    _ <- IO.println(s"tosetEq:${if (numSet == List.toSet([1, 2])) "y" else "n"}")
     _ <- IO.println(s"ldiff:${List.join(List.diff(xs, ["a", "z"]), ",")}")
     _ <- IO.println(s"lisect:${List.join(List.intersect(xs, ["a", "z"]), ",")}")
     _ <- IO.println(s"nhas:${if (List.contains(List.range(1, 4), 2)) "y" else "n"}")
