@@ -5112,6 +5112,22 @@ int main(void) {
       assert(strcmp(sz_string_cstr(right), "axx") == 0);
       assert(strcmp(sz_string_cstr(shortp), "abcd") == 0);
       assert(strcmp(sz_string_cstr(nopad), "a") == 0);
+      {
+        SzString *e = sz_string_from_cstr("\xc3\xa9");
+        SzString *px = sz_string_from_cstr("x");
+        SzString *p3 = sz_string_pad_left(e, 3, px);
+        SzString *a = sz_string_from_cstr("a");
+        SzString *mb = sz_string_pad_left(a, 4, e);
+        assert(strcmp(sz_string_cstr(p3), "xx\xc3\xa9") == 0);
+        assert(sz_string_ulen(p3) == 3);
+        assert(sz_string_ulen(mb) == 4);
+        assert(sz_string_len(mb) == 7);
+        sz_string_free(e);
+        sz_string_free(px);
+        sz_string_free(p3);
+        sz_string_free(a);
+        sz_string_free(mb);
+      }
       assert(sz_string_is_blank(sz_string_from_cstr(" \t\n")) == 1);
       assert(sz_string_is_blank(sz_string_from_cstr(" a")) == 0);
       assert(sz_string_is_blank(NULL) == 1);
@@ -5168,6 +5184,37 @@ int main(void) {
           assert(sz_string_ulen(tr) == 2 && sz_string_uchar_at(tr, 0) == 0xE9);
           assert(strcmp(sz_string_cstr(drr), "a") == 0);
           assert(sz_string_ulen(rv) == 3 && sz_string_uchar_at(rv, 0) == 'z' && sz_string_uchar_at(rv, 1) == 0xE9);
+          {
+            SzString *eonly = sz_string_uslice(u, 1, 2);
+            SzString *mid = sz_string_slice(eonly, 1, 2);
+            assert(sz_string_len(mid) == 1);
+            assert(sz_string_is_empty(mid) == 0);
+            assert(sz_string_ulen(mid) == 1);
+            assert(sz_string_uchar_at(mid, 0) == 0xA9);
+            assert(sz_string_uchar_at(mid, 1) == -1);
+            sz_string_free(mid);
+            sz_string_free(eonly);
+          }
+          {
+            SzString *eonly = sz_string_uslice(u, 1, 2);
+            SzString *px = sz_string_from_cstr("x");
+            SzString *p3 = sz_string_pad_left(eonly, 3, px);
+            SzString *aone = sz_string_uslice(u, 0, 1);
+            SzString *mb = sz_string_pad_left(aone, 4, eonly);
+            assert(sz_string_ulen(p3) == 3);
+            assert(sz_string_uchar_at(p3, 0) == 'x');
+            assert(sz_string_uchar_at(p3, 1) == 'x');
+            assert(sz_string_uchar_at(p3, 2) == 0xE9);
+            assert(sz_string_ulen(mb) == 4);
+            assert(sz_string_len(mb) == 7);
+            assert(sz_string_uchar_at(mb, 0) == 0xE9);
+            assert(sz_string_uchar_at(mb, 3) == 'a');
+            sz_string_free(eonly);
+            sz_string_free(px);
+            sz_string_free(p3);
+            sz_string_free(aone);
+            sz_string_free(mb);
+          }
           {
             /* Sequential walk, then a lower index. Leading non-ASCII must stay O(n). */
             SzString *fwd = sz_string_from_cstr("\xc3\xa9" "abcdefghijklmnopqrstuvwxyz");
@@ -5229,6 +5276,8 @@ int main(void) {
       assert(sz_string_len(tr) == 0);
     }
     assert(strcmp(sz_string_cstr(sz_string_from_int(42)), "42") == 0);
+    assert(strcmp(sz_string_cstr(sz_string_from_bool(1)), "true") == 0);
+    assert(strcmp(sz_string_cstr(sz_string_from_bool(0)), "false") == 0);
     assert(strcmp(sz_string_cstr(sz_string_from_float(1.5)), "1.5") == 0);
     assert(strcmp(sz_string_cstr(sz_string_from_float(2.0)), "2.0") == 0);
     assert(strcmp(sz_string_cstr(sz_string_from_float(-1.5)), "-1.5") == 0);

@@ -11,8 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
+#include <locale.h>
 #if defined(__APPLE__)
+#include <xlocale.h>
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
@@ -765,6 +766,8 @@ void sz_release(void *ptr) {
 
 /* --- strings ------------------------------------------------------------- */
 
+static uint32_t utf8_decode(const char *p, size_t left, size_t *used);
+
 SzString *sz_string_from_bytes(const char *bytes, size_t len) {
   SzString *s = (SzString *)sz_rc_alloc(sizeof(SzString), SZ_RC_STRING);
   size_t i;
@@ -777,12 +780,16 @@ SzString *sz_string_from_bytes(const char *bytes, size_t len) {
   s->ulen = 0;
   s->cp_hint = 0;
   s->off_hint = 0;
-  for (i = 0; i < len; i++) {
+  /* Count with the same walk as utf8_decode so a lone continuation is one
+   * code point, not invisible. */
+  for (i = 0; i < len; ) {
+    size_t used;
     unsigned char c = (unsigned char)s->data[i];
     if (c >= 0x80)
       s->is_ascii = 0;
-    if ((c & 0xC0) != 0x80)
-      s->ulen++;
+    utf8_decode(s->data + i, len - i, &used);
+    i += used;
+    s->ulen++;
   }
   return s;
 }
@@ -802,13 +809,17 @@ void sz_string_free(SzString *s) { sz_release(s); }
 SzString *sz_string_concat(const SzString *a, const SzString *b) {
   size_t al = a && a->data ? a->len : 0;
   size_t bl = b && b->data ? b->len : 0;
-  char *buf = (char *)sz_alloc(al + bl + 1);
+  char *buf;
+  SzString *out;
+  if (bl > SIZE_MAX - al)
+    sz_panic("Str.concat too large");
+  buf = (char *)sz_alloc(al + bl + 1);
   if (al)
     memcpy(buf, a->data, al);
   if (bl)
     memcpy(buf + al, b->data, bl);
   buf[al + bl] = '\0';
-  SzString *out = sz_string_from_bytes(buf, al + bl);
+  out = sz_string_from_bytes(buf, al + bl);
   sz_free(buf);
   return out;
 }
@@ -818,14 +829,19 @@ static void builder_append_bytes(SzBuilder *b, const char *p, size_t n) {
   char *d;
   if (!b || n == 0)
     return;
+  if (n > SIZE_MAX - b->len)
+    sz_panic("Builder.append too large");
   if (b->len + n <= b->cap) {
     memcpy(b->data + b->len, p, n);
     b->len += n;
     return;
   }
   cap = b->cap ? b->cap : 64;
-  while (cap < b->len + n)
+  while (cap < b->len + n) {
+    if (cap > SIZE_MAX / 2)
+      sz_panic("Builder.append too large");
     cap *= 2;
+  }
   d = (char *)sz_alloc(cap);
   if (b->len)
     memcpy(d, b->data, b->len);
@@ -924,14 +940,40 @@ SzString *sz_string_from_int(int64_t n) {
   return sz_string_from_cstr(buf);
 }
 
+SzString *sz_string_from_bool(int64_t b) {
+  return sz_string_from_cstr(b ? "true" : "false");
+}
+
+static locale_t str_c_locale(void) {
+  static locale_t loc;
+  if (!loc)
+    loc = newlocale(LC_ALL_MASK, "C", (locale_t)0);
+  return loc;
+}
+
 SzString *sz_string_from_float(double x) {
-  char buf[64];
+  char buf[512];
   char *dot;
   char *end;
+  int n;
+  locale_t loc;
   if (x != x) {
     return sz_string_from_cstr("NaN");
   }
-  snprintf(buf, sizeof(buf), "%.6f", x);
+  loc = str_c_locale();
+  if (!loc)
+    sz_panic("Str.fromFloat: C locale");
+#ifdef __APPLE__
+  n = snprintf_l(buf, sizeof(buf), loc, "%.6f", x);
+#else
+  {
+    locale_t old = uselocale(loc);
+    n = snprintf(buf, sizeof(buf), "%.6f", x);
+    uselocale(old);
+  }
+#endif
+  if (n < 0 || (size_t)n >= sizeof(buf))
+    sz_panic("Str.fromFloat overflow");
   dot = strchr(buf, '.');
   if (dot) {
     end = buf + strlen(buf);
@@ -1079,15 +1121,16 @@ static int64_t utf8_cp_off(const SzString *s, int64_t cp) {
     i = 0;
     k = 0;
   }
-  for (; i < s->len; i++) {
-    if (!utf8_cont((unsigned char)s->data[i])) {
-      if (k == cp) {
-        mut->cp_hint = cp;
-        mut->off_hint = (int64_t)i;
-        return (int64_t)i;
-      }
-      k++;
+  while (i < s->len) {
+    size_t used;
+    if (k == cp) {
+      mut->cp_hint = cp;
+      mut->off_hint = (int64_t)i;
+      return (int64_t)i;
     }
+    utf8_decode(s->data + i, s->len - i, &used);
+    i += used;
+    k++;
   }
   if (k == cp) {
     mut->cp_hint = cp;
@@ -1193,11 +1236,19 @@ SzString *sz_string_ureverse(const SzString *s) {
 
 /* Code-point count of the byte range [0, byte_end). */
 static int64_t utf8_cp_before(const SzString *s, int64_t byte_end) {
-  int64_t i;
+  size_t i = 0;
   int64_t k = 0;
-  for (i = 0; i < byte_end && i < (int64_t)s->len; i++) {
-    if (!utf8_cont((unsigned char)s->data[i]))
-      k++;
+  size_t end;
+  if (byte_end <= 0)
+    return 0;
+  end = (size_t)byte_end;
+  if (end > s->len)
+    end = s->len;
+  while (i < end) {
+    size_t used;
+    utf8_decode(s->data + i, s->len - i, &used);
+    k++;
+    i += used;
   }
   return k;
 }
@@ -1479,32 +1530,68 @@ SzString *sz_string_strip_suffix(const SzString *s, const SzString *suffix) {
 }
 
 static SzString *sz_string_pad(const SzString *s, int64_t n, const SzString *pad, int left) {
-  size_t slen = s && s->data ? s->len : 0;
-  size_t plen = pad && pad->data ? pad->len : 0;
+  int64_t slen = sz_string_ulen(s);
+  int64_t plen = sz_string_ulen(pad);
+  size_t sbytes = s && s->data ? s->len : 0;
+  size_t pbytes = pad && pad->data ? pad->len : 0;
   const char *src = s && s->data ? s->data : "";
   const char *psrc = pad && pad->data ? pad->data : "";
-  size_t want;
-  size_t need;
+  int64_t need;
+  size_t fill_bytes;
+  size_t po;
+  size_t off;
+  int64_t k;
   char *buf;
   SzString *out;
-  size_t i;
-  if (n <= 0 || (uint64_t)n <= (uint64_t)slen)
+  size_t want;
+  if (n <= 0 || n <= slen)
     return sz_string_copy(s);
-  if (plen == 0)
+  if (plen <= 0)
     return sz_string_copy(s);
-  if ((uint64_t)n > (uint64_t)SIZE_MAX)
+  need = n - slen;
+  if ((uint64_t)need > (uint64_t)SIZE_MAX / 4)
     sz_panic("Str.pad too large");
-  want = (size_t)n;
-  need = want - slen;
+  fill_bytes = 0;
+  po = 0;
+  for (k = 0; k < need; k++) {
+    size_t used;
+    if (po >= pbytes)
+      po = 0;
+    utf8_decode(psrc + po, pbytes - po, &used);
+    if (used > SIZE_MAX - fill_bytes)
+      sz_panic("Str.pad too large");
+    fill_bytes += used;
+    po += used;
+  }
+  if (fill_bytes > SIZE_MAX - sbytes)
+    sz_panic("Str.pad too large");
+  want = fill_bytes + sbytes;
   buf = (char *)sz_alloc(want + 1);
+  po = 0;
   if (left) {
-    for (i = 0; i < need; i++)
-      buf[i] = psrc[i % plen];
-    memcpy(buf + need, src, slen);
+    off = 0;
+    for (k = 0; k < need; k++) {
+      size_t used;
+      if (po >= pbytes)
+        po = 0;
+      utf8_decode(psrc + po, pbytes - po, &used);
+      memcpy(buf + off, psrc + po, used);
+      off += used;
+      po += used;
+    }
+    memcpy(buf + fill_bytes, src, sbytes);
   } else {
-    memcpy(buf, src, slen);
-    for (i = 0; i < need; i++)
-      buf[slen + i] = psrc[i % plen];
+    memcpy(buf, src, sbytes);
+    off = sbytes;
+    for (k = 0; k < need; k++) {
+      size_t used;
+      if (po >= pbytes)
+        po = 0;
+      utf8_decode(psrc + po, pbytes - po, &used);
+      memcpy(buf + off, psrc + po, used);
+      off += used;
+      po += used;
+    }
   }
   buf[want] = '\0';
   out = sz_string_from_bytes(buf, want);
