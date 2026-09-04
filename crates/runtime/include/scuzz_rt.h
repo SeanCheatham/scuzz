@@ -936,10 +936,12 @@ typedef struct SzNetSock {
 SzIo *sz_net_tcp_connect(SzString *host, int64_t port); /* IO[SzNetSock] */
 SzIo *sz_net_tcp_listen(int64_t port);                  /* IO[SzNetSock] */
 SzIo *sz_net_tcp_accept(SzNetSock *listener);           /* IO[SzNetSock] */
-SzIo *sz_net_tcp_read(SzNetSock *conn, int64_t n);      /* IO[String] */
+/* At most n bytes (cap 1 MiB). Short read when no more data is ready. */
+SzIo *sz_net_tcp_read(SzNetSock *conn, int64_t n); /* IO[String] */
 SzIo *sz_net_tcp_write(SzNetSock *conn, SzString *s);   /* IO[Unit] */
 SzIo *sz_net_tcp_close(SzNetSock *sock);                /* IO[Unit] */
-/* Blessed UDP. Bind 0 picks an ephemeral port. Recv is (host, port, data). */
+/* Blessed UDP. Bind is IPv4 localhost. Bind 0 picks an ephemeral port.
+ * Recv is (host, port, data). An IPv6 send host fails. */
 SzIo *sz_net_udp_bind(int64_t port); /* IO[SzNetSock] */
 SzIo *sz_net_udp_send(SzNetSock *sock, SzString *host, int64_t port,
                      SzString *data);
@@ -947,6 +949,8 @@ SzIo *sz_net_udp_recv(SzNetSock *sock, int64_t n); /* IO[(String, Int, String)] 
 SzIo *sz_net_udp_close(SzNetSock *sock);
 void sz_net_sock_on_free(SzNetSock *s);
 void sz_testrt_net_sock_gone(SzNetSock *s);
+/* 4 = IPv4, 6 = IPv6, 0 = not a literal. Writes a canonical host when canon is set. */
+int sz_net_host_family(const char *host, char *canon, size_t canon_cap);
 /* Test-only: UDP nameserver for live HTTP DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
 /* Test-only: Host header value for HTTP (RFC 9110). */
