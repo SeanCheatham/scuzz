@@ -1505,7 +1505,10 @@ def nethTupTy(body: Expr, rest: List[Param], defs: List[Fun]): String =
   if (exprIsI64(body, rest, defs)) "(Int, Int)" else "(Any, Any)"
 
 def emitNethBind2(bind: String, i64: Bool): String =
-  if (!keepBind(bind)) "" else if (i64) line(Str.concat("%", Str.concat(bind, " = call i64 @sz_unbox_i64(ptr %value)"))) else emitBindAliasPtr(bind)
+  if (!keepBind(bind)) "" else if (i64) emitNethBindI64(bind) else emitBindAliasPtr(bind)
+
+def emitNethBindI64(bind: String): String =
+  line(Str.concat("%", Str.concat(bind, " = call i64 @sz_unbox_i64(ptr %value)")))
 
 def emitNeth2(prefix: String, pre: String, s: Slot, loc: String, strs: List[String], pred: Bool): String =
   s match {

@@ -10,6 +10,8 @@ typedef struct LangResSt {
   void *acquired;
 } LangResSt;
 
+/* Acquire hands one retain to st->acquired. Use and release neths borrow
+ * that pointer. This drop is the only release of the acquired value. */
 static SzIo *lang_fin_free_ok(void *ignored, void *env) {
   LangResSt *st = (LangResSt *)env;
   sz_release(ignored);
