@@ -120,6 +120,7 @@ SzString *sz_string_slice(const SzString *s, int64_t start, int64_t end);
 int sz_string_eq(const SzString *a, const SzString *b);
 int64_t sz_string_char_at(const SzString *s, int64_t index); /* byte as i64; -1 OOB */
 SzString *sz_string_from_int(int64_t n);
+SzString *sz_string_from_bool(int64_t b);
 SzString *sz_string_from_float(double x);
 int64_t sz_string_index_of(const SzString *s, const SzString *needle);
 int64_t sz_string_last_index_of(const SzString *s, const SzString *needle);
@@ -167,9 +168,11 @@ SzString *sz_string_repeat(const SzString *s, int64_t n);
 SzString *sz_string_strip_prefix(const SzString *s, const SzString *prefix);
 /* Drop `suffix` when `s` ends with it. Else copy `s`. */
 SzString *sz_string_strip_suffix(const SzString *s, const SzString *suffix);
-/* Pad on the left to width `n`. `n` <= len, or empty pad, copies `s`. */
+/* Pad on the left to code-point width `n`. Fill cycles complete code points.
+ * `n` <= len, or empty pad, copies `s`. */
 SzString *sz_string_pad_left(const SzString *s, int64_t n, const SzString *pad);
-/* Pad on the right to width `n`. `n` <= len, or empty pad, copies `s`. */
+/* Pad on the right to code-point width `n`. Fill cycles complete code points.
+ * `n` <= len, or empty pad, copies `s`. */
 SzString *sz_string_pad_right(const SzString *s, int64_t n, const SzString *pad);
 /* 1 when `s` is empty or only ASCII space, tab, CR, LF. */
 int64_t sz_string_is_blank(const SzString *s);
