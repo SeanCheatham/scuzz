@@ -480,7 +480,10 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"defat:${if (List.isDefinedAt(xs, 1)) "y" else "n"}")
     _ <- IO.println(s"lcmp:${Str.fromInt(List.lengthCompare(xs, 3))}")
     _ <- IO.println(s"sort:${List.join(List.sort(["c", "a", "b"]), ",")}")
+    nsort = [3, 1, 2]
     _ <- IO.println(s"sortn:${List.join(List.map(List.sort([3, 1, 2]), n => Str.fromInt(n)), ",")}")
+    _ <- IO.println(s"sortb:${List.join(List.map(List.sort(nsort), n => Str.fromInt(n)), ",")}")
+    _ <- IO.println(s"sortr:${List.join(List.map(List.sort(List.range(1, 4)), n => Str.fromInt(n)), ",")}")
     _ <- IO.println(s"sortBy:${List.join(List.sortBy(["bb", "a", "ccc"], x => Str.len(x)), ",")}")
     _ <- IO.println(s"max:${List.max(["a", "c", "b"])}")
     _ <- IO.println(s"min:${List.min(["a", "c", "b"])}")

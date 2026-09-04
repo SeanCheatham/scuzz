@@ -52,3 +52,6 @@ def tyckIfMis(): Bool =
 def tyckMapHandle(): Bool =
   Main.tyckDiff(Main.srcMapHandle(), Main.wantMapHandle())
 
+def tyckJoinMis(): Bool =
+  Main.tyckDiff(Main.srcJoinMis(), Main.wantJoinMis())
+

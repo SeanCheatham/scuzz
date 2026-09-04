@@ -27,6 +27,31 @@ static SzList *sz_list_cons_take(void *head, SzList *tail) {
   return n;
 }
 
+/* First non-null head must be boxed Int or String. Empty or all-null panics. */
+static uint32_t list_elem_kind(SzList *xs, const char *msg) {
+  SzList *p;
+  uint32_t k;
+  for (p = xs; p; p = p->tail) {
+    if (!p->head)
+      continue;
+    k = sz_rc_kind(p->head);
+    if (k == SZ_RC_BOX || k == SZ_RC_STRING)
+      return k;
+    sz_panic(msg);
+  }
+  sz_panic(msg);
+}
+
+static void list_require_kind(const SzList *xs, uint32_t want, const char *msg) {
+  const SzList *p;
+  for (p = xs; p; p = p->tail) {
+    if (!p->head)
+      continue;
+    if (sz_rc_kind(p->head) != want)
+      sz_panic(msg);
+  }
+}
+
 void *sz_list_head(const SzList *xs) {
   if (!xs)
     sz_panic("List.head on empty");
@@ -320,6 +345,7 @@ static SzList *flatten_from_rev(SzList *rev) {
   SzList *out = NULL;
   SzList *p;
   SzList *next;
+  list_require_kind(rev, SZ_RC_LIST, "List.flatten: not List");
   for (p = rev; p; p = p->tail) {
     next = sz_list_concat((SzList *)p->head, out);
     sz_release(out);
@@ -643,6 +669,7 @@ SzPair *sz_list_unzip(SzList *pairs) {
   SzList *arev;
   SzList *brev;
   SzPair *out;
+  list_require_kind(pairs, SZ_RC_PAIR, "List.unzip: not pair");
   for (p = pairs; p; p = p->tail) {
     inner = (SzPair *)p->head;
     if (!inner)
@@ -878,9 +905,10 @@ SzMap *sz_list_to_map(SzList *pairs) {
   SzMap *acc = NULL;
   SzList *p;
   int32_t kind = 1;
+  list_require_kind(pairs, SZ_RC_PAIR, "List.toMap: not pair");
   if (pairs && pairs->head) {
     SzPair *first = (SzPair *)pairs->head;
-    if (first && first->left)
+    if (first->left)
       kind = sz_map_infer_key_kind(first->left);
   }
   for (p = pairs; p; p = p->tail) {
@@ -1239,8 +1267,12 @@ SzList *sz_list_sort(SzList *xs, int64_t as_int) {
   SzSortSlot *slots;
   SzList *p;
   size_t i;
+  uint32_t kind;
+  (void)as_int;
   if (!xs)
     return NULL;
+  kind = list_elem_kind(xs, "List.sort: not Int or String");
+  list_require_kind(xs, kind, "List.sort: not Int or String");
   slots = (SzSortSlot *)sz_alloc((size_t)n * sizeof(SzSortSlot));
   i = 0;
   for (p = xs; p; p = p->tail) {
@@ -1249,7 +1281,8 @@ SzList *sz_list_sort(SzList *xs, int64_t as_int) {
     slots[i].idx = i;
     i++;
   }
-  return sort_slots(slots, (size_t)n, as_int ? cmp_int_slots : cmp_str_slots);
+  return sort_slots(slots, (size_t)n,
+                    kind == SZ_RC_BOX ? cmp_int_slots : cmp_str_slots);
 }
 
 SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env) {
@@ -1274,8 +1307,8 @@ SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env) {
   return sort_slots(slots, (size_t)n, cmp_key_slots);
 }
 
-static int cell_ord(void *a, void *b, int64_t as_int) {
-  if (as_int) {
+static int cell_ord(void *a, void *b, uint32_t kind) {
+  if (kind == SZ_RC_BOX) {
     int64_t ka = sz_unbox_i64(a);
     int64_t kb = sz_unbox_i64(b);
     if (ka < kb)
@@ -1291,11 +1324,17 @@ static void *list_extreme(SzList *xs, int64_t as_int, int want_max,
                           const char *empty_msg) {
   SzList *p;
   void *best;
+  uint32_t kind;
+  const char *bad =
+      want_max ? "List.max: not Int or String" : "List.min: not Int or String";
+  (void)as_int;
   if (!xs)
     sz_panic(empty_msg);
+  kind = list_elem_kind(xs, bad);
+  list_require_kind(xs, kind, bad);
   best = xs->head;
   for (p = xs->tail; p; p = p->tail) {
-    int c = cell_ord(p->head, best, as_int);
+    int c = cell_ord(p->head, best, kind);
     if (want_max ? c > 0 : c < 0)
       best = p->head;
   }
@@ -1339,6 +1378,7 @@ SzMap *sz_list_group_by(SzList *xs, SzListMapFn fn, void *env, int32_t key_kind)
 int64_t sz_list_sum(SzList *xs) {
   uint64_t acc = 0;
   SzList *p;
+  list_require_kind(xs, SZ_RC_BOX, "List.sum: not Int");
   for (p = xs; p; p = p->tail)
     acc += (uint64_t)sz_unbox_i64(p->head);
   return (int64_t)acc;
@@ -1347,6 +1387,7 @@ int64_t sz_list_sum(SzList *xs) {
 int64_t sz_list_product(SzList *xs) {
   uint64_t acc = 1;
   SzList *p;
+  list_require_kind(xs, SZ_RC_BOX, "List.product: not Int");
   for (p = xs; p; p = p->tail)
     acc *= (uint64_t)sz_unbox_i64(p->head);
   return (int64_t)acc;
@@ -1398,12 +1439,22 @@ int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }
 
-SzString *sz_list_join(const SzList *xs, const char *sep) {
-  if (!sep)
-    sep = "";
-  size_t sep_len = strlen(sep);
+SzString *sz_list_join(const SzList *xs, const SzString *sep) {
+  const char *sep_data = "";
+  size_t sep_len = 0;
   size_t total = 0;
   size_t count = 0;
+  char *buf;
+  size_t off = 0;
+  size_t i = 0;
+  SzString *out;
+  list_require_kind(xs, SZ_RC_STRING, "List.join: not String");
+  if (sep) {
+    if (sz_rc_kind(sep) != SZ_RC_STRING)
+      sz_panic("List.join: not String");
+    sep_data = sep->data ? sep->data : "";
+    sep_len = sep->len;
+  }
   for (const SzList *p = xs; p; p = p->tail) {
     SzString *s = (SzString *)p->head;
     if (s) {
@@ -1420,12 +1471,10 @@ SzString *sz_list_join(const SzList *xs, const char *sep) {
   }
   if (total == SIZE_MAX)
     sz_panic("List.join too large");
-  char *buf = (char *)sz_alloc(total + 1);
-  size_t off = 0;
-  size_t i = 0;
+  buf = (char *)sz_alloc(total + 1);
   for (const SzList *p = xs; p; p = p->tail) {
     if (i > 0 && sep_len) {
-      memcpy(buf + off, sep, sep_len);
+      memcpy(buf + off, sep_data, sep_len);
       off += sep_len;
     }
     SzString *s = (SzString *)p->head;
@@ -1436,7 +1485,7 @@ SzString *sz_list_join(const SzList *xs, const char *sep) {
     i++;
   }
   buf[off] = '\0';
-  SzString *out = sz_string_from_bytes(buf, off);
+  out = sz_string_from_bytes(buf, off);
   sz_free(buf);
   return out;
 }
