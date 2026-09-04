@@ -3640,6 +3640,26 @@ static int idle_advance(Sched *s) {
         return 1;
       continue;
     }
+    if (sz_testrt_clock_is_fake()) {
+      /* Do not poll with a wall timeout. Virtual time does not move. */
+      pr = poll(pfds, (nfds_t)npoll, 0);
+      if (pr < 0 && errno == EINTR)
+        continue;
+      now = sz_clock_monotonic_ms_sync();
+      if (pr > 0 && wake_pollers(s, pfds, fibs, npoll))
+        return 1;
+      if (wake_sleepers(s, now))
+        return 1;
+      if (pr < 0)
+        return 0;
+      if (next < 0)
+        return 0;
+      delta = next - now;
+      if (delta > 0)
+        sz_testrt_clock_advance(delta);
+      now = sz_clock_monotonic_ms_sync();
+      return wake_sleepers(s, now);
+    }
     if (next < 0)
       timeout_ms = -1;
     else {

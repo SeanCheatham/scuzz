@@ -5495,7 +5495,32 @@ int main(void) {
 
     r = sz_io_unsafe_run(sz_clock_real_time());
     assert(r.ok);
-    assert(sz_unbox_i64(r.value) == t1);
+    assert(sz_unbox_i64(r.value) == sz_testrt_clock_now_ms());
+
+    /* Parked poller must not freeze fake-clock sleepers. */
+    {
+      int fds[2];
+      struct timespec w0, w1;
+      int64_t ct0, ct1;
+      long wall_ms;
+      assert(pipe(fds) == 0);
+      ct0 = sz_testrt_clock_now_ms();
+      clock_gettime(CLOCK_MONOTONIC, &w0);
+      r = sz_io_unsafe_run(race_drop(
+          sz_io_poll_readable(fds[0]),
+          fm_drop(sz_io_sleep_ms(50), after_sleep_tag,
+                  (void *)(intptr_t)50)));
+      clock_gettime(CLOCK_MONOTONIC, &w1);
+      assert(r.ok);
+      assert((intptr_t)r.value == 50);
+      ct1 = sz_testrt_clock_now_ms();
+      assert(ct1 == ct0 + 50);
+      wall_ms = (long)((w1.tv_sec - w0.tv_sec) * 1000L +
+                       (w1.tv_nsec - w0.tv_nsec) / 1000000L);
+      assert(wall_ms < 25);
+      close(fds[0]);
+      close(fds[1]);
+    }
 
     r = sz_io_unsafe_run(sz_random_next_int(10));
     assert(r.ok);
@@ -5516,6 +5541,44 @@ int main(void) {
       }
       assert(saw_hi);
     }
+
+    {
+      int64_t a[32];
+      int64_t b[32];
+      int i;
+      int alt;
+      sz_testrt_random_install(42);
+      for (i = 0; i < 32; i++) {
+        r = sz_io_unsafe_run(sz_random_next_int(2));
+        assert(r.ok);
+        a[i] = sz_unbox_i64(r.value);
+        assert(a[i] == 0 || a[i] == 1);
+        sz_release(r.value);
+      }
+      alt = 1;
+      for (i = 1; i < 32; i++) {
+        if (a[i] == a[i - 1])
+          alt = 0;
+      }
+      assert(!alt);
+      sz_testrt_random_install(42);
+      for (i = 0; i < 32; i++) {
+        r = sz_io_unsafe_run(sz_random_next_int(2));
+        assert(r.ok);
+        b[i] = sz_unbox_i64(r.value);
+        sz_release(r.value);
+        assert(b[i] == a[i]);
+      }
+    }
+
+    r = sz_io_unsafe_run(sz_random_next_int(0));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "bound <= 0") != NULL);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_random_next_int(-3));
+    assert(!r.ok);
+    sz_error_free(r.error);
 
     sz_alloc_stats(&base_bytes, &base_count);
     r = sz_io_unsafe_run(sz_random_next_int(10));

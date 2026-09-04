@@ -2571,9 +2571,17 @@ int sz_testrt_sys_is_fake(void) { return g_sys_fake; }
 /* --- install / reset ----------------------------------------------------- */
 
 void sz_testrt_install(void) {
+  uint64_t rand_seed = 42;
+  const char *rs;
   fault_arm_from_env();
   sz_testrt_clock_install(1);
-  sz_testrt_random_install(42);
+  rs = getenv("SCUZZ_RAND_SEED");
+  if (rs && rs[0]) {
+    unsigned long long parsed = strtoull(rs, NULL, 10);
+    if (parsed != 0)
+      rand_seed = (uint64_t)parsed;
+  }
+  sz_testrt_random_install(rand_seed);
   sz_testrt_fs_install();
   sz_testrt_net_install();
   sz_testrt_sys_install();

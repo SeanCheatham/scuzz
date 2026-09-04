@@ -909,9 +909,9 @@ SzIo *sz_sys_getenv(SzString *key);
 /* Blessed Clock / Random / Net (impurity boundary) */
 SzIo *sz_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
-int64_t sz_clock_monotonic_ms_sync(void); /* sync read for UI pump dt */
+int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, UI); TestRuntime fake clock */
 
-SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
+SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
 
 SzIo *sz_net_http_get(SzString *url); /* IO[String] body; 2xx; 1 MiB; http:// or https:// */
 SzIo *sz_net_http_post(SzString *url, SzString *body);
