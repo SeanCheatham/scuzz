@@ -603,7 +603,10 @@ def dispatchRunEnv(path: String, out: String, env: String, extra: String): IO[Un
   Drive.runDir(path, out, env, extra)
 
 def runEnvOf(out: String, headless: Bool, script: String, dump: String, toml: String): String =
-  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(script, " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " "))))
+  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat(runRecordEnv(out, headless, toml), Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(script, " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " ")))))
+
+def runRecordEnv(out: String, headless: Bool, toml: String): String =
+  if (Drive.uiEnvKind(headless, Manifest.uiRuntime(Manifest.manUi(Manifest.parse(toml)))) == "headless") "" else Str.concat("SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.script")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.dump")), " "))))
 
 def dispatchTest(path: String, update: Bool, pixels: Bool, differential: Bool): IO[Unit] =
   Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build"), update, pixels, differential))
