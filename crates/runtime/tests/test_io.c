@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 
@@ -1871,6 +1872,14 @@ static void json_expect_stringify_err(SzAdt *j) {
   assert(sz_adt_tag(sr) == 0);
   sz_release(sr);
   sz_release(j);
+}
+
+static void expect_fs_refused_root(const char *path) {
+  SzIoResult r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr(path)));
+  assert(!r.ok);
+  assert(r.error != NULL);
+  assert(strstr(sz_string_cstr(r.error->message), "refused root") != NULL);
+  sz_error_free(r.error);
 }
 
 int main(void) {
@@ -5420,6 +5429,42 @@ int main(void) {
     sz_error_free(r.error);
     remove("build/test_fs_mkdirs_file");
     remove(path);
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr(".")));
+    assert(r.ok);
+  }
+
+  /* Live root-delete guard: throwaway dir only. Never delete / or the repo. */
+  {
+    char tmpl[] = "/tmp/scuzz-fs-XXXXXX";
+    char oldcwd[2048];
+    char *tmp;
+    assert(getcwd(oldcwd, sizeof oldcwd) != NULL);
+    tmp = mkdtemp(tmpl);
+    assert(tmp != NULL);
+    assert(chdir(tmp) == 0);
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("work")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("canary.txt"), sz_string_from_cstr("x")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("work/canary.txt"), sz_string_from_cstr("y")));
+    assert(r.ok);
+    assert(chdir("work") == 0);
+    expect_fs_refused_root("./");
+    assert(access("canary.txt", F_OK) == 0);
+    expect_fs_refused_root("/.");
+    expect_fs_refused_root("..");
+    assert(access("canary.txt", F_OK) == 0);
+    assert(access("../canary.txt", F_OK) == 0);
+    r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr("../canary.txt")));
+    assert(r.ok);
+    assert(access("../canary.txt", F_OK) != 0);
+    assert(chdir(oldcwd) == 0);
+    r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr(tmp)));
+    assert(r.ok);
   }
 
   /* TestRuntime: Fs graph built before install still uses mem-FS. */
@@ -5730,6 +5775,57 @@ int main(void) {
       assert(r.error &&
              strstr(sz_string_cstr(r.error->message), "path too deep") != NULL);
       sz_error_free(r.error);
+      r = sz_io_unsafe_run(
+          sz_fs_write(sz_string_from_cstr(deep), sz_string_from_cstr("z")));
+      assert(!r.ok);
+      assert(r.error &&
+             strstr(sz_string_cstr(r.error->message), "path too deep") != NULL);
+      sz_error_free(r.error);
+      r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr(deep)));
+      assert(!r.ok);
+      assert(r.error &&
+             strstr(sz_string_cstr(r.error->message), "path too deep") != NULL);
+      sz_error_free(r.error);
+    }
+
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("")));
+    assert(r.ok);
+    expect_fs_refused_root("./");
+    expect_fs_refused_root("/.");
+    expect_fs_refused_root("..");
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("a")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("a/./b.txt"), sz_string_from_cstr("dot")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("a/b.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "dot") == 0);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("a/x"), sz_string_from_cstr("up")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("a/../a/x")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "up") == 0);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("a/./b"), sz_string_from_cstr("leaf")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_list(sz_string_from_cstr("a")));
+    assert(r.ok);
+    {
+      SzList *xs = (SzList *)r.value;
+      int saw_b = 0;
+      while (xs && !sz_list_is_empty(xs)) {
+        SzPair *ent = (SzPair *)sz_list_head(xs);
+        SzString *name = (SzString *)sz_pair_left(ent);
+        if (strcmp(sz_string_cstr(name), "b") == 0)
+          saw_b = 1;
+        xs = sz_list_tail(xs);
+      }
+      assert(saw_b);
+      sz_release(r.value);
     }
 
     r = sz_io_unsafe_run(

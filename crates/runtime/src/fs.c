@@ -137,8 +137,7 @@ static void *fs_write_result(void *env) {
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   FILE *f;
-  sz_timeline_log_bytes("Fs.write", contents ? contents->data : "",
-                        contents ? contents->len : 0);
+  sz_timeline_log_cstr("Fs.write", p);
   f = fopen(p, "wb");
   if (!f) {
     char msg[512];
@@ -198,19 +197,26 @@ static SzList *cons_fs_entry(SzList *acc, const char *name, int is_dir) {
   return out;
 }
 
+static int fs_join_into(char *out, size_t out_sz, const char *dir, const char *name) {
+  int n;
+  size_t dlen = strlen(dir);
+  if (dlen == 1 && dir[0] == '/')
+    n = snprintf(out, out_sz, "/%s", name);
+  else if (dlen > 0 && dir[dlen - 1] == '/')
+    n = snprintf(out, out_sz, "%s%s", dir, name);
+  else if (dlen == 0)
+    n = snprintf(out, out_sz, "%s", name);
+  else
+    n = snprintf(out, out_sz, "%s/%s", dir, name);
+  return n >= 0 && (size_t)n < out_sz;
+}
+
 static int fs_name_is_dir(const char *dir, const char *name) {
   char full[2048];
   struct stat st;
-  size_t n = strlen(dir);
-  if (n == 1 && dir[0] == '/')
-    snprintf(full, sizeof full, "/%s", name);
-  else if (n > 0 && dir[n - 1] == '/')
-    snprintf(full, sizeof full, "%s%s", dir, name);
-  else if (n == 0 || (n == 1 && dir[0] == '.'))
-    snprintf(full, sizeof full, "%s", name);
-  else
-    snprintf(full, sizeof full, "%s/%s", dir, name);
-  if (stat(full, &st) != 0)
+  if (!fs_join_into(full, sizeof full, dir, name))
+    return 0;
+  if (lstat(full, &st) != 0)
     return 0;
   return S_ISDIR(st.st_mode) ? 1 : 0;
 }
@@ -220,7 +226,9 @@ static void *fs_list_result(void *env) {
   SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
-  DIR *d = opendir(p);
+  DIR *d;
+  sz_timeline_log_cstr("Fs.list", p);
+  d = opendir(p);
   if (!d) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.list: cannot open %s: %s", p, strerror(errno));
@@ -282,6 +290,12 @@ static void *fs_mkdirs_result(void *env) {
   const char *p = sz_string_cstr(path);
   char tmp[1024];
   size_t len = strlen(p);
+  sz_timeline_log_cstr("Fs.mkdirs", p);
+  if (len == 0 || strcmp(p, ".") == 0 || strcmp(p, "/") == 0) {
+    r->is_err = 0;
+    r->as.ok = NULL;
+    goto done;
+  }
   if (len >= sizeof(tmp)) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.mkdirs: path too long");
@@ -318,7 +332,9 @@ static void *fs_canonicalize_result(void *env) {
   SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
-  char *resolved = realpath(p, NULL);
+  char *resolved;
+  sz_timeline_log_cstr("Fs.canonicalize", p);
+  resolved = realpath(p, NULL);
   if (!resolved) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.canonicalize: %s: %s", p, strerror(errno));
@@ -350,6 +366,7 @@ static void *fs_exists_result(void *env) {
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   struct stat st;
+  sz_timeline_log_cstr("Fs.exists", p);
   r->is_err = 0;
   r->as.ok = sz_box_i64(stat(p, &st) == 0 ? 1 : 0);
   return r;
@@ -364,22 +381,74 @@ static SzIo *fs_after_exists(void *value, void *env) {
 
 SzIo *sz_fs_exists(SzString *path) { return fs_bind(path, fs_after_exists); }
 
-static int fs_join_into(char *out, size_t out_sz, const char *dir, const char *name) {
-  int n;
-  size_t dlen = strlen(dir);
-  if (dlen == 1 && dir[0] == '/')
-    n = snprintf(out, out_sz, "/%s", name);
-  else if (dlen > 0 && dir[dlen - 1] == '/')
-    n = snprintf(out, out_sz, "%s%s", dir, name);
-  else if (dlen == 0)
-    n = snprintf(out, out_sz, "%s", name);
-  else
-    n = snprintf(out, out_sz, "%s/%s", dir, name);
-  return n >= 0 && (size_t)n < out_sz;
+/* Collapse duplicate slashes, trailing slashes, and "." segments.
+ * Keep ".." segments. Writes a NUL-terminated path into out. */
+static int fs_collapse_dot_slash(const char *p, char *out, size_t out_sz) {
+  size_t i = 0;
+  size_t o = 0;
+  int abs = 0;
+  if (!p)
+    p = "";
+  if (p[0] == '/') {
+    abs = 1;
+    if (out_sz < 2)
+      return 0;
+    out[o++] = '/';
+    while (p[i] == '/')
+      i++;
+  }
+  while (p[i]) {
+    size_t start = i;
+    size_t n;
+    while (p[i] && p[i] != '/')
+      i++;
+    n = i - start;
+    if (n == 1 && p[start] == '.') {
+      /* skip "." */
+    } else if (n > 0) {
+      if (o > 0 && out[o - 1] != '/') {
+        if (o + 1 >= out_sz)
+          return 0;
+        out[o++] = '/';
+      }
+      if (o + n >= out_sz)
+        return 0;
+      memcpy(out + o, p + start, n);
+      o += n;
+    }
+    while (p[i] == '/')
+      i++;
+  }
+  if (o > 1 && out[o - 1] == '/')
+    o--;
+  out[o] = '\0';
+  if (!abs && o == 0) {
+    if (out_sz < 2)
+      return 0;
+    out[0] = '.';
+    out[1] = '\0';
+  }
+  return 1;
+}
+
+static int fs_same_inode(const char *a, const char *b) {
+  struct stat sa;
+  struct stat sb;
+  if (lstat(a, &sa) != 0 || lstat(b, &sb) != 0)
+    return 0;
+  return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
 }
 
 static int fs_is_root_path(const char *p) {
-  return !p || !p[0] || strcmp(p, ".") == 0 || strcmp(p, "/") == 0;
+  char collapsed[2048];
+  if (!p || !p[0])
+    return 1;
+  if (!fs_collapse_dot_slash(p, collapsed, sizeof collapsed))
+    return 0;
+  if (strcmp(collapsed, ".") == 0 || strcmp(collapsed, "/") == 0 ||
+      strcmp(collapsed, "..") == 0)
+    return 1;
+  return fs_same_inode(p, "/") || fs_same_inode(p, ".");
 }
 
 static int fs_parent_is_dir(const char *path) {
@@ -465,6 +534,7 @@ static void *fs_delete_result(void *env) {
   SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
+  sz_timeline_log_cstr("Fs.delete", p);
   if (fs_is_root_path(p)) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.delete: refused root");
@@ -495,6 +565,7 @@ static void *fs_rename_result(void *env) {
   const char *src = sz_string_cstr(from);
   const char *dst = sz_string_cstr(to);
   struct stat st;
+  sz_timeline_log_cstr("Fs.rename", src);
   if (fs_is_root_path(src) || fs_is_root_path(dst)) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.rename: refused root");
@@ -631,6 +702,7 @@ static void *fs_walk_result(void *env) {
   const char *p = sz_string_cstr(path);
   struct stat st;
   SzList *acc;
+  sz_timeline_log_cstr("Fs.walk", p);
   if (stat(p, &st) != 0 || !S_ISDIR(st.st_mode)) {
     char msg[512];
     snprintf(msg, sizeof msg, "Fs.walk: not a directory: %s", p);

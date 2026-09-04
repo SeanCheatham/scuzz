@@ -59,31 +59,9 @@ static void sz_testrt_fs_install(void) {
 
 int sz_testrt_fs_is_fake(void) { return g_fs_fake; }
 
-static char *norm_path(const char *p) {
-  size_t n;
-  char *out;
-  size_t i, j;
-  if (!p)
-    p = "";
-  /* Strip leading ./ and collapse duplicate slashes; drop trailing slash. */
-  while (p[0] == '.' && p[1] == '/')
-    p += 2;
-  n = strlen(p);
-  out = (char *)sz_alloc(n + 1);
-  j = 0;
-  for (i = 0; i < n; i++) {
-    if (p[i] == '/' && j > 0 && out[j - 1] == '/')
-      continue;
-    out[j++] = p[i];
-  }
-  while (j > 0 && out[j - 1] == '/')
-    j--;
-  out[j] = '\0';
-  /* Map a lone '.' to the root path. */
-  if (strcmp(out, ".") == 0)
-    out[0] = '\0';
-  return out;
-}
+static char *canon_path(const char *p);
+
+static char *norm_path(const char *p) { return canon_path(p); }
 
 static MemNode *fs_find(const char *path) {
   MemNode *n;
@@ -391,10 +369,10 @@ void sz_effect_log(const char *line) {
   sz_timeline_log_cstr(line ? line : "", "");
 }
 
-static void fs_log(const char *op) {
+static void fs_log(const char *op, const char *path) {
   char buf[48];
   snprintf(buf, sizeof buf, "Fs.%s", op);
-  sz_timeline_log_cstr(buf, "");
+  sz_timeline_log_cstr(buf, path ? path : "");
 }
 
 static int fs_fault(BoxResult *r) {
@@ -422,6 +400,11 @@ static void *mem_read(void *env) {
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
+  if (!path) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.read: path too deep (mem)");
+    goto done;
+  }
   n = fs_find(path);
   sz_free(path);
   if (!n || n->is_dir) {
@@ -447,12 +430,16 @@ static void *mem_write(void *env) {
   char *path;
   char parent[1024];
   MemNode *n;
-  SzString *c;
-  sz_timeline_log_bytes("Fs.write", contents ? contents->data : "",
-                        contents ? contents->len : 0);
+  SzString *c = contents ? contents : NULL;
+  sz_timeline_log_cstr("Fs.write", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
+  if (!path) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.write: path too deep (mem)");
+    goto done;
+  }
   c = contents ? contents : sz_string_from_cstr("");
 
   if (!parent_path(path, parent, sizeof parent)) {
@@ -539,10 +526,15 @@ static void *mem_list(void *env) {
   MemNode *dir;
   MemNode *n;
   SzList *acc;
-  fs_log("list");
+  fs_log("list", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
+  if (!path) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.list: path too deep (mem)");
+    goto done;
+  }
   dir = fs_find(path);
 
   if (!dir || !dir->is_dir) {
@@ -592,14 +584,20 @@ static void *mem_exists(void *env) {
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path;
   MemNode *n;
-  fs_log("exists");
+  fs_log("exists", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
+  if (!path) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.exists: path too deep (mem)");
+    goto done;
+  }
   n = fs_find(path);
   sz_free(path);
   r->is_err = 0;
   r->as.ok = sz_box_i64(n ? 1 : 0);
+done:
   return r;
 }
 
@@ -636,11 +634,16 @@ static void *mem_delete(void *env) {
   char *path;
   MemNode *n;
   MemNode **pp;
-  fs_log("delete");
+  fs_log("delete", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
-  if (!path[0]) {
+  if (!path) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.delete: path too deep (mem)");
+    goto done;
+  }
+  if (!path[0] || (path[0] == '/' && path[1] == '\0')) {
     sz_free(path);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.delete: refused root (mem)");
@@ -685,12 +688,20 @@ static void *mem_rename(void *env) {
   MemNode *src;
   MemNode *n;
   size_t from_len;
-  fs_log("rename");
+  fs_log("rename", from_s ? sz_string_cstr(from_s) : "");
   if (fs_fault(r))
     return r;
   from = norm_path(sz_string_cstr(from_s));
   to = norm_path(sz_string_cstr(to_s));
-  if (!from[0] || !to[0]) {
+  if (!from || !to) {
+    sz_free(from);
+    sz_free(to);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: path too deep (mem)");
+    goto done;
+  }
+  if (!from[0] || !to[0] || (from[0] == '/' && from[1] == '\0') ||
+      (to[0] == '/' && to[1] == '\0')) {
     sz_free(from);
     sz_free(to);
     r->is_err = 1;
@@ -773,10 +784,15 @@ static void *mem_walk(void *env) {
   MemNode *n;
   SzList *acc;
   size_t dlen;
-  fs_log("walk");
+  fs_log("walk", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
+  if (!path) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.walk: path too deep (mem)");
+    goto done;
+  }
   dir = fs_find(path);
   if (!dir || !dir->is_dir) {
     sz_free(path);
@@ -828,10 +844,15 @@ static void *mem_mkdirs(void *env) {
   char tmp[1024];
   size_t len;
   size_t i;
-  fs_log("mkdirs");
+  fs_log("mkdirs", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = norm_path(sz_string_cstr(path_s));
+  if (!path) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.mkdirs: path too deep (mem)");
+    goto done;
+  }
   len = strlen(path);
 
   if (len == 0) {
@@ -877,63 +898,56 @@ SzIo *sz_testrt_fs_mkdirs(SzString *path) {
 }
 
 static char *canon_path(const char *p) {
-  char *norm = norm_path(p);
   char *parts[256];
   size_t nparts = 0;
   size_t i = 0;
   int abs = 0;
   char *out;
   size_t out_len = 1;
-  if (norm[0] == '/')
+  if (!p)
+    p = "";
+  if (p[0] == '/')
     abs = 1;
-  while (norm[i]) {
+  while (p[i]) {
     size_t start = i;
-    while (norm[i] && norm[i] != '/')
+    while (p[i] && p[i] != '/')
       i++;
     if (i > start) {
       size_t n = i - start;
-      char *seg = (char *)sz_alloc(n + 1);
-      memcpy(seg, norm + start, n);
-      seg[n] = '\0';
-      if (strcmp(seg, ".") == 0) {
-        sz_free(seg);
-      } else if (strcmp(seg, "..") == 0) {
-        sz_free(seg);
+      if (n == 1 && p[start] == '.') {
+        /* skip "." */
+      } else if (n == 2 && p[start] == '.' && p[start + 1] == '.') {
+        /* .. past the virtual root stays at root. */
         if (nparts > 0) {
           sz_free(parts[nparts - 1]);
           nparts--;
         }
       } else if (nparts < 256) {
+        char *seg = (char *)sz_alloc(n + 1);
+        memcpy(seg, p + start, n);
+        seg[n] = '\0';
         parts[nparts++] = seg;
       } else {
-        /* Fail when the path has too many segments. Do not drop extra segments. */
         size_t k;
-        sz_free(seg);
-        sz_free(norm);
         for (k = 0; k < nparts; k++)
           sz_free(parts[k]);
         return NULL;
       }
     }
-    if (norm[i] == '/')
+    if (p[i] == '/')
       i++;
   }
-  sz_free(norm);
   for (i = 0; i < nparts; i++)
     out_len += strlen(parts[i]) + 1;
   out = (char *)sz_alloc(out_len + 2);
   out[0] = '\0';
-  if (abs)
+  if (abs && nparts > 0)
     strcat(out, "/");
   for (i = 0; i < nparts; i++) {
     if (i > 0)
       strcat(out, "/");
     strcat(out, parts[i]);
     sz_free(parts[i]);
-  }
-  if (abs && nparts == 0) {
-    out[0] = '/';
-    out[1] = '\0';
   }
   return out;
 }
@@ -944,7 +958,7 @@ static void *mem_canonicalize(void *env) {
   BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path;
   MemNode *n;
-  fs_log("canonicalize");
+  fs_log("canonicalize", path_s ? sz_string_cstr(path_s) : "");
   if (fs_fault(r))
     return r;
   path = canon_path(sz_string_cstr(path_s));
