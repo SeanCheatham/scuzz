@@ -44,7 +44,7 @@ utils = { path = "../utils" }
 - Each entry is an inline table with exactly `path`.
 - Paths resolve relative to the directory that contains the declaring `scuzz.toml`.
 - Dependencies may declare their own path dependencies (recursive).
-- Resolution is deterministic (sorted by dependency name). A package directory is compiled once even if reached through multiple paths.
+- Resolution is deterministic. A package directory is compiled once even if reached through multiple paths.
 - Sources from the complete graph are **merged and typechecked as one program** (not separately compiled library artifacts). An executable root needs exactly one `@main`.
 - Cycles, missing packages/`src/`, duplicate names, empty paths, and unsupported value shapes are rejected.
 - Unknown keys and extra top-level tables are rejected (`git` / `version` on a dependency, `[plugins]`). Do not add `[plugins]` or a settings DSL.
@@ -59,7 +59,6 @@ Optional. Used by `scuzz run` / `test` / `package`.
 | `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
 | `headless_scale` | float | Headless session scale (default 1). Desktop uses OS backing scale when higher. |
 | `tap_button` | int (optional) | 0-based `[taps]` index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`) |
-| `tap_text` | string (optional) | Text injected before the scripted tap (`SCUZZ_UI_TEXT`) |
 | `bundle_id` | string | Android package / iOS `CFBundleIdentifier` for `scuzz package` |
 
 Invalid `default_runtime`, non-positive `headless_size`, non-positive `headless_scale`, or an empty `bundle_id` fail load.
@@ -85,4 +84,4 @@ my-app/
     ios/<name>.app          # signed sim bundle (`scuzz package --target ios`)
 ```
 
-The compiler accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged. Executables need exactly one `@main`. Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` and `*.scuzz_verify` load under `scuzz check` and verify/fuzz builds. See [vision.md](../vision.md#properties-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify the selected project's `src/` plus package `*.scuzz_verify` (not dependency trees).
+The compiler accepts `*.scuzz` files in `src/` (not nested directories). Units in the same package are merged. Executables need exactly one `@main`. `scuzz check` typechecks live `*.scuzz`. Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` load under verify/fuzz builds. `*.scuzz_verify` load under `scuzz check` and verify/fuzz builds. See [vision.md](../vision.md#properties-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify the selected project's `src/` plus package `*.scuzz_verify` (not dependency trees).

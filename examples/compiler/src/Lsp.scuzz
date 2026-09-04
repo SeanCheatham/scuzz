@@ -435,7 +435,10 @@ def handleJ(root: String, open: List[Open], j: Json, _body: String): IO[List[Ope
   handleM(root, open, j, methodOf(j), idJson(j))
 
 def handleM(root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
-  if (method == "initialize") reply(id, caps()).map(_ => open) else if (method == "shutdown") reply(id, "null").map(_ => open) else if (method == "exit") IO.pure(open) else if (method == "initialized") IO.pure(open) else handleM2(root, open, j, method, id)
+  if (method == "initialize") lspReplyKeep(id, caps(), open) else if (method == "shutdown") lspReplyKeep(id, "null", open) else if (method == "exit") IO.pure(open) else if (method == "initialized") IO.pure(open) else handleM2(root, open, j, method, id)
+
+def lspReplyKeep(id: String, result: String, open: List[Open]): IO[List[Open]] =
+  reply(id, result).flatMap(_ => IO.pure(open))
 
 def handleM2(root: String, open: List[Open], j: Json, method: String, id: String): IO[List[Open]] =
   if (method == "textDocument/didOpen") didOpen(root, open, j) else if (method == "textDocument/didChange") didChange(root, open, j) else if (method == "textDocument/didClose") didClose(open, j) else handleM3(root, open, j, method, id)
@@ -444,7 +447,10 @@ def handleM3(_root: String, open: List[Open], j: Json, method: String, id: Strin
   if (method == "textDocument/hover") hover(open, j, id) else if (method == "textDocument/completion") complete(open, j, id) else if (method == "textDocument/definition") definition(open, j, id) else if (method == "textDocument/formatting") format(open, j, id) else if (method == "textDocument/rename") rename(open, j, id) else if (method == "textDocument/semanticTokens/full") tokens(open, j, id) else handleM4(open, id)
 
 def handleM4(open: List[Open], id: String): IO[List[Open]] =
-  if (id == "null") IO.pure(open) else replyErr(id, 0 - 32601, "MethodNotFound").map(_ => open)
+  if (id == "null") IO.pure(open) else lspReplyErrKeep(open, id)
+
+def lspReplyErrKeep(open: List[Open], id: String): IO[List[Open]] =
+  replyErr(id, 0 - 32601, "MethodNotFound").flatMap(_ => IO.pure(open))
 
 def reply(id: String, result: String): IO[Unit] =
   Sys.write(frame(resultMsg(id, result)))
@@ -477,13 +483,16 @@ def didOpen2(root: String, open: List[Open], path: String, src: String): IO[List
   didOpen3(root, overlayPut(open, path, src), path)
 
 def didOpen3(root: String, open: List[Open], path: String): IO[List[Open]] =
-  Drive.checkOverlay(root, overlayPairs(open)).handleErrorWith(_ => IO.pure("[]")).flatMap(raw => notify(publishDiags(uriOfPath(path), raw)).map(_ => open))
+  Drive.checkOverlay(root, overlayPairs(open)).handleErrorWith(_ => IO.pure("[]")).flatMap(raw => lspNotifyKeep(publishDiags(uriOfPath(path), raw), open))
+
+def lspNotifyKeep(msg: String, open: List[Open]): IO[List[Open]] =
+  notify(msg).flatMap(_ => IO.pure(open))
 
 def didClose(open: List[Open], j: Json): IO[List[Open]] =
   didClose2(open, uriOf(j))
 
 def didClose2(open: List[Open], uri: String): IO[List[Open]] =
-  notify(publishDiags(uri, "[]")).map(_ => overlayDrop(open, pathOfUri(uri)))
+  notify(publishDiags(uri, "[]")).flatMap(_ => IO.pure(overlayDrop(open, pathOfUri(uri))))
 
 def hover(open: List[Open], j: Json, id: String): IO[List[Open]] =
   srcOf(open, pathOfUri(uriOf(j))).flatMap(src => reply(id, hoverJson(hoverAt(src, posLine(j), posCol(j)))).flatMap(_ => IO.pure(open)))

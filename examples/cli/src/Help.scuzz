@@ -147,7 +147,7 @@ Desktop/Mobile `run` writes build/record.script (live OS input; keys as `key`; a
 """
 
 def helpFuzz(): String =
-  """Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
+  """Replay corpus and seeds under TestRuntime, then walk schedule and fault seeds; then mutation
 
 Usage: scuzz fuzz [OPTIONS] [PATH]
 
@@ -167,8 +167,6 @@ Options:
           Mutate residual Property.check / Property.assert / .require predicates
       --no-fail-fast
           Finish search and still mutate after the first search failure
-      --minimize-corpus
-          Greedily minimize corpus/*.toml entries (keep pass/fail + declared sometimes coverage), then exit
       --relate
           Judge (Timeline, Timeline) => Verdict relation claims: replay each corpus entry under its own and a perturbed schedule, then exit
   -h, --help
@@ -180,10 +178,9 @@ Examples:
   scuzz fuzz --iterations 0
   scuzz fuzz --oracles examples/counter
   scuzz fuzz --replay build/fuzz/repro.toml
-  scuzz fuzz --minimize-corpus
   scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example
 
-`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and replays those entries before search. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). `examples/bad-adt` is an expected fuzz failure (wrong `record` area). `examples/bad-sched` is an expected fuzz failure (lost Queue offer order under PCT). `examples/bad-intent` is an expected check failure (empty `*.scuzz_verify` or leftover `*.scuzz_intent`). `examples/bad-split` is an expected fuzz failure (silent live/verify dump mismatch). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass on the other expected-fail packages.
+`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and `build/seeds.txt`, then replays those entries. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. Search after replay does not mutate `run.script`. It repeats that same seed/corpus script while `SCUZZ_SCHED_SEED` walks 0, 1, 2, … for the remaining budget. Iter 0 keeps no fault. Later iters set `SCUZZ_FAULT_SEED` to that same counter. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). `examples/bad-adt` is an expected fuzz failure (wrong `record` area). `examples/bad-sched` is an expected fuzz failure (lost Queue offer order under PCT). `examples/bad-intent` is an expected check failure (empty `*.scuzz_verify` or leftover `*.scuzz_intent`). `examples/bad-split` is an expected fuzz failure (silent live/verify dump mismatch). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass on the other expected-fail packages.
 """
 
 def helpNew(): String =
