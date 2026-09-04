@@ -1,4 +1,4 @@
-record UiMan(width: String, height: String, scale: String, tapN: String, bundleId: String)
+record UiMan(width: String, height: String, scale: String, tapN: String, bundleId: String, runtime: String)
 
 record Man(ok: Bool, name: String, version: String, hasUi: Bool, deps: List[(String, String)], ui: UiMan, err: String)
 
@@ -11,13 +11,13 @@ def noLines(): List[String] =
   []
 
 def defUi(): UiMan =
-  UiMan("200", "120", "1", "", "dev.scuzz.app")
+  UiMan("200", "120", "1", "", "dev.scuzz.app", "headless")
 
 def fail(msg: String): Man =
   Man(false, "", "0.0.0", false, noPairs(), defUi(), msg)
 
 def isSpace(c: Int): Bool =
-  c == 32 || c == 9
+  c == 32 || c == 9 || c == 13
 
 def ltrim(s: String, i: Int): Int =
   if (i >= Str.len(s)) i else if (isSpace(Str.charAt(s, i))) ltrim(s, i + 1) else i
@@ -38,13 +38,22 @@ def findEq(s: String, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 61) i else findEq(s, i + 1)
 
 def findComma(s: String, i: Int): Int =
-  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 44) i else findComma(s, i + 1)
+  findCommaQ(s, i, false)
+
+def findCommaQ(s: String, i: Int, q: Bool): Int =
+  if (i >= Str.len(s)) 0 - 1 else findCommaC(Str.charAt(s, i), s, i, q)
+
+def findCommaC(c: Int, s: String, i: Int, q: Bool): Int =
+  if (!q && c == 44) i else findCommaQ(s, i + 1, if (c == 34) !q else q)
 
 def unquote(s: String): String =
   unquote2(trim(s))
 
 def unquote2(s: String): String =
   if (Str.len(s) >= 2 && Str.charAt(s, 0) == 34 && Str.charAt(s, Str.len(s) - 1) == 34) Str.slice(s, 1, Str.len(s) - 1) else s
+
+def unquoteName(s: String): String =
+  trim(unquote(s))
 
 def splitEq(s: String): (String, String) =
   splitEq2(s, findEq(s, 0))
@@ -103,6 +112,30 @@ def badSize(): String =
 def badScale(): String =
   "headless_scale must be positive"
 
+def keyOutside(): String =
+  "key outside a table"
+
+def unclosedDep(): String =
+  "unclosed `{` in dependency"
+
+def dupDep(name: String): String =
+  Str.concat("duplicate dependency name `", Str.concat(name, "`"))
+
+def badPkgName(): String =
+  "package name must be [A-Za-z_][A-Za-z0-9_]*"
+
+def okPkgName(s: String): Bool =
+  s != "" && okNameStart(Str.charAt(s, 0)) && okNameRest(s, 1)
+
+def okNameStart(c: Int): Bool =
+  c >= 65 && c <= 90 || c >= 97 && c <= 122 || c == 95
+
+def okNameRest(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) true else okNameChar(Str.charAt(s, i)) && okNameRest(s, i + 1)
+
+def okNameChar(c: Int): Bool =
+  okNameStart(c) || c >= 48 && c <= 57
+
 def start(): St =
   St("", "", "0.0.0", false, noPairs(), defUi(), "")
 
@@ -124,27 +157,32 @@ def manUi(m: Man): UiMan =
 
 def uiWidth(ui: UiMan): String =
   ui match {
-    case UiMan(w, _h, _sc, _t, _id) => w
+    case UiMan(w, _h, _sc, _t, _id, _rt) => w
   }
 
 def uiHeight(ui: UiMan): String =
   ui match {
-    case UiMan(_w, h, _sc, _t, _id) => h
+    case UiMan(_w, h, _sc, _t, _id, _rt) => h
   }
 
 def uiScale(ui: UiMan): String =
   ui match {
-    case UiMan(_w, _h, sc, _t, _id) => sc
+    case UiMan(_w, _h, sc, _t, _id, _rt) => sc
   }
 
 def uiTap(ui: UiMan): String =
   ui match {
-    case UiMan(_w, _h, _sc, t, _id) => t
+    case UiMan(_w, _h, _sc, t, _id, _rt) => t
   }
 
 def uiBundle(ui: UiMan): String =
   ui match {
-    case UiMan(_w, _h, _sc, _t, id) => id
+    case UiMan(_w, _h, _sc, _t, id, _rt) => id
+  }
+
+def uiRuntime(ui: UiMan): String =
+  ui match {
+    case UiMan(_w, _h, _sc, _t, _id, rt) => rt
   }
 
 def finish(st: St): Man =
@@ -157,6 +195,18 @@ def parseLines(xs: List[String], st: St): St =
   if (Str.len(st.err) > 0) st else if (List.isEmpty(xs)) st else parseLine(trim(List.at(xs, 0)), List.tail(xs), st)
 
 def parseLine(line: String, rest: List[String], st: St): St =
+  parseLine2(trim(cutHash(line)), rest, st)
+
+def cutHash(s: String): String =
+  cutHash2(s, 0, false)
+
+def cutHash2(s: String, i: Int, q: Bool): String =
+  if (i >= Str.len(s)) s else cutHash3(Str.charAt(s, i), s, i, q)
+
+def cutHash3(c: Int, s: String, i: Int, q: Bool): String =
+  if (!q && c == 35) Str.slice(s, 0, i) else cutHash2(s, i + 1, if (c == 34) !q else q)
+
+def parseLine2(line: String, rest: List[String], st: St): St =
   if (line == "" || Str.startsWith(line, "#")) parseLines(rest, st) else if (Str.startsWith(line, "[")) parseSec(tableOf(line), rest, st) else parseKey(line, rest, st)
 
 def parseSec(t: String, rest: List[String], st: St): St =
@@ -166,10 +216,13 @@ def parseKey(line: String, rest: List[String], st: St): St =
   parseKey2(splitEq(line), rest, st)
 
 def parseKey2(kv: (String, String), rest: List[String], st: St): St =
-  if (st.sec == "package") parsePkg(kv._1, kv._2, rest, st) else if (st.sec == "dependencies") parseDep(kv._1, kv._2, rest, st) else if (st.sec == "ui") parseUi(kv._1, kv._2, rest, st) else withErr(st, unkTable(st.sec))
+  if (st.sec == "package") parsePkg(kv._1, kv._2, rest, st) else if (st.sec == "dependencies") parseDep(kv._1, kv._2, rest, st) else if (st.sec == "ui") parseUi(kv._1, kv._2, rest, st) else withErr(st, if (st.sec == "") keyOutside() else unkTable(st.sec))
 
 def parsePkg(k: String, v: String, rest: List[String], st: St): St =
-  if (!pkgKey(k)) withErr(st, unkPkg(k)) else if (k == "name") parseLines(rest, St(st.sec, unquote(v), st.version, st.hasUi, st.deps, stUi(st), st.err)) else if (k == "version") parseLines(rest, St(st.sec, st.name, unquote(v), st.hasUi, st.deps, stUi(st), st.err)) else parseLines(rest, st)
+  if (!pkgKey(k)) withErr(st, unkPkg(k)) else if (k == "name") parsePkgName(unquoteName(v), rest, st) else if (k == "version") parseLines(rest, St(st.sec, st.name, unquote(v), st.hasUi, st.deps, stUi(st), st.err)) else parseLines(rest, st)
+
+def parsePkgName(name: String, rest: List[String], st: St): St =
+  if (!okPkgName(name)) withErr(st, badPkgName()) else parseLines(rest, St(st.sec, name, st.version, st.hasUi, st.deps, stUi(st), st.err))
 
 def parseUi(k: String, v: String, rest: List[String], st: St): St =
   if (!uiKey(k)) withErr(st, unkUi(k)) else parseUiVal(k, v, rest, st)
@@ -178,14 +231,14 @@ def parseUiVal(k: String, v: String, rest: List[String], st: St): St =
   if (k == "default_runtime") parseRuntime(unquote(v), rest, st) else if (k == "headless_size") parseSize(v, rest, st) else if (k == "headless_scale") parseScale(trim(v), rest, st) else if (k == "tap_button") parseTap(trim(v), rest, st) else parseBundle(unquote(v), rest, st)
 
 def parseRuntime(v: String, rest: List[String], st: St): St =
-  if (v == "headless" || v == "desktop" || v == "mobile") parseLines(rest, st) else withErr(st, badRuntime())
+  if (v == "headless" || v == "desktop" || v == "mobile") parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), uiScale(stUi(st)), uiTap(stUi(st)), uiBundle(stUi(st)), v))) else withErr(st, badRuntime())
 
 def parseSize(raw: String, rest: List[String], st: St): St =
   parseSizeGot(sizePairVal(trim(raw)), rest, st)
 
 def parseSizeGot(wh: (Bool, String, String), rest: List[String], st: St): St =
   wh match {
-    case (ok, w, h) => if (!ok) withErr(st, badSize()) else parseLines(rest, withUi(st, UiMan(w, h, uiScale(stUi(st)), uiTap(stUi(st)), uiBundle(stUi(st)))))
+    case (ok, w, h) => if (!ok) withErr(st, badSize()) else parseLines(rest, withUi(st, UiMan(w, h, uiScale(stUi(st)), uiTap(stUi(st)), uiBundle(stUi(st)), uiRuntime(stUi(st)))))
   }
 
 def sizePairVal(v: String): (Bool, String, String) =
@@ -207,37 +260,34 @@ def allDigits(s: String, i: Int): Bool =
   if (i >= Str.len(s)) true else if (Str.charAt(s, i) < 48 || Str.charAt(s, i) > 57) false else allDigits(s, i + 1)
 
 def parseScale(v: String, rest: List[String], st: St): St =
-  if (!isPosScale(v)) withErr(st, badScale()) else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), v, uiTap(stUi(st)), uiBundle(stUi(st)))))
+  if (!isPosScale(v)) withErr(st, badScale()) else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), v, uiTap(stUi(st)), uiBundle(stUi(st)), uiRuntime(stUi(st)))))
 
 def isPosScale(s: String): Bool =
-  if (s == "" || Str.charAt(s, 0) == 45) false else scaleChars(s, 0) && hasNonZero(s, 0)
+  if (s == "" || Str.charAt(s, 0) == 45) false else scaleForm(s, 0, 0, false) && hasNonZero(s, 0)
 
-def scaleChars(s: String, i: Int): Bool =
-  if (i >= Str.len(s)) i > 0 else scaleChar(Str.charAt(s, i), s, i)
+def scaleForm(s: String, i: Int, dots: Int, digit: Bool): Bool =
+  if (i >= Str.len(s)) digit else scaleFormC(Str.charAt(s, i), s, i, dots, digit)
 
-def scaleChar(c: Int, s: String, i: Int): Bool =
-  if (c == 46 || c >= 48 && c <= 57) scaleChars(s, i + 1) else false
+def scaleFormC(c: Int, s: String, i: Int, dots: Int, digit: Bool): Bool =
+  if (c == 46) if (dots >= 1) false else scaleForm(s, i + 1, 1, false) else if (c >= 48 && c <= 57) scaleForm(s, i + 1, dots, true) else false
 
 def hasNonZero(s: String, i: Int): Bool =
   if (i >= Str.len(s)) false else if (Str.charAt(s, i) >= 49 && Str.charAt(s, i) <= 57) true else hasNonZero(s, i + 1)
 
 def parseTap(v: String, rest: List[String], st: St): St =
-  if (!allDigits(v, 0) || v == "") withErr(st, "tap_button must be a non-negative integer") else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), uiScale(stUi(st)), v, uiBundle(stUi(st)))))
+  if (!allDigits(v, 0) || v == "") withErr(st, "tap_button must be a non-negative integer") else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), uiScale(stUi(st)), v, uiBundle(stUi(st)), uiRuntime(stUi(st)))))
 
 def parseBundle(v: String, rest: List[String], st: St): St =
-  if (v == "") withErr(st, emptyBundle()) else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), uiScale(stUi(st)), uiTap(stUi(st)), v)))
+  if (v == "") withErr(st, emptyBundle()) else parseLines(rest, withUi(st, UiMan(uiWidth(stUi(st)), uiHeight(stUi(st)), uiScale(stUi(st)), uiTap(stUi(st)), v, uiRuntime(stUi(st)))))
 
 def parseDep(name: String, raw: String, rest: List[String], st: St): St =
-  parseDep2(name, trim(raw), rest, st)
+  parseDep2(trim(name), trim(raw), rest, st)
 
 def parseDep2(name: String, raw: String, rest: List[String], st: St): St =
-  if (Str.len(raw) > 0 && Str.charAt(raw, 0) == 34) withErr(st, strDep()) else if (Str.len(raw) > 0 && Str.charAt(raw, 0) == 123) parseInline(name, raw, rest, st) else withErr(st, strDep())
+  if (Str.len(raw) > 0 && Str.charAt(raw, 0) == 34) withErr(st, strDep()) else if (Str.len(raw) > 0 && Str.charAt(raw, 0) == 123) parseInline(name, raw, rest, st) else withErr(st, needPath())
 
 def parseInline(name: String, raw: String, rest: List[String], st: St): St =
-  parseInline2(name, innerOf(raw), rest, st)
-
-def innerOf(raw: String): String =
-  if (Str.len(raw) >= 2 && Str.charAt(raw, Str.len(raw) - 1) == 125) trim(Str.slice(raw, 1, Str.len(raw) - 1)) else trim(Str.slice(raw, 1, Str.len(raw)))
+  if (Str.len(raw) < 2 || Str.charAt(raw, Str.len(raw) - 1) != 125) withErr(st, unclosedDep()) else parseInline2(name, trim(Str.slice(raw, 1, Str.len(raw) - 1)), rest, st)
 
 def parseInline2(name: String, inner: String, rest: List[String], st: St): St =
   if (inner == "") withErr(st, needPath()) else takePath(name, kvs(inner, noPairs()), rest, st)
@@ -263,5 +313,13 @@ def takePathHd(name: String, h: (String, String), restXs: List[(String, String)]
   }
 
 def takePath3(name: String, path: String, found: Bool, rest: List[String], st: St): St =
-  if (!found) withErr(st, needPath()) else if (path == "") withErr(st, emptyPath()) else parseLines(rest, St(st.sec, st.name, st.version, st.hasUi, (name, path) :: st.deps, stUi(st), st.err))
+  if (!found) withErr(st, needPath()) else if (path == "") withErr(st, emptyPath()) else if (hasDep(st.deps, name)) withErr(st, dupDep(name)) else parseLines(rest, St(st.sec, st.name, st.version, st.hasUi, (name, path) :: st.deps, stUi(st), st.err))
+
+def hasDep(xs: List[(String, String)], name: String): Bool =
+  if (List.isEmpty(xs)) false else hasDepHd(List.at(xs, 0), List.tail(xs), name)
+
+def hasDepHd(h: (String, String), rest: List[(String, String)], name: String): Bool =
+  h match {
+    case (n, _p) => n == name || hasDep(rest, name)
+  }
 

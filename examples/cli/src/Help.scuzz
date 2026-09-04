@@ -122,7 +122,7 @@ Arguments:
 
 Options:
       --headless
-          Force Headless UiRuntime (no display needed)
+          Force Headless UiRuntime (overrides [ui].default_runtime; no display needed)
       --message-format <MESSAGE_FORMAT>
           Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
       --out-dir <OUT_DIR>
@@ -283,7 +283,7 @@ Arguments:
 
 Options:
       --headless
-          Force Headless UiRuntime
+          Force Headless UiRuntime (overrides [ui].default_runtime)
       --out-dir <OUT_DIR>
           [default: build]
       --message-format <MESSAGE_FORMAT>

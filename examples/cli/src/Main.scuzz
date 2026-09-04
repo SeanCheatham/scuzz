@@ -182,6 +182,63 @@ def tomlBadSize(): String =
 def wantBadSize(): String =
   "headless_size must be a pair of positive integers"
 
+def tomlStudio(): String =
+  "[package]\nname = \"studio\"\nversion = \"0.1.0\"\n\n[ui]\ndefault_runtime = \"desktop\"\nheadless_size = [400, 560]\nheadless_scale = 1.0\ntap_button = 1\n"
+
+def wantStudioMan(): String =
+  "name=studio ver=0.1.0 ui=true runtime=desktop size=400x560 scale=1.0 tap=1 bundle=dev.scuzz.app deps="
+
+def wantHelloMan(): String =
+  "name=hello ver=0.1.0 ui=false runtime=headless size=200x120 scale=1 tap= bundle=dev.scuzz.app deps="
+
+def wantCliMan(): String =
+  "name=cli ver=0.1.0 ui=false runtime=headless size=200x120 scale=1 tap= bundle=dev.scuzz.app deps=syntax=../syntax,compiler=../compiler"
+
+def tomlScaleDots(): String =
+  "[package]\nname = \"app\"\n[ui]\nheadless_scale = 1.2.3\n"
+
+def tomlScaleTrail(): String =
+  "[package]\nname = \"app\"\n[ui]\nheadless_scale = 1.\n"
+
+def tomlDupDep(): String =
+  "[package]\nname = \"app\"\n[dependencies]\nshared = { path = \"../a\" }\nshared = { path = \"../b\" }\n"
+
+def wantDupDep(): String =
+  "duplicate dependency name `shared`"
+
+def tomlBadPkgName(): String =
+  "[package]\nname = \"123app\"\n"
+
+def wantBadPkgNameToml(): String =
+  "package name must be [A-Za-z_][A-Za-z0-9_]*"
+
+def tomlInlineRt(): String =
+  "[package]\nname = \"app\"\n[ui]\ndefault_runtime = \"desktop\"   # or \"headless\" / \"mobile\"\n"
+
+def wantInlineRt(): String =
+  "name=app ver=0.0.0 ui=true runtime=desktop size=200x120 scale=1 tap= bundle=dev.scuzz.app deps="
+
+def tomlCommaPath(): String =
+  "[package]\nname = \"app\"\n[dependencies]\nshared = { path = \"../a,b\" }\n"
+
+def wantCommaPath(): String =
+  "name=app ver=0.0.0 ui=false runtime=headless size=200x120 scale=1 tap= bundle=dev.scuzz.app deps=shared=../a,b"
+
+def tomlKeyOut(): String =
+  "name = \"app\"\n"
+
+def wantKeyOut(): String =
+  "key outside a table"
+
+def tomlUnclosed(): String =
+  "[package]\nname = \"app\"\n[dependencies]\nshared = { path = \"../a\"\n"
+
+def wantUnclosed(): String =
+  "unclosed `{` in dependency"
+
+def manUiOk(): Bool =
+  Manifest.uiRuntime(Manifest.manUi(Manifest.parse(tomlStudio()))) == "desktop" && Drive.showMan(Manifest.parse(tomlStudio())) == wantStudioMan() && Str.contains(Drive.runEnvOf("build", false, tomlStudio()), "SCUZZ_UI_RUNTIME=desktop") && Str.contains(Drive.runEnvOf("build", true, tomlStudio()), "SCUZZ_UI_RUNTIME=headless") && Str.contains(Cli.runEnvOf("build", false, "", "", tomlStudio()), "SCUZZ_UI_RUNTIME=desktop") && Str.contains(Cli.runEnvOf("build", true, "", "", tomlStudio()), "SCUZZ_UI_RUNTIME=headless") && Str.contains(Drive.runEnvOf("build", false, tomlStudio()), "SCUZZ_UI_WIDTH=400") && Str.contains(Drive.runEnvOf("build", true, tomlStudio()), "SCUZZ_SNAPSHOT_PATH=build/snapshot.png") && !Str.contains(Drive.runEnvOf("build", false, tomlStudio()), "SCUZZ_SNAPSHOT_PATH") && Drive.showMan(Manifest.parse(tomlScaleDots())) == Str.concat("err:", Manifest.badScale()) && Drive.showMan(Manifest.parse(tomlScaleTrail())) == Str.concat("err:", Manifest.badScale()) && Drive.showMan(Manifest.parse(tomlDupDep())) == Str.concat("err:", wantDupDep()) && Drive.showMan(Manifest.parse(tomlBadPkgName())) == Str.concat("err:", wantBadPkgNameToml()) && Drive.showMan(Manifest.parse(tomlInlineRt())) == wantInlineRt() && Drive.showMan(Manifest.parse(tomlCommaPath())) == wantCommaPath() && Drive.showMan(Manifest.parse(tomlKeyOut())) == Str.concat("err:", wantKeyOut()) && Drive.showMan(Manifest.parse(tomlUnclosed())) == Str.concat("err:", wantUnclosed()) && Drive.seenHas("a" :: Manifest.noLines(), "a") && !Drive.seenHas(Manifest.noLines(), "a") && Drive.cycleErr("p") == "dependency cycle: p"
+
 def wantLink(): String =
   "clang -O0 -Wno-override-module build/hello.ll crates/runtime/build/libscuzz_rt.a -lpthread -lssl -lcrypto -o build/hello"
 
@@ -300,7 +357,7 @@ def wantPkg(): String =
   "ok name=hello ll=build/hello.ll link=clang -O0 -Wno-override-module build/hello.ll crates/runtime/build/libscuzz_rt.a -lpthread -lssl -lcrypto -o build/hello"
 
 def driveOk(): Bool =
-  Drive.showMan(Manifest.parse(tomlHello())) == "name=hello ver=0.1.0 ui=false deps=0" && Drive.showMan(Manifest.parse(tomlCli())) == "name=cli ver=0.1.0 ui=false deps=2" && Drive.showMan(Manifest.parse(tomlPlugins())) == Str.concat("err:", wantPlugins()) && Drive.showMan(Manifest.parse(tomlLicense())) == Str.concat("err:", wantLicense()) && Drive.showMan(Manifest.parse(tomlStrDep())) == Str.concat("err:", wantStrDep()) && Drive.showMan(Manifest.parse(tomlGit())) == Str.concat("err:", wantGit()) && Drive.showMan(Manifest.parse(tomlNoName())) == Str.concat("err:", wantNoName()) && Drive.showMan(Manifest.parse(tomlEmptyPath())) == Str.concat("err:", wantEmptyPath()) && Drive.showMan(Manifest.parse(tomlNeedPath())) == Str.concat("err:", wantNeedPathToml()) && Drive.showMan(Manifest.parse(tomlEmptyBundle())) == Str.concat("err:", wantEmptyBundle()) && Drive.showMan(Manifest.parse(tomlBadRt())) == Str.concat("err:", wantBadRt()) && Drive.showMan(Manifest.parse(tomlBadSize())) == Str.concat("err:", wantBadSize()) && Drive.bundleIdOf(tomlHello()) == "dev.scuzz.app" && Drive.bundleIdOf(tomlBundle()) == "dev.scuzz.hello" && Drive.compileSrc(srcIrHi()).ok && Drive.compileSrc(srcIrHi()).ir == wantIrHi() && !Drive.compileSrc(srcTyUnbound()).ok && Drive.compileSrc(srcTyUnbound()).diags == wantTyUnbound() && Drive.compileSrc(srcIrHi()).ir == Drive.compileSrc(srcIrHi()).ir && Drive.linkLine("clang", Drive.llName("build", "hello"), "crates/runtime/build/libscuzz_rt.a", Drive.exeName("build", "hello")) == wantLink() && Drive.linkLineHost(true, false, "clang", "a.ll", "rt.a", "app", ".", false) == wantLinkUi() && Drive.linkLineHost(true, true, "clang", "a.ll", "rt.a", "app", ".", false) == wantLinkMacUi() && Drive.missToml("/tmp/empty") == "missing scuzz.toml in /tmp/empty" && Drive.showPkg(Drive.compilePkg(tomlHello(), srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == wantPkg() && Drive.showPkg(Drive.compileFiles(tomlHello(), ("Main", srcIrHi()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == wantPkg() && !Drive.compileFiles(tomlHello(), ("Main", srcTyUnbound()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a").ok && Cli.runCmd(Cli.parse(a1("build")), srcIrHi()) == wantPkg()
+  manUiOk() && Drive.showMan(Manifest.parse(tomlHello())) == wantHelloMan() && Drive.showMan(Manifest.parse(tomlCli())) == wantCliMan() && Drive.showMan(Manifest.parse(tomlPlugins())) == Str.concat("err:", wantPlugins()) && Drive.showMan(Manifest.parse(tomlLicense())) == Str.concat("err:", wantLicense()) && Drive.showMan(Manifest.parse(tomlStrDep())) == Str.concat("err:", wantStrDep()) && Drive.showMan(Manifest.parse(tomlGit())) == Str.concat("err:", wantGit()) && Drive.showMan(Manifest.parse(tomlNoName())) == Str.concat("err:", wantNoName()) && Drive.showMan(Manifest.parse(tomlEmptyPath())) == Str.concat("err:", wantEmptyPath()) && Drive.showMan(Manifest.parse(tomlNeedPath())) == Str.concat("err:", wantNeedPathToml()) && Drive.showMan(Manifest.parse(tomlEmptyBundle())) == Str.concat("err:", wantEmptyBundle()) && Drive.showMan(Manifest.parse(tomlBadRt())) == Str.concat("err:", wantBadRt()) && Drive.showMan(Manifest.parse(tomlBadSize())) == Str.concat("err:", wantBadSize()) && Drive.bundleIdOf(tomlHello()) == "dev.scuzz.app" && Drive.bundleIdOf(tomlBundle()) == "dev.scuzz.hello" && Drive.compileSrc(srcIrHi()).ok && Drive.compileSrc(srcIrHi()).ir == wantIrHi() && !Drive.compileSrc(srcTyUnbound()).ok && Drive.compileSrc(srcTyUnbound()).diags == wantTyUnbound() && Drive.compileSrc(srcIrHi()).ir == Drive.compileSrc(srcIrHi()).ir && Drive.linkLine("clang", Drive.llName("build", "hello"), "crates/runtime/build/libscuzz_rt.a", Drive.exeName("build", "hello")) == wantLink() && Drive.linkLineHost(true, false, "clang", "a.ll", "rt.a", "app", ".", false) == wantLinkUi() && Drive.linkLineHost(true, true, "clang", "a.ll", "rt.a", "app", ".", false) == wantLinkMacUi() && Drive.missToml("/tmp/empty") == "missing scuzz.toml in /tmp/empty" && Drive.showPkg(Drive.compilePkg(tomlHello(), srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == wantPkg() && Drive.showPkg(Drive.compileFiles(tomlHello(), ("Main", srcIrHi()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == wantPkg() && !Drive.compileFiles(tomlHello(), ("Main", srcTyUnbound()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a").ok && Cli.runCmd(Cli.parse(a1("build")), srcIrHi()) == wantPkg()
 
 def cliDiff(got: String, want: String): Bool =
   got == want

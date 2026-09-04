@@ -569,10 +569,10 @@ def watchUiBoot(path: String, out: String, headless: Bool, name: String, gen: In
   Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out).flatMap(_ => watchUiSpawn(path, out, headless, name, gen))))
 
 def watchUiSpawn(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
-  Sys.spawn(Str.concat(watchUiEnv(out, headless), Drive.exeName(out, name))).flatMap(pid => watchUiPoll(path, out, headless, name, gen, pid))
+  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Sys.spawn(Str.concat(watchUiEnv(out, headless, toml), Drive.exeName(out, name))).flatMap(pid => watchUiPoll(path, out, headless, name, gen, pid)))
 
-def watchUiEnv(out: String, headless: Bool): String =
-  Str.concat(if (headless) Drive.snapEnv(out) else "", Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.joinSlash(out, "reload.stamp"), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.joinSlash(out, "reload.dylib"), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.joinSlash(out, "debug.dump"), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.joinSlash(out, "inject.script"), " ")))))))))
+def watchUiEnv(out: String, headless: Bool, toml: String): String =
+  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.joinSlash(out, "reload.stamp"), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.joinSlash(out, "reload.dylib"), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.joinSlash(out, "debug.dump"), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.joinSlash(out, "inject.script"), " ")))))))))
 
 def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
   Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
@@ -603,7 +603,7 @@ def dispatchRunEnv(path: String, out: String, env: String, extra: String): IO[Un
   Drive.runDir(path, out, env, extra)
 
 def runEnvOf(out: String, headless: Bool, script: String, dump: String, toml: String): String =
-  Str.concat(if (headless) Drive.snapEnvOf(out, toml) else "", Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(script, " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " "))))
+  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(script, " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " "))))
 
 def dispatchTest(path: String, update: Bool, pixels: Bool, differential: Bool): IO[Unit] =
   Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build"), update, pixels, differential))

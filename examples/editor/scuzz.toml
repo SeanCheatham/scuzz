@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Open a path from Sys.args, edit in View.editor, check JSON, save tabs"
 
 [ui]
-default_runtime = "headless"
+default_runtime = "desktop"
 headless_size = [960, 560]
 headless_scale = 1.0
 tap_button = 3
