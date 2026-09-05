@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "scuzz_ui.h"
 
 #include "scuzz_embedder.h"
@@ -15,6 +16,7 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <time.h>
 
 static int want_gpu_presenter(void) {
   const char *e = getenv("SCUZZ_SKIA");
@@ -1455,7 +1457,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
   pthread_mutex_lock(&session->bridge_lock);
-  session->dirty = 0;
+  /* A post during paint leaves bridge work. Keep dirty so the next pump
+   * and quiesce sample that work. */
+  session->dirty = session->bridge_head != NULL;
   pthread_mutex_unlock(&session->bridge_lock);
   /* Desktop peer: present to OS surface when embedder is available. */
   if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
@@ -2245,11 +2249,22 @@ SzQuiesce sz_ui_quiesce(SzUiSession *session) {
     pthread_mutex_unlock(&session->bridge_lock);
     if (!sz_ui_pump_sync(session))
       sz_panic("Ui.run quiesce pump failed");
-    /* Let IO bridge posters run. Count work that arrived during the pump. */
+    /* Let IO bridge posters run. Count work that arrived during the pump.
+     * sched_yield can skip a runnable poster; wait 1 ms before an idle
+     * sample so a live poster is visible. */
     sched_yield();
     pthread_mutex_lock(&session->bridge_lock);
     busy = busy || session->dirty || session->bridge_head != NULL;
     pthread_mutex_unlock(&session->bridge_lock);
+    if (!busy) {
+      struct timespec ts;
+      ts.tv_sec = 0;
+      ts.tv_nsec = 1000 * 1000;
+      nanosleep(&ts, NULL);
+      pthread_mutex_lock(&session->bridge_lock);
+      busy = session->dirty || session->bridge_head != NULL;
+      pthread_mutex_unlock(&session->bridge_lock);
+    }
     if (busy)
       idle = 0;
     else {
