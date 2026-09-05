@@ -132,6 +132,7 @@ SzString *sz_signal_dump(void);
 /* Publish the for-binder name. Property and Timeline kits read that name. */
 void sz_signal_name(const void *sig, const char *name);
 
+/* Named observation. A missing name panics. */
 int64_t sz_property_signal_int(SzString *name);
 SzString *sz_property_signal_str(SzString *name);
 int64_t sz_property_signal_list_len(SzString *name);
@@ -729,6 +730,7 @@ SzString *sz_lang_signal_str_get(SzSignalStr *s);
 void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v);
 SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name,
                                   int64_t elem_str);
+/* Retain the current list. Last-use drops it. */
 SzList *sz_lang_signal_list_get(SzSignalList *s);
 void *sz_lang_signal_list_set(SzSignalList *s, SzList *v);
 

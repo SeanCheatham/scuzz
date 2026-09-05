@@ -104,6 +104,23 @@ static SigReg *sig_find(SigKind kind, const char *name) {
   return NULL;
 }
 
+static void sig_missing(const char *name) {
+  char buf[192];
+  snprintf(buf, sizeof buf, "missing signal %s",
+           name && name[0] ? name : "(empty)");
+  sz_panic(buf);
+}
+
+/* First non-null head decides String vs count-only. Empty keeps `unknown`. */
+static int sig_list_heads_str(const SzList *p, int unknown) {
+  for (; p; p = p->tail) {
+    if (!p->head)
+      continue;
+    return sz_rc_kind(p->head) == SZ_RC_STRING;
+  }
+  return unknown ? 1 : 0;
+}
+
 /* Mark a list signal's element kind: 1 = String (dump prints elements),
  * 0 = other (dump prints the count only). */
 static void sig_set_elem_str(const void *sig, int64_t elem_str) {
@@ -144,7 +161,7 @@ SzString *sz_signal_dump(void) {
       break;
     case SIG_LIST: {
       SzList *p = sz_signal_list_get((const SzSignalList *)r->sig);
-      if (!r->elem_str) {
+      if (!sig_list_heads_str(p, r->elem_str)) {
         snprintf(line, sizeof line, "list[%d] %s= <%lld>\n", r->id, tag,
                  (long long)sz_list_len(p));
         sz_dump_append(&buf, &len, &cap, line);
@@ -175,7 +192,9 @@ int64_t sz_property_signal_int(SzString *name) {
   if (sz_timeline_replaying())
     return sz_timeline_replay_signal_int(n);
   r = sig_find(SIG_INT, n);
-  return r ? sz_signal_int_get((const SzSignalInt *)r->sig) : 0;
+  if (!r)
+    sig_missing(n);
+  return sz_signal_int_get((const SzSignalInt *)r->sig);
 }
 
 SzString *sz_property_signal_str(SzString *name) {
@@ -184,10 +203,9 @@ SzString *sz_property_signal_str(SzString *name) {
   if (sz_timeline_replaying())
     return sz_timeline_replay_signal_str(n);
   r = sig_find(SIG_STR, n);
-  if (r)
-    return sz_string_from_cstr(
-        sz_signal_str_get((const SzSignalStr *)r->sig));
-  return sz_string_from_cstr("");
+  if (!r)
+    sig_missing(n);
+  return sz_string_from_cstr(sz_signal_str_get((const SzSignalStr *)r->sig));
 }
 
 int64_t sz_property_signal_list_len(SzString *name) {
@@ -196,10 +214,9 @@ int64_t sz_property_signal_list_len(SzString *name) {
   if (sz_timeline_replaying())
     return sz_timeline_replay_signal_list_len(n);
   r = sig_find(SIG_LIST, n);
-  if (r)
-    return (int64_t)sz_list_len(
-        sz_signal_list_get((const SzSignalList *)r->sig));
-  return 0;
+  if (!r)
+    sig_missing(n);
+  return (int64_t)sz_list_len(sz_signal_list_get((const SzSignalList *)r->sig));
 }
 
 SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
@@ -212,17 +229,19 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   if (sz_timeline_replaying())
     return sz_timeline_replay_signal_list_at(n, index);
   r = sig_find(SIG_LIST, n);
-  if (r && r->elem_str) {
-    p = sz_signal_list_get((const SzSignalList *)r->sig);
-    i = 0;
-    while (p) {
-      if (i == index) {
-        SzString *h = (SzString *)p->head;
-        return sz_string_from_cstr(h ? sz_string_cstr(h) : "");
-      }
-      p = p->tail;
-      i++;
+  if (!r)
+    sig_missing(n);
+  p = sz_signal_list_get((const SzSignalList *)r->sig);
+  if (!sig_list_heads_str(p, r->elem_str))
+    return sz_string_from_cstr("");
+  i = 0;
+  while (p) {
+    if (i == index) {
+      SzString *h = (SzString *)p->head;
+      return sz_string_from_cstr(h ? sz_string_cstr(h) : "");
     }
+    p = p->tail;
+    i++;
   }
   return sz_string_from_cstr("");
 }
@@ -323,9 +342,9 @@ int sz_signal_list_elem_str(const SzSignalList *s) {
   SigReg *r;
   for (r = g_sig_head; r; r = r->next) {
     if (r->sig == (const void *)s)
-      return r->elem_str;
+      return sig_list_heads_str(s ? s->value : NULL, r->elem_str);
   }
-  return 1;
+  return 0;
 }
 
 SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name,
@@ -337,7 +356,12 @@ SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name,
   return s;
 }
 
-SzList *sz_lang_signal_list_get(SzSignalList *s) { return sz_signal_list_get(s); }
+/* Retain so last-use can drop. The C getter stays a borrow. */
+SzList *sz_lang_signal_list_get(SzSignalList *s) {
+  SzList *xs = sz_signal_list_get(s);
+  sz_retain(xs);
+  return xs;
+}
 
 void *sz_lang_signal_list_set(SzSignalList *s, SzList *v) {
   sz_signal_list_set(s, v);

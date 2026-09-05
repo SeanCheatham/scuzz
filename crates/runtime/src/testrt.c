@@ -3220,9 +3220,18 @@ static const char *tl_sig_line(const char *dump, const char *kind,
   return NULL;
 }
 
+static void tl_missing(const char *name) {
+  char buf[192];
+  snprintf(buf, sizeof buf, "missing signal %s",
+           name && name[0] ? name : "(empty)");
+  sz_panic(buf);
+}
+
 int64_t sz_timeline_replay_signal_int(const char *name) {
   const char *sep = tl_sig_line(g_replay_signals, "int", name);
-  return sep ? (int64_t)atoll(sep + 3) : 0;
+  if (!sep)
+    tl_missing(name);
+  return (int64_t)atoll(sep + 3);
 }
 
 static const char *tl_sig_payload(const char *sep) {
@@ -3263,18 +3272,23 @@ static int64_t tl_count_quoted_list(const char *p) {
 
 static int64_t tl_parse_signal_int(const char *dump, const char *name) {
   const char *sep = tl_sig_line(dump, "int", name);
-  return sep ? (int64_t)atoll(sep + 3) : 0;
+  if (!sep)
+    tl_missing(name);
+  return (int64_t)atoll(sep + 3);
 }
 
 SzString *sz_timeline_replay_signal_str(const char *name) {
-  return tl_parse_quoted_str(tl_sig_line(g_replay_signals, "str", name));
+  const char *sep = tl_sig_line(g_replay_signals, "str", name);
+  if (!sep)
+    tl_missing(name);
+  return tl_parse_quoted_str(sep);
 }
 
 int64_t sz_timeline_replay_signal_list_len(const char *name) {
   const char *sep = tl_sig_line(g_replay_signals, "list", name);
   const char *p;
   if (!sep)
-    return 0;
+    tl_missing(name);
   if (memcmp(sep, " = <", 4) == 0)
     return (int64_t)atoll(sep + 4);
   if (memcmp(sep, " = [", 4) != 0)
@@ -3287,7 +3301,9 @@ SzString *sz_timeline_replay_signal_list_at(const char *name, int64_t index) {
   const char *sep = tl_sig_line(g_replay_signals, "list", name);
   const char *p;
   int64_t i = 0;
-  if (index < 0 || !sep || memcmp(sep, " = [", 4) != 0)
+  if (!sep)
+    tl_missing(name);
+  if (index < 0 || memcmp(sep, " = [", 4) != 0)
     return sz_string_from_cstr("");
   p = sep + 4;
   while (*p && *p != ']' && *p != '\n') {
@@ -3336,7 +3352,7 @@ static int64_t tl_parse_signal_list_len(const char *dump, const char *name) {
   const char *sep = tl_sig_line(dump, "list", name);
   const char *p;
   if (!sep)
-    return 0;
+    tl_missing(name);
   /* Record lists dump the count only: `list[<id>] <name> = <n>`. */
   if (memcmp(sep, " = <", 4) == 0)
     return (int64_t)atoll(sep + 4);
@@ -3366,6 +3382,8 @@ int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
   if (!s || !s->signals)
     return 0;
   sep = tl_sig_line(s->signals, "str", name ? sz_string_cstr(name) : "");
+  if (!sep)
+    tl_missing(name ? sz_string_cstr(name) : "");
   p = tl_sig_payload(sep);
   if (!p || *p != '"')
     return 0;

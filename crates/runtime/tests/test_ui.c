@@ -7,9 +7,11 @@
 #include <math.h>
 #include <pthread.h>
 #include <sched.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -13217,9 +13219,6 @@ static void test_property_signal_list_len(void) {
   sz_signal_list_set(items, sz_list_nil());
   assert(sz_property_signal_list_len(name) == 0);
   sz_release(name);
-  name = sz_string_from_cstr("missing");
-  assert(sz_property_signal_list_len(name) == 0);
-  sz_release(name);
   sz_string_free(dump);
   sz_signal_list_free(items);
 }
@@ -13253,11 +13252,6 @@ static void test_property_signal_list_at(void) {
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
   sz_release(name);
-  name = sz_string_from_cstr("missing");
-  got = sz_property_signal_list_at(name, 0);
-  assert(strcmp(sz_string_cstr(got), "") == 0);
-  sz_string_free(got);
-  sz_release(name);
   sz_string_free(dump);
   sz_signal_list_free(items);
 }
@@ -13272,10 +13266,9 @@ static void test_property_signal_int(void) {
   dump = sz_signal_dump();
   s = strstr(sz_string_cstr(dump), "int[");
   assert(s);
-  /* Unnamed signals dump with no name and read as 0 by name. */
+  /* Unnamed signals dump with no name. A missing name panics. */
   assert(strstr(s, " = 7"));
   name = sz_string_from_cstr("count");
-  assert(sz_property_signal_int(name) == 0);
   sz_signal_name(count, "count");
   assert(sz_property_signal_int(name) == 7);
   sz_signal_int_set(count, 9);
@@ -13308,6 +13301,112 @@ static void test_signal_list_record_dump(void) {
   sz_release(name);
   sz_string_free(dump);
   sz_signal_list_free(items);
+
+  xs = sz_list_cons(sz_box_i64(1), sz_list_nil());
+  items = sz_lang_signal_list(xs, sz_string_from_cstr("rows"), 1);
+  dump = sz_signal_dump();
+  s = strstr(sz_string_cstr(dump), "list[");
+  assert(s);
+  /* A String flag on non-String heads still dumps the count. */
+  assert(strstr(s, "rows = <1>"));
+  sz_string_free(dump);
+  sz_signal_list_free(items);
+}
+
+static int wait_aborted(pid_t pid) {
+  int st = 0;
+  if (waitpid(pid, &st, 0) != pid)
+    return 0;
+  return WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT;
+}
+
+static void assert_missing_aborts(void (*fn)(void)) {
+  pid_t pid;
+  int fds[2];
+  char err[4096];
+  ssize_t n;
+
+  assert(pipe(fds) == 0);
+  fflush(NULL);
+  pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    dup2(fds[1], STDERR_FILENO);
+    close(fds[0]);
+    close(fds[1]);
+    fn();
+    _exit(1);
+  }
+  close(fds[1]);
+  n = read(fds[0], err, sizeof err - 1);
+  close(fds[0]);
+  if (n < 0)
+    n = 0;
+  err[n] = '\0';
+  assert(wait_aborted(pid));
+  assert(strstr(err, "missing signal missing") != NULL);
+}
+
+static void missing_property_int(void) {
+  SzString *name = sz_string_from_cstr("missing");
+  (void)sz_property_signal_int(name);
+}
+
+static void missing_property_str(void) {
+  SzString *name = sz_string_from_cstr("missing");
+  (void)sz_property_signal_str(name);
+}
+
+static void missing_property_list_len(void) {
+  SzString *name = sz_string_from_cstr("missing");
+  (void)sz_property_signal_list_len(name);
+}
+
+static void missing_timeline_int(void) {
+  FILE *f = fopen("/tmp/scuzz_ui_tl_missing.dump", "w");
+  void *tl;
+  SzString *name;
+  assert(f);
+  fputs("# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\n\nsignals:\n"
+        "int[0] count = 7\na11y:\n\n",
+        f);
+  fclose(f);
+  tl = sz_timeline_load("/tmp/scuzz_ui_tl_missing.dump");
+  name = sz_string_from_cstr("missing");
+  (void)sz_timeline_signal_int(tl, 0, name);
+}
+
+static void test_property_missing_signal_panics(void) {
+  assert_missing_aborts(missing_property_int);
+  assert_missing_aborts(missing_property_str);
+  assert_missing_aborts(missing_property_list_len);
+  assert_missing_aborts(missing_timeline_int);
+}
+
+static void test_signal_list_get_survives_set(void) {
+  SzSignalList *items;
+  SzList *old;
+  SzList *got;
+  SzList *neu;
+  SzString *a;
+  SzString *b;
+
+  a = sz_string_from_cstr("a");
+  old = sz_list_cons(a, sz_list_nil());
+  sz_string_free(a);
+  items = sz_signal_list(old);
+  sz_release(old);
+  got = sz_lang_signal_list_get(items);
+  b = sz_string_from_cstr("b");
+  neu = sz_list_cons(b, sz_list_nil());
+  sz_string_free(b);
+  sz_signal_list_set(items, neu);
+  sz_release(neu);
+  assert(sz_list_len(got) == 1);
+  assert(got && got->head);
+  assert(strcmp(sz_string_cstr((SzString *)got->head), "a") == 0);
+  sz_release(got);
+  sz_signal_list_free(items);
 }
 
 static void test_property_signal_str(void) {
@@ -13330,11 +13429,6 @@ static void test_property_signal_str(void) {
   sz_signal_str_set(draft, "oat");
   got = sz_property_signal_str(name);
   assert(strcmp(sz_string_cstr(got), "oat") == 0);
-  sz_string_free(got);
-  sz_release(name);
-  name = sz_string_from_cstr("missing");
-  got = sz_property_signal_str(name);
-  assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
   sz_release(name);
   sz_string_free(dump);
@@ -15349,6 +15443,8 @@ int main(void) {
   test_property_signal_list_len();
   test_property_signal_list_at();
   test_property_signal_int();
+  test_property_missing_signal_panics();
+  test_signal_list_get_survives_set();
   test_signal_list_record_dump();
   test_property_signal_str();
   test_signal_dump_escapes();

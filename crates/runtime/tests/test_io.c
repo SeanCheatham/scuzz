@@ -11686,10 +11686,7 @@ int main(void) {
     needle = sz_string_from_cstr("tasks");
     assert(sz_timeline_signal_list_len(tl, 0, needle) == 3);
     sz_release(needle);
-    /* An unnamed line or an unknown name reads as 0. */
-    needle = sz_string_from_cstr("missing");
-    assert(sz_timeline_signal_int(tl, 0, needle) == 0);
-    sz_release(needle);
+    /* A missing name panics (see test_property_missing_signal_panics). */
     needle = sz_string_from_cstr("button:+1");
     assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
     sz_release(needle);
