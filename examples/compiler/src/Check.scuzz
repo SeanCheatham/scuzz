@@ -1070,7 +1070,35 @@ def caseFieldTys3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
   }
 
 def inferMethod(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else if (name == "handleErrorWith") inferHandle(recv, args, env, funs, ens, e) else if (name == "map") inferIoMap(recv, args, env, funs, ens, e) else if (name == "apply") inferApply(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens, e)
+  if (name == "require") inferRequire(recv, args, env, funs, ens, e) else if (name == "flatMap") inferFlatMap(recv, args, env, funs, ens, e) else if (name == "handleErrorWith") inferHandle(recv, args, env, funs, ens, e) else if (name == "map") inferIoMap(recv, args, env, funs, ens, e) else if (name == "apply") inferApply(recv, args, env, funs, ens, e) else inferMethod2(recv, name, args, env, funs, ens, e)
+
+def inferRequire(recv: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  inferRequire2(infer(recv, env, funs, ens), args, env, funs, ens, e)
+
+def inferRequire2(o: Out, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (hasErr(o)) o else if (List.len(args) > 2) bad("require expects at most 2 args", exprSpan(env, e)) else inferRequirePred(o, requirePredExpr(args), env, funs, ens, e)
+
+def requirePredExpr(args: List[Expr]): Expr =
+  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) List.at(args, 0) else List.at(List.tail(args), 0)
+
+def inferRequirePred(recv: Out, pred: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  pred match {
+    case Expr.ELam(p, ty, body) => inferRequireLam(recv, infer(body, bindLam(p, requireBindTy(ty, recv.ty), env), funs, ens), env, e)
+    case Expr.ENamed(_, inner) => inferRequirePred(recv, inner, env, funs, ens, e)
+    case _ => inferRequirePredTy(recv, infer(pred, env, funs, ens), env, e)
+  }
+
+def requireBindTy(ann: String, recvTy: String): String =
+  if (ann != "") ann else if (isIo(recvTy)) ioOk(recvTy) else recvTy
+
+def inferRequireLam(recv: Out, body: Out, env: List[(String, String)], e: Expr): Out =
+  if (hasErr(body)) body else if (body.ty == "Bool" || body.ty == "Any") ok(recv.ty) else bad(Str.concat("require pred must be Bool, got ", body.ty), exprSpan(env, e))
+
+def inferRequirePredTy(recv: Out, po: Out, env: List[(String, String)], e: Expr): Out =
+  if (hasErr(po)) po else if (requirePredOk(po.ty)) ok(recv.ty) else bad(Str.concat("require pred must be Bool, IO[Bool], or A => Bool, got ", po.ty), exprSpan(env, e))
+
+def requirePredOk(ty: String): Bool =
+  ty == "Bool" || ty == "Any" || isIo(ty) && (ioOk(ty) == "Bool" || ioOk(ty) == "Any") || isFunTy(ty) && (funRetOf(ty) == "Bool" || funRetOf(ty) == "Any")
 
 def inferApply(recv: Expr, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   inferApply2(infer(recv, env, funs, ens), args, env, funs, ens, e)
@@ -1273,8 +1301,50 @@ def inferTupleRest(rest: List[Expr], env: List[(String, String)], funs: List[Fun
 
 def checkDef(d: Fun, funs: List[Fun], ens: List[En]): Out =
   d match {
-    case Fun(_, name, _, ps, ret, body, mod, off) => checkDefWrap(name, ret, body, infer(body, bindParams(ps, ("self", "Any") :: ("#mod", mod) :: noEnv()), funs, ens), (mod, off))
+    case Fun(_, name, _, ps, ret, body, mod, off) => checkDefWhere(name, ret, body, ps, funs, ens, mod, off, checkWheres(ps, bindParams(ps, ("self", "Any") :: ("#mod", mod) :: noEnv()), funs, ens, (mod, off)))
   }
+
+def checkDefWhere(name: String, ret: String, body: Expr, ps: List[Param], funs: List[Fun], ens: List[En], mod: String, off: Int, wo: Out): Out =
+  if (hasErr(wo)) checkDefWrap(name, ret, body, wo, (mod, off)) else checkDefWrap(name, ret, body, infer(body, bindParams(ps, ("self", "Any") :: ("#mod", mod) :: noEnv()), funs, ens), (mod, off))
+
+def checkWheres(ps: List[Param], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(ps)) ok("Bool") else checkWhereHd(List.at(ps, 0), List.tail(ps), env, funs, ens, span)
+
+def checkWhereHd(p: Param, rest: List[Param], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  p match {
+    case Param(n, _, w, _) => checkWhereGo(n, w, rest, env, funs, ens, span)
+  }
+
+def checkWhereGo(n: String, w: String, rest: List[Param], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (w == "") checkWheres(rest, env, funs, ens, span) else checkWhereTy(infer(dfltExpr(w), env, funs, ens), n, rest, env, funs, ens, span)
+
+def checkWhereTy(o: Out, n: String, rest: List[Param], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (hasErr(o)) o else if (o.ty == "Bool") checkWheres(rest, env, funs, ens, span) else bad(Str.concat("where on ", Str.concat(n, Str.concat(" must be Bool, got ", o.ty))), span)
+
+def checkEns(ens: List[En], funs: List[Fun]): Out =
+  checkEnsGo(ens, ens, funs)
+
+def checkEnsGo(rest: List[En], ens: List[En], funs: List[Fun]): Out =
+  if (List.isEmpty(rest)) ok("Bool") else checkEnHd(List.at(rest, 0), List.tail(rest), ens, funs)
+
+def checkEnHd(h: En, rest: List[En], ens: List[En], funs: List[Fun]): Out =
+  h match {
+    case En(_, _, _, cases) => checkEnsAfter(checkEnCases(cases, ens, funs), rest, ens, funs)
+  }
+
+def checkEnsAfter(o: Out, rest: List[En], ens: List[En], funs: List[Fun]): Out =
+  if (hasErr(o)) o else checkEnsGo(rest, ens, funs)
+
+def checkEnCases(cs: List[EnCase], ens: List[En], funs: List[Fun]): Out =
+  if (List.isEmpty(cs)) ok("Bool") else checkEnCaseHd(List.at(cs, 0), List.tail(cs), ens, funs)
+
+def checkEnCaseHd(c: EnCase, rest: List[EnCase], ens: List[En], funs: List[Fun]): Out =
+  c match {
+    case EnCase(_, fs) => checkEnCasesAfter(checkWheres(fs, bindParams(fs, noEnv()), funs, ens, noSpan()), rest, ens, funs)
+  }
+
+def checkEnCasesAfter(o: Out, rest: List[EnCase], ens: List[En], funs: List[Fun]): Out =
+  if (hasErr(o)) o else checkEnCases(rest, ens, funs)
 
 def checkDefWrap(name: String, ret: String, body: Expr, o: Out, span: (String, Int)): Out =
   if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o, span)
@@ -1298,7 +1368,10 @@ def checkProgOwn(p: Prog, stems: List[String]): Out =
   }
 
 def checkProgGo(ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
-  checkDefsRest(ds, ds, enums, main, body, stems)
+  checkProgAfterEns(checkEns(enums, ds), ds, enums, main, body, stems)
+
+def checkProgAfterEns(o: Out, ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
+  if (hasErr(o)) o else checkDefsRest(ds, ds, enums, main, body, stems)
 
 def withImportFuns(imps: List[Imp], defs: List[Fun]): List[Fun] =
   List.concat(importFuns(imps, defs), defs)

@@ -372,7 +372,19 @@ def desugarFor(bs: List[Bind], body: Expr): Expr =
   desugarForRev(List.reverse(bs), forYield(bs, body))
 
 def forYield(bs: List[Bind], body: Expr): Expr =
-  if (hasDraw(bs)) Expr.ECall("IO.pure", body :: noExpr(), 0) else body
+  if (Check.forHasDraw(bs)) Expr.ECall("IO.pure", body :: noExpr(), 0) else body
+
+def isIoPred(e: Expr): Bool =
+  e match {
+    case Expr.EFor(bs, body, _) => Check.forHasDraw(bs) || isIoPred(body)
+    case Expr.ECall(f, _, _) => ioCall(f)
+    case Expr.EMethod(_, name, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
+    case Expr.EIf(_, t, el, _) => isIoPred(t) || isIoPred(el)
+    case _ => false
+  }
+
+def ioCall(f: String): Bool =
+  Str.startsWith(f, "IO.") || Str.startsWith(f, "Fs.") || Str.startsWith(f, "Net.") || Str.startsWith(f, "Sys.") || Str.startsWith(f, "Clock.") || Str.startsWith(f, "Random.")
 
 def desugarForRev(bs: List[Bind], body: Expr): Expr =
   if (List.isEmpty(bs)) body else desugarForRevHit(bs, body)
@@ -2257,7 +2269,14 @@ def emitPropCheckJoin(ns: Slot, rs: Slot, pred: Expr, recv: Expr, prefix: String
 
 def emitPropCheckJoin2(nc: String, nv: String, no: Bool, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   rs match {
-    case Slot(rc, rv, ro) => emitPropCheckPred(join(nc, join(rc, if (ro && exprMentions(pred, recv)) retPtr(rv) else "")), nv, no, rv, ro, emitExpr(pred, Str.concat(prefix, "_p"), strs, defs, ens, ps, loc))
+    case Slot(rc, rv, ro) => emitPropCheckPred(join(nc, join(rc, if (ro && exprMentions(pred, recv)) retPtr(rv) else "")), nv, no, rv, ro, emitPropPred(pred, rv, ro, recv, prefix, strs, defs, ens, ps, loc))
+  }
+
+def emitPropPred(pred: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+  pred match {
+    case Expr.ENamed(_, inner) => emitPropPred(inner, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
+    case Expr.ELam(p, _, body) => emitApplyLam2(p, body, Slot("", rv, ro), slotBindI64(Slot("", rv, ro), recv, ps, defs), applyBindTy(p, recv, defs, ps), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc, 0)
+    case _ => emitExpr(pred, Str.concat(prefix, "_p"), strs, defs, ens, ps, loc)
   }
 
 def emitPropCheckPred(code: String, nv: String, no: Bool, rv: String, ro: Bool, pred: Slot): Slot =
@@ -3419,27 +3438,8 @@ def emitPairUnbox(scrut: String, left: Bool, prefix: String): Slot =
 def emitCtorCall(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   if (name == "copy") emitCopy(recv, args, prefix, strs, defs, ens, ps, loc) else if (name == "require") emitRequire(recv, args, prefix, strs, defs, ens, ps, loc) else emitCtorCall2(recv, name, args, prefix, strs, defs, ens, ps, loc)
 
-def emitRequire(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
-  if (requirePredIo(requirePred(args))) emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc) else emitRequireJoin(emitExpr(requirePred(args), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc), emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc))
-
-def requirePred(args: List[Expr]): Expr =
-  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) List.at(args, 0) else List.at(List.tail(args), 0)
-
-def requirePredIo(e: Expr): Bool =
-  e match {
-    case Expr.EFor(_, _, _) => true
-    case Expr.ECall(f, _, _) => Str.startsWith(f, "IO.")
-    case Expr.EMethod(_, name, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
-    case Expr.EIf(_, t, el, _) => requirePredIo(t) || requirePredIo(el)
-    case _ => false
-  }
-
-def emitRequireJoin(pred: Slot, body: Slot): Slot =
-  pred match {
-    case Slot(pc, pv, po) => body match {
-  case Slot(code, v, o) => Slot(join(pc, join(if (po) relPtr(pv) else "", code)), v, o)
-}
-  }
+def emitRequire(recv: Expr, _args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+  emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc)
 
 def emitCtorCall2(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   recv match {
