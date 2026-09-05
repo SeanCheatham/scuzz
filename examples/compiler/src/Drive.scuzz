@@ -8,6 +8,8 @@ record FuzzAcc(fail: Int, corpFail: Int, repro: String)
 
 record FuzzMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int)
 
+record MutBase(idle: String, tls: List[String], pass: List[FuzzRun])
+
 record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)], oracles: Bool, uiEnv: String)
 
 import Manifest.Man
@@ -1499,7 +1501,7 @@ def fuzzMutate2(job: FuzzJob, runs: List[FuzzRun], fail: Int, corpFail: Int, rep
   fuzzMutate3(job, runs, fail, corpFail, repro, sites, if (Verify.mutateN(job.iterations) < sites) Verify.mutateN(job.iterations) else sites)
 
 def fuzzMutate3(job: FuzzJob, runs: List[FuzzRun], fail: Int, corpFail: Int, repro: String, sites: Int, take: Int): IO[Unit] =
-  if (sites == 0) fuzzMutNone(job, List.len(runs), fail, corpFail, repro, sites) else if (take <= 0) fuzzDone(job, List.len(runs), fail, corpFail, repro, emptyMut(sites)) else IO.println(Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutBase(job, runs).flatMap(base => fuzzMutGo(job, Mutate.pickSites(job.seed, take, sites), runs, base, emptyMut(sites), take).flatMap(mut => fuzzMutFin(job, List.len(runs), fail, corpFail, repro, mut, take))))
+  if (sites == 0) fuzzMutNone(job, List.len(runs), fail, corpFail, repro, sites) else if (take <= 0) fuzzDone(job, List.len(runs), fail, corpFail, repro, emptyMut(sites)) else IO.println(Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutBase(job, runs).flatMap(base => fuzzMutGo(job, Mutate.pickSites(job.seed, take, sites), base, emptyMut(sites), take).flatMap(mut => fuzzMutFin(job, List.len(runs), fail, corpFail, repro, mut, take))))
 
 def fuzzMutNone(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, sites: Int): IO[Unit] =
   IO.println(if (job.oracles) "scuzz fuzz: no residual Property.check / Property.assert / .require sites" else "scuzz fuzz: no live-code mutation sites").flatMap(_ => fuzzDone(job, corpus, fail, corpFail, repro, emptyMut(sites)))
@@ -1507,23 +1509,26 @@ def fuzzMutNone(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: Stri
 def fuzzMutFin(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut, take: Int): IO[Unit] =
   IO.println(Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(mut.killed), Str.concat(" killed, ", Str.concat(Str.fromInt(mut.survived), Str.concat(" survived, ", Str.concat(Str.fromInt(mut.inert), Str.concat(" inert (", Str.concat(Str.fromInt(take), " ran)"))))))))).flatMap(_ => fuzzDone(job, corpus, fail, corpFail, repro, FuzzMut(mut.killed, mut.survived, mut.inert, take, mut.sites)))
 
-def fuzzMutBase(job: FuzzJob, runs: List[FuzzRun]): IO[(String, List[String])] =
-  fuzzIdleAt(job.exe, job.hasUi, joinSlash(joinSlash(job.outDir, "fuzz"), "mutate/baseline"), job.uiEnv).flatMap(p => fuzzMutBaseRuns(job, runs, 0, Verify.noStr()).flatMap(tls => IO.pure((fuzzIdleTl(p), tls))))
+def fuzzMutBase(job: FuzzJob, runs: List[FuzzRun]): IO[MutBase] =
+  fuzzIdleAt(job.exe, job.hasUi, joinSlash(joinSlash(job.outDir, "fuzz"), "mutate/baseline"), job.uiEnv).flatMap(p => fuzzMutBaseRuns(job, runs, 0, Verify.noStr(), noRuns()).flatMap(got => IO.pure(MutBase(fuzzIdleTl(p), got._1, got._2))))
 
-def fuzzMutBaseRuns(job: FuzzJob, runs: List[FuzzRun], i: Int, acc: List[String]): IO[List[String]] =
-  if (List.isEmpty(runs)) IO.pure(acc) else fuzzMutBaseRunHd(job, List.at(runs, 0), List.tail(runs), i, acc)
+def fuzzMutBaseRuns(job: FuzzJob, runs: List[FuzzRun], i: Int, tls: List[String], pass: List[FuzzRun]): IO[(List[String], List[FuzzRun])] =
+  if (List.isEmpty(runs)) IO.pure((tls, pass)) else fuzzMutBaseRunHd(job, List.at(runs, 0), List.tail(runs), i, tls, pass)
 
-def fuzzMutBaseRunHd(job: FuzzJob, h: FuzzRun, rest: List[FuzzRun], i: Int, acc: List[String]): IO[List[String]] =
-  fuzzProbeAt(job.exe, job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate/baseline"), Str.fromInt(i)), job.uiEnv, h.script, h.sched, h.fault).flatMap(p => fuzzMutBaseRuns(job, rest, i + 1, List.concat(acc, p._2 :: Verify.noStr())))
+def fuzzMutBaseRunHd(job: FuzzJob, h: FuzzRun, rest: List[FuzzRun], i: Int, tls: List[String], pass: List[FuzzRun]): IO[(List[String], List[FuzzRun])] =
+  fuzzProbeAt(job.exe, job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate/baseline"), Str.fromInt(i)), job.uiEnv, h.script, h.sched, h.fault).flatMap(p => fuzzMutBaseGot(job, h, rest, i, tls, pass, p))
+
+def fuzzMutBaseGot(job: FuzzJob, h: FuzzRun, rest: List[FuzzRun], i: Int, tls: List[String], pass: List[FuzzRun], p: (Int, String)): IO[(List[String], List[FuzzRun])] =
+  if (p._1 != 0) fuzzMutBaseRuns(job, rest, i, tls, pass) else fuzzMutBaseRuns(job, rest, i + 1, List.concat(tls, p._2 :: Verify.noStr()), List.concat(pass, h :: noRuns()))
 
 def fuzzIdleTl(p: (Int, String)): String =
   p._2
 
-def fuzzMutGo(job: FuzzJob, sites: List[Int], runs: List[FuzzRun], base: (String, List[String]), acc: FuzzMut, take: Int): IO[FuzzMut] =
-  if (List.isEmpty(sites)) IO.pure(acc) else fuzzMutOne(job, List.at(sites, 0), runs, base, acc).flatMap(next => fuzzMutGo(job, List.tail(sites), runs, base, next, take))
+def fuzzMutGo(job: FuzzJob, sites: List[Int], base: MutBase, acc: FuzzMut, take: Int): IO[FuzzMut] =
+  if (List.isEmpty(sites)) IO.pure(acc) else fuzzMutOne(job, List.at(sites, 0), base, acc).flatMap(next => fuzzMutGo(job, List.tail(sites), base, next, take))
 
-def fuzzMutOne(job: FuzzJob, site: Int, runs: List[FuzzRun], base: (String, List[String]), acc: FuzzMut): IO[FuzzMut] =
-  fuzzMutCompile(job, site).flatMap(exe => fuzzMutRun(job, site, exe, runs, base, acc))
+def fuzzMutOne(job: FuzzJob, site: Int, base: MutBase, acc: FuzzMut): IO[FuzzMut] =
+  fuzzMutCompile(job, site).flatMap(exe => fuzzMutRun(job, site, exe, base, acc))
 
 def fuzzMutCompile(job: FuzzJob, site: Int): IO[String] =
   fuzzMutCompile2(job, site, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)), Mutate.applyFiles(job.files, site, job.oracles))
@@ -1545,11 +1550,11 @@ def fuzzMutLinkGot(r: (Int, String, String), exe: String): String =
     case (code, _out, _err) => if (code == 0) exe else ""
   }
 
-def fuzzMutRun(job: FuzzJob, site: Int, exe: String, runs: List[FuzzRun], base: (String, List[String]), acc: FuzzMut): IO[FuzzMut] =
-  if (exe == "") fuzzMutKilled(site, "killed (compile)", acc) else fuzzIdleAt(exe, job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)), job.uiEnv).flatMap(p => fuzzMutAfterIdle(job, site, exe, runs, base, acc, p))
+def fuzzMutRun(job: FuzzJob, site: Int, exe: String, base: MutBase, acc: FuzzMut): IO[FuzzMut] =
+  if (exe == "") fuzzMutKilled(site, "killed (compile)", acc) else fuzzIdleAt(exe, job.hasUi, joinSlash(joinSlash(joinSlash(job.outDir, "fuzz"), "mutate"), Str.fromInt(site)), job.uiEnv).flatMap(p => fuzzMutAfterIdle(job, site, exe, base, acc, p))
 
-def fuzzMutAfterIdle(job: FuzzJob, site: Int, exe: String, runs: List[FuzzRun], base: (String, List[String]), acc: FuzzMut, p: (Int, String)): IO[FuzzMut] =
-  if (p._1 != 0) fuzzMutKilled(site, "killed", acc) else fuzzMutReplay(job, site, exe, runs, 0, Verify.noStr()).flatMap(tls => fuzzMutAfterReplay(site, base, acc, p._2, tls)).handleErrorWith(_ => fuzzMutKilled(site, "killed", acc))
+def fuzzMutAfterIdle(job: FuzzJob, site: Int, exe: String, base: MutBase, acc: FuzzMut, p: (Int, String)): IO[FuzzMut] =
+  if (p._1 != 0) fuzzMutKilled(site, "killed", acc) else fuzzMutReplay(job, site, exe, base.pass, 0, Verify.noStr()).flatMap(tls => fuzzMutAfterReplay(site, base, acc, p._2, tls)).handleErrorWith(_ => fuzzMutKilled(site, "killed", acc))
 
 def fuzzMutReplay(job: FuzzJob, site: Int, exe: String, runs: List[FuzzRun], i: Int, acc: List[String]): IO[List[String]] =
   if (List.isEmpty(runs)) IO.pure(acc) else fuzzMutReplayHd(job, site, exe, List.at(runs, 0), List.tail(runs), i, acc)
@@ -1560,8 +1565,8 @@ def fuzzMutReplayHd(job: FuzzJob, site: Int, exe: String, h: FuzzRun, rest: List
 def fuzzMutReplayGot(job: FuzzJob, site: Int, exe: String, rest: List[FuzzRun], i: Int, acc: List[String], p: (Int, String)): IO[List[String]] =
   if (p._1 != 0) IO.fail("killed") else fuzzMutReplay(job, site, exe, rest, i + 1, List.concat(acc, p._2 :: Verify.noStr()))
 
-def fuzzMutAfterReplay(site: Int, base: (String, List[String]), acc: FuzzMut, idle: String, tls: List[String]): IO[FuzzMut] =
-  if (idle == base._1 && tlsEq(tls, base._2)) IO.pure(FuzzMut(acc.killed, acc.survived, acc.inert + 1, acc.ran, acc.sites)) else fuzzMutLived(site, acc)
+def fuzzMutAfterReplay(site: Int, base: MutBase, acc: FuzzMut, idle: String, tls: List[String]): IO[FuzzMut] =
+  if (idle == base.idle && tlsEq(tls, base.tls)) IO.pure(FuzzMut(acc.killed, acc.survived, acc.inert + 1, acc.ran, acc.sites)) else fuzzMutLived(site, acc)
 
 def tlsEq(a: List[String], b: List[String]): Bool =
   if (List.len(a) != List.len(b)) false else tlsEqGo(a, b)
