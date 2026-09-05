@@ -1029,54 +1029,23 @@ def emitSometimes(code: String, vals: List[String], owns: List[Bool], _prefix: S
   Slot(join(code, join(line(Str.concat("call void @sz_property_sometimes(ptr ", Str.concat(arg0(vals), ")"))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), "null", false)
 
 def emitNetServe(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
-  emitNetServe2(if (f == "Net.serve") "sz_net_serve" else "sz_net_serve_once", emitExpr(List.at(args, 0), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), prefix, defs, modOfLoc(loc))
+  emitNetServe2(if (f == "Net.serve") "sz_net_serve" else "sz_net_serve_once", emitExpr(List.at(args, 0), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc), wrapPh(if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), ps, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc)
 
-def emitNetServe2(rt: String, port: Slot, fn: Expr, prefix: String, defs: List[Fun], mod: String): Slot =
+def emitNetServe2(rt: String, port: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   port match {
-    case Slot(pc, pv, po) => Slot(join(pc, join(if (po) relPtr(pv) else "", line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(pv, Str.concat(", ptr ", Str.concat(netServePtr(fn, defs, mod), ", ptr null)")))))))))), pct(prefix, "io"), false)
+    case Slot(pc, pv, po) => emitNetServe3(rt, pc, pv, po, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc)
   }
 
-def netServePtr(e: Expr, defs: List[Fun], mod: String): String =
-  e match {
-    case Expr.ELam(p, _, body) => netServePtrLam(p, body, defs, mod)
-    case Expr.EVar(f, _) => funPtr(defs, f, mod)
-    case Expr.EMethod(recv, name, _, _) => methodPtr(recv, name)
-    case Expr.ECall(f, _, _) => funPtr(defs, f, mod)
-    case _ => "null"
+def emitNetServe3(rt: String, pc: String, pv: String, po: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+  emitNetServe4(rt, pc, pv, po, emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, false, "(String, String, String)"), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
+
+def emitNetServe4(rt: String, pc: String, pv: String, po: Bool, neth: String, env: Slot, prefix: String): Slot =
+  env match {
+    case Slot(ec, ev, eo) => Slot(join(neth, join(pc, join(ec, join(line(netServeCall(rt, pv, prefix, ev)), join(if (po) relPtr(pv) else "", emitFmRel(ev, eo)))))), pct(prefix, "io"), false)
   }
 
-def netServePtrLam(p: String, body: Expr, defs: List[Fun], mod: String): String =
-  body match {
-    case Expr.ECall(f, args, _) => if (etaOne(p, args)) funPtr(defs, f, mod) else "null"
-    case Expr.EMethod(recv, name, args, _) => if (etaOne(p, args)) methodPtr(recv, name) else "null"
-    case _ => "null"
-  }
-
-def etaOne(p: String, args: List[Expr]): Bool =
-  !List.isEmpty(args) && List.isEmpty(List.tail(args)) && isVarName(List.at(args, 0), p)
-
-def isVarName(e: Expr, n: String): Bool =
-  e match {
-    case Expr.EVar(s, _) => s == n
-    case _ => false
-  }
-
-def funPtr(defs: List[Fun], f: String, mod: String): String =
-  funPtr2(findDefPrefer(defs, f, mod), f)
-
-def funPtr2(hit: List[Fun], f: String): String =
-  Str.concat("@sz_user_", if (List.isEmpty(hit)) Str.concat("Main_", f) else symOfHit(List.at(hit, 0)))
-
-def symOfHit(d: Fun): String =
-  d match {
-    case Fun(_, name, _, _, _, _, mod, _) => symOf(mod, name)
-  }
-
-def methodPtr(recv: Expr, name: String): String =
-  recv match {
-    case Expr.EVar(mod, _) => Str.concat("@sz_user_", Str.concat(if (mod == "") "Main" else mod, Str.concat("_", name)))
-    case _ => "null"
-  }
+def netServeCall(rt: String, pv: String, prefix: String, ev: String): String =
+  Str.concat(tmp(prefix, "io"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(pv, Str.concat(", ptr @sz_neth_", Str.concat(prefix, Str.concat(", ptr ", Str.concat(ev, ")")))))))))
 
 def isPredKit(f: String): Bool =
   f == "Stream.filter" || f == "Stream.takeWhile" || f == "Stream.dropWhile" || f == "Stream.find" || f == "Stream.exists" || f == "Stream.filterNot" || f == "Stream.forall" || f == "Stream.none" || f == "Stream.findLast" || f == "List.filter" || f == "List.filterNot" || f == "List.takeWhile" || f == "List.dropWhile" || f == "List.partition" || f == "Map.filter" || f == "Set.filter" || f == "List.find" || f == "List.findLast" || f == "List.span" || f == "Verdict.every" || f == "Verdict.any"

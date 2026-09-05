@@ -49,7 +49,7 @@ These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
 Needed before a real CLI, server, or desktop app stays.
 
-- **HTTP as a server** — Client kits return a body on 2xx (1 MiB cap). Live serve is localhost plaintext. Handler is `(path, method, body) => String`. Status, headers, and `0.0.0.0` bind stay out. HTTPS `Net.serve` stays out. POSIX sockets stay inside the runtime. Expand `Net` on this HTTP/1.0 stack. Do not add a second client.
+- **HTTP as a server** — Client kits return a body on 2xx (1 MiB cap). Live serve is localhost plaintext. Handler is `(path, method, body) => IO[String]`. Status, headers, and `0.0.0.0` bind stay out. HTTPS `Net.serve` stays out. POSIX sockets stay inside the runtime. Expand `Net` on this HTTP/1.0 stack. Do not add a second client.
 - **Missing kits** — No calendar time, regex, hash, hex/base64, or UUID. `Map` / `Set` keys are `Int` or `String`. Expand blessed kits. No user FFI.
 - **`scuzz eval`** — No worksheet. A one-file eval helps humans and agents try one def.
 - **Kit docs** — No `scuzz doc`. Hover must show the same text as generated kit docs.

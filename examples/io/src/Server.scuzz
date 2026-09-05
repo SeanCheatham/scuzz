@@ -1,15 +1,16 @@
-def handle(req: (String, String, String)): IO[String] =
-  req match {
-    case (path, method, body) => IO.println(s"served:$method:$path:$body").map(_ => s"ok:$path")
-  }
-
 def showPing(p: (Unit, String)): IO[Unit] =
   p match {
     case (_, body) => IO.println(s"ping:$body")
   }
 
 def runHttp(): IO[Unit] =
-  IO.both(Net.serveOnce(8080, handle), Net.httpPost("http://127.0.0.1:8080/ping", "hi")).flatMap(p => showPing(p))
+  for {
+    tag = "ok"
+    p <- IO.both(Net.serveOnce(8080, req => req match {
+  case (path, method, body) => IO.println(s"served:$method:$path:$body").map(_ => s"$tag:$path")
+}), Net.httpPost("http://127.0.0.1:8080/ping", "hi"))
+    _ <- showPing(p)
+  } yield ()
 
 def echoServer(ln: Any): IO[Unit] =
   for {
