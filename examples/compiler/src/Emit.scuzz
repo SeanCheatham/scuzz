@@ -1899,7 +1899,7 @@ def emitSigSetPtr(rt: String, code: String, vals: List[String], owns: List[Bool]
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), ")")))))))), if (headOwn(tailOwn(owns))) relPtr(arg1(vals)) else "")), pct(prefix, "v"), false)
 
 def emitSigGetList(code: String, vals: List[String], prefix: String): Slot =
-  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_list_get(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), false)
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_signal_list_get(ptr ", Str.concat(arg0(vals), ")"))))), pct(prefix, "v"), true)
 
 def emitListSetAt(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   Slot(join(code, join(listSetAtCall(vals, prefix), join(if (headOwn(owns)) relPtr(arg0(vals)) else "", if (headOwn(tailOwn(tailOwn(owns)))) relPtr(arg2(vals)) else ""))), pct(prefix, "v"), true)
@@ -2025,7 +2025,7 @@ def sigElemIsStr(e: Expr, defs: List[Fun], ps: List[Param]): Bool =
   sigElemIsStrTy(listElemTy(exprRetTy(e, defs, ps)))
 
 def sigElemIsStrTy(t: String): Bool =
-  t == "String" || t == "Any" || t == ""
+  t == "String"
 
 def emitViewEachCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(List.tail(args))) emitViewEach1(emitExpr(List.at(args, 0), Str.concat(prefix, "_src"), strs, defs, ens, ps, loc), prefix) else emitViewEachJoin(emitExpr(List.at(args, 0), Str.concat(prefix, "_src"), strs, defs, ens, ps, loc), List.at(List.tail(args), 0), eachElemTy(List.at(args, 0), defs, ps), prefix, strs, defs, ens, ps, loc)
