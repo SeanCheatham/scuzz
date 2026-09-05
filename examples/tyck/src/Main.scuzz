@@ -192,6 +192,32 @@ def srcDefMis(): String =
 def wantDefMis(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: Deferred.complete arg type mismatch: expected Deferred, got String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":21,\"end_line\":2,\"end_column\":27}]"
 
+def srcQueUnk(): String =
+  """@main def main: IO[Unit] =
+  Queue.foo(1)
+"""
+
+def wantQueUnk(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: unknown function Queue.foo\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":12}]"
+
+def srcQueMis(): String =
+  "@main def main: IO[Unit] =\n  Queue.offer(\"nope\", 1)\n"
+
+def wantQueMis(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: Queue.offer arg type mismatch: expected Queue, got String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":15,\"end_line\":2,\"end_column\":21}]"
+
+def srcQueTake(): String =
+  "@main def main: IO[Unit] =\n  Queue.take(\"nope\")\n"
+
+def wantQueTake(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: Queue.take arg type mismatch: expected Queue, got String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":14,\"end_line\":2,\"end_column\":20}]"
+
+def srcQuePay(): String =
+  "@main def main: IO[Unit] =\n  for {\n    q <- Queue.unbounded(): IO[Queue[Int]]\n    _ <- Queue.offer(q, \"x\")\n  } yield ()\n"
+
+def wantQuePay(): String =
+  "[{\"severity\":\"error\",\"message\":\"type error: Queue.offer arg type mismatch: expected Int, got String\",\"file\":\"Main.scuzz\",\"line\":4,\"column\":25,\"end_line\":4,\"end_column\":28}]"
+
 def srcNetStr(): String =
   "@main def main: IO[Unit] =\n  Net.serveOnce(8080, \"no\")\n"
 
@@ -296,7 +322,7 @@ def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit())
 
 def tyckRes(): Bool =
-  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcNetStr(), wantNetStr())
+  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr())
 
 def tyckFail(): Bool =
   tyckDiff(srcFailOk(), wantFailOk()) && tyckDiff(srcFailMis(), wantFailMis())

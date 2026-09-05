@@ -255,7 +255,7 @@ def isKitF(f: String): Bool =
   isNetHttp(f) || isNetServe(f) || isNetTcp(f) || isNetUdp(f)
 
 def isKitG(f: String): Bool =
-  f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Timeline.signalStrHas" || f == "Property.signalInt" || f == "Property.signalStr" || f == "Property.signalListLen" || f == "Property.signalListAt" || f == "Verdict.alwaysHas" || f == "Verdict.afterHit" || f == "Resource.make" || f == "Resource.use" || f == "Deferred.empty" || f == "Deferred.get" || f == "Deferred.complete" || f == "Deferred.fail"
+  f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Timeline.signalStrHas" || f == "Property.signalInt" || f == "Property.signalStr" || f == "Property.signalListLen" || f == "Property.signalListAt" || f == "Verdict.alwaysHas" || f == "Verdict.afterHit" || f == "Resource.make" || f == "Resource.use" || f == "Deferred.empty" || f == "Deferred.get" || f == "Deferred.complete" || f == "Deferred.fail" || f == "Queue.unbounded" || f == "Queue.offer" || f == "Queue.take"
 
 def isNetHttp(f: String): Bool =
   f == "Net.httpGet" || f == "Net.httpPost" || f == "Net.httpPut" || f == "Net.httpPatch" || f == "Net.httpDelete" || f == "Net.httpHead"
@@ -282,7 +282,7 @@ def kitParams3(f: String): List[String] =
   if (f == "Net.httpGet" || f == "Net.httpDelete" || f == "Net.httpHead") "String" :: noStr() else if (f == "Net.httpPost" || f == "Net.httpPut" || f == "Net.httpPatch") "String" :: "String" :: noStr() else if (f == "Net.serve" || f == "Net.serveOnce") "Int" :: "Any" :: noStr() else if (f == "Net.tcpConnect") "String" :: "Int" :: noStr() else if (f == "Net.tcpListen" || f == "Net.udpBind") "Int" :: noStr() else if (f == "Net.tcpAccept" || f == "Net.tcpClose" || f == "Net.udpClose") "Any" :: noStr() else if (f == "Net.tcpRead" || f == "Net.udpRecv") "Any" :: "Int" :: noStr() else if (f == "Net.tcpWrite") "Any" :: "String" :: noStr() else if (f == "Net.udpSend") "Any" :: "String" :: "Int" :: "String" :: noStr() else kitParams4(f)
 
 def kitParams4(f: String): List[String] =
-  if (f == "Timeline.signalInt" || f == "Timeline.signalListLen") "Timeline" :: "Int" :: "String" :: noStr() else if (f == "Timeline.signalStrHas") "Timeline" :: "Int" :: "String" :: "String" :: noStr() else if (f == "Property.signalInt" || f == "Property.signalStr" || f == "Property.signalListLen") "String" :: noStr() else if (f == "Property.signalListAt") "String" :: "Int" :: noStr() else if (f == "Verdict.alwaysHas") "Timeline" :: "String" :: noStr() else if (f == "Verdict.afterHit") "Timeline" :: "String" :: "String" :: noStr() else if (f == "Resource.make") "IO" :: "Any" :: noStr() else if (f == "Resource.use") "Resource" :: "Any" :: noStr() else if (f == "Deferred.empty") noStr() else if (f == "Deferred.get") "Deferred" :: noStr() else if (f == "Deferred.complete") "Deferred" :: "Any" :: noStr() else if (f == "Deferred.fail") "Deferred" :: "String" :: noStr() else noStr()
+  if (f == "Timeline.signalInt" || f == "Timeline.signalListLen") "Timeline" :: "Int" :: "String" :: noStr() else if (f == "Timeline.signalStrHas") "Timeline" :: "Int" :: "String" :: "String" :: noStr() else if (f == "Property.signalInt" || f == "Property.signalStr" || f == "Property.signalListLen") "String" :: noStr() else if (f == "Property.signalListAt") "String" :: "Int" :: noStr() else if (f == "Verdict.alwaysHas") "Timeline" :: "String" :: noStr() else if (f == "Verdict.afterHit") "Timeline" :: "String" :: "String" :: noStr() else if (f == "Resource.make") "IO" :: "Any" :: noStr() else if (f == "Resource.use") "Resource" :: "Any" :: noStr() else if (f == "Deferred.empty") noStr() else if (f == "Deferred.get") "Deferred" :: noStr() else if (f == "Deferred.complete") "Deferred" :: "Any" :: noStr() else if (f == "Deferred.fail") "Deferred" :: "String" :: noStr() else if (f == "Queue.unbounded") noStr() else if (f == "Queue.offer") "Queue" :: "Any" :: noStr() else if (f == "Queue.take") "Queue" :: noStr() else noStr()
 
 def kitNames(): List[String] =
   List.concat(kitNamesA(), List.concat(kitNamesB(), List.concat(kitNamesC(), List.concat(kitNamesD(), List.concat(kitNamesE(), List.concat(kitNamesF(), kitNamesG()))))))
@@ -306,7 +306,7 @@ def kitNamesF(): List[String] =
   "Net.httpGet" :: "Net.httpPost" :: "Net.httpPut" :: "Net.httpPatch" :: "Net.httpDelete" :: "Net.httpHead" :: "Net.serve" :: "Net.serveOnce" :: "Net.tcpConnect" :: "Net.tcpListen" :: "Net.tcpAccept" :: "Net.tcpRead" :: "Net.tcpWrite" :: "Net.tcpClose" :: "Net.udpBind" :: "Net.udpSend" :: "Net.udpRecv" :: "Net.udpClose" :: noStr()
 
 def kitNamesG(): List[String] =
-  "Timeline.signalInt" :: "Timeline.signalListLen" :: "Timeline.signalStrHas" :: "Property.signalInt" :: "Property.signalStr" :: "Property.signalListLen" :: "Property.signalListAt" :: "Verdict.alwaysHas" :: "Verdict.afterHit" :: "Resource.make" :: "Resource.use" :: "Deferred.empty" :: "Deferred.get" :: "Deferred.complete" :: "Deferred.fail" :: noStr()
+  "Timeline.signalInt" :: "Timeline.signalListLen" :: "Timeline.signalStrHas" :: "Property.signalInt" :: "Property.signalStr" :: "Property.signalListLen" :: "Property.signalListAt" :: "Verdict.alwaysHas" :: "Verdict.afterHit" :: "Resource.make" :: "Resource.use" :: "Deferred.empty" :: "Deferred.get" :: "Deferred.complete" :: "Deferred.fail" :: "Queue.unbounded" :: "Queue.offer" :: "Queue.take" :: noStr()
 
 def kitRet(f: String): String =
   if (f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Property.signalInt" || f == "Property.signalListLen") "Int" else if (f == "Timeline.signalStrHas") "Bool" else if (f == "Property.signalStr" || f == "Property.signalListAt" || f == "List.join" || f == "Json.getStr" || f == "Json.strOr") "String" else if (f == "Verdict.alwaysHas" || f == "Verdict.afterHit") "Verdict" else if (f == "Str.len" || f == "Str.byteLen" || f == "List.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.indexOf" || f == "Str.lastIndexOf" || f == "Map.size" || f == "Set.size" || f == "Json.getInt" || f == "Json.intOr") "Int" else if (f == "List.head" || f == "Map.get") "Option" else if (f == "List.at" || f == "Map.getOrElse") "Any" else if (f == "List.isEmpty" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.boolOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || f == "Json.isBool" || f == "Json.isInt" || f == "Json.isStr" || f == "Json.isFloat" || f == "Str.startsWith" || f == "Str.endsWith" || f == "Str.contains" || f == "Str.eq" || f == "Str.isEmpty" || f == "Str.nonEmpty" || f == "Str.isBlank") "Bool" else if (f == "List.concat" || f == "List.reverse" || f == "List.tail" || f == "List.cons" || f == "List.take" || f == "List.drop" || f == "List.takeRight" || f == "List.dropRight" || f == "List.init" || f == "List.last" || f == "List.flatten" || f == "Str.lines" || f == "Str.split") "List" else if (f == "Json.floatOr" || f == "Json.Float" || f == "Json.getFloat") "Float" else if (f == "Map.keys" || f == "Map.values" || f == "Map.toList" || f == "Set.toList" || f == "Json.keys" || f == "Json.arr" || f == "Json.at" || f == "Json.pairs" || f == "Json.asInt" || f == "Json.asBool" || f == "Json.asStr" || f == "Json.asFloat") "List" else if (f == "Builder.empty" || f == "Builder.append") "Builder" else if (f == "Fs.read" || f == "Sys.getenv" || f == "Sys.read" || f == "Sys.readLine" || f == "Fs.canonicalize" || f == "Sys.childRead" || isNetHttp(f) || f == "Net.tcpRead") "IO[String]" else if (f == "Fs.write" || f == "Fs.mkdirs" || f == "Fs.delete" || f == "Fs.rename" || f == "Impurity.runKit" || f == "Sys.write" || f == "Sys.kill" || f == "Sys.childWrite" || f == "Sys.childClose" || f == "IO.println" || isNetServe(f) || f == "Net.tcpWrite" || f == "Net.tcpClose" || f == "Net.udpSend" || f == "Net.udpClose") "IO[Unit]" else if (f == "Fs.list" || f == "Fs.walk") "IO[List[(String, Bool)]]" else if (f == "Sys.args") "IO[List[String]]" else if (f == "Sys.spawn" || f == "Sys.alive" || f == "Fs.exists" || f == "Random.nextInt") "IO[Int]" else if (isSysProc(f)) "IO[(Int, String, String)]" else if (f == "Net.udpRecv") "IO[(String, Int, String)]" else if (f == "Net.tcpConnect" || f == "Net.tcpListen" || f == "Net.tcpAccept" || f == "Net.udpBind") "IO[Any]" else if (f == "IO.pure") "IO[Any]" else if (f == "Clock.monotonic" || f == "Clock.realTime") "IO[Int]" else if (f == "Map.empty" || f == "Map.set" || f == "Map.remove") "Map" else if (f == "Set.empty" || f == "Set.add" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect" || f == "Set.diff") "Set" else if (f == "Json.parse" || f == "Json.stringify") "Result" else if (f == "Json.get" || f == "Json.set" || f == "Json.remove" || f == "Json.append" || f == "Json.prepend" || f == "Json.setAt" || f == "Json.dropAt" || f == "Json.merge" || f == "Json.Int" || f == "Json.Null" || f == "Json.Float" || f == "Json.Obj" || f == "Json.Str" || f == "Json.Bool" || f == "Json.Arr") "Any" else strKitRet(f)
@@ -358,7 +358,13 @@ def zipCheckErr(callee: String, w: String, ty: String, err: String, sp: (String,
   if (Str.len(err) > 0) Out(ty, err, sp) else zipCheckEq(callee, w, ty, want, args, env, funs, ens, span, acc, asp)
 
 def zipCheckEq(callee: String, w: String, got: String, want: List[String], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
-  if (tyEq(got, w) || w == "Any") zipCheck(callee, want, args, env, funs, ens, span, if (acc == "") got else acc) else argMismatch(callee, w, got, asp)
+  if (tyEq(got, w) || w == "Any") zipCheck(callee, kitWantFromTy(callee, if (acc == "") got else acc, want), args, env, funs, ens, span, if (acc == "") got else acc) else argMismatch(callee, w, got, asp)
+
+def kitWantFromTy(f: String, handleTy: String, want: List[String]): List[String] =
+  if (List.isEmpty(want)) want else if (f == "Queue.offer" || f == "Deferred.complete") offerElem(handleTy) :: List.tail(want) else want
+
+def offerElem(handleTy: String): String =
+  if (Str.startsWith(handleTy, "Queue[") || Str.startsWith(handleTy, "Deferred[")) elemOf(handleTy) else "Any"
 
 def argMismatch(callee: String, w: String, got: String, span: (String, Int)): Out =
   bad(argMismatchMsg(argMismatchWant(callee, w), got), span)
@@ -438,10 +444,13 @@ def checkKnownRet(f: String, o: Out, ret: String): Out =
   }
 
 def kitRetFromTy(f: String, ty: String, ret: String): String =
-  if (f == "List.head") kitRetOption(ty) else if (f == "Map.get") kitRetMapOption(ty) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat" || f == "List.last" || f == "List.find" || f == "List.findLast") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") ioTy("Any", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", Any]")) else if (f == "Deferred.get") defGetRet(ty) else ret
+  if (f == "List.head") kitRetOption(ty) else if (f == "Map.get") kitRetMapOption(ty) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat" || f == "List.last" || f == "List.find" || f == "List.findLast") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") ioTy("Any", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", Any]")) else if (f == "Deferred.get") defGetRet(ty) else if (f == "Queue.take") queueTakeRet(ty) else ret
 
 def defGetRet(ty: String): String =
   if (Str.startsWith(ty, "Deferred[")) ioTy("Any", elemOf(ty)) else "IO[Any]"
+
+def queueTakeRet(ty: String): String =
+  if (Str.startsWith(ty, "Queue[")) ioTy("Any", elemOf(ty)) else "IO[Any]"
 
 def kitRetOption(ty: String): String =
   Str.concat("Option[", Str.concat(elemOf(ty), "]"))
@@ -487,13 +496,13 @@ def hasCase1(c: EnCase, rest: List[EnCase], ctor: String): Bool =
   }
 
 def isOpenKit(f: String): Bool =
-  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Float.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Timeline.") || Str.startsWith(f, "Verdict.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Stream.") || Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".") && f != ".apply"
+  Str.startsWith(f, "List.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || Str.startsWith(f, "IO.") || Str.startsWith(f, "Float.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Timeline.") || Str.startsWith(f, "Verdict.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Stream.") || Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".") && f != ".apply"
 
 def anyParams(n: Int): List[String] =
   if (n <= 0) noStr() else "Any" :: anyParams(n - 1)
 
 def openKitRet(f: String): String =
-  if (openKitBool(f)) "Bool" else if (openKitInt(f) || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")) "Int" else if (f == "Property.sometimes") "Unit" else if (openKitAny(f) || Str.startsWith(f, "Signal.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Property.")) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "Stream.")) streamKitRet(f) else if (Str.startsWith(f, "IO.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".")) "Any" else "Any"
+  if (openKitBool(f)) "Bool" else if (openKitInt(f) || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")) "Int" else if (f == "Property.sometimes") "Unit" else if (openKitAny(f) || Str.startsWith(f, "Signal.") || Str.startsWith(f, "View.") || Str.startsWith(f, "Property.")) "Any" else if (Str.startsWith(f, "Map.")) "Map" else if (Str.startsWith(f, "Set.")) "Set" else if (Str.startsWith(f, "Stream.")) streamKitRet(f) else if (Str.startsWith(f, "IO.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Ref.")) "IO[Any]" else if (Str.startsWith(f, "Str.")) "String" else if (Str.startsWith(f, "Float.")) "Float" else if (Str.startsWith(f, "Builder.") || Str.startsWith(f, "Oracle.") || Str.startsWith(f, ".")) "Any" else "Any"
 
 def streamKitRet(f: String): String =
   if (f == "Stream.exists" || f == "Stream.forall" || f == "Stream.none") "IO[Bool]" else if (f == "Stream.count") "IO[Int]" else if (f == "Stream.compileToList" || f == "Stream.drain" || f == "Stream.head" || f == "Stream.last" || f == "Stream.fold") "IO[Any]" else "Stream"
@@ -505,7 +514,10 @@ def resourceKitRet(f: String): String =
   if (f == "Resource.make") "Resource" else if (f == "Resource.use") "IO[Any]" else deferredKitRet(f)
 
 def deferredKitRet(f: String): String =
-  if (f == "Deferred.empty") "IO[Deferred]" else if (f == "Deferred.get") "IO[Any]" else if (f == "Deferred.complete" || f == "Deferred.fail") "IO[Unit]" else "Any"
+  if (f == "Deferred.empty") "IO[Deferred]" else if (f == "Deferred.get") "IO[Any]" else if (f == "Deferred.complete" || f == "Deferred.fail") "IO[Unit]" else queueKitRet(f)
+
+def queueKitRet(f: String): String =
+  if (f == "Queue.unbounded") "IO[Queue]" else if (f == "Queue.take") "IO[Any]" else if (f == "Queue.offer") "IO[Unit]" else "Any"
 
 def resolveResource(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), resourceKitRet(f))) else if (List.len(args) != 2) bad(Str.concat(f, Str.concat(" expects 2 args, got ", Str.fromInt(List.len(args)))), span) else resolveResource2(f, infer(stripNamed(List.at(args, 0)), env, funs, ens), List.at(args, 1), env, funs, ens, span)
