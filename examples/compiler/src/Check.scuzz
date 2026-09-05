@@ -468,7 +468,7 @@ def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs:
   if (isKit(f) || isOpenKit(f)) resolveKit(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else if (enOfCase(ens, f) != "") inferCtor(enOfCase(ens, f), args, env, funs, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
 
 def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (List.isEmpty(args) && isKit(f) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (isKit(f)) checkKnown(f, kitParams(f), kitRet(f), args, env, funs, ens, span) else checkKnown(f, anyParams(List.len(args)), openKitRet(f), args, env, funs, ens, span)
+  if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (List.isEmpty(args) && isKit(f) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (isKit(f)) checkKnown(f, kitParams(f), kitRet(f), args, env, funs, ens, span) else checkKnown(f, anyParams(List.len(args)), openKitRet(f), args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
   if (List.isEmpty(ens)) "" else enOfCase1(List.at(ens, 0), List.tail(ens), ctor)
@@ -546,6 +546,38 @@ def bindOfAnn(a: Out): String =
 
 def resolveResBody(recv: String, body: Out, span: (String, Int), makeRet: String): Out =
   if (hasErr(body)) body else if (isIo(body.ty) || body.ty == "Any") ok(if (makeRet != "") makeRet else if (isIo(body.ty)) body.ty else "IO[Any]") else bad(Str.concat(if (makeRet == "") "Resource.use" else "Resource.make", Str.concat(" needs IO, got ", Str.concat(recv, Str.concat(" and ", body.ty)))), span)
+
+def netReqTy(): String =
+  "(String, String, String)"
+
+def isIoStr(t: String): Bool =
+  isIo(t) && tyEq(ioOk(t), "String")
+
+def netFunOk(ty: String): Bool =
+  isFunTy(ty) && tyEq(funArgOf(ty), netReqTy()) && isIoStr(funRetOf(ty))
+
+def resolveNetServe(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), kitRet(f))) else if (List.len(args) != 2) bad(Str.concat(f, Str.concat(" expects 2 args, got ", Str.fromInt(List.len(args)))), span) else resolveNetServe2(f, infer(stripNamed(List.at(args, 0)), env, funs, ens), List.at(args, 1), env, funs, ens, span)
+
+def resolveNetServe2(f: String, po: Out, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (hasErr(po)) po else if (tyEq(po.ty, "Int")) resolveNetLam(f, lam, env, funs, ens, span) else argMismatch(f, "Int", po.ty, span)
+
+def resolveNetLam(f: String, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  lam match {
+    case Expr.ELam(p, ty, body) => resolveNetAnn(annOk(ty, netReqTy(), span), f, p, body, env, funs, ens, span)
+    case Expr.ENamed(_, inner) => resolveNetLam(f, inner, env, funs, ens, span)
+    case Expr.EAscribe(inner, _, _) => resolveNetLam(f, inner, env, funs, ens, span)
+    case _ => resolveNetFun(f, infer(stripNamed(lam), env, funs, ens), span)
+  }
+
+def resolveNetAnn(a: Out, f: String, p: String, body: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (hasErr(a)) a else resolveNetBody(f, infer(body, bindRes(p, bindOfAnn(a), env), funs, ens), span)
+
+def resolveNetBody(f: String, body: Out, span: (String, Int)): Out =
+  if (hasErr(body)) body else if (isIoStr(body.ty) || body.ty == "Any") ok("IO[Unit]") else bad(Str.concat(f, Str.concat(" needs IO[String], got ", body.ty)), span)
+
+def resolveNetFun(f: String, o: Out, span: (String, Int)): Out =
+  if (hasErr(o)) o else if (netFunOk(o.ty)) ok("IO[Unit]") else bad(Str.concat(f, " needs a lambda"), span)
 
 def openKitBool(f: String): Bool =
   f == "List.exists" || f == "List.forall" || f == "List.contains" || f == "List.nonEmpty" || f == "List.isEmpty"
