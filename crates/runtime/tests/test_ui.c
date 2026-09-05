@@ -517,8 +517,8 @@ static void test_quiesce(void) {
   sz_signal_int_free(sig);
 
   /* Pending bridge work every pump trips the 64-pump budget. The poster
-   * thread runs at the same time as pump flushes. Wait for the first post
-   * so two idle samples cannot settle before the poster runs. */
+   * thread runs at the same time as pump flushes. Wait until several posts
+   * land so two idle samples cannot settle before the poster runs. */
   sig = sz_signal_int(0);
   root = sz_view_column();
   sz_view_add_child(root, sz_view_text_signal_int(sig, "n="));
@@ -530,7 +530,7 @@ static void test_quiesce(void) {
   atomic_init(&env.posted, 0);
   sz_ui_bridge_post_int(session, sig, 0);
   assert(pthread_create(&th, NULL, quiesce_poster, &env) == 0);
-  while (atomic_load_explicit(&env.posted, memory_order_relaxed) == 0)
+  while (atomic_load_explicit(&env.posted, memory_order_relaxed) < 16)
     sched_yield();
   q = SZ_QUIESCE_SETTLED;
   for (tries = 0; tries < 8 && q != SZ_QUIESCE_BUDGET_TRIPPED; tries++)
