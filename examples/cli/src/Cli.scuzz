@@ -111,7 +111,7 @@ For more information, try '--help'.
 """
 
 def badName(name: String): String =
-  Str.concat("error: invalid project name '", Str.concat(name, """'; use [A-Za-z_][A-Za-z0-9_]*
+  Str.concat("error: invalid project name '", Str.concat(name, """'; use [A-Za-z_][A-Za-z0-9_-]*
 
 For more information, try '--help'.
 """))
@@ -173,7 +173,7 @@ def okNameRest(s: String, i: Int): Bool =
   if (i >= Str.len(s)) true else okNameChar(Str.charAt(s, i)) && okNameRest(s, i + 1)
 
 def okNameChar(c: Int): Bool =
-  okNameStart(c) || c >= 48 && c <= 57
+  okNameStart(c) || c >= 48 && c <= 57 || c == 45
 
 def fuzzHasCamp(args: List[String], i: Int): Bool =
   if (i >= List.len(args)) false else fuzzCampTok(arg(args, i)) || fuzzHasCamp(args, i + 1)
