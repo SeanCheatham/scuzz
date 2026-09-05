@@ -862,7 +862,10 @@ SzString *sz_fs_basename(SzString *path);
 
 /* Pure Json. Enum Null|Bool|Int|Float|Str|Arr|Obj.
  * parse / stringify return Result (Err=0 / Ok=1). Query kits return empty
- * lists on a miss or a wrong tag. `*_or` / `get_*` use the default.
+ * lists on a miss or a wrong tag. is* and as* stay tag-strict.
+ * intOr / floatOr / getInt / getFloat coerce JSON numbers. Int to Float
+ * is a C double cast. Float to Int is an exact i64, else the default.
+ * Other *_or / get_* use the default.
  * Write kits copy Obj / Arr cells. A miss keeps the default or retains `j`. */
 SzAdt *sz_json_parse(SzString *s);
 SzAdt *sz_json_stringify(SzAdt *j);
@@ -875,6 +878,7 @@ SzList *sz_json_pairs(SzAdt *j);              /* List[(String, Json)]; empty if 
 int64_t sz_json_is_null(SzAdt *j);
 int64_t sz_json_is_bool(SzAdt *j);
 int64_t sz_json_is_int(SzAdt *j);
+int64_t sz_json_is_float(SzAdt *j);
 int64_t sz_json_is_str(SzAdt *j);
 int64_t sz_json_is_arr(SzAdt *j);
 int64_t sz_json_is_obj(SzAdt *j);

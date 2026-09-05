@@ -46,6 +46,33 @@ private def printArrWrite(): IO[Unit] =
 private def printFloat(): IO[Unit] =
   IO.println(if (Json.floatOr(Json.Float(1.5), 0.0) > 0.0) "float:pos" else "float:z")
 
+private def printIsFloat(src: String, label: String): IO[Unit] =
+  Json.parse(src) match {
+    case Result.Err(_) => IO.println(Str.concat(label, ":err"))
+    case Result.Ok(j) => IO.println(Str.concat(label, if (Json.isFloat(j)) ":1" else ":0"))
+  }
+
+private def printGetIntSrc(src: String, label: String): IO[Unit] =
+  Json.parse(src) match {
+    case Result.Err(_) => IO.println(Str.concat(label, ":err"))
+    case Result.Ok(j) => IO.println(s"$label:${Str.fromInt(Json.getInt(j, "n", -1))}")
+  }
+
+private def printGetFloatSrc(src: String, label: String): IO[Unit] =
+  Json.parse(src) match {
+    case Result.Err(_) => IO.println(Str.concat(label, ":err"))
+    case Result.Ok(j) => IO.println(if (Json.getFloat(j, "n", -1.0) > 0.5) Str.concat(label, ":pos") else Str.concat(label, ":z"))
+  }
+
+private def coerceKit(): IO[Unit] =
+  for {
+    _ <- printIsFloat("1.5", "isFloat15")
+    _ <- printIsFloat("1", "isFloat1")
+    _ <- printGetIntSrc("{\"n\":1.0}", "getInt10")
+    _ <- printGetIntSrc("{\"n\":1e2}", "getInt1e2")
+    _ <- printGetFloatSrc("{\"n\":1}", "getFloat1")
+  } yield ()
+
 private def printStr(j: Json, key: String): IO[Unit] =
   IO.println(Str.concat(s"str:$key:", Json.getStr(j, key, "")))
 
@@ -126,5 +153,6 @@ def run(): IO[Unit] =
     _ <- missKit()
     _ <- parseErr()
     _ <- printArrWrite()
+    _ <- coerceKit()
   } yield ()
 
