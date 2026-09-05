@@ -2626,9 +2626,23 @@ SzIo *sz_testrt_sys_read(int64_t n) {
   return io;
 }
 
+/* Drive.testEnv sets these on the process. Copy them into the sealed
+ * map so Sys.getenv can arm kit gates without reading the host map. */
+static void env_seed_drive(void) {
+  static const char *const keys[] = {"SCUZZ_SERVE", "SCUZZ_KIT"};
+  size_t i;
+  const char *v;
+  for (i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+    v = getenv(keys[i]);
+    if (v && v[0])
+      sz_testrt_env_set(keys[i], v);
+  }
+}
+
 static void sz_testrt_sys_install(void) {
   sz_testrt_sys_reset_live();
   g_sys_fake = 1;
+  env_seed_drive();
 }
 
 int sz_testrt_sys_is_fake(void) { return g_sys_fake; }

@@ -6585,6 +6585,50 @@ int main(void) {
       assert(strcmp(sz_string_cstr((SzString *)r.value), "sealed") == 0);
       sz_release(r.value);
 
+      /* Drive.testEnv keys seed the sealed map. Host PATH still does not leak. */
+      {
+        const char *old_serve = getenv("SCUZZ_SERVE");
+        const char *old_kit = getenv("SCUZZ_KIT");
+        char serve_save[64];
+        char kit_save[64];
+        int had_serve = old_serve && old_serve[0];
+        int had_kit = old_kit && old_kit[0];
+        if (had_serve)
+          snprintf(serve_save, sizeof serve_save, "%s", old_serve);
+        if (had_kit)
+          snprintf(kit_save, sizeof kit_save, "%s", old_kit);
+        setenv("SCUZZ_SERVE", "1", 1);
+        setenv("SCUZZ_KIT", "sealed", 1);
+        sz_testrt_install();
+        r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCUZZ_SERVE")));
+        assert(r.ok);
+        assert(strcmp(sz_string_cstr((SzString *)r.value), "1") == 0);
+        sz_release(r.value);
+        r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCUZZ_KIT")));
+        assert(r.ok);
+        assert(strcmp(sz_string_cstr((SzString *)r.value), "sealed") == 0);
+        sz_release(r.value);
+        r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("PATH")));
+        assert(r.ok);
+        assert(strcmp(sz_string_cstr((SzString *)r.value), "") == 0);
+        sz_release(r.value);
+        unsetenv("SCUZZ_SERVE");
+        unsetenv("SCUZZ_KIT");
+        sz_testrt_install();
+        r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCUZZ_SERVE")));
+        assert(r.ok);
+        assert(strcmp(sz_string_cstr((SzString *)r.value), "") == 0);
+        sz_release(r.value);
+        if (had_serve)
+          setenv("SCUZZ_SERVE", serve_save, 1);
+        else
+          unsetenv("SCUZZ_SERVE");
+        if (had_kit)
+          setenv("SCUZZ_KIT", kit_save, 1);
+        else
+          unsetenv("SCUZZ_KIT");
+      }
+
       {
         size_t base_bytes = 0, base_count = 0;
         size_t live_bytes = 0, live_count = 0;
