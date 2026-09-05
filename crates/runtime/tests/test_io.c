@@ -2847,6 +2847,35 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Nested ensure: cancel drops the inner finalizer success value. */
+  {
+    SzIo *park;
+    SzIo *inner_fin;
+    SzIo *inner;
+    SzIo *outer_fin;
+    SzIo *nested;
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    sz_testrt_install();
+    sz_alloc_stats(&base_bytes, &base_count);
+    park = sz_io_sleep_ms(100);
+    inner_fin = pure_drop(sz_string_from_cstr("inner-fin"));
+    inner = sz_io_ensure(park, inner_fin);
+    sz_release(park);
+    sz_release(inner_fin);
+    outer_fin = pure_drop(NULL);
+    nested = sz_io_ensure(inner, outer_fin);
+    sz_release(inner);
+    sz_release(outer_fin);
+    r = sz_io_unsafe_run(fm_drop(fork_drop(nested), fiber_interrupt_direct, NULL));
+    assert(r.ok);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+    sz_testrt_reset();
+  }
+
   /* Resource releases when cancelled as race loser (TestRuntime: both park, then short wins). */
   {
     sz_testrt_install();

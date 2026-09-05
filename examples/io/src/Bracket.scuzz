@@ -13,6 +13,7 @@ def run(): IO[Unit] =
     resN = Resource.make(IO.pure(3), n => IO.println(s"releaseN:${Str.fromInt(n)}"))
     gotN <- Resource.use(resN, n => IO.pure(n + 1))
     _ <- IO.println(s"useN:${Str.fromInt(gotN)}")
+    _ <- Resource.use(Resource.make(IO.pure(3), _ => IO.pure(())), n => IO.sleep(n).flatMap(_ => IO.timeout(n, IO.pure(())).flatMap(_ => Random.nextInt(n).flatMap(r => IO.println(s"nethN:${Str.fromInt(r)}")))))
     _ <- IO.println("done")
   } yield ()
 

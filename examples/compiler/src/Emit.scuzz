@@ -1091,7 +1091,10 @@ def isIntElem(e: Expr): Bool =
   }
 
 def mapElemTy(e: Expr, defs: List[Fun], ps: List[Param]): String =
-  if (isIntElem(e)) "Int" else listElemTy(exprRetTy(e, defs, ps))
+  if (isIntElem(e)) "Int" else mapElemTyOf(exprRetTy(e, defs, ps))
+
+def mapElemTyOf(ty: String): String =
+  if (Check.isRes(ty)) Check.resPayload(ty) else if (Check.isIo(ty)) Check.ioPayload(ty) else listElemTy(ty)
 
 def listElemTy(ty: String): String =
   if (Str.startsWith(ty, "List[") && Str.len(ty) > 6) Str.slice(ty, 5, Str.len(ty) - 1) else "Any"
@@ -2523,7 +2526,7 @@ def nonemptyTy(ty: String, e: Expr, defs: List[Fun], ps: List[Param]): String =
   if (ty != "" && !isTyParam(ty)) ty else if (exprIsI64(e, ps, defs)) "Int" else "Any"
 
 def callRetTy(f: String, ret: String, args: List[Expr], defs: List[Fun], ps: List[Param]): String =
-  if (f == "swap" && !List.isEmpty(args)) softenTup(flipTupTy(exprRetTy(List.at(args, 0), defs, ps))) else if (f == "Signal.list" && !List.isEmpty(args)) sigListWrap(exprRetTy(List.at(args, 0), defs, ps)) else if (f == "Signal.listN" && !List.isEmpty(List.tail(args))) sigListWrap(exprRetTy(List.at(List.tail(args), 0), defs, ps)) else if (f == "Signal.getList" && !List.isEmpty(args)) sigListUnwrap(exprRetTy(List.at(args, 0), defs, ps)) else ret
+  if (f == "swap" && !List.isEmpty(args)) softenTup(flipTupTy(exprRetTy(List.at(args, 0), defs, ps))) else if (f == "Signal.list" && !List.isEmpty(args)) sigListWrap(exprRetTy(List.at(args, 0), defs, ps)) else if (f == "Signal.listN" && !List.isEmpty(List.tail(args))) sigListWrap(exprRetTy(List.at(List.tail(args), 0), defs, ps)) else if (f == "Signal.getList" && !List.isEmpty(args)) sigListUnwrap(exprRetTy(List.at(args, 0), defs, ps)) else if (f == "IO.pure" && !List.isEmpty(args)) Check.kitRetFromTy(f, exprRetTy(List.at(args, 0), defs, ps), ret) else if (f == "Resource.make" && !List.isEmpty(args)) Check.resTy(Check.ioPayload(exprRetTy(List.at(args, 0), defs, ps))) else ret
 
 def exprCallTy(ty: String, f: String, e: Expr, defs: List[Fun], ps: List[Param]): String =
   if (ty == "" && isCtorName(f)) f else nonemptyTy(ty, e, defs, ps)
