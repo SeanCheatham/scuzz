@@ -122,7 +122,7 @@ def dupDep(name: String): String =
   Str.concat("duplicate dependency name `", Str.concat(name, "`"))
 
 def badPkgName(): String =
-  "package name must be [A-Za-z_][A-Za-z0-9_]*"
+  "package name must be [A-Za-z_][A-Za-z0-9_-]*"
 
 def okPkgName(s: String): Bool =
   s != "" && okNameStart(Str.charAt(s, 0)) && okNameRest(s, 1)
@@ -134,7 +134,7 @@ def okNameRest(s: String, i: Int): Bool =
   if (i >= Str.len(s)) true else okNameChar(Str.charAt(s, i)) && okNameRest(s, i + 1)
 
 def okNameChar(c: Int): Bool =
-  okNameStart(c) || c >= 48 && c <= 57
+  okNameStart(c) || c >= 48 && c <= 57 || c == 45
 
 def start(): St =
   St("", "", "0.0.0", false, noPairs(), defUi(), "")
