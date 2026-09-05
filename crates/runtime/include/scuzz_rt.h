@@ -1065,7 +1065,7 @@ void sz_testrt_stdout_append(const char *line); /* appends line + '\n' */
 void sz_testrt_stdout_write(const char *bytes, size_t n); /* raw; no extra newline */
 const char *sz_testrt_stdout_cstr(void);
 void sz_testrt_env_set(const char *key, const char *val); /* sealed Sys.getenv map */
-const char *sz_testrt_env_get(const char *key); /* NULL if unset */
+const char *sz_testrt_env_get(const char *key); /* NULL if unset. Install copies SCUZZ_SERVE / SCUZZ_KIT */
 void sz_testrt_proc_put(int64_t pid); /* fake Sys.alive table */
 int sz_testrt_proc_alive(int64_t pid); /* 1 if registered */
 void sz_testrt_proc_kill(int64_t pid); /* drop from table */
