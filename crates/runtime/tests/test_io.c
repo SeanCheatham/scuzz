@@ -11585,6 +11585,21 @@ int main(void) {
     }
     sz_release(needle);
     sz_timeline_free(tl);
+    write_text(path, "# timeline v=2 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
+                     "signals:\nstr[2] draft = \"\"\na11y:\n\n");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    needle = sz_string_from_cstr("draft");
+    {
+      SzString *want = sz_string_from_cstr("");
+      assert(sz_timeline_signal_str_has(tl, 0, needle, want) == 1);
+      sz_release(want);
+      want = sz_string_from_cstr("x");
+      assert(sz_timeline_signal_str_has(tl, 0, needle, want) == 0);
+      sz_release(want);
+    }
+    sz_release(needle);
+    sz_timeline_free(tl);
     write_text(path, "# timeline v=3 n=0\n");
     assert(sz_timeline_load(path) == NULL);
     write_text(path, "nonsense\n");

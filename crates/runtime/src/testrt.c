@@ -3353,7 +3353,8 @@ int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name) {
            : 0;
 }
 
-/* 1 when the unescaped `str[<id>] <name> = "<value>"` holds `needle`. */
+/* 1 when the unescaped `str[<id>] <name> = "<value>"` holds `needle`.
+ * An empty needle is true when the value is empty. */
 int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
                                    SzString *needle) {
   SzTlState *s = tl_at(tl, i);
@@ -3362,7 +3363,7 @@ int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
   const char *p;
   char *val = NULL;
   int64_t hit = 0;
-  if (!s || !s->signals || !n[0])
+  if (!s || !s->signals)
     return 0;
   sep = tl_sig_line(s->signals, "str", name ? sz_string_cstr(name) : "");
   p = tl_sig_payload(sep);
@@ -3370,7 +3371,7 @@ int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
     return 0;
   if (!sz_dump_parse_quoted(p, &val) || !val)
     return 0;
-  hit = strstr(val, n) != NULL ? 1 : 0;
+  hit = !n[0] ? (val[0] == '\0' ? 1 : 0) : (strstr(val, n) != NULL ? 1 : 0);
   sz_free(val);
   return hit;
 }
