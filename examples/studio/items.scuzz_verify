@@ -44,8 +44,8 @@ def renameRenames(t: Timeline): Verdict =
   Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Rename") || Timeline.lastHitHas(t, i - 1, "button:Rename") || Timeline.signalListLen(t, i - 1, "items") == 0 || Timeline.a11yHas(t, i, "listtile:oat"))
 
 def addNeedsDraft(t: Timeline): Verdict =
-  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Add") || Timeline.lastHitHas(t, i - 1, "button:Add") || !Timeline.signalStrHas(t, i - 1, "draft", "= \"\"") || Timeline.signalListLen(t, i, "items") == Timeline.signalListLen(t, i - 1, "items"))
+  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Add") || Timeline.lastHitHas(t, i - 1, "button:Add") || !Timeline.signalStrHas(t, i - 1, "draft", "") || Timeline.signalListLen(t, i, "items") == Timeline.signalListLen(t, i - 1, "items"))
 
 def addGrowsWithDraft(t: Timeline): Verdict =
-  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Add") || Timeline.lastHitHas(t, i - 1, "button:Add") || Timeline.signalStrHas(t, i - 1, "draft", "= \"\"") || Timeline.signalListLen(t, i, "items") == Timeline.signalListLen(t, i - 1, "items") + 1)
+  Verdict.every(t, i => i == 0 || !Timeline.lastHitHas(t, i, "button:Add") || Timeline.lastHitHas(t, i - 1, "button:Add") || Timeline.signalStrHas(t, i - 1, "draft", "") || Timeline.signalListLen(t, i, "items") == Timeline.signalListLen(t, i - 1, "items") + 1)
 
