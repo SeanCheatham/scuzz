@@ -312,7 +312,7 @@ def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens
     case Expr.EMethod(recv, name, args, _) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps, loc, fid) else if (name == "apply") emitApplyRecv(recv, args, prefix, strs, defs, ens, ps, loc, fid) else if (name == "map") emitIoMap(recv, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps, loc)
     case Expr.ELam(p, _, body) => emitLam(p, body, prefix, strs, defs, ens, ps, loc)
     case Expr.EIf(c, t, el, _) => emitIfFid(c, t, el, prefix, strs, defs, ens, ps, loc, fid)
-    case Expr.EField(recv, name, _) => emitField(recv, name, prefix, ens, ps)
+    case Expr.EField(recv, name, _) => emitField(recv, name, prefix, strs, defs, ens, ps, loc)
     case Expr.EMatch(s, arms, _) => emitMatch(s, arms, prefix, strs, defs, ens, ps, loc)
     case Expr.EList(xs) => emitList(xs, prefix, strs, defs, ens, ps, loc)
     case Expr.ETuple(xs) => emitTuple(xs, prefix, strs, defs, ens, ps, loc)
@@ -3384,8 +3384,8 @@ def emitIfPhi2(tv: String, ev: String, prefix: String, ty: String): String =
 def emitIfPhi3(prefix: String): String =
   Str.concat(", %", Str.concat(prefix, "_ej_0 ]"))
 
-def emitField(recv: Expr, name: String, prefix: String, ens: List[En], ps: List[Param]): Slot =
-  if (isTupField(name)) emitTupField(recv, name, prefix, ps) else emitFieldEn(recv, name, prefix, ens, ps)
+def emitField(recv: Expr, name: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+  if (isTupField(name)) emitTupField(recv, name, prefix, strs, defs, ens, ps, loc) else emitFieldEn(recv, name, prefix, ens, ps)
 
 def emitFieldEn(recv: Expr, name: String, prefix: String, ens: List[En], ps: List[Param]): Slot =
   recv match {
@@ -3411,10 +3411,17 @@ def emitRecFieldIdx2(pl: String, prefix: String, k: Int, unbox: Bool, n: Int): S
 def emitRecFieldMaybeUnbox(code: String, v: String, prefix: String, unbox: Bool): Slot =
   if (unbox) Slot(join(code, line(Str.concat(tmp(prefix, "ru"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(v, ")"))))), pct(prefix, "ru"), false) else Slot(code, v, false)
 
-def emitTupField(recv: Expr, name: String, prefix: String, ps: List[Param]): Slot =
+def emitTupField(recv: Expr, name: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   recv match {
     case Expr.EVar(s, _) => emitTupSel(Str.concat("%", s), tupSlots(paramTy(ps, s)), tupIdx(name), prefix, 0)
-    case _ => emitStuck()
+    case Expr.EAscribe(inner, _, _) => emitTupField(inner, name, prefix, strs, defs, ens, ps, loc)
+    case Expr.ENamed(_, inner) => emitTupField(inner, name, prefix, strs, defs, ens, ps, loc)
+    case _ => emitTupFrom(emitExpr(recv, Str.concat(prefix, "_tf"), strs, defs, ens, ps, loc), name, prefix, recv, defs, ps)
+  }
+
+def emitTupFrom(s: Slot, name: String, prefix: String, recv: Expr, defs: List[Fun], ps: List[Param]): Slot =
+  s match {
+    case Slot(code, v, _) => emitTupSelJoin2(code, emitTupSel(v, tupSlots(exprRetTy(recv, defs, ps)), tupIdx(name), prefix, 0))
   }
 
 def emitTupSel(scrut: String, tys: List[String], k: Int, prefix: String, i: Int): Slot =

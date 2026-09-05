@@ -1,20 +1,12 @@
 [signals]
-str[0] buf = "hello
-world
-"
-str[1] orig = "hello
-world
-"
+str[0] buf = "hello\nworld\n"
+str[1] orig = "hello\nworld\n"
 str[2] pathSig = "sample.txt"
 str[3] dirSig = "."
 int[4] dirty = 0
 list[5] paths = ["sample.txt"]
-list[6] bodies = ["hello
-world
-"]
-list[7] origs = ["hello
-world
-"]
+list[6] bodies = ["hello\nworld\n"]
+list[7] origs = ["hello\nworld\n"]
 int[8] idx = 0
 list[9] diags = []
 int[10] showDiags = 0
