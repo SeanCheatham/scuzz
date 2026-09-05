@@ -6,7 +6,9 @@ import Parse.Arm
 import Parse.Bind
 import Parse.En
 import Parse.EnCase
+import Parse.Im
 import Parse.pretty
+import Check.Out
 
 def nl(): String =
   """
@@ -532,15 +534,147 @@ def pickSim1(d: Fun, s: Fun, rest: List[Fun]): Fun =
 def noExpr(): List[Expr] =
   []
 
-def rewriteReqSrc(src: String): String =
-  rewriteReqKeep(src, Parse.parse(Lexer.lex(src)))
+def noParam(): List[Param] =
+  []
 
-def rewriteReqKeep(src: String, p: Prog): String =
-  if (progHasReq(p)) rewriteReqProg(p) else src
+def noBind(): List[Bind] =
+  []
+
+def rewriteReqFiles(files: List[(String, String)]): List[(String, String)] =
+  rewriteReqFilesGot(files, Parse.parseFiles(files))
+
+def rewriteReqFilesGot(files: List[(String, String)], p: Prog): List[(String, String)] =
+  p match {
+    case Prog(_, enums, _, _, _, _, defs, _, _) => rewriteReqGo(files, defs, enums)
+  }
+
+def rewriteReqGo(files: List[(String, String)], funs: List[Fun], ens: List[En]): List[(String, String)] =
+  if (List.isEmpty(files)) files else rewriteReqHd(List.at(files, 0), List.tail(files), funs, ens)
+
+def rewriteReqHd(h: (String, String), rest: List[(String, String)], funs: List[Fun], ens: List[En]): List[(String, String)] =
+  h match {
+    case (stem, src) => (stem, rewriteReqSrc(src, stem, funs, ens)) :: rewriteReqGo(rest, funs, ens)
+  }
+
+def rewriteReqSrc(src: String, stem: String, funs: List[Fun], ens: List[En]): String =
+  rewriteReqKeep(src, Parse.parse(Lexer.lex(src)), stem, funs, ens)
+
+def rewriteReqKeep(src: String, p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
+  if (progHasReq(p) || progNeedsWhere(p, funs, ens)) rewriteReqProg(p, stem, funs, ens) else src
 
 def progHasReq(p: Prog): Bool =
   p match {
-    case Prog(_, _, _, _, _, _, defs, _, body) => exprHasReq(body) || defsHaveReq(defs)
+    case Prog(_, _, _, _, impls, _, defs, _, body) => exprHasReq(body) || defsHaveReq(defs) || implsHaveReq(impls)
+  }
+
+def implsHaveReq(xs: List[Im]): Bool =
+  if (List.isEmpty(xs)) false else imHasReq(List.at(xs, 0)) || implsHaveReq(List.tail(xs))
+
+def imHasReq(im: Im): Bool =
+  im match {
+    case Im(_, _, _, methods) => defsHaveReq(methods)
+  }
+
+def progNeedsWhere(p: Prog, funs: List[Fun], ens: List[En]): Bool =
+  p match {
+    case Prog(_, _, _, _, impls, _, defs, _, body) => exprNeedsWhere(body, funs, ens) || defsNeedWhere(defs, funs, ens) || implsNeedWhere(impls, funs, ens)
+  }
+
+def defsNeedWhere(ds: List[Fun], funs: List[Fun], ens: List[En]): Bool =
+  if (List.isEmpty(ds)) false else funNeedsWhere(List.at(ds, 0), funs, ens) || defsNeedWhere(List.tail(ds), funs, ens)
+
+def funNeedsWhere(d: Fun, funs: List[Fun], ens: List[En]): Bool =
+  d match {
+    case Fun(_, _, _, _, _, body, _, _) => exprNeedsWhere(body, funs, ens)
+  }
+
+def implsNeedWhere(xs: List[Im], funs: List[Fun], ens: List[En]): Bool =
+  if (List.isEmpty(xs)) false else imNeedsWhere(List.at(xs, 0), funs, ens) || implsNeedWhere(List.tail(xs), funs, ens)
+
+def imNeedsWhere(im: Im, funs: List[Fun], ens: List[En]): Bool =
+  im match {
+    case Im(_, _, _, methods) => defsNeedWhere(methods, funs, ens)
+  }
+
+def exprNeedsWhere(e: Expr, funs: List[Fun], ens: List[En]): Bool =
+  e match {
+    case Expr.EPrint(inner, _) => exprNeedsWhere(inner, funs, ens)
+    case Expr.ECall(f, args, _) => paramsHaveWhere(paramsOfCall(f, funs, ens)) || listNeedsWhere(args, funs, ens)
+    case Expr.EMethod(recv, _, args, _) => exprNeedsWhere(recv, funs, ens) || listNeedsWhere(args, funs, ens)
+    case Expr.EField(recv, _, _) => exprNeedsWhere(recv, funs, ens)
+    case Expr.EBin(_, l, r, _) => exprNeedsWhere(l, funs, ens) || exprNeedsWhere(r, funs, ens)
+    case Expr.EUn(_, inner, _) => exprNeedsWhere(inner, funs, ens)
+    case Expr.ELam(_, _, body) => exprNeedsWhere(body, funs, ens)
+    case Expr.EIf(c, t, el, _) => exprNeedsWhere(c, funs, ens) || exprNeedsWhere(t, funs, ens) || exprNeedsWhere(el, funs, ens)
+    case Expr.EMatch(s, arms, _) => exprNeedsWhere(s, funs, ens) || armsNeedWhere(arms, funs, ens)
+    case Expr.EList(xs) => listNeedsWhere(xs, funs, ens)
+    case Expr.ETuple(xs) => listNeedsWhere(xs, funs, ens)
+    case Expr.ENamed(_, inner) => exprNeedsWhere(inner, funs, ens)
+    case Expr.EAscribe(inner, _, _) => exprNeedsWhere(inner, funs, ens)
+    case Expr.EFor(bs, body, _) => bindsNeedWhere(bs, funs, ens) || exprNeedsWhere(body, funs, ens)
+    case _ => false
+  }
+
+def listNeedsWhere(xs: List[Expr], funs: List[Fun], ens: List[En]): Bool =
+  if (List.isEmpty(xs)) false else exprNeedsWhere(List.at(xs, 0), funs, ens) || listNeedsWhere(List.tail(xs), funs, ens)
+
+def armsNeedWhere(xs: List[Arm], funs: List[Fun], ens: List[En]): Bool =
+  if (List.isEmpty(xs)) false else armNeedsWhere(List.at(xs, 0), funs, ens) || armsNeedWhere(List.tail(xs), funs, ens)
+
+def armNeedsWhere(a: Arm, funs: List[Fun], ens: List[En]): Bool =
+  a match {
+    case Arm(_, _, body) => exprNeedsWhere(body, funs, ens)
+  }
+
+def bindsNeedWhere(xs: List[Bind], funs: List[Fun], ens: List[En]): Bool =
+  if (List.isEmpty(xs)) false else bindNeedsWhere(List.at(xs, 0), funs, ens) || bindsNeedWhere(List.tail(xs), funs, ens)
+
+def bindNeedsWhere(b: Bind, funs: List[Fun], ens: List[En]): Bool =
+  b match {
+    case Bind(_, _, e) => exprNeedsWhere(e, funs, ens)
+  }
+
+def paramsHaveWhere(ps: List[Param]): Bool =
+  if (List.isEmpty(ps)) false else paramHasWhere(List.at(ps, 0)) || paramsHaveWhere(List.tail(ps))
+
+def paramHasWhere(p: Param): Bool =
+  p match {
+    case Param(_, _, w, _) => w != ""
+  }
+
+def paramsOfCall(f: String, funs: List[Fun], ens: List[En]): List[Param] =
+  paramsOfFun(Check.findFun(funs, f), f, ens)
+
+def paramsOfFun(hit: List[Fun], f: String, ens: List[En]): List[Param] =
+  if (List.isEmpty(hit)) ctorParams(ens, f) else funParams(List.at(hit, 0))
+
+def funParams(d: Fun): List[Param] =
+  d match {
+    case Fun(_, _, _, ps, _, _, _, _) => ps
+  }
+
+def ctorParams(ens: List[En], f: String): List[Param] =
+  if (List.isEmpty(ens)) noParam() else ctorParams1(List.at(ens, 0), List.tail(ens), f)
+
+def ctorParams1(h: En, rest: List[En], f: String): List[Param] =
+  h match {
+    case En(_, name, _, cases) => if (name == f) firstCaseParams(cases) else ctorParamsCase(cases, f, rest)
+  }
+
+def firstCaseParams(cs: List[EnCase]): List[Param] =
+  if (List.isEmpty(cs)) noParam() else caseParams(List.at(cs, 0))
+
+def caseParams(c: EnCase): List[Param] =
+  c match {
+    case EnCase(_, fs) => fs
+  }
+
+def ctorParamsCase(cs: List[EnCase], f: String, rest: List[En]): List[Param] =
+  if (List.isEmpty(cs)) ctorParams(rest, f) else ctorParamsCase1(List.at(cs, 0), List.tail(cs), f, rest)
+
+def ctorParamsCase1(c: EnCase, restCs: List[EnCase], f: String, rest: List[En]): List[Param] =
+  c match {
+    case EnCase(name, fs) => if (name == f) fs else ctorParamsCase(restCs, f, rest)
   }
 
 def defsHaveReq(ds: List[Fun]): Bool =
@@ -589,40 +723,120 @@ def bindHasReq(b: Bind): Bool =
     case Bind(_, _, e) => exprHasReq(e)
   }
 
-def rewriteReqProg(p: Prog): String =
+def rewriteReqProg(p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
   p match {
-    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, rewriteReqDefs(defs), main, rewriteReq(body)))
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Parse.pretty(Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens)))
   }
 
-def rewriteReqDefs(ds: List[Fun]): List[Fun] =
-  if (List.isEmpty(ds)) ds else rewriteReqFun(List.at(ds, 0)) :: rewriteReqDefs(List.tail(ds))
+def mainEnv(stem: String): List[(String, String)] =
+  ("#mod", stem) :: Check.noEnv()
 
-def rewriteReqFun(d: Fun): Fun =
+def rewriteReqImpls(xs: List[Im], funs: List[Fun], ens: List[En]): List[Im] =
+  if (List.isEmpty(xs)) xs else rewriteReqIm(List.at(xs, 0), funs, ens) :: rewriteReqImpls(List.tail(xs), funs, ens)
+
+def rewriteReqIm(im: Im, funs: List[Fun], ens: List[En]): Im =
+  im match {
+    case Im(tn, targs, forTy, methods) => Im(tn, targs, forTy, rewriteReqDefs(methods, funs, ens))
+  }
+
+def rewriteReqDefs(ds: List[Fun], funs: List[Fun], ens: List[En]): List[Fun] =
+  if (List.isEmpty(ds)) ds else rewriteReqFun(List.at(ds, 0), funs, ens) :: rewriteReqDefs(List.tail(ds), funs, ens)
+
+def rewriteReqFun(d: Fun, funs: List[Fun], ens: List[En]): Fun =
   d match {
-    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body), mod, off)
+    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, ("self", "Any") :: ("#mod", mod) :: Check.noEnv()), funs, ens), mod, off)
   }
 
-def rewriteReq(e: Expr): Expr =
+def inferTy(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
+  inferTyGot(Check.infer(e, env, funs, ens))
+
+def inferTyGot(o: Out): String =
+  if (Check.hasErr(o)) "Any" else o.ty
+
+def rewriteReq(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   e match {
-    case Expr.EPrint(inner, off) => Expr.EPrint(rewriteReq(inner), off)
-    case Expr.ECall(f, args, off) => Expr.ECall(f, rewriteReqList(args), off)
-    case Expr.EMethod(recv, name, args, off) => rewriteReqMeth(rewriteReq(recv), name, rewriteReqList(args), off)
-    case Expr.EField(recv, name, off) => Expr.EField(rewriteReq(recv), name, off)
-    case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteReq(l), rewriteReq(r), off)
-    case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteReq(inner), off)
-    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteReq(body))
-    case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteReq(c), rewriteReq(t), rewriteReq(el), off)
-    case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteReq(s), rewriteReqArms(arms), off)
-    case Expr.EList(xs) => Expr.EList(rewriteReqList(xs))
-    case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs))
-    case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteReq(inner))
-    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteReq(inner), ty, off)
-    case Expr.EFor(bs, body, off) => Expr.EFor(rewriteReqBinds(bs), rewriteReq(body), off)
+    case Expr.EPrint(inner, off) => Expr.EPrint(rewriteReq(inner, env, funs, ens), off)
+    case Expr.ECall(f, args, off) => wrapWhereCall(f, rewriteReqList(args, env, funs, ens), off, funs, ens)
+    case Expr.EMethod(recv, name, args, off) => rewriteReqMeth(rewriteReq(recv, env, funs, ens), name, rewriteReqList(args, env, funs, ens), off, env, funs, ens)
+    case Expr.EField(recv, name, off) => Expr.EField(rewriteReq(recv, env, funs, ens), name, off)
+    case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteReq(l, env, funs, ens), rewriteReq(r, env, funs, ens), off)
+    case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteReq(inner, env, funs, ens), off)
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteReq(body, Check.bindLam(p, ty, env), funs, ens))
+    case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteReq(c, env, funs, ens), rewriteReq(t, env, funs, ens), rewriteReq(el, env, funs, ens), off)
+    case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteReq(s, env, funs, ens), rewriteReqArms(arms, env, funs, ens), off)
+    case Expr.EList(xs) => Expr.EList(rewriteReqList(xs, env, funs, ens))
+    case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs, env, funs, ens))
+    case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteReq(inner, env, funs, ens))
+    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteReq(inner, env, funs, ens), ty, off)
+    case Expr.EFor(bs, body, off) => rewriteReqFor(bs, body, off, env, funs, ens)
     case _ => e
   }
 
-def rewriteReqMeth(recv: Expr, name: String, args: List[Expr], off: Int): Expr =
-  if (name == "require") Expr.ECall("Property.check", reqNameE(args) :: reqPredE(args) :: recv :: noExpr(), off) else Expr.EMethod(recv, name, args, off)
+def wrapWhereCall(f: String, args: List[Expr], off: Int, funs: List[Fun], ens: List[En]): Expr =
+  wrapWhereHit(f, args, off, paramsOfCall(f, funs, ens))
+
+def wrapWhereHit(f: String, args: List[Expr], off: Int, ps: List[Param]): Expr =
+  if (!paramsHaveWhere(ps)) Expr.ECall(f, args, off) else wrapWhereAl(f, args, off, ps, Check.alignCall(ps, args))
+
+def wrapWhereAl(f: String, args: List[Expr], off: Int, ps: List[Param], al: (List[Expr], String)): Expr =
+  al match {
+    case (xs, err) => if (err != "") Expr.ECall(f, args, off) else Expr.ECall(f, wrapWhereArgs(f, xs, ps), off)
+  }
+
+def wrapWhereArgs(f: String, xs: List[Expr], ps: List[Param]): List[Expr] =
+  if (List.isEmpty(ps) || List.isEmpty(xs)) xs else wrapWhereArg(f, List.at(xs, 0), List.at(ps, 0)) :: wrapWhereArgs(f, List.tail(xs), List.tail(ps))
+
+def wrapWhereArg(f: String, e: Expr, p: Param): Expr =
+  p match {
+    case Param(n, _, w, _) => if (w == "") e else Expr.ECall("Property.check", Expr.EStr(Str.concat(f, Str.concat(" ", w)), 0) :: Expr.ELam(n, "", Check.dfltExpr(w)) :: e :: noExpr(), 0)
+  }
+
+def rewriteReqFor(bs: List[Bind], body: Expr, off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+  rewriteReqForGo(bs, noBind(), env, body, off, funs, ens)
+
+def rewriteReqForGo(bs: List[Bind], acc: List[Bind], env: List[(String, String)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
+  if (List.isEmpty(bs)) Expr.EFor(List.reverse(acc), rewriteReq(body, env, funs, ens), off) else rewriteReqForHd(List.at(bs, 0), List.tail(bs), acc, env, body, off, funs, ens)
+
+def rewriteReqForHd(b: Bind, rest: List[Bind], acc: List[Bind], env: List[(String, String)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
+  b match {
+    case Bind(d, name, v) => rewriteReqForVal(d, name, rewriteReq(v, env, funs, ens), rest, acc, env, body, off, funs, ens)
+  }
+
+def rewriteReqForVal(d: Bool, name: String, nv: Expr, rest: List[Bind], acc: List[Bind], env: List[(String, String)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
+  rewriteReqForGo(rest, Bind(d, name, nv) :: acc, Check.bindFor(d, name, inferTy(nv, env, funs, ens), env, ens), body, off, funs, ens)
+
+def rewriteReqMeth(recv: Expr, name: String, args: List[Expr], off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+  if (name == "require") rewriteRequire(recv, args, off, env, funs, ens) else Expr.EMethod(recv, name, args, off)
+
+def rewriteRequire(recv: Expr, args: List[Expr], off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+  rewriteRequireTy(recv, args, off, env, funs, ens, Check.infer(recv, env, funs, ens))
+
+def rewriteRequireTy(recv: Expr, args: List[Expr], off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En], ro: Out): Expr =
+  if (Check.hasErr(ro) || !Check.isIo(ro.ty)) Expr.ECall("Property.check", reqNameE(args) :: forceIoPred(reqPredE(args), env, funs, ens) :: recv :: noExpr(), off) else rewriteIoRequire(recv, reqNameE(args), reqPredE(args), off, env, funs, ens)
+
+def forceIoPred(pred: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+  forceIoPredTy(pred, Check.infer(pred, env, funs, ens))
+
+def forceIoPredTy(pred: Expr, po: Out): Expr =
+  if (!Check.hasErr(po) && Check.isIo(po.ty)) Expr.ECall("Property.force", pred :: noExpr(), 0) else pred
+
+def rewriteIoRequire(recv: Expr, nameE: Expr, pred: Expr, off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+  rewriteIoPred(recv, nameE, pred, off, Check.infer(pred, env, funs, ens))
+
+def rewriteIoPred(recv: Expr, nameE: Expr, pred: Expr, off: Int, po: Out): Expr =
+  pred match {
+    case Expr.ELam(_, _, _) => reqFor(recv, nameE, reqApply(pred, off), off)
+    case _ => if (!Check.hasErr(po) && Check.isIo(po.ty)) reqForIoPred(recv, nameE, pred, off) else reqFor(recv, nameE, pred, off)
+  }
+
+def reqApply(pred: Expr, off: Int): Expr =
+  Expr.EMethod(pred, "apply", Expr.EVar("reqv", off) :: noExpr(), off)
+
+def reqFor(recv: Expr, nameE: Expr, pred: Expr, off: Int): Expr =
+  Expr.EFor(Bind(true, "reqv", recv) :: Bind(true, "_", Expr.ECall("Property.assert", nameE :: pred :: noExpr(), off)) :: noBind(), Expr.EVar("reqv", off), off)
+
+def reqForIoPred(recv: Expr, nameE: Expr, pred: Expr, off: Int): Expr =
+  Expr.EFor(Bind(true, "reqv", recv) :: Bind(true, "reqok", pred) :: Bind(true, "_", Expr.ECall("Property.assert", nameE :: Expr.EVar("reqok", off) :: noExpr(), off)) :: noBind(), Expr.EVar("reqv", off), off)
 
 def reqNameE(args: List[Expr]): Expr =
   if (List.len(args) < 2) Expr.EStr("require", 0) else reqNameHit(List.at(args, 0))
@@ -634,56 +848,17 @@ def reqNameHit(e: Expr): Expr =
   }
 
 def reqPredE(args: List[Expr]): Expr =
-  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) forcePred(List.at(args, 0)) else forcePred(List.at(List.tail(args), 0))
+  if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) List.at(args, 0) else List.at(List.tail(args), 0)
 
-def forcePred(e: Expr): Expr =
-  if (isIoPred(e)) Expr.ECall("Property.force", e :: noExpr(), 0) else e
+def rewriteReqList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Expr] =
+  if (List.isEmpty(xs)) xs else rewriteReq(List.at(xs, 0), env, funs, ens) :: rewriteReqList(List.tail(xs), env, funs, ens)
 
-def isIoPred(e: Expr): Bool =
-  e match {
-    case Expr.EFor(bs, body, _) => hasDraw(bs) || isIoPred(body)
-    case Expr.ECall(f, _, _) => ioCall(f)
-    case Expr.EMethod(_, name, _, _) => name == "flatMap" || name == "map" || name == "handleErrorWith"
-    case Expr.EIf(_, t, el, _) => isIoPred(t) || isIoPred(el)
-    case _ => false
-  }
+def rewriteReqArms(xs: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Arm] =
+  if (List.isEmpty(xs)) xs else rewriteReqArm(List.at(xs, 0), env, funs, ens) :: rewriteReqArms(List.tail(xs), env, funs, ens)
 
-def ioCall(f: String): Bool =
-  Str.startsWith(f, "IO.") || Str.startsWith(f, "Fs.") || Str.startsWith(f, "Net.") || Str.startsWith(f, "Sys.") || Str.startsWith(f, "Clock.") || Str.startsWith(f, "Random.")
-
-def hasDraw(bs: List[Bind]): Bool =
-  if (List.isEmpty(bs)) false else bindIsDraw(List.at(bs, 0)) || hasDraw(List.tail(bs))
-
-def bindIsDraw(b: Bind): Bool =
-  b match {
-    case Bind(draw, _, _) => draw
-  }
-
-def rewriteReqList(xs: List[Expr]): List[Expr] =
-  if (List.isEmpty(xs)) xs else rewriteReq(List.at(xs, 0)) :: rewriteReqList(List.tail(xs))
-
-def rewriteReqArms(xs: List[Arm]): List[Arm] =
-  if (List.isEmpty(xs)) xs else rewriteReqArm(List.at(xs, 0)) :: rewriteReqArms(List.tail(xs))
-
-def rewriteReqArm(a: Arm): Arm =
+def rewriteReqArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[En]): Arm =
   a match {
-    case Arm(pat, g, body) => Arm(pat, g, rewriteReq(body))
-  }
-
-def rewriteReqBinds(xs: List[Bind]): List[Bind] =
-  if (List.isEmpty(xs)) xs else rewriteReqBind(List.at(xs, 0)) :: rewriteReqBinds(List.tail(xs))
-
-def rewriteReqBind(b: Bind): Bind =
-  b match {
-    case Bind(draw, name, value) => Bind(draw, name, rewriteReq(value))
-  }
-
-def rewriteReqFiles(files: List[(String, String)]): List[(String, String)] =
-  if (List.isEmpty(files)) files else rewriteReqHd(List.at(files, 0), List.tail(files))
-
-def rewriteReqHd(h: (String, String), rest: List[(String, String)]): List[(String, String)] =
-  h match {
-    case (stem, src) => (stem, rewriteReqSrc(src)) :: rewriteReqFiles(rest)
+    case Arm(pat, g, body) => Arm(pat, g, rewriteReq(body, env, funs, ens))
   }
 
 def seeds(src: String): String =
