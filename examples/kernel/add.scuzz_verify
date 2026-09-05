@@ -28,6 +28,9 @@ def tupFive(): Bool =
 def tupEight(): Bool =
   (1, 2, 3, 4, 5, 6, 7, 8)._8 == 8
 
+def tupCall(): Bool =
+  Main.rot3((1, "x", true))._1 == "x"
+
 def smapN(): Bool =
   Main.mapSetSizeOk()
 
