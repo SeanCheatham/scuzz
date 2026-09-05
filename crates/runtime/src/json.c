@@ -804,6 +804,7 @@ SzList *sz_json_pairs(SzAdt *j) {
 int64_t sz_json_is_null(SzAdt *j) { return json_tag(j) == JSON_NULL ? 1 : 0; }
 int64_t sz_json_is_bool(SzAdt *j) { return json_tag(j) == JSON_BOOL ? 1 : 0; }
 int64_t sz_json_is_int(SzAdt *j) { return json_tag(j) == JSON_INT ? 1 : 0; }
+int64_t sz_json_is_float(SzAdt *j) { return json_tag(j) == JSON_FLOAT ? 1 : 0; }
 int64_t sz_json_is_str(SzAdt *j) { return json_tag(j) == JSON_STR ? 1 : 0; }
 int64_t sz_json_is_arr(SzAdt *j) { return json_tag(j) == JSON_ARR ? 1 : 0; }
 int64_t sz_json_is_obj(SzAdt *j) { return json_tag(j) == JSON_OBJ ? 1 : 0; }
@@ -831,16 +832,27 @@ int64_t sz_json_bool_or(SzAdt *j, int64_t d) {
   return n;
 }
 
-int64_t sz_json_int_or(SzAdt *j, int64_t d) {
-  SzList *xs = sz_json_as_int(j);
+static int json_float_exact_i64(double x, int64_t *out) {
   int64_t n;
-  if (!xs) {
-    sz_release(xs);
-    return d;
-  }
-  n = sz_unbox_i64(sz_list_head(xs));
-  sz_release(xs);
-  return n;
+  if (!isfinite(x))
+    return 0;
+  if (x < (double)INT64_MIN || x >= 0x1p63)
+    return 0;
+  n = (int64_t)x;
+  if ((double)n != x)
+    return 0;
+  *out = n;
+  return 1;
+}
+
+int64_t sz_json_int_or(SzAdt *j, int64_t d) {
+  int tag = json_tag(j);
+  int64_t n;
+  if (tag == JSON_INT)
+    return sz_unbox_i64(sz_adt_payload(j));
+  if (tag == JSON_FLOAT && json_float_exact_i64(unbox_f64(sz_adt_payload(j)), &n))
+    return n;
+  return d;
 }
 
 SzString *sz_json_str_or(SzAdt *j, SzString *d) {
@@ -938,15 +950,12 @@ SzAdt *sz_json_merge(SzAdt *a, SzAdt *b) {
 }
 
 double sz_json_float_or(SzAdt *j, double d) {
-  SzList *xs = sz_json_as_float(j);
-  double x;
-  if (!xs) {
-    sz_release(xs);
-    return d;
-  }
-  x = unbox_f64(sz_list_head(xs));
-  sz_release(xs);
-  return x;
+  int tag = json_tag(j);
+  if (tag == JSON_FLOAT)
+    return unbox_f64(sz_adt_payload(j));
+  if (tag == JSON_INT)
+    return (double)sz_unbox_i64(sz_adt_payload(j));
+  return d;
 }
 
 double sz_json_get_float(SzAdt *j, SzString *key, double d) {

@@ -4032,6 +4032,42 @@ int main(void) {
     sz_release(ar);
   }
 
+  /* isFloat is tag-strict. getInt / getFloat coerce JSON numbers. */
+  {
+    SzAdt *fr = json_expect_ok("1.5");
+    SzAdt *ir = json_expect_ok("1");
+    SzAdt *f = (SzAdt *)sz_adt_payload(fr);
+    SzAdt *n = (SzAdt *)sz_adt_payload(ir);
+    SzAdt *o10 = json_expect_ok("{\"n\":1.0}");
+    SzAdt *oe2 = json_expect_ok("{\"n\":1e2}");
+    SzAdt *oi = json_expect_ok("{\"n\":1}");
+    SzAdt *o15 = json_expect_ok("{\"n\":1.5}");
+    SzString *kn = sz_string_from_cstr("n");
+    SzList *as_i = sz_json_as_int(f);
+    SzList *as_f = sz_json_as_float(n);
+    double gf;
+    assert(sz_json_is_float(f) == 1);
+    assert(sz_json_is_float(n) == 0);
+    assert(sz_json_is_int(n) == 1);
+    assert(sz_json_is_int(f) == 0);
+    assert(sz_list_is_empty(as_i));
+    assert(sz_list_is_empty(as_f));
+    assert(sz_json_get_int((SzAdt *)sz_adt_payload(o10), kn, -1) == 1);
+    assert(sz_json_get_int((SzAdt *)sz_adt_payload(oe2), kn, -1) == 100);
+    gf = sz_json_get_float((SzAdt *)sz_adt_payload(oi), kn, -1.0);
+    assert(gf > 0.9 && gf < 1.1);
+    assert(sz_json_get_int((SzAdt *)sz_adt_payload(o15), kn, -1) == -1);
+    sz_release(as_i);
+    sz_release(as_f);
+    sz_release(kn);
+    sz_release(fr);
+    sz_release(ir);
+    sz_release(o10);
+    sz_release(oe2);
+    sz_release(oi);
+    sz_release(o15);
+  }
+
   {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
