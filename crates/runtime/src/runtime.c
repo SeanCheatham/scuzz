@@ -2528,7 +2528,7 @@ static SzIo *ensure_run_fin_err(SzIo *fin, SzError *err) {
 }
 
 static SzIo *ignore_then_io(void *ignored, void *env) {
-  (void)ignored;
+  sz_release(ignored);
   return (SzIo *)env;
 }
 
