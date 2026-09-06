@@ -8,17 +8,25 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
+
+/* Parse SCUZZ_UI_RUNTIME. Unset or empty means Headless. Reject any other
+   unknown value: a typo must not silently run Headless. */
+static SzUiRuntimeKind parse_runtime_kind(const char *rt) {
+  if (!rt || !rt[0] || strcasecmp(rt, "headless") == 0)
+    return SZ_UI_RUNTIME_HEADLESS;
+  if (strcasecmp(rt, "desktop") == 0)
+    return SZ_UI_RUNTIME_DESKTOP;
+  if (strcasecmp(rt, "mobile") == 0)
+    return SZ_UI_RUNTIME_MOBILE;
+  sz_panic("SCUZZ_UI_RUNTIME must be headless, desktop, or mobile");
+}
 
 static void fill_cfg(SzUiConfig *cfg, int width, int height) {
   double scale = 1.0;
-  const char *rt = getenv("SCUZZ_UI_RUNTIME");
   memset(cfg, 0, sizeof(*cfg));
-  cfg->kind = SZ_UI_RUNTIME_HEADLESS;
-  if (rt && (strcmp(rt, "desktop") == 0 || strcmp(rt, "Desktop") == 0))
-    cfg->kind = SZ_UI_RUNTIME_DESKTOP;
-  else if (rt && (strcmp(rt, "mobile") == 0 || strcmp(rt, "Mobile") == 0))
-    cfg->kind = SZ_UI_RUNTIME_MOBILE;
+  cfg->kind = parse_runtime_kind(getenv("SCUZZ_UI_RUNTIME"));
   cfg->width = width;
   cfg->height = height;
   cfg->title = sz_ui_default_title();
@@ -247,6 +255,8 @@ SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption
                        caption ? sz_string_cstr(caption) : "");
 }
 
+/* Codegen declares this as returning ptr: Scuzz Unit is a null pointer.
+   Do not change the return type to void. */
 void *sz_lang_view_add_child(SzView *parent, SzView *child) {
   sz_view_add_child(parent, child);
   return NULL;
@@ -266,8 +276,8 @@ static int live_still_watch(void) { return 1; }
 
 static void live_pump_loop(SzUiSession *session, int (*still)(void)) {
   const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
-  int64_t max_frames =
-      (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
+  int max_frames_parsed = max_frames_env ? atoi(max_frames_env) : 0;
+  int64_t max_frames = max_frames_parsed > 0 ? max_frames_parsed : 0;
   int64_t frame = 0;
   while (sz_ui_session_alive(session) && still()) {
     if (!sz_ui_pump_sync(session)) {

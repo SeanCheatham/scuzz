@@ -55,7 +55,7 @@ Optional. Used by `scuzz run` / `test` / `package`.
 
 | Key | Type | Notes |
 | --- | --- | --- |
-| `default_runtime` | `"headless"` \| `"desktop"` \| `"mobile"` | `scuzz run` / `scuzz ide` export `SCUZZ_UI_RUNTIME` from this key. `--headless` forces Headless. A raw binary with that env unset stays Headless. |
+| `default_runtime` | `"headless"` \| `"desktop"` \| `"mobile"` | `scuzz run` / `scuzz ide` export `SCUZZ_UI_RUNTIME` from this key. `--headless` forces Headless. A raw binary with that env unset stays Headless. A raw binary with that env set to any other value panics. |
 | `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
 | `headless_scale` | float | Headless session scale (default 1). Desktop uses OS backing scale when higher. |
 | `tap_button` | int (optional) | 0-based `[taps]` index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`) |
