@@ -2813,20 +2813,8 @@ static SzError *deferred_copy_error(SzDeferred *d) {
                   : sz_error_new(1, "deferred failed");
 }
 
-/* Unique parent: take the child. Shared parent (loop template): retain. */
-static SzIo *io_child(SzIo *parent, SzIo **slot) {
-  SzIo *c = *slot;
-  if (!c)
-    return NULL;
-  if (parent && sz_is_rc(parent) && sz_rc_hdr(parent)->rc > 1) {
-    sz_retain(c);
-    return c;
-  }
-  *slot = NULL;
-  return c;
-}
-
-static void *io_env_child(SzIo *parent, void **slot) {
+/* Unique parent: take the slot. Shared parent (loop template): retain. */
+static void *io_slot_child(SzIo *parent, void **slot) {
   void *e = *slot;
   if (!e)
     return NULL;
@@ -2836,6 +2824,10 @@ static void *io_env_child(SzIo *parent, void **slot) {
   }
   *slot = NULL;
   return e;
+}
+
+static SzIo *io_child(SzIo *parent, SzIo **slot) {
+  return (SzIo *)io_slot_child(parent, (void **)slot);
 }
 
 static void fiber_set_cur(Fiber *f, SzIo *next) {
@@ -3360,7 +3352,7 @@ static int step_fiber(Sched *s, Fiber *f) {
     SzIo *inner = io_child(cur, &cur->as.flatmap.inner);
     f->stack =
         cont_push_flatmap(f->stack, cur->as.flatmap.cont,
-                          io_env_child(cur, &cur->as.flatmap.env));
+                          io_slot_child(cur, &cur->as.flatmap.env));
     fiber_set_cur(f, inner);
     if (!f->cur) {
       fiber_finish(s, f, 0, NULL, sz_error_new(5, "flatMap inner is null"));
@@ -3372,7 +3364,7 @@ static int step_fiber(Sched *s, Fiber *f) {
   case SZ_IO_HANDLE_ERROR: {
     SzIo *inner = io_child(cur, &cur->as.handle_error.inner);
     f->stack = cont_push_handle(f->stack, cur->as.handle_error.handler,
-                                io_env_child(cur, &cur->as.handle_error.env));
+                                io_slot_child(cur, &cur->as.handle_error.env));
     fiber_set_cur(f, inner);
     if (!f->cur) {
       fiber_finish(s, f, 0, NULL,
@@ -3541,8 +3533,9 @@ static int step_fiber(Sched *s, Fiber *f) {
     return 0;
   }
   case SZ_IO_QUEUE_TAKE: {
-    SzQueue *q = cur->as.queue_take;
-    cur->as.queue_take = NULL;
+    /* Share rule of io_child: a loop re-steps this node, so retain the
+     * handle and keep the slot when the node is shared. */
+    SzQueue *q = (SzQueue *)io_slot_child(cur, (void **)&cur->as.queue_take);
     if (!q) {
       fiber_finish(s, f, 0, NULL, sz_error_new(1, "null queue"));
       return 0;
@@ -3573,8 +3566,8 @@ static int step_fiber(Sched *s, Fiber *f) {
     return 0;
   }
   case SZ_IO_DEFERRED_GET: {
-    SzDeferred *d = cur->as.deferred_get;
-    cur->as.deferred_get = NULL;
+    SzDeferred *d =
+        (SzDeferred *)io_slot_child(cur, (void **)&cur->as.deferred_get);
     if (!d) {
       fiber_finish(s, f, 0, NULL, sz_error_new(1, "null deferred"));
       return 0;
@@ -3872,26 +3865,35 @@ static SzIoResult run_io(SzIo *root) {
   sched.root = fiber_new(root, NULL, JOIN_NONE, 0);
   ready_enqueue(&sched, sched.root);
 
-  for (;;) {
-    Fiber *f = ready_dequeue(&sched);
-    if (f) {
-      if (f->state == FIB_CANCELLED || f->state == FIB_DONE)
+  {
+    int deadlocked = 0;
+    for (;;) {
+      Fiber *f = ready_dequeue(&sched);
+      if (f) {
+        if (f->state == FIB_CANCELLED || f->state == FIB_DONE)
+          continue;
+        step_fiber(&sched, f);
+        /* Drain ready (including cancel finalizers) before exiting on root done. */
         continue;
-      step_fiber(&sched, f);
-      /* Drain ready (including cancel finalizers) before exiting on root done. */
-      continue;
-    }
-    if (sched.root->state == FIB_DONE || sched.root->state == FIB_CANCELLED) {
-      if (!sz_testrt_skip_orphan_cancel())
-        cancel_forked_orphans(&sched);
-      if (sched.ready_head)
+      }
+      if (sched.root->state == FIB_DONE || sched.root->state == FIB_CANCELLED) {
+        if (!sz_testrt_skip_orphan_cancel())
+          cancel_forked_orphans(&sched);
+        if (sched.ready_head)
+          continue;
+        break;
+      }
+      if (idle_advance(&sched))
         continue;
+      /* Deadlock: no ready fibers and nothing to wake. Cancel the root once
+       * and keep draining so its IO.ensure finalizers still run. */
+      if (!deadlocked) {
+        deadlocked = 1;
+        fiber_cancel(&sched, sched.root);
+        continue;
+      }
       break;
     }
-    if (idle_advance(&sched))
-      continue;
-    /* Deadlock: no ready fibers and nothing to wake. */
-    break;
   }
 
   {

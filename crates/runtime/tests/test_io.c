@@ -3027,6 +3027,28 @@ int main(void) {
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
 
+    /* A loop re-steps the same take node. The handle slot must survive.
+     * repeatN(2) runs the inner three times. */
+    sz_alloc_stats(&base_bytes, &base_count);
+    q = sz_queue_make();
+    s = sz_string_from_cstr("t");
+    sz_retain(s);
+    sz_retain(s);
+    sz_retain(s);
+    sz_queue_enqueue(q, s);
+    sz_queue_enqueue(q, s);
+    sz_queue_enqueue(q, s);
+    r = sz_io_unsafe_run(repeat_n_drop(2, sz_io_queue_take(q)));
+    assert(r.ok);
+    assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "t") == 0);
+    sz_release(r.value);
+    assert(sz_queue_size(q) == 0);
+    sz_release(s);
+    sz_queue_free(q);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
     sz_alloc_stats(&base_bytes, &base_count);
     def = sz_deferred_make();
     s = sz_string_from_cstr("y");
@@ -3034,6 +3056,11 @@ int main(void) {
     sz_release(s);
     assert(r.ok);
     r = sz_io_unsafe_run(sz_deferred_get(def));
+    assert(r.ok);
+    assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
+    sz_release(r.value);
+    /* Same share rule for Deferred.get: repeatN must not drain the slot. */
+    r = sz_io_unsafe_run(repeat_n_drop(2, sz_deferred_get(def)));
     assert(r.ok);
     assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
     sz_release(r.value);
@@ -3071,6 +3098,23 @@ int main(void) {
   assert(r.ok);
   assert((intptr_t)r.value == 9);
   assert(retry_hits == 0);
+
+  /* Deadlock cancels the parked root and drains its IO.ensure finalizers. */
+  {
+    SzQueue *q = sz_queue_make();
+    SzIo *take = sz_io_queue_take(q);
+    SzIo *fin = sz_io_delay(delay_inc, NULL);
+    SzIo *io = sz_io_ensure(take, fin);
+    sz_release(take);
+    sz_release(fin);
+    delay_calls = 0;
+    r = sz_io_unsafe_run(io);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "deadlock") != NULL);
+    sz_error_free(r.error);
+    assert(delay_calls == 1);
+    sz_queue_free(q);
+  }
 
   /* Retry drops extra IO.fail retains; last error is the run result. */
   {
