@@ -2278,9 +2278,30 @@ def emitPropCheckJoin2(nc: String, nv: String, no: Bool, rs: Slot, pred: Expr, r
 def emitPropPred(pred: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   pred match {
     case Expr.ENamed(_, inner) => emitPropPred(inner, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
-    case Expr.ELam(p, _, body) => emitApplyLam2(p, body, Slot("", rv, ro), slotBindI64(Slot("", rv, ro), recv, ps, defs), applyBindTy(p, recv, defs, ps), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc, 0)
+    case Expr.ELam(p, _, body) => emitPropPredLam(p, body, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
     case _ => emitExpr(pred, Str.concat(prefix, "_p"), strs, defs, ens, ps, loc)
   }
+
+def emitPropPredLam(p: String, body: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+  emitPropPredLam2(p, body, Slot("", rv, ro), slotBindI64(Slot("", rv, ro), recv, ps, defs), recv, prefix, strs, defs, ens, ps, loc)
+
+def emitPropPredLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+  emitApplyLam2(propLamBind(p, boxInt, prefix), propLamBody(p, body, boxInt, prefix), arg, boxInt, applyBindTy(p, recv, defs, ps), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc, 0)
+
+def propLamBind(p: String, boxInt: Bool, prefix: String): String =
+  if (boxInt) Str.concat(p, Str.concat("_w", hashDec(prefix))) else p
+
+def propLamBody(p: String, body: Expr, boxInt: Bool, prefix: String): Expr =
+  if (propLamBind(p, boxInt, prefix) == p) body else rewriteBind(body, p, propLamBind(p, boxInt, prefix))
+
+def hashDec(s: String): String =
+  Str.fromInt(hashGo(s, 0, 5381))
+
+def hashGo(s: String, i: Int, h: Int): Int =
+  if (i >= Str.len(s)) hashPos(h) else hashGo(s, i + 1, h * 33 + Str.charAt(s, i))
+
+def hashPos(h: Int): Int =
+  if (h < 0) 0 - h % 100000 else h % 100000
 
 def emitPropCheckPred(code: String, nv: String, no: Bool, rv: String, ro: Bool, pred: Slot): Slot =
   pred match {
@@ -2564,19 +2585,10 @@ def emitApplyLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, bty: String, p
   }
 
 def emitApplyLam3(p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  if (keepBind(p)) emitApplyLamShadow(shadowBind(p, prefix, ps, boxInt), p, body, ac, av, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid) else emitApplyLamSkip(ac, emitExprFid(body, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc, fid))
+  if (keepBind(p)) emitApplyLamShadow(shadowBind(p, prefix, ps), p, body, ac, av, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid) else emitApplyLamSkip(ac, emitExprFid(body, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc, fid))
 
-def shadowBind(p: String, prefix: String, ps: List[Param], boxInt: Bool): String =
-  if (boxInt) Str.concat(p, Str.concat("_w", hashDec(prefix))) else if (paramKnown(ps, p)) Str.concat("_", Str.concat(prefix, Str.concat("_", p))) else p
-
-def hashDec(s: String): String =
-  Str.fromInt(hashGo(s, 0, 5381))
-
-def hashGo(s: String, i: Int, h: Int): Int =
-  if (i >= Str.len(s)) hashPos(h) else hashGo(s, i + 1, h * 33 + Str.charAt(s, i))
-
-def hashPos(h: Int): Int =
-  if (h < 0) 0 - h % 100000 else h % 100000
+def shadowBind(p: String, prefix: String, ps: List[Param]): String =
+  if (paramKnown(ps, p)) Str.concat("_", Str.concat(prefix, Str.concat("_", p))) else p
 
 def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, if (boxInt) "Int" else bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt)
