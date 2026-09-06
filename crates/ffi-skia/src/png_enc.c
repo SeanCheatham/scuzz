@@ -122,7 +122,9 @@ static int zlib_store(const uint8_t *data, size_t data_len, Buf *out) {
   size_t i;
   if (!buf_u8(out, 0x78) || !buf_u8(out, 0x01))
     return 0;
-  while (pos < data_len) {
+  /* A valid deflate stream needs at least one block. The do/while emits a
+   * final empty block when data_len is 0. */
+  for (;;) {
     size_t block = data_len - pos;
     int final;
     if (block > 65535)
@@ -138,6 +140,8 @@ static int zlib_store(const uint8_t *data, size_t data_len, Buf *out) {
     if (!buf_append(out, data + pos, block))
       return 0;
     pos += block;
+    if (final)
+      break;
   }
   for (i = 0; i < data_len; i++) {
     s1 = (s1 + data[i]) % 65521u;
@@ -161,6 +165,8 @@ uint8_t *sz_png_encode_rgba(const uint8_t *pixels, int width, int height,
   if (stride <= 0)
     stride = width * 4;
   if ((size_t)width > (SIZE_MAX - 1u) / 4u)
+    return NULL;
+  if ((size_t)height > SIZE_MAX / ((size_t)width * 4u + 1u))
     return NULL;
 
   filt_len = ((size_t)width * 4u + 1u) * (size_t)height;

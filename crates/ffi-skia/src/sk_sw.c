@@ -1,6 +1,7 @@
 #include "sk_capi.h"
 #include "png_enc.h"
 #include "sk_gpu.h"
+#include "sk_utf8.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +14,12 @@ struct SkPaint {
   float text_size;
 };
 
-#define SK_CLIP_STACK 8
+typedef struct {
+  int x0;
+  int y0;
+  int x1;
+  int y1;
+} SwClip;
 
 struct SkCanvas {
   struct SkSurface *surface;
@@ -21,11 +27,12 @@ struct SkCanvas {
   int clip_y0;
   int clip_x1;
   int clip_y1;
+  SwClip *saves; /* heap; grows on demand */
   int save_n;
-  int save_x0[SK_CLIP_STACK];
-  int save_y0[SK_CLIP_STACK];
-  int save_x1[SK_CLIP_STACK];
-  int save_y1[SK_CLIP_STACK];
+  int save_cap;
+  /* save() calls that failed to allocate. restore() eats them so the pair
+   * count stays balanced. The clip stays as it was. */
+  int save_dropped;
 };
 
 struct SkSurface {
@@ -36,20 +43,6 @@ struct SkSurface {
   uint8_t *present; /* GPU readback when gpu != 0 */
   SkCanvas canvas;  /* borrowed through sk_surface_get_canvas */
 };
-
-SkColor sk_color_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-  SkColor c = {r, g, b, a};
-  return c;
-}
-
-SkColor sk_color_argb(uint32_t argb) {
-  SkColor c;
-  c.a = (uint8_t)((argb >> 24) & 0xff);
-  c.r = (uint8_t)((argb >> 16) & 0xff);
-  c.g = (uint8_t)((argb >> 8) & 0xff);
-  c.b = (uint8_t)(argb & 0xff);
-  return c;
-}
 
 SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
   SkSurface *s;
@@ -70,7 +63,6 @@ SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
   s->canvas.clip_y0 = 0;
   s->canvas.clip_x1 = width;
   s->canvas.clip_y1 = height;
-  s->canvas.save_n = 0;
   return s;
 }
 
@@ -95,6 +87,7 @@ SkSurface *sk_surface_make_gpu_n32_premul(int width, int height) {
 void sk_surface_unref(SkSurface *surface) {
   if (!surface)
     return;
+  free(surface->canvas.saves);
   free(surface->pixels);
   free(surface->present);
   free(surface);
@@ -120,14 +113,19 @@ const uint8_t *sk_surface_peek_pixels(const SkSurface *surface, size_t *out_size
     return NULL;
   }
   n = (size_t)surface->width * (size_t)surface->height * 4;
-  if (out_size)
-    *out_size = n;
   if (surface->gpu) {
     if (!sk_gpu_roundtrip(surface->pixels, surface->present, surface->width,
-                          surface->height))
+                          surface->height)) {
+      if (out_size)
+        *out_size = 0;
       return NULL;
+    }
+    if (out_size)
+      *out_size = n;
     return surface->present;
   }
+  if (out_size)
+    *out_size = n;
   return surface->pixels;
 }
 
@@ -155,13 +153,28 @@ static void put_pixel(SkSurface *s, int x, int y, SkColor color) {
   }
 }
 
+/* Clear replaces pixels (Src mode), like SkCanvas::clear. It does not
+ * blend. A clear to transparent erases the surface. Respects the clip. */
 void sk_canvas_clear(SkCanvas *canvas, SkColor color) {
-  int x, y;
+  SkSurface *s;
+  int x, y, x0, y0, x1, y1;
   if (!canvas || !canvas->surface)
     return;
-  for (y = 0; y < canvas->surface->height; y++)
-    for (x = 0; x < canvas->surface->width; x++)
-      put_pixel(canvas->surface, x, y, color);
+  s = canvas->surface;
+  x0 = canvas->clip_x0 > 0 ? canvas->clip_x0 : 0;
+  y0 = canvas->clip_y0 > 0 ? canvas->clip_y0 : 0;
+  x1 = canvas->clip_x1 < s->width ? canvas->clip_x1 : s->width;
+  y1 = canvas->clip_y1 < s->height ? canvas->clip_y1 : s->height;
+  for (y = y0; y < y1; y++) {
+    uint8_t *row = s->pixels + (size_t)y * (size_t)s->width * 4;
+    for (x = x0; x < x1; x++) {
+      uint8_t *p = row + (size_t)x * 4;
+      p[0] = color.r;
+      p[1] = color.g;
+      p[2] = color.b;
+      p[3] = color.a;
+    }
+  }
 }
 
 void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
@@ -187,27 +200,43 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
 }
 
 void sk_canvas_save(SkCanvas *canvas) {
+  SwClip *top;
   if (!canvas)
     return;
-  if (canvas->save_n >= SK_CLIP_STACK) {
-    fputs("sk_capi: clip save stack is full\n", stderr);
-    abort();
+  if (canvas->save_n >= canvas->save_cap) {
+    int cap = canvas->save_cap ? canvas->save_cap * 2 : 16;
+    SwClip *s =
+        (SwClip *)realloc(canvas->saves, (size_t)cap * sizeof(SwClip));
+    if (!s) {
+      canvas->save_dropped++;
+      return;
+    }
+    canvas->saves = s;
+    canvas->save_cap = cap;
   }
-  canvas->save_x0[canvas->save_n] = canvas->clip_x0;
-  canvas->save_y0[canvas->save_n] = canvas->clip_y0;
-  canvas->save_x1[canvas->save_n] = canvas->clip_x1;
-  canvas->save_y1[canvas->save_n] = canvas->clip_y1;
+  top = &canvas->saves[canvas->save_n];
+  top->x0 = canvas->clip_x0;
+  top->y0 = canvas->clip_y0;
+  top->x1 = canvas->clip_x1;
+  top->y1 = canvas->clip_y1;
   canvas->save_n++;
 }
 
 void sk_canvas_restore(SkCanvas *canvas) {
-  if (!canvas || canvas->save_n <= 0)
+  SwClip *top;
+  if (!canvas)
     return;
+  if (canvas->save_n <= 0) {
+    if (canvas->save_dropped > 0)
+      canvas->save_dropped--;
+    return;
+  }
   canvas->save_n--;
-  canvas->clip_x0 = canvas->save_x0[canvas->save_n];
-  canvas->clip_y0 = canvas->save_y0[canvas->save_n];
-  canvas->clip_x1 = canvas->save_x1[canvas->save_n];
-  canvas->clip_y1 = canvas->save_y1[canvas->save_n];
+  top = &canvas->saves[canvas->save_n];
+  canvas->clip_x0 = top->x0;
+  canvas->clip_y0 = top->y0;
+  canvas->clip_x1 = top->x1;
+  canvas->clip_y1 = top->y1;
 }
 
 void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
@@ -332,21 +361,11 @@ static const uint8_t FONT8[95][8] = {
     {0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 };
 
-/* Same walk as sk_mono.c: one Unicode code point is one cell. */
-static int sw_utf8_clen(const char *s) {
-  unsigned char c;
-  if (!s || !s[0])
-    return 0;
-  c = (unsigned char)s[0];
-  if (c < 0x80)
-    return 1;
-  if ((c & 0xe0) == 0xc0)
-    return s[1] ? 2 : 1;
-  if ((c & 0xf0) == 0xe0)
-    return (s[1] && s[2]) ? 3 : 1;
-  if ((c & 0xf8) == 0xf0)
-    return (s[1] && s[2] && s[3]) ? 4 : 1;
-  return 1;
+/* Cell advance. Draw and measure use the same advance so caret columns
+ * match the pixels at any size. */
+static int sw_advance(float font_px) {
+  int a = (int)(font_px + 0.5f);
+  return a < 1 ? 1 : a;
 }
 
 float sk_font_measure_string(const char *text, float font_px) {
@@ -356,13 +375,13 @@ float sk_font_measure_string(const char *text, float font_px) {
   if (!text)
     return 0.f;
   for (p = text; *p;) {
-    int clen = sw_utf8_clen(p);
+    int clen = sk_utf8_clen(p);
     if (clen < 1)
       clen = 1;
     p += clen;
     n++;
   }
-  return (float)n * px;
+  return (float)n * (float)sw_advance(px);
 }
 
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
@@ -374,15 +393,13 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
     return;
   size = paint->text_size > 0.f ? paint->text_size : 8.f;
   scale = size / 8.f;
-  advance = (int)(size + 0.5f);
-  if (advance < 1)
-    advance = 1;
+  advance = sw_advance(size);
   baseline = (int)(size - 1.f + 0.5f);
   if (baseline < 0)
     baseline = 0;
   cx = (int)x;
   for (p = text; *p;) {
-    int clen = sw_utf8_clen(p);
+    int clen = sk_utf8_clen(p);
     unsigned char ch = (unsigned char)*p;
     const uint8_t *glyph;
     int gy = (int)y - baseline;
