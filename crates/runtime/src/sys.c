@@ -120,7 +120,7 @@ static void inbuf_take_eof(SysResult *r) {
   g_inlen = 0;
 }
 
-static void *sys_read_dispatch(void *env) {
+static void *sys_fake_dispatch(void *env) {
   (void)env;
   return (void *)(intptr_t)(sz_testrt_sys_is_fake() ? 1 : 0);
 }
@@ -205,7 +205,7 @@ static SzIo *sys_after_dispatch(void *value, void *env) {
 }
 
 SzIo *sz_sys_read_line(void) {
-  return fm_drop(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch,
+  return fm_drop(sz_io_delay(sys_fake_dispatch, NULL), sys_after_dispatch,
                        NULL);
 }
 
@@ -307,7 +307,7 @@ static SzIo *sys_after_dispatch_n(void *value, void *env) {
 
 SzIo *sz_sys_read(int64_t n) {
   void *nbox = sz_box_i64(n < 0 ? 0 : n);
-  SzIo *io = fm_drop(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch_n,
+  SzIo *io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL), sys_after_dispatch_n,
                      nbox);
   sz_release(nbox);
   return io;
@@ -637,11 +637,6 @@ static SzIo *exec_after_kick(void *ignored, void *env) {
   }
 }
 
-static void *sys_proc_dispatch(void *env) {
-  (void)env;
-  return (void *)(intptr_t)(sz_testrt_sys_is_fake() ? 1 : 0);
-}
-
 static SzIo *sys_after_exec_dispatch(void *value, void *env) {
   SzPair *p = (SzPair *)env;
   if ((intptr_t)value)
@@ -655,7 +650,7 @@ SzIo *sz_sys_exec(SzString *cmd) {
     sz_panic("sz_sys_exec(null)");
   p = sz_pair_new(cmd, NULL);
   {
-    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL), sys_after_exec_dispatch,
+    SzIo *io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL), sys_after_exec_dispatch,
                        p);
     sz_release(p);
     return io;
@@ -663,12 +658,12 @@ SzIo *sz_sys_exec(SzString *cmd) {
 }
 
 #define CHILD_MAX 16
-#define CHILD_CAP (1024 * 1024)
-
 typedef struct {
   pid_t pid;
   int in_fd;
   int out_fd;
+  int reaped;   /* waitpid collected the child; pid may be reused */
+  int overflow; /* output exceeded the 1 MiB cap; bytes were dropped */
   char *buf;
   size_t len;
   size_t cap;
@@ -713,13 +708,15 @@ static void child_clear(ChildSlot *c) {
   c->buf = NULL;
   c->len = 0;
   c->cap = 0;
+  c->reaped = 0;
+  c->overflow = 0;
   c->pid = 0;
 }
 
 static int child_drain(ChildSlot *c) {
   if (!c)
     return 1;
-  return exec_drain_fd(&c->out_fd, &c->buf, &c->len, &c->cap, NULL);
+  return exec_drain_fd(&c->out_fd, &c->buf, &c->len, &c->cap, &c->overflow);
 }
 
 static void child_gc(void) {
@@ -735,6 +732,7 @@ static void child_gc(void) {
     } while (w < 0 && errno == EINTR);
     if (w == 0)
       continue;
+    c->reaped = 1;
     (void)child_drain(c);
     exec_close_fd(&c->in_fd);
     exec_close_fd(&c->out_fd);
@@ -815,6 +813,8 @@ static void *sys_spawn_result(void *env) {
   slot->buf = NULL;
   slot->len = 0;
   slot->cap = 0;
+  slot->reaped = 0;
+  slot->overflow = 0;
   slot->pid = pid;
   r->is_err = 0;
   r->as.ok = sz_box_i64((int64_t)pid);
@@ -834,7 +834,7 @@ SzIo *sz_sys_spawn(SzString *cmd) {
     sz_panic("sz_sys_spawn(null)");
   p = sz_pair_new(cmd, NULL);
   {
-    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL), sys_after_spawn_dispatch,
+    SzIo *io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL), sys_after_spawn_dispatch,
                        p);
     sz_release(p);
     return io;
@@ -844,16 +844,22 @@ SzIo *sz_sys_spawn(SzString *cmd) {
 static void *sys_alive_result(void *env) {
   int64_t pid = sz_unbox_i64(env);
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
-  int status = 0;
-  pid_t w;
+  ChildSlot *c;
   r->is_err = 0;
   child_gc();
   if (sz_testrt_sys_is_fake()) {
     r->as.ok = sz_box_i64(sz_testrt_proc_alive(pid));
     return r;
   }
-  w = waitpid((pid_t)pid, &status, WNOHANG);
-  if (w == 0)
+  c = child_find((pid_t)pid);
+  if (c) {
+    /* Our child. child_gc reaped it when dead. */
+    r->as.ok = sz_box_i64(c->reaped ? 0 : 1);
+    return r;
+  }
+  /* Not a spawned child. Probe with kill(pid, 0). A waitpid here would reap
+   * a child owned by other code and report a live non-child as dead. */
+  if (pid > 0 && (kill((pid_t)pid, 0) == 0 || errno != ESRCH))
     r->as.ok = sz_box_i64(1);
   else
     r->as.ok = sz_box_i64(0);
@@ -877,15 +883,18 @@ static void *sys_kill_result(void *env) {
     sz_testrt_proc_kill(pid);
     return r;
   }
-  if (pid > 0 && kill((pid_t)pid, SIGTERM) != 0 && errno != ESRCH) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(3, "Sys.kill: kill failed");
-    return r;
-  }
   {
     ChildSlot *c = child_find((pid_t)pid);
     int status = 0;
     pid_t w = 0;
+    /* Skip SIGTERM for a child that child_gc already reaped. Its pid may
+     * name a new process now. */
+    if (!(c && c->reaped) && pid > 0 && kill((pid_t)pid, SIGTERM) != 0 &&
+        errno != ESRCH) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(3, "Sys.kill: kill failed");
+      return r;
+    }
     if (c)
       exec_close_fd(&c->in_fd);
     if (pid > 0) {
@@ -1027,7 +1036,7 @@ SzIo *sz_sys_child_write(int64_t pid, SzString *s) {
   st->s = s;
   st->off = 0;
   {
-    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL),
+    SzIo *io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL),
                        child_write_after_dispatch, st);
     sz_release(st);
     return io;
@@ -1077,9 +1086,11 @@ static void *child_read_try(void *env) {
     r->as.err = sz_error_new(3, "Sys.childRead: unknown pid");
     return r;
   }
-  if (!child_drain(c)) {
+  if (!child_drain(c) || c->overflow) {
     r->is_err = 1;
-    r->as.err = sz_error_new(3, "Sys.childRead: read failed");
+    r->as.err = sz_error_new(3, c->overflow
+                                    ? "Sys.childRead: output exceeds 1 MiB"
+                                    : "Sys.childRead: read failed");
     return r;
   }
   if (child_take(c, r, st->want))
@@ -1113,14 +1124,14 @@ static SzIo *child_read_after_dispatch(void *value, void *env) {
 SzIo *sz_sys_child_read(int64_t pid, int64_t n) {
   ChildReadSt *st;
   size_t want = n < 0 ? 0 : (size_t)n;
-  if (want > CHILD_CAP)
-    want = CHILD_CAP;
+  if (want > EXEC_CAP)
+    want = EXEC_CAP;
   st = (ChildReadSt *)sz_rc_alloc(sizeof(ChildReadSt), SZ_RC_BOX);
   memset(st, 0, sizeof(ChildReadSt));
   st->pid = pid;
   st->want = want;
   {
-    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL),
+    SzIo *io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL),
                        child_read_after_dispatch, st);
     sz_release(st);
     return io;
@@ -1150,7 +1161,7 @@ static SzIo *child_close_after_dispatch(void *value, void *env) {
 
 SzIo *sz_sys_child_close(int64_t pid) {
   void *p = sz_box_i64(pid);
-  SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL),
+  SzIo *io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL),
                      child_close_after_dispatch, p);
   sz_release(p);
   return io;
