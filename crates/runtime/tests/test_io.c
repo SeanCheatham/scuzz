@@ -7240,6 +7240,41 @@ int main(void) {
     (void)sz_io_unsafe_run(sz_sys_alive(pid));
   }
 
+  /* Sys.alive probes a non-child pid without a waitpid. */
+  {
+    SzIoResult r;
+    r = sz_io_unsafe_run(sz_sys_alive((int64_t)getpid()));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+    sz_release(r.value);
+  }
+
+  /* Sys.childRead fails when child output exceeds the 1 MiB cap. */
+  {
+    SzIoResult r;
+    int64_t pid;
+    int i;
+    r = sz_io_unsafe_run(
+        sz_sys_spawn(sz_string_from_cstr("head -c 2000000 /dev/zero")));
+    assert(r.ok);
+    pid = sz_unbox_i64(r.value);
+    sz_release(r.value);
+    assert(pid > 0);
+    /* Read zero bytes so the buffer fills to the cap. */
+    for (i = 0; i < 4000; i++) {
+      r = sz_io_unsafe_run(sz_sys_child_read(pid, 0));
+      if (!r.ok)
+        break;
+      sz_release(r.value);
+      sleep_us(1000);
+    }
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "exceeds 1 MiB"));
+    sz_error_free(r.error);
+    (void)sz_io_unsafe_run(sz_sys_kill(pid));
+  }
+
   /* Sys.spawn pipes: write stdin, read stdout (dd copies five bytes). */
   {
     SzIoResult pr;

@@ -917,9 +917,9 @@ SzIo *sz_sys_write(SzString *s); /* IO[Unit]: stdout bytes, no newline */
 SzIo *sz_sys_exec(SzString *cmd); /* IO[(Int, String, String)] code+stdout+stderr; parks on poll; fails under TestRuntime */
 SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; stdin/stdout pipes; stderr inherited; fails under TestRuntime */
 SzIo *sz_sys_child_write(int64_t pid, SzString *s); /* IO[Unit] child stdin; parks on poll */
-SzIo *sz_sys_child_read(int64_t pid, int64_t n); /* IO[String] child stdout bytes; fewer at EOF; unknown pid fails; parks on poll */
+SzIo *sz_sys_child_read(int64_t pid, int64_t n); /* IO[String] child stdout bytes; fewer at EOF; unknown pid fails; output over 1 MiB fails; parks on poll */
 SzIo *sz_sys_child_close(int64_t pid); /* IO[Unit] close child stdin */
-SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */
+SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running; spawn pids tracked, other pids probed with kill(pid, 0) */
 SzIo *sz_sys_kill(int64_t pid);    /* IO[Unit] SIGTERM; waitpid WNOHANG; slot stays until reaped */
 SzIo *sz_sys_getenv(SzString *key);
 
