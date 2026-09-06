@@ -4816,6 +4816,45 @@ static void test_gap_does_not_change_stack(void) {
   sz_view_free(wrap);
 }
 
+static void test_gap_paints_control_label_at_layout_gap(void) {
+  SzSignalInt *on;
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  float box = theme->font_px + 4.f;
+  int label_x;
+  int theme_x;
+  int y;
+  int saw;
+
+  on = sz_signal_int(1);
+  /* Gap 32 vs theme gap 8: the label must paint where layout put it. */
+  root = sz_view_sized(120, 40, sz_view_gap(32, sz_view_checkbox(on, "||||")));
+  surf = sk_surface_make_raster_n32_premul(160, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 160, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 160 * 80 * 4);
+  label_x = (int)(box + 32.f);
+  theme_x = (int)(box + 8.f);
+  saw = 0;
+  for (y = 14; y < 22; y++) {
+    if (row_has_dark(px, 160, y, label_x + 1, label_x + 9))
+      saw = 1;
+    /* Nothing may paint at the theme-gap offset. */
+    assert(!row_has_dark(px, 160, y, theme_x + 1, theme_x + 9));
+  }
+  assert(saw);
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(on);
+}
+
 static void test_font_size_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -15045,6 +15084,7 @@ int main(void) {
   test_gap_zero_row_is_flush();
   test_gap_zero_shrinks_column_height();
   test_gap_does_not_change_stack();
+  test_gap_paints_control_label_at_layout_gap();
   test_font_size_sizes_to_child();
   test_font_size_grows_text();
   test_logical_px_match_device_scale();
