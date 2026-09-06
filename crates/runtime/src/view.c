@@ -700,10 +700,10 @@ static int64_t slider_clamp(int64_t n) {
   return n;
 }
 
-int sz_view_slider_set_at(SzView *view, float x) {
+static int percent_view_set_at(SzView *view, SzViewKind kind, float x) {
   float t;
   int64_t n;
-  if (!view || view->kind != SZ_VIEW_SLIDER || !view->sig_int)
+  if (!view || view->kind != kind || !view->sig_int)
     return 0;
   if (view->frame.w <= 0.f)
     n = 0;
@@ -719,23 +719,12 @@ int sz_view_slider_set_at(SzView *view, float x) {
   return 1;
 }
 
+int sz_view_slider_set_at(SzView *view, float x) {
+  return percent_view_set_at(view, SZ_VIEW_SLIDER, x);
+}
+
 int sz_view_split_set_at(SzView *view, float x) {
-  float t;
-  int64_t n;
-  if (!view || view->kind != SZ_VIEW_SPLIT || !view->sig_int)
-    return 0;
-  if (view->frame.w <= 0.f)
-    n = 0;
-  else {
-    t = (x - view->frame.x) / view->frame.w;
-    if (t < 0.f)
-      t = 0.f;
-    if (t > 1.f)
-      t = 1.f;
-    n = (int64_t)(t * 100.f + 0.5f);
-  }
-  sz_signal_int_set(view->sig_int, slider_clamp(n));
-  return 1;
+  return percent_view_set_at(view, SZ_VIEW_SPLIT, x);
 }
 
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder) {
@@ -1623,8 +1612,12 @@ static void ellipsize_to_width(char *line, size_t cap, float max_w, float font_p
     int keep = n;
     if (keep > (int)cap - 4)
       keep = (int)cap - 4;
+    if (keep > (int)sizeof out - 4)
+      keep = (int)sizeof out - 4;
     if (keep < 0)
       keep = 0;
+    /* Do not cut a UTF-8 sequence: "..." must follow a whole character. */
+    keep = utf8_snap(line, keep);
     memcpy(out, line, (size_t)keep);
     memcpy(out + keep, "...", 4);
     if (text_width(out, font_px) <= max_w) {
@@ -4932,6 +4925,18 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     g_font_px = prev;
     break;
   }
+  case SZ_VIEW_GAP: {
+    /* Paint must see the same gap as layout. Control label x uses it. */
+    int prev_on = g_gap_on;
+    float prev = g_gap;
+    g_gap_on = 1;
+    g_gap = scale_px(theme, (float)v->img_w);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    g_gap_on = prev_on;
+    g_gap = prev;
+    break;
+  }
   case SZ_VIEW_SCROLL:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_children_clipped(v, c, theme);
@@ -4956,7 +4961,6 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_IGNORE_POINTER:
   case SZ_VIEW_ABSORB_POINTER:
   case SZ_VIEW_EXCLUDE_SEMANTICS:
-  case SZ_VIEW_GAP:
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_ON_SECONDARY:
   case SZ_VIEW_FOCUS_GROUP:
