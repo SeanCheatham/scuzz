@@ -55,21 +55,29 @@ static void sig_register(SigKind kind, const void *sig) {
 }
 
 /* Publish the author-facing name of a signal (its `for` binder name).
- * Last non-empty name wins: a later bind clears the same name on others. */
+ * Last non-empty name wins: a later bind clears the same name on other
+ * signals of the same kind. An unregistered signal clears nothing. */
 void sz_signal_name(const void *sig, const char *name) {
   SigReg *r;
   SigReg *mine = NULL;
   const char *n = name ? name : "";
   for (r = g_sig_head; r; r = r->next) {
-    if (r->sig == sig)
+    if (r->sig == sig) {
       mine = r;
-    else if (n[0] && r->name && strcmp(r->name, n) == 0) {
-      sz_free(r->name);
-      r->name = sz_strdup("");
+      break;
     }
   }
   if (!mine)
     return;
+  if (n[0]) {
+    for (r = g_sig_head; r; r = r->next) {
+      if (r != mine && r->kind == mine->kind && r->name &&
+          strcmp(r->name, n) == 0) {
+        sz_free(r->name);
+        r->name = sz_strdup("");
+      }
+    }
+  }
   sz_free(mine->name);
   mine->name = sz_strdup(n);
 }
@@ -133,28 +141,37 @@ static void sig_set_elem_str(const void *sig, int64_t elem_str) {
   }
 }
 
+/* 1 when the head is a String the dump may print, 0 otherwise. */
+static int sig_head_str(const void *head) {
+  return head && sz_rc_kind(head) == SZ_RC_STRING;
+}
+
 SzString *sz_signal_dump(void) {
   char *buf = NULL;
   size_t len = 0, cap = 0;
-  char line[512];
-  char tag[256];
+  char num[32];
   SigReg *r;
   SzString *out;
   sz_dump_append(&buf, &len, &cap, "");
   for (r = g_sig_head; r; r = r->next) {
-    if (r->name && r->name[0])
-      snprintf(tag, sizeof tag, "%s ", r->name);
-    else
-      tag[0] = '\0';
+    sz_dump_append(&buf, &len, &cap,
+                   r->kind == SIG_INT ? "int" : r->kind == SIG_STR ? "str"
+                                                                    : "list");
+    snprintf(num, sizeof num, "[%d] ", r->id);
+    sz_dump_append(&buf, &len, &cap, num);
+    if (r->name && r->name[0]) {
+      sz_dump_append(&buf, &len, &cap, r->name);
+      sz_dump_append(&buf, &len, &cap, " ");
+    }
+    sz_dump_append(&buf, &len, &cap, "= ");
     switch (r->kind) {
     case SIG_INT:
-      snprintf(line, sizeof line, "int[%d] %s= %lld\n", r->id, tag,
+      snprintf(num, sizeof num, "%lld\n",
                (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
-      sz_dump_append(&buf, &len, &cap, line);
+      sz_dump_append(&buf, &len, &cap, num);
       break;
     case SIG_STR:
-      snprintf(line, sizeof line, "str[%d] %s= \"", r->id, tag);
-      sz_dump_append(&buf, &len, &cap, line);
+      sz_dump_append(&buf, &len, &cap, "\"");
       sz_dump_append_escaped(&buf, &len, &cap,
                              sz_signal_str_get((const SzSignalStr *)r->sig));
       sz_dump_append(&buf, &len, &cap, "\"\n");
@@ -162,18 +179,17 @@ SzString *sz_signal_dump(void) {
     case SIG_LIST: {
       SzList *p = sz_signal_list_get((const SzSignalList *)r->sig);
       if (!sig_list_heads_str(p, r->elem_str)) {
-        snprintf(line, sizeof line, "list[%d] %s= <%lld>\n", r->id, tag,
-                 (long long)sz_list_len(p));
-        sz_dump_append(&buf, &len, &cap, line);
+        snprintf(num, sizeof num, "<%lld>\n", (long long)sz_list_len(p));
+        sz_dump_append(&buf, &len, &cap, num);
         break;
       }
-      snprintf(line, sizeof line, "list[%d] %s= [", r->id, tag);
-      sz_dump_append(&buf, &len, &cap, line);
+      sz_dump_append(&buf, &len, &cap, "[");
       for (; p; p = p->tail) {
-        const SzString *s = (const SzString *)p->head;
         sz_dump_append(&buf, &len, &cap, "\"");
         sz_dump_append_escaped(&buf, &len, &cap,
-                               s ? sz_string_cstr(s) : "");
+                               sig_head_str(p->head)
+                                   ? sz_string_cstr((const SzString *)p->head)
+                                   : "");
         sz_dump_append(&buf, &len, &cap, p->tail ? "\", " : "\"");
       }
       sz_dump_append(&buf, &len, &cap, "]\n");
@@ -237,8 +253,10 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   i = 0;
   while (p) {
     if (i == index) {
-      SzString *h = (SzString *)p->head;
-      return sz_string_from_cstr(h ? sz_string_cstr(h) : "");
+      if (sig_head_str(p->head))
+        return sz_string_from_cstr(
+            sz_string_cstr((const SzString *)p->head));
+      return sz_string_from_cstr("");
     }
     p = p->tail;
     i++;
@@ -261,8 +279,19 @@ void sz_signal_int_set(SzSignalInt *s, int64_t v) {
 int64_t sz_signal_int_get(const SzSignalInt *s) { return s ? s->value : 0; }
 
 void sz_signal_int_free(SzSignalInt *s) {
-  if (s)
-    sig_unregister(s);
+  SigReg *r;
+  if (!s)
+    return;
+  sig_unregister(s);
+  /* A derived Signal.map borrows its source. Sever the link so a later
+     get keeps the last computed value instead of reading freed memory. */
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->kind == SIG_STR) {
+      SzSignalStr *str = (SzSignalStr *)r->sig;
+      if (str->map_src == s)
+        str->map_src = NULL;
+    }
+  }
   sz_free(s);
 }
 
