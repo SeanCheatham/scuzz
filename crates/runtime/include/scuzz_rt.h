@@ -1178,7 +1178,9 @@ void sz_driver_run_script(const char *path);
 /* Entrypoint helper used by @main codegen */
 int sz_runtime_main_args(SzIo *program, int argc, char **argv);
 
-/* Impurity kit + TestRuntime (Clock/Random/Fs/Net/Sys console fakes) */
+/* Impurity kit demo: one pass over Clock / Random / Fs / Net / Sys fakes.
+ * Requires TestRuntime; fails when the clock is live. Boot replaces the fake
+ * net stubs, argv, and stdin, and resets fake stdout. */
 SzIo *sz_impurity_run_kit(void);
 
 #ifdef __cplusplus

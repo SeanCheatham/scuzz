@@ -6835,6 +6835,10 @@ int main(void) {
       size_t live_bytes = 0, live_count = 0;
       char *argv[] = {"alpha", "beta"};
       int i;
+      /* Pre-install the same fixtures the kit installs (impurity.c: net stub,
+       * argv, stdin, note.txt). The kit replaces them with same-size values,
+       * so the alloc baseline below stays comparable. Warm the stdout buffer
+       * cap for the same reason. */
       sz_testrt_net_stub("http://example.test/v1", "stub-body");
       sz_testrt_sys_set_args(2, argv);
       sz_testrt_stdin_feed("hello-line\n");
