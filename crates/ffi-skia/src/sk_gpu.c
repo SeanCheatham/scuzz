@@ -69,9 +69,13 @@ static int gpu_init_display(void) {
   if (get_plat) {
     dpy = get_plat(EGL_PLATFORM_SURFACELESS_MESA, (void *)EGL_DEFAULT_DISPLAY,
                    NULL);
-    if (dpy != EGL_NO_DISPLAY && eglInitialize(dpy, NULL, NULL)) {
-      g_dpy = dpy;
-      return 1;
+    if (dpy != EGL_NO_DISPLAY) {
+      if (eglInitialize(dpy, NULL, NULL)) {
+        g_dpy = dpy;
+        return 1;
+      }
+      /* Do not leak the half-initialized display. Fall back below. */
+      eglTerminate(dpy);
     }
   }
   dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);

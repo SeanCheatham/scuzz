@@ -55,7 +55,9 @@ void sk_paint_set_stroke_width(SkPaint *paint, float width);
 void sk_paint_set_text_size(SkPaint *paint, float size);
 float sk_paint_get_text_size(const SkPaint *paint);
 
-/* Advance width of UTF-8 text at font_px (sk_sw: monospace n * font_px). */
+/* Advance width of UTF-8 text at font_px. sk_sw is monospace. One advance
+ * per code point. advance = round(font_px), min 1. Draw and measure use the
+ * same advance. */
 float sk_font_measure_string(const char *text, float font_px);
 /* Monospace cell = max(measure("M"), measure("W")). Measure/draw use that
  * grid so editor caret columns match every presenter. View.text stays proportional. */

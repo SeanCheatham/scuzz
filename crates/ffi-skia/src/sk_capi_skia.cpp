@@ -1,4 +1,8 @@
-/* Internal Skia-backed helpers for sk_capi (no sk_capi.h — avoids type collisions). */
+/* Internal Skia-backed helpers for sk_capi (no sk_capi.h — avoids type
+ * collisions). Declarations come from the shared header so the C bridge and
+ * these definitions are checked against each other. */
+#include "sk_capi_skia.h"
+
 #include "include/core/SkCanvas.h"
 #include "include/core/SkData.h"
 #include "include/core/SkFont.h"
@@ -62,8 +66,6 @@ static SkFont make_font(float size) {
   float px = size > 0.f ? size : 8.f;
   return SkFont(default_typeface(), px);
 }
-
-extern "C" {
 
 void *scuzz_skia_surface_make(int width, int height) {
   if (width <= 0 || height <= 0)
@@ -255,5 +257,3 @@ int scuzz_skia_encode_png_to_file(const void *surface, const char *path) {
   std::free(bytes);
   return ok ? 1 : 0;
 }
-
-} /* extern "C" */
