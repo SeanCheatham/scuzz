@@ -7354,6 +7354,33 @@ int main(void) {
     sz_release(r.value);
   }
 
+  /* Out-of-range pids must not truncate into pid_t. 4294967295 casts to
+   * -1, which would turn kill(2) into a broadcast to every process we own.
+   * alive reports 0; kill is a tolerated no-op; child ops stay unknown. */
+  {
+    SzIoResult r;
+    r = sz_io_unsafe_run(sz_sys_alive(4294967295LL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(sz_sys_alive(INT64_MAX));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(sz_sys_kill(4294967295LL));
+    assert(r.ok);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(sz_sys_kill(INT64_MAX));
+    assert(r.ok);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(sz_sys_child_read(4294967295LL, 1));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_sys_child_close(4294967295LL));
+    assert(r.ok);
+    sz_release(r.value);
+  }
+
   /* Sys.childRead fails when child output exceeds the 1 MiB cap. */
   {
     SzIoResult r;

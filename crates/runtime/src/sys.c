@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,7 +78,7 @@ static char *g_inbuf = NULL;
 static size_t g_inlen = 0;
 static size_t g_incap = 0;
 
-static int inbuf_grow(size_t need) {
+static void inbuf_grow(size_t need) {
   char *nbuf;
   size_t cap = g_incap ? g_incap : 256;
   while (cap < need)
@@ -88,7 +89,6 @@ static int inbuf_grow(size_t need) {
   sz_free(g_inbuf);
   g_inbuf = nbuf;
   g_incap = cap;
-  return 0;
 }
 
 static int inbuf_take_line(SysResult *r) {
@@ -125,89 +125,11 @@ static void *sys_fake_dispatch(void *env) {
   return (void *)(intptr_t)(sz_testrt_sys_is_fake() ? 1 : 0);
 }
 
-static void *sys_try_line(void *env) {
-  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
-  (void)env;
-  if (inbuf_take_line(r))
-    return r;
-  r->retry = 1;
-  return r;
-}
-
-static void *sys_read_more(void *env) {
-  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
-  char tmp[256];
-  ssize_t n;
-  (void)env;
-  n = read(STDIN_FILENO, tmp, sizeof tmp);
-  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-    r->retry = 1;
-    return r;
-  }
-  if (n < 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(3, "Sys.readLine: read failed");
-    return r;
-  }
-  if (n == 0) {
-    inbuf_take_eof(r);
-    return r;
-  }
-  if (g_inlen + (size_t)n > g_incap)
-    inbuf_grow(g_inlen + (size_t)n);
-  memcpy(g_inbuf + g_inlen, tmp, (size_t)n);
-  g_inlen += (size_t)n;
-  if (inbuf_take_line(r))
-    return r;
-  r->retry = 1;
-  return r;
-}
-
-static SzIo *sys_poll_line(void *value, void *env);
-
-static SzIo *sys_unwrap_line(void *value, void *env) {
-  SysResult *r = (SysResult *)value;
-  (void)env;
-  if (r && r->retry) {
-    sz_release(r);
-    return sys_poll_line(NULL, NULL);
-  }
-  return unwrap_sys(value, NULL);
-}
-
-static SzIo *sys_after_poll(void *value, void *env) {
-  (void)value;
-  (void)env;
-  return fm_drop(sz_io_delay(sys_read_more, NULL), sys_unwrap_line, NULL);
-}
-
-static SzIo *sys_poll_line(void *value, void *env) {
-  (void)value;
-  (void)env;
-  return fm_drop(sz_io_poll_readable(STDIN_FILENO), sys_after_poll, NULL);
-}
-
-static SzIo *sys_after_try(void *value, void *env) {
-  SysResult *r = (SysResult *)value;
-  (void)env;
-  if (r && r->retry) {
-    sz_release(r);
-    return sys_poll_line(NULL, NULL);
-  }
-  return unwrap_sys(value, NULL);
-}
-
-static SzIo *sys_after_dispatch(void *value, void *env) {
-  (void)env;
-  if ((intptr_t)value)
-    return sz_testrt_sys_read_line();
-  return fm_drop(sz_io_delay(sys_try_line, NULL), sys_after_try, NULL);
-}
-
-SzIo *sz_sys_read_line(void) {
-  return fm_drop(sz_io_delay(sys_fake_dispatch, NULL), sys_after_dispatch,
-                       NULL);
-}
+/* One stdin pump for Sys.readLine (want < 0) and Sys.read (want >= 0
+ * bytes). Both park on poll, retry on EAGAIN / EINTR, and share g_inbuf. */
+typedef struct {
+  int64_t want;
+} StdinReadSt;
 
 static int inbuf_take_n(SysResult *r, size_t n) {
   if (g_inlen < n)
@@ -220,97 +142,121 @@ static int inbuf_take_n(SysResult *r, size_t n) {
   return 1;
 }
 
-static void *sys_try_n(void *env) {
-  size_t n = (size_t)sz_unbox_i64(env);
+static int stdin_take(SysResult *r, const StdinReadSt *st) {
+  if (st->want < 0)
+    return inbuf_take_line(r);
+  return inbuf_take_n(r, (size_t)st->want);
+}
+
+static void *stdin_try(void *env) {
+  StdinReadSt *st = (StdinReadSt *)env;
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
-  if (inbuf_take_n(r, n))
+  if (stdin_take(r, st))
     return r;
   r->retry = 1;
   return r;
 }
 
-static void *sys_read_more_n(void *env) {
-  size_t want = (size_t)sz_unbox_i64(env);
+static void *stdin_read_more(void *env) {
+  StdinReadSt *st = (StdinReadSt *)env;
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   char tmp[256];
   ssize_t n;
-  n = read(STDIN_FILENO, tmp, sizeof tmp);
+  for (;;) {
+    n = read(STDIN_FILENO, tmp, sizeof tmp);
+    if (n < 0 && errno == EINTR)
+      continue;
+    break;
+  }
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
     r->retry = 1;
     return r;
   }
   if (n < 0) {
     r->is_err = 1;
-    r->as.err = sz_error_new(3, "Sys.read: read failed");
+    r->as.err = sz_error_new(3, st->want < 0 ? "Sys.readLine: read failed"
+                                             : "Sys.read: read failed");
     return r;
   }
   if (n == 0) {
-    size_t take = g_inlen < want ? g_inlen : want;
-    r->is_err = 0;
-    r->as.ok = sz_string_from_bytes(g_inbuf ? g_inbuf : "", take);
-    if (take < g_inlen)
-      memmove(g_inbuf, g_inbuf + take, g_inlen - take);
-    g_inlen -= take;
-    return r;
+    /* EOF. readLine drains the rest; read(n) takes up to want bytes. */
+    if (st->want < 0) {
+      inbuf_take_eof(r);
+      return r;
+    }
+    {
+      size_t take = g_inlen < (size_t)st->want ? g_inlen : (size_t)st->want;
+      r->is_err = 0;
+      r->as.ok = sz_string_from_bytes(g_inbuf ? g_inbuf : "", take);
+      if (take < g_inlen)
+        memmove(g_inbuf, g_inbuf + take, g_inlen - take);
+      g_inlen -= take;
+      return r;
+    }
   }
   if (g_inlen + (size_t)n > g_incap)
     inbuf_grow(g_inlen + (size_t)n);
   memcpy(g_inbuf + g_inlen, tmp, (size_t)n);
   g_inlen += (size_t)n;
-  if (inbuf_take_n(r, want))
+  if (stdin_take(r, st))
     return r;
   r->retry = 1;
   return r;
 }
 
-static SzIo *sys_poll_n(void *value, void *env);
+static SzIo *stdin_poll(void *value, void *env);
 
-static SzIo *sys_unwrap_n(void *value, void *env) {
+/* A retry result re-parks on stdin; anything else unwraps. */
+static SzIo *stdin_unwrap(void *value, void *env) {
   SysResult *r = (SysResult *)value;
   if (r && r->retry) {
     sz_release(r);
-    return sys_poll_n(NULL, env);
+    return stdin_poll(NULL, env);
   }
   return unwrap_sys(value, NULL);
 }
 
-static SzIo *sys_after_poll_n(void *value, void *env) {
+static SzIo *stdin_after_poll(void *value, void *env) {
   (void)value;
-  return fm_drop(sz_io_delay(sys_read_more_n, env), sys_unwrap_n, env);
+  return fm_drop(sz_io_delay(stdin_read_more, env), stdin_unwrap, env);
 }
 
-static SzIo *sys_poll_n(void *value, void *env) {
+static SzIo *stdin_poll(void *value, void *env) {
   (void)value;
-  return fm_drop(sz_io_poll_readable(STDIN_FILENO), sys_after_poll_n, env);
+  return fm_drop(sz_io_poll_readable(STDIN_FILENO), stdin_after_poll, env);
 }
 
-static SzIo *sys_after_try_n(void *value, void *env) {
-  SysResult *r = (SysResult *)value;
-  if (r && r->retry) {
-    sz_release(r);
-    return sys_poll_n(NULL, env);
+static SzIo *stdin_after_dispatch(void *value, void *env) {
+  StdinReadSt *st = (StdinReadSt *)env;
+  if ((intptr_t)value) {
+    if (st->want < 0)
+      return sz_testrt_sys_read_line();
+    return sz_testrt_sys_read(st->want);
   }
-  return unwrap_sys(value, NULL);
-}
-
-static SzIo *sys_after_dispatch_n(void *value, void *env) {
-  int64_t n = sz_unbox_i64(env);
-  if ((intptr_t)value)
-    return sz_testrt_sys_read(n);
-  if (n <= 0) {
+  if (st->want == 0) {
     SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
     r->as.ok = sz_string_from_cstr("");
     return unwrap_sys(r, NULL);
   }
-  return fm_drop(sz_io_delay(sys_try_n, env), sys_after_try_n, env);
+  return fm_drop(sz_io_delay(stdin_try, env), stdin_unwrap, env);
+}
+
+static SzIo *stdin_read_io(int64_t want) {
+  StdinReadSt *st = (StdinReadSt *)rc_box_zero(sizeof(StdinReadSt));
+  SzIo *io;
+  st->want = want;
+  io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL), stdin_after_dispatch,
+               st);
+  sz_release(st);
+  return io;
+}
+
+SzIo *sz_sys_read_line(void) {
+  return stdin_read_io(-1);
 }
 
 SzIo *sz_sys_read(int64_t n) {
-  void *nbox = sz_box_i64(n < 0 ? 0 : n);
-  SzIo *io = fm_drop(sz_io_delay(sys_fake_dispatch, NULL), sys_after_dispatch_n,
-                     nbox);
-  sz_release(nbox);
-  return io;
+  return stdin_read_io(n < 0 ? 0 : n);
 }
 
 static void *sys_write_result(void *env) {
@@ -663,7 +609,7 @@ typedef struct {
   int in_fd;
   int out_fd;
   int reaped;   /* waitpid collected the child; pid may be reused */
-  int overflow; /* output exceeded the 1 MiB cap; bytes were dropped */
+  int overflow; /* output exceeded the 1 MiB cap; childRead fails */
   char *buf;
   size_t len;
   size_t cap;
@@ -679,12 +625,19 @@ static void child_ignore_sigpipe(void) {
   signal(SIGPIPE, SIG_IGN);
 }
 
-static ChildSlot *child_find(pid_t pid) {
+/* Pids arrive as int64. Reject values that do not fit pid_t: a truncated
+ * cast can name the wrong process. 4294967295 truncates to -1 and turns
+ * kill(2) into a broadcast to every process we own. */
+static int sys_pid_ok(int64_t pid) {
+  return pid > 0 && pid <= (int64_t)INT_MAX;
+}
+
+static ChildSlot *child_find(int64_t pid) {
   int i;
-  if (pid <= 0)
+  if (!sys_pid_ok(pid))
     return NULL;
   for (i = 0; i < CHILD_MAX; i++) {
-    if (g_children[i].pid == pid)
+    if (g_children[i].pid == (pid_t)pid)
       return &g_children[i];
   }
   return NULL;
@@ -741,7 +694,7 @@ static void child_gc(void) {
   }
 }
 
-static void child_drop_pid(pid_t pid) {
+static void child_drop_pid(int64_t pid) {
   ChildSlot *c = child_find(pid);
   if (c)
     child_clear(c);
@@ -851,7 +804,7 @@ static void *sys_alive_result(void *env) {
     r->as.ok = sz_box_i64(sz_testrt_proc_alive(pid));
     return r;
   }
-  c = child_find((pid_t)pid);
+  c = child_find(pid);
   if (c) {
     /* Our child. child_gc reaped it when dead. */
     r->as.ok = sz_box_i64(c->reaped ? 0 : 1);
@@ -859,7 +812,7 @@ static void *sys_alive_result(void *env) {
   }
   /* Not a spawned child. Probe with kill(pid, 0). A waitpid here would reap
    * a child owned by other code and report a live non-child as dead. */
-  if (pid > 0 && (kill((pid_t)pid, 0) == 0 || errno != ESRCH))
+  if (sys_pid_ok(pid) && (kill((pid_t)pid, 0) == 0 || errno != ESRCH))
     r->as.ok = sz_box_i64(1);
   else
     r->as.ok = sz_box_i64(0);
@@ -884,12 +837,12 @@ static void *sys_kill_result(void *env) {
     return r;
   }
   {
-    ChildSlot *c = child_find((pid_t)pid);
+    ChildSlot *c = child_find(pid);
     int status = 0;
     pid_t w = 0;
     /* Skip SIGTERM for a child that child_gc already reaped. Its pid may
      * name a new process now. */
-    if (!(c && c->reaped) && pid > 0 && kill((pid_t)pid, SIGTERM) != 0 &&
+    if (!(c && c->reaped) && sys_pid_ok(pid) && kill((pid_t)pid, SIGTERM) != 0 &&
         errno != ESRCH) {
       r->is_err = 1;
       r->as.err = sz_error_new(3, "Sys.kill: kill failed");
@@ -897,13 +850,13 @@ static void *sys_kill_result(void *env) {
     }
     if (c)
       exec_close_fd(&c->in_fd);
-    if (pid > 0) {
+    if (sys_pid_ok(pid)) {
       do {
         w = waitpid((pid_t)pid, &status, WNOHANG);
       } while (w < 0 && errno == EINTR);
     }
-    if (w > 0 || (w < 0 && errno == ECHILD) || pid <= 0)
-      child_drop_pid((pid_t)pid);
+    if (w > 0 || (w < 0 && errno == ECHILD) || !sys_pid_ok(pid))
+      child_drop_pid(pid);
   }
   return r;
 }
@@ -954,7 +907,7 @@ static SzIo *child_write_after_try(void *value, void *env) {
     ChildSlot *c;
     sz_release(r);
     child_gc();
-    c = child_find((pid_t)st->pid);
+    c = child_find(st->pid);
     if (!c || c->in_fd < 0)
       return sz_io_fail_cstr("Sys.childWrite: stdin closed");
     return fm_drop(sz_io_poll_writable(c->in_fd), child_write_pump, st);
@@ -969,7 +922,7 @@ static void *child_write_try(void *env) {
   const char *p;
   size_t n;
   child_gc();
-  c = child_find((pid_t)st->pid);
+  c = child_find(st->pid);
   if (!c) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.childWrite: unknown pid");
@@ -1065,7 +1018,7 @@ static SzIo *child_read_after_try(void *value, void *env) {
     ChildSlot *c;
     sz_release(r);
     child_gc();
-    c = child_find((pid_t)st->pid);
+    c = child_find(st->pid);
     if (!c)
       return sz_io_fail_cstr("Sys.childRead: unknown pid");
     if (c->out_fd < 0)
@@ -1080,7 +1033,7 @@ static void *child_read_try(void *env) {
   ChildSlot *c;
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   child_gc();
-  c = child_find((pid_t)st->pid);
+  c = child_find(st->pid);
   if (!c) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.childRead: unknown pid");
@@ -1143,7 +1096,7 @@ static void *child_close_try(void *env) {
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   ChildSlot *c;
   child_gc();
-  c = child_find((pid_t)pid);
+  c = child_find(pid);
   /* A child that already exited is reclaimed by child_gc. Its stdin is
    * closed, so close succeeds. Sys.kill tolerates ESRCH the same way. */
   if (c)
