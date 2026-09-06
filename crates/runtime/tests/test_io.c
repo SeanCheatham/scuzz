@@ -33,6 +33,16 @@ static SzString *test_list_join(SzList *xs, const char *sep) {
   return out;
 }
 
+static int map_test_depth(SzMap *m) {
+  int l;
+  int r;
+  if (!m)
+    return 0;
+  l = map_test_depth(m->left);
+  r = map_test_depth(m->right);
+  return 1 + (l > r ? l : r);
+}
+
 static void sleep_us(long us) {
   struct timespec ts;
   if (us <= 0)
@@ -10982,6 +10992,56 @@ int main(void) {
     sz_string_free(kx);
     sz_string_free(ky);
     sz_string_free(kz);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Balanced map: sorted inserts stay shallow. Remove stays balanced.
+   * The old tree keeps its entries (persistence). */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzMap *m = NULL;
+    SzMap *next;
+    int64_t i;
+    sz_alloc_stats(&base_bytes, &base_count);
+    for (i = 0; i < 10000; i++) {
+      void *k = sz_box_i64(i);
+      next = sz_map_set(m, k, NULL, 0);
+      sz_release(k);
+      sz_release(m);
+      m = next;
+    }
+    assert(sz_map_size(m) == 10000);
+    /* Weight balance keeps height near 2*log2(n). 34 covers 10000. */
+    assert(map_test_depth(m) <= 34);
+    for (i = 0; i < 10000; i += 97) {
+      void *k = sz_box_i64(i);
+      assert(sz_map_contains(m, k) == 1);
+      sz_release(k);
+    }
+    {
+      SzMap *half = m;
+      sz_retain(half);
+      for (i = 0; i < 10000; i += 2) {
+        void *k = sz_box_i64(i);
+        next = sz_map_remove(half, k);
+        sz_release(k);
+        sz_release(half);
+        half = next;
+      }
+      assert(sz_map_size(half) == 5000);
+      assert(map_test_depth(half) <= 34);
+      for (i = 1; i < 10000; i += 194) {
+        void *k = sz_box_i64(i);
+        assert(sz_map_contains(half, k) == 1);
+        sz_release(k);
+      }
+      sz_release(half);
+    }
+    assert(sz_map_size(m) == 10000);
+    sz_release(m);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
