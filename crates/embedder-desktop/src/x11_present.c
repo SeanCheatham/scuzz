@@ -160,6 +160,17 @@ char *sz_embedder_clipboard_get(void) {
     while (XPending(g_dpy)) {
       XEvent ev;
       XNextEvent(g_dpy, &ev);
+      if (ev.type == DestroyNotify ||
+          (ev.type == ClientMessage &&
+           (Atom)ev.xclient.data.l[0] == g_wm_delete)) {
+        /* Do not eat a close request while the paste reply is pending. */
+        char *fallback = g_clip ? clip_dup(g_clip) : NULL;
+        g_user_quit = 1;
+        if (ev.type == DestroyNotify)
+          g_win = 0;
+        sz_embedder_shutdown();
+        return fallback;
+      }
       if (ev.type == SelectionRequest)
         x11_serve_selection(&ev.xselectionrequest);
       else if (ev.type == SelectionClear)
@@ -632,8 +643,8 @@ static int ensure_window(const char *title, int width, int height) {
   }
   XSelectInput(g_dpy, g_win,
                ExposureMask | StructureNotifyMask | KeyPressMask |
-                   ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-                   Button1MotionMask);
+                   KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
+                   PointerMotionMask | Button1MotionMask);
   XMapWindow(g_dpy, g_win);
   g_gc = DefaultGC(g_dpy, screen);
 
@@ -721,8 +732,15 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
   while (XPending(g_dpy)) {
     XEvent ev;
     XNextEvent(g_dpy, &ev);
+    /* Give the input method first claim on key events. */
+    if (XFilterEvent(&ev, None))
+      continue;
     if (ev.type == DestroyNotify) {
       g_user_quit = 1;
+      /* The window is already gone. Skip XDestroyWindow in shutdown.
+       * The async BadWindow error would hit the default X error handler
+       * and exit the process. */
+      g_win = 0;
       sz_embedder_shutdown();
       return 1;
     }
