@@ -13422,6 +13422,66 @@ static void test_property_missing_signal_panics(void) {
   assert_missing_aborts(missing_timeline_int);
 }
 
+static SzView *runtime_env_factory(void *env) {
+  (void)env;
+  return sz_view_text("hi");
+}
+
+/* Run fn in a forked child with stderr captured. Report the exit status
+   (0 = clean, 1 = SIGABRT) through status and the stderr text in err. */
+static void run_child(void (*fn)(void), int *aborted, char *err, size_t cap) {
+  int fds[2];
+  ssize_t n;
+  pid_t pid;
+  int st = 0;
+
+  assert(pipe(fds) == 0);
+  fflush(NULL);
+  pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    dup2(fds[1], STDERR_FILENO);
+    close(fds[0]);
+    close(fds[1]);
+    fn();
+    _exit(0);
+  }
+  close(fds[1]);
+  n = read(fds[0], err, cap - 1);
+  close(fds[0]);
+  if (n < 0)
+    n = 0;
+  err[n] = '\0';
+  assert(waitpid(pid, &st, 0) == pid);
+  *aborted = WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT;
+}
+
+static void runtime_env_bad(void) {
+  setenv("SCUZZ_UI_RUNTIME", "deskop", 1);
+  (void)sz_io_unsafe_run(sz_ui_run_rebuild(runtime_env_factory, NULL));
+}
+
+static void runtime_env_upper_desktop(void) {
+  setenv("SCUZZ_UI_RUNTIME", "DESKTOP", 1);
+  (void)sz_io_unsafe_run(sz_ui_run_rebuild(runtime_env_factory, NULL));
+}
+
+static void test_runtime_env_parse(void) {
+  char err[4096];
+  int aborted;
+
+  /* An unknown value must abort, not silently run Headless. */
+  run_child(runtime_env_bad, &aborted, err, sizeof err);
+  assert(aborted);
+  assert(strstr(err, "SCUZZ_UI_RUNTIME must be headless, desktop, or mobile"));
+
+  /* Case does not matter. DESKTOP mounts the Desktop runtime. */
+  run_child(runtime_env_upper_desktop, &aborted, err, sizeof err);
+  assert(!aborted);
+  assert(strstr(err, "UiRuntime.Desktop mounted"));
+  unsetenv("SCUZZ_UI_RUNTIME");
+}
+
 static void test_signal_list_get_survives_set(void) {
   SzSignalList *items;
   SzList *old;
@@ -15484,6 +15544,7 @@ int main(void) {
   test_property_signal_list_at();
   test_property_signal_int();
   test_property_missing_signal_panics();
+  test_runtime_env_parse();
   test_signal_list_get_survives_set();
   test_signal_list_record_dump();
   test_property_signal_str();
