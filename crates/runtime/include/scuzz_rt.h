@@ -788,13 +788,15 @@ void sz_list_free(SzList *xs);
 /* Join string cells with `sep`. A null cell is empty. Other heads panic. */
 SzString *sz_list_join(const SzList *xs, const SzString *sep);
 
-/* Persistent Map / Set (NULL = empty). key_kind 0 = boxed i64, 1 = String. */
+/* Persistent Map / Set (NULL = empty). Weight-balanced by subtree count.
+ * key_kind 0 = boxed i64, 1 = String. */
 struct SzMap {
   void *key;
   void *val;
   struct SzMap *left;
   struct SzMap *right;
   int32_t key_kind;
+  int64_t size;
 };
 SzMap *sz_map_empty(void);
 /* Empty insert infers kind from `key`. A non-empty tree keeps
@@ -812,6 +814,7 @@ SzList *sz_map_keys(SzMap *m);
 SzList *sz_map_values(SzMap *m);
 /* Inorder `(K, V)` pairs as a new list. Empty is empty. */
 SzList *sz_map_to_list(SzMap *m);
+/* Entry count. O(1) from the cached subtree count. */
 int64_t sz_map_size(SzMap *m);
 /* Set algebra. Values stay null. Empty `b` retains `a` for union/diff. */
 SzMap *sz_set_union(SzMap *a, SzMap *b);
@@ -833,7 +836,7 @@ int64_t sz_map_forall(SzMap *m, SzListPred pred, void *env);
 /* Keep keys that match `pred`. Empty stays empty. */
 SzMap *sz_set_filter(SzMap *s, SzListPred pred, void *env);
 /* Map each key. Mapper returns +1. Kind comes from the first mapped
- * key. `key_kind` is unused then. Duplicate keys collapse. Empty stays
+ * key. `key_kind` is unused. Duplicate keys collapse. Empty stays
  * empty. */
 SzMap *sz_set_map(SzMap *s, SzListMapFn fn, void *env, int32_t key_kind);
 /* 1 when any key matches `pred`. Empty is 0. */
