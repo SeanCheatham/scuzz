@@ -55,6 +55,11 @@ static XIM g_xim;
 static XIC g_xic;
 #endif
 
+/* Handle one X event. Returns nonzero when the window session ended
+ * (destroy or WM close); the caller must stop using g_dpy/g_win.
+ * Defined below; the clipboard wait needs it before its definition. */
+static int x11_dispatch_event(XEvent *ev);
+
 static char *clip_dup(const char *s) {
   size_t n;
   char *out;
@@ -79,21 +84,24 @@ static void x11_clip_atoms(void) {
 
 static void x11_serve_selection(XSelectionRequestEvent *req) {
   XEvent notify;
+  Atom prop;
   int ok = 0;
   if (!req || !g_dpy)
     return;
   x11_clip_atoms();
+  /* ICCCM: obsolete clients send None; answer on the target property. */
+  prop = req->property == None ? req->target : req->property;
   if (req->target == g_atom_targets) {
     Atom targets[3];
     targets[0] = g_atom_targets;
     targets[1] = g_atom_utf8;
     targets[2] = XA_STRING;
-    XChangeProperty(g_dpy, req->requestor, req->property, XA_ATOM, 32,
+    XChangeProperty(g_dpy, req->requestor, prop, XA_ATOM, 32,
                     PropModeReplace, (unsigned char *)targets, 3);
     ok = 1;
   } else if ((req->target == g_atom_utf8 || req->target == XA_STRING) &&
              g_clip) {
-    XChangeProperty(g_dpy, req->requestor, req->property, req->target, 8,
+    XChangeProperty(g_dpy, req->requestor, prop, req->target, 8,
                     PropModeReplace, (unsigned char *)g_clip,
                     (int)strlen(g_clip));
     ok = 1;
@@ -104,7 +112,7 @@ static void x11_serve_selection(XSelectionRequestEvent *req) {
   notify.xselection.requestor = req->requestor;
   notify.xselection.selection = req->selection;
   notify.xselection.target = req->target;
-  notify.xselection.property = ok ? req->property : None;
+  notify.xselection.property = ok ? prop : None;
   notify.xselection.time = req->time;
   XSendEvent(g_dpy, req->requestor, True, NoEventMask, &notify);
 }
@@ -124,25 +132,73 @@ int sz_embedder_clipboard_set(const char *text) {
   return 1;
 }
 
+/* Read a selection property. Large selections do not fit one request:
+ * read in chunks until the owner has no more bytes, then delete the
+ * property (ICCCM leaves the delete to the requestor). */
 static char *x11_read_prop(Atom prop) {
-  Atom type = None;
-  int fmt = 0;
-  unsigned long nitems = 0;
-  unsigned long after = 0;
-  unsigned char *data = NULL;
-  char *out;
+  long offset = 0;
+  size_t len = 0;
+  size_t cap = 0;
+  char *out = NULL;
   if (!g_dpy || !g_win || prop == None)
     return NULL;
-  if (XGetWindowProperty(g_dpy, g_win, prop, 0, 65536, True, AnyPropertyType,
-                         &type, &fmt, &nitems, &after, &data) != Success ||
-      !data)
-    return NULL;
-  out = (char *)malloc(nitems + 1);
-  if (out) {
-    memcpy(out, data, nitems);
-    out[nitems] = '\0';
+  for (;;) {
+    Atom type = None;
+    int fmt = 0;
+    unsigned long nitems = 0;
+    unsigned long after = 0;
+    unsigned char *data = NULL;
+    if (XGetWindowProperty(g_dpy, g_win, prop, offset, 16384, False,
+                           AnyPropertyType, &type, &fmt, &nitems, &after,
+                           &data) != Success) {
+      free(out);
+      return NULL;
+    }
+    if (fmt != 8) {
+      /* UTF8_STRING / STRING are 8-bit. Do not guess at other formats. */
+      if (data)
+        XFree(data);
+      free(out);
+      return NULL;
+    }
+    if (nitems > 0 && data) {
+      if (len + nitems + 1 > cap) {
+        size_t ncap = cap ? cap : 4096;
+        char *nb;
+        while (ncap < len + nitems + 1) {
+          if (ncap > SIZE_MAX / 2) {
+            XFree(data);
+            free(out);
+            return NULL;
+          }
+          ncap *= 2;
+        }
+        nb = (char *)realloc(out, ncap);
+        if (!nb) {
+          XFree(data);
+          free(out);
+          return NULL;
+        }
+        out = nb;
+        cap = ncap;
+      }
+      memcpy(out + len, data, nitems);
+      len += nitems;
+    }
+    if (data)
+      XFree(data);
+    if (after == 0)
+      break;
+    offset += (long)((nitems + 3) / 4);
   }
-  XFree(data);
+  XDeleteProperty(g_dpy, g_win, prop);
+  if (!out) {
+    out = (char *)malloc(1);
+    if (out)
+      out[0] = '\0';
+    return out;
+  }
+  out[len] = '\0';
   return out;
 }
 
@@ -160,22 +216,7 @@ char *sz_embedder_clipboard_get(void) {
     while (XPending(g_dpy)) {
       XEvent ev;
       XNextEvent(g_dpy, &ev);
-      if (ev.type == DestroyNotify ||
-          (ev.type == ClientMessage &&
-           (Atom)ev.xclient.data.l[0] == g_wm_delete)) {
-        /* Do not eat a close request while the paste reply is pending. */
-        char *fallback = g_clip ? clip_dup(g_clip) : NULL;
-        g_user_quit = 1;
-        if (ev.type == DestroyNotify)
-          g_win = 0;
-        sz_embedder_shutdown();
-        return fallback;
-      }
-      if (ev.type == SelectionRequest)
-        x11_serve_selection(&ev.xselectionrequest);
-      else if (ev.type == SelectionClear)
-        g_clip_own = 0;
-      else if (ev.type == SelectionNotify) {
+      if (ev.type == SelectionNotify) {
         char *got = NULL;
         if (ev.xselection.property != None)
           got = x11_read_prop(ev.xselection.property);
@@ -183,6 +224,10 @@ char *sz_embedder_clipboard_get(void) {
           return got;
         return g_clip ? clip_dup(g_clip) : NULL;
       }
+      /* Dispatch every other event the same way present() does. A paste
+       * wait must not eat key presses, clicks, or close requests. */
+      if (x11_dispatch_event(&ev))
+        return NULL; /* shutdown ran; g_clip is freed */
     }
     {
       struct timespec ts;
@@ -292,6 +337,18 @@ int sz_embedder_poll_event(SzInputEvent *out) {
 
 static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button) {
   SzInputEvent ev;
+  /* Coalesce consecutive moves. A motion storm must not fill the queue
+   * and starve key events. */
+  if (phase == SZ_POINTER_MOVE && g_q_head != g_q_tail) {
+    SzInputEvent *last = &g_queue[(g_q_tail + EVENT_CAP - 1) % EVENT_CAP];
+    if (last->kind == SZ_INPUT_POINTER &&
+        last->pointer_phase == SZ_POINTER_MOVE &&
+        last->pointer_button == button) {
+      last->x = x;
+      last->y = y;
+      return;
+    }
+  }
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_POINTER;
   ev.pointer_phase = phase;
@@ -331,7 +388,7 @@ static void stash_text_only(const char *text, const char **out) {
 static int __attribute__((unused)) enqueue_compose(const char *text) {
   SzInputEvent ev;
   const char *t;
-  if (q_full())
+  if (q_full() || text_slot_queued(g_text_bufs[g_text_i]))
     return 0;
   stash_text_only(text, &t);
   memset(&ev, 0, sizeof(ev));
@@ -343,7 +400,7 @@ static int __attribute__((unused)) enqueue_compose(const char *text) {
 static int __attribute__((unused)) enqueue_text_edit(const char *text) {
   SzInputEvent ev;
   const char *t;
-  if (q_full())
+  if (q_full() || text_slot_queued(g_text_bufs[g_text_i]))
     return 0;
   stash_text_only(text ? text : "", &t);
   memset(&ev, 0, sizeof(ev));
@@ -663,18 +720,174 @@ static int ensure_window(const char *title, int width, int height) {
     return 0;
   }
 
-  /* Wait for MapNotify so the first frame is visible. */
-  for (;;) {
-    XEvent ev;
-    XNextEvent(g_dpy, &ev);
-    if (ev.type == MapNotify)
-      break;
+  /* Wait for MapNotify so the first frame is visible. Bound the wait:
+   * a WM that never maps must not hang startup. */
+  {
+    int mapped = 0;
+    int i;
+    for (i = 0; i < 500 && !mapped; i++) {
+      while (XPending(g_dpy)) {
+        XEvent ev;
+        XNextEvent(g_dpy, &ev);
+        if (ev.type == MapNotify) {
+          mapped = 1;
+          break;
+        }
+        if (ev.type == DestroyNotify) {
+          /* The window is already gone. Skip XDestroyWindow in shutdown. */
+          g_win = 0;
+          sz_embedder_shutdown();
+          return 0;
+        }
+      }
+      if (!mapped) {
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 2000000L; /* 2 ms */
+        nanosleep(&ts, NULL);
+      }
+    }
+    /* Unmapped after 1 s: present anyway. The blit queues in the server. */
   }
 
   x11_xim_open();
   g_ready = 1;
   fprintf(stderr, "scuzz embedder: X11 window %dx%d\n", width, height);
   return 1;
+}
+
+static void x11_handle_key_release(XKeyEvent *key) {
+  if (!key)
+    return;
+  if (XEventsQueued(g_dpy, QueuedAfterReading) > 0) {
+    XEvent nev;
+    XPeekEvent(g_dpy, &nev);
+    if (nev.type == KeyPress && nev.xkey.keycode == key->keycode &&
+        nev.xkey.time == key->time) {
+      g_key_repeat_pending = 1;
+      return;
+    }
+  }
+  if (g_key_held && key->keycode == g_held_keycode)
+    g_key_held = 0;
+}
+
+static void x11_handle_key_press(XKeyEvent *key) {
+  KeySym unshifted;
+  KeySym keysym;
+  Status xstatus = XLookupBoth;
+  char buf[128];
+  char name[KEY_NAME_LEN];
+  char utf8[TEXT_LEN];
+  int nkey = 0;
+  int mods = 0;
+  int repeat = g_key_repeat_pending;
+  if (!key)
+    return;
+  g_key_repeat_pending = 0;
+  if (g_key_held && key->keycode == g_held_keycode)
+    repeat = 1;
+  g_held_keycode = key->keycode;
+  g_key_held = 1;
+  unshifted = XLookupKeysym(key, 0);
+  if (x11_is_modifier(unshifted))
+    return;
+  buf[0] = '\0';
+#if SCUZZ_HAVE_XIM
+  if (g_xic)
+    nkey = Xutf8LookupString(g_xic, key, buf, (int)sizeof(buf) - 1, &keysym,
+                             &xstatus);
+  else
+    nkey = XLookupString(key, buf, (int)sizeof(buf) - 1, &keysym, NULL);
+#else
+  nkey = XLookupString(key, buf, (int)sizeof(buf) - 1, &keysym, NULL);
+  (void)xstatus;
+#endif
+  if (nkey < 0)
+    nkey = 0;
+  buf[nkey] = '\0';
+  x11_key_name(unshifted, name, sizeof name);
+  utf8[0] = '\0';
+#if SCUZZ_HAVE_XIM
+  if (xstatus == XLookupChars || xstatus == XLookupBoth) {
+    if (buf[0]) {
+      snprintf(utf8, sizeof utf8, "%s", buf);
+      enqueue_text_edit(utf8);
+      return;
+    }
+  }
+#endif
+  if (!x11_key_no_insert(name)) {
+    latin1_to_utf8(buf, nkey, utf8, sizeof utf8);
+    if (utf8[0] && (unsigned char)utf8[0] < 32)
+      utf8[0] = '\0';
+  }
+  if (key->state & ShiftMask)
+    mods |= SZ_KEY_SHIFT;
+  if (key->state & ControlMask)
+    mods |= SZ_KEY_CTRL;
+  if (key->state & Mod1Mask)
+    mods |= SZ_KEY_ALT;
+  if (key->state & Mod4Mask)
+    mods |= SZ_KEY_CMD;
+  enqueue_key(name, utf8, mods, repeat);
+}
+
+static int x11_dispatch_event(XEvent *ev) {
+  if (!ev || !g_dpy)
+    return 0;
+  /* Give the input method first claim on key events. */
+  if (XFilterEvent(ev, None))
+    return 0;
+  if (ev->type == DestroyNotify) {
+    g_user_quit = 1;
+    /* The window is already gone. Skip XDestroyWindow in shutdown.
+     * The async BadWindow error would hit the default X error handler
+     * and exit the process. */
+    g_win = 0;
+    sz_embedder_shutdown();
+    return 1;
+  }
+  if (ev->type == ClientMessage &&
+      (Atom)ev->xclient.data.l[0] == g_wm_delete) {
+    g_user_quit = 1;
+    sz_embedder_shutdown();
+    return 1;
+  }
+  if (ev->type == SelectionRequest)
+    x11_serve_selection(&ev->xselectionrequest);
+  else if (ev->type == SelectionClear)
+    g_clip_own = 0;
+  else if (ev->type == ButtonPress && ev->xbutton.button == 1)
+    enqueue_pointer(SZ_POINTER_DOWN, (float)ev->xbutton.x, (float)ev->xbutton.y,
+                    1);
+  else if (ev->type == ButtonPress && ev->xbutton.button == 3)
+    enqueue_pointer(SZ_POINTER_DOWN, (float)ev->xbutton.x, (float)ev->xbutton.y,
+                    3);
+  else if (ev->type == MotionNotify) {
+    int button = 0;
+    if (ev->xmotion.state & Button1Mask)
+      button = 1;
+    else if (ev->xmotion.state & Button3Mask)
+      button = 3;
+    enqueue_pointer(SZ_POINTER_MOVE, (float)ev->xmotion.x, (float)ev->xmotion.y,
+                    button);
+  } else if (ev->type == ButtonRelease && ev->xbutton.button == 1)
+    enqueue_pointer(SZ_POINTER_UP, (float)ev->xbutton.x, (float)ev->xbutton.y,
+                    1);
+  else if (ev->type == ButtonRelease && ev->xbutton.button == 3)
+    enqueue_pointer(SZ_POINTER_UP, (float)ev->xbutton.x, (float)ev->xbutton.y,
+                    3);
+  /* Wheel: 4 = up, 5 = down. Positive dy = content up (matches SZ_INPUT_SCROLL). */
+  else if (ev->type == ButtonPress && ev->xbutton.button == 4)
+    enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, 40.f);
+  else if (ev->type == ButtonPress && ev->xbutton.button == 5)
+    enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, -40.f);
+  else if (ev->type == KeyRelease)
+    x11_handle_key_release(&ev->xkey);
+  else if (ev->type == KeyPress)
+    x11_handle_key_press(&ev->xkey);
+  return 0;
 }
 
 int sz_embedder_present(const char *title, int point_w, int point_h,
@@ -728,131 +941,12 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
             (unsigned)height);
   XFlush(g_dpy);
 
-  /* Drain pending events: quit/close handled here; input only enqueued. */
+  /* Drain pending events: quit/close shutdown; input only enqueued. */
   while (XPending(g_dpy)) {
     XEvent ev;
     XNextEvent(g_dpy, &ev);
-    /* Give the input method first claim on key events. */
-    if (XFilterEvent(&ev, None))
-      continue;
-    if (ev.type == DestroyNotify) {
-      g_user_quit = 1;
-      /* The window is already gone. Skip XDestroyWindow in shutdown.
-       * The async BadWindow error would hit the default X error handler
-       * and exit the process. */
-      g_win = 0;
-      sz_embedder_shutdown();
+    if (x11_dispatch_event(&ev))
       return 1;
-    }
-    if (ev.type == ClientMessage &&
-        (Atom)ev.xclient.data.l[0] == g_wm_delete) {
-      g_user_quit = 1;
-      sz_embedder_shutdown();
-      return 1;
-    }
-    if (ev.type == SelectionRequest)
-      x11_serve_selection(&ev.xselectionrequest);
-    if (ev.type == SelectionClear)
-      g_clip_own = 0;
-    if (ev.type == ButtonPress && ev.xbutton.button == 1)
-      enqueue_pointer(SZ_POINTER_DOWN, (float)ev.xbutton.x, (float)ev.xbutton.y,
-                      1);
-    if (ev.type == ButtonPress && ev.xbutton.button == 3)
-      enqueue_pointer(SZ_POINTER_DOWN, (float)ev.xbutton.x, (float)ev.xbutton.y,
-                      3);
-    if (ev.type == MotionNotify) {
-      int button = 0;
-      if (ev.xmotion.state & Button1Mask)
-        button = 1;
-      else if (ev.xmotion.state & Button3Mask)
-        button = 3;
-      enqueue_pointer(SZ_POINTER_MOVE, (float)ev.xmotion.x, (float)ev.xmotion.y,
-                      button);
-    }
-    if (ev.type == ButtonRelease && ev.xbutton.button == 1)
-      enqueue_pointer(SZ_POINTER_UP, (float)ev.xbutton.x, (float)ev.xbutton.y,
-                      1);
-    if (ev.type == ButtonRelease && ev.xbutton.button == 3)
-      enqueue_pointer(SZ_POINTER_UP, (float)ev.xbutton.x, (float)ev.xbutton.y,
-                      3);
-    /* Wheel: 4 = up, 5 = down. Positive dy = content up (matches SZ_INPUT_SCROLL). */
-    if (ev.type == ButtonPress && ev.xbutton.button == 4)
-      enqueue_scroll((float)ev.xbutton.x, (float)ev.xbutton.y, 40.f);
-    if (ev.type == ButtonPress && ev.xbutton.button == 5)
-      enqueue_scroll((float)ev.xbutton.x, (float)ev.xbutton.y, -40.f);
-    if (ev.type == KeyRelease) {
-      if (XEventsQueued(g_dpy, QueuedAfterReading) > 0) {
-        XEvent nev;
-        XPeekEvent(g_dpy, &nev);
-        if (nev.type == KeyPress && nev.xkey.keycode == ev.xkey.keycode &&
-            nev.xkey.time == ev.xkey.time) {
-          g_key_repeat_pending = 1;
-          continue;
-        }
-      }
-      if (g_key_held && ev.xkey.keycode == g_held_keycode)
-        g_key_held = 0;
-      continue;
-    }
-    if (ev.type == KeyPress) {
-      KeySym unshifted;
-      KeySym keysym;
-      Status xstatus = XLookupBoth;
-      char buf[128];
-      char name[KEY_NAME_LEN];
-      char utf8[TEXT_LEN];
-      int nkey = 0;
-      int mods = 0;
-      int repeat = g_key_repeat_pending;
-      g_key_repeat_pending = 0;
-      if (g_key_held && ev.xkey.keycode == g_held_keycode)
-        repeat = 1;
-      g_held_keycode = ev.xkey.keycode;
-      g_key_held = 1;
-      unshifted = XLookupKeysym(&ev.xkey, 0);
-      if (x11_is_modifier(unshifted))
-        continue;
-      buf[0] = '\0';
-#if SCUZZ_HAVE_XIM
-      if (g_xic)
-        nkey = Xutf8LookupString(g_xic, &ev.xkey, buf, (int)sizeof(buf) - 1,
-                                 &keysym, &xstatus);
-      else
-        nkey = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, &keysym,
-                             NULL);
-#else
-      nkey = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, &keysym, NULL);
-      (void)xstatus;
-#endif
-      if (nkey < 0)
-        nkey = 0;
-      buf[nkey] = '\0';
-      x11_key_name(unshifted, name, sizeof name);
-      utf8[0] = '\0';
-#if SCUZZ_HAVE_XIM
-      if (xstatus == XLookupChars || xstatus == XLookupBoth) {
-        if (buf[0]) {
-          snprintf(utf8, sizeof utf8, "%s", buf);
-          enqueue_text_edit(utf8);
-          continue;
-        }
-      }
-#endif
-      if (!x11_key_no_insert(name)) {
-        latin1_to_utf8(buf, nkey, utf8, sizeof utf8);
-        if (utf8[0] && (unsigned char)utf8[0] < 32)
-          utf8[0] = '\0';
-      }
-      if (ev.xkey.state & ShiftMask)
-        mods |= SZ_KEY_SHIFT;
-      if (ev.xkey.state & ControlMask)
-        mods |= SZ_KEY_CTRL;
-      if (ev.xkey.state & Mod1Mask)
-        mods |= SZ_KEY_ALT;
-      if (ev.xkey.state & Mod4Mask)
-        mods |= SZ_KEY_CMD;
-      enqueue_key(name, utf8, mods, repeat);
-    }
   }
   return 1;
 }
