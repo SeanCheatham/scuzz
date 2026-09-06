@@ -4,7 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Impurity kit: Clock / Random / mem FS / stub Net / Sys console under TestRuntime. */
+/* Impurity kit: Clock / Random / mem FS / stub Net / Sys console under TestRuntime.
+ * Boot replaces fake net stubs, argv, and stdin, and resets fake stdout. */
 
 static SzIo *println_env(void *value, void *env) {
   (void)value;
@@ -76,10 +77,12 @@ static SzIo *after_net(void *value, void *env) {
 }
 
 static SzIo *do_net(void *value, void *env) {
-  SzString *url = sz_string_from_cstr("http://example.test/v1");
-  SzIo *io = sz_net_http_get(url);
+  SzString *url;
+  SzIo *io;
   (void)value;
   (void)env;
+  url = sz_string_from_cstr("http://example.test/v1");
+  io = sz_net_http_get(url);
   sz_release(url);
   return fm_drop(io, after_net, NULL);
 }
@@ -93,20 +96,25 @@ static SzIo *after_fs(void *value, void *env) {
 }
 
 static SzIo *do_fs_read(void *value, void *env) {
-  SzString *path = sz_string_from_cstr("note.txt");
-  SzIo *io = sz_fs_read(path);
+  SzString *path;
+  SzIo *io;
   (void)value;
   (void)env;
+  path = sz_string_from_cstr("note.txt");
+  io = sz_fs_read(path);
   sz_release(path);
   return fm_drop(io, after_fs, NULL);
 }
 
 static SzIo *do_fs_write(void *value, void *env) {
-  SzString *path = sz_string_from_cstr("note.txt");
-  SzString *body = sz_string_from_cstr("kit-note");
-  SzIo *io = sz_fs_write(path, body);
+  SzString *path;
+  SzString *body;
+  SzIo *io;
   (void)value;
   (void)env;
+  path = sz_string_from_cstr("note.txt");
+  body = sz_string_from_cstr("kit-note");
+  io = sz_fs_write(path, body);
   sz_release(path);
   sz_release(body);
   return fm_drop(io, do_fs_read, NULL);
@@ -125,16 +133,10 @@ static SzIo *do_rand(void *value, void *env) {
   return fm_drop(sz_random_next_int(100), after_rand, NULL);
 }
 
-static SzIo *after_sleep(void *value, void *env) {
-  (void)value;
-  (void)env;
-  return do_rand(NULL, NULL);
-}
-
 static SzIo *do_sleep(void *value, void *env) {
   (void)value;
   (void)env;
-  return fm_drop(sz_io_sleep_ms(50), after_sleep, NULL);
+  return fm_drop(sz_io_sleep_ms(50), do_rand, NULL);
 }
 
 static SzIo *after_mono(void *value, void *env) {
