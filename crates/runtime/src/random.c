@@ -1,8 +1,10 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 
-#include <stdio.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Blessed Random. Live seeds once from /dev/urandom. TestRuntime seeds from
  * a caller value. Both paths run xoshiro256**. Bounded ints use Lemire 2019
@@ -34,18 +36,35 @@ void sz_testrt_random_install(uint64_t seed) {
 
 void sz_testrt_random_reset_live(void) { g_fake = 0; }
 
-static uint64_t live_seed(void) {
-  FILE *f = fopen("/dev/urandom", "rb");
+/* OS entropy for one-shot seeds. Reads 8 bytes from /dev/urandom with a
+ * full-read loop. Falls back to a realtime mix only when the read fails.
+ * An all-zero read is a valid seed, not a failure. net.c uses this too. */
+uint64_t sz_os_entropy_u64(void) {
   uint64_t s = 0;
-  if (f) {
-    if (fread(&s, sizeof(s), 1, f) != 1)
-      s = 0;
-    fclose(f);
+  int ok = 0;
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    size_t got = 0;
+    while (got < sizeof s) {
+      ssize_t n = read(fd, (char *)&s + got, sizeof s - got);
+      if (n > 0) {
+        got += (size_t)n;
+        continue;
+      }
+      if (n < 0 && errno == EINTR)
+        continue;
+      break;
+    }
+    ok = got == sizeof s;
+    close(fd);
   }
-  if (s == 0) {
+  if (!ok) {
     struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    s = ((uint64_t)ts.tv_sec << 32) ^ (uint64_t)ts.tv_nsec ^ 0x9e3779b97f4a7c15ULL;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0)
+      s = ((uint64_t)ts.tv_sec << 32) ^ (uint64_t)ts.tv_nsec ^
+          0x9e3779b97f4a7c15ULL;
+    else
+      s = 0x9e3779b97f4a7c15ULL;
   }
   return s;
 }
@@ -71,7 +90,7 @@ static uint64_t next_u64(void) {
     static int inited = 0;
     static uint64_t live[4];
     if (!inited) {
-      seed_state(live, live_seed());
+      seed_state(live, sz_os_entropy_u64());
       inited = 1;
     }
     return xoshiro_next(live);
