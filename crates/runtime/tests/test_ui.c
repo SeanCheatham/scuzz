@@ -13606,6 +13606,114 @@ static void test_signal_name_last_wins(void) {
   sz_signal_int_free(b);
 }
 
+static void test_signal_name_last_wins_per_kind(void) {
+  SzSignalInt *count;
+  SzSignalStr *label;
+  SzString *name;
+  SzString *got;
+
+  /* Names are unique per kind: a str bind must not clear an int bind. */
+  count = sz_signal_int(41);
+  label = sz_signal_str("beans");
+  sz_signal_name(count, "dup");
+  sz_signal_name(label, "dup");
+  name = sz_string_from_cstr("dup");
+  assert(sz_property_signal_int(name) == 41);
+  got = sz_property_signal_str(name);
+  assert(strcmp(sz_string_cstr(got), "beans") == 0);
+  sz_string_free(got);
+  sz_release(name);
+  sz_signal_int_free(count);
+  sz_signal_str_free(label);
+}
+
+static void test_signal_name_unregistered_clears_nothing(void) {
+  SzSignalInt *a;
+  SzSignalInt *b;
+  SzString *name;
+
+  a = sz_signal_int(1);
+  sz_signal_name(a, "keep");
+  /* A wild pointer must not strip the name from a live signal. */
+  b = sz_signal_int(2);
+  sz_signal_int_free(b);
+  sz_signal_name(b, "keep");
+  name = sz_string_from_cstr("keep");
+  assert(sz_property_signal_int(name) == 1);
+  sz_release(name);
+  sz_signal_int_free(a);
+}
+
+static SzString *map_label_int(int64_t v, void *env) {
+  (void)env;
+  return sz_string_from_int(v);
+}
+
+static void test_signal_map_source_free(void) {
+  SzSignalInt *count;
+  SzSignalStr *label;
+  SzSignalInt *other;
+  const char *s;
+
+  count = sz_signal_int(7);
+  label = sz_lang_signal_map(count, map_label_int, NULL, NULL);
+  s = sz_signal_str_get(label);
+  assert(strcmp(s, "7") == 0);
+  /* Freeing the source severs the map. A recycled address must not leak
+     a foreign value into the derived signal. */
+  sz_signal_int_free(count);
+  other = sz_signal_int(99);
+  s = sz_signal_str_get(label);
+  assert(strcmp(s, "7") == 0);
+  sz_signal_int_free(other);
+  sz_signal_str_free(label);
+}
+
+static void test_signal_dump_long_name(void) {
+  SzSignalInt *s;
+  SzString *dump;
+  char big[601];
+  int i;
+
+  for (i = 0; i < 600; i++)
+    big[i] = (char)('a' + (i % 26));
+  big[600] = '\0';
+  s = sz_signal_int(3);
+  sz_signal_name(s, big);
+  dump = sz_signal_dump();
+  /* The full name survives: no fixed-buffer truncation. */
+  assert(strstr(sz_string_cstr(dump), big) != NULL);
+  assert(strstr(sz_string_cstr(dump), "= 3") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_free(s);
+}
+
+static void test_signal_list_mixed_kinds(void) {
+  SzSignalList *items;
+  SzList *xs;
+  SzString *dump;
+  SzString *name;
+  SzString *got;
+
+  /* First head decides the String dump; a non-String head prints empty. */
+  xs = sz_list_cons(sz_string_from_cstr("a"),
+                    sz_list_cons(sz_box_i64(2), sz_list_nil()));
+  items = sz_signal_list(xs);
+  sz_signal_name(items, "mix");
+  dump = sz_signal_dump();
+  assert(strstr(sz_string_cstr(dump), "mix = [\"a\", \"\"]") != NULL);
+  sz_string_free(dump);
+  name = sz_string_from_cstr("mix");
+  got = sz_property_signal_list_at(name, 0);
+  assert(strcmp(sz_string_cstr(got), "a") == 0);
+  sz_string_free(got);
+  got = sz_property_signal_list_at(name, 1);
+  assert(strcmp(sz_string_cstr(got), "") == 0);
+  sz_string_free(got);
+  sz_release(name);
+  sz_signal_list_free(items);
+}
+
 static void test_property_replay_str_list(void) {
   SzSignalStr *draft;
   SzSignalList *items;
@@ -15550,6 +15658,11 @@ int main(void) {
   test_property_signal_str();
   test_signal_dump_escapes();
   test_signal_name_last_wins();
+  test_signal_name_last_wins_per_kind();
+  test_signal_name_unregistered_clears_nothing();
+  test_signal_map_source_free();
+  test_signal_dump_long_name();
+  test_signal_list_mixed_kinds();
   test_property_replay_str_list();
   test_text_field_edit();
   test_view_editor();
