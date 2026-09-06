@@ -251,23 +251,13 @@ static int g_dns_rng_on;
 static int g_test_ns_on;
 static struct sockaddr_in g_test_ns;
 
+uint64_t sz_os_entropy_u64(void); /* random.c */
+
 static void dns_rng_seed(void) {
-  FILE *f;
-  uint64_t s = 0;
+  /* The LCG increment is odd, so state 0 is valid. No zero guard. */
   if (g_dns_rng_on)
     return;
-  f = fopen("/dev/urandom", "rb");
-  if (f) {
-    if (fread(&s, sizeof s, 1, f) != 1)
-      s = 0;
-    fclose(f);
-  }
-  if (s == 0) {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) == 0)
-      s = ((uint64_t)ts.tv_sec << 32) ^ (uint64_t)ts.tv_nsec ^ 0x9e3779b97f4a7c15ULL;
-  }
-  g_dns_rng = s ? s : 1;
+  g_dns_rng = sz_os_entropy_u64();
   g_dns_rng_on = 1;
 }
 

@@ -2,6 +2,7 @@
 #include "scuzz_ui.h"
 #include "rt_util.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2656,9 +2657,18 @@ void sz_testrt_install(void) {
   sz_testrt_clock_install(1);
   rs = getenv("SCUZZ_RAND_SEED");
   if (rs && rs[0]) {
-    unsigned long long parsed = strtoull(rs, NULL, 10);
-    if (parsed != 0)
-      rand_seed = (uint64_t)parsed;
+    char *end = NULL;
+    unsigned long long parsed;
+    errno = 0;
+    parsed = strtoull(rs, &end, 10);
+    /* Unset or 0 keeps 42. Reject a malformed seed loudly: a mistyped repro
+     * seed must not silently run a different stream. */
+    if (errno == 0 && end != rs && *end == '\0') {
+      if (parsed != 0)
+        rand_seed = (uint64_t)parsed;
+    } else {
+      fprintf(stderr, "scuzz: ignoring malformed SCUZZ_RAND_SEED='%s'\n", rs);
+    }
   }
   sz_testrt_random_install(rand_seed);
   sz_testrt_fs_install();

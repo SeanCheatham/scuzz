@@ -24,6 +24,8 @@
 
 static SzIo *pure_drop(void *value);
 
+void sz_testrt_random_reset_live(void); /* random.c; not in the public header */
+
 static SzString *test_list_join(SzList *xs, const char *sep) {
   SzString *s = sz_string_from_cstr(sep ? sep : "");
   SzString *out = sz_list_join(xs, s);
@@ -6072,6 +6074,99 @@ int main(void) {
         sz_release(r.value);
         assert(b[i] == a[i]);
       }
+    }
+
+    /* Degenerate bound: only 0 is in [0, 1). The lo < lim branch is always
+     * taken and the rejection threshold computes to 0. */
+    {
+      int i;
+      sz_testrt_random_install(5);
+      for (i = 0; i < 8; i++) {
+        r = sz_io_unsafe_run(sz_random_next_int(1));
+        assert(r.ok);
+        assert(sz_unbox_i64(r.value) == 0);
+        sz_release(r.value);
+      }
+    }
+
+    /* Bound 2^63-1: Lemire rejects about half of all draws. Small bounds
+     * never reach the rejection loop; this one must. */
+    {
+      int i;
+      int saw_hi = 0;
+      int saw_lo = 0;
+      sz_testrt_random_install(7);
+      for (i = 0; i < 512; i++) {
+        int64_t v;
+        r = sz_io_unsafe_run(sz_random_next_int(INT64_MAX));
+        assert(r.ok);
+        v = sz_unbox_i64(r.value);
+        assert(v >= 0 && v < INT64_MAX);
+        if (v >= ((int64_t)1 << 62))
+          saw_hi = 1;
+        else
+          saw_lo = 1;
+        sz_release(r.value);
+      }
+      assert(saw_hi && saw_lo);
+    }
+
+    /* Chi-square over 16 buckets with a fixed fake seed. Catches gross
+     * bias. The value is deterministic; 37.7 is the 0.999 quantile for
+     * 15 degrees of freedom. */
+    {
+      int64_t buckets[16];
+      int i;
+      double chi2 = 0.0;
+      sz_testrt_random_install(99);
+      for (i = 0; i < 16; i++)
+        buckets[i] = 0;
+      for (i = 0; i < 16000; i++) {
+        r = sz_io_unsafe_run(sz_random_next_int(16));
+        assert(r.ok);
+        buckets[sz_unbox_i64(r.value)]++;
+        sz_release(r.value);
+      }
+      for (i = 0; i < 16; i++) {
+        double d = (double)(buckets[i] - 1000);
+        chi2 += d * d / 1000.0;
+      }
+      assert(chi2 < 37.7);
+    }
+
+    /* Install/reset cycles: the fake stream restarts deterministically,
+     * and the live stream still works after a reset. The live draws seed
+     * from /dev/urandom; only the range is pinned. */
+    {
+      int64_t a0;
+      int64_t a1;
+      sz_testrt_random_install(1234);
+      r = sz_io_unsafe_run(sz_random_next_int((int64_t)1 << 32));
+      assert(r.ok);
+      a0 = sz_unbox_i64(r.value);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_random_next_int((int64_t)1 << 32));
+      assert(r.ok);
+      a1 = sz_unbox_i64(r.value);
+      sz_release(r.value);
+      sz_testrt_random_reset_live();
+      r = sz_io_unsafe_run(sz_random_next_int(10));
+      assert(r.ok);
+      assert(sz_unbox_i64(r.value) >= 0 && sz_unbox_i64(r.value) < 10);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_random_next_int(INT64_MAX));
+      assert(r.ok);
+      assert(sz_unbox_i64(r.value) >= 0 && sz_unbox_i64(r.value) < INT64_MAX);
+      sz_release(r.value);
+      sz_testrt_random_install(1234);
+      r = sz_io_unsafe_run(sz_random_next_int((int64_t)1 << 32));
+      assert(r.ok);
+      assert(sz_unbox_i64(r.value) == a0);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_random_next_int((int64_t)1 << 32));
+      assert(r.ok);
+      assert(sz_unbox_i64(r.value) == a1);
+      sz_release(r.value);
     }
 
     r = sz_io_unsafe_run(sz_random_next_int(0));
