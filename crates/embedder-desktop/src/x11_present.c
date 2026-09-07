@@ -60,6 +60,20 @@ static XIC g_xic;
  * Defined below; the clipboard wait needs it before its definition. */
 static int x11_dispatch_event(XEvent *ev);
 
+/* X errors are async: the default handler exits the process. A clipboard
+ * requestor can die between XChangeProperty and delivery; a stale window
+ * id must not take the app down. Log and continue. */
+static int x11_on_error(Display *dpy, XErrorEvent *err) {
+  char msg[128];
+  if (!dpy || !err)
+    return 0;
+  XGetErrorText(dpy, err->error_code, msg, sizeof msg);
+  fprintf(stderr, "scuzz embedder: X error %d (%s) op %d.%d\n",
+          (int)err->error_code, msg, (int)err->request_code,
+          (int)err->minor_code);
+  return 0;
+}
+
 static char *clip_dup(const char *s) {
   size_t n;
   char *out;
@@ -281,8 +295,11 @@ static int q_full(void) {
 static int text_slot_queued(const char *slot) {
   int i;
   for (i = g_q_head; i != g_q_tail; i = (i + 1) % EVENT_CAP) {
-    if (g_queue[i].kind == SZ_INPUT_KEY &&
-        (g_queue[i].key == slot || g_queue[i].text == slot))
+    const SzInputEvent *ev = &g_queue[i];
+    if (ev->kind == SZ_INPUT_KEY && (ev->key == slot || ev->text == slot))
+      return 1;
+    if ((ev->kind == SZ_INPUT_COMPOSE || ev->kind == SZ_INPUT_TEXT_EDIT) &&
+        ev->text == slot)
       return 1;
   }
   return 0;
@@ -625,6 +642,10 @@ static int frame_bytes(int width, int height, size_t *out) {
   size_t h;
   if (width <= 0 || height <= 0 || !out)
     return 0;
+  /* X11 window geometry is CARD16 on the wire. Bigger sizes truncate in
+   * the protocol and desync the blit from g_w/g_h. Reject them. */
+  if (width > 65535 || height > 65535)
+    return 0;
   w = (size_t)width;
   h = (size_t)height;
   if (w > SIZE_MAX / 4)
@@ -663,21 +684,33 @@ static int ensure_window(const char *title, int width, int height) {
   Visual *vis;
   int depth;
   int screen;
+  char *saved_clip;
 
   if (g_ready && g_w == width && g_h == height)
     return 1;
 
+  /* The clipboard is session state, not window state. Detach it before
+   * shutdown so a size change does not lose copied text, then re-own the
+   * selection on the new window. Every return path restores g_clip; every
+   * shutdown after this point must see g_clip == NULL to avoid a
+   * double free. */
+  saved_clip = g_clip;
+  g_clip = NULL;
   sz_embedder_shutdown();
   g_user_quit = 0;
 
-  if (!frame_bytes(width, height, &need))
+  if (!frame_bytes(width, height, &need)) {
+    g_clip = saved_clip;
     return 0;
+  }
 
   g_dpy = XOpenDisplay(NULL);
   if (!g_dpy) {
     fprintf(stderr, "scuzz embedder: cannot open DISPLAY\n");
+    g_clip = saved_clip;
     return 0;
   }
+  XSetErrorHandler(x11_on_error);
 
   screen = DefaultScreen(g_dpy);
   vis = DefaultVisual(g_dpy, screen);
@@ -710,6 +743,7 @@ static int ensure_window(const char *title, int width, int height) {
   g_img_data = (char *)malloc(need);
   if (!g_img_data) {
     sz_embedder_shutdown();
+    g_clip = saved_clip;
     return 0;
   }
 
@@ -717,6 +751,16 @@ static int ensure_window(const char *title, int width, int height) {
                        (unsigned)width, (unsigned)height, 32, width * 4);
   if (!g_img) {
     sz_embedder_shutdown();
+    g_clip = saved_clip;
+    return 0;
+  }
+  if (g_img->bits_per_pixel != 32) {
+    /* Both blit paths write one uint32_t per pixel. A 16-bit display
+     * would get garbage. Fail loudly instead. */
+    fprintf(stderr, "scuzz embedder: need 32 bits/pixel, got %d\n",
+            g_img->bits_per_pixel);
+    sz_embedder_shutdown();
+    g_clip = saved_clip;
     return 0;
   }
 
@@ -733,10 +777,11 @@ static int ensure_window(const char *title, int width, int height) {
           mapped = 1;
           break;
         }
-        if (ev.type == DestroyNotify) {
-          /* The window is already gone. Skip XDestroyWindow in shutdown. */
-          g_win = 0;
-          sz_embedder_shutdown();
+        /* Dispatch, do not drop: input, close requests, and selection
+         * requests that land during the map wait are still real events. */
+        if (x11_dispatch_event(&ev)) {
+          /* Window died; shutdown already ran. Keep the clipboard. */
+          g_clip = saved_clip;
           return 0;
         }
       }
@@ -752,6 +797,12 @@ static int ensure_window(const char *title, int width, int height) {
 
   x11_xim_open();
   g_ready = 1;
+  g_clip = saved_clip;
+  if (g_clip) {
+    x11_clip_atoms();
+    XSetSelectionOwner(g_dpy, g_atom_clipboard, g_win, CurrentTime);
+    g_clip_own = XGetSelectionOwner(g_dpy, g_atom_clipboard) == g_win;
+  }
   fprintf(stderr, "scuzz embedder: X11 window %dx%d\n", width, height);
   return 1;
 }

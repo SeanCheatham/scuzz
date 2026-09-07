@@ -27,8 +27,11 @@ lib: build/libscuzz_embedder.a
 build/libscuzz_embedder.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-test: lib
-	@echo "embedder-desktop: lib ok (X11 present requires DISPLAY)"
+build/test_headless: tests/test_headless.c build/libscuzz_embedder.a | build
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_headless.c -Lbuild -lscuzz_embedder -lX11 -o $@
+
+test: lib build/test_headless
+	env -u DISPLAY ./build/test_headless
 
 else ifeq ($(UNAME_S),Darwin)
 
