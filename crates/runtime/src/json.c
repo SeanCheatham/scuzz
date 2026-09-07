@@ -131,9 +131,12 @@ static void buf_grow(char **p, size_t n, size_t *cap, size_t need) {
   char *nb;
   if (need <= *cap)
     return;
-  nc = *cap ? *cap * 2 : 64;
-  while (nc < need)
+  nc = *cap ? *cap : 64;
+  while (nc < need) {
+    if (nc > SIZE_MAX / 2)
+      sz_panic("Json: buffer size overflow");
     nc *= 2;
+  }
   nb = (char *)sz_alloc(nc);
   if (*p && n)
     memcpy(nb, *p, n);
@@ -207,6 +210,8 @@ static int jp_hex4(Jp *p, unsigned *cp) {
 }
 
 static void jp_room(char **buf, size_t *cap, size_t n, size_t extra) {
+  if (n > SIZE_MAX - extra - 1)
+    sz_panic("Json: buffer size overflow");
   buf_grow(buf, n, cap, n + extra + 1);
 }
 
@@ -554,6 +559,10 @@ static void jb_fail(Jb *b, const char *msg) {
 static void jb_put(Jb *b, const char *s, size_t n) {
   if (b->err)
     return;
+  if (n > SIZE_MAX - b->n - 1) {
+    jb_fail(b, "Json.stringify: too large");
+    return;
+  }
   buf_grow(&b->p, b->n, &b->cap, b->n + n + 1);
   memcpy(b->p + b->n, s, n);
   b->n += n;
@@ -660,12 +669,17 @@ static void jb_value(Jb *b, const SzAdt *j) {
   }
   case JSON_FLOAT: {
     char tmp[64];
+    int r;
     double x = unbox_f64(pay);
     if (!isfinite(x)) {
       jb_fail(b, "Json.stringify: non-finite");
       break;
     }
-    json_fmt_double(tmp, sizeof tmp, x);
+    r = json_fmt_double(tmp, sizeof tmp, x);
+    if (r < 0 || (size_t)r >= sizeof tmp) {
+      jb_fail(b, "Json.stringify: float format");
+      break;
+    }
     if (!strchr(tmp, '.') && !strchr(tmp, 'e') && !strchr(tmp, 'E'))
       strcat(tmp, ".0");
     jb_puts(b, tmp);
@@ -823,10 +837,8 @@ SzList *sz_json_as_str(SzAdt *j) { return json_as_payload(j, JSON_STR); }
 int64_t sz_json_bool_or(SzAdt *j, int64_t d) {
   SzList *xs = sz_json_as_bool(j);
   int64_t n;
-  if (!xs) {
-    sz_release(xs);
+  if (!xs)
     return d ? 1 : 0;
-  }
   n = sz_unbox_i64(sz_list_head(xs)) ? 1 : 0;
   sz_release(xs);
   return n;
@@ -859,7 +871,6 @@ SzString *sz_json_str_or(SzAdt *j, SzString *d) {
   SzList *xs = sz_json_as_str(j);
   SzString *s;
   if (!xs) {
-    sz_release(xs);
     sz_retain(d);
     return d ? d : sz_string_from_cstr("");
   }
@@ -872,10 +883,8 @@ SzString *sz_json_str_or(SzAdt *j, SzString *d) {
 int64_t sz_json_get_bool(SzAdt *j, SzString *key, int64_t d) {
   SzList *g = sz_json_get(j, key);
   int64_t n;
-  if (!g) {
-    sz_release(g);
+  if (!g)
     return d ? 1 : 0;
-  }
   n = sz_json_bool_or((SzAdt *)sz_list_head(g), d);
   sz_release(g);
   return n;
@@ -884,10 +893,8 @@ int64_t sz_json_get_bool(SzAdt *j, SzString *key, int64_t d) {
 int64_t sz_json_get_int(SzAdt *j, SzString *key, int64_t d) {
   SzList *g = sz_json_get(j, key);
   int64_t n;
-  if (!g) {
-    sz_release(g);
+  if (!g)
     return d;
-  }
   n = sz_json_int_or((SzAdt *)sz_list_head(g), d);
   sz_release(g);
   return n;
@@ -897,7 +904,6 @@ SzString *sz_json_get_str(SzAdt *j, SzString *key, SzString *d) {
   SzList *g = sz_json_get(j, key);
   SzString *s;
   if (!g) {
-    sz_release(g);
     sz_retain(d);
     return d ? d : sz_string_from_cstr("");
   }
@@ -923,10 +929,6 @@ SzAdt *sz_json_merge(SzAdt *a, SzAdt *b) {
   SzList *out;
   SzList *p;
   SzAdt *j;
-  if (!left && !right) {
-    sz_retain(b);
-    return b;
-  }
   if (!left) {
     sz_retain(b);
     return b;
@@ -961,10 +963,8 @@ double sz_json_float_or(SzAdt *j, double d) {
 double sz_json_get_float(SzAdt *j, SzString *key, double d) {
   SzList *g = sz_json_get(j, key);
   double x;
-  if (!g) {
-    sz_release(g);
+  if (!g)
     return d;
-  }
   x = sz_json_float_or((SzAdt *)sz_list_head(g), d);
   sz_release(g);
   return x;

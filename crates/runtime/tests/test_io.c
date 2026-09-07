@@ -3887,6 +3887,174 @@ int main(void) {
     json_expect_err("not-json");
   }
 
+  /* Json malformed tokens, float fraction, escapes, and the depth boundary. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    json_expect_err("[1,]");
+    json_expect_err("{\"a\":1,}");
+    json_expect_err("[,]");
+    json_expect_err("01");
+    json_expect_err("-");
+    json_expect_err("1.");
+    json_expect_err(".5");
+    json_expect_err("1e");
+    json_expect_err("1e+");
+    json_expect_err("truex");
+    json_expect_err("nul");
+    json_expect_err("[nulll]");
+    json_expect_err("[true false]");
+    /* Integral floats keep a fraction so they re-parse as Float. */
+    json_expect_roundtrip("[1.0,100.0,-0.0,1500.0]");
+    /* Escaped control chars round trip as \u00XX. */
+    json_expect_roundtrip("\"\\u0000\\u001f\"");
+    /* The \b short escape normalizes to \u0008 on write. */
+    {
+      SzAdt *pr = json_expect_ok("\"a\\bb\"");
+      SzAdt *sr = sz_json_stringify((SzAdt *)sz_adt_payload(pr));
+      assert(sz_adt_tag(sr) == 1);
+      assert(strcmp(sz_string_cstr((SzString *)sz_adt_payload(sr)),
+                    "\"a\\u0008b\"") == 0);
+      sz_release(sr);
+      sz_release(pr);
+    }
+    /* Depth boundary: 255 nested Arr cells parse and stringify; 256 fail. */
+    {
+      SzAdt *deep = sz_adt_new(0, NULL);
+      int i;
+      for (i = 0; i < 255; i++) {
+        SzList *xs = sz_list_cons(deep, sz_list_nil());
+        sz_release(deep);
+        deep = sz_adt_new(5, xs);
+        sz_release(xs);
+      }
+      {
+        SzAdt *sr = sz_json_stringify(deep);
+        SzAdt *pr;
+        assert(sz_adt_tag(sr) == 1);
+        pr = sz_json_parse((SzString *)sz_adt_payload(sr));
+        assert(sz_adt_tag(pr) == 1);
+        sz_release(pr);
+        sz_release(sr);
+        sz_release(deep);
+      }
+    }
+    {
+      SzAdt *deep = sz_adt_new(0, NULL);
+      int i;
+      for (i = 0; i < 256; i++) {
+        SzList *xs = sz_list_cons(deep, sz_list_nil());
+        sz_release(deep);
+        deep = sz_adt_new(5, xs);
+        sz_release(xs);
+      }
+      json_expect_stringify_err(deep);
+    }
+    {
+      char text[2 * 256 + 8];
+      size_t pos = 0;
+      int i;
+      for (i = 0; i < 256; i++)
+        text[pos++] = '[';
+      memcpy(text + pos, "null", 4);
+      pos += 4;
+      for (i = 0; i < 256; i++)
+        text[pos++] = ']';
+      text[pos] = '\0';
+      json_expect_err(text);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Json kit edges: duplicate keys, non-Obj/Arr arguments, set order. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzAdt *dr = json_expect_ok("{\"a\":1,\"a\":2}");
+      SzAdt *j = (SzAdt *)sz_adt_payload(dr);
+      SzAdt *or2 = json_expect_ok("{\"a\":1,\"b\":2}");
+      SzAdt *j2 = (SzAdt *)sz_adt_payload(or2);
+      SzAdt *ir = json_expect_ok("7");
+      SzAdt *i7 = (SzAdt *)sz_adt_payload(ir);
+      SzAdt *ar = json_expect_ok("[1,2]");
+      SzAdt *arr = (SzAdt *)sz_adt_payload(ar);
+      SzAdt *nr = json_expect_ok("9");
+      SzAdt *nv = (SzAdt *)sz_adt_payload(nr);
+      SzString *ka = sz_string_from_cstr("a");
+      SzString *kb = sz_string_from_cstr("b");
+      SzString *kc = sz_string_from_cstr("c");
+      SzAdt *m1;
+      SzAdt *m2;
+      SzAdt *m3;
+      SzAdt *rm;
+      SzAdt *set_b;
+      SzAdt *set_c;
+      SzList *kk;
+      SzList *pp;
+      SzList *neg;
+      SzList *keys_b;
+      SzList *keys_c;
+      /* A duplicate key reads the first entry. */
+      assert(sz_json_get_int(j, ka, 0) == 1);
+      /* merge: a non-Obj side keeps the other side, or `b` when neither. */
+      m1 = sz_json_merge(i7, j);
+      m2 = sz_json_merge(j, i7);
+      m3 = sz_json_merge(i7, i7);
+      assert(m1 == j);
+      assert(m2 == j);
+      assert(sz_json_int_or(m3, 0) == 7);
+      /* remove on a non-Obj retains `j`. keys / pairs on a non-Obj are
+       * empty. at with a negative index is empty. */
+      rm = sz_json_remove(i7, ka);
+      assert(rm == i7);
+      kk = sz_json_keys(i7);
+      assert(sz_list_is_empty(kk));
+      pp = sz_json_pairs(i7);
+      assert(sz_list_is_empty(pp));
+      neg = sz_json_at(arr, -1);
+      assert(sz_list_is_empty(neg));
+      /* set keeps order: a replace stays in place, a new key goes last. */
+      set_b = sz_json_set(j2, kb, nv);
+      set_c = sz_json_set(j2, kc, nv);
+      keys_b = sz_json_keys(set_b);
+      keys_c = sz_json_keys(set_c);
+      assert(sz_list_len(keys_b) == 2);
+      assert(sz_string_eq((SzString *)sz_list_head(keys_b), ka) == 1);
+      assert(sz_string_eq((SzString *)sz_list_head(sz_list_tail(keys_b)), kb) == 1);
+      assert(sz_list_len(keys_c) == 3);
+      assert(sz_string_eq(
+                 (SzString *)sz_list_head(sz_list_tail(sz_list_tail(keys_c))),
+                 kc) == 1);
+      sz_release(keys_b);
+      sz_release(keys_c);
+      sz_release(set_b);
+      sz_release(set_c);
+      sz_release(neg);
+      sz_release(pp);
+      sz_release(kk);
+      sz_release(rm);
+      sz_release(m1);
+      sz_release(m2);
+      sz_release(m3);
+      sz_release(ka);
+      sz_release(kb);
+      sz_release(kc);
+      sz_release(dr);
+      sz_release(or2);
+      sz_release(ir);
+      sz_release(ar);
+      sz_release(nr);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* Json query kit: get / keys / arr / at / has / as* / *Or / merge. */
   {
     SzAdt *pr = json_expect_ok("{\"a\":1,\"b\":[true,null],\"s\":\"hi\"}");
