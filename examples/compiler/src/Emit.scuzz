@@ -835,6 +835,15 @@ def exprIsI64Go(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
     case Expr.EIf(_, t, _, _) => exprIsI64(t, ps, defs)
     case Expr.ENamed(_, inner) => exprIsI64(inner, ps, defs)
     case Expr.EAscribe(inner, _, _) => exprIsI64(inner, ps, defs)
+    case Expr.EField(recv, name, _) => exprFieldI64(recv, name, ps)
+    case _ => false
+  }
+
+def exprFieldI64(recv: Expr, name: String, ps: List[Param]): Bool =
+  recv match {
+    case Expr.EVar(s, _) => isTupField(name) && slotInt(tupSlots(paramTy(ps, s)), tupIdx(name))
+    case Expr.ENamed(_, inner) => exprFieldI64(inner, name, ps)
+    case Expr.EAscribe(inner, _, _) => exprFieldI64(inner, name, ps)
     case _ => false
   }
 
@@ -2500,7 +2509,10 @@ def emitApplyLamGo(p: String, body: Expr, argE: Expr, prefix: String, strs: List
   emitApplyLamSlot(p, body, emitExprFid(argE, Str.concat(prefix, "_aa"), strs, defs, ens, ps, loc, fid), argE, prefix, strs, defs, ens, ps, loc, fid)
 
 def emitApplyLamSlot(p: String, body: Expr, arg: Slot, argE: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitApplyLam2(p, body, arg, slotBindI64(arg, argE, ps, defs), if (slotBindI64(arg, argE, ps, defs)) "Int" else applyBindTy(p, argE, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc, fid)
+  emitApplyLamTyped(p, body, arg, slotBindI64(arg, argE, ps, defs), applyBindTy(p, argE, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc, fid)
+
+def emitApplyLamTyped(p: String, body: Expr, arg: Slot, guess: Bool, bty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  emitApplyLam2(p, body, arg, guess || isI64Ty(bty), if (guess || isI64Ty(bty)) "Int" else bty, prefix, strs, defs, ens, ps, loc, fid)
 
 def slotBindI64(s: Slot, e: Expr, ps: List[Param], defs: List[Fun]): Bool =
   s match {
