@@ -50,7 +50,7 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 
 ## Cursor Cloud specific instructions
 
-Host setup and prove-host commands: [`docs/developer-environment.md`](docs/developer-environment.md). CI mirror: `.github/workflows/ci.yml` (`linux-headless`).
+Host setup and prove-host commands: [`docs/developer-environment.md`](docs/developer-environment.md). CI slices: `./scripts/ci.sh` (same steps as `.github/workflows/ci.yml`).
 
 No long-running app daemons. Develop with `make` + `clang`. Rebuild the product CLI with `./scripts/bootstrap.sh` (newest GitHub `v*` release, or `SCUZZ_BOOTSTRAP_TAG`). Default UI path is headless (`scuzz run --headless`); it does not need `DISPLAY` or `X11`.
 

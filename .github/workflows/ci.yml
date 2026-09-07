@@ -14,30 +14,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Installer help + GitHub dry-run
-        run: |
-          ./scripts/install.sh --help
-          SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-dry.out
-          grep -q 'source=github SeanCheatham/scuzz latest' /tmp/install-dry.out
-          grep -q 'api.github.com/repos/SeanCheatham/scuzz/releases' /tmp/install-dry.out
-          grep -q 'asset=scuzz-' /tmp/install-dry.out
-          SCUZZ_INSTALL_SOURCE=github SCUZZ_VERSION=v0.1.0 SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-pin.out
-          grep -q 'releases/download/v0.1.0/scuzz-' /tmp/install-pin.out
-          ./scripts/install.sh --dry-run | tee /tmp/install-checkout-dry.out
-          grep -q 'source=checkout' /tmp/install-checkout-dry.out
-          cat scripts/install.sh | sh -s -- --dry-run | tee /tmp/install-pipe.out
-          grep -q 'source=github SeanCheatham/scuzz latest' /tmp/install-pipe.out
-          grep -q 'api.github.com/repos/SeanCheatham/scuzz/releases' /tmp/install-pipe.out
-          ./scripts/bump_version.sh --help
-          ./scripts/bump_version.sh --dry-run patch | tee /tmp/bump.out
-          grep -Eq '^tag=v[0-9]+\.[0-9]+\.[0-9]+$' /tmp/bump.out
-          grep -q 'dry-run=1' /tmp/bump.out
-          git diff --exit-code -- VERSION examples/cli/src/Version.scuzz
-          printf '%s\n' '"tag_name": "skia-cpu-v0.1"' '"tag_name": "v0.1.0-rc.1"' '"tag_name": "v9.9.9"' > /tmp/releases.json
-          SCUZZ_RELEASES_JSON=/tmp/releases.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-tag.out
-          grep -q 'tag=v9.9.9' /tmp/install-tag.out
-          printf '%s' '[{"tag_name":"skia-cpu-v0.1"},{"tag_name":"v0.1.0-rc.1"},{"tag_name":"v9.9.9"}]' > /tmp/releases-compact.json
-          SCUZZ_RELEASES_JSON=/tmp/releases-compact.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-compact.out
-          grep -q 'tag=v9.9.9' /tmp/install-compact.out
+        run: ./scripts/ci.sh install-dry
 
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |
@@ -48,20 +25,16 @@ jobs:
             libgl1-mesa-dri
 
       - name: Runtime + UI tests
-        run: make -C crates/runtime test CC=clang
+        run: ./scripts/ci.sh runtime
 
       - name: Runtime ASan (optional sanitizer; skips if unsupported)
-        run: make -C crates/runtime test-asan CC=clang
+        run: ./scripts/ci.sh asan
 
       - name: ffi-skia tests
-        run: |
-          make -C crates/ffi-skia test CC=clang
-          grep -qx skia crates/ffi-skia/build/sk_capi_backend
+        run: ./scripts/ci.sh skia
 
       - name: Embedder libs
-        run: |
-          make -C crates/embedder-desktop lib CC=clang
-          make -C crates/embedder-mobile lib CC=clang
+        run: ./scripts/ci.sh embedders
 
       - name: Bootstrap product CLI
         env:
@@ -69,79 +42,28 @@ jobs:
         run: ./scripts/bootstrap.sh
 
       - name: Hello world → LLVM → native
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" run --out-dir /tmp/scuzz-cli-self examples/cli | tee /tmp/cli.out
-          grep -q "cli-ok" /tmp/cli.out
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" run examples/hello | tee /tmp/hello.out
-          grep -q "Hello, Scuzz!" /tmp/hello.out
-          grep -q "ready." /tmp/hello.out
-          "$SCUZZ" run examples/fmt | tee /tmp/fmt.out
-          grep -q "fmt-ok" /tmp/fmt.out
+        run: ./scripts/ci.sh hello
 
       - name: Typecheck oracle
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" run examples/tyck | tee /tmp/tyck.out
-          grep -q "tyck-ok" /tmp/tyck.out
+        run: ./scripts/ci.sh tyck
 
       - name: Kit catalog
-        run: ./scripts/gen-kit-docs.sh --check
+        run: ./scripts/ci.sh kits
 
-      - name: Codegen emit
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          echo "codegen emit start"
-          "$SCUZZ" build examples/codegen
-          echo "codegen emit done"
-
-      - name: Codegen oracle
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
-          grep -q "ir-ok" /tmp/codegen.out
+      - name: Codegen emit + oracle
+        run: ./scripts/ci.sh codegen
 
       - name: Hello via out-dir
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" run --out-dir /tmp/scuzz-cli-hello examples/hello | tee /tmp/cli-hello.out
-          grep -q "Hello, Scuzz!" /tmp/cli-hello.out
-          grep -q "ready." /tmp/cli-hello.out
+        run: ./scripts/ci.sh hello-outdir
 
       - name: LLVM IR fixed-point
-        run: ./scripts/fixedpoint-ll.sh
+        run: ./scripts/ci.sh fixedpoint
 
       - name: Kernel + IO kits + incremental build
-        run: ./scripts/ci-kernel.sh
+        run: ./scripts/ci.sh kernel
 
       - name: Package release + install-from-tarball smoke
-        run: |
-          TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-          ./scripts/package_release.sh
-          test -f "dist/scuzz-${TRIPLE}.tar.gz"
-          test -x "dist/scuzz-${TRIPLE}/bin/scuzz"
-          SKIA_TRIPLE="$(./scripts/skia_triple.sh)"
-          test -f "dist/scuzz-${TRIPLE}/third_party/skia/prebuilt/${SKIA_TRIPLE}/libsk_capi.a"
-          PREFIX=/tmp/scuzz-prefix
-          rm -rf "$PREFIX"
-          RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
-          export PATH="$PREFIX/bin:$PATH"
-          unset SCUZZ_HOME SCUZZ_RUNTIME || true
-          test "$(command -v scuzz)" = "$PREFIX/bin/scuzz"
-          rm -rf /tmp/scuzz-release-app
-          scuzz new --ui --path /tmp scuzz-release-app
-          scuzz test --update /tmp/scuzz-release-app
-          scuzz test /tmp/scuzz-release-app
-          test -f /tmp/scuzz-release-app/goldens/scuzz-release-app.dump
-          grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
-          scuzz run --headless /tmp/scuzz-release-app
-          test -f /tmp/scuzz-release-app/build/snapshot.png
-          scuzz run examples/hello | tee /tmp/rel-hello.out
-          grep -q "Hello, Scuzz!" /tmp/rel-hello.out
-          grep -q "ready." /tmp/rel-hello.out
-          scuzz run --out-dir /tmp/scuzz-rel-cli examples/cli | tee /tmp/rel-cli.out
-          grep -q "cli-ok" /tmp/rel-cli.out
+        run: ./scripts/ci.sh package
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -151,94 +73,32 @@ jobs:
           if-no-files-found: error
 
       - name: Headless UI + golden PNGs
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" run --headless examples/counter
-          test -f examples/counter/build/snapshot.png
-          "$SCUZZ" test examples/counter
-          "$SCUZZ" run --headless examples/studio
-          test -f examples/studio/build/snapshot.png
-          "$SCUZZ" test examples/studio
-          "$SCUZZ" run --headless examples/editor
-          test -f examples/editor/build/snapshot.png
-          "$SCUZZ" test examples/editor
+        run: ./scripts/ci.sh ui
 
       - name: Pixel goldens (sk_sw software backend)
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib CC=clang
-          rm -rf examples/counter/build
-          SCUZZ_SKIA=sk_sw "$SCUZZ" test --pixels examples/counter
-          make -C crates/ffi-skia clean lib CC=clang
+        run: ./scripts/ci.sh pixels
 
       - name: GPU presenter (OpenGL readback)
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
-        run: |
-          xvfb-run -a env SCUZZ_SKIA=gpu make -C crates/ffi-skia test CC=clang
-          SCUZZ=./examples/cli/build/cli
-          xvfb-run -a env SCUZZ_SKIA=gpu "$SCUZZ" test examples/counter
-          make -C crates/ffi-skia clean lib CC=clang
+        run: ./scripts/ci.sh gpu
 
       - name: Differential structural dumps (skia vs sk_sw vs gpu)
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          xvfb-run -a "$SCUZZ" test --differential examples/counter
-          make -C crates/ffi-skia clean lib CC=clang
+        run: ./scripts/ci.sh differential
 
       - name: Deterministic fuzz (bounded) + repro replay
-        run: ./scripts/ci-fuzz.sh
+        run: ./scripts/ci.sh fuzz
 
       - name: v0 new --ui path
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          rm -rf /tmp/scuzz-v0app
-          "$SCUZZ" new --ui --path /tmp scuzz-v0app
-          "$SCUZZ" test --update /tmp/scuzz-v0app
-          test -f /tmp/scuzz-v0app/goldens/scuzz-v0app.dump
-          test -f /tmp/scuzz-v0app/goldens/scuzz-v0app_after_tap.dump
-          "$SCUZZ" test /tmp/scuzz-v0app
-          "$SCUZZ" run --headless /tmp/scuzz-v0app
-          test -f /tmp/scuzz-v0app/build/snapshot.png
+        run: ./scripts/ci.sh new-ui
 
       - name: Desktop peer + X11 embedder (xvfb)
-        run: |
-          # SCUZZ_LIVE_FRAMES bounds stay-open Ui.run under Desktop (else hangs on xvfb).
-          timeout 30s xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 \
-            SCUZZ_UI_WIDTH=400 SCUZZ_UI_HEIGHT=560 \
-            ./examples/studio/build/studio 2>&1 | tee /tmp/win.out
-          grep -q "desktop embedder" /tmp/win.out
-          grep -q "X11 window" /tmp/win.out
+        run: ./scripts/ci.sh desktop
 
       - name: Mobile peer + package shells
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          env SCUZZ_UI_RUNTIME=mobile SCUZZ_MOBILE_SHELL=1 SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
-            ./examples/counter/build/counter 2>&1 | tee /tmp/mobile.out
-          grep -q "UiRuntime.Mobile" /tmp/mobile.out
-          grep -q "scuzz mobile: present" /tmp/mobile.out
-          "$SCUZZ" package --target host examples/counter
-          test -x examples/counter/build/package/host/run.sh
-          # Linux CI has no NDK/SDK. android must fail with one install line,
-          # or emit a debug APK when the NDK and SDK are present.
-          if "$SCUZZ" package --target android examples/counter > /tmp/android-pkg.out 2>&1; then
-            test -f examples/counter/build/package/android/lib/arm64-v8a/libscuzz.so
-            test -f examples/counter/build/package/android/counter.apk
-          else
-            grep -Eq "ANDROID_NDK_HOME|ANDROID_HOME" /tmp/android-pkg.out
-          fi
-          # Linux has no Xcode. ios must fail with one install line.
-          if "$SCUZZ" package --target ios examples/counter > /tmp/ios-pkg.out 2>&1; then
-            echo "ios package succeeded without Xcode" >&2
-            cat /tmp/ios-pkg.out >&2
-            exit 1
-          fi
-          grep -q "xcode-select --install" /tmp/ios-pkg.out
-          env SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
-            ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
-          grep -q "scuzz mobile: present" /tmp/pkg-host.out
+        run: ./scripts/ci.sh mobile
 
   # Bounded Darwin coverage on every push/PR. Full packaging stays workflow_dispatch.
   macos-smoke:
@@ -249,20 +109,13 @@ jobs:
       - name: Install OpenSSL
         run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
       - name: Runtime tests
-        run: make -C crates/runtime test CC=clang
+        run: ./scripts/ci.sh runtime
       - name: Bootstrap product CLI
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/bootstrap.sh
       - name: Hello smoke
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" build --full examples/hello
-          "$SCUZZ" test examples/hello
-          "$SCUZZ" check examples/kernel
-          if "$SCUZZ" check examples/bad-intent; then
-            echo "empty verify should fail check" && exit 1
-          fi
+        run: ./scripts/ci.sh macos-hello
 
   # Full macOS packaging. Skip on push/PR.
   # Trigger manually: Actions → ci → Run workflow.
@@ -276,37 +129,13 @@ jobs:
         run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
 
       - name: Runtime + UI tests
-        run: make -C crates/runtime test CC=clang
+        run: ./scripts/ci.sh runtime
 
       - name: Build embedders
-        run: |
-          make -C crates/ffi-skia lib CC=clang
-          grep -qx skia crates/ffi-skia/build/sk_capi_backend
-          make -C crates/embedder-desktop lib CC=clang
-          make -C crates/embedder-mobile lib CC=clang
+        run: ./scripts/ci.sh embedders
 
       - name: Package release + install smoke
-        run: |
-          TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-          ./scripts/package_release.sh
-          test -f "dist/scuzz-${TRIPLE}.tar.gz"
-          SKIA_TRIPLE="$(./scripts/skia_triple.sh)"
-          test -f "dist/scuzz-${TRIPLE}/third_party/skia/prebuilt/${SKIA_TRIPLE}/libsk_capi.a"
-          PREFIX=/tmp/scuzz-prefix
-          rm -rf "$PREFIX"
-          RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
-          export PATH="$PREFIX/bin:$PATH"
-          unset SCUZZ_HOME SCUZZ_RUNTIME || true
-          rm -rf /tmp/scuzz-release-app
-          scuzz new --ui --path /tmp scuzz-release-app
-          scuzz test --update /tmp/scuzz-release-app
-          scuzz test /tmp/scuzz-release-app
-          grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
-          scuzz run --headless /tmp/scuzz-release-app
-          scuzz run examples/hello | tee /tmp/macos-rel-hello.out
-          grep -q "Hello, Scuzz!" /tmp/macos-rel-hello.out
-          scuzz run --out-dir /tmp/scuzz-macos-rel-cli examples/cli | tee /tmp/macos-rel-cli.out
-          grep -q "cli-ok" /tmp/macos-rel-cli.out
+        run: ./scripts/ci.sh package
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -316,16 +145,7 @@ jobs:
           if-no-files-found: error
 
       - name: Golden PNG tests
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          "$SCUZZ" test examples/counter
-          "$SCUZZ" test examples/studio
-          "$SCUZZ" test examples/editor
+        run: ./scripts/ci.sh ui-test
 
       - name: Pixel goldens (sk_sw software backend)
-        run: |
-          SCUZZ=./examples/cli/build/cli
-          SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib
-          rm -rf examples/counter/build
-          SCUZZ_SKIA=sk_sw "$SCUZZ" test --pixels examples/counter
-          make -C crates/ffi-skia clean lib
+        run: ./scripts/ci.sh pixels
