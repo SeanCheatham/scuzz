@@ -94,6 +94,7 @@ grep -q "tup:42" /tmp/kernel.out
 grep -q "tup:ok" /tmp/kernel.out
 grep -q "swap:ok:42" /tmp/kernel.out
 grep -q "eqTup:y" /tmp/kernel.out
+grep -q "rotb:1" /tmp/kernel.out
 grep -q "both:x" /tmp/kernel.out
 grep -q "first:9" /tmp/kernel.out
 grep -q "map:1" /tmp/kernel.out
