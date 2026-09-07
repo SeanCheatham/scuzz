@@ -394,7 +394,7 @@ def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs:
   if (isKit(f)) resolveKit(f, args, env, funs, ens, span) else if (isInstMeth(f)) resolveInst(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else if (enOfCase(ens, f) != "") inferCtor(enOfCase(ens, f), args, env, funs, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
 
 def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Signal.list" || f == "Signal.listN") resolveSignalList(f, args, env, funs, ens, span) else if (List.isEmpty(args) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (!arityOk(f, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(kitParams(f))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, want(f, List.len(args)), kitRet(f), args, env, funs, ens, span)
+  if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Signal.list" || f == "Signal.listN") resolveSignalList(f, args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else if (List.isEmpty(args) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (!arityOk(f, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(kitParams(f))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, want(f, List.len(args)), kitRet(f), args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
   if (List.isEmpty(ens)) "" else enOfCase1(List.at(ens, 0), List.tail(ens), ctor)
@@ -585,6 +585,18 @@ def resolveSignalList2(_f: String, xs: Expr, env: List[(String, String)], funs: 
 
 def resolveSignalList3(o: Out, span: (String, Int)): Out =
   if (hasErr(o)) o else if (isListTy(o.ty) || isLoose(o.ty)) ok(kitRetSignalList(o.ty)) else argMismatch("Signal.list", "List", o.ty, span)
+
+def resolvePropCheck(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (List.len(args) != 3) bad(Str.concat("Property.check expects 3 args, got ", Str.fromInt(List.len(args))), span) else resolvePropCheckName(infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens, span)
+
+def resolvePropCheckName(name: Out, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (hasErr(name)) name else if (tyEq(name.ty, "String") || isLoose(name.ty)) resolvePropCheckPred(infer(stripNamed(List.at(rest, 0)), env, funs, ens), List.tail(rest), env, funs, ens, span) else argMismatch("Property.check", "String", name.ty, span)
+
+def resolvePropCheckPred(pred: Out, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (hasErr(pred)) pred else if (requirePredOk(pred.ty)) resolvePropCheckVal(infer(stripNamed(List.at(rest, 0)), env, funs, ens), span) else argMismatch("Property.check", "Bool", pred.ty, span)
+
+def resolvePropCheckVal(val: Out, span: (String, Int)): Out =
+  if (hasErr(val)) val else ok(val.ty)
 
 def resolveFunOrUser(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), ty: String): Out =
   if (isFunTy(ty)) inferFunApply(ty, args, env, funs, ens, span) else resolveUser(f, args, env, funs, ens, span, findFunPrefer(funs, f, env))
