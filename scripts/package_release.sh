@@ -2,8 +2,8 @@
 # Assemble a self-contained scuzz release tree + tarball under dist/.
 #
 # The shipped `scuzz` is the Scuzz CLI (`examples/cli`). bootstrap.sh compiles
-# it with the newest GitHub `v*` scuzz. Layout matches SCUZZ_HOME (crates/ +
-# scripts/). Host needs clang/make to link apps.
+# it with the newest GitHub `v*` scuzz when that binary is missing. Layout
+# matches SCUZZ_HOME (crates/ + scripts/). Host needs clang/make to link apps.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -14,9 +14,13 @@ NAME="scuzz-$TRIPLE"
 OUT="$DIST_ROOT/$NAME"
 TGZ="$DIST_ROOT/$NAME.tar.gz"
 
-echo "==> bootstrap product CLI"
-"$ROOT/scripts/bootstrap.sh"
 SCUZZ_BIN="${SCUZZ_PRODUCT:-$ROOT/examples/cli/build/cli}"
+if [ -x "$SCUZZ_BIN" ]; then
+  echo "==> using existing product CLI"
+else
+  echo "==> bootstrap product CLI"
+  "$ROOT/scripts/bootstrap.sh"
+fi
 test -x "$SCUZZ_BIN"
 
 echo "==> assembling $OUT"

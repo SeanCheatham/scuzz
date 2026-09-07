@@ -34,7 +34,8 @@ grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
 "$SCUZZ" fuzz --iterations 8 examples/scale
 "$SCUZZ" fuzz --iterations 8 examples/fmt
 "$SCUZZ" fuzz --iterations 8 examples/tyck
-"$SCUZZ" fuzz --iterations 8 examples/codegen
+# examples/codegen: ci.sh codegen already runs ir-ok. A fuzz campaign
+# recompiles the compiler twice and does not finish in the Linux job budget.
 rm -rf /tmp/bad-seed
 cp -R examples/bad-example /tmp/bad-seed
 rm -rf /tmp/bad-seed/build /tmp/bad-seed/corpus
