@@ -1,0 +1,390 @@
+enum Ty:
+  case TVar(name: String)
+  case Named(name: String)
+  case App(name: String, args: List[Ty])
+  case Tuple(parts: List[Ty])
+  case Arrow(arg: Ty, ret: Ty)
+
+def noTy(): List[Ty] =
+  []
+
+def tUnit(): Ty =
+  Ty.Named("Unit")
+
+def tInt(): Ty =
+  Ty.Named("Int")
+
+def tFloat(): Ty =
+  Ty.Named("Float")
+
+def tStr(): Ty =
+  Ty.Named("String")
+
+def tBool(): Ty =
+  Ty.Named("Bool")
+
+def tAny(): Ty =
+  Ty.Named("Any")
+
+def tParam(n: String): Ty =
+  Ty.TVar(n)
+
+def tNamed(n: String): Ty =
+  Ty.Named(n)
+
+def tApp(n: String, args: List[Ty]): Ty =
+  Ty.App(n, args)
+
+def tList(e: Ty): Ty =
+  Ty.App("List", e :: noTy())
+
+def tBare(n: String): Ty =
+  Ty.App(n, noTy())
+
+def tIo(e: Ty, a: Ty): Ty =
+  if (isStr(e)) Ty.App("IO", a :: noTy()) else Ty.App("IO", e :: a :: noTy())
+
+def tFun(a: Ty, r: Ty): Ty =
+  Ty.Arrow(a, r)
+
+def tTuple(ps: List[Ty]): Ty =
+  Ty.Tuple(ps)
+
+def namedName(t: Ty): String =
+  t match {
+    case Ty.Named(n) => n
+    case _ => ""
+  }
+
+def isNamed(t: Ty, n: String): Bool =
+  namedName(t) == n
+
+def isAny(t: Ty): Bool =
+  isNamed(t, "Any")
+
+def isParam(t: Ty): Bool =
+  t match {
+    case Ty.TVar(_) => true
+    case _ => false
+  }
+
+def isWild(t: Ty): Bool =
+  isParam(t)
+
+def isUnit(t: Ty): Bool =
+  isNamed(t, "Unit")
+
+def isInt(t: Ty): Bool =
+  isNamed(t, "Int")
+
+def isFloat(t: Ty): Bool =
+  isNamed(t, "Float")
+
+def isStr(t: Ty): Bool =
+  isNamed(t, "String")
+
+def isBool(t: Ty): Bool =
+  isNamed(t, "Bool")
+
+def isI64(t: Ty): Bool =
+  isInt(t) || isBool(t)
+
+def isPtr(t: Ty): Bool =
+  !isI64(t) && !isFloat(t) && !isUnit(t) && !isParam(t) && !isAny(t) && !isNamed(t, "")
+
+def isFun(t: Ty): Bool =
+  t match {
+    case Ty.Arrow(_, _) => true
+    case _ => false
+  }
+
+def funArg(t: Ty): Ty =
+  t match {
+    case Ty.Arrow(a, _) => a
+    case _ => t
+  }
+
+def funRet(t: Ty): Ty =
+  t match {
+    case Ty.Arrow(_, r) => r
+    case _ => t
+  }
+
+def isTup(t: Ty): Bool =
+  t match {
+    case Ty.Tuple(_) => true
+    case _ => false
+  }
+
+def tupParts(t: Ty): List[Ty] =
+  t match {
+    case Ty.Tuple(ps) => ps
+    case _ => noTy()
+  }
+
+def appName(t: Ty): String =
+  t match {
+    case Ty.App(n, _) => n
+    case Ty.Named(n) => n
+    case _ => ""
+  }
+
+def appArgs(t: Ty): List[Ty] =
+  t match {
+    case Ty.App(_, args) => args
+    case _ => noTy()
+  }
+
+def isAppNamed(t: Ty, n: String): Bool =
+  appName(t) == n
+
+def isIo(t: Ty): Bool =
+  isNamed(t, "IO") || isAppNamed(t, "IO")
+
+def isList(t: Ty): Bool =
+  isAppNamed(t, "List")
+
+def isRes(t: Ty): Bool =
+  isAppNamed(t, "Resource")
+
+def ioArgs(t: Ty): List[Ty] =
+  appArgs(t)
+
+def ioErr(t: Ty): Ty =
+  ioErrOf(ioArgs(t))
+
+def ioErrOf(ps: List[Ty]): Ty =
+  if (List.len(ps) >= 2) List.at(ps, 0) else tStr()
+
+def ioOk(t: Ty): Ty =
+  ioOkOf(ioArgs(t))
+
+def ioOkOf(ps: List[Ty]): Ty =
+  if (List.isEmpty(ps)) tParam("A") else if (List.len(ps) == 1) List.at(ps, 0) else List.at(ps, List.len(ps) - 1)
+
+def elem(t: Ty): Ty =
+  elemOf(appArgs(t))
+
+def elemOf(ps: List[Ty]): Ty =
+  if (List.isEmpty(ps)) tParam("A") else List.at(ps, 0)
+
+def mapVal(t: Ty): Ty =
+  mapValOf(appArgs(t))
+
+def mapValOf(ps: List[Ty]): Ty =
+  if (List.isEmpty(ps) || List.isEmpty(List.tail(ps))) tParam("A") else List.at(ps, 1)
+
+def headName(t: Ty): String =
+  t match {
+    case Ty.Named(n) => n
+    case Ty.App(n, _) => n
+    case Ty.Tuple(_) => ""
+    case _ => show(t)
+  }
+
+def eq(a: Ty, b: Ty): Bool =
+  if (isParam(a) || isParam(b)) true else eqHit(a, b)
+
+def eqHit(a: Ty, b: Ty): Bool =
+  a match {
+    case Ty.TVar(_) => true
+    case Ty.Named(n) => namedEq(n, b)
+    case Ty.App(n, args) => appEq(n, args, b)
+    case Ty.Tuple(ps) => tupEq(ps, b)
+    case Ty.Arrow(arg, ret) => funEq(arg, ret, b)
+  }
+
+def namedEq(n: String, b: Ty): Bool =
+  if (n == "Any") isAny(b) else namedEq2(n, b)
+
+def namedEq2(n: String, b: Ty): Bool =
+  b match {
+    case Ty.Named(m) => n == m
+    case Ty.App(m, _) => n == m
+    case _ => false
+  }
+
+def appEq(n: String, args: List[Ty], b: Ty): Bool =
+  b match {
+    case Ty.App(m, bs) => n == m && (eqList(args, bs) || bareFit(args, bs) || ioFit(n, args, bs))
+    case Ty.Named(m) => n == m
+    case _ => false
+  }
+
+def bareFit(a: List[Ty], b: List[Ty]): Bool =
+  List.isEmpty(a) || List.isEmpty(b)
+
+def ioFit(n: String, a: List[Ty], b: List[Ty]): Bool =
+  n == "IO" && eq(ioOkOf(a), ioOkOf(b)) && eq(ioErrOf(a), ioErrOf(b))
+
+def tupEq(ps: List[Ty], b: Ty): Bool =
+  b match {
+    case Ty.Tuple(qs) => eqList(ps, qs)
+    case _ => false
+  }
+
+def funEq(arg: Ty, ret: Ty, b: Ty): Bool =
+  b match {
+    case Ty.Arrow(a2, r2) => eq(arg, a2) && eq(ret, r2)
+    case _ => false
+  }
+
+def eqList(xs: List[Ty], ys: List[Ty]): Bool =
+  if (List.isEmpty(xs)) List.isEmpty(ys) else if (List.isEmpty(ys)) false else eq(List.at(xs, 0), List.at(ys, 0)) && eqList(List.tail(xs), List.tail(ys))
+
+def prefer(a: Ty, b: Ty): Ty =
+  if (show(a) == "") b else if (show(b) == "") a else if (eqStruct(a, b)) a else if (isAny(a) || isParam(a)) b else if (isAny(b) || isParam(b)) a else if (isIo(a) && isIo(b)) tIo(prefer(ioErr(a), ioErr(b)), prefer(ioOk(a), ioOk(b))) else if (bareOf(a, b)) b else if (bareOf(b, a)) a else if (isTup(a) && isTup(b)) tTuple(preferList(tupParts(a), tupParts(b))) else a
+
+def eqStruct(a: Ty, b: Ty): Bool =
+  show(a) == show(b)
+
+def bareOf(bare: Ty, app: Ty): Bool =
+  isAppNamed(bare, appName(app)) && List.isEmpty(appArgs(bare)) && !List.isEmpty(appArgs(app))
+
+def preferList(xs: List[Ty], ys: List[Ty]): List[Ty] =
+  if (List.isEmpty(xs) || List.isEmpty(ys)) xs else prefer(List.at(xs, 0), List.at(ys, 0)) :: preferList(List.tail(xs), List.tail(ys))
+
+def show(t: Ty): String =
+  t match {
+    case Ty.TVar(n) => n
+    case Ty.Named(n) => n
+    case Ty.App(n, args) => showApp(n, args)
+    case Ty.Tuple(ps) => showTup(ps)
+    case Ty.Arrow(arg, ret) => showFun(arg, ret)
+  }
+
+def showApp(n: String, args: List[Ty]): String =
+  if (List.isEmpty(args)) n else Str.concat(n, Str.concat("[", Str.concat(showComma(args), "]")))
+
+def showTup(ps: List[Ty]): String =
+  Str.concat("(", Str.concat(showComma(ps), ")"))
+
+def showFun(arg: Ty, ret: Ty): String =
+  Str.concat(showFunArg(arg), Str.concat(" => ", show(ret)))
+
+def showFunArg(arg: Ty): String =
+  arg match {
+    case Ty.Arrow(_, _) => Str.concat("(", Str.concat(show(arg), ")"))
+    case _ => show(arg)
+  }
+
+def showComma(xs: List[Ty]): String =
+  if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) show(List.at(xs, 0)) else Str.concat(show(List.at(xs, 0)), Str.concat(", ", showComma(List.tail(xs))))
+
+def parse(s: String): Ty =
+  parseTrim(trim(s))
+
+def parseTrim(s: String): Ty =
+  if (s == "") tNamed("") else parseArrow(s, arrowAt(s, 0))
+
+def parseArrow(s: String, i: Int): Ty =
+  if (i < 0) parseAtom(s) else tFun(parse(Str.slice(s, 0, i)), parse(Str.slice(s, i + 4, Str.len(s))))
+
+def arrowAt(s: String, i: Int): Int =
+  if (i + 4 > Str.len(s)) 0 - 1 else if (sliceEq(s, i, " => ") && parenDepth(s, 0, i) == 0 && brackDepth(s, 0, i) == 0) i else arrowAt(s, i + 1)
+
+def parseAtom(s: String): Ty =
+  if (Str.len(s) > 0 && Str.charAt(s, 0) == 40) parseParen(s) else parseName(s)
+
+def parseParen(s: String): Ty =
+  parseParts(splitComma(innerParen(s)))
+
+def parseParts(ps: List[String]): Ty =
+  if (List.isEmpty(ps)) tUnit() else if (List.isEmpty(List.tail(ps))) parse(List.at(ps, 0)) else tTuple(mapParse(ps))
+
+def mapParse(xs: List[String]): List[Ty] =
+  if (List.isEmpty(xs)) noTy() else parse(List.at(xs, 0)) :: mapParse(List.tail(xs))
+
+def innerParen(s: String): String =
+  if (Str.len(s) >= 2 && Str.charAt(s, 0) == 40 && Str.charAt(s, Str.len(s) - 1) == 41) Str.slice(s, 1, Str.len(s) - 1) else s
+
+def parseName(s: String): Ty =
+  parseApp(brackAt(s, 0), s)
+
+def parseApp(b: Int, s: String): Ty =
+  if (b < 0) parsePrim(s) else tApp(Str.slice(s, 0, b), mapParse(splitComma(Str.slice(s, b + 1, Str.len(s) - 1))))
+
+def parsePrim(s: String): Ty =
+  if (s == "Unit") tUnit() else if (s == "Int") tInt() else if (s == "Float") tFloat() else if (s == "String") tStr() else if (s == "Bool") tBool() else if (s == "Any") tAny() else if (isTyParam(s)) tParam(s) else tNamed(s)
+
+def isTyParam(s: String): Bool =
+  Str.len(s) == 1 && Str.charAt(s, 0) >= 65 && Str.charAt(s, 0) <= 90
+
+def eqStr(a: String, b: String): Bool =
+  eq(parse(a), parse(b))
+
+def preferStr(a: String, b: String): String =
+  show(prefer(parse(a), parse(b)))
+
+def showIo(e: String, a: String): String =
+  show(tIo(parse(e), parse(a)))
+
+def countAny(t: Ty): Int =
+  t match {
+    case Ty.Named(n) => if (n == "Any") 1 else 0
+    case Ty.App(_, args) => countAnyList(args)
+    case Ty.Tuple(ps) => countAnyList(ps)
+    case Ty.Arrow(arg, ret) => countAny(arg) + countAny(ret)
+    case _ => 0
+  }
+
+def countAnyList(xs: List[Ty]): Int =
+  if (List.isEmpty(xs)) 0 else countAny(List.at(xs, 0)) + countAnyList(List.tail(xs))
+
+def countAnyStr(s: String): Int =
+  countAny(parse(s))
+
+def isPtrStr(s: String): Bool =
+  isPtr(parse(s))
+
+def isI64Str(s: String): Bool =
+  isI64(parse(s))
+
+def headNameStr(s: String): String =
+  headName(parse(s))
+
+def sliceEq(t: String, i: Int, w: String): Bool =
+  Str.slice(t, i, i + Str.len(w)) == w
+
+def brackAt(s: String, i: Int): Int =
+  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 91) i else brackAt(s, i + 1)
+
+def splitComma(s: String): List[String] =
+  splitCommaAt(s, commaAt(s, 0))
+
+def commaAt(s: String, i: Int): Int =
+  commaAtD(s, i, 0, 0)
+
+def commaAtD(s: String, i: Int, pd: Int, bd: Int): Int =
+  if (i >= Str.len(s)) 0 - 1 else commaAtC(s, i, pd, bd, Str.charAt(s, i))
+
+def commaAtC(s: String, i: Int, pd: Int, bd: Int, c: Int): Int =
+  if (c == 40) commaAtD(s, i + 1, pd + 1, bd) else if (c == 41) commaAtD(s, i + 1, if (pd > 0) pd - 1 else 0, bd) else if (c == 91) commaAtD(s, i + 1, pd, bd + 1) else if (c == 93) commaAtD(s, i + 1, pd, if (bd > 0) bd - 1 else 0) else if (c == 44 && pd == 0 && bd == 0) i else commaAtD(s, i + 1, pd, bd)
+
+def splitCommaAt(s: String, c: Int): List[String] =
+  if (c < 0) if (trim(s) == "") [] else trim(s) :: [] else trim(Str.slice(s, 0, c)) :: splitComma(Str.slice(s, c + 1, Str.len(s)))
+
+def parenDepth(s: String, i: Int, end: Int): Int =
+  if (i >= end) 0 else parenDepthCh(s, i, end, 0)
+
+def parenDepthCh(s: String, i: Int, end: Int, d: Int): Int =
+  if (i >= end) d else parenDepthHit(s, i, end, d, Str.charAt(s, i))
+
+def parenDepthHit(s: String, i: Int, end: Int, d: Int, c: Int): Int =
+  if (c == 40) parenDepthCh(s, i + 1, end, d + 1) else if (c == 41) parenDepthCh(s, i + 1, end, if (d > 0) d - 1 else 0) else parenDepthCh(s, i + 1, end, d)
+
+def brackDepth(s: String, i: Int, end: Int): Int =
+  if (i >= end) 0 else brackDepthCh(s, i, end, 0)
+
+def brackDepthCh(s: String, i: Int, end: Int, d: Int): Int =
+  if (i >= end) d else brackDepthHit(s, i, end, d, Str.charAt(s, i))
+
+def brackDepthHit(s: String, i: Int, end: Int, d: Int, c: Int): Int =
+  if (c == 91) brackDepthCh(s, i + 1, end, d + 1) else if (c == 93) brackDepthCh(s, i + 1, end, if (d > 0) d - 1 else 0) else brackDepthCh(s, i + 1, end, d)
+
+def trim(s: String): String =
+  trim2(s, 0, Str.len(s))
+
+def trim2(s: String, a: Int, b: Int): String =
+  if (a >= b) "" else if (Str.charAt(s, a) == 32) trim2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trim2(s, a, b - 1) else Str.slice(s, a, b)
+

@@ -24,7 +24,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | --- | --- |
 | UI testing / CI | `*.scuzz_verify` + in-body `.require` + composed drivers through `scuzz fuzz --iterations` (primary; mutation is a phase). Authors write named Timeline claims. Structural goldens are regression pins, not the authoring path. PNG optional through `--pixels` |
 | Static hygiene | One linter: `scuzz check` (format-verify + typecheck; lints on this command; no `lint` subcommand). One formatter: `scuzz fmt` rewrites |
-| Codegen | LLVM IR |
+| Codegen | LLVM IR. Emit reads types from the checker. It does not guess from SSA names |
 | Renderer (v0) | Skia through thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
 | Effects | Language + runtime builtins |
@@ -97,7 +97,7 @@ Verification track:
 1. `scuzz fmt` core in Scuzz. In: `examples/fmt` printer over `examples/syntax`. Oracles: parse-print roundtrip, fmt idempotence (`fmt-ok`). Pretty prints `::` with parser precedence (tighter than `==`, looser than `<<`) and right-assoc parens. A `for` guard prints `if pred`. Timeline session claims emit `effectHas` / fiber counts / `signalListLen` / `signalStrHas` as runtime kits. A tap lambda runs the body as IO only when that body is IO. `Signal.set` is not IO. Lexer and parser live in `examples/syntax` (path dep).
 2. Kernel typechecker in Scuzz. In: `examples/tyck` typechecks a kernel subset (unbound name, arithmetic mismatch, arity, def body, `IO.println` payload, unknown function, unknown kit name, comparison, `@main` body, arg type, function apply, function body vs `A => B`). Diagnostics report the real file stem, line, and column. A parse miss is not a type error. A duplicate substring does not steal the span. A second file keeps its own stem. Oracles: drive groups (`tyck-ok`). Checker lives in `examples/compiler` (path dep).
 3. Kernel codegen in Scuzz: LLVM IR text. In: `examples/codegen` lowers the kernel subset (hello, `if`, lists, enums, match). Oracles: emit idempotence (`ir-ok`). Emit lives in `examples/compiler` (path dep).
-4. CLI, driver, and the verification stack. In: `examples/cli` parses argv, emits help, and dispatches. `examples/compiler` holds the kernel typechecker, LLVM emit, `scuzz.toml` parse, compile pipeline, and clang argv. `Cli.runCmd` emits human or JSON diagnostics. `Emit.emitFull` / `Drive.compilePkg` / `Drive.emitDir` emit a linkable `.ll` from `src/` and path-dep packages. Oracles: empty-args `cli-ok`. The product CLI is the Scuzz-emitted binary. That binary compiles hello, the compiler library, and `examples/cli`. `scuzz test` fails when clang fails. `scuzz fuzz` runs drive oracles, mutation, `Timeline => Verdict` session claims, and `--relate`. `scuzz package` copies host, Android, and iOS artifacts. Product version lives in `VERSION`.
+4. CLI, driver, and the verification stack. In: `examples/cli` parses argv, emits help, and dispatches. `examples/compiler` holds the kernel typechecker, LLVM emit, `scuzz.toml` parse, compile pipeline, and clang argv. `Cli.runCmd` emits human or JSON diagnostics. `Emit.emitFull` / `Drive.compilePkg` / `Drive.emitDir` emit a linkable `.ll` from `src/` and path-dep packages. Oracles: empty-args `cli-ok`. The product CLI is the Scuzz-emitted binary. That binary compiles hello, the compiler library, and `examples/cli`. `scripts/fixedpoint-ll.sh` compares two self-compiles of `cli.ll` from the rebuilt compiler. `scuzz test` fails when clang fails. `scuzz fuzz` runs drive oracles, mutation, `Timeline => Verdict` session claims, and `--relate`. `scuzz package` copies host, Android, and iOS artifacts. Product version lives in `VERSION`.
 
 **Bootstrap.** `VERSION` names the product (`scuzz -V`). `scripts/bootstrap.sh` fetches the newest GitHub Release matching `v[0-9]*` and compiles the Scuzz compiler (`examples/cli`). Cut a release with the GitHub `release` workflow (`patch` / `minor` / `major` / `0.2.2`). It commits `VERSION`, tags, packages, and publishes. `package_release.sh` ships that binary. A later Scuzz `scuzz` compiles the next Scuzz. Users still install one `scuzz`. Toolchain sources (`examples/cli`, `examples/compiler`, `examples/syntax`) only call builtins that the newest `v*` bootstrap release already emits. A new builtin reaches toolchain sources one release after it lands.
 
@@ -143,7 +143,7 @@ Missing `[ui]` ⇒ Skia omitted from the link. `scuzz test` is TESTRT exit-0 smo
 
 The language `scuzz` implements. Proof is examples that exercise each construct (`examples/hello`, `kernel`, `io`, `counter`, `studio`, `scale`).
 
-Locks (not an API catalog — see [`guide.md`](guide.md)):
+Locks (not an API catalog — see [`guide.md`](guide.md) and [`kits.md`](kits.md)):
 
 - Expression dialect only: `for` primary binder (`=` pure, `<-` effect); no `val` / statement blocks / `var`. A `for` binder may unpack a tuple of 2 through 8 slots (`(a, b) = e`, `(a, b, c) = e`, `(a, b) <- e`) or a constructor, list, or as-pattern (`Point(x, y) = p`, `Opt.Some(n) <- e`, `h :: t = xs`). A miss panics. A `for` may include `if pred` (`pred` is Bool). A miss is `IO.fail`. The `for` needs a `<-` binder.
 - Optional `package`; top-level `def` / `private def` / `import`; `@main def …: IO[Unit]`
@@ -270,7 +270,7 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ### Layout model
 
-**Flutter-style constraints** (constraints down, sizes up). Tight slots: `sized`, `aspectRatio`, percent axes on `fraction`, `expanded` flex, and opt-in `stretch` (cross axis). Scroll content is unbounded on the pan axis (`max` 0). Column/row do not stretch non-flex children unless wrapped in `View.stretch`. Device-pixel paint multiplies author px by the backing scale so taps match the pixels. Desktop and Mobile present that pixel buffer into a point-sized window. Taps stay in logical points. Nested constructors only. Do not drift into CSS-ish ad-hoc rules. Do not grow Flutter-style constraint-overflow dumps. Diagnose through structural dumps + `*.scuzz_verify` + `.require`. Widget catalog: [`guide.md`](guide.md).
+**Flutter-style constraints** (constraints down, sizes up). Tight slots: `sized`, `aspectRatio`, percent axes on `fraction`, `expanded` flex, and opt-in `stretch` (cross axis). Scroll content is unbounded on the pan axis (`max` 0). Column/row do not stretch non-flex children unless wrapped in `View.stretch`. Device-pixel paint multiplies author px by the backing scale so taps match the pixels. Desktop and Mobile present that pixel buffer into a point-sized window. Taps stay in logical points. Nested constructors only. Do not drift into CSS-ish ad-hoc rules. Do not grow Flutter-style constraint-overflow dumps. Diagnose through structural dumps + `*.scuzz_verify` + `.require`. Widget catalog: [`kits.md`](kits.md).
 
 ### UI testing
 
@@ -278,11 +278,11 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ## Open work
 
-Close thesis-critical gaps in this order: `Signal[T]`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). `check` diagnostics, LSP goto-def, rename, hover, completion, tokens, and panic use recorded spans.
+Close thesis-critical gaps in this order: checker `Type` ADT and LLVM IR fixed-point (item 0), `Signal[T]`, Scuzz spans on panic and LSP, typed `E`, typed agent session schema. Ranked list: [`gaps.md`](gaps.md). `check` diagnostics, LSP goto-def, rename, hover, completion, tokens, and panic use recorded spans.
 
 Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. `scuzz ide` launches the bundled `[ui]` package (`examples/editor` / `SCUZZ_HOME/ide`). Headless is part of every UI slice. `scuzz test --differential` compares structural dumps across render backends.
 
-Self-hosting staged slices are in. The product CLI is Scuzz. Bootstrap fetches the newest GitHub `v*` release. Product version lives in `VERSION`.
+Self-hosting staged slices are in. The product CLI is Scuzz. `scripts/fixedpoint-ll.sh` compares two self-compiles of `cli.ll` from the rebuilt compiler. Bootstrap fetches the newest GitHub `v*` release. Product version lives in `VERSION`.
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)). HTTP status, bind, HTTPS serve, registry, Windows, OS threads, `scuzz eval`, and kit docs stay later.
 

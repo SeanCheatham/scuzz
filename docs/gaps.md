@@ -33,6 +33,8 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
+0. **Checker `Type` ADT, closed kits, emit from Check, LLVM IR fixed-point** — In: `examples/compiler/src/Type.scuzz` is the type ADT. `tyEq` does not treat `Any` as a top type. Type parameters still unify. Kit signatures live in `examples/compiler/src/Kits.scuzz` as data. Open kit prefixes are gone. `Kits.anyCount` is 0. Check has no `Any` string. Emit reads types from Check (`Check.typeOfEns`). It does not invent `Any`. Remaining Emit `Any` tokens are guards that reject an unknown type. Record `.copy` uses the checker record head. `scripts/fixedpoint-ll.sh` compares two self-compiles of `cli.ll` from the rebuilt compiler. Proof: `examples/tyck` (`tyck-ok`), `examples/codegen` (`ir-ok`), `scripts/fixedpoint-ll.sh`. Kit catalog: [`kits.md`](kits.md). Residual: Param letters (`A`/`E`) still unify. Bare kit return `IO` means some IO. Parser still stores Fun/Param types as strings; Check parses them.
+
 1. **`Signal[T]` and `View.each` over records** — In: `Signal.list` holds `List[T]` over records and enums; `View.each` binds the element type; studio keeps tasks as `List[Item]`; a record list dumps `list[N] name = <count>`. Open: one generic cell — `Signal.map` stays `Int => String` and there is no non-list `Signal[T]` cell. Direction: one generic cell and `View.each` over the element type.
 
 2. **UTF-8 `String`** — In: `Str.*` indexes code points; an isolated continuation byte counts as one code point; `Str.byteLen` / `Str.byteSlice` keep bytes for framing; pad cycles complete code points; the `Str` kit is closed; the kernel `utf8Ops` drive oracle proves multibyte ops. Case maps stay ASCII by design. Caret offsets in TextField/editor stay bytes. The editor and toolchain LSP framing uses `Str.byteLen` / `Str.byteSlice`. LLVM `[N x i8]` string sizing uses `Str.byteLen`.
@@ -71,7 +73,7 @@ Do not start these before thesis-critical gaps close.
 - **Web apps** — not a current target.
 - **HKT and environment `R`** — Thin generics. No `F[_]` beyond `IO`. No `ZIO[R, E, A]`.
 - **Oracle idioms in `guide.md`** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work. Authors write `Timeline => Verdict` and drive oracles in `*.scuzz_verify`.
-- **Type heuristics on SSA names** — In: `==` on ptr-producing call results compares by value (`sz_ptr_eq`); the i64 unbox path no longer eats string/list/ADT comparisons. Open: `List.at(xs, 0).field` reads through a first-record heuristic and mis-emits when that record lacks the field. `io.map(r => r._1)` does not box the Int result. `strish` and friends still guess operand types from SSA name substrings. Toolchain sources destructure payloads through `match` and bind call results before comparing. Direction: resolve the receiver type from the checker, not from `copyEnFirst` or name substrings.
+- **Emit fallbacks when Check returns an empty type** — Emit reads `Check.typeOfEns`. It does not invent `Any`. Residual: a field read through `List.at` still needs a record head. `io.map` Int boxing stays a known emit hole. An empty checker type stays empty. Direction: keep types on the checked tree; do not guess from SSA names.
 
 ### Dogfood IDE
 
