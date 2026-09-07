@@ -363,8 +363,11 @@ def srcShowOk(): String =
 def srcSelfGet(): String =
   "record Box[T](x: T)\ndef wrap[T](x: T): Box[T] =\n  Box(x)\ndef get(): T =\n  self.x\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(wrap(4).get()))\n"
 
+def srcPhOk(): String =
+  "def applyInt(f: Int => Int, n: Int): Int =\n  f(n)\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(applyInt(_ + 1, 3)))\n"
+
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]"
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]"
 
 def srcViewNope(): String =
   """@main def main: IO[Unit] =
