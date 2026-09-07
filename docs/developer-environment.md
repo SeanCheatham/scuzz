@@ -55,7 +55,16 @@ make -C crates/runtime test CC=clang
 make -C crates/runtime test-asan CC=clang   # skip if ASan cannot link
 ```
 
-Full Linux job: `.github/workflows/ci.yml` (`linux-headless`).
+Same slices as GitHub. List them, then run the required PR path:
+
+```bash
+./scripts/ci.sh --help
+./scripts/ci.sh pr
+```
+
+`pr` runs macos-smoke, oracles, kernel, ui, and fuzz. A local run wipes example `build/` dirs except `examples/cli/build`. That wipe stops a rebuilt CLI from a fingerprint hit on a stale `.ll`. GitHub sets `CI=true` and skips the wipe.
+
+Full Linux job: `./scripts/ci.sh linux-headless`. Apt install and artifact upload stay in `.github/workflows/ci.yml`.
 
 | Env | Paint |
 | --- | --- |
