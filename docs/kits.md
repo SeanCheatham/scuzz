@@ -443,11 +443,11 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Timeline.signalInt` | `Timeline, Int, String` | `Int` |
 | `Timeline.signalListLen` | `Timeline, Int, String` | `Int` |
 | `Timeline.signalStrHas` | `Timeline, Int, String, String` | `Bool` |
-| `Timeline.a11yHas` | `Timeline, Int, String` | `Int` |
-| `Timeline.lastHitHas` | `Timeline, Int, String` | `Int` |
-| `Timeline.driveHas` | `Timeline, Int, String` | `Int` |
-| `Timeline.effectHas` | `Timeline, Int, String` | `Int` |
-| `Timeline.faultKindHas` | `Timeline, Int, String` | `Int` |
+| `Timeline.a11yHas` | `Timeline, Int, String` | `Bool` |
+| `Timeline.lastHitHas` | `Timeline, Int, String` | `Bool` |
+| `Timeline.driveHas` | `Timeline, Int, String` | `Bool` |
+| `Timeline.effectHas` | `Timeline, Int, String` | `Bool` |
+| `Timeline.faultKindHas` | `Timeline, Int, String` | `Bool` |
 | `Timeline.effectCount` | `Timeline, Int` | `Int` |
 | `Timeline.fiberLive` | `Timeline, Int` | `Int` |
 | `Timeline.fiberReady` | `Timeline, Int` | `Int` |
@@ -456,7 +456,7 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Timeline.faultN` | `Timeline, Int` | `Int` |
 | `Timeline.checkpoint` | `Timeline, Int` | `Int` |
 | `Timeline.nearestCheckpoint` | `Timeline, Int` | `Int` |
-| `Timeline.exists` | `Timeline, Int => Bool` | `Int` |
+| `Timeline.exists` | `Timeline, Int => Bool` | `Bool` |
 | `Property.signalInt` | `String` | `Int` |
 | `Property.signalStr` | `String` | `String` |
 | `Property.signalListLen` | `String` | `Int` |
@@ -465,7 +465,7 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Property.check` | `String, Bool, A` | `A` |
 | `Property.assert` | `String, Bool` | `IO[Unit]` |
 | `Property.classify` | `String, Bool` | `Bool` |
-| `Property.a11yHas` | `String` | `Int` |
+| `Property.a11yHas` | `String` | `Bool` |
 | `Property.force` | `IO` | `A` |
 | `Verdict.ok` | `()` | `Verdict` |
 | `Verdict.fail` | `Int, String` | `Verdict` |
