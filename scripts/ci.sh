@@ -7,6 +7,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 SCUZZ="${SCUZZ:-$ROOT/examples/cli/build/cli}"
 export SCUZZ
+# A prior `scuzz run` in this shell can leak session env. GitHub starts clean.
+unset SCUZZ_SNAPSHOT_PATH SCUZZ_FUZZ_DUMP SCUZZ_UI_RUNTIME SCUZZ_UI_WIDTH \
+  SCUZZ_UI_HEIGHT SCUZZ_UI_SCALE SCUZZ_LIVE_FRAMES SCUZZ_MOBILE_SHELL \
+  SCUZZ_UI_RECORD SCUZZ_UI_DEBUG_DUMP SCUZZ_UI_SCRIPT SCUZZ_UI_INJECT \
+  SCUZZ_UI_TAP SCUZZ_UI_TEXT SCUZZ_SKIA || true
 
 need_scuzz() {
   if [ ! -x "$SCUZZ" ]; then
