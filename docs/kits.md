@@ -342,10 +342,10 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Signal.strN` | `String, String` | `Signal[String]` |
 | `Signal.getStr` | `Signal` | `String` |
 | `Signal.setStr` | `Signal, String` | `Unit` |
-| `Signal.list` | `List` | `Signal` |
-| `Signal.listN` | `String, List` | `Signal` |
-| `Signal.getList` | `Signal` | `List` |
-| `Signal.setList` | `Signal, List` | `Unit` |
+| `Signal.list` | `List[A]` | `Signal[List[A]]` |
+| `Signal.listN` | `String, List[A]` | `Signal[List[A]]` |
+| `Signal.getList` | `Signal[List[A]]` | `List[A]` |
+| `Signal.setList` | `Signal[List[A]], List[A]` | `Unit` |
 | `Color.rgb` | `Int, Int, Int` | `Int` |
 | `Color.rgba` | `Int, Int, Int, Int` | `Int` |
 | `Theme.accent` | `()` | `Int` |
@@ -426,7 +426,7 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `View.listTile` | `String, View (opt 1)` | `View` |
 | `View.image` | `Int, Int, Int, String` | `View` |
 | `View.icon` | `Int, Int` | `View` |
-| `View.each` | `Signal, A => View (opt 1)` | `View` |
+| `View.each` | `Signal[List[A]], A => View (opt 1)` | `View` |
 | `View.stretch` | `View` | `View` |
 | `View.clip` | `View` | `View` |
 | `View.opacity` | `Int, View` | `View` |
