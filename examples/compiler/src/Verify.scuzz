@@ -744,14 +744,14 @@ def rewriteReqDefs(ds: List[Fun], funs: List[Fun], ens: List[En]): List[Fun] =
 
 def rewriteReqFun(d: Fun, funs: List[Fun], ens: List[En]): Fun =
   d match {
-    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, ("self", "Any") :: ("#mod", mod) :: Check.noEnv()), funs, ens), mod, off)
+    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, ("self", "A") :: ("#mod", mod) :: Check.noEnv()), funs, ens), mod, off)
   }
 
 def inferTy(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
   inferTyGot(Check.infer(e, env, funs, ens))
 
 def inferTyGot(o: Out): String =
-  if (Check.hasErr(o)) "Any" else o.ty
+  if (Check.hasErr(o)) "A" else o.ty
 
 def rewriteReq(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   e match {

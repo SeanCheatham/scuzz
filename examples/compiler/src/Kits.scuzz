@@ -1,0 +1,191 @@
+record Kit(name: String, params: List[String], ret: String, rest: String, opt: Int)
+
+import Type.countAnyStr
+
+def ns(): List[String] =
+  []
+
+def k(name: String, params: List[String], ret: String): Kit =
+  Kit(name, params, ret, "", 0)
+
+def kv(name: String, params: List[String], ret: String, rest: String): Kit =
+  Kit(name, params, ret, rest, 0)
+
+def ko(name: String, params: List[String], ret: String, opt: Int): Kit =
+  Kit(name, params, ret, "", opt)
+
+def miss(): Kit =
+  Kit("", ns(), "", "", 0)
+
+def allKits(): List[Kit] =
+  List.concat(strKits(), List.concat(listKits(), List.concat(mapSetKits(), List.concat(ioKits(), List.concat(fsSysKits(), List.concat(jsonNetKits(), List.concat(uiKits(), extraKits())))))))
+
+def strKits(): List[Kit] =
+  k("Str.fromInt", "Int" :: ns(), "String") :: k("Str.fromBool", "Bool" :: ns(), "String") :: k("Str.concat", "String" :: "String" :: ns(), "String") :: k("Str.len", "String" :: ns(), "Int") :: k("Str.byteLen", "String" :: ns(), "Int") :: k("Str.charAt", "String" :: "Int" :: ns(), "Int") :: k("Str.slice", "String" :: "Int" :: "Int" :: ns(), "String") :: k("Str.byteSlice", "String" :: "Int" :: "Int" :: ns(), "String") :: k("Str.toInt", "String" :: "Int" :: ns(), "Int") :: k("Str.repeat", "String" :: "Int" :: ns(), "String") :: k("Str.startsWith", "String" :: "String" :: ns(), "Bool") :: k("Str.endsWith", "String" :: "String" :: ns(), "Bool") :: k("Str.contains", "String" :: "String" :: ns(), "Bool") :: k("Str.eq", "String" :: "String" :: ns(), "Bool") :: k("Str.indexOf", "String" :: "String" :: ns(), "Int") :: k("Str.lastIndexOf", "String" :: "String" :: ns(), "Int") :: k("Str.isEmpty", "String" :: ns(), "Bool") :: k("Str.nonEmpty", "String" :: ns(), "Bool") :: k("Str.isBlank", "String" :: ns(), "Bool") :: k("Str.lines", "String" :: ns(), "List[String]") :: k("Str.trim", "String" :: ns(), "String") :: k("Str.reverse", "String" :: ns(), "String") :: k("Str.toLower", "String" :: ns(), "String") :: k("Str.toUpper", "String" :: ns(), "String") :: k("Str.capitalize", "String" :: ns(), "String") :: k("Str.take", "String" :: "Int" :: ns(), "String") :: k("Str.drop", "String" :: "Int" :: ns(), "String") :: k("Str.takeRight", "String" :: "Int" :: ns(), "String") :: k("Str.dropRight", "String" :: "Int" :: ns(), "String") :: k("Str.padLeft", "String" :: "Int" :: "String" :: ns(), "String") :: k("Str.padRight", "String" :: "Int" :: "String" :: ns(), "String") :: k("Str.replace", "String" :: "String" :: "String" :: ns(), "String") :: k("Str.stripPrefix", "String" :: "String" :: ns(), "String") :: k("Str.stripSuffix", "String" :: "String" :: ns(), "String") :: k("Str.split", "String" :: "String" :: ns(), "List[String]") :: nsKit()
+
+def nsKit(): List[Kit] =
+  []
+
+def listKits(): List[Kit] =
+  k("List.len", "List" :: ns(), "Int") :: k("List.concat", "List" :: "List" :: ns(), "List") :: k("List.reverse", "List" :: ns(), "List") :: k("List.head", "List" :: ns(), "Option") :: k("List.tail", "List" :: ns(), "List") :: k("List.isEmpty", "List" :: ns(), "Bool") :: k("List.cons", "A" :: "List" :: ns(), "List") :: k("List.at", "List" :: "Int" :: ns(), "A") :: k("List.join", "List[String]" :: "String" :: ns(), "String") :: k("List.take", "List" :: "Int" :: ns(), "List") :: k("List.drop", "List" :: "Int" :: ns(), "List") :: k("List.takeRight", "List" :: "Int" :: ns(), "List") :: k("List.dropRight", "List" :: "Int" :: ns(), "List") :: k("List.init", "List" :: ns(), "List") :: k("List.last", "List" :: ns(), "List") :: k("List.flatten", "List" :: ns(), "List") :: k("List.empty", ns(), "List") :: k("List.setAt", "List" :: "Int" :: "A" :: ns(), "List") :: k("List.getOrElse", "List" :: "Int" :: "A" :: ns(), "A") :: k("List.fill", "Int" :: "A" :: ns(), "List") :: k("List.range", "Int" :: "Int" :: ns(), "List[Int]") :: k("List.padTo", "List" :: "Int" :: "A" :: ns(), "List") :: k("List.nonEmpty", "List" :: ns(), "Bool") :: k("List.map", "List" :: "A => B" :: ns(), "List") :: k("List.flatMap", "List" :: "A => List" :: ns(), "List") :: k("List.filter", "List" :: "A => Bool" :: ns(), "List") :: k("List.filterNot", "List" :: "A => Bool" :: ns(), "List") :: k("List.find", "List" :: "A => Bool" :: ns(), "List") :: k("List.findLast", "List" :: "A => Bool" :: ns(), "List") :: k("List.exists", "List" :: "A => Bool" :: ns(), "Bool") :: k("List.forall", "List" :: "A => Bool" :: ns(), "Bool") :: k("List.count", "List" :: "A => Bool" :: ns(), "Int") :: k("List.takeWhile", "List" :: "A => Bool" :: ns(), "List") :: k("List.dropWhile", "List" :: "A => Bool" :: ns(), "List") :: k("List.indexWhere", "List" :: "A => Bool" :: ns(), "Int") :: k("List.lastIndexWhere", "List" :: "A => Bool" :: ns(), "Int") :: k("List.span", "List" :: "A => Bool" :: ns(), "List") :: k("List.partition", "List" :: "A => Bool" :: ns(), "List") :: k("List.prefixLength", "List" :: "A => Bool" :: ns(), "Int") :: k("List.segmentLength", "List" :: "A => Bool" :: "Int" :: ns(), "Int") :: k("List.sortBy", "List" :: "A => Int" :: ns(), "List") :: k("List.maxBy", "List" :: "A => Int" :: ns(), "A") :: k("List.minBy", "List" :: "A => Int" :: ns(), "A") :: k("List.groupBy", "List" :: "A => B" :: ns(), "Map") :: k("List.distinctBy", "List" :: "A => B" :: ns(), "List") :: listKits2()
+
+def listKits2(): List[Kit] =
+  k("List.foldLeft", "List" :: "B" :: "(B, A) => B" :: ns(), "B") :: k("List.foldRight", "List" :: "B" :: "(A, B) => B" :: ns(), "B") :: k("List.scanLeft", "List" :: "B" :: "(B, A) => B" :: ns(), "List") :: k("List.scanRight", "List" :: "B" :: "(A, B) => B" :: ns(), "List") :: k("List.reduceLeft", "List" :: "(A, A) => A" :: ns(), "A") :: k("List.reduceRight", "List" :: "(A, A) => A" :: ns(), "A") :: k("List.tabulate", "Int" :: "Int => A" :: ns(), "List") :: k("List.contains", "List" :: "A" :: ns(), "Bool") :: k("List.indexOf", "List" :: "A" :: ns(), "Int") :: k("List.lastIndexOf", "List" :: "A" :: ns(), "Int") :: k("List.distinct", "List" :: ns(), "List") :: k("List.indices", "List" :: ns(), "List[Int]") :: k("List.inits", "List" :: ns(), "List") :: k("List.tails", "List" :: ns(), "List") :: k("List.transpose", "List" :: ns(), "List") :: k("List.zipWithIndex", "List" :: ns(), "List") :: k("List.toMap", "List" :: ns(), "Map") :: k("List.unzip", "List" :: ns(), "(List, List)") :: k("List.zip", "List" :: "List" :: ns(), "List") :: k("List.zipAll", "List" :: "List" :: "A" :: "B" :: ns(), "List") :: k("List.interleave", "List" :: "List" :: ns(), "List") :: k("List.intersperse", "List" :: "A" :: ns(), "List") :: k("List.diff", "List" :: "List" :: ns(), "List") :: k("List.intersect", "List" :: "List" :: ns(), "List") :: k("List.startsWith", "List" :: "List" :: ns(), "Bool") :: k("List.endsWith", "List" :: "List" :: ns(), "Bool") :: k("List.sameElements", "List" :: "List" :: ns(), "Bool") :: k("List.patch", "List" :: "Int" :: "List" :: "Int" :: ns(), "List") :: k("List.splitAt", "List" :: "Int" :: ns(), "List") :: k("List.grouped", "List" :: "Int" :: ns(), "List") :: k("List.sliding", "List" :: "Int" :: ns(), "List") :: k("List.slice", "List" :: "Int" :: "Int" :: ns(), "List") :: k("List.isDefinedAt", "List" :: "Int" :: ns(), "Bool") :: k("List.lengthCompare", "List" :: "Int" :: ns(), "Int") :: k("List.sort", "List" :: ns(), "List") :: k("List.max", "List" :: ns(), "A") :: k("List.min", "List" :: ns(), "A") :: k("List.sum", "List" :: ns(), "Int") :: k("List.product", "List" :: ns(), "Int") :: k("List.toSet", "List" :: ns(), "Set") :: k("List.indexOfSlice", "List" :: "List" :: ns(), "Int") :: k("List.lastIndexOfSlice", "List" :: "List" :: ns(), "Int") :: k("List.append", "List" :: "A" :: ns(), "List") :: nsKit()
+
+def mapSetKits(): List[Kit] =
+  k("Map.empty", ns(), "Map") :: k("Map.set", "Map" :: "A" :: "B" :: ns(), "Map") :: k("Map.keys", "Map" :: ns(), "List") :: k("Map.values", "Map" :: ns(), "List") :: k("Map.size", "Map" :: ns(), "Int") :: k("Map.contains", "Map" :: "A" :: ns(), "Bool") :: k("Map.get", "Map" :: "A" :: ns(), "Option") :: k("Map.getOrElse", "Map" :: "A" :: "B" :: ns(), "B") :: k("Map.remove", "Map" :: "A" :: ns(), "Map") :: k("Map.toList", "Map" :: ns(), "List") :: k("Map.isEmpty", "Map" :: ns(), "Bool") :: k("Map.nonEmpty", "Map" :: ns(), "Bool") :: k("Map.union", "Map" :: "Map" :: ns(), "Map") :: k("Map.intersect", "Map" :: "Map" :: ns(), "Map") :: k("Map.diff", "Map" :: "Map" :: ns(), "Map") :: k("Map.filter", "Map" :: "B => Bool" :: ns(), "Map") :: k("Map.mapValues", "Map" :: "B => C" :: ns(), "Map") :: k("Map.exists", "Map" :: "B => Bool" :: ns(), "Bool") :: k("Map.forall", "Map" :: "B => Bool" :: ns(), "Bool") :: k("Set.empty", ns(), "Set") :: k("Set.add", "Set" :: "A" :: ns(), "Set") :: k("Set.toList", "Set" :: ns(), "List") :: k("Set.size", "Set" :: ns(), "Int") :: k("Set.contains", "Set" :: "A" :: ns(), "Bool") :: k("Set.remove", "Set" :: "A" :: ns(), "Set") :: k("Set.union", "Set" :: "Set" :: ns(), "Set") :: k("Set.intersect", "Set" :: "Set" :: ns(), "Set") :: k("Set.diff", "Set" :: "Set" :: ns(), "Set") :: k("Set.isEmpty", "Set" :: ns(), "Bool") :: k("Set.nonEmpty", "Set" :: ns(), "Bool") :: k("Set.isSubset", "Set" :: "Set" :: ns(), "Bool") :: k("Set.isDisjoint", "Set" :: "Set" :: ns(), "Bool") :: k("Set.filter", "Set" :: "A => Bool" :: ns(), "Set") :: k("Set.map", "Set" :: "A => B" :: ns(), "Set") :: k("Set.exists", "Set" :: "A => Bool" :: ns(), "Bool") :: k("Set.forall", "Set" :: "A => Bool" :: ns(), "Bool") :: nsKit()
+
+def ioKits(): List[Kit] =
+  k("IO.pure", "A" :: ns(), "IO[A]") :: k("IO.println", "String" :: ns(), "IO[Unit]") :: k("IO.sleep", "Int" :: ns(), "IO[Unit]") :: k("IO.fail", "E" :: ns(), "IO[E, A]") :: k("IO.race", "IO" :: "IO" :: ns(), "IO") :: k("IO.both", "IO" :: "IO" :: ns(), "IO") :: k("IO.ensure", "IO" :: "IO[Unit]" :: ns(), "IO") :: k("IO.timeout", "Int" :: "IO" :: ns(), "IO") :: k("IO.forever", "IO" :: ns(), "IO") :: k("IO.repeatN", "Int" :: "IO" :: ns(), "IO") :: k("IO.retryN", "Int" :: "IO" :: ns(), "IO") :: k("IO.foreach", "List" :: "A => IO" :: ns(), "IO") :: k("IO.foreachDiscard", "List" :: "A => IO" :: ns(), "IO[Unit]") :: k("IO.when", "Bool" :: "IO" :: ns(), "IO") :: k("IO.unless", "Bool" :: "IO" :: ns(), "IO") :: k("Builder.empty", ns(), "Builder") :: k("Builder.append", "Builder" :: "String" :: ns(), "Builder") :: k("Builder.result", "Builder" :: ns(), "String") :: k("Clock.monotonic", ns(), "IO[Int]") :: k("Clock.realTime", ns(), "IO[Int]") :: k("Random.nextInt", "Int" :: ns(), "IO[Int]") :: k("Oracle.sumTo", "Int" :: ns(), "Int") :: k("Float.fromInt", "Int" :: ns(), "Float") :: k("Float.toInt", "Float" :: ns(), "Int") :: k("Resource.make", "IO" :: "A => IO" :: ns(), "Resource") :: k("Resource.use", "Resource" :: "A => IO" :: ns(), "IO") :: k("Deferred.empty", ns(), "IO[Deferred]") :: k("Deferred.get", "Deferred" :: ns(), "IO[A]") :: k("Deferred.complete", "Deferred" :: "A" :: ns(), "IO[Unit]") :: k("Deferred.fail", "Deferred" :: "String" :: ns(), "IO[Unit]") :: k("Queue.unbounded", ns(), "IO[Queue]") :: k("Queue.offer", "Queue" :: "A" :: ns(), "IO[Unit]") :: k("Queue.take", "Queue" :: ns(), "IO[A]") :: k("Ref.of", "A" :: ns(), "IO[Ref]") :: k("Ref.get", "Ref" :: ns(), "IO[A]") :: k("Ref.set", "Ref" :: "A" :: ns(), "IO[Unit]") :: k("Ref.update", "Ref" :: "A => A" :: ns(), "IO[Unit]") :: k("Ref.updateAndGet", "Ref" :: "A => A" :: ns(), "IO[A]") :: k("Fiber.fork", "IO" :: ns(), "IO[Fiber]") :: k("Fiber.join", "Fiber" :: ns(), "IO") :: k("Fiber.interrupt", "Fiber" :: ns(), "IO[Unit]") :: streamKits()
+
+def streamKits(): List[Kit] =
+  k("Stream.emit", "A" :: ns(), "Stream") :: k("Stream.emits", "List" :: ns(), "Stream") :: k("Stream.eval", "IO" :: ns(), "Stream") :: k("Stream.concat", "Stream" :: "Stream" :: ns(), "Stream") :: k("Stream.map", "Stream" :: "A => B" :: ns(), "Stream") :: k("Stream.evalMap", "Stream" :: "A => IO" :: ns(), "Stream") :: k("Stream.evalTap", "Stream" :: "A => IO" :: ns(), "Stream") :: k("Stream.filter", "Stream" :: "A => Bool" :: ns(), "Stream") :: k("Stream.filterNot", "Stream" :: "A => Bool" :: ns(), "Stream") :: k("Stream.take", "Stream" :: "Int" :: ns(), "Stream") :: k("Stream.takeWhile", "Stream" :: "A => Bool" :: ns(), "Stream") :: k("Stream.drop", "Stream" :: "Int" :: ns(), "Stream") :: k("Stream.dropWhile", "Stream" :: "A => Bool" :: ns(), "Stream") :: k("Stream.find", "Stream" :: "A => Bool" :: ns(), "IO") :: k("Stream.findLast", "Stream" :: "A => Bool" :: ns(), "IO") :: k("Stream.exists", "Stream" :: "A => Bool" :: ns(), "IO[Bool]") :: k("Stream.forall", "Stream" :: "A => Bool" :: ns(), "IO[Bool]") :: k("Stream.none", "Stream" :: "A => Bool" :: ns(), "IO[Bool]") :: k("Stream.range", "Int" :: "Int" :: ns(), "Stream") :: k("Stream.repeatN", "Stream" :: "Int" :: ns(), "Stream") :: k("Stream.zip", "Stream" :: "Stream" :: ns(), "Stream") :: k("Stream.zipWith", "Stream" :: "Stream" :: "(A, B) => C" :: ns(), "Stream") :: k("Stream.zipAll", "Stream" :: "Stream" :: "A" :: "B" :: ns(), "Stream") :: k("Stream.zipWithIndex", "Stream" :: ns(), "Stream") :: k("Stream.interleave", "Stream" :: "Stream" :: ns(), "Stream") :: k("Stream.intersperse", "Stream" :: "A" :: ns(), "Stream") :: k("Stream.grouped", "Stream" :: "Int" :: ns(), "Stream") :: k("Stream.sliding", "Stream" :: "Int" :: ns(), "Stream") :: k("Stream.takeRight", "Stream" :: "Int" :: ns(), "Stream") :: k("Stream.dropRight", "Stream" :: "Int" :: ns(), "Stream") :: k("Stream.flatten", "Stream" :: ns(), "Stream") :: k("Stream.flatMap", "Stream" :: "A => Stream" :: ns(), "Stream") :: k("Stream.mapConcat", "Stream" :: "A => List" :: ns(), "Stream") :: k("Stream.scan", "Stream" :: "B" :: "(B, A) => B" :: ns(), "Stream") :: k("Stream.fold", "Stream" :: "B" :: "(B, A) => B" :: ns(), "IO") :: k("Stream.changes", "Stream" :: ns(), "Stream") :: k("Stream.orElse", "Stream" :: "Stream" :: ns(), "Stream") :: k("Stream.iterate", "A" :: "A => A" :: ns(), "Stream") :: k("Stream.unfold", "S" :: "S => List" :: ns(), "Stream") :: k("Stream.head", "Stream" :: ns(), "IO") :: k("Stream.last", "Stream" :: ns(), "IO") :: k("Stream.count", "Stream" :: ns(), "IO[Int]") :: k("Stream.compileToList", "Stream" :: ns(), "IO") :: k("Stream.drain", "Stream" :: ns(), "IO[Unit]") :: nsKit()
+
+def fsSysKits(): List[Kit] =
+  k("Fs.read", "String" :: ns(), "IO[String]") :: k("Fs.write", "String" :: "String" :: ns(), "IO[Unit]") :: k("Fs.list", "String" :: ns(), "IO[List[(String, Bool)]]") :: k("Fs.mkdirs", "String" :: ns(), "IO[Unit]") :: k("Fs.exists", "String" :: ns(), "IO[Int]") :: k("Fs.delete", "String" :: ns(), "IO[Unit]") :: k("Fs.walk", "String" :: ns(), "IO[List[(String, Bool)]]") :: k("Fs.canonicalize", "String" :: ns(), "IO[String]") :: k("Fs.rename", "String" :: "String" :: ns(), "IO[Unit]") :: k("Fs.join", "String" :: "String" :: ns(), "String") :: k("Fs.dirname", "String" :: ns(), "String") :: k("Fs.basename", "String" :: ns(), "String") :: k("Sys.args", ns(), "IO[List[String]]") :: k("Sys.getenv", "String" :: ns(), "IO[String]") :: k("Sys.write", "String" :: ns(), "IO[Unit]") :: k("Sys.read", "Int" :: ns(), "IO[String]") :: k("Sys.readLine", ns(), "IO[String]") :: k("Sys.spawn", "String" :: ns(), "IO[Int]") :: k("Sys.exec", "String" :: ns(), "IO[(Int, String, String)]") :: k("Sys.alive", "Int" :: ns(), "IO[Int]") :: k("Sys.kill", "Int" :: ns(), "IO[Unit]") :: k("Sys.childWrite", "Int" :: "String" :: ns(), "IO[Unit]") :: k("Sys.childRead", "Int" :: "Int" :: ns(), "IO[String]") :: k("Sys.childClose", "Int" :: ns(), "IO[Unit]") :: k("Impurity.runKit", ns(), "IO[Unit]") :: nsKit()
+
+def jsonNetKits(): List[Kit] =
+  k("Json.parse", "String" :: ns(), "Result") :: k("Json.stringify", "Json" :: ns(), "Result") :: k("Json.keys", "Json" :: ns(), "List") :: k("Json.get", "Json" :: "String" :: ns(), "List") :: k("Json.has", "Json" :: "String" :: ns(), "Bool") :: k("Json.getStr", "Json" :: "String" :: "String" :: ns(), "String") :: k("Json.getBool", "Json" :: "String" :: "Bool" :: ns(), "Bool") :: k("Json.getInt", "Json" :: "String" :: "Int" :: ns(), "Int") :: k("Json.getFloat", "Json" :: "String" :: "Float" :: ns(), "Float") :: k("Json.intOr", "Json" :: "Int" :: ns(), "Int") :: k("Json.boolOr", "Json" :: "Bool" :: ns(), "Bool") :: k("Json.strOr", "Json" :: "String" :: ns(), "String") :: k("Json.floatOr", "Json" :: "Float" :: ns(), "Float") :: k("Json.arr", "Json" :: ns(), "List") :: k("Json.at", "Json" :: "Int" :: ns(), "List") :: k("Json.isNull", "Json" :: ns(), "Bool") :: k("Json.isObj", "Json" :: ns(), "Bool") :: k("Json.isArr", "Json" :: ns(), "Bool") :: k("Json.isBool", "Json" :: ns(), "Bool") :: k("Json.isInt", "Json" :: ns(), "Bool") :: k("Json.isStr", "Json" :: ns(), "Bool") :: k("Json.isFloat", "Json" :: ns(), "Bool") :: k("Json.pairs", "Json" :: ns(), "List") :: k("Json.set", "Json" :: "String" :: "Json" :: ns(), "Json") :: k("Json.remove", "Json" :: "String" :: ns(), "Json") :: k("Json.append", "Json" :: "Json" :: ns(), "Json") :: k("Json.prepend", "Json" :: "Json" :: ns(), "Json") :: k("Json.setAt", "Json" :: "Int" :: "Json" :: ns(), "Json") :: k("Json.dropAt", "Json" :: "Int" :: ns(), "Json") :: k("Json.merge", "Json" :: "Json" :: ns(), "Json") :: k("Json.Int", "Int" :: ns(), "Json") :: k("Json.Float", "Float" :: ns(), "Json") :: k("Json.Obj", "List" :: ns(), "Json") :: k("Json.Str", "String" :: ns(), "Json") :: k("Json.Bool", "Bool" :: ns(), "Json") :: k("Json.Arr", "List" :: ns(), "Json") :: k("Json.Null", ns(), "Json") :: k("Json.asInt", "Json" :: ns(), "List") :: k("Json.asBool", "Json" :: ns(), "List") :: k("Json.asStr", "Json" :: ns(), "List") :: k("Json.asFloat", "Json" :: ns(), "List") :: k("Net.httpGet", "String" :: ns(), "IO[String]") :: k("Net.httpDelete", "String" :: ns(), "IO[String]") :: k("Net.httpHead", "String" :: ns(), "IO[String]") :: k("Net.httpPost", "String" :: "String" :: ns(), "IO[String]") :: k("Net.httpPut", "String" :: "String" :: ns(), "IO[String]") :: k("Net.httpPatch", "String" :: "String" :: ns(), "IO[String]") :: k("Net.serve", "Int" :: "(String, String, String) => IO[String]" :: ns(), "IO[Unit]") :: k("Net.serveOnce", "Int" :: "(String, String, String) => IO[String]" :: ns(), "IO[Unit]") :: k("Net.tcpConnect", "String" :: "Int" :: ns(), "IO[Tcp]") :: k("Net.tcpListen", "Int" :: ns(), "IO[Tcp]") :: k("Net.tcpAccept", "Tcp" :: ns(), "IO[Tcp]") :: k("Net.tcpRead", "Tcp" :: "Int" :: ns(), "IO[String]") :: k("Net.tcpWrite", "Tcp" :: "String" :: ns(), "IO[Unit]") :: k("Net.tcpClose", "Tcp" :: ns(), "IO[Unit]") :: k("Net.udpBind", "Int" :: ns(), "IO[Udp]") :: k("Net.udpSend", "Udp" :: "String" :: "Int" :: "String" :: ns(), "IO[Unit]") :: k("Net.udpRecv", "Udp" :: "Int" :: ns(), "IO[(String, Int, String)]") :: k("Net.udpClose", "Udp" :: ns(), "IO[Unit]") :: nsKit()
+
+def uiKits(): List[Kit] =
+  k("Signal.int", "Int" :: ns(), "Signal[Int]") :: k("Signal.intN", "String" :: "Int" :: ns(), "Signal[Int]") :: k("Signal.get", "Signal" :: ns(), "Int") :: k("Signal.set", "Signal" :: "Int" :: ns(), "Unit") :: k("Signal.map", "Signal" :: "Int => String" :: ns(), "Signal[String]") :: k("Signal.mapN", "String" :: "Signal" :: "Int => String" :: ns(), "Signal[String]") :: k("Signal.str", "String" :: ns(), "Signal[String]") :: k("Signal.strN", "String" :: "String" :: ns(), "Signal[String]") :: k("Signal.getStr", "Signal" :: ns(), "String") :: k("Signal.setStr", "Signal" :: "String" :: ns(), "Unit") :: k("Signal.list", "List" :: ns(), "Signal") :: k("Signal.listN", "String" :: "List" :: ns(), "Signal") :: k("Signal.getList", "Signal" :: ns(), "List") :: k("Signal.setList", "Signal" :: "List" :: ns(), "Unit") :: k("Color.rgb", "Int" :: "Int" :: "Int" :: ns(), "Int") :: k("Color.rgba", "Int" :: "Int" :: "Int" :: "Int" :: ns(), "Int") :: k("Theme.accent", ns(), "Int") :: k("Theme.primary", ns(), "Int") :: k("Theme.muted", ns(), "Int") :: k("Theme.foreground", ns(), "Int") :: k("Ui.run", "A => View" :: ns(), "IO[Unit]") :: k("Ui.setTitle", "String" :: ns(), "IO[Unit]") :: k("Ui.setEditorCaret", "Int" :: "Int" :: ns(), "IO[Unit]") :: k("Ui.editorCaret", ns(), "IO[Int]") :: k("Ui.setEditorDiagnostics", "List" :: ns(), "IO[Unit]") :: k("Ui.setEditorTokens", "List" :: ns(), "IO[Unit]") :: k("Ui.setEditorInlays", "List" :: ns(), "IO[Unit]") :: k("Ui.setEditorFolds", "List" :: ns(), "IO[Unit]") :: viewKits()
+
+def viewKits(): List[Kit] =
+  kv("View.column", ns(), "View", "View") :: kv("View.row", ns(), "View", "View") :: kv("View.stack", ns(), "View", "View") :: kv("View.wrap", ns(), "View", "View") :: kv("View.grid", "Int" :: ns(), "View", "View") :: k("View.divider", ns(), "View") :: k("View.verticalDivider", ns(), "View") :: k("View.text", "String" :: ns(), "View") :: k("View.bindText", "Signal" :: ns(), "View") :: k("View.button", "String" :: "A" :: ns(), "View") :: k("View.iconButton", "String" :: "A" :: ns(), "View") :: k("View.fab", "String" :: "A" :: ns(), "View") :: k("View.outlinedButton", "String" :: "A" :: ns(), "View") :: k("View.textButton", "String" :: "A" :: ns(), "View") :: k("View.actionChip", "String" :: "A" :: ns(), "View") :: k("View.onSecondary", "View" :: "A" :: ns(), "View") :: k("View.center", "View" :: ns(), "View") :: k("View.scroll", "View" :: ns(), "View") :: k("View.scrollH", "View" :: ns(), "View") :: k("View.expanded", "View" :: ns(), "View") :: k("View.card", "View" :: ns(), "View") :: k("View.placeholder", "View" :: ns(), "View") :: k("View.unconstrainedBox", "View" :: ns(), "View") :: k("View.slider", "Signal" :: ns(), "View") :: k("View.progress", "Signal" :: ns(), "View") :: k("View.circularProgress", "Signal" :: ns(), "View") :: k("View.focusGroup", "View" :: ns(), "View") :: k("View.editor", "Signal" :: ns(), "View") :: k("View.avatar", "String" :: ns(), "View") :: k("View.background", "Int" :: "View" :: ns(), "View") :: k("View.padding", "Int" :: "View" :: ns(), "View") :: k("View.textColor", "Int" :: "View" :: ns(), "View") :: k("View.fontSize", "Int" :: "View" :: ns(), "View") :: k("View.minSize", "Int" :: "Int" :: "View" :: ns(), "View") :: k("View.sized", "Int" :: "Int" :: "View" :: ns(), "View") :: k("View.positioned", "Int" :: "Int" :: "View" :: ns(), "View") :: k("View.aspectRatio", "Int" :: "Int" :: "View" :: ns(), "View") :: k("View.fraction", "Int" :: "Int" :: "View" :: ns(), "View") :: k("View.maxSize", "Int" :: "Int" :: "View" :: ns(), "View") :: k("View.align", "Int" :: "Int" :: "View" :: ns(), "View") :: viewKits2()
+
+def viewKits2(): List[Kit] =
+  k("View.textField", "Signal" :: "String" :: ns(), "View") :: k("View.checkbox", "Signal" :: "String" :: ns(), "View") :: k("View.switch", "Signal" :: "String" :: ns(), "View") :: k("View.chip", "Signal" :: "String" :: ns(), "View") :: k("View.filterChip", "Signal" :: "String" :: ns(), "View") :: k("View.inputChip", "Signal" :: "String" :: ns(), "View") :: k("View.checkboxListTile", "Signal" :: "String" :: ns(), "View") :: k("View.switchListTile", "Signal" :: "String" :: ns(), "View") :: k("View.semantics", "String" :: "View" :: ns(), "View") :: k("View.mergeSemantics", "String" :: "View" :: ns(), "View") :: k("View.tooltip", "String" :: "View" :: ns(), "View") :: k("View.badge", "Signal" :: "View" :: ns(), "View") :: k("View.visibility", "Signal" :: "View" :: ns(), "View") :: k("View.offstage", "Signal" :: "View" :: ns(), "View") :: k("View.overlay", "Signal" :: "View" :: ns(), "View") :: k("View.radio", "Signal" :: "Int" :: "String" :: ns(), "View") :: k("View.choiceChip", "Signal" :: "Int" :: "String" :: ns(), "View") :: k("View.radioListTile", "Signal" :: "Int" :: "String" :: ns(), "View") :: k("View.showWhen", "Signal" :: "Int" :: "View" :: ns(), "View") :: k("View.split", "Signal" :: "View" :: "View" :: ns(), "View") :: k("View.segmented", "Signal" :: "String" :: "String" :: ns(), "View") :: k("View.expansionTile", "Signal" :: "String" :: "View" :: ns(), "View") :: k("View.inkWell", "String" :: "A" :: "View" :: ns(), "View") :: ko("View.listTile", "String" :: "View" :: ns(), "View", 1) :: k("View.image", "Int" :: "Int" :: "Int" :: "String" :: ns(), "View") :: k("View.icon", "Int" :: "Int" :: ns(), "View") :: ko("View.each", "Signal" :: "A => View" :: ns(), "View", 1) :: k("View.stretch", "View" :: ns(), "View") :: k("View.clip", "View" :: ns(), "View") :: k("View.opacity", "Int" :: "View" :: ns(), "View") :: k("View.maxLines", "Int" :: "View" :: ns(), "View") :: k("View.ellipsis", "View" :: ns(), "View") :: k("View.gap", "Int" :: "View" :: ns(), "View") :: k("View.border", "Int" :: "Int" :: "View" :: ns(), "View") :: k("View.radius", "Int" :: "View" :: ns(), "View") :: k("View.ignorePointer", "View" :: ns(), "View") :: k("View.absorbPointer", "View" :: ns(), "View") :: k("View.excludeSemantics", "View" :: ns(), "View") :: k("View.list", ns(), "View") :: nsKit()
+
+def extraKits(): List[Kit] =
+  k("Timeline.len", "Timeline" :: ns(), "Int") :: k("Timeline.signalInt", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.signalListLen", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.signalStrHas", "Timeline" :: "Int" :: "String" :: "String" :: ns(), "Bool") :: k("Timeline.a11yHas", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.lastHitHas", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.driveHas", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.effectHas", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.faultKindHas", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.effectCount", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberLive", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberReady", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberParked", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberDone", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.faultN", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.checkpoint", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.nearestCheckpoint", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.exists", "Timeline" :: "Int => Bool" :: ns(), "Int") :: k("Property.signalInt", "String" :: ns(), "Int") :: k("Property.signalStr", "String" :: ns(), "String") :: k("Property.signalListLen", "String" :: ns(), "Int") :: k("Property.signalListAt", "String" :: "Int" :: ns(), "String") :: k("Property.sometimes", "String" :: ns(), "Unit") :: k("Property.check", "String" :: "Bool" :: "A" :: ns(), "A") :: k("Property.assert", "String" :: "Bool" :: ns(), "IO[Unit]") :: k("Property.classify", "String" :: "Bool" :: ns(), "Bool") :: k("Property.a11yHas", "String" :: ns(), "Int") :: k("Property.force", "IO" :: ns(), "A") :: k("Verdict.ok", ns(), "Verdict") :: k("Verdict.fail", "Int" :: "String" :: ns(), "Verdict") :: k("Verdict.and", "Verdict" :: "Verdict" :: ns(), "Verdict") :: k("Verdict.or", "Verdict" :: "Verdict" :: ns(), "Verdict") :: k("Verdict.alwaysHas", "Timeline" :: "String" :: ns(), "Verdict") :: k("Verdict.afterHit", "Timeline" :: "String" :: "String" :: ns(), "Verdict") :: k("Verdict.every", "Timeline" :: "Int => Bool" :: ns(), "Verdict") :: k("Verdict.any", "Timeline" :: "Int => Bool" :: ns(), "Verdict") :: nsKit()
+
+def find(f: String): Kit =
+  findGo(allKits(), f)
+
+def findGo(xs: List[Kit], f: String): Kit =
+  if (List.isEmpty(xs)) miss() else findHd(List.at(xs, 0), List.tail(xs), f)
+
+def findHd(h: Kit, rest: List[Kit], f: String): Kit =
+  h match {
+    case Kit(n, _, _, _, _) => if (n == f) h else findGo(rest, f)
+  }
+
+def kitName(kit: Kit): String =
+  kit match {
+    case Kit(n, _, _, _, _) => n
+  }
+
+def kitParamsOf(kit: Kit): List[String] =
+  kit match {
+    case Kit(_, ps, _, _, _) => ps
+  }
+
+def kitRetOf(kit: Kit): String =
+  kit match {
+    case Kit(_, _, r, _, _) => r
+  }
+
+def kitRestOf(kit: Kit): String =
+  kit match {
+    case Kit(_, _, _, r, _) => r
+  }
+
+def kitOptOf(kit: Kit): Int =
+  kit match {
+    case Kit(_, _, _, _, o) => o
+  }
+
+def has(f: String): Bool =
+  kitName(find(f)) != ""
+
+def params(f: String): List[String] =
+  kitParamsOf(find(f))
+
+def ret(f: String): String =
+  kitRetOf(find(f))
+
+def rest(f: String): String =
+  kitRestOf(find(f))
+
+def opt(f: String): Int =
+  kitOptOf(find(f))
+
+def names(): List[String] =
+  namesOf(allKits())
+
+def namesOf(xs: List[Kit]): List[String] =
+  if (List.isEmpty(xs)) [] else namesOfHd(List.at(xs, 0), List.tail(xs))
+
+def namesOfHd(h: Kit, rest: List[Kit]): List[String] =
+  kitName(h) :: namesOf(rest)
+
+def want(f: String, n: Int): List[String] =
+  wantOf(find(f), n)
+
+def wantOf(kit: Kit, n: Int): List[String] =
+  wantOf2(kitName(kit), kitParamsOf(kit), kitRestOf(kit), kitOptOf(kit), n)
+
+def wantOf2(name: String, ps: List[String], r: String, o: Int, n: Int): List[String] =
+  if (name == "") ns() else if (r != "") wantRest(ps, r, n) else wantOpt(ps, o, n)
+
+def wantRest(ps: List[String], r: String, n: Int): List[String] =
+  if (n < List.len(ps)) ns() else List.concat(ps, fill(r, n - List.len(ps)))
+
+def wantOpt(ps: List[String], o: Int, n: Int): List[String] =
+  if (n < List.len(ps) - o || n > List.len(ps)) ns() else take(ps, n)
+
+def fill(t: String, n: Int): List[String] =
+  if (n <= 0) ns() else t :: fill(t, n - 1)
+
+def take(xs: List[String], n: Int): List[String] =
+  if (n <= 0 || List.isEmpty(xs)) ns() else List.at(xs, 0) :: take(List.tail(xs), n - 1)
+
+def arityOk(f: String, n: Int): Bool =
+  arityOf(find(f), n)
+
+def arityOf(kit: Kit, n: Int): Bool =
+  arityOf2(kitName(kit), kitParamsOf(kit), kitRestOf(kit), kitOptOf(kit), n)
+
+def arityOf2(name: String, ps: List[String], r: String, o: Int, n: Int): Bool =
+  if (name == "") false else if (r != "") n >= List.len(ps) else n >= List.len(ps) - o && n <= List.len(ps)
+
+def anyCount(): Int =
+  anyCountGo(allKits())
+
+def anyCountGo(xs: List[Kit]): Int =
+  if (List.isEmpty(xs)) 0 else anyCountKit(List.at(xs, 0)) + anyCountGo(List.tail(xs))
+
+def anyCountKit(kit: Kit): Int =
+  countAnyStr(kitRetOf(kit)) + countAnyStr(kitRestOf(kit)) + anyCountParams(kitParamsOf(kit))
+
+def anyCountParams(ps: List[String]): Int =
+  if (List.isEmpty(ps)) 0 else countAnyStr(List.at(ps, 0)) + anyCountParams(List.tail(ps))
+
+def catalogMd(): String =
+  Str.concat("""# Kit catalog
+
+Signatures live in `examples/compiler/src/Kits.scuzz`.
+
+| Kit | Params | Return |
+| --- | --- | --- |
+""", catalogRows(allKits()))
+
+def catalogRows(xs: List[Kit]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(catalogRow(List.at(xs, 0)), catalogRows(List.tail(xs)))
+
+def catalogRow(kit: Kit): String =
+  Str.concat("| `", Str.concat(kitName(kit), Str.concat("` | `", Str.concat(showParams(kit), Str.concat("` | `", Str.concat(kitRetOf(kit), """` |
+"""))))))
+
+def showParams(kit: Kit): String =
+  showParams2(kitParamsOf(kit), kitRestOf(kit), kitOptOf(kit))
+
+def showParams2(ps: List[String], r: String, o: Int): String =
+  if (r != "") showRest(ps, r) else if (List.isEmpty(ps)) "()" else joinComma(ps)
+
+def showRest(ps: List[String], r: String): String =
+  if (List.isEmpty(ps)) Str.concat(r, "*") else Str.concat(joinComma(ps), Str.concat(", ", Str.concat(r, "*")))
+
+def joinComma(ps: List[String]): String =
+  if (List.isEmpty(ps)) "" else if (List.isEmpty(List.tail(ps))) List.at(ps, 0) else Str.concat(List.at(ps, 0), Str.concat(", ", joinComma(List.tail(ps))))
+

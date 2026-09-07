@@ -7,7 +7,7 @@
 | [`HUMANS.md`](HUMANS.md) | Human source of truth for product intent. Agents read it. Agents never edit it. |
 | [`docs/vision.md`](docs/vision.md) | Product intent, locks, language direction, open work, risks |
 | [`docs/gaps.md`](docs/gaps.md) | Unknowns and known gaps, ranked by risk |
-| [`docs/plans.md`](docs/plans.md) | Next short-term slice only. Delete the slice when it is done. Do not keep history. |
+| [`docs/plans.md`](docs/plans.md) | Next short-term slice only, while a slice is in progress. Delete the file when the slice is done. Do not keep history. |
 | [`docs/optimization.md`](docs/optimization.md) | Later empirical pre-optimization (`*.scuzz_tune`). Not current work. |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep or cut vs Scala and effect libraries. Platforms. Toolchain. |
 | [`docs/guide.md`](docs/guide.md) | App author path from install to run |
