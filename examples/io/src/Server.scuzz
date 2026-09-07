@@ -12,7 +12,7 @@ def runHttp(): IO[Unit] =
     _ <- showPing(p)
   } yield ()
 
-def echoServer(ln: Any): IO[Unit] =
+def echoServer(ln: Tcp): IO[Unit] =
   for {
     c <- Net.tcpAccept(ln)
     s <- Net.tcpRead(c, 16)

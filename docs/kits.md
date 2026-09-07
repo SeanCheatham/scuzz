@@ -217,8 +217,8 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Stream.takeWhile` | `Stream, A => Bool` | `Stream` |
 | `Stream.drop` | `Stream, Int` | `Stream` |
 | `Stream.dropWhile` | `Stream, A => Bool` | `Stream` |
-| `Stream.find` | `Stream, A => Bool` | `IO` |
-| `Stream.findLast` | `Stream, A => Bool` | `IO` |
+| `Stream.find` | `Stream, A => Bool` | `Stream` |
+| `Stream.findLast` | `Stream, A => Bool` | `Stream` |
 | `Stream.exists` | `Stream, A => Bool` | `IO[Bool]` |
 | `Stream.forall` | `Stream, A => Bool` | `IO[Bool]` |
 | `Stream.none` | `Stream, A => Bool` | `IO[Bool]` |
@@ -241,7 +241,7 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Stream.fold` | `Stream, B, (B, A) => B` | `IO` |
 | `Stream.changes` | `Stream` | `Stream` |
 | `Stream.orElse` | `Stream, Stream` | `Stream` |
-| `Stream.iterate` | `A, A => A` | `Stream` |
+| `Stream.iterate` | `A, Int, A => A` | `Stream` |
 | `Stream.unfold` | `S, S => List` | `Stream` |
 | `Stream.head` | `Stream` | `IO` |
 | `Stream.last` | `Stream` | `IO` |
