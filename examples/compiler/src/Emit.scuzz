@@ -2516,8 +2516,11 @@ def emitApplyLamTyped(p: String, body: Expr, arg: Slot, guess: Bool, bty: String
 
 def slotBindI64(s: Slot, e: Expr, ps: List[Param], defs: List[Fun]): Bool =
   s match {
-    case Slot(_, v, _) => exprIsI64(e, ps, defs) || isI64Lit(v) || hasSub(v, "_u") || hasSub(v, "_tv") || hasSub(v, "_ic_v") || hasDigitStem(v, "_b")
+    case Slot(c, v, _) => exprIsI64(e, ps, defs) || isI64Lit(v) || hasSub(v, "_u") || hasSub(v, "_tv") || hasSub(v, "_ic_v") || hasDigitStem(v, "_b") || isUnboxVal(c, v)
   }
+
+def isUnboxVal(code: String, v: String): Bool =
+  hasSub(code, Str.concat(v, " = call i64 @sz_unbox_i64"))
 
 def applyBindTy(p: String, argE: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
   applyBindTyHit(exprRetTyEns(argE, defs, ens, ps, loc), argE)
