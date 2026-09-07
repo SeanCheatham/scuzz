@@ -654,6 +654,87 @@ def ifIoPick(a: String, b: String): String =
   if (isIo(a)) a else b
 
 def infer(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  if (needsPh(e)) infer(Expr.ELam("_ph", "", rewriteHole(e, "_ph")), env, funs, ens) else inferGo(e, env, funs, ens)
+
+def needsPh(e: Expr): Bool =
+  e match {
+    case Expr.ELam(_, _, _) => false
+    case Expr.EHole => true
+    case Expr.EBin(_, l, r, _) => hasHole(l) || hasHole(r)
+    case Expr.EUn(_, inner, _) => hasHole(inner)
+    case Expr.ECall(f, args, _) => needsPhCall(f, args)
+    case Expr.EMethod(recv, _, args, _) => (isBareHole(recv) || hasBareHoleArg(args)) && !isCompoundPh(recv) && !hasCompoundPhArg(args)
+    case Expr.EField(recv, _, _) => isBareHole(recv)
+    case _ => false
+  }
+
+def needsPhCall(f: String, args: List[Expr]): Bool =
+  if (isHoKit(f)) false else hasBareHoleArg(args) && !hasCompoundPhArg(args)
+
+def isHoKit(f: String): Bool =
+  isKit(f) && kitHasFun(kitParams(f))
+
+def kitHasFun(ps: List[String]): Bool =
+  !List.isEmpty(ps) && (isFunTy(List.at(ps, 0)) || kitHasFun(List.tail(ps)))
+
+def isBareHole(e: Expr): Bool =
+  e match {
+    case Expr.EHole => true
+    case _ => false
+  }
+
+def isCompoundPh(e: Expr): Bool =
+  hasHole(e) && !isBareHole(e)
+
+def hasBareHoleArg(xs: List[Expr]): Bool =
+  !List.isEmpty(xs) && (isBareHole(List.at(xs, 0)) || hasBareHoleArg(List.tail(xs)))
+
+def hasCompoundPhArg(xs: List[Expr]): Bool =
+  !List.isEmpty(xs) && (isCompoundPh(List.at(xs, 0)) || hasCompoundPhArg(List.tail(xs)))
+
+def hasHole(e: Expr): Bool =
+  e match {
+    case Expr.EHole => true
+    case Expr.EPrint(inner, _) => hasHole(inner)
+    case Expr.ECall(_, args, _) => hasHoleList(args)
+    case Expr.EMethod(recv, _, args, _) => hasHole(recv) || hasHoleList(args)
+    case Expr.EField(recv, _, _) => hasHole(recv)
+    case Expr.EBin(_, l, r, _) => hasHole(l) || hasHole(r)
+    case Expr.EUn(_, inner, _) => hasHole(inner)
+    case Expr.ELam(_, _, body) => hasHole(body)
+    case Expr.EIf(c, t, el, _) => hasHole(c) || hasHole(t) || hasHole(el)
+    case Expr.ENamed(_, inner) => hasHole(inner)
+    case Expr.EAscribe(inner, _, _) => hasHole(inner)
+    case Expr.EList(xs) => hasHoleList(xs)
+    case Expr.ETuple(xs) => hasHoleList(xs)
+    case _ => false
+  }
+
+def hasHoleList(xs: List[Expr]): Bool =
+  !List.isEmpty(xs) && (hasHole(List.at(xs, 0)) || hasHoleList(List.tail(xs)))
+
+def rewriteHole(e: Expr, n: String): Expr =
+  e match {
+    case Expr.EHole => Expr.EVar(n, 0)
+    case Expr.EPrint(inner, _) => Expr.EPrint(rewriteHole(inner, n), 0)
+    case Expr.ECall(f, args, _) => Expr.ECall(f, rewriteHoleList(args, n), 0)
+    case Expr.EMethod(recv, name, args, _) => Expr.EMethod(rewriteHole(recv, n), name, rewriteHoleList(args, n), 0)
+    case Expr.EField(recv, name, _) => Expr.EField(rewriteHole(recv, n), name, 0)
+    case Expr.EBin(op, l, r, _) => Expr.EBin(op, rewriteHole(l, n), rewriteHole(r, n), 0)
+    case Expr.EUn(op, inner, _) => Expr.EUn(op, rewriteHole(inner, n), 0)
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteHole(body, n))
+    case Expr.EIf(c, t, el, _) => Expr.EIf(rewriteHole(c, n), rewriteHole(t, n), rewriteHole(el, n), 0)
+    case Expr.ENamed(nm, inner) => Expr.ENamed(nm, rewriteHole(inner, n))
+    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteHole(inner, n), ty, off)
+    case Expr.EList(xs) => Expr.EList(rewriteHoleList(xs, n))
+    case Expr.ETuple(xs) => Expr.ETuple(rewriteHoleList(xs, n))
+    case _ => e
+  }
+
+def rewriteHoleList(xs: List[Expr], n: String): List[Expr] =
+  if (List.isEmpty(xs)) xs else rewriteHole(List.at(xs, 0), n) :: rewriteHoleList(List.tail(xs), n)
+
+def inferGo(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
   e match {
     case Expr.EInt(_, _) => ok("Int")
     case Expr.EBool(_) => ok("Bool")
