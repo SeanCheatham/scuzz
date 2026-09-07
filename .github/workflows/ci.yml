@@ -63,6 +63,8 @@ jobs:
         run: ./scripts/ci.sh kernel
 
       - name: Package release + install-from-tarball smoke
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/ci.sh package
 
       - name: Upload release artifact
@@ -135,6 +137,8 @@ jobs:
         run: ./scripts/ci.sh embedders
 
       - name: Package release + install smoke
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/ci.sh package
 
       - name: Upload release artifact
