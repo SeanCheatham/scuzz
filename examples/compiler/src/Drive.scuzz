@@ -708,10 +708,25 @@ def sigLine(line: String, rest: List[String], mode: Int, depth: Int, b: Builder)
   if (mode == 2) sigSkipLine(line, rest, b) else sigCopyLine(line, rest, b)
 
 def sigCopyLine(line: String, rest: List[String], b: Builder): String =
-  if (lineIsDef(line)) sigLines(rest, 2, 0, b) else sigLines(rest, 0, 0, nlAppend(b, line))
+  if (lineIsDef(line)) sigLines(rest, 2, 0, nlAppend(b, sigDef(line))) else sigLines(rest, 0, 0, nlAppend(b, line))
 
 def sigSkipLine(line: String, rest: List[String], b: Builder): String =
-  if (lineIsDef(line)) sigLines(rest, 2, 0, b) else if (lineIsTop(line)) sigCopyLine(line, rest, b) else sigLines(rest, 2, 0, b)
+  if (lineIsDef(line)) sigLines(rest, 2, 0, nlAppend(b, sigDef(line))) else if (lineIsTop(line)) sigCopyLine(line, rest, b) else sigLines(rest, 2, 0, b)
+
+def sigDef(line: String): String =
+  Str.concat(sigDefHead(line), " ()")
+
+def sigDefHead(line: String): String =
+  sigDefHeadGo(line, 0, 0)
+
+def sigDefHeadGo(line: String, i: Int, depth: Int): String =
+  if (i >= Str.len(line)) line else sigDefHeadCh(line, i, depth, Str.charAt(line, i))
+
+def sigDefHeadCh(line: String, i: Int, depth: Int, c: Int): String =
+  if (c == 40) sigDefHeadGo(line, i + 1, depth + 1) else if (c == 41) sigDefHeadGo(line, i + 1, if (depth > 0) depth - 1 else 0) else if (c == 61) sigDefEq(line, i, depth) else sigDefHeadGo(line, i + 1, depth)
+
+def sigDefEq(line: String, i: Int, depth: Int): String =
+  if (i + 1 < Str.len(line) && Str.charAt(line, i + 1) == 62) sigDefHeadGo(line, i + 2, depth) else if (depth == 0) Str.slice(line, 0, i + 1) else sigDefHeadGo(line, i + 1, depth)
 
 def nlAppend(b: Builder, line: String): Builder =
   Builder.append(b, Str.concat(line, """
@@ -721,7 +736,7 @@ def lineIsDef(line: String): Bool =
   Str.startsWith(line, "def ") || Str.startsWith(line, "@main def ") || Str.startsWith(line, "private def ")
 
 def lineIsTop(line: String): Bool =
-  lineIsDef(line) || Str.startsWith(line, "enum ") || Str.startsWith(line, "record ") || Str.startsWith(line, "import ") || Str.startsWith(line, "type ") || Str.startsWith(line, "opaque ") || Str.startsWith(line, "@")
+  lineIsDef(line) || Str.startsWith(line, "enum ") || Str.startsWith(line, "record ") || Str.startsWith(line, "import ") || Str.startsWith(line, "type ") || Str.startsWith(line, "opaque ") || Str.startsWith(line, "trait ") || Str.startsWith(line, "impl ") || Str.startsWith(line, "package ") || Str.startsWith(line, "@")
 
 def checkFmtFail(stem: String): IO[Unit] =
   IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail("scuzz check"))
