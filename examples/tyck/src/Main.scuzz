@@ -351,6 +351,21 @@ def tyckClosed(): Bool =
 def tyckLam(): Bool =
   tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]"
 
+def srcEitherOk(): String =
+  "enum Either[L, R]:\n  case Left(x: L)\n  case Right(y: R)\ndef eitherNum(e: Either[Int, Int]): Int =\n  e match {\n    case Either.Left(n) | Either.Right(n) => n\n  }\ndef describeEither(e: Either[Int, String]): String =\n  e match {\n    case Either.Left(n) => Str.fromInt(n)\n    case Either.Right(s) => s\n  }\n@main def main: IO[Unit] =\n  IO.println(Str.concat(Str.fromInt(eitherNum(Either.Left(4))), describeEither(Either.Right(\"ok\"))))\n"
+
+def srcEitherMis(): String =
+  "enum Either[L, R]:\n  case Left(x: L)\n  case Right(y: R)\ndef eitherNum(e: Either[Int, Int]): Int =\n  e match {\n    case Either.Left(n) | Either.Right(n) => n\n  }\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(eitherNum(Either.Left(\"x\"))))\n"
+
+def srcShowOk(): String =
+  "trait Show:\n  def show(): String\nrecord Point(x: Int, y: Int)\nimpl Show for Point:\n  def show(): String =\n    \"p\"\n@main def main: IO[Unit] =\n  IO.println(Point(1, 2).show())\n"
+
+def srcSelfGet(): String =
+  "record Box[T](x: T)\ndef wrap[T](x: T): Box[T] =\n  Box(x)\ndef get(): T =\n  self.x\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(wrap(4).get()))\n"
+
+def tyckAdt(): Bool =
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]"
+
 def srcViewNope(): String =
   """@main def main: IO[Unit] =
   Ui.run(_ => View.nope())
@@ -399,13 +414,13 @@ def tyckAny(): Bool =
   Kits.anyCount() == 0
 
 def allOk(): Bool =
-  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckClosed() && tyckAny()
+  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny()
 
 def tyckLive(): Bool =
   tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcSysExit(), wantSysExit())
 
 def dumpFail(): String =
-  if (!tyckCore()) "tyckCore" else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) "tyckFail" else if (!tyckParse()) "tyckParse" else if (!tyckLam()) "tyckLam" else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
+  if (!tyckCore()) "tyckCore" else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) "tyckFail" else if (!tyckParse()) "tyckParse" else if (!tyckLam()) "tyckLam" else if (!tyckAdt()) "tyckAdt" else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
 
 def dumpClosed(): String =
   if (!rejects(srcViewNope(), "unknown function View.nope")) "viewNope" else if (!rejects(srcViewArity(), "View.button expects")) "viewArity" else if (!rejects(srcSigGet(), "Signal.get arg type mismatch")) "sigGet" else if (!rejects(srcUiRun(), "Ui.run arg type mismatch")) "uiRun" else if (!rejects(srcIoNope(), "unknown function IO.notAKit")) "ioNope" else if (Check.check(srcTimeoutOk()) != "[]") Str.concat("timeoutOk ", Check.check(srcTimeoutOk())) else if (!rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")) Str.concat("timeoutMis ", Check.check(srcTimeoutMis())) else "closed-other"
