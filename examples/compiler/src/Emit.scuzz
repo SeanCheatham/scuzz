@@ -3348,7 +3348,7 @@ def emitFieldEn(recv: Expr, name: String, prefix: String, ens: List[En], ps: Lis
   }
 
 def emitRecFieldVar(en: String, name: String, prefix: String, ens: List[En], ps: List[Param]): Slot =
-  emitRecFieldVar2(en, prefix, recNames(ens, tyHead(paramTy(ps, en))), recTys(ens, tyHead(paramTy(ps, en))), name)
+  emitRecFieldVar2(en, prefix, recNames(ens, recHead(en, name, ens, ps)), recTys(ens, recHead(en, name, ens, ps)), name)
 
 def emitRecFieldVar2(en: String, prefix: String, ns: List[String], tys: List[String], name: String): Slot =
   emitRecFieldIdx(en, prefix, recFieldIdx(ns, name), slotInt(tys, recFieldIdx(ns, name)), List.len(ns))
@@ -5000,6 +5000,36 @@ def recNames2(cs: List[EnCase]): List[String] =
 def recNames3(c: EnCase): List[String] =
   c match {
     case EnCase(_, fs) => paramNames(fs)
+  }
+
+def recHead(en: String, name: String, ens: List[En], ps: List[Param]): String =
+  recHeadHit(tyHead(paramTy(ps, en)), name, ens)
+
+def recHeadHit(ty: String, name: String, ens: List[En]): String =
+  if (!List.isEmpty(recNames(ens, ty))) ty else recHeadField(ens, name, 0)
+
+def recHeadField(ens: List[En], name: String, i: Int): String =
+  if (i >= List.len(ens)) "" else recHeadFieldHit(List.at(ens, i), ens, name, i)
+
+def recHeadFieldHit(h: En, ens: List[En], name: String, i: Int): String =
+  h match {
+    case En(_, n, _, cases) => if (hasFieldName(cases, name)) n else recHeadField(ens, name, i + 1)
+  }
+
+def hasFieldName(cs: List[EnCase], name: String): Bool =
+  if (List.isEmpty(cs)) false else hasFieldName1(List.at(cs, 0), List.tail(cs), name)
+
+def hasFieldName1(c: EnCase, rest: List[EnCase], name: String): Bool =
+  c match {
+    case EnCase(_, fs) => hasParamName(fs, name) || hasFieldName(rest, name)
+  }
+
+def hasParamName(fs: List[Param], name: String): Bool =
+  if (List.isEmpty(fs)) false else hasParamName1(List.at(fs, 0), List.tail(fs), name)
+
+def hasParamName1(p: Param, rest: List[Param], name: String): Bool =
+  p match {
+    case Param(n, _, _, _) => n == name || hasParamName(rest, name)
   }
 
 def recTys(ens: List[En], ty: String): List[String] =
