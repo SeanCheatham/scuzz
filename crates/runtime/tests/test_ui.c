@@ -13359,10 +13359,10 @@ static int wait_aborted(pid_t pid) {
   return WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT;
 }
 
-static void assert_missing_aborts(void (*fn)(void)) {
+static void assert_missing_aborts(void (*fn)(void), const char *expect) {
   pid_t pid;
   int fds[2];
-  char err[4096];
+  char err[8192];
   ssize_t n;
 
   assert(pipe(fds) == 0);
@@ -13383,7 +13383,7 @@ static void assert_missing_aborts(void (*fn)(void)) {
     n = 0;
   err[n] = '\0';
   assert(wait_aborted(pid));
-  assert(strstr(err, "missing signal missing") != NULL);
+  assert(strstr(err, expect) != NULL);
 }
 
 static void missing_property_int(void) {
@@ -13415,11 +13415,82 @@ static void missing_timeline_int(void) {
   (void)sz_timeline_signal_int(tl, 0, name);
 }
 
+static char g_missing_long[601];
+
+static void missing_property_long_name(void) {
+  SzString *name = sz_string_from_cstr(g_missing_long);
+  (void)sz_property_signal_int(name);
+}
+
 static void test_property_missing_signal_panics(void) {
-  assert_missing_aborts(missing_property_int);
-  assert_missing_aborts(missing_property_str);
-  assert_missing_aborts(missing_property_list_len);
-  assert_missing_aborts(missing_timeline_int);
+  int i;
+  assert_missing_aborts(missing_property_int, "missing signal missing");
+  assert_missing_aborts(missing_property_str, "missing signal missing");
+  assert_missing_aborts(missing_property_list_len, "missing signal missing");
+  assert_missing_aborts(missing_timeline_int, "missing signal missing");
+  /* A long name reaches stderr in full: no fixed-buffer truncation. */
+  for (i = 0; i < 600; i++)
+    g_missing_long[i] = (char)('a' + (i % 26));
+  g_missing_long[600] = '\0';
+  assert_missing_aborts(missing_property_long_name, g_missing_long);
+}
+
+static int g_map_calls;
+
+static SzString *map_counting_int(int64_t v, void *env) {
+  (void)env;
+  g_map_calls++;
+  return sz_string_from_int(v);
+}
+
+static void test_signal_map_caches_unchanged_source(void) {
+  SzSignalInt *count;
+  SzSignalStr *label;
+
+  count = sz_signal_int(7);
+  g_map_calls = 0;
+  label = sz_lang_signal_map(count, map_counting_int, NULL, NULL);
+  /* Construction primes the cache once. */
+  assert(g_map_calls == 1);
+  /* An unchanged source serves the cached string: no recompute, no realloc. */
+  (void)sz_signal_str_get(label);
+  (void)sz_signal_str_get(label);
+  assert(g_map_calls == 1);
+  assert(strcmp(sz_signal_str_get(label), "7") == 0);
+  assert(g_map_calls == 1);
+  /* A changed source recomputes once, then caches again. */
+  sz_signal_int_set(count, 8);
+  assert(strcmp(sz_signal_str_get(label), "8") == 0);
+  assert(g_map_calls == 2);
+  (void)sz_signal_str_get(label);
+  assert(g_map_calls == 2);
+  sz_signal_str_free(label);
+  sz_signal_int_free(count);
+}
+
+static void test_signal_list_elem_str_flag(void) {
+  SzSignalList *strs;
+  SzSignalList *rows;
+  SzString *dump;
+
+  /* No explicit flag: an empty list stays unknown and dumps as String. */
+  strs = sz_signal_list(sz_list_nil());
+  sz_signal_name(strs, "estr");
+  assert(sz_signal_list_elem_str(strs) == 1);
+  dump = sz_signal_dump();
+  assert(strstr(sz_string_cstr(dump), "estr = []") != NULL);
+  sz_string_free(dump);
+
+  /* An explicit non-String flag decides an empty list: count-only dump. */
+  rows = sz_lang_signal_list(sz_list_nil(), sz_string_from_cstr("erow"), 0);
+  assert(sz_signal_list_elem_str(rows) == 0);
+  dump = sz_signal_dump();
+  assert(strstr(sz_string_cstr(dump), "erow = <0>") != NULL);
+  sz_string_free(dump);
+
+  assert(sz_signal_list_elem_str(NULL) == 0);
+  sz_signal_list_free(strs);
+  sz_signal_list_free(rows);
 }
 
 static SzView *runtime_env_factory(void *env) {
@@ -15661,6 +15732,8 @@ int main(void) {
   test_signal_name_last_wins_per_kind();
   test_signal_name_unregistered_clears_nothing();
   test_signal_map_source_free();
+  test_signal_map_caches_unchanged_source();
+  test_signal_list_elem_str_flag();
   test_signal_dump_long_name();
   test_signal_list_mixed_kinds();
   test_property_replay_str_list();
