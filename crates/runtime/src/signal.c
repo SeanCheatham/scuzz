@@ -11,14 +11,22 @@ struct SzSignalInt {
 
 struct SzSignalStr {
   char *value;
-  /* Derived from Signal.int through map (recomputed on get). */
+  /* Derived from Signal.int through map. The pure map result is cached and
+     recomputed on get only when the source value changed. map_valid marks
+     the cache primed; map_seen is the source value behind `value`. */
   SzSignalInt *map_src;
   SzSignalMapIntFn map_fn;
   void *map_env;
+  int64_t map_seen;
+  int map_valid;
 };
 
 struct SzSignalList {
   SzList *value;
+  /* Element kind for the dump and property oracles: 1 = String (print
+     elements), 0 = other (print the count). The first non-null head
+     overrides this flag; the flag decides empty and all-null lists. */
+  int elem_str;
 };
 
 /* --- signal store registry (fuzz / dump oracle) --------------------------- */
@@ -31,7 +39,6 @@ typedef struct SigReg {
   SigKind kind;
   int id;
   char *name;
-  int elem_str;
   const void *sig;
   struct SigReg *next;
 } SigReg;
@@ -45,7 +52,6 @@ static void sig_register(SigKind kind, const void *sig) {
   r->kind = kind;
   r->id = g_sig_next_id++;
   r->name = sz_strdup("");
-  r->elem_str = 1;
   r->sig = sig;
   if (g_sig_tail)
     g_sig_tail->next = r;
@@ -69,6 +75,8 @@ void sz_signal_name(const void *sig, const char *name) {
   }
   if (!mine)
     return;
+  if (strcmp(mine->name, n) == 0)
+    return;
   if (n[0]) {
     for (r = g_sig_head; r; r = r->next) {
       if (r != mine && r->kind == mine->kind && r->name &&
@@ -84,19 +92,18 @@ void sz_signal_name(const void *sig, const char *name) {
 
 static void sig_unregister(const void *sig) {
   SigReg **p = &g_sig_head;
+  SigReg *prev = NULL;
   while (*p) {
     if ((*p)->sig == sig) {
       SigReg *dead = *p;
       *p = dead->next;
-      if (g_sig_tail == dead) {
-        g_sig_tail = g_sig_head;
-        while (g_sig_tail && g_sig_tail->next)
-          g_sig_tail = g_sig_tail->next;
-      }
+      if (g_sig_tail == dead)
+        g_sig_tail = prev;
       sz_free(dead->name);
       sz_free(dead);
       return;
     }
+    prev = *p;
     p = &(*p)->next;
   }
 }
@@ -113,10 +120,11 @@ static SigReg *sig_find(SigKind kind, const char *name) {
 }
 
 static void sig_missing(const char *name) {
-  char buf[192];
-  snprintf(buf, sizeof buf, "missing signal %s",
-           name && name[0] ? name : "(empty)");
-  sz_panic(buf);
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  sz_dump_append(&buf, &len, &cap, "missing signal ");
+  sz_dump_append(&buf, &len, &cap, name && name[0] ? name : "(empty)");
+  sz_panic(buf); /* noreturn: buf dies with the process */
 }
 
 /* First non-null head decides String vs count-only. Empty keeps `unknown`. */
@@ -127,18 +135,6 @@ static int sig_list_heads_str(const SzList *p, int unknown) {
     return sz_rc_kind(p->head) == SZ_RC_STRING;
   }
   return unknown ? 1 : 0;
-}
-
-/* Mark a list signal's element kind: 1 = String (dump prints elements),
- * 0 = other (dump prints the count only). */
-static void sig_set_elem_str(const void *sig, int64_t elem_str) {
-  SigReg *r;
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->sig == sig) {
-      r->elem_str = elem_str ? 1 : 0;
-      return;
-    }
-  }
 }
 
 /* 1 when the head is a String the dump may print, 0 otherwise. */
@@ -177,8 +173,9 @@ SzString *sz_signal_dump(void) {
       sz_dump_append(&buf, &len, &cap, "\"\n");
       break;
     case SIG_LIST: {
-      SzList *p = sz_signal_list_get((const SzSignalList *)r->sig);
-      if (!sig_list_heads_str(p, r->elem_str)) {
+      const SzSignalList *ls = (const SzSignalList *)r->sig;
+      SzList *p = sz_signal_list_get(ls);
+      if (!sig_list_heads_str(p, ls->elem_str)) {
         snprintf(num, sizeof num, "<%lld>\n", (long long)sz_list_len(p));
         sz_dump_append(&buf, &len, &cap, num);
         break;
@@ -248,7 +245,7 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   if (!r)
     sig_missing(n);
   p = sz_signal_list_get((const SzSignalList *)r->sig);
-  if (!sig_list_heads_str(p, r->elem_str))
+  if (!sig_list_heads_str(p, ((const SzSignalList *)r->sig)->elem_str))
     return sz_string_from_cstr("");
   i = 0;
   while (p) {
@@ -310,19 +307,25 @@ void sz_signal_str_set(SzSignalStr *s, const char *v) {
 }
 
 const char *sz_signal_str_get(const SzSignalStr *s) {
-  SzSignalStr *mut;
+  /* The cache mutates through the const getter: a memoized derive. */
+  SzSignalStr *mut = (SzSignalStr *)s;
+  SzString *out;
+  int64_t in;
   if (!s)
     return "";
-  if (s->map_fn && s->map_src) {
-    SzString *out;
-    mut = (SzSignalStr *)s;
-    out = s->map_fn(sz_signal_int_get(s->map_src), s->map_env);
-    sz_free(mut->value);
-    mut->value = sz_strdup(out ? sz_string_cstr(out) : "");
-    if (out)
-      sz_string_free(out);
-  }
-  return s->value ? s->value : "";
+  if (!s->map_fn || !s->map_src)
+    return s->value ? s->value : "";
+  in = sz_signal_int_get(s->map_src);
+  if (s->map_valid && in == s->map_seen)
+    return s->value;
+  out = s->map_fn(in, s->map_env);
+  sz_free(mut->value);
+  mut->value = sz_strdup(out ? sz_string_cstr(out) : "");
+  if (out)
+    sz_string_free(out);
+  mut->map_seen = in;
+  mut->map_valid = 1;
+  return mut->value;
 }
 
 void sz_signal_str_free(SzSignalStr *s) {
@@ -368,18 +371,15 @@ void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v) {
 }
 
 int sz_signal_list_elem_str(const SzSignalList *s) {
-  SigReg *r;
-  for (r = g_sig_head; r; r = r->next) {
-    if (r->sig == (const void *)s)
-      return sig_list_heads_str(s ? s->value : NULL, r->elem_str);
-  }
-  return 0;
+  if (!s)
+    return 0;
+  return sig_list_heads_str(s->value, s->elem_str);
 }
 
 SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name,
                                   int64_t elem_str) {
   SzSignalList *s = sz_signal_list(initial);
-  sig_set_elem_str(s, elem_str);
+  s->elem_str = elem_str ? 1 : 0;
   if (name)
     sz_signal_name(s, sz_string_cstr(name));
   return s;
@@ -417,6 +417,7 @@ SzSignalList *sz_signal_list(SzList *initial) {
   SzSignalList *s = (SzSignalList *)sz_alloc(sizeof(SzSignalList));
   sz_retain(initial);
   s->value = initial;
+  s->elem_str = 1;
   sig_register(SIG_LIST, s);
   return s;
 }

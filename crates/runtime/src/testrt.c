@@ -3231,10 +3231,11 @@ static const char *tl_sig_line(const char *dump, const char *kind,
 }
 
 static void tl_missing(const char *name) {
-  char buf[192];
-  snprintf(buf, sizeof buf, "missing signal %s",
-           name && name[0] ? name : "(empty)");
-  sz_panic(buf);
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  sz_dump_append(&buf, &len, &cap, "missing signal ");
+  sz_dump_append(&buf, &len, &cap, name && name[0] ? name : "(empty)");
+  sz_panic(buf); /* noreturn: buf dies with the process */
 }
 
 int64_t sz_timeline_replay_signal_int(const char *name) {
