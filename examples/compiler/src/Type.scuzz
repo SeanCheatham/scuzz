@@ -206,13 +206,19 @@ def namedEq2(n: String, b: Ty): Bool =
 
 def appEq(n: String, args: List[Ty], b: Ty): Bool =
   b match {
-    case Ty.App(m, bs) => n == m && (eqList(args, bs) || bareFit(args, bs) || ioFit(n, args, bs))
+    case Ty.App(m, bs) => n == m && (eqList(args, bs) || argsFit(args, bs) || ioFit(n, args, bs))
     case Ty.Named(m) => n == m
     case _ => false
   }
 
-def bareFit(a: List[Ty], b: List[Ty]): Bool =
-  List.isEmpty(a) || List.isEmpty(b)
+def argsFit(xs: List[Ty], ys: List[Ty]): Bool =
+  argsPrefix(xs, ys) || argsPrefix(ys, xs) || argsTail(xs, ys) || argsTail(ys, xs)
+
+def argsPrefix(xs: List[Ty], ys: List[Ty]): Bool =
+  if (List.isEmpty(xs)) true else if (List.isEmpty(ys)) false else eq(List.at(xs, 0), List.at(ys, 0)) && argsPrefix(List.tail(xs), List.tail(ys))
+
+def argsTail(xs: List[Ty], ys: List[Ty]): Bool =
+  if (List.isEmpty(xs)) true else if (List.isEmpty(ys)) false else if (eqList(xs, ys)) true else argsTail(xs, List.tail(ys))
 
 def ioFit(n: String, a: List[Ty], b: List[Ty]): Bool =
   n == "IO" && eq(ioOkOf(a), ioOkOf(b)) && eq(ioErrOf(a), ioErrOf(b))
@@ -233,13 +239,13 @@ def eqList(xs: List[Ty], ys: List[Ty]): Bool =
   if (List.isEmpty(xs)) List.isEmpty(ys) else if (List.isEmpty(ys)) false else eq(List.at(xs, 0), List.at(ys, 0)) && eqList(List.tail(xs), List.tail(ys))
 
 def prefer(a: Ty, b: Ty): Ty =
-  if (show(a) == "") b else if (show(b) == "") a else if (eqStruct(a, b)) a else if (isAny(a) || isParam(a)) b else if (isAny(b) || isParam(b)) a else if (isIo(a) && isIo(b)) tIo(prefer(ioErr(a), ioErr(b)), prefer(ioOk(a), ioOk(b))) else if (bareOf(a, b)) b else if (bareOf(b, a)) a else if (isTup(a) && isTup(b)) tTuple(preferList(tupParts(a), tupParts(b))) else a
+  if (show(a) == "") b else if (show(b) == "") a else if (eqStruct(a, b)) a else if (isAny(a) || isParam(a)) b else if (isAny(b) || isParam(b)) a else if (isIo(a) && isIo(b)) tIo(prefer(ioErr(a), ioErr(b)), prefer(ioOk(a), ioOk(b))) else if (appRicher(a, b)) a else if (appRicher(b, a)) b else if (isTup(a) && isTup(b)) tTuple(preferList(tupParts(a), tupParts(b))) else a
 
 def eqStruct(a: Ty, b: Ty): Bool =
   show(a) == show(b)
 
-def bareOf(bare: Ty, app: Ty): Bool =
-  isAppNamed(bare, appName(app)) && List.isEmpty(appArgs(bare)) && !List.isEmpty(appArgs(app))
+def appRicher(long: Ty, short: Ty): Bool =
+  appName(long) != "" && appName(long) == appName(short) && List.len(appArgs(long)) > List.len(appArgs(short)) && argsFit(appArgs(short), appArgs(long))
 
 def preferList(xs: List[Ty], ys: List[Ty]): List[Ty] =
   if (List.isEmpty(xs) || List.isEmpty(ys)) xs else prefer(List.at(xs, 0), List.at(ys, 0)) :: preferList(List.tail(xs), List.tail(ys))

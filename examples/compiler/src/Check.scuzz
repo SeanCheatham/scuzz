@@ -10,6 +10,7 @@ import Parse.Arm
 import Parse.Bind
 import Parse.Alias
 import Parse.Imp
+import Parse.Im
 import Lexer.lex
 import Type.eqStr
 import Type.preferStr
@@ -430,7 +431,26 @@ def resolveInstKit2(f: String, ty: String, args: List[Expr], env: List[(String, 
   if (isKit(q)) resolveKit(q, args, env, funs, ens, span) else resolveInstCopy(f, ty, args, env, funs, ens, span)
 
 def resolveInstCopy(f: String, ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (f == ".copy") resolveInstArgs(List.tail(args), env, funs, ens, ok(ty)) else if (List.isEmpty(findFun(funs, Str.slice(f, 1, Str.len(f))))) bad(Str.concat("unknown function ", f), span) else resolveUser(f, args, env, funs, ens, span, findFun(funs, Str.slice(f, 1, Str.len(f))))
+  if (f == ".copy") resolveInstArgs(List.tail(args), env, funs, ens, ok(ty)) else resolveInstNamed(f, ty, args, env, funs, ens, span, findFun(funs, Str.slice(f, 1, Str.len(f))))
+
+def resolveInstNamed(f: String, ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), hit: List[Fun]): Out =
+  if (List.isEmpty(hit)) bad(Str.concat("unknown function ", f), span) else resolveInstHit(f, ty, args, env, funs, ens, span, List.at(hit, 0))
+
+def resolveInstHit(f: String, ty: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), d: Fun): Out =
+  d match {
+    case Fun(_, _, _, ps, ret, _, _, _) => checkKnown(f, instWant(ps, ty), ret, args, env, funs, ens, span)
+  }
+
+def instWant(ps: List[Param], recvTy: String): List[String] =
+  if (hasSelfParam(ps)) paramTys(ps) else recvTy :: paramTys(ps)
+
+def hasSelfParam(ps: List[Param]): Bool =
+  if (List.isEmpty(ps)) false else hasSelfParam1(List.at(ps, 0))
+
+def hasSelfParam1(p: Param): Bool =
+  p match {
+    case Param(n, _, _, _) => n == "self"
+  }
 
 def resolveInstArgs(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], o: Out): Out =
   if (hasErr(o)) o else if (List.isEmpty(args)) o else resolveInstArgsGo(infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens, o)
@@ -1289,7 +1309,7 @@ def checkProg(p: Prog): Out =
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
   p match {
-    case Prog(_, enums, aliases, _, _, imps, defs, main, body) => checkProgGo(expandDefs(withImportFuns(imps, defs), aliases), Parse.builtins(enums), main, body, stems)
+    case Prog(_, enums, aliases, _, impls, imps, defs, main, body) => checkProgGo(expandDefs(withImportFuns(imps, implFuns(impls, defs)), aliases), Parse.builtins(enums), main, body, stems)
   }
 
 def checkProgGo(ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
@@ -1297,6 +1317,22 @@ def checkProgGo(ds: List[Fun], enums: List[En], main: String, body: Expr, stems:
 
 def checkProgAfterEns(o: Out, ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
   if (hasErr(o)) o else checkDefsRest(ds, ds, enums, main, body, stems)
+
+def implFuns(impls: List[Im], defs: List[Fun]): List[Fun] =
+  if (List.isEmpty(impls)) defs else implFuns(List.tail(impls), implMeths(List.at(impls, 0), defs))
+
+def implMeths(im: Im, defs: List[Fun]): List[Fun] =
+  im match {
+    case Im(_, _, forTy, methods) => stampMod(methods, forTy, defs)
+  }
+
+def stampMod(ms: List[Fun], mod: String, defs: List[Fun]): List[Fun] =
+  if (List.isEmpty(ms)) defs else stampFun(List.at(ms, 0), mod) :: stampMod(List.tail(ms), mod, defs)
+
+def stampFun(d: Fun, mod: String): Fun =
+  d match {
+    case Fun(priv, name, ts, ps, ret, body, _, off) => Fun(priv, name, ts, Param("self", mod, "", "") :: ps, ret, body, mod, off)
+  }
 
 def withImportFuns(imps: List[Imp], defs: List[Fun]): List[Fun] =
   List.concat(importFuns(imps, defs), defs)
