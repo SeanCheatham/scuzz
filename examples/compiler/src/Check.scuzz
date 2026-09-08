@@ -16,11 +16,10 @@ import Type.eqStr
 import Type.preferStr
 import Type.isTyParam
 import Kits.has
+import Kits.Kit
 import Kits.params
 import Kits.ret
 import Kits.names
-import Kits.want
-import Kits.arityOk
 
 def noStr(): List[String] =
   []
@@ -110,20 +109,10 @@ def findFunPrefer3(hit: List[Fun], funs: List[Fun], name: String): List[Fun] =
   if (List.isEmpty(hit)) findFun(funs, name) else hit
 
 def findFun(funs: List[Fun], name: String): List[Fun] =
-  if (List.isEmpty(funs)) [] else findFun1(List.at(funs, 0), List.tail(funs), name)
-
-def findFun1(h: Fun, rest: List[Fun], name: String): List[Fun] =
-  h match {
-    case Fun(priv, n, ts, ps, ret, body, mod, off) => if (n == name) Fun(priv, n, ts, ps, ret, body, mod, off) :: findFun(rest, name) else findFun(rest, name)
-  }
+  List.filter(funs, h => h.name == name)
 
 def findFunMod(funs: List[Fun], mod: String, name: String): List[Fun] =
-  if (List.isEmpty(funs)) [] else findFunMod1(List.at(funs, 0), List.tail(funs), mod, name)
-
-def findFunMod1(h: Fun, rest: List[Fun], mod: String, name: String): List[Fun] =
-  h match {
-    case Fun(priv, n, ts, ps, ret, body, m, off) => if (n == name && m == mod) Fun(priv, n, ts, ps, ret, body, m, off) :: findFunMod(rest, mod, name) else findFunMod(rest, mod, name)
-  }
+  List.filter(funs, h => h.name == name && h.mod == mod)
 
 def paramTys(ps: List[Param]): List[String] =
   if (List.isEmpty(ps)) [] else paramTys1(List.at(ps, 0), List.tail(ps))
@@ -391,10 +380,16 @@ def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: L
   if (f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at") resolveGenericKit(f, args, env, funs, ens, span) else resolveKitRest(f, args, env, funs, ens, span)
 
 def resolveGenericKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), kitRet(f))) else if (List.len(args) != List.len(kitParams(f))) bad(Str.concat(f, " has wrong arity"), span) else genericArgs(f, ["A", "B", "E"], kitParams(f), kitRet(f), args, env, funs, ens, span)
+  resolveGenericKitSig(f, args, env, funs, ens, span, Kits.find(f))
+
+def resolveGenericKitSig(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), kit: Kit): Out =
+  if (List.isEmpty(args)) ok(funTyFrom(Kits.kitParamsOf(kit), Kits.kitRetOf(kit))) else if (List.len(args) != List.len(Kits.kitParamsOf(kit))) bad(Str.concat(f, " has wrong arity"), span) else genericArgs(f, ["A", "B", "E"], Kits.kitParamsOf(kit), Kits.kitRetOf(kit), args, env, funs, ens, span)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (Str.startsWith(f, "Signal.") || f == "IO.attempt") resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else if (List.isEmpty(args) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (!arityOk(f, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(kitParams(f))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, want(f, List.len(args)), kitRet(f), args, env, funs, ens, span)
+  if (Str.startsWith(f, "Signal.") || f == "IO.attempt") resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, Kits.find(f))
+
+def resolveKnownKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), kit: Kit): Out =
+  if (List.isEmpty(args) && !List.isEmpty(Kits.kitParamsOf(kit))) ok(funTyFrom(Kits.kitParamsOf(kit), Kits.kitRetOf(kit))) else if (!Kits.arityOf(kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, Kits.wantOf(kit, List.len(args)), Kits.kitRetOf(kit), args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
   if (List.isEmpty(ens)) "" else enOfCase1(List.at(ens, 0), List.tail(ens), ctor)
@@ -1631,8 +1626,13 @@ def checkMainGot(o: Out, body: Expr, file: String): Out =
     case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else if (ty == "IO[Unit]") Out(ty, err, sp) else bad(Str.concat("@main body must be IO[Unit], got ", ty), spanPick(sp, spanPick(Parse.spanOf(body), (file, 0 - 1))))
   }
 
-def lineCol(src: String, i: Int, j: Int, line: Int, col: Int, n: Int): (Int, Int) =
-  if (j >= i) (line, col) else if (j >= n) (line, col) else if (Str.charAt(src, j) == 10) lineCol(src, i, j + 1, line + 1, 1, n) else lineCol(src, i, j + 1, line, col + 1, n)
+def lineCol(src: String, off: Int): (Int, Int) =
+  lineColPrefix(Str.take(src, off))
+
+def lineColPrefix(prefix: String): (Int, Int) =
+  (Str.byteLen(prefix) - Str.byteLen(Str.replace(prefix, """
+""", "")) + 1, Str.len(prefix) - Str.lastIndexOf(prefix, """
+"""))
 
 def isIdentCh(c: Int): Bool =
   c >= 65 && c <= 90 || c >= 97 && c <= 122 || c >= 48 && c <= 57 || c == 95
@@ -1656,7 +1656,7 @@ def tokenEndCh(src: String, off: Int, c: Int): Int =
   if (c == 34) skipStr(src, off + 1) else if (isIdentCh(c)) skipQual(src, off) else off + 1
 
 def locOf(src: String, off: Int): (Int, Int, Int, Int) =
-  if (off < 0 || src == "") (1, 1, 1, 1) else locOf2(lineCol(src, off, 0, 1, 1, Str.len(src)), src, off)
+  if (off < 0 || src == "") (1, 1, 1, 1) else locOf2(lineCol(src, off), src, off)
 
 def locOf2(p: (Int, Int), src: String, off: Int): (Int, Int, Int, Int) =
   p match {

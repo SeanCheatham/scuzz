@@ -5676,6 +5676,32 @@ int main(void) {
           sz_string_free(empty);
         }
         {
+          /* Concatenation preserves bytes and code points at every split. */
+          {
+            const char bytes[] = {'a', 0, 'z', (char)0xc3, (char)0xa9,
+                                  (char)0xf0, (char)0x9f, (char)0x98,
+                                  (char)0x80, (char)0x80, (char)0xff};
+            size_t end, split;
+            for (end = 0; end <= sizeof(bytes); end++) {
+              SzString *whole = sz_string_from_bytes(bytes, end);
+              for (split = 0; split <= end; split++) {
+                SzString *left = sz_string_from_bytes(bytes, split);
+                SzString *right = sz_string_from_bytes(bytes + split, end - split);
+                SzString *joined = sz_string_concat(left, right);
+                int64_t cp;
+                assert(joined->len == whole->len);
+                assert(!memcmp(joined->data, whole->data, end + 1));
+                assert(joined->is_ascii == whole->is_ascii);
+                assert(sz_string_ulen(joined) == sz_string_ulen(whole));
+                for (cp = -1; cp <= sz_string_ulen(whole); cp++)
+                  assert(sz_string_uchar_at(joined, cp) == sz_string_uchar_at(whole, cp));
+                sz_release(joined);
+                sz_release(right);
+                sz_release(left);
+              }
+              sz_release(whole);
+            }
+          }
           /* UTF-8 code-point ops: "a\xc3\xa9z" is a, e-acute, z. */
           const char *acute = "a\xc3\xa9z";
           SzString *u = sz_string_from_cstr(acute);

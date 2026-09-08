@@ -3,8 +3,8 @@
 #
 # Stage 2: the bootstrap compiles the current CLI. That binary is the new compiler.
 # Stage 3: the new compiler emits `cli.ll` and a binary.
-# Stage 4: that binary emits `cli.ll` again.
-# Stage-3 and stage-4 `.ll` must match.
+# Stage 4: if stage-2 and stage-3 IR differ, that binary emits `cli.ll` again.
+# The final two IR files must match.
 # Bootstrap IR may differ from stage-3 when emit changes.
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,6 +29,12 @@ test -x "$STAGE2/cli"
 grep -q "cli-ok" /tmp/scuzz-fp-cli3.out
 test -f "$STAGE3/cli.ll"
 test -x "$STAGE3/cli"
+
+# Equal IR proves convergence. A third build is not necessary.
+if cmp -s "$STAGE2/cli.ll" "$STAGE3/cli.ll"; then
+  echo "ll-fixed-point-ok"
+  exit 0
+fi
 
 "$STAGE3/cli" build --full --out-dir "$STAGE4" examples/cli
 test -f "$STAGE4/cli.ll"

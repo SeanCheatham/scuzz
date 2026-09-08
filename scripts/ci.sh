@@ -65,7 +65,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   asan            make -C crates/runtime test-asan
   skia            ffi-skia tests
   embedders       ffi-skia lib + desktop and mobile embedders
-  hello           self-compile CLI, hello, fmt
+  hello           hello, fmt
   tyck            typecheck oracle
   kits            kit catalog --check
   codegen         codegen emit + oracle
@@ -141,8 +141,6 @@ slice_embedders() {
 slice_hello() {
   need_scuzz
   maybe_wipe
-  "$SCUZZ" run --out-dir /tmp/scuzz-cli-self examples/cli | tee /tmp/cli.out
-  grep -q "cli-ok" /tmp/cli.out
   "$SCUZZ" run examples/hello | tee /tmp/hello.out
   grep -q "Hello, Scuzz!" /tmp/hello.out
   grep -q "ready." /tmp/hello.out

@@ -424,7 +424,7 @@ static void sz_rc_retire(void *ptr) {
   if (!ptr)
     return;
   h = sz_rc_hdr(ptr);
-  if (!sz_testrt_oracles_armed() || !pairing_kind(h->kind)) {
+  if (!pairing_kind(h->kind) || !sz_testrt_oracles_armed()) {
     sz_free(ptr);
     return;
   }
@@ -840,29 +840,39 @@ void sz_release(void *ptr) {
 
 static uint32_t utf8_decode(const char *p, size_t left, size_t *used);
 
-SzString *sz_string_from_bytes(const char *bytes, size_t len) {
-  SzString *s = (SzString *)sz_rc_alloc(sizeof(SzString), SZ_RC_STRING);
-  size_t i;
+static SzString *string_alloc(size_t len) {
+  SzString *s;
+  if (len == SIZE_MAX)
+    sz_panic("String too large");
+  s = (SzString *)sz_rc_alloc(sizeof(SzString), SZ_RC_STRING);
   s->len = len;
   s->data = (char *)sz_alloc(len + 1);
-  if (len)
-    memcpy(s->data, bytes, len);
   s->data[len] = '\0';
-  s->is_ascii = 1;
-  s->ulen = 0;
   s->cp_hint = 0;
   s->off_hint = 0;
-  /* Count with the same walk as utf8_decode so a lone continuation is one
-   * code point, not invisible. */
-  for (i = 0; i < len; ) {
+  return s;
+}
+
+static void string_measure(SzString *s) {
+  size_t i;
+  s->is_ascii = 1;
+  s->ulen = 0;
+  /* Count malformed bytes with the same walk as code-point access. */
+  for (i = 0; i < s->len; ) {
     size_t used;
-    unsigned char c = (unsigned char)s->data[i];
-    if (c >= 0x80)
+    if ((unsigned char)s->data[i] >= 0x80)
       s->is_ascii = 0;
-    utf8_decode(s->data + i, len - i, &used);
+    utf8_decode(s->data + i, s->len - i, &used);
     i += used;
     s->ulen++;
   }
+}
+
+SzString *sz_string_from_bytes(const char *bytes, size_t len) {
+  SzString *s = string_alloc(len);
+  if (len)
+    memcpy(s->data, bytes, len);
+  string_measure(s);
   return s;
 }
 
@@ -881,18 +891,21 @@ void sz_string_free(SzString *s) { sz_release(s); }
 SzString *sz_string_concat(const SzString *a, const SzString *b) {
   size_t al = a && a->data ? a->len : 0;
   size_t bl = b && b->data ? b->len : 0;
-  char *buf;
   SzString *out;
   if (bl > SIZE_MAX - al)
     sz_panic("Str.concat too large");
-  buf = (char *)sz_alloc(al + bl + 1);
+  out = string_alloc(al + bl);
   if (al)
-    memcpy(buf, a->data, al);
+    memcpy(out->data, a->data, al);
   if (bl)
-    memcpy(buf + al, b->data, bl);
-  buf[al + bl] = '\0';
-  out = sz_string_from_bytes(buf, al + bl);
-  sz_free(buf);
+    memcpy(out->data + al, b->data, bl);
+  if ((!al || a->is_ascii) && (!bl || b->is_ascii)) {
+    out->is_ascii = 1;
+    out->ulen = (int64_t)(al + bl);
+  } else {
+    /* A split UTF-8 sequence can join at the boundary. */
+    string_measure(out);
+  }
   return out;
 }
 
