@@ -54,6 +54,63 @@ static void counter_tap(SzView *self, void *env) {
   sz_signal_int_set(count, sz_signal_int_get(count) + 1);
 }
 
+static void test_button_press_feedback(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzUiConfig cfg = {0};
+    SzInputEvent ev = {0};
+    SzSignalInt *count = sz_signal_int(0);
+    SzView *button = sz_view_button("Save", counter_tap, count);
+    SzUiSession *session;
+    SzRect before, after;
+    const char *idle = "/tmp/scuzz_button_idle.png";
+    const char *down = "/tmp/scuzz_button_down.png";
+    const char *cancel = "/tmp/scuzz_button_cancel.png";
+    cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+    cfg.width = 120;
+    cfg.height = 60;
+    cfg.scale = scale;
+    session = sz_ui_mount(&cfg, button);
+    assert(session && sz_ui_pump_sync(session));
+    before = sz_view_frame(button);
+    assert(sz_ui_snapshot_png_sync(session, idle));
+    ev.kind = SZ_INPUT_POINTER;
+    ev.pointer_phase = SZ_POINTER_DOWN;
+    ev.x = before.x + 10.f;
+    ev.y = before.y + 10.f;
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(sz_ui_pump_sync(session));
+    assert(sz_ui_snapshot_png_sync(session, down));
+    assert(!files_equal(idle, down));
+    assert(sz_signal_int_get(count) == 0);
+    after = sz_view_frame(button);
+    assert(before.x == after.x && before.y == after.y &&
+           before.w == after.w && before.h == after.h);
+    ev.pointer_phase = SZ_POINTER_MOVE;
+    ev.x = 110.f;
+    ev.y = 50.f;
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(sz_ui_pump_sync(session));
+    assert(sz_ui_snapshot_png_sync(session, cancel));
+    assert(files_equal(idle, cancel));
+    ev.pointer_phase = SZ_POINTER_UP;
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(sz_signal_int_get(count) == 0);
+    ev.pointer_phase = SZ_POINTER_DOWN;
+    ev.x = before.x + 10.f;
+    ev.y = before.y + 10.f;
+    assert(sz_ui_inject_sync(session, &ev));
+    ev.pointer_phase = SZ_POINTER_UP;
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(sz_signal_int_get(count) == 1);
+    sz_ui_unmount(session);
+    sz_view_free(button);
+    sz_signal_int_free(count);
+    remove(idle);
+    remove(down);
+    remove(cancel);
+  }
+}
+
 static void test_session_snapshot(void) {
   SzUiConfig cfg;
   SzSignalInt *count;
@@ -2785,8 +2842,8 @@ static void test_clip_paint_contains_overflow(void) {
   /* Scroll child sits at pad 12 inside the 40×40 clip. */
   assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
   /* Same canvas, outside the clip frame: theme background. */
-  assert(px_rgb(px, 80, 20, 50, 0xF5, 0xF5, 0xF5));
-  assert(px_rgb(px, 80, 50, 20, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 20, 50, 0xF3, 0xEF, 0xE3));
+  assert(px_rgb(px, 80, 50, 20, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -2841,14 +2898,14 @@ static void test_opacity_paint_scales_alpha(void) {
   root = opacity_green_box(0);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
-  assert(px_rgb(px, 80, 20, 20, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 20, 20, 0xF3, 0xEF, 0xE3));
   sz_view_free(root);
 
   root = opacity_green_box(50);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(!px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
-  assert(!px_rgb(px, 80, 20, 20, 0xF5, 0xF5, 0xF5));
+  assert(!px_rgb(px, 80, 20, 20, 0xF3, 0xEF, 0xE3));
   r50 = px[(20 * 80 + 20) * 4];
   g50 = px[(20 * 80 + 20) * 4 + 1];
   b50 = px[(20 * 80 + 20) * 4 + 2];
@@ -5069,7 +5126,7 @@ static void test_border_paints_inside_frame(void) {
   assert(px_rgb(px, 80, 0, 39, 0xFF, 0x00, 0x00));
   assert(px_rgb(px, 80, 39, 39, 0xFF, 0x00, 0x00));
   assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
-  assert(px_rgb(px, 80, 50, 20, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 50, 20, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -5273,9 +5330,9 @@ static void test_radius_clips_corners(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 0, 0, 0xF5, 0xF5, 0xF5));
-  assert(px_rgb(px, 80, 39, 0, 0xF5, 0xF5, 0xF5));
-  assert(px_rgb(px, 80, 0, 39, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 0, 0, 0xF3, 0xEF, 0xE3));
+  assert(px_rgb(px, 80, 39, 0, 0xF3, 0xEF, 0xE3));
+  assert(px_rgb(px, 80, 0, 39, 0xF3, 0xEF, 0xE3));
   assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
   assert(px_rgb(px, 80, 1, 20, 0x00, 0xAA, 0x00));
   sk_surface_unref(surf);
@@ -5298,7 +5355,7 @@ static void test_nested_radius_inner_wins(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 0, 0, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 0, 0, 0xF3, 0xEF, 0xE3));
   /* Inside r=8, outside r=20. Inner radius must win. */
   assert(px_rgb(px, 80, 12, 1, 0x00, 0xAA, 0x00));
   assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
@@ -5325,7 +5382,7 @@ static void test_radius_clips_border_corners(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 0, 0, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 0, 0, 0xF3, 0xEF, 0xE3));
   assert(px_rgb(px, 80, 0, 20, 0xFF, 0x00, 0x00));
   assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
   sk_surface_unref(surf);
@@ -5465,12 +5522,12 @@ static void test_checkbox_paint_off_on(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Box center: unchecked is theme background, not primary fill. */
-  assert(px_rgb(px, 80, 6, 16, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 6, 16, 0xF3, 0xEF, 0xE3));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 6, 16, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, 6, 16, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -5663,12 +5720,12 @@ static void test_switch_paint_off_on(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Left of track: off thumb is surface, on fill is primary. */
-  assert(px_rgb(px, 80, 6, 16, 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, 6, 16, 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 6, 16, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, 6, 16, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -5810,12 +5867,12 @@ static void test_chip_paint_off_on(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Top of chip fill, above the label. Off is surface; on is primary. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -5940,7 +5997,7 @@ static void test_list_tile_paint(void) {
   f = sz_view_frame(root);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -6085,9 +6142,8 @@ static void test_badge_paint_mark(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Off chip fill stays surface; badge mark is primary at top-right. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
-  assert(px_rgb(px, 80, (int)(f.x + f.w - 4.f), (int)(f.y + 4.f), 0x14, 0x28,
-                0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
+  assert(px_rgb(px, 80, (int)(f.x + f.w - 4.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -6230,8 +6286,8 @@ static void test_card_paint_pad(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 120 * 120 * 4);
   /* Pad ring is surface. Child button fill is primary. */
-  assert(px_rgb(px, 120, (int)(f.x + 2.f), (int)(f.y + 2.f), 0xFF, 0xFF, 0xFF));
-  assert(px_rgb(px, 120, (int)(cf.x + 8.f), (int)(cf.y + 4.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 120, (int)(f.x + 2.f), (int)(f.y + 2.f), 0xFF, 0xFC, 0xF4));
+  assert(px_rgb(px, 120, (int)(cf.x + 8.f), (int)(cf.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -6347,8 +6403,8 @@ static void test_divider_paint_line(void) {
   ly = (int)(f.y + f.h * 0.5f);
   by = (int)(f.y + 1.f);
   /* Hairline is muted. Slot above the line stays the canvas background. */
-  assert(px_rgb(px, 80, lx, ly, 0x6A, 0x6A, 0x6A));
-  assert(px_rgb(px, 80, lx, by, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, lx, ly, 0x65, 0x61, 0x57));
+  assert(px_rgb(px, 80, lx, by, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -6522,7 +6578,7 @@ static void test_expansion_tile_paint(void) {
   f = sz_view_frame(root);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 120 * 80 * 4);
-  assert(px_rgb(px, 120, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 120, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -6646,7 +6702,7 @@ static void test_icon_button_paint(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Fill is surface, not primary. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -6760,8 +6816,8 @@ static void test_vertical_divider_paint_line(void) {
   ly = (int)(f.y + 8.f);
   bx = (int)(f.x + 1.f);
   /* Hairline is muted. Slot left of the line stays the canvas background. */
-  assert(px_rgb(px, 80, lx, ly, 0x6A, 0x6A, 0x6A));
-  assert(px_rgb(px, 80, bx, ly, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, lx, ly, 0x65, 0x61, 0x57));
+  assert(px_rgb(px, 80, bx, ly, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -6917,13 +6973,13 @@ static void test_circular_progress_paint_ring(void) {
   cx = (int)(f.x + f.w * 0.5f);
   cy = (int)(f.y + f.h * 0.5f);
   /* Full ring is primary. Hole stays the canvas background. */
-  assert(px_rgb(px, 80, tx, ty, 0x14, 0x28, 0x50));
-  assert(px_rgb(px, 80, cx, cy, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, tx, ty, 0xE8, 0xEF, 0x48));
+  assert(px_rgb(px, 80, cx, cy, 0xF3, 0xEF, 0xE3));
   sz_signal_int_set(sig, 0);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, tx, ty, 0x6A, 0x6A, 0x6A));
+  assert(px_rgb(px, 80, tx, ty, 0x65, 0x61, 0x57));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -7049,8 +7105,8 @@ static void test_avatar_paint_disc(void) {
   cx = (int)(f.x + 1.f);
   cy = (int)(f.y + 1.f);
   /* Disc fill is primary. Square corner stays the canvas background. */
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
-  assert(px_rgb(px, 80, cx, cy, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
+  assert(px_rgb(px, 80, cx, cy, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -7203,12 +7259,12 @@ static void test_checkbox_list_tile_paint(void) {
   bx = (int)(f.x + theme->pad + 6.f);
   by = (int)(f.y + f.h * 0.5f);
   /* Off box fill is surface. On box fill is primary. */
-  assert(px_rgb(px, 80, bx, by, 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, bx, by, 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, bx, by, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, bx, by, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -7349,12 +7405,12 @@ static void test_switch_list_tile_paint(void) {
   sx = (int)(f.x + f.w - theme->pad - tw + 6.f);
   sy = (int)(f.y + f.h * 0.5f);
   /* Off thumb is surface. On track fill is primary. */
-  assert(px_rgb(px, 80, sx, sy, 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, sx, sy, 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, sx, sy, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, sx, sy, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -7517,12 +7573,12 @@ static void test_radio_list_tile_paint(void) {
   bx = (int)(f.x + theme->pad + 6.f);
   by = (int)(f.y + f.h * 0.5f);
   /* Off inner is surface. On inner is primary. */
-  assert(px_rgb(px, 80, bx, by, 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, bx, by, 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, bx, by, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, bx, by, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -7661,14 +7717,14 @@ static void test_segmented_paint(void) {
   rx = (int)(f.x + f.w * 0.75f);
   y = (int)(f.y + 4.f);
   /* Left selected is primary. Right selected is primary. */
-  assert(px_rgb(px, 80, lx, y, 0x14, 0x28, 0x50));
-  assert(px_rgb(px, 80, rx, y, 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, lx, y, 0xE8, 0xEF, 0x48));
+  assert(px_rgb(px, 80, rx, y, 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, lx, y, 0xFF, 0xFF, 0xFF));
-  assert(px_rgb(px, 80, rx, y, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, lx, y, 0xFF, 0xFC, 0xF4));
+  assert(px_rgb(px, 80, rx, y, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -7792,7 +7848,7 @@ static void test_fab_paint(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Disc fill is primary, not surface. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -7967,7 +8023,7 @@ static void test_tooltip_paint_child(void) {
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
   /* Child disc fill is primary. Tooltip adds no pad fill. */
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -8000,7 +8056,7 @@ static void test_tooltip_paint_hover(void) {
   if (my >= 80)
     my = 79;
   /* Hover bubble is surface white, not the page background. */
-  assert(px_rgb(px, 80, mx, my, 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, mx, my, 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -8309,7 +8365,7 @@ static void test_outlined_button_paint(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Fill is surface, not primary. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -8335,7 +8391,7 @@ static void test_outlined_button_paint_not_primary(void) {
   f = sz_view_frame(filled);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(filled);
 
@@ -8348,7 +8404,7 @@ static void test_outlined_button_paint_not_primary(void) {
   f = sz_view_frame(outlined);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(!px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0x14, 0x28, 0x50));
+  assert(!px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(outlined);
   sz_signal_int_free(sig);
@@ -8600,7 +8656,7 @@ static void test_text_button_paint(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* No fill: canvas stays theme background, not surface or primary. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -8626,7 +8682,7 @@ static void test_text_button_paint_not_filled(void) {
   f = sz_view_frame(filled);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(filled);
 
@@ -8639,7 +8695,7 @@ static void test_text_button_paint_not_filled(void) {
   f = sz_view_frame(outlined);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(outlined);
 
@@ -8652,8 +8708,8 @@ static void test_text_button_paint_not_filled(void) {
   f = sz_view_frame(textb);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(!px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0x14, 0x28, 0x50));
-  assert(!px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xFF, 0xFF, 0xFF));
+  assert(!px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xE8, 0xEF, 0x48));
+  assert(!px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(textb);
   sz_signal_int_free(sig);
@@ -8822,7 +8878,7 @@ static void test_placeholder_paint_child(void) {
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
   /* Child disc fill is primary. Mark does not cover this sample. */
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -8849,7 +8905,7 @@ static void test_placeholder_paint_mark(void) {
   /* Interior stays the child fill. */
   assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0x00, 0xAA, 0x00));
   /* Top edge is the muted box. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)f.y, 0x6A, 0x6A, 0x6A));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)f.y, 0x65, 0x61, 0x57));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -8870,7 +8926,7 @@ static void test_placeholder_paint_empty(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 8, 8, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -9095,7 +9151,7 @@ static void test_semantics_paint_child(void) {
   assert(px && n == 80 * 80 * 4);
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -9142,7 +9198,7 @@ static void test_semantics_paint_empty(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 8, 8, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -9385,7 +9441,7 @@ static void test_merge_semantics_paint_child(void) {
   assert(px && n == 80 * 80 * 4);
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -9431,7 +9487,7 @@ static void test_merge_semantics_paint_empty(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 8, 8, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -9770,7 +9826,7 @@ static void test_ink_well_paint_child(void) {
   assert(px && n == 80 * 80 * 4);
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -9816,7 +9872,7 @@ static void test_ink_well_paint_empty(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 8, 8, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -10098,7 +10154,7 @@ static void test_visibility_paint_on(void) {
   assert(px && n == 80 * 80 * 4);
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -10125,7 +10181,7 @@ static void test_visibility_paint_off(void) {
   f = sz_view_frame(root);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -10149,7 +10205,7 @@ static void test_visibility_paint_empty(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 8, 8, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -10504,7 +10560,7 @@ static void test_offstage_paint_on(void) {
   assert(px && n == 80 * 80 * 4);
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -10531,7 +10587,7 @@ static void test_offstage_paint_off(void) {
   f = sz_view_frame(child);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -10555,7 +10611,7 @@ static void test_offstage_paint_empty(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 8, 8, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -10850,7 +10906,7 @@ static void test_unconstrained_box_paint_child(void) {
   assert(px && n == 80 * 80 * 4);
   mx = (int)(f.x + f.w * 0.5f);
   my = (int)(f.y + 6.f);
-  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, mx, my, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -10871,7 +10927,7 @@ static void test_unconstrained_box_paint_empty(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 8, 8, 0xF3, 0xEF, 0xE3));
   sk_surface_unref(surf);
   sz_view_free(root);
 }
@@ -11152,12 +11208,12 @@ static void test_filter_chip_paint_off_on(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Top of chip fill, above the label. Off is surface; on is primary. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -11191,7 +11247,7 @@ static void test_filter_chip_paint_mark_on(void) {
   mx = (int)(f.x + theme->pad + box * 0.5f);
   my = (int)(f.y + f.h * 0.5f);
   /* Leading check fill is on_primary. */
-  assert(px_rgb(px, 80, mx, my, 0xF0, 0xF0, 0xF0));
+  assert(px_rgb(px, 80, mx, my, 0x24, 0x23, 0x1F));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -11419,12 +11475,12 @@ static void test_choice_chip_paint_off_on(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Top of chip fill, above the label. Off is surface; on is primary. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 0);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -11702,7 +11758,7 @@ static void test_action_chip_paint(void) {
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
   /* Fill is surface, not primary. */
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -11729,7 +11785,7 @@ static void test_action_chip_paint_not_primary(void) {
   f = sz_view_frame(filled);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   surf = sk_surface_make_raster_n32_premul(80, 80);
   assert(surf);
@@ -11739,7 +11795,7 @@ static void test_action_chip_paint_not_primary(void) {
   f = sz_view_frame(chip);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(filled);
   sz_view_free(chip);
@@ -11967,12 +12023,12 @@ static void test_input_chip_paint_off_on(void) {
   f = sz_view_frame(root);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -12006,7 +12062,7 @@ static void test_input_chip_paint_mark_on(void) {
   mx = (int)(f.x + f.w - theme->pad - box * 0.5f);
   my = (int)(f.y + f.h * 0.5f);
   /* Trailing X is on_primary. */
-  assert(px_rgb(px, 80, mx, my, 0xF0, 0xF0, 0xF0));
+  assert(px_rgb(px, 80, mx, my, 0x24, 0x23, 0x1F));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -12162,12 +12218,12 @@ static void test_radio_paint_off_on(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 6, 16, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 6, 16, 0xF3, 0xEF, 0xE3));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, 6, 16, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, 6, 16, 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -12332,14 +12388,12 @@ static void test_slider_paint_fill(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x14, 0x28,
-                0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0xE8, 0xEF, 0x48));
   sz_signal_int_set(sig, 0);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + f.w - 8.f), (int)(f.y + f.h * 0.5f), 0x6A,
-                0x6A, 0x6A));
+  assert(px_rgb(px, 80, (int)(f.x + f.w - 8.f), (int)(f.y + f.h * 0.5f), 0x65, 0x61, 0x57));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -12611,14 +12665,12 @@ static void test_progress_paint_fill(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x14, 0x28,
-                0x50));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0xE8, 0xEF, 0x48));
   sz_signal_int_set(sig, 0);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x6A, 0x6A,
-                0x6A));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x65, 0x61, 0x57));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -15221,6 +15273,7 @@ static void test_stamp_loads_reload_code(void) {
 }
 
 int main(void) {
+  test_button_press_feedback();
   test_session_snapshot();
   test_signals_layout_hit();
   test_replace_root_keeps_signals();

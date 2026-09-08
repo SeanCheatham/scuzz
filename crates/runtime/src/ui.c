@@ -823,6 +823,7 @@ static void session_drop_pointer(SzUiSession *session) {
   if (!session)
     return;
   session->pointer_down = 0;
+  sz_view_set_pressed_at(session->root, 0.f, 0.f, 0);
   session->pointer_button = 0;
   session->pointer_scroll = NULL;
   session->pointer_slider = NULL;
@@ -1529,6 +1530,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   case SZ_POINTER_DOWN: {
     SzView *hit = sz_view_hit_test(session->root, event->x, event->y);
     session->pointer_down = 1;
+    sz_view_set_pressed_at(session->root, event->x, event->y, button == 1);
     session->pointer_button = button;
     session->pointer_x = event->x;
     session->pointer_y = event->y;
@@ -1572,6 +1574,15 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->dirty = 1;
       return 1;
     }
+    dx = event->x - session->pointer_down_x;
+    dy = event->y - session->pointer_down_y;
+    sz_view_set_pressed_at(session->root, event->x, event->y,
+                          session->pointer_button == 1 &&
+                          dx * dx + dy * dy <= tap_slop2 &&
+                          sz_view_hit_test(session->root, event->x, event->y) ==
+                          sz_view_hit_test(session->root, session->pointer_down_x,
+                                           session->pointer_down_y));
+    session->dirty = 1;
     dx = event->x - session->pointer_x;
     dy = event->y - session->pointer_y;
     if (session->pointer_button == 3) {
@@ -1612,6 +1623,8 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     dx = event->x - session->pointer_down_x;
     dy = event->y - session->pointer_down_y;
     session->pointer_down = 0;
+    sz_view_set_pressed_at(session->root, 0.f, 0.f, 0);
+    session->dirty = 1;
     session->pointer_scroll = NULL;
     if (session->pointer_button == 3) {
       SzView *hit = NULL;

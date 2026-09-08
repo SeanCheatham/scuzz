@@ -25,6 +25,7 @@ struct SzView {
   SzRect frame;
   int interactive; /* participates in hit-test */
   int focused;
+  int pressed;
 
   /* common / kind-specific */
   char *text;
@@ -3510,6 +3511,22 @@ int sz_view_set_hover_at(SzView *root, float x, float y) {
   return 1;
 }
 
+static void clear_pressed(SzView *v) {
+  if (!v)
+    return;
+  v->pressed = 0;
+  for (int i = 0; i < v->child_count; i++)
+    clear_pressed(v->children[i]);
+}
+
+void sz_view_set_pressed_at(SzView *root, float x, float y, int active) {
+  SzView *hit;
+  clear_pressed(root);
+  hit = active ? sz_view_hit_test(root, x, y) : NULL;
+  if (hit && hit->kind == SZ_VIEW_BUTTON)
+    hit->pressed = 1;
+}
+
 static const float k_text_field_inset = 6.f;
 
 static int g_clip_on;
@@ -3870,12 +3887,12 @@ static void paint_editor_line_hl(SkCanvas *c, const char *s, int start, int end,
       while (i < end && s[i] >= '0' && s[i] <= '9')
         i++;
       tok_e = i;
-      col = theme->primary;
+      col = theme->accent;
     } else if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
                ch == '_') {
       tok_e = editor_ident_end(s, i, end);
       if (editor_is_kw(s, tok_s, tok_e))
-        col = theme->primary;
+        col = theme->accent;
       i = tok_e;
     } else {
       i++;
@@ -3892,9 +3909,8 @@ static void paint_editor_line_hl(SkCanvas *c, const char *s, int start, int end,
 static uint32_t editor_tok_color(int ty, const SzTheme *theme) {
   if (!theme)
     return 0;
-  if (ty == 8 || ty == 12 || ty == 4 || ty == 5 || ty == 10)
-    return theme->primary;
-  if (ty == 9 || ty == 1 || ty == 2 || ty == 3)
+  if (ty == 8 || ty == 12 || ty == 4 || ty == 5 || ty == 10 ||
+      ty == 9 || ty == 1 || ty == 2 || ty == 3)
     return theme->accent;
   return theme->foreground;
 }
@@ -4091,13 +4107,30 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     each_text_line(buf, font_px, inner, paint_wrap_line, &wp);
     break;
   }
-  case SZ_VIEW_BUTTON:
+  case SZ_VIEW_BUTTON: {
+    SzRect face = v->frame;
+    float offset = scale_px(theme, 3.f);
+    if (offset > face.w * 0.25f)
+      offset = face.w * 0.25f;
+    if (offset > face.h * 0.25f)
+      offset = face.h * 0.25f;
     resolve_text(v, buf, sizeof buf);
-    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->primary);
-    tx = v->frame.x + theme->pad;
-    ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
+    /* The shadow stays inside the control bounds. */
+    paint_rect(c, face.x + offset, face.y + offset,
+               face.w - offset, face.h - offset, theme->border);
+    face.w -= offset;
+    face.h -= offset;
+    if (v->pressed) {
+      face.x += offset;
+      face.y += offset;
+    }
+    paint_rect(c, face.x, face.y, face.w, face.h, theme->primary);
+    paint_border(c, face, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
+    tx = face.x + theme->pad;
+    ty = face.y + (face.h + theme->font_px) * 0.5f;
     paint_string(c, buf, tx, ty, theme->on_primary, theme->font_px);
     break;
+  }
   case SZ_VIEW_OUTLINED_BUTTON: {
     SzRect br = v->frame;
     resolve_text(v, buf, sizeof buf);
@@ -4610,7 +4643,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       SkPaint *p = sk_paint_new();
       if (p) {
         sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(
-            v->focused ? theme->primary : theme->border)));
+            v->focused ? theme->foreground : theme->border)));
         sk_paint_set_stroke(p, 1);
         sk_paint_set_stroke_width(p, v->focused ? 2.f : 1.f);
         sk_canvas_draw_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, p);
@@ -4634,7 +4667,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         if (h < 1.f)
           h = 1.f;
         y = v->frame.y + (v->frame.h - h) * 0.5f;
-        paint_rect(c, x0, y, x1 - x0, h, theme->accent);
+        paint_rect(c, x0, y, x1 - x0, h, theme->selection);
       }
     }
     {
@@ -4652,13 +4685,13 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         memcpy(left, buf, (size_t)ln);
         left[ln] = '\0';
         paint_string(c, left, base_x, base_y, theme->foreground, theme->font_px);
-        paint_preedit_run(c, pre, base_x + left_w, base_y, pre_w, theme->primary,
+        paint_preedit_run(c, pre, base_x + left_w, base_y, pre_w, theme->foreground,
                           theme->font_px, 0);
         paint_string(c, buf + caret, base_x + left_w + pre_w, base_y,
                      theme->foreground, theme->font_px);
       } else if (pre[0]) {
         float pre_w = text_width(pre, theme->font_px);
-        paint_preedit_run(c, pre, base_x, base_y, pre_w, theme->primary,
+        paint_preedit_run(c, pre, base_x, base_y, pre_w, theme->foreground,
                           theme->font_px, 0);
       } else {
         paint_string(c, shown, base_x, base_y,
@@ -4668,7 +4701,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     if (v->focused) {
       SzRect caret = sz_view_caret_rect(v, theme);
       if (caret.w > 0.f)
-        paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->primary);
+        paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->foreground);
     }
     break;
   }
@@ -4708,7 +4741,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       SkPaint *p = sk_paint_new();
       if (p) {
         sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(
-            v->focused ? theme->primary : theme->border)));
+            v->focused ? theme->foreground : theme->border)));
         sk_paint_set_stroke(p, 1);
         sk_paint_set_stroke_width(p, v->focused ? 2.f : 1.f);
         sk_canvas_draw_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, p);
@@ -4757,7 +4790,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                 if (h < 1.f)
                   h = 1.f;
                 if (x1 > x0)
-                  paint_rect(c, x0, top, x1 - x0, h, theme->accent);
+                  paint_rect(c, x0, top, x1 - x0, h, theme->selection);
               }
             }
             if (has_br) {
@@ -4767,10 +4800,10 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                 cell = 1.f;
               if (br_a >= start && br_a < end)
                 paint_rect(c, base_x + editor_span_width(s, start, br_a, font_px),
-                           top, cell, h, theme->muted);
+                           top, cell, h, theme->selection);
               if (br_b >= start && br_b < end && br_b != br_a)
                 paint_rect(c, base_x + editor_span_width(s, start, br_b, font_px),
-                           top, cell, h, theme->muted);
+                           top, cell, h, theme->selection);
             }
             {
               char num[16];
@@ -4803,7 +4836,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                                      top + font_px, font_px, v->scroll_x, tw,
                                      theme);
                 paint_preedit_run(c, pre, caret_x, top + font_px, pre_w,
-                                  theme->primary, font_px, 1);
+                                  theme->foreground, font_px, 1);
                 paint_editor_line_lsp(c, v, s, line, caret, end, base_x + pre_w,
                                      top + font_px, font_px, v->scroll_x, tw,
                                      theme);
@@ -4827,7 +4860,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     if (v->focused) {
       SzRect caret = sz_view_caret_rect(v, theme);
       if (caret.w > 0.f)
-        paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->primary);
+        paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->foreground);
     }
     sk_canvas_restore(c);
     g_clip = prev_clip;
@@ -4997,6 +5030,16 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
   default:
     break;
+  }
+  if (v->focused && v->interactive && !view_is_edit(v)) {
+    SzRect focus = v->frame;
+    float inset = scale_px(theme, 4.f);
+    focus.x += inset;
+    focus.y += inset;
+    focus.w -= inset * 2.f;
+    focus.h -= inset * 2.f;
+    paint_border(c, focus, (int)(scale_px(theme, 3.f) + 0.5f), theme->surface);
+    paint_border(c, focus, (int)(scale_px(theme, 1.f) + 0.5f), theme->foreground);
   }
 }
 

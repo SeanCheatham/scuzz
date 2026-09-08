@@ -78,6 +78,14 @@ Build a pure `View` tree. Hold state in `Signal`. Run a session with `Ui.run`:
 
 Lists: keep a `Signal[List[T]]`, render with `View.each(items)` or `View.each(items, s => view)`. The element type comes from the signal. Widget, View, Signal, and List kit signatures: [`kits.md`](kits.md). See `examples/counter` and `examples/studio`.
 
+UI controls use the shared Scuzz theme by default. It uses warm paper surfaces,
+dark borders, yellow primary buttons, and dark rust accent text. Primary buttons
+have a solid shadow and move on pointer press. Text selection uses a yellow
+background. `Theme.primary()` supplies the yellow fill. `Theme.foreground()`
+supplies dark text. `Theme.accent()` supplies dark rust. Use the existing `View`
+style constructors for explicit app colors. The default style is the same in
+Headless, Desktop, and Mobile.
+
 `Ui.run(_ => view)` under Headless: mount → optional scripted tap → snapshot → unmount. Desktop stays open when `[ui].default_runtime = "desktop"` (`examples/studio`; close the window to quit). The CLI sets `SCUZZ_UI_RUNTIME` from that key. `--headless` forces Headless. The factory re-runs construction on stamp-watch. Create Signals outside the factory. `Ui.run` does not take a prebuilt View. After a Desktop session, replay the recorded script Headless:
 
 ```bash

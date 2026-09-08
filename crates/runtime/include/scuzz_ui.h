@@ -83,6 +83,7 @@ typedef struct SzTheme {
   uint32_t border;
   uint32_t muted;
   uint32_t accent;
+  uint32_t selection;
   float pad;
   float gap;
   float control_h;
@@ -426,6 +427,8 @@ int sz_view_handle_secondary(SzView *root, float x, float y);
 /* Clear hover marks. Mark the tooltip at (x, y). 1 if a tooltip is hovered. */
 int sz_view_set_hover_at(SzView *root, float x, float y);
 void sz_view_clear_hover(SzView *root);
+/* Mark the primary button under the pointer. Clear all marks when inactive. */
+void sz_view_set_pressed_at(SzView *root, float x, float y, int active);
 int sz_view_handle_tap(SzView *root, float x, float y);
 /* Fire the tap handler on `target` (no hit-test). Slider / segmented use x. */
 int sz_view_activate(SzView *root, SzView *target, float x, float y);
