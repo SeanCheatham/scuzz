@@ -395,7 +395,17 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]"
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind()
+
+def tyckRecordBind(): Bool =
+  Check.check("""record Box(value: Int)
+def get(b: Box): Int = b match { case Box(n) => n }
+""") == "[]" && Check.check("""record Box(value: Int)
+def get(b: Box): String = b match { case Box(n) => n }
+""") != "[]" && Check.check("""record Inner(value: Int)
+record Box(value: Inner)
+def get(b: Box): Int = b match { case Box(p) => p.value }
+""") == "[]"
 
 def srcViewNope(): String =
   """@main def main: IO[Unit] =

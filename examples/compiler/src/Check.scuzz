@@ -1120,7 +1120,7 @@ def dotAt(s: String, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 46) i else dotAt(s, i + 1)
 
 def fieldTy2(dot: Int, core: String, ens: List[En]): String =
-  if (dot < 0) "" else caseFieldTy(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
+  if (dot < 0) caseFieldTy(ens, core, core) else caseFieldTy(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
 
 def caseFieldTy(ens: List[En], en: String, ctor: String): String =
   if (List.isEmpty(ens)) "" else caseFieldTy1(List.at(ens, 0), List.tail(ens), en, ctor)
