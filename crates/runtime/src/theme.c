@@ -1,14 +1,15 @@
 #include "scuzz_ui.h"
 
 static const SzTheme k_default_theme = {
-    .background = 0xFFF5F5F5u,
-    .surface = 0xFFFFFFFFu,
-    .foreground = 0xFF1A1A1Au,
-    .primary = 0xFF142850u,
-    .on_primary = 0xFFF0F0F0u,
-    .border = 0xFFB0B0B0u,
-    .muted = 0xFF6A6A6Au,
-    .accent = 0xFF142850u,
+    .background = 0xFFF3EFE3u,
+    .surface = 0xFFFFFCF4u,
+    .foreground = 0xFF24231Fu,
+    .primary = 0xFFE8EF48u,
+    .on_primary = 0xFF24231Fu,
+    .border = 0xFF24231Fu,
+    .muted = 0xFF656157u,
+    .accent = 0xFF923D24u,
+    .selection = 0xFFE8EF48u,
     .pad = 12.f,
     .gap = 8.f,
     .control_h = 32.f,

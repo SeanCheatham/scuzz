@@ -13,8 +13,8 @@ def capturedLabel(value: String, env: String): Signal[String] =
     count = Signal.map(state, value => value.value)
     _ = Signal.get(count).require("startZero", Signal.get(count) == 0)
     label = Signal.map(count, n => countLabel(n))
-    _ <- Ui.run(_ => View.center(View.column(View.background(Color.rgb(230, 240, 248), View.text(counterTitle())), View.bindText(label), View.row(View.minSize(80, 36, View.button("+1", _ => for {
+    _ <- Ui.run(_ => View.center(View.column(View.background(Theme.primary(), View.text(counterTitle())), View.bindText(label), View.row(View.minSize(80, 36, View.button("+1", _ => for {
   _ = Property.sometimes("tappedPlus")
   _ = Signal.set(state, Signal.get(state).copy(value = Signal.get(count) + 1))
-} yield Property.check("incremented", Signal.get(count) > 0, ()))), View.sized(32, 32, View.stack(View.image(24, 24, Color.rgb(61, 126, 166), ""), View.positioned(4, 4, View.icon(43, Theme.accent())))))))).require(Signal.get(count) >= 0).require(Str.len(Signal.get(label)) >= 0)
+} yield Property.check("incremented", Signal.get(count) > 0, ()))), View.sized(32, 32, View.stack(View.image(24, 24, Theme.primary(), ""), View.positioned(4, 4, View.icon(43, Theme.accent())))))))).require(Signal.get(count) >= 0).require(Str.len(Signal.get(label)) >= 0)
   } yield ()

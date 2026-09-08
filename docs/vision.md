@@ -268,6 +268,26 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 Runs end in a quiesce phase and claims judge the complete timeline at the terminal point, in memory. The campaign persists identities (corpus entries, `repro.toml`) and aggregates (`summary.toml`). Full timelines re-derive by replay. `Property.sometimes` verdicts match Antithesis campaign aggregation: a name must occur at least once. Scuzz does not emit an Antithesis SDK JSONL stream. Push/PR CI stays a bounded deterministic campaign. Long-budget campaigns stay local. No corpus auto-commit; failures report to authors.
 
+### UI design language
+
+Scuzz uses one default design language. Printed posters guide its visual style.
+Use warm paper surfaces, dark text, square controls, and clear borders.
+Use yellow for primary actions and selection backgrounds. Use dark rust for
+accent text. Keep body text, form fields, and editor content clear. Do not add
+noise, random distress, flicker, or tilted controls to these areas.
+
+The shared runtime theme supplies the default colors. Primary buttons have a
+small solid shadow inside their bounds. A pointer press moves the button face
+into that shadow. Keyboard focus has a light and dark inset border. Text fields
+and editors use dark carets. Editor selection and bracket marks use a yellow
+background. Headless, Desktop, and Mobile use the same paint path.
+
+Keep the current font metrics and control sizes for this slice. A larger body
+font, heading styles, app theme selection, dark mode, and motion settings remain
+open. Prove those changes with forms and the editor. Keep accent colors separate
+from text selection colors. App content can use the existing explicit style
+constructors.
+
 ### Layout model
 
 **Flutter-style constraints** (constraints down, sizes up). Tight slots: `sized`, `aspectRatio`, percent axes on `fraction`, `expanded` flex, and opt-in `stretch` (cross axis). Scroll content is unbounded on the pan axis (`max` 0). Column/row do not stretch non-flex children unless wrapped in `View.stretch`. Device-pixel paint multiplies author px by the backing scale so taps match the pixels. Desktop and Mobile present that pixel buffer into a point-sized window. Taps stay in logical points. Nested constructors only. Do not drift into CSS-ish ad-hoc rules. Do not grow Flutter-style constraint-overflow dumps. Diagnose through structural dumps + `*.scuzz_verify` + `.require`. Widget catalog: [`kits.md`](kits.md).
