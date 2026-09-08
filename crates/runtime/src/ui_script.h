@@ -6,6 +6,7 @@
 /* A11y-preorder collect over the session root (dump [taps]/[scrolls] and script). */
 int sz_ui_collect_buttons(SzUiSession *session, SzView **buttons, int cap);
 int sz_ui_collect_scrolls(SzUiSession *session, SzView **scrolls, int cap);
+int sz_ui_scroll_index(SzUiSession *session, int index, float dy);
 
 /* SCUZZ_UI_SCRIPT playback: text buffer (inject), file (replay), or one
  * env-driven tap. */

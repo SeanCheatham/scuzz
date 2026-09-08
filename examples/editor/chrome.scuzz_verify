@@ -1,12 +1,12 @@
 def chrome(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "button:Save") && Timeline.a11yHas(t, i, "button:Check") && Timeline.a11yHas(t, i, "button:Find") && Timeline.a11yHas(t, i, "button:Palette") && Timeline.a11yHas(t, i, "button:Save all") && Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "button:Fuzz") && Timeline.a11yHas(t, i, "button:x sample.txt") && Timeline.a11yHas(t, i, "editor:editor"))
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "button:Save") && Timeline.a11yHas(t, i, "outlined:Check") && Timeline.a11yHas(t, i, "outlined:Find") && Timeline.a11yHas(t, i, "outlined:Palette") && Timeline.a11yHas(t, i, "outlined:Save all") && Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "outlined:Fuzz") && Timeline.a11yHas(t, i, "textbutton:x sample.txt") && Timeline.a11yHas(t, i, "editor:editor"))
 
 def editorStays(t: Timeline): Verdict =
   Verdict.alwaysHas(t, "editor:editor")
 
 def afterCheckShowsDiag(t: Timeline): Verdict =
-  Verdict.afterHit(t, "button:Check", "button:1:1|sample.txt|x")
+  Verdict.afterHit(t, "outlined:Check", "button:1:1|sample.txt|x")
 
 def afterCompleteShowsItem(t: Timeline): Verdict =
-  Verdict.afterHit(t, "button:Complete", "button:foo")
+  Verdict.afterHit(t, "outlined:Complete", "button:foo")
 

@@ -32,32 +32,32 @@ split:28
 text:Files
 scroll:scroll
 list:list
-button:chrome.scuzz_verify
-button:sample.txt
-button:scuzz.toml
-button:src/
-button:    Check.scuzz
-button:    Chrome.scuzz
-button:    Lsp.scuzz
-button:    Lsp.scuzz_sim
-button:    Main.scuzz
-button:    Main.scuzz_sim
+textbutton:chrome.scuzz_verify
+textbutton:sample.txt
+textbutton:scuzz.toml
+textbutton:src/
+textbutton:    Check.scuzz
+textbutton:    Chrome.scuzz
+textbutton:    Lsp.scuzz
+textbutton:    Lsp.scuzz_sim
+textbutton:    Main.scuzz
+textbutton:    Main.scuzz_sim
 button:Save
-button:Check
-button:Find
-button:Complete
-button:Hover
-button:Format
-button:Def
-button:Rename
-button:Fix
-button:Palette
-button:Save all
+outlined:Check
+outlined:Find
+outlined:Complete
+outlined:Hover
+outlined:Format
+outlined:Def
+outlined:Rename
+outlined:Fix
+outlined:Palette
+outlined:Save all
 button:Run
-button:Fuzz
+outlined:Fuzz
 list:list
-button:sample.txt
-button:x sample.txt
+outlined:sample.txt
+textbutton:x sample.txt
 editor:editor
 overlay:0
 overlay:0
@@ -66,31 +66,31 @@ overlay:0
 overlay:0
 
 [taps]
-0 chrome.scuzz_verify 36,58 105x32
-1 sample.txt 36,98 67x32
-2 scuzz.toml 36,138 66x32
-3 src/ 36,178 48x32
-4     Check.scuzz 36,218 85x32
-5     Chrome.scuzz 36,258 92x32
-6     Lsp.scuzz 36,298 73x32
-7     Lsp.scuzz_sim 36,338 91x32
-8     Main.scuzz 36,378 79x32
-9     Main.scuzz_sim 36,418 97x32
-10 Save 309,36 48x32
-11 Check 365,36 49x32
-12 Find 422,36 48x32
-13 Complete 478,36 63x32
-14 Hover 549,36 48x32
-15 Format 605,36 53x32
-16 Def 666,36 48x32
-17 Rename 722,36 58x32
-18 Fix 788,36 48x32
-19 Palette 844,36 52x32
-20 Save all 309,76 56x32
-21 Run 373,76 48x32
-22 Fuzz 429,76 48x32
-23 sample.txt 321,152 67x32
-24 x sample.txt 396,152 75x32
+0 chrome.scuzz_verify 36,70 168x40
+1 sample.txt 36,118 98x40
+2 scuzz.toml 36,166 98x40
+3 src/ 36,214 50x40
+4     Check.scuzz 36,262 126x40
+5     Chrome.scuzz 36,310 139x40
+6     Lsp.scuzz 36,358 106x40
+7     Lsp.scuzz_sim 36,406 138x40
+8     Main.scuzz 36,454 116x40
+9     Main.scuzz_sim 36,502 148x40
+10 Save 309,36 59x40
+11 Check 376,36 68x40
+12 Find 452,36 54x40
+13 Complete 514,36 93x40
+14 Hover 615,36 67x40
+15 Format 690,36 75x40
+16 Def 773,36 49x40
+17 Rename 830,36 84x40
+18 Fix 309,84 48x40
+19 Palette 365,84 73x40
+20 Save all 446,84 80x40
+21 Run 534,84 52x40
+22 Fuzz 594,84 55x40
+23 sample.txt 321,168 98x40
+24 x sample.txt 427,168 110x40
 
 [fields]
 
@@ -111,4 +111,4 @@ overlay:0
 0 scroll
 
 [last_hit]
-xy 60.0 194.0 -> button:src/
+xy 61.0 234.0 -> textbutton:src/

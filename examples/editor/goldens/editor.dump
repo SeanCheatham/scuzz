@@ -32,26 +32,26 @@ split:28
 text:Files
 scroll:scroll
 list:list
-button:chrome.scuzz_verify
-button:sample.txt
-button:scuzz.toml
-button:src/
+textbutton:chrome.scuzz_verify
+textbutton:sample.txt
+textbutton:scuzz.toml
+textbutton:src/
 button:Save
-button:Check
-button:Find
-button:Complete
-button:Hover
-button:Format
-button:Def
-button:Rename
-button:Fix
-button:Palette
-button:Save all
+outlined:Check
+outlined:Find
+outlined:Complete
+outlined:Hover
+outlined:Format
+outlined:Def
+outlined:Rename
+outlined:Fix
+outlined:Palette
+outlined:Save all
 button:Run
-button:Fuzz
+outlined:Fuzz
 list:list
-button:sample.txt
-button:x sample.txt
+outlined:sample.txt
+textbutton:x sample.txt
 editor:editor
 overlay:0
 overlay:0
@@ -60,25 +60,25 @@ overlay:0
 overlay:0
 
 [taps]
-0 chrome.scuzz_verify 36,58 105x32
-1 sample.txt 36,98 67x32
-2 scuzz.toml 36,138 66x32
-3 src/ 36,178 48x32
-4 Save 309,36 48x32
-5 Check 365,36 49x32
-6 Find 422,36 48x32
-7 Complete 478,36 63x32
-8 Hover 549,36 48x32
-9 Format 605,36 53x32
-10 Def 666,36 48x32
-11 Rename 722,36 58x32
-12 Fix 788,36 48x32
-13 Palette 844,36 52x32
-14 Save all 309,76 56x32
-15 Run 373,76 48x32
-16 Fuzz 429,76 48x32
-17 sample.txt 321,152 67x32
-18 x sample.txt 396,152 75x32
+0 chrome.scuzz_verify 36,70 168x40
+1 sample.txt 36,118 98x40
+2 scuzz.toml 36,166 98x40
+3 src/ 36,214 50x40
+4 Save 309,36 59x40
+5 Check 376,36 68x40
+6 Find 452,36 54x40
+7 Complete 514,36 93x40
+8 Hover 615,36 67x40
+9 Format 690,36 75x40
+10 Def 773,36 49x40
+11 Rename 830,36 84x40
+12 Fix 309,84 48x40
+13 Palette 365,84 73x40
+14 Save all 446,84 80x40
+15 Run 534,84 52x40
+16 Fuzz 594,84 55x40
+17 sample.txt 321,168 98x40
+18 x sample.txt 427,168 110x40
 
 [fields]
 

@@ -87,7 +87,7 @@ typedef struct SzTheme {
   float pad;
   float gap;
   float control_h;
-  float font_px; /* paint/measure size (default 8px) */
+  float font_px; /* paint/measure size (default 14px) */
   /* Backing scale for View.fontSize / padding / gap / sized and other
    * author px. 0 or 1 = logical points (hit-test). Paint sets this to
    * the device scale so taps match pixels. */
@@ -790,6 +790,7 @@ SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child);
 SzView *sz_lang_view_padding(int64_t pad, SzView *child);
 SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child);
+SzView *sz_lang_view_max_size(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_text_color(int64_t argb, SzView *child);
 SzView *sz_lang_view_font_size(int64_t n, SzView *child);
 SzView *sz_lang_view_background(int64_t argb, SzView *child);

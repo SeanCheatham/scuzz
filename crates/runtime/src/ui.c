@@ -1674,6 +1674,21 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   }
 }
 
+int sz_ui_scroll_index(SzUiSession *session, int index, float dy) {
+  SzView *scrolls[64];
+  int count;
+  if (!session || !session->root || session->lifecycle == SZ_LIFECYCLE_STOP)
+    return 0;
+  sz_view_layout(session->root, (float)session->cfg.width,
+                 (float)session->cfg.height, session->theme);
+  count = sz_ui_collect_scrolls(session, scrolls, 64);
+  if (index < 0 || index >= count)
+    return 0;
+  sz_view_scroll_by(scrolls[index], dy);
+  session->dirty = 1;
+  return 1;
+}
+
 int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
   SzView *scroll;
   if (!session || !event || !session->root)

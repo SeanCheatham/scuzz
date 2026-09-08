@@ -124,7 +124,7 @@ bc""", 3)._1 == 1, true)
   walked <- walkTree(dir)
   _ = Signal.set(tree, Chrome.flatten(walked, Signal.get(openSig)))
 } yield ()))
-    _ <- Ui.run(_ => View.split(frac, View.column(View.text("Files"), View.expanded(View.scroll(View.focusGroup(View.each(tree, s => if (Str.endsWith(s, "/")) View.button(Chrome.treeLabel(s), _ => for {
+    _ <- Ui.run(_ => View.split(frac, View.column(View.fontSize(20, View.text("Files")), View.expanded(View.scroll(View.focusGroup(View.each(tree, s => if (Str.endsWith(s, "/")) View.textButton(Chrome.treeLabel(s), _ => for {
   dir = Signal.get(dirSig)
   _ = Property.sometimes("tappedDir")
   _ = Property.sometimes("focusedList")
@@ -133,7 +133,7 @@ bc""", 3)._1 == 1, true)
   walked <- walkTree(dir)
   _ = Signal.set(tree, Chrome.flatten(walked, open))
   _ <- IO.pure(())
-} yield ()) else View.onSecondary(View.button(Chrome.treeLabel(s), _ => for {
+} yield ()) else View.onSecondary(View.textButton(Chrome.treeLabel(s), _ => for {
   dir = Signal.get(dirSig)
   _ = Property.sometimes("tappedTree")
   _ = Property.sometimes("focusedList")
@@ -163,7 +163,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(origs, List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(buf)))
   _ = Signal.set(dirty, Str.len(""))
   _ <- Ui.setTitle(Fs.basename(p))
-} yield ()), View.button("Check", _ => for {
+} yield ()), View.outlinedButton("Check", _ => for {
   _ = Property.sometimes("tappedCheck")
   raw <- analyze(Signal.get(pathSig), Signal.get(buf))
   j = Lsp.parseJson(raw)
@@ -172,17 +172,17 @@ bc""", 3)._1 == 1, true)
   rows = Check.diagRows(j)
   _ = Signal.set(diags, rows)
   _ = Signal.set(showDiags, Chrome.flagNonEmpty(rows))
-} yield ()), View.button("Find", _ => for {
+} yield ()), View.outlinedButton("Find", _ => for {
   _ = Property.sometimes("tappedFind")
   _ = Signal.set(findOpen, Str.len("x"))
   _ <- IO.pure(())
-} yield ()), View.button("Complete", _ => for {
+} yield ()), View.outlinedButton("Complete", _ => for {
   _ = Property.sometimes("tappedComplete")
   j <- Lsp.lspCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/completion").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.set(comps, Lsp.completeLabels(j))
   _ = Signal.set(compOpen, Str.len("x"))
   _ <- IO.pure(())
-} yield ()), View.button("Hover", _ => for {
+} yield ()), View.outlinedButton("Hover", _ => for {
   _ = Property.sometimes("tappedHover")
   j <- Lsp.lspCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/hover").handleErrorWith(_ => IO.pure(Json.Null()))
   tok <- Lsp.paintEditor(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf))
@@ -192,7 +192,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(hoverOut))
   _ = Signal.set(hoverOpen, Str.len("x"))
   _ <- IO.pure(())
-} yield ()), View.button("Format", _ => for {
+} yield ()), View.outlinedButton("Format", _ => for {
   _ = Property.sometimes("tappedFormat")
   j <- Lsp.lspCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/formatting").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.set(buf, Lsp.formatText(j, Signal.get(buf)))
@@ -200,7 +200,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(output, fmtOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fmtOut))
   _ <- IO.pure(())
-} yield ()), View.button("Def", _ => for {
+} yield ()), View.outlinedButton("Def", _ => for {
   j <- Lsp.lspCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/definition").handleErrorWith(_ => IO.pure(Json.Null()))
   uri = Lsp.defUri(j)
   _ <- if (Str.isEmpty(uri)) IO.pure(()) else for {
@@ -218,11 +218,11 @@ bc""", 3)._1 == 1, true)
   _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
   _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
-} yield ()), View.button("Rename", _ => for {
+} yield ()), View.outlinedButton("Rename", _ => for {
   j <- Lsp.lspCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/rename").handleErrorWith(_ => IO.pure(Json.Null()))
   _ = Signal.set(buf, Lsp.renameText(j, Signal.get(buf)))
   _ <- IO.pure(())
-} yield ()), View.button("Fix", _ => for {
+} yield ()), View.outlinedButton("Fix", _ => for {
   j <- Lsp.lspCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/codeAction").handleErrorWith(_ => IO.pure(Json.Null()))
   t = Lsp.fixText(j, "")
   _ = if (Str.nonEmpty(t)) Signal.set(buf, t) else ()
@@ -232,10 +232,10 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(output, fixOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fixOut))
   _ <- IO.pure(())
-} yield ()), View.button("Palette", _ => for {
+} yield ()), View.outlinedButton("Palette", _ => for {
   _ = Signal.set(palOpen, Str.len("x"))
   _ <- IO.pure(())
-} yield ()), View.button("Save all", _ => for {
+} yield ()), View.outlinedButton("Save all", _ => for {
   _ = Property.sometimes("tappedSaveAll")
   bs = List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf))
   os <- Chrome.writeDirty(Signal.get(paths), bs, List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig)))
@@ -250,13 +250,13 @@ bc""", 3)._1 == 1, true)
   runOut = List.append(Signal.get(output), line)
   _ = Signal.set(output, runOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(runOut))
-} yield ()), View.button("Fuzz", _ => for {
+} yield ()), View.outlinedButton("Fuzz", _ => for {
   _ = Property.sometimes("tappedFuzz")
   line <- fuzzProject(Signal.get(dirSig))
   fuzzOut = List.append(Signal.get(output), line)
   _ = Signal.set(output, fuzzOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fuzzOut))
-} yield ())), View.each(paths, p => View.row(View.button(Chrome.tabLabel(p, Chrome.liveSlot(Signal.get(bodies), Signal.get(paths), p, Signal.get(pathSig), Signal.get(buf)), Chrome.liveSlot(Signal.get(origs), Signal.get(paths), p, Signal.get(pathSig), Signal.get(orig))), _ => for {
+} yield ())), View.each(paths, p => View.wrap(View.outlinedButton(Chrome.tabLabel(p, Chrome.liveSlot(Signal.get(bodies), Signal.get(paths), p, Signal.get(pathSig), Signal.get(buf)), Chrome.liveSlot(Signal.get(origs), Signal.get(paths), p, Signal.get(pathSig), Signal.get(orig))), _ => for {
   _ = Property.sometimes("tappedTab")
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyOpen(Signal.get(paths), Signal.get(bodies), Signal.get(origs), Signal.get(idx), Signal.get(buf), Signal.get(orig), p, "")
   _ = Signal.set(paths, ps)
@@ -268,7 +268,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(dirty, d)
   _ = Signal.set(pathSig, List.at(ps, i2))
   _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
-} yield ()), View.button(Chrome.closeLabel(p), _ => for {
+} yield ()), View.textButton(Chrome.closeLabel(p), _ => for {
   _ = Property.sometimes("tappedClose")
   (ps, bs, os, i2, nextBody, nextOrig, d) = Chrome.applyClose(Signal.get(paths), Signal.get(bodies), Signal.get(origs), Signal.get(idx), Signal.get(buf), Signal.get(orig), p)
   _ = Signal.set(paths, ps)
@@ -297,7 +297,7 @@ bc""", 3)._1 == 1, true)
   _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
   _ <- Check.jumpDiag(s)
-} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
   off <- Ui.editorCaret()
   found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
   hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found
@@ -317,7 +317,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), next))
   _ = Signal.set(compOpen, Str.len(""))
   _ <- Ui.setTitle(Str.concat(Fs.basename(Signal.get(pathSig)), " *"))
-} yield ())))), View.overlay(hoverOpen, View.bindText(hoverTxt)), View.overlay(palOpen, View.column(View.text("Palette"), View.each(palCmds, s => View.button(s, _ => for {
+} yield ())))), View.overlay(hoverOpen, View.bindText(hoverTxt)), View.overlay(palOpen, View.column(View.fontSize(20, View.text("Palette")), View.each(palCmds, s => View.button(s, _ => for {
   _ = Signal.set(palOpen, Str.len(""))
   _ <- if (s == "Save") for {
   _ = Property.sometimes("tappedSave")
@@ -419,7 +419,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(output, fuzzOut)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(fuzzOut))
 } yield () else IO.pure(())
-} yield ())))), View.overlay(ctxOpen, View.column(View.text("Context"), View.button("Open", _ => for {
+} yield ())))), View.overlay(ctxOpen, View.column(View.fontSize(20, View.text("Context")), View.button("Open", _ => for {
   _ = Property.sometimes("contextOpen")
   dir = Signal.get(dirSig)
   next = Chrome.joinChild(dir, Signal.get(ctxPath))

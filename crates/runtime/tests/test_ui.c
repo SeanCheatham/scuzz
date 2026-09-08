@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200112L
 #include "scuzz_ui.h"
 #include "sk_capi.h"
+#include "../src/ui_script.h"
 
 #include <assert.h>
 #include <stdatomic.h>
@@ -52,6 +53,36 @@ static void counter_tap(SzView *self, void *env) {
   SzSignalInt *count = (SzSignalInt *)env;
   (void)self;
   sz_signal_int_set(count, sz_signal_int_get(count) + 1);
+}
+
+static void test_script_scroll_targets_outer_container(void) {
+  SzUiConfig cfg = {0};
+  SzView *content = sz_view_column();
+  SzView *inner = sz_view_scroll_h(sz_view_sized(400, 40, sz_view_text("wide")));
+  SzView *outer;
+  SzView *root;
+  SzUiSession *session;
+  char outer_script[] = "scroll 0 30\n";
+  char inner_script[] = "scroll 1 15\n";
+  sz_view_add_child(content, inner);
+  sz_view_add_child(content, sz_view_sized(80, 300, sz_view_text("tall")));
+  outer = sz_view_scroll(content);
+  root = sz_view_sized(160, 120, outer);
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 160;
+  cfg.height = 120;
+  cfg.scale = 1.f;
+  session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  assert(sz_view_scroll_at(root, 80.f, 60.f) == inner);
+  sz_ui_script_play_text(session, outer_script);
+  assert(sz_view_scroll_y(outer) == 30.f);
+  assert(sz_view_scroll_x(inner) == 0.f);
+  sz_ui_script_play_text(session, inner_script);
+  assert(sz_view_scroll_y(outer) == 30.f);
+  assert(sz_view_scroll_x(inner) == 15.f);
+  sz_ui_unmount(session);
+  sz_view_free(root);
 }
 
 static void test_button_press_feedback(void) {
@@ -2821,6 +2852,106 @@ static int px_rgb(const uint8_t *px, int w, int x, int y, uint8_t r, uint8_t g,
   return p[0] == r && p[1] == g && p[2] == b;
 }
 
+static void test_control_labels_use_text(void) {
+  const SzTheme *theme = sz_theme_default();
+  const char *label = "Enable autosave";
+  SzSignalInt *state = sz_signal_int(0);
+  SzView *controls[] = {sz_view_checkbox(state, label), sz_view_switch(state, label),
+                        sz_view_chip(state, label), sz_view_radio(state, 1, label)};
+  for (int i = 0; i < 4; i++) {
+    SzRect before, after;
+    sz_view_layout(controls[i], 400.f, 80.f, theme);
+    before = sz_view_frame(controls[i]);
+    assert(before.w >= sk_font_measure_string(label, theme->font_px) + theme->gap);
+    sz_signal_int_set(state, 1);
+    sz_view_layout(controls[i], 400.f, 80.f, theme);
+    after = sz_view_frame(controls[i]);
+    assert(before.w == after.w && before.h == after.h);
+    assert(strcmp(sz_view_a11y_label(controls[i]), label) == 0);
+    sz_signal_int_set(state, 0);
+    sz_view_free(controls[i]);
+  }
+  sz_signal_int_free(state);
+}
+
+static void test_narrow_button_labels_stay_inside(void) {
+  const char *label = "A long document name with UTF-8: caf\xc3\xa9.scuzz";
+  for (int kind = 0; kind < 3; kind++) {
+    SzView *button = kind == 0 ? sz_view_button(label, NULL, NULL) :
+                     kind == 1 ? sz_view_outlined_button(label, NULL, NULL) :
+                                 sz_view_text_button(label, NULL, NULL);
+    SzView *root = sz_view_sized(80, 40, button);
+    SkSurface *surf = sk_surface_make_raster_n32_premul(240, 80);
+    SkCanvas *canvas = sk_surface_get_canvas(surf);
+    size_t bytes;
+    const uint8_t *pixels;
+    assert(sz_view_paint(root, canvas, 240, 80, sz_theme_default()));
+    assert(strcmp(sz_view_a11y_label(button), label) == 0);
+    pixels = sk_surface_peek_pixels(surf, &bytes);
+    assert(pixels && bytes == 240 * 80 * 4);
+    for (int y = 0; y < 80; y++)
+      for (int x = 80; x < 240; x++)
+        assert(px_rgb(pixels, 240, x, y, 0xF3, 0xEF, 0xE3));
+    sk_surface_unref(surf);
+    sz_view_free(root);
+  }
+}
+
+static void test_edit_paint_scale_and_clip(void) {
+  const float scales[] = {1.f, 1.5f, 2.f};
+  for (int editor = 0; editor <= 1; editor++) {
+    for (int i = 0; i < 3; i++) {
+      float scale = scales[i];
+      SzTheme theme = *sz_theme_default();
+      SzSignalStr *text = sz_signal_str(editor ? "a\nb\nc\nd\ne\nf\ng\nh\ni" : "");
+      SzView *edit = editor ? sz_view_editor(text) : sz_view_text_field(text, "");
+      SzView *root = sz_view_sized(100, 80, edit);
+      SkSurface *surf = sk_surface_make_raster_n32_premul(240, 180);
+      SkCanvas *canvas = sk_surface_get_canvas(surf);
+      SzRect caret;
+      const uint8_t *pixels;
+      size_t bytes;
+      sz_view_layout(root, 120.f, 90.f, &theme);
+      assert(sz_view_focus_edit_target(root));
+      if (editor) {
+        assert(sz_view_set_editor_caret(edit, 4));
+        sz_view_scroll_by(edit, 20.f);
+        assert(sz_view_editor_scroll_y(edit) > 0.f);
+      }
+      theme.font_px *= scale;
+      theme.control_h *= scale;
+      theme.pad *= scale;
+      theme.gap *= scale;
+      theme.px_scale = scale;
+      assert(sz_view_paint(root, canvas, 240, 180, &theme));
+      caret = sz_view_caret_rect(root, &theme);
+      assert(fabsf(caret.w - scale) < 0.01f);
+      assert(fabsf(caret.h - 14.f * scale) < 0.01f);
+      if (editor) {
+        assert(fabsf(caret.x - sk_font_mono_cell(theme.font_px) - 10.f * scale) < 0.01f);
+        assert(fabsf(caret.y - 26.f * scale) < 0.01f);
+      } else {
+        assert(fabsf(caret.x - 6.f * scale) < 0.01f);
+      }
+      pixels = sk_surface_peek_pixels(surf, &bytes);
+      assert(pixels && bytes == 240 * 180 * 4);
+      assert(px_rgb(pixels, 240, (int)ceilf(caret.x), (int)ceilf(caret.y + 2.f * scale),
+                    0x24, 0x23, 0x1F));
+      if (!editor) {
+        sz_signal_str_set(text, "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM");
+        assert(sz_view_paint(root, canvas, 240, 180, &theme));
+        pixels = sk_surface_peek_pixels(surf, &bytes);
+        for (int y = 0; y < 180; y++)
+          for (int x = (int)(100.f * scale); x < 240; x++)
+            assert(px_rgb(pixels, 240, x, y, 0xF3, 0xEF, 0xE3));
+      }
+      sk_surface_unref(surf);
+      sz_view_free(root);
+      sz_signal_str_free(text);
+    }
+  }
+}
+
 static void test_clip_paint_contains_overflow(void) {
   SzView *root, *clip, *body;
   SkSurface *surf;
@@ -2829,7 +2960,7 @@ static void test_clip_paint_contains_overflow(void) {
   size_t n = 0;
   const SzTheme *theme = sz_theme_default();
 
-  body = sz_view_background(0xFF00AA00u, sz_view_sized(20, 80, sz_view_text("x")));
+  body = sz_view_background(0xFF00AA00u, sz_view_sized(20, 80, sz_view_text("")));
   clip = sz_view_clip(sz_view_scroll(body));
   root = sz_view_sized(40, 40, clip);
   surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -4942,11 +5073,11 @@ static void test_font_size_grows_text(void) {
   sz_view_free(plain);
   assert(fabsf(plain_h - (theme->font_px + 6.f)) < 0.5f);
 
-  wrap = sz_view_font_size(16, sz_view_text("Hi"));
+  wrap = sz_view_font_size(24, sz_view_text("Hi"));
   sz_view_layout(wrap, 1000.f, 200.f, theme);
   big_h = sz_view_frame(wrap).h;
   big_w = sz_view_frame(wrap).w;
-  assert(fabsf(big_h - (16.f + 6.f)) < 0.5f);
+  assert(fabsf(big_h - (24.f + 6.f)) < 0.5f);
   assert(big_w > plain_w + 1.f);
   sz_view_free(wrap);
 }
@@ -15273,6 +15404,10 @@ static void test_stamp_loads_reload_code(void) {
 }
 
 int main(void) {
+  test_control_labels_use_text();
+  test_script_scroll_targets_outer_container();
+  test_narrow_button_labels_stay_inside();
+  test_edit_paint_scale_and_clip();
   test_button_press_feedback();
   test_session_snapshot();
   test_signals_layout_hit();

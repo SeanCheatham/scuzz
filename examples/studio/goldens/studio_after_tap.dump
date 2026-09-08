@@ -15,6 +15,7 @@ str[12] pageLabel = "page = 1"
 list[13] items = <1>
 
 [views]
+scroll:scroll
 radio:Home=0
 text:page = 1
 radio:Tasks=1
@@ -26,8 +27,8 @@ switch:On=0
 badge:0
 chip:Pin=0
 button:Rename
-scroll:scroll
 card:card
+text:Preferences
 divider:divider
 unconstrained:box
 offstage:1
@@ -45,6 +46,7 @@ fab:+
 expansion:More=0
 list:list
 listtile:milk
+text:Open
 iconbutton:i
 outlined:Edit
 textbutton:Open
@@ -58,30 +60,30 @@ button:Save
 button:Clear
 
 [taps]
-0 Home 24,24 25x32
-1 Tasks 264,24 25x32
-2 Add 384,88 48x32
-3 On 496,88 37x32
-4 Pin 541,88 32x32
-5 Rename 581,88 58x32
-6 face 48,192 32x32
-7 Star 48,232 304x32
-8 Quiet 48,272 304x32
-9 Night 48,312 304x32
-10 segmented 48,352 304x32
-11 + 48,392 32x32
-12 More 48,432 304x32
-13 i 84,496 32x32
-14 Edit 124,496 48x32
-15 Open 180,496 48x32
-16 Tag 236,496 49x32
-17 Day 293,496 32x32
-18 Go 333,496 35x32
-19 In 376,496 49x32
-20 Done 433,496 48x32
-21 Del 489,496 48x32
-22 Save 12,476 48x32
-23 Clear 12,516 48x32
+0 Home 48,48 69x40
+1 Tasks 256,48 66x40
+2 Add 296,120 52x40
+3 On 112,168 64x40
+4 Pin 184,168 45x40
+5 Rename 237,168 84x40
+6 face 60,302 40x40
+7 Star 60,350 280x40
+8 Quiet 60,398 280x40
+9 Night 60,446 280x40
+10 segmented 60,494 280x40
+11 + 60,542 40x40
+12 More 60,590 280x40
+13 i 96,722 40x40
+14 Edit 144,722 51x40
+15 Open 203,722 62x40
+16 Tag 96,770 77x40
+17 Day 181,770 52x40
+18 Go 241,770 44x40
+19 In 96,818 63x40
+20 Done 167,818 62x40
+21 Del 237,818 48x40
+22 Save 36,926 59x40
+23 Clear 36,974 62x40
 
 [fields]
 0* item="" caret=0 sel=0:0
@@ -90,4 +92,4 @@ button:Clear
 0 scroll
 
 [last_hit]
-xy 276.5 40.0 -> radio:Tasks
+xy 289.0 68.0 -> radio:Tasks

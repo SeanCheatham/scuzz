@@ -47,6 +47,11 @@ These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
 6. **Source-region coverage** — Campaign `summary.toml` reports original function locations and reached flags. It maps verification locations back to live definitions. Simulation replacements and mutant probes do not count as live body hits. `Property.sometimes` and dump novelty still direct search. Open: branch coverage and typed session output.
 
+The editor verification build fails its `idm` JSON response assertion before
+UI mount. The stored `5e4dd5a610aba46a.toml` entry reproduces the failure.
+Keep the assertion and corpus entry. Resolve the JSON response composition
+before treating the editor campaign as a passing proof.
+
 ### Table-stakes
 
 Needed before a real CLI, server, or desktop app stays.
