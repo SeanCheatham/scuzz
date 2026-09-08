@@ -251,6 +251,14 @@ static SzIo *both_drop(SzIo *left, SzIo *right) {
   sz_release(right);
   return io;
 }
+static SzIo *recover_value(void *value, void *env) {
+  SzIo *io;
+  assert(sz_ptr_eq(value, env));
+  io = sz_io_pure(value);
+  sz_release(value);
+  return io;
+}
+
 static SzIo *handle_drop(SzIo *inner, SzErrorHandler handler, void *env) {
   SzIo *io = sz_io_handle_error_with(inner, handler, env);
   sz_release(inner);
@@ -12328,6 +12336,50 @@ int main(void) {
     assert(sz_timeline_fiber_ready(tl, 0) == 0);
     assert(sz_timeline_fiber_parked(tl, 0) == 0);
     sz_timeline_free(tl);
+    remove(path);
+  }
+
+  {
+    void *payload = sz_box_i64(37);
+    SzError *err = sz_error_value(payload);
+    SzIo *failed = sz_io_fail(err);
+    SzIo *recovered = sz_io_handle_value(failed, recover_value, payload);
+    SzIoResult result = sz_io_unsafe_run(recovered);
+    assert(result.ok);
+    assert(sz_unbox_i64(result.value) == 37);
+    sz_release(result.value);
+    sz_release(recovered);
+    SzIo *forked = sz_fiber_fork(failed);
+    SzIo *joined = sz_io_flatmap(forked, fiber_join_cont, NULL);
+    recovered = sz_io_handle_value(joined, recover_value, payload);
+    result = sz_io_unsafe_run(recovered);
+    assert(result.ok);
+    assert(sz_unbox_i64(result.value) == 37);
+    sz_release(result.value);
+    sz_release(recovered);
+    sz_release(joined);
+    sz_release(forked);
+    sz_release(failed);
+    sz_release(err);
+    sz_release(payload);
+  }
+
+  {
+    const char *path = "/tmp/scuzz_test_coverage.txt";
+    char text[128] = {0};
+    FILE *file;
+    remove(path);
+    setenv("SCUZZ_COVERAGE_DUMP", path, 1);
+    sz_panic_push_src("Main.scuzz:1:5");
+    sz_panic_pop_src();
+    sz_panic_push_src("Main.scuzz:1:5");
+    sz_panic_pop_src();
+    unsetenv("SCUZZ_COVERAGE_DUMP");
+    file = fopen(path, "r");
+    assert(file);
+    assert(fread(text, 1, sizeof(text) - 1, file) == strlen("Main.scuzz:1:5\n"));
+    assert(!strcmp(text, "Main.scuzz:1:5\n"));
+    fclose(file);
     remove(path);
   }
 

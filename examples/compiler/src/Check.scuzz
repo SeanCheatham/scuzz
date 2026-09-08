@@ -394,6 +394,12 @@ def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs:
   if (isKit(f)) resolveKit(f, args, env, funs, ens, span) else if (isInstMeth(f)) resolveInst(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else if (enOfCase(ens, f) != "") inferCtor(enOfCase(ens, f), args, env, funs, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
 
 def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at") resolveGenericKit(f, args, env, funs, ens, span) else resolveKitRest(f, args, env, funs, ens, span)
+
+def resolveGenericKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), kitRet(f))) else if (List.len(args) != List.len(kitParams(f))) bad(Str.concat(f, " has wrong arity"), span) else genericArgs(f, ["A", "B", "E"], kitParams(f), kitRet(f), args, env, funs, ens, span)
+
+def resolveKitRest(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Signal.list" || f == "Signal.listN") resolveSignalList(f, args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else if (List.isEmpty(args) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (!arityOk(f, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(kitParams(f))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, want(f, List.len(args)), kitRet(f), args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
@@ -621,8 +627,41 @@ def resolveUser(f: String, args: List[Expr], env: List[(String, String)], funs: 
 
 def resolveUserHit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), d: Fun): Out =
   d match {
-    case Fun(_, _, _, ps, ret, _, _, _) => checkUser(f, ps, ret, args, env, funs, ens, span)
+    case Fun(_, _, ts, ps, ret, _, _, _) => if (List.isEmpty(ts)) checkUser(f, ps, ret, args, env, funs, ens, span) else checkGeneric(f, ts, ps, ret, args, env, funs, ens, span, alignCall(ps, args))
   }
+
+def checkGeneric(f: String, ts: List[String], ps: List[Param], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), aligned: (List[Expr], String)): Out =
+  if (aligned._2 != "") bad(alignErr(f, aligned._2, ps, args), span) else genericArgs(f, ts, paramTys(ps), ret, aligned._1, env, funs, ens, span)
+
+def genericArgs(f: String, ts: List[String], want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(args)) ok(ret) else genericArg(f, ts, want, ret, args, env, funs, ens, span, inferExpected(stripNamed(List.at(args, 0)), List.at(want, 0), env, funs, ens))
+
+def inferExpected(e: Expr, want: String, env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  e match {
+    case Expr.ELam(p, ann, body) => if (isFunTy(want)) inferExpectedLam(p, ann, body, Type.show(Type.funArg(Type.parse(want))), env, funs, ens, e) else infer(e, env, funs, ens)
+    case _ => infer(e, env, funs, ens)
+  }
+
+def inferExpectedLam(p: String, ann: String, body: Expr, arg: String, env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
+  if (ann != "" && !tyEq(ann, arg)) argMismatch("lambda", arg, ann, exprSpan(env, e)) else expectedLamBody(if (ann == "") arg else ann, infer(body, bindLam(p, if (ann == "") arg else ann, env), funs, ens))
+
+def expectedLamBody(arg: String, body: Out): Out =
+  if (hasErr(body)) body else ok(Type.show(Type.tFun(Type.parse(arg), Type.parse(body.ty))))
+
+def genericArg(f: String, ts: List[String], want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), got: Out): Out =
+  if (hasErr(got)) got else genericBound(f, ts, want, ret, args, env, funs, ens, span, got.ty, Type.bindings(Type.parse(List.at(want, 0)), Type.parse(got.ty), ts))
+
+def genericBound(f: String, ts: List[String], want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), got: String, bindings: List[(String, String)]): Out =
+  if (!tyEq(applyBindings(List.at(want, 0), bindings), got)) argMismatch(f, applyBindings(List.at(want, 0), bindings), got, span) else genericArgs(f, ts, bindWant(List.tail(want), bindings), applyBindings(ret, bindings), List.tail(args), env, funs, ens, span)
+
+def applyBindings(ty: String, bindings: List[(String, String)]): String =
+  if (List.isEmpty(bindings)) ty else applyBinding(ty, List.at(bindings, 0), List.tail(bindings))
+
+def applyBinding(ty: String, binding: (String, String), rest: List[(String, String)]): String =
+  applyBindings(substTy(ty, binding._1, binding._2), rest)
+
+def bindWant(want: List[String], bindings: List[(String, String)]): List[String] =
+  if (List.isEmpty(want)) want else applyBindings(List.at(want, 0), bindings) :: bindWant(List.tail(want), bindings)
 
 def checkUser(f: String, ps: List[Param], ret: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   checkUserAl(f, ps, ret, args, env, funs, ens, span, alignCall(ps, args))
@@ -1327,7 +1366,7 @@ def inferHandle3(recv: Out, body: Out, env: List[(String, String)], e: Expr): Ou
   if (hasErr(body)) body else if (isIo(recv.ty) && isIo(body.ty)) inferHandleOk(recv, body, env, e) else if (isIo(recv.ty) && isLoose(body.ty)) ok(recv.ty) else bad(Str.concat("handleErrorWith needs IO, got ", Str.concat(recv.ty, Str.concat(" and ", body.ty))), exprSpan(env, e))
 
 def inferHandleOk(recv: Out, body: Out, env: List[(String, String)], e: Expr): Out =
-  if (tyEq(ioOk(recv.ty), ioOk(body.ty))) ok(ioTy(ioErr(body.ty), ioOk(recv.ty))) else bad(Str.concat("handleErrorWith type mismatch: expected ", Str.concat(ioOk(recv.ty), Str.concat(", got ", ioOk(body.ty)))), exprSpan(env, e))
+  if (tyEq(ioOk(recv.ty), ioOk(body.ty))) ok(ioTy(ioErr(body.ty), prefer(ioOk(recv.ty), ioOk(body.ty)))) else bad(Str.concat("handleErrorWith type mismatch: expected ", Str.concat(ioOk(recv.ty), Str.concat(", got ", ioOk(body.ty)))), exprSpan(env, e))
 
 def inferVar(s: String, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   inferVar2(s, getTy(env, s), env, funs, ens, span)
@@ -1353,7 +1392,13 @@ def joinComma(ps: List[String]): String =
   if (List.isEmpty(ps)) "" else if (List.isEmpty(List.tail(ps))) List.at(ps, 0) else Str.concat(List.at(ps, 0), Str.concat(", ", joinComma(List.tail(ps))))
 
 def inferList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
-  if (List.isEmpty(xs)) ok("List") else inferList2(infer(List.at(xs, 0), env, funs, ens))
+  if (List.isEmpty(xs)) ok("List") else inferListRest(infer(List.at(xs, 0), env, funs, ens), List.tail(xs), env, funs, ens)
+
+def inferListRest(head: Out, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  if (hasErr(head)) head else if (List.isEmpty(rest)) inferList2(head) else inferListNext(head, infer(List.at(rest, 0), env, funs, ens), rest, env, funs, ens)
+
+def inferListNext(head: Out, next: Out, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): Out =
+  if (hasErr(next)) next else if (!tyEq(head.ty, next.ty)) argMismatch("list element", head.ty, next.ty, exprSpan(env, List.at(rest, 0))) else inferListRest(ok(prefer(head.ty, next.ty)), List.tail(rest), env, funs, ens)
 
 def inferList2(o: Out): Out =
   if (hasErr(o)) o else ok(Str.concat("List[", Str.concat(o.ty, "]")))

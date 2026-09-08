@@ -351,6 +351,44 @@ def wantQuoteEv(): String =
   "drive bump \"x\"\n"
 
 def campReproOk(): Bool =
+  mutationScoreOk() && campReproSeeds()
+
+def mutationScoreOk(): Bool =
+  Cli.fmtSrc("""def broken(): Int = 1
+)
+""") == """def broken(): Int = 1
+)
+""" && Lsp.formatJson("""def broken(): Int = 1
+)
+""") == "[]" && mutationCountsOk()
+
+def mutationCountsOk(): Bool =
+  coverageCountsOk() && mutationSampleOk()
+
+def coverageCountsOk(): Bool =
+  coverageShifted("""def hit(): Int = 1
+def miss(): Int = 2
+""", """
+
+def hit(): Int = 1
+def miss(): Int = 99
+""")
+
+def coverageShifted(live: String, compiled: String): Bool =
+  coverageReport(Verify.coverageToml([("Main", live)], [("Main", compiled)], """Main.scuzz:3:5
+Main.scuzz:3:5
+Main.scuzz:4:5
+"""))
+
+def coverageReport(summary: String): Bool =
+  Str.contains(summary, """total = 2
+reached = 1
+""") && Str.contains(summary, "location = \"Main.scuzz:1:5\"\nreached = true") && Str.contains(summary, "location = \"Main.scuzz:2:5\"\nreached = false")
+
+def mutationSampleOk(): Bool =
+  Str.contains(Verify.summaryMut(2, 1, 1, 5, 100, false, 1), "score = 0.666") && Str.contains(Verify.summaryMut(2, 1, 1, 5, 100, false, 1), "invalid = 1") && !Str.contains(Verify.summaryMut(0, 0, 1, 2, 100, false, 1), "score") && !Str.contains(Verify.summaryMut(0, 0, 0, 0, 100, false, 0), "score")
+
+def campReproSeeds(): Bool =
   Verify.searchN(8) == 5 && Verify.mutateN(8) == 3 && Verify.decodeD(Verify.parseSeed("1344")) == 2 && Verify.decodeK(Verify.parseSeed("1344")) == 0 && Str.contains(Verify.reproText(42, "1344", "", srcQuoteEv()), "pct_d = 2") && Str.contains(Verify.reproText(42, "1344", "", srcQuoteEv()), "pct_k = 0") && Verify.nls(Verify.parseEvents(Verify.reproText(42, "1344", "", srcQuoteEv()))) == wantQuoteEv()
 
 def campaignOk(): Bool =

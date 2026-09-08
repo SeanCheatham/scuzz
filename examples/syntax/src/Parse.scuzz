@@ -1252,6 +1252,17 @@ def parseFiles3(f: (String, String), rest: List[(String, String)], acc: Prog): P
     case (stem, src) => parseFiles2(rest, merge(acc, parseFile(stem, src)))
   }
 
+def hasParseError(p: Prog): Bool =
+  parseErrorDefs(p.defs)
+
+def parseErrorDefs(defs: List[Fun]): Bool =
+  if (List.isEmpty(defs)) false else parseErrorDef(List.at(defs, 0)) || parseErrorDefs(List.tail(defs))
+
+def parseErrorDef(d: Fun): Bool =
+  d match {
+    case Fun(_, name, _, _, _, _, _, _) => name == "#parse"
+  }
+
 def pretty(p: Prog): String =
   Str.concat(prettyPkg(p.pkg), Str.concat(prettyEnums(p.enums), Str.concat(prettyAliases(p.aliases), Str.concat(prettyTraits(p.traits), Str.concat(prettyImpls(p.impls), Str.concat(prettyImps(p.imps, !(List.isEmpty(p.defs) && p.main == "")), Str.concat(prettyDefs(p.defs), prettyMain(p.main, p.body))))))))
 

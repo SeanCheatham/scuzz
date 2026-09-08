@@ -967,7 +967,7 @@ def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, 
   }
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
-  if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
+  if (f == "IO.fail" && !List.isEmpty(args) && isI64Ty(exprRetTyEns(List.at(args, 0), defs, ens, ps, mod))) emitFailBox(code, arg0(vals), prefix) else if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
 
 def isRtExtra(f: String): Bool =
   f == "IO.sleep" || f == "IO.fail" || f == "IO.timeout" || f == "IO.when" || f == "IO.unless" || f == "IO.repeatN" || f == "IO.retryN" || f == "Property.sometimes" || f == "Stream.range" || f == "Deferred.fail"
@@ -982,7 +982,10 @@ def emitFail(code: String, vals: List[String], owns: List[Bool], prefix: String)
   emitFail2(code, arg0(vals), headOwn(owns), prefix)
 
 def emitFail2(code: String, s: String, o: Bool, prefix: String): Slot =
-  Slot(join(code, join(line(Str.concat(tmp(prefix, "cstr"), Str.concat("call ptr @sz_string_cstr(ptr ", Str.concat(s, ")")))), join(line(Str.concat(tmp(prefix, "err"), Str.concat("call ptr @sz_error_new(i32 1, ptr ", Str.concat(pct(prefix, "cstr"), ")")))), join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_fail(ptr ", Str.concat(pct(prefix, "err"), ")")))), join(relPtr(pct(prefix, "err")), if (o) relPtr(s) else ""))))), pct(prefix, "io"), false)
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "err"), Str.concat("call ptr @sz_error_value(ptr ", Str.concat(s, ")")))), join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_fail(ptr ", Str.concat(pct(prefix, "err"), ")")))), join(relPtr(pct(prefix, "err")), if (o) relPtr(s) else "")))), pct(prefix, "io"), false)
+
+def emitFailBox(code: String, value: String, prefix: String): Slot =
+  emitFail2(join(code, line(Str.concat(tmp(prefix, "box"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(value, ")"))))), pct(prefix, "box"), true, prefix)
 
 def emitDeferredFail(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitDeferredFail2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
@@ -2612,18 +2615,10 @@ def emitApplyRecv5(unbox: Bool, code: String, prefix: String): Slot =
   emitApply5(unbox, code, prefix)
 
 def emitIoPureCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
-  if (List.isEmpty(args)) emitIoPure2("", "null", false, prefix, ps) else emitIoPureFrom(emitExpr(List.at(args, 0), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc), List.at(args, 0), prefix, ps, defs)
+  if (List.isEmpty(args)) emitIoPure2("", "null", false, prefix, ps) else emitIoPureTyped(emitExpr(List.at(args, 0), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc), exprRetTyEns(List.at(args, 0), defs, ens, ps, loc), prefix)
 
-def emitIoPureFrom(s: Slot, e: Expr, prefix: String, ps: List[Param], defs: List[Fun]): Slot =
-  s match {
-    case Slot(code, v, o) => emitIoPurePick(code, v, o, prefix, ps, exprIsI64(e, ps, defs))
-  }
-
-def emitIoPurePick(code: String, v: String, o: Bool, prefix: String, ps: List[Param], i64: Bool): Slot =
-  if (o || v == "null" || !i64 && (isPtrSlot(v, ps) || ioPureSsa(v))) emitIoPurePtr(code, v, o, prefix) else emitIoPureI64(code, v, prefix)
-
-def ioPureSsa(v: String): Bool =
-  Str.len(v) > 0 && Str.charAt(v, 0) == 37 && !hasSub(v, "_u")
+def emitIoPureTyped(s: Slot, ty: String, prefix: String): Slot =
+  if (isI64Ty(ty)) emitIoPureI64(s.code, s.val, prefix) else emitIoPurePtr(s.code, s.val, s.owned, prefix)
 
 def emitConcat(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitConcat2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
@@ -5725,7 +5720,7 @@ def isFmName(name: String): Bool =
 
 def fmRt(name: String): String =
   name match {
-    case "handleErrorWith" => "sz_io_handle_error_with"
+    case "handleErrorWith" => "sz_io_handle_value"
     case _ => "sz_io_flatmap"
   }
 
@@ -5879,7 +5874,7 @@ def nameUnBoolList(xs: List[Expr], n: String): Bool =
   if (List.isEmpty(xs)) false else nameUnBool(List.at(xs, 0), n) || nameUnBoolList(List.tail(xs), n)
 
 def emitOneContTy(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
-  if (keepBind(bind) && nested || isI64Ty(bty) || isTuplePat(bind) || isTupTy(bty)) emitOneContAlias(id, body, strs, defs, ens, ps, loc, bind, start, bty) else emitOneCont2(id, emitOneCont3(emitUnpack(ps), emitExprFid(rewriteBind(body, bind, "value"), Str.concat("c", Str.fromInt(id)), strs, defs, ens, ps, loc, start)), loc, strs)
+  if (keepBind(bind) || isI64Ty(bty) || isTuplePat(bind) || isTupTy(bty)) emitOneContAlias(id, body, strs, defs, ens, ps, loc, bind, start, bty) else emitOneCont2(id, emitOneCont3(emitUnpack(ps), emitExprFid(rewriteBind(body, bind, "value"), Str.concat("c", Str.fromInt(id)), strs, defs, ens, ps, loc, start)), loc, strs)
 
 def keepBind(bind: String): Bool =
   bind != "" && bind != "_"
@@ -5947,7 +5942,10 @@ def emitOneContAlias(id: Int, body: Expr, strs: List[String], defs: List[Fun], e
   emitOneContAlias2(id, body, strs, defs, ens, dropParam(ps, bind), loc, bind, start, bty)
 
 def emitOneContAlias2(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], rest: List[Param], loc: String, bind: String, start: Int, bty: String): String =
-  emitOneCont2(id, emitOneCont3(join(emitUnpack(rest), emitBindAlias(bind, bty)), emitExprFid(body, Str.concat("c", Str.fromInt(id)), strs, defs, ens, bindPsTy(bind, rest, bty), loc, start)), loc, strs)
+  emitOneCont2(id, emitContDrop(emitOneCont3(join(emitUnpack(rest), emitBindAlias(bind, bty)), emitExprFid(body, Str.concat("c", Str.fromInt(id)), strs, defs, ens, bindPsTy(bind, rest, bty), loc, start)), bty), loc, strs)
+
+def emitContDrop(s: Slot, bty: String): Slot =
+  Slot(join(s.code, if (isI64Ty(bty)) "" else relPtr("%value")), s.val, s.owned)
 
 def emitOneCont3(pre: String, s: Slot): Slot =
   s match {
@@ -5967,7 +5965,7 @@ def emitContsHead(p: (String, Int)): String =
 
 def emitContsAt(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   e match {
-    case Expr.EMethod(recv, name, args, _) => if (isFmName(name)) emitContsFm(recv, args, strs, defs, ens, ps, loc, id) else if (name == "map") emitContsMap(recv, args, strs, defs, ens, ps, loc, id) else if (name == "apply") emitContsApply(recv, args, strs, defs, ens, ps, loc, id) else emitContsCtor(recv, args, strs, defs, ens, ps, loc, id)
+    case Expr.EMethod(recv, name, args, _) => if (name == "handleErrorWith") emitContsFmTy(Check.ioErr(exprRetTyEns(recv, defs, ens, ps, loc)), recv, args, strs, defs, ens, ps, loc, id) else if (isFmName(name)) emitContsFm(recv, args, strs, defs, ens, ps, loc, id) else if (name == "map") emitContsMap(recv, args, strs, defs, ens, ps, loc, id) else if (name == "apply") emitContsApply(recv, args, strs, defs, ens, ps, loc, id) else emitContsCtor(recv, args, strs, defs, ens, ps, loc, id)
     case Expr.EPrint(inner, _) => emitContsAtGo(inner, strs, defs, ens, ps, loc, id)
     case Expr.ELam(_, _, _) => ("", id)
     case Expr.ECall(_, args, _) => emitContsArgs(args, strs, defs, ens, ps, loc, id)
@@ -6038,13 +6036,7 @@ def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun
   emitContsFmTy(recvBindTy(recv, ens, defs, ps, loc), recv, args, strs, defs, ens, ps, loc, id)
 
 def recvBindTy(recv: Expr, ens: List[En], defs: List[Fun], ps: List[Param], loc: String): String =
-  recv match {
-    case Expr.EMethod(r, name, args, _) => recvBindTyMeth(r, name, args, ens, defs, ps, loc)
-    case _ => peelIo(exprRetTyEns(recv, defs, ens, ps, loc))
-  }
-
-def recvBindTyMeth(r: Expr, name: String, args: List[Expr], ens: List[En], defs: List[Fun], ps: List[Param], loc: String): String =
-  if (name == "map") exprRetTyEns(mapLamBody(lamArg(args)), defs, ens, ps, loc) else if (isFmName(name)) recvBindTy(r, ens, defs, ps, loc) else peelIo(exprRetTyEns(Expr.EMethod(r, name, args, 0), defs, ens, ps, loc))
+  peelIo(exprRetTyEns(recv, defs, ens, ps, loc))
 
 def emitContsFmTy(bty: String, recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsFm2(emitContsAt(recv, strs, defs, ens, ps, loc, id), lamArg(args), strs, defs, ens, ps, loc, bty)
@@ -6196,7 +6188,7 @@ def decl(s: String): String =
   Str.concat("declare ", Str.concat(s, nl()))
 
 def preamble(): String =
-  Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), decls())))
+  Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), join(decl("ptr @sz_error_value(ptr)"), join(decl("ptr @sz_io_handle_value(ptr, ptr, ptr)"), decls())))))
 
 def decls(): String =
   join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), join(declsV(), join(declsW(), join(declsX(), nl()))))))))))))))))))))))))

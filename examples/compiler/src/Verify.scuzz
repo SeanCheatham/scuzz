@@ -294,8 +294,8 @@ pct_k = """, Str.concat(Str.fromInt(decodeK(parseSeed(sched))), """
 def reproFault(fault: String): String =
   if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
 
-def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
-  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, promo, killed, survived, inert, ran, sites, oracles, classText))
+def summaryToml(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String, invalid: Int): String =
+  Str.concat(summaryFuzz(ok, seed, iterations, search, failures, corpus, repro), summaryRest(corpus, corpFail, promo, killed, survived, inert, ran, sites, oracles, classText, invalid))
 
 def kv(k: String, v: String): String =
   Str.concat(k, Str.concat(" = ", v))
@@ -316,8 +316,8 @@ def summaryFuzzNums(seed: Int, iterations: Int, search: Int, failures: Int, corp
 def summaryRepro(repro: String): String =
   if (repro == "") "" else kvn("repro", quote1(repro))
 
-def summaryRest(corpus: Int, corpFail: Int, promo: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String): String =
-  Str.concat(summaryCorpus(corpus, corpFail, promo), Str.concat(summaryClass(classText), summaryMut(killed, survived, inert, ran, sites, oracles)))
+def summaryRest(corpus: Int, corpFail: Int, promo: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classText: String, invalid: Int): String =
+  Str.concat(summaryCorpus(corpus, corpFail, promo), Str.concat(summaryClass(classText), summaryMut(killed, survived, inert, ran, sites, oracles, invalid)))
 
 def summaryCorpus(corpus: Int, corpFail: Int, promo: String): String =
   Str.concat("""
@@ -329,13 +329,44 @@ def summaryClass(classText: String): String =
 [classify]
 """, classText)
 
-def summaryMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool): String =
+def summaryMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int): String =
   Str.concat("""
 [mutate]
-""", Str.concat(kvn("killed", Str.fromInt(killed)), Str.concat(kvn("survived", Str.fromInt(survived)), Str.concat(kvn("inert", Str.fromInt(inert)), Str.concat(kvn("ran", Str.fromInt(ran)), Str.concat(kvn("sites", Str.fromInt(sites)), Str.concat(kvn("oracles", if (oracles) "true" else "false"), summaryScore(killed, sites))))))))
+""", Str.concat(kvn("killed", Str.fromInt(killed)), Str.concat(kvn("survived", Str.fromInt(survived)), Str.concat(kvn("inert", Str.fromInt(inert)), Str.concat(kvn("ran", Str.fromInt(ran)), Str.concat(kvn("sites", Str.fromInt(sites)), Str.concat(kvn("oracles", if (oracles) "true" else "false"), Str.concat(kvn("invalid", Str.fromInt(invalid)), summaryScore(killed, ran - invalid - inert)))))))))
 
 def summaryScore(killed: Int, sites: Int): String =
   if (sites <= 0) "" else kvn("score", score3(killed, sites))
+
+def coverageToml(files: List[(String, String)], compiled: List[(String, String)], hits: String): String =
+  coverageProg(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))
+
+def coverageProg(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): String =
+  coverageRows(List.distinct(List.concat(coverageDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), if (p.main == "") [] else [(Emit.panicLocExpr(files, p.body), Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocExpr(compiled, built.body)))])))
+
+def coverageDefs(defs: List[Fun], expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+  if (List.isEmpty(defs)) [] else coverageDef(List.at(defs, 0), expected, built, files, compiled, hits) :: coverageDefs(List.tail(defs), expected, built, files, compiled, hits)
+
+def coverageDef(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (String, Bool) =
+  (Emit.panicLoc(files, d.mod, d.off), coverageMatched(Check.findFunMod(expected, d.mod, d.name), Check.findFunMod(built, d.mod, d.name), compiled, hits))
+
+def coverageMatched(expected: List[Fun], built: List[Fun], compiled: List[(String, String)], hits: List[String]): Bool =
+  if (List.isEmpty(expected) || List.isEmpty(built)) false else coverageBody(List.at(expected, 0), List.at(built, 0), compiled, hits)
+
+def coverageBody(expected: Fun, built: Fun, compiled: List[(String, String)], hits: List[String]): Bool =
+  Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLoc(compiled, built.mod, built.off))
+
+def coverageRows(rows: List[(String, Bool)]): String =
+  Str.concat("""
+[coverage]
+""", Str.concat(kvn("total", Str.fromInt(List.len(rows))), Str.concat(kvn("reached", Str.fromInt(List.count(rows, r => r._2))), coverageEntries(rows))))
+
+def coverageEntries(rows: List[(String, Bool)]): String =
+  if (List.isEmpty(rows)) "" else Str.concat(coverageEntry(List.at(rows, 0)), coverageEntries(List.tail(rows)))
+
+def coverageEntry(row: (String, Bool)): String =
+  Str.concat("""
+[[coverage.regions]]
+""", Str.concat(kvn("location", quote1(row._1)), kvn("reached", if (row._2) "true" else "false")))
 
 def score3(killed: Int, sites: Int): String =
   score3n(killed * 1000 / sites)

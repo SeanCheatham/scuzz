@@ -206,7 +206,7 @@ def namedEq2(n: String, b: Ty): Bool =
 
 def appEq(n: String, args: List[Ty], b: Ty): Bool =
   b match {
-    case Ty.App(m, bs) => n == m && (eqList(args, bs) || argsFit(args, bs) || ioFit(n, args, bs))
+    case Ty.App(m, bs) => n == m && (if (n == "IO") List.isEmpty(args) || List.isEmpty(bs) || ioFit(n, args, bs) else eqList(args, bs) || argsFit(args, bs))
     case Ty.Named(m) => n == m
     case _ => false
   }
@@ -243,6 +243,18 @@ def prefer(a: Ty, b: Ty): Ty =
 
 def eqStruct(a: Ty, b: Ty): Bool =
   show(a) == show(b)
+
+def bindings(want: Ty, got: Ty, params: List[String]): List[(String, String)] =
+  want match {
+    case Ty.TVar(n) => if (List.contains(params, n) && !isParam(got)) [(n, show(got))] else []
+    case Ty.App(n, args) => if (n != appName(got)) [] else if (n == "IO") bindArgs([ioErrOf(args), ioOkOf(args)], [ioErr(got), ioOk(got)], params) else bindArgs(args, appArgs(got), params)
+    case Ty.Tuple(parts) => bindArgs(parts, tupParts(got), params)
+    case Ty.Arrow(arg, ret) => if (isFun(got)) List.concat(bindings(arg, funArg(got), params), bindings(ret, funRet(got), params)) else []
+    case _ => []
+  }
+
+def bindArgs(want: List[Ty], got: List[Ty], params: List[String]): List[(String, String)] =
+  if (List.isEmpty(want) || List.isEmpty(got)) [] else List.concat(bindings(List.at(want, 0), List.at(got, 0), params), bindArgs(List.tail(want), List.tail(got), params))
 
 def appRicher(long: Ty, short: Ty): Bool =
   appName(long) != "" && appName(long) == appName(short) && List.len(appArgs(long)) > List.len(appArgs(short)) && argsFit(appArgs(short), appArgs(long))

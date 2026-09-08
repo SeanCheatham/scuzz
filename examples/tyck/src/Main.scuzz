@@ -340,7 +340,24 @@ def rejects(src: String, msg: String): Bool =
   Str.contains(Check.check(src), msg)
 
 def tyckFail(): Bool =
-  tyckDiff(srcFailOk(), wantFailOk()) && rejects(srcFailMis(), "@main body must be IO[Unit]")
+  tyckDiff(srcFailOk(), wantFailOk()) && rejects(srcFailMis(), "@main body must be IO[Unit]") && ioTypeArgs()
+
+def ioTypeArgs(): Bool =
+  genericTypeArgs() && ioTypeCompatibility()
+
+def genericTypeArgs(): Bool =
+  collectionTypes() && userTypeArgs()
+
+def collectionTypes(): Bool =
+  rejects("def wrong(): List[Int] = [1, \"x\"]", "list element") && rejects("def wrong(): List[Int] = [1, missing]", "unbound") && rejects("def wrong(): List[Int] = List.concat([1], [\"x\"])", "arg type mismatch") && rejects("def wrong(): List[String] = List.map([1], x => x + 1)", "does not match declared")
+
+def userTypeArgs(): Bool =
+  rejects("def choose[A](x: A, y: A): A = x\ndef wrong(): Int = choose(1, \"x\")", "arg type mismatch") && Check.check("""def choose[A](x: A, y: A): A = x
+def right(): Int = choose(1, 2)""") == "[]" && rejects("""def identity[A](x: A): A = x
+def wrong(): String = identity(1)""", "does not match declared")
+
+def ioTypeCompatibility(): Bool =
+  Type.eqStr("IO[Int]", "IO[String, Int]") && !Type.eqStr("IO[String]", "IO[String, Int]") && !Type.eqStr("IO[Int]", "IO[Int, String]") && !Type.eqStr("IO[String, Int]", "IO[Bool, Int]") && rejects("def wrong(x: IO[String]): IO[String, Int] = x", "does not match declared")
 
 def tyckParse(): Bool =
   rejects(srcLeftover(), "unexpected token") && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
