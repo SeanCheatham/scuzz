@@ -683,6 +683,24 @@ def mapProof(): IO[Unit] =
     _ <- IO.println(s"caseio:${Str.fromInt(o)}")
   } yield ()
 
+def jsonPairField(j: Json, key: String): Json =
+  j match {
+    case Json.Obj(pairs) => List.find(pairs, p => p._1 == key) match {
+  case [] => Json.Null()
+  case pair :: _ => pair._2
+}
+    case _ => Json.Null()
+  }
+
+def jsonPairReads(j: Json, key: String, want: Int): Bool =
+  jsonPairField(j, key) == Json.Int(want) && jsonPairField(j, key) == Json.Int(want)
+
+def jsonPairRoundTrip(n: Int): Bool =
+  Json.parse(Str.concat("{\"id\":", Str.concat(Str.fromInt(n), "}"))) match {
+    case Result.Ok(j) => jsonPairReads(j, "id", n)
+    case Result.Err(_) => false
+  }
+
 def tupleProof(): IO[Unit] =
   for {
     (n, s) = (42, "ok")

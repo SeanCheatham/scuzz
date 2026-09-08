@@ -3606,7 +3606,7 @@ def caseFieldTy(ens: List[En], en: String, ctor: String): String =
   if (en == "Json") jsonFieldTy(ctor) else if (List.isEmpty(ens)) "" else caseFieldTy1(List.at(ens, 0), List.tail(ens), en, ctor)
 
 def jsonFieldTy(ctor: String): String =
-  if (ctor == "Int" || ctor == "Bool") "Int" else if (ctor == "Float") "Float" else if (ctor == "Str") "String" else "List"
+  if (ctor == "Int" || ctor == "Bool") "Int" else if (ctor == "Float") "Float" else if (ctor == "Str") "String" else if (ctor == "Obj") "List[(String, Json)]" else "List[Json]"
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
@@ -4050,7 +4050,13 @@ def fieldNameOf(s: String): String =
   if (namedEqAt(s, 0) < 0) s else Str.slice(s, 0, namedEqAt(s, 0))
 
 def emitOkCons(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
-  emitOkOwned(emitOkConsNest(consTail(pat), prefix, i, tys, emitExpr(rewriteCons(pat, body, prefix, i, slotInt(tys, 0)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, consPayloadParams(pat, prefix, i, tys, ps), loc)), ps)
+  emitOkConsNest(consTail(pat), prefix, i, tys, emitOkConsBody(rewriteCons(pat, body, prefix, i, slotInt(tys, 0)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, consPayloadParams(pat, prefix, i, tys, ps), loc))
+
+def emitOkConsBody(body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+  emitOkTyped(emitExpr(body, prefix, strs, defs, ens, ps, loc), exprRetTyEns(body, defs, ens, ps, loc))
+
+def emitOkTyped(s: Slot, ty: String): Slot =
+  if (s.owned || isI64Ty(ty)) s else Slot(join(s.code, retPtr(s.val)), s.val, true)
 
 def emitOkConsNest(t: String, prefix: String, i: Int, tys: List[String], s: Slot): Slot =
   if (isConsPat(t)) emitOkConsNest2(prefix, i, tys, s) else s
