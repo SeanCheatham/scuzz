@@ -49,3 +49,6 @@ def tosetVar(): Bool =
 def mapEmptyGet(): Bool =
   Main.mapGetEmptyOk()
 
+def jsonPairLifetime(n: Int): Bool =
+  Main.jsonPairRoundTrip(n)
+
