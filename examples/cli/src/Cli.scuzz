@@ -14,6 +14,7 @@ enum Cmd:
   case Ide(path: String, outDir: String, headless: Bool)
   case Package(path: String, outDir: String, target: String)
 
+import Parse.Prog
 import Manifest.Man
 
 def arg(xs: List[String], i: Int): String =
@@ -456,7 +457,10 @@ def parsePkgMsg(p: (String, Int), args: List[String], path: String, outDir: Stri
   }
 
 def fmtSrc(src: String): String =
-  Parse.pretty(Parse.parse(Lexer.lex(src)))
+  fmtParsed(src, Parse.parse(Lexer.lex(src)))
+
+def fmtParsed(src: String, p: Prog): String =
+  if (Parse.hasParseError(p)) src else Parse.pretty(p)
 
 def runCmd(c: Cmd, src: String): String =
   c match {
@@ -626,7 +630,7 @@ def fmtOne(dir: String, check: Bool, h: (String, String)): IO[Int] =
   }
 
 def fmtOnePath(check: Bool, path: String, src: String): IO[Int] =
-  fmtOneGot(check, path, src, fmtSrc(src))
+  if (Parse.hasParseError(Parse.parse(Lexer.lex(src)))) IO.println(Str.concat(path, ": parse error; source is unchanged")).flatMap(_ => IO.fail("fmt")) else fmtOneGot(check, path, src, fmtSrc(src))
 
 def fmtOneGot(check: Bool, path: String, src: String, pretty: String): IO[Int] =
   if (pretty == src) IO.pure(0) else fmtOneDirty(check, path, pretty)

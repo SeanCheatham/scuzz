@@ -40,13 +40,13 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Str.stripSuffix` | `String, String` | `String` |
 | `Str.split` | `String, String` | `List[String]` |
 | `List.len` | `List` | `Int` |
-| `List.concat` | `List, List` | `List` |
+| `List.concat` | `List[A], List[A]` | `List[A]` |
 | `List.reverse` | `List` | `List` |
 | `List.head` | `List` | `Option` |
 | `List.tail` | `List` | `List` |
 | `List.isEmpty` | `List` | `Bool` |
-| `List.cons` | `A, List` | `List` |
-| `List.at` | `List, Int` | `A` |
+| `List.cons` | `A, List[A]` | `List[A]` |
+| `List.at` | `List[A], Int` | `A` |
 | `List.join` | `List[String], String` | `String` |
 | `List.take` | `List, Int` | `List` |
 | `List.drop` | `List, Int` | `List` |
@@ -62,7 +62,7 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `List.range` | `Int, Int` | `List[Int]` |
 | `List.padTo` | `List, Int, A` | `List` |
 | `List.nonEmpty` | `List` | `Bool` |
-| `List.map` | `List, A => B` | `List` |
+| `List.map` | `List[A], A => B` | `List[B]` |
 | `List.flatMap` | `List, A => List` | `List` |
 | `List.filter` | `List, A => Bool` | `List` |
 | `List.filterNot` | `List, A => Bool` | `List` |

@@ -274,9 +274,76 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg) {
   return (int)n;
 }
 
+typedef struct CoverageHit {
+  struct CoverageHit *next;
+  char location[];
+} CoverageHit;
+
+static CoverageHit *coverage_hits[256];
+static char *coverage_path;
+
+static void coverage_clear(void) {
+  size_t i;
+  for (i = 0; i < 256; i++) {
+    CoverageHit *hit = coverage_hits[i];
+    while (hit) {
+      CoverageHit *next = hit->next;
+      free(hit);
+      hit = next;
+    }
+    coverage_hits[i] = NULL;
+  }
+  free(coverage_path);
+  coverage_path = NULL;
+}
+
+static void coverage_hit(const char *loc) {
+  const char *path = getenv("SCUZZ_COVERAGE_DUMP");
+  const unsigned char *p;
+  unsigned hash = 2166136261u;
+  CoverageHit *hit;
+  FILE *file;
+  int written;
+  int closed;
+  static int registered;
+  if (!path || !*path)
+    return;
+  if (!coverage_path || strcmp(path, coverage_path)) {
+    coverage_clear();
+    coverage_path = malloc(strlen(path) + 1);
+    if (!coverage_path)
+      sz_panic("coverage: out of memory");
+    strcpy(coverage_path, path);
+  }
+  if (!registered) {
+    atexit(coverage_clear);
+    registered = 1;
+  }
+  for (p = (const unsigned char *)loc; *p; p++)
+    hash = (hash ^ *p) * 16777619u;
+  hash %= 256;
+  for (hit = coverage_hits[hash]; hit; hit = hit->next)
+    if (!strcmp(hit->location, loc))
+      return;
+  file = fopen(path, "a");
+  if (!file)
+    sz_panic("coverage: cannot open output");
+  written = fprintf(file, "%s\n", loc);
+  closed = fclose(file);
+  if (written < 0 || closed)
+    sz_panic("coverage: cannot write output");
+  hit = malloc(sizeof(*hit) + strlen(loc) + 1);
+  if (!hit)
+    sz_panic("coverage: out of memory");
+  strcpy(hit->location, loc);
+  hit->next = coverage_hits[hash];
+  coverage_hits[hash] = hit;
+}
+
 void sz_panic_push_src(const char *loc) {
   if (!loc || !loc[0])
     return;
+  coverage_hit(loc);
   if (g_panic_src_n < SZ_PANIC_SRC_MAX)
     g_panic_src[g_panic_src_n++] = loc;
 }
@@ -673,9 +740,12 @@ void sz_release(void *ptr) {
   case SZ_RC_ERROR: {
     SzError *e = (SzError *)ptr;
     SzString *msg = e->message;
+    void *payload = e->payload;
     e->message = NULL;
+    e->payload = NULL;
     sz_rc_retire(ptr);
     sz_release(msg);
+    sz_release(payload);
     return;
   }
   case SZ_RC_REF: {
@@ -1718,7 +1788,7 @@ static int either_eq(const SzEither *a, const SzEither *b) {
 static int error_eq(const SzError *a, const SzError *b) {
   if (a->code != b->code)
     return 0;
-  return sz_ptr_eq(a->message, b->message);
+  return sz_ptr_eq(a->message, b->message) && sz_ptr_eq(a->payload, b->payload);
 }
 
 int sz_ptr_eq(const void *a, const void *b) {
@@ -1760,6 +1830,21 @@ SzError *sz_error_new(int32_t code, const char *msg) {
   SzError *e = (SzError *)sz_rc_alloc(sizeof(SzError), SZ_RC_ERROR);
   e->code = code;
   e->message = sz_string_from_cstr(msg ? msg : "error");
+  e->payload = e->message;
+  sz_retain(e->payload);
+  return e;
+}
+
+SzError *sz_error_value(void *payload) {
+  SzError *e = sz_error_new(1, "typed failure");
+  sz_release(e->payload);
+  e->payload = payload;
+  sz_retain(payload);
+  if (sz_rc_kind(payload) == SZ_RC_STRING) {
+    sz_release(e->message);
+    e->message = payload;
+    sz_retain(e->message);
+  }
   return e;
 }
 
@@ -1939,6 +2024,21 @@ SzIo *sz_io_attempt(SzIo *inner) {
   SzIo *io = sz_io_new(SZ_IO_ATTEMPT);
   sz_retain(inner);
   io->as.attempt_inner = inner;
+  return io;
+}
+
+static SzIo *handle_value(SzError *err, void *env) {
+  SzPair *pack = env;
+  SzCont handler = (SzCont)pack->left;
+  void *value = err ? err->payload : NULL;
+  sz_retain(value);
+  return handler(value, pack->right);
+}
+
+SzIo *sz_io_handle_value(SzIo *inner, SzCont handler, void *env) {
+  SzPair *pack = sz_pair_new((void *)handler, env);
+  SzIo *io = sz_io_handle_error_with(inner, handle_value, pack);
+  sz_release(pack);
   return io;
 }
 
@@ -2805,7 +2905,8 @@ static SzError *fiber_interrupt_err(void) {
 static SzError *error_copy_or_interrupt(SzError *err) {
   if (!err)
     return fiber_interrupt_err();
-  return sz_error_new(err->code, sz_string_cstr(err->message));
+  sz_retain(err);
+  return err;
 }
 
 static SzError *deferred_copy_error(SzDeferred *d) {

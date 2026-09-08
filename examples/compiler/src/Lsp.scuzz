@@ -265,6 +265,9 @@ def rangeOfNums(line: Int, col: Int, eline: Int, ecol: Int): String =
   Str.concat("{\"start\":{\"line\":", Str.concat(Str.fromInt(line), Str.concat(",\"character\":", Str.concat(Str.fromInt(col), Str.concat("},\"end\":{\"line\":", Str.concat(Str.fromInt(eline), Str.concat(",\"character\":", Str.concat(Str.fromInt(ecol), "}}"))))))))
 
 def formatJson(src: String): String =
+  if (Parse.hasParseError(Parse.parse(Lexer.lex(src)))) "[]" else formatValidJson(src)
+
+def formatValidJson(src: String): String =
   Str.concat("[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":", Str.concat(Str.fromInt(lineCount(src)), Str.concat(",\"character\":0}},\"newText\":", Str.concat(Check.jsonStr(Parse.pretty(Parse.parse(Lexer.lex(src)))), "}]"))))
 
 def lineCount(src: String): Int =

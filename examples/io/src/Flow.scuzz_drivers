@@ -1,0 +1,2 @@
+def composePayloads(n: Int): IO[Unit] =
+  Flow.composition(n % 10000).flatMap(_ => Flow.recoverInt(n % 10000)).flatMap(_ => Flow.recoverRecord(n % 10000)).flatMap(_ => Flow.recoverEnum(n % 10000)).flatMap(_ => Impurity.runKit()).flatMap(_ => Server.runHttp())

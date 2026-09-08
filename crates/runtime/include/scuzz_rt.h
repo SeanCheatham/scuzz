@@ -198,9 +198,11 @@ int sz_ptr_eq(const void *a, const void *b);
 typedef struct SzError {
   int32_t code;
   SzString *message;
+  void *payload;
 } SzError;
 
 SzError *sz_error_new(int32_t code, const char *msg);
+SzError *sz_error_value(void *payload);
 void sz_error_free(SzError *err);
 /* Caller owns a ref. A non-null error shares its message. */
 SzString *sz_error_message(const SzError *err);
@@ -345,6 +347,7 @@ SzIo *sz_io_fail_cstr(const char *msg);
 SzIo *sz_io_println(SzString *msg);
 SzIo *sz_io_println_cstr(const char *msg);
 SzIo *sz_io_handle_error_with(SzIo *inner, SzErrorHandler handler, void *env);
+SzIo *sz_io_handle_value(SzIo *inner, SzCont handler, void *env);
 SzIo *sz_io_attempt(SzIo *inner);
 SzIo *sz_io_attempt_as_result(SzIo *inner);
 SzIo *sz_io_sleep_ms(int64_t ms);

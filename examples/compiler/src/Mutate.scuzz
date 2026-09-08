@@ -522,8 +522,8 @@ def walkBindsRest(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, 
     case BindWalk(xs, n, h) => BindWalk(b :: xs, n, h)
   }
 
-def fuzzMutLine(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int): String =
-  Str.concat("mutate: ", Str.concat(Str.fromInt(killed), Str.concat(" killed, ", Str.concat(Str.fromInt(survived), Str.concat(" survived, ", Str.concat(Str.fromInt(inert), Str.concat(" inert (", Str.concat(Str.fromInt(ran), Str.concat(" of ", Str.concat(Str.fromInt(sites), " sites)"))))))))))
+def fuzzMutLine(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, invalid: Int): String =
+  Str.concat("mutate: ", Str.concat(Str.fromInt(killed), Str.concat(" killed, ", Str.concat(Str.fromInt(survived), Str.concat(" survived, ", Str.concat(Str.fromInt(inert), Str.concat(" inert, ", Str.concat(Str.fromInt(invalid), Str.concat(" invalid (", Str.concat(Str.fromInt(ran), Str.concat(" of ", Str.concat(Str.fromInt(sites), " sites)"))))))))))))
 
 def mutateHead(take: Int, sites: Int, o: Bool): String =
   Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(take), Str.concat(" of ", Str.concat(Str.fromInt(sites), if (o) " residual oracle sites (negate/flip/0-1/arith/drop); idle + corpus replay" else " live-code sites (flip/if/0-1/map/handler); idle + corpus replay"))))

@@ -33,9 +33,30 @@ grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
 "$SCUZZ" fuzz --iterations 16 examples/kernel
 "$SCUZZ" fuzz --iterations 8 examples/scale
 "$SCUZZ" fuzz --iterations 8 examples/fmt
-# examples/tyck and examples/codegen: ci.sh tyck/codegen already run oracles.
-# Fuzzing those packages mutates the compiler path-dep. The next scuzz
-# command then rebuilds the CLI and GitHub cancels the Linux job.
+# Compiler campaigns use a source copy and a fixed executable.
+compiler_campaigns() (
+  campaign_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-compiler-fuzz.XXXXXX")"
+  trap 'status=$?; if [ "$status" -eq 0 ]; then rm -rf "$campaign_dir"; else echo "Compiler campaign artifacts: $campaign_dir" >&2; fi' EXIT
+  cp "$SCUZZ" "$campaign_dir/scuzz"
+  for pkg in syntax compiler tyck codegen; do
+    mkdir -p "$campaign_dir/$pkg"
+    cp "examples/$pkg/scuzz.toml" "$campaign_dir/$pkg/"
+    cp -R "examples/$pkg/src" "$campaign_dir/$pkg/"
+    for claim in "examples/$pkg/"*.scuzz_verify; do
+      if [ -f "$claim" ]; then
+        cp "$claim" "$campaign_dir/$pkg/"
+      fi
+    done
+    if [ -d "examples/$pkg/corpus" ]; then
+      cp -R "examples/$pkg/corpus" "$campaign_dir/$pkg/"
+    fi
+  done
+  "$campaign_dir/scuzz" fuzz --iterations 2 "$campaign_dir/tyck"
+  "$campaign_dir/scuzz" fuzz --iterations 2 "$campaign_dir/codegen"
+)
+if [ "${SCUZZ_COMPILER_FUZZ:-0}" = 1 ]; then
+  compiler_campaigns
+fi
 rm -rf /tmp/bad-seed
 cp -R examples/bad-example /tmp/bad-seed
 rm -rf /tmp/bad-seed/build /tmp/bad-seed/corpus
@@ -170,7 +191,33 @@ grep -v schedule_seed /tmp/scuzz-schedbug/build/fuzz/repro.toml > /tmp/scuzz-sch
 if ! "$SCUZZ" fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
   echo "FIFO replay (no schedule_seed) should pass" && exit 1
 fi
-"$SCUZZ" fuzz --iterations 1 examples/io
+invalid_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-invalid-map.XXXXXX")"
+mkdir -p "$invalid_dir/src"
+cat > "$invalid_dir/scuzz.toml" <<'EOF'
+[package]
+name = "invalid-map"
+EOF
+cat > "$invalid_dir/src/Main.scuzz" <<'EOF'
+def label(count: Signal[Int]): Signal[String] =
+  Signal.map(count, n => Str.fromInt(n))
+
+def unused(): Int =
+  3
+
+@main def main: IO[Unit] =
+  IO.pure(label(Signal.int(2))).map(_ => ())
+EOF
+"$SCUZZ" fuzz --iterations 2 "$invalid_dir"
+grep -qx 'invalid = 1' "$invalid_dir/build/fuzz/summary.toml"
+grep -qx 'killed = 0' "$invalid_dir/build/fuzz/summary.toml"
+grep -qx 'total = 3' "$invalid_dir/build/fuzz/summary.toml"
+grep -qx 'reached = 2' "$invalid_dir/build/fuzz/summary.toml"
+if grep -q '^score =' "$invalid_dir/build/fuzz/summary.toml"; then
+  echo "invalid mutants must not produce a score" && exit 1
+fi
+rm -rf "$invalid_dir"
+"$SCUZZ" fuzz --iterations 2 examples/io
+grep -q '^\[coverage\]' examples/io/build/fuzz/summary.toml
+grep -Eq '^reached = [1-9]' examples/io/build/fuzz/summary.toml
 "$SCUZZ" fuzz --iterations 4 examples/hello
 "$SCUZZ" fuzz --iterations 4 --oracles examples/counter
-

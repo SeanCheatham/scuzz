@@ -1,3 +1,38 @@
+record Payload(value: Int)
+
+enum Choice:
+  case Number(value: Int)
+  case Empty
+
+def composition(n: Int): IO[Unit] =
+  for {
+    mapped <- IO.pure(n).map(x => x + 1).map(x => Str.fromInt(x))
+    _ <- IO.pure(mapped).require(s => s == Str.fromInt(n + 1))
+    changed <- IO.pure("value").flatMap(_ => IO.pure(n)).flatMap(x => IO.pure(x + 2))
+    _ <- IO.pure(changed).require(x => x == n + 2)
+    recordValue <- IO.pure(n).map(x => Payload(x)).map(p => p.value)
+    _ <- IO.pure(recordValue).require(x => x == n)
+    enumValue <- IO.pure(Choice.Number(n)).map(c => c match {
+  case Choice.Number(x) => x
+  case Choice.Empty => 0
+})
+    _ <- IO.pure(enumValue).require(x => x == n)
+    values <- IO.pure(List.map([n], x => Payload(x))).map(xs => List.map(xs, p => p.value))
+    _ <- IO.pure(values).require(xs => xs == [n])
+  } yield ()
+
+def recoverInt(n: Int): IO[Unit] =
+  IO.fail(n).handleErrorWith(e => IO.pure(e + 1)).flatMap(x => IO.pure(x).require(v => v == n + 1)).map(_ => ())
+
+def recoverRecord(n: Int): IO[Unit] =
+  IO.fail(Payload(n)).handleErrorWith(e => IO.pure(e.value)).flatMap(x => IO.pure(x).require(v => v == n)).map(_ => ())
+
+def recoverEnum(n: Int): IO[Unit] =
+  IO.fail(Choice.Number(n)).handleErrorWith(e => IO.pure(e match {
+  case Choice.Number(x) => x
+  case Choice.Empty => 0
+})).flatMap(x => IO.pure(x).require(v => v == n)).map(_ => ())
+
 private def headInt(xs: List[Int]): String =
   List.head(xs) match {
     case Option.Some(n) => Str.fromInt(n)
@@ -157,6 +192,10 @@ private def missKit(): IO[Unit] =
 
 def run(): IO[Unit] =
   for {
+    _ <- composition(7)
+    _ <- recoverInt(7)
+    _ <- recoverRecord(7)
+    _ <- recoverEnum(7)
     _ <- concatKit()
     _ <- sliceKit()
     _ <- searchKit()
