@@ -6,101 +6,100 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  linux-headless:
+  linux-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
-      - name: Installer help + GitHub dry-run
-        run: ./scripts/ci.sh install-dry
-
-      - name: Install clang/make/X11/xvfb + Skia link deps
+      - name: Install compiler dependencies
         run: |
           sudo apt-get update
-          # zlib/bz2: host libs for the Skia CPU prebuilt.
-          sudo apt-get install -y clang make libx11-dev xvfb \
-            zlib1g-dev libbz2-dev libssl-dev libegl1-mesa-dev libgles2-mesa-dev \
-            libgl1-mesa-dri
-
-      - name: Runtime + UI tests
-        run: ./scripts/ci.sh runtime
-
-      - name: Runtime ASan (optional sanitizer; skips if unsupported)
-        run: ./scripts/ci.sh asan
-
-      - name: ffi-skia tests
-        run: ./scripts/ci.sh skia
-
-      - name: Embedder libs
-        run: ./scripts/ci.sh embedders
-
+          sudo apt-get install -y clang make zlib1g-dev libbz2-dev libssl-dev
       - name: Bootstrap product CLI
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/bootstrap.sh
+      - name: Share product CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: scuzz-ci-linux
+          path: examples/cli/build/cli
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Hello world → LLVM → native
-        run: ./scripts/ci.sh hello
-
-      - name: Typecheck oracle
-        run: ./scripts/ci.sh tyck
-
-      - name: Kit catalog
-        run: ./scripts/ci.sh kits
-
-      - name: Codegen emit + oracle
-        run: ./scripts/ci.sh codegen
-
-      - name: Hello via out-dir
-        run: ./scripts/ci.sh hello-outdir
-
-      - name: LLVM IR fixed-point
-        run: ./scripts/ci.sh fixedpoint
-
-      - name: Kernel + IO kits + incremental build
-        run: ./scripts/ci.sh kernel
-
-      - name: Package release + install-from-tarball smoke
+  linux-checks:
+    name: linux-${{ matrix.name }}
+    needs: linux-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: compiler
+            slices: hello tyck kits codegen hello-outdir
+          - name: fixedpoint
+            slices: fixedpoint
+          - name: native
+            slices: install-dry runtime asan skia embedders
+          - name: apps
+            slices: embedders kernel package ui pixels gpu differential new-ui desktop mobile
+          - name: fuzz
+            slices: embedders fuzz
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang make libx11-dev xvfb \
+            zlib1g-dev libbz2-dev libssl-dev libegl1-mesa-dev libgles2-mesa-dev \
+            libgl1-mesa-dri
+      - name: Restore product CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: scuzz-ci-linux
+          path: examples/cli/build
+      - name: Set compiler permissions
+        run: chmod +x examples/cli/build/cli
+      - name: Run check slices
         env:
+          CI_SLICES: ${{ matrix.slices }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/ci.sh package
-
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          read -ra slices <<< "$CI_SLICES"
+          for slice in "${slices[@]}"; do
+            echo "::group::$slice"
+            started=$SECONDS
+            ./scripts/ci.sh "$slice"
+            echo "$slice: $((SECONDS - started)) seconds"
+            echo "::endgroup::"
+          done
       - name: Upload release artifact
+        if: matrix.name == 'apps'
         uses: actions/upload-artifact@v4
         with:
           name: scuzz-linux-x86_64
           path: dist/scuzz-*.tar.gz
           if-no-files-found: error
 
-      - name: Headless UI + golden PNGs
-        run: ./scripts/ci.sh ui
-
-      - name: Pixel goldens (sk_sw software backend)
-        run: ./scripts/ci.sh pixels
-
-      - name: GPU presenter (OpenGL readback)
+  linux-headless:
+    if: always()
+    needs: [linux-build, linux-checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all Linux checks
         env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
-        run: ./scripts/ci.sh gpu
-
-      - name: Differential structural dumps (skia vs sk_sw vs gpu)
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
-        run: ./scripts/ci.sh differential
-
-      - name: Deterministic fuzz (bounded) + repro replay
-        run: ./scripts/ci.sh fuzz
-
-      - name: v0 new --ui path
-        run: ./scripts/ci.sh new-ui
-
-      - name: Desktop peer + X11 embedder (xvfb)
-        run: ./scripts/ci.sh desktop
-
-      - name: Mobile peer + package shells
-        run: ./scripts/ci.sh mobile
+          BUILD_RESULT: ${{ needs.linux-build.result }}
+          CHECK_RESULT: ${{ needs.linux-checks.result }}
+        run: |
+          test "$BUILD_RESULT" = success
+          test "$CHECK_RESULT" = success
 
   # Bounded Darwin coverage on every push/PR. Full packaging stays workflow_dispatch.
   macos-smoke:

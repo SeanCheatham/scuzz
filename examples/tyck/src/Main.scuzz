@@ -1,3 +1,5 @@
+import Parse.Fun
+
 def srcOk(): String =
   """def add(n: Int, m: Int): Int =
   n + m
@@ -328,7 +330,7 @@ def wantFunBody(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: def f body Int does not match declared Int => Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":23,\"end_line\":1,\"end_column\":24}]"
 
 def tyckCore(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcArity(), wantArity()) && tyckDiff(srcRet(), wantRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
+  sourceOffsets() && funLookup() && tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcArity(), wantArity()) && tyckDiff(srcRet(), wantRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
 
 def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit())
@@ -488,6 +490,20 @@ def value(r: Result[Problem, Int]): Int = r match {
   case Result.Err(e) => Str.len(e)
   case Result.Ok(s) => Str.len(s)
 }""", "type mismatch")
+
+def funLookup(): Bool =
+  funLookupDefs(Parse.parseFiles(("A", """def pick(n: Int): Int = n
+def skip(): Int = 0
+def pick(s: String): String = s""") :: ("B", "def pick(): Bool = true") :: []).defs)
+
+def funLookupDefs(defs: List[Fun]): Bool =
+  List.map(Check.findFun(defs, "pick"), d => d.ret) == ["Int", "String", "Bool"] && List.map(Check.findFunMod(defs, "A", "pick"), d => d.ret) == ["Int", "String"] && List.isEmpty(Check.findFun(defs, "missing")) && List.isEmpty(Check.findFunMod(defs, "missing", "pick"))
+
+def sourceOffsets(): Bool =
+  List.map(List.range(0, 8), off => Check.lineCol("""aé
+
+雪r
+z""", off)) == [(1, 1), (1, 2), (1, 3), (2, 1), (3, 1), (3, 2), (3, 3), (4, 1)] && Check.lineCol("", 0) == (1, 1) && Check.lineCol("a", 5) == (1, 2)
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else Str.concat("tyck-bad ", dumpFail()))

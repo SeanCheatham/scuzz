@@ -15,6 +15,7 @@ record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bo
 import Manifest.Man
 import Manifest.UiMan
 import Parse.En
+import Parse.Prog
 
 def compileSrc(src: String): Build =
   compileSrc2(Check.check(src), src)
@@ -167,10 +168,13 @@ def compileFiles(toml: String, files: List[(String, String)], outDir: String, cl
   compileFiles2(Manifest.parse(toml), files, outDir, clang, lib)
 
 def compileFiles2(m: Man, files: List[(String, String)], outDir: String, clang: String, lib: String): PkgOut =
-  if (!m.ok) PkgOut(false, "", "", "", "", m.err) else compileFilesChecked(m, files, Check.checkFiles(files), outDir, clang, lib)
+  if (!m.ok) PkgOut(false, "", "", "", "", m.err) else compileFilesParsed(m, files, Parse.parseFiles(files), outDir, clang, lib)
 
-def compileFilesChecked(m: Man, files: List[(String, String)], diags: String, outDir: String, clang: String, lib: String): PkgOut =
-  if (diags != "[]") PkgOut(false, m.name, "", "", "", diags) else compileFilesOk(m, Emit.emitFullFiles(files), outDir, clang, lib)
+def compileFilesParsed(m: Man, files: List[(String, String)], p: Prog, outDir: String, clang: String, lib: String): PkgOut =
+  compileFilesChecked(m, files, p, Check.check3(files, Check.checkProgOwn(p, [])), outDir, clang, lib)
+
+def compileFilesChecked(m: Man, files: List[(String, String)], p: Prog, diags: String, outDir: String, clang: String, lib: String): PkgOut =
+  if (diags != "[]") PkgOut(false, m.name, "", "", "", diags) else compileFilesOk(m, Str.concat(Emit.preamble(), Emit.emitFilesGot(p, Emit.internFiles(files, []), files)), outDir, clang, lib)
 
 def compileFilesOk(m: Man, ll: String, outDir: String, clang: String, lib: String): PkgOut =
   PkgOut(true, m.name, ll, llName(outDir, m.name), linkLine(clang, llName(outDir, m.name), lib, exeName(outDir, m.name)), "[]")

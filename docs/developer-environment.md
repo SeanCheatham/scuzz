@@ -64,7 +64,7 @@ Same slices as GitHub. List them, then run the required PR path:
 
 `pr` runs macos-smoke, oracles, kernel, ui, and fuzz. A local run wipes example `build/` dirs except `examples/cli/build`. That wipe stops a rebuilt CLI from a fingerprint hit on a stale `.ll`. GitHub sets `CI=true` and skips the wipe.
 
-Full Linux job: `./scripts/ci.sh linux-headless`. Apt install and artifact upload stay in `.github/workflows/ci.yml`.
+Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI builds the product CLI once. Five jobs use that artifact to run compiler, fixed-point, native, app, and fuzz checks in separate checkouts. The `linux-headless` check requires all five jobs and the build to pass. Each slice prints its elapsed time. A new PR update cancels its older CI run. Apt install and artifact upload stay in `.github/workflows/ci.yml`.
 
 | Env | Paint |
 | --- | --- |
