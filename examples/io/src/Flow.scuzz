@@ -1,5 +1,9 @@
 record Payload(value: Int)
 
+record CopyPayload(value: Int, enabled: Bool, ratio: Float, label: String, child: Payload)
+
+record CopyEnvelope(payload: CopyPayload)
+
 enum Choice:
   case Number(value: Int)
   case Empty
@@ -23,6 +27,22 @@ def composition(n: Int): IO[Unit] =
 
 def recoverInt(n: Int): IO[Unit] =
   IO.fail(n).handleErrorWith(e => IO.pure(e + 1)).flatMap(x => IO.pure(x).require(v => v == n + 1)).map(_ => ())
+
+def copyPayload(n: Int, enabled: Bool, ratio: Float, label: String): IO[Unit] =
+  for {
+    original = CopyPayload(0, false, 0.0, "original", Payload(n))
+    changed = original.copy(value = n, enabled = enabled, ratio = ratio, label = label)
+    positional = original.copy(n + 1)
+    single = Payload(0).copy(value = n)
+    unchanged = changed.copy()
+    _ <- IO.pure(changed).require(p => p.value == n && p.enabled == enabled && p.ratio == ratio && p.label == label && p.child.value == n)
+    _ <- IO.pure(positional).require(p => p.value == n + 1 && !p.enabled && p.label == "original")
+    _ <- IO.pure(single).require(p => p.value == n)
+    _ <- IO.pure(unchanged).require(p => p == changed)
+    _ <- IO.pure(CopyPayload(n, enabled, ratio, label, Payload(n)).child.value).require(v => v == n)
+    _ <- IO.pure(CopyEnvelope(changed).payload.child).require(p => p.value == n)
+    _ <- IO.pure(original).require(p => p.value == 0 && !p.enabled && p.ratio == 0.0 && p.label == "original" && p.child.value == n)
+  } yield ()
 
 def recoverRecord(n: Int): IO[Unit] =
   IO.fail(Payload(n)).handleErrorWith(e => IO.pure(e.value)).flatMap(x => IO.pure(x).require(v => v == n)).map(_ => ())
@@ -196,6 +216,7 @@ def run(): IO[Unit] =
     _ <- recoverInt(7)
     _ <- recoverRecord(7)
     _ <- recoverEnum(7)
+    _ <- copyPayload(7, true, 1.5, "updated")
     _ <- concatKit()
     _ <- sliceKit()
     _ <- searchKit()

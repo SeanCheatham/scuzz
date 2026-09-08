@@ -73,7 +73,7 @@ Do not start these before thesis-critical gaps close.
 - **Web apps** — not a current target.
 - **HKT and environment `R`** — Thin generics. No `F[_]` beyond `IO`. No `ZIO[R, E, A]`.
 - **Oracle idioms in `guide.md`** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work. Authors write `Timeline => Verdict` and drive oracles in `*.scuzz_verify`.
-- **Emit fallbacks when Check returns an empty type** — Emit reads `Check.typeOfEns`. It does not invent `Any`. IO composition and `IO.pure` use checked payload types. Int, String, record, enum, and List composition proofs live in `examples/io`. Residual: record `.copy` scalar arguments and named IO receivers need broader native proofs. An empty checker type stays empty. Direction: keep types on the checked tree; do not guess from SSA names.
+- **Emit fallbacks when Check returns an empty type** — Emit reads `Check.typeOfEns`. It does not invent `Any`. IO composition and `IO.pure` use checked payload types. Multi-field constructors and record `.copy` use checked argument types for scalar boxing. Int, String, record, enum, and List composition proofs live in `examples/io`. Copy proofs cover Int, Bool, Float, pointer fields, and an unchanged source record. Single-field record patterns keep their field types. Nested field access reads the checked record layout and preserves values from temporary receivers. Residual: named IO receivers need broader native proofs. Some emitter helpers still use scalar fallbacks when the checker type is empty. Direction: keep types on the checked tree; do not guess from SSA names.
 
 ### Dogfood IDE
 
