@@ -214,6 +214,10 @@ SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child) {
 SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child) {
   return sz_view_min_size((int)w, (int)h, child);
 }
+
+SzView *sz_lang_view_max_size(int64_t w, int64_t h, SzView *child) {
+  return sz_view_max_size((int)w, (int)h, child);
+}
 SzView *sz_lang_view_text_color(int64_t argb, SzView *child) {
   return sz_view_text_color((uint32_t)argb, child);
 }

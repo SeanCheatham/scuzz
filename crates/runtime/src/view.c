@@ -1681,7 +1681,9 @@ static int editor_line_count(const char *s) {
   return n;
 }
 
-static float editor_gutter_w(const SzView *v, float font_px) {
+static float scale_px(const SzTheme *theme, float v);
+
+static float editor_gutter_w(const SzView *v, const SzTheme *theme) {
   int lines;
   int digits = 1;
   int n;
@@ -1694,8 +1696,8 @@ static float editor_gutter_w(const SzView *v, float font_px) {
     n /= 10;
     digits++;
   }
-  cell = sk_font_mono_cell(font_px);
-  return (float)digits * cell + 4.f;
+  cell = sk_font_mono_cell(theme->font_px);
+  return (float)digits * cell + scale_px(theme, 4.f);
 }
 
 static void hist_clear(SzEditHist **hist, int *n, int *cap) {
@@ -1790,7 +1792,7 @@ float sz_view_editor_gutter_w(const SzView *view) {
   const SzTheme *theme = sz_theme_default();
   if (!view || view->kind != SZ_VIEW_EDITOR)
     return 0.f;
-  return editor_gutter_w(view, theme->font_px);
+  return editor_gutter_w(view, theme);
 }
 
 int sz_view_editor_set_diagnostics(SzView *view, const int *lines,
@@ -2269,7 +2271,7 @@ static void resolve_text(const SzView *v, char *buf, size_t buflen) {
   if (!buf || buflen == 0)
     return;
   buf[0] = '\0';
-  if (v->sig_int) {
+  if (v->kind == SZ_VIEW_TEXT && v->sig_int) {
     snprintf(buf, buflen, "%s%lld", v->prefix ? v->prefix : "",
              (long long)sz_signal_int_get(v->sig_int));
   } else if (v->sig_str) {
@@ -2486,8 +2488,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     resolve_text(v, buf, sizeof buf);
     v->frame.w = text_width(buf, font) + theme->pad * 2.f;
     v->frame.h = theme->control_h;
-    if (v->frame.w < 48.f)
-      v->frame.w = 48.f;
+    if (v->frame.w < scale_px(theme, 48.f))
+      v->frame.w = scale_px(theme, 48.f);
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
@@ -2499,7 +2501,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.w = max_w;
     break;
   case SZ_VIEW_VERTICAL_DIVIDER:
-    v->frame.w = 8.f;
+    v->frame.w = scale_px(theme, 8.f);
     v->frame.h = theme->control_h;
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
@@ -2508,13 +2510,13 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   case SZ_VIEW_CHECKBOX:
   case SZ_VIEW_RADIO: {
-    float box = font + 4.f;
+    float box = font + scale_px(theme, 4.f);
     float gap = layout_gap(theme);
     resolve_text(v, buf, sizeof buf);
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     v->frame.h = theme->control_h;
     v->frame.w = box + gap + text_width(buf, font);
     if (v->frame.w < box)
@@ -2524,14 +2526,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   }
   case SZ_VIEW_SWITCH: {
-    float box = font + 4.f;
+    float box = font + scale_px(theme, 4.f);
     float gap = layout_gap(theme);
     float track;
     resolve_text(v, buf, sizeof buf);
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     track = box * 2.f;
     v->frame.h = theme->control_h;
     v->frame.w = track + gap + text_width(buf, font);
@@ -2554,13 +2556,13 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   case SZ_VIEW_FILTER_CHIP:
   case SZ_VIEW_INPUT_CHIP: {
-    float box = font + 4.f;
+    float box = font + scale_px(theme, 4.f);
     float gap = layout_gap(theme);
     resolve_text(v, buf, sizeof buf);
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     v->frame.w = theme->pad * 2.f + box + gap + text_width(buf, font);
     v->frame.h = theme->control_h;
     if (v->frame.w < 32.f)
@@ -2603,19 +2605,19 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   case SZ_VIEW_SLIDER:
     v->frame.w = max_w > 0 ? max_w : 120.f;
-    if (v->frame.w < 48.f)
-      v->frame.w = 48.f;
+    if (v->frame.w < scale_px(theme, 48.f))
+      v->frame.w = scale_px(theme, 48.f);
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     v->frame.h = theme->control_h;
     break;
   case SZ_VIEW_PROGRESS:
     v->frame.w = max_w > 0 ? max_w : 120.f;
-    if (v->frame.w < 48.f)
-      v->frame.w = 48.f;
+    if (v->frame.w < scale_px(theme, 48.f))
+      v->frame.w = scale_px(theme, 48.f);
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
-    v->frame.h = 8.f;
+    v->frame.h = scale_px(theme, 8.f);
     break;
   case SZ_VIEW_CIRCULAR_PROGRESS:
     v->frame.w = theme->control_h;
@@ -2635,7 +2637,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   case SZ_VIEW_DIVIDER:
     v->frame.w = max_w > 0 ? max_w : 120.f;
-    v->frame.h = 8.f;
+    v->frame.h = scale_px(theme, 8.f);
     break;
   case SZ_VIEW_EXPANSION_TILE: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
@@ -3216,7 +3218,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_SPLIT: {
     SzView *left = v->child_count > 0 ? v->children[0] : NULL;
     SzView *right = v->child_count > 1 ? v->children[1] : NULL;
-    float handle = 6.f;
+    float handle = scale_px(theme, 6.f);
     float avail = max_w > handle ? max_w - handle : 0.f;
     float n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 50);
     float lw = avail * (n / 100.f);
@@ -3344,7 +3346,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         if (min_h > 0.f && max_h > 0.f && min_h >= max_h - 0.5f &&
             max_h > pad * 2.f)
           child_max_h = max_h - pad * 2.f;
-        layout_constrained(v->scroll_child, x + pad - v->scroll_x, y + pad,
+        layout_constrained(v->scroll_child, x + pad - scale_px(theme, v->scroll_x), y + pad,
                            box_loose(0.f, child_max_h), theme);
         ch_w = v->scroll_child->frame.w;
         ch_h = v->scroll_child->frame.h;
@@ -3357,7 +3359,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       float inner_w = max_w - pad * 2.f;
       float vh;
       if (v->pref_h > 0)
-        vh = v->pref_h;
+        vh = scale_px(theme, v->pref_h);
       else if (max_h > 0)
         vh = max_h;
       else if (min_h > 0)
@@ -3370,7 +3372,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.h = vh;
       if (v->scroll_child) {
         /* Height 0 = unbounded. A fake large max makes Expanded rows fill it. */
-        layout_constrained(v->scroll_child, x + pad, y + pad - v->scroll_y,
+        layout_constrained(v->scroll_child, x + pad, y + pad - scale_px(theme, v->scroll_y),
                            box_loose(inner_w > 0 ? inner_w : max_w, 0.f),
                            theme);
       }
@@ -4115,6 +4117,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     if (offset > face.h * 0.25f)
       offset = face.h * 0.25f;
     resolve_text(v, buf, sizeof buf);
+    if (text_width(buf, theme->font_px) > v->frame.w - theme->pad * 2.f)
+      ellipsize_to_width(buf, sizeof buf, v->frame.w - theme->pad * 2.f,
+                        theme->font_px);
     /* The shadow stays inside the control bounds. */
     paint_rect(c, face.x + offset, face.y + offset,
                face.w - offset, face.h - offset, theme->border);
@@ -4134,6 +4139,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_OUTLINED_BUTTON: {
     SzRect br = v->frame;
     resolve_text(v, buf, sizeof buf);
+    if (text_width(buf, theme->font_px) > v->frame.w - theme->pad * 2.f)
+      ellipsize_to_width(buf, sizeof buf, v->frame.w - theme->pad * 2.f,
+                        theme->font_px);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_border(c, br, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
     tx = v->frame.x + theme->pad;
@@ -4143,6 +4151,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
   case SZ_VIEW_TEXT_BUTTON:
     resolve_text(v, buf, sizeof buf);
+    if (text_width(buf, theme->font_px) > v->frame.w - theme->pad * 2.f)
+      ellipsize_to_width(buf, sizeof buf, v->frame.w - theme->pad * 2.f,
+                        theme->font_px);
     tx = v->frame.x + theme->pad;
     ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
     paint_string(c, buf, tx, ty, theme->foreground, theme->font_px);
@@ -4188,15 +4199,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_CHECKBOX: {
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
     int on;
     SzRect br;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     gap = layout_gap(theme);
     bx = v->frame.x;
     by = v->frame.y + (v->frame.h - box) * 0.5f;
@@ -4216,15 +4227,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_SWITCH: {
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
     float tw, th, thumb, tx;
     int on;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     gap = layout_gap(theme);
     tw = box * 2.f;
     th = box;
@@ -4232,8 +4243,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     by = v->frame.y + (v->frame.h - th) * 0.5f;
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     paint_rect(c, bx, by, tw, th, on ? theme->primary : theme->muted);
-    thumb = th > 4.f ? th - 4.f : th;
-    tx = on ? bx + tw - thumb - 2.f : bx + 2.f;
+    thumb = th > scale_px(theme, 4.f) ? th - scale_px(theme, 4.f) : th;
+    tx = on ? bx + tw - thumb - scale_px(theme, 2.f) : bx + scale_px(theme, 2.f);
     paint_rect(c, tx, by + (th - thumb) * 0.5f, thumb, thumb, theme->surface);
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, bx + tw + gap,
@@ -4289,13 +4300,13 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     SzRect br = v->frame;
     SzRect mark;
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     gap = layout_gap(theme);
     resolve_text(v, buf, sizeof buf);
     if (on)
@@ -4325,12 +4336,12 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     SzRect br = v->frame;
     SzRect mark;
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float bx, by;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     resolve_text(v, buf, sizeof buf);
     if (on)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h,
@@ -4363,15 +4374,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_CHECKBOX_LIST_TILE: {
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
     int on;
     SzRect br;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     gap = layout_gap(theme);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     bx = v->frame.x + theme->pad;
@@ -4392,14 +4403,14 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_SWITCH_LIST_TILE: {
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float tw, th, thumb, tx;
     float bx, by;
     int on;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     tw = box * 2.f;
     th = box;
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
@@ -4409,26 +4420,29 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     by = v->frame.y + (v->frame.h - th) * 0.5f;
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     paint_rect(c, bx, by, tw, th, on ? theme->primary : theme->muted);
-    thumb = th > 4.f ? th - 4.f : th;
-    tx = on ? bx + tw - thumb - 2.f : bx + 2.f;
+    thumb = th > scale_px(theme, 4.f) ? th - scale_px(theme, 4.f) : th;
+    tx = on ? bx + tw - thumb - scale_px(theme, 2.f) : bx + scale_px(theme, 2.f);
     paint_rect(c, tx, by + (th - thumb) * 0.5f, thumb, thumb, theme->surface);
     resolve_text(v, buf, sizeof buf);
+    if (text_width(buf, theme->font_px) > bx - v->frame.x - theme->pad - theme->gap)
+      ellipsize_to_width(buf, sizeof buf, bx - v->frame.x - theme->pad - theme->gap,
+                        theme->font_px);
     paint_string(c, buf, v->frame.x + theme->pad,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  theme->foreground, theme->font_px);
     break;
   }
   case SZ_VIEW_RADIO_LIST_TILE: {
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
     float inset;
     int on;
     SzRect br;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     gap = layout_gap(theme);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     bx = v->frame.x + theme->pad;
@@ -4439,7 +4453,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     br.h = box;
     paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
     on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
-    inset = box > 8.f ? 3.f : 1.f;
+    inset = box > scale_px(theme, 8.f) ? scale_px(theme, 3.f) : scale_px(theme, 1.f);
     if (on)
       paint_rect(c, bx + inset, by + inset, box - inset * 2.f, box - inset * 2.f,
                  theme->primary);
@@ -4544,16 +4558,16 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_RADIO: {
-    float box = theme->font_px + 4.f;
+    float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
     float inset;
     int on;
     SzRect br;
-    if (box < 12.f)
-      box = 12.f;
-    if (box > theme->control_h - 4.f)
-      box = theme->control_h - 4.f;
+    if (box < scale_px(theme, 12.f))
+      box = scale_px(theme, 12.f);
+    if (box > theme->control_h - scale_px(theme, 4.f))
+      box = theme->control_h - scale_px(theme, 4.f);
     gap = layout_gap(theme);
     bx = v->frame.x;
     by = v->frame.y + (v->frame.h - box) * 0.5f;
@@ -4563,7 +4577,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     br.h = box;
     paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
     on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
-    inset = box > 8.f ? 3.f : 1.f;
+    inset = box > scale_px(theme, 8.f) ? scale_px(theme, 3.f) : scale_px(theme, 1.f);
     if (on)
       paint_rect(c, bx + inset, by + inset, box - inset * 2.f, box - inset * 2.f,
                  theme->primary);
@@ -4574,8 +4588,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_SLIDER: {
-    float track_h = 4.f;
-    float thumb = 12.f;
+    float track_h = scale_px(theme, 4.f);
+    float thumb = scale_px(theme, 12.f);
     float n;
     float tx;
     float ty;
@@ -4635,35 +4649,38 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
   case SZ_VIEW_TEXT_FIELD: {
     const char *shown;
+    SzRect prev_clip = g_clip;
+    int prev_on = g_clip_on;
+    SzRect next = v->frame;
+    if (g_clip_on && !rects_intersect(g_clip, v->frame, &next)) {
+      next.w = 0.f;
+      next.h = 0.f;
+    }
+    g_clip = next;
+    g_clip_on = 1;
+    sk_canvas_save(c);
+    sk_canvas_clip_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h);
     resolve_text(v, buf, sizeof buf);
     shown = buf[0] ? buf : (v->placeholder ? v->placeholder : "");
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     /* border */
-    {
-      SkPaint *p = sk_paint_new();
-      if (p) {
-        sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(
-            v->focused ? theme->foreground : theme->border)));
-        sk_paint_set_stroke(p, 1);
-        sk_paint_set_stroke_width(p, v->focused ? 2.f : 1.f);
-        sk_canvas_draw_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, p);
-        sk_paint_delete(p);
-      }
-    }
+    paint_border(c, v->frame,
+                 (int)(scale_px(theme, v->focused ? 2.f : 1.f) + 0.5f),
+                 v->focused ? theme->foreground : theme->border);
     if (buf[0] && field_has_sel(v)) {
       int a, b;
       float x0, x1, y, h;
       field_sel_bounds(v, &a, &b);
-      x0 = v->frame.x + k_text_field_inset + span_width(buf, 0, a, theme->font_px);
-      x1 = v->frame.x + k_text_field_inset + span_width(buf, 0, b, theme->font_px);
-      if (x0 > v->frame.x + v->frame.w - 2.f)
-        x0 = v->frame.x + v->frame.w - 2.f;
-      if (x1 > v->frame.x + v->frame.w - 2.f)
-        x1 = v->frame.x + v->frame.w - 2.f;
+      x0 = v->frame.x + scale_px(theme, k_text_field_inset) + span_width(buf, 0, a, theme->font_px);
+      x1 = v->frame.x + scale_px(theme, k_text_field_inset) + span_width(buf, 0, b, theme->font_px);
+      if (x0 > v->frame.x + v->frame.w - scale_px(theme, 2.f))
+        x0 = v->frame.x + v->frame.w - scale_px(theme, 2.f);
+      if (x1 > v->frame.x + v->frame.w - scale_px(theme, 2.f))
+        x1 = v->frame.x + v->frame.w - scale_px(theme, 2.f);
       if (x1 > x0) {
         h = theme->font_px;
-        if (h > v->frame.h - 4.f)
-          h = v->frame.h - 4.f;
+        if (h > v->frame.h - scale_px(theme, 4.f))
+          h = v->frame.h - scale_px(theme, 4.f);
         if (h < 1.f)
           h = 1.f;
         y = v->frame.y + (v->frame.h - h) * 0.5f;
@@ -4672,7 +4689,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     }
     {
       const char *pre = edit_preedit(v);
-      float base_x = v->frame.x + k_text_field_inset;
+      float base_x = v->frame.x + scale_px(theme, k_text_field_inset);
       float base_y = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
       if (pre[0] && buf[0]) {
         int caret = field_caret_clamped(v);
@@ -4703,6 +4720,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       if (caret.w > 0.f)
         paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->foreground);
     }
+    sk_canvas_restore(c);
+    g_clip = prev_clip;
+    g_clip_on = prev_on;
     break;
   }
   case SZ_VIEW_EDITOR: {
@@ -4710,11 +4730,11 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     int n, i, line, a, b;
     float font_px = theme->font_px;
     float line_h = text_line_h(theme, font_px);
-    float inset = k_text_field_inset;
-    float gutter = editor_gutter_w(v, font_px);
+    float inset = scale_px(theme, k_text_field_inset);
+    float gutter = editor_gutter_w(v, theme);
     float text_w = v->frame.w - gutter;
-    float base_x = v->frame.x + gutter + inset - v->scroll_x;
-    float base_y = v->frame.y + inset - v->scroll_y;
+    float base_x = v->frame.x + gutter + inset - scale_px(theme, v->scroll_x);
+    float base_y = v->frame.y + inset - scale_px(theme, v->scroll_y);
     SzRect prev_clip = g_clip;
     int prev_on = g_clip_on;
     SzRect next;
@@ -4737,17 +4757,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     if (gutter > 0.f)
       paint_rect(c, v->frame.x, v->frame.y, gutter, v->frame.h, theme->background);
-    {
-      SkPaint *p = sk_paint_new();
-      if (p) {
-        sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(
-            v->focused ? theme->foreground : theme->border)));
-        sk_paint_set_stroke(p, 1);
-        sk_paint_set_stroke_width(p, v->focused ? 2.f : 1.f);
-        sk_canvas_draw_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, p);
-        sk_paint_delete(p);
-      }
-    }
+    paint_border(c, v->frame,
+                 (int)(scale_px(theme, v->focused ? 2.f : 1.f) + 0.5f),
+                 v->focused ? theme->foreground : theme->border);
     field_sel_bounds(v, &a, &b);
     {
       int first_vis;
@@ -4758,7 +4770,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       int has_br;
       if (line_h < 1.f)
         line_h = 1.f;
-      first_vis = (int)(v->scroll_y / line_h);
+      first_vis = (int)(scale_px(theme, v->scroll_y) / line_h);
       if (first_vis < 0)
         first_vis = 0;
       last_vis = first_vis + (int)(v->frame.h / line_h) + 2;
@@ -4833,21 +4845,21 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                 float caret_x =
                     base_x + editor_span_width(s, start, caret, font_px);
                 paint_editor_line_lsp(c, v, s, line, start, caret, base_x,
-                                     top + font_px, font_px, v->scroll_x, tw,
+                                     top + font_px, font_px, scale_px(theme, v->scroll_x), tw,
                                      theme);
                 paint_preedit_run(c, pre, caret_x, top + font_px, pre_w,
                                   theme->foreground, font_px, 1);
                 paint_editor_line_lsp(c, v, s, line, caret, end, base_x + pre_w,
-                                     top + font_px, font_px, v->scroll_x, tw,
+                                     top + font_px, font_px, scale_px(theme, v->scroll_x), tw,
                                      theme);
               } else {
                 paint_editor_line_lsp(c, v, s, line, start, end, base_x,
-                                     top + font_px, font_px, v->scroll_x, tw,
+                                     top + font_px, font_px, scale_px(theme, v->scroll_x), tw,
                                      theme);
               }
             }
             paint_editor_inlays(c, v, line, base_x, top + font_px, font_px,
-                               v->scroll_x, text_w > 8.f ? text_w : 8.f, theme);
+                               scale_px(theme, v->scroll_x), text_w > 8.f ? text_w : 8.f, theme);
           }
           vis++;
         }
@@ -5012,7 +5024,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       paint_node(v->children[i], c, theme);
     break;
   case SZ_VIEW_SPLIT: {
-    float handle = 6.f;
+    float handle = scale_px(theme, 6.f);
     float n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 50);
     float hx;
     for (i = 0; i < v->child_count; i++)
@@ -5417,26 +5429,26 @@ static SzRect editor_caret_rect(SzView *f, const SzTheme *theme) {
   s = field_cstr(f);
   font_px = theme->font_px;
   line_h = text_line_h(theme, font_px);
-  inset = k_text_field_inset;
+  inset = scale_px(theme, k_text_field_inset);
   {
-    float gutter = editor_gutter_w(f, font_px);
+    float gutter = editor_gutter_w(f, theme);
     c = field_caret_clamped(f);
     line_bounds_at_off(s, c, &ls, &le);
     (void)le;
     line = line_index_at_off(s, c);
     x = f->frame.x + gutter + inset + editor_span_width(s, ls, c, font_px) -
-        f->scroll_x;
+        scale_px(theme, f->scroll_x);
     {
       const char *pre = edit_preedit(f);
       if (pre[0])
         x += editor_span_width(pre, 0, (int)strlen(pre), font_px);
     }
     y = f->frame.y + inset + (float)editor_vis_row(f, line) * line_h -
-        f->scroll_y;
-    if (x > f->frame.x + f->frame.w - 2.f)
-      x = f->frame.x + f->frame.w - 2.f;
-    if (x < f->frame.x + gutter + 1.f)
-      x = f->frame.x + gutter + 1.f;
+        scale_px(theme, f->scroll_y);
+    if (x > f->frame.x + f->frame.w - scale_px(theme, 2.f))
+      x = f->frame.x + f->frame.w - scale_px(theme, 2.f);
+    if (x < f->frame.x + gutter + scale_px(theme, 1.f))
+      x = f->frame.x + gutter + scale_px(theme, 1.f);
   }
   if (y + line_h > f->frame.y + f->frame.h)
     y = f->frame.y + f->frame.h - line_h;
@@ -5449,7 +5461,7 @@ static SzRect editor_caret_rect(SzView *f, const SzTheme *theme) {
     h = 1.f;
   z.x = x;
   z.y = y;
-  z.w = 1.f;
+  z.w = scale_px(theme, 1.f);
   z.h = h;
   return z;
 }
@@ -5466,7 +5478,7 @@ static void editor_scroll_to_caret(SzView *v) {
   line_h = text_line_h(theme, font_px);
   inset = k_text_field_inset;
   {
-    float gutter = editor_gutter_w(v, font_px);
+    float gutter = editor_gutter_w(v, theme);
     float text_w = v->frame.w - gutter;
     c = field_caret_clamped(v);
     line_bounds_at_off(s, c, &ls, &le);
@@ -5509,25 +5521,25 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   n = (int)strlen(buf);
   if (c < n)
     buf[c] = '\0';
-  x = f->frame.x + k_text_field_inset + text_width(buf, theme->font_px);
+  x = f->frame.x + scale_px(theme, k_text_field_inset) + text_width(buf, theme->font_px);
   {
     const char *pre = edit_preedit(f);
     if (pre[0])
       x += text_width(pre, theme->font_px);
   }
-  if (x > f->frame.x + f->frame.w - 2.f)
-    x = f->frame.x + f->frame.w - 2.f;
-  if (x < f->frame.x + k_text_field_inset)
-    x = f->frame.x + k_text_field_inset;
+  if (x > f->frame.x + f->frame.w - scale_px(theme, 2.f))
+    x = f->frame.x + f->frame.w - scale_px(theme, 2.f);
+  if (x < f->frame.x + scale_px(theme, k_text_field_inset))
+    x = f->frame.x + scale_px(theme, k_text_field_inset);
   h = theme->font_px;
-  if (h > f->frame.h - 4.f)
-    h = f->frame.h - 4.f;
+  if (h > f->frame.h - scale_px(theme, 4.f))
+    h = f->frame.h - scale_px(theme, 4.f);
   if (h < 1.f)
     h = 1.f;
   y = f->frame.y + (f->frame.h - h) * 0.5f;
   z.x = x;
   z.y = y;
-  z.w = 1.f;
+  z.w = scale_px(theme, 1.f);
   z.h = h;
   return z;
 }
@@ -5578,7 +5590,7 @@ static int caret_offset_at_xy(SzView *f, float x, float y) {
   line_h = text_line_h(theme, font_px);
   inset = k_text_field_inset;
   {
-    float gutter = editor_gutter_w(f, font_px);
+    float gutter = editor_gutter_w(f, theme);
     local_y = y - f->frame.y - inset + f->scroll_y;
     local_x = x - f->frame.x - gutter - inset + f->scroll_x;
   }
@@ -5604,7 +5616,7 @@ static int editor_toggle_fold_at(SzView *v, float x, float y) {
   font_px = theme->font_px;
   line_h = text_line_h(theme, font_px);
   inset = k_text_field_inset;
-  gutter = editor_gutter_w(v, font_px);
+  gutter = editor_gutter_w(v, theme);
   if (x >= v->frame.x + gutter)
     return 0;
   if (line_h < 1.f)

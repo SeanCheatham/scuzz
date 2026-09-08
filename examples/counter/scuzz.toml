@@ -7,5 +7,5 @@ shared = { path = "../shared" }
 
 [ui]
 default_runtime = "headless"
-headless_size = [200, 120]
+headless_size = [320, 200]
 headless_scale = 1.0

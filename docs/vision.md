@@ -282,11 +282,24 @@ into that shadow. Keyboard focus has a light and dark inset border. Text fields
 and editors use dark carets. Editor selection and bracket marks use a yellow
 background. Headless, Desktop, and Mobile use the same paint path.
 
-Keep the current font metrics and control sizes for this slice. A larger body
-font, heading styles, app theme selection, dark mode, and motion settings remain
-open. Prove those changes with forms and the editor. Keep accent colors separate
-from text selection colors. App content can use the existing explicit style
-constructors.
+Body text uses 14 logical pixels with a 20 pixel line height. Default controls
+have a 40 pixel height. Use `View.fontSize(28, ...)` for a screen title and
+`View.fontSize(20, ...)` for a section heading. These sizes use the same font and
+measurement path as body text. Control labels keep the default body size.
+
+Use `View.wrap` for action groups that must fit narrow windows. Use
+`View.maxSize` to cap a form field width. Its compiler call uses the shared
+runtime size constraint. Studio puts its form and preferences in one scroll
+view. The editor uses outlined secondary actions and text buttons for files.
+Primary actions retain the yellow fill. Text fields clip content to their bounds. Button labels use an ellipsis when
+they exceed the available width. Their accessibility labels stay complete.
+Text insets, carets, and scroll offsets scale with the display.
+State controls show their text labels. Indexed scroll scripts move the selected
+scroll container even when it contains another scroll container.
+
+App theme selection, dark mode, and motion settings remain open. Keep accent
+colors separate from text selection colors. App content can use the existing
+explicit style constructors.
 
 ### Layout model
 

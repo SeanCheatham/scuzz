@@ -53,8 +53,6 @@ static void script_parse_scroll(const char *rest, int *index, float *dy) {
 static void script_scroll(SzUiSession *session, int index, float dy) {
   SzView *scrolls[64];
   int count = sz_ui_collect_scrolls(session, scrolls, 64);
-  SzInputEvent ev;
-  SzRect fr;
   int n = index < 0 ? 0 : index;
   if (count <= 0 || n >= count) {
     if (index < 0)
@@ -63,13 +61,7 @@ static void script_scroll(SzUiSession *session, int index, float dy) {
       fprintf(stderr, "scuzz: script scroll %d skipped (%d scrolls)\n", n, count);
     return;
   }
-  fr = sz_view_frame(scrolls[n]);
-  memset(&ev, 0, sizeof ev);
-  ev.kind = SZ_INPUT_SCROLL;
-  ev.x = fr.x + fr.w * 0.5f;
-  ev.y = fr.y + fr.h * 0.5f;
-  ev.dy = dy;
-  if (!sz_ui_inject_sync(session, &ev))
+  if (!sz_ui_scroll_index(session, n, dy))
     fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
 }
 

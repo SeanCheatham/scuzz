@@ -86,6 +86,16 @@ supplies dark text. `Theme.accent()` supplies dark rust. Use the existing `View`
 style constructors for explicit app colors. The default style is the same in
 Headless, Desktop, and Mobile.
 
+Body text uses 14 logical pixels. Controls have a 40 pixel default height.
+Use `View.fontSize(28, View.text("Title"))` for a screen title. Use 20 for a
+section heading. `View.fontSize` changes text nodes, not control labels.
+Use `View.wrap` for action groups. Put a long form in
+`View.column(View.expanded(View.scroll(form)))` to fill the window.
+`View.maxSize(240, 0, View.textField(draft, "Item"))` caps a field at 240
+logical pixels. A smaller parent constraint still wins. Use
+`View.outlinedButton` for secondary actions and `View.textButton` for
+navigation actions.
+
 `Ui.run(_ => view)` under Headless: mount → optional scripted tap → snapshot → unmount. Desktop stays open when `[ui].default_runtime = "desktop"` (`examples/studio`; close the window to quit). The CLI sets `SCUZZ_UI_RUNTIME` from that key. `--headless` forces Headless. The factory re-runs construction on stamp-watch. Create Signals outside the factory. `Ui.run` does not take a prebuilt View. After a Desktop session, replay the recorded script Headless:
 
 ```bash

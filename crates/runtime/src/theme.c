@@ -12,8 +12,8 @@ static const SzTheme k_default_theme = {
     .selection = 0xFFE8EF48u,
     .pad = 12.f,
     .gap = 8.f,
-    .control_h = 32.f,
-    .font_px = 8.f,
+    .control_h = 40.f,
+    .font_px = 14.f,
 };
 
 const SzTheme *sz_theme_default(void) { return &k_default_theme; }
