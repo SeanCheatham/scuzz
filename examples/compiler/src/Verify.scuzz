@@ -1097,19 +1097,19 @@ def fuzzHead(iterations: Int, corpus: Int, sites: Int): String =
   Str.concat(if (iterations <= 0) Str.concat("scuzz fuzz: corpus-only (--iterations 0)", nl()) else "", Str.concat(if (iterations <= 0 && corpus > 0) Str.concat("scuzz fuzz: replay ", Str.concat(Str.fromInt(corpus), Str.concat(" corpus entries", nl()))) else "", if (sites == 0) Str.concat("scuzz fuzz: no live-code mutation sites", nl()) else ""))
 
 def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
-  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures, corpFail, fuzzMut(sites))
+  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures, corpFail, "0", fuzzMut(sites))
 
 def fuzzStatus(search: Int, failures: Int, seed: Int, corpus: Int): String =
   Str.concat("scuzz fuzz ", Str.concat(if (failures == 0) "ok" else "fail", Str.concat(" (", Str.concat(Str.fromInt(search), Str.concat(" search, ", Str.concat(Str.fromInt(failures), Str.concat(" search failures, seed ", Str.concat(Str.fromInt(seed), Str.concat(", ", Str.concat(Str.fromInt(corpus), " corpus)"))))))))))
 
-def fuzzCorpus(corpus: Int, corpFail: Int): String =
-  Str.concat("corpus: ", Str.concat(Str.fromInt(corpus), Str.concat(" stored, ", Str.concat(Str.fromInt(corpFail), " failed, 0 promoted"))))
+def fuzzCorpus(corpus: Int, corpFail: Int, promoted: String): String =
+  Str.concat("corpus: ", Str.concat(Str.fromInt(corpus), Str.concat(" stored, ", Str.concat(Str.fromInt(corpFail), Str.concat(" failed, ", Str.concat(promoted, " promoted"))))))
 
 def fuzzMut(sites: Int): String =
   Str.concat("mutate: 0 killed, 0 survived, 0 inert (0 of ", Str.concat(Str.fromInt(sites), " sites)"))
 
-def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, _sites: Int, failures: Int, corpFail: Int, mut: String): String =
-  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), mut)))))))))
+def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, _sites: Int, failures: Int, corpFail: Int, promoted: String, mut: String): String =
+  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail, promoted), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), mut)))))))))
 
 def remEuclid(a: Int, n: Int): Int =
   if (n <= 0) 0 else remEuclid2(a % n, n)
@@ -1152,4 +1152,98 @@ def mixStrAt(h: Int, s: String, i: Int): Int =
 
 def relateSeed(label: String, sched: String, script: String, n: Int): Int =
   mixByte(mixStr(mixStr(mixStr(2166136261, label), sched), script), n)
+
+def workloadDefs(srcs: List[String], ens: List[En]): List[Fun] =
+  if (List.isEmpty(srcs)) noFun() else List.concat(workloadProg(Parse.parse(Lexer.lex(List.at(srcs, 0))), ens), workloadDefs(List.tail(srcs), ens))
+
+def workloadProg(p: Prog, ens: List[En]): List[Fun] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => workloadFuns(defs, ens)
+  }
+
+def workloadFuns(ds: List[Fun], ens: List[En]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else workloadFun(List.at(ds, 0), List.tail(ds), ens)
+
+def workloadFun(d: Fun, rest: List[Fun], ens: List[En]): List[Fun] =
+  if (isDrive(d, ens) || !d.priv && Check.isIo(d.ret) && List.len(d.params) <= 3 && allFriendly(d.params, ens) && unaryAdtOk(d.params) && allSimpleWhere(d.params)) d :: workloadFuns(rest, ens) else workloadFuns(rest, ens)
+
+def generatedDrive(ds: List[Fun], ens: List[En], seed: Int): String =
+  if (List.isEmpty(ds)) "" else generatedEligible(List.at(ds, seed % List.len(ds)), ens, seed)
+
+def generatedFun(d: Fun, ens: List[En], seed: Int): String =
+  Str.concat("drive ", Str.concat(d.name, Str.concat(if (List.isEmpty(d.params)) "" else Str.concat(" ", generatedParams(d.params, ens, seed, 0, " ")), nl())))
+
+def generatedParams(ps: List[Param], ens: List[En], seed: Int, depth: Int, sep: String): String =
+  if (List.isEmpty(ps)) "" else Str.concat(generatedParam(List.at(ps, 0), ens, seed, depth), if (List.len(ps) == 1) "" else Str.concat(sep, generatedParams(List.tail(ps), ens, seed + 1, depth, sep)))
+
+def generatedParam(p: Param, ens: List[En], seed: Int, depth: Int): String =
+  if (p.ty == "Int") Str.fromInt(generatedInt(p.w, seed)) else generatedType(p.ty, ens, seed, depth)
+
+def generatedInt(w: String, seed: Int): Int =
+  if (w == "") generatedSigned(seed) else if (hasSub(w, ">=")) Str.toInt(trimNum(afterOp(w, ">=")), 0) + seed % 17 else if (hasSub(w, "<=")) Str.toInt(trimNum(afterOp(w, "<=")), 0) - seed % 17 else if (hasSub(w, ">")) Str.toInt(trimNum(afterOp(w, ">")), 0) + 1 + seed % 17 else if (hasSub(w, "<")) Str.toInt(trimNum(afterOp(w, "<")), 0) - 1 - seed % 17 else Str.toInt(trimNum(afterOp(w, "==")), 0)
+
+def generatedType(ty: String, ens: List[En], seed: Int, depth: Int): String =
+  if (ty == "Int") Str.fromInt(seed % 17) else if (ty == "Bool") generatedBool(seed) else if (ty == "String") Str.repeat("a", 1 + seed % 8) else if (isListTy(ty)) Str.concat("[", Str.concat(generatedList(listInner(ty), ens, seed, depth + 1, if (depth >= 3 || !generationType(listInner(ty), ens, depth + 1)) 0 else seed % 4), "]")) else generatedAdt(findEn(ens, tyHead(ty)), ens, seed, depth)
+
+def generatedList(ty: String, ens: List[En], seed: Int, depth: Int, n: Int): String =
+  if (n <= 0) "" else Str.concat(generatedType(ty, ens, seed, depth), if (n == 1) "" else Str.concat(",", generatedList(ty, ens, seed + 1, depth, n - 1)))
+
+def generatedAdt(hit: List[En], ens: List[En], seed: Int, depth: Int): String =
+  if (List.isEmpty(hit)) "0" else generatedEn(List.at(hit, 0), ens, seed, depth)
+
+def generatedEn(en: En, ens: List[En], seed: Int, depth: Int): String =
+  en match {
+    case En(_, _, _, cases) => generatedCases(generationCases(cases, ens, depth), ens, seed, depth)
+  }
+
+def generatedCases(cases: List[EnCase], ens: List[En], seed: Int, depth: Int): String =
+  if (List.isEmpty(cases)) "0" else generatedCase(List.at(cases, seed % List.len(cases)), ens, seed, depth)
+
+def generatedCase(c: EnCase, ens: List[En], seed: Int, depth: Int): String =
+  c match {
+    case EnCase(name, fields) => if (List.isEmpty(fields)) name else Str.concat(name, Str.concat("(", Str.concat(generatedParams(fields, ens, seed + 1, depth + 1, ","), ")")))
+  }
+
+def varyWorkload(script: String, seed: Int): String =
+  varyLines(linesOf(script), seed)
+
+def varyLines(lines: List[String], seed: Int): String =
+  if (List.isEmpty(lines)) "" else if (seed % 3 == 0) nls(List.reverse(lines)) else if (seed % 3 == 1) nls(List.concat(List.tail(lines), List.at(lines, 0) :: noStr())) else nls(List.concat(lines, List.at(lines, seed % List.len(lines)) :: noStr()))
+
+def workloadSeed(seed: Int): Int =
+  (seed % 2147483647 + 2147483647) % 2147483647
+
+def generatedSigned(seed: Int): Int =
+  if (seed % 2 == 0) 0 - seed % 17 else seed % 17
+
+def generatedBool(seed: Int): String =
+  if (seed % 2 == 0) "false" else "true"
+
+def generatedEligible(d: Fun, ens: List[En], seed: Int): String =
+  if (generationParams(d.params, ens, 0)) generatedFun(d, ens, seed) else ""
+
+def generationParams(ps: List[Param], ens: List[En], depth: Int): Bool =
+  if (List.isEmpty(ps)) true else generationParam(List.at(ps, 0), ens, depth) && generationParams(List.tail(ps), ens, depth)
+
+def generationType(ty: String, ens: List[En], depth: Int): Bool =
+  if (leafTy(ty) || isListTy(ty)) true else if (depth >= 3) false else generationEnum(findEn(ens, tyHead(ty)), ens, depth)
+
+def generationEnum(hit: List[En], ens: List[En], depth: Int): Bool =
+  if (List.isEmpty(hit)) false else generationEn(List.at(hit, 0), ens, depth)
+
+def generationEn(en: En, ens: List[En], depth: Int): Bool =
+  en match {
+    case En(_, _, _, cases) => !List.isEmpty(generationCases(cases, ens, depth))
+  }
+
+def generationCases(cs: List[EnCase], ens: List[En], depth: Int): List[EnCase] =
+  if (List.isEmpty(cs)) noCase() else generationCase(List.at(cs, 0), List.tail(cs), ens, depth)
+
+def generationCase(c: EnCase, rest: List[EnCase], ens: List[En], depth: Int): List[EnCase] =
+  c match {
+    case EnCase(_, fs) => if (generationParams(fs, ens, depth + 1)) c :: generationCases(rest, ens, depth) else generationCases(rest, ens, depth)
+  }
+
+def generationParam(p: Param, ens: List[En], depth: Int): Bool =
+  generationType(p.ty, ens, depth)
 

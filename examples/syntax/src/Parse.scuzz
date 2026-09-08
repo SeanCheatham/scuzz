@@ -1218,7 +1218,10 @@ def optionEn(): En =
   En(false, "Option", "T" :: [], EnCase("None", []) :: EnCase("Some", Param("x", "T", "", "") :: []) :: [])
 
 def builtins(ens: List[En]): List[En] =
-  if (hasEnName(ens, "Option")) ens else optionEn() :: ens
+  resultBuiltins(if (hasEnName(ens, "Option")) ens else optionEn() :: ens)
+
+def resultBuiltins(ens: List[En]): List[En] =
+  if (hasEnName(ens, "Result")) ens else En(false, "Result", "E" :: "A" :: [], EnCase("Err", Param("error", "E", "", "") :: []) :: EnCase("Ok", Param("value", "A", "", "") :: []) :: []) :: ens
 
 def hasEnName(ens: List[En], name: String): Bool =
   if (List.isEmpty(ens)) false else hasEnName1(List.at(ens, 0), List.tail(ens), name)

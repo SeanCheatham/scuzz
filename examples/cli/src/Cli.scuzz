@@ -657,7 +657,7 @@ def newTomlIo(name: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, "\"\nversion = \"0.1.0\"\n"))
 
 def newMainUi(): String =
-  "@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    ))\n  } yield ()\n"
+  "@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    ))\n  } yield ()\n"
 
 def newMainIo(): String =
   "@main def main: IO[Unit] =\n  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n"

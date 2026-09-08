@@ -163,6 +163,7 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Set.map` | `Set, A => B` | `Set` |
 | `Set.exists` | `Set, A => Bool` | `Bool` |
 | `Set.forall` | `Set, A => Bool` | `Bool` |
+| `IO.attempt` | `IO[E, A]` | `IO[Result[E, A]]` |
 | `IO.pure` | `A` | `IO[A]` |
 | `IO.println` | `String` | `IO[Unit]` |
 | `IO.sleep` | `Int` | `IO[Unit]` |
@@ -273,8 +274,8 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Sys.childRead` | `Int, Int` | `IO[String]` |
 | `Sys.childClose` | `Int` | `IO[Unit]` |
 | `Impurity.runKit` | `()` | `IO[Unit]` |
-| `Json.parse` | `String` | `Result` |
-| `Json.stringify` | `Json` | `Result` |
+| `Json.parse` | `String` | `Result[String, Json]` |
+| `Json.stringify` | `Json` | `Result[String, String]` |
 | `Json.keys` | `Json` | `List` |
 | `Json.get` | `Json, String` | `List` |
 | `Json.has` | `Json, String` | `Bool` |
@@ -332,20 +333,12 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `Net.udpSend` | `Udp, String, Int, String` | `IO[Unit]` |
 | `Net.udpRecv` | `Udp, Int` | `IO[(String, Int, String)]` |
 | `Net.udpClose` | `Udp` | `IO[Unit]` |
-| `Signal.int` | `Int` | `Signal[Int]` |
-| `Signal.intN` | `String, Int` | `Signal[Int]` |
-| `Signal.get` | `Signal` | `Int` |
-| `Signal.set` | `Signal, Int` | `Unit` |
-| `Signal.map` | `Signal, Int => String` | `Signal[String]` |
-| `Signal.mapN` | `String, Signal, Int => String` | `Signal[String]` |
-| `Signal.str` | `String` | `Signal[String]` |
-| `Signal.strN` | `String, String` | `Signal[String]` |
-| `Signal.getStr` | `Signal` | `String` |
-| `Signal.setStr` | `Signal, String` | `Unit` |
-| `Signal.list` | `List[A]` | `Signal[List[A]]` |
-| `Signal.listN` | `String, List[A]` | `Signal[List[A]]` |
-| `Signal.getList` | `Signal[List[A]]` | `List[A]` |
-| `Signal.setList` | `Signal[List[A]], List[A]` | `Unit` |
+| `Signal.make` | `A` | `Signal[A]` |
+| `Signal.makeN` | `String, A` | `Signal[A]` |
+| `Signal.get` | `Signal[A]` | `A` |
+| `Signal.set` | `Signal[A], A` | `Unit` |
+| `Signal.map` | `Signal[A], A => B` | `Signal[B]` |
+| `Signal.mapN` | `String, Signal[A], A => B` | `Signal[B]` |
 | `Color.rgb` | `Int, Int, Int` | `Int` |
 | `Color.rgba` | `Int, Int, Int, Int` | `Int` |
 | `Theme.accent` | `()` | `Int` |
@@ -368,7 +361,7 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `View.divider` | `()` | `View` |
 | `View.verticalDivider` | `()` | `View` |
 | `View.text` | `String` | `View` |
-| `View.bindText` | `Signal` | `View` |
+| `View.bindText` | `Signal[String]` | `View` |
 | `View.button` | `String, A` | `View` |
 | `View.iconButton` | `String, A` | `View` |
 | `View.fab` | `String, A` | `View` |
@@ -383,11 +376,11 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `View.card` | `View` | `View` |
 | `View.placeholder` | `View` | `View` |
 | `View.unconstrainedBox` | `View` | `View` |
-| `View.slider` | `Signal` | `View` |
-| `View.progress` | `Signal` | `View` |
-| `View.circularProgress` | `Signal` | `View` |
+| `View.slider` | `Signal[Int]` | `View` |
+| `View.progress` | `Signal[Int]` | `View` |
+| `View.circularProgress` | `Signal[Int]` | `View` |
 | `View.focusGroup` | `View` | `View` |
-| `View.editor` | `Signal` | `View` |
+| `View.editor` | `Signal[String]` | `View` |
 | `View.avatar` | `String` | `View` |
 | `View.background` | `Int, View` | `View` |
 | `View.padding` | `Int, View` | `View` |
@@ -400,28 +393,28 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `View.fraction` | `Int, Int, View` | `View` |
 | `View.maxSize` | `Int, Int, View` | `View` |
 | `View.align` | `Int, Int, View` | `View` |
-| `View.textField` | `Signal, String` | `View` |
-| `View.checkbox` | `Signal, String` | `View` |
-| `View.switch` | `Signal, String` | `View` |
-| `View.chip` | `Signal, String` | `View` |
-| `View.filterChip` | `Signal, String` | `View` |
-| `View.inputChip` | `Signal, String` | `View` |
-| `View.checkboxListTile` | `Signal, String` | `View` |
-| `View.switchListTile` | `Signal, String` | `View` |
+| `View.textField` | `Signal[String], String` | `View` |
+| `View.checkbox` | `Signal[Int], String` | `View` |
+| `View.switch` | `Signal[Int], String` | `View` |
+| `View.chip` | `Signal[Int], String` | `View` |
+| `View.filterChip` | `Signal[Int], String` | `View` |
+| `View.inputChip` | `Signal[Int], String` | `View` |
+| `View.checkboxListTile` | `Signal[Int], String` | `View` |
+| `View.switchListTile` | `Signal[Int], String` | `View` |
 | `View.semantics` | `String, View` | `View` |
 | `View.mergeSemantics` | `String, View` | `View` |
 | `View.tooltip` | `String, View` | `View` |
-| `View.badge` | `Signal, View` | `View` |
-| `View.visibility` | `Signal, View` | `View` |
-| `View.offstage` | `Signal, View` | `View` |
-| `View.overlay` | `Signal, View` | `View` |
-| `View.radio` | `Signal, Int, String` | `View` |
-| `View.choiceChip` | `Signal, Int, String` | `View` |
-| `View.radioListTile` | `Signal, Int, String` | `View` |
-| `View.showWhen` | `Signal, Int, View` | `View` |
-| `View.split` | `Signal, View, View` | `View` |
-| `View.segmented` | `Signal, String, String` | `View` |
-| `View.expansionTile` | `Signal, String, View` | `View` |
+| `View.badge` | `Signal[Int], View` | `View` |
+| `View.visibility` | `Signal[Int], View` | `View` |
+| `View.offstage` | `Signal[Int], View` | `View` |
+| `View.overlay` | `Signal[Int], View` | `View` |
+| `View.radio` | `Signal[Int], Int, String` | `View` |
+| `View.choiceChip` | `Signal[Int], Int, String` | `View` |
+| `View.radioListTile` | `Signal[Int], Int, String` | `View` |
+| `View.showWhen` | `Signal[Int], Int, View` | `View` |
+| `View.split` | `Signal[Int], View, View` | `View` |
+| `View.segmented` | `Signal[Int], String, String` | `View` |
+| `View.expansionTile` | `Signal[Int], String, View` | `View` |
 | `View.inkWell` | `String, A, View` | `View` |
 | `View.listTile` | `String, View (opt 1)` | `View` |
 | `View.image` | `Int, Int, Int, String` | `View` |

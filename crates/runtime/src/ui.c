@@ -753,6 +753,15 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   BridgeItem *it;
   if (!session || !sig)
     return;
+  pthread_mutex_lock(&session->bridge_lock);
+  /* A pump observes the last value in each adjacent write group. */
+  if (session->bridge_tail && session->bridge_tail->kind == BRIDGE_INT &&
+      session->bridge_tail->sig_int == sig) {
+    session->bridge_tail->int_value = value;
+    session->dirty = 1;
+    pthread_mutex_unlock(&session->bridge_lock);
+    return;
+  }
   /* Host malloc: IO threads post while the UI thread pumps, and the
    * tracked heap is single-threaded. */
   it = (BridgeItem *)malloc(sizeof(BridgeItem));
@@ -762,7 +771,6 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   it->next = NULL;
   it->sig_int = sig;
   it->int_value = value;
-  pthread_mutex_lock(&session->bridge_lock);
   if (session->bridge_tail)
     session->bridge_tail->next = it;
   else

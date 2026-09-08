@@ -1,6 +1,6 @@
 def checkOrder(): IO[Unit] =
   for {
-    order = Signal.int(0)
+    order = Signal.make(0)
     q <- Queue.unbounded()
     _ <- IO.both(Queue.offer(q, "L"), Queue.offer(q, "R"))
     first <- Queue.take(q)

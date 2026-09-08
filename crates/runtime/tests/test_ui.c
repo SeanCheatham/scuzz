@@ -13326,7 +13326,7 @@ static void test_signal_list_record_dump(void) {
   const char *s;
 
   xs = sz_list_cons(sz_box_i64(1), sz_list_cons(sz_box_i64(2), sz_list_nil()));
-  items = sz_lang_signal_list(xs, sz_string_from_cstr("rows"), 0);
+  items = sz_signal_new(xs, 5, sz_string_from_cstr("rows"));
   dump = sz_signal_dump();
   s = strstr(sz_string_cstr(dump), "list[");
   assert(s);
@@ -13342,7 +13342,7 @@ static void test_signal_list_record_dump(void) {
   sz_signal_list_free(items);
 
   xs = sz_list_cons(sz_box_i64(1), sz_list_nil());
-  items = sz_lang_signal_list(xs, sz_string_from_cstr("rows"), 1);
+  items = sz_signal_new(xs, 3, sz_string_from_cstr("rows"));
   dump = sz_signal_dump();
   s = strstr(sz_string_cstr(dump), "list[");
   assert(s);
@@ -13437,7 +13437,8 @@ static void test_property_missing_signal_panics(void) {
 
 static int g_map_calls;
 
-static SzString *map_counting_int(int64_t v, void *env) {
+static void *map_counting_int(void *value, void *env) {
+  int64_t v = sz_unbox_i64(value);
   (void)env;
   g_map_calls++;
   return sz_string_from_int(v);
@@ -13449,7 +13450,7 @@ static void test_signal_map_caches_unchanged_source(void) {
 
   count = sz_signal_int(7);
   g_map_calls = 0;
-  label = sz_lang_signal_map(count, map_counting_int, NULL, NULL);
+  label = sz_signal_derive(count, map_counting_int, NULL, 2, NULL);
   /* Construction primes the cache once. */
   assert(g_map_calls == 1);
   /* An unchanged source serves the cached string: no recompute, no realloc. */
@@ -13482,7 +13483,7 @@ static void test_signal_list_elem_str_flag(void) {
   sz_string_free(dump);
 
   /* An explicit non-String flag decides an empty list: count-only dump. */
-  rows = sz_lang_signal_list(sz_list_nil(), sz_string_from_cstr("erow"), 0);
+  rows = sz_signal_new(sz_list_nil(), 5, sz_string_from_cstr("erow"));
   assert(sz_signal_list_elem_str(rows) == 0);
   dump = sz_signal_dump();
   assert(strstr(sz_string_cstr(dump), "erow = <0>") != NULL);
@@ -13566,7 +13567,7 @@ static void test_signal_list_get_survives_set(void) {
   sz_string_free(a);
   items = sz_signal_list(old);
   sz_release(old);
-  got = sz_lang_signal_list_get(items);
+  got = sz_signal_read(items);
   b = sz_string_from_cstr("b");
   neu = sz_list_cons(b, sz_list_nil());
   sz_string_free(b);
@@ -13715,9 +13716,54 @@ static void test_signal_name_unregistered_clears_nothing(void) {
   sz_signal_int_free(a);
 }
 
-static SzString *map_label_int(int64_t v, void *env) {
+static void *map_label_int(void *value, void *env) {
+  int64_t v = sz_unbox_i64(value);
   (void)env;
   return sz_string_from_int(v);
+}
+
+static int generic_map_calls;
+
+static void *generic_record_value(void *value, void *env) {
+  (void)env;
+  generic_map_calls++;
+  void *payload = sz_adt_payload(value);
+  sz_retain(payload);
+  return payload;
+}
+
+static void *generic_value_label(void *value, void *env) {
+  (void)env;
+  return sz_string_from_int(sz_unbox_i64(value));
+}
+
+static void test_generic_signal_chain(void) {
+  size_t baseline, bytes, after;
+  sz_alloc_stats(&bytes, &baseline);
+  void *box = sz_box_i64(3);
+  SzAdt *record = sz_adt_new(0, box);
+  SzSignal *state = sz_signal_new(record, 4, NULL);
+  SzSignal *count = sz_signal_derive(state, generic_record_value, NULL, 1, NULL);
+  SzSignal *label = sz_signal_derive(count, generic_value_label, NULL, 2, NULL);
+  sz_release(box);
+  sz_release(record);
+  generic_map_calls = 0;
+  assert(strcmp(sz_signal_str_get(label), "3") == 0);
+  assert(strcmp(sz_signal_str_get(label), "3") == 0);
+  assert(generic_map_calls == 0);
+  box = sz_box_i64(9);
+  record = sz_adt_new(0, box);
+  sz_signal_write(state, record);
+  sz_release(box);
+  sz_release(record);
+  assert(strcmp(sz_signal_str_get(label), "9") == 0);
+  assert(generic_map_calls == 1);
+  sz_signal_free(state);
+  assert(strcmp(sz_signal_str_get(label), "9") == 0);
+  sz_signal_int_free(count);
+  sz_signal_str_free(label);
+  sz_alloc_stats(&bytes, &after);
+  assert(after == baseline);
 }
 
 static void test_signal_map_source_free(void) {
@@ -13727,7 +13773,7 @@ static void test_signal_map_source_free(void) {
   const char *s;
 
   count = sz_signal_int(7);
-  label = sz_lang_signal_map(count, map_label_int, NULL, NULL);
+  label = sz_signal_derive(count, map_label_int, NULL, 2, NULL);
   s = sz_signal_str_get(label);
   assert(strcmp(s, "7") == 0);
   /* Freeing the source severs the map. A recycled address must not leak
@@ -14875,7 +14921,8 @@ static void test_alloc_pump_flat(void) {
   sz_view_free(view);
 }
 
-static SzString *map_count_label(int64_t v, void *env) {
+static void *map_count_label(void *value, void *env) {
+  int64_t v = sz_unbox_i64(value);
   (void)env;
   return sz_string_from_int(v);
 }
@@ -14900,7 +14947,7 @@ static void test_alloc_counter_pump_flat(void) {
   cfg.scale = 1.0;
 
   count = sz_signal_int(0);
-  label = sz_lang_signal_map(count, map_count_label, NULL, NULL);
+  label = sz_signal_derive(count, map_count_label, NULL, 2, NULL);
   root = sz_view_column();
   sz_view_add_child(root, sz_lang_view_bind_text(label));
   btn = sz_view_button("+", counter_tap, count);
@@ -15731,6 +15778,7 @@ int main(void) {
   test_signal_name_last_wins();
   test_signal_name_last_wins_per_kind();
   test_signal_name_unregistered_clears_nothing();
+  test_generic_signal_chain();
   test_signal_map_source_free();
   test_signal_map_caches_unchanged_source();
   test_signal_list_elem_str_flag();

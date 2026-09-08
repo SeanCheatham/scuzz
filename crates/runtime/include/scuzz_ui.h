@@ -105,9 +105,17 @@ int64_t sz_color_rgba(int64_t r, int64_t g, int64_t b, int64_t a);
 
 /* --- signals ------------------------------------------------------------- */
 
-typedef struct SzSignalInt SzSignalInt;
-typedef struct SzSignalStr SzSignalStr;
-typedef struct SzSignalList SzSignalList;
+typedef struct SzSignal SzSignal;
+typedef struct SzSignal SzSignalInt;
+typedef struct SzSignal SzSignalStr;
+typedef struct SzSignal SzSignalList;
+typedef void *(*SzSignalMapFn)(void *value, void *env);
+SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name);
+void *sz_signal_read(SzSignal *s);
+void sz_signal_free(SzSignal *s);
+void *sz_signal_write(SzSignal *s, void *value);
+SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
+                           int64_t kind, SzString *name);
 
 SzSignalInt *sz_signal_int(int64_t initial);
 void sz_signal_int_set(SzSignalInt *s, int64_t v);
@@ -175,45 +183,45 @@ typedef enum SzViewKind {
   SZ_VIEW_FONT_SIZE, /* pass constraints; View.text measure/paint size in px */
   SZ_VIEW_BORDER, /* pass constraints; paint n px stroke in color inside the frame */
   SZ_VIEW_RADIUS, /* pass constraints; clip paint to a rounded rect of n px */
-  SZ_VIEW_CHECKBOX, /* Signal.int 0/1 box + label; tap flips */
+  SZ_VIEW_CHECKBOX, /* Signal[Int] 0/1 box + label; tap flips */
   SZ_VIEW_WRAP,     /* flow children into runs; wrap when remaining width is short */
-  SZ_VIEW_SLIDER,   /* Signal.int 0-100 track; tap/drag writes from hit x */
+  SZ_VIEW_SLIDER,   /* Signal[Int] 0-100 track; tap/drag writes from hit x */
   SZ_VIEW_GRID,     /* n equal columns; new row after n shown children */
-  SZ_VIEW_RADIO,    /* Signal.int group; tap writes this value */
-  SZ_VIEW_PROGRESS, /* Signal.int 0-100 bar; display only */
-  SZ_VIEW_SWITCH,   /* Signal.int 0/1 track + label; tap flips */
-  SZ_VIEW_CHIP,     /* Signal.int 0/1 labeled chip; tap flips */
+  SZ_VIEW_RADIO,    /* Signal[Int] group; tap writes this value */
+  SZ_VIEW_PROGRESS, /* Signal[Int] 0-100 bar; display only */
+  SZ_VIEW_SWITCH,   /* Signal[Int] 0/1 track + label; tap flips */
+  SZ_VIEW_CHIP,     /* Signal[Int] 0/1 labeled chip; tap flips */
   SZ_VIEW_LIST_TILE, /* full-width title row; optional trailing child */
-  SZ_VIEW_BADGE,     /* Signal.int mark on a child; sizes to the child */
+  SZ_VIEW_BADGE,     /* Signal[Int] mark on a child; sizes to the child */
   SZ_VIEW_CARD,      /* surface + pad + border around one child */
   SZ_VIEW_DIVIDER,   /* full-width hairline; display only */
-  SZ_VIEW_EXPANSION_TILE, /* Signal.int header; child shows when on */
+  SZ_VIEW_EXPANSION_TILE, /* Signal[Int] header; child shows when on */
   SZ_VIEW_ICON_BUTTON,    /* square label tap; same closure as button */
   SZ_VIEW_VERTICAL_DIVIDER, /* 8 px slot, control_h; muted hairline */
-  SZ_VIEW_CIRCULAR_PROGRESS, /* Signal.int 0-100 square ring; display only */
+  SZ_VIEW_CIRCULAR_PROGRESS, /* Signal[Int] 0-100 square ring; display only */
   SZ_VIEW_AVATAR,            /* control_h disc + label; display only */
-  SZ_VIEW_CHECKBOX_LIST_TILE, /* Signal.int 0/1 full-width title row; tap flips */
-  SZ_VIEW_SWITCH_LIST_TILE,   /* Signal.int 0/1 full-width title + trailing switch */
-  SZ_VIEW_RADIO_LIST_TILE,    /* Signal.int group; full-width title + leading radio */
-  SZ_VIEW_SEGMENTED,          /* Signal.int 0/1; two labeled halves; tap writes 0/1 */
+  SZ_VIEW_CHECKBOX_LIST_TILE, /* Signal[Int] 0/1 full-width title row; tap flips */
+  SZ_VIEW_SWITCH_LIST_TILE,   /* Signal[Int] 0/1 full-width title + trailing switch */
+  SZ_VIEW_RADIO_LIST_TILE,    /* Signal[Int] group; full-width title + leading radio */
+  SZ_VIEW_SEGMENTED,          /* Signal[Int] 0/1; two labeled halves; tap writes 0/1 */
   SZ_VIEW_FAB,                /* circular primary tap; same closure as button */
   SZ_VIEW_OUTLINED_BUTTON,    /* surface + border tap; same closure as button */
   SZ_VIEW_TEXT_BUTTON,        /* foreground label tap; same closure as button */
   SZ_VIEW_TOOLTIP,            /* message + child; sizes to the child; shows message on hover; not a tap */
   SZ_VIEW_PLACEHOLDER,        /* sizes to the child; muted box mark; not a tap */
-  SZ_VIEW_FILTER_CHIP,        /* Signal.int 0/1 chip with a leading check; tap flips */
-  SZ_VIEW_CHOICE_CHIP,        /* Signal.int group; chip tap writes this value */
+  SZ_VIEW_FILTER_CHIP,        /* Signal[Int] 0/1 chip with a leading check; tap flips */
+  SZ_VIEW_CHOICE_CHIP,        /* Signal[Int] group; chip tap writes this value */
   SZ_VIEW_ACTION_CHIP,        /* label tap; chip paint; same closure as button */
-  SZ_VIEW_INPUT_CHIP,         /* Signal.int 0/1 chip with a trailing X; tap flips */
+  SZ_VIEW_INPUT_CHIP,         /* Signal[Int] 0/1 chip with a trailing X; tap flips */
   SZ_VIEW_SEMANTICS,          /* a11y label + child; sizes to the child; not a tap */
   SZ_VIEW_MERGE_SEMANTICS,    /* a11y label + child; sizes to the child; omits child a11y */
   SZ_VIEW_INK_WELL,           /* label tap + child; sizes to the child; same closure as button */
-  SZ_VIEW_VISIBILITY,         /* Signal.int; sizes to the child; off keeps size, skips paint */
-  SZ_VIEW_OFFSTAGE,           /* Signal.int; lays out the child; off reports size 0, skips paint */
+  SZ_VIEW_VISIBILITY,         /* Signal[Int]; sizes to the child; off keeps size, skips paint */
+  SZ_VIEW_OFFSTAGE,           /* Signal[Int]; lays out the child; off reports size 0, skips paint */
   SZ_VIEW_UNCONSTRAINED_BOX,  /* sizes to the child; child lays out with unbounded max */
   SZ_VIEW_EDITOR,             /* multiline SignalStr buffer; not a TextField */
-  SZ_VIEW_SPLIT,              /* Signal.int 0-100; two children + drag handle */
-  SZ_VIEW_OVERLAY,            /* Signal.int; fills parent when on; Escape dismisses */
+  SZ_VIEW_SPLIT,              /* Signal[Int] 0-100; two children + drag handle */
+  SZ_VIEW_OVERLAY,            /* Signal[Int]; fills parent when on; Escape dismisses */
   SZ_VIEW_ON_SECONDARY,       /* child + button-3 handler; sizes to the child; not a tap */
   SZ_VIEW_FOCUS_GROUP         /* child list of taps; sizes to the child; not a tap */
 } SzViewKind;
@@ -338,7 +346,7 @@ SzView *sz_view_wrap(void);
 SzView *sz_view_grid(int cols);
 SzView *sz_view_stack(void);
 SzView *sz_view_list(void);
-/* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
+/* Reactive list: children rebuilt from Signal[List[T]] at layout (`- item` texts). */
 SzView *sz_view_each(SzSignalList *sig);
 /* Like `sz_view_each`, but `fn` builds each child from the element. */
 SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
@@ -722,18 +730,6 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
 
 /* --- language-facing View / Signal (Scuzz Lang-authored UI) ----------- */
 
-SzSignalInt *sz_lang_signal_int(int64_t initial, SzString *name);
-int64_t sz_lang_signal_get(SzSignalInt *s);
-void *sz_lang_signal_set(SzSignalInt *s, int64_t v);
-SzSignalStr *sz_lang_signal_str(SzString *initial, SzString *name);
-SzString *sz_lang_signal_str_get(SzSignalStr *s);
-void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v);
-SzSignalList *sz_lang_signal_list(SzList *initial, SzString *name,
-                                  int64_t elem_str);
-/* Retain the current list. Last-use drops it. */
-SzList *sz_lang_signal_list_get(SzSignalList *s);
-void *sz_lang_signal_list_set(SzSignalList *s, SzList *v);
-
 SzView *sz_lang_view_text(SzString *text);
 /* First-class tap closure: `tap`/`env` come from a compiled `_ => ...` lambda. */
 SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
@@ -812,10 +808,7 @@ SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption
 void *sz_lang_view_add_child(SzView *parent, SzView *child);
 SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 
-/* Derived Signal.str from Signal.int (recomputed on get / dump). */
-typedef SzString *(*SzSignalMapIntFn)(int64_t v, void *env);
-SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn,
-                                void *env, SzString *name);
+/* Derived Signal[String] from Signal[Int] (recomputed on get / dump). */
 SzView *sz_lang_view_bind_text(SzSignalStr *sig);
 
 /* Mount factory View → pump → optional scripted tap → snapshot → unmount.
