@@ -1883,13 +1883,7 @@ static SzAdt *sz_either_to_result(SzEither *e) {
     adt = sz_adt_new(1, payload);
     sz_release(payload);
   } else {
-    const char *msg = "error";
-    SzString *s;
-    if (e && !e->is_right && e->as.left && e->as.left->message)
-      msg = sz_string_cstr(e->as.left->message);
-    s = sz_string_from_cstr(msg);
-    adt = sz_adt_new(0, s);
-    sz_release(s);
+    adt = sz_adt_new(0, e && e->as.left ? e->as.left->payload : NULL);
   }
   sz_either_free(e);
   return adt;

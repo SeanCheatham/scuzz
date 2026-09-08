@@ -355,13 +355,7 @@ def substKitE(ret: String, ty: String): String =
   if (ty == "") ret else substTy(ret, "E", ty)
 
 def kitRetFromTy(f: String, ty: String, ret: String): String =
-  if (f == "List.head") kitRetOption(ty) else if (f == "Map.get") kitRetMapOption(ty) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat" || f == "List.last" || f == "List.find" || f == "List.findLast") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") ioTy("String", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", A]")) else if (f == "Deferred.get") defGetRet(ty) else if (f == "Queue.take") queueTakeRet(ty) else if (f == "Signal.list") kitRetSignalList(ty) else if (f == "Signal.getList") kitRetGetList(ty) else ret
-
-def kitRetSignalList(ty: String): String =
-  if (isListTy(ty) && ty != "List") Str.concat("Signal[", Str.concat(ty, "]")) else "Signal[List[A]]"
-
-def kitRetGetList(ty: String): String =
-  if (Str.startsWith(ty, "Signal[") && Str.len(ty) > 8) Str.slice(ty, 7, Str.len(ty) - 1) else "List"
+  if (f == "List.head") kitRetOption(ty) else if (f == "Map.get") kitRetMapOption(ty) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat" || f == "List.last" || f == "List.find" || f == "List.findLast") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") ioTy("String", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", A]")) else if (f == "Deferred.get") defGetRet(ty) else if (f == "Queue.take") queueTakeRet(ty) else ret
 
 def defGetRet(ty: String): String =
   if (Str.startsWith(ty, "Deferred[")) ioTy("String", elemOf(ty)) else "IO[A]"
@@ -391,7 +385,7 @@ def resolveCall(f: String, args: List[Expr], env: List[(String, String)], funs: 
   resolveCall2(f, args, env, funs, ens, span)
 
 def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (isKit(f)) resolveKit(f, args, env, funs, ens, span) else if (isInstMeth(f)) resolveInst(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferCtor(f, args, env, funs, ens) else if (enOfCase(ens, f) != "") inferCtor(enOfCase(ens, f), args, env, funs, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
+  if (isKit(f)) resolveKit(f, args, env, funs, ens, span) else if (isInstMeth(f)) resolveInst(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferNamedCtor(f, f, args, env, funs, ens, span, ens) else if (enOfCase(ens, f) != "") inferNamedCtor(enOfCase(ens, f), f, args, env, funs, ens, span, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
 
 def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at") resolveGenericKit(f, args, env, funs, ens, span) else resolveKitRest(f, args, env, funs, ens, span)
@@ -400,7 +394,7 @@ def resolveGenericKit(f: String, args: List[Expr], env: List[(String, String)], 
   if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), kitRet(f))) else if (List.len(args) != List.len(kitParams(f))) bad(Str.concat(f, " has wrong arity"), span) else genericArgs(f, ["A", "B", "E"], kitParams(f), kitRet(f), args, env, funs, ens, span)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Signal.list" || f == "Signal.listN") resolveSignalList(f, args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else if (List.isEmpty(args) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (!arityOk(f, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(kitParams(f))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, want(f, List.len(args)), kitRet(f), args, env, funs, ens, span)
+  if (Str.startsWith(f, "Signal.") || f == "IO.attempt") resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else if (List.isEmpty(args) && !List.isEmpty(kitParams(f))) ok(funTyFrom(kitParams(f), kitRet(f))) else if (!arityOk(f, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(kitParams(f))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, want(f, List.len(args)), kitRet(f), args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
   if (List.isEmpty(ens)) "" else enOfCase1(List.at(ens, 0), List.tail(ens), ctor)
@@ -564,7 +558,7 @@ def resolveViewEach(args: List[Expr], env: List[(String, String)], funs: List[Fu
   if (List.isEmpty(args)) ok(funTyFrom(kitParams("View.each"), kitRet("View.each"))) else resolveViewEach2(infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens, span)
 
 def resolveViewEach2(src: Out, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (hasErr(src)) src else if (List.isEmpty(rest)) ok("View") else resolveViewEachLam(src.ty, List.at(rest, 0), env, funs, ens, span)
+  if (hasErr(src)) src else if (!Str.startsWith(src.ty, "Signal[List[")) argMismatch("View.each", "Signal[List[A]]", src.ty, span) else if (List.len(rest) > 1) bad("View.each has wrong arity", span) else if (List.isEmpty(rest)) ok("View") else resolveViewEachLam(src.ty, List.at(rest, 0), env, funs, ens, span)
 
 def resolveViewEachLam(sigTy: String, lam: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   lam match {
@@ -582,15 +576,6 @@ def resolveViewEachFun(o: Out, elem: String, span: (String, Int)): Out =
 
 def resolveViewEachBody(body: Out, span: (String, Int)): Out =
   if (hasErr(body)) body else if (tyEq(body.ty, "View") || isLoose(body.ty)) ok("View") else bad(Str.concat("View.each needs View, got ", body.ty), span)
-
-def resolveSignalList(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), kitRet(f))) else resolveSignalList2(f, if (f == "Signal.listN" && !List.isEmpty(List.tail(args))) List.at(args, 1) else List.at(args, 0), env, funs, ens, span)
-
-def resolveSignalList2(_f: String, xs: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  resolveSignalList3(infer(stripNamed(xs), env, funs, ens), span)
-
-def resolveSignalList3(o: Out, span: (String, Int)): Out =
-  if (hasErr(o)) o else if (isListTy(o.ty) || isLoose(o.ty)) ok(kitRetSignalList(o.ty)) else argMismatch("Signal.list", "List", o.ty, span)
 
 def resolvePropCheck(args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.len(args) != 3) bad(Str.concat("Property.check expects 3 args, got ", Str.fromInt(List.len(args))), span) else resolvePropCheckName(infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens, span)
@@ -1075,7 +1060,7 @@ def commaAtD(s: String, i: Int, d: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else commaAtC(s, i, d, Str.charAt(s, i))
 
 def commaAtC(s: String, i: Int, d: Int, c: Int): Int =
-  if (c == 40) commaAtD(s, i + 1, d + 1) else if (c == 41) commaAtD(s, i + 1, if (d > 0) d - 1 else 0) else if (c == 44 && d == 0) i else commaAtD(s, i + 1, d)
+  if (c == 40 || c == 91) commaAtD(s, i + 1, d + 1) else if (c == 41 || c == 93) commaAtD(s, i + 1, if (d > 0) d - 1 else 0) else if (c == 44 && d == 0) i else commaAtD(s, i + 1, d)
 
 def splitCommaAt(s: String, c: Int): List[String] =
   if (c < 0) trimName(s) :: noStr() else trimName(Str.slice(s, 0, c)) :: splitComma(Str.slice(s, c + 1, Str.len(s)))
@@ -1093,7 +1078,7 @@ def bindSlot(n: String, ty: String, env: List[(String, String)]): List[(String, 
   if (isTuplePat(n)) bindTuple(n, ty, env) else (n, ty) :: env
 
 def bindTy(pat: String, scrutTy: String, ens: List[En]): String =
-  bindTyGot(patCore(pat), fieldTy(ens, patCore(pat)), scrutTy)
+  bindTyGot(patCore(pat), fieldTy(specializeEnums(ens, scrutTy), patCore(pat)), scrutTy)
 
 def bindTyGot(core: String, ft: String, scrutTy: String): String =
   if (ft == "") ctorElem(core, scrutTy) else ft
@@ -1108,7 +1093,7 @@ def ctorName2(d: Int, core: String): String =
   if (d < 0) core else Str.slice(core, d + 1, Str.len(core))
 
 def ctorElem2(name: String, args: List[String]): String =
-  if (List.isEmpty(args)) "A" else if (name == "Right" || name == "Err") ctorSecond(args) else List.at(args, 0)
+  if (List.isEmpty(args)) "A" else if (name == "Right" || name == "Ok") ctorSecond(args) else List.at(args, 0)
 
 def ctorSecond(args: List[String]): String =
   if (List.isEmpty(List.tail(args))) List.at(args, 0) else List.at(List.tail(args), 0)
@@ -1234,7 +1219,7 @@ def inferMethodEn(en: String, name: String, args: List[Expr], env: List[(String,
   inferMethodQual(Str.concat(en, Str.concat(".", name)), en, name, args, env, funs, ens, e)
 
 def inferMethodQual(q: String, en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
-  if (isKit(q)) inferCall(q, args, env, funs, ens, exprSpan(env, e)) else if (hasEn(ens, en)) inferCtor(en, args, env, funs, ens) else resolveQual(en, name, args, env, funs, ens, e)
+  if (isKit(q)) inferCall(q, args, env, funs, ens, exprSpan(env, e)) else if (hasEn(ens, en)) inferNamedCtor(en, name, args, env, funs, ens, exprSpan(env, e), ens) else resolveQual(en, name, args, env, funs, ens, e)
 
 def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], e: Expr): Out =
   resolveQualHit(en, name, args, env, funs, ens, findFunMod(funs, en, name), e)
@@ -1271,20 +1256,11 @@ def isIo(t: String): Bool =
 def ioEq(a: String, b: String): Bool =
   isIo(a) && isIo(b) && tyEq(ioErr(a), ioErr(b)) && tyEq(ioOk(a), ioOk(b))
 
-def ioParts(t: String): List[String] =
-  if (isIo(t)) splitComma(elemOf(t)) else noStr()
-
 def ioErr(t: String): String =
-  ioErrParts(ioParts(t))
-
-def ioErrParts(ps: List[String]): String =
-  if (List.len(ps) >= 2) List.at(ps, 0) else "String"
+  Type.show(Type.ioErr(Type.parse(t)))
 
 def ioOk(t: String): String =
-  ioOkParts(ioParts(t))
-
-def ioOkParts(ps: List[String]): String =
-  if (List.isEmpty(ps)) "A" else if (List.len(ps) == 1) List.at(ps, 0) else List.at(ps, List.len(ps) - 1)
+  Type.show(Type.ioOk(Type.parse(t)))
 
 def ioTy(e: String, a: String): String =
   if (e == "" || e == "String") Str.concat("IO[", Str.concat(a, "]")) else Str.concat("IO[", Str.concat(e, Str.concat(", ", Str.concat(a, "]"))))
@@ -1789,4 +1765,47 @@ def typeOfEns(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], mod: Str
 
 def typeOf(e: Expr, defs: List[Fun], ps: List[Param]): String =
   typeOfEns(e, defs, [], ps, "Main")
+
+def specializeEnums(ens: List[En], ty: String): List[En] =
+  if (List.isEmpty(ens)) ens else specializeEnum(List.at(ens, 0), ty) :: specializeEnums(List.tail(ens), ty)
+
+def specializeEnum(en: En, ty: String): En =
+  en match {
+    case En(priv, name, tps, cases) => if (!List.isEmpty(tps) && Str.startsWith(ty, Str.concat(name, "["))) En(priv, name, tps, specializeCases(cases, tps, Type.appArgs(Type.parse(ty)))) else En(priv, name, tps, cases)
+  }
+
+def specializeCases(cs: List[EnCase], tps: List[String], args: List[Ty]): List[EnCase] =
+  if (List.isEmpty(cs)) cs else specializeCase(List.at(cs, 0), tps, args) :: specializeCases(List.tail(cs), tps, args)
+
+def specializeCase(c: EnCase, tps: List[String], args: List[Ty]): EnCase =
+  c match {
+    case EnCase(name, fs) => EnCase(name, specializeFields(fs, tps, args))
+  }
+
+def specializeFields(ps: List[Param], tps: List[String], args: List[Ty]): List[Param] =
+  if (List.isEmpty(ps)) ps else specializeField(List.at(ps, 0), tps, args) :: specializeFields(List.tail(ps), tps, args)
+
+def specializeField(p: Param, tps: List[String], args: List[Ty]): Param =
+  p match {
+    case Param(n, ty, w, d) => Param(n, specializeType(ty, tps, args), w, d)
+  }
+
+def specializeType(ty: String, tps: List[String], args: List[Ty]): String =
+  if (List.isEmpty(tps) || List.isEmpty(args)) ty else specializeType(substTy(ty, List.at(tps, 0), Type.show(List.at(args, 0))), List.tail(tps), List.tail(args))
+
+def inferNamedCtor(en: String, ctor: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), rest: List[En]): Out =
+  if (List.isEmpty(rest)) inferCtor(en, args, env, funs, ens) else inferNamedCtorEn(List.at(rest, 0), List.tail(rest), en, ctor, args, env, funs, ens, span)
+
+def inferNamedCtorEn(head: En, rest: List[En], en: String, ctor: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  head match {
+    case En(_, name, tps, cases) => if (name != en) inferNamedCtor(en, ctor, args, env, funs, ens, span, rest) else if (List.isEmpty(tps)) inferCtor(en, args, env, funs, ens) else inferGenericCtor(en, ctor, tps, cases, args, env, funs, ens, span)
+  }
+
+def inferGenericCtor(en: String, ctor: String, tps: List[String], cases: List[EnCase], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(cases)) bad(Str.concat("unknown constructor ", ctor), span) else inferGenericCtorCase(en, ctor, tps, List.at(cases, 0), List.tail(cases), args, env, funs, ens, span)
+
+def inferGenericCtorCase(en: String, ctor: String, tps: List[String], c: EnCase, rest: List[EnCase], args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
+  c match {
+    case EnCase(name, ps) => if (name != ctor) inferGenericCtor(en, ctor, tps, rest, args, env, funs, ens, span) else checkGeneric(ctor, tps, ps, Type.show(Type.tApp(en, Type.mapParse(tps))), args, env, funs, ens, span, alignCall(ps, args))
+  }
 

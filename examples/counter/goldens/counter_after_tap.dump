@@ -1,6 +1,9 @@
 [signals]
-int[0] count = 1
-str[1] label = "count = 1"
+int[0] = 1
+str[1] = "ab"
+value[2] state = 0([1,"Counter"])
+int[3] count = 1
+str[4] label = "count = 1"
 
 [views]
 text:Counter

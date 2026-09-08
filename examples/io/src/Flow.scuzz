@@ -23,6 +23,33 @@ def composition(n: Int): IO[Unit] =
     _ <- IO.pure(enumValue).require(x => x == n)
     values <- IO.pure(List.map([n], x => Payload(x))).map(xs => List.map(xs, p => p.value))
     _ <- IO.pure(values).require(xs => xs == [n])
+    _ <- IO.pure(payloadHead([n]).value).require(v => v == n)
+    _ <- IO.pure(payloadSecond([0, n, 1]).value).require(v => v == n + 1)
+    _ <- IO.pure(payloadFold([n, 2], Payload(0)).value).require(v => v == n + 2)
+  } yield ()
+
+def namedComposition(n: Int): IO[Unit] =
+  for {
+    scalar = IO.pure(n)
+    text = IO.pure(Str.fromInt(n))
+    recordIO = IO.pure(Payload(n))
+    enumIO = IO.pure(Choice.Number(n))
+    listIO = IO.pure([Payload(n)])
+    flag = IO.pure(n > 0)
+    ratio = IO.pure(1.5)
+    mapped <- scalar.map(x => x + 1)
+    label <- text.map(x => Str.concat(x, "!"))
+    recordValue <- namedPayload(recordIO)
+    enumValue <- enumIO.map(c => c match {
+  case Choice.Number(x) => x
+  case Choice.Empty => 0
+})
+    values <- listIO.flatMap(xs => IO.pure(List.map(xs, p => p.value)))
+    negated <- flag.map(x => !x)
+    doubled <- ratio.map(x => x * 2.0)
+    failure = IO.fail(Payload(n)): IO[Payload, Int]
+    recovered <- failure.handleErrorWith(e => IO.pure(e.value + 2))
+    _ <- IO.pure(mapped == n + 1 && label == Str.concat(Str.fromInt(n), "!") && recordValue == n && enumValue == n && values == [n] && negated == !(n > 0) && doubled == 3.0 && recovered == n + 2).require(ok => ok)
   } yield ()
 
 def recoverInt(n: Int): IO[Unit] =
@@ -35,10 +62,14 @@ def copyPayload(n: Int, enabled: Bool, ratio: Float, label: String): IO[Unit] =
     positional = original.copy(n + 1)
     single = Payload(0).copy(value = n)
     unchanged = changed.copy()
+    rebuilt = rebuildPayload(changed)
+    looped = rebuildLoop(changed, 3)
     _ <- IO.pure(changed).require(p => p.value == n && p.enabled == enabled && p.ratio == ratio && p.label == label && p.child.value == n)
     _ <- IO.pure(positional).require(p => p.value == n + 1 && !p.enabled && p.label == "original")
     _ <- IO.pure(single).require(p => p.value == n)
     _ <- IO.pure(unchanged).require(p => p == changed)
+    _ <- IO.pure(rebuilt).require(p => p == changed)
+    _ <- IO.pure(looped).require(p => p == changed)
     _ <- IO.pure(CopyPayload(n, enabled, ratio, label, Payload(n)).child.value).require(v => v == n)
     _ <- IO.pure(CopyEnvelope(changed).payload.child).require(p => p.value == n)
     _ <- IO.pure(original).require(p => p.value == 0 && !p.enabled && p.ratio == 0.0 && p.label == "original" && p.child.value == n)
@@ -213,6 +244,8 @@ private def missKit(): IO[Unit] =
 def run(): IO[Unit] =
   for {
     _ <- composition(7)
+    _ <- namedComposition(7)
+    _ <- attempted(7)
     _ <- recoverInt(7)
     _ <- recoverRecord(7)
     _ <- recoverEnum(7)
@@ -230,4 +263,92 @@ def run(): IO[Unit] =
     _ <- pullKit()
     _ <- missKit()
   } yield ()
+
+def attempted(n: Int): IO[Unit] =
+  for {
+    failure = IO.fail(Payload(n)): IO[Payload, Int]
+    recordResult <- IO.attempt(failure)
+    intResult <- IO.attempt(IO.fail(n): IO[Int, String])
+    enumResult <- IO.attempt(IO.fail(Choice.Number(n)): IO[Choice, String])
+    success <- IO.attempt(IO.pure(Payload(n)))
+    recordValue = recordResult match {
+  case Result.Err(e) => e.value
+  case Result.Ok(v) => v + 1
+}
+    intValue = intResult match {
+  case Result.Err(e) => e
+  case Result.Ok(_) => n + 1
+}
+    enumValue = enumResult match {
+  case Result.Err(choice) => choice match {
+  case Choice.Number(e) => e
+  case Choice.Empty => n + 1
+}
+  case Result.Ok(_) => n + 1
+}
+    drained = drainError(Result.Err(3))
+    drainedValue = drained match {
+  case Result.Err(v) => v
+  case Result.Ok(_) => 1
+}
+    transformed = attemptedText(recordResult)
+    transformedValue = transformed match {
+  case Result.Err(v) => v
+  case Result.Ok(_) => n + 1
+}
+    transformedSuccess = attemptedText(Result.Ok(n))
+    transformedLabel = transformedSuccess match {
+  case Result.Ok(text) => text
+  case Result.Err(_) => ""
+}
+    successValue = success match {
+  case Result.Ok(p) => p.value
+  case Result.Err(_) => n + 1
+}
+    _ <- IO.pure(recordValue == n && intValue == n && enumValue == n && successValue == n && drainedValue == 0 && transformedValue == n && transformedLabel == Str.fromInt(n)).require(ok => ok)
+  } yield ()
+
+def namedPayload(io: IO[Payload]): IO[Int] =
+  io.map(p => p.value)
+
+def attemptedText(result: Result[Payload, Int]): Result[Int, String] =
+  result match {
+    case Result.Err(problem) => Result.Err(problem.value)
+    case Result.Ok(number) => Result.Ok(Str.fromInt(number))
+  }
+
+def rebuildPayload(p: CopyPayload): CopyPayload =
+  p match {
+    case CopyPayload(n, enabled, ratio, label, child) => CopyPayload(n, enabled, ratio, label, child)
+  }
+
+def rebuildLoop(p: CopyPayload, steps: Int): CopyPayload =
+  p match {
+    case CopyPayload(n, enabled, ratio, label, child) if steps > 0 => rebuildLoop(CopyPayload(n, enabled, ratio, label, child), steps - 1)
+    case _ => p
+  }
+
+def payloadHead(xs: List[Int]): Payload =
+  xs match {
+    case h :: _ => Payload(h)
+    case _ => Payload(0)
+  }
+
+def payloadSecond(xs: List[Int]): Payload =
+  xs match {
+    case _ :: h :: tail => Payload(h + List.len(tail))
+    case _ => Payload(0)
+  }
+
+def payloadFold(xs: List[Int], acc: Payload): Payload =
+  xs match {
+    case h :: tail => payloadFold(tail, Payload(acc.value + h))
+    case _ => acc
+  }
+
+def drainError(result: Result[Int, String]): Result[Int, String] =
+  result match {
+    case Result.Err(n) if n > 0 => drainError(Result.Err(n - 1))
+    case _ => result
+  }
 

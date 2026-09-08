@@ -343,7 +343,7 @@ def tyckFail(): Bool =
   tyckDiff(srcFailOk(), wantFailOk()) && rejects(srcFailMis(), "@main body must be IO[Unit]") && ioTypeArgs()
 
 def ioTypeArgs(): Bool =
-  genericTypeArgs() && ioTypeCompatibility()
+  genericTypeArgs() && ioTypeCompatibility() && namedIoTypes() && signalTypes() && attemptTypes() && kitLookup() && resultTypes()
 
 def genericTypeArgs(): Bool =
   collectionTypes() && userTypeArgs()
@@ -465,6 +465,29 @@ def dumpFail(): String =
 
 def dumpClosed(): String =
   if (!rejects(srcViewNope(), "unknown function View.nope")) "viewNope" else if (!rejects(srcViewArity(), "View.button expects")) "viewArity" else if (!rejects(srcSigGet(), "Signal.get arg type mismatch")) "sigGet" else if (!rejects(srcUiRun(), "Ui.run arg type mismatch")) "uiRun" else if (!rejects(srcIoNope(), "unknown function IO.notAKit")) "ioNope" else if (Check.check(srcTimeoutOk()) != "[]") Str.concat("timeoutOk ", Check.check(srcTimeoutOk())) else if (!rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")) Str.concat("timeoutMis ", Check.check(srcTimeoutMis())) else "closed-other"
+
+def namedIoTypes(): Bool =
+  Check.check("def right(io: IO[Int]): IO[String] = io.map(n => Str.fromInt(n))") == "[]" && rejects("def wrong(io: IO[Int]): IO[String] = io.map(n => n + 1)", "does not match declared") && rejects("def wrong(io: IO[Int]): IO[Int] = io.map(n => Str.len(n))", "type mismatch") && rejects("def wrong(io: IO[Int, Int]): IO[Int, Int] = io.flatMap(n => IO.fail(true))", "error") && rejects("def wrong(io: IO[Int, Int]): IO[Int] = io.handleErrorWith(e => IO.pure(Str.len(e)))", "type mismatch")
+
+def signalTypes(): Bool =
+  Check.check("""record State(n: Int)
+def right(): Signal[String] = Signal.map(Signal.make(State(1)), s => Str.fromInt(s.n))""") == "[]" && rejects("def wrong(s: Signal[Int]): Unit = Signal.set(s, \"x\")", "type mismatch") && rejects("def wrong(s: Signal[Int]): Signal[String] = Signal.map(s, n => n + 1)", "does not match declared") && rejects("def wrong(s: Signal[Int]): Signal[Int] = Signal.map(s, (n: String) => Str.len(n))", "type mismatch")
+
+def attemptTypes(): Bool =
+  Type.show(Type.ioErr(Type.parse("IO[Result[Int, String]]"))) == "String" && Type.show(Type.ioOk(Type.parse("IO[Result[Int, String]]"))) == "Result[Int, String]" && Check.check("def right(io: IO[Int, String]): IO[Result[Int, String]] = IO.attempt(io)") == "[]" && rejects("def wrong(io: IO[Int, String]): IO[Result[String, String]] = IO.attempt(io)", "does not match declared") && rejects("def wrong(): IO[Result[Int, String]] = IO.attempt(3)", "type mismatch")
+
+def kitLookup(): Bool =
+  List.forall(Kits.allKits(), kit => Kits.find(kit.name) == kit) && !Kits.has("Missing.name")
+
+def resultTypes(): Bool =
+  Check.check("def right(): Result[String, Int] = Result.Ok(1)") == "[]" && rejects("def wrong(): Result[String, Int] = Result.Ok(true)", "does not match declared") && Check.check("""record Problem(code: Int)
+def value(r: Result[Problem, Int]): Int = r match {
+  case Result.Err(e) => e.code
+  case Result.Ok(n) => n
+}""") == "[]" && rejects("""def wrong(r: Result[Int, String]): Int = r match {
+  case Result.Err(e) => Str.len(e)
+  case Result.Ok(s) => Str.len(s)
+}""", "type mismatch")
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else Str.concat("tyck-bad ", dumpFail()))

@@ -2753,6 +2753,30 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  {
+    size_t base_bytes, base_count, live_bytes, live_count;
+    sz_alloc_stats(&base_bytes, &base_count);
+    void *box = sz_box_i64(73);
+    SzAdt *payload = sz_adt_new(2, box);
+    SzError *error = sz_error_value(payload);
+    SzIo *inner = sz_io_fail(error);
+    SzIo *attempt = sz_io_attempt_as_result(inner);
+    sz_release(box);
+    sz_release(payload);
+    sz_release(error);
+    sz_release(inner);
+    SzIoResult result = sz_io_unsafe_run(attempt);
+    assert(result.ok);
+    SzAdt *out = result.value;
+    assert(sz_adt_tag(out) == 0);
+    SzAdt *recovered = sz_adt_payload(out);
+    assert(sz_adt_tag(recovered) == 2);
+    assert(sz_unbox_i64(sz_adt_payload(recovered)) == 73);
+    sz_release(out);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(base_count == live_count && base_bytes == live_bytes);
+  }
+
   /* Resource.make / use (IO acquire + IO release) */
   SzLangResource *lr;
   {

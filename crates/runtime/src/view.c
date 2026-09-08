@@ -53,7 +53,7 @@ struct SzView {
   SzSignalInt *show_when_sig;
   int64_t show_when_value;
 
-  /* View.each: rebuild children from Signal.list at layout (pull). */
+  /* View.each rebuilds children from the list cell at layout. */
   SzSignalList *each_sig;
   SzList *each_seen; /* last synced list (retained; sentinel 1 = never synced) */
   SzViewEachFn each_fn;

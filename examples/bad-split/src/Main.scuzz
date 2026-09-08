@@ -1,8 +1,8 @@
 @main def main: IO[Unit] =
   for {
-    title = Signal.str("live")
-    _ = Signal.getStr(title).require(for {
-  _ = Signal.setStr(title, "split")
+    title = Signal.make("live")
+    _ = Signal.get(title).require(for {
+  _ = Signal.set(title, "split")
 } yield true)
-    _ <- Ui.run(_ => View.text(Signal.getStr(title)))
+    _ <- Ui.run(_ => View.text(Signal.get(title)))
   } yield ()

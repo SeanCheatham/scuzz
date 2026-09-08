@@ -114,7 +114,7 @@ rm -rf /tmp/scuzz-fuzzbug
 cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
 @main def main: IO[Unit] =
   for {
-    count = Signal.int(0)
+    count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
     _ <- Ui.run(_ => View.column(
       View.text("Bug"),
@@ -135,7 +135,7 @@ fi
 cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
 @main def main: IO[Unit] =
   for {
-    count = Signal.int(0)
+    count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
     _ <- Ui.run(_ => View.column(
       View.text("Bug"),
@@ -152,7 +152,7 @@ grep -E '^failures = 0' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
 cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
 @main def main: IO[Unit] =
   for {
-    count = Signal.int(0)
+    count = Signal.make(0)
     label = Signal.map(count, n => s"count = $n")
     _ <- Ui.run(_ => View.column(
       View.text("Bug"),
@@ -205,7 +205,7 @@ def unused(): Int =
   3
 
 @main def main: IO[Unit] =
-  IO.pure(label(Signal.int(2))).map(_ => ())
+  IO.pure(label(Signal.make(2))).map(_ => ())
 EOF
 "$SCUZZ" fuzz --iterations 2 "$invalid_dir"
 grep -qx 'invalid = 1' "$invalid_dir/build/fuzz/summary.toml"
@@ -221,3 +221,39 @@ grep -q '^\[coverage\]' examples/io/build/fuzz/summary.toml
 grep -Eq '^reached = [1-9]' examples/io/build/fuzz/summary.toml
 "$SCUZZ" fuzz --iterations 4 examples/hello
 "$SCUZZ" fuzz --iterations 4 --oracles examples/counter
+
+workload_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-workload.XXXXXX")"
+mkdir -p "$workload_dir/src"
+cat > "$workload_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "workload"
+MANIFEST
+cat > "$workload_dir/src/Main.scuzz" <<'SOURCE'
+def accepts(n: Int): Bool =
+  n != 3
+
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$workload_dir/input.scuzz_verify" <<'CLAIMS'
+def input(n: Int): Bool =
+  Main.accepts(n)
+CLAIMS
+"$SCUZZ" fuzz --iterations 0 "$workload_dir"
+if "$SCUZZ" fuzz --seed 0 --iterations 16 "$workload_dir"; then
+  echo "workload search must find an input absent from the seeds" >&2
+  exit 1
+fi
+cp "$workload_dir/build/fuzz/repro.toml" "$workload_dir/first.toml"
+grep -Fqx 'events = ["drive input 3"]' "$workload_dir/first.toml"
+if "$SCUZZ" fuzz --replay "$workload_dir/first.toml" "$workload_dir"; then
+  echo "workload replay must preserve the failure" >&2
+  exit 1
+fi
+rm -rf "$workload_dir/corpus"
+if "$SCUZZ" fuzz --seed 0 --iterations 16 "$workload_dir"; then
+  echo "the same seed must find the same failure" >&2
+  exit 1
+fi
+cmp "$workload_dir/first.toml" "$workload_dir/build/fuzz/repro.toml"
+rm -rf "$workload_dir"
