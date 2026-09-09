@@ -11,14 +11,17 @@ int[8] quiet = 0
 int[9] mode = 0
 int[10] seg = 0
 str[11] countLabel = "count = 0"
-str[12] pageLabel = "page = 1"
-list[13] items = <1>
+list[12] items = <1>
 
 [views]
+semantics:Index book
 scroll:scroll
-radio:Home=0
-text:page = 1
-radio:Tasks=1
+choicechip:Home=0
+choicechip:Tasks=1
+choicechip:Preferences=0
+scroll:scroll
+semantics:Tasks
+text:Tasks
 textfield:item
 button:Add
 vdiv:vdiv
@@ -27,23 +30,6 @@ switch:On=0
 badge:0
 chip:Pin=0
 button:Rename
-card:card
-text:Preferences
-divider:divider
-unconstrained:box
-offstage:1
-visibility:1
-semantics:mark
-placeholder:ph
-tooltip:Sean
-inkwell:face
-avatar:S
-checktile:Star=0
-switchtile:Quiet=0
-radiotile:Night=0
-segmented:0
-fab:+
-expansion:More=0
 list:list
 listtile:milk
 text:Open
@@ -60,36 +46,31 @@ button:Save
 button:Clear
 
 [taps]
-0 Home 48,48 69x40
-1 Tasks 256,48 66x40
-2 Add 296,120 52x40
-3 On 112,168 64x40
-4 Pin 184,168 45x40
-5 Rename 237,168 84x40
-6 face 60,302 40x40
-7 Star 60,350 280x40
-8 Quiet 60,398 280x40
-9 Night 60,446 280x40
-10 segmented 60,494 280x40
-11 + 60,542 40x40
-12 More 60,590 280x40
-13 i 96,722 40x40
-14 Edit 144,722 51x40
-15 Open 203,722 62x40
-16 Tag 96,770 77x40
-17 Day 181,770 52x40
-18 Go 241,770 44x40
-19 In 96,818 63x40
-20 Done 167,818 62x40
-21 Del 237,818 48x40
-22 Save 36,926 59x40
-23 Clear 36,974 62x40
+0 Home 24,24 93x40
+1 Tasks 125,24 90x40
+2 Preferences 223,24 135x40
+3 Add 284,174 52x40
+4 On 84,222 64x40
+5 Pin 156,222 45x40
+6 Rename 209,222 84x40
+7 i 60,366 40x40
+8 Edit 108,366 51x40
+9 Open 167,366 62x40
+10 Tag 237,366 77x40
+11 Day 60,414 52x40
+12 Go 120,414 44x40
+13 In 172,414 63x40
+14 Done 243,414 62x40
+15 Del 60,462 48x40
+16 Save 24,546 59x40
+17 Clear 24,594 62x40
 
 [fields]
 0* item="" caret=0 sel=0:0
 
 [scrolls]
 0 scroll
+1 scroll
 
 [last_hit]
-xy 289.0 68.0 -> radio:Tasks
+xy 170.0 44.0 -> choicechip:Tasks

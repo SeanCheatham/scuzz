@@ -301,8 +301,7 @@ measurement path as body text. Control labels keep the default body size.
 
 Use `View.wrap` for action groups that must fit narrow windows. Use
 `View.maxSize` to cap a form field width. Its compiler call uses the shared
-runtime size constraint. Studio puts its form and preferences in one scroll
-view. The editor uses outlined secondary actions and text buttons for files.
+runtime size constraint. Studio groups its working pages in an Index Book. The editor uses outlined secondary actions and text buttons for files.
 Primary actions retain the yellow fill. Text fields clip content to their bounds. Button labels use an ellipsis when
 they exceed the available width. Their accessibility labels stay complete.
 Text insets, carets, and scroll offsets scale with the display.
@@ -312,6 +311,24 @@ scroll container even when it contains another scroll container.
 App theme selection, dark mode, and motion settings remain open. Keep accent
 colors separate from text selection colors. App content can use the existing
 explicit style constructors.
+
+### Index Book navigation
+
+`View.indexBook` groups named `View.section` pages around a persistent index.
+The index stays beside the page at widths of 640 logical pixels or more.
+At smaller widths, the index wraps above the page. A long index scrolls in its
+own space. Numbered printed tabs identify each section and mark selection. The index stays visible
+while the page scrolls. Each page keeps its scroll offset and app Signals.
+Only the selected page contributes content to hit testing and accessibility.
+The index supports focus-group arrow keys and Enter or Space activation.
+
+Use an Index Book for top-level app sections. Pass a selection Signal and a
+nonempty column of named sections. The selection is a zero-based index and must
+stay inside the section range. Each section supplies its own page heading.
+The book owns page scrolling. Studio uses Home, Tasks, and Preferences as
+separate working pages. Native proofs cover page switching, hidden controls,
+scroll retention, keyboard navigation, and wide-to-narrow resize. Studio
+Timeline claims check the active page and persistent index.
 
 ### Layout model
 

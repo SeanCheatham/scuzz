@@ -134,6 +134,14 @@ SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child) {
   return sz_view_badge(sig, child);
 }
 
+SzView *sz_lang_view_section(SzString *title, SzView *child) {
+  return sz_view_section(title ? sz_string_cstr(title) : "", child);
+}
+
+SzView *sz_lang_view_index_book(SzSignalInt *selected, SzView *sections) {
+  return sz_view_index_book(selected, sections);
+}
+
 SzView *sz_lang_view_card(SzView *child) { return sz_view_card(child); }
 
 SzView *sz_lang_view_tooltip(SzString *message, SzView *child) {

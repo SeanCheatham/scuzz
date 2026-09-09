@@ -14842,6 +14842,93 @@ static void test_view_focus_split_overlay(void) {
   remove(dump);
 }
 
+static void test_index_book_long_index(void) {
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *sections = sz_view_column();
+  SzView *root, *tabs[20], *scrolls[4];
+  const SzTheme *theme = sz_theme_default();
+  char title[32];
+  for (int i = 0; i < 16; i++) {
+    snprintf(title, sizeof title, "Section %d", i + 1);
+    sz_view_add_child(sections, sz_view_section(title, sz_view_text(title)));
+  }
+  root = sz_view_index_book(selected, sections);
+  sz_view_layout(root, 320.f, 240.f, theme);
+  assert(sz_view_collect_scrolls(root, scrolls, 4) == 2);
+  assert(sz_view_frame(scrolls[0]).h <= 96.f);
+  sz_view_scroll_by(scrolls[0], 1000.f);
+  sz_view_layout(root, 320.f, 240.f, theme);
+  assert(sz_view_collect_tap_targets(root, tabs, 20) == 16);
+  SzRect last = sz_view_frame(tabs[15]);
+  assert(last.y >= 0.f && last.y + last.h <= 96.f);
+  assert(sz_view_handle_tap(root, last.x + last.w * 0.5f,
+                           last.y + last.h * 0.5f));
+  assert(sz_signal_int_get(selected) == 15);
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
+static void test_index_book_navigation_and_resize(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzSignalInt *selected = sz_signal_int(0);
+    SzSignalInt *count = sz_signal_int(0);
+    SzView *sections = sz_view_column();
+    SzView *page = sz_view_column();
+    SzView *other = sz_view_button("Other action", counter_tap, count);
+    SzView *root, *taps[32], *scrolls[8];
+    SzTheme scaled = *sz_theme_default();
+    scaled.px_scale = (float)scale;
+    scaled.font_px *= scale;
+    scaled.control_h *= scale;
+    scaled.pad *= scale;
+    scaled.gap *= scale;
+    const SzTheme *theme = &scaled;
+    for (int i = 0; i < 12; i++)
+      sz_view_add_child(page, sz_view_button("Count", counter_tap, count));
+    sz_view_add_child(sections, sz_view_section("Page A", page));
+    sz_view_add_child(sections, sz_view_section("Page B", other));
+    root = sz_view_index_book(selected, sections);
+    sz_view_layout(root, 320.f * scale, 240.f * scale, theme);
+    assert(sz_view_collect_tap_targets(root, taps, 32) == 14);
+    assert(sz_view_frame(page).y > sz_view_frame(taps[0]).y);
+    assert(!sz_view_tap_label(root, "Other action"));
+    assert(sz_view_tap_label(root, "Count"));
+    assert(sz_signal_int_get(count) == 1);
+    assert(sz_view_collect_scrolls(root, scrolls, 8) == 2);
+    SzView *page_scroll = scrolls[1];
+    sz_view_scroll_by(page_scroll, 80.f * scale);
+    sz_view_layout(root, 320.f * scale, 240.f * scale, theme);
+    float offset = sz_view_scroll_y(page_scroll);
+    assert(offset > 0.f);
+    assert(sz_view_tap_label(root, "Page B"));
+    sz_view_layout(root, 320.f * scale, 240.f * scale, theme);
+    assert(sz_signal_int_get(selected) == 1);
+    assert(sz_view_collect_tap_targets(root, taps, 32) == 3);
+    assert(!sz_view_tap_label(root, "Count"));
+    assert(sz_view_tap_label(root, "Other action"));
+    assert(sz_signal_int_get(count) == 2);
+    assert(sz_view_tap_label(root, "Page A"));
+    sz_view_layout(root, 800.f * scale, 240.f * scale, theme);
+    assert(sz_view_frame(page).x >= 200.f * scale);
+    assert(fabsf(sz_view_scroll_y(page_scroll) - offset) < 0.1f);
+    assert(sz_signal_int_get(count) == 2);
+    sz_view_layout(root, 320.f * scale, 240.f * scale, theme);
+    assert(fabsf(sz_view_scroll_y(page_scroll) - offset) < 0.1f);
+    assert(sz_view_collect_tap_targets(root, taps, 32) == 14);
+    for (int i = 0; i < 2; i++) {
+      SzRect f = sz_view_frame(taps[i]);
+      assert(f.x >= 0.f && f.x + f.w <= 320.f * scale);
+    }
+    assert(sz_view_handle_key(root, "ArrowDown", "", 0));
+    assert(sz_signal_int_get(selected) == 0);
+    assert(sz_view_handle_key(root, "Enter", "", 0));
+    assert(sz_signal_int_get(selected) == 1);
+    sz_view_free(root);
+    sz_signal_int_free(selected);
+    sz_signal_int_free(count);
+  }
+}
+
 static void test_view_focus_group_keys(void) {
   SzSignalInt *a;
   SzSignalInt *b;
@@ -16058,6 +16145,8 @@ int main(void) {
   test_view_editor_undo_gutter();
   test_view_focus_split_overlay();
   test_view_focus_group_keys();
+  test_index_book_navigation_and_resize();
+  test_index_book_long_index();
   test_app_chord_save();
   test_app_chord_palette();
   test_caret_metrics();

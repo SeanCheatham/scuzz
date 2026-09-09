@@ -182,7 +182,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL ||
          kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE ||
          kind == SZ_VIEW_UNCONSTRAINED_BOX || kind == SZ_VIEW_SPLIT ||
-         kind == SZ_VIEW_OVERLAY;
+         kind == SZ_VIEW_OVERLAY || kind == SZ_VIEW_INDEX_BOOK ||
+         kind == SZ_VIEW_SECTION;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -617,6 +618,42 @@ SzView *sz_view_semantics(const char *label, SzView *child) {
   if (child)
     sz_view_add_child(v, child);
   return v;
+}
+
+SzView *sz_view_section(const char *title, SzView *child) {
+  SzView *v = sz_view_semantics(title, child);
+  v->kind = SZ_VIEW_SECTION;
+  return v;
+}
+
+SzView *sz_view_index_book(SzSignalInt *selected, SzView *sections) {
+  SzView *book, *index;
+  if (!selected || !sections || sections->kind != SZ_VIEW_COLUMN ||
+      sections->child_count == 0)
+    sz_panic("Index Book needs a selection and a nonempty column of sections");
+  for (int i = 0; i < sections->child_count; i++)
+    if (sections->children[i]->kind != SZ_VIEW_SECTION ||
+        !sections->children[i]->text || !sections->children[i]->text[0])
+      sz_panic("Index Book needs named sections");
+  book = view_new(SZ_VIEW_INDEX_BOOK);
+  book->sig_int = selected;
+  book->a11y_role = SZ_A11Y_SEMANTICS;
+  book->a11y_label = sz_strdup("Index book");
+  index = sz_view_wrap();
+  sz_view_add_child(book, sz_view_focus_group(sz_view_scroll(index)));
+  for (int i = 0; i < sections->child_count; i++) {
+    SzView *section = sections->children[i];
+    SzView *tab = sz_view_choice_chip(selected, i, section->text);
+    size_t label_size = strlen(section->text) + 32;
+    sz_free(tab->text);
+    tab->text = (char *)sz_alloc(label_size);
+    snprintf(tab->text, label_size, "%02d  %s", i + 1, section->text);
+    sz_view_add_child(index, tab);
+    sz_view_add_child(book, sz_view_show_when(selected, i, sz_view_scroll(section)));
+  }
+  sections->child_count = 0;
+  sz_view_free(sections);
+  return book;
 }
 
 SzView *sz_view_merge_semantics(const char *label, SzView *child) {
@@ -3196,6 +3233,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_ON_SECONDARY:
   case SZ_VIEW_FOCUS_GROUP:
   case SZ_VIEW_PLACEHOLDER:
+  case SZ_VIEW_SECTION:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
@@ -3215,6 +3253,53 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     /* Child gets unbounded max (0). Incoming max still clamps this frame. */
     layout_pass_child(v, x, y, 0.f, 0.f, 0.f, 0.f, theme);
     break;
+  case SZ_VIEW_INDEX_BOOK: {
+    SzView *nav = v->children[0];
+    SzView *tabs = nav->children[0]->children[0];
+    float width = max_w > 0.f ? max_w : scale_px(theme, 640.f);
+    float height = max_h > 0.f ? max_h : scale_px(theme, 480.f);
+    float gap = layout_gap(theme);
+    int wide = width >= scale_px(theme, 640.f);
+    int64_t selected = sz_signal_int_get(v->sig_int);
+    float nx, nh, px, py, pw, ph;
+    if (selected < 0 || selected >= v->child_count - 1)
+      sz_panic("Index Book selection is outside its sections");
+    tabs->kind = wide ? SZ_VIEW_COLUMN : SZ_VIEW_WRAP;
+    nx = wide ? scale_px(theme, 192.f) : width;
+    if (wide) {
+      nh = height;
+    } else {
+      layout_constrained(tabs, x, y,
+                         box_tight_width(fmaxf(0.f, width - 2.f * theme->pad), 0.f), theme);
+      nh = fminf(tabs->frame.h + 2.f * theme->pad, height * 0.4f);
+    }
+    layout_constrained(nav, x, y, box_tight(nx, nh), theme);
+    float nav_limit = fmaxf(0.f, (tabs->frame.h + 2.f * theme->pad - nh) /
+                                     theme_px_scale(theme));
+    if (nav->children[0]->scroll_y > nav_limit) {
+      nav->children[0]->scroll_y = nav_limit;
+      layout_constrained(nav, x, y, box_tight(nx, nh), theme);
+    }
+    px = wide ? x + nx + gap : x;
+    py = wide ? y : y + nh + gap;
+    pw = wide ? fmaxf(0.f, width - nx - gap) : width;
+    ph = wide ? height : fmaxf(0.f, height - nh - gap);
+    for (i = 1; i < v->child_count; i++) {
+      SzView *page = v->children[i];
+      layout_constrained(page, px, py, box_tight(pw, ph), theme);
+      if (view_is_shown(page)) {
+        float limit = fmaxf(0.f, (page->scroll_child->frame.h + 2.f * theme->pad - ph) /
+                                    theme_px_scale(theme));
+        if (page->scroll_y > limit) {
+          page->scroll_y = limit;
+          layout_constrained(page, px, py, box_tight(pw, ph), theme);
+        }
+      }
+    }
+    v->frame.w = width;
+    v->frame.h = height;
+    break;
+  }
   case SZ_VIEW_SPLIT: {
     SzView *left = v->child_count > 0 ? v->children[0] : NULL;
     SzView *right = v->child_count > 1 ? v->children[1] : NULL;
@@ -5023,6 +5108,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_ON_SECONDARY:
   case SZ_VIEW_FOCUS_GROUP:
+  case SZ_VIEW_SECTION:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
@@ -5037,6 +5123,14 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
     break;
+  case SZ_VIEW_INDEX_BOOK: {
+    SzRect nav = v->children[0]->frame;
+    paint_rect(c, nav.x, nav.y, nav.w, nav.h, theme->surface);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    paint_border(c, nav, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    break;
+  }
   case SZ_VIEW_SPLIT: {
     float handle = scale_px(theme, 6.f);
     float n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 50);
