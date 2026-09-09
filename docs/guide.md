@@ -165,6 +165,10 @@ count.scuzz_verify     # Timeline => Verdict session claims and Bool drive oracl
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries. `SCUZZ_RAND_SEED` seeds `Random.nextInt` (unset or `0` keeps 42). Under TestRuntime, Clock.realTime and Clock.monotonic both read the virtual ms counter (start 1). Simulation is hermetic (no live sockets; `Sys.exec` / `Sys.spawn` fail; `Sys.getenv` sealed except `SCUZZ_SERVE` / `SCUZZ_KIT`; `Sys.alive` / `Sys.kill` fake). Fault injection: `SCUZZ_FAULT_SEED` (or `SCUZZ_FAULT_KIND` + `SCUZZ_FAULT_N` + `SCUZZ_FAULT_MODE`) fails the Nth `Fs` / `Net` / `Queue` op, or drops/corrupts a Net stub. Seed `0` / unset is no fault. `scuzz fuzz` writes `fault_seed` and the decoded plan into `repro.toml`. PCT schedule: `SCUZZ_SCHED_SEED` arms priority plus change-points (packed `k=s%8`, `d=2+(s/8)%4`, `rng=s/32`). `SCUZZ_PCT_D` / `SCUZZ_PCT_K` override. Unset keeps FIFO. `scuzz fuzz` writes `schedule_seed` / `pct_d` / `pct_k` into `repro.toml`. Implicit oracles fail a run on leak (heap growth across consecutive idle UI pumps), deadlock (all fibers parked with no timer pending), heap baseline after session teardown, acquire/release pairing, finalizer-on-cancel, leftover parked fibers after quiesce, and a silent live/verify split (a `*.scuzz_sim` overlay is a declared delta).
 - Put non-determinism behind blessed `IO`. Keep View construction pure.
 
+After an intended visual change, inspect the rendered PNG files. Update the
+pixel goldens with `SCUZZ_SKIA=sk_sw scuzz test --pixels --update examples/counter`.
+Run `./scripts/ci.sh pixels` to compare the saved images with a fresh build.
+
 ## Examples to read next
 
 | Example | Shows |
