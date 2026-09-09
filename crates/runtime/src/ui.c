@@ -4,6 +4,9 @@
 #include "scuzz_embedder.h"
 #include "scuzz_mobile.h"
 #include "sk_capi.h"
+#ifdef __EMSCRIPTEN__
+#include "web.h"
+#endif
 
 #include "rt_util.h"
 #include "ui_script.h"
@@ -179,7 +182,7 @@ static void session_drop_pointer(SzUiSession *session);
 
 static int runtime_kind_ok(SzUiRuntimeKind kind) {
   return kind == SZ_UI_RUNTIME_HEADLESS || kind == SZ_UI_RUNTIME_DESKTOP ||
-         kind == SZ_UI_RUNTIME_MOBILE;
+         kind == SZ_UI_RUNTIME_MOBILE || kind == SZ_UI_RUNTIME_WEB;
 }
 
 static void sync_keyboard(SzUiSession *session) {
@@ -468,6 +471,8 @@ static const char *runtime_kind_name(SzUiRuntimeKind kind) {
     return "desktop";
   case SZ_UI_RUNTIME_MOBILE:
     return "mobile";
+  case SZ_UI_RUNTIME_WEB:
+    return "web";
   default:
     return "unknown";
   }
@@ -1487,6 +1492,12 @@ int sz_ui_pump_sync(SzUiSession *session) {
                         session->cfg.height, pw, ph, rgba, nbytes);
     }
   }
+#ifdef __EMSCRIPTEN__
+  if (session->cfg.kind == SZ_UI_RUNTIME_WEB) {
+    rgba = sk_surface_peek_pixels(session->surface, &nbytes);
+    if (rgba) sz_web_present(pw, ph, rgba);
+  }
+#endif
   session->pumps += 1;
   /* Leak oracle: heap must not grow across consecutive idle pumps. A dirty
    * frame resets the baseline. */

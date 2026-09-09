@@ -977,7 +977,7 @@ def ndkMiss(): String =
   "missing Android NDK - install the NDK, then set ANDROID_NDK_HOME"
 
 def badTarget(t: String): String =
-  Str.concat("unknown package target '", Str.concat(t, "' (host|android|ios|all). Example: scuzz package --target host"))
+  Str.concat("unknown package target '", Str.concat(t, "' (host|android|ios|web|all). Example: scuzz package --target host"))
 
 def bundleIdOf(toml: String): String =
   Manifest.uiBundle(Manifest.manUi(Manifest.parse(toml)))
@@ -1009,7 +1009,21 @@ def compileLinkedUi(m: Man, outDir: String): IO[Unit] =
   manNeed(m).flatMap(_ => if (m.hasUi) ensureUi().flatMap(_ => linkOnly(true, m.name, outDir)) else linkOnly(false, m.name, outDir))
 
 def pkgDir(dir: String, outDir: String, target: String): IO[Unit] =
-  if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir, outDir) else if (target == "ios") pkgIos(dir, outDir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ => pkgAndroid(dir, outDir).flatMap(_ => pkgIos(dir, outDir))) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
+  if (target == "web") pkgWeb(dir, outDir) else if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir, outDir) else if (target == "ios") pkgIos(dir, outDir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ => pkgAndroid(dir, outDir).flatMap(_ => pkgIos(dir, outDir))) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
+
+def pkgWeb(dir: String, outDir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgWebMan(dir, outDir, Manifest.parse(toml)))
+
+def pkgWebMan(dir: String, outDir: String, m: Man): IO[Unit] =
+  manNeed(m).flatMap(_ => if (m.hasUi) Fs.mkdirs(outDir).flatMap(_ => emitDir(dir, outDir, true).flatMap(_ => crateHome().flatMap(h => runLine(pkgWebCmd(h, joinSlash(outDir, Str.concat(m.name, ".ll")), joinSlash(outDir, "package/web"))).flatMap(r => pkgWebGot(r))))) else IO.fail("web package requires [ui]"))
+
+def pkgWebCmd(h: String, ll: String, dest: String): String =
+  Str.concat("bash ", Str.concat(shQuote(crateAt(h, "crates/embedder-web/build.sh")), Str.concat(" ", Str.concat(shQuote(ll), Str.concat(" ", shQuote(dest))))))
+
+def pkgWebGot(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, out, err) => Sys.write(out).flatMap(_ => if (code == 0) IO.println("scuzz package ok (web)") else IO.println(err).flatMap(_ => IO.fail("web package")))
+  }
 
 def pkgHost(dir: String, outDir: String): IO[Unit] =
   compileLinked(dir, outDir).flatMap(_ => pkgHostMan(dir, outDir))

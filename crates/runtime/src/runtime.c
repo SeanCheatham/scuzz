@@ -4127,16 +4127,22 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
    * bounded) does not depend on the process main-thread ulimit. Required on
    * macOS. `ulimit -s` cannot grow the main stack. */
   SzMainArgs args;
+#ifndef __EMSCRIPTEN__
   pthread_t thr;
   pthread_attr_t attr;
   size_t stack = 64u * 1024u * 1024u;
   int perr;
+#endif
 
   args.program = program;
   args.argc = argc;
   args.argv = argv;
   args.rc = 1;
 
+#ifdef __EMSCRIPTEN__
+  sz_runtime_main_worker(&args);
+  return args.rc;
+#else
   perr = pthread_attr_init(&attr);
   if (perr != 0)
     sz_panic("pthread_attr_init failed");
@@ -4168,4 +4174,5 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   if (perr != 0)
     sz_panic("pthread_join failed");
   return args.rc;
+#endif
 }

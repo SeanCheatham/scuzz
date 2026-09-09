@@ -1,0 +1,43 @@
+def heading(text: String): View =
+  View.fontSize(28, View.text(text))
+
+def paragraph(text: String): View =
+  View.padding(8, View.maxSize(760, 0, View.text(text)))
+
+def code(text: String): View =
+  View.card(View.padding(12, View.text(text)))
+
+def introduction(count: Signal[Int]): View =
+  View.column(heading("Scuzz Docs"), paragraph("Build native apps with a small functional language. Scuzz includes the compiler, effects, UI, and verification tools."), paragraph("This site is a Scuzz GUI app. The browser runs the same Signals and View layout as the native runtime."), View.fontSize(20, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages."))
+
+def installation(): View =
+  View.column(heading("Install and run"), paragraph("Install the Scuzz CLI from the project release. The native host needs clang and make. Linux also needs the zlib, bzip2, and OpenSSL development packages."), code("curl -fsSL https://raw.githubusercontent.com/SeanCheatham/scuzz/main/scripts/install.sh | sh"), paragraph("Create a GUI package. Run it with the Headless runtime."), code("""scuzz new --ui counter
+cd counter
+scuzz run --headless"""), paragraph("Use scuzz check to check formatting and types. Use scuzz fmt to format the source."), code("""scuzz fmt
+scuzz check"""))
+
+def language(): View =
+  View.column(heading("Language"), paragraph("Use def for functions. Values are immutable. A function states its parameter types and result type."), code("""def double(n: Int): Int =
+  n * 2"""), paragraph("Use a record to group values. Use copy to make a changed value."), code("""record Point(x: Int, y: Int)
+
+def move(p: Point): Point =
+  p.copy(x = p.x + 1)"""), paragraph("Use a for expression to bind values and sequence effects. An equals sign binds a pure value. The left arrow binds an effect result."), code("@main def main: IO[Unit] =\n  for {\n    name = \"Scuzz\"\n    _ <- IO.println(name)\n  } yield ()"))
+
+def interface(): View =
+  View.column(heading("Build a GUI"), paragraph("A View describes the interface. Ui.run mounts the View in a session. Signals hold state. A control changes a Signal. Bound text reads it."), code("@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    _ <- Ui.run(_ => View.column(\n      View.bindText(Signal.map(count, n => Str.fromInt(n))),\n      View.button(\"Add\", _ =>\n        Signal.set(count, Signal.get(count) + 1))))\n  } yield ()"), paragraph("Use View.column, View.row, and View.wrap for layout. Use View.indexBook with named View.section pages for app navigation. The book keeps the index visible and owns page scrolling."), paragraph("Headless uses the shared layout and input model. It supports event scripts, structural dumps, and verification without a display."))
+
+def verification(): View =
+  View.column(heading("Verify behavior"), paragraph("Scuzz combines simulation, properties, fuzzing, and mutation. Put assertions in live code with require. Put named claims in a .scuzz_verify file."), code("""def double(n: Int): Int =
+  (n * 2).require(result => result == n + n)"""), paragraph("Drivers supply workloads. Claims judge the recorded timeline. Simulation files replace effectful app definitions during verification."), code("""scuzz fuzz --iterations 100
+scuzz fuzz --iterations 0"""), paragraph("The zero-iteration command replays the stored corpus and seeds. A failed campaign writes a reduced reproduction and a summary under build/fuzz."))
+
+def browser(): View =
+  View.column(heading("Package for the web"), paragraph("Activate Emscripten 4.0.23 on the build host. Package a Scuzz GUI app as static browser files."), code("scuzz package --target web"), paragraph("The output is build/package/web. Serve this directory over HTTP for a local preview. Publish its contents with GitHub Pages for hosting."), paragraph("The app loads its JavaScript and WebAssembly from relative paths. A project site can live below a repository path. The browser does not need a Scuzz server."), paragraph("The first web target uses the software renderer. Native process execution, native sockets, and hot reload are not browser services."))
+
+@main def main: IO[Unit] =
+  for {
+    page = Signal.make(0)
+    count = Signal.make(0)
+    _ <- Ui.setTitle("Scuzz Docs")
+    _ <- Ui.run(_ => View.indexBook(page, View.column(View.section("Start", introduction(count)), View.section("Install", installation()), View.section("Language", language()), View.section("GUI", interface()), View.section("Verify", verification()), View.section("Web", browser()))))
+  } yield ()

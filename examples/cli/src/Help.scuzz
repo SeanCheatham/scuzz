@@ -14,7 +14,7 @@ Commands:
   fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
   new      Create a new Scuzz Lang project
   ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
-  package  Package a project for host, Android, or iOS
+  package  Package a project for host, Android, iOS, or web
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -299,7 +299,7 @@ The CLI uses SCUZZ_IDE, else SCUZZ_HOME/ide when that package exists, else examp
 """
 
 def helpPkg(): String =
-  """Package a project for host, Android, or iOS
+  """Package a project for host, Android, iOS, or web
 
 Usage: scuzz package [OPTIONS] [PATH]
 
@@ -308,7 +308,7 @@ Arguments:
 
 Options:
       --target <TARGET>
-          host, android, ios, or all [default: host]
+          host, android, ios, web, or all [default: host]
       --out-dir <OUT_DIR>
           [default: build]
       --message-format <MESSAGE_FORMAT>
@@ -319,5 +319,6 @@ Options:
 Examples:
   scuzz package --target host
   scuzz package --target android examples/counter
+  scuzz package --target web examples/docs
 """
 

@@ -82,6 +82,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   new-ui          scuzz new --ui path
   desktop         Desktop peer + X11 (needs xvfb)
   mobile          mobile shell + package targets
+  web             Docs package + browser input + Headless claims
 
 Examples:
   ./scripts/bootstrap.sh
@@ -344,6 +345,22 @@ slice_oracles() {
   slice_fixedpoint
 }
 
+slice_web() (
+  need_scuzz
+  need_cmd emcc 'Install Emscripten 4.0.23 and load emsdk_env.sh'
+  need_cmd node 'Install Node.js and Playwright 1.63.0 with Chromium'
+  web_tmp="$(mktemp -d)"
+  trap 'rm -rf "$web_tmp"' EXIT
+  "$SCUZZ" check examples/docs
+  "$SCUZZ" package --target web --out-dir "$web_tmp/docs output" examples/docs
+  node crates/embedder-web/test.cjs "$web_tmp/docs output/package/web"
+  "$SCUZZ" fuzz --iterations 0 examples/docs
+  if "$SCUZZ" package --target web examples/hello; then
+    echo 'web must reject a package without [ui]' >&2
+    exit 1
+  fi
+)
+
 slice_pr() {
   maybe_wipe
   export CI=1
@@ -404,6 +421,7 @@ case "$SLICE" in
   new-ui) slice_new_ui ;;
   desktop) slice_desktop ;;
   mobile) slice_mobile ;;
+  web) slice_web ;;
   oracles) slice_oracles ;;
   *)
     echo "unknown slice: $SLICE"

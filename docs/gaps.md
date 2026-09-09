@@ -70,7 +70,7 @@ Do not start these before thesis-critical gaps close.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not place OS IME candidate UI from it. Desktop already maps XIM preedit and Cocoa marked text into `SZ_INPUT_COMPOSE`.
 - **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, hello). Full macOS packaging stays `workflow_dispatch`. A Darwin UI link uses `-lc++`, `-framework Cocoa -lobjc`, `-force_load`, and the Skia frameworks.
-- **Web apps** — not a current target.
+- **Web apps** — the Docs GUI target uses WebAssembly. Browser clipboard, IME, accessibility integration, and hot reload remain open.
 - **HKT and environment `R`** — Thin generics. No `F[_]` beyond `IO`. No `ZIO[R, E, A]`.
 - **Oracle idioms in `guide.md`** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work. Authors write `Timeline => Verdict` and drive oracles in `*.scuzz_verify`.
 - **Emit fallbacks when Check returns an empty type** — Emit reads `Check.typeOfEns`. It does not invent `Any`. IO composition and `IO.pure` use checked payload types. Multi-field constructors and record `.copy` use checked argument types for scalar boxing. Int, String, record, enum, and List composition proofs live in `examples/io`. Copy proofs cover Int, Bool, Float, pointer fields, and an unchanged source record. Record patterns keep their field types. Native proofs reconstruct matched scalar and pointer fields. List patterns keep element types. Tail-call matches check guards before each recursive step. Result transformation proofs change both payload types. Nested field access reads the checked record layout and preserves values from temporary receivers. Native proofs cover named IO receivers and typed recovery. Some emitter helpers still use scalar fallbacks when the checker type is empty. Direction: keep types on the checked tree; do not guess from SSA names.
@@ -86,5 +86,5 @@ Open and deferred:
 - Live `Sys.exec` / `Sys.spawn` still fail under TestRuntime. Fuzz overlays `analyze`, `lspCall`, `runProject`, and `fuzzProject`.
 - Every new editor or chrome widget has a Headless path. No Desktop-only shortcut.
 - In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
-- Multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit, Windows desktop embedder, and web stay later.
+- Multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit, and Windows desktop embedder stay later.
 - Flutter DevTools / VM patching is an explicit non-goal.
