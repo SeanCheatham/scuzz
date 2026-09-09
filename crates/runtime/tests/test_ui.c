@@ -7180,8 +7180,8 @@ static void test_circular_progress_paint_ring(void) {
   ty = (int)(f.y + 1.f);
   cx = (int)(f.x + f.w * 0.5f);
   cy = (int)(f.y + f.h * 0.5f);
-  /* Full ring is primary. Hole stays the canvas background. */
-  assert(px_rgb(px, 80, tx, ty, 0xE8, 0xEF, 0x48));
+  /* The ink band shows completion. The center stays clear. */
+  assert(px_rgb(px, 80, tx, ty, 0x24, 0x23, 0x1F));
   assert(px_rgb(px, 80, cx, cy, 0xF3, 0xEF, 0xE3));
   sz_signal_int_set(sig, 0);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
@@ -12852,6 +12852,47 @@ static void test_progress_not_tap_target(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_progress_amount_without_accent(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.pad *= scale;
+    theme.gap *= scale;
+    theme.primary = theme.surface;
+    for (int kind = 0; kind < 2; kind++) {
+      SzSignalInt *sig = sz_signal_int(0);
+      SzView *view = kind ? sz_view_circular_progress(sig) : sz_view_progress(sig);
+      SkSurface *surf = sk_surface_make_raster_n32_premul(160 * scale, 60 * scale);
+      SkCanvas *canvas = sk_surface_get_canvas(surf);
+      int previous = -1;
+      for (int value = 0; value <= 100; value += 25) {
+        size_t bytes;
+        int ink = 0;
+        sz_signal_int_set(sig, value);
+        assert(sz_view_paint(view, canvas, 160 * scale, 60 * scale, &theme));
+        const uint8_t *pixels = sk_surface_peek_pixels(surf, &bytes);
+        SzRect frame = sz_view_frame(view);
+        for (int y = 0; y < 60 * scale; y++) {
+          for (int x = 0; x < 160 * scale; x++) {
+            if (px_rgb(pixels, 160 * scale, x, y, 0x24, 0x23, 0x1F))
+              ink++;
+            if (x >= frame.w || y >= frame.h)
+              assert(px_rgb(pixels, 160 * scale, x, y, 0xF3, 0xEF, 0xE3));
+          }
+        }
+        /* More completion adds ink even when the accent matches the paper. */
+        assert(ink > previous);
+        previous = ink;
+      }
+      sk_surface_unref(surf);
+      sz_view_free(view);
+      sz_signal_int_free(sig);
+    }
+  }
+}
+
 static void test_progress_paint_fill(void) {
   SzView *root;
   SzSignalInt *sig;
@@ -12878,7 +12919,7 @@ static void test_progress_paint_fill(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x65, 0x61, 0x57));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0xFF, 0xFC, 0xF4));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -16094,6 +16135,7 @@ int main(void) {
   test_progress_clamps_a11y();
   test_progress_not_tap_target();
   test_progress_paint_fill();
+  test_progress_amount_without_accent();
   test_progress_not_in_taps_dump();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
