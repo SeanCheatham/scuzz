@@ -5634,6 +5634,65 @@ static void test_checkbox_hit_test(void) {
   sz_signal_int_free(sig);
 }
 
+static SzView *bounded_label_control(int kind, SzSignalInt *sig, const char *label) {
+  switch (kind) {
+  case 0: return sz_view_checkbox(sig, label);
+  case 1: return sz_view_radio(sig, 1, label);
+  case 2: return sz_view_switch(sig, label);
+  case 3: return sz_view_checkbox_list_tile(sig, label);
+  case 4: return sz_view_radio_list_tile(sig, 1, label);
+  case 5: return sz_view_switch_list_tile(sig, label);
+  case 6: return sz_view_list_tile(label, sz_view_text("OK"));
+  default: return sz_view_expansion_tile(sig, label, sz_view_text("Details"));
+  }
+}
+
+static void test_control_labels_stay_in_bounds(void) {
+  const char *label = "A long selection label with readable words and UTF-8 caf\xc3\xa9";
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.pad *= scale;
+    theme.gap *= scale;
+    for (int kind = 0; kind < 8; kind++) {
+      for (int width = 64; width <= 256; width *= 2) {
+        SzSignalInt *sig = sz_signal_int(0);
+        SzView *control = bounded_label_control(kind, sig, label);
+        SzView *root = sz_view_sized(width, 40, control);
+        SzView *empty = sz_view_sized(width, 40, bounded_label_control(kind, sig, ""));
+        int canvas_w = 360 * scale;
+        SkSurface *surf = sk_surface_make_raster_n32_premul(canvas_w, 48 * scale);
+        SkSurface *reference = sk_surface_make_raster_n32_premul(canvas_w, 48 * scale);
+        size_t bytes, reference_bytes;
+        assert(sz_view_paint(root, sk_surface_get_canvas(surf), canvas_w, 48 * scale, &theme));
+        assert(sz_view_paint(empty, sk_surface_get_canvas(reference), canvas_w, 48 * scale, &theme));
+        const uint8_t *pixels = sk_surface_peek_pixels(surf, &bytes);
+        const uint8_t *base = sk_surface_peek_pixels(reference, &reference_bytes);
+        assert(bytes == reference_bytes);
+        int end = width * scale;
+        if (kind == 5) end -= 48 * scale;
+        if (kind == 6) end -= (int)(theme.pad + sk_font_measure_string("OK", theme.font_px));
+        if (kind == 7) end -= (int)(theme.pad + sk_font_measure_string(">", theme.font_px));
+        /* Labels do not cover trailing controls or paint outside the frame. */
+        for (int y = 0; y < 48 * scale; y++)
+          for (int x = end; x < canvas_w; x++)
+            assert(memcmp(pixels + (y * canvas_w + x) * 4,
+                          base + (y * canvas_w + x) * 4, 4) == 0);
+        SzString *a11y = sz_view_a11y_dump(control);
+        assert(strstr(sz_string_cstr(a11y), label) != NULL);
+        sz_string_free(a11y);
+        sk_surface_unref(surf);
+        sk_surface_unref(reference);
+        sz_view_free(root);
+        sz_view_free(empty);
+        sz_signal_int_free(sig);
+      }
+    }
+  }
+}
+
 static void test_selection_marks_without_color(void) {
   for (int scale = 1; scale <= 2; scale++) {
     SzTheme theme = *sz_theme_default();
@@ -15797,6 +15856,7 @@ int main(void) {
   test_checkbox_hit_test();
   test_checkbox_paint_off_on();
   test_selection_marks_without_color();
+  test_control_labels_stay_in_bounds();
   test_tap_collect_tree_order();
   test_activate_offscreen_button();
   test_checkbox_in_taps_dump();
