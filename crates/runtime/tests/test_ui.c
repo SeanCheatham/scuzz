@@ -2156,6 +2156,71 @@ static void test_on_secondary_script_fires(void) {
   remove(dump);
 }
 
+static void test_focus_revealed_after_resize(void) {
+  SzSignalInt *page = sz_signal_int(0);
+  SzSignalStr *draft = sz_signal_str("");
+  SzView *field = sz_view_text_field(draft, "item");
+  SzView *content = sz_view_column();
+  sz_view_add_child(content, sz_view_sized(20, 900, sz_view_text("space")));
+  sz_view_add_child(content, field);
+  SzView *sections = sz_view_column();
+  sz_view_add_child(sections, sz_view_section("stable", "Renamed title", content));
+  SzView *root = sz_view_index_book(page, sections);
+  SzUiConfig cfg = {0};
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 320; cfg.height = 720; cfg.scale = 1;
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  sz_ui_session_focus_view(session, field);
+  assert(sz_ui_pump_sync(session));
+  SzRect frame = sz_view_frame(field);
+  assert(frame.y >= 0 && frame.y + frame.h <= 720);
+  SzInputEvent resize = {0};
+  resize.kind = SZ_INPUT_RESIZE; resize.width = 320; resize.height = 240;
+  assert(sz_ui_inject_sync(session, &resize));
+  assert(sz_ui_pump_sync(session));
+  frame = sz_view_frame(field);
+  assert(frame.y >= 0 && frame.y + frame.h <= 240);
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  sz_signal_int_free(page);
+}
+
+static void test_code_copy_and_heading(void) {
+  char long_text[1024] = "";
+  for (int i = 0; i < 60; i++) strcat(long_text, "source line\n");
+  strcat(long_text, "last line");
+  SzView *long_view = sz_view_text(long_text);
+  sz_view_layout(long_view, 600, 0, sz_theme_default());
+  assert(sz_view_frame(long_view).h >= 61 * 20);
+  sz_view_free(long_view);
+  SzSignalStr *draft = sz_signal_str("");
+  SzView *root = sz_view_column();
+  SzView *targets[4];
+  const char *source = "echo café\n  echo world";
+  sz_view_add_child(root, sz_view_heading(1, sz_view_text("Example")));
+  sz_view_add_child(root, sz_view_code(source));
+  sz_view_add_child(root, sz_view_text_field(draft, "paste"));
+  SzUiConfig cfg = {0};
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 600; cfg.height = 400; cfg.scale = 1;
+  SzUiSession *session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_collect_tap_targets(root, targets, 4) >= 1);
+  assert(sz_ui_session_activate_view(session, targets[0]));
+  assert(sz_ui_session_paste(session, NULL));
+  assert(strcmp(sz_signal_str_get(draft), source) == 0);
+  SzString *dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "heading:1"));
+  assert(strstr(sz_string_cstr(dump), "outlined:Copied"));
+  sz_release(dump);
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+}
+
 static void test_session_inject_selection_clipboard(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -15019,6 +15084,75 @@ static void test_view_focus_split_overlay(void) {
   remove(dump);
 }
 
+static void test_app_shell_and_tabs(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzSignalInt *selected = sz_signal_int(0);
+    SzSignalInt *count = sz_signal_int(0);
+    SzSignalStr *draft = sz_signal_str("keep this text");
+    SzView *sections = sz_view_column(), *live = sz_view_column();
+    SzView *field = sz_view_text_field(draft, "Draft");
+    SzView *actions = sz_view_wrap();
+    SzView *action = sz_view_button("Save draft", counter_tap, count);
+    sz_view_add_child(actions, action);
+    sz_view_add_child(live, field);
+    for (int i = 0; i < 20; i++) sz_view_add_child(live, sz_view_text("Long panel content"));
+    sz_view_add_child(sections, sz_view_section("live", "Live", live));
+    sz_view_add_child(sections, sz_view_section("source", "Source", sz_view_button("Source action", counter_tap, count)));
+    SzView *tabs = sz_view_tabs(selected, sections);
+    SzView *bar = sz_view_app_bar(sz_view_text("A practical application"), actions);
+    SzView *root = sz_view_app_shell(bar, tabs);
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale; theme.control_h *= scale;
+    theme.pad *= scale; theme.gap *= scale;
+    for (int width = 320; width <= 800; width += 480) {
+      sz_view_layout(root, width * scale, 720.f * scale, &theme);
+      SzRect b = sz_view_frame(bar), a = sz_view_frame(action), t = sz_view_frame(tabs);
+      assert(b.y == 0.f && t.y == b.h);
+      assert(fabsf(t.h + b.h - 720.f * scale) < 0.1f);
+      assert(a.x >= 0.f && a.x + a.w <= width * scale);
+      assert(a.y >= 0.f && a.y + a.h <= b.h);
+      assert(sz_view_frame(field).x < 100.f * scale);
+      assert(!sz_view_tap_label(root, "Source action"));
+      SzView *scrolls[4];
+      assert(sz_view_collect_scrolls(root, scrolls, 4) == 2);
+      sz_view_scroll_by(scrolls[1], 60.f);
+      sz_view_layout(root, width * scale, 240.f * scale, &theme);
+      float offset = sz_view_scroll_y(scrolls[1]);
+      assert(offset > 0.f);
+      assert(sz_view_frame(bar).y == 0.f);
+      assert(sz_view_tap_label(root, "Live"));
+      assert(sz_view_handle_key(root, "ArrowRight", "", 0));
+      assert(sz_signal_int_get(selected) == 0);
+      assert(sz_view_handle_key(root, "Enter", "", 0));
+      assert(sz_signal_int_get(selected) == 1);
+      sz_view_layout(root, width * scale, 240.f * scale, &theme);
+      SzView *fields[4];
+      assert(sz_view_collect_text_fields(root, fields, 4) == 0);
+      assert(sz_view_tap_label(root, "Source action"));
+      assert(sz_view_tap_label(root, "Source"));
+      assert(sz_view_handle_key(root, "ArrowRight", "", 0));
+      assert(sz_view_handle_key(root, "Space", "", 0));
+      assert(sz_signal_int_get(selected) == 0);
+      sz_view_layout(root, width * scale, 240.f * scale, &theme);
+      assert(fabsf(sz_view_scroll_y(scrolls[1]) - offset) < 0.1f);
+      assert(strcmp(sz_signal_str_get(draft), "keep this text") == 0);
+      assert(sz_view_handle_key(root, "End", "", 0));
+      assert(sz_view_handle_key(root, "Home", "", 0));
+      assert(sz_view_handle_key(root, "Enter", "", 0));
+      assert(sz_signal_int_get(selected) == 0);
+      SzString *dump = sz_view_a11y_dump(root);
+      assert(strstr(sz_string_cstr(dump), "appbar:App bar"));
+      assert(strstr(sz_string_cstr(dump), "tab:Live=1"));
+      assert(strstr(sz_string_cstr(dump), "tabpanel:Live"));
+      assert(!strstr(sz_string_cstr(dump), "tabpanel:Source"));
+      sz_release(dump);
+    }
+    sz_view_free(root);
+    sz_signal_str_free(draft); sz_signal_int_free(selected); sz_signal_int_free(count);
+  }
+}
+
 static void test_index_book_long_index(void) {
   SzSignalInt *selected = sz_signal_int(0);
   SzView *sections = sz_view_column();
@@ -15027,7 +15161,7 @@ static void test_index_book_long_index(void) {
   char title[32];
   for (int i = 0; i < 16; i++) {
     snprintf(title, sizeof title, "Section %d", i + 1);
-    sz_view_add_child(sections, sz_view_section(title, sz_view_text(title)));
+    sz_view_add_child(sections, sz_view_section(title, title, sz_view_text(title)));
   }
   root = sz_view_index_book(selected, sections);
   sz_view_layout(root, 320.f, 240.f, theme);
@@ -15062,8 +15196,8 @@ static void test_index_book_navigation_and_resize(void) {
     const SzTheme *theme = &scaled;
     for (int i = 0; i < 12; i++)
       sz_view_add_child(page, sz_view_button("Count", counter_tap, count));
-    sz_view_add_child(sections, sz_view_section("Page A", page));
-    sz_view_add_child(sections, sz_view_section("Page B", other));
+    sz_view_add_child(sections, sz_view_section("a", "Page A", page));
+    sz_view_add_child(sections, sz_view_section("b", "Page B", other));
     root = sz_view_index_book(selected, sections);
     sz_view_layout(root, 320.f * scale, 240.f * scale, theme);
     assert(sz_view_collect_tap_targets(root, taps, 32) == 14);
@@ -15782,6 +15916,8 @@ int main(void) {
   test_session_inject_hover_secondary();
   test_on_secondary_script_fires();
   test_session_inject_selection_clipboard();
+  test_code_copy_and_heading();
+  test_focus_revealed_after_resize();
   test_session_inject_field_index();
   test_button_set_and_show_when();
   test_widgets();
@@ -16327,6 +16463,7 @@ int main(void) {
   test_view_focus_split_overlay();
   test_view_focus_group_keys();
   test_index_book_navigation_and_resize();
+  test_app_shell_and_tabs();
   test_index_book_long_index();
   test_app_chord_save();
   test_app_chord_palette();

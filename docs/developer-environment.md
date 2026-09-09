@@ -86,7 +86,16 @@ Build the product CLI with `./scripts/bootstrap.sh`. Then run:
 ./examples/cli/build/cli package --target web examples/docs
 ```
 
-The `web` CI slice also needs Node.js and Playwright 1.63.0 with Chromium.
+The `web` CI slice also needs Node.js and Playwright 1.63.0 with Chromium, Firefox, and WebKit.
+Install the browser binaries and host libraries with
+`playwright install --with-deps chromium firefox webkit`.
 Set `NODE_PATH` to the directory that contains the installed Playwright module.
 Run `./scripts/ci.sh web`. The browser check starts a temporary local HTTP
-server and closes it when the check ends.
+server and closes it when the check ends. The checks include phone emulation.
+
+For a real phone check, serve the web output through HTTPS. Open Docs on the
+phone. Copy a command with a long press. Zoom with two fingers. Scroll the page.
+Open GUI and focus each edit field. Check that the keyboard does not cover the
+field. Enter accented text, emoji, and IME text. Paste text. Rotate the phone.
+Switch sections and return to check the stored text. Emulation does not prove
+these OS keyboard and selection behaviors.

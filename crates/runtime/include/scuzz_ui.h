@@ -62,6 +62,7 @@ typedef struct SzInputEvent {
   float y;
   int width;  /* resize */
   int height; /* resize */
+  double scale; /* resize; 0 keeps the current display scale */
   const char *text; /* SZ_INPUT_TEXT / SZ_INPUT_TEXT_EDIT / SZ_INPUT_KEY insert */
   SzPointerPhase pointer_phase; /* SZ_INPUT_POINTER */
   float dy;                     /* SZ_INPUT_SCROLL (positive = content up) */
@@ -227,6 +228,9 @@ typedef enum SzViewKind {
   SZ_VIEW_ON_SECONDARY,       /* child + button-3 handler; sizes to the child; not a tap */
   SZ_VIEW_INDEX_BOOK,
   SZ_VIEW_SECTION,
+  SZ_VIEW_APP_SHELL,
+  SZ_VIEW_APP_BAR,
+  SZ_VIEW_TABS,
   SZ_VIEW_FOCUS_GROUP         /* child list of taps; sizes to the child; not a tap */
 } SzViewKind;
 
@@ -283,9 +287,14 @@ SzView *sz_view_switch_list_tile(SzSignalInt *sig, const char *title);
 SzView *sz_view_radio_list_tile(SzSignalInt *sig, int64_t value, const char *title);
 /* Full-width two-segment row. Tap left writes 0; tap right writes 1. */
 /* Named page for an Index Book. The book owns the section. */
-SzView *sz_view_section(const char *title, SzView *child);
+SzView *sz_view_section(const char *id, const char *title, SzView *child);
 /* Consume a column of sections. Selection is a zero-based section index. */
 SzView *sz_view_index_book(SzSignalInt *selected, SzView *sections);
+/* The shell reserves the bar height and gives the body the remaining space. */
+SzView *sz_view_app_shell(SzView *bar, SzView *body);
+SzView *sz_view_app_bar(SzView *title, SzView *actions);
+/* Fixed local panels. The selection is a zero-based section index. */
+SzView *sz_view_tabs(SzSignalInt *selected, SzView *sections);
 SzView *sz_view_segmented(SzSignalInt *sig, const char *left, const char *right);
 /* Overlay `sig` as a count on `child`. Sizes to the child. Not a tap target. */
 SzView *sz_view_badge(SzSignalInt *sig, SzView *child);
@@ -555,7 +564,12 @@ typedef enum SzA11yRole {
   SZ_A11Y_UNCONSTRAINED = 40,
   SZ_A11Y_EDITOR = 41,
   SZ_A11Y_SPLIT = 42,
-  SZ_A11Y_OVERLAY = 43
+  SZ_A11Y_OVERLAY = 43,
+  SZ_A11Y_HEADING = 44,
+  SZ_A11Y_TAB = 45,
+  SZ_A11Y_TAB_LIST = 46,
+  SZ_A11Y_TAB_PANEL = 47,
+  SZ_A11Y_APP_BAR = 48
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -763,8 +777,11 @@ SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
                                     SzString *title);
 SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *left, SzString *right);
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child);
-SzView *sz_lang_view_section(SzString *title, SzView *child);
+SzView *sz_lang_view_section(SzString *id, SzString *title, SzView *child);
 SzView *sz_lang_view_index_book(SzSignalInt *selected, SzView *sections);
+SzView *sz_lang_view_app_shell(SzView *bar, SzView *body);
+SzView *sz_lang_view_app_bar(SzView *title, SzView *actions);
+SzView *sz_lang_view_tabs(SzSignalInt *selected, SzView *sections);
 SzView *sz_lang_view_card(SzView *child);
 SzView *sz_lang_view_divider(void);
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,
@@ -836,6 +853,19 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * close. `resetpeak` resets
  * peak bytes and the heap delta mark. */
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
+
+/* Code blocks and heading semantics use the shared View tree. */
+SzView *sz_view_code(const char *text);
+SzView *sz_view_heading(int level, SzView *child);
+SzView *sz_lang_view_code(SzString *text);
+SzView *sz_lang_view_heading(int64_t level, SzView *child);
+SzView *sz_view_take_copy(SzView *root);
+const char *sz_view_copy_payload(SzView *view);
+void sz_view_copy_result(SzView *view, int success);
+void sz_view_focus(SzView *root, SzView *view);
+void sz_view_reveal_focus(SzView *root);
+void sz_ui_session_invalidate(SzUiSession *session);
+void sz_ui_session_focus_view(SzUiSession *session, SzView *view);
 
 #ifdef __cplusplus
 }

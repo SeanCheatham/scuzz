@@ -5,6 +5,7 @@
 #include "rt_util.h"
 #ifdef __EMSCRIPTEN__
 #include "web.h"
+static SzView *web_route_book;
 #endif
 
 #include <math.h>
@@ -34,6 +35,10 @@ struct SzView {
   char *text;
   char *prefix;
   char *placeholder;
+  char *route_id;
+  char *copy_text;
+  int copy_pending;
+  int heading_level;
   SzSignalInt *sig_int;
   SzSignalStr *sig_str;
   SzViewTapFn on_tap;
@@ -186,7 +191,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE ||
          kind == SZ_VIEW_UNCONSTRAINED_BOX || kind == SZ_VIEW_SPLIT ||
          kind == SZ_VIEW_OVERLAY || kind == SZ_VIEW_INDEX_BOOK ||
-         kind == SZ_VIEW_SECTION;
+         kind == SZ_VIEW_SECTION || kind == SZ_VIEW_TABS ||
+         kind == SZ_VIEW_APP_SHELL || kind == SZ_VIEW_APP_BAR;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -623,40 +629,84 @@ SzView *sz_view_semantics(const char *label, SzView *child) {
   return v;
 }
 
-SzView *sz_view_section(const char *title, SzView *child) {
+SzView *sz_view_section(const char *id, const char *title, SzView *child) {
   SzView *v = sz_view_semantics(title, child);
   v->kind = SZ_VIEW_SECTION;
+  v->route_id = sz_strdup(id ? id : "");
   return v;
 }
 
-SzView *sz_view_index_book(SzSignalInt *selected, SzView *sections) {
+static SzView *section_pages(SzSignalInt *selected, SzView *sections, int local) {
   SzView *book, *index;
   if (!selected || !sections || sections->kind != SZ_VIEW_COLUMN ||
       sections->child_count == 0)
-    sz_panic("Index Book needs a selection and a nonempty column of sections");
+    sz_panic("Page group needs a selection and a nonempty column of sections");
   for (int i = 0; i < sections->child_count; i++)
     if (sections->children[i]->kind != SZ_VIEW_SECTION ||
         !sections->children[i]->text || !sections->children[i]->text[0])
-      sz_panic("Index Book needs named sections");
-  book = view_new(SZ_VIEW_INDEX_BOOK);
+      sz_panic("Page group needs named sections");
+  for (int i = 0; i < sections->child_count; i++) {
+    const char *id = sections->children[i]->route_id;
+    if (!id || !id[0]) sz_panic("Page group needs nonempty section IDs");
+    for (int j = 0; j < i; j++)
+      if (!strcmp(id, sections->children[j]->route_id))
+        sz_panic("Page group needs unique section IDs");
+  }
+  book = view_new(local ? SZ_VIEW_TABS : SZ_VIEW_INDEX_BOOK);
   book->sig_int = selected;
   book->a11y_role = SZ_A11Y_SEMANTICS;
-  book->a11y_label = sz_strdup("Index book");
+  book->a11y_label = sz_strdup(local ? "Tabs" : "Index book");
   index = sz_view_wrap();
   sz_view_add_child(book, sz_view_focus_group(sz_view_scroll(index)));
+  if (local) {
+    book->children[0]->a11y_role = SZ_A11Y_TAB_LIST;
+    book->children[0]->a11y_label = sz_strdup("Tabs");
+  }
   for (int i = 0; i < sections->child_count; i++) {
     SzView *section = sections->children[i];
     SzView *tab = sz_view_choice_chip(selected, i, section->text);
-    size_t label_size = strlen(section->text) + 32;
-    sz_free(tab->text);
-    tab->text = (char *)sz_alloc(label_size);
-    snprintf(tab->text, label_size, "%02d  %s", i + 1, section->text);
+    if (local) {
+      tab->a11y_role = SZ_A11Y_TAB;
+      section->a11y_role = SZ_A11Y_TAB_PANEL;
+    } else {
+      tab->route_id = sz_strdup(section->route_id);
+      size_t label_size = strlen(section->text) + 32;
+      sz_free(tab->text);
+      tab->text = (char *)sz_alloc(label_size);
+      snprintf(tab->text, label_size, "%02d  %s", i + 1, section->text);
+    }
     sz_view_add_child(index, tab);
     sz_view_add_child(book, sz_view_show_when(selected, i, sz_view_scroll(section)));
   }
   sections->child_count = 0;
   sz_view_free(sections);
   return book;
+}
+
+SzView *sz_view_index_book(SzSignalInt *selected, SzView *sections) {
+  return section_pages(selected, sections, 0);
+}
+
+SzView *sz_view_tabs(SzSignalInt *selected, SzView *sections) {
+  return section_pages(selected, sections, 1);
+}
+
+SzView *sz_view_app_shell(SzView *bar, SzView *body) {
+  if (!bar || !body) sz_panic("App shell needs a bar and a body");
+  SzView *v = view_new(SZ_VIEW_APP_SHELL);
+  sz_view_add_child(v, bar);
+  sz_view_add_child(v, body);
+  return v;
+}
+
+SzView *sz_view_app_bar(SzView *title, SzView *actions) {
+  if (!title || !actions) sz_panic("App bar needs a title and actions");
+  SzView *v = view_new(SZ_VIEW_APP_BAR);
+  v->a11y_role = SZ_A11Y_APP_BAR;
+  v->a11y_label = sz_strdup("App bar");
+  sz_view_add_child(v, sz_view_heading(1, title));
+  sz_view_add_child(v, actions);
+  return v;
 }
 
 SzView *sz_view_merge_semantics(const char *label, SzView *child) {
@@ -1031,6 +1081,16 @@ static const char *a11y_role_name(SzA11yRole role) {
   switch (role) {
   case SZ_A11Y_BUTTON:
     return "button";
+  case SZ_A11Y_HEADING:
+    return "heading";
+  case SZ_A11Y_TAB:
+    return "tab";
+  case SZ_A11Y_TAB_LIST:
+    return "tablist";
+  case SZ_A11Y_TAB_PANEL:
+    return "tabpanel";
+  case SZ_A11Y_APP_BAR:
+    return "appbar";
   case SZ_A11Y_TEXT:
     return "text";
   case SZ_A11Y_TEXT_FIELD:
@@ -1558,6 +1618,8 @@ void sz_view_free(SzView *view) {
   sz_free(view->text);
   sz_free(view->prefix);
   sz_free(view->placeholder);
+  sz_free(view->route_id);
+  sz_free(view->copy_text);
   sz_free(view->a11y_label);
   sz_free(view->preedit);
   /* Signals are owned by the demo/session, not the view. */
@@ -2321,6 +2383,13 @@ static void resolve_text(const SzView *v, char *buf, size_t buflen) {
   }
 }
 
+static const char *text_content(const SzView *v, char *buf, size_t size) {
+  if (v->sig_str) return sz_signal_str_get(v->sig_str);
+  if (!v->sig_int && v->text) return v->text;
+  resolve_text(v, buf, size);
+  return buf;
+}
+
 /* Constraints down, sizes up. min==max is a tight slot (Sized, Expanded flex). */
 typedef struct SzBoxConstraints {
   float min_w;
@@ -2500,7 +2569,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     float font_px = layout_font_px(theme);
     float line_h = text_line_h(theme, font_px);
     float inset = scale_px(theme, 4.f);
-    resolve_text(v, buf, sizeof buf);
+    const char *content = text_content(v, buf, sizeof buf);
     inner = 0.f;
     if (max_w > inset)
       inner = max_w - inset;
@@ -2508,7 +2577,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     m.n = 0;
     m.cap = text_line_cap();
     m.truncated = 0;
-    each_text_line(buf, font_px, inner, accum_wrap_line, &m);
+    each_text_line(content, font_px, inner, accum_wrap_line, &m);
     if (m.n < 1)
       m.n = 1;
     v->frame.w = m.max_line_w + inset;
@@ -3270,17 +3339,54 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     /* Child gets unbounded max (0). Incoming max still clamps this frame. */
     layout_pass_child(v, x, y, 0.f, 0.f, 0.f, 0.f, theme);
     break;
+  case SZ_VIEW_APP_SHELL: {
+    float width = max_w > 0.f ? max_w : scale_px(theme, 640.f);
+    float height = max_h > 0.f ? max_h : scale_px(theme, 480.f);
+    SzView *bar = v->children[0];
+    layout_constrained(bar, x, y, box_tight_width(width, 0.f), theme);
+    float bh = fminf(bar->frame.h, height);
+    layout_constrained(v->children[1], x, y + bh,
+                       box_tight(width, fmaxf(0.01f, height - bh)), theme);
+    v->frame.w = width;
+    v->frame.h = height;
+    break;
+  }
+  case SZ_VIEW_APP_BAR: {
+    SzView *title = v->children[0], *actions = v->children[1];
+    float pad = theme->pad, gap = layout_gap(theme);
+    float width = max_w > 0.f ? max_w : scale_px(theme, 640.f);
+    float inner = fmaxf(0.01f, width - 2.f * pad);
+    layout_constrained(title, x + pad, y + pad, box_loose(0.f, 0.f), theme);
+    layout_constrained(actions, x + pad, y + pad, box_loose(0.f, 0.f), theme);
+    float tw = title->frame.w, aw = actions->frame.w;
+    if (tw + gap + aw <= inner) {
+      float h = fmaxf(title->frame.h, actions->frame.h);
+      layout_constrained(title, x + pad, y + pad + (h - title->frame.h) / 2.f,
+                         box_loose(tw, 0.f), theme);
+      layout_constrained(actions, x + width - pad - aw,
+                         y + pad + (h - actions->frame.h) / 2.f, box_loose(aw, 0.f), theme);
+      v->frame.h = h + 2.f * pad;
+    } else {
+      layout_constrained(title, x + pad, y + pad, box_loose(inner, 0.f), theme);
+      layout_constrained(actions, x + pad, y + pad + title->frame.h + gap,
+                         box_loose(inner, 0.f), theme);
+      v->frame.h = title->frame.h + gap + actions->frame.h + 2.f * pad;
+    }
+    v->frame.w = width;
+    break;
+  }
+  case SZ_VIEW_TABS:
   case SZ_VIEW_INDEX_BOOK: {
     SzView *nav = v->children[0];
     SzView *tabs = nav->children[0]->children[0];
     float width = max_w > 0.f ? max_w : scale_px(theme, 640.f);
     float height = max_h > 0.f ? max_h : scale_px(theme, 480.f);
     float gap = layout_gap(theme);
-    int wide = width >= scale_px(theme, 640.f);
+    int wide = v->kind == SZ_VIEW_INDEX_BOOK && width >= scale_px(theme, 640.f);
     int64_t selected = sz_signal_int_get(v->sig_int);
     float nx, nh, px, py, pw, ph;
     if (selected < 0 || selected >= v->child_count - 1)
-      sz_panic("Index Book selection is outside its sections");
+      sz_panic("Page selection is outside its sections");
     tabs->kind = wide ? SZ_VIEW_COLUMN : SZ_VIEW_WRAP;
     nx = wide ? scale_px(theme, 192.f) : width;
     if (wide) {
@@ -4246,12 +4352,47 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return;
 
+#ifdef __EMSCRIPTEN__
+  int excluded = 0;
+  for (SzView *p = v; p; p = p->parent)
+    if (p->kind == SZ_VIEW_EXCLUDE_SEMANTICS || p->kind == SZ_VIEW_IGNORE_POINTER)
+      excluded = 1;
+  int web_group = !excluded && (v->a11y_role == SZ_A11Y_APP_BAR ||
+    v->a11y_role == SZ_A11Y_TAB_LIST || v->a11y_role == SZ_A11Y_TAB_PANEL);
+  if (web_group) {
+    SzView *related = NULL;
+    if (v->a11y_role == SZ_A11Y_TAB_PANEL) {
+      SzView *book = v->parent->parent;
+      related = book->children[0]->children[0]->children[0]->children[sz_signal_int_get(book->sig_int)];
+    }
+    SzRect frame = v->a11y_role == SZ_A11Y_TAB_PANEL ? v->parent->frame : v->frame;
+    sz_web_group_begin(v, v->a11y_role, sz_view_a11y_label(v), related, 0,
+                       frame.x, frame.y, frame.w, frame.h);
+  }
+  if (!excluded && v->interactive) {
+    int checked = v->sig_int ? (int)sz_signal_int_get(v->sig_int) : 0;
+    if (v->kind == SZ_VIEW_CHOICE_CHIP || v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE)
+      checked = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
+    SzView *book = v->parent;
+    while (book && book->kind != SZ_VIEW_INDEX_BOOK) book = book->parent;
+    SzView *related = NULL;
+    if (v->a11y_role == SZ_A11Y_TAB) {
+      SzView *tabs = v->parent->parent->parent->parent;
+      related = tabs->children[v->radio_value + 1]->children[0];
+    }
+    sz_web_control(v, v->a11y_role, sz_view_a11y_label(v), book == web_route_book ? v->route_id : NULL,
+      v->copy_text, v->sig_str ? sz_signal_str_get(v->sig_str) : "", related, checked,
+      v->frame.x, v->frame.y, v->frame.w, v->frame.h,
+      g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h);
+  }
+#endif
+
   switch (v->kind) {
   case SZ_VIEW_TEXT: {
     SzWrapPaint wp;
     float inner = 0.f;
     float font_px = layout_font_px(theme);
-    resolve_text(v, buf, sizeof buf);
+    const char *content = text_content(v, buf, sizeof buf);
     if (v->frame.w > scale_px(theme, 4.f))
       inner = v->frame.w - scale_px(theme, 4.f);
     wp.c = c;
@@ -4270,16 +4411,19 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       m.n = 0;
       m.cap = wp.cap;
       m.truncated = 0;
-      each_text_line(buf, font_px, inner, accum_wrap_line, &m);
+      each_text_line(content, font_px, inner, accum_wrap_line, &m);
       wp.ellipsis = m.truncated;
     }
 #ifdef __EMSCRIPTEN__
     wp.selectable = 1;
     for (SzView *parent = v->parent; parent; parent = parent->parent)
       if (parent->interactive) wp.selectable = 0;
-    if (wp.selectable) sz_web_text_begin(buf);
+    int level = 0;
+    for (SzView *parent = v->parent; parent; parent = parent->parent)
+      if (parent->heading_level) { level = parent->heading_level; break; }
+    if (wp.selectable) sz_web_text_begin(v, content, level);
 #endif
-    each_text_line(buf, font_px, inner, paint_wrap_line, &wp);
+    each_text_line(content, font_px, inner, paint_wrap_line, &wp);
     break;
   }
   case SZ_VIEW_BUTTON: {
@@ -5175,19 +5319,41 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
     break;
+  case SZ_VIEW_APP_SHELL:
+    paint_children_clipped(v, c, theme);
+    break;
+  case SZ_VIEW_APP_BAR:
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    paint_rect(c, v->frame.x, v->frame.y + v->frame.h - scale_px(theme, 2.f),
+               v->frame.w, scale_px(theme, 2.f), theme->border);
+    break;
+  case SZ_VIEW_TABS:
   case SZ_VIEW_INDEX_BOOK: {
 #ifdef __EMSCRIPTEN__
-    if (sz_web_book_begin()) {
+    if (v->kind == SZ_VIEW_INDEX_BOOK && sz_web_book_begin()) {
+      web_route_book = v;
       for (i = 1; i < v->child_count; i++) {
         SzView *section = v->children[i]->children[0];
-        sz_web_section(section->text, i - 1 == sz_signal_int_get(v->sig_int));
+        sz_web_section(section->route_id, section->text, i - 1 == sz_signal_int_get(v->sig_int));
       }
     }
 #endif
     SzRect nav = v->children[0]->frame;
     paint_rect(c, nav.x, nav.y, nav.w, nav.h, theme->surface);
-    for (i = 0; i < v->child_count; i++)
-      paint_node(v->children[i], c, theme);
+    for (i = 0; i < v->child_count; i++) {
+#ifdef __EMSCRIPTEN__
+      /* Keep panel order stable so tab selection keeps browser focus. */
+      if (!excluded && v->kind == SZ_VIEW_TABS && i > 0 && !view_is_shown(v->children[i])) {
+        SzView *section = v->children[i]->children[0];
+        SzView *tab = v->children[0]->children[0]->children[0]->children[i - 1];
+        sz_web_group_begin(section, SZ_A11Y_TAB_PANEL, section->text, tab, 1, 0, 0, 0, 0);
+        sz_web_group_end();
+      } else
+#endif
+        paint_node(v->children[i], c, theme);
+    }
     paint_border(c, nav, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
     break;
   }
@@ -5221,6 +5387,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_border(c, focus, (int)(scale_px(theme, 3.f) + 0.5f), theme->surface);
     paint_border(c, focus, (int)(scale_px(theme, 1.f) + 0.5f), theme->foreground);
   }
+#ifdef __EMSCRIPTEN__
+  if (web_group) sz_web_group_end();
+#endif
 }
 
 static void paint_hover_bubble(SzView *v, SkCanvas *c, const SzTheme *theme,
@@ -5278,6 +5447,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
 #ifdef __EMSCRIPTEN__
+  web_route_book = NULL;
   sz_web_frame_begin(theme->px_scale > 0 ? theme->px_scale : 1);
 #endif
   paint_node(root, canvas, theme);
@@ -5807,10 +5977,51 @@ static int editor_toggle_fold_at(SzView *v, float x, float y) {
   return 1;
 }
 
+const char *sz_view_copy_payload(SzView *v) { return v ? v->copy_text : NULL; }
+
+void sz_view_copy_result(SzView *v, int success) {
+  if (!v || !v->copy_text) return;
+  sz_free(v->text);
+  sz_free(v->a11y_label);
+  v->text = sz_strdup(success ? "Copied" : "Copy failed");
+  v->a11y_label = sz_strdup(v->text);
+}
+
+SzView *sz_view_take_copy(SzView *v) {
+  if (!v) return NULL;
+  if (v->copy_pending) { v->copy_pending = 0; return v; }
+  for (int i = 0; i < v->child_count; i++) {
+    SzView *copy = sz_view_take_copy(v->children[i]);
+    if (copy) return copy;
+  }
+  return NULL;
+}
+
+SzView *sz_view_code(const char *text) {
+  SzView *column = sz_view_column();
+  SzView *button = sz_view_outlined_button("Copy", NULL, NULL);
+  button->copy_text = sz_strdup(text ? text : "");
+  sz_view_add_child(column, sz_view_align(2, 0, button));
+  sz_view_add_child(column, sz_view_text(text));
+  return sz_view_card(sz_view_padding(12, column));
+}
+
+SzView *sz_view_heading(int level, SzView *child) {
+  if (level < 1 || level > 6) sz_panic("Heading level must be 1 through 6");
+  SzView *v = sz_view_font_size(level == 1 ? 28 : 20, child);
+  v->heading_level = level;
+  v->a11y_role = SZ_A11Y_HEADING;
+  char label[8];
+  snprintf(label, sizeof label, "%d", level);
+  v->a11y_label = sz_strdup(label);
+  return v;
+}
+
 int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
   SzView *group;
   if (!root || !hit)
     return 0;
+  if (hit->copy_text) { hit->copy_pending = 1; return 1; }
   group = ancestor_focus_group(hit);
   if (hit->kind != SZ_VIEW_TEXT_FIELD && hit->kind != SZ_VIEW_EDITOR)
     clear_focus(root);
@@ -6451,6 +6662,23 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
     if (!find_focused_edit(root)) {
       group = find_active_focus_group(root);
       if (group) {
+        if (group->a11y_role == SZ_A11Y_TAB_LIST) {
+          SzView *tabs = group->parent;
+          int n = tabs->child_count - 1;
+          int next = group->caret;
+          if (strcmp(key, "ArrowLeft") == 0) next = (next + n - 1) % n;
+          else if (strcmp(key, "ArrowRight") == 0) next = (next + 1) % n;
+          else if (strcmp(key, "Home") == 0) next = 0;
+          else if (strcmp(key, "End") == 0) next = n - 1;
+          else next = -1;
+          if (next >= 0 && !(mods & (SZ_KEY_CTRL | SZ_KEY_CMD | SZ_KEY_ALT))) {
+            SzView *tab = group->children[0]->children[0]->children[next];
+            remember_group_focus(group, tab);
+            restore_group_focus(group);
+            sz_view_reveal_focus(root);
+            return 1;
+          }
+        }
         if (strcmp(key, "ArrowUp") == 0) {
           (void)move_group_focus(group, -1);
           return 1;
@@ -6644,7 +6872,7 @@ int sz_view_edit_extend_to_xy(SzView *view, float x, float y) {
 #ifdef __EMSCRIPTEN__
 /* The browser URL selects a section in the first Index Book. */
 static SzView *web_book(SzView *v) {
-  if (!v || !view_is_shown(v)) return NULL;
+  if (collect_walk_hidden(v)) return NULL;
   if (v->kind == SZ_VIEW_INDEX_BOOK) return v;
   for (int i = 0; i < v->child_count; i++) {
     SzView *book = web_book(v->children[i]);
@@ -6658,7 +6886,7 @@ int sz_view_web_navigate(SzView *root, const char *title) {
   if (!v) return 0;
   for (int i = 1; i < v->child_count; i++) {
     SzView *section = v->children[i]->children[0];
-    if (!strcmp(section->text, title)) {
+    if (!strcmp(section->route_id, title)) {
       sz_signal_int_set(v->sig_int, i - 1);
       return 1;
     }
@@ -6666,3 +6894,52 @@ int sz_view_web_navigate(SzView *root, const char *title) {
   return 0;
 }
 #endif
+
+#ifdef __EMSCRIPTEN__
+SzView *sz_view_web_find(SzView *v, uintptr_t id) {
+  if (!v || !view_is_shown(v) || v->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
+      (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v)) ||
+      (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v)) ||
+      (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))) return NULL;
+  if ((uintptr_t)v == id) return v;
+  for (int i = 0; i < v->child_count; i++) {
+    SzView *found = sz_view_web_find(v->children[i], id);
+    if (found) return found;
+  }
+  return NULL;
+}
+#endif
+
+static void reveal_view(SzView *view) {
+  SzRect frame = view->frame;
+  for (SzView *p = view->parent; p; p = p->parent) {
+    if (p->kind != SZ_VIEW_SCROLL) continue;
+    float start = p->scroll_h ? frame.x : frame.y;
+    float extent = p->scroll_h ? frame.w : frame.h;
+    float origin = p->scroll_h ? p->frame.x : p->frame.y;
+    float available = p->scroll_h ? p->frame.w : p->frame.h;
+    float delta = start < origin || extent > available ? start - origin :
+      start + extent > origin + available ? start + extent - origin - available : 0;
+    if (delta) {
+      sz_view_scroll_by(p, delta);
+      if (p->scroll_h) frame.x -= delta; else frame.y -= delta;
+    }
+  }
+}
+
+void sz_view_reveal_focus(SzView *root) {
+  if (!root || !view_is_shown(root)) return;
+  if (root->focused) reveal_view(root);
+  for (int i = 0; i < root->child_count; i++) sz_view_reveal_focus(root->children[i]);
+}
+
+void sz_view_focus(SzView *root, SzView *view) {
+  clear_focus(root);
+  clear_group_memories(root);
+  if (view) {
+    view->focused = 1;
+    reveal_view(view);
+    SzView *group = ancestor_focus_group(view);
+    if (group) remember_group_focus(group, view);
+  }
+}

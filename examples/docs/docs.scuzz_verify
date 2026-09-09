@@ -10,3 +10,18 @@ def countChangesOnlyWithControls(t: Timeline): Verdict =
 def resetClearsCount(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "outlined:Reset") || Timeline.signalInt(t, i, "count") == 0)
 
+def headingIsExposed(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "heading:1"))
+
+def codeHasCopyControl(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") == 0 || Timeline.a11yHas(t, i, "outlined:Copy") || Timeline.a11yHas(t, i, "outlined:Copied"))
+
+def guiHasEditingControls(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 3 || Timeline.signalInt(t, i, "guiTab") != 0 || Timeline.a11yHas(t, i, "textfield:Your text") && Timeline.a11yHas(t, i, "editor:editor"))
+
+def appBarStaysVisible(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "appbar:App bar") && Timeline.a11yHas(t, i, "textbutton:Get started") && Timeline.a11yHas(t, i, "outlined:Try GUI"))
+
+def onlySelectedTabIsExposed(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 3 || (if (Timeline.signalInt(t, i, "guiTab") == 0) Timeline.a11yHas(t, i, "tabpanel:Live example") && !Timeline.a11yHas(t, i, "tabpanel:Source") else Timeline.a11yHas(t, i, "tabpanel:Source") && !Timeline.a11yHas(t, i, "textfield:Your text") && !Timeline.a11yHas(t, i, "editor:editor")))
+

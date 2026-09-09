@@ -65,6 +65,9 @@ and resize events. Native network and process effects fail packaging.
 Files use Emscripten memory storage. They do not persist across page reloads.
 Static text supports browser selection and copying through a DOM text layer.
 Index Book sections use URL fragments for links and browser history.
-Editor clipboard access, IME composition, full accessibility integration, and
-hot reload remain open. Chromium runs the browser proof. Other browsers do not
-yet have a CI proof.
+The browser exposes links, buttons, headings, and editable fields through DOM
+controls. Fields support native clipboard actions and IME composition.
+Chromium, Firefox, and WebKit run the browser proof. Chromium and WebKit also
+run phone viewport and touch emulation. Real phone keyboards, long-press
+selection, pinch zoom, and screen-reader sessions still need device checks.
+Full accessibility conformance and hot reload remain open.
