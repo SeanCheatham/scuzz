@@ -32,7 +32,7 @@ def verification(): View =
 scuzz fuzz --iterations 0"""), paragraph("The zero-iteration command replays the stored corpus and seeds. A failed campaign writes a reduced reproduction and a summary under build/fuzz."))
 
 def browser(): View =
-  View.column(heading("Package for the web"), paragraph("Activate Emscripten 4.0.23 on the build host. Package a Scuzz GUI app as static browser files."), code("scuzz package --target web"), paragraph("The output is build/package/web. Serve this directory over HTTP for a local preview. Publish its contents with GitHub Pages for hosting."), paragraph("The app loads its JavaScript and WebAssembly from relative paths. A project site can live below a repository path. The browser does not need a Scuzz server."), paragraph("The first web target uses the software renderer. Native process execution, native sockets, and hot reload are not browser services."))
+  View.column(heading("Package for the web"), paragraph("Package a Scuzz GUI app as static browser files. The build needs Python 3. Scuzz downloads the web SDK on the first build and reuses it from the host cache."), code("scuzz package --target web"), paragraph("The output is build/package/web. Serve this directory over HTTP for a local preview. Publish its contents with GitHub Pages for hosting."), paragraph("The app loads its JavaScript and WebAssembly from relative paths. A project site can live below a repository path. The browser does not need a Scuzz server."), paragraph("The first web target uses the software renderer. Native process execution, native sockets, and hot reload are not browser services."))
 
 @main def main: IO[Unit] =
   for {

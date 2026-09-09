@@ -198,8 +198,16 @@ Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or l
 
 ## Package a GUI app for the browser
 
-Install Emscripten 4.0.23 on the build host. Activate its environment so `emcc`
-is on `PATH`. The app package must have a `[ui]` section.
+The build host needs Python 3. The app package must have a `[ui]` section.
+The first web build downloads Emscripten 4.0.23 into the host cache.
+Later builds reuse this SDK. No shell activation is required.
+
+On Linux, the cache is `$XDG_CACHE_HOME/scuzz`, or `~/.cache/scuzz` if
+`XDG_CACHE_HOME` is unset or is not an absolute path. On macOS, the cache is
+`~/Library/Caches/scuzz`. The SDK is in `emsdk/4.0.23/<host>-<architecture>`
+below this directory. Scuzz also stores the compiler cache there.
+Delete this SDK directory when no web build runs to reclaim its space.
+The next web build downloads it again. The first build needs network access.
 
 ```bash
 scuzz package --target web examples/docs
@@ -218,6 +226,17 @@ For another GitHub Pages site, publish the contents of the web output directory.
 The assets use relative URLs. They also work below a repository path.
 No application server or special response headers are required.
 The page must keep `app.js` and `app.wasm` beside `index.html`.
+
+Select page text with the pointer. Use the browser Copy command or Ctrl+C
+(Command+C on macOS). Copied text keeps its source spaces and line breaks.
+The browser text layer follows the shared text layout and scroll clips.
+
+The first Index Book updates the URL fragment, such as `#section=Install`.
+Share this URL to open the same section. Reload, Back, and Forward select the
+section from the URL. Section titles must be unique within the book. Keep titles
+stable to keep shared links valid. The URL keeps the site path and query.
+App Signals and page scroll offsets remain in memory during navigation.
+Reload starts a new app session.
 
 `examples/docs` is the first browser app. It uses Index Book navigation and a
 Signal counter. Verify its shared behavior with

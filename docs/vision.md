@@ -360,7 +360,10 @@ Timeline claims check the active page and persistent index.
 
 The browser target uses the shared compiler, Signals, View layout, and
 software renderer. Browser text uses matching font measurement and rasterization.
-`scuzz package --target web` writes static assets. Scuzz Docs uses Index Book
+`scuzz package --target web` writes static assets. It downloads the pinned
+Emscripten SDK into the host cache on the first build. Later builds reuse it.
+SDK setup stays inside the build process. It does not change shell startup files.
+Scuzz Docs uses Index Book
 navigation and a live counter. It runs below a GitHub Pages project path.
 The browser proof checks navigation, state retention, keyboard, touch, wheel,
 resize, and display scale in Chromium. Headless runs the Docs Timeline claims.

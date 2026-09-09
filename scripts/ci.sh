@@ -347,7 +347,8 @@ slice_oracles() {
 
 slice_web() (
   need_scuzz
-  need_cmd emcc 'Install Emscripten 4.0.23 and load emsdk_env.sh'
+  need_cmd python3 'Install Python 3 to build for the web'
+  python3 crates/embedder-web/test_sdk.py
   need_cmd node 'Install Node.js and Playwright 1.63.0 with Chromium'
   web_tmp="$(mktemp -d)"
   trap 'rm -rf "$web_tmp"' EXIT

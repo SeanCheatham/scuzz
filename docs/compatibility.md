@@ -46,7 +46,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | macOS desktop | Yes | Cocoa blit | peer to Linux X11 |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
 | iOS / Android | Shared app code | Packaging shells | `scuzz package`; NDK/Xcode for device |
-| Web / browser | WebAssembly GUI | Canvas presentation | `scuzz package --target web`; Emscripten 4.0.23 on the build host |
+| Web / browser | WebAssembly GUI | Canvas presentation | `scuzz package --target web`; cached Emscripten 4.0.23; Python 3 on the build host |
 
 ## Toolchain
 
@@ -63,6 +63,8 @@ The output needs no worker threads or cross-origin isolation headers.
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
 and resize events. Native network and process effects fail packaging.
 Files use Emscripten memory storage. They do not persist across page reloads.
-Browser clipboard access, IME composition, accessibility integration, and hot
-reload remain open. Chromium runs the browser proof. Other browsers do not
+Static text supports browser selection and copying through a DOM text layer.
+Index Book sections use URL fragments for links and browser history.
+Editor clipboard access, IME composition, full accessibility integration, and
+hot reload remain open. Chromium runs the browser proof. Other browsers do not
 yet have a CI proof.
