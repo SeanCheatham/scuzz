@@ -6318,12 +6318,56 @@ static void test_badge_sizes(void) {
   assert(sz_view_kind(badge) == SZ_VIEW_BADGE);
   f = sz_view_frame(badge);
   cf = sz_view_frame(ch);
-  assert(fabsf(f.w - cf.w) < 0.5f);
+  assert(fabsf(f.w - cf.w - 44.f) < 0.5f);
   assert(fabsf(f.h - cf.h) < 0.5f);
   assert(fabsf(f.h - theme->control_h) < 0.5f);
   sz_view_free(badge);
   sz_signal_int_free(sig);
   sz_signal_int_free(pin);
+}
+
+static void test_badge_ticket_counts_and_scale(void) {
+  const int64_t counts[] = {-1, 0, 9, 99, 100, INT64_MAX};
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.pad *= scale;
+    theme.gap *= scale;
+    for (int width = 64; width <= 256; width *= 2) {
+      SzSignalInt *count = sz_signal_int(0);
+      SzSignalInt *pin = sz_signal_int(0);
+      SzView *child = sz_view_chip(pin, "Pin");
+      SzView *badge = sz_view_badge(count, child);
+      SzView *root = sz_view_sized(width, 40, badge);
+      SkSurface *surface = sk_surface_make_raster_n32_premul(300 * scale, 60 * scale);
+      float previous_width = 0.f;
+      for (size_t i = 0; i < sizeof counts / sizeof counts[0]; i++) {
+        sz_signal_int_set(count, counts[i]);
+        assert(sz_view_paint(root, sk_surface_get_canvas(surface), 300 * scale, 60 * scale, &theme));
+        SzRect frame = sz_view_frame(badge);
+        SzRect control = sz_view_frame(child);
+        assert(frame.w > control.w);
+        assert(i == 0 || frame.w == previous_width);
+        previous_width = frame.w;
+        size_t bytes;
+        const uint8_t *pixels = sk_surface_peek_pixels(surface, &bytes);
+        for (int y = 0; y < 60 * scale; y++)
+          for (int x = width * scale; x < 300 * scale; x++)
+            assert(px_rgb(pixels, 300 * scale, x, y, 0xF3, 0xEF, 0xE3));
+        SzString *dump = sz_view_a11y_dump(root);
+        char full[64];
+        snprintf(full, sizeof full, "badge:%lld", (long long)counts[i]);
+        assert(strstr(sz_string_cstr(dump), full));
+        sz_string_free(dump);
+      }
+      sk_surface_unref(surface);
+      sz_view_free(root);
+      sz_signal_int_free(count);
+      sz_signal_int_free(pin);
+    }
+  }
 }
 
 static void test_badge_a11y(void) {
@@ -6408,9 +6452,9 @@ static void test_badge_paint_mark(void) {
   f = sz_view_frame(root);
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  /* Off chip fill stays surface; badge mark is primary at top-right. */
+  /* The ticket stays beside the child. */
   assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFC, 0xF4));
-  assert(px_rgb(px, 80, (int)(f.x + f.w - 4.f), (int)(f.y + 4.f), 0xE8, 0xEF, 0x48));
+  assert(px_rgb(px, 80, (int)(f.x + f.w - 4.f), (int)(f.y + 12.f), 0xE8, 0xEF, 0x48));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -15883,6 +15927,7 @@ int main(void) {
   test_list_tile_paint();
   test_list_tile_trailing_in_taps_dump();
   test_badge_sizes();
+  test_badge_ticket_counts_and_scale();
   test_badge_a11y();
   test_badge_not_tap_target();
   test_badge_child_tap();

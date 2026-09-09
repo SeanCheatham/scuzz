@@ -3219,6 +3219,21 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : child_min_h;
     break;
   }
+  case SZ_VIEW_BADGE: {
+    SzView *child = v->child_count ? v->children[0] : NULL;
+    float ticket = scale_px(theme, 40.f);
+    float gap = scale_px(theme, 4.f);
+    if (max_w > 0.f) {
+      ticket = fminf(ticket, max_w * 0.5f);
+      gap = fminf(gap, max_w * 0.1f);
+    }
+    if (child)
+      layout_constrained(child, x, y,
+                         box_loose(max_w > 0.f ? max_w - ticket - gap : 0.f, max_h), theme);
+    v->frame.w = (child ? child->frame.w + gap : 0.f) + ticket;
+    v->frame.h = fmaxf(child ? child->frame.h : 0.f, scale_px(theme, 24.f));
+    break;
+  }
   case SZ_VIEW_BACKGROUND:
   case SZ_VIEW_CLIP:
   case SZ_VIEW_OPACITY:
@@ -3228,7 +3243,6 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_TEXT_COLOR:
   case SZ_VIEW_BORDER:
   case SZ_VIEW_RADIUS:
-  case SZ_VIEW_BADGE:
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_ON_SECONDARY:
   case SZ_VIEW_FOCUS_GROUP:
@@ -4609,31 +4623,27 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_BADGE: {
-    float d;
-    float bx, by;
-    float font;
-    int64_t n;
+    SzView *child = v->child_count ? v->children[0] : NULL;
+    float gap = fminf(scale_px(theme, 4.f), v->frame.w * 0.1f);
+    float left = child ? child->frame.x + child->frame.w + gap : v->frame.x;
+    float height = fminf(scale_px(theme, 24.f), v->frame.h);
+    SzRect ticket = {left, v->frame.y + (v->frame.h - height) * 0.5f,
+                     fmaxf(0.f, v->frame.x + v->frame.w - left), height};
+    int64_t n = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
-    d = 14.f;
-    if (d > v->frame.w)
-      d = v->frame.w;
-    if (d > v->frame.h)
-      d = v->frame.h;
-    if (d < 1.f)
-      break;
-    bx = v->frame.x + v->frame.w - d;
-    by = v->frame.y;
-    paint_rect(c, bx, by, d, d, theme->primary);
-    n = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
-    if (n < 0)
-      n = 0;
-    snprintf(buf, sizeof buf, "%lld", (long long)n);
-    font = d * 0.6f;
-    if (font < 8.f)
-      font = 8.f;
-    paint_string(c, buf, bx + 2.f, by + (d + font) * 0.5f, theme->on_primary,
-                 font);
+    paint_rect(c, ticket.x, ticket.y, ticket.w, ticket.h, theme->primary);
+    paint_border(c, ticket, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
+    if (n > 99)
+      snprintf(buf, sizeof buf, "99+");
+    else
+      snprintf(buf, sizeof buf, "%lld", (long long)(n < 0 ? 0 : n));
+    float available = ticket.w - scale_px(theme, 8.f);
+    if (text_width(buf, theme->font_px) > available)
+      ellipsize_to_width(buf, sizeof buf, available, theme->font_px);
+    paint_string(c, buf, ticket.x + (ticket.w - text_width(buf, theme->font_px)) * 0.5f,
+                 ticket.y + (ticket.h + theme->font_px) * 0.5f,
+                 theme->on_primary, theme->font_px);
     break;
   }
   case SZ_VIEW_CARD: {
