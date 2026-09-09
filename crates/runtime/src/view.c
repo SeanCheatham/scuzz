@@ -3679,6 +3679,44 @@ static void paint_border(SkCanvas *c, SzRect f, int width, uint32_t argb) {
   paint_rect(c, f.x + f.w - t, f.y + t, t, f.h - 2.f * t, argb);
 }
 
+/* Selection marks keep their shape when color is unavailable. */
+static void paint_check(SkCanvas *c, SzRect box, int on, const SzTheme *theme) {
+  int i;
+  float unit = box.w / 18.f;
+  if (on) {
+    paint_rect(c, box.x, box.y, box.w, box.h, theme->primary);
+    for (i = 0; i < 11; i++) {
+      float y = i < 4 ? 8.f + i : 15.f - i;
+      paint_rect(c, box.x + (3.f + i) * unit, box.y + y * unit,
+                 2.f * unit, 2.f * unit, theme->foreground);
+    }
+  }
+  paint_border(c, box, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+}
+
+static void paint_switch_track(SkCanvas *c, SzRect track, int on,
+                               const SzTheme *theme) {
+  float inset = scale_px(theme, 3.f);
+  float thumb = track.h - 2.f * inset;
+  float x = on ? track.x + track.w - inset - thumb : track.x + inset;
+  paint_rect(c, track.x, track.y, track.w, track.h,
+             on ? theme->primary : theme->surface);
+  paint_border(c, track, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+  paint_rect(c, x, track.y + inset, thumb, thumb, theme->foreground);
+}
+
+static void paint_radio_mark(SkCanvas *c, SzRect box, int on,
+                            const SzTheme *theme) {
+  float inset = box.w / 6.f;
+  paint_border(c, box, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+  if (on) {
+    paint_rect(c, box.x + inset, box.y + inset, box.w - 2.f * inset,
+               box.h - 2.f * inset, theme->primary);
+    paint_rect(c, box.x + 2.f * inset, box.y + 2.f * inset,
+               box.w - 4.f * inset, box.h - 4.f * inset, theme->foreground);
+  }
+}
+
 static void paint_placeholder_mark(SkCanvas *c, SzRect f, uint32_t argb) {
   int i, steps;
   float n;
@@ -4216,10 +4254,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     br.w = box;
     br.h = box;
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
-    if (on)
-      paint_rect(c, bx, by, box, box, theme->primary);
-    else
-      paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    paint_check(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
@@ -4230,7 +4265,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
-    float tw, th, thumb, tx;
+    float tw, th;
     int on;
     if (box < scale_px(theme, 12.f))
       box = scale_px(theme, 12.f);
@@ -4242,10 +4277,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     bx = v->frame.x;
     by = v->frame.y + (v->frame.h - th) * 0.5f;
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
-    paint_rect(c, bx, by, tw, th, on ? theme->primary : theme->muted);
-    thumb = th > scale_px(theme, 4.f) ? th - scale_px(theme, 4.f) : th;
-    tx = on ? bx + tw - thumb - scale_px(theme, 2.f) : bx + scale_px(theme, 2.f);
-    paint_rect(c, tx, by + (th - thumb) * 0.5f, thumb, thumb, theme->surface);
+    paint_switch_track(c, (SzRect){bx, by, tw, th}, on, theme);
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, bx + tw + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
@@ -4392,10 +4424,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     br.w = box;
     br.h = box;
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
-    if (on)
-      paint_rect(c, bx, by, box, box, theme->primary);
-    else
-      paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    paint_check(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
@@ -4404,7 +4433,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
   case SZ_VIEW_SWITCH_LIST_TILE: {
     float box = theme->font_px + scale_px(theme, 4.f);
-    float tw, th, thumb, tx;
+    float tw, th;
     float bx, by;
     int on;
     if (box < scale_px(theme, 12.f))
@@ -4419,10 +4448,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       bx = v->frame.x + theme->pad;
     by = v->frame.y + (v->frame.h - th) * 0.5f;
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
-    paint_rect(c, bx, by, tw, th, on ? theme->primary : theme->muted);
-    thumb = th > scale_px(theme, 4.f) ? th - scale_px(theme, 4.f) : th;
-    tx = on ? bx + tw - thumb - scale_px(theme, 2.f) : bx + scale_px(theme, 2.f);
-    paint_rect(c, tx, by + (th - thumb) * 0.5f, thumb, thumb, theme->surface);
+    paint_switch_track(c, (SzRect){bx, by, tw, th}, on, theme);
     resolve_text(v, buf, sizeof buf);
     if (text_width(buf, theme->font_px) > bx - v->frame.x - theme->pad - theme->gap)
       ellipsize_to_width(buf, sizeof buf, bx - v->frame.x - theme->pad - theme->gap,
@@ -4436,7 +4462,6 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
-    float inset;
     int on;
     SzRect br;
     if (box < scale_px(theme, 12.f))
@@ -4451,12 +4476,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     br.y = by;
     br.w = box;
     br.h = box;
-    paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
     on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
-    inset = box > scale_px(theme, 8.f) ? scale_px(theme, 3.f) : scale_px(theme, 1.f);
-    if (on)
-      paint_rect(c, bx + inset, by + inset, box - inset * 2.f, box - inset * 2.f,
-                 theme->primary);
+    paint_radio_mark(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
@@ -4561,7 +4582,6 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float box = theme->font_px + scale_px(theme, 4.f);
     float gap;
     float bx, by;
-    float inset;
     int on;
     SzRect br;
     if (box < scale_px(theme, 12.f))
@@ -4575,12 +4595,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     br.y = by;
     br.w = box;
     br.h = box;
-    paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
     on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
-    inset = box > scale_px(theme, 8.f) ? scale_px(theme, 3.f) : scale_px(theme, 1.f);
-    if (on)
-      paint_rect(c, bx + inset, by + inset, box - inset * 2.f, box - inset * 2.f,
-                 theme->primary);
+    paint_radio_mark(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
@@ -4605,6 +4621,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_rect(c, v->frame.x, v->frame.y + (v->frame.h - track_h) * 0.5f,
                tx - v->frame.x + thumb * 0.5f, track_h, theme->primary);
     paint_rect(c, tx, ty, thumb, thumb, theme->primary);
+    paint_border(c, (SzRect){tx, ty, thumb, thumb},
+                 (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
     break;
   }
   case SZ_VIEW_PROGRESS: {

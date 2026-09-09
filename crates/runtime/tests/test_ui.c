@@ -5634,6 +5634,41 @@ static void test_checkbox_hit_test(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_selection_marks_without_color(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.pad *= scale;
+    theme.gap *= scale;
+    theme.primary = theme.background = theme.surface;
+    for (int kind = 0; kind < 4; kind++) {
+      SzSignalInt *sig = sz_signal_int(0);
+      SzView *view = kind == 0 ? sz_view_checkbox(sig, "") :
+                     kind == 1 ? sz_view_radio(sig, 1, "") :
+                     kind == 2 ? sz_view_checkbox_list_tile(sig, "") :
+                                 sz_view_radio_list_tile(sig, 1, "");
+      SkSurface *surf = sk_surface_make_raster_n32_premul(240, 100);
+      SkCanvas *canvas = sk_surface_get_canvas(surf);
+      size_t bytes;
+      const uint8_t *pixels;
+      int x = (9 + (kind >= 2 ? 12 : 0)) * scale;
+      int y = 20 * scale;
+      assert(sz_view_paint(view, canvas, 240, 100, &theme));
+      pixels = sk_surface_peek_pixels(surf, &bytes);
+      assert(px_rgb(pixels, 240, x, y, 0xFF, 0xFC, 0xF4));
+      sz_signal_int_set(sig, 1);
+      assert(sz_view_paint(view, canvas, 240, 100, &theme));
+      pixels = sk_surface_peek_pixels(surf, &bytes);
+      assert(px_rgb(pixels, 240, x, y, 0x24, 0x23, 0x1F));
+      sk_surface_unref(surf);
+      sz_view_free(view);
+      sz_signal_int_free(sig);
+    }
+  }
+}
+
 static void test_checkbox_paint_off_on(void) {
   SzView *root;
   SzSignalInt *sig;
@@ -5850,8 +5885,8 @@ static void test_switch_paint_off_on(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  /* Left of track: off thumb is surface, on fill is primary. */
-  assert(px_rgb(px, 80, 6, 16, 0xFF, 0xFC, 0xF4));
+  /* Left of track: off thumb is ink, on fill is primary. */
+  assert(px_rgb(px, 80, 6, 16, 0x24, 0x23, 0x1F));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
@@ -7535,8 +7570,8 @@ static void test_switch_list_tile_paint(void) {
   assert(px && n == 80 * 80 * 4);
   sx = (int)(f.x + f.w - theme->pad - tw + 6.f);
   sy = (int)(f.y + f.h * 0.5f);
-  /* Off thumb is surface. On track fill is primary. */
-  assert(px_rgb(px, 80, sx, sy, 0xFF, 0xFC, 0xF4));
+  /* Off thumb is ink. On track fill is primary. */
+  assert(px_rgb(px, 80, sx, sy, 0x24, 0x23, 0x1F));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
@@ -7703,13 +7738,13 @@ static void test_radio_list_tile_paint(void) {
   assert(px && n == 80 * 80 * 4);
   bx = (int)(f.x + theme->pad + 6.f);
   by = (int)(f.y + f.h * 0.5f);
-  /* Off inner is surface. On inner is primary. */
+  /* Off inner is surface. On inner is ink. */
   assert(px_rgb(px, 80, bx, by, 0xFF, 0xFC, 0xF4));
   sz_signal_int_set(sig, 1);
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  assert(px_rgb(px, 80, bx, by, 0xE8, 0xEF, 0x48));
+  assert(px_rgb(px, 80, bx, by, 0x24, 0x23, 0x1F));
   sk_surface_unref(surf);
   sz_view_free(root);
   sz_signal_int_free(sig);
@@ -15591,6 +15626,7 @@ int main(void) {
   test_checkbox_tap_toggles();
   test_checkbox_hit_test();
   test_checkbox_paint_off_on();
+  test_selection_marks_without_color();
   test_tap_collect_tree_order();
   test_activate_offscreen_button();
   test_checkbox_in_taps_dump();
