@@ -270,7 +270,7 @@ Runs end in a quiesce phase and claims judge the complete timeline at the termin
 
 ### UI design language
 
-Scuzz uses one default design language. Printed posters guide its visual style.
+Scuzz Style is the default UI design language. Printed posters guide its visual style.
 Use warm paper surfaces, dark text, square controls, and clear borders.
 Use yellow for primary actions and selection backgrounds. Use dark rust for
 accent text. Keep body text, form fields, and editor content clear. Do not add
@@ -286,6 +286,13 @@ an ink thumb that moves inside a bordered track. Slider thumbs have an ink
 border. These marks show selection through shape and position as well as color.
 Compact controls and list tiles use the same marks. Headless, Desktop, and
 Mobile use the same paint path.
+
+Selected chips and segmented controls use a printed tab shape. A heavy ink
+underline and a solid triangle at the top right mark the selected state.
+Both marks stay inside the control bounds. The yellow fill supports the marks.
+Labels use an ellipsis when space is limited. Each segment keeps its label
+inside its own half. Accessibility labels keep the complete text. These defaults
+apply to all apps through the shared renderer.
 
 Body text uses 14 logical pixels with a 20 pixel line height. Default controls
 have a 40 pixel height. Use `View.fontSize(28, ...)` for a screen title and

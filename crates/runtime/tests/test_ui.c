@@ -6012,6 +6012,48 @@ static void test_chip_hit_test(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_selection_tabs_without_color(void) {
+  for (int scale = 1; scale <= 2; scale++) {
+    SzTheme theme = *sz_theme_default();
+    theme.px_scale = (float)scale;
+    theme.font_px *= scale;
+    theme.control_h *= scale;
+    theme.pad *= scale;
+    theme.gap *= scale;
+    theme.primary = theme.surface;
+    for (int kind = 0; kind < 5; kind++) {
+      SzSignalInt *sig = sz_signal_int(0);
+      SzView *view = kind == 0 ? sz_view_chip(sig, "Label") :
+                     kind == 1 ? sz_view_choice_chip(sig, 1, "Label") :
+                     kind == 2 ? sz_view_filter_chip(sig, "Label") :
+                     kind == 3 ? sz_view_input_chip(sig, "Label") :
+                                 sz_view_segmented(sig, "Left", "Right");
+      SkSurface *surf = sk_surface_make_raster_n32_premul(400, 100);
+      SkCanvas *canvas = sk_surface_get_canvas(surf);
+      size_t bytes;
+      const uint8_t *pixels;
+      SzRect f;
+      assert(sz_view_paint(view, canvas, 400, 100, &theme));
+      f = sz_view_frame(view);
+      int x = (int)(f.x + f.w * (kind == 4 ? 0.75f : 0.5f));
+      int y = (int)(f.y + f.h - 3.f * scale);
+      int cx = (int)(f.x + f.w - 3.f * scale);
+      int cy = (int)(f.y + 3.f * scale);
+      pixels = sk_surface_peek_pixels(surf, &bytes);
+      assert(px_rgb(pixels, 400, x, y, 0xFF, 0xFC, 0xF4));
+      assert(px_rgb(pixels, 400, cx, cy, 0xFF, 0xFC, 0xF4));
+      sz_signal_int_set(sig, 1);
+      assert(sz_view_paint(view, canvas, 400, 100, &theme));
+      pixels = sk_surface_peek_pixels(surf, &bytes);
+      assert(px_rgb(pixels, 400, x, y, 0x24, 0x23, 0x1F));
+      assert(px_rgb(pixels, 400, cx, cy, 0x24, 0x23, 0x1F));
+      sk_surface_unref(surf);
+      sz_view_free(view);
+      sz_signal_int_free(sig);
+    }
+  }
+}
+
 static void test_chip_paint_off_on(void) {
   SzView *root;
   SzSignalInt *sig;
@@ -15643,6 +15685,7 @@ int main(void) {
   test_chip_tap_toggles();
   test_chip_hit_test();
   test_chip_paint_off_on();
+  test_selection_tabs_without_color();
   test_chip_in_taps_dump();
   test_list_tile_sizes();
   test_list_tile_unbounded_width();
