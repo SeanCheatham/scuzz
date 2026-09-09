@@ -243,6 +243,9 @@ private def missKit(): IO[Unit] =
 
 def run(): IO[Unit] =
   for {
+    _ <- tupleCapture((0, "0", true), 0).require(ok => ok)
+    _ <- tupleCapture((7, "7", false), 7).require(ok => ok)
+    _ <- tupleCapture((-3, "-3", false), -3).require(ok => ok)
     _ <- composition(7)
     _ <- namedComposition(7)
     _ <- attempted(7)
@@ -350,5 +353,13 @@ def drainError(result: Result[Int, String]): Result[Int, String] =
   result match {
     case Result.Err(n) if n > 0 => drainError(Result.Err(n - 1))
     case _ => result
+  }
+
+def code(n: Int): Int =
+  n + 1
+
+def tupleCapture(result: (Int, String, Bool), expected: Int): IO[Bool] =
+  result match {
+    case (code, label, enabled) => IO.pure(()).flatMap(_ => IO.pure(code == 0).flatMap(zero => IO.pure(zero == (expected == 0) && code == expected && label == Str.fromInt(expected) && enabled == (expected == 0))))
   }
 

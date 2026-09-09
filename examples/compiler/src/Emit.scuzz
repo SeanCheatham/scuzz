@@ -5917,27 +5917,27 @@ def emitContsCtor2(p: (String, Int), args: List[Expr], strs: List[String], defs:
   }
 
 def emitContsMatch(s: Expr, arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
-  emitContsMatch2(emitContsAt(s, strs, defs, ens, ps, loc, id), arms, strs, defs, ens, ps, loc)
+  emitContsMatch2(emitContsAt(s, strs, defs, ens, ps, loc, id), arms, strs, defs, ens, ps, loc, exprRetTyEns(s, defs, ens, ps, loc))
 
-def emitContsMatch2(p: (String, Int), arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): (String, Int) =
+def emitContsMatch2(p: (String, Int), arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ty: String): (String, Int) =
   p match {
-    case (code, id) => emitContsArgs3(code, emitContsArmList(arms, strs, defs, ens, ps, loc, id))
+    case (code, id) => emitContsArgs3(code, emitContsArmList(arms, strs, defs, ens, ps, loc, id, ty))
   }
 
-def emitContsArmList(arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
-  if (List.isEmpty(arms)) ("", id) else emitContsArmHd(List.at(arms, 0), List.tail(arms), strs, defs, ens, ps, loc, id)
+def emitContsArmList(arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int, ty: String): (String, Int) =
+  if (List.isEmpty(arms)) ("", id) else emitContsArmHd(List.at(arms, 0), List.tail(arms), strs, defs, ens, ps, loc, id, ty)
 
-def emitContsArmHd(a: Arm, rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsArmHd(a: Arm, rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int, ty: String): (String, Int) =
   a match {
-    case Arm(pat, _, body) => emitContsArmList2(emitContsAt(body, strs, defs, ens, bindPatPs(pat, ps), loc, id), rest, strs, defs, ens, ps, loc)
+    case Arm(pat, _, body) => emitContsArmList2(emitContsAt(body, strs, defs, ens, bindPatPs(pat, ps, ty), loc, id), rest, strs, defs, ens, ps, loc, ty)
   }
 
-def bindPatPs(pat: String, ps: List[Param]): List[Param] =
-  if (isTuplePat(pat)) bindTupPsTy(tupBindNs(pat), noStr(), ps) else ps
+def bindPatPs(pat: String, ps: List[Param], ty: String): List[Param] =
+  if (isTuplePat(pat)) bindTupPsTy(tupBindNs(pat), tupSlots(ty), ps) else ps
 
-def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): (String, Int) =
+def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ty: String): (String, Int) =
   p match {
-    case (code, id) => emitContsArgs3(code, emitContsArmList(rest, strs, defs, ens, ps, loc, id))
+    case (code, id) => emitContsArgs3(code, emitContsArmList(rest, strs, defs, ens, ps, loc, id, ty))
   }
 
 def emitContsMap(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =

@@ -1037,8 +1037,11 @@ def pkgWebCmd(h: String, ll: String, dest: String): String =
 
 def pkgWebGot(r: (Int, String, String)): IO[Unit] =
   r match {
-    case (code, out, err) => Sys.write(out).flatMap(_ => if (code == 0) IO.println("scuzz package ok (web)") else IO.println(err).flatMap(_ => IO.fail("web package")))
+    case (code, out, err) => pkgWebResult(code, out, err)
   }
+
+def pkgWebResult(code: Int, out: String, err: String): IO[Unit] =
+  Sys.write(out).flatMap(_ => if (code == 0) IO.println("scuzz package ok (web)") else IO.println(err).flatMap(_ => IO.fail(Str.concat("web package failed with exit code ", Str.fromInt(code)))))
 
 def pkgHost(dir: String, outDir: String): IO[Unit] =
   compileLinked(dir, outDir).flatMap(_ => pkgHostMan(dir, outDir))

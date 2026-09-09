@@ -17,7 +17,7 @@ async function check(browserType, url, mobile) {
     const expectText = async text => {
       try {
         await page.waitForFunction(text => Module.ready && Module.ccall('sz_web_snapshot', 'string', [], []).includes(text) &&
-          Module.textBlocks?.some(block => block.text.includes(text.replace(/^text:/, ''))), text);
+          Module.textBlocks?.some(block => block.text === text.replace(/^text:/, '')), text);
       } catch (error) {
         console.error({expected: text, url: page.url(), errors,
           state: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
@@ -25,23 +25,35 @@ async function check(browserType, url, mobile) {
       }
     };
     await page.goto(url);
-    await expectText('text:Scuzz Docs');
+    await expectText('text:Start');
     assert.equal(await page.title(), 'Scuzz Docs');
-    assert.equal(await page.getByRole('heading', {name: 'Scuzz Docs', level: 1}).count(), 1);
-    assert.equal(await page.getByRole('link').count(), 6);
+    assert.equal(await page.getByRole('heading', {name: 'Start', level: 1}).count(), 1);
+    assert.equal(await page.getByRole('link').count(), 11);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
+    await page.getByRole('button', {name: 'Add one', exact: true}).focus();
     await page.getByRole('button', {name: 'Add one', exact: true}).click();
     await expectText('text:Count: 1');
-    const headings = {Install: 'Install and run', Language: 'Language', GUI: 'Build a GUI', Verify: 'Verify behavior', Web: 'Package for the web'};
+    const headings = {Install: 'Install', Language: 'Language', GUI: 'GUI', Verify: 'Verify', Web: 'Web'};
     for (const [label, heading] of Object.entries(headings)) {
       await page.getByRole('link', {name: label, exact: true}).click();
       await expectText('text:' + heading);
       assert.equal(new URL(page.url()).hash, '#section=' + label.toLowerCase());
       assert.equal(await page.getByRole('link', {name: label, exact: true}).getAttribute('aria-current'), 'page');
       assert.equal(await page.getByRole('button', {name: 'Add one', exact: true}).count(), 0);
+      if (label === 'Verify') {
+        // Sibling paragraphs and code blocks keep constant left margins.
+        const margins = await page.evaluate(() => {
+          const left = prefix => Module.textBlocks.find(block => block.text.startsWith(prefix)).lines[0].x;
+          return {
+            paragraphs: ['Scuzz does not use', 'A def with one Timeline', 'Verdict.alwaysHas', 'Zero iterations', 'Simulation is hermetic'].map(left),
+            code: ['def bump', 'scuzz fuzz --iterations 16', 'scuzz fuzz --iterations 0'].map(left)
+          };
+        });
+        for (const values of Object.values(margins)) assert.equal(new Set(values).size, 1, JSON.stringify(margins));
+      }
     }
-    await page.goBack(); await expectText('text:Verify behavior');
-    await page.goForward(); await expectText('text:Package for the web');
+    await page.goBack(); await expectText('text:Verify');
+    await page.goForward(); await expectText('text:Web');
     await page.getByRole('link', {name: 'Start', exact: true}).click();
     await expectText('text:Count: 1');
     await page.getByRole('button', {name: 'Reset', exact: true}).click();
@@ -58,11 +70,21 @@ async function check(browserType, url, mobile) {
       await popup.close();
       await page.bringToFront();
     }
-    await install.click(); await expectText('text:Install and run');
+    await install.click(); await expectText('text:Install');
+    const codeRow = await page.evaluate(() => {
+      const text = [...document.querySelectorAll('.text span')].find(node => node.textContent.startsWith('curl -fsSL'));
+      const line = text.getBoundingClientRect();
+      const button = document.querySelector('[aria-label="Copy"]');
+      const box = button.getBoundingClientRect();
+      return {line: {x: line.x, y: line.y, width: line.width}, button: {x: box.x, y: box.y, bottom: box.bottom}};
+    });
+    assert(codeRow.line.y >= codeRow.button.y && codeRow.line.y < codeRow.button.bottom);
+    assert(codeRow.line.x + codeRow.line.width <= codeRow.button.x);
+
     await page.getByRole('button', {name: 'Copy', exact: true}).first().click();
     await page.getByRole('button', {name: 'Copied', exact: true}).first().waitFor();
     if (browserType === chromium) assert.equal(await page.evaluate(() => navigator.clipboard.readText()),
-      'curl -fsSL https://raw.githubusercontent.com/SeanCheatham/scuzz/main/scripts/install.sh | sh');
+      'curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh');
 
     // Clipboard failure keeps the source available and reports failure.
     await page.evaluate(() => {
@@ -102,8 +124,8 @@ async function check(browserType, url, mobile) {
     await expectText('text:Language');
 
     await page.getByRole('link', {name: 'GUI', exact: true}).click();
-    await expectText('text:Build a GUI');
-    const headingTop = await page.getByRole('heading', {name: 'Build a GUI', exact: true})
+    await expectText('text:GUI');
+    const headingTop = await page.getByRole('heading', {name: 'GUI', exact: true})
       .evaluate(node => node.firstElementChild.getBoundingClientRect().top);
     const positions = await page.evaluate(() => JSON.stringify(Module.textBlocks.map(block => block.lines.map(line => line.y))));
     if (mobile) {
@@ -125,7 +147,7 @@ async function check(browserType, url, mobile) {
       await page.mouse.move(box.x + 10, box.y + 10); await page.mouse.wheel(0, 100);
     }
     await page.waitForFunction(before => JSON.stringify(Module.textBlocks.map(block => block.lines.map(line => line.y))) !== before, positions);
-    assert.equal(await page.getByRole('heading', {name: 'Build a GUI', exact: true})
+    assert.equal(await page.getByRole('heading', {name: 'GUI', exact: true})
       .evaluate(node => node.firstElementChild.getBoundingClientRect().top), headingTop);
     const field = page.getByRole('textbox', {name: 'Your text', exact: true});
     // Focus must reveal the field in its shared scroll container.
@@ -193,10 +215,10 @@ async function check(browserType, url, mobile) {
     });
     await page.setViewportSize({width: mobile ? 390 : 1000, height: 720});
     await page.getByRole('link', {name: 'Web', exact: true}).click();
-    await expectText('text:Package for the web');
+    await expectText('text:Web');
     if (mobile) {
       await page.getByRole('link', {name: 'Install', exact: true}).tap();
-      await expectText('text:Install and run');
+      await expectText('text:Install');
       assert.equal(await page.evaluate(() => getComputedStyle(Module.canvas).touchAction), 'pinch-zoom');
       if (browserType === chromium) {
         const cdp = await context.newCDPSession(page);

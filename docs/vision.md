@@ -358,6 +358,10 @@ remaining window height. Use a scrolling View, Index Book, or tabs as the body.
 Use `View.wrap` for actions. Actions sit beside the title when they fit.
 They move below the title at narrow widths. The bar stays outside body scrolling.
 Docs and Studio use bound page titles and persistent navigation actions.
+Docs renders each topic as one list of sibling blocks. Block Signals are created
+once before the UI session. Each block keeps the same page margin.
+Docs page content shares an 800-pixel width limit and stays left-aligned.
+The content shrinks to fit narrow windows. The app bar spans the window.
 
 `View.tabs(selected, sections)` groups fixed local panels. It accepts the same
 named sections as Index Book. The tabs stay above the panel at all widths.
@@ -365,6 +369,8 @@ Each panel keeps its scroll offset and Signals. Only the selected panel
 contributes content to input and accessibility. Left, Right, Home, and End move
 tab focus. Enter or Space selects the focused tab. Browser Tab enters the
 selected tab and then the panel. Local tabs do not change the browser URL.
+Code blocks place text and Copy in one row with an eight-pixel gap.
+Text uses the remaining width. Multiline code sets the row height.
 Docs shows live text input and source panels. Studio shows counter and status
 panels. Headless claims and native layout checks cover these shared components.
 Browser checks cover tab roles, keyboard input, and state retention.
