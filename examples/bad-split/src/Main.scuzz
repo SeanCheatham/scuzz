@@ -1,8 +1,9 @@
+def changed(_effect: Unit): Bool =
+  true
+
 @main def main: IO[Unit] =
   for {
     title = Signal.make("live")
-    _ = Signal.get(title).require(for {
-  _ = Signal.set(title, "split")
-} yield true)
+    _ = Signal.get(title).require(changed(Signal.set(title, "split")))
     _ <- Ui.run(_ => View.text(Signal.get(title)))
   } yield ()
