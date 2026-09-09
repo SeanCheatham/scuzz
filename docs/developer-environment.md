@@ -1,6 +1,6 @@
 # Developer environment
 
-Host setup for a checkout. App author path: [`guide.md`](guide.md). Product locks: [`vision.md`](vision.md).
+Host setup for a checkout. App author path: run `scuzz docs start`. Product locks: [`vision.md`](vision.md).
 
 Fail on the first missing tool with one install line.
 
@@ -77,7 +77,7 @@ Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI build
 The browser package target needs Python 3. It downloads the pinned Emscripten
 SDK on the first build and reuses it from the host cache. It does not need
 `emcc` on `PATH` or a shell activation command. Cache paths and cleanup:
-[Package a GUI app for the browser](guide.md#package-a-gui-app-for-the-browser).
+run `scuzz docs web`.
 The native install script does not install this SDK.
 
 Build the product CLI with `./scripts/bootstrap.sh`. Then run:
@@ -99,3 +99,9 @@ Open GUI and focus each edit field. Check that the keyboard does not cover the
 field. Enter accented text, emoji, and IME text. Paste text. Rotate the phone.
 Switch sections and return to check the stored text. Emulation does not prove
 these OS keyboard and selection behaviors.
+
+## Compiler campaigns
+
+Default `./scripts/ci.sh fuzz` replays `examples/tyck` and `examples/codegen` with `scuzz fuzz --iterations 0`. That path uses generated-program oracles plus fixture seeds.
+
+Set `SCUZZ_COMPILER_FUZZ=1` to run a short search campaign on a source copy. That path is slower. Use it for a nightly or local extra check. The env var is the real opt-in. `./scripts/ci-fuzz.sh` invokes it.

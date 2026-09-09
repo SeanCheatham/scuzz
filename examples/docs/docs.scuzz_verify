@@ -1,11 +1,13 @@
 def indexStaysVisible(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Start") && Timeline.a11yHas(t, i, "choicechip:Install") && Timeline.a11yHas(t, i, "choicechip:Language") && Timeline.a11yHas(t, i, "choicechip:GUI") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Web"))
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Start") && Timeline.a11yHas(t, i, "choicechip:Install") && Timeline.a11yHas(t, i, "choicechip:Language") && Timeline.a11yHas(t, i, "choicechip:GUI") && Timeline.a11yHas(t, i, "choicechip:Signals") && Timeline.a11yHas(t, i, "choicechip:Packages") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Commands") && Timeline.a11yHas(t, i, "choicechip:Manifest") && Timeline.a11yHas(t, i, "choicechip:Web") && Timeline.a11yHas(t, i, "choicechip:IDE"))
 
 def activePage(t: Timeline): Verdict =
-  Verdict.every(t, i => if (Timeline.signalInt(t, i, "page") == 0) Timeline.a11yHas(t, i, "text:Scuzz Docs") && Timeline.a11yHas(t, i, "button:Add one") else if (Timeline.signalInt(t, i, "page") == 1) Timeline.a11yHas(t, i, "text:Install and run") else if (Timeline.signalInt(t, i, "page") == 2) Timeline.a11yHas(t, i, "text:Language") else if (Timeline.signalInt(t, i, "page") == 3) Timeline.a11yHas(t, i, "text:Build a GUI") else if (Timeline.signalInt(t, i, "page") == 4) Timeline.a11yHas(t, i, "text:Verify behavior") else Timeline.a11yHas(t, i, "text:Package for the web"))
+  Verdict.every(t, i => if (Timeline.signalInt(t, i, "page") == 0) Timeline.a11yHas(t, i, "text:Start") && Timeline.a11yHas(t, i, "button:Add one") else if (Timeline.signalInt(t, i, "page") == 1) Timeline.a11yHas(t, i, "text:Install") else if (Timeline.signalInt(t, i, "page") == 2) Timeline.a11yHas(t, i, "text:Language") else if (Timeline.signalInt(t, i, "page") == 3) Timeline.a11yHas(t, i, "text:GUI") else if (Timeline.signalInt(t, i, "page") == 4) Timeline.a11yHas(t, i, "text:Signals") else if (Timeline.signalInt(t, i, "page") == 5) Timeline.a11yHas(t, i, "text:Packages") else if (Timeline.signalInt(t, i, "page") == 6) Timeline.a11yHas(t, i, "text:Verify") else if (Timeline.signalInt(t, i, "page") == 7) Timeline.a11yHas(t, i, "text:Commands") else if (Timeline.signalInt(t, i, "page") == 8) Timeline.a11yHas(t, i, "text:Manifest") else if (Timeline.signalInt(t, i, "page") == 9) Timeline.a11yHas(t, i, "text:Web") else Timeline.a11yHas(t, i, "text:IDE"))
 
 def countChangesOnlyWithControls(t: Timeline): Verdict =
-  Verdict.every(t, i => i == 0 || Timeline.signalInt(t, i, "count") == Timeline.signalInt(t, i - 1, "count") || Timeline.lastHitHas(t, i, "button:Add one") || Timeline.lastHitHas(t, i, "outlined:Reset"))
+  Verdict.stepEvery(t, __tup => __tup match {
+  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") || Timeline.lastHitHas(t, after, "button:Add one") || Timeline.lastHitHas(t, after, "outlined:Reset")
+})
 
 def resetClearsCount(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "outlined:Reset") || Timeline.signalInt(t, i, "count") == 0)

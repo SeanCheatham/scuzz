@@ -1,3 +1,0 @@
-[fuzz]
-seed = 0
-events = ["tap 8", "tap 3", "tap 4", "tap 5", "type 0 café 🐈", "compose 日本", "compose", "tap 9", "tap 4", "tap 5", "tap 8", "tap 6", "tap 7", "tap 2", "tap 9", "tap 4", "tap 2"]

@@ -6,3 +6,6 @@ version = "0.1.0"
 default_runtime = "headless"
 headless_size = [1000, 720]
 headless_scale = 1.0
+
+[dependencies]
+manual = { path = "../manual" }

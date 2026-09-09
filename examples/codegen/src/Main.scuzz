@@ -74,6 +74,17 @@ def irDiff(src: String, want: String): Bool =
 def irIdem(src: String): Bool =
   Emit.emit(src) == Emit.emit(src)
 
+def genProg(n: Int): String =
+  Str.concat("""def f(x: Int): Int =
+  x + """, Str.concat(Str.fromInt(n % 8), """
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(f(1)))
+"""))
+
+def irIdemGen(n: Int where n >= 0): Bool =
+  irIdem(genProg(n))
+
 def srcHello(): String =
   "@main def main: IO[Unit] =\n  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n"
 

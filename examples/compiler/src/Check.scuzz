@@ -1724,13 +1724,84 @@ def check3(files: List[(String, String)], o: Out): String =
   if (hasErr(o)) Str.concat("[", Str.concat(diagJson(files, o), "]")) else "[]"
 
 def unclaimedJson(files: List[(String, String)]): String =
-  unclaimedOf(Parse.parseFiles(files))
+  unclaimedJsonVer(files, [])
 
-def unclaimedOf(p: Prog): String =
-  if (p.main == "") "[]" else Str.concat("[", Str.concat(unclaimedMain(p.main), "]"))
+def unclaimedJsonVer(files: List[(String, String)], vers: List[String]): String =
+  unclaimedWrap(unclaimedLines(files, vers))
 
-def unclaimedMain(name: String): String =
-  Str.concat("{\"severity\":\"info\",\"message\":\"unclaimed def ", Str.concat(name, "\",\"line\":1,\"column\":1}"))
+def unclaimedWrap(xs: List[String]): String =
+  if (List.isEmpty(xs)) "[]" else Str.concat("[", Str.concat(List.join(List.map(xs, s => unclaimedItem(s)), ","), "]"))
+
+def unclaimedItem(s: String): String =
+  Str.concat("{\"severity\":\"info\",\"message\":\"unclaimed ", Str.concat(s, "\",\"line\":1,\"column\":1}"))
+
+def unclaimedLines(files: List[(String, String)], vers: List[String]): List[String] =
+  unclaimedOf(Parse.parseFiles(files), files, List.join(vers, """
+"""))
+
+def unclaimedOf(p: Prog, files: List[(String, String)], ver: String): List[String] =
+  List.concat(unclaimedDefs(p, ver), List.concat(unclaimedSignals(files, ver), unclaimedControls(files, ver)))
+
+def unclaimedDefs(p: Prog, ver: String): List[String] =
+  unclaimedDefNames(if (p.main == "") p.defs else Fun(false, p.main, [], [], "IO[Unit]", p.body, "Main", 0) :: p.defs, ver)
+
+def unclaimedDefNames(ds: List[Fun], ver: String): List[String] =
+  if (List.isEmpty(ds)) [] else unclaimedDefHd(List.at(ds, 0), List.tail(ds), ver)
+
+def unclaimedDefHd(d: Fun, rest: List[Fun], ver: String): List[String] =
+  d match {
+    case Fun(priv, name, _, _, _, _, _, _) => if (priv || Str.startsWith(name, "_") || mentioned(ver, name)) unclaimedDefNames(rest, ver) else Str.concat("def ", name) :: unclaimedDefNames(rest, ver)
+  }
+
+def mentioned(ver: String, name: String): Bool =
+  ver != "" && Str.contains(ver, name)
+
+def unclaimedSignals(files: List[(String, String)], ver: String): List[String] =
+  if (List.isEmpty(files)) [] else List.concat(scanSignals(fileSrcOf(List.at(files, 0)), ver), unclaimedSignals(List.tail(files), ver))
+
+def unclaimedControls(files: List[(String, String)], ver: String): List[String] =
+  if (List.isEmpty(files)) [] else List.concat(scanControls(fileSrcOf(List.at(files, 0)), ver), unclaimedControls(List.tail(files), ver))
+
+def fileSrcOf(h: (String, String)): String =
+  h match {
+    case (_, src) => src
+  }
+
+def scanSignals(src: String, ver: String): List[String] =
+  scanNeedle(src, " = Signal.make", ver, "signal ", 0, [])
+
+def scanControls(src: String, ver: String): List[String] =
+  List.concat(scanQuoted(src, "View.button(\"", ver, "control ", 0, []), List.concat(scanQuoted(src, "View.outlinedButton(\"", ver, "control ", 0, []), scanQuoted(src, "View.textButton(\"", ver, "control ", 0, [])))
+
+def scanNeedle(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
+  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.slice(src, i, i + Str.len(needle)) == needle) scanNeedleHit(src, needle, ver, kind, i, acc) else scanNeedle(src, needle, ver, kind, i + 1, acc)
+
+def scanNeedleHit(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
+  scanNeedle(src, needle, ver, kind, i + Str.len(needle), identBefore(src, i, kind, ver, acc))
+
+def identBefore(src: String, i: Int, kind: String, ver: String, acc: List[String]): List[String] =
+  identTake(src, identStartAt(src, i - 1), i, kind, ver, acc)
+
+def identStartAt(src: String, i: Int): Int =
+  if (i < 0) 0 else if (isIdentCh(Str.charAt(src, i))) identStartAt(src, i - 1) else i + 1
+
+def identTake(src: String, start: Int, end: Int, kind: String, ver: String, acc: List[String]): List[String] =
+  if (start >= end) acc else unclaimedAdd(Str.concat(kind, Str.slice(src, start, end)), ver, acc)
+
+def scanQuoted(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
+  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.slice(src, i, i + Str.len(needle)) == needle) scanQuotedHit(src, needle, ver, kind, i, acc) else scanQuoted(src, needle, ver, kind, i + 1, acc)
+
+def scanQuotedHit(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
+  scanQuoted(src, needle, ver, kind, i + Str.len(needle), unclaimedAdd(Str.concat(kind, quoteTo(src, i + Str.len(needle))), ver, acc))
+
+def quoteTo(src: String, i: Int): String =
+  if (i >= Str.len(src) || Str.charAt(src, i) == 34) "" else Str.concat(Str.slice(src, i, i + 1), quoteTo(src, i + 1))
+
+def unclaimedAdd(item: String, ver: String, acc: List[String]): List[String] =
+  if (mentioned(ver, afterKind(item))) acc else item :: acc
+
+def afterKind(item: String): String =
+  if (Str.startsWith(item, "def ")) Str.slice(item, 4, Str.len(item)) else if (Str.startsWith(item, "signal ")) Str.slice(item, 7, Str.len(item)) else if (Str.startsWith(item, "control ")) Str.slice(item, 8, Str.len(item)) else item
 
 def humanLine(files: List[(String, String)], o: Out): String =
   humanLineSp(files, o, o.span)

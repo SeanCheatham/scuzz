@@ -1,3 +1,14 @@
 def addItem(s: String): IO[Unit] =
   IO.pure(Tasks.noteAdd(s))
 
+def renameItem(s: String): IO[Unit] =
+  IO.pure(Tasks.noteRename(s))
+
+def deleteItem(s: String): IO[Unit] =
+  IO.pure(Tasks.noteDel(s))
+
+def flipItem(s: String): IO[Unit] =
+  IO.pure(Tasks.noteFlip(s))
+
+def clearItems(): IO[Unit] =
+  IO.pure(Tasks.noteClear())

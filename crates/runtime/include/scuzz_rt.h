@@ -1118,6 +1118,8 @@ SzVerdict *sz_verdict_every(void *tl, void *fnp, void *envp);
 SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp);
 SzVerdict *sz_verdict_always_has(void *tl, SzString *needle);
 SzVerdict *sz_verdict_after_hit(void *tl, SzString *hit, SzString *needle);
+SzVerdict *sz_verdict_on_hit(void *tl, SzString *hit, void *fnp, void *envp);
+SzVerdict *sz_verdict_step_every(void *tl, void *fnp, void *envp);
 void sz_verify_register(const char *name, SzVerdict *(*fn)(void *));
 /* Relation claim: (Timeline, Timeline) => Verdict over a pair of dumps. */
 void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *));

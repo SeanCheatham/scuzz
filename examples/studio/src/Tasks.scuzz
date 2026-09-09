@@ -28,6 +28,21 @@ def flipDone(s: String): String =
 def flipItem(item: Item): Item =
   Item(if (item.done == 1) 0 else 1, item.label)
 
+def addTo(xs: List[Item], s: String): List[Item] =
+  if (Str.len(Str.trim(s)) == 0) xs else List.append(xs, parseItem(Str.trim(s)))
+
+def renameFirst(xs: List[Item], s: String): List[Item] =
+  if (List.isEmpty(xs) || Str.len(Str.trim(s)) == 0) xs else List.setAt(xs, 0, Item(List.at(xs, 0).done, Str.trim(s)))
+
+def deleteLabel(xs: List[Item], s: String): List[Item] =
+  List.filter(xs, x => x.label != s)
+
+def flipLabel(xs: List[Item], s: String): List[Item] =
+  List.map(xs, x => if (x.label == s) flipItem(x) else x)
+
+def clearAll(_xs: List[Item]): List[Item] =
+  []
+
 def loadItems(text: String): List[Item] =
   List.map(loadList(text), s => parseItem(s))
 
@@ -36,6 +51,18 @@ def saveItems(xs: List[Item]): String =
 
 def noteAdd(_s: String): Unit =
   Property.sometimes("droveAdd")
+
+def noteRename(_s: String): Unit =
+  Property.sometimes("droveRename")
+
+def noteDel(_s: String): Unit =
+  Property.sometimes("droveDel")
+
+def noteFlip(_s: String): Unit =
+  Property.sometimes("droveFlip")
+
+def noteClear(): Unit =
+  Property.sometimes("droveClear")
 
 def loadList(text: String): List[String] =
   if (List.isEmpty(Str.lines(text))) ["milk"] else Str.lines(text)

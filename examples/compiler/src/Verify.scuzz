@@ -280,8 +280,30 @@ def escEvCh(c: Int, s: String, i: Int): String =
 
 def reproText(seed: Int, sched: String, fault: String, events: List[String]): String =
   Str.concat("""[fuzz]
-seed = """, Str.concat(Str.fromInt(seed), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), """]
-"""))))))
+""", Str.concat(reproOracle(events), Str.concat("seed = ", Str.concat(Str.fromInt(seed), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), """]
+"""))))))))
+
+def reproOracle(events: List[String]): String =
+  if (oracleName(events) == "") "" else Str.concat("oracle = \"", Str.concat(oracleName(events), "\"\n"))
+
+def oracleName(events: List[String]): String =
+  if (List.isEmpty(events)) "" else oracleNameLine(List.at(events, 0), List.tail(events))
+
+def oracleNameLine(line: String, rest: List[String]): String =
+  if (Str.startsWith(line, "drive ")) oracleDrive(line) else oracleName(rest)
+
+def oracleDrive(line: String): String =
+  if (List.len(Str.split(line, " ")) < 2) "" else List.at(Str.split(line, " "), 1)
+
+def withOracle(src: String, events: List[String]): String =
+  if (oracleName(events) == "" || Str.contains(src, "oracle =")) src else insertOracle(src, oracleName(events))
+
+def insertOracle(src: String, name: String): String =
+  insertOracleAt(src, name, findIdx(src, """[fuzz]
+""", 0))
+
+def insertOracleAt(src: String, name: String, i: Int): String =
+  if (i < 0) Str.concat("oracle = \"", Str.concat(name, Str.concat("\"\n", src))) else Str.concat(Str.slice(src, 0, i + 7), Str.concat("oracle = \"", Str.concat(name, Str.concat("\"\n", Str.slice(src, i + 7, Str.len(src))))))
 
 def reproSched(sched: String): String =
   if (sched == "") nl() else Str.concat("\nschedule_seed = \"", Str.concat(sched, Str.concat("\"\n", pctLines(sched))))
@@ -500,8 +522,20 @@ def wrapFuns(stem: String, ds: List[Fun]): String =
 
 def wrapFun(_stem: String, d: Fun): String =
   d match {
-    case Fun(_, name, _, ps, _, body, _, _) => wrapFun2(name, wrapPs(ps), Parse.pretty0(body))
+    case Fun(_, name, _, ps, _, body, _, _) => wrapFunBody(name, wrapPs(ps), body)
   }
+
+def wrapFunBody(name: String, ps: String, body: Expr): String =
+  body match {
+    case Expr.EBin("==", l, r, _) => wrapEq(name, ps, l, r)
+    case _ => wrapFun2(name, ps, Parse.pretty0(body))
+  }
+
+def wrapEq(name: String, ps: String, l: Expr, r: Expr): String =
+  Str.concat("def _drv_", Str.concat(name, Str.concat("(", Str.concat(ps, Str.concat("""): IO[Unit] =
+  for {
+    oraL = """, Str.concat(Parse.pretty0(l), Str.concat("""
+    oraR = """, Str.concat(Parse.pretty0(r), Str.concat("\n    _ <- if (oraL == oraR) IO.pure(()) else IO.println(s\"oracle ", Str.concat(name, Str.concat(" rejected left=$oraL right=$oraR\").flatMap(_ => Property.assert(\"", Str.concat(name, "\", false))\n  } yield ()\n"))))))))))))
 
 def wrapFun2(name: String, ps: String, body: String): String =
   Str.concat("def _drv_", Str.concat(name, Str.concat("(", Str.concat(ps, Str.concat("): IO[Unit] =\n  Property.assert(\"", Str.concat(name, Str.concat("\", ", Str.concat(body, """)
@@ -948,6 +982,12 @@ def oracleNames(srcs: List[String]): List[String] =
 
 def oracleNamesEns(srcs: List[String], ens: List[En]): List[String] =
   funNames(parseVerifyAllEns(srcs, ens))
+
+def claimNames(srcs: List[String]): List[String] =
+  funNames(parseClaimsAll(srcs))
+
+def parseClaimsAll(srcs: List[String]): List[Fun] =
+  if (List.isEmpty(srcs)) noFun() else List.concat(parseClaims(List.at(srcs, 0)), parseClaimsAll(List.tail(srcs)))
 
 def funNames(ds: List[Fun]): List[String] =
   if (List.isEmpty(ds)) noStr() else funNamesHd(List.at(ds, 0), List.tail(ds))

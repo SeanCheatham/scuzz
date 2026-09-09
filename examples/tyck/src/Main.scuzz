@@ -329,6 +329,20 @@ def srcFunBody(): String =
 def wantFunBody(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: def f body Int does not match declared Int => Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":23,\"end_line\":1,\"end_column\":24}]"
 
+def genProg(n: Int): String =
+  Str.concat("""def f(x: Int): Int =
+  x + """, Str.concat(Str.fromInt(n % 8), """
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(f(1)))
+"""))
+
+def tyckGen(n: Int where n >= 0): Bool =
+  Check.check(genProg(n)) == "[]"
+
+def prettyIdem(n: Int where n >= 0): Bool =
+  Parse.pretty(Parse.parse(Lexer.lex(genProg(n)))) == Parse.pretty(Parse.parse(Lexer.lex(Parse.pretty(Parse.parse(Lexer.lex(genProg(n)))))))
+
 def tyckCore(): Bool =
   sourceOffsets() && funLookup() && tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcArity(), wantArity()) && tyckDiff(srcRet(), wantRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
 

@@ -67,7 +67,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   embedders       ffi-skia lib + desktop and mobile embedders
   hello           hello, fmt
   tyck            typecheck oracle
-  kits            kit catalog --check
+  kits            check and corpus-only fuzz for examples/manual
   codegen         codegen emit + oracle
   hello-outdir    hello via --out-dir
   fixedpoint      LLVM IR fixed-point
@@ -156,7 +156,9 @@ slice_tyck() {
 }
 
 slice_kits() {
-  ./scripts/gen-kit-docs.sh --check
+  need_scuzz
+  "$SCUZZ" check examples/manual
+  "$SCUZZ" fuzz --iterations 0 examples/manual
 }
 
 slice_codegen() {
@@ -272,6 +274,9 @@ slice_new_ui() {
   need_scuzz
   rm -rf /tmp/scuzz-v0app
   "$SCUZZ" new --ui --path /tmp scuzz-v0app
+  "$SCUZZ" fmt --check /tmp/scuzz-v0app
+  "$SCUZZ" check /tmp/scuzz-v0app
+  "$SCUZZ" fuzz --iterations 0 /tmp/scuzz-v0app
   "$SCUZZ" test --update /tmp/scuzz-v0app
   test -f /tmp/scuzz-v0app/goldens/scuzz-v0app.dump
   test -f /tmp/scuzz-v0app/goldens/scuzz-v0app_after_tap.dump

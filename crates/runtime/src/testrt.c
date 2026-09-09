@@ -2759,15 +2759,37 @@ int64_t sz_property_last_hit_has(SzString *needle) {
   return strstr(hay, n) != NULL ? 1 : 0;
 }
 
+static void print_drive_args(void) {
+  const char *path = getenv("SCUZZ_DRIVE_SCRIPT");
+  FILE *f;
+  char line[256];
+  if (!path || !path[0])
+    path = getenv("SCUZZ_UI_SCRIPT");
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "r");
+  if (!f)
+    return;
+  if (fgets(line, sizeof line, f)) {
+    size_t n = strlen(line);
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+      line[--n] = 0;
+    if (n > 0)
+      fprintf(stderr, "scuzz:   args: %s\n", line);
+  }
+  fclose(f);
+}
+
 SzIo *sz_property_assert(SzString *name, int64_t ok) {
   const char *tr = getenv("SCUZZ_TESTRT");
-  char buf[256];
+  char buf[512];
   if (!tr || tr[0] != '1')
     return pure_drop(NULL);
   if (ok)
     return pure_drop(NULL);
-  snprintf(buf, sizeof buf, "property failed: %s", name ? sz_string_cstr(name) : "?");
+  snprintf(buf, sizeof buf, "oracle %s rejected", name ? sz_string_cstr(name) : "?");
   fprintf(stderr, "scuzz: %s\n", buf);
+  print_drive_args();
   return sz_io_fail_cstr(buf);
 }
 
@@ -3715,6 +3737,55 @@ SzVerdict *sz_verdict_after_hit(void *tl, SzString *hit, SzString *needle) {
                          "hit never showed the needle");
 }
 
+SzVerdict *sz_verdict_step_every(void *tl, void *fnp, void *envp) {
+  SzTimeline *t = (SzTimeline *)tl;
+  SzListPred pred = (SzListPred)fnp;
+  int i;
+  if (!t || !pred || t->n < 2)
+    return sz_verdict_ok();
+  for (i = 1; i < t->n; i++) {
+    void *before = sz_box_i64((int64_t)(i - 1));
+    void *after = sz_box_i64((int64_t)i);
+    SzPair *pair = sz_pair_new(before, after);
+    int64_t ok;
+    sz_release(before);
+    sz_release(after);
+    ok = pred(pair, envp);
+    sz_release(pair);
+    if (!ok)
+      return sz_verdict_fail(i, "consecutive states failed the relation");
+  }
+  return sz_verdict_ok();
+}
+
+SzVerdict *sz_verdict_on_hit(void *tl, SzString *hit, void *fnp, void *envp) {
+  SzTimeline *t = (SzTimeline *)tl;
+  SzListPred pred = (SzListPred)fnp;
+  int i;
+  if (!t || !pred)
+    return sz_verdict_ok();
+  for (i = 1; i < t->n; i++) {
+    void *before;
+    void *after;
+    SzPair *pair;
+    int64_t ok;
+    if (!sz_timeline_last_hit_has(tl, i, hit))
+      continue;
+    if (sz_timeline_last_hit_has(tl, i - 1, hit))
+      continue;
+    before = sz_box_i64((int64_t)(i - 1));
+    after = sz_box_i64((int64_t)i);
+    pair = sz_pair_new(before, after);
+    sz_release(before);
+    sz_release(after);
+    ok = pred(pair, envp);
+    sz_release(pair);
+    if (!ok)
+      return sz_verdict_fail(i, "on-hit relation failed");
+  }
+  return sz_verdict_ok();
+}
+
 #define SZ_TIMELINE_DUMP_VERSION 2
 #define SZ_TIMELINE_DUMP_VERSION_MIN 1
 
@@ -4213,16 +4284,16 @@ static void verdict_msg(char *buf, size_t cap, const char *name,
   const char *nm = name ? name : "?";
   if (v->index >= 0) {
     if (v->why)
-      snprintf(buf, cap, "verify failed: %s at state %lld: %s", nm,
+      snprintf(buf, cap, "claim %s rejected at state %lld: %s", nm,
                (long long)v->index, v->why);
     else
-      snprintf(buf, cap, "verify failed: %s at state %lld", nm,
+      snprintf(buf, cap, "claim %s rejected at state %lld", nm,
                (long long)v->index);
   } else {
     if (v->why)
-      snprintf(buf, cap, "verify failed: %s: %s", nm, v->why);
+      snprintf(buf, cap, "claim %s rejected: %s", nm, v->why);
     else
-      snprintf(buf, cap, "verify failed: %s", nm);
+      snprintf(buf, cap, "claim %s rejected", nm);
   }
 }
 

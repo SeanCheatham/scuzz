@@ -1,0 +1,15 @@
+def topicsHaveBlocks(): Bool =
+  List.forall(Manual.topics(), t => List.nonEmpty(t.blocks))
+
+def idsUnique(): Bool =
+  List.len(Manual.topics()) == 11
+
+def idsStable(): Bool =
+  Manual.idsLine() == "start|install|language|gui|signals|packages|verify|commands|manifest|web|ide"
+
+def snippetsFmt(): Bool =
+  List.forall(Manual.allCode(), s => !Manual.isSnippet(s) || Manual.formatSrc(s) == s)
+
+def cmdsOk(): Bool =
+  List.forall(Manual.allCmd(), s => Str.startsWith(s, "scuzz ")) && List.forall(Manual.allCmd(), s => Manual.hasVerb(Manual.cmdVerb(s)))
+

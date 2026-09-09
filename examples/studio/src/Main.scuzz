@@ -22,11 +22,11 @@
   d = Str.trim(Signal.get(draft))
   n = Str.len(d)
 } yield if (n == 0) () else for {
-  xs = List.append(Signal.get(items), Tasks.parseItem(d))
+  xs = Tasks.addTo(Signal.get(items), d)
   _ = Signal.set(items, xs)
 } yield Signal.set(draft, "")), View.verticalDivider(), View.circularProgress(level), View.switch(live, "On"), View.badge(count, View.chip(pin, "Pin")), View.button("Rename", _ => for {
   xs = Signal.get(items)
-  ys = List.setAt(xs, 0, Item(0, "oat milk"))
+  ys = Tasks.renameFirst(xs, "oat milk")
 } yield Signal.set(items, ys))), View.each(items, item => View.column(View.listTile(item.label, View.text(if (item.done == 1) "Done" else "Open")), View.wrap(View.iconButton("i", _ => ()), View.outlinedButton("Edit", _ => ()), View.textButton("Open", _ => ()), View.filterChip(star, "Tag"), View.choiceChip(mode, 0, "Day"), View.actionChip("Go", _ => ()), View.inputChip(star, "In"), View.button(if (item.done == 1) "Undo" else "Done", _ => for {
   _ = Property.sometimes("tappedDone")
 } yield Signal.set(items, List.map(Signal.get(items), x => if (x == item) Tasks.flipItem(x) else x))), View.button("Del", _ => for {
