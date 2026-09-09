@@ -85,6 +85,39 @@ static void test_script_scroll_targets_outer_container(void) {
   sz_view_free(root);
 }
 
+static double color_luminance(uint32_t color) {
+  double channels[3];
+  for (int i = 0; i < 3; i++) {
+    double c = ((color >> (16 - i * 8)) & 255) / 255.0;
+    channels[i] = c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+  }
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+static double color_contrast(uint32_t a, uint32_t b) {
+  double first = color_luminance(a), second = color_luminance(b);
+  return (fmax(first, second) + 0.05) / (fmin(first, second) + 0.05);
+}
+
+static void test_default_theme_contrast(void) {
+  const SzTheme *theme = sz_theme_default();
+  const uint32_t papers[] = {theme->background, theme->surface};
+  const uint32_t texts[] = {theme->foreground, theme->muted, theme->accent};
+  /* WCAG 2.2: normal text 4.5:1; essential control graphics 3:1. */
+  assert(fabs(color_contrast(0xFF000000, 0xFFFFFFFF) - 21.0) < 0.0001);
+  assert(color_contrast(theme->surface, theme->surface) == 1.0);
+  for (size_t p = 0; p < sizeof papers / sizeof papers[0]; p++) {
+    for (size_t t = 0; t < sizeof texts / sizeof texts[0]; t++)
+      assert(color_contrast(texts[t], papers[p]) >= 4.5);
+    assert(color_contrast(theme->border, papers[p]) >= 3.0);
+    assert(color_contrast(theme->muted, papers[p]) >= 3.0);
+  }
+  assert(color_contrast(theme->on_primary, theme->primary) >= 4.5);
+  assert(color_contrast(theme->foreground, theme->selection) >= 4.5);
+  assert(color_contrast(theme->border, theme->primary) >= 3.0);
+  assert(color_contrast(theme->foreground, theme->surface) >= 3.0);
+}
+
 static void test_button_press_feedback(void) {
   for (int scale = 1; scale <= 2; scale++) {
     SzUiConfig cfg = {0};
@@ -15717,6 +15750,7 @@ int main(void) {
   test_narrow_button_labels_stay_inside();
   test_edit_paint_scale_and_clip();
   test_button_press_feedback();
+  test_default_theme_contrast();
   test_session_snapshot();
   test_signals_layout_hit();
   test_replace_root_keeps_signals();

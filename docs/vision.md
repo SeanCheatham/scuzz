@@ -291,6 +291,12 @@ completion and a thin muted track for the remaining part. The amount stays
 visible without the accent color. Headless, Desktop, and Mobile use the same
 paint path.
 
+Default text colors have at least 4.5:1 contrast against their paper surfaces.
+Control borders and essential marks have at least 3:1 contrast. Native checks
+calculate these ratios from the theme colors. They also check text on primary
+and selection fills. These limits follow [WCAG 2.2](https://www.w3.org/TR/WCAG22/).
+Color ratios do not prove full accessibility conformance.
+
 Selected chips and segmented controls use a printed tab shape. A heavy ink
 underline and a solid triangle at the top right mark the selected state.
 Both marks stay inside the control bounds. The yellow fill supports the marks.
