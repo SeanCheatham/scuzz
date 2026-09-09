@@ -7,9 +7,14 @@
 <style>
 html, body { margin: 0; width: 100%; height: 100%; background: #f5efdf; }
 canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+#text-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+#text-layer span { position: absolute; white-space: pre; color: transparent;
+  pointer-events: auto; user-select: text; -webkit-user-select: text; cursor: text; }
+#text-layer span::selection { background: #f4d35e; color: #24211c; }
 #status { position: absolute; top: 1rem; left: 1rem; font: 16px sans-serif; }
 </style>
 <canvas id="canvas" tabindex="0" aria-label="Scuzz application"></canvas>
+<div id="text-layer"></div>
 <p id="status" role="status">Loading Scuzz…</p>
 <script>
 const status = document.getElementById('status');
@@ -17,8 +22,91 @@ var Module = {
   canvas: document.getElementById('canvas'),
   onRuntimeInitialized() { status.hidden = true; },
   onAbort() { status.hidden = false; status.textContent = 'The application could not start.'; },
-  printErr(text) { console.error(text); }
+  printErr(text) { console.error(text); },
+  readRoute() {
+    if (!Module.ccall) return;
+    const title = new URLSearchParams(location.hash.slice(1)).get('section') ?? Module.firstSection;
+    if (title === undefined) return;
+    const found = Module.ccall('sz_web_navigate', 'number', ['string'], [title]);
+    if (!found && Module.currentSection)
+      history.replaceState(null, '', '#section=' + encodeURIComponent(Module.currentSection));
+  },
+  presentText(frame) {
+    const layer = document.getElementById('text-layer');
+    const scale = frame.scale;
+    const context = Module.selectionContext ||
+      (Module.selectionContext = document.createElement('canvas').getContext('2d'));
+    const baselines = new Map();
+    let index = 0;
+    frame.texts.forEach((block, blockIndex) => {
+      block.lines.forEach(line => {
+        let span = layer.children[index++];
+        if (!span) { span = document.createElement('span'); layer.append(span); }
+        if (span.textContent !== line.text) span.textContent = line.text;
+        span.block = blockIndex;
+        span.sourceStart = line.start;
+        span.style.left = line.x / scale + 'px';
+        if (!baselines.has(line.font)) {
+          context.font = line.font / scale + 'px monospace';
+          const metrics = context.measureText('M');
+          baselines.set(line.font, (metrics.fontBoundingBoxAscent - metrics.fontBoundingBoxDescent) / 2);
+        }
+        const top = line.y / scale - line.line_h / scale / 2 - baselines.get(line.font);
+        span.style.top = top + 'px';
+        span.style.font = line.font / scale + 'px monospace';
+        span.style.lineHeight = line.line_h / scale + 'px';
+        if (line.clip) {
+          const [x, y, w, h] = line.clip;
+          span.style.clipPath = `inset(${Math.max(0, y - top * scale) / scale}px ${Math.max(0, line.x + line.width - x - w) / scale}px ${Math.max(0, top * scale + line.line_h - y - h) / scale}px ${Math.max(0, x - line.x) / scale}px)`;
+        } else span.style.clipPath = '';
+      });
+    });
+    while (layer.children.length > index) layer.lastChild.remove();
+    Module.textBlocks = frame.texts;
+    const section = frame.sections.find(section => section.selected);
+    if (section) {
+      Module.firstSection = frame.sections[0].title;
+      Module.currentSection = section.title;
+      const hash = '#section=' + encodeURIComponent(section.title);
+      if (!Module.routeReady) {
+        history.replaceState(null, '', hash);
+        Module.routeReady = true;
+      } else if (new URLSearchParams(location.hash.slice(1)).get('section') !== section.title) {
+        history.pushState(null, '', hash);
+      }
+    }
+  }
 };
+const textLayer = document.getElementById('text-layer');
+let touchY;
+textLayer.addEventListener('touchstart', event => { touchY = event.touches[0].clientY; }, {passive: true});
+textLayer.addEventListener('touchmove', event => {
+  if (!getSelection().isCollapsed || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number'],
+    [touch.clientX, touch.clientY, touchY - touch.clientY]);
+  touchY = touch.clientY;
+  event.preventDefault();
+}, {passive: false});
+window.addEventListener('hashchange', () => Module.readRoute());
+window.addEventListener('popstate', () => Module.readRoute());
+// Use source offsets so copied text keeps spaces and explicit line breaks.
+document.addEventListener('copy', event => {
+  const selection = window.getSelection();
+  if (selection.isCollapsed || !selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  const first = range.startContainer.parentElement;
+  const last = range.endContainer.parentElement;
+  if (first?.block === undefined || last?.block === undefined) return;
+  const pieces = [];
+  for (let i = first.block; i <= last.block; i++) {
+    const text = Module.textBlocks[i].text;
+    pieces.push(text.slice(i === first.block ? first.sourceStart + range.startOffset : 0,
+      i === last.block ? last.sourceStart + range.endOffset : text.length));
+  }
+  event.clipboardData.setData('text/plain', pieces.join('\n'));
+  event.preventDefault();
+});
 </script>
 <script src="./app.js" onerror="Module.onAbort()"></script>
 </html>

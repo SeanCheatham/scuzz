@@ -3,6 +3,9 @@
 #include "sk_capi.h"
 
 #include "rt_util.h"
+#ifdef __EMSCRIPTEN__
+#include "web.h"
+#endif
 
 #include <math.h>
 #include <stdio.h>
@@ -4168,6 +4171,9 @@ typedef struct SzWrapPaint {
   int cap;
   int drawn;
   int ellipsis;
+#ifdef __EMSCRIPTEN__
+  int selectable;
+#endif
 } SzWrapPaint;
 
 static void paint_wrap_line(const char *s, int start, int end, float width,
@@ -4188,6 +4194,11 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
   tmp[n] = '\0';
   if (wp->ellipsis && wp->cap > 0 && wp->drawn == wp->cap - 1)
     ellipsize_to_width(tmp, sizeof tmp, wp->inner, wp->font_px);
+#ifdef __EMSCRIPTEN__
+  if (wp->selectable)
+    sz_web_text_line(s, start, end, tmp, wp->x, wp->y, width, wp->font_px,
+                     wp->line_h, g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h);
+#endif
   paint_string(wp->c, tmp, wp->x, wp->y, wp->argb, wp->font_px);
   wp->y += wp->line_h;
   wp->drawn++;
@@ -4262,6 +4273,12 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       each_text_line(buf, font_px, inner, accum_wrap_line, &m);
       wp.ellipsis = m.truncated;
     }
+#ifdef __EMSCRIPTEN__
+    wp.selectable = 1;
+    for (SzView *parent = v->parent; parent; parent = parent->parent)
+      if (parent->interactive) wp.selectable = 0;
+    if (wp.selectable) sz_web_text_begin(buf);
+#endif
     each_text_line(buf, font_px, inner, paint_wrap_line, &wp);
     break;
   }
@@ -5159,6 +5176,14 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       paint_node(v->children[i], c, theme);
     break;
   case SZ_VIEW_INDEX_BOOK: {
+#ifdef __EMSCRIPTEN__
+    if (sz_web_book_begin()) {
+      for (i = 1; i < v->child_count; i++) {
+        SzView *section = v->children[i]->children[0];
+        sz_web_section(section->text, i - 1 == sz_signal_int_get(v->sig_int));
+      }
+    }
+#endif
     SzRect nav = v->children[0]->frame;
     paint_rect(c, nav.x, nav.y, nav.w, nav.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -5252,7 +5277,13 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   g_radius_on = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
+#ifdef __EMSCRIPTEN__
+  sz_web_frame_begin(theme->px_scale > 0 ? theme->px_scale : 1);
+#endif
   paint_node(root, canvas, theme);
+#ifdef __EMSCRIPTEN__
+  sz_web_frame_end();
+#endif
   paint_hover_tooltips(root, canvas, theme, (float)width, (float)height);
   return 1;
 }
@@ -6609,3 +6640,29 @@ int sz_view_edit_extend_to_xy(SzView *view, float x, float y) {
     view->caret = caret_offset_at_x(view, x);
   return 1;
 }
+
+#ifdef __EMSCRIPTEN__
+/* The browser URL selects a section in the first Index Book. */
+static SzView *web_book(SzView *v) {
+  if (!v || !view_is_shown(v)) return NULL;
+  if (v->kind == SZ_VIEW_INDEX_BOOK) return v;
+  for (int i = 0; i < v->child_count; i++) {
+    SzView *book = web_book(v->children[i]);
+    if (book) return book;
+  }
+  return NULL;
+}
+
+int sz_view_web_navigate(SzView *root, const char *title) {
+  SzView *v = web_book(root);
+  if (!v) return 0;
+  for (int i = 1; i < v->child_count; i++) {
+    SzView *section = v->children[i]->children[0];
+    if (!strcmp(section->text, title)) {
+      sz_signal_int_set(v->sig_int, i - 1);
+      return 1;
+    }
+  }
+  return 0;
+}
+#endif

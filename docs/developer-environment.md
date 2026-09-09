@@ -74,10 +74,11 @@ Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI build
 
 ## Web build tools
 
-The browser package target needs Emscripten 4.0.23. Install this SDK with the
-[Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html).
-Run `emsdk install 4.0.23`, then `emsdk activate 4.0.23`. Load `emsdk_env.sh`
-in the build shell. The native install script does not install this SDK.
+The browser package target needs Python 3. It downloads the pinned Emscripten
+SDK on the first build and reuses it from the host cache. It does not need
+`emcc` on `PATH` or a shell activation command. Cache paths and cleanup:
+[Package a GUI app for the browser](guide.md#package-a-gui-app-for-the-browser).
+The native install script does not install this SDK.
 
 Build the product CLI with `./scripts/bootstrap.sh`. Then run:
 
