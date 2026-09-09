@@ -1,0 +1,7 @@
+[package]
+name = "manual"
+version = "0.1.0"
+description = "Scuzz technical manual as Scuzz data"
+
+[dependencies]
+syntax = { path = "../syntax" }

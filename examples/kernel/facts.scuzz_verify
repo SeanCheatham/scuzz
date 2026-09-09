@@ -1,0 +1,18 @@
+def adtFacts(): Bool =
+  Main.describe(Opt.Some(42)) == "adt:describe:42" && Main.describeBare(Opt.Some(42)) == "bare:42" && Main.describeBare(Main.noneInt()) == "bare:none" && Main.hueBare(Color.Red) == "barehue"
+
+def posFacts(): Bool =
+  Main.describePos(Opt.Some(3)) == "pos:3" && Main.describePos(Opt.Some(0)) == "nonpos:0" && Main.describePos(Main.noneInt()) == "none"
+
+def litFacts(): Bool =
+  Main.describeNum(0) == "zero" && Main.describeNum(2) == "other" && Main.describeFlag(true) == "yes" && Main.describeWord("ok") == "good"
+
+def recordFacts(): Bool =
+  Main.sum(Point(3, 5)) == 8 && Point(3, 5).show() == "Point(3,5)" && Point(3, 5).getOrElse(0) == 3
+
+def callFacts(): Bool =
+  Main.greet("hi", punct = "?") == "hi?" && Main.addDefault(3, m = 4) == 7 && Main.trunc(2.9) == 2
+
+def hueFacts(): Bool =
+  Main.describeHue(Color.Red) == "primary" && Main.describeSmall(0) == "tiny" && Main.describeOptZero(Opt.Some(0)) == "some0"
+

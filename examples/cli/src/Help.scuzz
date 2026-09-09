@@ -15,6 +15,7 @@ Commands:
   new      Create a new Scuzz Lang project
   ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
   package  Package a project for host, Android, iOS, or web
+  docs     Print the technical manual, or one topic, or a kit row
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -28,20 +29,11 @@ Options:
 Examples:
   scuzz new myapp --ui
   scuzz check
-  scuzz check --message-format=json
-  scuzz lsp
-  scuzz ide
-  scuzz ide --headless .
-  scuzz test
+  scuzz docs verify
+  scuzz fuzz --iterations 0
   scuzz run --headless
-  scuzz run examples/studio
-  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio
-  scuzz watch
-  scuzz run --watch --headless
-  scuzz fuzz --iterations 16
 
-JSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).
-`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump (includes [heap] kinds, delta, and [live] rows). Live inject: build/inject.script (tap/xy/text/type/key/compose/commit/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak). Desktop quit is window close. Headless `quit` stops the session. Desktop/Mobile record: build/record.script (live keys write `key`; auto-repeat writes `key a+repeat`; Shift+arrows write `key ArrowLeft+shift`; copy/cut/paste write those verbs; hover and right-click write `hover` / `secondary`).
+See: scuzz docs start
 """
 
 def helpFmt(): String =
@@ -64,6 +56,8 @@ Examples:
   scuzz fmt
   scuzz fmt --check
   scuzz fmt examples/hello
+
+See: scuzz docs commands
 """
 
 def helpCheck(): String =
@@ -84,6 +78,8 @@ Examples:
   scuzz check
   scuzz check examples/kernel
   scuzz check --message-format=json
+
+See: scuzz docs commands
 """
 
 def helpBuild(): String =
@@ -110,6 +106,8 @@ Examples:
   scuzz build
   scuzz build --full examples/hello
   scuzz build --verify examples/counter
+
+See: scuzz docs commands
 """
 
 def helpRun(): String =
@@ -143,7 +141,7 @@ Examples:
   scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio
   scuzz run --watch --headless
 
-Desktop/Mobile `run` writes build/record.script (live OS input; keys as `key`; auto-repeat as `key a+repeat`; Shift+arrows as `key ArrowLeft+shift`; copy/cut/paste as those verbs; hover and right-click as `hover` / `secondary`) and build/debug.dump. Replay Headless with --script and --dump. `[ui] run --watch` is hot reload. `build/inject.script` stays watch playback only (`dump` / `reload` / `quit` / `resetpeak` / `key` / `compose` / `commit` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` included). Desktop quit is window close. Headless `quit` stops the session.
+See: scuzz docs commands
 """
 
 def helpFuzz(): String =
@@ -180,7 +178,7 @@ Examples:
   scuzz fuzz --replay build/fuzz/repro.toml
   scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example
 
-`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and `build/seeds.txt`, then replays those entries. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. Search changes stored event order and repetition. It generates typed driver arguments. The workload seed makes this search repeatable. `SCUZZ_SCHED_SEED` walks 0, 1, 2, … for the search budget. A failure records the exact events and seeds. Event reduction removes steps while the failure remains. Replay does not use the generator. Iter 0 keeps no fault. Later iters set `SCUZZ_FAULT_SEED` to that same counter. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). `examples/bad-adt` is an expected fuzz failure (wrong `record` area). `examples/bad-sched` is an expected fuzz failure (lost Queue offer order under PCT). `examples/bad-intent` is an expected check failure (empty `*.scuzz_verify` or leftover `*.scuzz_intent`). `examples/bad-split` is an expected fuzz failure (silent live/verify dump mismatch). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass on the other expected-fail packages.
+See: scuzz docs verify
 """
 
 def helpNew(): String =
@@ -205,6 +203,8 @@ Examples:
   scuzz new mycli
   scuzz new myapp --ui
   scuzz new myapp --ui --path /tmp
+
+See: scuzz docs start
 """
 
 def helpLsp(): String =
@@ -223,7 +223,7 @@ Examples:
   scuzz lsp
   scuzz lsp examples/hello
 
-JSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check`.
+See: scuzz docs ide
 """
 
 def helpTest(): String =
@@ -250,6 +250,8 @@ Examples:
   scuzz test
   scuzz test --update
   scuzz test examples/hello
+
+See: scuzz docs verify
 """
 
 def helpWatch(): String =
@@ -271,6 +273,8 @@ Options:
 Examples:
   scuzz watch
   scuzz watch examples/hello
+
+See: scuzz docs commands
 """
 
 def helpIde(): String =
@@ -295,7 +299,7 @@ Examples:
   scuzz ide
   scuzz ide --headless .
 
-The CLI uses SCUZZ_IDE, else SCUZZ_HOME/ide when that package exists, else examples/editor. It passes PATH to the editor as Sys.args. There is no scuzz-ide binary.
+See: scuzz docs ide
 """
 
 def helpPkg(): String =
@@ -320,5 +324,30 @@ Examples:
   scuzz package --target host
   scuzz package --target android examples/counter
   scuzz package --target web examples/docs
+
+See: scuzz docs web
+"""
+
+def helpDocs(): String =
+  """Print the technical manual, or one topic, or a kit row
+
+Usage: scuzz docs [TOPIC]
+       scuzz docs kits
+       scuzz docs kit <Name.op>
+
+Arguments:
+  [TOPIC]  Topic id. Omit to list topics.
+
+Options:
+  -h, --help
+          Print help
+
+Examples:
+  scuzz docs
+  scuzz docs verify
+  scuzz docs kits
+  scuzz docs kit Str.len
+
+See: scuzz docs start
 """
 

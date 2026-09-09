@@ -10,9 +10,9 @@
 | [`docs/plans.md`](docs/plans.md) | Next short-term slice only, while a slice is in progress. Delete the file when the slice is done. Do not keep history. |
 | [`docs/optimization.md`](docs/optimization.md) | Later empirical pre-optimization (`*.scuzz_tune`). Not current work. |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep or cut vs Scala and effect libraries. Platforms. Toolchain. |
-| [`docs/guide.md`](docs/guide.md) | App author path from install to run |
+| `scuzz docs start` | App author path from install to run |
 | [`docs/developer-environment.md`](docs/developer-environment.md) | Checkout host setup |
-| [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
+| `scuzz docs manifest` | Package manifest schema |
 | [`README.md`](README.md) | Pitch, install, one example |
 | [`VERSION`](VERSION) | Product version (`scuzz -V`). Cut a release with the GitHub `release` workflow. |
 
@@ -46,7 +46,7 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 1. Read `HUMANS.md` for product intent. Do not edit it.
 2. Read `docs/vision.md` for locks and current direction.
 3. Add the smallest slice that proves the behavior (a test or `examples/` when it applies).
-4. Update `vision.md`. If `compatibility.md` or `guide.md` owns the topic, update that file instead.
+4. Update `vision.md`. If `compatibility.md` owns the topic, update that file instead. App author prose lives in `scuzz docs`.
 
 ## Cursor Cloud specific instructions
 

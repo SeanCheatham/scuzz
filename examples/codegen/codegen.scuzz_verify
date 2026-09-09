@@ -25,3 +25,9 @@ def irIdemHello(): Bool =
 def irFullHello(): Bool =
   Emit.emitFull(Main.srcHello()) == Str.concat(Emit.preamble(), Main.wantHello())
 
+def irIdemGenSeed(): Bool =
+  Main.irIdemGen(0)
+
+def irGenerated(n: Int where n >= 0): Bool =
+  Main.irIdemGen(n)
+

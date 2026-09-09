@@ -1,0 +1,133 @@
+record Topic(id: String, title: String, blocks: List[Block])
+
+enum Block:
+  case Para(text: String)
+  case Code(text: String)
+  case Cmd(text: String)
+
+def verbs(): List[String] =
+  "build" :: "run" :: "watch" :: "test" :: "check" :: "lsp" :: "fmt" :: "fuzz" :: "new" :: "ide" :: "package" :: "help" :: "docs" :: []
+
+def topics(): List[Topic] =
+  Topics.all()
+
+def topicIds(): List[String] =
+  idsOf(topics())
+
+def idsOf(ts: List[Topic]): List[String] =
+  if (List.isEmpty(ts)) [] else Str.concat(List.at(ts, 0).id, "") :: idsOf(List.tail(ts))
+
+def idsLine(): String =
+  idsLineGo(topics())
+
+def idsLineGo(ts: List[Topic]): String =
+  if (List.isEmpty(ts)) "" else if (List.len(ts) == 1) Str.concat(List.at(ts, 0).id, "") else Str.concat(Str.concat(List.at(ts, 0).id, "|"), idsLineGo(List.tail(ts)))
+
+def findTopic(id: String): List[Topic] =
+  List.filter(topics(), t => t.id == id)
+
+def hasTopic(id: String): Bool =
+  List.nonEmpty(findTopic(id))
+
+def formatSrc(src: String): String =
+  Parse.pretty(Parse.parse(Lexer.lex(src)))
+
+def wrapPara(text: String): String =
+  fillWords(wordsOf(text), 80, "", "")
+
+def wordsOf(s: String): List[String] =
+  List.filter(Str.split(s, " "), w => w != "")
+
+def fillWords(words: List[String], width: Int, line: String, acc: String): String =
+  if (List.isEmpty(words)) endLine(line, acc) else fillWord(List.at(words, 0), List.tail(words), width, line, acc)
+
+def fillWord(w: String, rest: List[String], width: Int, line: String, acc: String): String =
+  if (line == "") fillWords(rest, width, w, acc) else if (Str.len(line) + 1 + Str.len(w) <= width) fillWords(rest, width, Str.concat(line, Str.concat(" ", w)), acc) else fillWords(rest, width, w, endLine(line, acc))
+
+def endLine(line: String, acc: String): String =
+  if (line == "") acc else if (acc == "") line else Str.concat(acc, Str.concat("""
+""", line))
+
+def indentBlock(s: String): String =
+  List.join(List.map(Str.split(s, """
+"""), line => Str.concat("  ", line)), """
+""")
+
+def renderList(): String =
+  Str.concat(List.join(List.map(topics(), t => renderListRow(t)), """
+"""), """
+""")
+
+def renderListRow(t: Topic): String =
+  Str.concat(t.id, Str.concat("  ", t.title))
+
+def unknownTopic(id: String): String =
+  Str.concat("scuzz docs: unknown topic '", Str.concat(id, Str.concat("""'
+
+""", renderList())))
+
+def renderTopic(id: String): String =
+  if (!hasTopic(id)) unknownTopic(id) else renderTopicBody(List.at(findTopic(id), 0))
+
+def renderTopicBody(t: Topic): String =
+  Str.concat(t.title, Str.concat("""
+
+""", Str.concat(renderBlocks(t.blocks), """
+""")))
+
+def renderBlocks(xs: List[Block]): String =
+  if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) renderBlock(List.at(xs, 0)) else Str.concat(renderBlock(List.at(xs, 0)), Str.concat("""
+
+""", renderBlocks(List.tail(xs))))
+
+def renderBlock(b: Block): String =
+  b match {
+    case Block.Para(text) => wrapPara(text)
+    case Block.Code(text) => indentBlock(text)
+    case Block.Cmd(text) => indentBlock(text)
+  }
+
+def allBlocks(): List[Block] =
+  blocksOf(topics())
+
+def blocksOf(ts: List[Topic]): List[Block] =
+  if (List.isEmpty(ts)) [] else List.concat(List.at(ts, 0).blocks, blocksOf(List.tail(ts)))
+
+def allCode(): List[String] =
+  codeOf(allBlocks())
+
+def allCmd(): List[String] =
+  cmdOf(allBlocks())
+
+def codeOf(xs: List[Block]): List[String] =
+  if (List.isEmpty(xs)) [] else codeHd(List.at(xs, 0), List.tail(xs))
+
+def codeHd(b: Block, rest: List[Block]): List[String] =
+  b match {
+    case Block.Code(text) => text :: codeOf(rest)
+    case _ => codeOf(rest)
+  }
+
+def cmdOf(xs: List[Block]): List[String] =
+  if (List.isEmpty(xs)) [] else cmdHd(List.at(xs, 0), List.tail(xs))
+
+def cmdHd(b: Block, rest: List[Block]): List[String] =
+  b match {
+    case Block.Cmd(text) => text :: cmdOf(rest)
+    case _ => cmdOf(rest)
+  }
+
+def isSnippet(s: String): Bool =
+  Str.startsWith(s, "def ") || Str.startsWith(s, "record ") || Str.startsWith(s, "enum ") || Str.startsWith(s, "@main")
+
+def cmdVerb(s: String): String =
+  if (List.len(Str.split(s, " ")) < 2) "" else List.at(Str.split(s, " "), 1)
+
+def hasVerb(v: String): Bool =
+  verbHit(verbs(), v)
+
+def verbHit(xs: List[String], v: String): Bool =
+  if (List.isEmpty(xs)) false else if (List.at(xs, 0) == v) true else verbHit(List.tail(xs), v)
+
+@main def main: IO[Unit] =
+  IO.println(renderList())

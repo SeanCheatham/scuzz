@@ -1,44 +1,54 @@
+import Manual.Topic
+import Manual.Block
+
 def paragraph(text: String): View =
   View.padding(8, View.maxSize(760, 0, View.text(text)))
 
 def code(text: String): View =
   View.code(text)
 
-def introduction(count: Signal[Int]): View =
-  View.column(paragraph("Build native apps with a small functional language. Scuzz includes the compiler, effects, UI, and verification tools."), paragraph("This site is a Scuzz GUI app. The browser runs the same Signals and View layout as the native runtime."), View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages."))
+def blockView(b: Block): View =
+  b match {
+    case Block.Para(text) => paragraph(text)
+    case Block.Code(text) => code(text)
+    case Block.Cmd(text) => code(text)
+  }
 
-def installation(): View =
-  View.column(paragraph("Install the Scuzz CLI from the project release. The native host needs clang and make. Linux also needs the zlib, bzip2, and OpenSSL development packages."), code("curl -fsSL https://raw.githubusercontent.com/SeanCheatham/scuzz/main/scripts/install.sh | sh"), paragraph("Create a GUI package. Run it with the Headless runtime."), code("""scuzz new --ui counter
-cd counter
-scuzz run --headless"""), paragraph("Use scuzz check to check formatting and types. Use scuzz fmt to format the source."), code("""scuzz fmt
-scuzz check"""))
+def stackViews(xs: List[View]): View =
+  if (List.isEmpty(xs)) View.text("") else if (List.len(xs) == 1) List.at(xs, 0) else View.column(List.at(xs, 0), stackViews(List.tail(xs)))
 
-def language(): View =
-  View.column(paragraph("Use def for functions. Values are immutable. A function states its parameter types and result type."), code("""def double(n: Int): Int =
-  n * 2"""), paragraph("Use a record to group values. Use copy to make a changed value."), code("""record Point(x: Int, y: Int)
+def blocksColumn(xs: List[Block]): View =
+  stackViews(List.map(xs, b => blockView(b)))
 
-def move(p: Point): Point =
-  p.copy(x = p.x + 1)"""), paragraph("Use a for expression to bind values and sequence effects. An equals sign binds a pure value. The left arrow binds an effect result."), code("@main def main: IO[Unit] =\n  for {\n    name = \"Scuzz\"\n    _ <- IO.println(name)\n  } yield ()"))
+def liveCounter(count: Signal[Int]): View =
+  View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages."))
 
-def interface(tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
-  View.column(paragraph("A View describes the interface. Signals hold state. Switch between the live example and its source. Each tab keeps its state and scroll position."), View.maxSize(0, 520, View.tabs(tab, View.column(View.section("live", "Live example", View.column(View.heading(2, View.text("Try text input")), paragraph("Type text, then switch tabs or sections. Your text stays in the Signals."), View.textField(draft, "Your text"), View.bindText(Signal.map(draft, text => Str.concat("You typed: ", text))), View.editor(notes), View.bindText(Signal.map(notes, text => Str.concat("Notes: ", text))))), View.section("source", "Source", code("@main def main: IO[Unit] =\n  for {\n    draft = Signal.make(\"\")\n    notes = Signal.make(\"\")\n    _ <- Ui.run(_ => View.column(\n      View.textField(draft, \"Your text\"),\n      View.bindText(Signal.map(draft, text =>\n        Str.concat(\"You typed: \" , text))),\n      View.editor(notes),\n      View.bindText(Signal.map(notes, text =>\n        Str.concat(\"Notes: \" , text)))))\n  } yield ()"))))), View.heading(2, View.text("Organize an app")), paragraph("Use View.appShell with View.appBar for a title and actions above the body. The body gets the remaining window height. The bar stays visible while the body scrolls. Its actions move below the title when space is limited."), code("View.appShell(\n  View.appBar(View.text(\"My app\"),\n    View.wrap(View.button(\"Reset\", _ => Signal.set(count, 0)))),\n  View.indexBook(page, View.column(\n    View.section(\"home\", \"Home\", home()),\n    View.section(\"settings\", \"Settings\", settings()))))"), paragraph("Use Index Book for major sections. Use View.tabs with a selection Signal and named sections for related panels within a page. Tabs use Left, Right, Home, and End to move focus. Press Enter or Space to select the focused tab. Local tabs do not change the browser URL."), paragraph("Headless uses the shared layout and input model. It supports event scripts, structural dumps, and verification without a display."))
+def guiLive(tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
+  View.maxSize(0, 520, View.tabs(tab, View.column(View.section("live", "Live example", View.column(View.heading(2, View.text("Try text input")), paragraph("Type text, then switch tabs or sections. Your text stays in the Signals."), View.textField(draft, "Your text"), View.bindText(Signal.map(draft, text => Str.concat("You typed: ", text))), View.editor(notes), View.bindText(Signal.map(notes, text => Str.concat("Notes: ", text))))), View.section("source", "Source", code("@main def main: IO[Unit] =\n  for {\n    draft = Signal.make(\"\")\n    notes = Signal.make(\"\")\n    _ <- Ui.run(_ => View.column(\n      View.textField(draft, \"Your text\"),\n      View.bindText(Signal.map(draft, text =>\n        Str.concat(\"You typed: \" , text))),\n      View.editor(notes),\n      View.bindText(Signal.map(notes, text =>\n        Str.concat(\"Notes: \" , text)))))\n  } yield ()")))))
 
-def verification(): View =
-  View.column(paragraph("Scuzz combines simulation, properties, fuzzing, and mutation. Put assertions in live code with require. Put named claims in a .scuzz_verify file."), code("""def double(n: Int): Int =
-  (n * 2).require(result => result == n + n)"""), paragraph("Drivers supply workloads. Claims judge the recorded timeline. Simulation files replace effectful app definitions during verification."), code("""scuzz fuzz --iterations 100
-scuzz fuzz --iterations 0"""), paragraph("The zero-iteration command replays the stored corpus and seeds. A failed campaign writes a reduced reproduction and a summary under build/fuzz."))
+def topicAt(i: Int): Topic =
+  List.at(Manual.topics(), i)
 
-def browser(): View =
-  View.column(paragraph("Package a Scuzz GUI app as static browser files. The build needs Python 3. Scuzz downloads the web SDK on the first build and reuses it from the host cache."), code("scuzz package --target web"), paragraph("The output is build/package/web. Serve this directory over HTTP for a local preview. Publish its contents with GitHub Pages for hosting."), paragraph("The app loads its JavaScript and WebAssembly from relative paths. A project site can live below a repository path. The browser does not need a Scuzz server."), paragraph("The first web target uses the software renderer. Native process execution, native sockets, and hot reload are not browser services."))
+def titleAt(n: Int): String =
+  if (n < 0 || n >= List.len(Manual.topics())) "Docs" else topicAt(n).title
+
+def startSection(count: Signal[Int]): View =
+  View.section(topicAt(0).id, topicAt(0).title, View.column(blocksColumn(topicAt(0).blocks), liveCounter(count)))
+
+def guiSection(tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
+  View.section(topicAt(3).id, topicAt(3).title, View.column(blocksColumn(topicAt(3).blocks), guiLive(tab, draft, notes)))
+
+def plainSection(i: Int): View =
+  View.section(topicAt(i).id, topicAt(i).title, blocksColumn(topicAt(i).blocks))
 
 @main def main: IO[Unit] =
   for {
     page = Signal.make(0)
     guiTab = Signal.make(0)
-    title = Signal.map(page, n => if (n == 0) "Scuzz Docs" else if (n == 1) "Install and run" else if (n == 2) "Language" else if (n == 3) "Build a GUI" else if (n == 4) "Verify behavior" else "Package for the web")
+    title = Signal.map(page, n => titleAt(n))
     count = Signal.make(0)
     draft = Signal.make("")
     notes = Signal.make("")
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(View.section("start", "Start", introduction(count)), View.section("install", "Install", installation()), View.section("language", "Language", language()), View.section("gui", "GUI", interface(guiTab, draft, notes)), View.section("verify", "Verify", verification()), View.section("web", "Web", browser())))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(count), plainSection(1), plainSection(2), guiSection(guiTab, draft, notes), plainSection(4), plainSection(5), plainSection(6), plainSection(7), plainSection(8), plainSection(9), plainSection(10)))))
   } yield ()

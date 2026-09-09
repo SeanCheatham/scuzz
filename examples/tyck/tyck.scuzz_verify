@@ -16,3 +16,15 @@ def tyckParse(): Bool =
 def tyckLam(): Bool =
   Main.tyckLam()
 
+def tyckGenSeed(): Bool =
+  Main.tyckGen(0)
+
+def prettyRoundtrip(): Bool =
+  Main.prettyIdem(0)
+
+def tyckGenerated(n: Int where n >= 0): Bool =
+  Main.tyckGen(n)
+
+def prettyGenerated(n: Int where n >= 0): Bool =
+  Main.prettyIdem(n)
+

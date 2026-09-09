@@ -13,6 +13,7 @@ enum Cmd:
   case New(name: String, path: String, ui: Bool)
   case Ide(path: String, outDir: String, headless: Bool)
   case Package(path: String, outDir: String, target: String)
+  case Docs(mode: String, arg: String)
 
 import Parse.Prog
 import Manifest.Man
@@ -33,7 +34,7 @@ def isVer(s: String): Bool =
   s == "-V" || s == "--version"
 
 def isCmd(s: String): Bool =
-  s == "build" || s == "run" || s == "watch" || s == "test" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "package" || s == "help"
+  s == "build" || s == "run" || s == "watch" || s == "test" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "package" || s == "docs" || s == "help"
 
 def unrec(name: String): String =
   Str.concat("error: unrecognized subcommand '", Str.concat(name, """'
@@ -195,7 +196,7 @@ def takeVal3(args: List[String], j: Int): (String, Int) =
   if (j >= List.len(args)) ("", 0 - 1) else (arg(args, j), j + 1)
 
 def helpOf(topic: String): String =
-  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "test") Help.helpTest() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else unrec(topic)
+  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "test") Help.helpTest() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
 
 def show(c: Cmd): String =
   c match {
@@ -213,6 +214,7 @@ def show(c: Cmd): String =
     case Cmd.New(name, path, ui) => Str.concat("new name=", Str.concat(name, Str.concat(" path=", Str.concat(path, Str.concat(" ui=", yn(ui))))))
     case Cmd.Ide(path, outDir, headless) => Str.concat("ide path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" headless=", yn(headless))))))
     case Cmd.Package(path, outDir, target) => Str.concat("package path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", target)))))
+    case Cmd.Docs(mode, arg) => Str.concat("docs mode=", Str.concat(mode, Str.concat(" arg=", arg)))
   }
 
 def render(c: Cmd): String =
@@ -220,6 +222,7 @@ def render(c: Cmd): String =
     case Cmd.Help(t) => helpOf(t)
     case Cmd.Version => Version.line()
     case Cmd.Fail(m) => m
+    case Cmd.Docs(mode, arg) => docsOut(mode, arg)
     case _ => show(c)
   }
 
@@ -256,7 +259,30 @@ def parseHelp(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Help(""), json) else if (isCmd(arg(args, i)) || arg(args, i) == "") gateJson(Cmd.Help(arg(args, i)), json) else gateJson(Cmd.Fail(unrec(arg(args, i))), json)
 
 def parseCmd(args: List[String], cmd: String, i: Int, json: Bool): Cmd =
-  if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "test") parseTest(args, i, json, "", false, false, false) else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else parsePkg(args, i, json, "", "build", "host")
+  if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "test") parseTest(args, i, json, "", false, false, false) else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "host")
+
+def parseDocs(args: List[String], i: Int, json: Bool): Cmd =
+  if (i >= List.len(args)) gateJson(Cmd.Docs("list", ""), json) else parseDocsTok(args, i, json, arg(args, i))
+
+def parseDocsTok(args: List[String], i: Int, json: Bool, a: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("docs"), json) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz docs [TOPIC]")) else if (a == "kits") parseDocsEnd(args, i + 1, json, "kits", "") else if (a == "kit") parseDocsKit(args, i + 1, json) else parseDocsEnd(args, i + 1, json, "topic", a)
+
+def parseDocsKit(args: List[String], i: Int, json: Bool): Cmd =
+  if (i >= List.len(args)) Cmd.Fail(needVal("kit")) else if (isFlag(arg(args, i))) Cmd.Fail(unexp(arg(args, i), "scuzz docs kit <Name.op>")) else parseDocsEnd(args, i + 1, json, "kit", arg(args, i))
+
+def parseDocsEnd(args: List[String], i: Int, json: Bool, mode: String, topic: String): Cmd =
+  if (i >= List.len(args)) gateJson(Cmd.Docs(mode, topic), json) else Cmd.Fail(extraArg(arg(args, i), "scuzz docs [TOPIC]"))
+
+def docsOut(mode: String, topic: String): String =
+  if (mode == "list") Manual.renderList() else if (mode == "kits") Kits.formatAll() else if (mode == "kit") docsKit(topic) else Manual.renderTopic(topic)
+
+def docsKit(name: String): String =
+  if (Kits.formatName(name) == "") Str.concat("scuzz docs: unknown kit '", Str.concat(name, """'
+""")) else Str.concat(Kits.formatName(name), """
+""")
+
+def docsUnknown(mode: String, topic: String): Bool =
+  mode == "topic" && !Manual.hasTopic(topic) || mode == "kit" && Kits.formatName(topic) == ""
 
 def parseFmt(args: List[String], i: Int, json: Bool, path: String, check: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Fmt(orDot(path), check), json) else parseFmtTok(args, i, json, path, check, arg(args, i))
@@ -485,10 +511,14 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, relate) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles)
     case Cmd.Ide(path, outDir, headless) => dispatchIde(path, outDir, headless)
     case Cmd.Lsp(path) => Lsp.run(path)
+    case Cmd.Docs(mode, topic) => dispatchDocs(mode, topic)
     case Cmd.Help(t) => IO.println(helpOf(t))
     case Cmd.Version => IO.println(Version.banner())
     case Cmd.Fail(m) => IO.println(m).flatMap(_ => IO.fail("scuzz"))
   }
+
+def dispatchDocs(mode: String, topic: String): IO[Unit] =
+  if (docsUnknown(mode, topic)) IO.println(docsOut(mode, topic)).flatMap(_ => IO.fail("scuzz")) else IO.println(docsOut(mode, topic))
 
 def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
   Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), target)
@@ -657,10 +687,19 @@ def newTomlIo(name: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, "\"\nversion = \"0.1.0\"\n"))
 
 def newMainUi(): String =
-  "@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    ))\n  } yield ()\n"
+  "def bump(n: Int): Int =\n  n + 1\n\n@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(View.text(\"Counter\"), View.bindText(label), View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))))\n  } yield ()\n"
 
 def newMainIo(): String =
-  "@main def main: IO[Unit] =\n  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n"
+  "def greet(): String =\n  \"Hello, Scuzz!\"\n\n@main def main: IO[Unit] =\n  IO.println(greet()).flatMap(_ => IO.println(\"ready.\"))\n"
+
+def newVerifyUi(): String =
+  "def alwaysShowsCounter(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n\ndef afterPlusShowsCount(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"button:+1\", \"text:count = 1\")\n\ndef bumpOnce(n: Int): Bool =\n  if (Main.bump(n) == n + 1) true else false\n\n"
+
+def newVerifyIo(): String =
+  "def greetFact(): Bool =\n  Main.greet() == \"Hello, Scuzz!\"\n\n"
+
+def writeNew(dir: String, name: String, ui: Bool): IO[Unit] =
+  Fs.write(Drive.joinSlash(dir, "scuzz.toml"), if (ui) newTomlUi(name) else newTomlIo(name)).flatMap(_ => writeNewMain(dir, name, ui))
 
 def dispatchNew(name: String, path: String, ui: Bool): IO[Unit] =
   dispatchNewDir(Drive.joinSlash(path, name), name, ui)
@@ -668,9 +707,9 @@ def dispatchNew(name: String, path: String, ui: Bool): IO[Unit] =
 def dispatchNewDir(dir: String, name: String, ui: Bool): IO[Unit] =
   Fs.exists(Drive.joinSlash(dir, "scuzz.toml")).flatMap(hit => if (hit != 0) IO.println(existNew(dir)).flatMap(_ => IO.fail("scuzz")) else Fs.mkdirs(Drive.joinSlash(dir, "src")).flatMap(_ => writeNew(dir, name, ui)))
 
-def writeNew(dir: String, name: String, ui: Bool): IO[Unit] =
-  Fs.write(Drive.joinSlash(dir, "scuzz.toml"), if (ui) newTomlUi(name) else newTomlIo(name)).flatMap(_ => writeNewMain(dir, ui))
+def writeNewMain(dir: String, name: String, ui: Bool): IO[Unit] =
+  Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "src"), "Main.scuzz"), if (ui) newMainUi() else newMainIo()).flatMap(_ => writeNewVerify(dir, name, ui))
 
-def writeNewMain(dir: String, ui: Bool): IO[Unit] =
-  Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "src"), "Main.scuzz"), if (ui) newMainUi() else newMainIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz test --update && scuzz test && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz test && scuzz run"))))
+def writeNewVerify(dir: String, name: String, ui: Bool): IO[Unit] =
+  Fs.write(Drive.joinSlash(dir, Str.concat(name, ".scuzz_verify")), if (ui) newVerifyUi() else newVerifyIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz test --update && scuzz test && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz test && scuzz run"))))
 

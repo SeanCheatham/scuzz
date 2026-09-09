@@ -11978,7 +11978,7 @@ int main(void) {
     close(fds[0]);
     assert(wait_aborted(pid));
     assert(strstr(child_err,
-                  "verify failed: countOk at state 0: never holds") != NULL);
+                  "claim countOk rejected at state 0: never holds") != NULL);
     /* Verdict.every surfaces the first failing state index. */
     assert(pipe(fds) == 0);
     fflush(NULL);
@@ -12000,7 +12000,7 @@ int main(void) {
     read_fd_all(fds[0], child_err, sizeof child_err);
     close(fds[0]);
     assert(wait_aborted(pid));
-    assert(strstr(child_err, "verify failed: secondFails at state 1: "
+    assert(strstr(child_err, "claim secondFails rejected at state 1: "
                              "predicate false at this state") != NULL);
     unsetenv("SCUZZ_TESTRT");
   }
@@ -12288,6 +12288,29 @@ int main(void) {
     v = sz_verdict_after_hit(tl, hit, needle);
     assert(v->valid);
     sz_release(needle);
+    sz_release(hit);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
+  /* Verdict.onHit / Verdict.stepEvery fold consecutive-state relations. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_edge.dump";
+    void *tl;
+    SzString *hit;
+    SzVerdict *v;
+    write_text(path, "# timeline v=2 n=3\n--- 0\nlast_hit:\n\ndrive:\n\n"
+                     "signals:\nint[0] count = 0\na11y:\n--- 1\nlast_hit:\n"
+                     "button:+1\ndrive:\n\nsignals:\nint[0] count = 1\na11y:\n"
+                     "--- 2\nlast_hit:\nbutton:+1\ndrive:\n\nsignals:\n"
+                     "int[0] count = 1\na11y:\n");
+    tl = sz_timeline_load(path);
+    assert(tl);
+    hit = sz_string_from_cstr("button:+1");
+    v = sz_verdict_on_hit(tl, hit, (void *)verify_pred_true, NULL);
+    assert(v->valid);
+    v = sz_verdict_step_every(tl, (void *)verify_pred_true, NULL);
+    assert(v->valid);
     sz_release(hit);
     sz_timeline_free(tl);
     remove(path);

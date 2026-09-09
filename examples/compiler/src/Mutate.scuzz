@@ -78,6 +78,50 @@ def pickSiteGo(s: Int, tries: Int, sites: Int, acc: List[Int]): Int =
 def pickSiteAt(site: Int, s: Int, tries: Int, sites: Int, acc: List[Int]): Int =
   if (!hasInt(acc, site)) site else if (tries < 8) pickSiteGo(lcgNext(s), tries + 1, sites, acc) else freeSite(0, sites, acc)
 
+def siteLoc(files: List[(String, String)], site: Int, o: Bool): String =
+  siteLocGo(files, site, 0, o)
+
+def siteLocGo(files: List[(String, String)], site: Int, base: Int, o: Bool): String =
+  if (List.isEmpty(files)) Str.concat("site ", Str.fromInt(site)) else siteLocHd(List.at(files, 0), List.tail(files), site, base, o)
+
+def siteLocHd(h: (String, String), rest: List[(String, String)], site: Int, base: Int, o: Bool): String =
+  h match {
+    case (stem, src) => siteLocPick(stem, src, rest, site, base, o)
+  }
+
+def siteLocPick(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): String =
+  if (stem == wrapStem()) siteLocGo(rest, site, base, o) else siteLocFile(stem, src, rest, site, base, o)
+
+def siteLocFile(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): String =
+  siteLocFile2(stem, src, rest, site, base, o, countProg(Parse.parseFile(stem, src), o))
+
+def siteLocFile2(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool, n: Int): String =
+  if (site < base + n) siteLocProg(Parse.parseFile(stem, src), site - base, o) else siteLocGo(rest, site, base + n, o)
+
+def siteLocProg(p: Prog, local: Int, o: Bool): String =
+  p match {
+    case Prog(_, _, _, _, impls, _, defs, _, body) => siteLocImpls(impls, local, 0, o, siteLocFuns(defs, local, countImpls(impls, 0, o), o, siteLocBody(body, local, countImpls(impls, 0, o) + countFuns(defs, 0, o), o)))
+  }
+
+def siteLocBody(body: Expr, local: Int, seen: Int, o: Bool): String =
+  if (local < seen + countExpr(body, o)) "body" else ""
+
+def siteLocImpls(xs: List[Im], local: Int, seen: Int, o: Bool, fallback: String): String =
+  if (List.isEmpty(xs)) fallback else siteLocImplHd(List.at(xs, 0), List.tail(xs), local, seen, o, fallback)
+
+def siteLocImplHd(im: Im, rest: List[Im], local: Int, seen: Int, o: Bool, fallback: String): String =
+  im match {
+    case Im(_, _, _, methods) => siteLocFuns(methods, local, seen, o, siteLocImpls(rest, local, countFuns(methods, seen, o), o, fallback))
+  }
+
+def siteLocFuns(ds: List[Fun], local: Int, seen: Int, o: Bool, fallback: String): String =
+  if (List.isEmpty(ds)) fallback else siteLocFunHd(List.at(ds, 0), List.tail(ds), local, seen, o, fallback)
+
+def siteLocFunHd(d: Fun, rest: List[Fun], local: Int, seen: Int, o: Bool, fallback: String): String =
+  d match {
+    case Fun(_, name, _, _, _, body, mod, off) => if (local < seen + countExpr(body, o)) Str.concat(mod, Str.concat(".", Str.concat(name, Str.concat(":", Str.fromInt(off))))) else siteLocFuns(rest, local, seen + countExpr(body, o), o, fallback)
+  }
+
 def pickSites(seed: Int, take: Int, sites: Int): List[Int] =
   if (take <= 0 || sites <= 0) noInts() else pickSitesGo(seed, if (take < sites) take else sites, sites, 0, noInts())
 

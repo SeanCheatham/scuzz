@@ -68,7 +68,10 @@ def tableOf2(line: String): String =
   if (Str.len(line) >= 2 && Str.charAt(line, 0) == 91 && Str.charAt(line, Str.len(line) - 1) == 93) trim(Str.slice(line, 1, Str.len(line) - 1)) else ""
 
 def knownTable(t: String): Bool =
-  t == "package" || t == "dependencies" || t == "ui"
+  t == "package" || t == "dependencies" || t == "ui" || t == "fuzz"
+
+def fuzzKey(k: String): Bool =
+  k == "score_floor"
 
 def pkgKey(k: String): Bool =
   k == "name" || k == "version" || k == "description"
@@ -77,7 +80,7 @@ def uiKey(k: String): Bool =
   k == "default_runtime" || k == "headless_size" || k == "headless_scale" || k == "tap_button" || k == "bundle_id"
 
 def unkTable(t: String): String =
-  Str.concat("unknown scuzz.toml table [", Str.concat(t, "]; known tables: package, dependencies, ui"))
+  Str.concat("unknown scuzz.toml table [", Str.concat(t, "]; known tables: package, dependencies, ui, fuzz"))
 
 def unkPkg(k: String): String =
   Str.concat("unknown scuzz.toml key `", Str.concat(k, "` in [package]; known keys: name, version, description"))
@@ -216,7 +219,49 @@ def parseKey(line: String, rest: List[String], st: St): St =
   parseKey2(splitEq(line), rest, st)
 
 def parseKey2(kv: (String, String), rest: List[String], st: St): St =
-  if (st.sec == "package") parsePkg(kv._1, kv._2, rest, st) else if (st.sec == "dependencies") parseDep(kv._1, kv._2, rest, st) else if (st.sec == "ui") parseUi(kv._1, kv._2, rest, st) else withErr(st, if (st.sec == "") keyOutside() else unkTable(st.sec))
+  if (st.sec == "package") parsePkg(kv._1, kv._2, rest, st) else if (st.sec == "dependencies") parseDep(kv._1, kv._2, rest, st) else if (st.sec == "ui") parseUi(kv._1, kv._2, rest, st) else if (st.sec == "fuzz") parseFuzz(kv._1, kv._2, rest, st) else withErr(st, if (st.sec == "") keyOutside() else unkTable(st.sec))
+
+def parseFuzz(k: String, _v: String, rest: List[String], st: St): St =
+  if (!fuzzKey(k)) withErr(st, unkFuzz(k)) else parseLines(rest, st)
+
+def unkFuzz(k: String): String =
+  Str.concat("unknown scuzz.toml key `", Str.concat(k, "` in [fuzz]; known keys: score_floor"))
+
+def floorMilli(text: String): Int =
+  floorMilliAt(text, findEqKey(text, "score_floor"))
+
+def findEqKey(text: String, key: String): Int =
+  findIdx(text, Str.concat(key, " = "), 0)
+
+def findIdx(s: String, needle: String, i: Int): Int =
+  if (Str.len(needle) == 0 || i + Str.len(needle) > Str.len(s)) 0 - 1 else if (Str.slice(s, i, i + Str.len(needle)) == needle) i else findIdx(s, needle, i + 1)
+
+def floorMilliAt(text: String, i: Int): Int =
+  if (i < 0) 0 else floorMilliSkip(text, i, Str.len("score_floor = "))
+
+def floorMilliSkip(text: String, i: Int, skip: Int): Int =
+  parseFloor(trim(Str.slice(text, i + skip, floorEnd(text, i + skip))))
+
+def floorEnd(s: String, i: Int): Int =
+  if (i >= Str.len(s) || Str.charAt(s, i) == 10) i else floorEnd(s, i + 1)
+
+def parseFloor(v: String): Int =
+  parseFloor2(unquote(v))
+
+def parseFloor2(v: String): Int =
+  if (v == "") 0 else parseFloorDot(v, findDot(v, 0))
+
+def findDot(s: String, i: Int): Int =
+  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 46) i else findDot(s, i + 1)
+
+def parseFloorDot(v: String, dot: Int): Int =
+  if (dot < 0) Str.toInt(v, 0) * 1000 else parseFloorFrac(Str.slice(v, 0, dot), Str.slice(v, dot + 1, Str.len(v)))
+
+def parseFloorFrac(a: String, b: String): Int =
+  Str.toInt(a, 0) * 1000 + padFrac(b)
+
+def padFrac(b: String): Int =
+  if (Str.len(b) >= 3) Str.toInt(Str.slice(b, 0, 3), 0) else if (Str.len(b) == 2) Str.toInt(b, 0) * 10 else if (Str.len(b) == 1) Str.toInt(b, 0) * 100 else 0
 
 def parsePkg(k: String, v: String, rest: List[String], st: St): St =
   if (!pkgKey(k)) withErr(st, unkPkg(k)) else if (k == "name") parsePkgName(unquoteName(v), rest, st) else if (k == "version") parseLines(rest, St(st.sec, st.name, unquote(v), st.hasUi, st.deps, stUi(st), st.err)) else parseLines(rest, st)

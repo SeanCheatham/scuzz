@@ -175,7 +175,7 @@ def findFunHd(d: Fun, rest: List[Fun], name: String): String =
   }
 
 def kitHover(f: String): String =
-  if (Check.isKit(f)) Str.concat(f, Str.concat(": ", Check.kitRet(f))) else ""
+  Kits.formatName(f)
 
 def hoverAt(src: String, line: Int, col: Int): String =
   hoverName(src, qualIdentAt(src, offsetOf(src, line, col)))

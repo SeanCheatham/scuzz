@@ -33,7 +33,10 @@ grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
 "$SCUZZ" fuzz --iterations 16 examples/kernel
 "$SCUZZ" fuzz --iterations 8 examples/scale
 "$SCUZZ" fuzz --iterations 8 examples/fmt
-# Compiler campaigns use a source copy and a fixed executable.
+"$SCUZZ" fuzz --iterations 0 examples/tyck
+"$SCUZZ" fuzz --iterations 0 examples/codegen
+# Full compiler campaigns copy sources and run a short search. Default CI stays corpus-only.
+# Set SCUZZ_COMPILER_FUZZ=1 for the search campaign.
 compiler_campaigns() (
   campaign_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-compiler-fuzz.XXXXXX")"
   trap 'status=$?; if [ "$status" -eq 0 ]; then rm -rf "$campaign_dir"; else echo "Compiler campaign artifacts: $campaign_dir" >&2; fi' EXIT
