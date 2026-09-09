@@ -280,7 +280,12 @@ The shared runtime theme supplies the default colors. Primary buttons have a
 small solid shadow inside their bounds. A pointer press moves the button face
 into that shadow. Keyboard focus has a light and dark inset border. Text fields
 and editors use dark carets. Editor selection and bracket marks use a yellow
-background. Headless, Desktop, and Mobile use the same paint path.
+background. Checkboxes use an ink checkmark inside a bordered yellow square.
+Radio controls use a smaller ink square inside the yellow inset. Switches use
+an ink thumb that moves inside a bordered track. Slider thumbs have an ink
+border. These marks show selection through shape and position as well as color.
+Compact controls and list tiles use the same marks. Headless, Desktop, and
+Mobile use the same paint path.
 
 Body text uses 14 logical pixels with a 20 pixel line height. Default controls
 have a 40 pixel height. Use `View.fontSize(28, ...)` for a screen title and
