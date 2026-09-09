@@ -69,6 +69,8 @@ Slices (same names as ci.yml where one step maps to one slice):
   tyck            typecheck oracle
   kits            check and corpus-only fuzz for examples/manual
   codegen         codegen emit + oracle
+  tyck-replay     typechecker corpus replay
+  codegen-replay  code-generation corpus replay
   hello-outdir    hello via --out-dir
   fixedpoint      LLVM IR fixed-point
   kernel          ./scripts/ci-kernel.sh
@@ -341,11 +343,23 @@ slice_macos_smoke() {
   slice_macos_hello
 }
 
+slice_tyck_replay() {
+  need_scuzz
+  "$SCUZZ" fuzz --iterations 0 examples/tyck
+}
+
+slice_codegen_replay() {
+  need_scuzz
+  "$SCUZZ" fuzz --iterations 0 examples/codegen
+}
+
 slice_oracles() {
   slice_hello
   slice_tyck
   slice_kits
   slice_codegen
+  slice_tyck_replay
+  slice_codegen_replay
   slice_hello_outdir
   slice_fixedpoint
 }
@@ -426,6 +440,8 @@ case "$SLICE" in
   tyck) slice_tyck ;;
   kits) slice_kits ;;
   codegen) slice_codegen ;;
+  tyck-replay) slice_tyck_replay ;;
+  codegen-replay) slice_codegen_replay ;;
   hello-outdir) slice_hello_outdir ;;
   fixedpoint) slice_fixedpoint ;;
   kernel) slice_kernel ;;

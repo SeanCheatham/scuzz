@@ -7,4 +7,4 @@ description = "Desktop stay-open app: layout, file-backed list, properties"
 default_runtime = "desktop"
 headless_size = [400, 560]
 headless_scale = 1.0
-tap_button = 1
+tap_button = 0

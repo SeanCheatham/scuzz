@@ -1,19 +1,26 @@
 [signals]
 str[0] draft = ""
 int[1] page = 0
-int[2] count = 0
-int[3] level = 40
-int[4] live = 0
-int[5] pin = 0
-int[6] more = 0
-int[7] star = 0
-int[8] quiet = 0
-int[9] mode = 0
-int[10] seg = 0
-str[11] countLabel = "count = 0"
-list[12] items = <1>
+int[2] homeTab = 0
+str[3] title = "Studio"
+int[4] count = 0
+int[5] level = 40
+int[6] live = 0
+int[7] pin = 0
+int[8] more = 0
+int[9] star = 0
+int[10] quiet = 0
+int[11] mode = 0
+int[12] seg = 0
+str[13] countLabel = "count = 0"
+list[14] items = <1>
 
 [views]
+appbar:App bar
+heading:1
+text:Studio
+textbutton:Open tasks
+outlined:Settings
 semantics:Index book
 scroll:scroll
 choicechip:Home=1
@@ -21,24 +28,35 @@ choicechip:Tasks=0
 choicechip:Preferences=0
 scroll:scroll
 semantics:Home
-text:Studio
+semantics:Tabs
+tablist:Tabs
+scroll:scroll
+tab:Counter=1
+tab:Status=0
+scroll:scroll
+tabpanel:Counter
+heading:2
+text:Counter
 text:count = 0
-scroll:scrollh
 button:+1
-slider:40
-progress:40
-text:Close the window to quit
+outlined:Reset counter
+text:Switch tabs or sections. The counter keeps its value.
 
 [taps]
-0 Home 24,24 93x40
-1 Tasks 125,24 90x40
-2 Preferences 223,24 135x40
-3 +1 36,202 48x40
-4 slider 24,262 352x40
+0 Open tasks 185,24 102x40
+1 Settings 295,24 81x40
+2 Home 24,112 93x40
+3 Tasks 125,112 90x40
+4 Preferences 223,112 135x40
+5 Counter 36,220 81x40
+6 Status 125,220 68x40
+7 +1 48,390 48x40
+8 Reset counter 104,390 123x40
 
 [fields]
 
 [scrolls]
 0 scroll
 1 scroll
-2 scrollh
+2 scroll
+3 scroll

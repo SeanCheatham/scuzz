@@ -43,6 +43,10 @@ jobs:
         include:
           - name: compiler
             slices: hello tyck kits codegen hello-outdir
+          - name: tyck-replay
+            slices: tyck-replay
+          - name: codegen-replay
+            slices: codegen-replay
           - name: fixedpoint
             slices: fixedpoint
           - name: native
