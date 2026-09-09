@@ -1,82 +1,104 @@
 # Scuzz Lang
 
-Scuzz is a Scala-inspired language for native CLI, server, desktop, and mobile apps. It compiles to LLVM. Builtin `IO` is ZIO-shaped. It is not a ZIO port. UI is a `Ui` effect. Headless, Desktop, and Mobile are real runtimes.
+Scuzz is a functional programming language for native applications. It takes inspiration from Scala’s concise syntax and Flutter’s approach to user interfaces.
 
-Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Native is a reference, not a dependency. GUI apps can also use the WebAssembly browser target.
+Scuzz includes a compiler, a UI toolkit, and command-line tools to build, run, format, and test apps. It targets command-line tools, servers, desktop apps, and mobile apps. GUI apps can also run in a browser through WebAssembly.
 
-## Goals
+Scuzz is in active development. See [Status and platforms](#status-and-platforms) for current support and limits.
 
-- **Language:** Scala-inspired subset for CLI, server, desktop, and mobile. `for` is the binder (`=` pure, `<-` effect). I/O goes through `IO`. Dense source aims for Scala-like token efficiency.
-- **Runtime:** native LLVM. No VM, no Java, no classpath.
-- **UI:** `View` is pure. State lives in `Signal`. `Ui.run` is the session. Canvas is Skia-shaped. Headless is a peer runtime.
-- **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, and package. One formatter. One linter (`scuzz check`). `[ui] run --watch` is hot reload.
-- **Testing:** mutation, fuzz, properties, simulation, and determinism are built in. Oracles live in source. Drivers are oracle-free. Simulation is hermetic. Do not add a third-party harness.
-- **Batteries:** the language and standard kits cover common cases. No ecosystem library sprawl.
+## Why Scuzz?
 
-Product intent: [docs/vision.md](docs/vision.md). App path: run `scuzz docs start`. Checkout setup: [docs/developer-environment.md](docs/developer-environment.md).
+- **Native applications.** Write concise, functional code that compiles to native binaries through LLVM.
+- **An integrated UI toolkit.** Build interfaces with shared app code. Use hot reload to update a UI while it runs.
+- **UI automation.** Run UI apps without a display. Record and replay input for debugging and testing.
+- **Built-in verification.** Define properties that your code must satisfy. Use fuzzing, mutation testing, and deterministic simulation to check them.
+- **One toolchain.** Use `scuzz` to build, run, format, check, test, and package apps. The standard library covers common app tasks.
 
-## Install
+Scuzz takes inspiration from Scala but does not support Scala or JVM libraries. See the [compatibility details](docs/compatibility.md).
+
+## A small example
+
+This Counter displays a number and a button. Each click adds one to the number.
+
+```scala
+@main def main: IO[Unit] =
+  for {
+    count = Signal.make(0)
+    label = Signal.map(count, n => s"count = $n")
+    _ <- Ui.run(_ => View.column(
+      View.text("Counter"),
+      View.bindText(label),
+      View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
+    ))
+  } yield ()
+```
+
+A `Signal` holds a value that can change. The label updates when the count changes. A `View` describes the interface. `Ui.run` runs the interface through `IO`, which represents effects such as user interaction and file access.
+
+Create a Counter project with the commands below. The generated app includes verification code. For a larger app with pages and saved tasks, see [Studio](examples/studio).
+
+## Install and run
+
+Release packages support Linux x86-64 and macOS Apple Silicon. App builds need `clang` and `make`. Linux also needs the zlib, bzip2, and OpenSSL development packages. See [host setup](docs/developer-environment.md#required) for package commands. The installer does not install these tools or libraries.
 
 ```bash
 curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
-```
-
-The script installs `scuzz` under `~/.local/share/scuzz`. It puts a wrapper at `~/.local/bin/scuzz`. Put that `bin` dir on `PATH`:
-
-```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Apps need `clang` and `make`. Linux `[ui]` linking also needs zlib and bzip2 (`zlib1g-dev libbz2-dev`). Pin a release with `SCUZZ_VERSION=v0.2.1` on the same `curl | sh` line. From a checkout, `./scripts/install.sh` compiles `examples/cli` with the newest GitHub `v*` bootstrap and installs the tree.
+The script installs Scuzz under `~/.local/share/scuzz`. It puts the `scuzz` command in `~/.local/bin`. Add the `PATH` line to your shell configuration to use it in new terminals.
+
+Create and run a Counter app:
 
 ```bash
 scuzz new myapp --ui
 cd myapp
-scuzz test --update
-scuzz test
-scuzz run --headless    # scaffold default; Desktop: default_runtime = "desktop" in scuzz.toml
-scuzz ide --headless .  # bundled editor; Desktop without --headless
+scuzz run --headless
 ```
 
-`install.sh --help` lists flags and env vars.
+Headless mode runs the interface without a window and then exits. To open a desktop window, set `default_runtime = "desktop"` in the `[ui]` section of `scuzz.toml`, then run `scuzz run`. Linux desktop apps need X11 and its development libraries. Close the window to exit.
 
-## Example
+For a command-line app, omit `--ui` when you create the project, then use `scuzz run`.
 
-A multi-page Desktop app. Radios switch pages with `showWhen`. Tasks live in a `Signal[List[String]]` and persist through `Fs`. The window stays open. Close the window to quit. The snippet condenses [`examples/studio`](examples/studio). The full example adds the widget catalog, properties, and drivers.
+## Explore the tools
 
-```scala
-@main def main: IO[Unit] =
-  Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
-    for {
-      path = if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
-      draft = Signal.make("")
-      page = Signal.make(0)
-      text <- Fs.read(path).handleErrorWith(_ => IO.pure(""))
-      items = Signal.make(Tasks.loadList(text))
-      _ <- Ui.run(_ => View.column(
-        View.row(View.radio(page, 0, "Home"), View.radio(page, 1, "Tasks")),
-        View.showWhen(page, 0, View.text("Studio")),
-        View.row(
-          View.textField(draft, "item"),
-          View.button("Add", _ => for {
-            d = Str.trim(Signal.get(draft))
-          } yield if (Str.len(d) == 0) () else Signal.set(items, List.append(Signal.get(items), d)))
-        ),
-        View.expanded(View.scroll(View.each(items, s => View.row(
-          View.expanded(View.text(Tasks.itemLabel(s))),
-          View.button("Del", _ => Signal.set(items, List.filter(Signal.get(items), x => x != s)))
-        )))),
-        View.button("Save", _ => Fs.write(path, Tasks.saveBody(Signal.get(items))))
-      ))
-    } yield ()
-  )
-```
+Run these commands from your app directory:
 
 ```bash
-scuzz run examples/studio            # Desktop window; close the window to quit
-scuzz run --headless examples/studio
+scuzz fmt
+scuzz check
+scuzz fuzz --iterations 100
 ```
+
+These commands format the source, check the code, and run a verification campaign. Fuzzing searches for property failures. Mutation testing checks whether the properties detect changes to the code.
+
+Use `scuzz run --watch` for UI hot reload. Use `scuzz ide .` to open the bundled editor in a desktop window.
+
+## Status and platforms
+
+The compiler and command-line tools are written in Scuzz. Platform support has these limits:
+
+| Platform | Current support |
+| --- | --- |
+| Linux | Native apps, headless UI, and X11 desktop windows. Release package for x86-64. |
+| macOS | Native apps and desktop windows. Release package for Apple Silicon. |
+| Android and iOS | Packaging tools and platform shells. Android needs the NDK. iOS needs Xcode. Hardware device checks remain open. |
+| Browser | WebAssembly GUI apps. Native network and process effects are unavailable. Files do not persist across page reloads. |
+| Windows | Desktop support is planned. |
+
+See [compatibility](docs/compatibility.md) for platform details and [known gaps](docs/gaps.md) for open work.
+
+## Learn more and contribute
+
+- **Start building:** run `scuzz docs start` after installation.
+- **Learn the language:** run `scuzz docs language`.
+- **Build interfaces:** run `scuzz docs gui`.
+- **Write properties:** run `scuzz docs verify`.
+- **Browse working code:** see the [examples](examples).
+- **Understand the direction:** read the [product vision](docs/vision.md).
+- **Report a problem or suggest a change:** open a [GitHub issue](https://github.com/SeanCheatham/scuzz/issues).
+- **Work on Scuzz:** follow the [checkout setup](docs/developer-environment.md).
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE)
