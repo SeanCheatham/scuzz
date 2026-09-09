@@ -11,15 +11,16 @@ int[8] quiet = 0
 int[9] mode = 0
 int[10] seg = 0
 str[11] countLabel = "count = 0"
-str[12] pageLabel = "page = 0"
-list[13] items = <1>
+list[12] items = <1>
 
 [views]
+semantics:Index book
 scroll:scroll
-radio:Home=1
-text:page = 0
-radio:Tasks=0
-merge:logo
+choicechip:Home=1
+choicechip:Tasks=0
+choicechip:Preferences=0
+scroll:scroll
+semantics:Home
 text:Studio
 text:count = 0
 scroll:scrollh
@@ -27,77 +28,17 @@ button:+1
 slider:40
 progress:40
 text:Close the window to quit
-textfield:item
-button:Add
-vdiv:vdiv
-circular:40
-switch:On=0
-badge:0
-chip:Pin=0
-button:Rename
-card:card
-text:Preferences
-divider:divider
-unconstrained:box
-offstage:1
-visibility:1
-semantics:mark
-placeholder:ph
-tooltip:Sean
-inkwell:face
-avatar:S
-checktile:Star=0
-switchtile:Quiet=0
-radiotile:Night=0
-segmented:0
-fab:+
-expansion:More=0
-list:list
-listtile:milk
-text:Open
-iconbutton:i
-outlined:Edit
-textbutton:Open
-filterchip:Tag=0
-choicechip:Day=1
-actionchip:Go
-inputchip:In=0
-button:Done
-button:Del
-button:Save
-button:Clear
 
 [taps]
-0 Home 48,48 69x40
-1 Tasks 256,48 66x40
-2 +1 68,300 48x40
-3 slider 56,360 288x40
-4 Add 296,484 52x40
-5 On 112,532 64x40
-6 Pin 184,532 45x40
-7 Rename 237,532 84x40
-8 face 60,666 40x40
-9 Star 60,714 280x40
-10 Quiet 60,762 280x40
-11 Night 60,810 280x40
-12 segmented 60,858 280x40
-13 + 60,906 40x40
-14 More 60,954 280x40
-15 i 96,1086 40x40
-16 Edit 144,1086 51x40
-17 Open 203,1086 62x40
-18 Tag 96,1134 77x40
-19 Day 181,1134 52x40
-20 Go 241,1134 44x40
-21 In 96,1182 63x40
-22 Done 167,1182 62x40
-23 Del 237,1182 48x40
-24 Save 36,1290 59x40
-25 Clear 36,1338 62x40
+0 Home 24,24 93x40
+1 Tasks 125,24 90x40
+2 Preferences 223,24 135x40
+3 +1 36,202 48x40
+4 slider 24,262 352x40
 
 [fields]
-0* item="" caret=0 sel=0:0
 
 [scrolls]
 0 scroll
-1 scrollh
+1 scroll
+2 scrollh

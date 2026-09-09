@@ -1,0 +1,3 @@
+[fuzz]
+seed = 42
+events = ["tap 3", "tap 2", "tap 1", "tap 0"]

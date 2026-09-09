@@ -224,6 +224,8 @@ typedef enum SzViewKind {
   SZ_VIEW_SPLIT,              /* Signal[Int] 0-100; two children + drag handle */
   SZ_VIEW_OVERLAY,            /* Signal[Int]; fills parent when on; Escape dismisses */
   SZ_VIEW_ON_SECONDARY,       /* child + button-3 handler; sizes to the child; not a tap */
+  SZ_VIEW_INDEX_BOOK,
+  SZ_VIEW_SECTION,
   SZ_VIEW_FOCUS_GROUP         /* child list of taps; sizes to the child; not a tap */
 } SzViewKind;
 
@@ -279,6 +281,10 @@ SzView *sz_view_switch_list_tile(SzSignalInt *sig, const char *title);
 /* Full-width title row with a leading radio. Tap writes `value` into `sig`. */
 SzView *sz_view_radio_list_tile(SzSignalInt *sig, int64_t value, const char *title);
 /* Full-width two-segment row. Tap left writes 0; tap right writes 1. */
+/* Named page for an Index Book. The book owns the section. */
+SzView *sz_view_section(const char *title, SzView *child);
+/* Consume a column of sections. Selection is a zero-based section index. */
+SzView *sz_view_index_book(SzSignalInt *selected, SzView *sections);
 SzView *sz_view_segmented(SzSignalInt *sig, const char *left, const char *right);
 /* Overlay `sig` as a count on `child`. Sizes to the child. Not a tap target. */
 SzView *sz_view_badge(SzSignalInt *sig, SzView *child);
@@ -755,6 +761,8 @@ SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
                                     SzString *title);
 SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *left, SzString *right);
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child);
+SzView *sz_lang_view_section(SzString *title, SzView *child);
+SzView *sz_lang_view_index_book(SzSignalInt *selected, SzView *sections);
 SzView *sz_lang_view_card(SzView *child);
 SzView *sz_lang_view_divider(void);
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,

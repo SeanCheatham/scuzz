@@ -96,6 +96,23 @@ logical pixels. A smaller parent constraint still wins. Use
 `View.outlinedButton` for secondary actions and `View.textButton` for
 navigation actions.
 
+Use `View.indexBook` for named app sections. It fills its available space.
+Put it in `View.expanded` when a parent column also contains other controls.
+The index sits beside the page in wide windows and wraps above it in narrow
+windows. Each section scrolls independently. Use a nonempty column of sections
+and keep the selection index between zero and the last section.
+
+```scala
+selected = Signal.make(0)
+_ <- Ui.run(_ => View.indexBook(selected, View.column(
+  View.section("Work", View.column(View.text("Work"))),
+  View.section("Settings", View.column(View.text("Settings")))
+)))
+```
+
+Select an index tab with a pointer. After the index has focus, use ArrowUp or
+ArrowDown to move focus. Use Enter or Space to select the focused section.
+
 `Ui.run(_ => view)` under Headless: mount → optional scripted tap → snapshot → unmount. Desktop stays open when `[ui].default_runtime = "desktop"` (`examples/studio`; close the window to quit). The CLI sets `SCUZZ_UI_RUNTIME` from that key. `--headless` forces Headless. The factory re-runs construction on stamp-watch. Create Signals outside the factory. `Ui.run` does not take a prebuilt View. After a Desktop session, replay the recorded script Headless:
 
 ```bash
@@ -168,7 +185,7 @@ count.scuzz_verify     # Timeline => Verdict session claims and Bool drive oracl
 | `examples/counter` | Small UI: `Signal.map` + `View.bindText` + layout widgets + button lambda + `Ui.run(_ => view)` factory + path dep on `shared` + in-body `.require` / `Property.sometimes` + `count.scuzz_verify` `Timeline => Verdict` |
 | `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` + `.require` |
 | `examples/editor` | Bundled IDE package. `scuzz ide` launches it. Open a project root from `Sys.args`, edit in `View.editor`, save with `Fs.write`. Nested file tree (dir tap expands in place, nested rows indent, tree scrolls), basename tab plus dirty mark, wrapping toolbar, find/replace, completion/hover/palette overlays, Context overlay on a tree-file button-3 (`View.onSecondary`; Open / Delete), output list (hidden when empty), and `Ui.setTitle`. Tree and diagnostic rows wrap in `View.focusGroup`. A tap focuses that list. ArrowUp / ArrowDown move among sibling rows when no overlay is open. Enter / Space activate. Check writes the buffer, runs `scuzz check --message-format=json`, parses JSON, lists diagnostics, and jumps the caret. A diagnostic tap opens that file when the row encodes one. Hover / Complete / Format / Def / Rename / Fix host `scuzz lsp` over `Sys.spawn` pipes. Def can open a definition uri. Rename applies WorkspaceEdit `changes`. Fix applies the first `newText` from a code action. A completion tap inserts the label at the editor caret (`Ui.editorCaret`). Fuzz overlays `analyze` and `lspCall` with canned JSON. Headless goldens dump `[editor]`. Search-plus-mutate `scuzz fuzz --iterations N` compiles mutants on the compiler stack. `key s+ctrl` / `f+ctrl` fire labeled toolbar buttons. `key p+shift+ctrl` opens Palette. |
-| `examples/studio` | Desktop stay-open app: `showWhen` pages, `Signal.make` + `View.each`, Done/Add/Del/Rename, `View.radio` / `View.slider` / `View.progress` / `View.switch` / `View.chip` / `View.filterChip` / `View.choiceChip` / `View.actionChip` / `View.inputChip` / `View.listTile` / `View.badge` / `View.card` / `View.divider` / `View.expansionTile` / `View.iconButton` / `View.verticalDivider` / `View.circularProgress` / `View.avatar` / `View.checkboxListTile` / `View.switchListTile` / `View.radioListTile` / `View.segmented` / `View.fab` / `View.outlinedButton` / `View.textButton` / `View.tooltip` / `View.placeholder` / `View.semantics` / `View.mergeSemantics` / `View.inkWell` / `View.visibility` / `View.offstage` / `View.unconstrainedBox` / `View.scrollH` / `View.grid`, Fs load/save, `record` / `trait` / stem modules, `*.scuzz_verify` + drivers / `Property.sometimes`. `scuzz run` opens a window (close the window to quit). `--headless` snapshots. |
+| `examples/studio` | Index Book navigation with Home, Tasks, and Preferences. File-backed tasks, shared controls, Signals, and Timeline claims. `scuzz run` opens a window. `--headless` writes a snapshot. |
 | `examples/kernel` | Language constructs: enums, `record` + `where` + `.copy`, `trait` / `impl`, generics, generic enum/record, type aliases, stem modules, `private def`, `import` / `as` / `*`, unused names, `Float`, match guards, literal match, or-patterns, as-patterns, list patterns (`[]` / `::` / `[a, b]`), named field patterns, bare constructors (`case None`, `Some(1)`), tuple of 2 through 8 slots, tuple and constructor `for` / lambda unpack, `if` in `for`, `if` without `else` (`Unit` / `IO[Unit]`), `IO.fail` as `IO[A]`, `io.map`, case lambdas (`{ case … }`), `A => B` apply (`f(x)`, `f(x, y)`), named Fun values (`inc = (_ + 1): Int => Int`, `addN`), unary-def eta (`Str.fromInt`, `id`), n-ary-def eta (`add`), cons `h :: t`, named call arguments, default arguments, type ascription, typed lambdas, placeholder lambdas (`_ + 1`), structural `==`, numeric separators, scientific floats, triple-quoted strings, self-tail calls (loop lowering), Builder (linear string kit), recursive `Term` drive (`termDiff`) |
 | `examples/scale` | Compiler-scale package: about 4k lines across stem modules. A live run fills a String-keyed `Map` of 3048 entries (`mapn:3048`, `hit:0:49`). `scuzz fuzz --iterations 8` samples 3 of 97 live-code sites and finishes in about 36 s |
 | `examples/io` | Blessed kits: Clock / `Random.nextInt` / Fs (`list` entries, `exists`, `join` / `dirname` / `basename`, `delete` / `rename` / `walk`) / `Impurity.runKit` / `Ref` / `Queue` / `Deferred` (`empty` / `get` / `complete` / `fail`) / `Fiber` / `Resource` / `Stream` (range / zip / interleave / zipWith / flatMap / mapConcat / scan / fold / forall / iterate / unfold / head) / Json query (`get` / `keys` / `arr` / `merge` / `isBool` / `isFloat` / `getFloat` / `asFloat`) and write (`set` / `remove` / `append` / `dropAt`); parse miss is Result.Err / `Net.serveOnce` POST through virtual loopback plus TCP echo and UDP ping (`Impurity.runKit` and serve under `scuzz test`). `flow.scuzz_verify` claims fiber census, effect count, checkpoint, and nearest checkpoint stay in range. `fs.scuzz_verify` claims a `Fs.write` effect on the timeline. `net.scuzz_verify` claims a `Net.httpPost` effect |
