@@ -373,8 +373,13 @@ Signatures live in `examples/compiler/src/Kits.scuzz`. The typechecker uses that
 | `View.scroll` | `View` | `View` |
 | `View.scrollH` | `View` | `View` |
 | `View.expanded` | `View` | `View` |
-| `View.section` | `String, View` | `View` |
+| `View.section` | `String` ID, `String` title, `View` | `View` |
 | `View.indexBook` | `Signal[Int], View` | `View` |
+| `View.appShell` | `View` bar, `View` body | `View` |
+| `View.appBar` | `View` title, `View` actions | `View` |
+| `View.tabs` | `Signal[Int], View` sections | `View` |
+| `View.code` | `String` | `View` |
+| `View.heading` | `Int` level, `View` | `View` |
 | `View.card` | `View` | `View` |
 | `View.placeholder` | `View` | `View` |
 | `View.unconstrainedBox` | `View` | `View` |

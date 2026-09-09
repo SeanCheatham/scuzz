@@ -341,12 +341,35 @@ Only the selected page contributes content to hit testing and accessibility.
 The index supports focus-group arrow keys and Enter or Space activation.
 
 Use an Index Book for top-level app sections. Pass a selection Signal and a
-nonempty column of named sections. The selection is a zero-based index and must
-stay inside the section range. Each section supplies its own page heading.
+nonempty column of sections with unique IDs and displayed titles. The selection is a zero-based index and must
+stay inside the section range. Supply the selected page heading in its content
+or in the app bar.
 The book owns page scrolling. Studio uses Home, Tasks, and Preferences as
 separate working pages. Native proofs cover page switching, hidden controls,
 scroll retention, keyboard navigation, and wide-to-narrow resize. Studio
 Timeline claims check the active page and persistent index.
+
+### App structure
+
+`View.appShell(bar, body)` reserves the bar height. It gives the body the
+remaining window height. Use a scrolling View, Index Book, or tabs as the body.
+`View.appBar(title, actions)` supplies a level-one title and an action area.
+Use `View.wrap` for actions. Actions sit beside the title when they fit.
+They move below the title at narrow widths. The bar stays outside body scrolling.
+Docs and Studio use bound page titles and persistent navigation actions.
+
+`View.tabs(selected, sections)` groups fixed local panels. It accepts the same
+named sections as Index Book. The tabs stay above the panel at all widths.
+Each panel keeps its scroll offset and Signals. Only the selected panel
+contributes content to input and accessibility. Left, Right, Home, and End move
+tab focus. Enter or Space selects the focused tab. Browser Tab enters the
+selected tab and then the panel. Local tabs do not change the browser URL.
+Docs shows live text input and source panels. Studio shows counter and status
+panels. Headless claims and native layout checks cover these shared components.
+Browser checks cover tab roles, keyboard input, and state retention.
+
+Menus, automatic action overflow, closable document tabs, and list-detail
+navigation remain later slices.
 
 ### Layout model
 
@@ -366,8 +389,12 @@ SDK setup stays inside the build process. It does not change shell startup files
 Scuzz Docs uses Index Book
 navigation and a live counter. It runs below a GitHub Pages project path.
 The browser proof checks navigation, state retention, keyboard, touch, wheel,
-resize, and display scale in Chromium. Headless runs the Docs Timeline claims.
-The SDK includes the web build files. The `web` CI slice owns these checks.
+resize, and display scale in Chromium, Firefox, and WebKit. Headless runs the Docs Timeline claims.
+Section IDs stay stable when titles change. Browser links support new tabs.
+The DOM exposes shared controls and headings. Browser fields commit Unicode
+text and composition to shared Signals. Code blocks have a shared Copy control.
+Phone emulation covers Chromium and WebKit. Real phone and screen-reader checks
+remain open. The SDK includes the web build files. The `web` CI slice owns these checks.
 The `Deploy Docs` workflow builds and checks the site on pushes to `main`.
 It publishes static assets through GitHub Pages. Manual runs also use `main`.
 Browser limits: [`compatibility.md`](compatibility.md#browser-target).

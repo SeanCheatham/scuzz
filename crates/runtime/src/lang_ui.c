@@ -145,12 +145,24 @@ SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child) {
   return sz_view_badge(sig, child);
 }
 
-SzView *sz_lang_view_section(SzString *title, SzView *child) {
-  return sz_view_section(title ? sz_string_cstr(title) : "", child);
+SzView *sz_lang_view_section(SzString *id, SzString *title, SzView *child) {
+  return sz_view_section(id ? sz_string_cstr(id) : "", title ? sz_string_cstr(title) : "", child);
 }
 
 SzView *sz_lang_view_index_book(SzSignalInt *selected, SzView *sections) {
   return sz_view_index_book(selected, sections);
+}
+
+SzView *sz_lang_view_app_shell(SzView *bar, SzView *body) {
+  return sz_view_app_shell(bar, body);
+}
+
+SzView *sz_lang_view_app_bar(SzView *title, SzView *actions) {
+  return sz_view_app_bar(title, actions);
+}
+
+SzView *sz_lang_view_tabs(SzSignalInt *selected, SzView *sections) {
+  return sz_view_tabs(selected, sections);
 }
 
 SzView *sz_lang_view_card(SzView *child) { return sz_view_card(child); }
@@ -443,4 +455,12 @@ SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env) {
     sz_release(pack);
     return io;
   }
+}
+
+SzView *sz_lang_view_code(SzString *text) {
+  return sz_view_code(sz_string_cstr(text));
+}
+SzView *sz_lang_view_heading(int64_t level, SzView *child) {
+  if (level < 1 || level > 6) sz_panic("Heading level must be 1 through 6");
+  return sz_view_heading((int)level, child);
 }

@@ -105,8 +105,8 @@ and keep the selection index between zero and the last section.
 ```scala
 selected = Signal.make(0)
 _ <- Ui.run(_ => View.indexBook(selected, View.column(
-  View.section("Work", View.column(View.text("Work"))),
-  View.section("Settings", View.column(View.text("Settings")))
+  View.section("work", "Work", View.column(View.text("Work"))),
+  View.section("settings", "Settings", View.column(View.text("Settings")))
 )))
 ```
 
@@ -230,16 +230,41 @@ The page must keep `app.js` and `app.wasm` beside `index.html`.
 Select page text with the pointer. Use the browser Copy command or Ctrl+C
 (Command+C on macOS). Copied text keeps its source spaces and line breaks.
 The browser text layer follows the shared text layout and scroll clips.
+Use `View.code(text)` for a code block with a Copy button at the top right.
+The button reports success only after the clipboard accepts the text. On failure, select the text
+and use the browser Copy command. Clipboard buttons need HTTPS or localhost.
+Use `View.heading(level, child)` for heading levels 1 through 6.
 
-The first Index Book updates the URL fragment, such as `#section=Install`.
+The browser exposes links, buttons, headings, and editable fields as DOM
+controls. Tab moves between controls. Focus reveals controls in their shared
+scroll containers. Index links support middle-click and modified clicks.
+Browser Find, zoom, and reload shortcuts keep their normal behavior.
+Text fields and editors use browser editing for paste, Unicode, composition,
+and mobile keyboards. Committed text updates the shared Signal. The browser
+uses its native edit history while the field has focus.
+
+The first Index Book updates the URL fragment, such as `#section=install`.
 Share this URL to open the same section. Reload, Back, and Forward select the
-section from the URL. Section titles must be unique within the book. Keep titles
-stable to keep shared links valid. The URL keeps the site path and query.
+section from the URL. Each section has a nonempty, unique ID and a title.
+Keep IDs stable to keep shared links valid. Titles can change. The URL keeps the site path and query.
 App Signals and page scroll offsets remain in memory during navigation.
 Reload starts a new app session.
 
-`examples/docs` is the first browser app. It uses Index Book navigation and a
-Signal counter. Verify its shared behavior with
+Use `View.appShell(View.appBar(title, actions), body)` for an app frame.
+The bar supplies a level-one heading. Pass `View.text` or `View.bindText` as
+the title. Pass a `View.wrap` of controls as actions. Actions move below the
+title when they do not fit beside it. The body gets the remaining window height.
+Use an Index Book, tabs, or `View.scroll` as the body to scroll its content.
+
+Use `View.tabs(selected, sections)` for related panels within a page.
+Pass a nonempty column of `View.section(id, title, child)` values. IDs must be
+unique within that group. Keep the selection Signal inside the section range.
+Tabs keep panel state and scroll offsets. Left, Right, Home, and End move focus.
+Enter or Space selects the focused tab. Local tabs do not change the URL.
+Use `View.maxSize(0, height, tabs)` to cap nested tabs in a vertical scroll.
+
+`examples/docs` uses an app bar, Index Book navigation, a Signal counter, and
+live/source tabs. Verify its shared behavior with
 `scuzz fuzz --iterations 0 examples/docs`. The browser target does not change
 the native Headless verification path. Browser limits are in
 [`compatibility.md`](compatibility.md#browser-target).

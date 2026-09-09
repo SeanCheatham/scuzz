@@ -5,98 +5,244 @@
 <title>Scuzz</title>
 <link rel="icon" href="data:,">
 <style>
-html, body { margin: 0; width: 100%; height: 100%; background: #f5efdf; }
-canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
-#text-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-#text-layer span { position: absolute; white-space: pre; color: transparent;
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #f5efdf; }
+canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: pinch-zoom; }
+#text-layer { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
+#text-layer .text span { position: absolute; white-space: pre; color: transparent;
   pointer-events: auto; user-select: text; -webkit-user-select: text; cursor: text; }
-#text-layer span::selection { background: #f4d35e; color: #24211c; }
+#text-layer .text span::selection { background: #f4d35e; color: #24211c; }
+#app { position: relative; width: 100%; height: 100%; }
+.control { position: absolute; display: block; box-sizing: border-box; margin: 0; padding: 0;
+  border: 0; background: transparent; color: transparent; cursor: pointer; pointer-events: auto; }
+.control:focus-visible { outline: 2px solid #24211c; outline-offset: -4px; }
+.semantic-group { position: absolute; pointer-events: none; }
+.panel:focus-visible { outline: 2px solid #24211c; outline-offset: -4px; }
+.control.edit { font: 14px/20px monospace; padding: 8px; color: #24211c; background: #f5efdf;
+  border: 1px solid #24211c; resize: none; cursor: text; border-radius: 0; }
+@media (pointer: coarse) { .control.edit { font-size: 16px; } }
+#feedback { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #status { position: absolute; top: 1rem; left: 1rem; font: 16px sans-serif; }
 </style>
-<canvas id="canvas" tabindex="0" aria-label="Scuzz application"></canvas>
-<div id="text-layer"></div>
+<div id="app">
+<canvas id="canvas" tabindex="-1" aria-hidden="true"></canvas>
+<main id="text-layer" aria-label="Application"></main>
+</div>
+<p id="feedback" role="status"></p>
 <p id="status" role="status">Loading Scuzz…</p>
 <script>
 const status = document.getElementById('status');
+const layer = document.getElementById('text-layer');
+const encoder = new TextEncoder();
 var Module = {
   canvas: document.getElementById('canvas'),
+  nodes: new Map(),
   onRuntimeInitialized() { status.hidden = true; },
-  onAbort() { status.hidden = false; status.textContent = 'The application could not start.'; },
+  onAbort() { Module.ready = false; status.hidden = false; status.textContent = 'The application could not start. Reload to retry.'; },
   printErr(text) { console.error(text); },
   readRoute() {
-    if (!Module.ccall) return;
-    const title = new URLSearchParams(location.hash.slice(1)).get('section') ?? Module.firstSection;
-    if (title === undefined) return;
-    const found = Module.ccall('sz_web_navigate', 'number', ['string'], [title]);
+    if (!Module.ready) return;
+    const id = new URLSearchParams(location.hash.slice(1)).get('section') ?? Module.firstSection;
+    if (id === undefined) return;
+    const found = Module.ccall('sz_web_navigate', 'number', ['string'], [id]);
     if (!found && Module.currentSection)
       history.replaceState(null, '', '#section=' + encodeURIComponent(Module.currentSection));
   },
-  presentText(frame) {
-    const layer = document.getElementById('text-layer');
-    const scale = frame.scale;
-    const context = Module.selectionContext ||
-      (Module.selectionContext = document.createElement('canvas').getContext('2d'));
-    const baselines = new Map();
-    let index = 0;
-    frame.texts.forEach((block, blockIndex) => {
-      block.lines.forEach(line => {
-        let span = layer.children[index++];
-        if (!span) { span = document.createElement('span'); layer.append(span); }
-        if (span.textContent !== line.text) span.textContent = line.text;
-        span.block = blockIndex;
-        span.sourceStart = line.start;
-        span.style.left = line.x / scale + 'px';
-        if (!baselines.has(line.font)) {
-          context.font = line.font / scale + 'px monospace';
-          const metrics = context.measureText('M');
-          baselines.set(line.font, (metrics.fontBoundingBoxAscent - metrics.fontBoundingBoxDescent) / 2);
-        }
-        const top = line.y / scale - line.line_h / scale / 2 - baselines.get(line.font);
-        span.style.top = top + 'px';
-        span.style.font = line.font / scale + 'px monospace';
-        span.style.lineHeight = line.line_h / scale + 'px';
-        if (line.clip) {
-          const [x, y, w, h] = line.clip;
-          span.style.clipPath = `inset(${Math.max(0, y - top * scale) / scale}px ${Math.max(0, line.x + line.width - x - w) / scale}px ${Math.max(0, top * scale + line.line_h - y - h) / scale}px ${Math.max(0, x - line.x) / scale}px)`;
-        } else span.style.clipPath = '';
-      });
+  resizeViewport() {
+    const viewport = window.visualViewport;
+    const height = viewport && viewport.scale === 1 ? viewport.height : innerHeight;
+    document.getElementById('app').style.height = height + 'px';
+    if (Module.ready) Module.ccall('sz_web_resize', null, [], []);
+  },
+  async copyText(id, text) {
+    let success = false;
+    try { await navigator.clipboard.writeText(text); success = true; } catch (_) {}
+    Module.ccall('sz_web_copy_done', null, ['number', 'number'], [id, Number(success)]);
+    document.getElementById('feedback').textContent = success ? 'Copied' : 'Copy failed. Select the text and use Copy.';
+  },
+  syncEdit(node, mode = 0, preview = '') {
+    const start = encoder.encode(node.value.slice(0, node.selectionStart)).length;
+    const end = encoder.encode(node.value.slice(0, node.selectionEnd)).length;
+    Module.ccall('sz_web_edit', null, ['number', 'string', 'number', 'number', 'number'],
+      [node.item.id, mode === 1 ? preview : node.value, start, end, mode]);
+    if (mode === 0) node.committed = node.value;
+  },
+  makeControl(item) {
+    const editing = item.role === 3 || item.role === 41;
+    const node = document.createElement(item.route !== null ? 'a' : editing ? (item.role === 3 ? 'input' : 'textarea') : item.role === 8 ? 'input' : 'button');
+    node.className = 'control';
+    if (node.tagName === 'BUTTON') node.type = 'button';
+    node.addEventListener('focus', () => {
+      Module.ccall('sz_web_focus', null, ['number'], [node.item.id]);
+      if (editing) Module.syncEdit(node, 2);
     });
-    while (layer.children.length > index) layer.lastChild.remove();
+    if (editing) {
+      node.classList.add('edit');
+      node.spellcheck = false;
+      node.addEventListener('compositionstart', () => { node.composing = true; });
+      node.addEventListener('compositionupdate', event => Module.syncEdit(node, 1, event.data));
+      node.addEventListener('compositionend', () => {
+        node.composing = false;
+        Module.syncEdit(node);
+      });
+      node.addEventListener('input', event => {
+        if (!node.composing && !event.isComposing && node.value !== node.committed) Module.syncEdit(node);
+      });
+      node.addEventListener('select', () => { if (!node.composing) Module.syncEdit(node, 2); });
+      node.addEventListener('keyup', () => { if (!node.composing) Module.syncEdit(node, 2); });
+      node.addEventListener('click', () => Module.syncEdit(node, 2));
+    } else if (item.role === 8) {
+      node.type = 'range'; node.min = '0'; node.max = '100';
+      node.addEventListener('input', () => Module.ccall('sz_web_slider', null, ['number', 'number'], [node.item.id, Number(node.value)]));
+    } else {
+      node.addEventListener('click', event => {
+        if (node.tagName === 'A' && (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)) return;
+        event.preventDefault();
+        Module.ccall('sz_web_activate', 'number', ['number'], [node.item.id]);
+      });
+      node.addEventListener('keydown', event => {
+        const tab = node.item.role === 45;
+        if ((!node.item.route && !tab) || event.ctrlKey || event.metaKey || event.altKey) return;
+        const links = [...(tab ? node.closest('[role="tablist"]').querySelectorAll('[role="tab"]') : layer.querySelectorAll('a'))];
+        let next = links.indexOf(node);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (next + 1) % links.length;
+        else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = (next + links.length - 1) % links.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = links.length - 1;
+        else if (event.key === ' ') { event.preventDefault(); node.click(); return; }
+        else return;
+        event.preventDefault(); links[next].focus({preventScroll: true});
+      });
+    }
+    return node;
+  },
+  presentText(frame) {
+    const scale = frame.scale;
+    const context = Module.selectionContext || (Module.selectionContext = document.createElement('canvas').getContext('2d'));
+    const baselines = new Map();
+    const live = new Set();
+    const positions = new Map();
+    frame.items.forEach(item => {
+      live.add(item.id);
+      let node = Module.nodes.get(item.id);
+      const kind = item.group ? 'group' : item.lines ? 'text' : item.route !== null ? 'link' : String(item.role);
+      if (node && node.kind !== kind) { node.remove(); Module.nodes.delete(item.id); node = null; }
+      if (!node) {
+        node = item.lines || item.group ? document.createElement('div') : Module.makeControl(item);
+        node.kind = kind; node.dataset.view = item.id;
+        node.id = 'view-' + item.id;
+        if (item.group) node.className = 'semantic-group';
+        if (item.group && item.role === 47) {
+          node.classList.add('panel'); node.tabIndex = 0;
+          node.addEventListener('focus', () => Module.ccall('sz_web_focus', null, ['number'], [node.item.id]));
+        }
+        Module.nodes.set(item.id, node);
+      }
+      node.item = item;
+      const parent = item.parent ? Module.nodes.get(item.parent) : layer;
+      const ox = item.parent ? parent.item.x : 0;
+      const oy = item.parent ? parent.item.y : 0;
+      const index = positions.get(parent) || 0;
+      if (parent.children[index] !== node) parent.insertBefore(node, parent.children[index] || null);
+      positions.set(parent, index + 1);
+      if (item.group) {
+        node.hidden = item.hidden;
+        node.setAttribute('role', {46: 'tablist', 47: 'tabpanel', 48: 'region'}[item.role]);
+        node.setAttribute('aria-label', item.label);
+        if (item.related) node.setAttribute('aria-labelledby', 'view-' + item.related);
+        node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
+        node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
+      } else if (item.lines) {
+        node.className = 'text';
+        if (item.level) { node.setAttribute('role', 'heading'); node.setAttribute('aria-level', item.level); }
+        else { node.removeAttribute('role'); node.removeAttribute('aria-level'); }
+        let lineIndex = 0;
+        item.lines.forEach(line => {
+          let span = node.children[lineIndex++];
+          if (!span) { span = document.createElement('span'); node.append(span); }
+          if (span.textContent !== line.text) span.textContent = line.text;
+          span.block = frame.texts.indexOf(item); span.sourceStart = line.start;
+          if (!baselines.has(line.font)) {
+            context.font = line.font / scale + 'px monospace';
+            const metrics = context.measureText('M');
+            baselines.set(line.font, ((metrics.fontBoundingBoxAscent ?? line.font * 0.8 / scale) - (metrics.fontBoundingBoxDescent ?? line.font * 0.2 / scale)) / 2);
+          }
+          const top = line.y / scale - line.line_h / scale / 2 - baselines.get(line.font);
+          span.style.left = (line.x - ox) / scale + 'px'; span.style.top = top - oy / scale + 'px';
+          span.style.font = line.font / scale + 'px monospace'; span.style.lineHeight = line.line_h / scale + 'px';
+          clip(span, line.x, top * scale, line.width, line.line_h, line.clip, scale);
+        });
+        while (node.children.length > lineIndex) node.lastChild.remove();
+      } else {
+        node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
+        node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
+        node.setAttribute('aria-label', item.label);
+        if (item.route !== null) {
+          node.href = '#section=' + encodeURIComponent(item.route);
+          if (node.textContent !== item.label) node.textContent = item.label;
+          if (item.checked) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current');
+        } else if (item.role === 45) {
+          if (node.textContent !== item.label) node.textContent = item.label;
+          node.setAttribute('role', 'tab');
+          node.setAttribute('aria-selected', Boolean(item.checked));
+          node.setAttribute('aria-controls', 'view-' + item.related);
+          node.tabIndex = item.checked ? 0 : -1;
+        } else if (item.role === 3 || item.role === 41) {
+          if (!node.composing && node.value !== item.value) node.value = item.value;
+          node.committed = item.value;
+          node.placeholder = item.role === 3 ? item.label : '';
+        } else if (item.role === 8) {
+          node.value = item.checked;
+        } else {
+          if (node.textContent !== item.label) node.textContent = item.label;
+          const roles = {7: 'checkbox', 9: 'radio', 11: 'switch', 22: 'checkbox', 23: 'switch', 24: 'radio', 31: 'checkbox', 32: 'radio'};
+          if (roles[item.role]) { node.setAttribute('role', roles[item.role]); node.setAttribute('aria-checked', Boolean(item.checked)); }
+          if (item.role === 17) node.setAttribute('aria-expanded', Boolean(item.checked));
+        }
+        clip(node, item.x, item.y, item.w, item.h, item.clip, scale);
+      }
+    });
+    for (const [id, node] of Module.nodes) if (!live.has(id)) { node.remove(); Module.nodes.delete(id); }
     Module.textBlocks = frame.texts;
     const section = frame.sections.find(section => section.selected);
     if (section) {
-      Module.firstSection = frame.sections[0].title;
-      Module.currentSection = section.title;
-      const hash = '#section=' + encodeURIComponent(section.title);
-      if (!Module.routeReady) {
-        history.replaceState(null, '', hash);
-        Module.routeReady = true;
-      } else if (new URLSearchParams(location.hash.slice(1)).get('section') !== section.title) {
-        history.pushState(null, '', hash);
-      }
+      Module.firstSection = frame.sections[0].id; Module.currentSection = section.id;
+      const hash = '#section=' + encodeURIComponent(section.id);
+      if (!Module.routeReady) { history.replaceState(null, '', hash); Module.routeReady = true; }
+      else if (new URLSearchParams(location.hash.slice(1)).get('section') !== section.id) history.pushState(null, '', hash);
     }
   }
 };
-const textLayer = document.getElementById('text-layer');
-let touchY;
-textLayer.addEventListener('touchstart', event => { touchY = event.touches[0].clientY; }, {passive: true});
-textLayer.addEventListener('touchmove', event => {
-  if (!getSelection().isCollapsed || event.touches.length !== 1) return;
-  const touch = event.touches[0];
-  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number'],
-    [touch.clientX, touch.clientY, touchY - touch.clientY]);
-  touchY = touch.clientY;
-  event.preventDefault();
-}, {passive: false});
+function clip(node, x, y, width, height, bounds, scale) {
+  if (!bounds) { node.style.clipPath = ''; node.removeAttribute('aria-hidden'); return; }
+  const [cx, cy, cw, ch] = bounds;
+  node.style.clipPath = `inset(${Math.max(0, cy - y) / scale}px ${Math.max(0, x + width - cx - cw) / scale}px ${Math.max(0, y + height - cy - ch) / scale}px ${Math.max(0, cx - x) / scale}px)`;
+  // Offscreen controls remain in the focus order. Focus scrolls their shared container.
+  node.removeAttribute('aria-hidden');
+}
 window.addEventListener('hashchange', () => Module.readRoute());
 window.addEventListener('popstate', () => Module.readRoute());
+window.addEventListener('resize', () => Module.resizeViewport());
+window.visualViewport?.addEventListener('resize', () => Module.resizeViewport());
+document.addEventListener('keydown', event => {
+  if (!Module.ready || event.defaultPrevented || event.target !== Module.canvas || event.ctrlKey || event.metaKey || event.altKey || event.key === 'Tab') return;
+  if (!getSelection().isCollapsed) return;
+  if (Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, event.shiftKey ? 1 : 0, Number(event.repeat)])) event.preventDefault();
+});
+let touchY;
+layer.addEventListener('touchstart', event => { touchY = event.touches[0].clientY; }, {passive: true});
+layer.addEventListener('touchmove', event => {
+  if (!getSelection().isCollapsed || event.touches.length !== 1 || event.target.closest('.edit')) return;
+  const touch = event.touches[0];
+  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number'], [touch.clientX, touch.clientY, touchY - touch.clientY]);
+  touchY = touch.clientY; event.preventDefault();
+}, {passive: false});
 // Use source offsets so copied text keeps spaces and explicit line breaks.
 document.addEventListener('copy', event => {
-  const selection = window.getSelection();
+  if (event.target.closest?.('.edit')) return;
+  const selection = getSelection();
   if (selection.isCollapsed || !selection.rangeCount) return;
   const range = selection.getRangeAt(0);
-  const first = range.startContainer.parentElement;
-  const last = range.endContainer.parentElement;
+  const first = range.startContainer.parentElement, last = range.endContainer.parentElement;
   if (first?.block === undefined || last?.block === undefined) return;
   const pieces = [];
   for (let i = first.block; i <= last.block; i++) {
@@ -104,8 +250,7 @@ document.addEventListener('copy', event => {
     pieces.push(text.slice(i === first.block ? first.sourceStart + range.startOffset : 0,
       i === last.block ? last.sourceStart + range.endOffset : text.length));
   }
-  event.clipboardData.setData('text/plain', pieces.join('\n'));
-  event.preventDefault();
+  event.clipboardData.setData('text/plain', pieces.join('\n')); event.preventDefault();
 });
 </script>
 <script src="./app.js" onerror="Module.onAbort()"></script>

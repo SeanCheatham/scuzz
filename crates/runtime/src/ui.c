@@ -1404,6 +1404,27 @@ static int take_inject(SzUiSession *session, char **out) {
   return 1;
 }
 
+static void copy_requests(SzUiSession *session) {
+  SzView *button;
+  while ((button = sz_view_take_copy(session->root))) {
+    const char *text = sz_view_copy_payload(button);
+    session_set_clipboard(session, text);
+#ifdef __EMSCRIPTEN__
+    if (session->cfg.kind == SZ_UI_RUNTIME_WEB) {
+      sz_web_copy(button, text);
+      continue;
+    }
+#endif
+    int success = 1;
+    if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available())
+      success = sz_embedder_clipboard_set(text);
+    if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available())
+      success = sz_mobile_clipboard_set(text);
+    sz_view_copy_result(button, success);
+    session->dirty = 1;
+  }
+}
+
 int sz_ui_pump_sync(SzUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
@@ -1700,7 +1721,7 @@ int sz_ui_scroll_index(SzUiSession *session, int index, float dy) {
   return 1;
 }
 
-int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
+static int inject_event(SzUiSession *session, const SzInputEvent *event) {
   SzView *scroll;
   if (!session || !event || !session->root)
     return 0;
@@ -1781,6 +1802,7 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     if (event->width <= 0 || event->height <= 0)
       return 0;
     sk_surface_unref(session->surface);
+    if (event->scale > 0) session->cfg.scale = event->scale;
     session->cfg.width = event->width;
     session->cfg.height = event->height;
     {
@@ -1795,6 +1817,9 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     if (!session->surface)
       return 0;
     session->canvas = sk_surface_get_canvas(session->surface);
+    sz_view_layout(session->root, (float)session->cfg.width,
+                   (float)session->cfg.height, session->theme);
+    sz_view_reveal_focus(session->root);
     session->dirty = 1;
     return 1;
   case SZ_INPUT_POINTER:
@@ -1833,6 +1858,12 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
   }
 }
 
+int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
+  int result = inject_event(session, event);
+  if (session && session->root) copy_requests(session);
+  return result;
+}
+
 int sz_ui_session_activate_view(SzUiSession *session, SzView *target) {
   SzRect fr;
   float x, y;
@@ -1845,6 +1876,7 @@ int sz_ui_session_activate_view(SzUiSession *session, SzView *target) {
   y = fr.y + fr.h * 0.5f;
   if (!sz_view_activate(session->root, target, x, y))
     return 0;
+  copy_requests(session);
   session_set_last_hit(session, x, y, target);
   sync_keyboard(session);
   session->dirty = 1;
@@ -2347,4 +2379,16 @@ void sz_ui_session_finish(SzUiSession *session) {
     sz_property_stash_a11y(sz_string_cstr(views));
     sz_string_free(views);
   }
+}
+
+void sz_ui_session_focus_view(SzUiSession *session, SzView *view) {
+  if (!session) return;
+  sz_view_layout(session->root, (float)session->cfg.width,
+                 (float)session->cfg.height, session->theme);
+  sz_view_focus(session->root, view);
+  session->dirty = 1;
+}
+
+void sz_ui_session_invalidate(SzUiSession *session) {
+  if (session) session->dirty = 1;
 }

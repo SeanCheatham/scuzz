@@ -3,6 +3,8 @@
   path = if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
   draft = Signal.make("")
   page = Signal.make(0)
+  homeTab = Signal.make(0)
+  title = Signal.map(page, n => if (n == 0) "Studio" else if (n == 1) "Tasks" else "Preferences")
   count = Signal.make(0)
   level = Signal.make(40)
   live = Signal.make(0)
@@ -15,7 +17,7 @@
   countLabel = Signal.map(count, n => s"count = $n")
   text <- Fs.read(path).handleErrorWith(_ => IO.pure(""))
   items = Signal.make(Tasks.loadItems(text))
-  _ <- Ui.run(_ => View.indexBook(page, View.column(View.section("Home", View.column(View.fontSize(28, View.textColor(Theme.foreground(), View.text("Studio"))), View.bindText(countLabel), View.scrollH(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))), View.slider(level), View.progress(level), View.text("Close the window to quit"))), View.section("Tasks", View.column(View.fontSize(28, View.text("Tasks")), View.wrap(View.maxSize(240, 0, View.textField(draft, "item")), View.button("Add", _ => for {
+  _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Open tasks", _ => Signal.set(page, 1)), View.outlinedButton("Settings", _ => Signal.set(page, 2)))), View.indexBook(page, View.column(View.section("home", "Home", View.tabs(homeTab, View.column(View.section("counter", "Counter", View.column(View.heading(2, View.text("Counter")), View.bindText(countLabel), View.wrap(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset counter", _ => Signal.set(count, 0))), View.text("Switch tabs or sections. The counter keeps its value."))), View.section("status", "Status", View.column(View.heading(2, View.text("Status")), View.slider(level), View.progress(level), View.text("The slider keeps its value when you switch tabs.")))))), View.section("tasks", "Tasks", View.column(View.wrap(View.maxSize(240, 0, View.textField(draft, "item")), View.button("Add", _ => for {
   _ = Property.sometimes("tappedAdd")
   d = Str.trim(Signal.get(draft))
   n = Str.len(d)
@@ -35,5 +37,5 @@
   _ <- Fs.write(path, body).handleErrorWith(_ => IO.pure(()))
 } yield ()), View.button("Clear", _ => for {
   _ = Property.sometimes("tappedClear")
-} yield Signal.set(items, [])))), View.section("Preferences", View.column(View.fontSize(20, View.text("Preferences")), View.divider(), View.unconstrainedBox(View.offstage(level, View.visibility(level, View.semantics("mark", View.placeholder(View.tooltip("Sean", View.inkWell("face", _ => (), View.avatar("S")))))))), View.checkboxListTile(star, "Star"), View.switchListTile(quiet, "Quiet"), View.radioListTile(mode, 1, "Night"), View.segmented(seg, "List", "Grid"), View.fab("+", _ => ()), View.expansionTile(more, "More", View.text("hint"))))))).require(Property.signalListLen("items") >= 0).require(Str.len(Property.signalListAt("items", Property.signalListLen("items"))) == 0).require(Str.len(Property.signalStr("draft")) >= 0).require(Signal.get(count) >= 0)
+} yield Signal.set(items, [])))), View.section("preferences", "Preferences", View.column(View.divider(), View.unconstrainedBox(View.offstage(level, View.visibility(level, View.semantics("mark", View.placeholder(View.tooltip("Sean", View.inkWell("face", _ => (), View.avatar("S")))))))), View.checkboxListTile(star, "Star"), View.switchListTile(quiet, "Quiet"), View.radioListTile(mode, 1, "Night"), View.segmented(seg, "List", "Grid"), View.fab("+", _ => ()), View.expansionTile(more, "More", View.text("hint")))))))).require(Property.signalListLen("items") >= 0).require(Str.len(Property.signalListAt("items", Property.signalListLen("items"))) == 0).require(Str.len(Property.signalStr("draft")) >= 0).require(Signal.get(count) >= 0)
 } yield ())
