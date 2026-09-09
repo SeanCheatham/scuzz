@@ -13,7 +13,8 @@ extern "C" {
 typedef enum SzUiRuntimeKind {
   SZ_UI_RUNTIME_HEADLESS = 1,
   SZ_UI_RUNTIME_DESKTOP = 2,
-  SZ_UI_RUNTIME_MOBILE = 3
+  SZ_UI_RUNTIME_MOBILE = 3,
+  SZ_UI_RUNTIME_WEB = 4
 } SzUiRuntimeKind;
 
 typedef struct SzUiConfig {
@@ -715,6 +716,7 @@ typedef enum SzQuiesce {
  * (64 pumps); reports which terminal state was reached. */
 SzQuiesce sz_ui_quiesce(SzUiSession *session);
 int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event);
+int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event);
 int sz_ui_snapshot_png_sync(SzUiSession *session, const char *path);
 int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_len);
 

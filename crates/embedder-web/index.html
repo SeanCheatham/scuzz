@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scuzz</title>
+<link rel="icon" href="data:,">
+<style>
+html, body { margin: 0; width: 100%; height: 100%; background: #f5efdf; }
+canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+#status { position: absolute; top: 1rem; left: 1rem; font: 16px sans-serif; }
+</style>
+<canvas id="canvas" tabindex="0" aria-label="Scuzz application"></canvas>
+<p id="status" role="status">Loading Scuzz…</p>
+<script>
+const status = document.getElementById('status');
+var Module = {
+  canvas: document.getElementById('canvas'),
+  onRuntimeInitialized() { status.hidden = true; },
+  onAbort() { status.hidden = false; status.textContent = 'The application could not start.'; },
+  printErr(text) { console.error(text); }
+};
+</script>
+<script src="./app.js" onerror="Module.onAbort()"></script>
+</html>

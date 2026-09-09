@@ -444,7 +444,7 @@ def parsePkgTarget(p: (String, Int), args: List[String], json: Bool, path: Strin
   }
 
 def parsePkgTargetVal(v: String, n: Int, args: List[String], json: Bool, path: String, outDir: String): Cmd =
-  if (v == "host" || v == "android" || v == "ios" || v == "all") parsePkg(args, n, json, path, outDir, v) else Cmd.Fail(Drive.badTarget(v))
+  if (v == "host" || v == "android" || v == "ios" || v == "web" || v == "all") parsePkg(args, n, json, path, outDir, v) else Cmd.Fail(Drive.badTarget(v))
 
 def parsePkgOut(p: (String, Int), args: List[String], json: Bool, path: String, target: String): Cmd =
   p match {

@@ -10,6 +10,11 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+#include "web.h"
+#endif
 
 /* Parse SCUZZ_UI_RUNTIME. Unset or empty means Headless. Reject any other
    unknown value: a typo must not silently run Headless. */
@@ -27,11 +32,17 @@ static void fill_cfg(SzUiConfig *cfg, int width, int height) {
   double scale = 1.0;
   memset(cfg, 0, sizeof(*cfg));
   cfg->kind = parse_runtime_kind(getenv("SCUZZ_UI_RUNTIME"));
+#ifdef __EMSCRIPTEN__
+  cfg->kind = SZ_UI_RUNTIME_WEB;
+#endif
   cfg->width = width;
   cfg->height = height;
   cfg->title = sz_ui_default_title();
   sz_ui_resolve_headless_size(&cfg->width, &cfg->height, &scale);
   cfg->scale = scale;
+#ifdef __EMSCRIPTEN__
+  cfg->scale = emscripten_get_device_pixel_ratio();
+#endif
 }
 
 /* --- View builders ------------------------------------------------------- */
@@ -303,10 +314,14 @@ static void live_pump_loop(SzUiSession *session, int (*still)(void)) {
     if (max_frames > 0 && frame >= max_frames)
       break;
     {
+#ifdef __EMSCRIPTEN__
+      emscripten_sleep(16);
+#else
       struct timespec ts;
       ts.tv_sec = 0;
       ts.tv_nsec = 16000000L; /* ~60fps cap */
       nanosleep(&ts, NULL);
+#endif
     }
   }
 }
@@ -361,6 +376,9 @@ static void *thunk_run_rebuild(void *env) {
       sz_ui_session_set_record(session, record);
   }
 
+#ifdef __EMSCRIPTEN__
+  sz_web_start(session);
+#endif
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run pump failed");
   sz_testrt_session_baseline_snapshot();
@@ -385,6 +403,10 @@ static void *thunk_run_rebuild(void *env) {
     sz_ui_scripted_button_tap(session, inject_text);
   }
 
+#ifdef __EMSCRIPTEN__
+  live_pump_loop(session, live_still_watch);
+  sz_web_stop();
+#endif
   interactive = cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available();
   if (interactive) {
     live_pump_loop(session, live_still_desktop);

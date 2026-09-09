@@ -71,3 +71,21 @@ Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI build
 | unset | Skia CPU prebuilt |
 | `SCUZZ_SKIA=sk_sw` | in-tree software |
 | `SCUZZ_SKIA=gpu` | software paint, OpenGL present |
+
+## Web build tools
+
+The browser package target needs Emscripten 4.0.23. Install this SDK with the
+[Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html).
+Run `emsdk install 4.0.23`, then `emsdk activate 4.0.23`. Load `emsdk_env.sh`
+in the build shell. The native install script does not install this SDK.
+
+Build the product CLI with `./scripts/bootstrap.sh`. Then run:
+
+```bash
+./examples/cli/build/cli package --target web examples/docs
+```
+
+The `web` CI slice also needs Node.js and Playwright 1.63.0 with Chromium.
+Set `NODE_PATH` to the directory that contains the installed Playwright module.
+Run `./scripts/ci.sh web`. The browser check starts a temporary local HTTP
+server and closes it when the check ends.

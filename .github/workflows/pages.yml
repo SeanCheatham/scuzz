@@ -1,0 +1,65 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang make zlib1g-dev libbz2-dev libssl-dev
+      - name: Bootstrap product CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/bootstrap.sh
+      - name: Install browser build tools
+        run: |
+          git clone --depth 1 --branch 4.0.23 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install 4.0.23
+          "$RUNNER_TEMP/emsdk/emsdk" activate 4.0.23
+          echo "$RUNNER_TEMP/emsdk/upstream/emscripten" >> "$GITHUB_PATH"
+          npm install --prefix "$RUNNER_TEMP/web-tools" playwright@1.63.0
+          "$RUNNER_TEMP/web-tools/node_modules/.bin/playwright" install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/web-tools/node_modules" >> "$GITHUB_ENV"
+      - name: Build and check Docs
+        run: |
+          ./examples/cli/build/cli check examples/docs
+          ./examples/cli/build/cli package --target web examples/docs
+          node crates/embedder-web/test.cjs examples/docs/build/package/web
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: examples/docs/build/package/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

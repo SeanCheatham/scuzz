@@ -9,7 +9,7 @@ Edit this file when a decision or next-step order changes.
 ## Thesis
 
 - **Language**: purposeful Scala-inspired subset for native CLI, server, desktop, and mobile apps, with **built-in effect/IO/Streaming** (ZIO-inspired, not a ZIO or cats/fs2 port). Dense `for` dialect (`for` as primary binder). Token-efficient for agents. Functional by default. Keep the dialect practical. See [Language direction](#language-direction).
-- **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM. No Java interop. No classpath/Maven. Web is not a current target.
+- **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM. No Java interop. No classpath/Maven. GUI apps also target WebAssembly. Scuzz Docs is the first browser app.
 - **UI**: a primary product path, not the only one (Flutter-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Desktop/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Batteries**: the language and standard kits cover common app cases. No ecosystem library sprawl. No Maven, cats, or ZIO ports.
 - **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter (`scuzz fmt`). One linter (`scuzz check`: format-verify + typecheck; further lints emit here; no `lint` subcommand). One testing strategy. Mutation, fuzzing, properties, simulation, and determinism are **first-class in the language and `scuzz`**. They are not a third-party harness. Compiler, CLI, and toolchain are Scuzz (`examples/compiler`, `examples/cli`). A rebuild uses the newest GitHub `v*` bootstrap ([Self-hosting](#self-hosting)). `scuzz ide` launches a Scuzz `[ui]` app. That app is the dogfood IDE, not the compiler. Prerequisites: [`gaps.md`](gaps.md).
@@ -36,7 +36,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ## What Scuzz Lang is not
 
-- Not Scala 3, not the JVM, not Scala.js, not a web/browser product
+- Not Scala 3, not the JVM, not Scala.js, not a JavaScript language backend
 - Not a ZIO library port
 - Not a cats / cats-effect / Typelevel port
 - Not SwiftUI / UIKit / WinUI wrappers
@@ -74,7 +74,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **Fingerprint** (incremental): miss → rebuild. A hit still rebuilds when the out-dir has no `.ll`. A hit with a `.ll` is silent. The fingerprint text is VERSION, `uname -s`, a `clang -v` one-liner, `sk_capi_backend`, the toml, and the listed sources. Live (`fingerprint`) and verify (`fingerprint.verify`) share `build/` artifacts. A compile writes its mode file and deletes the sibling so a later switch rebuilds. Native `.a` mtimes are not in the stamp. No `scuzz clean` ritual.
 - **Native make:** quiet on success. A failed `make` prints the log. Clang compiles `.ll` without C `-I`. Package link uses `-O0 -Wno-override-module` (IR has no host triple). `scripts/bootstrap.sh` clang-links the product CLI at `-O2` after tagged bootstrap emit. A cli-ok proof of `examples/cli` writes a separate out-dir so it does not replace that binary. Make and clang of runtime and UI crates use `SCUZZ_HOME` when that env is set. `scuzz run` uses the fingerprint. `scuzz build PATH` writes `PATH/build`. A fuzz probe that runs longer than 20 s is killed.
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
-- **`scuzz package`:** `--target` is host, android, ios, or all. Default is host. An unknown target fails at parse. Android runs `crates/embedder-mobile/shells/android/build_ndk.sh` and emits `libscuzz.so` (needs the NDK). The same command installs the APK when `adb` lists a device. No device is not a failure. iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. When `SCUZZ_HOME` is set, the command exports `SCUZZ` to `$SCUZZ_HOME/bin/scuzz` before those shells. Shell tokens (bundle id, script path, project dir, copy dests) are quoted. Artifacts land in `build/package/`. A package that calls Net fails: mobile shells do not link OpenSSL. Not a Gradle/CocoaPods API.
+- **`scuzz package`:** `--target` is host, android, ios, web, or all. Web writes static browser files. `all` selects the native package targets. Default is host. An unknown target fails at parse. Android runs `crates/embedder-mobile/shells/android/build_ndk.sh` and emits `libscuzz.so` (needs the NDK). The same command installs the APK when `adb` lists a device. No device is not a failure. iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. When `SCUZZ_HOME` is set, the command exports `SCUZZ` to `$SCUZZ_HOME/bin/scuzz` before those shells. Shell tokens (bundle id, script path, project dir, copy dests) are quoted. Artifacts land in `build/package/`. A package that calls Net fails: mobile shells do not link OpenSSL. Not a Gradle/CocoaPods API.
 
 ### Self-hosting
 
@@ -358,9 +358,20 @@ Timeline claims check the active page and persistent index.
 
 ## Open work
 
+The browser target uses the shared compiler, Signals, View layout, and
+software renderer. Browser text uses matching font measurement and rasterization.
+`scuzz package --target web` writes static assets. Scuzz Docs uses Index Book
+navigation and a live counter. It runs below a GitHub Pages project path.
+The browser proof checks navigation, state retention, keyboard, touch, wheel,
+resize, and display scale in Chromium. Headless runs the Docs Timeline claims.
+The SDK includes the web build files. The `web` CI slice owns these checks.
+The `Deploy Docs` workflow builds and checks the site on pushes to `main`.
+It publishes static assets through GitHub Pages. Manual runs also use `main`.
+Browser limits: [`compatibility.md`](compatibility.md#browser-target).
+
 Keep type preservation through kits and emitted code as the first gate. Extend native composition proofs before more kit surface. Record construction and copy proofs cover scalar boxing and retained pointer fields. Native proofs cover named IO receivers, scalar maps, retained values, and typed recovery. Native proofs also cover generic Signals and typed attempt results. Workload search has a single-event reduction and replay proof. Next: reduce the remaining compiler campaign cost, then add the typed session schema. Accepted compositions must compile and preserve values. Invalid compositions must fail `check`. Ranked list: [`gaps.md`](gaps.md). `check` diagnostics, LSP goto-def, rename, hover, completion, tokens, and panic use recorded spans.
 
-Linux CI builds one product CLI and shares it across five independent check jobs. The `linux-headless` check requires all jobs to pass. The fixed-point proof owns the CLI self-compile smoke check. The hello slice checks hello and the formatter. The fixed-point proof stops when two adjacent self-compiles emit identical IR. Package builds share one parsed graph between Check and Emit. Function lookup uses the native list filter and keeps declaration order. Generic and ordinary kit calls share one signature for arity, argument, and result checks. Source locations use native string scans for LF counts and columns. String concatenation copies bytes once. It uses stored ASCII metadata when both inputs are ASCII. A cold live build of `examples/tyck` uses about 760 MiB on the development host.
+Linux CI builds one product CLI and shares it across six independent check jobs. The `linux-headless` check requires all jobs to pass. The fixed-point proof owns the CLI self-compile smoke check. The hello slice checks hello and the formatter. The fixed-point proof stops when two adjacent self-compiles emit identical IR. Package builds share one parsed graph between Check and Emit. Function lookup uses the native list filter and keeps declaration order. Generic and ordinary kit calls share one signature for arity, argument, and result checks. Source locations use native string scans for LF counts and columns. String concatenation copies bytes once. It uses stored ASCII metadata when both inputs are ASCII. A cold live build of `examples/tyck` uses about 760 MiB on the development host.
 
 Set `SCUZZ_COMPILER_FUZZ=1` to include compiler campaigns in `scripts/ci-fuzz.sh`. They use copied sources and a fixed executable in a temporary directory. Native checker and code-generation oracle builds still take several minutes. Keep these campaigns opt-in until their time and memory fit default CI. Failed campaigns keep their artifacts.
 
@@ -370,7 +381,7 @@ Self-hosting staged slices are in. The product CLI is Scuzz. `scripts/fixedpoint
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)). HTTP status, bind, HTTPS serve, registry, Windows, OS threads, `scuzz eval`, and kit docs stay later.
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. Hardware device runs stay open.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. GUI apps also target WebAssembly. Scuzz Docs is the first browser app. Hardware device runs stay open.
 
 ## Risks
 

@@ -2,7 +2,7 @@
 
 Scuzz is a Scala-inspired language for native CLI, server, desktop, and mobile apps. It compiles to LLVM. Builtin `IO` is ZIO-shaped. It is not a ZIO port. UI is a `Ui` effect. Headless, Desktop, and Mobile are real runtimes.
 
-Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Native is a reference, not a dependency. Web is not a current target.
+Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Native is a reference, not a dependency. GUI apps can also use the WebAssembly browser target.
 
 ## Goals
 

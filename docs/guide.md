@@ -191,3 +191,32 @@ count.scuzz_verify     # Timeline => Verdict session claims and Bool drive oracl
 | `examples/io` | Blessed kits: Clock / `Random.nextInt` / Fs (`list` entries, `exists`, `join` / `dirname` / `basename`, `delete` / `rename` / `walk`) / `Impurity.runKit` / `Ref` / `Queue` / `Deferred` (`empty` / `get` / `complete` / `fail`) / `Fiber` / `Resource` / `Stream` (range / zip / interleave / zipWith / flatMap / mapConcat / scan / fold / forall / iterate / unfold / head) / Json query (`get` / `keys` / `arr` / `merge` / `isBool` / `isFloat` / `getFloat` / `asFloat`) and write (`set` / `remove` / `append` / `dropAt`); parse miss is Result.Err / `Net.serveOnce` POST through virtual loopback plus TCP echo and UDP ping (`Impurity.runKit` and serve under `scuzz test`). `flow.scuzz_verify` claims fiber census, effect count, checkpoint, and nearest checkpoint stay in range. `fs.scuzz_verify` claims a `Fs.write` effect on the timeline. `net.scuzz_verify` claims a `Net.httpPost` effect |
 
 Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.
+
+## Package a GUI app for the browser
+
+Install Emscripten 4.0.23 on the build host. Activate its environment so `emcc`
+is on `PATH`. The app package must have a `[ui]` section.
+
+```bash
+scuzz package --target web examples/docs
+```
+
+The command writes `index.html`, `app.js`, and `app.wasm` to
+`examples/docs/build/package/web`. `--out-dir` changes the build directory.
+Serve these files over HTTP. Do not open `index.html` as a local file.
+
+The `Deploy Docs` workflow in `.github/workflows/pages.yml` builds and checks
+this site on each push to `main`. It publishes the web output through GitHub
+Pages. Run it manually from the Actions tab to publish `main` again.
+Set the repository Pages source to **GitHub Actions**.
+
+For another GitHub Pages site, publish the contents of the web output directory.
+The assets use relative URLs. They also work below a repository path.
+No application server or special response headers are required.
+The page must keep `app.js` and `app.wasm` beside `index.html`.
+
+`examples/docs` is the first browser app. It uses Index Book navigation and a
+Signal counter. Verify its shared behavior with
+`scuzz fuzz --iterations 0 examples/docs`. The browser target does not change
+the native Headless verification path. Browser limits are in
+[`compatibility.md`](compatibility.md#browser-target).

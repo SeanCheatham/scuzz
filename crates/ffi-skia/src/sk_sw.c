@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <math.h>
+#endif
 
 struct SkPaint {
   SkColor color;
@@ -361,6 +365,27 @@ static const uint8_t FONT8[95][8] = {
     {0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 };
 
+#ifdef __EMSCRIPTEN__
+/* Use the same browser font for text measurement and rasterization. */
+EM_JS(float, web_text_width, (const char *text, float size), {
+  const canvas = Module.scuzzTextCanvas || (Module.scuzzTextCanvas = document.createElement('canvas'));
+  const context = canvas.getContext('2d', {willReadFrequently: true});
+  context.font = size + 'px monospace';
+  return context.measureText(UTF8ToString(Number(text))).width;
+});
+
+EM_JS(void, web_text_pixels, (const char *text, float size, int width, int height, uint8_t *pixels), {
+  const canvas = Module.scuzzTextCanvas;
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', {willReadFrequently: true});
+  context.font = size + 'px monospace';
+  context.fillStyle = '#ffffff';
+  context.fillText(UTF8ToString(Number(text)), 0, size);
+  HEAPU8.set(context.getImageData(0, 0, width, height).data, Number(pixels));
+});
+#endif
+
 /* Cell advance. Draw and measure use the same advance so caret columns
  * match the pixels at any size. */
 static int sw_advance(float font_px) {
@@ -369,6 +394,9 @@ static int sw_advance(float font_px) {
 }
 
 float sk_font_measure_string(const char *text, float font_px) {
+#ifdef __EMSCRIPTEN__
+  return text ? web_text_width(text, font_px > 0.f ? font_px : 8.f) : 0.f;
+#else
   const char *p;
   int n = 0;
   float px = font_px > 0.f ? font_px : 8.f;
@@ -382,6 +410,7 @@ float sk_font_measure_string(const char *text, float font_px) {
     n++;
   }
   return (float)n * (float)sw_advance(px);
+#endif
 }
 
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
@@ -392,6 +421,27 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
   if (!canvas || !canvas->surface || !paint || !text)
     return;
   size = paint->text_size > 0.f ? paint->text_size : 8.f;
+#ifdef __EMSCRIPTEN__
+  {
+    int width = (int)ceilf(web_text_width(text, size)) + 2;
+    int height = (int)ceilf(size * 2.f);
+    if (width > canvas->surface->width + (int)size * 2)
+      width = canvas->surface->width + (int)size * 2;
+    if (width < 1 || height < 1) return;
+    uint8_t *pixels = malloc((size_t)width * height * 4);
+    if (!pixels) return;
+    web_text_pixels(text, size, width, height, pixels);
+    for (int row = 0; row < height; row++) {
+      for (int col = 0; col < width; col++) {
+        SkColor color = paint->color;
+        color.a = (uint8_t)((unsigned)color.a * pixels[(row * width + col) * 4 + 3] / 255);
+        put_pixel(canvas->surface, (int)x + col, (int)(y - size) + row, color);
+      }
+    }
+    free(pixels);
+    return;
+  }
+#endif
   scale = size / 8.f;
   advance = sw_advance(size);
   baseline = (int)(size - 1.f + 0.5f);

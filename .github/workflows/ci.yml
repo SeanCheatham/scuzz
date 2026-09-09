@@ -51,6 +51,8 @@ jobs:
             slices: embedders kernel package ui pixels gpu differential new-ui desktop mobile
           - name: fuzz
             slices: embedders fuzz
+          - name: web
+            slices: web
     steps:
       - uses: actions/checkout@v4
       - name: Install native dependencies
@@ -66,6 +68,16 @@ jobs:
           path: examples/cli/build
       - name: Set compiler permissions
         run: chmod +x examples/cli/build/cli
+      - name: Install browser build tools
+        if: matrix.name == 'web'
+        run: |
+          git clone --depth 1 --branch 4.0.23 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install 4.0.23
+          "$RUNNER_TEMP/emsdk/emsdk" activate 4.0.23
+          echo "$RUNNER_TEMP/emsdk/upstream/emscripten" >> "$GITHUB_PATH"
+          npm install --prefix "$RUNNER_TEMP/web-tools" playwright@1.63.0
+          "$RUNNER_TEMP/web-tools/node_modules/.bin/playwright" install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/web-tools/node_modules" >> "$GITHUB_ENV"
       - name: Run check slices
         env:
           CI_SLICES: ${{ matrix.slices }}
