@@ -4707,24 +4707,24 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_PROGRESS: {
-    float n;
-    float fw;
-    n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
-    fw = v->frame.w * (n / 100.f);
-    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->muted);
-    if (fw > 0.f)
-      paint_rect(c, v->frame.x, v->frame.y, fw, v->frame.h, theme->primary);
+    float n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
+    SzRect fill = v->frame;
+    int edge = (int)(scale_px(theme, 1.f) + 0.5f);
+    fill.w *= n / 100.f;
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    paint_border(c, v->frame, edge, theme->border);
+    if (fill.w > 0.f) {
+      paint_rect(c, fill.x, fill.y, fill.w, fill.h, theme->primary);
+      paint_border(c, fill, edge * 2, theme->border);
+    }
     break;
   }
   case SZ_VIEW_CIRCULAR_PROGRESS: {
-    float n;
-    float t;
-    n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
-    t = scale_px(theme, 4.f);
-    if (t < 2.f)
-      t = 2.f;
-    paint_border(c, v->frame, (int)(t + 0.5f), theme->muted);
-    paint_ring_frac(c, v->frame, t, n / 100.f, theme->primary);
+    float n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
+    float track = fminf(scale_px(theme, 2.f), fminf(v->frame.w, v->frame.h) * 0.5f);
+    float fill = fminf(scale_px(theme, 6.f), fminf(v->frame.w, v->frame.h) * 0.5f);
+    paint_border(c, v->frame, (int)(track + 0.5f), theme->muted);
+    paint_ring_frac(c, v->frame, fill, n / 100.f, theme->foreground);
     break;
   }
   case SZ_VIEW_AVATAR: {

@@ -284,8 +284,12 @@ background. Checkboxes use an ink checkmark inside a bordered yellow square.
 Radio controls use a smaller ink square inside the yellow inset. Switches use
 an ink thumb that moves inside a bordered track. Slider thumbs have an ink
 border. These marks show selection through shape and position as well as color.
-Compact controls and list tiles use the same marks. Headless, Desktop, and
-Mobile use the same paint path.
+Compact controls and list tiles use the same marks. Progress bars use a thin
+ink border around a paper track. A heavier ink border marks the completed
+part around its yellow fill. Square progress rings use a thick ink band for
+completion and a thin muted track for the remaining part. The amount stays
+visible without the accent color. Headless, Desktop, and Mobile use the same
+paint path.
 
 Selected chips and segmented controls use a printed tab shape. A heavy ink
 underline and a solid triangle at the top right mark the selected state.
