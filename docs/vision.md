@@ -298,6 +298,11 @@ Labels use an ellipsis when space is limited. Each segment keeps its label
 inside its own half. Accessibility labels keep the complete text. These defaults
 apply to all apps through the shared renderer.
 
+Badges place a bordered count ticket beside the child control. The ticket uses
+body-size text and scales with the display. Counts above 99 show `99+`.
+Accessibility output keeps the full count. The ticket reserves its width so
+count changes do not move the child or cover its label.
+
 Body text uses 14 logical pixels with a 20 pixel line height. Default controls
 have a 40 pixel height. Use `View.fontSize(28, ...)` for a screen title and
 `View.fontSize(20, ...)` for a section heading. These sizes use the same font and
