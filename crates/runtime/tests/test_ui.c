@@ -2195,6 +2195,14 @@ static void test_code_copy_and_heading(void) {
   sz_view_layout(long_view, 600, 0, sz_theme_default());
   assert(sz_view_frame(long_view).h >= 61 * 20);
   sz_view_free(long_view);
+  SzView *long_code = sz_view_code(long_text);
+  sz_view_layout(long_code, 300, 0, sz_theme_default());
+  assert(sz_view_frame(long_code).h >= 61 * 20);
+  sz_view_free(long_code);
+  SzView *inline_code = sz_view_code("echo hello");
+  sz_view_layout(inline_code, 600, 0, sz_theme_default());
+  assert(sz_view_frame(inline_code).h <= 90);
+  sz_view_free(inline_code);
   SzSignalStr *draft = sz_signal_str("");
   SzView *root = sz_view_column();
   SzView *targets[4];

@@ -2886,8 +2886,11 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         old_pref = ch->pref_h;
         ch->pref_h = 0.f;
       }
-      /* Tight slot: child sizes up to the flex box. No post-layout overwrite. */
-      layout_constrained(ch, x, y, box_tight(slot_w, slot_h), theme);
+      /* A bounded slot is tight. An unbounded height follows the content. */
+      layout_constrained(ch, x, y, slot_h > 0.f ? box_tight(slot_w, slot_h)
+                                      : box_tight_width(slot_w, 0.f), theme);
+      if (slot_h <= 0.f)
+        v->frame.h = ch->frame.h;
       if (ch->kind == SZ_VIEW_SCROLL)
         ch->pref_h = old_pref;
     }
@@ -2979,6 +2982,18 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
           flex_w = 0.f;
         if (n_flex > 1)
           flex_w = flex_w / (float)n_flex;
+        /* Unbounded rows measure flex content before setting the cross slot. */
+        if (max_h <= 0.f) {
+          for (i = 0; i < v->child_count; i++) {
+            SzView *ch = v->children[i];
+            if (!view_is_shown(ch) || !view_is_flex(ch))
+              continue;
+            layout_constrained(ch, x + theme->pad, y + theme->pad,
+                               box_tight_width(flex_w, 0.f), theme);
+            if (ch->frame.h > row_inner_h)
+              row_inner_h = ch->frame.h;
+          }
+        }
         cx = x + theme->pad;
         for (i = 0; i < v->child_count; i++) {
           SzView *ch = v->children[i];
@@ -5998,12 +6013,12 @@ SzView *sz_view_take_copy(SzView *v) {
 }
 
 SzView *sz_view_code(const char *text) {
-  SzView *column = sz_view_column();
+  SzView *row = sz_view_row();
   SzView *button = sz_view_outlined_button("Copy", NULL, NULL);
   button->copy_text = sz_strdup(text ? text : "");
-  sz_view_add_child(column, sz_view_align(2, 0, button));
-  sz_view_add_child(column, sz_view_text(text));
-  return sz_view_card(sz_view_padding(12, column));
+  sz_view_add_child(row, sz_view_expanded(sz_view_text(text)));
+  sz_view_add_child(row, button);
+  return sz_view_card(sz_view_gap(8, row));
 }
 
 SzView *sz_view_heading(int level, SzView *child) {

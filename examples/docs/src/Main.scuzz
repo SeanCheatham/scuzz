@@ -2,7 +2,7 @@ import Manual.Topic
 import Manual.Block
 
 def paragraph(text: String): View =
-  View.padding(8, View.maxSize(760, 0, View.text(text)))
+  View.padding(8, View.text(text))
 
 def code(text: String): View =
   View.code(text)
@@ -14,11 +14,8 @@ def blockView(b: Block): View =
     case Block.Cmd(text) => code(text)
   }
 
-def stackViews(xs: List[View]): View =
-  if (List.isEmpty(xs)) View.text("") else if (List.len(xs) == 1) List.at(xs, 0) else View.column(List.at(xs, 0), stackViews(List.tail(xs)))
-
-def blocksColumn(xs: List[Block]): View =
-  stackViews(List.map(xs, b => blockView(b)))
+def blocksColumn(xs: Signal[List[Block]]): View =
+  View.each(xs, b => blockView(b))
 
 def liveCounter(count: Signal[Int]): View =
   View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages."))
@@ -32,17 +29,21 @@ def topicAt(i: Int): Topic =
 def titleAt(n: Int): String =
   if (n < 0 || n >= List.len(Manual.topics())) "Docs" else topicAt(n).title
 
-def startSection(count: Signal[Int]): View =
-  View.section(topicAt(0).id, topicAt(0).title, View.column(blocksColumn(topicAt(0).blocks), liveCounter(count)))
+def topicSection(i: Int, body: View): View =
+  View.section(topicAt(i).id, topicAt(i).title, View.maxSize(800, 0, body))
 
-def guiSection(tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
-  View.section(topicAt(3).id, topicAt(3).title, View.column(blocksColumn(topicAt(3).blocks), guiLive(tab, draft, notes)))
+def startSection(blocks: Signal[List[Block]], count: Signal[Int]): View =
+  topicSection(0, View.column(blocksColumn(blocks), liveCounter(count)))
 
-def plainSection(i: Int): View =
-  View.section(topicAt(i).id, topicAt(i).title, blocksColumn(topicAt(i).blocks))
+def guiSection(blocks: Signal[List[Block]], tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
+  topicSection(3, View.column(blocksColumn(blocks), guiLive(tab, draft, notes)))
+
+def plainSection(blocks: List[Signal[List[Block]]], i: Int): View =
+  topicSection(i, blocksColumn(List.at(blocks, i)))
 
 @main def main: IO[Unit] =
   for {
+    blocks = List.map(Manual.topics(), topic => Signal.make(topic.blocks))
     page = Signal.make(0)
     guiTab = Signal.make(0)
     title = Signal.map(page, n => titleAt(n))
@@ -50,5 +51,5 @@ def plainSection(i: Int): View =
     draft = Signal.make("")
     notes = Signal.make("")
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(count), plainSection(1), plainSection(2), guiSection(guiTab, draft, notes), plainSection(4), plainSection(5), plainSection(6), plainSection(7), plainSection(8), plainSection(9), plainSection(10)))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(List.at(blocks, 0), count), plainSection(blocks, 1), plainSection(blocks, 2), guiSection(List.at(blocks, 3), guiTab, draft, notes), plainSection(blocks, 4), plainSection(blocks, 5), plainSection(blocks, 6), plainSection(blocks, 7), plainSection(blocks, 8), plainSection(blocks, 9), plainSection(blocks, 10)))))
   } yield ()

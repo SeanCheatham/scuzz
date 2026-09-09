@@ -359,6 +359,18 @@ slice_web() (
   trap 'rm -rf "$web_tmp"' EXIT
   "$SCUZZ" check examples/docs
   "$SCUZZ" package --target web --out-dir "$web_tmp/docs output" examples/docs
+  mkdir -p "$web_tmp/sdk/crates/embedder-web"
+  cat > "$web_tmp/sdk/crates/embedder-web/build.sh" <<'SH'
+echo 'web compiler failed' >&2
+exit 23
+SH
+  if SCUZZ_HOME="$web_tmp/sdk" "$SCUZZ" package --target web \
+      --out-dir "$web_tmp/failed output" examples/docs > "$web_tmp/failure.log" 2>&1; then
+    echo 'web must report a failed compiler process' >&2
+    exit 1
+  fi
+  grep -q 'web compiler failed' "$web_tmp/failure.log"
+  grep -q 'web package failed with exit code 23' "$web_tmp/failure.log"
   node crates/embedder-web/test.cjs "$web_tmp/docs output/package/web"
   "$SCUZZ" fuzz --iterations 0 examples/docs
   if "$SCUZZ" package --target web examples/hello; then
