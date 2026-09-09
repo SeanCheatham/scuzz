@@ -309,8 +309,11 @@ runtime size constraint. Studio groups its working pages in an Index Book. The e
 Primary actions retain the yellow fill. Text fields clip content to their bounds. Button labels use an ellipsis when
 they exceed the available width. Their accessibility labels stay complete.
 Text insets, carets, and scroll offsets scale with the display.
-State controls show their text labels. Indexed scroll scripts move the selected
-scroll container even when it contains another scroll container.
+State controls show their text labels. Long labels use an ellipsis inside the
+available width. List titles reserve space for trailing content. Expansion
+titles reserve space for the disclosure mark. Accessibility labels stay
+complete. Indexed scroll scripts move the selected scroll container even when
+it contains another scroll container.
 
 App theme selection, dark mode, and motion settings remain open. Keep accent
 colors separate from text selection colors. App content can use the existing

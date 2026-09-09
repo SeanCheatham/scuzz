@@ -4360,6 +4360,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     paint_check(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
+    float label_w = v->frame.x + v->frame.w - 0.f - bx - box - gap;
+    if (text_width(buf, theme->font_px) > label_w)
+      ellipsize_to_width(buf, sizeof buf, label_w, theme->font_px);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  theme->foreground, theme->font_px);
@@ -4383,6 +4386,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     paint_switch_track(c, (SzRect){bx, by, tw, th}, on, theme);
     resolve_text(v, buf, sizeof buf);
+    float label_w = v->frame.x + v->frame.w - 0.f - bx - tw - gap;
+    if (text_width(buf, theme->font_px) > label_w)
+      ellipsize_to_width(buf, sizeof buf, label_w, theme->font_px);
     paint_string(c, buf, bx + tw + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  theme->foreground, theme->font_px);
@@ -4483,6 +4489,12 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
   case SZ_VIEW_LIST_TILE: {
     resolve_text(v, buf, sizeof buf);
+    float label_end = v->frame.x + v->frame.w - theme->pad;
+    if (v->child_count > 0)
+      label_end = v->children[0]->frame.x - layout_gap(theme);
+    float label_w = label_end - v->frame.x - theme->pad;
+    if (text_width(buf, theme->font_px) > label_w)
+      ellipsize_to_width(buf, sizeof buf, label_w, theme->font_px);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_string(c, buf, v->frame.x + theme->pad,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
@@ -4512,6 +4524,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     paint_check(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
+    float label_w = v->frame.x + v->frame.w - theme->pad - bx - box - gap;
+    if (text_width(buf, theme->font_px) > label_w)
+      ellipsize_to_width(buf, sizeof buf, label_w, theme->font_px);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  theme->foreground, theme->font_px);
@@ -4565,6 +4580,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
     paint_radio_mark(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
+    float label_w = v->frame.x + v->frame.w - theme->pad - bx - box - gap;
+    if (text_width(buf, theme->font_px) > label_w)
+      ellipsize_to_width(buf, sizeof buf, label_w, theme->font_px);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  theme->foreground, theme->font_px);
@@ -4646,13 +4664,17 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float hh = theme->control_h;
     char mark[2];
     resolve_text(v, buf, sizeof buf);
+    float mark_w = text_width(">", theme->font_px);
+    float label_w = v->frame.w - 2.f * theme->pad - mark_w - layout_gap(theme);
+    if (text_width(buf, theme->font_px) > label_w)
+      ellipsize_to_width(buf, sizeof buf, label_w, theme->font_px);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, hh, theme->surface);
     paint_string(c, buf, v->frame.x + theme->pad,
                  v->frame.y + (hh + theme->font_px) * 0.5f, theme->foreground,
                  theme->font_px);
     mark[0] = on ? 'v' : '>';
     mark[1] = '\0';
-    paint_string(c, mark, v->frame.x + v->frame.w - theme->pad - 8.f,
+    paint_string(c, mark, v->frame.x + v->frame.w - theme->pad - mark_w,
                  v->frame.y + (hh + theme->font_px) * 0.5f, theme->muted,
                  theme->font_px);
     for (i = 0; i < v->child_count; i++)
@@ -4679,6 +4701,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
     paint_radio_mark(c, br, on, theme);
     resolve_text(v, buf, sizeof buf);
+    float label_w = v->frame.x + v->frame.w - 0.f - bx - box - gap;
+    if (text_width(buf, theme->font_px) > label_w)
+      ellipsize_to_width(buf, sizeof buf, label_w, theme->font_px);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  theme->foreground, theme->font_px);
