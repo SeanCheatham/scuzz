@@ -33,8 +33,6 @@ static void queue_grow(SzQueue *q) {
   if (q->cap >= (SIZE_MAX / 2) / sizeof(void *))
     sz_panic("sz_queue_offer: cap overflow");
   ncap = q->cap * 2;
-  if (ncap > SIZE_MAX / sizeof(void *))
-    sz_panic("sz_queue_offer: cap overflow");
   nitems = (void **)sz_alloc(sizeof(void *) * ncap);
   for (i = 0; i < q->len; i++)
     nitems[i] = q->items[queue_slot(q, i)];

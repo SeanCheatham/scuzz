@@ -1,4 +1,6 @@
-CC ?= clang
+# make has a built-in CC=cc default, so ?= never fires. Plain = keeps
+# clang the default while `make CC=gcc` on the command line still wins.
+CC = clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
 RUNTIME := $(ROOT)/crates/runtime

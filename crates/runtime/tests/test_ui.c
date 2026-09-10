@@ -5691,6 +5691,41 @@ static void test_checkbox_a11y_off_on(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_a11y_dump_long_labels(void) {
+  SzView *box;
+  SzView *txt;
+  SzSignalInt *sig;
+  SzSignalStr *strsig;
+  SzString *dump;
+  char *long_label;
+  size_t i;
+
+  /* Labels past the old 256-byte dump buffer survive in full. */
+  long_label = (char *)malloc(1200);
+  assert(long_label);
+  for (i = 0; i < 1100; i++)
+    long_label[i] = (char)('a' + (int)(i % 26));
+  long_label[1100] = '\0';
+
+  sig = sz_signal_int(1);
+  box = sz_view_checkbox(sig, long_label);
+  dump = sz_view_a11y_dump(box);
+  assert(strstr(sz_string_cstr(dump), long_label) != NULL);
+  assert(strstr(sz_string_cstr(dump), "=1\n") != NULL);
+  sz_string_free(dump);
+  sz_view_free(box);
+  sz_signal_int_free(sig);
+
+  strsig = sz_signal_str(long_label);
+  txt = sz_view_text_signal_str(strsig);
+  dump = sz_view_a11y_dump(txt);
+  assert(strstr(sz_string_cstr(dump), long_label) != NULL);
+  sz_string_free(dump);
+  sz_view_free(txt);
+  sz_signal_str_free(strsig);
+  free(long_label);
+}
+
 static void test_checkbox_nonzero_is_on(void) {
   SzView *box;
   SzSignalInt *sig;
@@ -16073,6 +16108,7 @@ int main(void) {
   test_radius_does_not_grow_button();
   test_checkbox_sizes();
   test_checkbox_a11y_off_on();
+  test_a11y_dump_long_labels();
   test_checkbox_nonzero_is_on();
   test_checkbox_tap_toggles();
   test_checkbox_hit_test();

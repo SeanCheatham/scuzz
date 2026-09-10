@@ -1180,6 +1180,23 @@ static const char *a11y_role_name(SzA11yRole role) {
   }
 }
 
+/* Append one a11y dump line: `role:label` plus `=N` when has_num. Labels
+ * come from app text, so no fixed buffer: grow with sz_dump_append. */
+static void a11y_dump_line(char **buf, size_t *len, size_t *cap,
+                           SzA11yRole role, const char *label, int has_num,
+                           int64_t num) {
+  char tmp[24];
+  sz_dump_append(buf, len, cap, a11y_role_name(role));
+  sz_dump_append(buf, len, cap, ":");
+  if (label)
+    sz_dump_append(buf, len, cap, label);
+  if (has_num) {
+    snprintf(tmp, sizeof tmp, "=%lld", (long long)num);
+    sz_dump_append(buf, len, cap, tmp);
+  }
+  sz_dump_append(buf, len, cap, "\n");
+}
+
 static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
   int i;
   if (!v || !buf || !len || !cap || !view_is_shown(v))
@@ -1187,11 +1204,20 @@ static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return;
   if (v->a11y_role != SZ_A11Y_NONE) {
-    char line[256];
-    char live[256];
+    char *live = NULL;
+    size_t live_len = 0, live_cap = 0;
     const char *label = v->a11y_label ? v->a11y_label : "";
     if (v->kind == SZ_VIEW_TEXT && (v->sig_int || v->sig_str)) {
-      resolve_text(v, live, sizeof live);
+      if (v->sig_int) {
+        char tmp[24];
+        sz_dump_append(&live, &live_len, &live_cap,
+                       v->prefix ? v->prefix : "");
+        snprintf(tmp, sizeof tmp, "%lld",
+                 (long long)sz_signal_int_get(v->sig_int));
+        sz_dump_append(&live, &live_len, &live_cap, tmp);
+      } else {
+        sz_dump_append(&live, &live_len, &live_cap, sz_signal_str_get(v->sig_str));
+      }
       label = live;
     }
     if (v->kind == SZ_VIEW_CHECKBOX || v->kind == SZ_VIEW_SWITCH ||
@@ -1201,53 +1227,42 @@ static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
         v->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
         v->kind == SZ_VIEW_SWITCH_LIST_TILE) {
       int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
-      snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
-               on ? 1 : 0);
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE ||
-        v->kind == SZ_VIEW_CHOICE_CHIP) {
+      a11y_dump_line(buf, len, cap, v->a11y_role, label, 1, on ? 1 : 0);
+    } else if (v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE ||
+               v->kind == SZ_VIEW_CHOICE_CHIP) {
       int on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
-      snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
-               on ? 1 : 0);
-      label = live;
+      a11y_dump_line(buf, len, cap, v->a11y_role, label, 1, on ? 1 : 0);
+    } else if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS ||
+               v->kind == SZ_VIEW_CIRCULAR_PROGRESS ||
+               v->kind == SZ_VIEW_SPLIT) {
+      char tmp[24];
+      int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int))
+                             : (v->kind == SZ_VIEW_SPLIT ? 50 : 0);
+      snprintf(tmp, sizeof tmp, "%lld", (long long)n);
+      a11y_dump_line(buf, len, cap, v->a11y_role, tmp, 0, 0);
+    } else if (v->kind == SZ_VIEW_BADGE) {
+      char tmp[24];
+      snprintf(tmp, sizeof tmp, "%lld",
+               (long long)(v->sig_int ? sz_signal_int_get(v->sig_int) : 0));
+      a11y_dump_line(buf, len, cap, v->a11y_role, tmp, 0, 0);
+    } else if (v->kind == SZ_VIEW_SEGMENTED) {
+      a11y_dump_line(buf, len, cap, v->a11y_role,
+                     v->sig_int && sz_signal_int_get(v->sig_int) != 0 ? "1"
+                                                                      : "0",
+                     0, 0);
+    } else if (v->kind == SZ_VIEW_VISIBILITY) {
+      a11y_dump_line(buf, len, cap, v->a11y_role,
+                     view_visibility_on(v) ? "1" : "0", 0, 0);
+    } else if (v->kind == SZ_VIEW_OFFSTAGE) {
+      a11y_dump_line(buf, len, cap, v->a11y_role,
+                     view_offstage_shown(v) ? "1" : "0", 0, 0);
+    } else if (v->kind == SZ_VIEW_OVERLAY) {
+      a11y_dump_line(buf, len, cap, v->a11y_role,
+                     view_overlay_open(v) ? "1" : "0", 0, 0);
+    } else {
+      a11y_dump_line(buf, len, cap, v->a11y_role, label, 0, 0);
     }
-    if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS ||
-        v->kind == SZ_VIEW_CIRCULAR_PROGRESS) {
-      int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int)) : 0;
-      snprintf(live, sizeof live, "%lld", (long long)n);
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_BADGE) {
-      int64_t n = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
-      snprintf(live, sizeof live, "%lld", (long long)n);
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_SEGMENTED) {
-      int64_t n = v->sig_int && sz_signal_int_get(v->sig_int) != 0 ? 1 : 0;
-      snprintf(live, sizeof live, "%lld", (long long)n);
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_VISIBILITY) {
-      snprintf(live, sizeof live, "%d", view_visibility_on(v) ? 1 : 0);
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_OFFSTAGE) {
-      snprintf(live, sizeof live, "%d", view_offstage_shown(v) ? 1 : 0);
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_SPLIT) {
-      int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int)) : 50;
-      snprintf(live, sizeof live, "%lld", (long long)n);
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_OVERLAY) {
-      snprintf(live, sizeof live, "%d", view_overlay_open(v) ? 1 : 0);
-      label = live;
-    }
-    snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
-             label);
-    sz_dump_append(buf, len, cap, line);
+    sz_free(live);
   }
   if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
     return;
@@ -1335,9 +1350,16 @@ static void sync_each(SzView *v) {
       if (row)
         sz_view_add_child(v, row);
     } else if (sz_signal_list_elem_str(v->each_sig)) {
-      char line[256];
-      snprintf(line, sizeof line, "- %s", s ? sz_string_cstr(s) : "");
-      sz_view_add_child(v, sz_view_text(line));
+      /* Item text has no length cap. Build "- <text>" without truncation. */
+      char *line = NULL;
+      size_t line_len = 0, line_cap = 0;
+      SzView *row;
+      sz_dump_append(&line, &line_len, &line_cap, "- ");
+      if (s)
+        sz_dump_append(&line, &line_len, &line_cap, sz_string_cstr(s));
+      row = sz_view_text(line);
+      sz_free(line);
+      sz_view_add_child(v, row);
     } else {
       sz_view_add_child(v, sz_view_text("- <item>"));
     }
