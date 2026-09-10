@@ -275,22 +275,6 @@ typedef struct StDrop {
   int64_t acc_len;
 } StDrop;
 
-typedef struct StFilter {
-  SzStreamPred pred;
-  void *penv;
-  int64_t remain;
-  int64_t acc_len;
-} StFilter;
-
-typedef struct StPull {
-  SzStream *s;
-  SzStreamPred pred;
-  void *penv;
-  int64_t remain;
-  int64_t acc_len;
-  int *found;
-} StPull;
-
 typedef struct StMap {
   SzCont f;
   void *fenv;
@@ -330,14 +314,6 @@ typedef struct StTWConcat {
   int *stopped;
 } StTWConcat;
 
-typedef struct StTWCut {
-  SzStreamPred pred;
-  void *penv;
-  int64_t remain;
-  int64_t acc_len;
-  int *stopped;
-} StTWCut;
-
 typedef struct StDropWhile {
   SzStreamPred pred;
   void *penv;
@@ -355,10 +331,12 @@ static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
                        SzStreamPred pred, void *penv, int *found);
 static SzIo *filter_into(SzStream *s, SzList *acc, int64_t remain,
                          SzStreamPred pred, void *penv);
-static SzList *find_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
-                         void *penv, int64_t remain, int *found);
 static SzIo *dropwhile_into(SzStream *s, SzList *acc, int64_t remain,
                             SzStreamPred pred, void *penv);
+static SzIo *stream_step(SzStream *s);
+static SzIo *cut_loop(SzStream *s, SzList *acc, int64_t remain,
+                      SzStreamPred pred, void *penv, int *stopped, int mode);
+static SzIo *none_from_exists(void *box, void *env);
 static SzIo *after_or_else(void *acc, void *env);
 static SzIo *after_tap_inner(void *inner_acc, void *env);
 static SzIo *mapconcat_into(SzStream *s, SzList *acc, int64_t remain,
@@ -368,6 +346,12 @@ static SzIo *changes_into(SzStream *s, SzList *acc, int64_t remain, void *prev,
 static SzIo *flatmap_into(SzStream *s, SzList *acc, int64_t remain,
                           SzStreamMapFn f, void *fenv);
 static int64_t filter_not_pred(void *v, void *env);
+
+/* Cut-loop modes: what a pulled item does to the accumulator. */
+#define SZ_CUT_FILTER 0
+#define SZ_CUT_TAKEWHILE 1
+#define SZ_CUT_FIND 2
+#define SZ_CUT_DROPWHILE 3
 
 static int64_t remain_dec(int64_t remain) {
   return remain < 0 ? remain : remain - 1;
@@ -468,142 +452,9 @@ static SzIo *after_drop(void *acc, void *env) {
   return pure_drop(out);
 }
 
-/* acc is newest-first. Keep matching items from the segment added after acc_len.
-   If remain >= 0, keep only the oldest `remain` matches. */
-static SzList *filter_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
-                            void *penv, int64_t remain) {
-  int64_t added = (int64_t)sz_list_len(acc) - acc_len;
-  int64_t i;
-  SzList *p = acc;
-  SzList *oldest_first = sz_list_nil();
-  SzList *oldest_root;
-  SzList *kept_nf = sz_list_nil();
-  SzList *kept_of;
-  SzList *kept_of_root;
-  SzList *out;
-  int64_t nkeep;
-  int64_t n;
-  if (added < 0)
-    added = 0;
-  for (i = 0; i < added; i++) {
-    oldest_first = cons_take(sz_list_head(p), oldest_first);
-    p = sz_list_tail(p);
-  }
-  oldest_root = oldest_first;
-  while (!sz_list_is_empty(oldest_first)) {
-    void *h = sz_list_head(oldest_first);
-    oldest_first = sz_list_tail(oldest_first);
-    if (pred(h, penv) != 0)
-      kept_nf = cons_take(h, kept_nf);
-  }
-  sz_release(oldest_root);
-  kept_of = reverse_take(kept_nf);
-  n = (int64_t)sz_list_len(kept_of);
-  nkeep = remain < 0 ? n : remain;
-  if (nkeep > n)
-    nkeep = n;
-  if (nkeep < 0)
-    nkeep = 0;
-  sz_retain(p);
-  sz_release(acc);
-  out = p;
-  kept_of_root = kept_of;
-  for (i = 0; i < nkeep; i++) {
-    out = cons_take(sz_list_head(kept_of), out);
-    kept_of = sz_list_tail(kept_of);
-  }
-  sz_release(kept_of_root);
-  return out;
-}
-
-static SzIo *after_filter(void *acc, void *env) {
-  StFilter *st = (StFilter *)env;
-  SzList *out =
-      filter_added((SzList *)acc, st->acc_len, st->pred, st->penv, st->remain);
-  sz_free(st);
-  return pure_drop(out);
-}
-
 static SzIo *after_stream_pin(void *acc, void *env) {
   sz_release(env);
   return pure_drop(acc);
-}
-
-static SzIo *after_filter_one(void *acc, void *env) {
-  StPull *st = (StPull *)env;
-  SzStream *s = st->s;
-  SzStreamPred pred = st->pred;
-  void *penv = st->penv;
-  int64_t remain = st->remain;
-  int64_t acc_len = st->acc_len;
-  int64_t added = (int64_t)sz_list_len((SzList *)acc) - acc_len;
-  SzList *out;
-  sz_free(st);
-  out = filter_added((SzList *)acc, acc_len, pred, penv, remain);
-  if (added <= 0)
-    return pure_drop(out);
-  if (remain >= 0) {
-    int64_t kept = (int64_t)sz_list_len(out) - acc_len;
-    remain = remain - kept;
-    if (remain < 0)
-      remain = 0;
-  }
-  if (remain == 0)
-    return pure_drop(out);
-  {
-    SzStream *rest = sz_stream_drop(s, 1);
-    SzIo *io = fm_drop(filter_into(rest, out, remain, pred, penv),
-                       after_stream_pin, rest);
-    sz_release(rest);
-    return io;
-  }
-}
-
-static SzIo *filter_pull_one(SzStream *s, SzList *acc, int64_t remain,
-                             SzStreamPred pred, void *penv) {
-  StPull *st = (StPull *)sz_alloc(sizeof(StPull));
-  st->s = s;
-  st->pred = pred;
-  st->penv = penv;
-  st->remain = remain;
-  st->acc_len = (int64_t)sz_list_len(acc);
-  st->found = NULL;
-  return fm_drop(compile_into(s, acc, 1), after_filter_one, st);
-}
-
-static SzIo *after_find_one(void *acc, void *env) {
-  StPull *st = (StPull *)env;
-  SzStream *s = st->s;
-  SzStreamPred pred = st->pred;
-  void *penv = st->penv;
-  int64_t remain = st->remain;
-  int64_t acc_len = st->acc_len;
-  int *found = st->found;
-  int64_t added = (int64_t)sz_list_len((SzList *)acc) - acc_len;
-  SzList *out;
-  sz_free(st);
-  out = find_added((SzList *)acc, acc_len, pred, penv, remain, found);
-  if ((found && *found) || added <= 0)
-    return pure_drop(out);
-  {
-    SzStream *rest = sz_stream_drop(s, 1);
-    SzIo *io = fm_drop(find_into(rest, out, remain, pred, penv, found),
-                       after_stream_pin, rest);
-    sz_release(rest);
-    return io;
-  }
-}
-
-static SzIo *find_pull_one(SzStream *s, SzList *acc, int64_t remain,
-                           SzStreamPred pred, void *penv, int *found) {
-  StPull *st = (StPull *)sz_alloc(sizeof(StPull));
-  st->s = s;
-  st->pred = pred;
-  st->penv = penv;
-  st->remain = remain;
-  st->acc_len = (int64_t)sz_list_len(acc);
-  st->found = found;
-  return fm_drop(compile_into(s, acc, 1), after_find_one, st);
 }
 
 static SzIo *fold_evalmap(SzList *xs, StMap *st);
@@ -704,49 +555,6 @@ static SzList *oldest_added(SzList *acc, int64_t acc_len, SzList **old_acc) {
   return oldest_first;
 }
 
-/* acc is newest-first. Keep a prefix of the added segment while pred holds. */
-static SzList *takewhile_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
-                               void *penv, int64_t remain, int *stopped) {
-  SzList *old_acc;
-  SzList *oldest_first = oldest_added(acc, acc_len, &old_acc);
-  SzList *oldest_root = oldest_first;
-  SzList *kept_nf = sz_list_nil();
-  SzList *kept_of;
-  SzList *kept_of_root;
-  SzList *out;
-  int64_t n;
-  int64_t nkeep;
-  int64_t i;
-  while (!sz_list_is_empty(oldest_first)) {
-    void *h = sz_list_head(oldest_first);
-    oldest_first = sz_list_tail(oldest_first);
-    if (pred(h, penv) == 0) {
-      if (stopped)
-        *stopped = 1;
-      break;
-    }
-    kept_nf = cons_take(h, kept_nf);
-  }
-  sz_release(oldest_root);
-  kept_of = reverse_take(kept_nf);
-  n = (int64_t)sz_list_len(kept_of);
-  nkeep = remain < 0 ? n : remain;
-  if (nkeep > n)
-    nkeep = n;
-  if (nkeep < 0)
-    nkeep = 0;
-  sz_retain(old_acc);
-  sz_release(acc);
-  out = old_acc;
-  kept_of_root = kept_of;
-  for (i = 0; i < nkeep; i++) {
-    out = cons_take(sz_list_head(kept_of), out);
-    kept_of = sz_list_tail(kept_of);
-  }
-  sz_release(kept_of_root);
-  return out;
-}
-
 /* acc is newest-first. Skip a prefix of the added segment while pred holds. */
 static SzList *dropwhile_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
                                void *penv, int64_t remain) {
@@ -777,36 +585,6 @@ static SzList *dropwhile_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
   }
   sz_release(oldest_root);
   return out;
-}
-
-/* acc is newest-first. Skip added items until the first match; keep only that. */
-static SzList *find_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
-                          void *penv, int64_t remain, int *found) {
-  SzList *old_acc;
-  SzList *oldest_first = oldest_added(acc, acc_len, &old_acc);
-  SzList *oldest_root = oldest_first;
-  SzList *out;
-  while (!sz_list_is_empty(oldest_first)) {
-    void *h = sz_list_head(oldest_first);
-    oldest_first = sz_list_tail(oldest_first);
-    if (pred(h, penv) != 0) {
-      if (found)
-        *found = 1;
-      sz_retain(old_acc);
-      sz_release(acc);
-      if (remain == 0) {
-        sz_release(oldest_root);
-        return old_acc;
-      }
-      out = cons_take(h, old_acc);
-      sz_release(oldest_root);
-      return out;
-    }
-  }
-  sz_release(oldest_root);
-  sz_retain(old_acc);
-  sz_release(acc);
-  return old_acc;
 }
 
 static SzIo *tw_done(void *acc, void *env) {
@@ -855,14 +633,6 @@ static SzIo *after_tw_concat(void *acc, void *env) {
   if (remain == 0)
     return pure_drop(acc);
   return takewhile_into(right, (SzList *)acc, remain, pred, penv, stopped);
-}
-
-static SzIo *after_tw_cut(void *acc, void *env) {
-  StTWCut *st = (StTWCut *)env;
-  SzList *out = takewhile_added((SzList *)acc, st->acc_len, st->pred, st->penv,
-                                st->remain, st->stopped);
-  sz_free(st);
-  return pure_drop(out);
 }
 
 static SzIo *after_dropwhile(void *acc, void *env) {
@@ -916,19 +686,6 @@ static SzIo *filter_into(SzStream *s, SzList *acc, int64_t remain,
     if (remain == 0)
       return pure_drop(acc);
     switch (s->tag) {
-    case SZ_ST_TAKE: {
-      int64_t n = (int64_t)(intptr_t)s->env;
-      StFilter *st;
-      if (n <= 0)
-        return pure_drop(acc);
-      /* Keep take(n) as an inner item budget. Do not fold n into remain. */
-      st = (StFilter *)sz_alloc(sizeof(StFilter));
-      st->pred = pred;
-      st->penv = penv;
-      st->remain = remain;
-      st->acc_len = (int64_t)sz_list_len(acc);
-      return fm_drop(compile_into(s, acc, n), after_filter, st);
-    }
     case SZ_ST_CONS:
       if (pred(s->left, penv) != 0) {
         acc = cons_take(s->left, acc);
@@ -970,7 +727,7 @@ static SzIo *filter_into(SzStream *s, SzList *acc, int64_t remain,
         }
         return pure_drop(acc);
       }
-      return filter_pull_one(s, acc, remain, pred, penv);
+      return cut_loop(s, acc, remain, pred, penv, NULL, SZ_CUT_FILTER);
     }
     case SZ_ST_DROP: {
       int64_t n = (int64_t)(intptr_t)s->env;
@@ -993,7 +750,7 @@ static SzIo *filter_into(SzStream *s, SzList *acc, int64_t remain,
         }
         return pure_drop(acc);
       }
-      return filter_pull_one(s, acc, remain, pred, penv);
+      return cut_loop(s, acc, remain, pred, penv, NULL, SZ_CUT_FILTER);
     }
     case SZ_ST_EVAL: {
       StTWEval *st = (StTWEval *)sz_alloc(sizeof(StTWEval));
@@ -1017,7 +774,7 @@ static SzIo *filter_into(SzStream *s, SzList *acc, int64_t remain,
                            after_filter_concat, st);
     }
     default:
-      return filter_pull_one(s, acc, remain, pred, penv);
+      return cut_loop(s, acc, remain, pred, penv, NULL, SZ_CUT_FILTER);
     }
   }
   return pure_drop(acc);
@@ -1133,14 +890,10 @@ static SzIo *dropwhile_into(SzStream *s, SzList *acc, int64_t remain,
           dropwhile_into((SzStream *)s->left, acc, remain, pred, penv),
           after_dw_concat, st);
     }
-    default: {
-      StDropWhile *st = (StDropWhile *)sz_alloc(sizeof(StDropWhile));
-      st->pred = pred;
-      st->penv = penv;
-      st->remain = remain;
-      st->acc_len = (int64_t)sz_list_len(acc);
-      return fm_drop(compile_into(s, acc, remain), after_dropwhile, st);
-    }
+    default:
+      /* Pull one item at a time until pred fails. The while-prefix must not
+       * swallow the rest of the stream. */
+      return cut_loop(s, acc, remain, pred, penv, NULL, SZ_CUT_DROPWHILE);
     }
   }
   return pure_drop(acc);
@@ -1356,6 +1109,750 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
     }
   }
   return pure_drop(acc);
+}
+
+static SzIo *after_step_evalmap_io(void *value, void *env);
+static SzIo *after_step_evaltap_io(void *ignored, void *env);
+static SzIo *after_step_flat_inner(void *value, void *env);
+static SzIo *after_step_fl_inner(void *value, void *env);
+
+/* --- One-item cursor ------------------------------------------------------
+ * stream_step pulls one item from `s` and yields an ADT: None (tag 0) when
+ * the stream is exhausted, or Some (tag 1) of (value, residual). CONS, RANGE,
+ * TAKE, DROP, MAP, EVAL, CONCAT, ITERATE, and UNFOLD advance in place. Other
+ * tags compile to a list once, then serve from an emits chain. Every effect
+ * runs once. No prefix is recompiled per pull. */
+
+typedef struct StStep {
+  int64_t n;
+  SzStreamMapFn f;
+  SzCont cf;
+  void *fenv;
+  void *cur;
+  SzStream *pin;
+  SzStream *pin2;
+} StStep;
+
+static SzIo *step_none(void) { return pure_drop(sz_adt_new(0, NULL)); }
+
+/* Borrows value and residual. The pair retains both. */
+static SzIo *step_some(void *value, SzStream *residual) {
+  SzPair *p = sz_pair_new(value, residual);
+  SzAdt *a = sz_adt_new(1, p);
+  sz_release(p);
+  return pure_drop(a);
+}
+
+static SzIo *after_step_eval(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzIo *io = step_some(value, st->pin);
+  sz_release(st->pin);
+  sz_release(value);
+  sz_free(st);
+  return io;
+}
+
+static SzIo *after_step_take(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  SzIo *io;
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_free(st);
+    return step_none();
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzStream *res = sz_stream_take((SzStream *)sz_pair_right(p), st->n - 1);
+    io = step_some(sz_pair_left(p), res);
+    sz_release(res);
+  }
+  sz_release(adt);
+  sz_free(st);
+  return io;
+}
+
+static SzIo *after_step_drop(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_free(st);
+    return step_none();
+  }
+  if (st->n == 0) {
+    sz_free(st);
+    return pure_drop(adt);
+  }
+  {
+    SzStream *res = (SzStream *)sz_pair_right(sz_adt_payload(adt));
+    SzIo *io;
+    sz_retain(res);
+    sz_release(adt);
+    st->n -= 1;
+    io = fm_drop(stream_step(res), after_step_drop, st);
+    sz_release(res);
+    return io;
+  }
+}
+
+static SzIo *after_step_map(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  SzIo *io;
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_release(st->fenv);
+    sz_free(st);
+    return step_none();
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    /* Mapper returns +1. The pair retains. Drop the mapper ref. */
+    void *mapped = st->f(sz_pair_left(p), st->fenv);
+    SzStream *res = sz_stream_map((SzStream *)sz_pair_right(p), st->f, st->fenv);
+    io = step_some(mapped, res);
+    sz_release(mapped);
+    sz_release(res);
+  }
+  sz_release(adt);
+  sz_release(st->fenv);
+  sz_free(st);
+  return io;
+}
+
+static SzIo *after_step_concat(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (sz_adt_tag(adt) != 1) {
+    /* Left is exhausted. Step the right stream. */
+    SzIo *io = stream_step(st->pin);
+    sz_release(st->pin);
+    sz_release(adt);
+    sz_free(st);
+    return io;
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzStream *res = sz_stream_concat((SzStream *)sz_pair_right(p), st->pin);
+    SzIo *io = step_some(sz_pair_left(p), res);
+    sz_release(res);
+    sz_release(st->pin);
+    sz_release(adt);
+    sz_free(st);
+    return io;
+  }
+}
+
+/* Opaque tag: compile once, then serve items from an emits chain. */
+static SzIo *after_step_mass(void *acc, void *env) {
+  StStep *st = (StStep *)env;
+  SzList *xs = reverse_take((SzList *)acc);
+  SzIo *io;
+  if (sz_list_is_empty(xs)) {
+    sz_release(xs);
+    io = step_none();
+  } else {
+    SzStream *res = sz_stream_emits(sz_list_tail(xs));
+    io = step_some(sz_list_head(xs), res);
+    sz_release(res);
+    sz_release(xs);
+  }
+  sz_release(st->pin);
+  sz_free(st);
+  return io;
+}
+
+static SzIo *after_step_evalmap_inner(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_release(st->fenv);
+    sz_free(st);
+    return step_none();
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzIo *io = st->cf(sz_pair_left(p), st->fenv);
+    sz_retain(sz_pair_right(p));
+    st->pin = (SzStream *)sz_pair_right(p);
+    sz_release(adt);
+    return fm_drop(io, after_step_evalmap_io, st);
+  }
+}
+
+static SzIo *after_step_evalmap_io(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzStream *res = sz_stream_evalmap(st->pin, st->cf, st->fenv);
+  SzIo *io = step_some(value, res);
+  sz_release(res);
+  sz_release(st->pin);
+  sz_release(st->fenv);
+  sz_release(value);
+  sz_free(st);
+  return io;
+}
+
+static SzIo *after_step_evaltap_inner(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_release(st->fenv);
+    sz_free(st);
+    return step_none();
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzIo *io;
+    sz_retain(sz_pair_left(p));
+    st->cur = sz_pair_left(p);
+    io = st->cf(sz_pair_left(p), st->fenv);
+    sz_retain(sz_pair_right(p));
+    st->pin = (SzStream *)sz_pair_right(p);
+    sz_release(adt);
+    return fm_drop(io, after_step_evaltap_io, st);
+  }
+}
+
+static SzIo *after_step_evaltap_io(void *ignored, void *env) {
+  StStep *st = (StStep *)env;
+  SzStream *res = sz_stream_evaltap(st->pin, st->cf, st->fenv);
+  SzIo *io = step_some(st->cur, res);
+  sz_release(ignored);
+  sz_release(res);
+  sz_release(st->pin);
+  sz_release(st->cur);
+  sz_release(st->fenv);
+  sz_free(st);
+  return io;
+}
+
+/* flatMap pull. st->pin2 holds the owned outer stream being stepped. The
+ * outer cont releases it. st->pin holds the owned inner stream of the
+ * current outer item. */
+static SzIo *after_step_flat_outer(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (st->pin2) {
+    sz_release(st->pin2);
+    st->pin2 = NULL;
+  }
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_release(st->fenv);
+    sz_free(st);
+    return step_none();
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzStream *inner = (SzStream *)st->f(sz_pair_left(p), st->fenv);
+    sz_retain(sz_pair_right(p));
+    st->pin2 = (SzStream *)sz_pair_right(p);
+    st->pin = inner;
+    sz_release(adt);
+    return fm_drop(stream_step(inner), after_step_flat_inner, st);
+  }
+}
+
+static SzIo *after_step_flat_inner(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  sz_release(st->pin);
+  st->pin = NULL;
+  if (sz_adt_tag(adt) != 1) {
+    /* Inner stream is empty. Pull the next outer item. */
+    SzIo *io;
+    sz_release(adt);
+    io = fm_drop(stream_step(st->pin2), after_step_flat_outer, st);
+    return io;
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzStream *tail = sz_stream_flatmap(st->pin2, st->f, st->fenv);
+    SzStream *res = sz_stream_concat((SzStream *)sz_pair_right(p), tail);
+    SzIo *io = step_some(sz_pair_left(p), res);
+    sz_release(res);
+    sz_release(tail);
+    sz_release(st->pin2);
+    sz_release(st->fenv);
+    sz_release(adt);
+    sz_free(st);
+    return io;
+  }
+}
+
+/* mapConcat pull. Same shape as flatMap, but f returns a List chunk. */
+static SzIo *after_step_mc_outer(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (st->pin2) {
+    sz_release(st->pin2);
+    st->pin2 = NULL;
+  }
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_release(st->fenv);
+    sz_free(st);
+    return step_none();
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzList *chunk = (SzList *)st->f(sz_pair_left(p), st->fenv);
+    sz_retain(sz_pair_right(p));
+    st->pin2 = (SzStream *)sz_pair_right(p);
+    sz_release(adt);
+    if (sz_list_is_empty(chunk)) {
+      SzIo *io;
+      sz_release(chunk);
+      io = fm_drop(stream_step(st->pin2), after_step_mc_outer, st);
+      return io;
+    }
+    {
+      SzStream *spill = sz_stream_emits(sz_list_tail(chunk));
+      SzStream *tail = sz_stream_map_concat(st->pin2, st->f, st->fenv);
+      SzStream *res = sz_stream_concat(spill, tail);
+      SzIo *io = step_some(sz_list_head(chunk), res);
+      sz_release(res);
+      sz_release(tail);
+      sz_release(spill);
+      sz_release(chunk);
+      sz_release(st->pin2);
+      sz_release(st->fenv);
+      sz_free(st);
+      return io;
+    }
+  }
+}
+
+/* flatten pull. Outer items are streams. */
+static SzIo *after_step_fl_outer(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (st->pin2) {
+    sz_release(st->pin2);
+    st->pin2 = NULL;
+  }
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_free(st);
+    return step_none();
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    sz_retain(sz_pair_left(p));
+    st->pin = (SzStream *)sz_pair_left(p);
+    sz_retain(sz_pair_right(p));
+    st->pin2 = (SzStream *)sz_pair_right(p);
+    sz_release(adt);
+    return fm_drop(stream_step(st->pin), after_step_fl_inner, st);
+  }
+}
+
+static SzIo *after_step_fl_inner(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  sz_release(st->pin);
+  st->pin = NULL;
+  if (sz_adt_tag(adt) != 1) {
+    SzIo *io;
+    sz_release(adt);
+    io = fm_drop(stream_step(st->pin2), after_step_fl_outer, st);
+    return io;
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzStream *tail = sz_stream_flatten(st->pin2);
+    SzStream *res = sz_stream_concat((SzStream *)sz_pair_right(p), tail);
+    SzIo *io = step_some(sz_pair_left(p), res);
+    sz_release(res);
+    sz_release(tail);
+    sz_release(st->pin2);
+    sz_release(adt);
+    sz_free(st);
+    return io;
+  }
+}
+
+/* orElse pull. The first left item drops the right side. */
+static SzIo *after_step_orelse(void *value, void *env) {
+  StStep *st = (StStep *)env;
+  SzAdt *adt = (SzAdt *)value;
+  if (sz_adt_tag(adt) != 1) {
+    SzIo *io = stream_step(st->pin);
+    sz_release(st->pin);
+    sz_release(adt);
+    sz_free(st);
+    return io;
+  }
+  {
+    SzPair *p = (SzPair *)sz_adt_payload(adt);
+    SzIo *io = step_some(sz_pair_left(p), (SzStream *)sz_pair_right(p));
+    sz_release(st->pin);
+    sz_release(adt);
+    sz_free(st);
+    return io;
+  }
+}
+
+/* Pull one item through a pred combinator. st->node pins the pred, its env,
+ * and the current inner stream. */
+typedef struct StStepCut {
+  SzStream *node;
+  int tag;
+} StStepCut;
+
+static SzStream *step_cut_wrap(int tag, SzStream *res, SzStreamPred pred,
+                               void *penv) {
+  switch (tag) {
+  case SZ_ST_FILTER:
+    return sz_stream_filter(res, pred, penv);
+  case SZ_ST_FILTERNOT:
+    return sz_stream_filter_not(res, pred, penv);
+  case SZ_ST_TAKEWHILE:
+    return sz_stream_takewhile(res, pred, penv);
+  case SZ_ST_DROPWHILE:
+    return sz_stream_dropwhile(res, pred, penv);
+  default:
+    return sz_stream_find(res, pred, penv);
+  }
+}
+
+static SzIo *after_step_cut(void *value, void *env) {
+  StStepCut *st = (StStepCut *)env;
+  SzAdt *adt = (SzAdt *)value;
+  SzStreamPred pred;
+  void *penv;
+  SzPair *p;
+  void *v;
+  SzStream *res;
+  SzIo *io;
+  int hit;
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    sz_release(st->node);
+    sz_free(st);
+    return step_none();
+  }
+  pred = (SzStreamPred)st->node->right;
+  penv = st->node->env;
+  p = (SzPair *)sz_adt_payload(adt);
+  v = sz_pair_left(p);
+  res = (SzStream *)sz_pair_right(p);
+  hit = pred(v, penv) != 0;
+  if (st->tag == SZ_ST_FILTERNOT)
+  hit = !hit;
+  if (st->tag == SZ_ST_TAKEWHILE && !hit) {
+    sz_release(adt);
+    sz_release(st->node);
+    sz_free(st);
+    return step_none();
+  }
+  if (st->tag == SZ_ST_DROPWHILE && !hit) {
+    /* While-prefix is done. The raw residual passes through. */
+    io = step_some(v, res);
+    sz_release(adt);
+    sz_release(st->node);
+    sz_free(st);
+    return io;
+  }
+  if (hit) {
+    SzStream *res2 = st->tag == SZ_ST_FIND
+                         ? sz_stream_nil()
+                         : step_cut_wrap(st->tag, res, pred, penv);
+    io = step_some(v, res2);
+    sz_release(res2);
+    sz_release(adt);
+    sz_release(st->node);
+    sz_free(st);
+    return io;
+  }
+  /* A miss, or a dropped while-prefix item. Pull the next item. */
+  {
+    SzStream *next = step_cut_wrap(st->tag, res, pred, penv);
+    sz_release(adt);
+    sz_release(st->node);
+    st->node = next;
+    return fm_drop(stream_step(res), after_step_cut, st);
+  }
+}
+
+static SzIo *stream_step(SzStream *s) {
+  for (;;) {
+    if (!s || s->tag == SZ_ST_NIL)
+      return step_none();
+    switch (s->tag) {
+    case SZ_ST_CONS:
+      return step_some(s->left, (SzStream *)s->right);
+    case SZ_ST_RANGE: {
+      int64_t from = (int64_t)(intptr_t)s->env;
+      int64_t until = (int64_t)(intptr_t)s->right;
+      void *box;
+      SzStream *res;
+      SzIo *io;
+      if (from >= until)
+        return step_none();
+      box = sz_box_i64(from);
+      res = from + 1 < until ? sz_stream_range(from + 1, until)
+                              : sz_stream_nil();
+      io = step_some(box, res);
+      sz_release(box);
+      sz_release(res);
+      return io;
+    }
+    case SZ_ST_TAKE: {
+      int64_t n = (int64_t)(intptr_t)s->env;
+      StStep *st;
+      if (n <= 0)
+        return step_none();
+      st = (StStep *)sz_alloc(sizeof(StStep));
+      st->n = n;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_take, st);
+    }
+    case SZ_ST_DROP: {
+      int64_t n = (int64_t)(intptr_t)s->env;
+      StStep *st;
+      if (n <= 0) {
+        s = (SzStream *)s->left;
+        break;
+      }
+      st = (StStep *)sz_alloc(sizeof(StStep));
+      st->n = n;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_drop, st);
+    }
+    case SZ_ST_MAP: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      st->f = (SzStreamMapFn)s->right;
+      sz_retain(s->env);
+      st->fenv = s->env;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_map, st);
+    }
+    case SZ_ST_EVAL: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      sz_retain(s->right);
+      st->pin = (SzStream *)s->right;
+      return fm_drop((SzIo *)s->left, after_step_eval, st);
+    }
+    case SZ_ST_EVALMAP: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      st->cf = (SzCont)s->right;
+      sz_retain(s->env);
+      st->fenv = s->env;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_evalmap_inner,
+                     st);
+    }
+    case SZ_ST_EVALTAP: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      st->cf = (SzCont)s->right;
+      sz_retain(s->env);
+      st->fenv = s->env;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_evaltap_inner,
+                     st);
+    }
+    case SZ_ST_FLATMAP: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      st->f = (SzStreamMapFn)s->right;
+      sz_retain(s->env);
+      st->fenv = s->env;
+      sz_retain(s->left);
+      st->pin2 = (SzStream *)s->left;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_flat_outer,
+                     st);
+    }
+    case SZ_ST_MAPCONCAT: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      st->f = (SzStreamMapFn)s->right;
+      sz_retain(s->env);
+      st->fenv = s->env;
+      sz_retain(s->left);
+      st->pin2 = (SzStream *)s->left;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_mc_outer, st);
+    }
+    case SZ_ST_FLATTEN: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      sz_retain(s->left);
+      st->pin2 = (SzStream *)s->left;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_fl_outer, st);
+    }
+    case SZ_ST_CONCAT: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      sz_retain(s->right);
+      st->pin = (SzStream *)s->right;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_concat, st);
+    }
+    case SZ_ST_ITERATE: {
+      SzPair *pack = (SzPair *)s->env;
+      int64_t n = pack ? sz_unbox_i64(pack->left) : 0;
+      void *fenv = pack ? pack->right : NULL;
+      SzStreamMapFn f = (SzStreamMapFn)s->right;
+      SzStream *res;
+      SzIo *io;
+      if (n <= 0)
+        return step_none();
+      if (n == 1) {
+        res = sz_stream_nil();
+      } else {
+        void *next = f(s->left, fenv);
+        void *nb = sz_box_i64(n - 1);
+        SzPair *np = sz_pair_new(nb, fenv);
+        sz_release(nb);
+        res = st_new(SZ_ST_ITERATE, next, (void *)f, np);
+      }
+      io = step_some(s->left, res);
+      sz_release(res);
+      return io;
+    }
+    case SZ_ST_UNFOLD: {
+      SzStreamMapFn f = (SzStreamMapFn)s->right;
+      SzList *step = (SzList *)f(s->left, s->env);
+      SzPair *p;
+      void *a;
+      void *next;
+      SzStream *res;
+      SzIo *io;
+      if (sz_list_is_empty(step)) {
+        sz_release(step);
+        return step_none();
+      }
+      p = (SzPair *)sz_list_head(step);
+      a = sz_pair_left(p);
+      next = sz_pair_right(p);
+      sz_retain(a);
+      sz_retain(next);
+      sz_release(step);
+      sz_retain(s->env);
+      res = st_new(SZ_ST_UNFOLD, next, (void *)f, s->env);
+      io = step_some(a, res);
+      sz_release(a);
+      sz_release(res);
+      return io;
+    }
+    case SZ_ST_ORELSE: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      sz_retain(s->right);
+      st->pin = (SzStream *)s->right;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_orelse, st);
+    }
+    case SZ_ST_FILTER:
+    case SZ_ST_FILTERNOT:
+    case SZ_ST_TAKEWHILE:
+    case SZ_ST_DROPWHILE:
+    case SZ_ST_FIND: {
+      StStepCut *st = (StStepCut *)sz_alloc(sizeof(StStepCut));
+      sz_retain(s);
+      st->node = s;
+      st->tag = s->tag;
+      return fm_drop(stream_step((SzStream *)s->left), after_step_cut, st);
+    }
+    default: {
+      StStep *st = (StStep *)sz_alloc(sizeof(StStep));
+      sz_retain(s);
+      st->pin = s;
+      return fm_drop(compile_into(s, sz_list_nil(), -1), after_step_mass, st);
+    }
+    }
+  }
+}
+
+/* Cut loop: pull items through stream_step and fold one at a time. */
+typedef struct StCut {
+  SzStream *s;
+  SzList *acc;
+  int64_t remain;
+  SzStreamPred pred;
+  void *penv;
+  int *stopped;
+  int mode;
+} StCut;
+
+static SzIo *cut_done(StCut *st) {
+  SzList *acc = st->acc;
+  sz_free(st);
+  return pure_drop(acc);
+}
+
+static SzIo *after_cut(void *value, void *env) {
+  StCut *st = (StCut *)env;
+  SzAdt *adt = (SzAdt *)value;
+  SzPair *p;
+  void *v;
+  SzStream *res;
+  int hit;
+  sz_release(st->s);
+  st->s = NULL;
+  if (sz_adt_tag(adt) != 1) {
+    sz_release(adt);
+    return cut_done(st);
+  }
+  p = (SzPair *)sz_adt_payload(adt);
+  v = sz_pair_left(p);
+  res = (SzStream *)sz_pair_right(p);
+  hit = st->pred(v, st->penv) != 0;
+  if (st->mode == SZ_CUT_TAKEWHILE) {
+    if (!hit) {
+      if (st->stopped)
+        *st->stopped = 1;
+      sz_release(adt);
+      return cut_done(st);
+    }
+    st->acc = cons_take(v, st->acc);
+    st->remain = remain_dec(st->remain);
+  } else if (st->mode == SZ_CUT_FIND) {
+    if (hit) {
+      if (st->stopped)
+        *st->stopped = 1;
+      st->acc = cons_take(v, st->acc);
+      sz_release(adt);
+      return cut_done(st);
+    }
+  } else if (st->mode == SZ_CUT_DROPWHILE) {
+    if (!hit) {
+      /* First item past the while-prefix. Keep it. Bulk-compile the rest. */
+      SzIo *io;
+      st->acc = cons_take(v, st->acc);
+      st->remain = remain_dec(st->remain);
+      sz_retain(res);
+      sz_release(adt);
+      if (st->remain == 0) {
+        sz_release(res);
+        return cut_done(st);
+      }
+      io = fm_drop(compile_into(res, st->acc, st->remain), after_stream_pin,
+                   res);
+      sz_release(res);
+      sz_free(st);
+      return io;
+    }
+  } else if (hit) { /* SZ_CUT_FILTER */
+    st->acc = cons_take(v, st->acc);
+    st->remain = remain_dec(st->remain);
+  }
+  if (st->remain == 0) {
+    sz_release(adt);
+    return cut_done(st);
+  }
+  {
+    SzIo *io = cut_loop(res, st->acc, st->remain, st->pred, st->penv,
+                        st->stopped, st->mode);
+    sz_release(adt);
+    sz_free(st);
+    return io;
+  }
+}
+
+static SzIo *cut_loop(SzStream *s, SzList *acc, int64_t remain,
+                      SzStreamPred pred, void *penv, int *stopped, int mode) {
+  StCut *st = (StCut *)sz_alloc(sizeof(StCut));
+  sz_retain(s);
+  st->s = s;
+  st->acc = acc;
+  st->remain = remain;
+  st->pred = pred;
+  st->penv = penv;
+  st->stopped = stopped;
+  st->mode = mode;
+  return fm_drop(stream_step(s), after_cut, st);
 }
 
 typedef struct StLift {
@@ -2009,19 +2506,6 @@ static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,
     if (remain == 0)
       return pure_drop(acc);
     switch (s->tag) {
-    case SZ_ST_TAKE: {
-      int64_t n = (int64_t)(intptr_t)s->env;
-      StTWCut *st;
-      if (n <= 0)
-        return pure_drop(acc);
-      st = (StTWCut *)sz_alloc(sizeof(StTWCut));
-      st->pred = pred;
-      st->penv = penv;
-      st->remain = remain;
-      st->acc_len = (int64_t)sz_list_len(acc);
-      st->stopped = stopped;
-      return fm_drop(compile_into(s, acc, n), after_tw_cut, st);
-    }
     case SZ_ST_CONS:
       if (pred(s->left, penv) == 0) {
         if (stopped)
@@ -2054,15 +2538,9 @@ static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,
           takewhile_into((SzStream *)s->left, acc, remain, pred, penv, stopped),
           after_tw_concat, st);
     }
-    default: {
-      StTWCut *st = (StTWCut *)sz_alloc(sizeof(StTWCut));
-      st->pred = pred;
-      st->penv = penv;
-      st->remain = remain;
-      st->acc_len = (int64_t)sz_list_len(acc);
-      st->stopped = stopped;
-      return fm_drop(compile_into(s, acc, remain), after_tw_cut, st);
-    }
+    default:
+      /* Pull one item at a time. Do not run effects past the stop. */
+      return cut_loop(s, acc, remain, pred, penv, stopped, SZ_CUT_TAKEWHILE);
     }
   }
   return pure_drop(acc);
@@ -2117,33 +2595,12 @@ static SzIo *after_find_concat(void *acc, void *env) {
   return find_into(right, (SzList *)acc, remain, pred, penv, found);
 }
 
-static SzIo *after_find_cut(void *acc, void *env) {
-  StTWCut *st = (StTWCut *)env;
-  SzList *out = find_added((SzList *)acc, st->acc_len, st->pred, st->penv,
-                           st->remain, st->stopped);
-  sz_free(st);
-  return pure_drop(out);
-}
-
 static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
                        SzStreamPred pred, void *penv, int *found) {
   while (s && s->tag != SZ_ST_NIL) {
     if (remain == 0)
       return pure_drop(acc);
     switch (s->tag) {
-    case SZ_ST_TAKE: {
-      int64_t n = (int64_t)(intptr_t)s->env;
-      StTWCut *st;
-      if (n <= 0)
-        return pure_drop(acc);
-      st = (StTWCut *)sz_alloc(sizeof(StTWCut));
-      st->pred = pred;
-      st->penv = penv;
-      st->remain = remain;
-      st->acc_len = (int64_t)sz_list_len(acc);
-      st->stopped = found;
-      return fm_drop(compile_into(s, acc, n), after_find_cut, st);
-    }
     case SZ_ST_CONS:
       if (pred(s->left, penv) != 0) {
         if (found)
@@ -2206,7 +2663,7 @@ static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
         }
         return pure_drop(acc);
       }
-      return find_pull_one(s, acc, remain, pred, penv, found);
+      return cut_loop(s, acc, remain, pred, penv, found, SZ_CUT_FIND);
     }
     case SZ_ST_DROP: {
       int64_t n = (int64_t)(intptr_t)s->env;
@@ -2238,7 +2695,7 @@ static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
         }
         return pure_drop(acc);
       }
-      return find_pull_one(s, acc, remain, pred, penv, found);
+      return cut_loop(s, acc, remain, pred, penv, found, SZ_CUT_FIND);
     }
     case SZ_ST_EVAL: {
       StTWEval *st = (StTWEval *)sz_alloc(sizeof(StTWEval));
@@ -2263,7 +2720,7 @@ static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
           after_find_concat, st);
     }
     default:
-      return find_pull_one(s, acc, remain, pred, penv, found);
+      return cut_loop(s, acc, remain, pred, penv, found, SZ_CUT_FIND);
     }
   }
   return pure_drop(acc);
@@ -2324,25 +2781,22 @@ SzIo *sz_stream_exists(SzStream *s, SzStreamPred pred, void *env) {
 }
 
 static int64_t forall_miss_pred(void *v, void *env) {
-  StFilter *st = (StFilter *)env;
-  return st->pred(v, st->penv) == 0;
+  SzPair *pack = (SzPair *)env;
+  SzStreamPred pred = (SzStreamPred)pack->left;
+  return pred(v, pack->right) == 0;
 }
 
-static SzIo *forall_from_exists(void *box, void *env) {
-  int64_t hit = sz_unbox_i64(box);
-  sz_release(box);
-  sz_free(env);
-  return pure_drop(sz_box_i64(hit ? 0 : 1));
-}
-
+/* The pred + env ride in an RC pair. A raw sz_alloc block is not an RC
+ * value; retaining it through the stream node would be a type pun. */
 SzIo *sz_stream_forall(SzStream *s, SzStreamPred pred, void *env) {
-  StFilter *st = (StFilter *)sz_alloc(sizeof(StFilter));
-  st->pred = pred;
-  st->penv = env;
-  st->remain = 0;
-  st->acc_len = 0;
-  return fm_drop(sz_stream_exists(s, forall_miss_pred, st), forall_from_exists,
-                 st);
+  SzPair *pack;
+  SzIo *io;
+  if (!pred)
+    sz_panic("sz_stream_forall(null pred)");
+  pack = sz_pair_new((void *)pred, env);
+  io = sz_stream_exists(s, forall_miss_pred, pack);
+  sz_release(pack);
+  return fm_drop(io, none_from_exists, NULL);
 }
 
 static SzIo *fold_from_list(void *list, void *env) {

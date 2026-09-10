@@ -1265,13 +1265,12 @@ static SzList *sort_slots(SzSortSlot *slots, size_t n,
   return acc;
 }
 
-SzList *sz_list_sort(SzList *xs, int64_t as_int) {
+SzList *sz_list_sort(SzList *xs) {
   int64_t n = sz_list_len(xs);
   SzSortSlot *slots;
   SzList *p;
   size_t i;
   uint32_t kind;
-  (void)as_int;
   if (!xs)
     return NULL;
   kind = list_elem_kind(xs, "List.sort: not Int or String");
@@ -1323,14 +1322,13 @@ static int cell_ord(void *a, void *b, uint32_t kind) {
   return str_ord((const SzString *)a, (const SzString *)b);
 }
 
-static void *list_extreme(SzList *xs, int64_t as_int, int want_max,
+static void *list_extreme(SzList *xs, int want_max,
                           const char *empty_msg) {
   SzList *p;
   void *best;
   uint32_t kind;
   const char *bad =
       want_max ? "List.max: not Int or String" : "List.min: not Int or String";
-  (void)as_int;
   if (!xs)
     sz_panic(empty_msg);
   kind = list_elem_kind(xs, bad);
@@ -1344,12 +1342,12 @@ static void *list_extreme(SzList *xs, int64_t as_int, int want_max,
   return best;
 }
 
-void *sz_list_max(SzList *xs, int64_t as_int) {
-  return list_extreme(xs, as_int, 1, "List.max on empty");
+void *sz_list_max(SzList *xs) {
+  return list_extreme(xs, 1, "List.max on empty");
 }
 
-void *sz_list_min(SzList *xs, int64_t as_int) {
-  return list_extreme(xs, as_int, 0, "List.min on empty");
+void *sz_list_min(SzList *xs) {
+  return list_extreme(xs, 0, "List.min on empty");
 }
 
 static void *list_reverse_value(void *head, void *env) {
