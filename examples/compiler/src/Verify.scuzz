@@ -1340,9 +1340,6 @@ def bindHasForbid(b: Bind): Bool =
     case Bind(_, _, e) => exprHasForbid(e)
   }
 
-def testOut(checkOk: Bool): String =
-  if (!checkOk) "scuzz test fail" else Str.concat("project compile smoke ok", Str.concat(nl(), Str.concat("IO smoke ok", Str.concat(nl(), "scuzz test ok"))))
-
 def searchN(n: Int): Int =
   if (n <= 0) 0 else n * 5 / 8
 

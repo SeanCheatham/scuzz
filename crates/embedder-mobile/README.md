@@ -1,6 +1,6 @@
 # embedder-mobile
 
-OS presentation and input for `UiRuntime.Mobile`. Headless remains the CI peer for goldens.
+OS presentation and input for `UiRuntime.Mobile`. Headless remains the CI peer.
 
 ## Host shell (Linux CI)
 

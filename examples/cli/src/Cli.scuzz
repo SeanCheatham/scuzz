@@ -7,9 +7,8 @@ enum Cmd:
   case Build(path: String, outDir: String, full: Bool, verify: Bool)
   case Run(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String)
   case Watch(path: String, outDir: String)
-  case Test(path: String, update: Bool, pixels: Bool, differential: Bool)
   case Lsp(path: String)
-  case Fuzz(path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool)
+  case Fuzz(path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool)
   case New(name: String, path: String, ui: Bool)
   case Ide(path: String, outDir: String, headless: Bool)
   case Package(path: String, outDir: String, target: String)
@@ -34,7 +33,7 @@ def isVer(s: String): Bool =
   s == "-V" || s == "--version"
 
 def isCmd(s: String): Bool =
-  s == "build" || s == "run" || s == "watch" || s == "test" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "package" || s == "docs" || s == "help"
+  s == "build" || s == "run" || s == "watch" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "package" || s == "docs" || s == "help"
 
 def unrec(name: String): String =
   Str.concat("error: unrecognized subcommand '", Str.concat(name, """'
@@ -196,7 +195,7 @@ def takeVal3(args: List[String], j: Int): (String, Int) =
   if (j >= List.len(args)) ("", 0 - 1) else (arg(args, j), j + 1)
 
 def helpOf(topic: String): String =
-  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "test") Help.helpTest() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
+  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
 
 def show(c: Cmd): String =
   c match {
@@ -208,9 +207,8 @@ def show(c: Cmd): String =
     case Cmd.Build(path, outDir, full, verify) => Str.concat("build path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" full=", Str.concat(yn(full), Str.concat(" verify=", yn(verify))))))))
     case Cmd.Run(path, outDir, headless, watch, script, dump) => Str.concat("run path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" headless=", Str.concat(yn(headless), Str.concat(" watch=", Str.concat(yn(watch), Str.concat(" script=", Str.concat(script, Str.concat(" dump=", dump)))))))))))
     case Cmd.Watch(path, outDir) => Str.concat("watch path=", Str.concat(path, Str.concat(" out=", outDir)))
-    case Cmd.Test(path, update, pixels, differential) => Str.concat("test path=", Str.concat(path, Str.concat(" update=", Str.concat(yn(update), Str.concat(" pixels=", Str.concat(yn(pixels), Str.concat(" differential=", yn(differential))))))))
     case Cmd.Lsp(path) => Str.concat("lsp path=", path)
-    case Cmd.Fuzz(path, iterations, seed, replay, oracles, noFailFast, relate) => Str.concat("fuzz path=", Str.concat(path, Str.concat(" iterations=", Str.concat(Str.fromInt(iterations), Str.concat(" seed=", Str.concat(Str.fromInt(seed), Str.concat(" replay=", Str.concat(replay, Str.concat(" oracles=", Str.concat(yn(oracles), Str.concat(" noFailFast=", Str.concat(yn(noFailFast), Str.concat(" relate=", yn(relate))))))))))))))
+    case Cmd.Fuzz(path, iterations, seed, replay, oracles, noFailFast, relate, differential) => Str.concat("fuzz path=", Str.concat(path, Str.concat(" iterations=", Str.concat(Str.fromInt(iterations), Str.concat(" seed=", Str.concat(Str.fromInt(seed), Str.concat(" replay=", Str.concat(replay, Str.concat(" oracles=", Str.concat(yn(oracles), Str.concat(" noFailFast=", Str.concat(yn(noFailFast), Str.concat(" relate=", Str.concat(yn(relate), Str.concat(" differential=", yn(differential))))))))))))))))
     case Cmd.New(name, path, ui) => Str.concat("new name=", Str.concat(name, Str.concat(" path=", Str.concat(path, Str.concat(" ui=", yn(ui))))))
     case Cmd.Ide(path, outDir, headless) => Str.concat("ide path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" headless=", yn(headless))))))
     case Cmd.Package(path, outDir, target) => Str.concat("package path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", target)))))
@@ -259,7 +257,7 @@ def parseHelp(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Help(""), json) else if (isCmd(arg(args, i)) || arg(args, i) == "") gateJson(Cmd.Help(arg(args, i)), json) else gateJson(Cmd.Fail(unrec(arg(args, i))), json)
 
 def parseCmd(args: List[String], cmd: String, i: Int, json: Bool): Cmd =
-  if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "test") parseTest(args, i, json, "", false, false, false) else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "host")
+  if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "host")
 
 def parseDocs(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Docs("list", ""), json) else parseDocsTok(args, i, json, arg(args, i))
@@ -367,60 +365,49 @@ def parseWatchMsg(p: (String, Int), args: List[String], path: String, outDir: St
     case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseWatch(args, n, true, path, outDir) else if (v == "human") parseWatch(args, n, false, path, outDir) else Cmd.Fail(badFmt(v))
   }
 
-def parseTest(args: List[String], i: Int, json: Bool, path: String, update: Bool, pixels: Bool, differential: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Test(orDot(path), update, pixels, differential), json) else parseTestTok(args, i, json, path, update, pixels, differential, arg(args, i))
-
-def parseTestTok(args: List[String], i: Int, json: Bool, path: String, update: Bool, pixels: Bool, differential: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("test"), json) else if (a == "--update") parseTest(args, i + 1, json, path, true, pixels, differential) else if (a == "--pixels") parseTest(args, i + 1, json, path, update, true, differential) else if (a == "--differential") parseTest(args, i + 1, json, path, update, pixels, true) else if (a == "--message-format" || flagPref(a, "--message-format")) parseTestMsg(takeVal(args, i, "--message-format"), args, path, update, pixels, differential) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz test [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz test [OPTIONS] [PATH]")) else parseTest(args, i + 1, json, a, update, pixels, differential)
-
-def parseTestMsg(p: (String, Int), args: List[String], path: String, update: Bool, pixels: Bool, differential: Bool): Cmd =
-  p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseTest(args, n, true, path, update, pixels, differential) else if (v == "human") parseTest(args, n, false, path, update, pixels, differential) else Cmd.Fail(badFmt(v))
-  }
-
 def parseLsp(args: List[String], i: Int, json: Bool, path: String): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Lsp(orDot(path)), json) else parseLspTok(args, i, json, path, arg(args, i))
 
 def parseLspTok(args: List[String], i: Int, json: Bool, path: String, a: String): Cmd =
   if (isHelp(a)) gateJson(Cmd.Help("lsp"), json) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz lsp [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz lsp [OPTIONS] [PATH]")) else parseLsp(args, i + 1, json, a)
 
-def parseFuzz(args: List[String], i: Int, json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
-  if (i >= List.len(args)) fuzzDone(args, json, path, iterations, seed, replay, oracles, noFailFast, relate) else parseFuzzTok(args, i, json, path, iterations, seed, replay, oracles, noFailFast, relate, arg(args, i))
+def parseFuzz(args: List[String], i: Int, json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
+  if (i >= List.len(args)) fuzzDone(args, json, path, iterations, seed, replay, oracles, noFailFast, relate, differential) else parseFuzzTok(args, i, json, path, iterations, seed, replay, oracles, noFailFast, relate, differential, arg(args, i))
 
-def fuzzDone(args: List[String], json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
-  if (relate && fuzzHasCamp(args, 0)) Cmd.Fail(relateOnly()) else gateJson(Cmd.Fuzz(orDot(path), iterations, seed, replay, oracles, noFailFast, relate), json)
+def fuzzDone(args: List[String], json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
+  if (relate && (fuzzHasCamp(args, 0) || differential)) Cmd.Fail(relateOnly()) else gateJson(Cmd.Fuzz(orDot(path), iterations, seed, replay, oracles, noFailFast, relate, differential), json)
 
-def parseFuzzTok(args: List[String], i: Int, json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("fuzz"), json) else if (a == "--oracles") parseFuzz(args, i + 1, json, path, iterations, seed, replay, true, noFailFast, relate) else if (a == "--no-fail-fast") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, true, relate) else if (a == "--relate") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, noFailFast, true) else if (a == "--iterations" || flagPref(a, "--iterations")) parseFuzzIter(takeVal(args, i, "--iterations"), args, json, path, seed, replay, oracles, noFailFast, relate) else if (a == "--seed" || flagPref(a, "--seed")) parseFuzzSeed(takeVal(args, i, "--seed"), args, json, path, iterations, replay, oracles, noFailFast, relate) else if (a == "--replay" || flagPref(a, "--replay")) parseFuzzReplay(takeVal(args, i, "--replay"), args, json, path, iterations, seed, oracles, noFailFast, relate) else if (a == "--message-format" || flagPref(a, "--message-format")) parseFuzzMsg(takeVal(args, i, "--message-format"), args, path, iterations, seed, replay, oracles, noFailFast, relate) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz fuzz [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz fuzz [OPTIONS] [PATH]")) else parseFuzz(args, i + 1, json, a, iterations, seed, replay, oracles, noFailFast, relate)
+def parseFuzzTok(args: List[String], i: Int, json: Bool, path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool, a: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("fuzz"), json) else if (a == "--oracles") parseFuzz(args, i + 1, json, path, iterations, seed, replay, true, noFailFast, relate, differential) else if (a == "--no-fail-fast") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, true, relate, differential) else if (a == "--relate") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, noFailFast, true, differential) else if (a == "--differential") parseFuzz(args, i + 1, json, path, iterations, seed, replay, oracles, noFailFast, relate, true) else if (a == "--iterations" || flagPref(a, "--iterations")) parseFuzzIter(takeVal(args, i, "--iterations"), args, json, path, seed, replay, oracles, noFailFast, relate, differential) else if (a == "--seed" || flagPref(a, "--seed")) parseFuzzSeed(takeVal(args, i, "--seed"), args, json, path, iterations, replay, oracles, noFailFast, relate, differential) else if (a == "--replay" || flagPref(a, "--replay")) parseFuzzReplay(takeVal(args, i, "--replay"), args, json, path, iterations, seed, oracles, noFailFast, relate, differential) else if (a == "--message-format" || flagPref(a, "--message-format")) parseFuzzMsg(takeVal(args, i, "--message-format"), args, path, iterations, seed, replay, oracles, noFailFast, relate, differential) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz fuzz [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz fuzz [OPTIONS] [PATH]")) else parseFuzz(args, i + 1, json, a, iterations, seed, replay, oracles, noFailFast, relate, differential)
 
-def parseFuzzIter(p: (String, Int), args: List[String], json: Bool, path: String, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+def parseFuzzIter(p: (String, Int), args: List[String], json: Bool, path: String, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--iterations")) else parseFuzzIterGot(parseFlagNat(v), v, n, args, json, path, seed, replay, oracles, noFailFast, relate)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--iterations")) else parseFuzzIterGot(parseFlagNat(v), v, n, args, json, path, seed, replay, oracles, noFailFast, relate, differential)
   }
 
-def parseFuzzIterGot(p: (Bool, Int), v: String, n: Int, args: List[String], json: Bool, path: String, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+def parseFuzzIterGot(p: (Bool, Int), v: String, n: Int, args: List[String], json: Bool, path: String, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
   p match {
-    case (ok, it) => if (!ok) Cmd.Fail(badInt("--iterations", v)) else parseFuzz(args, n, json, path, it, seed, replay, oracles, noFailFast, relate)
+    case (ok, it) => if (!ok) Cmd.Fail(badInt("--iterations", v)) else parseFuzz(args, n, json, path, it, seed, replay, oracles, noFailFast, relate, differential)
   }
 
-def parseFuzzSeed(p: (String, Int), args: List[String], json: Bool, path: String, iterations: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+def parseFuzzSeed(p: (String, Int), args: List[String], json: Bool, path: String, iterations: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--seed")) else parseFuzzSeedGot(parseFlagInt(v), v, n, args, json, path, iterations, replay, oracles, noFailFast, relate)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--seed")) else parseFuzzSeedGot(parseFlagInt(v), v, n, args, json, path, iterations, replay, oracles, noFailFast, relate, differential)
   }
 
-def parseFuzzSeedGot(p: (Bool, Int), v: String, n: Int, args: List[String], json: Bool, path: String, iterations: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+def parseFuzzSeedGot(p: (Bool, Int), v: String, n: Int, args: List[String], json: Bool, path: String, iterations: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
   p match {
-    case (ok, seed) => if (!ok) Cmd.Fail(badInt("--seed", v)) else parseFuzz(args, n, json, path, iterations, seed, replay, oracles, noFailFast, relate)
+    case (ok, seed) => if (!ok) Cmd.Fail(badInt("--seed", v)) else parseFuzz(args, n, json, path, iterations, seed, replay, oracles, noFailFast, relate, differential)
   }
 
-def parseFuzzReplay(p: (String, Int), args: List[String], json: Bool, path: String, iterations: Int, seed: Int, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+def parseFuzzReplay(p: (String, Int), args: List[String], json: Bool, path: String, iterations: Int, seed: Int, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--replay")) else parseFuzz(args, n, json, path, iterations, seed, v, oracles, noFailFast, relate)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--replay")) else parseFuzz(args, n, json, path, iterations, seed, v, oracles, noFailFast, relate, differential)
   }
 
-def parseFuzzMsg(p: (String, Int), args: List[String], path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool): Cmd =
+def parseFuzzMsg(p: (String, Int), args: List[String], path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseFuzz(args, n, true, path, iterations, seed, replay, oracles, noFailFast, relate) else if (v == "human") parseFuzz(args, n, false, path, iterations, seed, replay, oracles, noFailFast, relate) else Cmd.Fail(badFmt(v))
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseFuzz(args, n, true, path, iterations, seed, replay, oracles, noFailFast, relate, differential) else if (v == "human") parseFuzz(args, n, false, path, iterations, seed, replay, oracles, noFailFast, relate, differential) else Cmd.Fail(badFmt(v))
   }
 
 def parseNew(args: List[String], i: Int, json: Bool, name: String, path: String, ui: Bool): Cmd =
@@ -492,8 +479,7 @@ def runCmd(c: Cmd, src: String): String =
   c match {
     case Cmd.Check(_, json) => if (json) Check.check(src) else Check.human(src)
     case Cmd.Fmt(_, _) => fmtSrc(src)
-    case Cmd.Test(_, _, _, _) => Verify.testOut(Check.check(src) == "[]")
-    case Cmd.Fuzz(_, it, seed, _, _, _, _) => Verify.fuzzOut(it, seed, 0, 0, 0, 0)
+    case Cmd.Fuzz(_, it, seed, _, _, _, _, _) => Verify.fuzzOut(it, seed, 0, 0, 0, 0)
     case Cmd.Build(_, outDir, _, _) => Drive.showPkg(Drive.compilePkg("[package]\nname = \"hello\"\nversion = \"0.1.0\"\n", src, outDir, "clang", "crates/runtime/build/libscuzz_rt.a"))
     case _ => render(c)
   }
@@ -505,10 +491,9 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Watch(path, outDir) => dispatchWatch(path, outDir)
     case Cmd.Check(path, json) => Drive.checkDir(path, json)
     case Cmd.Fmt(path, check) => dispatchFmt(path, check)
-    case Cmd.Test(path, update, pixels, differential) => dispatchTest(path, update, pixels, differential)
     case Cmd.New(name, path, ui) => dispatchNew(name, path, ui)
     case Cmd.Package(path, outDir, target) => dispatchPkg(path, outDir, target)
-    case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, relate) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles)
+    case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, relate, differential) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles, differential)
     case Cmd.Ide(path, outDir, headless) => dispatchIde(path, outDir, headless)
     case Cmd.Lsp(path) => Lsp.run(path)
     case Cmd.Docs(mode, topic) => dispatchDocs(mode, topic)
@@ -523,11 +508,11 @@ def dispatchDocs(mode: String, topic: String): IO[Unit] =
 def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
   Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), target)
 
-def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool): IO[Unit] =
-  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => dispatchFuzz2(path, it, seed, replay, relate, noFailFast, oracles))
+def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
+  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => dispatchFuzz2(path, it, seed, replay, relate, noFailFast, oracles, differential))
 
-def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool): IO[Unit] =
-  if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast, oracles)
+def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
+  if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast, oracles, differential)
 
 def dispatchIde(path: String, outDir: String, headless: Bool): IO[Unit] =
   Sys.getenv("SCUZZ_IDE").flatMap(ide => Sys.getenv("SCUZZ_HOME").flatMap(home => dispatchIdeEnv(path, outDir, headless, ide, home)))
@@ -642,9 +627,6 @@ def runEnvOf(out: String, headless: Bool, script: String, dump: String, toml: St
 def runRecordEnv(out: String, headless: Bool, toml: String): String =
   if (Drive.uiEnvKind(headless, Manifest.uiRuntime(Manifest.manUi(Manifest.parse(toml)))) == "headless") "" else Str.concat("SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.script")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.dump")), " "))))
 
-def dispatchTest(path: String, update: Bool, pixels: Bool, differential: Bool): IO[Unit] =
-  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => Drive.testDir(path, Drive.joinSlash(path, "build"), update, pixels, differential))
-
 def dispatchFmt(path: String, check: Bool): IO[Unit] =
   Fs.list(Drive.joinSlash(path, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0)))
 
@@ -711,5 +693,5 @@ def writeNewMain(dir: String, name: String, ui: Bool): IO[Unit] =
   Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "src"), "Main.scuzz"), if (ui) newMainUi() else newMainIo()).flatMap(_ => writeNewVerify(dir, name, ui))
 
 def writeNewVerify(dir: String, name: String, ui: Bool): IO[Unit] =
-  Fs.write(Drive.joinSlash(dir, Str.concat(name, ".scuzz_verify")), if (ui) newVerifyUi() else newVerifyIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz test --update && scuzz test && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz test && scuzz run"))))
+  Fs.write(Drive.joinSlash(dir, Str.concat(name, ".scuzz_verify")), if (ui) newVerifyUi() else newVerifyIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz fuzz --iterations 0 && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz fuzz --iterations 0 && scuzz run"))))
 

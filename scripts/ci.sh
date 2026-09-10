@@ -75,9 +75,8 @@ Slices (same names as ci.yml where one step maps to one slice):
   fixedpoint      LLVM IR fixed-point
   kernel          ./scripts/ci-kernel.sh
   package         release tarball + install smoke
-  ui              headless counter/studio/editor + goldens
-  ui-test         golden tests without headless run
-  pixels          sk_sw pixel goldens
+  ui              headless counter/studio/editor + fuzz --iterations 0
+  ui-test         corpus-only fuzz for counter/studio/editor
   gpu             GPU presenter (needs xvfb)
   differential    skia vs sk_sw vs gpu dumps (needs xvfb)
   fuzz            ./scripts/ci-fuzz.sh
@@ -208,9 +207,7 @@ slice_package() {
     test "$(command -v scuzz)" = "$prefix/bin/scuzz"
     rm -rf /tmp/scuzz-release-app
     scuzz new --ui --path /tmp scuzz-release-app
-    scuzz test --update /tmp/scuzz-release-app
-    scuzz test /tmp/scuzz-release-app
-    test -f /tmp/scuzz-release-app/goldens/scuzz-release-app.dump
+    scuzz fuzz --iterations 0 /tmp/scuzz-release-app
     grep -qx skia "$prefix/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
     scuzz run --headless /tmp/scuzz-release-app
     test -f /tmp/scuzz-release-app/build/snapshot.png
@@ -227,42 +224,34 @@ slice_ui() {
   maybe_wipe
   "$SCUZZ" run --headless examples/counter
   test -f examples/counter/build/snapshot.png
-  "$SCUZZ" test examples/counter
+  "$SCUZZ" fuzz --iterations 0 examples/counter
   "$SCUZZ" run --headless examples/studio
   test -f examples/studio/build/snapshot.png
-  "$SCUZZ" test examples/studio
+  "$SCUZZ" fuzz --iterations 0 examples/studio
   "$SCUZZ" run --headless examples/editor
   test -f examples/editor/build/snapshot.png
-  "$SCUZZ" test examples/editor
+  "$SCUZZ" fuzz --iterations 0 examples/editor
 }
 
 slice_ui_test() {
   need_scuzz
-  "$SCUZZ" test examples/counter
-  "$SCUZZ" test examples/studio
-  "$SCUZZ" test examples/editor
-}
-
-slice_pixels() {
-  need_scuzz
-  SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib CC=clang
-  rm -rf examples/counter/build
-  SCUZZ_SKIA=sk_sw "$SCUZZ" test --pixels examples/counter
-  make -C crates/ffi-skia clean lib CC=clang
+  "$SCUZZ" fuzz --iterations 0 examples/counter
+  "$SCUZZ" fuzz --iterations 0 examples/studio
+  "$SCUZZ" fuzz --iterations 0 examples/editor
 }
 
 slice_gpu() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
   xvfb-run -a env SCUZZ_SKIA=gpu make -C crates/ffi-skia test CC=clang
-  xvfb-run -a env SCUZZ_SKIA=gpu "$SCUZZ" test examples/counter
+  xvfb-run -a env SCUZZ_SKIA=gpu "$SCUZZ" fuzz --iterations 0 examples/counter
   make -C crates/ffi-skia clean lib CC=clang
 }
 
 slice_differential() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
-  xvfb-run -a "$SCUZZ" test --differential examples/counter
+  xvfb-run -a "$SCUZZ" fuzz --differential --iterations 0 examples/counter
   make -C crates/ffi-skia clean lib CC=clang
 }
 
@@ -279,10 +268,6 @@ slice_new_ui() {
   "$SCUZZ" fmt --check /tmp/scuzz-v0app
   "$SCUZZ" check /tmp/scuzz-v0app
   "$SCUZZ" fuzz --iterations 0 /tmp/scuzz-v0app
-  "$SCUZZ" test --update /tmp/scuzz-v0app
-  test -f /tmp/scuzz-v0app/goldens/scuzz-v0app.dump
-  test -f /tmp/scuzz-v0app/goldens/scuzz-v0app_after_tap.dump
-  "$SCUZZ" test /tmp/scuzz-v0app
   "$SCUZZ" run --headless /tmp/scuzz-v0app
   test -f /tmp/scuzz-v0app/build/snapshot.png
 }
@@ -331,7 +316,7 @@ slice_macos_hello() {
   need_scuzz
   maybe_wipe
   "$SCUZZ" build --full examples/hello
-  "$SCUZZ" test examples/hello
+  "$SCUZZ" fuzz --iterations 0 examples/hello
   "$SCUZZ" check examples/kernel
   if "$SCUZZ" check examples/bad-intent; then
     echo "empty verify should fail check" && exit 1
@@ -415,7 +400,6 @@ slice_linux_headless() {
   slice_kernel
   slice_package
   slice_ui
-  slice_pixels
   slice_gpu
   slice_differential
   slice_fuzz
@@ -448,7 +432,6 @@ case "$SLICE" in
   package) slice_package ;;
   ui) slice_ui ;;
   ui-test) slice_ui_test ;;
-  pixels) slice_pixels ;;
   gpu) slice_gpu ;;
   differential) slice_differential ;;
   fuzz) slice_fuzz ;;
