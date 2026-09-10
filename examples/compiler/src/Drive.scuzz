@@ -319,52 +319,33 @@ def fuzzCollectMan(dir: String, m: Man): IO[List[(String, String)]] =
   manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => fuzzCollectListed(dir, m.deps, ents)))
 
 def fuzzCollectListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => collectDeps(dir, deps, own).flatMap(files => fuzzSimFiles(dir, deps, files).flatMap(simmed => fuzzReadDrv(joinSlash(dir, "src")).flatMap(drv => fuzzCollectVer(dir, simmed, drv)))))
-
-def fuzzSimFiles(dir: String, deps: List[(String, String)], files: List[(String, String)]): IO[List[(String, String)]] =
-  if (List.isEmpty(files)) IO.pure(files) else fuzzSimHd(dir, deps, List.at(files, 0), List.tail(files))
-
-def fuzzSimHd(dir: String, deps: List[(String, String)], h: (String, String), rest: List[(String, String)]): IO[List[(String, String)]] =
-  h match {
-    case (stem, src) => fuzzSimPair(dir, deps, stem, src, rest)
-  }
-
-def fuzzSimPair(dir: String, deps: List[(String, String)], stem: String, src: String, rest: List[(String, String)]): IO[List[(String, String)]] =
-  fuzzSimOne(dir, deps, stem, src).flatMap(got => fuzzSimFiles(dir, deps, rest).flatMap(more => IO.pure((stem, got) :: more)))
-
-def fuzzSimOne(dir: String, deps: List[(String, String)], stem: String, src: String): IO[String] =
-  fuzzSimPath(joinSlash(joinSlash(dir, "src"), Str.concat(stem, ".scuzz_sim")), src).handleErrorWith(_ => fuzzSimDeps(dir, deps, stem, src))
-
-def fuzzSimPath(path: String, src: String): IO[String] =
-  Fs.read(path).flatMap(sim => fuzzSimApply(src, sim))
-
-def fuzzSimApply(src: String, sim: String): IO[String] =
-  IO.pure(Verify.applySim(src, sim))
-
-def fuzzSimDeps(dir: String, deps: List[(String, String)], stem: String, src: String): IO[String] =
-  if (List.isEmpty(deps)) IO.pure(src) else fuzzSimDepHd(dir, List.at(deps, 0), List.tail(deps), stem, src)
-
-def fuzzSimDepHd(dir: String, d: (String, String), rest: List[(String, String)], stem: String, src: String): IO[String] =
-  d match {
-    case (_name, path) => fuzzSimPath(joinSlash(joinSlash(joinSlash(dir, path), "src"), Str.concat(stem, ".scuzz_sim")), src).handleErrorWith(_ => fuzzSimDeps(dir, rest, stem, src))
-  }
-
-def fuzzReadDrv(srcDir: String): IO[String] =
-  Fs.list(srcDir).flatMap(ents => fuzzDrvGo(srcDir, ents, "")).handleErrorWith(_ => IO.pure(""))
-
-def fuzzDrvGo(srcDir: String, ents: List[(String, Bool)], acc: String): IO[String] =
-  if (List.isEmpty(ents)) IO.pure(acc) else fuzzDrvHd(srcDir, List.at(ents, 0), List.tail(ents), acc)
-
-def fuzzDrvHd(srcDir: String, ent: (String, Bool), rest: List[(String, Bool)], acc: String): IO[String] =
-  ent match {
-    case (name, isDir) => fuzzDrvPick(srcDir, name, isDir, rest, acc)
-  }
-
-def fuzzDrvPick(srcDir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: String): IO[String] =
-  if (isDir || !isDrivers(name)) fuzzDrvGo(srcDir, rest, acc) else Fs.read(joinSlash(srcDir, name)).flatMap(src => fuzzDrvGo(srcDir, rest, Str.concat(acc, src)))
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => collectDeps(dir, deps, own).flatMap(files => fuzzReadScenario(dir).flatMap(scn => fuzzCollectVer(dir, Verify.applyScenarioFiles(files, scn), Verify.scenarioWrap(scn)))))
 
 def isDrivers(name: String): Bool =
   Str.len(name) > 14 && Str.slice(name, Str.len(name) - 14, Str.len(name)) == ".scuzz_drivers"
+
+def fuzzReadScenario(dir: String): IO[String] =
+  fuzzScenarioSrcs(dir).flatMap(xs => fuzzReadScenarioGot(xs))
+
+def fuzzReadScenarioGot(xs: List[String]): IO[String] =
+  if (List.isEmpty(xs)) IO.pure("") else if (List.isEmpty(List.tail(xs))) IO.pure(List.at(xs, 0)) else IO.println(Verify.manyScenarioMsg()).flatMap(_ => IO.fail("scuzz check"))
+
+def fuzzScenarioSrcs(dir: String): IO[List[String]] =
+  Fs.list(dir).flatMap(ents => fuzzScnGo(dir, ents, Verify.noStr())).handleErrorWith(_ => IO.pure(Verify.noStr()))
+
+def fuzzScnGo(dir: String, ents: List[(String, Bool)], acc: List[String]): IO[List[String]] =
+  if (List.isEmpty(ents)) IO.pure(acc) else fuzzScnHd(dir, List.at(ents, 0), List.tail(ents), acc)
+
+def fuzzScnHd(dir: String, ent: (String, Bool), rest: List[(String, Bool)], acc: List[String]): IO[List[String]] =
+  ent match {
+    case (name, isDir) => fuzzScnPick(dir, name, isDir, rest, acc)
+  }
+
+def fuzzScnPick(dir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[String]): IO[List[String]] =
+  if (isDir) fuzzScnDir(dir, name, rest, acc) else if (!isScenario(name)) fuzzScnGo(dir, rest, acc) else Fs.read(joinSlash(dir, name)).flatMap(src => fuzzScnGo(dir, rest, src :: acc))
+
+def fuzzScnDir(dir: String, name: String, rest: List[(String, Bool)], acc: List[String]): IO[List[String]] =
+  if (skipWalk(name)) fuzzScnGo(dir, rest, acc) else Fs.list(joinSlash(dir, name)).flatMap(sub => fuzzScnGo(joinSlash(dir, name), sub, acc).flatMap(got => fuzzScnGo(dir, rest, got)))
 
 def fuzzCollectVer(dir: String, files: List[(String, String)], drv: String): IO[List[(String, String)]] =
   Fs.list(dir).flatMap(ents => emitFuzzVerGo(dir, ents, Manifest.noPairs()).flatMap(ver => fuzzCollectVerGot(files, ver, drv)))
@@ -393,7 +374,7 @@ def fuzzFiles(files: List[(String, String)], ver: List[(String, String)], drv: S
   List.concat(Verify.rewriteReqFiles(files), fuzzWrap(ver, drv, files))
 
 def fuzzWrap(ver: List[(String, String)], drv: String, files: List[(String, String)]): List[(String, String)] =
-  fuzzWrapGot(Str.concat(Verify.wrapFilesEns(ver, Verify.ensOfFiles(files)), drv))
+  fuzzWrapGot(Str.concat(drv, Verify.wrapFilesEns(ver, Verify.ensOfFiles(files))))
 
 def fuzzWrapGot(src: String): List[(String, String)] =
   if (src == "") Manifest.noPairs() else (Verify.wrapMod(), src) :: Manifest.noPairs()
@@ -604,6 +585,9 @@ def isVerify(name: String): Bool =
 def isIntent(name: String): Bool =
   Str.len(name) > 13 && Str.slice(name, Str.len(name) - 13, Str.len(name)) == ".scuzz_intent"
 
+def isScenario(name: String): Bool =
+  Str.len(name) > 15 && Str.slice(name, Str.len(name) - 15, Str.len(name)) == ".scuzz_scenario"
+
 def skipWalk(name: String): Bool =
   name == "build" || name == "corpus" || name == "goldens" || Str.len(name) > 0 && Str.charAt(name, 0) == 46
 
@@ -614,27 +598,13 @@ def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: 
   readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDriveNames(dir, json, deps, own, ents))
 
 def checkDriveNames(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  drvSrcsOf(joinSlash(dir, "src"), ents).flatMap(drvs => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGot(dir, json, deps, own, List.concat(Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)), Verify.drvNames(drvs)))))
+  fuzzReadScenario(dir).flatMap(scn => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGot(dir, json, deps, own, List.concat(Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)), Verify.scenarioDrvNames(scn)))))
 
 def checkDriveNamesGot(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], names: List[String]): IO[Unit] =
   checkDriveNamesRule(dir, json, deps, own, Verify.driveRule(names))
 
 def checkDriveNamesRule(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], msg: String): IO[Unit] =
   if (msg == "") checkDirVerify(dir, json, deps, own) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
-
-def drvSrcsOf(srcDir: String, ents: List[(String, Bool)]): IO[List[String]] =
-  if (List.isEmpty(ents)) IO.pure(Verify.noStr()) else drvSrcsHd(srcDir, List.at(ents, 0), List.tail(ents))
-
-def drvSrcsHd(srcDir: String, ent: (String, Bool), rest: List[(String, Bool)]): IO[List[String]] =
-  ent match {
-    case (name, isDir) => drvSrcsPick(srcDir, name, isDir, rest)
-  }
-
-def drvSrcsPick(srcDir: String, name: String, isDir: Bool, rest: List[(String, Bool)]): IO[List[String]] =
-  if (isDir || !isDrivers(name)) drvSrcsOf(srcDir, rest) else Fs.read(joinSlash(srcDir, name)).flatMap(src => drvSrcsCons(src, srcDir, rest))
-
-def drvSrcsCons(src: String, srcDir: String, rest: List[(String, Bool)]): IO[List[String]] =
-  drvSrcsOf(srcDir, rest).flatMap(names => IO.pure(src :: names))
 
 def checkDirVerify(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
   Fs.list(dir).flatMap(ents => checkVerifyGo(dir, "", json, deps, own, ents))
@@ -651,13 +621,19 @@ def checkVerifyHd(dir: String, rel: String, json: Bool, deps: List[(String, Stri
   }
 
 def checkVerifyPick(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], name: String, isDir: Bool, rest: List[(String, Bool)]): IO[Unit] =
-  if (isDir) checkVerifyDir(dir, rel, json, deps, own, name, rest) else if (isIntent(name)) IO.println(Verify.intentMsg(joinRel(rel, name))).flatMap(_ => IO.fail("scuzz check")) else if (!isVerify(name)) checkVerifyGo(dir, rel, json, deps, own, rest) else Fs.read(joinSlash(dir, name)).flatMap(src => checkVerifySrc(dir, rel, json, deps, own, joinRel(rel, name), src, rest))
+  if (isDir) checkVerifyDir(dir, rel, json, deps, own, name, rest) else if (isIntent(name)) IO.println(Verify.intentMsg(joinRel(rel, name))).flatMap(_ => IO.fail("scuzz check")) else if (isSimName(name)) IO.println(Verify.simLeftoverMsg(joinRel(rel, name))).flatMap(_ => IO.fail("scuzz check")) else if (isDrivers(name)) IO.println(Verify.drvLeftoverMsg(joinRel(rel, name))).flatMap(_ => IO.fail("scuzz check")) else if (isScenario(name)) Fs.read(joinSlash(dir, name)).flatMap(src => checkScenarioGot(dir, rel, json, deps, own, joinRel(rel, name), src, rest)) else if (!isVerify(name)) checkVerifyGo(dir, rel, json, deps, own, rest) else Fs.read(joinSlash(dir, name)).flatMap(src => checkVerifySrc(dir, rel, json, deps, own, joinRel(rel, name), src, rest))
 
 def checkVerifyDir(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], name: String, rest: List[(String, Bool)]): IO[Unit] =
   if (skipWalk(name)) checkVerifyGo(dir, rel, json, deps, own, rest) else Fs.list(joinSlash(dir, name)).flatMap(sub => checkVerifyGo(joinSlash(dir, name), joinRel(rel, name), json, deps, own, sub).flatMap(_ => checkVerifyGo(dir, rel, json, deps, own, rest)))
 
 def checkVerifySrc(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], file: String, src: String, rest: List[(String, Bool)]): IO[Unit] =
   checkVerifyGot(dir, rel, json, deps, own, rest, Verify.checkVerifyEns(src, file, Verify.ensOfFiles(own)))
+
+def checkScenarioGot(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], file: String, src: String, rest: List[(String, Bool)]): IO[Unit] =
+  collectDeps(dir, deps, own).flatMap(files => checkScenarioMsg(dir, rel, json, deps, own, rest, file, Verify.checkScenario(src, file, files)))
+
+def checkScenarioMsg(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], rest: List[(String, Bool)], file: String, msg: String): IO[Unit] =
+  if (msg == "scuzz check ok") checkVerifyGo(dir, rel, json, deps, own, rest) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
 
 def checkVerifyGot(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], rest: List[(String, Bool)], msg: String): IO[Unit] =
   if (msg == "scuzz check ok") checkVerifyGo(dir, rel, json, deps, own, rest) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
@@ -1224,7 +1200,7 @@ def fuzzDirBuild(dir: String, outDir: String, iterations: Int, seed: Int, replay
   fuzzCollect(dir).flatMap(files => emitDirAlways(dir, outDir, files).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => fuzzWriteTable(dir, outDir, files).flatMap(_ => fuzzLiveBuild(dir, outDir).flatMap(_ => fuzzLinked(dir, outDir, iterations, seed, replay, files, noFailFast, oracles))))))
 
 def fuzzWriteTable(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
-  fuzzVerSrcs(dir).flatMap(srcs => Fs.write(joinSlash(outDir, "drivers.txt"), Verify.nls(Verify.mapSpecE(Verify.workloadDefs(Verify.sortStrs(srcs), Verify.ensOfFiles(files)), Verify.ensOfFiles(files)))))
+  fuzzWorkloadSrcs(dir).flatMap(srcs => Fs.write(joinSlash(outDir, "drivers.txt"), Verify.nls(Verify.mapSpecE(Verify.workloadDefs(Verify.sortStrs(srcs), Verify.ensOfFiles(files)), Verify.ensOfFiles(files)))))
 
 def fuzzVerSrcs(dir: String): IO[List[String]] =
   Fs.list(dir).flatMap(ents => fuzzVerSrcGo(dir, ents, Verify.noStr())).handleErrorWith(_ => IO.pure(Verify.noStr()))
@@ -1238,7 +1214,10 @@ def fuzzVerSrcHd(dir: String, ent: (String, Bool), rest: List[(String, Bool)], a
   }
 
 def fuzzVerSrcPick(dir: String, name: String, isDir: Bool, rest: List[(String, Bool)], acc: List[String]): IO[List[String]] =
-  if (isDir) fuzzVerSrcDir(dir, name, rest, acc) else if (!isVerify(name) && !isDrivers(name)) fuzzVerSrcGo(dir, rest, acc) else Fs.read(joinSlash(dir, name)).flatMap(src => fuzzVerSrcGo(dir, rest, src :: acc))
+  if (isDir) fuzzVerSrcDir(dir, name, rest, acc) else if (!isVerify(name)) fuzzVerSrcGo(dir, rest, acc) else Fs.read(joinSlash(dir, name)).flatMap(src => fuzzVerSrcGo(dir, rest, src :: acc))
+
+def fuzzWorkloadSrcs(dir: String): IO[List[String]] =
+  fuzzVerSrcs(dir).flatMap(vers => fuzzReadScenario(dir).flatMap(scn => IO.pure(if (scn == "") vers else scn :: vers)))
 
 def fuzzVerSrcDir(dir: String, name: String, rest: List[(String, Bool)], acc: List[String]): IO[List[String]] =
   if (skipWalk(name)) fuzzVerSrcGo(dir, rest, acc) else Fs.list(joinSlash(dir, name)).flatMap(sub => fuzzVerSrcGo(joinSlash(dir, name), sub, acc).flatMap(got => fuzzVerSrcGo(dir, rest, got)))
@@ -1298,7 +1277,7 @@ def fuzzBody4(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
   fuzzSplit(job).flatMap(_ => fuzzReplayGo(job.exe, job.hasUi, job.outDir, job.seed, runs, FuzzAcc(0, 0, ""), job.uiEnv).flatMap(acc => fuzzAfterReplay(job, script, runs, acc)))
 
 def fuzzAfterReplay(job: FuzzJob, script: String, runs: List[FuzzRun], acc: FuzzAcc): IO[Unit] =
-  if (acc.fail > 0 && !job.noFailFast) fuzzDone(job, List.len(runs), acc.fail, acc.corpFail, acc.repro, emptyMut(Mutate.countFiles(job.files, job.oracles))) else fuzzVerSrcs(job.dir).flatMap(srcs => fuzzWarn(srcs).flatMap(_ => fuzzSearch(job, script, runs, Verify.workloadDefs(Verify.sortStrs(srcs), Verify.ensOfFiles(job.files)), 0, 0))).flatMap(fail => fuzzAfterSearch(job, script, runs, acc, fail))
+  if (acc.fail > 0 && !job.noFailFast) fuzzDone(job, List.len(runs), acc.fail, acc.corpFail, acc.repro, emptyMut(Mutate.countFiles(job.files, job.oracles))) else fuzzVerSrcs(job.dir).flatMap(vers => fuzzWarn(vers).flatMap(_ => fuzzWorkloadSrcs(job.dir).flatMap(srcs => fuzzSearch(job, script, runs, Verify.workloadDefs(Verify.sortStrs(srcs), Verify.ensOfFiles(job.files)), 0, 0)))).flatMap(fail => fuzzAfterSearch(job, script, runs, acc, fail))
 
 def fuzzWarn(srcs: List[String]): IO[Unit] =
   if (List.isEmpty(Verify.oracleNames(srcs)) && List.isEmpty(Verify.claimNames(srcs))) IO.println("scuzz fuzz: no author oracles; only universal oracles ran") else IO.pure(())
@@ -1313,38 +1292,13 @@ def emptyMut(sites: Int): FuzzMut =
   FuzzMut(0, 0, 0, 0, sites, 0)
 
 def fuzzSplit(job: FuzzJob): IO[Unit] =
-  if (!job.hasUi) IO.pure(()) else Fs.read(joinSlash(job.dir, "scuzz.toml")).flatMap(toml => fuzzSplitMan(job, Manifest.parse(toml)))
+  if (!job.hasUi) IO.pure(()) else fuzzHasSim(job.dir).flatMap(sim => if (sim) IO.pure(()) else fuzzSplitGo(job))
 
-def fuzzSplitMan(job: FuzzJob, m: Man): IO[Unit] =
-  fuzzHasSim(job.dir, m.deps).flatMap(sim => if (sim) IO.pure(()) else fuzzSplitGo(job))
-
-def fuzzHasSim(dir: String, deps: List[(String, String)]): IO[Bool] =
-  fuzzHasSimDir(joinSlash(dir, "src")).flatMap(hit => if (hit) IO.pure(true) else fuzzHasSimDeps(dir, deps))
-
-def fuzzHasSimDir(srcDir: String): IO[Bool] =
-  Fs.list(srcDir).flatMap(ents => fuzzHasSimDirGot(ents)).handleErrorWith(_ => IO.pure(false))
-
-def fuzzHasSimDirGot(ents: List[(String, Bool)]): IO[Bool] =
-  IO.pure(fuzzHasSimEnts(ents))
-
-def fuzzHasSimEnts(ents: List[(String, Bool)]): Bool =
-  if (List.isEmpty(ents)) false else fuzzHasSimHd(List.at(ents, 0), List.tail(ents))
-
-def fuzzHasSimHd(h: (String, Bool), rest: List[(String, Bool)]): Bool =
-  h match {
-    case (name, isDir) => if (!isDir && isSimName(name)) true else fuzzHasSimEnts(rest)
-  }
+def fuzzHasSim(dir: String): IO[Bool] =
+  fuzzReadScenario(dir).flatMap(scn => IO.pure(scn != ""))
 
 def isSimName(name: String): Bool =
   Str.len(name) > 10 && Str.slice(name, Str.len(name) - 10, Str.len(name)) == ".scuzz_sim"
-
-def fuzzHasSimDeps(dir: String, deps: List[(String, String)]): IO[Bool] =
-  if (List.isEmpty(deps)) IO.pure(false) else fuzzHasSimDepHd(dir, List.at(deps, 0), List.tail(deps))
-
-def fuzzHasSimDepHd(dir: String, d: (String, String), rest: List[(String, String)]): IO[Bool] =
-  d match {
-    case (_name, path) => fuzzHasSimDir(joinSlash(joinSlash(dir, path), "src")).flatMap(hit => if (hit) IO.pure(true) else fuzzHasSimDeps(dir, rest))
-  }
 
 def fuzzLiveExe(job: FuzzJob): String =
   exeName(joinSlash(job.outDir, "live"), job.name)
@@ -1415,7 +1369,8 @@ def fuzzAddSeed(runs: List[FuzzRun], seedsPath: String, line: String, hasUi: Boo
   if (line == "") runs else if (fuzzHasScript(runs, Str.concat(fuzzSeedScript(hasUi, line), Verify.nl()))) runs else List.concat(runs, fuzzSeedRun(seedsPath, line, hasUi) :: noRuns())
 
 def fuzzSeedScript(hasUi: Bool, line: String): String =
-  if (hasUi && Str.startsWith(line, "drive ")) Str.concat("pump\n", line) else line
+  if (hasUi && Str.startsWith(line, "drive ")) Str.concat("""pump
+""", line) else line
 
 def fuzzSeedRun(seedsPath: String, line: String, hasUi: Bool): FuzzRun =
   FuzzRun(seedsPath, "", Str.concat(fuzzSeedScript(hasUi, line), Verify.nl()), "", "")

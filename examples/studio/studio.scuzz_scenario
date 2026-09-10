@@ -1,3 +1,6 @@
+def setup(): IO[Unit] =
+  IO.pure(())
+
 def addItem(s: String): IO[Unit] =
   IO.pure(Tasks.noteAdd(s))
 
@@ -12,3 +15,4 @@ def flipItem(s: String): IO[Unit] =
 
 def clearItems(): IO[Unit] =
   IO.pure(Tasks.noteClear())
+

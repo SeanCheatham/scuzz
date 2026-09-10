@@ -98,7 +98,7 @@ Options:
       --full
           Force a full rebuild (ignore incremental fingerprint)
       --verify
-          Apply `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_verify` + residual `.require` / `where` (TestRuntime / fuzz graph)
+          Apply `*.scuzz_scenario` / `*.scuzz_verify` + residual `.require` / `where` (TestRuntime / fuzz graph)
   -h, --help
           Print help
 

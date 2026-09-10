@@ -1,16 +1,16 @@
 [signals]
-str[0] buf = "hello\nworld\n"
-str[1] orig = "hello\nworld\n"
-str[2] pathSig = "sample.txt"
+str[0] buf = "[package]\nname = \"editor\"\nversion = \"0.1.0\"\ndescription = \"Open a path from Sys.args, edit in View.editor, check JSON, save tabs\"\n\n[ui]\ndefault_runtime = \"desktop\"\nheadless_size = [960, 560]\nheadless_scale = 1.0\ntap_button = 3\n"
+str[1] orig = "[package]\nname = \"editor\"\nversion = \"0.1.0\"\ndescription = \"Open a path from Sys.args, edit in View.editor, check JSON, save tabs\"\n\n[ui]\ndefault_runtime = \"desktop\"\nheadless_size = [960, 560]\nheadless_scale = 1.0\ntap_button = 3\n"
+str[2] pathSig = "scuzz.toml"
 str[3] dirSig = "."
 int[4] dirty = 0
-list[5] paths = ["sample.txt"]
-list[6] bodies = ["hello\nworld\n"]
-list[7] origs = ["hello\nworld\n"]
-int[8] idx = 0
+list[5] paths = ["sample.txt", "scuzz.toml"]
+list[6] bodies = ["hello\nworld\n", "[package]\nname = \"editor\"\nversion = \"0.1.0\"\ndescription = \"Open a path from Sys.args, edit in View.editor, check JSON, save tabs\"\n\n[ui]\ndefault_runtime = \"desktop\"\nheadless_size = [960, 560]\nheadless_scale = 1.0\ntap_button = 3\n"]
+list[7] origs = ["hello\nworld\n", "[package]\nname = \"editor\"\nversion = \"0.1.0\"\ndescription = \"Open a path from Sys.args, edit in View.editor, check JSON, save tabs\"\n\n[ui]\ndefault_runtime = \"desktop\"\nheadless_size = [960, 560]\nheadless_scale = 1.0\ntap_button = 3\n"]
+int[8] idx = 1
 list[9] diags = []
 int[10] showDiags = 0
-list[11] tree = ["chrome.scuzz_verify", "sample.txt", "scuzz.toml", "src/", "src/Check.scuzz", "src/Chrome.scuzz", "src/Lsp.scuzz", "src/Lsp.scuzz_sim", "src/Main.scuzz", "src/Main.scuzz_sim"]
+list[11] tree = ["chrome.scuzz_verify", "editor.scuzz_scenario", "sample.txt", "scuzz.toml", "src/"]
 list[12] output = []
 int[13] showOut = 0
 str[14] findQ = ""
@@ -21,7 +21,7 @@ int[18] compOpen = 0
 int[19] hoverOpen = 0
 str[20] hoverTxt = "hover stub"
 list[21] comps = []
-list[22] openSig = ["src/"]
+list[22] openSig = []
 int[23] palOpen = 0
 list[24] palCmds = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix", "Save all", "Run", "Fuzz"]
 int[25] ctxOpen = 0
@@ -33,15 +33,10 @@ text:Files
 scroll:scroll
 list:list
 textbutton:chrome.scuzz_verify
+textbutton:editor.scuzz_scenario
 textbutton:sample.txt
 textbutton:scuzz.toml
 textbutton:src/
-textbutton:    Check.scuzz
-textbutton:    Chrome.scuzz
-textbutton:    Lsp.scuzz
-textbutton:    Lsp.scuzz_sim
-textbutton:    Main.scuzz
-textbutton:    Main.scuzz_sim
 button:Save
 outlined:Check
 outlined:Find
@@ -58,6 +53,8 @@ outlined:Fuzz
 list:list
 outlined:sample.txt
 textbutton:x sample.txt
+outlined:scuzz.toml
+textbutton:x scuzz.toml
 editor:editor
 overlay:0
 overlay:0
@@ -67,35 +64,32 @@ overlay:0
 
 [taps]
 0 chrome.scuzz_verify 36,70 168x40
-1 sample.txt 36,118 98x40
-2 scuzz.toml 36,166 98x40
-3 src/ 36,214 50x40
-4     Check.scuzz 36,262 126x40
-5     Chrome.scuzz 36,310 139x40
-6     Lsp.scuzz 36,358 106x40
-7     Lsp.scuzz_sim 36,406 138x40
-8     Main.scuzz 36,454 116x40
-9     Main.scuzz_sim 36,502 148x40
-10 Save 309,36 59x40
-11 Check 376,36 68x40
-12 Find 452,36 54x40
-13 Complete 514,36 93x40
-14 Hover 615,36 67x40
-15 Format 690,36 75x40
-16 Def 773,36 49x40
-17 Rename 830,36 84x40
-18 Fix 309,84 48x40
-19 Palette 365,84 73x40
-20 Save all 446,84 80x40
-21 Run 534,84 52x40
-22 Fuzz 594,84 55x40
-23 sample.txt 321,168 98x40
-24 x sample.txt 427,168 110x40
+1 editor.scuzz_scenario 36,118 176x40
+2 sample.txt 36,166 98x40
+3 scuzz.toml 36,214 98x40
+4 src/ 36,262 50x40
+5 Save 309,36 59x40
+6 Check 376,36 68x40
+7 Find 452,36 54x40
+8 Complete 514,36 93x40
+9 Hover 615,36 67x40
+10 Format 690,36 75x40
+11 Def 773,36 49x40
+12 Rename 830,36 84x40
+13 Fix 309,84 48x40
+14 Palette 365,84 73x40
+15 Save all 446,84 80x40
+16 Run 534,84 52x40
+17 Fuzz 594,84 55x40
+18 sample.txt 321,168 98x40
+19 x sample.txt 427,168 110x40
+20 scuzz.toml 321,240 98x40
+21 x scuzz.toml 427,240 110x40
 
 [fields]
 
 [editor]
-0* caret=12 sel=12:12 sx=0 sy=0 lines=3 "hello\nworld\n"
+0* caret=12 sel=12:12 sx=0 sy=0 lines=11 "[package]\nname = \"editor\"\nversion = \"0.1.0\"\ndescription = \"Open a path from Sys.args, edit in View.editor, check JSON, save tabs\"\n\n[ui]\ndefault_runtime = \"desktop\"\nheadless_size = [960, 560]\nheadless_scale = 1.0\ntap_button = 3\n"
 
 [splits]
 0 frac=28
@@ -111,4 +105,4 @@ overlay:0
 0 scroll
 
 [last_hit]
-xy 61.0 234.0 -> textbutton:src/
+xy 85.0 234.0 -> textbutton:scuzz.toml

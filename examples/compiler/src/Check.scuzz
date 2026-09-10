@@ -386,7 +386,16 @@ def resolveGenericKitSig(f: String, args: List[Expr], env: List[(String, String)
   if (List.isEmpty(args)) ok(funTyFrom(Kits.kitParamsOf(kit), Kits.kitRetOf(kit))) else if (List.len(args) != List.len(Kits.kitParamsOf(kit))) bad(Str.concat(f, " has wrong arity"), span) else genericArgs(f, ["A", "B", "E"], Kits.kitParamsOf(kit), Kits.kitRetOf(kit), args, env, funs, ens, span)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (Str.startsWith(f, "Signal.") || f == "IO.attempt") resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, Kits.find(f))
+  if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.") || f == "IO.attempt") resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, Kits.find(f))
+
+def resolveScenarioCtx(funs: List[Fun], span: (String, Int)): Out =
+  resolveScenarioCtx2(findFun(funs, "setup"), span)
+
+def resolveScenarioCtx2(hit: List[Fun], span: (String, Int)): Out =
+  if (List.isEmpty(hit)) bad("Scenario.context needs a setup entrypoint", span) else resolveScenarioCtx3(List.at(hit, 0), span)
+
+def resolveScenarioCtx3(d: Fun, span: (String, Int)): Out =
+  if (!isIo(d.ret)) bad("setup must return IO", span) else ok(ioOk(d.ret))
 
 def resolveKnownKit(f: String, args: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], span: (String, Int), kit: Kit): Out =
   if (List.isEmpty(args) && !List.isEmpty(Kits.kitParamsOf(kit))) ok(funTyFrom(Kits.kitParamsOf(kit), Kits.kitRetOf(kit))) else if (!Kits.arityOf(kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnown(f, Kits.wantOf(kit, List.len(args)), Kits.kitRetOf(kit), args, env, funs, ens, span)

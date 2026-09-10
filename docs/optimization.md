@@ -18,18 +18,18 @@ Schedule search under fuzz is already the correctness half (`vision.md`). Optimi
 
 Once strategies can differ, performance is a searchable space. Fuzz is the safety net. Think offline PGO/autotuning, not JIT. Measure ahead of time on the target machine. Ship a static tuned build.
 
-A stem-paired sidecar, following the existing overlay convention:
+A scenario sidecar, following the existing overlay convention:
 
 ```text
 src/
-  Todo.scuzz          # meaning (defs + properties)
-  Todo.scuzz_sim      # test-time substitution
-  Todo.scuzz_tune     # machine-specific execution strategy
+  Todo.scuzz              # meaning (defs + properties)
+todo.scuzz_scenario        # test-time world
+  Todo.scuzz_tune         # machine-specific execution strategy
 ```
 
 Design constraints:
 
-- **Semantics-preserving by construction.** The tune vocabulary expresses strategy knobs only: fork fan-out, fiber-to-thread mapping, fusion/inlining/memoization decisions, reconciliation batch sizes. It cannot express a meaning change. Sim overlays are limited the same way: same name, same type, same purity.
+- **Semantics-preserving by construction.** The tune vocabulary expresses strategy knobs only: fork fan-out, fiber-to-thread mapping, fusion/inlining/memoization decisions, reconciliation batch sizes. It cannot express a meaning change. Scenario replacements are limited the same way: same name, same type, same purity.
 - **Non-load-bearing.** Delete the file and the default build stays correct. Tune files are per-target-machine output artifacts, not source of truth. Regenerate them. Do not migrate them.
 - **Fuzz-gated.** A tuned build must replay the fuzz corpus (including schedule seeds). Observable outputs must match the default build. Properties must not fail.
 

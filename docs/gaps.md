@@ -47,6 +47,8 @@ These gaps keep the distinctive claims kernel-shaped. Close them in this order.
 
 6. **Source-region coverage** — Campaign `summary.toml` reports original function locations and reached flags. It maps verification locations back to live definitions. Simulation replacements and mutant probes do not count as live body hits. `Property.sometimes` and dump novelty still direct search. Open: branch coverage and typed session output.
 
+7. **Scenario initialization and lifetime** — In: one `*.scuzz_scenario` per project. It owns replacements, zero-arg `setup`, typed context, drivers, and resource cleanup. `*.scuzz_verify` keeps app contracts across worlds. Setup runs once per execution with faults held. Drivers share the context after readiness. `Sys.exec` / `Sys.spawn` stay sealed. Proof: `examples/io` replaces `Flow.openStore`, setup returns `World`, drivers take that context, and `setupRan` reads `Timeline.driveHas(..., "setup")`. Residual: generated setup inputs, multiple named scenarios, and campaign selection.
+
 ### Table-stakes
 
 Needed before a real CLI, server, or desktop app stays.
@@ -63,7 +65,7 @@ Needed before a real CLI, server, or desktop app stays.
 Do not start these before thesis-critical gaps close.
 
 - **Stable inject keys** — `tap N` / `scroll N` follow a11y preorder. A refactor can miss a stored corpus entry. Named control keys for inject stay after named claim observations.
-- **Simulation world** — TestRuntime seals the wire (no live sockets; Nth Fs / Net / Queue fault; PCT on fibers; Clock and Fs fakes). Clock skew, partitions, and a model to relate against stay later.
+- **Simulation faults and multiple worlds** — TestRuntime seals the wire (no live sockets; Nth Fs / Net / Queue fault; PCT on fibers; Clock and Fs fakes). The single scenario lifecycle is in (gap 7). Generated setup inputs, multiple named scenarios, campaign selection, clock skew, partitions, and a model to relate against stay later.
 - **Mutation depth** — Mutation flips ops, swaps `if` arms, swaps tap handler bodies, and walks impl methods. Inert mutants stay unreported. Semantic mutants stay later.
 - **Memory** — Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated until panic sweep or process exit. No cycle collector.
 - **Dependency forms beyond `path`** — Path deps only (`Manifest.scuzz`). Git, versioned, and hosted artifacts are direction. There is no registry. Revisit after path deps and file-as-module stay the reuse story. A lockfile identity can land before a registry.

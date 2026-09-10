@@ -596,6 +596,222 @@ def pickSim(d: Fun, sim: List[Fun]): Fun =
 def pickSim1(d: Fun, s: Fun, rest: List[Fun]): Fun =
   if (d.name == s.name) s else pickSim(d, rest)
 
+def hasDot(name: String): Bool =
+  findIdx(name, ".", 0) >= 0
+
+def replMod(name: String): String =
+  replSplit(name, findIdx(name, ".", 0), true)
+
+def replLocal(name: String): String =
+  replSplit(name, findIdx(name, ".", 0), false)
+
+def replSplit(name: String, i: Int, left: Bool): String =
+  if (i < 0) if (left) "" else name else if (left) Str.slice(name, 0, i) else Str.slice(name, i + 1, Str.len(name))
+
+def applyScenarioFiles(files: List[(String, String)], src: String): List[(String, String)] =
+  if (src == "") files else applyScenarioGo(files, replFuns(Parse.parse(Lexer.lex(src))))
+
+def replFuns(p: Prog): List[Fun] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => replDefs(defs)
+  }
+
+def replDefs(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else replDefs1(List.at(ds, 0), List.tail(ds))
+
+def replDefs1(d: Fun, rest: List[Fun]): List[Fun] =
+  if (hasDot(d.name)) d :: replDefs(rest) else replDefs(rest)
+
+def applyScenarioGo(files: List[(String, String)], repls: List[Fun]): List[(String, String)] =
+  if (List.isEmpty(files)) files else applyScenarioHd(List.at(files, 0), List.tail(files), repls)
+
+def applyScenarioHd(h: (String, String), rest: List[(String, String)], repls: List[Fun]): List[(String, String)] =
+  h match {
+    case (stem, src) => applyScenarioStem(stem, src, rest, repls, replsFor(stem, repls))
+  }
+
+def applyScenarioStem(stem: String, src: String, rest: List[(String, String)], repls: List[Fun], locals: List[Fun]): List[(String, String)] =
+  (stem, if (List.isEmpty(locals)) src else applySimLive(Parse.parse(Lexer.lex(src)), locals)) :: applyScenarioGo(rest, repls)
+
+def replsFor(stem: String, repls: List[Fun]): List[Fun] =
+  if (List.isEmpty(repls)) noFun() else replsFor1(List.at(repls, 0), List.tail(repls), stem)
+
+def replsFor1(d: Fun, rest: List[Fun], stem: String): List[Fun] =
+  if (replMod(d.name) == stem) localRepl(d) :: replsFor(stem, rest) else replsFor(stem, rest)
+
+def localRepl(d: Fun): Fun =
+  d match {
+    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, replLocal(name), ts, ps, ret, body, mod, off)
+  }
+
+def scenarioWrap(src: String): String =
+  if (src == "") "" else scenarioWrapProg(Parse.parse(Lexer.lex(src)))
+
+def scenarioWrapProg(p: Prog): String =
+  p match {
+    case Prog(_, enums, _, _, _, _, defs, _, _) => Parse.pretty(Prog("", enums, Parse.noAl(), Parse.noTr(), Parse.noIm(), Parse.noImp(), wrapScenarioDefs(defs, ctxTyOf(defs)), "", Expr.EUnit))
+  }
+
+def ctxTyOf(ds: List[Fun]): String =
+  ctxTyHit(setupOf(ds))
+
+def setupOf(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else setupOf1(List.at(ds, 0), List.tail(ds))
+
+def setupOf1(d: Fun, rest: List[Fun]): List[Fun] =
+  if (!d.priv && d.name == "setup") d :: noFun() else setupOf(rest)
+
+def ctxTyHit(hit: List[Fun]): String =
+  if (List.isEmpty(hit)) "" else ctxTyFun(List.at(hit, 0))
+
+def ctxTyFun(d: Fun): String =
+  if (Check.isIo(d.ret)) Check.ioOk(d.ret) else ""
+
+def isCtxTy(t: String): Bool =
+  t != "" && t != "Unit" && t != "Int" && t != "String" && t != "Bool" && !isListTy(t)
+
+def wrapScenarioDefs(ds: List[Fun], ctxTy: String): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else List.concat(wrapScenarioOne(List.at(ds, 0), ctxTy), wrapScenarioDefs(List.tail(ds), ctxTy))
+
+def wrapScenarioOne(d: Fun, ctxTy: String): List[Fun] =
+  if (hasDot(d.name)) noFun() else if (d.priv || d.name == "setup" || !isCtxDriver(d, ctxTy)) d :: noFun() else wrapCtxDriver(d)
+
+def isCtxDriver(d: Fun, ctxTy: String): Bool =
+  isCtxTy(ctxTy) && Check.isIo(d.ret) && !d.priv && !List.isEmpty(d.params) && headTy(d.params) == ctxTy
+
+def headTy(ps: List[Param]): String =
+  if (List.isEmpty(ps)) "" else List.at(ps, 0) match {
+  case Param(_, ty, _, _) => ty
+}
+
+def wrapCtxDriver(d: Fun): List[Fun] =
+  d match {
+    case Fun(_, name, ts, ps, ret, body, _, off) => Fun(true, Str.concat("_scn_", name), ts, ps, ret, body, "", off) :: Fun(false, name, ts, List.tail(ps), ret, wrapCall(d), "", off) :: noFun()
+  }
+
+def wrapCall(d: Fun): Expr =
+  Expr.ECall(Str.concat("_scn_", d.name), Expr.ECall("Scenario.context", noExpr(), d.off) :: paramVars(List.tail(d.params), d.off), d.off)
+
+def paramVars(ps: List[Param], off: Int): List[Expr] =
+  if (List.isEmpty(ps)) noExpr() else paramVar(List.at(ps, 0), off) :: paramVars(List.tail(ps), off)
+
+def paramVar(p: Param, off: Int): Expr =
+  p match {
+    case Param(n, _, _, _) => Expr.EVar(n, off)
+  }
+
+def scenarioDrvNames(src: String): List[String] =
+  if (src == "") noStr() else scenarioDrvNamesGo(Parse.parse(Lexer.lex(src)))
+
+def scenarioDrvNamesGo(p: Prog): List[String] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => scenarioIoNames(defs)
+  }
+
+def scenarioIoNames(ds: List[Fun]): List[String] =
+  if (List.isEmpty(ds)) noStr() else scenarioIoNames1(List.at(ds, 0), List.tail(ds))
+
+def scenarioIoNames1(d: Fun, rest: List[Fun]): List[String] =
+  if (!d.priv && d.name != "setup" && !hasDot(d.name) && ioRet(d)) d.name :: scenarioIoNames(rest) else scenarioIoNames(rest)
+
+def simLeftoverMsg(file: String): String =
+  Str.concat(file, ":1:1: error: leftover *.scuzz_sim; move replacements into *.scuzz_scenario or delete the file")
+
+def drvLeftoverMsg(file: String): String =
+  Str.concat(file, ":1:1: error: leftover *.scuzz_drivers; move drivers into *.scuzz_scenario or delete the file")
+
+def manyScenarioMsg(): String =
+  "scuzz.toml:1:1: error: at most one *.scuzz_scenario file is allowed"
+
+def checkScenario(src: String, file: String, live: List[(String, String)]): String =
+  if (isBlank(src)) emptyScenario(file) else checkScenarioProg(src, file, live, Parse.parse(Lexer.lex(src)))
+
+def emptyScenario(file: String): String =
+  Str.concat(file, ":1:1: error: scenario file needs a setup entrypoint")
+
+def checkScenarioProg(src: String, file: String, live: List[(String, String)], p: Prog): String =
+  if (p.main != "") Str.concat(file, ":1:1: error: scenario file must not define @main") else if (!List.isEmpty(p.aliases)) Str.concat(file, ":1:1: error: scenario file must not define aliases") else if (!List.isEmpty(p.traits)) Str.concat(file, ":1:1: error: scenario file must not define traits") else if (!List.isEmpty(p.impls)) Str.concat(file, ":1:1: error: scenario file must not define impls") else if (!List.isEmpty(p.imps)) Str.concat(file, ":1:1: error: scenario file must not define imports") else checkScenarioBody(src, file, live, p)
+
+def checkScenarioBody(src: String, file: String, live: List[(String, String)], p: Prog): String =
+  if (defsHaveForbid(p.defs) || exprHasForbid(p.body)) Str.concat(file, ":1:1: error: scenario bodies must not call Property.* or .require") else checkScenarioSetup(src, file, live, p)
+
+def checkScenarioSetup(src: String, file: String, live: List[(String, String)], p: Prog): String =
+  checkScenarioSetup2(src, file, live, p, setupOf(p.defs))
+
+def checkScenarioSetup2(src: String, file: String, live: List[(String, String)], p: Prog, setups: List[Fun]): String =
+  if (List.isEmpty(setups)) emptyScenario(file) else if (!List.isEmpty(List.tail(setups))) Str.concat(file, ":1:1: error: scenario file must define one setup") else checkScenarioSetup3(src, file, live, p, List.at(setups, 0))
+
+def checkScenarioSetup3(src: String, file: String, live: List[(String, String)], p: Prog, d: Fun): String =
+  if (!Check.isIo(d.ret)) atLoc(file, src, d.off, "setup must return IO") else if (!List.isEmpty(d.params)) atLoc(file, src, d.off, "setup takes no generated params") else checkScenarioPublics(src, file, live, p, ctxTyFun(d), p.defs)
+
+def checkScenarioPublics(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, ds: List[Fun]): String =
+  if (List.isEmpty(ds)) checkScenarioReplDup(src, file, p) else checkScenarioPub(src, file, live, p, ctxTy, List.at(ds, 0), List.tail(ds))
+
+def checkScenarioPub(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun]): String =
+  if (d.priv) checkScenarioPublics(src, file, live, p, ctxTy, rest) else checkScenarioPub2(src, file, live, p, ctxTy, d, rest)
+
+def checkScenarioPub2(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun]): String =
+  if (d.name == "setup") checkScenarioPublics(src, file, live, p, ctxTy, rest) else if (hasDot(d.name)) checkScenarioRepl(src, file, live, p, ctxTy, d, rest) else if (Check.isIo(d.ret)) checkScenarioDrv(src, file, live, p, ctxTy, d, rest) else atLoc(file, src, d.off, Str.concat("public def ", Str.concat(d.name, " is not setup, a replacement, or a driver")))
+
+def checkScenarioRepl(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun]): String =
+  if (!Check.isIo(d.ret)) atLoc(file, src, d.off, "replacement must be IO") else checkScenarioRepl2(src, file, live, p, ctxTy, d, rest, liveFunOf(live, replMod(d.name), replLocal(d.name)))
+
+def checkScenarioRepl2(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun], hit: List[Fun]): String =
+  if (List.isEmpty(hit)) atLoc(file, src, d.off, Str.concat("replacement ", Str.concat(d.name, " has no production target"))) else checkScenarioRepl3(src, file, live, p, ctxTy, d, rest, List.at(hit, 0))
+
+def checkScenarioRepl3(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun], liveD: Fun): String =
+  if (!Check.isIo(liveD.ret)) atLoc(file, src, d.off, Str.concat("cannot replace pure helper ", d.name)) else if (isViewOrSig(liveD.ret)) atLoc(file, src, d.off, Str.concat("cannot replace View or Signal ", d.name)) else if (!sigEq(d, liveD)) atLoc(file, src, d.off, Str.concat("replacement ", Str.concat(d.name, " signature does not match production"))) else checkScenarioPublics(src, file, live, p, ctxTy, rest)
+
+def isViewOrSig(t: String): Bool =
+  t == "View" || Str.startsWith(t, "Signal")
+
+def sigEq(a: Fun, b: Fun): Bool =
+  a.ret == b.ret && paramTysEq(a.params, b.params)
+
+def paramTysEq(a: List[Param], b: List[Param]): Bool =
+  List.len(a) == List.len(b) && paramTysEqGo(a, b)
+
+def paramTysEqGo(a: List[Param], b: List[Param]): Bool =
+  if (List.isEmpty(a)) true else headTy(a) == headTy(b) && paramTysEq(List.tail(a), List.tail(b))
+
+def liveFunOf(files: List[(String, String)], mod: String, name: String): List[Fun] =
+  liveFunGo(liveFuns(files), mod, name)
+
+def liveFuns(files: List[(String, String)]): List[Fun] =
+  if (List.isEmpty(files)) noFun() else liveFunsHd(List.at(files, 0), List.tail(files))
+
+def liveFunsHd(h: (String, String), rest: List[(String, String)]): List[Fun] =
+  h match {
+    case (stem, src) => List.concat(Parse.stampFuns(stem, Parse.parse(Lexer.lex(src)).defs), liveFuns(rest))
+  }
+
+def liveFunGo(ds: List[Fun], mod: String, name: String): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else liveFunGo1(List.at(ds, 0), List.tail(ds), mod, name)
+
+def liveFunGo1(d: Fun, rest: List[Fun], mod: String, name: String): List[Fun] =
+  if (d.name == name && d.mod == mod) d :: noFun() else liveFunGo(rest, mod, name)
+
+def checkScenarioDrv(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun]): String =
+  if (isCtxTy(ctxTy) && (List.isEmpty(d.params) || headTy(d.params) != ctxTy)) atLoc(file, src, d.off, Str.concat("driver ", Str.concat(d.name, Str.concat(" must take ", Str.concat(ctxTy, " as the first param"))))) else checkScenarioDrv2(src, file, live, p, ctxTy, d, rest, drvGenPs(d.params, ctxTy))
+
+def checkScenarioDrv2(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun], ps: List[Param]): String =
+  if (List.len(ps) > 3 || !allFriendly(ps, ensOfProg(p)) || !unaryAdtOk(ps) || !allSimpleWhere(ps)) atLoc(file, src, d.off, Str.concat("drive ", Str.concat(d.name, " params must be generator-friendly (at most 3; ADT or List only as the sole param)"))) else checkScenarioPublics(src, file, live, p, ctxTy, rest)
+
+def drvGenPs(ps: List[Param], ctxTy: String): List[Param] =
+  if (isCtxTy(ctxTy) && !List.isEmpty(ps) && headTy(ps) == ctxTy) List.tail(ps) else ps
+
+def checkScenarioReplDup(src: String, file: String, p: Prog): String =
+  checkScenarioReplDup2(src, file, p, dupName(sortStrs(replTargets(replFuns(p)))))
+
+def replTargets(ds: List[Fun]): List[String] =
+  if (List.isEmpty(ds)) noStr() else List.at(ds, 0).name :: replTargets(List.tail(ds))
+
+def checkScenarioReplDup2(src: String, file: String, p: Prog, dup: String): String =
+  if (dup != "") Str.concat(file, Str.concat(":1:1: error: replacement ", Str.concat(dup, " is declared more than once"))) else checkScenarioFmt(src, file, p)
+
+def checkScenarioFmt(src: String, file: String, p: Prog): String =
+  if (Parse.pretty(p) == src) "scuzz check ok" else fmtMsg(file)
+
 def noExpr(): List[Expr] =
   []
 
@@ -1198,14 +1414,19 @@ def workloadDefs(srcs: List[String], ens: List[En]): List[Fun] =
 
 def workloadProg(p: Prog, ens: List[En]): List[Fun] =
   p match {
-    case Prog(_, _, _, _, _, _, defs, _, _) => workloadFuns(defs, ens)
+    case Prog(_, _, _, _, _, _, defs, _, _) => workloadFuns(defs, ens, ctxTyOf(defs))
   }
 
-def workloadFuns(ds: List[Fun], ens: List[En]): List[Fun] =
-  if (List.isEmpty(ds)) noFun() else workloadFun(List.at(ds, 0), List.tail(ds), ens)
+def workloadFuns(ds: List[Fun], ens: List[En], ctxTy: String): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else workloadFun(List.at(ds, 0), List.tail(ds), ens, ctxTy)
 
-def workloadFun(d: Fun, rest: List[Fun], ens: List[En]): List[Fun] =
-  if (isDrive(d, ens) || !d.priv && Check.isIo(d.ret) && List.len(d.params) <= 3 && allFriendly(d.params, ens) && unaryAdtOk(d.params) && allSimpleWhere(d.params)) d :: workloadFuns(rest, ens) else workloadFuns(rest, ens)
+def workloadFun(d: Fun, rest: List[Fun], ens: List[En], ctxTy: String): List[Fun] =
+  if (d.name == "setup" || hasDot(d.name)) workloadFuns(rest, ens, ctxTy) else if (isDrive(d, ens) || !d.priv && Check.isIo(d.ret) && List.len(drvGenPs(d.params, ctxTy)) <= 3 && allFriendly(drvGenPs(d.params, ctxTy), ens) && unaryAdtOk(drvGenPs(d.params, ctxTy)) && allSimpleWhere(drvGenPs(d.params, ctxTy))) stripCtxFun(d, ctxTy) :: workloadFuns(rest, ens, ctxTy) else workloadFuns(rest, ens, ctxTy)
+
+def stripCtxFun(d: Fun, ctxTy: String): Fun =
+  d match {
+    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, drvGenPs(ps, ctxTy), ret, body, mod, off)
+  }
 
 def generatedDrive(ds: List[Fun], ens: List[En], seed: Int): String =
   if (List.isEmpty(ds)) "" else generatedEligible(List.at(ds, seed % List.len(ds)), ens, seed)

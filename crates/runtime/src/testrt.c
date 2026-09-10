@@ -229,9 +229,46 @@ static void fault_arm_from_env(void) {
     fault_decode_seed(atoi(seed_s));
 }
 
+static int g_fault_hold;
+static void *g_scenario_setup;
+static void *g_scenario_ctx;
+
+void sz_testrt_fault_hold(void) { g_fault_hold = 1; }
+
+void sz_testrt_fault_release(void) { g_fault_hold = 0; }
+
+void sz_scenario_register_setup(void *fn) { g_scenario_setup = fn; }
+
+void *sz_scenario_context(void) { return g_scenario_ctx; }
+
+void sz_scenario_run_setup(void) {
+  SzIo *io;
+  SzIoResult r;
+  if (!g_scenario_setup)
+    return;
+  io = ((SzIo * (*)(void)) g_scenario_setup)();
+  r = sz_io_unsafe_run(io);
+  if (!r.ok) {
+    fprintf(stderr, "scuzz: scenario setup failed: %s\n",
+            r.error ? sz_string_cstr(r.error->message) : "unknown");
+    sz_panic("scenario setup failed");
+  }
+  g_scenario_ctx = r.value;
+  if (g_scenario_ctx)
+    sz_retain(g_scenario_ctx);
+  sz_timeline_set_drive("setup");
+  {
+    /* UI first paint records this drive. An empty view is not a workload
+     * state. IO drive scripts have no paint, so they snapshot now. */
+    const char *ui = getenv("SCUZZ_UI_RUNTIME");
+    if (!(ui && ui[0]))
+      sz_property_session_step();
+  }
+}
+
 int sz_testrt_fault_tick(int kind) {
   int *c;
-  if (!g_fault_kind || g_fault_n <= 0 || kind != g_fault_kind)
+  if (g_fault_hold || !g_fault_kind || g_fault_n <= 0 || kind != g_fault_kind)
     return 0;
   if (kind == SZ_FAULT_FS)
     c = &g_fault_count_fs;
@@ -2685,6 +2722,7 @@ void sz_testrt_reset(void) {
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
   g_fault_fail_msg = NULL;
+  g_fault_hold = 0;
   g_idle_have = 0;
   g_idle_bytes = 0;
   g_idle_count = 0;
@@ -3700,13 +3738,29 @@ SzVerdict *sz_verdict_any(void *tl, void *fnp, void *envp) {
                          "no state satisfied the predicate");
 }
 
-/* Fold: the needle stays visible in the a11y dump at every state. */
+static int tl_a11y_empty(SzTlState *s) {
+  const char *p;
+  if (!s || !s->a11y)
+    return 1;
+  for (p = s->a11y; *p; p++) {
+    if (*p != ' ' && *p != '\n' && *p != '\r' && *p != '\t')
+      return 0;
+  }
+  return 1;
+}
+
+/* Fold: the needle stays visible in the a11y dump at every state that has a
+ * view tree. Setup states before Ui.run have no a11y. They do not fail this
+ * fold. */
 SzVerdict *sz_verdict_always_has(void *tl, SzString *needle) {
   SzTimeline *t = (SzTimeline *)tl;
   int i;
   if (!t)
     return sz_verdict_ok();
   for (i = 0; i < t->n; i++) {
+    SzTlState *s = tl_at(tl, i);
+    if (tl_a11y_empty(s))
+      continue;
     if (!sz_timeline_a11y_has(tl, i, needle))
       return sz_verdict_fail(i, "needle not visible at this state");
   }

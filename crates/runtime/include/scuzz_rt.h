@@ -1182,6 +1182,11 @@ int64_t sz_drive_parse_bool(const char *tok);
 void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn);
 void sz_driver_run_line(const char *spec);
 void sz_driver_run_script(const char *path);
+void sz_scenario_register_setup(void *fn);
+void *sz_scenario_context(void);
+void sz_scenario_run_setup(void);
+void sz_testrt_fault_hold(void);
+void sz_testrt_fault_release(void);
 
 /* Entrypoint helper used by @main codegen */
 int sz_runtime_main_args(SzIo *program, int argc, char **argv);

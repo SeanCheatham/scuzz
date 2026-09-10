@@ -4089,6 +4089,11 @@ static void *sz_runtime_main_worker(void *arg) {
     }
   }
   {
+    sz_testrt_fault_hold();
+    sz_scenario_run_setup();
+    sz_testrt_fault_release();
+  }
+  {
     /* Drive-script mode: registered oracles run; @main does not.
      * Fuzz probes of a large @main (cli-ok) must not double-release. */
     const char *ds = getenv("SCUZZ_DRIVE_SCRIPT");

@@ -10,7 +10,7 @@ list[7] origs = ["hello\nworld\n"]
 int[8] idx = 0
 list[9] diags = []
 int[10] showDiags = 0
-list[11] tree = ["chrome.scuzz_verify", "sample.txt", "scuzz.toml", "src/"]
+list[11] tree = ["chrome.scuzz_verify", "editor.scuzz_scenario", "sample.txt", "scuzz.toml", "src/"]
 list[12] output = []
 int[13] showOut = 0
 str[14] findQ = ""
@@ -33,6 +33,7 @@ text:Files
 scroll:scroll
 list:list
 textbutton:chrome.scuzz_verify
+textbutton:editor.scuzz_scenario
 textbutton:sample.txt
 textbutton:scuzz.toml
 textbutton:src/
@@ -61,24 +62,25 @@ overlay:0
 
 [taps]
 0 chrome.scuzz_verify 36,70 168x40
-1 sample.txt 36,118 98x40
-2 scuzz.toml 36,166 98x40
-3 src/ 36,214 50x40
-4 Save 309,36 59x40
-5 Check 376,36 68x40
-6 Find 452,36 54x40
-7 Complete 514,36 93x40
-8 Hover 615,36 67x40
-9 Format 690,36 75x40
-10 Def 773,36 49x40
-11 Rename 830,36 84x40
-12 Fix 309,84 48x40
-13 Palette 365,84 73x40
-14 Save all 446,84 80x40
-15 Run 534,84 52x40
-16 Fuzz 594,84 55x40
-17 sample.txt 321,168 98x40
-18 x sample.txt 427,168 110x40
+1 editor.scuzz_scenario 36,118 176x40
+2 sample.txt 36,166 98x40
+3 scuzz.toml 36,214 98x40
+4 src/ 36,262 50x40
+5 Save 309,36 59x40
+6 Check 376,36 68x40
+7 Find 452,36 54x40
+8 Complete 514,36 93x40
+9 Hover 615,36 67x40
+10 Format 690,36 75x40
+11 Def 773,36 49x40
+12 Rename 830,36 84x40
+13 Fix 309,84 48x40
+14 Palette 365,84 73x40
+15 Save all 446,84 80x40
+16 Run 534,84 52x40
+17 Fuzz 594,84 55x40
+18 sample.txt 321,168 98x40
+19 x sample.txt 427,168 110x40
 
 [fields]
 
