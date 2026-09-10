@@ -862,13 +862,13 @@ def testDiffCap2(dir: String, outDir: String, name: String, backend: String, res
   Fs.exists(joinSlash(dir, "sample.txt")).flatMap(hit => testDiffCap3(dir, outDir, name, backend, rest, dumps, toml, if (hit) " sample.txt" else ""))
 
 def testDiffCap3(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String], toml: String, arg: String): IO[Unit] =
-  testDiffDump(dir, name, toml, arg, backend, false).flatMap(a => testDiffDump(dir, name, toml, arg, backend, true).flatMap(b => testDiffKeep(dir, outDir, name, rest, dumps, a, b)))
+  testDiffDump(dir, outDir, name, toml, arg, backend, false).flatMap(a => testDiffDump(dir, outDir, name, toml, arg, backend, true).flatMap(b => testDiffKeep(dir, outDir, name, rest, dumps, a, b)))
 
 def testDiffKeep(dir: String, outDir: String, name: String, rest: List[String], dumps: List[String], a: String, b: String): IO[Unit] =
   if (a == "" || b == "") testDiffBackends(dir, outDir, name, rest, dumps) else testDiffBackends(dir, outDir, name, rest, Str.concat(a, b) :: dumps)
 
-def testDiffDump(dir: String, name: String, toml: String, arg: String, backend: String, tap: Bool): IO[String] =
-  runLine(Str.concat("cd ", Str.concat(dir, Str.concat(" && ", Str.concat(uiDumpEnvOf(toml, uiDumpRel(name, tap), uiSnapRel(name, tap), tap), Str.concat(exeAfterCd(dir, joinSlash(dir, "build"), name), arg)))))).flatMap(r => testDiffDumpGot(r, dir, name, tap, backend))
+def testDiffDump(dir: String, outDir: String, name: String, toml: String, arg: String, backend: String, tap: Bool): IO[String] =
+  runLine(Str.concat("cd ", Str.concat(dir, Str.concat(" && ", Str.concat(uiDumpEnvOf(toml, uiDumpRel(name, tap), uiSnapRel(name, tap), tap), Str.concat(exeAfterCd(dir, outDir, name), arg)))))).flatMap(r => testDiffDumpGot(r, dir, name, tap, backend))
 
 def testDiffDumpGot(r: (Int, String, String), dir: String, name: String, tap: Bool, _backend: String): IO[String] =
   r match {
@@ -1197,7 +1197,7 @@ def fuzzUniversals(job: FuzzJob): IO[Unit] =
   fuzzLivePaint(job).flatMap(_ => fuzzSplit(job).flatMap(_ => fuzzDiffFlag(job)))
 
 def fuzzDiffFlag(job: FuzzJob): IO[Unit] =
-  if (!job.diff) IO.pure(()) else if (!job.hasUi) failMsg("--differential needs a [ui] package", "scuzz fuzz") else testDiff(job.dir, job.outDir)
+  if (!job.diff) IO.pure(()) else if (!job.hasUi) failMsg("--differential needs a [ui] package", "scuzz fuzz") else Fs.mkdirs(joinSlash(job.outDir, "diff")).flatMap(_ => testDiff(job.dir, joinSlash(job.outDir, "diff")))
 
 def fuzzLivePaint(job: FuzzJob): IO[Unit] =
   Fs.mkdirs(joinSlash(joinSlash(job.outDir, "fuzz"), "live")).flatMap(_ => if (job.hasUi) fuzzLivePaintUi(job) else fuzzLivePaintIo(job))
