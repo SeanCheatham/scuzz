@@ -1388,6 +1388,51 @@ static void test_session_inject_scroll(void) {
   remove(path);
 }
 
+static void test_script_run_file_long_line(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  const char *path = "/tmp/scuzz_ui_long_line.script";
+  FILE *f;
+  size_t i;
+  char *want;
+
+  /* One directive longer than 1024 bytes. It must run as one line. */
+  f = fopen(path, "w");
+  assert(f);
+  fputs("text ", f);
+  for (i = 0; i < 2000; i++)
+    fputc(i % 2 ? 'x' : 'y', f);
+  fputc('\n', f);
+  fclose(f);
+
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_ui_script_run_file(session, path);
+  want = (char *)malloc(2001);
+  assert(want);
+  for (i = 0; i < 2000; i++)
+    want[i] = i % 2 ? 'x' : 'y';
+  want[2000] = '\0';
+  assert(strcmp(sz_signal_str_get(draft), want) == 0);
+  free(want);
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(path);
+}
+
 static void test_session_inject_backspace(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -15947,6 +15992,7 @@ int main(void) {
   test_session_dump_now_needs_path();
   test_session_inject_scroll();
   test_session_inject_backspace();
+  test_script_run_file_long_line();
   test_session_inject_type();
   test_session_inject_key();
   test_session_inject_key_utf8_backspace();

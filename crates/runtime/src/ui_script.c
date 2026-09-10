@@ -630,16 +630,43 @@ void sz_ui_script_play_text(SzUiSession *session, char *text) {
 
 void sz_ui_script_run_file(SzUiSession *session, const char *path) {
   FILE *f = fopen(path, "r");
-  char line[1024];
+  char *line = NULL;
+  size_t cap = 0;
+  size_t len = 0;
+  int c;
   if (!f)
     sz_panic("Ui.run: SCUZZ_UI_SCRIPT open failed");
-  while (fgets(line, sizeof line, f)) {
-    size_t len = strlen(line);
-    if (!sz_ui_session_alive(session))
-      break;
-    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-      line[--len] = '\0';
-    play_script_line(session, line);
+  /* Read one logical line at a time, no fixed cap. A long line must not
+   * split into a bogus directive. */
+  for (;;) {
+    c = fgetc(f);
+    if (c == EOF || c == '\n') {
+      if (len == 0) {
+        if (c == EOF || !sz_ui_session_alive(session))
+          break;
+        continue;
+      }
+      while (len > 0 && line[len - 1] == '\r')
+        len--;
+      line[len] = '\0';
+      play_script_line(session, line);
+      len = 0;
+      if (c == EOF || !sz_ui_session_alive(session))
+        break;
+      continue;
+    }
+    if (len + 1 >= cap) {
+      size_t ncap = cap ? cap * 2 : 256;
+      char *nl = (char *)sz_alloc(ncap);
+      if (line) {
+        memcpy(nl, line, len);
+        sz_free(line);
+      }
+      line = nl;
+      cap = ncap;
+    }
+    line[len++] = (char)c;
   }
+  sz_free(line);
   fclose(f);
 }

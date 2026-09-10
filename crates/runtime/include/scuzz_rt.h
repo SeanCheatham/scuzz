@@ -772,11 +772,11 @@ int64_t sz_list_is_defined_at(SzList *xs, int64_t index);
 /* Negative when len < n, 0 when equal, positive when len > n. */
 int64_t sz_list_length_compare(SzList *xs, int64_t n);
 /* Kind comes from the first non-null head (boxed Int or String).
- * `as_int` is unused. Empty max panics. */
-SzList *sz_list_sort(SzList *xs, int64_t as_int);
+ * Empty max panics. */
+SzList *sz_list_sort(SzList *xs);
 SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env);
-void *sz_list_max(SzList *xs, int64_t as_int);
-void *sz_list_min(SzList *xs, int64_t as_int);
+void *sz_list_max(SzList *xs);
+void *sz_list_min(SzList *xs);
 void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max);
 /* Group cells by the `Int` or `String` key that `fn` returns. `key_kind`
  * is 0 for boxed Int, 1 for String. Empty is empty. Cells in a group

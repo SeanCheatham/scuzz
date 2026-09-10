@@ -381,6 +381,14 @@ static void *stream_bang_sync(void *v, void *env) {
   return out;
 }
 
+static int64_t stream_str_is(void *v, void *env) {
+  return strcmp(sz_string_cstr((SzString *)v), (const char *)env) == 0;
+}
+
+static int64_t stream_str_is_not(void *v, void *env) {
+  return strcmp(sz_string_cstr((SzString *)v), (const char *)env) != 0;
+}
+
 static int64_t stream_empty(void *v, void *env) {
   (void)env;
   return sz_string_len((SzString *)v) == 0;
@@ -4556,6 +4564,91 @@ int main(void) {
     joined = test_list_join((SzList *)r.value, ",");
     assert(strcmp(sz_string_cstr(joined), "a") == 0);
     assert(delay_calls == 1);
+
+    /* Cursor pulls: filter over a mapped eval chain runs each effect once. */
+    delay_calls = 0;
+    s = sz_stream_filter(
+        sz_stream_map(
+            sz_stream_concat(
+                sz_stream_concat(
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"a")),
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+                sz_stream_eval(sz_io_delay(take_hit, (void *)"c"))),
+            stream_bang_sync, NULL),
+        stream_nonempty, NULL);
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = test_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a!,b!,c!") == 0);
+    assert(delay_calls == 3);
+
+    /* takeWhile stops at the failing item. Later effects do not run. */
+    delay_calls = 0;
+    s = sz_stream_takewhile(
+        sz_stream_map(
+            sz_stream_concat(
+                sz_stream_concat(
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"a")),
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+                sz_stream_eval(sz_io_delay(take_hit, (void *)"c"))),
+            stream_bang_sync, NULL),
+        stream_str_is_not, (void *)"b!");
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = test_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a!") == 0);
+    assert(delay_calls == 2);
+
+    /* find stops at the match. Later effects do not run. */
+    delay_calls = 0;
+    s = sz_stream_find(
+        sz_stream_map(
+            sz_stream_concat(
+                sz_stream_concat(
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"a")),
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+                sz_stream_eval(sz_io_delay(take_hit, (void *)"c"))),
+            stream_bang_sync, NULL),
+        stream_str_is, (void *)"b!");
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = test_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "b!") == 0);
+    assert(delay_calls == 2);
+
+    /* dropWhile under take: the kept item past the prefix survives. */
+    delay_calls = 0;
+    s = sz_stream_take(
+        sz_stream_dropwhile(
+            sz_stream_map(
+                sz_stream_concat(
+                    sz_stream_concat(
+                        sz_stream_eval(sz_io_delay(take_hit, (void *)"a")),
+                        sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"c"))),
+                stream_bang_sync, NULL),
+            stream_str_is, (void *)"a!"),
+        1);
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = test_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "b!") == 0);
+    assert(delay_calls == 2);
+
+    /* forall short-circuits. Each effect runs once. */
+    delay_calls = 0;
+    r = sz_io_unsafe_run(sz_stream_forall(
+        sz_stream_map(
+            sz_stream_concat(
+                sz_stream_concat(
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"a")),
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+                sz_stream_eval(sz_io_delay(take_hit, (void *)"c"))),
+            stream_bang_sync, NULL),
+        stream_str_is, (void *)"a!"));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    assert(delay_calls == 2);
 
     {
       SzList *nums = sz_list_cons(
@@ -10406,16 +10499,16 @@ int main(void) {
       xs = sz_list_append(tmp, c);
       sz_release(tmp);
     }
-    out = sz_list_sort(xs, 0);
+    out = sz_list_sort(xs);
     assert(sz_list_len(out) == 3);
     assert(out->head == b);
     assert(sz_list_at(out, 1) == c);
     assert(sz_list_at(out, 2) == a);
     sz_list_free(out);
-    out = sz_list_sort(NULL, 0);
+    out = sz_list_sort(NULL);
     assert(sz_list_is_empty(out));
-    assert(sz_list_max(xs, 0) == a);
-    assert(sz_list_min(xs, 0) == b);
+    assert(sz_list_max(xs) == a);
+    assert(sz_list_min(xs) == b);
     sz_list_free(xs);
     xs = sz_list_cons(aa, NULL);
     {
@@ -10443,20 +10536,13 @@ int main(void) {
       ns = sz_list_append(tmp, n3);
       sz_release(tmp);
     }
-    out = sz_list_sort(ns, 1);
+    out = sz_list_sort(ns);
     assert(sz_unbox_i64(sz_list_head(out)) == 1);
     assert(sz_unbox_i64(sz_list_at(out, 1)) == 2);
     assert(sz_unbox_i64(sz_list_at(out, 2)) == 3);
     sz_list_free(out);
-    out = sz_list_sort(ns, 0);
-    assert(sz_unbox_i64(sz_list_head(out)) == 1);
-    assert(sz_unbox_i64(sz_list_at(out, 1)) == 2);
-    assert(sz_unbox_i64(sz_list_at(out, 2)) == 3);
-    sz_list_free(out);
-    assert(sz_unbox_i64(sz_list_max(ns, 1)) == 3);
-    assert(sz_unbox_i64(sz_list_min(ns, 1)) == 1);
-    assert(sz_unbox_i64(sz_list_max(ns, 0)) == 3);
-    assert(sz_unbox_i64(sz_list_min(ns, 0)) == 1);
+    assert(sz_unbox_i64(sz_list_max(ns)) == 3);
+    assert(sz_unbox_i64(sz_list_min(ns)) == 1);
     sz_list_free(ns);
     sz_release(n1);
     sz_release(n2);
