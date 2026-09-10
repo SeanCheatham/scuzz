@@ -5,21 +5,17 @@ What is unproven or missing, ranked by how much it threatens the thesis in [`vis
 - **Unknowns** — claims not yet shown within our constraints. A bad outcome invalidates later work.
 - **Known gaps** — settled design. Work is unfinished or deferred on purpose.
 
-When a gap closes or its assessment changes, update this file. If direction changes, also update `vision.md`.
+State what is missing. Do not record what landed. When a gap closes or its assessment changes, update this file. If direction changes, also update `vision.md`.
 
 ## Unknowns
 
 ### 1. Mobile on real devices
 
-**Status.** `scuzz package --target android` runs `crates/embedder-mobile/shells/android/build_ndk.sh` then `build_apk.sh`. `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh`. Both skip `net.c` (OpenSSL) and `impurity.c`. A package whose IR calls `sz_net_*` fails with one line. UI apps that do not call Net can link. Missing NDK, SDK, or Xcode fails with one install line. Android copies the APK to `build/package/android/`. iOS copies the signed sim `.app` to `build/package/ios/`. `[ui].bundle_id` is the Android package and iOS `CFBundleIdentifier` (`dev.scuzz.app` when the key is absent). Empty `bundle_id` fails load. Hardware devices stay open (provisioning).
-
-**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. OpenSSL on Android NDK or iOS (do not vendor OpenSSL-for-iOS). iOS sim and Android emulator UI packaging still need Xcode or the NDK on the host.
+**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. OpenSSL on the Android NDK or iOS (do not vendor OpenSSL-for-iOS). Hardware runs need provisioning.
 
 **Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. That bar stays host-gated. Hardware device runs stay open.
 
 ### 2. GPU presenters (Impeller / Skia GPU)
-
-**Status.** An OpenGL presenter is in (`SCUZZ_SKIA=gpu`): CPU `sk_sw` paint, GPU upload and readback behind `sk_capi`. Live structural dumps match the CPU path. `scuzz fuzz --differential` compares live dumps across `skia`, `sk_sw`, and `gpu` per host. Impeller and Skia GPU raster stay deferred.
 
 **Unproven.** A GPU rasterizer (Impeller or Skia GPU) behind `sk_capi` keeps identical structural dumps and tolerance-bounded pixels without a CPU paint pass.
 
@@ -31,32 +27,24 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 ### Thesis-critical
 
-These gaps keep the distinctive claims kernel-shaped. Close them in this order.
+Close them in this order.
 
-0. **Checker `Type` ADT, closed kits, emit from Check, LLVM IR fixed-point** — In: `examples/compiler/src/Type.scuzz` is the type ADT. `tyEq` does not treat `Any` as a top type. Type parameters still unify. Generic calls bind declared type parameters across arguments and results. List literals check every element. `List.map`, `List.concat`, `List.cons`, and `List.at` preserve element types. `IO` compares its error and success positions. Constructor calls keep declared type argument positions. An unbound position stays a type parameter. Pattern payloads use the concrete type arguments. Check loads impl methods and implicit `self` methods. A placeholder expr (`_ + 1`) is a lambda. Kit signatures live in `examples/compiler/src/Kits.scuzz` as data. Open kit prefixes are gone. `Kits.anyCount` is 0. Check has no `Any` string. Emit reads types from Check (`Check.typeOfEns`). It does not invent `Any`. Remaining Emit `Any` tokens are guards that reject an unknown type. Record `.copy` uses the checker record head. `scripts/fixedpoint-ll.sh` compares two self-compiles of `cli.ll` from the rebuilt compiler. Proof: `examples/tyck` (`tyck-ok`), `examples/codegen` (`ir-ok`), `scripts/fixedpoint-ll.sh`. Kit catalog: run `scuzz docs kits`. Residual: Param letters (`A`/`E`) still unify. Bare kit return `IO` means some IO. Parser still stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
+1. **Typed agent session schema** — One JSON schema for dump, inject, fuzz verdict, and coverage. Text dump and script stay until that schema ships. `--message-format=json` applies to `check` only until then.
 
-1. **`Signal[T]` and `View.each` over records** — In: `Signal.make` holds `List[T]` over records and enums; `View.each` binds the element type; studio keeps tasks as `List[Item]`; a record list dumps `list[N] name = <count>`. `Signal.make` creates a cell for any payload type. `Signal.get` and `Signal.set` preserve that type. `Signal.map` maps `A => B` and caches derived values. Counter uses a record cell with derived Int and String cells. Widget signatures require the correct Signal payload.
+2. **Source-region coverage** — Open: branch coverage and typed session output.
 
-2. **UTF-8 `String`** — In: `Str.*` indexes code points; an isolated continuation byte counts as one code point; `Str.byteLen` / `Str.byteSlice` keep bytes for framing; pad cycles complete code points; the `Str` kit is closed; the kernel `utf8Ops` drive oracle proves multibyte ops. Case maps stay ASCII by design. Caret offsets in TextField/editor stay bytes. The editor and toolchain LSP framing uses `Str.byteLen` / `Str.byteSlice`. LLVM `[N x i8]` string sizing uses `Str.byteLen`.
+3. **Scenario initialization and lifetime** — Residual: generated setup inputs, multiple named scenarios, and campaign selection.
 
-3. **Scuzz spans on panic and LSP** — In: `check` JSON diagnostics use recorded file stem, line, and column. No substring search. No hardcoded file. Product `scuzz lsp` is a stdio JSON-RPC server. It wraps `check`. JSON diagnostics stay the single schema. Overlay presence is a list entry. didChange reads full-sync `contentChanges`. Rename returns a WorkspaceEdit. Diagnostics run the check file list with overlays. Goto-def uses `Fun.off`. Rename replaces lexer ident tokens. Hover names the ident under the caret. Completion filters by the caret prefix from kit names and local defs. Semantic tokens come from the lexer. Panic prints `scuzz panic: Main.scuzz:2:14: <msg>` from that def's file, line, and column. The dogfood IDE consumes that schema. It does not replace it.
-
-4. **Typed fail `E`** — In: check encodes `IO[E, A]`. `IO[A]` means `IO[String, A]`. `IO.fail(e)` takes `E`. `handleErrorWith` binds `E`. `flatMap` keeps one `E`. Kits still fail with `String`. The runtime retains the error payload through failure and recovery. Int, record, and enum recovery proofs live in `examples/io`. `IO.attempt(io)` preserves the error and success payloads in `Result[E, A]`. Do not add `ZIO[R, E, A]`. Do not add user `IO.delay`.
-
-5. **Typed agent session schema** — Live debug is `build/debug.dump`, `inject.script`, `record.script`, `repro.toml`, and `summary.toml`. `--message-format=json` applies to `check` only. Direction: one JSON schema for dump, inject, fuzz verdict, and coverage. Text dump and script stay until that schema ships.
-
-6. **Source-region coverage** — Campaign `summary.toml` reports original function locations and reached flags. It maps verification locations back to live definitions. Simulation replacements and mutant probes do not count as live body hits. `Property.sometimes` and dump novelty still direct search. Open: branch coverage and typed session output.
-
-7. **Scenario initialization and lifetime** — In: one `*.scuzz_scenario` per project. It owns replacements, zero-arg `setup`, typed context, drivers, and resource cleanup. `*.scuzz_verify` keeps app contracts across worlds. Setup runs once per execution with faults held. Drivers share the context after readiness. `Sys.exec` / `Sys.spawn` stay sealed. Proof: `examples/io` replaces `Flow.openStore`, setup returns `World`, drivers take that context, and `setupRan` reads `Timeline.driveHas(..., "setup")`. Residual: generated setup inputs, multiple named scenarios, and campaign selection.
+4. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
 ### Table-stakes
 
 Needed before a real CLI, server, or desktop app stays.
 
-- **HTTP as a server** — Client kits return a body on 2xx (1 MiB cap). Live serve is localhost plaintext. Handler is `(path, method, body) => IO[String]`. Status, headers, and `0.0.0.0` bind stay out. HTTPS `Net.serve` stays out. POSIX sockets stay inside the runtime. Expand `Net` on this HTTP/1.0 stack. Do not add a second client.
+- **HTTP as a server** — Status, headers, and `0.0.0.0` bind stay out. HTTPS `Net.serve` stays out. Expand `Net` on this HTTP/1.0 stack. Do not add a second client.
 - **Missing kits** — No calendar time, regex, hash, hex/base64, or UUID. `Map` / `Set` keys are `Int` or `String`. Expand blessed kits. No user FFI.
 - **`scuzz eval`** — No worksheet. A one-file eval helps humans and agents try one def.
-- **Generators** — `examples/tyck` and `examples/codegen` drive generated programs with roundtrip and idempotence oracles. Search still uses simple Int bounds and bounded ADT depth. Event reduction preserves argument types. Argument reduction remains open. Direction: `Gen[T]` combinators and shrinking that keeps `where` bounds. Stateful model generators stay later.
+- **Generators** — Argument reduction remains open. Direction: `Gen[T]` combinators and shrinking that keeps `where` bounds. Stateful model generators stay later.
 - **Drive `==` wrap on UI** — A top-level `a == b` drive oracle wraps into a `for` that prints both sides. On a `[ui]` package that wrap can trip the unpaired-acquire session check. Write `if (a == b) true else false` until emit drops the extra retain.
 - **Scheduler lock** — Cooperative fibers on one thread are the scheduler for CLI, server, and UI. OS threads and supervision trees stay later.
 
@@ -65,28 +53,22 @@ Needed before a real CLI, server, or desktop app stays.
 Do not start these before thesis-critical gaps close.
 
 - **Stable inject keys** — `tap N` / `scroll N` follow a11y preorder. A refactor can miss a stored corpus entry. Named control keys for inject stay after named claim observations.
-- **Simulation faults and multiple worlds** — TestRuntime seals the wire (no live sockets; Nth Fs / Net / Queue fault; PCT on fibers; Clock and Fs fakes). The single scenario lifecycle is in (gap 7). Generated setup inputs, multiple named scenarios, campaign selection, clock skew, partitions, and a model to relate against stay later.
-- **Mutation depth** — Mutation flips ops, swaps `if` arms, swaps tap handler bodies, and walks impl methods. Inert mutants stay unreported. Semantic mutants stay later.
-- **Memory** — Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated until panic sweep or process exit. No cycle collector.
-- **Dependency forms beyond `path`** — Path deps only (`Manifest.scuzz`). Git, versioned, and hosted artifacts are direction. There is no registry. Revisit after path deps and file-as-module stay the reuse story. A lockfile identity can land before a registry.
+- **Simulation faults and multiple worlds** — Clock skew, partitions, and a model to relate against stay later.
+- **Mutation depth** — Semantic mutants stay later.
+- **Dependency forms beyond `path`** — Git, versioned, and hosted artifacts are direction. There is no registry. A lockfile identity can land before a registry.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
-- **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not place OS IME candidate UI from it. Desktop already maps XIM preedit and Cocoa marked text into `SZ_INPUT_COMPOSE`.
-- **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, hello). Full macOS packaging stays `workflow_dispatch`. A Darwin UI link uses `-lc++`, `-framework Cocoa -lobjc`, `-force_load`, and the Skia frameworks.
-- **Web apps** — the Docs GUI target uses WebAssembly. Browser fields support clipboard actions and IME. DOM controls expose links, buttons, headings, and edit fields. Full accessibility, real phone checks, and hot reload remain open.
-- **HKT and environment `R`** — Thin generics. No `F[_]` beyond `IO`. No `ZIO[R, E, A]`.
-- **Oracle idioms** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work. Authors write `Timeline => Verdict` and drive oracles in `*.scuzz_verify`. Verification path: run `scuzz docs verify`.
-- **Emit fallbacks when Check returns an empty type** — Emit reads `Check.typeOfEns`. It does not invent `Any`. IO composition and `IO.pure` use checked payload types. Multi-field constructors and record `.copy` use checked argument types for scalar boxing. Int, String, record, enum, and List composition proofs live in `examples/io`. Copy proofs cover Int, Bool, Float, pointer fields, and an unchanged source record. Record patterns keep their field types. Native proofs reconstruct matched scalar and pointer fields. List patterns keep element types. Tail-call matches check guards before each recursive step. Result transformation proofs change both payload types. Nested field access reads the checked record layout and preserves values from temporary receivers. Native proofs cover named IO receivers and typed recovery. Tuple pattern captures keep their checked types in IO continuations. Local captures take precedence over functions with the same name. Float tuple construction can still fail LLVM type checks. Some emitter helpers still use scalar fallbacks when the checker type is empty. Direction: keep types on the checked tree; do not guess from SSA names.
+- **OS IME candidate windows** — Embedders do not place OS IME candidate UI from the focused-field caret rect.
+- **macOS full packaging in default CI** — `macos-smoke` runs on push/PR. Full packaging stays `workflow_dispatch`.
+- **Web apps** — Full accessibility, real phone checks, and hot reload remain open.
+- **Oracle idioms** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work.
+- **Emit fallbacks when Check returns an empty type** — Float tuple construction can still fail LLVM type checks. Some emitter helpers still use scalar fallbacks when the checker type is empty. Direction: keep types on the checked tree; do not guess from SSA names.
 
 ### Dogfood IDE
-
-A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling). Proof: `examples/editor` and the SDK `ide/` tree. LSP span quality is thesis-critical gap 3.
 
 Open and deferred:
 
 - OS IME candidate-window placement stays deferred.
 - Do not add `Fs.watch` or an exec stub map. File change detection stays Clock plus Fs poll.
-- Live `Sys.exec` / `Sys.spawn` still fail under TestRuntime. Fuzz overlays `analyze`, `lspCall`, `runProject`, and `fuzzProject`.
-- Every new editor or chrome widget has a Headless path. No Desktop-only shortcut.
 - In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
 - Multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit, and Windows desktop embedder stay later.
 - Flutter DevTools / VM patching is an explicit non-goal.
