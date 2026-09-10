@@ -2097,7 +2097,15 @@ static void *serve_read_req(void *env) {
   }
   body = st->rbuf + hdr;
   blen = has_cl ? clen : 0;
-  strncpy(st->method, method, sizeof st->method - 1);
+  /* parse_http_req_line whitelists the method. Copy with an explicit
+   * terminator; strncpy leaves dst unterminated at the bound. */
+  {
+    size_t ml = strlen(method);
+    if (ml >= sizeof st->method)
+      ml = sizeof st->method - 1;
+    memcpy(st->method, method, ml);
+    st->method[ml] = '\0';
+  }
   st->head_resp = strcmp(method, "HEAD") == 0;
   r->is_err = 0;
   r->as.ok = pack_http_tuple(path, method, body, blen);

@@ -2452,7 +2452,8 @@ int main(void) {
     pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
-      freopen("/dev/null", "w", stderr);
+      if (!freopen("/dev/null", "w", stderr))
+        _exit(2);
       sz_alloc_set_panic_dump(panic_path);
       s = sz_string_from_cstr("file-live");
       xs = sz_list_cons(s, NULL);
@@ -2474,7 +2475,8 @@ int main(void) {
     pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
-      freopen("/dev/null", "w", stderr);
+      if (!freopen("/dev/null", "w", stderr))
+        _exit(2);
       setenv("SCUZZ_PANIC_DUMP", panic_path, 1);
       sz_alloc_set_panic_dump(NULL);
       sz_panic("env boom");

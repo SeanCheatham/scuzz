@@ -57,11 +57,16 @@ static inline SzString *pack_path(void *env) {
 static inline void sz_dump_append(char **buf, size_t *len, size_t *cap,
                                   const char *s) {
   size_t n = strlen(s);
+  if (n > SIZE_MAX - *len - 1)
+    sz_panic("sz_dump_append: buffer size overflow");
   if (*len + n + 1 > *cap) {
     size_t ncap = *cap ? *cap : 256;
     char *nb;
-    while (*len + n + 1 > ncap)
+    while (*len + n + 1 > ncap) {
+      if (ncap > SIZE_MAX / 2)
+        sz_panic("sz_dump_append: buffer size overflow");
       ncap *= 2;
+    }
     nb = (char *)sz_alloc(ncap);
     if (*buf) {
       memcpy(nb, *buf, *len);
