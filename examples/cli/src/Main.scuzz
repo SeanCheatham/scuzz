@@ -294,23 +294,6 @@ def srcBumpVerify(): String =
 def wantWrapBump(): String =
   "def _drv_bump(n: Int): IO[Unit] =\n  for {\n    oraL = Main.bump(n)\n    oraR = n + 1\n    _ <- if (oraL == oraR) IO.pure(()) else IO.println(s\"oracle bump rejected left=$oraL right=$oraR\").flatMap(_ => Property.assert(\"bump\", false))\n  } yield ()\n"
 
-def wantFuzzHello0(): String =
-  """scuzz fuzz: corpus-only (--iterations 0)
-scuzz fuzz: no live-code mutation sites
-scuzz fuzz ok (0 search, 0 search failures, seed 42, 0 corpus)
-corpus: 0 stored, 0 failed, 0 promoted
-coverage: (none)
-declared: (none)
-mutate: 0 killed, 0 survived, 0 inert (0 of 0 sites)"""
-
-def wantFuzzHello8(): String =
-  """scuzz fuzz: no live-code mutation sites
-scuzz fuzz ok (5 search, 0 search failures, seed 42, 0 corpus)
-corpus: 0 stored, 0 failed, 0 promoted
-coverage: (none)
-declared: (none)
-mutate: 0 killed, 0 survived, 0 inert (0 of 0 sites)"""
-
 def wantEmptyVerify(): String =
   "bad-intent/empty.scuzz_verify:1:1: error: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file"
 

@@ -563,23 +563,12 @@ def wrapRel2(name: String, ps: String, body: String): String =
 
 """))))))
 
-def wrapFiles(files: List[(String, String)]): String =
-  wrapFilesEns(files, noEn())
-
 def wrapFilesEns(files: List[(String, String)], ens: List[En]): String =
   if (List.isEmpty(files)) "" else wrapFilesEns2(List.at(files, 0), List.tail(files), ens)
 
 def wrapFilesEns2(h: (String, String), rest: List[(String, String)], ens: List[En]): String =
   h match {
     case (stem, src) => Str.concat(wrapSrcEns(stem, src, ens), wrapFilesEns(rest, ens))
-  }
-
-def applySim(live: String, sim: String): String =
-  applySimProg(Parse.parse(Lexer.lex(live)), Parse.parse(Lexer.lex(sim)))
-
-def applySimProg(live: Prog, sim: Prog): String =
-  sim match {
-    case Prog(_, _, _, _, _, _, sdefs, _, _) => applySimLive(live, sdefs)
   }
 
 def applySimLive(live: Prog, sdefs: List[Fun]): String =
@@ -1148,12 +1137,6 @@ def seeds(src: String): String =
 def drivers(src: String): String =
   nls(mapSpec(parseVerify(src)))
 
-def driversFrom(srcs: List[String], ens: List[En]): String =
-  nls(mapSpecE(parseVerifyAllEns(srcs, ens), ens))
-
-def parseVerifyAll(srcs: List[String]): List[Fun] =
-  parseVerifyAllEns(srcs, noEn())
-
 def parseVerifyAllEns(srcs: List[String], ens: List[En]): List[Fun] =
   if (List.isEmpty(srcs)) noFun() else List.concat(parseVerifyEns(List.at(srcs, 0), ens), parseVerifyAllEns(List.tail(srcs), ens))
 
@@ -1175,17 +1158,6 @@ def emptyVerify(file: String): String =
 
 def ioRet(d: Fun): Bool =
   Str.len(d.ret) >= 2 && Str.slice(d.ret, 0, 2) == "IO"
-
-def drvNames(srcs: List[String]): List[String] =
-  if (List.isEmpty(srcs)) noStr() else List.concat(drvFileNames(List.at(srcs, 0)), drvNames(List.tail(srcs)))
-
-def drvFileNames(src: String): List[String] =
-  drvFileNamesGo(Parse.parse(Lexer.lex(src)))
-
-def drvFileNamesGo(p: Prog): List[String] =
-  p match {
-    case Prog(_, _, _, _, _, _, defs, _, _) => ioDefNames(defs)
-  }
 
 def ioDefNames(ds: List[Fun]): List[String] =
   if (List.isEmpty(ds)) noStr() else ioDefNamesHd(List.at(ds, 0), List.tail(ds))

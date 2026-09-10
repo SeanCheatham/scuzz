@@ -146,9 +146,6 @@ def fill(t: String, n: Int): List[String] =
 def take(xs: List[String], n: Int): List[String] =
   if (n <= 0 || List.isEmpty(xs)) ns() else List.at(xs, 0) :: take(List.tail(xs), n - 1)
 
-def arityOk(f: String, n: Int): Bool =
-  arityOf(find(f), n)
-
 def arityOf(kit: Kit, n: Int): Bool =
   arityOf2(kitName(kit), kitParamsOf(kit), kitRestOf(kit), kitOptOf(kit), n)
 
@@ -166,28 +163,6 @@ def anyCountKit(kit: Kit): Int =
 
 def anyCountParams(ps: List[String]): Int =
   if (List.isEmpty(ps)) 0 else countAnyStr(List.at(ps, 0)) + anyCountParams(List.tail(ps))
-
-def catalogMd(): String =
-  Str.concat("""# Kit catalog
-
-Signatures live in `examples/compiler/src/Kits.scuzz`.
-
-| Kit | Params | Return |
-| --- | --- | --- |
-""", catalogRows(allKits()))
-
-def catalogRows(xs: List[Kit]): String =
-  if (List.isEmpty(xs)) "" else Str.concat(catalogRow(List.at(xs, 0)), catalogRows(List.tail(xs)))
-
-def catalogRow(kit: Kit): String =
-  Str.concat("| `", Str.concat(kitName(kit), Str.concat("` | `", Str.concat(showParams(kit), Str.concat("` | `", Str.concat(kitRetOf(kit), """` |
-"""))))))
-
-def showParams(kit: Kit): String =
-  showParams2(kitParamsOf(kit), kitRestOf(kit), kitOptOf(kit))
-
-def showParams2(ps: List[String], r: String, o: Int): String =
-  if (r != "") showRest(ps, r) else if (List.isEmpty(ps)) "()" else if (o > 0) Str.concat(joinComma(ps), Str.concat(" (opt ", Str.concat(Str.fromInt(o), ")"))) else joinComma(ps)
 
 def formatRow(kit: Kit): String =
   if (kitName(kit) == "") "" else Str.concat(kitName(kit), Str.concat("(", Str.concat(formatParams(kit), Str.concat("): ", kitRetOf(kit)))))

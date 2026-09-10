@@ -11,12 +11,6 @@ def verbs(): List[String] =
 def topics(): List[Topic] =
   Topics.all()
 
-def topicIds(): List[String] =
-  idsOf(topics())
-
-def idsOf(ts: List[Topic]): List[String] =
-  if (List.isEmpty(ts)) [] else Str.concat(List.at(ts, 0).id, "") :: idsOf(List.tail(ts))
-
 def idsLine(): String =
   idsLineGo(topics())
 

@@ -35,12 +35,6 @@ def tNamed(n: String): Ty =
 def tApp(n: String, args: List[Ty]): Ty =
   Ty.App(n, args)
 
-def tList(e: Ty): Ty =
-  Ty.App("List", e :: noTy())
-
-def tBare(n: String): Ty =
-  Ty.App(n, noTy())
-
 def tIo(e: Ty, a: Ty): Ty =
   if (isStr(e)) Ty.App("IO", a :: noTy()) else Ty.App("IO", e :: a :: noTy())
 
@@ -141,9 +135,6 @@ def isAppNamed(t: Ty, n: String): Bool =
 def isIo(t: Ty): Bool =
   isNamed(t, "IO") || isAppNamed(t, "IO")
 
-def isList(t: Ty): Bool =
-  isAppNamed(t, "List")
-
 def isRes(t: Ty): Bool =
   isAppNamed(t, "Resource")
 
@@ -167,9 +158,6 @@ def elem(t: Ty): Ty =
 
 def elemOf(ps: List[Ty]): Ty =
   if (List.isEmpty(ps)) tParam("A") else List.at(ps, 0)
-
-def mapVal(t: Ty): Ty =
-  mapValOf(appArgs(t))
 
 def mapValOf(ps: List[Ty]): Ty =
   if (List.isEmpty(ps) || List.isEmpty(List.tail(ps))) tParam("A") else List.at(ps, 1)
@@ -334,9 +322,6 @@ def eqStr(a: String, b: String): Bool =
 def preferStr(a: String, b: String): String =
   show(prefer(parse(a), parse(b)))
 
-def showIo(e: String, a: String): String =
-  show(tIo(parse(e), parse(a)))
-
 def countAny(t: Ty): Int =
   t match {
     case Ty.Named(n) => if (n == "Any") 1 else 0
@@ -354,9 +339,6 @@ def countAnyStr(s: String): Int =
 
 def isPtrStr(s: String): Bool =
   isPtr(parse(s))
-
-def isI64Str(s: String): Bool =
-  isI64(parse(s))
 
 def headNameStr(s: String): String =
   headName(parse(s))
