@@ -1,0 +1,11 @@
+record World(token: String)
+
+def setup(): IO[World] =
+  Flow.openStore().map(token => World(token))
+
+def Flow.openStore(): IO[String] =
+  IO.pure("sim-store")
+
+def composePayloads(world: World, n: Int): IO[Unit] =
+  if (Str.len(world.token) < 0) IO.pure(()) else Flow.attempted(n % 10000).flatMap(_ => Flow.namedComposition(n % 10000)).flatMap(_ => Flow.composition(n % 10000)).flatMap(_ => Flow.recoverInt(n % 10000)).flatMap(_ => Flow.recoverRecord(n % 10000)).flatMap(_ => Flow.recoverEnum(n % 10000)).flatMap(_ => Flow.copyPayload(n % 10000, n > 0, 1.5, Str.fromInt(n))).flatMap(_ => Impurity.runKit()).flatMap(_ => Server.runHttp())
+

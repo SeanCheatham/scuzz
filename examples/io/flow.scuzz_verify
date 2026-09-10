@@ -4,3 +4,6 @@ def fibersStayNonNeg(t: Timeline): Verdict =
 def effectsStayNonNeg(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.effectCount(t, i) >= 0 && Timeline.faultN(t, i) >= 0 && Timeline.checkpoint(t, i) >= 0 && Timeline.nearestCheckpoint(t, i) >= -1)
 
+def setupRan(t: Timeline): Verdict =
+  Verdict.any(t, i => Timeline.driveHas(t, i, "setup"))
+

@@ -114,7 +114,7 @@ def _intOf(t: Tok): Int =
   }
 
 def _kit(s: String): Bool =
-  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "Random" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property" || s == "Float"
+  s == "Str" || s == "List" || s == "IO" || s == "Map" || s == "Set" || s == "Builder" || s == "Oracle" || s == "Sys" || s == "Fs" || s == "Clock" || s == "Random" || s == "View" || s == "Signal" || s == "Ui" || s == "Json" || s == "Impurity" || s == "Net" || s == "Ref" || s == "Queue" || s == "Deferred" || s == "Fiber" || s == "Stream" || s == "Resource" || s == "Property" || s == "Float" || s == "Scenario"
 
 def _joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) List.at(xs, 0) else Str.concat(List.at(xs, 0), Str.concat(", ", _joinComma(List.tail(xs))))
@@ -711,7 +711,10 @@ def parseParamListNext(p: (Param, Int), toks: Toks, acc: List[Param]): (List[Par
   }
 
 def parseDef(toks: Toks, i: Int, priv: Bool): (Fun, Int) =
-  parseDefTp(priv, _identOf(_at(toks, i)), parseTParams(toks, i + 1), toks, _off(toks, i))
+  parseDefName(priv, _identOf(_at(toks, i)), toks, i + 1, _off(toks, i))
+
+def parseDefName(priv: Bool, name: String, toks: Toks, i: Int, off: Int): (Fun, Int) =
+  if (_is(toks, i, Tok.Dot)) parseDefTp(priv, Str.concat(name, Str.concat(".", _identOf(_at(toks, i + 1)))), parseTParams(toks, i + 2), toks, off) else parseDefTp(priv, name, parseTParams(toks, i), toks, off)
 
 def parseDefTp(priv: Bool, name: String, p: (List[String], Int), toks: Toks, off: Int): (Fun, Int) =
   p match {

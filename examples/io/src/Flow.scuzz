@@ -363,3 +363,6 @@ def tupleCapture(result: (Int, String, Bool), expected: Int): IO[Bool] =
     case (code, label, enabled) => IO.pure(()).flatMap(_ => IO.pure(code == 0).flatMap(zero => IO.pure(zero == (expected == 0) && code == expected && label == Str.fromInt(expected) && enabled == (expected == 0))))
   }
 
+def openStore(): IO[String] =
+  Sys.exec("true").map(_ => "live-store")
+
