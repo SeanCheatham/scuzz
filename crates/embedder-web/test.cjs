@@ -45,7 +45,7 @@ async function check(browserType, url, mobile) {
         const margins = await page.evaluate(() => {
           const left = prefix => Module.textBlocks.find(block => block.text.startsWith(prefix)).lines[0].x;
           return {
-            paragraphs: ['Scuzz does not use', 'A def with one Timeline', 'Verdict.alwaysHas', 'Zero iterations', 'Simulation is hermetic'].map(left),
+            paragraphs: ['Scuzz does not use', 'A def with one Timeline', 'Verdict.alwaysHas', 'Zero iterations', 'A scenario file must define setup'].map(left),
             code: ['def bump', 'scuzz fuzz --iterations 16', 'scuzz fuzz --iterations 0'].map(left)
           };
         });
