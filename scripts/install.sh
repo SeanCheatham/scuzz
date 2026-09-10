@@ -359,5 +359,5 @@ fi
 echo "Put $BIN on PATH (clang + make required to build apps;"
 echo "  Linux [ui] also needs zlib/bzip2: zlib1g-dev libbz2-dev), then:"
 echo "  scuzz new myapp --ui"
-echo "  cd myapp && scuzz test && scuzz run --headless"
+echo "  cd myapp && scuzz fuzz --iterations 0 && scuzz run --headless"
 echo "  scuzz ide --headless ."

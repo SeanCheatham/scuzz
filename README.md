@@ -2,7 +2,7 @@
 
 Scuzz is a functional programming language for native applications. It takes inspiration from Scala’s concise syntax and Flutter’s approach to user interfaces.
 
-Scuzz includes a compiler, a UI toolkit, and command-line tools to build, run, format, and test apps. It targets command-line tools, servers, desktop apps, and mobile apps. GUI apps can also run in a browser through WebAssembly.
+Scuzz includes a compiler, a UI toolkit, and command-line tools to build, run, format, and verify apps. It targets command-line tools, servers, desktop apps, and mobile apps. GUI apps can also run in a browser through WebAssembly.
 
 Scuzz is in active development. See [Status and platforms](#status-and-platforms) for current support and limits.
 
@@ -12,7 +12,7 @@ Scuzz is in active development. See [Status and platforms](#status-and-platforms
 - **An integrated UI toolkit.** Build interfaces with shared app code. Use hot reload to update a UI while it runs.
 - **UI automation.** Run UI apps without a display. Record and replay input for debugging and testing.
 - **Built-in verification.** Define properties that your code must satisfy. Use fuzzing, mutation testing, and deterministic simulation to check them.
-- **One toolchain.** Use `scuzz` to build, run, format, check, test, and package apps. The standard library covers common app tasks.
+- **One toolchain.** Use `scuzz` to build, run, format, check, fuzz, and package apps. The standard library covers common app tasks.
 
 Scuzz takes inspiration from Scala but does not support Scala or JVM libraries. See the [compatibility details](docs/compatibility.md).
 

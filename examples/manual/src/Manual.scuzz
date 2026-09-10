@@ -6,7 +6,7 @@ enum Block:
   case Cmd(text: String)
 
 def verbs(): List[String] =
-  "build" :: "run" :: "watch" :: "test" :: "check" :: "lsp" :: "fmt" :: "fuzz" :: "new" :: "ide" :: "package" :: "help" :: "docs" :: []
+  "build" :: "run" :: "watch" :: "check" :: "lsp" :: "fmt" :: "fuzz" :: "new" :: "ide" :: "package" :: "help" :: "docs" :: []
 
 def topics(): List[Topic] =
   Topics.all()

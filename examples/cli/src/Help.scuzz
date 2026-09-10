@@ -7,7 +7,6 @@ Commands:
   build    Compile a Scuzz Lang project to a native executable (LLVM)
   run      Build and run a Scuzz Lang project
   watch    Watch sources and rebuild on change (compile loop, not hot reload)
-  test     Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
   check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json
   lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
   fmt      Format Scuzz Lang sources under src/
@@ -145,7 +144,7 @@ See: scuzz docs commands
 """
 
 def helpFuzz(): String =
-  """Replay corpus and seeds under TestRuntime, then walk schedule and fault seeds; then mutation
+  """Probe the live graph under TestRuntime, then replay corpus and seeds, then search, then mutation
 
 Usage: scuzz fuzz [OPTIONS] [PATH]
 
@@ -167,6 +166,8 @@ Options:
           Finish search and still mutate after the first search failure
       --relate
           Judge (Timeline, Timeline) => Verdict relation claims: replay each corpus entry under its own and a perturbed schedule, then exit
+      --differential
+          Compare live structural dumps across Skia backends (skia, sk_sw, gpu)
   -h, --help
           Print help
 
@@ -177,6 +178,7 @@ Examples:
   scuzz fuzz --oracles examples/counter
   scuzz fuzz --replay build/fuzz/repro.toml
   scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example
+  scuzz fuzz --differential --iterations 0 examples/counter
 
 See: scuzz docs verify
 """
@@ -224,34 +226,6 @@ Examples:
   scuzz lsp examples/hello
 
 See: scuzz docs ide
-"""
-
-def helpTest(): String =
-  """Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
-
-Usage: scuzz test [OPTIONS] [PATH]
-
-Arguments:
-  [PATH]  [default: .]
-
-Options:
-      --update
-          Write Headless dumps into goldens/
-      --pixels
-          Also compare PNG goldens
-      --differential
-          Compare structural dumps across Skia backends
-      --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
-  -h, --help
-          Print help
-
-Examples:
-  scuzz test
-  scuzz test --update
-  scuzz test examples/hello
-
-See: scuzz docs verify
 """
 
 def helpWatch(): String =

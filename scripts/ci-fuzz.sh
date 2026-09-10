@@ -192,7 +192,7 @@ cat > /tmp/scuzz-schedbug/src/Main.scuzz <<'EOF'
     _ <- if (Str.eq(first, "L")) IO.pure(()) else IO.fail("expected L first")
   } yield ()
 EOF
-"$SCUZZ" test /tmp/scuzz-schedbug
+"$SCUZZ" fuzz --iterations 0 /tmp/scuzz-schedbug
 if fuzz --iterations 12 /tmp/scuzz-schedbug; then
   echo "schedule fuzz should have found the interleaving bug" && exit 1
 fi

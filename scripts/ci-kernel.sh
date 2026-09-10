@@ -59,7 +59,7 @@ grep -q "real:" /tmp/io.out
 grep -q "mono:" /tmp/io.out
 grep -q "kit:skip" /tmp/io.out
 grep -q "fs:" /tmp/io.out
-"$SCUZZ" test examples/io | tee /tmp/io-test.out
+"$SCUZZ" fuzz --iterations 0 examples/io | tee /tmp/io-test.out
 grep -q "served:POST:/ping:hi" /tmp/io-test.out
 grep -q "impurity-ok" /tmp/io-test.out
 grep -q "net:" /tmp/io-test.out
@@ -76,13 +76,9 @@ grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/studio
 "$SCUZZ" check examples/editor
 "$SCUZZ" check examples/bad-example
-"$SCUZZ" test examples/bad-example
 "$SCUZZ" check examples/bad-fault
-"$SCUZZ" test examples/bad-fault
 "$SCUZZ" check examples/bad-adt
-"$SCUZZ" test examples/bad-adt
 "$SCUZZ" check examples/bad-sched
-"$SCUZZ" test examples/bad-sched
 "$SCUZZ" check examples/bad-response
 "$SCUZZ" check examples/bad-split
 if "$SCUZZ" check examples/bad-intent; then

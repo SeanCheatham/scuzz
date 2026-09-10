@@ -976,7 +976,7 @@ void sz_net_test_set_nameserver(const char *ipv4, int port);
 void sz_net_test_http_host_header(const char *host, int port, char *out,
                                  size_t cap);
 
-/* TestRuntime — fake interpreters for deterministic scuzz test / fuzz */
+/* TestRuntime — fake interpreters for deterministic scuzz fuzz */
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
 void sz_testrt_reset(void);   /* restore live interpreters */
 

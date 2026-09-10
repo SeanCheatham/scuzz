@@ -27,7 +27,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Binary format | Native ELF/Mach-O/PE through LLVM | JVM classfiles / JARs |
 | Dependencies | `scuzz.toml` path deps (data only; no plugin DSL) | Maven Central / Ivy; git/versioned hosted artifacts (deferred); sbt/Gradle/`pubspec` plugins |
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO-as-library, Future-as-default |
-| Test interpreters | Built-in verification: hermetic TestRuntime (`SCUZZ_TESTRT=1`; no live sockets; stubs and virtual loopback); `*.scuzz_verify` + `.require` + stem-paired sim/drivers; `scuzz fuzz --iterations` (search + mutation; `corpus/` replay; `--iterations 0` corpus-only) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks; live network beyond stubs and virtual loopback under sim |
+| Test interpreters | Built-in verification: hermetic TestRuntime (`SCUZZ_TESTRT=1`; no live sockets; stubs and virtual loopback); `*.scuzz_verify` + `.require` + one `*.scuzz_scenario` world; `scuzz fuzz --iterations` (live-graph probe + search + mutation; `corpus/` replay; `--iterations 0` corpus-only; `--differential` live dumps across Skia backends) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks; live network beyond stubs and virtual loopback under sim; dump-fixture goldens |
 | Deterministic campaign (Antithesis-shaped) | Generator-independent `corpus/*.toml` event lists; file/env observation (`sometimes.reached`, scripts, dumps) so an external conductor can drive the same binary; `Property.sometimes` as campaign aggregation (a name must occur at least once) | Antithesis SDK JSONL; a second conductor-specific wire protocol |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 | Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui] run --watch` is hot reload (stamp-reload Views) | Flutter DevTools / VM patching |
@@ -40,7 +40,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 | Target | Language/runtime/UI-core | Desktop / Mobile embedder | Notes |
 | --- | --- | --- | --- |
-| Linux Headless (CI/cloud) | Yes | N/A | Default CI; goldens + TestRuntime |
+| Linux Headless (CI/cloud) | Yes | N/A | Default CI; Headless + TestRuntime |
 | Linux desktop | Yes | X11 | `embedder-desktop` when `DISPLAY` is set |
 | Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCUZZ_MOBILE_SHELL=1` |
 | macOS desktop | Yes | Cocoa blit | peer to Linux X11 |

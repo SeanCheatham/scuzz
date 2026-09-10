@@ -52,7 +52,7 @@ jobs:
           - name: native
             slices: install-dry runtime asan skia embedders
           - name: apps
-            slices: embedders kernel package ui pixels gpu differential new-ui desktop mobile
+            slices: embedders kernel package ui gpu differential new-ui desktop mobile
           - name: fuzz
             slices: embedders fuzz
           - name: web
@@ -159,8 +159,5 @@ jobs:
           path: dist/scuzz-*.tar.gz
           if-no-files-found: error
 
-      - name: Golden PNG tests
+      - name: UI fuzz (corpus-only)
         run: ./scripts/ci.sh ui-test
-
-      - name: Pixel goldens (sk_sw software backend)
-        run: ./scripts/ci.sh pixels
