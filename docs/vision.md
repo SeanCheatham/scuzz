@@ -12,8 +12,8 @@ Edit this file when a decision or next-step order changes.
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM. No Java interop. No classpath/Maven. GUI apps also target WebAssembly. Scuzz Docs is the first browser app.
 - **UI**: a primary product path, not the only one (Flutter-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Desktop/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Batteries**: the language and standard kits cover common app cases. No ecosystem library sprawl. No Maven, cats, or ZIO ports.
-- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter (`scuzz fmt`). One linter (`scuzz check`: format-verify + typecheck; further lints emit here; no `lint` subcommand). One testing strategy. Mutation, fuzzing, properties, simulation, and determinism are **first-class in the language and `scuzz`**. They are not a third-party harness. Compiler, CLI, and toolchain are Scuzz (`examples/compiler`, `examples/cli`). A rebuild uses the newest GitHub `v*` bootstrap ([Self-hosting](#self-hosting)). `scuzz ide` launches a Scuzz `[ui]` app. That app is the dogfood IDE, not the compiler. Prerequisites: [`gaps.md`](gaps.md).
-- **Language proof**: examples that exercise the surface (`examples/`). The dogfood IDE is an app on that same surface. Self-hosted tooling is the long-term proof. It lands in staged slices after the prerequisites close ([Self-hosting](#self-hosting)).
+- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter (`scuzz fmt`). One linter (`scuzz check`: format-verify + typecheck; further lints emit here; no `lint` subcommand). One testing strategy. Mutation, fuzzing, properties, simulation, and determinism are **first-class in the language and `scuzz`**. They are not a third-party harness. Compiler, CLI, and toolchain are Scuzz (`examples/compiler`, `examples/cli`). A rebuild uses the newest GitHub `v*` bootstrap ([Self-hosting](#self-hosting)). `scuzz ide` launches a Scuzz `[ui]` app. That app is the dogfood IDE, not the compiler.
+- **Language proof**: examples that exercise the surface (`examples/`). The dogfood IDE is an app on that same surface. Self-hosted tooling is that proof: the shipped CLI is Scuzz ([Self-hosting](#self-hosting)).
 - **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime. `scuzz watch` only rebuilds. `[ui] run --watch` is hot reload: it stamp-reloads Views, writes `build/debug.dump`, and plays `build/inject.script`. Desktop/Mobile `scuzz run` exports `SCUZZ_UI_RECORD` and `SCUZZ_UI_DEBUG_DUMP`. The session records live OS input to `build/record.script` and writes `build/debug.dump`. Replay Headless with `scuzz run --headless --script build/record.script --dump build/debug.dump`. Stamp-watch keeps Signals. IO-only `run --watch` kills and reruns on source change. `scuzz lsp` wraps `scuzz check` JSON diagnostics. Panic, goto-def, and rename must use Scuzz source spans. Dump, inject, fuzz verdict, and coverage become one typed session schema. Text dump and script stay until that schema ships. Dump and script verbs: run `scuzz docs commands`.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
@@ -43,10 +43,10 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
 - Not imperative View trees (`View.addChild`); nested constructors only
 - Not classical / example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures, third-party test runners) for apps. Use **mutation + fuzz + properties + sim + determinism**, all in `scuzz`, instead. Examples survive as oracle-free **drivers** and as concrete-fact `.require` checks. The objection is fixture-diff suites as the primary strategy, not examples-as-workloads and not concrete facts stated as oracles
-- Not Flutter DevTools / VM patching. `[ui] run --watch` is in-process hot reload (stamp-reload Views). A live structural dump and stamp-driven inject are in. `scuzz watch` only rebuilds. IO-only `run --watch` kills and reruns.
+- Not Flutter DevTools / VM patching. `[ui] run --watch` is in-process hot reload (stamp-reload Views) with a live structural dump and stamp-driven inject. `scuzz watch` only rebuilds. IO-only `run --watch` kills and reruns.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
-- Not a big-bang self-hosting rewrite. Self-hosting lands in staged slices behind prerequisites ([Self-hosting](#self-hosting)). The newest GitHub `v*` bootstrap compiles the Scuzz toolchain. The product CLI is the Scuzz-emitted binary. No dual shipped product CLIs. The tagged bootstrap `scuzz` is not a second product CLI.
+- Not a big-bang self-hosting rewrite. Self-hosting landed in staged slices. The newest GitHub `v*` bootstrap compiles the Scuzz toolchain. The product CLI is the Scuzz-emitted binary. No dual shipped product CLIs. The tagged bootstrap `scuzz` is not a second product CLI.
 - Not a second IDE typer. External editors speak `scuzz lsp`. The dogfood IDE is a Scuzz `[ui]` app that consumes `scuzz check` JSON and `scuzz lsp`. It does not grow a parallel analyze frontend.
 
 ## Success bars
@@ -81,24 +81,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 
 The product CLI is Scuzz (`examples/cli`). `scripts/bootstrap.sh` fetches the newest GitHub `v*` release and compiles that CLI. Do not ship two toolchains. Product version lives in `VERSION`.
 
-**Prerequisites** (ranked close-list: [`gaps.md`](gaps.md)). Language track:
-
-- **Tail calls.** In: codegen lowers a self-tail call in a `def` body to a loop (`match` and `if` arms included). Proof: `examples/kernel` `countdown` / `countdownMatch`.
-- **Builder.** In: blessed `Builder.empty` / `Builder.append` / `Builder.result` assemble a string in linear time (copy-on-write grow-in-place when unique). Proof: `examples/kernel` `fillBuilder`.
-- **Scale proof.** In: `examples/scale` and `examples/jump` typecheck and run. Bind and lookup stay in-process.
-
-Verification track:
-
-- **Differential oracle under fuzz.** In: blessed `Oracle.sumTo` is an in-process closed-form Int. `examples/kernel` `sumTo` is a tail loop. Drive `sumToDiff` compares them under TestRuntime. The compare does not use `Sys.exec`.
-- **Structured generation.** In: drive oracles draw well-formed ADT terms. Nest depth is 3. A leaf case is nullary or all Int, String, or Bool fields. Shrink keeps a Term a Term. `examples/kernel` `termDiff` drives `Term`. Decode of a recursive ADT stops at a leaf at that bound.
-- **Mutation at scale.** In: mutation samples a budget slice of live-code sites. A probe that runs longer than 20 s is killed. Proof: `examples/scale`.
-
-**Staged slices**, in order. Each slice is a Scuzz package with its own campaign. Each slice must pass roundtrip, idempotence, and differential oracles before the next starts:
-
-1. `scuzz fmt` core in Scuzz. In: `examples/fmt` printer over `examples/syntax`. Oracles: parse-print roundtrip, fmt idempotence (`fmt-ok`). Pretty prints `::` with parser precedence (tighter than `==`, looser than `<<`) and right-assoc parens. A `for` guard prints `if pred`. Timeline session claims emit `effectHas` / fiber counts / `signalListLen` / `signalStrHas` as runtime kits. A tap lambda runs the body as IO only when that body is IO. `Signal.set` is not IO. Lexer and parser live in `examples/syntax` (path dep).
-2. Kernel typechecker in Scuzz. In: `examples/tyck` typechecks a kernel subset (unbound name, arithmetic mismatch, arity, def body, `IO.println` payload, unknown function, unknown kit name, comparison, `@main` body, arg type, function apply, function body vs `A => B`). Diagnostics report the real file stem, line, and column. A parse miss is not a type error. A duplicate substring does not steal the span. A second file keeps its own stem. Oracles: drive groups (`tyck-ok`). Checker lives in `examples/compiler` (path dep).
-3. Kernel codegen in Scuzz: LLVM IR text. In: `examples/codegen` lowers the kernel subset (hello, `if`, lists, enums, match). Oracles: emit idempotence (`ir-ok`). Emit lives in `examples/compiler` (path dep).
-4. CLI, driver, and the verification stack. In: `examples/cli` parses argv, emits help, and dispatches. `examples/compiler` holds the kernel typechecker, LLVM emit, `scuzz.toml` parse, compile pipeline, and clang argv. `Cli.runCmd` emits human or JSON diagnostics. `Emit.emitFull` / `Drive.compilePkg` / `Drive.emitDir` emit a linkable `.ll` from `src/` and path-dep packages. Oracles: empty-args `cli-ok`. The product CLI is the Scuzz-emitted binary. That binary compiles hello, the compiler library, and `examples/cli`. `scripts/fixedpoint-ll.sh` compares two self-compiles of `cli.ll` from the rebuilt compiler. `scuzz fuzz` fails when clang fails. The same command probes the live graph, runs drive oracles, mutation, `Timeline => Verdict` session claims, `--relate`, and `--differential`. `scuzz package` copies host, Android, and iOS artifacts. Product version lives in `VERSION`.
+`examples/syntax` holds the lexer and parser. `examples/compiler` holds the typechecker, LLVM emit, `scuzz.toml` parse, compile pipeline, and clang argv. `examples/fmt`, `examples/tyck`, and `examples/codegen` prove the printer, checker, and emitter on the kernel subset (`fmt-ok` / `tyck-ok` / `ir-ok`). `scripts/fixedpoint-ll.sh` compares two self-compiles of `cli.ll` from the rebuilt compiler.
 
 **Bootstrap.** `VERSION` names the product (`scuzz -V`). `scripts/bootstrap.sh` fetches the newest GitHub Release matching `v[0-9]*` and compiles the Scuzz compiler (`examples/cli`). Cut a release with the GitHub `release` workflow (`patch` / `minor` / `major` / `0.2.2`). It commits `VERSION`, tags, packages, and publishes. `package_release.sh` ships that binary. A later Scuzz `scuzz` compiles the next Scuzz. Users still install one `scuzz`. Toolchain sources (`examples/cli`, `examples/compiler`, `examples/syntax`) only call builtins that the newest `v*` bootstrap release already emits. A new builtin reaches toolchain sources one release after it lands.
 
@@ -118,7 +101,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO and impurity
 
-One failure channel: `SzError` on `IO[T]`. The fail payload is a `String` message. Direction: typed `E` on `IO` without environment `R`. Do not add `ZIO[R, E, A]`. Blessed kits only. No app-level `IO.delay`. No user FFI. Expand kits for time, regex, and hash after the thesis-critical language gaps close. Cooperative single-threaded fibers are the scheduler for CLI, server, and UI (no OS threads for IO). Park on sleep, empty take, incomplete get, and fd poll. Cancel runs `IO.ensure` / `Resource` finalizers. `Fiber.fork` starts a supervised child. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock, random, FS, net, and console. Simulation is hermetic: no live sockets; HTTP uses stubs and a loopback mailbox; `Sys.exec` / `Sys.spawn` fail; `Sys.getenv` is sealed except `SCUZZ_SERVE` / `SCUZZ_KIT`; `Sys.alive` / `Sys.kill` use a fake process table. Live `Net.serve` binds localhost. Live HTTP client kits take `http://` and `https://` with OpenSSL. Expand `Net` on this HTTP/1.0 stack. Do not expose POSIX sockets. Do not add a second HTTP client. TLS is for `https://` on this kit. Every new `Net` op keeps a TestRuntime fake. Surface catalogs: run `scuzz docs kits`. Panics abort through `sz_panic`. A panic must print a Scuzz file and line.
+One failure channel: `SzError` on `IO[T]`. The fail payload is a `String` message. Direction: typed `E` on `IO` without environment `R`. Do not add `ZIO[R, E, A]`. Blessed kits only. No app-level `IO.delay`. No user FFI. Expand kits for time, regex, and hash; ranked in [`gaps.md`](gaps.md). Cooperative single-threaded fibers are the scheduler for CLI, server, and UI (no OS threads for IO). Park on sleep, empty take, incomplete get, and fd poll. Cancel runs `IO.ensure` / `Resource` finalizers. `Fiber.fork` starts a supervised child. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock, random, FS, net, and console. Simulation is hermetic: no live sockets; HTTP uses stubs and a loopback mailbox; `Sys.exec` / `Sys.spawn` fail; `Sys.getenv` is sealed except `SCUZZ_SERVE` / `SCUZZ_KIT`; `Sys.alive` / `Sys.kill` use a fake process table. Live `Net.serve` binds localhost. Live HTTP client kits take `http://` and `https://` with OpenSSL. Expand `Net` on this HTTP/1.0 stack. Do not expose POSIX sockets. Do not add a second HTTP client. TLS is for `https://` on this kit. Every new `Net` op keeps a TestRuntime fake. Surface catalogs: run `scuzz docs kits`. Panics abort through `sz_panic`. A panic must print a Scuzz file and line.
 
 `Stream` is one finite pull interpreter. Constructors and transformers are `Stream[A]`. Bind a Stream with `=`. `<-` needs `IO`. Terminals (`compileToList` / `drain` / `head` / `last` / `count` / `fold` / `exists` / `forall` / `none`) are `IO`. `take` pulls until n outputs. `head` and `forall` / `none` / `exists` / `find` stop early. `range` / `iterate` / `unfold` allocate on pull. The unfold cap is 65536 pulled steps. Do not add backpressure, publishers, or a second stream kit.
 
@@ -185,11 +168,9 @@ Clear-dense, not cryptic-dense: nested declarative `View`s, inference, single-ex
 
 ### Signal, String, and errors
 
-Close these before more widgets or Net surface.
-
-- **Named Signals.** In: a Signal publishes its `for` binder name (`count = Signal.make(0)` → `"count"`). Claims and `Property.signal*` read that name. A missing name panics. Absence is not 0 or empty. `Verdict.alwaysHas` and `Verdict.afterHit` cover the always-visible and after-hit-shows folds. Dump slot ids stay an implementation detail. The integer-id kit is gone.
+- **Named Signals.** A Signal publishes its `for` binder name (`count = Signal.make(0)` → `"count"`). Claims and `Property.signal*` read that name. A missing name panics. Absence is not 0 or empty. `Verdict.alwaysHas` and `Verdict.afterHit` cover the always-visible and after-hit-shows folds. Dump slot ids stay an implementation detail.
 - **`Signal[T]`.** `Signal.make(value)` creates a typed cell. `Signal.makeN(name, value)` gives it an explicit observation name. `Signal.get` and `Signal.set` preserve the payload type. `Signal.map` maps `A => B`. Derived cells cache their values and update through chains. Counter uses a record cell and derived Int and String cells. `View.each` binds a list element type. Record lists dump their count. Record cells dump their payload. Widget signatures require the correct Signal type.
-- **UTF-8 `String`.** In: `Str.*` indexes Unicode code points (`len` / `charAt` / `slice` / `take` / `drop` / `takeRight` / `dropRight` / `reverse` / `indexOf` / `lastIndexOf`). An isolated or invalid byte counts as one code point (same walk as decode). `Str.byteLen` / `Str.byteSlice` keep bytes for protocol framing. `Str.padLeft` / `Str.padRight` measure width in code points and cycle complete code points. `Str.fromBool` is `"true"` / `"false"`. Case maps stay ASCII. The `Str` kit is closed: unknown `Str.*` fails `check`. String-producing `Str` ops type as `String`. TextField and editor caret offsets stay bytes. ASCII strings take a byte fast path in the runtime.
+- **UTF-8 `String`.** `Str.*` indexes Unicode code points (`len` / `charAt` / `slice` / `take` / `drop` / `takeRight` / `dropRight` / `reverse` / `indexOf` / `lastIndexOf`). An isolated or invalid byte counts as one code point (same walk as decode). `Str.byteLen` / `Str.byteSlice` keep bytes for protocol framing. `Str.padLeft` / `Str.padRight` measure width in code points and cycle complete code points. `Str.fromBool` is `"true"` / `"false"`. Case maps stay ASCII. The `Str` kit is closed: unknown `Str.*` fails `check`. String-producing `Str` ops type as `String`. TextField and editor caret offsets stay bytes. ASCII strings take a byte fast path in the runtime.
 - **Typed fail.** Check encodes `IO[E, A]`. `IO[A]` means `IO[String, A]`. `IO.fail(e)` takes `E`. `handleErrorWith` binds `E`. `flatMap` keeps one `E`. Kits still fail with `String`. The runtime retains the typed payload through failure and recovery. `examples/io` proves Int, record, and enum recovery. `IO.attempt(io)` preserves both types in `Result[E, A]`. Do not add environment `R`. Do not add user FFI.
 
 ### Modules and source shape
@@ -206,7 +187,7 @@ Direction: payload **enums** / **`record`** + thin **traits**-as-interfaces. Mon
 
 ### Properties, simulation, mutation, and verification
 
-The current implementation is described below. Scenario worlds are in. See [Scenario worlds](#scenario-worlds).
+See [Scenario worlds](#scenario-worlds).
 
 App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, properties, simulation, and determinism**. All are first-class in the language and `scuzz` tooling. The split is **oracles in `*.scuzz_verify` and live bodies, drivers as the test surface**:
 
@@ -250,9 +231,9 @@ count.scuzz_verify        # Timeline => Verdict session claims and Bool drive or
 
 ### Scenario worlds
 
-**In.** A scenario defines one world in which the fuzzer exercises the app. Claims in `*.scuzz_verify` state app contracts across worlds. A contract can have a condition: an acknowledged save must survive restart. A scenario does not select or disable claims. A passing campaign provides evidence for the executions it explores. It does not prove correctness for all possible worlds.
+A scenario defines one world in which the fuzzer exercises the app. Claims in `*.scuzz_verify` state app contracts across worlds. A contract can have a condition: an acknowledged save must survive restart. A scenario does not select or disable claims. A passing campaign provides evidence for the executions it explores. It does not prove correctness for all possible worlds.
 
-The MVP supports one `*.scuzz_scenario` file per project that uses scenarios. That file contains one setup entrypoint, simulation replacements, all workload drivers, private helpers, and resource cleanup. Multiple named scenarios and campaign selection remain later work. One scenario can still generate many initial states through driver arguments. Setup takes no generated params. Generated setup inputs stay with later multiple-worlds work.
+One `*.scuzz_scenario` file per project that uses scenarios. That file contains one setup entrypoint, simulation replacements, all workload drivers, private helpers, and resource cleanup. Multiple named scenarios and campaign selection remain later work. One scenario can still generate many initial states through driver arguments. Setup takes no generated params. Generated setup inputs stay with later multiple-worlds work.
 
 | File | Target role |
 | --- | --- |
@@ -298,7 +279,7 @@ Keep purity checkable (pure `A` vs `IO` vs session). Total expr core. Signals as
 
 Oracles divide into three tiers by the judgment they need.
 
-- **Universal oracles need no intent.** Panic, `SzError`, and nondeterminism reject a run with no human review. This tier is in: double-run same-seed determinism, heap block count and retain balance return to baseline after session teardown (byte drift at equal count is retained end-state, not a leak), acquire/release pairing within a timeline, finalizers run on cancel, no parked fibers at quiescence, live graph still paints or IO still exits 0 with no scenario wrap, verify-graph idle paint for `[ui]`, live/verify dump equality on packages with no scenario file. Rules stay mechanical.
+- **Universal oracles need no intent.** Panic, `SzError`, and nondeterminism reject a run with no human review. This tier: double-run same-seed determinism, heap block count and retain balance return to baseline after session teardown (byte drift at equal count is retained end-state, not a leak), acquire/release pairing within a timeline, finalizers run on cancel, no parked fibers at quiescence, live graph still paints or IO still exits 0 with no scenario wrap, verify-graph idle paint for `[ui]`, live/verify dump equality on packages with no scenario file. Rules stay mechanical.
 - **Claims need stated intent.** Humans and agents write `Timeline => Verdict` predicates and drive oracles in `*.scuzz_verify`. The verify-file diffs are the review checkpoint.
 - **Descriptive observations carry no authority.** `classify` counts stay machine-maintained.
 
@@ -431,37 +412,13 @@ navigation remain later slices.
 
 ## Open work
 
-The browser target uses the shared compiler, Signals, View layout, and
-software renderer. Browser text uses matching font measurement and rasterization.
-`scuzz package --target web` writes static assets. It downloads the pinned
-Emscripten SDK into the host cache on the first build. Later builds reuse it.
-SDK setup stays inside the build process. It does not change shell startup files.
-Scuzz Docs uses Index Book
-navigation and a live counter. It runs below a GitHub Pages project path.
-The browser proof checks navigation, state retention, keyboard, touch, wheel,
-resize, and display scale in Chromium, Firefox, and WebKit. Headless runs the Docs Timeline claims.
-Section IDs stay stable when titles change. Browser links support new tabs.
-The DOM exposes shared controls and headings. Browser fields commit Unicode
-text and composition to shared Signals. Code blocks have a shared Copy control.
-Phone emulation covers Chromium and WebKit. Real phone and screen-reader checks
-remain open. The SDK includes the web build files. The `web` CI slice owns these checks.
-The `Deploy Docs` workflow builds and checks the site on pushes to `main`.
-It publishes static assets through GitHub Pages. Manual runs also use `main`.
-Browser limits: [`compatibility.md`](compatibility.md#browser-target).
+Ranked list: [`gaps.md`](gaps.md). Next: reduce the remaining compiler campaign cost, then add the typed session schema. Keep type preservation through kits and emitted code as the first gate. Extend native composition proofs before more kit surface. Accepted compositions must compile and preserve values. Invalid compositions must fail `check`.
 
-Keep type preservation through kits and emitted code as the first gate. Extend native composition proofs before more kit surface. Record construction and copy proofs cover scalar boxing and retained pointer fields. Native proofs cover named IO receivers, scalar maps, retained values, and typed recovery. Native proofs also cover generic Signals and typed attempt results. Workload search has a single-event reduction and replay proof. Next: reduce the remaining compiler campaign cost, then add the typed session schema. Accepted compositions must compile and preserve values. Invalid compositions must fail `check`. Ranked list: [`gaps.md`](gaps.md). `check` diagnostics, LSP goto-def, rename, hover, completion, tokens, and panic use recorded spans.
-
-Linux CI builds one product CLI and shares it across eight independent check jobs. The `linux-headless` check requires all jobs to pass. Typechecker and code-generation corpus replays run in separate jobs. The fuzz job prints the duration and exit status of each campaign. The fixed-point proof owns the CLI self-compile smoke check. The hello slice checks hello and the formatter. The fixed-point proof stops when two adjacent self-compiles emit identical IR. Package builds share one parsed graph between Check and Emit. Function lookup uses the native list filter and keeps declaration order. Generic and ordinary kit calls share one signature for arity, argument, and result checks. Source locations use native string scans for LF counts and columns. String concatenation copies bytes once. It uses stored ASCII metadata when both inputs are ASCII. A cold live build of `examples/tyck` uses about 760 MiB on the development host.
-
-Set `SCUZZ_COMPILER_FUZZ=1` to include compiler campaigns in `scripts/ci-fuzz.sh`. They use copied sources and a fixed executable in a temporary directory. Native checker and code-generation oracle builds still take several minutes. Keep these campaigns opt-in until their time and memory fit default CI. Failed campaigns keep their artifacts.
-
-Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. `scuzz ide` launches the bundled `[ui]` package (`examples/editor` / `SCUZZ_HOME/ide`). Headless is part of every UI slice. `scuzz fuzz --differential` compares live structural dumps across render backends.
-
-Self-hosting staged slices are in. The product CLI is Scuzz. `scripts/fixedpoint-ll.sh` compares two self-compiles of `cli.ll` from the rebuilt compiler. Bootstrap fetches the newest GitHub `v*` release. Product version lives in `VERSION`.
+Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. Real phone and screen-reader checks on the browser target remain open. Browser limits: [`compatibility.md`](compatibility.md#browser-target).
 
 Deferred, not current work: mining and the judgment loop (see [Oracle authority](#oracle-authority)). HTTP status, bind, HTTPS serve, registry, Windows, OS threads, `scuzz eval`, and kit docs stay later.
 
-App authors: run `scuzz docs start`. Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. GUI apps also target WebAssembly. Scuzz Docs is the first browser app. Hardware device runs stay open.
+App authors: run `scuzz docs start`. Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. GUI apps also target WebAssembly. Scuzz Docs is the first browser app.
 
 ## Risks
 
@@ -472,7 +429,7 @@ App authors: run `scuzz docs start`. Vertical slices over breadth. No Desktop-on
 | Effects too weak or too heavy | Builtin IO. Pure `View`. `Ui` at session boundary |
 | Hidden nondeterminism | Closed impurity + hermetic TestRuntime + deterministic `*.scuzz_scenario`. No live sockets under sim. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Sys.getenv` is sealed except `SCUZZ_SERVE` / `SCUZZ_KIT`. `Sys.alive` / `Sys.kill` use a fake process table. Double-run same-seed determinism is a universal oracle |
 | Properties become brittle dump goldens | Named observations on Signals and controls. Four `Verdict` helpers for the repeated folds. Strict replacement/live pairing in `check`. Mutation kills weak oracles. Universal live-graph paint is not a dump fixture |
-| `String` as bytes mangles UI text | UTF-8 `String` before more text features ([`gaps.md`](gaps.md)) |
+| `String` as bytes mangles UI text | `Str.*` indexes Unicode code points; `Str.byteLen` / `Str.byteSlice` keep bytes for framing. Case maps stay ASCII |
 | LSP span misses the token | One JSON schema. Check diagnostics and LSP goto-def, rename, hover, completion, and tokens use recorded spans. Panic prints the enclosing def file and line. The dogfood IDE consumes that schema |
 | Sim becomes Mockito | Only qualified IO replacements. No stubbing pure `View`/`Signal`. Kits stay TestRuntime |
 | Drivers become integration tests | `check` rejects `Property.*` in scenario files. Correctness lives in `*.scuzz_verify` and live-module `.require` |
@@ -484,7 +441,7 @@ App authors: run `scuzz docs start`. Vertical slices over breadth. No Desktop-on
 | “Almost Scala” confusion | Explicit non-goals. Language direction above. Run `scuzz docs language`. |
 | Watch confused with hot reload | `scuzz watch` rebuilds. `[ui]` `run --watch` is hot reload (stamp-reload Views). IO-only `run --watch` kills and reruns |
 | IDE typer ≠ batch typer | One JSON schema. LSP wraps `scuzz check`. The dogfood IDE consumes that schema. It does not grow a second typer |
-| Dogfood IDE before editor primitives | Close IDE prerequisites in [`gaps.md`](gaps.md). `scuzz ide` launches the bundled editor. Do not add a `scuzz-ide` binary |
+| Dogfood IDE before editor primitives | `scuzz ide` launches the bundled editor (`examples/editor`). Headless stays a peer. Do not add a `scuzz-ide` binary |
 | Skia weight | pinned CPU prebuilt default. `sk_sw` opt-out |
 | Desktop-only features | Headless peer rule. Editor keys, caret, selection, clipboard, compose, and inject verbs share one input alphabet |
 | Treating UI as the only product | UI is a primary path (Flutter-shaped). CLI/server/desktop/mobile are peers |
