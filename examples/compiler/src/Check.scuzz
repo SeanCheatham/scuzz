@@ -1257,9 +1257,6 @@ def enHasParams1(h: En, rest: List[En], name: String): Bool =
 def isIo(t: String): Bool =
   t == "IO" || Str.startsWith(t, "IO[")
 
-def ioEq(a: String, b: String): Bool =
-  isIo(a) && isIo(b) && tyEq(ioErr(a), ioErr(b)) && tyEq(ioOk(a), ioOk(b))
-
 def ioErr(t: String): String =
   Type.show(Type.ioErr(Type.parse(t)))
 
@@ -1462,9 +1459,6 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   case (sb, _) => if (oa < 0) b else (if (sa == "") sb else sa, oa)
 }
   }
-
-def checkProg(p: Prog): Out =
-  checkProgOwn(p, [])
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
   p match {
@@ -1732,9 +1726,6 @@ def checkFilesOwn(files: List[(String, String)], stems: List[String]): String =
 def check3(files: List[(String, String)], o: Out): String =
   if (hasErr(o)) Str.concat("[", Str.concat(diagJson(files, o), "]")) else "[]"
 
-def unclaimedJson(files: List[(String, String)]): String =
-  unclaimedJsonVer(files, [])
-
 def unclaimedJsonVer(files: List[(String, String)], vers: List[String]): String =
   unclaimedWrap(unclaimedLines(files, vers))
 
@@ -1842,9 +1833,6 @@ def human3(files: List[(String, String)], o: Out): String =
 
 def typeOfEns(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], mod: String): String =
   infer(e, bindParams(ps, ("self", "A") :: ("#mod", mod) :: noEnv()), defs, ens).ty
-
-def typeOf(e: Expr, defs: List[Fun], ps: List[Param]): String =
-  typeOfEns(e, defs, [], ps, "Main")
 
 def specializeEnums(ens: List[En], ty: String): List[En] =
   if (List.isEmpty(ens)) ens else specializeEnum(List.at(ens, 0), ty) :: specializeEnums(List.tail(ens), ty)

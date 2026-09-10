@@ -1992,15 +1992,6 @@ def emitViewListTile(code: String, vals: List[String], owns: List[Bool], prefix:
 def emitViewListTile1(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_list_tile(ptr ", Str.concat(arg0(vals), ", ptr null)")))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), pct(prefix, "v"), true)
 
-def sigElemFlag(isStr: Bool): String =
-  if (isStr) "1" else "0"
-
-def sigElemIsStr(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Bool =
-  sigElemIsStrTy(listElemTy(exprRetTyEns(e, defs, ens, ps, loc)))
-
-def sigElemIsStrTy(t: String): Bool =
-  t == "String"
-
 def emitViewEachCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(List.tail(args))) emitViewEach1(emitExpr(List.at(args, 0), Str.concat(prefix, "_src"), strs, defs, ens, ps, loc), prefix) else emitViewEachJoin(emitExpr(List.at(args, 0), Str.concat(prefix, "_src"), strs, defs, ens, ps, loc), List.at(List.tail(args), 0), eachElemTy(List.at(args, 0), defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc)
 
@@ -2443,9 +2434,6 @@ def exprRetTyEns(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: 
 
 def locMod(loc: String): String =
   if (modOfLoc(loc) == "") "Main" else modOfLoc(loc)
-
-def tupExprTy(xs: List[Expr], defs: List[Fun], ps: List[Param]): String =
-  exprRetTy(Expr.ETuple(xs), defs, ps)
 
 def nonemptyTy(ty: String, e: Expr, defs: List[Fun], ps: List[Param]): String =
   if (ty != "") ty else if (exprIsI64(e, ps, defs)) "Int" else ""
@@ -3672,9 +3660,6 @@ def payloadIntTy(ft: String, _ens: List[En]): Bool =
 def isTyParam(ft: String): Bool =
   Str.len(ft) == 1 && Str.charAt(ft, 0) >= 65 && Str.charAt(ft, 0) <= 90
 
-def isPtrName(ft: String, ens: List[En]): Bool =
-  ft == "String" || ft == "Float" || Str.startsWith(ft, "List") || Str.startsWith(ft, "IO") || hasEn(ens, tyHead(ft))
-
 def tyHead(ft: String): String =
   tyHeadAt(ft, 0)
 
@@ -4584,9 +4569,6 @@ def emitOkTailSlot2(pat: String, body: Expr, strs: List[String], defs: List[Fun]
 def emitOkTailSlot3(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
   if (isTuplePat(pat)) emitTailLeafTyped(rewriteTuple(pat, body, "body", i, tys), strs, defs, ens, ps, stemBps(pat, "body", i, tys, ps), loc, i) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitTailLeafTyped(rewriteFields(splitPat(patBind(pat)), body, "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat))), strs, defs, ens, ps, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), "body", i, 0, ps), loc, i) else emitTailLeafBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, strs, defs, ens, ps, patternPayloadParams(pat, "body", i, ens, ps), loc, i)
 
-def emitTailLeaf(body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
-  emitTailLeafTyped(body, strs, defs, ens, ps, ps, loc, i)
-
 def emitTailLeafTyped(body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int): Slot =
   Slot(emitSelfTailTyped(body, Str.concat("body_a0_", Str.fromInt(i)), strs, defs, ens, ps, bps, loc), "tco", false)
 
@@ -5010,14 +4992,8 @@ def paramNames1(p: Param, rest: List[Param]): List[String] =
     case Param(n, _, _, _) => n :: paramNames(rest)
   }
 
-def nameIdx(ns: List[String], name: String, i: Int): Int =
-  if (i >= List.len(ns)) 0 - 1 else if (List.at(ns, i) == name) i else nameIdx(ns, name, i + 1)
-
 def fakeBind(i: Int): String =
   Str.concat("__f", Str.fromInt(i))
-
-def bindsComma(i: Int, n: Int): String =
-  if (i >= n) "" else if (i + 1 == n) fakeBind(i) else Str.concat(fakeBind(i), Str.concat(", ", bindsComma(i + 1, n)))
 
 def bindsSelect(i: Int, n: Int, idx: Int): String =
   if (i >= n) "" else if (i + 1 == n) bindOrWild(i, idx) else Str.concat(bindOrWild(i, idx), Str.concat(", ", bindsSelect(i + 1, n, idx)))
@@ -6095,9 +6071,6 @@ def emitFiles(files: List[(String, String)]): String =
 
 def emitFilesGot(p: Prog, strs: List[String], files: List[(String, String)]): String =
   emitProg(p, internSigProg(p, files, internRel(p, strs)), files)
-
-def emitFullFiles(files: List[(String, String)]): String =
-  Str.concat(preamble(), emitFiles(files))
 
 def decl(s: String): String =
   Str.concat("declare ", Str.concat(s, nl()))

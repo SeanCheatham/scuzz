@@ -567,12 +567,6 @@ def tapNEnv(toml: String, tap: Bool): String =
 def tapNEnvMan(m: Man, tap: Bool): String =
   if (!tap || Manifest.uiTap(Manifest.manUi(m)) == "") "" else Str.concat("SCUZZ_UI_TAP_N=", Str.concat(Manifest.uiTap(Manifest.manUi(m)), " "))
 
-def snapEnv(outDir: String): String =
-  runEnvOf(outDir, true, "")
-
-def snapEnvOf(outDir: String, toml: String): String =
-  runEnvOf(outDir, true, toml)
-
 def checkDir(dir: String, json: Bool): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => checkDirMan(dir, json, Manifest.parse(toml)))
 

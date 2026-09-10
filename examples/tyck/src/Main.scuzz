@@ -138,9 +138,6 @@ def wantFailOk(): String =
 def srcFailMis(): String =
   "@main def main: IO[Unit] =\n  IO.fail(\"nope\")\n"
 
-def wantFailMis(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: def boom body IO[String, A] does not match declared IO[Err, Int]\",\"file\":\"Main.scuzz\",\"line\":4,\"column\":3,\"end_line\":4,\"end_column\":10}]"
-
 def srcMapHandle(): String =
   "def load(path: String, fallback: String): IO[String] =\n  Fs.read(path).map(s => Str.concat(s, \"!\")).handleErrorWith(_ => IO.pure(fallback))\n\n@main def main: IO[Unit] =\n  IO.println(\"ok\")\n"
 
@@ -152,9 +149,6 @@ def srcUtil(): String =
 
 def srcMainOk(): String =
   "@main def main: IO[Unit] =\n  IO.println(\"ok\")\n"
-
-def wantUtil(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: in bad: arithmetic needs Int or Float, got Int and String\",\"file\":\"Util.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":4}]"
 
 def srcJoinMis(): String =
   "@main def main: IO[Unit] =\n  IO.println(List.join([1, 2], \",\"))\n"
@@ -270,9 +264,6 @@ def tyckFiles(): Bool =
 def srcLeftover(): String =
   """def n(): Int = 0b21
 """
-
-def wantLeftover(): String =
-  "[{\"severity\":\"error\",\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":16,\"end_line\":1,\"end_column\":17}]"
 
 def srcBinBad(): String =
   """def n(): Int = 0b21
@@ -428,38 +419,23 @@ def srcViewNope(): String =
   Ui.run(_ => View.nope())
 """
 
-def wantViewNope(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unknown function View.nope\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":15,\"end_line\":2,\"end_column\":24}]"
-
 def srcViewArity(): String =
   """@main def main: IO[Unit] =
   Ui.run(_ => View.button(1))
 """
 
-def wantViewArity(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: View.button expects 2 args, got 1\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":15,\"end_line\":2,\"end_column\":26}]"
-
 def srcSigGet(): String =
   "@main def main: IO[Unit] =\n  IO.println(Str.fromInt(Signal.get(\"x\")))\n"
-
-def wantSigGet(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: Signal.get arg type mismatch: expected Signal, got String\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":36,\"end_line\":2,\"end_column\":39}]"
 
 def srcUiRun(): String =
   """@main def main: IO[Unit] =
   Ui.run(1)
 """
 
-def wantUiRun(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: Ui.run arg type mismatch: expected A => View, got Int\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":10,\"end_line\":2,\"end_column\":11}]"
-
 def srcIoNope(): String =
   """@main def main: IO[Unit] =
   IO.notAKit(1)
 """
-
-def wantIoNope(): String =
-  "[{\"severity\":\"error\",\"message\":\"type error: unknown function IO.notAKit\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":13}]"
 
 def srcTimeoutOk(): String =
   "@main def main: IO[Unit] =\n  IO.timeout(50, IO.println(\"x\")).flatMap(_ => IO.pure(()))\n"
@@ -472,9 +448,6 @@ def tyckAny(): Bool =
 
 def allOk(): Bool =
   tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny()
-
-def tyckLive(): Bool =
-  tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcSysExit(), wantSysExit())
 
 def dumpFail(): String =
   if (!tyckCore()) "tyckCore" else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) "tyckFail" else if (!tyckParse()) "tyckParse" else if (!tyckLam()) "tyckLam" else if (!tyckAdt()) "tyckAdt" else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
