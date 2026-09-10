@@ -65,6 +65,24 @@ int main(void) {
     assert(px[0] == 0 && px[1] == 0 && px[2] == 0 && px[3] == 0);
   }
 
+  /* Translucent SrcOver keeps premultiplied alpha: a 50% fill over a
+   * transparent clear stays at alpha 128. It must not force opaque. A
+   * second fill grows the alpha. It must not stay at 255. */
+  {
+    unsigned a1;
+    sk_paint_set_color(paint, sk_color_rgba(200, 100, 50, 128));
+    sk_canvas_draw_rect(canvas, 0, 0, 4, 4, paint);
+    px = sk_surface_peek_pixels(surf, &px_len);
+    assert(px && px_len == 32 * 32 * 4);
+    a1 = px[(1 * 32 + 1) * 4 + 3];
+    assert(a1 == 128);
+    assert(px[(1 * 32 + 1) * 4] >= 99 && px[(1 * 32 + 1) * 4] <= 102);
+    sk_canvas_draw_rect(canvas, 0, 0, 4, 4, paint);
+    px = sk_surface_peek_pixels(surf, &px_len);
+    assert(px[(1 * 32 + 1) * 4 + 3] > a1);
+    assert(px[(1 * 32 + 1) * 4 + 3] < 255);
+  }
+
   sk_paint_delete(paint);
   sk_surface_unref(surf);
   puts("ffi-skia clip tests ok");
