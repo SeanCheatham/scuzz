@@ -54,7 +54,7 @@ Env:
 
 Examples:
   curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh
-  SCUZZ_VERSION=v0.2.1 curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh
+  curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | SCUZZ_VERSION=v0.2.1 sh
   PREFIX=/usr/local ./scripts/install.sh
   RELEASE_TGZ=dist/scuzz-${TRIPLE}.tar.gz ./scripts/install.sh
   SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh

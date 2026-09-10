@@ -153,17 +153,29 @@ static void put_pixel(SkSurface *s, int x, int y, SkColor color) {
     p[0] = (uint8_t)((color.r * color.a + p[0] * ia) / 255);
     p[1] = (uint8_t)((color.g * color.a + p[1] * ia) / 255);
     p[2] = (uint8_t)((color.b * color.a + p[2] * ia) / 255);
-    p[3] = 255;
+    /* SrcOver alpha: src_a + dst_a * (1 - src_a). Do not force opaque. A
+     * translucent draw over a transparent clear keeps real alpha, like the
+     * premul Skia backend. */
+    p[3] = (uint8_t)(color.a + (p[3] * ia) / 255);
   }
 }
 
 /* Clear replaces pixels (Src mode), like SkCanvas::clear. It does not
- * blend. A clear to transparent erases the surface. Respects the clip. */
+ * blend. A clear to transparent erases the surface. Respects the clip.
+ * The surface is premul, so a translucent clear stores r*a/255. */
 void sk_canvas_clear(SkCanvas *canvas, SkColor color) {
   SkSurface *s;
   int x, y, x0, y0, x1, y1;
+  uint8_t pr = color.r;
+  uint8_t pg = color.g;
+  uint8_t pb = color.b;
   if (!canvas || !canvas->surface)
     return;
+  if (color.a < 255) {
+    pr = (uint8_t)((color.r * color.a) / 255);
+    pg = (uint8_t)((color.g * color.a) / 255);
+    pb = (uint8_t)((color.b * color.a) / 255);
+  }
   s = canvas->surface;
   x0 = canvas->clip_x0 > 0 ? canvas->clip_x0 : 0;
   y0 = canvas->clip_y0 > 0 ? canvas->clip_y0 : 0;
@@ -173,12 +185,19 @@ void sk_canvas_clear(SkCanvas *canvas, SkColor color) {
     uint8_t *row = s->pixels + (size_t)y * (size_t)s->width * 4;
     for (x = x0; x < x1; x++) {
       uint8_t *p = row + (size_t)x * 4;
-      p[0] = color.r;
-      p[1] = color.g;
-      p[2] = color.b;
+      p[0] = pr;
+      p[1] = pg;
+      p[2] = pb;
       p[3] = color.a;
     }
   }
+}
+
+/* Floor, not truncate: a rect at x = -0.5 covers pixel -1. A plain (int)
+ * cast shifts negative geometry right by up to one pixel. */
+static int sw_floor_int(float v) {
+  int i = (int)v;
+  return (float)i > v ? i - 1 : i;
 }
 
 void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
@@ -186,10 +205,10 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
   int x0, y0, x1, y1, ix, iy;
   if (!canvas || !canvas->surface || !paint || w <= 0 || h <= 0)
     return;
-  x0 = (int)x;
-  y0 = (int)y;
-  x1 = (int)(x + w);
-  y1 = (int)(y + h);
+  x0 = sw_floor_int(x);
+  y0 = sw_floor_int(y);
+  x1 = sw_floor_int(x + w);
+  y1 = sw_floor_int(y + h);
   if (paint->stroke) {
     int t = (int)(paint->stroke_width < 1.f ? 1.f : paint->stroke_width);
     for (iy = y0; iy < y1; iy++)
@@ -252,10 +271,10 @@ void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
     canvas->clip_y1 = canvas->clip_y0;
     return;
   }
-  x0 = (int)x;
-  y0 = (int)y;
-  x1 = (int)(x + w);
-  y1 = (int)(y + h);
+  x0 = sw_floor_int(x);
+  y0 = sw_floor_int(y);
+  x1 = sw_floor_int(x + w);
+  y1 = sw_floor_int(y + h);
   if (x0 > canvas->clip_x0)
     canvas->clip_x0 = x0;
   if (y0 > canvas->clip_y0)
@@ -447,12 +466,12 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
   baseline = (int)(size - 1.f + 0.5f);
   if (baseline < 0)
     baseline = 0;
-  cx = (int)x;
+  cx = sw_floor_int(x);
   for (p = text; *p;) {
     int clen = sk_utf8_clen(p);
     unsigned char ch = (unsigned char)*p;
     const uint8_t *glyph;
-    int gy = (int)y - baseline;
+    int gy = sw_floor_int(y) - baseline;
     if (clen < 1)
       clen = 1;
     if (ch < 32 || ch > 126)
@@ -525,16 +544,44 @@ float sk_paint_get_text_size(const SkPaint *paint) {
 
 int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes, size_t *out_len) {
   uint8_t *mem;
+  uint8_t *straight = NULL;
   size_t len = 0;
   size_t px_len = 0;
+  size_t i;
   const uint8_t *px;
   if (!surface || !out_bytes || !out_len)
     return 0;
   px = sk_surface_peek_pixels(surface, &px_len);
   if (!px)
     return 0;
+  /* Pixels are premul. PNG stores straight alpha. Unpremultiply first. */
+  for (i = 3; i < px_len; i += 4) {
+    if (px[i] != 255)
+      break;
+  }
+  if (i < px_len) {
+    size_t j;
+    straight = (uint8_t *)malloc(px_len);
+    if (!straight)
+      return 0;
+    memcpy(straight, px, px_len);
+    for (j = 0; j + 3 < px_len; j += 4) {
+      unsigned a = straight[j + 3];
+      if (a == 0) {
+        straight[j] = 0;
+        straight[j + 1] = 0;
+        straight[j + 2] = 0;
+      } else if (a < 255) {
+        straight[j] = (uint8_t)((straight[j] * 255u + a / 2) / a);
+        straight[j + 1] = (uint8_t)((straight[j + 1] * 255u + a / 2) / a);
+        straight[j + 2] = (uint8_t)((straight[j + 2] * 255u + a / 2) / a);
+      }
+    }
+    px = straight;
+  }
   mem = sz_png_encode_rgba(px, surface->width, surface->height,
                            surface->width * 4, &len);
+  free(straight);
   if (!mem)
     return 0;
   *out_bytes = mem;

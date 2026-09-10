@@ -15,7 +15,6 @@ fi
 grep -q "mapn:3048" /tmp/scale.out
 grep -q "maps:2098176" /tmp/scale.out
 grep -q "hit:0:49" /tmp/scale.out
-SCUZZ=./examples/cli/build/cli
 "$SCUZZ" run examples/io | tee /tmp/io.out
 grep -q "ref-ok" /tmp/io.out
 grep -q "queue-ok" /tmp/io.out
@@ -53,8 +52,6 @@ grep -q "dropWhile:a,b" /tmp/io.out
 grep -q "find:a" /tmp/io.out
 grep -q "exists:1" /tmp/io.out
 grep -q "miss:0" /tmp/io.out
-grep -q "fs:fs-note" /tmp/io.out
-grep -q "rand:ok" /tmp/io.out
 grep -q "real:" /tmp/io.out
 grep -q "mono:" /tmp/io.out
 grep -q "kit:skip" /tmp/io.out

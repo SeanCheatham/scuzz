@@ -225,12 +225,12 @@ static void script_parse_key_token(const char *tok, char *name, size_t cap,
                                    int *mods, int *repeat) {
   char buf[128];
   char *p;
-    char *part;
-    *mods = 0;
+  char *part;
+  if (!name || cap == 0 || !mods)
+    return;
+  *mods = 0;
   if (repeat)
     *repeat = 0;
-  if (!name || cap == 0)
-    return;
   name[0] = '\0';
   if (!tok)
     tok = "";
