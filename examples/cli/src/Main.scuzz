@@ -341,7 +341,29 @@ def mutationScoreOk(): Bool =
 """) == "[]" && mutationCountsOk()
 
 def mutationCountsOk(): Bool =
-  coverageCountsOk() && mutationSampleOk()
+  coverageCountsOk() && mutationSampleOk() && summaryJsonOk()
+
+def summaryJsonOk(): Bool =
+  summaryJsonSample() == wantSummaryJson() && summaryJsonEmpty() == wantSummaryJsonEmpty() && jsonObjOk(summaryJsonSample())
+
+def summaryJsonSample(): String =
+  Verify.summaryJson(true, 42, 16, 11, 0, 3, 0, "1", "fuzz/repro.toml", 2, 1, 1, 5, 100, false, """small 3 2
+""", 1, ("Main.scuzz:1:5", true) :: ("Main.scuzz:2:5", false) :: [])
+
+def wantSummaryJson(): String =
+  "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":true,\"seed\":42,\"iterations\":16,\"search\":11,\"search_failures\":0,\"corpus\":3,\"repro\":\"fuzz/repro.toml\"},\"corpus\":{\"entries\":3,\"failures\":0,\"promoted\":1},\"classify\":[{\"name\":\"small\",\"true\":3,\"false\":2}],\"mutate\":{\"killed\":2,\"survived\":1,\"inert\":1,\"ran\":5,\"sites\":100,\"oracles\":false,\"invalid\":1,\"score\":0.666},\"coverage\":{\"total\":2,\"reached\":1,\"regions\":[{\"location\":\"Main.scuzz:1:5\",\"reached\":true},{\"location\":\"Main.scuzz:2:5\",\"reached\":false}]}}"
+
+def summaryJsonEmpty(): String =
+  Verify.summaryJson(false, 1, 0, 0, 0, 0, 0, "0", "", 0, 0, 0, 0, 0, false, "", 0, [])
+
+def wantSummaryJsonEmpty(): String =
+  "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":false,\"seed\":1,\"iterations\":0,\"search\":0,\"search_failures\":0,\"corpus\":0},\"corpus\":{\"entries\":0,\"failures\":0,\"promoted\":0},\"mutate\":{\"killed\":0,\"survived\":0,\"inert\":0,\"ran\":0,\"sites\":0,\"oracles\":false,\"invalid\":0},\"coverage\":{\"total\":0,\"reached\":0,\"regions\":[]}}"
+
+def jsonObjOk(s: String): Bool =
+  Json.parse(s) match {
+    case Result.Ok(j) => Json.isObj(j)
+    case Result.Err(_) => false
+  }
 
 def coverageCountsOk(): Bool =
   coverageShifted("""def hit(): Int = 1

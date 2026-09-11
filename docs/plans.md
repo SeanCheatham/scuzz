@@ -54,8 +54,31 @@ Document `v=1`:
 - [x] `docs/vision.md`: schema paragraph names the landed inject surface.
 - [x] `docs/gaps.md`: gap 1 residual = fuzz verdict, coverage.
 
+## Slice 3: fuzz verdict surface
+
+`scuzz fuzz` writes `build/fuzz/summary.json` next to `summary.toml`. The text summary stays until the schema covers every surface.
+
+Document `v=1`:
+
+- Envelope: `{"v":1,"kind":"fuzz",...}`.
+- `fuzz`: `{"ok":B,"seed":N,"iterations":N,"search":N,"search_failures":N,"corpus":N,"repro":"..."}`. `repro` is absent when empty.
+- `corpus`: `{"entries":N,"failures":N,"promoted":N}`.
+- `classify`: `[{"name":"...","true":N,"false":N}]`. Absent when no labels.
+- `mutate`: `{"killed":N,"survived":N,"inert":N,"ran":N,"sites":N,"oracles":B,"invalid":N,"score":F}`. `score` is absent when the denominator is zero.
+- `coverage`: `{"total":N,"reached":N,"regions":[{"location":"...","reached":B}]}`.
+
+### Status
+
+- [x] `examples/compiler/src/Verify.scuzz`: `summaryJson` builders. `coverageRowsOf` shares one row computation between the text and JSON writers.
+- [x] `examples/compiler/src/Drive.scuzz`: `fuzzWriteSummary` writes `summary.json` next to `summary.toml`.
+- [x] `examples/cli/src/Main.scuzz`: oracle pins the JSON text and a `Json.parse` round-trip.
+- [x] `scripts/ci-fuzz.sh`: validate `summary.json` with `python3` json on the bad-example and io campaigns.
+- [x] `examples/manual/src/Topics.scuzz`: verify topic states the `summary.json` rule and the `v=1` sections.
+- [x] `docs/vision.md`: schema paragraph names the landed fuzz verdict surface.
+- [x] `docs/gaps.md`: gap 1 residual = typed a11y tree, typed list/value payloads. Gap 2 residual = branch coverage.
+
 ## Later slices (not started)
 
-- Fuzz verdict: `build/fuzz/summary` in the schema. Text `summary.toml` stays until then.
-- Coverage: source-region coverage output in the schema (gaps.md thesis-critical 2).
 - Typed a11y tree and typed list/value signal payloads.
+- Text dump, script, and summary removal once the schema covers every surface.
+- Branch coverage (gaps.md thesis-critical 2).

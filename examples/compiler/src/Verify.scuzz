@@ -359,11 +359,56 @@ def summaryMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, ora
 def summaryScore(killed: Int, sites: Int): String =
   if (sites <= 0) "" else kvn("score", score3(killed, sites))
 
-def coverageToml(files: List[(String, String)], compiled: List[(String, String)], hits: String): String =
-  coverageProg(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))
+def jb(b: Bool): String =
+  if (b) "true" else "false"
 
-def coverageProg(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): String =
-  coverageRows(List.distinct(List.concat(coverageDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), if (p.main == "") [] else [(Emit.panicLocExpr(files, p.body), Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocExpr(compiled, built.body)))])))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)]): String =
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows), "}"))))))
+
+def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
+  Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
+
+def jRepro(repro: String): String =
+  if (repro == "") "" else Str.concat(",\"repro\":", Check.jsonStr(repro))
+
+def jCorpus(corpus: Int, corpFail: Int, promo: String): String =
+  Str.concat(",\"corpus\":{\"entries\":", Str.concat(Str.fromInt(corpus), Str.concat(",\"failures\":", Str.concat(Str.fromInt(corpFail), Str.concat(",\"promoted\":", Str.concat(promo, "}"))))))
+
+def jClass(lines: List[String]): String =
+  if (List.isEmpty(lines)) "" else Str.concat(",\"classify\":[", Str.concat(jClassOne(List.at(lines, 0)), Str.concat(jClassRest(List.tail(lines)), "]")))
+
+def jClassRest(lines: List[String]): String =
+  if (List.isEmpty(lines)) "" else Str.concat(",", Str.concat(jClassOne(List.at(lines, 0)), jClassRest(List.tail(lines))))
+
+def jClassOne(line: String): String =
+  Str.concat("{\"name\":", Str.concat(Check.jsonStr(className(line)), Str.concat(",\"true\":", Str.concat(classYes(classNums(line)), Str.concat(",\"false\":", Str.concat(classNo(classNums(line)), "}"))))))
+
+def jMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int): String =
+  Str.concat(",\"mutate\":{\"killed\":", Str.concat(Str.fromInt(killed), Str.concat(",\"survived\":", Str.concat(Str.fromInt(survived), Str.concat(",\"inert\":", Str.concat(Str.fromInt(inert), Str.concat(",\"ran\":", Str.concat(Str.fromInt(ran), Str.concat(",\"sites\":", Str.concat(Str.fromInt(sites), Str.concat(",\"oracles\":", Str.concat(jb(oracles), Str.concat(",\"invalid\":", Str.concat(Str.fromInt(invalid), Str.concat(jScore(killed, ran - invalid - inert), "}")))))))))))))))
+
+def jScore(killed: Int, sites: Int): String =
+  if (sites <= 0) "" else Str.concat(",\"score\":", score3(killed, sites))
+
+def jCoverage(rows: List[(String, Bool)]): String =
+  Str.concat(",\"coverage\":{\"total\":", Str.concat(Str.fromInt(List.len(rows)), Str.concat(",\"reached\":", Str.concat(Str.fromInt(List.count(rows, r => r._2)), Str.concat(",\"regions\":[", Str.concat(jRegions(rows), "]}"))))))
+
+def jRegions(rows: List[(String, Bool)]): String =
+  if (List.isEmpty(rows)) "" else Str.concat(jRegion(List.at(rows, 0)), jRegionsRest(List.tail(rows)))
+
+def jRegionsRest(rows: List[(String, Bool)]): String =
+  if (List.isEmpty(rows)) "" else Str.concat(",", Str.concat(jRegion(List.at(rows, 0)), jRegionsRest(List.tail(rows))))
+
+def jRegion(row: (String, Bool)): String =
+  Str.concat("{\"location\":", Str.concat(Check.jsonStr(row._1), Str.concat(",\"reached\":", Str.concat(jb(row._2), "}"))))
+
+def coverageToml(files: List[(String, String)], compiled: List[(String, String)], hits: String): String =
+  coverageRows(coverageRowsOf(files, compiled, hits))
+
+def coverageRowsOf(files: List[(String, String)], compiled: List[(String, String)], hits: String): List[(String, Bool)] =
+  coverageProgRows(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))
+
+def coverageProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+  List.distinct(List.concat(coverageDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), if (p.main == "") [] else [(Emit.panicLocExpr(files, p.body), Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocExpr(compiled, built.body)))]))
 
 def coverageDefs(defs: List[Fun], expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
   if (List.isEmpty(defs)) [] else coverageDef(List.at(defs, 0), expected, built, files, compiled, hits) :: coverageDefs(List.tail(defs), expected, built, files, compiled, hits)
