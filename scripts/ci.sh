@@ -279,6 +279,7 @@ slice_differential() {
 
 slice_fuzz() {
   need_scuzz
+  need_cmd python3 "sudo apt-get install -y python3"
   maybe_wipe
   ./scripts/ci-fuzz.sh
 }

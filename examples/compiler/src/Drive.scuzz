@@ -1519,18 +1519,18 @@ def fuzzWriteSummary(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro:
     ct <- fuzzClassText(job.outDir)
     hits <- Fs.read(fuzzCoveragePath(job.outDir))
     files <- fuzzLiveCollect(job.dir)
-    summary = Verify.summaryToml(fail == 0, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, promo, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid)
-    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.toml"), Str.concat(summary, Verify.coverageToml(files, job.files, hits)))
+    rows = Verify.coverageRowsOf(files, job.files, hits)
+    summary = Verify.summaryToml(fail == 0, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, promo, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, Verify.classToml(ct), mut.invalid)
+    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.toml"), Str.concat(summary, Verify.coverageRows(rows)))
+    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJson(fail == 0, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, promo, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, rows), """
+"""))
   } yield ()
 
 def fuzzPromoOf(outDir: String): IO[String] =
   Fs.read(joinSlash(joinSlash(outDir, "fuzz"), "promo")).flatMap(_ => IO.pure("1")).handleErrorWith(_ => IO.pure("0"))
 
 def fuzzClassText(outDir: String): IO[String] =
-  Fs.read(fuzzClassPath(outDir)).flatMap(t => fuzzClassTextGot(t)).handleErrorWith(_ => IO.pure(""))
-
-def fuzzClassTextGot(t: String): IO[String] =
-  IO.pure(Verify.classToml(t))
+  Fs.read(fuzzClassPath(outDir)).handleErrorWith(_ => IO.pure(""))
 
 def mutSites(job: FuzzJob): Int =
   if (job.iterations <= 0) 0 else Mutate.countFiles(job.files, job.oracles)

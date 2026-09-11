@@ -27,6 +27,16 @@ grep -E '^inert = [1-9]' examples/bad-example/build/fuzz/summary.toml
 grep -E '^ran = [1-9]' examples/bad-example/build/fuzz/summary.toml
 grep -E '^entries = [1-9]' examples/bad-example/build/fuzz/summary.toml
 grep -E '^failures = [1-9]' examples/bad-example/build/fuzz/summary.toml
+python3 - <<'PY'
+import json
+with open("examples/bad-example/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["v"] == 1 and d["kind"] == "fuzz"
+assert d["fuzz"]["ok"] is False
+assert d["fuzz"]["search_failures"] >= 1
+assert d["corpus"]["failures"] >= 1
+assert d["mutate"]["ran"] >= 1
+PY
 if fuzz --replay examples/bad-example/build/fuzz/repro.toml examples/bad-example; then
   echo "replay should have reproduced the property failure" && exit 1
 fi
@@ -233,6 +243,15 @@ rm -rf "$invalid_dir"
 fuzz --iterations 2 examples/io
 grep -q '^\[coverage\]' examples/io/build/fuzz/summary.toml
 grep -Eq '^reached = [1-9]' examples/io/build/fuzz/summary.toml
+python3 - <<'PY'
+import json
+with open("examples/io/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["v"] == 1 and d["kind"] == "fuzz"
+assert d["fuzz"]["ok"] is True
+assert d["coverage"]["reached"] >= 1
+assert any(r["reached"] for r in d["coverage"]["regions"])
+PY
 fuzz --iterations 4 examples/hello
 fuzz --iterations 4 --oracles examples/counter
 
