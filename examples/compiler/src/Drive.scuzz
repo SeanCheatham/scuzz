@@ -10,7 +10,7 @@ record FuzzMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, inv
 
 record MutBase(idle: String, tls: List[String], pass: List[FuzzRun])
 
-record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)], oracles: Bool, uiEnv: String, diff: Bool)
+record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)], oracles: Bool, uiEnv: String, diff: Bool, ens: List[En])
 
 import Manifest.Man
 import Manifest.UiMan
@@ -302,6 +302,21 @@ def emitDirStored(dir: String, fp: String, ok: Bool): IO[Unit] =
 
 def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir).flatMap(_ => emitVerifyStamp(dir, toml, own)))
+
+def emitDirVerifyLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fpText(toml, files).flatMap(fp => emitDirVerifyHit(dir, outDir, files, toml, fp)))
+
+def emitDirVerifyHit(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
+  Fs.read(fpVerifyPath(dir)).flatMap(old => emitDirVerifyGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirVerifyFresh(dir, outDir, files, toml))
+
+def emitDirVerifyGot(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String, old: String): IO[Unit] =
+  if (old == fp) emitDirVerifyArt(dir, outDir, files, toml, Manifest.parse(toml)) else emitDirVerifyFresh(dir, outDir, files, toml)
+
+def emitDirVerifyArt(dir: String, outDir: String, files: List[(String, String)], toml: String, m: Man): IO[Unit] =
+  manNeed(m).flatMap(_ => Fs.exists(llName(outDir, m.name)).flatMap(ll => Fs.exists(exeName(outDir, m.name)).flatMap(exe => if (ll != 0 && exe != 0) IO.pure(()) else emitDirVerifyFresh(dir, outDir, files, toml))))
+
+def emitDirVerifyFresh(dir: String, outDir: String, files: List[(String, String)], toml: String): IO[Unit] =
+  emitDirAlwaysGot(toml, files, outDir).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => emitVerifyStamp(dir, toml, files)))
 
 def emitVerifyStamp(dir: String, toml: String, own: List[(String, String)]): IO[Unit] =
   fpText(toml, own).flatMap(fp => Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpVerifyPath(dir), fp).flatMap(_ => Fs.delete(fpPath(dir)).handleErrorWith(_ => IO.pure(())))))
@@ -1108,10 +1123,17 @@ def fuzzDir(dir: String, outDir: String, iterations: Int, seed: Int, replay: Str
   Fs.mkdirs(outDir).flatMap(_ => Fs.write(fuzzCoveragePath(outDir), "").flatMap(_ => fuzzDirBuild(dir, outDir, iterations, seed, replay, noFailFast, oracles, differential)))
 
 def fuzzDirBuild(dir: String, outDir: String, iterations: Int, seed: Int, replay: String, noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
-  fuzzCollect(dir).flatMap(files => emitDirAlways(dir, outDir, files).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => fuzzWriteTable(dir, outDir, files).flatMap(_ => fuzzLiveBuild(dir, outDir).flatMap(_ => fuzzLinked(dir, outDir, iterations, seed, replay, files, noFailFast, oracles, differential))))))
+  for {
+    files <- fuzzCollect(dir)
+    ens = Verify.ensOfFiles(files)
+    _ <- emitDirVerifyLinked(dir, outDir, files)
+    _ <- fuzzWriteTable(dir, outDir, ens)
+    _ <- fuzzLiveBuild(dir, outDir)
+    _ <- fuzzLinked(dir, outDir, iterations, seed, replay, files, ens, noFailFast, oracles, differential)
+  } yield ()
 
-def fuzzWriteTable(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
-  fuzzWorkloadSrcs(dir).flatMap(srcs => Fs.write(joinSlash(outDir, "drivers.txt"), Verify.nls(Verify.mapSpecE(Verify.workloadDefs(Verify.sortStrs(srcs), Verify.ensOfFiles(files)), Verify.ensOfFiles(files)))))
+def fuzzWriteTable(dir: String, outDir: String, ens: List[En]): IO[Unit] =
+  fuzzWorkloadSrcs(dir).flatMap(srcs => Fs.write(joinSlash(outDir, "drivers.txt"), Verify.nls(Verify.mapSpecE(Verify.workloadDefs(Verify.sortStrs(srcs), ens), ens))))
 
 def fuzzVerSrcs(dir: String): IO[List[String]] =
   Fs.list(dir).flatMap(ents => fuzzVerSrcGo(dir, ents, Verify.noStr())).handleErrorWith(_ => IO.pure(Verify.noStr()))
@@ -1137,7 +1159,25 @@ def fuzzLiveBuild(dir: String, outDir: String): IO[Unit] =
   fuzzLiveCollect(dir).flatMap(files => fuzzLiveEmit(dir, joinSlash(outDir, "live"), files))
 
 def fuzzLiveEmit(dir: String, liveDir: String, files: List[(String, String)]): IO[Unit] =
-  Fs.mkdirs(liveDir).flatMap(_ => emitDirAlways(dir, liveDir, files).flatMap(_ => compileLinkedMan(dir, liveDir)))
+  Fs.mkdirs(liveDir).flatMap(_ => emitDirLiveStamped(dir, liveDir, files))
+
+def fuzzLiveStampPath(liveDir: String): String =
+  joinSlash(liveDir, "fingerprint")
+
+def emitDirLiveStamped(dir: String, liveDir: String, files: List[(String, String)]): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fpText(toml, files).flatMap(fp => emitDirLiveStampedHit(dir, liveDir, files, toml, fp)))
+
+def emitDirLiveStampedHit(dir: String, liveDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
+  Fs.read(fuzzLiveStampPath(liveDir)).flatMap(old => emitDirLiveStampedGot(dir, liveDir, files, toml, fp, old)).handleErrorWith(_ => emitDirLiveStampedFresh(dir, liveDir, files, toml, fp))
+
+def emitDirLiveStampedGot(dir: String, liveDir: String, files: List[(String, String)], toml: String, fp: String, old: String): IO[Unit] =
+  if (old == fp) emitDirLiveStampedArt(dir, liveDir, files, toml, fp, Manifest.parse(toml)) else emitDirLiveStampedFresh(dir, liveDir, files, toml, fp)
+
+def emitDirLiveStampedArt(dir: String, liveDir: String, files: List[(String, String)], toml: String, fp: String, m: Man): IO[Unit] =
+  manNeed(m).flatMap(_ => Fs.exists(llName(liveDir, m.name)).flatMap(ll => Fs.exists(exeName(liveDir, m.name)).flatMap(exe => if (ll != 0 && exe != 0) IO.pure(()) else emitDirLiveStampedFresh(dir, liveDir, files, toml, fp))))
+
+def emitDirLiveStampedFresh(dir: String, liveDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
+  emitDirAlwaysGot(toml, files, liveDir).flatMap(_ => compileLinkedMan(dir, liveDir).flatMap(_ => Fs.write(fuzzLiveStampPath(liveDir), fp)))
 
 def fuzzLiveCollect(dir: String): IO[List[(String, String)]] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzLiveMan(dir, Manifest.parse(toml)))
@@ -1148,11 +1188,11 @@ def fuzzLiveMan(dir: String, m: Man): IO[List[(String, String)]] =
 def fuzzLiveListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
   readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => collectDeps(dir, deps, own))
 
-def fuzzLinked(dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzMan(Manifest.parse(toml), dir, outDir, iterations, seed, replay, files, noFailFast, oracles, differential))
+def fuzzLinked(dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], ens: List[En], noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzMan(Manifest.parse(toml), dir, outDir, iterations, seed, replay, files, ens, noFailFast, oracles, differential))
 
-def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
-  manNeed(m).flatMap(_ => fuzzMan2(FuzzJob(dir, outDir, exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential), replay))
+def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], ens: List[En], noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
+  manNeed(m).flatMap(_ => fuzzMan2(FuzzJob(dir, outDir, exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens), replay))
 
 def fuzzMan2(job: FuzzJob, replay: String): IO[Unit] =
   if (replay != "") fuzzReplayFile(job.outDir, job.exe, job.hasUi, replay, job.uiEnv) else fuzzBody(job)
@@ -1173,7 +1213,7 @@ def fuzzReplayDone(bad: Int): IO[Unit] =
   if (bad > 0) IO.println("fuzz replay reproduced a failure").flatMap(_ => IO.fail("fuzz")) else IO.println("fuzz replay ok (no failure)")
 
 def fuzzBody(job: FuzzJob): IO[Unit] =
-  fuzzClearPromo(job.outDir).flatMap(_ => fuzzSeedText(job.dir, job.files).flatMap(script => fuzzBody2(job, script)))
+  fuzzClearPromo(job.outDir).flatMap(_ => fuzzSeedText(job.dir, job.ens).flatMap(script => fuzzBody2(job, script)))
 
 def fuzzClearPromo(outDir: String): IO[Unit] =
   Fs.delete(joinSlash(joinSlash(outDir, "fuzz"), "promo")).handleErrorWith(_ => IO.pure(()))
@@ -1225,7 +1265,7 @@ def fuzzLivePaintViews(dump: String): IO[Unit] =
   if (dumpHasView(dump)) IO.pure(()) else failMsg("fuzz live graph produced no view tree", "scuzz fuzz")
 
 def fuzzAfterReplay(job: FuzzJob, script: String, runs: List[FuzzRun], acc: FuzzAcc): IO[Unit] =
-  if (acc.fail > 0 && !job.noFailFast) fuzzDone(job, List.len(runs), acc.fail, acc.corpFail, acc.repro, emptyMut(Mutate.countFiles(job.files, job.oracles))) else fuzzVerSrcs(job.dir).flatMap(vers => fuzzWarn(vers).flatMap(_ => fuzzWorkloadSrcs(job.dir).flatMap(srcs => fuzzSearch(job, script, runs, Verify.workloadDefs(Verify.sortStrs(srcs), Verify.ensOfFiles(job.files)), 0, 0)))).flatMap(fail => fuzzAfterSearch(job, script, runs, acc, fail))
+  if (acc.fail > 0 && !job.noFailFast) fuzzDone(job, List.len(runs), acc.fail, acc.corpFail, acc.repro, emptyMut(mutSites(job))) else fuzzVerSrcs(job.dir).flatMap(vers => fuzzWarn(vers).flatMap(_ => fuzzWorkloadSrcs(job.dir).flatMap(srcs => fuzzSearch(job, script, runs, Verify.workloadDefs(Verify.sortStrs(srcs), job.ens), 0, 0)))).flatMap(fail => fuzzAfterSearch(job, script, runs, acc, fail))
 
 def fuzzWarn(srcs: List[String]): IO[Unit] =
   if (List.isEmpty(Verify.oracleNames(srcs)) && List.isEmpty(Verify.claimNames(srcs))) IO.println("scuzz fuzz: no author oracles; only universal oracles ran") else IO.pure(())
@@ -1368,8 +1408,8 @@ def fuzzClassPath(outDir: String): String =
 def fuzzWriteDrive(outDir: String, script: String): IO[Unit] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(fuzzDrivePath(outDir), script))
 
-def fuzzSeedText(dir: String, files: List[(String, String)]): IO[String] =
-  Fs.list(dir).flatMap(ents => fuzzSeedGo(dir, ents, Verify.noStr(), Verify.ensOfFiles(files)).flatMap(acc => fuzzSeedTextGot(acc)))
+def fuzzSeedText(dir: String, ens: List[En]): IO[String] =
+  Fs.list(dir).flatMap(ents => fuzzSeedGo(dir, ents, Verify.noStr(), ens).flatMap(acc => fuzzSeedTextGot(acc)))
 
 def fuzzSeedTextGot(acc: List[String]): IO[String] =
   IO.pure(Verify.nls(Verify.sortStrs(acc)))
@@ -1401,7 +1441,7 @@ def fuzzWorkload(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[F
   FuzzRun("", "", fuzzWorkloadText(job, script, runs, defs, i), Str.fromInt(i), fuzzFaultOf(i))
 
 def fuzzWorkloadText(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int): String =
-  if (i == 0) fuzzBaseScript(job, script) else Str.concat(Verify.varyWorkload(fuzzCorpusScript(job, script, runs, i), Verify.workloadSeed(job.seed) + i), Verify.generatedDrive(defs, Verify.ensOfFiles(job.files), Verify.workloadSeed(job.seed) + i))
+  if (i == 0) fuzzBaseScript(job, script) else Str.concat(Verify.varyWorkload(fuzzCorpusScript(job, script, runs, i), Verify.workloadSeed(job.seed) + i), Verify.generatedDrive(defs, job.ens, Verify.workloadSeed(job.seed) + i))
 
 def fuzzBaseScript(job: FuzzJob, script: String): String =
   if (script == "" && job.hasUi) """tap 0
@@ -1492,8 +1532,11 @@ def fuzzClassText(outDir: String): IO[String] =
 def fuzzClassTextGot(t: String): IO[String] =
   IO.pure(Verify.classToml(t))
 
+def mutSites(job: FuzzJob): Int =
+  if (job.iterations <= 0) 0 else Mutate.countFiles(job.files, job.oracles)
+
 def fuzzMutate(job: FuzzJob, runs: List[FuzzRun], fail: Int, corpFail: Int, repro: String): IO[Unit] =
-  fuzzMutate2(job, runs, fail, corpFail, repro, Mutate.countFiles(job.files, job.oracles))
+  fuzzMutate2(job, runs, fail, corpFail, repro, mutSites(job))
 
 def fuzzMutate2(job: FuzzJob, runs: List[FuzzRun], fail: Int, corpFail: Int, repro: String, sites: Int): IO[Unit] =
   fuzzMutate3(job, runs, fail, corpFail, repro, sites, mutTake(job.iterations, sites))
@@ -1502,10 +1545,7 @@ def mutTake(iterations: Int, sites: Int): Int =
   if (iterations <= 0) 0 else if (sites <= 64) sites else if (Verify.mutateN(iterations) < sites) Verify.mutateN(iterations) else sites
 
 def fuzzMutate3(job: FuzzJob, runs: List[FuzzRun], fail: Int, corpFail: Int, repro: String, sites: Int, take: Int): IO[Unit] =
-  if (sites == 0) fuzzMutNone(job, List.len(runs), fail, corpFail, repro, sites) else if (take <= 0) fuzzDone(job, List.len(runs), fail, corpFail, repro, emptyMut(sites)) else IO.println(Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutBase(job, runs).flatMap(base => fuzzMutGo(job, Mutate.pickSites(job.seed, take, sites), base, emptyMut(sites), take).flatMap(mut => fuzzMutFin(job, List.len(runs), fail, corpFail, repro, mut, take))))
-
-def fuzzMutNone(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, sites: Int): IO[Unit] =
-  IO.println(if (job.oracles) "scuzz fuzz: no residual Property.check / Property.assert / .require sites" else "scuzz fuzz: no live-code mutation sites").flatMap(_ => fuzzDone(job, corpus, fail, corpFail, repro, emptyMut(sites)))
+  if (take <= 0) fuzzDone(job, List.len(runs), fail, corpFail, repro, emptyMut(sites)) else IO.println(Mutate.mutateHead(take, sites, job.oracles)).flatMap(_ => fuzzMutBase(job, runs).flatMap(base => fuzzMutGo(job, Mutate.pickSites(job.seed, take, sites), base, emptyMut(sites), take).flatMap(mut => fuzzMutFin(job, List.len(runs), fail, corpFail, repro, mut, take))))
 
 def fuzzMutFin(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro: String, mut: FuzzMut, take: Int): IO[Unit] =
   fuzzDone(job, corpus, fail, corpFail, repro, FuzzMut(mut.killed, mut.survived, mut.inert, take, mut.sites, mut.invalid))
@@ -1605,7 +1645,7 @@ def fuzzIdleReadGot(code: Int, tl: String): IO[(Int, String)] =
   IO.pure((code, tl))
 
 def fuzzRelate(dir: String, outDir: String): IO[Unit] =
-  fuzzCollect(dir).flatMap(files => emitDirAlways(dir, outDir, files).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => fuzzRelateLinked(dir, outDir, files))))
+  fuzzCollect(dir).flatMap(files => emitDirVerifyLinked(dir, outDir, files).flatMap(_ => fuzzRelateLinked(dir, outDir, files)))
 
 def fuzzRelateLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzRelateMan(Manifest.parse(toml), dir, outDir, files))
@@ -1614,7 +1654,7 @@ def fuzzRelateMan(m: Man, dir: String, outDir: String, files: List[(String, Stri
   manNeed(m).flatMap(_ => fuzzRelateJob(exeName(outDir, m.name), m.hasUi, dir, outDir, files, if (m.hasUi) headlessEnvMan(m) else ""))
 
 def fuzzRelateJob(exe: String, hasUi: Bool, dir: String, outDir: String, files: List[(String, String)], uiEnv: String): IO[Unit] =
-  fuzzSeedText(dir, files).flatMap(script => fuzzWriteSeeds(outDir, script).flatMap(_ => fuzzCorpusFiles(dir).flatMap(runs => fuzzRelateGo(exe, hasUi, outDir, fuzzAddSeeds(runs, joinSlash(outDir, "seeds.txt"), script, hasUi), uiEnv))))
+  fuzzSeedText(dir, Verify.ensOfFiles(files)).flatMap(script => fuzzWriteSeeds(outDir, script).flatMap(_ => fuzzCorpusFiles(dir).flatMap(runs => fuzzRelateGo(exe, hasUi, outDir, fuzzAddSeeds(runs, joinSlash(outDir, "seeds.txt"), script, hasUi), uiEnv))))
 
 def fuzzRelateGo(exe: String, hasUi: Bool, outDir: String, runs: List[FuzzRun], uiEnv: String): IO[Unit] =
   if (List.isEmpty(runs)) IO.println("scuzz fuzz: --relate: no corpus entries") else Fs.mkdirs(joinSlash(joinSlash(outDir, "fuzz"), "relate")).flatMap(_ => fuzzRelateAcc(exe, hasUi, joinSlash(joinSlash(outDir, "fuzz"), "relate"), runs, 0, 0, List.len(runs), uiEnv))
