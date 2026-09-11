@@ -690,7 +690,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   return 1;
 }
 
-/* --- typed session schema v=1 (JSON) -------------------------------------- */
+/* --- typed session schema v=2 (JSON dump) --------------------------------- */
 
 static void fputs_json_str(FILE *f, const char *s) {
   fputc('"', f);
@@ -795,12 +795,14 @@ int sz_ui_session_write_dump_json(SzUiSession *session, const char *path) {
   f = fopen(path, "w");
   if (!f)
     return 0;
-  fputs("{\"v\":1,\"kind\":\"dump\",\"signals\":", f);
+  fputs("{\"v\":2,\"kind\":\"dump\",\"signals\":", f);
   sz_signal_dump_json(f);
   fputs(",\"views\":", f);
   views = (session && session->root) ? sz_view_a11y_dump(session->root)
                                      : sz_string_from_cstr("");
   fputs_views_json(f, sz_string_cstr(views));
+  fputs(",\"a11y\":", f);
+  sz_view_a11y_dump_json(session ? session->root : NULL, f);
   fputs(",\"taps\":[", f);
   n_buttons = sz_ui_collect_buttons(session, buttons, 64);
   for (i = 0; i < n_buttons; i++) {

@@ -1197,6 +1197,104 @@ static void a11y_dump_line(char **buf, size_t *len, size_t *cap,
   sz_dump_append(buf, len, cap, "\n");
 }
 
+/* Per-node a11y info shared by the text dump and the JSON tree. `label` is
+ * the text-line label; it borrows from the view unless `live` holds it.
+ * cls: 0 default (label only), 1 toggle (`num` is the on state), 2 numeric
+ * (`num` is the value; `label` is its text form). */
+typedef struct SzA11yInfo {
+  const char *label;
+  char *live;
+  int cls;
+  int64_t num;
+} SzA11yInfo;
+
+static SzA11yInfo a11y_node_info(SzView *v) {
+  SzA11yInfo info;
+  char tmp[24];
+  info.label = v->a11y_label ? v->a11y_label : "";
+  info.live = NULL;
+  info.cls = 0;
+  info.num = 0;
+  if (v->kind == SZ_VIEW_TEXT && (v->sig_int || v->sig_str)) {
+    size_t live_len = 0, live_cap = 0;
+    if (v->sig_int) {
+      sz_dump_append(&info.live, &live_len, &live_cap,
+                     v->prefix ? v->prefix : "");
+      snprintf(tmp, sizeof tmp, "%lld",
+               (long long)sz_signal_int_get(v->sig_int));
+      sz_dump_append(&info.live, &live_len, &live_cap, tmp);
+    } else {
+      sz_dump_append(&info.live, &live_len, &live_cap,
+                     sz_signal_str_get(v->sig_str));
+    }
+    info.label = info.live;
+  } else if (v->kind == SZ_VIEW_CHECKBOX || v->kind == SZ_VIEW_SWITCH ||
+             v->kind == SZ_VIEW_CHIP || v->kind == SZ_VIEW_FILTER_CHIP ||
+             v->kind == SZ_VIEW_INPUT_CHIP ||
+             v->kind == SZ_VIEW_EXPANSION_TILE ||
+             v->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
+             v->kind == SZ_VIEW_SWITCH_LIST_TILE) {
+    info.cls = 1;
+    info.num = v->sig_int && sz_signal_int_get(v->sig_int) != 0 ? 1 : 0;
+  } else if (v->kind == SZ_VIEW_RADIO ||
+             v->kind == SZ_VIEW_RADIO_LIST_TILE ||
+             v->kind == SZ_VIEW_CHOICE_CHIP) {
+    info.cls = 1;
+    info.num =
+        v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value ? 1 : 0;
+  } else if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS ||
+             v->kind == SZ_VIEW_CIRCULAR_PROGRESS ||
+             v->kind == SZ_VIEW_SPLIT) {
+    info.cls = 2;
+    info.num = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int))
+                          : (v->kind == SZ_VIEW_SPLIT ? 50 : 0);
+    snprintf(tmp, sizeof tmp, "%lld", (long long)info.num);
+    info.live = sz_strdup(tmp);
+    info.label = info.live;
+  } else if (v->kind == SZ_VIEW_BADGE) {
+    info.cls = 2;
+    info.num = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
+    snprintf(tmp, sizeof tmp, "%lld", (long long)info.num);
+    info.live = sz_strdup(tmp);
+    info.label = info.live;
+  } else if (v->kind == SZ_VIEW_SEGMENTED) {
+    info.cls = 1;
+    info.num = v->sig_int && sz_signal_int_get(v->sig_int) != 0 ? 1 : 0;
+    info.label = info.num ? "1" : "0";
+  } else if (v->kind == SZ_VIEW_VISIBILITY) {
+    info.cls = 1;
+    info.num = view_visibility_on(v) ? 1 : 0;
+    info.label = info.num ? "1" : "0";
+  } else if (v->kind == SZ_VIEW_OFFSTAGE) {
+    info.cls = 1;
+    info.num = view_offstage_shown(v) ? 1 : 0;
+    info.label = info.num ? "1" : "0";
+  } else if (v->kind == SZ_VIEW_OVERLAY) {
+    info.cls = 1;
+    info.num = view_overlay_open(v) ? 1 : 0;
+    info.label = info.num ? "1" : "0";
+  }
+  return info;
+}
+
+/* The label is the on/off state, not app text: the JSON tree drops it. */
+static int a11y_kind_flag(SzViewKind kind) {
+  return kind == SZ_VIEW_SEGMENTED || kind == SZ_VIEW_VISIBILITY ||
+         kind == SZ_VIEW_OFFSTAGE || kind == SZ_VIEW_OVERLAY;
+}
+
+static int a11y_recurse(const SzView *v) {
+  if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
+    return 0;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return 0;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return 0;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return 0;
+  return 1;
+}
+
 static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
   int i;
   if (!v || !buf || !len || !cap || !view_is_shown(v))
@@ -1204,73 +1302,12 @@ static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return;
   if (v->a11y_role != SZ_A11Y_NONE) {
-    char *live = NULL;
-    size_t live_len = 0, live_cap = 0;
-    const char *label = v->a11y_label ? v->a11y_label : "";
-    if (v->kind == SZ_VIEW_TEXT && (v->sig_int || v->sig_str)) {
-      if (v->sig_int) {
-        char tmp[24];
-        sz_dump_append(&live, &live_len, &live_cap,
-                       v->prefix ? v->prefix : "");
-        snprintf(tmp, sizeof tmp, "%lld",
-                 (long long)sz_signal_int_get(v->sig_int));
-        sz_dump_append(&live, &live_len, &live_cap, tmp);
-      } else {
-        sz_dump_append(&live, &live_len, &live_cap, sz_signal_str_get(v->sig_str));
-      }
-      label = live;
-    }
-    if (v->kind == SZ_VIEW_CHECKBOX || v->kind == SZ_VIEW_SWITCH ||
-        v->kind == SZ_VIEW_CHIP || v->kind == SZ_VIEW_FILTER_CHIP ||
-        v->kind == SZ_VIEW_INPUT_CHIP ||
-        v->kind == SZ_VIEW_EXPANSION_TILE ||
-        v->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
-        v->kind == SZ_VIEW_SWITCH_LIST_TILE) {
-      int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
-      a11y_dump_line(buf, len, cap, v->a11y_role, label, 1, on ? 1 : 0);
-    } else if (v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE ||
-               v->kind == SZ_VIEW_CHOICE_CHIP) {
-      int on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
-      a11y_dump_line(buf, len, cap, v->a11y_role, label, 1, on ? 1 : 0);
-    } else if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS ||
-               v->kind == SZ_VIEW_CIRCULAR_PROGRESS ||
-               v->kind == SZ_VIEW_SPLIT) {
-      char tmp[24];
-      int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int))
-                             : (v->kind == SZ_VIEW_SPLIT ? 50 : 0);
-      snprintf(tmp, sizeof tmp, "%lld", (long long)n);
-      a11y_dump_line(buf, len, cap, v->a11y_role, tmp, 0, 0);
-    } else if (v->kind == SZ_VIEW_BADGE) {
-      char tmp[24];
-      snprintf(tmp, sizeof tmp, "%lld",
-               (long long)(v->sig_int ? sz_signal_int_get(v->sig_int) : 0));
-      a11y_dump_line(buf, len, cap, v->a11y_role, tmp, 0, 0);
-    } else if (v->kind == SZ_VIEW_SEGMENTED) {
-      a11y_dump_line(buf, len, cap, v->a11y_role,
-                     v->sig_int && sz_signal_int_get(v->sig_int) != 0 ? "1"
-                                                                      : "0",
-                     0, 0);
-    } else if (v->kind == SZ_VIEW_VISIBILITY) {
-      a11y_dump_line(buf, len, cap, v->a11y_role,
-                     view_visibility_on(v) ? "1" : "0", 0, 0);
-    } else if (v->kind == SZ_VIEW_OFFSTAGE) {
-      a11y_dump_line(buf, len, cap, v->a11y_role,
-                     view_offstage_shown(v) ? "1" : "0", 0, 0);
-    } else if (v->kind == SZ_VIEW_OVERLAY) {
-      a11y_dump_line(buf, len, cap, v->a11y_role,
-                     view_overlay_open(v) ? "1" : "0", 0, 0);
-    } else {
-      a11y_dump_line(buf, len, cap, v->a11y_role, label, 0, 0);
-    }
-    sz_free(live);
+    SzA11yInfo info = a11y_node_info(v);
+    a11y_dump_line(buf, len, cap, v->a11y_role, info.label, info.cls == 1,
+                   info.num);
+    sz_free(info.live);
   }
-  if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
-    return;
-  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
-    return;
-  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
-    return;
-  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+  if (!a11y_recurse(v))
     return;
   for (i = 0; i < v->child_count; i++)
     a11y_dump_node(v->children[i], buf, len, cap);
@@ -1285,6 +1322,107 @@ SzString *sz_view_a11y_dump(SzView *root) {
   out = sz_string_from_cstr(buf);
   sz_free(buf);
   return out;
+}
+
+/* --- typed session schema v=2: a11y tree (JSON) ---------------------------- */
+
+static void a11y_fputs_json(FILE *f, const char *s) {
+  const char *p;
+  if (!s)
+    return;
+  for (p = s; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c == '\\')
+      fputs("\\\\", f);
+    else if (c == '"')
+      fputs("\\\"", f);
+    else if (c == '\n')
+      fputs("\\n", f);
+    else if (c == '\r')
+      fputs("\\r", f);
+    else if (c == '\t')
+      fputs("\\t", f);
+    else if (c < 0x20)
+      fprintf(f, "\\u%04x", c);
+    else
+      fputc(*p, f);
+  }
+}
+
+/* 1 when the node or a hoisted descendant puts a node in the JSON forest. */
+static int a11y_node_dumpable(SzView *v) {
+  int i;
+  if (!v || !view_is_shown(v))
+    return 0;
+  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
+    return 0;
+  if (v->a11y_role != SZ_A11Y_NONE)
+    return 1;
+  if (!a11y_recurse(v))
+    return 0;
+  for (i = 0; i < v->child_count; i++) {
+    if (a11y_node_dumpable(v->children[i]))
+      return 1;
+  }
+  return 0;
+}
+
+/* Emit one node object into the current array. A node with no role hoists
+ * its children, same as the text preorder. */
+static void a11y_json_node(SzView *v, FILE *f, int *first) {
+  SzA11yInfo info;
+  int i;
+  if (!a11y_node_dumpable(v))
+    return;
+  if (v->a11y_role == SZ_A11Y_NONE) {
+    for (i = 0; i < v->child_count; i++)
+      a11y_json_node(v->children[i], f, first);
+    return;
+  }
+  if (!*first)
+    fputc(',', f);
+  *first = 0;
+  info = a11y_node_info(v);
+  fputs("{\"role\":\"", f);
+  fputs(a11y_role_name(v->a11y_role), f);
+  fputc('"', f);
+  if (info.cls == 2) {
+    fprintf(f, ",\"value\":%lld", (long long)info.num);
+  } else {
+    if (!(info.cls == 1 && a11y_kind_flag(v->kind))) {
+      fputs(",\"label\":\"", f);
+      a11y_fputs_json(f, info.label);
+      fputc('"', f);
+    }
+    if (info.cls == 1)
+      fprintf(f, ",\"on\":%s", info.num ? "true" : "false");
+  }
+  if (a11y_recurse(v)) {
+    int any = 0;
+    for (i = 0; i < v->child_count; i++) {
+      if (a11y_node_dumpable(v->children[i])) {
+        any = 1;
+        break;
+      }
+    }
+    if (any) {
+      int child_first = 1;
+      fputs(",\"children\":[", f);
+      for (i = 0; i < v->child_count; i++)
+        a11y_json_node(v->children[i], f, &child_first);
+      fputc(']', f);
+    }
+  }
+  fputc('}', f);
+  sz_free(info.live);
+}
+
+void sz_view_a11y_dump_json(SzView *root, FILE *f) {
+  int first = 1;
+  fputc('[', f);
+  if (root)
+    a11y_json_node(root, f, &first);
+  fputc(']', f);
 }
 
 SzView *sz_view_column(void) { return view_new(SZ_VIEW_COLUMN); }

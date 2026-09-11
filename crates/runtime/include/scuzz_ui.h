@@ -631,6 +631,9 @@ int sz_view_set_editor_sel(SzView *view, int start, int end);
 int sz_view_edit_extend_to_xy(SzView *view, float x, float y);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
 SzString *sz_view_a11y_dump(SzView *root);
+/* Typed session schema v=2: the same preorder as a JSON forest. Toggle kinds
+ * carry "on", numeric kinds carry "value". Children nest under "children". */
+void sz_view_a11y_dump_json(SzView *root, FILE *f);
 
 /* --- session protocol ---------------------------------------------------- */
 

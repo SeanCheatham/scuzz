@@ -77,8 +77,29 @@ Document `v=1`:
 - [x] `docs/vision.md`: schema paragraph names the landed fuzz verdict surface.
 - [x] `docs/gaps.md`: gap 1 residual = typed a11y tree, typed list/value payloads. Gap 2 residual = branch coverage.
 
+## Slice 4: typed a11y tree and typed signal payloads
+
+The dump schema moves to `v=2`. The document gains an `a11y` forest next to the `views` lines. Signal `value` and non-string `list` payloads become typed JSON instead of opaque strings.
+
+Document `v=2`:
+
+- Envelope: `{"v":2,"kind":"dump",...}`.
+- `a11y`: a forest of nodes in the same preorder and with the same filtering as the text dump. A node is `{"role":"...","label":"...","children":[...]}`. Toggle kinds (checkbox, radio, chip, switch, segmented, visibility, offstage, overlay, tiles) carry `"on":B`. Numeric kinds (slider, progress, badge, split) carry `"value":N`. `children` is absent when empty.
+- `signals`: `value` payloads encode typed. A String is a JSON string. A boxed Int is a number. An ADT is `{"tag":N,"payload":...}`. A List is an array. A handle stays `"<handle>"`. Null is `null`. A non-string `list` signal encodes its items the same way. It no longer reports `"<N>"`.
+
+### Status
+
+- [x] `crates/runtime/src/view.c`: share the per-node a11y info between the text and JSON walks. `sz_view_a11y_dump_json` writes the forest.
+- [x] `crates/runtime/src/signal.c`: typed JSON payload writer for value and list signals.
+- [x] `crates/runtime/src/ui.c`: `v=2` envelope; `a11y` forest next to `views`.
+- [x] `crates/runtime/include/scuzz_ui.h`: declare `sz_view_a11y_dump_json`.
+- [x] `crates/runtime/tests/test_ui.c`: assert the v=2 envelope, the a11y tree shape, and typed value/list payloads.
+- [x] `scripts/ci.sh` `slice_ui`: validate the v=2 envelope and the a11y tree on the counter dump.
+- [x] `examples/manual/src/Topics.scuzz`: commands topic states the v=2 rule, the `a11y` forest, and typed payloads.
+- [x] `docs/vision.md`: schema paragraph names the v=2 dump surface.
+- [x] `docs/gaps.md`: gap 1 residual = text dump, script, and summary removal.
+
 ## Later slices (not started)
 
-- Typed a11y tree and typed list/value signal payloads.
 - Text dump, script, and summary removal once the schema covers every surface.
 - Branch coverage (gaps.md thesis-critical 2).

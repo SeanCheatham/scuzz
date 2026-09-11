@@ -245,9 +245,51 @@ static void fputs_json_escaped(FILE *f, const char *s) {
   }
 }
 
-/* Typed session schema v=1: one object per registered signal. Int payloads
- * are numbers. Str payloads are strings. List and value payloads stay the
- * text form as a string. */
+/* Typed session schema v=2: a value payload as JSON. A String is a string.
+ * A boxed Int is a number. An ADT is {"tag":N,"payload":...}. A pair is a
+ * two-slot array. A List is an array. A handle stays "<handle>". */
+static void fputs_json_value(FILE *f, const void *value) {
+  uint32_t kind;
+  if (!value) {
+    fputs("null", f);
+    return;
+  }
+  kind = sz_rc_kind(value);
+  if (kind == SZ_RC_STRING) {
+    fputc('"', f);
+    fputs_json_escaped(f, sz_string_cstr(value));
+    fputc('"', f);
+  } else if (kind == SZ_RC_BOX) {
+    fprintf(f, "%lld", (long long)sz_unbox_i64(value));
+  } else if (kind == SZ_RC_ADT) {
+    fprintf(f, "{\"tag\":%d,\"payload\":", sz_adt_tag(value));
+    fputs_json_value(f, sz_adt_payload(value));
+    fputc('}', f);
+  } else if (kind == SZ_RC_PAIR) {
+    fputc('[', f);
+    fputs_json_value(f, sz_pair_left((const SzPair *)value));
+    fputc(',', f);
+    fputs_json_value(f, sz_pair_right((const SzPair *)value));
+    fputc(']', f);
+  } else if (kind == SZ_RC_LIST) {
+    const SzList *p = value;
+    int first = 1;
+    fputc('[', f);
+    for (; p; p = p->tail) {
+      if (!first)
+        fputc(',', f);
+      first = 0;
+      fputs_json_value(f, p->head);
+    }
+    fputc(']', f);
+  } else {
+    fputs("\"<handle>\"", f);
+  }
+}
+
+/* Typed session schema: one object per registered signal. Int payloads
+ * are numbers. Str payloads are strings. Value and list payloads encode
+ * typed (schema v=2). */
 void sz_signal_dump_json(FILE *f) {
   SigReg *r;
   int first = 1;
@@ -274,33 +316,29 @@ void sz_signal_dump_json(FILE *f) {
       fputc('"', f);
       break;
     case SIG_VALUE: {
-      char *buf = NULL;
-      size_t len = 0, cap = 0;
       void *value = sz_signal_read((SzSignal *)r->sig);
-      sig_dump_value(&buf, &len, &cap, value);
+      fputs_json_value(f, value);
       sz_release(value);
-      fputc('"', f);
-      fputs_json_escaped(f, buf ? buf : "");
-      fputc('"', f);
-      sz_free(buf);
       break;
     }
     case SIG_LIST: {
       const SzSignalList *ls = (const SzSignalList *)r->sig;
       SzList *p = sz_signal_list_get(ls);
+      int first = 1;
       if (!sig_list_heads_str(p, ls->elem_str)) {
-        fprintf(f, "\"<%lld>\"", (long long)sz_list_len(p));
+        fputs_json_value(f, p);
         break;
       }
       fputc('[', f);
       for (; p; p = p->tail) {
+        if (!first)
+          fputc(',', f);
+        first = 0;
         fputc('"', f);
         fputs_json_escaped(f, sig_head_str(p->head)
                                   ? sz_string_cstr((const SzString *)p->head)
                                   : "");
         fputc('"', f);
-        if (p->tail)
-          fputc(',', f);
       }
       fputc(']', f);
       break;
