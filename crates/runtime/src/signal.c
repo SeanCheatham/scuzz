@@ -222,6 +222,95 @@ SzString *sz_signal_dump(void) {
   return out;
 }
 
+static void fputs_json_escaped(FILE *f, const char *s) {
+  const char *p;
+  if (!s)
+    return;
+  for (p = s; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c == '\\')
+      fputs("\\\\", f);
+    else if (c == '"')
+      fputs("\\\"", f);
+    else if (c == '\n')
+      fputs("\\n", f);
+    else if (c == '\r')
+      fputs("\\r", f);
+    else if (c == '\t')
+      fputs("\\t", f);
+    else if (c < 0x20)
+      fprintf(f, "\\u%04x", c);
+    else
+      fputc(*p, f);
+  }
+}
+
+/* Typed session schema v=1: one object per registered signal. Int payloads
+ * are numbers. Str payloads are strings. List and value payloads stay the
+ * text form as a string. */
+void sz_signal_dump_json(FILE *f) {
+  SigReg *r;
+  int first = 1;
+  fputc('[', f);
+  for (r = g_sig_head; r; r = r->next) {
+    if (!first)
+      fputc(',', f);
+    first = 0;
+    fprintf(f, "{\"id\":%d,\"type\":\"", r->id);
+    fputs(r->kind == SIG_INT ? "int" : r->kind == SIG_STR ? "str"
+                                     : r->kind == SIG_LIST ? "list" : "value",
+          f);
+    fputs("\",\"name\":\"", f);
+    fputs_json_escaped(f, r->name);
+    fputs("\",\"value\":", f);
+    switch (r->kind) {
+    case SIG_INT:
+      fprintf(f, "%lld",
+              (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
+      break;
+    case SIG_STR:
+      fputc('"', f);
+      fputs_json_escaped(f, sz_signal_str_get((const SzSignalStr *)r->sig));
+      fputc('"', f);
+      break;
+    case SIG_VALUE: {
+      char *buf = NULL;
+      size_t len = 0, cap = 0;
+      void *value = sz_signal_read((SzSignal *)r->sig);
+      sig_dump_value(&buf, &len, &cap, value);
+      sz_release(value);
+      fputc('"', f);
+      fputs_json_escaped(f, buf ? buf : "");
+      fputc('"', f);
+      sz_free(buf);
+      break;
+    }
+    case SIG_LIST: {
+      const SzSignalList *ls = (const SzSignalList *)r->sig;
+      SzList *p = sz_signal_list_get(ls);
+      if (!sig_list_heads_str(p, ls->elem_str)) {
+        fprintf(f, "\"<%lld>\"", (long long)sz_list_len(p));
+        break;
+      }
+      fputc('[', f);
+      for (; p; p = p->tail) {
+        fputc('"', f);
+        fputs_json_escaped(f, sig_head_str(p->head)
+                                  ? sz_string_cstr((const SzString *)p->head)
+                                  : "");
+        fputc('"', f);
+        if (p->tail)
+          fputc(',', f);
+      }
+      fputc(']', f);
+      break;
+    }
+    }
+    fputc('}', f);
+  }
+  fputc(']', f);
+}
+
 int64_t sz_property_signal_int(SzString *name) {
   const char *n = name ? sz_string_cstr(name) : "";
   SigReg *r;
