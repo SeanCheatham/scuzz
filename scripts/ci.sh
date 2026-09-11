@@ -221,9 +221,22 @@ slice_package() {
 
 slice_ui() {
   need_scuzz
+  need_cmd python3 "sudo apt-get install -y python3"
   maybe_wipe
   "$SCUZZ" run --headless examples/counter
   test -f examples/counter/build/snapshot.png
+  "$SCUZZ" run --headless --dump examples/counter/build/session.json examples/counter
+  python3 - <<'PY'
+import json
+with open("examples/counter/build/session.json") as f:
+    d = json.load(f)
+assert d["v"] == 1 and d["kind"] == "dump"
+assert any(s.get("name") == "count" and s.get("type") == "int" and s.get("value") == 0 for s in d["signals"])
+assert any(s.get("name") == "state" and s.get("type") == "value" for s in d["signals"])
+assert d["taps"] and d["taps"][0]["label"] == "+1"
+assert isinstance(d["views"], list) and d["views"]
+assert isinstance(d["fields"], list) and isinstance(d["scrolls"], list)
+PY
   "$SCUZZ" fuzz --iterations 0 examples/counter
   "$SCUZZ" run --headless examples/studio
   test -f examples/studio/build/snapshot.png

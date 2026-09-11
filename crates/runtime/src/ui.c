@@ -452,9 +452,17 @@ static void fputs_escaped_body(FILE *f, const char *s) {
       fputs("\\r", f);
     else if (c == '\t')
       fputs("\\t", f);
+    else if (c < 0x20)
+      fprintf(f, "\\u%04x", c);
     else
       fputc(*p, f);
   }
+}
+
+/* A dump path that ends in `.json` selects the typed session schema. */
+static int dump_path_is_json(const char *path) {
+  size_t n = path ? strlen(path) : 0;
+  return n >= 5 && strcmp(path + n - 5, ".json") == 0;
 }
 
 static void fputs_dump_escaped(FILE *f, const char *s) {
@@ -502,6 +510,8 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   int n_buttons, n_fields, n_scrolls, i;
   if (!path || !path[0])
     return 0;
+  if (dump_path_is_json(path))
+    return sz_ui_session_write_dump_json(session, path);
   f = fopen(path, "w");
   if (!f)
     return 0;
@@ -668,6 +678,263 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   }
   fclose(f);
   sz_string_free(signals);
+  sz_string_free(views);
+  return 1;
+}
+
+/* --- typed session schema v=1 (JSON) -------------------------------------- */
+
+static void fputs_json_str(FILE *f, const char *s) {
+  fputc('"', f);
+  fputs_escaped_body(f, s);
+  fputc('"', f);
+}
+
+static void fputs_views_json(FILE *f, const char *views) {
+  const char *p = views;
+  int first = 1;
+  fputc('[', f);
+  while (p && *p) {
+    const char *nl = strchr(p, '\n');
+    if (!first)
+      fputc(',', f);
+    first = 0;
+    fputc('"', f);
+    if (nl) {
+      const char *q;
+      for (q = p; q < nl; q++) {
+        unsigned char c = (unsigned char)*q;
+        if (c == '\\')
+          fputs("\\\\", f);
+        else if (c == '"')
+          fputs("\\\"", f);
+        else if (c == '\r')
+          fputs("\\r", f);
+        else if (c == '\t')
+          fputs("\\t", f);
+        else if (c < 0x20)
+          fprintf(f, "\\u%04x", c);
+        else
+          fputc(*q, f);
+      }
+    } else {
+      fputs_escaped_body(f, p);
+    }
+    fputc('"', f);
+    if (!nl)
+      break;
+    p = nl + 1;
+  }
+  fputc(']', f);
+}
+
+static void fputs_heap_json(FILE *f) {
+  size_t live_bytes = 0, live_count = 0;
+  int64_t db = 0, dc = 0;
+  int i;
+  sz_alloc_stats(&live_bytes, &live_count);
+  sz_alloc_delta(&db, &dc);
+  fprintf(f,
+          "\"heap\":{\"live_bytes\":%zu,\"live_count\":%zu,\"peak_bytes\":%zu,"
+          "\"delta_bytes\":%lld,\"delta_count\":%lld,\"kinds\":[",
+          live_bytes, live_count, sz_alloc_peak_bytes(), (long long)db,
+          (long long)dc);
+  for (i = 0; i < SZ_RC_KIND_COUNT; i++) {
+    size_t bytes = 0, count = 0;
+    sz_alloc_kind_stats((uint32_t)i, &bytes, &count);
+    fprintf(f, "%s{\"kind\":\"%s\",\"count\":%zu,\"bytes\":%zu}",
+            i ? "," : "", sz_alloc_kind_name((uint32_t)i), count, bytes);
+  }
+  fputs("]}", f);
+  sz_alloc_mark();
+}
+
+typedef struct SzLiveJsonCtx {
+  FILE *f;
+  int rows;
+} SzLiveJsonCtx;
+
+static void live_json_row(void *ptr, uint32_t kind, size_t bytes, uint32_t rc,
+                          void *vctx) {
+  SzLiveJsonCtx *ctx = (SzLiveJsonCtx *)vctx;
+  (void)ptr;
+  if (ctx->rows >= 32)
+    return;
+  fprintf(ctx->f, "%s{\"kind\":\"%s\",\"rc\":%u,\"bytes\":%zu}",
+          ctx->rows ? "," : "", sz_alloc_kind_name(kind), (unsigned)rc,
+          bytes);
+  ctx->rows++;
+}
+
+static void fputs_hit_json(FILE *f, const char *key, float x, float y,
+                           const char *desc) {
+  fprintf(f, "\"%s\":{\"x\":%.1f,\"y\":%.1f,\"desc\":", key, (double)x,
+          (double)y);
+  fputs_json_str(f, desc ? desc : "NULL");
+  fputc('}', f);
+}
+
+int sz_ui_session_write_dump_json(SzUiSession *session, const char *path) {
+  FILE *f;
+  SzString *views;
+  SzView *buttons[64];
+  SzView *fields[64];
+  SzView *scrolls[64];
+  SzView *field_target;
+  int n_buttons, n_fields, n_scrolls, i;
+  if (!path || !path[0])
+    return 0;
+  f = fopen(path, "w");
+  if (!f)
+    return 0;
+  fputs("{\"v\":1,\"kind\":\"dump\",\"signals\":", f);
+  sz_signal_dump_json(f);
+  fputs(",\"views\":", f);
+  views = (session && session->root) ? sz_view_a11y_dump(session->root)
+                                     : sz_string_from_cstr("");
+  fputs_views_json(f, sz_string_cstr(views));
+  fputs(",\"taps\":[", f);
+  n_buttons = sz_ui_collect_buttons(session, buttons, 64);
+  for (i = 0; i < n_buttons; i++) {
+    SzRect fr = sz_view_frame(buttons[i]);
+    fprintf(f, "%s{\"i\":%d,\"label\":", i ? "," : "", i);
+    fputs_json_str(f, sz_view_a11y_label(buttons[i]));
+    fprintf(f, ",\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f}", (double)fr.x,
+            (double)fr.y, (double)fr.w, (double)fr.h);
+  }
+  fputs("],\"fields\":[", f);
+  n_fields = (session && session->root)
+                 ? sz_view_collect_text_fields(session->root, fields, 64)
+                 : 0;
+  field_target = (session && session->root) ? sz_view_edit_target(session->root)
+                                            : NULL;
+  for (i = 0; i < n_fields; i++) {
+    const char *pre = sz_view_text_field_preedit(fields[i]);
+    fprintf(f, "%s{\"i\":%d,\"target\":%s,\"label\":", i ? "," : "", i,
+            fields[i] == field_target ? "true" : "false");
+    fputs_json_str(f, sz_view_a11y_label(fields[i]));
+    fputs(",\"value\":", f);
+    fputs_json_str(f, sz_view_text_field_value(fields[i]));
+    fprintf(f, ",\"caret\":%d,\"sel_start\":%d,\"sel_end\":%d,\"preedit\":",
+            sz_view_text_field_caret(fields[i]),
+            sz_view_text_field_sel_start(fields[i]),
+            sz_view_text_field_sel_end(fields[i]));
+    fputs_json_str(f, pre ? pre : "");
+    fputc('}', f);
+  }
+  fputs("],\"editors\":[", f);
+  {
+    SzView *editors[64];
+    SzView *ed_target;
+    int n_editors = (session && session->root)
+                        ? sz_view_collect_editors(session->root, editors, 64)
+                        : 0;
+    ed_target = sz_view_edit_target(session->root);
+    for (i = 0; i < n_editors; i++) {
+      const char *pre = sz_view_editor_preedit(editors[i]);
+      int d, nd = sz_view_editor_diag_count(editors[i]);
+      fprintf(f,
+              "%s{\"i\":%d,\"target\":%s,\"caret\":%d,\"sel_start\":%d,"
+              "\"sel_end\":%d,\"scroll_x\":%.0f,\"scroll_y\":%.0f,\"lines\":%d,"
+              "\"diags\":[",
+              i ? "," : "", i, editors[i] == ed_target ? "true" : "false",
+              sz_view_editor_caret(editors[i]),
+              sz_view_editor_sel_start(editors[i]),
+              sz_view_editor_sel_end(editors[i]),
+              (double)sz_view_editor_scroll_x(editors[i]),
+              (double)sz_view_editor_scroll_y(editors[i]),
+              sz_view_editor_line_count(editors[i]));
+      for (d = 0; d < nd; d++)
+        fprintf(f, "%s{\"line\":%d,\"severity\":%d}", d ? "," : "",
+                sz_view_editor_diag_line(editors[i], d),
+                sz_view_editor_diag_severity(editors[i], d));
+      fprintf(f, "],\"tokens\":%d,\"inlays\":%d,\"folds\":%d,\"preedit\":",
+              sz_view_editor_token_count(editors[i]),
+              sz_view_editor_inlay_count(editors[i]),
+              sz_view_editor_fold_count(editors[i]));
+      fputs_json_str(f, pre ? pre : "");
+      fputs(",\"value\":", f);
+      fputs_json_str(f, sz_view_editor_value(editors[i]));
+      fputc('}', f);
+    }
+  }
+  fputs("],\"splits\":[", f);
+  {
+    SzView *splits[64];
+    int n_splits = (session && session->root)
+                       ? sz_view_collect_splits(session->root, splits, 64)
+                       : 0;
+    for (i = 0; i < n_splits; i++)
+      fprintf(f, "%s{\"i\":%d,\"frac\":%d}", i ? "," : "", i,
+              sz_view_split_frac(splits[i]));
+  }
+  fputs("],\"overlays\":[", f);
+  {
+    SzView *overlays[64];
+    SzView *top = NULL;
+    int n_ov = (session && session->root)
+                   ? sz_view_collect_overlays(session->root, overlays, 64)
+                   : 0;
+    int j;
+    for (j = n_ov - 1; j >= 0; j--) {
+      if (sz_view_overlay_is_open(overlays[j])) {
+        top = overlays[j];
+        break;
+      }
+    }
+    for (i = 0; i < n_ov; i++)
+      fprintf(f, "%s{\"i\":%d,\"top\":%s,\"open\":%s}", i ? "," : "", i,
+              overlays[i] == top ? "true" : "false",
+              sz_view_overlay_is_open(overlays[i]) ? "true" : "false");
+  }
+  fputs("],\"scrolls\":[", f);
+  n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
+  for (i = 0; i < n_scrolls; i++) {
+    fprintf(f, "%s{\"i\":%d,\"label\":", i ? "," : "", i);
+    fputs_json_str(f, sz_view_a11y_label(scrolls[i]));
+    fputc('}', f);
+  }
+  fputc(']', f);
+  if (session && session->last_hit_seen) {
+    fputc(',', f);
+    fputs_hit_json(f, "last_hit", session->last_hit_x, session->last_hit_y,
+                   session->last_hit_desc);
+  }
+  if (session && session->hover_seen) {
+    fputc(',', f);
+    fputs_hit_json(f, "hover", session->hover_x, session->hover_y,
+                   session->hover_desc);
+  }
+  if (session && session->last_secondary_seen) {
+    fputc(',', f);
+    fputs_hit_json(f, "last_secondary", session->last_secondary_x,
+                   session->last_secondary_y, session->last_secondary_desc);
+  }
+  if (session && session->debug_dump_path && path &&
+      strcmp(path, session->debug_dump_path) == 0) {
+    SzLiveJsonCtx ctx;
+    fprintf(f,
+            ",\"session\":{\"runtime\":\"%s\",\"width\":%d,\"height\":%d,"
+            "\"title\":",
+            runtime_kind_name(session->cfg.kind), session->cfg.width,
+            session->cfg.height);
+    fputs_json_str(f, sz_ui_session_title(session));
+    fputs(",\"focus\":", f);
+    fputs_json_str(f, session->root ? sz_view_focus_kind(session->root)
+                                    : "none");
+    fprintf(f, ",\"lifecycle\":\"%s\",\"keyboard\":%s,\"pumps\":%u}",
+            lifecycle_name(session->lifecycle),
+            session->keyboard_visible ? "true" : "false", session->pumps);
+    fputc(',', f);
+    fputs_heap_json(f);
+    fputs(",\"live\":[", f);
+    ctx.f = f;
+    ctx.rows = 0;
+    sz_alloc_walk(live_json_row, &ctx);
+    fputc(']', f);
+  }
+  fputs("}\n", f);
+  fclose(f);
   sz_string_free(views);
   return 1;
 }

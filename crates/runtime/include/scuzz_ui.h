@@ -4,6 +4,7 @@
 #include "scuzz_rt.h"
 
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,6 +141,9 @@ void sz_signal_list_free(SzSignalList *s);
 /* Signal store dump: one "kind[id] name = value" line per live signal.
  * String values use the editor dump escape dialect. Caller frees SzString. */
 SzString *sz_signal_dump(void);
+
+/* Typed session schema v=1 signal section: a JSON array written to `f`. */
+void sz_signal_dump_json(FILE *f);
 /* Publish the for-binder name. Property and Timeline kits read that name. */
 void sz_signal_name(const void *sig, const char *name);
 
@@ -697,6 +701,10 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * omit them. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
+
+/* Typed session schema v=1. A dump path that ends in `.json` writes the JSON
+ * document instead of the text format. */
+int sz_ui_session_write_dump_json(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
 /* Watch an inject script (tap/xy/text/type/key/compose/commit/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).

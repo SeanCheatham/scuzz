@@ -584,6 +584,181 @@ static void test_ui_run_rebuild_keepalive(void) {
   remove(stamp);
   remove(dump);
 }
+/* --- typed session schema v=1 (JSON dump) ---------------------------------- */
+
+static SzAdt *json_doc_key(SzAdt *j, const char *key) {
+  SzString *k = sz_string_from_cstr(key);
+  SzList *got = sz_json_get(j, k);
+  SzAdt *out = sz_list_is_empty(got) ? NULL : (SzAdt *)sz_list_head(got);
+  sz_release(got);
+  sz_release(k);
+  return out;
+}
+
+static int64_t json_doc_int(SzAdt *j, const char *key, int64_t d) {
+  SzString *k = sz_string_from_cstr(key);
+  int64_t out = sz_json_get_int(j, k, d);
+  sz_release(k);
+  return out;
+}
+
+static int json_str_eq(SzAdt *j, const char *key, const char *want) {
+  SzString *k = sz_string_from_cstr(key);
+  SzString *d = sz_string_from_cstr("");
+  SzString *got = sz_json_get_str(j, k, d);
+  int out = strcmp(sz_string_cstr(got), want) == 0;
+  sz_release(got);
+  sz_release(d);
+  sz_release(k);
+  return out;
+}
+
+static SzAdt *json_arr_head(SzAdt *j, SzList **hold) {
+  *hold = sz_json_arr(j);
+  if (sz_list_is_empty(*hold))
+    return NULL;
+  return (SzAdt *)sz_list_head(*hold);
+}
+
+/* First array entry with `key` equal to `want`, else NULL. `hold` keeps the
+ * array list alive for the returned borrow. */
+static SzAdt *json_arr_find_int(SzAdt *j, const char *key, int64_t want,
+                                SzList **hold) {
+  SzList *xs;
+  SzAdt *out = NULL;
+  *hold = sz_json_arr(j);
+  for (xs = *hold; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
+    SzAdt *ent = (SzAdt *)sz_list_head(xs);
+    if (json_doc_int(ent, key, want + 1) == want) {
+      out = ent;
+      break;
+    }
+  }
+  return out;
+}
+
+static void test_dump_json_schema(void) {
+  SzUiConfig cfg;
+  SzSignalInt *count;
+  SzSignalStr *text;
+  SzView *root;
+  SzUiSession *session;
+  const char *path = "/tmp/scuzz_ui_schema.json";
+  const char *text_path = "/tmp/scuzz_ui_schema.dump";
+  char buf[16384];
+  size_t n;
+  FILE *f;
+  SzString *doc;
+  SzAdt *parsed, *json, *signals, *sig0, *taps, *tap0, *fields, *field0,
+      *views, *session_j, *heap, *kinds, *live;
+  SzList *arr, *hold;
+
+  count = sz_signal_int(410001);
+  text = sz_signal_str("abc");
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_button("+", counter_tap, count));
+  sz_view_add_child(root, sz_view_text_field(text, "name"));
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_set_debug_dump(session, path));
+  remove(path);
+  assert(sz_ui_session_dump_now(session));
+
+  f = fopen(path, "r");
+  assert(f);
+  n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = '\0';
+  doc = sz_string_from_cstr(buf);
+  parsed = sz_json_parse(doc);
+  sz_release(doc);
+  assert(sz_adt_tag(parsed) == 1);
+  json = (SzAdt *)sz_adt_payload(parsed);
+
+  assert(json_doc_int(json, "v", 0) == 1);
+  assert(json_str_eq(json, "kind", "dump"));
+
+  signals = json_doc_key(json, "signals");
+  assert(signals && sz_json_is_arr(signals) == 1);
+  arr = sz_json_arr(signals);
+  assert(sz_list_len(arr) >= 2);
+  sz_release(arr);
+  sig0 = json_arr_find_int(signals, "value", 410001, &hold);
+  assert(sig0);
+  assert(json_doc_int(sig0, "id", -1) >= 0);
+  assert(json_str_eq(sig0, "type", "int"));
+  sz_release(hold);
+
+  views = json_doc_key(json, "views");
+  assert(views && sz_json_is_arr(views) == 1);
+  arr = sz_json_arr(views);
+  assert(sz_list_len(arr) >= 1);
+  sz_release(arr);
+
+  taps = json_doc_key(json, "taps");
+  assert(taps && sz_json_is_arr(taps) == 1);
+  arr = sz_json_arr(taps);
+  assert(sz_list_len(arr) == 1);
+  sz_release(arr);
+  tap0 = json_arr_head(taps, &hold);
+  assert(tap0 && json_str_eq(tap0, "label", "+"));
+  sz_release(hold);
+
+  fields = json_doc_key(json, "fields");
+  assert(fields && sz_json_is_arr(fields) == 1);
+  arr = sz_json_arr(fields);
+  assert(sz_list_len(arr) == 1);
+  sz_release(arr);
+  field0 = json_arr_head(fields, &hold);
+  assert(field0 && json_str_eq(field0, "value", "abc"));
+  assert(json_doc_int(field0, "caret", -1) == 3);
+  sz_release(hold);
+
+  session_j = json_doc_key(json, "session");
+  assert(session_j);
+  assert(json_str_eq(session_j, "runtime", "headless"));
+  assert(json_doc_int(session_j, "width", 0) == 200);
+  assert(json_doc_int(session_j, "pumps", 0) >= 1);
+
+  heap = json_doc_key(json, "heap");
+  assert(heap);
+  assert(json_doc_int(heap, "live_bytes", 0) > 0);
+  kinds = json_doc_key(heap, "kinds");
+  assert(kinds && sz_json_is_arr(kinds) == 1);
+  arr = sz_json_arr(kinds);
+  assert(sz_list_len(arr) == 17);
+  sz_release(arr);
+
+  live = json_doc_key(json, "live");
+  assert(live && sz_json_is_arr(live) == 1);
+
+  sz_release(parsed);
+
+  /* A non-`.json` path keeps the text format. */
+  remove(text_path);
+  assert(sz_ui_session_write_dump(session, text_path));
+  f = fopen(text_path, "r");
+  assert(f);
+  n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = '\0';
+  assert(strstr(buf, "[taps]") != NULL);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  sz_signal_str_free(text);
+  remove(path);
+  remove(text_path);
+}
+
 /* --- quiesce terminal boundary ------------------------------------------ */
 
 typedef struct {
@@ -15981,6 +16156,7 @@ int main(void) {
   test_stamp_loads_reload_code();
   test_ui_run_rebuild();
   test_ui_run_rebuild_keepalive();
+  test_dump_json_schema();
   test_session_debug_dump();
   test_xy_hit_and_miss();
   test_record_live_not_script();
