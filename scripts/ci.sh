@@ -6,6 +6,10 @@ set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 SCUZZ="${SCUZZ:-$ROOT/examples/cli/build/cli}"
+case "$SCUZZ" in
+  /*) ;;
+  *) SCUZZ="$ROOT/$SCUZZ" ;;
+esac
 export SCUZZ
 # A prior `scuzz run` in this shell can leak session env. GitHub starts clean.
 unset SCUZZ_SNAPSHOT_PATH SCUZZ_FUZZ_DUMP SCUZZ_UI_RUNTIME SCUZZ_UI_WIDTH \
@@ -250,16 +254,21 @@ PY
   "$SCUZZ" run --headless examples/studio
   test -f examples/studio/build/snapshot.png
   "$SCUZZ" fuzz --iterations 0 examples/studio
-  "$SCUZZ" run --headless examples/editor
+  # The editor seeds sample.txt, scuzz.toml, and src/ into the CWD at boot.
+  # Run it from a scratch dir so the worktree root stays clean. SCUZZ_HOME
+  # keeps crates/ anchored at the checkout from that CWD.
+  mkdir -p scratchpad/editor
+  (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" run --headless "$ROOT/examples/editor")
   test -f examples/editor/build/snapshot.png
-  "$SCUZZ" fuzz --iterations 0 examples/editor
+  (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" fuzz --iterations 0 "$ROOT/examples/editor")
 }
 
 slice_ui_test() {
   need_scuzz
   "$SCUZZ" fuzz --iterations 0 examples/counter
   "$SCUZZ" fuzz --iterations 0 examples/studio
-  "$SCUZZ" fuzz --iterations 0 examples/editor
+  mkdir -p scratchpad/editor
+  (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" fuzz --iterations 0 "$ROOT/examples/editor")
 }
 
 slice_gpu() {
