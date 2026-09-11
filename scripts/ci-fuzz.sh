@@ -271,3 +271,34 @@ if fuzz --seed 0 --iterations 16 "$workload_dir"; then
 fi
 cmp "$workload_dir/first.toml" "$workload_dir/build/fuzz/repro.toml"
 rm -rf "$workload_dir"
+
+# A repeated campaign skips emit and link on a stamp hit.
+stamp_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-stamp.XXXXXX")"
+mkdir -p "$stamp_dir/src"
+cat > "$stamp_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "stamp"
+MANIFEST
+cat > "$stamp_dir/src/Main.scuzz" <<'SOURCE'
+def accepts(n: Int): Bool =
+  n != 3
+
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$stamp_dir/input.scuzz_verify" <<'CLAIMS'
+def input(n: Int): Bool =
+  Main.accepts(n)
+CLAIMS
+fuzz --iterations 0 "$stamp_dir"
+ll_before="$(stat -c %y "$stamp_dir/build/stamp.ll")"
+exe_before="$(stat -c %y "$stamp_dir/build/stamp")"
+live_ll_before="$(stat -c %y "$stamp_dir/build/live/stamp.ll")"
+live_exe_before="$(stat -c %y "$stamp_dir/build/live/stamp")"
+sleep 1
+fuzz --iterations 0 "$stamp_dir"
+test "$ll_before" = "$(stat -c %y "$stamp_dir/build/stamp.ll")"
+test "$exe_before" = "$(stat -c %y "$stamp_dir/build/stamp")"
+test "$live_ll_before" = "$(stat -c %y "$stamp_dir/build/live/stamp.ll")"
+test "$live_exe_before" = "$(stat -c %y "$stamp_dir/build/live/stamp")"
+rm -rf "$stamp_dir"

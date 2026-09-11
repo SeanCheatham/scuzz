@@ -1319,7 +1319,7 @@ def mutateN(n: Int): Int =
   n - searchN(n)
 
 def fuzzHead(iterations: Int, corpus: Int, sites: Int): String =
-  Str.concat(if (iterations <= 0) Str.concat("scuzz fuzz: corpus-only (--iterations 0)", nl()) else "", Str.concat(if (iterations <= 0 && corpus > 0) Str.concat("scuzz fuzz: replay ", Str.concat(Str.fromInt(corpus), Str.concat(" corpus entries", nl()))) else "", if (sites == 0) Str.concat("scuzz fuzz: no live-code mutation sites", nl()) else ""))
+  Str.concat(if (iterations <= 0) Str.concat("scuzz fuzz: corpus-only (--iterations 0)", nl()) else "", Str.concat(if (iterations <= 0 && corpus > 0) Str.concat("scuzz fuzz: replay ", Str.concat(Str.fromInt(corpus), Str.concat(" corpus entries", nl()))) else "", if (sites == 0 && iterations > 0) Str.concat("scuzz fuzz: no live-code mutation sites", nl()) else ""))
 
 def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
   fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures, corpFail, "0", fuzzMut(sites))
