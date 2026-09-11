@@ -234,11 +234,13 @@ slice_ui() {
 import json
 with open("examples/counter/build/session.json") as f:
     d = json.load(f)
-assert d["v"] == 1 and d["kind"] == "dump"
+assert d["v"] == 2 and d["kind"] == "dump"
 assert any(s.get("name") == "count" and s.get("type") == "int" and s.get("value") == 0 for s in d["signals"])
-assert any(s.get("name") == "state" and s.get("type") == "value" for s in d["signals"])
+state = [s for s in d["signals"] if s.get("name") == "state"][0]
+assert state["type"] == "value" and isinstance(state["value"], dict) and "tag" in state["value"]
 assert d["taps"] and d["taps"][0]["label"] == "+1"
 assert isinstance(d["views"], list) and d["views"]
+assert any(n.get("role") == "button" and n.get("label") == "+1" for n in d["a11y"])
 assert isinstance(d["fields"], list) and isinstance(d["scrolls"], list)
 PY
   printf '%s\n' '{"v":1,"kind":"inject","events":[{"op":"tap","i":0}]}' > examples/counter/build/inject.json

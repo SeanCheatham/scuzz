@@ -584,7 +584,7 @@ static void test_ui_run_rebuild_keepalive(void) {
   remove(stamp);
   remove(dump);
 }
-/* --- typed session schema v=1 (JSON dump) ---------------------------------- */
+/* --- typed session schema v=2 (JSON dump) ---------------------------------- */
 
 static SzAdt *json_doc_key(SzAdt *j, const char *key) {
   SzString *k = sz_string_from_cstr(key);
@@ -637,11 +637,34 @@ static SzAdt *json_arr_find_int(SzAdt *j, const char *key, int64_t want,
   return out;
 }
 
+/* First array entry with `key` equal to `want`, else NULL. `hold` keeps the
+ * array list alive for the returned borrow. */
+static SzAdt *json_arr_find_str(SzAdt *j, const char *key, const char *want,
+                                SzList **hold) {
+  SzList *xs;
+  SzAdt *out = NULL;
+  *hold = sz_json_arr(j);
+  for (xs = *hold; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
+    SzAdt *ent = (SzAdt *)sz_list_head(xs);
+    if (json_str_eq(ent, key, want)) {
+      out = ent;
+      break;
+    }
+  }
+  return out;
+}
+
 static void test_dump_json_schema(void) {
   SzUiConfig cfg;
   SzSignalInt *count;
+  SzSignalInt *flag;
   SzSignalStr *text;
+  SzSignal *rec;
+  SzSignal *ints;
+  SzAdt *rec_adt;
+  SzList *int_list;
   SzView *root;
+  SzView *card;
   SzUiSession *session;
   const char *path = "/tmp/scuzz_ui_schema.json";
   const char *text_path = "/tmp/scuzz_ui_schema.dump";
@@ -650,13 +673,37 @@ static void test_dump_json_schema(void) {
   FILE *f;
   SzString *doc;
   SzAdt *parsed, *json, *signals, *sig0, *taps, *tap0, *fields, *field0,
-      *views, *session_j, *heap, *kinds, *live;
+      *views, *a11y, *card_j, *kids, *node, *session_j, *heap, *kinds, *live;
   SzList *arr, *hold;
 
   count = sz_signal_int(410001);
   text = sz_signal_str("abc");
+  flag = sz_signal_int(1);
+  /* Schema v=2: a value cell and a non-string list cell get typed payloads. */
+  {
+    void *box = sz_box_i64(3);
+    rec_adt = sz_adt_new(7, box);
+    sz_release(box);
+  }
+  rec = sz_signal_new(rec_adt, 4, NULL);
+  sz_release(rec_adt);
+  sz_signal_name(rec, "rec");
+  {
+    void *b1 = sz_box_i64(1);
+    void *b2 = sz_box_i64(2);
+    SzList *tail = sz_list_cons(b2, sz_list_nil());
+    int_list = sz_list_cons(b1, tail);
+    sz_release(b1);
+    sz_release(b2);
+    sz_release(tail);
+  }
+  ints = sz_signal_new(int_list, 5, NULL);
+  sz_release(int_list);
+  sz_signal_name(ints, "ints");
   root = sz_view_column();
-  sz_view_add_child(root, sz_view_button("+", counter_tap, count));
+  card = sz_view_card(sz_view_button("+", counter_tap, count));
+  sz_view_add_child(card, sz_view_checkbox(flag, "done"));
+  sz_view_add_child(root, card);
   sz_view_add_child(root, sz_view_text_field(text, "name"));
 
   memset(&cfg, 0, sizeof(cfg));
@@ -683,7 +730,7 @@ static void test_dump_json_schema(void) {
   assert(sz_adt_tag(parsed) == 1);
   json = (SzAdt *)sz_adt_payload(parsed);
 
-  assert(json_doc_int(json, "v", 0) == 1);
+  assert(json_doc_int(json, "v", 0) == 2);
   assert(json_str_eq(json, "kind", "dump"));
 
   signals = json_doc_key(json, "signals");
@@ -697,16 +744,75 @@ static void test_dump_json_schema(void) {
   assert(json_str_eq(sig0, "type", "int"));
   sz_release(hold);
 
+  /* v=2 typed payloads: an ADT value cell and a non-string list cell. */
+  sig0 = json_arr_find_str(signals, "name", "rec", &hold);
+  assert(sig0);
+  assert(json_str_eq(sig0, "type", "value"));
+  node = json_doc_key(sig0, "value");
+  assert(node && sz_json_is_obj(node) == 1);
+  assert(json_doc_int(node, "tag", -1) == 7);
+  assert(json_doc_int(node, "payload", -1) == 3);
+  sz_release(hold);
+  sig0 = json_arr_find_str(signals, "name", "ints", &hold);
+  assert(sig0);
+  assert(json_str_eq(sig0, "type", "list"));
+  node = json_doc_key(sig0, "value");
+  assert(node && sz_json_is_arr(node) == 1);
+  arr = sz_json_arr(node);
+  assert(sz_list_len(arr) == 2);
+  assert(sz_json_int_or((SzAdt *)sz_list_head(arr), -1) == 1);
+  sz_release(arr);
+  sz_release(hold);
+
   views = json_doc_key(json, "views");
   assert(views && sz_json_is_arr(views) == 1);
   arr = sz_json_arr(views);
   assert(sz_list_len(arr) >= 1);
   sz_release(arr);
 
+  /* v=2 a11y forest: the card nests the button and the checkbox. The
+   * column root has no role, so its children hoist to the top level. */
+  a11y = json_doc_key(json, "a11y");
+  assert(a11y && sz_json_is_arr(a11y) == 1);
+  arr = sz_json_arr(a11y);
+  assert(sz_list_len(arr) == 2);
+  sz_release(arr);
+  card_j = json_arr_find_str(a11y, "role", "card", &hold);
+  assert(card_j);
+  assert(json_str_eq(card_j, "label", "card"));
+  kids = json_doc_key(card_j, "children");
+  assert(kids && sz_json_is_arr(kids) == 1);
+  arr = sz_json_arr(kids);
+  assert(sz_list_len(arr) == 2);
+  sz_release(arr);
+  node = json_arr_find_str(kids, "role", "button", &arr);
+  assert(node);
+  assert(json_str_eq(node, "label", "+"));
+  {
+    SzString *k = sz_string_from_cstr("children");
+    assert(sz_json_has(node, k) == 0);
+    sz_release(k);
+  }
+  sz_release(arr);
+  node = json_arr_find_str(kids, "role", "checkbox", &arr);
+  assert(node);
+  assert(json_str_eq(node, "label", "done"));
+  {
+    SzString *k = sz_string_from_cstr("on");
+    assert(sz_json_get_bool(node, k, 0) == 1);
+    sz_release(k);
+  }
+  sz_release(arr);
+  sz_release(hold);
+  node = json_arr_find_str(a11y, "role", "textfield", &hold);
+  assert(node);
+  assert(json_str_eq(node, "label", "name"));
+  sz_release(hold);
+
   taps = json_doc_key(json, "taps");
   assert(taps && sz_json_is_arr(taps) == 1);
   arr = sz_json_arr(taps);
-  assert(sz_list_len(arr) == 1);
+  assert(sz_list_len(arr) == 2);
   sz_release(arr);
   tap0 = json_arr_head(taps, &hold);
   assert(tap0 && json_str_eq(tap0, "label", "+"));
@@ -754,7 +860,10 @@ static void test_dump_json_schema(void) {
 
   sz_ui_unmount(session);
   sz_signal_int_free(count);
+  sz_signal_int_free(flag);
   sz_signal_str_free(text);
+  sz_signal_free(rec);
+  sz_signal_free(ints);
   remove(path);
   remove(text_path);
 }
