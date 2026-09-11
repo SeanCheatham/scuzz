@@ -759,6 +759,176 @@ static void test_dump_json_schema(void) {
   remove(text_path);
 }
 
+/* --- typed session schema v=1 (JSON inject + record) ---------------------- */
+
+static char *slurp_cstr(const char *path);
+
+static SzAdt *json_slurp_parse(const char *path) {
+  char *body = slurp_cstr(path);
+  SzString *doc = sz_string_from_cstr(body);
+  SzAdt *parsed = sz_json_parse(doc);
+  free(body);
+  sz_release(doc);
+  assert(parsed && sz_adt_tag(parsed) == 1);
+  return parsed;
+}
+
+static void test_script_json_inject(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *count;
+  SzSignalStr *draft;
+  const char *path = "/tmp/scuzz_ui_inject_schema.json";
+
+  count = sz_signal_int(0);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_button("+1", counter_tap, count));
+  sz_view_add_child(root, sz_view_text_field(draft, "item"));
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+
+  sz_ui_script_play_json(session,
+                         "{\"v\":1,\"kind\":\"inject\",\"events\":["
+                         "{\"op\":\"tap\",\"i\":0},"
+                         "{\"op\":\"text\",\"value\":\"hi\"},"
+                         "{\"op\":\"type\",\"value\":\"!\"},"
+                         "{\"op\":\"key\",\"key\":\"Backspace\"}]}");
+  assert(sz_signal_int_get(count) == 1);
+  assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
+
+  /* A script path that ends in `.json` routes to the schema. */
+  remove(path);
+  write_stamp(
+      path,
+      "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
+  sz_ui_script_run_file(session, path);
+  assert(sz_signal_int_get(count) == 2);
+
+  /* A `.json` watch inject plays the whole document on change. */
+  assert(sz_ui_session_set_inject(session, path));
+  write_stamp(path,
+              "{\"v\":1,\"kind\":\"inject\",\"events\":["
+              "{\"op\":\"tap\",\"i\":0},{\"op\":\"tap\",\"i\":0}]}");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 4);
+  write_stamp(path,
+              "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 5);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  sz_signal_str_free(draft);
+  remove(path);
+}
+
+static void test_record_json(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn;
+  SzSignalInt *count;
+  SzInputEvent ev;
+  SzRect fr;
+  const char *record = "/tmp/scuzz_ui_record_schema.json";
+  SzAdt *parsed, *json, *events, *ev0, *mods, *m0;
+  SzList *arr, *marr;
+
+  remove(record);
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  btn = sz_view_button("+1", counter_tap, count);
+  sz_view_add_child(root, btn);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+  fr = sz_view_frame(btn);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = fr.x + fr.w * 0.5f;
+  ev.y = fr.y + fr.h * 0.5f;
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(sz_signal_int_get(count) == 1);
+
+  parsed = json_slurp_parse(record);
+  json = (SzAdt *)sz_adt_payload(parsed);
+  assert(json_doc_int(json, "v", 0) == 1);
+  assert(json_str_eq(json, "kind", "inject"));
+  events = json_doc_key(json, "events");
+  assert(events && sz_json_is_arr(events) == 1);
+  arr = sz_json_arr(events);
+  assert(sz_list_len(arr) == 1);
+  ev0 = (SzAdt *)sz_list_head(arr);
+  assert(json_str_eq(ev0, "op", "tap"));
+  assert(json_doc_int(ev0, "i", -1) == 0);
+  sz_release(arr);
+  sz_release(parsed);
+
+  /* A tap miss records an `xy` point. */
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = 190.f;
+  ev.y = 90.f;
+  assert(sz_ui_session_live_inject(session, &ev));
+  parsed = json_slurp_parse(record);
+  json = (SzAdt *)sz_adt_payload(parsed);
+  events = json_doc_key(json, "events");
+  arr = sz_json_arr(events);
+  assert(sz_list_len(arr) == 2);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(arr));
+  assert(json_str_eq(ev0, "op", "xy"));
+  assert(sz_json_float_or(json_doc_key(ev0, "x"), 0.0) == 190.0);
+  sz_release(arr);
+  sz_release(parsed);
+
+  /* A modified key records its mods. */
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "s";
+  ev.key_mods = SZ_KEY_CTRL;
+  assert(sz_ui_session_live_inject(session, &ev));
+  parsed = json_slurp_parse(record);
+  json = (SzAdt *)sz_adt_payload(parsed);
+  events = json_doc_key(json, "events");
+  arr = sz_json_arr(events);
+  assert(sz_list_len(arr) == 3);
+  ev0 = (SzAdt *)sz_list_head(sz_list_tail(sz_list_tail(arr)));
+  assert(json_str_eq(ev0, "op", "key"));
+  assert(json_str_eq(ev0, "key", "s"));
+  mods = json_doc_key(ev0, "mods");
+  assert(mods && sz_json_is_arr(mods) == 1);
+  marr = sz_json_arr(mods);
+  assert(sz_list_len(marr) == 1);
+  m0 = (SzAdt *)sz_list_head(marr);
+  assert(sz_json_is_str(m0) == 1);
+  assert(strcmp(sz_string_cstr((SzString *)sz_adt_payload(m0)), "ctrl") == 0);
+  sz_release(marr);
+  sz_release(arr);
+  sz_release(parsed);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  remove(record);
+}
+
 /* --- quiesce terminal boundary ------------------------------------------ */
 
 typedef struct {
@@ -16157,6 +16327,8 @@ int main(void) {
   test_ui_run_rebuild();
   test_ui_run_rebuild_keepalive();
   test_dump_json_schema();
+  test_script_json_inject();
+  test_record_json();
   test_session_debug_dump();
   test_xy_hit_and_miss();
   test_record_live_not_script();

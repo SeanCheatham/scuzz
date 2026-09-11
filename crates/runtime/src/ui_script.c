@@ -457,6 +457,14 @@ static void script_secondary_n(SzUiSession *session, int n) {
   script_secondary_xy(session, fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
 }
 
+/* Pump tail after every script event except quit. */
+static void script_after_event(SzUiSession *session) {
+  if (!sz_ui_session_alive(session))
+    return;
+  if (!sz_ui_pump_sync(session))
+    sz_panic("Ui.run: script pump failed");
+}
+
 static void play_script_line(SzUiSession *session, char *line) {
   size_t len = strlen(line);
   if (len == 0 || line[0] == '#')
@@ -602,10 +610,7 @@ static void play_script_line(SzUiSession *session, char *line) {
     sz_driver_run_line(line + 6);
   else
     sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
-  if (!sz_ui_session_alive(session))
-    return;
-  if (!sz_ui_pump_sync(session))
-    sz_panic("Ui.run: script pump failed");
+  script_after_event(session);
 }
 
 void sz_ui_script_play_text(SzUiSession *session, char *text) {
@@ -628,6 +633,280 @@ void sz_ui_script_play_text(SzUiSession *session, char *text) {
   }
 }
 
+/* --- typed session schema v=1 (JSON inject) ------------------------------ */
+/* Document: {"v":1,"kind":"inject","events":[...]}. One object per text
+ * verb. `op` names the verb. Same helpers and the same pump-after-event
+ * rule as the line protocol. A bad envelope or an unknown op panics, same
+ * as an unknown text directive. */
+
+/* A script / record / inject path that ends in `.json` selects the schema. */
+static int script_path_is_json(const char *path) {
+  size_t n = path ? strlen(path) : 0;
+  return n >= 5 && strcmp(path + n - 5, ".json") == 0;
+}
+
+/* Borrowed value at `key`, or NULL. The document outlives the borrow. */
+static SzAdt *jev_key(SzAdt *obj, const char *key) {
+  SzString *k;
+  SzList *got;
+  SzAdt *out = NULL;
+  if (!obj || !sz_json_is_obj(obj))
+    return NULL;
+  k = sz_string_from_cstr(key);
+  got = sz_json_get(obj, k);
+  if (got && !sz_list_is_empty(got))
+    out = (SzAdt *)sz_list_head(got);
+  if (got)
+    sz_release(got);
+  sz_release(k);
+  return out;
+}
+
+static int jev_has(SzAdt *obj, const char *key) {
+  return jev_key(obj, key) != NULL;
+}
+
+static int64_t jev_int(SzAdt *obj, const char *key, int64_t d) {
+  SzAdt *v = jev_key(obj, key);
+  if (!v)
+    return d;
+  if (sz_json_is_int(v))
+    return sz_json_int_or(v, d);
+  if (sz_json_is_float(v))
+    return (int64_t)sz_json_float_or(v, (double)d);
+  return d;
+}
+
+static double jev_num(SzAdt *obj, const char *key, double d) {
+  SzAdt *v = jev_key(obj, key);
+  if (!v)
+    return d;
+  if (sz_json_is_int(v))
+    return (double)sz_json_int_or(v, (int64_t)d);
+  if (sz_json_is_float(v))
+    return sz_json_float_or(v, d);
+  return d;
+}
+
+/* Borrowed cstr at `key` ("" when absent or not a string). */
+static const char *jev_str(SzAdt *obj, const char *key) {
+  SzAdt *v = jev_key(obj, key);
+  if (!v || !sz_json_is_str(v))
+    return "";
+  return sz_string_cstr((SzString *)sz_adt_payload(v));
+}
+
+static int jev_bool(SzAdt *obj, const char *key) {
+  SzAdt *v = jev_key(obj, key);
+  return v ? (int)sz_json_bool_or(v, 0) : 0;
+}
+
+static int jev_mods(SzAdt *ev) {
+  SzAdt *arr = jev_key(ev, "mods");
+  SzList *xs;
+  int mods = 0;
+  if (!arr || !sz_json_is_arr(arr))
+    return 0;
+  xs = sz_json_arr(arr);
+  for (; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
+    SzAdt *m = (SzAdt *)sz_list_head(xs);
+    const char *s;
+    if (!m || !sz_json_is_str(m))
+      continue;
+    s = sz_string_cstr((SzString *)sz_adt_payload(m));
+    if (script_eq_mod(s, "shift"))
+      mods |= SZ_KEY_SHIFT;
+    else if (script_eq_mod(s, "ctrl"))
+      mods |= SZ_KEY_CTRL;
+    else if (script_eq_mod(s, "cmd"))
+      mods |= SZ_KEY_CMD;
+    else if (script_eq_mod(s, "alt"))
+      mods |= SZ_KEY_ALT;
+  }
+  sz_release(xs);
+  return mods;
+}
+
+/* `{"op":"drive","name":n,"args":[...]}` → the text driver line. Typed
+ * args become the same tokens the text verb uses. */
+static void script_drive_json(SzAdt *ev) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  SzAdt *args;
+  SzList *xs;
+  sz_dump_append(&buf, &len, &cap, jev_str(ev, "name"));
+  args = jev_key(ev, "args");
+  if (args && sz_json_is_arr(args)) {
+    xs = sz_json_arr(args);
+    for (; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
+      SzAdt *a = (SzAdt *)sz_list_head(xs);
+      char tmp[64];
+      sz_dump_append(&buf, &len, &cap, " ");
+      if (a && sz_json_is_int(a)) {
+        snprintf(tmp, sizeof tmp, "%lld", (long long)sz_json_int_or(a, 0));
+        sz_dump_append(&buf, &len, &cap, tmp);
+      } else if (a && sz_json_is_float(a)) {
+        snprintf(tmp, sizeof tmp, "%g", sz_json_float_or(a, 0.0));
+        sz_dump_append(&buf, &len, &cap, tmp);
+      } else if (a && sz_json_is_bool(a))
+        sz_dump_append(&buf, &len, &cap,
+                       sz_json_bool_or(a, 0) ? "true" : "false");
+      else if (a && sz_json_is_str(a))
+        sz_dump_append(&buf, &len, &cap,
+                       sz_string_cstr((SzString *)sz_adt_payload(a)));
+    }
+    sz_release(xs);
+  }
+  if (buf) {
+    sz_driver_run_line(buf);
+    sz_free(buf);
+  }
+}
+
+static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
+  const char *op;
+  if (!ev || !sz_json_is_obj(ev))
+    sz_panic("Ui.run: inject event must be an object");
+  op = jev_str(ev, "op");
+  if (!op[0])
+    sz_panic("Ui.run: inject event needs op");
+  if (strcmp(op, "tap") == 0)
+    script_tap(session, (int)jev_int(ev, "i", 0));
+  else if (strcmp(op, "xy") == 0) {
+    if (!jev_has(ev, "x") || !jev_has(ev, "y"))
+      sz_panic("Ui.run: inject xy needs x and y");
+    script_xy(session, (float)jev_num(ev, "x", 0.0),
+              (float)jev_num(ev, "y", 0.0));
+  } else if (strcmp(op, "text") == 0) {
+    SzInputEvent e;
+    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
+    memset(&e, 0, sizeof e);
+    e.kind = SZ_INPUT_TEXT;
+    e.text = jev_str(ev, "value");
+    if (script_focus_field(session, idx)) {
+      if (!sz_ui_inject_sync(session, &e))
+        fprintf(stderr, "scuzz: script text skipped (no text field)\n");
+    }
+  } else if (strcmp(op, "type") == 0) {
+    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
+    script_type(session, idx, jev_str(ev, "value"));
+  } else if (strcmp(op, "key") == 0)
+    script_key(session, jev_str(ev, "key"), jev_str(ev, "text"),
+               jev_mods(ev), jev_bool(ev, "repeat"));
+  else if (strcmp(op, "compose") == 0)
+    script_compose(session, jev_str(ev, "value"));
+  else if (strcmp(op, "commit") == 0)
+    script_compose(session, "");
+  else if (strcmp(op, "caret") == 0) {
+    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
+    int off = (int)jev_int(ev, "offset", 0);
+    if (!sz_ui_session_set_caret(session, idx, off)) {
+      if (idx < 0)
+        fprintf(stderr, "scuzz: script caret skipped (no text field)\n");
+      else
+        fprintf(stderr, "scuzz: script caret %d skipped\n", idx);
+    }
+  } else if (strcmp(op, "select") == 0) {
+    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
+    int a = (int)jev_int(ev, "start", 0);
+    int b = (int)jev_int(ev, "end", 0);
+    if (!sz_ui_session_set_sel(session, idx, a, b)) {
+      if (idx < 0)
+        fprintf(stderr, "scuzz: script select skipped (no text field)\n");
+      else
+        fprintf(stderr, "scuzz: script select %d skipped\n", idx);
+    }
+  } else if (strcmp(op, "copy") == 0) {
+    if (!sz_ui_session_copy(session))
+      fprintf(stderr, "scuzz: script copy skipped (no text field)\n");
+  } else if (strcmp(op, "cut") == 0) {
+    if (!sz_ui_session_cut(session))
+      fprintf(stderr, "scuzz: script cut skipped (no text field)\n");
+  } else if (strcmp(op, "paste") == 0) {
+    const char *payload = jev_has(ev, "value") ? jev_str(ev, "value") : NULL;
+    if (!sz_ui_session_paste(session, payload))
+      fprintf(stderr, "scuzz: script paste skipped (no text field)\n");
+  } else if (strcmp(op, "drag") == 0) {
+    if (!jev_has(ev, "x1") || !jev_has(ev, "y1") || !jev_has(ev, "x2") ||
+        !jev_has(ev, "y2"))
+      sz_panic("Ui.run: inject drag needs x1 y1 x2 y2");
+    script_drag(session, (float)jev_num(ev, "x1", 0.0),
+                (float)jev_num(ev, "y1", 0.0), (float)jev_num(ev, "x2", 0.0),
+                (float)jev_num(ev, "y2", 0.0));
+  } else if (strcmp(op, "hover") == 0) {
+    if (!jev_has(ev, "x") || !jev_has(ev, "y"))
+      sz_panic("Ui.run: inject hover needs x and y");
+    script_hover(session, (float)jev_num(ev, "x", 0.0),
+                 (float)jev_num(ev, "y", 0.0));
+  } else if (strcmp(op, "secondary") == 0) {
+    if (jev_has(ev, "x") && jev_has(ev, "y"))
+      script_secondary_xy(session, (float)jev_num(ev, "x", 0.0),
+                          (float)jev_num(ev, "y", 0.0));
+    else
+      script_secondary_n(session, (int)jev_int(ev, "i", 0));
+  } else if (strcmp(op, "pump") == 0) {
+    int k = (int)jev_int(ev, "k", 1);
+    while (k-- > 1) {
+      if (!sz_ui_pump_sync(session))
+        sz_panic("Ui.run: script pump failed");
+    }
+  } else if (strcmp(op, "scroll") == 0) {
+    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
+    script_scroll(session, idx, (float)jev_num(ev, "dy", 40.0));
+  } else if (strcmp(op, "backspace") == 0) {
+    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
+    script_backspace(session, idx, (int)jev_int(ev, "count", 1));
+  } else if (strcmp(op, "dump") == 0)
+    sz_ui_session_dump_now(session);
+  else if (strcmp(op, "reload") == 0) {
+    if (!sz_ui_session_reload(session))
+      fprintf(stderr, "scuzz: script reload skipped (no factory)\n");
+  } else if (strcmp(op, "quit") == 0) {
+    sz_ui_session_request_stop(session);
+    return;
+  } else if (strcmp(op, "resetpeak") == 0) {
+    sz_alloc_reset_stats();
+    sz_alloc_mark();
+  } else if (strcmp(op, "drive") == 0)
+    script_drive_json(ev);
+  else
+    sz_panic("Ui.run: unknown inject op");
+  script_after_event(session);
+}
+
+void sz_ui_script_play_json(SzUiSession *session, const char *text) {
+  SzString *doc;
+  SzAdt *parsed, *json, *events;
+  SzList *xs;
+  if (!session || !text)
+    return;
+  doc = sz_string_from_cstr(text);
+  parsed = sz_json_parse(doc);
+  sz_release(doc);
+  if (!parsed || sz_adt_tag(parsed) != 1)
+    sz_panic("Ui.run: inject JSON parse failed");
+  json = (SzAdt *)sz_adt_payload(parsed);
+  if (!sz_json_is_obj(json) || jev_int(json, "v", 0) != 1 ||
+      strcmp(jev_str(json, "kind"), "inject") != 0 ||
+      !jev_has(json, "events")) {
+    sz_release(parsed);
+    sz_panic("Ui.run: inject JSON wants {\"v\":1,\"kind\":\"inject\",\"events\":[...]}");
+  }
+  events = jev_key(json, "events");
+  if (!sz_json_is_arr(events)) {
+    sz_release(parsed);
+    sz_panic("Ui.run: inject events must be an array");
+  }
+  xs = sz_json_arr(events);
+  for (; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
+    if (!sz_ui_session_alive(session))
+      break;
+    play_script_event_json(session, (SzAdt *)sz_list_head(xs));
+  }
+  sz_release(xs);
+  sz_release(parsed);
+}
+
 void sz_ui_script_run_file(SzUiSession *session, const char *path) {
   FILE *f = fopen(path, "r");
   char *line = NULL;
@@ -636,6 +915,23 @@ void sz_ui_script_run_file(SzUiSession *session, const char *path) {
   int c;
   if (!f)
     sz_panic("Ui.run: SCUZZ_UI_SCRIPT open failed");
+  if (script_path_is_json(path)) {
+    for (;;) {
+      char t[2];
+      c = fgetc(f);
+      if (c == EOF)
+        break;
+      t[0] = (char)c;
+      t[1] = '\0';
+      sz_dump_append(&line, &len, &cap, t);
+    }
+    fclose(f);
+    if (line) {
+      sz_ui_script_play_json(session, line);
+      sz_free(line);
+    }
+    return;
+  }
   /* Read one logical line at a time, no fixed cap. A long line must not
    * split into a bogus directive. */
   for (;;) {

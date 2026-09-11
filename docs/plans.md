@@ -31,9 +31,31 @@ Document `v=1`:
 - [x] `docs/vision.md`: schema paragraph names the landed dump surface and the `.json` rule.
 - [x] `docs/gaps.md`: gap 1 residual = inject, fuzz verdict, coverage.
 
+## Slice 2: inject surface
+
+A script, record, or inject path that ends in `.json` uses the typed schema instead of the text verbs. Selection by suffix keeps the CLI, flags, and env (`SCUZZ_UI_SCRIPT`, `SCUZZ_UI_RECORD`, `SCUZZ_UI_INJECT`) unchanged. No new flags.
+
+Document `v=1`:
+
+- Envelope: `{"v":1,"kind":"inject","events":[...]}`.
+- One object per verb. `op` names the verb. Indices are `i`. Payload strings are `value`. Points are `x` / `y` (`x1` / `y1` / `x2` / `y2` for drag). Keys: `{"op":"key","key":"Enter","text":"...","mods":["shift","ctrl","cmd","alt"],"repeat":B}`. `text` / `type` / `caret` / `select` / `backspace` take an optional `i` (absent = starred field). `scroll` takes optional `i` and `dy`. `secondary` takes `i` or `x` / `y`. `drive` takes `name` and typed `args`.
+- Playback runs the same helpers and pump-after-event rule as the text verbs. A bad envelope or an unknown `op` panics, same as an unknown text directive.
+- Record: a `.json` record path rewrites the whole document on each live OS event. Text keeps append-per-event.
+- Watch inject: a `.json` inject document plays whole on change. It is not prefix-appended.
+
+### Status
+
+- [x] `crates/runtime/src/ui_script.c`: JSON playback (`sz_ui_script_play_json`), `.json` routing in `sz_ui_script_run_file`.
+- [x] `crates/runtime/src/ui.c`: `.json` routing for watch inject and record; JSON record event writers.
+- [x] `crates/runtime/src/ui_script.h` / `scuzz_ui.h`: declarations.
+- [x] `crates/runtime/tests/test_ui.c`: play a JSON script (tap, text, key), replay a `.json` script file, record live events to a `.json` path and parse the result.
+- [x] `scripts/ci.sh` `slice_ui`: counter headless with a `.json` script; assert the tap landed through the `.json` dump.
+- [x] `examples/manual/src/Topics.scuzz`: commands topic states the `.json` script / record rule and the event ops.
+- [x] `docs/vision.md`: schema paragraph names the landed inject surface.
+- [x] `docs/gaps.md`: gap 1 residual = fuzz verdict, coverage.
+
 ## Later slices (not started)
 
-- Inject: JSON script form of the `*.script` verbs through the same schema.
 - Fuzz verdict: `build/fuzz/summary` in the schema. Text `summary.toml` stays until then.
 - Coverage: source-region coverage output in the schema (gaps.md thesis-critical 2).
 - Typed a11y tree and typed list/value signal payloads.

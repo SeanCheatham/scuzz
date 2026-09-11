@@ -29,7 +29,7 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 Close them in this order.
 
-1. **Typed agent session schema** — One JSON schema for dump, inject, fuzz verdict, and coverage. The dump surface landed (`v=1` through a `.json` dump path). Open: inject, fuzz verdict, and coverage in the schema. Typed a11y tree and typed list/value signal payloads. Text dump and script stay until that schema ships. `--message-format=json` applies to `check` only until then.
+1. **Typed agent session schema** — One JSON schema for dump, inject, fuzz verdict, and coverage. The dump and inject surfaces landed (`v=1` through `.json` paths). Open: fuzz verdict and coverage in the schema. Typed a11y tree and typed list/value signal payloads. Text dump and script stay until that schema ships. `--message-format=json` applies to `check` only until then.
 
 2. **Source-region coverage** — Open: branch coverage and typed session output.
 

@@ -237,6 +237,15 @@ assert d["taps"] and d["taps"][0]["label"] == "+1"
 assert isinstance(d["views"], list) and d["views"]
 assert isinstance(d["fields"], list) and isinstance(d["scrolls"], list)
 PY
+  printf '%s\n' '{"v":1,"kind":"inject","events":[{"op":"tap","i":0}]}' > examples/counter/build/inject.json
+  "$SCUZZ" run --headless --script examples/counter/build/inject.json --dump examples/counter/build/session.json examples/counter
+  python3 - <<'PY'
+import json
+with open("examples/counter/build/session.json") as f:
+    d = json.load(f)
+assert any(s.get("name") == "count" and s.get("value") == 1 for s in d["signals"])
+PY
+  rm -f examples/counter/build/inject.json
   "$SCUZZ" fuzz --iterations 0 examples/counter
   "$SCUZZ" run --headless examples/studio
   test -f examples/studio/build/snapshot.png

@@ -9,8 +9,9 @@ int sz_ui_collect_scrolls(SzUiSession *session, SzView **scrolls, int cap);
 int sz_ui_scroll_index(SzUiSession *session, int index, float dy);
 
 /* SCUZZ_UI_SCRIPT playback: text buffer (inject), file (replay), or one
- * env-driven tap. */
+ * env-driven tap. A path that ends in `.json` plays the typed schema. */
 void sz_ui_script_play_text(SzUiSession *session, char *text);
+void sz_ui_script_play_json(SzUiSession *session, const char *text);
 void sz_ui_script_run_file(SzUiSession *session, const char *path);
 void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper);
 

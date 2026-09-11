@@ -153,6 +153,10 @@ struct SzUiSession {
   char *inject_fp;
   int inject_playing;
   char *record_path;
+  /* JSON record: event objects so far; the file rewrites on each event. */
+  char *record_events;
+  size_t record_events_len;
+  size_t record_events_cap;
   int last_hit_seen;
   float last_hit_x;
   float last_hit_y;
@@ -409,6 +413,10 @@ int sz_ui_session_set_record(SzUiSession *session, const char *path) {
     return 0;
   sz_free(session->record_path);
   session->record_path = sz_strdup(path);
+  sz_free(session->record_events);
+  session->record_events = NULL;
+  session->record_events_len = 0;
+  session->record_events_cap = 0;
   /* Truncate so each process is one session. */
   f = fopen(path, "w");
   if (!f)
@@ -1143,6 +1151,7 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->inject_path);
   sz_free(session->inject_fp);
   sz_free(session->record_path);
+  sz_free(session->record_events);
   host_free(&session->last_hit_desc);
   host_free(&session->hover_desc);
   host_free(&session->record_hover_desc);
@@ -1380,6 +1389,248 @@ static void record_secondary_or_xy(SzUiSession *session, FILE *f, float x,
     fprintf(f, "secondary %.1f %.1f\n", x, y);
 }
 
+/* --- typed session schema v=1 (JSON record) ------------------------------- */
+/* A record path that ends in `.json` writes the inject schema instead of
+ * text lines. Each live OS event appends one object to `record_events` and
+ * rewrites the whole document. */
+
+static int clipboard_chord(const char *key, int mods);
+
+/* JSON string body escaping: same dialect as the JSON dump writer. */
+static void json_append_escaped(char **buf, size_t *len, size_t *cap,
+                                const char *s) {
+  const char *p;
+  if (!s)
+    return;
+  for (p = s; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c == '\\')
+      sz_dump_append(buf, len, cap, "\\\\");
+    else if (c == '"')
+      sz_dump_append(buf, len, cap, "\\\"");
+    else if (c == '\n')
+      sz_dump_append(buf, len, cap, "\\n");
+    else if (c == '\r')
+      sz_dump_append(buf, len, cap, "\\r");
+    else if (c == '\t')
+      sz_dump_append(buf, len, cap, "\\t");
+    else if (c < 0x20) {
+      char tmp[8];
+      snprintf(tmp, sizeof tmp, "\\u%04x", c);
+      sz_dump_append(buf, len, cap, tmp);
+    } else {
+      char t[2];
+      t[0] = (char)c;
+      t[1] = '\0';
+      sz_dump_append(buf, len, cap, t);
+    }
+  }
+}
+
+/* Append one event object and rewrite the record file. */
+static void record_json_event(SzUiSession *session, char *obj) {
+  FILE *f;
+  if (!obj)
+    return;
+  if (session->record_events_len > 0)
+    sz_dump_append(&session->record_events, &session->record_events_len,
+                   &session->record_events_cap, ",");
+  sz_dump_append(&session->record_events, &session->record_events_len,
+                 &session->record_events_cap, obj);
+  sz_free(obj);
+  f = fopen(session->record_path, "w");
+  if (!f)
+    return;
+  fputs("{\"v\":1,\"kind\":\"inject\",\"events\":[", f);
+  fputs(session->record_events, f);
+  fputs("]}\n", f);
+  fclose(f);
+}
+
+/* `{"op":"<op>","i":N}` on a tap-target hit. A miss records a point:
+ * `tap` degrades to `xy`, `secondary` keeps its name (same as the text). */
+static char *jrec_tap_or_xy(SzUiSession *session, const char *op, float x,
+                            float y) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  char tmp[128];
+  int idx = find_tap_index_at(session, x, y);
+  if (idx >= 0)
+    snprintf(tmp, sizeof tmp, "{\"op\":\"%s\",\"i\":%d}", op, idx);
+  else
+    snprintf(tmp, sizeof tmp, "{\"op\":\"%s\",\"x\":%.1f,\"y\":%.1f}",
+             strcmp(op, "tap") == 0 ? "xy" : op, (double)x, (double)y);
+  sz_dump_append(&buf, &len, &cap, tmp);
+  return buf;
+}
+
+static void jrec_mod(char **buf, size_t *len, size_t *cap, int *first,
+                     const char *name) {
+  sz_dump_append(buf, len, cap, *first ? "\"" : ",\"");
+  sz_dump_append(buf, len, cap, name);
+  sz_dump_append(buf, len, cap, "\"");
+  *first = 0;
+}
+
+static char *jrec_key(const SzInputEvent *ev) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  sz_dump_append(&buf, &len, &cap, "{\"op\":\"key\",\"key\":\"");
+  json_append_escaped(&buf, &len, &cap, ev->key);
+  sz_dump_append(&buf, &len, &cap, "\"");
+  if (ev->text && ev->text[0]) {
+    sz_dump_append(&buf, &len, &cap, ",\"text\":\"");
+    json_append_escaped(&buf, &len, &cap, ev->text);
+    sz_dump_append(&buf, &len, &cap, "\"");
+  }
+  if (ev->key_mods) {
+    int first = 1;
+    sz_dump_append(&buf, &len, &cap, ",\"mods\":[");
+    if (ev->key_mods & SZ_KEY_SHIFT)
+      jrec_mod(&buf, &len, &cap, &first, "shift");
+    if (ev->key_mods & SZ_KEY_CTRL)
+      jrec_mod(&buf, &len, &cap, &first, "ctrl");
+    if (ev->key_mods & SZ_KEY_CMD)
+      jrec_mod(&buf, &len, &cap, &first, "cmd");
+    if (ev->key_mods & SZ_KEY_ALT)
+      jrec_mod(&buf, &len, &cap, &first, "alt");
+    sz_dump_append(&buf, &len, &cap, "]");
+  }
+  if (ev->key_repeat)
+    sz_dump_append(&buf, &len, &cap, ",\"repeat\":true");
+  sz_dump_append(&buf, &len, &cap, "}");
+  return buf;
+}
+
+static char *jrec_str_event(const char *op, const char *key,
+                            const char *value) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  sz_dump_append(&buf, &len, &cap, "{\"op\":\"");
+  sz_dump_append(&buf, &len, &cap, op);
+  sz_dump_append(&buf, &len, &cap, "\"");
+  if (key) {
+    sz_dump_append(&buf, &len, &cap, ",\"");
+    sz_dump_append(&buf, &len, &cap, key);
+    sz_dump_append(&buf, &len, &cap, "\":\"");
+    json_append_escaped(&buf, &len, &cap, value);
+    sz_dump_append(&buf, &len, &cap, "\"");
+  }
+  sz_dump_append(&buf, &len, &cap, "}");
+  return buf;
+}
+
+/* JSON sibling of record_live_event. Same branch conditions, object out. */
+static void record_live_event_json(SzUiSession *session,
+                                   const SzInputEvent *ev) {
+  if (ev->kind == SZ_INPUT_TAP) {
+    record_json_event(session, jrec_tap_or_xy(session, "tap", ev->x, ev->y));
+  } else if (ev->kind == SZ_INPUT_KEY && ev->key && ev->key[0]) {
+    if (!clipboard_chord(ev->key, ev->key_mods))
+      record_json_event(session, jrec_key(ev));
+  } else if (ev->kind == SZ_INPUT_COMPOSE) {
+    if (ev->text && ev->text[0])
+      record_json_event(session, jrec_str_event("compose", "value", ev->text));
+    else
+      record_json_event(session, jrec_str_event("commit", NULL, NULL));
+  } else if (ev->kind == SZ_INPUT_TEXT_EDIT) {
+    if (!ev->text || !ev->text[0])
+      record_json_event(session, jrec_str_event("backspace", NULL, NULL));
+    else
+      record_json_event(session, jrec_str_event("type", "value", ev->text));
+  } else if (ev->kind == SZ_INPUT_POINTER &&
+             ev->pointer_phase == SZ_POINTER_MOVE && !session->pointer_down) {
+    SzView *tip;
+    char desc[256];
+    if (session->root) {
+      sz_view_layout(session->root, (float)session->cfg.width,
+                     (float)session->cfg.height, session->theme);
+      tip = sz_view_tooltip_at(session->root, ev->x, ev->y);
+    } else
+      tip = NULL;
+    format_last_hit_desc(tip, desc, sizeof desc);
+    if (!session->record_hover_desc ||
+        strcmp(session->record_hover_desc, desc) != 0) {
+      char *buf = NULL;
+      size_t len = 0, cap = 0;
+      char tmp[128];
+      snprintf(tmp, sizeof tmp, "{\"op\":\"hover\",\"x\":%.1f,\"y\":%.1f}",
+               (double)ev->x, (double)ev->y);
+      sz_dump_append(&buf, &len, &cap, tmp);
+      record_json_event(session, buf);
+      host_free(&session->record_hover_desc);
+      session->record_hover_desc = host_dup(desc);
+    }
+  } else if (ev->kind == SZ_INPUT_POINTER &&
+             ev->pointer_phase == SZ_POINTER_UP && session->pointer_down) {
+    float dx = ev->x - session->pointer_down_x;
+    float dy = ev->y - session->pointer_down_y;
+    if (session->pointer_button == 3 || ev->pointer_button == 3) {
+      if (dx * dx + dy * dy <= 64.f)
+        record_json_event(session,
+                          jrec_tap_or_xy(session, "secondary", ev->x, ev->y));
+    } else if (session->pointer_field && dx * dx + dy * dy > 64.f) {
+      char *buf = NULL;
+      size_t len = 0, cap = 0;
+      char tmp[160];
+      snprintf(tmp, sizeof tmp,
+               "{\"op\":\"drag\",\"x1\":%.1f,\"y1\":%.1f,\"x2\":%.1f,\"y2\":%.1f}",
+               (double)session->pointer_down_x, (double)session->pointer_down_y,
+               (double)ev->x, (double)ev->y);
+      sz_dump_append(&buf, &len, &cap, tmp);
+      record_json_event(session, buf);
+    } else if (session->pointer_slider) {
+      char *buf = NULL;
+      size_t len = 0, cap = 0;
+      char tmp[128];
+      snprintf(tmp, sizeof tmp, "{\"op\":\"xy\",\"x\":%.1f,\"y\":%.1f}",
+               (double)ev->x, (double)ev->y);
+      sz_dump_append(&buf, &len, &cap, tmp);
+      record_json_event(session, buf);
+    } else if (dx * dx + dy * dy <= 64.f)
+      record_json_event(session, jrec_tap_or_xy(session, "tap", ev->x, ev->y));
+  } else if (ev->kind == SZ_INPUT_SCROLL && session->root) {
+    SzView *scrolls[64];
+    SzView *hit;
+    int n, i, idx;
+    sz_view_layout(session->root, (float)session->cfg.width,
+                   (float)session->cfg.height, session->theme);
+    hit = sz_view_scroll_at(session->root, ev->x, ev->y);
+    if (hit) {
+      n = sz_ui_collect_scrolls(session, scrolls, 64);
+      idx = -1;
+      for (i = 0; i < n; i++) {
+        if (scrolls[i] == hit) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        char *buf = NULL;
+        size_t len = 0, cap = 0;
+        char tmp[128];
+        snprintf(tmp, sizeof tmp, "{\"op\":\"scroll\",\"i\":%d,\"dy\":%.0f}",
+                 idx, (double)ev->dy);
+        sz_dump_append(&buf, &len, &cap, tmp);
+        record_json_event(session, buf);
+      }
+    }
+  }
+}
+
+/* JSON sibling of record_clipboard_verb. */
+static void record_clipboard_verb_json(SzUiSession *session, int op) {
+  if (op == 1)
+    record_json_event(session, jrec_str_event("copy", NULL, NULL));
+  else if (op == 2)
+    record_json_event(session, jrec_str_event("cut", NULL, NULL));
+  else if (session->clipboard && session->clipboard[0])
+    record_json_event(session,
+                      jrec_str_event("paste", "value", session->clipboard));
+  else
+    record_json_event(session, jrec_str_event("paste", NULL, NULL));
+}
+
 static void session_set_clipboard(SzUiSession *session, const char *text) {
   if (!session)
     return;
@@ -1484,6 +1735,10 @@ static void record_clipboard_verb(SzUiSession *session, int op) {
   FILE *f;
   if (!session || !session->record_path || op < 1 || op > 3)
     return;
+  if (dump_path_is_json(session->record_path)) {
+    record_clipboard_verb_json(session, op);
+    return;
+  }
   f = fopen(session->record_path, "a");
   if (!f)
     return;
@@ -1527,6 +1782,10 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
   FILE *f;
   if (!session || !session->record_path || !ev)
     return;
+  if (dump_path_is_json(session->record_path)) {
+    record_live_event_json(session, ev);
+    return;
+  }
   f = fopen(session->record_path, "a");
   if (!f)
     return;
@@ -1656,7 +1915,9 @@ static int take_inject(SzUiSession *session, char **out) {
   }
   old_n = session->inject_fp ? strlen(session->inject_fp) : 0;
   now_n = strlen(now);
-  if (old_n > 0 && now_n >= old_n && memcmp(session->inject_fp, now, old_n) == 0)
+  /* A `.json` inject document plays whole on change. It is not appended. */
+  if (old_n > 0 && now_n >= old_n && memcmp(session->inject_fp, now, old_n) == 0 &&
+      !dump_path_is_json(session->inject_path))
     play = now + old_n;
   else
     play = now;
@@ -1723,7 +1984,10 @@ int sz_ui_pump_sync(SzUiSession *session) {
     char *delta = NULL;
     if (take_inject(session, &delta)) {
       session->inject_playing = 1;
-      sz_ui_script_play_text(session, delta);
+      if (dump_path_is_json(session->inject_path))
+        sz_ui_script_play_json(session, delta);
+      else
+        sz_ui_script_play_text(session, delta);
       sz_free(delta);
       session->inject_playing = 0;
       need_dump = 1;
