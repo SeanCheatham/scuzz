@@ -394,8 +394,8 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
-def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)]): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows), "}"))))))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)]): String =
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), "}"))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -421,8 +421,11 @@ def jMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: 
 def jScore(killed: Int, sites: Int): String =
   if (sites <= 0) "" else Str.concat(",\"score\":", score3(killed, sites))
 
-def jCoverage(rows: List[(String, Bool)]): String =
-  Str.concat(",\"coverage\":{\"total\":", Str.concat(Str.fromInt(List.len(rows)), Str.concat(",\"reached\":", Str.concat(Str.fromInt(List.count(rows, r => r._2)), Str.concat(",\"regions\":[", Str.concat(jRegions(rows), "]}"))))))
+def jCoverage(rows: List[(String, Bool)], branches: List[(String, Bool)]): String =
+  Str.concat(",\"coverage\":{", Str.concat(jCovRows(rows), Str.concat(",\"branches\":{", Str.concat(jCovRows(branches), "}}"))))
+
+def jCovRows(rows: List[(String, Bool)]): String =
+  Str.concat("\"total\":", Str.concat(Str.fromInt(List.len(rows)), Str.concat(",\"reached\":", Str.concat(Str.fromInt(List.count(rows, r => r._2)), Str.concat(",\"regions\":[", Str.concat(jRegions(rows), "]"))))))
 
 def jRegions(rows: List[(String, Bool)]): String =
   if (List.isEmpty(rows)) "" else Str.concat(jRegion(List.at(rows, 0)), jRegionsRest(List.tail(rows)))
@@ -450,6 +453,100 @@ def coverageMatched(expected: List[Fun], built: List[Fun], compiled: List[(Strin
 
 def coverageBody(expected: Fun, built: Fun, compiled: List[(String, String)], hits: List[String]): Bool =
   Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLoc(compiled, built.mod, built.off))
+
+def branchRowsOf(files: List[(String, String)], compiled: List[(String, String)], hits: String): List[(String, Bool)] =
+  branchProgRows(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))
+
+def branchProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+  List.concat(branchDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), branchMainRows(p, expected, built, files, compiled, hits))
+
+def branchDefs(defs: List[Fun], expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+  if (List.isEmpty(defs)) [] else List.concat(branchDefRows(List.at(defs, 0), expected, built, files, compiled, hits), branchDefs(List.tail(defs), expected, built, files, compiled, hits))
+
+def branchDefRows(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+  branchDefMatched(d, Check.findFunMod(expected, d.mod, d.name), Check.findFunMod(built, d.mod, d.name), files, compiled, hits, branchSites(d.body, 0))
+
+def branchDefMatched(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], sites: List[(Int, String)]): List[(String, Bool)] =
+  if (List.isEmpty(expected) || List.isEmpty(built) || Parse.pretty0(List.at(expected, 0).body) != Parse.pretty0(List.at(built, 0).body)) branchMissRows(files, d, sites) else branchZipRows(files, d, compiled, List.at(built, 0), hits, sites, branchSites(List.at(built, 0).body, 0))
+
+def branchMissRows(files: List[(String, String)], d: Fun, sites: List[(Int, String)]): List[(String, Bool)] =
+  if (List.isEmpty(sites)) [] else (Emit.panicLoc(files, d.mod, sitesOff(List.at(sites, 0))), false) :: branchMissRows(files, d, List.tail(sites))
+
+def sitesOff(site: (Int, String)): Int =
+  site._1
+
+def branchZipRows(files: List[(String, String)], d: Fun, compiled: List[(String, String)], bd: Fun, hits: List[String], live: List[(Int, String)], built: List[(Int, String)]): List[(String, Bool)] =
+  if (List.isEmpty(live) || List.isEmpty(built)) branchMissRows(files, d, live) else branchZipRow(files, d, compiled, bd, hits, List.at(live, 0), List.at(built, 0)) :: branchZipRows(files, d, compiled, bd, hits, List.tail(live), List.tail(built))
+
+def branchZipRow(files: List[(String, String)], d: Fun, compiled: List[(String, String)], bd: Fun, hits: List[String], live: (Int, String), built: (Int, String)): (String, Bool) =
+  (Emit.panicLoc(files, d.mod, live._1), List.contains(hits, Check.covKeyOf(Emit.panicLoc(compiled, bd.mod, bd.off), built._1, built._2)))
+
+def branchMainRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+  if (p.main == "" || Parse.pretty0(expected.body) != Parse.pretty0(built.body)) [] else branchMainZip(files, compiled, hits, branchSites(p.body, 0), branchSites(built.body, 0), panicLocMain(compiled, built.body))
+
+def panicLocMain(files: List[(String, String)], body: Expr): String =
+  Emit.panicLocExpr(files, body)
+
+def branchMainZip(files: List[(String, String)], compiled: List[(String, String)], hits: List[String], live: List[(Int, String)], built: List[(Int, String)], locBuilt: String): List[(String, Bool)] =
+  if (List.isEmpty(live)) [] else if (List.isEmpty(built)) branchMainMiss(files, List.at(live, 0)) :: branchMainZip(files, compiled, hits, List.tail(live), built, locBuilt) else branchMainRow(files, hits, List.at(live, 0), List.at(built, 0), locBuilt) :: branchMainZip(files, compiled, hits, List.tail(live), List.tail(built), locBuilt)
+
+def branchMainMiss(files: List[(String, String)], site: (Int, String)): (String, Bool) =
+  (Emit.panicLoc(files, "Main", site._1), false)
+
+def branchMainRow(files: List[(String, String)], hits: List[String], live: (Int, String), built: (Int, String), locBuilt: String): (String, Bool) =
+  (Emit.panicLoc(files, "Main", live._1), List.contains(hits, Check.covKeyOf(locBuilt, built._1, built._2)))
+
+def branchSites(e: Expr, parentOff: Int): List[(Int, String)] =
+  e match {
+    case Expr.EIf(c, t, el, ioff) => List.concat(branchIfSite(t, ioff, "t"), List.concat(branchIfSite(el, ioff, "e"), List.concat(branchSites(c, ioff), List.concat(branchSites(t, ioff), branchSites(el, ioff)))))
+    case Expr.EMatch(s, arms, moff) => List.concat(branchArmSites(arms, moff, 0), List.concat(branchSites(s, moff), branchArmsSites(arms, moff)))
+    case Expr.ECall(_, args, _) => branchListSites(args, parentOff)
+    case Expr.EMethod(recv, _, args, _) => List.concat(branchSites(recv, parentOff), branchListSites(args, parentOff))
+    case Expr.EField(recv, _, _) => branchSites(recv, parentOff)
+    case Expr.EBin(_, l, r, _) => List.concat(branchSites(l, parentOff), branchSites(r, parentOff))
+    case Expr.EUn(_, inner, _) => branchSites(inner, parentOff)
+    case Expr.ELam(_, _, body) => branchSites(body, parentOff)
+    case Expr.EPrint(inner, _) => branchSites(inner, parentOff)
+    case Expr.EFor(bs, body, _) => List.concat(branchBindSites(bs, parentOff), branchSites(body, parentOff))
+    case Expr.EList(xs) => branchListSites(xs, parentOff)
+    case Expr.ETuple(xs) => branchListSites(xs, parentOff)
+    case Expr.ENamed(_, inner) => branchSites(inner, parentOff)
+    case Expr.EAscribe(inner, _, _) => branchSites(inner, parentOff)
+    case _ => []
+  }
+
+def branchIfSite(e: Expr, parentOff: Int, tag: String): List[(Int, String)] =
+  e match {
+    case Expr.EUnit => []
+    case _ => (Parse.spanOff(e, parentOff), tag) :: []
+  }
+
+def branchArmSites(arms: List[Arm], moff: Int, i: Int): List[(Int, String)] =
+  if (List.isEmpty(arms)) [] else branchArmSite(List.at(arms, 0), moff, i) :: branchArmSites(List.tail(arms), moff, i + 1)
+
+def branchArmSite(a: Arm, moff: Int, i: Int): (Int, String) =
+  a match {
+    case Arm(_, _, body) => (Parse.spanOff(body, moff), Str.fromInt(i))
+  }
+
+def branchArmsSites(arms: List[Arm], moff: Int): List[(Int, String)] =
+  if (List.isEmpty(arms)) [] else List.concat(branchArmBodySites(List.at(arms, 0), moff), branchArmsSites(List.tail(arms), moff))
+
+def branchArmBodySites(a: Arm, moff: Int): List[(Int, String)] =
+  a match {
+    case Arm(_, _, body) => branchSites(body, moff)
+  }
+
+def branchListSites(xs: List[Expr], parentOff: Int): List[(Int, String)] =
+  if (List.isEmpty(xs)) [] else List.concat(branchSites(List.at(xs, 0), parentOff), branchListSites(List.tail(xs), parentOff))
+
+def branchBindSites(bs: List[Bind], parentOff: Int): List[(Int, String)] =
+  if (List.isEmpty(bs)) [] else List.concat(branchBindSite(List.at(bs, 0), parentOff), branchBindSites(List.tail(bs), parentOff))
+
+def branchBindSite(b: Bind, parentOff: Int): List[(Int, String)] =
+  b match {
+    case Bind(_, _, value) => branchSites(value, parentOff)
+  }
 
 def score3(killed: Int, sites: Int): String =
   score3n(killed * 1000 / sites)

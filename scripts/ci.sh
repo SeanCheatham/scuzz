@@ -256,6 +256,14 @@ PY
   "$SCUZZ" run --headless examples/studio
   test -f examples/studio/build/snapshot.png
   "$SCUZZ" fuzz --iterations 0 examples/studio
+  python3 - <<'PY'
+import json
+with open("examples/studio/build/fuzz/summary.json") as f:
+    d = json.load(f)
+b = d["coverage"]["branches"]
+assert b["total"] > 0 and b["reached"] > 0
+assert all("location" in r and "reached" in r for r in b["regions"])
+PY
   # The editor seeds sample.txt, scuzz.toml, and src/ into the CWD at boot.
   # Run it from a scratch dir so the worktree root stays clean. SCUZZ_HOME
   # keeps crates/ anchored at the checkout from that CWD.

@@ -1678,6 +1678,9 @@ def hex2(n: Int): String =
 def jsonStr(s: String): String =
   Str.concat("\"", Str.concat(_esc(s, 0, Builder.empty()), "\""))
 
+def covKeyOf(loc: String, off: Int, tag: String): String =
+  Str.concat(loc, Str.concat("@", Str.concat(Str.fromInt(off), Str.concat("#", tag))))
+
 def _esc(s: String, i: Int, b: Builder): String =
   if (i >= Str.len(s)) Builder.result(b) else _esc2(s, i, b, Str.charAt(s, i))
 
