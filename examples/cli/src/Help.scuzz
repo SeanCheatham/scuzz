@@ -137,7 +137,7 @@ Examples:
   scuzz run
   scuzz run --headless
   scuzz run examples/studio
-  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio
+  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.json examples/studio
   scuzz run --watch --headless
 
 See: scuzz docs commands

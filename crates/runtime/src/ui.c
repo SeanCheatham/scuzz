@@ -425,24 +425,6 @@ int sz_ui_session_set_record(SzUiSession *session, const char *path) {
   return 1;
 }
 
-static void fputs_dump_label(FILE *f, const char *label) {
-  const char *p;
-  if (!label)
-    return;
-  for (p = label; *p; p++)
-    fputc((*p == '\n' || *p == '\r') ? ' ' : *p, f);
-}
-
-static void fputs_dump_quoted(FILE *f, const char *s) {
-  const char *p;
-  fputc('"', f);
-  if (s) {
-    for (p = s; *p; p++)
-      fputc((*p == '\n' || *p == '\r' || *p == '"') ? ' ' : *p, f);
-  }
-  fputc('"', f);
-}
-
 /* Editor dump: keep newlines as \\n so a file buffer stays one node. */
 static void fputs_escaped_body(FILE *f, const char *s) {
   const char *p;
@@ -465,18 +447,6 @@ static void fputs_escaped_body(FILE *f, const char *s) {
     else
       fputc(*p, f);
   }
-}
-
-/* A dump path that ends in `.json` selects the typed session schema. */
-static int dump_path_is_json(const char *path) {
-  size_t n = path ? strlen(path) : 0;
-  return n >= 5 && strcmp(path + n - 5, ".json") == 0;
-}
-
-static void fputs_dump_escaped(FILE *f, const char *s) {
-  fputc('"', f);
-  fputs_escaped_body(f, s);
-  fputc('"', f);
 }
 
 static const char *runtime_kind_name(SzUiRuntimeKind kind) {
@@ -505,189 +475,6 @@ static const char *lifecycle_name(SzLifecyclePhase phase) {
   default:
     return "unknown";
   }
-}
-
-int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
-  FILE *f;
-  SzString *signals;
-  SzString *views;
-  SzView *buttons[64];
-  SzView *fields[64];
-  SzView *scrolls[64];
-  SzView *field_target;
-  int n_buttons, n_fields, n_scrolls, i;
-  if (!path || !path[0])
-    return 0;
-  if (dump_path_is_json(path))
-    return sz_ui_session_write_dump_json(session, path);
-  f = fopen(path, "w");
-  if (!f)
-    return 0;
-  signals = sz_signal_dump();
-  views = (session && session->root) ? sz_view_a11y_dump(session->root)
-                                     : sz_string_from_cstr("");
-  fprintf(f, "[signals]\n%s\n[views]\n%s\n[taps]\n", sz_string_cstr(signals),
-          sz_string_cstr(views));
-  n_buttons = sz_ui_collect_buttons(session, buttons, 64);
-  for (i = 0; i < n_buttons; i++) {
-    SzRect fr = sz_view_frame(buttons[i]);
-    fprintf(f, "%d ", i);
-    fputs_dump_label(f, sz_view_a11y_label(buttons[i]));
-    fprintf(f, " %.0f,%.0f %.0fx%.0f\n", fr.x, fr.y, fr.w, fr.h);
-  }
-  fprintf(f, "\n[fields]\n");
-  n_fields = (session && session->root)
-                 ? sz_view_collect_text_fields(session->root, fields, 64)
-                 : 0;
-  field_target = (session && session->root)
-                     ? sz_view_edit_target(session->root)
-                     : NULL;
-  for (i = 0; i < n_fields; i++) {
-    fprintf(f, "%d%s ", i, fields[i] == field_target ? "*" : "");
-    fputs_dump_label(f, sz_view_a11y_label(fields[i]));
-    fputc('=', f);
-    fputs_dump_quoted(f, sz_view_text_field_value(fields[i]));
-    fprintf(f, " caret=%d sel=%d:%d", sz_view_text_field_caret(fields[i]),
-            sz_view_text_field_sel_start(fields[i]),
-            sz_view_text_field_sel_end(fields[i]));
-    {
-      const char *pre = sz_view_text_field_preedit(fields[i]);
-      if (pre && pre[0]) {
-        fputs(" preedit=", f);
-        fputs_dump_quoted(f, pre);
-      }
-    }
-    fputc('\n', f);
-  }
-  {
-    SzView *editors[64];
-    SzView *ed_target;
-    int n_editors = (session && session->root)
-                        ? sz_view_collect_editors(session->root, editors, 64)
-                        : 0;
-    if (n_editors > 0) {
-      ed_target = sz_view_edit_target(session->root);
-      fprintf(f, "\n[editor]\n");
-      for (i = 0; i < n_editors; i++) {
-        fprintf(f, "%d%s caret=%d sel=%d:%d sx=%.0f sy=%.0f lines=%d", i,
-                editors[i] == ed_target ? "*" : "",
-                sz_view_editor_caret(editors[i]),
-                sz_view_editor_sel_start(editors[i]),
-                sz_view_editor_sel_end(editors[i]),
-                sz_view_editor_scroll_x(editors[i]),
-                sz_view_editor_scroll_y(editors[i]),
-                sz_view_editor_line_count(editors[i]));
-        {
-          int d, nd = sz_view_editor_diag_count(editors[i]);
-          int nt = sz_view_editor_token_count(editors[i]);
-          int ni = sz_view_editor_inlay_count(editors[i]);
-          int nf = sz_view_editor_fold_count(editors[i]);
-          if (nd > 0) {
-            fputs(" diag=", f);
-            for (d = 0; d < nd; d++) {
-              if (d)
-                fputc(',', f);
-              fprintf(f, "%d:%d", sz_view_editor_diag_line(editors[i], d),
-                      sz_view_editor_diag_severity(editors[i], d));
-            }
-          }
-          if (nt > 0)
-            fprintf(f, " tok=%d", nt);
-          if (ni > 0)
-            fprintf(f, " inlay=%d", ni);
-          if (nf > 0)
-            fprintf(f, " fold=%d", nf);
-        }
-        {
-          const char *pre = sz_view_editor_preedit(editors[i]);
-          if (pre && pre[0]) {
-            fputs(" preedit=", f);
-            fputs_dump_quoted(f, pre);
-          }
-        }
-        fputc(' ', f);
-        fputs_dump_escaped(f, sz_view_editor_value(editors[i]));
-        fputc('\n', f);
-      }
-    }
-  }
-  {
-    SzView *splits[64];
-    int n_splits = (session && session->root)
-                       ? sz_view_collect_splits(session->root, splits, 64)
-                       : 0;
-    if (n_splits > 0) {
-      fprintf(f, "\n[splits]\n");
-      for (i = 0; i < n_splits; i++)
-        fprintf(f, "%d frac=%d\n", i, sz_view_split_frac(splits[i]));
-    }
-  }
-  {
-    SzView *overlays[64];
-    SzView *top = NULL;
-    int n_ov = (session && session->root)
-                   ? sz_view_collect_overlays(session->root, overlays, 64)
-                   : 0;
-    int j;
-    if (n_ov > 0) {
-      for (j = n_ov - 1; j >= 0; j--) {
-        if (sz_view_overlay_is_open(overlays[j])) {
-          top = overlays[j];
-          break;
-        }
-      }
-      fprintf(f, "\n[overlays]\n");
-      for (i = 0; i < n_ov; i++)
-        fprintf(f, "%d%s open=%d\n", i, overlays[i] == top ? "*" : "",
-                sz_view_overlay_is_open(overlays[i]));
-    }
-  }
-  fprintf(f, "\n[scrolls]\n");
-  n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
-  for (i = 0; i < n_scrolls; i++) {
-    fprintf(f, "%d ", i);
-    fputs_dump_label(f, sz_view_a11y_label(scrolls[i]));
-    fputc('\n', f);
-  }
-  if (session && session->last_hit_seen) {
-    fprintf(f, "\n[last_hit]\nxy %.1f %.1f -> %s\n", session->last_hit_x,
-            session->last_hit_y,
-            session->last_hit_desc ? session->last_hit_desc : "NULL");
-  }
-  if (session && session->hover_seen) {
-    fprintf(f, "\n[hover]\nxy %.1f %.1f -> %s\n", session->hover_x,
-            session->hover_y,
-            session->hover_desc ? session->hover_desc : "NULL");
-  }
-  if (session && session->last_secondary_seen) {
-    fprintf(f, "\n[last_secondary]\nxy %.1f %.1f -> %s\n",
-            session->last_secondary_x, session->last_secondary_y,
-            session->last_secondary_desc ? session->last_secondary_desc
-                                         : "NULL");
-  }
-  if (session && session->debug_dump_path && path &&
-      strcmp(path, session->debug_dump_path) == 0) {
-    fprintf(f, "\n[session]\nkind=%s\nwidth=%d\nheight=%d\ntitle=%s\n"
-               "focus=%s\nlifecycle=%s\n"
-               "keyboard=%d\npumps=%u\n",
-            runtime_kind_name(session->cfg.kind), session->cfg.width,
-            session->cfg.height, sz_ui_session_title(session),
-            session->root ? sz_view_focus_kind(session->root) : "none",
-            lifecycle_name(session->lifecycle),
-            session->keyboard_visible, session->pumps);
-    {
-      char heap[1536];
-      char live[2048];
-      sz_alloc_format_heap(heap, sizeof heap, 1);
-      fprintf(f, "\n[heap]\n%s", heap);
-      sz_alloc_format_live(live, sizeof live, 32);
-      fprintf(f, "\n[live]\n%s", live);
-    }
-  }
-  fclose(f);
-  sz_string_free(signals);
-  sz_string_free(views);
-  return 1;
 }
 
 /* --- typed session schema v=2 (JSON dump) --------------------------------- */
@@ -782,7 +569,7 @@ static void fputs_hit_json(FILE *f, const char *key, float x, float y,
   fputc('}', f);
 }
 
-int sz_ui_session_write_dump_json(SzUiSession *session, const char *path) {
+int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   FILE *f;
   SzString *views;
   SzView *buttons[64];
@@ -1396,6 +1183,12 @@ static void record_secondary_or_xy(SzUiSession *session, FILE *f, float x,
  * text lines. Each live OS event appends one object to `record_events` and
  * rewrites the whole document. */
 
+/* A record or inject path that ends in `.json` selects the typed schema. */
+static int path_is_json(const char *path) {
+  size_t n = path ? strlen(path) : 0;
+  return n >= 5 && strcmp(path + n - 5, ".json") == 0;
+}
+
 static int clipboard_chord(const char *key, int mods);
 
 /* JSON string body escaping: same dialect as the JSON dump writer. */
@@ -1737,7 +1530,7 @@ static void record_clipboard_verb(SzUiSession *session, int op) {
   FILE *f;
   if (!session || !session->record_path || op < 1 || op > 3)
     return;
-  if (dump_path_is_json(session->record_path)) {
+  if (path_is_json(session->record_path)) {
     record_clipboard_verb_json(session, op);
     return;
   }
@@ -1784,7 +1577,7 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
   FILE *f;
   if (!session || !session->record_path || !ev)
     return;
-  if (dump_path_is_json(session->record_path)) {
+  if (path_is_json(session->record_path)) {
     record_live_event_json(session, ev);
     return;
   }
@@ -1919,7 +1712,7 @@ static int take_inject(SzUiSession *session, char **out) {
   now_n = strlen(now);
   /* A `.json` inject document plays whole on change. It is not appended. */
   if (old_n > 0 && now_n >= old_n && memcmp(session->inject_fp, now, old_n) == 0 &&
-      !dump_path_is_json(session->inject_path))
+      !path_is_json(session->inject_path))
     play = now + old_n;
   else
     play = now;
@@ -1986,7 +1779,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     char *delta = NULL;
     if (take_inject(session, &delta)) {
       session->inject_playing = 1;
-      if (dump_path_is_json(session->inject_path))
+      if (path_is_json(session->inject_path))
         sz_ui_script_play_json(session, delta);
       else
         sz_ui_script_play_text(session, delta);

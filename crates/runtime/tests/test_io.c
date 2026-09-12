@@ -12274,14 +12274,15 @@ int main(void) {
     remove(path);
   }
 
-  /* Loader parses signal lines; bad headers are rejected. */
+  /* Loader parses v=2 signal arrays; bad headers are rejected. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_sig.dump";
     void *tl;
     SzString *needle;
     write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                     "x\nsignals:\nint[0] count = 7\nlist[1] items = [\"a\", "
-                     "\"b\"]\nlist[2] tasks = <3>\na11y:\nbutton:+1\n");
+                     "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":7},"
+                     "{\"id\":1,\"type\":\"list\",\"name\":\"items\",\"value\":[\"a\",\"b\"]},"
+                     "{\"id\":2,\"type\":\"list\",\"name\":\"tasks\",\"value\":[1,2,3]}]\na11y:\nbutton:+1\n");
     tl = sz_timeline_load(path);
     assert(tl);
     assert(sz_timeline_len(tl) == 1);
@@ -12300,8 +12301,8 @@ int main(void) {
     sz_release(needle);
     sz_timeline_free(tl);
     write_text(path, "# timeline v=2 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
-                     "signals:\nlist[1] q = [\"a\\\"b\", \"a\\nb\"]\n"
-                     "str[2] draft = \"a\\\"b\"\na11y:\n\n");
+                     "signals:\n[{\"id\":1,\"type\":\"list\",\"name\":\"q\",\"value\":[\"a\\\"b\",\"a\\nb\"]},"
+                     "{\"id\":2,\"type\":\"str\",\"name\":\"draft\",\"value\":\"a\\\"b\"}]\na11y:\n\n");
     tl = sz_timeline_load(path);
     assert(tl);
     needle = sz_string_from_cstr("q");
@@ -12316,7 +12317,7 @@ int main(void) {
     sz_release(needle);
     sz_timeline_free(tl);
     write_text(path, "# timeline v=2 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
-                     "signals:\nstr[2] draft = \"\"\na11y:\n\n");
+                     "signals:\n[{\"id\":2,\"type\":\"str\",\"name\":\"draft\",\"value\":\"\"}]\na11y:\n\n");
     tl = sz_timeline_load(path);
     assert(tl);
     needle = sz_string_from_cstr("draft");
@@ -12388,10 +12389,10 @@ int main(void) {
     SzString *hit;
     SzVerdict *v;
     write_text(path, "# timeline v=2 n=3\n--- 0\nlast_hit:\n\ndrive:\n\n"
-                     "signals:\nint[0] count = 0\na11y:\n--- 1\nlast_hit:\n"
-                     "button:+1\ndrive:\n\nsignals:\nint[0] count = 1\na11y:\n"
+                     "signals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":0}]\na11y:\n--- 1\nlast_hit:\n"
+                     "button:+1\ndrive:\n\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":1}]\na11y:\n"
                      "--- 2\nlast_hit:\nbutton:+1\ndrive:\n\nsignals:\n"
-                     "int[0] count = 1\na11y:\n");
+                     "[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":1}]\na11y:\n");
     tl = sz_timeline_load(path);
     assert(tl);
     hit = sz_string_from_cstr("button:+1");
@@ -12409,16 +12410,16 @@ int main(void) {
     const char *a = "/tmp/scuzz_test_io_rel_a.dump";
     const char *b = "/tmp/scuzz_test_io_rel_b.dump";
     write_text(a, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                  "x\nsignals:\nint[0] count = 1\na11y:\n");
+                  "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":1}]\na11y:\n");
     write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                  "x\nsignals:\nint[0] count = 1\na11y:\n");
+                  "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":1}]\na11y:\n");
     sz_property_session_reset();
     sz_verify_register_rel("sameFinal", rel_final_int_eq);
     assert(sz_judge_rel_main(
                "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
            0);
     write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                  "x\nsignals:\nint[0] count = 2\na11y:\n");
+                  "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":2}]\na11y:\n");
     assert(sz_judge_rel_main(
                "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
            1);
@@ -12440,7 +12441,7 @@ int main(void) {
     void *tl;
     SzString *needle;
     write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                     "x\nsignals:\nint[0] = 1\na11y:\nbutton:+1\neffects:\n"
+                     "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"\",\"value\":1}]\na11y:\nbutton:+1\neffects:\n"
                      "fs.write n=7\nfibers:\nready=1 parked=2\nfault:\n"
                      "kind=fs n=1 mode=fail\n");
     tl = sz_timeline_load(path);
@@ -12460,7 +12461,7 @@ int main(void) {
     sz_release(needle);
     sz_timeline_free(tl);
     write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
-                     "x\nsignals:\nint[0] = 1\na11y:\nbutton:+1\n");
+                     "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"\",\"value\":1}]\na11y:\nbutton:+1\n");
     tl = sz_timeline_load(path);
     assert(tl);
     needle = sz_string_from_cstr("fs.write");

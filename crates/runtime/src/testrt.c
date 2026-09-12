@@ -3224,7 +3224,7 @@ static void tl_push(void) {
     g_tl = nb;
     g_tl_cap = ncap;
   }
-  dump = sz_signal_dump();
+  dump = sz_signal_dump_json_string();
   g_tl[g_tl_n].signals = tl_intern(dump ? sz_string_cstr(dump) : "");
   if (dump)
     sz_string_free(dump);
@@ -3262,32 +3262,70 @@ static void tl_restore_clear(void) {
 
 int sz_timeline_replaying(void) { return g_replay; }
 
-/* Find the signals-dump line for `kind` (`int` / `str` / `list`) with the
- * given signal name. Lines are `<kind>[<id>] <name> = <value>`, or
- * `<kind>[<id>] = <value>` for an unnamed signal. Returns a pointer at the
- * ` = ` separator, or NULL. */
-static const char *tl_sig_line(const char *dump, const char *kind,
-                               const char *name) {
-  size_t klen = strlen(kind);
-  size_t nlen = name ? strlen(name) : 0;
-  const char *p = dump;
-  if (!p || !nlen)
+/* The signals observation of a timeline state is the typed session schema
+ * v=2 signals array: `[{"id":N,"type":"int|str|list|value","name":"...",
+ * "value":...}]`. Readers find the entry by `type` and `name`. */
+
+static int tl_json_str_eq(SzAdt *j, const char *key, const char *want) {
+  SzString *k = sz_string_from_cstr(key);
+  SzString *d = sz_string_from_cstr("");
+  SzString *got = sz_json_get_str(j, k, d);
+  int out = got && strcmp(sz_string_cstr(got), want) == 0;
+  if (got)
+    sz_release(got);
+  sz_release(d);
+  sz_release(k);
+  return out;
+}
+
+static SzAdt *tl_json_value(SzAdt *ent) {
+  SzString *k = sz_string_from_cstr("value");
+  SzList *got = sz_json_get(ent, k);
+  SzAdt *out = sz_list_is_empty(got) ? NULL : (SzAdt *)sz_list_head(got);
+  sz_release(got);
+  sz_release(k);
+  return out;
+}
+
+/* First signals entry with `type` = `kind` and `name` = `name`, else NULL.
+ * `hold` keeps the parsed document alive for the returned borrow. */
+static SzAdt *tl_sig_entry(const char *dump, const char *kind,
+                           const char *name, SzAdt **hold) {
+  SzString *doc;
+  SzAdt *parsed, *arr, *out = NULL;
+  SzList *xs, *items;
+  *hold = NULL;
+  if (!dump || !name || !name[0])
     return NULL;
-  while (p && *p) {
-    const char *eol = strchr(p, '\n');
-    size_t line_len = eol ? (size_t)(eol - p) : strlen(p);
-    const char *bracket;
-    if (line_len > klen + 2 && memcmp(p, kind, klen) == 0 &&
-        p[klen] == '[') {
-      bracket = (const char *)memchr(p, ']', line_len);
-      if (bracket && (size_t)(bracket + 1 - p) + 1 + nlen + 3 <= line_len &&
-          bracket[1] == ' ' && memcmp(bracket + 2, name, nlen) == 0 &&
-          memcmp(bracket + 2 + nlen, " = ", 3) == 0)
-        return bracket + 2 + nlen;
-    }
-    p = eol ? eol + 1 : NULL;
+  doc = sz_string_from_cstr(dump);
+  parsed = sz_json_parse(doc);
+  sz_release(doc);
+  if (!parsed || sz_adt_tag(parsed) != 1) {
+    if (parsed)
+      sz_release(parsed);
+    return NULL;
   }
-  return NULL;
+  arr = (SzAdt *)sz_adt_payload(parsed);
+  if (!arr || sz_json_is_arr(arr) != 1) {
+    sz_release(parsed);
+    return NULL;
+  }
+  items = sz_json_arr(arr);
+  for (xs = items; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
+    SzAdt *ent = (SzAdt *)sz_list_head(xs);
+    if (tl_json_str_eq(ent, "type", kind) &&
+        tl_json_str_eq(ent, "name", name)) {
+      out = ent;
+      break;
+    }
+  }
+  sz_release(items);
+  if (!out) {
+    sz_release(parsed);
+    return NULL;
+  }
+  *hold = parsed;
+  return out;
 }
 
 static void tl_missing(const char *name) {
@@ -3298,105 +3336,85 @@ static void tl_missing(const char *name) {
   sz_panic(buf); /* noreturn: buf dies with the process */
 }
 
-int64_t sz_timeline_replay_signal_int(const char *name) {
-  const char *sep = tl_sig_line(g_replay_signals, "int", name);
-  if (!sep)
+static int64_t tl_parse_signal_int(const char *dump, const char *name) {
+  SzAdt *hold, *ent = tl_sig_entry(dump, "int", name, &hold);
+  int64_t out;
+  if (!ent)
     tl_missing(name);
-  return (int64_t)atoll(sep + 3);
-}
-
-static const char *tl_sig_payload(const char *sep) {
-  if (!sep || memcmp(sep, " = ", 3) != 0)
-    return NULL;
-  return sep + 3;
-}
-
-static SzString *tl_parse_quoted_str(const char *sep) {
-  const char *p = tl_sig_payload(sep);
-  char *val = NULL;
-  SzString *out;
-  if (!p || *p != '"')
-    return sz_string_from_cstr("");
-  if (!sz_dump_parse_quoted(p, &val) || !val)
-    return sz_string_from_cstr("");
-  out = sz_string_from_cstr(val);
-  sz_free(val);
+  out = sz_json_int_or(tl_json_value(ent), 0);
+  sz_release(hold);
   return out;
 }
 
-static int64_t tl_count_quoted_list(const char *p) {
-  int64_t n = 0;
-  if (!p)
-    return 0;
-  while (*p && *p != ']' && *p != '\n') {
-    while (*p == ' ' || *p == ',')
-      p++;
-    if (*p != '"')
-      break;
-    p = sz_dump_parse_quoted(p, NULL);
-    if (!p)
-      break;
-    n++;
-  }
-  return n;
+static SzString *tl_parse_signal_str(const char *dump, const char *name) {
+  SzAdt *hold, *ent = tl_sig_entry(dump, "str", name, &hold);
+  SzString *d, *out;
+  if (!ent)
+    tl_missing(name);
+  d = sz_string_from_cstr("");
+  out = sz_json_str_or(tl_json_value(ent), d);
+  sz_release(d);
+  sz_release(hold);
+  return out;
 }
 
-static int64_t tl_parse_signal_int(const char *dump, const char *name) {
-  const char *sep = tl_sig_line(dump, "int", name);
-  if (!sep)
+/* v=2 encodes every list payload as an array. */
+static int64_t tl_parse_signal_list_len(const char *dump, const char *name) {
+  SzAdt *hold, *ent = tl_sig_entry(dump, "list", name, &hold);
+  SzAdt *value;
+  SzList *xs;
+  int64_t out = 0;
+  if (!ent)
     tl_missing(name);
-  return (int64_t)atoll(sep + 3);
+  value = tl_json_value(ent);
+  if (value && sz_json_is_arr(value) == 1) {
+    xs = sz_json_arr(value);
+    out = (int64_t)sz_list_len(xs);
+    sz_release(xs);
+  }
+  sz_release(hold);
+  return out;
+}
+
+/* String element at `index`. A non-string element is "". */
+static SzString *tl_parse_signal_list_at(const char *dump, const char *name,
+                                         int64_t index) {
+  SzAdt *hold, *ent = tl_sig_entry(dump, "list", name, &hold);
+  SzAdt *value;
+  SzList *got;
+  SzString *d, *out;
+  if (!ent)
+    tl_missing(name);
+  value = tl_json_value(ent);
+  got = value ? sz_json_at(value, index) : NULL;
+  if (!got || sz_list_is_empty(got)) {
+    if (got)
+      sz_release(got);
+    sz_release(hold);
+    return sz_string_from_cstr("");
+  }
+  d = sz_string_from_cstr("");
+  out = sz_json_str_or((SzAdt *)sz_list_head(got), d);
+  sz_release(d);
+  sz_release(got);
+  sz_release(hold);
+  return out;
+}
+
+int64_t sz_timeline_replay_signal_int(const char *name) {
+  return tl_parse_signal_int(g_replay_signals, name);
 }
 
 SzString *sz_timeline_replay_signal_str(const char *name) {
-  const char *sep = tl_sig_line(g_replay_signals, "str", name);
-  if (!sep)
-    tl_missing(name);
-  return tl_parse_quoted_str(sep);
+  return tl_parse_signal_str(g_replay_signals, name);
 }
 
 int64_t sz_timeline_replay_signal_list_len(const char *name) {
-  const char *sep = tl_sig_line(g_replay_signals, "list", name);
-  const char *p;
-  if (!sep)
-    tl_missing(name);
-  if (memcmp(sep, " = <", 4) == 0)
-    return (int64_t)atoll(sep + 4);
-  if (memcmp(sep, " = [", 4) != 0)
-    return 0;
-  p = sep + 4;
-  return tl_count_quoted_list(p);
+  return tl_parse_signal_list_len(g_replay_signals, name);
 }
 
 SzString *sz_timeline_replay_signal_list_at(const char *name, int64_t index) {
-  const char *sep = tl_sig_line(g_replay_signals, "list", name);
-  const char *p;
-  int64_t i = 0;
-  if (!sep)
-    tl_missing(name);
-  if (index < 0 || memcmp(sep, " = [", 4) != 0)
-    return sz_string_from_cstr("");
-  p = sep + 4;
-  while (*p && *p != ']' && *p != '\n') {
-    char *val = NULL;
-    while (*p == ' ' || *p == ',')
-      p++;
-    if (*p != '"')
-      break;
-    p = sz_dump_parse_quoted(p, &val);
-    if (!p) {
-      sz_free(val);
-      break;
-    }
-    if (i == index) {
-      SzString *out = sz_string_from_cstr(val ? val : "");
-      sz_free(val);
-      return out;
-    }
-    sz_free(val);
-    i++;
-  }
-  return sz_string_from_cstr("");
+  return tl_parse_signal_list_at(g_replay_signals, name, index);
 }
 
 static SzTlState *tl_at(void *tl, int64_t i) {
@@ -3417,22 +3435,6 @@ int64_t sz_timeline_signal_int(void *tl, int64_t i, SzString *name) {
            : 0;
 }
 
-/* List length from the signals dump: `list[<id>] <name> = ["a", "b"]`
- * counts quoted strings with the dump escape dialect. */
-static int64_t tl_parse_signal_list_len(const char *dump, const char *name) {
-  const char *sep = tl_sig_line(dump, "list", name);
-  const char *p;
-  if (!sep)
-    tl_missing(name);
-  /* Record lists dump the count only: `list[<id>] <name> = <n>`. */
-  if (memcmp(sep, " = <", 4) == 0)
-    return (int64_t)atoll(sep + 4);
-  if (memcmp(sep, " = [", 4) != 0)
-    return 0;
-  p = sep + 4;
-  return tl_count_quoted_list(p);
-}
-
 int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name) {
   SzTlState *s = tl_at(tl, i);
   return s ? tl_parse_signal_list_len(s->signals,
@@ -3440,28 +3442,20 @@ int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name) {
            : 0;
 }
 
-/* 1 when the unescaped `str[<id>] <name> = "<value>"` holds `needle`.
- * An empty needle is true when the value is empty. */
+/* 1 when the `str` signal `name` holds `needle`. An empty needle is true
+ * when the value is empty. */
 int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
                                    SzString *needle) {
   SzTlState *s = tl_at(tl, i);
   const char *n = needle ? sz_string_cstr(needle) : "";
-  const char *sep;
-  const char *p;
-  char *val = NULL;
-  int64_t hit = 0;
+  SzString *val;
+  int64_t hit;
   if (!s || !s->signals)
     return 0;
-  sep = tl_sig_line(s->signals, "str", name ? sz_string_cstr(name) : "");
-  if (!sep)
-    tl_missing(name ? sz_string_cstr(name) : "");
-  p = tl_sig_payload(sep);
-  if (!p || *p != '"')
-    return 0;
-  if (!sz_dump_parse_quoted(p, &val) || !val)
-    return 0;
-  hit = !n[0] ? (val[0] == '\0' ? 1 : 0) : (strstr(val, n) != NULL ? 1 : 0);
-  sz_free(val);
+  val = tl_parse_signal_str(s->signals, name ? sz_string_cstr(name) : "");
+  hit = !n[0] ? (sz_string_cstr(val)[0] == '\0' ? 1 : 0)
+              : (strstr(sz_string_cstr(val), n) != NULL ? 1 : 0);
+  sz_string_free(val);
   return hit;
 }
 

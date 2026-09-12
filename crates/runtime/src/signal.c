@@ -1,8 +1,11 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "scuzz_ui.h"
 
 #include "rt_util.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 struct SzSignal {
@@ -129,99 +132,6 @@ static int sig_head_str(const void *head) {
   return head && sz_rc_kind(head) == SZ_RC_STRING;
 }
 
-static void sig_dump_value(char **buf, size_t *len, size_t *cap, const void *value) {
-  char number[64];
-  uint32_t kind = sz_rc_kind(value);
-  if (!value) { sz_dump_append(buf, len, cap, "()"); return; }
-  if (kind == SZ_RC_STRING) {
-    sz_dump_append(buf, len, cap, "\"");
-    sz_dump_append_escaped(buf, len, cap, sz_string_cstr(value));
-    sz_dump_append(buf, len, cap, "\"");
-  } else if (kind == SZ_RC_BOX) {
-    snprintf(number, sizeof number, "%lld", (long long)sz_unbox_i64(value));
-    sz_dump_append(buf, len, cap, number);
-  } else if (kind == SZ_RC_ADT) {
-    snprintf(number, sizeof number, "%d(", sz_adt_tag(value));
-    sz_dump_append(buf, len, cap, number);
-    sig_dump_value(buf, len, cap, sz_adt_payload(value));
-    sz_dump_append(buf, len, cap, ")");
-  } else if (kind == SZ_RC_LIST) {
-    const SzList *p = value;
-    sz_dump_append(buf, len, cap, "[");
-    for (; p; p = p->tail) {
-      sig_dump_value(buf, len, cap, p->head);
-      if (p->tail) sz_dump_append(buf, len, cap, ",");
-    }
-    sz_dump_append(buf, len, cap, "]");
-  } else {
-    sz_dump_append(buf, len, cap, "<handle>");
-  }
-}
-
-SzString *sz_signal_dump(void) {
-  char *buf = NULL;
-  size_t len = 0, cap = 0;
-  char num[32];
-  SigReg *r;
-  SzString *out;
-  sz_dump_append(&buf, &len, &cap, "");
-  for (r = g_sig_head; r; r = r->next) {
-    sz_dump_append(&buf, &len, &cap,
-                   r->kind == SIG_INT ? "int" : r->kind == SIG_STR ? "str"
-                                                                    : r->kind == SIG_LIST ? "list" : "value");
-    snprintf(num, sizeof num, "[%d] ", r->id);
-    sz_dump_append(&buf, &len, &cap, num);
-    if (r->name && r->name[0]) {
-      sz_dump_append(&buf, &len, &cap, r->name);
-      sz_dump_append(&buf, &len, &cap, " ");
-    }
-    sz_dump_append(&buf, &len, &cap, "= ");
-    switch (r->kind) {
-    case SIG_INT:
-      snprintf(num, sizeof num, "%lld\n",
-               (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
-      sz_dump_append(&buf, &len, &cap, num);
-      break;
-    case SIG_STR:
-      sz_dump_append(&buf, &len, &cap, "\"");
-      sz_dump_append_escaped(&buf, &len, &cap,
-                             sz_signal_str_get((const SzSignalStr *)r->sig));
-      sz_dump_append(&buf, &len, &cap, "\"\n");
-      break;
-    case SIG_VALUE: {
-      void *value = sz_signal_read((SzSignal *)r->sig);
-      sig_dump_value(&buf, &len, &cap, value);
-      sz_dump_append(&buf, &len, &cap, "\n");
-      sz_release(value);
-      break;
-    }
-    case SIG_LIST: {
-      const SzSignalList *ls = (const SzSignalList *)r->sig;
-      SzList *p = sz_signal_list_get(ls);
-      if (!sig_list_heads_str(p, ls->elem_str)) {
-        snprintf(num, sizeof num, "<%lld>\n", (long long)sz_list_len(p));
-        sz_dump_append(&buf, &len, &cap, num);
-        break;
-      }
-      sz_dump_append(&buf, &len, &cap, "[");
-      for (; p; p = p->tail) {
-        sz_dump_append(&buf, &len, &cap, "\"");
-        sz_dump_append_escaped(&buf, &len, &cap,
-                               sig_head_str(p->head)
-                                   ? sz_string_cstr((const SzString *)p->head)
-                                   : "");
-        sz_dump_append(&buf, &len, &cap, p->tail ? "\", " : "\"");
-      }
-      sz_dump_append(&buf, &len, &cap, "]\n");
-      break;
-    }
-    }
-  }
-  out = sz_string_from_cstr(buf);
-  sz_free(buf);
-  return out;
-}
-
 static void fputs_json_escaped(FILE *f, const char *s) {
   const char *p;
   if (!s)
@@ -326,7 +236,10 @@ void sz_signal_dump_json(FILE *f) {
       SzList *p = sz_signal_list_get(ls);
       int first = 1;
       if (!sig_list_heads_str(p, ls->elem_str)) {
-        fputs_json_value(f, p);
+        if (!p)
+          fputs("[]", f);
+        else
+          fputs_json_value(f, p);
         break;
       }
       fputc('[', f);
@@ -347,6 +260,20 @@ void sz_signal_dump_json(FILE *f) {
     fputc('}', f);
   }
   fputc(']', f);
+}
+
+SzString *sz_signal_dump_json_string(void) {
+  char *buf = NULL;
+  size_t len = 0;
+  FILE *f = open_memstream(&buf, &len);
+  SzString *out;
+  if (!f)
+    return sz_string_from_cstr("[]");
+  sz_signal_dump_json(f);
+  fclose(f);
+  out = sz_string_from_cstr(buf ? buf : "[]");
+  free(buf);
+  return out;
 }
 
 int64_t sz_property_signal_int(SzString *name) {
