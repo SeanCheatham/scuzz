@@ -293,9 +293,20 @@ const char *sz_testrt_fault_take_msg(void) {
   return m;
 }
 
+static int g_oracles_armed = -1;
+
+/* Cache the armed flag. Production sets SCUZZ_TESTRT at exec. Tests call
+ * sz_testrt_oracles_refresh after a setenv or unsetenv. */
 int sz_testrt_oracles_armed(void) {
-  const char *tr = getenv("SCUZZ_TESTRT");
-  return tr && tr[0] == '1';
+  if (g_oracles_armed < 0) {
+    const char *tr = getenv("SCUZZ_TESTRT");
+    g_oracles_armed = tr && tr[0] == '1';
+  }
+  return g_oracles_armed;
+}
+
+void sz_testrt_oracles_refresh(void) {
+  g_oracles_armed = -1;
 }
 
 void sz_testrt_ui_idle_snapshot(void) {

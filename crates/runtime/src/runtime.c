@@ -281,6 +281,7 @@ typedef struct CoverageHit {
 
 static CoverageHit *coverage_hits[256];
 static char *coverage_path;
+static int coverage_probed;
 
 static void coverage_clear(void) {
   size_t i;
@@ -297,35 +298,45 @@ static void coverage_clear(void) {
   coverage_path = NULL;
 }
 
+/* Read SCUZZ_COVERAGE_DUMP once. Production sets it at exec. Tests call
+ * sz_coverage_env_refresh after a setenv. */
+static void coverage_probe(void) {
+  const char *path;
+  if (coverage_probed)
+    return;
+  coverage_probed = 1;
+  path = getenv("SCUZZ_COVERAGE_DUMP");
+  if (!path || !*path)
+    return;
+  coverage_path = malloc(strlen(path) + 1);
+  if (!coverage_path)
+    sz_panic("coverage: out of memory");
+  strcpy(coverage_path, path);
+  atexit(coverage_clear);
+}
+
+void sz_coverage_env_refresh(void) {
+  coverage_clear();
+  coverage_probed = 0;
+}
+
 static void coverage_hit(const char *loc) {
-  const char *path = getenv("SCUZZ_COVERAGE_DUMP");
   const unsigned char *p;
   unsigned hash = 2166136261u;
   CoverageHit *hit;
   FILE *file;
   int written;
   int closed;
-  static int registered;
-  if (!path || !*path)
+  coverage_probe();
+  if (!coverage_path)
     return;
-  if (!coverage_path || strcmp(path, coverage_path)) {
-    coverage_clear();
-    coverage_path = malloc(strlen(path) + 1);
-    if (!coverage_path)
-      sz_panic("coverage: out of memory");
-    strcpy(coverage_path, path);
-  }
-  if (!registered) {
-    atexit(coverage_clear);
-    registered = 1;
-  }
   for (p = (const unsigned char *)loc; *p; p++)
     hash = (hash ^ *p) * 16777619u;
   hash %= 256;
   for (hit = coverage_hits[hash]; hit; hit = hit->next)
     if (!strcmp(hit->location, loc))
       return;
-  file = fopen(path, "a");
+  file = fopen(coverage_path, "a");
   if (!file)
     sz_panic("coverage: cannot open output");
   written = fprintf(file, "%s\n", loc);

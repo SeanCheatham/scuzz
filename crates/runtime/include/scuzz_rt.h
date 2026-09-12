@@ -14,8 +14,10 @@ void sz_panic(const char *msg) __attribute__((noreturn));
 void sz_panic_push_src(const char *loc);
 void sz_panic_pop_src(void);
 /* Record one coverage hit (def entry or branch arm) when SCUZZ_COVERAGE_DUMP
- * is set. Cheap no-op otherwise. */
+ * is set. Cheap no-op otherwise. The path is read once; tests call
+ * sz_coverage_env_refresh after a setenv. */
 void sz_coverage_hit(const char *loc);
+void sz_coverage_env_refresh(void);
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
@@ -996,8 +998,10 @@ void sz_effect_log(const char *line);
 /* Delay thunks stash a fail message; the DELAY step consumes it. */
 void sz_testrt_fault_note(const char *msg);
 const char *sz_testrt_fault_take_msg(void);
-/* Implicit oracles under SCUZZ_TESTRT=1. */
+/* Implicit oracles under SCUZZ_TESTRT=1. The flag is read once; tests call
+ * sz_testrt_oracles_refresh after a setenv or unsetenv. */
 int sz_testrt_oracles_armed(void);
+void sz_testrt_oracles_refresh(void);
 void sz_testrt_ui_idle_snapshot(void);
 void sz_testrt_ui_idle_check(void);
 void sz_testrt_ui_idle_reset(void);

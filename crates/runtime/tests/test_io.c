@@ -11578,6 +11578,7 @@ int main(void) {
   /* Fault injection: fail the Nth Fs op. */
   {
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_FAULT_KIND", "fs", 1);
     setenv("SCUZZ_FAULT_N", "1", 1);
     sz_testrt_install();
@@ -11591,12 +11592,14 @@ int main(void) {
     unsetenv("SCUZZ_FAULT_KIND");
     unsetenv("SCUZZ_FAULT_N");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Fault injection: drop a Net stub response. */
   {
     SzString *url;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_FAULT_KIND", "net", 1);
     setenv("SCUZZ_FAULT_N", "1", 1);
     setenv("SCUZZ_FAULT_MODE", "drop", 1);
@@ -11614,12 +11617,14 @@ int main(void) {
     unsetenv("SCUZZ_FAULT_KIND");
     unsetenv("SCUZZ_FAULT_N");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Fault injection: corrupt a Net stub body. */
   {
     SzString *url;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_FAULT_KIND", "net", 1);
     setenv("SCUZZ_FAULT_N", "1", 1);
     setenv("SCUZZ_FAULT_MODE", "corrupt", 1);
@@ -11637,12 +11642,14 @@ int main(void) {
     unsetenv("SCUZZ_FAULT_KIND");
     unsetenv("SCUZZ_FAULT_N");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Fault on Net fails before loopback mailbox offer. */
   {
     SzString *url;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_FAULT_KIND", "net", 1);
     setenv("SCUZZ_FAULT_N", "1", 1);
     sz_testrt_install();
@@ -11657,12 +11664,14 @@ int main(void) {
     unsetenv("SCUZZ_FAULT_KIND");
     unsetenv("SCUZZ_FAULT_N");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Fault injection: fail the Nth Queue op. */
   {
     SzQueue *q;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_FAULT_KIND", "queue", 1);
     setenv("SCUZZ_FAULT_N", "1", 1);
     sz_testrt_install();
@@ -11677,6 +11686,7 @@ int main(void) {
     unsetenv("SCUZZ_FAULT_KIND");
     unsetenv("SCUZZ_FAULT_N");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Deadlock oracle: all fibers parked with no timer pending. */
@@ -11695,6 +11705,7 @@ int main(void) {
   {
     pid_t pid;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     fflush(NULL);
     pid = fork();
     assert(pid >= 0);
@@ -11710,12 +11721,14 @@ int main(void) {
     sz_testrt_ui_idle_snapshot();
     sz_testrt_ui_idle_check();
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Heap baseline: growth vs the session/process snapshot fails. */
   {
     pid_t pid;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     sz_testrt_heap_baseline_snapshot();
     sz_testrt_heap_baseline_check();
     fflush(NULL);
@@ -11743,6 +11756,7 @@ int main(void) {
     }
     assert(wait_aborted(pid));
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Session baseline: byte drift at equal block count is retained end-state,
@@ -11750,6 +11764,7 @@ int main(void) {
   {
     SzString *a;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     a = sz_string_from_cstr("a");
     sz_testrt_session_baseline_snapshot();
     sz_release(a);
@@ -11757,6 +11772,7 @@ int main(void) {
     sz_testrt_session_baseline_check();
     sz_release(a);
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Acquire/release: leftover retain fails; double release fails. */
@@ -11764,6 +11780,7 @@ int main(void) {
     pid_t pid;
     SzString *s;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     s = sz_string_from_cstr("pair");
     sz_testrt_heap_baseline_snapshot();
     sz_retain(s);
@@ -11792,12 +11809,14 @@ int main(void) {
     }
     assert(wait_aborted(pid));
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Finalizer-on-cancel: a skipped unstepped IO.ensure fails. */
   {
     pid_t pid;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     fflush(NULL);
     pid = fork();
     assert(pid >= 0);
@@ -11812,12 +11831,14 @@ int main(void) {
     }
     assert(wait_aborted(pid));
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* No parked fibers at quiescence: a leftover forked waiter fails. */
   {
     pid_t pid;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     fflush(NULL);
     pid = fork();
     assert(pid >= 0);
@@ -11830,6 +11851,7 @@ int main(void) {
     }
     assert(wait_aborted(pid));
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Compact drive tokens: ctor / list / fields. */
@@ -11869,6 +11891,7 @@ int main(void) {
     char line[64];
     SzString *nm;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_CLASSIFY_DUMP", path, 1);
     nm = sz_string_from_cstr("square");
     sz_property_classify(nm, 1);
@@ -11882,6 +11905,7 @@ int main(void) {
     assert(strstr(line, "square 1 1") != NULL);
     unsetenv("SCUZZ_CLASSIFY_DUMP");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     unlink(path);
   }
 
@@ -11892,6 +11916,7 @@ int main(void) {
     char line[64];
     int saw_drive = 0;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_STATE_VARIED_DUMP", path, 1);
     sz_property_session_reset();
     sz_timeline_set_drive("drive a");
@@ -11909,6 +11934,7 @@ int main(void) {
     assert(saw_drive);
     unsetenv("SCUZZ_STATE_VARIED_DUMP");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     sz_property_session_reset();
     unlink(path);
   }
@@ -11918,6 +11944,7 @@ int main(void) {
     pid_t pid;
     SzString *nm;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     sz_property_session_reset();
     nm = sz_string_from_cstr("visible");
     sz_property_always_register(nm, (void *)session_ok);
@@ -11932,6 +11959,7 @@ int main(void) {
     assert(pid >= 0);
     if (pid == 0) {
       setenv("SCUZZ_TESTRT", "1", 1);
+      sz_testrt_oracles_refresh();
       nm = sz_string_from_cstr("visible");
       sz_property_always_register(nm, (void *)session_fail);
       sz_release(nm);
@@ -11945,6 +11973,7 @@ int main(void) {
     assert(pid >= 0);
     if (pid == 0) {
       setenv("SCUZZ_TESTRT", "1", 1);
+      sz_testrt_oracles_refresh();
       nm = sz_string_from_cstr("shown");
       sz_property_eventually_register(nm, (void *)session_fail);
       sz_release(nm);
@@ -11960,6 +11989,7 @@ int main(void) {
     sz_property_session_end();
     sz_property_session_reset();
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Response claims: trigger latch, per-run end check, campaign record. */
@@ -11967,6 +11997,7 @@ int main(void) {
     pid_t pid;
     SzString *nm;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     /* Trigger never fires: vacuous pass. */
     sz_property_session_reset();
     nm = sz_string_from_cstr("response:button:ghost:text:x");
@@ -12009,6 +12040,7 @@ int main(void) {
     assert(pid >= 0);
     if (pid == 0) {
       setenv("SCUZZ_TESTRT", "1", 1);
+      sz_testrt_oracles_refresh();
       sz_property_session_reset();
       nm = sz_string_from_cstr("response:button:+1:text:changed");
       sz_property_response_register(nm, (void *)session_ok,
@@ -12030,6 +12062,7 @@ int main(void) {
     sz_release(nm);
     sz_property_stash_last_hit(NULL);
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Timeline => Verdict session claims judge at session_end. */
@@ -12038,6 +12071,7 @@ int main(void) {
     int fds[2];
     char child_err[4096];
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     sz_property_session_reset();
     sz_verify_register("countOk", verify_len_ok);
     sz_verify_register("kitCombo", verify_kit_combo);
@@ -12055,6 +12089,7 @@ int main(void) {
       close(fds[0]);
       close(fds[1]);
       setenv("SCUZZ_TESTRT", "1", 1);
+      sz_testrt_oracles_refresh();
       sz_property_session_reset();
       sz_verify_register("countOk", verify_never);
       sz_property_session_step();
@@ -12077,6 +12112,7 @@ int main(void) {
       close(fds[0]);
       close(fds[1]);
       setenv("SCUZZ_TESTRT", "1", 1);
+      sz_testrt_oracles_refresh();
       sz_property_session_reset();
       sz_verify_register("secondFails", verify_every_second);
       sz_property_session_step();
@@ -12091,6 +12127,7 @@ int main(void) {
     assert(strstr(child_err, "claim secondFails rejected at state 1: "
                              "predicate false at this state") != NULL);
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
   }
 
   /* Timeline dump header carries the schema version. */
@@ -12099,6 +12136,7 @@ int main(void) {
     char *dump;
     remove(path);
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_TIMELINE_DUMP", path, 1);
     sz_property_session_reset();
     sz_property_session_step();
@@ -12114,6 +12152,7 @@ int main(void) {
     free(dump);
     unsetenv("SCUZZ_TIMELINE_DUMP");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     remove(path);
   }
 
@@ -12123,6 +12162,7 @@ int main(void) {
     void *tl;
     SzString *needle;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_TIMELINE_DUMP", path, 1);
     sz_property_session_reset();
     sz_property_stash_a11y("button:+1");
@@ -12135,6 +12175,7 @@ int main(void) {
     sz_property_session_reset();
     unsetenv("SCUZZ_TIMELINE_DUMP");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     tl = sz_timeline_load(path);
     assert(tl);
     assert(sz_timeline_len(tl) == 2);
@@ -12156,6 +12197,7 @@ int main(void) {
     void *tl;
     SzString *needle;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_TIMELINE_DUMP", path, 1);
     sz_testrt_install();
     sz_property_session_reset();
@@ -12166,6 +12208,7 @@ int main(void) {
     sz_property_session_reset();
     unsetenv("SCUZZ_TIMELINE_DUMP");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     sz_testrt_reset();
     tl = sz_timeline_load(path);
     assert(tl);
@@ -12197,6 +12240,7 @@ int main(void) {
     void *tl;
     SzString *needle;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_TIMELINE_DUMP", path, 1);
     setenv("SCUZZ_TIMELINE_CHECKPOINT", "2", 1);
     sz_property_session_reset();
@@ -12218,6 +12262,7 @@ int main(void) {
     unsetenv("SCUZZ_TIMELINE_DUMP");
     unsetenv("SCUZZ_TIMELINE_CHECKPOINT");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     tl = sz_timeline_load(path);
     assert(tl);
     assert(sz_timeline_len(tl) == 4);
@@ -12249,6 +12294,7 @@ int main(void) {
     const char *path = "/tmp/scuzz_test_io_tl_compact.dump";
     void *tl;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_TIMELINE_DUMP", path, 1);
     setenv("SCUZZ_TIMELINE_CHECKPOINT", "2", 1);
     setenv("SCUZZ_TIMELINE_COMPACT", "1", 1);
@@ -12265,6 +12311,7 @@ int main(void) {
     unsetenv("SCUZZ_TIMELINE_CHECKPOINT");
     unsetenv("SCUZZ_TIMELINE_COMPACT");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     tl = sz_timeline_load(path);
     assert(tl);
     assert(sz_timeline_len(tl) == 2);
@@ -12479,6 +12526,7 @@ int main(void) {
     void *tl;
     SzString *needle;
     setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
     setenv("SCUZZ_TIMELINE_DUMP", path, 1);
     sz_property_session_reset();
     sz_effect_log("fs.write n=7");
@@ -12486,6 +12534,7 @@ int main(void) {
     sz_property_session_reset();
     unsetenv("SCUZZ_TIMELINE_DUMP");
     unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
     tl = sz_timeline_load(path);
     assert(tl);
     assert(sz_timeline_len(tl) == 1);
@@ -12532,11 +12581,13 @@ int main(void) {
     FILE *file;
     remove(path);
     setenv("SCUZZ_COVERAGE_DUMP", path, 1);
+    sz_coverage_env_refresh();
     sz_panic_push_src("Main.scuzz:1:5");
     sz_panic_pop_src();
     sz_panic_push_src("Main.scuzz:1:5");
     sz_panic_pop_src();
     unsetenv("SCUZZ_COVERAGE_DUMP");
+    sz_coverage_env_refresh();
     file = fopen(path, "r");
     assert(file);
     assert(fread(text, 1, sizeof(text) - 1, file) == strlen("Main.scuzz:1:5\n"));
