@@ -62,8 +62,10 @@ static void test_script_scroll_targets_outer_container(void) {
   SzView *outer;
   SzView *root;
   SzUiSession *session;
-  char outer_script[] = "scroll 0 30\n";
-  char inner_script[] = "scroll 1 15\n";
+  const char *outer_script =
+      "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"scroll\",\"i\":0,\"dy\":30}]}";
+  const char *inner_script =
+      "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"scroll\",\"i\":1,\"dy\":15}]}";
   sz_view_add_child(content, inner);
   sz_view_add_child(content, sz_view_sized(80, 300, sz_view_text("tall")));
   outer = sz_view_scroll(content);
@@ -75,10 +77,10 @@ static void test_script_scroll_targets_outer_container(void) {
   session = sz_ui_mount(&cfg, root);
   assert(session && sz_ui_pump_sync(session));
   assert(sz_view_scroll_at(root, 80.f, 60.f) == inner);
-  sz_ui_script_play_text(session, outer_script);
+  sz_ui_script_play_json(session, outer_script);
   assert(sz_view_scroll_y(outer) == 30.f);
   assert(sz_view_scroll_x(inner) == 0.f);
-  sz_ui_script_play_text(session, inner_script);
+  sz_ui_script_play_json(session, inner_script);
   assert(sz_view_scroll_y(outer) == 30.f);
   assert(sz_view_scroll_x(inner) == 15.f);
   sz_ui_unmount(session);
@@ -1274,7 +1276,7 @@ static void test_xy_hit_and_miss(void) {
   SzSignalInt *count;
   SzInputEvent tap;
   const char *path = "/tmp/scuzz_ui_xy.dump";
-  const char *script = "/tmp/scuzz_ui_xy.script";
+  const char *script = "/tmp/scuzz_ui_xy.json";
   char *dump;
   SzRect fr;
 
@@ -1322,8 +1324,11 @@ static void test_xy_hit_and_miss(void) {
   remove(script);
   assert(sz_ui_session_set_inject(session, script));
   {
-    char line[128];
-    snprintf(line, sizeof line, "xy %.1f %.1f\nxy 190.0 150.0\n",
+    char line[256];
+    snprintf(line, sizeof line,
+             "{\"v\":1,\"kind\":\"inject\",\"events\":["
+             "{\"op\":\"xy\",\"x\":%.1f,\"y\":%.1f},"
+             "{\"op\":\"xy\",\"x\":190.0,\"y\":150.0}]}",
              fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
     write_stamp(script, line);
   }
@@ -1342,8 +1347,8 @@ static void test_record_live_not_script(void) {
   SzView *root, *btn;
   SzSignalInt *count;
   SzInputEvent tap;
-  const char *record = "/tmp/scuzz_ui_record.script";
-  const char *inject = "/tmp/scuzz_ui_record_inject.script";
+  const char *record = "/tmp/scuzz_ui_record.json";
+  const char *inject = "/tmp/scuzz_ui_record_inject.json";
   char *body;
   SzRect fr;
   size_t n0;
@@ -1374,7 +1379,7 @@ static void test_record_live_not_script(void) {
   assert(sz_ui_session_live_inject(session, &tap));
   assert(sz_signal_int_get(count) == 1);
   body = slurp_cstr(record);
-  assert(strstr(body, "tap 0") != NULL);
+  assert(strstr(body, "{\"op\":\"tap\",\"i\":0}") != NULL);
   n0 = strlen(body);
   free(body);
 
@@ -1384,12 +1389,12 @@ static void test_record_live_not_script(void) {
   tap.y = 90.f;
   assert(sz_ui_session_live_inject(session, &tap));
   body = slurp_cstr(record);
-  assert(strstr(body, "xy ") != NULL);
+  assert(strstr(body, "\"op\":\"xy\"") != NULL);
   n0 = strlen(body);
   free(body);
 
   assert(sz_ui_session_set_inject(session, inject));
-  write_stamp(inject, "tap 0\n");
+  write_stamp(inject, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 2);
   body = slurp_cstr(record);
@@ -1407,7 +1412,7 @@ static void test_record_live_scroll(void) {
   SzUiSession *session;
   SzView *root, *list, *scroll;
   SzInputEvent ev;
-  const char *record = "/tmp/scuzz_ui_record_scroll.script";
+  const char *record = "/tmp/scuzz_ui_record_scroll.json";
   char *body;
   SzRect fr;
   size_t n0;
@@ -1441,7 +1446,7 @@ static void test_record_live_scroll(void) {
   ev.dy = 40.f;
   assert(sz_ui_session_live_inject(session, &ev));
   body = slurp_cstr(record);
-  assert(strstr(body, "scroll 0 40") != NULL);
+  assert(strstr(body, "\"op\":\"scroll\",\"i\":0,\"dy\":40") != NULL);
   n0 = strlen(body);
   free(body);
 
@@ -1466,7 +1471,7 @@ static void test_studio_shaped_xy(void) {
   SzSignalInt *count;
   SzSignalInt *page;
   SzInputEvent tap;
-  const char *record = "/tmp/scuzz_ui_studio_xy.script";
+  const char *record = "/tmp/scuzz_ui_studio_xy.json";
   const char *dump = "/tmp/scuzz_ui_studio_xy.dump";
   char *body;
   SzRect fr, banner_fr;
@@ -1510,7 +1515,7 @@ static void test_studio_shaped_xy(void) {
   assert(strstr(body, "\"desc\":\"button:+1\"") != NULL);
   free(body);
   body = slurp_cstr(record);
-  assert(strstr(body, "tap ") != NULL);
+  assert(strstr(body, "\"op\":\"tap\"") != NULL);
   free(body);
 
   banner_fr = sz_view_frame(banner);
@@ -1525,7 +1530,7 @@ static void test_studio_shaped_xy(void) {
   assert(strstr(body, "\"desc\":\"NULL\"") != NULL);
   free(body);
   body = slurp_cstr(record);
-  assert(strstr(body, "xy ") != NULL);
+  assert(strstr(body, "\"op\":\"xy\"") != NULL);
   free(body);
 
   sz_ui_unmount(session);
@@ -1540,8 +1545,7 @@ static void test_session_inject_script(void) {
   SzUiSession *session;
   SzView *root, *btn;
   SzSignalInt *count;
-  const char *path = "/tmp/scuzz_ui_inject.script";
-  FILE *f;
+  const char *path = "/tmp/scuzz_ui_inject.json";
 
   remove(path);
   count = sz_signal_int(0);
@@ -1561,20 +1565,20 @@ static void test_session_inject_script(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 0);
 
-  write_stamp(path, "tap 0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 1);
 
-  f = fopen(path, "a");
-  assert(f);
-  fputs("tap 0\n", f);
-  fclose(f);
-  assert(sz_ui_pump_sync(session));
-  assert(sz_signal_int_get(count) == 2);
-
-  write_stamp(path, "tap 0\n");
+  /* The document plays whole on change. It is not appended. */
+  write_stamp(path,
+              "{\"v\":1,\"kind\":\"inject\",\"events\":["
+              "{\"op\":\"tap\",\"i\":0},{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 3);
+
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 4);
 
   sz_ui_unmount(session);
   sz_signal_int_free(count);
@@ -1586,12 +1590,11 @@ static void test_session_inject_grows_past_4k(void) {
   SzUiSession *session;
   SzView *root, *btn;
   SzSignalInt *count;
-  const char *path = "/tmp/scuzz_ui_inject_4k.script";
+  const char *path = "/tmp/scuzz_ui_inject_4k.json";
   FILE *f;
   int i;
 
-  remove(path);
-  count = sz_signal_int(0);
+  remove(path);  count = sz_signal_int(0);
   root = sz_view_column();
   btn = sz_view_button("+", counter_tap, count);
   sz_view_add_child(root, btn);
@@ -1608,23 +1611,24 @@ static void test_session_inject_grows_past_4k(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 0);
 
+  /* A document past 4k still parses whole. The long text event is a no-op
+   * (no text field). */
   f = fopen(path, "w");
   assert(f);
-  fputc('#', f);
+  fputs("{\"v\":1,\"kind\":\"inject\",\"events\":["
+        "{\"op\":\"text\",\"value\":\"", f);
   for (i = 0; i < 4200; i++)
     fputc('x', f);
-  fputc('\n', f);
-  fputs("tap 0\n", f);
+  fputs("\"},{\"op\":\"tap\",\"i\":0}]}", f);
   fclose(f);
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 1);
 
-  f = fopen(path, "a");
-  assert(f);
-  fputs("tap 0\n", f);
-  fclose(f);
+  write_stamp(path,
+              "{\"v\":1,\"kind\":\"inject\",\"events\":["
+              "{\"op\":\"tap\",\"i\":0},{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
-  assert(sz_signal_int_get(count) == 2);
+  assert(sz_signal_int_get(count) == 3);
 
   sz_ui_unmount(session);
   sz_signal_int_free(count);
@@ -1639,7 +1643,7 @@ static void test_session_inject_control(void) {
   SzString *a11y;
   const char *stamp = "/tmp/scuzz_ui_inject_control.stamp";
   const char *dump = "/tmp/scuzz_ui_inject_control.dump";
-  const char *inject = "/tmp/scuzz_ui_inject_control.script";
+  const char *inject = "/tmp/scuzz_ui_inject_control.json";
   const char *fuzz = "/tmp/scuzz_ui_inject_control.fuzz.dump";
   char *body;
 
@@ -1704,7 +1708,7 @@ static void test_session_inject_control(void) {
   {
     unsigned pumps0 = sz_ui_session_pumps(session);
     remove(dump);
-    write_stamp(inject, "dump\n");
+    write_stamp(inject, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
     assert(sz_ui_pump_sync(session));
     body = slurp_cstr(dump);
     assert(strstr(body, "\"heap\":{") != NULL);
@@ -1723,7 +1727,7 @@ static void test_session_inject_control(void) {
     peak_hi = dump_i64(body, "\"peak_bytes\":");
     free(body);
     sz_free(hold);
-    write_stamp(inject, "resetpeak\n");
+    write_stamp(inject, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"resetpeak\"}]}");
     assert(sz_ui_pump_sync(session));
     assert(sz_ui_session_dump_now(session));
     body = slurp_cstr(dump);
@@ -1736,14 +1740,14 @@ static void test_session_inject_control(void) {
 
   first = sz_ui_session_root(session);
   write_stamp(stamp, "v=");
-  write_stamp(inject, "reload\n");
+  write_stamp(inject, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"reload\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_root(session) != first);
   a11y = sz_view_a11y_dump(sz_ui_session_root(session));
   assert(strstr(sz_string_cstr(a11y), "text:v=") != NULL);
   sz_string_free(a11y);
 
-  write_stamp(inject, "quit\ntap 0\n");
+  write_stamp(inject, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"quit\"},{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(!sz_ui_session_alive(session));
   assert(sz_signal_int_get(env->count) == 0);
@@ -1788,7 +1792,7 @@ static void test_session_inject_scroll(void) {
   SzUiConfig cfg;
   SzUiSession *session;
   SzView *root, *row, *scroll, *scroll2, *list, *list2;
-  const char *path = "/tmp/scuzz_ui_inject_scroll.script";
+  const char *path = "/tmp/scuzz_ui_inject_scroll.json";
   float y0, y1;
 
   remove(path);
@@ -1823,17 +1827,17 @@ static void test_session_inject_scroll(void) {
   y0 = sz_view_scroll_y(scroll);
   y1 = sz_view_scroll_y(scroll2);
 
-  write_stamp(path, "scroll 40\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"scroll\",\"dy\":40}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_scroll_y(scroll) == y0 + 40.f);
   assert(sz_view_scroll_y(scroll2) == y1);
 
-  write_stamp(path, "scroll 1 40\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"scroll\",\"i\":1,\"dy\":40}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_scroll_y(scroll) == y0 + 40.f);
   assert(sz_view_scroll_y(scroll2) == y1 + 40.f);
 
-  write_stamp(path, "scroll\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"scroll\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_scroll_y(scroll) == y0 + 80.f);
   assert(sz_view_scroll_y(scroll2) == y1 + 40.f);
@@ -1847,18 +1851,18 @@ static void test_script_run_file_long_line(void) {
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
-  const char *path = "/tmp/scuzz_ui_long_line.script";
+  const char *path = "/tmp/scuzz_ui_long_line.json";
   FILE *f;
   size_t i;
   char *want;
 
-  /* One directive longer than 1024 bytes. It must run as one line. */
+  /* One event with a value longer than 1024 bytes. It must run whole. */
   f = fopen(path, "w");
   assert(f);
-  fputs("text ", f);
+  fputs("{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"", f);
   for (i = 0; i < 2000; i++)
     fputc(i % 2 ? 'x' : 'y', f);
-  fputc('\n', f);
+  fputs("\"}]}", f);
   fclose(f);
 
   draft = sz_signal_str("");
@@ -1892,7 +1896,7 @@ static void test_session_inject_backspace(void) {
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
-  const char *path = "/tmp/scuzz_ui_inject_backspace.script";
+  const char *path = "/tmp/scuzz_ui_inject_backspace.json";
 
   remove(path);
   draft = sz_signal_str("");
@@ -1911,15 +1915,15 @@ static void test_session_inject_backspace(void) {
   assert(sz_ui_session_set_inject(session, path));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "text hi\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"hi\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
 
-  write_stamp(path, "backspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "h") == 0);
 
-  write_stamp(path, "text abc\nbackspace 2\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"backspace\",\"count\":2}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "a") == 0);
 
@@ -1933,7 +1937,7 @@ static void test_session_inject_type(void) {
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
-  const char *path = "/tmp/scuzz_ui_inject_type.script";
+  const char *path = "/tmp/scuzz_ui_inject_type.json";
 
   remove(path);
   draft = sz_signal_str("");
@@ -1952,23 +1956,23 @@ static void test_session_inject_type(void) {
   assert(sz_ui_session_set_inject(session, path));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "text hi\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"hi\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
 
-  write_stamp(path, "type !\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"type\",\"value\":\"!\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hi!") == 0);
 
-  write_stamp(path, "type\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"type\",\"value\":\"\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hi!") == 0);
 
-  write_stamp(path, "text ab\ntype c\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"ab\"},{\"op\":\"type\",\"value\":\"c\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
 
-  write_stamp(path, "text x\ntype a\\nb\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"x\"},{\"op\":\"type\",\"value\":\"a\\nb\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "xa\nb") == 0);
 
@@ -1983,7 +1987,7 @@ static void test_session_inject_key(void) {
   SzView *root, *field;
   SzSignalStr *draft;
   SzInputEvent ev;
-  const char *path = "/tmp/scuzz_ui_inject_key.script";
+  const char *path = "/tmp/scuzz_ui_inject_key.json";
 
   remove(path);
   draft = sz_signal_str("");
@@ -2003,17 +2007,17 @@ static void test_session_inject_key(void) {
   assert(sz_ui_pump_sync(session));
 
   /* Focused field keeps q (quit is window close / Headless quit). */
-  write_stamp(path, "text hi\nkey q q\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"hi\"},{\"op\":\"key\",\"key\":\"q\",\"text\":\"q\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hiq") == 0);
   assert(sz_ui_session_alive(session));
 
-  write_stamp(path, "key Enter\nkey Tab\nkey Backspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"Enter\"},{\"op\":\"key\",\"key\":\"Tab\"},{\"op\":\"key\",\"key\":\"Backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
   assert(sz_ui_session_alive(session));
 
-  write_stamp(path, "key PageUp\nkey PageDown\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"PageUp\"},{\"op\":\"key\",\"key\":\"PageDown\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
 
@@ -2034,7 +2038,7 @@ static void test_session_inject_key_utf8_backspace(void) {
   SzUiSession *session;
   SzView *root, *field;
   SzSignalStr *draft;
-  const char *path = "/tmp/scuzz_ui_inject_key_utf8.script";
+  const char *path = "/tmp/scuzz_ui_inject_key_utf8.json";
   const char *cafe = "caf\xC3\xA9";
 
   remove(path);
@@ -2054,12 +2058,12 @@ static void test_session_inject_key_utf8_backspace(void) {
   assert(sz_ui_session_set_inject(session, path));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "text caf\xC3\xA9\nkey Backspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"caf\xC3\xA9\"},{\"op\":\"key\",\"key\":\"Backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
   assert(strlen(cafe) == 5);
 
-  write_stamp(path, "text caf\xC3\xA9\nbackspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"caf\xC3\xA9\"},{\"op\":\"backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
 
@@ -2074,7 +2078,7 @@ static void test_record_live_key(void) {
   SzView *root, *field;
   SzSignalStr *draft;
   SzInputEvent ev;
-  const char *record = "/tmp/scuzz_ui_record_key.script";
+  const char *record = "/tmp/scuzz_ui_record_key.json";
   char *body;
 
   remove(record);
@@ -2101,8 +2105,8 @@ static void test_record_live_key(void) {
   assert(sz_ui_session_live_inject(session, &ev));
   assert(strcmp(sz_signal_str_get(draft), "q") == 0);
   body = slurp_cstr(record);
-  assert(strstr(body, "key q q") != NULL);
-  assert(strstr(body, "type ") == NULL);
+  assert(strstr(body, "{\"op\":\"key\",\"key\":\"q\",\"text\":\"q\"}") != NULL);
+  assert(strstr(body, "\"op\":\"type\"") == NULL);
   free(body);
 
   memset(&ev, 0, sizeof(ev));
@@ -2112,7 +2116,7 @@ static void test_record_live_key(void) {
   assert(sz_ui_session_live_inject(session, &ev));
   assert(strcmp(sz_signal_str_get(draft), "") == 0);
   body = slurp_cstr(record);
-  assert(strstr(body, "key Backspace") != NULL);
+  assert(strstr(body, "\"op\":\"key\",\"key\":\"Backspace\"") != NULL);
   assert(strstr(body, "backspace") == NULL);
   free(body);
 
@@ -2127,7 +2131,7 @@ static void test_record_type_escapes(void) {
   SzView *root, *field;
   SzSignalStr *draft;
   SzInputEvent ev;
-  const char *record = "/tmp/scuzz_ui_record_type_esc.script";
+  const char *record = "/tmp/scuzz_ui_record_type_esc.json";
   char *body;
 
   remove(record);
@@ -2152,7 +2156,7 @@ static void test_record_type_escapes(void) {
   ev.text = "a\nb";
   assert(sz_ui_session_live_inject(session, &ev));
   body = slurp_cstr(record);
-  assert(strstr(body, "type a\\nb") != NULL);
+  assert(strstr(body, "\"op\":\"type\",\"value\":\"a\\nb\"") != NULL);
   free(body);
   assert(strcmp(sz_signal_str_get(draft), "a\nb") == 0);
 
@@ -2167,9 +2171,9 @@ static void test_session_inject_key_repeat(void) {
   SzView *root, *field;
   SzSignalStr *draft;
   SzInputEvent ev;
-  const char *path = "/tmp/scuzz_ui_inject_key_repeat.script";
+  const char *path = "/tmp/scuzz_ui_inject_key_repeat.json";
   const char *dump = "/tmp/scuzz_ui_inject_key_repeat.dump";
-  const char *record = "/tmp/scuzz_ui_record_key_repeat.script";
+  const char *record = "/tmp/scuzz_ui_record_key_repeat.json";
   char *body;
 
   remove(path);
@@ -2192,17 +2196,17 @@ static void test_session_inject_key_repeat(void) {
   assert(sz_ui_session_set_debug_dump(session, dump));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "key a a\nkey a+repeat a\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"a\",\"text\":\"a\"},{\"op\":\"key\",\"key\":\"a\",\"text\":\"a\",\"repeat\":true}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "aa") == 0);
   assert(sz_view_text_field_caret(field) == 2);
 
-  write_stamp(path, "key Backspace\nkey Backspace+repeat\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"Backspace\"},{\"op\":\"key\",\"key\":\"Backspace\",\"repeat\":true}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "") == 0);
   assert(sz_view_text_field_caret(field) == 0);
 
-  write_stamp(path, "key b b\nkey c c\nkey ArrowLeft\nkey ArrowLeft+repeat\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"b\",\"text\":\"b\"},{\"op\":\"key\",\"key\":\"c\",\"text\":\"c\"},{\"op\":\"key\",\"key\":\"ArrowLeft\"},{\"op\":\"key\",\"key\":\"ArrowLeft\",\"repeat\":true}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "bc") == 0);
   assert(sz_view_text_field_caret(field) == 0);
@@ -2224,7 +2228,7 @@ static void test_session_inject_key_repeat(void) {
   assert(sz_ui_session_live_inject(session, &ev));
   assert(strcmp(sz_signal_str_get(draft), "debc") == 0);
   body = slurp_cstr(record);
-  assert(strstr(body, "key e+repeat e") != NULL);
+  assert(strstr(body, "{\"op\":\"key\",\"key\":\"e\",\"text\":\"e\",\"repeat\":true}") != NULL);
   free(body);
 
   sz_ui_unmount(session);
@@ -2240,9 +2244,9 @@ static void test_session_inject_compose(void) {
   SzView *root, *field, *ed;
   SzSignalStr *draft, *buf;
   SzInputEvent ev;
-  const char *path = "/tmp/scuzz_ui_inject_compose.script";
+  const char *path = "/tmp/scuzz_ui_inject_compose.json";
   const char *dump = "/tmp/scuzz_ui_inject_compose.dump";
-  const char *record = "/tmp/scuzz_ui_record_compose.script";
+  const char *record = "/tmp/scuzz_ui_record_compose.json";
   char *body;
 
   remove(path);
@@ -2268,7 +2272,7 @@ static void test_session_inject_compose(void) {
   assert(sz_ui_session_set_debug_dump(session, dump));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "compose n\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"compose\",\"value\":\"n\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "ab") == 0);
   assert(strcmp(sz_view_text_field_preedit(field), "n") == 0);
@@ -2277,12 +2281,12 @@ static void test_session_inject_compose(void) {
   assert(strstr(body, "\"label\":\"item\",\"value\":\"ab\"") != NULL);
   free(body);
 
-  write_stamp(path, "compose ni\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"compose\",\"value\":\"ni\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "ab") == 0);
   assert(strcmp(sz_view_text_field_preedit(field), "ni") == 0);
 
-  write_stamp(path, "commit\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"commit\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "abni") == 0);
   assert(sz_view_text_field_preedit(field)[0] == '\0');
@@ -2291,12 +2295,12 @@ static void test_session_inject_compose(void) {
   assert(strstr(body, "\"preedit\":\"n\"") == NULL);
   free(body);
 
-  write_stamp(path, "compose ja\nkey Escape\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"compose\",\"value\":\"ja\"},{\"op\":\"key\",\"key\":\"Escape\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "abni") == 0);
   assert(sz_view_text_field_preedit(field)[0] == '\0');
 
-  write_stamp(path, "text hi\nselect 0 2\ncompose x\ncompose\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"hi\"},{\"op\":\"select\",\"start\":0,\"end\":2},{\"op\":\"compose\",\"value\":\"x\"},{\"op\":\"compose\",\"value\":\"\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "x") == 0);
 
@@ -2308,7 +2312,7 @@ static void test_session_inject_compose(void) {
     ev.y = fr.y + 8.f;
     assert(sz_ui_inject_sync(session, &ev));
   }
-  write_stamp(path, "compose ka\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"compose\",\"value\":\"ka\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "xy") == 0);
   assert(strcmp(sz_view_editor_preedit(ed), "ka") == 0);
@@ -2317,12 +2321,12 @@ static void test_session_inject_compose(void) {
   assert(strstr(body, "\"preedit\":\"ka\"") != NULL);
   free(body);
 
-  write_stamp(path, "commit\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"commit\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strstr(sz_signal_str_get(buf), "ka") != NULL);
   assert(sz_view_editor_preedit(ed)[0] == '\0');
 
-  write_stamp(path, "key z z\nkey z+repeat z\nkey Backspace+repeat\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"z\",\"text\":\"z\"},{\"op\":\"key\",\"key\":\"z\",\"text\":\"z\",\"repeat\":true},{\"op\":\"key\",\"key\":\"Backspace\",\"repeat\":true}]}");
   assert(sz_ui_pump_sync(session));
   {
     const char *got = sz_signal_str_get(buf);
@@ -2335,14 +2339,14 @@ static void test_session_inject_compose(void) {
   ev.text = "ni";
   assert(sz_ui_session_live_inject(session, &ev));
   body = slurp_cstr(record);
-  assert(strstr(body, "compose ni") != NULL);
+  assert(strstr(body, "\"op\":\"compose\",\"value\":\"ni\"") != NULL);
   free(body);
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_COMPOSE;
   ev.text = "";
   assert(sz_ui_session_live_inject(session, &ev));
   body = slurp_cstr(record);
-  assert(strstr(body, "commit") != NULL);
+  assert(strstr(body, "\"op\":\"commit\"") != NULL);
   free(body);
 
   sz_ui_unmount(session);
@@ -2359,7 +2363,7 @@ static void test_record_live_hover_secondary(void) {
   SzView *root, *btn, *tip;
   SzSignalInt *count;
   SzInputEvent ev;
-  const char *record = "/tmp/scuzz_ui_record_hover.script";
+  const char *record = "/tmp/scuzz_ui_record_hover.json";
   char *body;
   SzRect fr;
 
@@ -2392,9 +2396,9 @@ static void test_record_live_hover_secondary(void) {
   assert(sz_ui_session_live_inject(session, &ev));
   body = slurp_cstr(record);
   {
-    char *first = strstr(body, "hover ");
+    char *first = strstr(body, "\"op\":\"hover\"");
     assert(first != NULL);
-    assert(strstr(first + 6, "hover ") == NULL);
+    assert(strstr(first + 12, "\"op\":\"hover\"") == NULL);
   }
   free(body);
 
@@ -2409,8 +2413,8 @@ static void test_record_live_hover_secondary(void) {
   assert(sz_ui_session_live_inject(session, &ev));
   assert(sz_signal_int_get(count) == 0);
   body = slurp_cstr(record);
-  assert(strstr(body, "secondary 0") != NULL);
-  assert(strstr(body, "tap ") == NULL);
+  assert(strstr(body, "\"op\":\"secondary\",\"i\":0") != NULL);
+  assert(strstr(body, "\"op\":\"tap\"") == NULL);
   free(body);
 
   sz_ui_unmount(session);
@@ -2425,7 +2429,7 @@ static void test_session_inject_caret(void) {
   SzSignalStr *draft;
   SzInputEvent ev;
   const SzTheme *theme = sz_theme_default();
-  const char *path = "/tmp/scuzz_ui_inject_caret.script";
+  const char *path = "/tmp/scuzz_ui_inject_caret.json";
   const char *dump = "/tmp/scuzz_ui_inject_caret.dump";
   char *body;
   SzRect fr;
@@ -2450,7 +2454,7 @@ static void test_session_inject_caret(void) {
   assert(sz_ui_session_set_debug_dump(session, dump));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "text abc\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
   assert(sz_view_text_field_caret(field) == 3);
@@ -2459,7 +2463,7 @@ static void test_session_inject_caret(void) {
   assert(strstr(body, "\"taps\":[") != NULL);
   free(body);
 
-  write_stamp(path, "caret 1\nkey Delete\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"caret\",\"offset\":1},{\"op\":\"key\",\"key\":\"Delete\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "ac") == 0);
   assert(sz_view_text_field_caret(field) == 1);
@@ -2467,22 +2471,22 @@ static void test_session_inject_caret(void) {
   assert(strstr(body, "\"target\":true,\"label\":\"item\",\"value\":\"ac\",\"caret\":1") != NULL);
   free(body);
 
-  write_stamp(path, "text abc\nkey Home\nkey ArrowRight\nkey x x\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"key\",\"key\":\"Home\"},{\"op\":\"key\",\"key\":\"ArrowRight\"},{\"op\":\"key\",\"key\":\"x\",\"text\":\"x\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "axbc") == 0);
   assert(sz_view_text_field_caret(field) == 2);
 
-  write_stamp(path, "text abc\nkey End\nkey ArrowLeft\nkey Backspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"key\",\"key\":\"End\"},{\"op\":\"key\",\"key\":\"ArrowLeft\"},{\"op\":\"key\",\"key\":\"Backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "ac") == 0);
   assert(sz_view_text_field_caret(field) == 1);
 
-  write_stamp(path, "text caf\xC3\xA9\nkey ArrowLeft\nkey Delete\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"caf\xC3\xA9\"},{\"op\":\"key\",\"key\":\"ArrowLeft\"},{\"op\":\"key\",\"key\":\"Delete\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
   assert(sz_view_text_field_caret(field) == 3);
 
-  write_stamp(path, "text abc\ncaret 0 1\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"caret\",\"i\":0,\"offset\":1}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_text_field_caret(field) == 1);
 
@@ -2495,12 +2499,12 @@ static void test_session_inject_caret(void) {
   ev.kind = SZ_INPUT_TAP;
   ev.x = tap_x;
   ev.y = tap_y;
-  write_stamp(path, "text abc\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_inject_sync(session, &ev));
   assert(sz_ui_pump_sync(session));
   assert(sz_view_text_field_caret(field) == 1);
-  write_stamp(path, "key Delete\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"Delete\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "ac") == 0);
 
@@ -2516,7 +2520,7 @@ static void test_session_inject_hover_secondary(void) {
   SzView *root, *btn, *tip;
   SzSignalInt *count;
   SzInputEvent ev;
-  const char *path = "/tmp/scuzz_ui_inject_hover.script";
+  const char *path = "/tmp/scuzz_ui_inject_hover.json";
   const char *dump = "/tmp/scuzz_ui_inject_hover.dump";
   char *body;
   SzRect fr;
@@ -2556,9 +2560,11 @@ static void test_session_inject_hover_secondary(void) {
   free(body);
 
   {
-    char line[128];
-    snprintf(line, sizeof line, "hover %.1f %.1f\n", fr.x + fr.w * 0.5f,
-             fr.y + fr.h * 0.5f);
+    char line[256];
+    snprintf(line, sizeof line,
+             "{\"v\":1,\"kind\":\"inject\",\"events\":["
+             "{\"op\":\"hover\",\"x\":%.1f,\"y\":%.1f}]}",
+             fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
     write_stamp(path, line);
   }
   assert(sz_ui_pump_sync(session));
@@ -2567,14 +2573,14 @@ static void test_session_inject_hover_secondary(void) {
   assert(strstr(body, "tooltip:Sean") != NULL);
   free(body);
 
-  write_stamp(path, "hover 190.0 70.0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"hover\",\"x\":190,\"y\":70}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "\"hover\":{") != NULL);
   assert(strstr(body, "\"desc\":\"NULL\"") != NULL);
   free(body);
 
-  write_stamp(path, "secondary 0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"secondary\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 0);
   body = slurp_cstr(dump);
@@ -2583,15 +2589,17 @@ static void test_session_inject_hover_secondary(void) {
   free(body);
 
   {
-    char line[128];
-    snprintf(line, sizeof line, "secondary %.1f %.1f\n", fr.x + fr.w * 0.5f,
-             fr.y + fr.h * 0.5f);
+    char line[256];
+    snprintf(line, sizeof line,
+             "{\"v\":1,\"kind\":\"inject\",\"events\":["
+             "{\"op\":\"secondary\",\"x\":%.1f,\"y\":%.1f}]}",
+             fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
     write_stamp(path, line);
   }
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 0);
 
-  write_stamp(path, "tap 0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 1);
 
@@ -2607,7 +2615,7 @@ static void test_on_secondary_script_fires(void) {
   SzView *root, *btn, *wrap;
   SzSignalInt *primary;
   SzSignalInt *secondary;
-  const char *path = "/tmp/scuzz_ui_on_secondary.script";
+  const char *path = "/tmp/scuzz_ui_on_secondary.json";
   const char *dump = "/tmp/scuzz_ui_on_secondary.dump";
   char *body;
 
@@ -2634,7 +2642,7 @@ static void test_on_secondary_script_fires(void) {
   assert(sz_view_kind(wrap) == SZ_VIEW_ON_SECONDARY);
   assert(!sz_view_is_tap_target(wrap));
 
-  write_stamp(path, "secondary 0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"secondary\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(primary) == 0);
   assert(sz_signal_int_get(secondary) == 1);
@@ -2643,7 +2651,7 @@ static void test_on_secondary_script_fires(void) {
   assert(strstr(body, "button:Go") != NULL);
   free(body);
 
-  write_stamp(path, "tap 0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(primary) == 1);
   assert(sz_signal_int_get(secondary) == 1);
@@ -2735,9 +2743,9 @@ static void test_session_inject_selection_clipboard(void) {
   SzSignalStr *draft;
   SzInputEvent ev;
   const SzTheme *theme = sz_theme_default();
-  const char *path = "/tmp/scuzz_ui_inject_sel.script";
+  const char *path = "/tmp/scuzz_ui_inject_sel.json";
   const char *dump = "/tmp/scuzz_ui_inject_sel.dump";
-  const char *record = "/tmp/scuzz_ui_record_sel.script";
+  const char *record = "/tmp/scuzz_ui_record_sel.json";
   char *body;
   SzRect fr;
   float x0, x2, y;
@@ -2763,7 +2771,7 @@ static void test_session_inject_selection_clipboard(void) {
   assert(sz_ui_session_set_record(session, record));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "text abc\ncaret 0\nkey ArrowRight+shift\nkey ArrowRight+shift\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"caret\",\"offset\":0},{\"op\":\"key\",\"key\":\"ArrowRight\",\"mods\":[\"shift\"]},{\"op\":\"key\",\"key\":\"ArrowRight\",\"mods\":[\"shift\"]}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
   assert(sz_view_text_field_caret(field) == 2);
@@ -2775,11 +2783,11 @@ static void test_session_inject_selection_clipboard(void) {
   assert(strstr(body, "\"fields\":[") != NULL);
   free(body);
 
-  write_stamp(path, "copy\nkey End\npaste\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"copy\"},{\"op\":\"key\",\"key\":\"End\"},{\"op\":\"paste\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "abcab") == 0);
 
-  write_stamp(path, "text abc\nselect 0 2\ntype x\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"select\",\"start\":0,\"end\":2},{\"op\":\"type\",\"value\":\"x\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "xc") == 0);
   assert(sz_view_text_field_caret(field) == 1);
@@ -2789,27 +2797,27 @@ static void test_session_inject_selection_clipboard(void) {
   assert(strstr(body, "\"target\":true,\"label\":\"item\",\"value\":\"xc\",\"caret\":1,\"sel_start\":1,\"sel_end\":1") != NULL);
   free(body);
 
-  write_stamp(path, "text abc\nselect 0 2\nkey Backspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"select\",\"start\":0,\"end\":2},{\"op\":\"key\",\"key\":\"Backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "c") == 0);
 
-  write_stamp(path, "text abc\nselect 1 3\nkey Delete\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"select\",\"start\":1,\"end\":3},{\"op\":\"key\",\"key\":\"Delete\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "a") == 0);
 
-  write_stamp(path, "text abc\nselect 0 2\ncut\nkey End\npaste\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"select\",\"start\":0,\"end\":2},{\"op\":\"cut\"},{\"op\":\"key\",\"key\":\"End\"},{\"op\":\"paste\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "cab") == 0);
 
-  write_stamp(path, "text hi\npaste xyz\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"hi\"},{\"op\":\"paste\",\"value\":\"xyz\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hixyz") == 0);
 
-  write_stamp(path, "text caf\xC3\xA9\nselect 3 5\nkey Backspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"caf\xC3\xA9\"},{\"op\":\"select\",\"start\":3,\"end\":5},{\"op\":\"key\",\"key\":\"Backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
 
-  write_stamp(path, "text abc\nselect 0 3\nkey ArrowLeft\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"select\",\"start\":0,\"end\":3},{\"op\":\"key\",\"key\":\"ArrowLeft\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_text_field_caret(field) == 0);
   assert(sz_view_text_field_sel_start(field) == 0);
@@ -2821,11 +2829,14 @@ static void test_session_inject_selection_clipboard(void) {
   x0 = fr.x + 6.f;
   x2 = fr.x + 6.f + sk_font_measure_string("ab", theme->font_px);
   y = fr.y + fr.h * 0.5f;
-  write_stamp(path, "text abc\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"}]}");
   assert(sz_ui_pump_sync(session));
   {
-    char line[128];
-    snprintf(line, sizeof line, "drag %.1f %.1f %.1f %.1f\n", x0, y, x2, y);
+    char line[256];
+    snprintf(line, sizeof line,
+             "{\"v\":1,\"kind\":\"inject\",\"events\":["
+             "{\"op\":\"drag\",\"x1\":%.1f,\"y1\":%.1f,\"x2\":%.1f,\"y2\":%.1f}]}",
+             x0, y, x2, y);
     write_stamp(path, line);
   }
   assert(sz_ui_pump_sync(session));
@@ -2833,7 +2844,7 @@ static void test_session_inject_selection_clipboard(void) {
   assert(sz_view_text_field_sel_end(field) >= 1);
   assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
 
-  write_stamp(path, "text abc\nselect 0 2\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"select\",\"start\":0,\"end\":2}]}");
   assert(sz_ui_pump_sync(session));
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_KEY;
@@ -2842,27 +2853,27 @@ static void test_session_inject_selection_clipboard(void) {
   assert(sz_ui_session_live_inject(session, &ev));
   ev.key = "v";
   ev.key_mods = SZ_KEY_CTRL;
-  write_stamp(path, "key End\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"End\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_live_inject(session, &ev));
   assert(strcmp(sz_signal_str_get(draft), "abcab") == 0);
   body = slurp_cstr(record);
-  assert(strstr(body, "copy") != NULL);
-  assert(strstr(body, "paste ab") != NULL);
-  assert(strstr(body, "key c") == NULL);
+  assert(strstr(body, "\"op\":\"copy\"") != NULL);
+  assert(strstr(body, "\"op\":\"paste\",\"value\":\"ab\"") != NULL);
+  assert(strstr(body, "\"key\":\"c\"") == NULL);
   free(body);
 
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_KEY;
   ev.key = "ArrowLeft";
   ev.key_mods = SZ_KEY_SHIFT;
-  write_stamp(path, "text abc\nkey End\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"abc\"},{\"op\":\"key\",\"key\":\"End\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_live_inject(session, &ev));
   assert(sz_view_text_field_sel_end(field) == 3);
   assert(sz_view_text_field_sel_start(field) < 3);
   body = slurp_cstr(record);
-  assert(strstr(body, "key ArrowLeft+shift") != NULL);
+  assert(strstr(body, "\"key\":\"ArrowLeft\",\"mods\":[\"shift\"]") != NULL);
   free(body);
 
   sz_ui_unmount(session);
@@ -2877,7 +2888,7 @@ static void test_session_inject_field_index(void) {
   SzUiSession *session;
   SzView *root;
   SzSignalStr *draft, *query;
-  const char *path = "/tmp/scuzz_ui_inject_field.script";
+  const char *path = "/tmp/scuzz_ui_inject_field.json";
 
   remove(path);
   draft = sz_signal_str("");
@@ -2897,26 +2908,26 @@ static void test_session_inject_field_index(void) {
   assert(sz_ui_session_set_inject(session, path));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "text 1 hello\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"i\":1,\"value\":\"hello\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "") == 0);
   assert(strcmp(sz_signal_str_get(query), "hello") == 0);
 
-  write_stamp(path, "type 0 x\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"type\",\"i\":0,\"value\":\"x\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "x") == 0);
   assert(strcmp(sz_signal_str_get(query), "hello") == 0);
 
-  write_stamp(path, "text 0 ab\nbackspace 0 1\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"i\":0,\"value\":\"ab\"},{\"op\":\"backspace\",\"i\":0,\"count\":1}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "a") == 0);
   assert(strcmp(sz_signal_str_get(query), "hello") == 0);
 
-  write_stamp(path, "text 0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"0\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "0") == 0);
 
-  write_stamp(path, "text 9 no\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"i\":9,\"value\":\"no\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "0") == 0);
   assert(strcmp(sz_signal_str_get(query), "hello") == 0);
@@ -4456,7 +4467,7 @@ static void test_scroll_h_inject_script(void) {
   SzUiConfig cfg;
   SzUiSession *session;
   SzView *root, *scroll, *row, *left, *right;
-  const char *path = "/tmp/scuzz_ui_inject_scroll_h.script";
+  const char *path = "/tmp/scuzz_ui_inject_scroll_h.json";
   float x0;
 
   remove(path);
@@ -4477,7 +4488,7 @@ static void test_scroll_h_inject_script(void) {
   assert(sz_ui_session_set_inject(session, path));
   assert(sz_ui_pump_sync(session));
   x0 = sz_view_scroll_x(scroll);
-  write_stamp(path, "scroll 40\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"scroll\",\"dy\":40}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_scroll_x(scroll) == x0 + 40.f);
   assert(sz_view_scroll_y(scroll) == 0.f);
@@ -13470,7 +13481,7 @@ static void test_slider_live_records_xy(void) {
   SzView *root, *sl;
   SzSignalInt *sig;
   SzInputEvent ev;
-  const char *record = "/tmp/scuzz_ui_slider.script";
+  const char *record = "/tmp/scuzz_ui_slider.json";
   const SzTheme *theme = sz_theme_default();
   SzRect f;
   char *body;
@@ -13501,8 +13512,8 @@ static void test_slider_live_records_xy(void) {
   ev.pointer_phase = SZ_POINTER_UP;
   assert(sz_ui_session_live_inject(session, &ev));
   body = slurp_cstr(record);
-  assert(strstr(body, "xy ") != NULL);
-  assert(strstr(body, "tap ") == NULL);
+  assert(strstr(body, "\"op\":\"xy\"") != NULL);
+  assert(strstr(body, "\"op\":\"tap\"") == NULL);
   free(body);
   sz_ui_unmount(session);
   sz_signal_int_free(sig);
@@ -14999,7 +15010,7 @@ static void test_view_editor(void) {
   SzUiConfig cfg;
   SzUiSession *session;
   const SzTheme *theme = sz_theme_default();
-  const char *path = "/tmp/scuzz_ui_inject_editor.script";
+  const char *path = "/tmp/scuzz_ui_inject_editor.json";
   const char *dump = "/tmp/scuzz_ui_inject_editor.dump";
   char *body;
   SzString *a11y;
@@ -15045,7 +15056,7 @@ static void test_view_editor(void) {
   assert(sz_ui_pump_sync(session));
 
   /* Keys go to the starred field while the editor is unfocused. */
-  write_stamp(path, "key a a\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"a\",\"text\":\"a\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(field_sig), "hia") == 0);
   assert(strcmp(sz_signal_str_get(buf), "") == 0);
@@ -15059,7 +15070,7 @@ static void test_view_editor(void) {
   assert(sz_ui_pump_sync(session));
 
   /* Rewrite must not share a prefix with the prior `key a a` stamp (suffix play). */
-  write_stamp(path, "key z z\nkey Enter\nkey Tab\nkey b b\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"z\",\"text\":\"z\"},{\"op\":\"key\",\"key\":\"Enter\"},{\"op\":\"key\",\"key\":\"Tab\"},{\"op\":\"key\",\"key\":\"b\",\"text\":\"b\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "z\n  b") == 0);
   assert(strcmp(sz_signal_str_get(field_sig), "hia") == 0);
@@ -15076,37 +15087,37 @@ static void test_view_editor(void) {
   }
   free(body);
 
-  write_stamp(path, "caret 2\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"caret\",\"offset\":2}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_editor_caret(ed) == 2);
 
-  write_stamp(path, "select 0 2\nkey x x\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"select\",\"start\":0,\"end\":2},{\"op\":\"key\",\"key\":\"x\",\"text\":\"x\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "x  b") == 0);
 
-  write_stamp(path, "select 0 1\ncopy\nkey End\npaste\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"select\",\"start\":0,\"end\":1},{\"op\":\"copy\"},{\"op\":\"key\",\"key\":\"End\"},{\"op\":\"paste\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "x  bx") == 0);
 
-  write_stamp(path, "text ab\nkey Enter\nkey c c\nkey d d\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"text\",\"value\":\"ab\"},{\"op\":\"key\",\"key\":\"Enter\"},{\"op\":\"key\",\"key\":\"c\",\"text\":\"c\"},{\"op\":\"key\",\"key\":\"d\",\"text\":\"d\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "ab\ncd") == 0);
   body = slurp_cstr(dump);
   assert(strstr(body, "\"ab\\ncd\"") != NULL);
   free(body);
 
-  write_stamp(path, "caret 3\nkey Backspace\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"caret\",\"offset\":3},{\"op\":\"key\",\"key\":\"Backspace\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "abcd") == 0);
 
-  write_stamp(path, "caret 2\nkey Enter\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"caret\",\"offset\":2},{\"op\":\"key\",\"key\":\"Enter\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "ab\ncd") == 0);
 
-  write_stamp(path, "select 0 5\ncut\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"select\",\"start\":0,\"end\":5},{\"op\":\"cut\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "") == 0);
-  write_stamp(path, "paste\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"paste\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "ab\ncd") == 0);
 
@@ -15116,7 +15127,7 @@ static void test_view_editor(void) {
   long_s[300] = '\0';
   sz_signal_str_set(buf, long_s);
   assert(sz_view_set_editor_caret(ed, 300));
-  write_stamp(path, "dump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "\"editors\":[") != NULL);
@@ -15150,7 +15161,7 @@ static void test_view_editor_viewport(void) {
   SzUiConfig cfg;
   SzUiSession *session;
   const SzTheme *theme = sz_theme_default();
-  const char *path = "/tmp/scuzz_ui_editor_viewport.script";
+  const char *path = "/tmp/scuzz_ui_editor_viewport.json";
   const char *dump = "/tmp/scuzz_ui_editor_viewport.dump";
   char *body;
   char long_line[97];
@@ -15191,7 +15202,7 @@ static void test_view_editor_viewport(void) {
     long_line[i] = 'a';
   long_line[96] = '\0';
   sz_signal_str_set(buf, long_line);
-  write_stamp(path, "key End\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"End\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_editor_scroll_x(ed) > 0.f);
   body = slurp_cstr(dump);
@@ -15206,7 +15217,7 @@ static void test_view_editor_viewport(void) {
   strcat(tall, "z");
   sz_signal_str_set(buf, tall);
   sz_view_set_editor_caret(ed, (int)strlen(tall));
-  write_stamp(path, "caret 80\nkey End\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"caret\",\"offset\":80},{\"op\":\"key\",\"key\":\"End\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_editor_scroll_y(ed) > 0.f);
   body = slurp_cstr(dump);
@@ -15240,7 +15251,7 @@ static void test_view_editor_viewport(void) {
   /* Mono columns: i and W share a click-to-caret column. */
   sz_signal_str_set(buf, "ii\nWW");
   sz_view_set_editor_caret(ed, 0);
-  write_stamp(path, "key Home\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"Home\"}]}");
   assert(sz_ui_pump_sync(session));
   fr = sz_view_frame(ed);
   memset(&ev, 0, sizeof(ev));
@@ -15253,7 +15264,7 @@ static void test_view_editor_viewport(void) {
   assert(sz_ui_inject_sync(session, &ev));
   assert(sz_view_editor_caret(ed) == 5);
 
-  write_stamp(path, "key PageUp\nkey PageDown\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"PageUp\"},{\"op\":\"key\",\"key\":\"PageDown\"}]}");
   assert(sz_ui_pump_sync(session));
 
   sz_ui_unmount(session);
@@ -15267,7 +15278,7 @@ static void test_view_editor_undo_gutter(void) {
   SzView *root, *ed;
   SzUiConfig cfg;
   SzUiSession *session;
-  const char *path = "/tmp/scuzz_ui_editor_undo.script";
+  const char *path = "/tmp/scuzz_ui_editor_undo.json";
   const char *dump = "/tmp/scuzz_ui_editor_undo.dump";
   char *body;
   int lines[2];
@@ -15300,13 +15311,13 @@ static void test_view_editor_undo_gutter(void) {
   assert(sz_ui_inject_sync(session, &ev));
   assert(sz_ui_pump_sync(session));
 
-  write_stamp(path, "key a a\nkey b b\nkey c c\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"a\",\"text\":\"a\"},{\"op\":\"key\",\"key\":\"b\",\"text\":\"b\"},{\"op\":\"key\",\"key\":\"c\",\"text\":\"c\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "abc") == 0);
-  write_stamp(path, "key z+ctrl\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"z\",\"mods\":[\"ctrl\"]}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "ab") == 0);
-  write_stamp(path, "key y+ctrl\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"y\",\"mods\":[\"ctrl\"]}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(buf), "abc") == 0);
   assert(sz_view_editor_undo(ed));
@@ -15326,7 +15337,7 @@ static void test_view_editor_undo_gutter(void) {
   assert(sz_view_editor_set_diagnostics(ed, lines, sevs, 2));
   assert(sz_view_editor_line_count(ed) == 3);
   assert(sz_view_editor_gutter_w(ed) > 0.f);
-  write_stamp(path, "dump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "\"lines\":3") != NULL);
@@ -15360,7 +15371,7 @@ static void test_view_editor_undo_gutter(void) {
     assert(r.ok);
     sz_release(xs);
   }
-  write_stamp(path, "dump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "{\"line\":1,\"severity\":1}") != NULL);
@@ -15369,7 +15380,7 @@ static void test_view_editor_undo_gutter(void) {
     SzIoResult r = sz_io_unsafe_run(sz_lang_ui_set_editor_diagnostics(NULL));
     assert(r.ok);
   }
-  write_stamp(path, "dump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "\"diags\":[]") != NULL);
@@ -15453,7 +15464,7 @@ static void test_view_editor_undo_gutter(void) {
     assert(r.ok);
     sz_release(xs);
   }
-  write_stamp(path, "dump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "\"tokens\":1") != NULL);
@@ -15477,7 +15488,7 @@ static void test_view_editor_undo_gutter(void) {
     r = sz_io_unsafe_run(sz_lang_ui_set_editor_folds(NULL));
     assert(r.ok);
   }
-  write_stamp(path, "dump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "\"tokens\":0") != NULL);
@@ -15513,7 +15524,7 @@ static void test_view_focus_split_overlay(void) {
   SzView *root, *field, *btn, *split, *overlay, *pop_field;
   SzUiConfig cfg;
   SzUiSession *session;
-  const char *path = "/tmp/scuzz_ui_a8.script";
+  const char *path = "/tmp/scuzz_ui_a8.json";
   const char *dump = "/tmp/scuzz_ui_a8.dump";
   char *body;
   SzInputEvent ev;
@@ -15554,12 +15565,12 @@ static void test_view_focus_split_overlay(void) {
   assert(sz_ui_session_set_title(session, "Hello"));
   assert(strcmp(sz_ui_session_title(session), "Hello") == 0);
 
-  write_stamp(path, "key p p\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"p\",\"text\":\"p\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(pop), "p") == 0);
   assert(strcmp(sz_signal_str_get(draft), "") == 0);
 
-  write_stamp(path, "key Escape\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"Escape\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_overlay_is_open(overlay) == 0);
 
@@ -15572,7 +15583,7 @@ static void test_view_focus_split_overlay(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_view_has_focused_text_field(root));
 
-  write_stamp(path, "key a a\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"a\",\"text\":\"a\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "a") == 0);
 
@@ -15602,7 +15613,7 @@ static void test_view_focus_split_overlay(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_view_split_frac(split) == 25);
 
-  write_stamp(path, "dump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
   assert(strstr(body, "\"title\":\"Hello\"") != NULL);
@@ -15792,7 +15803,7 @@ static void test_view_focus_group_keys(void) {
   SzView *root, *group, *ba, *bb, *btn, *field, *overlay;
   SzUiConfig cfg;
   SzUiSession *session;
-  const char *path = "/tmp/scuzz_ui_focus_group.script";
+  const char *path = "/tmp/scuzz_ui_focus_group.json";
   const char *dump = "/tmp/scuzz_ui_focus_group.dump";
   char *body;
   SzInputEvent ev;
@@ -15846,7 +15857,7 @@ static void test_view_focus_group_keys(void) {
   assert(sz_view_has_focused_text_field(root));
   assert(strcmp(sz_view_focus_kind(root), "field") == 0);
 
-  write_stamp(path, "tap 0\ndump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0},{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(a) == 1);
   assert(!sz_view_has_focused_text_field(root));
@@ -15855,7 +15866,7 @@ static void test_view_focus_group_keys(void) {
   assert(strstr(body, "\"focus\":\"button:sample.txt\"") != NULL);
   free(body);
 
-  write_stamp(path, "key ArrowDown\ndump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"ArrowDown\"},{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(a) == 1);
   assert(sz_signal_int_get(b) == 0);
@@ -15864,15 +15875,15 @@ static void test_view_focus_group_keys(void) {
   assert(strstr(body, "\"focus\":\"button:scuzz.toml\"") != NULL);
   free(body);
 
-  write_stamp(path, "key Enter\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"Enter\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(b) == 1);
 
-  write_stamp(path, "tap 0\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(a) == 2);
   sz_signal_int_set(open, 1);
-  write_stamp(path, "key ArrowDown\ndump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"ArrowDown\"},{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(b) == 1);
   assert(strcmp(sz_view_focus_kind(root), "overlay") == 0);
@@ -15881,11 +15892,11 @@ static void test_view_focus_group_keys(void) {
   free(body);
 
   sz_signal_int_set(open, 0);
-  write_stamp(path, "key Space\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"Space\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(a) == 3);
 
-  write_stamp(path, "tap 2\ndump\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":2},{\"op\":\"dump\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(go) == 1);
   assert(strcmp(sz_view_focus_kind(root), "none") == 0);
@@ -15893,7 +15904,7 @@ static void test_view_focus_group_keys(void) {
   assert(strstr(body, "\"focus\":\"none\"") != NULL);
   free(body);
 
-  write_stamp(path, "key ArrowDown\n");
+  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"ArrowDown\"}]}");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(b) == 1);
 

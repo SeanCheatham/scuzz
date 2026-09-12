@@ -127,7 +127,7 @@ Options:
       --watch
           Keep running; [ui] hot-reloads the View tree; IO-only kills and reruns on source change
       --script <PATH>
-          Inject script path (SCUZZ_UI_SCRIPT); played after the first pump
+          Inject document path (SCUZZ_UI_SCRIPT); JSON schema v=1; played after the first pump
       --dump <PATH>
           Structural dump path at finish (SCUZZ_FUZZ_DUMP)
   -h, --help
@@ -137,7 +137,7 @@ Examples:
   scuzz run
   scuzz run --headless
   scuzz run examples/studio
-  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.json examples/studio
+  scuzz run --headless --script examples/studio/build/record.json --dump examples/studio/build/debug.json examples/studio
   scuzz run --watch --headless
 
 See: scuzz docs commands

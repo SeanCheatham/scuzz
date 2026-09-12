@@ -29,13 +29,11 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 Close them in this order.
 
-1. **Typed agent session schema** — One JSON schema for dump, inject, fuzz verdict, and coverage. Dumps write schema `v=2` at any path; the text dump is gone. `scuzz fuzz` writes only `build/fuzz/summary.json`; `summary.toml` is gone. Timeline states record the v=2 signals array as the observation string. Open: retire the text script, record, and inject format. `--message-format=json` applies to `check` only until then.
+1. **Source-region coverage** — Open: branch coverage.
 
-2. **Source-region coverage** — Open: branch coverage.
+2. **Scenario initialization and lifetime** — Residual: generated setup inputs, multiple named scenarios, and campaign selection.
 
-3. **Scenario initialization and lifetime** — Residual: generated setup inputs, multiple named scenarios, and campaign selection.
-
-4. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
+3. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
 ### Table-stakes
 

@@ -1155,39 +1155,15 @@ static int find_tap_index_at(SzUiSession *session, float x, float y) {
   return -1;
 }
 
-static void record_tap_or_xy(SzUiSession *session, FILE *f, float x, float y) {
-  int idx = find_tap_index_at(session, x, y);
-  if (idx >= 0)
-    fprintf(f, "tap %d\n", idx);
-  else
-    fprintf(f, "xy %.1f %.1f\n", x, y);
-}
-
 static int event_pointer_button(const SzInputEvent *ev) {
   if (ev && ev->pointer_button == 3)
     return 3;
   return 1;
 }
 
-static void record_secondary_or_xy(SzUiSession *session, FILE *f, float x,
-                                   float y) {
-  int idx = find_tap_index_at(session, x, y);
-  if (idx >= 0)
-    fprintf(f, "secondary %d\n", idx);
-  else
-    fprintf(f, "secondary %.1f %.1f\n", x, y);
-}
-
 /* --- typed session schema v=1 (JSON record) ------------------------------- */
-/* A record path that ends in `.json` writes the inject schema instead of
- * text lines. Each live OS event appends one object to `record_events` and
- * rewrites the whole document. */
-
-/* A record or inject path that ends in `.json` selects the typed schema. */
-static int path_is_json(const char *path) {
-  size_t n = path ? strlen(path) : 0;
-  return n >= 5 && strcmp(path + n - 5, ".json") == 0;
-}
+/* A record writes the inject schema. Each live OS event appends one object
+ * to `record_events` and rewrites the whole document. */
 
 static int clipboard_chord(const char *key, int mods);
 
@@ -1527,135 +1503,17 @@ static const char *app_chord_label(const char *key, int mods) {
 }
 
 static void record_clipboard_verb(SzUiSession *session, int op) {
-  FILE *f;
   if (!session || !session->record_path || op < 1 || op > 3)
     return;
-  if (path_is_json(session->record_path)) {
-    record_clipboard_verb_json(session, op);
-    return;
-  }
-  f = fopen(session->record_path, "a");
-  if (!f)
-    return;
-  if (op == 1)
-    fputs("copy\n", f);
-  else if (op == 2)
-    fputs("cut\n", f);
-  else if (session->clipboard && session->clipboard[0]) {
-    fputs("paste ", f);
-    fputs_escaped_body(f, session->clipboard);
-    fputc('\n', f);
-  } else
-    fputs("paste\n", f);
-  fclose(f);
-}
-
-static void record_key_line(FILE *f, const SzInputEvent *ev) {
-  int mods = ev->key_mods;
-  fputs("key ", f);
-  fputs(ev->key, f);
-  if (mods & SZ_KEY_SHIFT)
-    fputs("+shift", f);
-  if (mods & SZ_KEY_CTRL)
-    fputs("+ctrl", f);
-  if (mods & SZ_KEY_CMD)
-    fputs("+cmd", f);
-  if (mods & SZ_KEY_ALT)
-    fputs("+alt", f);
-  if (ev->key_repeat)
-    fputs("+repeat", f);
-  if (ev->text && ev->text[0]) {
-    fputc(' ', f);
-    fputs(ev->text, f);
-  }
-  fputc('\n', f);
+  record_clipboard_verb_json(session, op);
 }
 
 /* Append one OS event to the record file. Script / inject playback must not
  * call this. */
 static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
-  FILE *f;
   if (!session || !session->record_path || !ev)
     return;
-  if (path_is_json(session->record_path)) {
-    record_live_event_json(session, ev);
-    return;
-  }
-  f = fopen(session->record_path, "a");
-  if (!f)
-    return;
-  if (ev->kind == SZ_INPUT_TAP) {
-    record_tap_or_xy(session, f, ev->x, ev->y);
-  } else if (ev->kind == SZ_INPUT_KEY && ev->key && ev->key[0]) {
-    if (!clipboard_chord(ev->key, ev->key_mods))
-      record_key_line(f, ev);
-  } else if (ev->kind == SZ_INPUT_COMPOSE) {
-    if (ev->text && ev->text[0]) {
-      fputs("compose ", f);
-      fputs_escaped_body(f, ev->text);
-      fputc('\n', f);
-    } else
-      fputs("commit\n", f);
-  } else if (ev->kind == SZ_INPUT_TEXT_EDIT) {
-    if (!ev->text || !ev->text[0])
-      fputs("backspace\n", f);
-    else {
-      fputs("type ", f);
-      fputs_escaped_body(f, ev->text);
-      fputc('\n', f);
-    }
-  } else if (ev->kind == SZ_INPUT_POINTER &&
-             ev->pointer_phase == SZ_POINTER_MOVE && !session->pointer_down) {
-    SzView *tip;
-    char desc[256];
-    if (session->root) {
-      sz_view_layout(session->root, (float)session->cfg.width,
-                     (float)session->cfg.height, session->theme);
-      tip = sz_view_tooltip_at(session->root, ev->x, ev->y);
-    } else
-      tip = NULL;
-    format_last_hit_desc(tip, desc, sizeof desc);
-    if (!session->record_hover_desc ||
-        strcmp(session->record_hover_desc, desc) != 0) {
-      fprintf(f, "hover %.1f %.1f\n", ev->x, ev->y);
-      host_free(&session->record_hover_desc);
-      session->record_hover_desc = host_dup(desc);
-    }
-  } else if (ev->kind == SZ_INPUT_POINTER &&
-             ev->pointer_phase == SZ_POINTER_UP && session->pointer_down) {
-    float dx = ev->x - session->pointer_down_x;
-    float dy = ev->y - session->pointer_down_y;
-    if (session->pointer_button == 3 || ev->pointer_button == 3) {
-      if (dx * dx + dy * dy <= 64.f)
-        record_secondary_or_xy(session, f, ev->x, ev->y);
-    } else if (session->pointer_field && dx * dx + dy * dy > 64.f)
-      fprintf(f, "drag %.1f %.1f %.1f %.1f\n", session->pointer_down_x,
-              session->pointer_down_y, ev->x, ev->y);
-    else if (session->pointer_slider)
-      fprintf(f, "xy %.1f %.1f\n", ev->x, ev->y);
-    else if (dx * dx + dy * dy <= 64.f)
-      record_tap_or_xy(session, f, ev->x, ev->y);
-  } else if (ev->kind == SZ_INPUT_SCROLL && session->root) {
-    SzView *scrolls[64];
-    SzView *hit;
-    int n, i, idx;
-    sz_view_layout(session->root, (float)session->cfg.width,
-                   (float)session->cfg.height, session->theme);
-    hit = sz_view_scroll_at(session->root, ev->x, ev->y);
-    if (hit) {
-      n = sz_ui_collect_scrolls(session, scrolls, 64);
-      idx = -1;
-      for (i = 0; i < n; i++) {
-        if (scrolls[i] == hit) {
-          idx = i;
-          break;
-        }
-      }
-      if (idx >= 0)
-        fprintf(f, "scroll %d %.0f\n", idx, ev->dy);
-    }
-  }
-  fclose(f);
+  record_live_event_json(session, ev);
 }
 
 /* Live OS path: record then inject. Tests call this to simulate drain. */
@@ -1695,11 +1553,9 @@ static void drain_desktop_events(SzUiSession *session) {
     (void)sz_ui_session_live_inject(session, &ev);
 }
 
-/* Prefix-extend plays the suffix; rewrite plays the whole file. */
+/* The inject document plays whole on change. It is not appended. */
 static int take_inject(SzUiSession *session, char **out) {
   char *now;
-  size_t old_n, now_n;
-  const char *play;
   if (!session || !session->inject_path || !out)
     return 0;
   *out = NULL;
@@ -1708,20 +1564,12 @@ static int take_inject(SzUiSession *session, char **out) {
     sz_free(now);
     return 0;
   }
-  old_n = session->inject_fp ? strlen(session->inject_fp) : 0;
-  now_n = strlen(now);
-  /* A `.json` inject document plays whole on change. It is not appended. */
-  if (old_n > 0 && now_n >= old_n && memcmp(session->inject_fp, now, old_n) == 0 &&
-      !path_is_json(session->inject_path))
-    play = now + old_n;
-  else
-    play = now;
-  if (!play[0]) {
+  if (!now[0]) {
     sz_free(session->inject_fp);
     session->inject_fp = now;
     return 0;
   }
-  *out = sz_strdup(play);
+  *out = sz_strdup(now);
   sz_free(session->inject_fp);
   session->inject_fp = now;
   return 1;
@@ -1779,10 +1627,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     char *delta = NULL;
     if (take_inject(session, &delta)) {
       session->inject_playing = 1;
-      if (path_is_json(session->inject_path))
-        sz_ui_script_play_json(session, delta);
-      else
-        sz_ui_script_play_text(session, delta);
+      sz_ui_script_play_json(session, delta);
       sz_free(delta);
       session->inject_playing = 0;
       need_dump = 1;

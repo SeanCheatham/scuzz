@@ -450,7 +450,7 @@ void sz_view_set_pressed_at(SzView *root, float x, float y, int active);
 int sz_view_handle_tap(SzView *root, float x, float y);
 /* Fire the tap handler on `target` (no hit-test). Slider / segmented use x. */
 int sz_view_activate(SzView *root, SzView *target, float x, float y);
-/* Layout + activate `target` and mark the session dirty (script `tap N`). */
+/* Layout + activate `target` and mark the session dirty (inject `tap`). */
 int sz_ui_session_activate_view(SzUiSession *session, SzView *target);
 /* Focus dump-index `index` (starred field when index < 0), set caret, mark dirty.
  * Collapses the selection to that offset. Index < 0 uses the focused editor
@@ -690,12 +690,12 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including `session` and `heap`. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
-/* Watch an inject script (tap/xy/text/type/key/compose/commit/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).
- * Next pump that sees new contents plays the suffix (append) or the whole file
- * (rewrite). Missing = empty. */
+/* Watch an inject document (schema v=1, kind `inject`).
+ * Next pump that sees new contents plays the whole document.
+ * Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
-/* Live record path (Desktop / Mobile drain). Truncates on set. Appends only from
- * OS drain, never from script / inject playback. */
+/* Live record path (Desktop / Mobile drain). Writes the inject schema v=1.
+ * Appends only from OS drain, never from script / inject playback. */
 int sz_ui_session_set_record(SzUiSession *session, const char *path);
 /* Invoke the rebuild factory now. Pump calls this when the stamp changes. */
 int sz_ui_session_reload(SzUiSession *session);
