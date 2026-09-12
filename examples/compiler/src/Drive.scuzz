@@ -50,6 +50,12 @@ def crateHomeAt(h: String): IO[String] =
 def crateAt(h: String, rel: String): String =
   joinSlash(h, rel)
 
+def makeJobs(): String =
+  Str.concat("-j$", "(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)")
+
+def makeLine(h: String, rel: String): String =
+  Str.concat("make -C ", Str.concat(crateAt(h, rel), Str.concat(" lib ", Str.concat(makeJobs(), " CC=clang"))))
+
 def skiaLib(h: String): String =
   crateAt(h, "crates/ffi-skia/build/libsk_capi.a")
 
@@ -97,8 +103,8 @@ def linkLineMac(clang: String, ll: String, lib: String, exe: String): String =
 def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool): String =
   if (hasUi) linkLineUi(clang, ll, lib, exe, h, gpu, mac) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
 
-def runLinkLine(hasUi: Bool, dir: String, name: String): IO[(Int, String, String)] =
-  crateHome().flatMap(h => ensureRtMade(h).flatMap(_ => runLinkHost(hasUi, dir, name, h)))
+def linkExe(hasUi: Bool, dir: String, name: String): IO[(Int, String, String)] =
+  crateHome().flatMap(h => runLinkHost(hasUi, dir, name, h))
 
 def runLinkHost(hasUi: Bool, dir: String, name: String, h: String): IO[(Int, String, String)] =
   hostMac().flatMap(mac => runLinkGpu(hasUi, dir, name, h, mac))
@@ -109,13 +115,28 @@ def runLinkGpu(hasUi: Bool, dir: String, name: String, h: String, mac: Bool): IO
 def runLinkGot(hasUi: Bool, dir: String, name: String, h: String, mac: Bool, gpu: Bool): IO[(Int, String, String)] =
   runLine(linkLineHost(hasUi, mac, "clang", llName(dir, name), rtLib(h), exeName(dir, name), h, gpu))
 
-def ensureRtMade(h: String): IO[Unit] =
-  runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/runtime"), " lib CC=clang"))).flatMap(r => ensureRtGot(r))
+def ensureCrate(h: String, rel: String, tag: String): IO[Unit] =
+  runLine(makeLine(h, rel)).flatMap(r => ensureCrateGot(r, tag))
 
-def ensureRtGot(r: (Int, String, String)): IO[Unit] =
+def ensureCrateGot(r: (Int, String, String), tag: String): IO[Unit] =
   r match {
-    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("runtime")) else IO.pure(())
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail(tag)) else IO.pure(())
   }
+
+def ensureRtMade(h: String): IO[Unit] =
+  ensureCrate(h, "crates/runtime", "runtime")
+
+def ensureUiAll(h: String): IO[Unit] =
+  IO.both(ensureCrate(h, "crates/ffi-skia", "ui"), IO.both(ensureCrate(h, "crates/embedder-desktop", "ui"), ensureCrate(h, "crates/embedder-mobile", "ui"))).flatMap(_ => IO.pure(()))
+
+def ensureUiMaybe(h: String, hasUi: Bool): IO[Unit] =
+  if (hasUi) ensureUiAll(h) else IO.pure(())
+
+def ensureNative(hasUi: Bool): IO[Unit] =
+  crateHome().flatMap(h => ensureNativeAt(h, hasUi))
+
+def ensureNativeAt(h: String, hasUi: Bool): IO[Unit] =
+  IO.both(ensureRtMade(h), ensureUiMaybe(h, hasUi)).flatMap(_ => IO.pure(()))
 
 def missToml(dir: String): String =
   Str.concat("missing scuzz.toml in ", dir)
@@ -316,7 +337,13 @@ def emitDirVerifyArt(dir: String, outDir: String, files: List[(String, String)],
   manNeed(m).flatMap(_ => Fs.exists(llName(outDir, m.name)).flatMap(ll => Fs.exists(exeName(outDir, m.name)).flatMap(exe => if (ll != 0 && exe != 0) IO.pure(()) else emitDirVerifyFresh(dir, outDir, files, toml))))
 
 def emitDirVerifyFresh(dir: String, outDir: String, files: List[(String, String)], toml: String): IO[Unit] =
-  emitDirAlwaysGot(toml, files, outDir).flatMap(_ => compileLinkedMan(dir, outDir).flatMap(_ => emitVerifyStamp(dir, toml, files)))
+  emitDirVerifyFreshMan(dir, outDir, files, toml, Manifest.parse(toml))
+
+def emitDirVerifyFreshMan(dir: String, outDir: String, files: List[(String, String)], toml: String, m: Man): IO[Unit] =
+  manNeed(m).flatMap(_ => IO.both(ensureNative(m.hasUi), emitDirAlwaysGot(toml, files, outDir)).flatMap(_ => linkExe(m.hasUi, outDir, m.name).flatMap(r => emitDirVerifyFreshLink(r, dir, toml, files))))
+
+def emitDirVerifyFreshLink(r: (Int, String, String), dir: String, toml: String, files: List[(String, String)]): IO[Unit] =
+  linkOnlyGot(r).flatMap(_ => emitVerifyStamp(dir, toml, files))
 
 def emitVerifyStamp(dir: String, toml: String, own: List[(String, String)]): IO[Unit] =
   fpText(toml, own).flatMap(fp => Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpVerifyPath(dir), fp).flatMap(_ => Fs.delete(fpPath(dir)).handleErrorWith(_ => IO.pure(())))))
@@ -492,37 +519,10 @@ def emitDirWrite(ok: Bool, ll: String, llPath: String, diags: String): IO[Bool] 
   if (!ok) IO.println(Str.concat("fail:", diags)).flatMap(_ => IO.pure(false)) else Fs.write(llPath, ll).flatMap(_ => IO.println("ok").flatMap(_ => IO.pure(true)))
 
 def runDir(dir: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
-  emitDir(dir, outDir, false).flatMap(_ => linkRun(dir, outDir, runEnv, extra))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => runDirMan(dir, outDir, runEnv, extra, Manifest.parse(toml)))
 
-def linkRun(dir: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => linkRunMan(Manifest.parse(toml), outDir, runEnv, extra))
-
-def linkRunMan(m: Man, outDir: String, runEnv: String, extra: String): IO[Unit] =
-  manNeed(m).flatMap(_ => linkRunUi(m.hasUi, m.name, outDir, runEnv, extra))
-
-def linkRunUi(hasUi: Bool, name: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
-  if (hasUi) ensureUi().flatMap(_ => linkRunNamed(true, name, outDir, runEnv, extra)) else linkRunNamed(false, name, outDir, runEnv, extra)
-
-def ensureUi(): IO[Unit] =
-  crateHome().flatMap(h => runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/ffi-skia"), " lib CC=clang"))).flatMap(r => ensureUiDesk(h, r)))
-
-def ensureUiDesk(h: String, r: (Int, String, String)): IO[Unit] =
-  r match {
-    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui")) else runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/embedder-desktop"), " lib CC=clang"))).flatMap(r2 => ensureUiMob(h, r2))
-  }
-
-def ensureUiMob(h: String, r: (Int, String, String)): IO[Unit] =
-  r match {
-    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui")) else runLine(Str.concat("make -C ", Str.concat(crateAt(h, "crates/embedder-mobile"), " lib CC=clang"))).flatMap(r2 => ensureUiDone(r2))
-  }
-
-def ensureUiDone(r: (Int, String, String)): IO[Unit] =
-  r match {
-    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("ui")) else IO.pure(())
-  }
-
-def linkRunNamed(hasUi: Bool, name: String, outDir: String, runEnv: String, extra: String): IO[Unit] =
-  runLinkLine(hasUi, outDir, name).flatMap(r => afterClang(r, exeName(outDir, name), runEnv, extra))
+def runDirMan(dir: String, outDir: String, runEnv: String, extra: String, m: Man): IO[Unit] =
+  manNeed(m).flatMap(_ => IO.both(ensureNative(m.hasUi), emitDir(dir, outDir, false)).flatMap(_ => linkExe(m.hasUi, outDir, m.name).flatMap(r => afterClang(r, exeName(outDir, m.name), runEnv, extra))))
 
 def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
@@ -815,7 +815,7 @@ def testDiff(dir: String, outDir: String): IO[Unit] =
   testDiffUi(dir, outDir)
 
 def testDiffUi(dir: String, outDir: String): IO[Unit] =
-  ensureUi().flatMap(_ => Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testDiffMan(dir, outDir, Manifest.parse(toml))))
+  ensureNative(true).flatMap(_ => Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => testDiffMan(dir, outDir, Manifest.parse(toml))))
 
 def testDiffMan(dir: String, outDir: String, m: Man): IO[Unit] =
   manNeed(m).flatMap(_ => if (!m.hasUi) IO.println("--differential needs a [ui] package").flatMap(_ => IO.fail("differential")) else testDiffBackends(dir, outDir, m.name, "skia" :: "sk_sw" :: "gpu" :: [], []))
@@ -839,7 +839,7 @@ def failMsg(msg: String, tag: String): IO[Unit] =
   IO.println(msg).flatMap(_ => IO.fail(tag))
 
 def skiaMake(backend: String): IO[Bool] =
-  crateHome().flatMap(h => runLine(Str.concat("SCUZZ_SKIA=", Str.concat(backend, Str.concat(" make -C ", Str.concat(crateAt(h, "crates/ffi-skia"), " lib CC=clang"))))).flatMap(r => skiaMakeGot(r, backend)))
+  crateHome().flatMap(h => runLine(Str.concat("SCUZZ_SKIA=", Str.concat(backend, Str.concat(" ", makeLine(h, "crates/ffi-skia"))))).flatMap(r => skiaMakeGot(r, backend)))
 
 def skiaMakeGot(r: (Int, String, String), backend: String): IO[Bool] =
   r match {
@@ -847,7 +847,7 @@ def skiaMakeGot(r: (Int, String, String), backend: String): IO[Bool] =
   }
 
 def testDiffLink(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String]): IO[Unit] =
-  runLinkLine(true, outDir, name).flatMap(r => testDiffLinked(r, dir, outDir, name, backend, rest, dumps))
+  linkExe(true, outDir, name).flatMap(r => testDiffLinked(r, dir, outDir, name, backend, rest, dumps))
 
 def testDiffLinked(r: (Int, String, String), dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String]): IO[Unit] =
   r match {
@@ -896,7 +896,7 @@ def hostMeta(name: String, id: String): String =
   Str.concat("[package]\nname = \"", Str.concat(name, Str.concat("\"\ntarget = \"host\"\nbundle_id = \"", Str.concat(id, "\"\nruntime = \"mobile\"\n"))))
 
 def linkOnly(hasUi: Bool, name: String, outDir: String): IO[Unit] =
-  runLinkLine(hasUi, outDir, name).flatMap(r => linkOnlyGot(r))
+  ensureNative(hasUi).flatMap(_ => linkExe(hasUi, outDir, name).flatMap(r => linkOnlyGot(r)))
 
 def linkReload(ll: String, outDir: String): IO[Unit] =
   runLine(Str.concat("clang -O0 -Wno-override-module -shared -fPIC ", Str.concat(ll, Str.concat(" -o ", joinSlash(outDir, "reload.dylib"))))).flatMap(r => linkOnlyGot(r))
@@ -907,13 +907,10 @@ def linkOnlyGot(r: (Int, String, String)): IO[Unit] =
   }
 
 def compileLinked(dir: String, outDir: String): IO[Unit] =
-  emitDir(dir, outDir, true).flatMap(_ => compileLinkedMan(dir, outDir))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => compileLinkedGo(dir, outDir, Manifest.parse(toml)))
 
-def compileLinkedMan(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => compileLinkedUi(Manifest.parse(toml), outDir))
-
-def compileLinkedUi(m: Man, outDir: String): IO[Unit] =
-  manNeed(m).flatMap(_ => if (m.hasUi) ensureUi().flatMap(_ => linkOnly(true, m.name, outDir)) else linkOnly(false, m.name, outDir))
+def compileLinkedGo(dir: String, outDir: String, m: Man): IO[Unit] =
+  manNeed(m).flatMap(_ => IO.both(ensureNative(m.hasUi), emitDir(dir, outDir, true)).flatMap(_ => linkExe(m.hasUi, outDir, m.name).flatMap(r => linkOnlyGot(r))))
 
 def pkgDir(dir: String, outDir: String, target: String): IO[Unit] =
   if (target == "web") pkgWeb(dir, outDir) else if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir, outDir) else if (target == "ios") pkgIos(dir, outDir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ => pkgAndroid(dir, outDir).flatMap(_ => pkgIos(dir, outDir))) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
@@ -1167,7 +1164,13 @@ def emitDirLiveStampedArt(dir: String, liveDir: String, files: List[(String, Str
   manNeed(m).flatMap(_ => Fs.exists(llName(liveDir, m.name)).flatMap(ll => Fs.exists(exeName(liveDir, m.name)).flatMap(exe => if (ll != 0 && exe != 0) IO.pure(()) else emitDirLiveStampedFresh(dir, liveDir, files, toml, fp))))
 
 def emitDirLiveStampedFresh(dir: String, liveDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
-  emitDirAlwaysGot(toml, files, liveDir).flatMap(_ => compileLinkedMan(dir, liveDir).flatMap(_ => Fs.write(fuzzLiveStampPath(liveDir), fp)))
+  emitDirLiveStampedFreshMan(dir, liveDir, files, toml, fp, Manifest.parse(toml))
+
+def emitDirLiveStampedFreshMan(dir: String, liveDir: String, files: List[(String, String)], toml: String, fp: String, m: Man): IO[Unit] =
+  manNeed(m).flatMap(_ => IO.both(ensureNative(m.hasUi), emitDirAlwaysGot(toml, files, liveDir)).flatMap(_ => linkExe(m.hasUi, liveDir, m.name).flatMap(r => emitDirLiveStampedLink(r, liveDir, fp))))
+
+def emitDirLiveStampedLink(r: (Int, String, String), liveDir: String, fp: String): IO[Unit] =
+  linkOnlyGot(r).flatMap(_ => Fs.write(fuzzLiveStampPath(liveDir), fp))
 
 def fuzzLiveCollect(dir: String): IO[List[(String, String)]] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzLiveMan(dir, Manifest.parse(toml)))
@@ -1573,7 +1576,7 @@ def fuzzToml(job: FuzzJob): String =
   Str.concat("[package]\nname = \"", Str.concat(job.name, "\"\n"))
 
 def fuzzMutLink(job: FuzzJob, mutDir: String): IO[String] =
-  runLinkLine(job.hasUi, mutDir, job.name).flatMap(r => fuzzMutLinkIo(r, exeName(mutDir, job.name)))
+  ensureNative(job.hasUi).flatMap(_ => linkExe(job.hasUi, mutDir, job.name).flatMap(r => fuzzMutLinkIo(r, exeName(mutDir, job.name))))
 
 def fuzzMutLinkIo(r: (Int, String, String), exe: String): IO[String] =
   IO.pure(fuzzMutLinkGot(r, exe))

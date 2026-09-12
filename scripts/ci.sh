@@ -11,6 +11,7 @@ case "$SCUZZ" in
   *) SCUZZ="$ROOT/$SCUZZ" ;;
 esac
 export SCUZZ
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 # A prior `scuzz run` in this shell can leak session env. GitHub starts clean.
 unset SCUZZ_SNAPSHOT_PATH SCUZZ_FUZZ_DUMP SCUZZ_UI_RUNTIME SCUZZ_UI_WIDTH \
   SCUZZ_UI_HEIGHT SCUZZ_UI_SCALE SCUZZ_LIVE_FRAMES SCUZZ_MOBILE_SHELL \
@@ -125,23 +126,23 @@ slice_install_dry() {
 }
 
 slice_runtime() {
-  make -C crates/runtime test CC=clang
+  make -C crates/runtime test -j"$JOBS" CC=clang
 }
 
 slice_asan() {
-  make -C crates/runtime test-asan CC=clang
+  make -C crates/runtime test-asan -j"$JOBS" CC=clang
 }
 
 slice_skia() {
-  make -C crates/ffi-skia test CC=clang
+  make -C crates/ffi-skia test -j"$JOBS" CC=clang
   grep -qx skia crates/ffi-skia/build/sk_capi_backend
 }
 
 slice_embedders() {
-  make -C crates/ffi-skia lib CC=clang
+  make -C crates/ffi-skia lib -j"$JOBS" CC=clang
   grep -qx skia crates/ffi-skia/build/sk_capi_backend
-  make -C crates/embedder-desktop lib CC=clang
-  make -C crates/embedder-mobile lib CC=clang
+  make -C crates/embedder-desktop lib -j"$JOBS" CC=clang
+  make -C crates/embedder-mobile lib -j"$JOBS" CC=clang
 }
 
 slice_hello() {
@@ -284,16 +285,18 @@ slice_ui_test() {
 slice_gpu() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
-  xvfb-run -a env SCUZZ_SKIA=gpu make -C crates/ffi-skia test CC=clang
+  xvfb-run -a env SCUZZ_SKIA=gpu make -C crates/ffi-skia test -j"$JOBS" CC=clang
   xvfb-run -a env SCUZZ_SKIA=gpu "$SCUZZ" fuzz --iterations 0 examples/counter
-  make -C crates/ffi-skia clean lib CC=clang
+  make -C crates/ffi-skia clean
+  make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
 
 slice_differential() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
   xvfb-run -a "$SCUZZ" fuzz --differential --iterations 0 examples/counter
-  make -C crates/ffi-skia clean lib CC=clang
+  make -C crates/ffi-skia clean
+  make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
 
 slice_fuzz() {
