@@ -439,6 +439,15 @@ def jRegion(row: (String, Bool)): String =
 def coverageRowsOf(files: List[(String, String)], compiled: List[(String, String)], hits: String): List[(String, Bool)] =
   coverageProgRows(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))
 
+def coverageBoth(files: List[(String, String)], compiled: List[(String, String)], hits: String): (List[(String, Bool)], List[(String, Bool)]) =
+  coverageBothLive(Parse.parseFiles(files), files, compiled, Str.lines(hits))
+
+def coverageBothLive(p: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
+  coverageBothBuilt(p, Parse.parseFiles(rewriteReqFilesGot(files, p)), Parse.parseFiles(compiled), files, compiled, hits)
+
+def coverageBothBuilt(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
+  (coverageProgRows(p, expected, built, files, compiled, hits), branchProgRows(p, expected, built, files, compiled, hits))
+
 def coverageProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
   List.distinct(List.concat(coverageDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), if (p.main == "") [] else [(Emit.panicLocExpr(files, p.body), Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocExpr(compiled, built.body)))]))
 

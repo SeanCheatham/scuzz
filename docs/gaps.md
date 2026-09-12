@@ -33,7 +33,7 @@ Close them in this order.
 
 2. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
-3. **Compile-time performance** — One `scuzz fuzz` campaign re-parses package sources in the collect and coverage phases. Self-compiles and big package builds are slow. Profile the campaign path and the emit pipeline before more campaign-cost work.
+3. **Compile-time performance** — The coverage phase parses each file set once. The collect phase and mutation probes still re-parse package sources in one campaign. Self-compiles and big package builds are slow. Profile the campaign path and the emit pipeline before more campaign-cost work.
 
 ### Table-stakes
 
