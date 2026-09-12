@@ -190,6 +190,11 @@ echo "==> bootstrap $BOOTSTRAP ($TAG)" >&2
 unset SCUZZ_HOME || true
 export SCUZZ_RUNTIME="$ROOT/crates/runtime"
 
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+echo "==> make -C crates/runtime lib -j$JOBS" >&2
+make -C "$ROOT/crates/runtime" lib -j"$JOBS" CC=clang &
+mk=$!
+
 echo "==> $BOOTSTRAP build examples/cli" >&2
 "$BOOTSTRAP" build examples/cli
 SRC="$ROOT/examples/cli/build/cli"
@@ -198,8 +203,7 @@ RT="$ROOT/crates/runtime/build/libscuzz_rt.a"
 if [ ! -f "$LL" ]; then
   die "bootstrap build did not write $LL"
 fi
-echo "==> make -C crates/runtime lib" >&2
-make -C "$ROOT/crates/runtime" lib CC=clang
+wait "$mk" || die "runtime make failed"
 if [ ! -f "$RT" ]; then
   die "runtime make did not write $RT"
 fi
