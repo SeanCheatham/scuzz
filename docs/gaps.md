@@ -33,7 +33,7 @@ Close them in this order.
 
 2. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
-3. **Compile-time performance** — The coverage phase parses each file set once. The collect phase and mutation probes still re-parse package sources in one campaign. Self-compiles and big package builds are slow. Profile the campaign path and the emit pipeline before more campaign-cost work.
+3. **Compile-time performance** — The parser indexes tokens in two-level groups (was a linear chunk walk per token). The coverage phase parses each file set once. `coverage_hit` and `sz_testrt_oracles_armed` still call `getenv` per hit (36% of a compiler `check`). `Check.findFunMod` still scans defs linearly. The collect phase and mutation probes still re-parse package sources. Profile: gprofng works on the product CLI (no PMU; `perf` is blocked).
 
 ### Table-stakes
 
