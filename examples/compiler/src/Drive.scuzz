@@ -1384,7 +1384,7 @@ def fuzzReproBody(seed: Int, run: FuzzRun): String =
   Verify.withOracle(if (run.src != "") run.src else Verify.reproText(seed, run.sched, run.fault, Verify.linesOf(run.script)), Verify.linesOf(run.script))
 
 def fuzzDrivePath(outDir: String): String =
-  joinSlash(joinSlash(outDir, "fuzz"), "drive.txt")
+  joinSlash(joinSlash(outDir, "fuzz"), "drive.json")
 
 def fuzzWriteSeeds(outDir: String, script: String): IO[Unit] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(joinSlash(outDir, "seeds.txt"), script))
@@ -1396,7 +1396,7 @@ def fuzzClassPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "classify.dump")
 
 def fuzzWriteDrive(outDir: String, script: String): IO[Unit] =
-  Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(fuzzDrivePath(outDir), script))
+  Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => Fs.write(fuzzDrivePath(outDir), Verify.scriptJson(script)))
 
 def fuzzSeedText(dir: String, ens: List[En]): IO[String] =
   Fs.list(dir).flatMap(ents => fuzzSeedGo(dir, ents, Verify.noStr(), ens).flatMap(acc => fuzzSeedTextGot(acc)))
@@ -1616,7 +1616,7 @@ def fuzzIdleAt(exe: String, hasUi: Bool, mutDir: String, uiEnv: String): IO[(Int
   fuzzProbeAt(exe, hasUi, mutDir, uiEnv, "", "", "")
 
 def fuzzProbeAt(exe: String, hasUi: Bool, mutDir: String, uiEnv: String, script: String, sched: String, fault: String): IO[(Int, String)] =
-  Fs.mkdirs(mutDir).flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "drive.txt"), script).flatMap(_ => runProbe(Str.concat(fuzzProbeEnv(hasUi, joinSlash(mutDir, "drive.txt"), joinSlash(mutDir, "dump.json"), script != "", sched, fault, mutDir, uiEnv), Str.concat(fuzzTlEnv(joinSlash(mutDir, "timeline.txt")), exe))).flatMap(r => fuzzIdleGot(mutDir, r)))))
+  Fs.mkdirs(mutDir).flatMap(_ => Fs.write(joinSlash(mutDir, "timeline.txt"), "").flatMap(_ => Fs.write(joinSlash(mutDir, "drive.json"), Verify.scriptJson(script)).flatMap(_ => runProbe(Str.concat(fuzzProbeEnv(hasUi, joinSlash(mutDir, "drive.json"), joinSlash(mutDir, "dump.json"), script != "", sched, fault, mutDir, uiEnv), Str.concat(fuzzTlEnv(joinSlash(mutDir, "timeline.txt")), exe))).flatMap(r => fuzzIdleGot(mutDir, r)))))
 
 def fuzzTlEnv(path: String): String =
   Str.concat("SCUZZ_TIMELINE_DUMP=", Str.concat(path, " "))
@@ -1696,10 +1696,10 @@ def firstLine(s: String): String =
   if (List.isEmpty(Verify.linesOf(s))) "" else List.at(Verify.linesOf(s), 0)
 
 def relateExec(exe: String, hasUi: Bool, relDir: String, out: String, tag: String, script: String, sched: String, fault: String, uiEnv: String): IO[Int] =
-  relateExec2(exe, hasUi, relDir, out, tag, script, sched, fault, joinSlash(relDir, Str.concat(tag, ".script.txt")), joinSlash(relDir, Str.concat(tag, ".sometimes")), uiEnv)
+  relateExec2(exe, hasUi, relDir, out, tag, script, sched, fault, joinSlash(relDir, Str.concat(tag, ".script.json")), joinSlash(relDir, Str.concat(tag, ".sometimes")), uiEnv)
 
 def relateExec2(exe: String, hasUi: Bool, relDir: String, out: String, tag: String, script: String, sched: String, fault: String, scriptPath: String, reached: String, uiEnv: String): IO[Int] =
-  Fs.write(out, "").flatMap(_ => Fs.write(reached, "").flatMap(_ => Fs.write(scriptPath, script).flatMap(_ => Fs.write(joinSlash(relDir, Str.concat(tag, ".dump.json")), "").flatMap(_ => runProbe(Str.concat(relateEnv(hasUi, scriptPath, joinSlash(relDir, Str.concat(tag, ".dump.json")), script != "", out, reached, sched, fault, uiEnv), exe)).flatMap(r => relateExecGot(r))))))
+  Fs.write(out, "").flatMap(_ => Fs.write(reached, "").flatMap(_ => Fs.write(scriptPath, Verify.scriptJson(script)).flatMap(_ => Fs.write(joinSlash(relDir, Str.concat(tag, ".dump.json")), "").flatMap(_ => runProbe(Str.concat(relateEnv(hasUi, scriptPath, joinSlash(relDir, Str.concat(tag, ".dump.json")), script != "", out, reached, sched, fault, uiEnv), exe)).flatMap(r => relateExecGot(r))))))
 
 def relateExecGot(r: (Int, String, String)): IO[Int] =
   r match {

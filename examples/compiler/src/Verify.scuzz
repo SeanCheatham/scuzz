@@ -298,6 +298,81 @@ def oracleDrive(line: String): String =
 def withOracle(src: String, events: List[String]): String =
   if (oracleName(events) == "" || Str.contains(src, "oracle =")) src else insertOracle(src, oracleName(events))
 
+def scriptJson(script: String): String =
+  Str.concat("{\"v\":1,\"kind\":\"inject\",\"events\":[", Str.concat(jJoin(jEvents(linesOf(script))), "]}"))
+
+def jEvents(xs: List[String]): List[String] =
+  List.filter(List.map(xs, l => jLine(l)), e => e != "")
+
+def jJoin(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) List.at(xs, 0) else Str.concat(List.at(xs, 0), Str.concat(",", jJoin(List.tail(xs))))
+
+def jLine(line: String): String =
+  if (line == "" || Str.startsWith(line, "#")) "" else jVerb(line, List.filter(Str.split(line, " "), t => t != ""))
+
+def jVerb(line: String, toks: List[String]): String =
+  jVerbGo(line, List.at(toks, 0), List.drop(toks, 1))
+
+def jVerbGo(line: String, verb: String, args: List[String]): String =
+  if (verb == "tap") jObj("tap", jNum("i", jAt(args, 0, "0"))) else if (verb == "pump") jObj("pump", jNum("k", jAt(args, 0, "1"))) else if (verb == "drive") jObj("drive", Str.concat(jStrK("name", jAt(args, 0, "")), jStrArr(List.drop(args, 1)))) else if (verb == "key") jKeyEvent(jAt(args, 0, ""), jRest(jRest(line))) else if (verb == "caret") jObj("caret", if (List.len(args) >= 2) Str.concat(jNum("i", List.at(args, 0)), jNum("offset", List.at(args, 1))) else jNum("offset", jAt(args, 0, "0"))) else if (verb == "select") jObj("select", if (List.len(args) >= 3) Str.concat(jNum("i", List.at(args, 0)), Str.concat(jNum("start", List.at(args, 1)), jNum("end", List.at(args, 2)))) else Str.concat(jNum("start", jAt(args, 0, "0")), jNum("end", jAt(args, 1, "0")))) else if (verb == "secondary") jObj("secondary", if (List.len(args) >= 2) Str.concat(jNum("x", List.at(args, 0)), jNum("y", List.at(args, 1))) else jNum("i", jAt(args, 0, "0"))) else if (verb == "text") jField("text", jRest(line)) else if (verb == "type") jField("type", jRest(line)) else if (verb == "backspace") jObj("backspace", if (List.len(args) >= 2) Str.concat(jNum("i", List.at(args, 0)), jNum("count", List.at(args, 1))) else if (List.len(args) == 1) jNum("count", List.at(args, 0)) else "") else if (verb == "scroll") jObj("scroll", if (List.len(args) >= 2) Str.concat(jNum("i", List.at(args, 0)), jNum("dy", List.at(args, 1))) else if (List.len(args) == 1) jNum("dy", List.at(args, 0)) else "") else if (verb == "xy") jObj("xy", Str.concat(jNum("x", jAt(args, 0, "0")), jNum("y", jAt(args, 1, "0")))) else if (verb == "drag") jObj("drag", Str.concat(jNum("x1", jAt(args, 0, "0")), Str.concat(jNum("y1", jAt(args, 1, "0")), Str.concat(jNum("x2", jAt(args, 2, "0")), jNum("y2", jAt(args, 3, "0")))))) else if (verb == "hover") jObj("hover", Str.concat(jNum("x", jAt(args, 0, "0")), jNum("y", jAt(args, 1, "0")))) else if (verb == "compose") jObj("compose", jStrK("value", jRest(line))) else if (verb == "paste") jObj("paste", if (jRest(line) == "") "" else jStrK("value", jRest(line))) else if (jBareOp(verb)) jObj(verb, "") else jObj("__bad_line__", jStrK("line", line))
+
+def jBareOp(verb: String): Bool =
+  verb == "copy" || verb == "cut" || verb == "commit" || verb == "dump" || verb == "reload" || verb == "quit" || verb == "resetpeak"
+
+def jAt(xs: List[String], i: Int, d: String): String =
+  if (i < List.len(xs)) List.at(xs, i) else d
+
+def jRest(line: String): String =
+  jRestAt(line, findIdx(line, " ", 0))
+
+def jRestAt(line: String, i: Int): String =
+  if (i < 0) "" else Str.drop(line, i + 1)
+
+def jObj(op: String, body: String): String =
+  Str.concat("{\"op\":\"", Str.concat(op, Str.concat("\"", Str.concat(body, "}"))))
+
+def jNum(key: String, tok: String): String =
+  Str.concat(",\"", Str.concat(key, Str.concat("\":", tok)))
+
+def jStrK(key: String, v: String): String =
+  Str.concat(",\"", Str.concat(key, Str.concat("\":", Check.jsonStr(v))))
+
+def jStrArr(xs: List[String]): String =
+  Str.concat(",\"args\":[", Str.concat(jStrArrGo(xs), "]"))
+
+def jStrArrGo(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) Check.jsonStr(List.at(xs, 0)) else Str.concat(Check.jsonStr(List.at(xs, 0)), Str.concat(",", jStrArrGo(List.tail(xs))))
+
+def jField(op: String, rest: String): String =
+  jFieldAt(op, rest, findIdx(rest, " ", 0))
+
+def jFieldAt(op: String, rest: String, i: Int): String =
+  if (i > 0 && allDigits(Str.take(rest, i))) jObj(op, Str.concat(jNum("i", Str.take(rest, i)), jStrK("value", Str.drop(rest, i + 1)))) else jObj(op, jStrK("value", rest))
+
+def allDigits(s: String): Bool =
+  Str.len(s) > 0 && allDigitsAt(s, 0)
+
+def allDigitsAt(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) true else if (Str.charAt(s, i) < 48 || Str.charAt(s, i) > 57) false else allDigitsAt(s, i + 1)
+
+def jKeyEvent(tok: String, text: String): String =
+  jKeyAsm(List.filter(Str.split(tok, "+"), p => p != ""), text)
+
+def jKeyAsm(ps: List[String], text: String): String =
+  jObj("key", Str.concat(jStrK("key", jKeyName(ps)), Str.concat(if (text == "") "" else jStrK("text", text), Str.concat(jKeyModsBody(ps), if (List.exists(ps, p => Str.toLower(p) == "repeat")) ",\"repeat\":true" else ""))))
+
+def jKeyIsMod(p: String): Bool =
+  Str.toLower(p) == "shift" || Str.toLower(p) == "ctrl" || Str.toLower(p) == "cmd" || Str.toLower(p) == "alt"
+
+def jKeyIsMeta(p: String): Bool =
+  jKeyIsMod(p) || Str.toLower(p) == "repeat"
+
+def jKeyName(ps: List[String]): String =
+  if (List.isEmpty(List.filter(ps, p => !jKeyIsMeta(p)))) "" else List.at(List.filter(ps, p => !jKeyIsMeta(p)), 0)
+
+def jKeyModsBody(ps: List[String]): String =
+  if (List.isEmpty(List.filter(ps, p => jKeyIsMod(p)))) "" else Str.concat(",\"mods\":[", Str.concat(jJoin(List.map(List.filter(ps, p => jKeyIsMod(p)), p => Check.jsonStr(Str.toLower(p)))), "]"))
+
 def insertOracle(src: String, name: String): String =
   insertOracleAt(src, name, findIdx(src, """[fuzz]
 """, 0))

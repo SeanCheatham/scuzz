@@ -21,35 +21,6 @@ int sz_ui_collect_scrolls(SzUiSession *session, SzView **scrolls, int cap) {
   return sz_view_collect_scrolls(r, scrolls, cap);
 }
 
-static void script_parse_scroll(const char *rest, int *index, float *dy) {
-  const char *p = rest ? rest : "";
-  int a = 0;
-  *index = -1;
-  *dy = 40.f;
-  while (*p == ' ')
-    p++;
-  if (!*p)
-    return;
-  if (*p == '-') {
-    *dy = (float)atoi(p);
-    return;
-  }
-  if (*p < '0' || *p > '9')
-    return;
-  while (*p >= '0' && *p <= '9') {
-    a = a * 10 + (*p - '0');
-    p++;
-  }
-  while (*p == ' ')
-    p++;
-  if (*p) {
-    *index = a;
-    *dy = (float)atoi(p);
-    return;
-  }
-  *dy = (float)a;
-}
-
 static void script_scroll(SzUiSession *session, int index, float dy) {
   SzView *scrolls[64];
   int count = sz_ui_collect_scrolls(session, scrolls, 64);
@@ -63,77 +34,6 @@ static void script_scroll(SzUiSession *session, int index, float dy) {
   }
   if (!sz_ui_scroll_index(session, n, dy))
     fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
-}
-
-/* `N payload` → index N and payload; otherwise index -1 and rest unchanged
- * so `text 0` still means replace-with-"0" on the starred field. */
-static const char *script_field_payload(const char *rest, int *index) {
-  const char *p = rest ? rest : "";
-  int n = 0;
-  *index = -1;
-  if (*p < '0' || *p > '9')
-    return p;
-  while (*p >= '0' && *p <= '9') {
-    n = n * 10 + (*p - '0');
-    p++;
-  }
-  if (*p == ' ') {
-    *index = n;
-    return p + 1;
-  }
-  return rest ? rest : "";
-}
-
-static void script_parse_backspace(const char *rest, int *index, int *count) {
-  const char *p = rest ? rest : "";
-  int a = 0, b = 0;
-  *index = -1;
-  *count = 1;
-  if (*p < '0' || *p > '9')
-    return;
-  while (*p >= '0' && *p <= '9') {
-    a = a * 10 + (*p - '0');
-    p++;
-  }
-  if (*p == ' ') {
-    p++;
-    if (*p >= '0' && *p <= '9') {
-      while (*p >= '0' && *p <= '9') {
-        b = b * 10 + (*p - '0');
-        p++;
-      }
-      *index = a;
-      *count = b < 1 ? 1 : b;
-      return;
-    }
-  }
-  *count = a < 1 ? 1 : a;
-}
-
-static void script_parse_caret(const char *rest, int *index, int *offset) {
-  const char *p = rest ? rest : "";
-  int a = 0, b = 0;
-  *index = -1;
-  *offset = 0;
-  if (*p < '0' || *p > '9')
-    return;
-  while (*p >= '0' && *p <= '9') {
-    a = a * 10 + (*p - '0');
-    p++;
-  }
-  if (*p == ' ') {
-    p++;
-    if (*p >= '0' && *p <= '9') {
-      while (*p >= '0' && *p <= '9') {
-        b = b * 10 + (*p - '0');
-        p++;
-      }
-      *index = a;
-      *offset = b;
-      return;
-    }
-  }
-  *offset = a;
 }
 
 static int script_focus_field(SzUiSession *session, int index) {
@@ -219,75 +119,6 @@ static int script_eq_mod(const char *s, const char *mod) {
   return s[i] == '\0' && mod[i] == '\0';
 }
 
-/* First token is `Name` or `Name+shift+ctrl+repeat`. Known pieces: shift, ctrl,
- * cmd, alt, repeat. The leftover piece is the key name. */
-static void script_parse_key_token(const char *tok, char *name, size_t cap,
-                                   int *mods, int *repeat) {
-  char buf[128];
-  char *p;
-  char *part;
-  if (!name || cap == 0 || !mods)
-    return;
-  *mods = 0;
-  if (repeat)
-    *repeat = 0;
-  name[0] = '\0';
-  if (!tok)
-    tok = "";
-  if (strcmp(tok, "+") == 0) {
-    snprintf(name, cap, "+");
-    return;
-  }
-  snprintf(buf, sizeof buf, "%s", tok);
-  p = buf;
-  while (p && *p) {
-    part = p;
-    p = strchr(p, '+');
-    if (p) {
-      *p = '\0';
-      p++;
-    }
-    if (!part[0])
-      continue;
-    if (script_eq_mod(part, "shift"))
-      *mods |= SZ_KEY_SHIFT;
-    else if (script_eq_mod(part, "ctrl"))
-      *mods |= SZ_KEY_CTRL;
-    else if (script_eq_mod(part, "cmd"))
-      *mods |= SZ_KEY_CMD;
-    else if (script_eq_mod(part, "alt"))
-      *mods |= SZ_KEY_ALT;
-    else if (script_eq_mod(part, "repeat")) {
-      if (repeat)
-        *repeat = 1;
-    } else {
-      size_t n = strlen(part);
-      if (n >= cap)
-        n = cap - 1;
-      memcpy(name, part, n);
-      name[n] = '\0';
-    }
-  }
-}
-
-static void script_parse_select(const char *rest, int *index, int *start,
-                               int *end) {
-  int a = 0, b = 0, c = 0;
-  int n;
-  *index = -1;
-  *start = 0;
-  *end = 0;
-  n = sscanf(rest ? rest : "", "%d %d %d", &a, &b, &c);
-  if (n >= 3) {
-    *index = a;
-    *start = b;
-    *end = c;
-  } else if (n == 2) {
-    *start = a;
-    *end = b;
-  }
-}
-
 static void script_drag(SzUiSession *session, float x1, float y1, float x2,
                        float y2) {
   SzInputEvent ev;
@@ -351,50 +182,8 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
 }
 
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
-/* Line protocol, one event per line, delivered across pump boundaries:
-     tap <n>    activate the nth tap target in a11y preorder ([taps] in the dump); missing target is a no-op
-     xy <x> <y> inject TAP at logical point; miss does not panic
-     text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
-     text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"
-     type <s>   insert <s> at the caret on the [fields] starred TextField; empty is a no-op; no field is a no-op
-     type <n> <s>  insert at the caret on dump-index n; `type 0` is still payload "0"
-     key <name> [text]  named key on the starred TextField or focused editor
-                        (`Enter`, `Backspace`, `ArrowLeft`, `a`);
-                        optional UTF-8 insert text; arrows / Home / End / Delete use the caret;
-                        Enter / Tab insert newline / two spaces on an editor;
-                        PageUp / PageDown move by the viewport on an editor;
-                        Ctrl/Cmd+Z undoes, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redoes;
-                        `Name+shift` / `+ctrl` / `+cmd` / `+alt` set modifiers;
-                        `Name+repeat` is a held-key auto-repeat (same insert / move / delete);
-                        live OS keys record this verb (`+repeat` when the OS repeats)
-     compose <text>  set IME preedit on the starred field or focused editor
-                     (underlined preview; not in the committed buffer)
-     compose         commit preedit into the buffer at the caret (replaces a selection)
-     commit          same as empty `compose`
-     key Escape      cancel preedit when compose is active; else dismiss an overlay
-     caret <n>  set the starred TextField or focused-editor caret to byte offset n
-     caret <i> <n>  set dump-index i caret to byte offset n
-     select <a> <c>  set the starred TextField or focused-editor selection `[a, c)` (caret at c)
-     select <i> <a> <c>  set dump-index i selection
-     copy       copy the starred-field or focused-editor selection into the session clipboard
-     cut        copy then delete the selection
-     paste      insert the session clipboard (Headless) or OS pasteboard (Desktop/Mobile)
-     paste <s>  set the session clipboard to <s> then paste
-     drag <x1> <y1> <x2> <y2>  pointer drag (TextField / editor selection); live OS drag records this verb
-     hover <x> <y>  pointer MOVE with no button (hover); shows View.tooltip; live OS hover records this verb
-     secondary <n>  button-3 click on tap-dump index n; does not fire the primary tap; runs View.onSecondary
-     secondary <x> <y>  button-3 click at a logical point; live OS right-click records this verb
-     pump <k>   pump k extra frames
-     scroll <dy> pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
-     scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
-     backspace <n> chop n UTF-8 code points before the caret on the [fields] starred TextField (default 1); no field is a no-op
-     backspace <n> <k>  chop k UTF-8 code points before the caret on dump-index n
-     dump       rewrite the live debug dump now (includes [heap] kinds, delta, and [live] rows); no dump path is a no-op
-     reload     rebuild the View factory now; missing factory is a no-op
-     quit       stop the live session; remaining script lines do not run
-     resetpeak  set peak_bytes to live and mark delta; next dump reports growth from here
-     drive <name> [args]  run a verify-graph driver (Int/String/Bool args)
-   Blank lines and #-comments are skipped. Pump runs after every event except quit. */
+/* Shared event helpers. The inject schema below is the only script format.
+ * Pump runs after every event except quit. */
 
 static void script_tap(SzUiSession *session, int n) {
   SzView *buttons[64];
@@ -465,251 +254,67 @@ static void script_after_event(SzUiSession *session) {
     sz_panic("Ui.run: script pump failed");
 }
 
-static void play_script_line(SzUiSession *session, char *line) {
-  size_t len = strlen(line);
-  if (len == 0 || line[0] == '#')
-    return;
-  if (strncmp(line, "tap ", 4) == 0 || strcmp(line, "tap") == 0)
-    script_tap(session, len > 3 ? atoi(line + 4) : 0);
-  else if (strncmp(line, "xy ", 3) == 0) {
-    float x = 0.f, y = 0.f;
-    if (sscanf(line + 3, "%f %f", &x, &y) == 2)
-      script_xy(session, x, y);
-    else
-      sz_panic("Ui.run: xy needs x y");
-  } else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
-    SzInputEvent ev;
-    int idx;
-    const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
-    memset(&ev, 0, sizeof(ev));
-    ev.kind = SZ_INPUT_TEXT;
-    ev.text = payload;
-    if (script_focus_field(session, idx)) {
-      if (!sz_ui_inject_sync(session, &ev))
-        fprintf(stderr, "scuzz: script text skipped (no text field)\n");
-    }
-  } else if (strncmp(line, "pump ", 5) == 0 || strcmp(line, "pump") == 0) {
-    int k = len > 5 ? atoi(line + 5) : 1;
-    while (k-- > 1) {
-      if (!sz_ui_pump_sync(session))
-        sz_panic("Ui.run: script pump failed");
-    }
-  } else if (strncmp(line, "scroll ", 7) == 0 || strcmp(line, "scroll") == 0) {
-    int idx;
-    float dy;
-    script_parse_scroll(len > 6 ? line + 7 : "", &idx, &dy);
-    script_scroll(session, idx, dy);
-  } else if (strncmp(line, "backspace ", 10) == 0 ||
-             strcmp(line, "backspace") == 0) {
-    int idx, n;
-    script_parse_backspace(len > 9 ? line + 10 : "", &idx, &n);
-    script_backspace(session, idx, n);
-  } else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0) {
-    int idx;
-    const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
-    char *raw = sz_dump_unescape(payload);
-    script_type(session, idx, raw);
-    sz_free(raw);
-  } else if (strncmp(line, "key ", 4) == 0 || strcmp(line, "key") == 0) {
-    const char *rest = len > 3 ? line + 4 : "";
-    char token[96];
-    char name[64];
-    const char *text = "";
-    size_t ni = 0;
-    int mods = 0;
-    int repeat = 0;
-    while (*rest == ' ')
-      rest++;
-    while (rest[ni] && rest[ni] != ' ' && ni + 1 < sizeof token) {
-      token[ni] = rest[ni];
-      ni++;
-    }
-    token[ni] = '\0';
-    if (rest[ni] == ' ')
-      text = rest + ni + 1;
-    script_parse_key_token(token, name, sizeof name, &mods, &repeat);
-    script_key(session, name, text, mods, repeat);
-  } else if (strncmp(line, "compose ", 8) == 0 || strcmp(line, "compose") == 0) {
-    const char *rest = len > 7 ? line + 8 : "";
-    char *raw;
-    while (*rest == ' ')
-      rest++;
-    raw = sz_dump_unescape(rest);
-    script_compose(session, raw);
-    sz_free(raw);
-  } else if (strcmp(line, "commit") == 0) {
-    script_compose(session, "");
-  } else if (strncmp(line, "caret ", 6) == 0 || strcmp(line, "caret") == 0) {
-    int idx, off;
-    script_parse_caret(len > 5 ? line + 6 : "", &idx, &off);
-    if (!sz_ui_session_set_caret(session, idx, off)) {
-      if (idx < 0)
-        fprintf(stderr, "scuzz: script caret skipped (no text field)\n");
-      else
-        fprintf(stderr, "scuzz: script caret %d skipped\n", idx);
-    }
-  } else if (strncmp(line, "select ", 7) == 0 || strcmp(line, "select") == 0) {
-    int idx, a, b;
-    script_parse_select(len > 6 ? line + 7 : "", &idx, &a, &b);
-    if (!sz_ui_session_set_sel(session, idx, a, b)) {
-      if (idx < 0)
-        fprintf(stderr, "scuzz: script select skipped (no text field)\n");
-      else
-        fprintf(stderr, "scuzz: script select %d skipped\n", idx);
-    }
-  } else if (strcmp(line, "copy") == 0) {
-    if (!sz_ui_session_copy(session))
-      fprintf(stderr, "scuzz: script copy skipped (no text field)\n");
-  } else if (strcmp(line, "cut") == 0) {
-    if (!sz_ui_session_cut(session))
-      fprintf(stderr, "scuzz: script cut skipped (no text field)\n");
-  } else if (strncmp(line, "paste ", 6) == 0 || strcmp(line, "paste") == 0) {
-    const char *payload = NULL;
-    char *raw = NULL;
-    if (len > 6 && line[5] == ' ' && line[6])
-      payload = line + 6;
-    if (payload) {
-      raw = sz_dump_unescape(payload);
-      payload = raw;
-    }
-    if (!sz_ui_session_paste(session, payload))
-      fprintf(stderr, "scuzz: script paste skipped (no text field)\n");
-    sz_free(raw);
-  } else if (strncmp(line, "drag ", 5) == 0) {
-    float x1 = 0.f, y1 = 0.f, x2 = 0.f, y2 = 0.f;
-    if (sscanf(line + 5, "%f %f %f %f", &x1, &y1, &x2, &y2) == 4)
-      script_drag(session, x1, y1, x2, y2);
-    else
-      sz_panic("Ui.run: drag needs x1 y1 x2 y2");
-  } else if (strncmp(line, "hover ", 6) == 0) {
-    float x = 0.f, y = 0.f;
-    if (sscanf(line + 6, "%f %f", &x, &y) == 2)
-      script_hover(session, x, y);
-    else
-      sz_panic("Ui.run: hover needs x y");
-  } else if (strncmp(line, "secondary ", 10) == 0 ||
-             strcmp(line, "secondary") == 0) {
-    float x = 0.f, y = 0.f;
-    const char *rest = len > 9 ? line + 10 : "";
-    if (sscanf(rest, "%f %f", &x, &y) == 2)
-      script_secondary_xy(session, x, y);
-    else
-      script_secondary_n(session, rest[0] ? atoi(rest) : 0);
-  } else if (strcmp(line, "dump") == 0) {
-    sz_ui_session_dump_now(session);
-  } else if (strcmp(line, "reload") == 0) {
-    if (!sz_ui_session_reload(session))
-      fprintf(stderr, "scuzz: script reload skipped (no factory)\n");
-  } else if (strcmp(line, "quit") == 0) {
-    sz_ui_session_request_stop(session);
-    return;
-  } else if (strcmp(line, "resetpeak") == 0) {
-    sz_alloc_reset_stats();
-    sz_alloc_mark();
-  } else if (strncmp(line, "drive ", 6) == 0)
-    sz_driver_run_line(line + 6);
-  else
-    sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
-  script_after_event(session);
-}
-
-void sz_ui_script_play_text(SzUiSession *session, char *text) {
-  char *p = text;
-  while (p && *p) {
-    char *nl = strchr(p, '\n');
-    char *line = p;
-    size_t len;
-    if (!sz_ui_session_alive(session))
-      return;
-    if (nl) {
-      *nl = '\0';
-      p = nl + 1;
-    } else
-      p += strlen(p);
-    len = strlen(line);
-    while (len > 0 && line[len - 1] == '\r')
-      line[--len] = '\0';
-    play_script_line(session, line);
-  }
-}
-
 /* --- typed session schema v=1 (JSON inject) ------------------------------ */
-/* Document: {"v":1,"kind":"inject","events":[...]}. One object per text
- * verb. `op` names the verb. Same helpers and the same pump-after-event
- * rule as the line protocol. A bad envelope or an unknown op panics, same
- * as an unknown text directive. */
+/* Document: {"v":1,"kind":"inject","events":[...]}. One object per event:
+     {"op":"tap","i":N}        activate the nth tap target in a11y preorder; missing target is a no-op
+     {"op":"xy","x":X,"y":Y}  inject TAP at logical point; miss does not panic
+     {"op":"text","value":S}  replace the [fields] starred TextField with S; no field is a no-op
+     {"op":"text","i":N,"value":S}  replace dump-index N (a11y order)
+     {"op":"type","value":S}  insert S at the caret on the starred TextField; empty is a no-op
+     {"op":"type","i":N,"value":S}  insert at the caret on dump-index N
+     {"op":"key","key":K,"text":T,"mods":[...],"repeat":B}
+                        named key on the starred TextField or focused editor
+                        (`Enter`, `Backspace`, `ArrowLeft`, `a`);
+                        optional UTF-8 insert text; arrows / Home / End / Delete use the caret;
+                        Enter / Tab insert newline / two spaces on an editor;
+                        PageUp / PageDown move by the viewport on an editor;
+                        Ctrl/Cmd+Z undoes, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z redoes;
+                        mods are `shift` / `ctrl` / `cmd` / `alt`;
+                        repeat is a held-key auto-repeat (same insert / move / delete)
+     {"op":"compose","value":S}  set IME preedit on the starred field or focused editor
+                     (underlined preview; not in the committed buffer)
+     {"op":"commit"}   commit preedit into the buffer at the caret (replaces a selection)
+     key Escape      cancel preedit when compose is active; else dismiss an overlay
+     {"op":"caret","offset":N}  set the starred TextField or focused-editor caret to byte offset N
+     {"op":"caret","i":I,"offset":N}  set dump-index I caret to byte offset N
+     {"op":"select","start":A,"end":C}  set the starred TextField or focused-editor selection `[A, C)` (caret at C)
+     {"op":"select","i":I,"start":A,"end":C}  set dump-index I selection
+     {"op":"copy"}    copy the starred-field or focused-editor selection into the session clipboard
+     {"op":"cut"}     copy then delete the selection
+     {"op":"paste"}   insert the session clipboard (Headless) or OS pasteboard (Desktop/Mobile)
+     {"op":"paste","value":S}  set the session clipboard to S then paste
+     {"op":"drag","x1":..,"y1":..,"x2":..,"y2":..}  pointer drag (TextField / editor selection)
+     {"op":"hover","x":X,"y":Y}  pointer MOVE with no button (hover); shows View.tooltip
+     {"op":"secondary","i":N}  button-3 click on tap-dump index N; does not fire the primary tap; runs View.onSecondary
+     {"op":"secondary","x":X,"y":Y}  button-3 click at a logical point
+     {"op":"pump","k":K}  pump K extra frames
+     {"op":"scroll","dy":D}  pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
+     {"op":"scroll","i":N,"dy":D}  pan dump-index N ([scrolls] scan order)
+     {"op":"backspace","count":K}  chop K UTF-8 code points before the caret on the [fields] starred TextField (default 1); no field is a no-op
+     {"op":"backspace","i":N,"count":K}  chop K code points before the caret on dump-index N
+     {"op":"dump"}    rewrite the live debug dump now (includes heap and live rows); no dump path is a no-op
+     {"op":"reload"}  rebuild the View factory now; missing factory is a no-op
+     {"op":"quit"}    stop the live session; remaining events do not run
+     {"op":"resetpeak"}  set peak_bytes to live and mark delta; next dump reports growth from here
+     {"op":"drive","name":N,"args":[...]}  run a verify-graph driver (Int/String/Bool args)
+   Pump runs after every event except quit. A bad envelope or an unknown op
+   panics. */
 
-/* A script / record / inject path that ends in `.json` selects the schema. */
+/* A script / record / inject path must end in `.json`. */
 static int script_path_is_json(const char *path) {
   size_t n = path ? strlen(path) : 0;
   return n >= 5 && strcmp(path + n - 5, ".json") == 0;
 }
 
-/* Borrowed value at `key`, or NULL. The document outlives the borrow. */
-static SzAdt *jev_key(SzAdt *obj, const char *key) {
-  SzString *k;
-  SzList *got;
-  SzAdt *out = NULL;
-  if (!obj || !sz_json_is_obj(obj))
-    return NULL;
-  k = sz_string_from_cstr(key);
-  got = sz_json_get(obj, k);
-  if (got && !sz_list_is_empty(got))
-    out = (SzAdt *)sz_list_head(got);
-  if (got)
-    sz_release(got);
-  sz_release(k);
-  return out;
-}
-
-static int jev_has(SzAdt *obj, const char *key) {
-  return jev_key(obj, key) != NULL;
-}
-
-static int64_t jev_int(SzAdt *obj, const char *key, int64_t d) {
-  SzAdt *v = jev_key(obj, key);
-  if (!v)
-    return d;
-  if (sz_json_is_int(v))
-    return sz_json_int_or(v, d);
-  if (sz_json_is_float(v))
-    return (int64_t)sz_json_float_or(v, (double)d);
-  return d;
-}
-
-static double jev_num(SzAdt *obj, const char *key, double d) {
-  SzAdt *v = jev_key(obj, key);
-  if (!v)
-    return d;
-  if (sz_json_is_int(v))
-    return (double)sz_json_int_or(v, (int64_t)d);
-  if (sz_json_is_float(v))
-    return sz_json_float_or(v, d);
-  return d;
-}
-
-/* Borrowed cstr at `key` ("" when absent or not a string). */
-static const char *jev_str(SzAdt *obj, const char *key) {
-  SzAdt *v = jev_key(obj, key);
-  if (!v || !sz_json_is_str(v))
-    return "";
-  return sz_string_cstr((SzString *)sz_adt_payload(v));
-}
-
-static int jev_bool(SzAdt *obj, const char *key) {
-  SzAdt *v = jev_key(obj, key);
-  return v ? (int)sz_json_bool_or(v, 0) : 0;
-}
-
 static int jev_mods(SzAdt *ev) {
-  SzAdt *arr = jev_key(ev, "mods");
-  SzList *xs;
+  SzAdt *arr = sz_jev_key(ev, "mods");
+  SzList *xs, *p;
   int mods = 0;
   if (!arr || !sz_json_is_arr(arr))
     return 0;
   xs = sz_json_arr(arr);
-  for (; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
-    SzAdt *m = (SzAdt *)sz_list_head(xs);
+  for (p = xs; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
+    SzAdt *m = (SzAdt *)sz_list_head(p);
     const char *s;
     if (!m || !sz_json_is_str(m))
       continue;
@@ -727,79 +332,43 @@ static int jev_mods(SzAdt *ev) {
   return mods;
 }
 
-/* `{"op":"drive","name":n,"args":[...]}` → the text driver line. Typed
- * args become the same tokens the text verb uses. */
-static void script_drive_json(SzAdt *ev) {
-  char *buf = NULL;
-  size_t len = 0, cap = 0;
-  SzAdt *args;
-  SzList *xs;
-  sz_dump_append(&buf, &len, &cap, jev_str(ev, "name"));
-  args = jev_key(ev, "args");
-  if (args && sz_json_is_arr(args)) {
-    xs = sz_json_arr(args);
-    for (; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
-      SzAdt *a = (SzAdt *)sz_list_head(xs);
-      char tmp[64];
-      sz_dump_append(&buf, &len, &cap, " ");
-      if (a && sz_json_is_int(a)) {
-        snprintf(tmp, sizeof tmp, "%lld", (long long)sz_json_int_or(a, 0));
-        sz_dump_append(&buf, &len, &cap, tmp);
-      } else if (a && sz_json_is_float(a)) {
-        snprintf(tmp, sizeof tmp, "%g", sz_json_float_or(a, 0.0));
-        sz_dump_append(&buf, &len, &cap, tmp);
-      } else if (a && sz_json_is_bool(a))
-        sz_dump_append(&buf, &len, &cap,
-                       sz_json_bool_or(a, 0) ? "true" : "false");
-      else if (a && sz_json_is_str(a))
-        sz_dump_append(&buf, &len, &cap,
-                       sz_string_cstr((SzString *)sz_adt_payload(a)));
-    }
-    sz_release(xs);
-  }
-  if (buf) {
-    sz_driver_run_line(buf);
-    sz_free(buf);
-  }
-}
-
 static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
   const char *op;
   if (!ev || !sz_json_is_obj(ev))
     sz_panic("Ui.run: inject event must be an object");
-  op = jev_str(ev, "op");
+  op = sz_jev_str(ev, "op");
   if (!op[0])
     sz_panic("Ui.run: inject event needs op");
   if (strcmp(op, "tap") == 0)
-    script_tap(session, (int)jev_int(ev, "i", 0));
+    script_tap(session, (int)sz_jev_int(ev, "i", 0));
   else if (strcmp(op, "xy") == 0) {
-    if (!jev_has(ev, "x") || !jev_has(ev, "y"))
+    if (!sz_jev_has(ev, "x") || !sz_jev_has(ev, "y"))
       sz_panic("Ui.run: inject xy needs x and y");
-    script_xy(session, (float)jev_num(ev, "x", 0.0),
-              (float)jev_num(ev, "y", 0.0));
+    script_xy(session, (float)sz_jev_num(ev, "x", 0.0),
+              (float)sz_jev_num(ev, "y", 0.0));
   } else if (strcmp(op, "text") == 0) {
     SzInputEvent e;
-    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
+    int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
     memset(&e, 0, sizeof e);
     e.kind = SZ_INPUT_TEXT;
-    e.text = jev_str(ev, "value");
+    e.text = sz_jev_str(ev, "value");
     if (script_focus_field(session, idx)) {
       if (!sz_ui_inject_sync(session, &e))
         fprintf(stderr, "scuzz: script text skipped (no text field)\n");
     }
   } else if (strcmp(op, "type") == 0) {
-    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
-    script_type(session, idx, jev_str(ev, "value"));
+    int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
+    script_type(session, idx, sz_jev_str(ev, "value"));
   } else if (strcmp(op, "key") == 0)
-    script_key(session, jev_str(ev, "key"), jev_str(ev, "text"),
-               jev_mods(ev), jev_bool(ev, "repeat"));
+    script_key(session, sz_jev_str(ev, "key"), sz_jev_str(ev, "text"),
+               jev_mods(ev), sz_jev_bool(ev, "repeat"));
   else if (strcmp(op, "compose") == 0)
-    script_compose(session, jev_str(ev, "value"));
+    script_compose(session, sz_jev_str(ev, "value"));
   else if (strcmp(op, "commit") == 0)
     script_compose(session, "");
   else if (strcmp(op, "caret") == 0) {
-    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
-    int off = (int)jev_int(ev, "offset", 0);
+    int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
+    int off = (int)sz_jev_int(ev, "offset", 0);
     if (!sz_ui_session_set_caret(session, idx, off)) {
       if (idx < 0)
         fprintf(stderr, "scuzz: script caret skipped (no text field)\n");
@@ -807,9 +376,9 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
         fprintf(stderr, "scuzz: script caret %d skipped\n", idx);
     }
   } else if (strcmp(op, "select") == 0) {
-    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
-    int a = (int)jev_int(ev, "start", 0);
-    int b = (int)jev_int(ev, "end", 0);
+    int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
+    int a = (int)sz_jev_int(ev, "start", 0);
+    int b = (int)sz_jev_int(ev, "end", 0);
     if (!sz_ui_session_set_sel(session, idx, a, b)) {
       if (idx < 0)
         fprintf(stderr, "scuzz: script select skipped (no text field)\n");
@@ -823,39 +392,39 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
     if (!sz_ui_session_cut(session))
       fprintf(stderr, "scuzz: script cut skipped (no text field)\n");
   } else if (strcmp(op, "paste") == 0) {
-    const char *payload = jev_has(ev, "value") ? jev_str(ev, "value") : NULL;
+    const char *payload = sz_jev_has(ev, "value") ? sz_jev_str(ev, "value") : NULL;
     if (!sz_ui_session_paste(session, payload))
       fprintf(stderr, "scuzz: script paste skipped (no text field)\n");
   } else if (strcmp(op, "drag") == 0) {
-    if (!jev_has(ev, "x1") || !jev_has(ev, "y1") || !jev_has(ev, "x2") ||
-        !jev_has(ev, "y2"))
+    if (!sz_jev_has(ev, "x1") || !sz_jev_has(ev, "y1") || !sz_jev_has(ev, "x2") ||
+        !sz_jev_has(ev, "y2"))
       sz_panic("Ui.run: inject drag needs x1 y1 x2 y2");
-    script_drag(session, (float)jev_num(ev, "x1", 0.0),
-                (float)jev_num(ev, "y1", 0.0), (float)jev_num(ev, "x2", 0.0),
-                (float)jev_num(ev, "y2", 0.0));
+    script_drag(session, (float)sz_jev_num(ev, "x1", 0.0),
+                (float)sz_jev_num(ev, "y1", 0.0), (float)sz_jev_num(ev, "x2", 0.0),
+                (float)sz_jev_num(ev, "y2", 0.0));
   } else if (strcmp(op, "hover") == 0) {
-    if (!jev_has(ev, "x") || !jev_has(ev, "y"))
+    if (!sz_jev_has(ev, "x") || !sz_jev_has(ev, "y"))
       sz_panic("Ui.run: inject hover needs x and y");
-    script_hover(session, (float)jev_num(ev, "x", 0.0),
-                 (float)jev_num(ev, "y", 0.0));
+    script_hover(session, (float)sz_jev_num(ev, "x", 0.0),
+                 (float)sz_jev_num(ev, "y", 0.0));
   } else if (strcmp(op, "secondary") == 0) {
-    if (jev_has(ev, "x") && jev_has(ev, "y"))
-      script_secondary_xy(session, (float)jev_num(ev, "x", 0.0),
-                          (float)jev_num(ev, "y", 0.0));
+    if (sz_jev_has(ev, "x") && sz_jev_has(ev, "y"))
+      script_secondary_xy(session, (float)sz_jev_num(ev, "x", 0.0),
+                          (float)sz_jev_num(ev, "y", 0.0));
     else
-      script_secondary_n(session, (int)jev_int(ev, "i", 0));
+      script_secondary_n(session, (int)sz_jev_int(ev, "i", 0));
   } else if (strcmp(op, "pump") == 0) {
-    int k = (int)jev_int(ev, "k", 1);
+    int k = (int)sz_jev_int(ev, "k", 1);
     while (k-- > 1) {
       if (!sz_ui_pump_sync(session))
         sz_panic("Ui.run: script pump failed");
     }
   } else if (strcmp(op, "scroll") == 0) {
-    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
-    script_scroll(session, idx, (float)jev_num(ev, "dy", 40.0));
+    int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
+    script_scroll(session, idx, (float)sz_jev_num(ev, "dy", 40.0));
   } else if (strcmp(op, "backspace") == 0) {
-    int idx = jev_has(ev, "i") ? (int)jev_int(ev, "i", 0) : -1;
-    script_backspace(session, idx, (int)jev_int(ev, "count", 1));
+    int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
+    script_backspace(session, idx, (int)sz_jev_int(ev, "count", 1));
   } else if (strcmp(op, "dump") == 0)
     sz_ui_session_dump_now(session);
   else if (strcmp(op, "reload") == 0) {
@@ -868,7 +437,7 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
     sz_alloc_reset_stats();
     sz_alloc_mark();
   } else if (strcmp(op, "drive") == 0)
-    script_drive_json(ev);
+    sz_script_drive_json(ev);
   else
     sz_panic("Ui.run: unknown inject op");
   script_after_event(session);
@@ -886,83 +455,54 @@ void sz_ui_script_play_json(SzUiSession *session, const char *text) {
   if (!parsed || sz_adt_tag(parsed) != 1)
     sz_panic("Ui.run: inject JSON parse failed");
   json = (SzAdt *)sz_adt_payload(parsed);
-  if (!sz_json_is_obj(json) || jev_int(json, "v", 0) != 1 ||
-      strcmp(jev_str(json, "kind"), "inject") != 0 ||
-      !jev_has(json, "events")) {
+  if (!sz_json_is_obj(json) || sz_jev_int(json, "v", 0) != 1 ||
+      strcmp(sz_jev_str(json, "kind"), "inject") != 0 ||
+      !sz_jev_has(json, "events")) {
     sz_release(parsed);
     sz_panic("Ui.run: inject JSON wants {\"v\":1,\"kind\":\"inject\",\"events\":[...]}");
   }
-  events = jev_key(json, "events");
+  events = sz_jev_key(json, "events");
   if (!sz_json_is_arr(events)) {
     sz_release(parsed);
     sz_panic("Ui.run: inject events must be an array");
   }
   xs = sz_json_arr(events);
-  for (; xs && !sz_list_is_empty(xs); xs = sz_list_tail(xs)) {
-    if (!sz_ui_session_alive(session))
-      break;
-    play_script_event_json(session, (SzAdt *)sz_list_head(xs));
+  {
+    SzList *p;
+    for (p = xs; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
+      if (!sz_ui_session_alive(session))
+        break;
+      play_script_event_json(session, (SzAdt *)sz_list_head(p));
+    }
   }
   sz_release(xs);
   sz_release(parsed);
 }
 
 void sz_ui_script_run_file(SzUiSession *session, const char *path) {
-  FILE *f = fopen(path, "r");
+  FILE *f;
   char *line = NULL;
   size_t cap = 0;
   size_t len = 0;
   int c;
+  if (!script_path_is_json(path))
+    sz_panic("Ui.run: SCUZZ_UI_SCRIPT path must end in .json");
+  f = fopen(path, "r");
   if (!f)
     sz_panic("Ui.run: SCUZZ_UI_SCRIPT open failed");
-  if (script_path_is_json(path)) {
-    for (;;) {
-      char t[2];
-      c = fgetc(f);
-      if (c == EOF)
-        break;
-      t[0] = (char)c;
-      t[1] = '\0';
-      sz_dump_append(&line, &len, &cap, t);
-    }
-    fclose(f);
-    if (line) {
-      sz_ui_script_play_json(session, line);
-      sz_free(line);
-    }
-    return;
-  }
-  /* Read one logical line at a time, no fixed cap. A long line must not
-   * split into a bogus directive. */
   for (;;) {
+    char t[2];
     c = fgetc(f);
-    if (c == EOF || c == '\n') {
-      if (len == 0) {
-        if (c == EOF || !sz_ui_session_alive(session))
-          break;
-        continue;
-      }
-      while (len > 0 && line[len - 1] == '\r')
-        len--;
-      line[len] = '\0';
-      play_script_line(session, line);
-      len = 0;
-      if (c == EOF || !sz_ui_session_alive(session))
-        break;
-      continue;
-    }
-    if (len + 1 >= cap) {
-      size_t ncap = cap ? cap * 2 : 256;
-      char *nl = (char *)sz_alloc(ncap);
-      if (line) {
-        memcpy(nl, line, len);
-        sz_free(line);
-      }
-      line = nl;
-      cap = ncap;
-    }
-    line[len++] = (char)c;
+    if (c == EOF)
+      break;
+    t[0] = (char)c;
+    t[1] = '\0';
+    sz_dump_append(&line, &len, &cap, t);
   }
-  sz_free(line);
   fclose(f);
+  if (line) {
+    sz_ui_script_play_json(session, line);
+    sz_free(line);
+  }
 }
+

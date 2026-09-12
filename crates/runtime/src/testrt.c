@@ -1,6 +1,7 @@
 #include "scuzz_rt.h"
 #include "scuzz_ui.h"
 #include "rt_util.h"
+#include "ui_script.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -4742,26 +4743,154 @@ void sz_driver_run_line(const char *spec) {
   sz_property_session_step();
 }
 
+/* --- inject schema v=1 drive events --------------------------------------- */
+/* Borrowed value at `key`, or NULL. The document outlives the borrow. */
+SzAdt *sz_jev_key(SzAdt *obj, const char *key) {
+  SzString *k;
+  SzList *got;
+  SzAdt *out = NULL;
+  if (!obj || !sz_json_is_obj(obj))
+    return NULL;
+  k = sz_string_from_cstr(key);
+  got = sz_json_get(obj, k);
+  if (got && !sz_list_is_empty(got))
+    out = (SzAdt *)sz_list_head(got);
+  if (got)
+    sz_release(got);
+  sz_release(k);
+  return out;
+}
+
+int sz_jev_has(SzAdt *obj, const char *key) {
+  return sz_jev_key(obj, key) != NULL;
+}
+
+int64_t sz_jev_int(SzAdt *obj, const char *key, int64_t d) {
+  SzAdt *v = sz_jev_key(obj, key);
+  if (!v)
+    return d;
+  if (sz_json_is_int(v))
+    return sz_json_int_or(v, d);
+  if (sz_json_is_float(v))
+    return (int64_t)sz_json_float_or(v, (double)d);
+  return d;
+}
+
+double sz_jev_num(SzAdt *obj, const char *key, double d) {
+  SzAdt *v = sz_jev_key(obj, key);
+  if (!v)
+    return d;
+  if (sz_json_is_int(v))
+    return (double)sz_json_int_or(v, (int64_t)d);
+  if (sz_json_is_float(v))
+    return sz_json_float_or(v, d);
+  return d;
+}
+
+/* Borrowed cstr at `key` ("" when absent or not a string). */
+const char *sz_jev_str(SzAdt *obj, const char *key) {
+  SzAdt *v = sz_jev_key(obj, key);
+  if (!v || !sz_json_is_str(v))
+    return "";
+  return sz_string_cstr((SzString *)sz_adt_payload(v));
+}
+
+int sz_jev_bool(SzAdt *obj, const char *key) {
+  SzAdt *v = sz_jev_key(obj, key);
+  return v ? (int)sz_json_bool_or(v, 0) : 0;
+}
+
+/* `{"op":"drive","name":n,"args":[...]}` → the driver line. Typed args
+ * become the same tokens the driver line uses. */
+void sz_script_drive_json(SzAdt *ev) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  SzAdt *args;
+  SzList *xs, *p;
+  sz_dump_append(&buf, &len, &cap, sz_jev_str(ev, "name"));
+  args = sz_jev_key(ev, "args");
+  if (args && sz_json_is_arr(args)) {
+    xs = sz_json_arr(args);
+    for (p = xs; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
+      SzAdt *a = (SzAdt *)sz_list_head(p);
+      char tmp[64];
+      sz_dump_append(&buf, &len, &cap, " ");
+      if (a && sz_json_is_int(a)) {
+        snprintf(tmp, sizeof tmp, "%lld", (long long)sz_json_int_or(a, 0));
+        sz_dump_append(&buf, &len, &cap, tmp);
+      } else if (a && sz_json_is_float(a)) {
+        snprintf(tmp, sizeof tmp, "%g", sz_json_float_or(a, 0.0));
+        sz_dump_append(&buf, &len, &cap, tmp);
+      } else if (a && sz_json_is_bool(a))
+        sz_dump_append(&buf, &len, &cap,
+                       sz_json_bool_or(a, 0) ? "true" : "false");
+      else if (a && sz_json_is_str(a))
+        sz_dump_append(&buf, &len, &cap,
+                       sz_string_cstr((SzString *)sz_adt_payload(a)));
+    }
+    sz_release(xs);
+  }
+  if (buf) {
+    sz_driver_run_line(buf);
+    sz_free(buf);
+  }
+}
+
+/* IO-only drive script: every event of the document must be a drive op. */
+void sz_script_run_drive_doc(const char *text) {
+  SzString *doc;
+  SzAdt *parsed, *json, *events;
+  SzList *xs, *p;
+  if (!text)
+    return;
+  doc = sz_string_from_cstr(text);
+  parsed = sz_json_parse(doc);
+  sz_release(doc);
+  if (!parsed || sz_adt_tag(parsed) != 1)
+    sz_panic("drive script JSON parse failed");
+  json = (SzAdt *)sz_adt_payload(parsed);
+  if (!sz_json_is_obj(json) || sz_jev_int(json, "v", 0) != 1 ||
+      strcmp(sz_jev_str(json, "kind"), "inject") != 0 ||
+      !sz_jev_has(json, "events")) {
+    sz_release(parsed);
+    sz_panic("drive script wants {\"v\":1,\"kind\":\"inject\",\"events\":[...]}");
+  }
+  events = sz_jev_key(json, "events");
+  if (!sz_json_is_arr(events)) {
+    sz_release(parsed);
+    sz_panic("drive script events must be an array");
+  }
+  xs = sz_json_arr(events);
+  for (p = xs; p && !sz_list_is_empty(p); p = sz_list_tail(p)) {
+    SzAdt *ev = (SzAdt *)sz_list_head(p);
+    if (!ev || !sz_json_is_obj(ev) ||
+        strcmp(sz_jev_str(ev, "op"), "drive") != 0)
+      sz_panic("drive script event must be a drive op");
+    sz_script_drive_json(ev);
+  }
+  sz_release(xs);
+  sz_release(parsed);
+}
+
 void sz_driver_run_script(const char *path) {
   FILE *f;
-  char line[512];
+  char *doc = NULL;
+  size_t cap = 0, len = 0;
+  int c;
   if (!path || !path[0])
     return;
   f = fopen(path, "r");
   if (!f)
     return;
-  while (fgets(line, (int)sizeof(line), f)) {
-    size_t n = strlen(line);
-    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) {
-      line[n - 1] = 0;
-      n--;
-    }
-    if (line[0] == 0 || line[0] == '#')
-      continue;
-    if (strncmp(line, "drive ", 6) == 0)
-      sz_driver_run_line(line + 6);
-    else
-      sz_driver_run_line(line);
+  while ((c = fgetc(f)) != EOF) {
+    char t[2];
+    t[0] = (char)c;
+    t[1] = '\0';
+    sz_dump_append(&doc, &len, &cap, t);
   }
   fclose(f);
+  if (doc) {
+    sz_script_run_drive_doc(doc);
+    sz_free(doc);
+  }
 }
