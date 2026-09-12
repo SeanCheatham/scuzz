@@ -29,7 +29,7 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 Close them in this order.
 
-1. **Typed agent session schema** — One JSON schema for dump, inject, fuzz verdict, and coverage. The dump surface landed at `v=2` through `.json` paths (typed a11y tree, typed signal payloads). The inject surface landed (`v=1`). The fuzz verdict surface landed (`build/fuzz/summary.json` covers fuzz, corpus, classify, mutate, and coverage). The schema covers every surface. Open: retire the text dump, script, and summary formats. `--message-format=json` applies to `check` only until then.
+1. **Typed agent session schema** — One JSON schema for dump, inject, fuzz verdict, and coverage. Dumps write schema `v=2` at any path; the text dump is gone. `scuzz fuzz` writes only `build/fuzz/summary.json`; `summary.toml` is gone. Timeline states record the v=2 signals array as the observation string. Open: retire the text script, record, and inject format. `--message-format=json` applies to `check` only until then.
 
 2. **Source-region coverage** — Open: branch coverage.
 

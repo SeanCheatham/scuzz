@@ -138,12 +138,10 @@ void sz_signal_list_set(SzSignalList *s, SzList *v);
 SzList *sz_signal_list_get(const SzSignalList *s);
 void sz_signal_list_free(SzSignalList *s);
 
-/* Signal store dump: one "kind[id] name = value" line per live signal.
- * String values use the editor dump escape dialect. Caller frees SzString. */
-SzString *sz_signal_dump(void);
-
-/* Typed session schema v=1 signal section: a JSON array written to `f`. */
+/* Typed session schema v=2 signal section: a JSON array written to `f`. */
 void sz_signal_dump_json(FILE *f);
+/* The same array as a string. Timeline states record it (caller frees). */
+SzString *sz_signal_dump_json_string(void);
 /* Publish the for-binder name. Property and Timeline kits read that name. */
 void sz_signal_name(const void *sig, const char *name);
 
@@ -651,64 +649,46 @@ void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env
  * then replace_root. Missing file snapshots as empty. Headless, Desktop, and
  * Mobile share this path. */
 int sz_ui_session_watch(SzUiSession *session, const char *path);
-/* Live structural dump (same format as SCUZZ_FUZZ_DUMP) rewritten on dirty
- * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
- * [taps] lists inject indices for `tap N` (scan order, cap 64).
- * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace/key
- * target (focused, else first). Lines are `N placeholder="live" caret=B sel=A:C`
- * (star on the target; `B` is the caret byte offset; `A:C` is the selection
- * `[A, C)`). `preedit="…"` appends when IME compose is non-empty. Quoted field
- * values flatten newlines. Editors omit from `[fields]`.
- * [editor] lists `View.editor` nodes (one line each) when any exist:
- * `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S,... tok=N inlay=N fold=N preedit="…" "escaped"`
- * (star on the focused editor, else first; `sx`/`sy` are viewport pan; `lines`
- * is the buffer line count; `diag` is 1-based line:severity marks; `tok` /
- * `inlay` / `fold` are LSP span counts). `diag` / `tok` / `inlay` / `fold` /
- * `preedit=` omit when zero or empty. Editor paint is monospace cells with a
- * gutter. Quotes keep newlines as `\\n` (not a space). `text N s` / `type N s` /
- * `backspace N k` / `caret N b` / `select N a c` target dump index N.
- * One-token forms still use the starred field, or the focused editor when
- * that is the edit target. `key <name>[+shift|+ctrl|+cmd|+alt|+repeat] [text]`
- * uses the starred field or focused editor. `+repeat` is a held-key auto-repeat
- * (same insert / move / delete as a discrete key). Shift+arrows extend the
- * selection. Live OS keys record as `key`, not `type`. Desktop maps X11
- * auto-repeat and Cocoa `isARepeat` into `+repeat`. `compose <text>` sets IME
- * preedit (underlined preview; not in the committed buffer). `compose` with
- * no text, or `commit`, inserts the preedit at the caret. `key Escape` cancels
- * preedit. `caret <n>` sets the starred-field or focused-editor caret.
- * `select <a> <c>` sets that selection. Click-to-caret
- * uses TAP / `xy` on the field or editor. Pointer drag extends the selection.
- * `copy` / `cut` / `paste` / `paste <s>` are the clipboard verbs. Headless
- * `paste` uses the session clipboard. Desktop/Mobile pull the OS pasteboard
- * on paste when present. Live OS copy/cut/paste and Shift+arrows record those
- * verbs. `drag x1 y1 x2 y2` is pointer-drag select. `hover x y` is pointer
- * MOVE with no button. `secondary N` / `secondary x y`
- * is button 3. Live OS hover and right-click record those verbs.
- * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
- * (`scroll 40` stays the first).
- * [last_hit] appears after a TAP in this session: `xy x y -> role:label` or
- * `-> NULL`.
- * [hover] appears after a pointer MOVE with no button: `xy x y -> tooltip:msg`
- * or `-> NULL`.
- * [last_secondary] appears after a button-3 click: `xy x y -> role:label` or
- * `-> NULL`. Button-3 also runs `View.onSecondary` on that hit. `hover x y`
- * and `secondary N` / `secondary x y` are inject verbs.
- * Live Desktop hover and right-click record those verbs.
- * [heap] is live alloc stats (`live_bytes` / `live_count` / `peak_bytes`),
- * `delta_bytes` / `delta_count` since the last live dump or `resetpeak`,
- * and per-kind `name=count:bytes` (`raw`, `string`, `list`, …).
- * [session] is kind, size, title, focus, lifecycle, keyboard, and pump count.
- * [splits] lists split panes (`N frac=F`). [overlays] lists overlays
- * (`N* open=0|1`; star is the topmost open overlay).
- * Only the live debug dump includes [session] / [heap]. Fuzz / golden dumps
- * omit them. */
+/* Live structural dump rewritten on dirty pumps, stamp reload, and
+ * IO-bridge flushes. Agents read the file. The document is typed session
+ * schema v=2 (`{"v":2,"kind":"dump",...}`) at any path:
+ * signals (typed value / list payloads), views (a11y preorder lines), a11y
+ * (the same preorder as a JSON forest; toggle kinds carry "on", numeric kinds
+ * carry "value"), taps (inject indices for `tap N`, scan order, cap 64),
+ * fields (TextFields in a11y order; "target" marks the text/type/backspace/key
+ * target, focused else first; caret and sel are byte offsets `[A, C)`),
+ * editors (`View.editor` nodes: caret, sel, scroll pan, line count, 1-based
+ * line:severity diags, LSP token / inlay / fold counts, preedit, value),
+ * splits, overlays ("top" is the topmost open overlay), scrolls (hittable
+ * Scrolls in scan order; `scroll N dy` pans index N, `scroll 40` stays the
+ * first). `last_hit` / `hover` / `last_secondary` appear after a TAP, a
+ * pointer MOVE with no button, or a button-3 click in this session.
+ * `text N s` / `type N s` / `backspace N k` / `caret N b` / `select N a c`
+ * target dump index N. One-token forms still use the starred field, or the
+ * focused editor when that is the edit target.
+ * `key <name>[+shift|+ctrl|+cmd|+alt|+repeat] [text]` uses the starred field
+ * or focused editor. `+repeat` is a held-key auto-repeat (same insert / move /
+ * delete as a discrete key). Shift+arrows extend the selection. Live OS keys
+ * record as `key`, not `type`. Desktop maps X11 auto-repeat and Cocoa
+ * `isARepeat` into `+repeat`. `compose <text>` sets IME preedit (underlined
+ * preview; not in the committed buffer). `compose` with no text, or `commit`,
+ * inserts the preedit at the caret. `key Escape` cancels preedit.
+ * `caret <n>` sets the starred-field or focused-editor caret. `select <a> <c>`
+ * sets that selection. Click-to-caret uses TAP / `xy` on the field or editor.
+ * Pointer drag extends the selection. `copy` / `cut` / `paste` / `paste <s>`
+ * are the clipboard verbs. Headless `paste` uses the session clipboard.
+ * Desktop/Mobile pull the OS pasteboard on paste when present. Live OS
+ * copy/cut/paste and Shift+arrows record those verbs. `drag x1 y1 x2 y2` is
+ * pointer-drag select. `hover x y` is pointer MOVE with no button.
+ * `secondary N` / `secondary x y` is button 3. Live OS hover and right-click
+ * record those verbs. Button-3 also runs `View.onSecondary` on that hit.
+ * Only the live debug dump includes `session` (runtime, size, title, focus,
+ * lifecycle, keyboard, pump count), `heap` (live stats, delta since the last
+ * live dump or `resetpeak`, per-kind counts), and `live` (remaining blocks,
+ * capped at 32). Fuzz / golden dumps omit them. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
-
-/* Typed session schema v=1. A dump path that ends in `.json` writes the JSON
- * document instead of the text format. */
-int sz_ui_session_write_dump_json(SzUiSession *session, const char *path);
-/* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
+/* Rewrite the live debug dump now, including `session` and `heap`. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
 /* Watch an inject script (tap/xy/text/type/key/compose/commit/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).
  * Next pump that sees new contents plays the suffix (append) or the whole file

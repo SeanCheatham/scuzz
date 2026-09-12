@@ -591,7 +591,7 @@ def watchUiSpawn(path: String, out: String, headless: Bool, name: String, gen: I
   Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Sys.spawn(Str.concat(watchUiEnv(out, headless, toml), Drive.exeName(out, name))).flatMap(pid => watchUiPoll(path, out, headless, name, gen, pid)))
 
 def watchUiEnv(out: String, headless: Bool, toml: String): String =
-  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.joinSlash(out, "reload.stamp"), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.joinSlash(out, "reload.dylib"), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.joinSlash(out, "debug.dump"), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.joinSlash(out, "inject.script"), " ")))))))))
+  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.joinSlash(out, "reload.stamp"), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.joinSlash(out, "reload.dylib"), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.joinSlash(out, "debug.json"), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.joinSlash(out, "inject.script"), " ")))))))))
 
 def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
   Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
@@ -625,7 +625,7 @@ def runEnvOf(out: String, headless: Bool, script: String, dump: String, toml: St
   Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat(runRecordEnv(out, headless, toml), Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(script, " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(dump, " ")))))
 
 def runRecordEnv(out: String, headless: Bool, toml: String): String =
-  if (Drive.uiEnvKind(headless, Manifest.uiRuntime(Manifest.manUi(Manifest.parse(toml)))) == "headless") "" else Str.concat("SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.script")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.dump")), " "))))
+  if (Drive.uiEnvKind(headless, Manifest.uiRuntime(Manifest.manUi(Manifest.parse(toml)))) == "headless") "" else Str.concat("SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.script")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), " "))))
 
 def dispatchFmt(path: String, check: Bool): IO[Unit] =
   Fs.list(Drive.joinSlash(path, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0)))

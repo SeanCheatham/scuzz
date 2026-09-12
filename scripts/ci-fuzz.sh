@@ -22,11 +22,6 @@ if fuzz --no-fail-fast --iterations 8 examples/bad-example; then
   echo "fuzz should have found the property failure" && exit 1
 fi
 test -f examples/bad-example/build/fuzz/repro.toml
-grep -E '^search_failures = [1-9]' examples/bad-example/build/fuzz/summary.toml
-grep -E '^inert = [1-9]' examples/bad-example/build/fuzz/summary.toml
-grep -E '^ran = [1-9]' examples/bad-example/build/fuzz/summary.toml
-grep -E '^entries = [1-9]' examples/bad-example/build/fuzz/summary.toml
-grep -E '^failures = [1-9]' examples/bad-example/build/fuzz/summary.toml
 python3 - <<'PY'
 import json
 with open("examples/bad-example/build/fuzz/summary.json") as f:
@@ -34,8 +29,10 @@ with open("examples/bad-example/build/fuzz/summary.json") as f:
 assert d["v"] == 1 and d["kind"] == "fuzz"
 assert d["fuzz"]["ok"] is False
 assert d["fuzz"]["search_failures"] >= 1
+assert d["corpus"]["entries"] >= 1
 assert d["corpus"]["failures"] >= 1
 assert d["mutate"]["ran"] >= 1
+assert d["mutate"]["inert"] >= 1
 PY
 if fuzz --replay examples/bad-example/build/fuzz/repro.toml examples/bad-example; then
   echo "replay should have reproduced the property failure" && exit 1
@@ -93,8 +90,13 @@ if fuzz --iterations 0 examples/bad-sched; then
   echo "corpus-only should pin the bad-sched failure" && exit 1
 fi
 grep -q 'drive area Rect(' examples/bad-adt/corpus/209ce82661a8103a.toml
-grep -q 'square_false' examples/bad-adt/build/fuzz/summary.toml
-grep -q 'wide_false' examples/bad-adt/build/fuzz/summary.toml
+python3 - <<'PY'
+import json
+with open("examples/bad-adt/build/fuzz/summary.json") as f:
+    d = json.load(f)
+names = {c["name"]: c for c in d["classify"]}
+assert names["square"]["false"] >= 1 and names["wide"]["false"] >= 1
+PY
 if fuzz --replay examples/bad-adt/corpus/209ce82661a8103a.toml examples/bad-adt; then
   echo "replay should have reproduced the ADT property failure" && exit 1
 fi
@@ -151,7 +153,12 @@ if fuzz --iterations 8 /tmp/scuzz-fuzzbug; then
 fi
 test -f /tmp/scuzz-fuzzbug/build/fuzz/repro.toml
 test -n "$(ls /tmp/scuzz-fuzzbug/corpus/*.toml 2>/dev/null)"
-grep -E '^promoted = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
+python3 - <<'PY'
+import json
+with open("/tmp/scuzz-fuzzbug/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["corpus"]["promoted"] >= 1
+PY
 if fuzz --replay /tmp/scuzz-fuzzbug/build/fuzz/repro.toml /tmp/scuzz-fuzzbug; then
   echo "replay should have reproduced the failure" && exit 1
 fi
@@ -170,8 +177,12 @@ EOF
 if ! fuzz --iterations 0 /tmp/scuzz-fuzzbug; then
   echo "corpus-only should pass after the source fix" && exit 1
 fi
-grep -E '^entries = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
-grep -E '^failures = 0' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
+python3 - <<'PY'
+import json
+with open("/tmp/scuzz-fuzzbug/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["corpus"]["entries"] >= 1 and d["corpus"]["failures"] == 0
+PY
 cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
 @main def main: IO[Unit] =
   for {
@@ -187,9 +198,14 @@ EOF
 if fuzz --iterations 0 /tmp/scuzz-fuzzbug; then
   echo "corpus-only should pin the reintroduced bug" && exit 1
 fi
-grep -E '^entries = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
-grep -E '^failures = [1-9]' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
-grep -E '^promoted = 0' /tmp/scuzz-fuzzbug/build/fuzz/summary.toml
+python3 - <<'PY'
+import json
+with open("/tmp/scuzz-fuzzbug/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["corpus"]["entries"] >= 1
+assert d["corpus"]["failures"] >= 1
+assert d["corpus"]["promoted"] == 0
+PY
 rm -rf /tmp/scuzz-schedbug
 "$SCUZZ" new --path /tmp scuzz-schedbug
 rm /tmp/scuzz-schedbug/scuzz-schedbug.scuzz_verify
@@ -232,17 +248,18 @@ def unused(): Int =
   IO.pure(label(Signal.make(2))).map(_ => ())
 EOF
 fuzz --iterations 2 "$invalid_dir"
-grep -qx 'invalid = 1' "$invalid_dir/build/fuzz/summary.toml"
-grep -qx 'killed = 0' "$invalid_dir/build/fuzz/summary.toml"
-grep -qx 'total = 3' "$invalid_dir/build/fuzz/summary.toml"
-grep -qx 'reached = 2' "$invalid_dir/build/fuzz/summary.toml"
-if grep -q '^score =' "$invalid_dir/build/fuzz/summary.toml"; then
-  echo "invalid mutants must not produce a score" && exit 1
-fi
+INVALID_DIR="$invalid_dir" python3 - <<'PY'
+import json, os
+with open(os.environ["INVALID_DIR"] + "/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["mutate"]["invalid"] == 1
+assert d["mutate"]["killed"] == 0
+assert d["coverage"]["total"] == 3
+assert d["coverage"]["reached"] == 2
+assert "score" not in d["mutate"], "invalid mutants must not produce a score"
+PY
 rm -rf "$invalid_dir"
 fuzz --iterations 2 examples/io
-grep -q '^\[coverage\]' examples/io/build/fuzz/summary.toml
-grep -Eq '^reached = [1-9]' examples/io/build/fuzz/summary.toml
 python3 - <<'PY'
 import json
 with open("examples/io/build/fuzz/summary.json") as f:

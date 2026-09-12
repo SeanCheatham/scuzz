@@ -334,7 +334,7 @@ static void test_replace_root_keeps_signals(void) {
   tap.y = sz_view_frame(btn1).y + 8.f;
   assert(sz_ui_inject_sync(session, &tap));
   assert(sz_signal_int_get(count) == 1);
-  dump1 = sz_signal_dump();
+  dump1 = sz_signal_dump_json_string();
 
   root2 = sz_view_column();
   sz_view_add_child(root2, sz_view_text_signal_int(count, "v="));
@@ -344,7 +344,7 @@ static void test_replace_root_keeps_signals(void) {
   assert(sz_ui_session_root(session) == root2);
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 1);
-  dump2 = sz_signal_dump();
+  dump2 = sz_signal_dump_json_string();
   assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
   a11y = sz_view_a11y_dump(root2);
   assert(strstr(sz_string_cstr(a11y), "text:v=") != NULL);
@@ -458,13 +458,13 @@ static void test_watch_rebuild_keeps_signals(void) {
   tap.y = sz_view_frame(env->btn).y + 8.f;
   assert(sz_ui_inject_sync(session, &tap));
   assert(sz_signal_int_get(env->count) == 1);
-  dump1 = sz_signal_dump();
+  dump1 = sz_signal_dump_json_string();
 
   write_stamp(stamp, "v=");
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_root(session) != same);
   assert(sz_signal_int_get(env->count) == 1);
-  dump2 = sz_signal_dump();
+  dump2 = sz_signal_dump_json_string();
   assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
   a11y = sz_view_a11y_dump(sz_ui_session_root(session));
   assert(strstr(sz_string_cstr(a11y), "text:v=") != NULL);
@@ -570,15 +570,15 @@ static void test_ui_run_rebuild_keepalive(void) {
   n = fread(buf, 1, sizeof(buf) - 1, f);
   fclose(f);
   buf[n] = '\0';
-  assert(strstr(buf, "[signals]") != NULL);
-  assert(strstr(buf, "[views]") != NULL);
-  assert(strstr(buf, "[taps]") != NULL);
-  assert(strstr(buf, "[fields]") != NULL);
-  assert(strstr(buf, "[scrolls]") != NULL);
-  assert(strstr(buf, "[session]") != NULL);
-  assert(strstr(buf, "[heap]") != NULL);
-  assert(strstr(buf, "live_bytes=") != NULL);
-  assert(strstr(buf, "[live]") != NULL);
+  assert(strstr(buf, "\"signals\":[") != NULL);
+  assert(strstr(buf, "\"views\":[") != NULL);
+  assert(strstr(buf, "\"taps\":[") != NULL);
+  assert(strstr(buf, "\"fields\":[") != NULL);
+  assert(strstr(buf, "\"scrolls\":[") != NULL);
+  assert(strstr(buf, "\"session\":{") != NULL);
+  assert(strstr(buf, "\"heap\":{") != NULL);
+  assert(strstr(buf, "\"live_bytes\":") != NULL);
+  assert(strstr(buf, "\"live\":[") != NULL);
   sz_signal_int_free(env->count);
   sz_free(env);
   remove(stamp);
@@ -667,7 +667,7 @@ static void test_dump_json_schema(void) {
   SzView *card;
   SzUiSession *session;
   const char *path = "/tmp/scuzz_ui_schema.json";
-  const char *text_path = "/tmp/scuzz_ui_schema.dump";
+  const char *plain_path = "/tmp/scuzz_ui_schema_plain.dump";
   char buf[16384];
   size_t n;
   FILE *f;
@@ -848,15 +848,15 @@ static void test_dump_json_schema(void) {
 
   sz_release(parsed);
 
-  /* A non-`.json` path keeps the text format. */
-  remove(text_path);
-  assert(sz_ui_session_write_dump(session, text_path));
-  f = fopen(text_path, "r");
+  /* A non-`.json` path writes the same schema: no suffix routing. */
+  remove(plain_path);
+  assert(sz_ui_session_write_dump(session, plain_path));
+  f = fopen(plain_path, "r");
   assert(f);
   n = fread(buf, 1, sizeof(buf) - 1, f);
   fclose(f);
   buf[n] = '\0';
-  assert(strstr(buf, "[taps]") != NULL);
+  assert(strstr(buf, "\"taps\":[") != NULL);
 
   sz_ui_unmount(session);
   sz_signal_int_free(count);
@@ -865,7 +865,7 @@ static void test_dump_json_schema(void) {
   sz_signal_free(rec);
   sz_signal_free(ints);
   remove(path);
-  remove(text_path);
+  remove(plain_path);
 }
 
 /* --- typed session schema v=1 (JSON inject + record) ---------------------- */
@@ -1174,49 +1174,49 @@ static void test_session_debug_dump(void) {
   assert(strstr(sz_alloc_panic_dump_path(), ".panic") != NULL);
   assert(sz_ui_pump_sync(session));
   a = slurp_cstr(path);
-  assert(strstr(a, "[signals]") != NULL);
-  assert(strstr(a, "[views]") != NULL);
+  assert(strstr(a, "\"signals\":[") != NULL);
+  assert(strstr(a, "\"views\":[") != NULL);
   assert(strstr(a, "text:Debug") != NULL);
-  assert(strstr(a, "[taps]") != NULL);
-  assert(strstr(a, "0 +") != NULL);
-  assert(strstr(a, "1 -") != NULL);
+  assert(strstr(a, "\"taps\":[") != NULL);
+  assert(strstr(a, "\"i\":0,\"label\":\"+\"") != NULL);
+  assert(strstr(a, "\"i\":1,\"label\":\"-\"") != NULL);
   {
-    const char *taps = strstr(a, "[taps]\n");
+    const char *taps = strstr(a, "\"taps\":[");
     assert(taps != NULL);
     assert(strstr(taps, ",") != NULL);
     assert(strstr(taps, "x") != NULL);
   }
-  assert(strstr(a, "[last_hit]") == NULL);
-  assert(strstr(a, "[fields]") != NULL);
-  assert(strstr(a, "0* item=\"\"") != NULL);
-  assert(strstr(a, "1 search=\"\"") != NULL);
-  assert(strstr(a, "1* search") == NULL);
-  assert(strstr(a, "[scrolls]") != NULL);
-  assert(strstr(a, "[session]") != NULL);
-  assert(strstr(a, "kind=headless") != NULL);
-  assert(strstr(a, "width=200") != NULL);
-  assert(strstr(a, "height=200") != NULL);
-  assert(strstr(a, "lifecycle=resume") != NULL);
-  assert(strstr(a, "pumps=1") != NULL);
-  assert(strstr(a, "[heap]") != NULL);
-  assert(strstr(a, "live_bytes=") != NULL);
-  assert(strstr(a, "[live]") != NULL);
-  assert(strstr(a, "string rc=") != NULL);
-  assert(strstr(a, "live_count=") != NULL);
-  assert(strstr(a, "peak_bytes=") != NULL);
-  assert(strstr(a, "delta_bytes=") != NULL);
-  assert(strstr(a, "delta_count=") != NULL);
-  assert(strstr(a, "raw=") != NULL);
-  assert(strstr(a, "string=") != NULL);
-  assert(strstr(a, "list=") != NULL);
-  assert(strstr(a, "pair=") != NULL);
+  assert(strstr(a, "\"last_hit\":{") == NULL);
+  assert(strstr(a, "\"fields\":[") != NULL);
+  assert(strstr(a, "\"i\":0,\"target\":true,\"label\":\"item\"") != NULL);
+  assert(strstr(a, "\"i\":1,\"target\":false,\"label\":\"search\"") != NULL);
+  assert(strstr(a, "\"target\":true,\"label\":\"search\"") == NULL);
+  assert(strstr(a, "\"scrolls\":[") != NULL);
+  assert(strstr(a, "\"session\":{") != NULL);
+  assert(strstr(a, "\"runtime\":\"headless\"") != NULL);
+  assert(strstr(a, "\"width\":200") != NULL);
+  assert(strstr(a, "\"height\":200") != NULL);
+  assert(strstr(a, "\"lifecycle\":\"resume\"") != NULL);
+  assert(strstr(a, "\"pumps\":1") != NULL);
+  assert(strstr(a, "\"heap\":{") != NULL);
+  assert(strstr(a, "\"live_bytes\":") != NULL);
+  assert(strstr(a, "\"live\":[") != NULL);
+  assert(strstr(a, "\"kind\":\"string\",\"rc\":") != NULL);
+  assert(strstr(a, "\"live_count\":") != NULL);
+  assert(strstr(a, "\"peak_bytes\":") != NULL);
+  assert(strstr(a, "\"delta_bytes\":") != NULL);
+  assert(strstr(a, "\"delta_count\":") != NULL);
+  assert(strstr(a, "\"kind\":\"raw\"") != NULL);
+  assert(strstr(a, "\"kind\":\"string\"") != NULL);
+  assert(strstr(a, "\"kind\":\"list\"") != NULL);
+  assert(strstr(a, "\"kind\":\"pair\"") != NULL);
   {
     char *second;
     int64_t dc;
     assert(sz_ui_session_dump_now(session));
     second = slurp_cstr(path);
-    assert(strstr(second, "string=") != NULL);
-    dc = dump_i64(second, "delta_count=");
+    assert(strstr(second, "\"kind\":\"string\"") != NULL);
+    dc = dump_i64(second, "\"delta_count\":");
     assert(dc > -20 && dc < 20);
     free(second);
   }
@@ -1230,7 +1230,7 @@ static void test_session_debug_dump(void) {
     assert(sz_ui_pump_sync(session));
     free(a);
     a = slurp_cstr(path);
-    assert(strstr(a, "0* item=\"hi\" caret=2") != NULL);
+    assert(strstr(a, "\"label\":\"item\",\"value\":\"hi\",\"caret\":2") != NULL);
   }
 
   memset(&tap, 0, sizeof(tap));
@@ -1251,11 +1251,11 @@ static void test_session_debug_dump(void) {
   assert(sz_ui_inject_sync(session, &tap));
   assert(sz_ui_pump_sync(session));
   c = slurp_cstr(path);
-  assert(strstr(c, "1* search=\"\"") != NULL);
-  assert(strstr(c, "0 item=\"hi\"") != NULL);
-  assert(strstr(c, "0* item") == NULL);
-  assert(strstr(c, "[last_hit]") != NULL);
-  assert(strstr(c, "-> button:+") != NULL || strstr(c, "-> textfield:search") != NULL);
+  assert(strstr(c, "\"i\":1,\"target\":true,\"label\":\"search\"") != NULL);
+  assert(strstr(c, "\"i\":0,\"target\":false,\"label\":\"item\"") != NULL);
+  assert(strstr(c, "\"target\":true,\"label\":\"item\"") == NULL);
+  assert(strstr(c, "\"last_hit\":{") != NULL);
+  assert(strstr(c, "\"desc\":\"button:+\"") != NULL || strstr(c, "\"desc\":\"textfield:search\"") != NULL);
   free(b);
   free(c);
 
@@ -1304,8 +1304,8 @@ static void test_xy_hit_and_miss(void) {
   assert(sz_signal_int_get(count) == 1);
   assert(sz_ui_pump_sync(session));
   dump = slurp_cstr(path);
-  assert(strstr(dump, "[last_hit]") != NULL);
-  assert(strstr(dump, "-> button:+1") != NULL);
+  assert(strstr(dump, "\"last_hit\":{") != NULL);
+  assert(strstr(dump, "\"desc\":\"button:+1\"") != NULL);
   free(dump);
 
   memset(&tap, 0, sizeof(tap));
@@ -1316,7 +1316,7 @@ static void test_xy_hit_and_miss(void) {
   assert(sz_signal_int_get(count) == 1);
   assert(sz_ui_pump_sync(session));
   dump = slurp_cstr(path);
-  assert(strstr(dump, "-> NULL") != NULL);
+  assert(strstr(dump, "\"desc\":\"NULL\"") != NULL);
   free(dump);
 
   remove(script);
@@ -1507,7 +1507,7 @@ static void test_studio_shaped_xy(void) {
   assert(sz_signal_int_get(count) == 1);
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "-> button:+1") != NULL);
+  assert(strstr(body, "\"desc\":\"button:+1\"") != NULL);
   free(body);
   body = slurp_cstr(record);
   assert(strstr(body, "tap ") != NULL);
@@ -1522,7 +1522,7 @@ static void test_studio_shaped_xy(void) {
   assert(sz_signal_int_get(count) == 1);
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "-> NULL") != NULL);
+  assert(strstr(body, "\"desc\":\"NULL\"") != NULL);
   free(body);
   body = slurp_cstr(record);
   assert(strstr(body, "xy ") != NULL);
@@ -1673,32 +1673,32 @@ static void test_session_inject_control(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_pumps(session) == 1);
   body = slurp_cstr(dump);
-  assert(strstr(body, "[session]") != NULL);
-  assert(strstr(body, "kind=headless") != NULL);
-  assert(strstr(body, "lifecycle=resume") != NULL);
-  assert(strstr(body, "pumps=1") != NULL);
-  assert(strstr(body, "[heap]") != NULL);
-  assert(strstr(body, "live_bytes=") != NULL);
-  assert(strstr(body, "[live]") != NULL);
+  assert(strstr(body, "\"session\":{") != NULL);
+  assert(strstr(body, "\"runtime\":\"headless\"") != NULL);
+  assert(strstr(body, "\"lifecycle\":\"resume\"") != NULL);
+  assert(strstr(body, "\"pumps\":1") != NULL);
+  assert(strstr(body, "\"heap\":{") != NULL);
+  assert(strstr(body, "\"live_bytes\":") != NULL);
+  assert(strstr(body, "\"live\":[") != NULL);
   free(body);
 
   assert(sz_ui_session_write_dump(session, fuzz));
   body = slurp_cstr(fuzz);
-  assert(strstr(body, "[signals]") != NULL);
-  assert(strstr(body, "[session]") == NULL);
-  assert(strstr(body, "[heap]") == NULL);
-  assert(strstr(body, "[live]") == NULL);
+  assert(strstr(body, "\"signals\":[") != NULL);
+  assert(strstr(body, "\"session\":{") == NULL);
+  assert(strstr(body, "\"heap\":{") == NULL);
+  assert(strstr(body, "\"live\":[") == NULL);
   free(body);
 
   remove(dump);
   assert(sz_ui_session_dump_now(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "[session]") != NULL);
-  assert(strstr(body, "[heap]") != NULL);
-  assert(strstr(body, "peak_bytes=") != NULL);
-  assert(strstr(body, "delta_bytes=") != NULL);
-  assert(strstr(body, "string=") != NULL);
-  assert(strstr(body, "[live]") != NULL);
+  assert(strstr(body, "\"session\":{") != NULL);
+  assert(strstr(body, "\"heap\":{") != NULL);
+  assert(strstr(body, "\"peak_bytes\":") != NULL);
+  assert(strstr(body, "\"delta_bytes\":") != NULL);
+  assert(strstr(body, "\"kind\":\"string\"") != NULL);
+  assert(strstr(body, "\"live\":[") != NULL);
   free(body);
 
   {
@@ -1707,8 +1707,8 @@ static void test_session_inject_control(void) {
     write_stamp(inject, "dump\n");
     assert(sz_ui_pump_sync(session));
     body = slurp_cstr(dump);
-    assert(strstr(body, "[heap]") != NULL);
-    assert(strstr(body, "pumps=") != NULL);
+    assert(strstr(body, "\"heap\":{") != NULL);
+    assert(strstr(body, "\"pumps\":") != NULL);
     free(body);
     assert(sz_ui_session_pumps(session) > pumps0);
   }
@@ -1719,16 +1719,16 @@ static void test_session_inject_control(void) {
     hold = sz_alloc(65536);
     assert(sz_ui_session_dump_now(session));
     body = slurp_cstr(dump);
-    assert(strstr(body, "raw=") != NULL);
-    peak_hi = dump_i64(body, "peak_bytes=");
+    assert(strstr(body, "\"kind\":\"raw\"") != NULL);
+    peak_hi = dump_i64(body, "\"peak_bytes\":");
     free(body);
     sz_free(hold);
     write_stamp(inject, "resetpeak\n");
     assert(sz_ui_pump_sync(session));
     assert(sz_ui_session_dump_now(session));
     body = slurp_cstr(dump);
-    peak_lo = dump_i64(body, "peak_bytes=");
-    assert(strstr(body, "delta_count=") != NULL);
+    peak_lo = dump_i64(body, "\"peak_bytes\":");
+    assert(strstr(body, "\"delta_count\":") != NULL);
     free(body);
     assert(peak_hi >= 65536);
     assert(peak_lo < peak_hi);
@@ -2273,8 +2273,8 @@ static void test_session_inject_compose(void) {
   assert(strcmp(sz_signal_str_get(draft), "ab") == 0);
   assert(strcmp(sz_view_text_field_preedit(field), "n") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "preedit=\"n\"") != NULL);
-  assert(strstr(body, "item=\"ab\"") != NULL);
+  assert(strstr(body, "\"preedit\":\"n\"") != NULL);
+  assert(strstr(body, "\"label\":\"item\",\"value\":\"ab\"") != NULL);
   free(body);
 
   write_stamp(path, "compose ni\n");
@@ -2287,8 +2287,8 @@ static void test_session_inject_compose(void) {
   assert(strcmp(sz_signal_str_get(draft), "abni") == 0);
   assert(sz_view_text_field_preedit(field)[0] == '\0');
   body = slurp_cstr(dump);
-  assert(strstr(body, "item=\"abni\"") != NULL);
-  assert(strstr(body, "preedit=") == NULL);
+  assert(strstr(body, "\"label\":\"item\",\"value\":\"abni\"") != NULL);
+  assert(strstr(body, "\"preedit\":\"n\"") == NULL);
   free(body);
 
   write_stamp(path, "compose ja\nkey Escape\n");
@@ -2313,8 +2313,8 @@ static void test_session_inject_compose(void) {
   assert(strcmp(sz_signal_str_get(buf), "xy") == 0);
   assert(strcmp(sz_view_editor_preedit(ed), "ka") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "[editor]") != NULL);
-  assert(strstr(body, "preedit=\"ka\"") != NULL);
+  assert(strstr(body, "\"editors\":[") != NULL);
+  assert(strstr(body, "\"preedit\":\"ka\"") != NULL);
   free(body);
 
   write_stamp(path, "commit\n");
@@ -2455,8 +2455,8 @@ static void test_session_inject_caret(void) {
   assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
   assert(sz_view_text_field_caret(field) == 3);
   body = slurp_cstr(dump);
-  assert(strstr(body, "0* item=\"abc\" caret=3") != NULL);
-  assert(strstr(body, "[taps]") != NULL);
+  assert(strstr(body, "\"target\":true,\"label\":\"item\",\"value\":\"abc\",\"caret\":3") != NULL);
+  assert(strstr(body, "\"taps\":[") != NULL);
   free(body);
 
   write_stamp(path, "caret 1\nkey Delete\n");
@@ -2464,7 +2464,7 @@ static void test_session_inject_caret(void) {
   assert(strcmp(sz_signal_str_get(draft), "ac") == 0);
   assert(sz_view_text_field_caret(field) == 1);
   body = slurp_cstr(dump);
-  assert(strstr(body, "0* item=\"ac\" caret=1") != NULL);
+  assert(strstr(body, "\"target\":true,\"label\":\"item\",\"value\":\"ac\",\"caret\":1") != NULL);
   free(body);
 
   write_stamp(path, "text abc\nkey Home\nkey ArrowRight\nkey x x\n");
@@ -2551,7 +2551,7 @@ static void test_session_inject_hover_secondary(void) {
   assert(sz_ui_inject_sync(session, &ev));
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "[hover]") != NULL);
+  assert(strstr(body, "\"hover\":{") != NULL);
   assert(strstr(body, "tooltip:Sean") != NULL);
   free(body);
 
@@ -2563,22 +2563,22 @@ static void test_session_inject_hover_secondary(void) {
   }
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "[hover]") != NULL);
+  assert(strstr(body, "\"hover\":{") != NULL);
   assert(strstr(body, "tooltip:Sean") != NULL);
   free(body);
 
   write_stamp(path, "hover 190.0 70.0\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "[hover]") != NULL);
-  assert(strstr(body, "-> NULL") != NULL);
+  assert(strstr(body, "\"hover\":{") != NULL);
+  assert(strstr(body, "\"desc\":\"NULL\"") != NULL);
   free(body);
 
   write_stamp(path, "secondary 0\n");
   assert(sz_ui_pump_sync(session));
   assert(sz_signal_int_get(count) == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "[last_secondary]") != NULL);
+  assert(strstr(body, "\"last_secondary\":{") != NULL);
   assert(strstr(body, "button:Go") != NULL);
   free(body);
 
@@ -2639,7 +2639,7 @@ static void test_on_secondary_script_fires(void) {
   assert(sz_signal_int_get(primary) == 0);
   assert(sz_signal_int_get(secondary) == 1);
   body = slurp_cstr(dump);
-  assert(strstr(body, "[last_secondary]") != NULL);
+  assert(strstr(body, "\"last_secondary\":{") != NULL);
   assert(strstr(body, "button:Go") != NULL);
   free(body);
 
@@ -2770,9 +2770,9 @@ static void test_session_inject_selection_clipboard(void) {
   assert(sz_view_text_field_sel_start(field) == 0);
   assert(sz_view_text_field_sel_end(field) == 2);
   body = slurp_cstr(dump);
-  assert(strstr(body, "0* item=\"abc\" caret=2 sel=0:2") != NULL);
-  assert(strstr(body, "[taps]") != NULL);
-  assert(strstr(body, "[fields]") != NULL);
+  assert(strstr(body, "\"target\":true,\"label\":\"item\",\"value\":\"abc\",\"caret\":2,\"sel_start\":0,\"sel_end\":2") != NULL);
+  assert(strstr(body, "\"taps\":[") != NULL);
+  assert(strstr(body, "\"fields\":[") != NULL);
   free(body);
 
   write_stamp(path, "copy\nkey End\npaste\n");
@@ -2786,7 +2786,7 @@ static void test_session_inject_selection_clipboard(void) {
   assert(sz_view_text_field_sel_start(field) == 1);
   assert(sz_view_text_field_sel_end(field) == 1);
   body = slurp_cstr(dump);
-  assert(strstr(body, "0* item=\"xc\" caret=1 sel=1:1") != NULL);
+  assert(strstr(body, "\"target\":true,\"label\":\"item\",\"value\":\"xc\",\"caret\":1,\"sel_start\":1,\"sel_end\":1") != NULL);
   free(body);
 
   write_stamp(path, "text abc\nselect 0 2\nkey Backspace\n");
@@ -6474,7 +6474,7 @@ static void test_checkbox_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "checkbox:Done=0") != NULL);
-  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "\"taps\":[") != NULL);
   assert(strstr(dump, "Done") != NULL);
   free(dump);
   sz_ui_unmount(session);
@@ -6619,7 +6619,7 @@ static void test_switch_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "switch:On=0") != NULL);
-  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "\"taps\":[") != NULL);
   assert(strstr(dump, "On") != NULL);
   free(dump);
   sz_ui_unmount(session);
@@ -6808,7 +6808,7 @@ static void test_chip_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "chip:Pin=0") != NULL);
-  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "\"taps\":[") != NULL);
   assert(strstr(dump, "Pin") != NULL);
   free(dump);
   sz_ui_unmount(session);
@@ -6934,7 +6934,7 @@ static void test_list_tile_trailing_in_taps_dump(void) {
   dump = slurp_cstr(path);
   assert(strstr(dump, "listtile:milk") != NULL);
   assert(strstr(dump, "button:Del") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "listtile") == NULL);
   assert(strstr(taps, "Del") != NULL);
@@ -7127,7 +7127,7 @@ static void test_badge_child_in_taps_dump(void) {
   dump = slurp_cstr(path);
   assert(strstr(dump, "badge:3") != NULL);
   assert(strstr(dump, "chip:Pin=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "badge") == NULL);
   assert(strstr(taps, "Pin") != NULL);
@@ -7269,7 +7269,7 @@ static void test_card_child_in_taps_dump(void) {
   dump = slurp_cstr(path);
   assert(strstr(dump, "card:card") != NULL);
   assert(strstr(dump, "button:Go") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "card") == NULL);
   assert(strstr(taps, "Go") != NULL);
@@ -7402,7 +7402,7 @@ static void test_divider_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "divider:divider") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "divider") == NULL);
   assert(strstr(taps, "Go") != NULL);
@@ -7559,7 +7559,7 @@ static void test_expansion_tile_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "expansion:More=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "More") != NULL);
   free(dump);
@@ -7683,7 +7683,7 @@ static void test_icon_button_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "iconbutton:i") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "i") != NULL);
   free(dump);
@@ -7816,7 +7816,7 @@ static void test_vertical_divider_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "vdiv:vdiv") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "vdiv") == NULL);
   assert(strstr(taps, "Go") != NULL);
@@ -7982,7 +7982,7 @@ static void test_circular_progress_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "circular:40") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "circular") == NULL);
   assert(strstr(taps, "Go") != NULL);
@@ -8105,7 +8105,7 @@ static void test_avatar_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "avatar:S") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "avatar") == NULL);
   assert(strstr(taps, "Go") != NULL);
@@ -8245,7 +8245,7 @@ static void test_checkbox_list_tile_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "checktile:Star=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Star") != NULL);
   free(dump);
@@ -8391,7 +8391,7 @@ static void test_switch_list_tile_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "switchtile:Quiet=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Quiet") != NULL);
   free(dump);
@@ -8559,7 +8559,7 @@ static void test_radio_list_tile_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "radiotile:Night=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Night") != NULL);
   free(dump);
@@ -8705,7 +8705,7 @@ static void test_segmented_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "segmented:0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "segmented") != NULL);
   free(dump);
@@ -8829,7 +8829,7 @@ static void test_fab_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "fab:+") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "+") != NULL);
   free(dump);
@@ -9034,7 +9034,7 @@ static void test_tooltip_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "tooltip:Sean") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Sean") == NULL);
   assert(strstr(taps, "tooltip") == NULL);
@@ -9067,7 +9067,7 @@ static void test_tooltip_child_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "tooltip:hint") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   assert(strstr(taps, "hint") == NULL);
@@ -9385,7 +9385,7 @@ static void test_outlined_button_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "outlined:Edit") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Edit") != NULL);
   free(dump);
@@ -9690,7 +9690,7 @@ static void test_text_button_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "textbutton:Open") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Open") != NULL);
   free(dump);
@@ -9904,7 +9904,7 @@ static void test_placeholder_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "placeholder:ph") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "ph") == NULL);
   assert(strstr(taps, "placeholder") == NULL);
@@ -9937,7 +9937,7 @@ static void test_placeholder_child_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "placeholder:ph") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   assert(strstr(taps, "ph") == NULL);
@@ -10176,7 +10176,7 @@ static void test_semantics_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "semantics:mark") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "mark") == NULL);
   assert(strstr(taps, "semantics") == NULL);
@@ -10209,7 +10209,7 @@ static void test_semantics_child_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "semantics:mark") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   assert(strstr(taps, "mark") == NULL);
@@ -10465,7 +10465,7 @@ static void test_merge_semantics_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "merge:logo") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "logo") == NULL);
   assert(strstr(taps, "merge") == NULL);
@@ -10499,7 +10499,7 @@ static void test_merge_semantics_child_in_taps_dump(void) {
   dump = slurp_cstr(path);
   assert(strstr(dump, "merge:logo") != NULL);
   assert(strstr(dump, "button:Go") == NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   assert(strstr(taps, "logo") == NULL);
@@ -10852,7 +10852,7 @@ static void test_ink_well_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "inkwell:face") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "face") != NULL);
   free(dump);
@@ -10885,7 +10885,7 @@ static void test_ink_well_child_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "inkwell:face") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   assert(strstr(taps, "face") != NULL);
@@ -11186,7 +11186,7 @@ static void test_visibility_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "visibility:1") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "visibility") == NULL);
   free(dump);
@@ -11220,7 +11220,7 @@ static void test_visibility_child_in_taps_on(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "visibility:1") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   free(dump);
@@ -11256,7 +11256,7 @@ static void test_visibility_child_not_in_taps_off(void) {
   dump = slurp_cstr(path);
   assert(strstr(dump, "visibility:0") != NULL);
   assert(strstr(dump, "button:Go") == NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") == NULL);
   free(dump);
@@ -11592,7 +11592,7 @@ static void test_offstage_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "offstage:1") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "offstage") == NULL);
   free(dump);
@@ -11626,7 +11626,7 @@ static void test_offstage_child_in_taps_on(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "offstage:1") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   free(dump);
@@ -11662,7 +11662,7 @@ static void test_offstage_child_not_in_taps_off(void) {
   dump = slurp_cstr(path);
   assert(strstr(dump, "offstage:0") != NULL);
   assert(strstr(dump, "button:Go") == NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") == NULL);
   free(dump);
@@ -11905,7 +11905,7 @@ static void test_unconstrained_box_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "unconstrained:box") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "box") == NULL);
   assert(strstr(taps, "unconstrained") == NULL);
@@ -11939,7 +11939,7 @@ static void test_unconstrained_box_child_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "unconstrained:box") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   assert(strstr(taps, "unconstrained") == NULL);
@@ -12228,7 +12228,7 @@ static void test_filter_chip_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "filterchip:Tag=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Tag") != NULL);
   free(dump);
@@ -12493,7 +12493,7 @@ static void test_choice_chip_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "choicechip:Day=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Day") != NULL);
   free(dump);
@@ -12777,7 +12777,7 @@ static void test_action_chip_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "actionchip:Go") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
   free(dump);
@@ -13043,7 +13043,7 @@ static void test_input_chip_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "inputchip:In=0") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "In") != NULL);
   free(dump);
@@ -13203,7 +13203,7 @@ static void test_radio_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "radio:On=0") != NULL);
-  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "\"taps\":[") != NULL);
   assert(strstr(dump, "On") != NULL);
   free(dump);
   sz_ui_unmount(session);
@@ -13373,7 +13373,7 @@ static void test_slider_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "slider:40") != NULL);
-  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "\"taps\":[") != NULL);
   assert(strstr(dump, "slider") != NULL);
   free(dump);
   sz_ui_unmount(session);
@@ -13692,7 +13692,7 @@ static void test_progress_not_in_taps_dump(void) {
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
   assert(strstr(dump, "progress:40") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
   assert(strstr(taps, "progress") == NULL);
   free(dump);
@@ -14205,7 +14205,7 @@ static void test_view_each_map_button(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_write_dump(session, path));
   dump = slurp_cstr(path);
-  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "\"taps\":[") != NULL);
   assert(strstr(dump, "milk") != NULL);
   free(dump);
   sz_ui_unmount(session);
@@ -14262,17 +14262,17 @@ static void test_each_expanded_row_in_scroll(void) {
   dump = slurp_cstr(path);
   assert(strstr(dump, "text:milk") != NULL);
   assert(strstr(dump, "text:eggs") != NULL);
-  taps = strstr(dump, "[taps]\n");
+  taps = strstr(dump, "\"taps\":[");
   assert(taps != NULL);
-  p0 = strstr(taps, "Del ");
+  p0 = strstr(taps, "\"label\":\"Del\"");
   assert(p0 != NULL);
-  p1 = strstr(p0 + 4, "Del ");
+  p1 = strstr(p0 + 12, "\"label\":\"Del\"");
   assert(p1 != NULL);
-  c0 = strchr(p0, ',');
-  c1 = strchr(p1, ',');
+  c0 = strstr(p0, "\"y\":");
+  c1 = strstr(p1, "\"y\":");
   assert(c0 && c1);
-  y0 = atoi(c0 + 1);
-  y1 = atoi(c1 + 1);
+  y0 = atoi(c0 + 4);
+  y1 = atoi(c1 + 4);
   /* Unbounded scroll height must not stretch each Expanded row. */
   assert(y1 > y0);
   assert(y1 - y0 < 80);
@@ -14293,10 +14293,10 @@ static void test_property_signal_list_len(void) {
                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
   items = sz_signal_list(xs);
   sz_signal_name(items, "items");
-  dump = sz_signal_dump();
-  s = strstr(sz_string_cstr(dump), "list[");
+  dump = sz_signal_dump_json_string();
+  s = strstr(sz_string_cstr(dump), "\"type\":\"list\"");
   assert(s);
-  assert(strstr(s, "items = "));
+  assert(strstr(s, "\"name\":\"items\""));
   name = sz_string_from_cstr("items");
   assert(sz_property_signal_list_len(name) == 2);
   sz_signal_list_set(items, sz_list_nil());
@@ -14318,8 +14318,8 @@ static void test_property_signal_list_at(void) {
                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
   items = sz_signal_list(xs);
   sz_signal_name(items, "items");
-  dump = sz_signal_dump();
-  s = strstr(sz_string_cstr(dump), "list[");
+  dump = sz_signal_dump_json_string();
+  s = strstr(sz_string_cstr(dump), "\"type\":\"list\"");
   assert(s);
   name = sz_string_from_cstr("items");
   got = sz_property_signal_list_at(name, 0);
@@ -14346,11 +14346,11 @@ static void test_property_signal_int(void) {
   const char *s;
 
   count = sz_signal_int(7);
-  dump = sz_signal_dump();
-  s = strstr(sz_string_cstr(dump), "int[");
+  dump = sz_signal_dump_json_string();
+  s = strstr(sz_string_cstr(dump), "\"type\":\"int\"");
   assert(s);
-  /* Unnamed signals dump with no name. A missing name panics. */
-  assert(strstr(s, " = 7"));
+  /* Unnamed signals dump with an empty name. A missing name panics. */
+  assert(strstr(s, "\"value\":7"));
   name = sz_string_from_cstr("count");
   sz_signal_name(count, "count");
   assert(sz_property_signal_int(name) == 7);
@@ -14371,11 +14371,11 @@ static void test_signal_list_record_dump(void) {
 
   xs = sz_list_cons(sz_box_i64(1), sz_list_cons(sz_box_i64(2), sz_list_nil()));
   items = sz_signal_new(xs, 5, sz_string_from_cstr("rows"));
-  dump = sz_signal_dump();
-  s = strstr(sz_string_cstr(dump), "list[");
+  dump = sz_signal_dump_json_string();
+  s = strstr(sz_string_cstr(dump), "\"type\":\"list\"");
   assert(s);
-  /* Non-String elements dump the count only. */
-  assert(strstr(s, "rows = <2>"));
+  /* Non-String elements encode typed (v=2). */
+  assert(strstr(s, "\"name\":\"rows\",\"value\":[1,2]"));
   name = sz_string_from_cstr("rows");
   assert(sz_property_signal_list_len(name) == 2);
   got = sz_property_signal_list_at(name, 0);
@@ -14387,11 +14387,11 @@ static void test_signal_list_record_dump(void) {
 
   xs = sz_list_cons(sz_box_i64(1), sz_list_nil());
   items = sz_signal_new(xs, 3, sz_string_from_cstr("rows"));
-  dump = sz_signal_dump();
-  s = strstr(sz_string_cstr(dump), "list[");
+  dump = sz_signal_dump_json_string();
+  s = strstr(sz_string_cstr(dump), "\"type\":\"list\"");
   assert(s);
-  /* A String flag on non-String heads still dumps the count. */
-  assert(strstr(s, "rows = <1>"));
+  /* A String flag on non-String heads still encodes typed. */
+  assert(strstr(s, "\"name\":\"rows\",\"value\":[1]"));
   sz_string_free(dump);
   sz_signal_list_free(items);
 }
@@ -14522,15 +14522,15 @@ static void test_signal_list_elem_str_flag(void) {
   strs = sz_signal_list(sz_list_nil());
   sz_signal_name(strs, "estr");
   assert(sz_signal_list_elem_str(strs) == 1);
-  dump = sz_signal_dump();
-  assert(strstr(sz_string_cstr(dump), "estr = []") != NULL);
+  dump = sz_signal_dump_json_string();
+  assert(strstr(sz_string_cstr(dump), "\"name\":\"estr\",\"value\":[]") != NULL);
   sz_string_free(dump);
 
-  /* An explicit non-String flag decides an empty list: count-only dump. */
+  /* An explicit non-String flag decides an empty list: typed payload. */
   rows = sz_signal_new(sz_list_nil(), 5, sz_string_from_cstr("erow"));
   assert(sz_signal_list_elem_str(rows) == 0);
-  dump = sz_signal_dump();
-  assert(strstr(sz_string_cstr(dump), "erow = <0>") != NULL);
+  dump = sz_signal_dump_json_string();
+  assert(strstr(sz_string_cstr(dump), "\"name\":\"erow\",\"value\":[]") != NULL);
   sz_string_free(dump);
 
   assert(sz_signal_list_elem_str(NULL) == 0);
@@ -14633,10 +14633,10 @@ static void test_property_signal_str(void) {
 
   draft = sz_signal_str("milk");
   sz_signal_name(draft, "draft");
-  dump = sz_signal_dump();
-  s = strstr(sz_string_cstr(dump), "str[");
+  dump = sz_signal_dump_json_string();
+  s = strstr(sz_string_cstr(dump), "\"type\":\"str\"");
   assert(s);
-  assert(strstr(s, "draft = "));
+  assert(strstr(s, "\"name\":\"draft\""));
   name = sz_string_from_cstr("draft");
   got = sz_property_signal_str(name);
   assert(strcmp(sz_string_cstr(got), "milk") == 0);
@@ -14663,13 +14663,13 @@ static void test_signal_dump_escapes(void) {
 
   s = sz_signal_str("a\"b");
   sz_signal_name(s, "q");
-  dump = sz_signal_dump();
+  dump = sz_signal_dump_json_string();
   d = sz_string_cstr(dump);
   assert(strstr(d, "a\\\"b") != NULL);
   sz_string_free(dump);
 
   sz_signal_str_set(s, "a\nb");
-  dump = sz_signal_dump();
+  dump = sz_signal_dump_json_string();
   d = sz_string_cstr(dump);
   assert(strstr(d, "a\\nb") != NULL);
   sz_string_free(dump);
@@ -14678,7 +14678,7 @@ static void test_signal_dump_escapes(void) {
     big[i] = 'x';
   big[2000] = '\0';
   sz_signal_str_set(s, big);
-  dump = sz_signal_dump();
+  dump = sz_signal_dump_json_string();
   d = sz_string_cstr(dump);
   assert(strlen(d) > 2000);
   assert(strstr(d, big) != NULL);
@@ -14689,7 +14689,7 @@ static void test_signal_dump_escapes(void) {
                     sz_list_cons(sz_string_from_cstr("a\nb"), sz_list_nil()));
   items = sz_signal_list(xs);
   sz_signal_name(items, "xs");
-  dump = sz_signal_dump();
+  dump = sz_signal_dump_json_string();
   d = sz_string_cstr(dump);
   assert(strstr(d, "a\\\"b") != NULL);
   assert(strstr(d, "a\\nb") != NULL);
@@ -14841,10 +14841,10 @@ static void test_signal_dump_long_name(void) {
   big[600] = '\0';
   s = sz_signal_int(3);
   sz_signal_name(s, big);
-  dump = sz_signal_dump();
+  dump = sz_signal_dump_json_string();
   /* The full name survives: no fixed-buffer truncation. */
   assert(strstr(sz_string_cstr(dump), big) != NULL);
-  assert(strstr(sz_string_cstr(dump), "= 3") != NULL);
+  assert(strstr(sz_string_cstr(dump), "\"value\":3") != NULL);
   sz_string_free(dump);
   sz_signal_int_free(s);
 }
@@ -14861,8 +14861,8 @@ static void test_signal_list_mixed_kinds(void) {
                     sz_list_cons(sz_box_i64(2), sz_list_nil()));
   items = sz_signal_list(xs);
   sz_signal_name(items, "mix");
-  dump = sz_signal_dump();
-  assert(strstr(sz_string_cstr(dump), "mix = [\"a\", \"\"]") != NULL);
+  dump = sz_signal_dump_json_string();
+  assert(strstr(sz_string_cstr(dump), "\"name\":\"mix\",\"value\":[\"a\",\"\"]") != NULL);
   sz_string_free(dump);
   name = sz_string_from_cstr("mix");
   got = sz_property_signal_list_at(name, 0);
@@ -15064,14 +15064,15 @@ static void test_view_editor(void) {
   assert(strcmp(sz_signal_str_get(buf), "z\n  b") == 0);
   assert(strcmp(sz_signal_str_get(field_sig), "hia") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "[fields]") != NULL);
-  assert(strstr(body, "item=\"hia\"") != NULL);
-  assert(strstr(body, "[editor]") != NULL);
-  assert(strstr(body, "0* caret=5 sel=5:5 sx=0 sy=0 lines=2 \"z\\n  b\"") != NULL);
+  assert(strstr(body, "\"fields\":[") != NULL);
+  assert(strstr(body, "\"label\":\"item\",\"value\":\"hia\"") != NULL);
+  assert(strstr(body, "\"editors\":[") != NULL);
+  assert(strstr(body, "\"i\":0,\"target\":true,\"caret\":5,\"sel_start\":5,\"sel_end\":5,\"scroll_x\":0,\"scroll_y\":0,\"lines\":2") != NULL);
+  assert(strstr(body, "\"value\":\"z\\n  b\"") != NULL);
   {
-    const char *taps_sec = strstr(body, "[taps]\n");
+    const char *taps_sec = strstr(body, "\"taps\":[");
     assert(taps_sec != NULL);
-    assert(strstr(taps_sec, "0 Go") != NULL);
+    assert(strstr(taps_sec, "\"label\":\"Go\"") != NULL);
   }
   free(body);
 
@@ -15118,9 +15119,9 @@ static void test_view_editor(void) {
   write_stamp(path, "dump\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "[editor]") != NULL);
+  assert(strstr(body, "\"editors\":[") != NULL);
   assert(strstr(body, long_s) != NULL);
-  assert(strstr(body, "caret=300") != NULL);
+  assert(strstr(body, "\"caret\":300") != NULL);
   free(body);
   a11y = sz_view_a11y_dump(sz_ui_session_root(session));
   assert(strstr(sz_string_cstr(a11y), "editor:editor") != NULL);
@@ -15194,8 +15195,8 @@ static void test_view_editor_viewport(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_view_editor_scroll_x(ed) > 0.f);
   body = slurp_cstr(dump);
-  assert(strstr(body, "[editor]") != NULL);
-  assert(strstr(body, "sx=0") == NULL);
+  assert(strstr(body, "\"editors\":[") != NULL);
+  assert(strstr(body, "\"scroll_x\":0") == NULL);
   free(body);
 
   /* Tall file: caret at end pans vertically. Paint visible lines only. */
@@ -15209,7 +15210,7 @@ static void test_view_editor_viewport(void) {
   assert(sz_ui_pump_sync(session));
   assert(sz_view_editor_scroll_y(ed) > 0.f);
   body = slurp_cstr(dump);
-  assert(strstr(body, "sy=0") == NULL);
+  assert(strstr(body, "\"scroll_y\":0") == NULL);
   free(body);
   {
     SkSurface *surf = sk_surface_make_raster_n32_premul(80, 80);
@@ -15328,8 +15329,8 @@ static void test_view_editor_undo_gutter(void) {
   write_stamp(path, "dump\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "lines=3") != NULL);
-  assert(strstr(body, "diag=1:1,2:2") != NULL);
+  assert(strstr(body, "\"lines\":3") != NULL);
+  assert(strstr(body, "\"diags\":[{\"line\":1,\"severity\":1},{\"line\":2,\"severity\":2}]") != NULL);
   free(body);
 
   sz_signal_str_set(buf, "ab\ncd\n");
@@ -15362,7 +15363,7 @@ static void test_view_editor_undo_gutter(void) {
   write_stamp(path, "dump\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "diag=1:1") != NULL);
+  assert(strstr(body, "{\"line\":1,\"severity\":1}") != NULL);
   free(body);
   {
     SzIoResult r = sz_io_unsafe_run(sz_lang_ui_set_editor_diagnostics(NULL));
@@ -15371,7 +15372,7 @@ static void test_view_editor_undo_gutter(void) {
   write_stamp(path, "dump\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "diag=") == NULL);
+  assert(strstr(body, "\"diags\":[]") != NULL);
   free(body);
   {
     int data[5];
@@ -15455,9 +15456,9 @@ static void test_view_editor_undo_gutter(void) {
   write_stamp(path, "dump\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "tok=1") != NULL);
-  assert(strstr(body, "inlay=1") != NULL);
-  assert(strstr(body, "fold=1") != NULL);
+  assert(strstr(body, "\"tokens\":1") != NULL);
+  assert(strstr(body, "\"inlays\":1") != NULL);
+  assert(strstr(body, "\"folds\":1") != NULL);
   free(body);
   {
     SkSurface *surf = sk_surface_make_raster_n32_premul(200, 120);
@@ -15479,9 +15480,9 @@ static void test_view_editor_undo_gutter(void) {
   write_stamp(path, "dump\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "tok=") == NULL);
-  assert(strstr(body, "inlay=") == NULL);
-  assert(strstr(body, "fold=") == NULL);
+  assert(strstr(body, "\"tokens\":0") != NULL);
+  assert(strstr(body, "\"inlays\":0") != NULL);
+  assert(strstr(body, "\"folds\":0") != NULL);
   free(body);
   {
     SkSurface *surf = sk_surface_make_raster_n32_premul(200, 120);
@@ -15604,11 +15605,11 @@ static void test_view_focus_split_overlay(void) {
   write_stamp(path, "dump\n");
   assert(sz_ui_pump_sync(session));
   body = slurp_cstr(dump);
-  assert(strstr(body, "title=Hello") != NULL);
-  assert(strstr(body, "[splits]") != NULL);
-  assert(strstr(body, "frac=25") != NULL);
-  assert(strstr(body, "[overlays]") != NULL);
-  assert(strstr(body, "open=0") != NULL);
+  assert(strstr(body, "\"title\":\"Hello\"") != NULL);
+  assert(strstr(body, "\"splits\":[") != NULL);
+  assert(strstr(body, "\"frac\":25") != NULL);
+  assert(strstr(body, "\"overlays\":[") != NULL);
+  assert(strstr(body, "\"open\":false") != NULL);
   assert(strstr(body, "split:") != NULL);
   assert(strstr(body, "overlay:") != NULL);
   free(body);
@@ -15851,7 +15852,7 @@ static void test_view_focus_group_keys(void) {
   assert(!sz_view_has_focused_text_field(root));
   assert(strcmp(sz_view_focus_kind(root), "button:sample.txt") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "focus=button:sample.txt") != NULL);
+  assert(strstr(body, "\"focus\":\"button:sample.txt\"") != NULL);
   free(body);
 
   write_stamp(path, "key ArrowDown\ndump\n");
@@ -15860,7 +15861,7 @@ static void test_view_focus_group_keys(void) {
   assert(sz_signal_int_get(b) == 0);
   assert(strcmp(sz_view_focus_kind(root), "button:scuzz.toml") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "focus=button:scuzz.toml") != NULL);
+  assert(strstr(body, "\"focus\":\"button:scuzz.toml\"") != NULL);
   free(body);
 
   write_stamp(path, "key Enter\n");
@@ -15876,7 +15877,7 @@ static void test_view_focus_group_keys(void) {
   assert(sz_signal_int_get(b) == 1);
   assert(strcmp(sz_view_focus_kind(root), "overlay") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "focus=overlay") != NULL);
+  assert(strstr(body, "\"focus\":\"overlay\"") != NULL);
   free(body);
 
   sz_signal_int_set(open, 0);
@@ -15889,7 +15890,7 @@ static void test_view_focus_group_keys(void) {
   assert(sz_signal_int_get(go) == 1);
   assert(strcmp(sz_view_focus_kind(root), "none") == 0);
   body = slurp_cstr(dump);
-  assert(strstr(body, "focus=none") != NULL);
+  assert(strstr(body, "\"focus\":\"none\"") != NULL);
   free(body);
 
   write_stamp(path, "key ArrowDown\n");
@@ -16330,14 +16331,14 @@ static void test_session_load_code(void) {
   assert(sz_signal_int_get(count) == 7);
 
   sz_signal_int_set(count, 8);
-  dump1 = sz_signal_dump();
+  dump1 = sz_signal_dump_json_string();
   assert(sz_ui_session_load_code(session, RELOAD_B));
   assert(sz_ui_session_reload(session));
   a11y = sz_view_a11y_dump(sz_ui_session_root(session));
   assert(strstr(sz_string_cstr(a11y), "text:B") != NULL);
   assert(strstr(sz_string_cstr(a11y), "text:A") == NULL);
   sz_string_free(a11y);
-  dump2 = sz_signal_dump();
+  dump2 = sz_signal_dump_json_string();
   assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
   assert(sz_signal_int_get(count) == 8);
   sz_string_free(dump1);
@@ -16395,7 +16396,7 @@ static void test_stamp_loads_reload_code(void) {
   assert(sz_signal_int_get(count) == 7);
 
   sz_signal_int_set(count, 8);
-  dump1 = sz_signal_dump();
+  dump1 = sz_signal_dump_json_string();
   copy_file_test(RELOAD_B, code);
   write_stamp(stamp, "3");
   assert(sz_ui_pump_sync(session));
@@ -16403,7 +16404,7 @@ static void test_stamp_loads_reload_code(void) {
   assert(strstr(sz_string_cstr(a11y), "text:B") != NULL);
   assert(strstr(sz_string_cstr(a11y), "text:A") == NULL);
   sz_string_free(a11y);
-  dump2 = sz_signal_dump();
+  dump2 = sz_signal_dump_json_string();
   assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
   assert(sz_signal_int_get(count) == 8);
   sz_string_free(dump1);
