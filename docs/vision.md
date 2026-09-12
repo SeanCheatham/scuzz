@@ -412,7 +412,7 @@ navigation remain later slices.
 
 ## Open work
 
-Ranked list: [`gaps.md`](gaps.md). Next: compile-time performance. The fuzz collect phase and mutation probes still re-parse package sources in one campaign. Profile that path before more campaign-cost work. Keep type preservation through kits and emitted code as the first gate. Extend native composition proofs before more kit surface. Accepted compositions must compile and preserve values. Invalid compositions must fail `check`.
+Ranked list: [`gaps.md`](gaps.md). Next: compile-time performance. A profile of the campaign path is in [`gaps.md`](gaps.md): runtime `getenv` per coverage hit, linear `Check.findFunMod` scans, and collect-phase re-parses are the known costs. Keep type preservation through kits and emitted code as the first gate. Extend native composition proofs before more kit surface. Accepted compositions must compile and preserve values. Invalid compositions must fail `check`.
 
 Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. Real phone and screen-reader checks on the browser target remain open. Browser limits: [`compatibility.md`](compatibility.md#browser-target).
 

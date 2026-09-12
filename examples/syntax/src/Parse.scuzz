@@ -46,13 +46,16 @@ record Im(tn: String, targs: List[String], forTy: String, methods: List[Fun])
 
 record Prog(pkg: String, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr)
 
-record Toks(chunks: List[List[SpTok]], n: Int)
+record Toks(groups: List[List[List[SpTok]]], n: Int)
 
 import Lexer.Tok
 import Lexer.SpTok
 
 def tokChunk(): Int =
   64
+
+def tokGroup(): Int =
+  tokChunk() * tokChunk()
 
 def indexToks(toks: List[SpTok]): Toks =
   indexToksGo(toks, 0, [], [], 0)
@@ -61,10 +64,16 @@ def indexToksGo(toks: List[SpTok], n: Int, cur: List[SpTok], acc: List[List[SpTo
   if (List.isEmpty(toks)) indexToksDone(n, cur, acc, total) else if (n >= tokChunk()) indexToksGo(toks, 0, [], List.reverse(cur) :: acc, total) else indexToksGo(List.tail(toks), n + 1, List.at(toks, 0) :: cur, acc, total + 1)
 
 def indexToksDone(n: Int, cur: List[SpTok], acc: List[List[SpTok]], total: Int): Toks =
+  indexToksGroups(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), [], [], 0, total)
+
+def indexToksGroups(chunks: List[List[SpTok]], cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n: Int, total: Int): Toks =
+  if (List.isEmpty(chunks)) indexToksGroupsDone(cur, acc, n, total) else if (n >= tokChunk()) indexToksGroups(chunks, [], List.reverse(cur) :: acc, 0, total) else indexToksGroups(List.tail(chunks), List.at(chunks, 0) :: cur, acc, n + 1, total)
+
+def indexToksGroupsDone(cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n: Int, total: Int): Toks =
   Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total)
 
 def _sp(toks: Toks, i: Int): SpTok =
-  if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "") else _spOff(List.at(toks.chunks, i / tokChunk()), i % tokChunk())
+  if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "") else _spOff(List.at(List.at(toks.groups, i / tokGroup()), i % tokGroup() / tokChunk()), i % tokChunk())
 
 def _spOff(chunk: List[SpTok], i: Int): SpTok =
   if (List.isEmpty(chunk)) SpTok(Tok.Eof, 0, "") else if (i <= 0) List.at(chunk, 0) else _spOff(List.tail(chunk), i - 1)
