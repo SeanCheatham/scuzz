@@ -14894,6 +14894,7 @@ static void test_property_replay_str_list(void) {
   SzString *got;
 
   setenv("SCUZZ_TESTRT", "1", 1);
+  sz_testrt_oracles_refresh();
   sz_property_session_reset();
   draft = sz_signal_str("old");
   sz_signal_name(draft, "draft");
@@ -14923,6 +14924,7 @@ static void test_property_replay_str_list(void) {
   sz_release(name);
   sz_property_session_reset();
   unsetenv("SCUZZ_TESTRT");
+  sz_testrt_oracles_refresh();
   sz_signal_str_free(draft);
   sz_signal_list_free(items);
 }
@@ -16168,6 +16170,7 @@ static void test_alloc_counter_pump_flat(void) {
   session = sz_ui_mount(&cfg, root);
   assert(session);
   setenv("SCUZZ_TESTRT", "1", 1);
+  sz_testrt_oracles_refresh();
   /* Warm-up: layout + a few taps so map cache / frames settle. */
   assert(sz_ui_pump_sync(session));
   memset(&tap, 0, sizeof(tap));
@@ -16201,6 +16204,7 @@ static void test_alloc_counter_pump_flat(void) {
   sz_signal_str_free(label);
   sz_signal_int_free(count);
   unsetenv("SCUZZ_TESTRT");
+  sz_testrt_oracles_refresh();
 }
 
 /* Headless button with a captured list env: tap still fires after the

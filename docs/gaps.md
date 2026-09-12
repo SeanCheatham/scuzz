@@ -33,7 +33,7 @@ Close them in this order.
 
 2. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
-3. **Compile-time performance** — The parser indexes tokens in two-level groups (was a linear chunk walk per token). The coverage phase parses each file set once. `coverage_hit` and `sz_testrt_oracles_armed` still call `getenv` per hit (36% of a compiler `check`). `Check.findFunMod` still scans defs linearly. The collect phase and mutation probes still re-parse package sources. Profile: gprofng works on the product CLI (no PMU; `perf` is blocked).
+3. **Compile-time performance** — `scuzz check examples/compiler` is 21 s (was 1 m 45 s before this arc). `Check.findFunMod` still scans defs linearly (24% of a compiler `check`). The collect phase and mutation probes still re-parse package sources. RC retain/release churn and `sz_ptr_eq` each take about 13%. Profile: gprofng works on the product CLI (no PMU; `perf` is blocked).
 
 ### Table-stakes
 
