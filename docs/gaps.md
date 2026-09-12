@@ -29,11 +29,11 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 Close them in this order.
 
-1. **Source-region coverage** — Open: branch coverage.
+1. **Scenario initialization and lifetime** — Residual: generated setup inputs, multiple named scenarios, and campaign selection.
 
-2. **Scenario initialization and lifetime** — Residual: generated setup inputs, multiple named scenarios, and campaign selection.
+2. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
-3. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
+3. **Compile-time performance** — One `scuzz fuzz` campaign re-parses package sources in the collect and coverage phases. Self-compiles and big package builds are slow. Profile the campaign path and the emit pipeline before more campaign-cost work.
 
 ### Table-stakes
 

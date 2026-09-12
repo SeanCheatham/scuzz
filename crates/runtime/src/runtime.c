@@ -340,6 +340,10 @@ static void coverage_hit(const char *loc) {
   coverage_hits[hash] = hit;
 }
 
+void sz_coverage_hit(const char *loc) {
+  coverage_hit(loc);
+}
+
 void sz_panic_push_src(const char *loc) {
   if (!loc || !loc[0])
     return;

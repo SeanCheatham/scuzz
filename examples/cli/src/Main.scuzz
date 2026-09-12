@@ -348,16 +348,16 @@ def summaryJsonOk(): Bool =
 
 def summaryJsonSample(): String =
   Verify.summaryJson(true, 42, 16, 11, 0, 3, 0, "1", "fuzz/repro.toml", 2, 1, 1, 5, 100, false, """small 3 2
-""", 1, ("Main.scuzz:1:5", true) :: ("Main.scuzz:2:5", false) :: [])
+""", 1, ("Main.scuzz:1:5", true) :: ("Main.scuzz:2:5", false) :: [], ("Main.scuzz:1:9", true) :: ("Main.scuzz:2:9", false) :: [])
 
 def wantSummaryJson(): String =
-  "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":true,\"seed\":42,\"iterations\":16,\"search\":11,\"search_failures\":0,\"corpus\":3,\"repro\":\"fuzz/repro.toml\"},\"corpus\":{\"entries\":3,\"failures\":0,\"promoted\":1},\"classify\":[{\"name\":\"small\",\"true\":3,\"false\":2}],\"mutate\":{\"killed\":2,\"survived\":1,\"inert\":1,\"ran\":5,\"sites\":100,\"oracles\":false,\"invalid\":1,\"score\":0.666},\"coverage\":{\"total\":2,\"reached\":1,\"regions\":[{\"location\":\"Main.scuzz:1:5\",\"reached\":true},{\"location\":\"Main.scuzz:2:5\",\"reached\":false}]}}"
+  "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":true,\"seed\":42,\"iterations\":16,\"search\":11,\"search_failures\":0,\"corpus\":3,\"repro\":\"fuzz/repro.toml\"},\"corpus\":{\"entries\":3,\"failures\":0,\"promoted\":1},\"classify\":[{\"name\":\"small\",\"true\":3,\"false\":2}],\"mutate\":{\"killed\":2,\"survived\":1,\"inert\":1,\"ran\":5,\"sites\":100,\"oracles\":false,\"invalid\":1,\"score\":0.666},\"coverage\":{\"total\":2,\"reached\":1,\"regions\":[{\"location\":\"Main.scuzz:1:5\",\"reached\":true},{\"location\":\"Main.scuzz:2:5\",\"reached\":false}],\"branches\":{\"total\":2,\"reached\":1,\"regions\":[{\"location\":\"Main.scuzz:1:9\",\"reached\":true},{\"location\":\"Main.scuzz:2:9\",\"reached\":false}]}}}"
 
 def summaryJsonEmpty(): String =
-  Verify.summaryJson(false, 1, 0, 0, 0, 0, 0, "0", "", 0, 0, 0, 0, 0, false, "", 0, [])
+  Verify.summaryJson(false, 1, 0, 0, 0, 0, 0, "0", "", 0, 0, 0, 0, 0, false, "", 0, [], [])
 
 def wantSummaryJsonEmpty(): String =
-  "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":false,\"seed\":1,\"iterations\":0,\"search\":0,\"search_failures\":0,\"corpus\":0},\"corpus\":{\"entries\":0,\"failures\":0,\"promoted\":0},\"mutate\":{\"killed\":0,\"survived\":0,\"inert\":0,\"ran\":0,\"sites\":0,\"oracles\":false,\"invalid\":0},\"coverage\":{\"total\":0,\"reached\":0,\"regions\":[]}}"
+  "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":false,\"seed\":1,\"iterations\":0,\"search\":0,\"search_failures\":0,\"corpus\":0},\"corpus\":{\"entries\":0,\"failures\":0,\"promoted\":0},\"mutate\":{\"killed\":0,\"survived\":0,\"inert\":0,\"ran\":0,\"sites\":0,\"oracles\":false,\"invalid\":0},\"coverage\":{\"total\":0,\"reached\":0,\"regions\":[],\"branches\":{\"total\":0,\"reached\":0,\"regions\":[]}}}"
 
 def jsonObjOk(s: String): Bool =
   Json.parse(s) match {
@@ -372,16 +372,42 @@ def miss(): Int = 2
 
 def hit(): Int = 1
 def miss(): Int = 99
-""")
+""") && branchCountsOk()
+
+def branchCountsOk(): Bool =
+  branchIfRows() == wantBranchIfRows() && branchMatchRows() == wantBranchMatchRows()
+
+def branchIfSrc(): String =
+  "def pick(n: Int): Int = if (n > 0) 1 else 2"
+
+def branchIfRows(): List[(String, Bool)] =
+  Verify.branchRowsOf([("Main", branchIfSrc())], [("Main", branchIfSrc())], Str.concat(Check.covKeyOf(Emit.panicLoc([("Main", branchIfSrc())], "Main", 4), 35, "t"), """
+"""))
+
+def wantBranchIfRows(): List[(String, Bool)] =
+  ("Main.scuzz:1:36", true) :: ("Main.scuzz:1:43", false) :: []
+
+def branchMatchSrc(): String =
+  "def tag(o: Opt): Int = o match { case Some(n) => n case None => 0 }"
+
+def branchMatchRows(): List[(String, Bool)] =
+  Verify.branchRowsOf([("Main", branchMatchSrc())], [("Main", branchMatchSrc())], Str.concat(Check.covKeyOf(Emit.panicLoc([("Main", branchMatchSrc())], "Main", 4), 49, "0"), """
+"""))
+
+def wantBranchMatchRows(): List[(String, Bool)] =
+  ("Main.scuzz:1:50", true) :: ("Main.scuzz:1:65", false) :: []
 
 def coverageShifted(live: String, compiled: String): Bool =
   coverageReport(Verify.jCoverage(Verify.coverageRowsOf([("Main", live)], [("Main", compiled)], """Main.scuzz:3:5
 Main.scuzz:3:5
 Main.scuzz:4:5
+"""), Verify.branchRowsOf([("Main", live)], [("Main", compiled)], """Main.scuzz:3:5
+Main.scuzz:3:5
+Main.scuzz:4:5
 """)))
 
 def coverageReport(summary: String): Bool =
-  Str.contains(summary, "\"total\":2,\"reached\":1") && Str.contains(summary, "{\"location\":\"Main.scuzz:1:5\",\"reached\":true}") && Str.contains(summary, "{\"location\":\"Main.scuzz:2:5\",\"reached\":false}")
+  Str.contains(summary, "\"total\":2,\"reached\":1") && Str.contains(summary, "{\"location\":\"Main.scuzz:1:5\",\"reached\":true}") && Str.contains(summary, "{\"location\":\"Main.scuzz:2:5\",\"reached\":false}") && Str.contains(summary, "\"branches\":{\"total\":0,\"reached\":0,\"regions\":[]}")
 
 def mutationSampleOk(): Bool =
   Str.contains(Verify.jMut(2, 1, 1, 5, 100, false, 1), "\"score\":0.666") && Str.contains(Verify.jMut(2, 1, 1, 5, 100, false, 1), "\"invalid\":1") && !Str.contains(Verify.jMut(0, 0, 1, 2, 100, false, 1), "score") && !Str.contains(Verify.jMut(0, 0, 0, 0, 100, false, 0), "score")

@@ -13,6 +13,9 @@ extern "C" {
 void sz_panic(const char *msg) __attribute__((noreturn));
 void sz_panic_push_src(const char *loc);
 void sz_panic_pop_src(void);
+/* Record one coverage hit (def entry or branch arm) when SCUZZ_COVERAGE_DUMP
+ * is set. Cheap no-op otherwise. */
+void sz_coverage_hit(const char *loc);
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
