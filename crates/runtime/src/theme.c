@@ -19,6 +19,12 @@ static const SzTheme k_default_theme = {
 const SzTheme *sz_theme_default(void) { return &k_default_theme; }
 
 int64_t sz_theme_accent(void) { return (int64_t)(uint32_t)k_default_theme.accent; }
+int64_t sz_icon_book(void) { return (int64_t)'B'; }
+int64_t sz_icon_code(void) { return (int64_t)'{'; }
+int64_t sz_icon_link(void) { return (int64_t)'~'; }
+int64_t sz_icon_web(void) { return (int64_t)'W'; }
+int64_t sz_icon_gui(void) { return (int64_t)'['; }
+int64_t sz_icon_install(void) { return (int64_t)'i'; }
 int64_t sz_theme_primary(void) { return (int64_t)(uint32_t)k_default_theme.primary; }
 int64_t sz_theme_muted(void) { return (int64_t)(uint32_t)k_default_theme.muted; }
 int64_t sz_theme_foreground(void) {

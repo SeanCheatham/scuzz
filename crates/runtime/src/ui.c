@@ -1080,6 +1080,18 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_VDIV:
     role = "vdiv";
     break;
+  case SZ_A11Y_ICON:
+    role = "icon";
+    break;
+  case SZ_A11Y_LINK:
+    role = "link";
+    break;
+  case SZ_A11Y_BREADCRUMB:
+    role = "breadcrumb";
+    break;
+  case SZ_A11Y_NAV_TILE:
+    role = "navtile";
+    break;
   default:
     break;
   }

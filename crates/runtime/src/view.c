@@ -192,7 +192,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_UNCONSTRAINED_BOX || kind == SZ_VIEW_SPLIT ||
          kind == SZ_VIEW_OVERLAY || kind == SZ_VIEW_INDEX_BOOK ||
          kind == SZ_VIEW_SECTION || kind == SZ_VIEW_TABS ||
-         kind == SZ_VIEW_APP_SHELL || kind == SZ_VIEW_APP_BAR;
+         kind == SZ_VIEW_APP_SHELL || kind == SZ_VIEW_APP_BAR ||
+         kind == SZ_VIEW_BREADCRUMB;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -245,7 +246,8 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
           view->kind == SZ_VIEW_SWITCH_LIST_TILE ||
           view->kind == SZ_VIEW_RADIO_LIST_TILE ||
-          view->kind == SZ_VIEW_SEGMENTED);
+          view->kind == SZ_VIEW_SEGMENTED || view->kind == SZ_VIEW_LINK ||
+          view->kind == SZ_VIEW_NAV_TILE);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -1175,6 +1177,14 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "split";
   case SZ_A11Y_OVERLAY:
     return "overlay";
+  case SZ_A11Y_ICON:
+    return "icon";
+  case SZ_A11Y_LINK:
+    return "link";
+  case SZ_A11Y_BREADCRUMB:
+    return "breadcrumb";
+  case SZ_A11Y_NAV_TILE:
+    return "navtile";
   default:
     return "none";
   }
@@ -1428,6 +1438,13 @@ void sz_view_a11y_dump_json(SzView *root, FILE *f) {
 SzView *sz_view_column(void) { return view_new(SZ_VIEW_COLUMN); }
 SzView *sz_view_row(void) { return view_new(SZ_VIEW_ROW); }
 SzView *sz_view_wrap(void) { return view_new(SZ_VIEW_WRAP); }
+
+SzView *sz_view_breadcrumb(void) {
+  SzView *v = view_new(SZ_VIEW_BREADCRUMB);
+  v->a11y_role = SZ_A11Y_BREADCRUMB;
+  v->a11y_label = sz_strdup("Breadcrumb");
+  return v;
+}
 
 SzView *sz_view_grid(int cols) {
   SzView *v = view_new(SZ_VIEW_GRID);
@@ -1750,8 +1767,34 @@ SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption) {
 
 SzView *sz_view_icon(char glyph, uint32_t argb) {
   SzView *v = view_new(SZ_VIEW_ICON);
+  char label[2];
   v->glyph = glyph ? glyph : '*';
   v->fg_argb = argb ? argb : 0xFF1A1A1Au;
+  v->a11y_role = SZ_A11Y_ICON;
+  label[0] = v->glyph;
+  label[1] = '\0';
+  v->a11y_label = sz_strdup(label);
+  return v;
+}
+
+SzView *sz_view_link(const char *label, const char *route) {
+  SzView *v = view_new(SZ_VIEW_LINK);
+  v->text = sz_strdup(label ? label : "");
+  v->route_id = sz_strdup(route ? route : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_LINK;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
+SzView *sz_view_nav_tile(char glyph, const char *title, const char *route) {
+  SzView *v = view_new(SZ_VIEW_NAV_TILE);
+  v->glyph = glyph ? glyph : '*';
+  v->text = sz_strdup(title ? title : "");
+  v->route_id = sz_strdup(route ? route : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_NAV_TILE;
+  v->a11y_label = sz_strdup(title ? title : "");
   return v;
 }
 
@@ -2754,6 +2797,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_BUTTON:
   case SZ_VIEW_OUTLINED_BUTTON:
   case SZ_VIEW_TEXT_BUTTON:
+  case SZ_VIEW_LINK:
     resolve_text(v, buf, sizeof buf);
     v->frame.w = text_width(buf, font) + theme->pad * 2.f;
     v->frame.h = theme->control_h;
@@ -2840,6 +2884,15 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.w = max_w;
     break;
   }
+  case SZ_VIEW_NAV_TILE:
+    resolve_text(v, buf, sizeof buf);
+    v->frame.w = max_w > 0 ? max_w : 160.f;
+    v->frame.h = theme->control_h + theme->pad;
+    if (v->frame.w < scale_px(theme, 96.f))
+      v->frame.w = scale_px(theme, 96.f);
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    break;
   case SZ_VIEW_LIST_TILE: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     float pad = theme->pad;
@@ -2942,10 +2995,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = font + scale_px(theme, 4.f);
     v->frame.h = font + scale_px(theme, 4.f);
     break;
-  case SZ_VIEW_IMAGE:
+  case SZ_VIEW_IMAGE: {
+    float box_h = scale_px(theme, (float)v->img_h);
     v->frame.w = scale_px(theme, (float)v->img_w);
-    v->frame.h = scale_px(theme, (float)v->img_h);
+    v->frame.h = box_h;
+    if (v->text && v->text[0])
+      v->frame.h += text_line_h(theme, font) + scale_px(theme, 4.f);
     break;
+  }
   case SZ_VIEW_COLUMN:
   case SZ_VIEW_LIST: {
     float cy = y + theme->pad;
@@ -3199,7 +3256,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = inner_h + theme->pad * 2.f;
     break;
   }
-  case SZ_VIEW_WRAP: {
+  case SZ_VIEW_WRAP:
+  case SZ_VIEW_BREADCRUMB: {
     float pad = theme->pad;
     float gap = layout_gap(theme);
     float inner_w = max_w > pad * 2.f ? max_w - pad * 2.f : 0.f;
@@ -4533,7 +4591,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     if (p->kind == SZ_VIEW_EXCLUDE_SEMANTICS || p->kind == SZ_VIEW_IGNORE_POINTER)
       excluded = 1;
   int web_group = !excluded && (v->a11y_role == SZ_A11Y_APP_BAR ||
-    v->a11y_role == SZ_A11Y_TAB_LIST || v->a11y_role == SZ_A11Y_TAB_PANEL);
+    v->a11y_role == SZ_A11Y_TAB_LIST || v->a11y_role == SZ_A11Y_TAB_PANEL ||
+    v->a11y_role == SZ_A11Y_BREADCRUMB);
   if (web_group) {
     SzView *related = NULL;
     if (v->a11y_role == SZ_A11Y_TAB_PANEL) {
@@ -4544,18 +4603,18 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     sz_web_group_begin(v, v->a11y_role, sz_view_a11y_label(v), related, 0,
                        frame.x, frame.y, frame.w, frame.h);
   }
-  if (!excluded && v->interactive) {
+  if (!excluded && (v->interactive || v->kind == SZ_VIEW_IMAGE ||
+                    v->kind == SZ_VIEW_ICON)) {
     int checked = v->sig_int ? (int)sz_signal_int_get(v->sig_int) : 0;
     if (v->kind == SZ_VIEW_CHOICE_CHIP || v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE)
       checked = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
-    SzView *book = v->parent;
-    while (book && book->kind != SZ_VIEW_INDEX_BOOK) book = book->parent;
     SzView *related = NULL;
     if (v->a11y_role == SZ_A11Y_TAB) {
       SzView *tabs = v->parent->parent->parent->parent;
       related = tabs->children[v->radio_value + 1]->children[0];
     }
-    sz_web_control(v, v->a11y_role, sz_view_a11y_label(v), book == web_route_book ? v->route_id : NULL,
+    sz_web_control(v, v->a11y_role, sz_view_a11y_label(v),
+      v->route_id && v->route_id[0] ? v->route_id : NULL,
       v->copy_text, v->sig_str ? sz_signal_str_get(v->sig_str) : "", related, checked,
       v->frame.x, v->frame.y, v->frame.w, v->frame.h,
       g_clip_on, g_clip.x, g_clip.y, g_clip.w, g_clip.h);
@@ -4650,6 +4709,37 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
     paint_string(c, buf, tx, ty, theme->foreground, theme->font_px);
     break;
+  case SZ_VIEW_LINK: {
+    float underline;
+    resolve_text(v, buf, sizeof buf);
+    if (text_width(buf, theme->font_px) > v->frame.w - theme->pad * 2.f)
+      ellipsize_to_width(buf, sizeof buf, v->frame.w - theme->pad * 2.f,
+                        theme->font_px);
+    tx = v->frame.x + theme->pad;
+    ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
+    paint_string(c, buf, tx, ty, theme->accent, theme->font_px);
+    underline = text_width(buf, theme->font_px);
+    paint_rect(c, tx, ty + scale_px(theme, 2.f), underline, scale_px(theme, 1.f),
+               theme->accent);
+    break;
+  }
+  case SZ_VIEW_NAV_TILE: {
+    char g[2] = {v->glyph, '\0'};
+    SzRect br = v->frame;
+    resolve_text(v, buf, sizeof buf);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    paint_border(c, br, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
+    paint_string(c, g, v->frame.x + theme->pad,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f, theme->accent,
+                 theme->font_px);
+    tx = v->frame.x + theme->pad + theme->font_px + layout_gap(theme);
+    ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
+    if (text_width(buf, theme->font_px) > v->frame.w - (tx - v->frame.x) - theme->pad)
+      ellipsize_to_width(buf, sizeof buf,
+                        v->frame.w - (tx - v->frame.x) - theme->pad, theme->font_px);
+    paint_string(c, buf, tx, ty, theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_ICON_BUTTON: {
     SzRect br = v->frame;
     resolve_text(v, buf, sizeof buf);
@@ -5379,13 +5469,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     g_radius_rect = prev_rect;
     break;
   }
-  case SZ_VIEW_IMAGE:
-    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, v->bg_argb);
+  case SZ_VIEW_IMAGE: {
+    float box_h = scale_px(theme, (float)v->img_h);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, box_h, v->bg_argb);
     if (v->text && v->text[0])
-      paint_string(c, v->text, v->frame.x + 4.f,
-                   v->frame.y + v->frame.h * 0.5f + 4.f, theme->on_primary,
+      paint_string(c, v->text, v->frame.x + scale_px(theme, 4.f),
+                   v->frame.y + box_h + theme->font_px, theme->muted,
                    theme->font_px);
     break;
+  }
   case SZ_VIEW_CLIP:
     paint_children_clipped(v, c, theme);
     break;
@@ -5459,6 +5551,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_COLUMN:
   case SZ_VIEW_ROW:
   case SZ_VIEW_WRAP:
+  case SZ_VIEW_BREADCRUMB:
   case SZ_VIEW_GRID:
   case SZ_VIEW_LIST:
   case SZ_VIEW_EXPANDED:
@@ -5493,6 +5586,19 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, 0x66000000u);
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
+    if (v->kind == SZ_VIEW_BREADCRUMB) {
+      for (i = 0; i + 1 < v->child_count; i++) {
+        SzView *a = v->children[i];
+        SzView *b = v->children[i + 1];
+        float mid;
+        if (!view_is_shown(a) || !view_is_shown(b))
+          continue;
+        mid = (a->frame.x + a->frame.w + b->frame.x) * 0.5f;
+        paint_string(c, ">", mid - text_width(">", theme->font_px) * 0.5f,
+                     a->frame.y + (a->frame.h + theme->font_px) * 0.5f,
+                     theme->muted, theme->font_px);
+      }
+    }
     break;
   case SZ_VIEW_APP_SHELL:
     paint_children_clipped(v, c, theme);
@@ -6212,6 +6318,12 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
        hit->kind == SZ_VIEW_INK_WELL) &&
       hit->on_tap) {
     hit->on_tap(hit, hit->tap_env);
+    return 1;
+  }
+  if (hit->kind == SZ_VIEW_LINK || hit->kind == SZ_VIEW_NAV_TILE) {
+    if (hit->route_id && strncmp(hit->route_id, "http://", 7) &&
+        strncmp(hit->route_id, "https://", 8))
+      sz_view_navigate(root, hit->route_id);
     return 1;
   }
   if ((hit->kind == SZ_VIEW_CHECKBOX || hit->kind == SZ_VIEW_SWITCH ||
@@ -7044,29 +7156,35 @@ int sz_view_edit_extend_to_xy(SzView *view, float x, float y) {
   return 1;
 }
 
-#ifdef __EMSCRIPTEN__
-/* The browser URL selects a section in the first Index Book. */
-static SzView *web_book(SzView *v) {
+/* Select the first Index Book. Browser URL and View.link share this walk. */
+static SzView *first_book(SzView *v) {
   if (collect_walk_hidden(v)) return NULL;
   if (v->kind == SZ_VIEW_INDEX_BOOK) return v;
   for (int i = 0; i < v->child_count; i++) {
-    SzView *book = web_book(v->children[i]);
+    SzView *book = first_book(v->children[i]);
     if (book) return book;
   }
   return NULL;
 }
 
-int sz_view_web_navigate(SzView *root, const char *title) {
-  SzView *v = web_book(root);
+int sz_view_navigate(SzView *root, const char *id) {
+  SzView *v;
+  if (!root || !id || !id[0]) return 0;
+  v = first_book(root);
   if (!v) return 0;
   for (int i = 1; i < v->child_count; i++) {
     SzView *section = v->children[i]->children[0];
-    if (!strcmp(section->route_id, title)) {
+    if (section->route_id && !strcmp(section->route_id, id)) {
       sz_signal_int_set(v->sig_int, i - 1);
       return 1;
     }
   }
   return 0;
+}
+
+#ifdef __EMSCRIPTEN__
+int sz_view_web_navigate(SzView *root, const char *title) {
+  return sz_view_navigate(root, title);
 }
 #endif
 
