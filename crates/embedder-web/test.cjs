@@ -43,15 +43,6 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 1);
     await page.getByRole('link', {name: 'Docs', exact: true}).click();
     await expectText('text:Start');
-    const nextInstall = page.getByRole('link', {name: 'Next: Install', exact: true});
-    await nextInstall.focus();
-    await nextInstall.click();
-    await expectText('text:Install');
-    assert.equal(new URL(page.url()).hash, '#section=install');
-    const backStart = page.getByRole('link', {name: 'Back: Start', exact: true});
-    await backStart.focus();
-    await backStart.click();
-    await expectText('text:Start');
     await page.getByRole('button', {name: 'Add one', exact: true}).focus();
     await page.getByRole('button', {name: 'Add one', exact: true}).click();
     await expectText('text:Count: 1');
@@ -257,6 +248,17 @@ async function check(browserType, url, mobile) {
         await cdp.detach();
       }
     }
+    await page.getByRole('link', {name: 'Start', exact: true}).click();
+    await expectText('text:Start');
+    const nextInstall = page.getByRole('link', {name: 'Next: Install', exact: true});
+    await nextInstall.focus();
+    await nextInstall.click();
+    await expectText('text:Install');
+    assert.equal(new URL(page.url()).hash, '#section=install');
+    const backStart = page.getByRole('link', {name: 'Back: Start', exact: true});
+    await backStart.focus();
+    await backStart.click();
+    await expectText('text:Start');
     await page.goto(url + '?preview=1#section=language');
     await expectText('text:Language');
     await page.reload(); await expectText('text:Language');
