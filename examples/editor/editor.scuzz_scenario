@@ -2,7 +2,7 @@ def setup(): IO[Unit] =
   IO.pure(())
 
 def Main.analyze(_path: String, _body: String): IO[String] =
-  IO.pure("[{\"severity\":\"error\",\"message\":\"x\",\"line\":1,\"column\":1,\"file\":\"sample.txt\"}]")
+  IO.pure("[{\"severity\":\"error\",\"message\":\"x\",\"line\":1,\"column\":1,\"file\":\"Main.scuzz\"}]")
 
 def Main.runProject(_root: String): IO[String] =
   IO.pure("run ok")
