@@ -63,7 +63,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   pr              macos-smoke + oracles + kernel + ui + fuzz
   linux-headless  full Linux job minus apt install and artifact upload
   macos-smoke     required Darwin PR job (runtime + hello smoke)
-  macos-hello     hello build/test, kernel check, bad-intent
+  macos-hello     hello and counter fuzz, kernel check, bad-intent
   oracles         hello, tyck, kits, codegen, hello-outdir, fixedpoint
   install-dry     installer and bump_version dry-run
   runtime         make -C crates/runtime test
@@ -362,6 +362,7 @@ slice_macos_hello() {
   maybe_wipe
   "$SCUZZ" build --full examples/hello
   "$SCUZZ" fuzz --iterations 0 examples/hello
+  "$SCUZZ" fuzz --iterations 0 examples/counter
   "$SCUZZ" check examples/kernel
   if "$SCUZZ" check examples/bad-intent; then
     echo "empty verify should fail check" && exit 1

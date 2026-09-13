@@ -127,7 +127,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/bootstrap.sh
-      - name: Hello smoke
+      - name: Hello and Counter smoke
         run: ./scripts/ci.sh macos-hello
 
   # Full macOS packaging. Skip on push/PR.

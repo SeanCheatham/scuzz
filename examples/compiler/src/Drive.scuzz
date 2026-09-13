@@ -528,7 +528,10 @@ def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
 
 def runProbe(cmd: String): IO[(Int, String, String)] =
-  runLine(Str.concat("timeout --kill-after=2s 20s env ", cmd))
+  IO.timeout(20000, runLine(cmd)).handleErrorWith(e => runProbeTimed(e))
+
+def runProbeTimed(e: String): IO[(Int, String, String)] =
+  if (e == "timeout") IO.pure((124, "", "timeout")) else IO.fail(e)
 
 def afterClang(r: (Int, String, String), exe: String, runEnv: String, extra: String): IO[Unit] =
   r match {
