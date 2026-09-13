@@ -90,6 +90,7 @@ See [compatibility](docs/compatibility.md) for platform details and [known gaps]
 
 ## Learn more and contribute
 
+- **Read the hosted docs:** open [scuzz.build](https://scuzz.build).
 - **Start building:** run `scuzz docs start` after installation.
 - **Learn the language:** run `scuzz docs language`.
 - **Build interfaces:** run `scuzz docs gui`.
