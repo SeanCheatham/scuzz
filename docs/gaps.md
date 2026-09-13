@@ -33,7 +33,7 @@ Close them in this order.
 
 2. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. A bare kit return `IO` means some IO. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
-3. **Compile-time performance** — `scuzz check examples/compiler` is 16 s (was 1 m 45 s before this arc). The checker threads a name-indexed def table (`Check.Ftab`). Residuals: `Check.typeOfEns` rebuilds the table on each Emit call; the collect phase and mutation probes still re-parse package sources; RC retain/release churn and `sz_ptr_eq` each take about 13% of a compiler `check`. Profile: gprofng works on the product CLI (no PMU; `perf` is blocked).
+3. **Compile-time performance** — `scuzz check examples/compiler` is 16 s (was 1 m 45 s before this arc). Checker and emitter thread a name-indexed def table (`Check.Ftab`). A cold `scuzz build examples/tyck` is 1 m 10 s; profile: `sz_string_replace` 16% (from `lineCol`: O(file) string rebuild per location, called per def and branch site — a per-file cursor sweep is the direction; a per-char Scuzz walk measured slower than the C string trick and was reverted), RC retain/release churn, and `sz_list_concat` in string building. The collect phase and mutation probes still re-parse package sources. Profile: gprofng works on the product CLI (no PMU; `perf` is blocked).
 
 ### Table-stakes
 

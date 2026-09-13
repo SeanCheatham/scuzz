@@ -1,6 +1,6 @@
 record Out(ty: String, err: String, span: (String, Int))
 
-record Ftab(tab: Map[String, List[Fun]])
+record Ftab(list: List[Fun], tab: Map[String, List[Fun]])
 
 import Parse.Expr
 import Parse.Fun
@@ -117,7 +117,7 @@ def findFunMod(funs: List[Fun], mod: String, name: String): List[Fun] =
   List.filter(funs, h => h.name == name && h.mod == mod)
 
 def ftabOfList(ds: List[Fun]): Ftab =
-  Ftab(ftabOf(ds))
+  Ftab(ds, ftabOf(ds))
 
 def ftabOf(ds: List[Fun]): Map[String, List[Fun]] =
   if (List.isEmpty(ds)) Map.empty() else ftabAdd(ftabOf(List.tail(ds)), List.at(ds, 0))
@@ -1857,8 +1857,8 @@ def humanFilesOwn(files: List[(String, String)], stems: List[String]): String =
 def human3(files: List[(String, String)], o: Out): String =
   if (hasErr(o)) humanLine(files, o) else "scuzz check ok"
 
-def typeOfEns(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], mod: String): String =
-  infer(e, bindParams(ps, ("self", "A") :: ("#mod", mod) :: noEnv()), ftabOfList(defs), ens).ty
+def typeOfEns(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], mod: String): String =
+  infer(e, bindParams(ps, ("self", "A") :: ("#mod", mod) :: noEnv()), defs, ens).ty
 
 def specializeEnums(ens: List[En], ty: String): List[En] =
   if (List.isEmpty(ens)) ens else specializeEnum(List.at(ens, 0), ty) :: specializeEnums(List.tail(ens), ty)
