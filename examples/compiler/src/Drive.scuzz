@@ -1124,7 +1124,7 @@ def fuzzDirBuild(dir: String, outDir: String, iterations: Int, seed: Int, replay
     files <- fuzzCollect(dir)
     ens = Verify.ensOfFiles(files)
     _ <- emitDirVerifyLinked(dir, outDir, files)
-    _ <- fuzzWriteDeclared(outDir, files)
+    _ <- fuzzWriteDeclared(dir, outDir)
     _ <- fuzzWriteTable(dir, outDir, ens)
     _ <- fuzzLiveBuild(dir, outDir)
     _ <- fuzzLinked(dir, outDir, iterations, seed, replay, files, ens, noFailFast, oracles, differential)
@@ -1544,19 +1544,26 @@ def fuzzWriteSummary(job: FuzzJob, corpus: Int, fail: Int, corpFail: Int, repro:
     both = Verify.coverageBoth(files, job.files, hits)
     somDump <- fuzzReadOr(fuzzSometimesPath(job.outDir))
     trigDump <- fuzzReadOr(fuzzTriggerPath(job.outDir))
+    ver <- fuzzVerPairs(job.dir)
     somDec = Verify.sometimesOf(files)
     somHit = Verify.dumpNames(somDump)
-    trigDec = Verify.triggersOf(job.files)
+    trigDec = Verify.triggersOf(ver)
     trigHit = Verify.triggerReached(trigDump)
     somNever = Verify.reachNever(somDec, somHit)
     trigNever = Verify.reachNever(trigDec, trigHit)
-    ok = fail == 0 && (job.iterations <= 0 || (List.isEmpty(somNever) && List.isEmpty(trigNever)))
+    ok = fail == 0 && (job.iterations <= 0 || List.isEmpty(somNever) && List.isEmpty(trigNever))
     _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJson(ok, job.seed, job.iterations, Verify.searchN(job.iterations), fail, corpus, corpFail, promo, repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, both._1, both._2, somDec, somHit, trigDec, trigHit), """
 """))
   } yield (somNever, trigNever)
 
-def fuzzWriteDeclared(outDir: String, files: List[(String, String)]): IO[Unit] =
-  Fs.write(joinSlash(outDir, "sometimes.declared"), Verify.nls(Verify.sometimesOf(files))).flatMap(_ => Fs.write(joinSlash(outDir, "triggers.declared"), Verify.nls(Verify.triggersOf(files))))
+def fuzzVerPairs(dir: String): IO[List[(String, String)]] =
+  fuzzVerSrcs(dir).flatMap(xs => IO.pure(verSrcPairs(xs, 0)))
+
+def verSrcPairs(xs: List[String], i: Int): List[(String, String)] =
+  if (List.isEmpty(xs)) Manifest.noPairs() else (Str.concat("v", Str.fromInt(i)), List.at(xs, 0)) :: verSrcPairs(List.tail(xs), i + 1)
+
+def fuzzWriteDeclared(dir: String, outDir: String): IO[Unit] =
+  fuzzLiveCollect(dir).flatMap(live => fuzzVerPairs(dir).flatMap(ver => Fs.write(joinSlash(outDir, "sometimes.declared"), Verify.nls(Verify.sometimesOf(live))).flatMap(_ => Fs.write(joinSlash(outDir, "triggers.declared"), Verify.nls(Verify.triggersOf(ver))))))
 
 def fuzzPromoOf(outDir: String): IO[String] =
   Fs.read(joinSlash(joinSlash(outDir, "fuzz"), "promo")).flatMap(_ => IO.pure("1")).handleErrorWith(_ => IO.pure("0"))

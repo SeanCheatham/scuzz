@@ -476,10 +476,18 @@ def lastTab(s: String, i: Int, acc: Int): Int =
   if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 9) lastTab(s, i + 1, i) else lastTab(s, i + 1, acc)
 
 def sometimesOf(files: List[(String, String)]): List[String] =
-  sortStrs(List.distinct(callLitsOf(Parse.parseFiles(files), "Property.sometimes", 0)))
+  sortStrs(List.distinct(callLitsFiles(files, "Property.sometimes", 0)))
 
 def triggersOf(files: List[(String, String)]): List[String] =
-  sortStrs(List.distinct(List.concat(callLitsOf(Parse.parseFiles(files), "Verdict.afterHit", 1), callLitsOf(Parse.parseFiles(files), "Verdict.onHit", 1))))
+  sortStrs(List.distinct(List.concat(callLitsFiles(files, "Verdict.afterHit", 1), callLitsFiles(files, "Verdict.onHit", 1))))
+
+def callLitsFiles(files: List[(String, String)], f: String, idx: Int): List[String] =
+  if (List.isEmpty(files)) noStr() else List.concat(callLitsFile(List.at(files, 0), f, idx), callLitsFiles(List.tail(files), f, idx))
+
+def callLitsFile(file: (String, String), f: String, idx: Int): List[String] =
+  file match {
+    case (_stem, src) => callLitsOf(Parse.parse(Lexer.lex(src)), f, idx)
+  }
 
 def callLitsOf(p: Prog, f: String, idx: Int): List[String] =
   p match {
@@ -506,7 +514,7 @@ def callLitsExpr(e: Expr, f: String, idx: Int): List[String] =
   e match {
     case Expr.EPrint(inner, _) => callLitsExpr(inner, f, idx)
     case Expr.ECall(name, args, _) => List.concat(callLitHit(name, args, f, idx), callLitsList(args, f, idx))
-    case Expr.EMethod(recv, _, args, _) => List.concat(callLitsExpr(recv, f, idx), callLitsList(args, f, idx))
+    case Expr.EMethod(recv, name, args, _) => List.concat(callLitHit(qualCall(recv, name), args, f, idx), List.concat(callLitsExpr(recv, f, idx), callLitsList(args, f, idx)))
     case Expr.EField(recv, _, _) => callLitsExpr(recv, f, idx)
     case Expr.EBin(_, l, r, _) => List.concat(callLitsExpr(l, f, idx), callLitsExpr(r, f, idx))
     case Expr.EUn(_, inner, _) => callLitsExpr(inner, f, idx)
@@ -523,6 +531,12 @@ def callLitsExpr(e: Expr, f: String, idx: Int): List[String] =
 
 def callLitHit(name: String, args: List[Expr], f: String, idx: Int): List[String] =
   if (name != f) noStr() else callLitAt(args, idx)
+
+def qualCall(recv: Expr, name: String): String =
+  recv match {
+    case Expr.EVar(s, _) => Str.concat(s, Str.concat(".", name))
+    case _ => ""
+  }
 
 def callLitAt(args: List[Expr], idx: Int): List[String] =
   if (List.len(args) <= idx) noStr() else callLitStr(List.at(args, idx))

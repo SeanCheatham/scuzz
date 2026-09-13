@@ -2,4 +2,7 @@ def afterPlusShowsOne(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:+1", "text:count = 1")
 
 def onPlusMoves(t: Timeline): Verdict =
-  Verdict.onHit(t, "button:+1", (_before, _after) => true)
+  Verdict.onHit(t, "button:+1", __tup => __tup match {
+  case (_before, _after) => true
+})
+
