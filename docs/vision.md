@@ -398,7 +398,8 @@ tab focus. Enter or Space selects the focused tab. Browser Tab enters the
 selected tab and then the panel. Local tabs do not change the browser URL.
 `View.link(label, route)` and `View.navTile(icon, title, route)` open an Index
 Book section. A route that starts with `http://` or `https://` stays a browser
-URL. `View.breadcrumb` paints a trail of those links. `Icon.book`, `Icon.code`,
+URL. `View.breadcrumb` paints one inline trail. Links in the trail size as text.
+A chevron sits in a reserved gap. `Icon.book`, `Icon.code`,
 `Icon.link`, `Icon.web`, `Icon.gui`, and `Icon.install` supply glyphs for
 `View.icon` and `View.navTile`. `View.image` paints a color block. A non-empty
 caption sits under the block.

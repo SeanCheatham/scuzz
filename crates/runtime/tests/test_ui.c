@@ -15719,6 +15719,11 @@ static void test_docs_nav_widgets(void) {
   SzView *img;
   SzView *icon;
   SzString *dump;
+  SzView *docs;
+  SzView *cur;
+  SzRect docs_r;
+  SzRect cur_r;
+  float sep_w;
   const SzTheme *theme = sz_theme_default();
   float caption_h;
 
@@ -15726,8 +15731,10 @@ static void test_docs_nav_widgets(void) {
   sz_view_add_child(page, sz_view_link("Open GUI", "gui"));
   sz_view_add_child(page, sz_view_nav_tile('W', "Ship to the web", "web"));
   crumb = sz_view_breadcrumb();
-  sz_view_add_child(crumb, sz_view_link("Docs", "start"));
-  sz_view_add_child(crumb, sz_view_text("Start"));
+  docs = sz_view_link("Docs", "start");
+  cur = sz_view_text("Start");
+  sz_view_add_child(crumb, docs);
+  sz_view_add_child(crumb, cur);
   sz_view_add_child(page, crumb);
   img = sz_view_image(80, 32, 0xFFE8EF48u, "Scuzz Docs");
   icon = sz_view_icon('B', 0xFF923D24u);
@@ -15738,6 +15745,12 @@ static void test_docs_nav_widgets(void) {
   sz_view_add_child(sections, sz_view_section("web", "Web", sz_view_text("Web")));
   root = sz_view_index_book(selected, sections);
   sz_view_layout(root, 640.f, 480.f, theme);
+  docs_r = sz_view_frame(docs);
+  cur_r = sz_view_frame(cur);
+  sep_w = 8.f;
+  assert(docs_r.h < theme->control_h);
+  assert(cur_r.x >= docs_r.x + docs_r.w + sep_w);
+  assert(fabsf((docs_r.y + docs_r.h * 0.5f) - (cur_r.y + cur_r.h * 0.5f)) < 2.f);
   dump = sz_view_a11y_dump(root);
   assert(strstr(sz_string_cstr(dump), "link:Open GUI") != NULL);
   assert(strstr(sz_string_cstr(dump), "navtile:Ship to the web") != NULL);

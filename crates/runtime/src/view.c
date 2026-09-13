@@ -224,6 +224,10 @@ static int view_is_cross_stretch(const SzView *v) {
   return 0;
 }
 
+static int view_in_breadcrumb(const SzView *v) {
+  return v && v->parent && v->parent->kind == SZ_VIEW_BREADCRUMB;
+}
+
 SzViewKind sz_view_kind(const SzView *view) {
   return view ? view->kind : (SzViewKind)0;
 }
@@ -2797,12 +2801,26 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_BUTTON:
   case SZ_VIEW_OUTLINED_BUTTON:
   case SZ_VIEW_TEXT_BUTTON:
-  case SZ_VIEW_LINK:
     resolve_text(v, buf, sizeof buf);
     v->frame.w = text_width(buf, font) + theme->pad * 2.f;
     v->frame.h = theme->control_h;
     if (v->frame.w < scale_px(theme, 48.f))
       v->frame.w = scale_px(theme, 48.f);
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    break;
+  case SZ_VIEW_LINK:
+    resolve_text(v, buf, sizeof buf);
+    if (view_in_breadcrumb(v)) {
+      float inset = scale_px(theme, 2.f);
+      v->frame.w = text_width(buf, font) + inset * 2.f;
+      v->frame.h = text_line_h(theme, font);
+    } else {
+      v->frame.w = text_width(buf, font) + theme->pad * 2.f;
+      v->frame.h = theme->control_h;
+      if (v->frame.w < scale_px(theme, 48.f))
+        v->frame.w = scale_px(theme, 48.f);
+    }
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
@@ -3256,8 +3274,42 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = inner_h + theme->pad * 2.f;
     break;
   }
-  case SZ_VIEW_WRAP:
   case SZ_VIEW_BREADCRUMB: {
+    float gap = layout_gap(theme);
+    float sep = text_width(">", font);
+    float slot = gap + sep + gap;
+    float cx;
+    float inner_h = 0.f;
+    int n_shown = 0;
+    for (i = 0; i < v->child_count; i++) {
+      SzView *ch = v->children[i];
+      layout_constrained(ch, x, y, box_loose(0.f, 0.f), theme);
+      if (!view_is_shown(ch))
+        continue;
+      n_shown++;
+      if (ch->frame.h > inner_h)
+        inner_h = ch->frame.h;
+    }
+    if (inner_h < text_line_h(theme, font))
+      inner_h = text_line_h(theme, font);
+    cx = x;
+    for (i = 0; i < v->child_count; i++) {
+      SzView *ch = v->children[i];
+      if (!view_is_shown(ch)) {
+        layout_constrained(ch, cx, y, box_loose(0.f, 0.f), theme);
+        continue;
+      }
+      layout_constrained(ch, cx, y + (inner_h - ch->frame.h) * 0.5f,
+                         box_loose(0.f, 0.f), theme);
+      cx += ch->frame.w + slot;
+    }
+    if (n_shown > 0)
+      cx -= slot;
+    v->frame.w = cx - x;
+    v->frame.h = inner_h;
+    break;
+  }
+  case SZ_VIEW_WRAP: {
     float pad = theme->pad;
     float gap = layout_gap(theme);
     float inner_w = max_w > pad * 2.f ? max_w - pad * 2.f : 0.f;
@@ -4711,11 +4763,12 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   case SZ_VIEW_LINK: {
     float underline;
+    float inset = view_in_breadcrumb(v) ? scale_px(theme, 2.f) : theme->pad;
     resolve_text(v, buf, sizeof buf);
-    if (text_width(buf, theme->font_px) > v->frame.w - theme->pad * 2.f)
-      ellipsize_to_width(buf, sizeof buf, v->frame.w - theme->pad * 2.f,
+    if (text_width(buf, theme->font_px) > v->frame.w - inset * 2.f)
+      ellipsize_to_width(buf, sizeof buf, v->frame.w - inset * 2.f,
                         theme->font_px);
-    tx = v->frame.x + theme->pad;
+    tx = v->frame.x + inset;
     ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
     paint_string(c, buf, tx, ty, theme->accent, theme->font_px);
     underline = text_width(buf, theme->font_px);
@@ -5591,12 +5644,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         SzView *a = v->children[i];
         SzView *b = v->children[i + 1];
         float mid;
+        float ay;
+        float by;
         if (!view_is_shown(a) || !view_is_shown(b))
           continue;
         mid = (a->frame.x + a->frame.w + b->frame.x) * 0.5f;
+        ay = a->frame.y + (a->frame.h + theme->font_px) * 0.5f;
+        by = b->frame.y + (b->frame.h + theme->font_px) * 0.5f;
         paint_string(c, ">", mid - text_width(">", theme->font_px) * 0.5f,
-                     a->frame.y + (a->frame.h + theme->font_px) * 0.5f,
-                     theme->muted, theme->font_px);
+                     (ay + by) * 0.5f, theme->muted, theme->font_px);
       }
     }
     break;
