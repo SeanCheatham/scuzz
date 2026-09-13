@@ -9,3 +9,6 @@ shared = { path = "../shared" }
 default_runtime = "headless"
 headless_size = [320, 200]
 headless_scale = 1.0
+
+[fuzz]
+score_floor = 0.500
