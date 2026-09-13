@@ -402,7 +402,8 @@ URL. `View.breadcrumb` paints one inline trail. Links in the trail size as text.
 A chevron sits in a reserved gap. `Icon.book`, `Icon.code`,
 `Icon.link`, `Icon.web`, `Icon.gui`, and `Icon.install` supply glyphs for
 `View.icon` and `View.navTile`. `View.image` paints a color block. A non-empty
-caption sits under the block.
+caption sits under the block. Docs does not paint that block until bitmap
+support exists.
 Code blocks place text and Copy in one row with an eight-pixel gap.
 Text uses the remaining width. Multiline code sets the row height.
 Docs shows live text input and source panels. Studio shows counter and status

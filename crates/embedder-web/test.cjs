@@ -32,14 +32,14 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('link', {name: 'Install the CLI', exact: true}).count(), 1);
     assert(await page.getByRole('link').count() >= 16);
     assert.equal(await page.getByRole('navigation', {name: 'Breadcrumb'}).count(), 1);
-    assert.equal(await page.getByRole('img', {name: 'Same View tree on every runtime'}).count(), 1);
+    assert.equal(await page.getByRole('img', {name: 'Same View tree on every runtime'}).count(), 0);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).getAttribute('href'), '#section=install');
     await page.getByRole('link', {name: 'Build a GUI', exact: true}).click();
     await expectText('text:GUI');
     assert.equal(new URL(page.url()).hash, '#section=gui');
-    assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 1);
+    assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 0);
     await page.getByRole('link', {name: 'Docs', exact: true}).click();
     await expectText('text:Start');
     await page.getByRole('button', {name: 'Add one', exact: true}).focus();
@@ -228,7 +228,7 @@ async function check(browserType, url, mobile) {
     await page.setViewportSize({width: mobile ? 390 : 1000, height: 720});
     await page.getByRole('link', {name: 'Web', exact: true}).click();
     await expectText('text:Web');
-    assert.equal(await page.getByRole('img', {name: 'Hash links keep the selected section'}).count(), 1);
+    assert.equal(await page.getByRole('img', {name: 'Hash links keep the selected section'}).count(), 0);
     assert.equal(await page.getByRole('link', {name: 'Scuzz on GitHub', exact: true}).getAttribute('href'), 'https://github.com/SeanCheatham/scuzz');
     if (mobile) {
       await page.getByRole('link', {name: 'Install', exact: true}).tap();

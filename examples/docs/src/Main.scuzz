@@ -13,7 +13,6 @@ def blockView(b: Block): View =
     case Block.Code(text) => code(text)
     case Block.Cmd(text) => code(text)
     case Block.Link(nav) => View.padding(8, View.link(nav.label, nav.route))
-    case Block.Figure(caption) => View.padding(8, View.image(280, 48, Theme.primary(), caption))
   }
 
 def blocksColumn(xs: Signal[List[Block]]): View =
@@ -23,7 +22,7 @@ def pageHead(title: String): View =
   View.padding(8, View.breadcrumb(View.link("Docs", "start"), View.text(title)))
 
 def startHero(): View =
-  View.column(View.padding(8, View.heading(2, View.text("Choose a topic"))), View.padding(8, View.image(280, 48, Theme.primary(), "Same View tree on every runtime")))
+  View.padding(8, View.heading(2, View.text("Choose a topic")))
 
 def startTiles(): View =
   View.padding(8, View.grid(2, View.navTile(Icon.install(), "Install the CLI", "install"), View.navTile(Icon.gui(), "Build a GUI", "gui"), View.navTile(Icon.web(), "Ship to the web", "web"), View.navTile(Icon.code(), "Read the language", "language")))
