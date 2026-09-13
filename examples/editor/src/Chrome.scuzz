@@ -124,3 +124,4 @@ def pollTab(path: String, body: String, orig: String, dirty: Int): IO[(String, S
 
 def pollTabs(paths: List[String], bodies: List[String], origs: List[String], idx: Int, curBody: String, curOrig: String): IO[(List[String], List[String], Int)] =
   IO.foreach(List.indices(paths), i => pollTab(List.at(paths, i), if (i == idx) curBody else List.at(bodies, i), if (i == idx) curOrig else List.at(origs, i), if (i == idx) dirtyFlag(curBody, curOrig) else dirtyFlag(List.at(bodies, i), List.at(origs, i)))).map(rows => (List.map(rows, r => r._1), List.map(rows, r => r._2), if (List.exists(rows, r => r._3 == 1)) 1 else 0))
+
