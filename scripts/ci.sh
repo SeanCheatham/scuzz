@@ -85,7 +85,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   gpu             GPU presenter (needs xvfb)
   differential    skia vs sk_sw vs gpu dumps (needs xvfb)
   fuzz            ./scripts/ci-fuzz.sh
-  new-ui          scuzz new --ui path
+  new-ui          scuzz new --ui path + cheap search
   desktop         Desktop peer + X11 (needs xvfb)
   mobile          mobile shell + package targets
   web             Docs package + browser input + Headless claims
@@ -317,11 +317,24 @@ slice_fuzz() {
 
 slice_new_ui() {
   need_scuzz
+  need_cmd python3 "sudo apt-get install -y python3"
   rm -rf /tmp/scuzz-v0app
   "$SCUZZ" new --ui --path /tmp scuzz-v0app
   "$SCUZZ" fmt --check /tmp/scuzz-v0app
   "$SCUZZ" check /tmp/scuzz-v0app
-  "$SCUZZ" fuzz --iterations 0 /tmp/scuzz-v0app
+  grep -q 'tap button:+1' /tmp/scuzz-v0app/corpus/plus.toml
+  "$SCUZZ" fuzz --iterations 4 /tmp/scuzz-v0app
+  python3 - <<'PY'
+import json
+with open("/tmp/scuzz-v0app/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is True
+assert d["fuzz"]["iterations"] == 4
+assert d["fuzz"]["search"] > 0
+assert "button:+1" in d["triggers"]["declared"], d["triggers"]
+assert "button:+1" in d["triggers"]["reached"], d["triggers"]
+assert "button:+1" not in d["triggers"]["never"], d["triggers"]
+PY
   "$SCUZZ" run --headless /tmp/scuzz-v0app
   test -f /tmp/scuzz-v0app/build/snapshot.png
 }

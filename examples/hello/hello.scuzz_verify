@@ -1,0 +1,3 @@
+def greetFact(): Bool =
+  Main.greet() == "Hello, Scuzz!"
+
