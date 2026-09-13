@@ -172,16 +172,13 @@ assert d["fuzz"]["search_failures"] == 0
 assert "tappedPlus" in d["sometimes"]["never"]
 assert "button:+1" in d["triggers"]["never"]
 PY
-chrome_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-chrome-breadth.XXXXXX")"
+chrome_root="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-chrome-breadth.XXXXXX")"
+chrome_dir="$chrome_root/counter"
+mkdir -p "$chrome_dir" "$chrome_root/shared"
 cp -R examples/counter/. "$chrome_dir/"
+cp -R examples/shared/. "$chrome_root/shared/"
+rm -rf "$chrome_dir/build"
 rm -f "$chrome_dir"/count.scuzz_verify
-ROOT="$ROOT" CHROME_DIR="$chrome_dir" python3 - <<'PY'
-from pathlib import Path
-import os
-p = Path(os.environ["CHROME_DIR"]) / "scuzz.toml"
-shared = Path(os.environ["ROOT"]) / "examples" / "shared"
-p.write_text(p.read_text().replace('{ path = "../shared" }', '{ path = "%s" }' % shared))
-PY
 cat > "$chrome_dir/chrome.scuzz_verify" <<'EOF'
 def plusVisible(t: Timeline): Verdict =
   Verdict.alwaysHas(t, "button:+1")
@@ -205,7 +202,7 @@ assert "signals" in br["varied"], br
 assert br["claimed"]["signalInt"] == [], br
 assert "signals" in br["unclaimed"], br
 PY
-rm -rf "$chrome_dir"
+rm -rf "$chrome_root"
 rm -rf /tmp/scuzz-fuzzbug
 "$SCUZZ" new --ui --path /tmp scuzz-fuzzbug
 # The replacement fixture uses runtime failure checks.
