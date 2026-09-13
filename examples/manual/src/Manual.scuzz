@@ -7,7 +7,6 @@ enum Block:
   case Code(text: String)
   case Cmd(text: String)
   case Link(nav: NavLink)
-  case Figure(caption: String)
 
 def verbs(): List[String] =
   "build" :: "run" :: "watch" :: "check" :: "lsp" :: "fmt" :: "fuzz" :: "new" :: "ide" :: "package" :: "help" :: "docs" :: []
@@ -84,7 +83,6 @@ def renderBlock(b: Block): String =
     case Block.Code(text) => indentBlock(text)
     case Block.Cmd(text) => indentBlock(text)
     case Block.Link(nav) => wrapPara(Str.concat(nav.label, Str.concat(" -> ", nav.route)))
-    case Block.Figure(caption) => wrapPara(caption)
   }
 
 def allBlocks(): List[Block] =
