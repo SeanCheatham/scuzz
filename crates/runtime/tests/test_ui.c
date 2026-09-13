@@ -15747,8 +15747,8 @@ static void test_docs_nav_widgets(void) {
   sz_string_free(dump);
   caption_h = sz_view_frame(img).h;
   assert(caption_h > 32.f);
-  assert(sz_view_is_tap_target(page->children[0]));
   assert(sz_view_collect_tap_targets(root, taps, 16) >= 5);
+  assert(sz_view_is_tap_target(taps[0]));
   assert(sz_view_tap_label(root, "Open GUI"));
   sz_view_layout(root, 640.f, 480.f, theme);
   assert(sz_signal_int_get(selected) == 1);
