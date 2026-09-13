@@ -14,6 +14,9 @@ async function check(browserType, url, mobile) {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', msg => {
+      if (/Unable to preventDefault inside passive/.test(msg.text())) errors.push(msg.text());
+    });
     const expectText = async text => {
       try {
         await page.waitForFunction(text => Module.ready && Module.ccall('sz_web_snapshot', 'string', [], []).includes(text) &&
@@ -132,6 +135,29 @@ async function check(browserType, url, mobile) {
       const event = new KeyboardEvent('keydown', {key, ctrlKey: true, bubbles: true, cancelable: true});
       Module.canvas.dispatchEvent(event); return event.defaultPrevented;
     })), Array(6).fill(false));
+    // Wheel and canvas touchmove cancel on non-passive listeners.
+    assert.deepEqual(await page.evaluate(() => {
+      const wheel = new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 10, clientX: 40, clientY: 80});
+      window.dispatchEvent(wheel);
+      const zoom = new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 10, ctrlKey: true});
+      window.dispatchEvent(zoom);
+      const touch = new Touch({identifier: 1, target: Module.canvas, clientX: 40, clientY: 80});
+      const move = new TouchEvent('touchmove', {bubbles: true, cancelable: true, touches: [touch], changedTouches: [touch]});
+      Module.canvas.dispatchEvent(move);
+      return [wheel.defaultPrevented, zoom.defaultPrevented, move.defaultPrevented];
+    }), [true, false, true]);
+    if (browserType === chromium) {
+      const cdp = await context.newCDPSession(page);
+      const listeners = async expression => {
+        const {result: {objectId}} = await cdp.send('Runtime.evaluate', {expression, returnByValue: false});
+        return (await cdp.send('DOMDebugger.getEventListeners', {objectId})).listeners;
+      };
+      const wheel = (await listeners('window')).filter(listener => listener.type === 'wheel');
+      const touch = (await listeners('Module.canvas')).filter(listener => listener.type === 'touchmove');
+      assert(wheel.some(listener => listener.passive === false), JSON.stringify(wheel));
+      assert(touch.some(listener => listener.passive === false), JSON.stringify(touch));
+      await cdp.detach();
+    }
     await install.focus(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
     await expectText('text:Language');
 

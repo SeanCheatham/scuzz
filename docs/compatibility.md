@@ -61,7 +61,8 @@ The app runs on the browser thread. The UI loop yields between frames.
 The output needs no worker threads or cross-origin isolation headers.
 
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
-and resize events. Native network and process effects fail packaging.
+and resize events. Wheel and canvas touch listeners that cancel the event
+register as non-passive. Native network and process effects fail packaging.
 Files use Emscripten memory storage. They do not persist across page reloads.
 Static text supports browser selection and copying through a DOM text layer.
 Index Book sections use URL fragments for links and browser history.
