@@ -344,7 +344,11 @@ def mutationCountsOk(): Bool =
   coverageCountsOk() && mutationSampleOk() && summaryJsonOk() && reachNamesOk() && breadthNamesOk()
 
 def breadthNamesOk(): Bool =
-  List.join(Verify.breadthOf(("count", "def c(t: Timeline): Verdict =\n  Verdict.every(t, i => Timeline.signalInt(t, i, \"count\") >= 0)\n") :: Manifest.noPairs(), "signals\na11y\n").signalInt, ",") == "count" && List.join(Verify.breadthOf(("chrome", "def plusVisible(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"button:+1\")\n") :: Manifest.noPairs(), "signals\n").unclaimed, ",") == "signals" && List.join(Verify.breadthOf(("count", "def c(t: Timeline): Verdict =\n  Verdict.every(t, i => Timeline.signalInt(t, i, \"count\") >= 0)\n") :: Manifest.noPairs(), "signals\n").unclaimed, ",") == ""
+  List.join(Verify.breadthOf(("count", "def c(t: Timeline): Verdict =\n  Verdict.every(t, i => Timeline.signalInt(t, i, \"count\") >= 0)\n") :: Manifest.noPairs(), """signals
+a11y
+""").signalInt, ",") == "count" && List.join(Verify.breadthOf(("chrome", "def plusVisible(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"button:+1\")\n") :: Manifest.noPairs(), """signals
+""").unclaimed, ",") == "signals" && List.join(Verify.breadthOf(("count", "def c(t: Timeline): Verdict =\n  Verdict.every(t, i => Timeline.signalInt(t, i, \"count\") >= 0)\n") :: Manifest.noPairs(), """signals
+""").unclaimed, ",") == ""
 
 def summaryJsonSample(): String =
   Verify.summaryJson(true, 42, 16, 11, 0, 3, 0, "1", "fuzz/repro.toml", 2, 1, 1, 5, 100, false, """small 3 2
