@@ -20,7 +20,7 @@ def blocksColumn(xs: Signal[List[Block]]): View =
   View.each(xs, b => blockView(b))
 
 def pageHead(title: String): View =
-  View.padding(8, View.row(View.icon(Icon.book(), Theme.accent()), View.breadcrumb(View.link("Docs", "start"), View.text(title))))
+  View.padding(8, View.breadcrumb(View.link("Docs", "start"), View.text(title)))
 
 def startHero(): View =
   View.column(View.padding(8, View.heading(2, View.text("Choose a topic"))), View.padding(8, View.image(280, 48, Theme.primary(), "Same View tree on every runtime")))

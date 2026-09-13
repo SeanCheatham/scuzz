@@ -33,7 +33,6 @@ async function check(browserType, url, mobile) {
     assert(await page.getByRole('link').count() >= 16);
     assert.equal(await page.getByRole('navigation', {name: 'Breadcrumb'}).count(), 1);
     assert.equal(await page.getByRole('img', {name: 'Same View tree on every runtime'}).count(), 1);
-    assert.equal(await page.getByRole('img', {name: 'B'}).count(), 1);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).getAttribute('href'), '#section=install');
