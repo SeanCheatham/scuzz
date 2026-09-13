@@ -384,6 +384,17 @@ if fuzz --iterations 16 "$floor_dir" > /tmp/scuzz-floor-fail.log 2>&1; then
 fi
 cat /tmp/scuzz-floor-fail.log
 grep -q "is below floor 1.001" /tmp/scuzz-floor-fail.log
+grep -q "scuzz fuzz fail (" /tmp/scuzz-floor-fail.log
+if grep -q "scuzz fuzz ok" /tmp/scuzz-floor-fail.log; then
+  echo "floor-fail must not print scuzz fuzz ok" && exit 1
+fi
+FLOOR_DIR="$floor_dir" python3 - <<'PY'
+import json, os
+with open(os.environ["FLOOR_DIR"] + "/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is False, d["fuzz"]
+assert d["fuzz"]["search_failures"] == 0, d["fuzz"]
+PY
 rm -rf "$floor_root"
 
 workload_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-workload.XXXXXX")"
