@@ -35,6 +35,12 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('img', {name: 'Same View tree on every runtime'}).count(), 1);
     assert.equal(await page.getByRole('img', {name: 'B'}).count(), 1);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
+    await page.getByRole('link', {name: 'Build a GUI', exact: true}).click();
+    await expectText('text:GUI');
+    assert.equal(new URL(page.url()).hash, '#section=gui');
+    assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 1);
+    await page.getByRole('link', {name: 'Docs', exact: true}).click();
+    await expectText('text:Start');
     await page.getByRole('button', {name: 'Add one', exact: true}).focus();
     await page.getByRole('button', {name: 'Add one', exact: true}).click();
     await expectText('text:Count: 1');
@@ -60,11 +66,6 @@ async function check(browserType, url, mobile) {
     await page.goBack(); await expectText('text:Verify');
     await page.goForward(); await expectText('text:Web');
     await page.getByRole('link', {name: 'Start', exact: true}).click();
-    await expectText('text:Count: 1');
-    await page.getByRole('link', {name: 'Build a GUI', exact: true}).click({force: true});
-    await expectText('text:GUI');
-    assert.equal(new URL(page.url()).hash, '#section=gui');
-    await page.getByRole('link', {name: 'Docs', exact: true}).click({force: true});
     await expectText('text:Count: 1');
     await page.getByRole('button', {name: 'Reset', exact: true}).click();
     await expectText('text:Count: 0');
