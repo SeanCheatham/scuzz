@@ -393,6 +393,12 @@ Each panel keeps its scroll offset and Signals. Only the selected panel
 contributes content to input and accessibility. Left, Right, Home, and End move
 tab focus. Enter or Space selects the focused tab. Browser Tab enters the
 selected tab and then the panel. Local tabs do not change the browser URL.
+`View.link(label, route)` and `View.navTile(icon, title, route)` open an Index
+Book section. A route that starts with `http://` or `https://` stays a browser
+URL. `View.breadcrumb` paints a trail of those links. `Icon.book`, `Icon.code`,
+`Icon.link`, `Icon.web`, `Icon.gui`, and `Icon.install` supply glyphs for
+`View.icon` and `View.navTile`. `View.image` paints a color block. A non-empty
+caption sits under the block.
 Code blocks place text and Copy in one row with an eight-pixel gap.
 Text uses the remaining width. Multiline code sets the row height.
 Docs shows live text input and source panels. Studio shows counter and status

@@ -12,13 +12,24 @@ def blockView(b: Block): View =
     case Block.Para(text) => paragraph(text)
     case Block.Code(text) => code(text)
     case Block.Cmd(text) => code(text)
+    case Block.Link(label, route) => View.padding(8, View.link(label, route))
+    case Block.Figure(caption) => View.padding(8, View.image(280, 48, Theme.primary(), caption))
   }
 
 def blocksColumn(xs: Signal[List[Block]]): View =
   View.each(xs, b => blockView(b))
 
+def pageHead(title: String): View =
+  View.padding(8, View.row(View.icon(Icon.book(), Theme.accent()), View.breadcrumb(View.link("Docs", "start"), View.text(title))))
+
+def startHero(): View =
+  View.column(View.padding(8, View.heading(2, View.text("Choose a topic"))), View.padding(8, View.image(280, 48, Theme.primary(), "Same View tree on every runtime")))
+
+def startTiles(): View =
+  View.padding(8, View.grid(2, View.navTile(Icon.install(), "Install the CLI", "install"), View.navTile(Icon.gui(), "Build a GUI", "gui"), View.navTile(Icon.web(), "Ship to the web", "web"), View.navTile(Icon.code(), "Read the language", "language")))
+
 def liveCounter(count: Signal[Int]): View =
-  View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages."))
+  View.card(View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages.")))
 
 def guiLive(tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
   View.maxSize(0, 520, View.tabs(tab, View.column(View.section("live", "Live example", View.column(View.heading(2, View.text("Try text input")), paragraph("Type text, then switch tabs or sections. Your text stays in the Signals."), View.textField(draft, "Your text"), View.bindText(Signal.map(draft, text => Str.concat("You typed: ", text))), View.editor(notes), View.bindText(Signal.map(notes, text => Str.concat("Notes: ", text))))), View.section("source", "Source", code("@main def main: IO[Unit] =\n  for {\n    draft = Signal.make(\"\")\n    notes = Signal.make(\"\")\n    _ <- Ui.run(_ => View.column(\n      View.textField(draft, \"Your text\"),\n      View.bindText(Signal.map(draft, text =>\n        Str.concat(\"You typed: \" , text))),\n      View.editor(notes),\n      View.bindText(Signal.map(notes, text =>\n        Str.concat(\"Notes: \" , text)))))\n  } yield ()")))))
@@ -30,10 +41,10 @@ def titleAt(n: Int): String =
   if (n < 0 || n >= List.len(Manual.topics())) "Docs" else topicAt(n).title
 
 def topicSection(i: Int, body: View): View =
-  View.section(topicAt(i).id, topicAt(i).title, View.maxSize(800, 0, body))
+  View.section(topicAt(i).id, topicAt(i).title, View.maxSize(800, 0, View.column(pageHead(topicAt(i).title), body)))
 
 def startSection(blocks: Signal[List[Block]], count: Signal[Int]): View =
-  topicSection(0, View.column(blocksColumn(blocks), liveCounter(count)))
+  topicSection(0, View.column(startHero(), startTiles(), View.divider(), blocksColumn(blocks), liveCounter(count)))
 
 def guiSection(blocks: Signal[List[Block]], tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
   topicSection(3, View.column(blocksColumn(blocks), guiLive(tab, draft, notes)))
