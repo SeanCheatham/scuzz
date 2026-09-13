@@ -16,6 +16,15 @@ def verifyRels(ents: List[String]): List[String] =
 def stemOf(path: String): String =
   Str.stripSuffix(Fs.basename(path), ".scuzz")
 
+def takeUntilQuote(s: String): String =
+  if (Str.indexOf(s, "\"") < 0) "" else Str.take(s, Str.indexOf(s, "\""))
+
+def quotedAfter(src: String, key: String): String =
+  if (Str.indexOf(src, key) < 0) "" else takeUntilQuote(Str.drop(src, Str.indexOf(src, key) + Str.len(key)))
+
+def packageName(toml: String, fallback: String): String =
+  if (Str.isEmpty(quotedAfter(toml, "name = \""))) fallback else quotedAfter(toml, "name = \"")
+
 def preferredRel(hasMain: Bool, srcHits: List[String], topHits: List[String]): String =
   if (hasMain) Fs.join("src", "Main.scuzz") else List.head(srcHits) match {
   case Option.Some(h) => Fs.join("src", h)
