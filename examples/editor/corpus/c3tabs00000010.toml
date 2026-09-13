@@ -1,4 +1,0 @@
-[fuzz]
-seed = 10
-schedule_seed = "10"
-events = ["tap 1", "tap 16", "tap 19"]

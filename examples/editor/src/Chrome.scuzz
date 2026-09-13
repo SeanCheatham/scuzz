@@ -7,6 +7,15 @@ def joinChild(dir: String, label: String): String =
 def scuzzNames(ents: List[(String, Bool)]): List[String] =
   List.filter(filesOf(ents), s => Str.endsWith(s, ".scuzz"))
 
+def liveRels(ents: List[String]): List[String] =
+  List.filter(ents, s => Str.endsWith(s, ".scuzz"))
+
+def verifyRels(ents: List[String]): List[String] =
+  List.filter(ents, s => Str.endsWith(s, ".scuzz_verify") || Str.endsWith(s, ".scuzz_scenario"))
+
+def stemOf(path: String): String =
+  Str.stripSuffix(Fs.basename(path), ".scuzz")
+
 def preferredRel(hasMain: Bool, srcHits: List[String], topHits: List[String]): String =
   if (hasMain) Fs.join("src", "Main.scuzz") else List.head(srcHits) match {
   case Option.Some(h) => Fs.join("src", h)
@@ -29,6 +38,9 @@ def pickSource(dir: String): IO[String] =
 def openBuffer(arg: String, isDir: Int): IO[String] =
   if (isDir == 0) IO.pure(arg) else pickSource(arg)
 
+def defaultArg(hasToml: Int): String =
+  if (hasToml != 0) "." else "sample.txt"
+
 def stripUri(s: String): String =
   if (Str.startsWith(s, "file://")) Str.drop(s, Str.len("file://")) else s
 
@@ -43,33 +55,12 @@ def keepPart(p: String): Bool =
 def keepWalk(s: String): Bool =
   Property.check("walk", Str.len(s) > 0, List.forall(Str.split(Str.stripSuffix(s, "/"), "/"), p => keepPart(p)))
 
-def parts(path: String): List[String] =
-  List.filter(Str.split(Str.stripSuffix(path, "/"), "/"), p => p != "")
-
-def treeLabel(path: String): String =
-  if (List.isEmpty(parts(path))) path else Str.concat(Str.repeat("    ", List.len(parts(path)) - 1), Str.concat(Fs.basename(Str.stripSuffix(path, "/")), if (Str.endsWith(path, "/")) "/" else ""))
-
 def flagNonEmpty(xs: List[String]): Int =
   if (List.len(xs) > 0) 1 else 0
-
-def parentRel(path: String): String =
-  if (Fs.dirname(Str.stripSuffix(path, "/")) == "." || Fs.dirname(Str.stripSuffix(path, "/")) == "" || Fs.dirname(Str.stripSuffix(path, "/")) == "/") "" else Str.concat(Fs.dirname(Str.stripSuffix(path, "/")), "/")
-
-def isVisible(path: String, open: List[String]): Bool =
-  parentRel(path) == "" || List.contains(open, parentRel(path))
-
-def flatten(ents: List[String], open: List[String]): List[String] =
-  List.filter(ents, s => isVisible(s, open))
-
-def toggleOpen(open: List[String], path: String): List[String] =
-  if (List.contains(open, path)) List.filter(open, s => !Str.startsWith(s, path)) else List.append(open, path)
 
 def seedWorkspace(): IO[Unit] =
   for {
     _ <- Fs.mkdirs("src").handleErrorWith(_ => IO.pure(()))
-    _ <- Fs.read("sample.txt").flatMap(_ => IO.pure(())).handleErrorWith(_ => Fs.write("sample.txt", """hello
-world
-"""))
     _ <- Fs.read("scuzz.toml").flatMap(_ => IO.pure(())).handleErrorWith(_ => Fs.write("scuzz.toml", ""))
   } yield ()
 
@@ -133,4 +124,3 @@ def pollTab(path: String, body: String, orig: String, dirty: Int): IO[(String, S
 
 def pollTabs(paths: List[String], bodies: List[String], origs: List[String], idx: Int, curBody: String, curOrig: String): IO[(List[String], List[String], Int)] =
   IO.foreach(List.indices(paths), i => pollTab(List.at(paths, i), if (i == idx) curBody else List.at(bodies, i), if (i == idx) curOrig else List.at(origs, i), if (i == idx) dirtyFlag(curBody, curOrig) else dirtyFlag(List.at(bodies, i), List.at(origs, i)))).map(rows => (List.map(rows, r => r._1), List.map(rows, r => r._2), if (List.exists(rows, r => r._3 == 1)) 1 else 0))
-

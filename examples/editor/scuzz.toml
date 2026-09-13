@@ -1,10 +1,10 @@
 [package]
 name = "editor"
 version = "0.1.0"
-description = "Open a path from Sys.args, edit in View.editor, check JSON, save tabs"
+description = "Package Index Book: Live stems, Verify claims, Session output, View.editor"
 
 [ui]
 default_runtime = "desktop"
 headless_size = [960, 560]
 headless_scale = 1.0
-tap_button = 3
+tap_button = 0

@@ -1,4 +1,4 @@
 [fuzz]
 seed = 5
 schedule_seed = "5"
-events = ["tap 7"]
+events = ["tap outlined:Find"]
