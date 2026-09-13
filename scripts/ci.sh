@@ -277,6 +277,15 @@ PY
 slice_ui_test() {
   need_scuzz
   "$SCUZZ" fuzz --iterations 0 examples/counter
+  python3 - <<'PY'
+import json
+with open("examples/counter/build/fuzz/summary.json") as f:
+    d = json.load(f)
+br = d["breadth"]
+assert "signals" in br["varied"], br
+assert "count" in br["claimed"]["signalInt"], br
+assert "signals" not in br["unclaimed"], br
+PY
   "$SCUZZ" fuzz --iterations 0 examples/studio
   mkdir -p scratchpad/editor
   (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" fuzz --iterations 0 "$ROOT/examples/editor")

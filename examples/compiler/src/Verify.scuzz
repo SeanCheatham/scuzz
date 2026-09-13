@@ -1,3 +1,5 @@
+record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], unclaimed: List[String])
+
 import Parse.Fun
 import Parse.Param
 import Parse.Prog
@@ -394,8 +396,8 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
-def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String]): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), "}"))))))))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], br: Breadth): String =
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jBreadth(br), "}")))))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -435,6 +437,38 @@ def jRegionsRest(rows: List[(String, Bool)]): String =
 
 def jRegion(row: (String, Bool)): String =
   Str.concat("{\"location\":", Str.concat(Check.jsonStr(row._1), Str.concat(",\"reached\":", Str.concat(jb(row._2), "}"))))
+
+def jKVList(k: String, xs: List[String]): String =
+  Str.concat("\"", Str.concat(k, Str.concat("\":", jStrList(xs))))
+
+def jClaimed(signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): String =
+  Str.concat("{", Str.concat(List.join(jKVList("signalInt", signalInt) :: jKVList("signalListLen", signalListLen) :: jKVList("signalStrHas", signalStrHas) :: jKVList("a11yHas", a11yHas) :: jKVList("lastHitHas", lastHitHas) :: jKVList("driveHas", driveHas) :: jKVList("effectHas", effectHas) :: noStr(), ","), "}"))
+
+def jBreadth(br: Breadth): String =
+  br match {
+    case Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, unclaimed) => Str.concat(",\"breadth\":{\"varied\":", Str.concat(jStrList(varied), Str.concat(",\"claimed\":", Str.concat(jClaimed(signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas), Str.concat(",\"unclaimed\":", Str.concat(jStrList(unclaimed), "}"))))))
+  }
+
+def noBreadth(): Breadth =
+  Breadth(noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr())
+
+def sampleBreadth(): Breadth =
+  Breadth(["signals"], ["count"], noStr(), noStr(), ["text:count = -1"], noStr(), noStr(), noStr(), noStr())
+
+def breadthOf(files: List[(String, String)], raw: String): Breadth =
+  breadthFrom(dumpNames(raw), files)
+
+def breadthFrom(varied: List[String], files: List[(String, String)]): Breadth =
+  breadthFill(varied, sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalInt", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalListLen", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalStrHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.a11yHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.lastHitHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.driveHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.effectHas", 2))))
+
+def breadthFill(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): Breadth =
+  Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, breadthUnclaimed(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas))
+
+def breadthUnclaimed(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): List[String] =
+  List.filter(varied, b => breadthGap(b, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas))
+
+def breadthGap(b: String, signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): Bool =
+  if (b == "signals") List.isEmpty(signalInt) && List.isEmpty(signalListLen) && List.isEmpty(signalStrHas) else if (b == "a11y") List.isEmpty(a11yHas) else if (b == "last_hit") List.isEmpty(lastHitHas) else if (b == "drive") List.isEmpty(driveHas) else if (b == "effects") List.isEmpty(effectHas) else false
 
 def jReachKey(key: String, declared: List[String], reached: List[String]): String =
   Str.concat(",\"", Str.concat(key, Str.concat("\":", jReach(declared, reached))))
