@@ -680,6 +680,9 @@ def newVerifyUi(): String =
 def newVerifyIo(): String =
   "def greetFact(): Bool =\n  Main.greet() == \"Hello, Scuzz!\"\n\n"
 
+def newCorpusUi(): String =
+  "[fuzz]\nevents = [\"tap button:+1\"]\n"
+
 def writeNew(dir: String, name: String, ui: Bool): IO[Unit] =
   Fs.write(Drive.joinSlash(dir, "scuzz.toml"), if (ui) newTomlUi(name) else newTomlIo(name)).flatMap(_ => writeNewMain(dir, name, ui))
 
@@ -693,5 +696,11 @@ def writeNewMain(dir: String, name: String, ui: Bool): IO[Unit] =
   Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "src"), "Main.scuzz"), if (ui) newMainUi() else newMainIo()).flatMap(_ => writeNewVerify(dir, name, ui))
 
 def writeNewVerify(dir: String, name: String, ui: Bool): IO[Unit] =
-  Fs.write(Drive.joinSlash(dir, Str.concat(name, ".scuzz_verify")), if (ui) newVerifyUi() else newVerifyIo()).flatMap(_ => IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz fuzz --iterations 0 && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz fuzz --iterations 0 && scuzz run"))))
+  Fs.write(Drive.joinSlash(dir, Str.concat(name, ".scuzz_verify")), if (ui) newVerifyUi() else newVerifyIo()).flatMap(_ => writeNewCorpus(dir, ui))
+
+def writeNewCorpus(dir: String, ui: Bool): IO[Unit] =
+  if (ui) Fs.mkdirs(Drive.joinSlash(dir, "corpus")).flatMap(_ => Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "corpus"), "plus.toml"), newCorpusUi()).flatMap(_ => printNew(dir, true))) else printNew(dir, false)
+
+def printNew(dir: String, ui: Bool): IO[Unit] =
+  IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz fuzz --iterations 0 && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz fuzz --iterations 0 && scuzz run")))
 
