@@ -1,10 +1,12 @@
 record Topic(id: String, title: String, blocks: List[Block])
 
+record NavLink(label: String, route: String)
+
 enum Block:
   case Para(text: String)
   case Code(text: String)
   case Cmd(text: String)
-  case Link(label: String, route: String)
+  case Link(nav: NavLink)
   case Figure(caption: String)
 
 def verbs(): List[String] =
@@ -81,7 +83,7 @@ def renderBlock(b: Block): String =
     case Block.Para(text) => wrapPara(text)
     case Block.Code(text) => indentBlock(text)
     case Block.Cmd(text) => indentBlock(text)
-    case Block.Link(label, route) => wrapPara(Str.concat(label, Str.concat(" -> ", route)))
+    case Block.Link(nav) => wrapPara(Str.concat(nav.label, Str.concat(" -> ", nav.route)))
     case Block.Figure(caption) => wrapPara(caption)
   }
 

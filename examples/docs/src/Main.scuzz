@@ -12,7 +12,7 @@ def blockView(b: Block): View =
     case Block.Para(text) => paragraph(text)
     case Block.Code(text) => code(text)
     case Block.Cmd(text) => code(text)
-    case Block.Link(label, route) => View.padding(8, View.link(label, route))
+    case Block.Link(nav) => View.padding(8, View.link(nav.label, nav.route))
     case Block.Figure(caption) => View.padding(8, View.image(280, 48, Theme.primary(), caption))
   }
 
@@ -28,39 +28,46 @@ def startHero(): View =
 def startTiles(): View =
   View.padding(8, View.grid(2, View.navTile(Icon.install(), "Install the CLI", "install"), View.navTile(Icon.gui(), "Build a GUI", "gui"), View.navTile(Icon.web(), "Ship to the web", "web"), View.navTile(Icon.code(), "Read the language", "language")))
 
+def navBack(topics: List[Topic], i: Int): View =
+  if (i <= 0) View.text("") else View.link(Str.concat("Back: ", List.at(topics, i - 1).title), List.at(topics, i - 1).id)
+
+def navNext(topics: List[Topic], i: Int): View =
+  if (i >= List.len(topics) - 1) View.text("") else View.link(Str.concat("Next: ", List.at(topics, i + 1).title), List.at(topics, i + 1).id)
+
+def pageNav(topics: List[Topic], i: Int): View =
+  View.padding(8, View.wrap(navBack(topics, i), navNext(topics, i)))
+
 def liveCounter(count: Signal[Int]): View =
   View.card(View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages.")))
 
 def guiLive(tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
   View.maxSize(0, 520, View.tabs(tab, View.column(View.section("live", "Live example", View.column(View.heading(2, View.text("Try text input")), paragraph("Type text, then switch tabs or sections. Your text stays in the Signals."), View.textField(draft, "Your text"), View.bindText(Signal.map(draft, text => Str.concat("You typed: ", text))), View.editor(notes), View.bindText(Signal.map(notes, text => Str.concat("Notes: ", text))))), View.section("source", "Source", code("@main def main: IO[Unit] =\n  for {\n    draft = Signal.make(\"\")\n    notes = Signal.make(\"\")\n    _ <- Ui.run(_ => View.column(\n      View.textField(draft, \"Your text\"),\n      View.bindText(Signal.map(draft, text =>\n        Str.concat(\"You typed: \" , text))),\n      View.editor(notes),\n      View.bindText(Signal.map(notes, text =>\n        Str.concat(\"Notes: \" , text)))))\n  } yield ()")))))
 
-def topicAt(i: Int): Topic =
-  List.at(Manual.topics(), i)
+def titleAt(topics: List[Topic], n: Int): String =
+  if (n < 0 || n >= List.len(topics)) "Docs" else List.at(topics, n).title
 
-def titleAt(n: Int): String =
-  if (n < 0 || n >= List.len(Manual.topics())) "Docs" else topicAt(n).title
+def topicSection(topics: List[Topic], i: Int, body: View): View =
+  View.section(List.at(topics, i).id, List.at(topics, i).title, View.maxSize(800, 0, View.column(pageHead(List.at(topics, i).title), body, pageNav(topics, i))))
 
-def topicSection(i: Int, body: View): View =
-  View.section(topicAt(i).id, topicAt(i).title, View.maxSize(800, 0, View.column(pageHead(topicAt(i).title), body)))
+def startSection(topics: List[Topic], blocks: Signal[List[Block]], count: Signal[Int]): View =
+  topicSection(topics, 0, View.column(startHero(), startTiles(), View.divider(), blocksColumn(blocks), liveCounter(count)))
 
-def startSection(blocks: Signal[List[Block]], count: Signal[Int]): View =
-  topicSection(0, View.column(startHero(), startTiles(), View.divider(), blocksColumn(blocks), liveCounter(count)))
+def guiSection(topics: List[Topic], blocks: Signal[List[Block]], tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
+  topicSection(topics, 3, View.column(blocksColumn(blocks), guiLive(tab, draft, notes)))
 
-def guiSection(blocks: Signal[List[Block]], tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
-  topicSection(3, View.column(blocksColumn(blocks), guiLive(tab, draft, notes)))
-
-def plainSection(blocks: List[Signal[List[Block]]], i: Int): View =
-  topicSection(i, blocksColumn(List.at(blocks, i)))
+def plainSection(topics: List[Topic], blocks: List[Signal[List[Block]]], i: Int): View =
+  topicSection(topics, i, blocksColumn(List.at(blocks, i)))
 
 @main def main: IO[Unit] =
   for {
-    blocks = List.map(Manual.topics(), topic => Signal.make(topic.blocks))
+    topics = Manual.topics()
+    blocks = List.map(topics, topic => Signal.make(topic.blocks))
     page = Signal.make(0)
     guiTab = Signal.make(0)
-    title = Signal.map(page, n => titleAt(n))
+    title = Signal.map(page, n => titleAt(topics, n))
     count = Signal.make(0)
     draft = Signal.make("")
     notes = Signal.make("")
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(List.at(blocks, 0), count), plainSection(blocks, 1), plainSection(blocks, 2), guiSection(List.at(blocks, 3), guiTab, draft, notes), plainSection(blocks, 4), plainSection(blocks, 5), plainSection(blocks, 6), plainSection(blocks, 7), plainSection(blocks, 8), plainSection(blocks, 9), plainSection(blocks, 10)))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), count), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes), plainSection(topics, blocks, 4), plainSection(topics, blocks, 5), plainSection(topics, blocks, 6), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10)))))
   } yield ()
