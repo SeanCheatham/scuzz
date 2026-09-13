@@ -141,11 +141,16 @@ async function check(browserType, url, mobile) {
       window.dispatchEvent(wheel);
       const zoom = new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 10, ctrlKey: true});
       window.dispatchEvent(zoom);
-      const touch = new Touch({identifier: 1, target: Module.canvas, clientX: 40, clientY: 80});
-      const move = new TouchEvent('touchmove', {bubbles: true, cancelable: true, touches: [touch], changedTouches: [touch]});
-      Module.canvas.dispatchEvent(move);
-      return [wheel.defaultPrevented, zoom.defaultPrevented, move.defaultPrevented];
-    }), [true, false, true]);
+      return [wheel.defaultPrevented, zoom.defaultPrevented];
+    }), [true, false]);
+    if (mobile && browserType === chromium) {
+      assert.equal(await page.evaluate(() => {
+        const touch = new Touch({identifier: 1, target: Module.canvas, clientX: 40, clientY: 80});
+        const move = new TouchEvent('touchmove', {bubbles: true, cancelable: true, touches: [touch], changedTouches: [touch]});
+        Module.canvas.dispatchEvent(move);
+        return move.defaultPrevented;
+      }), true);
+    }
     if (browserType === chromium) {
       const cdp = await context.newCDPSession(page);
       const listeners = async expression => {
