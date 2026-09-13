@@ -15709,6 +15709,57 @@ static void test_app_shell_and_tabs(void) {
   }
 }
 
+static void test_docs_nav_widgets(void) {
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *sections = sz_view_column();
+  SzView *page;
+  SzView *root;
+  SzView *taps[16];
+  SzView *crumb;
+  SzView *img;
+  SzView *icon;
+  SzString *dump;
+  const SzTheme *theme = sz_theme_default();
+  float caption_h;
+
+  page = sz_view_column();
+  sz_view_add_child(page, sz_view_link("Open GUI", "gui"));
+  sz_view_add_child(page, sz_view_nav_tile('W', "Ship to the web", "web"));
+  crumb = sz_view_breadcrumb();
+  sz_view_add_child(crumb, sz_view_link("Docs", "start"));
+  sz_view_add_child(crumb, sz_view_text("Start"));
+  sz_view_add_child(page, crumb);
+  img = sz_view_image(80, 32, 0xFFE8EF48u, "Scuzz Docs");
+  icon = sz_view_icon('B', 0xFF923D24u);
+  sz_view_add_child(page, img);
+  sz_view_add_child(page, icon);
+  sz_view_add_child(sections, sz_view_section("start", "Start", page));
+  sz_view_add_child(sections, sz_view_section("gui", "GUI", sz_view_text("GUI")));
+  sz_view_add_child(sections, sz_view_section("web", "Web", sz_view_text("Web")));
+  root = sz_view_index_book(selected, sections);
+  sz_view_layout(root, 640.f, 480.f, theme);
+  dump = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(dump), "link:Open GUI") != NULL);
+  assert(strstr(sz_string_cstr(dump), "navtile:Ship to the web") != NULL);
+  assert(strstr(sz_string_cstr(dump), "breadcrumb:Breadcrumb") != NULL);
+  assert(strstr(sz_string_cstr(dump), "image:Scuzz Docs") != NULL);
+  assert(strstr(sz_string_cstr(dump), "icon:B") != NULL);
+  sz_string_free(dump);
+  caption_h = sz_view_frame(img).h;
+  assert(caption_h > 32.f);
+  assert(sz_view_is_tap_target(page->children[0]));
+  assert(sz_view_collect_tap_targets(root, taps, 16) >= 5);
+  assert(sz_view_tap_label(root, "Open GUI"));
+  sz_view_layout(root, 640.f, 480.f, theme);
+  assert(sz_signal_int_get(selected) == 1);
+  assert(sz_view_navigate(root, "web"));
+  assert(sz_signal_int_get(selected) == 2);
+  assert(!sz_view_navigate(root, "missing"));
+  assert(!sz_view_navigate(root, "https://example.com"));
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
 static void test_index_book_long_index(void) {
   SzSignalInt *selected = sz_signal_int(0);
   SzView *sections = sz_view_column();
@@ -17028,6 +17079,7 @@ int main(void) {
   test_index_book_navigation_and_resize();
   test_app_shell_and_tabs();
   test_index_book_long_index();
+  test_docs_nav_widgets();
   test_app_chord_save();
   test_app_chord_palette();
   test_caret_metrics();

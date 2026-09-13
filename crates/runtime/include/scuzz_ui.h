@@ -101,6 +101,12 @@ const SzTheme *sz_theme_default(void);
 
 /* Language-facing theme / color ints (ARGB). */
 int64_t sz_theme_accent(void);
+int64_t sz_icon_book(void);
+int64_t sz_icon_code(void);
+int64_t sz_icon_link(void);
+int64_t sz_icon_web(void);
+int64_t sz_icon_gui(void);
+int64_t sz_icon_install(void);
 int64_t sz_theme_primary(void);
 int64_t sz_theme_muted(void);
 int64_t sz_theme_foreground(void);
@@ -233,7 +239,10 @@ typedef enum SzViewKind {
   SZ_VIEW_APP_SHELL,
   SZ_VIEW_APP_BAR,
   SZ_VIEW_TABS,
-  SZ_VIEW_FOCUS_GROUP         /* child list of taps; sizes to the child; not a tap */
+  SZ_VIEW_FOCUS_GROUP,       /* child list of taps; sizes to the child; not a tap */
+  SZ_VIEW_LINK,             /* label + route; Index Book section or http(s) URL */
+  SZ_VIEW_BREADCRUMB,       /* wrap of trail children; paints > between items */
+  SZ_VIEW_NAV_TILE          /* icon + title + route; tap navigates like a link */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -421,6 +430,11 @@ SzView *sz_view_aspect_ratio(int rw, int rh, SzView *child);
 SzView *sz_view_fraction(int wpct, int hpct, SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
 SzView *sz_view_icon(char glyph, uint32_t argb);
+SzView *sz_view_link(const char *label, const char *route);
+SzView *sz_view_breadcrumb(void);
+SzView *sz_view_nav_tile(char glyph, const char *title, const char *route);
+/* Select the Index Book section whose ID equals `id`. 1 if a page changed. */
+int sz_view_navigate(SzView *root, const char *id);
 /* Visible iff Signal.get(sig) == value; returns child. */
 SzView *sz_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 
@@ -571,7 +585,11 @@ typedef enum SzA11yRole {
   SZ_A11Y_TAB = 45,
   SZ_A11Y_TAB_LIST = 46,
   SZ_A11Y_TAB_PANEL = 47,
-  SZ_A11Y_APP_BAR = 48
+  SZ_A11Y_APP_BAR = 48,
+  SZ_A11Y_ICON = 49,
+  SZ_A11Y_LINK = 50,
+  SZ_A11Y_BREADCRUMB = 51,
+  SZ_A11Y_NAV_TILE = 52
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -827,6 +845,9 @@ SzIo *sz_lang_ui_set_editor_inlays(SzList *hints);
 SzIo *sz_lang_ui_set_editor_folds(SzList *ranges);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
+SzView *sz_lang_view_link(SzString *label, SzString *route);
+SzView *sz_lang_view_breadcrumb(void);
+SzView *sz_lang_view_nav_tile(int64_t glyph, SzString *title, SzString *route);
 void *sz_lang_view_add_child(SzView *parent, SzView *child);
 SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 

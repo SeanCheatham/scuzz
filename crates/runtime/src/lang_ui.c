@@ -220,6 +220,7 @@ SzView *sz_lang_view_column(void) { return sz_view_column(); }
 SzView *sz_lang_view_row(void) { return sz_view_row(); }
 
 SzView *sz_lang_view_wrap(void) { return sz_view_wrap(); }
+SzView *sz_lang_view_breadcrumb(void) { return sz_view_breadcrumb(); }
 SzView *sz_lang_view_grid(int64_t cols) { return sz_view_grid((int)cols); }
 
 SzView *sz_lang_view_stack(void) { return sz_view_stack(); }
@@ -288,6 +289,16 @@ SzView *sz_lang_view_icon(int64_t glyph, int64_t argb) {
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption) {
   return sz_view_image((int)w, (int)h, (uint32_t)argb,
                        caption ? sz_string_cstr(caption) : "");
+}
+
+SzView *sz_lang_view_link(SzString *label, SzString *route) {
+  return sz_view_link(label ? sz_string_cstr(label) : "",
+                      route ? sz_string_cstr(route) : "");
+}
+
+SzView *sz_lang_view_nav_tile(int64_t glyph, SzString *title, SzString *route) {
+  return sz_view_nav_tile((char)glyph, title ? sz_string_cstr(title) : "",
+                          route ? sz_string_cstr(route) : "");
 }
 
 /* Codegen declares this as returning ptr: Scuzz Unit is a null pointer.
