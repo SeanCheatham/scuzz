@@ -12418,13 +12418,31 @@ int main(void) {
     assert(v->index == 1);
     sz_release(needle);
     sz_release(hit);
-    /* No hit at all stays valid. */
-    hit = sz_string_from_cstr("button:-1");
-    needle = sz_string_from_cstr("text:anything");
-    v = sz_verdict_after_hit(tl, hit, needle);
-    assert(v->valid);
-    sz_release(needle);
-    sz_release(hit);
+    /* No hit at all stays valid. Campaign dump records vacuous. */
+    {
+      const char *trig = "/tmp/scuzz_test_io_tl_vacuous.trigger";
+      FILE *f;
+      char buf[256];
+      int vacuous = 0;
+      unlink(trig);
+      setenv("SCUZZ_TRIGGER_DUMP", trig, 1);
+      hit = sz_string_from_cstr("button:-1");
+      needle = sz_string_from_cstr("text:anything");
+      v = sz_verdict_after_hit(tl, hit, needle);
+      assert(v->valid);
+      f = fopen(trig, "r");
+      assert(f);
+      while (fgets(buf, (int)sizeof buf, f)) {
+        if (strstr(buf, "claim\tbutton:-1\tvacuous"))
+          vacuous = 1;
+      }
+      fclose(f);
+      assert(vacuous);
+      unsetenv("SCUZZ_TRIGGER_DUMP");
+      unlink(trig);
+      sz_release(needle);
+      sz_release(hit);
+    }
     sz_timeline_free(tl);
     remove(path);
   }
@@ -12443,8 +12461,26 @@ int main(void) {
     tl = sz_timeline_load(path);
     assert(tl);
     hit = sz_string_from_cstr("button:+1");
-    v = sz_verdict_on_hit(tl, hit, (void *)verify_pred_true, NULL);
-    assert(v->valid);
+    {
+      const char *trig = "/tmp/scuzz_test_io_tl_onhit.trigger";
+      FILE *f;
+      char buf[256];
+      int fired = 0;
+      unlink(trig);
+      setenv("SCUZZ_TRIGGER_DUMP", trig, 1);
+      v = sz_verdict_on_hit(tl, hit, (void *)verify_pred_true, NULL);
+      assert(v->valid);
+      f = fopen(trig, "r");
+      assert(f);
+      while (fgets(buf, (int)sizeof buf, f)) {
+        if (strstr(buf, "claim\tbutton:+1\ttriggered"))
+          fired = 1;
+      }
+      fclose(f);
+      assert(fired);
+      unsetenv("SCUZZ_TRIGGER_DUMP");
+      unlink(trig);
+    }
     v = sz_verdict_step_every(tl, (void *)verify_pred_true, NULL);
     assert(v->valid);
     sz_release(hit);

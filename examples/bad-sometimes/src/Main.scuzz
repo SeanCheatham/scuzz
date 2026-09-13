@@ -1,0 +1,8 @@
+def noteTap(): Unit =
+  Property.sometimes("tappedPlus")
+
+@main def main: IO[Unit] =
+  for {
+    title = Signal.make("idle")
+    _ <- Ui.run(_ => View.text(Signal.get(title)))
+  } yield ()
