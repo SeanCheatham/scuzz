@@ -1888,7 +1888,7 @@ def emitViewNavTile(code: String, vals: List[String], owns: List[Bool], prefix: 
   Slot(join(code, join(viewNavTileCall(vals, prefix), join(if (headOwn(tailOwn(owns))) relPtr(arg1(vals)) else "", if (headOwn(tailOwn(tailOwn(owns)))) relPtr(arg2(vals)) else ""))), pct(prefix, "v"), true)
 
 def viewNavTileCall(vals: List[String], prefix: String): String =
-  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_nav_tile(i64 ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")")))))))))
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_nav_tile(i64 ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")"))))))))
 
 def emitPropKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   if (f == "Property.check") emitPropCheck(code, vals, owns, prefix) else if (f == "Property.assert") emitPropAssert(code, vals, owns, prefix) else if (f == "Property.force") emitPropForce(code, vals, owns, prefix) else if (f == "Property.classify") emitPropClass(code, vals, owns, prefix) else if (f == "Property.a11yHas") emitPropA11y(code, vals, owns, prefix) else if (f == "Property.signalInt") emitPropI64("sz_property_signal_int", code, vals, owns, prefix) else if (f == "Property.signalListLen") emitPropI64("sz_property_signal_list_len", code, vals, owns, prefix) else if (f == "Property.signalStr") emitPropStr(code, vals, owns, prefix) else if (f == "Property.signalListAt") emitPropListAt(code, vals, owns, prefix) else emitPropCheck(code, vals, owns, prefix)
