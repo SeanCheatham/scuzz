@@ -390,7 +390,23 @@ def miss(): Int = 2
 
 def hit(): Int = 1
 def miss(): Int = 99
-""") && branchCountsOk()
+""") && branchCountsOk() && rewriteParseOnceOk()
+
+def rewriteParseOnceOk(): Bool =
+  Verify.rewriteReqFiles(("Clean", "def n(): Int = 1") :: Manifest.noPairs()) == ("Clean", "def n(): Int = 1") :: Manifest.noPairs() && Str.contains(rewriteReqMain("def n(): Int = 1.require(true)"), "Property.check") && Str.contains(rewriteReqMain("""def note(n: Int where n >= 0): Bool = true
+def go(): Bool = note(1)
+"""), "Property.check")
+
+def rewriteReqMain(src: String): String =
+  rewriteReqMainGo(Verify.rewriteReqFiles(("Main", src) :: Manifest.noPairs()))
+
+def rewriteReqMainGo(files: List[(String, String)]): String =
+  if (List.isEmpty(files)) "" else rewriteReqMainHd(List.at(files, 0))
+
+def rewriteReqMainHd(h: (String, String)): String =
+  h match {
+    case (_, src) => src
+  }
 
 def branchCountsOk(): Bool =
   branchIfRows() == wantBranchIfRows() && branchMatchRows() == wantBranchMatchRows()

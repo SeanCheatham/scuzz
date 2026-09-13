@@ -604,13 +604,13 @@ def callLitsBind(b: Bind, f: String, idx: Int): List[String] =
   }
 
 def coverageRowsOf(files: List[(String, String)], compiled: List[(String, String)], hits: String): List[(String, Bool)] =
-  coverageProgRows(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))
+  coverageBoth(files, compiled, hits)._1
 
 def coverageBoth(files: List[(String, String)], compiled: List[(String, String)], hits: String): (List[(String, Bool)], List[(String, Bool)]) =
-  coverageBothLive(Parse.parseFiles(files), files, compiled, Str.lines(hits))
+  coverageBothKept(parseKept(files), files, compiled, Str.lines(hits))
 
-def coverageBothLive(p: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
-  coverageBothBuilt(p, Parse.parseFiles(rewriteReqFilesGot(files, p)), Parse.parseFiles(compiled), files, compiled, hits)
+def coverageBothKept(kept: List[(String, String, Prog)], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
+  coverageBothBuilt(mergeKept(kept), Parse.parseFiles(rewriteReqFromKept(kept)), Parse.parseFiles(compiled), files, compiled, hits)
 
 def coverageBothBuilt(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
   (coverageProgRows(p, expected, built, files, compiled, hits), branchProgRows(p, expected, built, files, compiled, hits))
@@ -631,7 +631,7 @@ def coverageBody(expected: Fun, built: Fun, compiled: List[(String, String)], hi
   Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLoc(compiled, built.mod, built.off))
 
 def branchRowsOf(files: List[(String, String)], compiled: List[(String, String)], hits: String): List[(String, Bool)] =
-  branchProgRows(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))
+  coverageBoth(files, compiled, hits)._2
 
 def branchProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
   List.concat(branchDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), branchMainRows(p, expected, built, files, compiled, hits))
@@ -1130,24 +1130,46 @@ def noParam(): List[Param] =
 def noBind(): List[Bind] =
   []
 
-def rewriteReqFiles(files: List[(String, String)]): List[(String, String)] =
-  rewriteReqFilesGot(files, Parse.parseFiles(files))
+def noKept(): List[(String, String, Prog)] =
+  []
 
-def rewriteReqFilesGot(files: List[(String, String)], p: Prog): List[(String, String)] =
-  p match {
-    case Prog(_, enums, _, _, _, _, defs, _, _) => rewriteReqGo(files, defs, enums)
-  }
+def parseKept(files: List[(String, String)]): List[(String, String, Prog)] =
+  if (List.isEmpty(files)) noKept() else parseKeptHd(List.at(files, 0), List.tail(files))
 
-def rewriteReqGo(files: List[(String, String)], funs: List[Fun], ens: List[En]): List[(String, String)] =
-  if (List.isEmpty(files)) files else rewriteReqHd(List.at(files, 0), List.tail(files), funs, ens)
-
-def rewriteReqHd(h: (String, String), rest: List[(String, String)], funs: List[Fun], ens: List[En]): List[(String, String)] =
+def parseKeptHd(h: (String, String), rest: List[(String, String)]): List[(String, String, Prog)] =
   h match {
-    case (stem, src) => (stem, rewriteReqSrc(src, stem, funs, ens)) :: rewriteReqGo(rest, funs, ens)
+    case (stem, src) => (stem, src, Parse.parseFile(stem, src)) :: parseKept(rest)
   }
 
-def rewriteReqSrc(src: String, stem: String, funs: List[Fun], ens: List[En]): String =
-  rewriteReqKeep(src, Parse.parse(Lexer.lex(src)), stem, funs, ens)
+def mergeKept(kept: List[(String, String, Prog)]): Prog =
+  mergeKeptGo(kept, Parse.emptyProg())
+
+def mergeKeptGo(kept: List[(String, String, Prog)], acc: Prog): Prog =
+  if (List.isEmpty(kept)) acc else mergeKeptHd(List.at(kept, 0), List.tail(kept), acc)
+
+def mergeKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], acc: Prog): Prog =
+  h match {
+    case (_, _, p) => mergeKeptGo(rest, Parse.merge(acc, p))
+  }
+
+def rewriteReqFiles(files: List[(String, String)]): List[(String, String)] =
+  rewriteReqFromKept(parseKept(files))
+
+def rewriteReqFromKept(kept: List[(String, String, Prog)]): List[(String, String)] =
+  rewriteReqKeptGo(kept, mergeKept(kept))
+
+def rewriteReqKeptGo(kept: List[(String, String, Prog)], p: Prog): List[(String, String)] =
+  p match {
+    case Prog(_, enums, _, _, _, _, defs, _, _) => rewriteReqKeptFiles(kept, defs, enums)
+  }
+
+def rewriteReqKeptFiles(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String)] =
+  if (List.isEmpty(kept)) Manifest.noPairs() else rewriteReqKeptHd(List.at(kept, 0), List.tail(kept), funs, ens)
+
+def rewriteReqKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String)] =
+  h match {
+    case (stem, src, fp) => (stem, rewriteReqKeep(src, fp, stem, funs, ens)) :: rewriteReqKeptFiles(rest, funs, ens)
+  }
 
 def rewriteReqKeep(src: String, p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
   if (progHasReq(p) || progNeedsWhere(p, funs, ens)) rewriteReqProg(p, stem, funs, ens) else src
