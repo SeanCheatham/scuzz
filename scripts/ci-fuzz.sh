@@ -353,6 +353,7 @@ assert d["coverage"]["reached"] >= 1
 assert any(r["reached"] for r in d["coverage"]["regions"])
 PY
 fuzz --iterations 4 examples/hello
+grep -q 'drive greetFact' examples/hello/build/seeds.txt
 fuzz --iterations 4 --oracles examples/counter
 python3 - <<'PY'
 import json

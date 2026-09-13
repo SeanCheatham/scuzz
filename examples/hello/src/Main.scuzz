@@ -1,2 +1,5 @@
+def greet(): String =
+  "Hello, Scuzz!"
+
 @main def main: IO[Unit] =
-  IO.println("Hello, Scuzz!").flatMap(_ => IO.println("ready."))
+  IO.println(greet()).flatMap(_ => IO.println("ready."))
