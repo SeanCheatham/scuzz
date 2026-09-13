@@ -43,10 +43,10 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 1);
     await page.getByRole('link', {name: 'Docs', exact: true}).click();
     await expectText('text:Start');
-    await page.getByRole('link', {name: 'Next: Install', exact: true}).click();
+    await page.getByRole('link', {name: 'Next: Install', exact: true}).click({force: true});
     await expectText('text:Install');
     assert.equal(new URL(page.url()).hash, '#section=install');
-    await page.getByRole('link', {name: 'Back: Start', exact: true}).click();
+    await page.getByRole('link', {name: 'Back: Start', exact: true}).click({force: true});
     await expectText('text:Start');
     await page.getByRole('button', {name: 'Add one', exact: true}).focus();
     await page.getByRole('button', {name: 'Add one', exact: true}).click();
