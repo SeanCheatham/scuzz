@@ -394,8 +394,8 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
-def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)]): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), "}"))))))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String]): String =
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), "}"))))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -435,6 +435,136 @@ def jRegionsRest(rows: List[(String, Bool)]): String =
 
 def jRegion(row: (String, Bool)): String =
   Str.concat("{\"location\":", Str.concat(Check.jsonStr(row._1), Str.concat(",\"reached\":", Str.concat(jb(row._2), "}"))))
+
+def jReachKey(key: String, declared: List[String], reached: List[String]): String =
+  Str.concat(",\"", Str.concat(key, Str.concat("\":", jReach(declared, reached))))
+
+def jReach(declared: List[String], reached: List[String]): String =
+  Str.concat("{\"declared\":", Str.concat(jStrList(sortStrs(List.distinct(declared))), Str.concat(",\"reached\":", Str.concat(jStrList(sortStrs(reachKeep(declared, reached))), Str.concat(",\"never\":", Str.concat(jStrList(sortStrs(reachNever(declared, reached))), "}"))))))
+
+def reachKeep(declared: List[String], reached: List[String]): List[String] =
+  List.filter(reached, n => List.contains(declared, n))
+
+def reachNever(declared: List[String], reached: List[String]): List[String] =
+  List.filter(declared, n => !List.contains(reached, n))
+
+def jStrList(xs: List[String]): String =
+  if (List.isEmpty(xs)) "[]" else Str.concat("[", Str.concat(jStrHead(xs), "]"))
+
+def jStrHead(xs: List[String]): String =
+  Str.concat(Check.jsonStr(List.at(xs, 0)), jStrRest(List.tail(xs)))
+
+def jStrRest(xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(",", Str.concat(Check.jsonStr(List.at(xs, 0)), jStrRest(List.tail(xs))))
+
+def dumpNames(raw: String): List[String] =
+  sortStrs(List.distinct(List.filter(linesOf(raw), l => l != "")))
+
+def triggerReached(raw: String): List[String] =
+  sortStrs(List.distinct(List.filter(List.map(linesOf(raw), triggerFired), l => l != "")))
+
+def triggerFired(line: String): String =
+  if (!Str.startsWith(line, "claim\t")) "" else triggerFired2(Str.slice(line, 6, Str.len(line)))
+
+def triggerFired2(rest: String): String =
+  triggerFired3(rest, lastTab(rest, 0, 0 - 1))
+
+def triggerFired3(rest: String, tab: Int): String =
+  if (tab < 0) "" else if (Str.slice(rest, tab + 1, Str.len(rest)) == "triggered") Str.slice(rest, 0, tab) else ""
+
+def lastTab(s: String, i: Int, acc: Int): Int =
+  if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 9) lastTab(s, i + 1, i) else lastTab(s, i + 1, acc)
+
+def sometimesOf(files: List[(String, String)]): List[String] =
+  sortStrs(List.distinct(callLitsFiles(files, "Property.sometimes", 0)))
+
+def triggersOf(files: List[(String, String)]): List[String] =
+  sortStrs(List.distinct(List.concat(callLitsFiles(files, "Verdict.afterHit", 1), callLitsFiles(files, "Verdict.onHit", 1))))
+
+def callLitsFiles(files: List[(String, String)], f: String, idx: Int): List[String] =
+  if (List.isEmpty(files)) noStr() else List.concat(callLitsFile(List.at(files, 0), f, idx), callLitsFiles(List.tail(files), f, idx))
+
+def callLitsFile(file: (String, String), f: String, idx: Int): List[String] =
+  file match {
+    case (_stem, src) => callLitsOf(Parse.parse(Lexer.lex(src)), f, idx)
+  }
+
+def callLitsOf(p: Prog, f: String, idx: Int): List[String] =
+  p match {
+    case Prog(_, _, _, _, impls, _, defs, _, body) => List.concat(callLitsExpr(body, f, idx), List.concat(callLitsDefs(defs, f, idx), callLitsImpls(impls, f, idx)))
+  }
+
+def callLitsImpls(xs: List[Im], f: String, idx: Int): List[String] =
+  if (List.isEmpty(xs)) noStr() else List.concat(callLitsIm(List.at(xs, 0), f, idx), callLitsImpls(List.tail(xs), f, idx))
+
+def callLitsIm(im: Im, f: String, idx: Int): List[String] =
+  im match {
+    case Im(_, _, _, methods) => callLitsDefs(methods, f, idx)
+  }
+
+def callLitsDefs(ds: List[Fun], f: String, idx: Int): List[String] =
+  if (List.isEmpty(ds)) noStr() else List.concat(callLitsFun(List.at(ds, 0), f, idx), callLitsDefs(List.tail(ds), f, idx))
+
+def callLitsFun(d: Fun, f: String, idx: Int): List[String] =
+  d match {
+    case Fun(_, _, _, _, _, body, _, _) => callLitsExpr(body, f, idx)
+  }
+
+def callLitsExpr(e: Expr, f: String, idx: Int): List[String] =
+  e match {
+    case Expr.EPrint(inner, _) => callLitsExpr(inner, f, idx)
+    case Expr.ECall(name, args, _) => List.concat(callLitHit(name, args, f, idx), callLitsList(args, f, idx))
+    case Expr.EMethod(recv, name, args, _) => List.concat(callLitHit(qualCall(recv, name), args, f, idx), List.concat(callLitsExpr(recv, f, idx), callLitsList(args, f, idx)))
+    case Expr.EField(recv, _, _) => callLitsExpr(recv, f, idx)
+    case Expr.EBin(_, l, r, _) => List.concat(callLitsExpr(l, f, idx), callLitsExpr(r, f, idx))
+    case Expr.EUn(_, inner, _) => callLitsExpr(inner, f, idx)
+    case Expr.ELam(_, _, body) => callLitsExpr(body, f, idx)
+    case Expr.EIf(c, t, el, _) => List.concat(callLitsExpr(c, f, idx), List.concat(callLitsExpr(t, f, idx), callLitsExpr(el, f, idx)))
+    case Expr.EMatch(s, arms, _) => List.concat(callLitsExpr(s, f, idx), callLitsArms(arms, f, idx))
+    case Expr.EList(xs) => callLitsList(xs, f, idx)
+    case Expr.ETuple(xs) => callLitsList(xs, f, idx)
+    case Expr.ENamed(_, inner) => callLitsExpr(inner, f, idx)
+    case Expr.EAscribe(inner, _, _) => callLitsExpr(inner, f, idx)
+    case Expr.EFor(bs, body, _) => List.concat(callLitsBinds(bs, f, idx), callLitsExpr(body, f, idx))
+    case _ => noStr()
+  }
+
+def callLitHit(name: String, args: List[Expr], f: String, idx: Int): List[String] =
+  if (name != f) noStr() else callLitAt(args, idx)
+
+def qualCall(recv: Expr, name: String): String =
+  recv match {
+    case Expr.EVar(s, _) => Str.concat(s, Str.concat(".", name))
+    case _ => ""
+  }
+
+def callLitAt(args: List[Expr], idx: Int): List[String] =
+  if (List.len(args) <= idx) noStr() else callLitStr(List.at(args, idx))
+
+def callLitStr(e: Expr): List[String] =
+  e match {
+    case Expr.EStr(s, _) => if (s == "") noStr() else s :: noStr()
+    case _ => noStr()
+  }
+
+def callLitsList(xs: List[Expr], f: String, idx: Int): List[String] =
+  if (List.isEmpty(xs)) noStr() else List.concat(callLitsExpr(List.at(xs, 0), f, idx), callLitsList(List.tail(xs), f, idx))
+
+def callLitsArms(xs: List[Arm], f: String, idx: Int): List[String] =
+  if (List.isEmpty(xs)) noStr() else List.concat(callLitsArm(List.at(xs, 0), f, idx), callLitsArms(List.tail(xs), f, idx))
+
+def callLitsArm(a: Arm, f: String, idx: Int): List[String] =
+  a match {
+    case Arm(_, _, body) => callLitsExpr(body, f, idx)
+  }
+
+def callLitsBinds(xs: List[Bind], f: String, idx: Int): List[String] =
+  if (List.isEmpty(xs)) noStr() else List.concat(callLitsBind(List.at(xs, 0), f, idx), callLitsBinds(List.tail(xs), f, idx))
+
+def callLitsBind(b: Bind, f: String, idx: Int): List[String] =
+  b match {
+    case Bind(_, _, e) => callLitsExpr(e, f, idx)
+  }
 
 def coverageRowsOf(files: List[(String, String)], compiled: List[(String, String)], hits: String): List[(String, Bool)] =
   coverageProgRows(Parse.parseFiles(files), Parse.parseFiles(rewriteReqFiles(files)), Parse.parseFiles(compiled), files, compiled, Str.lines(hits))

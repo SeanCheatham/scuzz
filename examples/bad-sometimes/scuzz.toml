@@ -1,0 +1,9 @@
+[package]
+name = "bad-sometimes"
+version = "0.1.0"
+description = "Declared sometimes and hit triggers never fire. Search must fail."
+
+[ui]
+default_runtime = "headless"
+headless_size = [200, 120]
+headless_scale = 1.0

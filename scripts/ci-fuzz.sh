@@ -132,6 +132,37 @@ if fuzz --iterations 0 examples/bad-split > /tmp/scuzz-bad-split.log 2>&1; then
 fi
 cat /tmp/scuzz-bad-split.log
 grep -q "fuzz live/verify split: silent observation mismatch" /tmp/scuzz-bad-split.log
+if ! fuzz --iterations 0 examples/bad-sometimes; then
+  echo "corpus-only should report never-reached without failing" && exit 1
+fi
+python3 - <<'PY'
+import json
+with open("examples/bad-sometimes/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is True
+assert d["fuzz"]["iterations"] == 0
+assert "tappedPlus" in d["sometimes"]["declared"]
+assert "tappedPlus" in d["sometimes"]["never"]
+assert "button:+1" in d["triggers"]["declared"]
+assert "button:+1" in d["triggers"]["never"]
+assert "tappedPlus" not in d["sometimes"]["reached"]
+assert "button:+1" not in d["triggers"]["reached"]
+PY
+if fuzz --iterations 8 examples/bad-sometimes > /tmp/scuzz-bad-sometimes.log 2>&1; then
+  echo "search should fail when tappedPlus and button:+1 never fire" && exit 1
+fi
+cat /tmp/scuzz-bad-sometimes.log
+grep -q "sometimes never reached: tappedPlus" /tmp/scuzz-bad-sometimes.log
+grep -q "trigger never fired: button:+1" /tmp/scuzz-bad-sometimes.log
+python3 - <<'PY'
+import json
+with open("examples/bad-sometimes/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is False
+assert d["fuzz"]["search_failures"] == 0
+assert "tappedPlus" in d["sometimes"]["never"]
+assert "button:+1" in d["triggers"]["never"]
+PY
 rm -rf /tmp/scuzz-fuzzbug
 "$SCUZZ" new --ui --path /tmp scuzz-fuzzbug
 # The replacement fixture uses runtime failure checks.

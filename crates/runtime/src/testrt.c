@@ -2897,11 +2897,29 @@ void sz_property_sometimes_flush(void) {
   int i;
   if (!path || !path[0])
     return;
-  f = fopen(path, "w");
+  f = fopen(path, "a");
   if (!f)
     return;
   for (i = 0; i < g_sometimes_n; i++)
     fprintf(f, "%s\n", g_sometimes[i]);
+  fclose(f);
+}
+
+/* Campaign reachability for afterHit / onHit. A missing hit still leaves
+ * the per-timeline verdict valid. The campaign unions triggered names. */
+static void trigger_note(SzString *hit, int fired) {
+  const char *path = getenv("SCUZZ_TRIGGER_DUMP");
+  const char *s;
+  FILE *f;
+  if (!path || !path[0])
+    return;
+  s = hit ? sz_string_cstr(hit) : "";
+  if (!s[0])
+    return;
+  f = fopen(path, "a");
+  if (!f)
+    return;
+  fprintf(f, "claim\t%s\t%s\n", s, fired ? "triggered" : "vacuous");
   fclose(f);
 }
 
@@ -3787,10 +3805,13 @@ SzVerdict *sz_verdict_after_hit(void *tl, SzString *hit, SzString *needle) {
       continue;
     hits = 1;
     for (j = i; j < t->n; j++) {
-      if (sz_timeline_a11y_has(tl, j, needle))
+      if (sz_timeline_a11y_has(tl, j, needle)) {
+        trigger_note(hit, 1);
         return sz_verdict_ok();
+      }
     }
   }
+  trigger_note(hit, hits);
   if (!hits)
     return sz_verdict_ok();
   return sz_verdict_fail(t->n > 0 ? t->n - 1 : 0,
@@ -3821,6 +3842,7 @@ SzVerdict *sz_verdict_step_every(void *tl, void *fnp, void *envp) {
 SzVerdict *sz_verdict_on_hit(void *tl, SzString *hit, void *fnp, void *envp) {
   SzTimeline *t = (SzTimeline *)tl;
   SzListPred pred = (SzListPred)fnp;
+  int hits = 0;
   int i;
   if (!t || !pred)
     return sz_verdict_ok();
@@ -3833,6 +3855,7 @@ SzVerdict *sz_verdict_on_hit(void *tl, SzString *hit, void *fnp, void *envp) {
       continue;
     if (sz_timeline_last_hit_has(tl, i - 1, hit))
       continue;
+    hits = 1;
     before = sz_box_i64((int64_t)(i - 1));
     after = sz_box_i64((int64_t)i);
     pair = sz_pair_new(before, after);
@@ -3840,9 +3863,12 @@ SzVerdict *sz_verdict_on_hit(void *tl, SzString *hit, void *fnp, void *envp) {
     sz_release(after);
     ok = pred(pair, envp);
     sz_release(pair);
-    if (!ok)
+    if (!ok) {
+      trigger_note(hit, 1);
       return sz_verdict_fail(i, "on-hit relation failed");
+    }
   }
+  trigger_note(hit, hits);
   return sz_verdict_ok();
 }
 

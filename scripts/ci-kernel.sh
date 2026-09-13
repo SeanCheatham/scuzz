@@ -78,6 +78,7 @@ grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/bad-sched
 "$SCUZZ" check examples/bad-response
 "$SCUZZ" check examples/bad-split
+"$SCUZZ" check examples/bad-sometimes
 if "$SCUZZ" check examples/bad-intent; then
   echo "empty verify should fail check" && exit 1
 fi
