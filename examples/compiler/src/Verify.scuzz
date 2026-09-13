@@ -610,7 +610,19 @@ def coverageBoth(files: List[(String, String)], compiled: List[(String, String)]
   coverageBothKept(parseKept(files), files, compiled, Str.lines(hits))
 
 def coverageBothKept(kept: List[(String, String, Prog)], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
-  coverageBothBuilt(mergeKept(kept), Parse.parseFiles(rewriteReqFromKept(kept)), Parse.parseFiles(compiled), files, compiled, hits)
+  coverageBothRew(mergeKept(kept), rewriteReqFromKept(kept), files, compiled, hits)
+
+def coverageBothRew(p: Prog, rew: List[(String, String)], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
+  coverageBothBuilt(p, expectedProg(p, files, rew), Parse.parseFiles(compiled), files, compiled, hits)
+
+def expectedProg(p: Prog, files: List[(String, String)], rew: List[(String, String)]): Prog =
+  if (sameFiles(files, rew)) p else Parse.parseFiles(rew)
+
+def sameFiles(a: List[(String, String)], b: List[(String, String)]): Bool =
+  if (List.isEmpty(a)) List.isEmpty(b) else if (List.isEmpty(b)) false else sameFileHd(List.at(a, 0), List.at(b, 0)) && sameFiles(List.tail(a), List.tail(b))
+
+def sameFileHd(x: (String, String), y: (String, String)): Bool =
+  x._1 == y._1 && x._2 == y._2
 
 def coverageBothBuilt(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
   (coverageProgRows(p, expected, built, files, compiled, hits), branchProgRows(p, expected, built, files, compiled, hits))
