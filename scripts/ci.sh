@@ -244,7 +244,7 @@ assert isinstance(d["views"], list) and d["views"]
 assert any(n.get("role") == "button" and n.get("label") == "+1" for n in d["a11y"])
 assert isinstance(d["fields"], list) and isinstance(d["scrolls"], list)
 PY
-  printf '%s\n' '{"v":1,"kind":"inject","events":[{"op":"tap","i":0}]}' > examples/counter/build/inject.json
+  printf '%s\n' '{"v":1,"kind":"inject","events":[{"op":"tap","id":"button:+1"}]}' > examples/counter/build/inject.json
   "$SCUZZ" run --headless --script examples/counter/build/inject.json --dump examples/counter/build/session.json examples/counter
   python3 - <<'PY'
 import json

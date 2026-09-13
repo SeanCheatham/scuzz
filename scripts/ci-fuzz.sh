@@ -179,6 +179,16 @@ cp -R examples/counter/. "$chrome_dir/"
 cp -R examples/shared/. "$chrome_root/shared/"
 rm -rf "$chrome_dir/build"
 rm -f "$chrome_dir"/count.scuzz_verify
+python3 - <<PY
+from pathlib import Path
+p = Path("$chrome_dir") / "src" / "Main.scuzz"
+text = p.read_text()
+old = 'View.row(View.minSize(80, 36, View.button("+1"'
+new = 'View.row(View.minSize(80, 36, View.button("skip", _ => IO.pure(()))), View.minSize(80, 36, View.button("+1"'
+if old not in text:
+    raise SystemExit("chrome decoy: +1 button site missing")
+p.write_text(text.replace(old, new, 1))
+PY
 cat > "$chrome_dir/chrome.scuzz_verify" <<'EOF'
 def plusVisible(t: Timeline): Verdict =
   Verdict.alwaysHas(t, "button:+1")

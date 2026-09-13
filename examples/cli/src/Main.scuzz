@@ -329,7 +329,10 @@ def wantQuoteEv(): String =
   "drive bump \"x\"\n"
 
 def campReproOk(): Bool =
-  mutationScoreOk() && campReproSeeds()
+  mutationScoreOk() && campReproSeeds() && scriptJsonOk()
+
+def scriptJsonOk(): Bool =
+  Verify.scriptJson("tap 0\n") == "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}" && Verify.scriptJson("tap button:+1\n") == "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"id\":\"button:+1\"}]}"
 
 def mutationScoreOk(): Bool =
   Cli.fmtSrc("""def broken(): Int = 1

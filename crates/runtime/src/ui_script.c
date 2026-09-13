@@ -185,7 +185,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
 /* Shared event helpers. The inject schema below is the only script format.
  * Pump runs after every event except quit. */
 
-static void script_tap(SzUiSession *session, int n) {
+static void script_tap_n(SzUiSession *session, int n) {
   SzView *buttons[64];
   int count = sz_ui_collect_buttons(session, buttons, 64);
   if (n < 0 || n >= count) {
@@ -194,6 +194,34 @@ static void script_tap(SzUiSession *session, int n) {
   }
   if (!sz_ui_session_activate_view(session, buttons[n]))
     sz_panic("Ui.run: script tap activate failed");
+}
+
+static void script_tap_id(SzUiSession *session, const char *id) {
+  SzView *buttons[64];
+  char desc[160];
+  int count;
+  int i;
+  if (!id || !id[0]) {
+    fprintf(stderr, "scuzz: script tap skipped (empty id)\n");
+    return;
+  }
+  count = sz_ui_collect_buttons(session, buttons, 64);
+  for (i = 0; i < count; i++) {
+    sz_view_format_hit_id(buttons[i], desc, sizeof desc);
+    if (strcmp(desc, id) != 0)
+      continue;
+    if (!sz_ui_session_activate_view(session, buttons[i]))
+      sz_panic("Ui.run: script tap activate failed");
+    return;
+  }
+  fprintf(stderr, "scuzz: script tap %s skipped (%d tap targets)\n", id, count);
+}
+
+static void script_tap(SzUiSession *session, SzAdt *ev) {
+  if (sz_jev_has(ev, "id"))
+    script_tap_id(session, sz_jev_str(ev, "id"));
+  else
+    script_tap_n(session, (int)sz_jev_int(ev, "i", 0));
 }
 
 static void script_xy(SzUiSession *session, float x, float y) {
@@ -257,6 +285,7 @@ static void script_after_event(SzUiSession *session) {
 /* --- typed session schema v=1 (JSON inject) ------------------------------ */
 /* Document: {"v":1,"kind":"inject","events":[...]}. One object per event:
      {"op":"tap","i":N}        activate the nth tap target in a11y preorder; missing target is a no-op
+     {"op":"tap","id":"button:+1"}  activate the tap target whose last_hit key matches; missing target is a no-op
      {"op":"xy","x":X,"y":Y}  inject TAP at logical point; miss does not panic
      {"op":"text","value":S}  replace the [fields] starred TextField with S; no field is a no-op
      {"op":"text","i":N,"value":S}  replace dump-index N (a11y order)
@@ -340,7 +369,7 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
   if (!op[0])
     sz_panic("Ui.run: inject event needs op");
   if (strcmp(op, "tap") == 0)
-    script_tap(session, (int)sz_jev_int(ev, "i", 0));
+    script_tap(session, ev);
   else if (strcmp(op, "xy") == 0) {
     if (!sz_jev_has(ev, "x") || !sz_jev_has(ev, "y"))
       sz_panic("Ui.run: inject xy needs x and y");
