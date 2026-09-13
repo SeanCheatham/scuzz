@@ -31,7 +31,10 @@ def crumbsStay(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.a11yHas(t, i, "breadcrumb:Breadcrumb") && Timeline.a11yHas(t, i, "link:Docs") && Timeline.a11yHas(t, i, "icon:B"))
 
 def startHasNav(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "navtile:Install the CLI") && Timeline.a11yHas(t, i, "navtile:Build a GUI") && Timeline.a11yHas(t, i, "navtile:Ship to the web") && Timeline.a11yHas(t, i, "navtile:Read the language") && Timeline.a11yHas(t, i, "image:Same View tree on every runtime") && Timeline.a11yHas(t, i, "link:Open the GUI topic"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "navtile:Install the CLI") && Timeline.a11yHas(t, i, "navtile:Build a GUI") && Timeline.a11yHas(t, i, "navtile:Ship to the web") && Timeline.a11yHas(t, i, "navtile:Read the language") && Timeline.a11yHas(t, i, "image:Same View tree on every runtime") && Timeline.a11yHas(t, i, "link:Open the GUI topic") && Timeline.a11yHas(t, i, "link:Next: Install"))
+
+def pageNavStays(t: Timeline): Verdict =
+  Verdict.every(t, i => if (Timeline.signalInt(t, i, "page") == 0) Timeline.a11yHas(t, i, "link:Next: Install") else if (Timeline.signalInt(t, i, "page") == 10) Timeline.a11yHas(t, i, "link:Back: Web") else Timeline.a11yHas(t, i, "link:Back:") && Timeline.a11yHas(t, i, "link:Next:"))
 
 def tileOpensGui(t: Timeline): Verdict =
   Verdict.afterHit(t, "navtile:Build a GUI", "text:GUI")
@@ -41,4 +44,7 @@ def linkOpensGui(t: Timeline): Verdict =
 
 def docsCrumb(t: Timeline): Verdict =
   Verdict.afterHit(t, "link:Docs", "text:Start")
+
+def nextOpensInstall(t: Timeline): Verdict =
+  Verdict.afterHit(t, "link:Next: Install", "text:Install")
 
