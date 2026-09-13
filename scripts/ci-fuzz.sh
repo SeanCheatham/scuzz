@@ -18,9 +18,11 @@ import json
 with open("examples/counter/build/fuzz/summary.json") as f:
     d = json.load(f)
 br = d["breadth"]
+assert d["fuzz"]["ok"] is True
 assert "signals" in br["varied"], br
 assert "count" in br["claimed"]["signalInt"], br
 assert "signals" not in br["unclaimed"], br
+assert d["mutate"]["score"] >= 0.5, d["mutate"]
 PY
 fuzz --iterations 16 examples/studio
 fuzz --relate examples/counter
@@ -352,6 +354,37 @@ assert any(r["reached"] for r in d["coverage"]["regions"])
 PY
 fuzz --iterations 4 examples/hello
 fuzz --iterations 4 --oracles examples/counter
+python3 - <<'PY'
+import json
+with open("examples/counter/build/fuzz/summary.json") as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is True
+assert d["mutate"]["oracles"] is True
+assert d["mutate"]["score"] >= 0.5, d["mutate"]
+PY
+floor_root="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-floor-fail.XXXXXX")"
+floor_dir="$floor_root/counter"
+mkdir -p "$floor_dir" "$floor_root/shared"
+cp -R examples/counter/. "$floor_dir/"
+cp -R examples/shared/. "$floor_root/shared/"
+rm -rf "$floor_dir/build"
+python3 - <<PY
+from pathlib import Path
+p = Path("$floor_dir") / "scuzz.toml"
+text = p.read_text()
+old = "score_floor = 0.500"
+new = "score_floor = 1.001"
+if old not in text:
+    raise SystemExit("floor-fail: score_floor 0.500 missing")
+p.write_text(text.replace(old, new, 1))
+PY
+if fuzz --iterations 16 "$floor_dir" > /tmp/scuzz-floor-fail.log 2>&1; then
+  cat /tmp/scuzz-floor-fail.log
+  echo "score_floor 1.001 must fail live-code mutation on counter" && exit 1
+fi
+cat /tmp/scuzz-floor-fail.log
+grep -q "is below floor 1.001" /tmp/scuzz-floor-fail.log
+rm -rf "$floor_root"
 
 workload_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-workload.XXXXXX")"
 mkdir -p "$workload_dir/src"
