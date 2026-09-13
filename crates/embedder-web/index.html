@@ -246,6 +246,24 @@ layer.addEventListener('touchmove', event => {
   Module.ccall('sz_web_scroll', null, ['number', 'number', 'number'], [touch.clientX, touch.clientY, touchY - touch.clientY]);
   touchY = touch.clientY; event.preventDefault();
 }, {passive: false});
+// Wheel and canvas touch cancel the event. Register those listeners as non-passive.
+window.addEventListener('wheel', event => {
+  if (!Module.ready || event.ctrlKey || event.metaKey) return;
+  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number'],
+    [event.clientX, event.clientY, event.deltaY * (event.deltaMode === 1 ? 20 : 1)]);
+  event.preventDefault();
+}, {passive: false});
+const sendTouch = (event, phase) => {
+  if (!Module.ready || event.touches.length > 1) return;
+  const touch = (phase === 3 ? event.changedTouches : event.touches)[0];
+  if (!touch) return;
+  Module.ccall('sz_web_pointer', null, ['number', 'number', 'number'], [touch.clientX, touch.clientY, phase]);
+  if (phase === 2) event.preventDefault();
+};
+Module.canvas.addEventListener('touchstart', event => sendTouch(event, 1), {passive: false});
+Module.canvas.addEventListener('touchmove', event => sendTouch(event, 2), {passive: false});
+Module.canvas.addEventListener('touchend', event => sendTouch(event, 3), {passive: false});
+Module.canvas.addEventListener('touchcancel', event => sendTouch(event, 3), {passive: false});
 // Use source offsets so copied text keeps spaces and explicit line breaks.
 document.addEventListener('copy', event => {
   if (event.target.closest?.('.edit')) return;

@@ -96,37 +96,6 @@ static EM_BOOL mouse(int type, const EmscriptenMouseEvent *event, void *data) {
   return EM_TRUE;
 }
 
-static EM_BOOL wheel(int type, const EmscriptenWheelEvent *event, void *data) {
-  (void)type; (void)data;
-  if (!active || event->mouse.ctrlKey || event->mouse.metaKey) return EM_FALSE;
-  SzInputEvent input = {0};
-  input.kind = SZ_INPUT_SCROLL;
-  input.x = event->mouse.clientX;
-  input.y = event->mouse.clientY;
-  input.dy = event->deltaY * (event->deltaMode == 1 ? 20 : 1);
-  sz_ui_session_live_inject(active, &input);
-  return EM_TRUE;
-}
-
-static EM_BOOL touch(int type, const EmscriptenTouchEvent *event, void *data) {
-  (void)data;
-  if (event->numTouches > 1) return EM_FALSE;
-  for (int i = 0; i < event->numTouches; i++) {
-    if (!event->touches[i].isChanged) continue;
-    if (!active) return EM_FALSE;
-    SzInputEvent input = {0};
-    input.kind = SZ_INPUT_POINTER;
-    input.x = event->touches[i].clientX;
-    input.y = event->touches[i].clientY;
-    input.pointer_button = 1;
-    input.pointer_phase = type == EMSCRIPTEN_EVENT_TOUCHSTART ? SZ_POINTER_DOWN :
-        type == EMSCRIPTEN_EVENT_TOUCHMOVE ? SZ_POINTER_MOVE : SZ_POINTER_UP;
-    sz_ui_session_live_inject(active, &input);
-    break;
-  }
-  return type == EMSCRIPTEN_EVENT_TOUCHMOVE ? EM_TRUE : EM_FALSE;
-}
-
 EMSCRIPTEN_KEEPALIVE void sz_web_scroll(double x, double y, double dy) {
   if (!active) return;
   SzInputEvent input = {0};
@@ -152,12 +121,6 @@ void sz_web_start(SzUiSession *session) {
   emscripten_set_mousedown_callback("#canvas", NULL, 0, mouse);
   emscripten_set_mousemove_callback("#canvas", NULL, 0, mouse);
   emscripten_set_mouseup_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, 0, mouse);
-  emscripten_set_wheel_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, 0, wheel);
-
-  emscripten_set_touchstart_callback("#canvas", NULL, 0, touch);
-  emscripten_set_touchmove_callback("#canvas", NULL, 0, touch);
-  emscripten_set_touchend_callback("#canvas", NULL, 0, touch);
-  emscripten_set_touchcancel_callback("#canvas", NULL, 0, touch);
   EM_ASM({ Module.resizeViewport(); });
 }
 
@@ -215,6 +178,17 @@ EMSCRIPTEN_KEEPALIVE void sz_web_edit(double id, const char *value, int start, i
 }
 
 EMSCRIPTEN_KEEPALIVE void sz_web_resize(void) { resize(0, NULL, NULL); }
+
+EMSCRIPTEN_KEEPALIVE void sz_web_pointer(double x, double y, int phase) {
+  if (!active) return;
+  SzInputEvent input = {0};
+  input.kind = SZ_INPUT_POINTER;
+  input.x = x;
+  input.y = y;
+  input.pointer_button = 1;
+  input.pointer_phase = phase;
+  sz_ui_session_live_inject(active, &input);
+}
 
 EMSCRIPTEN_KEEPALIVE void sz_web_slider(double id, int value) {
   SzView *view = active ? sz_view_web_find(sz_ui_session_root(active), (uintptr_t)id) : NULL;
