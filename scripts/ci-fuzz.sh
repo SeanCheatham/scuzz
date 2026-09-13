@@ -13,6 +13,15 @@ fuzz() {
 }
 
 fuzz --iterations 16 examples/counter
+python3 - <<'PY'
+import json
+with open("examples/counter/build/fuzz/summary.json") as f:
+    d = json.load(f)
+br = d["breadth"]
+assert "signals" in br["varied"], br
+assert "count" in br["claimed"]["signalInt"], br
+assert "signals" not in br["unclaimed"], br
+PY
 fuzz --iterations 16 examples/studio
 fuzz --relate examples/counter
 if fuzz --relate examples/bad-sched; then
@@ -163,6 +172,40 @@ assert d["fuzz"]["search_failures"] == 0
 assert "tappedPlus" in d["sometimes"]["never"]
 assert "button:+1" in d["triggers"]["never"]
 PY
+chrome_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-chrome-breadth.XXXXXX")"
+cp -R examples/counter/. "$chrome_dir/"
+rm -f "$chrome_dir"/count.scuzz_verify
+ROOT="$ROOT" CHROME_DIR="$chrome_dir" python3 - <<'PY'
+from pathlib import Path
+import os
+p = Path(os.environ["CHROME_DIR"]) / "scuzz.toml"
+shared = Path(os.environ["ROOT"]) / "examples" / "shared"
+p.write_text(p.read_text().replace('{ path = "../shared" }', '{ path = "%s" }' % shared))
+PY
+cat > "$chrome_dir/chrome.scuzz_verify" <<'EOF'
+def plusVisible(t: Timeline): Verdict =
+  Verdict.alwaysHas(t, "button:+1")
+
+def titleVisible(t: Timeline): Verdict =
+  Verdict.alwaysHas(t, "text:Counter")
+EOF
+if ! fuzz --iterations 0 "$chrome_dir" > /tmp/scuzz-chrome-breadth.log 2>&1; then
+  cat /tmp/scuzz-chrome-breadth.log
+  echo "chrome-only corpus replay must stay green" && exit 1
+fi
+cat /tmp/scuzz-chrome-breadth.log
+grep -Eq "varied but unclaimed:.*signals" /tmp/scuzz-chrome-breadth.log
+CHROME_DIR="$chrome_dir" python3 - <<'PY'
+import json, os
+with open(os.environ["CHROME_DIR"] + "/build/fuzz/summary.json") as f:
+    d = json.load(f)
+br = d["breadth"]
+assert d["fuzz"]["ok"] is True
+assert "signals" in br["varied"], br
+assert br["claimed"]["signalInt"] == [], br
+assert "signals" in br["unclaimed"], br
+PY
+rm -rf "$chrome_dir"
 rm -rf /tmp/scuzz-fuzzbug
 "$SCUZZ" new --ui --path /tmp scuzz-fuzzbug
 # The replacement fixture uses runtime failure checks.

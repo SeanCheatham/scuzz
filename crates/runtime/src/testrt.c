@@ -4222,6 +4222,8 @@ static int tl_str_diff(const char *a, const char *b) {
   return strcmp(a, b) != 0;
 }
 
+static int g_varied_flushed;
+
 void sz_timeline_varied_flush(void) {
   const char *path = getenv("SCUZZ_STATE_VARIED_DUMP");
   FILE *f;
@@ -4233,7 +4235,7 @@ void sz_timeline_varied_flush(void) {
   int effects = 0;
   int fibers = 0;
   int fault = 0;
-  if (!path || !path[0])
+  if (!path || !path[0] || g_varied_flushed)
     return;
   for (i = 1; i < g_tl_n; i++) {
     if (tl_str_diff(g_tl[i].signals, g_tl[0].signals))
@@ -4251,7 +4253,7 @@ void sz_timeline_varied_flush(void) {
     if (tl_str_diff(g_tl[i].fault, g_tl[0].fault))
       fault = 1;
   }
-  f = fopen(path, "w");
+  f = fopen(path, "a");
   if (!f)
     return;
   if (sig)
@@ -4269,6 +4271,7 @@ void sz_timeline_varied_flush(void) {
   if (fault)
     fputs("fault\n", f);
   fclose(f);
+  g_varied_flushed = 1;
 }
 
 static void session_register(SzSessionProp *tab, int *n, SzString *name,
@@ -4509,6 +4512,7 @@ void sz_property_session_reset(void) {
   free(g_last_drive);
   g_last_drive = NULL;
   tl_restore_clear();
+  g_varied_flushed = 0;
 }
 
 /* Drive table cap. Overlay rejects a larger table. */
