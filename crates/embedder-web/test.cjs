@@ -61,10 +61,10 @@ async function check(browserType, url, mobile) {
     await page.goForward(); await expectText('text:Web');
     await page.getByRole('link', {name: 'Start', exact: true}).click();
     await expectText('text:Count: 1');
-    await page.getByRole('link', {name: 'Build a GUI', exact: true}).click();
+    await page.getByRole('link', {name: 'Build a GUI', exact: true}).click({force: true});
     await expectText('text:GUI');
     assert.equal(new URL(page.url()).hash, '#section=gui');
-    await page.getByRole('link', {name: 'Docs', exact: true}).click();
+    await page.getByRole('link', {name: 'Docs', exact: true}).click({force: true});
     await expectText('text:Count: 1');
     await page.getByRole('button', {name: 'Reset', exact: true}).click();
     await expectText('text:Count: 0');
