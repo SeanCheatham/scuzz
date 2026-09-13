@@ -47,7 +47,7 @@ def titleAt(topics: List[Topic], n: Int): String =
   if (n < 0 || n >= List.len(topics)) "Docs" else List.at(topics, n).title
 
 def topicSection(topics: List[Topic], i: Int, body: View): View =
-  View.section(List.at(topics, i).id, List.at(topics, i).title, View.maxSize(800, 0, View.column(pageHead(List.at(topics, i).title), body, pageNav(topics, i))))
+  View.section(List.at(topics, i).id, List.at(topics, i).title, View.maxSize(800, 0, View.column(pageHead(List.at(topics, i).title), pageNav(topics, i), body)))
 
 def startSection(topics: List[Topic], blocks: Signal[List[Block]], count: Signal[Int]): View =
   topicSection(topics, 0, View.column(startHero(), startTiles(), View.divider(), blocksColumn(blocks), liveCounter(count)))

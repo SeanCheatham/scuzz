@@ -388,7 +388,7 @@ links read that list. They do not rebuild the manual on each page change.
 Each block keeps the same page margin.
 Docs page content shares an 800-pixel width limit and stays left-aligned.
 The content shrinks to fit narrow windows. The app bar spans the window.
-Each topic ends with Back and Next links to sibling sections.
+Each topic shows Back and Next links after the breadcrumb.
 
 `View.tabs(selected, sections)` groups fixed local panels. It accepts the same
 named sections as Index Book. The tabs stay above the panel at all widths.
