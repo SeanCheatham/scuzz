@@ -35,6 +35,13 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('img', {name: 'Same View tree on every runtime'}).count(), 1);
     assert.equal(await page.getByRole('img', {name: 'B'}).count(), 1);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
+    assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).count(), 1);
+    assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).getAttribute('href'), '#section=install');
+    await page.getByRole('link', {name: 'Next: Install', exact: true}).click();
+    await expectText('text:Install');
+    assert.equal(new URL(page.url()).hash, '#section=install');
+    await page.getByRole('link', {name: 'Back: Start', exact: true}).click();
+    await expectText('text:Start');
     await page.getByRole('link', {name: 'Build a GUI', exact: true}).click();
     await expectText('text:GUI');
     assert.equal(new URL(page.url()).hash, '#section=gui');
