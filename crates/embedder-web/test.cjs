@@ -79,7 +79,7 @@ async function check(browserType, url, mobile) {
       const popupReady = context.waitForEvent('page');
       await install.click({button: 'middle'});
       const popup = await popupReady;
-      await popup.waitForFunction(() => Module.currentSection === 'install');
+      await popup.waitForFunction(() => window.Module && Module.ready && Module.currentSection === 'install');
       await popup.close();
       await page.bringToFront();
     }
