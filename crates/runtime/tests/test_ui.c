@@ -943,6 +943,62 @@ static void test_script_json_inject(void) {
   remove(path);
 }
 
+static void test_script_tap_named_id(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *count;
+  SzSignalInt *decoy;
+  char id[160];
+
+  decoy = sz_signal_int(0);
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_button("skip", counter_tap, decoy));
+  sz_view_add_child(root, sz_view_button("+1", counter_tap, count));
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  {
+    SzView *taps[8];
+    int n = sz_ui_collect_buttons(session, taps, 8);
+    assert(n == 2);
+    sz_view_format_hit_id(taps[0], id, sizeof id);
+    assert(strcmp(id, "button:skip") == 0);
+    sz_view_format_hit_id(taps[1], id, sizeof id);
+    assert(strcmp(id, "button:+1") == 0);
+  }
+
+  sz_ui_script_play_json(session,
+                         "{\"v\":1,\"kind\":\"inject\",\"events\":["
+                         "{\"op\":\"tap\",\"id\":\"button:+1\"}]}");
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_signal_int_get(decoy) == 0);
+
+  sz_ui_script_play_json(session,
+                         "{\"v\":1,\"kind\":\"inject\",\"events\":["
+                         "{\"op\":\"tap\",\"i\":0}]}");
+  assert(sz_signal_int_get(decoy) == 1);
+  assert(sz_signal_int_get(count) == 1);
+
+  sz_ui_script_play_json(session,
+                         "{\"v\":1,\"kind\":\"inject\",\"events\":["
+                         "{\"op\":\"tap\",\"id\":\"button:missing\"}]}");
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_signal_int_get(decoy) == 1);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  sz_signal_int_free(decoy);
+}
+
 static void test_record_json(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -16517,6 +16573,7 @@ int main(void) {
   test_ui_run_rebuild_keepalive();
   test_dump_json_schema();
   test_script_json_inject();
+  test_script_tap_named_id();
   test_record_json();
   test_session_debug_dump();
   test_xy_hit_and_miss();

@@ -50,7 +50,7 @@ Needed before a real CLI, server, or desktop app stays.
 
 Do not start these before thesis-critical gaps close.
 
-- **Stable inject keys** — `tap N` / `scroll N` follow a11y preorder. A refactor can miss a stored corpus entry. Named control keys for inject stay after named claim observations.
+- **Stable scroll keys** — `scroll N` follows a11y preorder. A refactor can miss a stored corpus entry. `tap` accepts a last_hit key (`tap button:+1`) or an index.
 - **Simulation faults and multiple worlds** — Clock skew, partitions, and a model to relate against stay later.
 - **Mutation depth** — Semantic mutants stay later.
 - **Dependency forms beyond `path`** — Git, versioned, and hosted artifacts are direction. There is no registry. A lockfile identity can land before a registry.
