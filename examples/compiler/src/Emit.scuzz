@@ -17,6 +17,7 @@ import Parse.Im
 import Parse.Imp
 import Lexer.Tok
 import Lexer.SpTok
+import Check.Ftab
 import Check.getTy
 import Check.withImportFuns
 import Check.fileOf
@@ -216,10 +217,10 @@ def llvmBin(op: String): String =
 def stuckStr(): String =
   stuckStr()
 
-def emitExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitExpr(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitExprFid(e, prefix, strs, defs, ens, ps, loc, 0)
 
-def emitExprFid(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitExprFid(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (needsPh(e)) emitLam("_ph", rewriteHole(e, "_ph"), prefix, strs, defs, ens, ps, loc) else emitExprGo(etaKit(e, ps, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, fid)
 
 def needsPh(e: Expr): Bool =
@@ -309,7 +310,7 @@ def rewriteHole(e: Expr, n: String): Expr =
 def rewriteHoleList(xs: List[Expr], n: String): List[Expr] =
   if (List.isEmpty(xs)) xs else rewriteHole(List.at(xs, 0), n) :: rewriteHoleList(List.tail(xs), n)
 
-def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   e match {
     case Expr.EInt(n, _) => Slot("", Str.fromInt(n), false)
     case Expr.EBool(b) => Slot("", if (b) "1" else "0", false)
@@ -341,21 +342,21 @@ def emitStuck(): Slot =
 def emitFloatBits(s: String, prefix: String): Slot =
   Slot(line(Str.concat(tmp(prefix, "fb"), Str.concat("bitcast double ", Str.concat(s, " to i64")))), pct(prefix, "fb"), false)
 
-def emitVar(s: String, prefix: String, ens: List[En], ps: List[Param], strs: List[String], defs: List[Fun], loc: String): Slot =
+def emitVar(s: String, prefix: String, ens: List[En], ps: List[Param], strs: List[String], defs: Ftab, loc: String): Slot =
   if (s == "value" || paramTy(ps, s) != "") Slot("", Str.concat("%", s), s == "value") else emitFunOrCtor(s, prefix, ens, ps, strs, defs, loc, findDefPrefer(defs, s, modOfLoc(loc)))
 
-def emitFunOrCtor(s: String, prefix: String, ens: List[En], ps: List[Param], strs: List[String], defs: List[Fun], loc: String, hit: List[Fun]): Slot =
+def emitFunOrCtor(s: String, prefix: String, ens: List[En], ps: List[Param], strs: List[String], defs: Ftab, loc: String, hit: List[Fun]): Slot =
   if (List.isEmpty(hit)) emitBareCtor(s, prefix, ens) else emitFunRef(List.at(hit, 0), prefix, strs, defs, ens, ps, loc)
 
-def emitFunRef(d: Fun, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFunRef(d: Fun, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   d match {
     case Fun(_, name, _, params, _, _, _, _) => emitFunRef2(name, params, prefix, strs, defs, ens, ps, loc)
   }
 
-def emitFunRef2(name: String, params: List[Param], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFunRef2(name: String, params: List[Param], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.len(params) == 2) emitExpr(etaFold(name), prefix, strs, defs, ens, ps, loc) else if (List.isEmpty(params)) emitLam("_", Expr.ECall(name, noExpr(), 0), prefix, strs, defs, ens, ps, loc) else emitFunRef1(name, List.at(params, 0), prefix, strs, defs, ens, ps, loc)
 
-def emitFunRef1(name: String, p: Param, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFunRef1(name: String, p: Param, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   p match {
     case Param(n, _, _, _) => emitLam(n, Expr.ECall(name, Expr.EVar(n, 0) :: noExpr(), 0), prefix, strs, defs, ens, ps, loc)
   }
@@ -459,7 +460,7 @@ def eqIsLet(name: String): Bool =
 def isSimpleBind(n: String): Bool =
   n != "" && parenAt(n, 0) < 0 && !isConsPat(n)
 
-def emitInterp(s: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitInterp(s: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitInterpFold(interpParts(s, 0, "", noExpr()), prefix, strs, defs, ens, ps, loc, 0)
 
 def interpParts(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
@@ -515,16 +516,16 @@ def interpPartsBrace3(p: (Expr, Int), lit: String, acc: List[Expr], s: String, j
     case (e, _) => interpPartsFlush(lit, e, acc, s, j)
   }
 
-def emitInterpFold(parts: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitInterpFold(parts: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   if (List.isEmpty(parts)) emitStrAs("", prefix, strs, "s") else emitInterpAcc(emitInterpPart(List.at(parts, 0), prefix, i, strs, defs, ens, ps, loc), List.tail(parts), prefix, strs, defs, ens, ps, loc, i + 1)
 
-def emitInterpPart(e: Expr, prefix: String, i: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitInterpPart(e: Expr, prefix: String, i: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
     case Expr.EStr(s, _) => emitStrAs(s, Str.concat(prefix, Str.concat("_l", Str.fromInt(i))), strs, "s")
     case _ => emitInterpExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps, loc)
   }
 
-def emitInterpExpr(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitInterpExpr(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitInterpExpr2(emitExpr(e, prefix, strs, defs, ens, ps, loc), prefix, exprIsI64(e, ps, defs), ps, isFloatExpr(e, ps, defs))
 
 def emitInterpExpr2(s: Slot, prefix: String, i64: Bool, ps: List[Param], fl: Bool): Slot =
@@ -548,20 +549,20 @@ def emitInterpI64(s: Slot, prefix: String): Slot =
     case Slot(c, v, _) => Slot(join(c, line(Str.concat(tmp(prefix, "istr"), Str.concat("call ptr @sz_string_from_int(i64 ", Str.concat(v, ")"))))), pct(prefix, "istr"), true)
   }
 
-def emitInterpAcc(acc: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitInterpAcc(acc: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   if (List.isEmpty(rest)) acc else emitInterpCat(acc, emitInterpPart(List.at(rest, 0), prefix, i, strs, defs, ens, ps, loc), rest, prefix, strs, defs, ens, ps, loc, i)
 
-def emitInterpCat(acc: Slot, nxt: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitInterpCat(acc: Slot, nxt: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   acc match {
     case Slot(ac, av, ao) => emitInterpCat2(ac, av, ao, nxt, rest, prefix, strs, defs, ens, ps, loc, i)
   }
 
-def emitInterpCat2(ac: String, av: String, ao: Bool, nxt: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitInterpCat2(ac: String, av: String, ao: Bool, nxt: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   nxt match {
     case Slot(nc, nv, no) => emitInterpCat3(join(ac, nc), av, ao, nv, no, rest, prefix, strs, defs, ens, ps, loc, i)
   }
 
-def emitInterpCat3(code: String, av: String, ao: Bool, nv: String, no: Bool, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitInterpCat3(code: String, av: String, ao: Bool, nv: String, no: Bool, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   emitInterpAcc(emitInterpJoin(code, av, ao, nv, no, prefix, i), List.tail(rest), prefix, strs, defs, ens, ps, loc, i + 1)
 
 def interpCStem(prefix: String, i: Int): String =
@@ -585,10 +586,10 @@ def emitStrAs(s: String, prefix: String, strs: List[String], stem: String): Slot
 def emitStr2(prefix: String, idx: Int, len: Int, stem: String): Slot =
   Slot(join(line(Str.concat(tmp(prefix, "gep"), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(len), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0")))))), line(Str.concat(tmp(prefix, stem), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(prefix, "gep"), ")"))))), pct(prefix, stem), true)
 
-def emitPrint(inner: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPrint(inner: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitPrint2(emitSzString(inner, prefix, strs, defs, ens, ps, loc), prefix)
 
-def emitSzString(inner: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSzString(inner: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   inner match {
     case Expr.EStr(s, _) => emitStr(s, prefix, strs)
     case _ => emitExpr(inner, Str.concat(prefix, "_e"), strs, defs, ens, ps, loc)
@@ -597,10 +598,10 @@ def emitSzString(inner: Expr, prefix: String, strs: List[String], defs: List[Fun
 def emitPrint2(s: Slot, prefix: String): Slot =
   Slot(join(s.code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_println(ptr ", Str.concat(s.val, ")")))), if (s.owned) line(Str.concat("call void @sz_release(ptr ", Str.concat(s.val, ")"))) else "")), pct(prefix, "io"), false)
 
-def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (op == "::") emitCall("List.cons", l :: r :: noExpr(), prefix, strs, defs, ens, ps, loc) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps, loc) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps, loc) else emitBinFl(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), op, prefix, ps, isFloatExpr(l, ps, defs) || isFloatExpr(r, ps, defs), exprIsPtr(l, defs, ens, ps, loc) || exprIsPtr(r, defs, ens, ps, loc))
 
-def isFloatExpr(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
+def isFloatExpr(e: Expr, ps: List[Param], defs: Ftab): Bool =
   e match {
     case Expr.EFloat(_) => true
     case Expr.EVar(s, _) => paramTy(ps, s) == "Float"
@@ -691,7 +692,7 @@ def cmpPtrSlot(a: String, b: String, ps: List[Param]): Bool =
 def isI64Lit(v: String): Bool =
   Str.len(v) > 0 && Str.charAt(v, 0) != 37 && v != "null"
 
-def exprIsPtr(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Bool =
+def exprIsPtr(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Bool =
   e match {
     case Expr.EInt(_, _) => false
     case Expr.EBool(_) => false
@@ -766,7 +767,7 @@ def llvmIcmp(op: String): String =
 def emitCmpFrom(lc: String, lv: String, rc: String, rv: String, op: String, prefix: String): Slot =
   Slot(join(lc, join(rc, join(line(Str.concat(tmp(prefix, "cmp"), Str.concat("icmp ", Str.concat(llvmIcmp(op), Str.concat(" i64 ", Str.concat(lv, Str.concat(", ", rv))))))), line(Str.concat(tmp(prefix, "v"), Str.concat("zext i1 ", Str.concat(pct(prefix, "cmp"), " to i64"))))))), pct(prefix, "v"), false)
 
-def emitUn(op: String, inner: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitUn(op: String, inner: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitUnFl(emitExpr(inner, Str.concat(prefix, "_u"), strs, defs, ens, ps, loc), op, prefix, isFloatExpr(inner, ps, defs))
 
 def emitUnFl(inner: Slot, op: String, prefix: String, fl: Bool): Slot =
@@ -787,22 +788,22 @@ def emitBitNot(inner: Slot, prefix: String): Slot =
 def emitNot(inner: Slot, prefix: String): Slot =
   Slot(join(inner.code, join(line(Str.concat(tmp(prefix, "z"), Str.concat("icmp eq i64 ", Str.concat(inner.val, ", 0")))), line(Str.concat(tmp(prefix, "v"), Str.concat("zext i1 ", Str.concat(pct(prefix, "z"), " to i64")))))), pct(prefix, "v"), false)
 
-def emitList(xs: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitList(xs: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitListAt(xs, prefix, strs, defs, ens, ps, loc, 0)
 
-def emitTuple(xs: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTuple(xs: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(xs)) Slot("", "null", true) else emitTupleFold1(List.at(xs, 0), List.tail(xs), prefix, 0, strs, defs, ens, ps, loc)
 
-def emitTupleFold1(h: Expr, rest: List[Expr], prefix: String, i: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTupleFold1(h: Expr, rest: List[Expr], prefix: String, i: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(rest)) Slot("", "null", true) else emitTupleFold2(h, List.at(rest, 0), List.tail(rest), prefix, i, strs, defs, ens, ps, loc)
 
-def emitTupleFold2(h: Expr, x: Expr, more: List[Expr], prefix: String, i: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTupleFold2(h: Expr, x: Expr, more: List[Expr], prefix: String, i: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(more)) emitPair(h, x, Str.concat(prefix, Str.concat("_", Str.fromInt(i))), strs, defs, ens, ps, loc) else emitTupleNest(h, emitTupleFold1(x, more, prefix, i + 1, strs, defs, ens, ps, loc), prefix, i, strs, defs, ens, ps, loc)
 
-def emitTupleNest(h: Expr, rest: Slot, prefix: String, i: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTupleNest(h: Expr, rest: Slot, prefix: String, i: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitPair2(emitExpr(h, Str.concat(prefix, Str.concat("_h", Str.fromInt(i))), strs, defs, ens, ps, loc), rest, exprIsI64(h, ps, defs), false, Str.concat(prefix, Str.concat("_p", Str.fromInt(i))))
 
-def emitPair(l: Expr, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPair(l: Expr, r: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitPair2(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), exprIsI64(l, ps, defs), exprIsI64(r, ps, defs), prefix)
 
 def emitPair2(le: Slot, re: Slot, ln: Bool, rn: Bool, prefix: String): Slot =
@@ -830,10 +831,10 @@ def pairNew(prefix: String, lp: String, rp: String): String =
 def pairDrop(v: String, owned: Bool, num: Bool, prefix: String, stem: String): String =
   if (num) relPtr(pct(prefix, stem)) else if (owned) relPtr(v) else ""
 
-def exprIsI64(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
+def exprIsI64(e: Expr, ps: List[Param], defs: Ftab): Bool =
   if (needsPh(e)) false else exprIsI64Go(e, ps, defs)
 
-def exprIsI64Go(e: Expr, ps: List[Param], defs: List[Fun]): Bool =
+def exprIsI64Go(e: Expr, ps: List[Param], defs: Ftab): Bool =
   e match {
     case Expr.EInt(_, _) => true
     case Expr.EBool(_) => true
@@ -858,25 +859,25 @@ def exprFieldI64(recv: Expr, name: String, ps: List[Param]): Bool =
     case _ => false
   }
 
-def exprIsI64Match(arms: List[Arm], ps: List[Param], defs: List[Fun]): Bool =
+def exprIsI64Match(arms: List[Arm], ps: List[Param], defs: Ftab): Bool =
   if (List.isEmpty(arms)) false else exprIsI64Arm(List.at(arms, 0), ps, defs)
 
-def exprCallI64(f: String, args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+def exprCallI64(f: String, args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   if (f == "Signal.get") signalGetI64(args, ps, defs) else if (f == "Property.check") exprIsI64Recv(args, ps, defs) else if (f == "List.at") headUnbox(args, ps) else if (callIsI64(f, defs)) true else if (f == "Map.getOrElse" || isTyParam(funRetStr(defs, f))) argsHaveI64(args, ps, defs) else false
 
-def signalGetI64(args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+def signalGetI64(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   !List.isEmpty(args) && isI64Ty(Check.elemOf(exprRetTy(List.at(args, 0), defs, ps)))
 
-def argsHaveI64(xs: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+def argsHaveI64(xs: List[Expr], ps: List[Param], defs: Ftab): Bool =
   !List.isEmpty(xs) && (exprIsI64(List.at(xs, 0), ps, defs) || argsHaveI64(List.tail(xs), ps, defs))
 
-def exprMethI64(recv: Expr, name: String, args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+def exprMethI64(recv: Expr, name: String, args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   if (name == "at") headUnbox1(recv, ps) else if (name == "getOrElse" && !List.isEmpty(args)) exprIsI64(List.at(args, 0), ps, defs) else exprMethodI64(recv, name, defs)
 
-def exprIsI64Recv(args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+def exprIsI64Recv(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   if (List.len(args) < 3) false else exprIsI64(List.at(List.tail(List.tail(args)), 0), ps, defs)
 
-def exprIsI64Arm(a: Arm, ps: List[Param], defs: List[Fun]): Bool =
+def exprIsI64Arm(a: Arm, ps: List[Param], defs: Ftab): Bool =
   a match {
     case Arm(_, _, body) => exprIsI64(body, ps, defs)
   }
@@ -904,39 +905,42 @@ def hasSub(s: String, sub: String): Bool =
 def hasSubAt(s: String, sub: String, i: Int): Bool =
   if (i + Str.len(sub) > Str.len(s)) false else if (startsAt(s, i, sub)) true else hasSubAt(s, sub, i + 1)
 
-def callIsI64(f: String, defs: List[Fun]): Bool =
+def callIsI64(f: String, defs: Ftab): Bool =
   f == "Str.byteLen" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.boolOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
 
 def isTlI64Call(f: String): Bool =
   f == "Timeline.len" || f == "Timeline.signalInt" || f == "Timeline.signalListLen" || f == "Timeline.signalStrHas" || tlHasRt(f) != "" || tlI64Rt(f) != ""
 
-def exprMethodI64(recv: Expr, name: String, defs: List[Fun]): Bool =
+def exprMethodI64(recv: Expr, name: String, defs: Ftab): Bool =
   if (name == "require") exprIsI64(recv, noParam(), defs) else exprMethodI64Go(recv, name, defs)
 
-def exprMethodI64Go(recv: Expr, name: String, defs: List[Fun]): Bool =
+def exprMethodI64Go(recv: Expr, name: String, defs: Ftab): Bool =
   recv match {
     case Expr.EVar(en, _) => callIsI64(Str.concat(en, Str.concat(".", name)), defs) || callIsI64(name, defs)
     case _ => false
   }
 
-def funRetI64(defs: List[Fun], f: String): Bool =
+def funRetI64(defs: Ftab, f: String): Bool =
   isI64Ty(funRetStr(defs, f))
 
-def funRetStr(defs: List[Fun], f: String): String =
-  if (List.isEmpty(defs)) "" else funRetStrH(List.at(defs, 0), List.tail(defs), f)
+def funRetStr(defs: Ftab, f: String): String =
+  funRetStrL(defs.list, f)
+
+def funRetStrL(ds: List[Fun], f: String): String =
+  if (List.isEmpty(ds)) "" else funRetStrH(List.at(ds, 0), List.tail(ds), f)
 
 def funRetStrH(d: Fun, rest: List[Fun], f: String): String =
   d match {
-    case Fun(_, name, _, _, ret, _, mod, _) => if (qualFun(mod, name) == f || name == f) ret else funRetStr(rest, f)
+    case Fun(_, name, _, _, ret, _, mod, _) => if (qualFun(mod, name) == f || name == f) ret else funRetStrL(rest, f)
   }
 
 def qualFun(mod: String, name: String): String =
   if (mod == "") name else Str.concat(mod, Str.concat(".", name))
 
-def emitListAt(xs: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitListAt(xs: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   if (List.isEmpty(xs)) Slot(line(Str.concat(tmp(prefix, "0"), "call ptr @sz_list_nil()")), pct(prefix, "0"), true) else emitListCons(List.at(xs, 0), List.tail(xs), prefix, strs, defs, ens, ps, loc, i)
 
-def emitListCons(e: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitListCons(e: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   emitListCons2(emitListAt(rest, prefix, strs, defs, ens, ps, loc, i + 1), emitExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps, loc), prefix, i, exprIsI64(e, ps, defs))
 
 def emitListCons2(tail: Slot, elem: Slot, prefix: String, i: Int, isInt: Bool): Slot =
@@ -967,20 +971,20 @@ def emitBox(prefix: String, i: Int, ev: String): String =
 def emitCons(prefix: String, i: Int, hd: String, tl: String): String =
   line(Str.concat(tmp(prefix, Str.fromInt(i + 1)), Str.concat("call ptr @sz_list_cons(ptr ", Str.concat(hd, Str.concat(", ptr ", Str.concat(tl, ")"))))))
 
-def emitArgList(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool]): (String, List[String], List[Bool]) =
+def emitArgList(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool]): (String, List[String], List[Bool]) =
   if (List.isEmpty(args)) (code, List.reverse(vals), List.reverse(owns)) else emitArgList2(emitExpr(List.at(args, 0), Str.concat(prefix, Str.concat("_arg", Str.fromInt(i))), strs, defs, ens, ps, loc), List.tail(args), prefix, strs, defs, ens, ps, loc, i, code, vals, owns)
 
-def emitArgList2(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool]): (String, List[String], List[Bool]) =
+def emitArgList2(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool]): (String, List[String], List[Bool]) =
   s match {
     case Slot(sc, sv, so) => emitArgList(rest, prefix, strs, defs, ens, ps, loc, i + 1, join(code, sc), sv :: vals, so :: owns)
   }
 
-def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
+def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
   p match {
     case (code, vals, owns) => emitCall3(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
   }
 
-def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
+def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
   if (f == "IO.fail" && !List.isEmpty(args) && isI64Ty(exprRetTyEns(List.at(args, 0), defs, ens, ps, mod))) emitFailBox(code, arg0(vals), prefix) else if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
 
 def isRtExtra(f: String): Bool =
@@ -1067,13 +1071,13 @@ def emitVStr1(rt: String, code: String, vals: List[String], owns: List[Bool], pr
 def emitVStr2(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "tl"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", ptr ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")")))))))))), join(if (headOwn(tailOwn(owns))) relPtr(arg1(vals)) else "", if (headOwn(tailOwn(tailOwn(owns)))) relPtr(arg2(vals)) else ""))), pct(prefix, "tl"), true)
 
-def emitOnHit(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitOnHit(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitOnHit2(emitExpr(List.at(args, 0), Str.concat(prefix, "_tl"), strs, defs, ens, ps, loc), emitExpr(List.at(args, 1), Str.concat(prefix, "_h"), strs, defs, ens, ps, loc), wrapPh(List.at(args, 2), ps, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc)
 
-def emitOnHit2(tl: Slot, hit: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitOnHit2(tl: Slot, hit: Slot, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitOnHit3(tl, hit, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc)
 
-def emitOnHit3(tl: Slot, hit: Slot, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitOnHit3(tl: Slot, hit: Slot, bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitOnHit4(tl, hit, emitNethTy("sz_verdict_on_hit", prefix, bind, body, strs, defs, ens, ps, loc, true, ""), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
 def emitOnHit4(tl: Slot, hit: Slot, neth: String, env: Slot, prefix: String): Slot =
@@ -1094,15 +1098,15 @@ def emitRange(code: String, vals: List[String], prefix: String): Slot =
 def emitSometimes(code: String, vals: List[String], owns: List[Bool], _prefix: String): Slot =
   Slot(join(code, join(line(Str.concat("call void @sz_property_sometimes(ptr ", Str.concat(arg0(vals), ")"))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), "null", false)
 
-def emitNetServe(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitNetServe(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitNetServe2(if (f == "Net.serve") "sz_net_serve" else "sz_net_serve_once", emitExpr(List.at(args, 0), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc), wrapPh(if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), ps, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc)
 
-def emitNetServe2(rt: String, port: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitNetServe2(rt: String, port: Slot, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   port match {
     case Slot(pc, pv, po) => emitNetServe3(rt, pc, pv, po, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc)
   }
 
-def emitNetServe3(rt: String, pc: String, pv: String, po: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitNetServe3(rt: String, pc: String, pv: String, po: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitNetServe4(rt, pc, pv, po, emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, false, "(String, String, String)"), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
 def emitNetServe4(rt: String, pc: String, pv: String, po: Bool, neth: String, env: Slot, prefix: String): Slot =
@@ -1131,10 +1135,10 @@ def mapKitRt(f: String): String =
 def foldKitRt(f: String): String =
   if (f == "Stream.fold") "sz_stream_fold" else if (f == "Stream.scan") "sz_stream_scan" else if (f == "List.foldLeft") "sz_list_fold_left" else if (f == "List.foldRight") "sz_list_fold_right" else if (f == "List.scanLeft") "sz_list_scan_left" else if (f == "List.scanRight") "sz_list_scan_right" else "sz_stream_zip_with"
 
-def emitMapKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitMapKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitMapKitPred(isPredKit(f) || isPredI64(f), mapKitRt(f), args, prefix, strs, defs, ens, ps, loc)
 
-def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitMapKit2(pred, rt, emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), prefix, strs, defs, ens, ps, loc, mapElemTy(List.at(args, 0), defs, ens, ps, loc))
 
 def isIntElem(e: Expr): Bool =
@@ -1144,7 +1148,7 @@ def isIntElem(e: Expr): Bool =
     case _ => false
   }
 
-def mapElemTy(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def mapElemTy(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   if (isIntElem(e)) "Int" else mapElemTyOf(exprRetTyEns(e, defs, ens, ps, loc))
 
 def mapElemTyOf(ty: String): String =
@@ -1153,12 +1157,12 @@ def mapElemTyOf(ty: String): String =
 def listElemTy(ty: String): String =
   Check.elemOf(ty)
 
-def emitMapKit2(pred: Bool, rt: String, inner: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, elemTy: String): Slot =
+def emitMapKit2(pred: Bool, rt: String, inner: Slot, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, elemTy: String): Slot =
   inner match {
     case Slot(ic, iv, io) => emitMapKitPick(pred, rt, ic, iv, io, wrapPh(lam, ps, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, elemTy)
   }
 
-def emitMapKitPick(pred: Bool, rt: String, ic: String, iv: String, io: Bool, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, elemTy: String): Slot =
+def emitMapKitPick(pred: Bool, rt: String, ic: String, iv: String, io: Bool, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, elemTy: String): Slot =
   lam match {
     case Expr.EVar(f, _) => if (!pred && isLocalPack(f, ps)) emitMapKitPack(rt, ic, iv, io, f, prefix) else emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc, elemTy)
     case _ => emitMapKit3(pred, rt, ic, iv, io, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc, elemTy)
@@ -1173,10 +1177,10 @@ def emitMapKitPack(rt: String, ic: String, iv: String, io: Bool, f: String, pref
 def mapPackCall(rt: String, iv: String, prefix: String): String =
   Str.concat(tmp(prefix, "v"), Str.concat(mapKitCallMid(rt), Str.concat(iv, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), mapKitCallEnd(rt))))))))
 
-def wrapPh(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
+def wrapPh(e: Expr, ps: List[Param], defs: Ftab, mod: String): Expr =
   if (needsPh(e)) Expr.ELam("_ph", "", rewriteHole(e, "_ph")) else etaKit(e, ps, defs, mod)
 
-def etaKit(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
+def etaKit(e: Expr, ps: List[Param], defs: Ftab, mod: String): Expr =
   e match {
     case Expr.ECall(f, args, _) => if (List.isEmpty(args) && kitEta1(f)) phCall(f) else e
     case Expr.EVar(f, _) => if (etaVar(f, ps, defs, mod)) phCall(f) else e
@@ -1188,7 +1192,7 @@ def etaKit(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
 def phCall(f: String): Expr =
   Expr.ELam("_ph", "", Expr.ECall(f, Expr.EVar("_ph", 0) :: noExpr(), 0))
 
-def etaVar(f: String, ps: List[Param], defs: List[Fun], mod: String): Bool =
+def etaVar(f: String, ps: List[Param], defs: Ftab, mod: String): Bool =
   if (kitEta1(f)) true else paramTy(ps, f) == "" && etaFun1(findDefPrefer(defs, f, mod))
 
 def etaFun1(hit: List[Fun]): Bool =
@@ -1214,13 +1218,13 @@ def mapLamBody(e: Expr): Expr =
     case _ => e
   }
 
-def emitMapKit3(pred: Bool, rt: String, ic: String, iv: String, io: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, elemTy: String): Slot =
+def emitMapKit3(pred: Bool, rt: String, ic: String, iv: String, io: Bool, bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, elemTy: String): Slot =
   emitMapKit4(rt, ic, iv, io, emitNethTy(rt, prefix, bind, body, strs, defs, ens, ps, loc, pred, elemTy), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
-def emitNethTy(rt: String, prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, pred: Bool, elemTy: String): String =
+def emitNethTy(rt: String, prefix: String, bind: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, pred: Bool, elemTy: String): String =
   emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, pred, mapNethBindTy(rt, bind, body, dropParam(ps, bind), defs, elemTy))
 
-def mapNethBindTy(rt: String, bind: String, body: Expr, rest: List[Param], defs: List[Fun], elemTy: String): String =
+def mapNethBindTy(rt: String, bind: String, body: Expr, rest: List[Param], defs: Ftab, elemTy: String): String =
   if (nethIdxPred(rt)) "Int" else if (bind == "__tup" || bind == "__p" || bind == "_ph") nethBindTy(bind, body, rest, defs) else if (elemTy != "") elemTy else nethBindTy(bind, body, rest, defs)
 
 def nethIdxPred(rt: String): Bool =
@@ -1267,16 +1271,16 @@ def mapKitRtName(rt: String): String =
 def mapKitCallEnd(rt: String): String =
   if (rt == "sz_set_map" || rt == "sz_list_group_by" || rt == "sz_list_distinct_by") ", i32 0)" else if (rt == "sz_list_max_by") ", i64 1)" else if (rt == "sz_list_max_by_min") ", i64 0)" else ")"
 
-def emitFoldKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFoldKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitFoldKit2(foldKitRt(f), List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, loc)
 
-def emitFoldKit2(rt: String, a0: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFoldKit2(rt: String, a0: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitFoldKit3(rt, emitExpr(a0, Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), List.at(rest, 0), List.tail(rest), prefix, strs, defs, ens, ps, loc)
 
-def emitFoldKit3(rt: String, inner: Slot, a1: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFoldKit3(rt: String, inner: Slot, a1: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitFoldKit4(rt, inner, emitExpr(a1, Str.concat(prefix, "_z"), strs, defs, ens, ps, loc), List.at(rest, 0), prefix, strs, defs, ens, ps, loc)
 
-def emitFoldKit4(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFoldKit4(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitFoldKit4b(rt, inner, z, foldLam(lam), prefix, strs, defs, ens, ps, loc)
 
 def foldLam(e: Expr): Expr =
@@ -1289,12 +1293,12 @@ def foldLam(e: Expr): Expr =
 def etaFold(f: String): Expr =
   Expr.ELam("__tup", "", Expr.EMatch(Expr.EVar("__tup", 0), Arm("(a, b)", "", Expr.ECall(f, Expr.EVar("a", 0) :: Expr.EVar("b", 0) :: noExpr(), 0)) :: noArm(), 0))
 
-def emitFoldKit4b(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFoldKit4b(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   inner match {
     case Slot(ic, iv, io) => emitFoldKit5(rt, ic, iv, io, z, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc)
   }
 
-def emitFoldKit5(rt: String, ic: String, iv: String, io: Bool, z: Slot, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFoldKit5(rt: String, ic: String, iv: String, io: Bool, z: Slot, bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitFoldKit6(rt, ic, iv, io, z, emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, false), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
 def emitFoldKit6(rt: String, ic: String, iv: String, io: Bool, z: Slot, neth: String, env: Slot, prefix: String): Slot =
@@ -1348,21 +1352,21 @@ def foldCall5(prefix: String, env: String): String =
 def foldCall6(env: String): String =
   Str.concat(", ptr ", Str.concat(env, ")"))
 
-def emitIterKit(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitIterKit(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitIterKit2(List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, loc)
 
-def emitIterKit2(z: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitIterKit2(z: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitIterKit3(emitExpr(z, Str.concat(prefix, "_z"), strs, defs, ens, ps, loc), List.at(rest, 0), List.tail(rest), prefix, strs, defs, ens, ps, loc)
 
-def emitIterKit3(zs: Slot, n: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitIterKit3(zs: Slot, n: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitIterKit4(zs, emitExpr(n, Str.concat(prefix, "_n"), strs, defs, ens, ps, loc), List.at(rest, 0), prefix, strs, defs, ens, ps, loc)
 
-def emitIterKit4(zs: Slot, ns: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitIterKit4(zs: Slot, ns: Slot, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   zs match {
     case Slot(zc, zv, zo) => emitIterKit5(zc, zv, zo, ns, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc)
   }
 
-def emitIterKit5(zc: String, zv: String, zo: Bool, ns: Slot, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitIterKit5(zc: String, zv: String, zo: Bool, ns: Slot, bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitIterKit6(zc, zv, zo, ns, emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, false), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
 def emitIterKit6(zc: String, zv: String, zo: Bool, ns: Slot, neth: String, env: Slot, prefix: String): Slot =
@@ -1384,15 +1388,15 @@ def emitIterKitCall(zc: String, zv: String, zo: Bool, nc: String, nv: String, ne
 def iterCall(z: String, n: String, prefix: String, env: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_stream_iterate(ptr ", Str.concat(z, Str.concat(", i64 ", Str.concat(n, Str.concat(", ptr @sz_neth_", Str.concat(prefix, Str.concat(", ptr ", Str.concat(env, ")"))))))))))
 
-def emitTabulate(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTabulate(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitTabulate2(emitExpr(List.at(args, 0), Str.concat(prefix, "_n"), strs, defs, ens, ps, loc), List.at(List.tail(args), 0), prefix, strs, defs, ens, ps, loc)
 
-def emitTabulate2(ns: Slot, lam: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTabulate2(ns: Slot, lam: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   ns match {
     case Slot(nc, nv, _) => emitTabulate3(nc, nv, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc)
   }
 
-def emitTabulate3(nc: String, nv: String, bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTabulate3(nc: String, nv: String, bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitTabulate4(nc, nv, emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, false), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
 def emitTabulate4(nc: String, nv: String, neth: String, env: Slot, prefix: String): Slot =
@@ -1403,15 +1407,15 @@ def emitTabulate4(nc: String, nv: String, neth: String, env: Slot, prefix: Strin
 def tabCall(n: String, prefix: String, env: String): String =
   Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_tabulate(i64 ", Str.concat(n, Str.concat(", ptr @sz_neth_", Str.concat(prefix, Str.concat(", ptr ", Str.concat(env, ")")))))))
 
-def emitSegLen(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSegLen(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitSegLen2(emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), List.at(List.tail(args), 0), List.at(List.tail(List.tail(args)), 0), prefix, strs, defs, ens, ps, loc)
 
-def emitSegLen2(inner: Slot, lam: Expr, fromE: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSegLen2(inner: Slot, lam: Expr, fromE: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   inner match {
     case Slot(ic, iv, io) => emitSegLen3(ic, iv, io, mapLamBind(lam), mapLamBody(lam), emitExpr(fromE, Str.concat(prefix, "_from"), strs, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc)
   }
 
-def emitSegLen3(ic: String, iv: String, io: Bool, bind: String, body: Expr, fromS: Slot, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSegLen3(ic: String, iv: String, io: Bool, bind: String, body: Expr, fromS: Slot, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitSegLen4(ic, iv, io, emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, true), emitPackEnv(ps, Str.concat(prefix, "_e")), fromS, prefix)
 
 def emitSegLen4(ic: String, iv: String, io: Bool, neth: String, env: Slot, fromS: Slot, prefix: String): Slot =
@@ -1427,19 +1431,19 @@ def emitSegLen5(ic: String, iv: String, io: Bool, neth: String, ec: String, ev: 
 def segCall(iv: String, prefix: String, env: String, from: String): String =
   Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_list_segment_length(ptr ", Str.concat(iv, Str.concat(", ptr @sz_neth_", Str.concat(prefix, Str.concat(", ptr ", Str.concat(env, Str.concat(", i64 ", Str.concat(from, ")")))))))))
 
-def emitNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, pred: Bool): String =
+def emitNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, pred: Bool): String =
   emitNethGo(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, pred)
 
-def emitNethGo(prefix: String, bind: String, body: Expr, rest: List[Param], strs: List[String], defs: List[Fun], ens: List[En], loc: String, pred: Bool): String =
+def emitNethGo(prefix: String, bind: String, body: Expr, rest: List[Param], strs: List[String], defs: Ftab, ens: List[En], loc: String, pred: Bool): String =
   emitNethGoTy(prefix, bind, body, rest, strs, defs, ens, loc, pred, nethBindTy(bind, body, rest, defs))
 
-def emitNethGoTy(prefix: String, bind: String, body: Expr, rest: List[Param], strs: List[String], defs: List[Fun], ens: List[En], loc: String, pred: Bool, bty: String): String =
+def emitNethGoTy(prefix: String, bind: String, body: Expr, rest: List[Param], strs: List[String], defs: Ftab, ens: List[En], loc: String, pred: Bool, bty: String): String =
   nethWithConts(prefix, body, strs, defs, ens, nethPsTy(bind, bty, rest), loc, emitNeth2(prefix, join(emitUnpack(rest), emitNethBind2(bind, isI64Ty(bty))), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, nethPsTy(bind, bty, rest), loc), loc, strs, pred))
 
 def nethPsTy(bind: String, bty: String, rest: List[Param]): List[Param] =
   if (keepBind(bind)) Param(bind, bty, "", "") :: rest else rest
 
-def nethBindTy(bind: String, body: Expr, rest: List[Param], defs: List[Fun]): String =
+def nethBindTy(bind: String, body: Expr, rest: List[Param], defs: Ftab): String =
   if (bind == "__tup") nethTupTy(body, rest, defs) else if (bind == "_ph") phBindTy(body) else if (bind == "__p") matchLamBindTy(body) else if (nameIntUse(body, bind)) "Int" else ""
 
 def nameIntUse(e: Expr, n: String): Bool =
@@ -1556,7 +1560,7 @@ def isPhExpr(e: Expr): Bool =
     case _ => false
   }
 
-def nethTupTy(body: Expr, rest: List[Param], defs: List[Fun]): String =
+def nethTupTy(body: Expr, rest: List[Param], defs: Ftab): String =
   if (exprIsI64(body, rest, defs)) "(Int, Int)" else "(Any, Any)"
 
 def emitNethBind2(bind: String, i64: Bool): String =
@@ -1612,16 +1616,16 @@ def emitNethWithSig2(_prefix: String, code: String, p: (String, String), sig: St
     case (extra, ret) => Str.concat(nethBeg(), Str.concat("define internal ", Str.concat(sig, Str.concat(code, Str.concat(extra, Str.concat(nethRetLine(ret, false), nethEnd()))))))
   }
 
-def emitRebuildNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitRebuildNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitRebuildNeth2(prefix, dropParam(ps, bind), body, strs, defs, ens, loc)
 
-def emitRebuildNeth2(prefix: String, rest: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En], loc: String): String =
+def emitRebuildNeth2(prefix: String, rest: List[Param], body: Expr, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   nethWithConts(prefix, body, strs, defs, ens, rest, loc, emitNethWithSig(prefix, emitUnpack(rest), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, rest, loc), nethEnvSig(prefix, loc, strs)))
 
-def emitTapNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitTapNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitTapNeth2(prefix, bind, dropParam(ps, bind), body, strs, defs, ens, loc)
 
-def emitTapNeth2(prefix: String, bind: String, rest: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En], loc: String): String =
+def emitTapNeth2(prefix: String, bind: String, rest: List[Param], body: Expr, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   nethWithConts(prefix, body, strs, defs, ens, tapNethPs(bind, rest), loc, emitTapNeth3(prefix, join(emitUnpack(rest), tapBindLine(bind)), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, tapNethPs(bind, rest), loc), isIoPred(body), loc, strs))
 
 def tapBindLine(bind: String): String =
@@ -1638,7 +1642,7 @@ def emitTapNeth3(prefix: String, pre: String, s: Slot, io: Bool, loc: String, st
 def tapFinish(val: String, o: Bool, prefix: String, io: Bool): String =
   if (io) join(line(Str.concat(tmp(prefix, "ur"), Str.concat("call ptr @sz_io_unsafe_run_or_die(ptr ", Str.concat(val, ")")))), relPtr(pct(prefix, "ur"))) else if (o) relPtr(val) else ""
 
-def nethWithConts(prefix: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ir: String): String =
+def nethWithConts(prefix: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ir: String): String =
   join(nethBeg(), join(stampNethC(stampCont(emitConts(body, strs, defs, ens, ps, loc), prefix), prefix), stampCont(dropNethB(ir), prefix)))
 
 def dropNethB(ir: String): String =
@@ -1647,10 +1651,10 @@ def dropNethB(ir: String): String =
 def stampNethC(ir: String, key: String): String =
   stampFrom(ir, "@sz_neth_c", Str.concat("@sz_neth_", Str.concat(key, "_c")))
 
-def emitLam(bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitLam(bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitLamWithCopy(bind, body, prefix, strs, defs, ens, ps, loc, copyPs(ps))
 
-def emitLamWithCopy(bind: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ps2: List[Param]): Slot =
+def emitLamWithCopy(bind: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ps2: List[Param]): Slot =
   emitLam2(emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, false), emitPackEnv(ps2, Str.concat(prefix, "_e")), prefix)
 
 def emitLam2(neth: String, env: Slot, prefix: String): Slot =
@@ -1799,7 +1803,7 @@ def jsonBoxI64(n: String, prefix: String): String =
 def emitJsonNull(code: String, prefix: String): Slot =
   Slot(join(code, emitAdtNew(prefix, 0, "null")), pct(prefix, "adt"), true)
 
-def emitCall3b(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
+def emitCall3b(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
   if (f == "Scenario.context") emitClock("sz_scenario_context", code, prefix) else if (isUiKit(f)) emitUiKit(f, code, vals, owns, prefix) else if (f == "List.setAt") emitListSetAt(code, vals, owns, prefix) else if (f == "Str.fromInt") emitFromInt(code, vals, prefix, ps, owns, args) else if (f == "Str.fromBool") emitFromBool(code, vals, prefix) else if (f == "Str.concat") emitConcat(code, vals, owns, prefix) else if (f == "Str.len") emitStrLen(code, vals, owns, prefix) else if (f == "Str.byteLen") emitByteLen(code, vals, owns, prefix) else if (f == "Str.charAt") emitCharAt(code, vals, owns, prefix) else if (f == "Str.slice") emitSlice(code, vals, owns, prefix) else if (f == "Str.byteSlice") emitByteSlice(code, vals, owns, prefix) else if (f == "Str.toInt") emitToInt(code, vals, owns, prefix) else if (f == "Str.repeat") emitRepeat(code, vals, owns, prefix) else if (f == "Str.startsWith") emitStarts(code, vals, owns, prefix) else if (f == "Str.eq") emitStrEq(code, vals, owns, prefix) else if (f == "List.len") emitListLen(code, vals, owns, prefix) else if (f == "List.concat") emitListCat(code, vals, owns, prefix) else if (f == "List.reverse") emitListRev(code, vals, owns, prefix) else if (f == "List.head") emitListHead(code, vals, owns, prefix) else if (f == "List.tail") emitListTail(code, vals, owns, prefix) else if (f == "List.isEmpty") emitListEmpty(code, vals, owns, prefix) else if (f == "List.cons") emitConsCall(code, vals, owns, prefix, args, ps, defs) else if (f == "List.at") emitAt(code, vals, owns, prefix, args, ps) else if (f == "List.join") emitListJoin(code, vals, owns, prefix) else if (kitUnaryPtr(f) != "") emitKitUnaryPtr(kitUnaryPtr(f), code, vals, owns, prefix) else if (kitUnaryI64(f) != "") emitKitUnaryI64(kitUnaryI64(f), code, vals, owns, prefix) else if (kitPtrI64(f) != "") emitKitPtrI64(kitPtrI64(f), code, vals, owns, prefix) else if (kitBinaryPtr(f) != "") emitKitBinaryPtr(kitBinaryPtr(f), code, vals, owns, prefix) else if (kitBinaryI64(f) != "") emitKitBinaryI64(kitBinaryI64(f), code, vals, owns, prefix) else if (f == "Stream.zipAll") emitZipAllKit("sz_stream_zip_all", code, vals, owns, prefix) else if (f == "List.zipAll") emitZipAllKit("sz_list_zip_all", code, vals, owns, prefix) else if (f == "Str.replace") emitStrReplace(code, vals, owns, prefix) else if (f == "Str.padLeft") emitStrPad("sz_string_pad_left", code, vals, owns, prefix) else if (f == "Str.padRight") emitStrPad("sz_string_pad_right", code, vals, owns, prefix) else if (f == "List.empty") emitListNil(code, prefix) else if (f == "Map.empty" || f == "Set.empty") emitMapEmpty(code, prefix) else if (f == "Map.set") emitMapSet(code, vals, owns, prefix) else if (f == "Set.add") emitSetAdd(code, vals, owns, prefix) else if (f == "Map.getOrElse") emitMapGetOr(code, vals, owns, prefix) else if (f == "Clock.monotonic") emitClock("sz_clock_monotonic", code, prefix) else if (f == "Clock.realTime") emitClock("sz_clock_real_time", code, prefix) else if (f == "Queue.unbounded") emitClock("sz_queue_unbounded", code, prefix) else if (f == "Deferred.empty") emitClock("sz_deferred_empty", code, prefix) else if (f == "Fs.mkdirs") emitFsMkdirs(code, vals, owns, prefix) else if (f == "Builder.empty") emitBldNew(code, prefix) else if (f == "Builder.append") emitBldApp(code, vals, owns, prefix) else if (f == "Builder.result") emitBldRes(code, vals, owns, prefix) else if (f == "Fs.read") emitFsRead(code, vals, owns, prefix) else if (f == "Fs.write") emitFsWrite(code, vals, owns, prefix) else if (f == "Fs.list") emitFsList(code, vals, owns, prefix) else if (f == "Fs.canonicalize") emitFsReadRt("sz_fs_canonicalize", code, vals, owns, prefix) else if (f == "Fs.exists") emitFsReadRt("sz_fs_exists", code, vals, owns, prefix) else if (f == "Fs.walk") emitFsReadRt("sz_fs_walk", code, vals, owns, prefix) else if (f == "Fs.delete") emitFsReadRt("sz_fs_delete", code, vals, owns, prefix) else if (f == "Fs.rename") emitFsWriteRt("sz_fs_rename", code, vals, owns, prefix) else if (f == "Net.httpPost") emitFsWriteRt("sz_net_http_post", code, vals, owns, prefix) else if (f == "Net.httpPut") emitFsWriteRt("sz_net_http_put", code, vals, owns, prefix) else if (f == "Net.httpPatch") emitFsWriteRt("sz_net_http_patch", code, vals, owns, prefix) else if (f == "Net.tcpListen") emitSysI64("sz_net_tcp_listen", code, vals, prefix) else if (f == "Net.udpBind") emitSysI64("sz_net_udp_bind", code, vals, prefix) else if (f == "Net.tcpConnect") emitNetPtrI64("sz_net_tcp_connect", code, vals, owns, prefix) else if (f == "Net.tcpRead") emitNetPtrI64("sz_net_tcp_read", code, vals, owns, prefix) else if (f == "Net.udpRecv") emitNetPtrI64("sz_net_udp_recv", code, vals, owns, prefix) else if (f == "Net.tcpWrite") emitFsWriteRt("sz_net_tcp_write", code, vals, owns, prefix) else if (f == "Net.udpSend") emitNetUdpSend(code, vals, owns, prefix) else if (f == "Net.tcpAccept") emitFsReadRt("sz_net_tcp_accept", code, vals, owns, prefix) else if (f == "Net.tcpClose") emitFsReadRt("sz_net_tcp_close", code, vals, owns, prefix) else if (f == "Net.udpClose") emitFsReadRt("sz_net_udp_close", code, vals, owns, prefix) else if (f == "Random.nextInt") emitSysI64("sz_random_next_int", code, vals, prefix) else if (f == "Sys.getenv") emitFsReadRt("sz_sys_getenv", code, vals, owns, prefix) else if (f == "Sys.write") emitFsReadRt("sz_sys_write", code, vals, owns, prefix) else if (f == "Sys.exec") emitFsReadRt("sz_sys_exec", code, vals, owns, prefix) else if (f == "Sys.spawn") emitFsReadRt("sz_sys_spawn", code, vals, owns, prefix) else if (f == "Sys.kill") emitSysI64("sz_sys_kill", code, vals, prefix) else if (f == "Sys.alive") emitSysI64("sz_sys_alive", code, vals, prefix) else if (f == "Sys.childClose") emitSysI64("sz_sys_child_close", code, vals, prefix) else if (f == "Sys.childRead") emitSysI64I64("sz_sys_child_read", code, vals, prefix) else if (f == "Sys.childWrite") emitSysI64Ptr("sz_sys_child_write", code, vals, owns, prefix) else if (f == "Impurity.runKit") emitClock("sz_impurity_run_kit", code, prefix) else if (f == "Sys.args") emitSysArgs(code, prefix) else if (f == "Sys.read") emitSysI64("sz_sys_read", code, vals, prefix) else if (f == "Sys.readLine") emitClock("sz_sys_read_line", code, prefix) else if (f == "IO.pure") emitIoPure(code, vals, owns, prefix, ps) else if (f == "List.range") emitListRange(code, vals, prefix) else if (f == "List.fill") emitListFill(code, vals, owns, prefix) else if (f == "List.getOrElse") emitListGetOr(code, vals, owns, prefix) else if (f == "List.padTo") emitListPadTo(code, vals, owns, prefix) else if (f == "List.max") emitListExtreme("sz_list_max", code, vals, owns, prefix, args, ps, defs) else if (f == "List.min") emitListExtreme("sz_list_min", code, vals, owns, prefix, args, ps, defs) else if (f == "List.toSet") emitListToSet(code, vals, owns, prefix, args, ps) else if (f == "List.slice") emitListSlice(code, vals, owns, prefix) else if (f == "List.isDefinedAt") emitKitPtrI64I64("sz_list_is_defined_at", code, vals, owns, prefix) else if (f == "List.lengthCompare") emitKitPtrI64I64("sz_list_length_compare", code, vals, owns, prefix) else if (f == "Map.isEmpty" || f == "Set.isEmpty") emitMapSizePred(code, vals, owns, prefix, "eq") else if (f == "Map.nonEmpty" || f == "Set.nonEmpty") emitMapSizePred(code, vals, owns, prefix, "ne") else if (f == "Float.toInt") emitFloatToInt(code, vals, owns, prefix, ps) else if (f == "Float.fromInt") emitFloatFromInt(code, vals, prefix) else if (f == "Oracle.sumTo") emitOracleSumTo(code, vals, prefix) else if (hasEn(ens, f) || isCtorName(f)) emitRec(f, code, vals, owns, prefix, ens, args, ps, defs, mod) else if (isQualCtor(f, ens)) emitPayloadCtorN(qualEn(f), qualName(f), (code, vals, owns), args, prefix, ens, ps, defs, mod) else emitUser(f, code, vals, owns, prefix, defs, mod)
 
 def emitUiKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
@@ -2003,7 +2007,7 @@ def emitViewListTile(code: String, vals: List[String], owns: List[Bool], prefix:
 def emitViewListTile1(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_list_tile(ptr ", Str.concat(arg0(vals), ", ptr null)")))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), pct(prefix, "v"), true)
 
-def emitViewEachCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitViewEachCall(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(List.tail(args))) emitViewEach1(emitExpr(List.at(args, 0), Str.concat(prefix, "_src"), strs, defs, ens, ps, loc), prefix) else emitViewEachJoin(emitExpr(List.at(args, 0), Str.concat(prefix, "_src"), strs, defs, ens, ps, loc), List.at(List.tail(args), 0), eachElemTy(List.at(args, 0), defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc)
 
 def emitViewEach1(src: Slot, prefix: String): Slot =
@@ -2011,21 +2015,21 @@ def emitViewEach1(src: Slot, prefix: String): Slot =
     case Slot(sc, sv, _) => Slot(join(sc, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_each(ptr ", Str.concat(sv, ")"))))), pct(prefix, "v"), true)
   }
 
-def emitViewEachJoin(src: Slot, fn: Expr, elemTy: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitViewEachJoin(src: Slot, fn: Expr, elemTy: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   src match {
     case Slot(sc, sv, _) => emitViewEachJoin2(sc, sv, emitEachLamTy(fn, elemTy, Str.concat(prefix, "_fn"), strs, defs, ens, ps, loc), prefix)
   }
 
-def emitEachLamTy(e: Expr, elemTy: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitEachLamTy(e: Expr, elemTy: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
     case Expr.ELam(p, _, body) => emitLam2(emitNethGoTy(prefix, p, body, dropParam(ps, p), strs, defs, ens, loc, false, eachBindTy(p, body, dropParam(ps, p), defs, elemTy)), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
   }
 
-def eachBindTy(p: String, body: Expr, rest: List[Param], defs: List[Fun], elemTy: String): String =
+def eachBindTy(p: String, body: Expr, rest: List[Param], defs: Ftab, elemTy: String): String =
   if (p == "__tup" || p == "__p" || p == "_ph") nethBindTy(p, body, rest, defs) else if (elemTy != "") elemTy else nethBindTy(p, body, rest, defs)
 
-def eachElemTy(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def eachElemTy(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   eachElemOf(exprRetTyEns(e, defs, ens, ps, loc))
 
 def eachElemOf(ty: String): String =
@@ -2039,15 +2043,15 @@ def emitViewEachJoin2(sc: String, sv: String, pack: Slot, prefix: String): Slot 
 def eachMapCall(src: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_each_map(ptr ", Str.concat(src, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), ")"))))))))
 
-def emitInkWellCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitInkWellCall(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitInkWellJoin(emitExpr(List.at(args, 0), Str.concat(prefix, "_arg0"), strs, defs, ens, ps, loc), List.at(List.tail(args), 0), emitExpr(List.at(List.tail(List.tail(args)), 0), Str.concat(prefix, "_arg2"), strs, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc)
 
-def emitInkWellJoin(lab: Slot, fn: Expr, child: Slot, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitInkWellJoin(lab: Slot, fn: Expr, child: Slot, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   lab match {
     case Slot(lc, lv, lo) => emitInkWellJoin1(lc, lv, lo, fn, child, prefix, strs, defs, ens, ps, loc)
   }
 
-def emitInkWellJoin1(lc: String, lv: String, lo: Bool, fn: Expr, child: Slot, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitInkWellJoin1(lc: String, lv: String, lo: Bool, fn: Expr, child: Slot, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   child match {
     case Slot(cc, cv, _) => emitInkWellJoin2(lc, lv, lo, cc, cv, emitTapLam(fn, Str.concat(prefix, "_fn"), strs, defs, ens, ps, loc), prefix)
   }
@@ -2099,7 +2103,7 @@ def emitStrPad(rt: String, code: String, vals: List[String], owns: List[Bool], p
 def emitStrPadCall(rt: String, vals: List[String], prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), Str.concat(", ptr ", Str.concat(arg2(vals), ")"))))))))))
 
-def emitListExtreme(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param], defs: List[Fun]): Slot =
+def emitListExtreme(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param], defs: Ftab): Slot =
   emitListExtreme2(rt, code, arg0(vals), headOwn(owns), prefix, listAsIntOf(args, ps, defs))
 
 def emitListExtreme2(rt: String, code: String, v: String, o: Bool, prefix: String, asInt: String): Slot =
@@ -2117,10 +2121,10 @@ def listExtremeCall(rt: String, v: String, prefix: String): String =
 def listExtremeUnbox(prefix: String): String =
   line(Str.concat(tmp(prefix, "u"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(prefix, "v"), ")"))))
 
-def listAsIntOf(args: List[Expr], ps: List[Param], defs: List[Fun]): String =
+def listAsIntOf(args: List[Expr], ps: List[Param], defs: Ftab): String =
   if (List.isEmpty(args)) "1" else listAsIntExpr(List.at(args, 0), ps, defs)
 
-def listAsIntExpr(e: Expr, ps: List[Param], defs: List[Fun]): String =
+def listAsIntExpr(e: Expr, ps: List[Param], defs: Ftab): String =
   e match {
     case Expr.EList(xs) => if (List.isEmpty(xs) || exprIsI64(List.at(xs, 0), ps, defs)) "1" else "0"
     case Expr.EVar(s, _) => if (paramIsI64List(ps, s)) "1" else "0"
@@ -2174,22 +2178,22 @@ def floatToIntBits(v: String, prefix: String): String =
 def emitFloatFromInt(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "ff"), Str.concat("sitofp i64 ", Str.concat(arg0(vals), " to double")))), line(Str.concat(tmp(prefix, "v"), Str.concat("bitcast double ", Str.concat(pct(prefix, "ff"), " to i64")))))), pct(prefix, "v"), false)
 
-def emitCall(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCall(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (f == "Verdict.onHit") emitOnHit(args, prefix, strs, defs, ens, ps, loc) else if (!List.isEmpty(args) && isApplyName(f, ps, defs)) emitApply(f, args, prefix, strs, defs, ens, ps, loc) else emitCallKit(f, args, prefix, strs, defs, ens, ps, loc)
 
-def isApplyName(f: String, ps: List[Param], defs: List[Fun]): Bool =
+def isApplyName(f: String, ps: List[Param], defs: Ftab): Bool =
   isApplyTy(paramTy(ps, f), f, defs)
 
-def isApplyTy(ty: String, f: String, defs: List[Fun]): Bool =
+def isApplyTy(ty: String, f: String, defs: Ftab): Bool =
   if (isFunTy(ty)) true else if (ty == "" || isI64Ty(ty)) false else List.isEmpty(findDef(defs, f))
 
-def emitCallKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCallKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (Str.startsWith(f, "Signal.")) emitGenericSignal(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "Net.serveOnce" || f == "Net.serve") emitNetServe(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Ui.run") emitUiRunCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "Verdict.onHit") emitOnHit(args, prefix, strs, defs, ens, ps, loc) else if (tapViewRt(f) != "") emitTapViewCall(tapViewRt(f), args, prefix, strs, defs, ens, ps, loc) else if (f == "View.each") emitViewEachCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "View.inkWell") emitInkWellCall(args, prefix, strs, defs, ens, ps, loc) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps, loc) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps, loc) else emitCallKit2(f, args, prefix, strs, defs, ens, ps, loc)
 
-def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps, loc) else emitCall2(f, emitArgList(alignArgs(f, args, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), prefix, defs, alignArgs(f, args, defs, modOfLoc(loc)), ens, ps, modOfLoc(loc))
 
-def alignArgs(f: String, args: List[Expr], defs: List[Fun], mod: String): List[Expr] =
+def alignArgs(f: String, args: List[Expr], defs: Ftab, mod: String): List[Expr] =
   alignFill(funParamsOf(defs, f, mod), args)
 
 def alignFill(ps: List[Param], args: List[Expr]): List[Expr] =
@@ -2200,7 +2204,7 @@ def alignFillGot(p: (List[Expr], String)): List[Expr] =
     case (xs, _) => xs
   }
 
-def funParamsOf(defs: List[Fun], f: String, mod: String): List[Param] =
+def funParamsOf(defs: Ftab, f: String, mod: String): List[Param] =
   funParamsOfHit(findDefPrefer(defs, f, mod))
 
 def funParamsOfHit(hit: List[Fun]): List[Param] =
@@ -2211,36 +2215,36 @@ def funParamsOfD(d: Fun): List[Param] =
     case Fun(_, _, _, ps, _, _, _, _) => ps
   }
 
-def emitPropCheckCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropCheckCall(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitPropCheckCall2(nthE(args, 0), nthE(args, 1), nthE(args, 2), prefix, strs, defs, ens, ps, loc)
 
 def nthE(xs: List[Expr], i: Int): Expr =
   if (List.isEmpty(xs)) Expr.EUnit else if (i <= 0) List.at(xs, 0) else nthE(List.tail(xs), i - 1)
 
-def emitPropCheckCall2(name: Expr, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropCheckCall2(name: Expr, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitPropCheckJoin(emitExpr(name, Str.concat(prefix, "_n"), strs, defs, ens, ps, loc), emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), pred, recv, prefix, strs, defs, ens, ps, loc)
 
-def emitPropCheckJoin(ns: Slot, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropCheckJoin(ns: Slot, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   ns match {
     case Slot(nc, nv, no) => emitPropCheckJoin2(nc, nv, no, rs, pred, recv, prefix, strs, defs, ens, ps, loc)
   }
 
-def emitPropCheckJoin2(nc: String, nv: String, no: Bool, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropCheckJoin2(nc: String, nv: String, no: Bool, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   rs match {
     case Slot(rc, rv, ro) => emitPropCheckPred(join(nc, join(rc, if (ro && exprMentions(pred, recv)) retPtr(rv) else "")), nv, no, rv, ro, emitPropPred(pred, rv, ro, recv, prefix, strs, defs, ens, ps, loc))
   }
 
-def emitPropPred(pred: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropPred(pred: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   pred match {
     case Expr.ENamed(_, inner) => emitPropPred(inner, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
     case Expr.ELam(p, _, body) => emitPropPredLam(p, body, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
     case _ => emitExpr(pred, Str.concat(prefix, "_p"), strs, defs, ens, ps, loc)
   }
 
-def emitPropPredLam(p: String, body: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropPredLam(p: String, body: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitPropPredLam2(p, body, Slot("", rv, ro), slotBindI64(Slot("", rv, ro), recv, ps, defs), recv, prefix, strs, defs, ens, ps, loc)
 
-def emitPropPredLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropPredLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitApplyLam2(propLamBind(p, boxInt, prefix), propLamBody(p, body, boxInt, prefix), arg, boxInt, applyBindTy(p, recv, defs, ens, ps, loc), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc, 0)
 
 def propLamBind(p: String, boxInt: Bool, prefix: String): String =
@@ -2308,10 +2312,10 @@ def bindsHasVar1(b: Bind, rest: List[Bind], s: String): Bool =
     case Bind(_, _, value) => exprHasVar(value, s) || bindsHasVar(rest, s)
   }
 
-def emitUiRunCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitUiRunCall(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitUiRunPack(emitUiRunLam(List.at(args, 0), Str.concat(prefix, "_fn"), strs, defs, ens, ps, loc), prefix)
 
-def emitUiRunLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitUiRunLam(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
     case Expr.ELam(p, _, body) => emitLam2(emitRebuildNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
@@ -2322,15 +2326,15 @@ def emitUiRunPack(pack: Slot, prefix: String): Slot =
     case Slot(pc, pv, po) => Slot(join(pc, join(unpackFnPtr(pv, prefix), join(uiRunCall(prefix), if (po) relPtr(pv) else ""))), pct(prefix, "v"), false)
   }
 
-def emitTapViewCall(rt: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTapViewCall(rt: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitTapViewJoin(rt, emitExpr(List.at(args, 0), Str.concat(prefix, "_arg0"), strs, defs, ens, ps, loc), List.at(List.tail(args), 0), prefix, strs, defs, ens, ps, loc)
 
-def emitTapViewJoin(rt: String, lab: Slot, fn: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTapViewJoin(rt: String, lab: Slot, fn: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   lab match {
     case Slot(lc, lv, lo) => emitTapViewJoin2(rt, lc, lv, lo, emitTapLam(fn, Str.concat(prefix, "_fn"), strs, defs, ens, ps, loc), prefix)
   }
 
-def emitTapLam(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTapLam(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
     case Expr.ELam(p, _, body) => emitLam2(emitTapNeth(prefix, p, body, strs, defs, ens, ps, loc), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
@@ -2344,7 +2348,7 @@ def emitTapViewJoin2(rt: String, lc: String, lv: String, lo: Bool, pack: Slot, p
 def isFunTy(t: String): Bool =
   hasSub(t, "=>")
 
-def emitApply(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitApply(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.len(args) == 1) emitApply1(paramTy(ps, f), emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), f, prefix) else emitApply1(paramTy(ps, f), emitTuple(args, prefix, strs, defs, ens, ps, loc), f, prefix)
 
 def emitApply1(ty: String, arg: Slot, f: String, prefix: String): Slot =
@@ -2394,7 +2398,7 @@ def applyDrop(boxArg: Bool, av: String, ao: Bool, prefix: String): String =
 def emitApply5(unbox: Bool, code: String, prefix: String): Slot =
   if (unbox) Slot(join(code, join(line(Str.concat(tmp(prefix, "u"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(prefix, "v"), ")")))), relPtr(pct(prefix, "v")))), pct(prefix, "u"), false) else Slot(code, pct(prefix, "v"), true)
 
-def emitApplyRecv(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyRecv(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   recv match {
     case Expr.ELam(p, _, body) => emitApplyLam(p, body, args, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EMatch(_, arms, moff) => emitMatch(applyScrut(args), arms, moff, prefix, strs, defs, ens, ps, loc)
@@ -2404,19 +2408,19 @@ def emitApplyRecv(recv: Expr, args: List[Expr], prefix: String, strs: List[Strin
 def applyScrut(args: List[Expr]): Expr =
   if (List.isEmpty(args)) Expr.EUnit else if (List.isEmpty(List.tail(args))) List.at(args, 0) else Expr.ETuple(args)
 
-def emitApplyLam(p: String, body: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyLam(p: String, body: Expr, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLamGo(p, body, applyScrut(args), prefix, strs, defs, ens, ps, loc, fid)
 
-def emitApplyLamGo(p: String, body: Expr, argE: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyLamGo(p: String, body: Expr, argE: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLamSlot(p, body, emitExprFid(argE, Str.concat(prefix, "_aa"), strs, defs, ens, ps, loc, fid), argE, prefix, strs, defs, ens, ps, loc, fid)
 
-def emitApplyLamSlot(p: String, body: Expr, arg: Slot, argE: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyLamSlot(p: String, body: Expr, arg: Slot, argE: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLamTyped(p, body, arg, slotBindI64(arg, argE, ps, defs), applyBindTy(p, argE, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc, fid)
 
-def emitApplyLamTyped(p: String, body: Expr, arg: Slot, guess: Bool, bty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyLamTyped(p: String, body: Expr, arg: Slot, guess: Bool, bty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLam2(p, body, arg, guess || isI64Ty(bty), if (guess || isI64Ty(bty)) "Int" else bty, prefix, strs, defs, ens, ps, loc, fid)
 
-def slotBindI64(s: Slot, e: Expr, ps: List[Param], defs: List[Fun]): Bool =
+def slotBindI64(s: Slot, e: Expr, ps: List[Param], defs: Ftab): Bool =
   s match {
     case Slot(c, v, _) => exprIsI64(e, ps, defs) || isI64Lit(v) || hasSub(v, "_u") || hasSub(v, "_tv") || hasSub(v, "_ic_v") || hasDigitStem(v, "_b") || isUnboxVal(c, v)
   }
@@ -2424,7 +2428,7 @@ def slotBindI64(s: Slot, e: Expr, ps: List[Param], defs: List[Fun]): Bool =
 def isUnboxVal(code: String, v: String): Bool =
   hasSub(code, Str.concat(v, " = call i64 @sz_unbox_i64"))
 
-def applyBindTy(p: String, argE: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def applyBindTy(p: String, argE: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   applyBindTyHit(exprRetTyEns(argE, defs, ens, ps, loc), argE)
 
 def applyBindTyHit(ty: String, argE: Expr): String =
@@ -2437,30 +2441,30 @@ def ctorTyOf(e: Expr): String =
     case _ => ""
   }
 
-def exprRetTy(e: Expr, defs: List[Fun], ps: List[Param]): String =
+def exprRetTy(e: Expr, defs: Ftab, ps: List[Param]): String =
   exprRetTyEns(e, defs, noEn(), ps, "Main")
 
-def exprRetTyEns(e: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def exprRetTyEns(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   nonemptyTy(Check.typeOfEns(e, defs, ens, ps, locMod(loc)), e, defs, ps)
 
 def locMod(loc: String): String =
   if (modOfLoc(loc) == "") "Main" else modOfLoc(loc)
 
-def nonemptyTy(ty: String, e: Expr, defs: List[Fun], ps: List[Param]): String =
+def nonemptyTy(ty: String, e: Expr, defs: Ftab, ps: List[Param]): String =
   if (ty != "") ty else if (exprIsI64(e, ps, defs)) "Int" else ""
 
-def emitApplyLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   arg match {
     case Slot(ac, av, _) => emitApplyLam3(p, body, ac, av, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid)
   }
 
-def emitApplyLam3(p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyLam3(p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (keepBind(p)) emitApplyLamShadow(shadowBind(p, prefix, ps), p, body, ac, av, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid) else emitApplyLamSkip(ac, emitExprFid(body, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc, fid))
 
 def shadowBind(p: String, prefix: String, ps: List[Param]): String =
   if (paramKnown(ps, p)) Str.concat("_", Str.concat(prefix, Str.concat("_", p))) else p
 
-def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, if (boxInt) "Int" else bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt)
 
 def emitApplyLamSkip(ac: String, s: Slot): Slot =
@@ -2479,10 +2483,10 @@ def bindAliasTy(p: String, av: String, boxInt: Bool): String =
 def bindAlias(p: String, av: String): String =
   line(Str.concat("%", Str.concat(p, Str.concat(" = bitcast ptr ", Str.concat(av, " to ptr")))))
 
-def emitApplyRecvTy(ty: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitApplyRecvTy(ty: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitApplyRecvFn(emitExpr(recv, Str.concat(prefix, "_fn"), strs, defs, ens, ps, loc), args, ty, prefix, strs, defs, ens, ps, loc)
 
-def emitApplyRecvFn(fn: Slot, args: List[Expr], ty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitApplyRecvFn(fn: Slot, args: List[Expr], ty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.len(args) == 1) emitApplyRecvArg(fn, emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), ty, prefix) else emitApplyRecvArg(fn, emitTuple(args, prefix, strs, defs, ens, ps, loc), ty, prefix)
 
 def emitApplyRecvArg(fn: Slot, arg: Slot, ty: String, prefix: String): Slot =
@@ -2510,7 +2514,7 @@ def emitApplyRecv4(unbox: Bool, code: String, boxArg: Bool, av: String, ao: Bool
 def emitApplyRecv5(unbox: Bool, code: String, prefix: String): Slot =
   emitApply5(unbox, code, prefix)
 
-def emitIoPureCall(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitIoPureCall(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(args)) emitIoPure2("", "null", false, prefix, ps) else emitIoPureTyped(emitExpr(List.at(args, 0), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc), exprRetTyEns(List.at(args, 0), defs, ens, ps, loc), prefix)
 
 def emitIoPureTyped(s: Slot, ty: String, prefix: String): Slot =
@@ -2773,7 +2777,7 @@ def emitAtInt(code: String, v: String, i: String, o: Bool, prefix: String): Slot
 def emitAtPtr(code: String, v: String, i: String, o: Bool, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_at(ptr ", Str.concat(v, Str.concat(", i64 ", Str.concat(i, ")")))))), takePtr(v, o, prefix))), pct(prefix, "v"), o)
 
-def emitRec(en: String, code: String, vals: List[String], owns: List[Bool], prefix: String, ens: List[En], args: List[Expr], ps: List[Param], defs: List[Fun], mod: String): Slot =
+def emitRec(en: String, code: String, vals: List[String], owns: List[Bool], prefix: String, ens: List[En], args: List[Expr], ps: List[Param], defs: Ftab, mod: String): Slot =
   if (List.isEmpty(vals)) emitCtor(recEn(en, ens), en, prefix, ens) else if (List.len(vals) == 1) emitPayloadCtorN(recEn(en, ens), en, (code, vals, owns), args, prefix, ens, ps, defs, mod) else emitRecJoin(code, emitPack(vals, owns, args, prefix, 0, List.len(vals), ps, defs, ens, mod), en, prefix, ens)
 
 def emitRecJoin(code: String, pack: Slot, en: String, prefix: String, ens: List[En]): Slot =
@@ -2787,7 +2791,7 @@ def emitRec2(pc: String, pv: String, en: String, prefix: String, ens: List[En]):
 def recEn(en: String, ens: List[En]): String =
   if (hasEn(ens, en)) en else enOfCase(ens, en)
 
-def emitPack(vals: List[String], owns: List[Bool], args: List[Expr], prefix: String, i: Int, n: Int, ps: List[Param], defs: List[Fun], ens: List[En], mod: String): Slot =
+def emitPack(vals: List[String], owns: List[Bool], args: List[Expr], prefix: String, i: Int, n: Int, ps: List[Param], defs: Ftab, ens: List[En], mod: String): Slot =
   if (List.isEmpty(vals)) Slot(line(Str.concat(tmp(prefix, "pl0"), "call ptr @sz_list_nil()")), pct(prefix, "pl0"), true) else emitPack1(List.at(vals, 0), headOwn(owns), !List.isEmpty(args) && isI64Ty(Check.typeOfEns(List.at(args, 0), defs, ens, ps, mod)), emitPack(List.tail(vals), List.tail(owns), if (List.isEmpty(args)) args else List.tail(args), prefix, i + 1, n, ps, defs, ens, mod), prefix, i, n)
 
 def emitPack1(v: String, o: Bool, num: Bool, rest: Slot, prefix: String, i: Int, n: Int): Slot =
@@ -2931,10 +2935,10 @@ def emitRepeat(code: String, vals: List[String], owns: List[Bool], prefix: Strin
 def emitRepeat2(code: String, v: String, n: String, o: Bool, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_string_repeat(ptr ", Str.concat(v, Str.concat(", i64 ", Str.concat(n, ")")))))), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
 
-def emitConsCall(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param], defs: List[Fun]): Slot =
+def emitConsCall(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param], defs: Ftab): Slot =
   emitConsCall2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix, consHeadInt(args, ps, defs) || isI64Head(arg0(vals), headOwn(owns), ps))
 
-def consHeadInt(args: List[Expr], ps: List[Param], defs: List[Fun]): Bool =
+def consHeadInt(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   if (List.isEmpty(args)) true else exprIsI64(List.at(args, 0), ps, defs)
 
 def isI64Head(v: String, o: Bool, ps: List[Param]): Bool =
@@ -3033,10 +3037,10 @@ def emitIoPurePtr(code: String, v: String, o: Bool, prefix: String): Slot =
 def emitIoPureI64(code: String, v: String, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "b"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(v, ")")))), join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_pure(ptr ", Str.concat(pct(prefix, "b"), ")")))), relPtr(pct(prefix, "b"))))), pct(prefix, "io"), false)
 
-def emitSc(isAnd: Bool, l: Expr, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSc(isAnd: Bool, l: Expr, r: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitScA(isAnd, emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc), r, prefix, strs, defs, ens, ps, loc)
 
-def emitScA(isAnd: Bool, le: Slot, r: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitScA(isAnd: Bool, le: Slot, r: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   Slot(cat3(le.code, scHead(isAnd, le.val, prefix), emitScB(emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), prefix, isAnd)), pct(prefix, "v"), false)
 
 def scHead(isAnd: Bool, lv: String, prefix: String): String =
@@ -3054,16 +3058,8 @@ def scTail(isAnd: Bool, rv: String, prefix: String): String =
 def scPhi(isAnd: Bool, prefix: String): String =
   Str.concat("phi i64 [ ", Str.concat(if (isAnd) "0" else "1", Str.concat(", %", Str.concat(prefix, Str.concat("_al_0 ], [ ", Str.concat(pct(prefix, "rb0"), Str.concat(", %", Str.concat(prefix, "_ar_0 ]"))))))))
 
-def findDef(funs: List[Fun], name: String): List[Fun] =
-  findDefKeep(funs, name, noFun())
-
-def findDefKeep(funs: List[Fun], name: String, acc: List[Fun]): List[Fun] =
-  if (List.isEmpty(funs)) acc else findDefKeep1(List.at(funs, 0), List.tail(funs), name, acc)
-
-def findDefKeep1(h: Fun, rest: List[Fun], name: String, acc: List[Fun]): List[Fun] =
-  h match {
-    case Fun(priv, n, ts, ps, ret, body, mod, off) => if (n == name) Fun(priv, n, ts, ps, ret, body, mod, off) :: noFun() else findDefKeep(rest, name, acc)
-  }
+def findDef(funs: Ftab, name: String): List[Fun] =
+  Check.ftabGet(funs.tab, name)
 
 def modOfLoc(loc: String): String =
   modOfLoc2(loc, Str.indexOf(loc, ".scuzz:"))
@@ -3071,13 +3067,13 @@ def modOfLoc(loc: String): String =
 def modOfLoc2(loc: String, i: Int): String =
   if (i < 0) "" else Str.slice(loc, 0, i)
 
-def findDefPrefer(defs: List[Fun], name: String, mod: String): List[Fun] =
+def findDefPrefer(defs: Ftab, name: String, mod: String): List[Fun] =
   if (mod == "") findDef(defs, name) else findDefPrefer2(findDefMod(defs, mod, name), defs, name)
 
-def findDefPrefer2(hit: List[Fun], defs: List[Fun], name: String): List[Fun] =
+def findDefPrefer2(hit: List[Fun], defs: Ftab, name: String): List[Fun] =
   if (List.isEmpty(hit)) findDef(defs, name) else hit
 
-def emitUser(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun], mod: String): Slot =
+def emitUser(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab, mod: String): Slot =
   emitUser2(f, code, vals, owns, prefix, findDefPrefer(defs, f, mod))
 
 def emitUser2(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, hit: List[Fun]): Slot =
@@ -3144,10 +3140,10 @@ def oneArg(p: Param, v: String): String =
 def lab(s: String): String =
   Str.concat(s, Str.concat(":", nl()))
 
-def emitIfFid(c: Expr, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitIfFid(c: Expr, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitIfThen(unboxBin(emitExprFid(c, Str.concat(prefix, "_ic"), strs, defs, ens, ps, loc, fid), ps, Str.concat(prefix, "_iu")), t, el, ioff, prefix, strs, defs, ens, ps, loc, fid + fmCount(c))
 
-def emitIfThen(c: Slot, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitIfThen(c: Slot, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitIfElse(c, covThen(t, ioff, emitLiftUnitIo(t, el, Str.concat(prefix, "_t0"), strs, defs, ens, ps, loc, fid), loc, strs, prefix), el, ioff, prefix, strs, defs, ens, ps, loc, fid + fmCount(t))
 
 def covThen(t: Expr, ioff: Int, s: Slot, loc: String, strs: List[String], prefix: String): Slot =
@@ -3162,13 +3158,13 @@ def covElse(el: Expr, ioff: Int, s: Slot, loc: String, strs: List[String], prefi
     case _ => covSlot(el, ioff, "e", s, loc, strs, Str.concat(prefix, "_cve"))
   }
 
-def emitLiftUnitIo(t: Expr, el: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitLiftUnitIo(t: Expr, el: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   t match {
     case Expr.EUnit => if (isIoPred(el)) emitIoUnit(prefix) else emitExprFid(t, prefix, strs, defs, ens, ps, loc, fid)
     case _ => emitExprFid(t, prefix, strs, defs, ens, ps, loc, fid)
   }
 
-def emitIfElse(c: Slot, th: Slot, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitIfElse(c: Slot, th: Slot, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   th match {
     case Slot(tc, tv, to) => emitIf2(c, Slot(tc, tv, to), covElse(el, ioff, emitUnitElse(el, thenIsPtr(tc, tv, to, ps), isIoSlot(tv), prefix, strs, defs, ens, ps, loc, fid), loc, strs, prefix), prefix, ps)
   }
@@ -3188,7 +3184,7 @@ def hasSubTail(s: String, sub: String): Bool =
 def isIoSlot(v: String): Bool =
   hasSub(v, "_io") || hasSub(v, "_fm")
 
-def emitUnitElse(el: Expr, thenOwned: Bool, thenIo: Bool, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitUnitElse(el: Expr, thenOwned: Bool, thenIo: Bool, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   el match {
     case Expr.EUnit => if (thenIo) emitIoUnit(prefix) else if (thenOwned) Slot("", "null", true) else Slot("", "0", false)
     case _ => emitExprFid(el, Str.concat(prefix, "_e0"), strs, defs, ens, ps, loc, fid)
@@ -3250,10 +3246,10 @@ def emitIfPhi2(tv: String, ev: String, prefix: String, ty: String): String =
 def emitIfPhi3(prefix: String): String =
   Str.concat(", %", Str.concat(prefix, "_ej_0 ]"))
 
-def emitField(recv: Expr, name: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitField(recv: Expr, name: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (isTupField(name)) emitTupField(recv, name, prefix, strs, defs, ens, ps, loc) else emitFieldEn(recv, name, prefix, strs, defs, ens, ps, loc)
 
-def emitFieldEn(recv: Expr, name: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitFieldEn(recv: Expr, name: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   recv match {
     case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else emitCtor(en, name, prefix, ens)
     case _ => emitRecFieldFrom(emitExpr(recv, Str.concat(prefix, "_recv"), strs, defs, ens, ps, loc), name, prefix, copyEnAt(recv, ens, defs, ps, loc), ens)
@@ -3286,7 +3282,7 @@ def emitRecFieldIdx2(pl: String, prefix: String, k: Int, unbox: Bool, n: Int): S
 def emitRecFieldMaybeUnbox(code: String, v: String, prefix: String, unbox: Bool): Slot =
   if (unbox) Slot(join(code, line(Str.concat(tmp(prefix, "ru"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(v, ")"))))), pct(prefix, "ru"), false) else Slot(code, v, false)
 
-def emitTupField(recv: Expr, name: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTupField(recv: Expr, name: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   recv match {
     case Expr.EVar(s, _) => emitTupSel(Str.concat("%", s), tupSlots(paramTy(ps, s)), tupIdx(name), prefix, 0)
     case Expr.EAscribe(inner, _, _) => emitTupField(inner, name, prefix, strs, defs, ens, ps, loc)
@@ -3294,7 +3290,7 @@ def emitTupField(recv: Expr, name: String, prefix: String, strs: List[String], d
     case _ => emitTupFrom(emitExpr(recv, Str.concat(prefix, "_tf"), strs, defs, ens, ps, loc), name, prefix, recv, defs, ens, ps, loc)
   }
 
-def emitTupFrom(s: Slot, name: String, prefix: String, recv: Expr, defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitTupFrom(s: Slot, name: String, prefix: String, recv: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   s match {
     case Slot(code, v, _) => emitTupSelJoin2(code, emitTupSel(v, tupSlots(exprRetTyEns(recv, defs, ens, ps, loc)), tupIdx(name), prefix, 0))
   }
@@ -3322,61 +3318,64 @@ def pairRt(left: Bool): String =
 def emitPairUnbox(scrut: String, left: Bool, prefix: String): Slot =
   Slot(join(line(Str.concat(tmp(prefix, "p"), Str.concat("call ptr @", Str.concat(pairRt(left), Str.concat("(ptr ", Str.concat(scrut, ")")))))), line(Str.concat(tmp(prefix, "v"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(prefix, "p"), ")"))))), pct(prefix, "v"), false)
 
-def emitCtorCall(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCtorCall(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (name == "copy" && copyEnAt(recv, ens, defs, ps, loc) != "") emitCopy(recv, args, prefix, strs, defs, ens, ps, loc) else if (name == "require") emitRequire(recv, args, prefix, strs, defs, ens, ps, loc) else emitCtorCall2(recv, name, args, prefix, strs, defs, ens, ps, loc)
 
-def emitRequire(recv: Expr, _args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitRequire(recv: Expr, _args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitExpr(recv, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc)
 
-def emitCtorCall2(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCtorCall2(recv: Expr, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   recv match {
     case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitMethodVal(recv, name, args, prefix, recvEn(en, ps, ens, defs, name), strs, defs, ens, ps, loc) else emitCtorOrQual(en, name, args, prefix, strs, defs, ens, ps, loc)
     case _ => emitMethodVal(recv, name, args, prefix, copyEnAt(recv, ens, defs, ps, loc), strs, defs, ens, ps, loc)
   }
 
-def recvEn(n: String, ps: List[Param], ens: List[En], defs: List[Fun], meth: String): String =
+def recvEn(n: String, ps: List[Param], ens: List[En], defs: Ftab, meth: String): String =
   recvEnTy(tyHead(paramTy(ps, n)), ens, defs, meth)
 
-def recvEnTy(t: String, ens: List[En], defs: List[Fun], meth: String): String =
+def recvEnTy(t: String, ens: List[En], defs: Ftab, meth: String): String =
   if (hasEn(ens, t)) t else methEnOf(defs, meth)
 
-def methEnOf(defs: List[Fun], meth: String): String =
-  if (List.isEmpty(defs)) "Point" else methEnOfH(List.at(defs, 0), List.tail(defs), meth)
+def methEnOf(defs: Ftab, meth: String): String =
+  methEnOfL(defs.list, meth)
+
+def methEnOfL(ds: List[Fun], meth: String): String =
+  if (List.isEmpty(ds)) "Point" else methEnOfH(List.at(ds, 0), List.tail(ds), meth)
 
 def methEnOfH(d: Fun, rest: List[Fun], meth: String): String =
   d match {
-    case Fun(_, name, _, _, _, _, mod, _) => if (name == meth && mod != "") mod else methEnOf(rest, meth)
+    case Fun(_, name, _, _, _, _, mod, _) => if (name == meth && mod != "") mod else methEnOfL(rest, meth)
   }
 
-def emitMethodVal(recv: Expr, name: String, args: List[Expr], prefix: String, en: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitMethodVal(recv: Expr, name: String, args: List[Expr], prefix: String, en: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitMethodVal2(emitExpr(recv, Str.concat(prefix, "_mr"), strs, defs, ens, ps, loc), emitArgList(args, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), name, prefix, en, defs)
 
-def emitMethodVal2(r: Slot, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: List[Fun]): Slot =
+def emitMethodVal2(r: Slot, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: Ftab): Slot =
   r match {
     case Slot(rc, rv, ro) => emitMethodVal3(rc, rv, ro, ap, name, prefix, en, defs)
   }
 
-def emitMethodVal3(rc: String, rv: String, ro: Bool, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: List[Fun]): Slot =
+def emitMethodVal3(rc: String, rv: String, ro: Bool, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: Ftab): Slot =
   ap match {
     case (ac, vals, owns) => emitUserHit(Str.concat(en, Str.concat("_", name)), join(rc, ac), rv :: vals, ro :: owns, prefix, methodHit(defs, en, name))
   }
 
-def methodHit(defs: List[Fun], en: String, name: String): List[Fun] =
+def methodHit(defs: Ftab, en: String, name: String): List[Fun] =
   methodHit2(findDefMod(defs, en, name), defs, name)
 
-def methodHit2(hit: List[Fun], defs: List[Fun], name: String): List[Fun] =
+def methodHit2(hit: List[Fun], defs: Ftab, name: String): List[Fun] =
   if (List.isEmpty(hit)) findDef(defs, name) else hit
 
-def emitCopy(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCopy(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitCopyGo(emitExpr(recv, Str.concat(prefix, "_cr"), strs, defs, ens, ps, loc), args, prefix, copyEnAt(recv, ens, defs, ps, loc), strs, defs, ens, ps, loc)
 
-def copyEn(recv: Expr, ens: List[En], defs: List[Fun]): String =
+def copyEn(recv: Expr, ens: List[En], defs: Ftab): String =
   copyEnAt(recv, ens, defs, noParam(), "Main")
 
-def copyEnAt(recv: Expr, ens: List[En], defs: List[Fun], ps: List[Param], loc: String): String =
+def copyEnAt(recv: Expr, ens: List[En], defs: Ftab, ps: List[Param], loc: String): String =
   copyEnOr(Type.headNameStr(exprRetTyEns(recv, defs, ens, ps, loc)), ens)
 
-def copyEnCall(f: String, ens: List[En], defs: List[Fun]): String =
+def copyEnCall(f: String, ens: List[En], defs: Ftab): String =
   if (ctorHead(f, ens) != "") ctorHead(f, ens) else tyHead(funRetStr(defs, f))
 
 def copyEnOr(h: String, ens: List[En]): String =
@@ -3391,21 +3390,21 @@ def ctorHeadDot(f: String, ens: List[En], dot: Int): String =
 def ctorHeadOrCase(mod: String, name: String, ens: List[En]): String =
   if (hasEn(ens, mod)) mod else enOfCase(ens, name)
 
-def emitCopyGo(r: Slot, args: List[Expr], prefix: String, en: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCopyGo(r: Slot, args: List[Expr], prefix: String, en: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(args)) r else emitCopyUpd(r, args, prefix, en, recNames(ens, en), strs, defs, ens, ps, loc)
 
-def emitCopyUpd(r: Slot, args: List[Expr], prefix: String, en: String, names: List[String], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCopyUpd(r: Slot, args: List[Expr], prefix: String, en: String, names: List[String], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   r match {
     case Slot(c, v, o) => emitCopyUpd2(c, v, o, args, prefix, en, names, strs, defs, ens, ps, loc)
   }
 
-def emitCopyUpd2(c: String, v: String, o: Bool, args: List[Expr], prefix: String, en: String, names: List[String], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCopyUpd2(c: String, v: String, o: Bool, args: List[Expr], prefix: String, en: String, names: List[String], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.len(names) == 1) emitCopyOne(c, v, o, args, prefix, en, List.at(names, 0), strs, defs, ens, ps, loc) else emitCopyPackRel(emitCopyPack(join(c, line(Str.concat(tmp(prefix, "pl"), Str.concat("call ptr @sz_adt_payload(ptr ", Str.concat(v, ")"))))), args, prefix, en, names, 0, strs, defs, ens, ps, loc, noStr(), noBool()), v, o)
 
-def emitCopyOne(c: String, v: String, o: Bool, args: List[Expr], prefix: String, en: String, name: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCopyOne(c: String, v: String, o: Bool, args: List[Expr], prefix: String, en: String, name: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitCopyOneHit(c, v, o, copyOverride(args, 0, name), prefix, en, strs, defs, ens, ps, loc)
 
-def emitCopyOneHit(c: String, v: String, o: Bool, hit: List[Expr], prefix: String, en: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCopyOneHit(c: String, v: String, o: Bool, hit: List[Expr], prefix: String, en: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(hit)) emitCopyOneKeep(c, v, o, prefix, en, ens) else emitCopyOneArg(emitExpr(List.at(hit, 0), Str.concat(prefix, "_u0"), strs, defs, ens, ps, loc), isI64Ty(exprRetTyEns(List.at(hit, 0), defs, ens, ps, loc)), c, v, o, prefix, en, ens)
 
 def emitCopyOneKeep(c: String, v: String, o: Bool, prefix: String, en: String, ens: List[En]): Slot =
@@ -3424,10 +3423,10 @@ def emitCopyPackRel(s: Slot, v: String, o: Bool): Slot =
     case Slot(code, val, owned) => Slot(join(code, if (o) relPtr(v) else ""), val, owned)
   }
 
-def emitCopyPack(code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyPack(code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   if (k >= List.len(names)) emitCopyDone(code, List.reverse(vals), List.reverse(owns), prefix, en, ens, ps, defs) else emitCopyPackK(code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns)
 
-def emitCopyDone(code: String, vals: List[String], owns: List[Bool], prefix: String, en: String, ens: List[En], ps: List[Param], defs: List[Fun]): Slot =
+def emitCopyDone(code: String, vals: List[String], owns: List[Bool], prefix: String, en: String, ens: List[En], ps: List[Param], defs: Ftab): Slot =
   emitCopyDone2(code, emitPack(vals, owns, noExpr(), prefix, 0, List.len(vals), ps, defs, ens, ""), en, prefix, ens)
 
 def emitCopyDone2(code: String, pack: Slot, en: String, prefix: String, ens: List[En]): Slot =
@@ -3435,7 +3434,7 @@ def emitCopyDone2(code: String, pack: Slot, en: String, prefix: String, ens: Lis
     case Slot(pc, pv, _) => emitRec2(join(code, pc), pv, en, prefix, ens)
   }
 
-def emitCopyPackK(code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyPackK(code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   emitCopyPackHit(copyOverride(args, k, List.at(names, k)), code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns)
 
 def copyOverride(args: List[Expr], k: Int, name: String): List[Expr] =
@@ -3459,10 +3458,10 @@ def copyOverridePos1(h: Expr, rest: List[Expr], k: Int, i: Int): List[Expr] =
     case _ => if (i == k) h :: noExpr() else copyOverridePos(rest, k, i + 1)
   }
 
-def emitCopyPackHit(hit: List[Expr], code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyPackHit(hit: List[Expr], code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   if (List.isEmpty(hit)) emitCopyKeep(code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns) else emitCopyArg(List.at(hit, 0), code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns)
 
-def emitCopyKeep(code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyKeep(code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   emitCopyPack(join(code, copyKeepLoad(prefix, k)), args, prefix, en, names, k + 1, strs, defs, ens, ps, loc, pct(prefix, Str.concat("k", Str.fromInt(k))) :: vals, false :: owns)
 
 def copyKeepLoad(prefix: String, k: Int): String =
@@ -3471,21 +3470,21 @@ def copyKeepLoad(prefix: String, k: Int): String =
 def copyKeepLoad2(lhs: String, pl: String, k: String): String =
   line(Str.concat(lhs, Str.concat("call ptr @sz_list_at(ptr ", Str.concat(pl, Str.concat(", i64 ", Str.concat(k, ")"))))))
 
-def emitCopyArg(e: Expr, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyArg(e: Expr, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   emitCopyArg2(emitExpr(e, Str.concat(prefix, Str.concat("_u", Str.fromInt(k))), strs, defs, ens, ps, loc), isI64Ty(exprRetTyEns(e, defs, ens, ps, loc)), code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns)
 
-def emitCopyArg2(s: Slot, scalar: Bool, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyArg2(s: Slot, scalar: Bool, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   s match {
     case Slot(ec, ev, eo) => if (scalar) emitCopyArgBox(ec, ev, code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns) else emitCopyPack(join(code, ec), args, prefix, en, names, k + 1, strs, defs, ens, ps, loc, ev :: vals, eo :: owns)
   }
 
-def emitCopyArgBox(ec: String, ev: String, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyArgBox(ec: String, ev: String, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   emitCopyPack(join(code, join(ec, copyArgBox(prefix, k, ev))), args, prefix, en, names, k + 1, strs, defs, ens, ps, loc, pct(prefix, Str.concat("ub", Str.fromInt(k))) :: vals, true :: owns)
 
 def copyArgBox(prefix: String, k: Int, ev: String): String =
   line(Str.concat(tmp(prefix, Str.concat("ub", Str.fromInt(k))), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(ev, ")"))))
 
-def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps, loc) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc) else emitQual(en, name, args, prefix, strs, defs, ens, ps, loc)
 
 def isEmitKit(f: String): Bool =
@@ -3497,32 +3496,27 @@ def isNetEmit(f: String): Bool =
 def isUiKit(f: String): Bool =
   Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "Ui.")
 
-def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitQual2(en, name, emitArgList(alignFill(funParamsOfHit(findDefMod(defs, en, name)), args), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), prefix, defs)
 
-def emitQual2(en: String, name: String, p: (String, List[String], List[Bool]), prefix: String, defs: List[Fun]): Slot =
+def emitQual2(en: String, name: String, p: (String, List[String], List[Bool]), prefix: String, defs: Ftab): Slot =
   p match {
     case (code, vals, owns) => emitUserMod(en, name, code, vals, owns, prefix, defs)
   }
 
-def findDefMod(funs: List[Fun], mod: String, name: String): List[Fun] =
-  if (List.isEmpty(funs)) noFun() else findDefMod1(List.at(funs, 0), List.tail(funs), mod, name)
+def findDefMod(funs: Ftab, mod: String, name: String): List[Fun] =
+  Check.ftabGetMod(funs.tab, mod, name)
 
-def findDefMod1(h: Fun, rest: List[Fun], mod: String, name: String): List[Fun] =
-  h match {
-    case Fun(priv, n, ts, ps, ret, body, m, off) => if (n == name && m == mod) Fun(priv, n, ts, ps, ret, body, m, off) :: findDefMod(rest, mod, name) else findDefMod(rest, mod, name)
-  }
-
-def emitUserMod(en: String, name: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: List[Fun]): Slot =
+def emitUserMod(en: String, name: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab): Slot =
   emitUserHit(Str.concat(en, Str.concat("_", name)), code, vals, owns, prefix, findDefMod(defs, en, name))
 
-def emitPayloadCtor(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPayloadCtor(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(args)) emitCtor(en, name, prefix, ens) else emitPayloadCtorRest(en, name, List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, loc)
 
-def emitPayloadCtorRest(en: String, name: String, h: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPayloadCtorRest(en: String, name: String, h: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(rest)) emitPayloadCtor1(emitExpr(h, Str.concat(prefix, "_ap"), strs, defs, ens, ps, loc), en, name, prefix, ens, exprRetTyEns(h, defs, ens, ps, loc)) else emitPayloadCtorN(en, name, emitArgList(h :: rest, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), h :: rest, prefix, ens, ps, defs, modOfLoc(loc))
 
-def emitPayloadCtorN(en: String, name: String, p: (String, List[String], List[Bool]), args: List[Expr], prefix: String, ens: List[En], ps: List[Param], defs: List[Fun], mod: String): Slot =
+def emitPayloadCtorN(en: String, name: String, p: (String, List[String], List[Bool]), args: List[Expr], prefix: String, ens: List[En], ps: List[Param], defs: Ftab, mod: String): Slot =
   p match {
     case (code, vals, owns) => if (List.isEmpty(vals)) emitCtor(en, name, prefix, ens) else if (List.len(vals) == 1) emitPayloadCtor1(Slot(code, arg0(vals), headOwn(owns)), en, name, prefix, ens, Check.typeOfEns(List.at(args, 0), defs, ens, ps, mod)) else emitPayJoin(code, emitPack(vals, owns, args, prefix, 0, List.len(vals), ps, defs, ens, mod), en, name, prefix, ens)
   }
@@ -3698,13 +3692,13 @@ def bindStem(prefix: String, i: Int, isInt: Bool): String =
 def patTag2(dot: Int, pat: String, ens: List[En]): Int =
   if (dot < 0) ctorTag(ens, enOfCase(ens, pat), pat) else ctorTag(ens, Str.slice(pat, 0, dot), Str.slice(pat, dot + 1, Str.len(pat)))
 
-def emitMatch(s: Expr, arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitMatch(s: Expr, arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   s match {
     case Expr.EVar(n, _) => emitMatchV(n, arms, moff, prefix, strs, defs, ens, ps, loc)
     case _ => emitMatch1(emitExpr(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc), arms, moff, prefix, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)), exprIsI64(s, ps, defs))
   }
 
-def emitMatchV(n: String, arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitMatchV(n: String, arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitMatch1(emitExpr(Expr.EVar(n, 0), Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc), arms, moff, prefix, strs, defs, Check.specializeEnums(ens, paramTy(ps, n)), ps, loc, matchSlots(paramTy(ps, n)), paramIsI64(ps, n))
 
 def matchSlots(ty: String): List[String] =
@@ -3727,7 +3721,7 @@ def tupSlots(ty: String): List[String] =
 def slotInt(tys: List[String], k: Int): Bool =
   if (List.isEmpty(tys)) false else if (k <= 0) isI64Ty(List.at(tys, 0)) else slotInt(List.tail(tys), k - 1)
 
-def emitMatch1(se: Slot, arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, tys: List[String], asI64: Bool): Slot =
+def emitMatch1(se: Slot, arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, tys: List[String], asI64: Bool): Slot =
   se match {
     case Slot(sc, sv, _) => emitMatchOksFirst(sc, emitOks(arms, moff, prefix, strs, defs, ens, ps, loc, 0, tys, sv, asI64), arms, prefix, sv, ens, strs, tys)
   }
@@ -4023,24 +4017,24 @@ def hasComma(s: String): Bool =
 def emitPayload2(prefix: String, i: Int, scrut: String, isInt: Bool): String =
   join(line(Str.concat(tmp(fpre(prefix, i), "pl"), Str.concat("call ptr @sz_adt_payload(ptr ", Str.concat(scrut, ")")))), if (isInt) line(Str.concat(tmp(fpre(prefix, i), "b0"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(pct(fpre(prefix, i), "pl"), ")")))) else "")
 
-def emitOks(arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, asI64: Bool): (String, List[String], Bool) =
+def emitOks(arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, asI64: Bool): (String, List[String], Bool) =
   if (List.isEmpty(arms)) ("", noStr(), false) else emitOks0(List.at(arms, 0), List.tail(arms), moff, prefix, strs, defs, ens, ps, loc, i, tys, sv, asI64)
 
-def emitOks0(arm: Arm, rest: List[Arm], moff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, asI64: Bool): (String, List[String], Bool) =
+def emitOks0(arm: Arm, rest: List[Arm], moff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, asI64: Bool): (String, List[String], Bool) =
   arm match {
     case Arm(pat, g, body) => emitOks1g(g, pat, covSlot(body, moff, Str.fromInt(i), emitOkSlotPat(pat, body, prefix, strs, defs, ens, ps, loc, i, tys, sv, asI64), loc, strs, Str.concat(prefix, Str.concat("_cv", Str.fromInt(i)))), rest, moff, prefix, strs, defs, ens, ps, loc, i, tys, sv, List.isEmpty(rest), asI64)
   }
 
-def emitOkSlotPat(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, asI64: Bool): Slot =
+def emitOkSlotPat(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, asI64: Bool): Slot =
   if (isAsPat(pat)) emitOkSlotPat(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), prefix, strs, defs, ens, ps, loc, i, tys, sv, asI64) else if (isVarPat(pat, ens)) emitOkVar(pat, body, prefix, strs, defs, ens, ps, loc, i, sv, asI64) else emitOkSlotPat2(pat, body, prefix, strs, defs, ens, ps, loc, i, tys)
 
 def isVarPat(pat: String, ens: List[En]): Bool =
   isSimpleBind(pat) && !isOrPat(pat) && !isTuplePat(pat) && dotAt(pat, 0) < 0 && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
 
-def emitOkVar(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, sv: String, asI64: Bool): Slot =
+def emitOkVar(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, sv: String, asI64: Bool): Slot =
   emitOkVarBps(pat, body, prefix, strs, defs, ens, Param(pat, if (asI64) "Int" else "", "", "") :: dropParam(ps, pat), loc, i, sv, asI64)
 
-def emitOkVarBps(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], bps: List[Param], loc: String, i: Int, sv: String, asI64: Bool): Slot =
+def emitOkVarBps(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], bps: List[Param], loc: String, i: Int, sv: String, asI64: Bool): Slot =
   emitOkVar2(bindAliasTy(pat, sv, asI64), emitOkOwned(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, bps, loc), bps), asI64)
 
 def emitOkVar2(alias: String, s: Slot, asI64: Bool): Slot =
@@ -4048,7 +4042,7 @@ def emitOkVar2(alias: String, s: Slot, asI64: Bool): Slot =
     case Slot(code, val, owned) => Slot(join(alias, code), val, owned || !asI64)
   }
 
-def emitOkSlotPat2(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
+def emitOkSlotPat2(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
   if (isOrPat(pat)) emitOkSlotPat2(orLeft(pat), body, prefix, strs, defs, ens, ps, loc, i, tys) else if (isConsPat(pat)) emitOkCons(pat, body, prefix, strs, defs, ens, ps, loc, i, tys) else if (isConsPat(patBind(pat))) emitOkCons(patBind(pat), body, prefix, strs, defs, ens, ps, loc, i, tys) else if (isTuplePat(pat)) emitOkTuple(pat, body, prefix, strs, defs, ens, ps, loc, i, tys) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitOkFields(pat, body, prefix, strs, defs, ens, ps, loc, i) else emitOkSlotBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, prefix, strs, defs, ens, patternPayloadParams(pat, prefix, i, ens, ps), loc, i)
 
 def patternPayloadParams(pat: String, prefix: String, i: Int, ens: List[En], ps: List[Param]): List[Param] =
@@ -4069,10 +4063,10 @@ def fieldBind(s: String): String =
 def fieldNameOf(s: String): String =
   if (namedEqAt(s, 0) < 0) s else Str.slice(s, 0, namedEqAt(s, 0))
 
-def emitOkCons(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
+def emitOkCons(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
   emitOkConsNest(consTail(pat), prefix, i, tys, emitOkConsBody(rewriteCons(pat, body, prefix, i, slotInt(tys, 0)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, consPayloadParams(pat, prefix, i, tys, ps), loc))
 
-def emitOkConsBody(body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitOkConsBody(body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitOkTyped(emitExpr(body, prefix, strs, defs, ens, ps, loc), exprRetTyEns(body, defs, ens, ps, loc))
 
 def emitOkTyped(s: Slot, ty: String): Slot =
@@ -4125,7 +4119,7 @@ def consTailParams(t: String, prefix: String, i: Int, ty: String, ps: List[Param
 def patternParam(bind: String, stem: String, ty: String, ps: List[Param]): List[Param] =
   if (!keepBind(bind) || bind == "[]") ps else Param(stem, ty, "", "") :: ps
 
-def emitOkFields(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitOkFields(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   emitOkOwned(emitOkRetainNs(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), prefix, i, 0, emitExpr(rewriteFields(splitPat(patBind(pat)), body, prefix, i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat))), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), prefix, i, 0, ps), loc)), ps)
 
 def fieldPayloadParams(ns: List[String], fts: List[String], names: List[String], prefix: String, i: Int, k: Int, ps: List[Param]): List[Param] =
@@ -4185,10 +4179,10 @@ def caseNames3(h: EnCase, rest: List[EnCase], ctor: String): List[String] =
 def fieldStem(prefix: String, i: Int, k: Int, isInt: Bool): String =
   Str.concat(fpre(prefix, i), Str.concat(if (isInt) "_b" else "_c", Str.fromInt(k)))
 
-def emitOkTuple(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
+def emitOkTuple(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
   emitOkTuple2(pat, rewriteTuple(pat, body, prefix, i, tys), prefix, strs, defs, ens, loc, i, stemBps(pat, prefix, i, tys, ps))
 
-def emitOkTuple2(pat: String, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], loc: String, i: Int, bps: List[Param]): Slot =
+def emitOkTuple2(pat: String, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], loc: String, i: Int, bps: List[Param]): Slot =
   emitOkTupleJoin(emitOkOwned(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, bps, loc), bps), exprIsI64(body, bps, defs))
 
 def emitOkTupleJoin(s: Slot, asI64: Bool): Slot =
@@ -4250,7 +4244,7 @@ def trimPat(s: String): String =
 def trimPat2(s: String, a: Int, b: Int): String =
   if (a >= b) "" else if (Str.charAt(s, a) == 32) trimPat2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trimPat2(s, a, b - 1) else Str.slice(s, a, b)
 
-def emitOkSlotBind(bind: String, isInt: Bool, body: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitOkSlotBind(bind: String, isInt: Bool, body: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   if (isAsPat(bind)) emitOkSlotBind(asName(bind), isInt, body, prefix, strs, defs, ens, ps, loc, i) else if (bind == "") emitOkSlot2(emitExpr(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps, loc), true, isInt, prefix, i, ps) else emitOkSlot2(emitExpr(rewriteBind(body, bind, bindStem(prefix, i, isInt)), Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps, loc), false, isInt, prefix, i, ps)
 
 def emitOkSlot2(s: Slot, empty: Bool, isInt: Bool, prefix: String, i: Int, ps: List[Param]): Slot =
@@ -4362,17 +4356,17 @@ def rewriteBindArm(arm: Arm, from: String, to: String): Arm =
     case Arm(pat, g, body) => Arm(pat, g, rewriteBind(body, from, to))
   }
 
-def emitOks1g(g: String, pat: String, s: Slot, rest: List[Arm], moff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, last: Bool, asI64: Bool): (String, List[String], Bool) =
+def emitOks1g(g: String, pat: String, s: Slot, rest: List[Arm], moff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, last: Bool, asI64: Bool): (String, List[String], Bool) =
   s match {
     case Slot(code, val, owned) => emitOks2g(g, pat, val, owned, code, emitOks(rest, moff, prefix, strs, defs, ens, ps, loc, i + 1, tys, sv, asI64), prefix, i, last, strs, defs, ens, ps, loc)
   }
 
-def emitOks2g(g: String, pat: String, val: String, owned: Bool, code: String, p: (String, List[String], Bool), prefix: String, i: Int, last: Bool, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): (String, List[String], Bool) =
+def emitOks2g(g: String, pat: String, val: String, owned: Bool, code: String, p: (String, List[String], Bool), prefix: String, i: Int, last: Bool, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): (String, List[String], Bool) =
   p match {
     case (restCode, vals, restOwned) => (join(emitOkBodyG(g, pat, code, prefix, i, last, strs, defs, ens, ps, loc), restCode), val :: vals, owned || restOwned || isPtrSlot(val, ps))
   }
 
-def emitOkBodyG(g: String, pat: String, code: String, prefix: String, i: Int, last: Bool, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitOkBodyG(g: String, pat: String, code: String, prefix: String, i: Int, last: Bool, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   if (g == "") emitOkBody(code, prefix, i) else emitOkBodyGuard(emitExpr(rewriteBind(parseGuard(g), fieldBind(patBind(pat)), bindStem(prefix, i, bindIsInt(pat, ens))), Str.concat(prefix, Str.concat("_g0_", Str.fromInt(i))), strs, defs, ens, ps, loc), code, prefix, i, last)
 
 def parseGuard(g: String): Expr =
@@ -4430,10 +4424,10 @@ def defParams2(ps: List[Param]): String =
 def oneParam(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", p.name) else Str.concat("ptr %", p.name)
 
-def emitDefs(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], files: List[(String, String)]): String =
+def emitDefs(ds: List[Fun], strs: List[String], all: Ftab, ens: List[En], files: List[(String, String)]): String =
   Builder.result(emitDefsB(ds, strs, all, ens, files, Builder.empty()))
 
-def emitDefsB(ds: List[Fun], strs: List[String], all: List[Fun], ens: List[En], files: List[(String, String)], b: Builder): Builder =
+def emitDefsB(ds: List[Fun], strs: List[String], all: Ftab, ens: List[En], files: List[(String, String)], b: Builder): Builder =
   if (List.isEmpty(ds)) b else emitDefsB(List.tail(ds), strs, all, ens, files, Builder.append(b, emitDef(List.at(ds, 0), strs, all, ens, files)))
 
 def emitDef3(ty: String, name: String, params: String, body: Slot, loc: String, strs: List[String]): String =
@@ -4496,10 +4490,10 @@ def i64Args(vals: List[String]): String =
 def oneVal(v: String): String =
   if (isI64Lit(v) || isIntSsa(v)) Str.concat("i64 ", v) else Str.concat("ptr ", v)
 
-def emitDef(d: Fun, strs: List[String], defs: List[Fun], ens: List[En], files: List[(String, String)]): String =
+def emitDef(d: Fun, strs: List[String], defs: Ftab, ens: List[En], files: List[(String, String)]): String =
   emitDefRw(rwDef(d, defs, ens), strs, defs, ens, files)
 
-def emitDefRw(d: Fun, strs: List[String], defs: List[Fun], ens: List[En], files: List[(String, String)]): String =
+def emitDefRw(d: Fun, strs: List[String], defs: Ftab, ens: List[En], files: List[(String, String)]): String =
   d match {
     case Fun(_, name, _, ps, ret, body, mod, off) => emitDefByRet(name, mod, ret, ps, body, strs, defs, ens, panicLoc(files, mod, off))
   }
@@ -4507,7 +4501,7 @@ def emitDefRw(d: Fun, strs: List[String], defs: List[Fun], ens: List[En], files:
 def isIoTy(ret: String): Bool =
   Str.len(ret) >= 2 && Str.slice(ret, 0, 2) == "IO"
 
-def emitDefByRet(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En], loc: String): String =
+def emitDefByRet(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   stampNeth(if (isIoTy(ret)) stampCont(Str.concat(emitConts(body, strs, defs, ens, ps, loc), emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps, loc), loc, strs)), contKey(mod, name)) else if (hasTailIf(body, name)) emitDefTco(name, mod, ret, ps, body, strs, defs, ens, loc) else emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps, loc), loc, strs), contKey(mod, name))
 
 def hasTailIf(e: Expr, name: String): Bool =
@@ -4538,36 +4532,36 @@ def defParamsTco(ps: List[Param]): String =
 def oneParamTco(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", Str.concat(p.name, "_in")) else Str.concat("ptr %", Str.concat(p.name, "_in"))
 
-def emitDefTco(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: List[Fun], ens: List[En], loc: String): String =
+def emitDefTco(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   body match {
     case Expr.EIf(c, t, el, ioff) => emitDefTcoIf(name, mod, ret, ps, c, t, el, ioff, strs, defs, ens, loc)
     case Expr.EMatch(s, arms, moff) => emitDefTcoMatch(name, mod, ret, ps, s, arms, moff, strs, defs, ens, loc)
     case _ => emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps, loc), loc, strs)
   }
 
-def emitDefTcoMatch(name: String, mod: String, ret: String, ps: List[Param], s: Expr, arms: List[Arm], moff: Int, strs: List[String], defs: List[Fun], ens: List[En], loc: String): String =
+def emitDefTcoMatch(name: String, mod: String, ret: String, ps: List[Param], s: Expr, arms: List[Arm], moff: Int, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   emitDefTcoIf3(llvmRet(ret), symOf(mod, name), defParamsTco(ps), join(emitTcoPrep(ps), emitMatchTail(s, arms, moff, name, llvmRet(ret), strs, defs, ens, ps, loc)), loc, strs)
 
-def emitMatchTail(s: Expr, arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitMatchTail(s: Expr, arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitMatchTail1(emitExpr(s, "body_sc", strs, defs, ens, ps, loc), arms, moff, fname, tret, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)))
 
-def emitMatchTail1(se: Slot, arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, tys: List[String]): String =
+def emitMatchTail1(se: Slot, arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, tys: List[String]): String =
   se match {
     case Slot(sc, sv, _) => join(sc, join(brTry("body"), join(emitTries(arms, "body", sv, ens, strs, 0, tys), join(emitDefault("body", false, true), emitOksTail(arms, moff, fname, tret, strs, defs, ens, ps, loc, 0, tys, sv)))))
   }
 
-def emitOksTail(arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): String =
+def emitOksTail(arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): String =
   if (List.isEmpty(arms)) "" else emitOksTail0(List.at(arms, 0), List.tail(arms), moff, fname, tret, strs, defs, ens, ps, loc, i, tys, sv)
 
-def emitOksTail0(arm: Arm, rest: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): String =
+def emitOksTail0(arm: Arm, rest: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): String =
   arm match {
     case Arm(pat, g, body) => join(emitOkTailArm(pat, g, body, moff, fname, tret, strs, defs, ens, ps, loc, i, tys, sv, List.isEmpty(rest)), emitOksTail(rest, moff, fname, tret, strs, defs, ens, ps, loc, i + 1, tys, sv))
   }
 
-def emitOkTailArm(pat: String, g: String, body: Expr, moff: Int, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, last: Bool): String =
+def emitOkTailArm(pat: String, g: String, body: Expr, moff: Int, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, last: Bool): String =
   if (g == "") join(lab(Str.concat("body_ok_0_", Str.fromInt(i))), join(covHitIf(body, moff, Str.fromInt(i), loc, strs, Str.concat("body_cv_", Str.fromInt(i))), emitOkTailBody(pat, body, fname, tret, strs, defs, ens, ps, loc, i, tys, sv))) else emitTailGuard(emitTailGuardExpr(pat, g, strs, defs, ens, ps, loc, i), join(covHitIf(body, moff, Str.fromInt(i), loc, strs, Str.concat("body_cv_", Str.fromInt(i))), emitOkTailBody(pat, body, fname, tret, strs, defs, ens, ps, loc, i, tys, sv)), i, last)
 
-def emitTailGuardExpr(pat: String, g: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
+def emitTailGuardExpr(pat: String, g: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitExpr(rewriteFields(splitPat(patBind(pat)), parseGuard(g), "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat))), Str.concat("body_g0_", Str.fromInt(i)), strs, defs, ens, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), "body", i, 0, ps), loc) else emitExpr(rewriteBind(parseGuard(g), fieldBind(patBind(pat)), bindStem("body", i, bindIsInt(pat, ens))), Str.concat("body_g0_", Str.fromInt(i)), strs, defs, ens, patternPayloadParams(pat, "body", i, ens, ps), loc)
 
 def emitTailGuard(gs: Slot, code: String, i: Int, last: Bool): String =
@@ -4575,7 +4569,7 @@ def emitTailGuard(gs: Slot, code: String, i: Int, last: Bool): String =
     case Slot(gc, gv, _) => join(lab(Str.concat("body_ok_0_", Str.fromInt(i))), join(gc, join(emitGuardBr(gv, "body", i, last), join(lab(okBodyLab("body", i)), code))))
   }
 
-def emitOkTailBody(pat: String, body: Expr, fname: String, tret: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): String =
+def emitOkTailBody(pat: String, body: Expr, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): String =
   if (isSelfTail(body, fname)) emitOkTailSlot(pat, body, strs, defs, ens, ps, loc, i, tys, sv).code else emitOkTailBase(emitOkSlotPat(pat, body, "body", strs, defs, ens, ps, loc, i, tys, sv, false), tret, ps, i)
 
 def emitOkTailBase(s: Slot, tret: String, ps: List[Param], i: Int): String =
@@ -4583,25 +4577,25 @@ def emitOkTailBase(s: Slot, tret: String, ps: List[Param], i: Int): String =
     case Slot(c, v, o) => join(c, emitTcoRetSlots(tret, v, o, ps, Str.concat("ok_", Str.fromInt(i))))
   }
 
-def emitOkTailSlot(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): Slot =
+def emitOkTailSlot(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): Slot =
   if (isAsPat(pat)) emitOkTailSlot(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), strs, defs, ens, ps, loc, i, tys, sv) else emitOkTailSlot2(pat, body, strs, defs, ens, ps, loc, i, tys)
 
-def emitOkTailSlot2(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
+def emitOkTailSlot2(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
   if (isOrPat(pat)) emitOkTailSlot2(orLeft(pat), body, strs, defs, ens, ps, loc, i, tys) else if (isConsPat(pat)) emitOkOwned(emitOkConsNest(consTail(pat), "body", i, tys, emitTailLeafTyped(rewriteCons(pat, body, "body", i, slotInt(tys, 0)), strs, defs, ens, ps, consPayloadParams(pat, "body", i, tys, ps), loc, i)), ps) else emitOkTailSlot3(pat, body, strs, defs, ens, ps, loc, i, tys)
 
-def emitOkTailSlot3(pat: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
+def emitOkTailSlot3(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
   if (isTuplePat(pat)) emitTailLeafTyped(rewriteTuple(pat, body, "body", i, tys), strs, defs, ens, ps, stemBps(pat, "body", i, tys, ps), loc, i) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitTailLeafTyped(rewriteFields(splitPat(patBind(pat)), body, "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat))), strs, defs, ens, ps, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), "body", i, 0, ps), loc, i) else emitTailLeafBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, strs, defs, ens, ps, patternPayloadParams(pat, "body", i, ens, ps), loc, i)
 
-def emitTailLeafTyped(body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int): Slot =
+def emitTailLeafTyped(body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int): Slot =
   Slot(emitSelfTailTyped(body, Str.concat("body_a0_", Str.fromInt(i)), strs, defs, ens, ps, bps, loc), "tco", false)
 
-def emitTailLeafBind(bind: String, isInt: Bool, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int): Slot =
+def emitTailLeafBind(bind: String, isInt: Bool, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int): Slot =
   if (bind == "" || bind == "_") emitTailLeafTyped(body, strs, defs, ens, ps, bps, loc, i) else emitTailLeafTyped(rewriteBind(body, bind, bindStem("body", i, isInt)), strs, defs, ens, ps, bps, loc, i)
 
-def emitDefTcoIf(name: String, mod: String, ret: String, ps: List[Param], c: Expr, t: Expr, el: Expr, ioff: Int, strs: List[String], defs: List[Fun], ens: List[En], loc: String): String =
+def emitDefTcoIf(name: String, mod: String, ret: String, ps: List[Param], c: Expr, t: Expr, el: Expr, ioff: Int, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   emitDefTcoIf2(llvmRet(ret), symOf(mod, name), name, defParamsTco(ps), ps, c, t, el, ioff, strs, defs, ens, loc)
 
-def emitDefTcoIf2(ty: String, sym: String, fname: String, params: String, ps: List[Param], c: Expr, t: Expr, el: Expr, ioff: Int, strs: List[String], defs: List[Fun], ens: List[En], loc: String): String =
+def emitDefTcoIf2(ty: String, sym: String, fname: String, params: String, ps: List[Param], c: Expr, t: Expr, el: Expr, ioff: Int, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   emitDefTcoIf3(ty, sym, params, join(emitTcoPrep(ps), emitIfTail(c, t, el, ioff, "body", strs, defs, ens, ps, loc, ty, fname)), loc, strs)
 
 def emitDefTcoIf3(ty: String, name: String, params: String, body: String, loc: String, strs: List[String]): String =
@@ -4632,10 +4626,10 @@ def emitTcoLoadOne(p: Param, ps: List[Param], i: Int): String =
     case Param(n, ty, _, _) => join(line(Str.concat("%", Str.concat(n, Str.concat(" = load ", Str.concat(if (isI64Ty(ty)) "i64" else "ptr", Str.concat(", ptr %", Str.concat(n, "_slot"))))))), emitTcoLoads(ps, i + 1))
   }
 
-def emitIfTail(c: Expr, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
+def emitIfTail(c: Expr, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
   emitIfTail2(emitExpr(c, Str.concat(prefix, "_ic"), strs, defs, ens, ps, loc), t, el, ioff, prefix, strs, defs, ens, ps, loc, ret, fname)
 
-def emitIfTail2(c: Slot, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
+def emitIfTail2(c: Slot, t: Expr, el: Expr, ioff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
   c match {
     case Slot(cc, cv, _) => join(cc, join(emitIfCmp(cv, prefix), join(emitIfBr(prefix), join(join(lab(Str.concat(prefix, "_then_0")), join(covHitIf(t, ioff, "t", loc, strs, Str.concat(prefix, "_cvt")), emitTailArm(t, Str.concat(prefix, "_t"), strs, defs, ens, ps, loc, ret, fname))), join(lab(Str.concat(prefix, "_else_0")), join(covElseTail(el, ioff, loc, strs, prefix), emitTailArm(el, Str.concat(prefix, "_e"), strs, defs, ens, ps, loc, ret, fname)))))))
   }
@@ -4646,16 +4640,16 @@ def covElseTail(el: Expr, ioff: Int, loc: String, strs: List[String], prefix: St
     case _ => covHitIf(el, ioff, "e", loc, strs, Str.concat(prefix, "_cve"))
   }
 
-def emitTailArm(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
+def emitTailArm(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
   if (isSelfTail(e, fname)) emitSelfTail(e, prefix, strs, defs, ens, ps, loc) else emitTailArmIf(e, prefix, strs, defs, ens, ps, loc, ret, fname)
 
-def emitTailArmIf(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
+def emitTailArmIf(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ret: String, fname: String): String =
   e match {
     case Expr.EIf(c, t, el, ioff) => emitIfTail(c, t, el, ioff, prefix, strs, defs, ens, ps, loc, ret, fname)
     case _ => emitTailBase(e, prefix, strs, defs, ens, ps, loc, ret)
   }
 
-def emitTailBase(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ret: String): String =
+def emitTailBase(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ret: String): String =
   emitTailBase1(emitExpr(e, Str.concat(prefix, "_b"), strs, defs, ens, ps, loc), ret, ps, prefix)
 
 def emitTailBase1(s: Slot, ret: String, ps: List[Param], tag: String): String =
@@ -4666,23 +4660,23 @@ def emitTailBase1(s: Slot, ret: String, ps: List[Param], tag: String): String =
 def emitTcoRetSlots(ret: String, tv: String, to: Bool, ps: List[Param], tag: String): String =
   join(if (ret == "ptr" && !to) retPtr(tv) else "", join(emitTcoReleases(ps, 0, Str.concat(tag, "_rb")), join(panicPop(), line(Str.concat(if (ret == "ptr") "ret ptr " else "ret i64 ", tv)))))
 
-def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitSelfTailTyped(e, prefix, strs, defs, ens, ps, ps, loc)
 
-def emitSelfTailTyped(e: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bps: List[Param], loc: String): String =
+def emitSelfTailTyped(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String): String =
   e match {
     case Expr.ECall(_, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, bps, loc, 0, "", noStr())
     case Expr.EMethod(_, _, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, bps, loc, 0, "", noStr())
     case _ => line("br label %tco_loop")
   }
 
-def emitSelfTailAcc(args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
+def emitSelfTailAcc(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
   if (List.isEmpty(args)) emitTcoCommit(code, ps, vals, prefix) else emitSelfTailOne(List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, bps, loc, i, code, vals)
 
-def emitSelfTailOne(a: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
+def emitSelfTailOne(a: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
   emitSelfTailGot(emitExpr(a, Str.concat(prefix, Str.concat("_targ", Str.fromInt(i))), strs, defs, ens, bps, loc), rest, prefix, strs, defs, ens, ps, bps, loc, i, code, vals)
 
-def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
+def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
   s match {
     case Slot(c, v, o) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, bps, loc, i + 1, join(code, c), List.concat(vals, tcoMark(v, o) :: noStr()))
   }
@@ -4796,7 +4790,7 @@ def startsAt(s: String, i: Int, old: String): Bool =
 def startsAtGo(s: String, i: Int, old: String, k: Int): Bool =
   if (k >= Str.len(old)) true else if (Str.charAt(s, i + k) != Str.charAt(old, k)) false else startsAtGo(s, i, old, k + 1)
 
-def rwDef(d: Fun, defs: List[Fun], ens: List[En]): Fun =
+def rwDef(d: Fun, defs: Ftab, ens: List[En]): Fun =
   d match {
     case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, ps, ret, rwFields(body, paramEnv(ps), defs, ens, mod), mod, off)
   }
@@ -4809,7 +4803,7 @@ def paramEnv1(p: Param, rest: List[Param]): List[(String, String)] =
     case Param(n, ty, _, _) => (n, ty) :: paramEnv(rest)
   }
 
-def rwFields(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): Expr =
+def rwFields(e: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): Expr =
   e match {
     case Expr.EPrint(inner, off) => Expr.EPrint(rwFields(inner, env, funs, ens, mod), off)
     case Expr.ECall(f, args, off) => rwCall(f, rwFieldList(args, env, funs, ens, mod), funs, mod, off)
@@ -4828,47 +4822,47 @@ def rwFields(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En
     case _ => e
   }
 
-def rwCall(f: String, args: List[Expr], funs: List[Fun], mod: String, off: Int): Expr =
+def rwCall(f: String, args: List[Expr], funs: Ftab, mod: String, off: Int): Expr =
   if (List.isEmpty(findDefMod(funs, mod, f))) Expr.ECall(f, args, off) else Expr.EMethod(Expr.EVar(mod, 0), f, args, off)
 
-def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
+def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
   if (List.isEmpty(xs)) noExpr() else rwFieldListGo(xs, env, funs, ens, mod)
 
-def rwFieldListGo(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
+def rwFieldListGo(xs: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
   rwFieldListH(List.at(xs, 0), env, funs, ens, mod, xs)
 
-def rwFieldListH(h: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String, xs: List[Expr]): List[Expr] =
+def rwFieldListH(h: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String, xs: List[Expr]): List[Expr] =
   rwFieldListT(h, env, funs, ens, mod, List.tail(xs))
 
-def rwFieldListT(h: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String, rest: List[Expr]): List[Expr] =
+def rwFieldListT(h: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String, rest: List[Expr]): List[Expr] =
   rwFieldListCons(rwFields(h, env, funs, copyEns(ens), mod), rest, env, funs, ens, mod)
 
-def rwFieldListCons(e: Expr, rest: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Expr] =
+def rwFieldListCons(e: Expr, rest: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
   e :: rwFieldList(rest, env, funs, ens, mod)
 
-def rwFieldArms(arms: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Arm] =
+def rwFieldArms(arms: List[Arm], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Arm] =
   if (List.isEmpty(arms)) noArm() else rwFieldArm(List.at(arms, 0), env, funs, ens, mod) :: rwFieldArms(List.tail(arms), env, funs, ens, mod)
 
-def rwForBinds(bs: List[Bind], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Bind] =
+def rwForBinds(bs: List[Bind], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
   if (List.isEmpty(bs)) bs else rwForBindsHit(bs, env, funs, ens, mod)
 
-def rwForBindsHit(bs: List[Bind], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Bind] =
+def rwForBindsHit(bs: List[Bind], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
   bs match {
     case b :: rest => rwForBinds1(b, rest, env, funs, ens, mod)
     case [] => bs
   }
 
-def rwForBinds1(b: Bind, rest: List[Bind], env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): List[Bind] =
+def rwForBinds1(b: Bind, rest: List[Bind], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
   b match {
     case Bind(d, n, v) => Bind(d, n, rwFields(v, env, funs, ens, mod)) :: rwForBinds(rest, env, funs, ens, mod)
   }
 
-def rwFieldArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[En], mod: String): Arm =
+def rwFieldArm(a: Arm, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): Arm =
   a match {
     case Arm(pat, g, body) => Arm(pat, g, rwFields(body, env, funs, ens, mod))
   }
 
-def rwField(recv: Expr, name: String, off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rwField(recv: Expr, name: String, off: Int, env: List[(String, String)], funs: Ftab, ens: List[En]): Expr =
   recv match {
     case Expr.EVar(en, _) => rwFieldVar(en, name, off, env, ens)
     case Expr.EMethod(r, m, args, _) => rwFieldMethod(r, m, args, name, off, env, funs, ens)
@@ -4879,7 +4873,7 @@ def rwField(recv: Expr, name: String, off: Int, env: List[(String, String)], fun
 def rwFieldVar(en: String, name: String, off: Int, env: List[(String, String)], ens: List[En]): Expr =
   if (hasEn(ens, en)) Expr.EField(Expr.EVar(en, 0), name, off) else rwFieldTy(Expr.EVar(en, 0), name, off, getTy(env, en), ens)
 
-def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, off: Int, _env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, off: Int, _env: List[(String, String)], funs: Ftab, ens: List[En]): Expr =
   r match {
     case Expr.EVar(mod, _) => rwFieldQualHit(m, args, name, off, ens, findDefMod(funs, mod, m))
     case _ => rwFieldTy(Expr.EMethod(r, m, args, 0), name, off, copyEn(Expr.EMethod(r, m, args, 0), ens, funs), ens)
@@ -5030,13 +5024,13 @@ def bindsSelect(i: Int, n: Int, idx: Int): String =
 def bindOrWild(i: Int, idx: Int): String =
   if (i == idx) fakeBind(i) else "_"
 
-def emitMain(body: Expr, strs: List[String], defs: List[Fun], ens: List[En], files: List[(String, String)]): String =
+def emitMain(body: Expr, strs: List[String], defs: Ftab, ens: List[En], files: List[(String, String)]): String =
   stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam(), panicLocExpr(files, body)), defs, strs, ens, panicLocExpr(files, body)), "Main")
 
-def emitMain2(s: Slot, defs: List[Fun], strs: List[String], ens: List[En], loc: String): String =
-  emitMain3(s.code, s.val, drvFuns(defs), relFuns(defs), sessFuns(defs), strs, ens, loc, defs)
+def emitMain2(s: Slot, defs: Ftab, strs: List[String], ens: List[En], loc: String): String =
+  emitMain3(s.code, s.val, drvFuns(defs.list), relFuns(defs.list), sessFuns(defs.list), strs, ens, loc, defs)
 
-def emitMain3(code: String, val: String, ds: List[Fun], rs: List[Fun], ss: List[Fun], strs: List[String], ens: List[En], loc: String, defs: List[Fun]): String =
+def emitMain3(code: String, val: String, ds: List[Fun], rs: List[Fun], ss: List[Fun], strs: List[String], ens: List[En], loc: String, defs: Ftab): String =
   Str.concat(emitDrvTramps(ds, 0, ens, strs), emitMain4(code, val, Str.concat(emitSetupReg(defs), Str.concat(emitDrvRegs(ds, strs, 0), Str.concat(emitRelRegs(rs, strs, 0), emitSessRegs(ss, strs, 0)))), loc, strs))
 
 def emitMain4(code: String, val: String, regs: String, loc: String, strs: List[String]): String =
@@ -5051,8 +5045,8 @@ def drvFuns1(d: Fun, rest: List[Fun]): List[Fun] =
 def isDrv(d: Fun): Bool =
   d.mod == "__verify" && isIoTy(d.ret) && !d.priv && d.name != "setup" && !Str.startsWith(d.name, "_scn_")
 
-def emitSetupReg(defs: List[Fun]): String =
-  if (hasSetupFun(defs)) """  call void @sz_scenario_register_setup(ptr @sz_user___verify_setup)
+def emitSetupReg(defs: Ftab): String =
+  if (hasSetupFun(defs.list)) """  call void @sz_scenario_register_setup(ptr @sz_user___verify_setup)
 """ else ""
 
 def hasSetupFun(ds: List[Fun]): Bool =
@@ -5586,7 +5580,7 @@ def kindOf(p: Param): Int =
   if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
 def emitProg(p: Prog, strs: List[String], files: List[(String, String)]): String =
-  emitBits(p.body, prepDefs(p), strs, Parse.builtins(p.enums), files)
+  emitBits(p.body, Check.ftabOfList(prepDefs(p)), strs, Parse.builtins(p.enums), files)
 
 def prepDefs(p: Prog): List[Fun] =
   withSelfFuns(rwAliasFuns(implFuns(p.impls, withImportFuns(p.imps, p.defs)), p.aliases))
@@ -5642,19 +5636,19 @@ def rwAliasApply(a: Alias, t: String, rest: List[Alias]): String =
 def rwAliasPrefix(target: String, n: String, t: String): String =
   Str.concat(tyHead(target), Str.slice(t, Str.len(n), Str.len(t)))
 
-def emitBits(body: Expr, defs: List[Fun], strs: List[String], ens: List[En], files: List[(String, String)]): String =
+def emitBits(body: Expr, defs: Ftab, strs: List[String], ens: List[En], files: List[(String, String)]): String =
   emitBitsHeld(body :: noExpr(), defs, strs, ens, files)
 
-def emitBitsHeld(held: List[Expr], defs: List[Fun], strs: List[String], ens: List[En], files: List[(String, String)]): String =
+def emitBitsHeld(held: List[Expr], defs: Ftab, strs: List[String], ens: List[En], files: List[(String, String)]): String =
   emitBitsFromConts(emitConts(List.at(held, 0), strs, defs, ens, noParam(), panicLocExpr(files, List.at(held, 0))), held, defs, strs, ens, files)
 
-def emitBitsFromConts(conts: String, held: List[Expr], defs: List[Fun], strs: List[String], ens: List[En], files: List[(String, String)]): String =
+def emitBitsFromConts(conts: String, held: List[Expr], defs: Ftab, strs: List[String], ens: List[En], files: List[(String, String)]): String =
   emitBitsJoin(emitMainIf(List.at(held, 0), strs, defs, ens, files), conts, defs, strs, ens, files)
 
-def emitBitsJoin(main: String, conts: String, defs: List[Fun], strs: List[String], ens: List[En], files: List[(String, String)]): String =
-  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), hoistNeth(Str.concat(conts, Str.concat(emitDefs(defs, strs, defs, ens, files), main)))))
+def emitBitsJoin(main: String, conts: String, defs: Ftab, strs: List[String], ens: List[En], files: List[(String, String)]): String =
+  Str.concat(emitConsts(strs, 0), Str.concat(if (List.isEmpty(strs)) "" else nl(), hoistNeth(Str.concat(conts, Str.concat(emitDefs(defs.list, strs, defs, ens, files), main)))))
 
-def emitMainIf(body: Expr, strs: List[String], defs: List[Fun], ens: List[En], files: List[(String, String)]): String =
+def emitMainIf(body: Expr, strs: List[String], defs: Ftab, ens: List[En], files: List[(String, String)]): String =
   if (isEmptyMain(body)) "" else emitMain(body, strs, defs, ens, files)
 
 def isEmptyMain(e: Expr): Bool =
@@ -5730,13 +5724,13 @@ def fmCountArgsHit(xs: List[Expr]): Int =
     case [] => 0
   }
 
-def emitIoMap(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitIoMap(recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (Check.isIo(exprRetTyEns(recv, defs, ens, ps, loc))) emitFmRt("sz_io_flatmap", recv, wrapIoMapArgs(args, ps, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, fid) else emitCtorCall(recv, "map", args, prefix, strs, defs, ens, ps, loc)
 
-def wrapIoMapArgs(args: List[Expr], ps: List[Param], defs: List[Fun], mod: String): List[Expr] =
+def wrapIoMapArgs(args: List[Expr], ps: List[Param], defs: Ftab, mod: String): List[Expr] =
   if (List.isEmpty(args)) args else wrapIoMapLam(List.at(args, 0), ps, defs, mod) :: List.tail(args)
 
-def wrapIoMapLam(e: Expr, ps: List[Param], defs: List[Fun], mod: String): Expr =
+def wrapIoMapLam(e: Expr, ps: List[Param], defs: Ftab, mod: String): Expr =
   wrapIoMapLam1(wrapPh(e, ps, defs, mod))
 
 def wrapIoMapLam1(e: Expr): Expr =
@@ -5746,13 +5740,13 @@ def wrapIoMapLam1(e: Expr): Expr =
     case _ => Expr.ELam("_ph", "", Expr.ECall("IO.pure", e :: noExpr(), 0))
   }
 
-def emitFmRt(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitFmRt(rt: String, recv: Expr, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitFmCounted(rt, recv, args, prefix, strs, defs, ens, ps, loc, fid, fmCount(recv) + fmCountArgs(args))
 
-def emitFmCounted(rt: String, recv: Expr, _args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int, n: Int): Slot =
+def emitFmCounted(rt: String, recv: Expr, _args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int, n: Int): Slot =
   emitFmA(rt, fid + n, recv, prefix, strs, defs, ens, ps, loc, fid)
 
-def emitFmA(rt: String, na: Int, recv: Expr, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+def emitFmA(rt: String, na: Int, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitFm2(rt, emitExprFid(recv, Str.concat(prefix, "_in"), strs, defs, ens, ps, loc, fid), prefix, na, ps)
 
 def emitFm2(rt: String, inner: Slot, prefix: String, id: Int, ps: List[Param]): Slot =
@@ -5828,16 +5822,16 @@ def emitUnpackPtr(n: String, i: Int): String =
 def emitUnpackI64(n: String, i: Int): String =
   join(line(Str.concat("%", Str.concat(n, Str.concat("_c = call ptr @sz_list_at(ptr %env, i64 ", Str.concat(Str.fromInt(i), ")"))))), line(Str.concat("%", Str.concat(n, Str.concat(" = call i64 @sz_unbox_i64(ptr %", Str.concat(n, "_c)"))))))
 
-def emitOneCont(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
+def emitOneCont(id: Int, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
   emitOneContHeld(id, body :: noExpr(), strs, defs, ens, ps, loc, bind, nested, start, bty)
 
-def emitOneContHeld(id: Int, held: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
+def emitOneContHeld(id: Int, held: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
   emitOneContTy(id, List.at(held, 0), strs, defs, ens, ps, loc, bind, nested, start, peelIo(bty))
 
 def peelIo(ty: String): String =
   if (Check.isIo(ty)) Check.ioPayload(ty) else ty
 
-def emitOneContTy(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
+def emitOneContTy(id: Int, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
   if (keepBind(bind) || isI64Ty(bty) || isTuplePat(bind) || isTupTy(bty)) emitOneContAlias(id, body, strs, defs, ens, ps, loc, bind, start, bty) else emitOneCont2(id, emitOneCont3(emitUnpack(ps), emitExprFid(rewriteBind(body, bind, "value"), Str.concat("c", Str.fromInt(id)), strs, defs, ens, ps, loc, start)), loc, strs)
 
 def keepBind(bind: String): Bool =
@@ -5902,10 +5896,10 @@ def emitBindAliasPtr(n: String): String =
 def emitBindAliasI64(n: String): String =
   join(line(Str.concat("%", Str.concat(n, " = call i64 @sz_unbox_i64(ptr %value)"))), relPtr("%value"))
 
-def emitOneContAlias(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bind: String, start: Int, bty: String): String =
+def emitOneContAlias(id: Int, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bind: String, start: Int, bty: String): String =
   emitOneContAlias2(id, body, strs, defs, ens, dropParam(ps, bind), loc, bind, start, bty)
 
-def emitOneContAlias2(id: Int, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], rest: List[Param], loc: String, bind: String, start: Int, bty: String): String =
+def emitOneContAlias2(id: Int, body: Expr, strs: List[String], defs: Ftab, ens: List[En], rest: List[Param], loc: String, bind: String, start: Int, bty: String): String =
   emitOneCont2(id, emitContDrop(emitOneCont3(join(emitUnpack(rest), emitBindAlias(bind, bty)), emitExprFid(body, Str.concat("c", Str.fromInt(id)), strs, defs, ens, bindPsTy(bind, rest, bty), loc, start)), bty), loc, strs)
 
 def emitContDrop(s: Slot, bty: String): Slot =
@@ -5919,7 +5913,7 @@ def emitOneCont3(pre: String, s: Slot): Slot =
 def emitOneCont2(id: Int, s: Slot, loc: String, strs: List[String]): String =
   Str.concat("define internal ptr @sz_cont_", Str.concat(Str.fromInt(id), Str.concat("(ptr %value, ptr %env) {", Str.concat(nl(), Str.concat("entry:", Str.concat(nl(), Str.concat(panicPush(loc, strs), Str.concat(s.code, Str.concat(panicPop(), Str.concat("  ret ptr ", Str.concat(s.val, Str.concat(nl(), Str.concat("}", Str.concat(nl(), nl()))))))))))))))
 
-def emitConts(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitConts(e: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitContsHead(emitContsAt(e, strs, defs, ens, ps, loc, 0))
 
 def emitContsHead(p: (String, Int)): String =
@@ -5927,7 +5921,7 @@ def emitContsHead(p: (String, Int)): String =
     case (code, _) => Str.concat(code, "")
   }
 
-def emitContsAt(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsAt(e: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   e match {
     case Expr.EMethod(recv, name, args, _) => if (name == "handleErrorWith") emitContsFmTy(Check.ioErr(exprRetTyEns(recv, defs, ens, ps, loc)), recv, args, strs, defs, ens, ps, loc, id) else if (isFmName(name)) emitContsFm(recv, args, strs, defs, ens, ps, loc, id) else if (name == "map") emitContsMap(recv, args, strs, defs, ens, ps, loc, id) else if (name == "apply") emitContsApply(recv, args, strs, defs, ens, ps, loc, id) else emitContsCtor(recv, args, strs, defs, ens, ps, loc, id)
     case Expr.EPrint(inner, _) => emitContsAtGo(inner, strs, defs, ens, ps, loc, id)
@@ -5946,38 +5940,38 @@ def emitContsAt(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps:
     case _ => ("", id)
   }
 
-def emitContsAtGo(e: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsAtGo(e: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsAt(e, strs, defs, ens, ps, loc, id)
 
-def emitContsApply(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsApply(recv: Expr, args: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   recv match {
     case Expr.ELam(p, _, body) => emitContsApplyLam(p, body, args, strs, defs, ens, ps, loc, id)
     case _ => emitContsCtor(recv, args, strs, defs, ens, ps, loc, id)
   }
 
-def emitContsApplyLam(p: String, body: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsApplyLam(p: String, body: Expr, args: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsCtor2(emitContsAt(body, strs, defs, ens, bindPsTy(p, ps, applyBindTy(p, applyScrut(args), defs, ens, ps, loc)), loc, id), args, strs, defs, ens, ps, loc)
 
-def emitContsCtor(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsCtor(recv: Expr, args: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsCtor2(emitContsAt(recv, strs, defs, ens, ps, loc, id), args, strs, defs, ens, ps, loc)
 
-def emitContsCtor2(p: (String, Int), args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): (String, Int) =
+def emitContsCtor2(p: (String, Int), args: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): (String, Int) =
   p match {
     case (code, id) => emitContsArgs3(code, emitContsArgs(args, strs, defs, ens, ps, loc, id))
   }
 
-def emitContsMatch(s: Expr, arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsMatch(s: Expr, arms: List[Arm], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsMatch2(emitContsAt(s, strs, defs, ens, ps, loc, id), arms, strs, defs, ens, ps, loc, exprRetTyEns(s, defs, ens, ps, loc))
 
-def emitContsMatch2(p: (String, Int), arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ty: String): (String, Int) =
+def emitContsMatch2(p: (String, Int), arms: List[Arm], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ty: String): (String, Int) =
   p match {
     case (code, id) => emitContsArgs3(code, emitContsArmList(arms, strs, defs, ens, ps, loc, id, ty))
   }
 
-def emitContsArmList(arms: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int, ty: String): (String, Int) =
+def emitContsArmList(arms: List[Arm], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int, ty: String): (String, Int) =
   if (List.isEmpty(arms)) ("", id) else emitContsArmHd(List.at(arms, 0), List.tail(arms), strs, defs, ens, ps, loc, id, ty)
 
-def emitContsArmHd(a: Arm, rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int, ty: String): (String, Int) =
+def emitContsArmHd(a: Arm, rest: List[Arm], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int, ty: String): (String, Int) =
   a match {
     case Arm(pat, _, body) => emitContsArmList2(emitContsAt(body, strs, defs, ens, bindPatPs(pat, ps, ty), loc, id), rest, strs, defs, ens, ps, loc, ty)
   }
@@ -5985,55 +5979,55 @@ def emitContsArmHd(a: Arm, rest: List[Arm], strs: List[String], defs: List[Fun],
 def bindPatPs(pat: String, ps: List[Param], ty: String): List[Param] =
   if (isTuplePat(pat)) bindTupPsTy(tupBindNs(pat), tupSlots(ty), ps) else ps
 
-def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, ty: String): (String, Int) =
+def emitContsArmList2(p: (String, Int), rest: List[Arm], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, ty: String): (String, Int) =
   p match {
     case (code, id) => emitContsArgs3(code, emitContsArmList(rest, strs, defs, ens, ps, loc, id, ty))
   }
 
-def emitContsMap(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsMap(recv: Expr, args: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   if (Check.isIo(exprRetTyEns(recv, defs, ens, ps, loc))) emitContsFm(recv, wrapIoMapArgs(args, ps, defs, modOfLoc(loc)), strs, defs, ens, ps, loc, id) else reserveMapCont(emitContsCtor(recv, args, strs, defs, ens, ps, loc, id), args)
 
 def reserveMapCont(p: (String, Int), args: List[Expr]): (String, Int) =
   (p._1, p._2 + 1 + fmCountArgs(args) - fmCountSkipLam(args))
 
-def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsFm(recv: Expr, args: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsFmTy(recvBindTy(recv, ens, defs, ps, loc), recv, args, strs, defs, ens, ps, loc, id)
 
-def recvBindTy(recv: Expr, ens: List[En], defs: List[Fun], ps: List[Param], loc: String): String =
+def recvBindTy(recv: Expr, ens: List[En], defs: Ftab, ps: List[Param], loc: String): String =
   peelIo(exprRetTyEns(recv, defs, ens, ps, loc))
 
-def emitContsFmTy(bty: String, recv: Expr, args: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsFmTy(bty: String, recv: Expr, args: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsFm2(emitContsAt(recv, strs, defs, ens, ps, loc, id), lamArg(args), strs, defs, ens, ps, loc, bty)
 
 def lamArg(args: List[Expr]): Expr =
   if (List.isEmpty(args)) Expr.EUnit else List.at(args, 0)
 
-def emitContsFm2(p: (String, Int), lam: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
+def emitContsFm2(p: (String, Int), lam: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
   p match {
     case (code, id) => emitContsFm3(code, id, lam, strs, defs, ens, ps, loc, bty)
   }
 
-def emitContsFm3(code: String, id: Int, lam: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
+def emitContsFm3(code: String, id: Int, lam: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
   lam match {
     case Expr.ELam(p, _, body) => emitContsFm3Body(code, id, p, body, strs, defs, ens, ps, loc, bty)
     case _ => (code, id)
   }
 
-def emitContsFm3Body(code: String, id: Int, p: String, body: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
+def emitContsFm3Body(code: String, id: Int, p: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
   emitContsFm3Held(code, id, p, body :: noExpr(), strs, defs, ens, ps, loc, bty)
 
-def emitContsFm3Held(code: String, id: Int, p: String, held: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
+def emitContsFm3Held(code: String, id: Int, p: String, held: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bty: String): (String, Int) =
   emitContsFm3After(code, id, p, held, strs, defs, ens, ps, loc, bty, emitContsAt(List.at(held, 0), strs, defs, ens, bindPsTy(p, ps, bty), loc, id))
 
-def emitContsFm3After(code: String, id: Int, p: String, held: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, bty: String, nested: (String, Int)): (String, Int) =
+def emitContsFm3After(code: String, id: Int, p: String, held: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, bty: String, nested: (String, Int)): (String, Int) =
   nested match {
     case (ncode, id2) => (join(code, join(ncode, emitOneCont(id2, List.at(held, 0), strs, defs, ens, ps, loc, p, id2 > id, id, bty))), id2 + 1)
   }
 
-def emitContsArgs(xs: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsArgs(xs: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   if (List.isEmpty(xs)) ("", id) else emitContsArgs2(emitContsAt(List.at(xs, 0), strs, defs, ens, ps, loc, id), List.tail(xs), strs, defs, ens, ps, loc)
 
-def emitContsArgs2(p: (String, Int), rest: List[Expr], strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): (String, Int) =
+def emitContsArgs2(p: (String, Int), rest: List[Expr], strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): (String, Int) =
   p match {
     case (code, id) => emitContsArgs3(code, emitContsArgs(rest, strs, defs, ens, ps, loc, id))
   }
@@ -6043,15 +6037,15 @@ def emitContsArgs3(code: String, p: (String, Int)): (String, Int) =
     case (rest, id) => (join(code, rest), id)
   }
 
-def emitContsIf(c: Expr, t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
+def emitContsIf(c: Expr, t: Expr, el: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, id: Int): (String, Int) =
   emitContsIf2(emitContsAt(c, strs, defs, ens, ps, loc, id), t, el, strs, defs, ens, ps, loc)
 
-def emitContsIf2(p: (String, Int), t: Expr, el: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): (String, Int) =
+def emitContsIf2(p: (String, Int), t: Expr, el: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): (String, Int) =
   p match {
     case (code, id) => emitContsIf3(code, emitContsAt(t, strs, defs, ens, ps, loc, id), el, strs, defs, ens, ps, loc)
   }
 
-def emitContsIf3(code: String, p: (String, Int), el: Expr, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): (String, Int) =
+def emitContsIf3(code: String, p: (String, Int), el: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): (String, Int) =
   p match {
     case (rest, id) => emitContsArgs3(join(code, rest), emitContsAt(el, strs, defs, ens, ps, loc, id))
   }
@@ -6256,13 +6250,13 @@ def declsQ(): String =
 def emitFull(src: String): String =
   Str.concat(preamble(), emit(src))
 
-def emitGenericSignal(f: String, args: List[Expr], prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitGenericSignal(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (f == "Signal.makeN" || f == "Signal.mapN") emitSignalNamed(f, List.tail(args), emitExpr(List.at(args, 0), Str.concat(prefix, "_name"), strs, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc) else emitSignalNamed(f, args, Slot("", "null", false), prefix, strs, defs, ens, ps, loc)
 
-def emitSignalNamed(f: String, args: List[Expr], name: Slot, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSignalNamed(f: String, args: List[Expr], name: Slot, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitSignalTyped(f, args, name, emitExpr(List.at(args, 0), Str.concat(prefix, "_src"), strs, defs, ens, ps, loc), exprRetTyEns(List.at(args, 0), defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc)
 
-def emitSignalTyped(f: String, args: List[Expr], name: Slot, src: Slot, ty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSignalTyped(f: String, args: List[Expr], name: Slot, src: Slot, ty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (f == "Signal.make" || f == "Signal.makeN") emitSignalMake(boxSignalValue(src, ty, prefix), signalKind(ty), name, prefix) else if (f == "Signal.get") emitSignalGet(src, Check.elemOf(ty), prefix) else if (f == "Signal.set") emitSignalSet(src, boxSignalValue(emitExpr(List.at(args, 1), Str.concat(prefix, "_value"), strs, defs, ens, ps, loc), Check.elemOf(ty), prefix), prefix) else emitSignalMap(src, name, wrapPh(List.at(args, 1), ps, defs, modOfLoc(loc)), Check.elemOf(ty), prefix, strs, defs, ens, ps, loc)
 
 def signalKind(ty: String): Int =
@@ -6286,19 +6280,19 @@ def signalGetResult(s: Slot, ty: String, prefix: String): Slot =
 def emitSignalSet(src: Slot, payload: Slot, prefix: String): Slot =
   Slot(join(src.code, join(payload.code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_signal_write(ptr ", Str.concat(src.val, Str.concat(", ptr ", Str.concat(payload.val, ")")))))), dropSlot(payload)))), pct(prefix, "v"), false)
 
-def emitSignalMap(src: Slot, name: Slot, fn: Expr, ty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSignalMap(src: Slot, name: Slot, fn: Expr, ty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitSignalMapBody(src, name, mapLamBind(fn), mapLamBody(fn), ty, prefix, strs, defs, ens, ps, loc)
 
-def emitSignalMapBody(src: Slot, name: Slot, bind: String, body: Expr, ty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSignalMapBody(src: Slot, name: Slot, bind: String, body: Expr, ty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitSignalMapRenamed(src, name, freshSignalBind(Str.concat(prefix, "_item"), body, ps), body, bind, ty, prefix, strs, defs, ens, ps, loc)
 
 def freshSignalBind(name: String, body: Expr, ps: List[Param]): String =
   if (paramKnown(ps, name) || exprHasVar(body, name)) freshSignalBind(Str.concat(name, "_"), body, ps) else name
 
-def emitSignalMapRenamed(src: Slot, name: Slot, fresh: String, body: Expr, bind: String, ty: String, prefix: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): Slot =
+def emitSignalMapRenamed(src: Slot, name: Slot, fresh: String, body: Expr, bind: String, ty: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitSignalMapReady(src, name, emitSignalNeth(prefix, fresh, rewriteBind(body, bind, fresh), ty, strs, defs, ens, dropParam(ps, bind), loc), emitPackEnv(dropParam(ps, bind), Str.concat(prefix, "_env")), signalKind(exprRetTyEns(body, defs, ens, nethPsTy(bind, ty, dropParam(ps, bind)), loc)), prefix)
 
-def emitSignalNeth(prefix: String, bind: String, body: Expr, ty: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitSignalNeth(prefix: String, bind: String, body: Expr, ty: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitSignalNethCaptured(prefix, bind, ty, strs, defs, ens, loc, signalCaptures(prefix, body, ps, 0))
 
 def signalCaptures(prefix: String, body: Expr, ps: List[Param], at: Int): (Expr, List[Param]) =
@@ -6310,10 +6304,10 @@ def signalCaptureAt(prefix: String, body: Expr, ps: List[Param], at: Int, p: Par
 def signalCaptureRename(prefix: String, body: Expr, ps: List[Param], at: Int, p: Param, fresh: String): (Expr, List[Param]) =
   signalCaptures(prefix, rewriteBind(body, p.name, fresh), List.setAt(ps, at, Param(fresh, p.ty, p.w, p.d)), at + 1)
 
-def emitSignalNethCaptured(prefix: String, bind: String, ty: String, strs: List[String], defs: List[Fun], ens: List[En], loc: String, captured: (Expr, List[Param])): String =
+def emitSignalNethCaptured(prefix: String, bind: String, ty: String, strs: List[String], defs: Ftab, ens: List[En], loc: String, captured: (Expr, List[Param])): String =
   emitSignalNethCapturedBody(prefix, bind, captured._1, ty, strs, defs, ens, captured._2, loc)
 
-def emitSignalNethCapturedBody(prefix: String, bind: String, body: Expr, ty: String, strs: List[String], defs: List[Fun], ens: List[En], ps: List[Param], loc: String): String =
+def emitSignalNethCapturedBody(prefix: String, bind: String, body: Expr, ty: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitSignalNethBody(prefix, join(emitUnpack(ps), emitNethBind2(bind, isI64Ty(ty))), boxSignalValue(emitExpr(body, Str.concat(prefix, "_body"), strs, defs, ens, nethPsTy(bind, ty, ps), loc), exprRetTyEns(body, defs, ens, nethPsTy(bind, ty, ps), loc), Str.concat(prefix, "_ret")), loc, strs)
 
 def emitSignalNethBody(prefix: String, pre: String, payload: Slot, loc: String, strs: List[String]): String =
