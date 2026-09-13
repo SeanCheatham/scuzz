@@ -68,7 +68,8 @@ var Module = {
   },
   makeControl(item) {
     const editing = item.role === 3 || item.role === 41;
-    const node = document.createElement(item.route !== null ? 'a' : editing ? (item.role === 3 ? 'input' : 'textarea') : item.role === 8 ? 'input' : 'button');
+    const pictured = item.role === 4 || item.role === 49;
+    const node = document.createElement(item.route !== null ? 'a' : editing ? (item.role === 3 ? 'input' : 'textarea') : item.role === 8 ? 'input' : pictured ? 'div' : 'button');
     node.className = 'control';
     if (node.tagName === 'BUTTON') node.type = 'button';
     node.addEventListener('focus', () => {
@@ -93,9 +94,14 @@ var Module = {
     } else if (item.role === 8) {
       node.type = 'range'; node.min = '0'; node.max = '100';
       node.addEventListener('input', () => Module.ccall('sz_web_slider', null, ['number', 'number'], [node.item.id, Number(node.value)]));
+    } else if (pictured) {
+      node.setAttribute('role', 'img');
+      node.style.cursor = 'default';
     } else {
       node.addEventListener('click', event => {
         if (node.tagName === 'A' && (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)) return;
+        const route = node.item?.route || '';
+        if (node.tagName === 'A' && (route.startsWith('http://') || route.startsWith('https://'))) return;
         event.preventDefault();
         Module.ccall('sz_web_activate', 'number', ['number'], [node.item.id]);
       });
@@ -146,7 +152,7 @@ var Module = {
       positions.set(parent, index + 1);
       if (item.group) {
         node.hidden = item.hidden;
-        node.setAttribute('role', {46: 'tablist', 47: 'tabpanel', 48: 'region'}[item.role]);
+        node.setAttribute('role', {46: 'tablist', 47: 'tabpanel', 48: 'region', 51: 'navigation'}[item.role]);
         node.setAttribute('aria-label', item.label);
         if (item.related) node.setAttribute('aria-labelledby', 'view-' + item.related);
         node.style.left = (item.x - ox) / scale + 'px'; node.style.top = (item.y - oy) / scale + 'px';
@@ -177,9 +183,13 @@ var Module = {
         node.style.width = item.w / scale + 'px'; node.style.height = item.h / scale + 'px';
         node.setAttribute('aria-label', item.label);
         if (item.route !== null) {
-          node.href = '#section=' + encodeURIComponent(item.route);
+          const http = item.route.startsWith('http://') || item.route.startsWith('https://');
+          node.href = http ? item.route : '#section=' + encodeURIComponent(item.route);
           if (node.textContent !== item.label) node.textContent = item.label;
           if (item.checked) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current');
+        } else if (item.role === 4 || item.role === 49) {
+          node.setAttribute('role', 'img');
+          if (node.textContent !== item.label) node.textContent = item.label;
         } else if (item.role === 45) {
           if (node.textContent !== item.label) node.textContent = item.label;
           node.setAttribute('role', 'tab');

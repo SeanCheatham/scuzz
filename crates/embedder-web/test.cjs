@@ -28,7 +28,12 @@ async function check(browserType, url, mobile) {
     await expectText('text:Start');
     assert.equal(await page.title(), 'Scuzz Docs');
     assert.equal(await page.getByRole('heading', {name: 'Start', level: 1}).count(), 1);
-    assert.equal(await page.getByRole('link').count(), 11);
+    assert.equal(await page.getByRole('link', {name: 'Install', exact: true}).count(), 1);
+    assert.equal(await page.getByRole('link', {name: 'Install the CLI', exact: true}).count(), 1);
+    assert(await page.getByRole('link').count() >= 16);
+    assert.equal(await page.getByRole('navigation', {name: 'Breadcrumb'}).count(), 1);
+    assert.equal(await page.getByRole('img', {name: 'Same View tree on every runtime'}).count(), 1);
+    assert.equal(await page.getByRole('img', {name: 'B'}).count(), 1);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
     await page.getByRole('button', {name: 'Add one', exact: true}).focus();
     await page.getByRole('button', {name: 'Add one', exact: true}).click();
@@ -55,6 +60,11 @@ async function check(browserType, url, mobile) {
     await page.goBack(); await expectText('text:Verify');
     await page.goForward(); await expectText('text:Web');
     await page.getByRole('link', {name: 'Start', exact: true}).click();
+    await expectText('text:Count: 1');
+    await page.getByRole('link', {name: 'Build a GUI', exact: true}).click();
+    await expectText('text:GUI');
+    assert.equal(new URL(page.url()).hash, '#section=gui');
+    await page.getByRole('link', {name: 'Docs', exact: true}).click();
     await expectText('text:Count: 1');
     await page.getByRole('button', {name: 'Reset', exact: true}).click();
     await expectText('text:Count: 0');
@@ -216,6 +226,8 @@ async function check(browserType, url, mobile) {
     await page.setViewportSize({width: mobile ? 390 : 1000, height: 720});
     await page.getByRole('link', {name: 'Web', exact: true}).click();
     await expectText('text:Web');
+    assert.equal(await page.getByRole('img', {name: 'Hash links keep the selected section'}).count(), 1);
+    assert.equal(await page.getByRole('link', {name: 'Scuzz on GitHub', exact: true}).getAttribute('href'), 'https://github.com/SeanCheatham/scuzz');
     if (mobile) {
       await page.getByRole('link', {name: 'Install', exact: true}).tap();
       await expectText('text:Install');
