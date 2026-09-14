@@ -395,7 +395,7 @@ def miss(): Int = 99
 def rewriteParseOnceOk(): Bool =
   Verify.rewriteReqFiles(("Clean", "def n(): Int = 1") :: Manifest.noPairs()) == ("Clean", "def n(): Int = 1") :: Manifest.noPairs() && Str.contains(rewriteReqMain("def n(): Int = 1.require(true)"), "Property.check") && Str.contains(rewriteReqMain("""def note(n: Int where n >= 0): Bool = true
 def go(): Bool = note(1)
-"""), "Property.check")
+"""), "Property.check") && Verify.expectedTreeOk()
 
 def rewriteReqMain(src: String): String =
   rewriteReqMainGo(Verify.rewriteReqFiles(("Main", src) :: Manifest.noPairs()))
