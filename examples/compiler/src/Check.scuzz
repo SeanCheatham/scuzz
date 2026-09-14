@@ -1645,22 +1645,7 @@ def tyAppArg(t: String, name: String): String =
   Str.slice(t, Str.len(name) + 1, Str.len(t) - 1)
 
 def substTy(target: String, param: String, arg: String): String =
-  substTyAt(target, param, arg, 0)
-
-def substTyAt(target: String, param: String, arg: String, i: Int): String =
-  if (i + Str.len(param) > Str.len(target)) target else if (Str.slice(target, i, i + Str.len(param)) == param && tyBound(target, i, Str.len(param))) Str.concat(Str.slice(target, 0, i), Str.concat(arg, substTy(Str.slice(target, i + Str.len(param), Str.len(target)), param, arg))) else substTyAt(target, param, arg, i + 1)
-
-def tyBound(s: String, i: Int, n: Int): Bool =
-  tyBoundL(s, i) && tyBoundR(s, i + n)
-
-def tyBoundL(s: String, i: Int): Bool =
-  i == 0 || !isTyChar(Str.charAt(s, i - 1))
-
-def tyBoundR(s: String, i: Int): Bool =
-  i >= Str.len(s) || !isTyChar(Str.charAt(s, i))
-
-def isTyChar(c: Int): Bool =
-  c >= 65 && c <= 90 || c >= 97 && c <= 122 || c >= 48 && c <= 57 || c == 95
+  Type.substStr(target, param, arg)
 
 def inStems(stems: List[String], mod: String): Bool =
   List.isEmpty(stems) || hasStem(stems, mod)
