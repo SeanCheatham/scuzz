@@ -1,4 +1,4 @@
 [fuzz]
 seed = 1
 schedule_seed = "1"
-events = ["tap button:Add one", "tap navtile:Build a GUI"]
+events = ["tap 23", "tap 15"]
