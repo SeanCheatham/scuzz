@@ -610,13 +610,13 @@ def coverageBoth(files: List[(String, String)], compiled: List[(String, String)]
   coverageBothKept(parseKept(files), files, compiled, Str.lines(hits))
 
 def coverageBothKept(kept: List[(String, String, Prog)], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
-  coverageBothRew(mergeKept(kept), rewriteReqFromKept(kept), files, compiled, hits)
+  coverageBothLive(mergeKept(kept), kept, files, compiled, hits)
 
-def coverageBothRew(p: Prog, rew: List[(String, String)], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
-  coverageBothBuilt(p, expectedProg(p, files, rew), Parse.parseFiles(compiled), files, compiled, hits)
+def coverageBothLive(p: Prog, kept: List[(String, String, Prog)], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
+  coverageBothBuilt(p, expectedFromKept(kept), compiledProg(p, files, compiled), files, compiled, hits)
 
-def expectedProg(p: Prog, files: List[(String, String)], rew: List[(String, String)]): Prog =
-  if (sameFiles(files, rew)) p else Parse.parseFiles(rew)
+def compiledProg(live: Prog, files: List[(String, String)], compiled: List[(String, String)]): Prog =
+  if (sameFiles(files, compiled)) live else mergeKept(parseKept(compiled))
 
 def sameFiles(a: List[(String, String)], b: List[(String, String)]): Bool =
   if (List.isEmpty(a)) List.isEmpty(b) else if (List.isEmpty(b)) false else sameFileHd(List.at(a, 0), List.at(b, 0)) && sameFiles(List.tail(a), List.tail(b))
@@ -1189,6 +1189,45 @@ def rewriteReqKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog
 def rewriteReqKeep(src: String, p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
   if (progHasReq(p) || progNeedsWhere(p, funs, ens)) rewriteReqProg(p, stem, funs, ens) else src
 
+def expectedFromKept(kept: List[(String, String, Prog)]): Prog =
+  expectedFromKeptP(kept, mergeKept(kept))
+
+def expectedFromKeptP(kept: List[(String, String, Prog)], p: Prog): Prog =
+  p match {
+    case Prog(_, enums, _, _, _, _, defs, _, _) => if (keptNeedsRewrite(kept, defs, enums)) mergeKept(rewriteKeptTrees(kept, defs, enums)) else p
+  }
+
+def keptNeedsRewrite(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): Bool =
+  if (List.isEmpty(kept)) false else keptNeedsRewriteHd(List.at(kept, 0), List.tail(kept), funs, ens)
+
+def keptNeedsRewriteHd(h: (String, String, Prog), rest: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): Bool =
+  h match {
+    case (_, _, fp) => progHasReq(fp) || progNeedsWhere(fp, funs, ens) || keptNeedsRewrite(rest, funs, ens)
+  }
+
+def rewriteKeptTrees(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String, Prog)] =
+  if (List.isEmpty(kept)) noKept() else rewriteKeptHd(List.at(kept, 0), List.tail(kept), funs, ens)
+
+def rewriteKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): List[(String, String, Prog)] =
+  h match {
+    case (stem, src, fp) => (stem, src, rewriteReqKeepProg(src, fp, stem, funs, ens)) :: rewriteKeptTrees(rest, funs, ens)
+  }
+
+def rewriteReqKeepProg(src: String, p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
+  if (progHasReq(p) || progNeedsWhere(p, funs, ens)) rewriteReqTree(p, stem, funs, ens) else p
+
+def expectedTreeOk(): Bool =
+  expectedTreeSrc("def n(): Int = 1") && expectedTreeSrc("def n(): Int = 1.require(true)")
+
+def expectedTreeSrc(src: String): Bool =
+  expectedTreeFiles(("Main", src) :: Manifest.noPairs())
+
+def expectedTreeFiles(files: List[(String, String)]): Bool =
+  expectedTreeKept(parseKept(files))
+
+def expectedTreeKept(kept: List[(String, String, Prog)]): Bool =
+  Parse.pretty(expectedFromKept(kept)) == Parse.pretty(Parse.parseFiles(rewriteReqFromKept(kept)))
+
 def progHasReq(p: Prog): Bool =
   p match {
     case Prog(_, _, _, _, impls, _, defs, _, body) => exprHasReq(body) || defsHaveReq(defs) || implsHaveReq(impls)
@@ -1351,8 +1390,11 @@ def bindHasReq(b: Bind): Bool =
   }
 
 def rewriteReqProg(p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
+  Parse.pretty(rewriteReqTree(p, stem, funs, ens))
+
+def rewriteReqTree(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
   p match {
-    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Parse.pretty(Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens)))
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens))
   }
 
 def mainEnv(stem: String): List[(String, String)] =
