@@ -1,6 +1,9 @@
 def internInterpLit(): Bool =
   Main.internInterpLit()
 
+def rewriteInterpLit(): Bool =
+  Main.rewriteInterpLit()
+
 def internOrder(): Bool =
   Main.internOrder()
 

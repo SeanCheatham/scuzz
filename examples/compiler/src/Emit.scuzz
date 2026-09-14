@@ -4328,37 +4328,37 @@ def rewriteBindBinds1(b: Bind, rest: List[Bind], from: String, to: String): List
   }
 
 def rewriteInterpStr(s: String, from: String, to: String): String =
-  rewriteInterpAt(s, 0, "", from, to)
+  rewriteInterpAt(s, 0, Builder.empty(), from, to)
 
-def rewriteInterpAt(s: String, i: Int, acc: String, from: String, to: String): String =
-  if (i >= Str.len(s)) acc else rewriteInterpCh(s, i, acc, from, to, Str.charAt(s, i))
+def rewriteInterpAt(s: String, i: Int, b: Builder, from: String, to: String): String =
+  if (i >= Str.len(s)) Builder.result(b) else rewriteInterpCh(s, i, b, from, to, Str.charAt(s, i))
 
-def rewriteInterpCh(s: String, i: Int, acc: String, from: String, to: String, c: Int): String =
-  if (c == 36) rewriteInterpDollar(s, i, acc, from, to) else rewriteInterpAt(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)), from, to)
+def rewriteInterpCh(s: String, i: Int, b: Builder, from: String, to: String, c: Int): String =
+  if (c == 36) rewriteInterpDollar(s, i, b, from, to) else rewriteInterpAt(s, i + 1, Builder.append(b, Str.slice(s, i, i + 1)), from, to)
 
-def rewriteInterpDollar(s: String, i: Int, acc: String, from: String, to: String): String =
-  if (i + 1 >= Str.len(s)) rewriteInterpAt(s, i + 1, Str.concat(acc, "$"), from, to) else rewriteInterpDollar2(s, i, acc, from, to, Str.charAt(s, i + 1))
+def rewriteInterpDollar(s: String, i: Int, b: Builder, from: String, to: String): String =
+  if (i + 1 >= Str.len(s)) rewriteInterpAt(s, i + 1, Builder.append(b, "$"), from, to) else rewriteInterpDollar2(s, i, b, from, to, Str.charAt(s, i + 1))
 
-def rewriteInterpDollar2(s: String, i: Int, acc: String, from: String, to: String, n: Int): String =
-  if (n == 123) rewriteInterpBrace(s, i, acc, from, to) else if (isIdentStart(n)) rewriteInterpIdent(s, i + 1, acc, from, to) else rewriteInterpAt(s, i + 1, Str.concat(acc, "$"), from, to)
+def rewriteInterpDollar2(s: String, i: Int, b: Builder, from: String, to: String, n: Int): String =
+  if (n == 123) rewriteInterpBrace(s, i, b, from, to) else if (isIdentStart(n)) rewriteInterpIdent(s, i + 1, b, from, to) else rewriteInterpAt(s, i + 1, Builder.append(b, "$"), from, to)
 
-def rewriteInterpIdent(s: String, i: Int, acc: String, from: String, to: String): String =
-  rewriteInterpIdent2(s, i, i, acc, from, to)
+def rewriteInterpIdent(s: String, i: Int, b: Builder, from: String, to: String): String =
+  rewriteInterpIdent2(s, i, i, b, from, to)
 
-def rewriteInterpIdent2(s: String, i: Int, start: Int, acc: String, from: String, to: String): String =
-  if (i >= Str.len(s)) rewriteInterpIdent3(s, i, start, acc, from, to) else if (isIdentCont(Str.charAt(s, i))) rewriteInterpIdent2(s, i + 1, start, acc, from, to) else rewriteInterpIdent3(s, i, start, acc, from, to)
+def rewriteInterpIdent2(s: String, i: Int, start: Int, b: Builder, from: String, to: String): String =
+  if (i >= Str.len(s)) rewriteInterpIdent3(s, i, start, b, from, to) else if (isIdentCont(Str.charAt(s, i))) rewriteInterpIdent2(s, i + 1, start, b, from, to) else rewriteInterpIdent3(s, i, start, b, from, to)
 
-def rewriteInterpIdent3(s: String, i: Int, start: Int, acc: String, from: String, to: String): String =
-  rewriteInterpAt(s, i, Str.concat(acc, Str.concat("$", rewriteIdent(Str.slice(s, start, i), from, to))), from, to)
+def rewriteInterpIdent3(s: String, i: Int, start: Int, b: Builder, from: String, to: String): String =
+  rewriteInterpAt(s, i, Builder.append(Builder.append(b, "$"), rewriteIdent(Str.slice(s, start, i), from, to)), from, to)
 
 def rewriteIdent(n: String, from: String, to: String): String =
   if (n == from) to else n
 
-def rewriteInterpBrace(s: String, i: Int, acc: String, from: String, to: String): String =
-  rewriteInterpBrace2(closeBrace(s, i + 2, 1), s, i, acc, from, to)
+def rewriteInterpBrace(s: String, i: Int, b: Builder, from: String, to: String): String =
+  rewriteInterpBrace2(closeBrace(s, i + 2, 1), s, i, b, from, to)
 
-def rewriteInterpBrace2(j: Int, s: String, i: Int, acc: String, from: String, to: String): String =
-  rewriteInterpAt(s, j, Str.concat(acc, rewriteInterpInner(Str.slice(s, i + 2, j - 1), from, to)), from, to)
+def rewriteInterpBrace2(j: Int, s: String, i: Int, b: Builder, from: String, to: String): String =
+  rewriteInterpAt(s, j, Builder.append(b, rewriteInterpInner(Str.slice(s, i + 2, j - 1), from, to)), from, to)
 
 def rewriteInterpInner(inner: String, from: String, to: String): String =
   rewriteInterpInner2(Parse.parseExprList(Lexer.lex(inner), 0), from, to)
