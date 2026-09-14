@@ -1841,10 +1841,14 @@ static void test_idle_pump_skips_paint(void) {
   assert(sz_ui_session_pumps(session) == 1);
   assert(sz_ui_session_paints(session) == 1);
   assert(!sz_ui_session_needs_paint(session));
-  assert(sz_ui_pump_sync(session));
-  assert(sz_ui_session_pumps(session) == 2);
-  assert(sz_ui_session_paints(session) == 1);
-  assert(!sz_ui_session_needs_paint(session));
+  {
+    int i;
+    for (i = 0; i < 32; i++)
+      assert(sz_ui_pump_sync(session));
+    assert(sz_ui_session_pumps(session) == 33);
+    assert(sz_ui_session_paints(session) == 1);
+    assert(!sz_ui_session_needs_paint(session));
+  }
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_POINTER;
   tap.x = 40.f;
@@ -1855,7 +1859,7 @@ static void test_idle_pump_skips_paint(void) {
   assert(sz_ui_session_needs_paint(session));
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_paints(session) == 2);
-  assert(sz_ui_session_pumps(session) == 3);
+  assert(sz_ui_session_pumps(session) == 34);
   assert(!sz_ui_session_needs_paint(session));
   sz_ui_unmount(session);
 }
