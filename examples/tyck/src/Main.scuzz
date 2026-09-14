@@ -484,10 +484,73 @@ def fiberJoin(): Bool =
   Check.check("def right(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    s <- Fiber.join(f)\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    n <- Fiber.join(f)\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n", "type mismatch")
 
 def refTypes(): Bool =
-  Check.check("def right(): IO[Ref[String]] = Ref.of(\"x\")") == "[]" && rejects("def wrong(): IO[Ref[Int]] = Ref.of(\"x\")", "does not match declared") && Check.check("def right(): IO[Int] =\n  for {\n    r <- Ref.of(1)\n    n <- Ref.get(r)\n  } yield n\n") == "[]" && rejects("def wrong(): IO[String] =\n  for {\n    r <- Ref.of(1)\n    s <- Ref.get(r)\n  } yield s\n", "does not match declared") && Check.check("def right(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, \"y\")\n    s <- Ref.get(r)\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, 1)\n  } yield ()\n", "type mismatch") && Check.check("def right(): IO[Int] =\n  for {\n    r <- Ref.of(0)\n    _ <- Ref.update(r, n => n + 1)\n    n <- Ref.updateAndGet(r, n => n + 1)\n  } yield n\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(0)\n    _ <- Ref.update(r, n => Str.fromInt(n))\n  } yield ()\n", "arg type mismatch")
+  Check.check("def right(): IO[Ref[String]] = Ref.of(\"x\")") == "[]" && rejects("def wrong(): IO[Ref[Int]] = Ref.of(\"x\")", "does not match declared") && Check.check("""def right(): IO[Int] =
+  for {
+    r <- Ref.of(1)
+    n <- Ref.get(r)
+  } yield n
+""") == "[]" && rejects("""def wrong(): IO[String] =
+  for {
+    r <- Ref.of(1)
+    s <- Ref.get(r)
+  } yield s
+""", "does not match declared") && Check.check("def right(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, \"y\")\n    s <- Ref.get(r)\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, 1)\n  } yield ()\n", "type mismatch") && Check.check("""def right(): IO[Int] =
+  for {
+    r <- Ref.of(0)
+    _ <- Ref.update(r, n => n + 1)
+    n <- Ref.updateAndGet(r, n => n + 1)
+  } yield n
+""") == "[]" && rejects("""def wrong(): IO[Unit] =
+  for {
+    r <- Ref.of(0)
+    _ <- Ref.update(r, n => Str.fromInt(n))
+  } yield ()
+""", "arg type mismatch")
 
 def dumpRef(): String =
-  if (Check.check("def right(): IO[Ref[String]] = Ref.of(\"x\")") != "[]") Str.concat("refOfOk ", Check.check("def right(): IO[Ref[String]] = Ref.of(\"x\")")) else if (!rejects("def wrong(): IO[Ref[Int]] = Ref.of(\"x\")", "does not match declared")) Str.concat("refOfMis ", Check.check("def wrong(): IO[Ref[Int]] = Ref.of(\"x\")")) else if (Check.check("def right(): IO[Int] =\n  for {\n    r <- Ref.of(1)\n    n <- Ref.get(r)\n  } yield n\n") != "[]") Str.concat("refGetOk ", Check.check("def right(): IO[Int] =\n  for {\n    r <- Ref.of(1)\n    n <- Ref.get(r)\n  } yield n\n")) else if (!rejects("def wrong(): IO[String] =\n  for {\n    r <- Ref.of(1)\n    s <- Ref.get(r)\n  } yield s\n", "does not match declared")) Str.concat("refGetMis ", Check.check("def wrong(): IO[String] =\n  for {\n    r <- Ref.of(1)\n    s <- Ref.get(r)\n  } yield s\n")) else if (Check.check("def right(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, \"y\")\n    s <- Ref.get(r)\n    _ <- IO.println(s)\n  } yield ()\n") != "[]") Str.concat("refSetOk ", Check.check("def right(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, \"y\")\n    s <- Ref.get(r)\n    _ <- IO.println(s)\n  } yield ()\n")) else if (!rejects("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, 1)\n  } yield ()\n", "type mismatch")) Str.concat("refSetMis ", Check.check("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, 1)\n  } yield ()\n")) else if (Check.check("def right(): IO[Int] =\n  for {\n    r <- Ref.of(0)\n    _ <- Ref.update(r, n => n + 1)\n    n <- Ref.updateAndGet(r, n => n + 1)\n  } yield n\n") != "[]") Str.concat("refUpdateOk ", Check.check("def right(): IO[Int] =\n  for {\n    r <- Ref.of(0)\n    _ <- Ref.update(r, n => n + 1)\n    n <- Ref.updateAndGet(r, n => n + 1)\n  } yield n\n")) else if (!rejects("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(0)\n    _ <- Ref.update(r, n => Str.fromInt(n))\n  } yield ()\n", "arg type mismatch")) Str.concat("refUpdateMis ", Check.check("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(0)\n    _ <- Ref.update(r, n => Str.fromInt(n))\n  } yield ()\n")) else "ioComb-other"
+  if (Check.check("def right(): IO[Ref[String]] = Ref.of(\"x\")") != "[]") Str.concat("refOfOk ", Check.check("def right(): IO[Ref[String]] = Ref.of(\"x\")")) else if (!rejects("def wrong(): IO[Ref[Int]] = Ref.of(\"x\")", "does not match declared")) Str.concat("refOfMis ", Check.check("def wrong(): IO[Ref[Int]] = Ref.of(\"x\")")) else if (Check.check("""def right(): IO[Int] =
+  for {
+    r <- Ref.of(1)
+    n <- Ref.get(r)
+  } yield n
+""") != "[]") Str.concat("refGetOk ", Check.check("""def right(): IO[Int] =
+  for {
+    r <- Ref.of(1)
+    n <- Ref.get(r)
+  } yield n
+""")) else if (!rejects("""def wrong(): IO[String] =
+  for {
+    r <- Ref.of(1)
+    s <- Ref.get(r)
+  } yield s
+""", "does not match declared")) Str.concat("refGetMis ", Check.check("""def wrong(): IO[String] =
+  for {
+    r <- Ref.of(1)
+    s <- Ref.get(r)
+  } yield s
+""")) else if (Check.check("def right(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, \"y\")\n    s <- Ref.get(r)\n    _ <- IO.println(s)\n  } yield ()\n") != "[]") Str.concat("refSetOk ", Check.check("def right(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, \"y\")\n    s <- Ref.get(r)\n    _ <- IO.println(s)\n  } yield ()\n")) else if (!rejects("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, 1)\n  } yield ()\n", "type mismatch")) Str.concat("refSetMis ", Check.check("def wrong(): IO[Unit] =\n  for {\n    r <- Ref.of(\"x\")\n    _ <- Ref.set(r, 1)\n  } yield ()\n")) else if (Check.check("""def right(): IO[Int] =
+  for {
+    r <- Ref.of(0)
+    _ <- Ref.update(r, n => n + 1)
+    n <- Ref.updateAndGet(r, n => n + 1)
+  } yield n
+""") != "[]") Str.concat("refUpdateOk ", Check.check("""def right(): IO[Int] =
+  for {
+    r <- Ref.of(0)
+    _ <- Ref.update(r, n => n + 1)
+    n <- Ref.updateAndGet(r, n => n + 1)
+  } yield n
+""")) else if (!rejects("""def wrong(): IO[Unit] =
+  for {
+    r <- Ref.of(0)
+    _ <- Ref.update(r, n => Str.fromInt(n))
+  } yield ()
+""", "arg type mismatch")) Str.concat("refUpdateMis ", Check.check("""def wrong(): IO[Unit] =
+  for {
+    r <- Ref.of(0)
+    _ <- Ref.update(r, n => Str.fromInt(n))
+  } yield ()
+""")) else "ioComb-other"
 
 def resultTypes(): Bool =
   Check.check("def right(): Result[String, Int] = Result.Ok(1)") == "[]" && rejects("def wrong(): Result[String, Int] = Result.Ok(true)", "does not match declared") && Check.check("""record Problem(code: Int)
