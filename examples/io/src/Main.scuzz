@@ -10,6 +10,9 @@ def liveRand(): IO[Unit] =
 def liveRe(): IO[Unit] =
   IO.println(s"re:${if (Str.matches("abc123", "[a-z]+[0-9]+")) "hit" else "miss"}").flatMap(_ => IO.println(s"re-miss:${if (Str.matches("abc123x", "[a-z]+[0-9]+")) "hit" else "miss"}").flatMap(_ => IO.println(s"re-bad:${if (Str.matches("a", "[")) "hit" else "miss"}")))
 
+def liveHash(): IO[Unit] =
+  IO.println(s"sha:${Hash.sha256("abc")}")
+
 def maybeKit(): IO[Unit] =
   Sys.getenv("SCUZZ_KIT").flatMap(t => if (Str.len(t) == 0) IO.println("kit:skip") else Impurity.runKit())
 
@@ -23,6 +26,7 @@ def envProbe(): IO[Unit] =
   for {
     _ <- liveClock()
     _ <- liveRe()
+    _ <- liveHash()
     _ <- liveFs()
     _ <- liveRand()
     _ <- Concurrency.run()

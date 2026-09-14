@@ -942,6 +942,7 @@ SzIo *sz_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, UI); TestRuntime fake clock */
 SzString *sz_clock_iso8601(int64_t ms); /* UTC ISO-8601 from epoch ms. Caller owns. */
+SzString *sz_hash_sha256(const SzString *s); /* SHA-256 of UTF-8 bytes as lowercase hex. Caller owns. */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
 
