@@ -361,6 +361,15 @@ def preferStr(a: String, b: String): String =
 def isFunStr(s: String): Bool =
   isFun(parse(s))
 
+def isTupStr(s: String): Bool =
+  isTup(parse(s))
+
+def tupPartsStr(s: String): List[String] =
+  mapShow(tupParts(parse(s)))
+
+def mapShow(xs: List[Ty]): List[String] =
+  if (List.isEmpty(xs)) [] else show(List.at(xs, 0)) :: mapShow(List.tail(xs))
+
 def funArgStr(s: String): String =
   show(funArg(parse(s)))
 
