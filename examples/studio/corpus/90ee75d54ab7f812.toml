@@ -3,4 +3,4 @@ seed = 67
 schedule_seed = "67"
 pct_d = 2
 pct_k = 3
-events = ["tap 25"]
+events = ["tap choicechip:Tasks", "tap button:Clear"]

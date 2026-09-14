@@ -341,7 +341,7 @@ measurement path as body text. Control labels keep the default body size.
 
 Use `View.wrap` for action groups that must fit narrow windows. Use
 `View.maxSize` to cap a form field width. Its compiler call uses the shared
-runtime size constraint. Studio groups its working pages in an Index Book. The editor uses Live, Verify, and Session as unnumbered landmarks. It does not paint Index Book chapter numbers. Live lists file-stem modules. Verify lists claim names. The scenario file may stay listed. Session holds named campaign chips, check diagnostics, and Run. Check stays on Live. Live has no document tab row. The app-bar title is the package name. Outlined secondary actions stay on the app bar.
+runtime size constraint. Studio groups its working pages in an Index Book. Tasks is the list. Kit demos sit in Preferences More. The editor uses Live, Verify, and Session as unnumbered landmarks. It does not paint Index Book chapter numbers. Live lists file-stem modules. Verify lists claim names. The scenario file may stay listed. Session holds named campaign chips, check diagnostics, and Run. Check stays on Live. Live has no document tab row. The app-bar title is the package name. Outlined secondary actions stay on the app bar.
 Primary actions retain the yellow fill. Text fields clip content to their bounds. Button labels use an ellipsis when
 they exceed the available width. Their accessibility labels stay complete.
 Text insets, carets, and scroll offsets scale with the display.
@@ -414,7 +414,7 @@ echoes wait behind `View.showWhen`. Index, tiles, and breadcrumb stay visible.
 Docs Verify keeps the manual topic. A small chip row shows this app's campaign
 names. Open GUI and `openedGui` fills. That is the same string `scuzz fuzz`
 reached lists. Docs does not spawn the campaign. Studio shows counter and status
-panels. Headless claims and native layout checks cover these shared components.
+panels. Tasks is the list. Kit demos sit in Preferences More. Headless claims and native layout checks cover these shared components.
 Browser checks cover tab roles, keyboard input, and state retention.
 
 Menus, automatic action overflow, closable document tabs, and list-detail
