@@ -706,7 +706,7 @@ def skip(): Int = 0
 def pick(s: String): String = s""") :: ("B", "def pick(): Bool = true") :: []).defs)
 
 def funLookupDefs(defs: List[Fun]): Bool =
-  List.map(Check.findFun(defs, "pick"), d => d.ret) == ["Int", "String", "Bool"] && List.map(Check.findFunMod(defs, "A", "pick"), d => d.ret) == ["Int", "String"] && List.isEmpty(Check.findFun(defs, "missing")) && List.isEmpty(Check.findFunMod(defs, "missing", "pick"))
+  List.map(Check.findFun(defs, "pick"), d => d.ret) == ["Int", "String", "Bool"] && List.map(Check.findFunMod(defs, "A", "pick"), d => d.ret) == ["Int", "String"] && List.map(Check.ftabGetMod(Check.ftabOf(defs), "A", "pick"), d => d.ret) == ["Int", "String"] && List.isEmpty(Check.findFun(defs, "missing")) && List.isEmpty(Check.findFunMod(defs, "missing", "pick")) && List.isEmpty(Check.ftabGetMod(Check.ftabOf(defs), "missing", "pick"))
 
 def sourceOffsets(): Bool =
   List.map(List.range(0, 8), off => Check.lineCol("""aé
