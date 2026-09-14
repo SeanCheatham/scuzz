@@ -11,6 +11,7 @@ import Parse.EnCase
 import Parse.Im
 import Parse.pretty
 import Check.Out
+import Type.Ty
 
 def nl(): String =
   """
@@ -1400,8 +1401,8 @@ def rewriteReqTree(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog 
     case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens))
   }
 
-def mainEnv(stem: String): List[(String, String)] =
-  ("#mod", stem) :: Check.noEnv()
+def mainEnv(stem: String): List[(String, Ty)] =
+  Check.envMod(stem)
 
 def rewriteReqImpls(xs: List[Im], funs: List[Fun], ens: List[En]): List[Im] =
   if (List.isEmpty(xs)) xs else rewriteReqIm(List.at(xs, 0), funs, ens) :: rewriteReqImpls(List.tail(xs), funs, ens)
@@ -1416,16 +1417,16 @@ def rewriteReqDefs(ds: List[Fun], funs: List[Fun], ens: List[En]): List[Fun] =
 
 def rewriteReqFun(d: Fun, funs: List[Fun], ens: List[En]): Fun =
   d match {
-    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, ("self", "A") :: ("#mod", mod) :: Check.noEnv()), funs, ens), mod, off)
+    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, Check.envSelfMod(mod)), funs, ens), mod, off)
   }
 
-def inferTy(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): String =
+def inferTy(e: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): String =
   inferTyGot(Check.infer(e, env, Check.ftabOfList(funs), ens))
 
 def inferTyGot(o: Out): String =
   if (Check.hasErr(o)) "A" else Check.tyStr(o)
 
-def rewriteReq(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rewriteReq(e: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
   e match {
     case Expr.EPrint(inner, off) => Expr.EPrint(rewriteReq(inner, env, funs, ens), off)
     case Expr.ECall(f, args, off) => wrapWhereCall(f, rewriteReqList(args, env, funs, ens), off, funs, ens)
@@ -1463,36 +1464,36 @@ def wrapWhereArg(f: String, e: Expr, p: Param): Expr =
     case Param(n, _, w, _) => if (w == "") e else Expr.ECall("Property.check", Expr.EStr(Str.concat(f, Str.concat(" ", w)), 0) :: Expr.ELam(n, "", Check.dfltExpr(w)) :: e :: noExpr(), 0)
   }
 
-def rewriteReqFor(bs: List[Bind], body: Expr, off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rewriteReqFor(bs: List[Bind], body: Expr, off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
   rewriteReqForGo(bs, noBind(), env, body, off, funs, ens)
 
-def rewriteReqForGo(bs: List[Bind], acc: List[Bind], env: List[(String, String)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
+def rewriteReqForGo(bs: List[Bind], acc: List[Bind], env: List[(String, Ty)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
   if (List.isEmpty(bs)) Expr.EFor(List.reverse(acc), rewriteReq(body, env, funs, ens), off) else rewriteReqForHd(List.at(bs, 0), List.tail(bs), acc, env, body, off, funs, ens)
 
-def rewriteReqForHd(b: Bind, rest: List[Bind], acc: List[Bind], env: List[(String, String)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
+def rewriteReqForHd(b: Bind, rest: List[Bind], acc: List[Bind], env: List[(String, Ty)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
   b match {
     case Bind(d, name, v) => rewriteReqForVal(d, name, rewriteReq(v, env, funs, ens), rest, acc, env, body, off, funs, ens)
   }
 
-def rewriteReqForVal(d: Bool, name: String, nv: Expr, rest: List[Bind], acc: List[Bind], env: List[(String, String)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
+def rewriteReqForVal(d: Bool, name: String, nv: Expr, rest: List[Bind], acc: List[Bind], env: List[(String, Ty)], body: Expr, off: Int, funs: List[Fun], ens: List[En]): Expr =
   rewriteReqForGo(rest, Bind(d, name, nv) :: acc, Check.bindFor(d, name, inferTy(nv, env, funs, ens), env, ens), body, off, funs, ens)
 
-def rewriteReqMeth(recv: Expr, name: String, args: List[Expr], off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rewriteReqMeth(recv: Expr, name: String, args: List[Expr], off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
   if (name == "require") rewriteRequire(recv, args, off, env, funs, ens) else Expr.EMethod(recv, name, args, off)
 
-def rewriteRequire(recv: Expr, args: List[Expr], off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rewriteRequire(recv: Expr, args: List[Expr], off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
   rewriteRequireTy(recv, args, off, env, funs, ens, Check.infer(recv, env, Check.ftabOfList(funs), ens))
 
-def rewriteRequireTy(recv: Expr, args: List[Expr], off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En], ro: Out): Expr =
+def rewriteRequireTy(recv: Expr, args: List[Expr], off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En], ro: Out): Expr =
   if (Check.hasErr(ro) || !Type.isIo(ro.ty)) Expr.ECall("Property.check", reqNameE(args) :: forceIoPred(reqPredE(args), env, funs, ens) :: recv :: noExpr(), off) else rewriteIoRequire(recv, reqNameE(args), reqPredE(args), off, env, funs, ens)
 
-def forceIoPred(pred: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def forceIoPred(pred: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
   forceIoPredTy(pred, Check.infer(pred, env, Check.ftabOfList(funs), ens))
 
 def forceIoPredTy(pred: Expr, po: Out): Expr =
   if (!Check.hasErr(po) && Type.isIo(po.ty)) Expr.ECall("Property.force", pred :: noExpr(), 0) else pred
 
-def rewriteIoRequire(recv: Expr, nameE: Expr, pred: Expr, off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
+def rewriteIoRequire(recv: Expr, nameE: Expr, pred: Expr, off: Int, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Expr =
   rewriteIoPred(recv, nameE, pred, off, Check.infer(pred, env, Check.ftabOfList(funs), ens))
 
 def rewriteIoPred(recv: Expr, nameE: Expr, pred: Expr, off: Int, po: Out): Expr =
@@ -1522,13 +1523,13 @@ def reqNameHit(e: Expr): Expr =
 def reqPredE(args: List[Expr]): Expr =
   if (List.isEmpty(args)) Expr.EBool(true) else if (List.len(args) == 1) List.at(args, 0) else List.at(List.tail(args), 0)
 
-def rewriteReqList(xs: List[Expr], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Expr] =
+def rewriteReqList(xs: List[Expr], env: List[(String, Ty)], funs: List[Fun], ens: List[En]): List[Expr] =
   if (List.isEmpty(xs)) xs else rewriteReq(List.at(xs, 0), env, funs, ens) :: rewriteReqList(List.tail(xs), env, funs, ens)
 
-def rewriteReqArms(xs: List[Arm], env: List[(String, String)], funs: List[Fun], ens: List[En]): List[Arm] =
+def rewriteReqArms(xs: List[Arm], env: List[(String, Ty)], funs: List[Fun], ens: List[En]): List[Arm] =
   if (List.isEmpty(xs)) xs else rewriteReqArm(List.at(xs, 0), env, funs, ens) :: rewriteReqArms(List.tail(xs), env, funs, ens)
 
-def rewriteReqArm(a: Arm, env: List[(String, String)], funs: List[Fun], ens: List[En]): Arm =
+def rewriteReqArm(a: Arm, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Arm =
   a match {
     case Arm(pat, g, body) => Arm(pat, g, rewriteReq(body, env, funs, ens))
   }
