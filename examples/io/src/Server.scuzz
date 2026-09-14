@@ -68,6 +68,12 @@ def runUdp(): IO[Unit] =
     _ <- Net.udpClose(b)
   } yield ()
 
+def runHttps(): IO[Unit] =
+  for {
+    p <- IO.both(Net.serveOnceTls(8082, handle), Net.httpGet("https://127.0.0.1:8082/ping"))
+    _ <- showResp("tls", p)
+  } yield ()
+
 def runHttp(): IO[Unit] =
   for {
     _ <- runHttpOk()
@@ -79,5 +85,6 @@ def run(): IO[Unit] =
     _ <- runHttp()
     _ <- runTcp()
     _ <- runUdp()
+    _ <- runHttps()
   } yield ()
 
