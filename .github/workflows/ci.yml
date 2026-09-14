@@ -59,6 +59,12 @@ jobs:
             slices: web
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Skia CPU prebuilt
+        if: contains(fromJSON('["native","apps","fuzz","web"]'), matrix.name)
+        uses: actions/cache@v4
+        with:
+          path: third_party/skia/prebuilt
+          key: skia-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/skia/PIN') }}
       - name: Install native dependencies
         run: |
           sudo apt-get update
@@ -119,6 +125,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Skia CPU prebuilt
+        uses: actions/cache@v4
+        with:
+          path: third_party/skia/prebuilt
+          key: skia-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/skia/PIN') }}
       - name: Install OpenSSL
         run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
       - name: Runtime tests
@@ -137,6 +148,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Skia CPU prebuilt
+        uses: actions/cache@v4
+        with:
+          path: third_party/skia/prebuilt
+          key: skia-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/skia/PIN') }}
 
       - name: Install OpenSSL
         run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
