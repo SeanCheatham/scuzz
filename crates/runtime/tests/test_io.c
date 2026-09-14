@@ -5698,6 +5698,24 @@ int main(void) {
            1);
     assert(sz_string_matches(sz_string_from_cstr("a"), sz_string_from_cstr("")) ==
            0);
+    {
+      SzString *h = sz_hash_sha256(sz_string_from_cstr("abc"));
+      assert(strcmp(sz_string_cstr(h),
+                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") ==
+             0);
+      sz_release(h);
+      h = sz_hash_sha256(sz_string_from_cstr(""));
+      assert(strcmp(sz_string_cstr(h),
+                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") ==
+             0);
+      sz_release(h);
+      h = sz_hash_sha256(sz_string_from_cstr(
+          "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"));
+      assert(strcmp(sz_string_cstr(h),
+                    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1") ==
+             0);
+      sz_release(h);
+    }
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
     assert(sz_string_ends_with(c, sz_string_from_cstr("")) == 1);
