@@ -319,6 +319,21 @@ def isTyParam(s: String): Bool =
 def eqStr(a: String, b: String): Bool =
   eq(parse(a), parse(b))
 
+def hasName(ns: List[String], n: String): Bool =
+  if (List.isEmpty(ns)) false else if (List.at(ns, 0) == n) true else hasName(List.tail(ns), n)
+
+def pinTop(t: Ty, names: List[String]): Ty =
+  t match {
+    case Ty.TVar(n) => if (hasName(names, n)) tNamed(n) else t
+    case _ => t
+  }
+
+def eqPinned(a: String, b: String, names: List[String]): Bool =
+  eq(pinTop(parse(a), names), pinTop(parse(b), names))
+
+def preferPinned(a: String, b: String, names: List[String]): String =
+  show(prefer(pinTop(parse(a), names), pinTop(parse(b), names)))
+
 def preferStr(a: String, b: String): String =
   show(prefer(parse(a), parse(b)))
 
