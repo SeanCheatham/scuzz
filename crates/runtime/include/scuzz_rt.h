@@ -945,6 +945,8 @@ SzString *sz_clock_iso8601(int64_t ms); /* UTC ISO-8601 from epoch ms. Caller ow
 SzString *sz_hash_sha256(const SzString *s); /* Software SHA-256 of UTF-8 bytes as lowercase hex. Caller owns. */
 SzString *sz_hex_encode(const SzString *s); /* Lowercase hex of UTF-8 bytes. Caller owns. */
 SzString *sz_hex_decode(const SzString *s); /* Bytes from hex. Odd length or a bad digit is empty. Caller owns. */
+SzString *sz_base64_encode(const SzString *s); /* RFC 4648 of UTF-8 bytes. Caller owns. */
+SzString *sz_base64_decode(const SzString *s); /* Bytes from Base64. Bad length, digit, or pad is empty. Caller owns. */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
 

@@ -43,7 +43,7 @@ Not the next slice.
 
 Needed before a real CLI, server, or desktop app stays. Next work lives here.
 
-Time parse and zones. Regex capture and replace. Base64. UUID. HMAC. `Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+Time parse and zones. Regex capture and replace. UUID. HMAC. `Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Later
 
