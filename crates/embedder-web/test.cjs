@@ -27,6 +27,23 @@ async function check(browserType, url, mobile) {
         throw error;
       }
     };
+    const expectSection = async id => {
+      try {
+        await page.waitForFunction(id => Module.ready && Module.currentSection === id, id);
+      } catch (error) {
+        console.error({expected: id, url: page.url(), errors,
+          state: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
+        throw error;
+      }
+    };
+    // Native focus pans the shared scroll container. Playwright click needs the control in view.
+    const reveal = async locator => {
+      await locator.evaluate(node => node.focus());
+      await page.waitForFunction(el => {
+        const box = el.getBoundingClientRect();
+        return box.height > 0 && box.top >= 0 && box.bottom <= innerHeight;
+      }, await locator.elementHandle());
+    };
     await page.goto(url);
     await expectText('text:Start');
     assert.equal(await page.title(), 'Scuzz Docs');
@@ -39,22 +56,31 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).getAttribute('href'), '#section=install');
-    await page.getByRole('link', {name: 'Build a GUI', exact: true}).click();
+    // Index chips stay in view. Start tiles sit in a nested scroll below the fold.
+    assert.equal(await page.getByRole('link', {name: 'Build a GUI', exact: true}).count(), 1);
+    await page.getByRole('link', {name: 'GUI', exact: true}).click();
+    await expectSection('gui');
     await expectText('text:GUI');
     assert.equal(new URL(page.url()).hash, '#section=gui');
     assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 0);
     await page.getByRole('link', {name: 'Docs', exact: true}).click();
+    await expectSection('start');
     await expectText('text:Start');
     assert.equal(await page.getByRole('button', {name: 'Add one', exact: true}).count(), 0);
-    await page.getByRole('link', {name: 'Try Signals', exact: true}).click();
+    assert.equal(await page.getByRole('link', {name: 'Try Signals', exact: true}).count(), 1);
+    await page.getByRole('link', {name: 'Signals', exact: true}).click();
+    await expectSection('signals');
     await expectText('text:Signals');
     assert.equal(new URL(page.url()).hash, '#section=signals');
-    await page.getByRole('button', {name: 'Add one', exact: true}).focus();
-    await page.getByRole('button', {name: 'Add one', exact: true}).click();
+    const addOne = page.getByRole('button', {name: 'Add one', exact: true});
+    await addOne.waitFor({state: 'attached'});
+    await reveal(addOne);
+    await addOne.click();
     await expectText('text:Count: 1');
     const headings = {Install: 'Install', Language: 'Language', GUI: 'GUI', Verify: 'Verify', Web: 'Web'};
     for (const [label, heading] of Object.entries(headings)) {
       await page.getByRole('link', {name: label, exact: true}).click();
+      await expectSection(label.toLowerCase());
       await expectText('text:' + heading);
       assert.equal(new URL(page.url()).hash, '#section=' + label.toLowerCase());
       assert.equal(await page.getByRole('link', {name: label, exact: true}).getAttribute('aria-current'), 'page');
@@ -74,8 +100,11 @@ async function check(browserType, url, mobile) {
     await page.goBack(); await expectText('text:Verify');
     await page.goForward(); await expectText('text:Web');
     await page.getByRole('link', {name: 'Signals', exact: true}).click();
+    await expectSection('signals');
     await expectText('text:Count: 1');
-    await page.getByRole('button', {name: 'Reset', exact: true}).click();
+    const reset = page.getByRole('button', {name: 'Reset', exact: true});
+    await reveal(reset);
+    await reset.click();
     await expectText('text:Count: 0');
 
     // A real anchor keeps modified clicks and link addresses in the browser.
@@ -283,15 +312,17 @@ async function check(browserType, url, mobile) {
       }
     }
     await page.getByRole('link', {name: 'Start', exact: true}).click();
+    await expectSection('start');
     await expectText('text:Start');
     const nextInstall = page.getByRole('link', {name: 'Next: Install', exact: true});
-    await nextInstall.focus();
+    await reveal(nextInstall);
     await nextInstall.click();
-    await expectText('text:Install');
+    await expectSection('install');
     assert.equal(new URL(page.url()).hash, '#section=install');
     const backStart = page.getByRole('link', {name: 'Back: Start', exact: true});
-    await backStart.focus();
+    await reveal(backStart);
     await backStart.click();
+    await expectSection('start');
     await expectText('text:Start');
     await page.goto(url + '?preview=1#section=language');
     await expectText('text:Language');
