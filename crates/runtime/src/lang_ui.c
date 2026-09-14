@@ -331,19 +331,17 @@ static void web_live_frame(void) {
     web_live_session = NULL;
     return;
   }
-  if (sz_ui_session_needs_paint(session)) {
-    if (!sz_ui_pump_sync(session)) {
-      if (!sz_ui_session_alive(session)) {
-        emscripten_cancel_main_loop();
-        sz_web_stop();
-        web_live_session = NULL;
-        return;
-      }
-      sz_panic("Ui.run live pump failed");
-    }
-  }
   if (!sz_ui_session_needs_paint(session))
-    emscripten_pause_main_loop();
+    return;
+  if (!sz_ui_pump_sync(session)) {
+    if (!sz_ui_session_alive(session)) {
+      emscripten_cancel_main_loop();
+      sz_web_stop();
+      web_live_session = NULL;
+      return;
+    }
+    sz_panic("Ui.run live pump failed");
+  }
 }
 #endif
 

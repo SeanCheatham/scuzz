@@ -5,16 +5,11 @@
 
 static SzUiSession *active;
 static SzString *snapshot;
-static int live_loop;
 
-void sz_web_idle_wake(void) {
-  if (live_loop)
-    emscripten_resume_main_loop();
-}
+void sz_web_idle_wake(void) {}
 
 void sz_web_live_loop(void (*frame)(void)) {
-  live_loop = 1;
-  /* rAF. Return so a later JS ccall is a new WASM entry. */
+  /* rAF. Return so a later JS ccall is a new WASM entry. Idle frames skip paint. */
   emscripten_set_main_loop(frame, 0, 0);
 }
 
