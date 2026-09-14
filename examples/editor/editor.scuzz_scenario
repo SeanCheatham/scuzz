@@ -7,8 +7,18 @@ def Main.analyze(_path: String, _body: String): IO[String] =
 def Main.runProject(_root: String): IO[String] =
   IO.pure("run ok")
 
-def Main.fuzzProject(_root: String): IO[String] =
-  IO.pure("fuzz ok")
+def Main.startFuzz(root: String): IO[Int] =
+  for {
+    build = Fs.join(root, "build")
+    fuzz = Fs.join(build, "fuzz")
+    _ <- Fs.mkdirs(build).handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.mkdirs(fuzz).handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.write(Fs.join(build, "sometimes.declared"), "tappedPlus\nneverHit\n")
+    _ <- Fs.write(Fs.join(build, "triggers.declared"), "outlined:Check\n")
+    _ <- Fs.write(Fs.join(fuzz, "sometimes.dump"), "tappedPlus\n")
+    _ <- Fs.write(Fs.join(fuzz, "triggers.dump"), "claim\toutlined:Check\ttriggered\n")
+    _ <- Fs.write(Fs.join(fuzz, "summary.json"), "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":true}}\n")
+  } yield 1
 
 def Lsp.lspCall(_root: String, _path: String, _body: String, method: String): IO[Json] =
   IO.pure(parseJson(method match {
