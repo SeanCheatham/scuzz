@@ -6412,6 +6412,35 @@ int main(void) {
     sz_testrt_reset();
   }
 
+  /* Clock.iso8601: UTC from epoch ms. Independent of the fake clock. */
+  {
+    SzString *s;
+    s = sz_clock_iso8601(0);
+    assert(strcmp(sz_string_cstr(s), "1970-01-01T00:00:00.000Z") == 0);
+    sz_release(s);
+    s = sz_clock_iso8601(1);
+    assert(strcmp(sz_string_cstr(s), "1970-01-01T00:00:00.001Z") == 0);
+    sz_release(s);
+    s = sz_clock_iso8601(1000);
+    assert(strcmp(sz_string_cstr(s), "1970-01-01T00:00:01.000Z") == 0);
+    sz_release(s);
+    s = sz_clock_iso8601(86400000);
+    assert(strcmp(sz_string_cstr(s), "1970-01-02T00:00:00.000Z") == 0);
+    sz_release(s);
+    s = sz_clock_iso8601(-1);
+    assert(strcmp(sz_string_cstr(s), "1969-12-31T23:59:59.999Z") == 0);
+    sz_release(s);
+    s = sz_clock_iso8601(946684800000);
+    assert(strcmp(sz_string_cstr(s), "2000-01-01T00:00:00.000Z") == 0);
+    sz_release(s);
+    s = sz_clock_iso8601(1582934400000);
+    assert(strcmp(sz_string_cstr(s), "2020-02-29T00:00:00.000Z") == 0);
+    sz_release(s);
+    s = sz_clock_iso8601(1582979445123);
+    assert(strcmp(sz_string_cstr(s), "2020-02-29T12:30:45.123Z") == 0);
+    sz_release(s);
+  }
+
   /* TestRuntime: fake clock sleep without wall wait */
   {
     int64_t t0, t1;
