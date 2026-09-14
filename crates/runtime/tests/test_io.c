@@ -5739,6 +5739,35 @@ int main(void) {
       assert(strcmp(sz_string_cstr(h), "") == 0);
       sz_release(h);
     }
+    {
+      SzString *h = sz_base64_encode(sz_string_from_cstr("abc"));
+      assert(strcmp(sz_string_cstr(h), "YWJj") == 0);
+      sz_release(h);
+      h = sz_base64_encode(sz_string_from_cstr(""));
+      assert(strcmp(sz_string_cstr(h), "") == 0);
+      sz_release(h);
+      h = sz_base64_encode(sz_string_from_cstr("f"));
+      assert(strcmp(sz_string_cstr(h), "Zg==") == 0);
+      sz_release(h);
+      h = sz_base64_encode(sz_string_from_cstr("fo"));
+      assert(strcmp(sz_string_cstr(h), "Zm8=") == 0);
+      sz_release(h);
+      h = sz_base64_decode(sz_string_from_cstr("YWJj"));
+      assert(strcmp(sz_string_cstr(h), "abc") == 0);
+      sz_release(h);
+      h = sz_base64_decode(sz_string_from_cstr("Zg=="));
+      assert(strcmp(sz_string_cstr(h), "f") == 0);
+      sz_release(h);
+      h = sz_base64_decode(sz_string_from_cstr("Zm8="));
+      assert(strcmp(sz_string_cstr(h), "fo") == 0);
+      sz_release(h);
+      h = sz_base64_decode(sz_string_from_cstr("!!!!"));
+      assert(strcmp(sz_string_cstr(h), "") == 0);
+      sz_release(h);
+      h = sz_base64_decode(sz_string_from_cstr("Y"));
+      assert(strcmp(sz_string_cstr(h), "") == 0);
+      sz_release(h);
+    }
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
     assert(sz_string_ends_with(c, sz_string_from_cstr("")) == 1);

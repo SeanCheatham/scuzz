@@ -63,6 +63,9 @@ grep -q "sha:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" /
 grep -q "hex:616263" /tmp/io.out
 grep -q "hex-rt:abc" /tmp/io.out
 grep -q "hex-bad:miss" /tmp/io.out
+grep -q "b64:YWJj" /tmp/io.out
+grep -q "b64-rt:abc" /tmp/io.out
+grep -q "b64-bad:miss" /tmp/io.out
 grep -q "kit:skip" /tmp/io.out
 grep -q "fs:" /tmp/io.out
 "$SCUZZ" fuzz --iterations 0 examples/io | tee /tmp/io-test.out
@@ -79,6 +82,9 @@ grep -q "sha:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" /
 grep -q "hex:616263" /tmp/io-test.out
 grep -q "hex-rt:abc" /tmp/io-test.out
 grep -q "hex-bad:miss" /tmp/io-test.out
+grep -q "b64:YWJj" /tmp/io-test.out
+grep -q "b64-rt:abc" /tmp/io-test.out
+grep -q "b64-bad:miss" /tmp/io-test.out
 grep -q "impurity-ok" /tmp/io-test.out
 grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/hello
