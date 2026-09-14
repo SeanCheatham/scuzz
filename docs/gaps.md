@@ -29,44 +29,18 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 Close them in this order.
 
-1. **Scenario initialization and lifetime** — Residual: generated setup inputs, multiple named scenarios, and campaign selection.
+1. **Checker and emit residuals** — Queue, Deferred, `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. Param letters (`A`/`E`) still unify. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
-2. **Checker and emit residuals** — Param letters (`A`/`E`) still unify. Queue and Deferred still use a bare constructor as some T. Map.empty and Set.empty still return a bare constructor. List.empty still returns a bare `List`. The parser stores Fun/Param types as strings; Check parses them. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
-
-3. **Compile-time performance** — `scuzz check examples/compiler` is 16 s. Checker and emitter thread a name-indexed def table (`Check.Ftab`). Coverage and branch rows use that table. Emit, coverage, and LSP locations use a per-file line-start index. Mutation probes parse live files once and reuse that tree. Coverage residual rewrite keeps program trees. Coverage reuses the live program when compiled sources match. Emit interns strings by prepend and reverses once. The lexer prepends `Eof` and reverses once. LSP semantic tokens prepend each row and reverse once. Emit intern and split of interpolated literals use Builder. Bind rewrite of interpolated text uses Builder. Mutation site pick prepends each site and reverses once. Campaign event string parse uses Builder. A cold `scuzz build examples/tyck` is 1 m 10 s; profile: RC retain/release churn and remaining `sz_list_concat` in string building. Collect rewrite parses each live file once. Coverage still parses a compiled graph that differs from live. Profile: gprofng works on the product CLI (no PMU; `perf` is blocked).
+2. **Compile-time performance** — `scuzz check examples/compiler` is 16 s. A cold `scuzz build examples/tyck` is 1 m 10 s. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
 
 ### Table-stakes
 
 Needed before a real CLI, server, or desktop app stays.
 
-- **HTTP as a server** — Status, headers, and `0.0.0.0` bind stay out. HTTPS `Net.serve` stays out. Expand `Net` on this HTTP/1.0 stack. Do not add a second client.
-- **Missing kits** — No calendar time, regex, hash, hex/base64, or UUID. `Map` / `Set` keys are `Int` or `String`. Expand blessed kits. No user FFI.
-- **`scuzz eval`** — No worksheet. A one-file eval helps humans and agents try one def.
-- **Generators** — Argument reduction remains open. Direction: `Gen[T]` combinators and shrinking that keeps `where` bounds. Stateful model generators stay later.
-- **Drive `==` wrap on UI** — A top-level `a == b` drive oracle wraps into a `for` that prints both sides. On a `[ui]` package that wrap can trip the unpaired-acquire session check. Write `if (a == b) true else false` until emit drops the extra retain.
-- **Scheduler lock** — Cooperative fibers on one thread are the scheduler for CLI, server, and UI. OS threads and supervision trees stay later.
+HTTP status, headers, and `0.0.0.0` bind. HTTPS `Net.serve`. Time, regex, hash, hex/base64, UUID. `Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Generators. Drive `==` wrap on UI. OS threads.
 
 ### Later
 
 Do not start these before thesis-critical gaps close.
 
-- **Stable scroll keys** — `scroll N` follows a11y preorder. A refactor can miss a stored corpus entry. `tap` accepts a last_hit key (`tap button:+1`) or an index.
-- **Simulation faults and multiple worlds** — Clock skew, partitions, and a model to relate against stay later.
-- **Mutation depth** — Semantic mutants stay later.
-- **Dependency forms beyond `path`** — Git, versioned, and hosted artifacts are direction. There is no registry. A lockfile identity can land before a registry.
-- **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
-- **OS IME candidate windows** — Embedders do not place OS IME candidate UI from the focused-field caret rect.
-- **macOS full packaging in default CI** — `macos-smoke` runs on push/PR. Full packaging stays `workflow_dispatch`.
-- **Web apps** — Full accessibility, real phone checks, and hot reload remain open.
-- **Oracle idioms** — English grammar, Given rows, and intent thunks stay deferred with mining. They are not current work.
-- **Emit fallbacks when Check returns an empty type** — Float tuple construction can still fail LLVM type checks. Some emitter helpers still use scalar fallbacks when the checker type is empty. Direction: keep types on the checked tree; do not guess from SSA names.
-
-### Dogfood IDE
-
-Open and deferred:
-
-- OS IME candidate-window placement stays deferred.
-- Do not add `Fs.watch` or an exec stub map. File change detection stays Clock plus Fs poll.
-- In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
-- Multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit, and Windows desktop embedder stay later.
-- Flutter DevTools / VM patching is an explicit non-goal.
+Generated setup inputs. Multiple named scenarios and campaign selection. Stable scroll keys. Simulation faults. Semantic mutants. Git and hosted deps. Windows desktop. OS IME candidate windows. macOS full packaging in default CI. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Oracle mining. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
