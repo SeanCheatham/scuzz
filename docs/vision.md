@@ -411,8 +411,10 @@ on Start marks opened topic ids this session. Outline means not opened. Yellow
 means opened. The live Counter lives on the Signals topic. Get started and Try GUI stay on the app bar as
 accelerators. Docs shows live text input and source panels on GUI. Empty field
 echoes wait behind `View.showWhen`. Index, tiles, and breadcrumb stay visible.
-Studio shows counter and status panels. Headless claims and native layout
-checks cover these shared components.
+Docs Verify keeps the manual topic. A small chip row shows this app's campaign
+names. Open GUI and `openedGui` fills. That is the same string `scuzz fuzz`
+reached lists. Docs does not spawn the campaign. Studio shows counter and status
+panels. Headless claims and native layout checks cover these shared components.
 Browser checks cover tab roles, keyboard input, and state retention.
 
 Menus, automatic action overflow, closable document tabs, and list-detail

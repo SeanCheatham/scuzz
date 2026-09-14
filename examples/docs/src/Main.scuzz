@@ -42,9 +42,10 @@ def navNext(topics: List[Topic], i: Int): View =
 def pageNav(topics: List[Topic], i: Int): View =
   View.padding(8, View.wrap(navBack(topics, i), navNext(topics, i)))
 
-def liveCounter(count: Signal[Int]): View =
+def liveCounter(count: Signal[Int], tapped: Signal[Int]): View =
   View.card(View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => for {
   _ = Property.sometimes("tappedAdd")
+  _ = Signal.set(tapped, 1)
   _ = Signal.set(count, Signal.get(count) + 1)
 } yield ()), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages.")))
 
@@ -78,8 +79,14 @@ def startSection(topics: List[Topic], blocks: Signal[List[Block]], opened: List[
 def guiSection(topics: List[Topic], blocks: Signal[List[Block]], tab: Signal[Int], draft: Signal[String], notes: Signal[String], showDraft: Signal[Int], showNotes: Signal[Int]): View =
   topicSection(topics, 3, View.column(blocksColumn(blocks), guiLive(tab, draft, notes, showDraft, showNotes)))
 
-def signalsSection(topics: List[Topic], blocks: Signal[List[Block]], count: Signal[Int]): View =
-  topicSection(topics, 4, View.column(blocksColumn(blocks), liveCounter(count)))
+def signalsSection(topics: List[Topic], blocks: Signal[List[Block]], count: Signal[Int], tapped: Signal[Int]): View =
+  topicSection(topics, 4, View.column(blocksColumn(blocks), liveCounter(count, tapped)))
+
+def verifyLive(opened: List[Signal[Int]], tapped: Signal[Int]): View =
+  View.column(View.padding(8, View.heading(2, View.text("Names in this app"))), paragraph("Open the GUI topic. The openedGui chip fills. scuzz fuzz reached lists the same string."), View.padding(8, View.wrap(View.chip(List.at(opened, 3), "openedGui"), View.chip(List.at(opened, 6), "openedVerify"), View.chip(tapped, "tappedAdd"))))
+
+def verifySection(topics: List[Topic], blocks: Signal[List[Block]], opened: List[Signal[Int]], tapped: Signal[Int]): View =
+  topicSection(topics, 6, View.column(blocksColumn(blocks), verifyLive(opened, tapped)))
 
 def plainSection(topics: List[Topic], blocks: List[Signal[List[Block]]], i: Int): View =
   topicSection(topics, i, blocksColumn(List.at(blocks, i)))
@@ -93,10 +100,11 @@ def plainSection(topics: List[Topic], blocks: List[Signal[List[Block]]], i: Int)
     guiTab = Signal.make(0)
     title = Signal.map(page, n => (markOpened(opened, n), titleAt(topics, n))._2)
     count = Signal.make(0)
+    tapped = Signal.make(0)
     draft = Signal.make("")
     notes = Signal.make("")
     showDraft = Signal.map(draft, flagNonempty)
     showNotes = Signal.map(notes, flagNonempty)
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count), plainSection(topics, blocks, 5), plainSection(topics, blocks, 6), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10)))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count, tapped), plainSection(topics, blocks, 5), verifySection(topics, List.at(blocks, 6), opened, tapped), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10)))))
   } yield ()
