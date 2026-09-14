@@ -5709,6 +5709,12 @@ int main(void) {
                     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") ==
              0);
       sz_release(h);
+      h = sz_hash_sha256(sz_string_from_cstr(
+          "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"));
+      assert(strcmp(sz_string_cstr(h),
+                    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1") ==
+             0);
+      sz_release(h);
     }
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
