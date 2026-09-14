@@ -582,7 +582,7 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes()
 
 def namedLetterTypes(): Bool =
   Check.check("""enum E:
@@ -623,8 +623,47 @@ def right(): E => Int = (x: E) => 0
 def wrong(): E => Int = (x: Int) => x
 """, "does not match declared")
 
+def aliasTypes(): Bool =
+  Check.check(srcAliasListOk()) == "[]" && rejects(srcAliasListMis(), "does not match declared") && Check.check(srcAliasBoxOk()) == "[]" && Check.check(srcAliasFunOk()) == "[]" && rejects(srcAliasFunMis(), "does not match declared") && Check.check(srcAliasId()) == "[]"
+
+def srcAliasListOk(): String =
+  """type UserId = Int
+def right(): List[UserId] =
+  [1]
+"""
+
+def srcAliasListMis(): String =
+  "type UserId = Int\ndef wrong(): List[UserId] =\n  [\"x\"]\n"
+
+def srcAliasBoxOk(): String =
+  """type UserId = Int
+type BoxList[T] = List[T]
+def right(): BoxList[UserId] =
+  [1]
+"""
+
+def srcAliasFunOk(): String =
+  """type UserId = Int
+def right(): UserId => Int =
+  (x: UserId) => x
+"""
+
+def srcAliasFunMis(): String =
+  """type UserId = Int
+def wrong(): UserId => Int =
+  (x: String) => 0
+"""
+
+def srcAliasId(): String =
+  """type UserId = Int
+def id[A](x: A): Int =
+  x
+def right(): List[UserId] =
+  [id(1)]
+"""
+
 def dumpTyckAdt(): String =
-  if (!namedLetterTypes()) dumpNamedLetter() else "tyckAdt"
+  if (!namedLetterTypes()) dumpNamedLetter() else if (!aliasTypes()) dumpAliasTypes() else "tyckAdt"
 
 def dumpNamedLetter(): String =
   if (Check.check("""enum E:
@@ -666,6 +705,9 @@ def wrong(): E => Int = (x: Int) => x
   case Ok
 def wrong(): E => Int = (x: Int) => x
 """)) else "namedLetter-other"
+
+def dumpAliasTypes(): String =
+  if (Check.check(srcAliasListOk()) != "[]") Str.concat("aliasListOk ", Check.check(srcAliasListOk())) else if (!rejects(srcAliasListMis(), "does not match declared")) Str.concat("aliasListMis ", Check.check(srcAliasListMis())) else if (Check.check(srcAliasBoxOk()) != "[]") Str.concat("aliasBoxOk ", Check.check(srcAliasBoxOk())) else if (Check.check(srcAliasFunOk()) != "[]") Str.concat("aliasFunOk ", Check.check(srcAliasFunOk())) else if (!rejects(srcAliasFunMis(), "does not match declared")) Str.concat("aliasFunMis ", Check.check(srcAliasFunMis())) else if (Check.check(srcAliasId()) != "[]") Str.concat("aliasId ", Check.check(srcAliasId())) else "alias-other"
 
 def tyckRecordBind(): Bool =
   Check.check("""record Box(value: Int)
