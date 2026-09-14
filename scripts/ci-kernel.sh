@@ -54,6 +54,8 @@ grep -q "exists:1" /tmp/io.out
 grep -q "miss:0" /tmp/io.out
 grep -q "real:" /tmp/io.out
 grep -q "mono:" /tmp/io.out
+grep -q "iso:1970-01-01T00:00:00.000Z" /tmp/io.out
+grep -q "leap:2020-02-29T00:00:00.000Z" /tmp/io.out
 grep -q "kit:skip" /tmp/io.out
 grep -q "fs:" /tmp/io.out
 "$SCUZZ" fuzz --iterations 0 examples/io | tee /tmp/io-test.out
@@ -61,6 +63,8 @@ grep -q "served:POST:/ping:hi" /tmp/io-test.out
 grep -q "ping:200:ok:ok:/ping" /tmp/io-test.out
 grep -q "miss:404:miss:missing" /tmp/io-test.out
 grep -q "tls:200:ok:ok:/ping" /tmp/io-test.out
+grep -q "iso:1970-01-01T00:00:00.000Z" /tmp/io-test.out
+grep -q "leap:2020-02-29T00:00:00.000Z" /tmp/io-test.out
 grep -q "impurity-ok" /tmp/io-test.out
 grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/hello
