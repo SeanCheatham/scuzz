@@ -51,3 +51,9 @@ def docsCrumb(t: Timeline): Verdict =
 def nextOpensInstall(t: Timeline): Verdict =
   Verdict.afterHit(t, "link:Next: Install", "text:Install")
 
+def emptyDraftHidesEcho(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 3 || Timeline.signalInt(t, i, "guiTab") != 0 || !Timeline.signalStrHas(t, i, "draft", "") || !Timeline.a11yHas(t, i, "text:You typed:"))
+
+def emptyNotesHidesEcho(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 3 || Timeline.signalInt(t, i, "guiTab") != 0 || !Timeline.signalStrHas(t, i, "notes", "") || !Timeline.a11yHas(t, i, "text:Notes:"))
+
