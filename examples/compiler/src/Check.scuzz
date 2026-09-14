@@ -260,7 +260,7 @@ def kitRet(f: String): String =
   ret(f)
 
 def isNetServe(f: String): Bool =
-  f == "Net.serve" || f == "Net.serveOnce"
+  f == "Net.serve" || f == "Net.serveOnce" || f == "Net.serveTls" || f == "Net.serveOnceTls"
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"

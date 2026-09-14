@@ -951,6 +951,8 @@ SzIo *sz_net_http_head(SzString *url);
 void *sz_net_http_resp(int64_t status, SzMap *headers, SzString *body);
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one request; handler gets (path, method, body) and returns (status, headers, body) */
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; bind 0.0.0.0 and ::; drop bad clients/handlers */
+SzIo *sz_net_serve_once_tls(int64_t port, SzCont handler, void *env); /* IO[Unit]; serveOnce plus TLS with a process cert */
+SzIo *sz_net_serve_tls(int64_t port, SzCont handler, void *env); /* IO[Unit]; serve plus TLS with a process cert */
 typedef struct SzNetSock {
   int fd;
   int fd6;

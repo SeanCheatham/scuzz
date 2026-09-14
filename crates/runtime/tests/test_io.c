@@ -6996,6 +6996,18 @@ int main(void) {
       assert(strcmp(http_resp_hdr(pair->right, "X-Trace"), "miss") == 0);
       sz_pair_free(pair);
 
+      sz_testrt_net_set_last_serve_body(NULL);
+      url = sz_string_from_cstr("https://127.0.0.1:8082/ping");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once_tls(8082, serve_path_ok, NULL),
+                                    sz_net_http_get(url)));
+      sz_release(url);
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(strcmp(http_resp_body_cstr(pair->right), "ok:/ping") == 0);
+      assert(http_resp_status(pair->right) == 200);
+      sz_pair_free(pair);
+
       sz_testrt_net_stub("http://127.0.0.1:8080/stub", "from-stub");
       url = sz_string_from_cstr("http://127.0.0.1:8080/stub");
       r = sz_io_unsafe_run(sz_net_http_get(url));
@@ -8179,6 +8191,21 @@ int main(void) {
     assert(r.error);
     assert(!strstr(sz_string_cstr(r.error->message), "only http"));
     sz_error_free(r.error);
+  }
+
+  /* Live HTTPS against serveOnceTls completes the handshake. */
+  {
+    SzString *url = sz_string_from_cstr("https://127.0.0.1:18485/x");
+    SzPair *pair;
+    r = sz_io_unsafe_run(both_drop(sz_net_serve_once_tls(18485, serve_path_ok, NULL),
+                                  sz_net_http_get(url)));
+    sz_release(url);
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(pair && pair->right);
+    assert(strcmp(http_resp_body_cstr(pair->right), "ok:/x") == 0);
+    assert(http_resp_status(pair->right) == 200);
+    sz_pair_free(pair);
   }
 
   /* Live TCP echo and a 10000-byte read (drain until n, not a 4096 cap). */

@@ -50,7 +50,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 ## Toolchain
 
-The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([vision.md](vision.md#self-hosting)). Kernel surface: [vision.md](vision.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. HTTP `https://` links OpenSSL (`libssl` / `libcrypto`). There is no second TLS stack.
+The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([vision.md](vision.md#self-hosting)). Kernel surface: [vision.md](vision.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. HTTP `https://` links OpenSSL (`libssl` / `libcrypto`). Serve TLS uses the same stack. There is no second TLS stack.
 
 ## Browser target
 

@@ -7,7 +7,10 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
 #include <openssl/ssl.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <stdio.h>
 #include <string.h>
 #include <poll.h>
@@ -18,7 +21,9 @@
 /* Blessed Net HTTP/1.0 client and serve. HTTPS uses OpenSSL.
  * DNS, connect, TLS, write, and read each wait at most 1000ms. A response
  * is (status, headers, body). HEAD finishes at the header. Bodies cap at
- * 1 MiB. Serve binds 0.0.0.0 and/or ::. Failures use SzError code 6. */
+ * 1 MiB. Serve binds 0.0.0.0 and/or ::. serveTls terminates TLS with a
+ * process cert. A loopback https client skips verify. Failures use SzError
+ * code 6. */
 
 typedef struct {
   int is_err;
@@ -214,6 +219,27 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
     }
   }
   return 1;
+}
+
+static int host_eq_ci(const char *a, const char *b) {
+  if (!a || !b)
+    return 0;
+  while (*a && *b) {
+    unsigned char ca = (unsigned char)*a++;
+    unsigned char cb = (unsigned char)*b++;
+    if (ca >= 'A' && ca <= 'Z')
+      ca = (unsigned char)(ca + 32);
+    if (cb >= 'A' && cb <= 'Z')
+      cb = (unsigned char)(cb + 32);
+    if (ca != cb)
+      return 0;
+  }
+  return *a == 0 && *b == 0;
+}
+
+static int host_is_loopback(const char *host) {
+  return host_eq_ci(host, "127.0.0.1") || host_eq_ci(host, "::1") ||
+         host_eq_ci(host, "localhost");
 }
 
 typedef struct HttpSt {
@@ -987,7 +1013,10 @@ static void *http_tls_step(HttpSt *st, NetResult *r) {
     }
     SSL_set_connect_state(st->ssl);
     SSL_set_tlsext_host_name(st->ssl, st->host);
-    SSL_set1_host(st->ssl, st->host);
+    if (host_is_loopback(st->host))
+      SSL_set_verify(st->ssl, SSL_VERIFY_NONE, NULL);
+    else
+      SSL_set1_host(st->ssl, st->host);
     SSL_set_mode(st->ssl, SSL_MODE_ENABLE_PARTIAL_WRITE |
                               SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
   }
@@ -1976,6 +2005,10 @@ typedef struct ServeSt {
   int listen_fd;
   int listen6_fd;
   int conn_fd;
+  int tls;
+  int tls_up;
+  int tls_want; /* 1 readable, 2 writable */
+  SSL *ssl;
   SzCont handler;
   void *henv;
   void *body;
@@ -1991,9 +2024,92 @@ typedef struct ServeSt {
   void *vreq_done; /* SzDeferred* for a virtual client; NULL for inject */
 } ServeSt;
 
+static SSL_CTX *g_serve_ssl_ctx;
+
+static X509 *serve_self_signed(EVP_PKEY *pkey) {
+  X509 *cert;
+  X509_NAME *name;
+  X509_EXTENSION *ext;
+  X509V3_CTX v3;
+  if (!pkey)
+    return NULL;
+  cert = X509_new();
+  if (!cert)
+    return NULL;
+  if (X509_set_version(cert, 2) != 1)
+    goto fail;
+  if (!ASN1_INTEGER_set(X509_get_serialNumber(cert), 1))
+    goto fail;
+  if (!X509_gmtime_adj(X509_get_notBefore(cert), 0))
+    goto fail;
+  if (!X509_gmtime_adj(X509_get_notAfter(cert), 60 * 60 * 24 * 365))
+    goto fail;
+  if (X509_set_pubkey(cert, pkey) != 1)
+    goto fail;
+  name = X509_get_subject_name(cert);
+  if (!X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                                  (unsigned char *)"localhost", -1, -1, 0))
+    goto fail;
+  if (X509_set_issuer_name(cert, name) != 1)
+    goto fail;
+  X509V3_set_ctx_nodb(&v3);
+  X509V3_set_ctx(&v3, cert, cert, NULL, NULL, 0);
+  ext = X509V3_EXT_conf_nid(NULL, &v3, NID_subject_alt_name,
+                            "DNS:localhost,IP:127.0.0.1,IP:::1");
+  if (!ext)
+    goto fail;
+  if (X509_add_ext(cert, ext, -1) != 1) {
+    X509_EXTENSION_free(ext);
+    goto fail;
+  }
+  X509_EXTENSION_free(ext);
+  if (X509_sign(cert, pkey, EVP_sha256()) <= 0)
+    goto fail;
+  return cert;
+fail:
+  X509_free(cert);
+  return NULL;
+}
+
+static SSL_CTX *serve_ssl_ctx(void) {
+  EVP_PKEY *pkey;
+  X509 *cert;
+  if (g_serve_ssl_ctx)
+    return g_serve_ssl_ctx;
+  pkey = EVP_EC_gen("prime256v1");
+  if (!pkey)
+    return NULL;
+  cert = serve_self_signed(pkey);
+  if (!cert) {
+    EVP_PKEY_free(pkey);
+    return NULL;
+  }
+  g_serve_ssl_ctx = SSL_CTX_new(TLS_server_method());
+  if (!g_serve_ssl_ctx ||
+      SSL_CTX_set_min_proto_version(g_serve_ssl_ctx, TLS1_2_VERSION) != 1 ||
+      SSL_CTX_use_certificate(g_serve_ssl_ctx, cert) != 1 ||
+      SSL_CTX_use_PrivateKey(g_serve_ssl_ctx, pkey) != 1 ||
+      SSL_CTX_check_private_key(g_serve_ssl_ctx) != 1) {
+    SSL_CTX_free(g_serve_ssl_ctx);
+    g_serve_ssl_ctx = NULL;
+    X509_free(cert);
+    EVP_PKEY_free(pkey);
+    return NULL;
+  }
+  X509_free(cert);
+  EVP_PKEY_free(pkey);
+  return g_serve_ssl_ctx;
+}
+
 static void serve_close_conn(ServeSt *st) {
   if (!st)
     return;
+  if (st->ssl) {
+    SSL_free(st->ssl);
+    st->ssl = NULL;
+  }
+  st->tls_up = 0;
+  st->tls_want = 0;
   if (st->conn_fd >= 0) {
     close(st->conn_fd);
     st->conn_fd = -1;
@@ -2203,6 +2319,12 @@ static void *serve_accept(void *env) {
   st->write_deadline_ms = 0;
   st->head_resp = 0;
   st->method[0] = '\0';
+  if (st->ssl) {
+    SSL_free(st->ssl);
+    st->ssl = NULL;
+  }
+  st->tls_up = 0;
+  st->tls_want = 0;
 
   /* Chosen at step time so SCUZZ_TESTRT=1 install in runtime_main is visible. */
   if (sz_testrt_net_is_fake()) {
@@ -2263,22 +2385,46 @@ static void *serve_read_req(void *env) {
   const char *body;
   size_t blen;
 
-  n = read(st->conn_fd, st->rbuf + st->rlen, sizeof st->rbuf - 1 - st->rlen);
-  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-    if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
+  if (st->ssl) {
+    n = SSL_read(st->ssl, st->rbuf + st->rlen,
+                 (int)(sizeof st->rbuf - 1 - st->rlen));
+    if (n <= 0) {
+      int want = http_tls_want(st->ssl, (int)n);
+      if (want) {
+        if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
+          r->is_err = 1;
+          r->drop = 1;
+          r->as.err = sz_error_new(6, "Net.serve: request timed out");
+          return r;
+        }
+        st->tls_want = want;
+        r->retry = 1;
+        return r;
+      }
       r->is_err = 1;
       r->drop = 1;
-      r->as.err = sz_error_new(6, "Net.serve: request timed out");
+      r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
       return r;
     }
-    r->retry = 1;
-    return r;
-  }
-  if (n <= 0) {
-    r->is_err = 1;
-    r->drop = 1;
-    r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
-    return r;
+    st->tls_want = 0;
+  } else {
+    n = read(st->conn_fd, st->rbuf + st->rlen, sizeof st->rbuf - 1 - st->rlen);
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
+        r->is_err = 1;
+        r->drop = 1;
+        r->as.err = sz_error_new(6, "Net.serve: request timed out");
+        return r;
+      }
+      r->retry = 1;
+      return r;
+    }
+    if (n <= 0) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: expected HTTP request");
+      return r;
+    }
   }
   st->rlen += (size_t)n;
   st->rbuf[st->rlen] = '\0';
@@ -2386,26 +2532,49 @@ static void *serve_write_close(void *env) {
     r->as.err = sz_error_new(6, "Net.serve: write failed");
     return r;
   }
-#ifdef MSG_NOSIGNAL
-  n = send(st->conn_fd, st->wbuf + st->woff, st->wlen - st->woff, MSG_NOSIGNAL);
-#else
-  n = write(st->conn_fd, st->wbuf + st->woff, st->wlen - st->woff);
-#endif
-  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-    if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+  if (st->ssl) {
+    n = SSL_write(st->ssl, st->wbuf + st->woff, (int)(st->wlen - st->woff));
+    if (n <= 0) {
+      int want = http_tls_want(st->ssl, (int)n);
+      if (want) {
+        if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+          r->is_err = 1;
+          r->drop = 1;
+          r->as.err = sz_error_new(6, "Net.serve: write timed out");
+          return r;
+        }
+        st->tls_want = want;
+        r->retry = 1;
+        return r;
+      }
       r->is_err = 1;
       r->drop = 1;
-      r->as.err = sz_error_new(6, "Net.serve: write timed out");
+      r->as.err = sz_error_new(6, "Net.serve: write failed");
       return r;
     }
-    r->retry = 1;
-    return r;
-  }
-  if (n <= 0) {
-    r->is_err = 1;
-    r->drop = 1;
-    r->as.err = sz_error_new(6, "Net.serve: write failed");
-    return r;
+    st->tls_want = 0;
+  } else {
+#ifdef MSG_NOSIGNAL
+    n = send(st->conn_fd, st->wbuf + st->woff, st->wlen - st->woff, MSG_NOSIGNAL);
+#else
+    n = write(st->conn_fd, st->wbuf + st->woff, st->wlen - st->woff);
+#endif
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+        r->is_err = 1;
+        r->drop = 1;
+        r->as.err = sz_error_new(6, "Net.serve: write timed out");
+        return r;
+      }
+      r->retry = 1;
+      return r;
+    }
+    if (n <= 0) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: write failed");
+      return r;
+    }
   }
   st->woff += (size_t)n;
   if (st->woff < st->wlen) {
@@ -2419,6 +2588,8 @@ static void *serve_write_close(void *env) {
 }
 
 static SzIo *serve_poll_then_accept(void *value, void *env);
+static SzIo *serve_poll_handshake(void *value, void *env);
+static SzIo *serve_unwrap_handshake(void *value, void *env);
 static SzIo *serve_poll_conn_read(void *value, void *env);
 static SzIo *serve_poll_conn_write(void *value, void *env);
 static SzIo *serve_after_path(void *path, void *env);
@@ -2459,6 +2630,8 @@ static SzIo *serve_unwrap_read(void *value, void *env) {
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
     sz_release(r);
+    if (st->ssl && SSL_pending(st->ssl) > 0)
+      return fm_drop(sz_io_delay(serve_read_req, st), serve_unwrap_read, st);
     return serve_poll_conn_read(NULL, st);
   }
   if (r && r->drop) {
@@ -2520,7 +2693,11 @@ static SzIo *serve_poll_conn_read(void *value, void *env) {
   left = st->req_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
-  ready = race_drop(sz_io_poll_readable(st->conn_fd), sz_io_sleep_ms(left));
+  if (st->ssl && st->tls_want == 2)
+    ready = sz_io_poll_writable(st->conn_fd);
+  else
+    ready = sz_io_poll_readable(st->conn_fd);
+  ready = race_drop(ready, sz_io_sleep_ms(left));
   return fm_drop(ready, serve_after_conn_read_poll, st);
 }
 
@@ -2540,7 +2717,11 @@ static SzIo *serve_poll_conn_write(void *value, void *env) {
   left = st->write_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
-  ready = race_drop(sz_io_poll_writable(st->conn_fd), sz_io_sleep_ms(left));
+  if (st->ssl && st->tls_want == 1)
+    ready = sz_io_poll_readable(st->conn_fd);
+  else
+    ready = sz_io_poll_writable(st->conn_fd);
+  ready = race_drop(ready, sz_io_sleep_ms(left));
   return fm_drop(ready, serve_after_conn_write_poll, st);
 }
 
@@ -2558,6 +2739,97 @@ static SzIo *serve_after_vreq(void *value, void *env) {
   return serve_after_path(path, st);
 }
 
+static void *serve_tls_accept(void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
+  SSL_CTX *ctx;
+  int n;
+  int want;
+  if (!st->ssl) {
+    ctx = serve_ssl_ctx();
+    if (!ctx) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: TLS failed");
+      return r;
+    }
+    st->ssl = SSL_new(ctx);
+    if (!st->ssl || SSL_set_fd(st->ssl, st->conn_fd) != 1) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: TLS failed");
+      return r;
+    }
+    SSL_set_accept_state(st->ssl);
+    SSL_set_mode(st->ssl, SSL_MODE_ENABLE_PARTIAL_WRITE |
+                              SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+  }
+  n = SSL_accept(st->ssl);
+  if (n == 1) {
+    st->tls_up = 1;
+    st->tls_want = 0;
+    r->is_err = 0;
+    return r;
+  }
+  want = http_tls_want(st->ssl, n);
+  if (want) {
+    if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
+      r->is_err = 1;
+      r->drop = 1;
+      r->as.err = sz_error_new(6, "Net.serve: TLS timed out");
+      return r;
+    }
+    st->tls_want = want;
+    r->retry = 1;
+    return r;
+  }
+  r->is_err = 1;
+  r->drop = 1;
+  r->as.err = sz_error_new(6, "Net.serve: TLS failed");
+  return r;
+}
+
+static SzIo *serve_after_handshake_poll(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  return fm_drop(sz_io_delay(serve_tls_accept, st), serve_unwrap_handshake, st);
+}
+
+static SzIo *serve_poll_handshake(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  SzIo *ready;
+  int64_t left;
+  (void)value;
+  left = st->req_deadline_ms - sz_clock_monotonic_ms_sync();
+  if (left < 1)
+    left = 1;
+  if (st->tls_want == 2)
+    ready = sz_io_poll_writable(st->conn_fd);
+  else
+    ready = sz_io_poll_readable(st->conn_fd);
+  ready = race_drop(ready, sz_io_sleep_ms(left));
+  return fm_drop(ready, serve_after_handshake_poll, st);
+}
+
+static SzIo *serve_unwrap_handshake(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_release(r);
+    return serve_poll_handshake(NULL, st);
+  }
+  if (r && r->drop) {
+    SzError *err = r->as.err;
+    r->as.err = NULL;
+    sz_release(r);
+    return serve_drop_conn(st, err);
+  }
+  {
+    SzIo *io = unwrap_net(value, NULL);
+    return fm_drop(io, serve_poll_conn_read, st);
+  }
+}
+
 static SzIo *serve_after_listen(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   SzIo *io;
@@ -2565,6 +2837,8 @@ static SzIo *serve_after_listen(void *value, void *env) {
   if (sz_testrt_net_is_fake())
     return fm_drop(sz_testrt_net_accept(st->port), serve_after_vreq, st);
   io = serve_poll_then_accept(NULL, st);
+  if (st->tls)
+    return fm_drop(io, serve_poll_handshake, st);
   return fm_drop(io, serve_poll_conn_read, st);
 }
 
@@ -2649,6 +2923,7 @@ static SzIo *serve_again(void *value, void *env) {
 typedef struct ServeSpec {
   int64_t port;
   int64_t n;
+  int tls;
   SzCont handler;
 } ServeSpec;
 
@@ -2662,6 +2937,7 @@ static SzIo *serve_after_kick(void *ignored, void *env) {
     sz_panic("sz_net_serve(null spec)");
   st->port = spec->port;
   st->left = spec->n > 0 ? spec->n : -1;
+  st->tls = spec->tls;
   st->listen_fd = -1;
   st->listen6_fd = -1;
   st->conn_fd = -1;
@@ -2679,7 +2955,8 @@ static SzIo *serve_after_kick(void *ignored, void *env) {
   }
 }
 
-static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
+static SzIo *net_serve_n(int64_t port, int64_t n, int tls, SzCont handler,
+                         void *env) {
   ServeSpec *spec;
   SzPair *pack;
   if (!handler)
@@ -2687,6 +2964,7 @@ static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
   spec = (ServeSpec *)sz_rc_alloc(sizeof(ServeSpec), SZ_RC_BOX);
   spec->port = port;
   spec->n = n;
+  spec->tls = tls;
   spec->handler = handler;
   pack = sz_pair_new(env, spec);
   sz_release(spec);
@@ -2698,9 +2976,17 @@ static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
 }
 
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env) {
-  return net_serve_n(port, 0, handler, env);
+  return net_serve_n(port, 0, 0, handler, env);
 }
 
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env) {
-  return net_serve_n(port, 1, handler, env);
+  return net_serve_n(port, 1, 0, handler, env);
+}
+
+SzIo *sz_net_serve_tls(int64_t port, SzCont handler, void *env) {
+  return net_serve_n(port, 0, 1, handler, env);
+}
+
+SzIo *sz_net_serve_once_tls(int64_t port, SzCont handler, void *env) {
+  return net_serve_n(port, 1, 1, handler, env);
 }
