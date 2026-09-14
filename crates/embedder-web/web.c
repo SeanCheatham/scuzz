@@ -8,12 +8,13 @@ static SzString *snapshot;
 
 EM_JS(void, sz_web_idle_wait, (), {
   Asyncify.handleSleep(function(wakeUp) {
+    const resume = function() { setTimeout(wakeUp, 0); };
     if (Module.uiWakePending) {
       Module.uiWakePending = false;
-      wakeUp();
+      resume();
       return;
     }
-    Module.uiWake = wakeUp;
+    Module.uiWake = resume;
   });
 });
 

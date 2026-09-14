@@ -3,7 +3,8 @@
 #include "scuzz_ui.h"
 void sz_web_stop(void);
 void sz_web_start(SzUiSession *session);
-/* Park the live loop until inject or invalidate. */
+/* Park the live loop until inject or invalidate.
+ * Resume on a later JS turn. Do not call the sleep callback now. */
 void sz_web_idle_wait(void);
 /* Resume the parked live loop. Safe when the loop is not parked. */
 void sz_web_idle_wake(void);
