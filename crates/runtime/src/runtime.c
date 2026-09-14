@@ -1381,7 +1381,9 @@ int64_t sz_string_contains(const SzString *s, const SzString *needle) {
 }
 
 /* POSIX ERE. Full-string match on UTF-8 bytes. No capture.
- * A bad pattern, a NUL in the text, or a pattern over 1024 bytes is 0. */
+ * A bad pattern, a NUL in the text, or a pattern over 1024 bytes is 0.
+ * Empty pattern: match only the empty string. Do not call libc regex for
+ * that case. Darwin and glibc disagree on empty vs empty. */
 int64_t sz_string_matches(const SzString *s, const SzString *pat) {
   regex_t re;
   regmatch_t m;
@@ -1399,6 +1401,8 @@ int64_t sz_string_matches(const SzString *s, const SzString *pat) {
   text = s->data;
   if (strlen(text) != s->len)
     return 0;
+  if (pat->len == 0)
+    return s->len == 0 ? 1 : 0;
   if (regcomp(&re, p, REG_EXTENDED) != 0)
     return 0;
   rc = regexec(&re, text, 1, &m, 0);
