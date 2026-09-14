@@ -364,6 +364,12 @@ def isFunStr(s: String): Bool =
 def isTupStr(s: String): Bool =
   isTup(parse(s))
 
+def isIoStr(s: String): Bool =
+  isIo(parse(s))
+
+def isResStr(s: String): Bool =
+  isRes(parse(s))
+
 def tupPartsStr(s: String): List[String] =
   mapShow(tupParts(parse(s)))
 

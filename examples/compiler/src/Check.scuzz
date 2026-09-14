@@ -507,7 +507,7 @@ def resolveResource2(f: String, ao: Out, lam: Expr, env: List[(String, String)],
   if (hasErr(ao)) ao else if (f == "Resource.make") resolveResMake(ao, lam, env, funs, ens, span) else resolveResUse(ao, lam, env, funs, ens, span)
 
 def isRes(t: String): Bool =
-  t == "Resource" || Str.startsWith(t, "Resource[")
+  Type.isResStr(t)
 
 def resTy(a: String): String =
   if (a == "" || isLoose(a)) "Resource" else Str.concat("Resource[", Str.concat(a, "]"))
@@ -1314,7 +1314,7 @@ def enHasParams1(h: En, rest: List[En], name: String): Bool =
   }
 
 def isIo(t: String): Bool =
-  t == "IO" || Str.startsWith(t, "IO[")
+  Type.isIoStr(t)
 
 def ioErr(t: String): String =
   Type.show(Type.ioErr(Type.parse(t)))

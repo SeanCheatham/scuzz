@@ -770,7 +770,16 @@ def allOk(): Bool =
   tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny()
 
 def dumpFail(): String =
-  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
+  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
+
+def dumpTyckRes(): String =
+  if (!namedIoTypes()) dumpNamedIo() else "tyckRes"
+
+def dumpNamedIo(): String =
+  if (Check.check("def right(io: IO[Int]): IO[String] = io.map(n => Str.fromInt(n))") != "[]") Str.concat("ioMapOk ", Check.check("def right(io: IO[Int]): IO[String] = io.map(n => Str.fromInt(n))")) else if (!ioFunTypes()) dumpIoFun() else "namedIo-other"
+
+def dumpIoFun(): String =
+  if (Check.check(srcIoFunApply()) != "[]") Str.concat("ioFunApply ", Check.check(srcIoFunApply())) else if (!rejects(srcIoFunMap(), "unknown function .map")) Str.concat("ioFunMap ", Check.check(srcIoFunMap())) else if (!rejects(srcIoFunFlat(), "flatMap needs IO")) Str.concat("ioFunFlat ", Check.check(srcIoFunFlat())) else if (!rejects(srcIoFunHandle(), "handleErrorWith needs IO")) Str.concat("ioFunHandle ", Check.check(srcIoFunHandle())) else if (!rejects(srcIoFunResMake(), "Resource.make needs IO")) Str.concat("ioFunResMake ", Check.check(srcIoFunResMake())) else if (!rejects(srcIoFunResUse(), "Resource.use needs Resource")) Str.concat("ioFunResUse ", Check.check(srcIoFunResUse())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("ioFunEq ", Check.check(srcFunSubstId())) else "ioFun-other"
 
 def dumpTyckLam(): String =
   if (!funArrowTypes()) dumpFunArrow() else "tyckLam"
@@ -782,7 +791,7 @@ def dumpTyckCore(): String =
   if (!sourceOffsets()) "sourceOffsets" else if (!funLookup()) "funLookup" else "tyckCore"
 
 def dumpTyckFail(): String =
-  if (!collectionTypes()) dumpListFilter() else if (!streamTypes()) dumpStream() else if (!flattenTypes()) dumpFlatten() else if (!foldTypes()) dumpFold() else if (!mapSetTypes()) dumpMapSet() else if (!zipTypes()) dumpZip() else if (!unfoldTypes()) dumpUnfold() else if (!listBuildTypes()) dumpListBuild() else if (!mapProjectTypes()) dumpMapProject() else if (!listRestTypes()) dumpListRest() else if (!streamRestTypes()) dumpStreamRest() else if (!listStructTypes()) dumpListStruct() else if (!listToMapTypes()) dumpListToMap() else if (!listSpanTypes()) dumpListSpan() else if (!listSliceTypes()) dumpListSlice() else if (!setUnionTypes()) dumpSetUnion() else if (!streamChangesTypes()) dumpStreamChanges() else if (!listFindTypes()) dumpListFind() else if (!mapExistsTypes()) dumpMapExists() else if (!listSumTypes()) dumpListSum() else if (!jsonListTypes()) dumpJsonList() else if (!editorListTypes()) dumpEditorList() else if (!propertyForceTypes()) dumpPropertyForce() else if (!kitLookup()) "kitLookup" else if (!ioCombinators()) dumpIoComb() else "tyckFail"
+  if (!collectionTypes()) dumpListFilter() else if (!streamTypes()) dumpStream() else if (!flattenTypes()) dumpFlatten() else if (!foldTypes()) dumpFold() else if (!mapSetTypes()) dumpMapSet() else if (!zipTypes()) dumpZip() else if (!unfoldTypes()) dumpUnfold() else if (!listBuildTypes()) dumpListBuild() else if (!mapProjectTypes()) dumpMapProject() else if (!listRestTypes()) dumpListRest() else if (!streamRestTypes()) dumpStreamRest() else if (!listStructTypes()) dumpListStruct() else if (!listToMapTypes()) dumpListToMap() else if (!listSpanTypes()) dumpListSpan() else if (!listSliceTypes()) dumpListSlice() else if (!setUnionTypes()) dumpSetUnion() else if (!streamChangesTypes()) dumpStreamChanges() else if (!listFindTypes()) dumpListFind() else if (!mapExistsTypes()) dumpMapExists() else if (!listSumTypes()) dumpListSum() else if (!jsonListTypes()) dumpJsonList() else if (!editorListTypes()) dumpEditorList() else if (!propertyForceTypes()) dumpPropertyForce() else if (!namedIoTypes()) dumpNamedIo() else if (!kitLookup()) "kitLookup" else if (!ioCombinators()) dumpIoComb() else "tyckFail"
 
 def dumpIoComb(): String =
   if (Check.check("def right(): IO[String] = IO.timeout(50, IO.pure(\"x\"))") != "[]") Str.concat("timeoutOk ", Check.check("def right(): IO[String] = IO.timeout(50, IO.pure(\"x\"))")) else if (!rejects("def wrong(): IO[Int] = IO.timeout(50, IO.pure(\"x\"))", "does not match declared")) Str.concat("timeoutMis ", Check.check("def wrong(): IO[Int] = IO.timeout(50, IO.pure(\"x\"))")) else if (Check.check("def right(): IO[Int] = IO.race(IO.pure(1), IO.pure(2))") != "[]") Str.concat("raceOk ", Check.check("def right(): IO[Int] = IO.race(IO.pure(1), IO.pure(2))")) else if (!rejects("def wrong(): IO[Int] = IO.race(IO.pure(1), IO.pure(\"x\"))", "arg type mismatch")) Str.concat("raceMis ", Check.check("def wrong(): IO[Int] = IO.race(IO.pure(1), IO.pure(\"x\"))")) else if (Check.check("def right(): IO[(Int, String)] = IO.both(IO.pure(1), IO.pure(\"x\"))") != "[]") Str.concat("bothOk ", Check.check("def right(): IO[(Int, String)] = IO.both(IO.pure(1), IO.pure(\"x\"))")) else if (!rejects("def wrong(): IO[String] = IO.both(IO.pure(1), IO.pure(\"x\"))", "does not match declared")) Str.concat("bothMis ", Check.check("def wrong(): IO[String] = IO.both(IO.pure(1), IO.pure(\"x\"))")) else if (Check.check("def right(): IO[String] = IO.ensure(IO.pure(\"x\"), IO.pure(()))") != "[]") Str.concat("ensureOk ", Check.check("def right(): IO[String] = IO.ensure(IO.pure(\"x\"), IO.pure(()))")) else if (Check.check("def right(): IO[List[String]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))") != "[]") Str.concat("foreachOk ", Check.check("def right(): IO[List[String]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))")) else if (!rejects("def wrong(): IO[List[Int]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))", "does not match declared")) Str.concat("foreachMis ", Check.check("def wrong(): IO[List[Int]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))")) else if (Check.check("def right(): IO[Fiber[String]] = Fiber.fork(IO.pure(\"x\"))") != "[]") Str.concat("forkOk ", Check.check("def right(): IO[Fiber[String]] = Fiber.fork(IO.pure(\"x\"))")) else if (!rejects("def wrong(): IO[Fiber[Int]] = Fiber.fork(IO.pure(\"x\"))", "does not match declared")) Str.concat("forkMis ", Check.check("def wrong(): IO[Fiber[Int]] = Fiber.fork(IO.pure(\"x\"))")) else if (!bothUnpack()) Str.concat("bothUnpack ", Check.check("def wrong(): IO[Unit] =\n  for {\n    (_, n) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n")) else if (!fiberJoin()) Str.concat("fiberJoin ", Check.check("def wrong(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    n <- Fiber.join(f)\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n")) else if (!queueHandleTypes()) dumpQueueHandle() else dumpRef()
@@ -791,7 +800,40 @@ def dumpClosed(): String =
   if (!rejects(srcViewNope(), "unknown function View.nope")) "viewNope" else if (!rejects(srcViewArity(), "View.button expects")) "viewArity" else if (!rejects(srcSigGet(), "Signal.get arg type mismatch")) "sigGet" else if (!rejects(srcUiRun(), "Ui.run arg type mismatch")) "uiRun" else if (!rejects(srcIoNope(), "unknown function IO.notAKit")) "ioNope" else if (Check.check(srcTimeoutOk()) != "[]") Str.concat("timeoutOk ", Check.check(srcTimeoutOk())) else if (!rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")) Str.concat("timeoutMis ", Check.check(srcTimeoutMis())) else "closed-other"
 
 def namedIoTypes(): Bool =
-  Check.check("def right(io: IO[Int]): IO[String] = io.map(n => Str.fromInt(n))") == "[]" && rejects("def wrong(io: IO[Int]): IO[String] = io.map(n => n + 1)", "does not match declared") && rejects("def wrong(io: IO[Int]): IO[Int] = io.map(n => Str.len(n))", "type mismatch") && rejects("def wrong(io: IO[Int, Int]): IO[Int, Int] = io.flatMap(n => IO.fail(true))", "error") && rejects("def wrong(io: IO[Int, Int]): IO[Int] = io.handleErrorWith(e => IO.pure(Str.len(e)))", "type mismatch")
+  Check.check("def right(io: IO[Int]): IO[String] = io.map(n => Str.fromInt(n))") == "[]" && rejects("def wrong(io: IO[Int]): IO[String] = io.map(n => n + 1)", "does not match declared") && rejects("def wrong(io: IO[Int]): IO[Int] = io.map(n => Str.len(n))", "type mismatch") && rejects("def wrong(io: IO[Int, Int]): IO[Int, Int] = io.flatMap(n => IO.fail(true))", "error") && rejects("def wrong(io: IO[Int, Int]): IO[Int] = io.handleErrorWith(e => IO.pure(Str.len(e)))", "type mismatch") && ioFunTypes()
+
+def ioFunTypes(): Bool =
+  Check.check(srcIoFunApply()) == "[]" && rejects(srcIoFunMap(), "unknown function .map") && rejects(srcIoFunFlat(), "flatMap needs IO") && rejects(srcIoFunHandle(), "handleErrorWith needs IO") && rejects(srcIoFunResMake(), "Resource.make needs IO") && rejects(srcIoFunResUse(), "Resource.use needs Resource") && Check.check(srcFunSubstId()) == "[]"
+
+def srcIoFunApply(): String =
+  """def apply(h: IO[Int] => String, io: IO[Int]): String =
+  h(io)
+"""
+
+def srcIoFunMap(): String =
+  """def wrong(h: IO[Int] => String): IO[Int] =
+  h.map(n => n + 1)
+"""
+
+def srcIoFunFlat(): String =
+  """def wrong(h: IO[Int] => String): IO[Int] =
+  h.flatMap(n => IO.pure(n))
+"""
+
+def srcIoFunHandle(): String =
+  """def wrong(h: IO[Int] => String): IO[Int] =
+  h.handleErrorWith(e => IO.pure(0))
+"""
+
+def srcIoFunResMake(): String =
+  """def wrong(h: IO[Int] => String): Resource[Int] =
+  Resource.make(h, _ => IO.pure(()))
+"""
+
+def srcIoFunResUse(): String =
+  """def wrong(h: Resource[Int] => String): IO[String] =
+  Resource.use(h, n => IO.pure(Str.fromInt(n)))
+"""
 
 def signalTypes(): Bool =
   Check.check("""record State(n: Int)
