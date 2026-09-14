@@ -397,7 +397,10 @@ def resolveCall2(f: String, args: List[Expr], env: List[(String, String)], funs:
   if (isKit(f)) resolveKit(f, args, env, funs, ens, span) else if (isInstMeth(f)) resolveInst(f, args, env, funs, ens, span) else if (hasEn(ens, f)) inferNamedCtor(f, f, args, env, funs, ens, span, ens) else if (enOfCase(ens, f) != "") inferNamedCtor(enOfCase(ens, f), f, args, env, funs, ens, span, ens) else resolveFunOrUser(f, args, env, funs, ens, span, lookupEnv(env, f))
 
 def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at") resolveGenericKit(f, args, env, funs, ens, span) else resolveKitRest(f, args, env, funs, ens, span)
+  if (isGenericKit(f)) resolveGenericKit(f, args, env, funs, ens, span) else resolveKitRest(f, args, env, funs, ens, span)
+
+def isGenericKit(f: String): Bool =
+  f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at" || f == "IO.attempt" || f == "IO.race" || f == "IO.both" || f == "IO.ensure" || f == "IO.timeout" || f == "IO.forever" || f == "IO.repeatN" || f == "IO.retryN" || f == "IO.foreach" || f == "IO.foreachDiscard" || f == "IO.when" || f == "IO.unless" || f == "Fiber.fork" || f == "Fiber.join"
 
 def resolveGenericKit(f: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   resolveGenericKitSig(f, args, env, funs, ens, span, Kits.find(f))
@@ -406,7 +409,7 @@ def resolveGenericKitSig(f: String, args: List[Expr], env: List[(String, String)
   if (List.isEmpty(args)) ok(funTyFrom(Kits.kitParamsOf(kit), Kits.kitRetOf(kit))) else if (List.len(args) != List.len(Kits.kitParamsOf(kit))) bad(Str.concat(f, " has wrong arity"), span) else genericArgs(f, ["A", "B", "E"], Kits.kitParamsOf(kit), Kits.kitRetOf(kit), args, env, funs, ens, span)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.") || f == "IO.attempt") resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, Kits.find(f))
+  if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.")) resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, Kits.find(f))
 
 def resolveScenarioCtx(funs: Ftab, span: (String, Int)): Out =
   resolveScenarioCtx2(ftabGet(funs.tab, "setup"), span)
