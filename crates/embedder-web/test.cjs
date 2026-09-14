@@ -47,6 +47,14 @@ async function check(browserType, url, mobile) {
     await page.goto(url);
     await expectText('text:Start');
     assert.equal(await page.title(), 'Scuzz Docs');
+    {
+      const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
+      const pumps = await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], []));
+      assert(paints >= 1, 'first paint');
+      await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 400)));
+      assert.equal(await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], [])), paints);
+      assert.equal(await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], [])), pumps);
+    }
     assert.equal(await page.getByRole('heading', {name: 'Start', level: 1}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Install', exact: true}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Install the CLI', exact: true}).count(), 1);
@@ -77,6 +85,13 @@ async function check(browserType, url, mobile) {
     await reveal(addOne);
     await addOne.click();
     await expectText('text:Count: 1');
+    {
+      const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
+      const pumps = await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], []));
+      await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 400)));
+      assert.equal(await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], [])), paints);
+      assert.equal(await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], [])), pumps);
+    }
     const headings = {Install: 'Install', Language: 'Language', GUI: 'GUI', Verify: 'Verify', Web: 'Web'};
     for (const [label, heading] of Object.entries(headings)) {
       await page.getByRole('link', {name: label, exact: true}).click();

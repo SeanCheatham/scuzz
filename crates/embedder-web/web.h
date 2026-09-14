@@ -3,6 +3,11 @@
 #include "scuzz_ui.h"
 void sz_web_stop(void);
 void sz_web_start(SzUiSession *session);
+/* Start the live rAF loop. Return so a later JS ccall is a new WASM entry.
+ * Idle frames skip paint. Keep the loop running so the runtime stays live. */
+void sz_web_live_loop(void (*frame)(void));
+/* No-op. The rAF loop is already running. */
+void sz_web_idle_wake(void);
 void sz_web_present(int width, int height, const uint8_t *rgba);
 void sz_web_frame_begin(float scale);
 void sz_web_frame_end(void);

@@ -1818,6 +1818,52 @@ static void test_session_inject_control(void) {
   remove(fuzz);
 }
 
+static void test_idle_pump_skips_paint(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzInputEvent tap;
+
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_button("go", NULL, NULL));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 80;
+  cfg.height = 40;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_needs_paint(session));
+  assert(sz_ui_session_paints(session) == 0);
+  assert(sz_ui_session_pumps(session) == 0);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_pumps(session) == 1);
+  assert(sz_ui_session_paints(session) == 1);
+  assert(!sz_ui_session_needs_paint(session));
+  {
+    int i;
+    for (i = 0; i < 32; i++)
+      assert(sz_ui_pump_sync(session));
+    assert(sz_ui_session_pumps(session) == 33);
+    assert(sz_ui_session_paints(session) == 1);
+    assert(!sz_ui_session_needs_paint(session));
+  }
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_POINTER;
+  tap.x = 40.f;
+  tap.y = 20.f;
+  tap.pointer_phase = SZ_POINTER_DOWN;
+  tap.pointer_button = 1;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_ui_session_needs_paint(session));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_paints(session) == 2);
+  assert(sz_ui_session_pumps(session) == 34);
+  assert(!sz_ui_session_needs_paint(session));
+  sz_ui_unmount(session);
+}
+
 static void test_session_dump_now_needs_path(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -16583,6 +16629,7 @@ int main(void) {
   test_session_inject_script();
   test_session_inject_grows_past_4k();
   test_session_inject_control();
+  test_idle_pump_skips_paint();
   test_session_dump_now_needs_path();
   test_session_inject_scroll();
   test_session_inject_backspace();

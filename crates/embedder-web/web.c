@@ -6,6 +6,13 @@
 static SzUiSession *active;
 static SzString *snapshot;
 
+void sz_web_idle_wake(void) {}
+
+void sz_web_live_loop(void (*frame)(void)) {
+  /* rAF. Return so a later JS ccall is a new WASM entry. Idle frames skip paint. */
+  emscripten_set_main_loop(frame, 0, 0);
+}
+
 EM_JS(void, sz_web_frame_begin, (float scale), {
   Module.webFrame = {scale, texts: [], sections: [], items: [], groups: []};
 });
@@ -128,6 +135,14 @@ EMSCRIPTEN_KEEPALIVE const char *sz_web_snapshot(void) {
   if (snapshot) sz_release(snapshot);
   snapshot = active ? sz_view_a11y_dump(sz_ui_session_root(active)) : NULL;
   return snapshot ? sz_string_cstr(snapshot) : "";
+}
+
+EMSCRIPTEN_KEEPALIVE unsigned sz_web_pumps(void) {
+  return active ? sz_ui_session_pumps(active) : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE unsigned sz_web_paints(void) {
+  return active ? sz_ui_session_paints(active) : 0;
 }
 
 void sz_web_stop(void) {

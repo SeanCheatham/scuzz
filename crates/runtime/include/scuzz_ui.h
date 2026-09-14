@@ -731,6 +731,7 @@ void sz_ui_session_finish(SzUiSession *session);
 /* Width/height/scale from args, else SCUZZ_UI_WIDTH / HEIGHT / SCALE. */
 void sz_ui_resolve_headless_size(int *width, int *height, double *scale);
 
+/* Layout + paint + present. A pump with no dirty work skips paint. */
 int sz_ui_pump_sync(SzUiSession *session);
 typedef enum SzQuiesce {
   SZ_QUIESCE_SETTLED = 0,
@@ -760,6 +761,10 @@ void sz_ui_session_request_stop(SzUiSession *session);
 int sz_ui_session_keyboard_visible(const SzUiSession *session);
 /* Completed pump count. STOP returns 0 without incrementing. */
 unsigned sz_ui_session_pumps(const SzUiSession *session);
+/* Completed paint count. An idle pump does not increment this. */
+unsigned sz_ui_session_paints(const SzUiSession *session);
+/* 1 when the next pump must paint (dirty or IO bridge work). */
+int sz_ui_session_needs_paint(SzUiSession *session);
 
 /* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value);

@@ -57,8 +57,9 @@ The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/b
 The browser target uses the shared Signals, View layout, and software paint
 path. Browser font measurement and rasterization use the same monospace font.
 Emscripten keeps the 64-bit runtime layout and lowers the module to wasm32.
-The app runs on the browser thread. The UI loop yields between frames.
-The output needs no worker threads or cross-origin isolation headers.
+The app runs on the browser thread. The UI loop paints when the session is
+dirty. It waits when nothing changes. The output needs no worker threads or
+cross-origin isolation headers.
 
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
 and resize events. Wheel and canvas touch listeners that cancel the event
