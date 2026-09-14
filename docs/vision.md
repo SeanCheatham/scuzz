@@ -406,8 +406,9 @@ caption sits under the block. Docs does not paint that block until bitmap
 support exists.
 Code blocks place text and Copy in one row with an eight-pixel gap.
 Text uses the remaining width. Multiline code sets the row height.
-Docs Start is a choose-a-topic grid. Group headings give scent. The live Counter
-lives on the Signals topic. Get started and Try GUI stay on the app bar as
+Docs Start is a choose-a-topic grid. Group headings give scent. A quiet chip row
+on Start marks opened topic ids this session. Outline means not opened. Yellow
+means opened. The live Counter lives on the Signals topic. Get started and Try GUI stay on the app bar as
 accelerators. Docs shows live text input and source panels on GUI. Studio shows
 counter and status panels. Headless claims and native layout checks cover these shared components.
 Browser checks cover tab roles, keyboard input, and state retention.
