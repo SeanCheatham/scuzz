@@ -144,8 +144,14 @@ def parseTypeParen(toks: Toks, i: Int): (String, Int) =
 
 def parseTypeParen2(p: (List[String], Int), toks: Toks): (String, Int) =
   p match {
-    case (ts, j) => parseTypeArrow(toks, (if (List.len(ts) == 1) List.at(ts, 0) else Str.concat("(", Str.concat(_joinComma(ts), ")")), j + 1))
+    case (ts, j) => parseTypeArrow(toks, (_parenType(ts), j + 1))
   }
+
+def _parenType(ts: List[String]): String =
+  if (List.len(ts) == 1) _keepFunParen(List.at(ts, 0)) else Str.concat("(", Str.concat(_joinComma(ts), ")"))
+
+def _keepFunParen(t: String): String =
+  if (Str.contains(t, " => ")) Str.concat("(", Str.concat(t, ")")) else t
 
 def parseTypeApp(toks: Toks, i: Int): (String, Int) =
   parseTypeBrack(toks, i + 1, _identOf(_at(toks, i)))

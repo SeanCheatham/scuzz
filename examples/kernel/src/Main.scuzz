@@ -98,6 +98,15 @@ def applyIntStr(f: Int => String, n: Int): String =
 def applyInt(f: Int => Int, n: Int): Int =
   f(n)
 
+def applyStr1(f: Int => String): String =
+  f(1)
+
+def consumeStr1(h: (Int => String) => String, g: Int => String): String =
+  h(g)
+
+def funArrowPass(): String =
+  consumeStr1(applyStr1, n => "x")
+
 def add(n: Int, m: Int): Int =
   n + m
 
