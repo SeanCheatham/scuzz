@@ -37,10 +37,36 @@ def pageNav(topics: List[Topic], i: Int): View =
   View.padding(8, View.wrap(navBack(topics, i), navNext(topics, i)))
 
 def liveCounter(count: Signal[Int]): View =
-  View.card(View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Signal.set(count, Signal.get(count) + 1)), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages.")))
+  View.card(View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.map(count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => Property.sometimes("tappedAdd") match {
+    case _ => Signal.set(count, Signal.get(count) + 1)
+  }), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("Choose a section in the index. The example keeps its state when you switch pages.")))
+
+def echoDraft(text: String): String =
+  if (Str.len(text) == 0) Str.concat("You typed: ", text) else Property.sometimes("typedDraft") match {
+    case _ => Str.concat("You typed: ", text)
+  }
+
+def echoNotes(text: String): String =
+  if (Str.len(text) == 0) Str.concat("Notes: ", text) else Property.sometimes("typedNotes") match {
+    case _ => Str.concat("Notes: ", text)
+  }
 
 def guiLive(tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
-  View.maxSize(0, 520, View.tabs(tab, View.column(View.section("live", "Live example", View.column(View.heading(2, View.text("Try text input")), paragraph("Type text, then switch tabs or sections. Your text stays in the Signals."), View.textField(draft, "Your text"), View.bindText(Signal.map(draft, text => Str.concat("You typed: ", text))), View.editor(notes), View.bindText(Signal.map(notes, text => Str.concat("Notes: ", text))))), View.section("source", "Source", code("@main def main: IO[Unit] =\n  for {\n    draft = Signal.make(\"\")\n    notes = Signal.make(\"\")\n    _ <- Ui.run(_ => View.column(\n      View.textField(draft, \"Your text\"),\n      View.bindText(Signal.map(draft, text =>\n        Str.concat(\"You typed: \" , text))),\n      View.editor(notes),\n      View.bindText(Signal.map(notes, text =>\n        Str.concat(\"Notes: \" , text)))))\n  } yield ()")))))
+  View.maxSize(0, 520, View.tabs(tab, View.column(View.section("live", "Live example", View.column(View.heading(2, View.text("Try text input")), paragraph("Type text, then switch tabs or sections. Your text stays in the Signals."), View.textField(draft, "Your text"), View.bindText(Signal.map(draft, echoDraft)), View.editor(notes), View.bindText(Signal.map(notes, echoNotes)))), View.section("source", "Source", code("@main def main: IO[Unit] =\n  for {\n    draft = Signal.make(\"\")\n    notes = Signal.make(\"\")\n    _ <- Ui.run(_ => View.column(\n      View.textField(draft, \"Your text\"),\n      View.bindText(Signal.map(draft, text =>\n        Str.concat(\"You typed: \" , text))),\n      View.editor(notes),\n      View.bindText(Signal.map(notes, text =>\n        Str.concat(\"Notes: \" , text)))))\n  } yield ()")))))
+
+def markOpened(n: Int): Unit =
+  if (n == 0) Property.sometimes("openedStart")
+  else if (n == 1) Property.sometimes("openedInstall")
+  else if (n == 2) Property.sometimes("openedLanguage")
+  else if (n == 3) Property.sometimes("openedGui")
+  else if (n == 4) Property.sometimes("openedSignals")
+  else if (n == 5) Property.sometimes("openedPackages")
+  else if (n == 6) Property.sometimes("openedVerify")
+  else if (n == 7) Property.sometimes("openedCommands")
+  else if (n == 8) Property.sometimes("openedManifest")
+  else if (n == 9) Property.sometimes("openedWeb")
+  else if (n == 10) Property.sometimes("openedIde")
+  else ()
 
 def titleAt(topics: List[Topic], n: Int): String =
   if (n < 0 || n >= List.len(topics)) "Docs" else List.at(topics, n).title
@@ -63,7 +89,9 @@ def plainSection(topics: List[Topic], blocks: List[Signal[List[Block]]], i: Int)
     blocks = List.map(topics, topic => Signal.make(topic.blocks))
     page = Signal.make(0)
     guiTab = Signal.make(0)
-    title = Signal.map(page, n => titleAt(topics, n))
+    title = Signal.map(page, n => markOpened(n) match {
+      case _ => titleAt(topics, n)
+    })
     count = Signal.make(0)
     draft = Signal.make("")
     notes = Signal.make("")
