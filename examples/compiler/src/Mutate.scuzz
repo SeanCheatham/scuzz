@@ -615,7 +615,13 @@ def sitesOk(): Bool =
   twoBtnOk() && arithBtnOk() && twoBtnKept() && arithBtnKept() && pickSitesOk()
 
 def pickSitesOk(): Bool =
-  List.at(pickSites(42, 8, 8), 0) == 3 && List.at(pickSites(42, 8, 8), 5) == 0 && List.at(pickSites(42, 8, 8), 7) == 2 && List.at(pickSites(7, 3, 3), 0) == 2 && List.at(pickSites(7, 3, 3), 1) == 0 && List.at(pickSites(7, 3, 3), 2) == 1 && List.isEmpty(pickSites(1, 0, 5))
+  pickSitesEq(pickSites(42, 8, 8), 3 :: 4 :: 5 :: 6 :: 7 :: 0 :: 1 :: 2 :: noInts()) && pickSitesEq(pickSites(7, 3, 3), 2 :: 0 :: 1 :: noInts()) && pickSitesEq(pickSites(1, 0, 5), noInts())
+
+def pickSitesEq(xs: List[Int], ys: List[Int]): Bool =
+  if (List.isEmpty(xs) && List.isEmpty(ys)) true else if (List.isEmpty(xs) || List.isEmpty(ys)) false else pickSitesEqHd(List.at(xs, 0), List.at(ys, 0), List.tail(xs), List.tail(ys))
+
+def pickSitesEqHd(x: Int, y: Int, xs: List[Int], ys: List[Int]): Bool =
+  x == y && pickSitesEq(xs, ys)
 
 def twoBtnOk(): Bool =
   countFiles(oneSrc(srcTwoBtn()), false) == 2 && twoBtnSwap()
