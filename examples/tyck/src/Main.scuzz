@@ -350,7 +350,7 @@ def tyckFail(): Bool =
   tyckDiff(srcFailOk(), wantFailOk()) && rejects(srcFailMis(), "@main body must be IO[Unit]") && ioTypeArgs()
 
 def ioTypeArgs(): Bool =
-  genericTypeArgs() && ioTypeCompatibility() && namedIoTypes() && signalTypes() && attemptTypes() && kitLookup() && resultTypes()
+  genericTypeArgs() && ioTypeCompatibility() && namedIoTypes() && signalTypes() && attemptTypes() && kitLookup() && resultTypes() && ioCombinators()
 
 def genericTypeArgs(): Bool =
   collectionTypes() && userTypeArgs()
@@ -450,7 +450,13 @@ def allOk(): Bool =
   tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny()
 
 def dumpFail(): String =
-  if (!tyckCore()) "tyckCore" else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) "tyckFail" else if (!tyckParse()) "tyckParse" else if (!tyckLam()) "tyckLam" else if (!tyckAdt()) "tyckAdt" else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
+  if (!tyckCore()) "tyckCore" else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) "tyckLam" else if (!tyckAdt()) "tyckAdt" else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
+
+def dumpTyckFail(): String =
+  if (!ioCombinators()) dumpIoComb() else "tyckFail"
+
+def dumpIoComb(): String =
+  if (Check.check("def right(): IO[String] = IO.timeout(50, IO.pure(\"x\"))") != "[]") Str.concat("timeoutOk ", Check.check("def right(): IO[String] = IO.timeout(50, IO.pure(\"x\"))")) else if (!rejects("def wrong(): IO[Int] = IO.timeout(50, IO.pure(\"x\"))", "does not match declared")) Str.concat("timeoutMis ", Check.check("def wrong(): IO[Int] = IO.timeout(50, IO.pure(\"x\"))")) else if (Check.check("def right(): IO[Int] = IO.race(IO.pure(1), IO.pure(2))") != "[]") Str.concat("raceOk ", Check.check("def right(): IO[Int] = IO.race(IO.pure(1), IO.pure(2))")) else if (!rejects("def wrong(): IO[Int] = IO.race(IO.pure(1), IO.pure(\"x\"))", "arg type mismatch")) Str.concat("raceMis ", Check.check("def wrong(): IO[Int] = IO.race(IO.pure(1), IO.pure(\"x\"))")) else if (Check.check("def right(): IO[(Int, String)] = IO.both(IO.pure(1), IO.pure(\"x\"))") != "[]") Str.concat("bothOk ", Check.check("def right(): IO[(Int, String)] = IO.both(IO.pure(1), IO.pure(\"x\"))")) else if (!rejects("def wrong(): IO[String] = IO.both(IO.pure(1), IO.pure(\"x\"))", "does not match declared")) Str.concat("bothMis ", Check.check("def wrong(): IO[String] = IO.both(IO.pure(1), IO.pure(\"x\"))")) else if (Check.check("def right(): IO[String] = IO.ensure(IO.pure(\"x\"), IO.pure(()))") != "[]") Str.concat("ensureOk ", Check.check("def right(): IO[String] = IO.ensure(IO.pure(\"x\"), IO.pure(()))")) else if (Check.check("def right(): IO[List[String]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))") != "[]") Str.concat("foreachOk ", Check.check("def right(): IO[List[String]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))")) else if (!rejects("def wrong(): IO[List[Int]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))", "does not match declared")) Str.concat("foreachMis ", Check.check("def wrong(): IO[List[Int]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))")) else if (Check.check("def right(): IO[Fiber[String]] = Fiber.fork(IO.pure(\"x\"))") != "[]") Str.concat("forkOk ", Check.check("def right(): IO[Fiber[String]] = Fiber.fork(IO.pure(\"x\"))")) else if (!rejects("def wrong(): IO[Fiber[Int]] = Fiber.fork(IO.pure(\"x\"))", "does not match declared")) Str.concat("forkMis ", Check.check("def wrong(): IO[Fiber[Int]] = Fiber.fork(IO.pure(\"x\"))")) else if (!bothUnpack()) Str.concat("bothUnpack ", Check.check("def wrong(): IO[Unit] =\n  for {\n    (_, n) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n")) else if (!fiberJoin()) Str.concat("fiberJoin ", Check.check("def wrong(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    n <- Fiber.join(f)\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n")) else "ioComb-other"
 
 def dumpClosed(): String =
   if (!rejects(srcViewNope(), "unknown function View.nope")) "viewNope" else if (!rejects(srcViewArity(), "View.button expects")) "viewArity" else if (!rejects(srcSigGet(), "Signal.get arg type mismatch")) "sigGet" else if (!rejects(srcUiRun(), "Ui.run arg type mismatch")) "uiRun" else if (!rejects(srcIoNope(), "unknown function IO.notAKit")) "ioNope" else if (Check.check(srcTimeoutOk()) != "[]") Str.concat("timeoutOk ", Check.check(srcTimeoutOk())) else if (!rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")) Str.concat("timeoutMis ", Check.check(srcTimeoutMis())) else "closed-other"
@@ -466,7 +472,19 @@ def attemptTypes(): Bool =
   Type.show(Type.ioErr(Type.parse("IO[Result[Int, String]]"))) == "String" && Type.show(Type.ioOk(Type.parse("IO[Result[Int, String]]"))) == "Result[Int, String]" && Check.check("def right(io: IO[Int, String]): IO[Result[Int, String]] = IO.attempt(io)") == "[]" && rejects("def wrong(io: IO[Int, String]): IO[Result[String, String]] = IO.attempt(io)", "does not match declared") && rejects("def wrong(): IO[Result[Int, String]] = IO.attempt(3)", "type mismatch")
 
 def kitLookup(): Bool =
-  List.forall(Kits.allKits(), kit => Kits.find(kit.name) == kit) && !Kits.has("Missing.name")
+  List.forall(Kits.allKits(), kit => Kits.find(kit.name) == kit) && !Kits.has("Missing.name") && Kits.ret("IO.timeout") == "IO[E, A]" && Kits.ret("IO.both") == "IO[E, (A, B)]" && Kits.ret("Fiber.join") == "IO[A]"
+
+def ioCombinators(): Bool =
+  Check.check("def right(): IO[String] = IO.timeout(50, IO.pure(\"x\"))") == "[]" && rejects("def wrong(): IO[Int] = IO.timeout(50, IO.pure(\"x\"))", "does not match declared") && Check.check("def right(): IO[Int] = IO.race(IO.pure(1), IO.pure(2))") == "[]" && rejects("def wrong(): IO[Int] = IO.race(IO.pure(1), IO.pure(\"x\"))", "arg type mismatch") && Check.check("def right(): IO[(Int, String)] = IO.both(IO.pure(1), IO.pure(\"x\"))") == "[]" && rejects("def wrong(): IO[String] = IO.both(IO.pure(1), IO.pure(\"x\"))", "does not match declared") && Check.check("def right(): IO[String] = IO.ensure(IO.pure(\"x\"), IO.pure(()))") == "[]" && Check.check("def right(): IO[List[String]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))") == "[]" && rejects("def wrong(): IO[List[Int]] = IO.foreach([\"a\"], x => IO.pure(Str.concat(x, \"!\")))", "does not match declared") && Check.check("def right(): IO[Fiber[String]] = Fiber.fork(IO.pure(\"x\"))") == "[]" && rejects("def wrong(): IO[Fiber[Int]] = Fiber.fork(IO.pure(\"x\"))", "does not match declared") && bothUnpack() && fiberJoin()
+
+def bothUnpack(): Bool =
+  Check.check("def right(): IO[Unit] =\n  for {\n    (_, s) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    (_, n) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n", "type mismatch")
+
+def fiberJoin(): Bool =
+  Check.check("def right(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    s <- Fiber.join(f)\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    n <- Fiber.join(f)\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n", "type mismatch")
+
+def bothUnpack(): Bool =
+  Check.check("def right(): IO[Unit] =\n  for {\n    (_, s) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    (_, n) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n", "type mismatch")
 
 def resultTypes(): Bool =
   Check.check("def right(): Result[String, Int] = Result.Ok(1)") == "[]" && rejects("def wrong(): Result[String, Int] = Result.Ok(true)", "does not match declared") && Check.check("""record Problem(code: Int)
