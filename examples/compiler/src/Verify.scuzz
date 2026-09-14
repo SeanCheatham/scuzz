@@ -1423,7 +1423,7 @@ def inferTy(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]
   inferTyGot(Check.infer(e, env, Check.ftabOfList(funs), ens))
 
 def inferTyGot(o: Out): String =
-  if (Check.hasErr(o)) "A" else o.ty
+  if (Check.hasErr(o)) "A" else Check.tyStr(o)
 
 def rewriteReq(e: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   e match {
@@ -1484,13 +1484,13 @@ def rewriteRequire(recv: Expr, args: List[Expr], off: Int, env: List[(String, St
   rewriteRequireTy(recv, args, off, env, funs, ens, Check.infer(recv, env, Check.ftabOfList(funs), ens))
 
 def rewriteRequireTy(recv: Expr, args: List[Expr], off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En], ro: Out): Expr =
-  if (Check.hasErr(ro) || !Check.isIo(ro.ty)) Expr.ECall("Property.check", reqNameE(args) :: forceIoPred(reqPredE(args), env, funs, ens) :: recv :: noExpr(), off) else rewriteIoRequire(recv, reqNameE(args), reqPredE(args), off, env, funs, ens)
+  if (Check.hasErr(ro) || !Type.isIo(ro.ty)) Expr.ECall("Property.check", reqNameE(args) :: forceIoPred(reqPredE(args), env, funs, ens) :: recv :: noExpr(), off) else rewriteIoRequire(recv, reqNameE(args), reqPredE(args), off, env, funs, ens)
 
 def forceIoPred(pred: Expr, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   forceIoPredTy(pred, Check.infer(pred, env, Check.ftabOfList(funs), ens))
 
 def forceIoPredTy(pred: Expr, po: Out): Expr =
-  if (!Check.hasErr(po) && Check.isIo(po.ty)) Expr.ECall("Property.force", pred :: noExpr(), 0) else pred
+  if (!Check.hasErr(po) && Type.isIo(po.ty)) Expr.ECall("Property.force", pred :: noExpr(), 0) else pred
 
 def rewriteIoRequire(recv: Expr, nameE: Expr, pred: Expr, off: Int, env: List[(String, String)], funs: List[Fun], ens: List[En]): Expr =
   rewriteIoPred(recv, nameE, pred, off, Check.infer(pred, env, Check.ftabOfList(funs), ens))
@@ -1498,7 +1498,7 @@ def rewriteIoRequire(recv: Expr, nameE: Expr, pred: Expr, off: Int, env: List[(S
 def rewriteIoPred(recv: Expr, nameE: Expr, pred: Expr, off: Int, po: Out): Expr =
   pred match {
     case Expr.ELam(_, _, _) => reqFor(recv, nameE, reqApply(pred, off), off)
-    case _ => if (!Check.hasErr(po) && Check.isIo(po.ty)) reqForIoPred(recv, nameE, pred, off) else reqFor(recv, nameE, pred, off)
+    case _ => if (!Check.hasErr(po) && Type.isIo(po.ty)) reqForIoPred(recv, nameE, pred, off) else reqFor(recv, nameE, pred, off)
   }
 
 def reqApply(pred: Expr, off: Int): Expr =
