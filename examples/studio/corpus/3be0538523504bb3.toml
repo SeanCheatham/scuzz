@@ -3,4 +3,4 @@ seed = 43
 schedule_seed = "43"
 pct_d = 3
 pct_k = 3
-events = ["drive addItem u", "tap 23"]
+events = ["drive addItem u", "tap choicechip:Tasks", "tap button:Save"]

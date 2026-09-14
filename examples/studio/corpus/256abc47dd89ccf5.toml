@@ -7,4 +7,4 @@ fault_seed = "52"
 fault_kind = "fs"
 fault_n = 6
 fault_mode = "corrupt"
-events = ["tap 22"]
+events = ["tap choicechip:Tasks", "tap button:Save"]
