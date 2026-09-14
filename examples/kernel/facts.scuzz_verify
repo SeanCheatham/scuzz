@@ -11,7 +11,7 @@ def recordFacts(): Bool =
   Main.sum(Point(3, 5)) == 8 && Point(3, 5).show() == "Point(3,5)" && Point(3, 5).getOrElse(0) == 3
 
 def callFacts(): Bool =
-  Main.greet("hi", punct = "?") == "hi?" && Main.addDefault(3, m = 4) == 7 && Main.trunc(2.9) == 2
+  Main.greet("hi", punct = "?") == "hi?" && Main.addDefault(3, m = 4) == 7 && Main.trunc(2.9) == 2 && Main.funArrowPass() == "x"
 
 def hueFacts(): Bool =
   Main.describeHue(Color.Red) == "primary" && Main.describeSmall(0) == "tiny" && Main.describeOptZero(Opt.Some(0)) == "some0"

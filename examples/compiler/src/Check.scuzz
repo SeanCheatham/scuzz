@@ -78,28 +78,10 @@ def lookupEnv1(h: (String, String), rest: List[(String, String)], n: String): St
   }
 
 def isFunTy(t: String): Bool =
-  isFunTyAt(t, 0)
-
-def isFunTyAt(t: String, i: Int): Bool =
-  if (i + 1 >= Str.len(t)) false else isFunTyAt2(t, i)
-
-def isFunTyAt2(t: String, i: Int): Bool =
-  if (Str.charAt(t, i) == 61) isFunTyAt3(t, i) else isFunTyAt(t, i + 1)
-
-def isFunTyAt3(t: String, i: Int): Bool =
-  if (Str.charAt(t, i + 1) == 62) true else isFunTyAt(t, i + 1)
+  Type.isFunStr(t)
 
 def funRetOf(t: String): String =
-  funRetOfAt(t, 0)
-
-def funRetOfAt(t: String, i: Int): String =
-  if (i + 4 > Str.len(t)) t else funRetOfAt2(t, i)
-
-def funRetOfAt2(t: String, i: Int): String =
-  if (sliceEq(t, i, " => ")) Str.slice(t, i + 4, 8192) else funRetOfAt(t, i + 1)
-
-def sliceEq(t: String, i: Int, w: String): Bool =
-  Str.slice(t, i, i + Str.len(w)) == w
+  Type.funRetStr(t)
 
 def findFunPrefer(funs: Ftab, name: String, env: List[(String, String)]): List[Fun] =
   findFunPrefer2(funs, name, getTy(env, "#mod"))
@@ -344,10 +326,7 @@ def isLoose(t: String): Bool =
   isTyParam(t)
 
 def funArgOf(t: String): String =
-  funArgOfAt(t, 0)
-
-def funArgOfAt(t: String, i: Int): String =
-  if (i + 4 > Str.len(t)) t else if (sliceEq(t, i, " => ")) Str.slice(t, 0, i) else funArgOfAt(t, i + 1)
+  Type.funArgStr(t)
 
 def isTup(t: String): Bool =
   Str.len(t) > 0 && Str.charAt(t, 0) == 40
@@ -871,7 +850,7 @@ def inferAscribe2(o: Out, ty: String, span: (String, Int)): Out =
   if (hasErr(o)) o else if (tyEq(o.ty, ty)) ok(prefer(ty, o.ty)) else bad(Str.concat("type mismatch: expected ", Str.concat(ty, Str.concat(", got ", o.ty))), span)
 
 def inferLam(ty: String, o: Out): Out =
-  if (hasErr(o)) o else ok(Str.concat(if (ty == "") "A" else ty, Str.concat(" => ", o.ty)))
+  if (hasErr(o)) o else ok(Type.show(Type.tFun(Type.parse(if (ty == "") "A" else ty), Type.parse(o.ty))))
 
 def inferFor(bs: List[Bind], body: Expr, env: List[(String, String)], funs: Ftab, ens: List[En]): Out =
   inferForGo(bs, body, env, funs, ens, "")
@@ -1386,10 +1365,7 @@ def funTyOf(d: Fun): String =
   }
 
 def funTyFrom(ps: List[String], ret: String): String =
-  if (List.isEmpty(ps)) ret else if (List.len(ps) == 1) Str.concat(List.at(ps, 0), Str.concat(" => ", ret)) else Str.concat("(", Str.concat(joinComma(ps), Str.concat(") => ", ret)))
-
-def joinComma(ps: List[String]): String =
-  if (List.isEmpty(ps)) "" else if (List.isEmpty(List.tail(ps))) List.at(ps, 0) else Str.concat(List.at(ps, 0), Str.concat(", ", joinComma(List.tail(ps))))
+  Type.funFrom(ps, ret)
 
 def inferList(xs: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En]): Out =
   if (List.isEmpty(xs)) ok("List") else inferListRest(infer(List.at(xs, 0), env, funs, ens), List.tail(xs), env, funs, ens)

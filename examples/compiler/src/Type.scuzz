@@ -322,6 +322,21 @@ def eqStr(a: String, b: String): Bool =
 def preferStr(a: String, b: String): String =
   show(prefer(parse(a), parse(b)))
 
+def isFunStr(s: String): Bool =
+  isFun(parse(s))
+
+def funArgStr(s: String): String =
+  show(funArg(parse(s)))
+
+def funRetStr(s: String): String =
+  show(funRet(parse(s)))
+
+def funFrom(ps: List[String], ret: String): String =
+  show(funFromTy(ps, ret))
+
+def funFromTy(ps: List[String], ret: String): Ty =
+  if (List.isEmpty(ps)) parse(ret) else if (List.isEmpty(List.tail(ps))) tFun(parse(List.at(ps, 0)), parse(ret)) else tFun(tTuple(mapParse(ps)), parse(ret))
+
 def countAny(t: Ty): Int =
   t match {
     case Ty.Named(n) => if (n == "Any") 1 else 0
