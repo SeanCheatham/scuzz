@@ -5768,6 +5768,23 @@ int main(void) {
       assert(strcmp(sz_string_cstr(h), "") == 0);
       sz_release(h);
     }
+    {
+      SzString *s = sz_string_from_cstr("abc");
+      SzString *b = sz_bytes_from_str(s);
+      assert(sz_string_len(b) == 3);
+      sz_release(s);
+      sz_release(b);
+      s = sz_string_from_bytes("\xc3\xa9", 2);
+      b = sz_bytes_from_str(s);
+      assert(sz_string_len(b) == 2);
+      sz_release(s);
+      sz_release(b);
+      s = sz_string_from_cstr("");
+      b = sz_bytes_from_str(s);
+      assert(sz_string_len(b) == 0);
+      sz_release(s);
+      sz_release(b);
+    }
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
     assert(sz_string_ends_with(c, sz_string_from_cstr("")) == 1);

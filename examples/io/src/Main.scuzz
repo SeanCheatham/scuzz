@@ -25,6 +25,9 @@ def uuidOk(u: String): Bool =
 def liveUuid(): IO[Unit] =
   Uuid.v4().flatMap(u => IO.println(s"uuid:${if (uuidOk(u)) "ok" else "bad"}"))
 
+def liveBytes(): IO[Unit] =
+  IO.println(s"bytes:${Bytes.len(Bytes.fromStr(Hex.decode("c3a9")))}")
+
 def maybeKit(): IO[Unit] =
   Sys.getenv("SCUZZ_KIT").flatMap(t => if (Str.len(t) == 0) IO.println("kit:skip") else Impurity.runKit())
 
@@ -42,6 +45,7 @@ def envProbe(): IO[Unit] =
     _ <- liveHex()
     _ <- liveB64()
     _ <- liveUuid()
+    _ <- liveBytes()
     _ <- liveFs()
     _ <- liveRand()
     _ <- Concurrency.run()
