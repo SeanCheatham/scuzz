@@ -1,5 +1,5 @@
 def setup(): IO[Unit] =
-  IO.pure(())
+  Fs.write("scuzz.toml", "[package]\nname = \"editor\"\nversion = \"0.1.0\"\n")
 
 def Main.analyze(_path: String, _body: String): IO[String] =
   IO.pure("[{\"severity\":\"error\",\"message\":\"x\",\"line\":1,\"column\":1,\"file\":\"Main.scuzz\"}]")
