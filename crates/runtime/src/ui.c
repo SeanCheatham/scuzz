@@ -176,6 +176,7 @@ struct SzUiSession {
   void *code_stale;
   int code_gen;
   unsigned pumps;
+  unsigned paints;
 };
 
 static SzUiSession *g_live_session;
@@ -183,6 +184,19 @@ static char *g_pending_title;
 
 static void host_free(char **p);
 static void session_drop_pointer(SzUiSession *session);
+
+static void session_wake_live(void) {
+#ifdef __EMSCRIPTEN__
+  sz_web_idle_wake();
+#endif
+}
+
+static void session_mark_dirty(SzUiSession *session) {
+  if (!session)
+    return;
+  session->dirty = 1;
+  session_wake_live();
+}
 
 static int runtime_kind_ok(SzUiRuntimeKind kind) {
   return kind == SZ_UI_RUNTIME_HEADLESS || kind == SZ_UI_RUNTIME_DESKTOP ||
@@ -239,7 +253,7 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
     return NULL;
   }
   s->canvas = sk_surface_get_canvas(s->surface);
-  s->dirty = 1;
+  session_mark_dirty(s);
   pthread_mutex_init(&s->bridge_lock, NULL);
   {
     const char *t = cfg->title;
@@ -283,7 +297,7 @@ int sz_ui_session_replace_root(SzUiSession *session, SzView *root) {
   if (session->owns_view)
     sz_view_free(session->root);
   session->root = root;
-  session->dirty = 1;
+  session_mark_dirty(session);
   session->keyboard_visible = 0;
   return 1;
 }
@@ -751,7 +765,7 @@ int sz_ui_session_reload(SzUiSession *session) {
   if (!root)
     return 0;
   if (root == session->root) {
-    session->dirty = 1;
+    session_mark_dirty(session);
     ok = 1;
   } else
     ok = sz_ui_session_replace_root(session, root);
@@ -827,7 +841,7 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   if (session->bridge_tail && session->bridge_tail->kind == BRIDGE_INT &&
       session->bridge_tail->sig_int == sig) {
     session->bridge_tail->int_value = value;
-    session->dirty = 1;
+    session_mark_dirty(session);
     pthread_mutex_unlock(&session->bridge_lock);
     return;
   }
@@ -845,7 +859,7 @@ void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value
   else
     session->bridge_head = it;
   session->bridge_tail = it;
-  session->dirty = 1;
+  session_mark_dirty(session);
   pthread_mutex_unlock(&session->bridge_lock);
 }
 
@@ -1460,7 +1474,7 @@ static void copy_requests(SzUiSession *session) {
     if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available())
       success = sz_mobile_clipboard_set(text);
     sz_view_copy_result(button, success);
-    session->dirty = 1;
+    session_mark_dirty(session);
   }
 }
 
@@ -1503,6 +1517,17 @@ int sz_ui_pump_sync(SzUiSession *session) {
   }
   /* UI-thread hop: apply signal writes posted from completed IO. */
   sz_ui_bridge_flush(session);
+  pthread_mutex_lock(&session->bridge_lock);
+  need_dump = need_dump || session->dirty || session->bridge_head != NULL;
+  pthread_mutex_unlock(&session->bridge_lock);
+  if (!need_dump) {
+    session->pumps += 1;
+    if (sz_testrt_oracles_armed()) {
+      sz_testrt_ui_idle_check();
+      sz_testrt_ui_idle_snapshot();
+    }
+    return 1;
+  }
 
   scale = (float)session->cfg.scale;
   if (scale < 0.01f)
@@ -1559,6 +1584,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
   }
 #endif
   session->pumps += 1;
+  session->paints += 1;
   /* Leak oracle: heap must not grow across consecutive idle pumps. A dirty
    * frame resets the baseline. */
   if (sz_testrt_oracles_armed()) {
@@ -1632,7 +1658,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->pointer_scroll =
           sz_view_scroll_at(session->root, event->x, event->y);
     }
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   }
   case SZ_POINTER_MOVE:
@@ -1642,7 +1668,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session_set_hover(session, event->x, event->y, tip);
       session->pointer_x = event->x;
       session->pointer_y = event->y;
-      session->dirty = 1;
+      session_mark_dirty(session);
       return 1;
     }
     dx = event->x - session->pointer_down_x;
@@ -1653,7 +1679,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
                           sz_view_hit_test(session->root, event->x, event->y) ==
                           sz_view_hit_test(session->root, session->pointer_down_x,
                                            session->pointer_down_y));
-    session->dirty = 1;
+    session_mark_dirty(session);
     dx = event->x - session->pointer_x;
     dy = event->y - session->pointer_y;
     if (session->pointer_button == 3) {
@@ -1666,21 +1692,21 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
         sz_view_split_set_at(session->pointer_slider, event->x);
       else
         sz_view_slider_set_at(session->pointer_slider, event->x);
-      session->dirty = 1;
+      session_mark_dirty(session);
     } else if (session->pointer_field) {
       (void)sz_view_edit_extend_to_xy(session->pointer_field, event->x,
                                       event->y);
-      session->dirty = 1;
+      session_mark_dirty(session);
     } else if (session->pointer_scroll) {
       /* Finger down → content follows (positive finger pans content up or left). */
       if (sz_view_scroll_is_h(session->pointer_scroll)) {
         if (dx > 0.5f || dx < -0.5f) {
           sz_view_scroll_by(session->pointer_scroll, -dx);
-          session->dirty = 1;
+          session_mark_dirty(session);
         }
       } else if (dy > 0.5f || dy < -0.5f) {
         sz_view_scroll_by(session->pointer_scroll, -dy);
-        session->dirty = 1;
+        session_mark_dirty(session);
       }
     }
     session->pointer_x = event->x;
@@ -1695,7 +1721,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     dy = event->y - session->pointer_down_y;
     session->pointer_down = 0;
     sz_view_set_pressed_at(session->root, 0.f, 0.f, 0);
-    session->dirty = 1;
+    session_mark_dirty(session);
     session->pointer_scroll = NULL;
     if (session->pointer_button == 3) {
       SzView *hit = NULL;
@@ -1703,7 +1729,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
         hit = sz_view_hit_test(session->root, event->x, event->y);
         session_set_last_secondary(session, event->x, event->y, hit);
         (void)sz_view_handle_secondary(session->root, event->x, event->y);
-        session->dirty = 1;
+        session_mark_dirty(session);
       }
       session->pointer_slider = NULL;
       session->pointer_field = NULL;
@@ -1716,7 +1742,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session_set_last_hit(session, event->x, event->y, sl);
       session->pointer_slider = NULL;
       session->pointer_field = NULL;
-      session->dirty = 1;
+      session_mark_dirty(session);
       return 1;
     }
     if (session->pointer_field) {
@@ -1727,7 +1753,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
         (void)sz_view_handle_tap(session->root, event->x, event->y);
       sync_keyboard(session);
       session->pointer_field = NULL;
-      session->dirty = 1;
+      session_mark_dirty(session);
       return 1;
     }
     if (dx * dx + dy * dy <= tap_slop2) {
@@ -1736,7 +1762,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session_set_last_hit(session, event->x, event->y, fired ? hit : NULL);
       if (fired)
         sync_keyboard(session);
-      session->dirty = 1;
+      session_mark_dirty(session);
     }
     session->pointer_field = NULL;
     return 1;
@@ -1756,7 +1782,7 @@ int sz_ui_scroll_index(SzUiSession *session, int index, float dy) {
   if (index < 0 || index >= count)
     return 0;
   sz_view_scroll_by(scrolls[index], dy);
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -1780,21 +1806,21 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
     if (fired)
       sync_keyboard(session);
     /* Miss is a successful inject; mark dirty so live dump rewrites. */
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   }
   case SZ_INPUT_TEXT:
     if (!sz_view_handle_text(session->root, event->text))
       return 0;
     sync_keyboard(session);
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   case SZ_INPUT_TEXT_EDIT: {
     int backspace = !event->text || !event->text[0];
     if (!sz_view_handle_text_edit(session->root, event->text, backspace))
       return 0;
     sync_keyboard(session);
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   }
   case SZ_INPUT_KEY: {
@@ -1820,7 +1846,7 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
         sz_view_layout(session->root, (float)session->cfg.width,
                        (float)session->cfg.height, session->theme);
         (void)sz_view_tap_label(session->root, lab);
-        session->dirty = 1;
+        session_mark_dirty(session);
         return 1;
       }
     }
@@ -1828,14 +1854,14 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
                             event->key_mods))
       return 0;
     sync_keyboard(session);
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   }
   case SZ_INPUT_COMPOSE:
     if (!sz_view_handle_compose(session->root, event->text))
       return 0;
     sync_keyboard(session);
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   case SZ_INPUT_RESIZE:
     if (event->width <= 0 || event->height <= 0)
@@ -1859,7 +1885,7 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
     sz_view_reveal_focus(session->root);
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   case SZ_INPUT_POINTER:
     return inject_pointer(session, event);
@@ -1870,7 +1896,7 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
     if (!scroll)
       return 0;
     sz_view_scroll_by(scroll, event->dy);
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   case SZ_INPUT_LIFECYCLE:
     if (event->lifecycle != SZ_LIFECYCLE_RESUME &&
@@ -1884,13 +1910,13 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
       if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
         sz_mobile_set_keyboard(0);
     }
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   case SZ_INPUT_KEYBOARD:
     session->keyboard_visible = event->keyboard_visible ? 1 : 0;
     if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
       sz_mobile_set_keyboard(session->keyboard_visible);
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   default:
     return 0;
@@ -1918,7 +1944,7 @@ int sz_ui_session_activate_view(SzUiSession *session, SzView *target) {
   copy_requests(session);
   session_set_last_hit(session, x, y, target);
   sync_keyboard(session);
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -1942,7 +1968,7 @@ int sz_ui_session_set_caret(SzUiSession *session, int index, int offset) {
     } else if (!sz_view_set_text_field_caret(target, offset))
       return 0;
   }
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -1966,7 +1992,7 @@ int sz_ui_session_set_sel(SzUiSession *session, int index, int start, int end) {
     } else if (!sz_view_set_text_field_sel(target, start, end))
       return 0;
   }
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -1984,7 +2010,7 @@ int sz_ui_session_copy(SzUiSession *session) {
     clipboard_os_set(sel);
   }
   sz_free(sel);
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -2012,7 +2038,7 @@ int sz_ui_session_cut(SzUiSession *session) {
   if (!sz_view_handle_key(session->root, ev.key, "", 0))
     return 0;
   sync_keyboard(session);
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -2031,13 +2057,13 @@ int sz_ui_session_paste(SzUiSession *session, const char *text) {
     clipboard_os_pull(session);
   payload = session->clipboard ? session->clipboard : "";
   if (!payload[0]) {
-    session->dirty = 1;
+    session_mark_dirty(session);
     return 1;
   }
   if (!sz_view_handle_text_edit(session->root, payload, 0))
     return 0;
   sync_keyboard(session);
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -2073,7 +2099,7 @@ int sz_ui_session_set_title(SzUiSession *session, const char *title) {
   sz_free(session->title_owned);
   session->title_owned = n;
   session->cfg.title = n;
-  session->dirty = 1;
+  session_mark_dirty(session);
   return 1;
 }
 
@@ -2127,7 +2153,7 @@ static void *thunk_set_editor_caret(void *env) {
   off = sz_view_editor_offset_at_line_col(ed, (int)line, (int)col);
   sz_view_set_editor_caret(ed, off);
   if (g_live_session)
-    g_live_session->dirty = 1;
+    session_mark_dirty(g_live_session);
   return NULL;
 }
 
@@ -2166,7 +2192,7 @@ static void *thunk_set_editor_diagnostics(void *env) {
   if (n <= 0) {
     sz_view_editor_set_diagnostics(ed, NULL, NULL, 0);
     if (g_live_session)
-      g_live_session->dirty = 1;
+      session_mark_dirty(g_live_session);
     return NULL;
   }
   lines = (int *)sz_alloc(sizeof(int) * (size_t)n);
@@ -2186,7 +2212,7 @@ static void *thunk_set_editor_diagnostics(void *env) {
   sz_free(lines);
   sz_free(sevs);
   if (g_live_session)
-    g_live_session->dirty = 1;
+    session_mark_dirty(g_live_session);
   return NULL;
 }
 
@@ -2208,7 +2234,7 @@ static void *thunk_set_editor_tokens(void *env) {
   if (n <= 0) {
     sz_view_editor_set_tokens(ed, NULL, 0);
     if (g_live_session)
-      g_live_session->dirty = 1;
+      session_mark_dirty(g_live_session);
     return NULL;
   }
   vals = (int *)sz_alloc(sizeof(int) * (size_t)n);
@@ -2220,7 +2246,7 @@ static void *thunk_set_editor_tokens(void *env) {
   sz_view_editor_set_tokens(ed, vals, n);
   sz_free(vals);
   if (g_live_session)
-    g_live_session->dirty = 1;
+    session_mark_dirty(g_live_session);
   return NULL;
 }
 
@@ -2244,7 +2270,7 @@ static void *thunk_set_editor_inlays(void *env) {
   if (n <= 0) {
     sz_view_editor_set_inlays(ed, NULL, NULL, NULL, 0);
     if (g_live_session)
-      g_live_session->dirty = 1;
+      session_mark_dirty(g_live_session);
     return NULL;
   }
   lines = (int *)sz_alloc(sizeof(int) * (size_t)n);
@@ -2270,7 +2296,7 @@ static void *thunk_set_editor_inlays(void *env) {
   sz_free(cols);
   sz_free(labels);
   if (g_live_session)
-    g_live_session->dirty = 1;
+    session_mark_dirty(g_live_session);
   return NULL;
 }
 
@@ -2292,7 +2318,7 @@ static void *thunk_set_editor_folds(void *env) {
   if (n <= 0) {
     sz_view_editor_set_folds(ed, NULL, NULL, 0);
     if (g_live_session)
-      g_live_session->dirty = 1;
+      session_mark_dirty(g_live_session);
     return NULL;
   }
   starts = (int *)sz_alloc(sizeof(int) * (size_t)n);
@@ -2308,7 +2334,7 @@ static void *thunk_set_editor_folds(void *env) {
   sz_free(starts);
   sz_free(ends);
   if (g_live_session)
-    g_live_session->dirty = 1;
+    session_mark_dirty(g_live_session);
   return NULL;
 }
 
@@ -2337,6 +2363,20 @@ int sz_ui_session_keyboard_visible(const SzUiSession *session) {
 
 unsigned sz_ui_session_pumps(const SzUiSession *session) {
   return session ? session->pumps : 0;
+}
+
+unsigned sz_ui_session_paints(const SzUiSession *session) {
+  return session ? session->paints : 0;
+}
+
+int sz_ui_session_needs_paint(SzUiSession *session) {
+  int busy;
+  if (!session)
+    return 0;
+  pthread_mutex_lock(&session->bridge_lock);
+  busy = session->dirty || session->bridge_head != NULL;
+  pthread_mutex_unlock(&session->bridge_lock);
+  return busy;
 }
 
 /* Resolve width, height, and scale from args or env. */
@@ -2425,9 +2465,9 @@ void sz_ui_session_focus_view(SzUiSession *session, SzView *view) {
   sz_view_layout(session->root, (float)session->cfg.width,
                  (float)session->cfg.height, session->theme);
   sz_view_focus(session->root, view);
-  session->dirty = 1;
+  session_mark_dirty(session);
 }
 
 void sz_ui_session_invalidate(SzUiSession *session) {
-  if (session) session->dirty = 1;
+  if (session) session_mark_dirty(session);
 }

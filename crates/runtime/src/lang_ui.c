@@ -326,11 +326,22 @@ static void live_pump_loop(SzUiSession *session, int (*still)(void)) {
   int64_t max_frames = max_frames_parsed > 0 ? max_frames_parsed : 0;
   int64_t frame = 0;
   while (sz_ui_session_alive(session) && still()) {
+#ifdef __EMSCRIPTEN__
+    int busy = sz_ui_session_needs_paint(session);
+    if (busy) {
+      if (!sz_ui_pump_sync(session)) {
+        if (!sz_ui_session_alive(session))
+          break;
+        sz_panic("Ui.run live pump failed");
+      }
+    }
+#else
     if (!sz_ui_pump_sync(session)) {
       if (!sz_ui_session_alive(session))
         break;
       sz_panic("Ui.run live pump failed");
     }
+#endif
     if (!sz_ui_session_alive(session))
       break;
     frame++;
@@ -338,7 +349,10 @@ static void live_pump_loop(SzUiSession *session, int (*still)(void)) {
       break;
     {
 #ifdef __EMSCRIPTEN__
-      emscripten_sleep(16);
+      if (busy || sz_ui_session_needs_paint(session))
+        emscripten_sleep(16);
+      else
+        sz_web_idle_wait();
 #else
       struct timespec ts;
       ts.tv_sec = 0;
