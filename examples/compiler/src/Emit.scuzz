@@ -18,7 +18,10 @@ import Parse.Imp
 import Lexer.Tok
 import Lexer.SpTok
 import Check.Ftab
+import Type.Ty
 import Check.getTy
+import Check.noEnv
+import Check.envBind
 import Check.withImportFuns
 import Check.fileOf
 import Check.locOfIdx
@@ -36,9 +39,6 @@ def noExpr(): List[Expr] =
   []
 
 def noBool(): List[Bool] =
-  []
-
-def noEnv(): List[(String, String)] =
   []
 
 def noParam(): List[Param] =
@@ -4824,15 +4824,15 @@ def rwDef(d: Fun, defs: Ftab, ens: List[En]): Fun =
     case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, ps, ret, rwFields(body, paramEnv(ps), defs, ens, mod), mod, off)
   }
 
-def paramEnv(ps: List[Param]): List[(String, String)] =
+def paramEnv(ps: List[Param]): List[(String, Ty)] =
   if (List.isEmpty(ps)) noEnv() else paramEnv1(List.at(ps, 0), List.tail(ps))
 
-def paramEnv1(p: Param, rest: List[Param]): List[(String, String)] =
+def paramEnv1(p: Param, rest: List[Param]): List[(String, Ty)] =
   p match {
-    case Param(n, ty, _, _) => (n, ty) :: paramEnv(rest)
+    case Param(n, ty, _, _) => envBind(n, ty, paramEnv(rest))
   }
 
-def rwFields(e: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): Expr =
+def rwFields(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): Expr =
   e match {
     case Expr.EPrint(inner, off) => Expr.EPrint(rwFields(inner, env, funs, ens, mod), off)
     case Expr.ECall(f, args, off) => rwCall(f, rwFieldList(args, env, funs, ens, mod), funs, mod, off)
@@ -4854,44 +4854,44 @@ def rwFields(e: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], mo
 def rwCall(f: String, args: List[Expr], funs: Ftab, mod: String, off: Int): Expr =
   if (List.isEmpty(findDefMod(funs, mod, f))) Expr.ECall(f, args, off) else Expr.EMethod(Expr.EVar(mod, 0), f, args, off)
 
-def rwFieldList(xs: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
+def rwFieldList(xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
   if (List.isEmpty(xs)) noExpr() else rwFieldListGo(xs, env, funs, ens, mod)
 
-def rwFieldListGo(xs: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
+def rwFieldListGo(xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
   rwFieldListH(List.at(xs, 0), env, funs, ens, mod, xs)
 
-def rwFieldListH(h: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String, xs: List[Expr]): List[Expr] =
+def rwFieldListH(h: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String, xs: List[Expr]): List[Expr] =
   rwFieldListT(h, env, funs, ens, mod, List.tail(xs))
 
-def rwFieldListT(h: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String, rest: List[Expr]): List[Expr] =
+def rwFieldListT(h: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String, rest: List[Expr]): List[Expr] =
   rwFieldListCons(rwFields(h, env, funs, copyEns(ens), mod), rest, env, funs, ens, mod)
 
-def rwFieldListCons(e: Expr, rest: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
+def rwFieldListCons(e: Expr, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
   e :: rwFieldList(rest, env, funs, ens, mod)
 
-def rwFieldArms(arms: List[Arm], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Arm] =
+def rwFieldArms(arms: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Arm] =
   if (List.isEmpty(arms)) noArm() else rwFieldArm(List.at(arms, 0), env, funs, ens, mod) :: rwFieldArms(List.tail(arms), env, funs, ens, mod)
 
-def rwForBinds(bs: List[Bind], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
+def rwForBinds(bs: List[Bind], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
   if (List.isEmpty(bs)) bs else rwForBindsHit(bs, env, funs, ens, mod)
 
-def rwForBindsHit(bs: List[Bind], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
+def rwForBindsHit(bs: List[Bind], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
   bs match {
     case b :: rest => rwForBinds1(b, rest, env, funs, ens, mod)
     case [] => bs
   }
 
-def rwForBinds1(b: Bind, rest: List[Bind], env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
+def rwForBinds1(b: Bind, rest: List[Bind], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Bind] =
   b match {
     case Bind(d, n, v) => Bind(d, n, rwFields(v, env, funs, ens, mod)) :: rwForBinds(rest, env, funs, ens, mod)
   }
 
-def rwFieldArm(a: Arm, env: List[(String, String)], funs: Ftab, ens: List[En], mod: String): Arm =
+def rwFieldArm(a: Arm, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): Arm =
   a match {
     case Arm(pat, g, body) => Arm(pat, g, rwFields(body, env, funs, ens, mod))
   }
 
-def rwField(recv: Expr, name: String, off: Int, env: List[(String, String)], funs: Ftab, ens: List[En]): Expr =
+def rwField(recv: Expr, name: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Expr =
   recv match {
     case Expr.EVar(en, _) => rwFieldVar(en, name, off, env, ens)
     case Expr.EMethod(r, m, args, _) => rwFieldMethod(r, m, args, name, off, env, funs, ens)
@@ -4899,10 +4899,10 @@ def rwField(recv: Expr, name: String, off: Int, env: List[(String, String)], fun
     case _ => rwFieldTy(recv, name, off, copyEn(recv, ens, funs), ens)
   }
 
-def rwFieldVar(en: String, name: String, off: Int, env: List[(String, String)], ens: List[En]): Expr =
+def rwFieldVar(en: String, name: String, off: Int, env: List[(String, Ty)], ens: List[En]): Expr =
   if (hasEn(ens, en)) Expr.EField(Expr.EVar(en, 0), name, off) else rwFieldTy(Expr.EVar(en, 0), name, off, getTy(env, en), ens)
 
-def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, off: Int, _env: List[(String, String)], funs: Ftab, ens: List[En]): Expr =
+def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, off: Int, _env: List[(String, Ty)], funs: Ftab, ens: List[En]): Expr =
   r match {
     case Expr.EVar(mod, _) => rwFieldQualHit(m, args, name, off, ens, findDefMod(funs, mod, m))
     case _ => rwFieldTy(Expr.EMethod(r, m, args, 0), name, off, copyEn(Expr.EMethod(r, m, args, 0), ens, funs), ens)
