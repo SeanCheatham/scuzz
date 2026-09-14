@@ -318,7 +318,7 @@ def tokLen(t: Tok, src: String, off: Int): Int =
   }
 
 def tokenInts(toks: List[SpTok], src: String, starts: List[Int], pl: Int, pc: Int, acc: List[Int]): List[Int] =
-  if (List.isEmpty(toks)) acc else tokenIntsHd(List.at(toks, 0), List.tail(toks), src, starts, pl, pc, acc)
+  if (List.isEmpty(toks)) List.reverse(acc) else tokenIntsHd(List.at(toks, 0), List.tail(toks), src, starts, pl, pc, acc)
 
 def tokenIntsHd(sp: SpTok, rest: List[SpTok], src: String, starts: List[Int], pl: Int, pc: Int, acc: List[Int]): List[Int] =
   sp match {
@@ -337,10 +337,7 @@ def tokenIntsLoc(loc: (Int, Int, Int, Int), n: Int, ty: Int, rest: List[SpTok], 
   }
 
 def tokenIntsDelta(ll: Int, cc: Int, n: Int, ty: Int, rest: List[SpTok], src: String, starts: List[Int], pl: Int, pc: Int, acc: List[Int]): List[Int] =
-  tokenInts(rest, src, starts, ll, cc, List.concat(acc, tokenRow(ll - pl, if (ll == pl) cc - pc else cc, if (n < 1) 1 else n, ty)))
-
-def tokenRow(dline: Int, dcol: Int, n: Int, ty: Int): List[Int] =
-  dline :: dcol :: n :: ty :: 0 :: []
+  tokenInts(rest, src, starts, ll, cc, 0 :: ty :: (if (n < 1) 1 else n) :: (if (ll == pl) cc - pc else cc) :: ll - pl :: acc)
 
 def tokensJoin(xs: List[Int]): String =
   if (List.isEmpty(xs)) "" else tokensJoinGo(xs, Builder.empty())
