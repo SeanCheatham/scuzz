@@ -45,6 +45,10 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 0);
     await page.getByRole('link', {name: 'Docs', exact: true}).click();
     await expectText('text:Start');
+    assert.equal(await page.getByRole('button', {name: 'Add one', exact: true}).count(), 0);
+    await page.getByRole('link', {name: 'Try Signals', exact: true}).click();
+    await expectText('text:Signals');
+    assert.equal(new URL(page.url()).hash, '#section=signals');
     await page.getByRole('button', {name: 'Add one', exact: true}).focus();
     await page.getByRole('button', {name: 'Add one', exact: true}).click();
     await expectText('text:Count: 1');
@@ -69,7 +73,7 @@ async function check(browserType, url, mobile) {
     }
     await page.goBack(); await expectText('text:Verify');
     await page.goForward(); await expectText('text:Web');
-    await page.getByRole('link', {name: 'Start', exact: true}).click();
+    await page.getByRole('link', {name: 'Signals', exact: true}).click();
     await expectText('text:Count: 1');
     await page.getByRole('button', {name: 'Reset', exact: true}).click();
     await expectText('text:Count: 0');
