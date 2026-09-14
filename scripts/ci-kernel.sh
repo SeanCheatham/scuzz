@@ -58,6 +58,8 @@ grep -q "kit:skip" /tmp/io.out
 grep -q "fs:" /tmp/io.out
 "$SCUZZ" fuzz --iterations 0 examples/io | tee /tmp/io-test.out
 grep -q "served:POST:/ping:hi" /tmp/io-test.out
+grep -q "ping:200:ok:ok:/ping" /tmp/io-test.out
+grep -q "miss:404:miss:missing" /tmp/io-test.out
 grep -q "impurity-ok" /tmp/io-test.out
 grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/hello

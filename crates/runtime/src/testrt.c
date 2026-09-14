@@ -1513,12 +1513,15 @@ static void *stub_http_req(void *env) {
         if (strcmp(s->url, url) == 0) {
           size_t n = strlen(s->body);
           char *bad = (char *)sz_alloc(n + 2);
+          SzString *body;
           if (n)
             memcpy(bad, s->body, n);
           bad[n] = '!';
           bad[n + 1] = '\0';
+          body = sz_string_from_cstr(bad);
           r->is_err = 0;
-          r->as.ok = sz_string_from_cstr(bad);
+          r->as.ok = sz_net_http_resp(200, NULL, body);
+          sz_release(body);
           sz_free(bad);
           goto done;
         }
@@ -1532,8 +1535,10 @@ static void *stub_http_req(void *env) {
   }
   for (s = g_stubs; s; s = s->next) {
     if (strcmp(s->url, url) == 0) {
+      SzString *body = sz_string_from_cstr(s->body);
       r->is_err = 0;
-      r->as.ok = sz_string_from_cstr(s->body);
+      r->as.ok = sz_net_http_resp(200, NULL, body);
+      sz_release(body);
       goto done;
     }
   }

@@ -23,24 +23,30 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 ## Known gaps
 
-Close thesis-critical gaps before table-stakes kits. Close table-stakes before later items. Locks: [`vision.md`](vision.md).
+Next work is app-shaped stdlib and real tooling. Checker Fun-string residuals are not the next slice. Locks: [`vision.md`](vision.md).
+
+### Cuts
+
+Do not add user FFI, `extern`, or plugins. Determinism and effect capture are not settled.
+
+Do not add library publishing, git or registry deps, or `scuzz add`. Path deps stay. A hosted registry may never ship.
 
 ### Thesis-critical
 
-Close them in this order.
+Not the next slice.
 
-1. **Checker and emit residuals** — `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. A Queue or Deferred handle has no payload until the first offer or complete. Param letters (`A`/`E`) still unify. Parse Param/Fun stay strings. Check binds Param/Fun into the env as `Ty`. Check.Out stores a `Ty`. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
+1. **Checker and emit residuals** — `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. A Queue or Deferred handle has no payload until the first offer or complete. Param letters (`A`/`E`) still unify. Parse Param/Fun stay strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
 2. **Compile-time performance** — `scuzz check examples/compiler` is 16 s. A cold `scuzz build examples/tyck` is 1 m 10 s. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
 
 ### Table-stakes
 
-Needed before a real CLI, server, or desktop app stays.
+Needed before a real CLI, server, or desktop app stays. Next work lives here.
 
-HTTP status, headers, and `0.0.0.0` bind. HTTPS `Net.serve`. Time, regex, hash, hex/base64, UUID. `Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Generators. Drive `==` wrap on UI. OS threads.
+HTTPS `Net.serve`. Time, regex, hash, hex/base64, UUID. `Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Generators. Drive `==` wrap on UI. OS threads.
 
 ### Later
 
-Do not start these before thesis-critical gaps close.
+Do not start FFI, plugins, or a package registry. Other later items stay parked.
 
-Generated setup inputs. Multiple named scenarios and campaign selection. Stable scroll keys. Simulation faults. Semantic mutants. Git and hosted deps. Windows desktop. OS IME candidate windows. macOS full packaging in default CI. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Oracle mining. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
+Generated setup inputs. Multiple named scenarios and campaign selection. Stable scroll keys. Simulation faults. Semantic mutants. Windows desktop. OS IME candidate windows. macOS full packaging in default CI. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Oracle mining. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.

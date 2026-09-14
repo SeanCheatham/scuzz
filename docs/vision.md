@@ -70,7 +70,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **Verification** is built into `scuzz` and the language. A search failure fails `scuzz fuzz`. A mutation survivor does not. Catalog: run `scuzz docs verify`.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps `check`. Panic, goto-def, and rename must use Scuzz source spans. Do not grow a second typer or schema.
 - **Dogfood IDE.** `scuzz ide` launches a Scuzz `[ui]` package. Headless stays a peer. Editor landmarks stay unnumbered. Docs may use Index Book. The app consumes `scuzz check` / `lsp` / `fmt` / `run` / `fuzz`. Do not add Desktop-only editor behavior. Do not ship a second `scuzz-ide` binary.
-- **`scuzz.toml` is data** — package, path deps, `[ui]`, optional `[fuzz].score_floor`. No plugin DSL. Unknown keys rejected. `--headless` forces Headless.
+- **`scuzz.toml` is data** — package, path deps, `[ui]`, optional `[fuzz].score_floor`. No plugin DSL. Unknown keys rejected. `--headless` forces Headless. No `scuzz add`. No git or registry deps. No library publishing. A hosted registry may never ship.
 - **Docs.** `scuzz docs` prints the technical manual from `examples/manual`. Kit rows come from `examples/compiler/src/Kits.scuzz`. There is no `guide.md`. Run `scuzz docs kits` and `scuzz docs language`.
 - **Fingerprint** (incremental): miss → rebuild. Native make stays quiet on success. Fail on the first missing tool with one install line.
 - **`scuzz package`:** `--target` is host, android, ios, web, or all. Hardware device runs stay open ([`gaps.md`](gaps.md)).
@@ -91,7 +91,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO and impurity
 
-One failure channel: `SzError` on `IO[T]`. Typed `E` on `IO` without environment `R`. Do not add `ZIO[R, E, A]`. Blessed kits only. No app-level `IO.delay`. No user FFI. Cooperative single-threaded fibers are the scheduler. Simulation is hermetic. No live sockets under sim. Live HTTP uses this HTTP/1.0 stack plus OpenSSL. Do not expose POSIX sockets. Do not add a second HTTP client. Kits: run `scuzz docs kits`. A panic must print a Scuzz file and line.
+One failure channel: `SzError` on `IO[T]`. Typed `E` on `IO` without environment `R`. Do not add `ZIO[R, E, A]`. Blessed kits only. No app-level `IO.delay`. No user FFI, `extern`, or plugins. Determinism and effect capture are not settled. Cooperative single-threaded fibers are the scheduler. Simulation is hermetic. No live sockets under sim. Live HTTP uses this HTTP/1.0 stack plus OpenSSL. A response is `(Int, Map[String, String], String)`. Serve binds `0.0.0.0` and `::`. Do not expose POSIX sockets. Do not add a second HTTP client. Kits: run `scuzz docs kits`. A panic must print a Scuzz file and line.
 
 `Stream` is one finite pull interpreter. Bind a Stream with `=`. `<-` needs `IO`. Do not add backpressure, publishers, or a second stream kit.
 
@@ -130,7 +130,7 @@ Locks (not an API catalog — run `scuzz docs language` and `scuzz docs kits`):
 
 Expression-only dialect. **`for` is the kernel binder**. `=` aliases a pure value. `<-` sequences an effect. No `val`. No `var`. No statement blocks. `{ case … }` is a lambda, not a block. Surface sugar elaborates to a small core.
 
-Scala **nouns**, Rust/Cargo **verbs**. No JVM packages. Direction: payload **enums** / **`record`** + thin **traits**. Monomorphize generics early. No classes. Path deps remain the unit of reuse. Details: run `scuzz docs language`. Keep/cut: [`compatibility.md`](compatibility.md).
+Scala **nouns**, Rust/Cargo **verbs**. No JVM packages. Direction: payload **enums** / **`record`** + thin **traits**. Monomorphize generics early. No classes. Path deps remain the unit of reuse. Do not add a package registry. Details: run `scuzz docs language`. Keep/cut: [`compatibility.md`](compatibility.md).
 
 ## Verification posture
 
@@ -163,7 +163,9 @@ GUI apps also target WebAssembly. Scuzz Docs is the first browser app. Full web 
 
 ## Open work
 
-Next: checker and emit residuals. Ranked list: [`gaps.md`](gaps.md).
+Next: one missing stdlib hole an app needs, then real tooling. Not checker Fun-string residuals. Not GUI. Not user FFI. Not a package registry.
+
+Ranked list: [`gaps.md`](gaps.md).
 
 ## Risks
 

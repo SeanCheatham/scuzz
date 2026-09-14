@@ -941,14 +941,16 @@ int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, 
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
 
-SzIo *sz_net_http_get(SzString *url); /* IO[String] body; 2xx; 1 MiB; http:// or https:// */
+SzIo *sz_net_http_get(SzString *url); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
 SzIo *sz_net_http_post(SzString *url, SzString *body);
 SzIo *sz_net_http_put(SzString *url, SzString *body);
 SzIo *sz_net_http_patch(SzString *url, SzString *body);
 SzIo *sz_net_http_delete(SzString *url);
 SzIo *sz_net_http_head(SzString *url);
-SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one request; handler gets (path, method, body) */
-SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; drop bad clients/handlers */
+/* Pack (status, headers, body). Empty headers may be NULL. */
+void *sz_net_http_resp(int64_t status, SzMap *headers, SzString *body);
+SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one request; handler gets (path, method, body) and returns (status, headers, body) */
+SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; bind 0.0.0.0 and ::; drop bad clients/handlers */
 typedef struct SzNetSock {
   int fd;
   int fd6;
@@ -980,6 +982,8 @@ void sz_net_test_set_nameserver(const char *ipv4, int port);
 /* Test-only: Host header value for HTTP (RFC 9110). */
 void sz_net_test_http_host_header(const char *host, int port, char *out,
                                  size_t cap);
+/* Test-only: 1 when HTTP serve v4 bind uses INADDR_ANY (0.0.0.0). */
+int sz_net_test_serve_v4_is_any(void);
 
 /* TestRuntime — fake interpreters for deterministic scuzz fuzz */
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */

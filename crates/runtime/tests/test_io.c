@@ -515,6 +515,45 @@ static SzString *serve_req_path(void *req) {
   return p && p->left ? (SzString *)p->left : (SzString *)req;
 }
 
+static SzString *http_resp_body(void *resp) {
+  SzPair *p = (SzPair *)resp;
+  SzPair *inner;
+  if (!p || !p->right)
+    return NULL;
+  inner = (SzPair *)p->right;
+  return inner->right ? (SzString *)inner->right : NULL;
+}
+
+static int64_t http_resp_status(void *resp) {
+  SzPair *p = (SzPair *)resp;
+  return p && p->left ? sz_unbox_i64(p->left) : -1;
+}
+
+static const char *http_resp_body_cstr(void *resp) {
+  SzString *s = http_resp_body(resp);
+  return s ? sz_string_cstr(s) : "";
+}
+
+static const char *http_resp_hdr(void *resp, const char *name) {
+  SzPair *p = (SzPair *)resp;
+  SzPair *inner = p ? (SzPair *)p->right : NULL;
+  SzMap *h = inner ? (SzMap *)inner->left : NULL;
+  SzString *k;
+  void *v;
+  if (!name)
+    return "";
+  k = sz_string_from_cstr(name);
+  v = sz_map_get_or(h, k, NULL);
+  sz_release(k);
+  return v ? sz_string_cstr((SzString *)v) : "";
+}
+
+static SzIo *http_ok(SzString *body) {
+  void *resp = sz_net_http_resp(200, NULL, body);
+  sz_release(body);
+  return pure_drop(resp);
+}
+
 static SzIo *serve_path_ok(void *path, void *env) {
   SzString *prefix;
   SzString *out;
@@ -522,7 +561,7 @@ static SzIo *serve_path_ok(void *path, void *env) {
   prefix = sz_string_from_cstr("ok:");
   out = sz_string_concat(prefix, serve_req_path(path));
   sz_release(prefix);
-  return pure_drop(out);
+  return http_ok(out);
 }
 
 static SzIo *serve_echo_req(void *req, void *env) {
@@ -534,7 +573,7 @@ static SzIo *serve_echo_req(void *req, void *env) {
   char buf[2048];
   (void)env;
   snprintf(buf, sizeof buf, "%s:%s:%s", method, path, body);
-  return pure_drop(sz_string_from_cstr(buf));
+  return http_ok(sz_string_from_cstr(buf));
 }
 
 static int g_serve_fail_n;
@@ -543,7 +582,7 @@ static SzIo *serve_fail_then_ok(void *path, void *env) {
   (void)env;
   if (g_serve_fail_n++ == 0)
     return sz_io_fail_cstr("handler boom");
-  return pure_drop(
+  return http_ok(
       sz_string_concat(sz_string_from_cstr("ok:"), serve_req_path(path)));
 }
 
@@ -558,7 +597,7 @@ static SzIo *serve_big_ok(void *path, void *env) {
   {
     SzString *s = sz_string_from_bytes(blob, N);
     free(blob);
-    return pure_drop(s);
+    return http_ok(s);
   }
 }
 
@@ -574,7 +613,23 @@ static SzIo *serve_padded_ok(void *path, void *env) {
   memcpy(blob, "ok:/x", 5);
   s = sz_string_from_bytes(blob, N);
   free(blob);
-  return pure_drop(s);
+  return http_ok(s);
+}
+
+static SzIo *serve_not_found(void *path, void *env) {
+  SzString *k = sz_string_from_cstr("X-Trace");
+  SzString *v = sz_string_from_cstr("miss");
+  SzString *body = sz_string_from_cstr("missing");
+  SzMap *h = sz_map_set(NULL, k, v, 1);
+  void *resp;
+  (void)path;
+  (void)env;
+  resp = sz_net_http_resp(404, h, body);
+  sz_release(k);
+  sz_release(v);
+  sz_release(h);
+  sz_release(body);
+  return pure_drop(resp);
 }
 
 enum { SERVE_LEAK_N = 10000 };
@@ -6752,7 +6807,8 @@ int main(void) {
     r = sz_io_unsafe_run(
         sz_net_http_get(sz_string_from_cstr("http://example.test/ping")));
     assert(r.ok);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "pong") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "pong") == 0);
+    assert(http_resp_status(r.value) == 200);
     sz_release(r.value);
 
     sz_alloc_stats(&base_bytes, &base_count);
@@ -6882,7 +6938,8 @@ int main(void) {
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->right);
-      assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/ping") == 0);
+      assert(strcmp(http_resp_body_cstr(pair->right), "ok:/ping") == 0);
+      assert(http_resp_status(pair->right) == 200);
       assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/ping") == 0);
       assert(sz_testrt_net_serve_pending() == 0);
       sz_pair_free(pair);
@@ -6895,7 +6952,8 @@ int main(void) {
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->left);
-      assert(strcmp(sz_string_cstr((SzString *)pair->left), "ok:/pong") == 0);
+      assert(strcmp(http_resp_body_cstr(pair->left), "ok:/pong") == 0);
+      assert(http_resp_status(pair->left) == 200);
       sz_pair_free(pair);
 
       sz_testrt_net_set_last_serve_body(NULL);
@@ -6906,7 +6964,7 @@ int main(void) {
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->right);
-      assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/hi") == 0);
+      assert(strcmp(http_resp_body_cstr(pair->right), "ok:/hi") == 0);
       sz_pair_free(pair);
 
       sz_testrt_net_set_last_serve_body(NULL);
@@ -6917,7 +6975,20 @@ int main(void) {
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->right);
-      assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/v6") == 0);
+      assert(strcmp(http_resp_body_cstr(pair->right), "ok:/v6") == 0);
+      sz_pair_free(pair);
+
+      sz_testrt_net_set_last_serve_body(NULL);
+      url = sz_string_from_cstr("http://127.0.0.1:8080/nope");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_not_found, NULL),
+                                    sz_net_http_get(url)));
+      sz_release(url);
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(http_resp_status(pair->right) == 404);
+      assert(strcmp(http_resp_body_cstr(pair->right), "missing") == 0);
+      assert(strcmp(http_resp_hdr(pair->right, "X-Trace"), "miss") == 0);
       sz_pair_free(pair);
 
       sz_testrt_net_stub("http://127.0.0.1:8080/stub", "from-stub");
@@ -6925,7 +6996,8 @@ int main(void) {
       r = sz_io_unsafe_run(sz_net_http_get(url));
       sz_release(url);
       assert(r.ok);
-      assert(strcmp(sz_string_cstr((SzString *)r.value), "from-stub") == 0);
+      assert(strcmp(http_resp_body_cstr(r.value), "from-stub") == 0);
+      assert(http_resp_status(r.value) == 200);
       sz_release(r.value);
 
       sz_testrt_net_set_last_serve_body(NULL);
@@ -6955,7 +7027,7 @@ int main(void) {
       body = sz_string_from_cstr("abc");
       r = sz_io_unsafe_run(sz_net_http_post(url, body));
       assert(r.ok);
-      assert(strcmp(sz_string_cstr((SzString *)r.value), "posted") == 0);
+      assert(strcmp(http_resp_body_cstr(r.value), "posted") == 0);
       sz_release(url);
       sz_release(body);
       sz_release(r.value);
@@ -6964,7 +7036,7 @@ int main(void) {
       url = sz_string_from_cstr("https://example.test/s");
       r = sz_io_unsafe_run(sz_net_http_get(url));
       assert(r.ok);
-      assert(strcmp(sz_string_cstr((SzString *)r.value), "tls-ok") == 0);
+      assert(strcmp(http_resp_body_cstr(r.value), "tls-ok") == 0);
       sz_release(url);
       sz_release(r.value);
 
@@ -6975,7 +7047,7 @@ int main(void) {
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->right);
-      assert(strcmp(sz_string_cstr((SzString *)pair->right), "POST:/echo:xyz") == 0);
+      assert(strcmp(http_resp_body_cstr(pair->right), "POST:/echo:xyz") == 0);
       sz_release(url);
       sz_release(body);
       sz_pair_free(pair);
@@ -6986,7 +7058,7 @@ int main(void) {
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->right);
-      assert(strcmp(sz_string_cstr((SzString *)pair->right), "HEAD:/h:") == 0);
+      assert(strcmp(http_resp_body_cstr(pair->right), "HEAD:/h:") == 0);
       sz_release(url);
       sz_pair_free(pair);
 
@@ -8077,7 +8149,8 @@ int main(void) {
     assert(r.ok);
     pair = (SzPair *)r.value;
     assert(pair && pair->right);
-    assert(strcmp(sz_string_cstr((SzString *)pair->right), "POST:/echo:hi") == 0);
+    assert(strcmp(http_resp_body_cstr(pair->right), "POST:/echo:hi") == 0);
+    assert(http_resp_status(pair->right) == 200);
     sz_pair_free(pair);
   }
 
@@ -8359,7 +8432,8 @@ int main(void) {
     assert(r.ok);
     pair = (SzPair *)r.value;
     assert(pair && pair->right);
-    assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(pair->right), "ok:/x") == 0);
+    assert(http_resp_status(pair->right) == 200);
   }
 
   /* Live Net.serveOnce on ::1: httpGet through IPv6 literal. */
@@ -8375,7 +8449,8 @@ int main(void) {
     assert(r.ok);
     pair = (SzPair *)r.value;
     assert(pair && pair->right);
-    assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(pair->right), "ok:/x") == 0);
+    assert(http_resp_status(pair->right) == 200);
   }
 
   /* Live httpGet Host includes a non-default port (RFC 9110). */
@@ -8424,6 +8499,23 @@ int main(void) {
     assert(strcmp(host, "[::1]") == 0);
     sz_net_test_http_host_header("::1", 18621, host, sizeof host);
     assert(strcmp(host, "[::1]:18621") == 0);
+    assert(sz_net_test_serve_v4_is_any() == 1);
+  }
+
+  /* HTTP status and headers: 404 plus X-Trace. */
+  {
+    SzString *url = sz_string_from_cstr("http://127.0.0.1:18490/nope");
+    SzPair *pair;
+    r = sz_io_unsafe_run(both_drop(sz_net_serve_once(18490, serve_not_found, NULL),
+                                  sz_net_http_get(url)));
+    sz_release(url);
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(pair && pair->right);
+    assert(http_resp_status(pair->right) == 404);
+    assert(strcmp(http_resp_body_cstr(pair->right), "missing") == 0);
+    assert(strcmp(http_resp_hdr(pair->right, "X-Trace"), "miss") == 0);
+    sz_pair_free(pair);
   }
 
   /* Live Net.serve: a wide port that truncates to 18622 must not bind 18622. */
@@ -8513,7 +8605,8 @@ int main(void) {
     pthread_join(th, &ret);
     assert(r.ok);
     assert(ret != NULL);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "ok:/x") == 0);
+    assert(http_resp_status(r.value) == 200);
   }
 
   /* Hostname A NODATA then AAAA ::1, then HTTP on IPv6 loopback. */
@@ -8547,7 +8640,8 @@ int main(void) {
     sz_net_test_set_nameserver(NULL, 0);
     assert(r.ok);
     assert(http_ret != NULL);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "ok:/x") == 0);
+    assert(http_resp_status(r.value) == 200);
   }
 
   /* Happy Eyeballs: dead A 192.0.2.1 plus AAAA ::1; v6 connect wins. */
@@ -8581,7 +8675,8 @@ int main(void) {
     sz_net_test_set_nameserver(NULL, 0);
     assert(r.ok);
     assert(http_ret != NULL);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "ok:/x") == 0);
+    assert(http_resp_status(r.value) == 200);
   }
 
   /* Dual-stack DNS: v6 ::1 refused, then A 127.0.0.1 after preference delay. */
@@ -8615,7 +8710,8 @@ int main(void) {
     sz_net_test_set_nameserver(NULL, 0);
     assert(r.ok);
     assert(http_ret != NULL);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "ok:/x") == 0);
+    assert(http_resp_status(r.value) == 200);
   }
 
   /* AAAA NXDOMAIN first, then A 127.0.0.1; GET uses the A record. */
@@ -8649,7 +8745,8 @@ int main(void) {
     sz_net_test_set_nameserver(NULL, 0);
     assert(r.ok);
     assert(http_ret != NULL);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "ok:/x") == 0);
+    assert(http_resp_status(r.value) == 200);
   }
 
   /* TEST-NET-1 blackhole: connect fails in ~1s instead of hanging on the OS. */
@@ -8793,7 +8890,8 @@ int main(void) {
     assert(outer && outer->right);
     inner = (SzPair *)outer->right;
     assert(inner && inner->left);
-    assert(strcmp(sz_string_cstr((SzString *)inner->left), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(inner->left), "ok:/x") == 0);
+    assert(http_resp_status(inner->left) == 200);
   }
 
   /* CNAME-only answer re-queries the target, then A. */
@@ -8831,7 +8929,8 @@ int main(void) {
     assert(outer && outer->right);
     inner = (SzPair *)outer->right;
     assert(inner && inner->left);
-    assert(strcmp(sz_string_cstr((SzString *)inner->left), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(inner->left), "ok:/x") == 0);
+    assert(http_resp_status(inner->left) == 200);
   }
 
   /* Glue A/AAAA in ADDITIONAL is not an answer. */
@@ -8928,7 +9027,8 @@ int main(void) {
     t1 = sz_clock_monotonic_ms_sync();
     pthread_join(th, NULL);
     assert(r.ok);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "ok:/x") == 0);
+    assert(http_resp_status(r.value) == 200);
     sz_release(r.value);
     assert(t1 - t0 < 900);
   }
@@ -8973,7 +9073,7 @@ int main(void) {
     sz_error_free(r.error);
   }
 
-  /* Non-2xx fails. */
+  /* Non-2xx returns status and body. */
   {
     pthread_t th;
     int port = 18595;
@@ -8983,9 +9083,10 @@ int main(void) {
     r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
                                       sz_string_from_cstr(url)));
     pthread_join(th, NULL);
-    assert(!r.ok);
-    assert(r.error && strstr(sz_string_cstr(r.error->message), "HTTP error"));
-    sz_error_free(r.error);
+    assert(r.ok);
+    assert(http_resp_status(r.value) == 404);
+    assert(strcmp(http_resp_body_cstr(r.value), "err") == 0);
+    sz_release(r.value);
   }
 
   /* Peer RST after accept: IO fails; process stays alive (no SIGPIPE). */
@@ -11634,7 +11735,7 @@ int main(void) {
     r = sz_io_unsafe_run(sz_net_http_get(url));
     assert(r.ok);
     assert(r.value);
-    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok!") == 0);
+    assert(strcmp(http_resp_body_cstr(r.value), "ok!") == 0);
     sz_release(r.value);
     sz_release(url);
     sz_testrt_reset();
