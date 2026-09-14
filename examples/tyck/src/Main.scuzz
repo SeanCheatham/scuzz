@@ -588,7 +588,25 @@ def right(): R = R(1)
 def wrong(): R = 1
 """, "does not match declared") && Check.check("""def id[A](x: A): A = x
 def right(): Int = id(1)
-""") == "[]"
+""") == "[]" && Check.check("""enum E:
+  case Ok
+def right(): List[E] = [E.Ok]
+""") == "[]" && rejects("""enum E:
+  case Ok
+def wrong(): List[E] = [1]
+""", "does not match declared") && Check.check("""enum E:
+  case Ok
+def right(): Option[E] = Option.Some(E.Ok)
+""") == "[]" && rejects("""enum E:
+  case Ok
+def wrong(): Option[E] = Option.Some(1)
+""", "does not match declared") && Check.check("""enum E:
+  case Ok
+def right(): E => Int = (x: E) => 0
+""") == "[]" && rejects("""enum E:
+  case Ok
+def wrong(): E => Int = (x: Int) => x
+""", "does not match declared")
 
 def dumpTyckAdt(): String =
   if (!namedLetterTypes()) dumpNamedLetter() else "tyckAdt"
@@ -614,6 +632,24 @@ def wrong(): R = 1
 def right(): Int = id(1)
 """) != "[]") Str.concat("idOk ", Check.check("""def id[A](x: A): A = x
 def right(): Int = id(1)
+""")) else if (!rejects("""enum E:
+  case Ok
+def wrong(): List[E] = [1]
+""", "does not match declared")) Str.concat("listEMis ", Check.check("""enum E:
+  case Ok
+def wrong(): List[E] = [1]
+""")) else if (!rejects("""enum E:
+  case Ok
+def wrong(): Option[E] = Option.Some(1)
+""", "does not match declared")) Str.concat("optEMis ", Check.check("""enum E:
+  case Ok
+def wrong(): Option[E] = Option.Some(1)
+""")) else if (!rejects("""enum E:
+  case Ok
+def wrong(): E => Int = (x: Int) => x
+""", "does not match declared")) Str.concat("funEMis ", Check.check("""enum E:
+  case Ok
+def wrong(): E => Int = (x: Int) => x
 """)) else "namedLetter-other"
 
 def tyckRecordBind(): Bool =
