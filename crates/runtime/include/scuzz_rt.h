@@ -943,6 +943,8 @@ SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, UI); TestRuntime fake clock */
 SzString *sz_clock_iso8601(int64_t ms); /* UTC ISO-8601 from epoch ms. Caller owns. */
 SzString *sz_hash_sha256(const SzString *s); /* Software SHA-256 of UTF-8 bytes as lowercase hex. Caller owns. */
+SzString *sz_hex_encode(const SzString *s); /* Lowercase hex of UTF-8 bytes. Caller owns. */
+SzString *sz_hex_decode(const SzString *s); /* Bytes from hex. Odd length or a bad digit is empty. Caller owns. */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
 
