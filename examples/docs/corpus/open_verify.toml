@@ -1,4 +1,4 @@
 [fuzz]
 seed = 3
 schedule_seed = "3"
-events = ["tap 17", "tap choicechip:Verify"]
+events = ["tap 17", "tap link:Docs", "tap choicechip:Verify"]
