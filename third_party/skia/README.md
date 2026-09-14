@@ -14,8 +14,9 @@ satisfied. Opt out with `SCUZZ_SKIA=sk_sw` for the in-tree software backend.
 ```
 
 `{triple}` is replaced with the host triple (for example `x86_64-unknown-linux-gnu`,
-`aarch64-apple-darwin`). Layout after fetch:
-`third_party/skia/prebuilt/<triple>/libsk_capi.a`.
+`aarch64-apple-darwin`). An HTTPS fetch retries HTTP 502, 503, and 504. It also
+retries a truncated gzip. Other HTTP errors fail on the first response. Layout
+after fetch: `third_party/skia/prebuilt/<triple>/libsk_capi.a`.
 `crates/ffi-skia/Makefile` copies that archive into `crates/ffi-skia/build/`
 and replaces the shim (marker `build/sk_capi_backend` = `skia`).
 

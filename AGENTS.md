@@ -64,4 +64,4 @@ export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13${LIBRARY_PATH:+:$LIBRARY_PA
 
 The cloud VM `~/.bashrc` already sets this. New shells pick it up; non-login one-shot commands may need the export.
 
-Skia CPU prebuilt downloads on first `make -C crates/ffi-skia lib` / runtime test into `third_party/skia/prebuilt/` (gitignored).
+Skia CPU prebuilt downloads on first `make -C crates/ffi-skia lib` / runtime test into `third_party/skia/prebuilt/` (gitignored). `scripts/fetch_skia.sh` retries HTTP 502, 503, and 504, and a truncated gzip.

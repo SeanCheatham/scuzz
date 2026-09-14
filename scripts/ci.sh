@@ -66,6 +66,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   macos-hello     hello and counter fuzz, kernel check, bad-intent
   oracles         hello, tyck, kits, codegen, hello-outdir, fixedpoint
   install-dry     installer and bump_version dry-run
+  fetch-skia      fetch_skia.sh retry proof (no GitHub Releases)
   runtime         make -C crates/runtime test
   asan            make -C crates/runtime test-asan
   skia            ffi-skia tests
@@ -99,6 +100,123 @@ Examples:
 EOF
 }
 
+# Local HTTP proof for fetch_skia.sh retries. Does not call GitHub Releases.
+prove_fetch_skia_retry() {
+  need_cmd python3 "sudo apt-get install -y python3"
+  _prove_fetch_skia_retry
+}
+
+_prove_fetch_skia_retry() (
+  work="$(mktemp -d)"
+  triple=fetch-retry-proof
+  dest="$ROOT/third_party/skia/prebuilt/${triple}"
+  mkdir -p "$work/pkg"
+  : >"$work/pkg/libsk_capi.a"
+  tar -czf "$work/skia.tgz" -C "$work/pkg" libsk_capi.a
+  cat >"$work/server.py" <<'PY'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import sys
+
+tarball = open(sys.argv[1], "rb").read()
+truncated = tarball[:24]
+state = {"n": 0}
+portfile = sys.argv[2]
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith("/missing"):
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"not found")
+            return
+        state["n"] += 1
+        n = state["n"]
+        if n == 1:
+            self.send_response(502)
+            self.end_headers()
+            self.wfile.write(b"bad gateway")
+        elif n == 2:
+            self.send_response(503)
+            self.end_headers()
+            self.wfile.write(b"unavailable")
+        elif n == 3:
+            self.send_response(504)
+            self.end_headers()
+        elif n == 4:
+            body = truncated
+            self.send_response(200)
+            self.send_header("Content-Type", "application/gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/gzip")
+            self.send_header("Content-Length", str(len(tarball)))
+            self.end_headers()
+            self.wfile.write(tarball)
+
+    def log_message(self, *_args):
+        return
+
+
+httpd = HTTPServer(("127.0.0.1", 0), Handler)
+with open(portfile, "w", encoding="utf-8") as f:
+    f.write(str(httpd.server_address[1]))
+httpd.serve_forever()
+PY
+  python3 "$work/server.py" "$work/skia.tgz" "$work/port" &
+  srv_pid=$!
+  # shellcheck disable=SC2064
+  trap "kill $srv_pid 2>/dev/null || true; rm -rf '$work' '$dest'" EXIT
+  i=0
+  while [ ! -s "$work/port" ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 50 ]; then
+      echo "fetch_skia retry proof: server did not bind" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  port="$(cat "$work/port")"
+  url="http://127.0.0.1:${port}/skia-cpu.tar.gz"
+  rm -rf "$dest"
+  SCUZZ_SKIA_URL="$url" SCUZZ_SKIA_TRIPLE="$triple" SCUZZ_SKIA_FORCE=1 \
+    SCUZZ_SKIA_FETCH_ATTEMPTS=5 SCUZZ_SKIA_FETCH_RETRY_DELAY=0 \
+    ./scripts/fetch_skia.sh >"$work/retry.out" 2>&1
+  cat "$work/retry.out"
+  grep -q "HTTP 502" "$work/retry.out"
+  grep -q "HTTP 503" "$work/retry.out"
+  grep -q "HTTP 504" "$work/retry.out"
+  grep -q "truncated or corrupt gzip" "$work/retry.out"
+  grep -q "installed under ${dest}" "$work/retry.out"
+  test -f "$dest/libsk_capi.a"
+  if SCUZZ_SKIA_URL="http://127.0.0.1:${port}/missing.tar.gz" \
+      SCUZZ_SKIA_TRIPLE="$triple" SCUZZ_SKIA_FORCE=1 \
+      SCUZZ_SKIA_FETCH_ATTEMPTS=5 SCUZZ_SKIA_FETCH_RETRY_DELAY=0 \
+      ./scripts/fetch_skia.sh >"$work/missing.out" 2>&1; then
+    echo "fetch_skia retry proof: 404 must fail closed" >&2
+    cat "$work/missing.out" >&2
+    return 1
+  fi
+  grep -q "HTTP 404" "$work/missing.out"
+  if grep -q "retry in" "$work/missing.out"; then
+    echo "fetch_skia retry proof: 404 must not retry" >&2
+    cat "$work/missing.out" >&2
+    return 1
+  fi
+  echo "fetch_skia retry proof: 404 fail-closed"
+  cat "$work/missing.out"
+  rm -rf "$dest"
+  SCUZZ_SKIA_URL="file://${work}/skia.tgz" SCUZZ_SKIA_TRIPLE="$triple" \
+    SCUZZ_SKIA_FORCE=1 ./scripts/fetch_skia.sh >"$work/file.out" 2>&1
+  cat "$work/file.out"
+  grep -q "copying file://" "$work/file.out"
+  test -f "$dest/libsk_capi.a"
+  rm -rf "$dest"
+)
+
 slice_install_dry() {
   ./scripts/install.sh --help
   SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-dry.out
@@ -123,6 +241,7 @@ slice_install_dry() {
   printf '%s' '[{"tag_name":"skia-cpu-v0.1"},{"tag_name":"v0.1.0-rc.1"},{"tag_name":"v9.9.9"}]' > /tmp/releases-compact.json
   SCUZZ_RELEASES_JSON=/tmp/releases-compact.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-compact.out
   grep -q 'tag=v9.9.9' /tmp/install-compact.out
+  prove_fetch_skia_retry
 }
 
 slice_runtime() {
@@ -484,6 +603,7 @@ case "$SLICE" in
   macos-smoke) slice_macos_smoke ;;
   macos-hello) slice_macos_hello ;;
   install-dry) slice_install_dry ;;
+  fetch-skia) prove_fetch_skia_retry ;;
   runtime) slice_runtime ;;
   asan) slice_asan ;;
   skia) slice_skia ;;
