@@ -575,22 +575,22 @@ def funKitHeadTypes(): Bool =
 
 def srcFunListTailOk(): String =
   """def right(xs: List[Int]): List[Int] =
-  xs.tail
+  xs.tail()
 """
 
 def srcFunListTailMis(): String =
   """def wrong(h: List[Int] => String): List[Int] =
-  h.tail
+  h.tail()
 """
 
 def srcFunIoForeverOk(): String =
   """def right(io: IO[Int]): IO[Int] =
-  io.forever
+  io.forever()
 """
 
 def srcFunIoForeverMis(): String =
   """def wrong(h: IO[Int] => String): IO[Int] =
-  h.forever
+  h.forever()
 """
 
 def srcViewEachOk(): String =
