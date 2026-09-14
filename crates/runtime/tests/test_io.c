@@ -515,7 +515,7 @@ static SzString *serve_req_path(void *req) {
   return p && p->left ? (SzString *)p->left : (SzString *)req;
 }
 
-static void *tcp_close_sock(void *value, void *env) {
+static SzIo *tcp_close_sock(void *value, void *env) {
   (void)value;
   return sz_net_tcp_close((SzNetSock *)env);
 }
