@@ -1682,18 +1682,13 @@ def lineColIdxFound(found: (Int, Int), o: Int): (Int, Int) =
   }
 
 def lastStartLe(xs: List[Int], off: Int, line: Int, last: Int): (Int, Int) =
-  if (List.isEmpty(xs)) (if (line < 1) 1 else line, last) else lastStartAfter(lastStartTake(xs, off, line, last, 64), off)
+  if (List.isEmpty(xs)) (if (line < 1) 1 else line, last) else lastStartChunk(xs, off, line, last, 64)
 
-def lastStartAfter(got: ((Int, Int), (List[Int], Bool)), off: Int): (Int, Int) =
-  got match {
-    case ((line, last), (rest, done)) => if (done) (if (line < 1) 1 else line, last) else lastStartLe(rest, off, line, last)
-  }
+def lastStartChunk(xs: List[Int], off: Int, line: Int, last: Int, k: Int): (Int, Int) =
+  if (List.isEmpty(xs)) (if (line < 1) 1 else line, last) else if (k <= 0) lastStartLe(xs, off, line, last) else lastStartOne(List.at(xs, 0), List.tail(xs), off, line, last, k)
 
-def lastStartTake(xs: List[Int], off: Int, line: Int, last: Int, k: Int): ((Int, Int), (List[Int], Bool)) =
-  if (List.isEmpty(xs) || k <= 0) ((line, last), (xs, List.isEmpty(xs))) else lastStartTake1(List.at(xs, 0), List.tail(xs), off, line, last, k)
-
-def lastStartTake1(s: Int, rest: List[Int], off: Int, line: Int, last: Int, k: Int): ((Int, Int), (List[Int], Bool)) =
-  if (s > off) ((line, last), (s :: rest, true)) else lastStartTake(rest, off, line + 1, s, k - 1)
+def lastStartOne(s: Int, rest: List[Int], off: Int, line: Int, last: Int, k: Int): (Int, Int) =
+  if (s > off) (if (line < 1) 1 else line, last) else lastStartChunk(rest, off, line + 1, s, k - 1)
 
 def fileIndex(files: List[(String, String)]): Map[String, List[Int]] =
   fileIndexGo(files, Map.empty())
