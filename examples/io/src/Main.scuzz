@@ -19,6 +19,12 @@ def liveHex(): IO[Unit] =
 def liveB64(): IO[Unit] =
   IO.println(s"b64:${Base64.encode("abc")}").flatMap(_ => IO.println(s"b64-rt:${Base64.decode(Base64.encode("abc"))}").flatMap(_ => IO.println(s"b64-bad:${if (Str.len(Base64.decode("!!!!")) == 0) "miss" else "hit"}")))
 
+def uuidOk(u: String): Bool =
+  Str.len(u) == 36 && Str.charAt(u, 8) == 45 && Str.charAt(u, 13) == 45 && Str.charAt(u, 18) == 45 && Str.charAt(u, 23) == 45 && Str.charAt(u, 14) == 52 && (Str.charAt(u, 19) == 56 || Str.charAt(u, 19) == 57 || Str.charAt(u, 19) == 97 || Str.charAt(u, 19) == 98)
+
+def liveUuid(): IO[Unit] =
+  Uuid.v4().flatMap(u => IO.println(s"uuid:${if (uuidOk(u)) "ok" else "bad"}"))
+
 def maybeKit(): IO[Unit] =
   Sys.getenv("SCUZZ_KIT").flatMap(t => if (Str.len(t) == 0) IO.println("kit:skip") else Impurity.runKit())
 
@@ -35,6 +41,7 @@ def envProbe(): IO[Unit] =
     _ <- liveHash()
     _ <- liveHex()
     _ <- liveB64()
+    _ <- liveUuid()
     _ <- liveFs()
     _ <- liveRand()
     _ <- Concurrency.run()

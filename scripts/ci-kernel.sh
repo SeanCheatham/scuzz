@@ -66,6 +66,7 @@ grep -q "hex-bad:miss" /tmp/io.out
 grep -q "b64:YWJj" /tmp/io.out
 grep -q "b64-rt:abc" /tmp/io.out
 grep -q "b64-bad:miss" /tmp/io.out
+grep -q "uuid:ok" /tmp/io.out
 grep -q "kit:skip" /tmp/io.out
 grep -q "fs:" /tmp/io.out
 "$SCUZZ" fuzz --iterations 0 examples/io | tee /tmp/io-test.out
@@ -85,6 +86,7 @@ grep -q "hex-bad:miss" /tmp/io-test.out
 grep -q "b64:YWJj" /tmp/io-test.out
 grep -q "b64-rt:abc" /tmp/io-test.out
 grep -q "b64-bad:miss" /tmp/io-test.out
+grep -q "uuid:ok" /tmp/io-test.out
 grep -q "impurity-ok" /tmp/io-test.out
 grep -q "net:" /tmp/io-test.out
 "$SCUZZ" check examples/hello
