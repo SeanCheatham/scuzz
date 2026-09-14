@@ -25,6 +25,9 @@ neverHit
     _ <- Fs.write(Fs.join(fuzz, "summary.json"), "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":true}}\n")
   } yield 1
 
+def Main.loadClaimNames(_root: String, _rels: List[String]): IO[List[String]] =
+  IO.pure(["greetFact"])
+
 def Lsp.lspCall(_root: String, _path: String, _body: String, method: String): IO[Json] =
   IO.pure(parseJson(method match {
   case "textDocument/hover" => "{\"result\":{\"contents\":{\"kind\":\"plaintext\",\"value\":\"hover\"}}}"
