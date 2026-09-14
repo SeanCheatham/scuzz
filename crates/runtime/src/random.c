@@ -98,6 +98,18 @@ static uint64_t next_u64(void) {
   return xoshiro_next(g_state);
 }
 
+void sz_random_fill(unsigned char *buf, size_t n) {
+  size_t i = 0;
+  while (i < n) {
+    uint64_t u = next_u64();
+    unsigned k;
+    for (k = 0; k < 8 && i < n; k++) {
+      buf[i++] = (unsigned char)(u & 255);
+      u >>= 8;
+    }
+  }
+}
+
 static void *random_next_thunk(void *env) {
   int64_t bound = sz_unbox_i64(env);
   uint64_t lim = (uint64_t)bound;

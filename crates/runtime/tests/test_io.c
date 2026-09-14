@@ -6579,6 +6579,30 @@ int main(void) {
     sz_release(r.value);
 
     {
+      char first[37];
+      const char *s;
+      sz_testrt_random_install(1);
+      r = sz_io_unsafe_run(sz_uuid_v4());
+      assert(r.ok);
+      s = sz_string_cstr(r.value);
+      assert(strlen(s) == 36);
+      assert(s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-');
+      assert(s[14] == '4');
+      assert(s[19] == '8' || s[19] == '9' || s[19] == 'a' || s[19] == 'b');
+      memcpy(first, s, 37);
+      sz_release(r.value);
+      sz_testrt_random_install(1);
+      r = sz_io_unsafe_run(sz_uuid_v4());
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr(r.value), first) == 0);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_uuid_v4());
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr(r.value), first) != 0);
+      sz_release(r.value);
+    }
+
+    {
       int i;
       int saw_hi = 0;
       int64_t bound = (int64_t)1 << 40;

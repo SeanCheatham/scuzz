@@ -949,6 +949,8 @@ SzString *sz_base64_encode(const SzString *s); /* RFC 4648 of UTF-8 bytes. Calle
 SzString *sz_base64_decode(const SzString *s); /* Bytes from Base64. Bad length, digit, or pad is empty. Caller owns. */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fails */
+void sz_random_fill(unsigned char *buf, size_t n); /* Blessed Random bytes. Live or TestRuntime. */
+SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Uses blessed Random. */
 
 SzIo *sz_net_http_get(SzString *url); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
 SzIo *sz_net_http_post(SzString *url, SzString *body);
