@@ -5,25 +5,18 @@
 
 static SzUiSession *active;
 static SzString *snapshot;
+static int live_loop;
 
-EM_JS(void, sz_web_idle_wait, (), {
-  Asyncify.handleSleep(function(wakeUp) {
-    const resume = function() { setTimeout(wakeUp, 0); };
-    if (Module.uiWakePending) {
-      Module.uiWakePending = false;
-      resume();
-      return;
-    }
-    Module.uiWake = resume;
-  });
-});
+void sz_web_idle_wake(void) {
+  if (live_loop)
+    emscripten_resume_main_loop();
+}
 
-EM_JS(void, sz_web_idle_wake, (), {
-  const wake = Module.uiWake;
-  Module.uiWake = null;
-  if (wake) wake();
-  else Module.uiWakePending = true;
-});
+void sz_web_live_loop(void (*frame)(void)) {
+  live_loop = 1;
+  /* rAF. Return so a later JS ccall is a new WASM entry. */
+  emscripten_set_main_loop(frame, 0, 0);
+}
 
 EM_JS(void, sz_web_frame_begin, (float scale), {
   Module.webFrame = {scale, texts: [], sections: [], items: [], groups: []};

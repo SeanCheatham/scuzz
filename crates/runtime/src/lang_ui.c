@@ -320,45 +320,54 @@ static int live_still_mobile(void) { return sz_mobile_alive(); }
 
 static int live_still_watch(void) { return 1; }
 
+#ifdef __EMSCRIPTEN__
+static SzUiSession *web_live_session;
+
+static void web_live_frame(void) {
+  SzUiSession *session = web_live_session;
+  if (!session || !sz_ui_session_alive(session)) {
+    emscripten_cancel_main_loop();
+    sz_web_stop();
+    web_live_session = NULL;
+    return;
+  }
+  if (sz_ui_session_needs_paint(session)) {
+    if (!sz_ui_pump_sync(session)) {
+      if (!sz_ui_session_alive(session)) {
+        emscripten_cancel_main_loop();
+        sz_web_stop();
+        web_live_session = NULL;
+        return;
+      }
+      sz_panic("Ui.run live pump failed");
+    }
+  }
+  if (!sz_ui_session_needs_paint(session))
+    emscripten_pause_main_loop();
+}
+#endif
+
 static void live_pump_loop(SzUiSession *session, int (*still)(void)) {
   const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
   int max_frames_parsed = max_frames_env ? atoi(max_frames_env) : 0;
   int64_t max_frames = max_frames_parsed > 0 ? max_frames_parsed : 0;
   int64_t frame = 0;
   while (sz_ui_session_alive(session) && still()) {
-#ifdef __EMSCRIPTEN__
-    int busy = sz_ui_session_needs_paint(session);
-    if (busy) {
-      if (!sz_ui_pump_sync(session)) {
-        if (!sz_ui_session_alive(session))
-          break;
-        sz_panic("Ui.run live pump failed");
-      }
-    }
-#else
     if (!sz_ui_pump_sync(session)) {
       if (!sz_ui_session_alive(session))
         break;
       sz_panic("Ui.run live pump failed");
     }
-#endif
     if (!sz_ui_session_alive(session))
       break;
     frame++;
     if (max_frames > 0 && frame >= max_frames)
       break;
     {
-#ifdef __EMSCRIPTEN__
-      if (busy || sz_ui_session_needs_paint(session))
-        emscripten_sleep(16);
-      else
-        sz_web_idle_wait();
-#else
       struct timespec ts;
       ts.tv_sec = 0;
       ts.tv_nsec = 16000000L; /* ~60fps cap */
       nanosleep(&ts, NULL);
-#endif
     }
   }
 }
@@ -441,8 +450,10 @@ static void *thunk_run_rebuild(void *env) {
   }
 
 #ifdef __EMSCRIPTEN__
-  live_pump_loop(session, live_still_watch);
-  sz_web_stop();
+  web_live_session = session;
+  sz_web_live_loop(web_live_frame);
+  /* Keep the session mounted. The rAF loop owns it after main returns. */
+  return NULL;
 #endif
   interactive = cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available();
   if (interactive) {

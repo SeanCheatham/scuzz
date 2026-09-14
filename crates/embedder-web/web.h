@@ -3,10 +3,10 @@
 #include "scuzz_ui.h"
 void sz_web_stop(void);
 void sz_web_start(SzUiSession *session);
-/* Park the live loop until inject or invalidate.
- * Resume on a later JS turn. Do not call the sleep callback now. */
-void sz_web_idle_wait(void);
-/* Resume the parked live loop. Safe when the loop is not parked. */
+/* Start the live rAF loop. Return so a later JS ccall is a new WASM entry.
+ * Pause when the session is idle. */
+void sz_web_live_loop(void (*frame)(void));
+/* Resume the paused live loop after inject or invalidate. */
 void sz_web_idle_wake(void);
 void sz_web_present(int width, int height, const uint8_t *rgba);
 void sz_web_frame_begin(float scale);
