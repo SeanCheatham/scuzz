@@ -1,6 +1,3 @@
-def lexEofLast(): Bool =
-  Main.lexEofLast()
-
 def fmtHi(): Bool =
   Main.fmtDiff(Main.srcHi(), Main.wantHi())
 
