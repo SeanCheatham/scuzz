@@ -206,6 +206,8 @@ PY
     cat "$work/missing.out" >&2
     return 1
   fi
+  echo "fetch_skia retry proof: 404 fail-closed"
+  cat "$work/missing.out"
   rm -rf "$dest"
   SCUZZ_SKIA_URL="file://${work}/skia.tgz" SCUZZ_SKIA_TRIPLE="$triple" \
     SCUZZ_SKIA_FORCE=1 ./scripts/fetch_skia.sh >"$work/file.out" 2>&1
