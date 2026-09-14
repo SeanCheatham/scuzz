@@ -17,3 +17,12 @@ def afterCheckKeepsDiags(t: Timeline): Verdict =
 def sessionHasRun(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 2 || Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "outlined:Fuzz"))
 
+def afterFuzzShowsSometimes(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Fuzz", "chip:tappedPlus")
+
+def afterFuzzShowsReached(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Fuzz", "chip:tappedPlus=1")
+
+def afterFuzzShowsOpen(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Fuzz", "chip:neverHit=0")
+

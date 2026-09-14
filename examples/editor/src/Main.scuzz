@@ -17,10 +17,22 @@ def runProject(root: String): IO[String] =
     got <- Sys.exec(Str.concat("scuzz run ", root)).handleErrorWith(_ => IO.pure((Str.len("x"), "", "run fail")))
   } yield Chrome.captureOut(got._2, got._3)
 
-def fuzzProject(root: String): IO[String] =
+def startFuzz(root: String): IO[Int] =
+  Sys.spawn(Str.concat("scuzz fuzz --iterations 0 ", root)).handleErrorWith(_ => IO.pure(0))
+
+def fuzzAlive(pid: Int): IO[Int] =
+  Sys.alive(pid).handleErrorWith(_ => IO.pure(0))
+
+def loadFuzzMaps(root: String): IO[(List[String], List[String])] =
   for {
-    got <- Sys.exec(Str.concat("scuzz fuzz --iterations 0 ", root)).handleErrorWith(_ => IO.pure((Str.len("x"), "", "fuzz fail")))
-  } yield Chrome.captureOut(got._2, got._3)
+    somDec <- Chrome.readOr(Chrome.declaredPath(root, "sometimes.declared"))
+    trigDec <- Chrome.readOr(Chrome.declaredPath(root, "triggers.declared"))
+    somDump <- Chrome.readOr(Chrome.fuzzFile(root, "sometimes.dump"))
+    trigDump <- Chrome.readOr(Chrome.fuzzFile(root, "triggers.dump"))
+  } yield (Chrome.chipRows(Chrome.nonEmptyLines(somDec), Chrome.nonEmptyLines(somDump)), Chrome.chipRows(Chrome.nonEmptyLines(trigDec), Chrome.triggerHitNames(trigDump)))
+
+def loadFuzzStatus(root: String): IO[List[String]] =
+  Chrome.readOr(Chrome.fuzzFile(root, "summary.json")).map(raw => Chrome.statusLines(raw))
 
 def walkTree(root: String): IO[List[String]] =
   for {
@@ -60,6 +72,19 @@ def walkTree(root: String): IO[List[String]] =
     _ = Property.check("cap", Chrome.captureOut("out", "") == "out", true)
     _ = Property.check("err", Chrome.captureOut("out", "e") == """out
 e""", true)
+    _ = Property.check("nemp", Chrome.nonEmptyLines("""a
+
+b""") == ["a", "b"], true)
+    _ = Property.check("row", Chrome.rowName("tappedPlus\t1") == "tappedPlus", true)
+    _ = Property.check("ron", Chrome.rowOn("tappedPlus\t1") == 1, true)
+    _ = Property.check("roff", Chrome.rowOn("neverHit\t0") == 0, true)
+    _ = Property.check("crows", Chrome.chipRows(["a", "b"], ["a"]) == ["a\t1", "b\t0"], true)
+    _ = Property.check("thit", Chrome.triggerHitNames("""claim	outlined:Check	triggered
+claim	x	vacuous
+""") == ["outlined:Check"], true)
+    _ = Property.check("sok", Chrome.statusLines("{\"fuzz\":{\"ok\":true}}") == ["fuzz ok"], true)
+    _ = Property.check("sfail", Chrome.statusLines("{\"fuzz\":{\"ok\":false}}") == ["fuzz fail"], true)
+    _ = Property.check("sempty", Chrome.statusLines("") == [], true)
     _ = Property.check("find", Chrome.findNextOffset("ababa", "ba", 0) == 1, true)
     _ = Property.check("ins", Chrome.insertAt("ab", 1, "x") == "axb", true)
     _ = Property.check("line", Chrome.lineColAt("""a
@@ -86,6 +111,12 @@ bc""", 3)._1 == 1, true)
     verifies = Signal.make(Chrome.verifyRels(walked))
     output = Signal.make([]: List[String])
     showOut = Signal.make(0)
+    fuzzPid = Signal.make(0)
+    fuzzSometimesRows = Signal.make([]: List[String])
+    fuzzTriggerRows = Signal.make([]: List[String])
+    fuzzStatus = Signal.make([]: List[String])
+    onChip = Signal.make(1)
+    offChip = Signal.make(0)
     findQ = Signal.make("")
     replQ = Signal.make("")
     findOpen = Signal.make(Str.len(""))
@@ -121,6 +152,20 @@ bc""", 3)._1 == 1, true)
   walked <- walkTree(dir)
   _ = Signal.set(lives, Chrome.liveRels(walked))
   _ = Signal.set(verifies, Chrome.verifyRels(walked))
+  fp = Signal.get(fuzzPid)
+  _ <- if (fp == 0) IO.pure(()) else for {
+  maps <- loadFuzzMaps(dir)
+  _ = Signal.set(onChip, 1)
+  _ = Signal.set(offChip, 0)
+  _ = Signal.set(fuzzSometimesRows, maps._1)
+  _ = Signal.set(fuzzTriggerRows, maps._2)
+  alive <- fuzzAlive(fp)
+  _ <- if (alive != 0) IO.pure(()) else for {
+  lines <- loadFuzzStatus(dir)
+  _ = Signal.set(fuzzStatus, lines)
+  _ = Signal.set(fuzzPid, 0)
+} yield ()
+} yield ()
 } yield ()))
     _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.button("Save", _ => for {
   _ = Property.sometimes("tappedSave")
@@ -187,11 +232,21 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(showOut, Chrome.flagNonEmpty(runOut))
 } yield ()), View.outlinedButton("Fuzz", _ => for {
   _ = Property.sometimes("tappedFuzz")
-  line <- fuzzProject(Signal.get(dirSig))
-  fuzzOut = List.append(Signal.get(output), line)
-  _ = Signal.set(output, fuzzOut)
-  _ = Signal.set(showOut, Chrome.flagNonEmpty(fuzzOut))
-} yield ())), View.showWhen(showDiags, 1, View.focusGroup(View.each(diags, s => View.button(s, _ => for {
+  root = Signal.get(dirSig)
+  pid <- startFuzz(root)
+  _ = Signal.set(fuzzPid, pid)
+  _ = Signal.set(onChip, 1)
+  _ = Signal.set(offChip, 0)
+  maps <- loadFuzzMaps(root)
+  _ = Signal.set(fuzzSometimesRows, maps._1)
+  _ = Signal.set(fuzzTriggerRows, maps._2)
+  alive <- if (pid == 0) IO.pure(0) else fuzzAlive(pid)
+  _ <- if (alive != 0) IO.pure(()) else for {
+  lines <- loadFuzzStatus(root)
+  _ = Signal.set(fuzzStatus, lines)
+  _ = Signal.set(fuzzPid, 0)
+} yield ()
+} yield ())), View.each(fuzzSometimesRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzTriggerRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzStatus, s => View.text(s)), View.showWhen(showDiags, 1, View.focusGroup(View.each(diags, s => View.button(s, _ => for {
   file = Check.diagFile(s)
   _ <- if (Str.isEmpty(file)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.get(dirSig), file)

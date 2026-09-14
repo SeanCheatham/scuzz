@@ -134,3 +134,34 @@ def pollTab(path: String, body: String, orig: String, dirty: Int): IO[(String, S
 def pollTabs(paths: List[String], bodies: List[String], origs: List[String], idx: Int, curBody: String, curOrig: String): IO[(List[String], List[String], Int)] =
   IO.foreach(List.indices(paths), i => pollTab(List.at(paths, i), if (i == idx) curBody else List.at(bodies, i), if (i == idx) curOrig else List.at(origs, i), if (i == idx) dirtyFlag(curBody, curOrig) else dirtyFlag(List.at(bodies, i), List.at(origs, i)))).map(rows => (List.map(rows, r => r._1), List.map(rows, r => r._2), if (List.exists(rows, r => r._3 == 1)) 1 else 0))
 
+def readOr(path: String): IO[String] =
+  Fs.read(path).handleErrorWith(_ => IO.pure(""))
+
+def declaredPath(root: String, name: String): String =
+  Fs.join(Fs.join(root, "build"), name)
+
+def fuzzFile(root: String, name: String): String =
+  Fs.join(Fs.join(Fs.join(root, "build"), "fuzz"), name)
+
+def nonEmptyLines(src: String): List[String] =
+  List.filter(Str.split(src, """
+"""), s => !Str.isEmpty(s))
+
+def rowName(row: String): String =
+  if (Str.indexOf(row, "\t") < 0) row else Str.take(row, Str.indexOf(row, "\t"))
+
+def rowOn(row: String): Int =
+  if (Str.endsWith(row, "\t1")) 1 else 0
+
+def chipRows(declared: List[String], reached: List[String]): List[String] =
+  List.map(declared, n => Str.concat(n, if (List.contains(reached, n)) "\t1" else "\t0"))
+
+def triggerHitName(line: String): String =
+  if (!Str.contains(line, "\ttriggered")) "" else if (List.len(Str.split(line, "\t")) < 2) "" else List.at(Str.split(line, "\t"), 1)
+
+def triggerHitNames(raw: String): List[String] =
+  List.filter(List.map(nonEmptyLines(raw), triggerHitName), s => !Str.isEmpty(s))
+
+def statusLines(raw: String): List[String] =
+  if (Str.isEmpty(raw)) [] else if (Str.contains(raw, "\"ok\":true")) ["fuzz ok"] else ["fuzz fail"]
+
