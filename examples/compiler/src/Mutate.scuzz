@@ -145,10 +145,10 @@ def siteLocFunHd(d: Fun, rest: List[Fun], local: Int, seen: Int, o: Bool, fallba
   }
 
 def pickSites(seed: Int, take: Int, sites: Int): List[Int] =
-  if (take <= 0 || sites <= 0) noInts() else pickSitesGo(seed, if (take < sites) take else sites, sites, 0, noInts())
+  if (take <= 0 || sites <= 0) noInts() else List.reverse(pickSitesGo(seed, if (take < sites) take else sites, sites, 0, noInts()))
 
 def pickSitesGo(seed: Int, take: Int, sites: Int, i: Int, acc: List[Int]): List[Int] =
-  if (i >= take) acc else pickSitesGo(seed, take, sites, i + 1, List.concat(acc, pickSite(seed, i, sites, acc) :: noInts()))
+  if (i >= take) acc else pickSitesGo(seed, take, sites, i + 1, pickSite(seed, i, sites, acc) :: acc)
 
 def countFiles(files: List[(String, String)], o: Bool): Int =
   countKept(parseLive(files), o)
@@ -612,7 +612,10 @@ def fileSrcHd(h: (String, String)): String =
   }
 
 def sitesOk(): Bool =
-  twoBtnOk() && arithBtnOk() && twoBtnKept() && arithBtnKept()
+  twoBtnOk() && arithBtnOk() && twoBtnKept() && arithBtnKept() && pickSitesOk()
+
+def pickSitesOk(): Bool =
+  List.at(pickSites(42, 8, 8), 0) == 3 && List.at(pickSites(42, 8, 8), 5) == 0 && List.at(pickSites(42, 8, 8), 7) == 2 && List.at(pickSites(7, 3, 3), 0) == 2 && List.at(pickSites(7, 3, 3), 1) == 0 && List.at(pickSites(7, 3, 3), 2) == 1 && List.isEmpty(pickSites(1, 0, 5))
 
 def twoBtnOk(): Bool =
   countFiles(oneSrc(srcTwoBtn()), false) == 2 && twoBtnSwap()
