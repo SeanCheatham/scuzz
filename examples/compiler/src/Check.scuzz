@@ -344,7 +344,7 @@ def funArgOf(t: String): String =
   Type.funArgStr(t)
 
 def isTup(t: String): Bool =
-  Str.len(t) > 0 && Str.charAt(t, 0) == 40
+  Type.isTupStr(t)
 
 def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, ""), ret)
@@ -971,7 +971,7 @@ def fieldOf(o: Out, name: String, ens: List[En]): Out =
   if (hasErr(o)) o else fieldOf2(o.ty, name, ens, o.span)
 
 def fieldOf2(ty: String, name: String, ens: List[En], span: (String, Int)): Out =
-  if (isTup(ty) && isTupField(name)) tupFieldAt(splitComma(tupleInner(ty)), tupIdx(name), name, span) else if (isTup(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else fieldOf3(fieldNamed(ens, ty, name), ty)
+  if (isTup(ty) && isTupField(name)) tupFieldAt(Type.tupPartsStr(ty), tupIdx(name), name, span) else if (isTup(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else if (Type.isFunStr(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else fieldOf3(fieldNamed(ens, ty, name), ty)
 
 def isTupField(name: String): Bool =
   tupIdx(name) >= 0
@@ -1111,10 +1111,7 @@ def isTuplePat(pat: String): Bool =
   Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
 
 def bindTuple(pat: String, scrutTy: String, env: List[(String, String)]): List[(String, String)] =
-  bindTuple2(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), splitComma(tupleInner(scrutTy)), env)
-
-def tupleInner(ty: String): String =
-  if (Str.len(ty) > 0 && Str.charAt(ty, 0) == 40) Str.slice(ty, 1, Str.len(ty) - 1) else ty
+  bindTuple2(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(scrutTy), env)
 
 def splitComma(s: String): List[String] =
   splitCommaAt(s, commaAt(s, 0))
