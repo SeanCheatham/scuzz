@@ -307,5 +307,5 @@ def lex(src: String): List[SpTok] =
   lexStem(src, "")
 
 def lexStem(src: String, stem: String): List[SpTok] =
-  List.concat(List.reverse(lexAt(src, 0, stem, [])), [SpTok(Tok.Eof, Str.len(src), stem)])
+  List.reverse(SpTok(Tok.Eof, Str.len(src), stem) :: lexAt(src, 0, stem, []))
 
