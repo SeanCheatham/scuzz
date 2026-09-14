@@ -483,9 +483,6 @@ def bothUnpack(): Bool =
 def fiberJoin(): Bool =
   Check.check("def right(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    s <- Fiber.join(f)\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    f <- Fiber.fork(IO.pure(\"x\"))\n    n <- Fiber.join(f)\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n", "type mismatch")
 
-def bothUnpack(): Bool =
-  Check.check("def right(): IO[Unit] =\n  for {\n    (_, s) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(s)\n  } yield ()\n") == "[]" && rejects("def wrong(): IO[Unit] =\n  for {\n    (_, n) <- IO.both(IO.pure(1), IO.pure(\"x\"))\n    _ <- IO.println(Str.fromInt(n))\n  } yield ()\n", "type mismatch")
-
 def resultTypes(): Bool =
   Check.check("def right(): Result[String, Int] = Result.Ok(1)") == "[]" && rejects("def wrong(): Result[String, Int] = Result.Ok(true)", "does not match declared") && Check.check("""record Problem(code: Int)
 def value(r: Result[Problem, Int]): Int = r match {
