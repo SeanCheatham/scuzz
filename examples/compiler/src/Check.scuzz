@@ -860,7 +860,7 @@ def inferForGo(bs: List[Bind], body: Expr, env: List[(String, String)], funs: Ft
 
 def inferForBind(b: Bind, rest: List[Bind], body: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], errTy: String): Out =
   b match {
-    case Bind(d, name, v) => inferForBind2(d, name, infer(v, env, funs, ens), rest, body, env, funs, ens, errTy, exprSpan(env, v))
+    case Bind(d, name, v) => inferForBind2(d, name, infer(v, env, funs, ens), rest, body, refineEnv(v, env, funs, ens), funs, ens, errTy, exprSpan(env, v))
   }
 
 def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, String)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
@@ -874,6 +874,51 @@ def inferForDraw2(name: String, ty: String, rest: List[Bind], body: Expr, env: L
 
 def bindFor(d: Bool, name: String, ty: String, env: List[(String, String)], ens: List[En]): List[(String, String)] =
   if (name == "_" || name == "") env else bindPat(name, if (d) ioPayload(ty) else ty, env, ens)
+
+def refineEnv(e: Expr, env: List[(String, String)], funs: Ftab, ens: List[En]): List[(String, String)] =
+  e match {
+    case Expr.ECall(f, args, _) => refineOfferCall(f, args, env, funs, ens)
+    case Expr.EMethod(recv, name, args, _) => refineOfferMeth(recv, name, args, env, funs, ens)
+    case Expr.EAscribe(inner, _, _) => refineEnv(inner, env, funs, ens)
+    case Expr.ENamed(_, inner) => refineEnv(inner, env, funs, ens)
+    case _ => env
+  }
+
+def refineOfferCall(f: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En]): List[(String, String)] =
+  if (f == "Queue.offer" || f == "Deferred.complete") refineOfferArgs(offerCtor(f), args, env, funs, ens) else env
+
+def offerCtor(f: String): String =
+  if (Str.startsWith(f, "Queue.")) "Queue" else "Deferred"
+
+def refineOfferMeth(recv: Expr, name: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En]): List[(String, String)] =
+  if (name == "offer") refineOfferRecv(recv, "Queue", args, env, funs, ens) else if (name == "complete") refineOfferRecv(recv, "Deferred", args, env, funs, ens) else env
+
+def refineOfferArgs(ctor: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En]): List[(String, String)] =
+  if (List.len(args) < 2) env else refineHandlePay(ctor, List.at(args, 0), List.at(args, 1), env, funs, ens)
+
+def refineOfferRecv(recv: Expr, ctor: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En]): List[(String, String)] =
+  if (List.isEmpty(args)) env else refineHandlePay(ctor, recv, List.at(args, 0), env, funs, ens)
+
+def refineHandlePay(ctor: String, h: Expr, payE: Expr, env: List[(String, String)], funs: Ftab, ens: List[En]): List[(String, String)] =
+  refineHandlePay2(ctor, stripNamed(h), infer(stripNamed(payE), env, funs, ens), env)
+
+def refineHandlePay2(ctor: String, h: Expr, po: Out, env: List[(String, String)]): List[(String, String)] =
+  if (hasErr(po) || isLoose(po.ty) || po.ty == "") env else refineHandleVar(ctor, h, po.ty, env)
+
+def refineHandleVar(ctor: String, h: Expr, pay: String, env: List[(String, String)]): List[(String, String)] =
+  h match {
+    case Expr.EVar(name, _) => refineHandleName(ctor, name, pay, env)
+    case _ => env
+  }
+
+def refineHandleName(ctor: String, name: String, pay: String, env: List[(String, String)]): List[(String, String)] =
+  if (name == "_" || name == "") env else refineHandleName2(ctor, name, pay, lookupEnv(env, name), env)
+
+def refineHandleName2(ctor: String, name: String, pay: String, cur: String, env: List[(String, String)]): List[(String, String)] =
+  if (!isBareHandle(cur, ctor)) env else (name, Str.concat(ctor, Str.concat("[", Str.concat(pay, "]")))) :: env
+
+def isBareHandle(ty: String, ctor: String): Bool =
+  ty == ctor || ty == Str.concat(ctor, "[A]")
 
 def inferFor2(o: Out, errTy: String): Out =
   if (hasErr(o)) o else ok(ioTy(errTy, o.ty))

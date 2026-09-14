@@ -29,7 +29,7 @@ Close thesis-critical gaps before table-stakes kits. Close table-stakes before l
 
 Close them in this order.
 
-1. **Checker and emit residuals** — Queue, Deferred, `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. Param letters (`A`/`E`) still unify. Param and Fun types stay strings. Check parses those strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
+1. **Checker and emit residuals** — `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. A Queue or Deferred handle has no payload until the first offer or complete. Param letters (`A`/`E`) still unify. Param and Fun types stay strings. Check parses those strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
 
 2. **Compile-time performance** — `scuzz check examples/compiler` is 16 s. A cold `scuzz build examples/tyck` is 1 m 10 s. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
 
