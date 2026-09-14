@@ -400,7 +400,7 @@ def resolveKit(f: String, args: List[Expr], env: List[(String, String)], funs: F
   if (isGenericKit(f)) resolveGenericKit(f, args, env, funs, ens, span) else resolveKitRest(f, args, env, funs, ens, span)
 
 def isGenericKit(f: String): Bool =
-  f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at" || f == "IO.attempt" || f == "IO.race" || f == "IO.both" || f == "IO.ensure" || f == "IO.timeout" || f == "IO.forever" || f == "IO.repeatN" || f == "IO.retryN" || f == "IO.foreach" || f == "IO.foreachDiscard" || f == "IO.when" || f == "IO.unless" || f == "Fiber.fork" || f == "Fiber.join"
+  f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at" || f == "IO.attempt" || f == "IO.race" || f == "IO.both" || f == "IO.ensure" || f == "IO.timeout" || f == "IO.forever" || f == "IO.repeatN" || f == "IO.retryN" || f == "IO.foreach" || f == "IO.foreachDiscard" || f == "IO.when" || f == "IO.unless" || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Fiber.")
 
 def resolveGenericKit(f: String, args: List[Expr], env: List[(String, String)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   resolveGenericKitSig(f, args, env, funs, ens, span, Kits.find(f))
