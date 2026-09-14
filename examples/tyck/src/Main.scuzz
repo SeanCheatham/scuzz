@@ -567,7 +567,54 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes()
+
+def namedLetterTypes(): Bool =
+  Check.check("""enum E:
+  case Ok
+def right(): E = E.Ok
+""") == "[]" && rejects("""enum E:
+  case Ok
+def wrong(): E = 1
+""", "does not match declared") && Check.check("""enum E:
+  case Ok
+def right(e: E): E = e
+""") == "[]" && rejects("""enum E:
+  case Ok
+def wrong(x: Int): E = x
+""", "does not match declared") && Check.check("""record R(n: Int)
+def right(): R = R(1)
+""") == "[]" && rejects("""record R(n: Int)
+def wrong(): R = 1
+""", "does not match declared") && Check.check("""def id[A](x: A): A = x
+def right(): Int = id(1)
+""") == "[]"
+
+def dumpTyckAdt(): String =
+  if (!namedLetterTypes()) dumpNamedLetter() else "tyckAdt"
+
+def dumpNamedLetter(): String =
+  if (Check.check("""enum E:
+  case Ok
+def right(): E = E.Ok
+""") != "[]") Str.concat("enumOk ", Check.check("""enum E:
+  case Ok
+def right(): E = E.Ok
+""")) else if (!rejects("""enum E:
+  case Ok
+def wrong(): E = 1
+""", "does not match declared")) Str.concat("enumMis ", Check.check("""enum E:
+  case Ok
+def wrong(): E = 1
+""")) else if (!rejects("""record R(n: Int)
+def wrong(): R = 1
+""", "does not match declared")) Str.concat("recordMis ", Check.check("""record R(n: Int)
+def wrong(): R = 1
+""")) else if (Check.check("""def id[A](x: A): A = x
+def right(): Int = id(1)
+""") != "[]") Str.concat("idOk ", Check.check("""def id[A](x: A): A = x
+def right(): Int = id(1)
+""")) else "namedLetter-other"
 
 def tyckRecordBind(): Bool =
   Check.check("""record Box(value: Int)
@@ -615,7 +662,7 @@ def allOk(): Bool =
   tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny()
 
 def dumpFail(): String =
-  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) "tyckAdt" else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
+  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) "tyckRes" else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
 
 def dumpTyckLam(): String =
   if (!funArrowTypes()) dumpFunArrow() else "tyckLam"
