@@ -5716,6 +5716,29 @@ int main(void) {
              0);
       sz_release(h);
     }
+    {
+      SzString *h = sz_hex_encode(sz_string_from_cstr("abc"));
+      assert(strcmp(sz_string_cstr(h), "616263") == 0);
+      sz_release(h);
+      h = sz_hex_encode(sz_string_from_cstr(""));
+      assert(strcmp(sz_string_cstr(h), "") == 0);
+      sz_release(h);
+      h = sz_hex_decode(sz_string_from_cstr("616263"));
+      assert(strcmp(sz_string_cstr(h), "abc") == 0);
+      sz_release(h);
+      h = sz_hex_decode(sz_string_from_cstr(""));
+      assert(strcmp(sz_string_cstr(h), "") == 0);
+      sz_release(h);
+      h = sz_hex_decode(sz_string_from_cstr("4D616E"));
+      assert(strcmp(sz_string_cstr(h), "Man") == 0);
+      sz_release(h);
+      h = sz_hex_decode(sz_string_from_cstr("zz"));
+      assert(strcmp(sz_string_cstr(h), "") == 0);
+      sz_release(h);
+      h = sz_hex_decode(sz_string_from_cstr("abc"));
+      assert(strcmp(sz_string_cstr(h), "") == 0);
+      sz_release(h);
+    }
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
     assert(sz_string_ends_with(c, sz_string_from_cstr("")) == 1);

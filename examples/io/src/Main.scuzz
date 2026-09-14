@@ -13,6 +13,9 @@ def liveRe(): IO[Unit] =
 def liveHash(): IO[Unit] =
   IO.println(s"sha:${Hash.sha256("abc")}")
 
+def liveHex(): IO[Unit] =
+  IO.println(s"hex:${Hex.encode("abc")}").flatMap(_ => IO.println(s"hex-rt:${Hex.decode(Hex.encode("abc"))}").flatMap(_ => IO.println(s"hex-bad:${if (Str.len(Hex.decode("zz")) == 0) "miss" else "hit"}")))
+
 def maybeKit(): IO[Unit] =
   Sys.getenv("SCUZZ_KIT").flatMap(t => if (Str.len(t) == 0) IO.println("kit:skip") else Impurity.runKit())
 
@@ -27,6 +30,7 @@ def envProbe(): IO[Unit] =
     _ <- liveClock()
     _ <- liveRe()
     _ <- liveHash()
+    _ <- liveHex()
     _ <- liveFs()
     _ <- liveRand()
     _ <- Concurrency.run()
