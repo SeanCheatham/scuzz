@@ -70,8 +70,16 @@ static SzIo *do_args(void *value, void *env) {
 
 static SzIo *after_net(void *value, void *env) {
   SzIo *io;
+  SzPair *p = (SzPair *)value;
+  SzPair *inner = p ? (SzPair *)p->right : NULL;
+  SzString *body = inner && inner->right ? (SzString *)inner->right : NULL;
   (void)env;
-  io = labeled("net:", (SzString *)value);
+  if (!body)
+    body = sz_string_from_cstr("");
+  else
+    sz_retain(body);
+  io = labeled("net:", body);
+  sz_release(body);
   sz_release(value);
   return fm_drop(io, do_args, NULL);
 }

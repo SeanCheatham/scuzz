@@ -541,11 +541,14 @@ def resolveResBody(recv: String, body: Out, span: (String, Int), makeRet: String
 def netReqTy(): String =
   "(String, String, String)"
 
-def isIoStr(t: String): Bool =
-  isIo(t) && tyEq(ioOk(t), "String")
+def netRespTy(): String =
+  "(Int, Map[String, String], String)"
+
+def isIoHttpResp(t: String): Bool =
+  isIo(t) && tyEq(ioOk(t), netRespTy())
 
 def netFunOk(ty: String): Bool =
-  isFunTy(ty) && tyEq(funArgOf(ty), netReqTy()) && isIoStr(funRetOf(ty))
+  isFunTy(ty) && tyEq(funArgOf(ty), netReqTy()) && isIoHttpResp(funRetOf(ty))
 
 def resolveNetServe(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), kitRet(f))) else if (List.len(args) != 2) bad(Str.concat(f, Str.concat(" expects 2 args, got ", Str.fromInt(List.len(args)))), span) else resolveNetServe2(f, infer(stripNamed(List.at(args, 0)), env, funs, ens), List.at(args, 1), env, funs, ens, span)
@@ -565,7 +568,7 @@ def resolveNetAnn(a: Out, f: String, p: String, body: Expr, env: List[(String, T
   if (hasErr(a)) a else resolveNetBody(f, infer(body, bindRes(p, bindOfAnn(a), env), funs, ens), span)
 
 def resolveNetBody(f: String, body: Out, span: (String, Int)): Out =
-  if (hasErr(body)) body else if (isIoStr(tyStr(body)) || isLoose(tyStr(body))) ok("IO[Unit]") else bad(Str.concat(f, Str.concat(" needs IO[String], got ", tyStr(body))), span)
+  if (hasErr(body)) body else if (isIoHttpResp(tyStr(body)) || isLoose(tyStr(body))) ok("IO[Unit]") else bad(Str.concat(f, Str.concat(" needs IO[(Int, Map[String, String], String)], got ", tyStr(body))), span)
 
 def resolveNetFun(f: String, o: Out, span: (String, Int)): Out =
   if (hasErr(o)) o else if (netFunOk(tyStr(o))) ok("IO[Unit]") else bad(Str.concat(f, " needs a lambda"), span)

@@ -15,10 +15,10 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Blessed Net HTTP/1.0 client and localhost serve. HTTPS uses OpenSSL.
- * DNS, connect, TLS, write, and read each wait at most 1000ms. A 2xx
- * response finishes on Content-Length or EOF. HEAD finishes at the header.
- * Bodies cap at 1 MiB. Failures use SzError code 6. */
+/* Blessed Net HTTP/1.0 client and serve. HTTPS uses OpenSSL.
+ * DNS, connect, TLS, write, and read each wait at most 1000ms. A response
+ * is (status, headers, body). HEAD finishes at the header. Bodies cap at
+ * 1 MiB. Serve binds 0.0.0.0 and/or ::. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -55,6 +55,42 @@ static int set_nonblock(int fd) {
   if (fl < 0)
     return -1;
   return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
+void *sz_net_http_resp(int64_t status, SzMap *headers, SzString *body) {
+  void *st;
+  SzString *b = body;
+  SzPair *inner;
+  SzPair *outer;
+  int drop_b = 0;
+  if (!b) {
+    b = sz_string_from_cstr("");
+    drop_b = 1;
+  }
+  st = sz_box_i64(status);
+  inner = sz_pair_new(headers, b);
+  outer = sz_pair_new(st, inner);
+  sz_release(st);
+  sz_release(inner);
+  if (drop_b)
+    sz_release(b);
+  return outer;
+}
+
+static int http_resp_parts(void *resp, int64_t *status, SzMap **headers,
+                           SzString **body) {
+  SzPair *p = (SzPair *)resp;
+  SzPair *inner;
+  if (!p || !p->left || !p->right)
+    return 0;
+  inner = (SzPair *)p->right;
+  if (status)
+    *status = sz_unbox_i64(p->left);
+  if (headers)
+    *headers = (SzMap *)inner->left;
+  if (body)
+    *body = inner->right ? (SzString *)inner->right : NULL;
+  return 1;
 }
 
 /* 1 = ok, 0 = invalid URL, -1 = invalid port. */
@@ -1329,6 +1365,199 @@ static int http_content_length(const char *acc, size_t hdr_len, size_t *out) {
   return found;
 }
 
+static int http_tchar(unsigned char c) {
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+         (c >= 'a' && c <= 'z') || c == '!' || c == '#' || c == '$' ||
+         c == '%' || c == '&' || c == '\'' || c == '*' || c == '+' ||
+         c == '-' || c == '.' || c == '^' || c == '_' || c == '`' ||
+         c == '|' || c == '~';
+}
+
+static int http_name_ieq(const char *a, const char *b) {
+  size_t n;
+  if (!a || !b)
+    return 0;
+  n = strlen(a);
+  return strlen(b) == n && ascii_ieq(a, b, n);
+}
+
+static int http_hdr_skip(const char *name) {
+  return http_name_ieq(name, "Content-Length") ||
+         http_name_ieq(name, "Connection") ||
+         http_name_ieq(name, "Transfer-Encoding");
+}
+
+static int http_hdr_ok(const char *name, const char *val) {
+  size_t i;
+  if (!name || !name[0] || !val)
+    return 0;
+  for (i = 0; name[i]; i++) {
+    if (!http_tchar((unsigned char)name[i]))
+      return 0;
+  }
+  for (i = 0; val[i]; i++) {
+    unsigned char c = (unsigned char)val[i];
+    if (c == 0 || c == '\r' || c == '\n')
+      return 0;
+  }
+  return 1;
+}
+
+static const char *http_reason(int status) {
+  switch (status) {
+  case 200:
+    return "OK";
+  case 201:
+    return "Created";
+  case 204:
+    return "No Content";
+  case 301:
+    return "Moved Permanently";
+  case 302:
+    return "Found";
+  case 304:
+    return "Not Modified";
+  case 400:
+    return "Bad Request";
+  case 401:
+    return "Unauthorized";
+  case 403:
+    return "Forbidden";
+  case 404:
+    return "Not Found";
+  case 405:
+    return "Method Not Allowed";
+  case 500:
+    return "Internal Server Error";
+  case 502:
+    return "Bad Gateway";
+  case 503:
+    return "Service Unavailable";
+  default:
+    return "Response";
+  }
+}
+
+static SzMap *http_parse_headers(const char *acc, size_t hdr_len) {
+  SzMap *m = NULL;
+  size_t i = 0;
+  if (!acc || hdr_len < 4)
+    return NULL;
+  while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
+    i++;
+  i += 2;
+  while (i < hdr_len) {
+    size_t start = i;
+    size_t colon;
+    size_t end;
+    if (acc[i] == '\r')
+      break;
+    while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
+      i++;
+    end = i;
+    colon = start;
+    while (colon < end && acc[colon] != ':')
+      colon++;
+    if (colon < end) {
+      size_t ns = start;
+      size_t ne = colon;
+      size_t vs = colon + 1;
+      size_t ve = end;
+      while (ns < ne && (acc[ns] == ' ' || acc[ns] == '\t'))
+        ns++;
+      while (ne > ns && (acc[ne - 1] == ' ' || acc[ne - 1] == '\t'))
+        ne--;
+      while (vs < ve && (acc[vs] == ' ' || acc[vs] == '\t'))
+        vs++;
+      while (ve > vs && (acc[ve - 1] == ' ' || acc[ve - 1] == '\t'))
+        ve--;
+      if (ne > ns) {
+        SzString *name = sz_string_from_bytes(acc + ns, ne - ns);
+        SzString *val = sz_string_from_bytes(acc + vs, ve - vs);
+        SzMap *n = sz_map_set(m, name, val, 1);
+        sz_release(m);
+        sz_release(name);
+        sz_release(val);
+        m = n;
+      }
+    }
+    i += 2;
+  }
+  return m;
+}
+
+static void http_finish_resp(HttpSt *st, NetResult *r, int status, size_t hdr,
+                             const char *body, size_t blen) {
+  SzMap *headers = http_parse_headers(st->acc, hdr);
+  SzString *payload = sz_string_from_bytes(body ? body : "", blen);
+  r->is_err = 0;
+  r->as.ok = sz_net_http_resp(status, headers, payload);
+  sz_release(headers);
+  sz_release(payload);
+}
+
+static char *http_format_resp(int64_t status, SzMap *headers, const char *data,
+                              size_t len, int head, size_t *out_len) {
+  SzList *rows;
+  SzList *it;
+  size_t extra = 0;
+  size_t cap;
+  size_t hn;
+  char *buf;
+  char *p;
+  const char *reason;
+  if (status < 100 || status > 599)
+    return NULL;
+  if (head)
+    len = 0;
+  reason = http_reason((int)status);
+  rows = sz_map_to_list(headers);
+  for (it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
+    SzPair *kv = (SzPair *)sz_list_head(it);
+    const char *name =
+        kv && kv->left ? sz_string_cstr((SzString *)kv->left) : "";
+    const char *val =
+        kv && kv->right ? sz_string_cstr((SzString *)kv->right) : "";
+    if (http_hdr_skip(name))
+      continue;
+    if (!http_hdr_ok(name, val)) {
+      sz_release(rows);
+      return NULL;
+    }
+    extra += strlen(name) + 2 + strlen(val) + 2;
+  }
+  cap = 128 + extra + len;
+  buf = (char *)sz_alloc(cap + 1);
+  hn = (size_t)snprintf(buf, cap + 1,
+                        "HTTP/1.0 %d %s\r\nContent-Length: %zu\r\n"
+                        "Connection: close\r\n",
+                        (int)status, reason, len);
+  p = buf + hn;
+  for (it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
+    SzPair *kv = (SzPair *)sz_list_head(it);
+    const char *name =
+        kv && kv->left ? sz_string_cstr((SzString *)kv->left) : "";
+    const char *val =
+        kv && kv->right ? sz_string_cstr((SzString *)kv->right) : "";
+    size_t n;
+    if (http_hdr_skip(name))
+      continue;
+    n = (size_t)snprintf(p, (size_t)(buf + cap + 1 - p), "%s: %s\r\n", name,
+                         val);
+    p += n;
+  }
+  sz_release(rows);
+  memcpy(p, "\r\n", 2);
+  p += 2;
+  if (len)
+    memcpy(p, data ? data : "", len);
+  p += len;
+  *p = '\0';
+  if (out_len)
+    *out_len = (size_t)(p - buf);
+  return buf;
+}
+
 /* 1 = r is final (ok or err). 0 = retry. eof = connection closed. */
 static int http_try_complete(HttpSt *st, NetResult *r, int eof) {
   size_t hdr;
@@ -1360,19 +1589,13 @@ static int http_try_complete(HttpSt *st, NetResult *r, int eof) {
     r->as.err = http_err(st, "malformed response");
     return 1;
   }
-  if (status < 200 || status > 299) {
-    r->is_err = 1;
-    r->as.err = http_err(st, "HTTP error");
-    return 1;
-  }
-  if (strcmp(st->method, "HEAD") == 0) {
-    r->is_err = 0;
-    r->as.ok = sz_string_from_cstr("");
-    return 1;
-  }
   if (http_header_present(st->acc, hdr, "Transfer-Encoding")) {
     r->is_err = 1;
     r->as.err = http_err(st, "chunked encoding unsupported");
+    return 1;
+  }
+  if (strcmp(st->method, "HEAD") == 0) {
+    http_finish_resp(st, r, status, hdr, "", 0);
     return 1;
   }
   has_cl = 0;
@@ -1388,8 +1611,7 @@ static int http_try_complete(HttpSt *st, NetResult *r, int eof) {
   body_got = st->total > body_off ? st->total - body_off : 0;
   if (has_cl) {
     if (body_got >= clen) {
-      r->is_err = 0;
-      r->as.ok = sz_string_from_bytes(st->acc + body_off, clen);
+      http_finish_resp(st, r, status, hdr, st->acc + body_off, clen);
       return 1;
     }
     if (eof) {
@@ -1400,8 +1622,7 @@ static int http_try_complete(HttpSt *st, NetResult *r, int eof) {
     return 0;
   }
   if (eof) {
-    r->is_err = 0;
-    r->as.ok = sz_string_from_bytes(st->acc + body_off, body_got);
+    http_finish_resp(st, r, status, hdr, st->acc + body_off, body_got);
     return 1;
   }
   return 0;
@@ -1743,11 +1964,11 @@ SzIo *sz_net_http_delete(SzString *url) {
 SzIo *sz_net_http_head(SzString *url) { return sz_net_http_req("HEAD", url, NULL); }
 
 /* HTTP/1.0 server. Listen and conn fds are nonblocking. Live bind is
- * 127.0.0.1 and/or ::1. TestRuntime uses a per-port mailbox. Read and
+ * 0.0.0.0 and/or ::. TestRuntime uses a per-port mailbox. Read and
  * write wait at most 1000ms. Error code 6. serveOnce is one request.
  * serve keeps listen (n<=0 forever live, or until the TestRuntime queue
- * is empty). The handler receives (path, method, body). HEAD writes no
- * body. */
+ * is empty). The handler receives (path, method, body) and returns
+ * (status, headers, body). HEAD writes no body. */
 
 typedef struct ServeSt {
   int64_t port;
@@ -1758,6 +1979,8 @@ typedef struct ServeSt {
   SzCont handler;
   void *henv;
   void *body;
+  char *wbuf;
+  size_t wlen;
   char rbuf[65536];
   size_t rlen;
   size_t woff;
@@ -1806,6 +2029,9 @@ static void serve_free(ServeSt *st) {
   sz_testrt_net_cancel_accept(st->port);
   sz_testrt_net_fail_mailbox(st->port, NULL);
   serve_close_fds(st);
+  sz_free(st->wbuf);
+  st->wbuf = NULL;
+  st->wlen = 0;
   sz_release(st->body);
   st->body = NULL;
   sz_release(st->henv);
@@ -1865,6 +2091,13 @@ static SzPair *pack_http_tuple(const char *path, const char *method,
   return outer;
 }
 
+static void serve_v4_addr(int port, struct sockaddr_in *addr) {
+  memset(addr, 0, sizeof *addr);
+  addr->sin_family = AF_INET;
+  addr->sin_port = htons((uint16_t)port);
+  addr->sin_addr.s_addr = htonl(INADDR_ANY);
+}
+
 static int serve_bind_v4(int port) {
   struct sockaddr_in addr;
   int fd;
@@ -1873,16 +2106,19 @@ static int serve_bind_v4(int port) {
   if (fd < 0)
     return -1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-  memset(&addr, 0, sizeof addr);
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons((uint16_t)port);
-  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  serve_v4_addr(port, &addr);
   if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
       listen(fd, 16) != 0 || set_nonblock(fd) != 0) {
     close(fd);
     return -1;
   }
   return fd;
+}
+
+int sz_net_test_serve_v4_is_any(void) {
+  struct sockaddr_in addr;
+  serve_v4_addr(1, &addr);
+  return addr.sin_addr.s_addr == htonl(INADDR_ANY);
 }
 
 static int serve_bind_v6(int port) {
@@ -1902,8 +2138,8 @@ static int serve_bind_v6(int port) {
   addr.sin6_len = (uint8_t)sizeof(addr);
 #endif
   addr.sin6_port = htons((uint16_t)port);
-  if (inet_pton(AF_INET6, "::1", &addr.sin6_addr) != 1 ||
-      bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
+  addr.sin6_addr = in6addr_any;
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
       listen(fd, 16) != 0 || set_nonblock(fd) != 0) {
     close(fd);
     return -1;
@@ -2115,26 +2351,27 @@ static void *serve_read_req(void *env) {
 static void *serve_write_close(void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
-  SzString *body = (SzString *)st->body;
-  const char *data = body ? sz_string_cstr(body) : "";
-  size_t len = body ? (size_t)sz_string_len(body) : 0;
-  char hdr[160];
-  int hn;
-  size_t total;
   ssize_t n;
-  const char *src;
-  size_t src_off;
-  size_t src_len;
 
   if (sz_testrt_net_is_fake()) {
+    int64_t status = 0;
+    SzMap *headers = NULL;
+    SzString *payload = NULL;
+    const char *data = "";
+    void *resp;
+    http_resp_parts(st->body, &status, &headers, &payload);
+    (void)status;
+    (void)headers;
+    data = payload ? sz_string_cstr(payload) : "";
     sz_testrt_net_set_last_serve_body(data);
     if (st->vreq_done) {
-      void *payload = body;
-      if (!payload)
-        payload = sz_string_from_cstr("");
-      sz_deferred_complete_now((SzDeferred *)st->vreq_done, payload);
-      if (!body)
-        sz_release(payload);
+      resp = st->body;
+      if (!resp)
+        resp = sz_net_http_resp(200, NULL, NULL);
+      else
+        sz_retain(resp);
+      sz_deferred_complete_now((SzDeferred *)st->vreq_done, resp);
+      sz_release(resp);
       sz_release(st->vreq_done);
       st->vreq_done = NULL;
     }
@@ -2143,31 +2380,16 @@ static void *serve_write_close(void *env) {
     return r;
   }
 
-  if (st->head_resp)
-    len = 0;
-  hn = snprintf(hdr, sizeof hdr,
-                "HTTP/1.0 200 OK\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
-                len);
-  if (hn < 0 || st->conn_fd < 0) {
+  if (!st->wbuf || st->conn_fd < 0) {
     r->is_err = 1;
     r->drop = 1;
     r->as.err = sz_error_new(6, "Net.serve: write failed");
     return r;
   }
-  total = (size_t)hn + len;
-  if (st->woff < (size_t)hn) {
-    src = hdr;
-    src_off = st->woff;
-    src_len = (size_t)hn;
-  } else {
-    src = data;
-    src_off = st->woff - (size_t)hn;
-    src_len = len;
-  }
 #ifdef MSG_NOSIGNAL
-  n = send(st->conn_fd, src + src_off, src_len - src_off, MSG_NOSIGNAL);
+  n = send(st->conn_fd, st->wbuf + st->woff, st->wlen - st->woff, MSG_NOSIGNAL);
 #else
-  n = write(st->conn_fd, src + src_off, src_len - src_off);
+  n = write(st->conn_fd, st->wbuf + st->woff, st->wlen - st->woff);
 #endif
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
     if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
@@ -2186,7 +2408,7 @@ static void *serve_write_close(void *env) {
     return r;
   }
   st->woff += (size_t)n;
-  if (st->woff < total) {
+  if (st->woff < st->wlen) {
     r->retry = 1;
     return r;
   }
@@ -2356,11 +2578,26 @@ static SzIo *serve_after_write(void *value, void *env) {
 
 static SzIo *serve_after_body(void *body, void *env) {
   ServeSt *st = (ServeSt *)env;
+  int64_t status = 0;
+  SzMap *headers = NULL;
+  SzString *payload = NULL;
+  const char *data;
+  size_t len;
   sz_release(st->body);
   st->body = body;
   st->woff = 0;
+  sz_free(st->wbuf);
+  st->wbuf = NULL;
+  st->wlen = 0;
+  if (!http_resp_parts(body, &status, &headers, &payload))
+    return serve_drop_conn(st, sz_error_new(6, "Net.serve: expected HTTP response"));
+  data = payload ? sz_string_cstr(payload) : "";
+  len = payload ? (size_t)sz_string_len(payload) : 0;
   if (sz_testrt_net_is_fake())
     return fm_drop(sz_io_delay(serve_write_close, st), unwrap_net, NULL);
+  st->wbuf = http_format_resp(status, headers, data, len, st->head_resp, &st->wlen);
+  if (!st->wbuf)
+    return serve_drop_conn(st, sz_error_new(6, "Net.serve: invalid HTTP response"));
   return serve_poll_conn_write(NULL, st);
 }
 

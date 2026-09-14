@@ -1,15 +1,31 @@
-def showPing(p: (Unit, String)): IO[Unit] =
+def showResp(tag: String, p: (Unit, (Int, Map[String, String], String))): IO[Unit] =
   p match {
-    case (_, body) => IO.println(s"ping:$body")
+    case (_, resp) => printResp(tag, resp)
   }
 
-def runHttp(): IO[Unit] =
+def printResp(tag: String, resp: (Int, Map[String, String], String)): IO[Unit] =
+  resp match {
+    case (status, headers, body) => IO.println(s"$tag:${Str.fromInt(status)}:${Map.getOrElse(headers, "X-Trace", "-")}:$body")
+  }
+
+def reply(path: String): (Int, Map[String, String], String) =
+  if (path == "/ping") (200, Map.set(Map.empty(), "X-Trace", "ok"), s"ok:$path") else (404, Map.set(Map.empty(), "X-Trace", "miss"), "missing")
+
+def handle(req: (String, String, String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (path, method, body) => IO.println(s"served:$method:$path:$body").map(_ => reply(path))
+  }
+
+def runHttpOk(): IO[Unit] =
   for {
-    tag = "ok"
-    p <- IO.both(Net.serveOnce(8080, req => req match {
-  case (path, method, body) => IO.println(s"served:$method:$path:$body").map(_ => s"$tag:$path")
-}), Net.httpPost("http://127.0.0.1:8080/ping", "hi"))
-    _ <- showPing(p)
+    p <- IO.both(Net.serveOnce(8080, handle), Net.httpPost("http://127.0.0.1:8080/ping", "hi"))
+    _ <- showResp("ping", p)
+  } yield ()
+
+def runHttpMiss(): IO[Unit] =
+  for {
+    p <- IO.both(Net.serveOnce(8081, handle), Net.httpGet("http://127.0.0.1:8081/nope"))
+    _ <- showResp("miss", p)
   } yield ()
 
 def echoServer(ln: Tcp): IO[Unit] =
@@ -50,6 +66,12 @@ def runUdp(): IO[Unit] =
     _ <- showUdp(got)
     _ <- Net.udpClose(a)
     _ <- Net.udpClose(b)
+  } yield ()
+
+def runHttp(): IO[Unit] =
+  for {
+    _ <- runHttpOk()
+    _ <- runHttpMiss()
   } yield ()
 
 def run(): IO[Unit] =
