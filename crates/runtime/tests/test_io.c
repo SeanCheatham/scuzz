@@ -5686,6 +5686,18 @@ int main(void) {
     assert(sz_string_contains(c, b) == 1);
     assert(sz_string_contains(c, sz_string_from_cstr("zz")) == 0);
     assert(sz_string_contains(c, sz_string_from_cstr("")) == 1);
+    assert(sz_string_matches(sz_string_from_cstr("abc123"),
+                             sz_string_from_cstr("[a-z]+[0-9]+")) == 1);
+    assert(sz_string_matches(sz_string_from_cstr("abc123x"),
+                             sz_string_from_cstr("[a-z]+[0-9]+")) == 0);
+    assert(sz_string_matches(sz_string_from_cstr("abc"),
+                             sz_string_from_cstr("^[a-z]+$")) == 1);
+    assert(sz_string_matches(sz_string_from_cstr("a"), sz_string_from_cstr("[")) ==
+           0);
+    assert(sz_string_matches(sz_string_from_cstr(""), sz_string_from_cstr("")) ==
+           1);
+    assert(sz_string_matches(sz_string_from_cstr("a"), sz_string_from_cstr("")) ==
+           0);
     assert(sz_string_ends_with(c, b) == 1);
     assert(sz_string_ends_with(c, a) == 0);
     assert(sz_string_ends_with(c, sz_string_from_cstr("")) == 1);

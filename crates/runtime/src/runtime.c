@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <regex.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1377,6 +1378,40 @@ int64_t sz_string_starts_with(const SzString *s, const SzString *prefix) {
 
 int64_t sz_string_contains(const SzString *s, const SzString *needle) {
   return sz_string_index_of(s, needle) >= 0 ? 1 : 0;
+}
+
+/* POSIX ERE. Full-string match on UTF-8 bytes. No capture.
+ * A bad pattern, a NUL in the text, or a pattern over 1024 bytes is 0.
+ * Empty pattern: match only the empty string. Do not call libc regex for
+ * that case. Darwin and glibc disagree on empty vs empty. */
+int64_t sz_string_matches(const SzString *s, const SzString *pat) {
+  regex_t re;
+  regmatch_t m;
+  const char *text;
+  const char *p;
+  int rc;
+
+  if (!s || !s->data || !pat || !pat->data)
+    return 0;
+  if (pat->len > 1024)
+    return 0;
+  p = pat->data;
+  if (strlen(p) != pat->len)
+    return 0;
+  text = s->data;
+  if (strlen(text) != s->len)
+    return 0;
+  if (pat->len == 0)
+    return s->len == 0 ? 1 : 0;
+  if (regcomp(&re, p, REG_EXTENDED) != 0)
+    return 0;
+  rc = regexec(&re, text, 1, &m, 0);
+  regfree(&re);
+  if (rc != 0)
+    return 0;
+  if (m.rm_so != 0 || (size_t)m.rm_eo != s->len)
+    return 0;
+  return 1;
 }
 
 int64_t sz_string_ends_with(const SzString *s, const SzString *suffix) {

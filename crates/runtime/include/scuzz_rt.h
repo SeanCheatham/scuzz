@@ -155,6 +155,9 @@ SzString *sz_string_reverse(const SzString *s);
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix);
 int64_t sz_string_ends_with(const SzString *s, const SzString *suffix);
 int64_t sz_string_contains(const SzString *s, const SzString *needle);
+/* POSIX ERE. Full-string match on UTF-8 bytes. 1 or 0. A bad pattern is 0.
+ * Empty pattern matches only the empty string. */
+int64_t sz_string_matches(const SzString *s, const SzString *pat);
 /* Whole-string base-10 parse. Leading space is allowed. Junk or overflow uses `dflt`. */
 int64_t sz_string_to_int(const SzString *s, int64_t dflt);
 /* Replace every non-overlapping `oldv`. Empty `oldv` copies `s`. */
