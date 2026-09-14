@@ -322,17 +322,23 @@ def eqStr(a: String, b: String): Bool =
 def hasName(ns: List[String], n: String): Bool =
   if (List.isEmpty(ns)) false else if (List.at(ns, 0) == n) true else hasName(List.tail(ns), n)
 
-def pinTop(t: Ty, names: List[String]): Ty =
+def pin(t: Ty, names: List[String]): Ty =
   t match {
     case Ty.TVar(n) => if (hasName(names, n)) tNamed(n) else t
+    case Ty.App(n, args) => tApp(n, pinList(args, names))
+    case Ty.Tuple(ps) => tTuple(pinList(ps, names))
+    case Ty.Arrow(a, r) => tFun(pin(a, names), pin(r, names))
     case _ => t
   }
 
+def pinList(xs: List[Ty], names: List[String]): List[Ty] =
+  if (List.isEmpty(xs)) xs else pin(List.at(xs, 0), names) :: pinList(List.tail(xs), names)
+
 def eqPinned(a: String, b: String, names: List[String]): Bool =
-  eq(pinTop(parse(a), names), pinTop(parse(b), names))
+  eq(pin(parse(a), names), pin(parse(b), names))
 
 def preferPinned(a: String, b: String, names: List[String]): String =
-  show(prefer(pinTop(parse(a), names), pinTop(parse(b), names)))
+  show(prefer(pin(parse(a), names), pin(parse(b), names)))
 
 def preferStr(a: String, b: String): String =
   show(prefer(parse(a), parse(b)))
