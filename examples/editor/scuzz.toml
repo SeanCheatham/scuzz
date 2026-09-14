@@ -1,7 +1,7 @@
 [package]
 name = "editor"
 version = "0.1.0"
-description = "Package Index Book: Session chips from campaign dumps, Live stays the job"
+description = "Package Index Book: Verify claim names, Session chips, Live stays the job"
 
 [ui]
 default_runtime = "desktop"

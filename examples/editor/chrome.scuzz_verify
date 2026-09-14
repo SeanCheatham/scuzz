@@ -26,3 +26,13 @@ def afterFuzzShowsReached(t: Timeline): Verdict =
 def afterFuzzShowsOpen(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Fuzz", "chip:neverHit=0")
 
+def afterVerifyShowsClaim(t: Timeline): Verdict =
+  Verdict.onHit(t, "choicechip:Verify", __tup => __tup match {
+  case (before, after) => Timeline.signalInt(t, after, "page") == 1 && Timeline.a11yHas(t, after, "choicechip:Verify=1") && Timeline.a11yHas(t, after, "button:greetFact") && !Timeline.a11yHas(t, after, "chrome.scuzz_verify")
+})
+
+def afterClaimStaysVerify(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:greetFact", __tup => __tup match {
+  case (before, after) => Timeline.signalInt(t, after, "page") == 1 && Timeline.a11yHas(t, after, "choicechip:Verify=1") && Timeline.a11yHas(t, after, "button:greetFact")
+})
+

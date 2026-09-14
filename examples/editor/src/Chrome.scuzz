@@ -13,6 +13,12 @@ def liveRels(ents: List[String]): List[String] =
 def verifyRels(ents: List[String]): List[String] =
   List.filter(ents, s => Str.endsWith(s, ".scuzz_verify") || Str.endsWith(s, ".scuzz_scenario"))
 
+def verifyFileRels(ents: List[String]): List[String] =
+  List.filter(ents, s => Str.endsWith(s, ".scuzz_verify"))
+
+def scenarioRels(ents: List[String]): List[String] =
+  List.filter(ents, s => Str.endsWith(s, ".scuzz_scenario"))
+
 def stemOf(path: String): String =
   Str.stripSuffix(Fs.basename(path), ".scuzz")
 
@@ -164,4 +170,13 @@ def triggerHitNames(raw: String): List[String] =
 
 def statusLines(raw: String): List[String] =
   if (Str.isEmpty(raw)) [] else if (Str.contains(raw, "\"ok\":true")) ["fuzz ok"] else ["fuzz fail"]
+
+def takeUntilParen(s: String): String =
+  if (Str.indexOf(s, "(") < 0) "" else Str.take(s, Str.indexOf(s, "("))
+
+def claimNameOf(line: String): String =
+  if (!Str.startsWith(line, "def ")) "" else takeUntilParen(Str.drop(line, 4))
+
+def claimNames(src: String): List[String] =
+  List.filter(List.map(nonEmptyLines(src), claimNameOf), s => !Str.isEmpty(s))
 
