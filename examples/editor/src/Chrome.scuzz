@@ -144,7 +144,8 @@ def fuzzFile(root: String, name: String): String =
   Fs.join(Fs.join(Fs.join(root, "build"), "fuzz"), name)
 
 def nonEmptyLines(src: String): List[String] =
-  List.filter(Str.split(src, "\n"), s => !Str.isEmpty(s))
+  List.filter(Str.split(src, """
+"""), s => !Str.isEmpty(s))
 
 def rowName(row: String): String =
   if (Str.indexOf(row, "\t") < 0) row else Str.take(row, Str.indexOf(row, "\t"))

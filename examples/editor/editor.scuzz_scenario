@@ -13,10 +13,15 @@ def Main.startFuzz(root: String): IO[Int] =
     fuzz = Fs.join(build, "fuzz")
     _ <- Fs.mkdirs(build).handleErrorWith(_ => IO.pure(()))
     _ <- Fs.mkdirs(fuzz).handleErrorWith(_ => IO.pure(()))
-    _ <- Fs.write(Fs.join(build, "sometimes.declared"), "tappedPlus\nneverHit\n")
-    _ <- Fs.write(Fs.join(build, "triggers.declared"), "outlined:Check\n")
-    _ <- Fs.write(Fs.join(fuzz, "sometimes.dump"), "tappedPlus\n")
-    _ <- Fs.write(Fs.join(fuzz, "triggers.dump"), "claim\toutlined:Check\ttriggered\n")
+    _ <- Fs.write(Fs.join(build, "sometimes.declared"), """tappedPlus
+neverHit
+""")
+    _ <- Fs.write(Fs.join(build, "triggers.declared"), """outlined:Check
+""")
+    _ <- Fs.write(Fs.join(fuzz, "sometimes.dump"), """tappedPlus
+""")
+    _ <- Fs.write(Fs.join(fuzz, "triggers.dump"), """claim	outlined:Check	triggered
+""")
     _ <- Fs.write(Fs.join(fuzz, "summary.json"), "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":true}}\n")
   } yield 1
 
