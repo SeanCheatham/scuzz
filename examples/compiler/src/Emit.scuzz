@@ -176,33 +176,36 @@ def collectToksHd(h: SpTok, rest: List[SpTok], acc: List[String]): List[String] 
 def collectTok(t: Tok, rest: List[SpTok], acc: List[String]): List[String] =
   t match {
     case Tok.Str(s) => collectToks(rest, intern(acc, s))
-    case Tok.Interp(s) => collectToks(rest, internInterp(acc, s, 0, ""))
+    case Tok.Interp(s) => collectToks(rest, internInterp(acc, s, 0, Builder.empty()))
     case _ => collectToks(rest, acc)
   }
 
-def internInterp(acc: List[String], s: String, i: Int, lit: String): List[String] =
-  if (i >= Str.len(s)) internInterpEnd(acc, lit) else internInterpCh(acc, s, i, lit, Str.charAt(s, i))
+def internInterp(acc: List[String], s: String, i: Int, b: Builder): List[String] =
+  if (i >= Str.len(s)) internInterpEnd(acc, b) else internInterpCh(acc, s, i, b, Str.charAt(s, i))
 
-def internInterpEnd(acc: List[String], lit: String): List[String] =
+def internInterpEnd(acc: List[String], b: Builder): List[String] =
+  internInterpLit(acc, Builder.result(b))
+
+def internInterpLit(acc: List[String], lit: String): List[String] =
   if (lit == "") acc else intern(acc, lit)
 
-def internInterpCh(acc: List[String], s: String, i: Int, lit: String, c: Int): List[String] =
-  if (c == 36) internInterpDollar(acc, s, i, lit) else internInterp(acc, s, i + 1, Str.concat(lit, Str.slice(s, i, i + 1)))
+def internInterpCh(acc: List[String], s: String, i: Int, b: Builder, c: Int): List[String] =
+  if (c == 36) internInterpDollar(acc, s, i, b) else internInterp(acc, s, i + 1, Builder.append(b, Str.slice(s, i, i + 1)))
 
-def internInterpDollar(acc: List[String], s: String, i: Int, lit: String): List[String] =
-  if (i + 1 >= Str.len(s)) internInterp(acc, s, i + 1, Str.concat(lit, "$")) else internInterpDollar2(acc, s, i, lit, Str.charAt(s, i + 1))
+def internInterpDollar(acc: List[String], s: String, i: Int, b: Builder): List[String] =
+  if (i + 1 >= Str.len(s)) internInterp(acc, s, i + 1, Builder.append(b, "$")) else internInterpDollar2(acc, s, i, b, Str.charAt(s, i + 1))
 
-def internInterpDollar2(acc: List[String], s: String, i: Int, lit: String, n: Int): List[String] =
-  if (n == 123) internInterpBrace(internInterpEnd(acc, lit), s, i) else if (isIdentStart(n)) internInterpSkip(internInterpEnd(acc, lit), s, i + 1) else internInterp(acc, s, i + 1, Str.concat(lit, "$"))
+def internInterpDollar2(acc: List[String], s: String, i: Int, b: Builder, n: Int): List[String] =
+  if (n == 123) internInterpBrace(internInterpEnd(acc, b), s, i) else if (isIdentStart(n)) internInterpSkip(internInterpEnd(acc, b), s, i + 1) else internInterp(acc, s, i + 1, Builder.append(b, "$"))
 
 def internInterpSkip(acc: List[String], s: String, i: Int): List[String] =
-  if (i >= Str.len(s)) acc else if (isIdentCont(Str.charAt(s, i))) internInterpSkip(acc, s, i + 1) else internInterp(acc, s, i, "")
+  if (i >= Str.len(s)) acc else if (isIdentCont(Str.charAt(s, i))) internInterpSkip(acc, s, i + 1) else internInterp(acc, s, i, Builder.empty())
 
 def internInterpBrace(acc: List[String], s: String, i: Int): List[String] =
   internInterpBrace2(closeBrace(s, i + 2, 1), acc, s, i)
 
 def internInterpBrace2(j: Int, acc: List[String], s: String, i: Int): List[String] =
-  internInterp(internHole(acc, Str.slice(s, i + 2, j - 1)), s, j, "")
+  internInterp(internHole(acc, Str.slice(s, i + 2, j - 1)), s, j, Builder.empty())
 
 def internHole(acc: List[String], inner: String): List[String] =
   collectToks(Lexer.lex(inner), acc)
@@ -475,22 +478,25 @@ def isSimpleBind(n: String): Bool =
   n != "" && parenAt(n, 0) < 0 && !isConsPat(n)
 
 def emitInterp(s: String, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitInterpFold(interpParts(s, 0, "", noExpr()), prefix, strs, defs, ens, ps, loc, 0)
+  emitInterpFold(interpParts(s, 0, Builder.empty(), noExpr()), prefix, strs, defs, ens, ps, loc, 0)
 
-def interpParts(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
-  if (i >= Str.len(s)) interpPartsEnd(lit, acc) else interpPartsCh(s, i, lit, acc, Str.charAt(s, i))
+def interpParts(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
+  if (i >= Str.len(s)) interpPartsEnd(b, acc) else interpPartsCh(s, i, b, acc, Str.charAt(s, i))
 
-def interpPartsEnd(lit: String, acc: List[Expr]): List[Expr] =
+def interpPartsEnd(b: Builder, acc: List[Expr]): List[Expr] =
+  interpPartsEndLit(Builder.result(b), acc)
+
+def interpPartsEndLit(lit: String, acc: List[Expr]): List[Expr] =
   if (lit == "") List.reverse(acc) else List.reverse(Expr.EStr(lit, 0) :: acc)
 
-def interpPartsCh(s: String, i: Int, lit: String, acc: List[Expr], c: Int): List[Expr] =
-  if (c == 36) interpPartsDollar(s, i, lit, acc) else interpParts(s, i + 1, Str.concat(lit, Str.slice(s, i, i + 1)), acc)
+def interpPartsCh(s: String, i: Int, b: Builder, acc: List[Expr], c: Int): List[Expr] =
+  if (c == 36) interpPartsDollar(s, i, b, acc) else interpParts(s, i + 1, Builder.append(b, Str.slice(s, i, i + 1)), acc)
 
-def interpPartsDollar(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
-  if (i + 1 >= Str.len(s)) interpParts(s, i + 1, Str.concat(lit, "$"), acc) else interpPartsDollar2(s, i, lit, acc, Str.charAt(s, i + 1))
+def interpPartsDollar(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
+  if (i + 1 >= Str.len(s)) interpParts(s, i + 1, Builder.append(b, "$"), acc) else interpPartsDollar2(s, i, b, acc, Str.charAt(s, i + 1))
 
-def interpPartsDollar2(s: String, i: Int, lit: String, acc: List[Expr], n: Int): List[Expr] =
-  if (n == 123) interpPartsBrace(s, i, lit, acc) else if (isIdentStart(n)) interpPartsIdent(s, i + 1, lit, acc) else interpParts(s, i + 1, Str.concat(lit, "$"), acc)
+def interpPartsDollar2(s: String, i: Int, b: Builder, acc: List[Expr], n: Int): List[Expr] =
+  if (n == 123) interpPartsBrace(s, i, b, acc) else if (isIdentStart(n)) interpPartsIdent(s, i + 1, b, acc) else interpParts(s, i + 1, Builder.append(b, "$"), acc)
 
 def isIdentStart(c: Int): Bool =
   c == 95 || c >= 65 && c <= 90 || c >= 97 && c <= 122
@@ -498,17 +504,20 @@ def isIdentStart(c: Int): Bool =
 def isIdentCont(c: Int): Bool =
   isIdentStart(c) || c >= 48 && c <= 57
 
-def interpPartsIdent(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
-  interpPartsIdent2(s, i, i, lit, acc)
+def interpPartsIdent(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
+  interpPartsIdent2(s, i, i, b, acc)
 
-def interpPartsIdent2(s: String, i: Int, start: Int, lit: String, acc: List[Expr]): List[Expr] =
-  if (i >= Str.len(s)) interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i) else if (isIdentCont(Str.charAt(s, i))) interpPartsIdent2(s, i + 1, start, lit, acc) else interpPartsFlush(lit, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i)
+def interpPartsIdent2(s: String, i: Int, start: Int, b: Builder, acc: List[Expr]): List[Expr] =
+  if (i >= Str.len(s)) interpPartsFlush(b, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i) else if (isIdentCont(Str.charAt(s, i))) interpPartsIdent2(s, i + 1, start, b, acc) else interpPartsFlush(b, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i)
 
-def interpPartsFlush(lit: String, e: Expr, acc: List[Expr], s: String, i: Int): List[Expr] =
-  if (lit == "") interpParts(s, i, "", e :: acc) else interpParts(s, i, "", e :: Expr.EStr(lit, 0) :: acc)
+def interpPartsFlush(b: Builder, e: Expr, acc: List[Expr], s: String, i: Int): List[Expr] =
+  interpPartsFlushLit(Builder.result(b), e, acc, s, i)
 
-def interpPartsBrace(s: String, i: Int, lit: String, acc: List[Expr]): List[Expr] =
-  interpPartsBrace2(s, closeBrace(s, i + 2, 1), i, lit, acc)
+def interpPartsFlushLit(lit: String, e: Expr, acc: List[Expr], s: String, i: Int): List[Expr] =
+  if (lit == "") interpParts(s, i, Builder.empty(), e :: acc) else interpParts(s, i, Builder.empty(), e :: Expr.EStr(lit, 0) :: acc)
+
+def interpPartsBrace(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
+  interpPartsBrace2(s, closeBrace(s, i + 2, 1), i, b, acc)
 
 def closeBrace(s: String, i: Int, depth: Int): Int =
   if (i >= Str.len(s) || depth <= 0) i else closeBraceCh(s, i, depth, Str.charAt(s, i))
@@ -522,12 +531,12 @@ def skipQuoted(s: String, i: Int): Int =
 def skipQuotedCh(s: String, i: Int, c: Int): Int =
   if (c == 34) i + 1 else if (c == 92 && i + 1 < Str.len(s)) skipQuoted(s, i + 2) else skipQuoted(s, i + 1)
 
-def interpPartsBrace2(s: String, j: Int, i: Int, lit: String, acc: List[Expr]): List[Expr] =
-  interpPartsBrace3(Parse.parseExprList(Lexer.lex(Str.slice(s, i + 2, j - 1)), 0), lit, acc, s, j)
+def interpPartsBrace2(s: String, j: Int, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
+  interpPartsBrace3(Parse.parseExprList(Lexer.lex(Str.slice(s, i + 2, j - 1)), 0), b, acc, s, j)
 
-def interpPartsBrace3(p: (Expr, Int), lit: String, acc: List[Expr], s: String, j: Int): List[Expr] =
+def interpPartsBrace3(p: (Expr, Int), b: Builder, acc: List[Expr], s: String, j: Int): List[Expr] =
   p match {
-    case (e, _) => interpPartsFlush(lit, e, acc, s, j)
+    case (e, _) => interpPartsFlush(b, e, acc, s, j)
   }
 
 def emitInterpFold(parts: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
