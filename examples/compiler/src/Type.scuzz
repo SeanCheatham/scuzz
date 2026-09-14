@@ -334,6 +334,21 @@ def pin(t: Ty, names: List[String]): Ty =
 def pinList(xs: List[Ty], names: List[String]): List[Ty] =
   if (List.isEmpty(xs)) xs else pin(List.at(xs, 0), names) :: pinList(List.tail(xs), names)
 
+def subst(t: Ty, param: String, arg: Ty): Ty =
+  t match {
+    case Ty.TVar(n) => if (n == param) arg else t
+    case Ty.Named(n) => if (n == param) arg else t
+    case Ty.App(n, args) => tApp(n, substList(args, param, arg))
+    case Ty.Tuple(ps) => tTuple(substList(ps, param, arg))
+    case Ty.Arrow(a, r) => tFun(subst(a, param, arg), subst(r, param, arg))
+  }
+
+def substList(xs: List[Ty], param: String, arg: Ty): List[Ty] =
+  if (List.isEmpty(xs)) xs else subst(List.at(xs, 0), param, arg) :: substList(List.tail(xs), param, arg)
+
+def substStr(target: String, param: String, arg: String): String =
+  show(subst(parse(target), param, parse(arg)))
+
 def eqPinned(a: String, b: String, names: List[String]): Bool =
   eq(pin(parse(a), names), pin(parse(b), names))
 

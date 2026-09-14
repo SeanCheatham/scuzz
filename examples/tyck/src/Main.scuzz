@@ -514,7 +514,7 @@ def tyckLam(): Bool =
   tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]" && funArrowTypes()
 
 def funArrowTypes(): Bool =
-  Type.funFrom("Int => String" :: [], "String") == "(Int => String) => String" && Type.funFrom("Int" :: [], "String") == "Int => String" && Type.funFrom("Int" :: "String" :: [], "Bool") == "(Int, String) => Bool" && Check.check(srcFunArrowOk()) == "[]" && rejects(srcFunArrowMis(), "does not match declared") && rejects(srcFunArrowApply(), "arg type mismatch") && rejects(srcFunListApply(), "apply needs a function")
+  Type.funFrom("Int => String" :: [], "String") == "(Int => String) => String" && Type.funFrom("Int" :: [], "String") == "Int => String" && Type.funFrom("Int" :: "String" :: [], "Bool") == "(Int, String) => Bool" && Type.substStr("A => A", "A", "Int => String") == "(Int => String) => Int => String" && Check.check(srcFunArrowOk()) == "[]" && rejects(srcFunArrowMis(), "does not match declared") && rejects(srcFunArrowApply(), "arg type mismatch") && rejects(srcFunListApply(), "apply needs a function") && Check.check(srcFunSubstOk()) == "[]" && rejects(srcFunSubstMis(), "does not match declared") && Check.check(srcFunSubstId()) == "[]"
 
 def srcFunArrowOk(): String =
   """def right(): (Int => String) => String =
@@ -538,6 +538,21 @@ def bad(): String => String =
 def srcFunListApply(): String =
   """def wrong(xs: List[Int => String]): String =
   xs.apply(1)
+"""
+
+def srcFunSubstOk(): String =
+  "def wrap[A](x: A): A => A =\n  (y: A) => x\ndef right(): (Int => String) => (Int => String) =\n  wrap((n: Int) => \"x\")\n"
+
+def srcFunSubstMis(): String =
+  "def wrap[A](x: A): A => A =\n  (y: A) => x\ndef wrong(): Int => String => String =\n  wrap((n: Int) => \"x\")\n"
+
+def srcFunSubstId(): String =
+  """def id[A](x: A): Int =
+  x
+def wrap[A](x: A): A => A =
+  (y: A) => x
+def right(): Int => Int =
+  wrap(1)
 """
 
 def srcEitherOk(): String =
@@ -704,7 +719,7 @@ def dumpTyckLam(): String =
   if (!funArrowTypes()) dumpFunArrow() else "tyckLam"
 
 def dumpFunArrow(): String =
-  if (Type.funFrom("Int => String" :: [], "String") != "(Int => String) => String") "funFrom" else if (Check.check(srcFunArrowOk()) != "[]") Str.concat("funArrowOk ", Check.check(srcFunArrowOk())) else if (!rejects(srcFunArrowMis(), "does not match declared")) Str.concat("funArrowMis ", Check.check(srcFunArrowMis())) else if (!rejects(srcFunArrowApply(), "arg type mismatch")) Str.concat("funArrowApply ", Check.check(srcFunArrowApply())) else if (!rejects(srcFunListApply(), "apply needs a function")) Str.concat("funListApply ", Check.check(srcFunListApply())) else "funArrow-other"
+  if (Type.funFrom("Int => String" :: [], "String") != "(Int => String) => String") "funFrom" else if (Type.substStr("A => A", "A", "Int => String") != "(Int => String) => Int => String") "substFun" else if (Check.check(srcFunArrowOk()) != "[]") Str.concat("funArrowOk ", Check.check(srcFunArrowOk())) else if (!rejects(srcFunArrowMis(), "does not match declared")) Str.concat("funArrowMis ", Check.check(srcFunArrowMis())) else if (!rejects(srcFunArrowApply(), "arg type mismatch")) Str.concat("funArrowApply ", Check.check(srcFunArrowApply())) else if (!rejects(srcFunListApply(), "apply needs a function")) Str.concat("funListApply ", Check.check(srcFunListApply())) else if (Check.check(srcFunSubstOk()) != "[]") Str.concat("funSubstOk ", Check.check(srcFunSubstOk())) else if (!rejects(srcFunSubstMis(), "does not match declared")) Str.concat("funSubstMis ", Check.check(srcFunSubstMis())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("funSubstId ", Check.check(srcFunSubstId())) else "funArrow-other"
 
 def dumpTyckCore(): String =
   if (!sourceOffsets()) "sourceOffsets" else if (!funLookup()) "funLookup" else "tyckCore"
