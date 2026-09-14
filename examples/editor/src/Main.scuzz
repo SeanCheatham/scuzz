@@ -42,6 +42,12 @@ def walkTree(root: String): IO[List[String]] =
     ents <- Fs.walk(root).handleErrorWith(_ => IO.pure([]))
   } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepWalk(s)))
 
+def landmarkRail(page: Signal[Int]): View =
+  View.focusGroup(View.wrap(View.choiceChip(page, 0, "Live"), View.choiceChip(page, 1, "Verify"), View.choiceChip(page, 2, "Session")))
+
+def landmarkBook(page: Signal[Int], live: View, verify: View, session: View): View =
+  View.semantics("Index book", View.column(landmarkRail(page), View.showWhen(page, 0, View.expanded(live)), View.showWhen(page, 1, View.expanded(verify)), View.showWhen(page, 2, View.expanded(session))))
+
 @main def main: IO[Unit] =
   for {
     _ <- Chrome.seedWorkspace()
@@ -209,7 +215,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(origs, os)
   _ = Signal.set(orig, List.at(os, Signal.get(idx)))
   _ = Signal.set(dirty, Str.len(""))
-} yield ()))), View.stack(View.indexBook(page, View.column(View.section("live", "Live", View.column(View.each(lives, s => View.textButton(Chrome.stemOf(s), _ => for {
+} yield ()))), View.stack(landmarkBook(page, View.section("live", "Live", View.column(View.each(lives, s => View.textButton(Chrome.stemOf(s), _ => for {
   _ = Property.sometimes("tappedLive")
   next = Chrome.joinChild(Signal.get(dirSig), s)
   body <- Fs.read(next).handleErrorWith(_ => IO.pure(""))
@@ -268,7 +274,7 @@ bc""", 3)._1 == 1, true)
   _ = Signal.set(page, 0)
 } yield ()
   _ <- Check.jumpDiag(s)
-} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s)))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
   off <- Ui.editorCaret()
   found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
   hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found
