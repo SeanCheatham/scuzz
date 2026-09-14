@@ -515,6 +515,11 @@ static SzString *serve_req_path(void *req) {
   return p && p->left ? (SzString *)p->left : (SzString *)req;
 }
 
+static void *tcp_close_sock(void *value, void *env) {
+  (void)value;
+  return sz_net_tcp_close((SzNetSock *)env);
+}
+
 static SzString *http_resp_body(void *resp) {
   SzPair *p = (SzPair *)resp;
   SzPair *inner;
@@ -7117,9 +7122,19 @@ int main(void) {
           assert(sz_string_len((SzString *)r.value) == 10000);
           sz_release(r.value);
         }
+        /* Writer close must deliver buffered bytes, including a parked read. */
+        {
+          SzString *end = sz_string_from_cstr("end");
+          r = sz_io_unsafe_run(both_drop(
+              sz_net_tcp_read(a, 8),
+              fm_drop(sz_net_tcp_write(b, end), tcp_close_sock, b)));
+          sz_release(end);
+          assert(r.ok);
+          pair = (SzPair *)r.value;
+          assert(strcmp(sz_string_cstr((SzString *)pair->left), "end") == 0);
+          sz_pair_free(pair);
+        }
         r = sz_io_unsafe_run(sz_net_tcp_close(a));
-        assert(r.ok);
-        r = sz_io_unsafe_run(sz_net_tcp_close(b));
         assert(r.ok);
         r = sz_io_unsafe_run(sz_net_tcp_close(ln));
         assert(r.ok);

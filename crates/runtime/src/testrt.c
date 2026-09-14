@@ -1647,6 +1647,9 @@ static FakeSock g_fsock[FAKE_CAP];
 static int g_next_fid = 1;
 static ConnectPark *g_cpark;
 
+static SzString *fake_take(FakeSock *f, size_t n);
+static void fake_flush_read(FakeSock *f);
+
 static FakeSock *fake_by_id(int id) {
   int i;
   if (id <= 0)
@@ -1768,12 +1771,12 @@ void sz_testrt_net_sock_gone(SzNetSock *s) {
     return;
   f->closed = 1;
   peer = fake_by_id(f->peer_id);
-  fake_fail_wait(&f->read_wait, "Net: socket closed");
+  fake_flush_read(f);
   fake_fail_wait(&f->accept_wait, "Net: socket closed");
   fake_fail_wait(&f->recv_wait, "Net: socket closed");
   if (peer) {
-    fake_fail_wait(&peer->read_wait, "Net: socket closed");
     peer->closed = 1;
+    fake_flush_read(peer);
   }
 }
 
@@ -1809,6 +1812,23 @@ static SzString *fake_take(FakeSock *f, size_t n) {
     memmove(f->buf, f->buf + n, f->len - n);
   f->len -= n;
   return s;
+}
+
+/* Close must still deliver buffered bytes to a parked or later read. */
+static void fake_flush_read(FakeSock *f) {
+  if (!f)
+    return;
+  if (f->read_wait && f->len > 0) {
+    SzDeferred *w = f->read_wait;
+    SzString *got = fake_take(f, f->read_want);
+    f->read_wait = NULL;
+    f->read_want = 0;
+    sz_deferred_complete_now(w, got);
+    sz_release(w);
+    sz_release(got);
+    return;
+  }
+  fake_fail_wait(&f->read_wait, "Net: socket closed");
 }
 
 static void fake_pair(FakeSock *a, FakeSock *b) {
@@ -2072,7 +2092,7 @@ static void *tcp_read_now(void *env) {
   TcpRW *op = (TcpRW *)env;
   FakeSock *f = op && op->sock ? fake_by_id(op->sock->fake_id) : NULL;
   size_t want;
-  if (!f || f->closed)
+  if (!f)
     return box_err("Net.tcpRead: closed");
   want = op->n > 0 ? (size_t)op->n : 0;
   if (want > FAKE_READ_MAX)
@@ -2081,6 +2101,8 @@ static void *tcp_read_now(void *env) {
     return box_ok(sz_string_from_cstr(""));
   if (f->len > 0)
     return box_ok(fake_take(f, want));
+  if (f->closed)
+    return box_err("Net.tcpRead: closed");
   return NULL;
 }
 
@@ -2092,13 +2114,15 @@ static SzIo *after_tcp_read(void *value, void *env) {
   if (value)
     return unwrap_box(value, NULL);
   f = op && op->sock ? fake_by_id(op->sock->fake_id) : NULL;
-  if (!f || f->closed)
+  if (!f)
     return sz_io_fail_cstr("Net.tcpRead: closed");
   want = op->n > 0 ? (size_t)op->n : 0;
   if (want > FAKE_READ_MAX)
     want = FAKE_READ_MAX;
   if (f->len > 0)
     return unwrap_box(box_ok(fake_take(f, want)), NULL);
+  if (f->closed)
+    return sz_io_fail_cstr("Net.tcpRead: closed");
   d = sz_deferred_make();
   f->read_wait = d;
   f->read_want = want;
