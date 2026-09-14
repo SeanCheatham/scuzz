@@ -115,7 +115,10 @@ def strIndex(xs: List[String], s: String, i: Int): Int =
   if (List.isEmpty(xs)) i else if (Str.eq(List.at(xs, 0), s)) i else strIndex(List.tail(xs), s, i + 1)
 
 def intern(acc: List[String], s: String): List[String] =
-  if (internHas(acc, s)) acc else List.concat(acc, s :: noStr())
+  if (internHas(acc, s)) acc else s :: acc
+
+def internReady(xs: List[String]): List[String] =
+  List.reverse(xs)
 
 def internHas(xs: List[String], s: String): Bool =
   if (List.isEmpty(xs)) false else if (Str.eq(List.at(xs, 0), s)) true else internHas(List.tail(xs), s)
@@ -5597,7 +5600,7 @@ def kindOf(p: Param): Int =
   if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
 def emitProg(p: Prog, strs: List[String], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
-  emitBits(p.body, Check.ftabOfList(prepDefs(p)), strs, Parse.builtins(p.enums), files, lidx)
+  emitBits(p.body, Check.ftabOfList(prepDefs(p)), internReady(strs), Parse.builtins(p.enums), files, lidx)
 
 def prepDefs(p: Prog): List[Fun] =
   withSelfFuns(rwAliasFuns(implFuns(p.impls, withImportFuns(p.imps, p.defs)), p.aliases))

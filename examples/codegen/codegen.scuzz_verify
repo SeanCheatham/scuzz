@@ -1,3 +1,6 @@
+def internOrder(): Bool =
+  Main.internOrder()
+
 def irHi(): Bool =
   Main.irDiff(Main.srcHi(), Main.wantHi())
 
