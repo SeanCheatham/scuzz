@@ -24,8 +24,11 @@ def pageHead(title: String): View =
 def startHero(): View =
   View.padding(8, View.heading(2, View.text("Choose a topic")))
 
+def startGroup(title: String, tiles: View): View =
+  View.column(View.padding(8, View.heading(2, View.text(title))), tiles)
+
 def startTiles(): View =
-  View.padding(8, View.grid(2, View.navTile(Icon.install(), "Install the CLI", "install"), View.navTile(Icon.gui(), "Build a GUI", "gui"), View.navTile(Icon.web(), "Ship to the web", "web"), View.navTile(Icon.code(), "Read the language", "language")))
+  View.column(startGroup("Install", View.padding(8, View.grid(2, View.navTile(Icon.install(), "Install the CLI", "install")))), startGroup("Language", View.padding(8, View.grid(2, View.navTile(Icon.code(), "Read the language", "language"), View.navTile(Icon.code(), "Try Signals", "signals")))), startGroup("GUI and Web", View.padding(8, View.grid(2, View.navTile(Icon.gui(), "Build a GUI", "gui"), View.navTile(Icon.web(), "Ship to the web", "web")))), startGroup("Package", View.padding(8, View.grid(2, View.navTile(Icon.book(), "Packages", "packages"), View.navTile(Icon.book(), "Manifest", "manifest"), View.navTile(Icon.link(), "Commands", "commands")))), startGroup("Prove", View.padding(8, View.grid(2, View.navTile(Icon.link(), "Verify", "verify"), View.navTile(Icon.gui(), "Open the IDE", "ide")))))
 
 def navBack(topics: List[Topic], i: Int): View =
   if (i <= 0) View.text("") else View.link(Str.concat("Back: ", List.at(topics, i - 1).title), List.at(topics, i - 1).id)
@@ -60,11 +63,14 @@ def titleAt(topics: List[Topic], n: Int): String =
 def topicSection(topics: List[Topic], i: Int, body: View): View =
   View.section(List.at(topics, i).id, List.at(topics, i).title, View.maxSize(800, 0, View.column(pageHead(List.at(topics, i).title), body, pageNav(topics, i))))
 
-def startSection(topics: List[Topic], blocks: Signal[List[Block]], count: Signal[Int]): View =
-  topicSection(topics, 0, View.column(startHero(), startTiles(), View.divider(), blocksColumn(blocks), liveCounter(count)))
+def startSection(topics: List[Topic], blocks: Signal[List[Block]]): View =
+  topicSection(topics, 0, View.column(startHero(), startTiles(), View.divider(), blocksColumn(blocks)))
 
 def guiSection(topics: List[Topic], blocks: Signal[List[Block]], tab: Signal[Int], draft: Signal[String], notes: Signal[String]): View =
   topicSection(topics, 3, View.column(blocksColumn(blocks), guiLive(tab, draft, notes)))
+
+def signalsSection(topics: List[Topic], blocks: Signal[List[Block]], count: Signal[Int]): View =
+  topicSection(topics, 4, View.column(blocksColumn(blocks), liveCounter(count)))
 
 def plainSection(topics: List[Topic], blocks: List[Signal[List[Block]]], i: Int): View =
   topicSection(topics, i, blocksColumn(List.at(blocks, i)))
@@ -80,5 +86,5 @@ def plainSection(topics: List[Topic], blocks: List[Signal[List[Block]]], i: Int)
     draft = Signal.make("")
     notes = Signal.make("")
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), count), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes), plainSection(topics, blocks, 4), plainSection(topics, blocks, 5), plainSection(topics, blocks, 6), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10)))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0)), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes), signalsSection(topics, List.at(blocks, 4), count), plainSection(topics, blocks, 5), plainSection(topics, blocks, 6), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10)))))
   } yield ()
