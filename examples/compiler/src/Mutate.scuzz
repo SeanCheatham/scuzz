@@ -78,25 +78,47 @@ def pickSiteGo(s: Int, tries: Int, sites: Int, acc: List[Int]): Int =
 def pickSiteAt(site: Int, s: Int, tries: Int, sites: Int, acc: List[Int]): Int =
   if (!hasInt(acc, site)) site else if (tries < 8) pickSiteGo(lcgNext(s), tries + 1, sites, acc) else freeSite(0, sites, acc)
 
-def siteLoc(files: List[(String, String)], site: Int, o: Bool): String =
-  siteLocGo(files, site, 0, o)
+def noKept(): List[(String, String, Prog)] =
+  []
 
-def siteLocGo(files: List[(String, String)], site: Int, base: Int, o: Bool): String =
-  if (List.isEmpty(files)) Str.concat("site ", Str.fromInt(site)) else siteLocHd(List.at(files, 0), List.tail(files), site, base, o)
+def parseLive(files: List[(String, String)]): List[(String, String, Prog)] =
+  if (List.isEmpty(files)) noKept() else parseLiveHd(List.at(files, 0), List.tail(files))
 
-def siteLocHd(h: (String, String), rest: List[(String, String)], site: Int, base: Int, o: Bool): String =
+def parseLiveHd(h: (String, String), rest: List[(String, String)]): List[(String, String, Prog)] =
   h match {
-    case (stem, src) => siteLocPick(stem, src, rest, site, base, o)
+    case (stem, src) => parseLivePick(stem, src, rest)
   }
 
-def siteLocPick(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): String =
-  if (stem == wrapStem()) siteLocGo(rest, site, base, o) else siteLocFile(stem, src, rest, site, base, o)
+def parseLivePick(stem: String, src: String, rest: List[(String, String)]): List[(String, String, Prog)] =
+  if (stem == wrapStem()) (stem, src, Parse.emptyProg()) :: parseLive(rest) else (stem, src, Parse.parseFile(stem, src)) :: parseLive(rest)
 
-def siteLocFile(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): String =
-  siteLocFile2(stem, src, rest, site, base, o, countProg(Parse.parseFile(stem, src), o))
+def keptSrc(kept: List[(String, String, Prog)]): List[(String, String)] =
+  if (List.isEmpty(kept)) noFiles() else keptSrcHd(List.at(kept, 0), List.tail(kept))
 
-def siteLocFile2(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool, n: Int): String =
-  if (site < base + n) siteLocProg(Parse.parseFile(stem, src), site - base, o) else siteLocGo(rest, site, base + n, o)
+def keptSrcHd(h: (String, String, Prog), rest: List[(String, String, Prog)]): List[(String, String)] =
+  h match {
+    case (stem, src, _) => (stem, src) :: keptSrc(rest)
+  }
+
+def siteLoc(files: List[(String, String)], site: Int, o: Bool): String =
+  siteLocKept(parseLive(files), site, o)
+
+def siteLocKept(kept: List[(String, String, Prog)], site: Int, o: Bool): String =
+  siteLocKeptGo(kept, site, 0, o)
+
+def siteLocKeptGo(kept: List[(String, String, Prog)], site: Int, base: Int, o: Bool): String =
+  if (List.isEmpty(kept)) Str.concat("site ", Str.fromInt(site)) else siteLocKeptHd(List.at(kept, 0), List.tail(kept), site, base, o)
+
+def siteLocKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): String =
+  h match {
+    case (stem, _, p) => if (stem == wrapStem()) siteLocKeptGo(rest, site, base, o) else siteLocKeptFile(p, rest, site, base, o)
+  }
+
+def siteLocKeptFile(p: Prog, rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): String =
+  siteLocKeptFile2(p, rest, site, base, o, countProg(p, o))
+
+def siteLocKeptFile2(p: Prog, rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool, n: Int): String =
+  if (site < base + n) siteLocProg(p, site - base, o) else siteLocKeptGo(rest, site, base + n, o)
 
 def siteLocProg(p: Prog, local: Int, o: Bool): String =
   p match {
@@ -129,15 +151,15 @@ def pickSitesGo(seed: Int, take: Int, sites: Int, i: Int, acc: List[Int]): List[
   if (i >= take) acc else pickSitesGo(seed, take, sites, i + 1, List.concat(acc, pickSite(seed, i, sites, acc) :: noInts()))
 
 def countFiles(files: List[(String, String)], o: Bool): Int =
-  if (List.isEmpty(files)) 0 else countFilesHd(List.at(files, 0), List.tail(files), o)
+  countKept(parseLive(files), o)
 
-def countFilesHd(h: (String, String), rest: List[(String, String)], o: Bool): Int =
+def countKept(kept: List[(String, String, Prog)], o: Bool): Int =
+  if (List.isEmpty(kept)) 0 else countKeptHd(List.at(kept, 0), List.tail(kept), o)
+
+def countKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], o: Bool): Int =
   h match {
-    case (stem, src) => countFilesPick(stem, src, rest, o)
+    case (stem, _, p) => if (stem == wrapStem()) countKept(rest, o) else countProg(p, o) + countKept(rest, o)
   }
-
-def countFilesPick(stem: String, src: String, rest: List[(String, String)], o: Bool): Int =
-  if (stem == wrapStem()) countFiles(rest, o) else countProg(Parse.parseFile(stem, src), o) + countFiles(rest, o)
 
 def countProg(p: Prog, o: Bool): Int =
   p match {
@@ -164,27 +186,24 @@ def countExpr(e: Expr, o: Bool): Int =
   walk(e, 0 - 1, 0, false, collectHs(e, noExprs()), 0, o).n
 
 def applyFiles(files: List[(String, String)], site: Int, o: Bool): List[(String, String)] =
-  applyFilesGo(files, site, 0, o)
+  applyKept(parseLive(files), site, o)
 
-def applyFilesGo(files: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
-  if (List.isEmpty(files)) files else applyFilesHd(List.at(files, 0), List.tail(files), site, base, o)
+def applyKept(kept: List[(String, String, Prog)], site: Int, o: Bool): List[(String, String)] =
+  applyKeptGo(kept, site, 0, o)
 
-def applyFilesHd(h: (String, String), rest: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
+def applyKeptGo(kept: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  if (List.isEmpty(kept)) noFiles() else applyKeptHd(List.at(kept, 0), List.tail(kept), site, base, o)
+
+def applyKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
   h match {
-    case (stem, src) => applyFilesPick(stem, src, rest, site, base, o)
+    case (stem, src, p) => if (stem == wrapStem()) (stem, src) :: applyKeptGo(rest, site, base, o) else applyKeptLive(stem, src, p, rest, site, base, o)
   }
 
-def applyFilesPick(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
-  if (stem == wrapStem()) (stem, src) :: applyFilesGo(rest, site, base, o) else applyFilesLive(stem, src, rest, site, base, o)
+def applyKeptLive(stem: String, src: String, p: Prog, rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  applyKeptLive2(stem, src, p, rest, site, base, o, countProg(p, o))
 
-def applyFilesLive(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool): List[(String, String)] =
-  applyFilesLive2(stem, src, rest, site, base, o, Parse.parseFile(stem, src))
-
-def applyFilesLive2(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool, p: Prog): List[(String, String)] =
-  applyFilesLive3(stem, src, rest, site, base, o, p, countProg(p, o))
-
-def applyFilesLive3(stem: String, src: String, rest: List[(String, String)], site: Int, base: Int, o: Bool, p: Prog, n: Int): List[(String, String)] =
-  if (site >= base && site < base + n) (stem, Parse.pretty(applyProg(p, site - base, o))) :: rest else (stem, src) :: applyFilesGo(rest, site, base + n, o)
+def applyKeptLive2(stem: String, src: String, p: Prog, rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool, n: Int): List[(String, String)] =
+  if (site >= base && site < base + n) (stem, Parse.pretty(applyProg(p, site - base, o))) :: keptSrc(rest) else (stem, src) :: applyKeptGo(rest, site, base + n, o)
 
 def applyProg(p: Prog, site: Int, o: Bool): Prog =
   p match {
@@ -593,7 +612,7 @@ def fileSrcHd(h: (String, String)): String =
   }
 
 def sitesOk(): Bool =
-  twoBtnOk() && arithBtnOk()
+  twoBtnOk() && arithBtnOk() && twoBtnKept() && arithBtnKept()
 
 def twoBtnOk(): Bool =
   countFiles(oneSrc(srcTwoBtn()), false) == 2 && twoBtnSwap()
@@ -601,9 +620,21 @@ def twoBtnOk(): Bool =
 def twoBtnSwap(): Bool =
   Str.contains(fileSrc(applyFiles(oneSrc(srcTwoBtn()), 0, false)), "View.button(\"A\", _ => Signal.set(b, 4))") && !Str.contains(fileSrc(applyFiles(oneSrc(srcTwoBtn()), 0, false)), "Signal.set(a, 3)")
 
+def twoBtnKept(): Bool =
+  twoBtnKeptOf(parseLive(oneSrc(srcTwoBtn())))
+
+def twoBtnKeptOf(k: List[(String, String, Prog)]): Bool =
+  countKept(k, false) == 2 && Str.contains(fileSrc(applyKept(k, 0, false)), "View.button(\"A\", _ => Signal.set(b, 4))") && !Str.contains(fileSrc(applyKept(k, 0, false)), "Signal.set(a, 3)") && siteLocKept(k, 0, false) == "body"
+
 def arithBtnOk(): Bool =
   countFiles(oneSrc(srcArithBtn()), false) == 3 && arithBtnOp()
 
 def arithBtnOp(): Bool =
   Str.contains(fileSrc(applyFiles(oneSrc(srcArithBtn()), 1, false)), "Signal.get(a) - 3") && Str.contains(fileSrc(applyFiles(oneSrc(srcArithBtn()), 1, false)), "Signal.set(a,") && Str.contains(fileSrc(applyFiles(oneSrc(srcArithBtn()), 1, false)), "Signal.set(b, 4)")
+
+def arithBtnKept(): Bool =
+  arithBtnKeptOf(parseLive(oneSrc(srcArithBtn())))
+
+def arithBtnKeptOf(k: List[(String, String, Prog)]): Bool =
+  countKept(k, false) == 3 && Str.contains(fileSrc(applyKept(k, 1, false)), "Signal.get(a) - 3") && siteLocKept(k, 1, false) == "body"
 
