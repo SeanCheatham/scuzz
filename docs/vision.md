@@ -430,7 +430,7 @@ navigation remain later slices.
 
 ## Open work
 
-Ranked list: [`gaps.md`](gaps.md). Next: compile-time performance. A profile of the campaign path is in [`gaps.md`](gaps.md): linear `Check.findFunMod` scans and mutation re-parses are the known costs. Collect rewrite parses each live file once and reuses that tree. Coverage skips a residual re-parse when rewrite is identity. Keep type preservation through kits and emitted code as the first gate. IO combinators, Fiber, and Ref instantiate payload types; a mismatch fails `check`. Stream, List, Map, Set, Queue, Deferred, and Resource still return a bare constructor. Extend native composition proofs before more kit surface. Accepted compositions must compile and preserve values. Invalid compositions must fail `check`.
+Ranked list: [`gaps.md`](gaps.md). Next: compile-time performance. A profile of the campaign path is in [`gaps.md`](gaps.md): linear `Check.findFunMod` scans and mutation re-parses are the known costs. Collect rewrite parses each live file once and reuses that tree. Coverage skips a residual re-parse when rewrite is identity. Keep type preservation through kits and emitted code as the first gate. IO combinators, Fiber, Ref, and List filter/take instantiate payload types; a mismatch fails `check`. Stream, remaining List ops, Map, Set, Queue, Deferred, and Resource still return a bare constructor. Extend native composition proofs before more kit surface. Accepted compositions must compile and preserve values. Invalid compositions must fail `check`.
 
 Hardware device runs stay open. Impeller / Skia GPU raster stay deferred. Real phone and screen-reader checks on the browser target remain open. Browser limits: [`compatibility.md`](compatibility.md#browser-target).
 
