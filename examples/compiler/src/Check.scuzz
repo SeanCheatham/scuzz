@@ -19,6 +19,7 @@ import Type.preferStr
 import Type.eqPinned
 import Type.preferPinned
 import Type.isTyParam
+import Type.Ty
 import Kits.has
 import Kits.Kit
 import Kits.params
@@ -1628,21 +1629,40 @@ def expandParam(p: Param, als: List[Alias]): Param =
   }
 
 def expandTy(t: String, als: List[Alias]): String =
-  if (List.isEmpty(als)) t else expandTyGo(t, List.at(als, 0), als)
+  if (List.isEmpty(als) || t == "") t else Type.show(expandFuel(Type.parse(t), als, 8))
 
-def expandTyGo(t: String, h: Alias, als: List[Alias]): String =
-  h match {
-    case Alias(name, tps, target) => expandTyHit(t, name, tps, target, als)
+def expandFuel(t: Ty, als: List[Alias], fuel: Int): Ty =
+  if (fuel <= 0) t else expandApply(expandKids(t, als, fuel), als, fuel)
+
+def expandKids(t: Ty, als: List[Alias], fuel: Int): Ty =
+  t match {
+    case Ty.App(name, args) => Type.tApp(name, expandTyList(args, als, fuel))
+    case Ty.Tuple(ps) => Type.tTuple(expandTyList(ps, als, fuel))
+    case Ty.Arrow(a, r) => Type.tFun(expandFuel(a, als, fuel), expandFuel(r, als, fuel))
+    case _ => t
   }
 
-def expandTyHit(t: String, name: String, tps: List[String], target: String, als: List[Alias]): String =
-  if (t == name && List.isEmpty(tps)) target else if (isTyApp(t, name) && !List.isEmpty(tps)) expandTy(substTy(target, List.at(tps, 0), tyAppArg(t, name)), List.tail(als)) else expandTy(t, List.tail(als))
+def expandTyList(xs: List[Ty], als: List[Alias], fuel: Int): List[Ty] =
+  if (List.isEmpty(xs)) xs else expandFuel(List.at(xs, 0), als, fuel) :: expandTyList(List.tail(xs), als, fuel)
 
-def isTyApp(t: String, name: String): Bool =
-  Str.len(t) > Str.len(name) + 1 && Str.slice(t, 0, Str.len(name) + 1) == Str.concat(name, "[") && Str.charAt(t, Str.len(t) - 1) == 93
+def expandApply(t: Ty, als: List[Alias], fuel: Int): Ty =
+  if (List.isEmpty(als)) t else expandApplyGo(t, List.at(als, 0), List.tail(als), als, fuel)
 
-def tyAppArg(t: String, name: String): String =
-  Str.slice(t, Str.len(name) + 1, Str.len(t) - 1)
+def expandApplyGo(t: Ty, h: Alias, rest: List[Alias], als: List[Alias], fuel: Int): Ty =
+  h match {
+    case Alias(name, tps, target) => if (aliasHits(t, name, tps)) expandFuel(aliasFill(t, tps, target), als, fuel - 1) else expandApply(t, rest, fuel)
+  }
+
+def aliasHits(t: Ty, name: String, tps: List[String]): Bool =
+  t match {
+    case Ty.Named(n) => n == name && List.isEmpty(tps)
+    case Ty.TVar(n) => n == name && List.isEmpty(tps)
+    case Ty.App(n, _) => n == name && !List.isEmpty(tps)
+    case _ => false
+  }
+
+def aliasFill(t: Ty, tps: List[String], target: String): Ty =
+  Type.parse(specializeType(target, tps, Type.appArgs(t)))
 
 def substTy(target: String, param: String, arg: String): String =
   Type.substStr(target, param, arg)
