@@ -1655,13 +1655,68 @@ def checkMainGot(o: Out, body: Expr, file: String): Out =
     case Out(ty, err, sp) => if (Str.len(err) > 0) Out(ty, err, sp) else if (ty == "IO[Unit]") Out(ty, err, sp) else bad(Str.concat("@main body must be IO[Unit], got ", ty), spanPick(sp, spanPick(Parse.spanOf(body), (file, 0 - 1))))
   }
 
-def lineCol(src: String, off: Int): (Int, Int) =
-  lineColPrefix(Str.take(src, off))
+def lineIndex(src: String): List[Int] =
+  if (src == "") [0] else List.reverse(lineIndexGo(src, 0, Str.len(src), [0]))
 
-def lineColPrefix(prefix: String): (Int, Int) =
-  (Str.byteLen(prefix) - Str.byteLen(Str.replace(prefix, """
-""", "")) + 1, Str.len(prefix) - Str.lastIndexOf(prefix, """
-"""))
+def lineIndexGo(src: String, i: Int, n: Int, acc: List[Int]): List[Int] =
+  if (i >= n) acc else lineIndexGo(src, i + 256, n, lineScan(src, i, if (i + 256 < n) i + 256 else n, acc))
+
+def lineScan(src: String, i: Int, bound: Int, acc: List[Int]): List[Int] =
+  if (i >= bound) acc else if (Str.charAt(src, i) == 10) lineScan(src, i + 1, bound, i + 1 :: acc) else lineScan(src, i + 1, bound, acc)
+
+def lineCol(src: String, off: Int): (Int, Int) =
+  lineColIdx(lineIndex(src), src, off)
+
+def lineColIdx(starts: List[Int], src: String, off: Int): (Int, Int) =
+  if (src == "") (1, 1) else lineColIdxOff(starts, clampOff(off, Str.len(src)))
+
+def clampOff(off: Int, n: Int): Int =
+  if (off < 0) 0 else if (off > n) n else off
+
+def lineColIdxOff(starts: List[Int], o: Int): (Int, Int) =
+  lineColIdxFound(lastStartLe(starts, o, 0, 0), o)
+
+def lineColIdxFound(found: (Int, Int), o: Int): (Int, Int) =
+  found match {
+    case (line, last) => (if (line < 1) 1 else line, o - last + 1)
+  }
+
+def lastStartLe(xs: List[Int], off: Int, line: Int, last: Int): (Int, Int) =
+  if (List.isEmpty(xs)) (if (line < 1) 1 else line, last) else lastStartAfter(lastStartTake(xs, off, line, last, 64), off)
+
+def lastStartAfter(got: ((Int, Int), (List[Int], Bool)), off: Int): (Int, Int) =
+  got match {
+    case ((line, last), (rest, done)) => if (done) (if (line < 1) 1 else line, last) else lastStartLe(rest, off, line, last)
+  }
+
+def lastStartTake(xs: List[Int], off: Int, line: Int, last: Int, k: Int): ((Int, Int), (List[Int], Bool)) =
+  if (List.isEmpty(xs) || k <= 0) ((line, last), (xs, List.isEmpty(xs))) else lastStartTake1(List.at(xs, 0), List.tail(xs), off, line, last, k)
+
+def lastStartTake1(s: Int, rest: List[Int], off: Int, line: Int, last: Int, k: Int): ((Int, Int), (List[Int], Bool)) =
+  if (s > off) ((line, last), (s :: rest, true)) else lastStartTake(rest, off, line + 1, s, k - 1)
+
+def fileIndex(files: List[(String, String)]): Map[String, List[Int]] =
+  fileIndexGo(files, Map.empty())
+
+def fileIndexGo(files: List[(String, String)], acc: Map[String, List[Int]]): Map[String, List[Int]] =
+  if (List.isEmpty(files)) acc else fileIndexHd(List.at(files, 0), List.tail(files), acc)
+
+def fileIndexHd(h: (String, String), rest: List[(String, String)], acc: Map[String, List[Int]]): Map[String, List[Int]] =
+  h match {
+    case (stem, src) => fileIndexGo(rest, Map.set(acc, stem, lineIndex(src)))
+  }
+
+def startsOf(idx: Map[String, List[Int]], stem: String): List[Int] =
+  Map.get(idx, stem) match {
+    case Some(xs) => xs
+    case None => startsOfMiss(idx, stem)
+  }
+
+def startsOfMiss(idx: Map[String, List[Int]], stem: String): List[Int] =
+  if (stem == "") Map.get(idx, "Main") match {
+  case Some(xs) => xs
+  case None => [0]
+} else [0]
 
 def isIdentCh(c: Int): Bool =
   c >= 65 && c <= 90 || c >= 97 && c <= 122 || c >= 48 && c <= 57 || c == 95
@@ -1685,7 +1740,10 @@ def tokenEndCh(src: String, off: Int, c: Int): Int =
   if (c == 34) skipStr(src, off + 1) else if (isIdentCh(c)) skipQual(src, off) else off + 1
 
 def locOf(src: String, off: Int): (Int, Int, Int, Int) =
-  if (off < 0 || src == "") (1, 1, 1, 1) else locOf2(lineCol(src, off), src, off)
+  locOfIdx(lineIndex(src), src, off)
+
+def locOfIdx(starts: List[Int], src: String, off: Int): (Int, Int, Int, Int) =
+  if (off < 0 || src == "") (1, 1, 1, 1) else locOf2(lineColIdx(starts, src, off), src, off)
 
 def locOf2(p: (Int, Int), src: String, off: Int): (Int, Int, Int, Int) =
   p match {
