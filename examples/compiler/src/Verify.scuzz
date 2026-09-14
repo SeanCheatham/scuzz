@@ -628,13 +628,13 @@ def coverageBothBuilt(p: Prog, expected: Prog, built: Prog, files: List[(String,
   (coverageProgRows(p, expected, built, files, compiled, hits), branchProgRows(p, expected, built, files, compiled, hits))
 
 def coverageProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
-  List.distinct(List.concat(coverageDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), if (p.main == "") [] else [(Emit.panicLocExpr(files, p.body), Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocExpr(compiled, built.body)))]))
+  List.distinct(List.concat(coverageDefs(Check.implFuns(p.impls, p.defs), Check.ftabOf(Check.implFuns(expected.impls, expected.defs)), Check.ftabOf(Check.implFuns(built.impls, built.defs)), files, compiled, hits), if (p.main == "") [] else [(Emit.panicLocExpr(files, p.body), Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocExpr(compiled, built.body)))]))
 
-def coverageDefs(defs: List[Fun], expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+def coverageDefs(defs: List[Fun], expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
   if (List.isEmpty(defs)) [] else coverageDef(List.at(defs, 0), expected, built, files, compiled, hits) :: coverageDefs(List.tail(defs), expected, built, files, compiled, hits)
 
-def coverageDef(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (String, Bool) =
-  (Emit.panicLoc(files, d.mod, d.off), coverageMatched(Check.findFunMod(expected, d.mod, d.name), Check.findFunMod(built, d.mod, d.name), compiled, hits))
+def coverageDef(d: Fun, expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (String, Bool) =
+  (Emit.panicLoc(files, d.mod, d.off), coverageMatched(Check.ftabGetMod(expected, d.mod, d.name), Check.ftabGetMod(built, d.mod, d.name), compiled, hits))
 
 def coverageMatched(expected: List[Fun], built: List[Fun], compiled: List[(String, String)], hits: List[String]): Bool =
   if (List.isEmpty(expected) || List.isEmpty(built)) false else coverageBody(List.at(expected, 0), List.at(built, 0), compiled, hits)
@@ -646,13 +646,13 @@ def branchRowsOf(files: List[(String, String)], compiled: List[(String, String)]
   coverageBoth(files, compiled, hits)._2
 
 def branchProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
-  List.concat(branchDefs(Check.implFuns(p.impls, p.defs), Check.implFuns(expected.impls, expected.defs), Check.implFuns(built.impls, built.defs), files, compiled, hits), branchMainRows(p, expected, built, files, compiled, hits))
+  List.concat(branchDefs(Check.implFuns(p.impls, p.defs), Check.ftabOf(Check.implFuns(expected.impls, expected.defs)), Check.ftabOf(Check.implFuns(built.impls, built.defs)), files, compiled, hits), branchMainRows(p, expected, built, files, compiled, hits))
 
-def branchDefs(defs: List[Fun], expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+def branchDefs(defs: List[Fun], expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
   if (List.isEmpty(defs)) [] else List.concat(branchDefRows(List.at(defs, 0), expected, built, files, compiled, hits), branchDefs(List.tail(defs), expected, built, files, compiled, hits))
 
-def branchDefRows(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
-  branchDefMatched(d, Check.findFunMod(expected, d.mod, d.name), Check.findFunMod(built, d.mod, d.name), files, compiled, hits, branchSites(d.body, 0))
+def branchDefRows(d: Fun, expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): List[(String, Bool)] =
+  branchDefMatched(d, Check.ftabGetMod(expected, d.mod, d.name), Check.ftabGetMod(built, d.mod, d.name), files, compiled, hits, branchSites(d.body, 0))
 
 def branchDefMatched(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], sites: List[(Int, String)]): List[(String, Bool)] =
   if (List.isEmpty(expected) || List.isEmpty(built) || Parse.pretty0(List.at(expected, 0).body) != Parse.pretty0(List.at(built, 0).body)) branchMissRows(files, d, sites) else branchZipRows(files, d, compiled, List.at(built, 0), hits, sites, branchSites(List.at(built, 0).body, 0))
