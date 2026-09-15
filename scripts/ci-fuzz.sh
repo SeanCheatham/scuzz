@@ -12,7 +12,98 @@ fuzz() {
   return "$status"
 }
 
-fuzz --iterations 16 examples/counter
+assert_fuzz_summary() {
+  python3 - "$1" "$2" <<'PY_CHECK'
+import json, sys
+from pathlib import Path
+summary = json.loads(Path(sys.argv[1]).read_text())
+lines = Path(sys.argv[2]).read_text().splitlines()
+budget = summary["fuzz"]["iterations"]
+search = budget * 5 // 8
+assert 0 <= summary["fuzz"]["search"] <= search
+assert 0 <= summary["fuzz"]["search_failures"] <= summary["fuzz"]["search"]
+assert 0 <= summary["mutate"]["ran"] <= min(budget - search, summary["mutate"]["sites"])
+if summary["fuzz"]["ok"]:
+    assert summary["fuzz"]["search"] == search
+    assert summary["mutate"]["ran"] == min(budget - search, summary["mutate"]["sites"])
+coverage = summary["coverage"]
+branches = coverage["branches"]
+for group in (coverage, branches):
+    assert group["total"] == len(group["regions"])
+    assert group["reached"] == sum(row["reached"] for row in group["regions"])
+expected = [f"coverage: functions {coverage['reached']}/{coverage['total']}, "
+            f"branches {branches['reached']}/{branches['total']}"]
+for key, action in (("sometimes", "reached"), ("triggers", "fired")):
+    group = summary[key]
+    expected.append(f"{key}: {len(group['reached'])}/{len(group['declared'])} {action}")
+for line in expected:
+    assert lines.count(line) == 1, (line, lines)
+status = "ok" if summary["fuzz"]["ok"] else "fail"
+assert sum(line.startswith(f"scuzz fuzz {status} (") for line in lines) == 1
+assert any(line.startswith(f"scuzz fuzz {status} ({summary['fuzz']['search']} search, {summary['fuzz']['search_failures']} search failures,") for line in lines)
+PY_CHECK
+}
+
+# Failed corpus entries and search iterations have separate counts.
+search_counts_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-search-counts.XXXXXX")"
+mkdir -p "$search_counts_dir/src" "$search_counts_dir/corpus"
+cat > "$search_counts_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "search-counts"
+MANIFEST
+cat > "$search_counts_dir/src/Main.scuzz" <<'SOURCE'
+def accepts(n: Int): Bool =
+  n != 37
+
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$search_counts_dir/input.scuzz_verify" <<'CLAIMS'
+def check(n: Int): Bool =
+  Main.accepts(n)
+CLAIMS
+cat > "$search_counts_dir/corpus/rejected.toml" <<'CORPUS'
+[fuzz]
+seed = 42
+events = ["drive check 37"]
+CORPUS
+if fuzz --iterations 8 "$search_counts_dir" > "$search_counts_dir/corpus.log" 2>&1; then
+  echo "corpus failure must fail the campaign" && exit 1
+fi
+assert_fuzz_summary "$search_counts_dir/build/fuzz/summary.json" "$search_counts_dir/corpus.log"
+cp "$search_counts_dir/build/fuzz/summary.json" "$search_counts_dir/corpus.json"
+if fuzz --iterations 2 --no-fail-fast "$search_counts_dir" > "$search_counts_dir/continued.log" 2>&1; then
+  echo "passing search must not hide a corpus failure" && exit 1
+fi
+assert_fuzz_summary "$search_counts_dir/build/fuzz/summary.json" "$search_counts_dir/continued.log"
+cp "$search_counts_dir/build/fuzz/summary.json" "$search_counts_dir/continued.json"
+rm "$search_counts_dir/corpus/rejected.toml"
+python3 - "$search_counts_dir/src/Main.scuzz" <<'PY_CHANGE'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace("n != 37", "n == 0"))
+PY_CHANGE
+if fuzz --iterations 16 "$search_counts_dir" > "$search_counts_dir/search.log" 2>&1; then
+  echo "search failure must fail the campaign" && exit 1
+fi
+assert_fuzz_summary "$search_counts_dir/build/fuzz/summary.json" "$search_counts_dir/search.log"
+cp "$search_counts_dir/build/fuzz/summary.json" "$search_counts_dir/search.json"
+python3 - "$search_counts_dir" <<'PY_CHECK'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+for name, ran, failures, corpus_failures in (("corpus", 0, 0, 1), ("continued", 1, 0, 1), ("search", 2, 1, 0)):
+    report = json.loads((root / f"{name}.json").read_text())
+    assert report["fuzz"]["ok"] is False
+    assert report["fuzz"]["search"] == ran, report["fuzz"]
+    assert report["fuzz"]["search_failures"] == failures
+    assert report["corpus"]["failures"] == corpus_failures
+PY_CHECK
+rm -rf "$search_counts_dir"
+
+fuzz --iterations 16 examples/counter | tee /tmp/scuzz-counter-summary.log
+assert_fuzz_summary examples/counter/build/fuzz/summary.json /tmp/scuzz-counter-summary.log
 python3 - <<'PY'
 import json
 with open("examples/counter/build/fuzz/summary.json") as f:
@@ -23,8 +114,11 @@ assert "signals" in br["varied"], br
 assert "count" in br["claimed"]["signalInt"], br
 assert "signals" not in br["unclaimed"], br
 assert d["mutate"]["score"] >= 0.5, d["mutate"]
+assert d["coverage"]["reached"] > 0
+assert d["sometimes"]["reached"]
 PY
-fuzz --iterations 16 examples/studio
+fuzz --iterations 16 examples/studio | tee /tmp/scuzz-studio-summary.log
+assert_fuzz_summary examples/studio/build/fuzz/summary.json /tmp/scuzz-studio-summary.log
 fuzz --relate examples/counter
 if fuzz --relate examples/bad-sched; then
   echo "relate should have caught the schedule divergence" && exit 1
@@ -143,9 +237,10 @@ if fuzz --iterations 0 examples/bad-split > /tmp/scuzz-bad-split.log 2>&1; then
 fi
 cat /tmp/scuzz-bad-split.log
 grep -q "fuzz live/verify split: silent observation mismatch" /tmp/scuzz-bad-split.log
-if ! fuzz --iterations 0 examples/bad-sometimes; then
+if ! fuzz --iterations 0 examples/bad-sometimes | tee /tmp/scuzz-sometimes-summary.log; then
   echo "corpus-only should report never-reached without failing" && exit 1
 fi
+assert_fuzz_summary examples/bad-sometimes/build/fuzz/summary.json /tmp/scuzz-sometimes-summary.log
 python3 - <<'PY'
 import json
 with open("examples/bad-sometimes/build/fuzz/summary.json") as f:
@@ -163,6 +258,7 @@ if fuzz --iterations 8 examples/bad-sometimes > /tmp/scuzz-bad-sometimes.log 2>&
   echo "search should fail when tappedPlus and button:+1 never fire" && exit 1
 fi
 cat /tmp/scuzz-bad-sometimes.log
+assert_fuzz_summary examples/bad-sometimes/build/fuzz/summary.json /tmp/scuzz-bad-sometimes.log
 grep -q "sometimes never reached: tappedPlus" /tmp/scuzz-bad-sometimes.log
 grep -q "trigger never fired: button:+1" /tmp/scuzz-bad-sometimes.log
 python3 - <<'PY'
@@ -342,7 +438,189 @@ assert d["coverage"]["reached"] == 2
 assert "score" not in d["mutate"], "invalid mutants must not produce a score"
 PY
 rm -rf "$invalid_dir"
-fuzz --iterations 176 examples/api-report
+boolean_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-boolean-claim.XXXXXX")"
+mkdir -p "$boolean_dir/src"
+cat > "$boolean_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "boolean-claim"
+MANIFEST
+cat > "$boolean_dir/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+check_boolean_claim() {
+  local expression="$1" expected="$2" status=0
+  printf 'def fact(): Bool = %s\n' "$expression" > "$boolean_dir/fact.scuzz_verify"
+  rm -f "$boolean_dir/build/fuzz/summary.json"
+  fuzz --iterations 0 "$boolean_dir" > /tmp/scuzz-boolean-claim.log 2>&1 || status=$?
+  cat /tmp/scuzz-boolean-claim.log
+  test "$status" -eq "$expected"
+  assert_fuzz_summary "$boolean_dir/build/fuzz/summary.json" /tmp/scuzz-boolean-claim.log
+  python3 - "$boolean_dir/build/fuzz/summary.json" "$expected" <<'PY_BOOLEAN'
+import json, sys
+with open(sys.argv[1]) as f:
+    summary = json.load(f)
+expected = int(sys.argv[2])
+assert summary["fuzz"]["ok"] == (expected == 0)
+assert summary["fuzz"]["search"] == 0
+assert summary["corpus"]["entries"] == 1
+assert summary["corpus"]["failures"] == expected
+PY_BOOLEAN
+}
+check_boolean_claim 'false && false' 1
+check_boolean_claim 'true && false' 1
+check_boolean_claim 'false && true' 1
+check_boolean_claim 'true && true' 0
+check_boolean_claim 'false || false' 1
+check_boolean_claim 'true || false' 0
+check_boolean_claim 'false || true' 0
+check_boolean_claim '1 != 1' 1
+check_boolean_claim '1 != 2' 0
+check_boolean_claim '1 > 2' 1
+check_boolean_claim '1 < 2' 0
+check_boolean_claim '1 == 2' 1
+check_boolean_claim '1 == 1' 0
+check_boolean_claim 'for { x = false } yield x' 1
+check_boolean_claim 'for { x = true } yield x' 0
+check_boolean_claim 'for { pair = (7, "seven") } yield pair._1 == 7 && pair._2 == "seven"' 0
+rm -rf "$boolean_dir"
+
+match_require_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-match-require.XXXXXX")"
+mkdir -p "$match_require_dir/src" "$match_require_dir/corpus"
+cat > "$match_require_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "match-require"
+MANIFEST
+cat > "$match_require_dir/world.scuzz_scenario" <<'SCENARIO'
+def setup(): IO[Unit] = IO.pure(())
+def run(n: Int): IO[Int] = Main.checked(n)
+SCENARIO
+cat > "$match_require_dir/corpus/payload.toml" <<'CORPUS'
+[fuzz]
+seed = 42
+events = ["drive run 7", "drive run -1"]
+CORPUS
+check_match_require() {
+  local comparison="$1" expected="$2" status=0
+  cat > "$match_require_dir/src/Main.scuzz" <<SOURCE
+enum Packet:
+  case Value(n: Int)
+
+def checked(n: Int): IO[Int] =
+  Packet.Value(n) match {
+    case Packet.Value(7) => IO.pure(7).require("literal payload", result => result $comparison 7)
+    case Packet.Value(value) => IO.pure(value).require("matched payload", result => result $comparison value)
+  }
+
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+  fuzz --iterations 0 "$match_require_dir" > /tmp/scuzz-match-require.log 2>&1 || status=$?
+  cat /tmp/scuzz-match-require.log
+  test "$status" -eq "$expected"
+  assert_fuzz_summary "$match_require_dir/build/fuzz/summary.json" /tmp/scuzz-match-require.log
+  python3 - "$match_require_dir/build/fuzz/summary.json" "$expected" <<'PY_MATCH'
+import json, sys
+with open(sys.argv[1]) as f:
+    summary = json.load(f)
+expected = int(sys.argv[2])
+assert summary["fuzz"]["ok"] == (expected == 0)
+assert summary["corpus"]["failures"] == expected
+PY_MATCH
+  if [ "$expected" -ne 0 ]; then
+    if fuzz --replay "$match_require_dir/build/fuzz/repro.toml" "$match_require_dir" > /tmp/scuzz-match-require-replay.log 2>&1; then
+      echo "false payload assertion must fail replay" && exit 1
+    fi
+    grep -q 'fuzz replay reproduced a failure' /tmp/scuzz-match-require-replay.log
+  fi
+}
+check_match_require '==' 0
+check_match_require '!=' 1
+rm -rf "$match_require_dir"
+
+fuzz --iterations 160 examples/webhook | tee /tmp/scuzz-webhook-summary.log
+assert_fuzz_summary examples/webhook/build/fuzz/summary.json /tmp/scuzz-webhook-summary.log
+python3 - <<'PY_WEBHOOK'
+import json
+with open("examples/webhook/build/fuzz/summary.json") as f:
+    webhook = json.load(f)
+assert webhook["mutate"]["ran"] == webhook["mutate"]["sites"]
+assert webhook["mutate"]["survived"] == 0
+assert webhook["mutate"]["invalid"] == 0
+assert "webhook.json" in webhook["breadth"]["claimed"]["fileSame"]
+assert {"concurrent", "continued"} <= set(webhook["breadth"]["claimed"]["driveHas"])
+assert {"alpha.status", "beta.status", "forged.status", "final.status"} <= set(webhook["breadth"]["claimed"]["fileTextIs"])
+with open("examples/webhook/build/drivers.txt") as f:
+    drivers = [line.split()[0] for line in f if line.strip()]
+assert "faulted" not in drivers and "rejected" not in drivers
+PY_WEBHOOK
+
+fuzz --iterations 320 examples/api-report | tee /tmp/scuzz-api-report-summary.log
+assert_fuzz_summary examples/api-report/build/fuzz/summary.json /tmp/scuzz-api-report-summary.log
+python3 - <<'PY_CHECK'
+import json
+with open("examples/api-report/build/fuzz/summary.json") as f:
+    report = json.load(f)
+assert report["breadth"]["claimed"]["fileSame"] == ["report.json"]
+assert "queryPages" in report["breadth"]["claimed"]["driveHas"]
+assert "files" not in report["breadth"]["unclaimed"]
+assert report["mutate"]["ran"] == report["mutate"]["sites"]
+assert report["mutate"]["survived"] == 0
+assert report["mutate"]["invalid"] == 0
+PY_CHECK
+
+# File comparisons judge recorded contents at both states.
+file_compare_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-file-compare.XXXXXX")"
+mkdir -p "$file_compare_dir/src" "$file_compare_dir/corpus"
+cat > "$file_compare_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "file-compare"
+MANIFEST
+cat > "$file_compare_dir/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$file_compare_dir/files.scuzz_scenario" <<'SCENARIO'
+def setup(): IO[Unit] =
+  Fs.write("report.txt", "before")
+
+def keep(): IO[Unit] =
+  IO.pure(())
+
+def change(): IO[Unit] =
+  Fs.write("report.txt", "after!")
+SCENARIO
+cat > "$file_compare_dir/files.scuzz_verify" <<'CLAIMS'
+private def unchanged(t: Timeline, a: Int, b: Int): Bool =
+  Timeline.fileSame(t, a, b, "report.txt")
+
+def preserved(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => unchanged(t, pair._1, pair._2))
+CLAIMS
+cat > "$file_compare_dir/corpus/files.toml" <<'CORPUS'
+[fuzz]
+seed = 42
+events = ["drive keep"]
+CORPUS
+fuzz --iterations 0 "$file_compare_dir"
+cat > "$file_compare_dir/corpus/files.toml" <<'CORPUS'
+[fuzz]
+seed = 42
+events = ["drive change"]
+CORPUS
+if fuzz --iterations 0 "$file_compare_dir" > /tmp/scuzz-file-compare.log 2>&1; then
+  echo "file comparison must reject changed contents" >&2
+  exit 1
+fi
+FILE_COMPARE_DIR="$file_compare_dir" python3 - <<'PY_CHECK'
+import json, os
+with open(os.environ["FILE_COMPARE_DIR"] + "/build/fuzz/summary.json") as f:
+    comparison = json.load(f)
+assert comparison["fuzz"]["ok"] is False
+assert comparison["corpus"]["failures"] == 1
+assert comparison["breadth"]["claimed"]["fileSame"] == ["report.txt"]
+PY_CHECK
+rm -rf "$file_compare_dir"
 fuzz --iterations 2 examples/io
 python3 - <<'PY'
 import json
@@ -465,3 +743,55 @@ test "$exe_before" = "$(stat -c %y "$stamp_dir/build/stamp")"
 test "$live_ll_before" = "$(stat -c %y "$stamp_dir/build/live/stamp.ll")"
 test "$live_exe_before" = "$(stat -c %y "$stamp_dir/build/live/stamp")"
 rm -rf "$stamp_dir"
+
+# A compiler change invalidates live and verification artifacts.
+python3 - "$SCUZZ" <<'PY_COMPILER_CACHE'
+import hashlib
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+if sys.platform != "linux":
+    sys.exit(0)
+with tempfile.TemporaryDirectory(prefix="scuzz-compiler-cache-") as tmp:
+    root = Path(tmp)
+    compiler = root / "compiler"
+    shutil.copy2(sys.argv[1], compiler)
+    env = dict(os.environ, SCUZZ_EXECUTABLE_SHA256="caller-controlled")
+    packages = []
+    for kind in ("live", "verify"):
+        pkg = root / kind
+        (pkg / "src").mkdir(parents=True)
+        (pkg / "scuzz.toml").write_text('[package]\nname = "cache-proof"\n')
+        (pkg / "src/Main.scuzz").write_text(
+            'def id(n: Int): Int = n\n@main def main: IO[Unit] = IO.pure(())\n')
+        (pkg / "facts.scuzz_verify").write_text('def identity(n: Int): Bool = Main.id(n) == n\n')
+        packages.append((kind, pkg))
+
+    def run(kind, pkg):
+        args = ["build"] if kind == "live" else ["fuzz", "--iterations", "0"]
+        subprocess.run([str(compiler), *args, str(pkg)], env=env,
+                       check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        paths = [pkg / "build/cache-proof.ll", pkg / ".scuzz" / (
+            "fingerprint" if kind == "live" else "fingerprint.verify")]
+        if kind == "verify":
+            paths.extend([pkg / "build/live/cache-proof.ll", pkg / "build/live/fingerprint"])
+        digest = hashlib.sha256(compiler.read_bytes()).hexdigest()
+        for path in paths:
+            if "fingerprint" in path.name:
+                assert path.read_text().splitlines()[0] == digest
+        return [p.stat().st_mtime_ns for p in paths]
+
+    before = [run(kind, pkg) for kind, pkg in packages]
+    assert before == [run(kind, pkg) for kind, pkg in packages]
+    # ELF permits trailing data. The compiler behavior stays the same.
+    with compiler.open("ab") as out:
+        out.write(b"compiler-cache-identity-proof")
+    after = [run(kind, pkg) for kind, pkg in packages]
+    assert all(all(a != b for a, b in zip(old, new)) for old, new in zip(before, after))
+    assert after == [run(kind, pkg) for kind, pkg in packages]
+print("compiler cache identity ok")
+PY_COMPILER_CACHE

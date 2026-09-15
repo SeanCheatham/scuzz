@@ -1,0 +1,4 @@
+[fuzz]
+seed = 42
+fault_seed = "1"
+events = ["drive success 0", "drive paginated", "drive rejected 0"]

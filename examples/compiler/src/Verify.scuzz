@@ -1,4 +1,4 @@
-record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], unclaimed: List[String])
+record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String], unclaimed: List[String])
 
 import Parse.Fun
 import Parse.Param
@@ -445,34 +445,34 @@ def jRegion(row: (String, Bool)): String =
 def jKVList(k: String, xs: List[String]): String =
   Str.concat("\"", Str.concat(k, Str.concat("\":", jStrList(xs))))
 
-def jClaimed(signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): String =
-  Str.concat("{", Str.concat(List.join(jKVList("signalInt", signalInt) :: jKVList("signalListLen", signalListLen) :: jKVList("signalStrHas", signalStrHas) :: jKVList("a11yHas", a11yHas) :: jKVList("lastHitHas", lastHitHas) :: jKVList("driveHas", driveHas) :: jKVList("effectHas", effectHas) :: jKVList("fileTextIs", fileTextIs) :: noStr(), ","), "}"))
+def jClaimed(signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String]): String =
+  Str.concat("{", Str.concat(List.join(jKVList("signalInt", signalInt) :: jKVList("signalListLen", signalListLen) :: jKVList("signalStrHas", signalStrHas) :: jKVList("a11yHas", a11yHas) :: jKVList("lastHitHas", lastHitHas) :: jKVList("driveHas", driveHas) :: jKVList("effectHas", effectHas) :: jKVList("fileTextIs", fileTextIs) :: jKVList("fileSame", fileSame) :: noStr(), ","), "}"))
 
 def jBreadth(br: Breadth): String =
   br match {
-    case Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, unclaimed) => Str.concat(",\"breadth\":{\"varied\":", Str.concat(jStrList(varied), Str.concat(",\"claimed\":", Str.concat(jClaimed(signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs), Str.concat(",\"unclaimed\":", Str.concat(jStrList(unclaimed), "}"))))))
+    case Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, fileSame, unclaimed) => Str.concat(",\"breadth\":{\"varied\":", Str.concat(jStrList(varied), Str.concat(",\"claimed\":", Str.concat(jClaimed(signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, fileSame), Str.concat(",\"unclaimed\":", Str.concat(jStrList(unclaimed), "}"))))))
   }
 
 def noBreadth(): Breadth =
-  Breadth(noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr())
+  Breadth(noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr())
 
 def sampleBreadth(): Breadth =
-  Breadth(["signals"], ["count"], noStr(), noStr(), ["text:count = -1"], noStr(), noStr(), noStr(), noStr(), noStr())
+  Breadth(["signals"], ["count"], noStr(), noStr(), ["text:count = -1"], noStr(), noStr(), noStr(), noStr(), noStr(), noStr())
 
 def breadthOf(files: List[(String, String)], raw: String): Breadth =
   breadthFrom(dumpNames(raw), files)
 
 def breadthFrom(varied: List[String], files: List[(String, String)]): Breadth =
-  breadthFill(varied, sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalInt", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalListLen", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalStrHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.a11yHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.lastHitHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.driveHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.effectHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.fileTextIs", 2))))
+  breadthFill(varied, sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalInt", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalListLen", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalStrHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.a11yHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.lastHitHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.driveHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.effectHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.fileTextIs", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.fileSame", 3))))
 
-def breadthFill(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): Breadth =
-  Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, breadthUnclaimed(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs))
+def breadthFill(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String]): Breadth =
+  Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, fileSame, breadthUnclaimed(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, fileSame))
 
-def breadthUnclaimed(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): List[String] =
-  List.filter(varied, b => breadthGap(b, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs))
+def breadthUnclaimed(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String]): List[String] =
+  List.filter(varied, b => breadthGap(b, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, fileSame))
 
-def breadthGap(b: String, signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): Bool =
-  if (b == "signals") List.isEmpty(signalInt) && List.isEmpty(signalListLen) && List.isEmpty(signalStrHas) else if (b == "a11y") List.isEmpty(a11yHas) else if (b == "last_hit") List.isEmpty(lastHitHas) else if (b == "drive") List.isEmpty(driveHas) else if (b == "effects") List.isEmpty(effectHas) else if (b == "files") List.isEmpty(fileTextIs) else false
+def breadthGap(b: String, signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String]): Bool =
+  if (b == "signals") List.isEmpty(signalInt) && List.isEmpty(signalListLen) && List.isEmpty(signalStrHas) else if (b == "a11y") List.isEmpty(a11yHas) else if (b == "last_hit") List.isEmpty(lastHitHas) else if (b == "drive") List.isEmpty(driveHas) else if (b == "effects") List.isEmpty(effectHas) else if (b == "files") List.isEmpty(fileTextIs) && List.isEmpty(fileSame) else false
 
 def jReachKey(key: String, declared: List[String], reached: List[String]): String =
   Str.concat(",\"", Str.concat(key, Str.concat("\":", jReach(declared, reached))))
@@ -851,7 +851,12 @@ def wrapSrc(stem: String, src: String): String =
   wrapSrcEns(stem, src, noEn())
 
 def wrapSrcEns(stem: String, src: String, ens: List[En]): String =
-  Str.concat(wrapFuns(stem, parseVerifyEns(src, ens)), wrapRelFuns(parseClaims(src)))
+  wrapVerifyProg(stem, Parse.parse(Lexer.lex(src)), ens)
+
+def wrapVerifyProg(stem: String, p: Prog, ens: List[En]): String =
+  p match {
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Str.concat(Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, List.filter(defs, d => d.priv), main, body)), Str.concat(wrapFuns(stem, drives(defs, ens)), wrapRelFuns(claims(defs))))
+  }
 
 def wrapFuns(stem: String, ds: List[Fun]): String =
   if (List.isEmpty(ds)) "" else Str.concat(wrapFun(stem, List.at(ds, 0)), wrapFuns(stem, List.tail(ds)))
@@ -863,7 +868,7 @@ def wrapFun(_stem: String, d: Fun): String =
 
 def wrapFunBody(name: String, ps: String, body: Expr): String =
   body match {
-    case Expr.EBin("==", l, r, _) => wrapEq(name, ps, l, r)
+    case Expr.EBin(op, l, r, _) => if (op == "==") wrapEq(name, ps, l, r) else wrapFun2(name, ps, Parse.pretty0(body))
     case _ => wrapFun2(name, ps, Parse.pretty0(body))
   }
 
@@ -1436,7 +1441,7 @@ def rewriteReq(e: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En])
     case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteReq(inner, env, funs, ens), off)
     case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteReq(body, Check.bindLam(p, ty, env), funs, ens))
     case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteReq(c, env, funs, ens), rewriteReq(t, env, funs, ens), rewriteReq(el, env, funs, ens), off)
-    case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteReq(s, env, funs, ens), rewriteReqArms(arms, env, funs, ens), off)
+    case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteReq(s, env, funs, ens), rewriteReqArms(arms, inferTy(s, env, funs, ens), env, funs, ens), off)
     case Expr.EList(xs) => Expr.EList(rewriteReqList(xs, env, funs, ens))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteReqList(xs, env, funs, ens))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteReq(inner, env, funs, ens))
@@ -1526,12 +1531,12 @@ def reqPredE(args: List[Expr]): Expr =
 def rewriteReqList(xs: List[Expr], env: List[(String, Ty)], funs: List[Fun], ens: List[En]): List[Expr] =
   if (List.isEmpty(xs)) xs else rewriteReq(List.at(xs, 0), env, funs, ens) :: rewriteReqList(List.tail(xs), env, funs, ens)
 
-def rewriteReqArms(xs: List[Arm], env: List[(String, Ty)], funs: List[Fun], ens: List[En]): List[Arm] =
-  if (List.isEmpty(xs)) xs else rewriteReqArm(List.at(xs, 0), env, funs, ens) :: rewriteReqArms(List.tail(xs), env, funs, ens)
+def rewriteReqArms(xs: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): List[Arm] =
+  if (List.isEmpty(xs)) xs else rewriteReqArm(List.at(xs, 0), scrutTy, env, funs, ens) :: rewriteReqArms(List.tail(xs), scrutTy, env, funs, ens)
 
-def rewriteReqArm(a: Arm, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Arm =
+def rewriteReqArm(a: Arm, scrutTy: String, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): Arm =
   a match {
-    case Arm(pat, g, body) => Arm(pat, g, rewriteReq(body, env, funs, ens))
+    case Arm(pat, g, body) => Arm(pat, g, rewriteReq(body, Check.bindPat(pat, scrutTy, env, ens), funs, ens))
   }
 
 def seeds(src: String): String =
@@ -1713,10 +1718,10 @@ def bindHasForbid(b: Bind): Bool =
   }
 
 def searchN(n: Int): Int =
-  if (n <= 0) 0 else n * 5 / 8
+  if (n <= 0) 0 else n / 8 * 5 + n % 8 * 5 / 8
 
 def mutateN(n: Int): Int =
-  n - searchN(n)
+  if (n <= 0) 0 else n - searchN(n)
 
 def fuzzHead(iterations: Int, corpus: Int, sites: Int): String =
   Str.concat(if (iterations <= 0) Str.concat("scuzz fuzz: corpus-only (--iterations 0)", nl()) else "", Str.concat(if (iterations <= 0 && corpus > 0) Str.concat("scuzz fuzz: replay ", Str.concat(Str.fromInt(corpus), Str.concat(" corpus entries", nl()))) else "", if (sites == 0 && iterations > 0) Str.concat("scuzz fuzz: no live-code mutation sites", nl()) else ""))
@@ -1728,7 +1733,7 @@ def fuzzCampaignOk(fail: Int, iterations: Int, somNever: List[String], trigNever
   fail == 0 && (iterations <= 0 || List.isEmpty(somNever) && List.isEmpty(trigNever)) && !below
 
 def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
-  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, sites, failures, corpFail, "0", fuzzMut(sites), failures == 0)
+  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, fuzzObservations([], [], [], [], [], []), failures, corpFail, "0", fuzzMut(sites), failures == 0)
 
 def fuzzStatus(search: Int, failures: Int, seed: Int, corpus: Int, ok: Bool): String =
   Str.concat("scuzz fuzz ", Str.concat(if (ok) "ok" else "fail", Str.concat(" (", Str.concat(Str.fromInt(search), Str.concat(" search, ", Str.concat(Str.fromInt(failures), Str.concat(" search failures, seed ", Str.concat(Str.fromInt(seed), Str.concat(", ", Str.concat(Str.fromInt(corpus), " corpus)"))))))))))
@@ -1739,8 +1744,20 @@ def fuzzCorpus(corpus: Int, corpFail: Int, promoted: String): String =
 def fuzzMut(sites: Int): String =
   Str.concat("mutate: 0 killed, 0 survived, 0 inert (0 of ", Str.concat(Str.fromInt(sites), " sites)"))
 
-def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, _sites: Int, failures: Int, corpFail: Int, promoted: String, mut: String, ok: Bool): String =
-  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus, ok), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail, promoted), Str.concat(nl(), Str.concat("coverage: (none)", Str.concat(nl(), Str.concat("declared: (none)", Str.concat(nl(), mut)))))))))
+def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, observations: String, failures: Int, corpFail: Int, promoted: String, mut: String, ok: Bool): String =
+  Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus, ok), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail, promoted), Str.concat(nl(), Str.concat(observations, Str.concat(nl(), mut)))))))
+
+def fuzzObservations(rows: List[(String, Bool)], branches: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String]): String =
+  Str.concat("coverage: functions ", Str.concat(coverageRatio(rows), Str.concat(", branches ", Str.concat(coverageRatio(branches), Str.concat(nl(), Str.concat(reachText("sometimes", "reached", somDec, somHit), Str.concat(nl(), reachText("triggers", "fired", trigDec, trigHit))))))))
+
+def coverageRatio(rows: List[(String, Bool)]): String =
+  countRatio(List.count(rows, row => row._2), List.len(rows))
+
+def countRatio(reached: Int, total: Int): String =
+  Str.concat(Str.fromInt(reached), Str.concat("/", Str.fromInt(total)))
+
+def reachText(kind: String, action: String, declared: List[String], reached: List[String]): String =
+  Str.concat(kind, Str.concat(": ", Str.concat(countRatio(List.len(reachKeep(declared, reached)), List.len(List.distinct(declared))), Str.concat(" ", action))))
 
 def remEuclid(a: Int, n: Int): Int =
   if (n <= 0) 0 else remEuclid2(a % n, n)

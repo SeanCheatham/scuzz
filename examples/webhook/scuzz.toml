@@ -1,0 +1,4 @@
+[package]
+name = "webhook"
+version = "0.1.0"
+description = "Store the latest authenticated GitHub webhook payload"

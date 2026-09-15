@@ -19,3 +19,114 @@ def hueFacts(): Bool =
 def mapParameters(n: Int): Bool =
   Main.mapParamRoundTrip(n, Str.fromInt(n))
 
+def constructorStrings(s: String): Bool =
+  Main.literalPacket(LiteralPacket.Text(s)) == (if (s == "ready") 1 else 0)
+
+def constructorNumbers(n: Int): Bool =
+  Main.literalPacket(LiteralPacket.Number(n)) == (if (n == -7) 2 else 0)
+
+def constructorFlags(b: Bool): Bool =
+  Main.literalPacket(LiteralPacket.Flag(b)) == (if (b) 3 else 0)
+
+def constructorFields(n: Int): Bool =
+  Main.literalPacket(LiteralPacket.Fields("event", 2, true, n)) == n && Main.literalPacket(LiteralPacket.Fields("other", 2, true, n)) == 0 && Main.literalPacket(LiteralPacket.Fields("event", 3, true, n)) == 0 && Main.literalPacket(LiteralPacket.Fields("event", 2, false, n)) == 0
+
+def constructorMatches(): Bool =
+  Main.literalPacket(LiteralPacket.Text("ready")) == 1 && Main.literalPacket(LiteralPacket.Number(-7)) == 2 && Main.literalPacket(LiteralPacket.Flag(true)) == 3 && Main.literalPacket(LiteralPacket.Fields("event", 2, true, 29)) == 29
+
+def constructorNamed(n: Int): Bool =
+  Main.literalNamed(LiteralPacket.Fields("event", 2, true, n)) == (if (n > 0) n else 0) && Main.literalNamed(LiteralPacket.Fields("other", 2, true, n)) == 0 && Main.literalNamed(LiteralPacket.Fields("event", 3, true, n)) == 0 && Main.literalNamed(LiteralPacket.Fields("event", 2, false, n)) == 0
+
+def constructorEscaped(): Bool =
+  Main.literalEscaped(LiteralPacket.Text("line\n\"quoted\"\\end")) && !Main.literalEscaped(LiteralPacket.Text("line quoted end"))
+
+def constructorDelimiters(): Bool =
+  Main.literalDelimiters(LiteralPacket.Text("a,b) | c :: d @ e = f")) && !Main.literalDelimiters(LiteralPacket.Text("a"))
+
+def capturedNames(n: Int): Bool =
+  Main.captureNames(n, 5, 7, 11) == n + 23
+
+def capturedDirect(n: Int): Bool =
+  Main.captureDirect(n) == n
+
+def capturedString(s: String): Bool =
+  Main.captureString(s) == Str.concat(s, s)
+
+def pureForClaim(n: Int): Bool =
+  for {
+    pair = (n, Str.fromInt(n))
+    text = pair._2
+  } yield pair._1 == n && text == Str.fromInt(n)
+
+def patternResults(s: String): Bool =
+  Main.patternLabel(s) == s && Main.patternNamed(s) == s && List.join(Main.patternItems(s), "|") == Str.concat(s, Str.concat("|", s))
+
+def callbackFields(s: String): Bool =
+  List.join(List.flatMap([PatternFields("first", [s]), PatternFields("second", [s])], entry => entry.items), "|") == Str.concat(s, Str.concat("|", s))
+
+def genericCallbackFields(s: String): Bool =
+  List.join(List.flatMap([Box([s]), Box([s])], box => box.x), "|") == Str.concat(s, Str.concat("|", s))
+
+def genericScalarField(n: Int): Bool =
+  List.at(List.map([Box(n)], box => box.x + 1), 0) == n + 1
+
+def temporaryRecord(s: String): Bool =
+  Main.patternRecord(s) == Str.concat(s, s)
+
+def temporaryTailSize(s: String, n: Int): Bool =
+  Main.patternTailSize(s, n % 32) == Str.len(s)
+
+def temporaryTailValue(s: String, n: Int): Bool =
+  Main.patternTailValue(s, n % 32) == s
+
+def interpolatedJson(n: Int): Bool =
+  Json.parse(Main.interpolatedJson(n)) match {
+    case Result.Ok(j) => Main.jsonPairReads(j, "id", n)
+    case Result.Err(_) => false
+  }
+
+def verificationInterpolation(n: Int): Bool =
+  Json.parse(s"{\"id\":$n}") match {
+    case Result.Ok(j) => Main.jsonPairReads(j, "id", n)
+    case Result.Err(_) => false
+  }
+
+def interpolatedEscapes(s: String): Bool =
+  Main.interpolatedEscapes(s) == Str.concat("\"", Str.concat(s, "\"\n\t\\${literal}"))
+
+def interpolatedHole(s: String): Bool =
+  Main.interpolatedHole(s) == Str.concat("\"", s)
+
+def alternativeInt(n: Int): Bool =
+  Main.alternativeInt(n) == (n == -7 || n == 2 || n == 19)
+
+def alternativeBool(b: Bool): Bool =
+  Main.alternativeBool(b) == b
+
+def alternativeString(s: String): Bool =
+  Main.alternativeString(s) == (s == "a" || s == "b" || s == "c" || s == "x | y")
+
+def alternativeGuard(n: Int): Bool =
+  Main.alternativeGuard(n) == (n == 2 || n == 19)
+
+def alternativeQuoted(): Bool =
+  Main.alternativeString("x | y") && !Main.alternativeString("x")
+
+def constructorAlternativeNumbers(n: Int): Bool =
+  Main.constructorAlternatives(LiteralPacket.Number(n)) == (n == 19)
+
+def constructorAlternativeStrings(s: String): Bool =
+  Main.constructorAlternatives(LiteralPacket.Text(s)) == (s == "done")
+
+def constructorAlternativeFields(n: Int, b: Bool): Bool =
+  Main.constructorAlternatives(LiteralPacket.Fields("ready", 2, b, n)) == (n == 7 && b) && !Main.constructorAlternatives(LiteralPacket.Fields("other", 2, b, n))
+
+def constructorAlternativeValues(n: Int): Bool =
+  Main.constructorAlternativeValue(LiteralPacket.Number(n)) == n && Main.constructorAlternativeValue(LiteralPacket.Fields("ready", n, true, 0)) == n
+
+def constructorAlternativeTexts(s: String): Bool =
+  Main.constructorAlternativeText(LiteralPacket.Text(s)) == s && Main.constructorAlternativeText(LiteralPacket.Fields(s, 0, false, 0)) == s
+
+def constructorAlternativeGuards(n: Int): Bool =
+  Main.constructorAlternativeGuard(LiteralPacket.Number(n)) == (if (n > 0) n else 0) && Main.constructorAlternativeGuard(LiteralPacket.Fields("ready", 0, false, n)) == (if (n > 0) n else 0)
+

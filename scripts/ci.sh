@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Same slices as `.github/workflows/ci.yml`. Run one slice locally.
-# Fingerprint does not include the product CLI. These slices wipe example
-# `build/` dirs (not `examples/cli/build`) so a rebuilt compiler cannot reuse a stale `.ll`.
+# Selected slices use clean example build directories.
+# Keep examples/cli/build because it contains the compiler.
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -46,8 +46,8 @@ wipe_example_builds() {
   done
 }
 
-# GitHub sets CI=true. A clean runner has no stale .ll. Local runs wipe so a
-# rebuilt CLI cannot reuse a fingerprint hit from an older compiler.
+# GitHub sets CI=true and starts with clean build directories.
+# Local runs use the same starting state for these slices.
 maybe_wipe() {
   if [ "${CI:-}" = "" ]; then
     wipe_example_builds
@@ -293,6 +293,106 @@ slice_codegen() {
   echo "codegen emit done"
   "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
   grep -q "ir-ok" /tmp/codegen.out
+  local memory_dir
+  memory_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-match-memory.XXXXXX")"
+  mkdir -p "$memory_dir/src"
+  cat > "$memory_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "match-memory"
+MANIFEST
+  cat > "$memory_dir/src/Main.scuzz" <<'SOURCE'
+enum MemoryPacket:
+  case Fields(text: String, count: Int)
+
+record MemoryRecord(text: String, count: Int)
+
+def size(text: String): Int =
+  MemoryPacket.Fields(text, 1) match {
+    case MemoryPacket.Fields(label, _) => Str.len(label)
+  }
+
+def value(text: String): String =
+  MemoryPacket.Fields(text, 1) match {
+    case MemoryPacket.Fields(label, _) => label
+  }
+
+def recordSize(text: String): Int =
+  MemoryRecord(text, 1) match {
+    case MemoryRecord(label, _) => Str.len(label)
+  }
+
+def recordValue(text: String): String =
+  MemoryRecord(text, 1) match {
+    case MemoryRecord(label, _) => label
+  }
+
+def tailSize(text: String, count: Int): Int =
+  MemoryPacket.Fields(Str.concat(text, ""), count) match {
+    case MemoryPacket.Fields(label, n) if n > 0 => tailSize(label, n - 1)
+    case MemoryPacket.Fields(label, _) => Str.len(label)
+  }
+
+def tailValue(text: String, count: Int): String =
+  MemoryRecord(Str.concat(text, ""), count) match {
+    case MemoryRecord(label, n) if n > 0 => tailValue(label, n - 1)
+    case MemoryRecord(label, _) => label
+  }
+
+@main def main: IO[Unit] =
+  IO.println(value("ok"))
+SOURCE
+  "$SCUZZ" build --full "$memory_dir"
+  python3 - "$memory_dir/build/match-memory.ll" <<'PY_IR'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+for ty, name in (("i64", "size"), ("ptr", "value"), ("i64", "recordSize"), ("ptr", "recordValue"), ("i64", "tailSize"), ("ptr", "tailValue")):
+    old = f"define internal {ty} @sz_user_Main_{name}("
+    assert s.count(old) == 1
+    s = s.replace(old, f"define {ty} @sz_user_Main_{name}(")
+s = s.replace("define i32 @main(", "define i32 @scuzz_memory_main(")
+p.write_text(s)
+PY_IR
+  cat > "$memory_dir/probe.c" <<'C_SOURCE'
+#include "scuzz_rt.h"
+#include <stdio.h>
+#include <assert.h>
+extern int64_t sz_user_Main_size(SzString *);
+extern SzString *sz_user_Main_value(SzString *);
+extern int64_t sz_user_Main_recordSize(SzString *);
+extern SzString *sz_user_Main_recordValue(SzString *);
+extern int64_t sz_user_Main_tailSize(SzString *, int64_t);
+extern SzString *sz_user_Main_tailValue(SzString *, int64_t);
+int main(void) {
+  SzString *input = sz_string_from_cstr("payload");
+  size_t before, after;
+  sz_alloc_stats(&before, NULL);
+  for (int i = 0; i < 1000; ++i) {
+    assert(sz_user_Main_size(input) == 7);
+    SzString *output = sz_user_Main_value(input);
+    assert(sz_string_eq(input, output));
+    sz_release(output);
+    assert(sz_user_Main_recordSize(input) == 7);
+    output = sz_user_Main_recordValue(input);
+    assert(sz_string_eq(input, output));
+    sz_release(output);
+  }
+  assert(sz_user_Main_tailSize(input, 10000) == 7);
+  SzString *tail = sz_user_Main_tailValue(input, 10000);
+  assert(sz_string_eq(input, tail));
+  sz_release(tail);
+  sz_alloc_stats(&after, NULL);
+  printf("live allocation delta: %zu bytes\n", after-before);
+  sz_release(input);
+  return after == before ? 0 : 1;
+}
+C_SOURCE
+  clang -O2 -I crates/runtime/include "$memory_dir/probe.c" \
+    "$memory_dir/build/match-memory.ll" crates/runtime/build/libscuzz_rt.a \
+    -lssl -lcrypto -lz -lbz2 -lm -lpthread -ldl -o "$memory_dir/probe"
+  "$memory_dir/probe"
+  rm -rf "$memory_dir"
 }
 
 slice_hello_outdir() {

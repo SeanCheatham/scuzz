@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include <string.h>
 
-/* SHA-256 of UTF-8 bytes. Lowercase hex. Software so web and mobile compile
-   without OpenSSL. No HMAC. No other digests. */
+/* SHA-256 and HMAC-SHA-256 use raw string bytes and return lowercase hex.
+   Web and mobile compile this code without OpenSSL. */
 
 static void hex_lower(const unsigned char *in, size_t n, char *out) {
   static const char lut[] = "0123456789abcdef";
@@ -133,4 +133,51 @@ SzString *sz_hash_sha256(const SzString *s) {
   sha256(data, n, dig);
   hex_lower(dig, 32, hex);
   return sz_string_from_cstr(hex);
+}
+
+static void hash_wipe(void *p, size_t n) {
+  volatile unsigned char *v = p;
+  while (n--) *v++ = 0;
+}
+
+SzString *sz_hash_hmac_sha256(const SzString *key, const SzString *message) {
+  unsigned char pad[64] = {0}, digest[32], outer[96];
+  size_t key_len = key ? (size_t)key->len : 0;
+  size_t len = message ? (size_t)message->len : 0;
+  const unsigned char *key_bytes = (const unsigned char *)(key ? key->data : "");
+  unsigned char *inner;
+  char hex[65];
+  size_t i;
+  if (len > SIZE_MAX - 64) sz_panic("HMAC input is too large");
+  if (key_len > 64) sha256(key_bytes, key_len, pad);
+  else if (key_len) memcpy(pad, key_bytes, key_len);
+  inner = sz_alloc(len + 64);
+  for (i = 0; i < 64; i++) {
+    inner[i] = pad[i] ^ 0x36;
+    outer[i] = pad[i] ^ 0x5c;
+  }
+  if (len) memcpy(inner + 64, message->data, len);
+  sha256(inner, len + 64, digest);
+  memcpy(outer + 64, digest, 32);
+  sha256(outer, sizeof outer, digest);
+  hex_lower(digest, 32, hex);
+  hash_wipe(inner, len + 64);
+  sz_free(inner);
+  hash_wipe(pad, sizeof pad);
+  hash_wipe(digest, sizeof digest);
+  hash_wipe(outer, sizeof outer);
+  return sz_string_from_cstr(hex);
+}
+
+/* Equal-length comparisons visit every byte. Length is public. */
+int64_t sz_hash_constant_time_equal(const SzString *a, const SzString *b) {
+  size_t n = a ? (size_t)a->len : 0;
+  size_t m = b ? (size_t)b->len : 0;
+  const volatile unsigned char *x = (const unsigned char *)(a ? a->data : "");
+  const volatile unsigned char *y = (const unsigned char *)(b ? b->data : "");
+  unsigned int diff = 0;
+  size_t i;
+  if (n != m) return 0;
+  for (i = 0; i < n; i++) diff |= x[i] ^ y[i];
+  return diff == 0;
 }

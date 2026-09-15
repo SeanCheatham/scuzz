@@ -38,25 +38,94 @@ def retryFailuresPreserveReport(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "exhausted") || Timeline.driveHas(t, i, "retryDeadline") || Timeline.driveHas(t, i, "permanentStatus")) || !Timeline.effectHas(t, i, "Fs.write"))
 
 def retrySeconds(n: Int): Bool =
-  if (n < 0 || n > 9223372036854775) Report.retryAfter(Str.fromInt(n)) == -1 else Report.retryAfter(Str.fromInt(n)) == n * 1000
+  if (n < 0 || n > 9223372036854775) Net.retryAfterMillis(Str.fromInt(n), 0) == -1 else Net.retryAfterMillis(Str.fromInt(n), 0) == n * 1000
 
 def retryHeaderForms(): Bool =
-  Report.retryAfter("0") == 0 && Report.retryAfter(" 001 ") == 1000 && Report.retryAfter("+1") == -1 && Report.retryAfter("1.5") == -1 && Report.retryAfter("") == -1 && Report.retryAfter("1, 2") == -1 && Report.retryAfter("9223372036854775") == 9223372036854775000 && Report.retryAfter("9223372036854776") == -1 && Report.retryAfter("9999999999999999999999") == -1 && Report.retryAfter("Fri, 31 Dec 1999 23:59:59 GMT") == -1
+  Net.retryAfterMillis("0", 0) == 0 && Net.retryAfterMillis(" 001 ", 0) == 1000 && Net.retryAfterMillis("+1", 0) == -1 && Net.retryAfterMillis("1.5", 0) == -1 && Net.retryAfterMillis("", 0) == -1 && Net.retryAfterMillis("1, 2", 0) == -1 && Net.retryAfterMillis("9223372036854775", 0) == 9223372036854775000 && Net.retryAfterMillis("9223372036854776", 0) == -1 && Net.retryAfterMillis("9999999999999999999999", 0) == -1 && Net.retryAfterMillis("Fri, 31 Dec 1999 23:59:59 GMT", 0) == 946684799000
 
 def retryHeaderPolicy(): Bool =
-  Report.retryDelay(429, Map.empty()) == 1000 && Report.retryDelay(503, Map.empty()) == 100 && Report.retryDelay(401, Map.set(Map.empty(), "Retry-After", "1")) == -1 && Report.retryDelay(429, Map.set(Map.empty(), "rEtRy-AfTeR", "2")) == 2000 && Report.retryDelay(503, Map.set(Map.empty(), "Retry-After", "2")) == 2000 && Report.retryDelay(429, Map.set(Map.set(Map.empty(), "Retry-After", "1"), "retry-after", "2")) == -1
+  Report.retryDelay(429, Map.empty(), 0) == 1000 && Report.retryDelay(503, Map.empty(), 0) == 100 && Report.retryDelay(401, Map.set(Map.empty(), "Retry-After", "1"), 0) == -1 && Report.retryDelay(429, Map.set(Map.empty(), "rEtRy-AfTeR", "2"), 0) == 2000 && Report.retryDelay(503, Map.set(Map.empty(), "Retry-After", "2"), 0) == 2000 && Report.retryDelay(429, Map.set(Map.set(Map.empty(), "Retry-After", "1"), "retry-after", "2"), 0) == -1
 
 def rateLimitRecovery(t: Timeline): Verdict =
-  Verdict.every(t, i => !(Timeline.driveHas(t, i, "rateLimited") || Timeline.driveHas(t, i, "zeroRetry")) || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "dateLimited") || Timeline.driveHas(t, i, "dateExpired") || Timeline.driveHas(t, i, "rateLimited") || Timeline.driveHas(t, i, "zeroRetry")) || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
 
 def rateLimitFailurePreservesReport(t: Timeline): Verdict =
-  Verdict.every(t, i => !(Timeline.driveHas(t, i, "rateDeadline") || Timeline.driveHas(t, i, "rateExhausted") || Timeline.driveHas(t, i, "badRetryAfter")) || !Timeline.effectHas(t, i, "Fs.write"))
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "dateDeadline") || Timeline.driveHas(t, i, "rateDeadline") || Timeline.driveHas(t, i, "rateExhausted") || Timeline.driveHas(t, i, "badRetryAfter")) || !Timeline.effectHas(t, i, "Fs.write"))
 
 def reportContents(t: Timeline): Verdict =
-  Verdict.every(t, i => !(Timeline.driveHas(t, i, "success") || Timeline.driveHas(t, i, "recovers") || Timeline.driveHas(t, i, "rateLimited") || Timeline.driveHas(t, i, "zeroRetry")) || Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs") || Timeline.fileTextIs(t, i, "report.json", "[{\"id\":1,\"state\":\"open\"}]"))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "dateLimited") || Timeline.driveHas(t, b, "dateExpired") || Timeline.driveHas(t, b, "success") || Timeline.driveHas(t, b, "recovers") || Timeline.driveHas(t, b, "rateLimited") || Timeline.driveHas(t, b, "zeroRetry")) || Timeline.fileTextIs(t, b, "report.json", "[{\"id\":1,\"state\":\"open\"}]") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
+})
 
 def failuresKeepContents(t: Timeline): Verdict =
   Verdict.stepEvery(t, __tup => __tup match {
-  case (a, b) => !(Timeline.driveHas(t, b, "rejected") || Timeline.driveHas(t, b, "malformed") || Timeline.driveHas(t, b, "badStatus") || Timeline.driveHas(t, b, "timedOut") || Timeline.driveHas(t, b, "noToken") || Timeline.driveHas(t, b, "insecureUrl") || Timeline.driveHas(t, b, "exhausted") || Timeline.driveHas(t, b, "retryDeadline") || Timeline.driveHas(t, b, "permanentStatus") || Timeline.driveHas(t, b, "rateDeadline") || Timeline.driveHas(t, b, "rateExhausted") || Timeline.driveHas(t, b, "badRetryAfter")) || Timeline.fileTextIs(t, a, "report.json", "[]") && Timeline.fileTextIs(t, b, "report.json", "[]") || Timeline.fileTextIs(t, a, "report.json", "[{\"id\":1,\"state\":\"open\"}]") && Timeline.fileTextIs(t, b, "report.json", "[{\"id\":1,\"state\":\"open\"}]")
+  case (a, b) => !(Timeline.driveHas(t, b, "dateDeadline") || Timeline.driveHas(t, b, "pageMalformed") || Timeline.driveHas(t, b, "pageCycle") || Timeline.driveHas(t, b, "pageTimeout") || Timeline.driveHas(t, b, "rejected") || Timeline.driveHas(t, b, "malformed") || Timeline.driveHas(t, b, "badStatus") || Timeline.driveHas(t, b, "timedOut") || Timeline.driveHas(t, b, "noToken") || Timeline.driveHas(t, b, "insecureUrl") || Timeline.driveHas(t, b, "exhausted") || Timeline.driveHas(t, b, "retryDeadline") || Timeline.driveHas(t, b, "permanentStatus") || Timeline.driveHas(t, b, "rateDeadline") || Timeline.driveHas(t, b, "rateExhausted") || Timeline.driveHas(t, b, "badRetryAfter")) || Timeline.fileSame(t, a, b, "report.json")
+})
+
+def pageProgress(n: Int): Bool =
+  Report.nextPage(Map.set(Map.empty(), "X-Next-Page", Str.fromInt(n)), 1) == (if (n > 1 && n <= 100) n else -1)
+
+def pageHeaderForms(): Bool =
+  Report.nextPage(Map.empty(), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", ""), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", " 2 "), 1) == 2 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "https://other/"), 1) == -1 && Report.nextPage(Map.set(Map.set(Map.empty(), "X-Next-Page", "2"), "x-next-page", "3"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "999999999999999999999"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "100"), 100) == -1
+
+def pageAddresses(): Bool =
+  Report.pageUrl("https://api/records", 1) == "https://api/records" && Report.pageUrl("https://api/records", 2) == "https://api/records?page=2" && Report.pageUrl("https://api/records?state=all", 3) == "https://api/records?state=all&page=3"
+
+def paginatedContents(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "paginated") || Timeline.driveHas(t, b, "paginatedPlain")) || Timeline.fileTextIs(t, b, "report.json", "[{\"id\":1,\"state\":\"open\"},{\"id\":1,\"state\":\"open\"}]") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
+})
+
+def pageFailuresDoNotWrite(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "pageMalformed") || Timeline.driveHas(t, i, "pageCycle") || Timeline.driveHas(t, i, "pageTimeout")) || !Timeline.effectHas(t, i, "Fs.write"))
+
+def datedDelay(now: Int): Bool =
+  if (now < 0) true else Net.retryAfterMillis("Sun, 06 Nov 1994 08:49:37 GMT", now) == (if (now >= 784111777000) 0 else 784111777000 - now)
+
+def dateForms(): Bool =
+  Net.retryAfterMillis("Sunday, 06-Nov-94 08:49:37 GMT", 784111776000) == 1000 && Net.retryAfterMillis("Sun Nov  6 08:49:37 1994", 784111776500) == 500 && Net.retryAfterMillis("Sun, 31 Nov 1994 08:49:37 GMT", 0) == -1 && Net.retryAfterMillis("Mon, 06 Nov 1994 08:49:37 GMT", 0) == -1
+
+def linkReferences(n: Int): Bool =
+  Net.nextLink("https://api/records?old=1", s"<?cursor=$n>; rel=next") == Result.Ok(s"https://api/records?cursor=$n")
+
+def linkForms(): Bool =
+  Net.nextLink("https://api/a/b", "<../c?x=1>; rel=\"prev next\"; title=\"a,b\"") == Result.Ok("https://api/c?x=1") && Net.nextLink("https://api/a", "</b>; rel=last") == Result.Ok("") && Net.nextLink("https://api/a", "</b>; rel=next; anchor=\"#other\"") == Result.Ok("") && Net.nextLink("https://api/a", "<https://API:443/b#part>; rel=next") == Result.Ok("https://api/b")
+
+def linkOriginPolicy(): Bool =
+  List.forall(["http://api/b", "https://other/b", "https://api:444/b", "https://user@api/b"], url => Net.nextLink("https://api/a", s"<$url>; rel=next") match {
+  case Result.Err(_) => true
+  case Result.Ok(_) => false
+})
+
+def linkContents(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "linkPages") || Timeline.fileTextIs(t, b, "report.json", "[{\"id\":11,\"state\":\"open\"},{\"id\":13,\"state\":\"open\"}]") && Timeline.effectHas(t, b, "Fs.write") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
+})
+
+def linkFailures(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "linkCycle") || Timeline.driveHas(t, b, "linkOrigin") || Timeline.driveHas(t, b, "linkMalformed") || Timeline.driveHas(t, b, "linkTimeout") || Timeline.driveHas(t, b, "linkAmbiguous") || Timeline.driveHas(t, b, "linkLimit")) || Timeline.fileSame(t, a, b, "report.json") && !Timeline.effectHas(t, b, "Fs.write")
+})
+
+def linkDoesNotForwardCredentials(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "linkOrigin") || Timeline.driveHas(t, i, "linkAmbiguous")) || Timeline.effectCount(t, i) <= 2)
+
+def linkRequestsBounded(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "linkLimit") || Timeline.effectCount(t, i) <= 200)
+
+def linkHundredContents(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "linkHundred") || Timeline.fileTextIs(t, b, "report.json", "[{\"id\":100,\"state\":\"open\"}]") && Timeline.effectHas(t, b, "Fs.write") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
+})
+
+def pageReplacement(n: Int): Bool =
+  if (n <= 1) true else Report.pageUrl("https://api/records?page=1&filter=a%26b#view?tab=1", n) == Str.concat("https://api/records?filter=a%26b&page=", Str.fromInt(n))
+
+def pageQueryForms(): Bool =
+  Report.pageUrl("https://api/records?#view", 2) == "https://api/records?page=2" && Report.pageUrl("https://api/records?page=1&p%61ge=4&%70%61%67%65=9&Page=keep&homepage=keep", 3) == "https://api/records?Page=keep&homepage=keep&page=3" && Report.pageUrl("https://api/records#view?old=1", 2) == "https://api/records?page=2"
+
+def queryContents(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "queryPages") || Timeline.fileTextIs(t, b, "report.json", "[{\"id\":21,\"state\":\"open\"},{\"id\":22,\"state\":\"open\"}]") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
 })
 

@@ -10,6 +10,13 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/wait.h>
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/mman.h>
+#include <sys/stat.h>
+#endif
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 #include <unistd.h>
 
 /* Process / args / console kit (Sys.args, IO.println, clang link).
@@ -1131,6 +1138,44 @@ SzIo *sz_sys_child_close(int64_t pid) {
   return io;
 }
 
+/* Internal toolchain metadata uses the live binary, not caller environment. */
+static const char *executable_sha256(void) {
+  static char identity[65];
+  if (identity[0]) return identity;
+#if defined(__linux__) || defined(__APPLE__)
+  int fd = -1;
+#if defined(__linux__)
+  fd = open("/proc/self/exe", O_RDONLY);
+#else
+  uint32_t size = 0;
+  _NSGetExecutablePath(NULL, &size);
+  if (!size) return NULL;
+  char *path = sz_alloc(size);
+  if (_NSGetExecutablePath(path, &size) == 0) fd = open(path, O_RDONLY);
+  sz_free(path);
+#endif
+  if (fd < 0) return NULL;
+  struct stat st;
+  if (fstat(fd, &st) != 0 || st.st_size <= 0 ||
+      (uintmax_t)st.st_size > SIZE_MAX) {
+    close(fd);
+    return NULL;
+  }
+  size_t size_bytes = (size_t)st.st_size;
+  void *bytes = mmap(NULL, size_bytes, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  if (bytes == MAP_FAILED) return NULL;
+  SzString input = {.len = size_bytes, .data = bytes};
+  SzString *digest = sz_hash_sha256(&input);
+  memcpy(identity, sz_string_cstr(digest), sizeof(identity));
+  sz_release(digest);
+  munmap(bytes, size_bytes);
+  return identity;
+#else
+  return NULL;
+#endif
+}
+
 static void *sys_getenv_result(void *env) {
   SzPair *p = (SzPair *)env;
   SzString *key = p ? (SzString *)p->left : NULL;
@@ -1139,7 +1184,14 @@ static void *sys_getenv_result(void *env) {
   sz_timeline_log_cstr("Sys.getenv", key ? sz_string_cstr(key) : "");
   if (sz_testrt_sys_is_fake())
     v = sz_testrt_env_get(key ? sz_string_cstr(key) : "");
-  else
+  else if (key && strcmp(sz_string_cstr(key), "SCUZZ_EXECUTABLE_SHA256") == 0) {
+    v = executable_sha256();
+    if (!v) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(3, "Sys.getenv: cannot identify executable");
+      return r;
+    }
+  } else
     v = getenv(key ? sz_string_cstr(key) : "");
   r->is_err = 0;
   r->as.ok = sz_string_from_cstr(v ? v : "");

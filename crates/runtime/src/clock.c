@@ -3,6 +3,7 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 /* Live vs fake clock. Fake: virtual ms advanced by sleep / sz_testrt_clock_advance. */
@@ -145,4 +146,144 @@ SzString *sz_clock_iso8601(int64_t ms) {
   if (n < 0 || (size_t)n >= sizeof buf)
     return sz_string_from_cstr("");
   return sz_string_from_cstr(buf);
+}
+
+static int http_digits(const char *s, size_t n) {
+  int value = 0;
+  size_t i;
+  for (i = 0; i < n; i++) {
+    if (s[i] < '0' || s[i] > '9')
+      return -1;
+    value = value * 10 + s[i] - '0';
+  }
+  return value;
+}
+
+static int http_name(const char *s, size_t n, const char *const *names,
+                     int count) {
+  int i;
+  for (i = 0; i < count; i++)
+    if (strlen(names[i]) == n && memcmp(s, names[i], n) == 0)
+      return i;
+  return -1;
+}
+
+static int64_t http_days(int64_t year, int month, int day) {
+  int64_t era, yoe, doy;
+  year -= month <= 2;
+  era = floor_div(year, 400);
+  yoe = year - era * 400;
+  doy = (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+  return era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+}
+
+static int http_date_ms(const char *s, size_t n, int64_t now, int64_t *out) {
+  static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  static const char *const short_days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  static const char *const long_days[] = {"Sunday", "Monday", "Tuesday", "Wednesday",
+                                        "Thursday", "Friday", "Saturday"};
+  static const int month_days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  const char *time;
+  int year, month, day, weekday, hour, minute, second, limit, short_year = 0;
+  int64_t days;
+  if (n == 29 && s[3] == ',' && s[4] == ' ' && s[7] == ' ' &&
+      s[11] == ' ' && s[16] == ' ' && memcmp(s + 25, " GMT", 4) == 0) {
+    weekday = http_name(s, 3, short_days, 7);
+    day = http_digits(s + 5, 2);
+    month = http_name(s + 8, 3, months, 12) + 1;
+    year = http_digits(s + 12, 4);
+    time = s + 17;
+  } else if (n == 24 && s[3] == ' ' && s[7] == ' ' && s[10] == ' ' && s[19] == ' ') {
+    weekday = http_name(s, 3, short_days, 7);
+    month = http_name(s + 4, 3, months, 12) + 1;
+    day = s[8] == ' ' ? http_digits(s + 9, 1) : http_digits(s + 8, 2);
+    year = http_digits(s + 20, 4);
+    time = s + 11;
+  } else {
+    const char *comma = memchr(s, ',', n);
+    size_t name_len;
+    if (!comma)
+      return 0;
+    name_len = (size_t)(comma - s);
+    if (n != name_len + 24 || comma[1] != ' ')
+      return 0;
+    weekday = http_name(s, name_len, long_days, 7);
+    s = comma + 2;
+    if (s[2] != '-' || s[6] != '-' || s[9] != ' ' || memcmp(s + 18, " GMT", 4) != 0)
+      return 0;
+    day = http_digits(s, 2);
+    month = http_name(s + 3, 3, months, 12) + 1;
+    year = http_digits(s + 7, 2);
+    time = s + 10;
+    short_year = 1;
+  }
+  if (time[2] != ':' || time[5] != ':')
+    return 0;
+  hour = http_digits(time, 2);
+  minute = http_digits(time + 3, 2);
+  second = http_digits(time + 6, 2);
+  if (year < 0 || month < 1 || day < 1 || weekday < 0 || hour < 0 || hour > 23 ||
+      minute < 0 || minute > 59 || second < 0 || second > 60 ||
+      (second == 60 && (hour != 23 || minute != 59)))
+    return 0;
+  if (short_year) {
+    int64_t current_year, boundary;
+    int current_month, current_day;
+    civil_from_days(floor_div(now, 86400000), &current_year, &current_month, &current_day);
+    if (current_year < 1 || current_year > 9999)
+      return 0;
+    year += (int)((current_year + 50) / 100) * 100;
+    boundary = http_days(current_year + 50, current_month, current_day) * 86400000 +
+               floor_mod(now, 86400000);
+    if (http_days(year, month, day) * 86400000 +
+        (hour * 3600 + minute * 60 + second) * 1000 > boundary)
+      year -= 100;
+  }
+  if (year < 1 || year > 9999)
+    return 0;
+  limit = month_days[month - 1];
+  if (month == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0))
+    limit++;
+  if (day > limit)
+    return 0;
+  days = http_days(year, month, day);
+  if (floor_mod(days + 4, 7) != weekday)
+    return 0;
+  *out = days * 86400000 + (hour * 3600 + minute * 60 + second) * 1000;
+  return 1;
+}
+
+int64_t sz_net_retry_after_millis(SzString *value, int64_t now_ms) {
+  const char *s;
+  size_t n, i;
+  int64_t seconds = 0, target;
+  if (!value)
+    return -1;
+  s = sz_string_cstr(value);
+  n = (size_t)sz_string_len(value);
+  while (n && (*s == ' ' || *s == '\t')) {
+    s++;
+    n--;
+  }
+  while (n && (s[n - 1] == ' ' || s[n - 1] == '\t'))
+    n--;
+  if (!n)
+    return -1;
+  if (*s >= '0' && *s <= '9') {
+    for (i = 0; i < n; i++) {
+      int digit = s[i] - '0';
+      if (digit < 0 || digit > 9 || seconds > (INT64_MAX / 1000 - digit) / 10)
+        return -1;
+      seconds = seconds * 10 + digit;
+    }
+    return seconds * 1000;
+  }
+  if (!http_date_ms(s, n, now_ms, &target))
+    return -1;
+  if (target <= now_ms)
+    return 0;
+  if (now_ms < 0 && target > INT64_MAX + now_ms)
+    return -1;
+  return target - now_ms;
 }

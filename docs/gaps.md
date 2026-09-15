@@ -23,7 +23,7 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 ## Known gaps
 
-Next work is app-shaped stdlib and real tooling. Checker Fun-string residuals are not the next slice. Locks: [`vision.md`](vision.md).
+Next work improves general language usability. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Examples prove these capabilities. Locks: [`vision.md`](vision.md).
 
 ### Cuts
 
@@ -33,19 +33,19 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 ### Thesis-critical
 
-Not the next slice.
+Resolve these gaps when they prevent ordinary language use.
 
-1. **Checker and emit residuals** — `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. A Queue or Deferred handle has no payload until the first offer or complete. Param letters (`A`/`E`) still unify. Parse Param/Fun stay strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call. An IO `.require` inside a payload match can treat the IO handle as its value. A `for` inside nested matches can read the wrong captured value. Use a typed function for the matched payload. Escaped quotes in an interpolated verification string can reach `Json.parse` as backslash bytes.
+1. **Checker and emit residuals** — `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. A Queue or Deferred handle has no payload until the first offer or complete. Param letters (`A`/`E`) still unify. Parse Param/Fun stay strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call. Literal checks inside nested constructor patterns remain open. The checker does not enforce equal binding names and types across constructor alternatives. Direct constructor fields compare String, Int, and Bool literals.
 
 2. **Compile-time performance** — `scuzz check examples/compiler` is 16 s. A cold `scuzz build examples/tyck` is 1 m 10 s. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
 
 ### Table-stakes
 
-Needed before a real CLI, server, or desktop app stays. Next work lives here.
+Required for CLI, server, and desktop applications.
 
-The authenticated API report reads one response. Pagination and HTTP-date Retry-After values remain open.
+Filesystem symbolic links, extended metadata preservation, and power-loss durability remain open.
 
-`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Time parse and zones. Regex capture and replace. HMAC. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Time parse and zones. Regex capture and replace. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Later
 

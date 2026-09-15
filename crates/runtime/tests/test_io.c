@@ -3,6 +3,7 @@
 #if defined(__APPLE__)
 #define _DARWIN_C_SOURCE
 #endif
+#include <openssl/hmac.h>
 #include "scuzz_rt.h"
 
 #include <arpa/inet.h>
@@ -17,6 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -2229,11 +2232,160 @@ static void test_driver_growth(void) {
   sz_testrt_reset();
 }
 
+static void check_retry_after(const char *text, int64_t now, int64_t want) {
+  SzString *value = sz_string_from_cstr(text);
+  int64_t got = sz_net_retry_after_millis(value, now);
+  if (got != want)
+    fprintf(stderr, "retry-after %s: got %lld, want %lld\n", text,
+            (long long)got, (long long)want);
+  assert(got == want);
+  sz_release(value);
+}
+
+static void test_retry_after(void) {
+  int64_t epoch = 784111777000;
+  const char *forms[] = {"Sun, 06 Nov 1994 08:49:37 GMT",
+                         "Sunday, 06-Nov-94 08:49:37 GMT",
+                         "Sun Nov  6 08:49:37 1994"};
+  const char *bad[] = {"", "-1", "+1", "1.5", "1, 2", "1\n", "1\r",
+    "Sun, 31 Nov 1994 08:49:37 GMT", "Mon, 06 Nov 1994 08:49:37 GMT",
+    "Sun, 06 Nov 1994 24:49:37 GMT", "Sun, 06 Nov 1994 08:60:37 GMT",
+    "Sun, 06 Nov 1994 08:49:60 GMT", "Sun, 06 Nov 1994 08:49:37 UTC",
+    "Sun, 06 Nov 1994 08:49:37 GMT junk", "Sun, 06 nov 1994 08:49:37 GMT",
+    "Thu, 29 Feb 1900 00:00:00 GMT", "Thu, 01 Jan 0000 00:00:00 GMT",
+    "Sunday, 06-Nov-xx 08:49:37 GMT", "Sun Nov  x 08:49:37 1994"};
+  size_t i;
+  int64_t seconds;
+  SzString *nul;
+  for (i = 0; i < sizeof(forms) / sizeof(forms[0]); i++) {
+    check_retry_after(forms[i], epoch - 1234, 1234);
+    check_retry_after(forms[i], epoch, 0);
+    check_retry_after(forms[i], epoch + 1, 0);
+  }
+  for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+    check_retry_after(bad[i], 0, -1);
+  check_retry_after(" 001\t", INT64_MIN, 1000);
+  check_retry_after("9223372036854775", 0, INT64_C(9223372036854775000));
+  check_retry_after("9223372036854776", 0, -1);
+  check_retry_after("999999999999999999999999999999999", 0, -1);
+  check_retry_after(forms[0], INT64_MIN, -1);
+  check_retry_after(forms[0], INT64_MAX, 0);
+  check_retry_after("Tue, 29 Feb 2000 00:00:00 GMT", INT64_C(951782399000), 1000);
+  check_retry_after("Sat, 31 Dec 2016 23:59:60 GMT", INT64_C(1483228799000), 1000);
+  check_retry_after("Thursday, 01-Jan-70 00:00:00 GMT", 0, 0);
+  check_retry_after("Mon, 01 Jan 0001 00:00:00 GMT", INT64_C(-62135596800001), 1);
+  check_retry_after("Fri, 31 Dec 9999 23:59:59 GMT", INT64_C(253402300798000), 1000);
+  check_retry_after("Wednesday, 01-Jan-70 00:00:00 GMT", INT64_C(1577836800000), INT64_C(1577923200000));
+  check_retry_after("Thursday, 01-Jan-70 00:00:00 GMT", INT64_C(1577836799999), 0);
+  for (seconds = INT64_C(-2208988800); seconds < INT64_C(4102444800); seconds += 1234567) {
+    time_t instant = (time_t)seconds;
+    struct tm tm;
+    char text[64];
+    assert(gmtime_r(&instant, &tm));
+    assert(strftime(text, sizeof(text), "%a, %d %b %Y %H:%M:%S GMT", &tm));
+    check_retry_after(text, seconds * 1000 - 1234, 1234);
+  }
+  nul = sz_string_from_bytes("1\0x", 3);
+  assert(sz_net_retry_after_millis(nul, 0) == -1);
+  sz_release(nul);
+}
+
+static void test_atomic_fs_write(void) {
+  char directory[] = "/tmp/scuzz_atomic_write.XXXXXX";
+  char filename[256], alias[256], linkname[256];
+  SzString *path, *body, *fresh, *bad_path, *empty;
+  SzIoResult result;
+  struct stat st;
+  FILE *old_handle;
+  char buf[32] = {0};
+  pid_t child;
+  int status;
+  DIR *dir;
+  struct dirent *entry;
+  assert(mkdtemp(directory));
+  snprintf(filename, sizeof(filename), "%s/report.txt", directory);
+  snprintf(alias, sizeof(alias), "%s/alias.txt", directory);
+  snprintf(linkname, sizeof(linkname), "%s/link.txt", directory);
+  path = sz_string_from_cstr(filename);
+  body = sz_string_from_cstr("prior report");
+  fresh = sz_string_from_bytes("new\0report", 10);
+  empty = sz_string_from_cstr("");
+  sz_testrt_reset();
+  assert(sz_io_unsafe_run(sz_fs_write(path, body)).ok);
+  assert(stat(filename, &st) == 0 && (st.st_mode & 0777) == 0600);
+  assert(chmod(filename, 0640) == 0);
+  assert(link(filename, alias) == 0);
+  old_handle = fopen(filename, "rb");
+  assert(old_handle);
+  assert(sz_io_unsafe_run(sz_fs_write(path, fresh)).ok);
+  assert(fread(buf, 1, sizeof(buf), old_handle) == 12);
+  assert(memcmp(buf, "prior report", 12) == 0);
+  assert(fclose(old_handle) == 0);
+  result = sz_io_unsafe_run(sz_fs_read(path));
+  assert(result.ok && sz_string_len(result.value) == 10);
+  assert(memcmp(sz_string_cstr(result.value), "new\0report", 10) == 0);
+  sz_release(result.value);
+  assert(stat(filename, &st) == 0 && (st.st_mode & 0777) == 0640);
+  bad_path = sz_string_from_bytes(filename, strlen(filename) + 1);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(!result.ok);
+  sz_release(result.error);
+  sz_release(bad_path);
+  bad_path = sz_string_from_cstr(directory);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(!result.ok);
+  sz_release(result.error);
+  sz_release(bad_path);
+  assert(symlink(filename, linkname) == 0);
+  bad_path = sz_string_from_cstr(linkname);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(!result.ok);
+  sz_release(result.error);
+  sz_release(bad_path);
+  assert(lstat(linkname, &st) == 0 && S_ISLNK(st.st_mode));
+
+  child = fork();
+  assert(child >= 0);
+  if (!child) {
+    struct rlimit limit = {4, 4};
+    assert(signal(SIGXFSZ, SIG_IGN) != SIG_ERR);
+    assert(setrlimit(RLIMIT_FSIZE, &limit) == 0);
+    result = sz_io_unsafe_run(sz_fs_write(path, body));
+    assert(!result.ok);
+    sz_release(result.error);
+    _exit(0);
+  }
+  assert(waitpid(child, &status, 0) == child);
+  assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+  result = sz_io_unsafe_run(sz_fs_read(path));
+  assert(result.ok && sz_string_len(result.value) == 10);
+  assert(memcmp(sz_string_cstr(result.value), "new\0report", 10) == 0);
+  sz_release(result.value);
+  dir = opendir(directory);
+  assert(dir);
+  while ((entry = readdir(dir)))
+    assert(strncmp(entry->d_name, ".scuzz-write-", 13) != 0);
+  closedir(dir);
+  assert(sz_io_unsafe_run(sz_fs_write(path, empty)).ok);
+  assert(stat(filename, &st) == 0 && st.st_size == 0);
+  sz_release(path);
+  sz_release(body);
+  sz_release(fresh);
+  sz_release(empty);
+  assert(unlink(linkname) == 0);
+  assert(unlink(alias) == 0);
+  assert(unlink(filename) == 0);
+  assert(rmdir(directory) == 0);
+}
+
 static void test_file_timeline(void) {
   const char *dump_path = "/tmp/scuzz_test_file_timeline.dump";
   SzString *path = sz_string_from_cstr("report.txt");
   SzString *alias = sz_string_from_cstr("./report.txt");
   SzString *empty_path = sz_string_from_cstr("empty.txt");
+  SzString *directory = sz_string_from_cstr("folder");
+  SzString *nul_path = sz_string_from_bytes("report.txt\0other", 16);
+  SzString *long_path = sz_string_from_cstr("report.txt.more");
   SzString *old = sz_string_from_bytes("old\n\0", 5);
   SzString *fresh = sz_string_from_cstr("new");
   SzString *empty = sz_string_from_cstr("");
@@ -2246,16 +2398,21 @@ static void test_file_timeline(void) {
   sz_property_session_reset();
   assert(sz_io_unsafe_run(sz_fs_write(path, old)).ok);
   assert(sz_io_unsafe_run(sz_fs_write(empty_path, empty)).ok);
+  assert(sz_io_unsafe_run(sz_fs_mkdirs(directory)).ok);
+  assert(sz_io_unsafe_run(sz_fs_write(long_path, old)).ok);
   sz_property_session_step();
   assert(sz_io_unsafe_run(sz_fs_write(path, fresh)).ok);
   assert(sz_io_unsafe_run(sz_fs_delete(empty_path)).ok);
   sz_property_session_step();
   assert(sz_io_unsafe_run(sz_fs_delete(path)).ok);
   sz_property_session_step();
+  assert(sz_io_unsafe_run(sz_fs_write(path, old)).ok);
+  assert(sz_io_unsafe_run(sz_fs_write(empty_path, empty)).ok);
+  sz_property_session_step();
   sz_property_session_end();
   sz_property_session_reset();
   timeline = sz_timeline_load(dump_path);
-  assert(timeline && sz_timeline_len(timeline) == 3);
+  assert(timeline && sz_timeline_len(timeline) == 4);
   assert(sz_timeline_file_text_is(timeline, 0, path, old));
   assert(sz_timeline_file_text_is(timeline, 0, alias, old));
   assert(!sz_timeline_file_text_is(timeline, 1, path, old));
@@ -2265,7 +2422,25 @@ static void test_file_timeline(void) {
   assert(!sz_timeline_file_text_is(timeline, 2, path, empty));
   assert(sz_timeline_file_text_is(timeline, 0, empty_path, empty));
   assert(!sz_timeline_file_text_is(timeline, 1, empty_path, empty));
+  assert(sz_timeline_file_same(timeline, 0, 3, path));
+  assert(sz_timeline_file_same(timeline, 3, 0, alias));
+  assert(sz_timeline_file_same(timeline, 0, 0, path));
+  assert(!sz_timeline_file_same(timeline, 0, 1, path));
+  assert(!sz_timeline_file_same(timeline, 1, 0, path));
+  assert(!sz_timeline_file_same(timeline, 0, 2, path));
+  assert(!sz_timeline_file_same(timeline, 2, 2, path));
+  assert(sz_timeline_file_same(timeline, 0, 3, empty_path));
+  assert(!sz_timeline_file_same(timeline, 1, 2, empty_path));
+  assert(!sz_timeline_file_same(timeline, 0, 3, directory));
+  assert(!sz_timeline_file_same(timeline, -1, 0, path));
+  assert(!sz_timeline_file_same(timeline, 0, 4, path));
+  assert(!sz_timeline_file_same(NULL, 0, 0, path));
+  assert(!sz_timeline_file_same(timeline, 0, 0, NULL));
+  assert(!sz_timeline_file_same(timeline, 0, 3, nul_path));
   sz_timeline_free(timeline);
+  sz_release(directory);
+  sz_release(nul_path);
+  sz_release(long_path);
   sz_release(path);
   sz_release(alias);
   sz_release(empty_path);
@@ -2279,7 +2454,173 @@ static void test_file_timeline(void) {
   remove(dump_path);
 }
 
+static void check_next_link(const char *base, const char *header, const char *expected) {
+  SzString *b = sz_string_from_cstr(base), *h = sz_string_from_cstr(header);
+  SzAdt *r = sz_net_next_link(b, h);
+  assert(sz_adt_tag(r) == (expected ? 1 : 0));
+  if (expected && strcmp(sz_string_cstr(sz_adt_payload(r)), expected)) {
+    fprintf(stderr, "next Link %s: got %s, expected %s\n", header,
+            sz_string_cstr(sz_adt_payload(r)), expected);
+    assert(0);
+  }
+  sz_release(r); sz_release(b); sz_release(h);
+}
+
+static void test_hmac(void) {
+  unsigned char key[255], body[1024], expected[32];
+  const size_t keys[] = {0, 1, 20, 64, 65, 131, 255};
+  const size_t sizes[] = {0, 1, 55, 56, 63, 64, 65, 128, 1024};
+  char hex[65];
+  size_t i, j, k;
+  unsigned int olen;
+  for (i = 0; i < sizeof key; i++) key[i] = (unsigned char)(i * 17);
+  for (i = 0; i < sizeof body; i++) body[i] = (unsigned char)(i * 29);
+  for (i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+    for (j = 0; j < sizeof sizes / sizeof sizes[0]; j++) {
+      SzString *secret = sz_string_from_bytes((char *)key, keys[i]);
+      SzString *message = sz_string_from_bytes((char *)body, sizes[j]);
+      SzString *got = sz_hash_hmac_sha256(secret, message);
+      assert(HMAC(EVP_sha256(), key, (int)keys[i], body, sizes[j], expected, &olen));
+      assert(olen == 32);
+      for (k = 0; k < 32; k++) snprintf(hex + 2 * k, 3, "%02x", expected[k]);
+      assert(strcmp(sz_string_cstr(got), hex) == 0);
+      assert(sz_hash_constant_time_equal(got, got));
+      for (k = 0; k < 64; k++) {
+        SzString *changed;
+        hex[k] ^= 1;
+        changed = sz_string_from_bytes(hex, 64);
+        assert(!sz_hash_constant_time_equal(got, changed));
+        sz_release(changed);
+        hex[k] ^= 1;
+      }
+      sz_release(secret); sz_release(message); sz_release(got);
+    }
+  }
+  {
+    SzString *a = sz_string_from_bytes("a\0b", 3);
+    SzString *b = sz_string_from_bytes("a\0c", 3);
+    SzString *shorter = sz_string_from_cstr("a");
+    SzString *empty = sz_string_from_cstr("");
+    assert(!sz_hash_constant_time_equal(a, b));
+    assert(!sz_hash_constant_time_equal(a, shorter));
+    assert(sz_hash_constant_time_equal(empty, empty));
+    sz_release(a); sz_release(b); sz_release(shorter); sz_release(empty);
+  }
+}
+
+static void test_next_link(void) {
+  const char *base = "https://api.test/a/b/c?old=1";
+  static const struct { const char *ref, *path; } refs[] = {
+    {"g", "/a/b/g"}, {"./g", "/a/b/g"}, {"g/", "/a/b/g/"},
+    {"/g", "/g"}, {"//API.TEST:443/g", "/g"}, {"?y", "/a/b/c?y"},
+    {"g?y", "/a/b/g?y"}, {"#s", "/a/b/c?old=1"}, {"", "/a/b/c?old=1"},
+    {"g#s", "/a/b/g"}, {"g?y#s", "/a/b/g?y"}, {";x", "/a/b/;x"},
+    {"g;x", "/a/b/g;x"}, {"g;x?y#s", "/a/b/g;x?y"},
+    {".", "/a/b/"}, {"./", "/a/b/"}, {"..", "/a/"}, {"../", "/a/"},
+    {"../g", "/a/g"}, {"../..", "/"}, {"../../", "/"}, {"../../g", "/g"},
+    {"../../../g", "/g"}, {"/./g", "/g"}, {"/../g", "/g"},
+    {"g/./h", "/a/b/g/h"}, {"g/../h", "/a/b/h"},
+    {"g?y/./x", "/a/b/g?y/./x"}, {"g?y/../x", "/a/b/g?y/../x"},
+    {"g//h", "/a/b/g//h"}, {"%2e%2e/g", "/a/b/%2e%2e/g"},
+    {"?cursor=a%2Fb,c", "/a/b/c?cursor=a%2Fb,c"}
+  };
+  char header[2048], expected[2048];
+  size_t i;
+  for (i = 0; i < sizeof refs / sizeof refs[0]; i++) {
+    snprintf(header, sizeof header, "<%s>; rel=next", refs[i].ref);
+    snprintf(expected, sizeof expected, "https://api.test%s", refs[i].path);
+    check_next_link(base, header, expected);
+  }
+  check_next_link(base, "</last>; rel=last, </next>; title=\"a, \\\"b\\\"\"; REL=\"prev NEXT\"", "https://api.test/next");
+  check_next_link(base, "</next>; rel=prev; rel=next", "");
+  check_next_link(base, "</next>; rel=next; anchor=\"#elsewhere\"", "");
+  check_next_link(base, "</next>; rel=next, </other>; rel=next", NULL);
+  check_next_link(base, "<https://evil.test/>; rel=next", NULL);
+  check_next_link(base, "<http://api.test/>; rel=next", NULL);
+  check_next_link(base, "<https://api.test:444/>; rel=next", NULL);
+  check_next_link(base, "<https://user@api.test/>; rel=next", NULL);
+  check_next_link(base, "<https://api.test:443/a/../next>; rel=next", "https://api.test/next");
+  check_next_link(base, "</next>; rel=\"next", NULL);
+  check_next_link(base, "</next; rel=next", NULL);
+  check_next_link(base, "</next>; rel=next junk", NULL);
+  check_next_link(base, "</next>; rel=next\r\n", NULL);
+  check_next_link(base, " \t, ,", "");
+  check_next_link("invalid", "", NULL);
+  check_next_link(base, "<HTTPS://API.TEST/b>; rel=next", "https://api.test/b");
+  check_next_link(base, "</bad%xy>; rel=next", NULL);
+  check_next_link(base, "</bad%>; rel=next", NULL);
+  check_next_link("https://[::1]:443/a", "<https://[0:0:0:0:0:0:0:1]/b>; rel=next", "https://[::1]:443/b");
+}
+
+static void test_http_url(void) {
+  static const struct {
+    const char *url, *host, *path;
+    int port, v6, tls;
+  } valid[] = {
+    {"http://localhost", "localhost", "/", 80, 0, 0},
+    {"https://localhost?cursor=a%2Fb#page", "localhost", "/?cursor=a%2Fb", 443, 0, 1},
+    {"http://localhost:81?", "localhost", "/?", 81, 0, 0},
+    {"http://localhost#?ignored", "localhost", "/", 80, 0, 0},
+    {"http://localhost/a%23b?q=%20#ignored", "localhost", "/a%23b?q=%20", 80, 0, 0},
+    {"https://[::1]:8443?cursor=2#page", "::1", "/?cursor=2", 8443, 1, 1},
+    {"http://[::1]#page", "::1", "/", 80, 1, 0},
+    {"http://localhost:65535/a//b?x=1&x=2", "localhost", "/a//b?x=1&x=2", 65535, 0, 0},
+  };
+  static const char *invalid[] = {
+    "http://?x", "http://:80/x", "http://user@localhost/x",
+    "http://[localhost]/x", "http://[::1]extra/x", "http://[::1/x",
+    "http://localhost:0?x", "http://localhost:65536?x",
+    "http://localhost:12345678901234567890/x", "http://localhost:80x/x",
+    "http://localhost/a b", "http://localhost/\t", "http://localhost/\r\n",
+    "http://localhost/\177", "ftp://localhost/x"
+  };
+  char host[256], path[128], sim_path[128];
+  int port, v6, tls;
+  int64_t sim_port;
+  size_t i;
+  for (i = 0; i < sizeof valid / sizeof valid[0]; i++) {
+    assert(sz_net_parse_http_url(valid[i].url, host, sizeof host, path,
+                                 sizeof path, &port, &v6, &tls) == 1);
+    assert(strcmp(host, valid[i].host) == 0);
+    assert(strcmp(path, valid[i].path) == 0);
+    assert(port == valid[i].port && v6 == valid[i].v6 && tls == valid[i].tls);
+    assert(sz_testrt_net_parse_loopback(valid[i].url, &sim_port, sim_path,
+                                       sizeof sim_path) == 1);
+    assert(sim_port == port && strcmp(sim_path, path) == 0);
+    assert(sz_net_parse_http_url(valid[i].url, host, strlen(valid[i].host),
+                                 path, sizeof path, &port, &v6, &tls) == 0);
+    assert(sz_net_parse_http_url(valid[i].url, host, sizeof host, path,
+                                 strlen(valid[i].path), &port, &v6, &tls) == 0);
+    assert(sz_net_parse_http_url(valid[i].url, host, strlen(valid[i].host) + 1,
+                                 path, strlen(valid[i].path) + 1,
+                                 &port, &v6, &tls) == 1);
+  }
+  for (i = 0; i < sizeof invalid / sizeof invalid[0]; i++) {
+    assert(sz_net_parse_http_url(invalid[i], host, sizeof host, path,
+                                 sizeof path, &port, &v6, &tls) != 1);
+    assert(sz_testrt_net_parse_loopback(invalid[i], &sim_port, sim_path,
+                                       sizeof sim_path) == 0);
+  }
+  for (int mode = 0; mode < 2; mode++) {
+    const char bad[] = "http://localhost/\0hidden";
+    SzString *url = sz_string_from_bytes(bad, sizeof bad - 1);
+    SzIoResult r;
+    if (mode == 0) sz_testrt_install(); else sz_testrt_reset();
+    r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
+    assert(!r.ok);
+    assert(strstr(sz_string_cstr(r.error->message), "invalid URL"));
+    sz_release(r.error);
+    sz_release(url);
+  }
+
+}
+
 int main(void) {
+  test_hmac();
+  test_next_link();
+  test_http_url();
+  test_retry_after();
+  test_atomic_fs_write();
   test_request_headers();
   /* List.head_opt: None on empty, Some payload on a cell. C List.head still panics. */
   {
@@ -7279,6 +7620,20 @@ int main(void) {
       sz_pair_free(pair);
 
       sz_testrt_net_set_last_serve_body(NULL);
+      url = sz_string_from_cstr("http://127.0.0.1:8080?cursor=a%2Fb#page");
+      r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
+                                    sz_net_http_get(url, NULL)));
+      sz_release(url);
+      assert(r.ok);
+      pair = (SzPair *)r.value;
+      assert(pair && pair->right);
+      assert(strcmp(http_resp_body_cstr(pair->right), "ok:/?cursor=a%2Fb") == 0);
+      assert(http_resp_status(pair->right) == 200);
+      assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/?cursor=a%2Fb") == 0);
+      assert(sz_testrt_net_serve_pending() == 0);
+      sz_pair_free(pair);
+
+      sz_testrt_net_set_last_serve_body(NULL);
       url = sz_string_from_cstr("http://127.0.0.1:8080/pong");
       r = sz_io_unsafe_run(both_drop(sz_net_http_get(url, NULL),
                                     sz_net_serve_once(8080, serve_path_ok, NULL)));
@@ -7636,6 +7991,23 @@ int main(void) {
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)r.value), "sealed") == 0);
       sz_release(r.value);
+
+      /* Compiler metadata stays inside the simulated environment. */
+      {
+        SzString *key = sz_string_from_cstr("SCUZZ_EXECUTABLE_SHA256");
+        SzIo *read = sz_sys_getenv(key);
+        r = sz_io_unsafe_run(read);
+        assert(r.ok && strcmp(sz_string_cstr(r.value), "") == 0);
+        sz_release(r.value);
+        sz_release(read);
+        sz_testrt_env_set("SCUZZ_EXECUTABLE_SHA256", "simulated-compiler");
+        read = sz_sys_getenv(key);
+        sz_release(key);
+        r = sz_io_unsafe_run(read);
+        assert(r.ok && strcmp(sz_string_cstr(r.value), "simulated-compiler") == 0);
+        sz_release(r.value);
+        sz_release(read);
+      }
 
       /* Drive.testEnv keys seed the sealed map. Host PATH still does not leak. */
       {
@@ -9324,7 +9696,7 @@ int main(void) {
     sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
     g_peer_flag = 0;
     pthread_create(&th, NULL, dns_late_a, &dns_fd);
-    snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
+    snprintf(url, sizeof url, "http://scuzz.test:%d?cursor=a%%2Fb#page", http_port);
     r = sz_io_unsafe_run(both_drop(
         sz_net_serve_once(http_port, serve_path_ok, NULL),
         fm_drop(sz_io_sleep_ms(30), after_sleep_dns_http,
@@ -9337,7 +9709,7 @@ int main(void) {
     assert(outer && outer->right);
     inner = (SzPair *)outer->right;
     assert(inner && inner->left);
-    assert(strcmp(http_resp_body_cstr(inner->left), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(inner->left), "ok:/?cursor=a%2Fb") == 0);
     assert(http_resp_status(inner->left) == 200);
   }
 
@@ -9363,7 +9735,7 @@ int main(void) {
     sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
     g_peer_flag = 0;
     pthread_create(&th, NULL, dns_late_cname, &dns_fd);
-    snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
+    snprintf(url, sizeof url, "http://scuzz.test:%d/x?q=2#page", http_port);
     r = sz_io_unsafe_run(both_drop(
         sz_net_serve_once(http_port, serve_path_ok, NULL),
         fm_drop(sz_io_sleep_ms(30), after_sleep_dns_http,
@@ -9376,7 +9748,7 @@ int main(void) {
     assert(outer && outer->right);
     inner = (SzPair *)outer->right;
     assert(inner && inner->left);
-    assert(strcmp(http_resp_body_cstr(inner->left), "ok:/x") == 0);
+    assert(strcmp(http_resp_body_cstr(inner->left), "ok:/x?q=2") == 0);
     assert(http_resp_status(inner->left) == 200);
   }
 
@@ -9478,6 +9850,26 @@ int main(void) {
     assert(http_resp_status(r.value) == 200);
     sz_release(r.value);
     assert(t1 - t0 < 900);
+  }
+
+  /* Repeated Link fields retain each value in wire order. */
+  {
+    pthread_t th;
+    char url[64];
+    HttpRespArg arg;
+    arg.port = 18623;
+    arg.resp = "HTTP/1.0 200 OK\r\nLink: </prev>; rel=prev\r\n"
+               "Link: </next>; rel=next\r\nlink: </last>; rel=last\r\n"
+               "Content-Length: 5\r\n\r\nok:/x";
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", arg.port);
+    pthread_create(&th, NULL, ipv4_http_resp, &arg);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                sz_string_from_cstr(url)));
+    pthread_join(th, NULL);
+    assert(r.ok);
+    assert(strcmp(http_resp_hdr(r.value, "Link"),
+                  "</prev>; rel=prev,</next>; rel=next,</last>; rel=last") == 0);
+    sz_release(r.value);
   }
 
   /* Duplicate Content-Length is malformed. */

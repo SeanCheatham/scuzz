@@ -1,0 +1,8 @@
+[fuzz]
+oracle = "prior"
+seed = 42
+schedule_seed = "94"
+pct_d = 5
+pct_k = 6
+fault_seed = "94"
+events = ["drive prior 17", "drive tampered 0", "drive tampered -8", "drive wrongKey", "drive missingSignature", "drive emptySecret", "drive badJson", "drive arrayJson", "drive wrongPath", "drive wrongMethod", "drive storageFailure"]

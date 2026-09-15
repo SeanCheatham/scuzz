@@ -1,0 +1,3 @@
+[fuzz]
+seed = 42
+events = ["drive nestedMatch 7", "drive nestedMatch -1", "drive matchedFields payload 17", "drive matchedInt 7", "drive matchedInt -1", "drive matchedString payload", "drive temporaryRecord payload", "drive temporaryTailSize payload 31", "drive temporaryTailSize payload 0", "drive temporaryTailSize payload -1", "drive temporaryTailValue payload 31", "drive temporaryTailValue payload 0", "drive temporaryTailValue payload -1"]

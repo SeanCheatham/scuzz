@@ -1,0 +1,3 @@
+[fuzz]
+seed = 42
+events = ["drive interpolatedHole payload", "drive interpolatedJson 7", "drive interpolatedJson -19", "drive verificationInterpolation 7", "drive verificationInterpolation -19", "drive interpolatedEscapes payload"]

@@ -1,0 +1,23 @@
+def signature(secret: String, body: String): String =
+  Str.concat("sha256=", Hash.hmacSha256(secret, body))
+
+def authorized(secret: String, headers: Map[String, String], body: String): Bool =
+  secret != "" && Hash.constantTimeEqual(signature(secret, body), Map.getOrElse(headers, "x-hub-signature-256", ""))
+
+private def reply(status: Int, text: String): IO[(Int, Map[String, String], String)] =
+  IO.pure((status, Map.empty(), text))
+
+private def store(output: String, body: String): IO[(Int, Map[String, String], String)] =
+  Json.parse(body) match {
+    case Result.Err(_) => reply(400, "Invalid JSON")
+    case Result.Ok(value) => if (!Json.isObj(value)) reply(400, "Expected a JSON object") else Fs.write(output, body).flatMap(_ => reply(200, "Stored")).handleErrorWith(_ => reply(503, "Cannot store delivery"))
+  }
+
+def handle(secret: String, output: String, request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  request match {
+    case (path, method, headers, body) => if (path != "/webhook") reply(404, "Not found") else if (method != "POST") reply(405, "POST required") else if (!authorized(secret, headers, body)) reply(401, "Invalid signature") else store(output, body)
+  }
+
+def run(secret: String, port: Int, output: String): IO[Unit] =
+  if (secret == "") IO.fail("Set SCUZZ_WEBHOOK_SECRET") else Net.serve(port, request => handle(secret, output, request))
+

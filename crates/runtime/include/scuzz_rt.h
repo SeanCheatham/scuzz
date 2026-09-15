@@ -941,7 +941,10 @@ SzIo *sz_sys_getenv(SzString *key);
 SzIo *sz_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, UI); TestRuntime fake clock */
+int64_t sz_net_retry_after_millis(SzString *value, int64_t now_ms);
 SzString *sz_clock_iso8601(int64_t ms); /* UTC ISO-8601 from epoch ms. Caller owns. */
+SzString *sz_hash_hmac_sha256(const SzString *key, const SzString *message);
+int64_t sz_hash_constant_time_equal(const SzString *a, const SzString *b);
 SzString *sz_hash_sha256(const SzString *s); /* Software SHA-256 of UTF-8 bytes as lowercase hex. Caller owns. */
 SzString *sz_hex_encode(const SzString *s); /* Lowercase hex of UTF-8 bytes. Caller owns. */
 SzString *sz_hex_decode(const SzString *s); /* Bytes from hex. Odd length or a bad digit is empty. Caller owns. */
@@ -993,6 +996,11 @@ void sz_net_sock_on_free(SzNetSock *s);
 void sz_testrt_net_sock_gone(SzNetSock *s);
 /* 4 = IPv4, 6 = IPv6, 0 = not a literal. Writes a canonical host when canon is set. */
 int sz_net_host_family(const char *host, char *canon, size_t canon_cap);
+SzAdt *sz_net_next_link(SzString *base, SzString *header); /* Result[String, String] */
+/* Shared HTTP URL parser. 1 = valid, 0 = invalid URL, -1 = invalid port. */
+int sz_net_parse_http_url(const char *url, char *host, size_t host_sz,
+                          char *path, size_t path_sz, int *port,
+                          int *is_v6, int *tls);
 /* Test-only: UDP nameserver for live HTTP DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
 /* Test-only: Host header value for HTTP (RFC 9110). */
@@ -1175,6 +1183,8 @@ SzString *sz_timeline_replay_signal_list_at(const char *name, int64_t index);
 int64_t sz_timeline_len(void *tl);
 int64_t sz_timeline_signal_int(void *tl, int64_t i, SzString *name);
 int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name);
+int64_t sz_timeline_file_same(void *tl, int64_t a, int64_t b,
+                              SzString *path);
 int64_t sz_timeline_file_text_is(void *tl, int64_t i, SzString *path,
                                  SzString *text);
 int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,

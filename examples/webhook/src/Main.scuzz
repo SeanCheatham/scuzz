@@ -1,0 +1,7 @@
+@main def main: IO[Unit] =
+  for {
+    secret <- Sys.getenv("SCUZZ_WEBHOOK_SECRET")
+    port <- Sys.getenv("SCUZZ_WEBHOOK_PORT")
+    output <- Sys.getenv("SCUZZ_WEBHOOK_OUTPUT")
+    _ <- if (secret == "") IO.println("Set SCUZZ_WEBHOOK_SECRET to receive deliveries at /webhook. The default port is 8080. Run behind an HTTPS reverse proxy.") else Hook.run(secret, if (port == "") 8080 else Str.toInt(port, -1), if (output == "") "webhook.json" else output)
+  } yield ()

@@ -1,0 +1,3 @@
+[fuzz]
+seed = 42
+events = ["drive delivery", "drive prior 17", "drive tampered 0", "drive tampered -8", "drive wrongKey", "drive missingSignature", "drive emptySecret", "drive badJson", "drive arrayJson", "drive wrongPath", "drive wrongMethod", "drive storageFailure", "drive delivery", "drive concurrent", "drive prior -23", "drive continued", "drive concurrent"]

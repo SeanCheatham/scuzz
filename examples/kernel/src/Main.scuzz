@@ -10,6 +10,14 @@ record Point(x: Int where x >= 0, y: Int where y + 1 > y && y * 2 > y && y % 2 <
 
 record Box[T](x: T)
 
+record PatternFields(label: String, items: List[String])
+
+enum LiteralPacket:
+  case Text(value: String)
+  case Number(value: Int)
+  case Flag(value: Bool)
+  case Fields(kind: String, version: Int, enabled: Bool, value: Int)
+
 type UserId = Int
 type Labels = List[String]
 type BoxList[T] = List[T]
@@ -777,6 +785,182 @@ def utf8Check(): Int =
 
 def utf8Proof(): IO[Unit] =
   IO.println(s"utf8:${Str.fromInt(utf8Check())}")
+
+def literalPacket(packet: LiteralPacket): Int =
+  packet match {
+    case LiteralPacket.Text("ready") => 1
+    case LiteralPacket.Number(-7) => 2
+    case LiteralPacket.Flag(true) => 3
+    case LiteralPacket.Fields("event", 2, true, _value) => _value
+    case _ => 0
+  }
+
+def literalNamed(packet: LiteralPacket): Int =
+  packet match {
+    case LiteralPacket.Fields(value = value, enabled = true, version = 2, kind = "event") if value > 0 => value
+    case _ => 0
+  }
+
+def literalEscaped(packet: LiteralPacket): Bool =
+  packet match {
+    case LiteralPacket.Text("line\n\"quoted\"\\end") => true
+    case _ => false
+  }
+
+def literalDelimiters(packet: LiteralPacket): Bool =
+  packet match {
+    case LiteralPacket.Text("a,b) | c :: d @ e = f") => true
+    case _ => false
+  }
+
+def captureNames(env: Int, value: Int, self: Int, env_c: Int): Int =
+  List.at(List.map([value], n => n + env + self + env_c), 0)
+
+def captureNamedIO(env: String, value: Int): IO[String] =
+  IO.pure(value).flatMap(value => IO.pure(Str.concat(env, Str.fromInt(value))))
+
+def captureTuple(_tr0: Int, env: Int): IO[Int] =
+  for {
+    (value, env_c, self) <- IO.pure((1, 2, 3))
+  } yield value + env_c + self + _tr0 + env
+
+def captureDirect(_tr0: Int): Int =
+  List.at(List.map([0], value => _tr0), 0)
+
+def captureString(env: String): String =
+  Str.concat(List.at(List.map([0], value => env), 0), List.at(List.map([env], value => value), 0))
+
+private def sameForcedPair(n: Int, pair: (Int, String)): Bool =
+  pair._1 == n && pair._2 == Str.fromInt(n)
+
+def checkCaptureIO(n: Int): IO[Unit] =
+  IO.pure(()).require("captured IO String", Property.force(captureNamedIO("captured:", n)) == Str.concat("captured:", Str.fromInt(n))).require("captured IO tuple", Property.force(captureTuple(n, 9)) == n + 15).require("forced pair", sameForcedPair(n, Property.force(IO.pure((n, Str.fromInt(n))))))
+
+def patternLabel(s: String): String =
+  LiteralPacket.Fields(s, 2, true, 1) match {
+    case LiteralPacket.Fields(label, _, _, _) => label
+    case _ => ""
+  }
+
+def patternItems(s: String): List[String] =
+  Box([s, s]) match {
+    case Box(items) => items
+  }
+
+def patternNamed(s: String): String =
+  LiteralPacket.Fields(s, 2, true, 1) match {
+    case LiteralPacket.Fields(value = _, kind = label) => label
+    case _ => ""
+  }
+
+def patternRecord(s: String): String =
+  PatternFields(s, [s]) match {
+    case PatternFields(label, items) => Str.concat(label, List.at(items, 0))
+  }
+
+def patternTailSize(s: String, count: Int): Int =
+  LiteralPacket.Fields(Str.concat(s, ""), count, true, 0) match {
+    case LiteralPacket.Fields(label, n, _, _) if n > 0 => patternTailSize(label, n - 1)
+    case LiteralPacket.Fields(label, _, _, _) => Str.len(label)
+    case _ => 0
+  }
+
+def patternTailValue(s: String, count: Int): String =
+  PatternFields(Str.concat(s, ""), [Str.fromInt(count)]) match {
+    case PatternFields(label, _) if count > 0 => patternTailValue(label, count - 1)
+    case PatternFields(label, _) => label
+  }
+
+def checkMatchedInt(n: Int): IO[Int] =
+  LiteralPacket.Number(n) match {
+    case LiteralPacket.Number(7) => IO.pure(7).require("literal matched Int", result => result == 7)
+    case LiteralPacket.Number(value) => IO.pure(value).require("matched Int", result => result == value)
+    case _ => IO.pure(n)
+  }
+
+def checkMatchedString(s: String): IO[String] =
+  Box(s) match {
+    case Box(value) => IO.pure(value).require("matched String", result => result == value)
+  }
+
+def checkMatchedFields(s: String, n: Int): IO[String] =
+  LiteralPacket.Fields(s, n, true, 0) match {
+    case LiteralPacket.Fields(label, count, _, _) => IO.pure(Str.concat(label, Str.fromInt(count))).require("matched fields", result => result == Str.concat(label, Str.fromInt(count)))
+    case _ => IO.pure(s)
+  }
+
+def checkNestedMatch(n: Int): IO[String] =
+  Box(PatternFields(Str.fromInt(n), ["value:"])) match {
+    case Box(inner) => inner match {
+  case PatternFields(label, items) => (for {
+  value <- IO.pure(label)
+  text <- IO.pure(List.at(items, 0))
+} yield Str.concat(text, value)).require("nested payload", result => result == Str.concat("value:", Str.fromInt(n)))
+}
+  }
+
+def interpolatedJson(n: Int): String =
+  s"{\"id\":$n}"
+
+def interpolatedEscapes(s: String): String =
+  s"\"$s\"\n\t\\\${literal}"
+
+def interpolatedHole(s: String): String =
+  s"${Str.concat("\"", s)}"
+
+def alternativeInt(n: Int): Bool =
+  n match {
+    case -7 | 2 | 19 => true
+    case _ => false
+  }
+
+def alternativeBool(b: Bool): Bool =
+  b match {
+    case true | true | true => true
+    case _ => false
+  }
+
+def alternativeString(s: String): Bool =
+  s match {
+    case "a" | "b" | "c" | "x | y" => true
+    case _ => false
+  }
+
+def alternativeGuard(n: Int): Bool =
+  n match {
+    case -7 | 2 | 19 if n > 0 => true
+    case _ => false
+  }
+
+def constructorAlternatives(p: LiteralPacket): Bool =
+  p match {
+    case LiteralPacket.Fields("ready", 2, true, 7) | LiteralPacket.Text("done") | LiteralPacket.Number(19) => true
+    case _ => false
+  }
+
+def constructorAlternativeValue(p: LiteralPacket): Int =
+  p match {
+    case LiteralPacket.Fields("ready", n, true, _) | LiteralPacket.Number(n) => n
+    case _ => 0
+  }
+
+def constructorAlternativeText(p: LiteralPacket): String =
+  p match {
+    case LiteralPacket.Fields(label, _, _, _) | LiteralPacket.Text(label) => label
+    case _ => ""
+  }
+
+def constructorAlternativeGuard(p: LiteralPacket): Int =
+  p match {
+    case LiteralPacket.Fields(value = n, kind = "ready") | LiteralPacket.Number(n) if n > 0 => n
+    case _ => 0
+  }
+
+def checkConstructorAlternatives(n: Int): IO[Int] =
+  (if (n > 0) LiteralPacket.Fields("ready", n, true, 0) else LiteralPacket.Number(n)) match {
+    case LiteralPacket.Fields("ready", value, true, _) | LiteralPacket.Number(value) => IO.pure(value).require("constructor alternative", result => result == n)
+    case _ => IO.pure(0)
+  }
 
 @main def main: IO[Unit] =
   for {
