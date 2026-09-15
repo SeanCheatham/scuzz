@@ -1,0 +1,10 @@
+enum Payload:
+  case Num(n: Int)
+  case Text(s: String)
+  case Empty
+
+@main def main: IO[Unit] =
+  Payload.Num(1) match {
+    case Payload.Num(v) | Payload.Text(v) => IO.println("hit")
+    case Payload.Empty => IO.println("empty")
+  }

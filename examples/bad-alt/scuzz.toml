@@ -1,0 +1,4 @@
+[package]
+name = "bad-alt"
+version = "0.1.0"
+description = "Constructor alternatives with mismatched binding types. scuzz check must fail."

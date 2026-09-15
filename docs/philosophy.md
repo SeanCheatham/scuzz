@@ -124,7 +124,7 @@ Locks (not an API catalog — run `scuzz docs language` and `scuzz docs kits`):
 - Record field lookup substitutes the receiver type arguments into the declared field type. The same rule applies inside callbacks.
 - Constructor patterns compare direct String, Int, and Bool literals before an arm runs. Named fields use their declared positions. A failed literal comparison tries the next arm.
 - Literal alternatives support chains of String, Int, or Bool values. Test each alternative before the arm guard. String contents can include the alternative separator.
-- Constructor alternatives check tags and direct literal fields. Alternatives with the same binding names and types share the selected payload values. Field positions can differ. Guards and IO assertions use these bindings.
+- Constructor alternatives check tags and direct literal fields. Alternatives with the same binding names and types share the selected payload values. Field positions can differ. `check` rejects alternatives whose binding names or types differ. Guards and IO assertions use these bindings.
 - Closure captures keep their declared types. Generated closure names cannot collide with source bindings. A local binding of `self` does not add an implicit parameter.
 - File-stem modules; enums namespaced by stem
 - Blessed kits + `Signal` / `View` / `Ui` / `Property.*` / `.require`
