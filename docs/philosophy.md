@@ -68,6 +68,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **Docs.** `scuzz docs` prints the technical manual from `examples/manual`. Kit rows come from `examples/compiler/src/Kits.scuzz`. There is no `guide.md`. Run `scuzz docs kits` and `scuzz docs language`.
 - **Fingerprint** (incremental): miss → rebuild. Cache keys include the SHA-256 of the executing compiler. A compiler change invalidates live and verification artifacts. The runtime supplies this identity through the reserved SCUZZ_EXECUTABLE_SHA256 key in Sys.getenv. A host environment value cannot replace it. Simulation reads this key from its fake environment only. Native make stays quiet on success. Fail on the first missing tool with one install line.
 - **`scuzz package`:** `--target` is host, android, ios, web, or all. Hardware device runs stay open ([`gaps.md`](gaps.md)).
+- **iOS local loop.** `scuzz devices` lists available iOS simulators. `scuzz run --target ios` selects or boots a simulator, builds and installs the app, and streams app output. `--device` selects an exact name or ID. `--watch` rebuilds and restarts after source or manifest changes. A build error preserves the running app. Restart resets app state. Host UI hot reload still preserves Signals. Native object caches shorten source rebuilds. Run `scuzz docs ios`.
 
 ### Self-hosting
 

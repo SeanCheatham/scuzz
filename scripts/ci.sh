@@ -89,6 +89,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   new-ui          scuzz new --ui path + cheap search
   desktop         Desktop peer + X11 (needs xvfb)
   mobile          mobile shell + package targets
+  ios             local iOS simulator loop (Apple Silicon + Xcode)
   web             Docs package + browser input + Headless claims
 
 Examples:
@@ -388,7 +389,11 @@ int main(void) {
   return after == before ? 0 : 1;
 }
 C_SOURCE
-  clang -O2 -I crates/runtime/include "$memory_dir/probe.c" \
+  local memory_host_link=()
+  if [ "$(uname -s)" = Darwin ]; then
+    memory_host_link=(-framework CoreFoundation -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib)
+  fi
+  clang -O2 "${memory_host_link[@]}" -I crates/runtime/include "$memory_dir/probe.c" \
     "$memory_dir/build/match-memory.ll" crates/runtime/build/libscuzz_rt.a \
     -lssl -lcrypto -lz -lbz2 -lm -lpthread -ldl -o "$memory_dir/probe"
   "$memory_dir/probe"
@@ -569,6 +574,14 @@ slice_desktop() {
   grep -q "X11 window" /tmp/win.out
 }
 
+slice_ios() {
+  need_scuzz
+  need_cmd xcrun "Install Xcode and an iOS simulator runtime"
+  need_cmd python3 "Install the Xcode command-line tools"
+  "$SCUZZ" fuzz --iterations 0 examples/counter
+  python3 crates/embedder-mobile/shells/ios/test_loop.py "$SCUZZ"
+}
+
 slice_mobile() {
   need_scuzz
   test -x examples/counter/build/counter || slice_ui
@@ -726,6 +739,7 @@ case "$SLICE" in
   new-ui) slice_new_ui ;;
   desktop) slice_desktop ;;
   mobile) slice_mobile ;;
+  ios) slice_ios ;;
   web) slice_web ;;
   oracles) slice_oracles ;;
   *)

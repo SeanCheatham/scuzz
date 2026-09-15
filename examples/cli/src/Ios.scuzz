@@ -1,0 +1,110 @@
+record Sim(id: String, name: String, runtime: String, booted: Bool)
+
+import Manifest.Man
+
+def child(j: Json, key: String): Json =
+  List.getOrElse(Json.get(j, key), 0, Json.Null())
+
+def simulators(text: String): List[Sim] =
+  Json.parse(text) match {
+    case Result.Ok(j) => List.flatMap(Json.pairs(child(j, "devices")), pair => runtimeDevices(pair))
+    case Result.Err(_) => []
+  }
+
+def runtimeDevices(pair: (String, Json)): List[Sim] =
+  pair match {
+    case (runtime, rows) => if (!Str.startsWith(runtime, "com.apple.CoreSimulator.SimRuntime.iOS-") || runtimeVersion(runtime) < 160000) [] else List.map(List.filter(Json.arr(rows), j => Json.getBool(j, "isAvailable", false) && Json.getStr(j, "udid", "") != ""), j => Sim(Json.getStr(j, "udid", ""), Json.getStr(j, "name", ""), runtime, Json.getStr(j, "state", "") == "Booted"))
+  }
+
+def runtimeVersion(runtime: String): Int =
+  for {
+    parts = Str.split(Str.drop(runtime, Str.len("com.apple.CoreSimulator.SimRuntime.iOS-")), "-")
+  } yield Str.toInt(List.getOrElse(parts, 0, "0"), 0) * 10000 + Str.toInt(List.getOrElse(parts, 1, "0"), 0) * 100 + Str.toInt(List.getOrElse(parts, 2, "0"), 0)
+
+def runtimeLabel(runtime: String): String =
+  Str.concat("iOS ", Str.replace(Str.drop(runtime, Str.len("com.apple.CoreSimulator.SimRuntime.iOS-")), "-", "."))
+
+def matches(sims: List[Sim], device: String): List[Sim] =
+  if (device == "") defaults(sims) else List.filter(sims, s => s.id == device || s.name == device)
+
+def defaults(sims: List[Sim]): List[Sim] =
+  for {
+    booted = List.filter(sims, s => s.booted)
+    phones = List.filter(sims, s => Str.startsWith(s.name, "iPhone"))
+    pool = if (List.nonEmpty(booted)) booted else if (List.nonEmpty(phones)) phones else sims
+  } yield List.take(List.sortBy(pool, s => 0 - runtimeVersion(s.runtime)), 1)
+
+def selectionError(sims: List[Sim], device: String): String =
+  if (List.isEmpty(sims)) "No iOS simulators are available. Install an iOS runtime in Xcode Settings > Components." else if (List.isEmpty(matches(sims, device))) Str.concat("No iOS simulator matches ", Str.concat(device, ". Run scuzz devices.")) else if (List.len(matches(sims, device)) > 1) Str.concat("More than one simulator matches ", Str.concat(device, ". Use a device ID from scuzz devices.")) else ""
+
+def discover(): IO[List[Sim]] =
+  Sys.exec("xcrun --sdk iphonesimulator --show-sdk-path").flatMap(r => sdkGot(r))
+
+def sdkGot(r: (Int, String, String)): IO[List[Sim]] =
+  r match {
+    case (code, _, _) => if (code != 0) IO.println(Drive.xcodeMiss()).flatMap(_ => IO.fail("ios")) else Sys.exec("xcrun simctl list devices available --json").flatMap(rows => discovered(rows))
+  }
+
+def discovered(r: (Int, String, String)): IO[List[Sim]] =
+  r match {
+    case (code, out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.fail("simulator discovery")) else Json.parse(out) match {
+  case Result.Ok(_) => IO.pure(simulators(out))
+  case Result.Err(_) => IO.fail("invalid simulator list from xcrun simctl")
+}
+  }
+
+def devices(): IO[Unit] =
+  discover().flatMap(sims => if (List.isEmpty(sims)) IO.println(selectionError(sims, "")) else IO.foreachDiscard(sims, s => IO.println(Str.concat(s.id, Str.concat("  ", Str.concat(s.name, Str.concat("  ", Str.concat(runtimeLabel(s.runtime), if (s.booted) "  Booted" else "  Shutdown"))))))))
+
+def checked(cmd: String): IO[Unit] =
+  Sys.exec(cmd).flatMap(r => checkedResult(r))
+
+def checkedResult(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, out, err) => Sys.write(out).flatMap(_ => Sys.write(err).flatMap(_ => if (code == 0) IO.pure(()) else IO.fail("iOS command fails")))
+  }
+
+def run(path: String, out: String, device: String, watch: Bool): IO[Unit] =
+  Fs.canonicalize(path).flatMap(dir => Fs.mkdirs(out).flatMap(_ => Fs.canonicalize(out).flatMap(dest => discover().flatMap(sims => runSelected(dir, dest, sims, device, watch)))))
+
+def runSelected(dir: String, out: String, sims: List[Sim], device: String, watch: Bool): IO[Unit] =
+  if (selectionError(sims, device) != "") IO.println(selectionError(sims, device)).flatMap(_ => IO.fail("simulator selection")) else runOn(dir, out, List.at(matches(sims, device), 0), watch)
+
+def runOn(dir: String, out: String, sim: Sim, watch: Bool): IO[Unit] =
+  IO.println(Str.concat("iOS simulator: ", Str.concat(sim.name, Str.concat(" (", Str.concat(sim.id, ")"))))).flatMap(_ => stamp(dir).flatMap(before => build(dir, out).flatMap(ok => if (!ok) IO.fail("ios build") else boot(sim).flatMap(_ => start(dir, out, sim, watch, before)))))
+
+def boot(sim: Sim): IO[Unit] =
+  IO.println("Start the simulator.").flatMap(_ => IO.timeout(180000, checked(Str.concat("xcrun simctl bootstatus ", Str.concat(Drive.shQuote(sim.id), " -b")))).flatMap(_ => checked(Str.concat("open -a Simulator --args -CurrentDeviceUDID ", Drive.shQuote(sim.id)))))
+
+def build(dir: String, out: String): IO[Bool] =
+  IO.println("Build the iOS app.").flatMap(_ => Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => buildManifest(dir, out, Manifest.parse(toml)))).handleErrorWith(_ => IO.println("Build fails. Fix the source and retry.").map(_ => false))
+
+def buildManifest(dir: String, out: String, m: Man): IO[Bool] =
+  if (m.ok && !m.hasUi) IO.println("iOS run needs a [ui] package. Create one with scuzz new NAME --ui.").flatMap(_ => IO.pure(false)) else Drive.pkgIosMan(dir, out, m).map(_ => true)
+
+def consoleCommand(home: String, sim: Sim, out: String): String =
+  Str.concat("bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-mobile/shells/ios/run_sim.sh")), Str.concat(" ", Str.concat(Drive.shQuote(sim.id), Str.concat(" ", Str.concat(Drive.shQuote(out), " 1>&2"))))))
+
+def start(dir: String, out: String, sim: Sim, watch: Bool, before: String): IO[Unit] =
+  Sys.getenv("SCUZZ_HOME").flatMap(home => Sys.spawn(consoleCommand(home, sim, out)).flatMap(pid => IO.ensure(IO.println("App output follows. Enter r to rebuild and restart. Enter q to stop. Ctrl+C stops the app.").flatMap(_ => loop(dir, out, watch, before, pid)), stop(pid))))
+
+def stop(pid: Int): IO[Unit] =
+  Sys.childWrite(pid, """quit
+""").handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(pid).handleErrorWith(_ => IO.pure(())).flatMap(_ => IO.timeout(5000, stopped(pid)).handleErrorWith(_ => Sys.kill(pid))))
+
+def stopped(pid: Int): IO[Unit] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(()) else IO.sleep(50).flatMap(_ => stopped(pid)))
+
+def stamp(dir: String): IO[String] =
+  Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => Fs.list(Drive.joinSlash(dir, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(dir, "src"), ents).flatMap(own => Drive.collectDeps(dir, Manifest.parse(toml).deps, own).map(files => Hash.sha256(Str.concat(toml, Drive.fpFiles(files))))))).handleErrorWith(_ => IO.pure("unreadable sources"))
+
+def loop(dir: String, out: String, watch: Bool, before: String, pid: Int): IO[Unit] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.fail("iOS app session ends") else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => tick(dir, out, watch, before, pid, Str.trim(command))))
+
+def tick(dir: String, out: String, watch: Bool, before: String, pid: Int, command: String): IO[Unit] =
+  if (command == "q") IO.pure(()) else stamp(dir).flatMap(now => if (command == "r" || watch && now != before) rebuild(dir, out, watch, now, pid) else IO.sleep(300).flatMap(_ => loop(dir, out, watch, before, pid)))
+
+def rebuild(dir: String, out: String, watch: Bool, now: String, pid: Int): IO[Unit] =
+  build(dir, out).flatMap(ok => if (ok) Sys.childWrite(pid, """restart
+""") else IO.println("The running app stays. Save a change or enter r to retry.")).flatMap(_ => loop(dir, out, watch, now, pid))
+

@@ -97,7 +97,7 @@ build_abi() {
     "$clang" "${cflags[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" \
       -o "$obj/rt_$(basename "${src%.c}").o"
   done
-  for src in "$ROOT"/crates/ffi-skia/src/sk_sw.c "$ROOT"/crates/ffi-skia/src/png_enc.c \
+  for src in "$ROOT"/crates/ffi-skia/src/sk_color.c "$ROOT"/crates/ffi-skia/src/sk_sw.c "$ROOT"/crates/ffi-skia/src/png_enc.c \
              "$ROOT"/crates/ffi-skia/src/sk_gpu_none.c "$ROOT"/crates/ffi-skia/src/sk_mono.c; do
     "$clang" "${cflags[@]}" -std=c11 \
       -I"$ROOT"/crates/ffi-skia/include -I"$ROOT"/crates/ffi-skia/src -c "$src" \
