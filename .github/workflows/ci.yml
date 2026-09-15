@@ -119,7 +119,7 @@ jobs:
           test "$BUILD_RESULT" = success
           test "$CHECK_RESULT" = success
 
-  # Bounded Darwin coverage on every push/PR. Full packaging stays workflow_dispatch.
+  # Bounded Darwin coverage on every push/PR. Release packaging stays workflow_dispatch.
   macos-smoke:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -140,10 +140,12 @@ jobs:
         run: ./scripts/bootstrap.sh
       - name: Hello and Counter smoke
         run: ./scripts/ci.sh macos-hello
+      - name: macOS app bundle proof
+        run: ./scripts/ci.sh macos-app
       - name: iOS simulator proof
         run: ./scripts/ci.sh ios
 
-  # Full macOS packaging. Skip on push/PR.
+  # macOS release packaging. Skip on push/PR.
   # Trigger manually: Actions → ci → Run workflow.
   macos:
     if: github.event_name == 'workflow_dispatch'
