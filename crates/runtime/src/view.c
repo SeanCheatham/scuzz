@@ -2105,25 +2105,16 @@ static float span_width(const char *s, int start, int end, float font_px) {
   return text_width(tmp, font_px);
 }
 
-/* Unbounded span measure. Editor paint/caret must not use the 256-byte cap. */
+static int editor_cols(const char *s, int start, int end);
+
+/* Unbounded span measure. Editor paint/caret must not use the 256-byte cap.
+ * Uses the same code point walk as editor_cols. Caret and paint must agree. */
 static float editor_span_width(const char *s, int start, int end, float font_px) {
   float cell;
-  int n = 0;
-  int i;
   if (!s || end <= start)
     return 0.f;
   cell = sk_font_mono_cell(font_px);
-  i = start;
-  while (i < end) {
-    int clen = utf8_clen(s, i);
-    if (clen < 1)
-      clen = 1;
-    if (i + clen > end)
-      clen = end - i;
-    i += clen;
-    n++;
-  }
-  return (float)n * cell;
+  return (float)editor_cols(s, start, end) * cell;
 }
 
 static int editor_line_count(const char *s) {
