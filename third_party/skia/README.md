@@ -33,4 +33,4 @@ install `zlib1g-dev libbz2-dev`.
 **Pin / release:** `third_party/skia/PIN` records the as-needed `skia-cpu-vN`
 URL template (`url=…/skia-{triple}-cpu.tar.gz`). `scripts/package_release.sh`
 fetches the host-matching asset into the release tree (unless
-`SCUZZ_SKIA=sk_sw`). `SCUZZ_SKIA=gpu` presents through OpenGL. Impeller / Skia GPU raster stay deferred (`docs/vision.md`).
+`SCUZZ_SKIA=sk_sw`). `SCUZZ_SKIA=gpu` presents through OpenGL. Impeller / Skia GPU raster stay deferred (`docs/philosophy.md`).

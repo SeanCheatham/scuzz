@@ -1,6 +1,6 @@
 # Developer environment
 
-Host setup for a checkout. App author path: run `scuzz docs start`. Product locks: [`vision.md`](vision.md).
+Host setup for a checkout. App author path: run `scuzz docs start`. Product locks: [`philosophy.md`](philosophy.md).
 
 Fail on the first missing tool with one install line.
 

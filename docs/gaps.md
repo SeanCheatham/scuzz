@@ -1,11 +1,11 @@
 # Gaps and unknowns
 
-What is unproven or missing, ranked by how much it threatens the thesis in [`vision.md`](vision.md).
+What is unproven or missing, ranked by how much it threatens the thesis in [`philosophy.md`](philosophy.md).
 
 - **Unknowns** — claims not yet shown within our constraints. A bad outcome invalidates later work.
 - **Known gaps** — settled design. Work is unfinished or deferred on purpose.
 
-State what is missing. Do not record what landed. When a gap closes or its assessment changes, update this file. If direction changes, also update `vision.md`.
+State what is missing. Do not record what landed. When a gap closes or its assessment changes, update this file. If direction changes, also update `philosophy.md`.
 
 ## Unknowns
 
@@ -23,7 +23,7 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 ## Known gaps
 
-Next work improves general language usability. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Examples prove these capabilities. Locks: [`vision.md`](vision.md).
+Next work improves general language usability. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Examples prove these capabilities. Locks: [`philosophy.md`](philosophy.md).
 
 ### Cuts
 

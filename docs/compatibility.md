@@ -1,13 +1,13 @@
 # Compatibility matrix
 
-What we keep vs cut. Product locks and language direction: [`vision.md`](vision.md).
+What we keep vs cut. Product locks and language direction: [`philosophy.md`](philosophy.md).
 
 ## Language
 
 | Feature | Stance |
 | --- | --- |
 | Scala-like defs, ADTs, pattern matching | Keep |
-| Local `val` / blocks | Cut — use `for` with `=` / `<-` ([vision](vision.md#language-direction)) |
+| Local `val` / blocks | Cut — use `for` with `=` / `<-` ([philosophy](philosophy.md#language-direction)) |
 | Traits-as-interfaces, `Option`/`Either`-style enums | Keep |
 | Local type inference, generics | Keep (monomorphize early) |
 | Higher-kinded types | Only where effects need them (`IO`) |
@@ -33,7 +33,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui] run --watch` is hot reload (stamp-reload Views) | Flutter DevTools / VM patching |
 | Diagnostics | `scuzz check` is the linter (`--message-format=json`); `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `lint` subcommand; `*.g.scuzz` codegen |
 | Dogfood IDE | `scuzz ide` launches the bundled `[ui]` package. Live, Verify, and Session are unnumbered landmarks. The app consumes `check` / `lsp`. Headless is a peer | A compiler inside the IDE app; second typer; Desktop-only editor; a file-tree clone; numbered Docs chapter chrome; a `scuzz-ide` binary |
-| Self-hosting | Product CLI is Scuzz ([`vision.md`](vision.md#self-hosting)); `VERSION` names the product; `bootstrap.sh` fetches the newest GitHub `v*` release; `package_release.sh` compiles `examples/cli` with that tagged binary | Big-bang rewrite; dual shipped product CLIs; cargo as the product compiler |
+| Self-hosting | Product CLI is Scuzz ([`philosophy.md`](philosophy.md#self-hosting)); `VERSION` names the product; `bootstrap.sh` fetches the newest GitHub `v*` release; `package_release.sh` compiles `examples/cli` with that tagged binary | Big-bang rewrite; dual shipped product CLIs; cargo as the product compiler |
 | Packaging | Android debug APK through `scuzz package --target android` (installs when adb lists a device); iOS sim `.app` through `scuzz package --target ios` | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
 
 ## Platforms (Headless first)
@@ -50,7 +50,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 ## Toolchain
 
-The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([vision.md](vision.md#self-hosting)). Kernel surface: [vision.md](vision.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. HTTP `https://` links OpenSSL (`libssl` / `libcrypto`). Serve TLS uses the same stack. There is no second TLS stack.
+The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([philosophy.md](philosophy.md#self-hosting)). Kernel surface: [philosophy.md](philosophy.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. HTTP `https://` links OpenSSL (`libssl` / `libcrypto`). Serve TLS uses the same stack. There is no second TLS stack.
 
 ## Browser target
 

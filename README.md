@@ -96,7 +96,7 @@ See [compatibility](docs/compatibility.md) for platform details and [known gaps]
 - **Build interfaces:** run `scuzz docs gui`.
 - **Write properties:** run `scuzz docs verify`.
 - **Browse working code:** see the [examples](examples).
-- **Understand the direction:** read the [product vision](docs/vision.md).
+- **Understand the direction:** read the [product philosophy](docs/philosophy.md) and the [planning arcs](docs/vision.md).
 - **Report a problem or suggest a change:** open a [GitHub issue](https://github.com/SeanCheatham/scuzz/issues).
 - **Work on Scuzz:** follow the [checkout setup](docs/developer-environment.md).
 
