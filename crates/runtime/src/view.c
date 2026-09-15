@@ -1488,29 +1488,6 @@ SzString *sz_view_a11y_dump(SzView *root) {
 
 /* --- typed session schema v=2: a11y tree (JSON) ---------------------------- */
 
-static void a11y_fputs_json(FILE *f, const char *s) {
-  const char *p;
-  if (!s)
-    return;
-  for (p = s; *p; p++) {
-    unsigned char c = (unsigned char)*p;
-    if (c == '\\')
-      fputs("\\\\", f);
-    else if (c == '"')
-      fputs("\\\"", f);
-    else if (c == '\n')
-      fputs("\\n", f);
-    else if (c == '\r')
-      fputs("\\r", f);
-    else if (c == '\t')
-      fputs("\\t", f);
-    else if (c < 0x20)
-      fprintf(f, "\\u%04x", c);
-    else
-      fputc(*p, f);
-  }
-}
-
 /* 1 when the node or a hoisted descendant puts a node in the JSON forest. */
 static int a11y_node_dumpable(SzView *v) {
   int i;
@@ -1553,7 +1530,7 @@ static void a11y_json_node(SzView *v, FILE *f, int *first) {
   } else {
     if (!(info.cls == 1 && a11y_kind_flag(v->kind))) {
       fputs(",\"label\":\"", f);
-      a11y_fputs_json(f, info.label);
+      sz_json_fputs_escaped(f, info.label);
       fputc('"', f);
     }
     if (info.cls == 1)

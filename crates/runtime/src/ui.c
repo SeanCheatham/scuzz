@@ -439,30 +439,6 @@ int sz_ui_session_set_record(SzUiSession *session, const char *path) {
   return 1;
 }
 
-/* Editor dump: keep newlines as \\n so a file buffer stays one node. */
-static void fputs_escaped_body(FILE *f, const char *s) {
-  const char *p;
-  if (!s)
-    return;
-  for (p = s; *p; p++) {
-    unsigned char c = (unsigned char)*p;
-    if (c == '\\')
-      fputs("\\\\", f);
-    else if (c == '"')
-      fputs("\\\"", f);
-    else if (c == '\n')
-      fputs("\\n", f);
-    else if (c == '\r')
-      fputs("\\r", f);
-    else if (c == '\t')
-      fputs("\\t", f);
-    else if (c < 0x20)
-      fprintf(f, "\\u%04x", c);
-    else
-      fputc(*p, f);
-  }
-}
-
 static const char *runtime_kind_name(SzUiRuntimeKind kind) {
   switch (kind) {
   case SZ_UI_RUNTIME_HEADLESS:
@@ -495,7 +471,7 @@ static const char *lifecycle_name(SzLifecyclePhase phase) {
 
 static void fputs_json_str(FILE *f, const char *s) {
   fputc('"', f);
-  fputs_escaped_body(f, s);
+  sz_json_fputs_escaped(f, s);
   fputc('"', f);
 }
 
@@ -527,7 +503,7 @@ static void fputs_views_json(FILE *f, const char *views) {
           fputc(*q, f);
       }
     } else {
-      fputs_escaped_body(f, p);
+      sz_json_fputs_escaped(f, p);
     }
     fputc('"', f);
     if (!nl)
