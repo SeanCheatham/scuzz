@@ -5,7 +5,8 @@
 | Doc | Purpose |
 | --- | --- |
 | [`HUMANS.md`](HUMANS.md) | Human source of truth for product intent. Agents read it. Agents never edit it. |
-| [`docs/vision.md`](docs/vision.md) | Product intent, locks, language direction, open work, risks |
+| [`docs/philosophy.md`](docs/philosophy.md) | Product intent, design locks, language direction |
+| [`docs/vision.md`](docs/vision.md) | Long-term planning arcs: open work, risks |
 | [`docs/gaps.md`](docs/gaps.md) | Unknowns and known gaps, ranked by risk |
 | [`docs/plans.md`](docs/plans.md) | Next short-term slice only, while a slice is in progress. Delete the file when the slice is done. Do not keep history. |
 | [`docs/optimization.md`](docs/optimization.md) | Later empirical pre-optimization (`*.scuzz_tune`). Not current work. |
@@ -16,7 +17,7 @@
 | [`README.md`](README.md) | Pitch, install, one example |
 | [`VERSION`](VERSION) | Product version (`scuzz -V`). Cut a release with the GitHub `release` workflow. |
 
-If a decision or next-step order changes, edit `vision.md`. Keep `vision.md` aligned with `HUMANS.md`.
+If a decision changes, edit `philosophy.md`. If the next-step order changes, edit `vision.md`. Keep both aligned with `HUMANS.md`.
 
 ## Keep the codebase small
 
@@ -27,8 +28,8 @@ Scuzz Lang is a language, a runtime, UI, and tooling. Keep a small subset. Ship 
 - **No ecosystem theater.** Do not add Maven, JVM, cats, or ZIO compatibility layers. Do not add unused dependency graphs. Do not copy Scala Native structure for familiarity.
 - **Forwards only.** Do not keep backwards compatibility, migration shims, or legacy paths. Delete and rewrite call sites. Do not keep dual APIs.
 - **Vertical slice over scaffolding.** Prefer a working hello or Counter path to empty module trees and placeholder APIs.
-- **Headless first for UI.** Do not add Desktop-only UI behavior. Headless is a peer runtime. See `vision.md`.
-- **One compiler.** The toolchain is Scuzz (`examples/cli`). Language proof is `examples/` that exercise the kernel. Product version lives in `VERSION`. Bootstrap fetches the newest GitHub `v*` release. See `vision.md`.
+- **Headless first for UI.** Do not add Desktop-only UI behavior. Headless is a peer runtime. See `philosophy.md`.
+- **One compiler.** The toolchain is Scuzz (`examples/cli`). Language proof is `examples/` that exercise the kernel. Product version lives in `VERSION`. Bootstrap fetches the newest GitHub `v*` release. See `philosophy.md`.
 - **No agent- or tool-specific references.** Keep CI, docs, and code owned by the project. Do not tie them to a coding agent, a branch naming scheme, or a vendor workflow.
 - **No history in the tree.** Write docs and comments in present tense. Do not keep phase diaries, landed changelogs, or references to removed paths.
 
@@ -44,9 +45,9 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 ## Default workflow
 
 1. Read `HUMANS.md` for product intent. Do not edit it.
-2. Read `docs/vision.md` for locks and current direction.
+2. Read `docs/philosophy.md` for locks and current direction. Read `docs/vision.md` for open work and risks.
 3. Add the smallest slice that proves the behavior (a test or `examples/` when it applies).
-4. Update `vision.md`. If `compatibility.md` owns the topic, update that file instead. App author prose lives in `scuzz docs`.
+4. Update `philosophy.md` or `vision.md`. If `compatibility.md` owns the topic, update that file instead. App author prose lives in `scuzz docs`.
 
 ## Cursor Cloud specific instructions
 

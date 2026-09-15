@@ -1,6 +1,6 @@
 # Empirical pre-optimization (future)
 
-Not a current priority. Properties, sim overlays, and `scuzz fuzz` (including schedule search) live in [`vision.md`](vision.md). This doc is later work: separate performance from meaning. Search finds a machine-specific execution strategy. The same fuzzer verifies it. Do not start this work until a parallel execution strategy exists (OS threads residual in [`gaps.md`](gaps.md)).
+Not a current priority. Properties, sim overlays, and `scuzz fuzz` (including schedule search) live in [`philosophy.md`](philosophy.md). This doc is later work: separate performance from meaning. Search finds a machine-specific execution strategy. The same fuzzer verifies it. Do not start this work until a parallel execution strategy exists (OS threads residual in [`gaps.md`](gaps.md)).
 
 ## Why this can wait — and why it can work
 
@@ -12,7 +12,7 @@ Separating *performance* from *meaning* works only if the language pins meaning 
 
 When this is in scope, the fuzzer also checks equivalence. Any transform that claims to keep meaning (a parallel execution strategy, a tuned build) must replay the same corpus. Observable outputs must match. Properties must not fail. Classic autotuners (Halide schedules, PGO, BOLT) assume their transforms are safe. Scuzz search-verifies them against the fixed observation surface.
 
-Schedule search under fuzz is already the correctness half (`vision.md`). Optimization is the performance half. It is blocked until more than one execution strategy exists.
+Schedule search under fuzz is already the correctness half (`philosophy.md`). Optimization is the performance half. It is blocked until more than one execution strategy exists.
 
 ## Direction: `*.scuzz_tune`
 
