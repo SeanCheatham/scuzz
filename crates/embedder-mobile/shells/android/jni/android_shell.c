@@ -48,12 +48,14 @@ void sz_mobile_shutdown(void) {
   g_rgba_cap = 0;
   g_w = g_h = 0;
   pthread_mutex_unlock(&g_frame_lock);
+  pthread_mutex_lock(&g_q_lock);
   for (i = 0; i < TEXT_RING; i++) {
     free(g_text_bufs[i]);
     g_text_bufs[i] = NULL;
   }
   free(g_poll_text);
   g_poll_text = NULL;
+  pthread_mutex_unlock(&g_q_lock);
   free(g_clip);
   g_clip = NULL;
   scuzz_android_set_alive(0);
