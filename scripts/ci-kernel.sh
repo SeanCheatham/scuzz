@@ -113,6 +113,9 @@ grep -q "net:" /tmp/io-test.out
 if "$SCUZZ" check examples/bad-intent; then
   echo "empty verify should fail check" && exit 1
 fi
+if "$SCUZZ" check examples/bad-alt; then
+  echo "mismatched alternative bindings should fail check" && exit 1
+fi
 "$SCUZZ" check --message-format=json examples/hello | tee /tmp/hello-check.json
 grep -q '"severity":"info"' /tmp/hello-check.json
 grep -q 'unclaimed def' /tmp/hello-check.json
