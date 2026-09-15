@@ -98,14 +98,13 @@ static int http_resp_parts(void *resp, int64_t *status, SzMap **headers,
   return 1;
 }
 
-/* 1 = ok, 0 = invalid URL, -1 = invalid port. */
 static int url_has_bad_bytes(const char *s, size_t n) {
   size_t i;
   if (!s)
     return 1;
   for (i = 0; i < n; i++) {
     unsigned char c = (unsigned char)s[i];
-    if (c == 0 || c == '\r' || c == '\n')
+    if (c <= 32 || c == 127)
       return 1;
   }
   return 0;
@@ -131,18 +130,14 @@ static int parse_port_digits(const char *s, const char **end, int *port) {
   return 1;
 }
 
-static int parse_http_url(const char *url, char *host, size_t host_sz, char *path,
-                          size_t path_sz, int *port, int *is_v6, int *tls) {
-  const char *p;
-  const char *slash;
-  const char *rb;
-  const char *rest;
-  size_t hlen;
-  size_t ulen;
-  if (!url || !host || !path || !port || !is_v6 || !tls)
+int sz_net_parse_http_url(const char *url, char *host, size_t host_sz,
+                          char *path, size_t path_sz, int *port,
+                          int *is_v6, int *tls) {
+  const char *p, *end, *rest;
+  size_t hlen, plen, prefix;
+  if (!url || !host || !path || !port || !is_v6 || !tls || path_sz < 2)
     return 0;
-  ulen = strlen(url);
-  if (url_has_bad_bytes(url, ulen))
+  if (url_has_bad_bytes(url, strlen(url)))
     return 0;
   *tls = 0;
   *is_v6 = 0;
@@ -155,69 +150,48 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
     p = url + 7;
   } else
     return 0;
-  if (p[0] == '[') {
-    rb = strchr(p, ']');
+  end = p + strcspn(p, "/?#");
+  if (*p == '[') {
+    const char *rb = memchr(p, ']', (size_t)(end - p));
+    struct in6_addr address;
     if (!rb)
       return 0;
-    hlen = (size_t)(rb - (p + 1));
-    if (hlen == 0 || hlen + 1 > host_sz)
+    hlen = (size_t)(rb - p - 1);
+    if (!hlen || hlen >= host_sz)
       return 0;
     memcpy(host, p + 1, hlen);
-    host[hlen] = '\0';
-    if (strchr(host, '@') || url_has_bad_bytes(host, hlen))
+    host[hlen] = 0;
+    if (inet_pton(AF_INET6, host, &address) != 1)
       return 0;
     *is_v6 = 1;
     p = rb + 1;
-    if (p[0] == ':') {
-      p++;
-      if (!parse_port_digits(p, &rest, port))
-        return -1;
-      if (*rest && *rest != '/')
-        return -1;
-      p = rest;
-    }
-    if (p[0] == '\0') {
-      memcpy(path, "/", 2);
-      return 1;
-    }
-    if (p[0] != '/' || strlen(p) + 1 > path_sz)
-      return 0;
-    if (url_has_bad_bytes(p, strlen(p)))
-      return 0;
-    memcpy(path, p, strlen(p) + 1);
-    return 1;
-  }
-  slash = strchr(p, '/');
-  if (slash) {
-    hlen = (size_t)(slash - p);
-    if (hlen == 0 || hlen + 1 > host_sz || (size_t)strlen(slash) + 1 > path_sz)
+  } else {
+    const char *colon = memchr(p, ':', (size_t)(end - p));
+    const char *host_end = colon ? colon : end;
+    hlen = (size_t)(host_end - p);
+    if (!hlen || hlen >= host_sz)
       return 0;
     memcpy(host, p, hlen);
-    host[hlen] = '\0';
-    if (url_has_bad_bytes(slash, strlen(slash)))
+    host[hlen] = 0;
+    if (strpbrk(host, "@[]"))
       return 0;
-    memcpy(path, slash, strlen(slash) + 1);
-  } else {
-    hlen = strlen(p);
-    if (hlen == 0 || hlen + 1 > host_sz)
-      return 0;
-    memcpy(host, p, hlen + 1);
-    memcpy(path, "/", 2);
+    p = host_end;
   }
-  if (strchr(host, '@') || url_has_bad_bytes(host, strlen(host)))
+  if (p != end) {
+    if (*p != ':')
+      return 0;
+    if (!parse_port_digits(p + 1, &rest, port) || rest != end)
+      return -1;
+  }
+  /* The request target contains the path and query. It excludes the fragment. */
+  plen = strcspn(end, "#");
+  prefix = *end != '/';
+  if (plen + prefix >= path_sz)
     return 0;
-  {
-    char *colon = strchr(host, ':');
-    if (colon) {
-      *colon = '\0';
-      if (host[0] == '\0')
-        return 0;
-      if (!parse_port_digits(colon + 1, &rest, port))
-        return -1;
-      if (*rest)
-        return -1;
-    }
-  }
+  if (prefix)
+    path[0] = '/';
+  memcpy(path + prefix, end, plen);
+  path[plen + prefix] = 0;
   return 1;
 }
 
@@ -235,6 +209,194 @@ static int host_eq_ci(const char *a, const char *b) {
       return 0;
   }
   return *a == 0 && *b == 0;
+}
+
+static SzAdt *link_result(int ok, const char *text) {
+  SzString *s = sz_string_from_cstr(text);
+  SzAdt *r = sz_adt_new(ok, s);
+  sz_release(s);
+  return r;
+}
+
+/* RFC 3986 removes dot segments from the path, not from the query. */
+static void link_clean_path(const char *input, char *out) {
+  size_t i = 0, n = 0;
+  while (input[i]) {
+    if (strncmp(input + i, "/./", 3) == 0) i += 2;
+    else if (strcmp(input + i, "/.") == 0) { out[n++] = '/'; break; }
+    else if (strncmp(input + i, "/../", 4) == 0 || strcmp(input + i, "/..") == 0) {
+      i += 3;
+      while (n && out[n - 1] != '/') n--;
+      if (n) n--;
+      if (!input[i]) { out[n++] = '/'; break; }
+    } else {
+      if (input[i] == '/') out[n++] = input[i++];
+      while (input[i] && input[i] != '/') out[n++] = input[i++];
+    }
+  }
+  out[n] = 0;
+}
+
+static int link_uri(const char *p) {
+  for (; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (c == '%') {
+      if (!p[1] || !p[2] || !strchr("0123456789abcdefABCDEF", p[1]) ||
+          !strchr("0123456789abcdefABCDEF", p[2])) return 0;
+      p += 2;
+    } else if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                 (c >= '0' && c <= '9') || strchr("-._~:/?#[]@!$&'()*+,;=", c)))
+      return 0;
+  }
+  return 1;
+}
+
+static int link_resolve(const char *base, const char *ref, char *out, size_t cap) {
+  char host[256], target_host[256], path[1024], target_path[1024];
+  char candidate[2048], clean[1024], query[1024];
+  int port, v6, tls, target_port, target_v6, target_tls, n;
+  size_t origin, cut;
+  const char *colon;
+  if (!link_uri(base) || !link_uri(ref) ||
+      sz_net_parse_http_url(base, host, sizeof host, path, sizeof path,
+                            &port, &v6, &tls) != 1)
+    return 0;
+  origin = (tls ? 8 : 7) + strcspn(base + (tls ? 8 : 7), "/?#");
+  colon = strchr(ref, ':');
+  if (colon && (size_t)(colon - ref) < strcspn(ref, "/?#"))
+    n = snprintf(candidate, sizeof candidate, "%s", ref);
+  else if (strncmp(ref, "//", 2) == 0)
+    n = snprintf(candidate, sizeof candidate, "%s:%s", tls ? "https" : "http", ref);
+  else if (*ref == '/')
+    n = snprintf(candidate, sizeof candidate, "%.*s%s", (int)origin, base, ref);
+  else {
+    if (*ref == '?' || (*ref && *ref != '#')) {
+      path[strcspn(path, "?")] = 0;
+      if (*ref != '?') {
+        char *slash = strrchr(path, '/');
+        if (slash) slash[1] = 0;
+      }
+    }
+    n = snprintf(candidate, sizeof candidate, "%.*s%s%s", (int)origin, base, path, ref);
+  }
+  if (n < 0 || (size_t)n >= sizeof candidate) return 0;
+  for (cut = 0; candidate[cut] && candidate[cut] != ':'; cut++)
+    if (candidate[cut] >= 'A' && candidate[cut] <= 'Z') candidate[cut] += 32;
+  if (sz_net_parse_http_url(candidate, target_host, sizeof target_host,
+                            target_path, sizeof target_path,
+                            &target_port, &target_v6, &target_tls) != 1 ||
+      port != target_port || tls != target_tls || v6 != target_v6)
+    return 0;
+  if (v6) {
+    struct in6_addr a, b;
+    if (inet_pton(AF_INET6, host, &a) != 1 ||
+        inet_pton(AF_INET6, target_host, &b) != 1 || memcmp(&a, &b, sizeof a))
+      return 0;
+  } else if (!host_eq_ci(host, target_host)) return 0;
+  cut = strcspn(target_path, "?");
+  strcpy(query, target_path + cut);
+  target_path[cut] = 0;
+  link_clean_path(target_path, clean);
+  n = snprintf(out, cap, "%.*s%s%s", (int)origin, base, clean, query);
+  return n >= 0 && (size_t)n < cap;
+}
+
+static int link_token(unsigned char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || (c && strchr("!#$%&'*+-.^_`|~", c));
+}
+
+static void link_spaces(const char **p) {
+  while (**p == ' ' || **p == '\t') (*p)++;
+}
+
+static int link_next_relation(char *value) {
+  char *p = value;
+  while (*p) {
+    char *start, saved;
+    while (*p == ' ') p++;
+    start = p;
+    while (*p && *p != ' ') p++;
+    saved = *p;
+    *p = 0;
+    if (host_eq_ci(start, "next")) return 1;
+    *p = saved;
+  }
+  return 0;
+}
+
+/* A next link uses the current origin. Links with an anchor do not apply. */
+SzAdt *sz_net_next_link(SzString *base_value, SzString *header_value) {
+  const char *base = sz_string_cstr(base_value), *p = sz_string_cstr(header_value);
+  char target[2048], result[2048] = "", value[16385], name[128];
+  size_t i, len = (size_t)sz_string_len(header_value);
+  int found = 0;
+  if (url_has_bad_bytes(base, (size_t)sz_string_len(base_value)) || len > 16384)
+    return link_result(0, "Invalid Link header or base URL");
+  if (!link_resolve(base, "", result, sizeof result))
+    return link_result(0, "Invalid base URL");
+  result[0] = 0;
+  for (i = 0; i < len; i++)
+    if (((unsigned char)p[i] < 32 && p[i] != '\t') || (unsigned char)p[i] == 127)
+      return link_result(0, "Invalid Link header");
+  while (*p) {
+    int rel_seen = 0, next = 0, anchor = 0;
+    link_spaces(&p);
+    if (*p == ',') { p++; continue; }
+    if (!*p) break;
+    if (*p++ != '<') return link_result(0, "Invalid Link header");
+    i = 0;
+    while (*p && *p != '>') {
+      if (i + 1 >= sizeof target || (unsigned char)*p <= 32 || *p == '<')
+        return link_result(0, "Invalid Link target");
+      target[i++] = *p++;
+    }
+    target[i] = 0;
+    if (*p++ != '>') return link_result(0, "Invalid Link header");
+    link_spaces(&p);
+    while (*p == ';') {
+      p++;
+      link_spaces(&p);
+      i = 0;
+      while (link_token((unsigned char)*p)) {
+        if (i + 1 >= sizeof name) return link_result(0, "Invalid Link parameter");
+        name[i++] = *p++;
+      }
+      name[i] = 0;
+      if (!i) return link_result(0, "Invalid Link parameter");
+      link_spaces(&p);
+      i = 0;
+      if (*p == '=') {
+        p++;
+        link_spaces(&p);
+        if (*p == '"') {
+          p++;
+          while (*p && *p != '"') {
+            if (*p == '\\') { p++; if (!*p) return link_result(0, "Invalid Link quote"); }
+            value[i++] = *p++;
+          }
+          if (*p++ != '"') return link_result(0, "Invalid Link quote");
+        } else {
+          while (link_token((unsigned char)*p)) value[i++] = *p++;
+          if (!i) return link_result(0, "Invalid Link parameter");
+        }
+      }
+      value[i] = 0;
+      if (host_eq_ci(name, "anchor")) anchor = 1;
+      if (host_eq_ci(name, "rel") && !rel_seen) {
+        next = link_next_relation(value);
+        rel_seen = 1;
+      }
+      link_spaces(&p);
+    }
+    if (*p && *p != ',') return link_result(0, "Invalid Link header");
+    if (next && !anchor) {
+      if (found++) return link_result(0, "Ambiguous next Link");
+      if (!link_resolve(base, target, result, sizeof result))
+        return link_result(0, "Next Link must use the current origin");
+    }
+  }
+  return link_result(1, result);
 }
 
 static int host_is_loopback(const char *host) {
@@ -727,7 +889,7 @@ static void *http_start(void *env) {
 
   int url_ok;
 
-  url_ok = parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
+  url_ok = sz_net_parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
                           &port, &is_v6, &tls);
   if (url_ok < 0) {
     r->is_err = 1;
@@ -1596,6 +1758,21 @@ static SzMap *http_parse_headers(const char *acc, size_t hdr_len) {
       if (ne > ns) {
         SzString *name = sz_string_from_bytes(acc + ns, ne - ns);
         SzString *val = sz_string_from_bytes(acc + vs, ve - vs);
+        if (host_eq_ci(sz_string_cstr(name), "link")) {
+          SzString *old;
+          sz_release(name);
+          name = sz_string_from_cstr("Link");
+          old = sz_map_get_or(m, name, NULL);
+          if (old) {
+            SzString *comma = sz_string_from_cstr(",");
+            SzString *prefix = sz_string_concat(old, comma);
+            SzString *combined = sz_string_concat(prefix, val);
+            sz_release(comma);
+            sz_release(prefix);
+            sz_release(val);
+            val = combined;
+          }
+        }
         SzMap *n = sz_map_set(m, name, val, 1);
         sz_release(m);
         sz_release(name);
@@ -2016,6 +2193,8 @@ static SzIo *http_after_dispatch(void *value, void *env) {
   const char *method = ms ? sz_string_cstr(ms) : "GET";
   HttpSt *st;
   SzIo *io;
+  if (!url || url_has_bad_bytes(sz_string_cstr(url), (size_t)sz_string_len(url)))
+    return fail_drop(sz_error_new(6, "Net: invalid URL"));
   if (!request_headers_valid(headers))
     return fail_drop(sz_error_new(6, "Net: invalid request headers"));
   if ((intptr_t)value)

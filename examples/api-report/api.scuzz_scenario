@@ -84,3 +84,107 @@ def badRetryAfter(): IO[Unit] =
 def zeroRetry(): IO[Unit] =
   rateRequest(0, "0", 5000)
 
+private def pagedReply(mode: Int, request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  request match {
+    case (path, _, _, _) => if (path == "/records" || path == "/records?state=all") IO.pure((200, Map.set(Map.empty(), "X-Next-Page", "2"), "[{\"id\":1,\"state\":\"open\"}]")) else if (path != "/records?page=2" && path != "/records?state=all&page=2") reply(400, "Invalid page query") else if (mode == 1) reply(200, "{") else if (mode == 2) IO.pure((200, Map.set(Map.empty(), "x-next-page", "2"), "[]")) else if (mode == 3) Deferred.empty().flatMap(wait => Deferred.get(wait)) else handle(request)
+  }
+
+private def pagedRequest(mode: Int, query: String): IO[Unit] =
+  for {
+    server <- Fiber.fork(Net.serveTls(18083, request => pagedReply(mode, request)))
+    _ <- IO.ensure(IO.attempt(Report.run(Str.concat("https://127.0.0.1:18083/records", query), "sim-token", "report.json", 5000)).map(_ => ()), Fiber.interrupt(server))
+  } yield ()
+
+def paginated(): IO[Unit] =
+  pagedRequest(0, "?state=all")
+
+def pageMalformed(): IO[Unit] =
+  pagedRequest(1, "?state=all")
+
+def pageCycle(): IO[Unit] =
+  pagedRequest(2, "?state=all")
+
+def pageTimeout(): IO[Unit] =
+  pagedRequest(3, "?state=all")
+
+def paginatedPlain(): IO[Unit] =
+  pagedRequest(0, "")
+
+def priorReport(n: Int): IO[Unit] =
+  Fs.write("report.json", Str.concat("""Prior report
+""", Str.fromInt(n)))
+
+private def dateMonth(iso: String): String =
+  List.at(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], Str.toInt(Str.slice(iso, 5, 7), 1) - 1)
+
+private def dateText(iso: String, weekday: Int, mode: Int): String =
+  if (mode == 1) s"${List.at(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"], weekday)}, ${Str.slice(iso, 8, 10)}-${dateMonth(iso)}-${Str.slice(iso, 2, 4)} ${Str.slice(iso, 11, 19)} GMT" else shortDate(iso, List.at(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], weekday), mode)
+
+private def shortDate(iso: String, weekday: String, mode: Int): String =
+  if (mode == 2) s"$weekday ${dateMonth(iso)} ${Str.slice(iso, 8, 10)} ${Str.slice(iso, 11, 19)} ${Str.slice(iso, 0, 4)}" else s"$weekday, ${Str.slice(iso, 8, 10)} ${dateMonth(iso)} ${Str.slice(iso, 0, 4)} ${Str.slice(iso, 11, 19)} GMT"
+
+private def dateRequest(now: Int, mode: Int, timeoutMs: Int, expired: Bool): IO[Unit] =
+  datedRequestAt(now, if (expired) now / 1000 * 1000 else (now / 1000 + 2) * 1000, mode, timeoutMs)
+
+private def datedRequestAt(now: Int, target: Int, mode: Int, timeoutMs: Int): IO[Unit] =
+  rateRequest(if (target < now) 0 else target - now, dateText(Clock.iso8601(target), (target / 86400000 + 4) % 7, mode), timeoutMs)
+
+def dateLimited(n: Int): IO[Unit] =
+  Clock.realTime().flatMap(now => dateRequest(now, (n % 3 + 3) % 3, 5000, false))
+
+def dateExpired(): IO[Unit] =
+  Clock.realTime().flatMap(now => dateRequest(now, 0, 5000, true))
+
+def dateDeadline(): IO[Unit] =
+  Clock.realTime().flatMap(now => dateRequest(now, 0, 500, false))
+
+private def linkTarget(mode: Int): String =
+  if (mode == 0) "https://127.0.0.1:18083/links?cursor=a%2Fb" else if (mode == 1) "?cursor=a%2Fb" else if (mode == 2) "./other/../links?cursor=a%2Fb" else if (mode == 4) "https://127.0.0.1:18084/private" else "?cursor=a%2Fb"
+
+private def linkedReply(mode: Int, count: Ref[Int], request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  request match {
+    case (path, method, headers, _) => if (method != "GET" || Map.getOrElse(headers, "authorization", "") != "Bearer sim-token") reply(401, "denied") else if (mode == 8 || mode == 9) Ref.updateAndGet(count, n => n + 1).map(n => if (mode == 9 && n == 100) (200, Map.empty(), "[{\"id\":100,\"state\":\"open\"}]") else (200, Map.set(Map.empty(), "Link", s"<?cursor=$n>; rel=next"), "[]")) else if (path == "/links") IO.pure((200, Map.set(Map.set(Map.set(Map.empty(), "X-Next-Page", "99"), "link", "</previous>; rel=prev"), "Link", if (mode == 7) "</one>; rel=next, </two>; rel=next" else Str.concat(s"<${linkTarget(mode)}>", "; title=\"cursor, page\"; rel=\"next\"")), "[{\"id\":11,\"state\":\"open\"},{\"id\":12,\"state\":\"closed\"}]")) else if (path != "/links?cursor=a%2Fb") reply(400, "Invalid cursor") else if (mode == 3) Ref.updateAndGet(count, n => n + 1).flatMap(n => if (n == 1) IO.pure((200, Map.set(Map.empty(), "Link", "<?cursor=a%2Fb>; rel=next"), "[]")) else reply(200, "[]")) else if (mode == 5) reply(200, "{") else if (mode == 6) Deferred.empty().flatMap(wait => Deferred.get(wait)) else IO.pure((200, Map.set(Map.empty(), "Link", "</links>; rel=first"), "[{\"id\":13,\"state\":\"open\"}]"))
+  }
+
+private def linkedRequest(mode: Int): IO[Unit] =
+  for {
+    count <- Ref.of(0)
+    server <- Fiber.fork(Net.serveTls(18083, request => linkedReply(mode, count, request)))
+    _ <- IO.ensure(IO.attempt(Report.run("https://127.0.0.1:18083/links", "sim-token", "report.json", 5000)).map(_ => ()), Fiber.interrupt(server))
+  } yield ()
+
+def linkPages(n: Int): IO[Unit] =
+  linkedRequest((n % 3 + 3) % 3)
+
+def linkCycle(): IO[Unit] =
+  linkedRequest(3)
+
+def linkOrigin(): IO[Unit] =
+  linkedRequest(4)
+
+def linkMalformed(): IO[Unit] =
+  linkedRequest(5)
+
+def linkTimeout(): IO[Unit] =
+  linkedRequest(6)
+
+def linkAmbiguous(): IO[Unit] =
+  linkedRequest(7)
+
+def linkLimit(): IO[Unit] =
+  linkedRequest(8)
+
+def linkHundred(): IO[Unit] =
+  linkedRequest(9)
+
+private def queryReply(request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  request match {
+    case (path, method, headers, _) => if (method != "GET" || Map.getOrElse(headers, "authorization", "") != "Bearer sim-token") reply(401, "denied") else if (path == "/records?page=1&p%61ge=1&filter=a%26b") IO.pure((200, Map.set(Map.empty(), "X-Next-Page", "2"), "[{\"id\":21,\"state\":\"open\"}]")) else if (path == "/records?filter=a%26b&page=2") reply(200, "[{\"id\":22,\"state\":\"open\"}]") else reply(400, "Invalid page query")
+  }
+
+def queryPages(): IO[Unit] =
+  for {
+    server <- Fiber.fork(Net.serveTls(18083, queryReply))
+    _ <- IO.ensure(IO.attempt(Main.runConfigured("https://127.0.0.1:18083/records?page=1&p%61ge=1&filter=a%26b#view?tab=1", "sim-token", "report.json")).map(_ => ()), Fiber.interrupt(server))
+  } yield ()
+

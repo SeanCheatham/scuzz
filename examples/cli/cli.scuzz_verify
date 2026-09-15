@@ -94,3 +94,9 @@ def lspDef(): Bool =
 def docsFacts(): Bool =
   Main.cliDiff(Cli.render(Cli.parse(Main.a1("docs"))), Manual.renderList()) && Main.cliDiff(Cli.render(Cli.parse(Main.a2("docs", "verify"))), Manual.renderTopic("verify"))
 
+def campaignBudget(n: Int, sites: Int): Bool =
+  if (n < 0 || sites < 0) true else Verify.searchN(n) >= 0 && Verify.mutateN(n) >= 0 && Verify.searchN(n) + Verify.mutateN(n) == n && Drive.mutTake(n, sites) >= 0 && Drive.mutTake(n, sites) <= sites && Drive.mutTake(n, sites) <= Verify.mutateN(n)
+
+def campaignBudgetEdges(): Bool =
+  Drive.mutTake(0, 52) == 0 && Drive.mutTake(1, 52) == 1 && Drive.mutTake(16, 52) == 6 && Drive.mutTake(16, 4) == 4 && Drive.mutTake(176, 90) == 66 && Drive.mutTake(280, 100) == 100 && Verify.searchN(9223372036854775807) == 5764607523034234879 && Verify.mutateN(9223372036854775807) == 3458764513820540928
+

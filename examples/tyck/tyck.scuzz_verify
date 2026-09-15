@@ -28,3 +28,9 @@ def tyckGenerated(n: Int where n >= 0): Bool =
 def prettyGenerated(n: Int where n >= 0): Bool =
   Main.prettyIdem(n)
 
+def pureForArguments(): Bool =
+  Main.pureForArguments()
+
+def genericRecordFields(): Bool =
+  Main.genericRecordFields()
+

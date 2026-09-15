@@ -1,0 +1,3 @@
+[fuzz]
+seed = 42
+events = ["drive capturedString retain", "drive capturedDirect 37", "drive capturedNames 17", "drive capturedNames -3", "drive capturedIO -9", "drive capturedIO 0", "drive capturedIO 31"]

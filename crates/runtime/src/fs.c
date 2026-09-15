@@ -136,33 +136,81 @@ static void *fs_write_result(void *env) {
   SzString *contents = (SzString *)pack->right;
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
-  FILE *f;
+  const char *slash = strrchr(p, '/');
+  const char suffix[] = ".scuzz-write-XXXXXX";
+  size_t dir_len = slash ? (size_t)(slash - p) + 1 : 0;
+  struct stat st;
+  mode_t mode = 0600;
+  char *temporary = NULL;
+  FILE *f = NULL;
+  int fd, saved_errno, created = 0;
   sz_timeline_log_cstr("Fs.write", p);
-  f = fopen(p, "wb");
+  if (lstat(p, &st) == 0) {
+    if (!S_ISREG(st.st_mode)) {
+      errno = EINVAL;
+      goto fail;
+    }
+    mode = st.st_mode & 0777;
+  } else if (errno != ENOENT) {
+    goto fail;
+  }
+  temporary = (char *)sz_alloc(dir_len + sizeof(suffix));
+  memcpy(temporary, p, dir_len);
+  memcpy(temporary + dir_len, suffix, sizeof(suffix));
+  fd = mkstemp(temporary);
+  if (fd < 0)
+    goto fail;
+  created = 1;
+  f = fdopen(fd, "wb");
   if (!f) {
+    saved_errno = errno;
+    close(fd);
+    errno = saved_errno;
+    goto fail;
+  }
+  if (contents && contents->len &&
+      fwrite(contents->data, 1, contents->len, f) != contents->len) {
+    if (!errno)
+      errno = EIO;
+    goto fail;
+  }
+  if (fchmod(fd, mode) != 0)
+    goto fail;
+  if (fclose(f) != 0) {
+    f = NULL;
+    goto fail;
+  }
+  f = NULL;
+  if (rename(temporary, p) != 0)
+    goto fail;
+  sz_free(temporary);
+  return r;
+fail:
+  saved_errno = errno;
+  if (f)
+    fclose(f);
+  if (temporary) {
+    if (created)
+      unlink(temporary);
+    sz_free(temporary);
+  }
+  {
     char msg[512];
-    snprintf(msg, sizeof(msg), "Fs.write: cannot open %s: %s", p, strerror(errno));
+    snprintf(msg, sizeof(msg), "Fs.write: cannot replace %s: %s", p,
+             strerror(saved_errno));
     r->is_err = 1;
     r->as.err = sz_error_new(2, msg);
-    goto done;
   }
-  if (contents && contents->len) {
-    if (fwrite(contents->data, 1, contents->len, f) != contents->len) {
-      fclose(f);
-      r->is_err = 1;
-      r->as.err = sz_error_new(2, "Fs.write: short write");
-      goto done;
-    }
-  }
-  fclose(f);
-  r->is_err = 0;
-  r->as.ok = NULL;
-done:
   return r;
 }
 
 static SzIo *fs_after_write(void *value, void *env) {
   SzPair *pack = (SzPair *)env;
+  SzString *path = (SzString *)pack->left;
+  const char *p = sz_string_cstr(path);
+  size_t len = (size_t)sz_string_len(path);
+  if (!len || strlen(p) != len || p[len - 1] == '/')
+    return sz_io_fail_cstr("Fs.write: invalid file path");
   if ((intptr_t)value)
     return sz_testrt_fs_write((SzString *)pack->left, (SzString *)pack->right);
   return fm_drop(sz_io_delay(fs_write_result, pack), unwrap_fs, NULL);

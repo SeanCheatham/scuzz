@@ -1034,5 +1034,16 @@ z"""
 def sourceOffsets(): Bool =
   List.map(List.range(0, 8), off => Check.lineCol(sourceOffSrc(), off)) == [(1, 1), (1, 2), (1, 3), (2, 1), (3, 1), (3, 2), (3, 3), (4, 1)] && Check.lineCol("", 0) == (1, 1) && Check.lineCol("a", 5) == (1, 2) && Check.lineIndex(sourceOffSrc()) == [0, 3, 4, 7] && Check.lineIndex("") == [0] && Check.lineIndex("a") == [0] && Check.startsOf(Check.fileIndex(("Main", sourceOffSrc()) :: []), "Main") == [0, 3, 4, 7] && Check.startsOf(Check.fileIndex(("Main", "a") :: []), "") == [0]
 
+def pureForArguments(): Bool =
+  Check.check("""def accept(b: Bool): Bool = b
+def right(): Bool = accept(for { x = true } yield x)""") == "[]" && rejects("""def accept(b: Bool): Bool = b
+def wrong(): Bool = accept(for { x = 1 } yield x)""", "expected Bool, got Int") && rejects("""def accept(b: Bool): Bool = b
+def wrong(): Bool = accept(for { x <- IO.pure(true) } yield x)""", "expected Bool, got IO[Bool]")
+
+def genericRecordFields(): Bool =
+  Check.check("record Holder[A](item: A)\ndef right(): List[String] = List.flatMap([Holder([\"a\"])], holder => holder.item)") == "[]" && rejects("""record Holder[A](item: A)
+def wrong(holder: Holder[String]): Int = holder.item""", "does not match declared") && Check.check("""record Holder[A](item: A)
+def right(holder: Holder[Int]): Int = holder.item + 1""") == "[]"
+
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else Str.concat("tyck-bad ", dumpFail()))

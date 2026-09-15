@@ -19,43 +19,76 @@ def writeRows(rows: List[Json], output: String): IO[Unit] =
     case Result.Ok(text) => Fs.write(output, text)
   }
 
-def writeResponse(response: (Int, Map[String, String], String), output: String): IO[Unit] =
-  response match {
-    case (status, _, body) => decode(status, body) match {
-  case Result.Err(message) => IO.fail(message)
-  case Result.Ok(rows) => writeRows(rows, output)
-}
-  }
-
 def retryable(status: Int): Bool =
   status == 429 || status == 502 || status == 503 || status == 504
 
-def delayMillis(seconds: Int): Int =
-  if (seconds < 0 || seconds > 9223372036854775) -1 else seconds * 1000
+def retryDelay(status: Int, headers: Map[String, String], nowMs: Int): Int =
+  if (!retryable(status)) -1 else retryHeader(status, headers, nowMs, List.filter(Map.keys(headers), name => Str.toLower(name) == "retry-after"))
 
-def retryAfter(value: String): Int =
-  if (!Str.matches(value, "[ \t]*[0-9]+[ \t]*")) -1 else delayMillis(Str.toInt(Str.trim(value), -1))
-
-def retryDelay(status: Int, headers: Map[String, String]): Int =
-  if (!retryable(status)) -1 else retryHeader(status, headers, List.filter(Map.keys(headers), name => Str.toLower(name) == "retry-after"))
-
-private def retryHeader(status: Int, headers: Map[String, String], names: List[String]): Int =
-  if (List.isEmpty(names)) if (status == 429) 1000 else 100 else if (List.len(names) != 1) -1 else retryAfter(Map.getOrElse(headers, List.at(names, 0), ""))
+private def retryHeader(status: Int, headers: Map[String, String], nowMs: Int, names: List[String]): Int =
+  if (List.isEmpty(names)) if (status == 429) 1000 else 100 else if (List.len(names) != 1) -1 else Net.retryAfterMillis(Map.getOrElse(headers, List.at(names, 0), ""), nowMs)
 
 private def waitForRetry(url: String, headers: Map[String, String], remaining: Int, response: (Int, Map[String, String], String), delay: Int): IO[(Int, Map[String, String], String)] =
-  if (remaining <= 0 || delay < 0) IO.pure(response) else IO.sleep(delay).flatMap(_ => fetch(url, headers, remaining - 1))
+  if (delay < 0) IO.pure(response) else IO.sleep(delay).flatMap(_ => fetch(url, headers, remaining - 1))
 
 private def continueRequest(url: String, headers: Map[String, String], remaining: Int, response: (Int, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
   response match {
-    case (status, responseHeaders, _) => waitForRetry(url, headers, remaining, response, retryDelay(status, responseHeaders))
+    case (status, responseHeaders, _) => if (!retryable(status) || remaining <= 0) IO.pure(response) else Clock.realTime().flatMap(now => waitForRetry(url, headers, remaining, response, retryDelay(status, responseHeaders, now)))
   }
 
 private def fetch(url: String, headers: Map[String, String], remaining: Int): IO[(Int, Map[String, String], String)] =
   Net.httpGet(url, headers).flatMap(response => continueRequest(url, headers, remaining.require(n => n >= 0 && n <= 2), response))
 
+def nextPage(headers: Map[String, String], current: Int): Int =
+  pageHeader(headers, current, List.filter(Map.keys(headers), name => Str.toLower(name) == "x-next-page"))
+
+private def pageHeader(headers: Map[String, String], current: Int, names: List[String]): Int =
+  if (List.isEmpty(names)) 0 else if (List.len(names) != 1) -1 else pageNumber(Str.trim(Map.getOrElse(headers, List.at(names, 0), "")), current)
+
+private def boundedPage(page: Int, current: Int): Int =
+  if (page > current && page <= 100) page else -1
+
+private def pageNumber(value: String, current: Int): Int =
+  if (value == "") 0 else if (!Str.matches(value, "[0-9]+")) -1 else boundedPage(Str.toInt(value, -1), current)
+
+def pageUrl(url: String, page: Int): String =
+  if (page == 1) url else numberedUrl(List.at(Str.split(url, "#"), 0), page)
+
+private def numberedUrl(url: String, page: Int): String =
+  Str.indexOf(url, "?") match {
+    case -1 => Str.concat(url, Str.concat("?page=", Str.fromInt(page)))
+    case mark => Str.concat(Str.take(url, mark), Str.concat("?", pageQuery(Str.drop(url, mark + 1), page)))
+  }
+
+private def pageQuery(query: String, page: Int): String =
+  List.join(List.concat(List.filter(Str.split(query, "&"), field => field != "" && !Str.matches(List.at(Str.split(field, "="), 0), "(p|%70)(a|%61)(g|%67)(e|%65)")), [Str.concat("page=", Str.fromInt(page))]), "&")
+
+def linkHeader(headers: Map[String, String]): String =
+  List.join(List.map(List.filter(Map.keys(headers), name => Str.toLower(name) == "link"), name => Map.getOrElse(headers, name, "")), ",")
+
+private def readPage(base: String, url: String, headers: Map[String, String], page: Int, rows: List[Json], seen: List[String]): IO[List[Json]] =
+  if (List.len(seen) >= 100 || List.contains(seen, url)) IO.fail("Pagination cycle or page limit") else fetch(url, headers, 2).flatMap(response => collectPage(base, url, headers, page, rows, url :: seen, response))
+
+private def collectPage(base: String, url: String, headers: Map[String, String], page: Int, rows: List[Json], seen: List[String], response: (Int, Map[String, String], String)): IO[List[Json]] =
+  response match {
+    case (status, responseHeaders, body) => decode(status, body) match {
+  case Result.Err(message) => IO.fail(message)
+  case Result.Ok(found) => advancePage(base, url, headers, page, List.concat(rows, found), seen, responseHeaders)
+}
+  }
+
+private def advancePage(base: String, url: String, headers: Map[String, String], page: Int, rows: List[Json], seen: List[String], responseHeaders: Map[String, String]): IO[List[Json]] =
+  if (List.exists(Map.keys(responseHeaders), name => Str.toLower(name) == "link")) Net.nextLink(url, linkHeader(responseHeaders)) match {
+  case Result.Err(message) => IO.fail(message)
+  case Result.Ok(next) => if (next == "") IO.pure(rows) else readPage(base, next, headers, page + 1, rows, seen)
+} else continuePages(base, headers, nextPage(responseHeaders, page), rows, seen)
+
+private def continuePages(base: String, headers: Map[String, String], next: Int, rows: List[Json], seen: List[String]): IO[List[Json]] =
+  if (next < 0) IO.fail("Invalid X-Next-Page header") else if (next == 0) IO.pure(rows) else readPage(base, pageUrl(base, next), headers, next, rows, seen)
+
 def run(url: String, token: String, output: String, timeoutMs: Int): IO[Unit] =
   if (Str.len(token) == 0) IO.fail("Set SCUZZ_API_TOKEN") else for {
-  response <- IO.timeout(timeoutMs, fetch(url, requestHeaders(token), 2))
-  _ <- writeResponse(response, output)
+  rows <- IO.timeout(timeoutMs, readPage(url, url, requestHeaders(token), 1, [], []))
+  _ <- writeRows(rows, output)
 } yield ()
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Compile the product CLI (`examples/cli`) with tagged `scuzz`.
+# Build a temporary compiler with tagged `scuzz`.
+# Use that compiler to build the product CLI (`examples/cli`).
 #
 # Writes examples/cli/build/cli (override with SCUZZ_PRODUCT).
 # Default tag is the newest GitHub Release matching v[0-9]*.
@@ -195,28 +196,38 @@ echo "==> make -C crates/runtime lib -j$JOBS" >&2
 make -C "$ROOT/crates/runtime" lib -j"$JOBS" CC=clang &
 mk=$!
 
-echo "==> $BOOTSTRAP build examples/cli" >&2
-"$BOOTSTRAP" build examples/cli
+stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-bootstrap-compiler.XXXXXX")"
+trap 'rm -rf "$stage_dir"' EXIT
+
+echo "==> $BOOTSTRAP build --out-dir $stage_dir examples/cli" >&2
+"$BOOTSTRAP" build --out-dir "$stage_dir" examples/cli
 SRC="$ROOT/examples/cli/build/cli"
-LL="$ROOT/examples/cli/build/cli.ll"
 RT="$ROOT/crates/runtime/build/libscuzz_rt.a"
-if [ ! -f "$LL" ]; then
-  die "bootstrap build did not write $LL"
-fi
 wait "$mk" || die "runtime make failed"
 if [ ! -f "$RT" ]; then
   die "runtime make did not write $RT"
 fi
-echo "==> clang -O2 $LL" >&2
-if [ "$(uname -s)" = Darwin ]; then
-  ssl_lib=""
-  if command -v brew >/dev/null 2>&1 && brew --prefix openssl@3 >/dev/null 2>&1; then
-    ssl_lib="-L$(brew --prefix openssl@3)/lib"
+
+link_cli() {
+  local ir="$1" output="$2"
+  local platform_libs=()
+  if [ ! -f "$ir" ]; then
+    die "compiler build did not write $ir"
   fi
-  clang -O2 -Wno-override-module "$LL" "$RT" -framework CoreFoundation $ssl_lib -lpthread -lssl -lcrypto -o "$SRC"
-else
-  clang -O2 -Wno-override-module "$LL" "$RT" -lpthread -lssl -lcrypto -o "$SRC"
-fi
+  if [ "$(uname -s)" = Darwin ]; then
+    platform_libs+=(-framework CoreFoundation)
+    if command -v brew >/dev/null 2>&1 && brew --prefix openssl@3 >/dev/null 2>&1; then
+      platform_libs+=("-L$(brew --prefix openssl@3)/lib")
+    fi
+  fi
+  echo "==> clang -O2 $ir" >&2
+  clang -O2 -Wno-override-module "$ir" "$RT" "${platform_libs[@]}" -lpthread -lssl -lcrypto -o "$output"
+}
+
+link_cli "$stage_dir/cli.ll" "$stage_dir/cli"
+echo "==> compile product with checkout compiler" >&2
+"$stage_dir/cli" build --full examples/cli
+link_cli "$ROOT/examples/cli/build/cli.ll" "$SRC"
 if [ ! -x "$SRC" ]; then
   die "clang -O2 did not produce $SRC"
 fi

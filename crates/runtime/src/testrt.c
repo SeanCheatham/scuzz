@@ -1146,61 +1146,16 @@ static int host_eq_ci(const char *a, const char *b) {
 
 int sz_testrt_net_parse_loopback(const char *url, int64_t *port, char *path,
                                 size_t path_cap) {
-  const char *p;
   char host[256];
-  size_t hn = 0;
-  int64_t po = 80;
-  if (!url || !path || path_cap < 2)
+  int parsed_port, is_v6, tls;
+  if (sz_net_parse_http_url(url, host, sizeof host, path, path_cap,
+                            &parsed_port, &is_v6, &tls) != 1)
     return 0;
-  if (strncmp(url, "https://", 8) == 0) {
-    p = url + 8;
-    po = 443;
-  } else if (strncmp(url, "http://", 7) == 0) {
-    p = url + 7;
-  } else
-    return 0;
-  if (*p == '[') {
-    p++;
-    while (*p && *p != ']' && hn + 1 < sizeof host)
-      host[hn++] = *p++;
-    host[hn] = '\0';
-    if (*p != ']')
-      return 0;
-    p++;
-  } else {
-    while (*p && *p != '/' && *p != ':' && hn + 1 < sizeof host)
-      host[hn++] = *p++;
-    host[hn] = '\0';
-  }
   if (!host_eq_ci(host, "127.0.0.1") && !host_eq_ci(host, "localhost") &&
       !host_eq_ci(host, "::1"))
     return 0;
-  if (*p == ':') {
-    p++;
-    po = 0;
-    if (*p < '0' || *p > '9')
-      return 0;
-    while (*p >= '0' && *p <= '9') {
-      po = po * 10 + (*p - '0');
-      if (po > 65535)
-        return 0;
-      p++;
-    }
-  }
-  if (po < 1)
-    return 0;
-  if (*p == '\0') {
-    path[0] = '/';
-    path[1] = '\0';
-  } else if (*p == '/') {
-    size_t n = strlen(p);
-    if (n + 1 > path_cap)
-      return 0;
-    memcpy(path, p, n + 1);
-  } else
-    return 0;
   if (port)
-    *port = po;
+    *port = parsed_port;
   return 1;
 }
 
@@ -3625,6 +3580,49 @@ int64_t sz_timeline_file_text_is(void *tl, int64_t i, SzString *path,
   }
   free(wanted);
   return found;
+}
+
+static const char *tl_file_contents(SzTlState *state, const char *prefix,
+                                    size_t prefix_len, size_t *len) {
+  const char *line = state->files;
+  if (!line)
+    return NULL;
+  while (*line) {
+    const char *end = strchr(line, '\n');
+    size_t n = end ? (size_t)(end - line) : strlen(line);
+    if (n >= prefix_len && memcmp(line, prefix, prefix_len) == 0) {
+      *len = n - prefix_len;
+      return line + prefix_len;
+    }
+    if (!end)
+      break;
+    line = end + 1;
+  }
+  return NULL;
+}
+
+int64_t sz_timeline_file_same(void *tl, int64_t a, int64_t b,
+                              SzString *path) {
+  SzTlState *before = tl_at(tl, a);
+  SzTlState *after = tl_at(tl, b);
+  char *normalized, *prefix;
+  const char *left, *right;
+  size_t left_len = 0, right_len = 0;
+  int64_t same;
+  if (!before || !after || !path ||
+      strlen(sz_string_cstr(path)) != (size_t)sz_string_len(path))
+    return 0;
+  normalized = norm_path(sz_string_cstr(path));
+  if (!normalized)
+    return 0;
+  prefix = tl_file_line(normalized, "", 0);
+  sz_free(normalized);
+  left = tl_file_contents(before, prefix, strlen(prefix), &left_len);
+  right = tl_file_contents(after, prefix, strlen(prefix), &right_len);
+  same = left && right && left_len == right_len &&
+         memcmp(left, right, left_len) == 0;
+  free(prefix);
+  return same;
 }
 
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle) {

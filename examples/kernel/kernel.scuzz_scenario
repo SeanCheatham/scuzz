@@ -1,0 +1,21 @@
+def setup(): IO[Unit] =
+  IO.pure(())
+
+def capturedIO(n: Int): IO[Unit] =
+  Main.checkCaptureIO(n)
+
+def matchedInt(n: Int): IO[Int] =
+  Main.checkMatchedInt(n)
+
+def matchedString(s: String): IO[String] =
+  Main.checkMatchedString(s)
+
+def matchedFields(s: String, n: Int): IO[String] =
+  Main.checkMatchedFields(s, n)
+
+def nestedMatch(n: Int): IO[String] =
+  Main.checkNestedMatch(n)
+
+def constructorAlternativesIO(n: Int): IO[Int] =
+  Main.checkConstructorAlternatives(n)
+

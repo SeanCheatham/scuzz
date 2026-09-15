@@ -1,0 +1,56 @@
+def githubVector(): Bool =
+  Hook.signature("It's a Secret to Everybody", "Hello, World!") == "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+
+def signatureRoundTrip(n: Int): Bool =
+  Hash.constantTimeEqual(Hash.hmacSha256("secret", Str.fromInt(n)), Hash.hmacSha256("secret", Str.fromInt(n))) && !Hash.constantTimeEqual(Hash.hmacSha256("secret", Str.fromInt(n)), Hash.hmacSha256("other", Str.fromInt(n)))
+
+def compareBytes(n: Int): Bool =
+  Hash.constantTimeEqual(Str.fromInt(n), Str.fromInt(n)) && !Hash.constantTimeEqual(Str.fromInt(n), Str.concat(Str.fromInt(n), "x")) && !Hash.constantTimeEqual("same prefix 1", "same prefix 2")
+
+private def faulted(t: Timeline, i: Int): Bool =
+  Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs")
+
+private def rejected(t: Timeline, i: Int): Bool =
+  Timeline.driveHas(t, i, "tampered") || Timeline.driveHas(t, i, "wrongKey") || Timeline.driveHas(t, i, "missingSignature") || Timeline.driveHas(t, i, "emptySecret") || Timeline.driveHas(t, i, "badJson") || Timeline.driveHas(t, i, "arrayJson") || Timeline.driveHas(t, i, "wrongPath") || Timeline.driveHas(t, i, "wrongMethod") || Timeline.driveHas(t, i, "storageFailure")
+
+def preservesRejected(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !rejected(t, b) || Timeline.fileSame(t, a, b, "webhook.json")
+})
+
+def storesAuthenticated(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "delivery") || Timeline.fileTextIs(t, b, "webhook.json", "{\"kind\":\"ping\"}") && Timeline.fileTextIs(t, b, "status.txt", "200") || faulted(t, b) && (Timeline.fileSame(t, a, b, "webhook.json") || Timeline.fileTextIs(t, b, "webhook.json", "{\"kind\":\"ping\"}"))
+})
+
+def unauthorized(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "tampered") || Timeline.driveHas(t, i, "wrongKey") || Timeline.driveHas(t, i, "missingSignature") || Timeline.driveHas(t, i, "emptySecret")) || faulted(t, i) || Timeline.fileTextIs(t, i, "status.txt", "401"))
+
+def malformed(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "badJson") || Timeline.driveHas(t, i, "arrayJson")) || faulted(t, i) || Timeline.fileTextIs(t, i, "status.txt", "400"))
+
+def routes(t: Timeline): Verdict =
+  Verdict.every(t, i => faulted(t, i) || (!Timeline.driveHas(t, i, "wrongPath") || Timeline.fileTextIs(t, i, "status.txt", "404")) && (!Timeline.driveHas(t, i, "wrongMethod") || Timeline.fileTextIs(t, i, "status.txt", "405")))
+
+def storageStatus(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "storageFailure") || faulted(t, i) || Timeline.fileTextIs(t, i, "status.txt", "503"))
+
+private def batchPayload(t: Timeline, i: Int): Bool =
+  Timeline.fileTextIs(t, i, "webhook.json", "{\"kind\":\"alpha\"}") || Timeline.fileTextIs(t, i, "webhook.json", "{\"kind\":\"beta\"}")
+
+private def finalPayload(t: Timeline, i: Int): Bool =
+  Timeline.fileTextIs(t, i, "webhook.json", "{\"kind\":\"final\"}")
+
+def concurrentStorage(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "concurrent") || batchPayload(t, b) || faulted(t, b) && Timeline.fileSame(t, a, b, "webhook.json")
+})
+
+def continuedStorage(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "continued") || finalPayload(t, b) || faulted(t, b) && (batchPayload(t, b) || Timeline.fileSame(t, a, b, "webhook.json"))
+})
+
+def batchStatus(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "concurrent") || Timeline.driveHas(t, i, "continued")) || faulted(t, i) || Timeline.fileTextIs(t, i, "alpha.status", "200") && Timeline.fileTextIs(t, i, "beta.status", "200") && Timeline.fileTextIs(t, i, "forged.status", "401") && (!Timeline.driveHas(t, i, "continued") || Timeline.fileTextIs(t, i, "final.status", "200")))
+

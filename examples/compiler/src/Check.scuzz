@@ -941,7 +941,7 @@ def isBareHandle(ty: String, ctor: String): Bool =
   ty == ctor || ty == Str.concat(ctor, "[A]")
 
 def inferFor2(o: Out, errTy: String): Out =
-  if (hasErr(o)) o else ok(ioTy(errTy, tyStr(o)))
+  if (hasErr(o) || errTy == "") o else ok(ioTy(errTy, tyStr(o)))
 
 def forHasDraw(bs: List[Bind]): Bool =
   if (List.isEmpty(bs)) false else forHasDraw1(List.at(bs, 0), List.tail(bs))
@@ -976,7 +976,7 @@ def fieldOf(o: Out, name: String, ens: List[En]): Out =
   if (hasErr(o)) o else fieldOf2(tyStr(o), name, ens, o.span)
 
 def fieldOf2(ty: String, name: String, ens: List[En], span: (String, Int)): Out =
-  if (isTup(ty) && isTupField(name)) tupFieldAt(Type.tupPartsStr(ty), tupIdx(name), name, span) else if (isTup(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else if (Type.isFunStr(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else fieldOf3(fieldNamed(ens, ty, name), ty)
+  if (isTup(ty) && isTupField(name)) tupFieldAt(Type.tupPartsStr(ty), tupIdx(name), name, span) else if (isTup(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else if (Type.isFunStr(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else fieldOf3(fieldNamed(specializeEnums(ens, ty), Type.headNameStr(ty), name), ty)
 
 def isTupField(name: String): Bool =
   tupIdx(name) >= 0
@@ -1044,7 +1044,7 @@ def patBind3(p: Int, c: Int, pat: String): String =
   if (c < 0) Str.slice(pat, p + 1, Str.len(pat) - 1) else Str.slice(pat, p + 1, c)
 
 def closeParen(s: String, i: Int, d: Int): Int =
-  if (i >= Str.len(s)) 0 - 1 else closeParenCh(s, i, d, Str.charAt(s, i))
+  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) closeParen(s, Parse.quotedEnd(s, i), d) else closeParenCh(s, i, d, Str.charAt(s, i))
 
 def closeParenCh(s: String, i: Int, d: Int, c: Int): Int =
   if (c == 40) closeParen(s, i + 1, d + 1) else if (c == 41) closeParenDone(s, i, d) else closeParen(s, i + 1, d)
@@ -1059,16 +1059,31 @@ def patCore2(p: Int, pat: String): String =
   if (p < 0) pat else Str.slice(pat, 0, p)
 
 def bindPat(pat: String, scrutTy: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
-  bindPat2(patBind(pat), pat, scrutTy, env, ens)
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) bindPat(Str.take(pat, Parse.patternAlternativeAt(pat, 0, 0)), scrutTy, env, ens) else bindPat2(patBind(pat), pat, scrutTy, env, ens)
 
 def bindPat2(b: String, pat: String, scrutTy: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
-  if (asAt(pat, 0) >= 0) bindAs(pat, scrutTy, env, ens) else if (consAt(pat, 0) >= 0) bindCons(pat, scrutTy, env, ens) else if (isTuplePat(pat)) bindTuple(pat, scrutTy, env) else if (hasComma(b)) bindTuple2(splitComma(b), recFieldTys(ens, patCore(pat)), env) else if (asAt(b, 0) >= 0) bindAs(b, bindTy(pat, scrutTy, ens), env, ens) else if (eqAt(b, 0) >= 0) bindEq(b, bindTy(pat, scrutTy, ens), env, ens) else if (consAt(b, 0) >= 0) bindCons(b, bindTy(pat, scrutTy, ens), env, ens) else if (b == "") bindBare(pat, scrutTy, env) else envBind(b, bindTy(pat, scrutTy, ens), env)
+  if (asAt(pat, 0) >= 0) bindAs(pat, scrutTy, env, ens) else if (consAt(pat, 0) >= 0) bindCons(pat, scrutTy, env, ens) else if (isTuplePat(pat)) bindTuple(pat, scrutTy, env) else if (hasComma(b) || eqAt(b, 0) >= 0) bindConstructorFields(splitComma(b), constructorFields(specializeEnums(ens, scrutTy), patCore(pat)), 0, env, ens) else if (asAt(b, 0) >= 0) bindAs(b, bindTy(pat, scrutTy, ens), env, ens) else if (eqAt(b, 0) >= 0) bindEq(b, bindTy(pat, scrutTy, ens), env, ens) else if (consAt(b, 0) >= 0) bindCons(b, bindTy(pat, scrutTy, ens), env, ens) else if (b == "") bindBare(pat, scrutTy, env) else envBind(b, bindTy(pat, scrutTy, ens), env)
+
+def constructorFields(ens: List[En], core: String): List[Param] =
+  if (List.exists(ens, en => en.name == core)) List.flatMap(List.filter(ens, en => en.name == core), en => List.flatMap(en.cases, c => c.fields)) else List.flatMap(ens, en => constructorFieldsIn(en, core))
+
+def constructorFieldsIn(en: En, core: String): List[Param] =
+  List.flatMap(en.cases, c => if (core == Str.concat(en.name, Str.concat(".", c.name)) || core == en.name && en.isRec || core == c.name) c.fields else [])
+
+def bindConstructorFields(names: List[String], fields: List[Param], i: Int, scope: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
+  if (List.isEmpty(names)) scope else bindConstructorField(List.at(names, 0), List.tail(names), fields, i, scope, ens)
+
+def bindConstructorField(name: String, rest: List[String], fields: List[Param], i: Int, scope: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
+  if (eqAt(name, 0) >= 0) bindNamedConstructorField(name, rest, fields, i, scope, ens, List.filter(fields, p => p.name == Str.take(name, eqAt(name, 0)))) else bindConstructorFields(rest, fields, i + 1, bindPat(name, if (i < List.len(fields)) List.at(fields, i).ty else "A", scope, ens), ens)
+
+def bindNamedConstructorField(name: String, rest: List[String], fields: List[Param], i: Int, scope: List[(String, Ty)], ens: List[En], selected: List[Param]): List[(String, Ty)] =
+  bindConstructorFields(rest, fields, i + 1, bindPat(Str.drop(name, eqAt(name, 0) + 3), if (List.isEmpty(selected)) "A" else List.at(selected, 0).ty, scope, ens), ens)
 
 def eqAt(s: String, i: Int): Int =
   eqAtD(s, i, 0)
 
 def eqAtD(s: String, i: Int, d: Int): Int =
-  if (i + 3 > Str.len(s)) 0 - 1 else if (d == 0 && Str.slice(s, i, i + 3) == " = ") i else eqAtD(s, i + 1, asDepth(s, i, d))
+  if (i + 3 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) eqAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Str.slice(s, i, i + 3) == " = ") i else eqAtD(s, i + 1, asDepth(s, i, d))
 
 def bindEq(b: String, ty: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   bindPat(Str.slice(b, eqAt(b, 0) + 3, Str.len(b)), ty, env, ens)
@@ -1077,7 +1092,7 @@ def consAt(s: String, i: Int): Int =
   consAtD(s, i, 0)
 
 def consAtD(s: String, i: Int, d: Int): Int =
-  if (i + 4 > Str.len(s)) 0 - 1 else if (d == 0 && Str.slice(s, i, i + 4) == " :: ") i else consAtD(s, i + 1, asDepth(s, i, d))
+  if (i + 4 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) consAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Str.slice(s, i, i + 4) == " :: ") i else consAtD(s, i + 1, asDepth(s, i, d))
 
 def bindCons(pat: String, scrutTy: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   bindConsAt(consAt(pat, 0), pat, scrutTy, env, ens)
@@ -1092,13 +1107,13 @@ def isBareName(s: String): Bool =
   Str.len(s) > 0 && isBareStart(Str.charAt(s, 0)) && s != "_"
 
 def isBareStart(c: Int): Bool =
-  c >= 65 && c <= 90 || c >= 97 && c <= 122
+  c == 95 || c >= 65 && c <= 90 || c >= 97 && c <= 122
 
 def asAt(s: String, i: Int): Int =
   asAtD(s, i, 0)
 
 def asAtD(s: String, i: Int, d: Int): Int =
-  if (i + 3 > Str.len(s)) 0 - 1 else if (d == 0 && Str.slice(s, i, i + 3) == " @ ") i else asAtD(s, i + 1, asDepth(s, i, d))
+  if (i + 3 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) asAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Str.slice(s, i, i + 3) == " @ ") i else asAtD(s, i + 1, asDepth(s, i, d))
 
 def asDepth(s: String, i: Int, d: Int): Int =
   asDepthCh(Str.charAt(s, i), d)
@@ -1125,7 +1140,7 @@ def commaAt(s: String, i: Int): Int =
   commaAtD(s, i, 0)
 
 def commaAtD(s: String, i: Int, d: Int): Int =
-  if (i >= Str.len(s)) 0 - 1 else commaAtC(s, i, d, Str.charAt(s, i))
+  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) commaAtD(s, Parse.quotedEnd(s, i), d) else commaAtC(s, i, d, Str.charAt(s, i))
 
 def commaAtC(s: String, i: Int, d: Int, c: Int): Int =
   if (c == 40 || c == 91) commaAtD(s, i + 1, d + 1) else if (c == 41 || c == 93) commaAtD(s, i + 1, if (d > 0) d - 1 else 0) else if (c == 44 && d == 0) i else commaAtD(s, i + 1, d)
