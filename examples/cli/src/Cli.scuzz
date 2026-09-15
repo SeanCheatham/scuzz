@@ -628,18 +628,21 @@ def runRecordEnv(out: String, headless: Bool, toml: String): String =
   if (Drive.uiEnvKind(headless, Manifest.uiRuntime(Manifest.manUi(Manifest.parse(toml)))) == "headless") "" else Str.concat("SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.json")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), " "))))
 
 def dispatchFmt(path: String, check: Bool): IO[Unit] =
-  Fs.list(Drive.joinSlash(path, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(path, "src"), ents).flatMap(files => fmtFiles(path, check, files, 0)))
+  Fs.list(Drive.joinSlash(path, "src")).flatMap(_ => fmtDir(path, "", check).flatMap(dirty => fmtDone(check, dirty)))
 
-def fmtFiles(dir: String, check: Bool, files: List[(String, String)], dirty: Int): IO[Unit] =
-  if (List.isEmpty(files)) fmtDone(check, dirty) else fmtFilesGo(dir, check, List.at(files, 0), files, dirty)
+def fmtDir(dir: String, rel: String, check: Bool): IO[Int] =
+  Fs.list(dir).flatMap(ents => fmtEntries(dir, rel, check, ents, 0))
 
-def fmtFilesGo(dir: String, check: Bool, h: (String, String), files: List[(String, String)], dirty: Int): IO[Unit] =
-  fmtOne(dir, check, h).flatMap(n => fmtFiles(dir, check, List.tail(files), dirty + n))
+def fmtEntries(dir: String, rel: String, check: Bool, ents: List[(String, Bool)], dirty: Int): IO[Int] =
+  if (List.isEmpty(ents)) IO.pure(dirty) else fmtEntry(dir, rel, check, List.at(ents, 0)).flatMap(n => fmtEntries(dir, rel, check, List.tail(ents), dirty + n))
 
-def fmtOne(dir: String, check: Bool, h: (String, String)): IO[Int] =
-  h match {
-    case (stem, src) => fmtOnePath(check, Drive.joinSlash(Drive.joinSlash(dir, "src"), Str.concat(stem, ".scuzz")), src)
+def fmtEntry(dir: String, rel: String, check: Bool, ent: (String, Bool)): IO[Int] =
+  ent match {
+    case (name, isDir) => if (isDir) if (Drive.skipWalk(name)) IO.pure(0) else fmtDir(Drive.joinSlash(dir, name), Drive.joinRel(rel, name), check) else if (fmtSource(rel, name)) Fs.read(Drive.joinSlash(dir, name)).flatMap(src => fmtOnePath(check, Drive.joinSlash(dir, name), src)) else IO.pure(0)
   }
+
+def fmtSource(rel: String, name: String): Bool =
+  Drive.isVerify(name) || Drive.isScenario(name) || rel == "src" && Drive.isScuzz(name)
 
 def fmtOnePath(check: Bool, path: String, src: String): IO[Int] =
   if (Parse.hasParseError(Parse.parse(Lexer.lex(src)))) IO.println(Str.concat(path, ": parse error; source is unchanged")).flatMap(_ => IO.fail("fmt")) else fmtOneGot(check, path, src, fmtSrc(src))

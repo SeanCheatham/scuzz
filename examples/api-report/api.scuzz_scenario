@@ -1,5 +1,5 @@
 def setup(): IO[Unit] =
-  IO.pure(())
+  Fs.write("report.json", "[]")
 
 private def reply(status: Int, body: String): IO[(Int, Map[String, String], String)] =
   IO.pure((status, Map.empty(), body))
@@ -11,7 +11,7 @@ private def handle(request: (String, String, Map[String, String], String)): IO[(
 
 private def request(path: String, token: String): IO[Unit] =
   for {
-    server <- Fiber.fork(Net.serveOnceTls(18083, handle))
+    server <- Fiber.fork(Net.serveTls(18083, handle))
     _ <- IO.ensure(IO.attempt(Main.runConfigured(s"https://127.0.0.1:18083$path", token, "report.json")).map(_ => ()), Fiber.interrupt(server))
   } yield ()
 
@@ -35,4 +35,52 @@ def noToken(): IO[Unit] =
 
 def insecureUrl(): IO[Unit] =
   IO.attempt(Main.runConfigured("http://127.0.0.1:18083/records", "sim-token", "report.json")).map(_ => ())
+
+private def transientReply(count: Ref[Int], failures: Int, status: Int, request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  Ref.updateAndGet(count, n => n + 1).flatMap(n => if (n <= failures) reply(status, "unavailable") else handle(request))
+
+private def transientRequest(failures: Int, status: Int, timeoutMs: Int): IO[Unit] =
+  for {
+    count <- Ref.of(0)
+    server <- Fiber.fork(Net.serveTls(18083, request => transientReply(count, failures, status, request)))
+    _ <- IO.ensure(IO.attempt(Report.run("https://127.0.0.1:18083/records", "sim-token", "report.json", timeoutMs)).map(_ => ()), Fiber.interrupt(server))
+  } yield ()
+
+def recovers(n: Int): IO[Unit] =
+  transientRequest(2, 502 + (if (n % 3 < 0) -(n % 3) else n % 3), 5000)
+
+def exhausted(): IO[Unit] =
+  transientRequest(3, 503, 5000)
+
+def retryDeadline(): IO[Unit] =
+  transientRequest(2, 503, 150)
+
+def permanentStatus(): IO[Unit] =
+  transientRequest(1, 401, 5000)
+
+private def rateReply(count: Ref[Int], start: Int, waitMs: Int, header: String, request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  Ref.updateAndGet(count, n => n + 1).flatMap(n => Clock.monotonic().flatMap(now => if (n == 1 || now - start < waitMs) IO.pure((429, Map.set(Map.empty(), "rEtRy-AfTeR", header), "limited")) else handle(request)))
+
+private def rateRequest(waitMs: Int, header: String, timeoutMs: Int): IO[Unit] =
+  for {
+    start <- Clock.monotonic()
+    count <- Ref.of(0)
+    server <- Fiber.fork(Net.serveTls(18083, request => rateReply(count, start, waitMs, header, request)))
+    _ <- IO.ensure(IO.attempt(Report.run("https://127.0.0.1:18083/records", "sim-token", "report.json", timeoutMs)).map(_ => ()), Fiber.interrupt(server))
+  } yield ()
+
+def rateLimited(n: Int): IO[Unit] =
+  rateRequest(1000, if (n % 2 == 0) "1" else " 001 ", 5000)
+
+def rateDeadline(): IO[Unit] =
+  rateRequest(1000, "1", 500)
+
+def rateExhausted(): IO[Unit] =
+  rateRequest(1000, "0", 5000)
+
+def badRetryAfter(): IO[Unit] =
+  rateRequest(0, "invalid", 5000)
+
+def zeroRetry(): IO[Unit] =
+  rateRequest(0, "0", 5000)
 

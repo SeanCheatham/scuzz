@@ -23,7 +23,7 @@ Upstream Scala Native is a reference, not a dependency. Divergence is intentiona
 | Topic | Choice |
 | --- | --- |
 | UI testing / CI | `*.scuzz_verify` + in-body `.require` + drivers through `scuzz fuzz --iterations`. Mutation is a phase. `--differential` compares live dumps across Skia backends |
-| Static hygiene | One linter: `scuzz check` (format-verify + typecheck; lints on this command; no `lint` subcommand). One formatter: `scuzz fmt` rewrites |
+| Static hygiene | One linter: `scuzz check` (format-verify + typecheck; lints on this command; no `lint` subcommand). One formatter: `scuzz fmt` rewrites live sources, scenarios, and claims |
 | Codegen | LLVM IR. Emit reads types from the checker. It does not guess from SSA names |
 | Renderer (v0) | Skia through thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
@@ -67,7 +67,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 
 - **Watch** rebuilds when sources or `scuzz.toml` change. `[ui]` `run --watch` is hot reload. See `scuzz docs gui`. IO-only `run --watch` kills and reruns.
 - **Static hygiene** is `scuzz check` (the linter). `scuzz fmt` rewrites. No `lint` subcommand.
-- **Verification** is built into `scuzz` and the language. A search failure fails `scuzz fuzz`. A mutation survivor does not. Catalog: run `scuzz docs verify`.
+- **Verification** is built into `scuzz` and the language. A search failure fails `scuzz fuzz`. A mutation survivor does not. The driver registry grows with the package. Drive names must be unique. Catalog: run `scuzz docs verify`.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps `check`. Panic, goto-def, and rename must use Scuzz source spans. Do not grow a second typer or schema.
 - **Dogfood IDE.** `scuzz ide` launches a Scuzz `[ui]` package. Headless stays a peer. Editor landmarks stay unnumbered. Docs may use Index Book. The app consumes `scuzz check` / `lsp` / `fmt` / `run` / `fuzz`. Do not add Desktop-only editor behavior. Do not ship a second `scuzz-ide` binary.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`, optional `[fuzz].score_floor`. No plugin DSL. Unknown keys rejected. `--headless` forces Headless. No `scuzz add`. No git or registry deps. No library publishing. A hosted registry may never ship.
@@ -91,7 +91,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO and impurity
 
-One failure channel: `SzError` on `IO[T]`. Typed `E` on `IO` without environment `R`. Do not add `ZIO[R, E, A]`. Blessed kits only. No app-level `IO.delay`. No user FFI, `extern`, or plugins. Determinism and effect capture are not settled. Cooperative single-threaded fibers are the scheduler. Simulation is hermetic. No live sockets under sim. Live HTTP uses this HTTP/1.0 stack plus OpenSSL. A response is `(Int, Map[String, String], String)`. Serve binds `0.0.0.0` and `::`. `Net.serveTls` and `Net.serveOnceTls` terminate TLS with a process cert. A loopback `https://` client does not verify that cert. Do not expose POSIX sockets. Do not add a second HTTP client. `Clock.iso8601` formats UTC from epoch milliseconds. No parse. No time zone kit. `Str.matches` is POSIX ERE full-string match on UTF-8 bytes. No capture. No replace. `Hash.sha256` returns lowercase hex of the SHA-256 of UTF-8 bytes. Software SHA-256. No OpenSSL. No HMAC. No other digests. `Hex.encode` returns lowercase hex of UTF-8 bytes. `Hex.decode` reverses that encoding. Odd length or a bad digit yields the empty string. `Base64.encode` returns RFC 4648 of UTF-8 bytes. `Base64.decode` reverses that encoding. Bad length, digit, or pad yields the empty string. No URL-safe alphabet. `Uuid.v4` returns an RFC 4122 version-4 UUID as lowercase hex with hyphens. It uses the blessed Random stream. No parse. No other versions. `Bytes.fromStr` copies UTF-8 bytes. `Bytes.len` is the byte count. No Fs or Net Bytes. Kits: run `scuzz docs kits`. A panic must print a Scuzz file and line.
+One failure channel: `SzError` on `IO[T]`. Typed `E` on `IO` without environment `R`. Do not add `ZIO[R, E, A]`. Blessed kits only. No app-level `IO.delay`. No user FFI, `extern`, or plugins. Determinism and effect capture are not settled. Cooperative single-threaded fibers are the scheduler. Simulation is hermetic. No live sockets under sim. Persistent HTTP servers wait for new requests until cancellation in live and simulation runtimes. Live HTTP uses this HTTP/1.0 stack plus OpenSSL. A response is `(Int, Map[String, String], String)`. Serve binds `0.0.0.0` and `::`. `Net.serveTls` and `Net.serveOnceTls` terminate TLS with a process cert. A loopback `https://` client does not verify that cert. Do not expose POSIX sockets. Do not add a second HTTP client. `Clock.iso8601` formats UTC from epoch milliseconds. No parse. No time zone kit. `Str.matches` is POSIX ERE full-string match on UTF-8 bytes. No capture. No replace. `Hash.sha256` returns lowercase hex of the SHA-256 of UTF-8 bytes. Software SHA-256. No OpenSSL. No HMAC. No other digests. `Hex.encode` returns lowercase hex of UTF-8 bytes. `Hex.decode` reverses that encoding. Odd length or a bad digit yields the empty string. `Base64.encode` returns RFC 4648 of UTF-8 bytes. `Base64.decode` reverses that encoding. Bad length, digit, or pad yields the empty string. No URL-safe alphabet. `Uuid.v4` returns an RFC 4122 version-4 UUID as lowercase hex with hyphens. It uses the blessed Random stream. No parse. No other versions. `Bytes.fromStr` copies UTF-8 bytes. `Bytes.len` is the byte count. No Fs or Net Bytes. Kits: run `scuzz docs kits`. A panic must print a Scuzz file and line.
 
 Each HTTP client call takes a request header map after the URL. Body methods take the body last. A server request is `(String, String, Map[String, String], String)`: path, method, headers, and body. Request header names use lowercase in handlers. The runtime owns Host, Content-Length, Connection, and Transfer-Encoding. Client maps cannot set these fields. Invalid names, control bytes other than tab, duplicate names with different case, and maps over 16 KiB fail before network dispatch. Simulation carries app headers through the virtual server. Header values do not enter the effect log.
 
@@ -138,10 +138,11 @@ Scala **nouns**, Rust/Cargo **verbs**. No JVM packages. Direction: payload **enu
 
 App correctness is not classical unit tests. Prefer mutation, fuzzing, properties, simulation, and determinism. All are first-class in the language and in `scuzz`.
 
-- **Claims** live in `*.scuzz_verify`. The author surface is `Timeline => Verdict`. Dump slot ids stay behind the algebra. Do not add a temporal-operator calculus.
+- **Claims** live in `*.scuzz_verify`. The author surface is `Timeline => Verdict`. Dump slot ids stay behind the algebra. `Timeline.fileTextIs` compares a file with expected text at a recorded state. It observes the hermetic filesystem. Missing files and directories return false. Do not add a temporal-operator calculus.
 - **`.require`** and `Property.sometimes` stay in live function bodies. They erase from live builds.
 - **Drivers** live in one `*.scuzz_scenario`. They are impure, parameterized, and oracle-free. `check` rejects `Property.*` and `.require` in scenario files.
 - **Simulation is hermetic.** Fuzz, mutation, and TestRuntime keep impurity inside fakes. No live sockets. Scheduler ownership, not address, is the determinism boundary.
+- **Probe limits.** Each probe has a 20-second deadline and a 512 MiB virtual memory limit. Simulation stops after 1000000 scheduler steps per IO run. A limit failure fails the probe. Process cancellation kills the shell and its process group.
 - **One `scuzz fuzz`.** `--iterations N` is the campaign. `--iterations 0` is corpus-only. Mutation is a phase of that command. Search failure fails the campaign. Catalog: run `scuzz docs verify`.
 
 ```text
@@ -165,7 +166,7 @@ GUI apps also target WebAssembly. Scuzz Docs is the first browser app. Full web 
 
 ## Open work
 
-Next: real tooling measured through `examples/api-report`. This example fetches authenticated JSON records and writes an open-record report. Its corpus covers successful requests, rejected credentials, invalid JSON, failed status, and timeout. Not checker Fun-string residuals. Not GUI. Not user FFI. Not a package registry.
+Next: real tooling measured through `examples/api-report`. This example fetches authenticated JSON records and writes an open-record report. It retries HTTP 429, 502, 503, and 504 at most twice. A numeric Retry-After header sets the delay in seconds. Without that header, HTTP 429 waits 1000 ms and gateway errors wait 100 ms. Invalid, ambiguous, or HTTP-date Retry-After values stop the request. One timeout covers all attempts and delays. Its corpus covers recovery, retry exhaustion, rejected credentials, invalid JSON, failed status, and timeout. File claims check report contents and preserve the prior report on failed requests. Not checker Fun-string residuals. Not GUI. Not user FFI. Not a package registry.
 
 Ranked list: [`gaps.md`](gaps.md).
 

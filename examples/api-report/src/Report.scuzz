@@ -27,9 +27,35 @@ def writeResponse(response: (Int, Map[String, String], String), output: String):
 }
   }
 
+def retryable(status: Int): Bool =
+  status == 429 || status == 502 || status == 503 || status == 504
+
+def delayMillis(seconds: Int): Int =
+  if (seconds < 0 || seconds > 9223372036854775) -1 else seconds * 1000
+
+def retryAfter(value: String): Int =
+  if (!Str.matches(value, "[ \t]*[0-9]+[ \t]*")) -1 else delayMillis(Str.toInt(Str.trim(value), -1))
+
+def retryDelay(status: Int, headers: Map[String, String]): Int =
+  if (!retryable(status)) -1 else retryHeader(status, headers, List.filter(Map.keys(headers), name => Str.toLower(name) == "retry-after"))
+
+private def retryHeader(status: Int, headers: Map[String, String], names: List[String]): Int =
+  if (List.isEmpty(names)) if (status == 429) 1000 else 100 else if (List.len(names) != 1) -1 else retryAfter(Map.getOrElse(headers, List.at(names, 0), ""))
+
+private def waitForRetry(url: String, headers: Map[String, String], remaining: Int, response: (Int, Map[String, String], String), delay: Int): IO[(Int, Map[String, String], String)] =
+  if (remaining <= 0 || delay < 0) IO.pure(response) else IO.sleep(delay).flatMap(_ => fetch(url, headers, remaining - 1))
+
+private def continueRequest(url: String, headers: Map[String, String], remaining: Int, response: (Int, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  response match {
+    case (status, responseHeaders, _) => waitForRetry(url, headers, remaining, response, retryDelay(status, responseHeaders))
+  }
+
+private def fetch(url: String, headers: Map[String, String], remaining: Int): IO[(Int, Map[String, String], String)] =
+  Net.httpGet(url, headers).flatMap(response => continueRequest(url, headers, remaining.require(n => n >= 0 && n <= 2), response))
+
 def run(url: String, token: String, output: String, timeoutMs: Int): IO[Unit] =
   if (Str.len(token) == 0) IO.fail("Set SCUZZ_API_TOKEN") else for {
-  response <- IO.timeout(timeoutMs, Net.httpGet(url, requestHeaders(token)))
+  response <- IO.timeout(timeoutMs, fetch(url, requestHeaders(token), 2))
   _ <- writeResponse(response, output)
 } yield ()
 

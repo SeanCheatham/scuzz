@@ -1,0 +1,8 @@
+[fuzz]
+oracle = "recovers"
+seed = 42
+schedule_seed = "2"
+pct_d = 2
+pct_k = 2
+fault_seed = "2"
+events = ["drive recovers -10"]

@@ -328,6 +328,9 @@ def mapGetEmptyOk(): Bool =
 def mapGetEmptyAt(m: Map): Bool =
   Map.contains(m, "e") && Map.get(m, "e") == Option.Some([]: List[String]) && Map.get(m, "z") == (Option.None: Option[List[String]])
 
+def mapParamRoundTrip(n: Int, value: String): Bool =
+  Map.getOrElse(Map.set(Map.empty(), "value", n), "value", 0) == n && Map.getOrElse(Map.set(Map.empty(), "value", value), "value", "") == value
+
 def mapSetProof(): IO[Unit] =
   for {
     mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")

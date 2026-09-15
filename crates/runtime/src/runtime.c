@@ -4008,6 +4008,8 @@ void sz_fiber_census(int64_t *live, int64_t *ready, int64_t *parked,
 static SzIoResult run_io(SzIo *root) {
   Sched sched;
   SzIoResult result;
+  uint64_t steps = 0;
+  int bounded = sz_testrt_clock_is_fake();
   result.ok = 0;
   result.value = NULL;
   result.error = NULL;
@@ -4030,6 +4032,9 @@ static SzIoResult run_io(SzIo *root) {
       if (f) {
         if (f->state == FIB_CANCELLED || f->state == FIB_DONE)
           continue;
+        /* Zero-delay loops cannot advance the simulation clock. */
+        if (bounded && ++steps > 1000000)
+          sz_panic("simulation exceeds 1000000 scheduler steps");
         step_fiber(&sched, f);
         /* Drain ready (including cancel finalizers) before exiting on root done. */
         continue;

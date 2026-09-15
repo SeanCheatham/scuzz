@@ -3003,19 +3003,10 @@ static SzIo *serve_one(ServeSt *st) {
   return fm_drop(prog, serve_after_listen, st);
 }
 
-static int serve_should_stop(ServeSt *st) {
-  if (st->left == 0)
-    return 1;
-  if (st->left < 0 && sz_testrt_net_is_fake() &&
-      sz_testrt_net_serve_pending_port(st->port) <= 0)
-    return 1;
-  return 0;
-}
-
 static SzIo *serve_again(void *value, void *env);
 
 static SzIo *serve_loop(ServeSt *st) {
-  if (serve_should_stop(st)) {
+  if (st->left == 0) {
     serve_free(st);
     return pure_drop(NULL);
   }
