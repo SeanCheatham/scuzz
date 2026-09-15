@@ -21,7 +21,10 @@ A package that calls Net fails: the NDK link does not include OpenSSL.
 simulator `.app` into `build/package/ios/`.
 `scuzz run --target ios` boots a simulator, installs the app, and streams output.
 `--watch` rebuilds and restarts. A build error preserves the running app.
-App source edits reuse native objects. App instructions: `scuzz docs ios`.
+App source edits reuse native objects. The iOS viewport uses safe areas and
+the docked keyboard boundary. Layout changes send shared resize events.
+Headless replays resize, lifecycle, and keyboard events from live records.
+App instructions: `scuzz docs ios`.
 
 | Target | Path | Role |
 | --- | --- | --- |

@@ -119,10 +119,14 @@ target limits: run `scuzz docs ios`.
 The session copies `debug.json` and `record.json` from the app to the build
 directory when the app stops. Replay recorded input with Headless.
 
-Run `./scripts/ci.sh ios` for the simulator proof. It checks dependency edits,
-source diagnostics, error recovery, native object reuse, manual restart, quit,
-and interruption. It also runs the Counter Headless claims. Set
-`SCUZZ_IOS_DEVICE` to select a simulator name or ID. The proof removes its app.
+Run `./scripts/ci.sh ios` for the simulator proof. The Darwin PR job runs this slice.
+The loop proof checks dependency edits, source diagnostics, error recovery,
+native object reuse, manual restart, quit, and interruption.
+The UIKit proof checks safe areas, viewport changes, software keyboard input,
+and keyboard dismissal. It restores the keyboard preference after the run.
+Both proofs use the selected simulator. Each proof removes its app.
+The slice also runs the Counter Headless claims.
+Set `SCUZZ_IOS_DEVICE` to select a simulator name or ID.
 
 ## Compiler campaigns
 

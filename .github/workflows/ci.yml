@@ -140,6 +140,8 @@ jobs:
         run: ./scripts/bootstrap.sh
       - name: Hello and Counter smoke
         run: ./scripts/ci.sh macos-hello
+      - name: iOS simulator proof
+        run: ./scripts/ci.sh ios
 
   # Full macOS packaging. Skip on push/PR.
   # Trigger manually: Actions → ci → Run workflow.

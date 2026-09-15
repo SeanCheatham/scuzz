@@ -124,6 +124,7 @@ try:
         wait_for(lambda: dead(working), "interrupt cleanup", 10)
         thread.join(timeout=10)
         assert not thread.is_alive(), "console process survives interruption"
+        subprocess.run([sys.executable, str(Path(__file__).with_name("test_viewport.py")), device], check=True)
         print("ios loop proof ok", flush=True)
 finally:
     for proc in sessions:

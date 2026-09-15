@@ -25,7 +25,6 @@ static char *g_text_bufs[TEXT_RING];
 static int g_text_i;
 static char *g_poll_text;
 static int g_soft_keyboard;
-static UIView *g_hidden_input;
 
 static int q_full(void) { return ((g_q_tail + 1) % EVENT_CAP) == g_q_head; }
 
@@ -126,11 +125,14 @@ int sz_mobile_push_event(const SzInputEvent *event) {
   if (!event)
     return 0;
   os_unfair_lock_lock(&g_q_lock);
-  if (event->kind == SZ_INPUT_POINTER &&
-      event->pointer_phase == SZ_POINTER_MOVE && g_q_head != g_q_tail) {
+  if (g_q_head != g_q_tail) {
     last = (g_q_tail + EVENT_CAP - 1) % EVENT_CAP;
-    if (g_queue[last].kind == SZ_INPUT_POINTER &&
-        g_queue[last].pointer_phase == SZ_POINTER_MOVE) {
+    if ((event->kind == SZ_INPUT_RESIZE &&
+         g_queue[last].kind == SZ_INPUT_RESIZE) ||
+        (event->kind == SZ_INPUT_POINTER &&
+         event->pointer_phase == SZ_POINTER_MOVE &&
+         g_queue[last].kind == SZ_INPUT_POINTER &&
+         g_queue[last].pointer_phase == SZ_POINTER_MOVE)) {
       g_queue[last] = *event;
       os_unfair_lock_unlock(&g_q_lock);
       return 1;
@@ -181,6 +183,9 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   size_t _nbytes;
   int _pw;
   int _ph;
+  int _vw;
+  int _vh;
+  CGFloat _scale;
 }
 - (void)setFramePixels:(NSData *)data width:(int)w height:(int)h;
 @end
@@ -189,13 +194,49 @@ int sz_mobile_poll_event(SzInputEvent *out) {
 
 - (instancetype)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
-  if (self)
+  if (self) {
     self.backgroundColor = [UIColor whiteColor];
+    [NSNotificationCenter.defaultCenter
+        addObserver:self selector:@selector(keyboardWillHide:)
+        name:UIKeyboardWillHideNotification object:nil];
+  }
   return self;
 }
 
 - (void)dealloc {
+  [NSNotificationCenter.defaultCenter removeObserver:self];
   free(_pixels);
+}
+
+- (void)keyboardWillHide:(NSNotification *)notification {
+  (void)notification;
+  if (g_soft_keyboard) {
+    SzInputEvent event = {0};
+    event.kind = SZ_INPUT_KEYBOARD;
+    sz_mobile_push_event(&event);
+  }
+}
+
+- (void)layoutSubviews {
+  [super layoutSubviews];
+  int w = (int)self.bounds.size.width;
+  int h = (int)self.bounds.size.height;
+  CGFloat scale = self.window.screen.scale;
+  if (w <= 0 || h <= 0 || scale <= 0 ||
+      (w == _vw && h == _vh && scale == _scale))
+    return;
+  SzInputEvent event = {0};
+  event.kind = SZ_INPUT_RESIZE;
+  event.width = w;
+  event.height = h;
+  event.scale = scale;
+  if (sz_mobile_push_event(&event)) {
+    _vw = w;
+    _vh = h;
+    _scale = scale;
+  } else {
+    dispatch_async(dispatch_get_main_queue(), ^{ [self setNeedsLayout]; });
+  }
 }
 
 - (void)setFramePixels:(NSData *)data width:(int)w height:(int)h {
@@ -274,21 +315,11 @@ int sz_mobile_poll_event(SzInputEvent *out) {
 
 @end
 
-/* Invisible first responder. Insert and backspace become TEXT_EDIT.
- * Soft keyboard stays off until sz_mobile_set_keyboard(1). Hardware keys
- * still reach the field so the simulator can type without a tap. */
+/* Native text input for the focused Scuzz field. */
 @interface ScuzzKeyboardField : UITextField <UITextFieldDelegate>
 @end
 
 @implementation ScuzzKeyboardField
-- (UIView *)inputView {
-  if (g_soft_keyboard)
-    return nil;
-  if (!g_hidden_input)
-    g_hidden_input = [[UIView alloc] initWithFrame:CGRectZero];
-  return g_hidden_input;
-}
-
 - (BOOL)textField:(UITextField *)textField
     shouldChangeCharactersInRange:(NSRange)range
                 replacementString:(NSString *)string {
@@ -321,13 +352,13 @@ int sz_mobile_poll_event(SzInputEvent *out) {
 static ScuzzView *g_view;
 static ScuzzKeyboardField *g_keyboard_field;
 
-UIView *scuzz_ios_make_view(CGRect bounds) {
+static UIView *scuzz_ios_make_view(CGRect bounds) {
   g_view = [[ScuzzView alloc] initWithFrame:bounds];
-  /* Alpha 0: a hidden view cannot become first responder. */
+  /* The one-point field accepts native keyboard input. */
   g_keyboard_field = [[ScuzzKeyboardField alloc]
       initWithFrame:CGRectMake(0, 0, 1, 1)];
-  g_keyboard_field.alpha = 0;
-  g_keyboard_field.userInteractionEnabled = NO;
+  g_keyboard_field.textColor = UIColor.clearColor;
+  g_keyboard_field.tintColor = UIColor.clearColor;
   g_keyboard_field.autocorrectionType = UITextAutocorrectionTypeNo;
   g_keyboard_field.autocapitalizationType = UITextAutocapitalizationTypeNone;
   g_keyboard_field.spellCheckingType = UITextSpellCheckingTypeNo;
@@ -336,7 +367,6 @@ UIView *scuzz_ios_make_view(CGRect bounds) {
   [g_view addSubview:g_keyboard_field];
   dispatch_async(dispatch_get_main_queue(), ^{
     const char *typed;
-    [g_keyboard_field becomeFirstResponder];
     typed = getenv("SCUZZ_IOS_TYPE");
     if (!typed || !typed[0])
       return;
@@ -360,13 +390,32 @@ UIView *scuzz_ios_make_view(CGRect bounds) {
   return g_view;
 }
 
+UIViewController *scuzz_ios_make_controller(void) {
+  UIViewController *controller = [[UIViewController alloc] init];
+  UIView *container = [[UIView alloc] initWithFrame:CGRectZero];
+  container.backgroundColor = [UIColor whiteColor];
+  controller.view = container;
+  UIView *content = scuzz_ios_make_view(CGRectZero);
+  content.translatesAutoresizingMaskIntoConstraints = NO;
+  [container addSubview:content];
+  UILayoutGuide *safe = container.safeAreaLayoutGuide;
+  [NSLayoutConstraint activateConstraints:@[
+    [content.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
+    [content.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
+    [content.topAnchor constraintEqualToAnchor:safe.topAnchor],
+    [content.bottomAnchor
+        constraintEqualToAnchor:container.keyboardLayoutGuide.topAnchor]
+  ]];
+  return controller;
+}
+
+CGRect scuzz_ios_viewport(void) { return g_view.bounds; }
+
 int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
                       int pixel_h, const uint8_t *rgba, size_t nbytes) {
   NSData *frame;
   size_t need;
   (void)title;
-  (void)point_w;
-  (void)point_h;
   if (!rgba)
     return 0;
   if (!frame_bytes(pixel_w, pixel_h, &need))
@@ -376,7 +425,10 @@ int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
   /* Copy: the worker thread reuses the raster on the next pump. */
   frame = [NSData dataWithBytes:rgba length:need];
   dispatch_async(dispatch_get_main_queue(), ^{
-    [g_view setFramePixels:frame width:pixel_w height:pixel_h];
+    /* A resize can overtake a frame from the worker. */
+    if ((int)g_view.bounds.size.width == point_w &&
+        (int)g_view.bounds.size.height == point_h)
+      [g_view setFramePixels:frame width:pixel_w height:pixel_h];
   });
   return 1;
 }
@@ -386,9 +438,12 @@ void sz_mobile_set_keyboard(int visible) {
     if (!g_keyboard_field)
       return;
     g_soft_keyboard = visible ? 1 : 0;
-    [g_keyboard_field reloadInputViews];
-    if (![g_keyboard_field isFirstResponder])
-      [g_keyboard_field becomeFirstResponder];
+    if (visible) {
+      if (![g_keyboard_field isFirstResponder])
+        [g_keyboard_field becomeFirstResponder];
+    } else {
+      [g_keyboard_field resignFirstResponder];
+    }
   });
 }
 
