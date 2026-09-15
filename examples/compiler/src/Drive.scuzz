@@ -942,13 +942,30 @@ def pkgWebResult(code: Int, out: String, err: String): IO[Unit] =
   Sys.write(out).flatMap(_ => if (code == 0) IO.println("scuzz package ok (web)") else IO.println(err).flatMap(_ => IO.fail(Str.concat("web package failed with exit code ", Str.fromInt(code)))))
 
 def pkgHost(dir: String, outDir: String): IO[Unit] =
-  compileLinked(dir, outDir).flatMap(_ => pkgHostMan(dir, outDir))
+  Fs.mkdirs(outDir).flatMap(_ => compileLinked(dir, outDir).flatMap(_ => pkgHostMan(dir, outDir)))
 
 def pkgHostMan(dir: String, outDir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgHostNamed(Manifest.parse(toml), dir, outDir, toml))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgHostNamed(Manifest.parse(toml), outDir))
 
-def pkgHostNamed(m: Man, _dir: String, outDir: String, toml: String): IO[Unit] =
-  manNeed(m).flatMap(_ => pkgHostCopy(m.name, exeName(outDir, m.name), joinSlash(joinSlash(outDir, "package"), "host"), Manifest.uiBundle(Manifest.manUi(m))))
+def pkgHostNamed(m: Man, outDir: String): IO[Unit] =
+  manNeed(m).flatMap(_ => hostMac().flatMap(mac => if (mac && m.hasUi) pkgMac(m, outDir) else pkgHostCopy(m.name, exeName(outDir, m.name), joinSlash(joinSlash(outDir, "package"), "host"), Manifest.uiBundle(Manifest.manUi(m)))))
+
+def pkgMac(m: Man, outDir: String): IO[Unit] =
+  crateHome().flatMap(h => runLine(pkgMacCmd(h, m, outDir)).flatMap(result => pkgMacGot(result)))
+
+def pkgMacCmd(h: String, m: Man, outDir: String): String =
+  Str.concat("python3 ", Str.concat(shQuote(crateAt(h, "crates/embedder-desktop/package_macos.py")), pkgMacArgs(exeName(outDir, m.name) :: joinSlash(joinSlash(outDir, "package"), "host") :: m.name :: m.version :: Manifest.uiBundle(Manifest.manUi(m)) :: Manifest.uiWidth(Manifest.manUi(m)) :: Manifest.uiHeight(Manifest.manUi(m)) :: Manifest.uiScale(Manifest.manUi(m)) :: [])))
+
+def pkgMacArgs(args: List[String]): String =
+  args match {
+    case [] => ""
+    case arg :: rest => Str.concat(" ", Str.concat(shQuote(arg), pkgMacArgs(rest)))
+  }
+
+def pkgMacGot(result: (Int, String, String)): IO[Unit] =
+  result match {
+    case (code, out, err) => Sys.write(out).flatMap(_ => if (code == 0) IO.pure(()) else Sys.write(err).flatMap(_ => IO.fail("macOS package")))
+  }
 
 def pkgHostCopy(name: String, exe: String, dest: String, id: String): IO[Unit] =
   Fs.mkdirs(dest).flatMap(_ => pkgHostCp(name, exe, dest, id))

@@ -13,6 +13,25 @@ static void enqueue_compose(const char *text);
 static void enqueue_text_edit(const char *text);
 static void enqueue_key(const char *name, const char *text, int mods, int repeat);
 
+/* Finder launch has no CLI environment. Read the packaged UI configuration. */
+__attribute__((constructor)) static void configure_bundle(void) {
+  @autoreleasepool {
+    NSBundle *bundle = NSBundle.mainBundle;
+    NSDictionary *ui = [bundle objectForInfoDictionaryKey:@"ScuzzUI"];
+    if (![bundle.bundleURL.pathExtension isEqualToString:@"app"] ||
+        ![ui isKindOfClass:NSDictionary.class])
+      return;
+    setenv("SCUZZ_UI_RUNTIME", "desktop", 0);
+    const char *keys[] = {"SCUZZ_UI_WIDTH", "SCUZZ_UI_HEIGHT", "SCUZZ_UI_SCALE"};
+    NSString *labels[] = {@"width", @"height", @"scale"};
+    for (int i = 0; i < 3; i++) {
+      id value = ui[labels[i]];
+      if (value)
+        setenv(keys[i], [value description].UTF8String, 0);
+    }
+  }
+}
+
 @interface ScuzzContentView : NSView <NSTextInputClient>
 @end
 

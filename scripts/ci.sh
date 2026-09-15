@@ -64,6 +64,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   linux-headless  full Linux job minus apt install and artifact upload
   macos-smoke     required Darwin PR job (runtime + hello smoke)
   macos-hello     hello and counter fuzz, kernel check, bad-intent
+  macos-app       relocated macOS UI bundle and Finder launch
   oracles         hello, tyck, kits, codegen, hello-outdir, fixedpoint
   install-dry     installer and bump_version dry-run
   fetch-skia      fetch_skia.sh retry proof (no GitHub Releases)
@@ -590,7 +591,11 @@ slice_mobile() {
   grep -q "UiRuntime.Mobile" /tmp/mobile.out
   grep -q "scuzz mobile: present" /tmp/mobile.out
   "$SCUZZ" package --target host examples/counter
-  test -x examples/counter/build/package/host/run.sh
+  if [ "$(uname -s)" = Darwin ]; then
+    test -x examples/counter/build/package/host/counter.app/Contents/MacOS/counter
+  else
+    test -x examples/counter/build/package/host/run.sh
+  fi
   if "$SCUZZ" package --target android examples/counter > /tmp/android-pkg.out 2>&1; then
     test -f examples/counter/build/package/android/lib/arm64-v8a/libscuzz.so
     test -f examples/counter/build/package/android/counter.apk
@@ -606,9 +611,21 @@ slice_mobile() {
   else
     grep -q "xcode-select --install" /tmp/ios-pkg.out
   fi
-  env SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
-    ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
-  grep -q "scuzz mobile: present" /tmp/pkg-host.out
+  if [ "$(uname -s)" = Darwin ]; then
+    env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
+      ./examples/counter/build/package/host/counter.app/Contents/MacOS/counter 2>&1 | tee /tmp/pkg-host.out
+    grep -q "desktop embedder" /tmp/pkg-host.out
+  else
+    env SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
+      ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
+    grep -q "scuzz mobile: present" /tmp/pkg-host.out
+  fi
+}
+
+slice_macos_app() {
+  need_scuzz
+  need_cmd python3 "Install the Xcode command-line tools"
+  python3 crates/embedder-desktop/tests/test_package.py "$SCUZZ"
 }
 
 slice_macos_hello() {
@@ -626,6 +643,7 @@ slice_macos_hello() {
 slice_macos_smoke() {
   slice_runtime
   slice_macos_hello
+  if [ "$(uname -s)" = Darwin ]; then slice_macos_app; fi
 }
 
 slice_tyck_replay() {
@@ -740,6 +758,7 @@ case "$SLICE" in
   desktop) slice_desktop ;;
   mobile) slice_mobile ;;
   ios) slice_ios ;;
+  macos-app) slice_macos_app ;;
   web) slice_web ;;
   oracles) slice_oracles ;;
   *)

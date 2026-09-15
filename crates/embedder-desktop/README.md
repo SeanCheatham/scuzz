@@ -22,3 +22,9 @@ Linked when present.
 - Retina: session paints at `backingScaleFactor` and presents a point-sized
   `NSImage` with a matching pixel buffer (no upsample blur)
 - Link: `-framework Cocoa -lobjc` (apps also need `-framework CoreFoundation`)
+
+On macOS, `scuzz package --target host` builds a local UI `.app` bundle.
+The bundle includes its non-system libraries and an ad hoc signature.
+Finder launch uses Desktop and reads UI size from the bundle metadata.
+Explicit runtime environment values take priority.
+Run `./scripts/ci.sh macos-app` to prove relocation and Finder launch.
