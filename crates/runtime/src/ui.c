@@ -20,6 +20,8 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <time.h>
+#include <limits.h>
+#include <math.h>
 
 static int want_gpu_presenter(void) {
   const char *e = getenv("SCUZZ_SKIA");
@@ -1154,6 +1156,26 @@ static void record_live_event_json(SzUiSession *session,
                                    const SzInputEvent *ev) {
   if (ev->kind == SZ_INPUT_TAP) {
     record_json_event(session, jrec_tap_or_xy(session, "tap", ev->x, ev->y));
+  } else if (ev->kind == SZ_INPUT_RESIZE) {
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    char tmp[160];
+    snprintf(tmp, sizeof tmp,
+             "{\"op\":\"resize\",\"width\":%d,\"height\":%d,\"scale\":%.6g}",
+             ev->width, ev->height, ev->scale);
+    sz_dump_append(&buf, &len, &cap, tmp);
+    record_json_event(session, buf);
+  } else if (ev->kind == SZ_INPUT_LIFECYCLE) {
+    record_json_event(session,
+                      jrec_str_event("lifecycle", "phase",
+                                     lifecycle_name(ev->lifecycle)));
+  } else if (ev->kind == SZ_INPUT_KEYBOARD) {
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    sz_dump_append(&buf, &len, &cap,
+                   ev->keyboard_visible ? "{\"op\":\"keyboard\",\"visible\":true}"
+                                        : "{\"op\":\"keyboard\",\"visible\":false}");
+    record_json_event(session, buf);
   } else if (ev->kind == SZ_INPUT_KEY && ev->key && ev->key[0]) {
     if (!clipboard_chord(ev->key, ev->key_mods))
       record_json_event(session, jrec_key(ev));
@@ -1839,30 +1861,39 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
     sync_keyboard(session);
     session_mark_dirty(session);
     return 1;
-  case SZ_INPUT_RESIZE:
-    if (event->width <= 0 || event->height <= 0)
+  case SZ_INPUT_RESIZE: {
+    double scale = event->scale == 0 ? session->cfg.scale : event->scale;
+    SkSurface *surface;
+    if (event->width <= 0 || event->height <= 0 || !isfinite(scale) ||
+        scale <= 0 || event->width * scale > INT_MAX - 0.5 ||
+        event->height * scale > INT_MAX - 0.5)
       return 0;
-    sk_surface_unref(session->surface);
-    if (event->scale > 0) session->cfg.scale = event->scale;
-    session->cfg.width = event->width;
-    session->cfg.height = event->height;
+    if (event->width == session->cfg.width &&
+        event->height == session->cfg.height && scale == session->cfg.scale)
+      return 1;
     {
-      int pw = (int)(event->width * session->cfg.scale + 0.5);
-      int ph = (int)(event->height * session->cfg.scale + 0.5);
+      int pw = (int)(event->width * scale + 0.5);
+      int ph = (int)(event->height * scale + 0.5);
       if (pw < 1)
         pw = 1;
       if (ph < 1)
         ph = 1;
-      session->surface = make_session_surface(pw, ph);
+      surface = make_session_surface(pw, ph);
     }
-    if (!session->surface)
+    if (!surface)
       return 0;
+    sk_surface_unref(session->surface);
+    session->surface = surface;
+    session->cfg.scale = scale;
+    session->cfg.width = event->width;
+    session->cfg.height = event->height;
     session->canvas = sk_surface_get_canvas(session->surface);
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
     sz_view_reveal_focus(session->root);
     session_mark_dirty(session);
     return 1;
+  }
   case SZ_INPUT_POINTER:
     return inject_pointer(session, event);
   case SZ_INPUT_SCROLL:

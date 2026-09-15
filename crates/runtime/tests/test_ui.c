@@ -2791,9 +2791,81 @@ static void test_focus_revealed_after_resize(void) {
   assert(sz_ui_pump_sync(session));
   frame = sz_view_frame(field);
   assert(frame.y >= 0 && frame.y + frame.h <= 240);
+  uint8_t *pixels;
+  size_t bytes;
+  assert(sz_ui_snapshot_png_bytes(session, &pixels, &bytes));
+  resize.scale = NAN;
+  assert(!sz_ui_inject_sync(session, &resize));
+  resize.scale = -1;
+  assert(!sz_ui_inject_sync(session, &resize));
+  resize.scale = 1e30;
+  assert(!sz_ui_inject_sync(session, &resize));
+  uint8_t *after;
+  size_t unchanged;
+  assert(sz_ui_snapshot_png_bytes(session, &after, &unchanged));
+  assert(unchanged == bytes && memcmp(pixels, after, bytes) == 0);
+  free(pixels);
+  free(after);
   sz_ui_unmount(session);
   sz_signal_str_free(draft);
   sz_signal_int_free(page);
+}
+
+static void test_viewport_record_replay(void) {
+  const char *record = "/tmp/scuzz_ui_viewport_record.json";
+  const char *dump = "/tmp/scuzz_ui_viewport_dump.json";
+  for (int scale = 1; scale <= 2; scale++) {
+    for (int replay = 0; replay <= 1; replay++) {
+      SzSignalStr *draft = sz_signal_str("");
+      SzView *field = sz_view_text_field(draft, "draft");
+      SzView *content = sz_view_column();
+      sz_view_add_child(content, sz_view_sized(20, 900, sz_view_text("space")));
+      sz_view_add_child(content, field);
+      SzView *root = sz_view_scroll(content);
+      SzUiConfig cfg = {0};
+      cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+      cfg.width = 320; cfg.height = 720; cfg.scale = scale;
+      SzUiSession *session = sz_ui_mount(&cfg, root);
+      assert(session);
+      sz_ui_session_take_root(session);
+      sz_ui_session_focus_view(session, field);
+      if (replay) {
+        sz_ui_script_run_file(session, record);
+      } else {
+        assert(sz_ui_session_set_record(session, record));
+        SzInputEvent event = {0};
+        event.kind = SZ_INPUT_TEXT_EDIT; event.text = "caf\xc3\xa9";
+        assert(sz_ui_session_live_inject(session, &event));
+        event.kind = SZ_INPUT_RESIZE;
+        event.width = 720; event.height = 320; event.scale = scale;
+        assert(sz_ui_session_live_inject(session, &event));
+        event.kind = SZ_INPUT_LIFECYCLE; event.lifecycle = SZ_LIFECYCLE_PAUSE;
+        assert(sz_ui_session_live_inject(session, &event));
+        event.lifecycle = SZ_LIFECYCLE_RESUME;
+        assert(sz_ui_session_live_inject(session, &event));
+        event.kind = SZ_INPUT_KEYBOARD; event.keyboard_visible = 1;
+        assert(sz_ui_session_live_inject(session, &event));
+        event.kind = SZ_INPUT_RESIZE; event.width = 320; event.height = 240;
+        assert(sz_ui_session_live_inject(session, &event));
+      }
+      assert(sz_ui_pump_sync(session));
+      SzRect frame = sz_view_frame(field);
+      assert(frame.x >= 0 && frame.x + frame.w <= 320);
+      assert(frame.y >= 0 && frame.y + frame.h <= 240);
+      assert(strcmp(sz_signal_str_get(draft), "caf\xc3\xa9") == 0);
+      assert(sz_ui_session_keyboard_visible(session));
+      assert(sz_ui_session_lifecycle(session) == SZ_LIFECYCLE_RESUME);
+      assert(sz_ui_session_set_debug_dump(session, dump));
+      assert(sz_ui_session_dump_now(session));
+      char *body = slurp_cstr(dump);
+      assert(strstr(body, "\"width\":320,\"height\":240") != NULL);
+      free(body);
+      sz_ui_unmount(session);
+      sz_signal_str_free(draft);
+    }
+  }
+  remove(record);
+  remove(dump);
 }
 
 static void test_code_copy_and_heading(void) {
@@ -16648,6 +16720,7 @@ int main(void) {
   test_session_inject_selection_clipboard();
   test_code_copy_and_heading();
   test_focus_revealed_after_resize();
+  test_viewport_record_replay();
   test_session_inject_field_index();
   test_button_set_and_show_when();
   test_widgets();

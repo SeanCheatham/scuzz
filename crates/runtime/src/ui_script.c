@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <string.h>
 
 int sz_ui_collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
@@ -287,6 +288,9 @@ static void script_after_event(SzUiSession *session) {
      {"op":"tap","i":N}        activate the nth tap target in a11y preorder; missing target is a no-op
      {"op":"tap","id":"button:+1"}  activate the tap target whose last_hit key matches; missing target is a no-op
      {"op":"xy","x":X,"y":Y}  inject TAP at logical point; miss does not panic
+     {"op":"resize","width":W,"height":H,"scale":S}  resize the viewport; optional scale keeps the current scale
+     {"op":"lifecycle","phase":P}  pause, resume, or stop
+     {"op":"keyboard","visible":B}  set soft keyboard visibility
      {"op":"text","value":S}  replace the [fields] starred TextField with S; no field is a no-op
      {"op":"text","i":N,"value":S}  replace dump-index N (a11y order)
      {"op":"type","value":S}  insert S at the caret on the starred TextField; empty is a no-op
@@ -375,6 +379,32 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
       sz_panic("Ui.run: inject xy needs x and y");
     script_xy(session, (float)sz_jev_num(ev, "x", 0.0),
               (float)sz_jev_num(ev, "y", 0.0));
+  } else if (strcmp(op, "resize") == 0) {
+    SzInputEvent e = {0};
+    int64_t width = sz_jev_int(ev, "width", 0);
+    int64_t height = sz_jev_int(ev, "height", 0);
+    if (width <= 0 || width > INT_MAX || height <= 0 || height > INT_MAX)
+      sz_panic("Ui.run: inject resize needs valid width and height");
+    e.kind = SZ_INPUT_RESIZE;
+    e.width = (int)width;
+    e.height = (int)height;
+    e.scale = sz_jev_num(ev, "scale", 0);
+    if (!sz_ui_inject_sync(session, &e))
+      sz_panic("Ui.run: inject resize needs positive width, height, and scale");
+  } else if (strcmp(op, "lifecycle") == 0) {
+    SzInputEvent e = {0};
+    const char *phase = sz_jev_str(ev, "phase");
+    e.kind = SZ_INPUT_LIFECYCLE;
+    e.lifecycle = strcmp(phase, "pause") == 0 ? SZ_LIFECYCLE_PAUSE :
+                  strcmp(phase, "resume") == 0 ? SZ_LIFECYCLE_RESUME :
+                  strcmp(phase, "stop") == 0 ? SZ_LIFECYCLE_STOP : 0;
+    if (!sz_ui_inject_sync(session, &e))
+      sz_panic("Ui.run: inject lifecycle needs pause, resume, or stop");
+  } else if (strcmp(op, "keyboard") == 0) {
+    SzInputEvent e = {0};
+    e.kind = SZ_INPUT_KEYBOARD;
+    e.keyboard_visible = sz_jev_bool(ev, "visible");
+    sz_ui_inject_sync(session, &e);
   } else if (strcmp(op, "text") == 0) {
     SzInputEvent e;
     int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
@@ -534,4 +564,3 @@ void sz_ui_script_run_file(SzUiSession *session, const char *path) {
     sz_free(line);
   }
 }
-
