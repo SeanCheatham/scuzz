@@ -6,10 +6,25 @@
 static SzUiSession *active;
 static SzString *snapshot;
 
-void sz_web_idle_wake(void) {}
+static int loop_paused;
+
+void sz_web_idle_wake(void) {
+  if (!loop_paused)
+    return;
+  loop_paused = 0;
+  emscripten_resume_main_loop();
+}
+
+void sz_web_loop_pause(void) {
+  if (loop_paused)
+    return;
+  loop_paused = 1;
+  emscripten_pause_main_loop();
+}
 
 void sz_web_live_loop(void (*frame)(void)) {
-  /* rAF. Return so a later JS ccall is a new WASM entry. Idle frames skip paint. */
+  /* rAF. Return so a later JS ccall is a new WASM entry. An idle frame
+   * pauses the loop. sz_web_idle_wake resumes it. */
   emscripten_set_main_loop(frame, 0, 0);
 }
 
@@ -67,9 +82,15 @@ EM_JS(void, sz_web_present, (int width, int height, const uint8_t *rgba), {
   const canvas = Module.canvas;
   if (canvas.width !== width) canvas.width = width;
   if (canvas.height !== height) canvas.height = height;
+  /* Reuse the ImageData and context. A fresh pair per paint allocates the
+   * full framebuffer twice. */
+  let frame = Module.presentFrame;
+  if (!frame || frame.width !== width || frame.height !== height)
+    frame = Module.presentFrame = {width, height,
+      context: canvas.getContext('2d'), image: new ImageData(width, height)};
   const start = Number(rgba);
-  const pixels = new Uint8ClampedArray(HEAPU8.subarray(start, start + width * height * 4));
-  canvas.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
+  frame.image.data.set(HEAPU8.subarray(start, start + width * height * 4));
+  frame.context.putImageData(frame.image, 0, 0);
 });
 
 static EM_BOOL resize(int type, const EmscriptenUiEvent *event, void *data) {

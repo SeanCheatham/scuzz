@@ -58,7 +58,8 @@ The browser target uses the shared Signals, View layout, and software paint
 path. Browser font measurement and rasterization use the same monospace font.
 Emscripten keeps the 64-bit runtime layout and lowers the module to wasm32.
 The app runs on the browser thread. The UI loop paints when the session is
-dirty. It waits when nothing changes. The output needs no worker threads or
+dirty. The frame loop pauses when nothing changes. An input event or a
+signal write resumes it. The output needs no worker threads or
 cross-origin isolation headers.
 
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
@@ -66,6 +67,7 @@ and resize events. Wheel and canvas touch listeners that cancel the event
 register as non-passive. Native network and process effects fail packaging.
 Files use Emscripten memory storage. They do not persist across page reloads.
 Static text supports browser selection and copying through a DOM text layer.
+A removed focused control moves focus to the text layer.
 Index Book sections use URL fragments for links and browser history.
 In-content `View.link` and `View.navTile` controls use the same `#section=`
 fragment. An `http://` or `https://` route is a real URL. Icons and remaining

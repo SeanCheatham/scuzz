@@ -10,6 +10,11 @@ async function check(browserType, url, mobile) {
   try {
     const context = await browser.newContext({viewport: mobile ? {width: 390, height: 720} : {width: 1000, height: 720},
       hasTouch: mobile, isMobile: mobile, deviceScaleFactor: 2});
+    await context.addInitScript(() => {
+      window.rafRequests = 0;
+      const original = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = callback => { window.rafRequests += 1; return original(callback); };
+    });
     if (browserType === chromium) await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const page = await context.newPage();
     const errors = [];
@@ -50,10 +55,13 @@ async function check(browserType, url, mobile) {
     {
       const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
       const pumps = await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], []));
+      const frames = await page.evaluate(() => window.rafRequests);
       assert(paints >= 1, 'first paint');
       await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 400)));
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], [])), paints);
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], [])), pumps);
+      // An idle session pauses the frame loop.
+      assert.equal(await page.evaluate(() => window.rafRequests), frames, 'idle frame loop');
     }
     assert.equal(await page.getByRole('heading', {name: 'Start', level: 1}).count(), 1);
     assert.equal(await page.getByRole('link', {name: 'Install', exact: true}).count(), 1);
@@ -88,9 +96,12 @@ async function check(browserType, url, mobile) {
     {
       const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
       const pumps = await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], []));
+      const frames = await page.evaluate(() => window.rafRequests);
       await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 400)));
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], [])), paints);
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], [])), pumps);
+      // The click resumes the loop. The settled session pauses it again.
+      assert.equal(await page.evaluate(() => window.rafRequests), frames, 'idle frame loop');
     }
     const headings = {Install: 'Install', Language: 'Language', GUI: 'GUI', Verify: 'Verify', Web: 'Web'};
     for (const [label, heading] of Object.entries(headings)) {
@@ -295,6 +306,13 @@ async function check(browserType, url, mobile) {
     await page.getByRole('tabpanel', {name: 'Live example', exact: true}).waitFor();
     assert.equal(await field.inputValue(), savedText);
     assert.equal(await editor.inputValue(), 'one\ntwo 🌍');
+    // Removing the focused control moves focus to the text layer.
+    await editor.focus();
+    await sourceTab.evaluate(node => node.click());
+    await page.getByRole('tabpanel', {name: 'Source', exact: true}).waitFor();
+    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'text-layer');
+    await liveTab.evaluate(node => node.click());
+    await page.getByRole('tabpanel', {name: 'Live example', exact: true}).waitFor();
     await liveTab.focus(); await page.keyboard.press('End'); await page.keyboard.press('Home');
     assert(await liveTab.evaluate(node => node === document.activeElement));
     await page.setViewportSize({width: 390, height: 400});

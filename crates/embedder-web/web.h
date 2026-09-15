@@ -4,9 +4,14 @@
 void sz_web_stop(void);
 void sz_web_start(SzUiSession *session);
 /* Start the live rAF loop. Return so a later JS ccall is a new WASM entry.
- * Idle frames skip paint. Keep the loop running so the runtime stays live. */
+ * An idle frame pauses the loop. Keep the loop mounted so the runtime stays
+ * live. */
 void sz_web_live_loop(void (*frame)(void));
-/* No-op. The rAF loop is already running. */
+/* Pause the rAF loop. Call from the frame callback when the session has no
+ * pending work. */
+void sz_web_loop_pause(void);
+/* Resume a paused rAF loop. The runtime calls this when new work marks the
+ * session dirty. */
 void sz_web_idle_wake(void);
 void sz_web_present(int width, int height, const uint8_t *rgba);
 void sz_web_frame_begin(float scale);
