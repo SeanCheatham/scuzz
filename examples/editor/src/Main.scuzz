@@ -104,6 +104,11 @@ claim	x	vacuous
     _ = Property.check("ins", Chrome.insertAt("ab", 1, "x") == "axb", true)
     _ = Property.check("line", Chrome.lineColAt("""a
 bc""", 3)._1 == 1, true)
+    _ = Property.check("lblank", Chrome.lineColAt("""a
+
+b""", 4)._1 == 2, true)
+    _ = Property.check("leol", Chrome.lineColAt("""a
+b""", 2) == (1, 0), true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ => IO.pure(Str.len("")))
     file <- Chrome.openBuffer(arg, argListed)
     root = if (argListed == 0) Fs.dirname(file) else arg

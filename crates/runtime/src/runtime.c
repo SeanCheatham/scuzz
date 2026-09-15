@@ -1753,6 +1753,8 @@ int64_t sz_string_is_blank(const SzString *s) {
   return 1;
 }
 
+/* One line per break. Interior empty lines stay. A break at the end does
+ * not add a line. Empty text gives an empty list. */
 SzList *sz_string_lines(const SzString *s) {
   SzList *acc = NULL;
   size_t i = 0;
@@ -1760,20 +1762,21 @@ SzList *sz_string_lines(const SzString *s) {
   const char *data = s && s->data ? s->data : "";
   while (i < len) {
     size_t start = i;
+    size_t end;
+    SzString *line;
+    SzList *old;
     while (i < len && data[i] != '\n' && data[i] != '\r')
       i++;
-    size_t end = i;
+    end = i;
     if (i < len && data[i] == '\r')
       i++;
     if (i < len && data[i] == '\n')
       i++;
-    if (end > start) {
-      SzString *line = sz_string_from_bytes(data + start, end - start);
-      SzList *old = acc;
-      acc = sz_list_cons(line, old);
-      sz_release(line);
-      sz_release(old);
-    }
+    line = sz_string_from_bytes(data + start, end - start);
+    old = acc;
+    acc = sz_list_cons(line, old);
+    sz_release(line);
+    sz_release(old);
   }
   {
     SzList *rev = sz_list_reverse(acc);
