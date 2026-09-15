@@ -1,0 +1,30 @@
+def filtersRecords(): Bool =
+  Report.decode(200, "[{\"id\":1,\"state\":\"open\"},{\"id\":2,\"state\":\"closed\"}]") match {
+    case Result.Err(_) => false
+    case Result.Ok(rows) => List.len(rows) == 1 && Json.getInt(List.at(rows, 0), "id", 0) == 1
+  }
+
+def rejectsStatus(n: Int): Bool =
+  if (n >= 200 && n < 300) true else Report.decode(n, "[]") match {
+  case Result.Err(_) => true
+  case Result.Ok(_) => false
+}
+
+def rejectsJson(): Bool =
+  Report.decode(200, "{") == Result.Err("API returned invalid JSON") && Report.decode(200, "{}") == Result.Err("API response must be an array") && Report.decode(200, "[{}]") == Result.Err("Each record must have a string state")
+
+def successWrites(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "success") || Timeline.effectHas(t, i, "Fs.write"))
+
+def failuresPreserveReport(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "rejected") || Timeline.driveHas(t, i, "malformed") || Timeline.driveHas(t, i, "badStatus") || Timeline.driveHas(t, i, "timedOut")) || !Timeline.effectHas(t, i, "Fs.write"))
+
+def preservesOpenFields(n: Int): Bool =
+  Report.decode(200, Str.concat("[{\"state\":\"closed\"},{\"id\":", Str.concat(Str.fromInt(n), ",\"state\":\"open\",\"title\":\"keep\"}]"))) match {
+    case Result.Err(_) => false
+    case Result.Ok(rows) => List.len(rows) == 1 && Json.getInt(List.at(rows, 0), "id", 0) == n && Json.getStr(List.at(rows, 0), "title", "") == "keep"
+  }
+
+def rejectsConfigBeforeNetwork(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "noToken") || Timeline.driveHas(t, i, "insecureUrl")) || !Timeline.effectHas(t, i, "Net.httpGet") && !Timeline.effectHas(t, i, "Fs.write"))
+

@@ -953,15 +953,17 @@ SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound); bound <= 0 fa
 void sz_random_fill(unsigned char *buf, size_t n); /* Blessed Random bytes. Live or TestRuntime. */
 SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Uses blessed Random. */
 
-SzIo *sz_net_http_get(SzString *url); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
-SzIo *sz_net_http_post(SzString *url, SzString *body);
-SzIo *sz_net_http_put(SzString *url, SzString *body);
-SzIo *sz_net_http_patch(SzString *url, SzString *body);
-SzIo *sz_net_http_delete(SzString *url);
-SzIo *sz_net_http_head(SzString *url);
+SzIo *sz_net_http_get(SzString *url, SzMap *headers); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
+SzIo *sz_net_http_post(SzString *url, SzMap *headers, SzString *body);
+SzIo *sz_net_http_put(SzString *url, SzMap *headers, SzString *body);
+SzIo *sz_net_http_patch(SzString *url, SzMap *headers, SzString *body);
+SzIo *sz_net_http_delete(SzString *url, SzMap *headers);
+SzIo *sz_net_http_head(SzString *url, SzMap *headers);
+/* Normalize request names and outer whitespace. */
+SzMap *sz_net_request_headers(SzMap *headers);
 /* Pack (status, headers, body). Empty headers may be NULL. */
 void *sz_net_http_resp(int64_t status, SzMap *headers, SzString *body);
-SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one request; handler gets (path, method, body) and returns (status, headers, body) */
+SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one request; handler gets (path, method, headers, body) and returns (status, headers, body) */
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; bind 0.0.0.0 and ::; drop bad clients/handlers */
 SzIo *sz_net_serve_once_tls(int64_t port, SzCont handler, void *env); /* IO[Unit]; serveOnce plus TLS with a process cert */
 SzIo *sz_net_serve_tls(int64_t port, SzCont handler, void *env); /* IO[Unit]; serve plus TLS with a process cert */
@@ -1066,7 +1068,7 @@ int sz_testrt_net_serve_pending(void);
 int sz_testrt_net_serve_pending_port(int64_t port); /* injects plus mailbox items */
 char *sz_testrt_net_pop_request(void); /* owned; NULL if empty */
 int sz_testrt_net_is_fake(void);
-SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzString *body);
+SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzMap *headers, SzString *body);
 SzIo *sz_testrt_net_accept(int64_t port); /* IO[(req, Deferred|null)] */
 SzIo *sz_testrt_net_tcp_connect(SzString *host, int64_t port);
 SzIo *sz_testrt_net_tcp_listen(int64_t port);

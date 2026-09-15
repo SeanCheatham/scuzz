@@ -1,0 +1,4 @@
+[package]
+name = "api-report"
+version = "0.1.0"
+description = "Fetch authenticated JSON records and write an open-record report"

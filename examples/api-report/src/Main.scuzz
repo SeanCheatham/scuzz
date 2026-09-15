@@ -1,0 +1,10 @@
+def runConfigured(url: String, token: String, output: String): IO[Unit] =
+  if (!Str.startsWith(url, "https://")) IO.fail("SCUZZ_API_URL must use HTTPS") else Report.run(url, token, if (output == "") "report.json" else output, 5000)
+
+@main def main: IO[Unit] =
+  for {
+    url <- Sys.getenv("SCUZZ_API_URL")
+    token <- Sys.getenv("SCUZZ_API_TOKEN")
+    output <- Sys.getenv("SCUZZ_API_OUTPUT")
+    _ <- if (url == "") IO.println("Set SCUZZ_API_URL and SCUZZ_API_TOKEN. Set SCUZZ_API_OUTPUT to choose the report path. The default is report.json.") else runConfigured(url, token, output)
+  } yield ()

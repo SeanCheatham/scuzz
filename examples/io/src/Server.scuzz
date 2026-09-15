@@ -11,20 +11,20 @@ def printResp(tag: String, resp: (Int, Map[String, String], String)): IO[Unit] =
 def reply(path: String): (Int, Map[String, String], String) =
   if (path == "/ping") (200, Map.set(Map.empty(), "X-Trace", "ok"), s"ok:$path") else (404, Map.set(Map.empty(), "X-Trace", "miss"), "missing")
 
-def handle(req: (String, String, String)): IO[(Int, Map[String, String], String)] =
+def handle(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
   req match {
-    case (path, method, body) => IO.println(s"served:$method:$path:$body").map(_ => reply(path))
+    case (path, method, _, body) => IO.println(s"served:$method:$path:$body").map(_ => reply(path))
   }
 
 def runHttpOk(): IO[Unit] =
   for {
-    p <- IO.both(Net.serveOnce(8080, handle), Net.httpPost("http://127.0.0.1:8080/ping", "hi"))
+    p <- IO.both(Net.serveOnce(8080, handle), Net.httpPost("http://127.0.0.1:8080/ping", Map.empty(), "hi"))
     _ <- showResp("ping", p)
   } yield ()
 
 def runHttpMiss(): IO[Unit] =
   for {
-    p <- IO.both(Net.serveOnce(8081, handle), Net.httpGet("http://127.0.0.1:8081/nope"))
+    p <- IO.both(Net.serveOnce(8081, handle), Net.httpGet("http://127.0.0.1:8081/nope", Map.empty()))
     _ <- showResp("miss", p)
   } yield ()
 
@@ -70,14 +70,27 @@ def runUdp(): IO[Unit] =
 
 def runHttps(): IO[Unit] =
   for {
-    p <- IO.both(Net.serveOnceTls(8082, handle), Net.httpGet("https://127.0.0.1:8082/ping"))
+    p <- IO.both(Net.serveOnceTls(8082, handle), Net.httpGet("https://127.0.0.1:8082/ping", Map.empty()))
     _ <- showResp("tls", p)
+  } yield ()
+
+def runHttpMethods(): IO[Unit] =
+  for {
+    put <- IO.both(Net.serveOnce(8083, handle), Net.httpPut("http://127.0.0.1:8083/ping", Map.set(Map.empty(), "Content-Type", "text/plain"), "put"))
+    _ <- showResp("put", put)
+    patch <- IO.both(Net.serveOnce(8083, handle), Net.httpPatch("http://127.0.0.1:8083/ping", Map.empty(), "patch"))
+    _ <- showResp("patch", patch)
+    deleted <- IO.both(Net.serveOnce(8083, handle), Net.httpDelete("http://127.0.0.1:8083/ping", Map.empty()))
+    _ <- showResp("delete", deleted)
+    head <- IO.both(Net.serveOnce(8083, handle), Net.httpHead("http://127.0.0.1:8083/ping", Map.empty()))
+    _ <- showResp("head", head)
   } yield ()
 
 def runHttp(): IO[Unit] =
   for {
     _ <- runHttpOk()
     _ <- runHttpMiss()
+    _ <- runHttpMethods()
   } yield ()
 
 def run(): IO[Unit] =

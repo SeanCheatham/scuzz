@@ -90,7 +90,7 @@ static SzIo *do_net(void *value, void *env) {
   (void)value;
   (void)env;
   url = sz_string_from_cstr("http://example.test/v1");
-  io = sz_net_http_get(url);
+  io = sz_net_http_get(url, NULL);
   sz_release(url);
   return fm_drop(io, after_net, NULL);
 }

@@ -539,7 +539,7 @@ def resolveResBody(recv: String, body: Out, span: (String, Int), makeRet: String
   if (hasErr(body)) body else if (isIo(tyStr(body)) || isLoose(tyStr(body))) ok(if (makeRet != "") makeRet else if (isIo(tyStr(body))) tyStr(body) else "IO[A]") else bad(Str.concat(if (makeRet == "") "Resource.use" else "Resource.make", Str.concat(" needs IO, got ", Str.concat(recv, Str.concat(" and ", tyStr(body))))), span)
 
 def netReqTy(): String =
-  "(String, String, String)"
+  "(String, String, Map[String, String], String)"
 
 def netRespTy(): String =
   "(Int, Map[String, String], String)"
