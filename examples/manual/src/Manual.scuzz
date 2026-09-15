@@ -9,7 +9,7 @@ enum Block:
   case Link(nav: NavLink)
 
 def verbs(): List[String] =
-  "build" :: "run" :: "watch" :: "check" :: "lsp" :: "fmt" :: "fuzz" :: "new" :: "ide" :: "package" :: "help" :: "docs" :: []
+  "devices" :: "build" :: "run" :: "watch" :: "check" :: "lsp" :: "fmt" :: "fuzz" :: "new" :: "ide" :: "package" :: "help" :: "docs" :: []
 
 def topics(): List[Topic] =
   Topics.all()

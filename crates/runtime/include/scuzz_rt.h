@@ -998,6 +998,7 @@ void sz_testrt_net_sock_gone(SzNetSock *s);
 /* 4 = IPv4, 6 = IPv6, 0 = not a literal. Writes a canonical host when canon is set. */
 int sz_net_host_family(const char *host, char *canon, size_t canon_cap);
 SzAdt *sz_net_next_link(SzString *base, SzString *header); /* Result[String, String] */
+int sz_net_url_has_bad_bytes(const char *s, size_t n);
 /* Shared HTTP URL parser. 1 = valid, 0 = invalid URL, -1 = invalid port. */
 int sz_net_parse_http_url(const char *url, char *host, size_t host_sz,
                           char *path, size_t path_sz, int *port,

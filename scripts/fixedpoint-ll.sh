@@ -20,12 +20,28 @@ STAGE4="${SCUZZ_FP_STAGE4:-/tmp/scuzz-fp-stage4}"
 rm -rf "$STAGE2" "$STAGE3" "$STAGE4"
 mkdir -p "$STAGE2" "$STAGE3" "$STAGE4"
 
-"$SCUZZ" run --out-dir "$STAGE2" examples/cli | tee /tmp/scuzz-fp-cli.out
+# Use the optimized compiler link that bootstrap.sh ships.
+link_cli() {
+  local stage="$1"
+  local platform_libs=()
+  if [ "$(uname -s)" = Darwin ]; then
+    platform_libs=(-framework CoreFoundation -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib)
+  fi
+  clang -O2 -Wno-override-module "$stage/cli.ll" \
+    "$ROOT/crates/runtime/build/libscuzz_rt.a" "${platform_libs[@]}" \
+    -lpthread -lssl -lcrypto -o "$stage/cli"
+}
+
+"$SCUZZ" build --full --out-dir "$STAGE2" examples/cli
+link_cli "$STAGE2"
+"$STAGE2/cli" | tee /tmp/scuzz-fp-cli.out
 grep -q "cli-ok" /tmp/scuzz-fp-cli.out
 test -f "$STAGE2/cli.ll"
 test -x "$STAGE2/cli"
 
-"$STAGE2/cli" run --out-dir "$STAGE3" examples/cli | tee /tmp/scuzz-fp-cli3.out
+"$STAGE2/cli" build --full --out-dir "$STAGE3" examples/cli
+link_cli "$STAGE3"
+"$STAGE3/cli" | tee /tmp/scuzz-fp-cli3.out
 grep -q "cli-ok" /tmp/scuzz-fp-cli3.out
 test -f "$STAGE3/cli.ll"
 test -x "$STAGE3/cli"

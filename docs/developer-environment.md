@@ -100,6 +100,30 @@ field. Enter accented text, emoji, and IME text. Paste text. Rotate the phone.
 Switch sections and return to check the stored text. Emulation does not prove
 these OS keyboard and selection behaviors.
 
+## iOS simulator loop
+
+Use Xcode on an Apple Silicon Mac. Install an iOS simulator runtime in Xcode.
+Build the product CLI with `./scripts/bootstrap.sh`. Then run:
+
+```bash
+./examples/cli/build/cli devices
+./examples/cli/build/cli run --target ios --watch examples/counter
+```
+
+Use `--device` with an exact simulator name or ID. Enter `r` and press Return
+to rebuild and restart. Enter `q` and press Return to stop. Ctrl+C stops the
+session and app. The simulator stays available. App source edits reuse native
+objects. The Headless verification path stays required. App instructions and
+target limits: run `scuzz docs ios`.
+
+The session copies `debug.json` and `record.json` from the app to the build
+directory when the app stops. Replay recorded input with Headless.
+
+Run `./scripts/ci.sh ios` for the simulator proof. It checks dependency edits,
+source diagnostics, error recovery, native object reuse, manual restart, quit,
+and interruption. It also runs the Counter Headless claims. Set
+`SCUZZ_IOS_DEVICE` to select a simulator name or ID. The proof removes its app.
+
 ## Compiler campaigns
 
 Default `./scripts/ci.sh fuzz` replays `examples/tyck` and `examples/codegen` with `scuzz fuzz --iterations 0`. That path uses generated-program oracles plus fixture seeds.

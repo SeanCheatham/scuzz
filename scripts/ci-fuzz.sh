@@ -732,16 +732,23 @@ def input(n: Int): Bool =
   Main.accepts(n)
 CLAIMS
 fuzz --iterations 0 "$stamp_dir"
-ll_before="$(stat -c %y "$stamp_dir/build/stamp.ll")"
-exe_before="$(stat -c %y "$stamp_dir/build/stamp")"
-live_ll_before="$(stat -c %y "$stamp_dir/build/live/stamp.ll")"
-live_exe_before="$(stat -c %y "$stamp_dir/build/live/stamp")"
+stamp_before="$(python3 - "$stamp_dir" <<'PY_STAMP'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+paths = ("build/stamp.ll", "build/stamp", "build/live/stamp.ll", "build/live/stamp")
+print(json.dumps({path: (root / path).stat().st_mtime_ns for path in paths}))
+PY_STAMP
+)"
 sleep 1
 fuzz --iterations 0 "$stamp_dir"
-test "$ll_before" = "$(stat -c %y "$stamp_dir/build/stamp.ll")"
-test "$exe_before" = "$(stat -c %y "$stamp_dir/build/stamp")"
-test "$live_ll_before" = "$(stat -c %y "$stamp_dir/build/live/stamp.ll")"
-test "$live_exe_before" = "$(stat -c %y "$stamp_dir/build/live/stamp")"
+python3 - "$stamp_dir" "$stamp_before" <<'PY_STAMP'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+for path, before in json.loads(sys.argv[2]).items():
+    assert (root / path).stat().st_mtime_ns == before, path
+PY_STAMP
 rm -rf "$stamp_dir"
 
 # A compiler change invalidates live and verification artifacts.

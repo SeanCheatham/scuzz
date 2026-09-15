@@ -19,6 +19,9 @@ present (`--whole-archive` on Linux, `-force_load` on Darwin, so strong symbols 
 A package that calls Net fails: the NDK link does not include OpenSSL.
 `scuzz package --target ios` runs `shells/ios/build_sim.sh` and copies a signed
 simulator `.app` into `build/package/ios/`.
+`scuzz run --target ios` boots a simulator, installs the app, and streams output.
+`--watch` rebuilds and restarts. A build error preserves the running app.
+App source edits reuse native objects. App instructions: `scuzz docs ios`.
 
 | Target | Path | Role |
 | --- | --- | --- |
@@ -41,9 +44,8 @@ logical points. SurfaceView taps map to the same session space.
 iOS simulator (macOS arm64 + Xcode):
 
 ```bash
-scuzz package --target ios examples/counter
-xcrun simctl install booted examples/counter/build/package/ios/counter.app
-xcrun simctl launch booted dev.scuzz.app
+scuzz devices
+scuzz run --target ios --watch examples/counter
 ```
 
 The iOS shell owns `main` + `UIApplicationMain`. The Android shell owns

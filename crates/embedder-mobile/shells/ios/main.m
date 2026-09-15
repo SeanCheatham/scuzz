@@ -57,8 +57,10 @@ static void *scuzz_app_thread(void *unused) {
                                                         NSUserDomainMask, YES);
     NSString *docs = dirs.firstObject;
     NSString *dump =
-        [docs stringByAppendingPathComponent:@"scuzz_ios.debug.dump"];
+        [docs stringByAppendingPathComponent:@"debug.json"];
+    NSString *record = [docs stringByAppendingPathComponent:@"record.json"];
     setenv("SCUZZ_UI_DEBUG_DUMP", dump.fileSystemRepresentation, 0);
+    setenv("SCUZZ_UI_RECORD", record.fileSystemRepresentation, 0);
   }
 
   scuzz_ios_set_alive(1);

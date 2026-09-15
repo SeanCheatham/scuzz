@@ -5,7 +5,8 @@ enum Cmd:
   case Fmt(path: String, check: Bool)
   case Check(path: String, json: Bool)
   case Build(path: String, outDir: String, full: Bool, verify: Bool)
-  case Run(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String)
+  case Run(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String)
+  case Devices
   case Watch(path: String, outDir: String)
   case Lsp(path: String)
   case Fuzz(path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool)
@@ -33,7 +34,7 @@ def isVer(s: String): Bool =
   s == "-V" || s == "--version"
 
 def isCmd(s: String): Bool =
-  s == "build" || s == "run" || s == "watch" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "package" || s == "docs" || s == "help"
+  s == "devices" || s == "build" || s == "run" || s == "watch" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "package" || s == "docs" || s == "help"
 
 def unrec(name: String): String =
   Str.concat("error: unrecognized subcommand '", Str.concat(name, """'
@@ -195,7 +196,7 @@ def takeVal3(args: List[String], j: Int): (String, Int) =
   if (j >= List.len(args)) ("", 0 - 1) else (arg(args, j), j + 1)
 
 def helpOf(topic: String): String =
-  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
+  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "devices") Help.helpDevices() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
 
 def show(c: Cmd): String =
   c match {
@@ -205,7 +206,8 @@ def show(c: Cmd): String =
     case Cmd.Fmt(path, check) => Str.concat("fmt path=", Str.concat(path, Str.concat(" check=", yn(check))))
     case Cmd.Check(path, json) => Str.concat("check path=", Str.concat(path, Str.concat(" json=", yn(json))))
     case Cmd.Build(path, outDir, full, verify) => Str.concat("build path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" full=", Str.concat(yn(full), Str.concat(" verify=", yn(verify))))))))
-    case Cmd.Run(path, outDir, headless, watch, script, dump) => Str.concat("run path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" headless=", Str.concat(yn(headless), Str.concat(" watch=", Str.concat(yn(watch), Str.concat(" script=", Str.concat(script, Str.concat(" dump=", dump)))))))))))
+    case Cmd.Run(path, outDir, headless, watch, script, dump, target, device) => Str.concat("run path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" headless=", Str.concat(yn(headless), Str.concat(" watch=", Str.concat(yn(watch), Str.concat(" script=", Str.concat(script, Str.concat(" dump=", Str.concat(dump, Str.concat(" target=", Str.concat(target, Str.concat(" device=", device)))))))))))))))
+    case Cmd.Devices => "devices"
     case Cmd.Watch(path, outDir) => Str.concat("watch path=", Str.concat(path, Str.concat(" out=", outDir)))
     case Cmd.Lsp(path) => Str.concat("lsp path=", path)
     case Cmd.Fuzz(path, iterations, seed, replay, oracles, noFailFast, relate, differential) => Str.concat("fuzz path=", Str.concat(path, Str.concat(" iterations=", Str.concat(Str.fromInt(iterations), Str.concat(" seed=", Str.concat(Str.fromInt(seed), Str.concat(" replay=", Str.concat(replay, Str.concat(" oracles=", Str.concat(yn(oracles), Str.concat(" noFailFast=", Str.concat(yn(noFailFast), Str.concat(" relate=", Str.concat(yn(relate), Str.concat(" differential=", yn(differential))))))))))))))))
@@ -257,7 +259,7 @@ def parseHelp(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Help(""), json) else if (isCmd(arg(args, i)) || arg(args, i) == "") gateJson(Cmd.Help(arg(args, i)), json) else gateJson(Cmd.Fail(unrec(arg(args, i))), json)
 
 def parseCmd(args: List[String], cmd: String, i: Int, json: Bool): Cmd =
-  if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "host")
+  if (cmd == "devices") parseDevices(args, i, json) else if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "", "host", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "host")
 
 def parseDocs(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Docs("list", ""), json) else parseDocsTok(args, i, json, arg(args, i))
@@ -323,31 +325,47 @@ def parseBuildMsg(p: (String, Int), args: List[String], path: String, outDir: St
     case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseBuild(args, n, true, path, outDir, full, verify) else if (v == "human") parseBuild(args, n, false, path, outDir, full, verify) else Cmd.Fail(badFmt(v))
   }
 
-def parseRun(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Run(orDot(path), outDir, headless, watch, script, dump), json) else parseRunTok(args, i, json, path, outDir, headless, watch, script, dump, arg(args, i))
+def parseRun(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
+  if (i >= List.len(args)) gateJson(runCommand(path, outDir, headless, watch, script, dump, target, device), json) else parseRunTok(args, i, json, path, outDir, headless, watch, script, dump, arg(args, i), target, device)
 
-def parseRunTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("run"), json) else if (a == "--headless") parseRun(args, i + 1, json, path, outDir, true, watch, script, dump) else if (a == "--watch") parseRun(args, i + 1, json, path, outDir, headless, true, script, dump) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseRunOut(takeVal(args, i, "--out-dir"), args, json, path, headless, watch, script, dump) else if (a == "--script" || flagPref(a, "--script")) parseRunScript(takeVal(args, i, "--script"), args, json, path, outDir, headless, watch, dump) else if (a == "--dump" || flagPref(a, "--dump")) parseRunDump(takeVal(args, i, "--dump"), args, json, path, outDir, headless, watch, script) else if (a == "--message-format" || flagPref(a, "--message-format")) parseRunMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless, watch, script, dump) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz run [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz run [OPTIONS] [PATH]")) else parseRun(args, i + 1, json, a, outDir, headless, watch, script, dump)
+def parseRunTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, a: String, target: String, device: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("run"), json) else if (a == "--target" || flagPref(a, "--target")) parseRunTarget(takeVal(args, i, "--target"), args, json, path, outDir, headless, watch, script, dump, device) else if (a == "--device" || flagPref(a, "--device")) parseRunDevice(takeVal(args, i, "--device"), args, json, path, outDir, headless, watch, script, dump, target) else if (a == "--headless") parseRun(args, i + 1, json, path, outDir, true, watch, script, dump, target, device) else if (a == "--watch") parseRun(args, i + 1, json, path, outDir, headless, true, script, dump, target, device) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseRunOut(takeVal(args, i, "--out-dir"), args, json, path, headless, watch, script, dump, target, device) else if (a == "--script" || flagPref(a, "--script")) parseRunScript(takeVal(args, i, "--script"), args, json, path, outDir, headless, watch, dump, target, device) else if (a == "--dump" || flagPref(a, "--dump")) parseRunDump(takeVal(args, i, "--dump"), args, json, path, outDir, headless, watch, script, target, device) else if (a == "--message-format" || flagPref(a, "--message-format")) parseRunMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless, watch, script, dump, target, device) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz run [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz run [OPTIONS] [PATH]")) else parseRun(args, i + 1, json, a, outDir, headless, watch, script, dump, target, device)
 
-def parseRunOut(p: (String, Int), args: List[String], json: Bool, path: String, headless: Bool, watch: Bool, script: String, dump: String): Cmd =
+def parseRunOut(p: (String, Int), args: List[String], json: Bool, path: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--out-dir")) else parseRun(args, n, json, path, v, headless, watch, script, dump)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--out-dir")) else parseRun(args, n, json, path, v, headless, watch, script, dump, target, device)
   }
 
-def parseRunScript(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, dump: String): Cmd =
+def parseRunScript(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, dump: String, target: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--script")) else parseRun(args, n, json, path, outDir, headless, watch, v, dump)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--script")) else parseRun(args, n, json, path, outDir, headless, watch, v, dump, target, device)
   }
 
-def parseRunDump(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String): Cmd =
+def parseRunDump(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, target: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--dump")) else parseRun(args, n, json, path, outDir, headless, watch, script, v)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--dump")) else parseRun(args, n, json, path, outDir, headless, watch, script, v, target, device)
   }
 
-def parseRunMsg(p: (String, Int), args: List[String], path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String): Cmd =
+def parseRunMsg(p: (String, Int), args: List[String], path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseRun(args, n, true, path, outDir, headless, watch, script, dump) else if (v == "human") parseRun(args, n, false, path, outDir, headless, watch, script, dump) else Cmd.Fail(badFmt(v))
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseRun(args, n, true, path, outDir, headless, watch, script, dump, target, device) else if (v == "human") parseRun(args, n, false, path, outDir, headless, watch, script, dump, target, device) else Cmd.Fail(badFmt(v))
   }
+
+def runCommand(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
+  if (target == "ios" && (headless || script != "" || dump != "")) Cmd.Fail("error: --target ios does not accept --headless, --script, or --dump. Use the host Headless path for replay.") else if (target != "ios" && device != "") Cmd.Fail("error: --device needs --target ios. List simulators with scuzz devices.") else Cmd.Run(orDot(path), outDir, headless, watch, script, dump, target, device)
+
+def parseRunTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, device: String): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--target")) else if (v == "host" || v == "ios") parseRun(args, n, json, path, outDir, headless, watch, script, dump, v, device) else Cmd.Fail("error: run target must be host or ios")
+  }
+
+def parseRunDevice(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--device")) else parseRun(args, n, json, path, outDir, headless, watch, script, dump, target, v)
+  }
+
+def parseDevices(args: List[String], i: Int, json: Bool): Cmd =
+  if (i >= List.len(args)) gateJson(Cmd.Devices, json) else if (isHelp(arg(args, i)) && i + 1 == List.len(args)) gateJson(Cmd.Help("devices"), json) else Cmd.Fail(unexp(arg(args, i), "scuzz devices"))
 
 def parseWatch(args: List[String], i: Int, json: Bool, path: String, outDir: String): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Watch(orDot(path), outDir), json) else parseWatchTok(args, i, json, path, outDir, arg(args, i))
@@ -487,7 +505,8 @@ def runCmd(c: Cmd, src: String): String =
 def dispatch(c: Cmd): IO[Unit] =
   c match {
     case Cmd.Build(path, outDir, full, verify) => dispatchBuild(path, outDir, full, verify)
-    case Cmd.Run(path, outDir, headless, watch, script, dump) => dispatchRunCmd(path, outDir, headless, watch, script, dump)
+    case Cmd.Run(path, outDir, headless, watch, script, dump, target, device) => if (target == "ios") Ios.run(path, pkgOut(path, outDir), device, watch) else dispatchRunCmd(path, outDir, headless, watch, script, dump)
+    case Cmd.Devices => Ios.devices()
     case Cmd.Watch(path, outDir) => dispatchWatch(path, outDir)
     case Cmd.Check(path, json) => Drive.checkDir(path, json)
     case Cmd.Fmt(path, check) => dispatchFmt(path, check)
