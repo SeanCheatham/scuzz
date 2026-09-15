@@ -187,7 +187,8 @@ int64_t sz_string_is_blank(const SzString *s);
 
 typedef struct SzList SzList;
 typedef struct SzMap SzMap;
-/* Split on `\n` / `\r\n`; skip empty lines. */
+/* Split on `\n` / `\r\n` / `\r`. Interior empty lines stay. A break at the
+ * end does not add a line. Empty text is empty. */
 SzList *sz_string_lines(const SzString *s);
 /* Split on non-overlapping `sep`. Empty `sep` copies `s` as one cell. */
 SzList *sz_string_split(const SzString *s, const SzString *sep);
