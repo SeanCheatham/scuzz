@@ -35,7 +35,7 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 Not the next slice.
 
-1. **Checker and emit residuals** — `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. A Queue or Deferred handle has no payload until the first offer or complete. Param letters (`A`/`E`) still unify. Parse Param/Fun stay strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call.
+1. **Checker and emit residuals** — `Map.empty`, `Set.empty`, and `List.empty` still use a bare constructor. A Queue or Deferred handle has no payload until the first offer or complete. Param letters (`A`/`E`) still unify. Parse Param/Fun stay strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call. An IO `.require` inside a payload match can treat the IO handle as its value. A `for` inside nested matches can read the wrong captured value. Use a typed function for the matched payload. Escaped quotes in an interpolated verification string can reach `Json.parse` as backslash bytes.
 
 2. **Compile-time performance** — `scuzz check examples/compiler` is 16 s. A cold `scuzz build examples/tyck` is 1 m 10 s. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
 

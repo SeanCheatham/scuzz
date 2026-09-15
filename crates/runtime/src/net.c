@@ -245,6 +245,7 @@ static int host_is_loopback(const char *host) {
 typedef struct HttpSt {
   SzString *url;
   SzString *req_body;
+  SzMap *req_headers;
   char method[16];
   int tls;
   int tls_up;
@@ -698,6 +699,8 @@ static void http_free(HttpSt *st) {
   }
   sz_release(st->req_body);
   st->req_body = NULL;
+  sz_release(st->req_headers);
+  st->req_headers = NULL;
   sz_free(st->req);
   st->req = NULL;
   sz_free(st->acc);
@@ -933,6 +936,77 @@ void sz_net_test_http_host_header(const char *host, int port, char *out,
   http_fmt_hosthdr(out, cap, host, port, 80);
 }
 
+static int http_hdr_ok(const char *name, const char *val);
+static int http_hdr_skip(const char *name);
+static int http_name_ieq(const char *a, const char *b);
+
+static int request_headers_valid(SzMap *headers) {
+  SzList *rows = sz_map_to_list(headers);
+  SzList *it;
+  SzMap *seen = NULL;
+  size_t total = 0;
+  int valid = 1;
+  for (it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
+    SzPair *kv = (SzPair *)sz_list_head(it);
+    SzString *name = kv ? (SzString *)kv->left : NULL;
+    SzString *value = kv ? (SzString *)kv->right : NULL;
+    const char *n = name ? sz_string_cstr(name) : "";
+    const char *v = value ? sz_string_cstr(value) : "";
+    SzString *lower;
+    SzMap *next;
+    if (!name || !value || strlen(n) != (size_t)sz_string_len(name) ||
+        strlen(v) != (size_t)sz_string_len(value) || !http_hdr_ok(n, v) ||
+        http_hdr_skip(n) || http_name_ieq(n, "Host")) {
+      valid = 0;
+      break;
+    }
+    for (size_t j = 0; v[j]; j++) {
+      unsigned char c = (unsigned char)v[j];
+      if ((c < 32 && c != '\t') || c == 127) valid = 0;
+    }
+    if (!valid) break;
+    total += strlen(n) + strlen(v) + 4;
+    lower = sz_string_to_lower(name);
+    if (total > 16384 || sz_map_contains(seen, lower)) {
+      sz_release(lower);
+      valid = 0;
+      break;
+    }
+    next = sz_map_set(seen, lower, value, 1);
+    sz_release(seen);
+    sz_release(lower);
+    seen = next;
+  }
+  sz_release(seen);
+  sz_release(rows);
+  return valid;
+}
+
+/* Request names use lowercase. Values have no outer space or tab. */
+SzMap *sz_net_request_headers(SzMap *headers) {
+  SzList *rows = sz_map_to_list(headers);
+  SzList *it;
+  SzMap *out = NULL;
+  for (it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
+    SzPair *kv = (SzPair *)sz_list_head(it);
+    SzString *name = sz_string_to_lower((SzString *)kv->left);
+    const char *v = sz_string_cstr((SzString *)kv->right);
+    size_t n = (size_t)sz_string_len((SzString *)kv->right);
+    SzString *value;
+    SzMap *next;
+    while (n && (*v == ' ' || *v == '\t')) { v++; n--; }
+    while (n && (v[n - 1] == ' ' || v[n - 1] == '\t')) n--;
+    value = sz_string_from_bytes(v, n);
+    next = sz_map_set(out, name, value, 1);
+    sz_release(out);
+    sz_release(name);
+    sz_release(value);
+    out = next;
+  }
+  sz_release(rows);
+  return out;
+}
+
 static int http_build_req(HttpSt *st) {
   char hosthdr[300];
   const char *method = st->method[0] ? st->method : "GET";
@@ -943,24 +1017,43 @@ static int http_build_req(HttpSt *st) {
   char hdr[2048];
   int hn;
   size_t nreq;
+  size_t extra = 0;
+  size_t off;
+  SzList *rows = sz_map_to_list(st->req_headers);
+  SzList *it;
+  for (it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
+    SzPair *kv = (SzPair *)sz_list_head(it);
+    extra += (size_t)sz_string_len(kv->left) + (size_t)sz_string_len(kv->right) + 4;
+  }
   http_fmt_hosthdr(hosthdr, sizeof hosthdr, st->host, st->http_port,
                    st->tls ? 443 : 80);
   if (has_body)
     hn = snprintf(hdr, sizeof hdr,
                   "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n"
-                  "Content-Length: %zu\r\n\r\n",
+                  "Content-Length: %zu\r\n",
                   method, st->path, hosthdr, blen);
   else
     hn = snprintf(hdr, sizeof hdr,
-                  "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+                  "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n",
                   method, st->path, hosthdr);
-  if (hn < 0 || (size_t)hn >= sizeof hdr)
+  if (hn < 0 || (size_t)hn >= sizeof hdr) {
+    sz_release(rows);
     return 0;
-  nreq = (size_t)hn + (has_body ? blen : 0);
+  }
+  nreq = (size_t)hn + extra + 2 + (has_body ? blen : 0);
   st->req = (char *)sz_alloc(nreq + 1);
   memcpy(st->req, hdr, (size_t)hn);
+  off = (size_t)hn;
+  for (it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
+    SzPair *kv = (SzPair *)sz_list_head(it);
+    off += (size_t)snprintf(st->req + off, nreq + 1 - off, "%s: %s\r\n",
+                           sz_string_cstr(kv->left), sz_string_cstr(kv->right));
+  }
+  sz_release(rows);
+  memcpy(st->req + off, "\r\n", 2);
+  off += 2;
   if (has_body && blen)
-    memcpy(st->req + (size_t)hn, body, blen);
+    memcpy(st->req + off, body, blen);
   st->req[nreq] = '\0';
   st->req_len = nreq;
   st->req_off = 0;
@@ -1917,17 +2010,23 @@ static SzIo *http_after_dispatch(void *value, void *env) {
   SzString *url = pack ? (SzString *)pack->left : NULL;
   SzPair *inner = pack ? (SzPair *)pack->right : NULL;
   SzString *ms = inner ? (SzString *)inner->left : NULL;
-  SzString *body = inner ? (SzString *)inner->right : NULL;
+  SzPair *payload = inner ? (SzPair *)inner->right : NULL;
+  SzMap *headers = payload ? (SzMap *)payload->left : NULL;
+  SzString *body = payload ? (SzString *)payload->right : NULL;
   const char *method = ms ? sz_string_cstr(ms) : "GET";
   HttpSt *st;
   SzIo *io;
+  if (!request_headers_valid(headers))
+    return fail_drop(sz_error_new(6, "Net: invalid request headers"));
   if ((intptr_t)value)
-    return sz_testrt_net_http_req(method, url, body);
+    return sz_testrt_net_http_req(method, url, headers, body);
   sz_timeline_log_cstr(http_op(method), url ? sz_string_cstr(url) : "");
   st = (HttpSt *)sz_rc_alloc(sizeof(HttpSt), SZ_RC_BOX);
   memset(st, 0, sizeof(HttpSt));
   sz_retain(url);
   st->url = url;
+  st->req_headers = headers;
+  sz_retain(headers);
   if (body) {
     sz_retain(body);
     st->req_body = body;
@@ -1949,7 +2048,7 @@ static SzIo *http_after_dispatch(void *value, void *env) {
   }
 }
 
-static SzIo *sz_net_http_req(const char *method, SzString *url, SzString *body) {
+static SzIo *sz_net_http_req(const char *method, SzString *url, SzMap *headers, SzString *body) {
   SzString *ms;
   SzPair *inner;
   SzPair *pack;
@@ -1957,7 +2056,9 @@ static SzIo *sz_net_http_req(const char *method, SzString *url, SzString *body) 
   if (!url)
     sz_panic("sz_net_http_req(null)");
   ms = sz_string_from_cstr(method ? method : "GET");
-  inner = sz_pair_new(ms, body);
+  SzPair *payload = sz_pair_new(headers, body);
+  inner = sz_pair_new(ms, payload);
+  sz_release(payload);
   pack = sz_pair_new(url, inner);
   sz_release(ms);
   sz_release(inner);
@@ -1966,37 +2067,37 @@ static SzIo *sz_net_http_req(const char *method, SzString *url, SzString *body) 
   return io;
 }
 
-SzIo *sz_net_http_get(SzString *url) { return sz_net_http_req("GET", url, NULL); }
+SzIo *sz_net_http_get(SzString *url, SzMap *headers) { return sz_net_http_req("GET", url, headers, NULL); }
 
-SzIo *sz_net_http_post(SzString *url, SzString *body) {
+SzIo *sz_net_http_post(SzString *url, SzMap *headers, SzString *body) {
   if (!url || !body)
     sz_panic("sz_net_http_post(null)");
-  return sz_net_http_req("POST", url, body);
+  return sz_net_http_req("POST", url, headers, body);
 }
 
-SzIo *sz_net_http_put(SzString *url, SzString *body) {
+SzIo *sz_net_http_put(SzString *url, SzMap *headers, SzString *body) {
   if (!url || !body)
     sz_panic("sz_net_http_put(null)");
-  return sz_net_http_req("PUT", url, body);
+  return sz_net_http_req("PUT", url, headers, body);
 }
 
-SzIo *sz_net_http_patch(SzString *url, SzString *body) {
+SzIo *sz_net_http_patch(SzString *url, SzMap *headers, SzString *body) {
   if (!url || !body)
     sz_panic("sz_net_http_patch(null)");
-  return sz_net_http_req("PATCH", url, body);
+  return sz_net_http_req("PATCH", url, headers, body);
 }
 
-SzIo *sz_net_http_delete(SzString *url) {
-  return sz_net_http_req("DELETE", url, NULL);
+SzIo *sz_net_http_delete(SzString *url, SzMap *headers) {
+  return sz_net_http_req("DELETE", url, headers, NULL);
 }
 
-SzIo *sz_net_http_head(SzString *url) { return sz_net_http_req("HEAD", url, NULL); }
+SzIo *sz_net_http_head(SzString *url, SzMap *headers) { return sz_net_http_req("HEAD", url, headers, NULL); }
 
 /* HTTP/1.0 server. Listen and conn fds are nonblocking. Live bind is
  * 0.0.0.0 and/or ::. TestRuntime uses a per-port mailbox. Read and
  * write wait at most 1000ms. Error code 6. serveOnce is one request.
  * serve keeps listen (n<=0 forever live, or until the TestRuntime queue
- * is empty). The handler receives (path, method, body) and returns
+ * is empty). The handler receives (path, method, headers, body) and returns
  * (status, headers, body). HEAD writes no body. */
 
 typedef struct ServeSt {
@@ -2194,11 +2295,13 @@ static int parse_http_req_line(const char *req, char *method, size_t method_sz,
 }
 
 static SzPair *pack_http_tuple(const char *path, const char *method,
-                              const char *body, size_t blen) {
+                              SzMap *headers, const char *body, size_t blen) {
   SzString *ps = sz_string_from_cstr(path ? path : "/");
   SzString *ms = sz_string_from_cstr(method ? method : "GET");
   SzString *bs = sz_string_from_bytes(body ? body : "", blen);
-  SzPair *inner = sz_pair_new(ms, bs);
+  SzPair *payload = sz_pair_new(headers, bs);
+  SzPair *inner = sz_pair_new(ms, payload);
+  sz_release(payload);
   SzPair *outer = sz_pair_new(ps, inner);
   sz_release(ps);
   sz_release(ms);
@@ -2490,7 +2593,11 @@ static void *serve_read_req(void *env) {
   }
   st->head_resp = strcmp(method, "HEAD") == 0;
   r->is_err = 0;
-  r->as.ok = pack_http_tuple(path, method, body, blen);
+  SzMap *headers = http_parse_headers(st->rbuf, hdr);
+  SzMap *normalized = sz_net_request_headers(headers);
+  r->as.ok = pack_http_tuple(path, method, normalized, body, blen);
+  sz_release(normalized);
+  sz_release(headers);
   return r;
 }
 

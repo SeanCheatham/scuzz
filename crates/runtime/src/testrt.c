@@ -1111,11 +1111,13 @@ static void net_req_push3(const char *method, const char *path, const char *body
 }
 
 static SzPair *pack_http_tuple(const char *path, const char *method,
-                              const char *body) {
+                              SzMap *headers, const char *body) {
   SzString *ps = sz_string_from_cstr(path ? path : "/");
   SzString *ms = sz_string_from_cstr(method ? method : "GET");
   SzString *bs = sz_string_from_cstr(body ? body : "");
-  SzPair *inner = sz_pair_new(ms, bs);
+  SzPair *payload = sz_pair_new(headers, bs);
+  SzPair *inner = sz_pair_new(ms, payload);
+  sz_release(payload);
   SzPair *outer = sz_pair_new(ps, inner);
   sz_release(ps);
   sz_release(ms);
@@ -1407,7 +1409,8 @@ SzIo *sz_testrt_net_accept(int64_t port) {
   char *body = NULL;
   PortBox *b;
   if (net_req_pop3(&method, &path, &body)) {
-    SzPair *req = pack_http_tuple(path, method, body);
+    SzMap *headers = NULL;
+    SzPair *req = pack_http_tuple(path, method, headers, body);
     SzPair *vreq = sz_pair_new(req, NULL);
     sz_free(method);
     sz_free(path);
@@ -1428,9 +1431,11 @@ SzIo *sz_testrt_net_accept(int64_t port) {
 }
 
 static SzIo *virtual_http_req(int64_t port, const char *method, const char *path,
-                             const char *body) {
+                             SzMap *headers, const char *body) {
   SzDeferred *done = sz_deferred_make();
-  SzPair *req = pack_http_tuple(path, method, body);
+  SzMap *normalized = sz_net_request_headers(headers);
+  SzPair *req = pack_http_tuple(path, method, normalized, body);
+  sz_release(normalized);
   SzPair *vreq = sz_pair_new(req, done);
   PortBox *b = mailbox_get(port);
   sz_release(req);
@@ -1562,17 +1567,19 @@ static SzIo *after_stub_http(void *value, void *env) {
         sz_testrt_net_parse_loopback(sz_string_cstr(url), &port, path,
                                     sizeof path)) {
       const char *method = inner && inner->left ? sz_string_cstr((SzString *)inner->left) : "GET";
-      const char *body = inner && inner->right ? sz_string_cstr((SzString *)inner->right) : "";
+      SzPair *payload = inner ? (SzPair *)inner->right : NULL;
+      SzMap *headers = payload ? (SzMap *)payload->left : NULL;
+      const char *body = payload && payload->right ? sz_string_cstr((SzString *)payload->right) : "";
       sz_release(r->as.err);
       r->as.err = NULL;
       sz_release(r);
-      return virtual_http_req(port, method, path, body);
+      return virtual_http_req(port, method, path, headers, body);
     }
   }
   return unwrap_box(value, NULL);
 }
 
-SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzString *body) {
+SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzMap *headers, SzString *body) {
   SzString *ms;
   SzPair *inner;
   SzPair *pack;
@@ -1580,7 +1587,9 @@ SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzString *body) 
   if (!url)
     sz_panic("sz_testrt_net_http_req(null)");
   ms = sz_string_from_cstr(method ? method : "GET");
-  inner = sz_pair_new(ms, body);
+  SzPair *payload = sz_pair_new(headers, body);
+  inner = sz_pair_new(ms, payload);
+  sz_release(payload);
   pack = sz_pair_new(url, inner);
   sz_release(ms);
   sz_release(inner);

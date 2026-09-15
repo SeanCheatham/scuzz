@@ -574,7 +574,8 @@ static SzIo *serve_echo_req(void *req, void *env) {
   SzPair *inner = p ? (SzPair *)p->right : NULL;
   const char *path = p && p->left ? sz_string_cstr((SzString *)p->left) : "";
   const char *method = inner && inner->left ? sz_string_cstr((SzString *)inner->left) : "";
-  const char *body = inner && inner->right ? sz_string_cstr((SzString *)inner->right) : "";
+  SzPair *payload = inner ? (SzPair *)inner->right : NULL;
+  const char *body = payload && payload->right ? sz_string_cstr((SzString *)payload->right) : "";
   char buf[2048];
   (void)env;
   snprintf(buf, sizeof buf, "%s:%s:%s", method, path, body);
@@ -1023,13 +1024,13 @@ static void *live_get_client_late(void *arg) {
 
 static SzIo *after_sleep_http(void *value, void *env) {
   (void)value;
-  return sz_net_http_get((SzString *)env);
+  return sz_net_http_get((SzString *)env, NULL);
 }
 
 static SzIo *after_sleep_dns_http(void *value, void *env) {
   (void)value;
   return both_drop(
-      sz_net_http_get((SzString *)env),
+      sz_net_http_get((SzString *)env, NULL),
       fm_drop(sz_io_println_cstr("peer"), assert_peer_quiet, NULL));
 }
 
@@ -2107,7 +2108,104 @@ static void expect_fs_refused_root(const char *path) {
   sz_error_free(r.error);
 }
 
+static SzMap *test_header(SzMap *headers, const char *name, const char *value) {
+  SzString *key = sz_string_from_cstr(name);
+  SzString *text = sz_string_from_cstr(value);
+  SzMap *next = sz_map_set(headers, key, text, 1);
+  sz_release(key);
+  sz_release(text);
+  sz_release(headers);
+  return next;
+}
+
+static SzIo *serve_headers(void *req, void *env) {
+  SzPair *outer = (SzPair *)req;
+  SzPair *method = (SzPair *)outer->right;
+  SzPair *payload = (SzPair *)method->right;
+  SzMap *headers = (SzMap *)payload->left;
+  SzString *name = sz_string_from_cstr("authorization");
+  SzString *auth = (SzString *)sz_map_get_or(headers, name, NULL);
+  SzString *body = (SzString *)payload->right;
+  const char *verb = sz_string_cstr(method->left);
+  SzMap *response = NULL;
+  void *result;
+  assert(strcmp(sz_string_cstr(outer->left), "/records") == 0);
+  assert(strcmp(verb, sz_string_cstr(env)) == 0);
+  assert(auth && strcmp(sz_string_cstr(auth), "Bearer demo-token") == 0);
+  assert(strcmp(sz_string_cstr(body),
+                strcmp(verb, "POST") == 0 || strcmp(verb, "PUT") == 0 ||
+                        strcmp(verb, "PATCH") == 0 ? "data" : "") == 0);
+  response = test_header(response, "X-Auth", sz_string_cstr(auth));
+  result = sz_net_http_resp(200, response, body);
+  sz_release(response);
+  sz_release(name);
+  return pure_drop(result);
+}
+
+static void test_request_headers(void) {
+  const char *verbs[] = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"};
+  const char *bad_names[] = {"Bad Name", "Bad:Name", "", "Host",
+                             "Content-Length", "Transfer-Encoding", "Connection"};
+  int mode, i;
+  for (mode = 0; mode < 3; mode++) {
+    if (mode == 0) sz_testrt_install(); else sz_testrt_reset();
+    for (i = 0; i < 6; i++) {
+      SzString *url = sz_string_from_cstr(mode == 2 ?
+          "https://127.0.0.1:18084/records" : "http://127.0.0.1:18084/records");
+      SzString *body = sz_string_from_cstr("data");
+      SzString *verb = sz_string_from_cstr(verbs[i]);
+      SzMap *headers = test_header(NULL, "AuThOrIzAtIoN", "  Bearer demo-token\t");
+      SzIo *client, *server;
+      SzIoResult r;
+      if (i == 0) client = sz_net_http_get(url, headers);
+      else if (i == 1) client = sz_net_http_post(url, headers, body);
+      else if (i == 2) client = sz_net_http_put(url, headers, body);
+      else if (i == 3) client = sz_net_http_patch(url, headers, body);
+      else if (i == 4) client = sz_net_http_delete(url, headers);
+      else client = sz_net_http_head(url, headers);
+      server = mode == 2 ? sz_net_serve_once_tls(18084, serve_headers, verb) :
+                           sz_net_serve_once(18084, serve_headers, verb);
+      sz_release(url);
+      sz_release(body);
+      sz_release(headers);
+      sz_release(verb);
+      r = sz_io_unsafe_run(both_drop(server, client));
+      assert(r.ok);
+      assert(http_resp_status(((SzPair *)r.value)->right) == 200);
+      assert(strcmp(http_resp_hdr(((SzPair *)r.value)->right, "X-Auth"),
+                    "Bearer demo-token") == 0);
+      sz_release(r.value);
+    }
+    for (i = 0; i < 12; i++) {
+      SzString *url = sz_string_from_cstr("http://127.0.0.1:18084/records");
+      SzMap *headers = NULL;
+      SzIoResult r;
+      if (i < 7) headers = test_header(NULL, bad_names[i], "x");
+      else if (i == 7) headers = test_header(NULL, "Authorization", "x\r\nInjected: y");
+      else if (i == 8) headers = test_header(NULL, "Authorization", "x\177");
+      else if (i == 9) {
+        headers = test_header(NULL, "Authorization", "x");
+        headers = test_header(headers, "authorization", "y");
+      } else {
+        SzString *key = i == 10 ? sz_string_from_bytes("A\0B", 3) : sz_string_from_cstr("A");
+        SzString *value = sz_string_from_bytes("x\0y", 3);
+        headers = sz_map_set(NULL, key, value, 1);
+        sz_release(key);
+        sz_release(value);
+      }
+      r = sz_io_unsafe_run(sz_net_http_get(url, headers));
+      assert(!r.ok);
+      assert(strstr(sz_string_cstr(r.error->message), "invalid request headers"));
+      sz_release(r.error);
+      sz_release(url);
+      sz_release(headers);
+    }
+  }
+  sz_testrt_reset();
+}
+
 int main(void) {
+  test_request_headers();
   /* List.head_opt: None on empty, Some payload on a cell. C List.head still panics. */
   {
     SzList *xs;
@@ -3782,7 +3880,7 @@ int main(void) {
     sz_alloc_stats(&base_bytes, &base_count);
     {
       SzString *url = sz_string_from_cstr("http://example.test/ping");
-      SzIo *io = sz_net_http_get(url);
+      SzIo *io = sz_net_http_get(url, NULL);
       sz_release(url);
       sz_release(io);
     }
@@ -3794,7 +3892,7 @@ int main(void) {
     {
       SzString *url = sz_string_from_cstr("http://192.0.2.1:9/x");
       r = sz_io_unsafe_run(
-          race_drop(sz_net_http_get(url), sz_io_sleep_ms(20)));
+          race_drop(sz_net_http_get(url, NULL), sz_io_sleep_ms(20)));
       sz_release(url);
       assert(r.ok);
     }
@@ -6962,7 +7060,7 @@ int main(void) {
     }
 
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://example.test/ping")));
+        sz_net_http_get(sz_string_from_cstr("http://example.test/ping"), NULL));
     assert(r.ok);
     assert(strcmp(http_resp_body_cstr(r.value), "pong") == 0);
     assert(http_resp_status(r.value) == 200);
@@ -6971,7 +7069,7 @@ int main(void) {
     sz_alloc_stats(&base_bytes, &base_count);
     {
       SzString *url = sz_string_from_cstr("http://example.test/ping");
-      r = sz_io_unsafe_run(sz_net_http_get(url));
+      r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
       sz_release(url);
       assert(r.ok);
       sz_release(r.value);
@@ -7090,7 +7188,7 @@ int main(void) {
       sz_testrt_net_set_last_serve_body(NULL);
       url = sz_string_from_cstr("http://127.0.0.1:8080/ping");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
-                                    sz_net_http_get(url)));
+                                    sz_net_http_get(url, NULL)));
       sz_release(url);
       assert(r.ok);
       pair = (SzPair *)r.value;
@@ -7103,7 +7201,7 @@ int main(void) {
 
       sz_testrt_net_set_last_serve_body(NULL);
       url = sz_string_from_cstr("http://127.0.0.1:8080/pong");
-      r = sz_io_unsafe_run(both_drop(sz_net_http_get(url),
+      r = sz_io_unsafe_run(both_drop(sz_net_http_get(url, NULL),
                                     sz_net_serve_once(8080, serve_path_ok, NULL)));
       sz_release(url);
       assert(r.ok);
@@ -7116,7 +7214,7 @@ int main(void) {
       sz_testrt_net_set_last_serve_body(NULL);
       url = sz_string_from_cstr("http://localhost:8080/hi");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
-                                    sz_net_http_get(url)));
+                                    sz_net_http_get(url, NULL)));
       sz_release(url);
       assert(r.ok);
       pair = (SzPair *)r.value;
@@ -7127,7 +7225,7 @@ int main(void) {
       sz_testrt_net_set_last_serve_body(NULL);
       url = sz_string_from_cstr("http://[::1]:8080/v6");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
-                                    sz_net_http_get(url)));
+                                    sz_net_http_get(url, NULL)));
       sz_release(url);
       assert(r.ok);
       pair = (SzPair *)r.value;
@@ -7138,7 +7236,7 @@ int main(void) {
       sz_testrt_net_set_last_serve_body(NULL);
       url = sz_string_from_cstr("http://127.0.0.1:8080/nope");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_not_found, NULL),
-                                    sz_net_http_get(url)));
+                                    sz_net_http_get(url, NULL)));
       sz_release(url);
       assert(r.ok);
       pair = (SzPair *)r.value;
@@ -7151,7 +7249,7 @@ int main(void) {
       sz_testrt_net_set_last_serve_body(NULL);
       url = sz_string_from_cstr("https://127.0.0.1:8082/ping");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once_tls(8082, serve_path_ok, NULL),
-                                    sz_net_http_get(url)));
+                                    sz_net_http_get(url, NULL)));
       sz_release(url);
       assert(r.ok);
       pair = (SzPair *)r.value;
@@ -7162,7 +7260,7 @@ int main(void) {
 
       sz_testrt_net_stub("http://127.0.0.1:8080/stub", "from-stub");
       url = sz_string_from_cstr("http://127.0.0.1:8080/stub");
-      r = sz_io_unsafe_run(sz_net_http_get(url));
+      r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
       sz_release(url);
       assert(r.ok);
       assert(strcmp(http_resp_body_cstr(r.value), "from-stub") == 0);
@@ -7173,7 +7271,7 @@ int main(void) {
       sz_alloc_stats(&base_bytes, &base_count);
       url = sz_string_from_cstr("http://127.0.0.1:8080/leak");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_path_ok, NULL),
-                                    sz_net_http_get(url)));
+                                    sz_net_http_get(url, NULL)));
       sz_release(url);
       assert(r.ok);
       sz_pair_free((SzPair *)r.value);
@@ -7194,7 +7292,7 @@ int main(void) {
       sz_testrt_net_stub("http://example.test/post", "posted");
       url = sz_string_from_cstr("http://example.test/post");
       body = sz_string_from_cstr("abc");
-      r = sz_io_unsafe_run(sz_net_http_post(url, body));
+      r = sz_io_unsafe_run(sz_net_http_post(url, NULL, body));
       assert(r.ok);
       assert(strcmp(http_resp_body_cstr(r.value), "posted") == 0);
       sz_release(url);
@@ -7203,7 +7301,7 @@ int main(void) {
 
       sz_testrt_net_stub("https://example.test/s", "tls-ok");
       url = sz_string_from_cstr("https://example.test/s");
-      r = sz_io_unsafe_run(sz_net_http_get(url));
+      r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
       assert(r.ok);
       assert(strcmp(http_resp_body_cstr(r.value), "tls-ok") == 0);
       sz_release(url);
@@ -7212,7 +7310,7 @@ int main(void) {
       url = sz_string_from_cstr("http://127.0.0.1:8080/echo");
       body = sz_string_from_cstr("xyz");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_echo_req, NULL),
-                                    sz_net_http_post(url, body)));
+                                    sz_net_http_post(url, NULL, body)));
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->right);
@@ -7223,7 +7321,7 @@ int main(void) {
 
       url = sz_string_from_cstr("http://127.0.0.1:8080/h");
       r = sz_io_unsafe_run(both_drop(sz_net_serve_once(8080, serve_echo_req, NULL),
-                                    sz_net_http_head(url)));
+                                    sz_net_http_head(url, NULL)));
       assert(r.ok);
       pair = (SzPair *)r.value;
       assert(pair && pair->right);
@@ -8322,7 +8420,7 @@ int main(void) {
     SzString *body = sz_string_from_cstr("hi");
     SzPair *pair;
     r = sz_io_unsafe_run(both_drop(sz_net_serve_once(18483, serve_echo_req, NULL),
-                                  sz_net_http_post(url, body)));
+                                  sz_net_http_post(url, NULL, body)));
     sz_release(url);
     sz_release(body);
     assert(r.ok);
@@ -8337,7 +8435,7 @@ int main(void) {
   {
     SzString *url = sz_string_from_cstr("https://127.0.0.1:18484/x");
     r = sz_io_unsafe_run(both_drop(sz_net_serve_once(18484, serve_path_ok, NULL),
-                                  sz_net_http_get(url)));
+                                  sz_net_http_get(url, NULL)));
     sz_release(url);
     assert(!r.ok);
     assert(r.error);
@@ -8350,7 +8448,7 @@ int main(void) {
     SzString *url = sz_string_from_cstr("https://127.0.0.1:18485/x");
     SzPair *pair;
     r = sz_io_unsafe_run(both_drop(sz_net_serve_once_tls(18485, serve_path_ok, NULL),
-                                  sz_net_http_get(url)));
+                                  sz_net_http_get(url, NULL)));
     sz_release(url);
     assert(r.ok);
     pair = (SzPair *)r.value;
@@ -8701,7 +8799,7 @@ int main(void) {
     SzString *url = sz_string_from_cstr("http://127.0.0.1:18490/nope");
     SzPair *pair;
     r = sz_io_unsafe_run(both_drop(sz_net_serve_once(18490, serve_not_found, NULL),
-                                  sz_net_http_get(url)));
+                                  sz_net_http_get(url, NULL)));
     sz_release(url);
     assert(r.ok);
     pair = (SzPair *)r.value;
@@ -8948,7 +9046,7 @@ int main(void) {
     int64_t t0 = sz_clock_monotonic_ms_sync();
     int64_t t1;
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://192.0.2.1:9/x")));
+        sz_net_http_get(sz_string_from_cstr("http://192.0.2.1:9/x"), NULL));
     t1 = sz_clock_monotonic_ms_sync();
     assert(!r.ok);
     assert(r.error && strstr(sz_string_cstr(r.error->message), "timed out"));
@@ -8965,7 +9063,7 @@ int main(void) {
     {
       SzString *url = sz_string_from_cstr("http://192.0.2.1:9/x");
       r = sz_io_unsafe_run(
-          race_drop(sz_net_http_get(url), sz_io_sleep_ms(20)));
+          race_drop(sz_net_http_get(url, NULL), sz_io_sleep_ms(20)));
       sz_release(url);
       assert(r.ok);
     }
@@ -9017,7 +9115,7 @@ int main(void) {
     sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
     t0 = sz_clock_monotonic_ms_sync();
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://silent.test/x")));
+        sz_net_http_get(sz_string_from_cstr("http://silent.test/x"), NULL));
     t1 = sz_clock_monotonic_ms_sync();
     close(dns_fd);
     sz_net_test_set_nameserver(NULL, 0);
@@ -9145,7 +9243,7 @@ int main(void) {
     sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
     pthread_create(&th, NULL, dns_glue_only, &dns_fd);
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://scuzz.test/x")));
+        sz_net_http_get(sz_string_from_cstr("http://scuzz.test/x"), NULL));
     pthread_join(th, NULL);
     close(dns_fd);
     sz_net_test_set_nameserver(NULL, 0);
@@ -9175,7 +9273,7 @@ int main(void) {
     pthread_create(&th, NULL, dns_wrong_src, &dns_fd);
     t0 = sz_clock_monotonic_ms_sync();
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://silent.test/x")));
+        sz_net_http_get(sz_string_from_cstr("http://silent.test/x"), NULL));
     t1 = sz_clock_monotonic_ms_sync();
     pthread_join(th, NULL);
     close(dns_fd);
@@ -9190,17 +9288,17 @@ int main(void) {
   /* URL: CR/LF, userinfo, and port out of range fail in get_start. */
   {
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://127.0.0.1/\r\nHost: x")));
+        sz_net_http_get(sz_string_from_cstr("http://127.0.0.1/\r\nHost: x"), NULL));
     assert(!r.ok);
     assert(r.error && strstr(sz_string_cstr(r.error->message), "invalid URL"));
     sz_error_free(r.error);
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://user@host/")));
+        sz_net_http_get(sz_string_from_cstr("http://user@host/"), NULL));
     assert(!r.ok);
     assert(r.error && strstr(sz_string_cstr(r.error->message), "invalid URL"));
     sz_error_free(r.error);
     r = sz_io_unsafe_run(
-        sz_net_http_get(sz_string_from_cstr("http://127.0.0.1:99999/")));
+        sz_net_http_get(sz_string_from_cstr("http://127.0.0.1:99999/"), NULL));
     assert(!r.ok);
     assert(r.error && strstr(sz_string_cstr(r.error->message), "invalid port"));
     sz_error_free(r.error);
@@ -11901,7 +11999,7 @@ int main(void) {
     sz_testrt_install();
     sz_testrt_net_stub("http://example.test/v1", "ok");
     url = sz_string_from_cstr("http://example.test/v1");
-    r = sz_io_unsafe_run(sz_net_http_get(url));
+    r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
     assert(!r.ok);
     assert(r.error &&
            strstr(sz_string_cstr(r.error->message), "dropped") != NULL);
@@ -11926,7 +12024,7 @@ int main(void) {
     sz_testrt_install();
     sz_testrt_net_stub("http://example.test/v1", "ok");
     url = sz_string_from_cstr("http://example.test/v1");
-    r = sz_io_unsafe_run(sz_net_http_get(url));
+    r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
     assert(r.ok);
     assert(r.value);
     assert(strcmp(http_resp_body_cstr(r.value), "ok!") == 0);
@@ -11949,7 +12047,7 @@ int main(void) {
     setenv("SCUZZ_FAULT_N", "1", 1);
     sz_testrt_install();
     url = sz_string_from_cstr("http://127.0.0.1:8080/ping");
-    r = sz_io_unsafe_run(sz_net_http_get(url));
+    r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
     assert(!r.ok);
     assert(r.error &&
            strstr(sz_string_cstr(r.error->message), "injected fault") != NULL);

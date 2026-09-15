@@ -1,0 +1,35 @@
+def requestHeaders(token: String): Map[String, String] =
+  Map.set(Map.set(Map.set(Map.empty(), "Authorization", s"Bearer $token"), "Accept", "application/json"), "User-Agent", "scuzz-api-report")
+
+def isOpen(row: Json): Bool =
+  Json.getStr(row, "state", "") == "open"
+
+def validRecord(row: Json): Bool =
+  Json.isObj(row) && List.nonEmpty(Json.get(row, "state")) && List.forall(Json.get(row, "state"), s => Json.isStr(s))
+
+def decode(status: Int, body: String): Result[String, List[Json]] =
+  if (status == 401 || status == 403) Result.Err("API credentials rejected") else if (status < 200 || status >= 300) Result.Err(s"API status $status") else Json.parse(body) match {
+  case Result.Err(_) => Result.Err("API returned invalid JSON")
+  case Result.Ok(value) => if (!Json.isArr(value)) Result.Err("API response must be an array") else if (!List.forall(Json.arr(value), row => validRecord(row))) Result.Err("Each record must have a string state") else Result.Ok(List.filter(Json.arr(value), row => isOpen(row)))
+}
+
+def writeRows(rows: List[Json], output: String): IO[Unit] =
+  Json.stringify(Json.Arr(rows.require(xs => List.forall(xs, row => isOpen(row))))) match {
+    case Result.Err(_) => IO.fail("Cannot encode report")
+    case Result.Ok(text) => Fs.write(output, text)
+  }
+
+def writeResponse(response: (Int, Map[String, String], String), output: String): IO[Unit] =
+  response match {
+    case (status, _, body) => decode(status, body) match {
+  case Result.Err(message) => IO.fail(message)
+  case Result.Ok(rows) => writeRows(rows, output)
+}
+  }
+
+def run(url: String, token: String, output: String, timeoutMs: Int): IO[Unit] =
+  if (Str.len(token) == 0) IO.fail("Set SCUZZ_API_TOKEN") else for {
+  response <- IO.timeout(timeoutMs, Net.httpGet(url, requestHeaders(token)))
+  _ <- writeResponse(response, output)
+} yield ()
+

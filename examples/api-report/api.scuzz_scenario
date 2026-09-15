@@ -1,0 +1,38 @@
+def setup(): IO[Unit] =
+  IO.pure(())
+
+private def reply(status: Int, body: String): IO[(Int, Map[String, String], String)] =
+  IO.pure((status, Map.empty(), body))
+
+private def handle(request: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  request match {
+    case (path, method, headers, _) => if (method != "GET" || Map.getOrElse(headers, "authorization", "") != "Bearer sim-token") reply(401, "denied") else if (Map.getOrElse(headers, "accept", "") != "application/json" || Map.getOrElse(headers, "user-agent", "") != "scuzz-api-report") reply(400, "headers missing") else if (path == "/bad-json") reply(200, "{") else if (path == "/bad-status") reply(503, "unavailable") else if (path == "/slow") Deferred.empty().flatMap(wait => Deferred.get(wait)) else reply(200, "[{\"id\":1,\"state\":\"open\"},{\"id\":2,\"state\":\"closed\"}]")
+  }
+
+private def request(path: String, token: String): IO[Unit] =
+  for {
+    server <- Fiber.fork(Net.serveOnceTls(18083, handle))
+    _ <- IO.ensure(IO.attempt(Main.runConfigured(s"https://127.0.0.1:18083$path", token, "report.json")).map(_ => ()), Fiber.interrupt(server))
+  } yield ()
+
+def success(n: Int): IO[Unit] =
+  request(s"/records?n=$n", "sim-token")
+
+def rejected(n: Int): IO[Unit] =
+  request("/records", s"bad-$n")
+
+def malformed(): IO[Unit] =
+  request("/bad-json", "sim-token")
+
+def badStatus(): IO[Unit] =
+  request("/bad-status", "sim-token")
+
+def timedOut(): IO[Unit] =
+  request("/slow", "sim-token")
+
+def noToken(): IO[Unit] =
+  IO.attempt(Main.runConfigured("https://127.0.0.1:18083/records", "", "report.json")).map(_ => ())
+
+def insecureUrl(): IO[Unit] =
+  IO.attempt(Main.runConfigured("http://127.0.0.1:18083/records", "sim-token", "report.json")).map(_ => ())
+
