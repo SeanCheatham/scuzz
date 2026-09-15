@@ -6344,6 +6344,30 @@ int main(void) {
       sz_string_free(empty);
     }
     {
+      SzList *xs = sz_string_lines(sz_string_from_cstr("a\n\nb"));
+      SzList *trail = sz_string_lines(sz_string_from_cstr("a\n"));
+      SzList *none = sz_string_lines(sz_string_from_cstr(""));
+      SzList *one_blank = sz_string_lines(sz_string_from_cstr("\n"));
+      SzList *crlf = sz_string_lines(sz_string_from_cstr("a\r\nb"));
+      assert(sz_list_len(xs) == 3);
+      assert(strcmp(sz_string_cstr(xs->head), "a") == 0);
+      assert(strcmp(sz_string_cstr(xs->tail->head), "") == 0);
+      assert(strcmp(sz_string_cstr(xs->tail->tail->head), "b") == 0);
+      assert(sz_list_len(trail) == 1);
+      assert(strcmp(sz_string_cstr(trail->head), "a") == 0);
+      assert(sz_list_len(none) == 0);
+      assert(sz_list_len(one_blank) == 1);
+      assert(strcmp(sz_string_cstr(one_blank->head), "") == 0);
+      assert(sz_list_len(crlf) == 2);
+      assert(strcmp(sz_string_cstr(crlf->head), "a") == 0);
+      assert(strcmp(sz_string_cstr(crlf->tail->head), "b") == 0);
+      sz_list_free(xs);
+      sz_list_free(trail);
+      sz_list_free(none);
+      sz_list_free(one_blank);
+      sz_list_free(crlf);
+    }
+    {
       assert(sz_string_is_empty(sz_string_from_cstr("")) == 1);
       assert(sz_string_is_empty(sz_string_from_cstr("a")) == 0);
       assert(sz_string_is_empty(NULL) == 1);

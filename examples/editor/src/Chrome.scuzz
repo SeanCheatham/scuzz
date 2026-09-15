@@ -125,8 +125,12 @@ def writeDirty(paths: List[String], bodies: List[String], origs: List[String]): 
 def lineColFromLines(rows: List[String]): (Int, Int) =
   if (List.isEmpty(rows)) (0, 0) else (List.len(rows) - 1, Str.len(List.at(rows, List.len(rows) - 1)))
 
+def lineColPre(pre: String): (Int, Int) =
+  if (Str.isEmpty(pre)) (0, 0) else if (Str.endsWith(pre, """
+""")) (List.len(Str.lines(pre)), 0) else lineColFromLines(Str.lines(pre))
+
 def lineColAt(body: String, off: Int): (Int, Int) =
-  lineColFromLines(Str.lines(Str.take(body, if (off < 0) 0 else off)))
+  lineColPre(Str.take(body, if (off < 0) 0 else off))
 
 def findNextOffset(body: String, needle: String, start: Int): Int =
   if (Str.isEmpty(needle)) start else if (Str.indexOf(Str.drop(body, if (start < 0) 0 else start), needle) < 0) -1 else start + Str.indexOf(Str.drop(body, if (start < 0) 0 else start), needle)

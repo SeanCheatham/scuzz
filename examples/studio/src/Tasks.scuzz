@@ -64,8 +64,11 @@ def noteFlip(_s: String): Unit =
 def noteClear(): Unit =
   Property.sometimes("droveClear")
 
+def loadListRows(rows: List[String]): List[String] =
+  if (List.isEmpty(rows)) ["milk"] else rows
+
 def loadList(text: String): List[String] =
-  if (List.isEmpty(Str.lines(text))) ["milk"] else Str.lines(text)
+  loadListRows(List.filter(Str.lines(text), x => Str.nonEmpty(x)))
 
 def saveBody(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else Str.concat(List.join(xs, """
