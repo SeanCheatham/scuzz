@@ -94,3 +94,6 @@ def fmtIdemEnum(): Bool =
 def fmtIdemFor(): Bool =
   Main.fmtIdem(Main.srcFor())
 
+def truncatedDefinitions(): Bool =
+  Parse.hasParseError(Parse.parse(Lexer.lex("def setup(:"))) && Parse.hasParseError(Parse.parse(Lexer.lex("def value(): Int ="))) && Parse.hasParseError(Parse.parse(Lexer.lex("@main def main: IO[Unit] =")))
+

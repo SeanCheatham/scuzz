@@ -1065,7 +1065,6 @@ void sz_testrt_net_inject_http(const char *method, const char *path,
 void sz_testrt_net_queue_http(const char *method, const char *path,
                              const char *body);
 int sz_testrt_net_serve_pending(void);
-int sz_testrt_net_serve_pending_port(int64_t port); /* injects plus mailbox items */
 char *sz_testrt_net_pop_request(void); /* owned; NULL if empty */
 int sz_testrt_net_is_fake(void);
 SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzMap *headers, SzString *body);
@@ -1176,6 +1175,8 @@ SzString *sz_timeline_replay_signal_list_at(const char *name, int64_t index);
 int64_t sz_timeline_len(void *tl);
 int64_t sz_timeline_signal_int(void *tl, int64_t i, SzString *name);
 int64_t sz_timeline_signal_list_len(void *tl, int64_t i, SzString *name);
+int64_t sz_timeline_file_text_is(void *tl, int64_t i, SzString *path,
+                                 SzString *text);
 int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
                                   SzString *needle);
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle);

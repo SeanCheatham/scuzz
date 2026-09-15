@@ -299,6 +299,7 @@ typedef struct ExecSt {
   int out_fd;
   int err_fd;
   pid_t pid;
+  pid_t pgid;
   int status;
   int overflow;
   char *out_buf;
@@ -336,6 +337,10 @@ static void exec_reap_pid(pid_t pid) {
 static void exec_free(ExecSt *st) {
   if (!st)
     return;
+  if (st->pgid > 0) {
+    (void)kill(-st->pgid, SIGKILL);
+    st->pgid = 0;
+  }
   exec_close_fd(&st->out_fd);
   exec_close_fd(&st->err_fd);
   if (st->pid > 0) {
@@ -449,6 +454,9 @@ static void *sys_exec_start(void *env) {
     return r;
   }
   if (pid == 0) {
+    /* Keep the shell and its children in one cancellation group. */
+    if (setpgid(0, 0) != 0)
+      _exit(127);
     close(out_fds[0]);
     close(err_fds[0]);
     if (dup2(out_fds[1], STDOUT_FILENO) < 0)
@@ -463,6 +471,9 @@ static void *sys_exec_start(void *env) {
     execl("/bin/sh", "sh", "-c", c, (char *)NULL);
     _exit(127);
   }
+  /* Both sides set the group before either side can cancel. */
+  (void)setpgid(pid, pid);
+  st->pgid = pid;
   close(out_fds[1]);
   close(err_fds[1]);
   exec_set_cloexec_nb(out_fds[0]);

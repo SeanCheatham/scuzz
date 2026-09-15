@@ -1,4 +1,4 @@
-record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], unclaimed: List[String])
+record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], unclaimed: List[String])
 
 import Parse.Fun
 import Parse.Param
@@ -445,34 +445,34 @@ def jRegion(row: (String, Bool)): String =
 def jKVList(k: String, xs: List[String]): String =
   Str.concat("\"", Str.concat(k, Str.concat("\":", jStrList(xs))))
 
-def jClaimed(signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): String =
-  Str.concat("{", Str.concat(List.join(jKVList("signalInt", signalInt) :: jKVList("signalListLen", signalListLen) :: jKVList("signalStrHas", signalStrHas) :: jKVList("a11yHas", a11yHas) :: jKVList("lastHitHas", lastHitHas) :: jKVList("driveHas", driveHas) :: jKVList("effectHas", effectHas) :: noStr(), ","), "}"))
+def jClaimed(signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): String =
+  Str.concat("{", Str.concat(List.join(jKVList("signalInt", signalInt) :: jKVList("signalListLen", signalListLen) :: jKVList("signalStrHas", signalStrHas) :: jKVList("a11yHas", a11yHas) :: jKVList("lastHitHas", lastHitHas) :: jKVList("driveHas", driveHas) :: jKVList("effectHas", effectHas) :: jKVList("fileTextIs", fileTextIs) :: noStr(), ","), "}"))
 
 def jBreadth(br: Breadth): String =
   br match {
-    case Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, unclaimed) => Str.concat(",\"breadth\":{\"varied\":", Str.concat(jStrList(varied), Str.concat(",\"claimed\":", Str.concat(jClaimed(signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas), Str.concat(",\"unclaimed\":", Str.concat(jStrList(unclaimed), "}"))))))
+    case Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, unclaimed) => Str.concat(",\"breadth\":{\"varied\":", Str.concat(jStrList(varied), Str.concat(",\"claimed\":", Str.concat(jClaimed(signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs), Str.concat(",\"unclaimed\":", Str.concat(jStrList(unclaimed), "}"))))))
   }
 
 def noBreadth(): Breadth =
-  Breadth(noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr())
+  Breadth(noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr(), noStr())
 
 def sampleBreadth(): Breadth =
-  Breadth(["signals"], ["count"], noStr(), noStr(), ["text:count = -1"], noStr(), noStr(), noStr(), noStr())
+  Breadth(["signals"], ["count"], noStr(), noStr(), ["text:count = -1"], noStr(), noStr(), noStr(), noStr(), noStr())
 
 def breadthOf(files: List[(String, String)], raw: String): Breadth =
   breadthFrom(dumpNames(raw), files)
 
 def breadthFrom(varied: List[String], files: List[(String, String)]): Breadth =
-  breadthFill(varied, sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalInt", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalListLen", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalStrHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.a11yHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.lastHitHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.driveHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.effectHas", 2))))
+  breadthFill(varied, sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalInt", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalListLen", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.signalStrHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.a11yHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.lastHitHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.driveHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.effectHas", 2))), sortStrs(List.distinct(callLitsFiles(files, "Timeline.fileTextIs", 2))))
 
-def breadthFill(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): Breadth =
-  Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, breadthUnclaimed(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas))
+def breadthFill(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): Breadth =
+  Breadth(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs, breadthUnclaimed(varied, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs))
 
-def breadthUnclaimed(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): List[String] =
-  List.filter(varied, b => breadthGap(b, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas))
+def breadthUnclaimed(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): List[String] =
+  List.filter(varied, b => breadthGap(b, signalInt, signalListLen, signalStrHas, a11yHas, lastHitHas, driveHas, effectHas, fileTextIs))
 
-def breadthGap(b: String, signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String]): Bool =
-  if (b == "signals") List.isEmpty(signalInt) && List.isEmpty(signalListLen) && List.isEmpty(signalStrHas) else if (b == "a11y") List.isEmpty(a11yHas) else if (b == "last_hit") List.isEmpty(lastHitHas) else if (b == "drive") List.isEmpty(driveHas) else if (b == "effects") List.isEmpty(effectHas) else false
+def breadthGap(b: String, signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String]): Bool =
+  if (b == "signals") List.isEmpty(signalInt) && List.isEmpty(signalListLen) && List.isEmpty(signalStrHas) else if (b == "a11y") List.isEmpty(a11yHas) else if (b == "last_hit") List.isEmpty(lastHitHas) else if (b == "drive") List.isEmpty(driveHas) else if (b == "effects") List.isEmpty(effectHas) else if (b == "files") List.isEmpty(fileTextIs) else false
 
 def jReachKey(key: String, declared: List[String], reached: List[String]): String =
   Str.concat(",\"", Str.concat(key, Str.concat("\":", jReach(declared, reached))))
@@ -1592,14 +1592,11 @@ def dupName(xs: List[String]): String =
 def dupName2(a: String, b: String, rest: List[String]): String =
   if (a == b) a else dupName(rest)
 
-def driveCapMsg(n: Int): String =
-  Str.concat("scuzz.toml:1:1: error: package declares ", Str.concat(Str.fromInt(n), " drive names; at most 32 drive names are allowed"))
-
 def driveDupMsg(name: String): String =
   Str.concat("scuzz.toml:1:1: error: drive name ", Str.concat(name, " is declared more than once"))
 
 def driveRule(names: List[String]): String =
-  if (List.len(names) > 32) driveCapMsg(List.len(names)) else driveDupMsgGo(dupName(sortStrs(names)))
+  driveDupMsgGo(dupName(sortStrs(names)))
 
 def driveDupMsgGo(dup: String): String =
   if (dup == "") "" else driveDupMsg(dup)

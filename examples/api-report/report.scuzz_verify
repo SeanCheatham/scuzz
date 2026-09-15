@@ -14,7 +14,7 @@ def rejectsJson(): Bool =
   Report.decode(200, "{") == Result.Err("API returned invalid JSON") && Report.decode(200, "{}") == Result.Err("API response must be an array") && Report.decode(200, "[{}]") == Result.Err("Each record must have a string state")
 
 def successWrites(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.driveHas(t, i, "success") || Timeline.effectHas(t, i, "Fs.write"))
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "success") || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
 
 def failuresPreserveReport(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "rejected") || Timeline.driveHas(t, i, "malformed") || Timeline.driveHas(t, i, "badStatus") || Timeline.driveHas(t, i, "timedOut")) || !Timeline.effectHas(t, i, "Fs.write"))
@@ -27,4 +27,36 @@ def preservesOpenFields(n: Int): Bool =
 
 def rejectsConfigBeforeNetwork(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "noToken") || Timeline.driveHas(t, i, "insecureUrl")) || !Timeline.effectHas(t, i, "Net.httpGet") && !Timeline.effectHas(t, i, "Fs.write"))
+
+def retryPolicy(status: Int): Bool =
+  Report.retryable(status) == (status == 429 || status >= 502 && status <= 504)
+
+def recoveredRequestWrites(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "recovers") || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
+
+def retryFailuresPreserveReport(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "exhausted") || Timeline.driveHas(t, i, "retryDeadline") || Timeline.driveHas(t, i, "permanentStatus")) || !Timeline.effectHas(t, i, "Fs.write"))
+
+def retrySeconds(n: Int): Bool =
+  if (n < 0 || n > 9223372036854775) Report.retryAfter(Str.fromInt(n)) == -1 else Report.retryAfter(Str.fromInt(n)) == n * 1000
+
+def retryHeaderForms(): Bool =
+  Report.retryAfter("0") == 0 && Report.retryAfter(" 001 ") == 1000 && Report.retryAfter("+1") == -1 && Report.retryAfter("1.5") == -1 && Report.retryAfter("") == -1 && Report.retryAfter("1, 2") == -1 && Report.retryAfter("9223372036854775") == 9223372036854775000 && Report.retryAfter("9223372036854776") == -1 && Report.retryAfter("9999999999999999999999") == -1 && Report.retryAfter("Fri, 31 Dec 1999 23:59:59 GMT") == -1
+
+def retryHeaderPolicy(): Bool =
+  Report.retryDelay(429, Map.empty()) == 1000 && Report.retryDelay(503, Map.empty()) == 100 && Report.retryDelay(401, Map.set(Map.empty(), "Retry-After", "1")) == -1 && Report.retryDelay(429, Map.set(Map.empty(), "rEtRy-AfTeR", "2")) == 2000 && Report.retryDelay(503, Map.set(Map.empty(), "Retry-After", "2")) == 2000 && Report.retryDelay(429, Map.set(Map.set(Map.empty(), "Retry-After", "1"), "retry-after", "2")) == -1
+
+def rateLimitRecovery(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "rateLimited") || Timeline.driveHas(t, i, "zeroRetry")) || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
+
+def rateLimitFailurePreservesReport(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "rateDeadline") || Timeline.driveHas(t, i, "rateExhausted") || Timeline.driveHas(t, i, "badRetryAfter")) || !Timeline.effectHas(t, i, "Fs.write"))
+
+def reportContents(t: Timeline): Verdict =
+  Verdict.every(t, i => !(Timeline.driveHas(t, i, "success") || Timeline.driveHas(t, i, "recovers") || Timeline.driveHas(t, i, "rateLimited") || Timeline.driveHas(t, i, "zeroRetry")) || Timeline.faultKindHas(t, i, "net") || Timeline.faultKindHas(t, i, "fs") || Timeline.fileTextIs(t, i, "report.json", "[{\"id\":1,\"state\":\"open\"}]"))
+
+def failuresKeepContents(t: Timeline): Verdict =
+  Verdict.stepEvery(t, __tup => __tup match {
+  case (a, b) => !(Timeline.driveHas(t, b, "rejected") || Timeline.driveHas(t, b, "malformed") || Timeline.driveHas(t, b, "badStatus") || Timeline.driveHas(t, b, "timedOut") || Timeline.driveHas(t, b, "noToken") || Timeline.driveHas(t, b, "insecureUrl") || Timeline.driveHas(t, b, "exhausted") || Timeline.driveHas(t, b, "retryDeadline") || Timeline.driveHas(t, b, "permanentStatus") || Timeline.driveHas(t, b, "rateDeadline") || Timeline.driveHas(t, b, "rateExhausted") || Timeline.driveHas(t, b, "badRetryAfter")) || Timeline.fileTextIs(t, a, "report.json", "[]") && Timeline.fileTextIs(t, b, "report.json", "[]") || Timeline.fileTextIs(t, a, "report.json", "[{\"id\":1,\"state\":\"open\"}]") && Timeline.fileTextIs(t, b, "report.json", "[{\"id\":1,\"state\":\"open\"}]")
+})
 

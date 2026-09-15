@@ -2204,6 +2204,81 @@ static void test_request_headers(void) {
   sz_testrt_reset();
 }
 
+static int64_t driver_sum;
+
+static SzIo *driver_add(int64_t n) {
+  driver_sum += n;
+  return sz_io_pure(NULL);
+}
+
+static void test_driver_growth(void) {
+  char name[64];
+  int i;
+  for (i = 0; i < 65; i++) {
+    SzString *text;
+    snprintf(name, sizeof name, "growth%d", i);
+    text = sz_string_from_cstr(name);
+    sz_driver_register(text, 1, 0, (void *)driver_add);
+    sz_release(text);
+  }
+  for (i = 0; i < 65; i++) {
+    snprintf(name, sizeof name, "growth%d %d", i, i);
+    sz_driver_run_line(name);
+  }
+  assert(driver_sum == 64 * 65 / 2);
+  sz_testrt_reset();
+}
+
+static void test_file_timeline(void) {
+  const char *dump_path = "/tmp/scuzz_test_file_timeline.dump";
+  SzString *path = sz_string_from_cstr("report.txt");
+  SzString *alias = sz_string_from_cstr("./report.txt");
+  SzString *empty_path = sz_string_from_cstr("empty.txt");
+  SzString *old = sz_string_from_bytes("old\n\0", 5);
+  SzString *fresh = sz_string_from_cstr("new");
+  SzString *empty = sz_string_from_cstr("");
+  void *timeline;
+  sz_testrt_reset();
+  sz_testrt_install();
+  setenv("SCUZZ_TESTRT", "1", 1);
+  setenv("SCUZZ_TIMELINE_DUMP", dump_path, 1);
+  sz_testrt_oracles_refresh();
+  sz_property_session_reset();
+  assert(sz_io_unsafe_run(sz_fs_write(path, old)).ok);
+  assert(sz_io_unsafe_run(sz_fs_write(empty_path, empty)).ok);
+  sz_property_session_step();
+  assert(sz_io_unsafe_run(sz_fs_write(path, fresh)).ok);
+  assert(sz_io_unsafe_run(sz_fs_delete(empty_path)).ok);
+  sz_property_session_step();
+  assert(sz_io_unsafe_run(sz_fs_delete(path)).ok);
+  sz_property_session_step();
+  sz_property_session_end();
+  sz_property_session_reset();
+  timeline = sz_timeline_load(dump_path);
+  assert(timeline && sz_timeline_len(timeline) == 3);
+  assert(sz_timeline_file_text_is(timeline, 0, path, old));
+  assert(sz_timeline_file_text_is(timeline, 0, alias, old));
+  assert(!sz_timeline_file_text_is(timeline, 1, path, old));
+  assert(sz_timeline_file_text_is(timeline, 1, path, fresh));
+  assert(!sz_timeline_file_text_is(timeline, 1, path, empty));
+  assert(!sz_timeline_file_text_is(timeline, 2, path, fresh));
+  assert(!sz_timeline_file_text_is(timeline, 2, path, empty));
+  assert(sz_timeline_file_text_is(timeline, 0, empty_path, empty));
+  assert(!sz_timeline_file_text_is(timeline, 1, empty_path, empty));
+  sz_timeline_free(timeline);
+  sz_release(path);
+  sz_release(alias);
+  sz_release(empty_path);
+  sz_release(old);
+  sz_release(fresh);
+  sz_release(empty);
+  unsetenv("SCUZZ_TESTRT");
+  unsetenv("SCUZZ_TIMELINE_DUMP");
+  sz_testrt_oracles_refresh();
+  sz_testrt_reset();
+  remove(dump_path);
+}
+
 int main(void) {
   test_request_headers();
   /* List.head_opt: None on empty, Some payload on a cell. C List.head still panics. */
@@ -7095,7 +7170,8 @@ int main(void) {
 
     sz_testrt_net_inject_request("/a");
     sz_testrt_net_queue_request("/b");
-    r = sz_io_unsafe_run(sz_net_serve(8080, serve_path_ok, NULL));
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(8080, serve_path_ok, NULL),
+                                   sz_io_sleep_ms(20)));
     assert(r.ok);
     assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/b") == 0);
     assert(sz_testrt_net_serve_pending() == 0);
@@ -7104,7 +7180,8 @@ int main(void) {
     sz_alloc_stats(&base_bytes, &base_count);
     sz_testrt_net_inject_request("/a");
     sz_testrt_net_queue_request("/b");
-    r = sz_io_unsafe_run(sz_net_serve(8080, serve_path_ok, NULL));
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(8080, serve_path_ok, NULL),
+                                   sz_io_sleep_ms(20)));
     assert(r.ok);
     sz_testrt_net_set_last_serve_body(NULL);
     sz_alloc_stats(&live_bytes, &live_count);
@@ -7114,7 +7191,8 @@ int main(void) {
     g_serve_fail_n = 0;
     sz_testrt_net_inject_request("/a");
     sz_testrt_net_queue_request("/b");
-    r = sz_io_unsafe_run(sz_net_serve(8080, serve_fail_then_ok, NULL));
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(8080, serve_fail_then_ok, NULL),
+                                   sz_io_sleep_ms(20)));
     assert(r.ok);
     assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/b") == 0);
 
@@ -7126,7 +7204,8 @@ int main(void) {
     memset(g_serve_io, 0, sizeof g_serve_io);
     sz_testrt_net_set_last_serve_body(NULL);
     sz_testrt_net_inject_request("/x");
-    r = sz_io_unsafe_run(sz_net_serve(8080, serve_leak_ok, NULL));
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(8080, serve_leak_ok, NULL),
+                                   sz_io_sleep_ms(20)));
     assert(r.ok);
     assert(g_serve_rounds == SERVE_LEAK_N);
     assert(g_serve_count[1] <= g_serve_count[0] + 2);
@@ -8371,6 +8450,82 @@ int main(void) {
       assert(sz_unbox_i64(got->left) == 0);
     }
     assert(g_peer_flag == 1);
+  }
+
+  /* A zero-delay loop cannot bypass the simulation step limit. */
+  {
+    char path[] = "/tmp/scuzz-step-limit-XXXXXX";
+    char message[8192];
+    int fd = mkstemp(path);
+    int status;
+    pid_t child;
+    ssize_t n;
+    assert(fd >= 0);
+    child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+      alarm(10);
+      assert(dup2(fd, STDERR_FILENO) >= 0);
+      close(fd);
+      sz_testrt_install();
+      SzIo *sleep = sz_io_sleep_ms(0);
+      SzIo *loop = sz_io_forever(sleep);
+      SzIo *timed = sz_io_timeout(1, loop);
+      sz_release(sleep);
+      sz_release(loop);
+      sz_io_unsafe_run(timed);
+      _exit(1);
+    }
+    assert(waitpid(child, &status, 0) == child);
+    assert(lseek(fd, 0, SEEK_SET) == 0);
+    n = read(fd, message, sizeof message - 1);
+    assert(n >= 0);
+    message[n] = 0;
+    close(fd);
+    unlink(path);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+    assert(strstr(message, "simulation exceeds 1000000 scheduler steps"));
+  }
+
+  /* Cancel kills a shell child, including after the shell exits. */
+  {
+    int shell_exits;
+    for (shell_exits = 0; shell_exits <= 1; shell_exits++) {
+      char path[] = "/tmp/scuzz-exec-child-XXXXXX";
+      char command[256];
+      int fd = mkstemp(path);
+      int child = 0;
+      int stopped = 0;
+      int i;
+      FILE *file;
+      assert(fd >= 0);
+      close(fd);
+      snprintf(command, sizeof command,
+               "sleep 30 & echo $! > %s; %s", path,
+               shell_exits ? "exit 0" : "wait");
+      SzString *cmd = sz_string_from_cstr(command);
+      SzIo *exec = sz_sys_exec(cmd);
+      SzIo *timed = sz_io_timeout(200, exec);
+      sz_release(cmd);
+      sz_release(exec);
+      r = sz_io_unsafe_run(timed);
+      assert(!r.ok);
+      sz_error_free(r.error);
+      file = fopen(path, "r");
+      assert(file && fscanf(file, "%d", &child) == 1 && child > 0);
+      fclose(file);
+      unlink(path);
+      for (i = 0; i < 100; i++) {
+        if (kill((pid_t)child, 0) < 0 || pid_is_zombie((pid_t)child)) {
+          stopped = 1;
+          break;
+        }
+        usleep(10000);
+      }
+      if (!stopped)
+        kill((pid_t)child, SIGKILL);
+      assert(stopped);
+    }
   }
 
   /* Cancel of a long child reaps it. */
@@ -12538,7 +12693,7 @@ int main(void) {
     sz_property_session_reset();
     dump = slurp_path(path);
     assert(dump);
-    assert(strncmp(dump, "# timeline v=2 n=2\n", 19) == 0);
+    assert(strncmp(dump, "# timeline v=3 n=2\n", 19) == 0);
     assert(strstr(dump, "effects:\n") != NULL);
     assert(strstr(dump, "fibers:\n") != NULL);
     assert(strstr(dump, "fault:\n") != NULL);
@@ -12549,7 +12704,7 @@ int main(void) {
     remove(path);
   }
 
-  /* v1 timeline dump loader: round-trip through tl_dump_file. */
+  /* File load preserves the captured timeline. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_load.dump";
     void *tl;
@@ -12584,7 +12739,7 @@ int main(void) {
     remove(path);
   }
 
-  /* Effect log, fiber census, and fault context round-trip on a v2 dump. */
+  /* Effect log, fiber census, and fault context round-trip on a timeline dump. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_obs.dump";
     void *tl;
@@ -12719,7 +12874,7 @@ int main(void) {
     const char *path = "/tmp/scuzz_test_io_tl_sig.dump";
     void *tl;
     SzString *needle;
-    write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+    write_text(path, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
                      "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":7},"
                      "{\"id\":1,\"type\":\"list\",\"name\":\"items\",\"value\":[\"a\",\"b\"]},"
                      "{\"id\":2,\"type\":\"list\",\"name\":\"tasks\",\"value\":[1,2,3]}]\na11y:\nbutton:+1\n");
@@ -12740,7 +12895,7 @@ int main(void) {
     assert(sz_timeline_a11y_has(tl, 0, needle) == 1);
     sz_release(needle);
     sz_timeline_free(tl);
-    write_text(path, "# timeline v=2 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
+    write_text(path, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
                      "signals:\n[{\"id\":1,\"type\":\"list\",\"name\":\"q\",\"value\":[\"a\\\"b\",\"a\\nb\"]},"
                      "{\"id\":2,\"type\":\"str\",\"name\":\"draft\",\"value\":\"a\\\"b\"}]\na11y:\n\n");
     tl = sz_timeline_load(path);
@@ -12756,7 +12911,7 @@ int main(void) {
     }
     sz_release(needle);
     sz_timeline_free(tl);
-    write_text(path, "# timeline v=2 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
+    write_text(path, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\n\n"
                      "signals:\n[{\"id\":2,\"type\":\"str\",\"name\":\"draft\",\"value\":\"\"}]\na11y:\n\n");
     tl = sz_timeline_load(path);
     assert(tl);
@@ -12771,7 +12926,7 @@ int main(void) {
     }
     sz_release(needle);
     sz_timeline_free(tl);
-    write_text(path, "# timeline v=3 n=0\n");
+    write_text(path, "# timeline v=4 n=0\n");
     assert(sz_timeline_load(path) == NULL);
     write_text(path, "nonsense\n");
     assert(sz_timeline_load(path) == NULL);
@@ -12786,7 +12941,7 @@ int main(void) {
     SzString *hit;
     SzString *needle;
     SzVerdict *v;
-    write_text(path, "# timeline v=2 n=2\n--- 0\nlast_hit:\n\ndrive:\n\n"
+    write_text(path, "# timeline v=3 n=2\n--- 0\nlast_hit:\n\ndrive:\n\n"
                      "signals:\n\na11y:\nbutton:+1\n--- 1\nlast_hit:\n"
                      "button:+1\ndrive:\n\nsignals:\n\na11y:\nbutton:+1\n"
                      "text:count = 1\n");
@@ -12846,7 +13001,7 @@ int main(void) {
     void *tl;
     SzString *hit;
     SzVerdict *v;
-    write_text(path, "# timeline v=2 n=3\n--- 0\nlast_hit:\n\ndrive:\n\n"
+    write_text(path, "# timeline v=3 n=3\n--- 0\nlast_hit:\n\ndrive:\n\n"
                      "signals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":0}]\na11y:\n--- 1\nlast_hit:\n"
                      "button:+1\ndrive:\n\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":1}]\na11y:\n"
                      "--- 2\nlast_hit:\nbutton:+1\ndrive:\n\nsignals:\n"
@@ -12885,16 +13040,16 @@ int main(void) {
   {
     const char *a = "/tmp/scuzz_test_io_rel_a.dump";
     const char *b = "/tmp/scuzz_test_io_rel_b.dump";
-    write_text(a, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+    write_text(a, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
                   "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":1}]\na11y:\n");
-    write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+    write_text(b, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
                   "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":1}]\na11y:\n");
     sz_property_session_reset();
     sz_verify_register_rel("sameFinal", rel_final_int_eq);
     assert(sz_judge_rel_main(
                "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
            0);
-    write_text(b, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+    write_text(b, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
                   "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":2}]\na11y:\n");
     assert(sz_judge_rel_main(
                "/tmp/scuzz_test_io_rel_a.dump,/tmp/scuzz_test_io_rel_b.dump") ==
@@ -12916,7 +13071,7 @@ int main(void) {
     const char *path = "/tmp/scuzz_test_io_tl_obs.dump";
     void *tl;
     SzString *needle;
-    write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+    write_text(path, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
                      "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"\",\"value\":1}]\na11y:\nbutton:+1\neffects:\n"
                      "fs.write n=7\nfibers:\nready=1 parked=2\nfault:\n"
                      "kind=fs n=1 mode=fail\n");
@@ -12936,7 +13091,7 @@ int main(void) {
     assert(sz_timeline_fault_kind_has(tl, 0, needle) == 1);
     sz_release(needle);
     sz_timeline_free(tl);
-    write_text(path, "# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
+    write_text(path, "# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\ndrive "
                      "x\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"\",\"value\":1}]\na11y:\nbutton:+1\n");
     tl = sz_timeline_load(path);
     assert(tl);
@@ -13025,6 +13180,8 @@ int main(void) {
     remove(path);
   }
 
+  test_driver_growth();
+  test_file_timeline();
   puts("runtime io tests ok");
   return 0;
 }

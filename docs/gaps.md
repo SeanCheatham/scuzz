@@ -43,6 +43,8 @@ Not the next slice.
 
 Needed before a real CLI, server, or desktop app stays. Next work lives here.
 
+The authenticated API report reads one response. Pagination and HTTP-date Retry-After values remain open.
+
 `Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Time parse and zones. Regex capture and replace. HMAC. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Later

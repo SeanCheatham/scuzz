@@ -14563,7 +14563,7 @@ static void missing_timeline_int(void) {
   void *tl;
   SzString *name;
   assert(f);
-  fputs("# timeline v=1 n=1\n--- 0\nlast_hit:\n\ndrive:\n\nsignals:\n"
+  fputs("# timeline v=3 n=1\n--- 0\nlast_hit:\n\ndrive:\n\nsignals:\n"
         "int[0] count = 7\na11y:\n\n",
         f);
   fclose(f);

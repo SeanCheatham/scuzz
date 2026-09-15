@@ -120,6 +120,98 @@ grep -q 'unclaimed def' /tmp/hello-check.json
 grep -q "scuzz check" /tmp/lsp-help.txt
 if "$SCUZZ" check testdata/fmt/needs_format > /tmp/fmt-check.err 2>&1; then echo "expected format error" && exit 1; fi
 grep -q "needs formatting" /tmp/fmt-check.err
+python3 - "$SCUZZ" <<'PYFMT'
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+cli = str(pathlib.Path(sys.argv[1]).resolve())
+with tempfile.TemporaryDirectory(prefix="scuzz-format-") as tmp:
+    root = pathlib.Path(tmp)
+    (root / "scuzz.toml").write_text('[package]\nname = "format-proof"\nversion = "0.1.0"\n')
+    sources = {
+        "src/Main.scuzz": "@main def main:IO[Unit]=IO.pure(())\n",
+        "drivers/world.scuzz_scenario": "def setup():IO[Unit]=IO.pure(())\n",
+        "law.scuzz_verify": "def valid():Bool=true\n",
+        "claims spaced/law.scuzz_verify": "def other():Bool=true\n",
+    }
+    ignored = {f"{folder}/ignored.scuzz_verify": "not Scuzz\n"
+               for folder in ["build", "corpus", "goldens", ".hidden"]}
+    ignored.update({"Ignored.scuzz": "not Scuzz\n",
+                    "src/nested/Ignored.scuzz": "not Scuzz\n"})
+    for name, content in {**sources, **ignored}.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+    def run(*args, ok=True):
+        result = subprocess.run([cli, *args, str(root)], text=True, capture_output=True)
+        assert (result.returncode == 0) == ok, result.stdout + result.stderr
+        return result.stdout + result.stderr
+
+    run("check", ok=False)
+    run("fmt", "--check", ok=False)
+    assert all((root / name).read_text() == content for name, content in sources.items())
+    run("fmt")
+    formatted = {name: (root / name).read_text() for name in sources}
+    assert all(formatted[name] != content for name, content in sources.items())
+    run("fmt", "--check")
+    run("fmt")
+    assert all((root / name).read_text() == content for name, content in formatted.items())
+    assert all((root / name).read_text() == content for name, content in ignored.items())
+    run("check")
+    broken = root / "drivers/world.scuzz_scenario"
+    broken.write_text("def setup(:\n")
+    assert "parse error" in run("fmt", ok=False)
+    assert broken.read_text() == "def setup(:\n"
+print("format source scope ok")
+PYFMT
+
+# A pure allocation loop must fail inside the probe memory limit.
+python3 - "$SCUZZ" <<'PYMEM'
+import os
+import pathlib
+import resource
+import signal
+import subprocess
+import sys
+import tempfile
+
+if sys.platform != "linux":
+    sys.exit(0)
+cli = str(pathlib.Path(sys.argv[1]).resolve())
+
+def outer_limit():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024,) * 2)
+
+with tempfile.TemporaryDirectory(prefix="scuzz-probe-memory-") as tmp:
+    root = pathlib.Path(tmp)
+    (root / "src").mkdir()
+    (root / "scuzz.toml").write_text('[package]\nname = "memory-proof"\n')
+    (root / "src/Main.scuzz").write_text(
+        'def grow(s: String): String =\n  grow(Str.concat(s, s))\n\n'
+        '@main def main: IO[Unit] =\n  IO.println(grow("x"))\n'
+    )
+    child = subprocess.Popen(
+        [cli, "fuzz", "--iterations", "0", tmp],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        start_new_session=True, preexec_fn=outer_limit,
+    )
+    try:
+        output, _ = child.communicate(timeout=60)
+    finally:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.wait()
+    assert child.returncode != 0, output.decode()
+    assert b"out of memory" in output, output.decode()
+    assert b"fuzz live graph failed" in output, output.decode()
+    assert resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss < 524288
+PYMEM
 "$SCUZZ" build examples/kernel
 "$SCUZZ" build examples/kernel 2>&1 | tee /tmp/incr.out
 if grep -q "^ok$" /tmp/incr.out; then echo "fingerprint hit should not rebuild" && exit 1; fi

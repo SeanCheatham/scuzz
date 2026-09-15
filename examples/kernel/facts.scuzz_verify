@@ -16,3 +16,6 @@ def callFacts(): Bool =
 def hueFacts(): Bool =
   Main.describeHue(Color.Red) == "primary" && Main.describeSmall(0) == "tiny" && Main.describeOptZero(Opt.Some(0)) == "some0"
 
+def mapParameters(n: Int): Bool =
+  Main.mapParamRoundTrip(n, Str.fromInt(n))
+

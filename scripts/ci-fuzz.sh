@@ -342,7 +342,7 @@ assert d["coverage"]["reached"] == 2
 assert "score" not in d["mutate"], "invalid mutants must not produce a score"
 PY
 rm -rf "$invalid_dir"
-fuzz --iterations 16 examples/api-report
+fuzz --iterations 176 examples/api-report
 fuzz --iterations 2 examples/io
 python3 - <<'PY'
 import json

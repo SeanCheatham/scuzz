@@ -528,7 +528,7 @@ def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
 
 def runProbe(cmd: String): IO[(Int, String, String)] =
-  IO.timeout(20000, runLine(cmd)).handleErrorWith(e => runProbeTimed(e))
+  IO.timeout(20000, runLine(Str.concat("ulimit -v 524288 && exec env ", cmd))).handleErrorWith(e => runProbeTimed(e))
 
 def runProbeTimed(e: String): IO[(Int, String, String)] =
   if (e == "timeout") IO.pure((124, "", "timeout")) else IO.fail(e)
@@ -1242,7 +1242,7 @@ def fuzzLivePaint(job: FuzzJob): IO[Unit] =
   Fs.mkdirs(joinSlash(joinSlash(job.outDir, "fuzz"), "live")).flatMap(_ => if (job.hasUi) fuzzLivePaintUi(job) else fuzzLivePaintIo(job))
 
 def fuzzLivePaintIo(job: FuzzJob): IO[Unit] =
-  runLine(Str.concat(testEnv(), Str.concat(fuzzReachEnv(job.outDir), fuzzLiveExe(job)))).flatMap(r => fuzzLivePaintIoGot(r))
+  runProbe(Str.concat(testEnv(), Str.concat(fuzzReachEnv(job.outDir), fuzzLiveExe(job)))).flatMap(r => fuzzLivePaintIoGot(r))
 
 def fuzzLivePaintIoGot(r: (Int, String, String)): IO[Unit] =
   r match {

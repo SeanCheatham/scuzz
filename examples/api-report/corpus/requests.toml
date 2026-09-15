@@ -1,3 +1,3 @@
 [fuzz]
 seed = 42
-events = ["drive success 0", "drive rejected 1", "drive malformed", "drive badStatus", "drive timedOut", "drive success 2", "drive noToken", "drive insecureUrl"]
+events = ["drive success 0", "drive rejected 1", "drive malformed", "drive badStatus", "drive timedOut", "drive success 2", "drive noToken", "drive insecureUrl", "drive recovers 0", "drive recovers 1", "drive recovers 2", "drive exhausted", "drive retryDeadline", "drive permanentStatus", "drive rateLimited 0", "drive rateLimited 1", "drive rateDeadline", "drive rateExhausted", "drive badRetryAfter", "drive zeroRetry"]

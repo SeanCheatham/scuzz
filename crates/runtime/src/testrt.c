@@ -1351,10 +1351,6 @@ void sz_testrt_net_queue_http(const char *method, const char *path,
 
 int sz_testrt_net_serve_pending(void) { return g_req_n + mailbox_len_all(); }
 
-int sz_testrt_net_serve_pending_port(int64_t port) {
-  return g_req_n + mailbox_len(mailbox_find(port));
-}
-
 char *sz_testrt_net_pop_request(void) {
   char *p;
   int i;
@@ -3059,6 +3055,7 @@ static int g_verify_rel_n;
 
 typedef struct {
   char *signals;
+  char *files;
   char *a11y;
   char *last_hit;
   char *drive;
@@ -3152,12 +3149,76 @@ static void tl_intern_drop(char *s) {
 
 static void tl_intern_drop_state(SzTlState *s) {
   tl_intern_drop(s->signals);
+  tl_intern_drop(s->files);
   tl_intern_drop(s->a11y);
   tl_intern_drop(s->last_hit);
   tl_intern_drop(s->drive);
   tl_intern_drop(s->effects);
   tl_intern_drop(s->fibers);
   tl_intern_drop(s->fault);
+}
+
+static void tl_cat(char **buf, size_t *len, size_t *cap, const char *s,
+                   size_t n);
+
+/* Each line has a hex path and hex contents. */
+static char *tl_file_line(const char *path, const char *data, size_t len) {
+  SzString *p = sz_string_from_cstr(path);
+  SzString *d = sz_string_from_bytes(data, len);
+  SzString *ph = sz_hex_encode(p);
+  SzString *dh = sz_hex_encode(d);
+  size_t pn = (size_t)sz_string_len(ph);
+  size_t dn = (size_t)sz_string_len(dh);
+  char *line;
+  if (pn > SIZE_MAX - dn - 2)
+    sz_panic("timeline: file snapshot too large");
+  line = (char *)malloc(pn + dn + 2);
+  if (!line)
+    sz_panic("timeline: out of memory");
+  memcpy(line, sz_string_cstr(ph), pn);
+  line[pn] = ' ';
+  memcpy(line + pn + 1, sz_string_cstr(dh), dn);
+  line[pn + dn + 1] = 0;
+  sz_release(p);
+  sz_release(d);
+  sz_release(ph);
+  sz_release(dh);
+  return line;
+}
+
+static int tl_file_cmp(const void *a, const void *b) {
+  const MemNode *aa = *(const MemNode *const *)a;
+  const MemNode *bb = *(const MemNode *const *)b;
+  return strcmp(aa->path, bb->path);
+}
+
+static char *tl_files_snapshot(void) {
+  MemNode *node;
+  MemNode **nodes;
+  size_t n = 0, i = 0, len = 0, cap = 0;
+  char *out = NULL;
+  if (!g_fs_fake)
+    return tl_copy("");
+  for (node = g_fs; node; node = node->next)
+    if (!node->is_dir)
+      n++;
+  if (!n)
+    return tl_copy("");
+  nodes = (MemNode **)malloc(n * sizeof(*nodes));
+  if (!nodes)
+    sz_panic("timeline: out of memory");
+  for (node = g_fs; node; node = node->next)
+    if (!node->is_dir)
+      nodes[i++] = node;
+  qsort(nodes, n, sizeof(*nodes), tl_file_cmp);
+  for (i = 0; i < n; i++) {
+    char *line = tl_file_line(nodes[i]->path, nodes[i]->data, nodes[i]->len);
+    tl_cat(&out, &len, &cap, line, strlen(line));
+    tl_cat(&out, &len, &cap, "\n", 1);
+    free(line);
+  }
+  free(nodes);
+  return out ? out : tl_copy("");
 }
 
 static uint64_t tl_hash_bytes(const void *p, size_t n) {
@@ -3296,6 +3357,11 @@ static void tl_push(void) {
   g_tl[g_tl_n].signals = tl_intern(dump ? sz_string_cstr(dump) : "");
   if (dump)
     sz_string_free(dump);
+  {
+    char *files = tl_files_snapshot();
+    g_tl[g_tl_n].files = tl_intern(files);
+    free(files);
+  }
   g_tl[g_tl_n].a11y = tl_intern(g_property_a11y);
   g_tl[g_tl_n].last_hit = tl_intern(g_property_last_hit);
   g_tl[g_tl_n].drive = tl_intern(g_last_drive);
@@ -3527,6 +3593,40 @@ int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
   return hit;
 }
 
+int64_t sz_timeline_file_text_is(void *tl, int64_t i, SzString *path,
+                                  SzString *text) {
+  SzTlState *state = tl_at(tl, i);
+  char *normalized;
+  char *wanted;
+  const char *line;
+  size_t len;
+  int64_t found = 0;
+  if (!state || !state->files || !path || !text ||
+      strlen(sz_string_cstr(path)) != (size_t)sz_string_len(path))
+    return 0;
+  normalized = norm_path(sz_string_cstr(path));
+  if (!normalized)
+    return 0;
+  wanted = tl_file_line(normalized, sz_string_cstr(text),
+                        (size_t)sz_string_len(text));
+  sz_free(normalized);
+  len = strlen(wanted);
+  line = state->files;
+  while (*line) {
+    const char *end = strchr(line, '\n');
+    size_t n = end ? (size_t)(end - line) : strlen(line);
+    if (n == len && memcmp(line, wanted, len) == 0) {
+      found = 1;
+      break;
+    }
+    if (!end)
+      break;
+    line = end + 1;
+  }
+  free(wanted);
+  return found;
+}
+
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle) {
   SzTlState *s = tl_at(tl, i);
   const char *n = needle ? sz_string_cstr(needle) : "";
@@ -3677,6 +3777,7 @@ void sz_timeline_compact_loaded(void *tl) {
   for (i = 0; i < t->n; i++) {
     if (!t->states[i].checkpoint) {
       free(t->states[i].signals);
+      free(t->states[i].files);
       free(t->states[i].a11y);
       free(t->states[i].last_hit);
       free(t->states[i].drive);
@@ -3910,8 +4011,7 @@ SzVerdict *sz_verdict_on_hit(void *tl, SzString *hit, void *fnp, void *envp) {
   return sz_verdict_ok();
 }
 
-#define SZ_TIMELINE_DUMP_VERSION 2
-#define SZ_TIMELINE_DUMP_VERSION_MIN 1
+#define SZ_TIMELINE_DUMP_VERSION 3
 
 static void tl_fputs_block(FILE *f, const char *s) {
   fputs(s ? s : "", f);
@@ -3941,11 +4041,13 @@ static void tl_dump_file(void) {
     tl_fputs_block(f, g_tl[i].effects);
     fprintf(f, "fibers:\n%s\n", g_tl[i].fibers ? g_tl[i].fibers : "");
     fprintf(f, "fault:\n%s\n", g_tl[i].fault ? g_tl[i].fault : "");
+    fprintf(f, "files:\n");
+    tl_fputs_block(f, g_tl[i].files);
   }
   fclose(f);
 }
 
-/* --- v1 dump loader + relation judge (SCUZZ_JUDGE_REL) --------------------- */
+/* --- Dump loader and relation judge (SCUZZ_JUDGE_REL) ---------------------- */
 
 static void verdict_msg(char *buf, size_t cap, const char *name,
                         const SzVerdict *v);
@@ -4044,6 +4146,7 @@ void sz_timeline_free(void *tl) {
     return;
   for (i = 0; i < t->n; i++) {
     free(t->states[i].signals);
+    free(t->states[i].files);
     free(t->states[i].a11y);
     free(t->states[i].last_hit);
     free(t->states[i].drive);
@@ -4072,8 +4175,7 @@ static int tl_scan_block(SzTlScan *scan, const char *stop1, const char *stop2,
   return 1;
 }
 
-/* Parse v1 or v2. Optional trailing effects/fibers/fault keep handwritten
- * v=1 dumps loadable. v=2 dumps always write those blocks. */
+/* Omitted observation blocks represent empty observations. */
 void *sz_timeline_load(const char *path) {
   char *buf = tl_read_all(path);
   SzTlScan scan;
@@ -4097,7 +4199,7 @@ void *sz_timeline_load(const char *path) {
   memcpy(hdr, line, len);
   hdr[len] = 0;
   if (sscanf(hdr, "# timeline v=%d n=%d", &v, &n) != 2 ||
-      v < SZ_TIMELINE_DUMP_VERSION_MIN || v > SZ_TIMELINE_DUMP_VERSION ||
+      v != SZ_TIMELINE_DUMP_VERSION ||
       n < 0) {
     fprintf(stderr, "scuzz: judge: %s: expected timeline v=%d dump\n", path,
             SZ_TIMELINE_DUMP_VERSION);
@@ -4143,7 +4245,7 @@ void *sz_timeline_load(const char *path) {
       goto malformed;
     if (!tl_expect(&scan, "a11y:"))
       goto malformed_sig;
-    while (!tl_scan_peek(&scan, "--- ") && !tl_scan_peek(&scan, "effects:") &&
+    while (!tl_scan_peek(&scan, "files:") && !tl_scan_peek(&scan, "--- ") && !tl_scan_peek(&scan, "effects:") &&
            !tl_scan_peek(&scan, "fibers:") && !tl_scan_peek(&scan, "fault:") &&
            tl_scan_line(&scan, &line, &len)) {
       tl_cat(&a11y, &alen, &acap, line, len);
@@ -4151,6 +4253,7 @@ void *sz_timeline_load(const char *path) {
     }
     t->states[i].signals = sig ? sig : tl_copy("");
     t->states[i].a11y = a11y ? a11y : tl_copy("");
+    t->states[i].files = tl_copy("");
     t->states[i].effects = tl_copy("");
     t->states[i].fibers = tl_copy("");
     t->states[i].fault = tl_copy("");
@@ -4159,7 +4262,7 @@ void *sz_timeline_load(const char *path) {
       size_t elen = 0, ecap = 0;
       if (!tl_expect(&scan, "effects:"))
         goto malformed;
-      while (!tl_scan_peek(&scan, "fibers:") && !tl_scan_peek(&scan, "fault:") &&
+      while (!tl_scan_peek(&scan, "files:") && !tl_scan_peek(&scan, "fibers:") && !tl_scan_peek(&scan, "fault:") &&
              !tl_scan_peek(&scan, "--- ") && tl_scan_line(&scan, &line, &len)) {
         tl_cat(&eff, &elen, &ecap, line, len);
         tl_cat(&eff, &elen, &ecap, "\n", 1);
@@ -4172,7 +4275,7 @@ void *sz_timeline_load(const char *path) {
       size_t flen = 0, fcap = 0;
       if (!tl_expect(&scan, "fibers:"))
         goto malformed;
-      while (!tl_scan_peek(&scan, "fault:") && !tl_scan_peek(&scan, "--- ") &&
+      while (!tl_scan_peek(&scan, "files:") && !tl_scan_peek(&scan, "fault:") && !tl_scan_peek(&scan, "--- ") &&
              tl_scan_line(&scan, &line, &len)) {
         tl_cat(&fib, &flen, &fcap, line, len);
         tl_cat(&fib, &flen, &fcap, "\n", 1);
@@ -4185,12 +4288,20 @@ void *sz_timeline_load(const char *path) {
       size_t qlen = 0, qcap = 0;
       if (!tl_expect(&scan, "fault:"))
         goto malformed;
-      while (!tl_scan_peek(&scan, "--- ") && tl_scan_line(&scan, &line, &len)) {
+      while (!tl_scan_peek(&scan, "files:") && !tl_scan_peek(&scan, "--- ") && tl_scan_line(&scan, &line, &len)) {
         tl_cat(&flt, &qlen, &qcap, line, len);
         tl_cat(&flt, &qlen, &qcap, "\n", 1);
       }
       free(t->states[i].fault);
       t->states[i].fault = flt ? flt : tl_copy("");
+    }
+    if (tl_scan_peek(&scan, "files:")) {
+      char *files = NULL;
+      if (!tl_expect(&scan, "files:"))
+        goto malformed;
+      tl_scan_block(&scan, "--- ", NULL, &files);
+      free(t->states[i].files);
+      t->states[i].files = files ? files : tl_copy("");
     }
     continue;
   malformed_sig:
@@ -4271,6 +4382,7 @@ void sz_timeline_varied_flush(void) {
   int hit = 0;
   int drive = 0;
   int effects = 0;
+  int files = 0;
   int fibers = 0;
   int fault = 0;
   if (!path || !path[0] || g_varied_flushed)
@@ -4284,6 +4396,8 @@ void sz_timeline_varied_flush(void) {
       hit = 1;
     if (tl_str_diff(g_tl[i].drive, g_tl[0].drive))
       drive = 1;
+    if (tl_str_diff(g_tl[i].files, g_tl[0].files))
+      files = 1;
     if (tl_str_diff(g_tl[i].effects, g_tl[0].effects))
       effects = 1;
     if (tl_str_diff(g_tl[i].fibers, g_tl[0].fibers))
@@ -4304,6 +4418,8 @@ void sz_timeline_varied_flush(void) {
     fputs("drive\n", f);
   if (effects)
     fputs("effects\n", f);
+  if (files)
+    fputs("files\n", f);
   if (fibers)
     fputs("fibers\n", f);
   if (fault)
@@ -4553,8 +4669,6 @@ void sz_property_session_reset(void) {
   g_varied_flushed = 0;
 }
 
-/* Drive table cap. Overlay rejects a larger table. */
-#define SZ_DRIVERS_MAX 32
 typedef struct {
   char *name;
   int nargs;
@@ -4562,8 +4676,9 @@ typedef struct {
   void *fn;
 } SzDriver;
 
-static SzDriver g_drivers[SZ_DRIVERS_MAX];
-static int g_drivers_n;
+static SzDriver *g_drivers;
+static size_t g_drivers_n;
+static size_t g_drivers_cap;
 
 void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn) {
   const char *s = name ? sz_string_cstr(name) : "";
@@ -4571,8 +4686,19 @@ void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn) {
   char *copy;
   if (!fn || !s[0])
     return;
-  if (g_drivers_n >= SZ_DRIVERS_MAX)
-    sz_panic("sz_driver_register: too many drivers");
+  if (g_drivers_n == g_drivers_cap) {
+    SzDriver *grown;
+    size_t cap;
+    if (g_drivers_cap > SIZE_MAX / sizeof(SzDriver) / 2)
+      sz_panic("sz_driver_register: table size overflow");
+    cap = g_drivers_cap ? g_drivers_cap * 2 : 16;
+    grown = (SzDriver *)sz_alloc(cap * sizeof(SzDriver));
+    if (g_drivers_n)
+      memcpy(grown, g_drivers, g_drivers_n * sizeof(SzDriver));
+    sz_free(g_drivers);
+    g_drivers = grown;
+    g_drivers_cap = cap;
+  }
   n = strlen(s);
   copy = (char *)sz_alloc(n + 1);
   memcpy(copy, s, n + 1);
@@ -4584,7 +4710,7 @@ void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn) {
 }
 
 static SzDriver *sz_driver_find(const char *name) {
-  int i;
+  size_t i;
   for (i = 0; i < g_drivers_n; i++) {
     if (strcmp(g_drivers[i].name, name) == 0)
       return &g_drivers[i];
