@@ -528,7 +528,13 @@ def runLine(cmd: String): IO[(Int, String, String)] =
   Sys.exec(cmd)
 
 def runProbe(cmd: String): IO[(Int, String, String)] =
-  IO.timeout(20000, runLine(Str.concat("ulimit -v 524288 && exec env ", cmd))).handleErrorWith(e => runProbeTimed(e))
+  hostMac().flatMap(mac => runProbeGo(mac, cmd))
+
+def runProbeGo(mac: Bool, cmd: String): IO[(Int, String, String)] =
+  IO.timeout(20000, runLine(Str.concat(probeLimit(mac), cmd))).handleErrorWith(e => runProbeTimed(e))
+
+def probeLimit(mac: Bool): String =
+  if (mac) "exec env " else "ulimit -v 524288 && exec env "
 
 def runProbeTimed(e: String): IO[(Int, String, String)] =
   if (e == "timeout") IO.pure((124, "", "timeout")) else IO.fail(e)
