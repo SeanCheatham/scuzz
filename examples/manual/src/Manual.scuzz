@@ -18,7 +18,7 @@ def idsLine(): String =
   idsLineGo(topics())
 
 def idsLineGo(ts: List[Topic]): String =
-  if (List.isEmpty(ts)) "" else if (List.len(ts) == 1) Str.concat(List.at(ts, 0).id, "") else Str.concat(Str.concat(List.at(ts, 0).id, "|"), idsLineGo(List.tail(ts)))
+  if (List.isEmpty(ts)) "" else if (List.len(ts) == 1) List.at(ts, 0).id else Str.concat(Str.concat(List.at(ts, 0).id, "|"), idsLineGo(List.tail(ts)))
 
 def findTopic(id: String): List[Topic] =
   List.filter(topics(), t => t.id == id)
