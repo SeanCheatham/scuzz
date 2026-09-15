@@ -132,29 +132,6 @@ static int sig_head_str(const void *head) {
   return head && sz_rc_kind(head) == SZ_RC_STRING;
 }
 
-static void fputs_json_escaped(FILE *f, const char *s) {
-  const char *p;
-  if (!s)
-    return;
-  for (p = s; *p; p++) {
-    unsigned char c = (unsigned char)*p;
-    if (c == '\\')
-      fputs("\\\\", f);
-    else if (c == '"')
-      fputs("\\\"", f);
-    else if (c == '\n')
-      fputs("\\n", f);
-    else if (c == '\r')
-      fputs("\\r", f);
-    else if (c == '\t')
-      fputs("\\t", f);
-    else if (c < 0x20)
-      fprintf(f, "\\u%04x", c);
-    else
-      fputc(*p, f);
-  }
-}
-
 /* Typed session schema v=2: a value payload as JSON. A String is a string.
  * A boxed Int is a number. An ADT is {"tag":N,"payload":...}. A pair is a
  * two-slot array. A List is an array. A handle stays "<handle>". */
@@ -167,7 +144,7 @@ static void fputs_json_value(FILE *f, const void *value) {
   kind = sz_rc_kind(value);
   if (kind == SZ_RC_STRING) {
     fputc('"', f);
-    fputs_json_escaped(f, sz_string_cstr(value));
+    sz_json_fputs_escaped(f, sz_string_cstr(value));
     fputc('"', f);
   } else if (kind == SZ_RC_BOX) {
     fprintf(f, "%lld", (long long)sz_unbox_i64(value));
@@ -213,7 +190,7 @@ void sz_signal_dump_json(FILE *f) {
                                      : r->kind == SIG_LIST ? "list" : "value",
           f);
     fputs("\",\"name\":\"", f);
-    fputs_json_escaped(f, r->name);
+    sz_json_fputs_escaped(f, r->name);
     fputs("\",\"value\":", f);
     switch (r->kind) {
     case SIG_INT:
@@ -222,7 +199,7 @@ void sz_signal_dump_json(FILE *f) {
       break;
     case SIG_STR:
       fputc('"', f);
-      fputs_json_escaped(f, sz_signal_str_get((const SzSignalStr *)r->sig));
+      sz_json_fputs_escaped(f, sz_signal_str_get((const SzSignalStr *)r->sig));
       fputc('"', f);
       break;
     case SIG_VALUE: {
@@ -248,7 +225,7 @@ void sz_signal_dump_json(FILE *f) {
           fputc(',', f);
         first = 0;
         fputc('"', f);
-        fputs_json_escaped(f, sig_head_str(p->head)
+        sz_json_fputs_escaped(f, sig_head_str(p->head)
                                   ? sz_string_cstr((const SzString *)p->head)
                                   : "");
         fputc('"', f);
