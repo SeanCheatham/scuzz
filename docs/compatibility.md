@@ -50,7 +50,7 @@ What we keep vs cut. Product locks and language direction: [`philosophy.md`](phi
 
 ## Toolchain
 
-The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([philosophy.md](philosophy.md#self-hosting)). Kernel surface: [philosophy.md](philosophy.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. HTTP `https://` links OpenSSL (`libssl` / `libcrypto`). Serve TLS uses the same stack. There is no second TLS stack.
+Host build, run, and package commands support file paths with spaces. Host UI watch needs one direct `Ui.run` factory. Keep its captured bindings unchanged during reload. The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([philosophy.md](philosophy.md#self-hosting)). Kernel surface: [philosophy.md](philosophy.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. HTTP `https://` links OpenSSL (`libssl` / `libcrypto`). Serve TLS uses the same stack. There is no second TLS stack.
 
 ## Browser target
 

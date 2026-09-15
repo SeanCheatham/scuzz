@@ -39,7 +39,7 @@ def exeAfterCd(dir: String, outDir: String, name: String): String =
   if (Str.startsWith(outDir, "/")) exeName(outDir, name) else if (Str.startsWith(outDir, Str.concat(dir, "/"))) joinSlash(Str.slice(outDir, Str.len(dir) + 1, Str.len(outDir)), name) else exeName(outDir, name)
 
 def linkLine(clang: String, ll: String, lib: String, exe: String): String =
-  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -lpthread -lssl -lcrypto -o ", exe))))))
+  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(shQuote(ll), Str.concat(" ", Str.concat(shQuote(lib), Str.concat(" -lpthread -lssl -lcrypto -o ", shQuote(exe)))))))
 
 def crateHome(): IO[String] =
   Sys.getenv("SCUZZ_HOME").flatMap(h => crateHomeAt(h))
@@ -54,7 +54,7 @@ def makeJobs(): String =
   Str.concat("-j$", "(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)")
 
 def makeLine(h: String, rel: String): String =
-  Str.concat("make -C ", Str.concat(crateAt(h, rel), Str.concat(" lib ", Str.concat(makeJobs(), " CC=clang"))))
+  Str.concat("make -C ", Str.concat(shQuote(crateAt(h, rel)), Str.concat(" lib ", Str.concat(makeJobs(), " CC=clang"))))
 
 def skiaLib(h: String): String =
   crateAt(h, "crates/ffi-skia/build/libsk_capi.a")
@@ -78,7 +78,7 @@ def gpuLibs(mac: Bool): String =
   if (mac) " -framework OpenGL" else " -lEGL -lGLESv2"
 
 def forceLoad(mac: Bool, lib: String): String =
-  if (mac) Str.concat("-Wl,-force_load,", lib) else lib
+  if (mac) Str.concat("-Xlinker -force_load -Xlinker ", shQuote(lib)) else shQuote(lib)
 
 def linkGpu(h: String): IO[Bool] =
   Fs.read(crateAt(h, "crates/ffi-skia/build/sk_capi_backend")).flatMap(s => linkGpuGot(s)).handleErrorWith(_ => IO.pure(false))
@@ -87,7 +87,7 @@ def linkGpuGot(s: String): IO[Bool] =
   IO.pure(Str.trim(s) == "gpu")
 
 def linkLineUi(clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool, mac: Bool): String =
-  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" ", Str.concat(skiaLib(h), Str.concat(uiFlags1(mac), Str.concat(forceLoad(mac, deskLib(h)), Str.concat(uiFlags2(mac), Str.concat(forceLoad(mac, mobLib(h)), Str.concat(uiFlags3(gpu, mac), exe))))))))))))
+  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(shQuote(ll), Str.concat(" ", Str.concat(shQuote(lib), Str.concat(" ", Str.concat(shQuote(skiaLib(h)), Str.concat(uiFlags1(mac), Str.concat(forceLoad(mac, deskLib(h)), Str.concat(uiFlags2(mac), Str.concat(forceLoad(mac, mobLib(h)), Str.concat(uiFlags3(gpu, mac), shQuote(exe)))))))))))))
 
 def hostMac(): IO[Bool] =
   Sys.exec("uname -s").flatMap(r => hostMacGot(r))
@@ -98,7 +98,7 @@ def hostMacGot(r: (Int, String, String)): IO[Bool] =
   }
 
 def linkLineMac(clang: String, ll: String, lib: String, exe: String): String =
-  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(ll, Str.concat(" ", Str.concat(lib, Str.concat(" -framework CoreFoundation -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o ", exe))))))
+  Str.concat(clang, Str.concat(" -O0 -Wno-override-module ", Str.concat(shQuote(ll), Str.concat(" ", Str.concat(shQuote(lib), Str.concat(" -framework CoreFoundation -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib -lpthread -lssl -lcrypto -o ", shQuote(exe)))))))
 
 def linkLineHost(hasUi: Bool, mac: Bool, clang: String, ll: String, lib: String, exe: String, h: String, gpu: Bool): String =
   if (hasUi) linkLineUi(clang, ll, lib, exe, h, gpu, mac) else if (mac) linkLineMac(clang, ll, lib, exe) else linkLine(clang, ll, lib, exe)
@@ -551,7 +551,7 @@ def afterClangFail(err: String): IO[Unit] =
   IO.println(err).flatMap(_ => IO.fail("link"))
 
 def afterClangRun(exe: String, runEnv: String, extra: String): IO[Unit] =
-  runLine(Str.concat(runEnv, Str.concat(exe, extra))).flatMap(r => afterRun(r))
+  runLine(Str.concat(runEnv, Str.concat(shQuote(exe), extra))).flatMap(r => afterRun(r))
 
 def afterRun(r: (Int, String, String)): IO[Unit] =
   r match {
@@ -583,7 +583,7 @@ def headlessEnvOf(toml: String): String =
   uiEnvOf(toml, true)
 
 def runEnvOf(outDir: String, headless: Bool, toml: String): String =
-  Str.concat(uiEnvOf(toml, headless), if (headless) Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(joinSlash(outDir, "snapshot.png"), " ")) else "")
+  Str.concat(uiEnvOf(toml, headless), if (headless) Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(shQuote(joinSlash(outDir, "snapshot.png")), " ")) else "")
 
 def tapNEnv(toml: String, tap: Bool): String =
   tapNEnvMan(Manifest.parse(toml), tap)
@@ -908,7 +908,25 @@ def linkOnly(hasUi: Bool, name: String, outDir: String): IO[Unit] =
   ensureNative(hasUi).flatMap(_ => linkExe(hasUi, outDir, name).flatMap(r => linkOnlyGot(r)))
 
 def linkReload(ll: String, outDir: String): IO[Unit] =
-  runLine(Str.concat("clang -O0 -Wno-override-module -shared -fPIC ", Str.concat(ll, Str.concat(" -o ", joinSlash(outDir, "reload.dylib"))))).flatMap(r => linkOnlyGot(r))
+  Fs.read(ll).flatMap(ir => linkReloadIr(ir, outDir, reloadFactory(Verify.linesOf(ir), "")))
+
+def reloadFactory(lines: List[String], found: String): String =
+  lines match {
+    case [] => found
+    case line :: rest => reloadFactoryNext(rest, found, reloadFactoryName(line))
+  }
+
+def reloadFactoryName(line: String): String =
+  if (Str.startsWith(line, "define internal ptr @sz_neth_") && Str.contains(line, "(ptr %.closure.env)")) Str.slice(line, Str.len("define internal ptr @"), Str.indexOf(line, "(ptr %.closure.env)")) else ""
+
+def reloadFactoryNext(rest: List[String], found: String, name: String): String =
+  if (name == "") reloadFactory(rest, found) else if (found == "") reloadFactory(rest, name) else "many"
+
+def linkReloadIr(ir: String, outDir: String, factory: String): IO[Unit] =
+  if (factory == "" || factory == "many") IO.println("Host UI watch needs one direct Ui.run factory.").flatMap(_ => IO.fail("UI reload factory")) else Fs.write(joinSlash(outDir, "reload.ll"), Str.concat(ir, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_rebuild = alias ptr (ptr), ptr @", Str.concat(factory, Verify.nl()))))).flatMap(_ => linkReloadNative(joinSlash(outDir, "reload.ll"), outDir))
+
+def linkReloadNative(ll: String, outDir: String): IO[Unit] =
+  hostMac().flatMap(mac => runLine(Str.concat("clang -O0 -Wno-override-module -shared -fPIC ", Str.concat(if (mac) "-Wl,-undefined,dynamic_lookup " else "", Str.concat(shQuote(ll), Str.concat(" -o ", shQuote(joinSlash(outDir, "reload.dylib"))))))).flatMap(r => linkOnlyGot(r)))
 
 def linkOnlyGot(r: (Int, String, String)): IO[Unit] =
   r match {

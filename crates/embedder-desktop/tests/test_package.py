@@ -7,25 +7,97 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 cli = str(Path(sys.argv[1]).resolve())
 name = "macosproof" + uuid.uuid4().hex[:8]
 
 with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
-    root = Path(temp)
+    root = Path(temp) / "author's project, with spaces"
+    root.mkdir()
+    toolchain = root / "toolchain, with spaces"
+    toolchain.symlink_to(Path(os.environ.get("SCUZZ_HOME") or
+                             Path(__file__).resolve().parents[3]).resolve(),
+                        target_is_directory=True)
+    author_env = dict(os.environ, SCUZZ_HOME=str(toolchain))
     subprocess.run([cli, "new", name, "--ui", "--path", str(root)], check=True)
     source = root / name
     manifest = source / "scuzz.toml"
     text = manifest.read_text().replace('version = "0.1.0"', 'version = "1.2.3"')
     text = re.sub(r"headless_size\s*=\s*\[[^]]+\]", "headless_size = [480, 320]", text)
     manifest.write_text(text)
-    subprocess.run([cli, "package", "--target", "host", "--out-dir", "native",
-                    str(source)], check=True)
-    packaged = source / "native" / "package" / "host" / (name + ".app")
+    subprocess.run([cli, "package", "--target", "host", "--out-dir", "native output",
+                    str(source)], env=author_env, check=True)
+    subprocess.run([cli, "run", "--headless", "--out-dir", "native output",
+                    str(source)], env=author_env, check=True, timeout=30)
+    assert (source / "native output" / "snapshot.png").is_file()
+    # A source edit keeps the running worker and its Signal state.
+    watch_env = {key: value for key, value in author_env.items()
+                 if key != "SCUZZ_LIVE_FRAMES"}
+    debug = source / "native output" / "debug.json"
+    with (root / "watch.log").open("w") as output:
+        watch = subprocess.Popen([cli, "run", "--watch", "--headless", "--out-dir",
+                                  "native output", str(source)], env=watch_env,
+                                 stdout=output, stderr=subprocess.STDOUT,
+                                 start_new_session=True)
+        try:
+            worker = None
+            for expected in ("Counter", "count = 1", "Updated counter"):
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    assert watch.poll() is None, (root / "watch.log").read_text()
+                    if debug.is_file() and expected in debug.read_text():
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise AssertionError("watch does not show " + expected + "\n" +
+                                         (root / "watch.log").read_text())
+                children = subprocess.run(["pgrep", "-P", str(watch.pid)], text=True,
+                                          capture_output=True).stdout.split()
+                workers = [child for child in children if Path(subprocess.run(
+                    ["ps", "-o", "comm=", "-p", child], text=True,
+                    capture_output=True).stdout.strip()).name == name]
+                assert len(workers) == 1, "one running UI worker is required"
+                if worker is None:
+                    worker = workers[0]
+                assert workers[0] == worker, "a View reload replaces the worker"
+                if expected == "Counter":
+                    inject = source / "native output" / "inject.json"
+                    inject.write_text(json.dumps({"v": 1, "kind": "inject", "events": [
+                        {"op": "tap", "id": "button:+1"}]}))
+                elif expected == "count = 1":
+                    main = source / "src" / "Main.scuzz"
+                    main.write_text(main.read_text().replace('"Counter"', '"Updated counter"'))
+                else:
+                    assert "count = 1" in debug.read_text(), "reload resets the Signal"
+        finally:
+            children = subprocess.run(["pgrep", "-P", str(watch.pid)], text=True,
+                                      capture_output=True).stdout.split()
+            for child in children:
+                try:
+                    if os.getpgid(int(child)) == int(child):
+                        os.killpg(int(child), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            os.killpg(watch.pid, signal.SIGTERM)
+            watch.wait(timeout=5)
+    io_name = "ioproof" + uuid.uuid4().hex[:8]
+    subprocess.run([cli, "new", io_name, "--path", str(root)], check=True)
+    io_source = root / io_name
+    io_run = subprocess.run([cli, "run", "--out-dir", "native output", str(io_source)],
+                            env=author_env, text=True, capture_output=True,
+                            check=True, timeout=30)
+    assert "Hello" in io_run.stdout, io_run.stdout
+    subprocess.run([cli, "package", "--target", "host", "--out-dir", "native output",
+                    str(io_source)], env=author_env, check=True, timeout=30)
+    io_exe = io_source / "native output" / "package" / "host" / io_name
+    subprocess.run([str(io_exe)], capture_output=True, check=True, timeout=30)
+    packaged = source / "native output" / "package" / "host" / (name + ".app")
     packager = Path(__file__).resolve().parents[1] / "package_macos.py"
     failed = subprocess.run([sys.executable, str(packager), str(root / "missing"),
                              str(packaged.parent), name, "1.2.3", "dev.scuzz." + name,
