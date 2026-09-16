@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Prove UIKit viewport events on the selected simulator."""
 
+import os
 from pathlib import Path
 import plistlib
 import subprocess
@@ -42,12 +43,16 @@ try:
         subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none",
                         str(app)], check=True)
         subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True)
+        result = Path(temp) / "result.txt"
         proof = subprocess.run(["xcrun", "simctl", "launch", "--console", device,
                                 bundle], capture_output=True,
-                               text=True, timeout=45)
+                               text=True, timeout=45, env={**os.environ,
+                               "SIMCTL_CHILD_SCUZZ_VIEWPORT_RESULT": str(result)})
         print(proof.stdout + proof.stderr, end="", flush=True)
-        assert proof.returncode == 0 and "ios viewport proof ok" in proof.stdout, \
-            "UIKit viewport proof fails"
+        report = result.read_text() if result.exists() else "No native result."
+        print(report, end="", flush=True)
+        assert proof.returncode == 0 and report.strip() == "ios viewport proof ok", \
+            "UIKit viewport proof fails: " + report + proof.stdout + proof.stderr
 finally:
     subprocess.run(["xcrun", "simctl", "terminate", device, bundle],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
