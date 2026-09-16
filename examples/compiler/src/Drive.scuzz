@@ -564,26 +564,32 @@ def afterRun2(code: Int, out: String, err: String): IO[Unit] =
 def testEnv(): String =
   "SCUZZ_TESTRT=1 SCUZZ_SERVE=1 SCUZZ_KIT=sealed "
 
-def uiEnvKind(headless: Bool, rt: String): String =
-  if (headless) "headless" else rt
+def uiEnvKind(target: String, rt: String): String =
+  if (target == "") rt else if (target == "headless") "headless" else if (target == "linux" || target == "macos") "desktop" else "mobile"
 
-def uiEnvUi(ui: UiMan, headless: Bool): String =
-  Str.concat("SCUZZ_UI_RUNTIME=", Str.concat(uiEnvKind(headless, Manifest.uiRuntime(ui)), Str.concat(" SCUZZ_UI_WIDTH=", Str.concat(Manifest.uiWidth(ui), Str.concat(" SCUZZ_UI_HEIGHT=", Str.concat(Manifest.uiHeight(ui), Str.concat(" SCUZZ_UI_SCALE=", Str.concat(Manifest.uiScale(ui), " "))))))))
+def uiEnvUi(ui: UiMan, target: String): String =
+  Str.concat("SCUZZ_UI_RUNTIME=", Str.concat(uiEnvKind(target, Manifest.uiRuntime(ui)), Str.concat(" SCUZZ_UI_WIDTH=", Str.concat(Manifest.uiWidth(ui), Str.concat(" SCUZZ_UI_HEIGHT=", Str.concat(Manifest.uiHeight(ui), Str.concat(" SCUZZ_UI_SCALE=", Str.concat(Manifest.uiScale(ui), " "))))))))
 
-def uiEnvMan(m: Man, headless: Bool): String =
-  uiEnvUi(Manifest.manUi(m), headless)
+def uiEnvMan(m: Man, target: String): String =
+  uiEnvUi(Manifest.manUi(m), target)
 
-def uiEnvOf(toml: String, headless: Bool): String =
-  uiEnvMan(Manifest.parse(toml), headless)
+def uiEnvOf(toml: String, target: String): String =
+  uiEnvMan(Manifest.parse(toml), target)
 
 def headlessEnvMan(m: Man): String =
-  uiEnvMan(m, true)
+  uiEnvMan(m, "headless")
 
 def headlessEnvOf(toml: String): String =
-  uiEnvOf(toml, true)
+  uiEnvOf(toml, "headless")
 
-def runEnvOf(outDir: String, headless: Bool, toml: String): String =
-  Str.concat(uiEnvOf(toml, headless), if (headless) Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(shQuote(joinSlash(outDir, "snapshot.png")), " ")) else "")
+def snapOr(outDir: String, snap: String): String =
+  if (snap == "") joinSlash(outDir, "snapshot.png") else snap
+
+def runEnvOf(outDir: String, target: String, snap: String, toml: String): String =
+  runEnvMan(outDir, target, snap, Manifest.parse(toml))
+
+def runEnvMan(outDir: String, target: String, snap: String, m: Man): String =
+  Str.concat(uiEnvMan(m, target), if (m.hasUi && uiEnvKind(target, Manifest.uiRuntime(Manifest.manUi(m))) == "headless") Str.concat("SCUZZ_SNAPSHOT_PATH=", Str.concat(shQuote(snapOr(outDir, snap)), " ")) else "")
 
 def tapNEnv(toml: String, tap: Bool): String =
   tapNEnvMan(Manifest.parse(toml), tap)
@@ -893,7 +899,13 @@ def ndkMiss(): String =
   "missing Android NDK - install the NDK, then set ANDROID_NDK_HOME"
 
 def badTarget(t: String): String =
-  Str.concat("unknown package target '", Str.concat(t, "' (host|android|ios|web|all). Example: scuzz package --target host"))
+  Str.concat("unknown package target '", Str.concat(t, "' (linux|macos|android|ios|web|all). Example: scuzz package --target linux"))
+
+def hostTarget(mac: Bool): String =
+  if (mac) "macos" else "linux"
+
+def hostMismatch(t: String, mac: Bool): String =
+  Str.concat("scuzz: --target ", Str.concat(t, Str.concat(" does not match this host (", Str.concat(hostTarget(mac), "); cross builds are not supported"))))
 
 def bundleIdOf(toml: String): String =
   Manifest.uiBundle(Manifest.manUi(Manifest.parse(toml)))
@@ -945,7 +957,7 @@ def compileLinkedGo(dir: String, outDir: String, m: Man): IO[Unit] =
   manNeed(m).flatMap(_ => IO.both(ensureNative(m.hasUi), emitDir(dir, outDir, true)).flatMap(_ => linkExe(m.hasUi, outDir, m.name).flatMap(r => linkOnlyGot(r))))
 
 def pkgDir(dir: String, outDir: String, target: String): IO[Unit] =
-  if (target == "web") pkgWeb(dir, outDir) else if (target == "host") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir, outDir) else if (target == "ios") pkgIos(dir, outDir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ => pkgAndroid(dir, outDir).flatMap(_ => pkgIos(dir, outDir))) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
+  if (target == "web") pkgWeb(dir, outDir) else if (target == "linux" || target == "macos") pkgHost(dir, outDir) else if (target == "android") pkgAndroid(dir, outDir) else if (target == "ios") pkgIos(dir, outDir) else if (target == "all") pkgHost(dir, outDir).flatMap(_ => pkgAndroid(dir, outDir).flatMap(_ => pkgIos(dir, outDir))) else IO.println(badTarget(target)).flatMap(_ => IO.fail("package"))
 
 def pkgWeb(dir: String, outDir: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => pkgWebMan(dir, outDir, Manifest.parse(toml)))

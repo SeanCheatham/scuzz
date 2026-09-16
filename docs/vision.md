@@ -8,9 +8,15 @@ Edit this file when the next-step order changes.
 
 Next: make the language usable for general application development. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Use examples to prove these capabilities through the built-in verification strategy. Specific application workflows do not define the scope.
 
+### Session control arc
+
+`scuzz run` carries the session control channel on every runtime. The channel is file-based: an inject document drives the session and a debug dump reports it. `scuzz exec` sends ops to a live session. `--exec` plays a finite ops program at boot, then exits. The same op vocabulary serves batch and attached modes. Headless, Desktop, and Mobile share the channel. Web needs a second transport and waits for the web hot-reload work.
+
+Deferred on this arc, unproven value: a session event journal with prefix-replay rewind, and time ops (`pause_time`, `resume_time`, clock advance). Time ops reuse the TestRuntime clock fakes on a live session. They make no hermetic claim. Simulation stays the only hermetic tier.
+
 ### Success bars
 
-**v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter as `View` + builtin `IO`) → `scuzz fuzz --iterations 0`, and `scuzz run` (`--headless` for UI). Desktop when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/io`).
+**v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter as `View` + builtin `IO`) → `scuzz fuzz --iterations 0`, and `scuzz run` (`--target headless` for UI). Desktop when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/io`).
 
 **v1** — Shipped `scuzz` is the Scuzz CLI (GitHub Releases; `package_release.sh` / `install.sh`). Cut a release with the GitHub `release` workflow. Kernel surface is proven by examples. `fuzz` lives on that CLI.
 

@@ -456,6 +456,10 @@ static void *thunk_run_rebuild(void *env) {
     run->still = live_still_watch;
   else if (cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available())
     run->still = live_still_mobile;
+  else if (cfg.kind == SZ_UI_RUNTIME_HEADLESS && getenv("SCUZZ_UI_SERVE"))
+    /* Daemon headless: pump until a quit op or signal. scuzz run sets
+     * SCUZZ_UI_SERVE only without --exec, so fuzz and batch stay one-shot. */
+    run->still = live_still_watch;
   const char *limit = getenv("SCUZZ_LIVE_FRAMES");
   run->limit = limit ? atoll(limit) : 0;
   return NULL;

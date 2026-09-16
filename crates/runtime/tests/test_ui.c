@@ -1820,6 +1820,23 @@ static void test_session_inject_control(void) {
   }
 
   {
+    const char *png = "/tmp/scuzz_ui_inject_control.png";
+    FILE *f;
+    unsigned char magic[8];
+    remove(png);
+    write_stamp(inject,
+                "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"snapshot\",\"path\":\"/tmp/scuzz_ui_inject_control.png\"}]}");
+    assert(sz_ui_pump_sync(session));
+    f = fopen(png, "rb");
+    assert(f != NULL);
+    assert(fread(magic, 1, 8, f) == 8);
+    fclose(f);
+    assert(magic[0] == 0x89 && magic[1] == 'P' && magic[2] == 'N' &&
+           magic[3] == 'G');
+    remove(png);
+  }
+
+  {
     void *hold;
     int64_t peak_hi, peak_lo;
     hold = sz_alloc(65536);

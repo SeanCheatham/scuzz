@@ -53,10 +53,10 @@ Create and run a Counter app:
 ```bash
 scuzz new myapp --ui
 cd myapp
-scuzz run --headless
+scuzz run --target headless --exec ""
 ```
 
-Headless mode runs the interface without a window and then exits. To open a desktop window, set `default_runtime = "desktop"` in the `[ui]` section of `scuzz.toml`, then run `scuzz run`. Linux desktop apps need X11 and its development libraries. Close the window to exit.
+Headless mode runs the interface without a window. `--exec ""` plays no ops and exits after the first paint. Drop `--exec` to keep the session live, then drive it with `scuzz exec`. To open a desktop window, set `default_runtime = "desktop"` in the `[ui]` section of `scuzz.toml`, then run `scuzz run`. Linux desktop apps need X11 and its development libraries. Close the window to exit.
 
 For a command-line app, omit `--ui` when you create the project, then use `scuzz run`.
 

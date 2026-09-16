@@ -326,6 +326,7 @@ static void script_after_event(SzUiSession *session) {
      {"op":"backspace","count":K}  chop K UTF-8 code points before the caret on the [fields] starred TextField (default 1); no field is a no-op
      {"op":"backspace","i":N,"count":K}  chop K code points before the caret on dump-index N
      {"op":"dump"}    rewrite the live debug dump now (includes heap and live rows); no dump path is a no-op
+     {"op":"snapshot","path":P}  write a PNG snapshot to path P now; a missing path panics
      {"op":"reload"}  rebuild the View factory now; missing factory is a no-op
      {"op":"quit"}    stop the live session; remaining events do not run
      {"op":"resetpeak"}  set peak_bytes to live and mark delta; next dump reports growth from here
@@ -486,7 +487,13 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
     script_backspace(session, idx, (int)sz_jev_int(ev, "count", 1));
   } else if (strcmp(op, "dump") == 0)
     sz_ui_session_dump_now(session);
-  else if (strcmp(op, "reload") == 0) {
+  else if (strcmp(op, "snapshot") == 0) {
+    const char *path = sz_jev_str(ev, "path");
+    if (!path[0])
+      sz_panic("Ui.run: inject snapshot needs path");
+    if (!sz_ui_snapshot_png_sync(session, path))
+      sz_panic("Ui.run: inject snapshot failed");
+  } else if (strcmp(op, "reload") == 0) {
     if (!sz_ui_session_reload(session))
       fprintf(stderr, "scuzz: script reload skipped (no factory)\n");
   } else if (strcmp(op, "quit") == 0) {

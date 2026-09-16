@@ -5,13 +5,14 @@ enum Cmd:
   case Fmt(path: String, check: Bool)
   case Check(path: String, json: Bool)
   case Build(path: String, outDir: String, full: Bool, verify: Bool)
-  case Run(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String)
+  case Run(path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String)
   case Devices
   case Watch(path: String, outDir: String)
   case Lsp(path: String)
   case Fuzz(path: String, iterations: Int, seed: Int, replay: String, oracles: Bool, noFailFast: Bool, relate: Bool, differential: Bool)
   case New(name: String, path: String, ui: Bool)
-  case Ide(path: String, outDir: String, headless: Bool)
+  case Ide(path: String, outDir: String, target: String)
+  case Exec(path: String, outDir: String, ops: List[String])
   case Package(path: String, outDir: String, target: String)
   case Docs(mode: String, arg: String)
 
@@ -34,7 +35,7 @@ def isVer(s: String): Bool =
   s == "-V" || s == "--version"
 
 def isCmd(s: String): Bool =
-  s == "devices" || s == "build" || s == "run" || s == "watch" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "package" || s == "docs" || s == "help"
+  s == "devices" || s == "build" || s == "run" || s == "watch" || s == "check" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "new" || s == "ide" || s == "exec" || s == "package" || s == "docs" || s == "help"
 
 def unrec(name: String): String =
   Str.concat("error: unrecognized subcommand '", Str.concat(name, """'
@@ -196,7 +197,7 @@ def takeVal3(args: List[String], j: Int): (String, Int) =
   if (j >= List.len(args)) ("", 0 - 1) else (arg(args, j), j + 1)
 
 def helpOf(topic: String): String =
-  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "devices") Help.helpDevices() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
+  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "devices") Help.helpDevices() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "exec") Help.helpExec() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
 
 def show(c: Cmd): String =
   c match {
@@ -206,13 +207,14 @@ def show(c: Cmd): String =
     case Cmd.Fmt(path, check) => Str.concat("fmt path=", Str.concat(path, Str.concat(" check=", yn(check))))
     case Cmd.Check(path, json) => Str.concat("check path=", Str.concat(path, Str.concat(" json=", yn(json))))
     case Cmd.Build(path, outDir, full, verify) => Str.concat("build path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" full=", Str.concat(yn(full), Str.concat(" verify=", yn(verify))))))))
-    case Cmd.Run(path, outDir, headless, watch, script, dump, target, device) => Str.concat("run path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" headless=", Str.concat(yn(headless), Str.concat(" watch=", Str.concat(yn(watch), Str.concat(" script=", Str.concat(script, Str.concat(" dump=", Str.concat(dump, Str.concat(" target=", Str.concat(target, Str.concat(" device=", device)))))))))))))))
+    case Cmd.Run(path, outDir, target, watch, exec, hasExec, dump, snap, device) => Str.concat("run path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", Str.concat(target, Str.concat(" watch=", Str.concat(yn(watch), Str.concat(" exec=", Str.concat(exec, Str.concat(" hasExec=", Str.concat(yn(hasExec), Str.concat(" dump=", Str.concat(dump, Str.concat(" snap=", Str.concat(snap, Str.concat(" device=", device)))))))))))))))))
     case Cmd.Devices => "devices"
     case Cmd.Watch(path, outDir) => Str.concat("watch path=", Str.concat(path, Str.concat(" out=", outDir)))
     case Cmd.Lsp(path) => Str.concat("lsp path=", path)
     case Cmd.Fuzz(path, iterations, seed, replay, oracles, noFailFast, relate, differential) => Str.concat("fuzz path=", Str.concat(path, Str.concat(" iterations=", Str.concat(Str.fromInt(iterations), Str.concat(" seed=", Str.concat(Str.fromInt(seed), Str.concat(" replay=", Str.concat(replay, Str.concat(" oracles=", Str.concat(yn(oracles), Str.concat(" noFailFast=", Str.concat(yn(noFailFast), Str.concat(" relate=", Str.concat(yn(relate), Str.concat(" differential=", yn(differential))))))))))))))))
     case Cmd.New(name, path, ui) => Str.concat("new name=", Str.concat(name, Str.concat(" path=", Str.concat(path, Str.concat(" ui=", yn(ui))))))
-    case Cmd.Ide(path, outDir, headless) => Str.concat("ide path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" headless=", yn(headless))))))
+    case Cmd.Ide(path, outDir, target) => Str.concat("ide path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", target)))))
+    case Cmd.Exec(path, outDir, ops) => Str.concat("exec path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" ops=", joinOps(ops))))))
     case Cmd.Package(path, outDir, target) => Str.concat("package path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", target)))))
     case Cmd.Docs(mode, arg) => Str.concat("docs mode=", Str.concat(mode, Str.concat(" arg=", arg)))
   }
@@ -259,7 +261,7 @@ def parseHelp(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Help(""), json) else if (isCmd(arg(args, i)) || arg(args, i) == "") gateJson(Cmd.Help(arg(args, i)), json) else gateJson(Cmd.Fail(unrec(arg(args, i))), json)
 
 def parseCmd(args: List[String], cmd: String, i: Int, json: Bool): Cmd =
-  if (cmd == "devices") parseDevices(args, i, json) else if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", false, false, "", "", "host", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", false) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "host")
+  if (cmd == "devices") parseDevices(args, i, json) else if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", "", false, "", false, "", "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", "") else if (cmd == "exec") parseExec(args, i, json, "", "build", []) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "")
 
 def parseDocs(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Docs("list", ""), json) else parseDocsTok(args, i, json, arg(args, i))
@@ -325,44 +327,62 @@ def parseBuildMsg(p: (String, Int), args: List[String], path: String, outDir: St
     case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseBuild(args, n, true, path, outDir, full, verify) else if (v == "human") parseBuild(args, n, false, path, outDir, full, verify) else Cmd.Fail(badFmt(v))
   }
 
-def parseRun(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
-  if (i >= List.len(args)) gateJson(runCommand(path, outDir, headless, watch, script, dump, target, device), json) else parseRunTok(args, i, json, path, outDir, headless, watch, script, dump, arg(args, i), target, device)
+def okRunTarget(t: String): Bool =
+  t == "" || t == "headless" || t == "linux" || t == "macos" || t == "android" || t == "ios"
 
-def parseRunTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, a: String, target: String, device: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("run"), json) else if (a == "--target" || flagPref(a, "--target")) parseRunTarget(takeVal(args, i, "--target"), args, json, path, outDir, headless, watch, script, dump, device) else if (a == "--device" || flagPref(a, "--device")) parseRunDevice(takeVal(args, i, "--device"), args, json, path, outDir, headless, watch, script, dump, target) else if (a == "--headless") parseRun(args, i + 1, json, path, outDir, true, watch, script, dump, target, device) else if (a == "--watch") parseRun(args, i + 1, json, path, outDir, headless, true, script, dump, target, device) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseRunOut(takeVal(args, i, "--out-dir"), args, json, path, headless, watch, script, dump, target, device) else if (a == "--script" || flagPref(a, "--script")) parseRunScript(takeVal(args, i, "--script"), args, json, path, outDir, headless, watch, dump, target, device) else if (a == "--dump" || flagPref(a, "--dump")) parseRunDump(takeVal(args, i, "--dump"), args, json, path, outDir, headless, watch, script, target, device) else if (a == "--message-format" || flagPref(a, "--message-format")) parseRunMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless, watch, script, dump, target, device) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz run [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz run [OPTIONS] [PATH]")) else parseRun(args, i + 1, json, a, outDir, headless, watch, script, dump, target, device)
+def badRunTarget(t: String): String =
+  Str.concat("error: invalid value '", Str.concat(t, """' for '--target <TARGET>'
+  [possible values: linux, macos, headless, android, ios]
 
-def parseRunOut(p: (String, Int), args: List[String], json: Bool, path: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
+For more information, try '--help'.
+"""))
+
+def parseRun(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String): Cmd =
+  if (i >= List.len(args)) runDone(json, path, outDir, target, watch, exec, hasExec, dump, snap, device) else parseRunTok(args, i, json, path, outDir, target, watch, exec, hasExec, dump, snap, device, arg(args, i))
+
+def runDone(json: Bool, path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String): Cmd =
+  if (!okRunTarget(target)) Cmd.Fail(badRunTarget(target)) else gateJson(runCommand(path, outDir, target, watch, exec, hasExec, dump, snap, device), json)
+
+def parseRunTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String, a: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("run"), json) else if (a == "--watch") parseRun(args, i + 1, json, path, outDir, target, true, exec, hasExec, dump, snap, device) else if (a == "--target" || flagPref(a, "--target")) parseRunTarget(takeVal(args, i, "--target"), args, json, path, outDir, watch, exec, hasExec, dump, snap, device) else if (a == "--device" || flagPref(a, "--device")) parseRunDevice(takeVal(args, i, "--device"), args, json, path, outDir, target, watch, exec, hasExec, dump, snap) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseRunOut(takeVal(args, i, "--out-dir"), args, json, path, target, watch, exec, hasExec, dump, snap, device) else if (a == "--exec" || flagPref(a, "--exec")) parseRunExec(takeVal(args, i, "--exec"), args, json, path, outDir, target, watch, dump, snap, device) else if (a == "--dump" || flagPref(a, "--dump")) parseRunDump(takeVal(args, i, "--dump"), args, json, path, outDir, target, watch, exec, hasExec, snap, device) else if (a == "--snapshot-out" || flagPref(a, "--snapshot-out")) parseRunSnap(takeVal(args, i, "--snapshot-out"), args, json, path, outDir, target, watch, exec, hasExec, dump, device) else if (a == "--message-format" || flagPref(a, "--message-format")) parseRunMsg(takeVal(args, i, "--message-format"), args, path, outDir, target, watch, exec, hasExec, dump, snap, device) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz run [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz run [OPTIONS] [PATH]")) else parseRun(args, i + 1, json, a, outDir, target, watch, exec, hasExec, dump, snap, device)
+
+def parseRunTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--out-dir")) else parseRun(args, n, json, path, v, headless, watch, script, dump, target, device)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--target")) else parseRun(args, n, json, path, outDir, v, watch, exec, hasExec, dump, snap, device)
   }
 
-def parseRunScript(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, dump: String, target: String, device: String): Cmd =
+def parseRunDevice(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--script")) else parseRun(args, n, json, path, outDir, headless, watch, v, dump, target, device)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--device")) else parseRun(args, n, json, path, outDir, target, watch, exec, hasExec, dump, snap, v)
   }
 
-def parseRunDump(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, target: String, device: String): Cmd =
+def parseRunOut(p: (String, Int), args: List[String], json: Bool, path: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--dump")) else parseRun(args, n, json, path, outDir, headless, watch, script, v, target, device)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--out-dir")) else parseRun(args, n, json, path, v, target, watch, exec, hasExec, dump, snap, device)
   }
 
-def parseRunMsg(p: (String, Int), args: List[String], path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
+def parseRunExec(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, target: String, watch: Bool, dump: String, snap: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseRun(args, n, true, path, outDir, headless, watch, script, dump, target, device) else if (v == "human") parseRun(args, n, false, path, outDir, headless, watch, script, dump, target, device) else Cmd.Fail(badFmt(v))
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--exec")) else parseRun(args, n, json, path, outDir, target, watch, v, true, dump, snap, device)
   }
 
-def runCommand(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String, device: String): Cmd =
-  if (target == "ios" && (headless || script != "" || dump != "")) Cmd.Fail("error: --target ios does not accept --headless, --script, or --dump. Use the host Headless path for replay.") else if (target != "ios" && device != "") Cmd.Fail("error: --device needs --target ios. List simulators with scuzz devices.") else Cmd.Run(orDot(path), outDir, headless, watch, script, dump, target, device)
-
-def parseRunTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, device: String): Cmd =
+def parseRunDump(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, snap: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--target")) else if (v == "host" || v == "ios") parseRun(args, n, json, path, outDir, headless, watch, script, dump, v, device) else Cmd.Fail("error: run target must be host or ios")
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--dump")) else parseRun(args, n, json, path, outDir, target, watch, exec, hasExec, v, snap, device)
   }
 
-def parseRunDevice(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String, target: String): Cmd =
+def parseRunSnap(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, device: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--device")) else parseRun(args, n, json, path, outDir, headless, watch, script, dump, target, v)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--snapshot-out")) else parseRun(args, n, json, path, outDir, target, watch, exec, hasExec, dump, v, device)
   }
+
+def parseRunMsg(p: (String, Int), args: List[String], path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseRun(args, n, true, path, outDir, target, watch, exec, hasExec, dump, snap, device) else if (v == "human") parseRun(args, n, false, path, outDir, target, watch, exec, hasExec, dump, snap, device) else Cmd.Fail(badFmt(v))
+  }
+
+def runCommand(path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String): Cmd =
+  if (target == "ios" && (hasExec || dump != "" || snap != "")) Cmd.Fail("error: --target ios does not accept --exec, --snapshot-out, or --dump. Use the host headless path for replay.") else if (target != "ios" && device != "") Cmd.Fail("error: --device needs --target ios. List simulators with scuzz devices.") else Cmd.Run(orDot(path), outDir, target, watch, exec, hasExec, dump, snap, device)
 
 def parseDevices(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Devices, json) else if (isHelp(arg(args, i)) && i + 1 == List.len(args)) gateJson(Cmd.Help("devices"), json) else Cmd.Fail(unexp(arg(args, i), "scuzz devices"))
@@ -447,21 +467,96 @@ def parseNewMsg(p: (String, Int), args: List[String], name: String, path: String
     case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseNew(args, n, true, name, path, ui) else if (v == "human") parseNew(args, n, false, name, path, ui) else Cmd.Fail(badFmt(v))
   }
 
-def parseIde(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Ide(orDot(path), outDir, headless), json) else parseIdeTok(args, i, json, path, outDir, headless, arg(args, i))
+def parseIde(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String): Cmd =
+  if (i >= List.len(args)) ideDone(json, path, outDir, target) else parseIdeTok(args, i, json, path, outDir, target, arg(args, i))
 
-def parseIdeTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, headless: Bool, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--headless") parseIde(args, i + 1, json, path, outDir, true) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, headless) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, headless) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, headless)
+def ideDone(json: Bool, path: String, outDir: String, target: String): Cmd =
+  if (!okRunTarget(target)) Cmd.Fail(badRunTarget(target)) else gateJson(Cmd.Ide(orDot(path), outDir, target), json)
 
-def parseIdeOut(p: (String, Int), args: List[String], json: Bool, path: String, headless: Bool): Cmd =
+def parseIdeTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String, a: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--target" || flagPref(a, "--target")) parseIdeTarget(takeVal(args, i, "--target"), args, json, path, outDir) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, target) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, target) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, target)
+
+def parseIdeTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--out-dir")) else parseIde(args, n, json, path, v, headless)
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--target")) else parseIde(args, n, json, path, outDir, v)
   }
 
-def parseIdeMsg(p: (String, Int), args: List[String], path: String, outDir: String, headless: Bool): Cmd =
+def parseIdeOut(p: (String, Int), args: List[String], json: Bool, path: String, target: String): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseIde(args, n, true, path, outDir, headless) else if (v == "human") parseIde(args, n, false, path, outDir, headless) else Cmd.Fail(badFmt(v))
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--out-dir")) else parseIde(args, n, json, path, v, target)
   }
+
+def parseIdeMsg(p: (String, Int), args: List[String], path: String, outDir: String, target: String): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseIde(args, n, true, path, outDir, target) else if (v == "human") parseIde(args, n, false, path, outDir, target) else Cmd.Fail(badFmt(v))
+  }
+
+def isExecOp(s: String): Bool =
+  s == "tap" || s == "xy" || s == "text" || s == "type" || s == "key" || s == "scroll" || s == "pump" || s == "backspace" || s == "snapshot" || s == "dump" || s == "reload" || s == "quit"
+
+def parseExec(args: List[String], i: Int, json: Bool, path: String, outDir: String, ops: List[String]): Cmd =
+  if (i >= List.len(args)) execDone(json, path, outDir, List.reverse(ops)) else parseExecTok(args, i, json, path, outDir, ops, arg(args, i))
+
+def parseExecTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, ops: List[String], a: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("exec"), json) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseExecOut(takeVal(args, i, "--out-dir"), args, json, path, ops) else if (a == "--message-format" || flagPref(a, "--message-format")) parseExecMsg(takeVal(args, i, "--message-format"), args, path, outDir, ops) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz exec [OPTIONS] [PATH] OP [ARGS...]")) else if (!List.isEmpty(ops)) parseExec(args, i + 1, json, path, outDir, a :: ops) else if (isExecOp(a)) parseExec(args, i + 1, json, path, outDir, a :: ops) else if (path != "") Cmd.Fail(extraArg(a, "scuzz exec [OPTIONS] [PATH] OP [ARGS...]")) else parseExec(args, i + 1, json, a, outDir, ops)
+
+def parseExecOut(p: (String, Int), args: List[String], json: Bool, path: String, ops: List[String]): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--out-dir")) else parseExec(args, n, json, path, v, ops)
+  }
+
+def parseExecMsg(p: (String, Int), args: List[String], path: String, outDir: String, ops: List[String]): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json") parseExec(args, n, true, path, outDir, ops) else if (v == "human") parseExec(args, n, false, path, outDir, ops) else Cmd.Fail(badFmt(v))
+  }
+
+def execDone(json: Bool, path: String, outDir: String, ops: List[String]): Cmd =
+  if (List.isEmpty(ops)) Cmd.Fail("""error: the following required arguments were not provided:
+  <OP>
+
+Usage: scuzz exec [OPTIONS] [PATH] OP [ARGS...]
+
+For more information, try '--help'.
+""") else gateJson(Cmd.Exec(orDot(path), outDir, ops), json)
+
+def joinOps(ops: List[String]): String =
+  if (List.isEmpty(ops)) "" else Str.concat(List.at(ops, 0), if (List.isEmpty(List.tail(ops))) "" else Str.concat(";", joinOps(List.tail(ops))))
+
+def execNum(s: String): Bool =
+  isDigits(s) || Str.len(s) > 1 && Str.charAt(s, 0) == 45 && isDigits(Str.slice(s, 1, Str.len(s)))
+
+def execArgErr(op: String): (Bool, String) =
+  (false, Str.concat("scuzz exec: bad args for op '", Str.concat(op, "'")))
+
+def execOps(ops: List[String]): (Bool, String) =
+  if (List.isEmpty(ops)) (false, "scuzz exec: no ops") else execOpsGo(ops, "")
+
+def execOpsGo(ops: List[String], acc: String): (Bool, String) =
+  if (List.isEmpty(ops)) (true, acc) else execOpAt(List.at(ops, 0), List.tail(ops), acc)
+
+def execEv(acc: String, ev: String, rest: List[String]): (Bool, String) =
+  execOpsGo(rest, if (acc == "") ev else Str.concat(acc, Str.concat(",", ev)))
+
+def execOpAt(op: String, rest: List[String], acc: String): (Bool, String) =
+  if (op == "tap") execTap(rest, acc) else if (op == "xy") execXy(rest, acc) else if (op == "text") execStr1(op, "value", rest, acc) else if (op == "type") execStr1(op, "value", rest, acc) else if (op == "key") execStr1(op, "key", rest, acc) else if (op == "scroll") execNum1(op, "dy", rest, acc) else if (op == "pump") execNum1(op, "k", rest, acc) else if (op == "backspace") execNum1(op, "count", rest, acc) else if (op == "snapshot") execStr1(op, "path", rest, acc) else if (op == "dump") execEv(acc, "{\"op\":\"dump\"}", rest) else if (op == "reload") execEv(acc, "{\"op\":\"reload\"}", rest) else if (op == "quit") execEv(acc, "{\"op\":\"quit\"}", rest) else (false, Str.concat("scuzz exec: unknown op '", Str.concat(op, "'")))
+
+def execTap(rest: List[String], acc: String): (Bool, String) =
+  if (List.isEmpty(rest)) execArgErr("tap") else execTapGot(List.at(rest, 0), List.tail(rest), acc)
+
+def execTapGot(v: String, rest: List[String], acc: String): (Bool, String) =
+  if (isDigits(v)) execEv(acc, Str.concat("{\"op\":\"tap\",\"i\":", Str.concat(v, "}")), rest) else if (Str.startsWith(v, "id:")) execEv(acc, Str.concat("{\"op\":\"tap\",\"id\":", Str.concat(Check.jsonStr(Str.slice(v, 3, Str.len(v))), "}")), rest) else execArgErr("tap")
+
+def execXy(rest: List[String], acc: String): (Bool, String) =
+  if (List.len(rest) < 2) execArgErr("xy") else execXyGot(List.at(rest, 0), List.at(rest, 1), List.tail(List.tail(rest)), acc)
+
+def execXyGot(x: String, y: String, rest: List[String], acc: String): (Bool, String) =
+  if (execNum(x) && execNum(y)) execEv(acc, Str.concat("{\"op\":\"xy\",\"x\":", Str.concat(x, Str.concat(",\"y\":", Str.concat(y, "}")))), rest) else execArgErr("xy")
+
+def execStr1(op: String, key: String, rest: List[String], acc: String): (Bool, String) =
+  if (List.isEmpty(rest)) execArgErr(op) else execEv(acc, Str.concat("{\"op\":", Str.concat(Check.jsonStr(op), Str.concat(",", Str.concat(Check.jsonStr(key), Str.concat(":", Str.concat(Check.jsonStr(List.at(rest, 0)), "}")))))), List.tail(rest))
+
+def execNum1(op: String, key: String, rest: List[String], acc: String): (Bool, String) =
+  if (List.isEmpty(rest) || !execNum(List.at(rest, 0))) execArgErr(op) else execEv(acc, Str.concat("{\"op\":\"", Str.concat(op, Str.concat("\",\"", Str.concat(key, Str.concat("\":", Str.concat(List.at(rest, 0), "}")))))), List.tail(rest))
 
 def parsePkg(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Package(orDot(path), outDir, target), json) else parsePkgTok(args, i, json, path, outDir, target, arg(args, i))
@@ -475,7 +570,7 @@ def parsePkgTarget(p: (String, Int), args: List[String], json: Bool, path: Strin
   }
 
 def parsePkgTargetVal(v: String, n: Int, args: List[String], json: Bool, path: String, outDir: String): Cmd =
-  if (v == "host" || v == "android" || v == "ios" || v == "web" || v == "all") parsePkg(args, n, json, path, outDir, v) else Cmd.Fail(Drive.badTarget(v))
+  if (v == "linux" || v == "macos" || v == "android" || v == "ios" || v == "web" || v == "all") parsePkg(args, n, json, path, outDir, v) else Cmd.Fail(Drive.badTarget(v))
 
 def parsePkgOut(p: (String, Int), args: List[String], json: Bool, path: String, target: String): Cmd =
   p match {
@@ -505,7 +600,7 @@ def runCmd(c: Cmd, src: String): String =
 def dispatch(c: Cmd): IO[Unit] =
   c match {
     case Cmd.Build(path, outDir, full, verify) => dispatchBuild(path, outDir, full, verify)
-    case Cmd.Run(path, outDir, headless, watch, script, dump, target, device) => if (target == "ios") Ios.run(path, pkgOut(path, outDir), device, watch) else dispatchRunCmd(path, outDir, headless, watch, script, dump)
+    case Cmd.Run(path, outDir, target, watch, exec, hasExec, dump, snap, device) => if (target == "ios") Ios.run(path, pkgOut(path, outDir), device, watch) else dispatchRunCmd(path, outDir, target, watch, exec, hasExec, dump, snap)
     case Cmd.Devices => Ios.devices()
     case Cmd.Watch(path, outDir) => dispatchWatch(path, outDir)
     case Cmd.Check(path, json) => Drive.checkDir(path, json)
@@ -513,7 +608,8 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.New(name, path, ui) => dispatchNew(name, path, ui)
     case Cmd.Package(path, outDir, target) => dispatchPkg(path, outDir, target)
     case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, relate, differential) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles, differential)
-    case Cmd.Ide(path, outDir, headless) => dispatchIde(path, outDir, headless)
+    case Cmd.Ide(path, outDir, target) => dispatchIde(path, outDir, target)
+    case Cmd.Exec(path, outDir, ops) => dispatchExec(path, outDir, ops)
     case Cmd.Lsp(path) => Lsp.run(path)
     case Cmd.Docs(mode, topic) => dispatchDocs(mode, topic)
     case Cmd.Help(t) => IO.println(helpOf(t))
@@ -525,7 +621,10 @@ def dispatchDocs(mode: String, topic: String): IO[Unit] =
   if (docsUnknown(mode, topic)) IO.println(docsOut(mode, topic)).flatMap(_ => IO.fail("scuzz")) else IO.println(docsOut(mode, topic))
 
 def dispatchPkg(path: String, outDir: String, target: String): IO[Unit] =
-  Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), target)
+  Drive.hostMac().flatMap(mac => dispatchPkgHost(path, outDir, target, mac))
+
+def dispatchPkgHost(path: String, outDir: String, target: String, mac: Bool): IO[Unit] =
+  if (target == "linux" && mac || target == "macos" && !mac) IO.println(Drive.hostMismatch(target, mac)).flatMap(_ => IO.fail("package")) else Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), if (target == "") Drive.hostTarget(mac) else target)
 
 def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
   Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => dispatchFuzz2(path, it, seed, replay, relate, noFailFast, oracles, differential))
@@ -533,17 +632,17 @@ def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool,
 def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
   if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast, oracles, differential)
 
-def dispatchIde(path: String, outDir: String, headless: Bool): IO[Unit] =
-  Sys.getenv("SCUZZ_IDE").flatMap(ide => Sys.getenv("SCUZZ_HOME").flatMap(home => dispatchIdeEnv(path, outDir, headless, ide, home)))
+def dispatchIde(path: String, outDir: String, target: String): IO[Unit] =
+  Sys.getenv("SCUZZ_IDE").flatMap(ide => Sys.getenv("SCUZZ_HOME").flatMap(home => dispatchIdeEnv(path, outDir, target, ide, home)))
 
-def dispatchIdeEnv(path: String, outDir: String, headless: Bool, ide: String, home: String): IO[Unit] =
-  homeIdeOf(home).flatMap(homeIde => Fs.exists("examples/editor/scuzz.toml").flatMap(co => dispatchIdeGot(path, outDir, headless, resolveIdeDir(ide, homeIde, if (co != 0) "examples/editor" else ""))))
+def dispatchIdeEnv(path: String, outDir: String, target: String, ide: String, home: String): IO[Unit] =
+  homeIdeOf(home).flatMap(homeIde => Fs.exists("examples/editor/scuzz.toml").flatMap(co => dispatchIdeGot(path, outDir, target, resolveIdeDir(ide, homeIde, if (co != 0) "examples/editor" else ""))))
 
 def homeIdeOf(home: String): IO[String] =
   if (home == "") IO.pure("") else Fs.exists(Drive.joinSlash(Drive.joinSlash(home, "ide"), "scuzz.toml")).flatMap(hit => IO.pure(if (hit != 0) Drive.joinSlash(home, "ide") else ""))
 
-def dispatchIdeGot(path: String, outDir: String, headless: Bool, ideDir: String): IO[Unit] =
-  if (ideDir == "") IO.println(missIde()).flatMap(_ => IO.fail("scuzz")) else Fs.exists(Drive.joinSlash(ideDir, "scuzz.toml")).flatMap(hit => if (hit != 0) dispatchRun(ideDir, outDir, headless, "", "", runExtra(path)) else IO.println(missIde()).flatMap(_ => IO.fail("scuzz")))
+def dispatchIdeGot(path: String, outDir: String, target: String, ideDir: String): IO[Unit] =
+  if (ideDir == "") IO.println(missIde()).flatMap(_ => IO.fail("scuzz")) else Fs.exists(Drive.joinSlash(ideDir, "scuzz.toml")).flatMap(hit => if (hit != 0) dispatchRun(ideDir, outDir, target, "", false, "", "", runExtra(path)) else IO.println(missIde()).flatMap(_ => IO.fail("scuzz")))
 
 def dispatchBuild(path: String, outDir: String, full: Bool, verify: Bool): IO[Unit] =
   dispatchBuildOut(path, pkgOut(path, outDir), full, verify)
@@ -554,8 +653,20 @@ def dispatchBuildOut(path: String, out: String, full: Bool, verify: Bool): IO[Un
 def dispatchBuildVerify(path: String, out: String): IO[Unit] =
   Drive.fuzzCollect(path).flatMap(files => Drive.emitDirAlways(path, out, files))
 
-def dispatchRunCmd(path: String, outDir: String, headless: Bool, watch: Bool, script: String, dump: String): IO[Unit] =
-  if (watch && (script != "" || dump != "")) IO.println("scuzz run --watch does not accept --script or --dump. Run without --watch: scuzz run --headless --script PATH --dump PATH") else if (watch) dispatchRunWatch(path, outDir, headless) else dispatchRun(path, outDir, headless, script, dump, "")
+def dispatchRunCmd(path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String): IO[Unit] =
+  if (watch && (hasExec || dump != "" || snap != "")) IO.println("scuzz run --watch does not accept --exec, --snapshot-out, or --dump. Run without --watch: scuzz run --target headless --exec PATH --dump PATH") else if (watch) dispatchRunWatch(path, outDir, target) else dispatchRun(path, outDir, target, exec, hasExec, dump, snap, "")
+
+def dispatchExec(path: String, outDir: String, ops: List[String]): IO[Unit] =
+  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => dispatchExecMan(path, pkgOut(path, outDir), ops, Manifest.parse(toml)))
+
+def dispatchExecMan(path: String, out: String, ops: List[String], m: Man): IO[Unit] =
+  Drive.manNeed(m).flatMap(_ => if (!m.hasUi) IO.println(Str.concat("scuzz exec: ", Str.concat(path, " has no [ui] table"))).flatMap(_ => IO.fail("exec")) else dispatchExecWrite(out, ops))
+
+def dispatchExecWrite(out: String, ops: List[String]): IO[Unit] =
+  execOps(ops) match {
+    case (ok, body) => if (!ok) IO.println(body).flatMap(_ => IO.fail("exec")) else Fs.mkdirs(out).flatMap(_ => Fs.write(Drive.joinSlash(out, "inject.json"), Str.concat("{\"v\":1,\"kind\":\"inject\",\"events\":[", Str.concat(body, """]}
+"""))).flatMap(_ => IO.println(Str.concat("scuzz exec: wrote ", Drive.joinSlash(out, "inject.json")))))
+  }
 
 def dispatchWatch(path: String, outDir: String): IO[Unit] =
   IO.println(Str.concat("scuzz watch ", Str.concat(path, " (rebuild on change; not hot reload)"))).flatMap(_ => watchBuild(path, pkgOut(path, outDir)))
@@ -563,11 +674,11 @@ def dispatchWatch(path: String, outDir: String): IO[Unit] =
 def watchBuild(path: String, out: String): IO[Unit] =
   Fs.mkdirs(out).flatMap(_ => Drive.emitDir(path, out, false).flatMap(_ => IO.sleep(400).flatMap(_ => watchBuild(path, out))))
 
-def dispatchRunWatch(path: String, outDir: String, headless: Bool): IO[Unit] =
-  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => dispatchRunWatchMan(path, pkgOut(path, outDir), headless, Manifest.parse(toml)))
+def dispatchRunWatch(path: String, outDir: String, target: String): IO[Unit] =
+  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => dispatchRunWatchMan(path, pkgOut(path, outDir), target, Manifest.parse(toml)))
 
-def dispatchRunWatchMan(path: String, out: String, headless: Bool, m: Man): IO[Unit] =
-  Drive.manNeed(m).flatMap(_ => if (m.hasUi) watchUi(path, out, headless, m.name) else watchIo(path, out, m.name))
+def dispatchRunWatchMan(path: String, out: String, target: String, m: Man): IO[Unit] =
+  Drive.manNeed(m).flatMap(_ => if (m.hasUi) watchUi(path, out, target, m.name) else watchIo(path, out, m.name))
 
 def watchIo(path: String, out: String, name: String): IO[Unit] =
   IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (rebuild and rerun on source change; kills a still-running process; not hot reload)"))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name)))))
@@ -599,17 +710,17 @@ def watchIoIdle(path: String, out: String, name: String): IO[Unit] =
 def watchIoIdle2(path: String, out: String, name: String, old: String, now: String): IO[Unit] =
   if (now != old) Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name)) else watchIoIdle(path, out, name)
 
-def watchUi(path: String, out: String, headless: Bool, name: String): IO[Unit] =
-  IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (hot reload). Enter r to rebuild and restart. Enter q to stop."))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => watchUiBoot(path, out, headless, name, 0)))
+def watchUi(path: String, out: String, target: String, name: String): IO[Unit] =
+  IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (hot reload). Enter r to rebuild and restart. Enter q to stop."))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => watchUiBoot(path, out, target, name, 0)))
 
-def watchUiBoot(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
-  Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out, false).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), "0").flatMap(_ => watchUiSpawn(path, out, headless, name, gen)))))
+def watchUiBoot(path: String, out: String, target: String, name: String, gen: Int): IO[Unit] =
+  Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out, false).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), "0").flatMap(_ => watchUiSpawn(path, out, target, name, gen)))))
 
-def watchUiSpawn(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
-  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Sys.getenv("SCUZZ_HOME").flatMap(home => Sys.spawn(watchUiCommand(home, out, headless, toml, name)).flatMap(pid => IO.ensure(watchUiPoll(path, out, headless, name, gen, pid), watchUiStop(pid)).flatMap(restart => if (restart) watchUiBoot(path, out, headless, name, 0) else IO.pure(())))))
+def watchUiSpawn(path: String, out: String, target: String, name: String, gen: Int): IO[Unit] =
+  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Sys.getenv("SCUZZ_HOME").flatMap(home => Sys.spawn(watchUiCommand(home, out, target, toml, name)).flatMap(pid => IO.ensure(watchUiPoll(path, out, target, name, gen, pid), watchUiStop(pid)).flatMap(restart => if (restart) watchUiBoot(path, out, target, name, 0) else IO.pure(())))))
 
-def watchUiCommand(home: String, out: String, headless: Bool, toml: String, name: String): String =
-  Str.concat(watchUiEnv(out, headless, toml), Str.concat("bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-desktop/run_watch.sh")), Str.concat(" ", Drive.shQuote(Drive.exeName(out, name))))))
+def watchUiCommand(home: String, out: String, target: String, toml: String, name: String): String =
+  Str.concat(watchUiEnv(out, target, toml), Str.concat("bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-desktop/run_watch.sh")), Str.concat(" ", Drive.shQuote(Drive.exeName(out, name))))))
 
 def watchUiStop(pid: Int): IO[Unit] =
   Sys.childWrite(pid, """quit
@@ -618,51 +729,79 @@ def watchUiStop(pid: Int): IO[Unit] =
 def watchUiStopped(pid: Int): IO[Unit] =
   Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(()) else IO.sleep(20).flatMap(_ => watchUiStopped(pid)))
 
-def watchUiEnv(out: String, headless: Bool, toml: String): String =
-  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.stamp")), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.dylib")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "inject.json")), Str.concat(" SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.json")), " ")))))))))))
+def watchUiEnv(out: String, target: String, toml: String): String =
+  Str.concat(Drive.runEnvOf(out, target, "", toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.stamp")), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.dylib")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "inject.json")), Str.concat(" SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.json")), " ")))))))))))
 
-def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Bool] =
-  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(false) else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => watchUiControl(path, out, headless, name, gen, pid, Str.trim(command))))
+def watchUiPoll(path: String, out: String, target: String, name: String, gen: Int, pid: Int): IO[Bool] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(false) else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => watchUiControl(path, out, target, name, gen, pid, Str.trim(command))))
 
-def watchUiControl(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, command: String): IO[Bool] =
-  if (command == "q") IO.pure(false) else if (command == "r") watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen, pid) else watchUiLink(name, out).flatMap(linked => if (linked) IO.pure(true) else watchUiPoll(path, out, headless, name, gen, pid))) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
+def watchUiControl(path: String, out: String, target: String, name: String, gen: Int, pid: Int, command: String): IO[Bool] =
+  if (command == "q") IO.pure(false) else if (command == "r") watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, target, name, gen, pid) else watchUiLink(name, out).flatMap(linked => if (linked) IO.pure(true) else watchUiPoll(path, out, target, name, gen, pid))) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, target, name, gen, pid, old)))
 
-def watchUiTick(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String): IO[Bool] =
-  watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen, pid) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, headless, name, gen, pid, old, now)))
+def watchUiTick(path: String, out: String, target: String, name: String, gen: Int, pid: Int, old: String): IO[Bool] =
+  watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, target, name, gen, pid) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, target, name, gen, pid, old, now)))
 
 def watchUiCompile(path: String, out: String): IO[Bool] =
   Drive.emitDir(path, out, false).map(_ => true).handleErrorWith(_ => IO.println("Build fails. Fix the source and retry.").map(_ => false))
 
-def watchUiTick2(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String): IO[Bool] =
-  Sys.alive(pid).flatMap(live => watchUiTick3(path, out, headless, name, gen, pid, old, now, live))
+def watchUiTick2(path: String, out: String, target: String, name: String, gen: Int, pid: Int, old: String, now: String): IO[Bool] =
+  Sys.alive(pid).flatMap(live => watchUiTick3(path, out, target, name, gen, pid, old, now, live))
 
-def watchUiTick3(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String, live: Int): IO[Bool] =
-  if (live == 0) IO.pure(false) else if (now != old) watchUiReload(path, out, headless, name, gen + 1, pid) else watchUiPoll(path, out, headless, name, gen, pid)
+def watchUiTick3(path: String, out: String, target: String, name: String, gen: Int, pid: Int, old: String, now: String, live: Int): IO[Bool] =
+  if (live == 0) IO.pure(false) else if (now != old) watchUiReload(path, out, target, name, gen + 1, pid) else watchUiPoll(path, out, target, name, gen, pid)
 
-def watchUiReload(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Bool] =
-  watchUiLink(name, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen - 1, pid) else Fs.write(Drive.joinSlash(out, "reload.stamp"), Str.concat(Str.fromInt(gen), """
-""")).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, headless, name, gen, pid))))
+def watchUiReload(path: String, out: String, target: String, name: String, gen: Int, pid: Int): IO[Bool] =
+  watchUiLink(name, out).flatMap(ok => if (!ok) watchUiPoll(path, out, target, name, gen - 1, pid) else Fs.write(Drive.joinSlash(out, "reload.stamp"), Str.concat(Str.fromInt(gen), """
+""")).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, target, name, gen, pid))))
 
 def watchUiLink(name: String, out: String): IO[Bool] =
   Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out, false)).map(_ => true).handleErrorWith(_ => IO.println("Reload fails. Fix the source and retry.").map(_ => false))
 
-def dispatchRun(path: String, outDir: String, headless: Bool, script: String, dump: String, extra: String): IO[Unit] =
-  dispatchRunOut(path, pkgOut(path, outDir), headless, script, dump, extra)
+def dispatchRun(path: String, outDir: String, target: String, exec: String, hasExec: Bool, dump: String, snap: String, extra: String): IO[Unit] =
+  dispatchRunOut(path, pkgOut(path, outDir), target, exec, hasExec, dump, snap, extra)
 
 def pkgOut(path: String, outDir: String): String =
   if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir)
 
-def dispatchRunOut(path: String, out: String, headless: Bool, script: String, dump: String, extra: String): IO[Unit] =
-  Fs.mkdirs(out).flatMap(_ => Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => dispatchRunEnv(path, out, runEnvOf(out, headless, script, dump, toml), extra)))
+def dispatchRunOut(path: String, out: String, target: String, exec: String, hasExec: Bool, dump: String, snap: String, extra: String): IO[Unit] =
+  Fs.mkdirs(out).flatMap(_ => Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Drive.hostMac().flatMap(mac => dispatchRunCheck(path, out, target, exec, hasExec, dump, snap, extra, toml, Manifest.parse(toml), mac))))
+
+def dispatchRunCheck(path: String, out: String, target: String, exec: String, hasExec: Bool, dump: String, snap: String, extra: String, toml: String, m: Man, mac: Bool): IO[Unit] =
+  Drive.manNeed(m).flatMap(_ => dispatchRunGate(path, out, target, exec, hasExec, dump, snap, extra, toml, m, mac))
+
+def dispatchRunGate(path: String, out: String, target: String, exec: String, hasExec: Bool, dump: String, snap: String, extra: String, toml: String, m: Man, mac: Bool): IO[Unit] =
+  if (target == "linux" && mac || target == "macos" && !mac) IO.println(Drive.hostMismatch(target, mac)).flatMap(_ => IO.fail("run")) else if (!m.hasUi && target != "" && target != "linux" && target != "macos") IO.println(Str.concat("scuzz run --target ", Str.concat(target, ": package has no [ui] table"))).flatMap(_ => IO.fail("run")) else dispatchRunExec(path, out, target, exec, hasExec, dump, snap, extra, toml)
+
+def execInline(s: String): Bool =
+  s == "" || Str.startsWith(s, "{") || Str.startsWith(s, "[")
+
+def execDoc(s: String): String =
+  if (s == "") "{\"v\":1,\"kind\":\"inject\",\"events\":[]}\n" else Str.concat(s, """
+""")
+
+def dispatchRunExec(path: String, out: String, target: String, exec: String, hasExec: Bool, dump: String, snap: String, extra: String, toml: String): IO[Unit] =
+  if (hasExec && execInline(exec)) Fs.write(Drive.joinSlash(out, "exec.json"), execDoc(exec)).flatMap(_ => dispatchRunEnv(path, out, runEnvOf(out, target, Drive.joinSlash(out, "exec.json"), hasExec, dump, snap, toml), extra)) else dispatchRunEnv(path, out, runEnvOf(out, target, exec, hasExec, dump, snap, toml), extra)
 
 def dispatchRunEnv(path: String, out: String, env: String, extra: String): IO[Unit] =
   Drive.runDir(path, out, env, extra)
 
-def runEnvOf(out: String, headless: Bool, script: String, dump: String, toml: String): String =
-  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat(runRecordEnv(out, headless, toml), Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(Drive.shQuote(script), " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(Drive.shQuote(dump), " ")))))
+def runEnvOf(out: String, target: String, script: String, hasExec: Bool, dump: String, snap: String, toml: String): String =
+  Str.concat(Drive.runEnvOf(out, target, snap, toml), Str.concat(runChannelEnv(out, target, hasExec, toml), Str.concat(if (script == "") "" else Str.concat("SCUZZ_UI_SCRIPT=", Str.concat(Drive.shQuote(script), " ")), if (dump == "") "" else Str.concat("SCUZZ_FUZZ_DUMP=", Str.concat(Drive.shQuote(dump), " ")))))
 
-def runRecordEnv(out: String, headless: Bool, toml: String): String =
-  if (Drive.uiEnvKind(headless, Manifest.uiRuntime(Manifest.manUi(Manifest.parse(toml)))) == "headless") "" else Str.concat("SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.json")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), " "))))
+def runChannelEnv(out: String, target: String, hasExec: Bool, toml: String): String =
+  runChannelMan(out, target, hasExec, Manifest.parse(toml))
+
+def runChannelMan(out: String, target: String, hasExec: Bool, m: Man): String =
+  if (hasExec || !m.hasUi) "" else Str.concat(runRecordEnv(out, target, m), Str.concat("SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "inject.json")), Str.concat(" ", runServeEnv(target, m)))))))
+
+def runServeEnv(target: String, m: Man): String =
+  if (uiKindOf(target, m) == "headless") "SCUZZ_UI_SERVE=1 " else ""
+
+def runRecordEnv(out: String, target: String, m: Man): String =
+  if (uiKindOf(target, m) == "headless") "" else Str.concat("SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.json")), " "))
+
+def uiKindOf(target: String, m: Man): String =
+  Drive.uiEnvKind(target, Manifest.uiRuntime(Manifest.manUi(m)))
 
 def dispatchFmt(path: String, check: Bool): IO[Unit] =
   Fs.list(Drive.joinSlash(path, "src")).flatMap(_ => fmtDir(path, "", check).flatMap(dirty => fmtDone(check, dirty)))
@@ -742,5 +881,5 @@ def writeNewCorpus(dir: String, ui: Bool): IO[Unit] =
   if (ui) Fs.mkdirs(Drive.joinSlash(dir, "corpus")).flatMap(_ => Fs.write(Drive.joinSlash(Drive.joinSlash(dir, "corpus"), "plus.toml"), newCorpusUi()).flatMap(_ => printNew(dir, true))) else printNew(dir, false)
 
 def printNew(dir: String, ui: Bool): IO[Unit] =
-  IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz fuzz --iterations 0 && scuzz run --headless")) else Str.concat("created ", Str.concat(dir, " - next: scuzz fuzz --iterations 0 && scuzz run")))
+  IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz fuzz --iterations 0 && scuzz run --target headless --exec \"\"")) else Str.concat("created ", Str.concat(dir, " - next: scuzz fuzz --iterations 0 && scuzz run")))
 

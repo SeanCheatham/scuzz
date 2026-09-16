@@ -1,40 +1,5 @@
 def helpRoot(): String =
-  """Scuzz Lang CLI
-
-Usage: scuzz [OPTIONS] <COMMAND>
-
-Commands:
-  build    Compile a Scuzz Lang project to a native executable (LLVM)
-  run      Build and run a Scuzz Lang project
-  watch    Watch sources and rebuild on change (compile loop, not hot reload)
-  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json
-  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
-  fmt      Format Scuzz Lang sources under src/
-  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
-  new      Create a new Scuzz Lang project
-  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
-  devices  List available iOS simulators
-  package  Package a project for host, Android, iOS, or web
-  docs     Print the technical manual, or one topic, or a kit row
-  help     Print this message or the help of the given subcommand(s)
-
-Options:
-      --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
-  -h, --help
-          Print help
-  -V, --version
-          Print version
-
-Examples:
-  scuzz new myapp --ui
-  scuzz check
-  scuzz docs verify
-  scuzz fuzz --iterations 0
-  scuzz run --headless
-
-See: scuzz docs start
-"""
+  "Scuzz Lang CLI\n\nUsage: scuzz [OPTIONS] <COMMAND>\n\nCommands:\n  build    Compile a Scuzz Lang project to a native executable (LLVM)\n  run      Build and run a Scuzz Lang project\n  watch    Watch sources and rebuild on change (compile loop, not hot reload)\n  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json\n  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)\n  fmt      Format Scuzz Lang sources under src/\n  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation\n  new      Create a new Scuzz Lang project\n  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)\n  devices  List available iOS simulators\n  exec     Send inject ops to a live session started by `scuzz run`\n  package  Package a project for Linux, macOS, Android, iOS, or web\n  docs     Print the technical manual, or one topic, or a kit row\n  help     Print this message or the help of the given subcommand(s)\n\nOptions:\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz docs verify\n  scuzz fuzz --iterations 0\n  scuzz run --target headless --exec \"\"\n\nSee: scuzz docs start\n"
 
 def helpFmt(): String =
   """Format Scuzz Lang sources under src/
@@ -111,7 +76,7 @@ See: scuzz docs commands
 """
 
 def helpRun(): String =
-  "Build and run a Scuzz Lang project\n\nUsage: scuzz run [OPTIONS] [PATH]\n\nArguments:\n  [PATH]  [default: .]\n\nOptions:\n      --target <TARGET>\n          host or ios [default: host]\n      --device <DEVICE>\n          iOS simulator name or ID (see scuzz devices)\n      --headless\n          Force Headless UiRuntime (overrides [ui].default_runtime; no display needed)\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]\n      --out-dir <OUT_DIR>\n          [default: build]\n      --watch\n          Keep running; host and iOS UI hot-reload Views; IO-only reruns\n      --script <PATH>\n          Inject document path (SCUZZ_UI_SCRIPT); JSON schema v=1; played after the first pump\n      --dump <PATH>\n          Structural dump path at finish (SCUZZ_FUZZ_DUMP)\n  -h, --help\n          Print help\n\nExamples:\n  scuzz run\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.json --dump examples/studio/build/debug.json examples/studio\n  scuzz run --watch --headless\n  scuzz run --target ios --watch\n  scuzz run --target ios --device \"iPhone 17\"\n\nSee: scuzz docs commands\n"
+  "Build and run a Scuzz Lang project\n\nUsage: scuzz run [OPTIONS] [PATH]\n\nArguments:\n  [PATH]  [default: .]\n\nOptions:\n      --target <TARGET>\n          Platform to run: linux or macos (must match the host), headless (host build, no display), android (host shell), or ios (simulator; see scuzz devices). Overrides [ui].default_runtime. A package without [ui] accepts only the host platform\n      --device <DEVICE>\n          iOS simulator name or ID (see scuzz devices)\n      --exec <OPS>\n          Finite ops program played after the first pump; the run quiesces and exits when it finishes. Inline JSON when the value starts with '{' or '['; anything else is a path to an inject document (schema v=1). An empty value mounts, paints, and exits\n      --snapshot-out <PATH>\n          PNG snapshot path at finish (headless default: build/snapshot.png)\n      --dump <PATH>\n          Structural dump path at finish (SCUZZ_FUZZ_DUMP)\n      --watch\n          Keep running; host and iOS UI hot-reload Views; IO-only reruns. Rejects --exec, --snapshot-out, and --dump\n      --out-dir <OUT_DIR>\n          [default: build]\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n\nWithout --exec a [ui] run stays live: every runtime watches build/inject.json and rewrites build/debug.json. Drive a live session with `scuzz exec`. Headless exits on a quit op or signal.\n\nExamples:\n  scuzz run\n  scuzz run --target headless --exec \"\"\n  scuzz run --target headless --exec '[{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"id\":\"button:+1\"}]}]'\n  scuzz run --exec examples/studio/build/record.json --dump examples/studio/build/session.json examples/studio\n  scuzz run --watch --target headless\n  scuzz run --target ios --watch\n  scuzz run --target ios --device \"iPhone 17\"\n\nSee: scuzz docs commands\n"
 
 def helpDevices(): String =
   """List available iOS simulators
@@ -242,8 +207,8 @@ Arguments:
   [PATH]  [default: .]
 
 Options:
-      --headless
-          Force Headless UiRuntime (overrides [ui].default_runtime)
+      --target <TARGET>
+          Platform to run: linux, macos, headless, android, or ios (same rules as `scuzz run`)
       --out-dir <OUT_DIR>
           [default: build]
       --message-format <MESSAGE_FORMAT>
@@ -253,13 +218,42 @@ Options:
 
 Examples:
   scuzz ide
-  scuzz ide --headless .
+  scuzz ide --target headless .
 
 See: scuzz docs ide
 """
 
+def helpExec(): String =
+  """Send inject ops to a live session started by `scuzz run`
+
+Usage: scuzz exec [OPTIONS] [PATH] OP [ARGS...]
+
+Arguments:
+  [PATH]       Package path of the running app [default: .]
+  OP [ARGS...]  Ops played in order: tap N | tap id:KEY | xy X Y | text S | type S | key K |
+               scroll DY | pump K | backspace K | snapshot PATH | dump | reload | quit
+
+Options:
+      --out-dir <OUT_DIR>
+          Out dir of the running app [default: build]
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Writes one inject document (schema v=1) to <out-dir>/inject.json. The live session plays it on the next pump. Read the session back from <out-dir>/debug.json; snapshot writes a PNG.
+
+Examples:
+  scuzz exec examples/counter tap id:button:+1
+  scuzz exec . type hello snapshot build/typed.png
+  scuzz exec . dump
+  scuzz exec . quit
+
+See: scuzz docs commands
+"""
+
 def helpPkg(): String =
-  """Package a project for host, Android, iOS, or web
+  """Package a project for Linux, macOS, Android, iOS, or web
 
 Usage: scuzz package [OPTIONS] [PATH]
 
@@ -268,7 +262,7 @@ Arguments:
 
 Options:
       --target <TARGET>
-          host, android, ios, web, or all [default: host]
+          linux, macos, android, ios, web, or all [default: the host platform]
       --out-dir <OUT_DIR>
           [default: build]
       --message-format <MESSAGE_FORMAT>
@@ -277,7 +271,8 @@ Options:
           Print help
 
 Examples:
-  scuzz package --target host
+  scuzz package
+  scuzz package --target linux
   scuzz package --target android examples/counter
   scuzz package --target web examples/docs
 

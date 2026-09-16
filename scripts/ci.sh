@@ -439,7 +439,7 @@ slice_package() {
     scuzz new --ui --path /tmp scuzz-release-app
     scuzz fuzz --iterations 0 /tmp/scuzz-release-app
     grep -qx skia "$prefix/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
-    scuzz run --headless /tmp/scuzz-release-app
+    scuzz run --target headless --exec "" /tmp/scuzz-release-app
     test -f /tmp/scuzz-release-app/build/snapshot.png
     scuzz run examples/hello | tee /tmp/rel-hello.out
     grep -q "Hello, Scuzz!" /tmp/rel-hello.out
@@ -453,9 +453,9 @@ slice_ui() {
   need_scuzz
   need_cmd python3 "sudo apt-get install -y python3"
   maybe_wipe
-  "$SCUZZ" run --headless examples/counter
+  "$SCUZZ" run --target headless --exec "" examples/counter
   test -f examples/counter/build/snapshot.png
-  "$SCUZZ" run --headless --dump examples/counter/build/session.json examples/counter
+  "$SCUZZ" run --target headless --exec "" --dump examples/counter/build/session.json examples/counter
   python3 - <<'PY'
 import json
 with open("examples/counter/build/session.json") as f:
@@ -470,7 +470,7 @@ assert any(n.get("role") == "button" and n.get("label") == "+1" for n in d["a11y
 assert isinstance(d["fields"], list) and isinstance(d["scrolls"], list)
 PY
   printf '%s\n' '{"v":1,"kind":"inject","events":[{"op":"tap","id":"button:+1"}]}' > examples/counter/build/inject.json
-  "$SCUZZ" run --headless --script examples/counter/build/inject.json --dump examples/counter/build/session.json examples/counter
+  "$SCUZZ" run --target headless --exec examples/counter/build/inject.json --dump examples/counter/build/session.json examples/counter
   python3 - <<'PY'
 import json
 with open("examples/counter/build/session.json") as f:
@@ -478,8 +478,30 @@ with open("examples/counter/build/session.json") as f:
 assert any(s.get("name") == "count" and s.get("value") == 1 for s in d["signals"])
 PY
   rm -f examples/counter/build/inject.json
+  # Daemon headless: no --exec stays live. scuzz exec drives the channel.
+  rm -f examples/counter/build/debug.json examples/counter/build/live.png
+  "$SCUZZ" run --target headless examples/counter &
+  daemon_pid=$!
+  trap 'kill $daemon_pid 2>/dev/null || true' EXIT
+  for i in $(seq 1 100); do [ -f examples/counter/build/debug.json ] && break; sleep 0.2; done
+  test -f examples/counter/build/debug.json
+  "$SCUZZ" exec examples/counter tap id:button:+1
+  for i in $(seq 1 50); do grep -q '"name":"count","value":1' examples/counter/build/debug.json 2>/dev/null && break; sleep 0.2; done
+  python3 - <<'PY'
+import json
+with open("examples/counter/build/debug.json") as f:
+    d = json.load(f)
+assert any(s.get("name") == "count" and s.get("value") == 1 for s in d["signals"])
+assert d.get("last_hit", {}).get("desc") == "button:+1"
+PY
+  "$SCUZZ" exec examples/counter snapshot "$ROOT/examples/counter/build/live.png"
+  for i in $(seq 1 50); do [ -f examples/counter/build/live.png ] && break; sleep 0.2; done
+  test -f examples/counter/build/live.png
+  "$SCUZZ" exec examples/counter quit
+  wait $daemon_pid
+  trap - EXIT
   "$SCUZZ" fuzz --iterations 0 examples/counter
-  "$SCUZZ" run --headless examples/studio
+  "$SCUZZ" run --target headless --exec "" examples/studio
   test -f examples/studio/build/snapshot.png
   "$SCUZZ" fuzz --iterations 0 examples/studio
   python3 - <<'PY'
@@ -494,7 +516,7 @@ PY
   # Run it from a scratch dir so the worktree root stays clean. SCUZZ_HOME
   # keeps crates/ anchored at the checkout from that CWD.
   mkdir -p scratchpad/editor
-  (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" run --headless "$ROOT/examples/editor")
+  (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec "" "$ROOT/examples/editor")
   test -f examples/editor/build/snapshot.png
   (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" fuzz --iterations 0 "$ROOT/examples/editor")
 }
@@ -560,7 +582,7 @@ assert "button:+1" in d["triggers"]["declared"], d["triggers"]
 assert "button:+1" in d["triggers"]["reached"], d["triggers"]
 assert "button:+1" not in d["triggers"]["never"], d["triggers"]
 PY
-  "$SCUZZ" run --headless /tmp/scuzz-v0app
+  "$SCUZZ" run --target headless --exec "" /tmp/scuzz-v0app
   test -f /tmp/scuzz-v0app/build/snapshot.png
 }
 
@@ -592,7 +614,9 @@ slice_mobile() {
     ./examples/counter/build/counter 2>&1 | tee /tmp/mobile.out
   grep -q "UiRuntime.Mobile" /tmp/mobile.out
   grep -q "scuzz mobile: present" /tmp/mobile.out
-  "$SCUZZ" package --target host examples/counter
+  host_target="linux"
+  [ "$(uname -s)" = Darwin ] && host_target="macos"
+  "$SCUZZ" package --target "$host_target" examples/counter
   if [ "$(uname -s)" = Darwin ]; then
     test -x examples/counter/build/package/host/counter.app/Contents/MacOS/counter
   else

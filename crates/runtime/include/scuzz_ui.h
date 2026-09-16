@@ -868,7 +868,7 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
  * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
  * when set (includes [heap]). Plays SCUZZ_UI_INJECT
- * (tap/xy/text/type/key/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak) when
+ * (tap/xy/text/type/key/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/snapshot/reload/quit/resetpeak) when
  * that file changes. `quit` stops the live pump loop. Desktop quit is window
  * close. `resetpeak` resets
  * peak bytes and the heap delta mark. */
