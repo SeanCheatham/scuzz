@@ -907,8 +907,8 @@ def hostMeta(name: String, id: String): String =
 def linkOnly(hasUi: Bool, name: String, outDir: String): IO[Unit] =
   ensureNative(hasUi).flatMap(_ => linkExe(hasUi, outDir, name).flatMap(r => linkOnlyGot(r)))
 
-def linkReload(ll: String, outDir: String): IO[Unit] =
-  Fs.read(ll).flatMap(ir => linkReloadIr(ir, outDir, reloadFactory(Verify.linesOf(ir), "")))
+def linkReload(ll: String, outDir: String, ios: Bool): IO[Unit] =
+  Fs.read(ll).flatMap(ir => linkReloadIr(ir, outDir, reloadFactory(Verify.linesOf(ir), ""), ios))
 
 def reloadFactory(lines: List[String], found: String): String =
   lines match {
@@ -922,11 +922,16 @@ def reloadFactoryName(line: String): String =
 def reloadFactoryNext(rest: List[String], found: String, name: String): String =
   if (name == "") reloadFactory(rest, found) else if (found == "") reloadFactory(rest, name) else "many"
 
-def linkReloadIr(ir: String, outDir: String, factory: String): IO[Unit] =
-  if (factory == "" || factory == "many") IO.println("Host UI watch needs one direct Ui.run factory.").flatMap(_ => IO.fail("UI reload factory")) else Fs.write(joinSlash(outDir, "reload.ll"), Str.concat(ir, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_rebuild = alias ptr (ptr), ptr @", Str.concat(factory, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_capture = alias [65 x i8], ptr @", Str.concat(factory, Str.concat("_capture", Verify.nl()))))))))).flatMap(_ => linkReloadNative(joinSlash(outDir, "reload.ll"), outDir))
+def linkReloadIr(ir: String, outDir: String, factory: String, ios: Bool): IO[Unit] =
+  if (factory == "" || factory == "many") IO.println("UI hot reload needs one direct Ui.run factory.").flatMap(_ => IO.fail("UI reload factory")) else Fs.write(joinSlash(outDir, "reload.ll"), Str.concat(ir, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_rebuild = alias ptr (ptr), ptr @", Str.concat(factory, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_capture = alias [65 x i8], ptr @", Str.concat(factory, Str.concat("_capture", Verify.nl()))))))))).flatMap(_ => linkReloadNative(joinSlash(outDir, "reload.ll"), outDir, ios))
 
-def linkReloadNative(ll: String, outDir: String): IO[Unit] =
-  hostMac().flatMap(mac => runLine(Str.concat("clang -O0 -Wno-override-module -shared -fPIC ", Str.concat(if (mac) "-Wl,-undefined,dynamic_lookup " else "", Str.concat(shQuote(ll), Str.concat(" -o ", shQuote(joinSlash(outDir, "reload.dylib"))))))).flatMap(r => linkOnlyGot(r)))
+def linkReloadNative(ll: String, outDir: String, ios: Bool): IO[Unit] =
+  if (ios) runLine("xcrun --sdk iphonesimulator --show-sdk-path").flatMap(r => linkReloadIos(r, ll, outDir)) else hostMac().flatMap(mac => runLine(Str.concat("clang -O0 -Wno-override-module -shared -fPIC ", Str.concat(if (mac) "-Wl,-undefined,dynamic_lookup " else "", Str.concat(shQuote(ll), Str.concat(" -o ", shQuote(joinSlash(outDir, "reload.dylib"))))))).flatMap(r => linkOnlyGot(r)))
+
+def linkReloadIos(r: (Int, String, String), ll: String, outDir: String): IO[Unit] =
+  r match {
+    case (code, sdk, _) => if (code != 0) pkgIosMiss() else runLine(Str.concat("xcrun clang -target arm64-apple-ios16.0-simulator -isysroot ", Str.concat(shQuote(Str.trim(sdk)), Str.concat(" -O0 -Wno-override-module -dynamiclib -undefined dynamic_lookup ", Str.concat(shQuote(ll), Str.concat(" -o ", shQuote(joinSlash(outDir, "reload.dylib.tmp")))))))).flatMap(result => linkOnlyGot(result).flatMap(_ => runLine(Str.concat("codesign --force --sign - --timestamp=none ", shQuote(joinSlash(outDir, "reload.dylib.tmp")))).flatMap(signed => linkOnlyGot(signed).flatMap(_ => runLine(Str.concat("mv -f ", Str.concat(shQuote(joinSlash(outDir, "reload.dylib.tmp")), Str.concat(" ", shQuote(joinSlash(outDir, "reload.dylib")))))).flatMap(moved => linkOnlyGot(moved))))))
+  }
 
 def linkOnlyGot(r: (Int, String, String)): IO[Unit] =
   r match {

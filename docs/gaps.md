@@ -15,7 +15,7 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 **Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. That bar stays host-gated. Hardware device runs stay open.
 
-The local iOS loop targets arm64 simulators on iOS 16 or later. It rebuilds and restarts the app. State-preserving iOS hot reload, physical device signing, and release distribution remain open. iOS supports Net clients with platform certificate trust. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
+The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits reload the View and preserve app state. Manifest changes and the r command restart the app. Physical device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 
