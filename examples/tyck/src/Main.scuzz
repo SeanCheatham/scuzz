@@ -338,7 +338,7 @@ def tyckCore(): Bool =
   sourceOffsets() && funLookup() && tyckDiff(srcOk(), wantOk()) && tyckDiff(srcUnbound(), wantUnbound()) && tyckDiff(srcArith(), wantArith()) && tyckDiff(srcArity(), wantArity()) && tyckDiff(srcRet(), wantRet()) && tyckDiff(srcPrint(), wantPrint()) && tyckDiff(srcUnk(), wantUnk()) && tyckDiff(srcCmp(), wantCmp()) && tyckDiff(srcMainTy(), wantMainTy()) && tyckDiff(srcArg(), wantArg()) && tyckDiff(srcWatch(), wantWatch()) && tyckDiff(srcDup(), wantDup()) && tyckFiles()
 
 def tyckFlow(): Bool =
-  tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit())
+  tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit()) && unaryNumTypes()
 
 def tyckRes(): Bool =
   tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr())
@@ -630,7 +630,7 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes()
 
 def namedLetterTypes(): Bool =
   Check.check("""enum E:
@@ -1016,6 +1016,24 @@ def value(r: Result[Problem, Int]): Int = r match {
   case Result.Err(e) => Str.len(e)
   case Result.Ok(s) => Str.len(s)
 }""", "type mismatch")
+
+def unaryNumTypes(): Bool =
+  Check.check("def right(): Float = -1.5") == "[]" && Check.check("def right(n: Float): Float = -n") == "[]" && Check.check("def right(): Int = -1") == "[]" && rejects("def wrong(): Bool = -true", "expected Int or Float, got Bool")
+
+def matchArmTypes(): Bool =
+  Check.check("""enum E:
+  case A
+  case B
+def right(e: E): Int = e match {
+  case E.A => 1
+  case E.B => 2
+}""") == "[]" && rejects("enum E:\n  case A\n  case B\ndef wrong(e: E): Int = e match {\n  case E.A => 1\n  case E.B => \"x\"\n}", "type mismatch: expected Int, got String") && rejects("""enum E:
+  case A
+  case B
+def wrong(e: E): Int = e match {
+  case E.A => 1
+  case E.B => nope
+}""", "unbound variable nope")
 
 def funLookup(): Bool =
   funLookupDefs(Parse.parseFiles(("A", """def pick(n: Int): Int = n

@@ -730,7 +730,10 @@ def inferUn(op: String, inner: Expr, env: List[(String, Ty)], funs: Ftab, ens: L
   inferUn2(op, infer(inner, env, funs, ens), env, e)
 
 def inferUn2(op: String, o: Out, env: List[(String, Ty)], e: Expr): Out =
-  if (hasErr(o)) o else if (op == "!") inferUnBool(o, env, e) else inferUnInt(o, env, e)
+  if (hasErr(o)) o else if (op == "!") inferUnBool(o, env, e) else if (op == "-") inferUnNum(o, env, e) else inferUnInt(o, env, e)
+
+def inferUnNum(o: Out, env: List[(String, Ty)], e: Expr): Out =
+  if (tyStr(o) == "Int" || tyStr(o) == "Float" || isLoose(tyStr(o))) o else bad(Str.concat("expected Int or Float, got ", tyStr(o)), exprSpan(env, e))
 
 def inferUnBool(o: Out, env: List[(String, Ty)], e: Expr): Out =
   if (tyStr(o) == "Bool" || isLoose(tyStr(o))) ok("Bool") else bad(Str.concat("expected Bool, got ", tyStr(o)), exprSpan(env, e))
@@ -1024,7 +1027,18 @@ def inferMatch(s: Expr, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, en
   inferMatch2(infer(s, env, funs, ens), arms, env, funs, ens, span)
 
 def inferMatch2(o: Out, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(o)) o else if (List.isEmpty(arms)) o else inferMatchChecked(altArmsErr(arms, tyStr(o), ens, span), List.at(arms, 0), tyStr(o), env, funs, ens)
+  if (hasErr(o)) o else if (List.isEmpty(arms)) o else inferMatchRest(inferMatchChecked(altArmsErr(arms, tyStr(o), ens, span), List.at(arms, 0), tyStr(o), env, funs, ens), List.tail(arms), tyStr(o), env, funs, ens)
+
+def inferMatchRest(first: Out, rest: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  if (hasErr(first)) first else if (List.isEmpty(rest)) first else inferMatchArm2(first, inferMatchArm(List.at(rest, 0), scrutTy, env, funs, ens), List.at(rest, 0), List.tail(rest), scrutTy, env, funs, ens)
+
+def inferMatchArm2(first: Out, cur: Out, arm: Arm, rest: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  if (hasErr(cur)) cur else if (tyEqEn(tyStr(first), tyStr(cur), ens)) inferMatchRest(first, rest, scrutTy, env, funs, ens) else bad(Str.concat("type mismatch: expected ", Str.concat(tyStr(first), Str.concat(", got ", tyStr(cur)))), armSpan(arm, env))
+
+def armSpan(arm: Arm, env: List[(String, Ty)]): (String, Int) =
+  arm match {
+    case Arm(_, _, body) => exprSpan(env, body)
+  }
 
 def inferMatchChecked(v: Out, arm: Arm, scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   if (hasErr(v)) v else inferMatchArm(arm, scrutTy, env, funs, ens)
