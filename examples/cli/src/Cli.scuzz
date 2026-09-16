@@ -600,34 +600,46 @@ def watchIoIdle2(path: String, out: String, name: String, old: String, now: Stri
   if (now != old) Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name)) else watchIoIdle(path, out, name)
 
 def watchUi(path: String, out: String, headless: Bool, name: String): IO[Unit] =
-  IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (hot reload: recompiles build/reload.dylib then stamp-reloads View tree)"))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), """0
-""").flatMap(_ => watchUiBoot(path, out, headless, name, 0))))
+  IO.println(Str.concat("scuzz run --watch ", Str.concat(path, " (hot reload). Enter r to rebuild and restart. Enter q to stop."))).flatMap(_ => Fs.mkdirs(out).flatMap(_ => watchUiBoot(path, out, headless, name, 0)))
 
 def watchUiBoot(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
-  Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out, false).flatMap(_ => watchUiSpawn(path, out, headless, name, gen))))
+  Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out, false).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), "0").flatMap(_ => watchUiSpawn(path, out, headless, name, gen)))))
 
 def watchUiSpawn(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
-  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Sys.spawn(Str.concat(watchUiEnv(out, headless, toml), Drive.shQuote(Drive.exeName(out, name)))).flatMap(pid => watchUiPoll(path, out, headless, name, gen, pid)))
+  Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Sys.getenv("SCUZZ_HOME").flatMap(home => Sys.spawn(watchUiCommand(home, out, headless, toml, name)).flatMap(pid => IO.ensure(watchUiPoll(path, out, headless, name, gen, pid), watchUiStop(pid)).flatMap(restart => if (restart) watchUiBoot(path, out, headless, name, 0) else IO.pure(())))))
+
+def watchUiCommand(home: String, out: String, headless: Bool, toml: String, name: String): String =
+  Str.concat(watchUiEnv(out, headless, toml), Str.concat("bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-desktop/run_watch.sh")), Str.concat(" ", Drive.shQuote(Drive.exeName(out, name))))))
+
+def watchUiStop(pid: Int): IO[Unit] =
+  Sys.childWrite(pid, """quit
+""").handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(pid).handleErrorWith(_ => IO.pure(())).flatMap(_ => IO.timeout(5000, watchUiStopped(pid)).handleErrorWith(_ => Sys.kill(pid))))
+
+def watchUiStopped(pid: Int): IO[Unit] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(()) else IO.sleep(20).flatMap(_ => watchUiStopped(pid)))
 
 def watchUiEnv(out: String, headless: Bool, toml: String): String =
-  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.stamp")), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.dylib")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "inject.json")), " ")))))))))
+  Str.concat(Drive.runEnvOf(out, headless, toml), Str.concat("SCUZZ_UI_RELOAD_STAMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.stamp")), Str.concat(" SCUZZ_UI_RELOAD_CODE=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "reload.dylib")), Str.concat(" SCUZZ_UI_DEBUG_DUMP=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "debug.json")), Str.concat(" SCUZZ_UI_INJECT=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "inject.json")), Str.concat(" SCUZZ_UI_RECORD=", Str.concat(Drive.shQuote(Drive.joinSlash(out, "record.json")), " ")))))))))))
 
-def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
-  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
+def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Bool] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(false) else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => watchUiControl(path, out, headless, name, gen, pid, Str.trim(command))))
 
-def watchUiTick(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String): IO[Unit] =
+def watchUiControl(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, command: String): IO[Bool] =
+  if (command == "q") IO.pure(false) else if (command == "r") watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen, pid) else watchUiLink(name, out).flatMap(linked => if (linked) IO.pure(true) else watchUiPoll(path, out, headless, name, gen, pid))) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
+
+def watchUiTick(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String): IO[Bool] =
   watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen, pid) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, headless, name, gen, pid, old, now)))
 
 def watchUiCompile(path: String, out: String): IO[Bool] =
   Drive.emitDir(path, out, false).map(_ => true).handleErrorWith(_ => IO.println("Build fails. Fix the source and retry.").map(_ => false))
 
-def watchUiTick2(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String): IO[Unit] =
+def watchUiTick2(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String): IO[Bool] =
   Sys.alive(pid).flatMap(live => watchUiTick3(path, out, headless, name, gen, pid, old, now, live))
 
-def watchUiTick3(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String, live: Int): IO[Unit] =
-  if (live == 0) watchUiBoot(path, out, headless, name, gen) else if (now != old) watchUiReload(path, out, headless, name, gen + 1, pid) else watchUiPoll(path, out, headless, name, gen, pid)
+def watchUiTick3(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String, live: Int): IO[Bool] =
+  if (live == 0) IO.pure(false) else if (now != old) watchUiReload(path, out, headless, name, gen + 1, pid) else watchUiPoll(path, out, headless, name, gen, pid)
 
-def watchUiReload(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
+def watchUiReload(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Bool] =
   watchUiLink(name, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen - 1, pid) else Fs.write(Drive.joinSlash(out, "reload.stamp"), Str.concat(Str.fromInt(gen), """
 """)).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, headless, name, gen, pid))))
 

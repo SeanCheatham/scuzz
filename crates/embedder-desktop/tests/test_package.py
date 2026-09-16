@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove a relocated macOS app bundle and Finder launch."""
+"""Prove host watch controls, a relocated macOS bundle, and Finder launch."""
 
 import json
 import os
@@ -16,6 +16,26 @@ import uuid
 
 cli = str(Path(sys.argv[1]).resolve())
 name = "macosproof" + uuid.uuid4().hex[:8]
+
+def descendants(pid):
+    children = subprocess.run(["pgrep", "-P", str(pid)], text=True,
+                              capture_output=True).stdout.split()
+    return children + [nested for child in children for nested in descendants(child)]
+
+def workers(pid):
+    return [child for child in descendants(pid) if Path(subprocess.run(
+        ["ps", "-o", "comm=", "-p", child], text=True,
+        capture_output=True).stdout.strip()).name == name]
+
+def wait_for(check, label, timeout=60):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check(): return
+        time.sleep(0.1)
+    raise AssertionError("timeout: " + label)
+
+def worker_gone(pid):
+    return subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode != 0
 
 with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
     root = Path(temp) / "author's project, with spaces"
@@ -44,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
         watch = subprocess.Popen([cli, "run", "--watch", "--headless", "--out-dir",
                                   "native output", str(source)], env=watch_env,
                                  stdout=output, stderr=subprocess.STDOUT,
-                                 start_new_session=True)
+                                 start_new_session=True, stdin=subprocess.PIPE, text=True)
         try:
             worker = None
             for expected in ("Counter", "count = 1", "Updated counter"):
@@ -57,15 +77,11 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
                 else:
                     raise AssertionError("watch does not show " + expected + "\n" +
                                          (root / "watch.log").read_text())
-                children = subprocess.run(["pgrep", "-P", str(watch.pid)], text=True,
-                                          capture_output=True).stdout.split()
-                workers = [child for child in children if Path(subprocess.run(
-                    ["ps", "-o", "comm=", "-p", child], text=True,
-                    capture_output=True).stdout.strip()).name == name]
-                assert len(workers) == 1, "one running UI worker is required"
+                active = workers(watch.pid)
+                assert len(active) == 1, "one running UI worker is required"
                 if worker is None:
-                    worker = workers[0]
-                assert workers[0] == worker, "a View reload replaces the worker"
+                    worker = active[0]
+                assert active[0] == worker, "a View reload replaces the worker"
                 if expected == "Counter":
                     inject = source / "native output" / "inject.json"
                     inject.write_text(json.dumps({"v": 1, "kind": "inject", "events": [
@@ -100,17 +116,53 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
                 time.sleep(0.1)
             assert "count = 1" in debug.read_text()
             assert subprocess.run(["ps", "-p", worker], capture_output=True).returncode == 0
+            watch.stdin.write("r\n")
+            watch.stdin.flush()
+            wait_for(lambda: "count = 0" in debug.read_text() and
+                     workers(watch.pid) and workers(watch.pid)[0] != worker, "manual restart")
+            wait_for(lambda: worker_gone(worker), "old worker stops", 10)
+            worker = workers(watch.pid)[0]
+            main.write_text(main.read_text().replace('"Recovered counter"', '"Restarted counter"'))
+            wait_for(lambda: "Restarted counter" in debug.read_text(), "reload after restart")
+            assert "count = 0" in debug.read_text() and workers(watch.pid)[0] == worker
+            watch.stdin.write("q\n")
+            watch.stdin.flush()
+            assert watch.wait(timeout=10) == 0, "quit fails"
+            wait_for(lambda: worker_gone(worker), "quit stops worker", 10)
         finally:
-            children = subprocess.run(["pgrep", "-P", str(watch.pid)], text=True,
-                                      capture_output=True).stdout.split()
-            for child in children:
-                try:
-                    if os.getpgid(int(child)) == int(child):
-                        os.killpg(int(child), signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-            os.killpg(watch.pid, signal.SIGTERM)
-            watch.wait(timeout=5)
+            if watch.poll() is None:
+                watch.send_signal(signal.SIGINT)
+                watch.wait(timeout=10)
+    # Native Desktop sessions also stop when the owner process ends.
+    manifest.write_text(manifest.read_text().replace('default_runtime = "headless"',
+                                                   'default_runtime = "desktop"'))
+    for mode in ("interrupt", "terminate", "window"):
+        debug.unlink(missing_ok=True)
+        with (root / (mode + ".log")).open("w") as output:
+            watch = subprocess.Popen([cli, "run", "--watch", "--out-dir", "native output", str(source)],
+                                     env=watch_env, stdin=subprocess.PIPE, stdout=output,
+                                     stderr=subprocess.STDOUT, text=True)
+            try:
+                wait_for(lambda: debug.exists() and '"runtime":"desktop"' in debug.read_text() and
+                         workers(watch.pid), "native " + mode)
+                worker = workers(watch.pid)[0]
+                if mode == "window":
+                    main.write_text("invalid source")
+                    wait_for(lambda: "Build fails. Fix the source and retry." in
+                             (root / (mode + ".log")).read_text(), "failed build before window close")
+                    (source / "native output" / "inject.json").write_text(json.dumps(
+                        {"v": 1, "kind": "inject", "events": [{"op": "quit"}]}))
+                else:
+                    watch.send_signal(signal.SIGINT if mode == "interrupt" else signal.SIGTERM)
+                code = watch.wait(timeout=10)
+                expected = {"window": (0,), "interrupt": (-signal.SIGINT, 130),
+                            "terminate": (-signal.SIGTERM,)}
+                assert code in expected[mode], "unexpected session exit: " + str(code)
+                wait_for(lambda: worker_gone(worker), "native owner cleanup", 10)
+            finally:
+                if watch.poll() is None:
+                    watch.send_signal(signal.SIGINT)
+                    watch.wait(timeout=10)
     io_name = "ioproof" + uuid.uuid4().hex[:8]
     subprocess.run([cli, "new", io_name, "--path", str(root)], check=True)
     io_source = root / io_name
