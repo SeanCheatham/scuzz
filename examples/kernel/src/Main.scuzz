@@ -932,6 +932,40 @@ def alternativeGuard(n: Int): Bool =
     case _ => false
   }
 
+def tupleLitInt(p: (Int, String)): String =
+  p match {
+    case (1, s) => Str.concat("one:", s)
+    case (n, s) => Str.concat(Str.fromInt(n), s)
+  }
+
+def tupleLitStr(p: (String, Int)): Int =
+  p match {
+    case ("a", _) => 1
+    case _ => 2
+  }
+
+def tupleLitBool(p: (Bool, Int)): Int =
+  p match {
+    case (true, n) => n
+    case (false, n) => 0 - n
+  }
+
+def tupleLitTri(p: (Int, String, Bool)): Int =
+  p match {
+    case (0, _, _) => 1
+    case (_, "a", _) => 2
+    case (_, _, true) => 3
+    case _ => 4
+  }
+
+def tupleLitNest(p: ((Int, Int), String)): Int =
+  p match {
+    case ((1, 2), _) => 1
+    case ((1, _), _) => 2
+    case ((_, 2), _) => 3
+    case _ => 4
+  }
+
 def constructorAlternatives(p: LiteralPacket): Bool =
   p match {
     case LiteralPacket.Fields("ready", 2, true, 7) | LiteralPacket.Text("done") | LiteralPacket.Number(19) => true
