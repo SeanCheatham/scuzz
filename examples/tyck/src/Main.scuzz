@@ -341,7 +341,7 @@ def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit()) && unaryNumTypes()
 
 def tyckRes(): Bool =
-  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes()
+  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes() && nestedPatTypes()
 
 def rejects(src: String, msg: String): Bool =
   Str.contains(Check.check(src), msg)
@@ -1019,6 +1019,66 @@ def value(r: Result[Problem, Int]): Int = r match {
 
 def unaryNumTypes(): Bool =
   Check.check("def right(): Float = -1.5") == "[]" && Check.check("def right(n: Float): Float = -n") == "[]" && Check.check("def right(): Int = -1") == "[]" && rejects("def wrong(): Bool = -true", "expected Int or Float, got Bool")
+
+def nestedPatTypes(): Bool =
+  rejects("""enum Inner:
+  case Good(v: Int)
+enum Outer:
+  case Wrap(a: Inner, b: Int)
+def wrong(o: Outer): Int = o match {
+  case Outer.Wrap(Inner.Good(n), b) => n
+  case _ => 0
+}""", "nested patterns are not supported here") && rejects("""enum Box2:
+  case P(p: (Int, Int))
+def wrong(b: Box2): Int = b match {
+  case Box2.P((n, m)) => n + m
+  case _ => 0
+}""", "nested patterns are not supported here") && rejects("""def wrong(p: (Result[String, Int], Int)): Int = p match {
+  case (Result.Ok(n), m) => n + m
+  case _ => 0
+}""", "nested patterns are not supported here") && rejects("""def wrong(p: (List[Int], Int)): Int = p match {
+  case (x :: _, n) => x + n
+  case _ => 0
+}""", "nested patterns are not supported here") && rejects("""enum Opt:
+  case Some(value: Int)
+  case None
+def wrong(o: Opt): Int = o match {
+  case Opt.Some(n @ 0) => n
+  case _ => 0
+}""", "nested patterns are not supported here") && rejects("""enum Opt:
+  case Some(value: Int)
+  case None
+enum W:
+  case V(o: Opt, n: Int)
+def wrong(w: W): Int = w match {
+  case W.V(Opt.None, _) => 100
+  case _ => 0
+}""", "nested patterns are not supported here") && Check.check("""enum W:
+  case V(n: Int, m: Int)
+def right(w: W): Int = w match {
+  case W.V(1, _) => 1
+  case _ => 0
+}""") == "[]" && Check.check("""enum BoxL:
+  case L(xs: List[Int])
+def right(b: BoxL): Int = b match {
+  case BoxL.L(x :: _) => x
+  case BoxL.L(_) => 0
+}""") == "[]" && Check.check("""enum Opt:
+  case Some(value: Int)
+  case None
+def right(o: Opt): Int = o match {
+  case Opt.Some(0) => 100
+  case Opt.Some(n) => n
+  case Opt.None => 0 - 1
+}""") == "[]" && Check.check("""def right(p: ((Int, Int), Int)): Int = p match {
+  case ((1, _), n) => n
+  case ((a, b), n) => a + b + n
+}""") == "[]" && rejects("""enum BoxL:
+  case L(xs: List[Int])
+def wrong(b: BoxL): Int = b match {
+  case BoxL.L([]) => 1
+  case _ => 0
+}""", "nested patterns are not supported here")
 
 def queueRefineTypes(): Bool =
   Check.check("""@main def main: IO[Unit] =
