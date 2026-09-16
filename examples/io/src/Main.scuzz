@@ -37,8 +37,13 @@ def maybeServe(): IO[Unit] =
 def envProbe(): IO[Unit] =
   Sys.getenv("HOME").flatMap(h => IO.println(s"env:home:$h").flatMap(_ => Sys.getenv("SCUZZ_KIT").flatMap(k => IO.println(s"env:kit:$k"))))
 
+def nestedComposition(flag: Bool): IO[Unit] =
+  IO.pure("retained").flatMap(value => (if (flag) IO.pure(()).flatMap(_ => IO.pure(())) else IO.pure(())).flatMap(_ => IO.ensure(IO.pure(value).flatMap(actual => IO.pure(actual.require(actual == "retained"))), IO.pure(()).flatMap(_ => IO.pure(()))).flatMap(actual => IO.both(IO.pure(actual).flatMap(left => IO.pure(left.require(left == "retained"))), IO.pure(7).flatMap(right => IO.pure(right.require(right == 7)))).flatMap(pair => IO.pure(pair.require(pair._1 == "retained" && pair._2 == 7))).map(_ => ()))))
+
 @main def main: IO[Unit] =
   for {
+    _ <- nestedComposition(true)
+    _ <- nestedComposition(false)
     _ <- liveClock()
     _ <- liveRe()
     _ <- liveHash()

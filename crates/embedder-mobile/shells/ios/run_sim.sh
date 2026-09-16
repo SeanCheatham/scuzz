@@ -5,6 +5,7 @@ set -euo pipefail
 DEVICE="$1"
 OUT="$2"
 PACKAGE="$OUT/package/ios"
+MODE="${3:-run}"
 CONSOLE=""
 BUNDLE=""
 
@@ -17,15 +18,7 @@ stop_app() {
     wait "$CONSOLE" 2>/dev/null || true
     CONSOLE=""
   fi
-  if [ -n "$BUNDLE" ]; then
-    local data trace
-    data="$(xcrun simctl get_app_container "$DEVICE" "$BUNDLE" data 2>/dev/null || true)"
-    for trace in debug.json record.json; do
-      if [ -f "$data/Documents/$trace" ]; then
-        cp "$data/Documents/$trace" "$OUT/$trace" || true
-      fi
-    done
-  fi
+
 }
 
 trap stop_app EXIT
@@ -46,6 +39,13 @@ launch() {
   echo "Launch $BUNDLE."
   (
     result=0
+    export SIMCTL_CHILD_SCUZZ_UI_DEBUG_DUMP="$OUT/debug.json"
+    export SIMCTL_CHILD_SCUZZ_UI_RECORD="$OUT/record.json"
+    export SIMCTL_CHILD_SCUZZ_UI_INJECT="$OUT/inject.json"
+    if [ "$MODE" = "watch" ]; then
+      export SIMCTL_CHILD_SCUZZ_UI_RELOAD_STAMP="$OUT/reload.stamp"
+      export SIMCTL_CHILD_SCUZZ_UI_RELOAD_CODE="$OUT/reload.dylib"
+    fi
     xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" || result=$?
     echo "App output session ends (status $result). Enter r to restart or q to stop."
   ) &

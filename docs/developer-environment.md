@@ -116,12 +116,13 @@ session and app. The simulator stays available. App source edits reuse native
 objects. The Headless verification path stays required. App instructions and
 target limits: run `scuzz docs ios`.
 
-The session copies `debug.json` and `record.json` from the app to the build
-directory when the app stops. Replay recorded input with Headless.
+Source edits reload the View and preserve Signals. Manifest changes restart the app.
+The session writes live `debug.json` and `record.json` to the build directory.
+Write live input to `inject.json` in that directory. Replay recorded input with Headless.
 
 Run `./scripts/ci.sh ios` for the simulator proof. The Darwin PR job runs this slice.
 The loop proof checks dependency edits, source diagnostics, error recovery,
-native object reuse, manual restart, quit, and interruption.
+state preservation, capture rejection, native object reuse, manual restart, quit, and interruption.
 The UIKit proof checks safe areas, viewport changes, software keyboard input,
 and keyboard dismissal. It restores the keyboard preference after the run.
 Both proofs use the selected simulator. Each proof removes its app.

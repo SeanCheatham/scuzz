@@ -334,7 +334,7 @@ def emitExprGo(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: Lis
     case Expr.EVar(s, _) => emitVar(s, prefix, ens, ps, strs, defs, loc)
     case Expr.EStr(s, _) => emitStrAs(s, prefix, strs, "s")
     case Expr.EPrint(inner, _) => emitPrint(inner, prefix, strs, defs, ens, ps, loc)
-    case Expr.ECall(f, args, _) => emitCall(f, args, prefix, strs, defs, ens, ps, loc)
+    case Expr.ECall(f, args, _) => emitCall(f, args, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EBin(op, l, r, _) => emitBin(op, l, r, prefix, strs, defs, ens, ps, loc)
     case Expr.EUn(op, inner, _) => emitUn(op, inner, prefix, strs, defs, ens, ps, loc)
     case Expr.ENamed(_, inner) => emitExprFid(inner, prefix, strs, defs, ens, ps, loc, fid)
@@ -622,7 +622,7 @@ def emitPrint2(s: Slot, prefix: String): Slot =
   Slot(join(s.code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_println(ptr ", Str.concat(s.val, ")")))), if (s.owned) line(Str.concat("call void @sz_release(ptr ", Str.concat(s.val, ")"))) else "")), pct(prefix, "io"), true)
 
 def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (op == "::") emitCall("List.cons", l :: r :: noExpr(), prefix, strs, defs, ens, ps, loc) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps, loc) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps, loc) else emitBinFl(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), op, prefix, ps, isFloatExpr(l, ps, defs) || isFloatExpr(r, ps, defs), exprIsPtr(l, defs, ens, ps, loc) || exprIsPtr(r, defs, ens, ps, loc))
+  if (op == "::") emitCall("List.cons", l :: r :: noExpr(), prefix, strs, defs, ens, ps, loc, 0) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps, loc) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps, loc) else emitBinFl(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), op, prefix, ps, isFloatExpr(l, ps, defs) || isFloatExpr(r, ps, defs), exprIsPtr(l, defs, ens, ps, loc) || exprIsPtr(r, defs, ens, ps, loc))
 
 def isFloatExpr(e: Expr, ps: List[Param], defs: Ftab): Bool =
   e match {
@@ -994,12 +994,12 @@ def emitBox(prefix: String, i: Int, ev: String): String =
 def emitCons(prefix: String, i: Int, hd: String, tl: String): String =
   line(Str.concat(tmp(prefix, Str.fromInt(i + 1)), Str.concat("call ptr @sz_list_cons(ptr ", Str.concat(hd, Str.concat(", ptr ", Str.concat(tl, ")"))))))
 
-def emitArgList(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool]): (String, List[String], List[Bool]) =
-  if (List.isEmpty(args)) (code, List.reverse(vals), List.reverse(owns)) else emitArgList2(emitExpr(List.at(args, 0), Str.concat(prefix, Str.concat("_arg", Str.fromInt(i))), strs, defs, ens, ps, loc), List.tail(args), prefix, strs, defs, ens, ps, loc, i, code, vals, owns)
+def emitArgList(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool], fid: Int): (String, List[String], List[Bool]) =
+  if (List.isEmpty(args)) (code, List.reverse(vals), List.reverse(owns)) else emitArgList2(emitExprFid(List.at(args, 0), Str.concat(prefix, Str.concat("_arg", Str.fromInt(i))), strs, defs, ens, ps, loc, fid), List.tail(args), prefix, strs, defs, ens, ps, loc, i, code, vals, owns, fid + fmCountSkipLam1(List.at(args, 0)))
 
-def emitArgList2(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool]): (String, List[String], List[Bool]) =
+def emitArgList2(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, code: String, vals: List[String], owns: List[Bool], fid: Int): (String, List[String], List[Bool]) =
   s match {
-    case Slot(sc, sv, so) => emitArgList(rest, prefix, strs, defs, ens, ps, loc, i + 1, join(code, sc), sv :: vals, so :: owns)
+    case Slot(sc, sv, so) => emitArgList(rest, prefix, strs, defs, ens, ps, loc, i + 1, join(code, sc), sv :: vals, so :: owns, fid)
   }
 
 def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
@@ -2224,8 +2224,8 @@ def floatToIntBits(v: String, prefix: String): String =
 def emitFloatFromInt(code: String, vals: List[String], prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "ff"), Str.concat("sitofp i64 ", Str.concat(arg0(vals), " to double")))), line(Str.concat(tmp(prefix, "v"), Str.concat("bitcast double ", Str.concat(pct(prefix, "ff"), " to i64")))))), pct(prefix, "v"), false)
 
-def emitCall(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (f == "Verdict.onHit") emitOnHit(args, prefix, strs, defs, ens, ps, loc) else if (!List.isEmpty(args) && isApplyName(f, ps, defs)) emitApply(f, args, prefix, strs, defs, ens, ps, loc) else emitCallKit(f, args, prefix, strs, defs, ens, ps, loc)
+def emitCall(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  if (f == "Verdict.onHit") emitOnHit(args, prefix, strs, defs, ens, ps, loc) else if (!List.isEmpty(args) && isApplyName(f, ps, defs)) emitApply(f, args, prefix, strs, defs, ens, ps, loc) else emitCallKit(f, args, prefix, strs, defs, ens, ps, loc, fid)
 
 def isApplyName(f: String, ps: List[Param], defs: Ftab): Bool =
   isApplyTy(paramTy(ps, f), f, defs)
@@ -2233,11 +2233,11 @@ def isApplyName(f: String, ps: List[Param], defs: Ftab): Bool =
 def isApplyTy(ty: String, f: String, defs: Ftab): Bool =
   if (isFunTy(ty)) true else if (ty == "" || isI64Ty(ty)) false else List.isEmpty(findDef(defs, f))
 
-def emitCallKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (Str.startsWith(f, "Signal.")) emitGenericSignal(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "Net.serveOnce" || f == "Net.serve" || f == "Net.serveOnceTls" || f == "Net.serveTls") emitNetServe(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Ui.run") emitUiRunCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "Verdict.onHit") emitOnHit(args, prefix, strs, defs, ens, ps, loc) else if (tapViewRt(f) != "") emitTapViewCall(tapViewRt(f), args, prefix, strs, defs, ens, ps, loc) else if (f == "View.each") emitViewEachCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "View.inkWell") emitInkWellCall(args, prefix, strs, defs, ens, ps, loc) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps, loc) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps, loc) else emitCallKit2(f, args, prefix, strs, defs, ens, ps, loc)
+def emitCallKit(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  if (Str.startsWith(f, "Signal.")) emitGenericSignal(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "Net.serveOnce" || f == "Net.serve" || f == "Net.serveOnceTls" || f == "Net.serveTls") emitNetServe(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Ui.run") emitUiRunCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "Verdict.onHit") emitOnHit(args, prefix, strs, defs, ens, ps, loc) else if (tapViewRt(f) != "") emitTapViewCall(tapViewRt(f), args, prefix, strs, defs, ens, ps, loc) else if (f == "View.each") emitViewEachCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "View.inkWell") emitInkWellCall(args, prefix, strs, defs, ens, ps, loc) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps, loc) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps, loc) else emitCallKit2(f, args, prefix, strs, defs, ens, ps, loc, fid)
 
-def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (f == "Property.force") emitPropForce(List.at(args, 0), prefix, strs, defs, ens, ps, loc) else if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps, loc) else emitCall2(f, emitArgList(alignArgs(f, args, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), prefix, defs, alignArgs(f, args, defs, modOfLoc(loc)), ens, ps, modOfLoc(loc))
+def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  if (f == "Property.force") emitPropForce(List.at(args, 0), prefix, strs, defs, ens, ps, loc) else if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps, loc) else emitCall2(f, emitArgList(alignArgs(f, args, defs, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid), prefix, defs, alignArgs(f, args, defs, modOfLoc(loc)), ens, ps, modOfLoc(loc))
 
 def alignArgs(f: String, args: List[Expr], defs: Ftab, mod: String): List[Expr] =
   alignFill(funParamsOf(defs, f, mod), args)
@@ -3451,7 +3451,7 @@ def methEnOfH(d: Fun, rest: List[Fun], meth: String): String =
   }
 
 def emitMethodVal(recv: Expr, name: String, args: List[Expr], prefix: String, en: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitMethodVal2(emitExpr(recv, Str.concat(prefix, "_mr"), strs, defs, ens, ps, loc), emitArgList(args, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), name, prefix, en, defs)
+  emitMethodVal2(emitExpr(recv, Str.concat(prefix, "_mr"), strs, defs, ens, ps, loc), emitArgList(args, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), 0), name, prefix, en, defs)
 
 def emitMethodVal2(r: Slot, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: Ftab): Slot =
   r match {
@@ -3588,7 +3588,7 @@ def copyArgBox(prefix: String, k: Int, ev: String): String =
   line(Str.concat(tmp(prefix, Str.concat("ub", Str.fromInt(k))), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(ev, ")"))))
 
 def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps, loc) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc) else emitQual(en, name, args, prefix, strs, defs, ens, ps, loc)
+  if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps, loc, 0) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc) else emitQual(en, name, args, prefix, strs, defs, ens, ps, loc)
 
 def isEmitKit(f: String): Bool =
   isUiKit(f) || f == "List.setAt" || f == "List.join" || kitUnaryPtr(f) != "" || kitUnaryI64(f) != "" || kitPtrI64(f) != "" || kitBinaryPtr(f) != "" || kitBinaryI64(f) != "" || isJsonExtra(f) || isRtExtra(f) || isMapKit(f) || f == "Map.empty" || f == "Set.empty" || f == "List.empty" || f == "Str.replace" || f == "Str.padLeft" || f == "Str.padRight" || f == "Map.set" || f == "Set.add" || f == "Map.getOrElse" || f == "Clock.iso8601" || f == "Clock.monotonic" || f == "Clock.realTime" || f == "Fs.mkdirs" || f == "Fs.canonicalize" || f == "Fs.exists" || f == "Fs.walk" || f == "Fs.delete" || f == "List.len" || f == "List.concat" || f == "List.reverse" || f == "List.head" || f == "List.tail" || f == "List.isEmpty" || f == "List.cons" || f == "List.at" || f == "Str.fromInt" || f == "Str.fromBool" || f == "Str.concat" || f == "Str.len" || f == "Str.byteLen" || f == "Str.byteSlice" || f == "Fs.read" || f == "Fs.write" || f == "Fs.list" || f == "IO.pure" || f == "Sys.getenv" || f == "Impurity.runKit" || f == "Net.serveOnce" || f == "Net.serve" || f == "Net.serveOnceTls" || f == "Net.serveTls" || isNetEmit(f) || f == "Queue.unbounded" || f == "Deferred.empty" || f == "Float.toInt" || f == "Float.fromInt" || f == "Map.isEmpty" || f == "Set.isEmpty" || f == "Map.nonEmpty" || f == "Set.nonEmpty" || f == "List.range" || f == "List.fill" || f == "List.getOrElse" || f == "List.padTo" || f == "List.max" || f == "List.min" || f == "List.sort" || f == "List.toSet" || f == "List.slice" || f == "List.isDefinedAt" || f == "List.lengthCompare" || f == "List.tabulate" || f == "List.segmentLength" || isTlKit(f) || f == "Net.retryAfterMillis" || f == "Oracle.sumTo" || f == "Fs.rename" || f == "Random.nextInt" || f == "Uuid.v4"
@@ -3600,7 +3600,7 @@ def isUiKit(f: String): Bool =
   Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Icon.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "Ui.")
 
 def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitQual2(en, name, emitArgList(alignFill(funParamsOfHit(findDefMod(defs, en, name)), args), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), prefix, defs)
+  emitQual2(en, name, emitArgList(alignFill(funParamsOfHit(findDefMod(defs, en, name)), args), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), 0), prefix, defs)
 
 def emitQual2(en: String, name: String, p: (String, List[String], List[Bool]), prefix: String, defs: Ftab): Slot =
   p match {
@@ -3617,7 +3617,7 @@ def emitPayloadCtor(en: String, name: String, args: List[Expr], prefix: String, 
   if (List.isEmpty(args)) emitCtor(en, name, prefix, ens) else emitPayloadCtorRest(en, name, List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, loc)
 
 def emitPayloadCtorRest(en: String, name: String, h: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (List.isEmpty(rest)) emitPayloadCtor1(emitExpr(h, Str.concat(prefix, "_ap"), strs, defs, ens, ps, loc), en, name, prefix, ens, exprRetTyEns(h, defs, ens, ps, loc)) else emitPayloadCtorN(en, name, emitArgList(h :: rest, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool()), h :: rest, prefix, ens, ps, defs, modOfLoc(loc))
+  if (List.isEmpty(rest)) emitPayloadCtor1(emitExpr(h, Str.concat(prefix, "_ap"), strs, defs, ens, ps, loc), en, name, prefix, ens, exprRetTyEns(h, defs, ens, ps, loc)) else emitPayloadCtorN(en, name, emitArgList(h :: rest, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), 0), h :: rest, prefix, ens, ps, defs, modOfLoc(loc))
 
 def emitPayloadCtorN(en: String, name: String, p: (String, List[String], List[Bool]), args: List[Expr], prefix: String, ens: List[En], ps: List[Param], defs: Ftab, mod: String): Slot =
   p match {

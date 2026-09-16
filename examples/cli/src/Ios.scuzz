@@ -82,11 +82,17 @@ def build(dir: String, out: String): IO[Bool] =
 def buildManifest(dir: String, out: String, m: Man): IO[Bool] =
   if (m.ok && !m.hasUi) IO.println("iOS run needs a [ui] package. Create one with scuzz new NAME --ui.").flatMap(_ => IO.pure(false)) else Drive.pkgIosMan(dir, out, m).map(_ => true)
 
-def consoleCommand(home: String, sim: Sim, out: String): String =
-  Str.concat("bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-mobile/shells/ios/run_sim.sh")), Str.concat(" ", Str.concat(Drive.shQuote(sim.id), Str.concat(" ", Str.concat(Drive.shQuote(out), " 1>&2"))))))
+def consoleCommand(home: String, sim: Sim, out: String, watch: Bool): String =
+  Str.concat("bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-mobile/shells/ios/run_sim.sh")), Str.concat(" ", Str.concat(Drive.shQuote(sim.id), Str.concat(" ", Str.concat(Drive.shQuote(out), Str.concat(if (watch) " watch" else " run", " 1>&2")))))))
 
 def start(dir: String, out: String, sim: Sim, watch: Bool, before: String): IO[Unit] =
-  Sys.getenv("SCUZZ_HOME").flatMap(home => Sys.spawn(consoleCommand(home, sim, out)).flatMap(pid => IO.ensure(IO.println("App output follows. Enter r to rebuild and restart. Enter q to stop. Ctrl+C stops the app.").flatMap(_ => loop(dir, out, watch, before, pid)), stop(pid))))
+  prepareReload(dir, out, watch).flatMap(_ => Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => startConsole(dir, out, sim, watch, before, toml)))
+
+def prepareReload(dir: String, out: String, watch: Bool): IO[Unit] =
+  if (watch) reloadCode(dir, out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), "0")) else IO.pure(())
+
+def startConsole(dir: String, out: String, sim: Sim, watch: Bool, before: String, toml: String): IO[Unit] =
+  Sys.getenv("SCUZZ_HOME").flatMap(home => Sys.spawn(consoleCommand(home, sim, out, watch)).flatMap(pid => IO.ensure(IO.println(if (watch) "App output follows. Source edits reload Views and preserve state. Enter r to rebuild and restart. Enter q to stop. Ctrl+C stops the app." else "App output follows. Enter r to rebuild and restart. Enter q to stop. Ctrl+C stops the app.").flatMap(_ => loop(dir, out, watch, before, toml, pid)), stop(pid))))
 
 def stop(pid: Int): IO[Unit] =
   Sys.childWrite(pid, """quit
@@ -98,13 +104,19 @@ def stopped(pid: Int): IO[Unit] =
 def stamp(dir: String): IO[String] =
   Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => Fs.list(Drive.joinSlash(dir, "src")).flatMap(ents => Drive.readSrcFiles(Drive.joinSlash(dir, "src"), ents).flatMap(own => Drive.collectDeps(dir, Manifest.parse(toml).deps, own).map(files => Hash.sha256(Str.concat(toml, Drive.fpFiles(files))))))).handleErrorWith(_ => IO.pure("unreadable sources"))
 
-def loop(dir: String, out: String, watch: Bool, before: String, pid: Int): IO[Unit] =
-  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.fail("iOS app session ends") else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => tick(dir, out, watch, before, pid, Str.trim(command))))
+def loop(dir: String, out: String, watch: Bool, before: String, toml: String, pid: Int): IO[Unit] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.fail("iOS app session ends") else IO.timeout(10, Sys.readLine()).handleErrorWith(_ => IO.pure("")).flatMap(command => tick(dir, out, watch, before, toml, pid, Str.trim(command))))
 
-def tick(dir: String, out: String, watch: Bool, before: String, pid: Int, command: String): IO[Unit] =
-  if (command == "q") IO.pure(()) else stamp(dir).flatMap(now => if (command == "r" || watch && now != before) rebuild(dir, out, watch, now, pid) else IO.sleep(300).flatMap(_ => loop(dir, out, watch, before, pid)))
+def tick(dir: String, out: String, watch: Bool, before: String, toml: String, pid: Int, command: String): IO[Unit] =
+  if (command == "q") IO.pure(()) else stamp(dir).flatMap(now => if (command == "r") rebuild(dir, out, watch, now, pid) else if (watch && now != before) Fs.read(Drive.joinSlash(dir, "scuzz.toml")).handleErrorWith(_ => IO.pure("")).flatMap(next => if (next != toml) rebuild(dir, out, watch, now, pid) else reload(dir, out, now).flatMap(_ => loop(dir, out, watch, now, toml, pid))) else IO.sleep(300).flatMap(_ => loop(dir, out, watch, before, toml, pid)))
 
 def rebuild(dir: String, out: String, watch: Bool, now: String, pid: Int): IO[Unit] =
-  build(dir, out).flatMap(ok => if (ok) Sys.childWrite(pid, """restart
-""") else IO.println("The running app stays. Save a change or enter r to retry.")).flatMap(_ => loop(dir, out, watch, now, pid))
+  build(dir, out).flatMap(ok => if (ok) Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => Sys.childWrite(pid, """restart
+""").flatMap(_ => loop(dir, out, watch, now, toml, pid))) else IO.println("The running app stays. Save a change or enter r to retry.").flatMap(_ => Fs.read(Drive.joinSlash(dir, "scuzz.toml")).handleErrorWith(_ => IO.pure("")).flatMap(toml => loop(dir, out, watch, now, toml, pid))))
+
+def reloadCode(dir: String, out: String): IO[Unit] =
+  Drive.emitDir(dir, out, false).flatMap(_ => Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => Drive.linkReload(Drive.llName(out, Manifest.parse(toml).name), out, true)))
+
+def reload(dir: String, out: String, now: String): IO[Unit] =
+  reloadCode(dir, out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), now).flatMap(_ => IO.println("Reload the simulator View. Enter r if a capture change needs a restart."))).handleErrorWith(error => IO.println(error).flatMap(_ => IO.println("The running app stays. Save a change or enter r to retry.")))
 

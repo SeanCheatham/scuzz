@@ -604,7 +604,7 @@ def watchUi(path: String, out: String, headless: Bool, name: String): IO[Unit] =
 """).flatMap(_ => watchUiBoot(path, out, headless, name, 0))))
 
 def watchUiBoot(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
-  Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out).flatMap(_ => watchUiSpawn(path, out, headless, name, gen))))
+  Drive.emitDir(path, out, false).flatMap(_ => Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out, false).flatMap(_ => watchUiSpawn(path, out, headless, name, gen))))
 
 def watchUiSpawn(path: String, out: String, headless: Bool, name: String, gen: Int): IO[Unit] =
   Fs.read(Drive.joinSlash(path, "scuzz.toml")).flatMap(toml => Sys.spawn(Str.concat(watchUiEnv(out, headless, toml), Drive.shQuote(Drive.exeName(out, name)))).flatMap(pid => watchUiPoll(path, out, headless, name, gen, pid)))
@@ -632,7 +632,7 @@ def watchUiReload(path: String, out: String, headless: Bool, name: String, gen: 
 """)).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, headless, name, gen, pid))))
 
 def watchUiLink(name: String, out: String): IO[Bool] =
-  Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out)).map(_ => true).handleErrorWith(_ => IO.println("Reload fails. Fix the source and retry.").map(_ => false))
+  Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out, false)).map(_ => true).handleErrorWith(_ => IO.println("Reload fails. Fix the source and retry.").map(_ => false))
 
 def dispatchRun(path: String, outDir: String, headless: Bool, script: String, dump: String, extra: String): IO[Unit] =
   dispatchRunOut(path, pkgOut(path, outDir), headless, script, dump, extra)
