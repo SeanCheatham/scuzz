@@ -40,3 +40,12 @@ def irIdemGenSeed(): Bool =
 def irGenerated(n: Int where n >= 0): Bool =
   Main.irIdemGen(n)
 
+def reloadCaptureOrder(): Bool =
+  Main.reloadCaptureOrder()
+
+def reloadCaptureType(): Bool =
+  Main.reloadCaptureType()
+
+def reloadRecordLayout(): Bool =
+  Main.reloadRecordLayout()
+

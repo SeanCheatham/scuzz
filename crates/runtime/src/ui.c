@@ -124,6 +124,11 @@ typedef struct BridgeItem {
   struct BridgeItem *next;
 } BridgeItem;
 
+typedef struct ReloadCode {
+  void *handle;
+  struct ReloadCode *next;
+} ReloadCode;
+
 struct SzUiSession {
   SzUiConfig cfg;
   SzView *root;
@@ -174,8 +179,8 @@ struct SzUiSession {
   char *last_secondary_desc;
   char *clipboard;
   char *title_owned;
-  void *code_handle;
-  void *code_stale;
+  char *capture_schema;
+  ReloadCode *code;
   int code_gen;
   unsigned pumps;
   unsigned paints;
@@ -383,9 +388,11 @@ static int stamp_changed(SzUiSession *session) {
 }
 
 void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn,
-                               void *env) {
+                               void *env, const char *schema) {
   if (!session)
     return;
+  sz_free(session->capture_schema);
+  session->capture_schema = schema ? sz_strdup(schema) : NULL;
   session->rebuild = fn;
   sz_release(session->rebuild_env);
   sz_retain(env);
@@ -748,10 +755,6 @@ int sz_ui_session_reload(SzUiSession *session) {
     ok = 1;
   } else
     ok = sz_ui_session_replace_root(session, root);
-  if (ok && session->code_stale) {
-    dlclose(session->code_stale);
-    session->code_stale = NULL;
-  }
   return ok;
 }
 
@@ -805,8 +808,17 @@ int sz_ui_session_load_code(SzUiSession *session, const char *path) {
     return 0;
   }
   unlink(staged);
-  session->code_stale = session->code_handle;
-  session->code_handle = h;
+  const char *schema = (const char *)dlsym(h, "sz_ui_reload_capture");
+  if (!schema || !session->capture_schema || strcmp(schema, session->capture_schema)) {
+    fprintf(stderr, "scuzz: reload changes captured bindings or type layouts. Restart the app.\n");
+    dlclose(h);
+    return 0;
+  }
+  /* IO callbacks can retain code from an earlier View. Keep it until unmount. */
+  ReloadCode *code = (ReloadCode *)sz_alloc(sizeof *code);
+  code->handle = h;
+  code->next = session->code;
+  session->code = code;
   session->rebuild = fn;
   return 1;
 }
@@ -921,10 +933,13 @@ void sz_ui_unmount(SzUiSession *session) {
     sz_view_free(session->root);
   sz_release(session->rebuild_env);
   session->rebuild_env = NULL;
-  if (session->code_stale)
-    dlclose(session->code_stale);
-  if (session->code_handle)
-    dlclose(session->code_handle);
+  while (session->code) {
+    ReloadCode *code = session->code;
+    session->code = code->next;
+    dlclose(code->handle);
+    sz_free(code);
+  }
+  sz_free(session->capture_schema);
   sz_free(session->watch_path);
   sz_free(session->watch_fp);
   sz_free(session->debug_dump_path);
@@ -1498,11 +1513,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
   pthread_mutex_unlock(&session->bridge_lock);
   if (stamp_changed(session)) {
     const char *code = getenv("SCUZZ_UI_RELOAD_CODE");
-    if (code && code[0])
-      sz_ui_session_load_code(session, code);
-    if (!sz_ui_session_reload(session))
-      return 0;
-    need_dump = 1;
+    if ((!code || !code[0] || sz_ui_session_load_code(session, code)) &&
+        sz_ui_session_reload(session))
+      need_dump = 1;
   }
   if (!session->inject_playing) {
     char *delta = NULL;

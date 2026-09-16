@@ -923,7 +923,7 @@ def reloadFactoryNext(rest: List[String], found: String, name: String): String =
   if (name == "") reloadFactory(rest, found) else if (found == "") reloadFactory(rest, name) else "many"
 
 def linkReloadIr(ir: String, outDir: String, factory: String): IO[Unit] =
-  if (factory == "" || factory == "many") IO.println("Host UI watch needs one direct Ui.run factory.").flatMap(_ => IO.fail("UI reload factory")) else Fs.write(joinSlash(outDir, "reload.ll"), Str.concat(ir, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_rebuild = alias ptr (ptr), ptr @", Str.concat(factory, Verify.nl()))))).flatMap(_ => linkReloadNative(joinSlash(outDir, "reload.ll"), outDir))
+  if (factory == "" || factory == "many") IO.println("Host UI watch needs one direct Ui.run factory.").flatMap(_ => IO.fail("UI reload factory")) else Fs.write(joinSlash(outDir, "reload.ll"), Str.concat(ir, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_rebuild = alias ptr (ptr), ptr @", Str.concat(factory, Str.concat(Verify.nl(), Str.concat("@sz_ui_reload_capture = alias [65 x i8], ptr @", Str.concat(factory, Str.concat("_capture", Verify.nl()))))))))).flatMap(_ => linkReloadNative(joinSlash(outDir, "reload.ll"), outDir))
 
 def linkReloadNative(ll: String, outDir: String): IO[Unit] =
   hostMac().flatMap(mac => runLine(Str.concat("clang -O0 -Wno-override-module -shared -fPIC ", Str.concat(if (mac) "-Wl,-undefined,dynamic_lookup " else "", Str.concat(shQuote(ll), Str.concat(" -o ", shQuote(joinSlash(outDir, "reload.dylib"))))))).flatMap(r => linkOnlyGot(r)))

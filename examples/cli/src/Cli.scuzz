@@ -616,7 +616,10 @@ def watchUiPoll(path: String, out: String, headless: Bool, name: String, gen: In
   Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, headless, name, gen, pid, old)))
 
 def watchUiTick(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String): IO[Unit] =
-  Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, headless, name, gen, pid, old, now)))
+  watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen, pid) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, headless, name, gen, pid, old, now)))
+
+def watchUiCompile(path: String, out: String): IO[Bool] =
+  Drive.emitDir(path, out, false).map(_ => true).handleErrorWith(_ => IO.println("Build fails. Fix the source and retry.").map(_ => false))
 
 def watchUiTick2(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int, old: String, now: String): IO[Unit] =
   Sys.alive(pid).flatMap(live => watchUiTick3(path, out, headless, name, gen, pid, old, now, live))
@@ -625,8 +628,11 @@ def watchUiTick3(path: String, out: String, headless: Bool, name: String, gen: I
   if (live == 0) watchUiBoot(path, out, headless, name, gen) else if (now != old) watchUiReload(path, out, headless, name, gen + 1, pid) else watchUiPoll(path, out, headless, name, gen, pid)
 
 def watchUiReload(path: String, out: String, headless: Bool, name: String, gen: Int, pid: Int): IO[Unit] =
-  Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), Str.concat(Str.fromInt(gen), """
-""")).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, headless, name, gen, pid)))))
+  watchUiLink(name, out).flatMap(ok => if (!ok) watchUiPoll(path, out, headless, name, gen - 1, pid) else Fs.write(Drive.joinSlash(out, "reload.stamp"), Str.concat(Str.fromInt(gen), """
+""")).flatMap(_ => IO.println(Str.concat("scuzz: view reload stamp ", Str.fromInt(gen))).flatMap(_ => watchUiPoll(path, out, headless, name, gen, pid))))
+
+def watchUiLink(name: String, out: String): IO[Bool] =
+  Drive.linkOnly(true, name, out).flatMap(_ => Drive.linkReload(Drive.llName(out, name), out)).map(_ => true).handleErrorWith(_ => IO.println("Reload fails. Fix the source and retry.").map(_ => false))
 
 def dispatchRun(path: String, outDir: String, headless: Bool, script: String, dump: String, extra: String): IO[Unit] =
   dispatchRunOut(path, pkgOut(path, outDir), headless, script, dump, extra)

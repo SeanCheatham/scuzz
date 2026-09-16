@@ -447,7 +447,7 @@ static void test_watch_rebuild_keeps_signals(void) {
   session = sz_ui_mount(&cfg, root);
   assert(session);
   sz_ui_session_take_root(session);
-  sz_ui_session_set_rebuild(session, watch_rebuild, env);
+  sz_ui_session_set_rebuild(session, watch_rebuild, env, NULL);
   assert(sz_ui_session_watch(session, stamp));
   assert(sz_ui_pump_sync(session));
   same = sz_ui_session_root(session);
@@ -497,7 +497,7 @@ static SzView *run_rebuild_factory(void *env) {
 
 static void test_ui_run_rebuild(void) {
   SzSignalInt *count = sz_signal_int(7);
-  SzIoResult r = sz_io_unsafe_run(sz_ui_run_rebuild(run_rebuild_factory, count));
+  SzIoResult r = sz_io_unsafe_run(sz_ui_run_rebuild(run_rebuild_factory, count, NULL));
   assert(r.ok);
   assert(sz_signal_int_get(count) == 7);
   sz_signal_int_free(count);
@@ -507,7 +507,7 @@ static void test_ui_run_rebuild(void) {
     sz_alloc_stats(&base_bytes, &base_count);
     count = sz_signal_int(1);
     {
-      SzIo *io = sz_ui_run_rebuild(run_rebuild_factory, count);
+      SzIo *io = sz_ui_run_rebuild(run_rebuild_factory, count, NULL);
       sz_release(io);
     }
     sz_signal_int_free(count);
@@ -550,7 +550,7 @@ static void test_ui_async_handlers(void) {
   setenv("SCUZZ_UI_TAP", "1", 1);
   setenv("SCUZZ_UI_RELOAD_STAMP", "/tmp/scuzz-no-async-reload.stamp", 1);
   setenv("SCUZZ_LIVE_FRAMES", "3", 1);
-  SzIo *ui = sz_ui_run_rebuild(async_ui_factory, env);
+  SzIo *ui = sz_ui_run_rebuild(async_ui_factory, env, NULL);
   SzIo *progress = sz_io_delay(async_ui_progress, env);
   SzIo *both = sz_io_both(ui, progress);
   sz_release(ui); sz_release(progress);
@@ -605,7 +605,7 @@ static void test_ui_run_rebuild_keepalive(void) {
   setenv("SCUZZ_UI_DEBUG_DUMP", dump, 1);
   setenv("SCUZZ_LIVE_FRAMES", "8", 1);
   assert(pthread_create(&th, NULL, stamp_bump, (void *)stamp) == 0);
-  r = sz_io_unsafe_run(sz_ui_run_rebuild(keep_factory, env));
+  r = sz_io_unsafe_run(sz_ui_run_rebuild(keep_factory, env, NULL));
   pthread_join(th, NULL);
   unsetenv("SCUZZ_UI_RELOAD_STAMP");
   unsetenv("SCUZZ_UI_DEBUG_DUMP");
@@ -1767,7 +1767,7 @@ static void test_session_inject_control(void) {
   session = sz_ui_mount(&cfg, root);
   assert(session);
   sz_ui_session_take_root(session);
-  sz_ui_session_set_rebuild(session, watch_rebuild, env);
+  sz_ui_session_set_rebuild(session, watch_rebuild, env, NULL);
   assert(sz_ui_session_set_debug_dump(session, dump));
   assert(sz_ui_session_set_inject(session, inject));
   assert(sz_ui_session_alive(session));
@@ -14805,12 +14805,12 @@ static void run_child(void (*fn)(void), int *aborted, char *err, size_t cap) {
 
 static void runtime_env_bad(void) {
   setenv("SCUZZ_UI_RUNTIME", "deskop", 1);
-  (void)sz_io_unsafe_run(sz_ui_run_rebuild(runtime_env_factory, NULL));
+  (void)sz_io_unsafe_run(sz_ui_run_rebuild(runtime_env_factory, NULL, NULL));
 }
 
 static void runtime_env_upper_desktop(void) {
   setenv("SCUZZ_UI_RUNTIME", "DESKTOP", 1);
-  (void)sz_io_unsafe_run(sz_ui_run_rebuild(runtime_env_factory, NULL));
+  (void)sz_io_unsafe_run(sz_ui_run_rebuild(runtime_env_factory, NULL, NULL));
 }
 
 static void test_runtime_env_parse(void) {
@@ -16589,10 +16589,14 @@ static void test_each_env_retain_release(void) {
 #ifdef __APPLE__
 #define RELOAD_A "build/reload_a.dylib"
 #define RELOAD_B "build/reload_b.dylib"
+#define RELOAD_BAD "build/reload_bad.dylib"
 #else
 #define RELOAD_A "build/reload_a.so"
 #define RELOAD_B "build/reload_b.so"
+#define RELOAD_BAD "build/reload_bad.so"
 #endif
+
+SzIo *scuzz_reload_later;
 
 static void test_session_load_code(void) {
   SzUiConfig cfg;
@@ -16613,7 +16617,7 @@ static void test_session_load_code(void) {
   session = sz_ui_mount(&cfg, root);
   assert(session);
   sz_ui_session_take_root(session);
-  sz_ui_session_set_rebuild(session, NULL, count);
+  sz_ui_session_set_rebuild(session, NULL, count, "counter:int");
   assert(sz_ui_session_load_code(session, RELOAD_A));
   {
     char staged[128];
@@ -16629,6 +16633,12 @@ static void test_session_load_code(void) {
   sz_string_free(a11y);
   assert(sz_signal_int_get(count) == 7);
 
+  assert(!sz_ui_session_load_code(session, RELOAD_BAD));
+  assert(sz_ui_session_reload(session));
+  a11y = sz_view_a11y_dump(sz_ui_session_root(session));
+  assert(strstr(sz_string_cstr(a11y), "text:A") != NULL);
+  sz_string_free(a11y);
+
   sz_signal_int_set(count, 8);
   dump1 = sz_signal_dump_json_string();
   assert(sz_ui_session_load_code(session, RELOAD_B));
@@ -16642,6 +16652,12 @@ static void test_session_load_code(void) {
   assert(sz_signal_int_get(count) == 8);
   sz_string_free(dump1);
   sz_string_free(dump2);
+
+  SzIoResult later = sz_io_unsafe_run(scuzz_reload_later);
+  scuzz_reload_later = NULL;
+  assert(later.ok);
+  sz_release(later.value);
+  assert(sz_signal_int_get(count) == 9);
 
   sz_ui_unmount(session);
   sz_signal_int_free(count);
@@ -16669,7 +16685,7 @@ static void test_stamp_loads_reload_code(void) {
   session = sz_ui_mount(&cfg, root);
   assert(session);
   sz_ui_session_take_root(session);
-  sz_ui_session_set_rebuild(session, init_code_factory, count);
+  sz_ui_session_set_rebuild(session, init_code_factory, count, "counter:int");
   write_stamp(stamp, "0");
   assert(sz_ui_session_watch(session, stamp));
   setenv("SCUZZ_UI_RELOAD_CODE", code, 1);
@@ -16709,6 +16725,8 @@ static void test_stamp_loads_reload_code(void) {
   sz_string_free(dump1);
   sz_string_free(dump2);
 
+  sz_release(scuzz_reload_later);
+  scuzz_reload_later = NULL;
   sz_ui_unmount(session);
   sz_signal_int_free(count);
   unsetenv("SCUZZ_UI_RELOAD_CODE");

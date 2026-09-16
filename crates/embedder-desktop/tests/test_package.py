@@ -75,6 +75,31 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
                     main.write_text(main.read_text().replace('"Counter"', '"Updated counter"'))
                 else:
                     assert "count = 1" in debug.read_text(), "reload resets the Signal"
+            main = source / "src" / "Main.scuzz"
+            stable = main.read_text()
+            def await_log(message):
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    assert watch.poll() is None, (root / "watch.log").read_text()
+                    if message in (root / "watch.log").read_text():
+                        return
+                    time.sleep(0.1)
+                raise AssertionError("watch does not report " + message)
+            main.write_text("invalid source")
+            await_log("Build fails. Fix the source and retry.")
+            assert "count = 1" in debug.read_text()
+            main.write_text(stable.replace("count = Signal.make(0)",
+                                           "extra = 42\n    count = Signal.make(0)").replace(
+                                               '"Updated counter"', '"Unsafe counter"'))
+            await_log("Restart the app.")
+            assert "Updated counter" in debug.read_text() and "Unsafe counter" not in debug.read_text()
+            main.write_text(stable.replace('"Updated counter"', '"Recovered counter"'))
+            deadline = time.monotonic() + 60
+            while "Recovered counter" not in debug.read_text():
+                assert watch.poll() is None and time.monotonic() < deadline, (root / "watch.log").read_text()
+                time.sleep(0.1)
+            assert "count = 1" in debug.read_text()
+            assert subprocess.run(["ps", "-p", worker], capture_output=True).returncode == 0
         finally:
             children = subprocess.run(["pgrep", "-P", str(watch.pid)], text=True,
                                       capture_output=True).stdout.split()

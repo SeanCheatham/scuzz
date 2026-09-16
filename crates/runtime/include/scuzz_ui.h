@@ -664,7 +664,8 @@ int sz_ui_session_replace_root(SzUiSession *session, SzView *root);
 /* Rebuild factory for stamp-watch / reload. Must return a new tree. Signals
  * stay with the caller. env is not owned. */
 typedef SzView *(*SzUiRebuildFn)(void *env);
-void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env);
+void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env,
+                               const char *schema);
 /* Watch a stamp file. Next pump that sees different contents calls rebuild
  * then replace_root. Missing file snapshots as empty. Headless, Desktop, and
  * Mobile share this path. */
@@ -871,7 +872,7 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * that file changes. `quit` stops the live pump loop. Desktop quit is window
  * close. `resetpeak` resets
  * peak bytes and the heap delta mark. */
-SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
+SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env, const char *schema);
 
 /* Code blocks and heading semantics use the shared View tree. */
 SzView *sz_view_code(const char *text);

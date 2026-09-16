@@ -1,3 +1,7 @@
+import Parse.Param
+import Parse.En
+import Parse.EnCase
+
 def srcHi(): String =
   "@main def main: IO[Unit] =\n  IO.println(\"Hi\")\n"
 
@@ -620,6 +624,15 @@ def wantLam(): String =
 
 def allOk(): Bool =
   okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam())
+
+def reloadCaptureOrder(): Bool =
+  Emit.captureSchema([Param("a", "Int", "", ""), Param("b", "String", "", "")], []) != Emit.captureSchema([Param("b", "String", "", ""), Param("a", "Int", "", "")], [])
+
+def reloadCaptureType(): Bool =
+  Emit.captureSchema([Param("a", "Int", "", "")], []) != Emit.captureSchema([Param("a", "String", "", "")], [])
+
+def reloadRecordLayout(): Bool =
+  Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "Int", "", "")])])]) != Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "String", "", "")])])])
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "ir-ok" else "ir-bad")

@@ -351,6 +351,7 @@ static void web_live_frame(void) {
 
 typedef struct {
   SzUiRebuildFn rebuild;
+  const char *schema;
 } RebuildFnCell;
 
 typedef struct {
@@ -395,7 +396,7 @@ static void *thunk_run_rebuild(void *env) {
     sz_panic("Ui.run mount failed");
   run->session = session;
   sz_ui_session_take_root(session);
-  sz_ui_session_set_rebuild(session, rebuild, capture);
+  sz_ui_session_set_rebuild(session, rebuild, capture, cell->schema);
   stamp = getenv("SCUZZ_UI_RELOAD_STAMP");
   if (stamp && stamp[0])
     sz_ui_session_watch(session, stamp);
@@ -532,9 +533,10 @@ static SzIo *mounted_run(void *value, void *env) {
 #endif
 }
 
-SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env) {
+SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env, const char *schema) {
   RebuildFnCell *cell = (RebuildFnCell *)sz_rc_alloc(sizeof(RebuildFnCell), SZ_RC_BOX);
   cell->rebuild = fn;
+  cell->schema = schema;
   SzPair *pack = sz_pair_new(env, cell);
   sz_release(cell);
   SzIo *mount = sz_io_delay(new_run, pack);
