@@ -278,7 +278,7 @@ async function check(browserType, url, mobile) {
     await expectText('text:You typed: café 🐈日本');
     if (browserType === chromium) {
       await page.evaluate(() => navigator.clipboard.writeText('paste 😀'));
-      await field.focus(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+v');
+      await field.focus(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.press('ControlOrMeta+v');
       await expectText('text:You typed: paste 😀');
     }
     const editor = page.getByRole('textbox', {name: 'editor', exact: true});
