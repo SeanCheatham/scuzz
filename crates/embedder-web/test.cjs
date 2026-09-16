@@ -125,6 +125,11 @@ async function check(browserType, url, mobile) {
     }
     await page.goBack(); await expectText('text:Verify');
     await page.goForward(); await expectText('text:Web');
+    for (const [label, id] of [['iOS', 'ios'], ['IDE', 'ide']]) {
+      await page.getByRole('link', {name: label, exact: true}).click();
+      await expectSection(id);
+      await expectText('text:' + label);
+    }
     await page.getByRole('link', {name: 'Signals', exact: true}).click();
     await expectSection('signals');
     await expectText('text:Count: 1');

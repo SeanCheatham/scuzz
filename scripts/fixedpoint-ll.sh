@@ -20,6 +20,9 @@ STAGE4="${SCUZZ_FP_STAGE4:-/tmp/scuzz-fp-stage4}"
 rm -rf "$STAGE2" "$STAGE3" "$STAGE4"
 mkdir -p "$STAGE2" "$STAGE3" "$STAGE4"
 
+# Build the runtime on hosts that restore only the product CLI.
+make -C crates/runtime lib
+
 # Use the optimized compiler link that bootstrap.sh ships.
 link_cli() {
   local stage="$1"

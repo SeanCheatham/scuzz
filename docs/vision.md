@@ -22,6 +22,8 @@ The API report fetches authenticated JSON records and writes an open-record repo
 
 The network UI fetches JSON through the shared Net API. It shows loading, failure, and success. Input continues during a request. Retry preserves the tap count. Native UI loops yield to IO fibers. Session exit cancels IO tap handlers. iOS and macOS GUI requests use URLSession with platform certificate trust. CLI and server requests keep the OpenSSL transport. Simulation uses the shared hermetic dispatch. Host and iOS simulator reload check captures before they use retained state. Source edits in the simulator preserve Signals. Manifest changes and the r command restart the app. Failed builds and incompatible reloads preserve the app. Code remains available to active IO handlers until the session ends. Host and simulator watch sessions accept r to rebuild and restart. They accept q to stop. A host app stops when its CLI session ends. Physical iPhone proof remains open.
 
+The Docs app exposes all manual topics in its index. It includes the iOS local loop. Section links use stable topic IDs. Headless claims check pages and navigation. Corpus taps keep the full control label.
+
 Ranked list: [`gaps.md`](gaps.md).
 
 ## Risks
