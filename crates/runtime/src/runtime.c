@@ -283,6 +283,7 @@ typedef struct CoverageHit {
 static CoverageHit *coverage_hits[256];
 static char *coverage_path;
 static int coverage_probed;
+static int coverage_off;
 
 static void coverage_clear(void) {
   size_t i;
@@ -307,8 +308,10 @@ static void coverage_probe(void) {
     return;
   coverage_probed = 1;
   path = getenv("SCUZZ_COVERAGE_DUMP");
-  if (!path || !*path)
+  if (!path || !*path) {
+    coverage_off = 1;
     return;
+  }
   coverage_path = malloc(strlen(path) + 1);
   if (!coverage_path)
     sz_panic("coverage: out of memory");
@@ -319,6 +322,7 @@ static void coverage_probe(void) {
 void sz_coverage_env_refresh(void) {
   coverage_clear();
   coverage_probed = 0;
+  coverage_off = 0;
 }
 
 static void coverage_hit(const char *loc) {
@@ -353,13 +357,16 @@ static void coverage_hit(const char *loc) {
 }
 
 void sz_coverage_hit(const char *loc) {
+  if (coverage_off)
+    return;
   coverage_hit(loc);
 }
 
 void sz_panic_push_src(const char *loc) {
   if (!loc || !loc[0])
     return;
-  coverage_hit(loc);
+  if (!coverage_off)
+    coverage_hit(loc);
   if (g_panic_src_n < SZ_PANIC_SRC_MAX)
     g_panic_src[g_panic_src_n++] = loc;
 }
