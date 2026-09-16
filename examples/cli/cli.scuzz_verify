@@ -116,3 +116,10 @@ def iosDefault(): Bool =
 def iosRunArgs(): Bool =
   Cli.show(Cli.parse(Main.a4("run", "--target=ios", "--device=phone-new", "--watch"))) == "run path=. out=build headless=false watch=true script= dump= target=ios device=phone-new" && Cli.show(Cli.parse(Main.a4("run", "--device=phone-new", "app", "--target=ios"))) == "run path=app out=build headless=false watch=false script= dump= target=ios device=phone-new" && Str.startsWith(Cli.show(Cli.parse(Main.a2("run", "--device=phone-new"))), "fail:") && Str.startsWith(Cli.show(Cli.parse(Main.a3("run", "--target=ios", "--headless"))), "fail:") && Str.startsWith(Cli.show(Cli.parse(Main.a3("run", "--target=ios", "--script=events.json"))), "fail:") && Str.startsWith(Cli.show(Cli.parse(Main.a2("run", "--target=android"))), "fail:") && Cli.show(Cli.parse(Main.a1("devices"))) == "devices" && Cli.render(Cli.parse(Main.a2("devices", "--help"))) == Help.helpDevices()
 
+def campTapIds(): Bool =
+  Verify.scriptJson("""tap button:Add one
+tap link:Open the iOS topic
+tap 7
+tap
+""") == "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"id\":\"button:Add one\"},{\"op\":\"tap\",\"id\":\"link:Open the iOS topic\"},{\"op\":\"tap\",\"i\":7},{\"op\":\"tap\",\"i\":0}]}"
+

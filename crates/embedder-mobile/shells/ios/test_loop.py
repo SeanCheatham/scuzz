@@ -80,15 +80,17 @@ try:
         manifest.write_text(manifest.read_text().replace("name = ", "name=").replace("bundle_id = ", "bundle_id=") + '\n[dependencies]\ntext = { path = "../text" }\n')
         source = app / "src" / "Main.scuzz"
         original = source.read_text().replace('    _ <- Ui.run', '    _ <- IO.println(Text.value())\n    _ <- Ui.run').replace('View.text("Counter")', 'View.text(Text.value())')
-        original = ('def slow(count: Signal[Int], status: Signal[String]): IO[Unit] =\n'
-                    '  for {\n    _ = Signal.set(status, "Loading")\n    _ <- IO.sleep(2500)\n'
+        original = ('def awaitRelease(release: Signal[Bool]): IO[Unit] =\n'
+                    '  if (Signal.get(release)) IO.pure(()) else IO.sleep(20).flatMap(_ => awaitRelease(release))\n\n'
+                    'def slow(count: Signal[Int], status: Signal[String], release: Signal[Bool]): IO[Unit] =\n'
+                    '  for {\n    _ = Signal.set(release, false)\n    _ = Signal.set(status, "Loading")\n    _ <- awaitRelease(release)\n'
                     '    _ = Signal.set(count, Signal.get(count) + 1)\n'
                     '    _ = Signal.set(status, "Done")\n  } yield ()\n\n' + original)
-        original = original.replace('    label =', '    status = Signal.make("Ready")\n    label =').replace(
-            'View.text(Text.value())', 'View.text(Text.value()), View.bindText(status), View.button("Wait", _ => slow(count, status))')
+        original = original.replace('    label =', '    status = Signal.make("Ready")\n    release = Signal.make(false)\n    label =').replace(
+            'View.text(Text.value())', 'View.text(Text.value()), View.bindText(status), View.button("Wait", _ => slow(count, status, release)), View.button("Release", _ => Signal.set(release, true))')
         source.write_text(original)
         proc, lines, thread = start(app)
-        wait_for(lambda: "ios-loop-v1" in lines and launches(lines), "initial launch")
+        wait_for(lambda: "ios-loop-v1" in lines and launches(lines), "initial launch", 600)
         device = next(re.search(r"\(([0-9A-F-]{36})\)", line)[1]
                       for line in lines if line.startswith("iOS simulator:"))
         objects = app / "output path" / "ios-sim" / "obj"
@@ -113,6 +115,7 @@ try:
         value.write_text('def value(): String =\n  "ios-loop-inflight"\n')
         wait_for(lambda: shows("ios-loop-inflight"), "reload during IO")
         assert shows("Loading"), "reload waits for the handler"
+        (app / "output path" / "inject.json").write_text(json.dumps({"v": 1, "kind": "inject", "events": [{"op": "tap", "id": "button:Release"}]}))
         wait_for(lambda: shows("count = 2") and shows("Done"), "old code finishes IO")
         assert app_pid() == working, "reload replaces the active handler process"
         source.write_text(original.replace('  n + 1', '  "bad type"'))
