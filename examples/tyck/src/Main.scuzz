@@ -341,7 +341,7 @@ def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit()) && unaryNumTypes()
 
 def tyckRes(): Bool =
-  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes() && nestedPatTypes()
+  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes() && nestedPatTypes() && lambdaApplyTypes()
 
 def rejects(src: String, msg: String): Bool =
   Str.contains(Check.check(src), msg)
@@ -1019,6 +1019,19 @@ def value(r: Result[Problem, Int]): Int = r match {
 
 def unaryNumTypes(): Bool =
   Check.check("def right(): Float = -1.5") == "[]" && Check.check("def right(n: Float): Float = -n") == "[]" && Check.check("def right(): Int = -1") == "[]" && rejects("def wrong(): Bool = -true", "expected Int or Float, got Bool")
+
+def lambdaApplyTypes(): Bool =
+  rejects("@main def main: IO[Unit] =\n  for {\n    f = (n => n + 1)\n    _ <- IO.println(Str.fromInt(f(\"s\")))\n  } yield ()\n", "lambda parameter type is unresolved") && Check.check("""@main def main: IO[Unit] =
+  for {
+    f = ((n: Int) => n + 1)
+    _ <- IO.println(Str.fromInt(f(1)))
+  } yield ()
+""") == "[]" && rejects("@main def main: IO[Unit] =\n  for {\n    f = ((n: Int) => n + 1)\n    _ <- IO.println(Str.fromInt(f(\"s\")))\n  } yield ()\n", "apply arg type mismatch: expected Int, got String") && rejects("""@main def main: IO[Unit] =
+  for {
+    f = (n => n)
+    _ <- IO.println(Str.fromInt(f(1)))
+  } yield ()
+""", "lambda parameter type is unresolved") && Check.check("@main def main: IO[Unit] =\n  for {\n    f = ((n: String) => n)\n    _ <- IO.println(f(\"s\"))\n  } yield ()\n") == "[]" && Check.check("def right(): Int = (n => n + 1)(1)") == "[]" && rejects("def wrong(): Int = (n => n + 1)(\"s\")", "arithmetic needs Int or Float")
 
 def nestedPatTypes(): Bool =
   rejects("""enum Inner:
