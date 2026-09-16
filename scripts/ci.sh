@@ -194,6 +194,10 @@ PY
   grep -q "truncated or corrupt gzip" "$work/retry.out"
   grep -q "installed under ${dest}" "$work/retry.out"
   test -f "$dest/libsk_capi.a"
+  SCUZZ_SKIA_FETCH_ATTEMPTS=5 SCUZZ_SKIA_FETCH_RETRY_DELAY=0 \
+    ./scripts/fetch_skia.sh --download "$url" "$work/include.tar.gz"
+  tar -tzf "$work/include.tar.gz" >/dev/null
+  test -f "$work/include.tar.gz"
   if SCUZZ_SKIA_URL="http://127.0.0.1:${port}/missing.tar.gz" \
       SCUZZ_SKIA_TRIPLE="$triple" SCUZZ_SKIA_FORCE=1 \
       SCUZZ_SKIA_FETCH_ATTEMPTS=5 SCUZZ_SKIA_FETCH_RETRY_DELAY=0 \

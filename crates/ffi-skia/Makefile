@@ -62,7 +62,7 @@ build/sk_gpu.o: src/sk_gpu.c src/sk_gpu.h | build
 build/skia-src/.stamp: | build
 	@mkdir -p build/skia-src/include
 	@echo "ffi-skia: fetch $(SKIA_BRANCH) include for shim relink"
-	@curl -fsSL "$(SKIA_HDR_URL)" -o build/skia-include.tar.gz
+	@"$(ROOT)/scripts/fetch_skia.sh" --download "$(SKIA_HDR_URL)" build/skia-include.tar.gz
 	@rm -rf build/skia-src/include
 	@mkdir -p build/skia-src/include
 	@tar -xzf build/skia-include.tar.gz -C build/skia-src/include

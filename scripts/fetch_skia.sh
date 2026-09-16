@@ -13,6 +13,7 @@
 #
 #   SCUZZ_SKIA_URL=https://…/skia-{triple}-cpu.tar.gz ./scripts/fetch_skia.sh
 #   SCUZZ_SKIA=sk_sw ./scripts/fetch_skia.sh   # no-op
+#   ./scripts/fetch_skia.sh --download URL DEST  # gzip tarball only (same retry)
 #   SCUZZ_SKIA_FETCH_ATTEMPTS=5               # HTTPS tries (default 5)
 #   SCUZZ_SKIA_FETCH_RETRY_DELAY=1            # first backoff seconds (default 1)
 #
@@ -26,33 +27,6 @@ PIN="${ROOT}/third_party/skia/PIN"
 URL="${SCUZZ_SKIA_URL:-}"
 ATTEMPTS="${SCUZZ_SKIA_FETCH_ATTEMPTS:-5}"
 DELAY="${SCUZZ_SKIA_FETCH_RETRY_DELAY:-1}"
-
-if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
-  echo "fetch_skia: SCUZZ_SKIA=sk_sw — skipping download (in-tree software backend)"
-  exit 0
-fi
-
-if [[ -z "${URL}" && -f "${PIN}" ]]; then
-  URL="$(awk -F= '/^url=/{print substr($0,5); exit}' "${PIN}" || true)"
-fi
-
-if [[ -z "${URL}" ]]; then
-  cat <<EOF >&2
-fetch_skia: no URL (SCUZZ_SKIA_URL unset and third_party/skia/PIN url= empty).
-Default UI backend is Skia. Either:
-  - set url= in third_party/skia/PIN / SCUZZ_SKIA_URL=<tarball>, or
-  - opt out: SCUZZ_SKIA=sk_sw
-EOF
-  exit 1
-fi
-
-# Host-specific asset from a shared release pin (e.g. skia-{triple}-cpu.tar.gz).
-URL="${URL//\{triple\}/${TRIPLE}}"
-
-if [[ -f "${DEST}/${TRIPLE}/libsk_capi.a" && -z "${SCUZZ_SKIA_FORCE:-}" ]]; then
-  echo "fetch_skia: already installed under ${DEST}/${TRIPLE}"
-  exit 0
-fi
 
 is_retryable_http() {
   case "$1" in
@@ -74,7 +48,7 @@ fetch_https() {
   local curl_args=(-sS -L --connect-timeout 30 --max-time 300
     -A scuzz-fetch-skia -o "$dest" -w '%{http_code}')
 
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  if [[ -n "${GITHUB_TOKEN:-}" && "${url}" == *github.com* ]]; then
     curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   fi
 
@@ -109,6 +83,47 @@ fetch_https() {
     attempt=$((attempt + 1))
   done
 }
+
+if [[ "${1:-}" == "--download" ]]; then
+  if [[ $# -ne 3 || -z "${2:-}" || -z "${3:-}" ]]; then
+    echo "fetch_skia: usage: $0 --download URL DEST" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$3")"
+  fetch_https "$3" "$2"
+  if ! tarball_ok "$3"; then
+    echo "fetch_skia: not a gzip tarball: $2" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
+  echo "fetch_skia: SCUZZ_SKIA=sk_sw — skipping download (in-tree software backend)"
+  exit 0
+fi
+
+if [[ -z "${URL}" && -f "${PIN}" ]]; then
+  URL="$(awk -F= '/^url=/{print substr($0,5); exit}' "${PIN}" || true)"
+fi
+
+if [[ -z "${URL}" ]]; then
+  cat <<EOF >&2
+fetch_skia: no URL (SCUZZ_SKIA_URL unset and third_party/skia/PIN url= empty).
+Default UI backend is Skia. Either:
+  - set url= in third_party/skia/PIN / SCUZZ_SKIA_URL=<tarball>, or
+  - opt out: SCUZZ_SKIA=sk_sw
+EOF
+  exit 1
+fi
+
+# Host-specific asset from a shared release pin (e.g. skia-{triple}-cpu.tar.gz).
+URL="${URL//\{triple\}/${TRIPLE}}"
+
+if [[ -f "${DEST}/${TRIPLE}/libsk_capi.a" && -z "${SCUZZ_SKIA_FORCE:-}" ]]; then
+  echo "fetch_skia: already installed under ${DEST}/${TRIPLE}"
+  exit 0
+fi
 
 mkdir -p "${DEST}/${TRIPLE}"
 # Clear the dest dir so a prior fetch cannot leave extra files.

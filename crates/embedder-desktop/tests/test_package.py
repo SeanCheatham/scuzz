@@ -51,9 +51,9 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
     text = manifest.read_text().replace('version = "0.1.0"', 'version = "1.2.3"')
     text = re.sub(r"headless_size\s*=\s*\[[^]]+\]", "headless_size = [480, 320]", text)
     manifest.write_text(text)
-    subprocess.run([cli, "package", "--target", "host", "--out-dir", "native output",
+    subprocess.run([cli, "package", "--target", "macos", "--out-dir", "native output",
                     str(source)], env=author_env, check=True)
-    subprocess.run([cli, "run", "--headless", "--out-dir", "native output",
+    subprocess.run([cli, "run", "--target", "headless", "--out-dir", "native output",
                     str(source)], env=author_env, check=True, timeout=30)
     assert (source / "native output" / "snapshot.png").is_file()
     # A source edit keeps the running worker and its Signal state.
@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
                  if key != "SCUZZ_LIVE_FRAMES"}
     debug = source / "native output" / "debug.json"
     with (root / "watch.log").open("w") as output:
-        watch = subprocess.Popen([cli, "run", "--watch", "--headless", "--out-dir",
+        watch = subprocess.Popen([cli, "run", "--watch", "--target", "headless", "--out-dir",
                                   "native output", str(source)], env=watch_env,
                                  stdout=output, stderr=subprocess.STDOUT,
                                  start_new_session=True, stdin=subprocess.PIPE, text=True)
@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
                             env=author_env, text=True, capture_output=True,
                             check=True, timeout=30)
     assert "Hello" in io_run.stdout, io_run.stdout
-    subprocess.run([cli, "package", "--target", "host", "--out-dir", "native output",
+    subprocess.run([cli, "package", "--target", "macos", "--out-dir", "native output",
                     str(io_source)], env=author_env, check=True, timeout=30)
     io_exe = io_source / "native output" / "package" / "host" / io_name
     subprocess.run([str(io_exe)], capture_output=True, check=True, timeout=30)

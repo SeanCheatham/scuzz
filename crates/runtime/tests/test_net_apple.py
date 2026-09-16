@@ -145,7 +145,7 @@ with tempfile.TemporaryDirectory(prefix="scuzz-apple-net-") as temp:
         project = temp / "network-ui"
         shutil.copytree(root / "examples/network-ui", project,
                         ignore=shutil.ignore_patterns("build", ".scuzz"))
-        subprocess.run([cli, "package", "--target", "host", str(project)], check=True)
+        subprocess.run([cli, "package", "--target", "macos", str(project)], check=True)
         bundle = project / "build/package/host/network-ui.app"
         moved = temp / "Relocated network app.app"
         shutil.move(bundle, moved)

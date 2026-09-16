@@ -62,7 +62,7 @@ Same slices as GitHub. List them, then run the required PR path:
 ./scripts/ci.sh pr
 ```
 
-`pr` runs macos-smoke, oracles, kernel, ui, and fuzz. The Darwin smoke includes the relocated UI app bundle and source reload proof. A local run wipes example `build/` dirs except `examples/cli/build`. That wipe stops a rebuilt CLI from a fingerprint hit on a stale `.ll`. GitHub sets `CI=true` and skips the wipe. Jobs that fetch the Skia CPU prebuilt restore `third_party/skia/prebuilt` from a cache keyed by OS, arch, and `third_party/skia/PIN`. `scripts/fetch_skia.sh` retries HTTP 502, 503, and 504, and a truncated gzip.
+`pr` runs macos-smoke, oracles, kernel, ui, and fuzz. The Darwin smoke includes the relocated UI app bundle and source reload proof. A local run wipes example `build/` dirs except `examples/cli/build`. That wipe stops a rebuilt CLI from a fingerprint hit on a stale `.ll`. GitHub sets `CI=true` and skips the wipe. Jobs that fetch the Skia CPU prebuilt restore `third_party/skia/prebuilt` from a cache keyed by OS, arch, and `third_party/skia/PIN`. `scripts/fetch_skia.sh` retries HTTP 502, 503, and 504, and a truncated gzip. The ffi-skia include fetch uses the same download retry.
 
 Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI builds the product CLI once. Eight check jobs use that artifact in separate checkouts. The `linux-headless` check requires all eight jobs and the build to pass. Each slice prints its elapsed time. A new PR update cancels its older CI run. Apt install and artifact upload stay in `.github/workflows/ci.yml`.
 

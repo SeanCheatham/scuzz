@@ -34,7 +34,7 @@ What we keep vs cut. Product locks and language direction: [`philosophy.md`](phi
 | Diagnostics | `scuzz check` is the linter (`--message-format=json`); `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `lint` subcommand; `*.g.scuzz` codegen |
 | Dogfood IDE | `scuzz ide` launches the bundled `[ui]` package. Live, Verify, and Session are unnumbered landmarks. The app consumes `check` / `lsp`. Headless is a peer | A compiler inside the IDE app; second typer; Desktop-only editor; a file-tree clone; numbered Docs chapter chrome; a `scuzz-ide` binary |
 | Self-hosting | Product CLI is Scuzz ([`philosophy.md`](philosophy.md#self-hosting)); `VERSION` names the product; `bootstrap.sh` fetches the newest GitHub `v*` release; `package_release.sh` compiles `examples/cli` with that tagged binary | Big-bang rewrite; dual shipped product CLIs; cargo as the product compiler |
-| Packaging | macOS UI `.app` through `scuzz package --target host`; Android debug APK through `scuzz package --target android` (installs when adb lists a device); iOS simulator `.app` through `scuzz package --target ios`; local iOS run and hot reload through `scuzz run --target ios --watch` | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
+| Packaging | macOS UI `.app` through `scuzz package --target macos`; Android debug APK through `scuzz package --target android` (installs when adb lists a device); iOS simulator `.app` through `scuzz package --target ios`; local iOS run and hot reload through `scuzz run --target ios --watch` | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
 
 ## Platforms (Headless first)
 

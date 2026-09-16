@@ -471,7 +471,7 @@ def pkgAndroidCmdOk(): Bool =
   pkgAndroidCmdGot(Drive.pkgAndroidCmd("/opt/scuzz", "examples/counter", "dev.scuzz.app")) && Str.contains(Drive.pkgAndroidCmd("/opt/scuzz", "my app", "dev.scuzz.app"), "'my app'") && Str.contains(Drive.pkgIosCmd("/opt/scuzz", "my app", "dev.scuzz.app", "my app/build", "app", "0.1.0"), "'my app'")
 
 def pkgParseOk(): Bool =
-  cliDiff(Cli.render(Cli.parse(a3("package", "--target", "foo"))), Drive.badTarget("foo")) && cliDiff(Cli.show(Cli.parse(a2("package", "--target=ios"))), "package path=. out=build target=ios") && cliDiff(Cli.show(Cli.parse(a1("package"))), "package path=. out=build target=")
+  cliDiff(Cli.render(Cli.parse(a3("package", "--target", "foo"))), Drive.badTarget("foo")) && cliDiff(Cli.render(Cli.parse(a3("package", "--target", "host"))), Drive.badTarget("host")) && cliDiff(Cli.show(Cli.parse(a2("package", "--target=macos"))), "package path=. out=build target=macos") && cliDiff(Cli.show(Cli.parse(a2("package", "--target=ios"))), "package path=. out=build target=ios") && cliDiff(Cli.show(Cli.parse(a1("package"))), "package path=. out=build target=")
 
 def pkgOk(): Bool =
   pkgEnvOk() && pkgIdOk() && pkgAndroidCmdOk() && pkgParseOk()
