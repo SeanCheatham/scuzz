@@ -888,11 +888,40 @@ def bindFor(d: Bool, name: String, ty: String, env: List[(String, Ty)], ens: Lis
 
 def refineEnv(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   e match {
-    case Expr.ECall(f, args, _) => refineOfferCall(f, args, env, funs, ens)
-    case Expr.EMethod(recv, name, args, _) => refineOfferMeth(recv, name, args, env, funs, ens)
+    case Expr.ECall(f, args, _) => refineExprs(args, refineOfferCall(f, args, env, funs, ens), funs, ens)
+    case Expr.EMethod(recv, name, args, _) => refineExprs(args, refineEnv(recv, refineOfferMeth(recv, name, args, env, funs, ens), funs, ens), funs, ens)
     case Expr.EAscribe(inner, _, _) => refineEnv(inner, env, funs, ens)
     case Expr.ENamed(_, inner) => refineEnv(inner, env, funs, ens)
+    case Expr.ELam(_, _, body) => refineEnv(body, env, funs, ens)
+    case Expr.EPrint(inner, _) => refineEnv(inner, env, funs, ens)
+    case Expr.EField(recv, _, _) => refineEnv(recv, env, funs, ens)
+    case Expr.EBin(_, l, r, _) => refineEnv(r, refineEnv(l, env, funs, ens), funs, ens)
+    case Expr.EUn(_, inner, _) => refineEnv(inner, env, funs, ens)
+    case Expr.EIf(c, t, el, _) => refineEnv(el, refineEnv(t, refineEnv(c, env, funs, ens), funs, ens), funs, ens)
+    case Expr.EMatch(s, arms, _) => refineArms(arms, refineEnv(s, env, funs, ens), funs, ens)
+    case Expr.EFor(bs, body, _) => refineEnv(body, refineBinds(bs, env, funs, ens), funs, ens)
+    case Expr.EList(xs) => refineExprs(xs, env, funs, ens)
+    case Expr.ETuple(xs) => refineExprs(xs, env, funs, ens)
     case _ => env
+  }
+
+def refineExprs(xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (List.isEmpty(xs)) env else refineExprs(List.tail(xs), refineEnv(List.at(xs, 0), env, funs, ens), funs, ens)
+
+def refineArms(xs: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (List.isEmpty(xs)) env else refineArms(List.tail(xs), refineArm(List.at(xs, 0), env, funs, ens), funs, ens)
+
+def refineArm(a: Arm, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  a match {
+    case Arm(_, _, body) => refineEnv(body, env, funs, ens)
+  }
+
+def refineBinds(xs: List[Bind], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (List.isEmpty(xs)) env else refineBinds(List.tail(xs), refineBind(List.at(xs, 0), env, funs, ens), funs, ens)
+
+def refineBind(b: Bind, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  b match {
+    case Bind(_, _, v) => refineEnv(v, env, funs, ens)
   }
 
 def refineOfferCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
