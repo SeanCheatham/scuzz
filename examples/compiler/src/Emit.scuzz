@@ -1649,7 +1649,13 @@ def emitRebuildNeth(prefix: String, bind: String, body: Expr, strs: List[String]
   emitRebuildNeth2(prefix, dropParam(ps, bind), body, strs, defs, ens, loc)
 
 def emitRebuildNeth2(prefix: String, rest: List[Param], body: Expr, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
-  nethWithConts(prefix, body, strs, defs, ens, rest, loc, emitNethWithSig(prefix, emitUnpack(rest), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, rest, loc), nethEnvSig(prefix, loc, strs)))
+  join(emitCaptureSchema(prefix, rest, ens), nethWithConts(prefix, body, strs, defs, ens, rest, loc, emitNethWithSig(prefix, emitUnpack(rest), emitExpr(body, Str.concat("n", prefix), strs, defs, ens, rest, loc), nethEnvSig(prefix, loc, strs))))
+
+def captureSchema(ps: List[Param], ens: List[En]): String =
+  Hash.sha256(Str.concat(List.join(List.map(ps, p => Str.concat(p.name, Str.concat(":", p.ty))), ";"), Str.concat("|", Parse.prettyEnums(ens))))
+
+def emitCaptureSchema(prefix: String, ps: List[Param], ens: List[En]): String =
+  Str.concat(nethBeg(), Str.concat("@sz_neth_", Str.concat(prefix, Str.concat("_capture = private constant [65 x i8] c\"", Str.concat(captureSchema(ps, ens), Str.concat("\\00\"", Str.concat(nl(), Str.concat("NETHE", nl()))))))))
 
 def emitTapNeth(prefix: String, bind: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   emitTapNeth2(prefix, bind, dropParam(ps, bind), body, strs, defs, ens, loc)
@@ -1860,7 +1866,7 @@ def themeRt(f: String): String =
   if (f == "Theme.accent") "sz_theme_accent" else if (f == "Theme.primary") "sz_theme_primary" else if (f == "Theme.muted") "sz_theme_muted" else if (f == "Theme.foreground") "sz_theme_foreground" else if (f == "Icon.book") "sz_icon_book" else if (f == "Icon.code") "sz_icon_code" else if (f == "Icon.link") "sz_icon_link" else if (f == "Icon.web") "sz_icon_web" else if (f == "Icon.gui") "sz_icon_gui" else "sz_icon_install"
 
 def emitUiRun(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  Slot(join(code, join(unpackFnPtr(arg0(vals), prefix), join(uiRunCall(prefix), if (headOwn(owns)) relPtr(arg0(vals)) else ""))), pct(prefix, "v"), true)
+  Slot(join(code, join(unpackFnPtr(arg0(vals), prefix), join(uiRunCall(prefix, "null"), if (headOwn(owns)) relPtr(arg0(vals)) else ""))), pct(prefix, "v"), true)
 
 def emitPropCheck(code: String, vals: List[String], owns: List[Bool], _prefix: String): Slot =
   Slot(join(code, join(line(Str.concat("call void @sz_property_check(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), arg2(vals), headOwn(tailOwn(tailOwn(owns))))
@@ -1886,8 +1892,8 @@ def emitViewAdds(parent: String, xs: List[String], prefix: String, i: Int): Stri
 def viewAddLine(parent: String, child: String, prefix: String, i: Int): String =
   line(Str.concat(tmp(prefix, Str.concat("ac", Str.fromInt(i))), Str.concat("call ptr @sz_lang_view_add_child(ptr ", Str.concat(parent, Str.concat(", ptr ", Str.concat(child, ")"))))))
 
-def uiRunCall(prefix: String): String =
-  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_ui_run_rebuild(ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), ")"))))))
+def uiRunCall(prefix: String, schema: String): String =
+  line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_ui_run_rebuild(ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), Str.concat(", ptr ", Str.concat(schema, ")"))))))))
 
 def viewTapPtr(rt: String, label: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(ptr ", Str.concat(label, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), ")"))))))))))
@@ -2392,7 +2398,13 @@ def bindsHasVar1(b: Bind, rest: List[Bind], s: String): Bool =
   }
 
 def emitUiRunCall(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitUiRunPack(emitUiRunLam(List.at(args, 0), Str.concat(prefix, "_fn"), strs, defs, ens, ps, loc), prefix)
+  emitUiRunPack(emitUiRunLam(List.at(args, 0), Str.concat(prefix, "_fn"), strs, defs, ens, ps, loc), prefix, uiCapturePtr(List.at(args, 0), Str.concat(prefix, "_fn")))
+
+def uiCapturePtr(e: Expr, prefix: String): String =
+  e match {
+    case Expr.ELam(_, _, _) => Str.concat("@sz_neth_", Str.concat(prefix, "_capture"))
+    case _ => "null"
+  }
 
 def emitUiRunLam(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   e match {
@@ -2400,9 +2412,9 @@ def emitUiRunLam(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: L
     case _ => emitExpr(e, prefix, strs, defs, ens, ps, loc)
   }
 
-def emitUiRunPack(pack: Slot, prefix: String): Slot =
+def emitUiRunPack(pack: Slot, prefix: String, schema: String): Slot =
   pack match {
-    case Slot(pc, pv, po) => Slot(join(pc, join(unpackFnPtr(pv, prefix), join(uiRunCall(prefix), if (po) relPtr(pv) else ""))), pct(prefix, "v"), true)
+    case Slot(pc, pv, po) => Slot(join(pc, join(unpackFnPtr(pv, prefix), join(uiRunCall(prefix, schema), if (po) relPtr(pv) else ""))), pct(prefix, "v"), true)
   }
 
 def emitTapViewCall(rt: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
@@ -6312,7 +6324,7 @@ def declsT(): String =
   join(declsT1(), join(declsT2(), join(declsT3(), join(declsT4(), join(declsT5(), declsT6())))))
 
 def declsT1(): String =
-  join(decl("i64 @sz_color_rgb(i64, i64, i64)"), join(decl("i64 @sz_color_rgba(i64, i64, i64, i64)"), join(decl("i64 @sz_theme_accent()"), join(decl("i64 @sz_theme_primary()"), join(decl("i64 @sz_theme_muted()"), join(decl("i64 @sz_theme_foreground()"), join(decl("i64 @sz_icon_book()"), join(decl("i64 @sz_icon_code()"), join(decl("i64 @sz_icon_link()"), join(decl("i64 @sz_icon_web()"), join(decl("i64 @sz_icon_gui()"), join(decl("i64 @sz_icon_install()"), join(decl("ptr @sz_ui_run_rebuild(ptr, ptr)"), join(decl("void @sz_property_check(ptr, i64)"), join(decl("ptr @sz_property_assert(ptr, i64)"), join(decl("void @sz_driver_register(ptr, i64, i64, ptr)"), join(decl("void @sz_scenario_register_setup(ptr)"), join(decl("ptr @sz_scenario_context()"), join(decl("ptr @sz_io_unsafe_run_or_die(ptr)"), decl("void @sz_io_submit_ui(ptr)"))))))))))))))))))))
+  join(decl("i64 @sz_color_rgb(i64, i64, i64)"), join(decl("i64 @sz_color_rgba(i64, i64, i64, i64)"), join(decl("i64 @sz_theme_accent()"), join(decl("i64 @sz_theme_primary()"), join(decl("i64 @sz_theme_muted()"), join(decl("i64 @sz_theme_foreground()"), join(decl("i64 @sz_icon_book()"), join(decl("i64 @sz_icon_code()"), join(decl("i64 @sz_icon_link()"), join(decl("i64 @sz_icon_web()"), join(decl("i64 @sz_icon_gui()"), join(decl("i64 @sz_icon_install()"), join(decl("ptr @sz_ui_run_rebuild(ptr, ptr, ptr)"), join(decl("void @sz_property_check(ptr, i64)"), join(decl("ptr @sz_property_assert(ptr, i64)"), join(decl("void @sz_driver_register(ptr, i64, i64, ptr)"), join(decl("void @sz_scenario_register_setup(ptr)"), join(decl("ptr @sz_scenario_context()"), join(decl("ptr @sz_io_unsafe_run_or_die(ptr)"), decl("void @sz_io_submit_ui(ptr)"))))))))))))))))))))
 
 def declsT2(): String =
   join(decl("ptr @sz_lang_view_max_size(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_text(ptr)"), join(decl("ptr @sz_lang_view_bind_text(ptr)"), join(decl("ptr @sz_lang_view_button(ptr, ptr, ptr)"), join(decl("ptr @sz_lang_view_center(ptr)"), join(decl("ptr @sz_lang_view_column()"), join(decl("ptr @sz_lang_view_row()"), join(decl("ptr @sz_lang_view_stack()"), join(decl("ptr @sz_lang_view_add_child(ptr, ptr)"), join(decl("ptr @sz_lang_view_background(i64, ptr)"), join(decl("ptr @sz_lang_view_min_size(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_sized(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_positioned(i64, i64, ptr)"), join(decl("ptr @sz_lang_view_image(i64, i64, i64, ptr)"), decl("ptr @sz_lang_view_icon(i64, i64)")))))))))))))))

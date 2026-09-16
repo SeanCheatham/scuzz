@@ -79,11 +79,14 @@ build/reload_a.$(RELOAD_EXT): tests/reload_a.c include/scuzz_ui.h | build
 build/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
 
+build/reload_bad.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | build
+	$(CC) $(CFLAGS) $(INCLUDES) -DRELOAD_SCHEMA='"counter:string"' -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
+
 build/test_io: tests/test_io.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
-build/test_ui: tests/test_ui.c build/libscuzz_rt.a build/reload_a.$(RELOAD_EXT) build/reload_b.$(RELOAD_EXT) | build ffi-skia
+build/test_ui: tests/test_ui.c build/libscuzz_rt.a build/reload_a.$(RELOAD_EXT) build/reload_b.$(RELOAD_EXT) build/reload_bad.$(RELOAD_EXT) | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread $(SSL_LINK) $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
