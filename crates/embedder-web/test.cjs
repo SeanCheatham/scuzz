@@ -143,7 +143,7 @@ async function check(browserType, url, mobile) {
     assert.equal(await install.getAttribute('href'), '#section=install');
     if (!mobile) {
       const popupReady = context.waitForEvent('page');
-      await install.click({button: 'middle'});
+      await install.click({modifiers: ['ControlOrMeta']});
       const popup = await popupReady;
       await popup.waitForFunction(() => window.Module && Module.ready && Module.currentSection === 'install');
       await popup.close();
