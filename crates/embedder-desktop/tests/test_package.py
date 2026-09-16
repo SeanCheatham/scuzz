@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
     manifest.write_text(text)
     subprocess.run([cli, "package", "--target", "macos", "--out-dir", "native output",
                     str(source)], env=author_env, check=True)
-    subprocess.run([cli, "run", "--target", "headless", "--out-dir", "native output",
+    subprocess.run([cli, "run", "--target", "headless", "--exec", "", "--out-dir", "native output",
                     str(source)], env=author_env, check=True, timeout=30)
     assert (source / "native output" / "snapshot.png").is_file()
     # A source edit keeps the running worker and its Signal state.
