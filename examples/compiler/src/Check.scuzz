@@ -1234,7 +1234,7 @@ def bindTuple2(ns: List[String], ts: List[String], env: List[(String, Ty)]): Lis
   if (List.isEmpty(ns)) env else bindSlot(List.at(ns, 0), if (List.isEmpty(ts)) "A" else List.at(ts, 0), bindTuple2(List.tail(ns), if (List.isEmpty(ts)) ts else List.tail(ts), env))
 
 def bindSlot(n: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (isTuplePat(n)) bindTuple(n, ty, env) else envBind(n, ty, env)
+  if (isTuplePat(n)) bindTuple(n, ty, env) else if (altStrPat(n) || altIntPat(n) || altBoolPat(n)) env else envBind(n, ty, env)
 
 def bindTy(pat: String, scrutTy: String, ens: List[En]): String =
   bindTyGot(patCore(pat), fieldTy(specializeEnums(ens, scrutTy), patCore(pat)), scrutTy)

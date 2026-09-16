@@ -109,6 +109,24 @@ def alternativeString(s: String): Bool =
 def alternativeGuard(n: Int): Bool =
   Main.alternativeGuard(n) == (n == 2 || n == 19)
 
+def tupleLitInt(n: Int, s: String): Bool =
+  Main.tupleLitInt((n, s)) == (if (n == 1) Str.concat("one:", s) else Str.concat(Str.fromInt(n), s))
+
+def tupleLitStr(s: String, n: Int): Bool =
+  Main.tupleLitStr((s, n)) == (if (s == "a") 1 else 2)
+
+def tupleLitBool(b: Bool, n: Int): Bool =
+  Main.tupleLitBool((b, n)) == (if (b) n else 0 - n)
+
+def tupleLitTri(n: Int, s: String, b: Bool): Bool =
+  Main.tupleLitTri((n, s, b)) == (if (n == 0) 1 else if (s == "a") 2 else if (b) 3 else 4)
+
+def tupleLitNest(a: Int, b: Int, s: String): Bool =
+  Main.tupleLitNest(((a, b), s)) == (if (a == 1 && b == 2) 1 else if (a == 1) 2 else if (b == 2) 3 else 4)
+
+def tupleLitConcrete(): Bool =
+  Main.tupleLitInt((1, "a")) == "one:a" && Main.tupleLitInt((2, "b")) == "2b" && Main.tupleLitStr(("a", 9)) == 1 && Main.tupleLitStr(("z", 9)) == 2 && Main.tupleLitBool((true, 3)) == 3 && Main.tupleLitBool((false, 3)) == 0 - 3 && Main.tupleLitTri((0, "z", false)) == 1 && Main.tupleLitTri((7, "a", false)) == 2 && Main.tupleLitTri((7, "z", true)) == 3 && Main.tupleLitTri((7, "z", false)) == 4 && Main.tupleLitNest(((1, 2), "x")) == 1 && Main.tupleLitNest(((1, 9), "x")) == 2 && Main.tupleLitNest(((9, 2), "x")) == 3 && Main.tupleLitNest(((9, 9), "x")) == 4
+
 def alternativeQuoted(): Bool =
   Main.alternativeString("x | y") && !Main.alternativeString("x")
 

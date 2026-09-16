@@ -3875,7 +3875,7 @@ def emitTryPat(pat: String, prefix: String, i: Int, scrut: String, ens: List[En]
   if (isAsPat(pat)) emitTryPat(stripAs(pat), prefix, i, scrut, ens, strs, last, tys) else emitTryPat2(pat, prefix, i, scrut, ens, strs, last, tys)
 
 def emitTryPat2(pat: String, prefix: String, i: Int, scrut: String, ens: List[En], strs: List[String], last: Bool, tys: List[String]): String =
-  if (pat == "_") line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (pat == "[]") emitNilTry(prefix, i, scrut, last) else if (isConsPat(pat)) emitConsTry(prefix, i, scrut, last, slotInt(tys, 0), consTail(pat)) else if (isOrPat(pat)) emitOrTry(pat, prefix, i, scrut, ens, strs, last) else if (isStrPat(pat)) emitStrTry(pat, prefix, i, scrut, strs, last) else if (isIntPat(pat)) emitIntTry(pat, prefix, i, scrut, last) else if (isBoolPat(pat)) emitIntTry(boolPatLit(pat), prefix, i, scrut, last) else if (isTuplePat(pat)) emitTupleTry(prefix, i, scrut, tys) else if (isVarPat(pat, ens)) line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (isConsPat(patBind(pat))) emitCtorConsTry(pat, prefix, i, scrut, ens, last, tys) else join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitLiteralMatchedPat(pat, prefix, i, scrut, ens, strs, last)))
+  if (pat == "_") line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (pat == "[]") emitNilTry(prefix, i, scrut, last) else if (isConsPat(pat)) emitConsTry(prefix, i, scrut, last, slotInt(tys, 0), consTail(pat)) else if (isOrPat(pat)) emitOrTry(pat, prefix, i, scrut, ens, strs, last) else if (isStrPat(pat)) emitStrTry(pat, prefix, i, scrut, strs, last) else if (isIntPat(pat)) emitIntTry(pat, prefix, i, scrut, last) else if (isBoolPat(pat)) emitIntTry(boolPatLit(pat), prefix, i, scrut, last) else if (isTuplePat(pat)) emitTupleTry(pat, prefix, i, scrut, strs, last, tys) else if (isVarPat(pat, ens)) line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (isConsPat(patBind(pat))) emitCtorConsTry(pat, prefix, i, scrut, ens, last, tys) else join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitLiteralMatchedPat(pat, prefix, i, scrut, ens, strs, last)))
 
 def emitCtorConsTry(pat: String, prefix: String, i: Int, scrut: String, ens: List[En], last: Bool, tys: List[String]): String =
   join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitCtorConsM(pat, prefix, i, scrut, last, tys)))
@@ -3925,23 +3925,56 @@ def emitConsOk(prefix: String, i: Int): String =
 def isTuplePat(pat: String): Bool =
   Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
 
-def emitTupleTry(prefix: String, i: Int, scrut: String, tys: List[String]): String =
-  emitTuplePeel(ppre(prefix, i), i + 1, scrut, tys, prefix, i, true)
+def emitTupleTry(pat: String, prefix: String, i: Int, scrut: String, strs: List[String], last: Bool, tys: List[String]): String =
+  emitTuplePeel(ppre(prefix, i), i + 1, scrut, tys, tupComps(pat), prefix, i, last, strs, true)
 
-def emitTuplePeel(pre: String, sid: Int, scrut: String, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
-  join(peelLeft(pre, sid, scrut), join(peelRight(pre, sid, scrut), join(peelBrTn(pre, sid), join(peelTnLab(pre, sid), emitTupleCont(pre, sid, tys, armPrefix, armI, fin)))))
+def tupComps(pat: String): List[String] =
+  splitPat(Str.slice(pat, 1, Str.len(pat) - 1))
 
-def emitTupleCont(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
-  join(if (slotInt(tys, 0)) peelUnboxL(pre, sid) else "", emitTupleRest(pre, sid, tys, armPrefix, armI, fin))
+def compAt(comps: List[String], k: Int): String =
+  if (List.isEmpty(comps)) "" else if (k <= 0) List.at(comps, 0) else compAt(List.tail(comps), k - 1)
 
-def emitTupleRest(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
-  join(emitNest(pre, sid, "tl", headTy(tys), armPrefix, armI), emitTupleRest2(pre, sid, tys, armPrefix, armI, fin))
+def nestComps(comp: String): List[String] =
+  if (isTuplePat(comp)) tupComps(comp) else noStr()
 
-def emitTupleRest2(pre: String, sid: Int, tys: List[String], armPrefix: String, armI: Int, fin: Bool): String =
-  if (List.len(tys) > 2) emitTuplePeel(Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, pct(pre, Str.concat("tr", Str.fromInt(sid))), List.tail(tys), armPrefix, armI, fin) else join(emitNest(pre, sid, "tr", secondTy(tys), armPrefix, armI), join(if (slotInt(tys, 1)) peelUnboxR(pre, sid) else "", if (fin) tupleBrOk(armPrefix, armI) else ""))
+def tailComps(comps: List[String]): List[String] =
+  if (List.isEmpty(comps)) comps else List.tail(comps)
 
-def emitNest(pre: String, sid: Int, side: String, ty: String, armPrefix: String, armI: Int): String =
-  if (!isTupTy(ty)) "" else emitTuplePeel(Str.concat(pre, Str.concat(Str.concat("_", side), Str.fromInt(sid))), 1, pct(pre, Str.concat(side, Str.fromInt(sid))), tupSlots(ty), armPrefix, armI, false)
+def emitTuplePeel(pre: String, sid: Int, scrut: String, tys: List[String], comps: List[String], armPrefix: String, armI: Int, last: Bool, strs: List[String], fin: Bool): String =
+  join(peelLeft(pre, sid, scrut), join(peelRight(pre, sid, scrut), join(peelBrTn(pre, sid), join(peelTnLab(pre, sid), emitTupleCont(pre, sid, tys, comps, armPrefix, armI, last, strs, fin)))))
+
+def emitTupleCont(pre: String, sid: Int, tys: List[String], comps: List[String], armPrefix: String, armI: Int, last: Bool, strs: List[String], fin: Bool): String =
+  join(if (slotInt(tys, 0)) peelUnboxL(pre, sid) else "", tupleSideTest(compAt(comps, 0), pre, sid, "l", slotInt(tys, 0), strs, emitTupleRest(pre, sid, tys, comps, armPrefix, armI, last, strs, fin), nextLab(armPrefix, armI, last)))
+
+def emitTupleRest(pre: String, sid: Int, tys: List[String], comps: List[String], armPrefix: String, armI: Int, last: Bool, strs: List[String], fin: Bool): String =
+  join(emitNest(pre, sid, "tl", headTy(tys), compAt(comps, 0), armPrefix, armI, last, strs), emitTupleRest2(pre, sid, tys, comps, armPrefix, armI, last, strs, fin))
+
+def emitTupleRest2(pre: String, sid: Int, tys: List[String], comps: List[String], armPrefix: String, armI: Int, last: Bool, strs: List[String], fin: Bool): String =
+  if (List.len(tys) > 2) emitTuplePeel(Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, pct(pre, Str.concat("tr", Str.fromInt(sid))), List.tail(tys), tailComps(comps), armPrefix, armI, last, strs, fin) else join(emitNest(pre, sid, "tr", secondTy(tys), compAt(comps, 1), armPrefix, armI, last, strs), join(if (slotInt(tys, 1)) peelUnboxR(pre, sid) else "", tupleSideTest(compAt(comps, 1), pre, sid, "r", slotInt(tys, 1), strs, if (fin) tupleBrOk(armPrefix, armI) else "", nextLab(armPrefix, armI, last))))
+
+def emitNest(pre: String, sid: Int, side: String, ty: String, comp: String, armPrefix: String, armI: Int, last: Bool, strs: List[String]): String =
+  if (!isTupTy(ty)) "" else emitTuplePeel(Str.concat(pre, Str.concat(Str.concat("_", side), Str.fromInt(sid))), 1, pct(pre, Str.concat(side, Str.fromInt(sid))), tupSlots(ty), nestComps(comp), armPrefix, armI, last, strs, false)
+
+def tupleSideTest(comp: String, pre: String, sid: Int, side: String, isInt: Bool, strs: List[String], cont: String, fail: String): String =
+  if (isIntPat(comp) || isBoolPat(comp)) tupleIntTest(comp, pre, sid, side, isInt, cont, fail) else if (isStrPat(comp)) tupleStrTest(comp, pre, sid, side, strs, cont, fail) else cont
+
+def tupleContStem(pre: String, side: String): String =
+  Str.concat(pre, Str.concat("_tok", side))
+
+def tupleSideVal(pre: String, sid: Int, side: String): String =
+  pct(pre, Str.concat(if (side == "l") "tl" else "tr", Str.fromInt(sid)))
+
+def tupleSideI64(pre: String, sid: Int, side: String): String =
+  pct(pre, Str.concat(if (side == "l") "tvl" else "tv", Str.fromInt(sid)))
+
+def tupleIntTest(comp: String, pre: String, sid: Int, side: String, isInt: Bool, cont: String, fail: String): String =
+  if (!isInt) cont else join(line(Str.concat(tmp(pre, Str.concat("tie", side)), Str.concat("icmp eq i64 ", Str.concat(tupleSideI64(pre, sid, side), Str.concat(", ", if (isBoolPat(comp)) boolPatLit(comp) else comp))))), join(line(Str.concat("br i1 ", Str.concat(pct(pre, Str.concat("tie", side)), Str.concat(", label %", Str.concat(tupleContStem(pre, side), Str.concat(", label %", fail)))))), join(lab(tupleContStem(pre, side)), cont)))
+
+def tupleStrTest(comp: String, pre: String, sid: Int, side: String, strs: List[String], cont: String, fail: String): String =
+  join(tupleStrCompare(unquote(comp), pre, side, tupleSideVal(pre, sid, side), strs), join(line(Str.concat("br i1 ", Str.concat(pct(pre, Str.concat("tseq", side)), Str.concat(", label %", Str.concat(tupleContStem(pre, side), Str.concat(", label %", fail)))))), join(lab(tupleContStem(pre, side)), cont)))
+
+def tupleStrCompare(s: String, pre: String, side: String, val: String, strs: List[String]): String =
+  join(line(Str.concat(tmp(pre, Str.concat("tsgep", side)), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, s, 0)), ", i64 0, i64 0")))))), join(line(Str.concat(tmp(pre, Str.concat("tslit", side)), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(pre, Str.concat("tsgep", side)), ")")))), join(line(Str.concat(tmp(pre, Str.concat("tseqi", side)), Str.concat("call i32 @sz_string_eq(ptr ", Str.concat(val, Str.concat(", ptr ", Str.concat(pct(pre, Str.concat("tslit", side)), ")")))))), join(relPtr(pct(pre, Str.concat("tslit", side))), line(Str.concat(tmp(pre, Str.concat("tseq", side)), Str.concat("icmp ne i32 ", Str.concat(pct(pre, Str.concat("tseqi", side)), ", 0"))))))))
 
 def headTy(tys: List[String]): String =
   if (List.isEmpty(tys)) "" else List.at(tys, 0)
