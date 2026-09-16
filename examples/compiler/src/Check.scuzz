@@ -305,37 +305,7 @@ def zipCheckEq(callee: String, w: String, got: String, want: List[String], args:
   if (tyEqEn(got, w, ens)) zipCheck(callee, kitWantFromTy(callee, if (acc == "") got else acc, want), args, env, funs, ens, span, if (acc == "") got else acc) else argMismatch(callee, w, got, asp)
 
 def kitWantFromTy(f: String, handleTy: String, want: List[String]): List[String] =
-  if (List.isEmpty(want)) want else if (f == "Queue.offer" || f == "Deferred.complete") offerElem(handleTy) :: List.tail(want) else if (f == "Map.set" || f == "Map.getOrElse") mapKVWant(f, handleTy, want) else if (f == "Map.get" || f == "Map.contains" || f == "Map.remove") mapKWant(f, handleTy, want) else if (f == "Set.add" || f == "Set.contains" || f == "Set.remove") setElemWant(f, handleTy, want) else if (f == "Set.union" || f == "Set.intersect") setSameWant(f, handleTy, want) else if (f == "List.cons") consListWant(handleTy) :: List.tail(want) else if (f == "List.concat") concatWant(handleTy, want) else want
-
-def isMapTy(t: String): Bool =
-  Str.startsWith(t, "Map[")
-
-def isSetTy(t: String): Bool =
-  Str.startsWith(t, "Set[")
-
-def mapKVWant(f: String, handleTy: String, want: List[String]): List[String] =
-  if (isMapTy(handleTy) && List.len(want) > 1) mapKeyOf(handleTy) :: mapValOf(handleTy) :: List.tail(List.tail(want)) else want
-
-def mapKWant(f: String, handleTy: String, want: List[String]): List[String] =
-  if (isMapTy(handleTy)) mapKeyOf(handleTy) :: List.tail(want) else want
-
-def setElemWant(f: String, handleTy: String, want: List[String]): List[String] =
-  if (isSetTy(handleTy)) elemOf(handleTy) :: List.tail(want) else want
-
-def setSameWant(f: String, handleTy: String, want: List[String]): List[String] =
-  if (isSetTy(handleTy)) handleTy :: List.tail(want) else want
-
-def consListWant(elem: String): String =
-  Str.concat("List[", Str.concat(elem, "]"))
-
-def concatWant(handleTy: String, want: List[String]): List[String] =
-  if (isListTy(handleTy) && handleTy != "List") handleTy :: List.tail(want) else want
-
-def mapKeyOf(ty: String): String =
-  mapKeyOf2(splitComma(elemOf(ty)))
-
-def mapKeyOf2(parts: List[String]): String =
-  if (List.isEmpty(parts)) "A" else List.at(parts, 0)
+  if (List.isEmpty(want)) want else if (f == "Queue.offer" || f == "Deferred.complete") offerElem(handleTy) :: List.tail(want) else want
 
 def offerElem(handleTy: String): String =
   if (Str.startsWith(handleTy, "Queue[") || Str.startsWith(handleTy, "Deferred[")) elemOf(handleTy) else "A"
@@ -380,40 +350,16 @@ def isTup(t: String): Bool =
   Type.isTupStr(t)
 
 def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, ""), ret, args, env, funs, ens)
+  if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, ""), ret)
 
-def checkKnownRet(f: String, o: Out, ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  if (hasErr(o)) o else ok(kitRetFromTy(f, tyStr(o), emptyPinRet(f, tyStr(o), args, env, funs, ens, substKitE(ret, tyStr(o)))))
-
-def emptyPinRet(f: String, handleTy: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], ret: String): String =
-  if (f == "Map.set" && handleTy == "Map") emptyMapRet(argTyAt(args, 1, env, funs, ens), argTyAt(args, 2, env, funs, ens), ret) else if (f == "Set.add" && handleTy == "Set") emptySetRet(argTyAt(args, 1, env, funs, ens), ret) else ret
-
-def argTyAt(args: List[Expr], k: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (k >= List.len(args)) "" else argTyOut(infer(stripNamed(List.at(args, k)), env, funs, ens))
-
-def argTyOut(o: Out): String =
-  if (hasErr(o)) "" else tyStr(o)
-
-def emptyMapRet(k: String, v: String, ret: String): String =
-  if (k == "" || v == "") ret else Str.concat("Map[", Str.concat(k, Str.concat(", ", Str.concat(v, "]"))))
-
-def emptySetRet(x: String, ret: String): String =
-  if (x == "") ret else Str.concat("Set[", Str.concat(x, "]"))
+def checkKnownRet(f: String, o: Out, ret: String): Out =
+  if (hasErr(o)) o else ok(kitRetFromTy(f, tyStr(o), substKitE(ret, tyStr(o))))
 
 def substKitE(ret: String, ty: String): String =
   if (ty == "") ret else substTy(ret, "E", ty)
 
 def kitRetFromTy(f: String, ty: String, ret: String): String =
-  if (f == "List.head") kitRetOption(ty) else if (f == "Map.get") kitRetMapOption(ty) else if (f == "Map.getOrElse") mapGetOrElseRet(ty, ret) else if (f == "Map.set" || f == "Map.remove") mapSameRet(ty, ret) else if (f == "Set.add" || f == "Set.remove" || f == "Set.union" || f == "Set.intersect") setSameRet(ty, ret) else if (f == "List.at") elemOf(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.concat" || f == "List.last") kitRetList(ty, ret) else if (f == "List.cons") kitRetCons(ty, ret) else if (f == "IO.pure") ioTy("String", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", A]")) else if (f == "Deferred.get") defGetRet(ty) else if (f == "Queue.take") queueTakeRet(ty) else ret
-
-def mapGetOrElseRet(ty: String, ret: String): String =
-  if (isMapTy(ty)) mapValOf(ty) else ret
-
-def mapSameRet(ty: String, ret: String): String =
-  if (isMapTy(ty)) ty else ret
-
-def setSameRet(ty: String, ret: String): String =
-  if (isSetTy(ty)) ty else ret
+  if (f == "List.head") kitRetOption(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.last") kitRetList(ty, ret) else if (f == "IO.pure") ioTy("String", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", A]")) else if (f == "Deferred.get") defGetRet(ty) else if (f == "Queue.take") queueTakeRet(ty) else ret
 
 def defGetRet(ty: String): String =
   if (Str.startsWith(ty, "Deferred[")) ioTy("String", elemOf(ty)) else "IO[A]"
@@ -424,20 +370,8 @@ def queueTakeRet(ty: String): String =
 def kitRetOption(ty: String): String =
   Str.concat("Option[", Str.concat(elemOf(ty), "]"))
 
-def kitRetMapOption(ty: String): String =
-  Str.concat("Option[", Str.concat(mapValOf(ty), "]"))
-
-def mapValOf(ty: String): String =
-  mapValOf2(splitComma(elemOf(ty)))
-
-def mapValOf2(parts: List[String]): String =
-  if (List.isEmpty(parts) || List.isEmpty(List.tail(parts))) "A" else List.at(parts, 1)
-
 def kitRetList(ty: String, ret: String): String =
   if (isListTy(ty)) ty else ret
-
-def kitRetCons(ty: String, ret: String): String =
-  if (ty == "") ret else Str.concat("List[", Str.concat(ty, "]"))
 
 def resolveCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   resolveCall2(f, args, env, funs, ens, span)
