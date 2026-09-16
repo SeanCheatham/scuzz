@@ -179,6 +179,7 @@ struct SzUiSession {
   int code_gen;
   unsigned pumps;
   unsigned paints;
+  uint64_t signal_revision;
 };
 
 static SzUiSession *g_live_session;
@@ -1513,6 +1514,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
       need_dump = 1;
     }
   }
+  if (session->signal_revision != sz_signal_revision()) session_mark_dirty(session);
   /* UI-thread hop: apply signal writes posted from completed IO. */
   sz_ui_bridge_flush(session);
   pthread_mutex_lock(&session->bridge_lock);
@@ -1521,8 +1523,11 @@ int sz_ui_pump_sync(SzUiSession *session) {
   if (!need_dump) {
     session->pumps += 1;
     if (sz_testrt_oracles_armed()) {
-      sz_testrt_ui_idle_check();
-      sz_testrt_ui_idle_snapshot();
+      if (sz_io_ui_pending()) sz_testrt_ui_idle_reset();
+      else {
+        sz_testrt_ui_idle_check();
+        sz_testrt_ui_idle_snapshot();
+      }
     }
     return 1;
   }
@@ -1583,10 +1588,11 @@ int sz_ui_pump_sync(SzUiSession *session) {
 #endif
   session->pumps += 1;
   session->paints += 1;
+  session->signal_revision = sz_signal_revision();
   /* Leak oracle: heap must not grow across consecutive idle pumps. A dirty
    * frame resets the baseline. */
   if (sz_testrt_oracles_armed()) {
-    if (need_dump)
+    if (need_dump || sz_io_ui_pending())
       sz_testrt_ui_idle_reset();
     else {
       sz_testrt_ui_idle_check();

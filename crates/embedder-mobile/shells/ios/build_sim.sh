@@ -34,7 +34,7 @@ APP="$OUT/$NAME.app"
 mkdir -p "$OUT/obj"
 
 # SDK and compiler changes invalidate native objects.
-key="$(printf '%s\n' "$TARGET" "$SDK" "$(xcrun clang --version)" "$ROOT" "$ROOT"/crates/runtime/src/*.c)"
+key="$(printf '%s\n' "$TARGET" "$SDK" "$(xcrun clang --version)" "$ROOT" "$ROOT"/crates/runtime/src/*.c "$ROOT"/crates/runtime/src/net_apple.m)"
 if [ ! -f "$OUT/native-key" ] || [ "$(cat "$OUT/native-key")" != "$key" ]; then
   rm -f "$OUT"/obj/*.o
   printf '%s\n' "$key" > "$OUT/native-key"
@@ -78,9 +78,9 @@ if ! grep -q 'define i32 @scuzz_app_main(' "$OUT/app.ios.ll"; then
   echo "missing scuzz_app_main — IR main rename failed" >&2
   exit 1
 fi
-# net.c needs OpenSSL. This target does not ship it. Fail if the app calls Net.
-if grep -E 'call [^@]*@sz_net_' "$OUT/app.ios.ll" >/dev/null; then
-  echo "mobile package cannot link Net — this target has no OpenSSL" >&2
+# This target supplies HTTP clients. HTTP servers need the host transport.
+if grep -E 'call [^@]*@sz_net_serve' "$OUT/app.ios.ll" >/dev/null; then
+  echo "iOS package cannot link Net HTTP servers; use a host target" >&2
   exit 1
 fi
 if needs_compile "$OUT/app.ios.ll" "$OUT/obj/app.o"; then
@@ -88,10 +88,10 @@ if needs_compile "$OUT/app.ios.ll" "$OUT/obj/app.o"; then
   mv "$OUT/obj/app.o.tmp" "$OUT/obj/app.o"
 fi
 
-# Runtime (C) for the sim SDK. Skip net.c (OpenSSL) and impurity.c (calls Net).
+# Runtime (C) for the sim SDK. The Apple client replaces net.c (OpenSSL).
 for src in "$ROOT"/crates/runtime/src/*.c; do
   base="$(basename "$src")"
-  if [ "$base" = "net.c" ] || [ "$base" = "impurity.c" ]; then
+  if [ "$base" = "net.c" ]; then
     continue
   fi
   obj="$OUT/obj/rt_$(basename "${src%.c}").o"
@@ -114,7 +114,8 @@ done
 
 # Shell (ObjC, ARC).
 for src in "$ROOT"/crates/embedder-mobile/shells/ios/main.m \
-           "$ROOT"/crates/embedder-mobile/shells/ios/ScuzzShell.m; do
+           "$ROOT"/crates/embedder-mobile/shells/ios/ScuzzShell.m \
+           "$ROOT"/crates/runtime/src/net_apple.m; do
   obj="$OUT/obj/shell_$(basename "${src%.m}").o"
   if needs_compile "$src" "$obj"; then
     "${CLANG[@]}" "${CFLAGS[@]}" -fobjc-arc \

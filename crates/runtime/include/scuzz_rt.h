@@ -401,8 +401,16 @@ typedef struct SzIoResult {
   SzError *error;
 } SzIoResult;
 
+/* Consume the root graph. Retain it first to run it again. */
 SzIoResult sz_io_unsafe_run(SzIo *io);
+/* Borrow the root graph for compiler callbacks that need its result. */
 void *sz_io_unsafe_run_or_die(SzIo *io);
+/* UI handlers use the current scheduler and end with the mounted session. */
+void sz_io_submit_ui(SzIo *io);
+int sz_io_ui_pending(void);
+void sz_io_ui_cancel(void);
+void sz_io_ui_reap(void);
+uint64_t sz_signal_revision(void);
 
 /* Called from queue/deferred delay thunks to wake a parked fiber (returns 1 if woke). */
 int sz_fiber_wake_queue(SzQueue *q, void *value);

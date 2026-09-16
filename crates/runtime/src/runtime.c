@@ -2415,6 +2415,7 @@ typedef struct Fiber {
   int result_ok;
   void *result_value;
   SzError *result_error;
+  int ui_callback; /* 1 scoped child; 2 handler with no public handle */
   int forked; /* 1 if created by Fiber.fork */
   void *join_waiters; /* Fiber* list parked on Fiber.join / interrupt */
   struct Fiber *fwait; /* target when state is FIB_FWAIT */
@@ -2439,6 +2440,7 @@ typedef struct Sched {
   Fiber *sleepers;
   Fiber *pollers;
   Fiber *root;
+  Fiber *current;
   Fiber *forked_live;
   Fiber *all_fibers;
   int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
@@ -3009,6 +3011,7 @@ static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
   f->cur = cur;
   f->state = FIB_READY;
   f->parent = parent;
+  f->ui_callback = parent && parent->ui_callback ? 1 : 0;
   f->join_kind = jk;
   f->child_slot = slot;
   if (g_sched) {
@@ -4009,6 +4012,7 @@ void sz_fiber_census(int64_t *live, int64_t *ready, int64_t *parked,
 }
 
 static SzIoResult run_io(SzIo *root) {
+  Sched *previous_sched = g_sched;
   Sched sched;
   SzIoResult result;
   uint64_t steps = 0;
@@ -4038,7 +4042,9 @@ static SzIoResult run_io(SzIo *root) {
         /* Zero-delay loops cannot advance the simulation clock. */
         if (bounded && ++steps > 1000000)
           sz_panic("simulation exceeds 1000000 scheduler steps");
+        sched.current = f;
         step_fiber(&sched, f);
+        sched.current = NULL;
         /* Drain ready (including cancel finalizers) before exiting on root done. */
         continue;
       }
@@ -4093,7 +4099,7 @@ static SzIoResult run_io(SzIo *root) {
     }
   }
 
-  g_sched = NULL;
+  g_sched = previous_sched;
   sched_free_fibers(&sched);
   return result;
 }
@@ -4103,6 +4109,7 @@ SzIoResult sz_io_unsafe_run(SzIo *root) { return run_io(root); }
 /* UI callbacks (taps, Signal.map over IO) have no error channel. An unhandled
    failure mirrors main: report and die so fuzz/tests observe it. */
 void *sz_io_unsafe_run_or_die(SzIo *root) {
+  sz_retain(root);
   SzIoResult r = run_io(root);
   if (!r.ok) {
     fprintf(stderr, "scuzz: IO failed in UI callback: %s\n",
@@ -4113,6 +4120,63 @@ void *sz_io_unsafe_run_or_die(SzIo *root) {
     exit(1);
   }
   return r.value;
+}
+
+static SzIo *ui_callback_error(SzError *error, void *env) {
+  (void)env;
+  fprintf(stderr, "scuzz: IO failed in UI callback: %s\n",
+          error ? sz_string_cstr(error->message) : "unknown");
+  fflush(stderr);
+  exit(1);
+}
+
+void sz_io_submit_ui(SzIo *io) {
+  if (!g_sched || !g_sched->current) {
+    sz_release(sz_io_unsafe_run_or_die(io));
+    return;
+  }
+  SzIo *handled = sz_io_handle_error_with(io, ui_callback_error, NULL);
+  Fiber *child = fiber_new(handled, g_sched->current, JOIN_NONE, 0);
+  child->ui_callback = 2;
+  child->forked = 1;
+  forked_live_add(g_sched, child);
+  ready_enqueue(g_sched, child);
+}
+
+int sz_io_ui_pending(void) {
+  if (!g_sched) return 0;
+  for (Fiber *f = g_sched->all_fibers; f; f = f->all_next)
+    if (f->ui_callback && f->state != FIB_DONE && f->state != FIB_CANCELLED)
+      return 1;
+  return 0;
+}
+
+void sz_io_ui_cancel(void) {
+  if (!g_sched) return;
+  for (Fiber *f = g_sched->all_fibers; f; f = f->all_next)
+    if (f->ui_callback) fiber_cancel(g_sched, f);
+}
+
+static int ui_reapable(Fiber *f) {
+  return f && f->ui_callback && (!f->forked || f->ui_callback == 2) &&
+         (f->state == FIB_DONE || f->state == FIB_CANCELLED);
+}
+
+void sz_io_ui_reap(void) {
+  if (!g_sched || sz_io_ui_pending()) return;
+  /* Explicit fork handles stay valid. UI handlers have no exposed handle. */
+  for (Fiber *f = g_sched->all_fibers; f; f = f->all_next)
+    if (!ui_reapable(f) && ui_reapable(f->parent)) f->parent = NULL;
+  Fiber **slot = &g_sched->all_fibers;
+  while (*slot) {
+    Fiber *f = *slot;
+    if (!ui_reapable(f)) { slot = &f->all_next; continue; }
+    *slot = f->all_next;
+    sz_release(f->cur);
+    cont_free_all(f->stack);
+    fiber_release_result(f);
+    sz_free(f);
+  }
 }
 
 typedef struct {
