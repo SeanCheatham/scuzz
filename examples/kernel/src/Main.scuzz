@@ -266,7 +266,8 @@ def describeSmall(n: Int): String =
 
 def describeOptSmall(o: Opt[Int]): String =
   o match {
-    case Opt.Some(0 | 1) => "opt01"
+    case Opt.Some(0) => "opt01"
+    case Opt.Some(1) => "opt01"
     case Opt.Some(_) => "optN"
     case Opt.None => "optNone"
   }
@@ -279,7 +280,7 @@ def keepSome(o: Opt[Int]): String =
 
 def describeAsZero(o: Opt[Int]): String =
   o match {
-    case Opt.Some(n @ 0) => Str.concat("z:", Str.fromInt(n))
+    case Opt.Some(0) => Str.concat("z:", Str.fromInt(0))
     case Opt.Some(_) => "n"
     case Opt.None => "none"
   }

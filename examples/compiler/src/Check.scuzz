@@ -1044,7 +1044,57 @@ def inferMatch(s: Expr, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, en
   inferMatch2(infer(s, env, funs, ens), arms, env, funs, ens, span)
 
 def inferMatch2(o: Out, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(o)) o else if (List.isEmpty(arms)) o else inferMatchRest(inferMatchChecked(altArmsErr(arms, tyStr(o), ens, span), List.at(arms, 0), tyStr(o), env, funs, ens), List.tail(arms), tyStr(o), env, funs, ens)
+  if (hasErr(o)) o else if (List.isEmpty(arms)) o else inferMatchNest(nestArmsErr(arms, span), arms, tyStr(o), env, funs, ens, span)
+
+def inferMatchNest(v: Out, arms: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(v)) v else inferMatchRest(inferMatchChecked(altArmsErr(arms, scrutTy, ens, span), List.at(arms, 0), scrutTy, env, funs, ens), List.tail(arms), scrutTy, env, funs, ens)
+
+def nestArmsErr(arms: List[Arm], span: (String, Int)): Out =
+  if (List.isEmpty(arms)) ok("Unit") else nestArmsErr2(nestArmErr(List.at(arms, 0)), List.tail(arms), span)
+
+def nestArmsErr2(err: String, rest: List[Arm], span: (String, Int)): Out =
+  if (Str.len(err) > 0) bad(err, span) else nestArmsErr(rest, span)
+
+def nestArmErr(arm: Arm): String =
+  arm match {
+    case Arm(pat, _, _) => nestAltErr(pat, Parse.patternAlternativeAt(pat, 0, 0))
+  }
+
+def nestAltErr(pat: String, i: Int): String =
+  if (i < 0) nestPatErr(trimName(pat)) else nestAltErr2(nestPatErr(trimName(Str.take(pat, i))), Str.drop(pat, i + 3))
+
+def nestAltErr2(err: String, rest: String): String =
+  if (Str.len(err) > 0) err else nestAltErr(rest, Parse.patternAlternativeAt(rest, 0, 0))
+
+def nestPatErr(pat: String): String =
+  if (asAt(pat, 0) >= 0) nestPatErr(trimName(Str.drop(pat, asAt(pat, 0) + 3))) else if (consAt(pat, 0) >= 0) nestConsHeadErr(trimName(Str.take(pat, consAt(pat, 0))), trimName(Str.drop(pat, consAt(pat, 0) + 4))) else if (isTuplePat(pat)) nestFieldsErr(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), true) else if (patBind(pat) == "") "" else nestFieldsErr(splitComma(patBind(pat)), false)
+
+def nestConsHeadErr(head: String, tail: String): String =
+  if (asAt(head, 0) >= 0) "nested patterns are not supported here" else if (nestSimple(head)) nestPatErr(tail) else "nested patterns are not supported here"
+
+def nestSimple(s: String): Bool =
+  s == "" || s == "_" || altStrPat(s) || altIntPat(s) || altBoolPat(s) || isBareName(s) && dotAt(s, 0) < 0
+
+def nestFieldsErr(fs: List[String], inTuple: Bool): String =
+  if (List.isEmpty(fs)) "" else nestFieldsErr2(nestFieldErr(List.at(fs, 0), inTuple), List.tail(fs), inTuple)
+
+def nestFieldsErr2(err: String, rest: List[String], inTuple: Bool): String =
+  if (Str.len(err) > 0) err else nestFieldsErr(rest, inTuple)
+
+def nestFieldErr(f: String, inTuple: Bool): String =
+  nestFieldErrAt(eqAt(f, 0), f, inTuple)
+
+def nestFieldErrAt(i: Int, f: String, inTuple: Bool): String =
+  nestCompErr(trimName(if (i < 0) f else Str.drop(f, i + 3)), inTuple)
+
+def nestCompErr(c: String, inTuple: Bool): String =
+  if (asAt(c, 0) >= 0) "nested patterns are not supported here" else if (consAt(c, 0) >= 0) nestConsInErr(c, inTuple) else if (nestSimple(c)) "" else if (isTuplePat(c)) nestTupErr(c, inTuple) else "nested patterns are not supported here"
+
+def nestTupErr(c: String, inTuple: Bool): String =
+  if (inTuple) nestFieldsErr(splitComma(Str.slice(c, 1, Str.len(c) - 1)), true) else "nested patterns are not supported here"
+
+def nestConsInErr(c: String, inTuple: Bool): String =
+  if (inTuple) "nested patterns are not supported here" else nestConsHeadErr(trimName(Str.take(c, consAt(c, 0))), trimName(Str.drop(c, consAt(c, 0) + 4)))
 
 def inferMatchRest(first: Out, rest: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   if (hasErr(first)) first else if (List.isEmpty(rest)) first else inferMatchArm2(first, inferMatchArm(List.at(rest, 0), scrutTy, env, funs, ens), List.at(rest, 0), List.tail(rest), scrutTy, env, funs, ens)
