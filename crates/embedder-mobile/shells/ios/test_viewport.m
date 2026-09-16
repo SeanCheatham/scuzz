@@ -9,9 +9,21 @@
 UIViewController *scuzz_ios_make_controller(void);
 CGRect scuzz_ios_viewport(void);
 
+static void proof_report(const char *message) {
+  const char *path = getenv("SCUZZ_VIEWPORT_RESULT");
+  if (path) {
+    FILE *file = fopen(path, "w");
+    if (!file) { perror("viewport result"); exit(1); }
+    fprintf(file, "%s\n", message);
+    fclose(file);
+  }
+}
+
 static void proof_check(BOOL ok, NSString *message) {
   if (!ok) {
-    fprintf(stderr, "ios viewport proof fails: %s\n", message.UTF8String);
+    NSString *failure = [@"ios viewport proof fails: " stringByAppendingString:message];
+    proof_report(failure.UTF8String);
+    fprintf(stderr, "%s\n", failure.UTF8String);
     fflush(stderr);
     exit(1);
   }
@@ -53,6 +65,14 @@ static void proof_check(BOOL ok, NSString *message) {
 }
 
 - (void)startProof {
+  BOOL active = self.window.isKeyWindow &&
+      UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+  if (!active && ++_attempts < 100) {
+    [self performSelector:_cmd withObject:nil afterDelay:0.1];
+    return;
+  }
+  proof_check(active, @"active window");
+  _attempts = 0;
   [self checkLayout];
   _initial = scuzz_ios_viewport();
   proof_check(_initial.size.height < self.window.bounds.size.height, @"safe area");
@@ -106,6 +126,7 @@ static void proof_check(BOOL ok, NSString *message) {
   viewport = scuzz_ios_viewport();
   proof_check(viewport.size.width != _initial.size.width, @"viewport follows container");
   sz_mobile_shutdown();
+  proof_report("ios viewport proof ok");
   puts("ios viewport proof ok");
   fflush(stdout);
   exit(0);
@@ -119,6 +140,7 @@ static void proof_check(BOOL ok, NSString *message) {
   self.controller = scuzz_ios_make_controller();
   self.window.rootViewController = self.controller;
   [self.window makeKeyAndVisible];
+  proof_report("ios viewport proof waits for active window");
   [self performSelector:@selector(startProof) withObject:nil afterDelay:0.5];
   return YES;
 }
