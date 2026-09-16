@@ -612,7 +612,7 @@ def inferFunApply(ty: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab,
   if (List.isEmpty(args)) bad("apply expects 1 arg", span) else if (List.len(args) == 1) inferFunApply1(ty, infer(List.at(args, 0), env, funs, ens), spanPick(exprSpan(env, List.at(args, 0)), span), ens) else inferFunApply1(ty, inferTuple(args, env, funs, ens), span, ens)
 
 def inferFunApply1(ty: Ty, o: Out, span: (String, Int), ens: List[En]): Out =
-  if (hasErr(o)) o else if (tyEqEn(tyStr(o), Type.show(Type.funArg(ty)), ens)) okTy(Type.funRet(ty)) else argMismatch("apply", Type.show(Type.funArg(ty)), tyStr(o), span)
+  if (hasErr(o)) o else if (Type.isParam(Type.funArg(ty)) && !isLoose(tyStr(o))) bad("lambda parameter type is unresolved; annotate the parameter", span) else if (tyEqEn(tyStr(o), Type.show(Type.funArg(ty)), ens)) okTy(Type.funRet(ty)) else argMismatch("apply", Type.show(Type.funArg(ty)), tyStr(o), span)
 
 def elemOf(t: String): String =
   elemOf2(brackAt(t, 0), t)
@@ -1430,7 +1430,25 @@ def requirePredOk(ty: String): Bool =
   ty == "Bool" || isLoose(ty) || isIo(ty) && (ioOk(ty) == "Bool" || isLoose(ioOk(ty))) || isFunTy(ty) && (funRetOf(ty) == "Bool" || isLoose(funRetOf(ty)))
 
 def inferApply(recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
-  inferApply2(infer(recv, env, funs, ens), args, env, funs, ens, e)
+  recv match {
+    case Expr.ELam(_, _, _) => inferApplyLam(recv, args, env, funs, ens, e)
+    case _ => inferApply2(infer(recv, env, funs, ens), args, env, funs, ens, e)
+  }
+
+def inferApplyLam(lam: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
+  if (List.len(args) != 1) bad("apply expects 1 arg", exprSpan(env, e)) else inferApplyLam2(infer(stripNamed(List.at(args, 0)), env, funs, ens), lam, env, funs, ens, spanPick(exprSpan(env, stripNamed(List.at(args, 0))), exprSpan(env, e)))
+
+def inferApplyLam2(a: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], asp: (String, Int)): Out =
+  if (hasErr(a)) a else inferApplyLam3(inferApplyExpected(lam, tyStr(a), env, funs, ens), tyStr(a), env, ens, asp)
+
+def inferApplyExpected(lam: Expr, argTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  lam match {
+    case Expr.ELam(p, ann, body) => if (ann == "") inferExpected(lam, Str.concat(argTy, " => B"), env, funs, ens) else infer(lam, env, funs, ens)
+    case _ => infer(lam, env, funs, ens)
+  }
+
+def inferApplyLam3(lo: Out, argTy: String, env: List[(String, Ty)], ens: List[En], asp: (String, Int)): Out =
+  if (hasErr(lo)) lo else if (tyEqEn(argTy, Type.show(Type.funArg(lo.ty)), ens)) okTy(Type.funRet(lo.ty)) else argMismatch("apply", Type.show(Type.funArg(lo.ty)), argTy, asp)
 
 def inferApply2(o: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   if (hasErr(o)) o else if (Type.isFun(o.ty) || isLoose(tyStr(o))) inferFunApply(o.ty, args, env, funs, ens, exprSpan(env, e)) else bad(Str.concat("apply needs a function, got ", tyStr(o)), exprSpan(env, e))
