@@ -18,6 +18,13 @@
   <string>0.1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Connect to app services on your local network.</string>
   <key>UILaunchScreen</key>
   <dict/>
   <key>UIDeviceFamily</key>

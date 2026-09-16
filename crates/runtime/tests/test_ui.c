@@ -517,6 +517,52 @@ static void test_ui_run_rebuild(void) {
   }
 }
 
+typedef struct { int started; int cancelled; int progressed; } AsyncUiEnv;
+static void *async_ui_start(void *value) {
+  ((AsyncUiEnv *)value)->started++;
+  return NULL;
+}
+static void *async_ui_cancelled(void *value) {
+  ((AsyncUiEnv *)value)->cancelled++;
+  return NULL;
+}
+static void *async_ui_progress(void *value) {
+  ((AsyncUiEnv *)value)->progressed++;
+  return NULL;
+}
+static void async_ui_tap(SzView *view, void *value) {
+  (void)view;
+  SzIo *sleep = sz_io_sleep_ms(1000);
+  SzIo *start = sz_io_delay(async_ui_start, value);
+  SzIo *inner = sz_io_both(start, sleep);
+  SzIo *finish = sz_io_delay(async_ui_cancelled, value);
+  SzIo *io = sz_io_ensure(inner, finish);
+  sz_io_submit_ui(io);
+  sz_release(sleep); sz_release(start); sz_release(inner);
+  sz_release(finish); sz_release(io);
+}
+static SzView *async_ui_factory(void *value) {
+  return sz_view_button("async", async_ui_tap, value);
+}
+static void test_ui_async_handlers(void) {
+  AsyncUiEnv *env = sz_rc_alloc(sizeof *env, SZ_RC_BOX);
+  memset(env, 0, sizeof *env);
+  setenv("SCUZZ_UI_TAP", "1", 1);
+  setenv("SCUZZ_UI_RELOAD_STAMP", "/tmp/scuzz-no-async-reload.stamp", 1);
+  setenv("SCUZZ_LIVE_FRAMES", "3", 1);
+  SzIo *ui = sz_ui_run_rebuild(async_ui_factory, env);
+  SzIo *progress = sz_io_delay(async_ui_progress, env);
+  SzIo *both = sz_io_both(ui, progress);
+  sz_release(ui); sz_release(progress);
+  SzIoResult result = sz_io_unsafe_run(both);
+  assert(result.ok);
+  assert(env->started == 1 && env->progressed == 1 && env->cancelled == 1);
+  sz_release(result.value);
+  sz_release(env);
+  unsetenv("SCUZZ_UI_TAP"); unsetenv("SCUZZ_UI_RELOAD_STAMP");
+  unsetenv("SCUZZ_LIVE_FRAMES");
+}
+
 typedef struct {
   SzSignalInt *count;
   int calls;
@@ -16689,6 +16735,7 @@ int main(void) {
   test_stamp_loads_reload_code();
   test_ui_run_rebuild();
   test_ui_run_rebuild_keepalive();
+  test_ui_async_handlers();
   test_dump_json_schema();
   test_script_json_inject();
   test_script_tap_named_id();

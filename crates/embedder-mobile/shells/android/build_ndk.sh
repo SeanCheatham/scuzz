@@ -90,8 +90,8 @@ build_abi() {
   "$clang" "${cflags[@]}" -c "$OUT/app.android.ll" -o "$obj/app.o"
   for src in "$ROOT"/crates/runtime/src/*.c; do
     base="$(basename "$src")"
-    # net.c needs OpenSSL. impurity.c calls sz_net_http_get.
-    if [ "$base" = "net.c" ] || [ "$base" = "impurity.c" ]; then
+    # The target has no live HTTP transport.
+    if [ "$base" = "net.c" ] || [ "$base" = "net_request.c" ] || [ "$base" = "impurity.c" ]; then
       continue
     fi
     "$clang" "${cflags[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" \

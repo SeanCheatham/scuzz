@@ -37,8 +37,11 @@ test: lib build/test_headless
 
 else ifeq ($(UNAME_S),Darwin)
 
-SRC := src/macos_present.m
-OBJ := build/macos_present.o
+SRC := src/macos_present.m $(RUNTIME)/src/net_apple.m
+OBJ := build/macos_present.o build/net_apple.o
+
+build/net_apple.o: $(RUNTIME)/src/net_apple.m $(RUNTIME)/src/net_transport.h $(RUNTIME)/src/rt_util.h $(RUNTIME)/include/scuzz_rt.h | build
+	$(CC) $(OBJCFLAGS) $(INCLUDES) -I$(RUNTIME)/src -c $< -o $@
 
 build/%.o: src/%.m include/scuzz_embedder.h | build
 	$(CC) $(OBJCFLAGS) $(INCLUDES) -c $< -o $@

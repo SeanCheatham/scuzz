@@ -1,0 +1,36 @@
+record Screen(status: String, taps: Int)
+
+def decode(status: Int, body: String): Result[String, String] =
+  if (status != 200) Result.Err(s"HTTP $status") else Json.parse(body) match {
+  case Result.Err(_) => Result.Err("Invalid JSON")
+  case Result.Ok(value) => if (!Json.isObj(value) || Json.getStr(value, "message", "") == "") Result.Err("Missing message") else Result.Ok(Json.getStr(value, "message", ""))
+}
+
+def finish(state: Signal[Screen], response: (Int, Map[String, String], String)): IO[Unit] =
+  response match {
+    case (status, _, body) => decode(status, body) match {
+  case Result.Err(message) => IO.fail(message)
+  case Result.Ok(message) => IO.pure(Signal.set(state, Signal.get(state).copy(status = s"Loaded: $message")))
+}
+  }
+
+def request(url: String): IO[(Int, Map[String, String], String)] =
+  Net.httpGet(url, Map.set(Map.empty(), "Accept", "application/json"))
+
+def load(state: Signal[Screen], url: String): IO[Unit] =
+  if (Signal.get(state).status == "Loading") IO.pure(()) else for {
+  _ = Signal.set(state, Signal.get(state).copy(status = "Loading"))
+  _ <- IO.timeout(2000, request(url).flatMap(response => finish(state, response))).handleErrorWith(_ => IO.pure(Signal.set(state, Signal.get(state).copy(status = "Failed. Try again."))))
+} yield ()
+
+def endpoint(): IO[String] =
+  Sys.getenv("SCUZZ_NETWORK_URL").map(configured => if (configured == "") "https://example.com/message" else configured)
+
+@main def main: IO[Unit] =
+  for {
+    url <- endpoint()
+    state = Signal.make(Screen("Ready", 0))
+    status = Signal.map(state, value => value.status)
+    taps = Signal.map(state, value => Str.concat("Taps: ", Str.fromInt(value.taps)))
+    _ <- Ui.run(_ => View.center(View.column(View.text("Network"), View.bindText(status), View.bindText(taps), View.button("Load", _ => load(state, url)), View.button("Tap", _ => Signal.set(state, Signal.get(state).copy(taps = Signal.get(state).taps + 1))))).require(Signal.get(state).taps >= 0))
+  } yield ()

@@ -579,6 +579,8 @@ slice_ios() {
   need_scuzz
   need_cmd xcrun "Install Xcode and an iOS simulator runtime"
   need_cmd python3 "Install the Xcode command-line tools"
+  "$SCUZZ" fuzz --iterations 0 examples/network-ui
+  python3 crates/runtime/tests/test_net_apple.py --ios
   "$SCUZZ" fuzz --iterations 0 examples/counter
   python3 crates/embedder-mobile/shells/ios/test_loop.py "$SCUZZ"
 }
@@ -626,6 +628,7 @@ slice_macos_app() {
   need_scuzz
   need_cmd python3 "Install the Xcode command-line tools"
   python3 crates/embedder-desktop/tests/test_package.py "$SCUZZ"
+  python3 crates/runtime/tests/test_net_apple.py
 }
 
 slice_macos_hello() {

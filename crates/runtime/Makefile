@@ -26,7 +26,7 @@ SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/str
 	src/theme.c src/signal.c src/view.c src/ui.c \
 	src/ui_script.c src/lang_ui.c \
 	src/list.c src/map.c src/fs.c src/sys.c src/clock.c src/hash.c src/hex.c src/base64.c src/bytes.c src/random.c src/uuid.c src/net.c \
-	src/net_http.c src/net_sock.c src/json.c src/testrt.c src/impurity.c
+	src/net_http.c src/net_request.c src/net_sock.c src/json.c src/testrt.c src/impurity.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
 .PHONY: all clean test test-asan lib ffi-skia
@@ -44,7 +44,7 @@ FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 ffi-skia:
 	@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
-build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/ui_script.h | build
+build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/ui_script.h src/net_transport.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 lib: build/libscuzz_rt.a

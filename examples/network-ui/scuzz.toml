@@ -1,0 +1,9 @@
+[package]
+name = "network-ui"
+version = "0.1.0"
+description = "Fetch JSON while the UI stays responsive"
+
+[ui]
+default_runtime = "headless"
+headless_size = [400, 280]
+headless_scale = 1.0

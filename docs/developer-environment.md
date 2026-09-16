@@ -125,7 +125,7 @@ native object reuse, manual restart, quit, and interruption.
 The UIKit proof checks safe areas, viewport changes, software keyboard input,
 and keyboard dismissal. It restores the keyboard preference after the run.
 Both proofs use the selected simulator. Each proof removes its app.
-The slice also runs the Counter Headless claims.
+The Net proof uses a separate temporary simulator. It adds a test root only to that simulator. It deletes the simulator after the proof. It checks HTTP methods, limits, cancellation, and platform trust. The network UI shows loading, failure, and retry. Input continues during a request. The slice also runs the Counter and network UI Headless claims. macos-app proves public HTTPS with OpenSSL certificate paths disabled.
 Set `SCUZZ_IOS_DEVICE` to select a simulator name or ID.
 
 ## Compiler campaigns

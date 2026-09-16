@@ -76,6 +76,8 @@ def bundle(exe, dest, name, version, identifier, width, height, scale):
             "CFBundleShortVersionString": version,
             "CFBundleVersion": "1",
             "NSHighResolutionCapable": True,
+            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+            "NSLocalNetworkUsageDescription": "Connect to app services on your local network.",
             "ScuzzUI": {"width": int(width), "height": int(height), "scale": float(scale)},
         }
         (contents / "Info.plist").write_bytes(plistlib.dumps(info))

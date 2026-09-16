@@ -24,7 +24,7 @@ FLAGS=(-O2 -sMEMORY64=2)
 "${EMCC[@]}" "${FLAGS[@]}" -Wno-override-module -c "$IR" -o "$OBJ/app.o"
 for src in "$ROOT"/crates/runtime/src/*.c; do
   name="$(basename "$src" .c)"
-  case "$name" in net|impurity) continue ;; esac
+  case "$name" in net|net_request|impurity) continue ;; esac
   "${EMCC[@]}" "${FLAGS[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" -o "$OBJ/rt_$name.o"
 done
 for name in sk_sw png_enc sk_gpu_none sk_mono sk_color; do

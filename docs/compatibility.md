@@ -45,12 +45,12 @@ What we keep vs cut. Product locks and language direction: [`philosophy.md`](phi
 | Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCUZZ_MOBILE_SHELL=1` |
 | macOS desktop | Yes | Cocoa blit | UI host packages are signed `.app` bundles. Non-system libraries are included. Finder launch uses Desktop. |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
-| iOS / Android | Shared app code | Packaging shells | iOS simulator run needs Xcode on Apple Silicon. Android needs the NDK. Physical device proof stays open |
+| iOS / Android | Shared app code | Packaging shells | iOS simulator run needs Xcode on Apple Silicon. Android needs the NDK. iOS HTTP clients use platform trust. Physical device proof stays open |
 | Web / browser | WebAssembly GUI | Canvas presentation | `scuzz package --target web`; cached Emscripten 4.0.23; Python 3 on the build host |
 
 ## Toolchain
 
-Host build, run, and package commands support file paths with spaces. Host UI watch needs one direct `Ui.run` factory. Keep its captured bindings unchanged during reload. The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([philosophy.md](philosophy.md#self-hosting)). Kernel surface: [philosophy.md](philosophy.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. HTTP `https://` links OpenSSL (`libssl` / `libcrypto`). Serve TLS uses the same stack. There is no second TLS stack.
+Host build, run, and package commands support file paths with spaces. Host UI watch needs one direct `Ui.run` factory. Keep its captured bindings unchanged during reload. The compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). `scripts/bootstrap.sh` compiles `examples/cli` with the newest GitHub `v*` release ([philosophy.md](philosophy.md#self-hosting)). Kernel surface: [philosophy.md](philosophy.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy. CLI and server HTTPS link OpenSSL (`libssl` / `libcrypto`). iOS and macOS GUI clients use URLSession with platform certificate trust. Both transports use the same Net API and hermetic simulation dispatch. iOS supports Net HTTP clients and TCP/UDP. It does not support Net HTTP servers. GUI clients verify loopback certificates. App Transport Security allows local networking. Use HTTPS for remote services.
 
 ## Browser target
 

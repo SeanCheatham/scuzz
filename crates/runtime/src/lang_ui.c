@@ -347,39 +347,32 @@ static void web_live_frame(void) {
 }
 #endif
 
-static void live_pump_loop(SzUiSession *session, int (*still)(void)) {
-  const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
-  int max_frames_parsed = max_frames_env ? atoi(max_frames_env) : 0;
-  int64_t max_frames = max_frames_parsed > 0 ? max_frames_parsed : 0;
-  int64_t frame = 0;
-  while (sz_ui_session_alive(session) && still()) {
-    if (!sz_ui_pump_sync(session)) {
-      if (!sz_ui_session_alive(session))
-        break;
-      sz_panic("Ui.run live pump failed");
-    }
-    if (!sz_ui_session_alive(session))
-      break;
-    frame++;
-    if (max_frames > 0 && frame >= max_frames)
-      break;
-    {
-      struct timespec ts;
-      ts.tv_sec = 0;
-      ts.tv_nsec = 16000000L; /* ~60fps cap */
-      nanosleep(&ts, NULL);
-    }
-  }
-}
-
 /* --- Ui.run -------------------------------------------------------------- */
 
 typedef struct {
   SzUiRebuildFn rebuild;
 } RebuildFnCell;
 
+typedef struct {
+  SzUiSession *session;
+  int (*still)(void);
+  int64_t frames;
+  int64_t limit;
+  int closing;
+} RunCell;
+
+static void *new_run(void *env) {
+  RunCell *run = (RunCell *)sz_rc_alloc(sizeof *run, SZ_RC_BOX);
+  memset(run, 0, sizeof *run);
+  SzPair *owner = sz_pair_new(env, run);
+  sz_release(run);
+  return owner;
+}
+
 static void *thunk_run_rebuild(void *env) {
-  SzPair *pack = (SzPair *)env;
+  SzPair *owner = env;
+  SzPair *pack = owner->left;
+  RunCell *run = owner->right;
   RebuildFnCell *cell = pack ? (RebuildFnCell *)pack->right : NULL;
   void *capture = pack ? pack->left : NULL;
   SzUiRebuildFn rebuild = cell ? cell->rebuild : NULL;
@@ -387,7 +380,6 @@ static void *thunk_run_rebuild(void *env) {
   SzUiSession *session;
   SzView *root;
   const char *stamp;
-  int interactive;
   int inject_text = 0;
 
   fill_cfg(&cfg, 0, 0);
@@ -401,6 +393,7 @@ static void *thunk_run_rebuild(void *env) {
   session = sz_ui_mount(&cfg, root);
   if (!session)
     sz_panic("Ui.run mount failed");
+  run->session = session;
   sz_ui_session_take_root(session);
   sz_ui_session_set_rebuild(session, rebuild, capture);
   stamp = getenv("SCUZZ_UI_RELOAD_STAMP");
@@ -455,42 +448,100 @@ static void *thunk_run_rebuild(void *env) {
   /* Keep the session mounted. The rAF loop owns it after main returns. */
   return NULL;
 #endif
-  interactive = cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available();
-  if (interactive) {
-    live_pump_loop(session, live_still_desktop);
-    sz_ui_session_finish(session);
-  } else if (stamp && stamp[0]) {
-    live_pump_loop(session, live_still_watch);
-    sz_ui_session_finish(session);
-  } else if (cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available()) {
-    /* Host shell reports alive=0, so CI stays one frame. */
-    live_pump_loop(session, live_still_mobile);
-    sz_ui_session_finish(session);
-  } else {
-    if (sz_testrt_oracles_armed() &&
-        sz_ui_quiesce(session) == SZ_QUIESCE_BUDGET_TRIPPED)
-      sz_panic("quiesce budget tripped (64 pumps): timeline not settled");
-    sz_ui_session_finish(session);
-  }
+  run->session = session;
+  if (cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available())
+    run->still = live_still_desktop;
+  else if (stamp && stamp[0])
+    run->still = live_still_watch;
+  else if (cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available())
+    run->still = live_still_mobile;
+  const char *limit = getenv("SCUZZ_LIVE_FRAMES");
+  run->limit = limit ? atoll(limit) : 0;
+  return NULL;
+}
 
-  /* Check after unmount: view-owned capture packs pin session values until
-     teardown, so a pre-unmount check cannot tell session state from leaks. */
-  sz_ui_unmount(session);
+static void *finish_run(void *env) {
+  RunCell *run = env;
+  if (!run || !run->session) return NULL;
+  sz_io_ui_reap();
+  if (sz_ui_session_alive(run->session)) sz_ui_pump_sync(run->session);
+  if (sz_testrt_oracles_armed() &&
+      sz_ui_quiesce(run->session) == SZ_QUIESCE_BUDGET_TRIPPED)
+    sz_panic("quiesce budget tripped (64 pumps): timeline not settled");
+  sz_ui_session_finish(run->session);
+  sz_ui_unmount(run->session);
+  run->session = NULL;
   sz_testrt_session_baseline_check();
   return NULL;
 }
 
+static SzIo *pump_run(void *unused, void *env) {
+  (void)unused;
+  RunCell *run = env;
+  sz_io_ui_reap();
+  int alive = sz_ui_session_alive(run->session);
+  if (!alive || (run->still && (!run->still() ||
+                    (run->limit > 0 && run->frames >= run->limit)))) {
+    if (!run->closing) sz_io_ui_cancel();
+    run->closing = 1;
+  }
+  if ((run->closing || !run->still) && !sz_io_ui_pending())
+    return sz_io_pure(NULL);
+  if (alive && !run->closing) {
+    if (!sz_ui_pump_sync(run->session) && sz_ui_session_alive(run->session))
+      sz_panic("Ui.run live pump failed");
+    run->frames++;
+  }
+  SzIo *sleep = sz_io_sleep_ms(run->still ? 16 : 1);
+  SzIo *next = sz_io_flatmap(sleep, pump_run, run);
+  sz_release(sleep);
+  return next;
+}
+
+static void *cancel_handlers(void *env) {
+  (void)env;
+  sz_io_ui_cancel();
+  return NULL;
+}
+static SzIo *finish_handlers(void *unused, void *env) {
+  (void)unused;
+  if (!sz_io_ui_pending()) return sz_io_delay(finish_run, env);
+  SzIo *sleep = sz_io_sleep_ms(1);
+  SzIo *next = sz_io_flatmap(sleep, finish_handlers, env);
+  sz_release(sleep);
+  return next;
+}
+
+static SzIo *mounted_run(void *value, void *env) {
+  (void)env;
+#ifdef __EMSCRIPTEN__
+  return sz_io_delay(thunk_run_rebuild, value);
+#else
+  SzPair *owner = value;
+  RunCell *run = owner->right;
+  SzIo *mount = sz_io_delay(thunk_run_rebuild, owner);
+  SzIo *inner = sz_io_flatmap(mount, pump_run, run);
+  sz_release(mount);
+  SzIo *cancel = sz_io_delay(cancel_handlers, run);
+  SzIo *finish = sz_io_flatmap(cancel, finish_handlers, run);
+  sz_release(cancel);
+  SzIo *io = sz_io_ensure(inner, finish);
+  sz_release(inner);
+  sz_release(finish);
+  return io;
+#endif
+}
+
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env) {
   RebuildFnCell *cell = (RebuildFnCell *)sz_rc_alloc(sizeof(RebuildFnCell), SZ_RC_BOX);
-  SzPair *pack;
   cell->rebuild = fn;
-  pack = sz_pair_new(env, cell);
+  SzPair *pack = sz_pair_new(env, cell);
   sz_release(cell);
-  {
-    SzIo *io = sz_io_delay(thunk_run_rebuild, pack);
-    sz_release(pack);
-    return io;
-  }
+  SzIo *mount = sz_io_delay(new_run, pack);
+  sz_release(pack);
+  SzIo *io = sz_io_flatmap(mount, mounted_run, NULL);
+  sz_release(mount);
+  return io;
 }
 
 SzView *sz_lang_view_code(SzString *text) {

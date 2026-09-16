@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static uint64_t g_signal_revision;
+uint64_t sz_signal_revision(void) { return g_signal_revision; }
+
 struct SzSignal {
   void *value;
   int elem_str;
@@ -353,6 +356,7 @@ void *sz_signal_write(SzSignal *s, void *value) {
   sz_release(s->value);
   s->value = value;
   s->version++;
+  g_signal_revision++;
   return NULL;
 }
 
