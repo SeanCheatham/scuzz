@@ -607,7 +607,7 @@ def emitStrAs(s: String, prefix: String, strs: List[String], stem: String): Slot
   emitStr2(prefix, strIndex(strs, s, 0), strArr(s), stem)
 
 def emitStr2(prefix: String, idx: Int, len: Int, stem: String): Slot =
-  Slot(join(line(Str.concat(tmp(prefix, "gep"), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(len), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0")))))), line(Str.concat(tmp(prefix, stem), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(prefix, "gep"), ")"))))), pct(prefix, stem), true)
+  Slot(join(line(Str.concat(tmp(prefix, "gep"), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(len), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0")))))), line(Str.concat(tmp(prefix, stem), Str.concat("call ptr @sz_string_lit(ptr ", Str.concat(pct(prefix, "gep"), ")"))))), pct(prefix, stem), true)
 
 def emitPrint(inner: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitPrint2(emitSzString(inner, prefix, strs, defs, ens, ps, loc), prefix)
@@ -3974,7 +3974,7 @@ def tupleStrTest(comp: String, pre: String, sid: Int, side: String, strs: List[S
   join(tupleStrCompare(unquote(comp), pre, side, tupleSideVal(pre, sid, side), strs), join(line(Str.concat("br i1 ", Str.concat(pct(pre, Str.concat("tseq", side)), Str.concat(", label %", Str.concat(tupleContStem(pre, side), Str.concat(", label %", fail)))))), join(lab(tupleContStem(pre, side)), cont)))
 
 def tupleStrCompare(s: String, pre: String, side: String, val: String, strs: List[String]): String =
-  join(line(Str.concat(tmp(pre, Str.concat("tsgep", side)), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, s, 0)), ", i64 0, i64 0")))))), join(line(Str.concat(tmp(pre, Str.concat("tslit", side)), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(pre, Str.concat("tsgep", side)), ")")))), join(line(Str.concat(tmp(pre, Str.concat("tseqi", side)), Str.concat("call i32 @sz_string_eq(ptr ", Str.concat(val, Str.concat(", ptr ", Str.concat(pct(pre, Str.concat("tslit", side)), ")")))))), join(relPtr(pct(pre, Str.concat("tslit", side))), line(Str.concat(tmp(pre, Str.concat("tseq", side)), Str.concat("icmp ne i32 ", Str.concat(pct(pre, Str.concat("tseqi", side)), ", 0"))))))))
+  join(line(Str.concat(tmp(pre, Str.concat("tsgep", side)), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, s, 0)), ", i64 0, i64 0")))))), join(line(Str.concat(tmp(pre, Str.concat("tslit", side)), Str.concat("call ptr @sz_string_lit(ptr ", Str.concat(pct(pre, Str.concat("tsgep", side)), ")")))), join(line(Str.concat(tmp(pre, Str.concat("tseqi", side)), Str.concat("call i32 @sz_string_eq(ptr ", Str.concat(val, Str.concat(", ptr ", Str.concat(pct(pre, Str.concat("tslit", side)), ")")))))), join(relPtr(pct(pre, Str.concat("tslit", side))), line(Str.concat(tmp(pre, Str.concat("tseq", side)), Str.concat("icmp ne i32 ", Str.concat(pct(pre, Str.concat("tseqi", side)), ", 0"))))))))
 
 def headTy(tys: List[String]): String =
   if (List.isEmpty(tys)) "" else List.at(tys, 0)
@@ -4135,7 +4135,7 @@ def strGep(s: String, prefix: String, i: Int, tag: String, idx: Int): String =
   line(Str.concat(tmp(ppre(prefix, i), Str.concat("sgep", Str.concat(sid(i), tag))), Str.concat("getelementptr inbounds [", Str.concat(Str.fromInt(strArr(s)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(idx), ", i64 0, i64 0"))))))
 
 def strLit(prefix: String, i: Int, tag: String): String =
-  line(Str.concat(tmp(ppre(prefix, i), Str.concat("slit", Str.concat(sid(i), tag))), Str.concat("call ptr @sz_string_from_cstr(ptr ", Str.concat(pct(ppre(prefix, i), Str.concat("sgep", Str.concat(sid(i), tag))), ")"))))
+  line(Str.concat(tmp(ppre(prefix, i), Str.concat("slit", Str.concat(sid(i), tag))), Str.concat("call ptr @sz_string_lit(ptr ", Str.concat(pct(ppre(prefix, i), Str.concat("sgep", Str.concat(sid(i), tag))), ")"))))
 
 def strEqi(prefix: String, i: Int, tag: String, scrut: String): String =
   line(Str.concat(tmp(ppre(prefix, i), Str.concat("seqi", Str.concat(sid(i), tag))), Str.concat("call i32 @sz_string_eq(ptr ", Str.concat(scrut, Str.concat(", ptr ", Str.concat(pct(ppre(prefix, i), Str.concat("slit", Str.concat(sid(i), tag))), ")"))))))
@@ -5725,7 +5725,7 @@ def decodePanic(prefix: String, fail: Int): String =
   join(fromCstrLine(prefix, fail), join(panicLine(prefix, fail), line("unreachable")))
 
 def fromCstrLine(prefix: String, fail: Int): String =
-  line(Str.concat(decPct(prefix, "ps", fail), Str.concat(" = call ptr @sz_string_from_cstr(ptr ", Str.concat(decPct(prefix, "g", fail), ")"))))
+  line(Str.concat(decPct(prefix, "ps", fail), Str.concat(" = call ptr @sz_string_lit(ptr ", Str.concat(decPct(prefix, "g", fail), ")"))))
 
 def panicLine(prefix: String, fail: Int): String =
   line(Str.concat("call void @sz_panic(ptr ", Str.concat(decPct(prefix, "ps", fail), ")")))
@@ -5758,7 +5758,7 @@ def drvGep(name: String, strs: List[String], i: Int): String =
   line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_gep = getelementptr inbounds [", Str.concat(Str.fromInt(strArr(name)), Str.concat(" x i8], ptr @.str", Str.concat(Str.fromInt(strIndex(strs, name, 0)), ", i64 0, i64 0")))))))
 
 def drvSs(i: Int): String =
-  line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_ss = call ptr @sz_string_from_cstr(ptr %drv", Str.concat(Str.fromInt(i), "_gep)")))))
+  line(Str.concat("%drv", Str.concat(Str.fromInt(i), Str.concat("_ss = call ptr @sz_string_lit(ptr %drv", Str.concat(Str.fromInt(i), "_gep)")))))
 
 def drvCall(name: String, ps: List[Param], mod: String, i: Int): String =
   line(Str.concat("call void @sz_driver_register(ptr %drv", Str.concat(Str.fromInt(i), Str.concat("_ss, i64 ", Str.concat(Str.fromInt(List.len(ps)), Str.concat(", i64 ", Str.concat(Str.fromInt(packKind(ps)), Str.concat(", ptr ", Str.concat(drvSym(name, ps, mod, i), ")")))))))))
@@ -6395,7 +6395,7 @@ def declsX(): String =
   join(decl("ptr @sz_net_http_post(ptr, ptr, ptr)"), join(decl("ptr @sz_net_http_put(ptr, ptr, ptr)"), join(decl("ptr @sz_net_http_patch(ptr, ptr, ptr)"), join(decl("ptr @sz_net_http_delete(ptr, ptr)"), join(decl("ptr @sz_net_http_head(ptr, ptr)"), join(decl("ptr @sz_net_tcp_connect(ptr, i64)"), join(decl("ptr @sz_net_tcp_listen(i64)"), join(decl("ptr @sz_net_tcp_accept(ptr)"), join(decl("ptr @sz_net_tcp_read(ptr, i64)"), join(decl("ptr @sz_net_tcp_write(ptr, ptr)"), join(decl("ptr @sz_net_tcp_close(ptr)"), join(decl("ptr @sz_net_udp_bind(i64)"), join(decl("ptr @sz_net_udp_send(ptr, ptr, i64, ptr)"), join(decl("ptr @sz_net_udp_recv(ptr, i64)"), decl("ptr @sz_net_udp_close(ptr)")))))))))))))))
 
 def declsA(): String =
-  join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_from_bool(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)")))))))))
+  join(decl("ptr @sz_string_from_cstr(ptr)"), join(decl("ptr @sz_string_lit(ptr)"), join(decl("void @sz_retain(ptr)"), join(decl("void @sz_release(ptr)"), join(decl("ptr @sz_string_from_int(i64)"), join(decl("ptr @sz_string_from_bool(i64)"), join(decl("ptr @sz_string_concat(ptr, ptr)"), join(decl("ptr @sz_adt_new(i32, ptr)"), join(decl("i32 @sz_adt_tag(ptr)"), decl("ptr @sz_box_i64(i64)"))))))))))
 
 def declsB(): String =
   join(decl("ptr @sz_list_nil()"), join(decl("ptr @sz_list_cons(ptr, ptr)"), join(decl("i64 @sz_list_len(ptr)"), join(decl("ptr @sz_list_concat(ptr, ptr)"), join(decl("ptr @sz_list_reverse(ptr)"), join(decl("ptr @sz_io_println(ptr)"), join(decl("ptr @sz_io_flatmap(ptr, ptr, ptr)"), decl("i32 @sz_runtime_main_args(ptr, i32, ptr)"))))))))
