@@ -79,8 +79,8 @@ def bindParamsHd(p: Param, rest: List[Param], acc: List[(String, Ty)]): List[(St
 def bindLam(p: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
   envBind(p, ty, env)
 
-def annOk(ann: String, expect: String, span: (String, Int)): Out =
-  if (ann == "" || tyEq(ann, expect)) ok(expect) else bad(Str.concat("type mismatch: expected ", Str.concat(ann, Str.concat(", got ", expect))), span)
+def annOk(ann: String, expect: String, span: (String, Int), ens: List[En]): Out =
+  if (ann == "" || tyEqEn(ann, expect, ens)) ok(expect) else bad(Str.concat("type mismatch: expected ", Str.concat(ann, Str.concat(", got ", expect))), span)
 
 def lookupEnv(env: List[(String, Ty)], n: String): Ty =
   if (List.isEmpty(env)) Type.tNamed("") else lookupEnv1(List.at(env, 0), List.tail(env), n)
@@ -526,7 +526,7 @@ def resolveResUse(ao: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: 
 
 def resolveResLam(recv: String, bind: String, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), makeRet: String): Out =
   lam match {
-    case Expr.ELam(p, ty, body) => resolveResAnn(annOk(ty, bind, span), recv, p, body, env, funs, ens, span, makeRet)
+    case Expr.ELam(p, ty, body) => resolveResAnn(annOk(ty, bind, span, ens), recv, p, body, env, funs, ens, span, makeRet)
     case Expr.ENamed(_, inner) => resolveResLam(recv, bind, inner, env, funs, ens, span, makeRet)
     case _ => bad(Str.concat(if (makeRet == "") "Resource.use" else "Resource.make", " needs a lambda"), span)
   }
@@ -560,7 +560,7 @@ def resolveNetServe2(f: String, po: Out, lam: Expr, env: List[(String, Ty)], fun
 
 def resolveNetLam(f: String, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   lam match {
-    case Expr.ELam(p, ty, body) => resolveNetAnn(annOk(ty, netReqTy(), span), f, p, body, env, funs, ens, span)
+    case Expr.ELam(p, ty, body) => resolveNetAnn(annOk(ty, netReqTy(), span, ens), f, p, body, env, funs, ens, span)
     case Expr.ENamed(_, inner) => resolveNetLam(f, inner, env, funs, ens, span)
     case Expr.EAscribe(inner, _, _) => resolveNetLam(f, inner, env, funs, ens, span)
     case _ => resolveNetFun(f, infer(stripNamed(lam), env, funs, ens), span)
@@ -592,7 +592,7 @@ def resolveViewEach2(src: Out, rest: List[Expr], env: List[(String, Ty)], funs: 
 
 def resolveViewEachLam(sigTy: Ty, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   lam match {
-    case Expr.ELam(p, ty, body) => resolveViewEachAnn(annOk(ty, eachElemOf(sigTy), span), p, body, env, funs, ens, span)
+    case Expr.ELam(p, ty, body) => resolveViewEachAnn(annOk(ty, eachElemOf(sigTy), span, ens), p, body, env, funs, ens, span)
     case Expr.ENamed(_, inner) => resolveViewEachLam(sigTy, inner, env, funs, ens, span)
     case Expr.EAscribe(inner, _, _) => resolveViewEachLam(sigTy, inner, env, funs, ens, span)
     case _ => resolveViewEachFun(infer(stripNamed(lam), env, funs, ens), eachElemOf(sigTy), span, ens)
@@ -892,7 +892,7 @@ def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, 
   if (hasErr(vo)) vo else if (d) inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span) else inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy)
 
 def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (Str.startsWith(ty, "Stream") || Str.startsWith(ty, "Resource")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span))
+  if (Str.startsWith(ty, "Stream") || Str.startsWith(ty, "Resource")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens))
 
 def inferForDraw2(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], u: Out): Out =
   if (hasErr(u)) u else inferForGo(rest, body, bindFor(true, name, ty, env, ens), funs, ens, tyStr(u))
@@ -1566,8 +1566,8 @@ def ioOk(t: String): String =
 def ioTy(e: String, a: String): String =
   if (e == "" || e == "String") Str.concat("IO[", Str.concat(a, "]")) else Str.concat("IO[", Str.concat(e, Str.concat(", ", Str.concat(a, "]"))))
 
-def unifyErr(a: String, b: String, span: (String, Int)): Out =
-  if (a == "") ok(if (b == "") "String" else b) else if (b == "") ok(a) else if (tyEq(a, b)) ok(prefer(a, b)) else bad(Str.concat("fail type mismatch: expected ", Str.concat(a, Str.concat(", got ", b))), span)
+def unifyErr(a: String, b: String, span: (String, Int), ens: List[En]): Out =
+  if (a == "") ok(if (b == "") "String" else b) else if (b == "") ok(a) else if (tyEqEn(a, b, ens)) ok(preferEn(a, b, ens)) else bad(Str.concat("fail type mismatch: expected ", Str.concat(a, Str.concat(", got ", b))), span)
 
 def inferFlatMap(recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   inferFlatMap2(infer(recv, env, funs, ens), args, env, funs, ens, e)
@@ -1580,7 +1580,7 @@ def inferIoMap2(o: Out, recv: Expr, args: List[Expr], env: List[(String, Ty)], f
 
 def inferIoMapLam(recv: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   lam match {
-    case Expr.ELam(p, ty, body) => inferIoMapAnn(annOk(ty, ioPayload(tyStr(recv)), exprSpan(env, e)), recv, p, body, env, funs, ens, e)
+    case Expr.ELam(p, ty, body) => inferIoMapAnn(annOk(ty, ioPayload(tyStr(recv)), exprSpan(env, e), ens), recv, p, body, env, funs, ens, e)
     case Expr.EMatch(_, _, _) => inferIoMap3(recv, infer(lam, env, funs, ens), env, e)
     case _ => bad("map needs a lambda", exprSpan(env, e))
   }
@@ -1596,7 +1596,7 @@ def inferFlatMap2(o: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab,
 
 def inferFlatMapLam(recv: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   lam match {
-    case Expr.ELam(p, ty, body) => inferFlatMapAnn(annOk(ty, ioPayload(tyStr(recv)), exprSpan(env, e)), recv, p, body, env, funs, ens, e)
+    case Expr.ELam(p, ty, body) => inferFlatMapAnn(annOk(ty, ioPayload(tyStr(recv)), exprSpan(env, e), ens), recv, p, body, env, funs, ens, e)
     case _ => inferFlatMap3(recv, infer(lam, env, funs, ens), env, ens, e)
   }
 
@@ -1613,10 +1613,10 @@ def inferFlatMap3(recv: Out, body: Out, env: List[(String, Ty)], ens: List[En], 
   if (hasErr(body)) body else inferFlatMap4(recv, body, env, ens, e)
 
 def inferFlatMap4(recv: Out, body: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
-  if (isIo(tyStr(recv)) && isIo(tyStr(body))) inferFlatMapErr(recv, body, env, e) else if (isIo(tyStr(recv)) && isLooseEn(tyStr(body), ens)) okTy(recv.ty) else if (isLooseEn(tyStr(recv), ens)) ok(if (isIo(tyStr(body))) tyStr(body) else "IO[A]") else bad(Str.concat("flatMap needs IO, got ", Str.concat(tyStr(recv), Str.concat(" and ", tyStr(body)))), exprSpan(env, e))
+  if (isIo(tyStr(recv)) && isIo(tyStr(body))) inferFlatMapErr(recv, body, env, ens, e) else if (isIo(tyStr(recv)) && isLooseEn(tyStr(body), ens)) okTy(recv.ty) else if (isLooseEn(tyStr(recv), ens)) ok(if (isIo(tyStr(body))) tyStr(body) else "IO[A]") else bad(Str.concat("flatMap needs IO, got ", Str.concat(tyStr(recv), Str.concat(" and ", tyStr(body)))), exprSpan(env, e))
 
-def inferFlatMapErr(recv: Out, body: Out, env: List[(String, Ty)], e: Expr): Out =
-  inferFlatMapErr2(unifyErr(ioErr(tyStr(recv)), ioErr(tyStr(body)), exprSpan(env, e)), recv, body)
+def inferFlatMapErr(recv: Out, body: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
+  inferFlatMapErr2(unifyErr(ioErr(tyStr(recv)), ioErr(tyStr(body)), exprSpan(env, e), ens), recv, body)
 
 def inferFlatMapErr2(u: Out, recv: Out, body: Out): Out =
   if (hasErr(u)) u else ok(ioTy(tyStr(u), ioOk(tyStr(body))))
@@ -1629,7 +1629,7 @@ def inferHandle2(o: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab, 
 
 def inferHandleLam(recv: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   lam match {
-    case Expr.ELam(p, ty, body) => inferHandleAnn(annOk(ty, ioErr(tyStr(recv)), exprSpan(env, e)), recv, p, body, env, funs, ens, e)
+    case Expr.ELam(p, ty, body) => inferHandleAnn(annOk(ty, ioErr(tyStr(recv)), exprSpan(env, e), ens), recv, p, body, env, funs, ens, e)
     case _ => inferHandle3(recv, infer(lam, env, funs, ens), env, ens, e)
   }
 
@@ -1640,10 +1640,10 @@ def bindHandle(p: String, ioTy: String, env: List[(String, Ty)]): List[(String, 
   envBind(p, ioErr(ioTy), env)
 
 def inferHandle3(recv: Out, body: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
-  if (hasErr(body)) body else if (isIo(tyStr(recv)) && isIo(tyStr(body))) inferHandleOk(recv, body, env, e) else if (isIo(tyStr(recv)) && isLooseEn(tyStr(body), ens)) okTy(recv.ty) else bad(Str.concat("handleErrorWith needs IO, got ", Str.concat(tyStr(recv), Str.concat(" and ", tyStr(body)))), exprSpan(env, e))
+  if (hasErr(body)) body else if (isIo(tyStr(recv)) && isIo(tyStr(body))) inferHandleOk(recv, body, env, ens, e) else if (isIo(tyStr(recv)) && isLooseEn(tyStr(body), ens)) okTy(recv.ty) else bad(Str.concat("handleErrorWith needs IO, got ", Str.concat(tyStr(recv), Str.concat(" and ", tyStr(body)))), exprSpan(env, e))
 
-def inferHandleOk(recv: Out, body: Out, env: List[(String, Ty)], e: Expr): Out =
-  if (tyEq(ioOk(tyStr(recv)), ioOk(tyStr(body)))) ok(ioTy(ioErr(tyStr(body)), prefer(ioOk(tyStr(recv)), ioOk(tyStr(body))))) else bad(Str.concat("handleErrorWith type mismatch: expected ", Str.concat(ioOk(tyStr(recv)), Str.concat(", got ", ioOk(tyStr(body))))), exprSpan(env, e))
+def inferHandleOk(recv: Out, body: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
+  if (tyEqEn(ioOk(tyStr(recv)), ioOk(tyStr(body)), ens)) ok(ioTy(ioErr(tyStr(body)), preferEn(ioOk(tyStr(recv)), ioOk(tyStr(body)), ens))) else bad(Str.concat("handleErrorWith type mismatch: expected ", Str.concat(ioOk(tyStr(recv)), Str.concat(", got ", ioOk(tyStr(body))))), exprSpan(env, e))
 
 def inferVar(s: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   inferVar2(s, lookupEnv(env, s), env, funs, ens, span)
