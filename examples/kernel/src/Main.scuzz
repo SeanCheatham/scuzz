@@ -136,6 +136,13 @@ def evalTerm(t: Term): Int =
     case Term.Add(a, b) => evalTerm(a) + evalTerm(b)
   }
 
+def evalNestedAdd(t: Term): Int =
+  t match {
+    case Term.Add(Term.N(n), Term.N(m)) => n + m
+    case Term.Add(a, b) => evalTerm(a) + evalTerm(b)
+    case Term.N(n) => n
+  }
+
 def _termLeaves(t: Term): List[Int] =
   t match {
     case Term.N(n) => [n]
@@ -1153,6 +1160,7 @@ b"""
     _ <- IO.println(s"tco:${Str.fromInt(countdown(1000000))}")
     _ <- IO.println(s"tcom:${Str.fromInt(countdownMatch(1000000))}")
     _ <- IO.println(s"tcol:${Str.fromInt(sumAcc([1, 2, 3], 0))}")
+    _ <- IO.println(s"nest:${Str.fromInt(evalNestedAdd(Term.Add(Term.N(2), Term.N(3))))}")
     _ <- IO.println(s"diff:${if (sumTo(10, 0) == Oracle.sumTo(10)) "y" else "n"}")
     _ <- builderProof()
     _ <- utf8Proof()
