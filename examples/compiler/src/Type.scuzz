@@ -352,6 +352,9 @@ def substStr(target: String, param: String, arg: String): String =
 def eqPinned(a: String, b: String, names: List[String]): Bool =
   eq(pin(parse(a), names), pin(parse(b), names))
 
+def eqPinGot(want: String, got: String, names: List[String]): Bool =
+  eq(parse(want), pin(parse(got), names))
+
 def preferPinned(a: String, b: String, names: List[String]): String =
   show(prefer(pin(parse(a), names), pin(parse(b), names)))
 

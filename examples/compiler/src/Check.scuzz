@@ -14,9 +14,9 @@ import Parse.Alias
 import Parse.Imp
 import Parse.Im
 import Lexer.lex
-import Type.eqStr
 import Type.preferStr
 import Type.eqPinned
+import Type.eqPinGot
 import Type.preferPinned
 import Type.isTyParam
 import Type.Ty
@@ -322,9 +322,6 @@ def argMismatchMsg(prefix: String, got: String): String =
 def isListTy(t: String): Bool =
   t == "List" || Str.startsWith(t, "List[")
 
-def tyEq(a: String, b: String): Bool =
-  eqStr(a, b)
-
 def enNames(ens: List[En]): List[String] =
   if (List.isEmpty(ens)) noStr() else enNamesHd(List.at(ens, 0), List.tail(ens))
 
@@ -335,6 +332,9 @@ def enNamesHd(h: En, rest: List[En]): List[String] =
 
 def tyEqEn(a: String, b: String, ens: List[En]): Bool =
   eqPinned(a, b, enNames(ens))
+
+def tyEqGot(want: String, got: String, ens: List[En]): Bool =
+  eqPinGot(want, got, enNames(ens))
 
 def pinEns(ens: List[En], ts: List[String]): List[En] =
   if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase()) :: ens
@@ -667,7 +667,7 @@ def genericArg(f: String, ts: List[String], want: List[String], ret: String, arg
   if (hasErr(got)) got else genericBound(f, ts, want, ret, args, env, funs, ens, span, tyStr(got), Type.bindings(Type.parse(List.at(want, 0)), got.ty, ts))
 
 def genericBound(f: String, ts: List[String], want: List[String], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: String, bindings: List[(String, String)]): Out =
-  if (!tyEq(applyBindings(List.at(want, 0), bindings), got)) argMismatch(f, applyBindings(List.at(want, 0), bindings), got, span) else genericArgs(f, ts, bindWant(List.tail(want), bindings), applyBindings(ret, bindings), List.tail(args), env, funs, ens, span)
+  if (!tyEqGot(applyBindings(List.at(want, 0), bindings), got, ens)) argMismatch(f, applyBindings(List.at(want, 0), bindings), got, span) else genericArgs(f, ts, bindWant(List.tail(want), bindings), applyBindings(ret, bindings), List.tail(args), env, funs, ens, span)
 
 def applyBindings(ty: String, bindings: List[(String, String)]): String =
   if (List.isEmpty(bindings)) ty else applyBinding(ty, List.at(bindings, 0), List.tail(bindings))
