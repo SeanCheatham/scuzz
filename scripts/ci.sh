@@ -276,6 +276,11 @@ slice_hello() {
   "$SCUZZ" run examples/hello | tee /tmp/hello.out
   grep -q "Hello, Scuzz!" /tmp/hello.out
   grep -q "ready." /tmp/hello.out
+  # Evaluator parity: eval stdout must equal the compiled program stdout.
+  # The driver prints one "ok" line when it emits fresh IR; that line is not program output.
+  "$SCUZZ" run examples/hello | grep -v '^ok$' > /tmp/hello.run.out
+  "$SCUZZ" eval examples/hello | tee /tmp/hello.eval.out
+  diff /tmp/hello.run.out /tmp/hello.eval.out
   "$SCUZZ" run examples/fmt | tee /tmp/fmt.out
   grep -q "fmt-ok" /tmp/fmt.out
 }
@@ -299,6 +304,7 @@ slice_codegen() {
   echo "codegen emit done"
   "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
   grep -q "ir-ok" /tmp/codegen.out
+  grep -q "eval-ok" /tmp/codegen.out
   local memory_dir
   memory_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-match-memory.XXXXXX")"
   mkdir -p "$memory_dir/src"

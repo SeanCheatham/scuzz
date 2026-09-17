@@ -1,0 +1,734 @@
+enum Value:
+  case VUnit
+  case VInt(n: Int)
+  case VBool(b: Bool)
+  case VStr(s: String)
+  case VList(xs: List[Value])
+  case VTuple(xs: List[Value])
+  case VCon(en: String, tag: String, fields: List[Value])
+  case VClo(param: String, body: Expr, env: EvEnv)
+  case VFun(name: String, mod: String)
+  case VIo(io: IO[Value])
+  case VErr(msg: String)
+
+record EvEnv(vars: List[(String, Value)], mod: String)
+
+record EvStep(e: Expr, env: EvEnv)
+
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)])
+
+import Parse.Expr
+import Parse.Fun
+import Parse.Prog
+import Parse.En
+import Parse.Arm
+import Parse.Param
+import Parse.Bind
+import Check.Ftab
+
+def noVars(): List[(String, Value)] =
+  []
+
+def noVals(): List[Value] =
+  []
+
+def noNames(): List[String] =
+  []
+
+def load(files: List[(String, String)]): EvProg =
+  loadGo(files, Parse.emptyProg(), "Main", files)
+
+def loadGo(rest: List[(String, String)], acc: Prog, mainMod: String, files: List[(String, String)]): EvProg =
+  if (List.isEmpty(rest)) loadProg(acc, mainMod, files) else loadFile(List.at(rest, 0), List.tail(rest), acc, mainMod, files)
+
+def loadFile(f: (String, String), rest: List[(String, String)], acc: Prog, mainMod: String, files: List[(String, String)]): EvProg =
+  f match {
+    case (stem, src) => loadParsed(stem, Parse.parseFile(stem, src), rest, acc, mainMod, files)
+  }
+
+def loadParsed(stem: String, p: Prog, rest: List[(String, String)], acc: Prog, mainMod: String, files: List[(String, String)]): EvProg =
+  loadGo(rest, Parse.merge(acc, p), if (p.main == "") mainMod else stem, files)
+
+def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
+  p match {
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases)), Parse.builtins(enums), body, mainMod, files)
+  }
+
+def callPure(p: EvProg, mod: String, name: String, args: List[Value]): Value =
+  callPureHit(Check.ftabGetMod(p.funs.tab, mod, name), mod, name, args, p)
+
+def callPureHit(hit: List[Fun], mod: String, name: String, args: List[Value], p: EvProg): Value =
+  if (List.isEmpty(hit)) Value.VErr(Str.concat("eval: unknown function ", Str.concat(mod, Str.concat(".", name)))) else step(defStepVals(List.at(hit, 0), args, p), p)
+
+def runMain(p: EvProg): IO[Unit] =
+  mainIo(step(EvStep(p.main, EvEnv(noVars(), p.mainMod)), p))
+
+def mainIo(v: Value): IO[Unit] =
+  v match {
+    case Value.VIo(io) => io.flatMap(_ => IO.pure(()))
+    case Value.VErr(msg) => IO.println(msg).flatMap(_ => IO.fail("eval"))
+    case _ => IO.println("eval: @main did not produce IO").flatMap(_ => IO.fail("eval"))
+  }
+
+def supportedKits(): List[String] =
+  "Str.fromInt" :: "Str.fromBool" :: "Str.concat" :: "Str.len" :: "Str.eq" :: "Str.slice" :: "Str.charAt" :: "Str.startsWith" :: "Str.endsWith" :: "Str.contains" :: "List.len" :: "List.at" :: "List.tail" :: "List.isEmpty" :: "List.concat" :: "List.reverse" :: "List.join" :: "List.map" :: "List.filter" :: "List.head" :: "IO.println" :: "IO.pure" :: noNames()
+
+def show(v: Value): String =
+  v match {
+    case Value.VUnit => "()"
+    case Value.VInt(n) => Str.fromInt(n)
+    case Value.VBool(b) => if (b) "true" else "false"
+    case Value.VStr(s) => Check.jsonStr(s)
+    case Value.VList(xs) => Str.concat("[", Str.concat(showAll(xs), "]"))
+    case Value.VTuple(xs) => Str.concat("(", Str.concat(showAll(xs), ")"))
+    case Value.VCon(_, tag, fields) => if (List.isEmpty(fields)) tag else Str.concat(tag, Str.concat("(", Str.concat(showAll(fields), ")")))
+    case Value.VClo(_, _, _) => "<closure>"
+    case Value.VFun(name, _) => Str.concat("<fun ", Str.concat(name, ">"))
+    case Value.VIo(_) => "<io>"
+    case Value.VErr(msg) => msg
+  }
+
+def showAll(xs: List[Value]): String =
+  List.join(List.map(xs, x => show(x)), ", ")
+
+def step(s: EvStep, p: EvProg): Value =
+  s.e match {
+    case Expr.EInt(n, _) => Value.VInt(n)
+    case Expr.EBool(b) => Value.VBool(b)
+    case Expr.EStr(str, _) => Value.VStr(str)
+    case Expr.EUnit => Value.VUnit
+    case Expr.EVar(name, off) => varValue(name, s.env, p, off)
+    case Expr.EPrint(inner, off) => printValue(step(EvStep(inner, s.env), p), s.env, p, off)
+    case Expr.ECall(f, args, off) => step(callStep(s.e, f, args, s.env, p, off), p)
+    case Expr.EMethod(recv, name, args, off) => step(methodStep(s.e, recv, name, args, s.env, p, off), p)
+    case Expr.EField(recv, name, off) => fieldValue(s.e, recv, name, s.env, p, off)
+    case Expr.EBin(op, l, r, off) => binValue(s.e, op, l, r, s.env, p, off)
+    case Expr.EUn(op, inner, off) => unValue(s.e, op, inner, s.env, p, off)
+    case Expr.ELam(param, _, body) => Value.VClo(param, body, s.env)
+    case Expr.EIf(c, t, el, off) => step(ifStep(step(EvStep(c, s.env), p), t, el, s.env, p, off), p)
+    case Expr.EMatch(scr, arms, off) => step(matchStep(step(EvStep(scr, s.env), p), arms, s.env, p, off), p)
+    case Expr.EFor(bs, body, off) => forValue(bs, body, s.env, p, off, false)
+    case Expr.EList(xs) => listValue(stepAll(xs, s.env, p))
+    case Expr.ETuple(xs) => tupleValue(stepAll(xs, s.env, p))
+    case Expr.ENamed(_, inner) => step(EvStep(inner, s.env), p)
+    case Expr.EAscribe(inner, _, _) => step(EvStep(inner, s.env), p)
+    case Expr.EInterp(str) => interpAcc(Emit.interpParts(str, 0, Builder.empty(), []), s.env, p, Builder.empty())
+    case Expr.EHole => unsupported("placeholder", s.env, p, 0)
+    case Expr.EFloat(_) => unsupported("Float", s.env, p, 0)
+  }
+
+def stepAll(xs: List[Expr], env: EvEnv, p: EvProg): List[Value] =
+  if (List.isEmpty(xs)) noVals() else step(EvStep(List.at(xs, 0), env), p) :: stepAll(List.tail(xs), env, p)
+
+def valueStep(v: Value): EvStep =
+  EvStep(Expr.EVar("#v", 0), EvEnv(("#v", v) :: noVars(), ""))
+
+def holeStep(e: Expr, env: EvEnv): EvStep =
+  valueStep(Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env))
+
+def isErr(v: Value): Bool =
+  v match {
+    case Value.VErr(_) => true
+    case _ => false
+  }
+
+def hasErr(vals: List[Value]): Bool =
+  List.exists(vals, v => isErr(v))
+
+def firstErr(vals: List[Value]): Value =
+  if (List.isEmpty(vals)) Value.VErr("eval: internal error") else if (isErr(List.at(vals, 0))) List.at(vals, 0) else firstErr(List.tail(vals))
+
+def errAt(msg: String, env: EvEnv, p: EvProg, off: Int): Value =
+  Value.VErr(Str.concat("eval: ", Str.concat(msg, Str.concat(" at ", locStr(env.mod, p, off)))))
+
+def unsupported(what: String, env: EvEnv, p: EvProg, off: Int): Value =
+  errAt(Str.concat("unsupported ", what), env, p, off)
+
+def locStr(mod: String, p: EvProg, off: Int): String =
+  locSrc(Check.fileOf(mod), Check.srcOfStem(p.files, mod), off)
+
+def locSrc(file: String, src: String, off: Int): String =
+  if (src == "" || off < 0) file else locLine(file, Check.locOf(src, off))
+
+def locLine(file: String, loc: (Int, Int, Int, Int)): String =
+  loc match {
+    case (line, col, _, _) => Str.concat(file, Str.concat(":", Str.concat(Str.fromInt(line), Str.concat(":", Str.fromInt(col)))))
+  }
+
+def lookupVars(vars: List[(String, Value)], name: String): Option[Value] =
+  if (List.isEmpty(vars)) None else lookupVars1(List.at(vars, 0), List.tail(vars), name)
+
+def lookupVars1(h: (String, Value), rest: List[(String, Value)], name: String): Option[Value] =
+  h match {
+    case (k, v) => if (k == name) Some(v) else lookupVars(rest, name)
+  }
+
+def isBound(env: EvEnv, name: String): Bool =
+  lookupVars(env.vars, name) match {
+    case Some(_) => true
+    case None => false
+  }
+
+def varValue(name: String, env: EvEnv, p: EvProg, off: Int): Value =
+  lookupVars(env.vars, name) match {
+    case Some(v) => v
+    case None => varGlobal(Check.findFunPrefer2(p.funs, name, env.mod), name, env, p, off)
+  }
+
+def varGlobal(hit: List[Fun], name: String, env: EvEnv, p: EvProg, off: Int): Value =
+  if (!List.isEmpty(hit)) Value.VFun(name, List.at(hit, 0).mod) else if (Check.enOfCase(p.ens, name) != "") Value.VCon(Check.enOfCase(p.ens, name), name, noVals()) else errAt(Str.concat("unbound variable ", name), env, p, off)
+
+def printValue(v: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  v match {
+    case Value.VStr(s) => Value.VIo(printlnIo(s))
+    case Value.VErr(_) => v
+    case _ => errAt("IO.println needs String", env, p, off)
+  }
+
+def printlnIo(s: String): IO[Value] =
+  IO.println(s).flatMap(_ => IO.pure(Value.VUnit))
+
+def pureIo(v: Value): IO[Value] =
+  IO.pure(v)
+
+def failIo(msg: String): IO[Value] =
+  IO.println(msg).flatMap(_ => IO.fail("eval"))
+
+def ioOf(v: Value): IO[Value] =
+  v match {
+    case Value.VIo(io) => io
+    case Value.VErr(msg) => failIo(msg)
+    case _ => failIo("eval: continuation did not produce IO")
+  }
+
+def ioOfPure(v: Value): IO[Value] =
+  v match {
+    case Value.VErr(msg) => failIo(msg)
+    case _ => pureIo(v)
+  }
+
+def ifStep(cv: Value, t: Expr, el: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
+  cv match {
+    case Value.VBool(b) => if (b) EvStep(t, env) else EvStep(el, env)
+    case Value.VErr(_) => valueStep(cv)
+    case _ => valueStep(errAt("if condition is not Bool", env, p, off))
+  }
+
+def callStep(e: Expr, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (Check.needsPh(e)) holeStep(e, env) else if (Check.isKit(f)) kitStep(f, args, env, p, off) else if (Check.hasEn(p.ens, f)) ctorStep(f, f, args, env, p, off) else if (Check.enOfCase(p.ens, f) != "") ctorStep(Check.enOfCase(p.ens, f), f, args, env, p, off) else callLocal(lookupVars(env.vars, f), f, args, env, p, off)
+
+def callLocal(bound: Option[Value], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  bound match {
+    case Some(fv) => applyStep(fv, stepAll(args, env, p), env, p, off)
+    case None => callDef(Check.findFunPrefer2(p.funs, f, env.mod), f, args, env, p, off)
+  }
+
+def callDef(hit: List[Fun], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (List.isEmpty(hit)) valueStep(errAt(Str.concat("unknown function ", f), env, p, off)) else defStep(List.at(hit, 0), args, env, p, off)
+
+def defStep(d: Fun, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  defStepAligned(d, Check.alignCall(d.params, args), env, p, off)
+
+def defStepAligned(d: Fun, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): EvStep =
+  al match {
+    case (xs, err) => if (err != "") valueStep(errAt(err, env, p, off)) else defStepVals(d, stepAll(xs, env, p), p)
+  }
+
+def defStepVals(d: Fun, vals: List[Value], p: EvProg): EvStep =
+  if (hasErr(vals)) valueStep(firstErr(vals)) else EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod))
+
+def bindParams(ps: List[Param], vals: List[Value], acc: List[(String, Value)]): List[(String, Value)] =
+  if (List.isEmpty(ps) || List.isEmpty(vals)) acc else bindParams(List.tail(ps), List.tail(vals), (List.at(ps, 0).name, List.at(vals, 0)) :: acc)
+
+def kitStep(f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (List.isEmpty(args) && !List.isEmpty(Kits.params(f))) valueStep(Value.VFun(f, "")) else valueStep(kitCall(f, stepAll(args, env, p), env, p, off))
+
+def ctorStep(en: String, tag: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  ctorAligned(en, tag, Check.alignCall(Check.constructorFields(p.ens, qualTag(en, tag)), args), env, p, off)
+
+def qualTag(en: String, tag: String): String =
+  if (en == tag) en else Str.concat(en, Str.concat(".", tag))
+
+def ctorAligned(en: String, tag: String, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): EvStep =
+  al match {
+    case (xs, err) => if (err != "") valueStep(errAt(err, env, p, off)) else valueStep(conValue(en, tag, stepAll(xs, env, p)))
+  }
+
+def conValue(en: String, tag: String, vals: List[Value]): Value =
+  if (hasErr(vals)) firstErr(vals) else Value.VCon(en, tag, vals)
+
+def applyStep(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (hasErr(vals)) valueStep(firstErr(vals)) else applyStep2(fv, vals, env, p, off)
+
+def applyStep2(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): EvStep =
+  fv match {
+    case Value.VClo(param, body, cenv) => bindArg(param, applyArg(vals), cenv, body, env, p, off)
+    case Value.VFun(name, mod) => applyFun(name, mod, vals, env, p, off)
+    case Value.VErr(_) => valueStep(fv)
+    case _ => valueStep(errAt("apply needs a function", env, p, off))
+  }
+
+def applyArg(vals: List[Value]): Value =
+  if (List.len(vals) == 1) List.at(vals, 0) else Value.VTuple(vals)
+
+def bindArg(param: String, arg: Value, cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (param == "" || param == "()") EvStep(body, cenv) else bindArgPat(tryPat(param, arg, p.ens), cenv, body, env, p, off)
+
+def bindArgPat(bound: Option[List[(String, Value)]], cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
+  bound match {
+    case Some(bs) => EvStep(body, EvEnv(List.concat(bs, cenv.vars), cenv.mod))
+    case None => valueStep(errAt("lambda argument does not match its parameter", env, p, off))
+  }
+
+def applyFun(name: String, mod: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (Check.isKit(name)) valueStep(kitCall(name, vals, env, p, off)) else applyFunHit(Check.ftabGetMod(p.funs.tab, mod, name), name, vals, env, p, off)
+
+def applyFunHit(hit: List[Fun], name: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (List.isEmpty(hit)) valueStep(errAt(Str.concat("unknown function ", name), env, p, off)) else defStepVals(List.at(hit, 0), vals, p)
+
+def applyValue(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  step(applyStep(fv, vals, env, p, off), p)
+
+def methodStep(e: Expr, recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (Check.needsPh(e)) holeStep(e, env) else if (name == "apply") applyStep(step(EvStep(recv, env), p), stepAll(args, env, p), env, p, off) else methodRecv(recv, name, args, env, p, off)
+
+def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  recv match {
+    case Expr.EVar(en, _) => if (isBound(env, en)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else methodQual(en, name, args, env, p, off)
+    case _ => methodValue(step(EvStep(recv, env), p), name, args, env, p, off)
+  }
+
+def methodQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (Check.isKit(Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (Check.hasEn(p.ens, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(Check.ftabGetMod(p.funs.tab, en, name), en, name, args, env, p, off)
+
+def methodQualDef(hit: List[Fun], en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (List.isEmpty(hit)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else defStep(List.at(hit, 0), args, env, p, off)
+
+def methodValue(rv: Value, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (isErr(rv)) valueStep(rv) else if (name == "require") valueStep(rv) else if (name == "flatMap" && isIo(rv)) valueStep(ioBind(rv, stepAll(args, env, p), env, p, off, true)) else if (name == "map" && isIo(rv)) valueStep(ioBind(rv, stepAll(args, env, p), env, p, off, false)) else methodUser(rv, Check.ftabGetMod(p.funs.tab, tyHeadOf(rv), name), name, args, env, p, off)
+
+def isIo(v: Value): Bool =
+  v match {
+    case Value.VIo(_) => true
+    case _ => false
+  }
+
+def ioBind(rv: Value, fs: List[Value], env: EvEnv, p: EvProg, off: Int, flat: Bool): Value =
+  if (hasErr(fs)) firstErr(fs) else if (List.len(fs) != 1) errAt("flatMap expects 1 argument", env, p, off) else Value.VIo(ioBindGo(ioOf(rv), List.at(fs, 0), env, p, off, flat))
+
+def ioBindGo(io: IO[Value], f: Value, env: EvEnv, p: EvProg, off: Int, flat: Bool): IO[Value] =
+  io.flatMap(x => ioCont(applyValue(f, x :: noVals(), env, p, off), flat))
+
+def ioCont(v: Value, flat: Bool): IO[Value] =
+  if (flat) ioOf(v) else ioOfPure(v)
+
+def tyHeadOf(v: Value): String =
+  v match {
+    case Value.VCon(en, _, _) => en
+    case Value.VStr(_) => "String"
+    case Value.VInt(_) => "Int"
+    case Value.VBool(_) => "Bool"
+    case Value.VList(_) => "List"
+    case _ => ""
+  }
+
+def kitNs(v: Value): String =
+  v match {
+    case Value.VStr(_) => "Str"
+    case Value.VList(_) => "List"
+    case Value.VIo(_) => "IO"
+    case _ => tyHeadOf(v)
+  }
+
+def methodUser(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (!List.isEmpty(hit)) methodDef(List.at(hit, 0), rv, args, env, p, off) else methodKit(rv, Str.concat(kitNs(rv), Str.concat(".", name)), name, args, env, p, off)
+
+def methodDef(d: Fun, rv: Value, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  methodDefAligned(d, rv, Check.alignCall(List.tail(d.params), args), env, p, off)
+
+def methodDefAligned(d: Fun, rv: Value, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): EvStep =
+  al match {
+    case (xs, err) => if (err != "") valueStep(errAt(err, env, p, off)) else defStepVals(d, rv :: stepAll(xs, env, p), p)
+  }
+
+def methodKit(rv: Value, q: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (Check.isKit(q)) valueStep(kitCall(q, rv :: stepAll(args, env, p), env, p, off)) else methodAny(rv, Check.ftabGet(p.funs.tab, name), name, args, env, p, off)
+
+def methodAny(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (List.isEmpty(hit)) valueStep(errAt(Str.concat("unknown method ", name), env, p, off)) else methodDef(List.at(hit, 0), rv, args, env, p, off)
+
+def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
+  if (Check.needsPh(e)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else fieldRecv(recv, name, env, p, off)
+
+def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
+  recv match {
+    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.hasEn(p.ens, en)) Value.VCon(en, name, noVals()) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
+    case _ => fieldOf(step(EvStep(recv, env), p), name, env, p, off)
+  }
+
+def fieldOf(rv: Value, name: String, env: EvEnv, p: EvProg, off: Int): Value =
+  rv match {
+    case Value.VCon(en, tag, fields) => fieldAt(fields, fieldIndex(Check.constructorFields(p.ens, qualTag(en, tag)), name, 0), name, env, p, off)
+    case Value.VTuple(xs) => fieldAt(xs, Check.tupIdx(name), name, env, p, off)
+    case Value.VErr(_) => rv
+    case _ => errAt(Str.concat("no field ", name), env, p, off)
+  }
+
+def fieldIndex(ps: List[Param], name: String, i: Int): Int =
+  if (List.isEmpty(ps)) 0 - 1 else if (List.at(ps, 0).name == name) i else fieldIndex(List.tail(ps), name, i + 1)
+
+def fieldAt(xs: List[Value], i: Int, name: String, env: EvEnv, p: EvProg, off: Int): Value =
+  if (i < 0 || i >= List.len(xs)) errAt(Str.concat("no field ", name), env, p, off) else List.at(xs, i)
+
+def binValue(e: Expr, op: String, l: Expr, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+  if (Check.needsPh(e)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else if (op == "&&") andValue(step(EvStep(l, env), p), r, env, p, off) else if (op == "||") orValue(step(EvStep(l, env), p), r, env, p, off) else binVals(op, step(EvStep(l, env), p), step(EvStep(r, env), p), env, p, off)
+
+def andValue(lv: Value, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+  lv match {
+    case Value.VBool(b) => if (b) step(EvStep(r, env), p) else lv
+    case Value.VErr(_) => lv
+    case _ => errAt("&& needs Bool", env, p, off)
+  }
+
+def orValue(lv: Value, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+  lv match {
+    case Value.VBool(b) => if (b) lv else step(EvStep(r, env), p)
+    case Value.VErr(_) => lv
+    case _ => errAt("|| needs Bool", env, p, off)
+  }
+
+def binVals(op: String, lv: Value, rv: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  if (isErr(lv)) lv else if (isErr(rv)) rv else if (op == "::") consValue(lv, rv, env, p, off) else if (op == "==") Value.VBool(valEq(lv, rv)) else if (op == "!=") Value.VBool(!valEq(lv, rv)) else binInt(op, lv, rv, env, p, off)
+
+def consValue(lv: Value, rv: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  rv match {
+    case Value.VList(xs) => Value.VList(lv :: xs)
+    case _ => errAt(":: needs a List", env, p, off)
+  }
+
+def binInt(op: String, lv: Value, rv: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  lv match {
+    case Value.VInt(a) => binInt2(op, a, rv, env, p, off)
+    case _ => errAt(Str.concat("operator ", Str.concat(op, " needs Int")), env, p, off)
+  }
+
+def binInt2(op: String, a: Int, rv: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  rv match {
+    case Value.VInt(b) => binInts(op, a, b, env, p, off)
+    case _ => errAt(Str.concat("operator ", Str.concat(op, " needs Int")), env, p, off)
+  }
+
+def binInts(op: String, a: Int, b: Int, env: EvEnv, p: EvProg, off: Int): Value =
+  if (op == "+") Value.VInt(a + b) else if (op == "-") Value.VInt(a - b) else if (op == "*") Value.VInt(a * b) else if (op == "/") divInts(a, b, false, env, p, off) else if (op == "%") divInts(a, b, true, env, p, off) else if (op == "<") Value.VBool(a < b) else if (op == "<=") Value.VBool(a <= b) else if (op == ">") Value.VBool(a > b) else if (op == ">=") Value.VBool(a >= b) else unsupported(Str.concat("operator ", op), env, p, off)
+
+def divInts(a: Int, b: Int, rem: Bool, env: EvEnv, p: EvProg, off: Int): Value =
+  if (b == 0) errAt("division by zero", env, p, off) else if (rem) Value.VInt(a % b) else Value.VInt(a / b)
+
+def unValue(e: Expr, op: String, inner: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+  if (Check.needsPh(e)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else unVal(op, step(EvStep(inner, env), p), env, p, off)
+
+def unVal(op: String, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  v match {
+    case Value.VBool(b) => if (op == "!") Value.VBool(!b) else unsupported(Str.concat("operator ", op), env, p, off)
+    case Value.VInt(n) => if (op == "-") Value.VInt(0 - n) else unsupported(Str.concat("operator ", op), env, p, off)
+    case Value.VErr(_) => v
+    case _ => unsupported(Str.concat("operator ", op), env, p, off)
+  }
+
+def valEq(a: Value, b: Value): Bool =
+  a match {
+    case Value.VUnit => isUnit(b)
+    case Value.VInt(x) => eqInt(x, b)
+    case Value.VBool(x) => eqBool(x, b)
+    case Value.VStr(x) => eqStr(x, b)
+    case Value.VList(xs) => eqList(xs, b)
+    case Value.VTuple(xs) => eqTuple(xs, b)
+    case Value.VCon(_, tag, fields) => eqCon(tag, fields, b)
+    case _ => false
+  }
+
+def isUnit(b: Value): Bool =
+  b match {
+    case Value.VUnit => true
+    case _ => false
+  }
+
+def eqInt(x: Int, b: Value): Bool =
+  b match {
+    case Value.VInt(y) => x == y
+    case _ => false
+  }
+
+def eqBool(x: Bool, b: Value): Bool =
+  b match {
+    case Value.VBool(y) => x == y
+    case _ => false
+  }
+
+def eqStr(x: String, b: Value): Bool =
+  b match {
+    case Value.VStr(y) => x == y
+    case _ => false
+  }
+
+def eqList(xs: List[Value], b: Value): Bool =
+  b match {
+    case Value.VList(ys) => eqAll(xs, ys)
+    case _ => false
+  }
+
+def eqTuple(xs: List[Value], b: Value): Bool =
+  b match {
+    case Value.VTuple(ys) => eqAll(xs, ys)
+    case _ => false
+  }
+
+def eqCon(tag: String, fields: List[Value], b: Value): Bool =
+  b match {
+    case Value.VCon(_, tag2, fields2) => tag == tag2 && eqAll(fields, fields2)
+    case _ => false
+  }
+
+def eqAll(xs: List[Value], ys: List[Value]): Bool =
+  if (List.len(xs) != List.len(ys)) false else eqAllGo(xs, ys)
+
+def eqAllGo(xs: List[Value], ys: List[Value]): Bool =
+  if (List.isEmpty(xs)) true else valEq(List.at(xs, 0), List.at(ys, 0)) && eqAllGo(List.tail(xs), List.tail(ys))
+
+def matchStep(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (isErr(v)) valueStep(v) else if (List.isEmpty(arms)) valueStep(errAt("no match arm matched", env, p, off)) else matchArm(v, List.at(arms, 0), List.tail(arms), env, p, off)
+
+def matchArm(v: Value, arm: Arm, rest: List[Arm], env: EvEnv, p: EvProg, off: Int): EvStep =
+  arm match {
+    case Arm(pat, g, body) => matchBound(v, tryPat(pat, v, p.ens), g, body, rest, env, p, off)
+  }
+
+def matchBound(v: Value, bound: Option[List[(String, Value)]], g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int): EvStep =
+  bound match {
+    case Some(bs) => matchGuard(v, EvEnv(List.concat(bs, env.vars), env.mod), g, body, rest, env, p, off)
+    case None => matchStep(v, rest, env, p, off)
+  }
+
+def matchGuard(v: Value, benv: EvEnv, g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (g == "") EvStep(body, benv) else matchGuardVal(v, step(EvStep(Emit.parseGuard(g), benv), p), benv, body, rest, env, p, off)
+
+def matchGuardVal(v: Value, gv: Value, benv: EvEnv, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int): EvStep =
+  gv match {
+    case Value.VBool(b) => if (b) EvStep(body, benv) else matchStep(v, rest, env, p, off)
+    case Value.VErr(_) => valueStep(gv)
+    case _ => valueStep(errAt("guard is not Bool", env, p, off))
+  }
+
+def tryPat(pat: String, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) tryOr(pat, Parse.patternAlternativeAt(pat, 0, 0), v, ens) else if (Check.asAt(pat, 0) >= 0) tryAs(pat, Check.asAt(pat, 0), v, ens) else if (Check.consAt(pat, 0) >= 0) tryCons(pat, Check.consAt(pat, 0), v, ens) else if (pat == "_") Some(noVars()) else if (pat == "[]") tryNil(v) else if (Emit.isStrPat(pat)) tryLit(valEq(v, Value.VStr(Emit.unquote(pat)))) else if (Emit.isIntPat(pat)) tryLit(valEq(v, Value.VInt(Str.toInt(pat, 0)))) else if (Emit.isBoolPat(pat)) tryLit(valEq(v, Value.VBool(pat == "true"))) else if (Check.isTuplePat(pat)) tryTuple(Check.splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), v, ens) else if (Check.patBind(pat) == "") tryBare(pat, v, ens) else tryTag(Check.patCore(pat), v, ens, Check.splitComma(Check.patBind(pat)))
+
+def tryLit(ok: Bool): Option[List[(String, Value)]] =
+  if (ok) Some(noVars()) else None
+
+def tryNil(v: Value): Option[List[(String, Value)]] =
+  v match {
+    case Value.VList(xs) => tryLit(List.isEmpty(xs))
+    case _ => None
+  }
+
+def tryOr(pat: String, i: Int, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  tryOrLeft(tryPat(Str.slice(pat, 0, i), v, ens), Str.slice(pat, i + 3, Str.len(pat)), v, ens)
+
+def tryOrLeft(l: Option[List[(String, Value)]], right: String, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  l match {
+    case Some(_) => l
+    case None => tryPat(right, v, ens)
+  }
+
+def tryAs(pat: String, i: Int, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  tryAsInner(Str.slice(pat, 0, i), tryPat(Str.slice(pat, i + 3, Str.len(pat)), v, ens), v)
+
+def tryAsInner(name: String, inner: Option[List[(String, Value)]], v: Value): Option[List[(String, Value)]] =
+  inner match {
+    case Some(bs) => Some((name, v) :: bs)
+    case None => None
+  }
+
+def tryCons(pat: String, i: Int, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  v match {
+    case Value.VList(xs) => if (List.isEmpty(xs)) None else tryBoth(tryPat(Str.slice(pat, 0, i), List.at(xs, 0), ens), Str.slice(pat, i + 4, Str.len(pat)), Value.VList(List.tail(xs)), ens)
+    case _ => None
+  }
+
+def tryBoth(l: Option[List[(String, Value)]], pat2: String, v2: Value, ens: List[En]): Option[List[(String, Value)]] =
+  l match {
+    case Some(bs) => tryJoin(bs, tryPat(pat2, v2, ens))
+    case None => None
+  }
+
+def tryJoin(bs: List[(String, Value)], r: Option[List[(String, Value)]]): Option[List[(String, Value)]] =
+  r match {
+    case Some(bs2) => Some(List.concat(bs, bs2))
+    case None => None
+  }
+
+def tryTuple(comps: List[String], v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  if (List.len(comps) == 1) tryPat(List.at(comps, 0), v, ens) else tryTupleVals(comps, v, ens)
+
+def tryTupleVals(comps: List[String], v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  v match {
+    case Value.VTuple(xs) => tryAll(comps, xs, ens)
+    case _ => None
+  }
+
+def tryAll(pats: List[String], vals: List[Value], ens: List[En]): Option[List[(String, Value)]] =
+  if (List.len(pats) != List.len(vals)) None else if (List.isEmpty(pats)) Some(noVars()) else tryAllHead(tryPat(List.at(pats, 0), List.at(vals, 0), ens), List.tail(pats), List.tail(vals), ens)
+
+def tryAllHead(l: Option[List[(String, Value)]], pats: List[String], vals: List[Value], ens: List[En]): Option[List[(String, Value)]] =
+  l match {
+    case Some(bs) => tryJoin(bs, tryAll(pats, vals, ens))
+    case None => None
+  }
+
+def tryBare(pat: String, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+  if (Check.dotAt(pat, 0) >= 0 || Check.enOfCase(ens, pat) != "") tryTag(pat, v, ens, noNames()) else Some((pat, v) :: noVars())
+
+def tagOf(core: String): String =
+  if (Check.dotAt(core, 0) < 0) core else Str.slice(core, Check.dotAt(core, 0) + 1, Str.len(core))
+
+def enOf(core: String): String =
+  if (Check.dotAt(core, 0) < 0) "" else Str.slice(core, 0, Check.dotAt(core, 0))
+
+def tryTag(core: String, v: Value, ens: List[En], subs: List[String]): Option[List[(String, Value)]] =
+  v match {
+    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && (enOf(core) == "" || enOf(core) == en)) tryFields(subs, fields, Check.constructorFields(ens, core), ens, 0) else None
+    case _ => None
+  }
+
+def tryFields(subs: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
+  if (List.isEmpty(subs)) Some(noVars()) else tryField(List.at(subs, 0), List.tail(subs), fields, params, ens, i)
+
+def tryField(sub: String, rest: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
+  if (Check.eqAt(sub, 0) >= 0) tryFieldAt(Str.drop(sub, Check.eqAt(sub, 0) + 3), fieldIndex(params, Str.take(sub, Check.eqAt(sub, 0)), 0), rest, fields, params, ens, i) else tryFieldAt(sub, i, rest, fields, params, ens, i)
+
+def tryFieldAt(sub: String, k: Int, rest: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
+  if (k < 0 || k >= List.len(fields)) None else tryFieldNext(tryPat(sub, List.at(fields, k), ens), rest, fields, params, ens, i + 1)
+
+def tryFieldNext(l: Option[List[(String, Value)]], rest: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
+  l match {
+    case Some(bs) => tryJoin(bs, tryFields(rest, fields, params, ens, i))
+    case None => None
+  }
+
+def forValue(bs: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
+  if (List.isEmpty(bs)) forBody(step(EvStep(body, env), p), drew) else forBind(List.at(bs, 0), List.tail(bs), body, env, p, off, drew)
+
+def forBody(v: Value, drew: Bool): Value =
+  if (drew) Value.VIo(ioOfPure(v)) else v
+
+def forBind(b: Bind, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
+  b match {
+    case Bind(draw, name, value) => forBound(draw, name, step(EvStep(value, env), p), rest, body, env, p, off, drew)
+  }
+
+def forBound(draw: Bool, name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
+  if (isErr(v)) v else if (!draw) forPure(name, v, rest, body, env, p, off, drew) else forDraw(name, v, rest, body, env, p, off)
+
+def forPure(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
+  tryPat(name, v, p.ens) match {
+    case Some(vars) => forValue(rest, body, EvEnv(List.concat(vars, env.vars), env.mod), p, off, drew)
+    case None => errAt("for binding does not match", env, p, off)
+  }
+
+def forDraw(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int): Value =
+  v match {
+    case Value.VIo(io) => Value.VIo(forDrawIo(io, name, rest, body, env, p, off))
+    case _ => errAt("<- needs IO", env, p, off)
+  }
+
+def forDrawIo(io: IO[Value], name: String, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int): IO[Value] =
+  io.flatMap(x => ioOf(forPure(name, x, rest, body, env, p, off, true)))
+
+def listValue(vals: List[Value]): Value =
+  if (hasErr(vals)) firstErr(vals) else Value.VList(vals)
+
+def tupleValue(vals: List[Value]): Value =
+  if (hasErr(vals)) firstErr(vals) else if (List.isEmpty(vals)) Value.VUnit else Value.VTuple(vals)
+
+def interpAcc(parts: List[Expr], env: EvEnv, p: EvProg, b: Builder): Value =
+  if (List.isEmpty(parts)) Value.VStr(Builder.result(b)) else interpPart(step(EvStep(List.at(parts, 0), env), p), List.tail(parts), env, p, b)
+
+def interpPart(v: Value, rest: List[Expr], env: EvEnv, p: EvProg, b: Builder): Value =
+  v match {
+    case Value.VStr(s) => interpAcc(rest, env, p, Builder.append(b, s))
+    case Value.VInt(n) => interpAcc(rest, env, p, Builder.append(b, Str.fromInt(n)))
+    case Value.VBool(bv) => interpAcc(rest, env, p, Builder.append(b, if (bv) "1" else "0"))
+    case Value.VErr(_) => v
+    case _ => unsupported("interpolation of a non-scalar value", env, p, 0)
+  }
+
+def intOf(v: Value): Int =
+  v match {
+    case Value.VInt(n) => n
+    case _ => 0
+  }
+
+def strOf(v: Value): String =
+  v match {
+    case Value.VStr(s) => s
+    case _ => ""
+  }
+
+def boolOf(v: Value): Bool =
+  v match {
+    case Value.VBool(b) => b
+    case _ => false
+  }
+
+def listOf(v: Value): List[Value] =
+  v match {
+    case Value.VList(xs) => xs
+    case _ => noVals()
+  }
+
+def intAt(vals: List[Value], i: Int): Int =
+  intOf(List.at(vals, i))
+
+def strAt(vals: List[Value], i: Int): String =
+  strOf(List.at(vals, i))
+
+def listAt(vals: List[Value], i: Int): List[Value] =
+  listOf(List.at(vals, i))
+
+def kitCall(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else if (f == "Property.sometimes") Value.VUnit else unsupported(Str.concat("kit ", f), env, p, off)
+
+def strKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Str.fromInt") Value.VStr(Str.fromInt(intAt(vals, 0))) else if (f == "Str.fromBool") Value.VStr(Str.fromBool(boolOf(List.at(vals, 0)))) else if (f == "Str.concat") Value.VStr(Str.concat(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.len") Value.VInt(Str.len(strAt(vals, 0))) else if (f == "Str.eq") Value.VBool(strAt(vals, 0) == strAt(vals, 1)) else if (f == "Str.slice") Value.VStr(Str.slice(strAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Str.charAt") Value.VInt(Str.charAt(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.startsWith") Value.VBool(Str.startsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.endsWith") Value.VBool(Str.endsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.contains") Value.VBool(Str.contains(strAt(vals, 0), strAt(vals, 1))) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def listKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "List.len") Value.VInt(List.len(listAt(vals, 0))) else if (f == "List.at") listAtKit(listAt(vals, 0), intAt(vals, 1), env, p, off) else if (f == "List.tail") listTailKit(listAt(vals, 0), env, p, off) else if (f == "List.isEmpty") Value.VBool(List.isEmpty(listAt(vals, 0))) else if (f == "List.concat") Value.VList(List.concat(listAt(vals, 0), listAt(vals, 1))) else if (f == "List.reverse") Value.VList(List.reverse(listAt(vals, 0))) else if (f == "List.join") Value.VStr(List.join(List.map(listAt(vals, 0), v => strOf(v)), strAt(vals, 1))) else if (f == "List.map") listValue(mapKit(listAt(vals, 0), List.at(vals, 1), env, p, off)) else if (f == "List.filter") filterKit(listAt(vals, 0), List.at(vals, 1), env, p, off, noVals()) else if (f == "List.head") headKit(listAt(vals, 0)) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def listAtKit(xs: List[Value], i: Int, env: EvEnv, p: EvProg, off: Int): Value =
+  if (i < 0 || i >= List.len(xs)) errAt("List.at out of bounds", env, p, off) else List.at(xs, i)
+
+def listTailKit(xs: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (List.isEmpty(xs)) Value.VList(xs) else Value.VList(List.tail(xs))
+
+def headKit(xs: List[Value]): Value =
+  if (List.isEmpty(xs)) Value.VCon("Option", "None", noVals()) else Value.VCon("Option", "Some", List.at(xs, 0) :: noVals())
+
+def mapKit(xs: List[Value], f: Value, env: EvEnv, p: EvProg, off: Int): List[Value] =
+  if (List.isEmpty(xs)) noVals() else applyValue(f, List.at(xs, 0) :: noVals(), env, p, off) :: mapKit(List.tail(xs), f, env, p, off)
+
+def filterKit(xs: List[Value], f: Value, env: EvEnv, p: EvProg, off: Int, acc: List[Value]): Value =
+  if (List.isEmpty(xs)) Value.VList(List.reverse(acc)) else filterKitHit(List.at(xs, 0), applyValue(f, List.at(xs, 0) :: noVals(), env, p, off), List.tail(xs), f, env, p, off, acc)
+
+def filterKitHit(x: Value, keep: Value, rest: List[Value], f: Value, env: EvEnv, p: EvProg, off: Int, acc: List[Value]): Value =
+  keep match {
+    case Value.VBool(b) => filterKit(rest, f, env, p, off, consIf(b, x, acc))
+    case Value.VErr(_) => keep
+    case _ => errAt("List.filter predicate is not Bool", env, p, off)
+  }
+
+def consIf(b: Bool, x: Value, acc: List[Value]): List[Value] =
+  if (b) x :: acc else acc
+
+def ioKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "IO.println") Value.VIo(printlnIo(strAt(vals, 0))) else if (f == "IO.pure") Value.VIo(pureIo(List.at(vals, 0))) else unsupported(Str.concat("kit ", f), env, p, off)
+

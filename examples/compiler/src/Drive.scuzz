@@ -603,6 +603,21 @@ def checkDir(dir: String, json: Bool): IO[Unit] =
 def checkDirMan(dir: String, json: Bool, m: Man): IO[Unit] =
   manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => checkDirListed(dir, json, m.deps, ents)))
 
+def evDir(dir: String): IO[Unit] =
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => evDirMan(dir, Manifest.parse(toml)))
+
+def evDirMan(dir: String, m: Man): IO[Unit] =
+  if (m.hasUi) evFail("eval: [ui] packages are not supported yet") else manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => evDirListed(dir, m.deps, ents)))
+
+def evDirListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => collectDeps(dir, deps, own).flatMap(files => evFiles(files, Check.humanFiles(files))))
+
+def evFiles(files: List[(String, String)], human: String): IO[Unit] =
+  if (human != "scuzz check ok") evFail(human) else Eval.runMain(Eval.load(files))
+
+def evFail(msg: String): IO[Unit] =
+  IO.println(msg).flatMap(_ => IO.fail("eval"))
+
 def isVerify(name: String): Bool =
   Str.len(name) > 13 && Str.slice(name, Str.len(name) - 13, Str.len(name)) == ".scuzz_verify"
 

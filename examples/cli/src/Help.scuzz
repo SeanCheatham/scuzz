@@ -1,5 +1,25 @@
 def helpRoot(): String =
-  "Scuzz Lang CLI\n\nUsage: scuzz [OPTIONS] <COMMAND>\n\nCommands:\n  build    Compile a Scuzz Lang project to a native executable (LLVM)\n  run      Build and run a Scuzz Lang project\n  watch    Watch sources and rebuild on change (compile loop, not hot reload)\n  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json\n  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)\n  fmt      Format Scuzz Lang sources under src/\n  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation\n  new      Create a new Scuzz Lang project\n  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)\n  devices  List available iOS simulators\n  exec     Send inject ops to a live session started by `scuzz run`\n  package  Package a project for Linux, macOS, Android, iOS, or web\n  docs     Print the technical manual, or one topic, or a kit row\n  help     Print this message or the help of the given subcommand(s)\n\nOptions:\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz docs verify\n  scuzz fuzz --iterations 0\n  scuzz run --target headless --exec \"\"\n\nSee: scuzz docs start\n"
+  "Scuzz Lang CLI\n\nUsage: scuzz [OPTIONS] <COMMAND>\n\nCommands:\n  build    Compile a Scuzz Lang project to a native executable (LLVM)\n  run      Build and run a Scuzz Lang project\n  watch    Watch sources and rebuild on change (compile loop, not hot reload)\n  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json\n  eval     Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)\n  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)\n  fmt      Format Scuzz Lang sources under src/\n  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation\n  new      Create a new Scuzz Lang project\n  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)\n  devices  List available iOS simulators\n  exec     Send inject ops to a live session started by `scuzz run`\n  package  Package a project for Linux, macOS, Android, iOS, or web\n  docs     Print the technical manual, or one topic, or a kit row\n  help     Print this message or the help of the given subcommand(s)\n\nOptions:\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz docs verify\n  scuzz fuzz --iterations 0\n  scuzz run --target headless --exec \"\"\n\nSee: scuzz docs start\n"
+
+def helpEv(): String =
+  """Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)
+
+Usage: scuzz eval [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]  [default: .]
+
+Options:
+      --message-format <MESSAGE_FORMAT>
+          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+Examples:
+  scuzz eval examples/hello
+
+See: scuzz docs commands
+"""
 
 def helpFmt(): String =
   """Format Scuzz Lang sources under src/
