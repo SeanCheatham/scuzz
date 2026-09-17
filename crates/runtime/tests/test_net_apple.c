@@ -31,6 +31,12 @@ static void drop(SzIoResult result) { sz_release(result.value); sz_release(resul
 static int status(SzIoResult result, int expected) {
   return result.ok && sz_unbox_i64(((SzPair *)result.value)->left) == expected;
 }
+static void check_http(SzIoResult result, int expected, const char *name) {
+  if (status(result, expected)) return;
+  check(0, name);
+  if (!result.ok && result.error && result.error->message)
+    fprintf(stderr, "%s\n", sz_string_cstr(result.error->message));
+}
 static const char *body(SzIoResult result) {
   return sz_string_cstr(((SzPair *)((SzPair *)result.value)->right)->right);
 }
@@ -46,7 +52,7 @@ int scuzz_net_apple_proof(void) {
   SzMap *headers = header(NULL, "X-Proof", "custom");
   for (size_t i = 0; i < sizeof methods / sizeof *methods; i++) {
     SzIoResult r = run(request(base, "/echo", methods[i], headers));
-    check(status(r, 200), methods[i]);
+    check_http(r, 200, methods[i]);
     if (r.ok) {
       check(!strcmp(body(r), !strcmp(methods[i], "HEAD") ? "" : methods[i]), "method response");
       SzString *key = sz_string_from_cstr("x-method");
@@ -80,7 +86,9 @@ int scuzz_net_apple_proof(void) {
   check(descriptors() <= before + 4, "cancellation closes request descriptors");
   r = run(request(tls, "/echo", "GET", NULL));
   int trusted = getenv("SCUZZ_NET_TRUSTED") != NULL;
-  check(trusted ? status(r, 200) : !r.ok, "platform certificate trust on loopback"); drop(r);
+  if (trusted) check_http(r, 200, "platform certificate trust on loopback");
+  else check(!r.ok, "platform certificate trust on loopback");
+  drop(r);
   if (!trusted) {
     r = run(request("https://example.com", "/", "GET", NULL));
     check(status(r, 200), "platform public certificate trust without OpenSSL paths");

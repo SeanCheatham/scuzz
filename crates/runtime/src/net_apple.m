@@ -60,8 +60,9 @@ enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
   config.URLCredentialStorage = nil;
   config.HTTPShouldSetCookies = NO;
   config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
-  config.timeoutIntervalForRequest = 1;
-  config.timeoutIntervalForResource = 5;
+  /* Idle bounds only. IO.timeout cancels the task through the finalizer. */
+  config.timeoutIntervalForRequest = 30;
+  config.timeoutIntervalForResource = 60;
   config.waitsForConnectivity = NO;
   NSOperationQueue *queue = [NSOperationQueue new];
   queue.maxConcurrentOperationCount = 1;

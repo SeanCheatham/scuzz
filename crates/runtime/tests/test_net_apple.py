@@ -114,7 +114,7 @@ def prove_ios(cli, project, temp, env):
         subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none", str(app)], check=True)
         subprocess.run(["xcrun", "simctl", "install", device, str(app)], check=True)
         child_env = dict(os.environ, **{"SIMCTL_CHILD_" + key: value for key, value in env.items() if key.startswith(("SCUZZ_NET_", "SSL_CERT_"))}, SIMCTL_CHILD_SCUZZ_NET_TRUSTED="1")
-        result = subprocess.run(["xcrun", "simctl", "launch", "--console", device, "dev.scuzz.netproof"], env=child_env, capture_output=True, text=True, timeout=45)
+        result = subprocess.run(["xcrun", "simctl", "launch", "--console", device, "dev.scuzz.netproof"], env=child_env, capture_output=True, text=True, timeout=90)
         print(result.stdout + result.stderr, end="", flush=True)
         assert result.returncode == 0 and "Apple Net proof ok" in result.stdout, "iOS Net contract fails"
         subprocess.run(["xcrun", "simctl", "install", device, str(ios / "network-ui.app")], check=True)
