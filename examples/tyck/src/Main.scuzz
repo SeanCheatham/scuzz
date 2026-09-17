@@ -341,7 +341,7 @@ def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit()) && unaryNumTypes()
 
 def tyckRes(): Bool =
-  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes() && nestedPatTypes() && lambdaApplyTypes()
+  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes() && queueLambdaPinTypes() && nestedPatTypes() && lambdaApplyTypes()
 
 def rejects(src: String, msg: String): Bool =
   Str.contains(Check.check(src), msg)
@@ -1130,6 +1130,51 @@ def queueRefineTypes(): Bool =
     _ <- IO.println(Str.fromInt(n))
   } yield ()
 """) == "[]"
+
+def queueLambdaPinTypes(): Bool =
+  Check.check("""@main def main: IO[Unit] =
+  for {
+    q <- Queue.unbounded()
+    _ <- IO.foreach([q], x => Queue.offer(x, 1))
+    n <- Queue.take(q)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+""") == "[]" && rejects("""@main def main: IO[Unit] =
+  for {
+    q <- Queue.unbounded()
+    _ <- IO.foreach([q], x => Queue.offer(x, 1))
+    s <- Queue.take(q)
+    _ <- IO.println(s)
+  } yield ()
+""", "expected String, got Int") && Check.check("""@main def main: IO[Unit] =
+  for {
+    q <- Queue.unbounded()
+    _ <- [q].map(x => Queue.offer(x, 1))
+    n <- Queue.take(q)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+""") == "[]" && rejects("""@main def main: IO[Unit] =
+  for {
+    q <- Queue.unbounded()
+    _ <- [q].map(x => Queue.offer(x, 1))
+    s <- Queue.take(q)
+    _ <- IO.println(s)
+  } yield ()
+""", "expected String, got Int") && Check.check("""@main def main: IO[Unit] =
+  for {
+    d <- Deferred.empty()
+    _ <- IO.foreachDiscard([d], x => Deferred.complete(x, 1))
+    n <- Deferred.get(d)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+""") == "[]" && rejects("""@main def main: IO[Unit] =
+  for {
+    d <- Deferred.empty()
+    _ <- IO.foreach([d], x => Deferred.complete(x, 1))
+    s <- Deferred.get(d)
+    _ <- IO.println(s)
+  } yield ()
+""", "expected String, got Int")
 
 def emptyCtorTypes(): Bool =
   Check.check("def right(): Map[String, Int] = Map.set(Map.empty(), \"a\", 1)") == "[]" && rejects("def wrong(): Map[String, String] = Map.set(Map.empty(), \"a\", 1)", "does not match declared") && Check.check("def right(m: Map[String, Int]): Map[String, Int] = Map.set(m, \"b\", 2)") == "[]" && rejects("def wrong(m: Map[String, Int]): Map[String, Int] = Map.set(m, 1, 2)", "Map.set arg type mismatch: expected String, got Int") && rejects("def wrong(m: Map[String, Int]): Map[String, Int] = Map.set(m, \"b\", \"x\")", "Map.set arg type mismatch: expected Int, got String") && Check.check("def right(m: Map[String, Int]): Option[Int] = Map.get(m, \"k\")") == "[]" && rejects("def wrong(m: Map[String, Int]): Option[Int] = Map.get(m, 1)", "Map.get arg type mismatch: expected String, got Int") && Check.check("def right(m: Map[String, Int]): Int = Map.getOrElse(m, \"k\", 0)") == "[]" && rejects("def wrong(m: Map[String, Int]): Int = Map.getOrElse(m, \"k\", \"x\")", "Map.getOrElse arg type mismatch: expected Int, got String") && Check.check("def right(): Set[Int] = Set.add(Set.empty(), 1)") == "[]" && rejects("def wrong(): Set[String] = Set.add(Set.empty(), 1)", "does not match declared") && rejects("def wrong(s: Set[Int]): Bool = Set.contains(s, \"x\")", "Set.contains arg type mismatch: expected Int, got String") && rejects("def wrong(a: Set[Int], b: Set[String]): Set[Int] = Set.union(a, b)", "Set.union arg type mismatch: expected Set[Int], got Set[String]") && Check.check("def right(xs: List[Int]): List[Int] = List.cons(1, xs)") == "[]" && rejects("def wrong(xs: List[Int]): List[String] = List.cons(\"s\", xs)", "List.cons arg type mismatch: expected List[String], got List[Int]") && Check.check("def right(): List[Int] = List.cons(1, List.empty())") == "[]"
