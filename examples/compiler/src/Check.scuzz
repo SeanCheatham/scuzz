@@ -1683,11 +1683,11 @@ def inferTupleRest(rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: L
 
 def checkDef(d: Fun, funs: Ftab, ens: List[En]): Out =
   d match {
-    case Fun(_, name, _, ps, ret, body, mod, off) => checkDefWhere(name, ret, body, ps, funs, ens, mod, off, checkWheres(ps, bindParams(ps, envSelfMod(mod)), funs, ens, (mod, off)))
+    case Fun(_, name, ts, ps, ret, body, mod, off) => checkDefWhere(name, ret, body, ps, funs, ens, ts, mod, off, checkWheres(ps, bindParams(ps, envSelfMod(mod)), funs, ens, (mod, off)))
   }
 
-def checkDefWhere(name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], mod: String, off: Int, wo: Out): Out =
-  if (hasErr(wo)) checkDefWrap(name, ret, body, wo, (mod, off), ens) else checkDefWrap(name, ret, body, inferExpected(body, ret, bindParams(ps, envSelfMod(mod)), funs, ens), (mod, off), ens)
+def checkDefWhere(name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], ts: List[String], mod: String, off: Int, wo: Out): Out =
+  if (hasErr(wo)) checkDefWrap(name, ret, body, wo, (mod, off), ens, ts) else checkDefWrap(name, ret, body, inferExpected(body, ret, bindParams(ps, envSelfMod(mod)), funs, ens), (mod, off), ens, ts)
 
 def checkWheres(ps: List[Param], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(ps)) ok("Bool") else checkWhereHd(List.at(ps, 0), List.tail(ps), env, funs, ens, span)
@@ -1728,11 +1728,14 @@ def checkEnCaseHd(c: EnCase, rest: List[EnCase], ens: List[En], funs: Ftab): Out
 def checkEnCasesAfter(o: Out, rest: List[EnCase], ens: List[En], funs: Ftab): Out =
   if (hasErr(o)) o else checkEnCases(rest, ens, funs)
 
-def checkDefWrap(name: String, ret: String, body: Expr, o: Out, span: (String, Int), ens: List[En]): Out =
-  if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o, span, ens)
+def checkDefWrap(name: String, ret: String, body: Expr, o: Out, span: (String, Int), ens: List[En], ts: List[String]): Out =
+  if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o, span, ens, ts)
 
-def checkDefGot(name: String, ret: String, body: Expr, o: Out, span: (String, Int), ens: List[En]): Out =
-  if (hasErr(o)) o else if (tyEqEn(tyStr(o), ret, ens)) o else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(tyStr(o), Str.concat(" does not match declared ", ret))))), spanPick(Parse.spanOf(body), span))
+def checkDefGot(name: String, ret: String, body: Expr, o: Out, span: (String, Int), ens: List[En], ts: List[String]): Out =
+  if (hasErr(o)) o else if (tyEqParams(tyStr(o), ret, ens, ts)) o else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(tyStr(o), Str.concat(" does not match declared ", ret))))), spanPick(Parse.spanOf(body), span))
+
+def tyEqParams(a: String, b: String, ens: List[En], ts: List[String]): Bool =
+  eqPinned(a, b, List.concat(ts, enNames(ens)))
 
 def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   a match {
