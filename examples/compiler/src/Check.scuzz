@@ -546,34 +546,34 @@ def netReqTy(): String =
 def netRespTy(): String =
   "(Int, Map[String, String], String)"
 
-def isIoHttpResp(t: String): Bool =
-  isIo(t) && tyEq(ioOk(t), netRespTy())
+def isIoHttpResp(t: String, ens: List[En]): Bool =
+  isIo(t) && tyEqEn(ioOk(t), netRespTy(), ens)
 
-def netFunOk(ty: String): Bool =
-  isFunTy(ty) && tyEq(funArgOf(ty), netReqTy()) && isIoHttpResp(funRetOf(ty))
+def netFunOk(ty: String, ens: List[En]): Bool =
+  isFunTy(ty) && tyEqEn(funArgOf(ty), netReqTy(), ens) && isIoHttpResp(funRetOf(ty), ens)
 
 def resolveNetServe(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(args)) ok(funTyFrom(kitParams(f), kitRet(f))) else if (List.len(args) != 2) bad(Str.concat(f, Str.concat(" expects 2 args, got ", Str.fromInt(List.len(args)))), span) else resolveNetServe2(f, infer(stripNamed(List.at(args, 0)), env, funs, ens), List.at(args, 1), env, funs, ens, span)
 
 def resolveNetServe2(f: String, po: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(po)) po else if (tyEq(tyStr(po), "Int")) resolveNetLam(f, lam, env, funs, ens, span) else argMismatch(f, "Int", tyStr(po), span)
+  if (hasErr(po)) po else if (tyEqEn(tyStr(po), "Int", ens)) resolveNetLam(f, lam, env, funs, ens, span) else argMismatch(f, "Int", tyStr(po), span)
 
 def resolveNetLam(f: String, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   lam match {
     case Expr.ELam(p, ty, body) => resolveNetAnn(annOk(ty, netReqTy(), span, ens), f, p, body, env, funs, ens, span)
     case Expr.ENamed(_, inner) => resolveNetLam(f, inner, env, funs, ens, span)
     case Expr.EAscribe(inner, _, _) => resolveNetLam(f, inner, env, funs, ens, span)
-    case _ => resolveNetFun(f, infer(stripNamed(lam), env, funs, ens), span)
+    case _ => resolveNetFun(f, infer(stripNamed(lam), env, funs, ens), span, ens)
   }
 
 def resolveNetAnn(a: Out, f: String, p: String, body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (hasErr(a)) a else resolveNetBody(f, infer(body, bindRes(p, bindOfAnn(a), env), funs, ens), span, ens)
 
 def resolveNetBody(f: String, body: Out, span: (String, Int), ens: List[En]): Out =
-  if (hasErr(body)) body else if (isIoHttpResp(tyStr(body)) || isLooseEn(tyStr(body), ens)) ok("IO[Unit]") else bad(Str.concat(f, Str.concat(" needs IO[(Int, Map[String, String], String)], got ", tyStr(body))), span)
+  if (hasErr(body)) body else if (isIoHttpResp(tyStr(body), ens) || isLooseEn(tyStr(body), ens)) ok("IO[Unit]") else bad(Str.concat(f, Str.concat(" needs IO[(Int, Map[String, String], String)], got ", tyStr(body))), span)
 
-def resolveNetFun(f: String, o: Out, span: (String, Int)): Out =
-  if (hasErr(o)) o else if (netFunOk(tyStr(o))) ok("IO[Unit]") else bad(Str.concat(f, " needs a lambda"), span)
+def resolveNetFun(f: String, o: Out, span: (String, Int), ens: List[En]): Out =
+  if (hasErr(o)) o else if (netFunOk(tyStr(o), ens)) ok("IO[Unit]") else bad(Str.concat(f, " needs a lambda"), span)
 
 def isListHead(t: Ty): Bool =
   Type.isNamed(t, "List") || Type.isAppNamed(t, "List")
@@ -602,7 +602,7 @@ def resolveViewEachAnn(a: Out, p: String, body: Expr, env: List[(String, Ty)], f
   if (hasErr(a)) a else resolveViewEachBody(infer(body, bindRes(p, bindOfAnn(a), env), funs, ens), span, ens)
 
 def resolveViewEachFun(o: Out, elem: String, span: (String, Int), ens: List[En]): Out =
-  if (hasErr(o)) o else if (Type.isFun(o.ty) && tyEq(Type.show(Type.funArg(o.ty)), elem) && (tyEqEn(Type.show(Type.funRet(o.ty)), "View", ens) || isLooseEn(Type.show(Type.funRet(o.ty)), ens))) ok("View") else bad("View.each needs A => View", span)
+  if (hasErr(o)) o else if (Type.isFun(o.ty) && tyEqEn(Type.show(Type.funArg(o.ty)), elem, ens) && (tyEqEn(Type.show(Type.funRet(o.ty)), "View", ens) || isLooseEn(Type.show(Type.funRet(o.ty)), ens))) ok("View") else bad("View.each needs A => View", span)
 
 def resolveViewEachBody(body: Out, span: (String, Int), ens: List[En]): Out =
   if (hasErr(body)) body else if (tyEqEn(tyStr(body), "View", ens) || isLooseEn(tyStr(body), ens)) ok("View") else bad(Str.concat("View.each needs View, got ", tyStr(body)), span)
