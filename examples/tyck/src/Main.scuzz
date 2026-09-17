@@ -341,7 +341,7 @@ def tyckFlow(): Bool =
   tyckDiff(srcUnBool(), wantUnBool()) && tyckDiff(srcIfMis(), wantIfMis()) && tyckDiff(srcMapHandle(), wantMapHandle()) && tyckDiff(srcJoinMis(), wantJoinMis()) && tyckDiff(srcNope(), wantNope()) && tyckDiff(srcStrUnk(), wantStrUnk()) && tyckDiff(srcStrConcatTy(), wantStrConcatTy()) && tyckDiff(srcSysExit(), wantSysExit()) && unaryNumTypes()
 
 def tyckRes(): Bool =
-  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes() && queueLambdaPinTypes() && nestedPatTypes() && lambdaApplyTypes()
+  tyckDiff(srcResArity(), wantResArity()) && tyckDiff(srcResDraw(), wantResDraw()) && tyckDiff(srcResLam(), wantResLam()) && tyckDiff(srcResUnk(), wantResUnk()) && tyckDiff(srcJsonUnk(), wantJsonUnk()) && tyckDiff(srcDefUnk(), wantDefUnk()) && tyckDiff(srcDefMis(), wantDefMis()) && tyckDiff(srcQueUnk(), wantQueUnk()) && tyckDiff(srcQueMis(), wantQueMis()) && tyckDiff(srcQueTake(), wantQueTake()) && tyckDiff(srcQuePay(), wantQuePay()) && tyckDiff(srcNetStr(), wantNetStr()) && emptyCtorTypes() && queueRefineTypes() && queueLambdaPinTypes() && nestedPatTypes() && lambdaApplyTypes() && expectedLamTypes()
 
 def rejects(src: String, msg: String): Bool =
   Str.contains(Check.check(src), msg)
@@ -514,7 +514,7 @@ def tyckLam(): Bool =
   tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]" && funArrowTypes()
 
 def funArrowTypes(): Bool =
-  Type.funFrom("Int => String" :: [], "String") == "(Int => String) => String" && Type.funFrom("Int" :: [], "String") == "Int => String" && Type.funFrom("Int" :: "String" :: [], "Bool") == "(Int, String) => Bool" && Type.substStr("A => A", "A", "Int => String") == "(Int => String) => Int => String" && Check.check(srcFunArrowOk()) == "[]" && rejects(srcFunArrowMis(), "does not match declared") && rejects(srcFunArrowApply(), "arg type mismatch") && rejects(srcFunListApply(), "apply needs a function") && Check.check(srcFunSubstOk()) == "[]" && rejects(srcFunSubstMis(), "does not match declared") && Check.check(srcFunSubstId()) == "[]" && Check.check(srcFunTupFieldOk()) == "[]" && rejects(srcFunTupFieldMis(), "tuple has no field") && rejects(srcFunTupFieldKeep(), "tuple has no field") && funKitHeadTypes()
+  Type.funFrom("Int => String" :: [], "String") == "(Int => String) => String" && Type.funFrom("Int" :: [], "String") == "Int => String" && Type.funFrom("Int" :: "String" :: [], "Bool") == "(Int, String) => Bool" && Type.substStr("A => A", "A", "Int => String") == "(Int => String) => Int => String" && Check.check(srcFunArrowOk()) == "[]" && rejects(srcFunArrowMis(), "lambda arg type mismatch: expected Int, got Int => String") && rejects(srcFunArrowApply(), "arg type mismatch") && rejects(srcFunListApply(), "apply needs a function") && Check.check(srcFunSubstOk()) == "[]" && rejects(srcFunSubstMis(), "does not match declared") && Check.check(srcFunSubstId()) == "[]" && Check.check(srcFunTupFieldOk()) == "[]" && rejects(srcFunTupFieldMis(), "tuple has no field") && rejects(srcFunTupFieldKeep(), "tuple has no field") && funKitHeadTypes()
 
 def srcFunArrowOk(): String =
   """def right(): (Int => String) => String =
@@ -669,10 +669,10 @@ def right(): E => Int = (x: E) => 0
 """) == "[]" && rejects("""enum E:
   case Ok
 def wrong(): E => Int = (x: Int) => x
-""", "does not match declared")
+""", "lambda arg type mismatch: expected E, got Int")
 
 def aliasTypes(): Bool =
-  Check.check(srcAliasListOk()) == "[]" && rejects(srcAliasListMis(), "does not match declared") && Check.check(srcAliasBoxOk()) == "[]" && Check.check(srcAliasFunOk()) == "[]" && rejects(srcAliasFunMis(), "does not match declared") && Check.check(srcAliasId()) == "[]"
+  Check.check(srcAliasListOk()) == "[]" && rejects(srcAliasListMis(), "does not match declared") && Check.check(srcAliasBoxOk()) == "[]" && Check.check(srcAliasFunOk()) == "[]" && rejects(srcAliasFunMis(), "lambda arg type mismatch: expected Int, got String") && Check.check(srcAliasId()) == "[]"
 
 def srcAliasListOk(): String =
   """type UserId = Int
@@ -749,13 +749,13 @@ def wrong(): Option[E] = Option.Some(1)
 """)) else if (!rejects("""enum E:
   case Ok
 def wrong(): E => Int = (x: Int) => x
-""", "does not match declared")) Str.concat("funEMis ", Check.check("""enum E:
+""", "lambda arg type mismatch: expected E, got Int")) Str.concat("funEMis ", Check.check("""enum E:
   case Ok
 def wrong(): E => Int = (x: Int) => x
 """)) else "namedLetter-other"
 
 def dumpAliasTypes(): String =
-  if (Check.check(srcAliasListOk()) != "[]") Str.concat("aliasListOk ", Check.check(srcAliasListOk())) else if (!rejects(srcAliasListMis(), "does not match declared")) Str.concat("aliasListMis ", Check.check(srcAliasListMis())) else if (Check.check(srcAliasBoxOk()) != "[]") Str.concat("aliasBoxOk ", Check.check(srcAliasBoxOk())) else if (Check.check(srcAliasFunOk()) != "[]") Str.concat("aliasFunOk ", Check.check(srcAliasFunOk())) else if (!rejects(srcAliasFunMis(), "does not match declared")) Str.concat("aliasFunMis ", Check.check(srcAliasFunMis())) else if (Check.check(srcAliasId()) != "[]") Str.concat("aliasId ", Check.check(srcAliasId())) else "alias-other"
+  if (Check.check(srcAliasListOk()) != "[]") Str.concat("aliasListOk ", Check.check(srcAliasListOk())) else if (!rejects(srcAliasListMis(), "does not match declared")) Str.concat("aliasListMis ", Check.check(srcAliasListMis())) else if (Check.check(srcAliasBoxOk()) != "[]") Str.concat("aliasBoxOk ", Check.check(srcAliasBoxOk())) else if (Check.check(srcAliasFunOk()) != "[]") Str.concat("aliasFunOk ", Check.check(srcAliasFunOk())) else if (!rejects(srcAliasFunMis(), "lambda arg type mismatch: expected Int, got String")) Str.concat("aliasFunMis ", Check.check(srcAliasFunMis())) else if (Check.check(srcAliasId()) != "[]") Str.concat("aliasId ", Check.check(srcAliasId())) else "alias-other"
 
 def tyckRecordBind(): Bool =
   Check.check("""record Box(value: Int)
@@ -818,7 +818,7 @@ def dumpTyckLam(): String =
   if (!funArrowTypes()) dumpFunArrow() else "tyckLam"
 
 def dumpFunArrow(): String =
-  if (Type.funFrom("Int => String" :: [], "String") != "(Int => String) => String") "funFrom" else if (Type.substStr("A => A", "A", "Int => String") != "(Int => String) => Int => String") "substFun" else if (Check.check(srcFunArrowOk()) != "[]") Str.concat("funArrowOk ", Check.check(srcFunArrowOk())) else if (!rejects(srcFunArrowMis(), "does not match declared")) Str.concat("funArrowMis ", Check.check(srcFunArrowMis())) else if (!rejects(srcFunArrowApply(), "arg type mismatch")) Str.concat("funArrowApply ", Check.check(srcFunArrowApply())) else if (!rejects(srcFunListApply(), "apply needs a function")) Str.concat("funListApply ", Check.check(srcFunListApply())) else if (Check.check(srcFunSubstOk()) != "[]") Str.concat("funSubstOk ", Check.check(srcFunSubstOk())) else if (!rejects(srcFunSubstMis(), "does not match declared")) Str.concat("funSubstMis ", Check.check(srcFunSubstMis())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("funSubstId ", Check.check(srcFunSubstId())) else if (Check.check(srcFunTupFieldOk()) != "[]") Str.concat("funTupFieldOk ", Check.check(srcFunTupFieldOk())) else if (!rejects(srcFunTupFieldMis(), "tuple has no field")) Str.concat("funTupFieldMis ", Check.check(srcFunTupFieldMis())) else if (!rejects(srcFunTupFieldKeep(), "tuple has no field")) Str.concat("funTupFieldKeep ", Check.check(srcFunTupFieldKeep())) else if (!funKitHeadTypes()) dumpFunKitHead() else "funArrow-other"
+  if (Type.funFrom("Int => String" :: [], "String") != "(Int => String) => String") "funFrom" else if (Type.substStr("A => A", "A", "Int => String") != "(Int => String) => Int => String") "substFun" else if (Check.check(srcFunArrowOk()) != "[]") Str.concat("funArrowOk ", Check.check(srcFunArrowOk())) else if (!rejects(srcFunArrowMis(), "lambda arg type mismatch: expected Int, got Int => String")) Str.concat("funArrowMis ", Check.check(srcFunArrowMis())) else if (!rejects(srcFunArrowApply(), "arg type mismatch")) Str.concat("funArrowApply ", Check.check(srcFunArrowApply())) else if (!rejects(srcFunListApply(), "apply needs a function")) Str.concat("funListApply ", Check.check(srcFunListApply())) else if (Check.check(srcFunSubstOk()) != "[]") Str.concat("funSubstOk ", Check.check(srcFunSubstOk())) else if (!rejects(srcFunSubstMis(), "does not match declared")) Str.concat("funSubstMis ", Check.check(srcFunSubstMis())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("funSubstId ", Check.check(srcFunSubstId())) else if (Check.check(srcFunTupFieldOk()) != "[]") Str.concat("funTupFieldOk ", Check.check(srcFunTupFieldOk())) else if (!rejects(srcFunTupFieldMis(), "tuple has no field")) Str.concat("funTupFieldMis ", Check.check(srcFunTupFieldMis())) else if (!rejects(srcFunTupFieldKeep(), "tuple has no field")) Str.concat("funTupFieldKeep ", Check.check(srcFunTupFieldKeep())) else if (!funKitHeadTypes()) dumpFunKitHead() else "funArrow-other"
 
 def dumpFunKitHead(): String =
   if (Type.headName(Type.parse("List[Int] => String")) != "List[Int] => String") "headNameFun" else if (Type.headName(Type.parse("List[Int]")) != "List") "headNameList" else if (Check.check(srcFunListTailOk()) != "[]") Str.concat("funListTailOk ", Check.check(srcFunListTailOk())) else if (!rejects(srcFunListTailMis(), "unknown function .tail")) Str.concat("funListTailMis ", Check.check(srcFunListTailMis())) else if (Check.check(srcFunIoForeverOk()) != "[]") Str.concat("funIoForeverOk ", Check.check(srcFunIoForeverOk())) else if (!rejects(srcFunIoForeverMis(), "unknown function .forever")) Str.concat("funIoForeverMis ", Check.check(srcFunIoForeverMis())) else if (Check.check(srcViewEachOk()) != "[]") Str.concat("viewEachOk ", Check.check(srcViewEachOk())) else if (!rejects(srcFunViewEachMis(), "View.each arg type mismatch")) Str.concat("funViewEachMis ", Check.check(srcFunViewEachMis())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("funKitHeadEq ", Check.check(srcFunSubstId())) else "funKitHead-other"
@@ -1193,6 +1193,22 @@ def wrong(e: E): Int = e match {
   case E.A => 1
   case E.B => nope
 }""", "unbound variable nope")
+
+def expectedLamTypes(): Bool =
+  Check.check("""def apply(f: Int => String): String = f(1)
+def right(): String = apply(n => Str.fromInt(n))
+@main def main: IO[Unit] = IO.println(right())
+""") == "[]" && rejects("""def apply(f: Int => String): String = f(1)
+def wrong(): String = apply(n => n)
+""", "apply arg type mismatch: expected Int => String, got Int => Int") && Check.check("""def apply(f: Int => String): String = f(1)
+def right(): String = apply((n: Int) => Str.fromInt(n))
+""") == "[]" && rejects("""def apply(f: Int => String): String = f(1)
+def wrong(): String = apply((s: String) => s)
+""", "lambda arg type mismatch: expected Int, got String") && Check.check("""def applyBoth(f: Int => Int, g: String => String): Int = f(1)
+def right(): Int = applyBoth(n => n + 1, s => s)
+""") == "[]" && rejects("""def applyBoth(f: Int => Int, g: String => String): Int = f(1)
+def wrong(): Int = applyBoth(n => n + 1, s => 1)
+""", "applyBoth arg type mismatch: expected String => String, got String => Int") && Check.check("def right(): Int => String = n => Str.fromInt(n)") == "[]" && rejects("def wrong(): Int => String = n => n", "def wrong body Int => Int does not match declared Int => String")
 
 def funLookup(): Bool =
   funLookupDefs(Parse.parseFiles(("A", """def pick(n: Int): Int = n

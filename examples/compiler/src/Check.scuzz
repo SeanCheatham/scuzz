@@ -293,7 +293,7 @@ def zipCheckArg(callee: String, w: String, want: List[String], arg: Expr, args: 
   zipCheckGo(callee, w, want, arg, args, env, funs, ens, span, acc, spanPick(exprSpan(env, stripNamed(arg)), span))
 
 def zipCheckGo(callee: String, w: String, want: List[String], arg: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
-  if (List.isEmpty(args)) zipCheckLast(infer(stripNamed(arg), env, funs, ens), callee, w, asp, acc, ens) else zipCheck2(callee, w, infer(stripNamed(arg), env, funs, ens), want, args, env, funs, ens, span, acc, asp)
+  if (List.isEmpty(args)) zipCheckLast(inferExpected(stripNamed(arg), w, env, funs, ens), callee, w, asp, acc, ens) else zipCheck2(callee, w, inferExpected(stripNamed(arg), w, env, funs, ens), want, args, env, funs, ens, span, acc, asp)
 
 def zipCheckLast(o: Out, callee: String, w: String, span: (String, Int), acc: String, ens: List[En]): Out =
   if (hasErr(o)) o else if (tyEqEn(tyStr(o), w, ens)) ok(if (acc == "") tyStr(o) else acc) else argMismatch(callee, w, tyStr(o), span)
@@ -1693,7 +1693,7 @@ def checkDef(d: Fun, funs: Ftab, ens: List[En]): Out =
   }
 
 def checkDefWhere(name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], mod: String, off: Int, wo: Out): Out =
-  if (hasErr(wo)) checkDefWrap(name, ret, body, wo, (mod, off), ens) else checkDefWrap(name, ret, body, infer(body, bindParams(ps, envSelfMod(mod)), funs, ens), (mod, off), ens)
+  if (hasErr(wo)) checkDefWrap(name, ret, body, wo, (mod, off), ens) else checkDefWrap(name, ret, body, inferExpected(body, ret, bindParams(ps, envSelfMod(mod)), funs, ens), (mod, off), ens)
 
 def checkWheres(ps: List[Param], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(ps)) ok("Bool") else checkWhereHd(List.at(ps, 0), List.tail(ps), env, funs, ens, span)
