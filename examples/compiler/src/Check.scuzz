@@ -705,43 +705,43 @@ def inferBin3(op: String, lo: Out, ro: Out, env: List[(String, Ty)], ens: List[E
   if (hasErr(ro)) ro else inferBin4(op, tyStr(lo), tyStr(ro), exprSpan(env, e), ens)
 
 def inferBin4(op: String, lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
-  if (isArith(op)) inferArith(lt, rt, span) else if (isEq(op)) inferEq(lt, rt, span, ens) else if (isOrd(op)) inferOrd(lt, rt, span) else if (isLogic(op)) inferLogic(lt, rt, span) else if (isBit(op)) inferBit(lt, rt, span) else if (op == "::") ok(Str.concat("List[", Str.concat(lt, "]"))) else ok(lt)
+  if (isArith(op)) inferArith(lt, rt, span, ens) else if (isEq(op)) inferEq(lt, rt, span, ens) else if (isOrd(op)) inferOrd(lt, rt, span, ens) else if (isLogic(op)) inferLogic(lt, rt, span, ens) else if (isBit(op)) inferBit(lt, rt, span) else if (op == "::") ok(Str.concat("List[", Str.concat(lt, "]"))) else ok(lt)
 
-def inferArith(lt: String, rt: String, span: (String, Int)): Out =
-  if (numTy(lt) && numTy(rt)) ok(if (lt == "Float" || rt == "Float") "Float" else "Int") else bad(Str.concat("arithmetic needs Int or Float, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
+def inferArith(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
+  if (numTy(lt, ens) && numTy(rt, ens)) ok(if (lt == "Float" || rt == "Float") "Float" else "Int") else bad(Str.concat("arithmetic needs Int or Float, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
 
-def numTy(t: String): Bool =
-  t == "Int" || t == "Float" || isLoose(t)
+def numTy(t: String, ens: List[En]): Bool =
+  t == "Int" || t == "Float" || isLooseEn(t, ens)
 
 def inferEq(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
   if (tyEqEn(lt, rt, ens)) ok("Bool") else bad(Str.concat("comparison type mismatch ", Str.concat(lt, Str.concat(" vs ", rt))), span)
 
-def inferOrd(lt: String, rt: String, span: (String, Int)): Out =
-  if (numTy(lt) && numTy(rt)) ok("Bool") else bad("ordered compare needs Int or Float", span)
+def inferOrd(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
+  if (numTy(lt, ens) && numTy(rt, ens)) ok("Bool") else bad("ordered compare needs Int or Float", span)
 
-def inferLogic(lt: String, rt: String, span: (String, Int)): Out =
-  if (logicTy(lt) && logicTy(rt)) ok("Bool") else bad(Str.concat("logic needs Bool, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
+def inferLogic(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
+  if (logicTy(lt, ens) && logicTy(rt, ens)) ok("Bool") else bad(Str.concat("logic needs Bool, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
 
-def logicTy(t: String): Bool =
-  t == "Bool" || isLoose(t)
+def logicTy(t: String, ens: List[En]): Bool =
+  t == "Bool" || isLooseEn(t, ens)
 
 def inferBit(lt: String, rt: String, span: (String, Int)): Out =
   if (lt == "Int" && rt == "Int") ok("Int") else bad(Str.concat("bitwise needs Int, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
 
 def inferUn(op: String, inner: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
-  inferUn2(op, infer(inner, env, funs, ens), env, e)
+  inferUn2(op, infer(inner, env, funs, ens), env, ens, e)
 
-def inferUn2(op: String, o: Out, env: List[(String, Ty)], e: Expr): Out =
-  if (hasErr(o)) o else if (op == "!") inferUnBool(o, env, e) else if (op == "-") inferUnNum(o, env, e) else inferUnInt(o, env, e)
+def inferUn2(op: String, o: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
+  if (hasErr(o)) o else if (op == "!") inferUnBool(o, env, ens, e) else if (op == "-") inferUnNum(o, env, ens, e) else inferUnInt(o, env, ens, e)
 
-def inferUnNum(o: Out, env: List[(String, Ty)], e: Expr): Out =
-  if (tyStr(o) == "Int" || tyStr(o) == "Float" || isLoose(tyStr(o))) o else bad(Str.concat("expected Int or Float, got ", tyStr(o)), exprSpan(env, e))
+def inferUnNum(o: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
+  if (tyStr(o) == "Int" || tyStr(o) == "Float" || isLooseEn(tyStr(o), ens)) o else bad(Str.concat("expected Int or Float, got ", tyStr(o)), exprSpan(env, e))
 
-def inferUnBool(o: Out, env: List[(String, Ty)], e: Expr): Out =
-  if (tyStr(o) == "Bool" || isLoose(tyStr(o))) ok("Bool") else bad(Str.concat("expected Bool, got ", tyStr(o)), exprSpan(env, e))
+def inferUnBool(o: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
+  if (tyStr(o) == "Bool" || isLooseEn(tyStr(o), ens)) ok("Bool") else bad(Str.concat("expected Bool, got ", tyStr(o)), exprSpan(env, e))
 
-def inferUnInt(o: Out, env: List[(String, Ty)], e: Expr): Out =
-  if (tyStr(o) == "Int" || isLoose(tyStr(o))) ok("Int") else bad(Str.concat("expected Int, got ", tyStr(o)), exprSpan(env, e))
+def inferUnInt(o: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
+  if (tyStr(o) == "Int" || isLooseEn(tyStr(o), ens)) ok("Int") else bad(Str.concat("expected Int, got ", tyStr(o)), exprSpan(env, e))
 
 def inferIf(c: Expr, t: Expr, el: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   inferIf2(infer(c, env, funs, ens), t, el, env, funs, ens, e)
