@@ -8,6 +8,11 @@ PACKAGE="$OUT/package/ios"
 MODE="${3:-run}"
 CONSOLE=""
 BUNDLE=""
+APP_NAME=""
+
+app_alive() {
+  [ -n "$APP_NAME" ] && pgrep -f "/${APP_NAME}.app/${APP_NAME}" >/dev/null
+}
 
 stop_app() {
   if [ -n "$BUNDLE" ]; then
@@ -18,7 +23,11 @@ stop_app() {
     wait "$CONSOLE" 2>/dev/null || true
     CONSOLE=""
   fi
-
+  n=0
+  while app_alive && [ "$n" -lt 100 ]; do
+    n=$((n + 1))
+    sleep 0.1
+  done
 }
 
 trap stop_app EXIT
@@ -28,6 +37,7 @@ trap 'exit 143' TERM HUP
 launch() {
   local name next_bundle
   name="$(sed -n 's/^name = "\(.*\)"/\1/p' "$PACKAGE/package.toml")"
+  APP_NAME="$name"
   next_bundle="$(/usr/libexec/PlistBuddy -c Print:CFBundleIdentifier "$PACKAGE/$name.app/Info.plist")"
   echo "Install $name on the simulator."
   if ! xcrun simctl install "$DEVICE" "$PACKAGE/$name.app"; then

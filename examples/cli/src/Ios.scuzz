@@ -96,7 +96,7 @@ def startConsole(dir: String, out: String, sim: Sim, watch: Bool, before: String
 
 def stop(pid: Int): IO[Unit] =
   Sys.childWrite(pid, """quit
-""").handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(pid).handleErrorWith(_ => IO.pure(())).flatMap(_ => IO.timeout(5000, stopped(pid)).handleErrorWith(_ => Sys.kill(pid))))
+""").handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(pid).handleErrorWith(_ => IO.pure(())).flatMap(_ => IO.timeout(20000, stopped(pid)).handleErrorWith(_ => Sys.kill(pid))))
 
 def stopped(pid: Int): IO[Unit] =
   Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(()) else IO.sleep(50).flatMap(_ => stopped(pid)))

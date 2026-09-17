@@ -142,8 +142,8 @@ try:
         working = app_pid()
         proc.stdin.write("q\n")
         proc.stdin.flush()
-        assert proc.wait(timeout=10) == 0, "quit fails"
-        wait_for(lambda: dead(working), "quit cleanup", 10)
+        assert proc.wait(timeout=30) == 0, "quit fails"
+        wait_for(lambda: dead(working), "quit cleanup", 30)
         thread.join(timeout=10)
         assert not thread.is_alive(), "console process survives quit"
         dump = json.loads((app / "output path" / "debug.json").read_text())
@@ -152,8 +152,8 @@ try:
         wait_for(lambda: "ios-loop-v3" in lines and launches(lines), "second launch")
         working = app_pid()
         proc.send_signal(signal.SIGINT)
-        assert proc.wait(timeout=10) in (-signal.SIGINT, 130), "interrupt status is wrong"
-        wait_for(lambda: dead(working), "interrupt cleanup", 10)
+        assert proc.wait(timeout=30) in (-signal.SIGINT, 130), "interrupt status is wrong"
+        wait_for(lambda: dead(working), "interrupt cleanup", 30)
         thread.join(timeout=10)
         assert not thread.is_alive(), "console process survives interruption"
         subprocess.run([sys.executable, str(Path(__file__).with_name("test_viewport.py")), device], check=True)
