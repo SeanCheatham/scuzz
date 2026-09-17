@@ -39,7 +39,7 @@ jobs:
       tag: ${{ steps.cut.outputs.tag }}
       ref: ${{ steps.cut.outputs.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.sha }}
           fetch-depth: 0
@@ -121,7 +121,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -187,7 +187,7 @@ jobs:
           grep -q "^scuzz ${SCUZZ_VERSION#v}$" /tmp/rel-ver.out
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/scuzz-*.tar.gz
@@ -198,12 +198,12 @@ jobs:
     if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
       - name: Download packaged tarballs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: scuzz-*
@@ -219,7 +219,7 @@ jobs:
           cat dist/SHA256SUMS
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}

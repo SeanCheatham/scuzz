@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install compiler dependencies
         run: |
           sudo apt-get update
@@ -25,7 +25,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/bootstrap.sh
       - name: Share product CLI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scuzz-ci-linux
           path: examples/cli/build/cli
@@ -58,10 +58,10 @@ jobs:
           - name: web
             slices: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cache Skia CPU prebuilt
         if: contains(fromJSON('["native","apps","fuzz","web"]'), matrix.name)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/skia/prebuilt
           key: skia-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/skia/PIN') }}
@@ -72,7 +72,7 @@ jobs:
             zlib1g-dev libbz2-dev libssl-dev libegl1-mesa-dev libgles2-mesa-dev \
             libgl1-mesa-dri
       - name: Restore product CLI
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: scuzz-ci-linux
           path: examples/cli/build
@@ -100,7 +100,7 @@ jobs:
           done
       - name: Upload release artifact
         if: matrix.name == 'apps'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scuzz-linux-x86_64
           path: dist/scuzz-*.tar.gz
@@ -124,9 +124,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cache Skia CPU prebuilt
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/skia/prebuilt
           key: skia-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/skia/PIN') }}
@@ -151,10 +151,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache Skia CPU prebuilt
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/skia/prebuilt
           key: skia-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/skia/PIN') }}
@@ -174,7 +174,7 @@ jobs:
         run: ./scripts/ci.sh package
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: scuzz-macos-arm64
           path: dist/scuzz-*.tar.gz
