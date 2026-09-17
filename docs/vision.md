@@ -8,6 +8,20 @@ Edit this file when the next-step order changes.
 
 Next: make the language usable for general application development. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Use examples to prove these capabilities through the built-in verification strategy. Specific application workflows do not define the scope.
 
+### Evaluator arc
+
+Current arc. Locks: [`philosophy.md`](philosophy.md#evaluator). Current slice: **Kits** (2). Write its plan in `plans.md` when work starts.
+
+The evaluator runs checked programs without emit or link. It gives `scuzz fuzz` an in-process engine: no rebuild per mutant, no process spawn per probe, cheap state forks for branching, and coverage with comparison operand feedback. It gives the Docs site a static "try it" playground through the existing WebAssembly target. It gives `scuzz eval` on the host. The compiled binary stays the deploy artifact and the corpus replay engine.
+
+Slices, in order. Each slice closes with a proof in `examples/`.
+
+1. **Core.** In the tree. `examples/compiler/src/Eval.scuzz` evaluates expressions, `match`, `for`, closures, records, enums, traits, and module calls. `IO.println`, `IO.pure`, `map`, and `flatMap` map to native `IO`. Kits: `Eval.supportedKits()` (`Str`, `List`, `IO` subsets). A self tail call runs in constant stack. `scuzz eval PATH` runs an IO-only package. Proof: `examples/codegen` `ev*` oracles call evaluated defs and print `eval-ok`; `scripts/ci.sh hello` diffs `scuzz eval` against `scuzz run` on `examples/hello`.
+2. **Kits.** Current. Evaluator cases for `Str`, `List`, `Map`, `Set`, `Json`, `Float`, `Int`, `Option`, and `Result`. `Kits.scuzz` drives a verification oracle: every kit row has an evaluator case or a listed exclusion. Proof: CI diffs `scuzz eval` against `scuzz run` on `examples/kernel`.
+3. **Effects.** `Fs`, `Sys`, `Clock`, `Random`, `Ref`, `Queue`, `Deferred`, `Resource`, `Stream`, and `Net` map to native `IO`. `scuzz fuzz` search and mutation run on the evaluator. Corpus replay runs compiled. Proof: wall-clock and identical summaries on `examples/counter`, `examples/webhook`, and `examples/api-report` against the compiled campaign.
+4. **Branching and coverage.** Snapshot and fork at scheduler steps. Expression and branch coverage from the evaluator. Comparison operand distance feeds search. Proof: a `Property.sometimes` that compiled search does not reach in budget and evaluator search does.
+5. **Browser.** `View`, `Signal`, and `Ui` cases. The evaluator compiles to WebAssembly inside Docs. A "try it" page evaluates a source field and mounts the result. Proof: the Docs browser proof runs a counter typed into the page.
+
 ### Session control arc
 
 `scuzz run` carries the session control channel on every runtime. The channel is file-based: an inject document drives the session and a debug dump reports it. `scuzz exec` sends ops to a live session. `--exec` plays a finite ops program at boot, then exits. The same op vocabulary serves batch and attached modes. Headless, Desktop, and Mobile share the channel. Web needs a second transport and waits for the web hot-reload work.
@@ -53,6 +67,8 @@ Ranked list: [`gaps.md`](gaps.md).
 | “Almost Scala” confusion | Explicit non-goals. Language direction: [`philosophy.md`](philosophy.md). Run `scuzz docs language`. |
 | Watch confused with hot reload | `scuzz watch` rebuilds. `[ui]` `run --watch` is hot reload (stamp-reload Views). IO-only `run --watch` kills and reruns |
 | IDE typer ≠ batch typer | One JSON schema. LSP wraps `scuzz check`. No second typer |
+| Evaluator ≠ emitted binary | One meaning. `fuzz` replays the corpus compiled after an evaluator campaign and fails on a difference. CI diffs `eval` against `run` on examples. The toolchain, editor, and Docs run under both engines before end users do |
+| Evaluator grows a second runtime | `IO` maps to native `IO`. No evaluator scheduler, fakes, or clock. Kits are native calls through one `Kits.scuzz` table |
 | Dogfood IDE before editor primitives | `scuzz ide` launches the bundled editor (`examples/editor`). Headless stays a peer. Do not add a `scuzz-ide` binary |
 | Skia weight | pinned CPU prebuilt default. `sk_sw` opt-out |
 | Desktop-only features | Headless peer rule. One input alphabet for editor keys, caret, selection, clipboard, compose, and inject |

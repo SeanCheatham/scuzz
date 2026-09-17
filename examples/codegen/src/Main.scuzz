@@ -699,5 +699,38 @@ def reloadCaptureType(): Bool =
 def reloadRecordLayout(): Bool =
   Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "Int", "", "")])])]) != Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "String", "", "")])])])
 
+def srcEvMatch(): String =
+  "enum Shape:\n  case Circle(r: Int)\n  case Rect(w: Int, h: Int)\n\nrecord Pt(x: Int, y: Int)\n\ndef pick(xs: List[Int], s: Shape, p: Pt, name: String): Int =\n  xs match {\n    case [] => 0\n    case h :: _ if h > 100 => 1\n    case whole @ (h :: t) => h + List.len(t) + area(s) + p.x * p.y + tag(name) + List.len(whole)\n  }\n\ndef area(s: Shape): Int =\n  s match {\n    case Shape.Circle(r) => r * r * 3\n    case Shape.Rect(w = ww, h = hh) => ww * hh\n  }\n\ndef tag(name: String): Int =\n  name match {\n    case \"a\" | \"b\" => 10\n    case \"c\" => 20\n    case _ => 30\n  }\n\ndef opt(o: Option[Int]): Int =\n  o match {\n    case Some(n) => n\n    case None => 0 - 1\n  }\n\ndef pair(t: (Int, String)): String =\n  t match {\n    case (n, s) => s\"$s=${n + 1}\"\n  }\n\ndef lam(): Int =\n  List.len(List.filter(List.map([1, 2, 3], x => x * 2), y => y > 2))\n\ndef divs(): List[Int] =\n  [7 / 2, (0 - 7) / 2, 7 % 3, (0 - 7) % 3, 7 % (0 - 3)]\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(pick([5, 6, 7], Shape.Rect(2, 3), Pt(2, 5), \"b\")))\n"
+
+def evProg(src: String): EvProg =
+  Eval.load(("Main", src) :: [])
+
+def evCall(src: String, name: String, args: List[Value]): String =
+  Eval.show(Eval.callPure(evProg(src), "Main", name, args))
+
+def evAdd(): Bool =
+  evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) == "3"
+
+def evTco(): Bool =
+  evCall(srcTco(), "countdown", [Value.VInt(100000)]) == "0"
+
+def evTcoMatch(): Bool =
+  evCall(srcTcoMatch(), "countdownMatch", [Value.VInt(100000)]) == "0"
+
+def evGenerated(n: Int where n >= 0): Bool =
+  evCall(genProg(n), "f", [Value.VInt(1)]) == Str.fromInt(1 + n % 8)
+
+def evMatch(): Bool =
+  evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) == "36" && evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(500)]), Value.VCon("Shape", "Circle", [Value.VInt(1)]), Value.VCon("Pt", "Pt", [Value.VInt(0), Value.VInt(0)]), Value.VStr("z")]) == "1" && evCall(srcEvMatch(), "pick", [Value.VList([]), Value.VCon("Shape", "Circle", [Value.VInt(1)]), Value.VCon("Pt", "Pt", [Value.VInt(0), Value.VInt(0)]), Value.VStr("z")]) == "0" && evCall(srcEvMatch(), "area", [Value.VCon("Shape", "Circle", [Value.VInt(2)])]) == "12" && evCall(srcEvMatch(), "tag", [Value.VStr("c")]) == "20" && evCall(srcEvMatch(), "tag", [Value.VStr("q")]) == "30" && evCall(srcEvMatch(), "opt", [Value.VCon("Option", "Some", [Value.VInt(9)])]) == "9" && evCall(srcEvMatch(), "opt", [Value.VCon("Option", "None", [])]) == "-1" && evCall(srcEvMatch(), "pair", [Value.VTuple([Value.VInt(4), Value.VStr("k")])]) == "\"k=5\"" && evCall(srcEvMatch(), "lam", []) == "2" && evCall(srcEvMatch(), "divs", []) == "[3, -3, 1, -1, 1]" && Check.check(srcEvMatch()) == "[]"
+
+def evKitsListed(): Bool =
+  !List.exists(Eval.supportedKits(), k => !Check.isKit(k))
+
+def evAllOk(): Bool =
+  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evKitsListed()
+
+def evDump(): String =
+  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evKitsListed()) "evKitsListed" else "ev-other"
+
 @main def main: IO[Unit] =
-  IO.println(if (allOk()) "ir-ok" else dumpAll())
+  IO.println(if (allOk()) "ir-ok" else dumpAll()).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump()))

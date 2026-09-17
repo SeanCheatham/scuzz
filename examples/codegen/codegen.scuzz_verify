@@ -49,3 +49,21 @@ def reloadCaptureType(): Bool =
 def reloadRecordLayout(): Bool =
   Main.reloadRecordLayout()
 
+def evAdd(): Bool =
+  Main.evAdd()
+
+def evTco(): Bool =
+  Main.evTco()
+
+def evTcoMatch(): Bool =
+  Main.evTcoMatch()
+
+def evGenerated(n: Int where n >= 0): Bool =
+  Main.evGenerated(n)
+
+def evMatch(): Bool =
+  Main.evMatch()
+
+def evKitsListed(): Bool =
+  Main.evKitsListed()
+

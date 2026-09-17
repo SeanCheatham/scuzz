@@ -23,6 +23,12 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits rel
 
 **Proof.** `SCUZZ_SKIA=gpu` renders `examples/counter` with unchanged live structural dumps. `scuzz fuzz --differential --iterations 0` on counter is the host proof. Unused GPU stubs do not close the proof.
 
+### 3. Evaluator parity and speed
+
+**Unproven.** An evaluator written in Scuzz produces the same observable output as the emitted binary on every example. An evaluator `scuzz fuzz` campaign on an app-sized package finishes in less wall-clock time than the compiled campaign, with identical summaries. Interpreted steps are slower; rebuilds and process spawns are gone. The balance is not measured.
+
+**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello` and `examples/kernel`. `scuzz fuzz` on `examples/counter`, `examples/webhook`, and `examples/api-report` reports the same kill, coverage, and reach results on both engines and completes faster on the evaluator. Arc and slices: [`vision.md`](vision.md#evaluator-arc).
+
 ## Known gaps
 
 Next work improves general language usability. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Examples prove these capabilities. Locks: [`philosophy.md`](philosophy.md).
@@ -47,7 +53,7 @@ Required for CLI, server, and desktop applications.
 
 Filesystem symbolic links, extended metadata preservation, and power-loss durability remain open.
 
-`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Time parse and zones. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval` kits beyond the `Str`, `List`, and `IO` subsets in `Eval.supportedKits()` (evaluator arc, [`vision.md`](vision.md#evaluator-arc)). Time parse and zones. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Later
 

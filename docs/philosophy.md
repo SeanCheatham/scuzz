@@ -9,10 +9,10 @@ Edit this file when a decision changes.
 ## Thesis
 
 - **Language**: a purposeful Scala-inspired subset for native CLI, server, desktop, and mobile apps. Effects use built-in `IO` (ZIO-inspired, not a ZIO or cats port). `for` is the primary binder. Dense and token-efficient. Functional by default. Keep it practical. See [Language direction](#language-direction).
-- **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM. No Java interop. No classpath or Maven. GUI apps also target WebAssembly. Scuzz Docs is the first browser app.
+- **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM. No Java interop. No classpath or Maven. GUI apps also target WebAssembly. Scuzz Docs is the first browser app. One evaluator runs checked programs for `scuzz fuzz`, `scuzz eval`, and the browser playground. It is not a deploy target ([Evaluator](#evaluator)).
 - **UI**: a primary product path, not the only one. Flutter-shaped: GUI is first-class; so are CLI and server. One design language plus Skia, as a `Ui` effect with Headless, Desktop, and Mobile interpreters. Headless is a product runtime for agents and CI. It is not a test-only shim.
 - **Batteries**: the language and standard kits cover common app cases. No ecosystem library sprawl. No Maven, cats, or ZIO ports.
-- **Tooling**: one CLI (`scuzz`). One formatter (`scuzz fmt`). One linter (`scuzz check`; no `lint` subcommand). One testing strategy. Mutation, fuzz, properties, simulation, and determinism are first-class. Compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). Bootstrap uses the newest GitHub `v*` release ([Self-hosting](#self-hosting)). `scuzz ide` launches the dogfood `[ui]` app. It is not the compiler.
+- **Tooling**: one CLI (`scuzz`). One formatter (`scuzz fmt`). One linter (`scuzz check`; no `lint` subcommand). One compiler. One evaluator. One testing strategy. Mutation, fuzz, properties, simulation, and determinism are first-class. Compiler and CLI are Scuzz (`examples/compiler`, `examples/cli`). Bootstrap uses the newest GitHub `v*` release ([Self-hosting](#self-hosting)). `scuzz ide` launches the dogfood `[ui]` app. It is not the compiler.
 - **Language proof**: examples that exercise the surface (`examples/`). The shipped CLI is Scuzz ([Self-hosting](#self-hosting)).
 - **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime. `scuzz watch` only rebuilds. `[ui] run --watch` is hot reload: it stamp-reloads Views. Dump and inject ops: run `scuzz docs commands`.
 
@@ -47,6 +47,7 @@ Upstream Scala Native is a reference, not a dependency. Divergence is intentiona
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
 - Not a dual shipped product CLI. The product CLI is Scuzz. Bootstrap uses the newest GitHub `v*` release. The tagged bootstrap `scuzz` is not a second product CLI.
+- Not a VM deploy target. The evaluator serves `fuzz`, `eval`, and the browser playground. `scuzz run` and `scuzz package` stay compiled.
 - Not a second IDE typer. External editors speak `scuzz lsp`. The dogfood IDE consumes `scuzz check` JSON. It does not grow a parallel analyze frontend.
 
 ## Decisions
@@ -57,7 +58,7 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI `scuzz`; compiler pac
 
 ### Tooling
 
-One CLI. One typer. One formatter. One linter. One testing strategy. No second analyze frontend. No `*.g.scuzz` codegen. No `src/test` runner. No bolted-on mutation/fuzz/property ecosystems.
+One CLI. One typer. One formatter. One linter. One compiler. One evaluator. One testing strategy. No second analyze frontend. No `*.g.scuzz` codegen. No `src/test` runner. No bolted-on mutation/fuzz/property ecosystems.
 
 - **Watch** rebuilds when sources or `scuzz.toml` change. `[ui]` `run --watch` is hot reload. See `scuzz docs gui`. IO-only `run --watch` kills and reruns.
 - **Static hygiene** is `scuzz check` (the linter). An expression that ends before its required body or operand is a parse error. `scuzz fmt` rewrites. No `lint` subcommand.
@@ -74,7 +75,20 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 
 The product CLI is Scuzz (`examples/cli`). `scripts/bootstrap.sh` fetches the newest GitHub `v*` release. It builds a temporary compiler from the checkout. That compiler builds the product CLI with the current emission rules. The script removes the temporary compiler. Do not ship two toolchains. Product version lives in `VERSION`.
 
-`examples/syntax` is the lexer and parser. `examples/compiler` is the checker, emit, and compile pipeline. `examples/fmt`, `examples/tyck`, and `examples/codegen` prove printer, checker, and emitter. Toolchain sources only call builtins that the newest `v*` bootstrap already emits.
+`examples/syntax` is the lexer and parser. `examples/compiler` is the checker, evaluator, emit, and compile pipeline. `examples/fmt`, `examples/tyck`, and `examples/codegen` prove printer, checker, evaluator, and emitter. Toolchain sources only call builtins that the newest `v*` bootstrap already emits.
+
+### Evaluator
+
+`Eval.scuzz` in `examples/compiler` evaluates a checked program. It is Scuzz. It is one module of the one compiler, not a second toolchain.
+
+- **Scope.** `scuzz eval` runs a package on the host. `scuzz fuzz` searches, mutates, and measures coverage on the evaluator. The browser playground in Docs runs the evaluator compiled to WebAssembly. `scuzz run` and `scuzz package` stay compiled.
+- **Same meaning.** A program has one meaning. A difference between evaluator output and emitted output, other than speed, is a compiler bug or an evaluator bug. `scuzz fuzz` replays the corpus on the compiled binary after an evaluator campaign. A difference fails the campaign.
+- **One scheduler.** The evaluator maps `IO` to native `IO`. It does not own a scheduler, fibers, fakes, faults, clocks, or timelines. TestRuntime, hermetic simulation, schedule seeds, and `Timeline` are shared with compiled programs.
+- **One kit table.** `Kits.scuzz` is the one list of builtins. The evaluator dispatches by kit name. A kit without an evaluator case fails the compiler's own verification. Kits are native runtime calls in both engines.
+- **Checked input only.** The evaluator runs after `check` passes. Values carry runtime tags. Generics need no instantiation. Traits dispatch on the receiver tag.
+- **Erasure matches live builds.** `.require`, `where`, and `Property.sometimes` erase in `eval` and `run`. They stay active under `fuzz`.
+- **Tail calls.** A self tail call runs in constant evaluator stack, as emit does.
+- **Fail loud.** An unsupported construct or kit stops evaluation with a Scuzz file and line. The evaluator does not guess.
 
 ### GC (v0)
 
@@ -150,7 +164,7 @@ App correctness is not classical unit tests. Prefer mutation, fuzzing, propertie
 - **Drivers** live in one `*.scuzz_scenario`. They are impure, parameterized, and oracle-free. `check` rejects `Property.*` and `.require` in scenario files.
 - **Simulation is hermetic.** Fuzz, mutation, and TestRuntime keep impurity inside fakes. No live sockets. Scheduler ownership, not address, is the determinism boundary.
 - **Probe limits.** Each probe has a 20-second deadline. Linux probes also have a 512 MiB virtual memory limit. Darwin has no `RLIMIT_AS`. Simulation stops after 1000000 scheduler steps per IO run. A limit failure fails the probe. Process cancellation kills the shell and its process group.
-- **One `scuzz fuzz`.** `--iterations N` allocates five eighths of N to search, rounded down. Mutation uses the remaining allocation, up to the number of sites. Initial probes and corpus replay do not use this allocation. Small packages obey the same limit. `--iterations 0` is corpus-only. Mutation is a phase of that command. Search and corpus failures fail the campaign. Summaries count completed search iterations and keep corpus failures separate. --no-fail-fast cannot turn a corpus failure into a passing campaign. Catalog: run `scuzz docs verify`.
+- **One `scuzz fuzz`, two engines.** Search, mutation, and coverage run on the evaluator when the evaluator covers the package. Corpus replay runs the compiled binary. Any difference in observable output between engines fails the campaign. A package the evaluator does not cover runs the compiled path for every phase. `--iterations N` allocates five eighths of N to search, rounded down. Mutation uses the remaining allocation, up to the number of sites. Initial probes and corpus replay do not use this allocation. Small packages obey the same limit. `--iterations 0` is corpus-only. Mutation is a phase of that command. Search and corpus failures fail the campaign. Summaries count completed search iterations and keep corpus failures separate. --no-fail-fast cannot turn a corpus failure into a passing campaign. Catalog: run `scuzz docs verify`.
 
 ```text
 src/
