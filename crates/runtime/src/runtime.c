@@ -1433,6 +1433,33 @@ int64_t sz_string_contains(const SzString *s, const SzString *needle) {
   return sz_string_index_of(s, needle) >= 0 ? 1 : 0;
 }
 
+enum { SZ_RE_MAX_PAT = 1024, SZ_RE_MAX_MATCH = 32 };
+
+static int sz_re_nul_ok(const SzString *s) {
+  return s && s->data && strlen(s->data) == s->len;
+}
+
+/* 0 compiled, 1 empty pattern, -1 fail. Caller calls regfree when 0. */
+static int sz_re_compile(const SzString *pat, regex_t *re) {
+  if (!pat || !pat->data)
+    return -1;
+  if (pat->len > SZ_RE_MAX_PAT)
+    return -1;
+  if (strlen(pat->data) != pat->len)
+    return -1;
+  if (pat->len == 0)
+    return 1;
+  if (regcomp(re, pat->data, REG_EXTENDED) != 0)
+    return -1;
+  return 0;
+}
+
+static SzString *sz_re_group(const char *text, const regmatch_t *m) {
+  if (!m || m->rm_so < 0)
+    return sz_string_from_bytes("", 0);
+  return sz_string_from_bytes(text + m->rm_so, (size_t)(m->rm_eo - m->rm_so));
+}
+
 /* POSIX ERE. Full-string match on UTF-8 bytes. No capture.
  * A bad pattern, a NUL in the text, or a pattern over 1024 bytes is 0.
  * Empty pattern: match only the empty string. Do not call libc regex for
@@ -1440,31 +1467,109 @@ int64_t sz_string_contains(const SzString *s, const SzString *needle) {
 int64_t sz_string_matches(const SzString *s, const SzString *pat) {
   regex_t re;
   regmatch_t m;
-  const char *text;
-  const char *p;
+  int crc;
   int rc;
 
-  if (!s || !s->data || !pat || !pat->data)
+  crc = sz_re_compile(pat, &re);
+  if (crc == 1)
+    return s && s->len == 0 ? 1 : 0;
+  if (crc != 0)
     return 0;
-  if (pat->len > 1024)
+  if (!sz_re_nul_ok(s)) {
+    regfree(&re);
     return 0;
-  p = pat->data;
-  if (strlen(p) != pat->len)
-    return 0;
-  text = s->data;
-  if (strlen(text) != s->len)
-    return 0;
-  if (pat->len == 0)
-    return s->len == 0 ? 1 : 0;
-  if (regcomp(&re, p, REG_EXTENDED) != 0)
-    return 0;
-  rc = regexec(&re, text, 1, &m, 0);
+  }
+  rc = regexec(&re, s->data, 1, &m, 0);
   regfree(&re);
   if (rc != 0)
     return 0;
   if (m.rm_so != 0 || (size_t)m.rm_eo != s->len)
     return 0;
   return 1;
+}
+
+/* First match. Cell 0 is the full match. Later cells are groups.
+ * Empty list when there is no match or the pattern is bad. Empty pattern
+ * does not match. */
+SzList *sz_string_capture(const SzString *s, const SzString *pat) {
+  regex_t re;
+  regmatch_t m[SZ_RE_MAX_MATCH];
+  size_t nmatch;
+  size_t i;
+  int crc;
+  SzList *acc = NULL;
+
+  crc = sz_re_compile(pat, &re);
+  if (crc != 0)
+    return NULL;
+  if (!sz_re_nul_ok(s)) {
+    regfree(&re);
+    return NULL;
+  }
+  nmatch = re.re_nsub + 1;
+  if (nmatch > SZ_RE_MAX_MATCH)
+    nmatch = SZ_RE_MAX_MATCH;
+  if (regexec(&re, s->data, nmatch, m, 0) != 0) {
+    regfree(&re);
+    return NULL;
+  }
+  i = nmatch;
+  while (i > 0) {
+    SzString *g;
+    SzList *old;
+    i--;
+    g = sz_re_group(s->data, &m[i]);
+    old = acc;
+    acc = sz_list_cons(g, old);
+    sz_release(g);
+    sz_release(old);
+  }
+  regfree(&re);
+  return acc;
+}
+
+/* Replace the first match with a literal string. No backreferences.
+ * A miss, a bad pattern, an empty pattern, or a NUL in the text copies s. */
+SzString *sz_string_replace_match(const SzString *s, const SzString *pat,
+                                  const SzString *repl) {
+  regex_t re;
+  regmatch_t m;
+  int crc;
+  size_t slen;
+  const char *text;
+  const char *rp;
+  size_t nrepl;
+  size_t out_len;
+  char *buf;
+  SzString *out;
+
+  slen = s && s->data ? s->len : 0;
+  text = s && s->data ? s->data : "";
+  nrepl = repl && repl->data ? repl->len : 0;
+  rp = repl && repl->data ? repl->data : "";
+  crc = sz_re_compile(pat, &re);
+  if (crc != 0)
+    return sz_string_from_bytes(text, slen);
+  if (!sz_re_nul_ok(s)) {
+    regfree(&re);
+    return sz_string_from_bytes(text, slen);
+  }
+  if (regexec(&re, text, 1, &m, 0) != 0 || m.rm_so < 0) {
+    regfree(&re);
+    return sz_string_from_bytes(text, slen);
+  }
+  out_len = slen - (size_t)(m.rm_eo - m.rm_so) + nrepl;
+  buf = (char *)sz_alloc(out_len + 1);
+  memcpy(buf, text, (size_t)m.rm_so);
+  if (nrepl)
+    memcpy(buf + (size_t)m.rm_so, rp, nrepl);
+  memcpy(buf + (size_t)m.rm_so + nrepl, text + (size_t)m.rm_eo,
+         slen - (size_t)m.rm_eo);
+  buf[out_len] = '\0';
+  out = sz_string_from_bytes(buf, out_len);
+  sz_free(buf);
+  regfree(&re);
+  return out;
 }
 
 int64_t sz_string_ends_with(const SzString *s, const SzString *suffix) {

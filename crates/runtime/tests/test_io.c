@@ -6213,6 +6213,44 @@ int main(void) {
     assert(sz_string_matches(sz_string_from_cstr("a"), sz_string_from_cstr("")) ==
            0);
     {
+      SzList *cap = sz_string_capture(sz_string_from_cstr("abc123"),
+                                      sz_string_from_cstr("([a-z]+)([0-9]+)"));
+      assert(sz_list_len(cap) == 3);
+      assert(strcmp(sz_string_cstr((SzString *)cap->head), "abc123") == 0);
+      assert(strcmp(sz_string_cstr((SzString *)cap->tail->head), "abc") == 0);
+      assert(strcmp(sz_string_cstr((SzString *)cap->tail->tail->head), "123") ==
+             0);
+      sz_release(cap);
+      cap = sz_string_capture(sz_string_from_cstr("abc123x"),
+                              sz_string_from_cstr("([a-z]+)([0-9]+)"));
+      assert(sz_list_len(cap) == 3);
+      sz_release(cap);
+      cap = sz_string_capture(sz_string_from_cstr("abc123"),
+                              sz_string_from_cstr("^[a-z]+$"));
+      assert(cap == NULL);
+      cap = sz_string_capture(sz_string_from_cstr("a"), sz_string_from_cstr("["));
+      assert(cap == NULL);
+      cap = sz_string_capture(sz_string_from_cstr("a"), sz_string_from_cstr(""));
+      assert(cap == NULL);
+    }
+    {
+      SzString *rep = sz_string_replace_match(sz_string_from_cstr("a1b"),
+                                              sz_string_from_cstr("[0-9]"),
+                                              sz_string_from_cstr("x"));
+      assert(strcmp(sz_string_cstr(rep), "axb") == 0);
+      sz_release(rep);
+      rep = sz_string_replace_match(sz_string_from_cstr("ab"),
+                                    sz_string_from_cstr("[0-9]"),
+                                    sz_string_from_cstr("x"));
+      assert(strcmp(sz_string_cstr(rep), "ab") == 0);
+      sz_release(rep);
+      rep = sz_string_replace_match(sz_string_from_cstr("a1b"),
+                                    sz_string_from_cstr("["),
+                                    sz_string_from_cstr("x"));
+      assert(strcmp(sz_string_cstr(rep), "a1b") == 0);
+      sz_release(rep);
+    }
+    {
       SzString *h = sz_hash_sha256(sz_string_from_cstr("abc"));
       assert(strcmp(sz_string_cstr(h),
                     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") ==
