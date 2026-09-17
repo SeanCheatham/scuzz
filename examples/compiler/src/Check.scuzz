@@ -329,10 +329,18 @@ def enNames(ens: List[En]): List[String] =
   if (List.isEmpty(ens)) noStr() else enNamesHd(List.at(ens, 0), List.tail(ens))
 
 def enNamesHd(h: En, rest: List[En]): List[String] =
-  h.name :: enNames(rest)
+  h match {
+    case En(_, name, ts, _) => if (name == "#pin") List.concat(ts, enNames(rest)) else name :: enNames(rest)
+  }
 
 def tyEqEn(a: String, b: String, ens: List[En]): Bool =
   eqPinned(a, b, enNames(ens))
+
+def pinEns(ens: List[En], ts: List[String]): List[En] =
+  if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase()) :: ens
+
+def noCase(): List[EnCase] =
+  []
 
 def preferEn(a: String, b: String, ens: List[En]): String =
   preferPinned(a, b, enNames(ens))
@@ -342,6 +350,12 @@ def prefer(a: String, b: String): String =
 
 def isLoose(t: String): Bool =
   isTyParam(t)
+
+def isLooseEn(t: String, ens: List[En]): Bool =
+  isTyParam(t) && !nameIn(enNames(ens), t)
+
+def nameIn(ns: List[String], n: String): Bool =
+  if (List.isEmpty(ns)) false else if (List.at(ns, 0) == n) true else nameIn(List.tail(ns), n)
 
 def funArgOf(t: String): String =
   Type.funArgStr(t)
@@ -676,10 +690,10 @@ def inferCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, 
   resolveCall(f, args, env, funs, ens, span)
 
 def inferPrint(inner: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
-  inferPrint2(infer(inner, env, funs, ens), env, inner, e)
+  inferPrint2(infer(inner, env, funs, ens), env, inner, e, ens)
 
-def inferPrint2(o: Out, env: List[(String, Ty)], inner: Expr, e: Expr): Out =
-  if (hasErr(o)) o else if (tyStr(o) == "String" || isLoose(tyStr(o))) ok("IO[Unit]") else bad(Str.concat("expected String, got ", tyStr(o)), spanPick(exprSpan(env, inner), exprSpan(env, e)))
+def inferPrint2(o: Out, env: List[(String, Ty)], inner: Expr, e: Expr, ens: List[En]): Out =
+  if (hasErr(o)) o else if (tyStr(o) == "String" || isLooseEn(tyStr(o), ens)) ok("IO[Unit]") else bad(Str.concat("expected String, got ", tyStr(o)), spanPick(exprSpan(env, inner), exprSpan(env, e)))
 
 def inferBin(op: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   inferBin2(op, infer(l, env, funs, ens), r, env, funs, ens, e)
@@ -1683,8 +1697,11 @@ def inferTupleRest(rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: L
 
 def checkDef(d: Fun, funs: Ftab, ens: List[En]): Out =
   d match {
-    case Fun(_, name, ts, ps, ret, body, mod, off) => checkDefWhere(name, ret, body, ps, funs, ens, ts, mod, off, checkWheres(ps, bindParams(ps, envSelfMod(mod)), funs, ens, (mod, off)))
+    case Fun(_, name, ts, ps, ret, body, mod, off) => checkDefGo(name, ret, body, ps, funs, pinEns(ens, ts), ts, mod, off)
   }
+
+def checkDefGo(name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], ts: List[String], mod: String, off: Int): Out =
+  checkDefWhere(name, ret, body, ps, funs, ens, ts, mod, off, checkWheres(ps, bindParams(ps, envSelfMod(mod)), funs, ens, (mod, off)))
 
 def checkDefWhere(name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], ts: List[String], mod: String, off: Int, wo: Out): Out =
   if (hasErr(wo)) checkDefWrap(name, ret, body, wo, (mod, off), ens, ts) else checkDefWrap(name, ret, body, inferExpected(body, ret, bindParams(ps, envSelfMod(mod)), funs, ens), (mod, off), ens, ts)
