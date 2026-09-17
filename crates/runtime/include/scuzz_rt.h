@@ -193,6 +193,13 @@ typedef struct SzMap SzMap;
 SzList *sz_string_lines(const SzString *s);
 /* Split on non-overlapping `sep`. Empty `sep` copies `s` as one cell. */
 SzList *sz_string_split(const SzString *s, const SzString *sep);
+/* First match. Cell 0 is the full match. Later cells are groups. Empty
+ * when there is no match or the pattern is bad. Empty pattern is empty. */
+SzList *sz_string_capture(const SzString *s, const SzString *pat);
+/* Replace the first match with a literal string. No backreferences. A
+ * miss, a bad pattern, or an empty pattern copies `s`. */
+SzString *sz_string_replace_match(const SzString *s, const SzString *pat,
+                                  const SzString *repl);
 
 /* Boxed i64 for IO[Int] */
 void *sz_box_i64(int64_t n);

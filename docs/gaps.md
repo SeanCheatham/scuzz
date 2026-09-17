@@ -47,7 +47,7 @@ Required for CLI, server, and desktop applications.
 
 Filesystem symbolic links, extended metadata preservation, and power-loss durability remain open.
 
-`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Time parse and zones. Regex capture and replace. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval`. Time parse and zones. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Later
 
