@@ -373,6 +373,18 @@ extern SzString *sz_user_Main_tailValue(SzString *, int64_t);
 int main(void) {
   SzString *input = sz_string_from_cstr("payload");
   size_t before, after;
+  {
+    /* Warm up: interned string literals pin on first evaluation. */
+    SzString *warm = sz_user_Main_value(input);
+    sz_release(warm);
+    warm = sz_user_Main_recordValue(input);
+    sz_release(warm);
+    warm = sz_user_Main_tailValue(input, 1);
+    sz_release(warm);
+    assert(sz_user_Main_size(input) == 7);
+    assert(sz_user_Main_recordSize(input) == 7);
+    assert(sz_user_Main_tailSize(input, 1) == 7);
+  }
   sz_alloc_stats(&before, NULL);
   for (int i = 0; i < 1000; ++i) {
     assert(sz_user_Main_size(input) == 7);

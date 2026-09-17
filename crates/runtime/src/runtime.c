@@ -56,6 +56,8 @@ static SzIo *attempt_drop(SzIo *inner) {
 #define SZ_ALLOC_MAGIC 0x535A414Cu /* 'SZAL' */
 #define SZ_RC_MAGIC 0x535A5243u    /* 'SZRC' */
 #define SZ_RC_TOMB 0x535A544Du     /* 'SZTM' */
+/* Pinned rc: an interned literal that retain and release never touch. */
+#define SZ_RC_PINNED UINT32_MAX
 
 typedef struct SzRcHdr {
   uint32_t magic;
@@ -476,7 +478,7 @@ uint64_t sz_alloc_rc_sum(void) {
   uint64_t n = 0;
   SzRcHdr *h;
   for (h = g_live; h; h = h->next) {
-    if (h->magic == SZ_RC_MAGIC)
+    if (h->magic == SZ_RC_MAGIC && h->rc != SZ_RC_PINNED)
       n += h->rc;
   }
   return n;
@@ -545,9 +547,13 @@ void *sz_rc_alloc(size_t size, uint32_t kind) {
 }
 
 void sz_retain(void *ptr) {
+  SzRcHdr *h;
   if (!sz_is_rc(ptr))
     return;
-  sz_rc_hdr(ptr)->rc += 1;
+  h = sz_rc_hdr(ptr);
+  if (h->rc == SZ_RC_PINNED)
+    return;
+  h->rc += 1;
 }
 
 uint32_t sz_rc_kind(const void *ptr) {
@@ -570,6 +576,8 @@ void sz_release(void *ptr) {
     return;
   }
   h = sz_rc_hdr(ptr);
+  if (h->rc == SZ_RC_PINNED)
+    return;
   if (h->rc > 1) {
     h->rc -= 1;
     return;
@@ -903,6 +911,44 @@ SzString *sz_string_from_cstr(const char *cstr) {
   if (!cstr)
     sz_panic("sz_string_from_cstr(null)");
   return sz_string_from_bytes(cstr, strlen(cstr));
+}
+
+/* Interned string literals. Emitted code calls this for compile-time
+ * literals only; runtime data goes through sz_string_from_cstr. The first
+ * call builds the string and pins its rc, so later evaluations share one
+ * allocation that retain and release never touch. */
+#define SZ_LIT_BUCKETS 4096
+typedef struct SzLitEnt {
+  struct SzLitEnt *next;
+  SzString *s;
+} SzLitEnt;
+static SzLitEnt *g_lits[SZ_LIT_BUCKETS];
+
+SzString *sz_string_lit(const char *cstr) {
+  size_t len;
+  size_t i;
+  uint32_t hash;
+  SzLitEnt *e;
+  SzString *s;
+  if (!cstr)
+    sz_panic("sz_string_lit(null)");
+  len = strlen(cstr);
+  hash = 5381;
+  for (i = 0; i < len; i++)
+    hash = hash * 33 + (unsigned char)cstr[i];
+  hash %= SZ_LIT_BUCKETS;
+  for (e = g_lits[hash]; e; e = e->next)
+    if (e->s->len == len && !memcmp(e->s->data, cstr, len))
+      return e->s;
+  s = sz_string_from_bytes(cstr, len);
+  sz_rc_hdr(s)->rc = SZ_RC_PINNED;
+  e = (SzLitEnt *)malloc(sizeof(*e));
+  if (!e)
+    sz_panic("out of memory");
+  e->s = s;
+  e->next = g_lits[hash];
+  g_lits[hash] = e;
+  return s;
 }
 
 const char *sz_string_cstr(const SzString *s) {

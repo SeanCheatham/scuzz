@@ -39,7 +39,7 @@ Resolve these gaps when they prevent ordinary language use.
 
 1. **Checker and emit residuals** — A Queue or Deferred payload pins at the first offer or complete in the same for-comprehension, including nested expressions and payloads seen through a lambda parameter over a collection. Applying an env-bound lambda with an unresolved parameter letter to a concrete argument fails check. An unannotated lambda in argument or def-body position binds its parameter from the expected function type, so a loose lambda can no longer escape through an expected function type. Param letters (`A`/`E`) still unify elsewhere in `Type.eq`. Parse Param/Fun stay strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call. Constructor patterns do not nest. A nested constructor, tuple, as, or cons pattern in a constructor field or tuple component fails check. A bare enum case, float literal, or list literal in those positions also fails check. Tuple components and direct constructor fields compare String, Int, and Bool literals.
 
-2. **Compile-time performance** — `scuzz check examples/compiler` is 16 s. A cold `scuzz build examples/tyck` is 1 m 10 s. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
+2. **Compile-time performance** — `scuzz check examples/compiler` is 17 s. A cold `scuzz build examples/tyck` is 34 s. Emitted string literals intern to pinned allocations. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
 
 ### Table-stakes
 

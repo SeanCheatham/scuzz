@@ -103,7 +103,7 @@ def srcIrHi(): String =
   "@main def main: IO[Unit] =\n  IO.println(\"Hi\")\n"
 
 def wantIrHi(): String =
-  "@.str0 = private unnamed_addr constant [3 x i8] c\"Hi\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_ss = call ptr @sz_string_from_cstr(ptr %build_gep)\n  %build_io = call ptr @sz_io_println(ptr %build_ss)\n  call void @sz_release(ptr %build_ss)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
+  "@.str0 = private unnamed_addr constant [3 x i8] c\"Hi\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_ss = call ptr @sz_string_lit(ptr %build_gep)\n  %build_io = call ptr @sz_io_println(ptr %build_ss)\n  call void @sz_release(ptr %build_ss)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def srcTyUnbound(): String =
   """@main def main: IO[Unit] =

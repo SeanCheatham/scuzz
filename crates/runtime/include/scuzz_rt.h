@@ -101,6 +101,7 @@ typedef struct SzString {
 } SzString;
 
 SzString *sz_string_from_cstr(const char *cstr);
+SzString *sz_string_lit(const char *cstr);
 SzString *sz_string_from_bytes(const char *bytes, size_t len);
 const char *sz_string_cstr(const SzString *s);
 void sz_string_free(SzString *s);
