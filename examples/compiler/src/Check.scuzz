@@ -888,8 +888,8 @@ def bindFor(d: Bool, name: String, ty: String, env: List[(String, Ty)], ens: Lis
 
 def refineEnv(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   e match {
-    case Expr.ECall(f, args, _) => refineExprs(args, refineOfferCall(f, args, env, funs, ens), funs, ens)
-    case Expr.EMethod(recv, name, args, _) => refineExprs(args, refineEnv(recv, refineOfferMeth(recv, name, args, env, funs, ens), funs, ens), funs, ens)
+    case Expr.ECall(f, args, _) => refineExprs(args, refineIterCall(f, args, refineOfferCall(f, args, env, funs, ens), funs, ens), funs, ens)
+    case Expr.EMethod(recv, name, args, _) => refineExprs(args, refineEnv(recv, refineIterMeth(recv, name, args, refineOfferMeth(recv, name, args, env, funs, ens), funs, ens), funs, ens), funs, ens)
     case Expr.EAscribe(inner, _, _) => refineEnv(inner, env, funs, ens)
     case Expr.ENamed(_, inner) => refineEnv(inner, env, funs, ens)
     case Expr.ELam(_, _, body) => refineEnv(body, env, funs, ens)
@@ -932,6 +932,58 @@ def offerCtor(f: String): String =
 
 def refineOfferMeth(recv: Expr, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   if (name == "offer") refineOfferRecv(recv, "Queue", args, env, funs, ens) else if (name == "complete") refineOfferRecv(recv, "Deferred", args, env, funs, ens) else env
+
+def refineIterCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if ((f == "IO.foreach" || f == "IO.foreachDiscard") && List.len(args) == 2) refineIterLam(List.at(args, 0), List.at(args, 1), env, funs, ens) else env
+
+def refineIterMeth(recv: Expr, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if ((name == "foreach" || name == "map" || name == "flatMap" || name == "filter") && List.len(args) == 1) refineIterLam(recv, List.at(args, 0), env, funs, ens) else env
+
+def refineIterLam(xs: Expr, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  lam match {
+    case Expr.ELam(p, ann, body) => refineIterLam2(xs, p, body, iterParamTy(ann, iterElemTy(xs, env, funs, ens)), env, funs, ens)
+    case _ => env
+  }
+
+def iterElemTy(xs: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  iterElemTy2(infer(xs, env, funs, ens))
+
+def iterElemTy2(o: Out): String =
+  if (hasErr(o) || !Str.startsWith(tyStr(o), "List[")) "" else elemOf(tyStr(o))
+
+def iterParamTy(ann: String, el: String): String =
+  if (ann != "") ann else el
+
+def refineIterLam2(xs: Expr, p: String, body: Expr, pt: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (p == "" || p == "_") env else if (!isBareHandle(pt, "Queue") && !isBareHandle(pt, "Deferred")) env else refineIterPin(xs, p, pt, refineEnv(body, envBind(p, pt, env), funs, ens))
+
+def refineIterPin(xs: Expr, p: String, pt: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  refineIterPin2(xs, p, pt, Type.show(lookupEnv(env, p)), List.filter(env, e => e._1 != p))
+
+def refineIterPin2(xs: Expr, p: String, pt: String, pinned: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (pinned == "" || pinned == pt) env else pinIterSource(xs, pinned, env)
+
+def pinIterSource(xs: Expr, pay: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  xs match {
+    case Expr.EVar(n, _) => pinIterVar(n, pay, env)
+    case Expr.EList(es) => pinIterElems(es, pay, env)
+    case _ => env
+  }
+
+def pinIterVar(n: String, pay: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (isBareHandle(iterElemOf(getTy(env, n)), Type.headNameStr(pay))) envBind(n, Str.concat("List[", Str.concat(pay, "]")), env) else env
+
+def iterElemOf(ty: String): String =
+  if (Str.startsWith(ty, "List[")) elemOf(ty) else ""
+
+def pinIterElems(es: List[Expr], pay: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (List.isEmpty(es)) env else pinIterElems(List.tail(es), pay, pinIterElem(List.at(es, 0), pay, env))
+
+def pinIterElem(e: Expr, pay: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  e match {
+    case Expr.EVar(n, _) => if (isBareHandle(getTy(env, n), Type.headNameStr(pay))) envBind(n, pay, env) else env
+    case _ => env
+  }
 
 def refineOfferArgs(ctor: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   if (List.len(args) < 2) env else refineHandlePay(ctor, List.at(args, 0), List.at(args, 1), env, funs, ens)
