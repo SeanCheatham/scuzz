@@ -13,6 +13,9 @@ def sumToTen(): Bool =
 def termDiff(t: Term): Bool =
   Main.termAgrees(t)
 
+def nestedTerm(t: Term): Bool =
+  Main.evalNestedAdd(t) == Main.evalTerm(t)
+
 def utf8Ops(): Bool =
   Main.utf8Check() == 1
 

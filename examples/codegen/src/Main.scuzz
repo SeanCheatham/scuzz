@@ -542,7 +542,63 @@ def okList(): Bool =
   irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]"
 
 def okOpt(): Bool =
-  irDiff(srcOpt(), wantOpt()) && irIdem(srcOpt()) && irDiff(srcHead(), wantHead()) && irIdem(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irIdem(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irIdem(srcTail()) && irDiff(srcTok(), wantTok()) && irIdem(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]" && okHeadPair()
+  irDiff(srcOpt(), wantOpt()) && irIdem(srcOpt()) && irDiff(srcHead(), wantHead()) && irIdem(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irIdem(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irIdem(srcTail()) && irDiff(srcTok(), wantTok()) && irIdem(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]" && okHeadPair() && okNestCtor() && okNestTupField() && okNestCons()
+
+def okNestCtor(): Bool =
+  Check.check(srcNestCtor()) == "[]" && hasNestCtor(Emit.emit(srcNestCtor())) && irIdem(srcNestCtor())
+
+def okNestTupField(): Bool =
+  Check.check(srcNestTupField()) == "[]" && hasNestTupField(Emit.emit(srcNestTupField())) && irIdem(srcNestTupField())
+
+def okNestCons(): Bool =
+  Check.check(srcNestCons()) == "[]" && hasNestCons(Emit.emit(srcNestCons())) && irIdem(srcNestCons())
+
+def srcNestCtor(): String =
+  """enum Inner:
+  case Good(v: Int)
+enum Outer:
+  case Wrap(a: Inner, b: Int)
+def get(o: Outer): Int =
+  o match {
+    case Outer.Wrap(Inner.Good(n), _) => n
+    case _ => 0
+  }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(get(Outer.Wrap(Inner.Good(7), 1))))
+"""
+
+def hasNestCtor(ir: String): Bool =
+  Str.contains(ir, "call i32 @sz_adt_tag(ptr %o)") && Str.contains(ir, "_n_p0_0_tg1") && Str.contains(ir, "call i64 @sz_unbox_i64")
+
+def srcNestTupField(): String =
+  """enum Box2:
+  case P(p: (Int, Int))
+def get(b: Box2): Int =
+  b match {
+    case Box2.P((n, m)) => n + m
+    case _ => 0
+  }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(get(Box2.P((1, 2)))))
+"""
+
+def hasNestTupField(ir: String): Bool =
+  Str.contains(ir, "call ptr @sz_adt_payload") && Str.contains(ir, "call ptr @sz_pair_left") && Str.contains(ir, "call ptr @sz_pair_right") && Str.contains(ir, "call i64 @sz_unbox_i64")
+
+def srcNestCons(): String =
+  """enum BoxL:
+  case L(xs: List[Int])
+def get(b: BoxL): Int =
+  b match {
+    case BoxL.L(x :: _) => x
+    case _ => 0
+  }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(get(BoxL.L([7]))))
+"""
+
+def hasNestCons(ir: String): Bool =
+  Str.contains(ir, "call ptr @sz_adt_payload") && Str.contains(ir, "call i32 @sz_list_is_empty") && Str.contains(ir, "call ptr @sz_list_head") && Str.contains(ir, "call i64 @sz_unbox_i64")
 
 def okHeadPair(): Bool =
   Check.check(srcHeadPair()) == "[]" && hasHeadPairBox(Emit.emit(srcHeadPair()))
@@ -625,6 +681,18 @@ def wantLam(): String =
 def allOk(): Bool =
   okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam())
 
+def dumpAll(): String =
+  if (!okHi()) "okHi" else if (!okIf()) "okIf" else if (!okCmp()) "okCmp" else if (!okList()) "okList" else if (!okOpt()) dumpOpt() else if (!okKw()) "okKw" else if (!okPair()) "okPair" else if (!okMod()) "okMod" else if (!okPtr()) dumpPtr() else if (!okFs()) "okFs" else if (!irDiff(srcLam(), wantLam()) || !irIdem(srcLam())) "okLam" else "other"
+
+def dumpPtr(): String =
+  if (!irDiff(srcIfPtr(), wantIfPtr()) || !irIdem(srcIfPtr())) "srcIfPtr" else if (!irDiff(srcTCons(), wantTCons()) || !irIdem(srcTCons())) "srcTCons" else if (!irDiff(srcTupPtr(), wantTupPtr()) || !irIdem(srcTupPtr())) "srcTupPtr" else if (!irDiff(srcT3(), wantT3()) || !irIdem(srcT3())) "srcT3" else if (!irDiff(srcIfTup(), wantIfTup()) || !irIdem(srcIfTup())) "srcIfTup" else if (!irDiff(srcNestTup(), wantNestTup()) || !irIdem(srcNestTup())) "srcNestTup" else "okPtr-other"
+
+def dumpOpt(): String =
+  if (!irDiff(srcOpt(), wantOpt())) "srcOpt" else if (!irDiff(srcHead(), wantHead())) "srcHead" else if (!okHeadPair()) "okHeadPair" else if (!okNestCtor()) "okNestCtor" else if (!okNestTupField()) "okNestTupField" else if (!okNestCons()) "okNestCons" else "okOpt-other"
+
+@main def main: IO[Unit] =
+  IO.println(if (allOk()) "ir-ok" else dumpAll())
+
 def reloadCaptureOrder(): Bool =
   Emit.captureSchema([Param("a", "Int", "", ""), Param("b", "String", "", "")], []) != Emit.captureSchema([Param("b", "String", "", ""), Param("a", "Int", "", "")], [])
 
@@ -633,6 +701,3 @@ def reloadCaptureType(): Bool =
 
 def reloadRecordLayout(): Bool =
   Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "Int", "", "")])])]) != Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "String", "", "")])])])
-
-@main def main: IO[Unit] =
-  IO.println(if (allOk()) "ir-ok" else "ir-bad")

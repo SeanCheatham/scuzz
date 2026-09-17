@@ -806,7 +806,24 @@ def dumpFail(): String =
   if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else "other"
 
 def dumpTyckRes(): String =
-  if (!namedIoTypes()) dumpNamedIo() else "tyckRes"
+  if (!nestedPatTypes()) dumpNestedPat() else if (!namedIoTypes()) dumpNamedIo() else "tyckRes"
+
+def dumpNestedPat(): String =
+  if (Check.check("""enum Inner:
+  case Good(v: Int)
+enum Outer:
+  case Wrap(a: Inner, b: Int)
+def right(o: Outer): Int = o match {
+  case Outer.Wrap(Inner.Good(n), b) => n
+  case _ => 0
+}""") != "[]") Str.concat("nestCtor ", Check.check("""enum Inner:
+  case Good(v: Int)
+enum Outer:
+  case Wrap(a: Inner, b: Int)
+def right(o: Outer): Int = o match {
+  case Outer.Wrap(Inner.Good(n), b) => n
+  case _ => 0
+}""")) else "nestedPat-other"
 
 def dumpNamedIo(): String =
   if (Check.check("def right(io: IO[Int]): IO[String] = io.map(n => Str.fromInt(n))") != "[]") Str.concat("ioMapOk ", Check.check("def right(io: IO[Int]): IO[String] = io.map(n => Str.fromInt(n))")) else if (!ioFunTypes()) dumpIoFun() else "namedIo-other"
@@ -1034,39 +1051,39 @@ def lambdaApplyTypes(): Bool =
 """, "lambda parameter type is unresolved") && Check.check("@main def main: IO[Unit] =\n  for {\n    f = ((n: String) => n)\n    _ <- IO.println(f(\"s\"))\n  } yield ()\n") == "[]" && Check.check("def right(): Int = (n => n + 1)(1)") == "[]" && rejects("def wrong(): Int = (n => n + 1)(\"s\")", "arithmetic needs Int or Float")
 
 def nestedPatTypes(): Bool =
-  rejects("""enum Inner:
+  Check.check("""enum Inner:
   case Good(v: Int)
 enum Outer:
   case Wrap(a: Inner, b: Int)
-def wrong(o: Outer): Int = o match {
+def right(o: Outer): Int = o match {
   case Outer.Wrap(Inner.Good(n), b) => n
   case _ => 0
-}""", "nested patterns are not supported here") && rejects("""enum Box2:
+}""") == "[]" && Check.check("""enum Box2:
   case P(p: (Int, Int))
-def wrong(b: Box2): Int = b match {
+def right(b: Box2): Int = b match {
   case Box2.P((n, m)) => n + m
   case _ => 0
-}""", "nested patterns are not supported here") && rejects("""def wrong(p: (Result[String, Int], Int)): Int = p match {
+}""") == "[]" && Check.check("""def right(p: (Result[String, Int], Int)): Int = p match {
   case (Result.Ok(n), m) => n + m
   case _ => 0
-}""", "nested patterns are not supported here") && rejects("""def wrong(p: (List[Int], Int)): Int = p match {
+}""") == "[]" && Check.check("""def right(p: (List[Int], Int)): Int = p match {
   case (x :: _, n) => x + n
   case _ => 0
-}""", "nested patterns are not supported here") && rejects("""enum Opt:
+}""") == "[]" && Check.check("""enum Opt:
   case Some(value: Int)
   case None
-def wrong(o: Opt): Int = o match {
+def right(o: Opt): Int = o match {
   case Opt.Some(n @ 0) => n
   case _ => 0
-}""", "nested patterns are not supported here") && rejects("""enum Opt:
+}""") == "[]" && Check.check("""enum Opt:
   case Some(value: Int)
   case None
 enum W:
   case V(o: Opt, n: Int)
-def wrong(w: W): Int = w match {
+def right(w: W): Int = w match {
   case W.V(Opt.None, _) => 100
   case _ => 0
-}""", "nested patterns are not supported here") && Check.check("""enum W:
+}""") == "[]" && Check.check("""enum W:
   case V(n: Int, m: Int)
 def right(w: W): Int = w match {
   case W.V(1, _) => 1
@@ -1086,12 +1103,12 @@ def right(o: Opt): Int = o match {
 }""") == "[]" && Check.check("""def right(p: ((Int, Int), Int)): Int = p match {
   case ((1, _), n) => n
   case ((a, b), n) => a + b + n
-}""") == "[]" && rejects("""enum BoxL:
+}""") == "[]" && Check.check("""enum BoxL:
   case L(xs: List[Int])
-def wrong(b: BoxL): Int = b match {
+def right(b: BoxL): Int = b match {
   case BoxL.L([]) => 1
   case _ => 0
-}""", "nested patterns are not supported here")
+}""") == "[]"
 
 def queueRefineTypes(): Bool =
   Check.check("""@main def main: IO[Unit] =
