@@ -690,9 +690,6 @@ def dumpPtr(): String =
 def dumpOpt(): String =
   if (!irDiff(srcOpt(), wantOpt())) "srcOpt" else if (!irDiff(srcHead(), wantHead())) "srcHead" else if (!okHeadPair()) "okHeadPair" else if (!okNestCtor()) "okNestCtor" else if (!okNestTupField()) "okNestTupField" else if (!okNestCons()) "okNestCons" else "okOpt-other"
 
-@main def main: IO[Unit] =
-  IO.println(if (allOk()) "ir-ok" else dumpAll())
-
 def reloadCaptureOrder(): Bool =
   Emit.captureSchema([Param("a", "Int", "", ""), Param("b", "String", "", "")], []) != Emit.captureSchema([Param("b", "String", "", ""), Param("a", "Int", "", "")], [])
 
@@ -701,3 +698,6 @@ def reloadCaptureType(): Bool =
 
 def reloadRecordLayout(): Bool =
   Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "Int", "", "")])])]) != Emit.captureSchema([Param("s", "Signal[State]", "", "")], [En(true, "State", [], [EnCase("State", [Param("value", "String", "", "")])])])
+
+@main def main: IO[Unit] =
+  IO.println(if (allOk()) "ir-ok" else dumpAll())
