@@ -49,6 +49,9 @@ def reloadCaptureType(): Bool =
 def reloadRecordLayout(): Bool =
   Main.reloadRecordLayout()
 
+def contInCtor(): Bool =
+  Main.contInCtor()
+
 def evAdd(): Bool =
   Main.evAdd()
 
