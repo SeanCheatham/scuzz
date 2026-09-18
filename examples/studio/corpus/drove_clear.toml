@@ -1,3 +1,2 @@
 [fuzz]
-seed = 46
 events = ["drive clearItems"]

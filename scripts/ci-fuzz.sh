@@ -64,7 +64,6 @@ def check(n: Int): Bool =
 CLAIMS
 cat > "$search_counts_dir/corpus/rejected.toml" <<'CORPUS'
 [fuzz]
-seed = 42
 events = ["drive check 37"]
 CORPUS
 if fuzz --iterations 8 "$search_counts_dir" > "$search_counts_dir/corpus.log" 2>&1; then
@@ -503,7 +502,6 @@ def run(n: Int): IO[Int] = Main.checked(n)
 SCENARIO
 cat > "$match_require_dir/corpus/payload.toml" <<'CORPUS'
 [fuzz]
-seed = 42
 events = ["drive run 7", "drive run -1"]
 CORPUS
 check_match_require() {
@@ -605,13 +603,11 @@ def preserved(t: Timeline): Verdict =
 CLAIMS
 cat > "$file_compare_dir/corpus/files.toml" <<'CORPUS'
 [fuzz]
-seed = 42
 events = ["drive keep"]
 CORPUS
 fuzz --iterations 0 "$file_compare_dir"
 cat > "$file_compare_dir/corpus/files.toml" <<'CORPUS'
 [fuzz]
-seed = 42
 events = ["drive change"]
 CORPUS
 if fuzz --iterations 0 "$file_compare_dir" > /tmp/scuzz-file-compare.log 2>&1; then

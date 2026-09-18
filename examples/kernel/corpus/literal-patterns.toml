@@ -1,3 +1,2 @@
 [fuzz]
-seed = 42
 events = ["drive constructorStrings ready", "drive constructorStrings other", "drive constructorNumbers -7", "drive constructorNumbers 7", "drive constructorFlags true", "drive constructorFlags false", "drive constructorFields 29", "drive constructorFields -8", "drive constructorNamed 29", "drive constructorNamed -8", "drive constructorEscaped", "drive constructorDelimiters", "drive constructorMatches"]

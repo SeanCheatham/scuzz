@@ -316,7 +316,7 @@ def wantOpaqueDrive(): String =
   "bad.scuzz_verify:1:5: error: drive hold params must be generator-friendly (at most 3; ADT or List only as the sole param)"
 
 def srcBumpRepro(): String =
-  "[fuzz]\nseed = 42\nschedule_seed = \"42\"\nevents = [\"drive bump 0\"]\n"
+  "[fuzz]\nschedule_seed = \"42\"\nevents = [\"drive bump 0\"]\n"
 
 def wantBumpEvents(): String =
   """drive bump 0
@@ -447,7 +447,7 @@ def mutationSampleOk(): Bool =
   Str.contains(Verify.jMut(2, 1, 1, 5, 100, false, 1), "\"score\":0.666") && Str.contains(Verify.jMut(2, 1, 1, 5, 100, false, 1), "\"invalid\":1") && !Str.contains(Verify.jMut(0, 0, 1, 2, 100, false, 1), "score") && !Str.contains(Verify.jMut(0, 0, 0, 0, 100, false, 0), "score")
 
 def campReproSeeds(): Bool =
-  Verify.searchN(8) == 5 && Verify.mutateN(8) == 3 && Verify.decodeD(Verify.parseSeed("1344")) == 2 && Verify.decodeK(Verify.parseSeed("1344")) == 0 && Str.contains(Verify.reproText(42, "1344", "", srcQuoteEv()), "pct_d = 2") && Str.contains(Verify.reproText(42, "1344", "", srcQuoteEv()), "pct_k = 0") && Verify.nls(Verify.parseEvents(Verify.reproText(42, "1344", "", srcQuoteEv()))) == wantQuoteEv()
+  Verify.searchN(8) == 5 && Verify.mutateN(8) == 3 && Verify.decodeD(Verify.parseSeed("1344")) == 2 && Verify.decodeK(Verify.parseSeed("1344")) == 0 && Str.contains(Verify.reproText("1344", "", srcQuoteEv()), "pct_d = 2") && Str.contains(Verify.reproText("1344", "", srcQuoteEv()), "pct_k = 0") && Verify.nls(Verify.parseEvents(Verify.reproText("1344", "", srcQuoteEv()))) == wantQuoteEv()
 
 def campaignOk(): Bool =
   Verify.seeds(srcAddVerify()) == wantAddSeeds() && Verify.drivers(srcAddVerify()) == wantAddDrivers() && Verify.wrapSrc("bump", srcBumpVerify()) == wantWrapBump() && Verify.nls(Verify.parseEvents(srcBumpRepro())) == wantBumpEvents() && Verify.nls(Verify.linesOf(wantBumpEvents())) == wantBumpEvents() && Verify.tomlQuoted(srcBumpRepro(), "schedule_seed") == "42" && campReproOk() && Verify.checkVerify("", "bad-intent/empty.scuzz_verify") == wantEmptyVerify() && Verify.checkVerify(srcAddVerify(), "add.scuzz_verify") == "scuzz check ok" && Verify.checkVerify(srcBadDrive(), "bad.scuzz_verify") == wantBadDrive() && Verify.checkVerify(srcOpaqueDrive(), "bad.scuzz_verify") == wantOpaqueDrive() && Verify.checkVerify("nope", "junk.scuzz_verify") != wantEmptyVerify() && Verify.simLeftoverMsg("src/Shared.scuzz_sim") == "src/Shared.scuzz_sim:1:1: error: leftover *.scuzz_sim; move replacements into *.scuzz_scenario or delete the file" && Verify.drvLeftoverMsg("src/Main.scuzz_drivers") == "src/Main.scuzz_drivers:1:1: error: leftover *.scuzz_drivers; move drivers into *.scuzz_scenario or delete the file" && Verify.manyScenarioMsg() == "scuzz.toml:1:1: error: at most one *.scuzz_scenario file is allowed" && Verify.checkScenario("", "bad.scuzz_scenario", []) == "bad.scuzz_scenario:1:1: error: scenario file needs a setup entrypoint"

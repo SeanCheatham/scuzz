@@ -1,3 +1,2 @@
 [fuzz]
-seed = 45
 events = ["drive flipItem x"]

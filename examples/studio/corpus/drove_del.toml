@@ -1,3 +1,2 @@
 [fuzz]
-seed = 44
 events = ["drive deleteItem x"]

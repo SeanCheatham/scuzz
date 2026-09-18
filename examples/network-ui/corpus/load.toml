@@ -1,4 +1,3 @@
 [fuzz]
-seed = 42
 schedule_seed = "42"
 events = ["tap button:Load", "tap button:Tap"]

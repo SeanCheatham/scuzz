@@ -1,3 +1,2 @@
 [fuzz]
-seed = 42
 events = ["drive composePayloads 0", "drive composePayloads -17", "drive composePayloads 9999"]
