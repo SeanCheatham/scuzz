@@ -11,6 +11,9 @@ if [ "${PIPESTATUS[0]}" -ne 0 ]; then
   gdb -batch -ex run -ex bt ./examples/kernel/build/kernel 2>&1 | tail -30 || true
   exit 1
 fi
+# The evaluator is a reference semantics: same stdout as the compiled kernel.
+"$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
+diff <(grep -vx ok /tmp/kernel.out) /tmp/kernel-eval.out
 "$SCUZZ" run examples/scale | tee /tmp/scale.out
 grep -q "mapn:3048" /tmp/scale.out
 grep -q "maps:2098176" /tmp/scale.out

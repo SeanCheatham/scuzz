@@ -67,6 +67,6 @@ def evGenerated(n: Int where n >= 0): Bool =
 def evMatch(): Bool =
   Main.evMatch()
 
-def evKitsListed(): Bool =
-  Main.evKitsListed()
+def evKitsCovered(): Bool =
+  Main.evKitsCovered()
 
