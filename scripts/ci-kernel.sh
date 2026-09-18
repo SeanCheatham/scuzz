@@ -73,6 +73,9 @@ grep -q "uuid:ok" /tmp/io.out
 grep -q "bytes:2" /tmp/io.out
 grep -q "kit:skip" /tmp/io.out
 grep -q "fs:" /tmp/io.out
+# The evaluator runs the same effects. Clock and random draws differ per run.
+"$SCUZZ" eval examples/io | tee /tmp/io-eval.out
+diff <(grep -vx ok /tmp/io.out | grep -Ev '^(real|mono|nethN):') <(grep -Ev '^(real|mono|nethN):' /tmp/io-eval.out)
 "$SCUZZ" fuzz --iterations 0 examples/io | tee /tmp/io-test.out
 grep -q "served:POST:/ping:hi" /tmp/io-test.out
 grep -q "ping:200:ok:ok:/ping" /tmp/io-test.out

@@ -27,7 +27,7 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits rel
 
 **Unproven.** An evaluator written in Scuzz produces the same observable output as the emitted binary on every example. An evaluator `scuzz fuzz` campaign on an app-sized package finishes in less wall-clock time than the compiled campaign, with identical summaries. Interpreted steps are slower; rebuilds and process spawns are gone. The balance is not measured.
 
-**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello` and `examples/kernel`. `scuzz fuzz` on `examples/counter`, `examples/webhook`, and `examples/api-report` reports the same kill, coverage, and reach results on both engines and completes faster on the evaluator. Arc and slices: [`vision.md`](vision.md#evaluator-arc).
+**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scuzz fuzz` on `examples/counter`, `examples/webhook`, and `examples/api-report` reports the same kill, coverage, and reach results on both engines and completes faster on the evaluator. Arc and slices: [`vision.md`](vision.md#evaluator-arc).
 
 ## Known gaps
 
@@ -53,7 +53,7 @@ Required for CLI, server, and desktop applications.
 
 Filesystem symbolic links, extended metadata preservation, and power-loss durability remain open.
 
-`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval` effect kits: the prefixes in `Eval.excludedKits()` (`IO` beyond `println`, `pure`, `both`, `fail`; `Fs`, `Sys`, `Clock`, `Random`, `Ref`, `Queue`, `Deferred`, `Fiber`, `Resource`, `Stream`, `Net`, UI) (evaluator arc, [`vision.md`](vision.md#evaluator-arc)). Time parse and zones. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval` UI and fuzz kits: the prefixes in `Eval.excludedKits()` (evaluator arc, [`vision.md`](vision.md#evaluator-arc)). Time parse and zones. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Later
 

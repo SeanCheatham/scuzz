@@ -182,6 +182,24 @@ static void *take_hit(void *env) {
   return sz_string_from_cstr((const char *)env);
 }
 
+static SzIo *cont_delay_inc(void *value, void *env) {
+  (void)env;
+  sz_release(value);
+  return sz_io_delay(delay_inc, NULL);
+}
+
+static SzIo *cont_delay_calls(void *value, void *env) {
+  (void)env;
+  sz_release(value);
+  return sz_io_pure((void *)(intptr_t)delay_calls);
+}
+
+static SzIo *handle_delay_calls(SzError *err, void *env) {
+  (void)env;
+  sz_error_free(err);
+  return sz_io_pure((void *)(intptr_t)delay_calls);
+}
+
 static SzIo *cont_println(void *value, void *env) {
   (void)value;
   (void)env;
@@ -272,6 +290,12 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   SzIo *io = sz_io_flatmap(inner, cont, env);
   sz_release(inner);
   return io;
+}
+
+/* A finalizer that takes several scheduler steps. */
+static SzIo *slow_inc(void) {
+  return fm_drop(fm_drop(pure_drop(NULL), cont_pure_unit, NULL), cont_delay_inc,
+                 NULL);
 }
 
 
@@ -5058,6 +5082,23 @@ int main(void) {
     r = sz_io_unsafe_run(sz_stream_drain(sz_stream_emit(sz_string_from_cstr("d"))));
     assert(r.ok);
 
+    /* A shared compile node reruns: each run builds a fresh pull graph. */
+    xs = sz_list_cons(sz_string_from_cstr("a"),
+                      sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    {
+      SzIo *once = sz_stream_compile_to_list(
+          sz_stream_evalmap(sz_stream_emits(xs), stream_bang, NULL));
+      SzIo *twice = sz_io_repeat_n(2, once);
+      r = sz_io_unsafe_run(twice);
+      assert(r.ok);
+      joined = test_list_join((SzList *)r.value, ",");
+      assert(strcmp(sz_string_cstr(joined), "a!,b!") == 0);
+      r = sz_io_unsafe_run(once);
+      assert(r.ok);
+      joined = test_list_join((SzList *)r.value, ",");
+      assert(strcmp(sz_string_cstr(joined), "a!,b!") == 0);
+    }
+
     xs = sz_list_cons(
         sz_string_from_cstr("a"),
         sz_list_cons(sz_string_from_cstr("b"),
@@ -6142,6 +6183,20 @@ int main(void) {
     assert(r.ok);
     assert(t1 - t0 < 80);
   }
+
+  /* race and timeout resume after the loser's finalizer runs. */
+  delay_calls = 0;
+  r = sz_io_unsafe_run(fm_drop(
+      race_drop(ensure_drop(sz_io_sleep_ms(300), slow_inc()), sz_io_sleep_ms(1)),
+      cont_delay_calls, NULL));
+  assert(r.ok);
+  assert((intptr_t)r.value == 1);
+  delay_calls = 0;
+  r = sz_io_unsafe_run(handle_drop(
+      timeout_drop(1, ensure_drop(sz_io_sleep_ms(300), slow_inc())),
+      handle_delay_calls, NULL));
+  assert(r.ok);
+  assert((intptr_t)r.value == 1);
 
   /* both */
   r = sz_io_unsafe_run(

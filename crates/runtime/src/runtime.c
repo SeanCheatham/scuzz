@@ -2551,7 +2551,8 @@ typedef enum JoinKind {
   JOIN_NONE = 0,
   JOIN_RACE = 1,
   JOIN_BOTH = 2,
-  JOIN_TIMEOUT = 3
+  JOIN_TIMEOUT = 3,
+  JOIN_CANCEL_WAIT = 4 /* winner settled; wait for the loser's finalizers */
 } JoinKind;
 
 typedef struct Fiber {
@@ -2570,6 +2571,8 @@ typedef struct Fiber {
   void *child_val[2];
   SzError *child_err[2];
   int children_settled;
+  int win_slot;       /* JOIN_CANCEL_WAIT: child_val slot to resume with */
+  SzError *wait_err;  /* JOIN_CANCEL_WAIT: fail with this instead */
   int result_ok;
   void *result_value;
   SzError *result_error;
@@ -3134,12 +3137,15 @@ static SzError *deferred_copy_error(SzDeferred *d) {
                   : sz_error_new(1, "deferred failed");
 }
 
-/* Unique parent: take the slot. Shared parent (loop template): retain. */
+/* Unique parent: take the slot. Shared parent (loop template): retain.
+ * A raw (non-RC) env is single-use state that its continuation frees. Take
+ * it even from a shared parent so a later release of the parent does not
+ * touch freed memory. */
 static void *io_slot_child(SzIo *parent, void **slot) {
   void *e = *slot;
   if (!e)
     return NULL;
-  if (parent && sz_is_rc(parent) && sz_rc_hdr(parent)->rc > 1) {
+  if (parent && sz_is_rc(parent) && sz_rc_hdr(parent)->rc > 1 && sz_is_rc(e)) {
     sz_retain(e);
     return e;
   }
@@ -3236,6 +3242,11 @@ static void fiber_cancel(Sched *s, Fiber *f) {
     poller_remove(s, f);
   if (f->state == FIB_FWAIT && f->fwait)
     fiber_join_waiter_remove(f->fwait, f);
+  if (f->wait_err) {
+    sz_error_free(f->wait_err);
+    f->wait_err = NULL;
+  }
+  f->join_kind = JOIN_NONE;
   if (f->children[0])
     fiber_cancel(s, f->children[0]);
   if (f->children[1])
@@ -3299,7 +3310,21 @@ static void fiber_wake_joiners(Sched *s, Fiber *target, int ok, void *val,
   }
 }
 
+static void parent_after_cancel_wait(Sched *s, Fiber *p) {
+  SzError *err = p->wait_err;
+  p->join_kind = JOIN_NONE;
+  p->wait_err = NULL;
+  if (err) {
+    fiber_fail(s, p, err);
+    return;
+  }
+  p->state = FIB_READY;
+  fiber_set_pure_retained(p, p->child_val[p->win_slot]);
+  ready_enqueue(s, p);
+}
+
 static void fiber_settle_cancelled(Sched *s, Fiber *f) {
+  Fiber *p = f->parent;
   f->state = FIB_CANCELLED;
   f->result_ok = 0;
   if (!f->result_error)
@@ -3307,6 +3332,30 @@ static void fiber_settle_cancelled(Sched *s, Fiber *f) {
   if (f->forked)
     forked_live_remove(s, f);
   fiber_wake_joiners(s, f, 0, NULL, f->result_error);
+  if (p && p->join_kind == JOIN_CANCEL_WAIT && p->state == FIB_JOIN &&
+      p->children[f->child_slot] == f)
+    parent_after_cancel_wait(s, p);
+}
+
+/* Cancel the loser. The parent resumes after the loser's finalizers run, so
+ * `race`, `timeout`, and `both` return only when no child is still active.
+ * Returns 1 when the parent waits. */
+static int cancel_sibling_then(Sched *s, Fiber *p, int slot, SzError *err) {
+  Fiber *sib = p->children[1 - slot];
+  if (sib)
+    fiber_cancel(s, sib);
+  if (sib && sib->state == FIB_FINALIZING) {
+    p->join_kind = JOIN_CANCEL_WAIT;
+    p->win_slot = slot;
+    p->wait_err = err;
+    return 1;
+  }
+  p->join_kind = JOIN_NONE;
+  if (err) {
+    fiber_fail(s, p, err);
+    return 1;
+  }
+  return 0;
 }
 
 static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
@@ -3324,12 +3373,10 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
 
   if (p->join_kind == JOIN_RACE) {
     if (ok) {
-      Fiber *sib = p->children[1 - slot];
-      if (sib)
-        fiber_cancel(s, sib);
+      if (cancel_sibling_then(s, p, slot, NULL))
+        return;
       p->state = FIB_READY;
       fiber_set_pure_retained(p, val);
-      p->join_kind = JOIN_NONE;
       ready_enqueue(s, p);
       return;
     }
@@ -3347,33 +3394,25 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
   }
 
   if (p->join_kind == JOIN_TIMEOUT) {
-    Fiber *sib = p->children[1 - slot];
-    if (sib)
-      fiber_cancel(s, sib);
-    p->join_kind = JOIN_NONE;
-    if (slot == 1) {
-      if (ok) {
-        p->state = FIB_READY;
-        fiber_set_pure_retained(p, val);
-        ready_enqueue(s, p);
-      } else {
-        fiber_fail(s, p, err ? error_copy_or_interrupt(err)
-                             : sz_error_new(1, "timeout inner failed"));
-      }
-    } else {
-      fiber_fail(s, p, sz_error_new(1, "timeout"));
-    }
+    SzError *out = NULL;
+    if (slot == 0)
+      out = sz_error_new(1, "timeout");
+    else if (!ok)
+      out = err ? error_copy_or_interrupt(err)
+                : sz_error_new(1, "timeout inner failed");
+    if (cancel_sibling_then(s, p, slot, out))
+      return;
+    p->state = FIB_READY;
+    fiber_set_pure_retained(p, val);
+    ready_enqueue(s, p);
     return;
   }
 
   if (p->join_kind == JOIN_BOTH) {
     if (!ok) {
-      Fiber *sib = p->children[1 - slot];
-      if (sib)
-        fiber_cancel(s, sib);
-      p->join_kind = JOIN_NONE;
-      fiber_fail(s, p, err ? error_copy_or_interrupt(err)
-                           : sz_error_new(7, "both failed"));
+      cancel_sibling_then(s, p, slot,
+                          err ? error_copy_or_interrupt(err)
+                              : sz_error_new(7, "both failed"));
       return;
     }
     if (p->children_settled >= 2) {
