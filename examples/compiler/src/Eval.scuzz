@@ -30,7 +30,7 @@ record EvEnv(vars: List[(String, Value)], mod: String, loc: String)
 
 record EvStep(e: Expr, env: EvEnv)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], enNames: Set[String], caseEn: Map[String, String])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]])
 
 import Parse.Expr
 import Parse.Fun
@@ -73,7 +73,7 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()))
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()))
   }
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
@@ -99,6 +99,24 @@ def hasEn(p: EvProg, name: String): Bool =
 
 def enOfCase(p: EvProg, ctor: String): String =
   Map.getOrElse(p.caseEn, ctor, "")
+
+def ctorFields(p: EvProg, core: String): List[Param] =
+  Map.get(p.ctorFields, core) match {
+    case Some(ps) => ps
+    case None => Check.constructorFields(p.ens, core)
+  }
+
+def ctorFieldMap(ens: List[En], all: List[En], acc: Map[String, List[Param]]): Map[String, List[Param]] =
+  if (List.isEmpty(ens)) acc else ctorFieldMap(List.tail(ens), all, ctorFieldEn(List.at(ens, 0), all, acc))
+
+def ctorFieldEn(en: En, all: List[En], acc: Map[String, List[Param]]): Map[String, List[Param]] =
+  ctorFieldCases(en.name, en.cases, all, Map.set(acc, en.name, Check.constructorFields(all, en.name)))
+
+def ctorFieldCases(en: String, cs: List[EnCase], all: List[En], acc: Map[String, List[Param]]): Map[String, List[Param]] =
+  if (List.isEmpty(cs)) acc else ctorFieldCases(en, List.tail(cs), all, ctorFieldCase(en, List.at(cs, 0).name, all, acc))
+
+def ctorFieldCase(en: String, c: String, all: List[En], acc: Map[String, List[Param]]): Map[String, List[Param]] =
+  Map.set(Map.set(acc, c, Check.constructorFields(all, c)), Str.concat(en, Str.concat(".", c)), Check.constructorFields(all, Str.concat(en, Str.concat(".", c))))
 
 def callPure(p: EvProg, mod: String, name: String, args: List[Value]): Value =
   callPureHit(Check.ftabGetMod(p.funs.tab, mod, name), mod, name, args, p)
@@ -350,7 +368,10 @@ def isUnitExpr(e: Expr): Bool =
   }
 
 def callStep(e: Expr, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (Check.needsPh(e)) holeStep(e, env) else if (isKit(p, f)) kitStep(f, args, env, p, off) else if (hasEn(p, f)) ctorStep(f, f, args, env, p, off) else if (enOfCase(p, f) != "") ctorStep(enOfCase(p, f), f, args, env, p, off) else callLocal(lookupVars(env.vars, f), f, args, env, p, off)
+  if (Check.needsPh(e)) holeStep(e, env) else if (Str.contains(f, ".") && isKit(p, f)) kitStep(f, args, env, p, off) else if (hasEn(p, f)) ctorStep(f, f, args, env, p, off) else callCase(enOfCase(p, f), f, args, env, p, off)
+
+def callCase(en: String, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
+  if (en != "") ctorStep(en, f, args, env, p, off) else callLocal(lookupVars(env.vars, f), f, args, env, p, off)
 
 def callLocal(bound: Option[Value], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   bound match {
@@ -362,7 +383,16 @@ def callDef(hit: List[Fun], f: String, args: List[Expr], env: EvEnv, p: EvProg, 
   if (List.isEmpty(hit)) valueStep(errAt(Str.concat("unknown function ", f), env, p, off)) else defStep(List.at(hit, 0), args, env, p, off)
 
 def defStep(d: Fun, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  defStepAligned(d, Check.alignCall(d.params, args), env, p, off)
+  if (plainArgs(args, d.params)) defStepVals(d, stepAll(args, env, p), p) else defStepAligned(d, Check.alignCall(d.params, args), env, p, off)
+
+def plainArgs(args: List[Expr], ps: List[Param]): Bool =
+  if (List.isEmpty(args)) List.isEmpty(ps) else !List.isEmpty(ps) && plainArg(List.at(args, 0)) && plainArgs(List.tail(args), List.tail(ps))
+
+def plainArg(e: Expr): Bool =
+  e match {
+    case Expr.ENamed(_, _) => false
+    case _ => true
+  }
 
 def defStepAligned(d: Fun, al: (List[Expr], String), env: EvEnv, p: EvProg, off: Int): EvStep =
   al match {
@@ -376,7 +406,13 @@ def defBody(d: Fun, vals: List[Value], loc: String): EvStep =
   if (loc == "") EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, "")) else hitStep(Fuzz.hit(loc), EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc)))
 
 def defLoc(d: Fun, p: EvProg): String =
-  if (List.isEmpty(p.ctx)) "" else Emit.panicLocAt(p.files, p.idx, d.mod, d.off)
+  if (List.isEmpty(p.ctx)) "" else Map.getOrElse(Map.getOrElse(p.locs, d.mod, Map.empty()), d.name, "")
+
+def funLocs(ds: List[Fun], p: EvProg, acc: Map[String, Map[String, String]]): Map[String, Map[String, String]] =
+  if (List.isEmpty(ds)) acc else funLocs(List.tail(ds), p, funLoc(List.at(ds, 0), p, acc))
+
+def funLoc(d: Fun, p: EvProg, acc: Map[String, Map[String, String]]): Map[String, Map[String, String]] =
+  Map.set(acc, d.mod, Map.set(Map.getOrElse(acc, d.mod, Map.empty()), d.name, Emit.panicLocAt(p.files, p.idx, d.mod, d.off)))
 
 def bindParams(ps: List[Param], vals: List[Value], acc: List[(String, Value)]): List[(String, Value)] =
   if (List.isEmpty(ps) || List.isEmpty(vals)) acc else bindParams(List.tail(ps), List.tail(vals), (List.at(ps, 0).name, List.at(vals, 0)) :: acc)
@@ -385,7 +421,7 @@ def kitStep(f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvSte
   if (List.isEmpty(args) && !List.isEmpty(Kits.params(f))) valueStep(Value.VFun(f, "")) else valueStep(kitCall(f, stepAll(args, env, p), env, p, off))
 
 def ctorStep(en: String, tag: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  ctorAligned(en, tag, Check.alignCall(Check.constructorFields(p.ens, qualTag(en, tag)), args), env, p, off)
+  ctorAligned(en, tag, Check.alignCall(ctorFields(p, qualTag(en, tag)), args), env, p, off)
 
 def qualTag(en: String, tag: String): String =
   if (en == tag) en else Str.concat(en, Str.concat(".", tag))
@@ -413,7 +449,7 @@ def applyArg(vals: List[Value]): Value =
   if (List.len(vals) == 1) List.at(vals, 0) else Value.VTuple(vals)
 
 def bindArg(param: String, arg: Value, cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (param == "" || param == "()") EvStep(body, cenv) else bindArgPat(tryPat(param, arg, p.ens), cenv, body, env, p, off)
+  if (param == "" || param == "()") EvStep(body, cenv) else bindArgPat(tryPat(param, arg, p), cenv, body, env, p, off)
 
 def bindArgPat(bound: Option[List[(String, Value)]], cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
   bound match {
@@ -465,7 +501,7 @@ def isCon(v: Value): Bool =
 
 def copyValue(rv: Value, args: List[Expr], env: EvEnv, p: EvProg, off: Int): Value =
   rv match {
-    case Value.VCon(en, tag, fields) => conValue(en, tag, copyFields(Check.constructorFields(p.ens, qualTag(en, tag)), fields, args, 0, env, p))
+    case Value.VCon(en, tag, fields) => conValue(en, tag, copyFields(ctorFields(p, qualTag(en, tag)), fields, args, 0, env, p))
     case _ => rv
   }
 
@@ -543,7 +579,7 @@ def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value 
 
 def fieldOf(rv: Value, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   rv match {
-    case Value.VCon(en, tag, fields) => fieldAt(fields, fieldIndex(Check.constructorFields(p.ens, qualTag(en, tag)), name, 0), name, env, p, off)
+    case Value.VCon(en, tag, fields) => fieldAt(fields, fieldIndex(ctorFields(p, qualTag(en, tag)), name, 0), name, env, p, off)
     case Value.VTuple(xs) => fieldAt(xs, Check.tupIdx(name), name, env, p, off)
     case Value.VErr(_) => rv
     case _ => errAt(Str.concat("no field ", name), env, p, off)
@@ -706,7 +742,7 @@ def matchArms(v: Value, arms: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int
 
 def matchArm(v: Value, arm: Arm, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): EvStep =
   arm match {
-    case Arm(pat, g, body) => matchBound(v, tryPat(pat, v, p.ens), g, body, rest, env, p, off, i)
+    case Arm(pat, g, body) => matchBound(v, tryPat(pat, v, p), g, body, rest, env, p, off, i)
   }
 
 def matchBound(v: Value, bound: Option[List[(String, Value)]], g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): EvStep =
@@ -725,8 +761,11 @@ def matchGuardVal(v: Value, gv: Value, benv: EvEnv, body: Expr, rest: List[Arm],
     case _ => valueStep(errAt("guard is not Bool", env, p, off))
   }
 
-def tryPat(pat: String, v: Value, ens: List[En]): Option[List[(String, Value)]] =
-  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) tryOr(pat, Parse.patternAlternativeAt(pat, 0, 0), v, ens) else if (Check.asAt(pat, 0) >= 0) tryAs(pat, Check.asAt(pat, 0), v, ens) else if (Check.consAt(pat, 0) >= 0) tryCons(pat, Check.consAt(pat, 0), v, ens) else if (pat == "_") Some(noVars()) else if (pat == "[]") tryNil(v) else if (Emit.isStrPat(pat)) tryLit(valEq(v, Value.VStr(Emit.unquote(pat)))) else if (Emit.isIntPat(pat)) tryLit(valEq(v, Value.VInt(Str.toInt(pat, 0)))) else if (Emit.isBoolPat(pat)) tryLit(valEq(v, Value.VBool(pat == "true"))) else if (Check.isTuplePat(pat)) tryTuple(Check.splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), v, ens) else if (Check.patBind(pat) == "") tryBare(pat, v, ens) else tryTag(Check.patCore(pat), v, ens, Check.splitComma(Check.patBind(pat)))
+def tryPat(pat: String, v: Value, p: EvProg): Option[List[(String, Value)]] =
+  if (pat == "_") Some(noVars()) else if (pat == "[]") tryNil(v) else if (Emit.isIntPat(pat)) tryLit(valEq(v, Value.VInt(Str.toInt(pat, 0)))) else if (Emit.isBoolPat(pat)) tryLit(valEq(v, Value.VBool(pat == "true"))) else tryPatScan(pat, v, p)
+
+def tryPatScan(pat: String, v: Value, p: EvProg): Option[List[(String, Value)]] =
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) tryOr(pat, Parse.patternAlternativeAt(pat, 0, 0), v, p) else if (Check.asAt(pat, 0) >= 0) tryAs(pat, Check.asAt(pat, 0), v, p) else if (Check.consAt(pat, 0) >= 0) tryCons(pat, Check.consAt(pat, 0), v, p) else if (Emit.isStrPat(pat)) tryLit(valEq(v, Value.VStr(Emit.unquote(pat)))) else if (Check.isTuplePat(pat)) tryTuple(Check.splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), v, p) else if (Check.patBind(pat) == "") tryBare(pat, v, p) else tryTag(Check.patCore(pat), v, p, Check.splitComma(Check.patBind(pat)))
 
 def tryLit(ok: Bool): Option[List[(String, Value)]] =
   if (ok) Some(noVars()) else None
@@ -737,17 +776,17 @@ def tryNil(v: Value): Option[List[(String, Value)]] =
     case _ => None
   }
 
-def tryOr(pat: String, i: Int, v: Value, ens: List[En]): Option[List[(String, Value)]] =
-  tryOrLeft(tryPat(Str.slice(pat, 0, i), v, ens), Str.slice(pat, i + 3, Str.len(pat)), v, ens)
+def tryOr(pat: String, i: Int, v: Value, p: EvProg): Option[List[(String, Value)]] =
+  tryOrLeft(tryPat(Str.slice(pat, 0, i), v, p), Str.slice(pat, i + 3, Str.len(pat)), v, p)
 
-def tryOrLeft(l: Option[List[(String, Value)]], right: String, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+def tryOrLeft(l: Option[List[(String, Value)]], right: String, v: Value, p: EvProg): Option[List[(String, Value)]] =
   l match {
     case Some(_) => l
-    case None => tryPat(right, v, ens)
+    case None => tryPat(right, v, p)
   }
 
-def tryAs(pat: String, i: Int, v: Value, ens: List[En]): Option[List[(String, Value)]] =
-  tryAsInner(Str.slice(pat, 0, i), tryPat(Str.slice(pat, i + 3, Str.len(pat)), v, ens), v)
+def tryAs(pat: String, i: Int, v: Value, p: EvProg): Option[List[(String, Value)]] =
+  tryAsInner(Str.slice(pat, 0, i), tryPat(Str.slice(pat, i + 3, Str.len(pat)), v, p), v)
 
 def tryAsInner(name: String, inner: Option[List[(String, Value)]], v: Value): Option[List[(String, Value)]] =
   inner match {
@@ -755,15 +794,15 @@ def tryAsInner(name: String, inner: Option[List[(String, Value)]], v: Value): Op
     case None => None
   }
 
-def tryCons(pat: String, i: Int, v: Value, ens: List[En]): Option[List[(String, Value)]] =
+def tryCons(pat: String, i: Int, v: Value, p: EvProg): Option[List[(String, Value)]] =
   v match {
-    case Value.VList(xs) => if (List.isEmpty(xs)) None else tryBoth(tryPat(Str.slice(pat, 0, i), List.at(xs, 0), ens), Str.slice(pat, i + 4, Str.len(pat)), Value.VList(List.tail(xs)), ens)
+    case Value.VList(xs) => if (List.isEmpty(xs)) None else tryBoth(tryPat(Str.slice(pat, 0, i), List.at(xs, 0), p), Str.slice(pat, i + 4, Str.len(pat)), Value.VList(List.tail(xs)), p)
     case _ => None
   }
 
-def tryBoth(l: Option[List[(String, Value)]], pat2: String, v2: Value, ens: List[En]): Option[List[(String, Value)]] =
+def tryBoth(l: Option[List[(String, Value)]], pat2: String, v2: Value, p: EvProg): Option[List[(String, Value)]] =
   l match {
-    case Some(bs) => tryJoin(bs, tryPat(pat2, v2, ens))
+    case Some(bs) => tryJoin(bs, tryPat(pat2, v2, p))
     case None => None
   }
 
@@ -773,26 +812,26 @@ def tryJoin(bs: List[(String, Value)], r: Option[List[(String, Value)]]): Option
     case None => None
   }
 
-def tryTuple(comps: List[String], v: Value, ens: List[En]): Option[List[(String, Value)]] =
-  if (List.len(comps) == 1) tryPat(List.at(comps, 0), v, ens) else tryTupleVals(comps, v, ens)
+def tryTuple(comps: List[String], v: Value, p: EvProg): Option[List[(String, Value)]] =
+  if (List.len(comps) == 1) tryPat(List.at(comps, 0), v, p) else tryTupleVals(comps, v, p)
 
-def tryTupleVals(comps: List[String], v: Value, ens: List[En]): Option[List[(String, Value)]] =
+def tryTupleVals(comps: List[String], v: Value, p: EvProg): Option[List[(String, Value)]] =
   v match {
-    case Value.VTuple(xs) => tryAll(comps, xs, ens)
+    case Value.VTuple(xs) => tryAll(comps, xs, p)
     case _ => None
   }
 
-def tryAll(pats: List[String], vals: List[Value], ens: List[En]): Option[List[(String, Value)]] =
-  if (List.len(pats) != List.len(vals)) None else if (List.isEmpty(pats)) Some(noVars()) else tryAllHead(tryPat(List.at(pats, 0), List.at(vals, 0), ens), List.tail(pats), List.tail(vals), ens)
+def tryAll(pats: List[String], vals: List[Value], p: EvProg): Option[List[(String, Value)]] =
+  if (List.len(pats) != List.len(vals)) None else if (List.isEmpty(pats)) Some(noVars()) else tryAllHead(tryPat(List.at(pats, 0), List.at(vals, 0), p), List.tail(pats), List.tail(vals), p)
 
-def tryAllHead(l: Option[List[(String, Value)]], pats: List[String], vals: List[Value], ens: List[En]): Option[List[(String, Value)]] =
+def tryAllHead(l: Option[List[(String, Value)]], pats: List[String], vals: List[Value], p: EvProg): Option[List[(String, Value)]] =
   l match {
-    case Some(bs) => tryJoin(bs, tryAll(pats, vals, ens))
+    case Some(bs) => tryJoin(bs, tryAll(pats, vals, p))
     case None => None
   }
 
-def tryBare(pat: String, v: Value, ens: List[En]): Option[List[(String, Value)]] =
-  if (Check.dotAt(pat, 0) >= 0 || Check.enOfCase(ens, pat) != "") tryTag(pat, v, ens, noNames()) else Some((pat, v) :: noVars())
+def tryBare(pat: String, v: Value, p: EvProg): Option[List[(String, Value)]] =
+  if (Check.dotAt(pat, 0) >= 0 || enOfCase(p, pat) != "") tryTag(pat, v, p, noNames()) else Some((pat, v) :: noVars())
 
 def tagOf(core: String): String =
   if (Check.dotAt(core, 0) < 0) core else Str.slice(core, Check.dotAt(core, 0) + 1, Str.len(core))
@@ -800,24 +839,24 @@ def tagOf(core: String): String =
 def enOf(core: String): String =
   if (Check.dotAt(core, 0) < 0) "" else Str.slice(core, 0, Check.dotAt(core, 0))
 
-def tryTag(core: String, v: Value, ens: List[En], subs: List[String]): Option[List[(String, Value)]] =
+def tryTag(core: String, v: Value, p: EvProg, subs: List[String]): Option[List[(String, Value)]] =
   v match {
-    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && (enOf(core) == "" || enOf(core) == en)) tryFields(subs, fields, Check.constructorFields(ens, core), ens, 0) else None
+    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && (enOf(core) == "" || enOf(core) == en)) tryFields(subs, fields, ctorFields(p, core), p, 0) else None
     case _ => None
   }
 
-def tryFields(subs: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
-  if (List.isEmpty(subs)) Some(noVars()) else tryField(List.at(subs, 0), List.tail(subs), fields, params, ens, i)
+def tryFields(subs: List[String], fields: List[Value], params: List[Param], p: EvProg, i: Int): Option[List[(String, Value)]] =
+  if (List.isEmpty(subs)) Some(noVars()) else tryField(List.at(subs, 0), List.tail(subs), fields, params, p, i)
 
-def tryField(sub: String, rest: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
-  if (Check.eqAt(sub, 0) >= 0) tryFieldAt(Str.drop(sub, Check.eqAt(sub, 0) + 3), fieldIndex(params, Str.take(sub, Check.eqAt(sub, 0)), 0), rest, fields, params, ens, i) else tryFieldAt(sub, i, rest, fields, params, ens, i)
+def tryField(sub: String, rest: List[String], fields: List[Value], params: List[Param], p: EvProg, i: Int): Option[List[(String, Value)]] =
+  if (Check.eqAt(sub, 0) >= 0) tryFieldAt(Str.drop(sub, Check.eqAt(sub, 0) + 3), fieldIndex(params, Str.take(sub, Check.eqAt(sub, 0)), 0), rest, fields, params, p, i) else tryFieldAt(sub, i, rest, fields, params, p, i)
 
-def tryFieldAt(sub: String, k: Int, rest: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
-  if (k < 0 || k >= List.len(fields)) None else tryFieldNext(tryPat(sub, List.at(fields, k), ens), rest, fields, params, ens, i + 1)
+def tryFieldAt(sub: String, k: Int, rest: List[String], fields: List[Value], params: List[Param], p: EvProg, i: Int): Option[List[(String, Value)]] =
+  if (k < 0 || k >= List.len(fields)) None else tryFieldNext(tryPat(sub, List.at(fields, k), p), rest, fields, params, p, i + 1)
 
-def tryFieldNext(l: Option[List[(String, Value)]], rest: List[String], fields: List[Value], params: List[Param], ens: List[En], i: Int): Option[List[(String, Value)]] =
+def tryFieldNext(l: Option[List[(String, Value)]], rest: List[String], fields: List[Value], params: List[Param], p: EvProg, i: Int): Option[List[(String, Value)]] =
   l match {
-    case Some(bs) => tryJoin(bs, tryFields(rest, fields, params, ens, i))
+    case Some(bs) => tryJoin(bs, tryFields(rest, fields, params, p, i))
     case None => None
   }
 
@@ -842,7 +881,7 @@ def forGuard(v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off:
   }
 
 def forPure(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
-  tryPat(name, v, p.ens) match {
+  tryPat(name, v, p) match {
     case Some(vars) => forValue(rest, body, EvEnv(List.concat(vars, env.vars), env.mod, env.loc), p, off, drew)
     case None => errAt("for binding does not match", env, p, off)
   }
@@ -1594,7 +1633,7 @@ def probeExit(e: String): Int =
   if (Str.startsWith(e, "probe exit ")) Str.toInt(Str.drop(e, 11), 1) else 1
 
 def withCtx(p: EvProg, ctx: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.enNames, p.caseEn)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields)
 
 def probeProg(p: EvProg, ctx: Ref[Value]): IO[Unit] =
   probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Fuzz.probe(IO.pure(()).flatMap(_ => probeMain(p)))))

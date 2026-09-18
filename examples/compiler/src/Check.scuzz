@@ -100,10 +100,13 @@ def findFunPrefer(funs: Ftab, name: String, env: List[(String, Ty)]): List[Fun] 
   findFunPrefer2(funs, name, getTy(env, "#mod"))
 
 def findFunPrefer2(funs: Ftab, name: String, mod: String): List[Fun] =
-  if (mod == "") ftabGet(funs.tab, name) else findFunPrefer3(ftabGetMod(funs.tab, mod, name), funs, name)
+  if (mod == "") ftabGet(funs.tab, name) else findFunPrefer3(ftabGet(funs.tab, name), mod)
 
-def findFunPrefer3(hit: List[Fun], funs: Ftab, name: String): List[Fun] =
-  if (List.isEmpty(hit)) ftabGet(funs.tab, name) else hit
+def findFunPrefer3(all: List[Fun], mod: String): List[Fun] =
+  if (List.len(all) <= 1) all else findFunPrefer4(List.filter(all, h => h.mod == mod), all)
+
+def findFunPrefer4(hit: List[Fun], all: List[Fun]): List[Fun] =
+  if (List.isEmpty(hit)) all else hit
 
 def findFun(funs: List[Fun], name: String): List[Fun] =
   List.filter(funs, h => h.name == name)
@@ -1289,7 +1292,7 @@ def eqAt(s: String, i: Int): Int =
   eqAtD(s, i, 0)
 
 def eqAtD(s: String, i: Int, d: Int): Int =
-  if (i + 3 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) eqAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Str.slice(s, i, i + 3) == " = ") i else eqAtD(s, i + 1, asDepth(s, i, d))
+  if (i + 3 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) eqAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Parse.at3(s, i, 32, 61, 32)) i else eqAtD(s, i + 1, asDepth(s, i, d))
 
 def bindEq(b: String, ty: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   bindPat(Str.slice(b, eqAt(b, 0) + 3, Str.len(b)), ty, env, ens)
@@ -1298,7 +1301,7 @@ def consAt(s: String, i: Int): Int =
   consAtD(s, i, 0)
 
 def consAtD(s: String, i: Int, d: Int): Int =
-  if (i + 4 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) consAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Str.slice(s, i, i + 4) == " :: ") i else consAtD(s, i + 1, asDepth(s, i, d))
+  if (i + 4 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) consAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Parse.at3(s, i, 32, 58, 58) && Str.charAt(s, i + 3) == 32) i else consAtD(s, i + 1, asDepth(s, i, d))
 
 def bindCons(pat: String, scrutTy: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   bindConsAt(consAt(pat, 0), pat, scrutTy, env, ens)
@@ -1319,7 +1322,7 @@ def asAt(s: String, i: Int): Int =
   asAtD(s, i, 0)
 
 def asAtD(s: String, i: Int, d: Int): Int =
-  if (i + 3 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) asAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Str.slice(s, i, i + 3) == " @ ") i else asAtD(s, i + 1, asDepth(s, i, d))
+  if (i + 3 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) asAtD(s, Parse.quotedEnd(s, i), d) else if (d == 0 && Parse.at3(s, i, 32, 64, 32)) i else asAtD(s, i + 1, asDepth(s, i, d))
 
 def asDepth(s: String, i: Int, d: Int): Int =
   asDepthCh(Str.charAt(s, i), d)

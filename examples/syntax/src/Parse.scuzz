@@ -963,16 +963,19 @@ def _hasChar(s: String, i: Int, c: Int): Bool =
   if (i >= Str.len(s)) false else if (Str.charAt(s, i) == c) true else _hasChar(s, i + 1, c)
 
 def patternAlternativeAt(s: String, i: Int, depth: Int): Int =
-  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) patternAlternativeAt(s, quotedEnd(s, i), depth) else if (Str.charAt(s, i) == 40) patternAlternativeAt(s, i + 1, depth + 1) else if (Str.charAt(s, i) == 41) patternAlternativeAt(s, i + 1, if (depth > 0) depth - 1 else 0) else if (depth == 0 && Str.slice(s, i, i + 3) == " | ") i else patternAlternativeAt(s, i + 1, depth)
+  if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) patternAlternativeAt(s, quotedEnd(s, i), depth) else if (Str.charAt(s, i) == 40) patternAlternativeAt(s, i + 1, depth + 1) else if (Str.charAt(s, i) == 41) patternAlternativeAt(s, i + 1, if (depth > 0) depth - 1 else 0) else if (depth == 0 && at3(s, i, 32, 124, 32)) i else patternAlternativeAt(s, i + 1, depth)
+
+def at3(s: String, i: Int, a: Int, b: Int, c: Int): Bool =
+  Str.charAt(s, i) == a && Str.charAt(s, i + 1) == b && Str.charAt(s, i + 2) == c
 
 def quotedEnd(s: String, i: Int): Int =
-  if (Str.slice(s, i, i + 3) == "\"\"\"") quotedTripleEnd(s, i + 3) else quotedSingleEnd(s, i + 1)
+  if (at3(s, i, 34, 34, 34)) quotedTripleEnd(s, i + 3) else quotedSingleEnd(s, i + 1)
 
 def quotedSingleEnd(s: String, i: Int): Int =
   if (i >= Str.len(s)) Str.len(s) else if (Str.charAt(s, i) == 92) quotedSingleEnd(s, i + 2) else if (Str.charAt(s, i) == 34) i + 1 else quotedSingleEnd(s, i + 1)
 
 def quotedTripleEnd(s: String, i: Int): Int =
-  if (i >= Str.len(s)) Str.len(s) else if (Str.slice(s, i, i + 3) == "\"\"\"") i + 3 else quotedTripleEnd(s, i + 1)
+  if (i >= Str.len(s)) Str.len(s) else if (at3(s, i, 34, 34, 34)) i + 3 else quotedTripleEnd(s, i + 1)
 
 def quote(s: String): String =
   if (_hasChar(s, 0, 10) && !_hasChar(s, 0, 34)) Str.concat("\"\"\"", Str.concat(s, "\"\"\"")) else Str.concat("\"", Str.concat(_esc1(s, 0, Builder.empty()), "\""))
