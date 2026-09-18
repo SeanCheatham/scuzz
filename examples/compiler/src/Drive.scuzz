@@ -4,7 +4,9 @@ record PkgOut(ok: Bool, name: String, ll: String, llPath: String, link: String, 
 
 record FuzzRun(path: String, src: String, script: String, sched: String, fault: String)
 
-record FuzzAcc(search: Int, searchFail: Int, corpFail: Int, repro: String)
+record FuzzClimb(best: Map[String, Int], seed: String, tries: Int, exp: Int, sign: Int)
+
+record FuzzAcc(search: Int, searchFail: Int, corpFail: Int, repro: String, climb: FuzzClimb)
 
 record FuzzMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, invalid: Int)
 
@@ -1360,7 +1362,7 @@ def fuzzBody3(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
   fuzzBody4(job, script, fuzzAddSeeds(runs, joinSlash(job.outDir, "seeds.txt"), script, job.hasUi))
 
 def fuzzBody4(job: FuzzJob, script: String, runs: List[FuzzRun]): IO[Unit] =
-  fuzzUniversals(job).flatMap(_ => fuzzEngineCheck(job).flatMap(j => fuzzReplayGo(j.exe, j.hasUi, j.outDir, runs, FuzzAcc(0, 0, 0, ""), j.uiEnv).flatMap(acc => fuzzAfterReplay(j, script, runs, acc))))
+  fuzzUniversals(job).flatMap(_ => fuzzEngineCheck(job).flatMap(j => fuzzReplayGo(j.exe, j.hasUi, j.outDir, runs, FuzzAcc(0, 0, 0, "", climbNew()), j.uiEnv).flatMap(acc => fuzzAfterReplay(j, script, runs, acc))))
 
 def fuzzEngineCheck(job: FuzzJob): IO[FuzzJob] =
   if (!job.ev) IO.pure(job) else fuzzIdleAt(job, fuzzEvDir(job.outDir), joinSlash(joinSlash(job.outDir, "fuzz"), "idle/ev")).flatMap(p => fuzzEngineGot(job, p))
@@ -1523,7 +1525,7 @@ def fuzzNoteFail(outDir: String, run: FuzzRun, acc: FuzzAcc): IO[FuzzAcc] =
   fuzzSaveRepro(outDir, run).flatMap(path => fuzzNoteFail2(outDir, run, acc, path))
 
 def fuzzNoteFail2(_outDir: String, run: FuzzRun, acc: FuzzAcc, path: String): IO[FuzzAcc] =
-  IO.println(Str.concat("fuzz failure on corpus ", Str.concat(run.path, Str.concat(" (", Str.concat(Str.fromInt(List.len(Verify.linesOf(run.script))), " events)"))))).flatMap(_ => IO.println(Str.concat("replay: scuzz fuzz --replay ", path)).flatMap(_ => IO.pure(FuzzAcc(acc.search, acc.searchFail, acc.corpFail + 1, path))))
+  IO.println(Str.concat("fuzz failure on corpus ", Str.concat(run.path, Str.concat(" (", Str.concat(Str.fromInt(List.len(Verify.linesOf(run.script))), " events)"))))).flatMap(_ => IO.println(Str.concat("replay: scuzz fuzz --replay ", path)).flatMap(_ => IO.pure(FuzzAcc(acc.search, acc.searchFail, acc.corpFail + 1, path, acc.climb))))
 
 def fuzzSaveRepro(outDir: String, run: FuzzRun): IO[String] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => fuzzSaveRepro2(outDir, run))
@@ -1579,13 +1581,95 @@ def fuzzFaultOf(i: Int): String =
   if (i <= 0) "" else Str.fromInt(i)
 
 def fuzzSearch(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc): IO[FuzzAcc] =
-  if (acc.search >= Verify.searchN(job.iterations) || acc.searchFail > 0 && !job.noFailFast) IO.pure(acc) else fuzzSearchRun(job, script, runs, defs, acc, fuzzWorkload(job, script, runs, defs, acc.search))
+  if (acc.search >= Verify.searchN(job.iterations) || acc.searchFail > 0 && !job.noFailFast) IO.pure(acc) else fuzzSearchRun(job, script, runs, defs, acc, fuzzWorkload(job, script, runs, defs, acc.search, acc.climb))
 
-def fuzzWorkload(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int): FuzzRun =
-  FuzzRun("", "", fuzzWorkloadText(job, script, runs, defs, i), Str.fromInt(i), fuzzFaultOf(i))
+def fuzzWorkload(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, c: FuzzClimb): FuzzRun =
+  FuzzRun("", "", fuzzWorkloadText(job, script, runs, defs, i, c), Str.fromInt(i), fuzzFaultOf(i))
 
-def fuzzWorkloadText(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int): String =
-  if (i == 0) fuzzBaseScript(job, script) else Str.concat(Verify.varyWorkload(fuzzCorpusScript(job, script, runs, i), Verify.workloadSeed(job.seed) + i), Verify.generatedDrive(defs, job.ens, Verify.workloadSeed(job.seed) + i))
+def fuzzWorkloadText(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, c: FuzzClimb): String =
+  if (i == 0) fuzzBaseScript(job, script) else fuzzWorkloadPick(job, script, runs, defs, i, if (i % 2 == 1 && c.seed != "") fuzzNudge(c, defs) else "")
+
+def fuzzWorkloadPick(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, nudged: String): String =
+  if (nudged != "") nudged else Str.concat(Verify.varyWorkload(fuzzCorpusScript(job, script, runs, i), Verify.workloadSeed(job.seed) + i), Verify.generatedDrive(defs, job.ens, Verify.workloadSeed(job.seed) + i))
+
+def climbNew(): FuzzClimb =
+  FuzzClimb(Map.empty(), "", 0, 0, 1)
+
+def climbExp(c: FuzzClimb): Int =
+  c.exp - c.tries / 2
+
+def climbSign(c: FuzzClimb): Int =
+  if (c.tries % 2 == 0) c.sign else 0 - c.sign
+
+def climbSpent(c: FuzzClimb): Bool =
+  c.tries / 2 > c.exp
+
+def log2Floor(n: Int): Int =
+  if (n <= 1) 0 else 1 + log2Floor(n / 2)
+
+def pow2(n: Int): Int =
+  if (n <= 0) 1 else 2 * pow2(n - 1)
+
+def fuzzNudge(c: FuzzClimb, defs: List[Fun]): String =
+  fuzzNudgeAt(Verify.linesOf(c.seed), fuzzNudgePairs(Verify.linesOf(c.seed), defs, 0, []), c, defs)
+
+def fuzzNudgeAt(lines: List[String], pairs: List[(Int, Int)], c: FuzzClimb, defs: List[Fun]): String =
+  if (List.isEmpty(pairs)) "" else fuzzNudgePick(lines, List.at(pairs, c.tries % List.len(pairs)), climbSign(c) * pow2(climbExp(c)), defs)
+
+def fuzzNudgePick(lines: List[String], pick: (Int, Int), delta: Int, defs: List[Fun]): String =
+  pick match {
+    case (line, j) => Verify.nls(List.setAt(lines, line, fuzzNudgeLine(List.at(lines, line), j, delta, defs)))
+  }
+
+def fuzzNudgePairs(lines: List[String], defs: List[Fun], i: Int, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (List.isEmpty(lines)) List.reverse(acc) else fuzzNudgePairs(List.tail(lines), defs, i + 1, fuzzLinePairs(Str.split(List.at(lines, 0), " "), fuzzDriveDef(Str.split(List.at(lines, 0), " "), defs), i, 0, acc))
+
+def fuzzDriveDef(toks: List[String], defs: List[Fun]): List[Fun] =
+  if (List.len(toks) < 2 || List.at(toks, 0) != "drive") [] else List.filter(defs, d => d.name == List.at(toks, 1) && List.len(d.params) + 2 == List.len(toks))
+
+def fuzzLinePairs(toks: List[String], hit: List[Fun], line: Int, j: Int, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (List.isEmpty(hit) || j >= List.len(List.at(hit, 0).params)) acc else fuzzLinePairs(toks, hit, line, j + 1, if (List.at(List.at(hit, 0).params, j).ty == "Int" && isIntTok(List.at(toks, j + 2))) (line, j) :: acc else acc)
+
+def isIntTok(s: String): Bool =
+  s != "" && s != "-" && isIntTok2(s, if (Str.charAt(s, 0) == 45) 1 else 0)
+
+def isIntTok2(s: String, i: Int): Bool =
+  if (i >= Str.len(s)) true else Str.charAt(s, i) >= 48 && Str.charAt(s, i) <= 57 && isIntTok2(s, i + 1)
+
+def fuzzNudgeLine(l: String, j: Int, delta: Int, defs: List[Fun]): String =
+  fuzzNudgeToks(Str.split(l, " "), j + 2, Verify.nudgeInt(List.at(List.at(fuzzDriveDef(Str.split(l, " "), defs), 0).params, j).w, Str.toInt(List.at(Str.split(l, " "), j + 2), 0), delta))
+
+def fuzzNudgeToks(toks: List[String], at: Int, v: Int): String =
+  List.join(List.setAt(toks, at, Str.fromInt(v)), " ")
+
+def fuzzDistRead(job: FuzzJob): IO[List[(String, Int)]] =
+  if (!job.ev) IO.pure(noDists()) else Fs.exists(fuzzDistancePath(job.outDir)).flatMap(ok => if (ok == 0) IO.pure(noDists()) else Fs.read(fuzzDistancePath(job.outDir)).map(text => fuzzDistParse(Verify.linesOf(text))))
+
+def noDists(): List[(String, Int)] =
+  []
+
+def fuzzDistParse(lines: List[String]): List[(String, Int)] =
+  List.map(List.filter(lines, l => List.len(Str.split(l, " ")) == 2), l => (List.at(Str.split(l, " "), 0), Str.toInt(List.at(Str.split(l, " "), 1), 0)))
+
+def fuzzDistBetter(best: Map[String, Int], ds: List[(String, Int)]): Bool =
+  List.exists(ds, d => d._2 > 0 && d._2 < Map.getOrElse(best, d._1, d._2 + 1))
+
+def fuzzDistGain(best: Map[String, Int], ds: List[(String, Int)]): Int =
+  List.min(List.map(List.filter(ds, d => d._2 > 0 && d._2 < Map.getOrElse(best, d._1, d._2 + 1)), d => d._2))
+
+def fuzzDistMerge(best: Map[String, Int], ds: List[(String, Int)]): Map[String, Int] =
+  if (List.isEmpty(ds)) best else fuzzDistMerge(fuzzDistSet(best, List.at(ds, 0)), List.tail(ds))
+
+def fuzzDistSet(best: Map[String, Int], d: (String, Int)): Map[String, Int] =
+  d match {
+    case (site, v) => Map.set(best, site, Verify.minInt(v, Map.getOrElse(best, site, v)))
+  }
+
+def fuzzClimbNext(c: FuzzClimb, run: FuzzRun, i: Int, ds: List[(String, Int)]): FuzzClimb =
+  if (fuzzDistBetter(c.best, ds)) FuzzClimb(fuzzDistMerge(c.best, ds), run.script, 0, log2Floor(fuzzDistGain(c.best, ds)), if (i % 2 == 1 && c.seed != "") climbSign(c) else 1) else if (i % 2 == 1 && c.seed != "") fuzzClimbTry(FuzzClimb(fuzzDistMerge(c.best, ds), c.seed, c.tries + 1, c.exp, c.sign)) else FuzzClimb(fuzzDistMerge(c.best, ds), c.seed, c.tries, c.exp, c.sign)
+
+def fuzzClimbTry(c: FuzzClimb): FuzzClimb =
+  if (climbSpent(c)) FuzzClimb(c.best, "", 0, 0, 1) else c
 
 def fuzzBaseScript(job: FuzzJob, script: String): String =
   if (script == "" && job.hasUi) """tap 0
@@ -1595,10 +1679,10 @@ def fuzzCorpusScript(job: FuzzJob, script: String, runs: List[FuzzRun], i: Int):
   if (List.isEmpty(runs)) fuzzBaseScript(job, script) else fuzzRunScript(List.at(runs, (Verify.workloadSeed(job.seed) + i) % List.len(runs)))
 
 def fuzzSearchRun(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun): IO[FuzzAcc] =
-  fuzzWriteDrive(job.outDir, run.script).flatMap(_ => fuzzProbeJob(job, run).flatMap(bad => fuzzSearchResult(job, script, runs, defs, acc, run, bad)))
+  fuzzWriteDrive(job.outDir, run.script).flatMap(_ => fuzzProbeJob(job, run).flatMap(bad => fuzzDistRead(job).flatMap(ds => fuzzSearchResult(job, script, runs, defs, FuzzAcc(acc.search, acc.searchFail, acc.corpFail, acc.repro, fuzzClimbNext(acc.climb, run, acc.search, ds)), run, bad))))
 
 def fuzzSearchResult(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun, bad: Int): IO[FuzzAcc] =
-  if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, run, 0, 32).flatMap(small => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path)))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro))
+  if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, run, 0, 32).flatMap(small => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path, acc.climb)))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro, acc.climb))
 
 def fuzzConfirm(job: FuzzJob, small: FuzzRun): IO[Unit] =
   if (!job.ev) IO.pure(()) else fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeRun(job.exe, false, job.outDir, small, "").flatMap(bad => if (bad > 0) IO.pure(()) else failMsg("evaluator search failure did not reproduce on the compiled binary", "scuzz fuzz")))
@@ -1640,7 +1724,10 @@ def fuzzFaultEnv(pre: String, fault: String): String =
   if (fault == "") "" else kv(pre, "FAULT_SEED", fault)
 
 def fuzzClassEnv(pre: String, outDir: String): String =
-  Str.concat(kv(pre, "COVERAGE_DUMP", fuzzCoveragePath(outDir)), Str.concat(kv(pre, "CLASSIFY_DUMP", fuzzClassPath(outDir)), fuzzReachEnv(pre, outDir)))
+  Str.concat(kv(pre, "COVERAGE_DUMP", fuzzCoveragePath(outDir)), Str.concat(kv(pre, "CLASSIFY_DUMP", fuzzClassPath(outDir)), Str.concat(kv(pre, "DISTANCE_DUMP", fuzzDistancePath(outDir)), fuzzReachEnv(pre, outDir))))
+
+def fuzzDistancePath(outDir: String): String =
+  joinSlash(outDir, "distance.txt")
 
 def fuzzReachEnv(pre: String, outDir: String): String =
   Str.concat(kv(pre, "SOMETIMES_DUMP", fuzzSometimesPath(outDir)), Str.concat(kv(pre, "TRIGGER_DUMP", fuzzTriggerPath(outDir)), kv(pre, "STATE_VARIED_DUMP", fuzzVariedPath(outDir))))

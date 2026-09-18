@@ -1,0 +1,11 @@
+def unlock(code: Int): String =
+  if (code == 4242) unlocked() else "locked"
+
+def unlocked(): String =
+  noteUnlocked(Property.sometimes("unlocked"))
+
+def noteUnlocked(_u: Unit): String =
+  "unlocked"
+
+@main def main: IO[Unit] =
+  IO.println(unlock(7))

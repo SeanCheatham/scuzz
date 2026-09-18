@@ -1,0 +1,5 @@
+def setup(): IO[Unit] =
+  IO.pure(())
+
+def tryCode(code: Int): IO[Unit] =
+  IO.println(Main.unlock(code))

@@ -609,7 +609,28 @@ def orValue(lv: Value, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
   }
 
 def binVals(op: String, lv: Value, rv: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  if (isErr(lv)) lv else if (isErr(rv)) rv else if (op == "::") consValue(lv, rv, env, p, off) else if (op == "==") Value.VBool(valEq(lv, rv)) else if (op == "!=") Value.VBool(!valEq(lv, rv)) else if (isFloat(lv)) binFloats(op, floatOf(lv), floatOf(rv), env, p, off) else binInt(op, lv, rv, env, p, off)
+  if (isErr(lv)) lv else if (isErr(rv)) rv else if (op == "::") consValue(lv, rv, env, p, off) else if (op == "==") distEq(lv, rv, env, off, Value.VBool(valEq(lv, rv))) else if (op == "!=") distEq(lv, rv, env, off, Value.VBool(!valEq(lv, rv))) else if (isFloat(lv)) binFloats(op, floatOf(lv), floatOf(rv), env, p, off) else binInt(op, lv, rv, env, p, off)
+
+def distEq(lv: Value, rv: Value, env: EvEnv, off: Int, v: Value): Value =
+  lv match {
+    case Value.VInt(a) => distEq2(a, rv, env, off, v)
+    case _ => v
+  }
+
+def distEq2(a: Int, rv: Value, env: EvEnv, off: Int, v: Value): Value =
+  rv match {
+    case Value.VInt(b) => distVal(distHit(a, b, env, off), v)
+    case _ => v
+  }
+
+def distHit(a: Int, b: Int, env: EvEnv, off: Int): Unit =
+  if (env.loc == "") () else Fuzz.hit(Str.concat("dist:", Str.concat(Check.covKeyOf(env.loc, off, "cmp"), Str.concat(":", Str.fromInt(absInt(a - b))))))
+
+def absInt(x: Int): Int =
+  if (x < 0) 0 - x else x
+
+def distVal(_u: Unit, v: Value): Value =
+  v
 
 def binFloats(op: String, a: Float, b: Float, env: EvEnv, p: EvProg, off: Int): Value =
   if (op == "+") Value.VFloat(a + b) else if (op == "-") Value.VFloat(a - b) else if (op == "*") Value.VFloat(a * b) else if (op == "/") Value.VFloat(a / b) else if (op == "<") Value.VBool(a < b) else if (op == "<=") Value.VBool(a <= b) else if (op == ">") Value.VBool(a > b) else if (op == ">=") Value.VBool(a >= b) else unsupported(Str.concat("Float operator ", op), env, p, off)
@@ -633,7 +654,7 @@ def binInt2(op: String, a: Int, rv: Value, env: EvEnv, p: EvProg, off: Int): Val
   }
 
 def binInts(op: String, a: Int, b: Int, env: EvEnv, p: EvProg, off: Int): Value =
-  if (op == "+") Value.VInt(a + b) else if (op == "-") Value.VInt(a - b) else if (op == "*") Value.VInt(a * b) else if (op == "/") divInts(a, b, false, env, p, off) else if (op == "%") divInts(a, b, true, env, p, off) else if (op == "<") Value.VBool(a < b) else if (op == "<=") Value.VBool(a <= b) else if (op == ">") Value.VBool(a > b) else if (op == ">=") Value.VBool(a >= b) else bitInts(op, a, b, env, p, off)
+  if (op == "+") Value.VInt(a + b) else if (op == "-") Value.VInt(a - b) else if (op == "*") Value.VInt(a * b) else if (op == "/") divInts(a, b, false, env, p, off) else if (op == "%") divInts(a, b, true, env, p, off) else if (op == "<") distVal(distHit(a, b, env, off), Value.VBool(a < b)) else if (op == "<=") distVal(distHit(a, b, env, off), Value.VBool(a <= b)) else if (op == ">") distVal(distHit(a, b, env, off), Value.VBool(a > b)) else if (op == ">=") distVal(distHit(a, b, env, off), Value.VBool(a >= b)) else bitInts(op, a, b, env, p, off)
 
 def bitInts(op: String, a: Int, b: Int, env: EvEnv, p: EvProg, off: Int): Value =
   if (op == "&") Value.VInt(a & b) else if (op == "|") Value.VInt(a | b) else if (op == "^") Value.VInt(a ^ b) else if (op == "<<") Value.VInt(a << b) else if (op == ">>") Value.VInt(a >> b) else unsupported(Str.concat("operator ", op), env, p, off)
