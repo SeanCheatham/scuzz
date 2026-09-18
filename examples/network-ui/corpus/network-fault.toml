@@ -1,6 +1,4 @@
 [fuzz]
 schedule_seed = "2"
-pct_d = 2
-pct_k = 2
 fault_seed = "2"
 events = ["tap button:Load"]

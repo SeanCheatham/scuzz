@@ -126,7 +126,7 @@ Options:
       --seed <SEED>
           Deterministic LCG seed [default: 42]
       --replay <REPLAY>
-          Replay a repro.toml (events + optional schedule_seed / pct_d / pct_k + optional fault_seed)
+          Replay a repro.toml (events + optional schedule_seed + optional fault_seed)
       --oracles
           Mutate residual Property.check / Property.assert / .require predicates
       --no-fail-fast
