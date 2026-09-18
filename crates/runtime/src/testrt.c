@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 #include "scuzz_ui.h"
 #include "rt_util.h"
@@ -232,6 +233,7 @@ static void fault_arm_from_env(void) {
 
 static int g_fault_hold;
 static void *g_scenario_setup;
+static SzIo *g_scenario_setup_io;
 static void *g_scenario_ctx;
 
 void sz_testrt_fault_hold(void) { g_fault_hold = 1; }
@@ -240,14 +242,26 @@ void sz_testrt_fault_release(void) { g_fault_hold = 0; }
 
 void sz_scenario_register_setup(void *fn) { g_scenario_setup = fn; }
 
+SzIo *sz_fuzz_setup(SzIo *setup) {
+  sz_retain(setup);
+  sz_release(g_scenario_setup_io);
+  g_scenario_setup_io = setup;
+  return sz_io_pure(NULL);
+}
+
 void *sz_scenario_context(void) { return g_scenario_ctx; }
 
 void sz_scenario_run_setup(void) {
   SzIo *io;
   SzIoResult r;
-  if (!g_scenario_setup)
+  if (!g_scenario_setup && !g_scenario_setup_io)
     return;
-  io = ((SzIo * (*)(void)) g_scenario_setup)();
+  if (g_scenario_setup_io) {
+    io = g_scenario_setup_io;
+    sz_retain(io);
+  } else {
+    io = ((SzIo * (*)(void)) g_scenario_setup)();
+  }
   r = sz_io_unsafe_run(io);
   if (!r.ok) {
     fprintf(stderr, "scuzz: scenario setup failed: %s\n",
@@ -2992,9 +3006,13 @@ typedef struct {
 static SzResponseProp g_response[SZ_SESSION_MAX];
 static int g_response_n;
 
+/* `fn` is a fn-pointer claim. `cfn` with `env` is a closure claim from the
+ * evaluator probe. One of them is set. */
 typedef struct {
   char *name;
   SzVerdict *(*fn)(void *);
+  SzVerdict *(*cfn)(void *, void *);
+  void *env;
 } SzVerifyProp;
 
 static SzVerifyProp g_verify[SZ_SESSION_MAX];
@@ -3003,6 +3021,8 @@ static int g_verify_n;
 typedef struct {
   char *name;
   SzVerdict *(*fn)(void *, void *);
+  SzVerdict *(*cfn)(void *, void *);
+  void *env;
 } SzVerifyRel;
 
 static SzVerifyRel g_verify_rel[SZ_SESSION_MAX];
@@ -4316,6 +4336,17 @@ void *sz_timeline_load(const char *path) {
   return t;
 }
 
+static SzVerdict *verify_rel_call(SzVerifyRel *r, void *a, void *b) {
+  SzPair *pair;
+  SzVerdict *v;
+  if (r->fn)
+    return r->fn(a, b);
+  pair = sz_pair_new(a, b);
+  v = r->cfn(pair, r->env);
+  sz_release(pair);
+  return v;
+}
+
 int sz_judge_rel_main(const char *spec) {
   char *copy;
   char *comma;
@@ -4346,9 +4377,9 @@ int sz_judge_rel_main(const char *spec) {
   for (i = 0; i < g_verify_rel_n; i++) {
     SzVerdict *v;
     char msg[256];
-    if (!g_verify_rel[i].fn)
+    if (!g_verify_rel[i].fn && !g_verify_rel[i].cfn)
       continue;
-    v = g_verify_rel[i].fn(a, b);
+    v = verify_rel_call(&g_verify_rel[i], a, b);
     if (!v || v->valid)
       continue;
     verdict_msg(msg, sizeof msg, g_verify_rel[i].name, v);
@@ -4501,6 +4532,131 @@ void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *)) 
   g_verify_rel_n++;
 }
 
+SzIo *sz_fuzz_verify(SzString *name, void *fn, void *env) {
+  const char *s = name ? sz_string_cstr(name) : "";
+  if (fn && s[0]) {
+    if (g_verify_n >= SZ_SESSION_MAX)
+      sz_panic("sz_property session: too many verify predicates");
+    g_verify[g_verify_n].name = dup_cstr(s);
+    g_verify[g_verify_n].fn = NULL;
+    g_verify[g_verify_n].cfn = (SzVerdict * (*)(void *, void *)) fn;
+    sz_retain(env);
+    g_verify[g_verify_n].env = env;
+    g_verify_n++;
+  }
+  return sz_io_pure(NULL);
+}
+
+SzIo *sz_fuzz_verify_rel(SzString *name, void *fn, void *env) {
+  const char *s = name ? sz_string_cstr(name) : "";
+  if (fn && s[0]) {
+    if (g_verify_rel_n >= SZ_SESSION_MAX)
+      sz_panic("sz_property session: too many verify relations");
+    g_verify_rel[g_verify_rel_n].name = dup_cstr(s);
+    g_verify_rel[g_verify_rel_n].fn = NULL;
+    g_verify_rel[g_verify_rel_n].cfn = (SzVerdict * (*)(void *, void *)) fn;
+    sz_retain(env);
+    g_verify_rel[g_verify_rel_n].env = env;
+    g_verify_rel_n++;
+  }
+  return sz_io_pure(NULL);
+}
+
+void sz_fuzz_hit(SzString *key) {
+  if (key && sz_string_cstr(key)[0])
+    sz_coverage_hit(sz_string_cstr(key));
+}
+
+/* Copy every SCUZZ_EV_<name>=<value> to SCUZZ_<name>. The parent sets probe
+ * env under the EV prefix so the evaluator process itself runs live. */
+static void fuzz_probe_env(void) {
+  extern char **environ;
+  char **e;
+  size_t n = 0;
+  char **names = NULL;
+  size_t i;
+  for (e = environ; e && *e; e++)
+    if (strncmp(*e, "SCUZZ_EV_", 9) == 0)
+      n++;
+  if (!n)
+    return;
+  names = (char **)sz_alloc(n * sizeof(char *));
+  i = 0;
+  for (e = environ; e && *e; e++)
+    if (strncmp(*e, "SCUZZ_EV_", 9) == 0)
+      names[i++] = dup_cstr(*e);
+  for (i = 0; i < n; i++) {
+    char *eq = strchr(names[i], '=');
+    if (eq) {
+      char key[256];
+      *eq = 0;
+      snprintf(key, sizeof key, "SCUZZ_%s", names[i] + 9);
+      setenv(key, eq + 1, 1);
+    }
+    sz_free(names[i]);
+  }
+  sz_free(names);
+}
+
+static void *fuzz_probe_thunk(void *env) {
+  SzIo *program = (SzIo *)env;
+  const char *tr;
+  const char *ds;
+  void *out = NULL;
+  fuzz_probe_env();
+  sz_coverage_env_refresh();
+  sz_testrt_oracles_refresh();
+  tr = getenv("SCUZZ_TESTRT");
+  if (tr && tr[0] == '1')
+    sz_testrt_install();
+  sz_testrt_fault_hold();
+  sz_scenario_run_setup();
+  sz_testrt_fault_release();
+  ds = getenv("SCUZZ_DRIVE_SCRIPT");
+  if (ds && ds[0]) {
+    sz_driver_run_script(ds);
+    sz_property_session_end();
+  } else {
+    SzIoResult r;
+    sz_retain(program);
+    r = sz_io_unsafe_run(program);
+    if (!r.ok) {
+      out = sz_string_from_cstr(r.error ? sz_string_cstr(r.error->message)
+                                        : "unknown");
+      if (r.error)
+        sz_error_free(r.error);
+    } else {
+      sz_release(r.value);
+      sz_property_session_end();
+    }
+  }
+  sz_property_sometimes_flush();
+  sz_timeline_varied_flush();
+  sz_property_classify_flush();
+  return out;
+}
+
+static SzIo *fuzz_probe_after(void *value, void *env) {
+  SzIo *out;
+  (void)env;
+  if (!value)
+    return sz_io_pure(NULL);
+  out = sz_io_fail_cstr(sz_string_cstr((SzString *)value));
+  sz_release(value);
+  return out;
+}
+
+SzIo *sz_fuzz_probe(SzIo *program) {
+  SzIo *delay;
+  SzIo *out;
+  if (!program)
+    sz_panic("sz_fuzz_probe(null)");
+  delay = sz_io_delay(fuzz_probe_thunk, program);
+  out = sz_io_flatmap(delay, fuzz_probe_after, NULL);
+  sz_release(delay);
+  return out;
+}
+
 int sz_property_session_armed(void) {
   return g_always_n > 0 || g_eventually_n > 0 || g_response_n > 0 ||
          g_verify_n > 0;
@@ -4610,9 +4766,10 @@ void sz_property_session_end(void) {
   frozen.states = g_tl;
   for (i = 0; i < g_verify_n; i++) {
     SzVerdict *v;
-    if (!g_verify[i].fn)
+    if (!g_verify[i].fn && !g_verify[i].cfn)
       continue;
-    v = g_verify[i].fn(&frozen);
+    v = g_verify[i].fn ? g_verify[i].fn(&frozen)
+                       : g_verify[i].cfn(&frozen, g_verify[i].env);
     if (!v || v->valid)
       continue;
     claim_fail_verdict(g_verify[i].name, v);
@@ -4649,15 +4806,21 @@ void sz_property_session_reset(void) {
   for (i = 0; i < g_verify_n; i++) {
     if (g_verify[i].name)
       sz_free(g_verify[i].name);
+    sz_release(g_verify[i].env);
     g_verify[i].name = NULL;
     g_verify[i].fn = NULL;
+    g_verify[i].cfn = NULL;
+    g_verify[i].env = NULL;
   }
   g_verify_n = 0;
   for (i = 0; i < g_verify_rel_n; i++) {
     if (g_verify_rel[i].name)
       sz_free(g_verify_rel[i].name);
+    sz_release(g_verify_rel[i].env);
     g_verify_rel[i].name = NULL;
     g_verify_rel[i].fn = NULL;
+    g_verify_rel[i].cfn = NULL;
+    g_verify_rel[i].env = NULL;
   }
   g_verify_rel_n = 0;
   tl_free_states();
@@ -4672,14 +4835,28 @@ typedef struct {
   int nargs;
   int kind; /* 0=Int, 1=String, 2=Bool (i64 0/1) */
   void *fn;
+  int closure; /* 1: fn(List[String], env) from the evaluator probe */
+  void *env;
 } SzDriver;
 
 static SzDriver *g_drivers;
 static size_t g_drivers_n;
 static size_t g_drivers_cap;
 
+static void driver_add(const char *s, int64_t nargs, int64_t kind, void *fn,
+                       int closure, void *env);
+
 void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn) {
-  const char *s = name ? sz_string_cstr(name) : "";
+  driver_add(name ? sz_string_cstr(name) : "", nargs, kind, fn, 0, NULL);
+}
+
+SzIo *sz_fuzz_driver(SzString *name, int64_t nargs, void *fn, void *env) {
+  driver_add(name ? sz_string_cstr(name) : "", nargs, 0, fn, 1, env);
+  return sz_io_pure(NULL);
+}
+
+static void driver_add(const char *s, int64_t nargs, int64_t kind, void *fn,
+                       int closure, void *env) {
   size_t n;
   char *copy;
   if (!fn || !s[0])
@@ -4704,6 +4881,9 @@ void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn) {
   g_drivers[g_drivers_n].nargs = (int)nargs;
   g_drivers[g_drivers_n].kind = (int)kind;
   g_drivers[g_drivers_n].fn = fn;
+  g_drivers[g_drivers_n].closure = closure;
+  sz_retain(env);
+  g_drivers[g_drivers_n].env = env;
   g_drivers_n++;
 }
 
@@ -4876,6 +5056,32 @@ static int sz_driver_split_rest(const char *rest, char tok[][128], int maxn) {
   return n;
 }
 
+static SzList *driver_tokens_cons(SzList *tail, const char *t) {
+  SzString *s = sz_string_from_cstr(t);
+  SzList *out = sz_list_cons(s, tail);
+  sz_release(s);
+  sz_release(tail);
+  return out;
+}
+
+/* Closure drivers take the same tokens as the fn-pointer path, as strings. */
+static SzIo *driver_closure_io(SzDriver *d, const char *rest) {
+  SzList *args = sz_list_nil();
+  SzIo *io;
+  if (d->nargs == 1)
+    args = driver_tokens_cons(args, rest);
+  else if (d->nargs > 1) {
+    char tok[4][128];
+    int ntok = sz_driver_split_rest(rest, tok, 4);
+    int j;
+    for (j = d->nargs - 1; j >= 0; j--)
+      args = driver_tokens_cons(args, j < ntok ? tok[j] : "");
+  }
+  io = ((SzIo * (*)(void *, void *)) d->fn)(args, d->env);
+  sz_release(args);
+  return io;
+}
+
 void sz_driver_run_line(const char *spec) {
   char name[64];
   const char *rest;
@@ -4896,7 +5102,9 @@ void sz_driver_run_line(const char *spec) {
     fprintf(stderr, "scuzz: unknown driver %s\n", name);
     sz_panic("Ui.run: unknown driver");
   }
-  if (d->nargs <= 0)
+  if (d->closure)
+    io = driver_closure_io(d, rest);
+  else if (d->nargs <= 0)
     io = ((SzIo * (*)(void)) d->fn)();
   else if (d->nargs == 1) {
     if (d->kind == 1)

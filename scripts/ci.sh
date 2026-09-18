@@ -302,9 +302,16 @@ slice_codegen() {
   echo "codegen emit start"
   "$SCUZZ" build examples/codegen
   echo "codegen emit done"
-  "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
+  # The probe oracle runs last under SCUZZ_EV_*: two evAdd drive lines, one
+  # claim, one coverage key.
+  printf '{"v":1,"kind":"inject","events":[{"op":"drive","name":"evAdd","args":[3]},{"op":"drive","name":"evAdd","args":[4]}]}' > /tmp/codegen-probe.json
+  rm -f /tmp/codegen-probe.cov
+  SCUZZ_EV_TESTRT=1 SCUZZ_EV_DRIVE_SCRIPT=/tmp/codegen-probe.json SCUZZ_EV_COVERAGE_DUMP=/tmp/codegen-probe.cov \
+    "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
   grep -q "ir-ok" /tmp/codegen.out
   grep -q "eval-ok" /tmp/codegen.out
+  grep -q "probe-ok" /tmp/codegen.out
+  grep -qx "codegen:probe" /tmp/codegen-probe.cov
   local memory_dir
   memory_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-match-memory.XXXXXX")"
   mkdir -p "$memory_dir/src"

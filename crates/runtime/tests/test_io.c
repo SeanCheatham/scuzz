@@ -2256,6 +2256,154 @@ static void test_driver_growth(void) {
   sz_testrt_reset();
 }
 
+static int64_t closure_sum;
+static int closure_pair_ok;
+static int closure_verify_ran;
+
+static SzIo *closure_add(void *tokens, void *env) {
+  SzList *xs = (SzList *)tokens;
+  assert(sz_unbox_i64(env) == 5);
+  assert(sz_list_len(xs) == 1);
+  closure_sum += atoi(sz_string_cstr((SzString *)sz_list_head(xs)));
+  return sz_io_pure(NULL);
+}
+
+static SzIo *closure_pair(void *tokens, void *env) {
+  SzList *xs = (SzList *)tokens;
+  (void)env;
+  assert(sz_list_len(xs) == 3);
+  closure_pair_ok = strcmp(sz_string_cstr((SzString *)sz_list_head(xs)), "a") == 0 &&
+                    strcmp(sz_string_cstr((SzString *)sz_list_head(sz_list_tail(xs))), "b") == 0 &&
+                    sz_string_cstr((SzString *)sz_list_head(sz_list_tail(sz_list_tail(xs))))[0] == 0;
+  return sz_io_pure(NULL);
+}
+
+static SzVerdict *closure_verify(void *tl, void *env) {
+  assert(sz_unbox_i64(env) == 9);
+  closure_verify_ran = 1;
+  return sz_timeline_len(tl) >= 3 ? sz_verdict_ok()
+                                  : sz_verdict_fail(0, "short timeline");
+}
+
+static SzVerdict *closure_rel(void *pair, void *env) {
+  SzPair *p = (SzPair *)pair;
+  (void)env;
+  return sz_timeline_len(p->left) == sz_timeline_len(p->right)
+             ? sz_verdict_ok()
+             : sz_verdict_fail(0, "lengths differ");
+}
+
+/* Evaluator probe hooks: closure setup, drivers, and claims run one probe
+ * under SCUZZ_EV_* env, in process. */
+static void test_fuzz_probe_closures(void) {
+  const char *dump = "/tmp/scuzz_test_fuzz_probe.dump";
+  const char *cov = "/tmp/scuzz_test_fuzz_probe.cov";
+  const char *script = "/tmp/scuzz_test_fuzz_probe.json";
+  void *env5 = sz_box_i64(5);
+  void *env9 = sz_box_i64(9);
+  void *ctx = sz_box_i64(7);
+  SzString *name;
+  SzString *key;
+  SzIoResult r;
+  FILE *f = fopen(script, "w");
+  assert(f);
+  fputs("{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"drive\",\"name\":\"evAdd\",\"args\":[3]},"
+        "{\"op\":\"drive\",\"name\":\"evPair\",\"args\":[\"a\",\"b\"]}]}",
+        f);
+  fclose(f);
+  remove(dump);
+  remove(cov);
+  sz_testrt_reset();
+  sz_property_session_reset();
+  setenv("SCUZZ_EV_TESTRT", "1", 1);
+  setenv("SCUZZ_EV_TIMELINE_DUMP", dump, 1);
+  setenv("SCUZZ_EV_COVERAGE_DUMP", cov, 1);
+  setenv("SCUZZ_EV_DRIVE_SCRIPT", script, 1);
+  unsetenv("SCUZZ_TESTRT");
+  {
+    SzIo *setup = sz_io_pure(ctx);
+    r = sz_io_unsafe_run(sz_fuzz_setup(setup));
+    assert(r.ok);
+    sz_release(setup);
+  }
+  name = sz_string_from_cstr("evAdd");
+  r = sz_io_unsafe_run(sz_fuzz_driver(name, 1, (void *)closure_add, env5));
+  assert(r.ok);
+  sz_release(name);
+  name = sz_string_from_cstr("evPair");
+  r = sz_io_unsafe_run(sz_fuzz_driver(name, 3, (void *)closure_pair, NULL));
+  assert(r.ok);
+  sz_release(name);
+  name = sz_string_from_cstr("evLen");
+  r = sz_io_unsafe_run(sz_fuzz_verify(name, (void *)closure_verify, env9));
+  assert(r.ok);
+  sz_release(name);
+  name = sz_string_from_cstr("evRel");
+  r = sz_io_unsafe_run(sz_fuzz_verify_rel(name, (void *)closure_rel, NULL));
+  assert(r.ok);
+  sz_release(name);
+  sz_release(env5);
+  sz_release(env9);
+  {
+    SzIo *unit = sz_io_pure(NULL);
+    r = sz_io_unsafe_run(sz_fuzz_probe(unit));
+    assert(r.ok);
+    sz_release(unit);
+  }
+  assert(getenv("SCUZZ_TESTRT") && getenv("SCUZZ_TESTRT")[0] == '1');
+  assert(sz_unbox_i64(sz_scenario_context()) == 7);
+  assert(closure_sum == 3);
+  assert(closure_pair_ok);
+  assert(closure_verify_ran);
+  {
+    void *tl = sz_timeline_load(dump);
+    assert(tl && sz_timeline_len(tl) >= 3);
+    sz_timeline_free(tl);
+  }
+  {
+    char spec[256];
+    snprintf(spec, sizeof spec, "%s,%s", dump, dump);
+    assert(sz_judge_rel_main(spec) == 0);
+  }
+  key = sz_string_from_cstr("Main:1:2:probe");
+  sz_fuzz_hit(key);
+  sz_release(key);
+  {
+    char line[64];
+    FILE *c = fopen(cov, "r");
+    assert(c && fgets(line, sizeof line, c));
+    assert(strncmp(line, "Main:1:2:probe", 14) == 0);
+    fclose(c);
+  }
+  /* No drive script: the probe runs `program` and fails with its message. */
+  unsetenv("SCUZZ_EV_DRIVE_SCRIPT");
+  unsetenv("SCUZZ_DRIVE_SCRIPT");
+  {
+    SzIo *boom = sz_io_fail_cstr("boom");
+    r = sz_io_unsafe_run(sz_fuzz_probe(boom));
+    assert(!r.ok);
+    assert(strcmp(sz_string_cstr(r.error->message), "boom") == 0);
+    sz_release(r.error);
+    sz_release(boom);
+  }
+  r = sz_io_unsafe_run(sz_fuzz_setup(NULL));
+  assert(r.ok);
+  sz_release(ctx);
+  unsetenv("SCUZZ_EV_TESTRT");
+  unsetenv("SCUZZ_EV_TIMELINE_DUMP");
+  unsetenv("SCUZZ_EV_COVERAGE_DUMP");
+  unsetenv("SCUZZ_TESTRT");
+  unsetenv("SCUZZ_TIMELINE_DUMP");
+  unsetenv("SCUZZ_COVERAGE_DUMP");
+  sz_testrt_oracles_refresh();
+  sz_coverage_env_refresh();
+  sz_property_session_reset();
+  sz_testrt_reset();
+  remove(dump);
+  remove(cov);
+  remove(script);
+}
+
 static void check_retry_after(const char *text, int64_t now, int64_t want) {
   SzString *value = sz_string_from_cstr(text);
   int64_t got = sz_net_retry_after_millis(value, now);
@@ -13690,6 +13838,7 @@ int main(void) {
   }
 
   test_driver_growth();
+  test_fuzz_probe_closures();
   test_file_timeline();
   puts("runtime io tests ok");
   return 0;

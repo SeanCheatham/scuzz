@@ -1244,6 +1244,24 @@ void sz_scenario_run_setup(void);
 void sz_testrt_fault_hold(void);
 void sz_testrt_fault_release(void);
 
+/* Fuzz hooks for the evaluator probe (`scuzz eval --probe`). The
+ * registration nodes register when they are built and return IO[Unit].
+ * Sequence them before `sz_fuzz_probe` in one for-comprehension.
+ * Closures are (fn, env) pairs with the SzCont shape. */
+SzIo *sz_fuzz_setup(SzIo *setup); /* setup IO; its value is Scenario.context */
+/* fn(List[String] tokens, env) gives IO[Unit]. nargs 0: empty list. nargs 1:
+ * the rest of the line. More: whitespace tokens; a missing token is "". */
+SzIo *sz_fuzz_driver(SzString *name, int64_t nargs, void *fn, void *env);
+SzIo *sz_fuzz_verify(SzString *name, void *fn, void *env);     /* Timeline to Verdict */
+SzIo *sz_fuzz_verify_rel(SzString *name, void *fn, void *env); /* (Timeline, Timeline) pair to Verdict */
+/* Coverage hit with a key the evaluator interns. */
+void sz_fuzz_hit(SzString *key);
+/* One probe: copy SCUZZ_EV_* to SCUZZ_*, install TestRuntime under
+ * SCUZZ_TESTRT=1, refresh cached env reads, run setup, run the drive script
+ * or `program`, end the session, flush the dumps. Fails with the runtime
+ * message when `program` fails. */
+SzIo *sz_fuzz_probe(SzIo *program);
+
 /* Entrypoint helper used by @main codegen */
 int sz_runtime_main_args(SzIo *program, int argc, char **argv);
 
