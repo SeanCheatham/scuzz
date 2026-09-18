@@ -123,13 +123,19 @@ fuzz --relate examples/counter
 if fuzz --relate examples/bad-sched; then
   echo "relate should have caught the schedule divergence" && exit 1
 fi
-if fuzz --no-fail-fast --iterations 8 examples/bad-example; then
+# A failing search promotes its repro into <pkg>/corpus/. Run the campaign that
+# must fail on a copy so the tracked corpus stays what a human committed.
+rm -rf /tmp/bad-example
+cp -R examples/bad-example /tmp/bad-example
+rm -rf /tmp/bad-example/build
+if fuzz --no-fail-fast --iterations 8 /tmp/bad-example; then
   echo "fuzz should have found the property failure" && exit 1
 fi
-test -f examples/bad-example/build/fuzz/repro.toml
+test -f /tmp/bad-example/build/fuzz/repro.toml
+test -f /tmp/bad-example/corpus/search-42-0.toml
 python3 - <<'PY'
 import json
-with open("examples/bad-example/build/fuzz/summary.json") as f:
+with open("/tmp/bad-example/build/fuzz/summary.json") as f:
     d = json.load(f)
 assert d["v"] == 1 and d["kind"] == "fuzz"
 assert d["fuzz"]["ok"] is False
@@ -139,7 +145,7 @@ assert d["corpus"]["failures"] >= 1
 assert d["mutate"]["ran"] >= 1
 assert d["mutate"]["inert"] >= 1
 PY
-if fuzz --replay examples/bad-example/build/fuzz/repro.toml examples/bad-example; then
+if fuzz --replay /tmp/bad-example/build/fuzz/repro.toml /tmp/bad-example; then
   echo "replay should have reproduced the property failure" && exit 1
 fi
 if fuzz --iterations 0 examples/bad-example; then
