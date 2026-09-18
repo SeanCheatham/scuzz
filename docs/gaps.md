@@ -25,9 +25,9 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits rel
 
 ### 3. Evaluator parity and speed
 
-**Unproven.** An evaluator written in Scuzz produces the same observable output as the emitted binary on every example. An evaluator `scuzz fuzz` campaign on an app-sized package finishes in less wall-clock time than the compiled campaign, with identical summaries. Interpreted steps are slower; rebuilds and process spawns are gone. The balance is not measured.
+**Partly proven.** An evaluator written in Scuzz produces the same observable output as the emitted binary on every example. `scuzz fuzz` on `examples/webhook` and `examples/api-report` writes the same `summary.json` on both engines (`scripts/ci-fuzz.sh`). Speed is not there: the evaluator campaign is slower than the compiled one on `examples/api-report`. Each probe is a `scuzz eval --probe` spawn that parses and checks the package again, and every drive step interprets. Mutants skip emit and link, which is the only saving so far. One process per campaign that forks probes in memory is the next slice. Three examples fall back to compiled probes at the idle gate: `examples/io` because forked fibers interleave at different scheduler steps on the two engines, so the deterministic schedule differs; `examples/kernel` and `examples/fmt` because the evaluator idle probe exceeds the 20-second deadline.
 
-**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scuzz fuzz` on `examples/counter`, `examples/webhook`, and `examples/api-report` reports the same kill, coverage, and reach results on both engines and completes faster on the evaluator. Arc and slices: [`vision.md`](vision.md#evaluator-arc).
+**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scripts/ci-fuzz.sh` prints wall clock for both engines on `examples/webhook` and `examples/api-report` and diffs the summaries. The open half: the evaluator campaign completes faster. Arc and slices: [`vision.md`](vision.md#evaluator-arc).
 
 ## Known gaps
 
@@ -53,7 +53,7 @@ Required for CLI, server, and desktop applications.
 
 Filesystem symbolic links, extended metadata preservation, and power-loss durability remain open.
 
-`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval` UI kits, the live signal readers (`Property.signal*`, `Property.a11yHas`), and `Fuzz.*`: the prefixes in `Eval.excludedKits()` (evaluator arc, [`vision.md`](vision.md#evaluator-arc)). `scuzz fuzz` on the evaluator: step 2 of the fuzz engine slice. Time parse and zones. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+`Map` / `Set` keys beyond `Int` or `String`. `scuzz eval` UI kits, the live signal readers (`Property.signal*`, `Property.a11yHas`), and `Fuzz.*` at `Value` (the probe entry calls them natively): the prefixes in `Eval.excludedKits()` (evaluator arc, [`vision.md`](vision.md#evaluator-arc)). `scuzz fuzz` on the evaluator for a `[ui]` package. Time parse and zones. Generators. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Later
 

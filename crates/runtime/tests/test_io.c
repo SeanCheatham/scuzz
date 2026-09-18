@@ -2320,6 +2320,10 @@ static void test_fuzz_probe_closures(void) {
   setenv("SCUZZ_EV_COVERAGE_DUMP", cov, 1);
   setenv("SCUZZ_EV_DRIVE_SCRIPT", script, 1);
   unsetenv("SCUZZ_TESTRT");
+  /* A key hit before the probe waits and lands first in the dump. */
+  key = sz_string_from_cstr("Main:0:0:build");
+  sz_fuzz_hit(key);
+  sz_release(key);
   {
     SzIo *setup = sz_io_pure(ctx);
     r = sz_io_unsafe_run(sz_fuzz_setup(setup));
@@ -2372,6 +2376,8 @@ static void test_fuzz_probe_closures(void) {
     char line[64];
     FILE *c = fopen(cov, "r");
     assert(c && fgets(line, sizeof line, c));
+    assert(strncmp(line, "Main:0:0:build", 14) == 0);
+    assert(fgets(line, sizeof line, c));
     assert(strncmp(line, "Main:1:2:probe", 14) == 0);
     fclose(c);
   }

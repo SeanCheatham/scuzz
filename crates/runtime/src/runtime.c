@@ -286,6 +286,7 @@ static CoverageHit *coverage_hits[256];
 static char *coverage_path;
 static int coverage_probed;
 static int coverage_off;
+static int coverage_own_off;
 
 static void coverage_clear(void) {
   size_t i;
@@ -327,6 +328,8 @@ void sz_coverage_env_refresh(void) {
   coverage_off = 0;
 }
 
+void sz_coverage_own_off(void) { coverage_own_off = 1; }
+
 static void coverage_hit(const char *loc) {
   const unsigned char *p;
   unsigned hash = 2166136261u;
@@ -359,15 +362,17 @@ static void coverage_hit(const char *loc) {
 }
 
 void sz_coverage_hit(const char *loc) {
-  if (coverage_off)
+  if (coverage_off || coverage_own_off)
     return;
   coverage_hit(loc);
 }
 
+void sz_coverage_hit_key(const char *loc) { coverage_hit(loc); }
+
 void sz_panic_push_src(const char *loc) {
   if (!loc || !loc[0])
     return;
-  if (!coverage_off)
+  if (!coverage_off && !coverage_own_off)
     coverage_hit(loc);
   if (g_panic_src_n < SZ_PANIC_SRC_MAX)
     g_panic_src[g_panic_src_n++] = loc;
@@ -449,7 +454,7 @@ static void sz_rc_retire(void *ptr) {
   if (!ptr)
     return;
   h = sz_rc_hdr(ptr);
-  if (!pairing_kind(h->kind) || !sz_testrt_oracles_armed()) {
+  if (!pairing_kind(h->kind) || !sz_testrt_tomb_armed()) {
     sz_free(ptr);
     return;
   }
@@ -567,7 +572,7 @@ void sz_release(void *ptr) {
   uint32_t kind;
   if (!sz_is_rc(ptr)) {
     uintptr_t p = (uintptr_t)ptr;
-    if (sz_testrt_oracles_armed() && ptr && p >= 4096 && (p & 7) == 0 &&
+    if (sz_testrt_tomb_armed() && ptr && p >= 4096 && (p & 7) == 0 &&
         sz_hdr_readable(ptr) && sz_rc_hdr(ptr)->magic == SZ_RC_TOMB) {
       fprintf(stderr, "scuzz: unpaired release: double release (%s)\n",
               sz_alloc_kind_name(sz_rc_hdr(ptr)->kind));
@@ -4207,6 +4212,14 @@ void sz_fiber_census(int64_t *live, int64_t *ready, int64_t *parked,
   if (done)
     *done = d;
 }
+
+void *sz_sched_detach(void) {
+  Sched *s = g_sched;
+  g_sched = NULL;
+  return s;
+}
+
+void sz_sched_attach(void *sched) { g_sched = (Sched *)sched; }
 
 static SzIoResult run_io(SzIo *root) {
   Sched *previous_sched = g_sched;

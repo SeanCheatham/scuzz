@@ -10,6 +10,8 @@ Arguments:
   [PATH]  [default: .]
 
 Options:
+      --probe
+          Run one fuzz probe on the prepared files in PATH (`scuzz fuzz` spawns this)
       --message-format <MESSAGE_FORMAT>
           Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
   -h, --help
