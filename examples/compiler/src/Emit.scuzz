@@ -4734,7 +4734,13 @@ def isIoTy(ret: String): Bool =
   Str.len(ret) >= 2 && Str.slice(ret, 0, 2) == "IO"
 
 def emitDefByRet(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
-  stampNeth(if (isIoTy(ret)) stampCont(Str.concat(emitConts(body, strs, defs, ens, ps, loc), emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps, loc), loc, strs)), contKey(mod, name)) else if (hasTailIf(body, name)) emitDefTco(name, mod, ret, ps, body, strs, defs, ens, loc) else emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps, loc), loc, strs), contKey(mod, name))
+  stampNeth(stampCont(Str.concat(emitDefConts(ret, body, strs, defs, ens, ps, loc), emitDefBody(name, mod, ret, ps, body, strs, defs, ens, loc)), contKey(mod, name)), contKey(mod, name))
+
+def emitDefConts(ret: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
+  if (isIoTy(ret) || fmCount(body) > 0) emitConts(body, strs, defs, ens, ps, loc) else ""
+
+def emitDefBody(name: String, mod: String, ret: String, ps: List[Param], body: Expr, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
+  if (!isIoTy(ret) && hasTailIf(body, name)) emitDefTco(name, mod, ret, ps, body, strs, defs, ens, loc) else emitDef3(llvmRet(ret), symOf(mod, name), defParams2(ps), emitExpr(body, "body", strs, defs, ens, ps, loc), loc, strs)
 
 def hasTailIf(e: Expr, name: String): Bool =
   e match {

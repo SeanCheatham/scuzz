@@ -679,10 +679,10 @@ def wantLam(): String =
   "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:5:3\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:5\\00\", align 1\n\ndefine internal ptr @sz_neth_Main_plusOne_body(ptr %.closure.value, ptr %.closure.env) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %n = bitcast ptr %.closure.value to ptr\n  %nbody_bl_u = call i64 @sz_unbox_i64(ptr %n)\n  %nbody_v = add i64 %nbody_bl_u, 1\n  %body_nr = call ptr @sz_box_i64(i64 %nbody_v)\n  call void @sz_panic_pop_src()\n  ret ptr %body_nr\n}\ndefine internal ptr @sz_user_Main_plusOne() {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %body_cl0 = call ptr @sz_list_nil()\n  %body_cl1 = call ptr @sz_list_cons(ptr null, ptr %body_cl0)\n  call void @sz_release(ptr %body_cl0)\n  %body_cl2 = call ptr @sz_list_cons(ptr @sz_neth_Main_plusOne_body, ptr %body_cl1)\n  call void @sz_release(ptr %body_cl1)\n  call void @sz_panic_pop_src()\n  ret ptr %body_cl2\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_fn_v = call ptr @sz_user_Main_plusOne()\n  %build_e_arg0_fnp = call ptr @sz_list_head(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_fnt = call ptr @sz_list_tail(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_envp = call ptr @sz_list_head(ptr %build_e_arg0_fnt)\n  %build_e_arg0_ab = call ptr @sz_box_i64(i64 5)\n  %build_e_arg0_v = call ptr %build_e_arg0_fnp(ptr %build_e_arg0_ab, ptr %build_e_arg0_envp)\n  call void @sz_release(ptr %build_e_arg0_ab)\n  call void @sz_release(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_u = call i64 @sz_unbox_i64(ptr %build_e_arg0_v)\n  call void @sz_release(ptr %build_e_arg0_v)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_u)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def allOk(): Bool =
-  okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam())
+  okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam()) && contInCtor()
 
 def dumpAll(): String =
-  if (!okHi()) "okHi" else if (!okIf()) "okIf" else if (!okCmp()) "okCmp" else if (!okList()) "okList" else if (!okOpt()) dumpOpt() else if (!okKw()) "okKw" else if (!okPair()) "okPair" else if (!okMod()) "okMod" else if (!okPtr()) dumpPtr() else if (!okFs()) "okFs" else if (!irDiff(srcLam(), wantLam()) || !irIdem(srcLam())) "okLam" else "other"
+  if (!okHi()) "okHi" else if (!okIf()) "okIf" else if (!okCmp()) "okCmp" else if (!okList()) "okList" else if (!okOpt()) dumpOpt() else if (!okKw()) "okKw" else if (!okPair()) "okPair" else if (!okMod()) "okMod" else if (!okPtr()) dumpPtr() else if (!okFs()) "okFs" else if (!irDiff(srcLam(), wantLam()) || !irIdem(srcLam())) "okLam" else if (!contInCtor()) "contInCtor" else "other"
 
 def dumpPtr(): String =
   if (!irDiff(srcIfPtr(), wantIfPtr()) || !irIdem(srcIfPtr())) "srcIfPtr" else if (!irDiff(srcTCons(), wantTCons()) || !irIdem(srcTCons())) "srcTCons" else if (!irDiff(srcTupPtr(), wantTupPtr()) || !irIdem(srcTupPtr())) "srcTupPtr" else if (!irDiff(srcT3(), wantT3()) || !irIdem(srcT3())) "srcT3" else if (!irDiff(srcIfTup(), wantIfTup()) || !irIdem(srcIfTup())) "srcIfTup" else if (!irDiff(srcNestTup(), wantNestTup()) || !irIdem(srcNestTup())) "srcNestTup" else "okPtr-other"
@@ -701,6 +701,31 @@ def reloadRecordLayout(): Bool =
 
 def srcEvMatch(): String =
   "enum Shape:\n  case Circle(r: Int)\n  case Rect(w: Int, h: Int)\n\nrecord Pt(x: Int, y: Int)\n\ndef pick(xs: List[Int], s: Shape, p: Pt, name: String): Int =\n  xs match {\n    case [] => 0\n    case h :: _ if h > 100 => 1\n    case whole @ (h :: t) => h + List.len(t) + area(s) + p.x * p.y + tag(name) + List.len(whole)\n  }\n\ndef area(s: Shape): Int =\n  s match {\n    case Shape.Circle(r) => r * r * 3\n    case Shape.Rect(w = ww, h = hh) => ww * hh\n  }\n\ndef tag(name: String): Int =\n  name match {\n    case \"a\" | \"b\" => 10\n    case \"c\" => 20\n    case _ => 30\n  }\n\ndef opt(o: Option[Int]): Int =\n  o match {\n    case Some(n) => n\n    case None => 0 - 1\n  }\n\ndef pair(t: (Int, String)): String =\n  t match {\n    case (n, s) => s\"$s=${n + 1}\"\n  }\n\ndef lam(): Int =\n  List.len(List.filter(List.map([1, 2, 3], x => x * 2), y => y > 2))\n\ndef divs(): List[Int] =\n  [7 / 2, (0 - 7) / 2, 7 % 3, (0 - 7) % 3, 7 % (0 - 3)]\n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(pick([5, 6, 7], Shape.Rect(2, 3), Pt(2, 5), \"b\")))\n"
+
+def srcContInCtor(): String =
+  """enum Box:
+  case B(io: IO[Int])
+
+def mk(): Box =
+  Box.B(IO.pure(0).flatMap(_ => IO.pure(1)))
+
+def loop(n: Int, acc: Box): Box =
+  if (n <= 0) acc else loop(n - 1, Box.B(unbox(acc).flatMap(k => IO.pure(k + 1))))
+
+def unbox(b: Box): IO[Int] =
+  b match {
+    case Box.B(io) => io
+  }
+
+@main def main: IO[Unit] =
+  unbox(loop(3, mk())).flatMap(n => IO.println(Str.fromInt(n)))
+"""
+
+def contInCtor(): Bool =
+  contDefined(Emit.emit(srcContInCtor()), "Main_mk_0") && contDefined(Emit.emit(srcContInCtor()), "Main_loop_0") && Check.check(srcContInCtor()) == "[]"
+
+def contDefined(ir: String, key: String): Bool =
+  Str.contains(ir, Str.concat("define internal ptr @sz_cont_", Str.concat(key, "("))) && Str.contains(ir, Str.concat("ptr @sz_cont_", Str.concat(key, ",")))
 
 def evProg(src: String): EvProg =
   Eval.load(("Main", src) :: [])
