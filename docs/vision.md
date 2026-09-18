@@ -10,7 +10,7 @@ Next: make the language usable for general application development. Prioritize c
 
 ### Evaluator arc
 
-Current arc. Locks: [`philosophy.md`](philosophy.md#evaluator). Current slice: **Effects** (3). Write its plan in `plans.md` when work starts.
+Current arc. Locks: [`philosophy.md`](philosophy.md#evaluator). Current slice: **Fuzz engine** (4). Write its plan in `plans.md` when work starts.
 
 The evaluator runs checked programs without emit or link. It gives `scuzz fuzz` an in-process engine: no rebuild per mutant, no process spawn per probe, cheap state forks for branching, and coverage with comparison operand feedback. It gives the Docs site a static "try it" playground through the existing WebAssembly target. It gives `scuzz eval` on the host. The compiled binary stays the deploy artifact and the corpus replay engine.
 
@@ -18,9 +18,10 @@ Slices, in order. Each slice closes with a proof in `examples/`.
 
 1. **Core.** In the tree. `examples/compiler/src/Eval.scuzz` evaluates expressions, `match`, `for`, closures, records, enums, traits, and module calls. `IO.println`, `IO.pure`, `map`, and `flatMap` map to native `IO`. A self tail call runs in constant stack. `scuzz eval PATH` runs an IO-only package. Proof: `examples/codegen` `ev*` oracles call evaluated defs and print `eval-ok`; `scripts/ci.sh hello` diffs `scuzz eval` against `scuzz run` on `examples/hello`.
 2. **Kits.** In the tree. Evaluator cases for `Str`, `List`, `Map`, `Set`, `Json`, `Float`, `Builder`, `Hash`, `Hex`, `Base64`, and `IO.both`, `IO.fail`, `handleErrorWith` with typed errors. Record `copy`, implicit `self` defs, `for` guards, and bare `_` callbacks evaluate. `Eval.excludedKits()` lists the namespace prefixes later slices own. Proof: `examples/codegen` `evKitsCovered` probes every non-excluded row in `Kits.scuzz`; `scripts/ci-kernel.sh` diffs `scuzz eval` against `scuzz run` on `examples/kernel`.
-3. **Effects.** Current. `Fs`, `Sys`, `Clock`, `Random`, `Ref`, `Queue`, `Deferred`, `Resource`, `Stream`, and `Net` map to native `IO`. `scuzz fuzz` search and mutation run on the evaluator. Corpus replay runs compiled. Proof: wall-clock and identical summaries on `examples/counter`, `examples/webhook`, and `examples/api-report` against the compiled campaign.
-4. **Branching and coverage.** Snapshot and fork at scheduler steps. Expression and branch coverage from the evaluator. Comparison operand distance feeds search. Proof: a `Property.sometimes` that compiled search does not reach in budget and evaluator search does.
-5. **Browser.** `View`, `Signal`, and `Ui` cases. The evaluator compiles to WebAssembly inside Docs. A "try it" page evaluates a source field and mounts the result. Proof: the Docs browser proof runs a counter typed into the page.
+3. **Effects.** In the tree. `IO` combinators, `Fs`, `Sys`, `Clock`, `Random`, `Uuid`, `Bytes`, `Ref`, `Queue`, `Deferred`, `Fiber`, `Resource`, `Stream`, and `Net` map to native `IO` at `Value`. Native `IO[A]` failures lift to `VStr`; typed failures stay `Value`. `Property.sometimes` is a no-op outside `scuzz fuzz`. Proof: `scripts/ci-kernel.sh` diffs `scuzz eval` against `scuzz run` on `examples/io` with clock and random lines removed; `evKitsCovered` probes every row outside the UI and fuzz prefixes.
+4. **Fuzz engine.** Current. `Property`, `Scenario`, `Timeline`, and `Verdict` cases. `scuzz fuzz` search and mutation run on the evaluator. Corpus replay runs compiled. Proof: wall-clock and identical summaries on `examples/counter`, `examples/webhook`, and `examples/api-report` against the compiled campaign.
+5. **Branching and coverage.** Snapshot and fork at scheduler steps. Expression and branch coverage from the evaluator. Comparison operand distance feeds search. Proof: a `Property.sometimes` that compiled search does not reach in budget and evaluator search does.
+6. **Browser.** `View`, `Signal`, and `Ui` cases. The evaluator compiles to WebAssembly inside Docs. A "try it" page evaluates a source field and mounts the result. Proof: the Docs browser proof runs a counter typed into the page.
 
 ### Session control arc
 

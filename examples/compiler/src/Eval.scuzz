@@ -14,6 +14,15 @@ enum Value:
   case VMap(kvs: List[(Value, Value)])
   case VSet(xs: List[Value])
   case VBuilder(b: Builder)
+  case VBytes(b: Bytes)
+  case VRef(r: Ref[Value])
+  case VQueue(q: Queue[Value])
+  case VDeferred(d: Deferred[Value])
+  case VFiber(f: Fiber[Value])
+  case VStream(s: Stream[Value])
+  case VResource(r: Resource[Value])
+  case VTcp(t: Tcp)
+  case VUdp(u: Udp)
 
 record EvEnv(vars: List[(String, Value)], mod: String)
 
@@ -85,7 +94,7 @@ def mainFail(e: Value): IO[Value] =
   }
 
 def excludedKits(): List[String] =
-  "IO." :: "Fs." :: "Sys." :: "Impurity." :: "Net." :: "Stream." :: "Clock." :: "Random." :: "Uuid." :: "Ref." :: "Queue." :: "Deferred." :: "Fiber." :: "Resource." :: "Bytes." :: "Signal." :: "Ui." :: "View." :: "Icon." :: "Color." :: "Theme." :: "Timeline." :: "Verdict." :: "Property." :: "Scenario." :: noNames()
+  "Signal." :: "Ui." :: "View." :: "Icon." :: "Color." :: "Theme." :: "Timeline." :: "Verdict." :: "Property." :: "Scenario." :: noNames()
 
 def isExcludedKit(f: String): Bool =
   List.exists(excludedKits(), pre => Str.startsWith(f, pre))
@@ -116,6 +125,15 @@ def show(v: Value): String =
     case Value.VMap(kvs) => Str.concat("Map(", Str.concat(showAll(pairsToTuples(kvs)), ")"))
     case Value.VSet(xs) => Str.concat("Set(", Str.concat(showAll(xs), ")"))
     case Value.VBuilder(_) => "<builder>"
+    case Value.VBytes(_) => "<bytes>"
+    case Value.VRef(_) => "<ref>"
+    case Value.VQueue(_) => "<queue>"
+    case Value.VDeferred(_) => "<deferred>"
+    case Value.VFiber(_) => "<fiber>"
+    case Value.VStream(_) => "<stream>"
+    case Value.VResource(_) => "<resource>"
+    case Value.VTcp(_) => "<tcp>"
+    case Value.VUdp(_) => "<udp>"
   }
 
 def fmtFloat(f: Float): String =
@@ -799,7 +817,7 @@ def interpPart(v: Value, rest: List[Expr], env: EvEnv, p: EvProg, b: Builder): V
     case Value.VBool(bv) => interpAcc(rest, env, p, Builder.append(b, if (bv) "1" else "0"))
     case Value.VFloat(f) => interpAcc(rest, env, p, Builder.append(b, fmtFloat(f)))
     case Value.VErr(_) => v
-    case _ => unsupported("interpolation of a non-scalar value", env, p, 0)
+    case _ => unsupported(Str.concat("interpolation of a non-scalar value ", show(v)), env, p, 0)
   }
 
 def intOf(v: Value): Int =
@@ -1031,7 +1049,7 @@ def lastTrue(rs: List[Value], i: Int, hit: Int): Int =
   if (List.isEmpty(rs)) hit else lastTrue(List.tail(rs), i + 1, if (boolOf(List.at(rs, 0))) i else hit)
 
 def kitCall(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "Map.")) mapKit(f, vals, env, p, off) else if (Str.startsWith(f, "Set.")) setKit(f, vals, env, p, off) else if (Str.startsWith(f, "Json.")) jsonKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else miscKit(f, vals, env, p, off)
+  if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "Map.")) mapKit(f, vals, env, p, off) else if (Str.startsWith(f, "Set.")) setKit(f, vals, env, p, off) else if (Str.startsWith(f, "Json.")) jsonKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else if (Str.startsWith(f, "Stream.")) streamKit(f, vals, env, p, off) else if (Str.startsWith(f, "Fs.") || Str.startsWith(f, "Sys.")) fsKit(f, vals, env, p, off) else if (Str.startsWith(f, "Net.")) netKit(f, vals, env, p, off) else if (isHandleKit(f)) handleKit(f, vals, env, p, off) else miscKit(f, vals, env, p, off)
 
 def strKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Str.fromInt") Value.VStr(Str.fromInt(intAt(vals, 0))) else if (f == "Str.fromBool") Value.VStr(Str.fromBool(boolOf(List.at(vals, 0)))) else if (f == "Str.concat") Value.VStr(Str.concat(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.len") Value.VInt(Str.len(strAt(vals, 0))) else if (f == "Str.byteLen") Value.VInt(Str.byteLen(strAt(vals, 0))) else if (f == "Str.eq") Value.VBool(strAt(vals, 0) == strAt(vals, 1)) else if (f == "Str.slice") Value.VStr(Str.slice(strAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Str.byteSlice") Value.VStr(Str.byteSlice(strAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Str.charAt") Value.VInt(Str.charAt(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.toInt") Value.VInt(Str.toInt(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.repeat") Value.VStr(Str.repeat(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.startsWith") Value.VBool(Str.startsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.endsWith") Value.VBool(Str.endsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.contains") Value.VBool(Str.contains(strAt(vals, 0), strAt(vals, 1))) else strKit2(f, vals, env, p, off)
@@ -1219,11 +1237,215 @@ def jsonKit3(f: String, j: Json, vals: List[Value], env: EvEnv, p: EvProg, off: 
   if (f == "Json.isNull") Value.VBool(Json.isNull(j)) else if (f == "Json.isObj") Value.VBool(Json.isObj(j)) else if (f == "Json.isArr") Value.VBool(Json.isArr(j)) else if (f == "Json.isBool") Value.VBool(Json.isBool(j)) else if (f == "Json.isInt") Value.VBool(Json.isInt(j)) else if (f == "Json.isStr") Value.VBool(Json.isStr(j)) else if (f == "Json.isFloat") Value.VBool(Json.isFloat(j)) else if (f == "Json.asInt") vInts(Json.asInt(j)) else if (f == "Json.asBool") Value.VList(List.map(Json.asBool(j), b => Value.VBool(b))) else if (f == "Json.asStr") vStrs(Json.asStr(j)) else if (f == "Json.asFloat") Value.VList(List.map(Json.asFloat(j), x => Value.VFloat(x))) else if (f == "Json.set") fromJson(Json.set(j, strAt(vals, 1), toJson(List.at(vals, 2)))) else if (f == "Json.remove") fromJson(Json.remove(j, strAt(vals, 1))) else if (f == "Json.append") fromJson(Json.append(j, toJson(List.at(vals, 1)))) else if (f == "Json.prepend") fromJson(Json.prepend(j, toJson(List.at(vals, 1)))) else if (f == "Json.setAt") fromJson(Json.setAt(j, intAt(vals, 1), toJson(List.at(vals, 2)))) else if (f == "Json.dropAt") fromJson(Json.dropAt(j, intAt(vals, 1))) else if (f == "Json.merge") fromJson(Json.merge(j, toJson(List.at(vals, 1)))) else unsupported(Str.concat("kit ", f), env, p, off)
 
 def ioKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "IO.println") Value.VIo(printlnIo(strAt(vals, 0))) else if (f == "IO.pure") Value.VIo(pureIo(List.at(vals, 0))) else if (f == "IO.both") Value.VIo(bothIo(ioOf(List.at(vals, 0)), ioOf(List.at(vals, 1)))) else if (f == "IO.fail") Value.VIo(failWith(List.at(vals, 0))) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (f == "IO.println") Value.VIo(printlnIo(strAt(vals, 0))) else if (f == "IO.pure") Value.VIo(pureIo(List.at(vals, 0))) else if (f == "IO.both") Value.VIo(bothIo(ioAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.fail") Value.VIo(failWith(List.at(vals, 0))) else if (f == "IO.attempt") Value.VIo(attemptIo(ioAt(vals, 0))) else if (f == "IO.sleep") Value.VIo(unitIo(IO.sleep(intAt(vals, 0)))) else if (f == "IO.race") Value.VIo(IO.race(ioAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.ensure") Value.VIo(IO.ensure(ioAt(vals, 0), unitOf(ioAt(vals, 1)))) else if (f == "IO.timeout") Value.VIo(IO.timeout(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.forever") Value.VIo(IO.forever(ioAt(vals, 0))) else if (f == "IO.repeatN") Value.VIo(IO.repeatN(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.retryN") Value.VIo(IO.retryN(intAt(vals, 0), ioAt(vals, 1))) else if (f == "IO.foreach") Value.VIo(foreachIo(listAt(vals, 0), List.at(vals, 1), env, p, off)) else if (f == "IO.foreachDiscard") Value.VIo(foreachIo(listAt(vals, 0), List.at(vals, 1), env, p, off).map(_ => Value.VUnit)) else if (f == "IO.when") Value.VIo(if (boolOf(List.at(vals, 0))) ioAt(vals, 1) else pureIo(Value.VUnit)) else if (f == "IO.unless") Value.VIo(if (boolOf(List.at(vals, 0))) pureIo(Value.VUnit) else ioAt(vals, 1)) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def ioAt(vals: List[Value], i: Int): IO[Value, Value] =
+  ioOf(List.at(vals, i))
+
+def attemptIo(io: IO[Value, Value]): IO[Value, Value] =
+  liftIo(IO.attempt(io).map(r => attemptVal(r)))
+
+def attemptVal(r: Result[Value, Value]): Value =
+  r match {
+    case Result.Ok(v) => okV(v)
+    case Result.Err(e) => errV(e)
+  }
+
+def foreachIo(xs: List[Value], fn: Value, env: EvEnv, p: EvProg, off: Int): IO[Value, Value] =
+  IO.foreach(xs, x => ioOf(applyValue(fn, x :: noVals(), env, p, off))).map(ys => Value.VList(ys))
 
 def bothIo(a: IO[Value, Value], b: IO[Value, Value]): IO[Value, Value] =
   IO.both(a, b).map(pr => Value.VTuple(pairFst(pr) :: pairSnd(pr) :: noVals()))
 
 def miscKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Builder.empty") Value.VBuilder(Builder.empty()) else if (f == "Builder.append") Value.VBuilder(Builder.append(builderOf(List.at(vals, 0)), strAt(vals, 1))) else if (f == "Builder.result") Value.VStr(Builder.result(builderOf(List.at(vals, 0)))) else if (f == "Hash.hmacSha256") Value.VStr(Hash.hmacSha256(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.constantTimeEqual") Value.VBool(Hash.constantTimeEqual(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.sha256") Value.VStr(Hash.sha256(strAt(vals, 0))) else if (f == "Hex.encode") Value.VStr(Hex.encode(strAt(vals, 0))) else if (f == "Hex.decode") Value.VStr(Hex.decode(strAt(vals, 0))) else if (f == "Base64.encode") Value.VStr(Base64.encode(strAt(vals, 0))) else if (f == "Base64.decode") Value.VStr(Base64.decode(strAt(vals, 0))) else if (f == "Float.fromInt") Value.VFloat(Float.fromInt(intAt(vals, 0))) else if (f == "Float.toInt") Value.VInt(Float.toInt(floatOf(List.at(vals, 0)))) else if (f == "Oracle.sumTo") Value.VInt(Oracle.sumTo(intAt(vals, 0))) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (f == "Builder.empty") Value.VBuilder(Builder.empty()) else if (f == "Builder.append") Value.VBuilder(Builder.append(builderOf(List.at(vals, 0)), strAt(vals, 1))) else if (f == "Builder.result") Value.VStr(Builder.result(builderOf(List.at(vals, 0)))) else if (f == "Hash.hmacSha256") Value.VStr(Hash.hmacSha256(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.constantTimeEqual") Value.VBool(Hash.constantTimeEqual(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.sha256") Value.VStr(Hash.sha256(strAt(vals, 0))) else if (f == "Hex.encode") Value.VStr(Hex.encode(strAt(vals, 0))) else if (f == "Hex.decode") Value.VStr(Hex.decode(strAt(vals, 0))) else if (f == "Base64.encode") Value.VStr(Base64.encode(strAt(vals, 0))) else if (f == "Base64.decode") Value.VStr(Base64.decode(strAt(vals, 0))) else if (f == "Float.fromInt") Value.VFloat(Float.fromInt(intAt(vals, 0))) else if (f == "Float.toInt") Value.VInt(Float.toInt(floatOf(List.at(vals, 0)))) else if (f == "Oracle.sumTo") Value.VInt(Oracle.sumTo(intAt(vals, 0))) else if (f == "Clock.monotonic") Value.VIo(intIo(Clock.monotonic())) else if (f == "Clock.realTime") Value.VIo(intIo(Clock.realTime())) else if (f == "Clock.iso8601") Value.VStr(Clock.iso8601(intAt(vals, 0))) else if (f == "Random.nextInt") Value.VIo(intIo(Random.nextInt(intAt(vals, 0)))) else if (f == "Uuid.v4") Value.VIo(strIo(Uuid.v4())) else if (f == "Bytes.fromStr") Value.VBytes(Bytes.fromStr(strAt(vals, 0))) else if (f == "Bytes.len") Value.VInt(Bytes.len(bytesOf(List.at(vals, 0)))) else if (f == "Impurity.runKit") Value.VIo(unitIo(Impurity.runKit())) else if (f == "Property.sometimes") Value.VUnit else unsupported(Str.concat("kit ", f), env, p, off)
+
+def bytesOf(v: Value): Bytes =
+  v match {
+    case Value.VBytes(b) => b
+    case _ => Bytes.fromStr("")
+  }
+
+def unitOf(io: IO[Value, Value]): IO[Unit] =
+  io.map(_ => ()).handleErrorWith(e => IO.fail(show(e)))
+
+def unitIo(io: IO[Unit]): IO[Value, Value] =
+  liftIo(io.map(_ => Value.VUnit))
+
+def intIo(io: IO[Int]): IO[Value, Value] =
+  liftIo(io.map(n => Value.VInt(n)))
+
+def strIo(io: IO[String]): IO[Value, Value] =
+  liftIo(io.map(s => Value.VStr(s)))
+
+def boolIo(io: IO[Bool]): IO[Value, Value] =
+  liftIo(io.map(b => Value.VBool(b)))
+
+def listIo(io: IO[List[Value]]): IO[Value, Value] =
+  liftIo(io.map(xs => Value.VList(xs)))
+
+def isHandleKit(f: String): Bool =
+  Str.startsWith(f, "Ref.") || Str.startsWith(f, "Queue.") || Str.startsWith(f, "Deferred.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Resource.")
+
+def refOf(v: Value): IO[Value, Ref[Value]] =
+  v match {
+    case Value.VRef(r) => IO.pure(r).handleErrorWith(e => IO.fail(Value.VStr(e)))
+    case _ => IO.fail(Value.VErr("eval: Ref expected"))
+  }
+
+def queueOf(v: Value): IO[Value, Queue[Value]] =
+  v match {
+    case Value.VQueue(q) => IO.pure(q).handleErrorWith(e => IO.fail(Value.VStr(e)))
+    case _ => IO.fail(Value.VErr("eval: Queue expected"))
+  }
+
+def deferredOf(v: Value): IO[Value, Deferred[Value]] =
+  v match {
+    case Value.VDeferred(d) => IO.pure(d).handleErrorWith(e => IO.fail(Value.VStr(e)))
+    case _ => IO.fail(Value.VErr("eval: Deferred expected"))
+  }
+
+def fiberOf(v: Value): IO[Value, Fiber[Value]] =
+  v match {
+    case Value.VFiber(f) => IO.pure(f).handleErrorWith(e => IO.fail(Value.VStr(e)))
+    case _ => IO.fail(Value.VErr("eval: Fiber expected"))
+  }
+
+def resourceOf(v: Value): Resource[Value] =
+  v match {
+    case Value.VResource(r) => r
+    case _ => Resource.make(IO.pure(Value.VUnit), _ => IO.pure(()))
+  }
+
+def handleKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Ref.of") Value.VIo(liftIo(Ref.of(List.at(vals, 0)).map(r => Value.VRef(r)))) else if (f == "Ref.get") Value.VIo(refOf(List.at(vals, 0)).flatMap(r => liftIo(Ref.get(r)))) else if (f == "Ref.set") Value.VIo(refOf(List.at(vals, 0)).flatMap(r => unitIo(Ref.set(r, List.at(vals, 1))))) else if (f == "Ref.update") Value.VIo(refOf(List.at(vals, 0)).flatMap(r => unitIo(Ref.update(r, x => applyValue(List.at(vals, 1), x :: noVals(), env, p, off))))) else if (f == "Ref.updateAndGet") Value.VIo(refOf(List.at(vals, 0)).flatMap(r => liftIo(Ref.updateAndGet(r, x => applyValue(List.at(vals, 1), x :: noVals(), env, p, off))))) else if (f == "Queue.unbounded") Value.VIo(liftIo(Queue.unbounded().map(q => Value.VQueue(q)))) else if (f == "Queue.offer") Value.VIo(queueOf(List.at(vals, 0)).flatMap(q => unitIo(Queue.offer(q, List.at(vals, 1))))) else if (f == "Queue.take") Value.VIo(queueOf(List.at(vals, 0)).flatMap(q => liftIo(Queue.take(q)))) else if (f == "Deferred.empty") Value.VIo(liftIo(Deferred.empty().map(d => Value.VDeferred(d)))) else if (f == "Deferred.get") Value.VIo(deferredOf(List.at(vals, 0)).flatMap(d => liftIo(Deferred.get(d)))) else if (f == "Deferred.complete") Value.VIo(deferredOf(List.at(vals, 0)).flatMap(d => unitIo(Deferred.complete(d, List.at(vals, 1))))) else if (f == "Deferred.fail") Value.VIo(deferredOf(List.at(vals, 0)).flatMap(d => unitIo(Deferred.fail(d, strAt(vals, 1))))) else if (f == "Fiber.fork") Value.VIo(liftIo(Fiber.fork(ioAt(vals, 0)).map(fb => Value.VFiber(fb)))) else if (f == "Fiber.join") Value.VIo(fiberOf(List.at(vals, 0)).flatMap(fb => liftIo(Fiber.join(fb)))) else if (f == "Fiber.interrupt") Value.VIo(fiberOf(List.at(vals, 0)).flatMap(fb => unitIo(Fiber.interrupt(fb)))) else if (f == "Resource.make") Value.VResource(Resource.make(ioAt(vals, 0), a => unitOf(ioOf(applyValue(List.at(vals, 1), a :: noVals(), env, p, off))))) else if (f == "Resource.use") Value.VIo(Resource.use(resourceOf(List.at(vals, 0)), a => ioOf(applyValue(List.at(vals, 1), a :: noVals(), env, p, off)))) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def streamOf(v: Value): Stream[Value] =
+  v match {
+    case Value.VStream(s) => s
+    case _ => Stream.emits(noVals())
+  }
+
+def streamAt(vals: List[Value], i: Int): Stream[Value] =
+  streamOf(List.at(vals, i))
+
+def seedAt(vals: List[Value], i: Int): Value =
+  List.at(vals, i)
+
+def vStream(s: Stream[Value]): Value =
+  Value.VStream(s)
+
+def tupleOfPair(pr: (Value, Value)): Value =
+  Value.VTuple(pairFst(pr) :: pairSnd(pr) :: noVals())
+
+def tupleOfIdx(pr: (Int, Value)): Value =
+  pr match {
+    case (i, v) => Value.VTuple(Value.VInt(i) :: v :: noVals())
+  }
+
+def pairOfTuple(v: Value): List[(Value, Value)] =
+  v match {
+    case Value.VTuple(xs) => if (List.len(xs) == 2) (List.at(xs, 0), List.at(xs, 1)) :: noPairs() else noPairs()
+    case _ => noPairs()
+  }
+
+def unfoldStep(fn: Value, st: Value, env: EvEnv, p: EvProg, off: Int): List[(Value, Value)] =
+  List.flatMap(listOf(applyValue(fn, st :: noVals(), env, p, off)), t => pairOfTuple(t))
+
+def streamKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Stream.emit") vStream(Stream.emit(List.at(vals, 0))) else if (f == "Stream.emits") vStream(Stream.emits(listAt(vals, 0))) else if (f == "Stream.eval") vStream(Stream.eval(ioAt(vals, 0))) else if (f == "Stream.concat") vStream(Stream.concat(streamAt(vals, 0), streamAt(vals, 1))) else if (f == "Stream.range") vStream(Stream.map(Stream.range(intAt(vals, 0), intAt(vals, 1)), n => Value.VInt(n))) else if (f == "Stream.repeatN") vStream(Stream.repeatN(streamAt(vals, 0), intAt(vals, 1))) else if (f == "Stream.zip") vStream(Stream.map(Stream.zip(streamAt(vals, 0), streamAt(vals, 1)), pr => tupleOfPair(pr))) else if (f == "Stream.zipWith") vStream(Stream.map(Stream.zip(streamAt(vals, 0), streamAt(vals, 1)), pr => apply2(List.at(vals, 2), pairFst(pr), pairSnd(pr), env, p, off))) else if (f == "Stream.zipAll") vStream(Stream.map(Stream.zipAll(streamAt(vals, 0), streamAt(vals, 1), List.at(vals, 2), List.at(vals, 3)), pr => tupleOfPair(pr))) else if (f == "Stream.zipWithIndex") vStream(Stream.map(Stream.zipWithIndex(streamAt(vals, 0)), pr => tupleOfIdx(pr))) else if (f == "Stream.interleave") vStream(Stream.interleave(streamAt(vals, 0), streamAt(vals, 1))) else if (f == "Stream.intersperse") vStream(Stream.intersperse(streamAt(vals, 0), List.at(vals, 1))) else if (f == "Stream.grouped") vStream(Stream.map(Stream.grouped(streamAt(vals, 0), intAt(vals, 1)), g => Value.VList(g))) else if (f == "Stream.sliding") vStream(Stream.map(Stream.sliding(streamAt(vals, 0), intAt(vals, 1)), g => Value.VList(g))) else if (f == "Stream.take") vStream(Stream.take(streamAt(vals, 0), intAt(vals, 1))) else if (f == "Stream.drop") vStream(Stream.drop(streamAt(vals, 0), intAt(vals, 1))) else if (f == "Stream.takeRight") vStream(Stream.takeRight(streamAt(vals, 0), intAt(vals, 1))) else if (f == "Stream.dropRight") vStream(Stream.dropRight(streamAt(vals, 0), intAt(vals, 1))) else if (f == "Stream.flatten") vStream(Stream.flatten(Stream.map(streamAt(vals, 0), x => listOf(x)))) else if (f == "Stream.changes") vStream(Stream.changes(streamAt(vals, 0))) else if (f == "Stream.orElse") vStream(Stream.orElse(streamAt(vals, 0), streamAt(vals, 1))) else if (f == "Stream.iterate") vStream(Stream.iterate(List.at(vals, 0), intAt(vals, 1), x => applyValue(List.at(vals, 2), x :: noVals(), env, p, off))) else if (f == "Stream.unfold") vStream(Stream.unfold(List.at(vals, 0), st => unfoldStep(List.at(vals, 1), st, env, p, off))) else streamFnKit(f, vals, env, p, off)
+
+def streamFnKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Stream.map") vStream(Stream.map(streamAt(vals, 0), x => applyValue(List.at(vals, 1), x :: noVals(), env, p, off))) else if (f == "Stream.evalMap") vStream(Stream.evalMap(streamAt(vals, 0), x => ioOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.evalTap") vStream(Stream.evalTap(streamAt(vals, 0), x => ioOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.filter") vStream(Stream.filter(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.filterNot") vStream(Stream.filterNot(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.takeWhile") vStream(Stream.takeWhile(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.dropWhile") vStream(Stream.dropWhile(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.find") vStream(Stream.find(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.findLast") vStream(Stream.findLast(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.flatMap") vStream(Stream.flatMap(streamAt(vals, 0), x => streamOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.mapConcat") vStream(Stream.mapConcat(streamAt(vals, 0), x => listOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off)))) else if (f == "Stream.scan") vStream(Stream.scan(streamAt(vals, 0), seedAt(vals, 1), __tup => __tup match {
+  case (acc, x) => apply2(List.at(vals, 2), acc, x, env, p, off)
+})) else streamRunKit(f, vals, env, p, off)
+
+def streamRunKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Stream.exists") Value.VIo(boolIo(Stream.exists(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off))))) else if (f == "Stream.forall") Value.VIo(boolIo(Stream.forall(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off))))) else if (f == "Stream.none") Value.VIo(boolIo(Stream.none(streamAt(vals, 0), x => boolOf(applyValue(List.at(vals, 1), x :: noVals(), env, p, off))))) else if (f == "Stream.fold") Value.VIo(liftIo(Stream.fold(streamAt(vals, 0), seedAt(vals, 1), __tup => __tup match {
+  case (acc, x) => apply2(List.at(vals, 2), acc, x, env, p, off)
+}))) else if (f == "Stream.head") Value.VIo(liftIo(Stream.head(streamAt(vals, 0)))) else if (f == "Stream.last") Value.VIo(liftIo(Stream.last(streamAt(vals, 0)))) else if (f == "Stream.count") Value.VIo(intIo(Stream.count(streamAt(vals, 0)))) else if (f == "Stream.compileToList") Value.VIo(listIo(Stream.compileToList(streamAt(vals, 0)))) else if (f == "Stream.drain") Value.VIo(unitIo(Stream.drain(streamAt(vals, 0)))) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def entryVal(e: (String, Bool)): Value =
+  e match {
+    case (name, dir) => Value.VTuple(Value.VStr(name) :: Value.VBool(dir) :: noVals())
+  }
+
+def entriesIo(io: IO[List[(String, Bool)]]): IO[Value, Value] =
+  liftIo(io.map(xs => Value.VList(List.map(xs, e => entryVal(e)))))
+
+def execVal(t: (Int, String, String)): Value =
+  t match {
+    case (code, out, err) => Value.VTuple(Value.VInt(code) :: Value.VStr(out) :: Value.VStr(err) :: noVals())
+  }
+
+def fsKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Fs.read") Value.VIo(strIo(Fs.read(strAt(vals, 0)))) else if (f == "Fs.write") Value.VIo(unitIo(Fs.write(strAt(vals, 0), strAt(vals, 1)))) else if (f == "Fs.list") Value.VIo(entriesIo(Fs.list(strAt(vals, 0)))) else if (f == "Fs.mkdirs") Value.VIo(unitIo(Fs.mkdirs(strAt(vals, 0)))) else if (f == "Fs.exists") Value.VIo(intIo(Fs.exists(strAt(vals, 0)))) else if (f == "Fs.delete") Value.VIo(unitIo(Fs.delete(strAt(vals, 0)))) else if (f == "Fs.walk") Value.VIo(entriesIo(Fs.walk(strAt(vals, 0)))) else if (f == "Fs.canonicalize") Value.VIo(strIo(Fs.canonicalize(strAt(vals, 0)))) else if (f == "Fs.rename") Value.VIo(unitIo(Fs.rename(strAt(vals, 0), strAt(vals, 1)))) else if (f == "Fs.join") Value.VStr(Fs.join(strAt(vals, 0), strAt(vals, 1))) else if (f == "Fs.dirname") Value.VStr(Fs.dirname(strAt(vals, 0))) else if (f == "Fs.basename") Value.VStr(Fs.basename(strAt(vals, 0))) else sysKit(f, vals, env, p, off)
+
+def sysKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Sys.args") Value.VIo(liftIo(Sys.args().map(xs => vStrs(xs)))) else if (f == "Sys.getenv") Value.VIo(strIo(Sys.getenv(strAt(vals, 0)))) else if (f == "Sys.write") Value.VIo(unitIo(Sys.write(strAt(vals, 0)))) else if (f == "Sys.read") Value.VIo(strIo(Sys.read(intAt(vals, 0)))) else if (f == "Sys.readLine") Value.VIo(strIo(Sys.readLine())) else if (f == "Sys.spawn") Value.VIo(intIo(Sys.spawn(strAt(vals, 0)))) else if (f == "Sys.exec") Value.VIo(liftIo(Sys.exec(strAt(vals, 0)).map(t => execVal(t)))) else if (f == "Sys.alive") Value.VIo(intIo(Sys.alive(intAt(vals, 0)))) else if (f == "Sys.kill") Value.VIo(unitIo(Sys.kill(intAt(vals, 0)))) else if (f == "Sys.childWrite") Value.VIo(unitIo(Sys.childWrite(intAt(vals, 0), strAt(vals, 1)))) else if (f == "Sys.childRead") Value.VIo(strIo(Sys.childRead(intAt(vals, 0), intAt(vals, 1)))) else if (f == "Sys.childClose") Value.VIo(unitIo(Sys.childClose(intAt(vals, 0)))) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def hdrPair(kv: (String, String)): (Value, Value) =
+  kv match {
+    case (k, v) => (Value.VStr(k), Value.VStr(v))
+  }
+
+def vMapOf(m: Map[String, String]): Value =
+  Value.VMap(List.map(Map.toList(m), kv => hdrPair(kv)))
+
+def natMapGo(kvs: List[(Value, Value)], acc: Map[String, String]): Map[String, String] =
+  if (List.isEmpty(kvs)) acc else natMapGo(List.tail(kvs), Map.set(acc, strOf(pairFst(List.at(kvs, 0))), strOf(pairSnd(List.at(kvs, 0)))))
+
+def natMap(v: Value): Map[String, String] =
+  natMapGo(mapOf(v), Map.empty())
+
+def respVal(t: (Int, Map[String, String], String)): Value =
+  t match {
+    case (status, hs, body) => Value.VTuple(Value.VInt(status) :: vMapOf(hs) :: Value.VStr(body) :: noVals())
+  }
+
+def respIo(io: IO[(Int, Map[String, String], String)]): IO[Value, Value] =
+  liftIo(io.map(t => respVal(t)))
+
+def natResp(v: Value): (Int, Map[String, String], String) =
+  v match {
+    case Value.VTuple(xs) => if (List.len(xs) == 3) (intOf(List.at(xs, 0)), natMap(List.at(xs, 1)), strOf(List.at(xs, 2))) else (500, Map.empty(), "eval: response tuple expected")
+    case _ => (500, Map.empty(), "eval: response tuple expected")
+  }
+
+def reqVal(req: (String, String, Map[String, String], String)): Value =
+  req match {
+    case (a, b, hs, d) => Value.VTuple(Value.VStr(a) :: Value.VStr(b) :: vMapOf(hs) :: Value.VStr(d) :: noVals())
+  }
+
+def serveHandler(fn: Value, req: (String, String, Map[String, String], String), env: EvEnv, p: EvProg, off: Int): IO[(Int, Map[String, String], String)] =
+  ioOf(applyValue(fn, reqVal(req) :: noVals(), env, p, off)).map(v => natResp(v)).handleErrorWith(e => IO.fail(show(e)))
+
+def resultVal(r: Result[String, String]): Value =
+  r match {
+    case Result.Ok(s) => okV(Value.VStr(s))
+    case Result.Err(e) => errV(Value.VStr(e))
+  }
+
+def tcpOf(v: Value): IO[Value, Tcp] =
+  v match {
+    case Value.VTcp(t) => IO.pure(t).handleErrorWith(e => IO.fail(Value.VStr(e)))
+    case _ => IO.fail(Value.VErr("eval: Tcp expected"))
+  }
+
+def udpOf(v: Value): IO[Value, Udp] =
+  v match {
+    case Value.VUdp(u) => IO.pure(u).handleErrorWith(e => IO.fail(Value.VStr(e)))
+    case _ => IO.fail(Value.VErr("eval: Udp expected"))
+  }
+
+def udpVal(t: (String, Int, String)): Value =
+  t match {
+    case (host, port, data) => Value.VTuple(Value.VStr(host) :: Value.VInt(port) :: Value.VStr(data) :: noVals())
+  }
+
+def netKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Net.nextLink") resultVal(Net.nextLink(strAt(vals, 0), strAt(vals, 1))) else if (f == "Net.retryAfterMillis") Value.VInt(Net.retryAfterMillis(strAt(vals, 0), intAt(vals, 1))) else if (f == "Net.httpGet") Value.VIo(respIo(Net.httpGet(strAt(vals, 0), natMap(List.at(vals, 1))))) else if (f == "Net.httpDelete") Value.VIo(respIo(Net.httpDelete(strAt(vals, 0), natMap(List.at(vals, 1))))) else if (f == "Net.httpHead") Value.VIo(respIo(Net.httpHead(strAt(vals, 0), natMap(List.at(vals, 1))))) else if (f == "Net.httpPost") Value.VIo(respIo(Net.httpPost(strAt(vals, 0), natMap(List.at(vals, 1)), strAt(vals, 2)))) else if (f == "Net.httpPut") Value.VIo(respIo(Net.httpPut(strAt(vals, 0), natMap(List.at(vals, 1)), strAt(vals, 2)))) else if (f == "Net.httpPatch") Value.VIo(respIo(Net.httpPatch(strAt(vals, 0), natMap(List.at(vals, 1)), strAt(vals, 2)))) else if (f == "Net.serve") Value.VIo(unitIo(Net.serve(intAt(vals, 0), req => serveHandler(List.at(vals, 1), req, env, p, off)))) else if (f == "Net.serveOnce") Value.VIo(unitIo(Net.serveOnce(intAt(vals, 0), req => serveHandler(List.at(vals, 1), req, env, p, off)))) else if (f == "Net.serveTls") Value.VIo(unitIo(Net.serveTls(intAt(vals, 0), req => serveHandler(List.at(vals, 1), req, env, p, off)))) else if (f == "Net.serveOnceTls") Value.VIo(unitIo(Net.serveOnceTls(intAt(vals, 0), req => serveHandler(List.at(vals, 1), req, env, p, off)))) else sockKit(f, vals, env, p, off)
+
+def sockKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Net.tcpConnect") Value.VIo(liftIo(Net.tcpConnect(strAt(vals, 0), intAt(vals, 1)).map(t => Value.VTcp(t)))) else if (f == "Net.tcpListen") Value.VIo(liftIo(Net.tcpListen(intAt(vals, 0)).map(t => Value.VTcp(t)))) else if (f == "Net.tcpAccept") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => liftIo(Net.tcpAccept(t).map(c => Value.VTcp(c))))) else if (f == "Net.tcpRead") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => strIo(Net.tcpRead(t, intAt(vals, 1))))) else if (f == "Net.tcpWrite") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => unitIo(Net.tcpWrite(t, strAt(vals, 1))))) else if (f == "Net.tcpClose") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => unitIo(Net.tcpClose(t)))) else if (f == "Net.udpBind") Value.VIo(liftIo(Net.udpBind(intAt(vals, 0)).map(u => Value.VUdp(u)))) else if (f == "Net.udpSend") Value.VIo(udpOf(List.at(vals, 0)).flatMap(u => unitIo(Net.udpSend(u, strAt(vals, 1), intAt(vals, 2), strAt(vals, 3))))) else if (f == "Net.udpRecv") Value.VIo(udpOf(List.at(vals, 0)).flatMap(u => liftIo(Net.udpRecv(u, intAt(vals, 1)).map(t => udpVal(t))))) else if (f == "Net.udpClose") Value.VIo(udpOf(List.at(vals, 0)).flatMap(u => unitIo(Net.udpClose(u)))) else unsupported(Str.concat("kit ", f), env, p, off)
 

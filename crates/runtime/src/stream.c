@@ -760,7 +760,7 @@ static SzIo *filter_into(SzStream *s, SzList *acc, int64_t remain,
       st->pred = pred;
       st->penv = penv;
       st->stopped = NULL;
-      return fm_drop((SzIo *)s->left, after_filter_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_filter_eval, st);
     }
     case SZ_ST_CONCAT: {
       StTWConcat *st = (StTWConcat *)sz_alloc(sizeof(StTWConcat));
@@ -876,7 +876,7 @@ static SzIo *dropwhile_into(SzStream *s, SzList *acc, int64_t remain,
       st->pred = pred;
       st->penv = penv;
       st->stopped = NULL;
-      return fm_drop((SzIo *)s->left, after_dw_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_dw_eval, st);
     }
     case SZ_ST_CONCAT: {
       StTWConcat *st = (StTWConcat *)sz_alloc(sizeof(StTWConcat));
@@ -1006,7 +1006,7 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
       st->tail = (SzStream *)s->right;
       st->acc = acc;
       st->remain = remain_dec(remain);
-      return fm_drop((SzIo *)s->left, after_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_eval, st);
     }
     case SZ_ST_CONCAT: {
       StConcat *st = (StConcat *)sz_alloc(sizeof(StConcat));
@@ -1632,7 +1632,7 @@ static SzIo *stream_step(SzStream *s) {
       StStep *st = (StStep *)sz_alloc(sizeof(StStep));
       sz_retain(s->right);
       st->pin = (SzStream *)s->right;
-      return fm_drop((SzIo *)s->left, after_step_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_step_eval, st);
     }
     case SZ_ST_EVALMAP: {
       StStep *st = (StStep *)sz_alloc(sizeof(StStep));
@@ -2150,7 +2150,7 @@ static SzIo *mapconcat_into(SzStream *s, SzList *acc, int64_t remain,
       st->acc_len = 0;
       st->next = (SzStream *)s->right;
       st->acc = acc;
-      return fm_drop((SzIo *)s->left, after_mc_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_mc_eval, st);
     }
     case SZ_ST_CONCAT: {
       StMc *st = (StMc *)sz_alloc(sizeof(StMc));
@@ -2266,7 +2266,7 @@ static SzIo *changes_into(SzStream *s, SzList *acc, int64_t remain, void *prev,
       st->acc_len = 0;
       st->next = (SzStream *)s->right;
       st->acc = acc;
-      return fm_drop((SzIo *)s->left, after_ch_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_ch_eval, st);
     }
     case SZ_ST_CONCAT: {
       StCh *st = (StCh *)sz_alloc(sizeof(StCh));
@@ -2402,7 +2402,7 @@ static SzIo *flatmap_into(SzStream *s, SzList *acc, int64_t remain,
       st->next = (SzStream *)s->right;
       st->cur = NULL;
       st->acc = acc;
-      return fm_drop((SzIo *)s->left, after_fp_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_fp_eval, st);
     }
     case SZ_ST_CONCAT: {
       StFp *st = (StFp *)sz_alloc(sizeof(StFp));
@@ -2524,7 +2524,7 @@ static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,
       st->pred = pred;
       st->penv = penv;
       st->stopped = stopped;
-      return fm_drop((SzIo *)s->left, after_tw_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_tw_eval, st);
     }
     case SZ_ST_CONCAT: {
       StTWConcat *st = (StTWConcat *)sz_alloc(sizeof(StTWConcat));
@@ -2705,7 +2705,7 @@ static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
       st->pred = pred;
       st->penv = penv;
       st->stopped = found;
-      return fm_drop((SzIo *)s->left, after_find_eval, st);
+      return sz_io_flatmap((SzIo *)s->left, after_find_eval, st);
     }
     case SZ_ST_CONCAT: {
       StTWConcat *st = (StTWConcat *)sz_alloc(sizeof(StTWConcat));
@@ -2738,21 +2738,29 @@ static void *st_release_io(void *env) {
   return NULL;
 }
 
+/* Build the pull graph at run time. The graph carries single-use state in
+ * raw envs, so a shared or repeated compile node must build a fresh graph
+ * on every run. The outer node keeps only the stream (RC). */
+static SzIo *compile_build(void *value, void *env) {
+  SzStream *s = (SzStream *)env;
+  SzIo *body = fm_drop(compile_into(s, sz_list_nil(), -1), reverse_acc, NULL);
+  SzIo *fin = sz_io_delay(st_release_io, s);
+  SzIo *ens = sz_io_ensure(body, fin);
+  (void)value;
+  sz_release(body);
+  sz_release(fin);
+  return ens;
+}
+
 SzIo *sz_stream_compile_to_list(SzStream *s) {
-  SzIo *body;
+  SzIo *io;
   if (!s)
     s = sz_stream_nil();
   else
     sz_retain(s);
-  body = fm_drop(compile_into(s, sz_list_nil(), -1), reverse_acc, NULL);
-  {
-    SzIo *fin = sz_io_delay(st_release_io, s);
-    SzIo *ens = sz_io_ensure(body, fin);
-    sz_release(body);
-    sz_release(fin);
-    sz_release(s);
-    return ens;
-  }
+  io = fm_drop(sz_io_pure(NULL), compile_build, s);
+  sz_release(s);
+  return io;
 }
 
 static SzIo *drain_discard(void *list, void *env) {
@@ -2807,6 +2815,7 @@ static SzIo *fold_from_list(void *list, void *env) {
   void *out = sz_list_fold_left(xs, z, (SzListMapFn)fn, st->outer);
   sz_release(xs);
   sz_release(z);
+  sz_release(st->outer);
   sz_free(st);
   return pure_drop(out);
 }
@@ -2816,6 +2825,7 @@ SzIo *sz_stream_fold(SzStream *s, void *z, SzStreamMapFn f, void *env) {
   if (!f)
     sz_panic("sz_stream_fold(null fn)");
   st = (StLift *)sz_alloc(sizeof(StLift));
+  sz_retain(env);
   st->outer = env;
   st->remain = 0;
   st->tag = 0;
