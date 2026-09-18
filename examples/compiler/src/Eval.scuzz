@@ -23,12 +23,14 @@ enum Value:
   case VResource(r: Resource[Value])
   case VTcp(t: Tcp)
   case VUdp(u: Udp)
+  case VTimeline(t: Timeline)
+  case VVerdict(v: Verdict)
 
 record EvEnv(vars: List[(String, Value)], mod: String)
 
 record EvStep(e: Expr, env: EvEnv)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], ctx: List[Ref[Value]])
 
 import Parse.Expr
 import Parse.Fun
@@ -65,9 +67,12 @@ def loadFile(f: (String, String), rest: List[(String, String)], acc: Prog, mainM
 def loadParsed(stem: String, p: Prog, rest: List[(String, String)], acc: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   loadGo(rest, Parse.merge(acc, p), if (p.main == "") mainMod else stem, files)
 
+def noRefs(): List[Ref[Value]] =
+  []
+
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files)
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, noRefs())
   }
 
 def callPure(p: EvProg, mod: String, name: String, args: List[Value]): Value =
@@ -94,7 +99,7 @@ def mainFail(e: Value): IO[Value] =
   }
 
 def excludedKits(): List[String] =
-  "Signal." :: "Ui." :: "View." :: "Icon." :: "Color." :: "Theme." :: "Timeline." :: "Verdict." :: "Property." :: "Scenario." :: noNames()
+  "Signal." :: "Ui." :: "View." :: "Icon." :: "Color." :: "Theme." :: "Property.signal" :: "Property.a11yHas" :: "Fuzz." :: noNames()
 
 def isExcludedKit(f: String): Bool =
   List.exists(excludedKits(), pre => Str.startsWith(f, pre))
@@ -134,6 +139,8 @@ def show(v: Value): String =
     case Value.VResource(_) => "<resource>"
     case Value.VTcp(_) => "<tcp>"
     case Value.VUdp(_) => "<udp>"
+    case Value.VTimeline(_) => "<timeline>"
+    case Value.VVerdict(_) => "<verdict>"
   }
 
 def fmtFloat(f: Float): String =
@@ -1049,7 +1056,7 @@ def lastTrue(rs: List[Value], i: Int, hit: Int): Int =
   if (List.isEmpty(rs)) hit else lastTrue(List.tail(rs), i + 1, if (boolOf(List.at(rs, 0))) i else hit)
 
 def kitCall(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "Map.")) mapKit(f, vals, env, p, off) else if (Str.startsWith(f, "Set.")) setKit(f, vals, env, p, off) else if (Str.startsWith(f, "Json.")) jsonKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else if (Str.startsWith(f, "Stream.")) streamKit(f, vals, env, p, off) else if (Str.startsWith(f, "Fs.") || Str.startsWith(f, "Sys.")) fsKit(f, vals, env, p, off) else if (Str.startsWith(f, "Net.")) netKit(f, vals, env, p, off) else if (isHandleKit(f)) handleKit(f, vals, env, p, off) else miscKit(f, vals, env, p, off)
+  if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "Map.")) mapKit(f, vals, env, p, off) else if (Str.startsWith(f, "Set.")) setKit(f, vals, env, p, off) else if (Str.startsWith(f, "Json.")) jsonKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else if (Str.startsWith(f, "Stream.")) streamKit(f, vals, env, p, off) else if (Str.startsWith(f, "Fs.") || Str.startsWith(f, "Sys.")) fsKit(f, vals, env, p, off) else if (Str.startsWith(f, "Net.")) netKit(f, vals, env, p, off) else if (isHandleKit(f)) handleKit(f, vals, env, p, off) else if (Str.startsWith(f, "Property.")) propKit(f, vals, env, p, off) else if (Str.startsWith(f, "Timeline.")) tlKit(f, vals, env, p, off) else if (Str.startsWith(f, "Verdict.")) verdictKit(f, vals, env, p, off) else miscKit(f, vals, env, p, off)
 
 def strKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Str.fromInt") Value.VStr(Str.fromInt(intAt(vals, 0))) else if (f == "Str.fromBool") Value.VStr(Str.fromBool(boolOf(List.at(vals, 0)))) else if (f == "Str.concat") Value.VStr(Str.concat(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.len") Value.VInt(Str.len(strAt(vals, 0))) else if (f == "Str.byteLen") Value.VInt(Str.byteLen(strAt(vals, 0))) else if (f == "Str.eq") Value.VBool(strAt(vals, 0) == strAt(vals, 1)) else if (f == "Str.slice") Value.VStr(Str.slice(strAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Str.byteSlice") Value.VStr(Str.byteSlice(strAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Str.charAt") Value.VInt(Str.charAt(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.toInt") Value.VInt(Str.toInt(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.repeat") Value.VStr(Str.repeat(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.startsWith") Value.VBool(Str.startsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.endsWith") Value.VBool(Str.endsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.contains") Value.VBool(Str.contains(strAt(vals, 0), strAt(vals, 1))) else strKit2(f, vals, env, p, off)
@@ -1258,7 +1265,7 @@ def bothIo(a: IO[Value, Value], b: IO[Value, Value]): IO[Value, Value] =
   IO.both(a, b).map(pr => Value.VTuple(pairFst(pr) :: pairSnd(pr) :: noVals()))
 
 def miscKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Builder.empty") Value.VBuilder(Builder.empty()) else if (f == "Builder.append") Value.VBuilder(Builder.append(builderOf(List.at(vals, 0)), strAt(vals, 1))) else if (f == "Builder.result") Value.VStr(Builder.result(builderOf(List.at(vals, 0)))) else if (f == "Hash.hmacSha256") Value.VStr(Hash.hmacSha256(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.constantTimeEqual") Value.VBool(Hash.constantTimeEqual(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.sha256") Value.VStr(Hash.sha256(strAt(vals, 0))) else if (f == "Hex.encode") Value.VStr(Hex.encode(strAt(vals, 0))) else if (f == "Hex.decode") Value.VStr(Hex.decode(strAt(vals, 0))) else if (f == "Base64.encode") Value.VStr(Base64.encode(strAt(vals, 0))) else if (f == "Base64.decode") Value.VStr(Base64.decode(strAt(vals, 0))) else if (f == "Float.fromInt") Value.VFloat(Float.fromInt(intAt(vals, 0))) else if (f == "Float.toInt") Value.VInt(Float.toInt(floatOf(List.at(vals, 0)))) else if (f == "Oracle.sumTo") Value.VInt(Oracle.sumTo(intAt(vals, 0))) else if (f == "Clock.monotonic") Value.VIo(intIo(Clock.monotonic())) else if (f == "Clock.realTime") Value.VIo(intIo(Clock.realTime())) else if (f == "Clock.iso8601") Value.VStr(Clock.iso8601(intAt(vals, 0))) else if (f == "Random.nextInt") Value.VIo(intIo(Random.nextInt(intAt(vals, 0)))) else if (f == "Uuid.v4") Value.VIo(strIo(Uuid.v4())) else if (f == "Bytes.fromStr") Value.VBytes(Bytes.fromStr(strAt(vals, 0))) else if (f == "Bytes.len") Value.VInt(Bytes.len(bytesOf(List.at(vals, 0)))) else if (f == "Impurity.runKit") Value.VIo(unitIo(Impurity.runKit())) else if (f == "Property.sometimes") Value.VUnit else unsupported(Str.concat("kit ", f), env, p, off)
+  if (f == "Builder.empty") Value.VBuilder(Builder.empty()) else if (f == "Builder.append") Value.VBuilder(Builder.append(builderOf(List.at(vals, 0)), strAt(vals, 1))) else if (f == "Builder.result") Value.VStr(Builder.result(builderOf(List.at(vals, 0)))) else if (f == "Hash.hmacSha256") Value.VStr(Hash.hmacSha256(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.constantTimeEqual") Value.VBool(Hash.constantTimeEqual(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.sha256") Value.VStr(Hash.sha256(strAt(vals, 0))) else if (f == "Hex.encode") Value.VStr(Hex.encode(strAt(vals, 0))) else if (f == "Hex.decode") Value.VStr(Hex.decode(strAt(vals, 0))) else if (f == "Base64.encode") Value.VStr(Base64.encode(strAt(vals, 0))) else if (f == "Base64.decode") Value.VStr(Base64.decode(strAt(vals, 0))) else if (f == "Float.fromInt") Value.VFloat(Float.fromInt(intAt(vals, 0))) else if (f == "Float.toInt") Value.VInt(Float.toInt(floatOf(List.at(vals, 0)))) else if (f == "Oracle.sumTo") Value.VInt(Oracle.sumTo(intAt(vals, 0))) else if (f == "Clock.monotonic") Value.VIo(intIo(Clock.monotonic())) else if (f == "Clock.realTime") Value.VIo(intIo(Clock.realTime())) else if (f == "Clock.iso8601") Value.VStr(Clock.iso8601(intAt(vals, 0))) else if (f == "Random.nextInt") Value.VIo(intIo(Random.nextInt(intAt(vals, 0)))) else if (f == "Uuid.v4") Value.VIo(strIo(Uuid.v4())) else if (f == "Bytes.fromStr") Value.VBytes(Bytes.fromStr(strAt(vals, 0))) else if (f == "Bytes.len") Value.VInt(Bytes.len(bytesOf(List.at(vals, 0)))) else if (f == "Impurity.runKit") Value.VIo(unitIo(Impurity.runKit())) else if (f == "Scenario.context") scenarioCtx(p, env, off) else unsupported(Str.concat("kit ", f), env, p, off)
 
 def bytesOf(v: Value): Bytes =
   v match {
@@ -1448,4 +1455,74 @@ def netKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value
 
 def sockKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Net.tcpConnect") Value.VIo(liftIo(Net.tcpConnect(strAt(vals, 0), intAt(vals, 1)).map(t => Value.VTcp(t)))) else if (f == "Net.tcpListen") Value.VIo(liftIo(Net.tcpListen(intAt(vals, 0)).map(t => Value.VTcp(t)))) else if (f == "Net.tcpAccept") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => liftIo(Net.tcpAccept(t).map(c => Value.VTcp(c))))) else if (f == "Net.tcpRead") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => strIo(Net.tcpRead(t, intAt(vals, 1))))) else if (f == "Net.tcpWrite") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => unitIo(Net.tcpWrite(t, strAt(vals, 1))))) else if (f == "Net.tcpClose") Value.VIo(tcpOf(List.at(vals, 0)).flatMap(t => unitIo(Net.tcpClose(t)))) else if (f == "Net.udpBind") Value.VIo(liftIo(Net.udpBind(intAt(vals, 0)).map(u => Value.VUdp(u)))) else if (f == "Net.udpSend") Value.VIo(udpOf(List.at(vals, 0)).flatMap(u => unitIo(Net.udpSend(u, strAt(vals, 1), intAt(vals, 2), strAt(vals, 3))))) else if (f == "Net.udpRecv") Value.VIo(udpOf(List.at(vals, 0)).flatMap(u => liftIo(Net.udpRecv(u, intAt(vals, 1)).map(t => udpVal(t))))) else if (f == "Net.udpClose") Value.VIo(udpOf(List.at(vals, 0)).flatMap(u => unitIo(Net.udpClose(u)))) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def seqUnit(_u: Unit): Value =
+  Value.VUnit
+
+def propKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Property.sometimes") seqUnit(Property.sometimes(strAt(vals, 0))) else if (f == "Property.check") propCheck(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Property.assert") Value.VIo(unitIo(Property.assert(strAt(vals, 0), boolOf(List.at(vals, 1))))) else if (f == "Property.classify") Value.VBool(Property.classify(strAt(vals, 0), boolOf(List.at(vals, 1)))) else if (f == "Property.force") propForce(List.at(vals, 0), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def propForce(v: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  v match {
+    case Value.VIo(io) => Property.force(io.handleErrorWith(e => IO.fail(show(e))))
+    case Value.VErr(_) => v
+    case _ => errAt("Property.force needs IO", env, p, off)
+  }
+
+def propCheck(name: String, pred: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  propCheckOk(name, propPred(pred, v, env, p, off), v, env, p, off)
+
+def propPred(pred: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  pred match {
+    case Value.VBool(_) => pred
+    case Value.VClo(_, _, _) => propPred(apply1(pred, v, env, p, off), v, env, p, off)
+    case Value.VFun(_, _) => propPred(apply1(pred, v, env, p, off), v, env, p, off)
+    case Value.VIo(_) => propForce(pred, env, p, off)
+    case Value.VErr(_) => pred
+    case _ => errAt("Property.check predicate is not Bool", env, p, off)
+  }
+
+def propCheckOk(name: String, ok: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  ok match {
+    case Value.VBool(b) => Property.check(name, b, v)
+    case Value.VErr(_) => ok
+    case _ => errAt("Property.check predicate is not Bool", env, p, off)
+  }
+
+def tlKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  List.at(vals, 0) match {
+    case Value.VTimeline(t) => tlKitAt(f, t, vals, env, p, off)
+    case _ => errAt(Str.concat(f, " needs Timeline"), env, p, off)
+  }
+
+def tlKitAt(f: String, t: Timeline, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Timeline.len") Value.VInt(Timeline.len(t)) else if (f == "Timeline.signalInt") Value.VInt(Timeline.signalInt(t, intAt(vals, 1), strAt(vals, 2))) else if (f == "Timeline.signalListLen") Value.VInt(Timeline.signalListLen(t, intAt(vals, 1), strAt(vals, 2))) else if (f == "Timeline.fileSame") Value.VBool(Timeline.fileSame(t, intAt(vals, 1), intAt(vals, 2), strAt(vals, 3))) else if (f == "Timeline.fileTextIs") Value.VBool(Timeline.fileTextIs(t, intAt(vals, 1), strAt(vals, 2), strAt(vals, 3))) else if (f == "Timeline.signalStrHas") Value.VBool(Timeline.signalStrHas(t, intAt(vals, 1), strAt(vals, 2), strAt(vals, 3))) else if (f == "Timeline.a11yHas") Value.VBool(Timeline.a11yHas(t, intAt(vals, 1), strAt(vals, 2))) else if (f == "Timeline.lastHitHas") Value.VBool(Timeline.lastHitHas(t, intAt(vals, 1), strAt(vals, 2))) else if (f == "Timeline.driveHas") Value.VBool(Timeline.driveHas(t, intAt(vals, 1), strAt(vals, 2))) else if (f == "Timeline.effectHas") Value.VBool(Timeline.effectHas(t, intAt(vals, 1), strAt(vals, 2))) else if (f == "Timeline.faultKindHas") Value.VBool(Timeline.faultKindHas(t, intAt(vals, 1), strAt(vals, 2))) else if (f == "Timeline.exists") Value.VBool(Timeline.exists(t, i => boolOf(apply1(List.at(vals, 1), Value.VInt(i), env, p, off)))) else tlIntKit(f, t, intAt(vals, 1), env, p, off)
+
+def tlIntKit(f: String, t: Timeline, i: Int, env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Timeline.effectCount") Value.VInt(Timeline.effectCount(t, i)) else if (f == "Timeline.fiberLive") Value.VInt(Timeline.fiberLive(t, i)) else if (f == "Timeline.fiberReady") Value.VInt(Timeline.fiberReady(t, i)) else if (f == "Timeline.fiberParked") Value.VInt(Timeline.fiberParked(t, i)) else if (f == "Timeline.fiberDone") Value.VInt(Timeline.fiberDone(t, i)) else if (f == "Timeline.faultN") Value.VInt(Timeline.faultN(t, i)) else if (f == "Timeline.checkpoint") Value.VInt(Timeline.checkpoint(t, i)) else if (f == "Timeline.nearestCheckpoint") Value.VInt(Timeline.nearestCheckpoint(t, i)) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def verdictOf(v: Value, env: EvEnv, p: EvProg, off: Int): Verdict =
+  v match {
+    case Value.VVerdict(x) => x
+    case _ => Verdict.fail(0, Str.concat("eval: Verdict expected at ", locStr(env.mod, p, off)))
+  }
+
+def pairPred(f: Value, a: Int, b: Int, env: EvEnv, p: EvProg, off: Int): Bool =
+  boolOf(apply2(f, Value.VInt(a), Value.VInt(b), env, p, off))
+
+def verdictKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Verdict.ok") Value.VVerdict(Verdict.ok()) else if (f == "Verdict.fail") Value.VVerdict(Verdict.fail(intAt(vals, 0), strAt(vals, 1))) else if (f == "Verdict.and") Value.VVerdict(Verdict.and(verdictOf(List.at(vals, 0), env, p, off), verdictOf(List.at(vals, 1), env, p, off))) else if (f == "Verdict.or") Value.VVerdict(Verdict.or(verdictOf(List.at(vals, 0), env, p, off), verdictOf(List.at(vals, 1), env, p, off))) else List.at(vals, 0) match {
+  case Value.VTimeline(t) => verdictTlKit(f, t, vals, env, p, off)
+  case _ => errAt(Str.concat(f, " needs Timeline"), env, p, off)
+}
+
+def verdictTlKit(f: String, t: Timeline, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Verdict.alwaysHas") Value.VVerdict(Verdict.alwaysHas(t, strAt(vals, 1))) else if (f == "Verdict.afterHit") Value.VVerdict(Verdict.afterHit(t, strAt(vals, 1), strAt(vals, 2))) else if (f == "Verdict.onHit") Value.VVerdict(Verdict.onHit(t, strAt(vals, 1), __tup => __tup match {
+  case (a, b) => pairPred(List.at(vals, 2), a, b, env, p, off)
+})) else if (f == "Verdict.stepEvery") Value.VVerdict(Verdict.stepEvery(t, __tup => __tup match {
+  case (a, b) => pairPred(List.at(vals, 1), a, b, env, p, off)
+})) else if (f == "Verdict.every") Value.VVerdict(Verdict.every(t, i => boolOf(apply1(List.at(vals, 1), Value.VInt(i), env, p, off)))) else if (f == "Verdict.any") Value.VVerdict(Verdict.any(t, i => boolOf(apply1(List.at(vals, 1), Value.VInt(i), env, p, off)))) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def scenarioCtx(p: EvProg, env: EvEnv, off: Int): Value =
+  if (List.isEmpty(p.ctx)) errAt("Scenario.context outside scuzz fuzz", env, p, off) else Property.force(Ref.get(List.at(p.ctx, 0)))
 

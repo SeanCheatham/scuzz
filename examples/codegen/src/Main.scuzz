@@ -769,5 +769,52 @@ def evAllOk(): Bool =
 def evDump(): String =
   if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else "ev-other"
 
+def probeDriver(r: Ref[Int], toks: List[String]): IO[Unit] =
+  Ref.update(r, n => n + Str.toInt(List.at(toks, 0), 0))
+
+def probeClaim(seen: Ref[Int], t: Timeline): Verdict =
+  probeClaimAt(Property.force(Ref.update(seen, x => x + Timeline.len(t))), t)
+
+def probeClaimAt(_u: Unit, t: Timeline): Verdict =
+  if (Timeline.exists(t, i => Timeline.driveHas(t, i, "evAdd 3"))) Verdict.ok() else Verdict.fail(0, "evAdd 3 is not in the timeline")
+
+def probeRel(a: Timeline, b: Timeline): Verdict =
+  if (Timeline.len(a) == Timeline.len(b)) Verdict.ok() else Verdict.fail(0, "lengths differ")
+
+def probeHit(_u: Unit): IO[Unit] =
+  IO.pure(())
+
+def probeRun(r: Ref[Int], seen: Ref[Int], s: Ref[Int]): IO[Unit] =
+  for {
+    _ <- Fuzz.setup(Ref.set(s, 1))
+    _ <- Fuzz.driver("evAdd", 1, toks => probeDriver(r, toks))
+    _ <- Fuzz.verify("evClaim", t => probeClaim(seen, t))
+    _ <- Fuzz.verifyRel("evRel", __tup => __tup match {
+  case (a, b) => probeRel(a, b)
+})
+    _ <- Fuzz.probe(IO.pure(()))
+    _ <- probeHit(Fuzz.hit("codegen:probe"))
+  } yield ()
+
+def probeReport(r: Ref[Int], seen: Ref[Int], s: Ref[Int]): IO[String] =
+  for {
+    a <- Ref.get(r)
+    b <- Ref.get(seen)
+    c <- Ref.get(s)
+  } yield if (a == 7 && b >= 2 && c == 1) "probe-ok" else s"probe-bad drivers=${a} claimLen=${b} setup=${c}"
+
+def probeGo(): IO[Unit] =
+  for {
+    r <- Ref.of(0)
+    seen <- Ref.of(0)
+    s <- Ref.of(0)
+    _ <- probeRun(r, seen, s)
+    msg <- probeReport(r, seen, s)
+    _ <- IO.println(msg)
+  } yield ()
+
+def probeMain(): IO[Unit] =
+  Sys.getenv("SCUZZ_EV_TESTRT").flatMap(ev => if (ev == "") IO.println("probe-skip") else probeGo())
+
 @main def main: IO[Unit] =
-  IO.println(if (allOk()) "ir-ok" else dumpAll()).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump()))
+  IO.println(if (allOk()) "ir-ok" else dumpAll()).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => probeMain())
