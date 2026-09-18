@@ -649,6 +649,17 @@ assert any(r["reached"] for r in d["coverage"]["regions"])
 PY
 fuzz --iterations 4 examples/hello
 grep -q 'drive greetFact' examples/hello/build/seeds.txt
+# Distance feedback: the evaluator search climbs to `code == 4242` and
+# reaches the sometimes; the compiled control has no feedback and does not.
+fuzz --iterations 32 examples/reach | tee /tmp/scuzz-reach-summary.log
+grep -q '^sometimes: 1/1 reached' /tmp/scuzz-reach-summary.log
+if grep -q 'probes run compiled' /tmp/scuzz-reach-summary.log; then
+  echo "examples/reach: the evaluator engine fell back to compiled probes" && exit 1
+fi
+if SCUZZ_FUZZ_ENGINE=compiled fuzz --iterations 32 examples/reach | tee /tmp/scuzz-reach-compiled.log; then
+  echo "examples/reach: the compiled control reached the magic value without feedback" && exit 1
+fi
+grep -q '^sometimes: 0/1 reached' /tmp/scuzz-reach-compiled.log
 fuzz --iterations 4 --oracles examples/counter
 python3 - <<'PY'
 import json

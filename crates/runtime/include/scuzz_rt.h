@@ -1272,7 +1272,10 @@ SzIo *sz_fuzz_verify(SzString *name, void *fn, void *env);     /* Timeline to Ve
 SzIo *sz_fuzz_verify_rel(SzString *name, void *fn, void *env); /* (Timeline, Timeline) pair to Verdict */
 /* Coverage hit with a key the evaluator interns. Keys hit before the probe
  * arms coverage wait and flush when it does, so building the program before
- * `sz_fuzz_probe` records the same keys as a compiled @main. */
+ * `sz_fuzz_probe` records the same keys as a compiled @main. A key
+ * `dist:<site>:<d>` is not coverage: it reports the comparison distance
+ * |a - b| at `site`, the probe keeps the smallest per site, and the probe
+ * end overwrites SCUZZ_DISTANCE_DUMP with `site d` lines. */
 void sz_fuzz_hit(SzString *key);
 /* One probe: copy SCUZZ_EV_* to SCUZZ_*, install TestRuntime under
  * SCUZZ_TESTRT=1, refresh cached env reads, turn panic-frame coverage off,

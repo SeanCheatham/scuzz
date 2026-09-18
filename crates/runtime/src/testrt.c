@@ -4584,10 +4584,79 @@ static size_t g_fuzz_wait_n;
 static size_t g_fuzz_wait_cap;
 static int g_fuzz_armed;
 
+/* Comparison distance per site: the smallest |a - b| this probe saw. */
+typedef struct {
+  char *site;
+  int64_t d;
+} SzDist;
+static SzDist *g_dist;
+static size_t g_dist_n;
+static size_t g_dist_cap;
+
+static void fuzz_dist_record(const char *body) {
+  const char *colon = strrchr(body, ':');
+  size_t len;
+  int64_t d;
+  size_t i;
+  if (!colon || colon == body || !colon[1])
+    return;
+  d = strtoll(colon + 1, NULL, 10);
+  len = (size_t)(colon - body);
+  for (i = 0; i < g_dist_n; i++) {
+    if (strlen(g_dist[i].site) == len && !memcmp(g_dist[i].site, body, len)) {
+      if (d < g_dist[i].d)
+        g_dist[i].d = d;
+      return;
+    }
+  }
+  if (g_dist_n == g_dist_cap) {
+    size_t cap = g_dist_cap ? g_dist_cap * 2 : 64;
+    SzDist *next = (SzDist *)sz_alloc(cap * sizeof(SzDist));
+    if (g_dist_n)
+      memcpy(next, g_dist, g_dist_n * sizeof(SzDist));
+    if (g_dist)
+      sz_free(g_dist);
+    g_dist = next;
+    g_dist_cap = cap;
+  }
+  g_dist[g_dist_n].site = (char *)sz_alloc(len + 1);
+  memcpy(g_dist[g_dist_n].site, body, len);
+  g_dist[g_dist_n].site[len] = 0;
+  g_dist[g_dist_n].d = d;
+  g_dist_n++;
+}
+
+static void fuzz_dist_clear(void) {
+  size_t i;
+  for (i = 0; i < g_dist_n; i++)
+    sz_free(g_dist[i].site);
+  g_dist_n = 0;
+}
+
+/* Overwrite SCUZZ_DISTANCE_DUMP with `site d` lines. The file holds one
+ * probe, so an empty file means the probe saw no comparison. */
+static void fuzz_dist_flush(void) {
+  const char *path = getenv("SCUZZ_DISTANCE_DUMP");
+  FILE *f;
+  size_t i;
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "w");
+  if (!f)
+    return;
+  for (i = 0; i < g_dist_n; i++)
+    fprintf(f, "%s %lld\n", g_dist[i].site, (long long)g_dist[i].d);
+  fclose(f);
+}
+
 void sz_fuzz_hit(SzString *key) {
   const char *s = key ? sz_string_cstr(key) : "";
   if (!s[0])
     return;
+  if (!strncmp(s, "dist:", 5)) {
+    fuzz_dist_record(s + 5);
+    return;
+  }
   if (g_fuzz_armed) {
     sz_coverage_hit_key(s);
     return;
@@ -4803,6 +4872,7 @@ static void *fuzz_probe_run(SzIo *program) {
   sz_property_sometimes_flush();
   sz_timeline_varied_flush();
   sz_property_classify_flush();
+  fuzz_dist_flush();
   sz_sched_attach(outer);
   return out;
 }
@@ -5071,6 +5141,7 @@ static void fuzz_regs_reset(void) {
   }
   g_drivers_n = 0;
   verify_clear();
+  fuzz_dist_clear();
   sz_release(g_scenario_setup_io);
   g_scenario_setup_io = NULL;
 }
