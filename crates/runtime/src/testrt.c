@@ -5,9 +5,15 @@
 #include "ui_script.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 /* TestRuntime: install / reset fake interpreters. */
 
@@ -4648,8 +4654,119 @@ static void fuzz_probe_env(void) {
   sz_free(names);
 }
 
+/* Probe server request: `KEY=VALUE` lines become `SCUZZ_KEY` in the forked
+ * child, so one server process runs many probes with different env. */
+static void fuzz_probe_request(const char *path) {
+  FILE *f = fopen(path, "r");
+  char line[4096];
+  if (!f)
+    return;
+  while (fgets(line, sizeof line, f)) {
+    char key[300];
+    char *eq = strchr(line, '=');
+    size_t n = strlen(line);
+    if (n && line[n - 1] == '\n')
+      line[--n] = 0;
+    if (!eq || eq == line)
+      continue;
+    *eq = 0;
+    snprintf(key, sizeof key, "SCUZZ_%s", line);
+    setenv(key, eq + 1, 1);
+  }
+  fclose(f);
+}
+
+static void fuzz_probe_child_limits(void) {
+  const char *log = getenv("SCUZZ_PROBE_LOG");
+  int fd = open(log && log[0] ? log : "/dev/null",
+                O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd >= 0) {
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    if (fd > STDERR_FILENO)
+      close(fd);
+  }
+  sz_panic_exit();
+#if defined(__linux__)
+  {
+    struct rlimit rl;
+    rl.rlim_cur = 512u * 1024u * 1024u;
+    rl.rlim_max = rl.rlim_cur;
+    setrlimit(RLIMIT_AS, &rl);
+  }
+#endif
+}
+
+/* Clear setup, drivers, and claims after a forked probe so the server
+ * registers them again for the next one. */
+static void fuzz_regs_reset(void);
+static void verify_clear(void);
+
+/* Parent side of a forked probe: wait under the 20-second deadline. */
+static int fuzz_probe_wait(pid_t pid) {
+  struct timespec nap;
+  int status = 0;
+  long waited_ms = 0;
+  nap.tv_sec = 0;
+  nap.tv_nsec = 2 * 1000 * 1000;
+  for (;;) {
+    pid_t w = waitpid(pid, &status, WNOHANG);
+    if (w == pid)
+      break;
+    if (w < 0 && errno != EINTR)
+      return 1;
+    if (waited_ms >= 20000) {
+      kill(pid, SIGKILL);
+      while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+        ;
+      return 124;
+    }
+    nanosleep(&nap, NULL);
+    waited_ms += 2;
+  }
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  if (WIFSIGNALED(status))
+    return 128 + WTERMSIG(status);
+  return 1;
+}
+
+static void *fuzz_probe_run(SzIo *program);
+
 static void *fuzz_probe_thunk(void *env) {
   SzIo *program = (SzIo *)env;
+  const char *req = getenv("SCUZZ_EV_REQUEST");
+  pid_t pid;
+  int code;
+  char msg[64];
+  if (!req || !req[0])
+    return fuzz_probe_run(program);
+  fflush(stdout);
+  fflush(stderr);
+  pid = fork();
+  if (pid < 0)
+    return sz_string_from_cstr("probe fork failed");
+  if (pid == 0) {
+    void *out;
+    fuzz_probe_request(req);
+    fuzz_probe_child_limits();
+    out = fuzz_probe_run(program);
+    if (out)
+      fprintf(stderr, "scuzz: probe failed: %s\n",
+              sz_string_cstr((SzString *)out));
+    fflush(stdout);
+    fflush(stderr);
+    _exit(out ? 1 : 0);
+  }
+  code = fuzz_probe_wait(pid);
+  fuzz_regs_reset();
+  if (code == 0)
+    return NULL;
+  snprintf(msg, sizeof msg, "probe exit %d", code);
+  return sz_string_from_cstr(msg);
+}
+
+static void *fuzz_probe_run(SzIo *program) {
   const char *tr;
   const char *ds;
   void *out = NULL;
@@ -4857,6 +4974,16 @@ void sz_property_session_reset(void) {
     g_response[i].response = NULL;
   }
   g_response_n = 0;
+  verify_clear();
+  tl_free_states();
+  free(g_last_drive);
+  g_last_drive = NULL;
+  tl_restore_clear();
+  g_varied_flushed = 0;
+}
+
+static void verify_clear(void) {
+  int i;
   for (i = 0; i < g_verify_n; i++) {
     if (g_verify[i].name)
       sz_free(g_verify[i].name);
@@ -4877,11 +5004,6 @@ void sz_property_session_reset(void) {
     g_verify_rel[i].env = NULL;
   }
   g_verify_rel_n = 0;
-  tl_free_states();
-  free(g_last_drive);
-  g_last_drive = NULL;
-  tl_restore_clear();
-  g_varied_flushed = 0;
 }
 
 typedef struct {
@@ -4939,6 +5061,18 @@ static void driver_add(const char *s, int64_t nargs, int64_t kind, void *fn,
   sz_retain(env);
   g_drivers[g_drivers_n].env = env;
   g_drivers_n++;
+}
+
+static void fuzz_regs_reset(void) {
+  size_t i;
+  for (i = 0; i < g_drivers_n; i++) {
+    sz_free(g_drivers[i].name);
+    sz_release(g_drivers[i].env);
+  }
+  g_drivers_n = 0;
+  verify_clear();
+  sz_release(g_scenario_setup_io);
+  g_scenario_setup_io = NULL;
 }
 
 static SzDriver *sz_driver_find(const char *name) {

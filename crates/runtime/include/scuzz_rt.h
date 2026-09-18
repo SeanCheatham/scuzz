@@ -11,6 +11,9 @@ extern "C" {
 /* --- panic / alloc ------------------------------------------------------- */
 
 void sz_panic(const char *msg) __attribute__((noreturn));
+/* Panic exits 134 instead of abort. A forked probe child sets this: the
+ * abort signal path invokes the host core handler, which costs a second. */
+void sz_panic_exit(void);
 void sz_panic_push_src(const char *loc);
 void sz_panic_pop_src(void);
 /* Record one coverage hit (def entry or branch arm) when SCUZZ_COVERAGE_DUMP
