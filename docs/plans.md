@@ -21,9 +21,9 @@ A scheduler step is one effect. `pure`, `flatMap`, `handleError`, `attempt`, `en
 
 ## Step C: evaluator speed on large packages
 
-Status: in progress.
+Status: done.
 
-`examples/kernel` idle probe is 33 s on the evaluator: 8 s check, 25 s interpretation. Profile `Eval.step` on `examples/kernel` and cut the hot paths. Proof: `examples/kernel` idle probe under the 20-second deadline.
+The idle probe on `examples/kernel` went from 21 s to 12 s and on `examples/fmt` from 21 s to 18 s. Cuts: one location string per def computed at load instead of per call, a plain-argument fast path around `Check.alignCall`, one Ftab lookup per call, literal patterns before the pattern scans, constructor fields cached per enum case, and character checks instead of `Str.slice` in the pattern scans. Proof: both idle probes run under the 20-second deadline and `scripts/ci-fuzz.sh` runs `examples/kernel` on the evaluator.
 
 ## Step D: search feedback
 
