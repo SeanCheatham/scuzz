@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <locale.h>
 #if defined(__APPLE__)
 #include <xlocale.h>
@@ -388,6 +389,8 @@ void sz_alloc_sweep(void) {
     sz_free((void *)(g_live + 1));
 }
 
+static int g_panic_exit;
+
 void sz_panic(const char *msg) {
   char report[8192];
   const char *path;
@@ -410,8 +413,12 @@ void sz_panic(const char *msg) {
     }
   }
   sz_alloc_sweep();
+  if (g_panic_exit)
+    _exit(134);
   abort();
 }
+
+void sz_panic_exit(void) { g_panic_exit = 1; }
 
 void *sz_alloc(size_t size) {
   return alloc_block(size, 0, SZ_ALLOC_MAGIC, SZ_RC_RAW);
@@ -2591,6 +2598,7 @@ typedef struct Fiber {
   struct Fiber *wait_next;
   struct Fiber *all_next;
   int32_t pct_prio; /* higher wins; PCT demotion goes below every assigned prio */
+  int spin; /* 1: a structural node set cur; step it in the same scheduler step */
 } Fiber;
 
 enum {
@@ -2616,6 +2624,7 @@ typedef struct Sched {
   int32_t pct_low;   /* next demotion priority (0, -1, -2, …) */
   int pct_contention; /* 1-based count of ready_count>1 picks */
   int pct_change[SZ_PCT_K_MAX];
+  int bounded;       /* 1 under the fake clock: step and spin limits apply */
 } Sched;
 
 static Sched *g_sched = NULL;
@@ -3169,6 +3178,20 @@ static void fiber_set_cur(Fiber *f, SzIo *next) {
     sz_release(old);
 }
 
+/* A structural node (pure, flatMap, handleErrorWith, attempt, ensure, loop
+ * entry) costs no scheduler step: the fiber keeps running until the next
+ * effect. Other fibers see one step per effect, so the interleaving depends
+ * on the effect sequence and not on how many combinators produced it. A
+ * fiber that is not the current one (a parent resumed by its child) goes to
+ * the ready queue. */
+static void fiber_yield(Sched *s, Fiber *f) {
+  if (s->current == f && f->state == FIB_READY) {
+    f->spin = 1;
+    return;
+  }
+  ready_enqueue(s, f);
+}
+
 /* Retain so the run result does not alias a live slot. */
 static void fiber_set_pure_retained(Fiber *f, void *value) {
   sz_retain(value);
@@ -3478,7 +3501,7 @@ static void fiber_resume_value(Sched *s, Fiber *f, void *value) {
         fiber_finish(s, f, 0, NULL, sz_error_new(5, "loop inner is null"));
         return;
       }
-      ready_enqueue(s, f);
+      fiber_yield(s, f);
       return;
     }
     f->stack = cont_pop(stack);
@@ -3490,7 +3513,7 @@ static void fiber_resume_value(Sched *s, Fiber *f, void *value) {
     stack->finalizer = NULL;
     f->stack = cont_pop(stack);
     fiber_set_cur(f, ensure_run_fin_ok(fin, value));
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return;
   }
   {
@@ -3509,7 +3532,7 @@ static void fiber_resume_value(Sched *s, Fiber *f, void *value) {
                    sz_error_new(2, "flatMap continuation returned null"));
       return;
     }
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
   }
 }
 
@@ -3643,7 +3666,25 @@ static void park_sleep(Sched *s, Fiber *f, int64_t ms) {
   sleeper_add(s, f);
 }
 
+static int step_node(Sched *s, Fiber *f);
+
+/* One scheduler step: run structural nodes until the fiber reaches an
+ * effect, forks, parks, or finishes. Simulation bounds the spin so a pure
+ * zero-delay loop fails the probe the same way a stepped one does. */
 static int step_fiber(Sched *s, Fiber *f) {
+  long spins = 0;
+  for (;;) {
+    int r;
+    f->spin = 0;
+    r = step_node(s, f);
+    if (!f->spin)
+      return r;
+    if (s->bounded && ++spins > 1000000)
+      sz_panic("simulation exceeds 1000000 scheduler steps");
+  }
+}
+
+static int step_node(Sched *s, Fiber *f) {
   SzIo *cur;
   if (f->state == FIB_CANCELLED || f->state == FIB_DONE || f->state == FIB_JOIN ||
       f->state == FIB_FWAIT)
@@ -3724,7 +3765,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       fiber_finish(s, f, 0, NULL, sz_error_new(5, "flatMap inner is null"));
       return 0;
     }
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return 0;
   }
   case SZ_IO_HANDLE_ERROR: {
@@ -3737,7 +3778,7 @@ static int step_fiber(Sched *s, Fiber *f) {
                    sz_error_new(5, "handleErrorWith inner is null"));
       return 0;
     }
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return 0;
   }
   case SZ_IO_ATTEMPT: {
@@ -3746,7 +3787,7 @@ static int step_fiber(Sched *s, Fiber *f) {
     SzIo *handled = sz_io_handle_error_with(mapped, attempt_err, NULL);
     sz_release(mapped);
     fiber_set_cur(f, handled);
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return 0;
   }
   case SZ_IO_RACE: {
@@ -3780,7 +3821,7 @@ static int step_fiber(Sched *s, Fiber *f) {
     SzIo *inner = io_child(cur, &cur->as.ensure.inner);
     f->stack = cont_push_ensure(f->stack, fin);
     fiber_set_cur(f, inner);
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return 0;
   }
   case SZ_IO_TIMEOUT: {
@@ -3807,7 +3848,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       fiber_finish(s, f, 0, NULL, sz_error_new(5, "forever inner is null"));
       return 0;
     }
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return 0;
   }
   case SZ_IO_REPEAT_N: {
@@ -3821,7 +3862,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       fiber_finish(s, f, 0, NULL, sz_error_new(5, "repeatN inner is null"));
       return 0;
     }
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return 0;
   }
   case SZ_IO_RETRY_N: {
@@ -3835,7 +3876,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       fiber_finish(s, f, 0, NULL, sz_error_new(5, "retryN inner is null"));
       return 0;
     }
-    ready_enqueue(s, f);
+    fiber_yield(s, f);
     return 0;
   }
   case SZ_IO_FORK: {
@@ -4239,6 +4280,7 @@ static SzIoResult run_io(SzIo *root) {
   memset(&sched, 0, sizeof(sched));
   sched_arm_from_env(&sched);
   g_sched = &sched;
+  sched.bounded = bounded;
   sched.root = fiber_new(root, NULL, JOIN_NONE, 0);
   ready_enqueue(&sched, sched.root);
 
@@ -4418,6 +4460,9 @@ static void *sz_runtime_main_worker(void *arg) {
     const char *tr = getenv("SCUZZ_TESTRT");
     if (tr && tr[0] == '1') {
       sz_testrt_install();
+      /* A probe is a child of scuzz fuzz; exit 134 skips the host core
+       * handler on a panic. */
+      sz_panic_exit();
     }
   }
   {

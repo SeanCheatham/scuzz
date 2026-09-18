@@ -4104,7 +4104,9 @@ int main(void) {
     sz_testrt_reset();
   }
 
-  /* Cancel Resource.use after acquire, before the ensure step. */
+  /* Cancel Resource.use right after fork. Acquire, the ensure frame, and the
+   * first use effect run in one scheduler step, so the use body runs once
+   * and release still runs. */
   {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
@@ -4117,7 +4119,7 @@ int main(void) {
         fork_drop(sz_lang_resource_use(lr, lang_use_step, NULL)),
         fiber_interrupt_direct, NULL));
     assert(r.ok);
-    assert(lang_use_stepped == 0);
+    assert(lang_use_stepped == 1);
     assert(lang_released == 1);
     sz_lang_resource_free(lr);
     sz_alloc_stats(&live_bytes, &live_count);
@@ -13023,7 +13025,9 @@ int main(void) {
     sz_testrt_oracles_refresh();
   }
 
-  /* Finalizer-on-cancel: a skipped unstepped IO.ensure fails. */
+  /* Finalizer-on-cancel: a skipped unstepped IO.ensure fails. The left side
+   * of IO.both fails first, so the right fiber is cancelled before its first
+   * step while its cur is still the ENSURE node. */
   {
     pid_t pid;
     setenv("SCUZZ_TESTRT", "1", 1);
@@ -13032,12 +13036,10 @@ int main(void) {
     pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
-      SzLangResource *lr;
       sz_testrt_plant_skip_unstepped_ensure();
-      lr = lang_make_tok();
-      (void)sz_io_unsafe_run(fm_drop(
-          fork_drop(sz_lang_resource_use(lr, lang_use_step, NULL)),
-          fiber_interrupt_direct, NULL));
+      (void)sz_io_unsafe_run(both_drop(
+          fail_drop(sz_error_new(1, "left")),
+          ensure_drop(sz_io_sleep_ms(1000), pure_drop(NULL))));
       _exit(0);
     }
     assert(wait_aborted(pid));

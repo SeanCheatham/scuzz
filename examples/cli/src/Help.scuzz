@@ -11,7 +11,7 @@ Arguments:
 
 Options:
       --probe
-          Run one fuzz probe on the prepared files in PATH (`scuzz fuzz` spawns this)
+          Serve fuzz probes on the prepared files in PATH: each `probe` line on stdin runs one and prints its exit code (`scuzz fuzz` spawns this)
       --message-format <MESSAGE_FORMAT>
           Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
   -h, --help

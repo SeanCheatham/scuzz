@@ -637,7 +637,7 @@ assert comparison["corpus"]["failures"] == 1
 assert comparison["breadth"]["claimed"]["fileSame"] == ["report.txt"]
 PY_CHECK
 rm -rf "$file_compare_dir"
-fuzz --iterations 2 examples/io
+fuzz_both_engines examples/io 2 io
 python3 - <<'PY'
 import json
 with open("examples/io/build/fuzz/summary.json") as f:
