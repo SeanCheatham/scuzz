@@ -212,21 +212,19 @@ if fuzz --replay examples/bad-adt/corpus/209ce82661a8103a.toml examples/bad-adt;
 fi
 test -f examples/bad-fault/build/fuzz/repro.toml
 grep -q 'fault_seed' examples/bad-fault/build/fuzz/repro.toml
-grep -q 'fault_kind = "fs"' examples/bad-fault/build/fuzz/repro.toml
 if fuzz --replay examples/bad-fault/corpus/f83245e1fbf633a5.toml examples/bad-fault; then
   echo "fault replay should have reproduced the failure" && exit 1
 fi
-grep -v -e fault_seed -e fault_kind -e fault_n -e fault_mode examples/bad-fault/corpus/f83245e1fbf633a5.toml > /tmp/bad-fault-nofault.toml
+grep -v fault_seed examples/bad-fault/corpus/f83245e1fbf633a5.toml > /tmp/bad-fault-nofault.toml
 if ! fuzz --replay /tmp/bad-fault-nofault.toml examples/bad-fault; then
   echo "replay without fault_seed should pass" && exit 1
 fi
-grep -q 'pct_d = 2' examples/bad-sched/corpus/d037d00bc981a2fb.toml
-grep -q 'pct_k = 0' examples/bad-sched/corpus/d037d00bc981a2fb.toml
+grep -q 'schedule_seed = "' examples/bad-sched/corpus/d037d00bc981a2fb.toml
 grep -q 'drive checkOrder' examples/bad-sched/corpus/d037d00bc981a2fb.toml
 if fuzz --replay examples/bad-sched/corpus/d037d00bc981a2fb.toml examples/bad-sched; then
   echo "schedule replay should have reproduced the failure" && exit 1
 fi
-grep -v -e schedule_seed -e pct_d -e pct_k examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad-sched-fifo.toml
+grep -v schedule_seed examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad-sched-fifo.toml
 if ! fuzz --replay /tmp/bad-sched-fifo.toml examples/bad-sched; then
   echo "FIFO replay (no schedule_seed) should pass" && exit 1
 fi

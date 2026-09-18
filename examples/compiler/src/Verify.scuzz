@@ -387,12 +387,7 @@ def insertOracleAt(src: String, name: String, i: Int): String =
   if (i < 0) Str.concat("oracle = \"", Str.concat(name, Str.concat("\"\n", src))) else Str.concat(Str.slice(src, 0, i + 7), Str.concat("oracle = \"", Str.concat(name, Str.concat("\"\n", Str.slice(src, i + 7, Str.len(src))))))
 
 def reproSched(sched: String): String =
-  if (sched == "") "" else Str.concat("schedule_seed = \"", Str.concat(sched, Str.concat("\"\n", pctLines(sched))))
-
-def pctLines(sched: String): String =
-  Str.concat("pct_d = ", Str.concat(Str.fromInt(decodeD(parseSeed(sched))), Str.concat("""
-pct_k = """, Str.concat(Str.fromInt(decodeK(parseSeed(sched))), """
-"""))))
+  if (sched == "") "" else Str.concat("schedule_seed = \"", Str.concat(sched, "\"\n"))
 
 def reproFault(fault: String): String =
   if (fault == "") "" else Str.concat("fault_seed = \"", Str.concat(fault, "\"\n"))
