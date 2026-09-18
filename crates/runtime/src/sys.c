@@ -1176,23 +1176,46 @@ static const char *executable_sha256(void) {
 #endif
 }
 
+/* Path of the live binary. `scuzz fuzz` spawns itself for evaluator probes. */
+static const char *self_binary_path(void) {
+  static char path[4096];
+  if (path[0]) return path;
+#if defined(__linux__)
+  {
+    ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (n <= 0) return NULL;
+    path[n] = 0;
+  }
+#elif defined(__APPLE__)
+  {
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) != 0) return NULL;
+  }
+#else
+  return NULL;
+#endif
+  return path;
+}
+
 static void *sys_getenv_result(void *env) {
   SzPair *p = (SzPair *)env;
   SzString *key = p ? (SzString *)p->left : NULL;
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   const char *v;
-  sz_timeline_log_cstr("Sys.getenv", key ? sz_string_cstr(key) : "");
+  const char *k = key ? sz_string_cstr(key) : "";
+  sz_timeline_log_cstr("Sys.getenv", k);
   if (sz_testrt_sys_is_fake())
-    v = sz_testrt_env_get(key ? sz_string_cstr(key) : "");
-  else if (key && strcmp(sz_string_cstr(key), "SCUZZ_EXECUTABLE_SHA256") == 0) {
-    v = executable_sha256();
+    v = sz_testrt_env_get(k);
+  else if (strcmp(k, "SCUZZ_EXECUTABLE_SHA256") == 0 ||
+           strcmp(k, "SCUZZ_EXECUTABLE") == 0) {
+    v = k[16] ? executable_sha256() : self_binary_path();
     if (!v) {
       r->is_err = 1;
       r->as.err = sz_error_new(3, "Sys.getenv: cannot identify executable");
       return r;
     }
   } else
-    v = getenv(key ? sz_string_cstr(key) : "");
+    v = getenv(k);
   r->is_err = 0;
   r->as.ok = sz_string_from_cstr(v ? v : "");
   return r;

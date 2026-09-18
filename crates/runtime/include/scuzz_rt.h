@@ -18,6 +18,10 @@ void sz_panic_pop_src(void);
  * sz_coverage_env_refresh after a setenv. */
 void sz_coverage_hit(const char *loc);
 void sz_coverage_env_refresh(void);
+/* Stop this binary's own def and branch hits. The evaluator probe sets this
+ * so only `sz_fuzz_hit` keys of the evaluated program reach the dump. */
+void sz_coverage_own_off(void);
+void sz_coverage_hit_key(const char *loc); /* records under own_off */
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
@@ -427,6 +431,12 @@ void sz_fiber_wake_deferred(SzDeferred *d);
  * not READY and not DONE/CANCELLED. NULL out-params are ignored. */
 void sz_fiber_census(int64_t *live, int64_t *ready, int64_t *parked,
                      int64_t *done);
+/* Hide the current scheduler while a nested program runs as if from C
+ * `main`. The evaluator probe uses this so the toolchain's own fiber does
+ * not appear in the probed program's census. Attach the returned handle
+ * back before the caller's step returns. */
+void *sz_sched_detach(void);
+void sz_sched_attach(void *sched);
 
 /* Language Resource.make / use: IO acquire + SzCont release/use. */
 struct SzLangResource {
@@ -1047,6 +1057,9 @@ const char *sz_testrt_fault_take_msg(void);
 /* Implicit oracles under SCUZZ_TESTRT=1. The flag is read once; tests call
  * sz_testrt_oracles_refresh after a setenv or unsetenv. */
 int sz_testrt_oracles_armed(void);
+/* 1 when the double-release tombstone oracle is on: armed and not a nested
+ * probe. */
+int sz_testrt_tomb_armed(void);
 void sz_testrt_oracles_refresh(void);
 void sz_testrt_ui_idle_snapshot(void);
 void sz_testrt_ui_idle_check(void);
@@ -1254,12 +1267,15 @@ SzIo *sz_fuzz_setup(SzIo *setup); /* setup IO; its value is Scenario.context */
 SzIo *sz_fuzz_driver(SzString *name, int64_t nargs, void *fn, void *env);
 SzIo *sz_fuzz_verify(SzString *name, void *fn, void *env);     /* Timeline to Verdict */
 SzIo *sz_fuzz_verify_rel(SzString *name, void *fn, void *env); /* (Timeline, Timeline) pair to Verdict */
-/* Coverage hit with a key the evaluator interns. */
+/* Coverage hit with a key the evaluator interns. Keys hit before the probe
+ * arms coverage wait and flush when it does, so building the program before
+ * `sz_fuzz_probe` records the same keys as a compiled @main. */
 void sz_fuzz_hit(SzString *key);
 /* One probe: copy SCUZZ_EV_* to SCUZZ_*, install TestRuntime under
- * SCUZZ_TESTRT=1, refresh cached env reads, run setup, run the drive script
- * or `program`, end the session, flush the dumps. Fails with the runtime
- * message when `program` fails. */
+ * SCUZZ_TESTRT=1, refresh cached env reads, turn panic-frame coverage off,
+ * flush waiting hits, run setup, run the drive script or `program`, end the
+ * session, flush the dumps. Fails with the runtime message when `program`
+ * fails. */
 SzIo *sz_fuzz_probe(SzIo *program);
 
 /* Entrypoint helper used by @main codegen */

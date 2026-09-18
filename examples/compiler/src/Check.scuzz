@@ -777,7 +777,7 @@ def needsPh(e: Expr): Bool =
   }
 
 def needsPhCall(f: String, args: List[Expr]): Bool =
-  if (isHoKit(f)) false else hasBareHoleArg(args) && !hasCompoundPhArg(args)
+  hasBareHoleArg(args) && !hasCompoundPhArg(args) && !isHoKit(f)
 
 def isHoKit(f: String): Bool =
   isKit(f) && kitHasFun(kitParams(f))

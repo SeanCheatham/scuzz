@@ -308,6 +308,7 @@ const char *sz_testrt_fault_take_msg(void) {
 }
 
 static int g_oracles_armed = -1;
+static int g_probe_nested;
 
 /* Cache the armed flag. Production sets SCUZZ_TESTRT at exec. Tests call
  * sz_testrt_oracles_refresh after a setenv or unsetenv. */
@@ -317,6 +318,13 @@ int sz_testrt_oracles_armed(void) {
     g_oracles_armed = tr && tr[0] == '1';
   }
   return g_oracles_armed;
+}
+
+/* The tombstone oracle pairs releases in the compiled binary. A nested probe
+ * (the evaluator inside a running program) frees toolchain strings per step;
+ * tombstones there hold every one, so the oracle is off for a nested probe. */
+int sz_testrt_tomb_armed(void) {
+  return !g_probe_nested && sz_testrt_oracles_armed();
 }
 
 void sz_testrt_oracles_refresh(void) {
@@ -4562,9 +4570,51 @@ SzIo *sz_fuzz_verify_rel(SzString *name, void *fn, void *env) {
   return sz_io_pure(NULL);
 }
 
+/* Keys hit before the probe arms coverage wait here, one entry per key, and
+ * flush when it arms. A key the evaluator hits while it registers setup,
+ * drivers, and claims lands in the same dump as a key hit inside the probe. */
+static char **g_fuzz_wait;
+static size_t g_fuzz_wait_n;
+static size_t g_fuzz_wait_cap;
+static int g_fuzz_armed;
+
 void sz_fuzz_hit(SzString *key) {
-  if (key && sz_string_cstr(key)[0])
-    sz_coverage_hit(sz_string_cstr(key));
+  const char *s = key ? sz_string_cstr(key) : "";
+  if (!s[0])
+    return;
+  if (g_fuzz_armed) {
+    sz_coverage_hit_key(s);
+    return;
+  }
+  for (size_t i = 0; i < g_fuzz_wait_n; i++)
+    if (!strcmp(g_fuzz_wait[i], s))
+      return;
+  if (g_fuzz_wait_n == g_fuzz_wait_cap) {
+    size_t cap = g_fuzz_wait_cap ? g_fuzz_wait_cap * 2 : 64;
+    char **next = (char **)sz_alloc(cap * sizeof(char *));
+    if (g_fuzz_wait_n)
+      memcpy(next, g_fuzz_wait, g_fuzz_wait_n * sizeof(char *));
+    if (g_fuzz_wait)
+      sz_free(g_fuzz_wait);
+    g_fuzz_wait = next;
+    g_fuzz_wait_cap = cap;
+  }
+  g_fuzz_wait[g_fuzz_wait_n++] = dup_cstr(s);
+}
+
+static void fuzz_arm_coverage(void) {
+  size_t i;
+  sz_coverage_own_off();
+  g_fuzz_armed = 1;
+  for (i = 0; i < g_fuzz_wait_n; i++) {
+    sz_coverage_hit_key(g_fuzz_wait[i]);
+    sz_free(g_fuzz_wait[i]);
+  }
+  if (g_fuzz_wait)
+    sz_free(g_fuzz_wait);
+  g_fuzz_wait = NULL;
+  g_fuzz_wait_n = 0;
+  g_fuzz_wait_cap = 0;
 }
 
 /* Copy every SCUZZ_EV_<name>=<value> to SCUZZ_<name>. The parent sets probe
@@ -4603,8 +4653,11 @@ static void *fuzz_probe_thunk(void *env) {
   const char *tr;
   const char *ds;
   void *out = NULL;
+  void *outer = sz_sched_detach();
+  g_probe_nested = outer != NULL;
   fuzz_probe_env();
   sz_coverage_env_refresh();
+  fuzz_arm_coverage();
   sz_testrt_oracles_refresh();
   tr = getenv("SCUZZ_TESTRT");
   if (tr && tr[0] == '1')
@@ -4633,6 +4686,7 @@ static void *fuzz_probe_thunk(void *env) {
   sz_property_sometimes_flush();
   sz_timeline_varied_flush();
   sz_property_classify_flush();
+  sz_sched_attach(outer);
   return out;
 }
 

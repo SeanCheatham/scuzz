@@ -4,7 +4,7 @@ enum Cmd:
   case Fail(msg: String)
   case Fmt(path: String, check: Bool)
   case Check(path: String, json: Bool)
-  case Eval(path: String)
+  case Eval(path: String, probe: Bool)
   case Build(path: String, outDir: String, full: Bool, verify: Bool)
   case Run(path: String, outDir: String, target: String, watch: Bool, exec: String, hasExec: Bool, dump: String, snap: String, device: String)
   case Devices
@@ -207,7 +207,7 @@ def show(c: Cmd): String =
     case Cmd.Fail(m) => Str.concat("fail:", m)
     case Cmd.Fmt(path, check) => Str.concat("fmt path=", Str.concat(path, Str.concat(" check=", yn(check))))
     case Cmd.Check(path, json) => Str.concat("check path=", Str.concat(path, Str.concat(" json=", yn(json))))
-    case Cmd.Eval(path) => Str.concat("eval path=", path)
+    case Cmd.Eval(path, probe) => Str.concat("eval path=", Str.concat(path, Str.concat(" probe=", yn(probe))))
     case Cmd.Build(path, outDir, full, verify) => Str.concat("build path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" full=", Str.concat(yn(full), Str.concat(" verify=", yn(verify))))))))
     case Cmd.Run(path, outDir, target, watch, exec, hasExec, dump, snap, device) => Str.concat("run path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", Str.concat(target, Str.concat(" watch=", Str.concat(yn(watch), Str.concat(" exec=", Str.concat(exec, Str.concat(" hasExec=", Str.concat(yn(hasExec), Str.concat(" dump=", Str.concat(dump, Str.concat(" snap=", Str.concat(snap, Str.concat(" device=", device)))))))))))))))))
     case Cmd.Devices => "devices"
@@ -263,7 +263,7 @@ def parseHelp(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Help(""), json) else if (isCmd(arg(args, i)) || arg(args, i) == "") gateJson(Cmd.Help(arg(args, i)), json) else gateJson(Cmd.Fail(unrec(arg(args, i))), json)
 
 def parseCmd(args: List[String], cmd: String, i: Int, json: Bool): Cmd =
-  if (cmd == "devices") parseDevices(args, i, json) else if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "eval") parseEv(args, i, json, "") else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", "", false, "", false, "", "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", "") else if (cmd == "exec") parseExec(args, i, json, "", "build", []) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "")
+  if (cmd == "devices") parseDevices(args, i, json) else if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "eval") parseEv(args, i, json, "", false) else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", "", false, "", false, "", "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", "") else if (cmd == "exec") parseExec(args, i, json, "", "build", []) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "")
 
 def parseDocs(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Docs("list", ""), json) else parseDocsTok(args, i, json, arg(args, i))
@@ -313,15 +313,15 @@ def parseCheckMsg(p: (String, Int), args: List[String], path: String): Cmd =
     case (v, n) => if (n < 0) Cmd.Fail(if (n == 0 - 1) needVal("--message-format") else unexp(arg(args, 0), "scuzz check [OPTIONS] [PATH]")) else if (v == "json") parseCheck(args, n, true, path) else if (v == "human") parseCheck(args, n, false, path) else Cmd.Fail(badFmt(v))
   }
 
-def parseEv(args: List[String], i: Int, json: Bool, path: String): Cmd =
-  if (i >= List.len(args)) gateJson(Cmd.Eval(orDot(path)), json) else parseEvTok(args, i, json, path, arg(args, i))
+def parseEv(args: List[String], i: Int, json: Bool, path: String, probe: Bool): Cmd =
+  if (i >= List.len(args)) gateJson(Cmd.Eval(orDot(path), probe), json) else parseEvTok(args, i, json, path, probe, arg(args, i))
 
-def parseEvTok(args: List[String], i: Int, json: Bool, path: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("eval"), json) else if (a == "--message-format" || flagPref(a, "--message-format")) parseEvMsg(takeVal(args, i, "--message-format"), args, path) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz eval [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz eval [OPTIONS] [PATH]")) else parseEv(args, i + 1, json, a)
+def parseEvTok(args: List[String], i: Int, json: Bool, path: String, probe: Bool, a: String): Cmd =
+  if (isHelp(a)) gateJson(Cmd.Help("eval"), json) else if (a == "--probe") parseEv(args, i + 1, json, path, true) else if (a == "--message-format" || flagPref(a, "--message-format")) parseEvMsg(takeVal(args, i, "--message-format"), args, path, probe) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz eval [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz eval [OPTIONS] [PATH]")) else parseEv(args, i + 1, json, a, probe)
 
-def parseEvMsg(p: (String, Int), args: List[String], path: String): Cmd =
+def parseEvMsg(p: (String, Int), args: List[String], path: String, probe: Bool): Cmd =
   p match {
-    case (v, n) => if (n < 0) Cmd.Fail(if (n == 0 - 1) needVal("--message-format") else unexp(arg(args, 0), "scuzz eval [OPTIONS] [PATH]")) else if (v == "json") parseEv(args, n, true, path) else if (v == "human") parseEv(args, n, false, path) else Cmd.Fail(badFmt(v))
+    case (v, n) => if (n < 0) Cmd.Fail(if (n == 0 - 1) needVal("--message-format") else unexp(arg(args, 0), "scuzz eval [OPTIONS] [PATH]")) else if (v == "json") parseEv(args, n, true, path, probe) else if (v == "human") parseEv(args, n, false, path, probe) else Cmd.Fail(badFmt(v))
   }
 
 def parseBuild(args: List[String], i: Int, json: Bool, path: String, outDir: String, full: Bool, verify: Bool): Cmd =
@@ -617,7 +617,7 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Devices => Ios.devices()
     case Cmd.Watch(path, outDir) => dispatchWatch(path, outDir)
     case Cmd.Check(path, json) => Drive.checkDir(path, json)
-    case Cmd.Eval(path) => Drive.evDir(path)
+    case Cmd.Eval(path, probe) => if (probe) Drive.evProbeDir(path) else Drive.evDir(path)
     case Cmd.Fmt(path, check) => dispatchFmt(path, check)
     case Cmd.New(name, path, ui) => dispatchNew(name, path, ui)
     case Cmd.Package(path, outDir, target) => dispatchPkg(path, outDir, target)

@@ -540,7 +540,23 @@ check_match_require '==' 0
 check_match_require '!=' 1
 rm -rf "$match_require_dir"
 
-fuzz --iterations 160 examples/webhook | tee /tmp/scuzz-webhook-summary.log
+# Both engines write the same summary. The default run is the evaluator; it
+# must not fall back to compiled probes. SCUZZ_FUZZ_ENGINE=compiled is the
+# control.
+fuzz_both_engines() {
+  local dir="$1" iterations="$2" name="$3"
+  fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-summary.log"
+  if grep -q 'probes run compiled' "/tmp/scuzz-$name-summary.log"; then
+    echo "$dir: the evaluator engine fell back to compiled probes" && exit 1
+  fi
+  cp "$dir/build/fuzz/summary.json" "/tmp/scuzz-$name-ev.json"
+  SCUZZ_FUZZ_ENGINE=compiled fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-compiled.log"
+  if ! diff "/tmp/scuzz-$name-ev.json" "$dir/build/fuzz/summary.json"; then
+    echo "$dir: evaluator and compiled summaries differ" && exit 1
+  fi
+}
+
+fuzz_both_engines examples/webhook 160 webhook
 assert_fuzz_summary examples/webhook/build/fuzz/summary.json /tmp/scuzz-webhook-summary.log
 python3 - <<'PY_WEBHOOK'
 import json
@@ -557,7 +573,7 @@ with open("examples/webhook/build/drivers.txt") as f:
 assert "faulted" not in drivers and "rejected" not in drivers
 PY_WEBHOOK
 
-fuzz --iterations 320 examples/api-report | tee /tmp/scuzz-api-report-summary.log
+fuzz_both_engines examples/api-report 320 api-report
 assert_fuzz_summary examples/api-report/build/fuzz/summary.json /tmp/scuzz-api-report-summary.log
 python3 - <<'PY_CHECK'
 import json
