@@ -1,5 +1,4 @@
 [fuzz]
-seed = 43
 schedule_seed = "43"
 pct_d = 3
 pct_k = 3

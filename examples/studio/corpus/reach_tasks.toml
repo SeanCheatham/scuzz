@@ -1,3 +1,2 @@
 [fuzz]
-seed = 47
 events = ["tap choicechip:Tasks", "tap button:Rename", "tap button:Done", "type 0 x", "tap button:Add", "tap button:Del", "tap button:Clear"]

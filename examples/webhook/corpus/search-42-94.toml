@@ -1,6 +1,5 @@
 [fuzz]
 oracle = "prior"
-seed = 42
 schedule_seed = "94"
 pct_d = 5
 pct_k = 6

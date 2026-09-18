@@ -281,10 +281,10 @@ def escEv(s: String, i: Int, b: Builder): String =
 def escEvCh(c: Int, s: String, i: Int): String =
   if (c == 92) "\\\\" else if (c == 34) "\\\"" else Str.slice(s, i, i + 1)
 
-def reproText(seed: Int, sched: String, fault: String, events: List[String]): String =
+def reproText(sched: String, fault: String, events: List[String]): String =
   Str.concat("""[fuzz]
-""", Str.concat(reproOracle(events), Str.concat("seed = ", Str.concat(Str.fromInt(seed), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), """]
-"""))))))))
+""", Str.concat(reproOracle(events), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), """]
+"""))))))
 
 def reproOracle(events: List[String]): String =
   if (oracleName(events) == "") "" else Str.concat("oracle = \"", Str.concat(oracleName(events), "\"\n"))
@@ -387,7 +387,7 @@ def insertOracleAt(src: String, name: String, i: Int): String =
   if (i < 0) Str.concat("oracle = \"", Str.concat(name, Str.concat("\"\n", src))) else Str.concat(Str.slice(src, 0, i + 7), Str.concat("oracle = \"", Str.concat(name, Str.concat("\"\n", Str.slice(src, i + 7, Str.len(src))))))
 
 def reproSched(sched: String): String =
-  if (sched == "") nl() else Str.concat("\nschedule_seed = \"", Str.concat(sched, Str.concat("\"\n", pctLines(sched))))
+  if (sched == "") "" else Str.concat("schedule_seed = \"", Str.concat(sched, Str.concat("\"\n", pctLines(sched))))
 
 def pctLines(sched: String): String =
   Str.concat("pct_d = ", Str.concat(Str.fromInt(decodeD(parseSeed(sched))), Str.concat("""
