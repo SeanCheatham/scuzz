@@ -310,6 +310,7 @@ slice_codegen() {
     "$SCUZZ" run examples/codegen | tee /tmp/codegen.out
   grep -q "ir-ok" /tmp/codegen.out
   grep -q "eval-ok" /tmp/codegen.out
+  grep -q "eval-ui-ok" /tmp/codegen.out
   grep -q "probe-ok" /tmp/codegen.out
   grep -qx "codegen:probe" /tmp/codegen-probe.cov
   local memory_dir
