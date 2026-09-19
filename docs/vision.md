@@ -26,6 +26,7 @@ Slices, in order. Each slice closes with a proof in `examples/`.
 8. **Live campaign.** In the tree. Docs searches a Bool oracle on the evaluator (`Eval.campSearch`) and shows the failing argument. The user edits the snippet and presses Fuzz. The search does not call `Fuzz.probe`, so it does not nest inside a Docs campaign. Proof: `examples/codegen` prints `eval-camp-ok`; Headless `afterHit` reads `fail hidden 3`; Chromium, Firefox, and WebKit tap Fuzz and read the same line.
 9. **Tutorial path.** In the tree. Start has a Try Scuzz group. How it runs puts the live campaign above labeled schedule, trace, coverage, and mutant blocks, with fail and pass chips. Proof: Headless claims open the tiles and read the headings (`scuzz fuzz --iterations 0 examples/docs`); Chromium, Firefox, and WebKit read the same labels.
 10. **Schedule branches.** In the tree. How it runs runs one `IO.both` snippet under seeds 0 and 128 and prints `leftFirst` with the first winner and the verdict on each branch. The search does not call `Fuzz.probe`. Proof: Headless reads `seed 0 first=R fail` and `seed 128 first=L pass` (`scuzz fuzz --iterations 0 examples/docs`); Chromium, Firefox, and WebKit read the same lines.
+11. **World pair.** In the tree. How it runs paints the two scheduler worlds as a `View.row` of cards (`semantics:seed 0` and `semantics:seed 128`). Each card shows `first=` and trace rows. Proof: Headless reads both semantics and `first=R fail` / `first=L pass` (`scuzz fuzz --iterations 0 examples/docs`); Chromium, Firefox, and WebKit read the same labels.
 
 ### Session control arc
 
@@ -47,7 +48,7 @@ The API report fetches authenticated JSON records and writes an open-record repo
 
 The network UI fetches JSON through the shared Net API. It shows loading, failure, and success. Input continues during a request. Retry preserves the tap count. Native UI loops yield to IO fibers. Session exit cancels IO tap handlers. iOS and macOS GUI requests use URLSession with platform certificate trust. CLI and server requests keep the OpenSSL transport. Simulation uses the shared hermetic dispatch. Host and iOS simulator reload check captures before they use retained state. Source edits in the simulator preserve Signals. Manifest changes and the r command restart the app. Failed builds and incompatible reloads preserve the app. Code remains available to active IO handlers until the session ends. Host and simulator watch sessions accept r to rebuild and restart. They accept q to stop. A host app stops when its CLI session ends. Physical iPhone proof remains open.
 
-The Docs app exposes all manual topics in its index. It includes the iOS local loop and How it runs. Start tiles open Try it and How it runs. How it runs shows two scheduler worlds of one race. Section links use stable topic IDs. Headless claims check pages, navigation, tutorial views, and the in-page Fuzz search. Corpus taps keep the full control label.
+The Docs app exposes all manual topics in its index. It includes the iOS local loop and How it runs. Start tiles open Try it and How it runs. How it runs shows two scheduler worlds of one race as a pair of cards. Section links use stable topic IDs. Headless claims check pages, navigation, tutorial views, and the in-page Fuzz search. Corpus taps keep the full control label.
 
 Ranked list: [`gaps.md`](gaps.md).
 

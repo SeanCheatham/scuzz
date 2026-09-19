@@ -416,7 +416,8 @@ async function check(browserType, url, mobile) {
     await page.waitForFunction(() => {
       const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
       return snap.includes('text:leftFirst: L must win') &&
-        snap.includes('text:seed 0 first=R fail') && snap.includes('text:seed 128 first=L pass') &&
+        snap.includes('semantics:seed 0') && snap.includes('semantics:seed 128') &&
+        snap.includes('text:first=R fail') && snap.includes('text:first=L pass') &&
         snap.includes(' n 3') && snap.includes('text:arms ') && snap.includes('text:live ') &&
         snap.includes('text:mutant ') && snap.includes('text:Campaign') && snap.includes('text:Schedule branches');
     }, null, {timeout: 60000}).catch(async error => {
