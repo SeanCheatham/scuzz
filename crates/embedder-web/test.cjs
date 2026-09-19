@@ -368,6 +368,34 @@ async function check(browserType, url, mobile) {
     assert.equal(new URL(page.url()).search, '?preview=1');
     await page.evaluate(() => { location.hash = 'section=missing'; });
     await page.waitForFunction(() => location.hash === '#section=language');
+    // Try it: the evaluator runs the typed program and mounts its view.
+    const tryLink = page.getByRole('link', {name: 'Try it', exact: true});
+    await reveal(tryLink);
+    await tryLink.click();
+    await expectSection('try');
+    await expectText('text:Try it');
+    await expectText('text:Clicks: 0');
+    const plusOne = page.getByRole('button', {name: '+1', exact: true});
+    await reveal(plusOne);
+    await plusOne.click();
+    await expectText('text:Clicks: 1');
+    const tryEditor = page.getByRole('textbox', {name: 'editor', exact: true});
+    const trySource = await tryEditor.inputValue();
+    assert(trySource.includes('Clicks: $n'));
+    await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.insertText(trySource.replace('Clicks: $n', 'Taps: $n'));
+    const run = page.getByRole('button', {name: 'Run', exact: true});
+    await reveal(run);
+    await run.click();
+    await expectText('text:Taps: 0');
+    await reveal(plusOne);
+    await plusOne.click();
+    await expectText('text:Taps: 1');
+    await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.insertText('@main def main: IO[Unit] = Ui.run(_ => View.text(1))');
+    await reveal(run);
+    await run.click();
+    await page.waitForFunction(() => Module.textBlocks?.some(block => /expected String/.test(block.text)));
     assert.deepEqual(errors, []);
     console.log(`web: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }
