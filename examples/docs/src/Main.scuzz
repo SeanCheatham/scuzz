@@ -7,16 +7,28 @@ def paragraph(text: String): View =
 def code(text: String): View =
   View.code(text)
 
-def trySource(): String =
-  "@main def main: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    label = Signal.map(clicks, n => s\"Clicks: $n\")\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => Signal.set(clicks, Signal.get(clicks) + 1))))\n  } yield ()\n"
-
-def campSource(): String =
-  """def hidden(code: Int): Bool =
-  if (code == 3) false else true
+def runSrc(): String =
+  """def inc(n: Int): Int =
+  n + 1
 
 @main def main: IO[Unit] =
-  IO.pure(())
+  for {
+    n = inc(0)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
 """
+
+def viewSrc(): String =
+  "def inc(n: Int): Int =\n  n + 1\n\n@main def main: IO[Unit] =\n  Ui.run(_ => View.column(View.text(\"Clicks: 0\"), View.button(\"+1\", _ => IO.println(Str.fromInt(inc(0))))))\n"
+
+def checkSrc(): String =
+  "def inc(n: Int): Int =\n  n + 1\n\ndef ok(n: Int): Bool =\n  inc(n) == n + 1\n\n@main def main: IO[Unit] =\n  for {\n    p = ok(0)\n    _ <- Ui.run(_ => View.column(View.text(\"Clicks: 0\"), View.button(\"+1\", _ => IO.println(Str.fromInt(inc(0))))))\n  } yield ()\n"
+
+def signalSrc(): String =
+  "def inc(n: Int): Int =\n  n + 1\n\ndef ok(n: Int): Bool =\n  inc(n) == n + 1\n\n@main def main: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    label = Signal.map(clicks, n => s\"Clicks: $n\")\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => Signal.set(clicks, inc(Signal.get(clicks))))))\n  } yield ()\n"
+
+def searchSrc(): String =
+  "def inc(n: Int): Int =\n  n + 1\n\ndef ok(n: Int): Bool =\n  inc(n) == n + 1\n\ndef hidden(n: Int): Bool =\n  if (n == 3) false else true\n\n@main def main: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    label = Signal.map(clicks, n => s\"Clicks: $n\")\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => Signal.set(clicks, inc(Signal.get(clicks))))))\n  } yield ()\n"
 
 def schedSource(): String =
   "@main def main: IO[Unit] =\n  for {\n    order = Signal.makeN(\"order\", 0)\n    q <- Queue.unbounded()\n    _ <- IO.both(Queue.offer(q, \"L\"), Queue.offer(q, \"R\"))\n    first <- Queue.take(q)\n    _ = Signal.set(order, if (Str.eq(first, \"L\")) 1 else 0)\n  } yield ()\n"
@@ -27,8 +39,8 @@ def coverSource(): String =
 
 @main def main: IO[Unit] =
   for {
-    _ = countdown(8)
-    _ <- IO.pure(())
+    n = countdown(8)
+    _ <- IO.println(Str.fromInt(n))
   } yield ()
 """
 
@@ -36,15 +48,18 @@ def mutSource(): String =
   """@main def main: IO[Unit] =
   for {
     n = 1 + 2
-    _ <- IO.pure(())
+    _ <- IO.println(Str.fromInt(n))
   } yield ()
 """
 
+def starter(n: Int): String =
+  if (n == 0) runSrc() else if (n == 1) viewSrc() else if (n == 2) checkSrc() else if (n == 3) signalSrc() else searchSrc()
+
 def fireOpened(n: Int): Unit =
-  if (n == 0) Property.sometimes("openedRun") else if (n == 1) Property.sometimes("openedSignal") else if (n == 2) Property.sometimes("openedClaim") else if (n == 3) Property.sometimes("openedSearch") else if (n == 4) Property.sometimes("openedBranch") else if (n == 5) Property.sometimes("openedCover") else ()
+  if (n == 0) Property.sometimes("openedRun") else if (n == 1) Property.sometimes("openedView") else if (n == 2) Property.sometimes("openedCheck") else if (n == 3) Property.sometimes("openedSignal") else if (n == 4) Property.sometimes("openedSearch") else if (n == 5) Property.sometimes("openedCover") else ()
 
 def stageTitle(n: Int): String =
-  if (n == 0) "Run" else if (n == 1) "Signal" else if (n == 2) "Claim" else if (n == 3) "Search" else if (n == 4) "Branch" else "Cover"
+  if (n == 0) "Run" else if (n == 1) "View" else if (n == 2) "Check" else if (n == 3) "Signal" else if (n == 4) "Search" else "Cover"
 
 def tryRun(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value]): IO[Unit] =
   IO.pure(tryShow(Eval.tryNow(Signal.get(src), pool), diags, mounted))
@@ -52,11 +67,32 @@ def tryRun(src: Signal[String], diags: Signal[String], mounted: Signal[List[View
 def tryShow(out: TryOut, diags: Signal[String], mounted: Signal[List[View]]): Unit =
   (Signal.set(diags, if (out.diags == "") "ok" else out.diags), Signal.set(mounted, List.map(out.prog, p => Mount.mount(out.view, p))))._2
 
+def bindShown(out: TryOut, name: String): String =
+  bindShownGo(Eval.traceLines(out.trace), name)
+
+def bindShownGo(xs: List[String], name: String): String =
+  if (List.isEmpty(xs)) "" else bindPick(Str.split(List.at(xs, 0), " "), name, List.tail(xs))
+
+def bindPick(parts: List[String], name: String, rest: List[String]): String =
+  if (List.len(parts) >= 3 && List.at(parts, 1) == name) List.join(List.drop(parts, 2), " ") else bindShownGo(rest, name)
+
+def runInc(src: Signal[String], out: Signal[String], pool: Ref[Value]): Unit =
+  Signal.set(out, bindShown(Eval.tryNow(Signal.get(src), pool), "n"))
+
+def checkOk(src: Signal[String], out: Signal[String], pool: Ref[Value]): Unit =
+  Signal.set(out, bindShown(Eval.tryNow(Signal.get(src), pool), "p"))
+
 def continueWhen(ready: Signal[Int], step: Signal[Int], next: Int, hint: String): View =
   View.padding(8, View.wrap(View.showWhen(ready, 1, View.button("Continue", _ => Signal.set(step, next))), View.showWhen(ready, 0, View.text(hint))))
 
 def backBtn(step: Signal[Int], prev: Int): View =
   View.padding(8, View.outlinedButton("Back", _ => Signal.set(step, prev)))
+
+def isOne(s: String): Int =
+  if (s == "1") 1 else 0
+
+def isTrue(s: String): Int =
+  if (s == "true") 1 else 0
 
 def runReadyFlag(s: String): Int =
   if (s == "ok") 1 else 0
@@ -64,24 +100,24 @@ def runReadyFlag(s: String): Int =
 def countReadyFlag(n: Int): Int =
   if (n > 0) 1 else 0
 
-def runLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value]): View =
-  View.column(View.padding(8, View.heading(2, View.text("Run a snippet"))), paragraph("Edit the program. Press Run. Tap +1."), View.padding(8, View.maxSize(0, 260, View.editor(src))), View.padding(8, View.wrap(View.button("Run", _ => tryRun(src, diags, mounted, pool)), View.bindText(diags))), View.card(View.padding(8, View.each(mounted, v => v))))
+def runLive(src: Signal[String], out: Signal[String], pool: Ref[Value]): View =
+  View.column(View.padding(8, View.heading(2, View.text("Run inc"))), paragraph("inc adds one. Press Run. See 1."), View.padding(8, View.maxSize(0, 200, View.editor(src))), View.padding(8, View.wrap(View.button("Run", _ => runInc(src, out, pool)), View.bindText(out))))
+
+def viewLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value]): View =
+  View.column(View.padding(8, View.heading(2, View.text("Show a View"))), paragraph("The program now builds a View. Press Run. Tap +1."), View.padding(8, View.maxSize(0, 220, View.editor(src))), View.padding(8, View.wrap(View.button("Run", _ => tryRun(src, diags, mounted, pool)), View.bindText(diags))), View.card(View.padding(8, View.each(mounted, v => v))))
+
+def checkLive(src: Signal[String], out: Signal[String], pool: Ref[Value]): View =
+  View.column(View.padding(8, View.heading(2, View.text("Check a Bool"))), paragraph("ok(n) is true when inc is n + 1. Press Check."), View.padding(8, View.maxSize(0, 220, View.editor(src))), View.padding(8, View.wrap(View.button("Check", _ => checkOk(src, out, pool)), View.bindText(out))))
 
 def liveCounter(count: Signal[Int], tapped: Signal[Int]): View =
-  View.card(View.column(View.heading(2, View.text("Try a Signal")), View.bindText(Signal.mapN("countLabel", count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => for {
+  View.card(View.column(View.heading(2, View.text("Keep a Signal")), View.bindText(Signal.mapN("countLabel", count, n => Str.concat("Count: ", Str.fromInt(n)))), View.wrap(View.button("Add one", _ => for {
   _ = Property.sometimes("tappedAdd")
   _ = Signal.set(tapped, 1)
   _ = Signal.set(count, Signal.get(count) + 1)
 } yield ()), View.outlinedButton("Reset", _ => Signal.set(count, 0))), paragraph("The count stays when you change stages.")))
 
-def signalLive(count: Signal[Int], tapped: Signal[Int]): View =
-  View.column(View.padding(8, View.heading(2, View.text("Keep state"))), paragraph("Tap Add one. Continue. The count stays."), liveCounter(count, tapped))
-
-def claimLive(tapped: Signal[Int]): View =
-  View.column(View.padding(8, View.heading(2, View.text("Names in this app"))), paragraph("Tap Record a hit. scuzz fuzz reached lists tappedAdd."), View.padding(8, View.button("Record a hit", _ => for {
-  _ = Property.sometimes("tappedAdd")
-  _ = Signal.set(tapped, 1)
-} yield ())), View.padding(8, View.chip(tapped, "tappedAdd")))
+def signalLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], count: Signal[Int], tapped: Signal[Int]): View =
+  View.column(View.padding(8, View.heading(2, View.text("Hold state"))), paragraph("Tap Add one. Continue. The count stays."), liveCounter(count, tapped), View.padding(8, View.maxSize(0, 200, View.editor(src))), View.padding(8, View.wrap(View.button("Run", _ => tryRun(src, diags, mounted, pool)), View.bindText(diags))), View.card(View.padding(8, View.each(mounted, v => v))))
 
 def campFailFlag(s: String): Int =
   if (Str.startsWith(s, "fail ")) 1 else 0
@@ -90,13 +126,13 @@ def campPassFlag(s: String): Int =
   if (s == "pass") 1 else 0
 
 def campDetail(s: String): String =
-  if (s == "Press Fuzz") "Search has not run." else if (s == "pass") "No failing argument in 0 through 8." else if (Str.startsWith(s, "fail ")) "The Bool oracle returned false." else "Check failed. Fix the snippet and press Fuzz."
+  if (s == "Press Fuzz") "Search has not run." else if (s == "pass") "hidden stayed true for 0 through 8." else if (Str.startsWith(s, "fail ")) "hidden returned false at that argument." else "Check failed. Fix the snippet and press Fuzz."
 
 def campCard(camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String]): View =
   View.card(View.padding(8, View.column(View.heading(2, View.text("Campaign")), View.padding(8, View.wrap(View.chip(fail, "fail"), View.chip(pass, "pass"))), View.bindText(camp), View.bindText(detail))))
 
 def searchLive(src: Signal[String], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String]): View =
-  View.column(View.padding(8, View.heading(2, View.text("Find a failing oracle"))), paragraph("hidden(code) is true except at 3. Fuzz tries 0 through 8."), View.padding(8, View.maxSize(0, 200, View.editor(src))), View.padding(8, View.wrap(View.button("Fuzz", _ => Signal.set(camp, Eval.campSearch(Signal.get(src), "hidden", 8))))), campCard(camp, fail, pass, detail))
+  View.column(View.padding(8, View.heading(2, View.text("Search a Bool def"))), paragraph("A Bool def is an oracle. Fuzz calls hidden(0) through hidden(8). false is a fail. hidden(3) is false."), View.padding(8, View.maxSize(0, 200, View.editor(src))), View.padding(8, View.wrap(View.button("Fuzz", _ => Signal.set(camp, Eval.campSearch(Signal.get(src), "hidden", 8))))), campCard(camp, fail, pass, detail))
 
 def vizPool(): Ref[Value] =
   Property.force(Ref.of(Value.VList([])))
@@ -130,9 +166,6 @@ def schedTracePick(all: List[String], hit: List[String]): String =
 
 def schedCard(seed: Int, out: TryOut, order: Int): View =
   View.semantics(Str.concat("seed ", Str.fromInt(seed)), View.card(View.padding(8, View.column(View.heading(2, View.text(Str.concat("seed ", Str.fromInt(seed)))), paragraph(schedVerdict(out, order)), paragraph(schedTrace(out))))))
-
-def branchLive(): View =
-  View.column(View.padding(8, View.heading(2, View.text("Schedule branches"))), paragraph("Queue.offer L and Queue.offer R race. Two seeds. One branch fails. One branch passes."), vizSchedule(schedSource()))
 
 def vizCover(src: String): View =
   vizCoverAt(src, Eval.tryNow(src, vizPool()))
@@ -188,25 +221,31 @@ def mutBindGo(xs: List[String]): String =
   if (List.isEmpty(xs)) "no n" else List.at(xs, 0)
 
 def coverLive(): View =
-  View.column(View.padding(8, View.heading(2, View.text("Coverage arms"))), paragraph("Coverage marks source arms. A mutant changes the live expression."), vizCover(coverSource()), View.padding(8, View.heading(2, View.text("Mutant"))), vizMutant(mutSource()), paragraph("Commands and kits: scuzz docs"), View.padding(8, View.link("Scuzz on GitHub", "https://github.com/SeanCheatham/scuzz")))
+  View.column(View.padding(8, View.heading(2, View.text("Schedule branches"))), paragraph("Queue.offer L and Queue.offer R race. Two seeds. One branch fails. One branch passes."), vizSchedule(schedSource()), View.padding(8, View.heading(2, View.text("Coverage arms"))), paragraph("Coverage marks source arms. A mutant changes the live expression."), vizCover(coverSource()), View.padding(8, View.heading(2, View.text("Mutant"))), vizMutant(mutSource()), paragraph("Next: scuzz docs"), View.padding(8, View.link("Scuzz on GitHub", "https://github.com/SeanCheatham/scuzz")))
 
 def one(v: View): List[View] =
   v :: []
 
-def tourTabs(step: Signal[Int], trySrc: Signal[String], tryDiags: Signal[String], tryMounted: Signal[List[View]], tryPool: Ref[Value], count: Signal[Int], tapped: Signal[Int], howSrc: Signal[String], howCamp: Signal[String], howFail: Signal[Int], howPass: Signal[Int], howDetail: Signal[String], branchBody: Signal[List[View]], coverBody: Signal[List[View]]): View =
-  View.tabs(step, View.column(View.section("run", "Run", runLive(trySrc, tryDiags, tryMounted, tryPool)), View.section("signal", "Signal", signalLive(count, tapped)), View.section("claim", "Claim", claimLive(tapped)), View.section("search", "Search", searchLive(howSrc, howCamp, howFail, howPass, howDetail)), View.section("branch", "Branch", View.each(branchBody, v => v)), View.section("cover", "Cover", View.each(coverBody, v => v))))
+def tourTabs(step: Signal[Int], src: Signal[String], out: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], count: Signal[Int], tapped: Signal[Int], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String], coverBody: Signal[List[View]]): View =
+  View.tabs(step, View.column(View.section("run", "Run", runLive(src, out, pool)), View.section("view", "View", viewLive(src, diags, mounted, pool)), View.section("check", "Check", checkLive(src, out, pool)), View.section("signal", "Signal", signalLive(src, diags, mounted, pool, count, tapped)), View.section("search", "Search", searchLive(src, camp, fail, pass, detail)), View.section("cover", "Cover", View.each(coverBody, v => v))))
 
-def fillHeavy(n: Int, branchBody: Signal[List[View]], coverBody: Signal[List[View]]): Unit =
-  for {
-    _ = Signal.set(branchBody, if (n == 4) one(branchLive()) else [])
-    _ = Signal.set(coverBody, if (n == 5) one(coverLive()) else [])
-  } yield ()
+def isStarter(cur: String, i: Int, n: Int): Bool =
+  if (i >= n) false else if (cur == starter(i)) true else isStarter(cur, i + 1, n)
+
+def growTo(src: Signal[String], n: Int, diags: Signal[String], out: Signal[String], mounted: Signal[List[View]]): Unit =
+  (Signal.set(src, starter(n)), (Signal.set(diags, ""), (Signal.set(out, ""), Signal.set(mounted, one(View.text("Press Run"))))._2)._2)._2
+
+def maybeGrow(src: Signal[String], n: Int, diags: Signal[String], out: Signal[String], mounted: Signal[List[View]]): Unit =
+  if (n <= 0 || n > 4 || !isStarter(Signal.get(src), 0, n)) () else growTo(src, n, diags, out, mounted)
+
+def fillCover(n: Int, coverBody: Signal[List[View]]): Unit =
+  Signal.set(coverBody, if (n == 5) one(coverLive()) else [])
 
 def warmup(): Unit =
   warmupAt(Property.force(Ref.of(Value.VList([]))))
 
 def warmupAt(p: Ref[Value]): Unit =
-  (Eval.tryNow(trySource(), p), (Eval.tryNowAt(schedSource(), 0, p), (Eval.tryNowAt(schedSource(), 128, p), (Eval.tryNow(coverSource(), p), (Eval.tryNow(mutSource(), p), (Eval.campSearch(campSource(), "hidden", 8), warmupMut(p))._2)._2)._2)._2)._2)._2
+  (Eval.tryNow(runSrc(), p), (Eval.tryNow(viewSrc(), p), (Eval.tryNow(checkSrc(), p), (Eval.tryNow(signalSrc(), p), (Eval.tryNow(searchSrc(), p), (Eval.campSearch(searchSrc(), "hidden", 8), (Eval.tryNowAt(schedSource(), 0, p), (Eval.tryNowAt(schedSource(), 128, p), (Eval.tryNow(coverSource(), p), (Eval.tryNow(mutSource(), p), warmupMut(p))._2)._2)._2)._2)._2)._2)._2)._2)._2)._2
 
 def warmupMut(p: Ref[Value]): Unit =
   warmupMutGo(Mutate.oneSrc(mutSource()), p)
@@ -219,21 +258,22 @@ def warmupMutGo(files: List[(String, String)], p: Ref[Value]): Unit =
     step = Signal.makeN("step", 0)
     count = Signal.makeN("count", 0)
     tapped = Signal.makeN("tapped", 0)
-    trySrc = Signal.makeN("trySrc", trySource())
+    src = Signal.makeN("trySrc", runSrc())
+    out = Signal.makeN("tryOut", "")
     tryDiags = Signal.makeN("tryDiags", "")
     tryMounted = Signal.make([View.text("Press Run")])
     tryPool <- Ref.of(Value.VList([]))
-    howSrc = Signal.makeN("howSrc", campSource())
     howCamp = Signal.makeN("howCamp", "Press Fuzz")
     howFail = Signal.mapN("howFail", howCamp, campFailFlag)
     howPass = Signal.mapN("howPass", howCamp, campPassFlag)
     howDetail = Signal.mapN("howDetail", howCamp, campDetail)
-    runReady = Signal.mapN("runReady", tryDiags, runReadyFlag)
+    runReady = Signal.mapN("runReady", out, isOne)
+    viewReady = Signal.mapN("viewReady", tryDiags, runReadyFlag)
+    checkReady = Signal.mapN("checkReady", out, isTrue)
     countReady = Signal.mapN("countReady", count, countReadyFlag)
-    branchBody = Signal.make([View.text("")])
     coverBody = Signal.make([View.text("")])
-    title = Signal.mapN("title", step, n => (fireOpened(n), (fillHeavy(n, branchBody, coverBody), stageTitle(n))._2)._2)
+    title = Signal.mapN("title", step, n => (fireOpened(n), (maybeGrow(src, n, tryDiags, out, tryMounted), (fillCover(n, coverBody), stageTitle(n))._2)._2)._2)
     _ = warmup()
     _ <- Ui.setTitle("Scuzz")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.text("")), View.column(View.expanded(tourTabs(step, trySrc, tryDiags, tryMounted, tryPool, count, tapped, howSrc, howCamp, howFail, howPass, howDetail, branchBody, coverBody)), View.showWhen(step, 0, continueWhen(runReady, step, 1, "Press Run, then Continue.")), View.showWhen(step, 1, View.wrap(backBtn(step, 0), continueWhen(countReady, step, 2, "Tap Add one, then Continue."))), View.showWhen(step, 2, View.wrap(backBtn(step, 1), continueWhen(tapped, step, 3, "Tap Record a hit, then Continue."))), View.showWhen(step, 3, View.wrap(backBtn(step, 2), continueWhen(howFail, step, 4, "Press Fuzz, then Continue."))), View.showWhen(step, 4, View.wrap(backBtn(step, 3), View.padding(8, View.button("Continue", _ => Signal.set(step, 5))))), View.showWhen(step, 5, backBtn(step, 4)))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.text("")), View.column(View.expanded(tourTabs(step, src, out, tryDiags, tryMounted, tryPool, count, tapped, howCamp, howFail, howPass, howDetail, coverBody)), View.showWhen(step, 0, continueWhen(runReady, step, 1, "Press Run, then Continue.")), View.showWhen(step, 1, View.wrap(backBtn(step, 0), continueWhen(viewReady, step, 2, "Press Run, then Continue."))), View.showWhen(step, 2, View.wrap(backBtn(step, 1), continueWhen(checkReady, step, 3, "Press Check, then Continue."))), View.showWhen(step, 3, View.wrap(backBtn(step, 2), continueWhen(countReady, step, 4, "Tap Add one, then Continue."))), View.showWhen(step, 4, View.wrap(backBtn(step, 3), continueWhen(howFail, step, 5, "Press Fuzz, then Continue."))), View.showWhen(step, 5, backBtn(step, 4)))))
   } yield ()
