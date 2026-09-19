@@ -14,6 +14,8 @@ uint64_t sz_signal_revision(void) { return g_signal_revision; }
 struct SzSignal {
   void *value;
   int elem_str;
+  /* 1 after View.each mounts the current list: a tree owns its views. */
+  int mounted;
   uint64_t version;
   SzSignal *map_src;
   SzSignalMapFn map_fn;
@@ -318,6 +320,24 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   return sz_string_from_cstr("");
 }
 
+/* view.c installs `sz_view_free_orphans` with the first view. A program
+ * without views links no view code. */
+static void (*g_orphan_hook)(SzList *xs);
+
+void sz_signal_set_orphan_hook(void (*fn)(SzList *xs)) { g_orphan_hook = fn; }
+
+/* Drop the current value. A list no `View.each` mounted and this signal
+ * alone holds frees its views, so a `Signal[List[View]]` written twice
+ * before a layout does not leak the middle list. A mounted list keeps its
+ * views: the tree owns and frees them. */
+static void drop_value(SzSignal *s, void *value) {
+  if (value && g_orphan_hook && !s->mounted &&
+      sz_rc_kind(value) == SZ_RC_LIST && sz_rc_count(value) == 1)
+    g_orphan_hook((SzList *)value);
+  s->mounted = 0;
+  sz_release(value);
+}
+
 static void *signal_value(SzSignal *s) {
   void *out;
   if (!s) return NULL;
@@ -325,7 +345,7 @@ static void *signal_value(SzSignal *s) {
   (void)signal_value(s->map_src);
   if (s->map_valid && s->map_seen == s->map_src->version) return s->value;
   out = s->map_fn(s->map_src->value, s->map_env);
-  sz_release(s->value);
+  drop_value(s, s->value);
   s->value = out;
   s->map_seen = s->map_src->version;
   s->map_valid = 1;
@@ -353,7 +373,7 @@ void *sz_signal_write(SzSignal *s, void *value) {
   if (!s || s->map_fn) return NULL;
   if (s->value == value || sz_ptr_eq(s->value, value)) return NULL;
   sz_retain(value);
-  sz_release(s->value);
+  drop_value(s, s->value);
   s->value = value;
   s->version++;
   g_signal_revision++;
@@ -382,7 +402,7 @@ void sz_signal_free(SzSignal *s) {
     }
   }
   sig_unregister(s);
-  sz_release(s->value);
+  drop_value(s, s->value);
   sz_release(s->map_env);
   sz_free(s);
 }
@@ -420,6 +440,9 @@ const char *sz_signal_str_get(const SzSignalStr *s) {
 void sz_signal_str_free(SzSignalStr *s) { sz_signal_free(s); }
 SzSignalList *sz_signal_list(SzList *initial) { return sz_signal_new(initial, 3, NULL); }
 void sz_signal_list_set(SzSignalList *s, SzList *value) { sz_signal_write(s, value); }
+void sz_signal_list_mark_mounted(SzSignalList *s) {
+  if (s) s->mounted = 1;
+}
 SzList *sz_signal_list_get(const SzSignalList *s) { return signal_value((SzSignal *)s); }
 void sz_signal_list_free(SzSignalList *s) { sz_signal_free(s); }
 int sz_signal_list_elem_str(const SzSignalList *s) {

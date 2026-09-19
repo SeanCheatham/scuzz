@@ -142,6 +142,13 @@ SzSignalList *sz_signal_list(SzList *initial);
 int sz_signal_list_elem_str(const SzSignalList *s);
 void sz_signal_list_set(SzSignalList *s, SzList *v);
 SzList *sz_signal_list_get(const SzSignalList *s);
+/* `View.each` mounted the current list: a tree owns its views. The next
+ * write or free leaves them alone. A list the signal drops before a mount
+ * frees its views through `sz_view_free_orphans`. */
+void sz_signal_list_mark_mounted(SzSignalList *s);
+/* The list drop hook. view.c installs `sz_view_free_orphans` with the
+ * first view, so a program without views links no view code. */
+void sz_signal_set_orphan_hook(void (*fn)(SzList *xs));
 void sz_signal_list_free(SzSignalList *s);
 
 /* Typed session schema v=2 signal section: a JSON array written to `f`. */
@@ -441,6 +448,10 @@ SzView *sz_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 void sz_view_add_child(SzView *parent, SzView *child);
 void sz_view_clear_children(SzView *parent);
 void sz_view_free(SzView *view);
+/* Free the views in `xs` that no tree holds. A signal calls this when it
+ * drops a list that no `View.each` mounted and it alone holds, so the list
+ * does not leak its views. Other heads are left alone. */
+void sz_view_free_orphans(SzList *xs);
 
 SzViewKind sz_view_kind(const SzView *view);
 SzRect sz_view_frame(const SzView *view);

@@ -761,7 +761,7 @@ def evKitsMissing(): List[String] =
   List.filter(List.filter(Kits.names(), k => !Eval.isExcludedKit(k)), k => Eval.isUnsupported(Eval.kitProbe(k, List.map(Kits.params(k), ty => evSample(ty)), evProg(srcAdd()))))
 
 def evSample(ty: String): Value =
-  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Value.VSigStr(Signal.make("a")) else if (Str.startsWith(ty, "Signal")) Value.VSigInt(Signal.make(1)) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap([]) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
+  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Eval.sigNew("", Value.VStr("a"), 0) else if (Str.startsWith(ty, "Signal")) Eval.sigNew("", Value.VInt(1), 0) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap([]) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
 
 def evAllOk(): Bool =
   evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evKitsCovered()
@@ -785,7 +785,10 @@ def countLabel(n: Int): String =
 """
 
 def evCounterView(): IO[String] =
-  Ref.of(Value.VUnit).flatMap(host => Eval.runMain(Eval.withHost(evProg(srcCounter()), host)).flatMap(_ => Ref.get(host).flatMap(view => evTap(view, evProg(srcCounter())).flatMap(_ => IO.pure(evLabel(view))))))
+  Ref.of(Value.VUnit).flatMap(host => Ref.of(Value.VList([])).flatMap(pool => evCounterRun(Eval.withHost(evProg(srcCounter()), host, pool), host)))
+
+def evCounterRun(p: EvProg, host: Ref[Value]): IO[String] =
+  Eval.runMain(p).flatMap(_ => Ref.get(host).flatMap(view => evTap(view, p).flatMap(_ => IO.pure(evLabel(view)))))
 
 def evViewArgs(view: Value): List[Value] =
   view match {
@@ -804,7 +807,7 @@ def evLabel(view: Value): String =
 
 def evSigStr(sv: Value): String =
   sv match {
-    case Value.VSig(s) => Eval.show(Signal.get(s))
+    case Value.VSig(_, _, s, _, _) => Eval.show(Signal.get(s))
     case _ => Eval.show(sv)
   }
 

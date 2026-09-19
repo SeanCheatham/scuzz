@@ -114,7 +114,8 @@ struct SzView {
 };
 
 static SzView *view_new(SzViewKind kind) {
-  SzView *v = (SzView *)sz_alloc_zero(sizeof(SzView));
+  SzView *v = (SzView *)sz_alloc_zero_kind(sizeof(SzView), SZ_RC_VIEW);
+  sz_signal_set_orphan_hook(sz_view_free_orphans);
   v->kind = kind;
   return v;
 }
@@ -1649,6 +1650,7 @@ static void sync_each(SzView *v) {
     }
   }
   each_seen_set(v, xs);
+  sz_signal_list_mark_mounted(v->each_sig);
 }
 
 SzView *sz_view_scroll(SzView *child) {
@@ -1989,6 +1991,18 @@ void sz_view_free(SzView *view) {
     sz_free(view->fold_closed);
   }
   sz_free(view);
+}
+
+void sz_view_free_orphans(SzList *xs) {
+  SzList *p;
+  /* Stop at a shared tail: another list still reads those heads. */
+  for (p = xs; p && sz_rc_count(p) == 1; p = p->tail) {
+    SzView *v = (SzView *)p->head;
+    if (v && sz_alloc_kind_of(v) == SZ_RC_VIEW && !v->parent) {
+      p->head = NULL;
+      sz_view_free(v);
+    }
+  }
 }
 
 void sz_view_clear_children(SzView *parent) {

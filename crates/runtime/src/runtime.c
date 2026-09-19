@@ -142,7 +142,7 @@ static size_t g_kind_count[SZ_RC_KIND_COUNT];
 static const char *k_kind_names[SZ_RC_KIND_COUNT] = {
     "raw",      "string", "list",     "adt",      "box",  "map",
     "io",       "stream", "resource", "error",    "ref",  "queue",
-    "deferred", "either", "pair", "builder", "netsock"};
+    "deferred", "either", "pair", "builder", "netsock", "view"};
 
 static uint32_t kind_idx(uint32_t kind) {
   return kind < SZ_RC_KIND_COUNT ? kind : (uint32_t)SZ_RC_RAW;
@@ -428,6 +428,10 @@ void *sz_alloc_zero(size_t size) {
   return alloc_block(size, 1, SZ_ALLOC_MAGIC, SZ_RC_RAW);
 }
 
+void *sz_alloc_zero_kind(size_t size, uint32_t kind) {
+  return alloc_block(size, 1, SZ_ALLOC_MAGIC, kind);
+}
+
 void sz_free(void *ptr) {
   SzRcHdr *h;
   size_t *raw;
@@ -572,6 +576,18 @@ uint32_t sz_rc_kind(const void *ptr) {
   if (!sz_is_rc(ptr))
     return SZ_RC_KIND_COUNT;
   return sz_rc_hdr(ptr)->kind;
+}
+
+uint32_t sz_alloc_kind_of(const void *ptr) {
+  if (!sz_is_rc(ptr) && !sz_is_alloc(ptr))
+    return SZ_RC_KIND_COUNT;
+  return sz_rc_hdr(ptr)->kind;
+}
+
+uint32_t sz_rc_count(const void *ptr) {
+  if (!sz_is_rc(ptr))
+    return 0;
+  return sz_rc_hdr(ptr)->rc;
 }
 
 void sz_release(void *ptr) {
