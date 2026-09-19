@@ -31,10 +31,16 @@ def crumbsStay(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.a11yHas(t, i, "breadcrumb:Breadcrumb") && Timeline.a11yHas(t, i, "link:Docs"))
 
 def startHasNav(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "text:Choose a topic") && Timeline.a11yHas(t, i, "text:Install") && Timeline.a11yHas(t, i, "text:Language") && Timeline.a11yHas(t, i, "text:GUI and Web") && Timeline.a11yHas(t, i, "text:Package") && Timeline.a11yHas(t, i, "text:Prove") && Timeline.a11yHas(t, i, "navtile:Install the CLI") && Timeline.a11yHas(t, i, "navtile:Read the language") && Timeline.a11yHas(t, i, "navtile:Try Signals") && Timeline.a11yHas(t, i, "navtile:Build a GUI") && Timeline.a11yHas(t, i, "navtile:Ship to the web") && Timeline.a11yHas(t, i, "navtile:Packages") && Timeline.a11yHas(t, i, "navtile:Manifest") && Timeline.a11yHas(t, i, "navtile:Commands") && Timeline.a11yHas(t, i, "navtile:Verify") && Timeline.a11yHas(t, i, "navtile:Open the IDE") && Timeline.a11yHas(t, i, "link:Open the GUI topic") && Timeline.a11yHas(t, i, "link:Next: Install") && Timeline.a11yHas(t, i, "chip:start=1") && (Timeline.a11yHas(t, i, "chip:gui=0") || Timeline.a11yHas(t, i, "chip:gui=1")) && (Timeline.a11yHas(t, i, "chip:install=0") || Timeline.a11yHas(t, i, "chip:install=1")) && (Timeline.a11yHas(t, i, "chip:signals=0") || Timeline.a11yHas(t, i, "chip:signals=1")))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "text:Choose a topic") && Timeline.a11yHas(t, i, "text:Try Scuzz") && Timeline.a11yHas(t, i, "text:Install") && Timeline.a11yHas(t, i, "text:Language") && Timeline.a11yHas(t, i, "text:GUI and Web") && Timeline.a11yHas(t, i, "text:Package") && Timeline.a11yHas(t, i, "text:Prove") && Timeline.a11yHas(t, i, "navtile:Run a snippet") && Timeline.a11yHas(t, i, "navtile:Watch a campaign") && Timeline.a11yHas(t, i, "navtile:Install the CLI") && Timeline.a11yHas(t, i, "navtile:Read the language") && Timeline.a11yHas(t, i, "navtile:Try Signals") && Timeline.a11yHas(t, i, "navtile:Build a GUI") && Timeline.a11yHas(t, i, "navtile:Ship to the web") && Timeline.a11yHas(t, i, "navtile:Packages") && Timeline.a11yHas(t, i, "navtile:Manifest") && Timeline.a11yHas(t, i, "navtile:Commands") && Timeline.a11yHas(t, i, "navtile:Verify") && Timeline.a11yHas(t, i, "navtile:Open the IDE") && Timeline.a11yHas(t, i, "link:Open the GUI topic") && Timeline.a11yHas(t, i, "link:Next: Install") && Timeline.a11yHas(t, i, "chip:start=1") && (Timeline.a11yHas(t, i, "chip:gui=0") || Timeline.a11yHas(t, i, "chip:gui=1")) && (Timeline.a11yHas(t, i, "chip:install=0") || Timeline.a11yHas(t, i, "chip:install=1")) && (Timeline.a11yHas(t, i, "chip:signals=0") || Timeline.a11yHas(t, i, "chip:signals=1")))
 
 def pageNavStays(t: Timeline): Verdict =
   Verdict.every(t, i => if (Timeline.signalInt(t, i, "page") == 0) Timeline.a11yHas(t, i, "link:Next: Install") else if (Timeline.signalInt(t, i, "page") == 13) Timeline.a11yHas(t, i, "link:Back: Try it") else Timeline.a11yHas(t, i, "link:Back:") && Timeline.a11yHas(t, i, "link:Next:"))
+
+def tileOpensTry(t: Timeline): Verdict =
+  Verdict.afterHit(t, "navtile:Run a snippet", "text:Try it")
+
+def tileOpensHow(t: Timeline): Verdict =
+  Verdict.afterHit(t, "navtile:Watch a campaign", "text:How it runs")
 
 def tileOpensGui(t: Timeline): Verdict =
   Verdict.afterHit(t, "navtile:Build a GUI", "text:GUI")
@@ -84,7 +90,7 @@ def tryPlusOneCounts(t: Timeline): Verdict =
 })
 
 def howShowsSchedule(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 13 || (Timeline.a11yHas(t, i, "text:seed 0: pass") && Timeline.a11yHas(t, i, "text:seed 128: fail") || Timeline.a11yHas(t, i, "text:seed 0: fail") && Timeline.a11yHas(t, i, "text:seed 128: pass")))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 13 || Timeline.a11yHas(t, i, "text:leftFirst: L must win") && Timeline.a11yHas(t, i, "text:seed 0 first=R fail") && Timeline.a11yHas(t, i, "text:seed 128 first=L pass"))
 
 def howShowsTrace(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 13 || Timeline.a11yHas(t, i, " n 3"))
@@ -96,8 +102,14 @@ def howShowsMutant(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 13 || Timeline.a11yHas(t, i, "text:live ") && Timeline.a11yHas(t, i, "text:mutant "))
 
 def howHasFuzz(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 13 || Timeline.a11yHas(t, i, "button:Fuzz") && Timeline.a11yHas(t, i, "editor:editor"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 13 || Timeline.a11yHas(t, i, "button:Fuzz") && Timeline.a11yHas(t, i, "editor:editor") && Timeline.a11yHas(t, i, "text:Campaign") && (Timeline.a11yHas(t, i, "chip:fail=0") || Timeline.a11yHas(t, i, "chip:fail=1")) && (Timeline.a11yHas(t, i, "chip:pass=0") || Timeline.a11yHas(t, i, "chip:pass=1")))
+
+def howShowsKinds(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 13 || Timeline.a11yHas(t, i, "text:Schedule branches") && Timeline.a11yHas(t, i, "text:Reduction trace") && Timeline.a11yHas(t, i, "text:Coverage arms") && Timeline.a11yHas(t, i, "text:Mutant"))
 
 def howFuzzFindsFail(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Fuzz", "text:fail hidden 3")
+
+def howFuzzMarksFail(t: Timeline): Verdict =
+  Verdict.afterHit(t, "button:Fuzz", "chip:fail=1")
 

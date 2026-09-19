@@ -352,6 +352,9 @@ async function check(browserType, url, mobile) {
     await page.getByRole('link', {name: 'Start', exact: true}).click();
     await expectSection('start');
     await expectText('text:Start');
+    await expectText('text:Try Scuzz');
+    await expectText('navtile:Run a snippet');
+    await expectText('navtile:Watch a campaign');
     const nextInstall = page.getByRole('link', {name: 'Next: Install', exact: true});
     if (mobile) {
       await page.getByRole('link', {name: 'Install', exact: true}).click();
@@ -412,10 +415,10 @@ async function check(browserType, url, mobile) {
     await expectText('text:How it runs');
     await page.waitForFunction(() => {
       const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
-      const seeds = snap.includes('text:seed 0: pass') && snap.includes('text:seed 128: fail') ||
-        snap.includes('text:seed 0: fail') && snap.includes('text:seed 128: pass');
-      return seeds && snap.includes(' n 3') && snap.includes('text:arms ') && snap.includes('text:live ') &&
-        snap.includes('text:mutant ');
+      return snap.includes('text:leftFirst: L must win') &&
+        snap.includes('text:seed 0 first=R fail') && snap.includes('text:seed 128 first=L pass') &&
+        snap.includes(' n 3') && snap.includes('text:arms ') && snap.includes('text:live ') &&
+        snap.includes('text:mutant ') && snap.includes('text:Campaign') && snap.includes('text:Schedule branches');
     }, null, {timeout: 60000}).catch(async error => {
       console.error({how: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
       throw error;
@@ -424,6 +427,7 @@ async function check(browserType, url, mobile) {
     await reveal(fuzz);
     await fuzz.click();
     await expectText('text:fail hidden 3');
+    await expectText('chip:fail=1');
     assert.deepEqual(errors, []);
     console.log(`web: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }

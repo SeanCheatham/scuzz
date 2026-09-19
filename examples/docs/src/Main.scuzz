@@ -34,7 +34,7 @@ def startGroup(title: String, tiles: View): View =
   View.column(View.padding(8, View.heading(2, View.text(title))), tiles)
 
 def startTiles(): View =
-  View.column(startGroup("Install", View.padding(8, View.grid(2, View.navTile(Icon.install(), "Install the CLI", "install")))), startGroup("Language", View.padding(8, View.grid(2, View.navTile(Icon.code(), "Read the language", "language"), View.navTile(Icon.code(), "Try Signals", "signals")))), startGroup("GUI and Web", View.padding(8, View.grid(2, View.navTile(Icon.gui(), "Build a GUI", "gui"), View.navTile(Icon.web(), "Ship to the web", "web")))), startGroup("Package", View.padding(8, View.grid(2, View.navTile(Icon.book(), "Packages", "packages"), View.navTile(Icon.book(), "Manifest", "manifest"), View.navTile(Icon.link(), "Commands", "commands")))), startGroup("Prove", View.padding(8, View.grid(2, View.navTile(Icon.link(), "Verify", "verify"), View.navTile(Icon.gui(), "Open the IDE", "ide")))))
+  View.column(startGroup("Try Scuzz", View.padding(8, View.grid(2, View.navTile(Icon.code(), "Run a snippet", "try"), View.navTile(Icon.link(), "Watch a campaign", "how")))), startGroup("Install", View.padding(8, View.grid(2, View.navTile(Icon.install(), "Install the CLI", "install")))), startGroup("Language", View.padding(8, View.grid(2, View.navTile(Icon.code(), "Read the language", "language"), View.navTile(Icon.code(), "Try Signals", "signals")))), startGroup("GUI and Web", View.padding(8, View.grid(2, View.navTile(Icon.gui(), "Build a GUI", "gui"), View.navTile(Icon.web(), "Ship to the web", "web")))), startGroup("Package", View.padding(8, View.grid(2, View.navTile(Icon.book(), "Packages", "packages"), View.navTile(Icon.book(), "Manifest", "manifest"), View.navTile(Icon.link(), "Commands", "commands")))), startGroup("Prove", View.padding(8, View.grid(2, View.navTile(Icon.link(), "Verify", "verify"), View.navTile(Icon.gui(), "Open the IDE", "ide")))))
 
 def navBack(topics: List[Topic], i: Int): View =
   if (i <= 0) View.text("") else View.link(Str.concat("Back: ", List.at(topics, i - 1).title), List.at(topics, i - 1).id)
@@ -101,37 +101,58 @@ def tryShow(out: TryOut, diags: Signal[String], mounted: Signal[List[View]]): Un
   (Signal.set(diags, if (out.diags == "") "ok" else out.diags), Signal.set(mounted, List.map(out.prog, p => Mount.mount(out.view, p))))._2
 
 def tryLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value]): View =
-  View.column(View.padding(8, View.maxSize(0, 260, View.editor(src))), View.padding(8, View.wrap(View.button("Run", _ => tryRun(src, diags, mounted, pool)), View.bindText(diags))), View.card(View.padding(8, View.each(mounted, v => v))))
+  View.column(View.padding(8, View.heading(2, View.text("Run a snippet"))), View.padding(8, View.maxSize(0, 260, View.editor(src))), View.padding(8, View.wrap(View.button("Run", _ => tryRun(src, diags, mounted, pool)), View.bindText(diags))), View.card(View.padding(8, View.each(mounted, v => v))))
 
 def trySection(topics: List[Topic], blocks: Signal[List[Block]], src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value]): View =
   topicSection(topics, 12, View.column(blocksColumn(blocks), tryLive(src, diags, mounted, pool)))
 
-def howSection(topics: List[Topic], blocks: Signal[List[Block]], src: Signal[String], camp: Signal[String]): View =
-  topicSection(topics, 13, View.column(blocksColumn(blocks), howLive(src, camp)))
+def howSection(topics: List[Topic], blocks: Signal[List[Block]], src: Signal[String], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String]): View =
+  topicSection(topics, 13, View.column(howLive(src, camp, fail, pass, detail), blocksColumn(blocks)))
 
-def howLive(src: Signal[String], camp: Signal[String]): View =
-  View.column(View.padding(8, View.heading(2, View.text("Find a failing oracle"))), paragraph("hidden(code) is true except at 3. Fuzz tries 0 through 8."), View.padding(8, View.maxSize(0, 200, View.editor(src))), View.padding(8, View.wrap(View.button("Fuzz", _ => Signal.set(camp, Eval.campSearch(Signal.get(src), "hidden", 8))), View.bindText(camp))))
+def howLive(src: Signal[String], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String]): View =
+  View.column(View.padding(8, View.heading(2, View.text("Find a failing oracle"))), paragraph("hidden(code) is true except at 3. Fuzz tries 0 through 8."), View.padding(8, View.maxSize(0, 200, View.editor(src))), View.padding(8, View.wrap(View.button("Fuzz", _ => Signal.set(camp, Eval.campSearch(Signal.get(src), "hidden", 8))))), campCard(camp, fail, pass, detail))
+
+def campFailFlag(s: String): Int =
+  if (Str.startsWith(s, "fail ")) 1 else 0
+
+def campPassFlag(s: String): Int =
+  if (s == "pass") 1 else 0
+
+def campDetail(s: String): String =
+  if (s == "Press Fuzz") "Search has not run." else if (s == "pass") "No failing argument in 0 through 8." else if (Str.startsWith(s, "fail ")) "The Bool oracle returned false." else "Check failed. Fix the snippet and press Fuzz."
+
+def campCard(camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String]): View =
+  View.card(View.padding(8, View.column(View.heading(2, View.text("Campaign")), View.padding(8, View.wrap(View.chip(fail, "fail"), View.chip(pass, "pass"))), View.bindText(camp), View.bindText(detail))))
 
 def vizPool(): Ref[Value] =
   Property.force(Ref.of(Value.VList([])))
 
+def vizTitle(kind: String): String =
+  if (kind == "schedule") "Schedule branches" else if (kind == "trace") "Reduction trace" else if (kind == "coverage") "Coverage arms" else "Mutant"
+
 def vizView(kind: String, src: String): View =
-  if (kind == "schedule") vizSchedule(src) else if (kind == "trace") vizTrace(src) else if (kind == "coverage") vizCover(src) else vizMutant(src)
+  View.column(View.padding(8, View.heading(2, View.text(vizTitle(kind)))), if (kind == "schedule") vizSchedule(src) else if (kind == "trace") vizTrace(src) else if (kind == "coverage") vizCover(src) else vizMutant(src))
 
 def vizSchedule(src: String): View =
   vizScheduleAt(src, vizPool())
 
 def vizScheduleAt(src: String, pool: Ref[Value]): View =
-  View.column(code(src), paragraph(schedLine(0, schedOrder(src, 0, pool))), paragraph(schedLine(128, schedOrder(src, 128, pool))))
+  vizScheduleA(src, pool, Eval.tryNowAt(src, 0, pool))
 
-def schedOrder(src: String, seed: Int, pool: Ref[Value]): Int =
-  schedOrderOf(Eval.tryNowAt(src, seed, pool), pool)
+def vizScheduleA(src: String, pool: Ref[Value], a: TryOut): View =
+  vizScheduleB(src, pool, a, Eval.poolInt(pool, "order"))
 
-def schedOrderOf(_out: TryOut, pool: Ref[Value]): Int =
-  Eval.poolInt(pool, "order")
+def vizScheduleB(src: String, pool: Ref[Value], a: TryOut, order0: Int): View =
+  vizScheduleC(src, a, order0, Eval.tryNowAt(src, 128, pool), pool)
 
-def schedLine(seed: Int, order: Int): String =
-  Str.concat("seed ", Str.concat(Str.fromInt(seed), if (order == 1) ": pass" else ": fail"))
+def vizScheduleC(src: String, a: TryOut, order0: Int, b: TryOut, pool: Ref[Value]): View =
+  View.column(code(src), paragraph("leftFirst: L must win"), paragraph(schedBranch(0, a, order0)), paragraph(schedBranch(128, b, Eval.poolInt(pool, "order"))))
+
+def schedFirst(out: TryOut): String =
+  if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"L\""))) "L" else if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"R\""))) "R" else "none"
+
+def schedBranch(seed: Int, out: TryOut, order: Int): String =
+  Str.concat("seed ", Str.concat(Str.fromInt(seed), Str.concat(" first=", Str.concat(schedFirst(out), if (order == 1) " pass" else " fail"))))
 
 def vizTrace(src: String): View =
   vizTraceAt(src, Eval.tryNow(src, vizPool()))
@@ -212,7 +233,10 @@ def mutBindGo(xs: List[String]): String =
     tryPool <- Ref.of(Value.VList([]))
     howSrc = Signal.makeN("howSrc", Topics.campSource())
     howCamp = Signal.makeN("howCamp", "Press Fuzz")
+    howFail = Signal.mapN("howFail", howCamp, campFailFlag)
+    howPass = Signal.mapN("howPass", howCamp, campPassFlag)
+    howDetail = Signal.mapN("howDetail", howCamp, campDetail)
     _ <- tryRun(trySrc, tryDiags, tryMounted, tryPool)
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count, tapped), plainSection(topics, blocks, 5), verifySection(topics, List.at(blocks, 6), opened, tapped), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10), plainSection(topics, blocks, 11), trySection(topics, List.at(blocks, 12), trySrc, tryDiags, tryMounted, tryPool), howSection(topics, List.at(blocks, 13), howSrc, howCamp)))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count, tapped), plainSection(topics, blocks, 5), verifySection(topics, List.at(blocks, 6), opened, tapped), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10), plainSection(topics, blocks, 11), trySection(topics, List.at(blocks, 12), trySrc, tryDiags, tryMounted, tryPool), howSection(topics, List.at(blocks, 13), howSrc, howCamp, howFail, howPass, howDetail)))))
   } yield ()
