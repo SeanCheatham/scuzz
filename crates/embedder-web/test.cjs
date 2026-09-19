@@ -420,6 +420,10 @@ async function check(browserType, url, mobile) {
       console.error({how: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
       throw error;
     });
+    const fuzz = page.getByRole('button', {name: 'Fuzz', exact: true});
+    await reveal(fuzz);
+    await fuzz.click();
+    await expectText('text:fail hidden 3');
     assert.deepEqual(errors, []);
     console.log(`web: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }

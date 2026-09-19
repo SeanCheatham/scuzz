@@ -8,7 +8,7 @@ def idsStable(): Bool =
   Manual.idsLine() == "start|install|language|gui|signals|packages|verify|commands|manifest|ios|web|ide|try|how"
 
 def snippetsFmt(): Bool =
-  List.forall(Manual.allCode(), s => !Manual.isSnippet(s) || Manual.formatSrc(s) == s)
+  List.forall(Manual.allCode(), s => !Manual.isSnippet(s) || Manual.formatSrc(s) == s) && Manual.formatSrc(Topics.campSource()) == Topics.campSource()
 
 def cmdsOk(): Bool =
   List.forall(Manual.allCmd(), s => Str.startsWith(s, "scuzz ")) && List.forall(Manual.allCmd(), s => Manual.hasVerb(Manual.cmdVerb(s)))

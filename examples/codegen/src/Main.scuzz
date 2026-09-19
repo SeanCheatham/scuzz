@@ -834,8 +834,22 @@ def evSchedOk(pool: Ref[Value]): Bool =
 def evSchedReport(pool: Ref[Value]): String =
   if (evSchedOk(pool)) "eval-sched-ok" else "eval-sched-fail"
 
+def srcCamp(): String =
+  """def hidden(code: Int): Bool =
+  if (code == 3) false else true
+
+@main def main: IO[Unit] =
+  IO.pure(())
+"""
+
+def evCampOk(): Bool =
+  Eval.campSearch(srcCamp(), "hidden", 8) == "fail hidden 3" && Eval.campSearch(srcCamp(), "hidden", 2) == "pass"
+
+def evCampReport(): String =
+  if (evCampOk()) "eval-camp-ok" else Str.concat("eval-camp-fail ", Eval.campSearch(srcCamp(), "hidden", 8))
+
 def evTraceMain(): IO[Unit] =
-  Ref.of(Value.VList([])).flatMap(pool => IO.println(evTraceReport(Eval.tryNow(srcTraceLet(), pool), Eval.tryNow(srcTraceTco(), pool))).flatMap(_ => IO.println(evSchedReport(pool))))
+  Ref.of(Value.VList([])).flatMap(pool => IO.println(evTraceReport(Eval.tryNow(srcTraceLet(), pool), Eval.tryNow(srcTraceTco(), pool))).flatMap(_ => IO.println(evSchedReport(pool))).flatMap(_ => IO.println(evCampReport())))
 
 def evTraceReport(a: TryOut, b: TryOut): String =
   if (evTraceLetOk(a) && evTraceTcoOk(b)) "eval-trace-ok" else Str.concat("eval-trace-fail let=", Str.concat(List.join(Eval.traceLines(a.trace), "|"), Str.concat(" tco=", List.join(Eval.traceLines(b.trace), "|"))))

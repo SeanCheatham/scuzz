@@ -152,6 +152,26 @@ def tryNowDone(out: TryOut): TryOut =
 def tryNowCleared(_u: Unit, out: TryOut): TryOut =
   out
 
+def campSearch(src: String, name: String, hi: Int): String =
+  campSearchDiags(Check.human(src), src, name, hi)
+
+def campSearchDiags(diags: String, src: String, name: String, hi: Int): String =
+  if (diags != "scuzz check ok") diags else campSearchGo(load(("Main", src) :: []), name, 0, hi)
+
+def campSearchGo(p: EvProg, name: String, i: Int, hi: Int): String =
+  if (i > hi) "pass" else campSearchAt(p, name, i, hi, callPure(p, "Main", name, Value.VInt(i) :: noVals()))
+
+def campSearchAt(p: EvProg, name: String, i: Int, hi: Int, v: Value): String =
+  v match {
+    case Value.VBool(true) => campSearchGo(p, name, i + 1, hi)
+    case Value.VBool(false) => campFail(name, i)
+    case Value.VErr(msg) => msg
+    case _ => campFail(name, i)
+  }
+
+def campFail(name: String, i: Int): String =
+  Str.concat("fail ", Str.concat(name, Str.concat(" ", Str.fromInt(i))))
+
 def poolInt(pool: Ref[Value], name: String): Int =
   poolIntGo(listOf(refGet(pool)), name)
 

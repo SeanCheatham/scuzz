@@ -106,8 +106,11 @@ def tryLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[Vie
 def trySection(topics: List[Topic], blocks: Signal[List[Block]], src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value]): View =
   topicSection(topics, 12, View.column(blocksColumn(blocks), tryLive(src, diags, mounted, pool)))
 
-def howSection(topics: List[Topic], blocks: Signal[List[Block]]): View =
-  topicSection(topics, 13, blocksColumn(blocks))
+def howSection(topics: List[Topic], blocks: Signal[List[Block]], src: Signal[String], camp: Signal[String]): View =
+  topicSection(topics, 13, View.column(blocksColumn(blocks), howLive(src, camp)))
+
+def howLive(src: Signal[String], camp: Signal[String]): View =
+  View.column(View.padding(8, View.heading(2, View.text("Find a failing oracle"))), paragraph("hidden(code) is true except at 3. Fuzz tries 0 through 8."), View.padding(8, View.maxSize(0, 200, View.editor(src))), View.padding(8, View.wrap(View.button("Fuzz", _ => Signal.set(camp, Eval.campSearch(Signal.get(src), "hidden", 8))), View.bindText(camp))))
 
 def vizPool(): Ref[Value] =
   Property.force(Ref.of(Value.VList([])))
@@ -207,7 +210,9 @@ def mutBindGo(xs: List[String]): String =
     tryDiags = Signal.makeN("tryDiags", "")
     tryMounted = Signal.make([View.text("Press Run")])
     tryPool <- Ref.of(Value.VList([]))
+    howSrc = Signal.makeN("howSrc", Topics.campSource())
+    howCamp = Signal.makeN("howCamp", "Press Fuzz")
     _ <- tryRun(trySrc, tryDiags, tryMounted, tryPool)
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count, tapped), plainSection(topics, blocks, 5), verifySection(topics, List.at(blocks, 6), opened, tapped), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10), plainSection(topics, blocks, 11), trySection(topics, List.at(blocks, 12), trySrc, tryDiags, tryMounted, tryPool), howSection(topics, List.at(blocks, 13))))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count, tapped), plainSection(topics, blocks, 5), verifySection(topics, List.at(blocks, 6), opened, tapped), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10), plainSection(topics, blocks, 11), trySection(topics, List.at(blocks, 12), trySrc, tryDiags, tryMounted, tryPool), howSection(topics, List.at(blocks, 13), howSrc, howCamp)))))
   } yield ()
