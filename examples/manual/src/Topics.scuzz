@@ -71,7 +71,15 @@ def trySource(): String =
   "@main def main: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    label = Signal.map(clicks, n => s\"Clicks: $n\")\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => Signal.set(clicks, Signal.get(clicks) + 1))))\n  } yield ()\n"
 
 def how(): Topic =
-  Topic("how", "How it runs", p("The evaluator reduces a snippet and records a trace: each row is a source span, a binding that changed, or an effect. Self tail calls collapse. Docs renders that trace, two schedule seeds of one IO.both snippet, coverage arms on the source, and one mutant.") :: p("Queue.offer L and Queue.offer R race. leftFirst requires L. One schedule seed passes. Another fails.") :: Block.Viz("schedule", schedSource()) :: Block.Viz("trace", traceSource()) :: Block.Viz("coverage", coverSource()) :: Block.Viz("mutant", mutSource()) :: [])
+  Topic("how", "How it runs", p("The evaluator reduces a snippet and records a trace: each row is a source span, a binding that changed, or an effect. Self tail calls collapse. Docs renders that trace, two schedule seeds of one IO.both snippet, coverage arms on the source, and one mutant.") :: p("Queue.offer L and Queue.offer R race. leftFirst requires L. One schedule seed passes. Another fails.") :: p("Press Fuzz to search a Bool oracle. hidden is true except at 3. The search tries 0 through 8 and prints the failing argument.") :: Block.Viz("schedule", schedSource()) :: Block.Viz("trace", traceSource()) :: Block.Viz("coverage", coverSource()) :: Block.Viz("mutant", mutSource()) :: [])
+
+def campSource(): String =
+  """def hidden(code: Int): Bool =
+  if (code == 3) false else true
+
+@main def main: IO[Unit] =
+  IO.pure(())
+"""
 
 def schedSource(): String =
   "@main def main: IO[Unit] =\n  for {\n    order = Signal.makeN(\"order\", 0)\n    q <- Queue.unbounded()\n    _ <- IO.both(Queue.offer(q, \"L\"), Queue.offer(q, \"R\"))\n    first <- Queue.take(q)\n    _ = Signal.set(order, if (Str.eq(first, \"L\")) 1 else 0)\n  } yield ()\n"

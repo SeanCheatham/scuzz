@@ -313,6 +313,7 @@ slice_codegen() {
   grep -q "eval-ui-ok" /tmp/codegen.out
   grep -q "eval-trace-ok" /tmp/codegen.out
   grep -q "eval-sched-ok" /tmp/codegen.out
+  grep -q "eval-camp-ok" /tmp/codegen.out
   grep -q "probe-ok" /tmp/codegen.out
   grep -qx "codegen:probe" /tmp/codegen-probe.cov
   local memory_dir

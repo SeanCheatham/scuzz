@@ -3000,7 +3000,8 @@ void sz_property_classify_flush(void) {
   fclose(f);
 }
 
-#define SZ_SESSION_MAX 32
+/* Session claims, always, eventually, and response thunks share this cap. */
+#define SZ_SESSION_MAX 64
 typedef struct {
   char *name;
   int64_t (*fn)(void);
