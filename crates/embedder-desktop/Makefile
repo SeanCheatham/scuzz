@@ -32,8 +32,12 @@ build/libscuzz_embedder.a: $(OBJ)
 build/test_headless: tests/test_headless.c build/libscuzz_embedder.a | build
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_headless.c -Lbuild -lscuzz_embedder -lX11 -o $@
 
-test: lib build/test_headless
+build/test_idle_events: tests/test_idle_events.c build/libscuzz_embedder.a | build
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_idle_events.c -Lbuild -lscuzz_embedder -lX11 -o $@
+
+test: lib build/test_headless build/test_idle_events
 	env -u DISPLAY ./build/test_headless
+	@if [ -n "$$DISPLAY" ]; then ./build/test_idle_events; else echo "embedder-desktop: skip idle events (no DISPLAY)"; fi
 
 else ifeq ($(UNAME_S),Darwin)
 

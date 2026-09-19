@@ -117,7 +117,7 @@ Live and simulated HTTP clients share one URL parser. A URL with no path uses `/
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Desktop/Mobile. Frame boundary is `pump`. A live loop paints when the session is dirty. It waits when nothing changes. World effects stay blessed `IO`. No UI feature without a Headless path. Nested declarative construction only. `Ui.run(_ => view)` is the session. Dump and inject ops: run `scuzz docs commands`.
+Headless is a **peer** of Desktop/Mobile. Frame boundary is `pump`. A live loop paints when the session is dirty. It waits when nothing changes. Each pump still drains OS events, so a static frame receives clicks and close. World effects stay blessed `IO`. No UI feature without a Headless path. Nested declarative construction only. `Ui.run(_ => view)` is the session. Dump and inject ops: run `scuzz docs commands`.
 
 **The tree owns views.** A `View` is not a reference-counted value. Its parent frees it. A `List[View]` holds views for `View.each`, which mounts the list at layout and frees the views it replaces. A `Signal[List[View]]` that drops a list before any `View.each` mounts it frees the views in that list, so two writes between layouts do not leak the middle list. A list another holder still reads keeps its views. Do not mount a view pulled out of a list signal by hand.
 

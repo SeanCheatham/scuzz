@@ -1,6 +1,7 @@
 import Parse.Param
 import Parse.En
 import Parse.EnCase
+import Eval.TryOut
 
 def srcHi(): String =
   "@main def main: IO[Unit] =\n  IO.println(\"Hi\")\n"
@@ -770,19 +771,7 @@ def evDump(): String =
   if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else "ev-other"
 
 def srcCounter(): String =
-  """record CounterState(value: Int)
-
-def countLabel(n: Int): String =
-  Str.concat("Count: ", Str.fromInt(n))
-
-@main def main: IO[Unit] =
-  for {
-    state = Signal.make(CounterState(0))
-    count = Signal.map(state, v => v.value)
-    label = Signal.map(count, n => countLabel(n))
-    _ <- Ui.run(_ => View.column(View.bindText(label), View.button("+1", _ => IO.pure(Signal.set(state, Signal.get(state).copy(value = Signal.get(count) + 1))))))
-  } yield ()
-"""
+  "record CounterState(value: Int)\n\ndef countLabel(n: Int): String =\n  Str.concat(\"Count: \", Str.fromInt(n))\n\n@main def main: IO[Unit] =\n  for {\n    state = Signal.make(CounterState(0))\n    count = Signal.map(state, v => v.value)\n    label = Signal.map(count, n => countLabel(n))\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => IO.pure(Signal.set(state, Signal.get(state).copy(value = Signal.get(count) + 1))))))\n  } yield ()\n"
 
 def evCounterView(): IO[String] =
   Ref.of(Value.VUnit).flatMap(host => Ref.of(Value.VList([])).flatMap(pool => evCounterRun(Eval.withHost(evProg(srcCounter()), host, pool), host)))
@@ -813,6 +802,49 @@ def evSigStr(sv: Value): String =
 
 def evUiMain(): IO[Unit] =
   evCounterView().flatMap(label => IO.println(if (label == "\"Count: 1\"") "eval-ui-ok" else Str.concat("eval-ui-fail ", label)))
+
+def srcTraceLet(): String =
+  """@main def main: IO[Unit] =
+  for {
+    n = 1 + 2
+    _ <- IO.pure(())
+  } yield ()
+"""
+
+def srcTraceTco(): String =
+  """def countdown(n: Int): Int =
+  if (n <= 0) 0 else countdown(n - 1)
+
+@main def main: IO[Unit] =
+  for {
+    _ = countdown(8)
+    _ <- IO.pure(())
+  } yield ()
+"""
+
+def srcSched(): String =
+  "@main def main: IO[Unit] =\n  for {\n    order = Signal.makeN(\"order\", 0)\n    q <- Queue.unbounded()\n    _ <- IO.both(Queue.offer(q, \"L\"), Queue.offer(q, \"R\"))\n    first <- Queue.take(q)\n    _ = Signal.set(order, if (Str.eq(first, \"L\")) 1 else 0)\n  } yield ()\n"
+
+def evSchedFirst(out: TryOut): String =
+  if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"L\""))) "L" else if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"R\""))) "R" else "none"
+
+def evSchedOk(pool: Ref[Value]): Bool =
+  evSchedFirst(Eval.tryNowAt(srcSched(), 0, pool)) == "R" && evSchedFirst(Eval.tryNowAt(srcSched(), 128, pool)) == "L"
+
+def evSchedReport(pool: Ref[Value]): String =
+  if (evSchedOk(pool)) "eval-sched-ok" else "eval-sched-fail"
+
+def evTraceMain(): IO[Unit] =
+  Ref.of(Value.VList([])).flatMap(pool => IO.println(evTraceReport(Eval.tryNow(srcTraceLet(), pool), Eval.tryNow(srcTraceTco(), pool))).flatMap(_ => IO.println(evSchedReport(pool))))
+
+def evTraceReport(a: TryOut, b: TryOut): String =
+  if (evTraceLetOk(a) && evTraceTcoOk(b)) "eval-trace-ok" else Str.concat("eval-trace-fail let=", Str.concat(List.join(Eval.traceLines(a.trace), "|"), Str.concat(" tco=", List.join(Eval.traceLines(b.trace), "|"))))
+
+def evTraceLetOk(out: TryOut): Bool =
+  List.exists(Eval.traceLines(out.trace), s => Str.contains(s, " n 3")) && List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "IO.pure"))
+
+def evTraceTcoOk(out: TryOut): Bool =
+  List.len(List.filter(Eval.traceLines(out.trace), s => Str.contains(s, "countdown"))) == 1
 
 def probeDriver(r: Ref[Int], toks: List[String]): IO[Unit] =
   Ref.update(r, n => n + Str.toInt(List.at(toks, 0), 0))
@@ -862,4 +894,4 @@ def probeMain(): IO[Unit] =
   Sys.getenv("SCUZZ_EV_TESTRT").flatMap(ev => if (ev == "") IO.println("probe-skip") else probeGo())
 
 @main def main: IO[Unit] =
-  IO.println(if (allOk()) "ir-ok" else dumpAll()).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => probeMain())
+  IO.println(if (allOk()) "ir-ok" else dumpAll()).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => evTraceMain()).flatMap(_ => probeMain())

@@ -59,6 +59,7 @@ static XIC g_xic;
  * (destroy or WM close); the caller must stop using g_dpy/g_win.
  * Defined below; the clipboard wait needs it before its definition. */
 static int x11_dispatch_event(XEvent *ev);
+static void x11_drain_pending(void);
 
 /* X errors are async: the default handler exits the process. A clipboard
  * requestor can die between XChangeProperty and delivery; a stale window
@@ -344,7 +345,19 @@ static int q_push(const SzInputEvent *ev) {
   return 1;
 }
 
+static void x11_drain_pending(void) {
+  if (!g_dpy || g_user_quit)
+    return;
+  while (XPending(g_dpy)) {
+    XEvent ev;
+    XNextEvent(g_dpy, &ev);
+    if (x11_dispatch_event(&ev))
+      return;
+  }
+}
+
 int sz_embedder_poll_event(SzInputEvent *out) {
+  x11_drain_pending();
   if (!out || g_q_head == g_q_tail)
     return 0;
   *out = g_queue[g_q_head];
@@ -991,14 +1004,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
   XPutImage(g_dpy, g_win, g_gc, g_img, 0, 0, 0, 0, (unsigned)width,
             (unsigned)height);
   XFlush(g_dpy);
-
-  /* Drain pending events: quit/close shutdown; input only enqueued. */
-  while (XPending(g_dpy)) {
-    XEvent ev;
-    XNextEvent(g_dpy, &ev);
-    if (x11_dispatch_event(&ev))
-      return 1;
-  }
+  x11_drain_pending();
   return 1;
 }
 

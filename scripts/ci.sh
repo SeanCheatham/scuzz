@@ -311,6 +311,8 @@ slice_codegen() {
   grep -q "ir-ok" /tmp/codegen.out
   grep -q "eval-ok" /tmp/codegen.out
   grep -q "eval-ui-ok" /tmp/codegen.out
+  grep -q "eval-trace-ok" /tmp/codegen.out
+  grep -q "eval-sched-ok" /tmp/codegen.out
   grep -q "probe-ok" /tmp/codegen.out
   grep -qx "codegen:probe" /tmp/codegen-probe.cov
   local memory_dir
@@ -619,6 +621,7 @@ PY
 slice_desktop() {
   need_cmd xvfb-run "sudo apt-get install -y xvfb libx11-dev"
   need_cmd timeout "sudo apt-get install -y coreutils"
+  xvfb-run -a make -C crates/embedder-desktop test
   test -x examples/studio/build/studio || slice_ui
   timeout 30s xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 \
     SCUZZ_UI_WIDTH=400 SCUZZ_UI_HEIGHT=560 \

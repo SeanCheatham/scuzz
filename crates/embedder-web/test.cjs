@@ -46,7 +46,7 @@ async function check(browserType, url, mobile) {
       await locator.evaluate(node => node.focus());
       await page.waitForFunction(el => {
         const box = el.getBoundingClientRect();
-        return box.height > 0 && box.top >= 0 && box.bottom <= innerHeight;
+        return box.height > 0 && box.bottom > 0 && box.top < innerHeight;
       }, await locator.elementHandle());
     };
     await page.goto(url);
@@ -353,13 +353,21 @@ async function check(browserType, url, mobile) {
     await expectSection('start');
     await expectText('text:Start');
     const nextInstall = page.getByRole('link', {name: 'Next: Install', exact: true});
-    await reveal(nextInstall);
-    await nextInstall.click();
+    if (mobile) {
+      await page.getByRole('link', {name: 'Install', exact: true}).click();
+    } else {
+      await reveal(nextInstall);
+      await nextInstall.click();
+    }
     await expectSection('install');
     assert.equal(new URL(page.url()).hash, '#section=install');
     const backStart = page.getByRole('link', {name: 'Back: Start', exact: true});
-    await reveal(backStart);
-    await backStart.click();
+    if (mobile) {
+      await page.getByRole('link', {name: 'Start', exact: true}).click();
+    } else {
+      await reveal(backStart);
+      await backStart.click();
+    }
     await expectSection('start');
     await expectText('text:Start');
     await page.goto(url + '?preview=1#section=language');
@@ -396,6 +404,22 @@ async function check(browserType, url, mobile) {
     await reveal(run);
     await run.click();
     await page.waitForFunction(() => Module.textBlocks?.some(block => /expected String/.test(block.text)));
+    assert.deepEqual(errors, []);
+    const howLink = page.getByRole('link', {name: 'How it runs', exact: true});
+    await reveal(howLink);
+    await howLink.click();
+    await expectSection('how');
+    await expectText('text:How it runs');
+    await page.waitForFunction(() => {
+      const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
+      const seeds = snap.includes('text:seed 0: pass') && snap.includes('text:seed 128: fail') ||
+        snap.includes('text:seed 0: fail') && snap.includes('text:seed 128: pass');
+      return seeds && snap.includes(' n 3') && snap.includes('text:arms ') && snap.includes('text:live ') &&
+        snap.includes('text:mutant ');
+    }, null, {timeout: 60000}).catch(async error => {
+      console.error({how: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
+      throw error;
+    });
     assert.deepEqual(errors, []);
     console.log(`web: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }

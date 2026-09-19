@@ -35,8 +35,9 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
 /* Destroy the window / display connection. */
 void sz_embedder_shutdown(void);
 
-/* Pop one queued OS event into out. Returns 1 if an event was written.
- * present() enqueues pointer / scroll / key events. pump drains through this. */
+/* Drain pending OS events into the queue, then pop one into out.
+ * Returns 1 if an event was written. Idle pumps call this so a static
+ * frame still receives clicks and close. */
 int sz_embedder_poll_event(SzInputEvent *out);
 
 /* Session clipboard sync. `set` stores UTF-8 on the OS pasteboard when a

@@ -32,9 +32,9 @@ record EvEnv(vars: List[(String, Value)], mod: String, loc: String)
 
 record EvStep(e: Expr, env: EvEnv)
 
-record TryOut(diags: String, view: Value, prog: List[EvProg])
+record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]])
 
 import Parse.Expr
 import Parse.Fun
@@ -77,7 +77,7 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs())
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs())
   }
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
@@ -140,16 +140,85 @@ def tryIt(src: String, pool: Ref[Value]): IO[TryOut] =
 def tryNow(src: String, pool: Ref[Value]): TryOut =
   Property.force(tryIt(src, pool))
 
+def tryNowAt(src: String, seed: Int, pool: Ref[Value]): TryOut =
+  tryNowRest(Fuzz.hit(Str.concat("seed:", Str.fromInt(seed))), src, pool)
+
+def tryNowRest(_u: Unit, src: String, pool: Ref[Value]): TryOut =
+  tryNowDone(tryNow(src, pool))
+
+def tryNowDone(out: TryOut): TryOut =
+  tryNowCleared(Fuzz.hit("seed:"), out)
+
+def tryNowCleared(_u: Unit, out: TryOut): TryOut =
+  out
+
+def poolInt(pool: Ref[Value], name: String): Int =
+  poolIntGo(listOf(refGet(pool)), name)
+
+def poolIntGo(xs: List[Value], name: String): Int =
+  if (List.isEmpty(xs)) 0 else poolIntHd(List.at(xs, 0), List.tail(xs), name)
+
+def poolIntHd(v: Value, rest: List[Value], name: String): Int =
+  v match {
+    case Value.VSig(_, n, _, si, _) => if (n == name) Signal.get(si) else poolIntGo(rest, name)
+    case _ => poolIntGo(rest, name)
+  }
+
 def tryChecked(src: String, diags: String, pool: Ref[Value]): IO[TryOut] =
-  if (diags != "scuzz check ok") IO.pure(TryOut(diags, Value.VUnit, [])) else Ref.of(Value.VUnit).flatMap(host => tryHost(withHost(load(("Main", src) :: []), host, pool), host))
+  if (diags != "scuzz check ok") IO.pure(TryOut(diags, Value.VUnit, [], Value.VList(noVals()))) else Ref.of(Value.VUnit).flatMap(host => Ref.of(Value.VList(noVals())).flatMap(log => tryHost(withLog(withHost(load(("Main", src) :: []), host, pool), log), host)))
 
 def tryHost(p: EvProg, host: Ref[Value]): IO[TryOut] =
   tryMain(step(EvStep(p.main, envOf(p)), p)).flatMap(msg => Ref.get(host).map(v => tryOut(msg, v, p)))
 
 def tryOut(msg: String, v: Value, p: EvProg): TryOut =
   v match {
-    case Value.VView(_, _) => TryOut(msg, v, p :: [])
-    case _ => TryOut(if (msg == "") "eval: @main did not reach Ui.run" else msg, v, [])
+    case Value.VView(_, _) => TryOut(msg, v, p :: [], logOf(p))
+    case _ => TryOut(if (msg == "") "eval: @main did not reach Ui.run" else msg, v, [], logOf(p))
+  }
+
+def logOf(p: EvProg): Value =
+  if (List.isEmpty(p.log)) Value.VList(noVals()) else refGet(List.at(p.log, 0))
+
+def logAdd(p: EvProg, off: Int, bind: String, effect: String, env: EvEnv): Unit =
+  if (List.isEmpty(p.log)) () else logPut(List.at(p.log, 0), locStr(env.mod, p, off), bind, effect)
+
+def logPut(r: Ref[Value], loc: String, bind: String, effect: String): Unit =
+  logPutList(r, listOf(refGet(r)), loc, bind, effect)
+
+def logPutList(r: Ref[Value], xs: List[Value], loc: String, bind: String, effect: String): Unit =
+  if (List.len(xs) >= 64) () else if (logSame(xs, loc, bind, effect)) () else refPut(r, Value.VList(List.append(xs, logRow(loc, bind, effect))))
+
+def logRow(loc: String, bind: String, effect: String): Value =
+  Value.VTuple(Value.VStr(loc) :: Value.VStr(bind) :: Value.VStr(effect) :: noVals())
+
+def logSame(xs: List[Value], loc: String, bind: String, effect: String): Bool =
+  List.exists(xs, v => logSameRow(v, loc, bind, effect))
+
+def logSameRow(v: Value, loc: String, bind: String, effect: String): Bool =
+  v match {
+    case Value.VTuple(xs) => List.len(xs) >= 3 && strOf(List.at(xs, 0)) == loc && strOf(List.at(xs, 1)) == bind && strOf(List.at(xs, 2)) == effect
+    case _ => false
+  }
+
+def traceLine(v: Value): String =
+  v match {
+    case Value.VTuple(xs) => if (List.len(xs) < 3) "" else traceLine3(strOf(List.at(xs, 0)), strOf(List.at(xs, 1)), strOf(List.at(xs, 2)))
+    case _ => ""
+  }
+
+def traceLine3(loc: String, bind: String, effect: String): String =
+  if (bind == "") Str.concat(loc, Str.concat(" ", effect)) else if (effect == "") Str.concat(loc, Str.concat(" ", bind)) else Str.concat(loc, Str.concat(" ", Str.concat(bind, Str.concat(" ", effect))))
+
+def traceLines(v: Value): List[String] =
+  List.map(listOf(v), x => traceLine(x))
+
+def logAfter(_u: Unit, v: Value): Value =
+  v
+
+def logKit(v: Value, f: String, env: EvEnv, p: EvProg, off: Int): Value =
+  v match {
+    case Value.VIo(_) => logAfter(logAdd(p, off, "", f, env), v)
+    case _ => v
   }
 
 def tryMain(v: Value): IO[String] =
@@ -381,12 +450,15 @@ def handleErr(e: Value, f: Value, env: EvEnv, p: EvProg, off: Int): IO[Value, Va
 
 def ifStep(cv: Value, t: Expr, el: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
   cv match {
-    case Value.VBool(b) => if (b) ifArmStep(t, "t", env, off) else ifArmStep(el, "e", env, off)
+    case Value.VBool(b) => if (b) ifArmStep(t, "t", env, off, p) else ifArmStep(el, "e", env, off, p)
     case Value.VErr(_) => valueStep(cv)
     case _ => valueStep(errAt("if condition is not Bool", env, p, off))
   }
 
-def ifArmStep(e: Expr, tag: String, env: EvEnv, parentOff: Int): EvStep =
+def ifArmStep(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): EvStep =
+  if (isUnitExpr(e)) EvStep(e, env) else ifArmLogged(logAdd(p, Parse.spanOff(e, parentOff), "", Str.concat("#", tag), env), e, tag, env, parentOff)
+
+def ifArmLogged(_u: Unit, e: Expr, tag: String, env: EvEnv, parentOff: Int): EvStep =
   if (isUnitExpr(e)) EvStep(e, env) else armStep(e, tag, env, parentOff)
 
 def armStep(e: Expr, tag: String, env: EvEnv, parentOff: Int): EvStep =
@@ -434,9 +506,12 @@ def defStepAligned(d: Fun, al: (List[Expr], String), env: EvEnv, p: EvProg, off:
   }
 
 def defStepVals(d: Fun, vals: List[Value], p: EvProg): EvStep =
-  if (hasErr(vals)) valueStep(firstErr(vals)) else defBody(d, vals, defLoc(d, p))
+  if (hasErr(vals)) valueStep(firstErr(vals)) else defBody(d, vals, defLoc(d, p), p)
 
-def defBody(d: Fun, vals: List[Value], loc: String): EvStep =
+def defBody(d: Fun, vals: List[Value], loc: String, p: EvProg): EvStep =
+  defBodyLogged(logAdd(p, d.off, "", d.name, EvEnv(noVars(), d.mod, loc)), d, vals, loc)
+
+def defBodyLogged(_u: Unit, d: Fun, vals: List[Value], loc: String): EvStep =
   if (loc == "") EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, "")) else hitStep(Fuzz.hit(loc), EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc)))
 
 def defLoc(d: Fun, p: EvProg): String =
@@ -923,7 +998,7 @@ def forBody(v: Value, drew: Bool): Value =
 
 def forBind(b: Bind, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
   b match {
-    case Bind(draw, name, value) => forBound(draw, name, step(EvStep(if (draw) value else Emit.nameSig(name, value), env), p), rest, body, env, p, off, drew)
+    case Bind(draw, name, value) => forBound(draw, name, step(EvStep(if (draw) value else Emit.nameSig(name, value), env), p), rest, body, env, p, Parse.spanOff(value, off), drew)
   }
 
 def forBound(draw: Bool, name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
@@ -936,7 +1011,7 @@ def forGuard(v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off:
   }
 
 def forPure(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
-  tryPat(name, v, p) match {
+  tryPat(name, logAfter(if (name == "_") () else logAdd(p, off, name, show(v), env), v), p) match {
     case Some(vars) => forValue(rest, body, EvEnv(List.concat(vars, env.vars), env.mod, env.loc), p, off, drew)
     case None => errAt("for binding does not match", env, p, off)
   }
@@ -1199,6 +1274,9 @@ def lastTrue(rs: List[Value], i: Int, hit: Int): Int =
   if (List.isEmpty(rs)) hit else lastTrue(List.tail(rs), i + 1, if (boolOf(List.at(rs, 0))) i else hit)
 
 def kitCall(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  logKit(kitDispatch(f, vals, env, p, off), f, env, p, off)
+
+def kitDispatch(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "Map.")) mapKit(f, vals, env, p, off) else if (Str.startsWith(f, "Set.")) setKit(f, vals, env, p, off) else if (Str.startsWith(f, "Json.")) jsonKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else if (Str.startsWith(f, "Stream.")) streamKit(f, vals, env, p, off) else if (Str.startsWith(f, "Fs.") || Str.startsWith(f, "Sys.")) fsKit(f, vals, env, p, off) else if (Str.startsWith(f, "Net.")) netKit(f, vals, env, p, off) else if (isHandleKit(f)) handleKit(f, vals, env, p, off) else if (Str.startsWith(f, "Property.")) propKit(f, vals, env, p, off) else if (Str.startsWith(f, "Timeline.")) tlKit(f, vals, env, p, off) else if (Str.startsWith(f, "Verdict.")) verdictKit(f, vals, env, p, off) else if (isUiKit(f)) uiKit(f, vals, env, p, off) else miscKit(f, vals, env, p, off)
 
 def strKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
@@ -1818,10 +1896,13 @@ def probeExit(e: String): Int =
   if (Str.startsWith(e, "probe exit ")) Str.toInt(Str.drop(e, 11), 1) else 1
 
 def withCtx(p: EvProg, ctx: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log)
 
 def withHost(p: EvProg, host: Ref[Value], pool: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig))
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log)
+
+def withLog(p: EvProg, log: Ref[Value]): EvProg =
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs())
 
 def sigRefs(): List[Ref[Value]] =
   newRef(Value.VList(noVals())) :: newRef(Value.VInt(0)) :: newRef(Value.VList(noVals())) :: noRefs()

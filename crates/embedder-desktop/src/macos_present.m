@@ -12,6 +12,10 @@
 static void enqueue_compose(const char *text);
 static void enqueue_text_edit(const char *text);
 static void enqueue_key(const char *name, const char *text, int mods, int repeat);
+static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button);
+static void enqueue_scroll(float x, float y, float dy);
+static int event_content_xy(NSEvent *ev, float *x, float *y);
+static void mark_user_quit(void);
 
 /* Finder launch has no CLI environment. Read the packaged UI configuration. */
 __attribute__((constructor)) static void configure_bundle(void) {
@@ -259,7 +263,77 @@ static int q_push(const SzInputEvent *ev) {
   return 1;
 }
 
+static int cocoa_drain_events(void) {
+  int quit = 0;
+  for (;;) {
+    NSEvent *ev = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                     untilDate:[NSDate distantPast]
+                                        inMode:NSDefaultRunLoopMode
+                                       dequeue:YES];
+    if (!ev)
+      break;
+
+    {
+      NSEventType t = [ev type];
+      float x, y;
+      if (t == NSEventTypeLeftMouseDown && event_content_xy(ev, &x, &y)) {
+        enqueue_pointer(SZ_POINTER_DOWN, x, y, 1);
+        continue;
+      }
+      if (t == NSEventTypeLeftMouseDragged && event_content_xy(ev, &x, &y)) {
+        enqueue_pointer(SZ_POINTER_MOVE, x, y, 1);
+        continue;
+      }
+      if (t == NSEventTypeLeftMouseUp && event_content_xy(ev, &x, &y)) {
+        enqueue_pointer(SZ_POINTER_UP, x, y, 1);
+        continue;
+      }
+      if (t == NSEventTypeRightMouseDown && event_content_xy(ev, &x, &y)) {
+        enqueue_pointer(SZ_POINTER_DOWN, x, y, 3);
+        continue;
+      }
+      if (t == NSEventTypeRightMouseDragged && event_content_xy(ev, &x, &y)) {
+        enqueue_pointer(SZ_POINTER_MOVE, x, y, 3);
+        continue;
+      }
+      if (t == NSEventTypeRightMouseUp && event_content_xy(ev, &x, &y)) {
+        enqueue_pointer(SZ_POINTER_UP, x, y, 3);
+        continue;
+      }
+      if (t == NSEventTypeMouseMoved && event_content_xy(ev, &x, &y)) {
+        enqueue_pointer(SZ_POINTER_MOVE, x, y, 0);
+        continue;
+      }
+      if (t == NSEventTypeScrollWheel && event_content_xy(ev, &x, &y)) {
+        enqueue_scroll(x, y, (float)[ev scrollingDeltaY]);
+        continue;
+      }
+    }
+
+    if ([ev type] == NSEventTypeKeyDown) {
+      if (g_content)
+        [(ScuzzContentView *)g_content interpretKeyEvents:@[ev]];
+      continue;
+    }
+
+    [NSApp sendEvent:ev];
+  }
+  if (g_win && ![g_win isVisible])
+    quit = 1;
+  return quit;
+}
+
 int sz_embedder_poll_event(SzInputEvent *out) {
+  if (g_ready && !g_user_quit) {
+    __block int quit = 0;
+    on_main(^{
+      @autoreleasepool {
+        quit = cocoa_drain_events();
+      }
+    });
+    if (quit)
+      mark_user_quit();
+  }
   if (!out || g_q_head == g_q_tail)
     return 0;
   *out = g_queue[g_q_head];
@@ -481,64 +555,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
       [g_view setImage:image];
       [g_view setNeedsDisplay:YES];
       [g_win displayIfNeeded];
-
-      /* Drain pending events: quit handled here; input only enqueued. */
-      for (;;) {
-        NSEvent *ev = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                         untilDate:[NSDate distantPast]
-                                            inMode:NSDefaultRunLoopMode
-                                           dequeue:YES];
-        if (!ev)
-          break;
-
-        {
-          NSEventType t = [ev type];
-          float x, y;
-          if (t == NSEventTypeLeftMouseDown && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_DOWN, x, y, 1);
-            continue;
-          }
-          if (t == NSEventTypeLeftMouseDragged && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_MOVE, x, y, 1);
-            continue;
-          }
-          if (t == NSEventTypeLeftMouseUp && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_UP, x, y, 1);
-            continue;
-          }
-          if (t == NSEventTypeRightMouseDown && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_DOWN, x, y, 3);
-            continue;
-          }
-          if (t == NSEventTypeRightMouseDragged && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_MOVE, x, y, 3);
-            continue;
-          }
-          if (t == NSEventTypeRightMouseUp && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_UP, x, y, 3);
-            continue;
-          }
-          if (t == NSEventTypeMouseMoved && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_MOVE, x, y, 0);
-            continue;
-          }
-          /* scrollingDeltaY: positive = content up (matches SZ_INPUT_SCROLL). */
-          if (t == NSEventTypeScrollWheel && event_content_xy(ev, &x, &y)) {
-            enqueue_scroll(x, y, (float)[ev scrollingDeltaY]);
-            continue;
-          }
-        }
-
-        if ([ev type] == NSEventTypeKeyDown) {
-          if (g_content)
-            [(ScuzzContentView *)g_content interpretKeyEvents:@[ev]];
-          continue;
-        }
-
-        [NSApp sendEvent:ev];
-      }
-
-      if (!quit && g_win && ![g_win isVisible])
+      if (cocoa_drain_events())
         quit = 1;
       ok = 1;
     }

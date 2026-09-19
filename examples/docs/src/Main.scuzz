@@ -15,6 +15,7 @@ def blockView(b: Block): View =
     case Block.Code(text) => code(text)
     case Block.Cmd(text) => code(text)
     case Block.Link(nav) => View.padding(8, View.link(nav.label, nav.route))
+    case Block.Viz(kind, src) => vizView(kind, src)
   }
 
 def blocksColumn(xs: Signal[List[Block]]): View =
@@ -27,7 +28,7 @@ def startHero(): View =
   View.padding(8, View.heading(2, View.text("Choose a topic")))
 
 def startChips(topics: List[Topic], opened: List[Signal[Int]]): View =
-  View.padding(8, View.wrap(View.chip(List.at(opened, 0), List.at(topics, 0).id), View.chip(List.at(opened, 1), List.at(topics, 1).id), View.chip(List.at(opened, 2), List.at(topics, 2).id), View.chip(List.at(opened, 3), List.at(topics, 3).id), View.chip(List.at(opened, 4), List.at(topics, 4).id), View.chip(List.at(opened, 5), List.at(topics, 5).id), View.chip(List.at(opened, 6), List.at(topics, 6).id), View.chip(List.at(opened, 7), List.at(topics, 7).id), View.chip(List.at(opened, 8), List.at(topics, 8).id), View.chip(List.at(opened, 9), List.at(topics, 9).id), View.chip(List.at(opened, 10), List.at(topics, 10).id), View.chip(List.at(opened, 11), List.at(topics, 11).id), View.chip(List.at(opened, 12), List.at(topics, 12).id)))
+  View.padding(8, View.wrap(View.chip(List.at(opened, 0), List.at(topics, 0).id), View.chip(List.at(opened, 1), List.at(topics, 1).id), View.chip(List.at(opened, 2), List.at(topics, 2).id), View.chip(List.at(opened, 3), List.at(topics, 3).id), View.chip(List.at(opened, 4), List.at(topics, 4).id), View.chip(List.at(opened, 5), List.at(topics, 5).id), View.chip(List.at(opened, 6), List.at(topics, 6).id), View.chip(List.at(opened, 7), List.at(topics, 7).id), View.chip(List.at(opened, 8), List.at(topics, 8).id), View.chip(List.at(opened, 9), List.at(topics, 9).id), View.chip(List.at(opened, 10), List.at(topics, 10).id), View.chip(List.at(opened, 11), List.at(topics, 11).id), View.chip(List.at(opened, 12), List.at(topics, 12).id), View.chip(List.at(opened, 13), List.at(topics, 13).id)))
 
 def startGroup(title: String, tiles: View): View =
   View.column(View.padding(8, View.heading(2, View.text(title))), tiles)
@@ -64,7 +65,7 @@ def guiLive(tab: Signal[Int], draft: Signal[String], notes: Signal[String], show
   View.maxSize(0, 520, View.tabs(tab, View.column(View.section("live", "Live example", View.column(View.heading(2, View.text("Try text input")), paragraph("Type text, then switch tabs or sections. Your text stays in the Signals."), View.textField(draft, "Your text"), View.showWhen(showDraft, 1, View.bindText(Signal.map(draft, echoDraft))), View.editor(notes), View.showWhen(showNotes, 1, View.bindText(Signal.map(notes, echoNotes))))), View.section("source", "Source", code("@main def main: IO[Unit] =\n  for {\n    draft = Signal.make(\"\")\n    notes = Signal.make(\"\")\n    showDraft = Signal.map(draft, text => if (Str.len(text) == 0) 0 else 1)\n    showNotes = Signal.map(notes, text => if (Str.len(text) == 0) 0 else 1)\n    _ <- Ui.run(_ => View.column(\n      View.textField(draft, \"Your text\"),\n      View.showWhen(showDraft, 1, View.bindText(Signal.map(draft, text =>\n        Str.concat(\"You typed: \", text)))),\n      View.editor(notes),\n      View.showWhen(showNotes, 1, View.bindText(Signal.map(notes, text =>\n        Str.concat(\"Notes: \", text))))))\n  } yield ()")))))
 
 def fireOpened(n: Int): Unit =
-  if (n == 0) Property.sometimes("openedStart") else if (n == 1) Property.sometimes("openedInstall") else if (n == 2) Property.sometimes("openedLanguage") else if (n == 3) Property.sometimes("openedGui") else if (n == 4) Property.sometimes("openedSignals") else if (n == 5) Property.sometimes("openedPackages") else if (n == 6) Property.sometimes("openedVerify") else if (n == 7) Property.sometimes("openedCommands") else if (n == 8) Property.sometimes("openedManifest") else if (n == 9) Property.sometimes("openedIos") else if (n == 10) Property.sometimes("openedWeb") else if (n == 11) Property.sometimes("openedIde") else if (n == 12) Property.sometimes("openedTry") else ()
+  if (n == 0) Property.sometimes("openedStart") else if (n == 1) Property.sometimes("openedInstall") else if (n == 2) Property.sometimes("openedLanguage") else if (n == 3) Property.sometimes("openedGui") else if (n == 4) Property.sometimes("openedSignals") else if (n == 5) Property.sometimes("openedPackages") else if (n == 6) Property.sometimes("openedVerify") else if (n == 7) Property.sometimes("openedCommands") else if (n == 8) Property.sometimes("openedManifest") else if (n == 9) Property.sometimes("openedIos") else if (n == 10) Property.sometimes("openedWeb") else if (n == 11) Property.sometimes("openedIde") else if (n == 12) Property.sometimes("openedTry") else if (n == 13) Property.sometimes("openedHow") else ()
 
 def markOpened(opened: List[Signal[Int]], n: Int): Unit =
   if (n < 0 || n >= List.len(opened)) () else (fireOpened(n), Signal.set(List.at(opened, n), 1))._2
@@ -105,6 +106,89 @@ def tryLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[Vie
 def trySection(topics: List[Topic], blocks: Signal[List[Block]], src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value]): View =
   topicSection(topics, 12, View.column(blocksColumn(blocks), tryLive(src, diags, mounted, pool)))
 
+def howSection(topics: List[Topic], blocks: Signal[List[Block]]): View =
+  topicSection(topics, 13, blocksColumn(blocks))
+
+def vizPool(): Ref[Value] =
+  Property.force(Ref.of(Value.VList([])))
+
+def vizView(kind: String, src: String): View =
+  if (kind == "schedule") vizSchedule(src) else if (kind == "trace") vizTrace(src) else if (kind == "coverage") vizCover(src) else vizMutant(src)
+
+def vizSchedule(src: String): View =
+  vizScheduleAt(src, vizPool())
+
+def vizScheduleAt(src: String, pool: Ref[Value]): View =
+  View.column(code(src), paragraph(schedLine(0, schedOrder(src, 0, pool))), paragraph(schedLine(128, schedOrder(src, 128, pool))))
+
+def schedOrder(src: String, seed: Int, pool: Ref[Value]): Int =
+  schedOrderOf(Eval.tryNowAt(src, seed, pool), pool)
+
+def schedOrderOf(_out: TryOut, pool: Ref[Value]): Int =
+  Eval.poolInt(pool, "order")
+
+def schedLine(seed: Int, order: Int): String =
+  Str.concat("seed ", Str.concat(Str.fromInt(seed), if (order == 1) ": pass" else ": fail"))
+
+def vizTrace(src: String): View =
+  vizTraceAt(src, Eval.tryNow(src, vizPool()))
+
+def vizTraceAt(src: String, out: TryOut): View =
+  View.column(code(src), paragraph(if (List.isEmpty(Eval.traceLines(out.trace))) "trace empty" else List.join(Eval.traceLines(out.trace), " | ")))
+
+def vizCover(src: String): View =
+  vizCoverAt(src, Eval.tryNow(src, vizPool()))
+
+def vizCoverAt(src: String, out: TryOut): View =
+  View.column(code(coverText(src, out.trace)), paragraph(coverSummary(out.trace)))
+
+def coverText(src: String, trace: Value): String =
+  List.join(coverLines(Str.split(src, """
+"""), coverHits(Eval.traceLines(trace))), """
+""")
+
+def coverHits(rows: List[String]): List[Int] =
+  List.map(List.filter(rows, s => Str.contains(s, " #")), s => locLineNo(s))
+
+def locLineNo(row: String): Int =
+  locLineNo2(Str.split(row, ":"))
+
+def locLineNo2(xs: List[String]): Int =
+  if (List.len(xs) < 2) 0 else Str.toInt(List.at(xs, 1), 0)
+
+def coverLines(lines: List[String], hits: List[Int]): List[String] =
+  coverLinesGo(lines, hits, 1)
+
+def coverLinesGo(lines: List[String], hits: List[Int], i: Int): List[String] =
+  if (List.isEmpty(lines)) [] else coverMark(List.at(lines, 0), List.exists(hits, h => h == i)) :: coverLinesGo(List.tail(lines), hits, i + 1)
+
+def coverMark(line: String, hit: Bool): String =
+  if (hit) Str.concat("> ", line) else Str.concat("  ", line)
+
+def coverSummary(trace: Value): String =
+  Str.concat("arms ", Str.fromInt(List.len(List.filter(Eval.traceLines(trace), s => Str.contains(s, " #")))))
+
+def vizMutant(src: String): View =
+  vizMutantAt(src, Mutate.oneSrc(src))
+
+def vizMutantAt(src: String, files: List[(String, String)]): View =
+  vizMutantGo(src, files, Mutate.countFiles(files, false))
+
+def vizMutantGo(src: String, files: List[(String, String)], n: Int): View =
+  if (n <= 0) paragraph("mutant: no site") else vizMutantSrc(src, Mutate.fileSrc(Mutate.applyFiles(files, 0, false)))
+
+def vizMutantSrc(live: String, mut: String): View =
+  View.column(paragraph(mutLine("live", live)), paragraph(mutLine("mutant", mut)))
+
+def mutLine(tag: String, src: String): String =
+  Str.concat(tag, Str.concat(" ", mutBind(Eval.tryNow(src, vizPool()))))
+
+def mutBind(out: TryOut): String =
+  mutBindGo(List.filter(Eval.traceLines(out.trace), s => Str.contains(s, " n ")))
+
+def mutBindGo(xs: List[String]): String =
+  if (List.isEmpty(xs)) "no n" else List.at(xs, 0)
+
 @main def main: IO[Unit] =
   for {
     topics = Manual.topics()
@@ -125,5 +209,5 @@ def trySection(topics: List[Topic], blocks: Signal[List[Block]], src: Signal[Str
     tryPool <- Ref.of(Value.VList([]))
     _ <- tryRun(trySrc, tryDiags, tryMounted, tryPool)
     _ <- Ui.setTitle("Scuzz Docs")
-    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count, tapped), plainSection(topics, blocks, 5), verifySection(topics, List.at(blocks, 6), opened, tapped), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10), plainSection(topics, blocks, 11), trySection(topics, List.at(blocks, 12), trySrc, tryDiags, tryMounted, tryPool)))))
+    _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.textButton("Get started", _ => Signal.set(page, 1)), View.outlinedButton("Try GUI", _ => Signal.set(page, 3)))), View.indexBook(page, View.column(startSection(topics, List.at(blocks, 0), opened), plainSection(topics, blocks, 1), plainSection(topics, blocks, 2), guiSection(topics, List.at(blocks, 3), guiTab, draft, notes, showDraft, showNotes), signalsSection(topics, List.at(blocks, 4), count, tapped), plainSection(topics, blocks, 5), verifySection(topics, List.at(blocks, 6), opened, tapped), plainSection(topics, blocks, 7), plainSection(topics, blocks, 8), plainSection(topics, blocks, 9), plainSection(topics, blocks, 10), plainSection(topics, blocks, 11), trySection(topics, List.at(blocks, 12), trySrc, tryDiags, tryMounted, tryPool), howSection(topics, List.at(blocks, 13))))))
   } yield ()

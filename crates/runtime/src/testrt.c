@@ -4657,6 +4657,31 @@ void sz_fuzz_hit(SzString *key) {
     fuzz_dist_record(s + 5);
     return;
   }
+  if (!strncmp(s, "seed:", 5)) {
+    static char saved[64];
+    static int had;
+    const char *old;
+    if (!s[5]) {
+      if (had) {
+        if (saved[0])
+          setenv("SCUZZ_SCHED_SEED", saved, 1);
+        else
+          unsetenv("SCUZZ_SCHED_SEED");
+        had = 0;
+      }
+      return;
+    }
+    if (!had) {
+      old = getenv("SCUZZ_SCHED_SEED");
+      if (old)
+        snprintf(saved, sizeof saved, "%s", old);
+      else
+        saved[0] = 0;
+      had = 1;
+    }
+    setenv("SCUZZ_SCHED_SEED", s + 5, 1);
+    return;
+  }
   if (g_fuzz_armed) {
     sz_coverage_hit_key(s);
     return;
