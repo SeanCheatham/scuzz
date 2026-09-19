@@ -26,15 +26,15 @@ enum Value:
   case VTimeline(t: Timeline)
   case VVerdict(v: Verdict)
   case VView(kind: String, args: List[Value])
-  case VSigInt(s: Signal[Int])
-  case VSigStr(s: Signal[String])
-  case VSig(s: Signal[Value])
+  case VSig(id: Int, name: String, s: Signal[Value], si: Signal[Int], ss: Signal[String])
 
 record EvEnv(vars: List[(String, Value)], mod: String, loc: String)
 
 record EvStep(e: Expr, env: EvEnv)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]])
+record TryOut(diags: String, view: Value, prog: List[EvProg])
+
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]])
 
 import Parse.Expr
 import Parse.Fun
@@ -77,7 +77,7 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs())
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs())
   }
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
@@ -133,6 +133,31 @@ def runMain(p: EvProg): IO[Unit] =
 
 def envOf(p: EvProg): EvEnv =
   EvEnv(noVars(), p.mainMod, "")
+
+def tryIt(src: String, pool: Ref[Value]): IO[TryOut] =
+  tryChecked(src, Check.human(src), pool)
+
+def tryNow(src: String, pool: Ref[Value]): TryOut =
+  Property.force(tryIt(src, pool))
+
+def tryChecked(src: String, diags: String, pool: Ref[Value]): IO[TryOut] =
+  if (diags != "scuzz check ok") IO.pure(TryOut(diags, Value.VUnit, [])) else Ref.of(Value.VUnit).flatMap(host => tryHost(withHost(load(("Main", src) :: []), host, pool), host))
+
+def tryHost(p: EvProg, host: Ref[Value]): IO[TryOut] =
+  tryMain(step(EvStep(p.main, envOf(p)), p)).flatMap(msg => Ref.get(host).map(v => tryOut(msg, v, p)))
+
+def tryOut(msg: String, v: Value, p: EvProg): TryOut =
+  v match {
+    case Value.VView(_, _) => TryOut(msg, v, p :: [])
+    case _ => TryOut(if (msg == "") "eval: @main did not reach Ui.run" else msg, v, [])
+  }
+
+def tryMain(v: Value): IO[String] =
+  v match {
+    case Value.VIo(io) => io.map(_ => "").handleErrorWith(e => IO.pure(errText(e)))
+    case Value.VErr(msg) => IO.pure(msg)
+    case _ => IO.pure("eval: @main did not produce IO")
+  }
 
 def mainIo(v: Value): IO[Unit] =
   v match {
@@ -192,9 +217,7 @@ def show(v: Value): String =
     case Value.VTimeline(_) => "<timeline>"
     case Value.VVerdict(_) => "<verdict>"
     case Value.VView(kind, _) => Str.concat("<", Str.concat(kind, ">"))
-    case Value.VSigInt(_) => "<signal>"
-    case Value.VSigStr(_) => "<signal>"
-    case Value.VSig(_) => "<signal>"
+    case Value.VSig(_, _, _, _, _) => "<signal>"
   }
 
 def fmtFloat(f: Float): String =
@@ -900,7 +923,7 @@ def forBody(v: Value, drew: Bool): Value =
 
 def forBind(b: Bind, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
   b match {
-    case Bind(draw, name, value) => forBound(draw, name, step(EvStep(value, env), p), rest, body, env, p, off, drew)
+    case Bind(draw, name, value) => forBound(draw, name, step(EvStep(if (draw) value else Emit.nameSig(name, value), env), p), rest, body, env, p, off, drew)
   }
 
 def forBound(draw: Bool, name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
@@ -1403,65 +1426,116 @@ def uiRun(fv: Value, env: EvEnv, p: EvProg, off: Int): Value =
   if (List.isEmpty(p.host)) errAt("Ui.run needs a UI host", env, p, off) else Value.VIo(unitIo(Ref.set(List.at(p.host, 0), applyValue(fv, Value.VUnit :: noVals(), env, p, off))))
 
 def sigKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Signal.make") sigMake("", List.at(vals, 0)) else if (f == "Signal.makeN") sigMake(strAt(vals, 0), List.at(vals, 1)) else if (f == "Signal.get") sigGet(List.at(vals, 0), env, p, off) else if (f == "Signal.set") sigSet(List.at(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Signal.map") Value.VSig(Signal.map(sigValues(List.at(vals, 0)), x => applyValue(List.at(vals, 1), x :: noVals(), env, p, off))) else if (f == "Signal.mapN") Value.VSig(Signal.mapN(strAt(vals, 0), sigValues(List.at(vals, 1)), x => applyValue(List.at(vals, 2), x :: noVals(), env, p, off))) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (f == "Signal.make") sigMake("", List.at(vals, 0), p) else if (f == "Signal.makeN") sigMake(strAt(vals, 0), List.at(vals, 1), p) else if (f == "Signal.get") sigGet(List.at(vals, 0), env, p, off) else if (f == "Signal.set") sigSet(List.at(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Signal.map") sigMap("", List.at(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Signal.mapN") sigMap(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
 
-def sigMake(name: String, v: Value): Value =
+def sigMake(name: String, v: Value, p: EvProg): Value =
+  sigTake(name, v, intOf(refGet(List.at(p.sig, 1))), listOf(refGet(List.at(p.sig, 0))), p)
+
+def sigTake(name: String, v: Value, next: Int, pool: List[Value], p: EvProg): Value =
+  if (next < List.len(pool) && sigFits(List.at(pool, next), name, v)) sigBump(sigStore(List.at(pool, next), v), next, p) else sigBump(sigGrow(sigNew(name, v, next), List.take(pool, next), p), next, p)
+
+def sigFits(sv: Value, name: String, v: Value): Bool =
+  sv match {
+    case Value.VSig(_, n, s, _, _) => n == name && sigKind(Signal.get(s)) == sigKind(v)
+    case _ => false
+  }
+
+def sigKind(v: Value): String =
   v match {
-    case Value.VInt(n) => Value.VSigInt(if (name == "") Signal.make(n) else Signal.makeN(name, n))
-    case Value.VStr(s) => Value.VSigStr(if (name == "") Signal.make(s) else Signal.makeN(name, s))
-    case _ => Value.VSig(if (name == "") Signal.make(v) else Signal.makeN(name, v))
+    case Value.VInt(_) => "int"
+    case Value.VStr(_) => "str"
+    case _ => "value"
+  }
+
+def sigBump(sv: Value, next: Int, p: EvProg): Value =
+  sigAfter(refPut(List.at(p.sig, 1), Value.VInt(next + 1)), sv)
+
+def sigGrow(sv: Value, pool: List[Value], p: EvProg): Value =
+  sigAfter(refPut(List.at(p.sig, 0), Value.VList(List.append(pool, sv))), sv)
+
+def sigAfter(_u: Unit, sv: Value): Value =
+  sv
+
+def sigStore(sv: Value, v: Value): Value =
+  sv match {
+    case Value.VSig(_, _, s, si, ss) => sigWrite(sv, s, si, ss, v)
+    case _ => sv
+  }
+
+def sigWrite(sv: Value, s: Signal[Value], si: Signal[Int], ss: Signal[String], v: Value): Value =
+  v match {
+    case Value.VInt(n) => sigAfter(Signal.set(si, n), sigAfter(Signal.set(s, v), sv))
+    case Value.VStr(x) => sigAfter(Signal.set(ss, x), sigAfter(Signal.set(s, v), sv))
+    case _ => sigAfter(Signal.set(s, v), sv)
+  }
+
+def sigNew(name: String, v: Value, id: Int): Value =
+  v match {
+    case Value.VInt(n) => Value.VSig(id, name, Signal.make(v), if (name == "") Signal.make(n) else Signal.makeN(name, n), Signal.make(""))
+    case Value.VStr(x) => Value.VSig(id, name, Signal.make(v), Signal.make(0), if (name == "") Signal.make(x) else Signal.makeN(name, x))
+    case _ => Value.VSig(id, name, if (name == "") Signal.make(v) else Signal.makeN(name, v), Signal.make(0), Signal.make(""))
   }
 
 def sigGet(sv: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
-    case Value.VSigInt(s) => Value.VInt(Signal.get(s))
-    case Value.VSigStr(s) => Value.VStr(Signal.get(s))
-    case Value.VSig(s) => Signal.get(s)
+    case Value.VSig(_, _, s, si, ss) => sigRead(Signal.get(s), si, ss)
     case _ => errAt("Signal.get needs a Signal", env, p, off)
+  }
+
+def sigRead(v: Value, si: Signal[Int], ss: Signal[String]): Value =
+  v match {
+    case Value.VInt(_) => Value.VInt(Signal.get(si))
+    case Value.VStr(_) => Value.VStr(Signal.get(ss))
+    case _ => v
   }
 
 def sigSet(sv: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
-    case Value.VSigInt(s) => sigSetInt(s, v, env, p, off)
-    case Value.VSigStr(s) => sigSetStr(s, v, env, p, off)
-    case Value.VSig(s) => sigDone(Signal.set(s, v))
+    case Value.VSig(id, _, s, si, ss) => sigPush(id, v, listOf(refGet(List.at(p.sig, 2))), sigWrite(Value.VUnit, s, si, ss, v), env, p, off)
     case _ => errAt("Signal.set needs a Signal", env, p, off)
   }
 
-def sigSetInt(s: Signal[Int], v: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  v match {
-    case Value.VInt(n) => sigDone(Signal.set(s, n))
-    case _ => errAt("Signal.set needs an Int", env, p, off)
+def sigPush(id: Int, v: Value, deps: List[Value], _u: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  if (List.isEmpty(deps)) Value.VUnit else sigPushOne(id, v, List.at(deps, 0), List.tail(deps), env, p, off)
+
+def sigPushOne(id: Int, v: Value, dep: Value, rest: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  dep match {
+    case Value.VTuple(xs) => if (intOf(List.at(xs, 0)) == id) sigPushNext(id, v, rest, sigSet(List.at(xs, 2), applyValue(List.at(xs, 1), v :: noVals(), env, p, off), env, p, off), env, p, off) else sigPush(id, v, rest, Value.VUnit, env, p, off)
+    case _ => sigPush(id, v, rest, Value.VUnit, env, p, off)
   }
 
-def sigSetStr(s: Signal[String], v: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  v match {
-    case Value.VStr(x) => sigDone(Signal.set(s, x))
-    case _ => errAt("Signal.set needs a String", env, p, off)
-  }
+def sigPushNext(id: Int, v: Value, rest: List[Value], r: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  if (isErr(r)) r else sigPush(id, v, rest, Value.VUnit, env, p, off)
 
-def sigDone(_u: Unit): Value =
-  Value.VUnit
-
-def sigValues(sv: Value): Signal[Value] =
+def sigMap(name: String, sv: Value, f: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
-    case Value.VSigInt(s) => Signal.map(s, n => Value.VInt(n))
-    case Value.VSigStr(s) => Signal.map(s, x => Value.VStr(x))
-    case Value.VSig(s) => s
-    case _ => Signal.make(sv)
+    case Value.VSig(id, _, _, _, _) => sigMapDst(id, f, sigMake(name, applyValue(f, sigGet(sv, env, p, off) :: noVals(), env, p, off), p), p)
+    case _ => errAt("Signal.map needs a Signal", env, p, off)
   }
+
+def sigMapDst(id: Int, f: Value, dst: Value, p: EvProg): Value =
+  if (isErr(dst)) dst else sigMapDep(dst, refPut(List.at(p.sig, 2), Value.VList(List.append(listOf(refGet(List.at(p.sig, 2))), Value.VTuple(Value.VInt(id) :: f :: dst :: noVals())))))
+
+def sigMapDep(dst: Value, _u: Unit): Value =
+  dst
 
 def sigInt(sv: Value): Signal[Int] =
   sv match {
-    case Value.VSigInt(s) => s
-    case _ => Signal.map(sigValues(sv), v => intOf(v))
+    case Value.VSig(_, _, _, si, _) => si
+    case _ => Signal.make(0)
   }
 
 def sigStr(sv: Value): Signal[String] =
   sv match {
-    case Value.VSigStr(s) => s
-    case _ => Signal.map(sigValues(sv), v => strOf(v))
+    case Value.VSig(_, _, _, _, ss) => ss
+    case _ => Signal.make("")
   }
+
+def refGet(r: Ref[Value]): Value =
+  Property.force(Ref.get(r))
+
+def refPut(r: Ref[Value], v: Value): Unit =
+  Property.force(Ref.set(r, v))
 
 def miscKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Builder.empty") Value.VBuilder(Builder.empty()) else if (f == "Builder.append") Value.VBuilder(Builder.append(builderOf(List.at(vals, 0)), strAt(vals, 1))) else if (f == "Builder.result") Value.VStr(Builder.result(builderOf(List.at(vals, 0)))) else if (f == "Hash.hmacSha256") Value.VStr(Hash.hmacSha256(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.constantTimeEqual") Value.VBool(Hash.constantTimeEqual(strAt(vals, 0), strAt(vals, 1))) else if (f == "Hash.sha256") Value.VStr(Hash.sha256(strAt(vals, 0))) else if (f == "Hex.encode") Value.VStr(Hex.encode(strAt(vals, 0))) else if (f == "Hex.decode") Value.VStr(Hex.decode(strAt(vals, 0))) else if (f == "Base64.encode") Value.VStr(Base64.encode(strAt(vals, 0))) else if (f == "Base64.decode") Value.VStr(Base64.decode(strAt(vals, 0))) else if (f == "Float.fromInt") Value.VFloat(Float.fromInt(intAt(vals, 0))) else if (f == "Float.toInt") Value.VInt(Float.toInt(floatOf(List.at(vals, 0)))) else if (f == "Oracle.sumTo") Value.VInt(Oracle.sumTo(intAt(vals, 0))) else if (f == "Clock.monotonic") Value.VIo(intIo(Clock.monotonic())) else if (f == "Clock.realTime") Value.VIo(intIo(Clock.realTime())) else if (f == "Clock.iso8601") Value.VStr(Clock.iso8601(intAt(vals, 0))) else if (f == "Random.nextInt") Value.VIo(intIo(Random.nextInt(intAt(vals, 0)))) else if (f == "Uuid.v4") Value.VIo(strIo(Uuid.v4())) else if (f == "Bytes.fromStr") Value.VBytes(Bytes.fromStr(strAt(vals, 0))) else if (f == "Bytes.len") Value.VInt(Bytes.len(bytesOf(List.at(vals, 0)))) else if (f == "Impurity.runKit") Value.VIo(unitIo(Impurity.runKit())) else if (f == "Scenario.context") scenarioCtx(p, env, off) else unsupported(Str.concat("kit ", f), env, p, off)
@@ -1735,7 +1809,7 @@ def probe(files: List[(String, String)]): IO[Unit] =
   Ref.of(Value.VUnit).flatMap(ctx => probeServe(withCtx(load(files), ctx), ctx))
 
 def probeServe(p: EvProg, ctx: Ref[Value]): IO[Unit] =
-  Sys.readLine.flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else probeOnce(p, ctx).flatMap(code => IO.println(Str.fromInt(code)).flatMap(_ => probeServe(p, ctx))))
+  Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else probeOnce(p, ctx).flatMap(code => IO.println(Str.fromInt(code)).flatMap(_ => probeServe(p, ctx))))
 
 def probeOnce(p: EvProg, ctx: Ref[Value]): IO[Int] =
   probeProg(p, ctx).map(_ => 0).handleErrorWith(e => IO.pure(probeExit(e)))
@@ -1744,10 +1818,16 @@ def probeExit(e: String): Int =
   if (Str.startsWith(e, "probe exit ")) Str.toInt(Str.drop(e, 11), 1) else 1
 
 def withCtx(p: EvProg, ctx: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig)
 
-def withHost(p: EvProg, host: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs())
+def withHost(p: EvProg, host: Ref[Value], pool: Ref[Value]): EvProg =
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig))
+
+def sigRefs(): List[Ref[Value]] =
+  newRef(Value.VList(noVals())) :: newRef(Value.VInt(0)) :: newRef(Value.VList(noVals())) :: noRefs()
+
+def newRef(v: Value): Ref[Value] =
+  Property.force(Ref.of(v))
 
 def probeProg(p: EvProg, ctx: Ref[Value]): IO[Unit] =
   probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Fuzz.probe(IO.pure(()).flatMap(_ => probeMain(p)))))

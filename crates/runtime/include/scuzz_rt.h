@@ -67,13 +67,20 @@ enum {
   SZ_RC_PAIR = 14,
   SZ_RC_BUILDER = 15,
   SZ_RC_NETSOCK = 16,
-  SZ_RC_KIND_COUNT = 17
+  SZ_RC_VIEW = 17,
+  SZ_RC_KIND_COUNT = 18
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
+/* Zeroed non-RC block tagged `kind` for the census (`SZ_RC_VIEW`). */
+void *sz_alloc_zero_kind(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
 void sz_release(void *ptr);
 /* RC kind of `ptr`. A non-RC pointer is `SZ_RC_KIND_COUNT`. */
 uint32_t sz_rc_kind(const void *ptr);
+/* Kind of any RC or sz_alloc block. Other pointers are `SZ_RC_KIND_COUNT`. */
+uint32_t sz_alloc_kind_of(const void *ptr);
+/* RC count of an RC block. 0 for other pointers. */
+uint32_t sz_rc_count(const void *ptr);
 /* Live heap through sz_alloc/sz_free (user bytes; excludes size header). */
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
 /* Sum of RC counts on live RC blocks. Raw sz_alloc blocks add 0. */

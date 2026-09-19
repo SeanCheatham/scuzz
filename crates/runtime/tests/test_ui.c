@@ -888,7 +888,7 @@ static void test_dump_json_schema(void) {
   kinds = json_doc_key(heap, "kinds");
   assert(kinds && sz_json_is_arr(kinds) == 1);
   arr = sz_json_arr(kinds);
-  assert(sz_list_len(arr) == 17);
+  assert(sz_list_len(arr) == SZ_RC_KIND_COUNT);
   sz_release(arr);
 
   live = json_doc_key(json, "live");
@@ -16603,6 +16603,67 @@ static void test_each_env_retain_release(void) {
   sz_signal_int_free(n);
 }
 
+static SzView *each_row_identity(SzString *item, void *env) {
+  (void)env;
+  return (SzView *)item;
+}
+
+/* One view list per write. The middle list never reaches a layout. */
+static SzList *orphan_button_list(void *env) {
+  SzList *xs = sz_list_cons(sz_view_button("go", noop_tap, env), sz_list_nil());
+  return xs;
+}
+
+static void test_each_orphan_views_freed(void) {
+  SzSignalList *items;
+  SzList *xs, *env, *held;
+  SzString *cap;
+  SzView *list;
+  const SzTheme *theme = sz_theme_default();
+  size_t base_count = 0, base_bytes = 0;
+  size_t live_count = 0, live_bytes = 0;
+
+  sz_alloc_stats(&base_bytes, &base_count);
+  xs = sz_list_cons(sz_view_text("start"), sz_list_nil());
+  items = sz_signal_list(xs);
+  sz_release(xs);
+  list = sz_view_each_map(items, each_row_identity, NULL);
+  sz_view_layout(list, 200.f, 120.f, theme);
+
+  /* Two writes before the next layout: the first list is never mounted. Its
+   * button and the env the button retains die with the write. The tree
+   * frees the mounted views; the signal leaves them alone. */
+  cap = sz_string_from_cstr("captured");
+  env = sz_list_cons(cap, sz_list_nil());
+  sz_release(cap);
+  xs = orphan_button_list(env);
+  sz_signal_list_set(items, xs);
+  sz_release(xs);
+  xs = orphan_button_list(env);
+  sz_signal_list_set(items, xs);
+  sz_release(xs);
+  sz_release(env);
+  sz_view_layout(list, 200.f, 120.f, theme);
+  sz_view_free(list);
+  sz_signal_list_free(items);
+  sz_alloc_stats(&live_bytes, &live_count);
+  assert(live_count == base_count);
+
+  /* A list another holder still reads keeps its views. */
+  xs = sz_list_cons(sz_view_text("kept"), sz_list_nil());
+  items = sz_signal_list(xs);
+  held = xs;
+  xs = sz_list_cons(sz_view_text("next"), sz_list_nil());
+  sz_signal_list_set(items, xs);
+  sz_release(xs);
+  assert(sz_alloc_kind_of(held->head) == SZ_RC_VIEW);
+  sz_view_free((SzView *)held->head);
+  sz_release(held);
+  sz_signal_list_free(items);
+  sz_alloc_stats(&live_bytes, &live_count);
+  assert(live_count == base_count);
+}
+
 #ifdef __APPLE__
 #define RELOAD_A "build/reload_a.dylib"
 #define RELOAD_B "build/reload_b.dylib"
@@ -17360,6 +17421,7 @@ int main(void) {
   test_alloc_each_pump_flat();
   test_tap_env_retain_release();
   test_each_env_retain_release();
+  test_each_orphan_views_freed();
   test_quiesce();
   puts("runtime ui tests ok");
   return 0;

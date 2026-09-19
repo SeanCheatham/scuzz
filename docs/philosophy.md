@@ -119,6 +119,10 @@ Live and simulated HTTP clients share one URL parser. A URL with no path uses `/
 
 Headless is a **peer** of Desktop/Mobile. Frame boundary is `pump`. A live loop paints when the session is dirty. It waits when nothing changes. World effects stay blessed `IO`. No UI feature without a Headless path. Nested declarative construction only. `Ui.run(_ => view)` is the session. Dump and inject ops: run `scuzz docs commands`.
 
+**The tree owns views.** A `View` is not a reference-counted value. Its parent frees it. A `List[View]` holds views for `View.each`, which mounts the list at layout and frees the views it replaces. A `Signal[List[View]]` that drops a list before any `View.each` mounts it frees the views in that list, so two writes between layouts do not leak the middle list. A list another holder still reads keeps its views. Do not mount a view pulled out of a list signal by hand.
+
+A tap closure runs its synchronous part in the tap. Its `IO` runs on the scheduler after the injected script. Claims see the synchronous part at the tap state and the `IO` result at the last state.
+
 `scuzz run` carries the session channel on every runtime: the session watches `build/inject.json` and rewrites `build/debug.json`. `run --exec` plays a finite ops program after the first pump, then quiesces and exits. Without `--exec` a `[ui]` run stays live until a `quit` op or signal. `scuzz exec` writes ops to a live session. `scuzz package` strips the channel.
 
 ### IO apps vs Headless

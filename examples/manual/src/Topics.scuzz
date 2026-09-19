@@ -3,7 +3,7 @@ import Manual.Block
 import Manual.NavLink
 
 def all(): List[Topic] =
-  start() :: install() :: language() :: gui() :: signals() :: packages() :: verify() :: commands() :: manifest() :: ios() :: web() :: ide() :: []
+  start() :: install() :: language() :: gui() :: signals() :: packages() :: verify() :: commands() :: manifest() :: ios() :: web() :: ide() :: tryIt() :: []
 
 def p(text: String): Block =
   Block.Para(text)
@@ -63,4 +63,10 @@ def web(): Topic =
 
 def ide(): Topic =
   Topic("ide", "IDE", p("scuzz ide launches the bundled [ui] editor. The CLI uses SCUZZ_IDE, else SCUZZ_HOME/ide, else examples/editor in a checkout. Desktop is the default. --target headless stays a peer. There is no scuzz-ide binary.") :: cmd("scuzz ide") :: cmd("scuzz ide --target headless .") :: p("The app talks to scuzz check, scuzz lsp, scuzz fmt, scuzz run, and scuzz fuzz. It does not reimplement the compiler. External editors speak scuzz lsp.") :: p("Pass a file or a project directory. A directory opens src/Main.scuzz. Live, Verify, and Session are unnumbered landmarks. The editor does not use Index Book chapter numbers, Start tiles, or Back/Next sibling chapters. Live lists *.scuzz stems. There is no document tab row. Verify lists claim names. The scenario file may stay listed. A claim tap stays on Verify. Session shows named campaign chips, check diagnostics, and Run. Fuzz starts scuzz fuzz --iterations 0 and polls dump files. Chips use declared versus reached names. Check stays on Live. The app-bar title is the package name. The app bar keeps Save and Check.") :: [])
+
+def tryIt(): Topic =
+  Topic("try", "Try it", p("Edit the program and press Run. The evaluator checks the source, runs @main, and mounts the View that Ui.run receives. A check error or an evaluator stop shows in place of the view. The same evaluator drives scuzz eval and scuzz fuzz.") :: p("The view is live. Buttons run their closures. Signals update the bound text.") :: [])
+
+def trySource(): String =
+  "@main def main: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    label = Signal.map(clicks, n => s\"Clicks: $n\")\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => Signal.set(clicks, Signal.get(clicks) + 1))))\n  } yield ()\n"
 

@@ -12,11 +12,11 @@ Proof: `examples/codegen` `evKitsCovered` probes every UI row; `evCounterView` e
 
 ## Step 2: Try it in Docs, headless
 
-Status: in progress.
+Status: done.
 
-`examples/docs` depends on `examples/compiler`. `Mount.scuzz` in Docs walks a `VView` description into a native `View`: closures become taps through `Eval.applyValue`, `VSigInt` and `VSigStr` pass through, `VSig` maps at the boundary. Boxes (`column`, `row`, `stack`, `wrap`, `grid`, `breadcrumb`) take up to eight children per level; `column` beyond that nests, others fail loud. A "Try it" topic page holds a `View.editor` bound to a source signal, a diagnostics text, and the mounted view. `Eval.tryIt(src)` checks one module source and returns diagnostics or the `VView` of its `@main` `Ui.run` callback. An evaluator stop renders as a diagnostic. The mounted view is replaced on every evaluation.
+`examples/docs` depends on `examples/compiler`. `Mount.scuzz` in Docs walks a `VView` description into a native `View`: closures become taps through `Eval.applyValue`, `VSigInt` and `VSigStr` pass through, `VSig` maps at the boundary. Boxes (`column`, `row`, `stack`, `wrap`, `grid`, `breadcrumb`) take up to eight children per level; `column` beyond that nests, others fail loud. `View.each` is not mounted yet. A "Try it" topic page holds a `View.editor` bound to a source signal, a diagnostics text, and the mounted view. `Eval.tryNow(src, pool)` checks one module source and returns diagnostics or the `VView` of its `@main` `Ui.run` callback; it runs inside the Run tap, so the result lands in the tap state. An evaluator stop renders as a diagnostic. The mounted view is replaced on every evaluation. Evaluator signals live in one pool per page (`Ref[Value]`): a run reuses a pooled signal by name and kind and resets its value, so a run does not grow the signal registry. A `Signal[List[View]]` frees a list that no `View.each` mounted (`philosophy.md`, "The tree owns views").
 
-Proof: Headless claims in `examples/docs` type the counter source into the editor, tap `+1`, and read the label (`scuzz fuzz --iterations 0 examples/docs`).
+Proof: Headless claims in `examples/docs` evaluate the counter, tap `+1`, tap Run again, and read the label (`scuzz fuzz --iterations 0 examples/docs`). Runtime test `test_each_orphan_views_freed` covers the list rule.
 
 ## Step 3: Try it in Chromium
 
