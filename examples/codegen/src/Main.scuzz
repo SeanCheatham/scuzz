@@ -761,13 +761,55 @@ def evKitsMissing(): List[String] =
   List.filter(List.filter(Kits.names(), k => !Eval.isExcludedKit(k)), k => Eval.isUnsupported(Eval.kitProbe(k, List.map(Kits.params(k), ty => evSample(ty)), evProg(srcAdd()))))
 
 def evSample(ty: String): Value =
-  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap([]) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
+  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Value.VSigStr(Signal.make("a")) else if (Str.startsWith(ty, "Signal")) Value.VSigInt(Signal.make(1)) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap([]) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
 
 def evAllOk(): Bool =
   evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evKitsCovered()
 
 def evDump(): String =
   if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else "ev-other"
+
+def srcCounter(): String =
+  """record CounterState(value: Int)
+
+def countLabel(n: Int): String =
+  Str.concat("Count: ", Str.fromInt(n))
+
+@main def main: IO[Unit] =
+  for {
+    state = Signal.make(CounterState(0))
+    count = Signal.map(state, v => v.value)
+    label = Signal.map(count, n => countLabel(n))
+    _ <- Ui.run(_ => View.column(View.bindText(label), View.button("+1", _ => IO.pure(Signal.set(state, Signal.get(state).copy(value = Signal.get(count) + 1))))))
+  } yield ()
+"""
+
+def evCounterView(): IO[String] =
+  Ref.of(Value.VUnit).flatMap(host => Eval.runMain(Eval.withHost(evProg(srcCounter()), host)).flatMap(_ => Ref.get(host).flatMap(view => evTap(view, evProg(srcCounter())).flatMap(_ => IO.pure(evLabel(view))))))
+
+def evViewArgs(view: Value): List[Value] =
+  view match {
+    case Value.VView(_, args) => args
+    case _ => []
+  }
+
+def evTap(view: Value, p: EvProg): IO[Unit] =
+  evTapButton(List.at(evViewArgs(view), 1), p)
+
+def evTapButton(button: Value, p: EvProg): IO[Unit] =
+  Eval.evUnit(Eval.applyValue(List.at(evViewArgs(button), 1), [Value.VUnit], Eval.envOf(p), p, 0))
+
+def evLabel(view: Value): String =
+  evSigStr(List.at(evViewArgs(List.at(evViewArgs(view), 0)), 0))
+
+def evSigStr(sv: Value): String =
+  sv match {
+    case Value.VSig(s) => Eval.show(Signal.get(s))
+    case _ => Eval.show(sv)
+  }
+
+def evUiMain(): IO[Unit] =
+  evCounterView().flatMap(label => IO.println(if (label == "\"Count: 1\"") "eval-ui-ok" else Str.concat("eval-ui-fail ", label)))
 
 def probeDriver(r: Ref[Int], toks: List[String]): IO[Unit] =
   Ref.update(r, n => n + Str.toInt(List.at(toks, 0), 0))
@@ -817,4 +859,4 @@ def probeMain(): IO[Unit] =
   Sys.getenv("SCUZZ_EV_TESTRT").flatMap(ev => if (ev == "") IO.println("probe-skip") else probeGo())
 
 @main def main: IO[Unit] =
-  IO.println(if (allOk()) "ir-ok" else dumpAll()).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => probeMain())
+  IO.println(if (allOk()) "ir-ok" else dumpAll()).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => probeMain())
