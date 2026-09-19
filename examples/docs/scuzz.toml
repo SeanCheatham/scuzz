@@ -8,5 +8,4 @@ headless_size = [1000, 720]
 headless_scale = 1.0
 
 [dependencies]
-manual = { path = "../manual" }
 compiler = { path = "../compiler" }

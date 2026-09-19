@@ -1,3 +1,0 @@
-[fuzz]
-schedule_seed = "3"
-events = ["tap navtile:Build a GUI", "tap link:Docs", "tap choicechip:Verify"]

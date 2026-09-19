@@ -70,11 +70,11 @@ the call (`Net: not available on web`); a process effect fails at `fork`
 dependencies; the linker drops the defs `@main` does not reach. Files use Emscripten memory storage. They do not persist across page reloads.
 Static text supports browser selection and copying through a DOM text layer.
 A removed focused control moves focus to the text layer.
-Index Book sections use URL fragments for links and browser history.
-In-content `View.link` and `View.navTile` controls use the same `#section=`
-fragment. An `http://` or `https://` route is a real URL. Icons and remaining
-images expose `role=img`. Docs does not paint placeholder images. A breadcrumb
-is a navigation group.
+Walkthrough tabs and Index Book sections use URL fragments for links and
+browser history. The fragment key is `#stage=id`. In-content `View.link` and
+`View.navTile` controls use the same `#stage=` fragment. An `http://` or
+`https://` route is a real URL. Icons and remaining images expose `role=img`.
+Docs does not paint placeholder images. A breadcrumb is a navigation group.
 The browser exposes links, buttons, headings, images, and editable fields through DOM
 controls. Fields support native clipboard actions and IME composition.
 Chromium, Firefox, and WebKit run the browser proof. Chromium and WebKit also

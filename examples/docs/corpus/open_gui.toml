@@ -1,3 +1,0 @@
-[fuzz]
-schedule_seed = "1"
-events = ["tap 17", "tap link:Docs"]

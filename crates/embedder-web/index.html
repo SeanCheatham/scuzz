@@ -41,11 +41,11 @@ var Module = {
   printErr(text) { console.error(text); },
   readRoute() {
     if (!Module.ready) return;
-    const id = new URLSearchParams(location.hash.slice(1)).get('section') ?? Module.firstSection;
+    const id = new URLSearchParams(location.hash.slice(1)).get('stage') ?? Module.firstSection;
     if (id === undefined) return;
     const found = Module.ccall('sz_web_navigate', 'number', ['string'], [id]);
     if (!found && Module.currentSection)
-      history.replaceState(null, '', '#section=' + encodeURIComponent(Module.currentSection));
+      history.replaceState(null, '', '#stage=' + encodeURIComponent(Module.currentSection));
   },
   resizeViewport() {
     const viewport = window.visualViewport;
@@ -185,7 +185,7 @@ var Module = {
         node.setAttribute('aria-label', item.label);
         if (item.route !== null) {
           const http = item.route.startsWith('http://') || item.route.startsWith('https://');
-          node.href = http ? item.route : '#section=' + encodeURIComponent(item.route);
+          node.href = http ? item.route : '#stage=' + encodeURIComponent(item.route);
           if (node.textContent !== item.label) node.textContent = item.label;
           if (item.checked) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current');
         } else if (item.role === 4 || item.role === 49) {
@@ -220,9 +220,9 @@ var Module = {
     const section = frame.sections.find(section => section.selected);
     if (section) {
       Module.firstSection = frame.sections[0].id; Module.currentSection = section.id;
-      const hash = '#section=' + encodeURIComponent(section.id);
+      const hash = '#stage=' + encodeURIComponent(section.id);
       if (!Module.routeReady) { history.replaceState(null, '', hash); Module.routeReady = true; }
-      else if (new URLSearchParams(location.hash.slice(1)).get('section') !== section.id) history.pushState(null, '', hash);
+      else if (new URLSearchParams(location.hash.slice(1)).get('stage') !== section.id) history.pushState(null, '', hash);
     }
   }
 };
