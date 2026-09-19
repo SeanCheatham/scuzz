@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "1"
+events = ["tap tab:Claim", "tap button:Record a hit"]

@@ -32,6 +32,15 @@ async function check(browserType, url, mobile) {
         throw error;
       }
     };
+    const expectSnap = async text => {
+      try {
+        await page.waitForFunction(text => Module.ready && Module.ccall('sz_web_snapshot', 'string', [], []).includes(text), text);
+      } catch (error) {
+        console.error({expected: text, url: page.url(), errors,
+          state: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
+        throw error;
+      }
+    };
     const expectSection = async id => {
       try {
         await page.waitForFunction(id => Module.ready && Module.currentSection === id, id);
@@ -41,7 +50,6 @@ async function check(browserType, url, mobile) {
         throw error;
       }
     };
-    // Native focus pans the shared scroll container. Playwright click needs the control in view.
     const reveal = async locator => {
       await locator.evaluate(node => node.focus());
       await page.waitForFunction(el => {
@@ -50,8 +58,9 @@ async function check(browserType, url, mobile) {
       }, await locator.elementHandle());
     };
     await page.goto(url);
-    await expectText('text:Start');
-    assert.equal(await page.title(), 'Scuzz Docs');
+    await expectText('text:Run a snippet');
+    await expectSection('run');
+    assert.equal(await page.title(), 'Scuzz');
     {
       const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
       const pumps = await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], []));
@@ -60,34 +69,45 @@ async function check(browserType, url, mobile) {
       await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 400)));
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], [])), paints);
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], [])), pumps);
-      // An idle session pauses the frame loop.
       assert.equal(await page.evaluate(() => window.rafRequests), frames, 'idle frame loop');
     }
-    assert.equal(await page.getByRole('heading', {name: 'Start', level: 1}).count(), 1);
-    assert.equal(await page.getByRole('link', {name: 'Install', exact: true}).count(), 1);
-    assert.equal(await page.getByRole('link', {name: 'Install the CLI', exact: true}).count(), 1);
-    assert(await page.getByRole('link').count() >= 16);
-    assert.equal(await page.getByRole('navigation', {name: 'Breadcrumb'}).count(), 1);
-    assert.equal(await page.getByRole('img', {name: 'Same View tree on every runtime'}).count(), 0);
+    assert.equal(await page.getByRole('heading', {name: 'Run', level: 1}).count(), 1);
+    assert.equal(await page.getByRole('navigation', {name: 'Breadcrumb'}).count(), 0);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
-    assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).count(), 1);
-    assert.equal(await page.getByRole('link', {name: 'Next: Install', exact: true}).getAttribute('href'), '#section=install');
-    // Index chips stay in view. Start tiles sit in a nested scroll below the fold.
-    assert.equal(await page.getByRole('link', {name: 'Build a GUI', exact: true}).count(), 1);
-    await page.getByRole('link', {name: 'GUI', exact: true}).click();
-    await expectSection('gui');
-    await expectText('text:GUI');
-    assert.equal(new URL(page.url()).hash, '#section=gui');
-    assert.equal(await page.getByRole('img', {name: 'A View tree plus Signals'}).count(), 0);
-    await page.getByRole('link', {name: 'Docs', exact: true}).click();
-    await expectSection('start');
-    await expectText('text:Start');
+    assert.equal(await page.getByRole('tab', {name: 'Run', exact: true}).count(), 1);
+    assert.equal(await page.getByRole('tab', {name: 'Cover', exact: true}).count(), 1);
     assert.equal(await page.getByRole('button', {name: 'Add one', exact: true}).count(), 0);
-    assert.equal(await page.getByRole('link', {name: 'Try Signals', exact: true}).count(), 1);
-    await page.getByRole('link', {name: 'Signals', exact: true}).click();
-    await expectSection('signals');
-    await expectText('text:Signals');
-    assert.equal(new URL(page.url()).hash, '#section=signals');
+    assert.equal(await page.getByRole('img').count(), 0);
+    const run = page.getByRole('button', {name: 'Run', exact: true});
+    await reveal(run);
+    await run.click();
+    await expectText('text:Clicks: 0');
+    const plusOne = page.getByRole('button', {name: '+1', exact: true});
+    await reveal(plusOne);
+    await plusOne.click();
+    await expectText('text:Clicks: 1');
+    assert.equal(await page.getByRole('button', {name: 'Continue', exact: true}).count(), 1);
+    const tryEditor = page.getByRole('textbox', {name: 'editor', exact: true});
+    const trySource = await tryEditor.inputValue();
+    assert(trySource.includes('Clicks: $n'));
+    await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.insertText(trySource.replace('Clicks: $n', 'Taps: $n'));
+    await reveal(run);
+    await run.click();
+    await expectText('text:Taps: 0');
+    await reveal(plusOne);
+    await plusOne.click();
+    await expectText('text:Taps: 1');
+    await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.insertText('@main def main: IO[Unit] = Ui.run(_ => View.text(1))');
+    await reveal(run);
+    await run.click();
+    await page.waitForFunction(() => Module.textBlocks?.some(block => /expected String/.test(block.text)));
+    const signalTab = page.getByRole('tab', {name: 'Signal', exact: true});
+    await reveal(signalTab);
+    await signalTab.click();
+    await expectSection('signal');
+    assert.equal(new URL(page.url()).hash, '#stage=signal');
     const addOne = page.getByRole('button', {name: 'Add one', exact: true});
     await addOne.waitFor({state: 'attached'});
     await reveal(addOne);
@@ -100,72 +120,51 @@ async function check(browserType, url, mobile) {
       await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 400)));
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], [])), paints);
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], [])), pumps);
-      // The click resumes the loop. The settled session pauses it again.
       assert.equal(await page.evaluate(() => window.rafRequests), frames, 'idle frame loop');
     }
-    const headings = {Install: 'Install', Language: 'Language', GUI: 'GUI', Verify: 'Verify', Web: 'Web'};
-    for (const [label, heading] of Object.entries(headings)) {
-      await page.getByRole('link', {name: label, exact: true}).click();
-      await expectSection(label.toLowerCase());
-      await expectText('text:' + heading);
-      assert.equal(new URL(page.url()).hash, '#section=' + label.toLowerCase());
-      assert.equal(await page.getByRole('link', {name: label, exact: true}).getAttribute('aria-current'), 'page');
-      assert.equal(await page.getByRole('button', {name: 'Add one', exact: true}).count(), 0);
-      if (label === 'Verify') {
-        // Sibling paragraphs and code blocks keep constant left margins.
-        const margins = await page.evaluate(() => {
-          const left = prefix => Module.textBlocks.find(block => block.text.startsWith(prefix)).lines[0].x;
-          return {
-            paragraphs: ['Scuzz does not use', 'A def with one Timeline', 'Verdict.alwaysHas', 'Zero iterations', 'A scenario file must define setup'].map(left),
-            code: ['def bump', 'scuzz fuzz --iterations 16', 'scuzz fuzz --iterations 0'].map(left)
-          };
-        });
-        for (const values of Object.values(margins)) assert.equal(new Set(values).size, 1, JSON.stringify(margins));
-      }
-    }
-    await page.goBack(); await expectText('text:Verify');
-    await page.goForward(); await expectText('text:Web');
-    for (const [label, id] of [['iOS', 'ios'], ['IDE', 'ide']]) {
-      await page.getByRole('link', {name: label, exact: true}).click();
-      await expectSection(id);
-      await expectText('text:' + label);
-    }
-    await page.getByRole('link', {name: 'Signals', exact: true}).click();
-    await expectSection('signals');
+    const continueBtn = page.getByRole('button', {name: 'Continue', exact: true});
+    await reveal(continueBtn);
+    await continueBtn.click();
+    await expectSection('claim');
+    await expectText('text:Names in this app');
+    const record = page.getByRole('button', {name: 'Record a hit', exact: true});
+    await reveal(record);
+    await record.click();
+    await expectSnap('chip:tappedAdd=1');
+    await page.getByRole('tab', {name: 'Signal', exact: true}).click();
     await expectText('text:Count: 1');
-    const reset = page.getByRole('button', {name: 'Reset', exact: true});
-    await reveal(reset);
-    await reset.click();
-    await expectText('text:Count: 0');
-
-    // A real anchor keeps modified clicks and link addresses in the browser.
-    const install = page.getByRole('link', {name: 'Install', exact: true});
-    assert.equal(await install.getAttribute('href'), '#section=install');
-    if (!mobile) {
-      const popupReady = context.waitForEvent('page');
-      await install.click({modifiers: ['ControlOrMeta']});
-      const popup = await popupReady;
-      await popup.waitForFunction(() => window.Module && Module.ready && Module.currentSection === 'install');
-      await popup.close();
-      await page.bringToFront();
-    }
-    await install.click(); await expectText('text:Install');
-    const codeRow = await page.evaluate(() => {
-      const text = [...document.querySelectorAll('.text span')].find(node => node.textContent.startsWith('curl -fsSL'));
-      const line = text.getBoundingClientRect();
-      const button = document.querySelector('[aria-label="Copy"]');
-      const box = button.getBoundingClientRect();
-      return {line: {x: line.x, y: line.y, width: line.width}, button: {x: box.x, y: box.y, bottom: box.bottom}};
+    await page.getByRole('tab', {name: 'Search', exact: true}).click();
+    await expectSection('search');
+    await expectText('text:Campaign');
+    const fuzz = page.getByRole('button', {name: 'Fuzz', exact: true});
+    await reveal(fuzz);
+    await fuzz.click();
+    await expectText('text:fail hidden 3');
+    await expectSnap('chip:fail=1');
+    await page.getByRole('tab', {name: 'Branch', exact: true}).click();
+    await expectSection('branch');
+    await page.waitForFunction(() => {
+      const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
+      return snap.includes('text:leftFirst: L must win') &&
+        snap.includes('semantics:seed 0') && snap.includes('semantics:seed 128') &&
+        snap.includes('text:first=R fail') && snap.includes('text:first=L pass');
+    }, null, {timeout: 60000}).catch(async error => {
+      console.error({branch: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
+      throw error;
     });
-    assert(codeRow.line.y >= codeRow.button.y && codeRow.line.y < codeRow.button.bottom);
-    assert(codeRow.line.x + codeRow.line.width <= codeRow.button.x);
-
+    await page.getByRole('tab', {name: 'Cover', exact: true}).click();
+    await expectSection('cover');
+    await expectSnap('text:arms ');
+    await expectSnap('text:live ');
+    await expectSnap('text:mutant ');
+    assert.equal(await page.getByRole('link', {name: 'Scuzz on GitHub', exact: true}).getAttribute('href'),
+      'https://github.com/SeanCheatham/scuzz');
     await page.getByRole('button', {name: 'Copy', exact: true}).first().click();
     await page.getByRole('button', {name: 'Copied', exact: true}).first().waitFor();
-    if (browserType === chromium) assert.equal(await page.evaluate(() => navigator.clipboard.readText()),
-      'curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh');
-
-    // Clipboard failure keeps the source available and reports failure.
+    if (browserType === chromium) {
+      const copied = await page.evaluate(() => navigator.clipboard.readText());
+      assert(copied.includes('countdown'), copied);
+    }
     await page.evaluate(() => {
       window.writeClipboard = navigator.clipboard.writeText.bind(navigator.clipboard);
       navigator.clipboard.writeText = async () => { throw new Error('denied'); };
@@ -173,33 +172,11 @@ async function check(browserType, url, mobile) {
     await page.getByRole('button', {name: 'Copied', exact: true}).first().click();
     await page.getByRole('button', {name: 'Copy failed', exact: true}).first().waitFor();
     await page.evaluate(() => { navigator.clipboard.writeText = window.writeClipboard; });
-    if (!mobile) {
-      const line = page.locator('.text span').filter({hasText: 'curl -fsSL'}).first();
-      const box = await line.boundingBox();
-      await page.mouse.move(box.x + 1, box.y + box.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(box.x + 80, box.y + box.height / 2, {steps: 10});
-      await page.mouse.up();
-      assert((await page.evaluate(() => getSelection().toString())).startsWith('curl'));
-    }
-    const source = await page.evaluate(() => {
-      const first = [...document.querySelectorAll('.text span')].find(line => line.textContent.startsWith('curl -fsSL'));
-      const lines = [...first.parentElement.children];
-      const range = document.createRange();
-      range.setStart(first.firstChild, 0); range.setEnd(lines.at(-1).firstChild, lines.at(-1).textContent.length);
-      getSelection().removeAllRanges(); getSelection().addRange(range);
-      const event = new ClipboardEvent('copy', {clipboardData: new DataTransfer(), bubbles: true, cancelable: true});
-      document.dispatchEvent(event);
-      return [event.clipboardData.getData('text/plain'), Module.textBlocks[first.block].text];
-    });
-    assert.equal(source[0], source[1]);
-    await page.evaluate(() => getSelection().removeAllRanges());
     // Browser commands must retain their default action.
     assert.deepEqual(await page.evaluate(() => ['f', '+', '-', '0', 'r', 'l'].map(key => {
       const event = new KeyboardEvent('keydown', {key, ctrlKey: true, bubbles: true, cancelable: true});
       Module.canvas.dispatchEvent(event); return event.defaultPrevented;
     })), Array(6).fill(false));
-    // Wheel and canvas touchmove cancel on non-passive listeners.
     assert.deepEqual(await page.evaluate(() => {
       const wheel = new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 10, clientX: 40, clientY: 80});
       window.dispatchEvent(wheel);
@@ -227,114 +204,21 @@ async function check(browserType, url, mobile) {
       assert(touch.some(listener => listener.passive === false), JSON.stringify(touch));
       await cdp.detach();
     }
-    await install.focus(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
-    await expectText('text:Language');
-
-    await page.getByRole('link', {name: 'GUI', exact: true}).click();
-    await expectText('text:GUI');
-    const headingTop = await page.getByRole('heading', {name: 'GUI', exact: true})
-      .evaluate(node => node.firstElementChild.getBoundingClientRect().top);
-    const positions = await page.evaluate(() => JSON.stringify(Module.textBlocks.map(block => block.lines.map(line => line.y))));
-    if (mobile) {
-      await page.evaluate(() => {
-        const target = [...document.querySelectorAll('.text span')].find(node => node.textContent.startsWith('A View describes'));
-        const box = target.getBoundingClientRect();
-        const touch = y => ({identifier: 1, target, clientX: box.x + 10, clientY: y});
-        const send = (type, touches) => {
-          const event = new Event(type, {bubbles: true, cancelable: true});
-          Object.defineProperty(event, 'touches', {value: touches});
-          target.dispatchEvent(event);
-        };
-        send('touchstart', [touch(box.y + 70)]);
-        send('touchmove', [touch(box.y + 10)]);
-        send('touchend', []);
-      });
-    } else {
-      const box = await page.locator('.text span').filter({hasText: 'A View describes'}).first().boundingBox();
-      await page.mouse.move(box.x + 10, box.y + 10); await page.mouse.wheel(0, 100);
-    }
-    await page.waitForFunction(before => JSON.stringify(Module.textBlocks.map(block => block.lines.map(line => line.y))) !== before, positions);
-    assert.equal(await page.getByRole('heading', {name: 'GUI', exact: true})
-      .evaluate(node => node.firstElementChild.getBoundingClientRect().top), headingTop);
-    const field = page.getByRole('textbox', {name: 'Your text', exact: true});
-    // Focus must reveal the field in its shared scroll container.
-    await field.focus();
-    await page.waitForFunction(() => {
-      const field = document.querySelector('input.edit');
-      const box = field.getBoundingClientRect(); return box.y >= 0 && box.bottom <= innerHeight;
-    });
-    await page.keyboard.insertText('café 🐈');
-    await expectText('text:You typed: café 🐈');
-    await field.evaluate(node => {
-      node.dispatchEvent(new CompositionEvent('compositionstart', {bubbles: true}));
-      node.value = 'café 🐈日本';
-      node.dispatchEvent(new CompositionEvent('compositionupdate', {data: '日本', bubbles: true}));
-    });
-    assert(!(await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))).includes('text:You typed: café 🐈日本'));
-    await field.evaluate(node => {
-      node.dispatchEvent(new CompositionEvent('compositionend', {data: '日本', bubbles: true}));
-      node.dispatchEvent(new InputEvent('input', {data: '日本', inputType: 'insertCompositionText', bubbles: true}));
-    });
-    await expectText('text:You typed: café 🐈日本');
-    if (browserType === chromium) {
-      await page.evaluate(() => navigator.clipboard.writeText('paste 😀'));
-      await field.focus(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.press('ControlOrMeta+v');
-      await expectText('text:You typed: paste 😀');
-    }
-    const editor = page.getByRole('textbox', {name: 'editor', exact: true});
-    await editor.focus(); await page.keyboard.insertText('one\ntwo 🌍');
-    await expectText('text:Notes: one\ntwo 🌍');
-    const savedText = await field.inputValue();
-    const liveTab = page.getByRole('tab', {name: 'Live example', exact: true});
-    const sourceTab = page.getByRole('tab', {name: 'Source', exact: true});
-    assert.equal(await page.getByRole('tablist').count(), 1);
-    assert.equal(await liveTab.getAttribute('tabindex'), '0');
-    assert.equal(await sourceTab.getAttribute('tabindex'), '-1');
-    await liveTab.focus();
+    const runTab = page.getByRole('tab', {name: 'Run', exact: true});
+    await reveal(runTab);
+    await runTab.focus();
     await page.keyboard.press('End');
-    assert(await sourceTab.evaluate(node => node === document.activeElement));
-    assert.equal(await liveTab.getAttribute('aria-selected'), 'true');
     await page.keyboard.press('Enter');
-    await page.getByRole('tabpanel', {name: 'Source', exact: true}).waitFor();
-    const sourcePanel = page.getByRole('tabpanel', {name: 'Source', exact: true});
-    assert((await sourcePanel.locator('.text').textContent()).endsWith('  } yield ()'));
-    assert.equal(await field.count(), 0);
-    assert.equal(await editor.count(), 0);
-    assert.equal(new URL(page.url()).hash, '#section=gui');
-    assert(await sourceTab.evaluate(node => document.getElementById(node.getAttribute('aria-controls')).getAttribute('role') === 'tabpanel'));
-    await page.keyboard.press('Tab');
-    assert(await page.getByRole('tabpanel', {name: 'Source', exact: true}).evaluate(node => node === document.activeElement));
-    await page.getByRole('link', {name: 'Start', exact: true}).click();
-    await page.getByRole('button', {name: 'Try GUI', exact: true}).click();
-    await page.getByRole('tabpanel', {name: 'Source', exact: true}).waitFor();
-    await sourceTab.focus(); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Space');
-    await page.getByRole('tabpanel', {name: 'Live example', exact: true}).waitFor();
-    assert.equal(await field.inputValue(), savedText);
-    assert.equal(await editor.inputValue(), 'one\ntwo 🌍');
-    // Removing the focused control moves focus to the text layer.
-    await editor.focus();
-    await sourceTab.evaluate(node => node.click());
-    await page.getByRole('tabpanel', {name: 'Source', exact: true}).waitFor();
-    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'text-layer');
-    await liveTab.evaluate(node => node.click());
-    await page.getByRole('tabpanel', {name: 'Live example', exact: true}).waitFor();
-    await liveTab.focus(); await page.keyboard.press('End'); await page.keyboard.press('Home');
-    assert(await liveTab.evaluate(node => node === document.activeElement));
-    await page.setViewportSize({width: 390, height: 400});
-    await field.focus();
-    await page.waitForFunction(() => {
-      const field = document.querySelector('input.edit');
-      const box = field.getBoundingClientRect();
-      return box.top >= 0 && box.bottom <= 400 && document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === field;
-    });
-    await page.setViewportSize({width: mobile ? 390 : 1000, height: 720});
-    await page.getByRole('link', {name: 'Web', exact: true}).click();
-    await expectText('text:Web');
-    assert.equal(await page.getByRole('img', {name: 'Hash links keep the selected section'}).count(), 0);
-    assert.equal(await page.getByRole('link', {name: 'Scuzz on GitHub', exact: true}).getAttribute('href'), 'https://github.com/SeanCheatham/scuzz');
+    await expectSection('cover');
+    await page.goto(url + '?preview=1#stage=search');
+    await expectSection('search');
+    await page.reload(); await expectSection('search');
+    assert.equal(new URL(page.url()).search, '?preview=1');
+    await page.evaluate(() => { location.hash = 'stage=missing'; });
+    await page.waitForFunction(() => location.hash === '#stage=search');
     if (mobile) {
-      await page.getByRole('link', {name: 'Install', exact: true}).tap();
-      await expectText('text:Install');
+      await page.getByRole('tab', {name: 'Run', exact: true}).tap();
+      await expectSection('run');
       assert.equal(await page.evaluate(() => getComputedStyle(Module.canvas).touchAction), 'pinch-zoom');
       if (browserType === chromium) {
         const cdp = await context.newCDPSession(page);
@@ -349,86 +233,6 @@ async function check(browserType, url, mobile) {
         await cdp.detach();
       }
     }
-    await page.getByRole('link', {name: 'Start', exact: true}).click();
-    await expectSection('start');
-    await expectText('text:Start');
-    await expectText('text:Try Scuzz');
-    await expectText('navtile:Run a snippet');
-    await expectText('navtile:Watch a campaign');
-    const nextInstall = page.getByRole('link', {name: 'Next: Install', exact: true});
-    if (mobile) {
-      await page.getByRole('link', {name: 'Install', exact: true}).click();
-    } else {
-      await reveal(nextInstall);
-      await nextInstall.click();
-    }
-    await expectSection('install');
-    assert.equal(new URL(page.url()).hash, '#section=install');
-    const backStart = page.getByRole('link', {name: 'Back: Start', exact: true});
-    if (mobile) {
-      await page.getByRole('link', {name: 'Start', exact: true}).click();
-    } else {
-      await reveal(backStart);
-      await backStart.click();
-    }
-    await expectSection('start');
-    await expectText('text:Start');
-    await page.goto(url + '?preview=1#section=language');
-    await expectText('text:Language');
-    await page.reload(); await expectText('text:Language');
-    assert.equal(new URL(page.url()).search, '?preview=1');
-    await page.evaluate(() => { location.hash = 'section=missing'; });
-    await page.waitForFunction(() => location.hash === '#section=language');
-    // Try it: the evaluator runs the typed program and mounts its view.
-    const tryLink = page.getByRole('link', {name: 'Try it', exact: true});
-    await reveal(tryLink);
-    await tryLink.click();
-    await expectSection('try');
-    await expectText('text:Try it');
-    await expectText('text:Clicks: 0');
-    const plusOne = page.getByRole('button', {name: '+1', exact: true});
-    await reveal(plusOne);
-    await plusOne.click();
-    await expectText('text:Clicks: 1');
-    const tryEditor = page.getByRole('textbox', {name: 'editor', exact: true});
-    const trySource = await tryEditor.inputValue();
-    assert(trySource.includes('Clicks: $n'));
-    await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
-    await page.keyboard.insertText(trySource.replace('Clicks: $n', 'Taps: $n'));
-    const run = page.getByRole('button', {name: 'Run', exact: true});
-    await reveal(run);
-    await run.click();
-    await expectText('text:Taps: 0');
-    await reveal(plusOne);
-    await plusOne.click();
-    await expectText('text:Taps: 1');
-    await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
-    await page.keyboard.insertText('@main def main: IO[Unit] = Ui.run(_ => View.text(1))');
-    await reveal(run);
-    await run.click();
-    await page.waitForFunction(() => Module.textBlocks?.some(block => /expected String/.test(block.text)));
-    assert.deepEqual(errors, []);
-    const howLink = page.getByRole('link', {name: 'How it runs', exact: true});
-    await reveal(howLink);
-    await howLink.click();
-    await expectSection('how');
-    await expectText('text:How it runs');
-    await page.waitForFunction(() => {
-      const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
-      return snap.includes('text:leftFirst: L must win') &&
-        snap.includes('semantics:seed 0') && snap.includes('semantics:seed 128') &&
-        snap.includes('text:first=R fail') && snap.includes('text:first=L pass') &&
-        snap.includes(' n 3') && snap.includes('text:arms ') && snap.includes('text:live ') &&
-        snap.includes('text:mutant ') && snap.includes('text:Campaign') && snap.includes('text:Schedule branches');
-    }, null, {timeout: 60000}).catch(async error => {
-      console.error({how: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
-      throw error;
-    });
-    const fuzz = page.getByRole('button', {name: 'Fuzz', exact: true});
-    await reveal(fuzz);
-    await fuzz.click();
-    await expectText('text:fail hidden 3');
-    await expectText('chip:fail=1');
     assert.deepEqual(errors, []);
     console.log(`web: ${browserType.name()} ${mobile ? 'mobile emulation' : 'desktop'} passed`);
   } finally { await browser.close(); }

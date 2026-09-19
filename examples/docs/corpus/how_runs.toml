@@ -1,3 +1,0 @@
-[fuzz]
-schedule_seed = "3"
-events = ["tap choicechip:How it runs", "tap button:Fuzz"]

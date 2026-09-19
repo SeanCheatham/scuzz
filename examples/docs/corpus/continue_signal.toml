@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "2"
+events = ["tap tab:Signal", "tap button:Add one", "tap button:Continue"]

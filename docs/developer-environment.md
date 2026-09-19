@@ -93,11 +93,11 @@ Set `NODE_PATH` to the directory that contains the installed Playwright module.
 Run `./scripts/ci.sh web`. The browser check starts a temporary local HTTP
 server and closes it when the check ends. The checks include phone emulation.
 
-For a real phone check, serve the web output through HTTPS. Open Docs on the
-phone. Copy a command with a long press. Zoom with two fingers. Scroll the page.
-Open GUI and focus each edit field. Check that the keyboard does not cover the
-field. Enter accented text, emoji, and IME text. Paste text. Rotate the phone.
-Switch sections and return to check the stored text. Emulation does not prove
+For a real phone check, serve the web output through HTTPS. Open the walkthrough
+on the phone. Copy code on Cover with a long press. Zoom with two fingers.
+Scroll the page. Focus the Run editor. Check that the keyboard does not cover
+the field. Enter accented text, emoji, and IME text. Paste text. Rotate the
+phone. Switch stages and return to check Signal state. Emulation does not prove
 these OS keyboard and selection behaviors.
 
 ## iOS simulator loop

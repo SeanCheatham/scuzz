@@ -1002,6 +1002,18 @@ void sz_view_format_hit_id(const SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_NAV_TILE:
     role = "navtile";
     break;
+  case SZ_A11Y_TAB:
+    role = "tab";
+    break;
+  case SZ_A11Y_TAB_LIST:
+    role = "tablist";
+    break;
+  case SZ_A11Y_TAB_PANEL:
+    role = "tabpanel";
+    break;
+  case SZ_A11Y_APP_BAR:
+    role = "appbar";
+    break;
   default:
     break;
   }
@@ -5799,7 +5811,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_TABS:
   case SZ_VIEW_INDEX_BOOK: {
 #ifdef __EMSCRIPTEN__
-    if (v->kind == SZ_VIEW_INDEX_BOOK && sz_web_book_begin()) {
+    if (sz_web_book_begin()) {
       web_route_book = v;
       for (i = 1; i < v->child_count; i++) {
         SzView *section = v->children[i]->children[0];
@@ -7342,10 +7354,10 @@ int sz_view_edit_extend_to_xy(SzView *view, float x, float y) {
   return 1;
 }
 
-/* Select the first Index Book. Browser URL and View.link share this walk. */
+/* Select the first Index Book or Tabs. Browser URL and View.link share this walk. */
 static SzView *first_book(SzView *v) {
   if (collect_walk_hidden(v)) return NULL;
-  if (v->kind == SZ_VIEW_INDEX_BOOK) return v;
+  if (v->kind == SZ_VIEW_INDEX_BOOK || v->kind == SZ_VIEW_TABS) return v;
   for (int i = 0; i < v->child_count; i++) {
     SzView *book = first_book(v->children[i]);
     if (book) return book;

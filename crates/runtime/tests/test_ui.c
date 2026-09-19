@@ -15946,6 +15946,21 @@ static void test_app_shell_and_tabs(void) {
   }
 }
 
+static void test_tabs_navigate(void) {
+  SzSignalInt *selected = sz_signal_int(0);
+  SzView *sections = sz_view_column();
+  SzView *root;
+  sz_view_add_child(sections, sz_view_section("run", "Run", sz_view_text("Run")));
+  sz_view_add_child(sections, sz_view_section("search", "Search", sz_view_text("Search")));
+  root = sz_view_tabs(selected, sections);
+  sz_view_layout(root, 640.f, 480.f, sz_theme_default());
+  assert(sz_view_navigate(root, "search"));
+  assert(sz_signal_int_get(selected) == 1);
+  assert(!sz_view_navigate(root, "missing"));
+  sz_view_free(root);
+  sz_signal_int_free(selected);
+}
+
 static void test_docs_nav_widgets(void) {
   SzSignalInt *selected = sz_signal_int(0);
   SzView *sections = sz_view_column();
@@ -17411,6 +17426,7 @@ int main(void) {
   test_view_focus_group_keys();
   test_index_book_navigation_and_resize();
   test_app_shell_and_tabs();
+  test_tabs_navigate();
   test_index_book_long_index();
   test_docs_nav_widgets();
   test_app_chord_save();

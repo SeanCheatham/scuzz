@@ -1,3 +1,0 @@
-[fuzz]
-schedule_seed = "4"
-events = ["tap choicechip:GUI", "tap link:Open the iOS topic", "tap link:Next: Web", "tap link:Next: IDE", "tap link:Back: Web"]
