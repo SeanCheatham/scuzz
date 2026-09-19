@@ -31,6 +31,11 @@ int main(void) {
 
   check(sz_embedder_available() == 0, "available: no DISPLAY");
   check(sz_embedder_alive() == 0, "alive: no DISPLAY");
+  {
+    SzInputEvent ev;
+    memset(&ev, 0, sizeof ev);
+    check(sz_embedder_poll_event(&ev) == 0, "poll without DISPLAY is empty");
+  }
 
   /* Session clipboard works before any window exists. */
   check(sz_embedder_clipboard_set("scuzz clip") == 1, "clipboard_set");
