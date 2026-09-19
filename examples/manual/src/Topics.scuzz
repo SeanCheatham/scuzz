@@ -71,7 +71,7 @@ def trySource(): String =
   "@main def main: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    label = Signal.map(clicks, n => s\"Clicks: $n\")\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => Signal.set(clicks, Signal.get(clicks) + 1))))\n  } yield ()\n"
 
 def how(): Topic =
-  Topic("how", "How it runs", p("Press Fuzz to search a Bool oracle. Edit the snippet. The search tries hidden at 0 through 8 and prints the failing argument.") :: p("The same IO.both snippet runs under two schedule seeds. Queue.offer L and Queue.offer R race. leftFirst requires L. One scheduler branch fails. One branch passes. Below that, the evaluator shows a reduction trace, coverage arms, and one mutant.") :: Block.Viz("schedule", schedSource()) :: Block.Viz("trace", traceSource()) :: Block.Viz("coverage", coverSource()) :: Block.Viz("mutant", mutSource()) :: [])
+  Topic("how", "How it runs", p("Press Fuzz to search a Bool oracle. Edit the snippet. The search tries hidden at 0 through 8 and prints the failing argument.") :: p("The same IO.both snippet runs under two schedule seeds. Two cards show the two scheduler worlds. Queue.offer L and Queue.offer R race. leftFirst requires L. One branch fails. One branch passes. Below that, the evaluator shows a reduction trace, coverage arms, and one mutant.") :: Block.Viz("schedule", schedSource()) :: Block.Viz("trace", traceSource()) :: Block.Viz("coverage", coverSource()) :: Block.Viz("mutant", mutSource()) :: [])
 
 def campSource(): String =
   """def hidden(code: Int): Bool =

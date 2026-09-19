@@ -146,13 +146,22 @@ def vizScheduleB(src: String, pool: Ref[Value], a: TryOut, order0: Int): View =
   vizScheduleC(src, a, order0, Eval.tryNowAt(src, 128, pool), pool)
 
 def vizScheduleC(src: String, a: TryOut, order0: Int, b: TryOut, pool: Ref[Value]): View =
-  View.column(code(src), paragraph("leftFirst: L must win"), paragraph(schedBranch(0, a, order0)), paragraph(schedBranch(128, b, Eval.poolInt(pool, "order"))))
+  View.column(code(src), paragraph("leftFirst: L must win"), View.padding(8, View.row(View.expanded(schedCard(0, a, order0)), View.expanded(schedCard(128, b, Eval.poolInt(pool, "order"))))))
 
 def schedFirst(out: TryOut): String =
   if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"L\""))) "L" else if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"R\""))) "R" else "none"
 
-def schedBranch(seed: Int, out: TryOut, order: Int): String =
-  Str.concat("seed ", Str.concat(Str.fromInt(seed), Str.concat(" first=", Str.concat(schedFirst(out), if (order == 1) " pass" else " fail"))))
+def schedVerdict(out: TryOut, order: Int): String =
+  Str.concat("first=", Str.concat(schedFirst(out), if (order == 1) " pass" else " fail"))
+
+def schedTrace(out: TryOut): String =
+  schedTracePick(Eval.traceLines(out.trace), List.filter(Eval.traceLines(out.trace), s => Str.contains(s, "first \"")))
+
+def schedTracePick(all: List[String], hit: List[String]): String =
+  if (List.isEmpty(all)) "trace empty" else List.join(if (List.isEmpty(hit)) List.take(all, 3) else List.concat(hit, List.take(all, 2)), " | ")
+
+def schedCard(seed: Int, out: TryOut, order: Int): View =
+  View.semantics(Str.concat("seed ", Str.fromInt(seed)), View.card(View.padding(8, View.column(View.heading(2, View.text(Str.concat("seed ", Str.fromInt(seed)))), paragraph(schedVerdict(out, order)), paragraph(schedTrace(out))))))
 
 def vizTrace(src: String): View =
   vizTraceAt(src, Eval.tryNow(src, vizPool()))
