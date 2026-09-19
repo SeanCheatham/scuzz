@@ -64,8 +64,10 @@ cross-origin isolation headers.
 
 The first target supports GUI sessions with pointer, touch, keyboard, wheel,
 and resize events. Wheel and canvas touch listeners that cancel the event
-register as non-passive. Native network and process effects fail packaging.
-Files use Emscripten memory storage. They do not persist across page reloads.
+register as non-passive. The HTTP client and the HTTP servers fail loud at
+the call (`Net: not available on web`); a process effect fails at `fork`
+(`Sys.exec: fork failed`). The web build links every def in the package and its path
+dependencies; the linker drops the defs `@main` does not reach. Files use Emscripten memory storage. They do not persist across page reloads.
 Static text supports browser selection and copying through a DOM text layer.
 A removed focused control moves focus to the text layer.
 Index Book sections use URL fragments for links and browser history.
