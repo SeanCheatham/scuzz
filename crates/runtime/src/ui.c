@@ -1794,10 +1794,6 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   }
 }
 
-int sz_ui_scroll_index(SzUiSession *session, int index, float dy) {
-  return sz_ui_scroll_index_xy(session, index, 0.f, dy);
-}
-
 int sz_ui_scroll_index_xy(SzUiSession *session, int index, float dx, float dy) {
   SzView *scrolls[64];
   int count;

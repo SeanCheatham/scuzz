@@ -1,7 +1,6 @@
 # Desktop presenter: Linux X11 or Darwin Cocoa. Skipped elsewhere (Headless still works).
 UNAME_S := $(shell uname -s)
-# make has a built-in CC=cc default, so ?= never fires. Plain = keeps
-# clang the default while `make CC=gcc` on the command line still wins.
+# Plain = so a command-line CC=gcc still wins. ?= would lose to make's built-in CC=cc default.
 CC = clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 OBJCFLAGS ?= -Wall -Wextra -Werror -O2 -fobjc-arc

@@ -58,14 +58,6 @@ void sk_paint_set_color(SkPaint *paint, SkColor color) {
   scuzz_skia_paint_set_color(paint, color.r, color.g, color.b, color.a);
 }
 
-void sk_paint_set_stroke(SkPaint *paint, int stroke) {
-  scuzz_skia_paint_set_stroke(paint, stroke);
-}
-
-void sk_paint_set_stroke_width(SkPaint *paint, float width) {
-  scuzz_skia_paint_set_stroke_width(paint, width);
-}
-
 void sk_paint_set_text_size(SkPaint *paint, float size) {
   scuzz_skia_paint_set_text_size(paint, size);
 }

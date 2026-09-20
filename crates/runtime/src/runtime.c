@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
+#include "rt_locale.h"
 #include "rt_util.h"
 
 #include <errno.h>
@@ -1126,13 +1127,6 @@ SzString *sz_string_from_bool(int64_t b) {
   return sz_string_from_cstr(b ? "true" : "false");
 }
 
-static locale_t str_c_locale(void) {
-  static locale_t loc;
-  if (!loc)
-    loc = newlocale(LC_ALL_MASK, "C", (locale_t)0);
-  return loc;
-}
-
 SzString *sz_string_from_float(double x) {
   char buf[512];
   char *dot;
@@ -1142,7 +1136,7 @@ SzString *sz_string_from_float(double x) {
   if (x != x) {
     return sz_string_from_cstr("NaN");
   }
-  loc = str_c_locale();
+  loc = rt_c_locale();
   if (!loc)
     sz_panic("Str.fromFloat: C locale");
 #ifdef __APPLE__

@@ -50,8 +50,6 @@ void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h);
 SkPaint *sk_paint_new(void);
 void sk_paint_delete(SkPaint *paint);
 void sk_paint_set_color(SkPaint *paint, SkColor color);
-void sk_paint_set_stroke(SkPaint *paint, int stroke /* bool */);
-void sk_paint_set_stroke_width(SkPaint *paint, float width);
 void sk_paint_set_text_size(SkPaint *paint, float size);
 float sk_paint_get_text_size(const SkPaint *paint);
 
@@ -67,7 +65,6 @@ void sk_canvas_draw_string_mono(SkCanvas *canvas, const char *text, float x,
 /* Monospace cell = measure_string_mono("0"). Measure/draw use that grid so
  * editor caret columns match every presenter. View.text stays proportional. */
 float sk_font_mono_cell(float font_px);
-float sk_font_measure_mono_string(const char *text, float font_px);
 void sk_canvas_draw_mono_string(SkCanvas *canvas, const char *text, float x,
                                 float y, const SkPaint *paint);
 

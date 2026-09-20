@@ -3,6 +3,8 @@
 #define _DARWIN_C_SOURCE
 #endif
 #include "scuzz_rt.h"
+#include "rt_locale.h"
+#include "rt_util.h"
 
 #include <errno.h>
 #include <locale.h>
@@ -45,15 +47,8 @@ typedef struct {
   const char *err;
 } Jb;
 
-static locale_t json_c_locale(void) {
-  static locale_t loc;
-  if (!loc)
-    loc = newlocale(LC_ALL_MASK, "C", (locale_t)0);
-  return loc;
-}
-
 static double json_strtod(const char *s, char **end) {
-  locale_t loc = json_c_locale();
+  locale_t loc = rt_c_locale();
   if (!loc) {
     if (end)
       *end = (char *)s;
@@ -72,7 +67,7 @@ static double json_strtod(const char *s, char **end) {
 }
 
 static int json_fmt_double(char *tmp, size_t n, double x) {
-  locale_t loc = json_c_locale();
+  locale_t loc = rt_c_locale();
   if (!loc) {
     if (n)
       tmp[0] = '\0';
@@ -529,7 +524,7 @@ static SzAdt *jp_value(Jp *p) {
 SzAdt *sz_json_parse(SzString *s) {
   Jp p;
   SzAdt *v;
-  if (!json_c_locale())
+  if (!rt_c_locale())
     return result_err("C locale");
   if (!s)
     return result_err("Json.parse(null)");
@@ -704,7 +699,7 @@ static void jb_value(Jb *b, const SzAdt *j) {
 SzAdt *sz_json_stringify(SzAdt *j) {
   Jb b;
   SzString *s;
-  if (!json_c_locale())
+  if (!rt_c_locale())
     return result_err("C locale");
   if (!j)
     return result_err("Json.stringify(null)");

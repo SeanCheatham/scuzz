@@ -51,12 +51,10 @@ int main(void) {
   cell = sk_font_mono_cell(8.f);
   assert(cell > 0.f);
   assert(sk_font_measure_string_mono("I", 8.f) == sk_font_measure_string_mono("W", 8.f));
-  assert(sk_font_measure_mono_string("I", 8.f) == cell);
-  ii = sk_font_measure_mono_string("ii", 8.f);
-  ww = sk_font_measure_mono_string("WW", 8.f);
+  ii = sk_font_measure_string_mono("ii", 8.f);
+  ww = sk_font_measure_string_mono("WW", 8.f);
   assert(ii == ww);
-  assert(ii == 2.f * sk_font_measure_mono_string("i", 8.f));
-  assert(sk_font_measure_mono_string("", 8.f) == 0.f);
+  assert(ii == 2.f * cell);
   sk_paint_set_color(paint, sk_color_rgba(240, 240, 240, 255));
   sk_canvas_draw_mono_string(canvas, "ii", 8, 28, paint);
 

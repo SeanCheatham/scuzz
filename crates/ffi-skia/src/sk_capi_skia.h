@@ -35,8 +35,6 @@ void *scuzz_skia_paint_new(void);
 void scuzz_skia_paint_delete(void *paint);
 void scuzz_skia_paint_set_color(void *paint, uint8_t r, uint8_t g, uint8_t b,
                                 uint8_t a);
-void scuzz_skia_paint_set_stroke(void *paint, int stroke);
-void scuzz_skia_paint_set_stroke_width(void *paint, float width);
 void scuzz_skia_paint_set_text_size(void *paint, float size);
 float scuzz_skia_paint_get_text_size(const void *paint);
 float scuzz_skia_font_measure_string(const char *text, float font_px);

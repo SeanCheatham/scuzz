@@ -2,10 +2,10 @@ oracle topicsHaveBlocks(): Bool =
   List.forall(Manual.topics(), t => List.nonEmpty(t.blocks))
 
 oracle idsUnique(): Bool =
-  List.len(Manual.topics()) == 14
+  List.len(Manual.topics()) == 15
 
 oracle idsStable(): Bool =
-  Manual.idsLine() == "start|install|language|gui|signals|packages|verify|commands|manifest|ios|web|ide|try|how"
+  Manual.idsLine() == "start|install|language|gui|signals|packages|verify|commands|manifest|ios|android|web|ide|try|how"
 
 oracle snippetsFmt(): Bool =
   List.forall(Manual.allCode(), s => !Manual.isSnippet(s) || Manual.formatSrc(s) == s) && Manual.formatSrc(Topics.campSource()) == Topics.campSource()

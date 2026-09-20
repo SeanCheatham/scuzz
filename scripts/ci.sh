@@ -103,12 +103,8 @@ EOF
 }
 
 # Local HTTP proof for fetch_skia.sh retries. Does not call GitHub Releases.
-prove_fetch_skia_retry() {
+prove_fetch_skia_retry() (
   need_cmd python3 "sudo apt-get install -y python3"
-  _prove_fetch_skia_retry
-}
-
-_prove_fetch_skia_retry() (
   work="$(mktemp -d)"
   triple=fetch-retry-proof
   dest="$ROOT/third_party/skia/prebuilt/${triple}"

@@ -13,8 +13,6 @@
 
 struct SkPaint {
   SkColor color;
-  int stroke;
-  float stroke_width;
   float text_size;
 };
 
@@ -209,17 +207,9 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
   y0 = sw_floor_int(y);
   x1 = sw_floor_int(x + w);
   y1 = sw_floor_int(y + h);
-  if (paint->stroke) {
-    int t = (int)(paint->stroke_width < 1.f ? 1.f : paint->stroke_width);
-    for (iy = y0; iy < y1; iy++)
-      for (ix = x0; ix < x1; ix++)
-        if (ix < x0 + t || iy < y0 + t || ix >= x1 - t || iy >= y1 - t)
-          put_pixel(canvas->surface, ix, iy, paint->color);
-  } else {
-    for (iy = y0; iy < y1; iy++)
-      for (ix = x0; ix < x1; ix++)
-        put_pixel(canvas->surface, ix, iy, paint->color);
-  }
+  for (iy = y0; iy < y1; iy++)
+    for (ix = x0; ix < x1; ix++)
+      put_pixel(canvas->surface, ix, iy, paint->color);
 }
 
 void sk_canvas_save(SkCanvas *canvas) {
@@ -510,8 +500,6 @@ SkPaint *sk_paint_new(void) {
   if (!p)
     return NULL;
   p->color = sk_color_rgba(0, 0, 0, 255);
-  p->stroke = 0;
-  p->stroke_width = 1.f;
   p->text_size = 8.f;
   return p;
 }
@@ -521,16 +509,6 @@ void sk_paint_delete(SkPaint *paint) { free(paint); }
 void sk_paint_set_color(SkPaint *paint, SkColor color) {
   if (paint)
     paint->color = color;
-}
-
-void sk_paint_set_stroke(SkPaint *paint, int stroke) {
-  if (paint)
-    paint->stroke = stroke ? 1 : 0;
-}
-
-void sk_paint_set_stroke_width(SkPaint *paint, float width) {
-  if (paint)
-    paint->stroke_width = width;
 }
 
 void sk_paint_set_text_size(SkPaint *paint, float size) {

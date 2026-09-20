@@ -56,13 +56,6 @@ static SzIo *unwrap_net(void *value, void *env) {
   }
 }
 
-static int set_nonblock(int fd) {
-  int fl = fcntl(fd, F_GETFL, 0);
-  if (fl < 0)
-    return -1;
-  return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
-}
-
 static int http_resp_parts(void *resp, int64_t *status, SzMap **headers,
                            SzString **body) {
   SzPair *p = (SzPair *)resp;
@@ -712,29 +705,6 @@ static void *http_dns_recv(void *env) {
 }
 
 static void *http_check_write(void *env);
-
-static int tcp_begin(const struct sockaddr *sa, socklen_t len) {
-  int fd;
-  if (!sa || len == 0)
-    return -1;
-  fd = socket(sa->sa_family, SOCK_STREAM, 0);
-  if (fd < 0 || set_nonblock(fd) != 0) {
-    if (fd >= 0)
-      close(fd);
-    return -1;
-  }
-#ifdef SO_NOSIGPIPE
-  {
-    int nosig = 1;
-    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof nosig);
-  }
-#endif
-  if (connect(fd, sa, len) != 0 && errno != EINPROGRESS && errno != EAGAIN) {
-    close(fd);
-    return -1;
-  }
-  return fd;
-}
 
 /* RFC 9110: omit the port when it is the default for the scheme. */
 static void http_fmt_hosthdr(char *dst, size_t cap, const char *host, int port,
