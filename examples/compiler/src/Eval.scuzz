@@ -1049,9 +1049,18 @@ def forGuard(v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off:
   }
 
 def forPure(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
-  tryPat(name, logAfter(if (name == "_") () else logAdd(p, off, name, show(v), env), v), p) match {
+  tryPat(name, logAfter(forLog(name, v, p, off, env), v), p) match {
     case Some(vars) => forValue(rest, body, EvEnv(List.concat(vars, env.vars), env.mod, env.loc), p, off, drew)
     case None => errAt("for binding does not match", env, p, off)
+  }
+
+def forLog(name: String, v: Value, p: EvProg, off: Int, env: EvEnv): Unit =
+  if (name == "_" || List.isEmpty(p.log)) () else logAdd(p, off, name, showBound(v), env)
+
+def showBound(v: Value): String =
+  v match {
+    case Value.VStr(s) => if (Str.byteLen(s) > 128) "\"...\"" else Check.jsonStr(s)
+    case _ => show(v)
   }
 
 def forDraw(name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int): Value =
