@@ -6109,30 +6109,103 @@ int sz_view_scroll_is_h(const SzView *scroll) {
   return scroll && scroll->kind == SZ_VIEW_SCROLL && scroll->scroll_h;
 }
 
+static void clamp_scroll(float *slot, float d, float maxv) {
+  *slot += d;
+  if (*slot < 0.f)
+    *slot = 0.f;
+  if (*slot > maxv)
+    *slot = maxv;
+}
+
+static float editor_max_scroll_x(const SzView *v) {
+  const SzTheme *theme = sz_theme_default();
+  const char *s = field_cstr(v);
+  float cell = sk_font_mono_cell(theme->font_px);
+  float gutter = editor_gutter_w(v, theme);
+  float text_w = v->frame.w - gutter;
+  float extra;
+  int i;
+  int start = 0;
+  int max_cols = 0;
+  if (text_w < 8.f)
+    text_w = 8.f;
+  if (!s)
+    s = "";
+  for (i = 0;; i++) {
+    if (s[i] == '\0' || s[i] == '\n') {
+      int cols = editor_cols(s, start, i);
+      if (cols > max_cols)
+        max_cols = cols;
+      if (s[i] == '\0')
+        break;
+      start = i + 1;
+    }
+  }
+  extra = k_text_field_inset + (float)max_cols * cell - (text_w - 2.f);
+  return extra > 0.f ? extra : 0.f;
+}
+
+static float editor_max_scroll_y(const SzView *v) {
+  const SzTheme *theme = sz_theme_default();
+  float line_h = text_line_h(theme, theme->font_px);
+  float extra =
+      (float)editor_line_count(field_cstr(v)) * line_h + k_text_field_inset -
+      v->frame.h;
+  return extra > 0.f ? extra : 0.f;
+}
+
+static float scroll_max_x(const SzView *v) {
+  const SzTheme *theme = sz_theme_default();
+  float extra;
+  if (!v || v->kind != SZ_VIEW_SCROLL || !v->scroll_h || !v->scroll_child)
+    return 0.f;
+  extra = v->scroll_child->frame.w + theme->pad * 2.f - v->frame.w;
+  extra /= theme_px_scale(theme);
+  return extra > 0.f ? extra : 0.f;
+}
+
+static float scroll_max_y(const SzView *v) {
+  const SzTheme *theme = sz_theme_default();
+  float extra;
+  if (!v || v->kind != SZ_VIEW_SCROLL || v->scroll_h || !v->scroll_child)
+    return 0.f;
+  extra = v->scroll_child->frame.h + theme->pad * 2.f - v->frame.h;
+  extra /= theme_px_scale(theme);
+  return extra > 0.f ? extra : 0.f;
+}
+
+static SzView *parent_scrollable(SzView *v) {
+  SzView *p;
+  for (p = v ? v->parent : NULL; p; p = p->parent) {
+    if (p->kind == SZ_VIEW_SCROLL || p->kind == SZ_VIEW_EDITOR)
+      return p;
+  }
+  return NULL;
+}
+
+int sz_view_scroll_pan(SzView *scroll, float dx, float dy) {
+  float ox;
+  float oy;
+  if (!scroll)
+    return 0;
+  ox = scroll->scroll_x;
+  oy = scroll->scroll_y;
+  if (scroll->kind == SZ_VIEW_EDITOR) {
+    clamp_scroll(&scroll->scroll_x, dx, editor_max_scroll_x(scroll));
+    clamp_scroll(&scroll->scroll_y, dy, editor_max_scroll_y(scroll));
+  } else if (scroll->kind == SZ_VIEW_SCROLL && scroll->scroll_h) {
+    clamp_scroll(&scroll->scroll_x, dx != 0.f ? dx : dy, scroll_max_x(scroll));
+  } else if (scroll->kind == SZ_VIEW_SCROLL) {
+    clamp_scroll(&scroll->scroll_y, dy, scroll_max_y(scroll));
+  }
+  return scroll->scroll_x != ox || scroll->scroll_y != oy;
+}
+
 void sz_view_scroll_by(SzView *scroll, float d) {
   if (!scroll)
     return;
   if (scroll->kind == SZ_VIEW_EDITOR) {
-    const SzTheme *theme = sz_theme_default();
-    const char *s = field_cstr(scroll);
-    float line_h = text_line_h(theme, theme->font_px);
-    int lines = 1;
-    int i;
-    float max_sy;
-    if (s) {
-      for (i = 0; s[i]; i++) {
-        if (s[i] == '\n')
-          lines++;
-      }
-    }
-    scroll->scroll_y += d;
-    max_sy = (float)lines * line_h + k_text_field_inset - scroll->frame.h;
-    if (max_sy < 0.f)
-      max_sy = 0.f;
-    if (scroll->scroll_y > max_sy)
-      scroll->scroll_y = max_sy;
-    if (scroll->scroll_y < 0.f)
-      scroll->scroll_y = 0.f;
+    (void)sz_view_scroll_pan(scroll, 0.f, d);
     return;
   }
   if (scroll->kind != SZ_VIEW_SCROLL)
@@ -6146,6 +6219,22 @@ void sz_view_scroll_by(SzView *scroll, float d) {
     if (scroll->scroll_y < 0.f)
       scroll->scroll_y = 0.f;
   }
+}
+
+SzView *sz_view_scroll_wheel_target(SzView *root, float x, float y, float dx,
+                                    float dy) {
+  SzView *v = sz_view_scroll_at(root, x, y);
+  while (v) {
+    float ox = v->scroll_x;
+    float oy = v->scroll_y;
+    if (sz_view_scroll_pan(v, dx, dy)) {
+      v->scroll_x = ox;
+      v->scroll_y = oy;
+      return v;
+    }
+    v = parent_scrollable(v);
+  }
+  return NULL;
 }
 
 static SzView *scroll_at_node(SzView *v, float x, float y) {
@@ -6480,7 +6569,7 @@ SzView *sz_view_code(const char *text) {
   SzView *row = sz_view_row();
   SzView *button = sz_view_outlined_button("Copy", NULL, NULL);
   button->copy_text = sz_strdup(text ? text : "");
-  sz_view_add_child(row, sz_view_expanded(sz_view_text(text)));
+  sz_view_add_child(row, sz_view_expanded(sz_view_scroll_h(sz_view_text(text))));
   sz_view_add_child(row, button);
   return sz_view_card(sz_view_gap(8, row));
 }

@@ -124,12 +124,13 @@ static EM_BOOL mouse(int type, const EmscriptenMouseEvent *event, void *data) {
   return EM_TRUE;
 }
 
-EMSCRIPTEN_KEEPALIVE void sz_web_scroll(double x, double y, double dy) {
+EMSCRIPTEN_KEEPALIVE void sz_web_scroll(double x, double y, double dx, double dy) {
   if (!active) return;
   SzInputEvent input = {0};
   input.kind = SZ_INPUT_SCROLL;
   input.x = x;
   input.y = y;
+  input.dx = dx;
   input.dy = dy;
   sz_ui_session_live_inject(active, &input);
 }

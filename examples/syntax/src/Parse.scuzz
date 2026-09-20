@@ -24,7 +24,7 @@ enum Expr:
 
 record Param(name: String, ty: String, w: String, d: String)
 
-record Fun(priv: Bool, name: String, tparams: List[String], params: List[Param], ret: String, body: Expr, mod: String, off: Int)
+record Fun(priv: Bool, ora: Bool, name: String, tparams: List[String], params: List[Param], ret: String, body: Expr, mod: String, off: Int)
 
 record Arm(pat: String, g: String, body: Expr)
 
@@ -726,30 +726,30 @@ def parseParamListNext(p: (Param, Int), toks: Toks, acc: List[Param]): (List[Par
     case (par, j) => if (_is(toks, j, Tok.Comma)) parseParamList(toks, j + 1, par :: acc) else (List.reverse(par :: acc), j + 1)
   }
 
-def parseDef(toks: Toks, i: Int, priv: Bool): (Fun, Int) =
-  parseDefName(priv, _identOf(_at(toks, i)), toks, i + 1, _off(toks, i))
+def parseDef(toks: Toks, i: Int, priv: Bool, ora: Bool): (Fun, Int) =
+  parseDefName(priv, ora, _identOf(_at(toks, i)), toks, i + 1, _off(toks, i))
 
-def parseDefName(priv: Bool, name: String, toks: Toks, i: Int, off: Int): (Fun, Int) =
-  if (_is(toks, i, Tok.Dot)) parseDefTp(priv, Str.concat(name, Str.concat(".", _identOf(_at(toks, i + 1)))), parseTParams(toks, i + 2), toks, off) else parseDefTp(priv, name, parseTParams(toks, i), toks, off)
+def parseDefName(priv: Bool, ora: Bool, name: String, toks: Toks, i: Int, off: Int): (Fun, Int) =
+  if (_is(toks, i, Tok.Dot)) parseDefTp(priv, ora, Str.concat(name, Str.concat(".", _identOf(_at(toks, i + 1)))), parseTParams(toks, i + 2), toks, off) else parseDefTp(priv, ora, name, parseTParams(toks, i), toks, off)
 
-def parseDefTp(priv: Bool, name: String, p: (List[String], Int), toks: Toks, off: Int): (Fun, Int) =
+def parseDefTp(priv: Bool, ora: Bool, name: String, p: (List[String], Int), toks: Toks, off: Int): (Fun, Int) =
   p match {
-    case (ts, j) => parseDef2(priv, name, ts, parseParams(toks, j), toks, off)
+    case (ts, j) => parseDef2(priv, ora, name, ts, parseParams(toks, j), toks, off)
   }
 
-def parseDef2(priv: Bool, name: String, ts: List[String], p: (List[Param], Int), toks: Toks, off: Int): (Fun, Int) =
+def parseDef2(priv: Bool, ora: Bool, name: String, ts: List[String], p: (List[Param], Int), toks: Toks, off: Int): (Fun, Int) =
   p match {
-    case (params, j) => parseDef3(priv, name, ts, params, parseType(toks, j + 1), toks, off)
+    case (params, j) => parseDef3(priv, ora, name, ts, params, parseType(toks, j + 1), toks, off)
   }
 
-def parseDef3(priv: Bool, name: String, ts: List[String], params: List[Param], p: (String, Int), toks: Toks, off: Int): (Fun, Int) =
+def parseDef3(priv: Bool, ora: Bool, name: String, ts: List[String], params: List[Param], p: (String, Int), toks: Toks, off: Int): (Fun, Int) =
   p match {
-    case (ret, j) => parseDef4(priv, name, ts, params, ret, parseExpr(toks, j + 1), off)
+    case (ret, j) => parseDef4(priv, ora, name, ts, params, ret, parseExpr(toks, j + 1), off)
   }
 
-def parseDef4(priv: Bool, name: String, ts: List[String], params: List[Param], ret: String, p: (Expr, Int), off: Int): (Fun, Int) =
+def parseDef4(priv: Bool, ora: Bool, name: String, ts: List[String], params: List[Param], ret: String, p: (Expr, Int), off: Int): (Fun, Int) =
   p match {
-    case (body, j) => (Fun(priv, name, ts, params, ret, body, "", off), j)
+    case (body, j) => (Fun(priv, ora, name, ts, params, ret, body, "", off), j)
   }
 
 def parseMain(toks: Toks, i: Int): (String, Expr, Int) =
@@ -882,7 +882,7 @@ def parseImpl2(tn: String, p: (List[String], Int), toks: Toks): (Im, Int) =
   }
 
 def parseImplMeths(tn: String, args: List[String], forTy: String, toks: Toks, i: Int, acc: List[Fun]): (Im, Int) =
-  if (_is(toks, i, Tok.Def)) parseImplMethsNext(parseDef(toks, i + 1, false), tn, args, forTy, toks, acc) else (Im(tn, args, forTy, List.reverse(acc)), i)
+  if (_is(toks, i, Tok.Def)) parseImplMethsNext(parseDef(toks, i + 1, false, false), tn, args, forTy, toks, acc) else (Im(tn, args, forTy, List.reverse(acc)), i)
 
 def parseImplMethsNext(p: (Fun, Int), tn: String, args: List[String], forTy: String, toks: Toks, acc: List[Fun]): (Im, Int) =
   p match {
@@ -890,10 +890,16 @@ def parseImplMethsNext(p: (Fun, Int), tn: String, args: List[String], forTy: Str
   }
 
 def parseItems(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
-  if (i >= toks.n) parseItemsFail(toks, toks.n - 1, enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body) else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Private)) parseItemsDef(toks, parseDef(toks, i + 2, true), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs) else parseItemsFail(toks, i, enums, aliases, traits, impls, imps, defs, main, body)
+  if (i < toks.n && _is(toks, i, Tok.Private)) parseItemsPriv(toks, i, enums, aliases, traits, impls, imps, defs, main, body) else if (i < toks.n && _is(toks, i, Tok.Oracle)) parseItemsDef(toks, parseDef(toks, i + 1, false, true), enums, aliases, traits, impls, imps, defs, main, body) else parseItemsGo(toks, i, enums, aliases, traits, impls, imps, defs, main, body)
+
+def parseItemsPriv(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  if (_is(toks, i + 1, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 2, true, false), enums, aliases, traits, impls, imps, defs, main, body) else parseItemsFail(toks, i + 1, enums, aliases, traits, impls, imps, defs, main, body)
+
+def parseItemsGo(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
+  if (i >= toks.n) parseItemsFail(toks, toks.n - 1, enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Eof)) Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), List.reverse(defs), main, body) else if (_is(toks, i, Tok.Enum)) parseItemsEn(toks, parseEnum(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Record)) parseItemsEn(toks, parseRec(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.TypeKw)) parseItemsAl(toks, parseAlias(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Trait)) parseItemsTr(toks, parseTrait(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Impl)) parseItemsIm(toks, parseImpl(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Import)) parseItemsImp(toks, parseImport(toks, i + 1), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.Def)) parseItemsDef(toks, parseDef(toks, i + 1, false, false), enums, aliases, traits, impls, imps, defs, main, body) else if (_is(toks, i, Tok.AtMain)) parseItemsMain(toks, parseMain(toks, i + 2), enums, aliases, traits, impls, imps, defs) else parseItemsFail(toks, i, enums, aliases, traits, impls, imps, defs, main, body)
 
 def parseItemsFail(toks: Toks, i: Int, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
-  Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), Fun(false, "#parse", [], [], "Unit", Expr.EUnit, "", _off(toks, i)) :: List.reverse(defs), main, body)
+  Prog("", List.reverse(enums), List.reverse(aliases), List.reverse(traits), List.reverse(impls), List.reverse(imps), Fun(false, false, "#parse", [], [], "Unit", Expr.EUnit, "", _off(toks, i)) :: List.reverse(defs), main, body)
 
 def parseItemsEn(toks: Toks, p: (En, Int), enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr): Prog =
   p match {
@@ -1142,9 +1148,12 @@ def _paramStrD(base: String, d: String): String =
 def _commaParams(xs: List[Param]): String =
   if (List.isEmpty(xs)) "" else if (List.len(xs) == 1) _paramStr(List.at(xs, 0)) else Str.concat(_paramStr(List.at(xs, 0)), Str.concat(", ", _commaParams(List.tail(xs))))
 
+def funKw(d: Fun): String =
+  if (d.ora) "oracle " else if (d.priv) "private def " else "def "
+
 def prettyFun(d: Fun): String =
-  Str.concat(if (d.priv) "private " else "", Str.concat("def ", Str.concat(d.name, Str.concat(_tparams(d.tparams), Str.concat("(", Str.concat(_commaParams(d.params), Str.concat("): ", Str.concat(d.ret, Str.concat(""" =
-""", prettyExpr(d.body, 1))))))))))
+  Str.concat(funKw(d), Str.concat(d.name, Str.concat(_tparams(d.tparams), Str.concat("(", Str.concat(_commaParams(d.params), Str.concat("): ", Str.concat(d.ret, Str.concat(""" =
+""", prettyExpr(d.body, 1)))))))))
 
 def prettyDefs(ds: List[Fun]): String =
   if (List.isEmpty(ds)) "" else Builder.result(prettyDefsGo(ds, Builder.empty()))
@@ -1216,7 +1225,7 @@ def prettyPkg(pkg: String): String =
 
 def stampFun(mod: String, d: Fun): Fun =
   d match {
-    case Fun(priv, name, tparams, params, ret, body, _, off) => Fun(priv, name, tparams, params, ret, body, mod, off)
+    case Fun(priv, ora, name, tparams, params, ret, body, _, off) => Fun(priv, ora, name, tparams, params, ret, body, mod, off)
   }
 
 def stampFuns(mod: String, ds: List[Fun]): List[Fun] =
@@ -1297,7 +1306,7 @@ def parseErrorDefs(defs: List[Fun]): Bool =
 
 def parseErrorDef(d: Fun): Bool =
   d match {
-    case Fun(_, name, _, _, _, _, _, _) => name == "#parse"
+    case Fun(_, _, name, _, _, _, _, _, _) => name == "#parse"
   }
 
 def pretty(p: Prog): String =

@@ -1,57 +1,57 @@
-def add(n: Int, m: Int): Bool =
+oracle add(n: Int, m: Int): Bool =
   Main.add(n, m) == Main.add(m, n)
 
-def addTwoThree(): Bool =
+oracle addTwoThree(): Bool =
   Main.add(2, 3) == 5
 
-def sumToDiff(n: Int where n >= 0): Bool =
+oracle sumToDiff(n: Int where n >= 0): Bool =
   Main.sumTo(n, 0) == Oracle.sumTo(n)
 
-def sumToTen(): Bool =
+oracle sumToTen(): Bool =
   Main.sumTo(10, 0) == 55
 
-def termDiff(t: Term): Bool =
+oracle termDiff(t: Term): Bool =
   Main.termAgrees(t)
 
-def nestedTerm(t: Term): Bool =
+oracle nestedTerm(t: Term): Bool =
   Main.evalNestedAdd(t) == Main.evalTerm(t)
 
-def utf8Ops(): Bool =
+oracle utf8Ops(): Bool =
   Main.utf8Check() == 1
 
-def mixedDefault(): Bool =
+oracle mixedDefault(): Bool =
   Main.addDefault(3, m = 4) == 7
 
-def mixedGreet(): Bool =
+oracle mixedGreet(): Bool =
   Main.greet("hi", punct = "?") == "hi?"
 
-def tupFive(): Bool =
+oracle tupFive(): Bool =
   (1, 2, 3, 4, 5)._5 == 5
 
-def tupEight(): Bool =
+oracle tupEight(): Bool =
   (1, 2, 3, 4, 5, 6, 7, 8)._8 == 8
 
-def tupCall(): Bool =
+oracle tupCall(): Bool =
   Main.rot3((1, "x", true))._1 == "x"
 
-def smapN(): Bool =
+oracle smapN(): Bool =
   Main.mapSetSizeOk()
 
-def smapHas(): Bool =
+oracle smapHas(): Bool =
   Main.mapSetHasOk()
 
-def smapEq(): Bool =
+oracle smapEq(): Bool =
   Main.mapSetEqOk()
 
-def scollapse(): Bool =
+oracle scollapse(): Bool =
   Main.mapSetCollapseOk()
 
-def tosetVar(): Bool =
+oracle tosetVar(): Bool =
   Main.toSetFromVarOk()
 
-def mapEmptyGet(): Bool =
+oracle mapEmptyGet(): Bool =
   Main.mapGetEmptyOk()
 
-def jsonPairLifetime(n: Int): Bool =
+oracle jsonPairLifetime(n: Int): Bool =
   Main.jsonPairRoundTrip(n)
 

@@ -1,10 +1,10 @@
-def githubVector(): Bool =
+oracle githubVector(): Bool =
   Hook.signature("It's a Secret to Everybody", "Hello, World!") == "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
 
-def signatureRoundTrip(n: Int): Bool =
+oracle signatureRoundTrip(n: Int): Bool =
   Hash.constantTimeEqual(Hash.hmacSha256("secret", Str.fromInt(n)), Hash.hmacSha256("secret", Str.fromInt(n))) && !Hash.constantTimeEqual(Hash.hmacSha256("secret", Str.fromInt(n)), Hash.hmacSha256("other", Str.fromInt(n)))
 
-def compareBytes(n: Int): Bool =
+oracle compareBytes(n: Int): Bool =
   Hash.constantTimeEqual(Str.fromInt(n), Str.fromInt(n)) && !Hash.constantTimeEqual(Str.fromInt(n), Str.concat(Str.fromInt(n), "x")) && !Hash.constantTimeEqual("same prefix 1", "same prefix 2")
 
 private def faulted(t: Timeline, i: Int): Bool =

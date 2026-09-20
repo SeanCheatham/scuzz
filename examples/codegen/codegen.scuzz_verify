@@ -1,72 +1,72 @@
-def internInterpLit(): Bool =
+oracle internInterpLit(): Bool =
   Main.internInterpLit()
 
-def rewriteInterpLit(): Bool =
+oracle rewriteInterpLit(): Bool =
   Main.rewriteInterpLit()
 
-def internOrder(): Bool =
+oracle internOrder(): Bool =
   Main.internOrder()
 
-def irHi(): Bool =
+oracle irHi(): Bool =
   Main.irDiff(Main.srcHi(), Main.wantHi())
 
-def irSum(): Bool =
+oracle irSum(): Bool =
   Main.irDiff(Main.srcSum(), Main.wantSum())
 
-def irAdd(): Bool =
+oracle irAdd(): Bool =
   Main.irDiff(Main.srcAdd(), Main.wantAdd())
 
-def irIdemHi(): Bool =
+oracle irIdemHi(): Bool =
   Main.irIdem(Main.srcHi())
 
-def irIdemSum(): Bool =
+oracle irIdemSum(): Bool =
   Main.irIdem(Main.srcSum())
 
-def irIdemAdd(): Bool =
+oracle irIdemAdd(): Bool =
   Main.irIdem(Main.srcAdd())
 
-def irHello(): Bool =
+oracle irHello(): Bool =
   Main.irDiff(Main.srcHello(), Main.wantHello())
 
-def irIdemHello(): Bool =
+oracle irIdemHello(): Bool =
   Main.irIdem(Main.srcHello())
 
-def irFullHello(): Bool =
+oracle irFullHello(): Bool =
   Emit.emitFull(Main.srcHello()) == Str.concat(Emit.preamble(), Main.wantHello())
 
-def irIdemGenSeed(): Bool =
+oracle irIdemGenSeed(): Bool =
   Main.irIdemGen(0)
 
-def irGenerated(n: Int where n >= 0): Bool =
+oracle irGenerated(n: Int where n >= 0): Bool =
   Main.irIdemGen(n)
 
-def reloadCaptureOrder(): Bool =
+oracle reloadCaptureOrder(): Bool =
   Main.reloadCaptureOrder()
 
-def reloadCaptureType(): Bool =
+oracle reloadCaptureType(): Bool =
   Main.reloadCaptureType()
 
-def reloadRecordLayout(): Bool =
+oracle reloadRecordLayout(): Bool =
   Main.reloadRecordLayout()
 
-def contInCtor(): Bool =
+oracle contInCtor(): Bool =
   Main.contInCtor()
 
-def evAdd(): Bool =
+oracle evAdd(): Bool =
   Main.evAdd()
 
-def evTco(): Bool =
+oracle evTco(): Bool =
   Main.evTco()
 
-def evTcoMatch(): Bool =
+oracle evTcoMatch(): Bool =
   Main.evTcoMatch()
 
-def evGenerated(n: Int where n >= 0): Bool =
+oracle evGenerated(n: Int where n >= 0): Bool =
   Main.evGenerated(n)
 
-def evMatch(): Bool =
+oracle evMatch(): Bool =
   Main.evMatch()
 
-def evKitsCovered(): Bool =
+oracle evKitsCovered(): Bool =
   Main.evKitsCovered()
 

@@ -1,7 +1,7 @@
-def parseRoundTrip(s: String): Bool =
+oracle parseRoundTrip(s: String): Bool =
   Tasks.encodeItem(Tasks.parseItem(s)) == s
 
-def flipTwice(s: String): Bool =
+oracle flipTwice(s: String): Bool =
   Tasks.flipDone(Tasks.flipDone(s)) == s
 
 def doneShowsUndo(t: Timeline): Verdict =
@@ -23,31 +23,31 @@ def rowsVanishOnlyAfterDelOrClear(t: Timeline): Verdict =
   case (before, after) => Timeline.signalListLen(t, after, "items") >= Timeline.signalListLen(t, before, "items") || Timeline.lastHitHas(t, after, "button:Del") || Timeline.lastHitHas(t, after, "button:Clear")
 })
 
-def parseHashRoundTrip(): Bool =
+oracle parseHashRoundTrip(): Bool =
   Tasks.encodeItem(Tasks.parseItem("#milk")) == "#milk"
 
-def parsePlainRoundTrip(): Bool =
+oracle parsePlainRoundTrip(): Bool =
   Tasks.encodeItem(Tasks.parseItem("milk")) == "milk"
 
-def flipDoneTwice(): Bool =
+oracle flipDoneTwice(): Bool =
   Tasks.flipDone(Tasks.flipDone("#milk")) == "#milk" && Tasks.flipDone(Tasks.flipDone("milk")) == "milk"
 
-def itemStates(): Bool =
+oracle itemStates(): Bool =
   Tasks.itemDone("#milk") == 1 && Tasks.itemDone("milk") == 0 && Tasks.itemLabel("#milk") == "milk"
 
-def addGrows(s: String): Bool =
+oracle addGrows(s: String): Bool =
   List.len(Tasks.addTo([], s)) == (if (Str.len(Str.trim(s)) == 0) 0 else 1)
 
-def renameKeepsLen(s: String): Bool =
+oracle renameKeepsLen(s: String): Bool =
   List.len(Tasks.renameFirst(Item(0, "milk") :: [], s)) == 1
 
-def deleteDrops(): Bool =
+oracle deleteDrops(): Bool =
   List.isEmpty(Tasks.deleteLabel(Item(0, "milk") :: [], "milk"))
 
-def flipToggles(): Bool =
+oracle flipToggles(): Bool =
   Tasks.flipLabel(Item(0, "milk") :: [], "milk") == Item(1, "milk") :: []
 
-def clearDrops(): Bool =
+oracle clearDrops(): Bool =
   List.isEmpty(Tasks.clearAll(Item(0, "x") :: []))
 
 def initialWidgets(t: Timeline): Verdict =

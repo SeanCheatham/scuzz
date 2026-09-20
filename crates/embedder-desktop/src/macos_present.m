@@ -13,7 +13,7 @@ static void enqueue_compose(const char *text);
 static void enqueue_text_edit(const char *text);
 static void enqueue_key(const char *name, const char *text, int mods, int repeat);
 static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button);
-static void enqueue_scroll(float x, float y, float dy);
+static void enqueue_scroll(float x, float y, float dx, float dy);
 static int event_content_xy(NSEvent *ev, float *x, float *y);
 static void mark_user_quit(void);
 
@@ -305,7 +305,13 @@ static int cocoa_drain_events(void) {
         continue;
       }
       if (t == NSEventTypeScrollWheel && event_content_xy(ev, &x, &y)) {
-        enqueue_scroll(x, y, (float)[ev scrollingDeltaY]);
+        float dx = (float)[ev scrollingDeltaX];
+        float dy = (float)[ev scrollingDeltaY];
+        if (([ev modifierFlags] & NSEventModifierFlagShift) && dx == 0.f) {
+          dx = dy;
+          dy = 0.f;
+        }
+        enqueue_scroll(x, y, dx, dy);
         continue;
       }
     }
@@ -352,12 +358,13 @@ static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button) 
   q_push(&ev);
 }
 
-static void enqueue_scroll(float x, float y, float dy) {
+static void enqueue_scroll(float x, float y, float dx, float dy) {
   SzInputEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_SCROLL;
   ev.x = x;
   ev.y = y;
+  ev.dx = dx;
   ev.dy = dy;
   q_push(&ev);
 }

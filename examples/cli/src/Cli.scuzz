@@ -868,10 +868,10 @@ def newMainIo(): String =
   "def greet(): String =\n  \"Hello, Scuzz!\"\n\n@main def main: IO[Unit] =\n  IO.println(greet()).flatMap(_ => IO.println(\"ready.\"))\n"
 
 def newVerifyUi(): String =
-  "def alwaysShowsCounter(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n\ndef afterPlusShowsCount(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"button:+1\", \"text:count = 1\")\n\ndef bumpOnce(n: Int): Bool =\n  if (Main.bump(n) == n + 1) true else false\n\n"
+  "def alwaysShowsCounter(t: Timeline): Verdict =\n  Verdict.alwaysHas(t, \"text:Counter\")\n\ndef afterPlusShowsCount(t: Timeline): Verdict =\n  Verdict.afterHit(t, \"button:+1\", \"text:count = 1\")\n\noracle bumpOnce(n: Int): Bool =\n  if (Main.bump(n) == n + 1) true else false\n\n"
 
 def newVerifyIo(): String =
-  "def greetFact(): Bool =\n  Main.greet() == \"Hello, Scuzz!\"\n\n"
+  "oracle greetFact(): Bool =\n  Main.greet() == \"Hello, Scuzz!\"\n\n"
 
 def newCorpusUi(): String =
   "[fuzz]\nevents = [\"tap button:+1\"]\n"

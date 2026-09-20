@@ -4,16 +4,16 @@ def controls(t: Timeline): Verdict =
 def responsive(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Tap", "text:Taps: 1")
 
-def validMessage(status: Int, body: String): Bool =
+oracle validMessage(status: Int, body: String): Bool =
   Main.decode(status, body) match {
     case Result.Err(_) => true
     case Result.Ok(message) => status == 200 && Str.len(message) > 0
   }
 
-def decodedMessage(): Bool =
+oracle decodedMessage(): Bool =
   Main.decode(200, "{\"message\":\"hello\"}") == Result.Ok("hello")
 
-def invalidResponse(): Bool =
+oracle invalidResponse(): Bool =
   Main.decode(503, "{\"message\":\"hello\"}") == Result.Err("HTTP 503") && Main.decode(200, "{") == Result.Err("Invalid JSON") && Main.decode(200, "{}") == Result.Err("Missing message")
 
 def startsLoading(t: Timeline): Verdict =
@@ -24,3 +24,4 @@ def settles(t: Timeline): Verdict =
 
 def requestResult(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Load") || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:Loaded: hello") || Timeline.faultKindHas(t, i, "net") && Timeline.a11yHas(t, Timeline.len(t) - 1, "text:Failed. Try again."))
+

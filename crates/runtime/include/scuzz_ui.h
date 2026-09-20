@@ -43,7 +43,7 @@ typedef enum SzInputKind {
   SZ_INPUT_RESIZE = 2,
   SZ_INPUT_TEXT = 3,      /* full replace of focused TextField (Headless) */
   SZ_INPUT_POINTER = 4,   /* touch / pointer with phase */
-  SZ_INPUT_SCROLL = 5,    /* vertical pan dy on Scroll under (x,y) */
+  SZ_INPUT_SCROLL = 5,    /* pan dx/dy on Scroll or editor under (x,y) */
   SZ_INPUT_LIFECYCLE = 6, /* pause / resume / stop */
   SZ_INPUT_KEYBOARD = 7,  /* soft keyboard show (1) / hide (0) */
   SZ_INPUT_TEXT_EDIT = 8, /* append text, or backspace if text NULL/empty */
@@ -67,6 +67,7 @@ typedef struct SzInputEvent {
   const char *text; /* SZ_INPUT_TEXT / SZ_INPUT_TEXT_EDIT / SZ_INPUT_KEY insert */
   SzPointerPhase pointer_phase; /* SZ_INPUT_POINTER */
   float dy;                     /* SZ_INPUT_SCROLL (positive = content up) */
+  float dx;                     /* SZ_INPUT_SCROLL (positive = content left) */
   SzLifecyclePhase lifecycle;   /* SZ_INPUT_LIFECYCLE */
   int keyboard_visible;         /* SZ_INPUT_KEYBOARD: 1=show, 0=hide */
   const char *key;              /* SZ_INPUT_KEY name: Enter, Backspace, ArrowLeft, a */
@@ -519,6 +520,13 @@ float sz_view_scroll_x(const SzView *scroll);
 float sz_view_scroll_y(const SzView *scroll);
 /* Pan on the scroll axis (positive = content up or left). */
 void sz_view_scroll_by(SzView *scroll, float d);
+/* Pan dx/dy with a max clamp. Horizontal Scroll maps dy onto x when dx is 0.
+ * 1 if the offset changed. */
+int sz_view_scroll_pan(SzView *scroll, float dx, float dy);
+/* Innermost Scroll or editor under (x,y) that can pan this wheel. NULL if
+ * none. Does not pan. */
+SzView *sz_view_scroll_wheel_target(SzView *root, float x, float y, float dx,
+                                    float dy);
 int sz_view_scroll_is_h(const SzView *scroll);
 SzView *sz_view_scroll_at(SzView *root, float x, float y);
 /* 1 if a TextField or editor is focused (soft-keyboard show). */

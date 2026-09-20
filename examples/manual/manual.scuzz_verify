@@ -1,15 +1,15 @@
-def topicsHaveBlocks(): Bool =
+oracle topicsHaveBlocks(): Bool =
   List.forall(Manual.topics(), t => List.nonEmpty(t.blocks))
 
-def idsUnique(): Bool =
+oracle idsUnique(): Bool =
   List.len(Manual.topics()) == 14
 
-def idsStable(): Bool =
+oracle idsStable(): Bool =
   Manual.idsLine() == "start|install|language|gui|signals|packages|verify|commands|manifest|ios|web|ide|try|how"
 
-def snippetsFmt(): Bool =
+oracle snippetsFmt(): Bool =
   List.forall(Manual.allCode(), s => !Manual.isSnippet(s) || Manual.formatSrc(s) == s) && Manual.formatSrc(Topics.campSource()) == Topics.campSource()
 
-def cmdsOk(): Bool =
+oracle cmdsOk(): Bool =
   List.forall(Manual.allCmd(), s => Str.startsWith(s, "scuzz ")) && List.forall(Manual.allCmd(), s => Manual.hasVerb(Manual.cmdVerb(s)))
 

@@ -78,6 +78,15 @@ float sk_font_measure_string(const char *text, float font_px) {
   return scuzz_skia_font_measure_string(text, font_px);
 }
 
+float sk_font_measure_string_mono(const char *text, float font_px) {
+  return scuzz_skia_font_measure_string_mono(text, font_px);
+}
+
+void sk_canvas_draw_string_mono(SkCanvas *canvas, const char *text, float x,
+                                float y, const SkPaint *paint) {
+  scuzz_skia_canvas_draw_string_mono(canvas, text, x, y, paint);
+}
+
 int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes,
                   size_t *out_len) {
   return scuzz_skia_encode_png(surface, out_bytes, out_len);

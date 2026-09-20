@@ -141,7 +141,7 @@ def siteLocFuns(ds: List[Fun], local: Int, seen: Int, o: Bool, fallback: String)
 
 def siteLocFunHd(d: Fun, rest: List[Fun], local: Int, seen: Int, o: Bool, fallback: String): String =
   d match {
-    case Fun(_, name, _, _, _, body, mod, off) => if (local < seen + countExpr(body, o)) Str.concat(mod, Str.concat(".", Str.concat(name, Str.concat(":", Str.fromInt(off))))) else siteLocFuns(rest, local, seen + countExpr(body, o), o, fallback)
+    case Fun(_, _, name, _, _, _, body, mod, off) => if (local < seen + countExpr(body, o)) Str.concat(mod, Str.concat(".", Str.concat(name, Str.concat(":", Str.fromInt(off))))) else siteLocFuns(rest, local, seen + countExpr(body, o), o, fallback)
   }
 
 def pickSites(seed: Int, take: Int, sites: Int): List[Int] =
@@ -179,7 +179,7 @@ def countFuns(ds: List[Fun], n: Int, o: Bool): Int =
 
 def countFunsHd(d: Fun, rest: List[Fun], n: Int, o: Bool): Int =
   d match {
-    case Fun(_, _, _, _, _, body, _, _) => countFuns(rest, n + countExpr(body, o), o)
+    case Fun(_, _, _, _, _, _, body, _, _) => countFuns(rest, n + countExpr(body, o), o)
   }
 
 def countExpr(e: Expr, o: Bool): Int =
@@ -236,12 +236,12 @@ def applyFuns(ds: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
 
 def applyFunsHd(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
   d match {
-    case Fun(priv, name, tps, ps, ret, body, mod, off) => applyFunBody(priv, name, tps, ps, ret, body, mod, off, rest, site, seen, o)
+    case Fun(priv, ora, name, tps, ps, ret, body, mod, off) => applyFunBody(priv, ora, name, tps, ps, ret, body, mod, off, rest, site, seen, o)
   }
 
-def applyFunBody(priv: Bool, name: String, tps: List[String], ps: List[Param], ret: String, body: Expr, mod: String, off: Int, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+def applyFunBody(priv: Bool, ora: Bool, name: String, tps: List[String], ps: List[Param], ret: String, body: Expr, mod: String, off: Int, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
   walk(body, site, seen, false, collectHs(body, noExprs()), 0, o) match {
-    case Walk(b, n, _) => applyFunsRest(Fun(priv, name, tps, ps, ret, b, mod, off), rest, site, n, o)
+    case Walk(b, n, _) => applyFunsRest(Fun(priv, ora, name, tps, ps, ret, b, mod, off), rest, site, n, o)
   }
 
 def applyFunsRest(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =

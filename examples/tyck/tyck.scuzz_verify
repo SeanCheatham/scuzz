@@ -1,36 +1,36 @@
-def tyckCore(): Bool =
+oracle tyckCore(): Bool =
   Main.tyckCore()
 
-def tyckFlow(): Bool =
+oracle tyckFlow(): Bool =
   Main.tyckFlow()
 
-def tyckRes(): Bool =
+oracle tyckRes(): Bool =
   Main.tyckRes()
 
-def tyckFail(): Bool =
+oracle tyckFail(): Bool =
   Main.tyckFail()
 
-def tyckParse(): Bool =
+oracle tyckParse(): Bool =
   Main.tyckParse()
 
-def tyckLam(): Bool =
+oracle tyckLam(): Bool =
   Main.tyckLam()
 
-def tyckGenSeed(): Bool =
+oracle tyckGenSeed(): Bool =
   Main.tyckGen(0)
 
-def prettyRoundtrip(): Bool =
+oracle prettyRoundtrip(): Bool =
   Main.prettyIdem(0)
 
-def tyckGenerated(n: Int where n >= 0): Bool =
+oracle tyckGenerated(n: Int where n >= 0): Bool =
   Main.tyckGen(n)
 
-def prettyGenerated(n: Int where n >= 0): Bool =
+oracle prettyGenerated(n: Int where n >= 0): Bool =
   Main.prettyIdem(n)
 
-def pureForArguments(): Bool =
+oracle pureForArguments(): Bool =
   Main.pureForArguments()
 
-def genericRecordFields(): Bool =
+oracle genericRecordFields(): Bool =
   Main.genericRecordFields()
 

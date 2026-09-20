@@ -155,7 +155,7 @@ def qualIdentAt2(src: String, name: String, a: Int): String =
 
 def showFun(d: Fun): String =
   d match {
-    case Fun(_, name, _, ps, ret, _, _, _) => Str.concat("def ", Str.concat(name, Str.concat("(", Str.concat(showParams(ps), Str.concat("): ", ret)))))
+    case Fun(_, ora, name, _, ps, ret, _, _, _) => Str.concat(if (ora) "oracle " else "def ", Str.concat(name, Str.concat("(", Str.concat(showParams(ps), Str.concat("): ", ret)))))
   }
 
 def showParams(ps: List[Param]): String =
@@ -171,7 +171,7 @@ def findFun(ds: List[Fun], name: String): String =
 
 def findFunHd(d: Fun, rest: List[Fun], name: String): String =
   d match {
-    case Fun(_, n, _, _, _, _, _, _) => if (n == name) showFun(d) else findFun(rest, name)
+    case Fun(_, _, n, _, _, _, _, _, _) => if (n == name) showFun(d) else findFun(rest, name)
   }
 
 def kitHover(f: String): String =
@@ -200,7 +200,7 @@ def completeNames2(ds: List[Fun], acc: List[String]): List[String] =
 
 def completeNamesHd(d: Fun, rest: List[Fun], acc: List[String]): List[String] =
   d match {
-    case Fun(_, name, _, _, _, _, _, _) => completeNames2(rest, name :: acc)
+    case Fun(_, _, name, _, _, _, _, _, _) => completeNames2(rest, name :: acc)
   }
 
 def completePref(xs: List[String], p: String): List[String] =
@@ -250,7 +250,7 @@ def findFunOff(ds: List[Fun], name: String): Int =
 
 def findFunOffHd(d: Fun, rest: List[Fun], name: String): Int =
   d match {
-    case Fun(_, n, _, _, _, _, _, off) => if (n == name) off else findFunOff(rest, name)
+    case Fun(_, _, n, _, _, _, _, _, off) => if (n == name) off else findFunOff(rest, name)
   }
 
 def rangeOf(src: String, off: Int): String =
@@ -309,7 +309,7 @@ def tokensJson(src: String): String =
   Str.concat("{\"data\":[", Str.concat(tokensJoin(tokenInts(Lexer.lex(src), src, Check.lineIndex(src), 0, 0, [])), "]}"))
 
 def tokTypeK(k: Int): Int =
-  if (k >= 1 && k <= 20) 0 else if (k == 55) 1 else if (k == 56 || k == 59) 2 else if (k == 57 || k == 58) 3 else 0 - 1
+  if (k >= 1 && k <= 20 || k == 61) 0 else if (k == 55) 1 else if (k == 56 || k == 59) 2 else if (k == 57 || k == 58) 3 else 0 - 1
 
 def tokLen(t: Tok, src: String, off: Int): Int =
   t match {

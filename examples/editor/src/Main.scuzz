@@ -69,6 +69,7 @@ def landmarkBook(page: Signal[Int], live: View, verify: View, session: View): Vi
   Verdict.ok()
 """) == ["greetFact"], true)
     _ = Property.check("cnpriv", Chrome.claimNames("private def hide(t: Timeline): Verdict =") == [], true)
+    _ = Property.check("cnora", Chrome.claimNames("oracle hidden(n: Int): Bool =") == ["hidden"], true)
     _ = Property.check("defa", Chrome.defaultArg(1) == ".", true)
     _ = Property.check("deft", Chrome.defaultArg(0) == "sample.txt", true)
     _ = Property.check("strip", Chrome.stripUri("file://a") == "a", true)

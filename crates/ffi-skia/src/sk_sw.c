@@ -606,3 +606,12 @@ int sk_encode_png_to_file(const SkSurface *surface, const char *path) {
   free(bytes);
   return n == len;
 }
+
+float sk_font_measure_string_mono(const char *text, float font_px) {
+  return sk_font_measure_string(text, font_px);
+}
+
+void sk_canvas_draw_string_mono(SkCanvas *canvas, const char *text, float x,
+                                float y, const SkPaint *paint) {
+  sk_canvas_draw_string(canvas, text, x, y, paint);
+}

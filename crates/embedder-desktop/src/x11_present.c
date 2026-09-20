@@ -388,12 +388,13 @@ static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button) 
   q_push(&ev);
 }
 
-static void enqueue_scroll(float x, float y, float dy) {
+static void enqueue_scroll(float x, float y, float dx, float dy) {
   SzInputEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_SCROLL;
   ev.x = x;
   ev.y = y;
+  ev.dx = dx;
   ev.dy = dy;
   q_push(&ev);
 }
@@ -942,11 +943,22 @@ static int x11_dispatch_event(XEvent *ev) {
   else if (ev->type == ButtonRelease && ev->xbutton.button == 3)
     enqueue_pointer(SZ_POINTER_UP, (float)ev->xbutton.x, (float)ev->xbutton.y,
                     3);
-  /* Wheel: 4 = up, 5 = down. Positive dy = content up (matches SZ_INPUT_SCROLL). */
-  else if (ev->type == ButtonPress && ev->xbutton.button == 4)
-    enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, 40.f);
-  else if (ev->type == ButtonPress && ev->xbutton.button == 5)
-    enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, -40.f);
+  /* Wheel: 4 = up, 5 = down. Shift or buttons 6/7 pan x. Positive dy = content
+   * up. Positive dx = content left (matches SZ_INPUT_SCROLL). */
+  else if (ev->type == ButtonPress && ev->xbutton.button == 4) {
+    if (ev->xbutton.state & ShiftMask)
+      enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, 40.f, 0.f);
+    else
+      enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, 0.f, 40.f);
+  } else if (ev->type == ButtonPress && ev->xbutton.button == 5) {
+    if (ev->xbutton.state & ShiftMask)
+      enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, -40.f, 0.f);
+    else
+      enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, 0.f, -40.f);
+  } else if (ev->type == ButtonPress && ev->xbutton.button == 6)
+    enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, -40.f, 0.f);
+  else if (ev->type == ButtonPress && ev->xbutton.button == 7)
+    enqueue_scroll((float)ev->xbutton.x, (float)ev->xbutton.y, 40.f, 0.f);
   else if (ev->type == KeyRelease)
     x11_handle_key_release(&ev->xkey);
   else if (ev->type == KeyPress)
