@@ -3142,7 +3142,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_EDITOR: {
     float font_px = theme->font_px;
     float line_h = text_line_h(theme, font_px);
-    float h = 8.f * line_h;
+    float h = 16.f * line_h;
     v->frame.w = max_w > 0 ? max_w : 120.f;
     if (max_h > 0.f && h > max_h)
       h = max_h;

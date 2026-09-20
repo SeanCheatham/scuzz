@@ -17,8 +17,11 @@ canvas { display: block; width: 100%; height: 100%; outline: none; touch-action:
 .control:focus-visible { outline: 2px solid #24211c; outline-offset: -4px; }
 .semantic-group { position: absolute; pointer-events: none; }
 .panel:focus-visible { outline: 2px solid #24211c; outline-offset: -4px; }
-.control.edit { font: 14px/20px monospace; padding: 8px; color: #24211c; background: #f5efdf;
-  border: 1px solid #24211c; resize: none; cursor: text; border-radius: 0; }
+.control.edit { font: 14px/20px monospace; padding: 8px; color: transparent; caret-color: #24211c;
+  background: transparent; border: 1px solid transparent; resize: none; cursor: text; border-radius: 0;
+  overflow: auto; overscroll-behavior: contain; white-space: pre; }
+.control.edit::selection { background: #f4d35e; color: transparent; }
+.control.edit.ime { color: #24211c; }
 @media (pointer: coarse) { .control.edit { font-size: 16px; } }
 #feedback { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #status { position: absolute; top: 1rem; left: 1rem; font: 16px sans-serif; }
@@ -79,10 +82,12 @@ var Module = {
     if (editing) {
       node.classList.add('edit');
       node.spellcheck = false;
-      node.addEventListener('compositionstart', () => { node.composing = true; });
+      if (item.role === 41) node.wrap = 'off';
+      node.addEventListener('compositionstart', () => { node.composing = true; node.classList.add('ime'); });
       node.addEventListener('compositionupdate', event => Module.syncEdit(node, 1, event.data));
       node.addEventListener('compositionend', () => {
         node.composing = false;
+        node.classList.remove('ime');
         Module.syncEdit(node);
       });
       node.addEventListener('input', event => {
@@ -242,13 +247,25 @@ document.addEventListener('keydown', event => {
   if (!getSelection().isCollapsed) return;
   if (Module.ccall('sz_web_key', 'number', ['string', 'number', 'number'], [event.key, event.shiftKey ? 1 : 0, Number(event.repeat)])) event.preventDefault();
 });
+let touchX;
 let touchY;
-layer.addEventListener('touchstart', event => { touchY = event.touches[0].clientY; }, {passive: true});
+const panEdit = (node, dx, dy) => {
+  if (!node) return;
+  node.scrollLeft += dx;
+  node.scrollTop += dy;
+};
+layer.addEventListener('touchstart', event => {
+  touchX = event.touches[0].clientX; touchY = event.touches[0].clientY;
+}, {passive: true});
 layer.addEventListener('touchmove', event => {
-  if (!getSelection().isCollapsed || event.touches.length !== 1 || event.target.closest('.edit')) return;
+  if (!getSelection().isCollapsed || event.touches.length !== 1) return;
   const touch = event.touches[0];
-  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number', 'number'], [touch.clientX, touch.clientY, 0, touchY - touch.clientY]);
-  touchY = touch.clientY; event.preventDefault();
+  const dx = touchX - touch.clientX;
+  const dy = touchY - touch.clientY;
+  panEdit(event.target.closest('.edit'), dx, dy);
+  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number', 'number'],
+    [touch.clientX, touch.clientY, dx, dy]);
+  touchX = touch.clientX; touchY = touch.clientY; event.preventDefault();
 }, {passive: false});
 // Wheel and canvas touch cancel the event. Register those listeners as non-passive.
 window.addEventListener('wheel', event => {
@@ -257,6 +274,7 @@ window.addEventListener('wheel', event => {
   let dx = event.deltaX * scale;
   let dy = event.deltaY * scale;
   if (event.shiftKey && dx === 0) { dx = dy; dy = 0; }
+  panEdit(event.target.closest?.('.edit'), dx, dy);
   Module.ccall('sz_web_scroll', null, ['number', 'number', 'number', 'number'],
     [event.clientX, event.clientY, dx, dy]);
   event.preventDefault();
