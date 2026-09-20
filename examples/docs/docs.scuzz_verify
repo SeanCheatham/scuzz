@@ -5,30 +5,30 @@ def appBarStaysVisible(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.a11yHas(t, i, "appbar:App bar") && !Timeline.a11yHas(t, i, "textbutton:Get started") && !Timeline.a11yHas(t, i, "outlined:Try GUI"))
 
 def stripStays(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "tab:Run") && Timeline.a11yHas(t, i, "tab:View") && Timeline.a11yHas(t, i, "tab:Check") && Timeline.a11yHas(t, i, "tab:Signal") && Timeline.a11yHas(t, i, "tab:Search") && Timeline.a11yHas(t, i, "tab:Cover"))
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "tab:Intro") && Timeline.a11yHas(t, i, "tab:Run") && Timeline.a11yHas(t, i, "tab:View") && Timeline.a11yHas(t, i, "tab:Check") && Timeline.a11yHas(t, i, "tab:State") && Timeline.a11yHas(t, i, "tab:Search") && Timeline.a11yHas(t, i, "tab:Cover") && Timeline.a11yHas(t, i, "tab:Mutation"))
 
 def noIndexBook(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.a11yHas(t, i, "semantics:Index book") && !Timeline.a11yHas(t, i, "choicechip:Start") && !Timeline.a11yHas(t, i, "text:Choose a topic") && !Timeline.a11yHas(t, i, "breadcrumb:Breadcrumb"))
 
 def activeStage(t: Timeline): Verdict =
-  Verdict.every(t, i => if (Timeline.signalInt(t, i, "step") == 0) Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "editor:editor") && !Timeline.a11yHas(t, i, "button:Add one") && !Timeline.a11yHas(t, i, "button:Fuzz") && !Timeline.a11yHas(t, i, "button:Check") else if (Timeline.signalInt(t, i, "step") == 1) Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "editor:editor") && !Timeline.a11yHas(t, i, "button:Add one") && !Timeline.a11yHas(t, i, "button:Fuzz") else if (Timeline.signalInt(t, i, "step") == 2) Timeline.a11yHas(t, i, "button:Check") && !Timeline.a11yHas(t, i, "button:Fuzz") && !Timeline.a11yHas(t, i, "button:Add one") else if (Timeline.signalInt(t, i, "step") == 3) Timeline.a11yHas(t, i, "button:Add one") && !Timeline.a11yHas(t, i, "button:Fuzz") else if (Timeline.signalInt(t, i, "step") == 4) Timeline.a11yHas(t, i, "button:Fuzz") && Timeline.a11yHas(t, i, "text:Campaign") && (Timeline.a11yHas(t, i, "chip:fail=0") || Timeline.a11yHas(t, i, "chip:fail=1")) else Timeline.a11yHas(t, i, "text:leftFirst: L must win") && Timeline.a11yHas(t, i, "semantics:seed 0") && Timeline.a11yHas(t, i, "semantics:seed 128") && Timeline.a11yHas(t, i, "text:first=R fail") && Timeline.a11yHas(t, i, "text:first=L pass") && Timeline.a11yHas(t, i, "text:arms ") && Timeline.a11yHas(t, i, "text:live ") && Timeline.a11yHas(t, i, "text:mutant ") && Timeline.a11yHas(t, i, "link:Scuzz on GitHub"))
+  Verdict.every(t, i => if (Timeline.signalInt(t, i, "step") == 0) Timeline.a11yHas(t, i, "text:This walkthrough grows one Counter. Press Continue.") && Timeline.a11yHas(t, i, "button:Continue") && !Timeline.a11yHas(t, i, "button:Run") && !Timeline.a11yHas(t, i, "button:Add one") && !Timeline.a11yHas(t, i, "button:Fuzz") else if (Timeline.signalInt(t, i, "step") == 1) Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "editor:editor") && !Timeline.a11yHas(t, i, "button:Add one") && !Timeline.a11yHas(t, i, "button:Fuzz") && !Timeline.a11yHas(t, i, "button:Check") else if (Timeline.signalInt(t, i, "step") == 2) Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "editor:editor") && !Timeline.a11yHas(t, i, "button:Add one") && !Timeline.a11yHas(t, i, "button:Fuzz") else if (Timeline.signalInt(t, i, "step") == 3) Timeline.a11yHas(t, i, "button:Check") && !Timeline.a11yHas(t, i, "button:Fuzz") && !Timeline.a11yHas(t, i, "button:Add one") else if (Timeline.signalInt(t, i, "step") == 4) Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "editor:editor") && !Timeline.a11yHas(t, i, "button:Add one") && !Timeline.a11yHas(t, i, "button:Fuzz") else if (Timeline.signalInt(t, i, "step") == 5) Timeline.a11yHas(t, i, "button:Fuzz") && Timeline.a11yHas(t, i, "text:Campaign") && (Timeline.a11yHas(t, i, "chip:fail=0") || Timeline.a11yHas(t, i, "chip:fail=1")) else if (Timeline.signalInt(t, i, "step") == 6) Timeline.a11yHas(t, i, "text:leftFirst: L must win") && Timeline.a11yHas(t, i, "semantics:seed 0") && Timeline.a11yHas(t, i, "semantics:seed 128") && Timeline.a11yHas(t, i, "text:first=R fail") && Timeline.a11yHas(t, i, "text:first=L pass") && Timeline.a11yHas(t, i, "text:hits ") && Timeline.a11yHas(t, i, "semantics:cover-hit") && !Timeline.a11yHas(t, i, "text:mutant ") else Timeline.a11yHas(t, i, "text:live ") && Timeline.a11yHas(t, i, "text:mutant ") && Timeline.a11yHas(t, i, "text:- ") && Timeline.a11yHas(t, i, "text:+ ") && Timeline.a11yHas(t, i, "text:incAdds reject") && Timeline.a11yHas(t, i, "link:Scuzz on GitHub"))
+
+def trailStays(t: Timeline): Verdict =
+  Verdict.every(t, i => if (Timeline.signalInt(t, i, "step") == 0) Timeline.a11yHas(t, i, "text:Intro 1/8") else if (Timeline.signalInt(t, i, "step") == 1) Timeline.a11yHas(t, i, "text:Run 2/8") else if (Timeline.signalInt(t, i, "step") == 2) Timeline.a11yHas(t, i, "text:View 3/8") else if (Timeline.signalInt(t, i, "step") == 3) Timeline.a11yHas(t, i, "text:Check 4/8") else if (Timeline.signalInt(t, i, "step") == 4) Timeline.a11yHas(t, i, "text:State 5/8") else if (Timeline.signalInt(t, i, "step") == 5) Timeline.a11yHas(t, i, "text:Search 6/8") else if (Timeline.signalInt(t, i, "step") == 6) Timeline.a11yHas(t, i, "text:Cover 7/8") else Timeline.a11yHas(t, i, "text:Mutation 8/8"))
 
 def countChangesOnlyWithControls(t: Timeline): Verdict =
   Verdict.stepEvery(t, __tup => __tup match {
-  case (before, after) => Timeline.signalInt(t, after, "count") == Timeline.signalInt(t, before, "count") || Timeline.lastHitHas(t, after, "button:Add one") || Timeline.lastHitHas(t, after, "outlined:Reset")
+  case (before, after) => !Timeline.a11yHas(t, after, "text:Clicks: 1") || Timeline.a11yHas(t, before, "text:Clicks: 1") || Timeline.lastHitHas(t, after, "button:+1")
 })
 
-def resetClearsCount(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "outlined:Reset") || Timeline.signalInt(t, i, "count") == 0)
-
 def runShowsInc(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") != 0 || Timeline.signalStrHas(t, i, "tryOut", "1"))
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") != 1 || Timeline.signalStrHas(t, i, "tryOut", "1"))
 
 def viewMountsClicks(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 1 || !Timeline.signalStrHas(t, i, "tryDiags", "ok") || Timeline.a11yHas(t, i, "text:Clicks: 0") && Timeline.a11yHas(t, i, "button:+1"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 2 || !Timeline.signalStrHas(t, i, "tryDiags", "ok") || Timeline.a11yHas(t, i, "text:Clicks: 0") && Timeline.a11yHas(t, i, "button:+1"))
 
 def tryRunKeepsOk(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") == 0 || Timeline.signalStrHas(t, i, "tryDiags", "ok") || !Timeline.signalStrHas(t, i, "trySrc", "View.column"))
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") == 1 || Timeline.signalStrHas(t, i, "tryDiags", "ok") || !Timeline.signalStrHas(t, i, "trySrc", "View.column"))
 
 def tryRunMountsFresh(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || !Timeline.signalStrHas(t, i, "tryDiags", "ok") || !Timeline.signalStrHas(t, i, "trySrc", "Clicks: $n") || Timeline.a11yHas(t, i, "text:Clicks: 0"))
@@ -42,10 +42,10 @@ def checkShowsTrue(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Check") || Timeline.signalStrHas(t, i, "tryOut", "true"))
 
 def checkShowsFiles(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 2 && Timeline.signalInt(t, i, "step") != 4 || Timeline.a11yHas(t, i, "tab:Main.scuzz") && Timeline.a11yHas(t, i, "tab:count.scuzz_verify"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 3 && Timeline.signalInt(t, i, "step") != 5 || Timeline.a11yHas(t, i, "tab:Main.scuzz") && Timeline.a11yHas(t, i, "tab:count.scuzz_verify"))
 
 def codeHasCopyControl(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 5 || Timeline.a11yHas(t, i, "outlined:Copy") || Timeline.a11yHas(t, i, "outlined:Copied"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 6 || Timeline.a11yHas(t, i, "outlined:Copy") || Timeline.a11yHas(t, i, "outlined:Copied"))
 
 def howFuzzFindsFail(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Fuzz", "text:fail hidden 3")
@@ -54,18 +54,35 @@ def howFuzzMarksFail(t: Timeline): Verdict =
   Verdict.afterHit(t, "button:Fuzz", "chip:fail=1")
 
 def continueGatedOnRun(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 0 || Timeline.signalStrHas(t, i, "tryOut", "1") || !Timeline.a11yHas(t, i, "button:Continue"))
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 1 || Timeline.signalStrHas(t, i, "tryOut", "1") || !Timeline.a11yHas(t, i, "button:Continue"))
 
 def runUnlocksContinue(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") != 0 || Timeline.a11yHas(t, i, "button:Continue"))
+  Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Run") || Timeline.signalInt(t, i, "step") != 1 || Timeline.a11yHas(t, i, "button:Continue"))
+
+def continueFromIntro(t: Timeline): Verdict =
+  Verdict.stepEvery(t, __tup => __tup match {
+  case (before, after) => !Timeline.lastHitHas(t, after, "button:Continue") || Timeline.signalInt(t, before, "step") != 0 || Timeline.signalInt(t, after, "step") == 1 && Timeline.a11yHas(t, after, "text:Run inc")
+})
 
 def continueFromRun(t: Timeline): Verdict =
   Verdict.stepEvery(t, __tup => __tup match {
-  case (before, after) => !Timeline.lastHitHas(t, after, "button:Continue") || Timeline.signalInt(t, before, "step") != 0 || Timeline.signalInt(t, after, "step") == 1 && Timeline.a11yHas(t, after, "text:Show a View")
+  case (before, after) => !Timeline.lastHitHas(t, after, "button:Continue") || Timeline.signalInt(t, before, "step") != 1 || Timeline.signalInt(t, after, "step") == 2 && Timeline.a11yHas(t, after, "text:Show a View")
 })
 
-def continueFromSignal(t: Timeline): Verdict =
+def continueFromState(t: Timeline): Verdict =
   Verdict.stepEvery(t, __tup => __tup match {
-  case (before, after) => !Timeline.lastHitHas(t, after, "button:Continue") || Timeline.signalInt(t, before, "step") != 3 || Timeline.signalInt(t, after, "step") == 4 && Timeline.a11yHas(t, after, "button:Fuzz")
+  case (before, after) => !Timeline.lastHitHas(t, after, "button:Continue") || Timeline.signalInt(t, before, "step") != 4 || Timeline.signalInt(t, after, "step") == 5 && Timeline.a11yHas(t, after, "button:Fuzz")
 })
+
+def continueGatedOnState(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 4 || Timeline.signalInt(t, i, "countReady") == 1 || !Timeline.a11yHas(t, i, "button:Continue"))
+
+def stateUnlocksContinue(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalListLen(t, i, "countNav") < 1 || !Timeline.lastHitHas(t, i, "button:+1") || Timeline.signalInt(t, i, "step") != 4 || !Timeline.a11yHas(t, i, "text:Clicks: 1") || Timeline.a11yHas(t, i, "button:Continue"))
+
+def coverPaintsHits(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 6 || Timeline.a11yHas(t, i, "semantics:cover-hit") && Timeline.a11yHas(t, i, "text:hits ") && Timeline.a11yHas(t, i, "button:Play hits"))
+
+def mutantShowsDiff(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 7 || Timeline.a11yHas(t, i, "text:live source") && Timeline.a11yHas(t, i, "text:mutant source") && Timeline.a11yHas(t, i, "text:- ") && Timeline.a11yHas(t, i, "text:+ ") && Timeline.a11yHas(t, i, "text:incAdds reject"))
 

@@ -69,8 +69,9 @@ async function check(browserType, url, mobile) {
       }, await locator.elementHandle());
     };
     await page.goto(url);
-    await expectText('text:Run inc');
-    await expectSection('run');
+    await expectText('text:Scuzz Lang');
+    await expectSection('intro');
+    await expectText('text:Intro 1/8');
     assert.equal(await page.title(), 'Scuzz');
     {
       const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
@@ -82,18 +83,70 @@ async function check(browserType, url, mobile) {
       assert.equal(await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], [])), pumps);
       assert.equal(await page.evaluate(() => window.rafRequests), frames, 'idle frame loop');
     }
-    assert.equal(await page.getByRole('heading', {name: 'Run', level: 1}).count(), 1);
+    assert.equal(await page.getByRole('heading', {name: 'Intro 1/8', level: 1}).count(), 1);
     assert.equal(await page.getByRole('navigation', {name: 'Breadcrumb'}).count(), 0);
     assert.equal(await page.getByRole('region', {name: 'App bar'}).count(), 1);
+    assert.equal(await page.getByRole('tab', {name: 'Intro', exact: true}).count(), 1);
     assert.equal(await page.getByRole('tab', {name: 'Run', exact: true}).count(), 1);
     assert.equal(await page.getByRole('tab', {name: 'View', exact: true}).count(), 1);
+    assert.equal(await page.getByRole('tab', {name: 'State', exact: true}).count(), 1);
     assert.equal(await page.getByRole('tab', {name: 'Cover', exact: true}).count(), 1);
+    assert.equal(await page.getByRole('tab', {name: 'Mutation', exact: true}).count(), 1);
     assert.equal(await page.getByRole('button', {name: 'Add one', exact: true}).count(), 0);
     assert.equal(await page.getByRole('img').count(), 0);
+    const introContinue = page.getByRole('button', {name: 'Continue', exact: true});
+    await reveal(introContinue);
+    await introContinue.click();
+    await expectSection('run');
+    await expectText('text:Run inc');
     const run = page.getByRole('button', {name: 'Run', exact: true});
     await reveal(run);
     await run.click();
     await expectText('text:1');
+    {
+      const tryEditor = page.getByRole('textbox', {name: 'editor', exact: true});
+      const original = await tryEditor.inputValue();
+      const overlay = await tryEditor.evaluate(node => {
+        const computed = getComputedStyle(node);
+        return {color: computed.color, background: computed.backgroundColor};
+      });
+      assert.equal(overlay.color, 'rgba(0, 0, 0, 0)', JSON.stringify(overlay));
+      assert.equal(overlay.background, 'rgba(0, 0, 0, 0)', JSON.stringify(overlay));
+      await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.insertText(Array.from({length: 40}, (_, i) => `line ${i}`).join('\n'));
+      const scrolled = await tryEditor.evaluate(node => {
+        const rect = node.getBoundingClientRect();
+        const before = node.scrollTop;
+        const wheel = new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 120,
+          clientX: rect.left + 24, clientY: rect.top + 24});
+        node.dispatchEvent(wheel);
+        return {before, after: node.scrollTop, height: node.scrollHeight, client: node.clientHeight};
+      });
+      assert(scrolled.height > scrolled.client, JSON.stringify(scrolled));
+      assert(scrolled.after > scrolled.before, JSON.stringify(scrolled));
+      if (mobile && browserType === chromium) {
+        const swiped = await tryEditor.evaluate(node => {
+          node.scrollTop = 0;
+          const rect = node.getBoundingClientRect();
+          const x = rect.left + 24;
+          const y0 = rect.top + 80;
+          const y1 = rect.top + 20;
+          const before = node.scrollTop;
+          const startTouch = new Touch({identifier: 1, target: node, clientX: x, clientY: y0});
+          const moveTouch = new Touch({identifier: 1, target: node, clientX: x, clientY: y1});
+          node.dispatchEvent(new TouchEvent('touchstart', {bubbles: true, cancelable: true,
+            touches: [startTouch], changedTouches: [startTouch]}));
+          const move = new TouchEvent('touchmove', {bubbles: true, cancelable: true,
+            touches: [moveTouch], changedTouches: [moveTouch]});
+          node.dispatchEvent(move);
+          return {before, after: node.scrollTop, prevented: move.defaultPrevented};
+        });
+        assert(swiped.after > swiped.before, JSON.stringify(swiped));
+        assert.equal(swiped.prevented, true);
+      }
+      await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.insertText(original);
+    }
     assert.equal(await page.getByRole('button', {name: 'Continue', exact: true}).count(), 1);
     const continueRun = page.getByRole('button', {name: 'Continue', exact: true});
     await reveal(continueRun);
@@ -110,24 +163,29 @@ async function check(browserType, url, mobile) {
     await expectText('text:Clicks: 0');
     await page.getByRole('tab', {name: 'Check', exact: true}).click();
     await expectSection('check');
+    await expectText('text:Check 4/8');
     assert.equal(await page.getByRole('tab', {name: 'Main.scuzz', exact: true}).count(), 1);
     assert.equal(await page.getByRole('tab', {name: 'count.scuzz_verify', exact: true}).count(), 1);
-    await page.getByRole('tab', {name: 'count.scuzz_verify', exact: true}).click();
     await expectEditor('oracle incAdds');
     const check = page.getByRole('button', {name: 'Check', exact: true});
     await reveal(check);
     await check.click();
     await expectText('text:true');
-    const signalTab = page.getByRole('tab', {name: 'Signal', exact: true});
-    await reveal(signalTab);
-    await signalTab.click();
-    await expectSection('signal');
-    assert.equal(new URL(page.url()).hash, '#stage=signal');
-    const addOne = page.getByRole('button', {name: 'Add one', exact: true});
-    await addOne.waitFor({state: 'attached'});
-    await reveal(addOne);
-    await addOne.click();
-    await expectText('text:Count: 1');
+    const stateTab = page.getByRole('tab', {name: 'State', exact: true});
+    await reveal(stateTab);
+    await stateTab.click();
+    await expectSection('state');
+    assert.equal(new URL(page.url()).hash, '#stage=state');
+    await expectText('text:State 5/8');
+    const stateRun = page.getByRole('button', {name: 'Run', exact: true});
+    await reveal(stateRun);
+    await stateRun.click();
+    await expectText('text:Clicks: 0');
+    const plusState = page.getByRole('button', {name: '+1', exact: true});
+    await reveal(plusState);
+    await plusState.click();
+    await expectText('text:Clicks: 1');
+    assert.equal(await page.getByRole('button', {name: 'Continue', exact: true}).count(), 1);
     {
       const paints = await page.evaluate(() => Module.ccall('sz_web_paints', 'number', [], []));
       const pumps = await page.evaluate(() => Module.ccall('sz_web_pumps', 'number', [], []));
@@ -146,19 +204,18 @@ async function check(browserType, url, mobile) {
     await fuzz.click();
     await expectText('text:fail hidden 3');
     await expectSnap('chip:fail=1');
-    await page.getByRole('tab', {name: 'Signal', exact: true}).click();
-    await expectText('text:Count: 1');
-    const signalRun = page.getByRole('button', {name: 'Run', exact: true});
-    await reveal(signalRun);
-    await signalRun.click();
+    await page.getByRole('tab', {name: 'State', exact: true}).click();
+    await expectText('text:Clicks: 1');
+    await reveal(stateRun);
+    await stateRun.click();
     await expectText('text:Clicks: 0');
     const tryEditor = page.getByRole('textbox', {name: 'editor', exact: true});
     const trySource = await tryEditor.inputValue();
     assert(trySource.includes('Clicks: $n'));
     await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.insertText(trySource.replace('Clicks: $n', 'Taps: $n'));
-    await reveal(signalRun);
-    await signalRun.click();
+    await reveal(stateRun);
+    await stateRun.click();
     await expectText('text:Taps: 0');
     const plusMounted = page.getByRole('button', {name: '+1', exact: true});
     await reveal(plusMounted);
@@ -166,8 +223,8 @@ async function check(browserType, url, mobile) {
     await expectText('text:Taps: 1');
     await tryEditor.focus(); await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.insertText('@main def main: IO[Unit] = Ui.run(_ => View.text(1))');
-    await reveal(signalRun);
-    await signalRun.click();
+    await reveal(stateRun);
+    await stateRun.click();
     await page.waitForFunction(() => Module.textBlocks?.some(block => /expected String/.test(block.text)));
     await page.getByRole('tab', {name: 'Cover', exact: true}).click();
     await expectSection('cover');
@@ -180,11 +237,23 @@ async function check(browserType, url, mobile) {
       console.error({cover: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
       throw error;
     });
-    await expectSnap('text:arms ');
-    await expectSnap('text:live ');
-    await expectSnap('text:mutant ');
+    await expectSnap('text:hits ');
+    await expectSnap('semantics:cover-hit');
+    await page.getByRole('tab', {name: 'Mutation', exact: true}).click();
+    await expectSection('mutation');
+    await expectSnap('text:live source');
+    await expectSnap('text:mutant source');
+    await expectSnap('text:- ');
+    await expectSnap('text:+ ');
+    await page.waitForFunction(() => Module.ccall('sz_web_snapshot', 'string', [], []).includes('text:incAdds reject'),
+      null, {timeout: 60000}).catch(async error => {
+      console.error({mutation: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
+      throw error;
+    });
     assert.equal(await page.getByRole('link', {name: 'Scuzz on GitHub', exact: true}).getAttribute('href'),
       'https://github.com/SeanCheatham/scuzz');
+    await page.getByRole('tab', {name: 'Cover', exact: true}).click();
+    await expectSection('cover');
     await page.getByRole('button', {name: 'Copy', exact: true}).first().click();
     await page.getByRole('button', {name: 'Copied', exact: true}).first().waitFor();
     if (browserType === chromium) {
@@ -235,7 +304,7 @@ async function check(browserType, url, mobile) {
     await runTab.focus();
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
-    await expectSection('cover');
+    await expectSection('mutation');
     await page.goto(url + '?preview=1#stage=search');
     await expectSection('search');
     await page.reload(); await expectSection('search');
