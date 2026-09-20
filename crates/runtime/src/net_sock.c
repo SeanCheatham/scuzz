@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 #include "rt_util.h"
+#include "net_transport.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -45,13 +46,6 @@ static SzIo *unwrap_sock(void *value, void *env) {
     sz_release(r);
     return pure_drop(ok);
   }
-}
-
-static int set_nonblock(int fd) {
-  int fl = fcntl(fd, F_GETFL, 0);
-  if (fl < 0)
-    return -1;
-  return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 }
 
 static SzNetSock *sock_new(int kind) {
@@ -167,29 +161,6 @@ int sz_net_host_family(const char *host, char *canon, size_t canon_cap) {
     return 6;
   }
   return 0;
-}
-
-static int tcp_begin(const struct sockaddr *sa, socklen_t len) {
-  int fd;
-  if (!sa || len == 0)
-    return -1;
-  fd = socket(sa->sa_family, SOCK_STREAM, 0);
-  if (fd < 0 || set_nonblock(fd) != 0) {
-    if (fd >= 0)
-      close(fd);
-    return -1;
-  }
-#ifdef SO_NOSIGPIPE
-  {
-    int nosig = 1;
-    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof nosig);
-  }
-#endif
-  if (connect(fd, sa, len) != 0 && errno != EINPROGRESS && errno != EAGAIN) {
-    close(fd);
-    return -1;
-  }
-  return fd;
 }
 
 static int listen_v4(int port) {

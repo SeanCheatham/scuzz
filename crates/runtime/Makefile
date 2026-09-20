@@ -44,7 +44,7 @@ FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 ffi-skia:
 	@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
-build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/ui_script.h src/net_transport.h | build
+build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 lib: build/libscuzz_rt.a
@@ -60,7 +60,6 @@ SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_S
 	else echo -lstdc++ -lm -lz -lbz2; fi)
 GPU_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx gpu $(FFI_SKIA)/build/sk_capi_backend && \
 	if [ "$$(uname -s)" = Darwin ]; then echo -framework OpenGL; else echo -lEGL -lGLESv2; fi)
-UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 HOST_LINK := -framework CoreFoundation
 EXPORT_LINK :=

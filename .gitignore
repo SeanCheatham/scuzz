@@ -7,7 +7,6 @@ examples/jump/src/
 build/
 **/.scuzz/
 *.png
-!examples/**/goldens/**/*.png
 .DS_Store
 *.a
 *.so

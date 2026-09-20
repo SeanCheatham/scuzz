@@ -23,27 +23,15 @@ mkdir -p "$STAGE2" "$STAGE3" "$STAGE4"
 # Build the runtime on hosts that restore only the product CLI.
 make -C crates/runtime lib
 
-# Use the optimized compiler link that bootstrap.sh ships.
-link_cli() {
-  local stage="$1"
-  local platform_libs=()
-  if [ "$(uname -s)" = Darwin ]; then
-    platform_libs=(-framework CoreFoundation -L/opt/homebrew/opt/openssl@3/lib -L/usr/local/opt/openssl@3/lib)
-  fi
-  clang -O2 -Wno-override-module "$stage/cli.ll" \
-    "$ROOT/crates/runtime/build/libscuzz_rt.a" "${platform_libs[@]}" \
-    -lpthread -lssl -lcrypto -o "$stage/cli"
-}
-
 "$SCUZZ" build --full --out-dir "$STAGE2" examples/cli
-link_cli "$STAGE2"
+"$ROOT/scripts/link_cli.sh" "$STAGE2/cli.ll" "$STAGE2/cli"
 "$STAGE2/cli" | tee /tmp/scuzz-fp-cli.out
 grep -q "cli-ok" /tmp/scuzz-fp-cli.out
 test -f "$STAGE2/cli.ll"
 test -x "$STAGE2/cli"
 
 "$STAGE2/cli" build --full --out-dir "$STAGE3" examples/cli
-link_cli "$STAGE3"
+"$ROOT/scripts/link_cli.sh" "$STAGE3/cli.ll" "$STAGE3/cli"
 "$STAGE3/cli" | tee /tmp/scuzz-fp-cli3.out
 grep -q "cli-ok" /tmp/scuzz-fp-cli3.out
 test -f "$STAGE3/cli.ll"

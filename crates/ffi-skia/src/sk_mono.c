@@ -20,22 +20,6 @@ float sk_font_mono_cell(float font_px) {
   return cell;
 }
 
-float sk_font_measure_mono_string(const char *text, float font_px) {
-  float cell = sk_font_mono_cell(font_px);
-  const char *p;
-  int n = 0;
-  if (!text)
-    return 0.f;
-  for (p = text; *p;) {
-    int clen = sk_utf8_clen(p);
-    if (clen < 1)
-      clen = 1;
-    p += clen;
-    n++;
-  }
-  return (float)n * cell;
-}
-
 void sk_canvas_draw_mono_string(SkCanvas *canvas, const char *text, float x,
                                 float y, const SkPaint *paint) {
   float cell;

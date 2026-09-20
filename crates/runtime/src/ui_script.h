@@ -7,7 +7,6 @@
 int sz_ui_collect_buttons(SzUiSession *session, SzView **buttons, int cap);
 int sz_ui_collect_scrolls(SzUiSession *session, SzView **scrolls, int cap);
 int sz_ui_scroll_index_xy(SzUiSession *session, int index, float dx, float dy);
-int sz_ui_scroll_index(SzUiSession *session, int index, float dy);
 
 /* SCUZZ_UI_SCRIPT playback (inject document replay) and one env-driven tap.
  * The inject schema v=1 (`{"v":1,"kind":"inject","events":[...]}`) is the

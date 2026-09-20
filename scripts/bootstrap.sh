@@ -208,26 +208,10 @@ if [ ! -f "$RT" ]; then
   die "runtime make did not write $RT"
 fi
 
-link_cli() {
-  local ir="$1" output="$2"
-  local platform_libs=()
-  if [ ! -f "$ir" ]; then
-    die "compiler build did not write $ir"
-  fi
-  if [ "$(uname -s)" = Darwin ]; then
-    platform_libs+=(-framework CoreFoundation)
-    if command -v brew >/dev/null 2>&1 && brew --prefix openssl@3 >/dev/null 2>&1; then
-      platform_libs+=("-L$(brew --prefix openssl@3)/lib")
-    fi
-  fi
-  echo "==> clang -O2 $ir" >&2
-  clang -O2 -Wno-override-module "$ir" "$RT" "${platform_libs[@]}" -lpthread -lssl -lcrypto -o "$output"
-}
-
-link_cli "$stage_dir/cli.ll" "$stage_dir/cli"
+"$ROOT/scripts/link_cli.sh" "$stage_dir/cli.ll" "$stage_dir/cli"
 echo "==> compile product with checkout compiler" >&2
 "$stage_dir/cli" build --full examples/cli
-link_cli "$ROOT/examples/cli/build/cli.ll" "$SRC"
+"$ROOT/scripts/link_cli.sh" "$ROOT/examples/cli/build/cli.ll" "$SRC"
 if [ ! -x "$SRC" ]; then
   die "clang -O2 did not produce $SRC"
 fi

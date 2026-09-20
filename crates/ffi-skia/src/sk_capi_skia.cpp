@@ -230,19 +230,6 @@ void scuzz_skia_paint_set_color(void *paint, uint8_t r, uint8_t g, uint8_t b,
                       nullptr);
 }
 
-void scuzz_skia_paint_set_stroke(void *paint, int stroke) {
-  auto *p = static_cast<CapPaint *>(paint);
-  if (!p)
-    return;
-  p->paint.setStyle(stroke ? SkPaint::kStroke_Style : SkPaint::kFill_Style);
-}
-
-void scuzz_skia_paint_set_stroke_width(void *paint, float width) {
-  auto *p = static_cast<CapPaint *>(paint);
-  if (p)
-    p->paint.setStrokeWidth(width);
-}
-
 void scuzz_skia_paint_set_text_size(void *paint, float size) {
   auto *p = static_cast<CapPaint *>(paint);
   if (p)

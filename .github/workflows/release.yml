@@ -157,22 +157,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-          ./scripts/package_release.sh
-          test -f "dist/scuzz-${TRIPLE}.tar.gz"
-          test -x "dist/scuzz-${TRIPLE}/bin/scuzz"
+          ./scripts/ci.sh package
           grep -q "^version=${SCUZZ_VERSION}$" "dist/scuzz-${TRIPLE}/VERSION"
-          PREFIX=/tmp/scuzz-prefix
-          rm -rf "$PREFIX"
-          RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
-          export PATH="$PREFIX/bin:$PATH"
+          export PATH="/tmp/scuzz-prefix/bin:$PATH"
           unset SCUZZ_HOME SCUZZ_RUNTIME || true
-          rm -rf /tmp/scuzz-release-app
-          scuzz new --ui --path /tmp scuzz-release-app
-          scuzz fuzz --iterations 0 /tmp/scuzz-release-app
-          scuzz run --target headless --exec "" /tmp/scuzz-release-app
-          scuzz run examples/hello | tee /tmp/rel-hello.out
-          grep -q "Hello, Scuzz!" /tmp/rel-hello.out
-          grep -q "ready." /tmp/rel-hello.out
           # Packaged scuzz must emit the CLI so the next cut can bootstrap from this tag.
           # Drop the fingerprint from bootstrap emit. Cap Linux address space so a leak fails here.
           rm -rf examples/cli/.scuzz
