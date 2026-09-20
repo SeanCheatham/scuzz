@@ -59,7 +59,7 @@ def accepts(n: Int): Bool =
   IO.pure(())
 SOURCE
 cat > "$search_counts_dir/input.scuzz_verify" <<'CLAIMS'
-def check(n: Int): Bool =
+oracle check(n: Int): Bool =
   Main.accepts(n)
 CLAIMS
 cat > "$search_counts_dir/corpus/rejected.toml" <<'CORPUS'
@@ -453,7 +453,7 @@ cat > "$boolean_dir/src/Main.scuzz" <<'SOURCE'
 SOURCE
 check_boolean_claim() {
   local expression="$1" expected="$2" status=0
-  printf 'def fact(): Bool = %s\n' "$expression" > "$boolean_dir/fact.scuzz_verify"
+  printf 'oracle fact(): Bool =\n  %s\n\n' "$expression" > "$boolean_dir/fact.scuzz_verify"
   rm -f "$boolean_dir/build/fuzz/summary.json"
   fuzz --iterations 0 "$boolean_dir" > /tmp/scuzz-boolean-claim.log 2>&1 || status=$?
   cat /tmp/scuzz-boolean-claim.log
@@ -483,9 +483,13 @@ check_boolean_claim '1 > 2' 1
 check_boolean_claim '1 < 2' 0
 check_boolean_claim '1 == 2' 1
 check_boolean_claim '1 == 1' 0
-check_boolean_claim 'for { x = false } yield x' 1
-check_boolean_claim 'for { x = true } yield x' 0
-check_boolean_claim 'for { pair = (7, "seven") } yield pair._1 == 7 && pair._2 == "seven"' 0
+check_boolean_for() {
+  local bind="$1" yield="$2" expected="$3"
+  check_boolean_claim "$(printf 'for {\n    %s\n  } yield %s' "$bind" "$yield")" "$expected"
+}
+check_boolean_for 'x = false' 'x' 1
+check_boolean_for 'x = true' 'x' 0
+check_boolean_for 'pair = (7, "seven")' 'pair._1 == 7 && pair._2 == "seven"' 0
 rm -rf "$boolean_dir"
 
 match_require_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-match-require.XXXXXX")"
@@ -718,7 +722,7 @@ def accepts(n: Int): Bool =
   IO.pure(())
 SOURCE
 cat > "$workload_dir/input.scuzz_verify" <<'CLAIMS'
-def input(n: Int): Bool =
+oracle input(n: Int): Bool =
   Main.accepts(n)
 CLAIMS
 fuzz --iterations 0 "$workload_dir"
@@ -755,7 +759,7 @@ def accepts(n: Int): Bool =
   IO.pure(())
 SOURCE
 cat > "$stamp_dir/input.scuzz_verify" <<'CLAIMS'
-def input(n: Int): Bool =
+oracle input(n: Int): Bool =
   Main.accepts(n)
 CLAIMS
 fuzz --iterations 0 "$stamp_dir"
@@ -802,7 +806,8 @@ with tempfile.TemporaryDirectory(prefix="scuzz-compiler-cache-") as tmp:
         (pkg / "scuzz.toml").write_text('[package]\nname = "cache-proof"\n')
         (pkg / "src/Main.scuzz").write_text(
             'def id(n: Int): Int = n\n@main def main: IO[Unit] = IO.pure(())\n')
-        (pkg / "facts.scuzz_verify").write_text('def identity(n: Int): Bool = Main.id(n) == n\n')
+        (pkg / "facts.scuzz_verify").write_text(
+            'oracle identity(n: Int): Bool =\n  Main.id(n) == n\n\n')
         packages.append((kind, pkg))
 
     def run(kind, pkg):
