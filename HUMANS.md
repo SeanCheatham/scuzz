@@ -7,7 +7,7 @@ This file may be read by AI agents, but it must never be written, edited, or rem
 - Scuzz is heavily inspired by Scala and ZIO.
 - Scuzz is also heavily inspired by Flutter to support GUI-based applications.
 - Scuzz does not embrace the JVM; it instead embraces "native".
-- Scuzz is meant for building server, CLI, desktop, and mobile apps. Web apps might come at some point.
+- Scuzz is meant for building server, CLI, web, desktop, and mobile apps.
 - Scuzz is LLM/AI-friendly. Scala is especially productive and terse, making it very token-efficient. Scuzz aims for a similar degree of efficiency.
 - Scuzz includes headless mode, hot reload, and debugging tools, with a particular goal of aiding AI agents
 - Scuzz includes the compiler and tooling.
