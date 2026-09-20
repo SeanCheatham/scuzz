@@ -50,6 +50,17 @@ async function check(browserType, url, mobile) {
         throw error;
       }
     };
+    const expectEditor = async text => {
+      try {
+        await page.waitForFunction(text => [...document.querySelectorAll('textarea[aria-label="editor"]')]
+          .some(editor => editor.value.includes(text)), text);
+      } catch (error) {
+        console.error({expected: text, url: page.url(), errors,
+          editors: await page.evaluate(() => [...document.querySelectorAll('textarea[aria-label="editor"]')].map(editor => editor.value)),
+          state: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
+        throw error;
+      }
+    };
     const reveal = async locator => {
       await locator.evaluate(node => node.focus());
       await page.waitForFunction(el => {
@@ -102,10 +113,7 @@ async function check(browserType, url, mobile) {
     assert.equal(await page.getByRole('tab', {name: 'Main.scuzz', exact: true}).count(), 1);
     assert.equal(await page.getByRole('tab', {name: 'count.scuzz_verify', exact: true}).count(), 1);
     await page.getByRole('tab', {name: 'count.scuzz_verify', exact: true}).click();
-    {
-      const verEditor = page.getByRole('textbox', {name: 'editor', exact: true});
-      assert((await verEditor.inputValue()).includes('oracle incAdds'));
-    }
+    await expectEditor('oracle incAdds');
     const check = page.getByRole('button', {name: 'Check', exact: true});
     await reveal(check);
     await check.click();
@@ -132,10 +140,7 @@ async function check(browserType, url, mobile) {
     await page.getByRole('tab', {name: 'Search', exact: true}).click();
     await expectSection('search');
     await expectText('text:Campaign');
-    {
-      const verEditor = page.getByRole('textbox', {name: 'editor', exact: true});
-      assert((await verEditor.inputValue()).includes('oracle hidden'));
-    }
+    await expectEditor('oracle hidden');
     const fuzz = page.getByRole('button', {name: 'Fuzz', exact: true});
     await reveal(fuzz);
     await fuzz.click();

@@ -142,8 +142,8 @@ with tempfile.TemporaryDirectory(prefix="scuzz-format-") as tmp:
     sources = {
         "src/Main.scuzz": "@main def main:IO[Unit]=IO.pure(())\n",
         "drivers/world.scuzz_scenario": "def setup():IO[Unit]=IO.pure(())\n",
-        "law.scuzz_verify": "def valid():Bool=true\n",
-        "claims spaced/law.scuzz_verify": "def other():Bool=true\n",
+        "law.scuzz_verify": "oracle valid():Bool=true\n",
+        "claims spaced/law.scuzz_verify": "oracle other():Bool=true\n",
     }
     ignored = {f"{folder}/ignored.scuzz_verify": "not Scuzz\n"
                for folder in ["build", "corpus", "goldens", ".hidden"]}
