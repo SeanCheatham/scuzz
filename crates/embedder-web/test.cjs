@@ -189,7 +189,7 @@ async function check(browserType, url, mobile) {
     await page.getByRole('button', {name: 'Copied', exact: true}).first().waitFor();
     if (browserType === chromium) {
       const copied = await page.evaluate(() => navigator.clipboard.readText());
-      assert(copied.includes('countdown'), copied);
+      assert(copied.includes('Queue.offer'), copied);
     }
     await page.evaluate(() => {
       window.writeClipboard = navigator.clipboard.writeText.bind(navigator.clipboard);
