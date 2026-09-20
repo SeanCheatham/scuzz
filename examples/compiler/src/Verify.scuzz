@@ -178,7 +178,7 @@ def allSimpleWhere1(p: Param, rest: List[Param]): Bool =
   }
 
 def isDrive(d: Fun, ens: List[En]): Bool =
-  !d.priv && d.ret == "Bool" && List.len(d.params) <= 3 && allFriendly(d.params, ens) && unaryAdtOk(d.params) && allSimpleWhere(d.params)
+  !d.priv && d.ora && d.ret == "Bool" && List.len(d.params) <= 3 && allFriendly(d.params, ens) && unaryAdtOk(d.params) && allSimpleWhere(d.params)
 
 def isClaim(d: Fun): Bool =
   !d.priv && d.ret == "Verdict" && claimPs(d.params)
@@ -540,7 +540,7 @@ def callLitsDefs(ds: List[Fun], f: String, idx: Int): List[String] =
 
 def callLitsFun(d: Fun, f: String, idx: Int): List[String] =
   d match {
-    case Fun(_, _, _, _, _, body, _, _) => callLitsExpr(body, f, idx)
+    case Fun(_, _, _, _, _, _, body, _, _) => callLitsExpr(body, f, idx)
   }
 
 def callLitsExpr(e: Expr, f: String, idx: Int): List[String] =
@@ -858,7 +858,7 @@ def wrapFuns(stem: String, ds: List[Fun]): String =
 
 def wrapFun(_stem: String, d: Fun): String =
   d match {
-    case Fun(_, name, _, ps, _, body, _, _) => wrapFunBody(name, wrapPs(ps), body)
+    case Fun(_, _, name, _, ps, _, body, _, _) => wrapFunBody(name, wrapPs(ps), body)
   }
 
 def wrapFunBody(name: String, ps: String, body: Expr): String =
@@ -890,7 +890,7 @@ def wrapRelFuns(ds: List[Fun]): String =
 
 def wrapRel(d: Fun): String =
   d match {
-    case Fun(_, name, _, ps, _, body, _, _) => wrapRel2(name, wrapPs(ps), Parse.pretty0(body))
+    case Fun(_, _, name, _, ps, _, body, _, _) => wrapRel2(name, wrapPs(ps), Parse.pretty0(body))
   }
 
 def wrapRel2(name: String, ps: String, body: String): String =
@@ -966,7 +966,7 @@ def replsFor1(d: Fun, rest: List[Fun], stem: String): List[Fun] =
 
 def localRepl(d: Fun): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, replLocal(name), ts, ps, ret, body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => Fun(priv, ora, replLocal(name), ts, ps, ret, body, mod, off)
   }
 
 def scenarioWrap(src: String): String =
@@ -1011,7 +1011,7 @@ def headTy(ps: List[Param]): String =
 
 def wrapCtxDriver(d: Fun): List[Fun] =
   d match {
-    case Fun(_, name, ts, ps, ret, body, _, off) => Fun(true, Str.concat("_scn_", name), ts, ps, ret, body, "", off) :: Fun(false, name, ts, List.tail(ps), ret, wrapCall(d), "", off) :: noFun()
+    case Fun(_, _, name, ts, ps, ret, body, _, off) => Fun(true, false, Str.concat("_scn_", name), ts, ps, ret, body, "", off) :: Fun(false, false, name, ts, List.tail(ps), ret, wrapCall(d), "", off) :: noFun()
   }
 
 def wrapCall(d: Fun): Expr =
@@ -1255,7 +1255,7 @@ def defsNeedWhere(ds: List[Fun], funs: List[Fun], ens: List[En]): Bool =
 
 def funNeedsWhere(d: Fun, funs: List[Fun], ens: List[En]): Bool =
   d match {
-    case Fun(_, _, _, _, _, body, _, _) => exprNeedsWhere(body, funs, ens)
+    case Fun(_, _, _, _, _, _, body, _, _) => exprNeedsWhere(body, funs, ens)
   }
 
 def implsNeedWhere(xs: List[Im], funs: List[Fun], ens: List[En]): Bool =
@@ -1320,7 +1320,7 @@ def paramsOfFun(hit: List[Fun], f: String, ens: List[En]): List[Param] =
 
 def funParams(d: Fun): List[Param] =
   d match {
-    case Fun(_, _, _, ps, _, _, _, _) => ps
+    case Fun(_, _, _, _, ps, _, _, _, _) => ps
   }
 
 def ctorParams(ens: List[En], f: String): List[Param] =
@@ -1352,7 +1352,7 @@ def defsHaveReq(ds: List[Fun]): Bool =
 
 def funHasReq(d: Fun): Bool =
   d match {
-    case Fun(_, _, _, _, _, body, _, _) => exprHasReq(body)
+    case Fun(_, _, _, _, _, _, body, _, _) => exprHasReq(body)
   }
 
 def exprHasReq(e: Expr): Bool =
@@ -1417,7 +1417,7 @@ def rewriteReqDefs(ds: List[Fun], funs: List[Fun], ens: List[En]): List[Fun] =
 
 def rewriteReqFun(d: Fun, funs: List[Fun], ens: List[En]): Fun =
   d match {
-    case Fun(priv, name, tparams, params, ret, body, mod, off) => Fun(priv, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, Check.envSelfMod(mod)), funs, ens), mod, off)
+    case Fun(priv, ora, name, tparams, params, ret, body, mod, off) => Fun(priv, ora, name, tparams, params, ret, rewriteReq(body, Check.bindParams(params, Check.envSelfMod(mod)), funs, ens), mod, off)
   }
 
 def inferTy(e: Expr, env: List[(String, Ty)], funs: List[Fun], ens: List[En]): String =
@@ -1658,7 +1658,7 @@ def checkVerifyDefHit(src: String, file: String, ens: List[En], p: Prog, d: Fun,
   if (d.priv) checkVerifyDefsGo(src, file, ens, p, rest) else if (isDrive(d, ens)) checkVerifyDefsGo(src, file, ens, p, rest) else if (isClaim(d)) checkVerifyDefsGo(src, file, ens, p, rest) else defFail(d, file, src)
 
 def defFail(d: Fun, file: String, src: String): String =
-  if (d.ret == "Bool") atLoc(file, src, d.off, Str.concat("drive ", Str.concat(d.name, " params must be generator-friendly (at most 3; ADT or List only as the sole param)"))) else if (d.ret == "Verdict") atLoc(file, src, d.off, Str.concat("claim ", Str.concat(d.name, " must take 1 or 2 Timeline params"))) else atLoc(file, src, d.off, Str.concat("public def ", Str.concat(d.name, " is not a drive oracle or a Timeline => Verdict claim")))
+  if (d.ora && d.ret == "Bool") atLoc(file, src, d.off, Str.concat("oracle ", Str.concat(d.name, " params must be generator-friendly (at most 3; ADT or List only as the sole param)"))) else if (d.ora) atLoc(file, src, d.off, Str.concat("oracle ", Str.concat(d.name, " must return Bool"))) else if (d.ret == "Verdict") atLoc(file, src, d.off, Str.concat("claim ", Str.concat(d.name, " must take 1 or 2 Timeline params"))) else atLoc(file, src, d.off, Str.concat("public def ", Str.concat(d.name, " is not a drive oracle or a Timeline => Verdict claim")))
 
 def checkVerifyEmpty(src: String, file: String, ens: List[En], p: Prog): String =
   if (List.isEmpty(drives(p.defs, ens)) && List.isEmpty(claims(p.defs))) emptyVerify(file) else checkVerifyFmt(src, file, p)
@@ -1671,7 +1671,7 @@ def defsHaveForbid(ds: List[Fun]): Bool =
 
 def funHasForbid(d: Fun): Bool =
   d match {
-    case Fun(_, _, _, _, _, body, _, _) => exprHasForbid(body)
+    case Fun(_, _, _, _, _, _, body, _, _) => exprHasForbid(body)
   }
 
 def exprHasForbid(e: Expr): Bool =
@@ -1812,7 +1812,7 @@ def workloadFun(d: Fun, rest: List[Fun], ens: List[En], ctxTy: String): List[Fun
 
 def stripCtxFun(d: Fun, ctxTy: String): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, drvGenPs(ps, ctxTy), ret, body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => Fun(priv, ora, name, ts, drvGenPs(ps, ctxTy), ret, body, mod, off)
   }
 
 def generatedDrive(ds: List[Fun], ens: List[En], seed: Int): String =

@@ -179,7 +179,7 @@ def takeUntilParen(s: String): String =
   if (Str.indexOf(s, "(") < 0) "" else Str.take(s, Str.indexOf(s, "("))
 
 def claimNameOf(line: String): String =
-  if (!Str.startsWith(line, "def ")) "" else takeUntilParen(Str.drop(line, 4))
+  if (Str.startsWith(line, "def ")) takeUntilParen(Str.drop(line, 4)) else if (Str.startsWith(line, "oracle ")) takeUntilParen(Str.drop(line, 7)) else ""
 
 def claimNames(src: String): List[String] =
   List.filter(List.map(nonEmptyLines(src), claimNameOf), s => !Str.isEmpty(s))

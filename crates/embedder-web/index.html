@@ -247,14 +247,18 @@ layer.addEventListener('touchstart', event => { touchY = event.touches[0].client
 layer.addEventListener('touchmove', event => {
   if (!getSelection().isCollapsed || event.touches.length !== 1 || event.target.closest('.edit')) return;
   const touch = event.touches[0];
-  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number'], [touch.clientX, touch.clientY, touchY - touch.clientY]);
+  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number', 'number'], [touch.clientX, touch.clientY, 0, touchY - touch.clientY]);
   touchY = touch.clientY; event.preventDefault();
 }, {passive: false});
 // Wheel and canvas touch cancel the event. Register those listeners as non-passive.
 window.addEventListener('wheel', event => {
   if (!Module.ready || event.ctrlKey || event.metaKey) return;
-  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number'],
-    [event.clientX, event.clientY, event.deltaY * (event.deltaMode === 1 ? 20 : 1)]);
+  const scale = event.deltaMode === 1 ? 20 : 1;
+  let dx = event.deltaX * scale;
+  let dy = event.deltaY * scale;
+  if (event.shiftKey && dx === 0) { dx = dy; dy = 0; }
+  Module.ccall('sz_web_scroll', null, ['number', 'number', 'number', 'number'],
+    [event.clientX, event.clientY, dx, dy]);
   event.preventDefault();
 }, {passive: false});
 const sendTouch = (event, phase) => {

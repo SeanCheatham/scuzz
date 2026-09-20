@@ -1,150 +1,150 @@
-def adtFacts(): Bool =
+oracle adtFacts(): Bool =
   Main.describe(Opt.Some(42)) == "adt:describe:42" && Main.describeBare(Opt.Some(42)) == "bare:42" && Main.describeBare(Main.noneInt()) == "bare:none" && Main.hueBare(Color.Red) == "barehue"
 
-def posFacts(): Bool =
+oracle posFacts(): Bool =
   Main.describePos(Opt.Some(3)) == "pos:3" && Main.describePos(Opt.Some(0)) == "nonpos:0" && Main.describePos(Main.noneInt()) == "none"
 
-def litFacts(): Bool =
+oracle litFacts(): Bool =
   Main.describeNum(0) == "zero" && Main.describeNum(2) == "other" && Main.describeFlag(true) == "yes" && Main.describeWord("ok") == "good"
 
-def recordFacts(): Bool =
+oracle recordFacts(): Bool =
   Main.sum(Point(3, 5)) == 8 && Point(3, 5).show() == "Point(3,5)" && Point(3, 5).getOrElse(0) == 3
 
-def callFacts(): Bool =
+oracle callFacts(): Bool =
   Main.greet("hi", punct = "?") == "hi?" && Main.addDefault(3, m = 4) == 7 && Main.trunc(2.9) == 2 && Main.funArrowPass() == "x"
 
-def hueFacts(): Bool =
+oracle hueFacts(): Bool =
   Main.describeHue(Color.Red) == "primary" && Main.describeSmall(0) == "tiny" && Main.describeOptZero(Opt.Some(0)) == "some0"
 
-def mapParameters(n: Int): Bool =
+oracle mapParameters(n: Int): Bool =
   Main.mapParamRoundTrip(n, Str.fromInt(n))
 
-def constructorStrings(s: String): Bool =
+oracle constructorStrings(s: String): Bool =
   Main.literalPacket(LiteralPacket.Text(s)) == (if (s == "ready") 1 else 0)
 
-def constructorNumbers(n: Int): Bool =
+oracle constructorNumbers(n: Int): Bool =
   Main.literalPacket(LiteralPacket.Number(n)) == (if (n == -7) 2 else 0)
 
-def constructorFlags(b: Bool): Bool =
+oracle constructorFlags(b: Bool): Bool =
   Main.literalPacket(LiteralPacket.Flag(b)) == (if (b) 3 else 0)
 
-def constructorFields(n: Int): Bool =
+oracle constructorFields(n: Int): Bool =
   Main.literalPacket(LiteralPacket.Fields("event", 2, true, n)) == n && Main.literalPacket(LiteralPacket.Fields("other", 2, true, n)) == 0 && Main.literalPacket(LiteralPacket.Fields("event", 3, true, n)) == 0 && Main.literalPacket(LiteralPacket.Fields("event", 2, false, n)) == 0
 
-def constructorMatches(): Bool =
+oracle constructorMatches(): Bool =
   Main.literalPacket(LiteralPacket.Text("ready")) == 1 && Main.literalPacket(LiteralPacket.Number(-7)) == 2 && Main.literalPacket(LiteralPacket.Flag(true)) == 3 && Main.literalPacket(LiteralPacket.Fields("event", 2, true, 29)) == 29
 
-def constructorNamed(n: Int): Bool =
+oracle constructorNamed(n: Int): Bool =
   Main.literalNamed(LiteralPacket.Fields("event", 2, true, n)) == (if (n > 0) n else 0) && Main.literalNamed(LiteralPacket.Fields("other", 2, true, n)) == 0 && Main.literalNamed(LiteralPacket.Fields("event", 3, true, n)) == 0 && Main.literalNamed(LiteralPacket.Fields("event", 2, false, n)) == 0
 
-def constructorEscaped(): Bool =
+oracle constructorEscaped(): Bool =
   Main.literalEscaped(LiteralPacket.Text("line\n\"quoted\"\\end")) && !Main.literalEscaped(LiteralPacket.Text("line quoted end"))
 
-def constructorDelimiters(): Bool =
+oracle constructorDelimiters(): Bool =
   Main.literalDelimiters(LiteralPacket.Text("a,b) | c :: d @ e = f")) && !Main.literalDelimiters(LiteralPacket.Text("a"))
 
-def capturedNames(n: Int): Bool =
+oracle capturedNames(n: Int): Bool =
   Main.captureNames(n, 5, 7, 11) == n + 23
 
-def capturedDirect(n: Int): Bool =
+oracle capturedDirect(n: Int): Bool =
   Main.captureDirect(n) == n
 
-def capturedString(s: String): Bool =
+oracle capturedString(s: String): Bool =
   Main.captureString(s) == Str.concat(s, s)
 
-def pureForClaim(n: Int): Bool =
+oracle pureForClaim(n: Int): Bool =
   for {
     pair = (n, Str.fromInt(n))
     text = pair._2
   } yield pair._1 == n && text == Str.fromInt(n)
 
-def patternResults(s: String): Bool =
+oracle patternResults(s: String): Bool =
   Main.patternLabel(s) == s && Main.patternNamed(s) == s && List.join(Main.patternItems(s), "|") == Str.concat(s, Str.concat("|", s))
 
-def callbackFields(s: String): Bool =
+oracle callbackFields(s: String): Bool =
   List.join(List.flatMap([PatternFields("first", [s]), PatternFields("second", [s])], entry => entry.items), "|") == Str.concat(s, Str.concat("|", s))
 
-def genericCallbackFields(s: String): Bool =
+oracle genericCallbackFields(s: String): Bool =
   List.join(List.flatMap([Box([s]), Box([s])], box => box.x), "|") == Str.concat(s, Str.concat("|", s))
 
-def genericScalarField(n: Int): Bool =
+oracle genericScalarField(n: Int): Bool =
   List.at(List.map([Box(n)], box => box.x + 1), 0) == n + 1
 
-def temporaryRecord(s: String): Bool =
+oracle temporaryRecord(s: String): Bool =
   Main.patternRecord(s) == Str.concat(s, s)
 
-def temporaryTailSize(s: String, n: Int): Bool =
+oracle temporaryTailSize(s: String, n: Int): Bool =
   Main.patternTailSize(s, n % 32) == Str.len(s)
 
-def temporaryTailValue(s: String, n: Int): Bool =
+oracle temporaryTailValue(s: String, n: Int): Bool =
   Main.patternTailValue(s, n % 32) == s
 
-def interpolatedJson(n: Int): Bool =
+oracle interpolatedJson(n: Int): Bool =
   Json.parse(Main.interpolatedJson(n)) match {
     case Result.Ok(j) => Main.jsonPairReads(j, "id", n)
     case Result.Err(_) => false
   }
 
-def verificationInterpolation(n: Int): Bool =
+oracle verificationInterpolation(n: Int): Bool =
   Json.parse(s"{\"id\":$n}") match {
     case Result.Ok(j) => Main.jsonPairReads(j, "id", n)
     case Result.Err(_) => false
   }
 
-def interpolatedEscapes(s: String): Bool =
+oracle interpolatedEscapes(s: String): Bool =
   Main.interpolatedEscapes(s) == Str.concat("\"", Str.concat(s, "\"\n\t\\${literal}"))
 
-def interpolatedHole(s: String): Bool =
+oracle interpolatedHole(s: String): Bool =
   Main.interpolatedHole(s) == Str.concat("\"", s)
 
-def alternativeInt(n: Int): Bool =
+oracle alternativeInt(n: Int): Bool =
   Main.alternativeInt(n) == (n == -7 || n == 2 || n == 19)
 
-def alternativeBool(b: Bool): Bool =
+oracle alternativeBool(b: Bool): Bool =
   Main.alternativeBool(b) == b
 
-def alternativeString(s: String): Bool =
+oracle alternativeString(s: String): Bool =
   Main.alternativeString(s) == (s == "a" || s == "b" || s == "c" || s == "x | y")
 
-def alternativeGuard(n: Int): Bool =
+oracle alternativeGuard(n: Int): Bool =
   Main.alternativeGuard(n) == (n == 2 || n == 19)
 
-def tupleLitInt(n: Int, s: String): Bool =
+oracle tupleLitInt(n: Int, s: String): Bool =
   Main.tupleLitInt((n, s)) == (if (n == 1) Str.concat("one:", s) else Str.concat(Str.fromInt(n), s))
 
-def tupleLitStr(s: String, n: Int): Bool =
+oracle tupleLitStr(s: String, n: Int): Bool =
   Main.tupleLitStr((s, n)) == (if (s == "a") 1 else 2)
 
-def tupleLitBool(b: Bool, n: Int): Bool =
+oracle tupleLitBool(b: Bool, n: Int): Bool =
   Main.tupleLitBool((b, n)) == (if (b) n else 0 - n)
 
-def tupleLitTri(n: Int, s: String, b: Bool): Bool =
+oracle tupleLitTri(n: Int, s: String, b: Bool): Bool =
   Main.tupleLitTri((n, s, b)) == (if (n == 0) 1 else if (s == "a") 2 else if (b) 3 else 4)
 
-def tupleLitNest(a: Int, b: Int, s: String): Bool =
+oracle tupleLitNest(a: Int, b: Int, s: String): Bool =
   Main.tupleLitNest(((a, b), s)) == (if (a == 1 && b == 2) 1 else if (a == 1) 2 else if (b == 2) 3 else 4)
 
-def tupleLitConcrete(): Bool =
+oracle tupleLitConcrete(): Bool =
   Main.tupleLitInt((1, "a")) == "one:a" && Main.tupleLitInt((2, "b")) == "2b" && Main.tupleLitStr(("a", 9)) == 1 && Main.tupleLitStr(("z", 9)) == 2 && Main.tupleLitBool((true, 3)) == 3 && Main.tupleLitBool((false, 3)) == 0 - 3 && Main.tupleLitTri((0, "z", false)) == 1 && Main.tupleLitTri((7, "a", false)) == 2 && Main.tupleLitTri((7, "z", true)) == 3 && Main.tupleLitTri((7, "z", false)) == 4 && Main.tupleLitNest(((1, 2), "x")) == 1 && Main.tupleLitNest(((1, 9), "x")) == 2 && Main.tupleLitNest(((9, 2), "x")) == 3 && Main.tupleLitNest(((9, 9), "x")) == 4
 
-def alternativeQuoted(): Bool =
+oracle alternativeQuoted(): Bool =
   Main.alternativeString("x | y") && !Main.alternativeString("x")
 
-def constructorAlternativeNumbers(n: Int): Bool =
+oracle constructorAlternativeNumbers(n: Int): Bool =
   Main.constructorAlternatives(LiteralPacket.Number(n)) == (n == 19)
 
-def constructorAlternativeStrings(s: String): Bool =
+oracle constructorAlternativeStrings(s: String): Bool =
   Main.constructorAlternatives(LiteralPacket.Text(s)) == (s == "done")
 
-def constructorAlternativeFields(n: Int, b: Bool): Bool =
+oracle constructorAlternativeFields(n: Int, b: Bool): Bool =
   Main.constructorAlternatives(LiteralPacket.Fields("ready", 2, b, n)) == (n == 7 && b) && !Main.constructorAlternatives(LiteralPacket.Fields("other", 2, b, n))
 
-def constructorAlternativeValues(n: Int): Bool =
+oracle constructorAlternativeValues(n: Int): Bool =
   Main.constructorAlternativeValue(LiteralPacket.Number(n)) == n && Main.constructorAlternativeValue(LiteralPacket.Fields("ready", n, true, 0)) == n
 
-def constructorAlternativeTexts(s: String): Bool =
+oracle constructorAlternativeTexts(s: String): Bool =
   Main.constructorAlternativeText(LiteralPacket.Text(s)) == s && Main.constructorAlternativeText(LiteralPacket.Fields(s, 0, false, 0)) == s
 
-def constructorAlternativeGuards(n: Int): Bool =
+oracle constructorAlternativeGuards(n: Int): Bool =
   Main.constructorAlternativeGuard(LiteralPacket.Number(n)) == (if (n > 0) n else 0) && Main.constructorAlternativeGuard(LiteralPacket.Fields("ready", 0, false, n)) == (if (n > 0) n else 0)
 

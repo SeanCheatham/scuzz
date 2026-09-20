@@ -22,7 +22,7 @@ int sz_ui_collect_scrolls(SzUiSession *session, SzView **scrolls, int cap) {
   return sz_view_collect_scrolls(r, scrolls, cap);
 }
 
-static void script_scroll(SzUiSession *session, int index, float dy) {
+static void script_scroll(SzUiSession *session, int index, float dx, float dy) {
   SzView *scrolls[64];
   int count = sz_ui_collect_scrolls(session, scrolls, 64);
   int n = index < 0 ? 0 : index;
@@ -33,7 +33,7 @@ static void script_scroll(SzUiSession *session, int index, float dy) {
       fprintf(stderr, "scuzz: script scroll %d skipped (%d scrolls)\n", n, count);
     return;
   }
-  if (!sz_ui_scroll_index(session, n, dy))
+  if (!sz_ui_scroll_index_xy(session, n, dx, dy))
     fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
 }
 
@@ -323,6 +323,7 @@ static void script_after_event(SzUiSession *session) {
      {"op":"pump","k":K}  pump K extra frames
      {"op":"scroll","dy":D}  pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
      {"op":"scroll","i":N,"dy":D}  pan dump-index N ([scrolls] scan order)
+     {"op":"scroll","dx":D}  pan the first Scroll on x (positive = content left); dy defaults to 0 when dx is set
      {"op":"backspace","count":K}  chop K UTF-8 code points before the caret on the [fields] starred TextField (default 1); no field is a no-op
      {"op":"backspace","i":N,"count":K}  chop K code points before the caret on dump-index N
      {"op":"dump"}    rewrite the live debug dump now (includes heap and live rows); no dump path is a no-op
@@ -481,7 +482,13 @@ static void play_script_event_json(SzUiSession *session, SzAdt *ev) {
     }
   } else if (strcmp(op, "scroll") == 0) {
     int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
-    script_scroll(session, idx, (float)sz_jev_num(ev, "dy", 40.0));
+    float dx = (float)sz_jev_num(ev, "dx", 0.0);
+    float dy;
+    if (sz_jev_has(ev, "dy"))
+      dy = (float)sz_jev_num(ev, "dy", 0.0);
+    else
+      dy = sz_jev_has(ev, "dx") ? 0.f : 40.f;
+    script_scroll(session, idx, dx, dy);
   } else if (strcmp(op, "backspace") == 0) {
     int idx = sz_jev_has(ev, "i") ? (int)sz_jev_int(ev, "i", 0) : -1;
     script_backspace(session, idx, (int)sz_jev_int(ev, "count", 1));

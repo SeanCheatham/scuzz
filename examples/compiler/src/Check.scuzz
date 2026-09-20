@@ -471,7 +471,7 @@ def resolveInstNamed(f: String, ty: String, args: List[Expr], env: List[(String,
 
 def resolveInstHit(f: String, ty: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), d: Fun): Out =
   d match {
-    case Fun(_, _, _, ps, ret, _, _, _) => checkKnown(f, instWant(ps, ty), ret, args, env, funs, ens, span)
+    case Fun(_, _, _, _, ps, ret, _, _, _) => checkKnown(f, instWant(ps, ty), ret, args, env, funs, ens, span)
   }
 
 def instWant(ps: List[Param], recvTy: String): List[String] =
@@ -645,7 +645,7 @@ def resolveUser(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab
 
 def resolveUserHit(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), d: Fun): Out =
   d match {
-    case Fun(_, _, ts, ps, ret, _, _, _) => if (List.isEmpty(ts)) checkUser(f, ps, ret, args, env, funs, ens, span) else checkGeneric(f, ts, ps, ret, args, env, funs, ens, span, alignCall(ps, args))
+    case Fun(_, _, _, ts, ps, ret, _, _, _) => if (List.isEmpty(ts)) checkUser(f, ps, ret, args, env, funs, ens, span) else checkGeneric(f, ts, ps, ret, args, env, funs, ens, span, alignCall(ps, args))
   }
 
 def checkGeneric(f: String, ts: List[String], ps: List[Param], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), aligned: (List[Expr], String)): Out =
@@ -1662,7 +1662,7 @@ def inferVarCase(s: String, ens: List[En], span: (String, Int)): Out =
 
 def funTyOf(d: Fun): Ty =
   d match {
-    case Fun(_, _, _, ps, ret, _, _, _) => Type.funFromTy(paramTys(ps), ret)
+    case Fun(_, _, _, _, ps, ret, _, _, _) => Type.funFromTy(paramTys(ps), ret)
   }
 
 def funTyFrom(ps: List[String], ret: String): String =
@@ -1700,8 +1700,11 @@ def inferTupleRest(rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: L
 
 def checkDef(d: Fun, funs: Ftab, ens: List[En]): Out =
   d match {
-    case Fun(_, name, ts, ps, ret, body, mod, off) => checkDefGo(name, ret, body, ps, funs, pinEns(ens, ts), ts, mod, off)
+    case Fun(_, ora, name, ts, ps, ret, body, mod, off) => checkDefOra(ora, name, ret, body, ps, funs, pinEns(ens, ts), ts, mod, off)
   }
+
+def checkDefOra(ora: Bool, name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], ts: List[String], mod: String, off: Int): Out =
+  if (ora && ret != "Bool") bad(Str.concat("oracle ", Str.concat(name, " must return Bool")), (mod, off)) else checkDefGo(name, ret, body, ps, funs, ens, ts, mod, off)
 
 def checkDefGo(name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], ts: List[String], mod: String, off: Int): Out =
   checkDefWhere(name, ret, body, ps, funs, ens, ts, mod, off, checkWheres(ps, bindParams(ps, envSelfMod(mod)), funs, ens, (mod, off)))
@@ -1791,7 +1794,7 @@ def stampMod(ms: List[Fun], mod: String, defs: List[Fun]): List[Fun] =
 
 def stampFun(d: Fun, mod: String): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, _, off) => Fun(priv, name, ts, Param("self", mod, "", "") :: ps, ret, body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, _, off) => Fun(priv, ora, name, ts, Param("self", mod, "", "") :: ps, ret, body, mod, off)
   }
 
 def withImportFuns(imps: List[Imp], defs: List[Fun]): List[Fun] =
@@ -1813,7 +1816,7 @@ def renameHits(hit: List[Fun], alias: String): List[Fun] =
 
 def renameFun(d: Fun, alias: String): Fun =
   d match {
-    case Fun(priv, _, ts, ps, ret, body, mod, off) => Fun(priv, alias, ts, ps, ret, body, mod, off)
+    case Fun(priv, ora, _, ts, ps, ret, body, mod, off) => Fun(priv, ora, alias, ts, ps, ret, body, mod, off)
   }
 
 def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
@@ -1824,7 +1827,7 @@ def expandDefsGo(defs: List[Fun], als: List[Alias], acc: List[Fun]): List[Fun] =
 
 def expandDef(d: Fun, als: List[Alias]): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, expandParams(ps, als), expandTy(ret, als), expandExpr(body, als), mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => Fun(priv, ora, name, ts, expandParams(ps, als), expandTy(ret, als), expandExpr(body, als), mod, off)
   }
 
 def expandExpr(e: Expr, als: List[Alias]): Expr =
@@ -1923,7 +1926,7 @@ def checkDefsRest(all: Ftab, rest: List[Fun], enums: List[En], main: String, bod
 
 def checkDefsHit(d: Fun, all: Ftab, rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
   d match {
-    case Fun(_, name, _, _, _, _, mod, off) => if (name == "#parse") bad("unexpected token", (mod, off)) else if (inStems(stems, mod)) checkDefsAfter(checkDef(d, all, enums), all, rest, enums, main, body, stems) else checkDefsRest(all, rest, enums, main, body, stems)
+    case Fun(_, _, name, _, _, _, _, mod, off) => if (name == "#parse") bad("unexpected token", (mod, off)) else if (inStems(stems, mod)) checkDefsAfter(checkDef(d, all, enums), all, rest, enums, main, body, stems) else checkDefsRest(all, rest, enums, main, body, stems)
   }
 
 def checkDefsAfter(o: Out, all: Ftab, rest: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
@@ -2108,14 +2111,14 @@ def unclaimedOf(p: Prog, files: List[(String, String)], ver: String): List[Strin
   List.concat(unclaimedDefs(p, ver), List.concat(unclaimedSignals(files, ver), unclaimedControls(files, ver)))
 
 def unclaimedDefs(p: Prog, ver: String): List[String] =
-  unclaimedDefNames(if (p.main == "") p.defs else Fun(false, p.main, [], [], "IO[Unit]", p.body, "Main", 0) :: p.defs, ver)
+  unclaimedDefNames(if (p.main == "") p.defs else Fun(false, false, p.main, [], [], "IO[Unit]", p.body, "Main", 0) :: p.defs, ver)
 
 def unclaimedDefNames(ds: List[Fun], ver: String): List[String] =
   if (List.isEmpty(ds)) [] else unclaimedDefHd(List.at(ds, 0), List.tail(ds), ver)
 
 def unclaimedDefHd(d: Fun, rest: List[Fun], ver: String): List[String] =
   d match {
-    case Fun(priv, name, _, _, _, _, _, _) => if (priv || Str.startsWith(name, "_") || mentioned(ver, name)) unclaimedDefNames(rest, ver) else Str.concat("def ", name) :: unclaimedDefNames(rest, ver)
+    case Fun(priv, ora, name, _, _, _, _, _, _) => if (priv || Str.startsWith(name, "_") || mentioned(ver, name)) unclaimedDefNames(rest, ver) else Str.concat(if (ora) "oracle " else "def ", name) :: unclaimedDefNames(rest, ver)
   }
 
 def mentioned(ver: String, name: String): Bool =

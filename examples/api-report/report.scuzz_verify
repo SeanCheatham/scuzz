@@ -1,16 +1,16 @@
-def filtersRecords(): Bool =
+oracle filtersRecords(): Bool =
   Report.decode(200, "[{\"id\":1,\"state\":\"open\"},{\"id\":2,\"state\":\"closed\"}]") match {
     case Result.Err(_) => false
     case Result.Ok(rows) => List.len(rows) == 1 && Json.getInt(List.at(rows, 0), "id", 0) == 1
   }
 
-def rejectsStatus(n: Int): Bool =
+oracle rejectsStatus(n: Int): Bool =
   if (n >= 200 && n < 300) true else Report.decode(n, "[]") match {
   case Result.Err(_) => true
   case Result.Ok(_) => false
 }
 
-def rejectsJson(): Bool =
+oracle rejectsJson(): Bool =
   Report.decode(200, "{") == Result.Err("API returned invalid JSON") && Report.decode(200, "{}") == Result.Err("API response must be an array") && Report.decode(200, "[{}]") == Result.Err("Each record must have a string state")
 
 def successWrites(t: Timeline): Verdict =
@@ -19,7 +19,7 @@ def successWrites(t: Timeline): Verdict =
 def failuresPreserveReport(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "rejected") || Timeline.driveHas(t, i, "malformed") || Timeline.driveHas(t, i, "badStatus") || Timeline.driveHas(t, i, "timedOut")) || !Timeline.effectHas(t, i, "Fs.write"))
 
-def preservesOpenFields(n: Int): Bool =
+oracle preservesOpenFields(n: Int): Bool =
   Report.decode(200, Str.concat("[{\"state\":\"closed\"},{\"id\":", Str.concat(Str.fromInt(n), ",\"state\":\"open\",\"title\":\"keep\"}]"))) match {
     case Result.Err(_) => false
     case Result.Ok(rows) => List.len(rows) == 1 && Json.getInt(List.at(rows, 0), "id", 0) == n && Json.getStr(List.at(rows, 0), "title", "") == "keep"
@@ -28,7 +28,7 @@ def preservesOpenFields(n: Int): Bool =
 def rejectsConfigBeforeNetwork(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "noToken") || Timeline.driveHas(t, i, "insecureUrl")) || !Timeline.effectHas(t, i, "Net.httpGet") && !Timeline.effectHas(t, i, "Fs.write"))
 
-def retryPolicy(status: Int): Bool =
+oracle retryPolicy(status: Int): Bool =
   Report.retryable(status) == (status == 429 || status >= 502 && status <= 504)
 
 def recoveredRequestWrites(t: Timeline): Verdict =
@@ -37,13 +37,13 @@ def recoveredRequestWrites(t: Timeline): Verdict =
 def retryFailuresPreserveReport(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "exhausted") || Timeline.driveHas(t, i, "retryDeadline") || Timeline.driveHas(t, i, "permanentStatus")) || !Timeline.effectHas(t, i, "Fs.write"))
 
-def retrySeconds(n: Int): Bool =
+oracle retrySeconds(n: Int): Bool =
   if (n < 0 || n > 9223372036854775) Net.retryAfterMillis(Str.fromInt(n), 0) == -1 else Net.retryAfterMillis(Str.fromInt(n), 0) == n * 1000
 
-def retryHeaderForms(): Bool =
+oracle retryHeaderForms(): Bool =
   Net.retryAfterMillis("0", 0) == 0 && Net.retryAfterMillis(" 001 ", 0) == 1000 && Net.retryAfterMillis("+1", 0) == -1 && Net.retryAfterMillis("1.5", 0) == -1 && Net.retryAfterMillis("", 0) == -1 && Net.retryAfterMillis("1, 2", 0) == -1 && Net.retryAfterMillis("9223372036854775", 0) == 9223372036854775000 && Net.retryAfterMillis("9223372036854776", 0) == -1 && Net.retryAfterMillis("9999999999999999999999", 0) == -1 && Net.retryAfterMillis("Fri, 31 Dec 1999 23:59:59 GMT", 0) == 946684799000
 
-def retryHeaderPolicy(): Bool =
+oracle retryHeaderPolicy(): Bool =
   Report.retryDelay(429, Map.empty(), 0) == 1000 && Report.retryDelay(503, Map.empty(), 0) == 100 && Report.retryDelay(401, Map.set(Map.empty(), "Retry-After", "1"), 0) == -1 && Report.retryDelay(429, Map.set(Map.empty(), "rEtRy-AfTeR", "2"), 0) == 2000 && Report.retryDelay(503, Map.set(Map.empty(), "Retry-After", "2"), 0) == 2000 && Report.retryDelay(429, Map.set(Map.set(Map.empty(), "Retry-After", "1"), "retry-after", "2"), 0) == -1
 
 def rateLimitRecovery(t: Timeline): Verdict =
@@ -62,13 +62,13 @@ def failuresKeepContents(t: Timeline): Verdict =
   case (a, b) => !(Timeline.driveHas(t, b, "dateDeadline") || Timeline.driveHas(t, b, "pageMalformed") || Timeline.driveHas(t, b, "pageCycle") || Timeline.driveHas(t, b, "pageTimeout") || Timeline.driveHas(t, b, "rejected") || Timeline.driveHas(t, b, "malformed") || Timeline.driveHas(t, b, "badStatus") || Timeline.driveHas(t, b, "timedOut") || Timeline.driveHas(t, b, "noToken") || Timeline.driveHas(t, b, "insecureUrl") || Timeline.driveHas(t, b, "exhausted") || Timeline.driveHas(t, b, "retryDeadline") || Timeline.driveHas(t, b, "permanentStatus") || Timeline.driveHas(t, b, "rateDeadline") || Timeline.driveHas(t, b, "rateExhausted") || Timeline.driveHas(t, b, "badRetryAfter")) || Timeline.fileSame(t, a, b, "report.json")
 })
 
-def pageProgress(n: Int): Bool =
+oracle pageProgress(n: Int): Bool =
   Report.nextPage(Map.set(Map.empty(), "X-Next-Page", Str.fromInt(n)), 1) == (if (n > 1 && n <= 100) n else -1)
 
-def pageHeaderForms(): Bool =
+oracle pageHeaderForms(): Bool =
   Report.nextPage(Map.empty(), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", ""), 1) == 0 && Report.nextPage(Map.set(Map.empty(), "x-next-page", " 2 "), 1) == 2 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "https://other/"), 1) == -1 && Report.nextPage(Map.set(Map.set(Map.empty(), "X-Next-Page", "2"), "x-next-page", "3"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "999999999999999999999"), 1) == -1 && Report.nextPage(Map.set(Map.empty(), "x-next-page", "100"), 100) == -1
 
-def pageAddresses(): Bool =
+oracle pageAddresses(): Bool =
   Report.pageUrl("https://api/records", 1) == "https://api/records" && Report.pageUrl("https://api/records", 2) == "https://api/records?page=2" && Report.pageUrl("https://api/records?state=all", 3) == "https://api/records?state=all&page=3"
 
 def paginatedContents(t: Timeline): Verdict =
@@ -79,19 +79,19 @@ def paginatedContents(t: Timeline): Verdict =
 def pageFailuresDoNotWrite(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "pageMalformed") || Timeline.driveHas(t, i, "pageCycle") || Timeline.driveHas(t, i, "pageTimeout")) || !Timeline.effectHas(t, i, "Fs.write"))
 
-def datedDelay(now: Int): Bool =
+oracle datedDelay(now: Int): Bool =
   if (now < 0) true else Net.retryAfterMillis("Sun, 06 Nov 1994 08:49:37 GMT", now) == (if (now >= 784111777000) 0 else 784111777000 - now)
 
-def dateForms(): Bool =
+oracle dateForms(): Bool =
   Net.retryAfterMillis("Sunday, 06-Nov-94 08:49:37 GMT", 784111776000) == 1000 && Net.retryAfterMillis("Sun Nov  6 08:49:37 1994", 784111776500) == 500 && Net.retryAfterMillis("Sun, 31 Nov 1994 08:49:37 GMT", 0) == -1 && Net.retryAfterMillis("Mon, 06 Nov 1994 08:49:37 GMT", 0) == -1
 
-def linkReferences(n: Int): Bool =
+oracle linkReferences(n: Int): Bool =
   Net.nextLink("https://api/records?old=1", s"<?cursor=$n>; rel=next") == Result.Ok(s"https://api/records?cursor=$n")
 
-def linkForms(): Bool =
+oracle linkForms(): Bool =
   Net.nextLink("https://api/a/b", "<../c?x=1>; rel=\"prev next\"; title=\"a,b\"") == Result.Ok("https://api/c?x=1") && Net.nextLink("https://api/a", "</b>; rel=last") == Result.Ok("") && Net.nextLink("https://api/a", "</b>; rel=next; anchor=\"#other\"") == Result.Ok("") && Net.nextLink("https://api/a", "<https://API:443/b#part>; rel=next") == Result.Ok("https://api/b")
 
-def linkOriginPolicy(): Bool =
+oracle linkOriginPolicy(): Bool =
   List.forall(["http://api/b", "https://other/b", "https://api:444/b", "https://user@api/b"], url => Net.nextLink("https://api/a", s"<$url>; rel=next") match {
   case Result.Err(_) => true
   case Result.Ok(_) => false
@@ -118,10 +118,10 @@ def linkHundredContents(t: Timeline): Verdict =
   case (a, b) => !Timeline.driveHas(t, b, "linkHundred") || Timeline.fileTextIs(t, b, "report.json", "[{\"id\":100,\"state\":\"open\"}]") && Timeline.effectHas(t, b, "Fs.write") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
 })
 
-def pageReplacement(n: Int): Bool =
+oracle pageReplacement(n: Int): Bool =
   if (n <= 1) true else Report.pageUrl("https://api/records?page=1&filter=a%26b#view?tab=1", n) == Str.concat("https://api/records?filter=a%26b&page=", Str.fromInt(n))
 
-def pageQueryForms(): Bool =
+oracle pageQueryForms(): Bool =
   Report.pageUrl("https://api/records?#view", 2) == "https://api/records?page=2" && Report.pageUrl("https://api/records?page=1&p%61ge=4&%70%61%67%65=9&Page=keep&homepage=keep", 3) == "https://api/records?Page=keep&homepage=keep&page=3" && Report.pageUrl("https://api/records#view?old=1", 2) == "https://api/records?page=2"
 
 def queryContents(t: Timeline): Verdict =

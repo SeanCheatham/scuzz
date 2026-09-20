@@ -14,6 +14,10 @@ INCLUDES := -Iinclude -Isrc
 SRC := src/sk_sw.c src/png_enc.c src/sk_mono.c src/sk_color.c
 OBJ := $(SRC:src/%.c=build/%.o)
 SHIM_OBJS := build/sk_capi_skia.o build/sk_capi_skia_bridge.o
+MONO_TTF := build/DejaVuSansMono.ttf
+MONO_C := build/scuzz_embedded_mono_font.c
+MONO_OBJ := build/scuzz_embedded_mono_font.o
+MONO_URL := https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSansMono.ttf
 
 .PHONY: all clean test lib lib-skia lib-sk-sw lib-gpu ensure-prebuilt
 
@@ -71,7 +75,22 @@ build/skia-src/.stamp: | build
 
 build/sk_capi_skia.o: src/sk_capi_skia.cpp src/sk_capi_skia.h build/skia-src/.stamp
 	$(CXX) -std=c++17 -O2 -fPIC -c src/sk_capi_skia.cpp -o $@ \
-	  -Ibuild/skia-src -DSK_RELEASE -DSCUZZ_SKIA_EMBEDDED_FONT
+	  -Ibuild/skia-src -DSK_RELEASE -DSCUZZ_SKIA_EMBEDDED_FONT \
+	  -DSCUZZ_SKIA_EMBEDDED_MONO_FONT
+
+$(MONO_TTF): | build
+	@if [ -f /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf ]; then \
+	  cp -f /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf $@; \
+	else \
+	  curl -fsSL -o $@ "$(MONO_URL)"; \
+	fi
+	@test -s $@
+
+$(MONO_C): $(MONO_TTF)
+	python3 -c 'import pathlib,sys; data=pathlib.Path(sys.argv[1]).read_bytes(); n=sys.argv[2]; print("unsigned char %s[] = {" % n); print(",".join(str(b) for b in data)); print("};"); print("unsigned int %s_len = %d;" % (n, len(data)))' $< scuzz_embedded_mono_font > $@
+
+$(MONO_OBJ): $(MONO_C)
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 build/sk_capi_skia_bridge.o: src/sk_capi_skia_bridge.c include/sk_capi.h src/sk_capi_skia.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
@@ -102,7 +121,7 @@ lib-gpu: $(OBJ) build/sk_gpu.o | build
 
 # Pin supplies Skia objects + font. Replace the shim so the C ABI matches
 # sk_capi.h (save/clip/restore, RGBA peek). Fail if clip symbols are missing.
-lib-skia: build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o $(SHIM_OBJS) | build
+lib-skia: build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o $(SHIM_OBJS) $(MONO_OBJ) | build
 	@test -f "$(PREBUILT_LIB)"
 	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend \
 	    && [ ! "$(PREBUILT_LIB)" -nt build/libsk_capi.a ] \
@@ -110,7 +129,8 @@ lib-skia: build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o $(SHIM_OBJS)
 	    && [ ! build/sk_mono.o -nt build/libsk_capi.a ] \
 	    && [ ! build/sk_color.o -nt build/libsk_capi.a ] \
 	    && [ ! build/sk_capi_skia.o -nt build/libsk_capi.a ] \
-	    && [ ! build/sk_capi_skia_bridge.o -nt build/libsk_capi.a ]; then \
+	    && [ ! build/sk_capi_skia_bridge.o -nt build/libsk_capi.a ] \
+	    && [ ! "$(MONO_OBJ)" -nt build/libsk_capi.a ]; then \
 	  if nm build/libsk_capi.a | grep -E ' T _?sk_canvas_clip_rect' >/dev/null && \
 	     nm build/libsk_capi.a | grep -E ' T _?sk_canvas_save' >/dev/null && \
 	     nm build/libsk_capi.a | grep -E ' T _?sk_canvas_restore' >/dev/null; then \
@@ -120,7 +140,7 @@ lib-skia: build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o $(SHIM_OBJS)
 	rm -f build/*.a; \
 	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a; \
 	ar d build/libsk_capi.a sk_capi_skia.o sk_capi_skia_bridge.o; \
-	ar rcs build/libsk_capi.a $(SHIM_OBJS) build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o; \
+	ar rcs build/libsk_capi.a $(SHIM_OBJS) $(MONO_OBJ) build/sk_gpu_skia_stub.o build/sk_mono.o build/sk_color.o; \
 	if ! nm build/libsk_capi.a | grep -E ' T _?sk_canvas_clip_rect' >/dev/null; then \
 	  echo "ffi-skia: linked archive lacks sk_canvas_clip_rect" >&2; \
 	  exit 1; \

@@ -347,7 +347,10 @@ def rejects(src: String, msg: String): Bool =
   Str.contains(Check.check(src), msg)
 
 def tyckFail(): Bool =
-  tyckDiff(srcFailOk(), wantFailOk()) && rejects(srcFailMis(), "@main body must be IO[Unit]") && ioTypeArgs()
+  tyckDiff(srcFailOk(), wantFailOk()) && rejects(srcFailMis(), "@main body must be IO[Unit]") && tyckOra() && ioTypeArgs()
+
+def tyckOra(): Bool =
+  rejects("oracle hidden(): Int = 1", "oracle hidden must return Bool") && Check.check("oracle hidden(): Bool = true") == "[]" && rejects("private oracle hidden(): Bool = true", "unexpected token")
 
 def ioTypeArgs(): Bool =
   genericTypeArgs() && ioTypeCompatibility() && namedIoTypes() && signalTypes() && attemptTypes() && kitLookup() && resultTypes() && ioCombinators()

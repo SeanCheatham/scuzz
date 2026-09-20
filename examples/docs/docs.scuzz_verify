@@ -41,6 +41,9 @@ def tryPlusOneCounts(t: Timeline): Verdict =
 def checkShowsTrue(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "button:Check") || Timeline.signalStrHas(t, i, "tryOut", "true"))
 
+def checkShowsFiles(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 2 && Timeline.signalInt(t, i, "step") != 4 || Timeline.a11yHas(t, i, "tab:Main.scuzz") && Timeline.a11yHas(t, i, "tab:count.scuzz_verify"))
+
 def codeHasCopyControl(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "step") != 5 || Timeline.a11yHas(t, i, "outlined:Copy") || Timeline.a11yHas(t, i, "outlined:Copied"))
 

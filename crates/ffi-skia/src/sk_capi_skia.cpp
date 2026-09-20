@@ -36,7 +36,9 @@ struct CapSurface {
 };
 
 static sk_sp<SkTypeface> g_typeface;
+static sk_sp<SkTypeface> g_mono_typeface;
 static std::once_flag g_font_once;
+static std::once_flag g_mono_once;
 
 static sk_sp<SkTypeface> default_typeface() {
   std::call_once(g_font_once, [] {
@@ -62,9 +64,35 @@ static sk_sp<SkTypeface> default_typeface() {
   return g_typeface;
 }
 
+static sk_sp<SkTypeface> mono_typeface() {
+  std::call_once(g_mono_once, [] {
+#if defined(SCUZZ_SKIA_EMBEDDED_MONO_FONT)
+    extern const unsigned char scuzz_embedded_mono_font[];
+    extern const unsigned int scuzz_embedded_mono_font_len;
+    sk_sp<SkData> data = SkData::MakeWithoutCopy(scuzz_embedded_mono_font,
+                                                scuzz_embedded_mono_font_len);
+    if (data) {
+      sk_sp<SkData> fonts[1] = {data};
+      sk_sp<SkFontMgr> mgr =
+          SkFontMgr_New_Custom_Data(SkSpan<sk_sp<SkData>>(fonts, 1));
+      if (mgr)
+        g_mono_typeface = mgr->makeFromData(data);
+    }
+#endif
+    if (!g_mono_typeface)
+      g_mono_typeface = default_typeface();
+  });
+  return g_mono_typeface;
+}
+
 static SkFont make_font(float size) {
   float px = size > 0.f ? size : 8.f;
   return SkFont(default_typeface(), px);
+}
+
+static SkFont make_mono_font(float size) {
+  float px = size > 0.f ? size : 8.f;
+  return SkFont(mono_typeface(), px);
 }
 
 void *scuzz_skia_surface_make(int width, int height) {
@@ -147,6 +175,17 @@ void scuzz_skia_canvas_draw_string(void *canvas, const char *text, float x,
                          font, p->paint);
 }
 
+void scuzz_skia_canvas_draw_string_mono(void *canvas, const char *text, float x,
+                                        float y, const void *paint) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  auto *p = static_cast<const CapPaint *>(paint);
+  if (!c || !c->raw || !p || !text)
+    return;
+  SkFont font = make_mono_font(p->text_size);
+  c->raw->drawSimpleText(text, std::strlen(text), SkTextEncoding::kUTF8, x, y,
+                         font, p->paint);
+}
+
 void scuzz_skia_canvas_save(void *canvas) {
   auto *c = static_cast<CapCanvas *>(canvas);
   if (c && c->raw)
@@ -219,6 +258,13 @@ float scuzz_skia_font_measure_string(const char *text, float font_px) {
   if (!text)
     return 0.f;
   SkFont font = make_font(font_px);
+  return font.measureText(text, std::strlen(text), SkTextEncoding::kUTF8);
+}
+
+float scuzz_skia_font_measure_string_mono(const char *text, float font_px) {
+  if (!text)
+    return 0.f;
+  SkFont font = make_mono_font(font_px);
   return font.measureText(text, std::strlen(text), SkTextEncoding::kUTF8);
 }
 

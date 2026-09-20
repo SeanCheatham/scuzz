@@ -50,6 +50,8 @@ int main(void) {
   (void)measured;
   cell = sk_font_mono_cell(8.f);
   assert(cell > 0.f);
+  assert(sk_font_measure_string_mono("I", 8.f) == sk_font_measure_string_mono("W", 8.f));
+  assert(sk_font_measure_mono_string("I", 8.f) == cell);
   ii = sk_font_measure_mono_string("ii", 8.f);
   ww = sk_font_measure_mono_string("WW", 8.f);
   assert(ii == ww);

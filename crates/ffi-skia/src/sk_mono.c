@@ -1,21 +1,23 @@
-/* Monospace measure/draw. Cell is max(measure("M"), measure("W")) so
- * editor caret columns match Skia and sk_sw. View.text stays proportional. */
+/* Monospace measure/draw. Cell is the advance of "0" on the monospace face
+ * so I and W share one column. View.text stays proportional. */
 #include "sk_capi.h"
 #include "sk_utf8.h"
 
 #include <string.h>
 
 float sk_font_mono_cell(float font_px) {
-  float m;
-  float w;
+  static float cached_px = -1.f;
+  static float cached_cell = 0.f;
   float px = font_px > 0.f ? font_px : 8.f;
-  m = sk_font_measure_string("M", px);
-  w = sk_font_measure_string("W", px);
-  if (w > m)
-    m = w;
-  if (m <= 0.f)
-    m = px;
-  return m;
+  float cell;
+  if (px == cached_px)
+    return cached_cell;
+  cell = sk_font_measure_string_mono("0", px);
+  if (cell <= 0.f)
+    cell = px;
+  cached_px = px;
+  cached_cell = cell;
+  return cell;
 }
 
 float sk_font_measure_mono_string(const char *text, float font_px) {
@@ -52,7 +54,7 @@ void sk_canvas_draw_mono_string(SkCanvas *canvas, const char *text, float x,
       clen = 4;
     memcpy(tmp, p, (size_t)clen);
     tmp[clen] = '\0';
-    sk_canvas_draw_string(canvas, tmp, cx, y, paint);
+    sk_canvas_draw_string_mono(canvas, tmp, cx, y, paint);
     cx += cell;
     p += clen;
   }

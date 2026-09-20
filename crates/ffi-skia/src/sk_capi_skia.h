@@ -25,6 +25,8 @@ void scuzz_skia_canvas_draw_rect(void *canvas, float x, float y, float w,
                                  float h, const void *paint);
 void scuzz_skia_canvas_draw_string(void *canvas, const char *text, float x,
                                    float y, const void *paint);
+void scuzz_skia_canvas_draw_string_mono(void *canvas, const char *text, float x,
+                                        float y, const void *paint);
 void scuzz_skia_canvas_save(void *canvas);
 void scuzz_skia_canvas_restore(void *canvas);
 void scuzz_skia_canvas_clip_rect(void *canvas, float x, float y, float w,
@@ -38,6 +40,7 @@ void scuzz_skia_paint_set_stroke_width(void *paint, float width);
 void scuzz_skia_paint_set_text_size(void *paint, float size);
 float scuzz_skia_paint_get_text_size(const void *paint);
 float scuzz_skia_font_measure_string(const char *text, float font_px);
+float scuzz_skia_font_measure_string_mono(const char *text, float font_px);
 int scuzz_skia_encode_png(const void *surface, uint8_t **out_bytes,
                           size_t *out_len);
 int scuzz_skia_encode_png_to_file(const void *surface, const char *path);

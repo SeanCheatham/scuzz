@@ -153,17 +153,35 @@ def tryNowCleared(_u: Unit, out: TryOut): TryOut =
   out
 
 def campSearch(src: String, name: String, hi: Int): String =
-  campSearchDiags(Check.human(src), src, name, hi)
+  campSearchFiles(("Main", src) :: [], name, hi)
 
-def campSearchDiags(diags: String, src: String, name: String, hi: Int): String =
-  if (diags != "scuzz check ok") diags else campSearchGo(load(("Main", src) :: []), name, 0, hi)
+def campSearchPair(live: String, ver: String, name: String, hi: Int): String =
+  campSearchFiles(("Main", live) :: ("__verify", ver) :: [], name, hi)
 
-def campSearchGo(p: EvProg, name: String, i: Int, hi: Int): String =
-  if (i > hi) "pass" else campSearchAt(p, name, i, hi, callPure(p, "Main", name, Value.VInt(i) :: noVals()))
+def campSearchFiles(files: List[(String, String)], name: String, hi: Int): String =
+  campSearchDiags(Check.humanFiles(files), files, name, hi)
 
-def campSearchAt(p: EvProg, name: String, i: Int, hi: Int, v: Value): String =
+def campSearchDiags(diags: String, files: List[(String, String)], name: String, hi: Int): String =
+  if (diags != "scuzz check ok") diags else campSearchOra(load(files), name, hi)
+
+def campSearchOra(p: EvProg, name: String, hi: Int): String =
+  campSearchOraAt(p, name, hi, oraHome(p, name))
+
+def oraHome(p: EvProg, name: String): String =
+  if (List.isEmpty(Check.ftabGetMod(p.funs.tab, "__verify", name))) "Main" else "__verify"
+
+def campSearchOraAt(p: EvProg, name: String, hi: Int, mod: String): String =
+  campSearchOraHit(Check.ftabGetMod(p.funs.tab, mod, name), p, name, hi, mod)
+
+def campSearchOraHit(hit: List[Fun], p: EvProg, name: String, hi: Int, mod: String): String =
+  if (List.isEmpty(hit)) Str.concat("no oracle ", name) else if (List.at(hit, 0).ora) campSearchGo(p, name, 0, hi, mod) else Str.concat(name, " is not an oracle")
+
+def campSearchGo(p: EvProg, name: String, i: Int, hi: Int, mod: String): String =
+  if (i > hi) "pass" else campSearchAt(p, name, i, hi, mod, callPure(p, mod, name, Value.VInt(i) :: noVals()))
+
+def campSearchAt(p: EvProg, name: String, i: Int, hi: Int, mod: String, v: Value): String =
   v match {
-    case Value.VBool(true) => campSearchGo(p, name, i + 1, hi)
+    case Value.VBool(true) => campSearchGo(p, name, i + 1, hi, mod)
     case Value.VBool(false) => campFail(name, i)
     case Value.VErr(msg) => msg
     case _ => campFail(name, i)

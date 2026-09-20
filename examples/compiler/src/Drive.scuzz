@@ -783,7 +783,7 @@ def nlAppend(b: Builder, line: String): Builder =
 """))
 
 def lineIsDef(line: String): Bool =
-  Str.startsWith(line, "def ") || Str.startsWith(line, "@main def ") || Str.startsWith(line, "private def ")
+  Str.startsWith(line, "def ") || Str.startsWith(line, "oracle ") || Str.startsWith(line, "@main def ") || Str.startsWith(line, "private def ")
 
 def lineIsTop(line: String): Bool =
   lineIsDef(line) || Str.startsWith(line, "enum ") || Str.startsWith(line, "record ") || Str.startsWith(line, "import ") || Str.startsWith(line, "type ") || Str.startsWith(line, "opaque ") || Str.startsWith(line, "trait ") || Str.startsWith(line, "impl ") || Str.startsWith(line, "package ") || Str.startsWith(line, "@")
@@ -1335,7 +1335,8 @@ def evRequestPath(dir: String): String =
   joinSlash(dir, "request.txt")
 
 def evProbe(job: FuzzJob, dir: String, req: String): IO[Int] =
-  evServer(job, dir).flatMap(pid => Fs.write(evRequestPath(dir), Str.concat(req, kv("", "PROBE_LOG", joinSlash(dir, "probe.log")))).flatMap(_ => Sys.childWrite(pid, "probe\n").flatMap(_ => evReadCode(job, pid))))
+  evServer(job, dir).flatMap(pid => Fs.write(evRequestPath(dir), Str.concat(req, kv("", "PROBE_LOG", joinSlash(dir, "probe.log")))).flatMap(_ => Sys.childWrite(pid, """probe
+""").flatMap(_ => evReadCode(job, pid))))
 
 def evServer(job: FuzzJob, dir: String): IO[Int] =
   Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure(s._2) else evSpawn(job, dir)) else evStop(job).flatMap(_ => evSpawn(job, dir)))
@@ -1350,7 +1351,8 @@ def evReadCode(job: FuzzJob, pid: Int): IO[Int] =
   IO.timeout(30000, evReadLine(pid, "")).handleErrorWith(e => if (e == "timeout") IO.pure("") else IO.fail(e)).flatMap(line => if (Str.trim(line) == "") evStop(job).flatMap(_ => IO.pure(1)) else IO.pure(Str.toInt(Str.trim(line), 1)))
 
 def evReadLine(pid: Int, acc: String): IO[String] =
-  if (Str.indexOf(acc, "\n") >= 0) IO.pure(acc) else Sys.childRead(pid, 1).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else evReadLine(pid, Str.concat(acc, c)))
+  if (Str.indexOf(acc, """
+""") >= 0) IO.pure(acc) else Sys.childRead(pid, 1).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else evReadLine(pid, Str.concat(acc, c)))
 
 def fuzzClearPromo(outDir: String): IO[Unit] =
   Fs.delete(joinSlash(joinSlash(outDir, "fuzz"), "promo")).handleErrorWith(_ => IO.pure(()))
@@ -1706,7 +1708,8 @@ def fuzzProbeJob(job: FuzzJob, run: FuzzRun): IO[Int] =
   if (!job.ev) fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv) else evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", false, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, job.outDir, "")).flatMap(code => IO.pure(if (code == 0) 0 else 1))
 
 def kv(pre: String, key: String, val: String): String =
-  if (pre == "") Str.concat(key, Str.concat("=", Str.concat(val, "\n"))) else Str.concat(pre, Str.concat(key, Str.concat("=", Str.concat(shQuote(val), " "))))
+  if (pre == "") Str.concat(key, Str.concat("=", Str.concat(val, """
+"""))) else Str.concat(pre, Str.concat(key, Str.concat("=", Str.concat(shQuote(val), " "))))
 
 def fuzzProbeEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String, outDir: String, uiEnv: String): String =
   Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnv else "", Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir))))))

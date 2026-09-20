@@ -835,6 +835,14 @@ def evSchedReport(pool: Ref[Value]): String =
   if (evSchedOk(pool)) "eval-sched-ok" else "eval-sched-fail"
 
 def srcCamp(): String =
+  """oracle hidden(code: Int): Bool =
+  if (code == 3) false else true
+
+@main def main: IO[Unit] =
+  IO.pure(())
+"""
+
+def srcCampDef(): String =
   """def hidden(code: Int): Bool =
   if (code == 3) false else true
 
@@ -842,8 +850,38 @@ def srcCamp(): String =
   IO.pure(())
 """
 
+def srcCampInt(): String =
+  """oracle hidden(): Int =
+  1
+
+@main def main: IO[Unit] =
+  IO.pure(())
+"""
+
+def srcCampLive(): String =
+  """def inc(n: Int): Int =
+  n + 1
+
+@main def main: IO[Unit] =
+  IO.pure(())
+"""
+
+def srcCampVer(): String =
+  """oracle incAdds(n: Int): Bool =
+  Main.inc(n) == n + 1
+
+oracle hidden(code: Int): Bool =
+  if (code == 3) false else true
+"""
+
 def evCampOk(): Bool =
-  Eval.campSearch(srcCamp(), "hidden", 8) == "fail hidden 3" && Eval.campSearch(srcCamp(), "hidden", 2) == "pass"
+  evCampMainOk() && evCampPairOk()
+
+def evCampMainOk(): Bool =
+  Eval.campSearch(srcCamp(), "hidden", 8) == "fail hidden 3" && Eval.campSearch(srcCamp(), "hidden", 2) == "pass" && Eval.campSearch(srcCampDef(), "hidden", 8) == "hidden is not an oracle" && Eval.campSearch(srcCamp(), "missing", 8) == "no oracle missing" && Str.contains(Eval.campSearch(srcCampInt(), "hidden", 8), "oracle hidden must return Bool")
+
+def evCampPairOk(): Bool =
+  Eval.campSearchPair(srcCampLive(), srcCampVer(), "hidden", 8) == "fail hidden 3" && Eval.campSearchPair(srcCampLive(), srcCampVer(), "incAdds", 8) == "pass"
 
 def evCampReport(): String =
   if (evCampOk()) "eval-camp-ok" else Str.concat("eval-camp-fail ", Eval.campSearch(srcCamp(), "hidden", 8))

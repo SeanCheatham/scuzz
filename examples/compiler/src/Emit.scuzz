@@ -367,7 +367,7 @@ def emitFunOrCtor(s: String, prefix: String, ens: List[En], ps: List[Param], str
 
 def emitFunRef(d: Fun, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   d match {
-    case Fun(_, name, _, params, _, _, _, _) => emitFunRef2(name, params, prefix, strs, defs, ens, ps, loc)
+    case Fun(_, _, name, _, params, _, _, _, _) => emitFunRef2(name, params, prefix, strs, defs, ens, ps, loc)
   }
 
 def emitFunRef2(name: String, params: List[Param], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
@@ -954,7 +954,7 @@ def funRetStrL(ds: List[Fun], f: String): String =
 
 def funRetStrH(d: Fun, rest: List[Fun], f: String): String =
   d match {
-    case Fun(_, name, _, _, ret, _, mod, _) => if (qualFun(mod, name) == f || name == f) ret else funRetStrL(rest, f)
+    case Fun(_, _, name, _, _, ret, _, mod, _) => if (qualFun(mod, name) == f || name == f) ret else funRetStrL(rest, f)
   }
 
 def qualFun(mod: String, name: String): String =
@@ -1235,7 +1235,7 @@ def etaFun1(hit: List[Fun]): Bool =
 
 def funArity1(d: Fun): Bool =
   d match {
-    case Fun(_, _, _, params, _, _, _, _) => List.len(params) == 1
+    case Fun(_, _, _, _, params, _, _, _, _) => List.len(params) == 1
   }
 
 def kitEta1(f: String): Bool =
@@ -2264,7 +2264,7 @@ def funParamsOfHit(hit: List[Fun]): List[Param] =
 
 def funParamsOfD(d: Fun): List[Param] =
   d match {
-    case Fun(_, _, _, ps, _, _, _, _) => ps
+    case Fun(_, _, _, _, ps, _, _, _, _) => ps
   }
 
 def emitPropCheckCall(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
@@ -3196,7 +3196,7 @@ def emitUserHit(sym: String, code: String, vals: List[String], owns: List[Bool],
 
 def emitUserD(code: String, vals: List[String], owns: List[Bool], prefix: String, d: Fun): Slot =
   d match {
-    case Fun(_, name, _, params, ret, _, mod, _) => emitUser6(symOf(mod, name), code, vals, owns, prefix, params, ret)
+    case Fun(_, _, name, _, params, ret, _, mod, _) => emitUser6(symOf(mod, name), code, vals, owns, prefix, params, ret)
   }
 
 def symOf(mod: String, name: String): String =
@@ -3456,7 +3456,7 @@ def methEnOfL(ds: List[Fun], meth: String): String =
 
 def methEnOfH(d: Fun, rest: List[Fun], meth: String): String =
   d match {
-    case Fun(_, name, _, _, _, _, mod, _) => if (name == meth && mod != "") mod else methEnOfL(rest, meth)
+    case Fun(_, _, name, _, _, _, _, mod, _) => if (name == meth && mod != "") mod else methEnOfL(rest, meth)
   }
 
 def emitMethodVal(recv: Expr, name: String, args: List[Expr], prefix: String, en: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
@@ -4736,7 +4736,7 @@ def emitDef(d: Fun, strs: List[String], defs: Ftab, ens: List[En], files: List[(
 
 def emitDefRw(d: Fun, strs: List[String], defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
   d match {
-    case Fun(_, name, _, ps, ret, body, mod, off) => emitDefByRet(name, mod, ret, ps, body, strs, defs, ens, panicLocAt(files, lidx, mod, off))
+    case Fun(_, _, name, _, ps, ret, body, mod, off) => emitDefByRet(name, mod, ret, ps, body, strs, defs, ens, panicLocAt(files, lidx, mod, off))
   }
 
 def isIoTy(ret: String): Bool =
@@ -5042,7 +5042,7 @@ def startsAtGo(s: String, i: Int, old: String, k: Int): Bool =
 
 def rwDef(d: Fun, defs: Ftab, ens: List[En]): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, ps, ret, rwFields(body, paramEnv(ps), defs, ens, mod), mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => Fun(priv, ora, name, ts, ps, ret, rwFields(body, paramEnv(ps), defs, ens, mod), mod, off)
   }
 
 def paramEnv(ps: List[Param]): List[(String, Ty)] =
@@ -5134,7 +5134,7 @@ def rwFieldQualHit(m: String, args: List[Expr], name: String, off: Int, ens: Lis
 
 def rwFieldQualFun(m: String, args: List[Expr], name: String, off: Int, ens: List[En], d: Fun): Expr =
   d match {
-    case Fun(_, _, _, _, ret, _, mod, _) => rwFieldTy(Expr.EMethod(Expr.EVar(mod, 0), m, args, 0), name, off, ret, ens)
+    case Fun(_, _, _, _, _, ret, _, mod, _) => rwFieldTy(Expr.EMethod(Expr.EVar(mod, 0), m, args, 0), name, off, ret, ens)
   }
 
 def rwFieldTy(recv: Expr, name: String, off: Int, ty: String, ens: List[En]): Expr =
@@ -5377,7 +5377,7 @@ def internSigDefs(ds: List[Fun], files: List[(String, String)], lidx: Map[String
 
 def internSigDef(d: Fun, files: List[(String, String)], lidx: Map[String, List[Int]], acc: List[String]): List[String] =
   d match {
-    case Fun(_, _, _, _, _, body, mod, off) => internBranch(body, panicLocAt(files, lidx, mod, off), internSigExpr(body, intern(acc, panicLocAt(files, lidx, mod, off))))
+    case Fun(_, _, _, _, _, _, body, mod, off) => internBranch(body, panicLocAt(files, lidx, mod, off), internSigExpr(body, intern(acc, panicLocAt(files, lidx, mod, off))))
   }
 
 def internBranch(e: Expr, loc: String, acc: List[String]): List[String] =
@@ -5476,7 +5476,7 @@ def emitRelRegs(ds: List[Fun], strs: List[String], i: Int): String =
 
 def emitRelReg(d: Fun, strs: List[String], i: Int): String =
   d match {
-    case Fun(_, name, _, _, _, _, mod, _) => emitRelReg2(name, mod, strs, i)
+    case Fun(_, _, name, _, _, _, _, mod, _) => emitRelReg2(name, mod, strs, i)
   }
 
 def emitRelReg2(name: String, mod: String, strs: List[String], i: Int): String =
@@ -5493,7 +5493,7 @@ def emitSessRegs(ds: List[Fun], strs: List[String], i: Int): String =
 
 def emitSessReg(d: Fun, strs: List[String], i: Int): String =
   d match {
-    case Fun(_, name, _, _, _, _, mod, _) => emitSessReg2(name, mod, strs, i)
+    case Fun(_, _, name, _, _, _, _, mod, _) => emitSessReg2(name, mod, strs, i)
   }
 
 def emitSessReg2(name: String, mod: String, strs: List[String], i: Int): String =
@@ -5510,7 +5510,7 @@ def emitDrvRegs(ds: List[Fun], strs: List[String], i: Int): String =
 
 def emitDrvReg(d: Fun, strs: List[String], i: Int): String =
   d match {
-    case Fun(_, name, _, ps, _, _, mod, _) => emitDrvReg2(drvRegName(name), name, ps, mod, strs, i)
+    case Fun(_, _, name, _, ps, _, _, mod, _) => emitDrvReg2(drvRegName(name), name, ps, mod, strs, i)
   }
 
 def drvRegName(name: String): String =
@@ -5524,7 +5524,7 @@ def emitDrvTramps(ds: List[Fun], i: Int, ens: List[En], strs: List[String]): Str
 
 def emitDrvTramp(d: Fun, i: Int, ens: List[En], strs: List[String]): String =
   d match {
-    case Fun(_, name, _, ps, _, _, mod, _) => emitDrvTramp2(name, ps, mod, i, ens, strs)
+    case Fun(_, _, name, _, ps, _, _, mod, _) => emitDrvTramp2(name, ps, mod, i, ens, strs)
   }
 
 def emitDrvTramp2(name: String, ps: List[Param], mod: String, i: Int, ens: List[En], strs: List[String]): String =
@@ -5840,7 +5840,7 @@ def withSelfFuns(ds: List[Fun]): List[Fun] =
 
 def withSelfFun(d: Fun): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod, off) => if (paramKnown(ps, "self") || !exprFreeVar(body, "self")) d else Fun(priv, name, ts, Param("self", if (mod == "") "" else mod, "", "") :: ps, ret, body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => if (paramKnown(ps, "self") || !exprFreeVar(body, "self")) d else Fun(priv, ora, name, ts, Param("self", if (mod == "") "" else mod, "", "") :: ps, ret, body, mod, off)
   }
 
 def implFuns(impls: List[Im], defs: List[Fun]): List[Fun] =
@@ -5856,7 +5856,7 @@ def stampMod(ms: List[Fun], mod: String, defs: List[Fun]): List[Fun] =
 
 def stampFun(d: Fun, mod: String): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, _, off) => Fun(priv, name, ts, Param("self", mod, "", "") :: ps, ret, body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, _, off) => Fun(priv, ora, name, ts, Param("self", mod, "", "") :: ps, ret, body, mod, off)
   }
 
 def rwAliasFuns(ds: List[Fun], als: List[Alias]): List[Fun] =
@@ -5864,7 +5864,7 @@ def rwAliasFuns(ds: List[Fun], als: List[Alias]): List[Fun] =
 
 def rwAliasFun(d: Fun, als: List[Alias]): Fun =
   d match {
-    case Fun(priv, name, ts, ps, ret, body, mod, off) => Fun(priv, name, ts, rwAliasParams(ps, als), rwAliasTy(ret, als), body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => Fun(priv, ora, name, ts, rwAliasParams(ps, als), rwAliasTy(ret, als), body, mod, off)
   }
 
 def rwAliasParams(ps: List[Param], als: List[Alias]): List[Param] =

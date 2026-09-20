@@ -11,6 +11,7 @@ enum Tok:
   case Case
   case Match
   case Def
+  case Oracle
   case Where
   case Private
   case Import
@@ -80,6 +81,7 @@ def kind(t: Tok): Int =
     case Tok.Case => 9
     case Tok.Match => 10
     case Tok.Def => 11
+    case Tok.Oracle => 61
     case Tok.Where => 12
     case Tok.Private => 13
     case Tok.Import => 14
@@ -157,6 +159,7 @@ def _kw(s: String): Tok =
     case "case" => Tok.Case
     case "match" => Tok.Match
     case "def" => Tok.Def
+    case "oracle" => Tok.Oracle
     case "where" => Tok.Where
     case "private" => Tok.Private
     case "import" => Tok.Import

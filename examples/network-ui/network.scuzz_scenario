@@ -6,3 +6,4 @@ def Main.request(url: String): IO[(Int, Map[String, String], String)] =
     server <- Fiber.fork(Net.serveTls(18089, request => IO.sleep(20).flatMap(_ => IO.pure((200, Map.empty(), "{\"message\":\"hello\"}")))))
     response <- IO.ensure(Net.httpGet("https://127.0.0.1:18089/message", Map.empty()), Fiber.interrupt(server))
   } yield response
+

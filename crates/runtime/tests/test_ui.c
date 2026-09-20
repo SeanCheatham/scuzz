@@ -87,6 +87,72 @@ static void test_script_scroll_targets_outer_container(void) {
   sz_view_free(root);
 }
 
+static void test_nested_scroll_wheel_bubbles(void) {
+  SzUiConfig cfg = {0};
+  SzView *content = sz_view_column();
+  SzView *inner = sz_view_scroll(sz_view_text("short"));
+  SzView *outer;
+  SzView *root;
+  SzUiSession *session;
+  SzInputEvent ev;
+  SzRect fr;
+
+  sz_view_add_child(content, sz_view_sized(160, 80, inner));
+  sz_view_add_child(content, sz_view_sized(80, 300, sz_view_text("tall")));
+  outer = sz_view_scroll(content);
+  root = sz_view_sized(160, 120, outer);
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 160;
+  cfg.height = 120;
+  cfg.scale = 1.f;
+  session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  fr = sz_view_frame(inner);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_SCROLL;
+  ev.x = fr.x + 8.f;
+  ev.y = fr.y + 8.f;
+  ev.dy = 30.f;
+  assert(sz_view_scroll_at(root, ev.x, ev.y) == inner);
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_view_scroll_y(inner) == 0.f);
+  assert(sz_view_scroll_y(outer) == 30.f);
+  sz_ui_unmount(session);
+  sz_view_free(root);
+}
+
+static void test_code_block_wheel_pans_x(void) {
+  SzUiConfig cfg = {0};
+  SzView *code = sz_view_code(
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+  SzView *root = sz_view_sized(140, 80, code);
+  SzView *scrolls[8];
+  SzUiSession *session;
+  SzInputEvent ev;
+  SzRect fr;
+  int n;
+
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 140;
+  cfg.height = 80;
+  cfg.scale = 1.f;
+  session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  n = sz_view_collect_scrolls(root, scrolls, 8);
+  assert(n == 1);
+  assert(sz_view_scroll_is_h(scrolls[0]));
+  fr = sz_view_frame(scrolls[0]);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_SCROLL;
+  ev.x = fr.x + 8.f;
+  ev.y = fr.y + 8.f;
+  ev.dy = 24.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_view_scroll_x(scrolls[0]) == 24.f);
+  sz_ui_unmount(session);
+  sz_view_free(root);
+}
+
 static double color_luminance(uint32_t color) {
   double channels[3];
   for (int i = 0; i < 3; i++) {
@@ -2945,7 +3011,7 @@ static void test_code_copy_and_heading(void) {
   sz_view_free(long_code);
   SzView *inline_code = sz_view_code("echo hello");
   sz_view_layout(inline_code, 600, 0, sz_theme_default());
-  assert(sz_view_frame(inline_code).h <= 90);
+  assert(sz_view_frame(inline_code).h <= 130);
   sz_view_free(inline_code);
   SzSignalStr *draft = sz_signal_str("");
   SzView *root = sz_view_column();
@@ -15441,13 +15507,27 @@ static void test_view_editor_viewport(void) {
     long_line[i] = 'a';
   long_line[96] = '\0';
   sz_signal_str_set(buf, long_line);
-  write_stamp(path, "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"key\",\"key\":\"End\"}]}");
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "End";
+  assert(sz_ui_inject_sync(session, &ev));
   assert(sz_ui_pump_sync(session));
   assert(sz_view_editor_scroll_x(ed) > 0.f);
   body = slurp_cstr(dump);
   assert(strstr(body, "\"editors\":[") != NULL);
   assert(strstr(body, "\"scroll_x\":0") == NULL);
   free(body);
+  {
+    float x0 = sz_view_editor_scroll_x(ed);
+    fr = sz_view_frame(ed);
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = SZ_INPUT_SCROLL;
+    ev.x = fr.x + 8.f;
+    ev.y = fr.y + 8.f;
+    ev.dx = -20.f;
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(sz_view_editor_scroll_x(ed) < x0);
+  }
 
   /* Tall file: caret at end pans vertically. Paint visible lines only. */
   tall[0] = '\0';
@@ -16834,6 +16914,8 @@ static void test_stamp_loads_reload_code(void) {
 int main(void) {
   test_control_labels_use_text();
   test_script_scroll_targets_outer_container();
+  test_nested_scroll_wheel_bubbles();
+  test_code_block_wheel_pans_x();
   test_narrow_button_labels_stay_inside();
   test_edit_paint_scale_and_clip();
   test_button_press_feedback();

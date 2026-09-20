@@ -59,8 +59,13 @@ float sk_paint_get_text_size(const SkPaint *paint);
  * per code point. advance = round(font_px), min 1. Draw and measure use the
  * same advance. */
 float sk_font_measure_string(const char *text, float font_px);
-/* Monospace cell = max(measure("M"), measure("W")). Measure/draw use that
- * grid so editor caret columns match every presenter. View.text stays proportional. */
+/* Advance of UTF-8 text on the monospace face. Editor cells use this so I
+ * and W share one column without padding I to a proportional @ width. */
+float sk_font_measure_string_mono(const char *text, float font_px);
+void sk_canvas_draw_string_mono(SkCanvas *canvas, const char *text, float x,
+                                float y, const SkPaint *paint);
+/* Monospace cell = measure_string_mono("0"). Measure/draw use that grid so
+ * editor caret columns match every presenter. View.text stays proportional. */
 float sk_font_mono_cell(float font_px);
 float sk_font_measure_mono_string(const char *text, float font_px);
 void sk_canvas_draw_mono_string(SkCanvas *canvas, const char *text, float x,

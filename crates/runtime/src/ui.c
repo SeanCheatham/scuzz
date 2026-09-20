@@ -1262,7 +1262,8 @@ static void record_live_event_json(SzUiSession *session,
     int n, i, idx;
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
-    hit = sz_view_scroll_at(session->root, ev->x, ev->y);
+    hit = sz_view_scroll_wheel_target(session->root, ev->x, ev->y, ev->dx,
+                                      ev->dy);
     if (hit) {
       n = sz_ui_collect_scrolls(session, scrolls, 64);
       idx = -1;
@@ -1275,9 +1276,14 @@ static void record_live_event_json(SzUiSession *session,
       if (idx >= 0) {
         char *buf = NULL;
         size_t len = 0, cap = 0;
-        char tmp[128];
-        snprintf(tmp, sizeof tmp, "{\"op\":\"scroll\",\"i\":%d,\"dy\":%.0f}",
-                 idx, (double)ev->dy);
+        char tmp[160];
+        if (ev->dx != 0.f)
+          snprintf(tmp, sizeof tmp,
+                   "{\"op\":\"scroll\",\"i\":%d,\"dx\":%.0f,\"dy\":%.0f}", idx,
+                   (double)ev->dx, (double)ev->dy);
+        else
+          snprintf(tmp, sizeof tmp, "{\"op\":\"scroll\",\"i\":%d,\"dy\":%.0f}",
+                   idx, (double)ev->dy);
         sz_dump_append(&buf, &len, &cap, tmp);
         record_json_event(session, buf);
       }
@@ -1789,6 +1795,10 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
 }
 
 int sz_ui_scroll_index(SzUiSession *session, int index, float dy) {
+  return sz_ui_scroll_index_xy(session, index, 0.f, dy);
+}
+
+int sz_ui_scroll_index_xy(SzUiSession *session, int index, float dx, float dy) {
   SzView *scrolls[64];
   int count;
   if (!session || !session->root || session->lifecycle == SZ_LIFECYCLE_STOP)
@@ -1798,7 +1808,10 @@ int sz_ui_scroll_index(SzUiSession *session, int index, float dy) {
   count = sz_ui_collect_scrolls(session, scrolls, 64);
   if (index < 0 || index >= count)
     return 0;
-  sz_view_scroll_by(scrolls[index], dy);
+  if (dx != 0.f)
+    (void)sz_view_scroll_pan(scrolls[index], dx, dy);
+  else
+    sz_view_scroll_by(scrolls[index], dy);
   session_mark_dirty(session);
   return 1;
 }
@@ -1918,10 +1931,11 @@ static int inject_event(SzUiSession *session, const SzInputEvent *event) {
   case SZ_INPUT_SCROLL:
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
-    scroll = sz_view_scroll_at(session->root, event->x, event->y);
+    scroll = sz_view_scroll_wheel_target(session->root, event->x, event->y,
+                                         event->dx, event->dy);
     if (!scroll)
       return 0;
-    sz_view_scroll_by(scroll, event->dy);
+    (void)sz_view_scroll_pan(scroll, event->dx, event->dy);
     session_mark_dirty(session);
     return 1;
   case SZ_INPUT_LIFECYCLE:

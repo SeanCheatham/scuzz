@@ -1,3 +1,3 @@
 [fuzz]
 schedule_seed = "2"
-events = ["tap tab:Check", "tap button:Check"]
+events = ["tap tab:Check", "tap tab:count.scuzz_verify", "tap button:Check"]
