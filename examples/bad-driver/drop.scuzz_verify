@@ -1,0 +1,3 @@
+def dropWrote(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "drop") || Timeline.effectHas(t, i, "Fs.write"))
+

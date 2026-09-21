@@ -660,10 +660,10 @@ def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: 
   readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDriveNames(dir, json, deps, own, ents))
 
 def checkDriveNames(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  fuzzReadScenario(dir).flatMap(scn => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGot(dir, json, deps, own, List.concat(Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)), Verify.scenarioDrvNames(scn)))))
+  fuzzReadScenario(dir).flatMap(scn => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGo(dir, json, deps, own, scn, vers, Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)))))
 
-def checkDriveNamesGot(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], names: List[String]): IO[Unit] =
-  checkDriveNamesRule(dir, json, deps, own, Verify.driveRule(names))
+def checkDriveNamesGo(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], scn: String, vers: List[String], oracles: List[String]): IO[Unit] =
+  checkDriveNamesRule(dir, json, deps, own, Verify.ruleFirst(Verify.driveRule(List.concat(oracles, Verify.scenarioDrvNames(scn))), Verify.driveClaimRule(vers, Verify.driveClaimNames(scn, oracles))))
 
 def checkDriveNamesRule(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], msg: String): IO[Unit] =
   if (msg == "") checkDirVerify(dir, json, deps, own) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
@@ -1770,7 +1770,7 @@ def fuzzDistancePath(outDir: String): String =
   joinSlash(outDir, "distance.txt")
 
 def fuzzReachEnv(pre: String, outDir: String): String =
-  Str.concat(kv(pre, "SOMETIMES_DUMP", fuzzSometimesPath(outDir)), Str.concat(kv(pre, "TRIGGER_DUMP", fuzzTriggerPath(outDir)), kv(pre, "STATE_VARIED_DUMP", fuzzVariedPath(outDir))))
+  Str.concat(kv(pre, "SOMETIMES_DUMP", fuzzSometimesPath(outDir)), Str.concat(kv(pre, "TRIGGER_DUMP", fuzzTriggerPath(outDir)), Str.concat(kv(pre, "STATE_VARIED_DUMP", fuzzVariedPath(outDir)), kv(pre, "CLAIM_DUMP", fuzzClaimPath(outDir)))))
 
 def fuzzCoveragePath(outDir: String): String =
   joinSlash(outDir, "coverage.txt")
@@ -1784,6 +1784,9 @@ def fuzzTriggerPath(outDir: String): String =
 def fuzzVariedPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "varied.dump")
 
+def fuzzClaimPath(outDir: String): String =
+  joinSlash(joinSlash(outDir, "fuzz"), "claims.dump")
+
 def fuzzProbeCode(r: (Int, String, String)): Int =
   r match {
     case (code, _out, _err) => if (code == 0) 0 else 1
@@ -1793,19 +1796,19 @@ def fuzzProbeCodeIo(r: (Int, String, String)): IO[Int] =
   IO.pure(fuzzProbeCode(r))
 
 def fuzzDone(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut): IO[Unit] =
-  fuzzTomlFloor(job.dir).flatMap(floor => fuzzWriteSummary(job, corpus, acc, mut, floor).flatMap(reach => fuzzReachPrint(reach._1, reach._2, reach._3).flatMap(_ => fuzzDoneFloor(acc.searchFail + acc.corpFail, mut, floor, job.iterations, reach._1, reach._2))))
+  fuzzTomlFloor(job.dir).flatMap(floor => fuzzWriteSummary(job, corpus, acc, mut, floor).flatMap(reach => fuzzReachPrint(reach._1, reach._2, reach._3, reach._4).flatMap(_ => fuzzDoneFloor(acc.searchFail + acc.corpFail, mut, floor, job.iterations, reach._1, reach._2, reach._3))))
 
 def fuzzTomlFloor(dir: String): IO[Int] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(t => IO.pure(Manifest.floorMilli(t))).handleErrorWith(_ => IO.pure(0))
 
-def fuzzDoneFloor(fail: Int, mut: FuzzMut, floor: Int, iterations: Int, somNever: List[String], trigNever: List[String]): IO[Unit] =
-  if (Verify.fuzzBelowFloor(scoreMilli(mut), floor)) IO.println(Str.concat("scuzz fuzz: mutation score ", Str.concat(Verify.score3n(scoreMilli(mut)), Str.concat(" is below floor ", Verify.score3n(floor))))).flatMap(_ => IO.fail("scuzz fuzz")) else fuzzReachFail(fail, iterations, somNever, trigNever)
+def fuzzDoneFloor(fail: Int, mut: FuzzMut, floor: Int, iterations: Int, somNever: List[String], trigNever: List[String], claimNever: List[String]): IO[Unit] =
+  if (Verify.fuzzBelowFloor(scoreMilli(mut), floor)) IO.println(Str.concat("scuzz fuzz: mutation score ", Str.concat(Verify.score3n(scoreMilli(mut)), Str.concat(" is below floor ", Verify.score3n(floor))))).flatMap(_ => IO.fail("scuzz fuzz")) else fuzzReachFail(fail, iterations, somNever, trigNever, claimNever)
 
-def fuzzReachFail(fail: Int, iterations: Int, somNever: List[String], trigNever: List[String]): IO[Unit] =
-  if (fail > 0) IO.fail("scuzz fuzz") else if (iterations > 0 && (!List.isEmpty(somNever) || !List.isEmpty(trigNever))) IO.fail("scuzz fuzz") else IO.pure(())
+def fuzzReachFail(fail: Int, iterations: Int, somNever: List[String], trigNever: List[String], claimNever: List[String]): IO[Unit] =
+  if (fail > 0) IO.fail("scuzz fuzz") else if (iterations > 0 && (!List.isEmpty(somNever) || !List.isEmpty(trigNever) || !List.isEmpty(claimNever))) IO.fail("scuzz fuzz") else IO.pure(())
 
-def fuzzReachPrint(somNever: List[String], trigNever: List[String], unclaimed: List[String]): IO[Unit] =
-  fuzzReachPrint1("sometimes never reached", somNever).flatMap(_ => fuzzReachPrint1("trigger never fired", trigNever).flatMap(_ => fuzzReachPrint1("varied but unclaimed", unclaimed)))
+def fuzzReachPrint(somNever: List[String], trigNever: List[String], claimNever: List[String], unclaimed: List[String]): IO[Unit] =
+  fuzzReachPrint1("sometimes never reached", somNever).flatMap(_ => fuzzReachPrint1("trigger never fired", trigNever).flatMap(_ => fuzzReachPrint1("claim drive never fired", claimNever).flatMap(_ => fuzzReachPrint1("varied but unclaimed", unclaimed))))
 
 def fuzzReachPrint1(kind: String, xs: List[String]): IO[Unit] =
   if (List.isEmpty(xs)) IO.pure(()) else IO.println(Str.concat("scuzz fuzz: ", Str.concat(kind, Str.concat(": ", List.join(xs, ", ")))))
@@ -1813,7 +1816,7 @@ def fuzzReachPrint1(kind: String, xs: List[String]): IO[Unit] =
 def scoreMilli(mut: FuzzMut): Int =
   if (mut.ran - mut.invalid - mut.inert <= 0) 0 - 1 else mut.killed * 1000 / (mut.ran - mut.invalid - mut.inert)
 
-def fuzzWriteSummary(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut, floor: Int): IO[(List[String], List[String], List[String], Bool)] =
+def fuzzWriteSummary(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut, floor: Int): IO[(List[String], List[String], List[String], List[String], Bool)] =
   for {
     _ <- Fs.mkdirs(joinSlash(job.outDir, "fuzz"))
     promo <- fuzzPromoOf(job.outDir)
@@ -1824,19 +1827,23 @@ def fuzzWriteSummary(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut, floo
     somDump <- fuzzReadOr(fuzzSometimesPath(job.outDir))
     trigDump <- fuzzReadOr(fuzzTriggerPath(job.outDir))
     variedDump <- fuzzReadOr(fuzzVariedPath(job.outDir))
+    claimDump <- fuzzReadOr(fuzzClaimPath(job.outDir))
     ver <- fuzzVerPairs(job.dir)
     somDec = Verify.sometimesOf(files)
     somHit = Verify.dumpNames(somDump)
     trigDec = Verify.triggersOf(ver)
     trigHit = Verify.triggerReached(trigDump)
+    claimDec = Verify.claimDriveOf(ver)
+    claimHit = Verify.claimDriveHit(claimDump, claimDec)
     br = Verify.breadthOf(ver, variedDump)
     somNever = Verify.reachNever(somDec, somHit)
     trigNever = Verify.reachNever(trigDec, trigHit)
-    ok = Verify.fuzzCampaignOk(acc.searchFail + acc.corpFail, job.iterations, somNever, trigNever, Verify.fuzzBelowFloor(scoreMilli(mut), floor))
-    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJson(ok, job.seed, job.iterations, acc.search, acc.searchFail, corpus, acc.corpFail, promo, acc.repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, both._1, both._2, somDec, somHit, trigDec, trigHit, br), """
+    claimNever = Verify.reachNever(claimDec, claimHit)
+    ok = Verify.fuzzCampaignOk(acc.searchFail + acc.corpFail, job.iterations, somNever, trigNever, claimNever, Verify.fuzzBelowFloor(scoreMilli(mut), floor))
+    _ <- Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "summary.json"), Str.concat(Verify.summaryJson(ok, job.seed, job.iterations, acc.search, acc.searchFail, corpus, acc.corpFail, promo, acc.repro, mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, job.oracles, ct, mut.invalid, both._1, both._2, somDec, somHit, trigDec, trigHit, claimDec, claimHit, br), """
 """))
-    _ <- IO.println(Verify.fuzzOut2(Verify.fuzzHead(job.iterations, corpus, mut.sites), acc.search, job.seed, corpus, Verify.fuzzObservations(both._1, both._2, somDec, somHit, trigDec, trigHit), acc.searchFail, acc.corpFail, promo, Mutate.fuzzMutLine(mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, mut.invalid), ok))
-  } yield (somNever, trigNever, br.unclaimed, ok)
+    _ <- IO.println(Verify.fuzzOut2(Verify.fuzzHead(job.iterations, corpus, mut.sites), acc.search, job.seed, corpus, Verify.fuzzObservations(both._1, both._2, somDec, somHit, trigDec, trigHit, claimDec, claimHit), acc.searchFail, acc.corpFail, promo, Mutate.fuzzMutLine(mut.killed, mut.survived, mut.inert, mut.ran, mut.sites, mut.invalid), ok))
+  } yield (somNever, trigNever, claimNever, br.unclaimed, ok)
 
 def fuzzVerPairs(dir: String): IO[List[(String, String)]] =
   fuzzVerSrcs(dir).flatMap(xs => IO.pure(verSrcPairs(xs, 0)))

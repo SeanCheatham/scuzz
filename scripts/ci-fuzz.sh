@@ -228,6 +228,60 @@ grep -v schedule_seed examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad
 if ! fuzz --replay /tmp/bad-sched-fifo.toml examples/bad-sched; then
   echo "FIFO replay (no schedule_seed) should pass" && exit 1
 fi
+# A claim that guards on a renamed driver fails check. A claim antecedent
+# that never fires fails a campaign with search iterations.
+if "$SCUZZ" check examples/bad-driver > /tmp/scuzz-bad-driver.log 2>&1; then
+  echo "renamed driveHas name should fail check" && exit 1
+fi
+cat /tmp/scuzz-bad-driver.log
+grep -q 'Timeline.driveHas name drop is not a drive in this package' /tmp/scuzz-bad-driver.log
+vacuous_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-vacuous.XXXXXX")"
+mkdir -p "$vacuous_dir/src"
+cat > "$vacuous_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "vacuous"
+MANIFEST
+cat > "$vacuous_dir/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$vacuous_dir/vac.scuzz_scenario" <<'SCENARIO'
+def setup(): IO[Unit] =
+  IO.pure(())
+
+def calm(): IO[Unit] =
+  IO.pure(())
+
+def storm(): IO[Unit] =
+  IO.pure(())
+
+SCENARIO
+cat > "$vacuous_dir/vac.scuzz_verify" <<'CLAIMS'
+def stormWrote(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "storm") || Timeline.effectHas(t, i, "Fs.write"))
+
+CLAIMS
+"$SCUZZ" check "$vacuous_dir"
+if fuzz --seed 42 --iterations 2 "$vacuous_dir" > /tmp/scuzz-vacuous.log 2>&1; then
+  echo "vacuous claim antecedent should fail the campaign" && exit 1
+fi
+cat /tmp/scuzz-vacuous.log
+grep -q 'claim drive never fired: storm' /tmp/scuzz-vacuous.log
+python3 - "$vacuous_dir/build/fuzz/summary.json" <<'PY_VACUOUS'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is False
+assert d["fuzz"]["search_failures"] == 0
+assert d["claims"]["declared"] == ["storm"]
+assert d["claims"]["reached"] == []
+assert d["claims"]["never"] == ["storm"]
+PY_VACUOUS
+if ! fuzz --seed 42 --iterations 0 "$vacuous_dir" > /tmp/scuzz-vacuous-corpus.log 2>&1; then
+  echo "corpus-only must report never-fired without failing" && exit 1
+fi
+grep -q 'claim drive never fired: storm' /tmp/scuzz-vacuous-corpus.log
+rm -rf "$vacuous_dir"
 if fuzz --iterations 8 examples/bad-response; then
   echo "fuzz should have found the response failure" && exit 1
 fi

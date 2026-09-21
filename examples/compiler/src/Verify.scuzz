@@ -395,8 +395,8 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
-def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], br: Breadth): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jBreadth(br), "}")))))))))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth): String =
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claims", claimDec, claimHit), Str.concat(jBreadth(br), "}"))))))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -513,6 +513,18 @@ def sometimesOf(files: List[(String, String)]): List[String] =
 
 def triggersOf(files: List[(String, String)]): List[String] =
   sortStrs(List.distinct(List.concat(callLitsFiles(files, "Verdict.afterHit", 1), callLitsFiles(files, "Verdict.onHit", 1))))
+
+def claimDriveOf(files: List[(String, String)]): List[String] =
+  sortStrs(List.distinct(callLitsFiles(files, "Timeline.driveHas", 2)))
+
+def claimDriveHit(raw: String, dec: List[String]): List[String] =
+  sortStrs(List.filter(dec, n => List.exists(claimDriveLines(raw), h => hasSub(h, n))))
+
+def claimDriveLines(raw: String): List[String] =
+  List.filter(List.map(linesOf(raw), claimDriveFired), l => l != "")
+
+def claimDriveFired(line: String): String =
+  if (!Str.startsWith(line, "drive\t")) "" else Str.drop(line, 6)
 
 def callLitsFiles(files: List[(String, String)], f: String, idx: Int): List[String] =
   if (List.isEmpty(files)) noStr() else List.concat(callLitsFile(List.at(files, 0), f, idx), callLitsFiles(List.tail(files), f, idx))
@@ -1598,6 +1610,24 @@ def driveDupMsg(name: String): String =
 def driveRule(names: List[String]): String =
   driveDupMsgGo(dupName(sortStrs(names)))
 
+def driveClaimNames(scn: String, oracles: List[String]): List[String] =
+  List.concat(if (scn == "") oracles else "setup" :: oracles, scenarioDrvNames(scn))
+
+def ruleFirst(a: String, b: String): String =
+  if (a == "") b else a
+
+def driveClaimRule(vers: List[String], names: List[String]): String =
+  driveClaimMsg(driveClaimUnknown(sortStrs(List.distinct(callLitsSrcs(vers, "Timeline.driveHas", 2))), names))
+
+def callLitsSrcs(srcs: List[String], f: String, idx: Int): List[String] =
+  if (List.isEmpty(srcs)) noStr() else List.concat(callLitsOf(Parse.parse(Lexer.lex(List.at(srcs, 0))), f, idx), callLitsSrcs(List.tail(srcs), f, idx))
+
+def driveClaimUnknown(xs: List[String], names: List[String]): String =
+  if (List.isEmpty(xs)) "" else if (List.contains(names, List.at(xs, 0))) driveClaimUnknown(List.tail(xs), names) else List.at(xs, 0)
+
+def driveClaimMsg(x: String): String =
+  if (x == "") "" else Str.concat("scuzz.toml:1:1: error: Timeline.driveHas name ", Str.concat(x, " is not a drive in this package"))
+
 def driveDupMsgGo(dup: String): String =
   if (dup == "") "" else driveDupMsg(dup)
 
@@ -1724,11 +1754,11 @@ def fuzzHead(iterations: Int, corpus: Int, sites: Int): String =
 def fuzzBelowFloor(scoreMilli: Int, floor: Int): Bool =
   floor > 0 && scoreMilli >= 0 && scoreMilli < floor
 
-def fuzzCampaignOk(fail: Int, iterations: Int, somNever: List[String], trigNever: List[String], below: Bool): Bool =
-  fail == 0 && (iterations <= 0 || List.isEmpty(somNever) && List.isEmpty(trigNever)) && !below
+def fuzzCampaignOk(fail: Int, iterations: Int, somNever: List[String], trigNever: List[String], claimNever: List[String], below: Bool): Bool =
+  fail == 0 && (iterations <= 0 || List.isEmpty(somNever) && List.isEmpty(trigNever) && List.isEmpty(claimNever)) && !below
 
 def fuzzOut(iterations: Int, seed: Int, corpus: Int, sites: Int, failures: Int, corpFail: Int): String =
-  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, fuzzObservations([], [], [], [], [], []), failures, corpFail, "0", fuzzMut(sites), failures == 0)
+  fuzzOut2(fuzzHead(iterations, corpus, sites), searchN(iterations), seed, corpus, fuzzObservations([], [], [], [], [], [], [], []), failures, corpFail, "0", fuzzMut(sites), failures == 0)
 
 def fuzzStatus(search: Int, failures: Int, seed: Int, corpus: Int, ok: Bool): String =
   Str.concat("scuzz fuzz ", Str.concat(if (ok) "ok" else "fail", Str.concat(" (", Str.concat(Str.fromInt(search), Str.concat(" search, ", Str.concat(Str.fromInt(failures), Str.concat(" search failures, seed ", Str.concat(Str.fromInt(seed), Str.concat(", ", Str.concat(Str.fromInt(corpus), " corpus)"))))))))))
@@ -1742,8 +1772,8 @@ def fuzzMut(sites: Int): String =
 def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, observations: String, failures: Int, corpFail: Int, promoted: String, mut: String, ok: Bool): String =
   Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus, ok), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail, promoted), Str.concat(nl(), Str.concat(observations, Str.concat(nl(), mut)))))))
 
-def fuzzObservations(rows: List[(String, Bool)], branches: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String]): String =
-  Str.concat("coverage: functions ", Str.concat(coverageRatio(rows), Str.concat(", branches ", Str.concat(coverageRatio(branches), Str.concat(nl(), Str.concat(reachText("sometimes", "reached", somDec, somHit), Str.concat(nl(), reachText("triggers", "fired", trigDec, trigHit))))))))
+def fuzzObservations(rows: List[(String, Bool)], branches: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String]): String =
+  Str.concat("coverage: functions ", Str.concat(coverageRatio(rows), Str.concat(", branches ", Str.concat(coverageRatio(branches), Str.concat(nl(), Str.concat(reachText("sometimes", "reached", somDec, somHit), Str.concat(nl(), Str.concat(reachText("triggers", "fired", trigDec, trigHit), Str.concat(nl(), reachText("claims", "fired", claimDec, claimHit))))))))))
 
 def coverageRatio(rows: List[(String, Bool)]): String =
   countRatio(List.count(rows, row => row._2), List.len(rows))

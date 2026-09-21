@@ -1,0 +1,4 @@
+[package]
+name = "bad-driver"
+version = "0.1.0"
+description = "Claim guards on a renamed driver. scuzz check must fail."
