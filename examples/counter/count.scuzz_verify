@@ -13,6 +13,17 @@ def afterPlusShowsOne(t: Timeline): Verdict =
 def countStaysNonNeg(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "count") >= 0)
 
+private def countStep(t: Timeline, m: CountModel, i: Int): CountModel =
+  if (m.badAt >= 0) m else if (Timeline.signalInt(t, i, "count") == m.count || Timeline.signalInt(t, i, "count") == m.count + 1 && Timeline.lastHitHas(t, i, "button:+1")) CountModel(Timeline.signalInt(t, i, "count"), -1) else CountModel(m.count, i)
+
+private def countVerdict(m: CountModel): Verdict =
+  if (m.badAt < 0) Verdict.ok() else Verdict.fail(m.badAt, "count left the tap model")
+
+def countFollowsTaps(t: Timeline): Verdict =
+  countVerdict(Timeline.fold(t, CountModel(0, -1), __tup => __tup match {
+  case (m, i) => countStep(t, m, i)
+}))
+
 def countMatchesAcrossSchedules(a: Timeline, b: Timeline): Verdict =
   if (Timeline.signalInt(a, Timeline.len(a) - 1, "count") == Timeline.signalInt(b, Timeline.len(b) - 1, "count")) Verdict.ok() else Verdict.fail(0, "final count differs across schedules")
 

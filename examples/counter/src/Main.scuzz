@@ -1,5 +1,7 @@
 record CounterState(value: Int, title: String)
 
+record CountModel(count: Int, badAt: Int)
+
 def noteDrive(n: Int where n >= 0): Unit =
   Property.sometimes("drovePlus")
 

@@ -42,7 +42,7 @@ Closed impurity makes a probe a function of program, seed, script, and schedule 
 
 Slices, in order. Each slice closes with a proof in `examples/`.
 
-1. **Model claims.** Add `Timeline.fold`. Document a pure reference model over the timeline. Do not add a temporal-operator calculus. Proof: `examples/counter` or `examples/studio` states the model in one claim.
+1. **Model claims.** In the tree. `Timeline.fold` walks every state and returns a record model. `examples/counter` states the count model in one claim. A compiled fold types its lambda pair from the seed and the element, so a record accumulator with an `Int` element compiles. Not taken: a per-state event reader. `lastHitHas` and `driveHas` read levels, so a model does not count consecutive taps ([`gaps.md`](gaps.md#verification)).
 2. **Live transport.** A sanctioned `--live` corpus replay against the live loopback transport, or an explicit statement that OpenSSL, URLSession, TLS, and Skia pixels have no test home. Simulation stays hermetic. Proof: `examples/webhook` or `examples/api-report` replays one corpus entry on the live client, or `philosophy.md` states the cut.
 3. **ASan replay.** Corpus replay on the compiled engine runs under ASan. Proof: `scripts/ci-fuzz.sh` or a runtime ASan slice replays `examples/io` corpus without a leak report.
 4. **Destructuring binds.** A `for` bind unpacks a constructor. Proof: a compiler helper chain in `examples/compiler` becomes one bind; `scuzz fuzz --iterations 0 examples/tyck` stays green. Update the kernel lock in `philosophy.md`.

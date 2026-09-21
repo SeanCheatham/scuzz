@@ -11220,6 +11220,25 @@ int main(void) {
     folded = (SzString *)sz_list_fold_left(NULL, bang, fold_concat_pair, NULL);
     assert(strcmp(sz_string_cstr(folded), "!") == 0);
     sz_release(folded);
+    /* Timeline.fold visits every state index in order. A null timeline
+     * returns the seed. */
+    {
+      const char *tlp = "/tmp/scuzz_test_io_tl_fold.dump";
+      void *tl;
+      write_text(tlp, "# timeline v=3 n=3\n--- 0\nlast_hit:\n\ndrive:\n\nsignals:\n[]\na11y:\n"
+                      "--- 1\nlast_hit:\n\ndrive:\n\nsignals:\n[]\na11y:\n"
+                      "--- 2\nlast_hit:\n\ndrive:\n\nsignals:\n[]\na11y:\n");
+      tl = sz_timeline_load(tlp);
+      assert(tl);
+      sum = sz_timeline_fold(tl, z0, fold_add_i64, NULL);
+      assert(sz_unbox_i64(sum) == 3);
+      sz_release(sum);
+      sum = sz_timeline_fold(NULL, n1, fold_add_i64, NULL);
+      assert(sz_unbox_i64(sum) == 1);
+      sz_release(sum);
+      sz_timeline_free(tl);
+      remove(tlp);
+    }
     sz_list_free(ns);
     sz_list_free(xs);
     sz_release(n1);

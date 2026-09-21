@@ -3925,6 +3925,31 @@ int64_t sz_timeline_exists(void *tl, SzListPred pred, void *env) {
   t->fail_index = t->n > 0 ? t->n - 1 : 0;
   return 0;
 }
+
+/* Timeline.fold: walk every state in order. fn takes (acc, boxed index) and
+ * returns the next model. Same pair shape as sz_list_fold_left. */
+void *sz_timeline_fold(void *tl, void *z, SzListMapFn fn, void *env) {
+  SzTimeline *t = (SzTimeline *)tl;
+  void *acc;
+  int i;
+  if (!fn)
+    sz_panic("sz_timeline_fold(null fn)");
+  sz_retain(z);
+  acc = z;
+  if (!t)
+    return acc;
+  for (i = 0; i < t->n; i++) {
+    void *box = sz_box_i64((int64_t)i);
+    SzPair *pack = sz_pair_new(acc, box);
+    void *next = fn(pack, env);
+    sz_release(box);
+    sz_release(pack);
+    sz_release(acc);
+    acc = next;
+  }
+  return acc;
+}
+
 SzVerdict *sz_verdict_ok(void) {
   static SzVerdict ok = {1, -1, NULL};
   return &ok;
