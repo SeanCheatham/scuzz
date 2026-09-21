@@ -744,6 +744,44 @@ fi
 cmp "$workload_dir/first.toml" "$workload_dir/build/fuzz/repro.toml"
 rm -rf "$workload_dir"
 
+# A failing search stores the minimal script: shrink drops unneeded script
+# lines to a fixpoint, then moves Int arguments toward the where bound or zero.
+shrink_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-shrink.XXXXXX")"
+mkdir -p "$shrink_dir/src" "$shrink_dir/corpus"
+cat > "$shrink_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "shrink"
+MANIFEST
+cat > "$shrink_dir/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$shrink_dir/shrink.scuzz_scenario" <<'SCENARIO'
+def setup(): IO[Unit] =
+  IO.pure(())
+
+def calm(): IO[Unit] =
+  IO.pure(())
+
+def trip(n: Int): IO[Unit] =
+  if (n >= 10) IO.fail("tripped") else IO.pure(())
+SCENARIO
+cat > "$shrink_dir/corpus/seed.toml" <<'CORPUS'
+[fuzz]
+events = ["drive calm", "drive calm", "drive calm"]
+CORPUS
+if fuzz --seed 42 --iterations 16 "$shrink_dir"; then
+  echo "shrink search must find the boundary failure" >&2
+  exit 1
+fi
+grep -Fqx 'events = ["drive trip 10"]' "$shrink_dir/build/fuzz/repro.toml"
+grep -Fqx 'events = ["drive trip 10"]' "$shrink_dir"/corpus/search-*.toml
+if fuzz --replay "$shrink_dir/build/fuzz/repro.toml" "$shrink_dir"; then
+  echo "shrunk replay must preserve the failure" >&2
+  exit 1
+fi
+rm -rf "$shrink_dir"
+
 # A repeated campaign skips emit and link on a stamp hit.
 stamp_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-stamp.XXXXXX")"
 mkdir -p "$stamp_dir/src"
