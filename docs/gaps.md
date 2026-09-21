@@ -59,19 +59,17 @@ Filesystem symbolic links, extended metadata preservation, and power-loss durabi
 
 The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. These gaps weaken that strategy. Rank is threat order. Arc: [`vision.md`](vision.md#verification-arc). Locks: [`philosophy.md`](philosophy.md#verification-posture).
 
-1. **Schedule replay.** `schedule_seed` replays a PRNG walk over fiber creation order and contention steps, not recorded decisions. A code change elsewhere in the program can shift the interleaving under the same seed and turn a pinned concurrency failure green. Record the fiber picked at each contention step in the corpus entry and report drift on replay. Do it in the evaluator scheduler first (evaluator arc).
+1. **Mutation gate.** Operators flip relations, arithmetic, `0`/`1`, booleans, `if` arms, `&&` to one operand, `Signal.map` to identity, and handler bodies. There is no equivalent-mutant filter, no constant boundary, and no match-arm delete. A survivor does not fail the campaign unless `[fuzz].score_floor` is set. The mutation budget is a fraction of `--iterations`, capped at site count. There is no diff-scoped mutation and no persisted per-site result keyed by compiler identity.
 
-2. **Mutation gate.** Operators flip relations, arithmetic, `0`/`1`, booleans, `if` arms, `&&` to one operand, `Signal.map` to identity, and handler bodies. There is no equivalent-mutant filter, no constant boundary, and no match-arm delete. A survivor does not fail the campaign unless `[fuzz].score_floor` is set. The mutation budget is a fraction of `--iterations`, capped at site count. There is no diff-scoped mutation and no persisted per-site result keyed by compiler identity.
+2. **Model claims.** Authors walk `Timeline` by index. There is no `Timeline.fold` and no documented reference-model pattern. Do not add a temporal-operator calculus.
 
-3. **Model claims.** Authors walk `Timeline` by index. There is no `Timeline.fold` and no documented reference-model pattern. Do not add a temporal-operator calculus.
+3. **Live transport.** Simulation fakes Fs, loopback Net, and clocks. The live OpenSSL HTTP/1.0 client, URLSession, TLS errors, and Skia pixels have no fuzz home. `--differential` compares Skia backends. Add a sanctioned loopback corpus replay on the live transport, or state that those surfaces have no test home.
 
-4. **Live transport.** Simulation fakes Fs, loopback Net, and clocks. The live OpenSSL HTTP/1.0 client, URLSession, TLS errors, and Skia pixels have no fuzz home. `--differential` compares Skia backends. Add a sanctioned loopback corpus replay on the live transport, or state that those surfaces have no test home.
+4. **ASan replay.** Corpus replay on the compiled engine does not run under ASan. `Signal`, `Ref`, `Queue`, `Deferred`, and view-list ownership can leak or cycle. RC has no collector.
 
-5. **ASan replay.** Corpus replay on the compiled engine does not run under ASan. `Signal`, `Ref`, `Queue`, `Deferred`, and view-list ownership can leak or cycle. RC has no collector.
+5. **Destructuring binds.** A `match` result in a `for` needs a helper def per binding. That multiplies defs, mutation sites, and coverage denominators. A `for` bind that unpacks a constructor is open.
 
-6. **Destructuring binds.** A `match` result in a `for` needs a helper def per binding. That multiplies defs, mutation sites, and coverage denominators. A `for` bind that unpacks a constructor is open.
-
-7. **Facts tier.** Zero-argument `oracle` goldens seed campaigns in the compiler, formatter, and CLI packages. Named generated-program oracles exist (`tyckGenerated`, `irGenerated`, `prettyGenerated`). [`philosophy.md`](philosophy.md) does not name goldens as a facts tier. The compiler's primary oracles should be generated-program round-trip and engine parity. Goldens stay seeds.
+6. **Facts tier.** Zero-argument `oracle` goldens seed campaigns in the compiler, formatter, and CLI packages. Named generated-program oracles exist (`tyckGenerated`, `irGenerated`, `prettyGenerated`). [`philosophy.md`](philosophy.md) does not name goldens as a facts tier. The compiler's primary oracles should be generated-program round-trip and engine parity. Goldens stay seeds.
 
 ### Later
 

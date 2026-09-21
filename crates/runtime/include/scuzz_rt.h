@@ -1164,6 +1164,12 @@ void sz_property_sometimes(SzString *name);
 void sz_property_sometimes_flush(void);
 void sz_timeline_varied_flush(void);
 void sz_timeline_claim_flush(void);
+/* Reset fiber ordinals and recorded-pick state for a new probe, and
+ * truncate the pick dump. */
+void sz_sched_picks_probe_reset(void);
+/* Name the running IO for recorded-pick matching (setup, a drive name,
+ * or main). */
+void sz_sched_set_pick_name(const char *name);
 void sz_property_classify(SzString *name, int64_t hit);
 void sz_property_classify_flush(void);
 void sz_property_always_register(SzString *name, void *fn);

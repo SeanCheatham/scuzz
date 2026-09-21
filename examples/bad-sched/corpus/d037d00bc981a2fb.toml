@@ -1,3 +1,5 @@
 [fuzz]
-schedule_seed = "1344"
+oracle = "checkOrder"
+schedule_seed = "1"
+schedule_picks = ["setup 1:-", "checkOrder 4:4,4"]
 events = ["drive checkOrder"]

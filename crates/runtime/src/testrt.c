@@ -262,6 +262,7 @@ void sz_scenario_run_setup(void) {
   SzIoResult r;
   if (!g_scenario_setup && !g_scenario_setup_io)
     return;
+  sz_sched_set_pick_name("setup");
   if (g_scenario_setup_io) {
     io = g_scenario_setup_io;
     sz_retain(io);
@@ -4926,6 +4927,7 @@ static void *fuzz_probe_run(SzIo *program) {
   if (tr && tr[0] == '1')
     sz_testrt_install();
   sz_testrt_fault_hold();
+  sz_sched_picks_probe_reset();
   sz_scenario_run_setup();
   sz_testrt_fault_release();
   ds = getenv("SCUZZ_DRIVE_SCRIPT");
@@ -4934,6 +4936,7 @@ static void *fuzz_probe_run(SzIo *program) {
     sz_property_session_end();
   } else {
     SzIoResult r;
+    sz_sched_set_pick_name("main");
     sz_retain(program);
     r = sz_io_unsafe_run(program);
     if (!r.ok) {
@@ -5514,6 +5517,7 @@ void sz_driver_run_line(const char *spec) {
   }
   name[i] = 0;
   rest = spec[i] == ' ' ? spec + i + 1 : "";
+  sz_sched_set_pick_name(name);
   d = sz_driver_find(name);
   if (!d) {
     fprintf(stderr, "scuzz: unknown driver %s\n", name);

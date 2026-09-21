@@ -224,10 +224,46 @@ grep -q 'drive checkOrder' examples/bad-sched/corpus/d037d00bc981a2fb.toml
 if fuzz --replay examples/bad-sched/corpus/d037d00bc981a2fb.toml examples/bad-sched; then
   echo "schedule replay should have reproduced the failure" && exit 1
 fi
-grep -v schedule_seed examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad-sched-fifo.toml
+grep -v -e schedule_seed -e schedule_picks examples/bad-sched/corpus/d037d00bc981a2fb.toml > /tmp/bad-sched-fifo.toml
 if ! fuzz --replay /tmp/bad-sched-fifo.toml examples/bad-sched; then
   echo "FIFO replay (no schedule_seed) should pass" && exit 1
 fi
+# A pinned schedule replays recorded picks. An unrelated edit keeps the
+# failure red; a fiber-structure edit reports drift instead of going green.
+rm -rf /tmp/bad-sched-picks
+cp -R examples/bad-sched /tmp/bad-sched-picks
+rm -rf /tmp/bad-sched-picks/build
+python3 - <<'PY_EDIT'
+from pathlib import Path
+p = Path("/tmp/bad-sched-picks/src/Main.scuzz")
+text = p.read_text()
+old = 'IO.println("sched-example")'
+if old not in text:
+    raise SystemExit("edit fixture: println site missing")
+p.write_text(text.replace(old, 'IO.println("sched example")', 1))
+PY_EDIT
+if fuzz --replay examples/bad-sched/corpus/d037d00bc981a2fb.toml /tmp/bad-sched-picks > /tmp/scuzz-sched-keep.log 2>&1; then
+  echo "pinned schedule must stay red after an unrelated edit" && exit 1
+fi
+if grep -q "schedule drift" /tmp/scuzz-sched-keep.log; then
+  echo "unrelated edit must not drift" && exit 1
+fi
+python3 - <<'PY_DRIFT'
+from pathlib import Path
+p = Path("/tmp/bad-sched-picks/sched.scuzz_scenario")
+text = p.read_text()
+old = '    _ <- IO.both(Queue.offer(q, "L"), Queue.offer(q, "R"))'
+new = '    _ <- Fiber.fork(Deferred.empty().flatMap(w => Deferred.get(w))).flatMap(_ => IO.both(Queue.offer(q, "L"), Queue.offer(q, "R")))'
+if old not in text:
+    raise SystemExit("drift fixture: IO.both site missing")
+p.write_text(text.replace(old, new, 1))
+PY_DRIFT
+if fuzz --replay examples/bad-sched/corpus/d037d00bc981a2fb.toml /tmp/bad-sched-picks > /tmp/scuzz-sched-drift.log 2>&1; then
+  echo "drifted replay must not pass" && exit 1
+fi
+cat /tmp/scuzz-sched-drift.log
+grep -q "schedule drift" /tmp/scuzz-sched-drift.log
+rm -rf /tmp/bad-sched-picks
 # A claim that guards on a renamed driver fails check. A claim antecedent
 # that never fires fails a campaign with search iterations.
 if "$SCUZZ" check examples/bad-driver > /tmp/scuzz-bad-driver.log 2>&1; then
