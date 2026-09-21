@@ -402,6 +402,7 @@ void sz_panic(const char *msg) {
   sz_property_sometimes_flush();
   sz_timeline_varied_flush();
   sz_property_classify_flush();
+  sz_timeline_claim_flush();
   sz_alloc_format_panic(report, sizeof report, msg);
   fputs(report, stderr);
   fflush(stderr);
@@ -4505,6 +4506,7 @@ static void *sz_runtime_main_worker(void *arg) {
   sz_property_sometimes_flush();
   sz_timeline_varied_flush();
   sz_property_classify_flush();
+  sz_timeline_claim_flush();
 done:
 #if defined(__APPLE__)
   g_sz_main_worker_done = 1;

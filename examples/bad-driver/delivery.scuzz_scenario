@@ -1,0 +1,6 @@
+def setup(): IO[Unit] =
+  IO.pure(())
+
+def deliver(): IO[Unit] =
+  IO.pure(())
+

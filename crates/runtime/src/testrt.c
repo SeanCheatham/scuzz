@@ -2908,6 +2908,48 @@ void sz_property_sometimes(SzString *name) {
   sometimes_record(s);
 }
 
+/* Claim antecedent firing. A Timeline.driveHas guard whose needle matches
+ * no drive line in the campaign stays true on every state. The dump holds
+ * the distinct drive lines; the campaign applies the same substring rule. */
+#define SZ_CLAIM_DRIVE_MAX 512
+static char *g_claim_drive[SZ_CLAIM_DRIVE_MAX];
+static int g_claim_drive_n;
+
+static void claim_drive_note(const char *name) {
+  int i;
+  size_t n;
+  char *copy;
+  if (!name || !name[0])
+    return;
+  for (i = 0; i < g_claim_drive_n; i++)
+    if (strcmp(g_claim_drive[i], name) == 0)
+      return;
+  if (g_claim_drive_n >= SZ_CLAIM_DRIVE_MAX)
+    return;
+  n = strlen(name);
+  copy = (char *)malloc(n + 1);
+  if (!copy)
+    sz_panic("timeline: out of memory");
+  memcpy(copy, name, n + 1);
+  g_claim_drive[g_claim_drive_n++] = copy;
+  /* Reachability names stay live. Do not treat that retain as a UI leak. */
+  sz_testrt_ui_idle_reset();
+}
+
+void sz_timeline_claim_flush(void) {
+  const char *path = getenv("SCUZZ_CLAIM_DUMP");
+  FILE *f;
+  int i;
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "a");
+  if (!f)
+    return;
+  for (i = 0; i < g_claim_drive_n; i++)
+    fprintf(f, "drive\t%s\n", g_claim_drive[i]);
+  fclose(f);
+}
+
 void sz_property_sometimes_flush(void) {
   const char *path = getenv("SCUZZ_SOMETIMES_DUMP");
   FILE *f;
@@ -3317,6 +3359,7 @@ static void tl_free_states(void) {
 void sz_timeline_set_drive(const char *line) {
   free(g_last_drive);
   g_last_drive = tl_copy(line ? line : "");
+  claim_drive_note(line);
 }
 
 static void tl_push(void) {
@@ -4898,6 +4941,7 @@ static void *fuzz_probe_run(SzIo *program) {
   sz_property_sometimes_flush();
   sz_timeline_varied_flush();
   sz_property_classify_flush();
+  sz_timeline_claim_flush();
   fuzz_dist_flush();
   sz_sched_attach(outer);
   return out;
