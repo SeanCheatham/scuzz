@@ -6,7 +6,7 @@ Edit this file when the next-step order changes.
 
 ## Open work
 
-Next: make the language usable for general application development. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Use examples to prove these capabilities through the built-in verification strategy. Specific application workflows do not define the scope.
+Next: make the language usable for general application development. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Use examples to prove these capabilities through the built-in verification strategy. Harden that strategy on the [verification arc](#verification-arc). Specific application workflows do not define the scope.
 
 ### Evaluator arc
 
@@ -36,6 +36,24 @@ Slices, in order. Each slice closes with a proof in `examples/`.
 
 Deferred on this arc, unproven value: a session event journal with prefix-replay rewind, and time ops (`pause_time`, `resume_time`, clock advance). Time ops reuse the TestRuntime clock fakes on a live session. They make no hermetic claim. Simulation stays the only hermetic tier.
 
+### Verification arc
+
+Closed impurity makes a probe a function of program, seed, script, and schedule seed. Search, mutation, and coverage already run inside `scuzz fuzz`. These slices close the gaps that make authors leave that path. Ranked list: [`gaps.md`](gaps.md#verification).
+
+Slices, in order. Each slice closes with a proof in `examples/`.
+
+1. **Shrink.** Delta-debug script lines. Nudge Int arguments toward a `where` bound or zero. Store the minimal script. Proof: a known failing search on `examples/reach` or `examples/api-report` stores a shorter corpus entry that still fails.
+2. **Claim reachability.** `check` rejects unknown `driveHas` / `a11yHas` / `signalStrHas` names. A campaign fails when a claim antecedent never fires. Proof: `examples/bad-*` for a renamed driver; `examples/webhook` claims still pass.
+3. **Generators.** Boundary Ints. Size that grows with the iteration. A string alphabet that includes empty, quotes, newlines, delimiters, and non-ASCII. Parse `where` as an expression. Proof: generated oracles on `examples/kernel` or `examples/tyck` reach those shapes; a compound `where` keeps its bounds.
+4. **Fault surface.** The scenario declares the faults it injects. Claims drop `faulted` as a pass. Fault storms and partial writes follow. Proof: `examples/io` at `--iterations 16` is green or fails on a real invariant; `examples/webhook` claims no longer pass on `faulted` alone.
+5. **Schedule replay.** Record the fiber picked at each contention step in the corpus entry. Report drift on replay. Do it in the evaluator scheduler first. Proof: a pinned `examples/bad-sched` or `examples/webhook` concurrent entry stays red after an unrelated edit, or the campaign reports drift.
+6. **Mutation gate.** Mutate only defs that changed since the last fingerprint. Persist per-site kill results keyed by compiler SHA-256. Default `[fuzz].score_floor` on. Proof: a small edit in `examples/counter` mutates that def; a second campaign reuses prior kills; a surviving mutant fails the floor.
+7. **Model claims.** Add `Timeline.fold`. Document a pure reference model over the timeline. Do not add a temporal-operator calculus. Proof: `examples/counter` or `examples/studio` states the model in one claim.
+8. **Live transport.** A sanctioned `--live` corpus replay against the live loopback transport, or an explicit statement that OpenSSL, URLSession, TLS, and Skia pixels have no test home. Simulation stays hermetic. Proof: `examples/webhook` or `examples/api-report` replays one corpus entry on the live client, or `philosophy.md` states the cut.
+9. **ASan replay.** Corpus replay on the compiled engine runs under ASan. Proof: `scripts/ci-fuzz.sh` or a runtime ASan slice replays `examples/io` corpus without a leak report.
+10. **Destructuring binds.** A `for` bind unpacks a constructor. Proof: a compiler helper chain in `examples/compiler` becomes one bind; `scuzz fuzz --iterations 0 examples/tyck` stays green. Update the kernel lock in `philosophy.md`.
+11. **Facts tier.** Name goldens as a facts tier in `philosophy.md`. Keep them as campaign seeds. Make generated-program round-trip and engine parity the compiler's primary oracles. Proof: `examples/tyck`, `examples/codegen`, and `examples/fmt` keep generated oracles as the search workload; goldens stay zero-argument seeds.
+
 ### Success bars
 
 **v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter as `View` + builtin `IO`) → `scuzz fuzz --iterations 0`, and `scuzz run` (`--target headless` for UI). Desktop when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/io`).
@@ -62,16 +80,25 @@ Ranked list: [`gaps.md`](gaps.md).
 | Dialect unexercised by apps | Kernel examples. `check` / `fuzz` on passing `examples/`. `examples/bad-*` are expected-fail |
 | Effects too weak or too heavy | Builtin IO. Pure `View`. `Ui` at session boundary |
 | Hidden nondeterminism | Closed impurity + hermetic TestRuntime. No live sockets under sim |
-| Properties become brittle dump goldens | Named observations. Mutation kills weak oracles. Live-graph paint is not a dump fixture |
+| Properties become brittle dump goldens | Named observations. Mutation kills weak oracles. Live-graph paint is not a dump fixture. Goldens are a facts tier, not the compiler's primary oracles ([verification arc](#verification-arc)) |
 | `String` as bytes mangles UI text | `Str.*` indexes Unicode code points; `Str.byteLen` / `Str.byteSlice` keep bytes for framing. Case maps stay ASCII |
 | LSP span misses the token | One JSON schema. Check diagnostics and LSP use recorded spans. The dogfood IDE consumes that schema |
 | Sim becomes Mockito | Only qualified IO replacements. No stubbing pure `View`/`Signal`. Kits stay TestRuntime |
 | Drivers become integration tests | `check` rejects `Property.*` in scenario files. Correctness lives in `*.scuzz_verify` and live-module `.require` |
-| Drivers pass vacuously | `Property.sometimes` reachability fails the campaign when declared states are never reached |
+| Drivers pass vacuously | `Property.sometimes` reachability fails the campaign when declared states are never reached. Claim antecedents must fire. `check` validates `driveHas` names |
 | Verification tool sprawl | One `scuzz` strategy — mutation/fuzz/properties/sim/determinism in-tree. No external test frameworks |
-| Slow fuzz inner loop pushes authors back to ad-hoc testing | Corpus-only replay tier answers in seconds. Full campaigns stay in CI |
+| Slow fuzz inner loop pushes authors back to ad-hoc testing | Corpus-only replay tier answers in seconds. Full campaigns stay in CI. Shrink stores a readable failure |
+| Search fails large and unread | Delta-debug the script. Nudge Ints toward bounds. Store the minimal corpus entry |
+| Generators miss empty, overflow, and delimiters | Boundary Ints. Growing size. A real string alphabet. `where` is an expression |
+| Faulted claims pass without an invariant | Scenario declares its fault surface. Claims drop `faulted` as a pass |
+| Schedule seed replay turns a concurrency failure green | Record the fiber at each contention step. Report drift |
+| Mutation samples too few sites to gate | Diff-scoped mutation. Persisted per-site kills. Default `score_floor` |
+| Transport and Skia bugs have no test home | Sanctioned `--live` loopback replay, or an explicit cut in `philosophy.md` |
+| Wall-clock probe deadlines flake on a slow host | Prefer the 1000000-step bound. Size the deadline from the idle probe |
+| RC misses Signal/Ref cycles and view-list leaks | ASan corpus replay on the compiled engine |
+| No `val` / no destructure multiplies helper defs | `for` constructor binds. Update the kernel lock when that lands |
 | `Property.sometimes` verdicts vary with iteration budget | Checked-in corpus keeps reaching prefixes. Summary separates never-reached from not-reached-in-budget |
-| Concrete business facts have no home without unit tests | Concrete-fact `.require` checks are sanctioned oracles. Zero-argument verify oracles seed the campaign |
+| Concrete business facts have no home without unit tests | Concrete-fact `.require` checks are sanctioned oracles. Zero-argument verify oracles seed the campaign. Generated-program properties stay the compiler search workload |
 | “Almost Scala” confusion | Explicit non-goals. Language direction: [`philosophy.md`](philosophy.md). Run `scuzz docs language`. |
 | Watch confused with hot reload | `scuzz watch` rebuilds. `[ui]` `run --watch` is hot reload (stamp-reload Views). IO-only `run --watch` kills and reruns |
 | IDE typer ≠ batch typer | One JSON schema. LSP wraps `scuzz check`. No second typer |
