@@ -1063,17 +1063,48 @@ def unaryNumTypes(): Bool =
   Check.check("def right(): Float = -1.5") == "[]" && Check.check("def right(n: Float): Float = -n") == "[]" && Check.check("def right(): Int = -1") == "[]" && rejects("def wrong(): Bool = -true", "expected Int or Float, got Bool")
 
 def lambdaApplyTypes(): Bool =
-  rejects("@main def main: IO[Unit] =\n  for {\n    f = (n => n + 1)\n    _ <- IO.println(Str.fromInt(f(\"s\")))\n  } yield ()\n", "lambda parameter type is unresolved") && Check.check("""@main def main: IO[Unit] =
+  rejects("@main def main: IO[Unit] =\n  for {\n    f = (n => n + 1)\n    _ <- IO.println(Str.fromInt(f(\"s\")))\n  } yield ()\n", "arithmetic needs Int or Float, got String and Int") && Check.check("""@main def main: IO[Unit] =
   for {
     f = ((n: Int) => n + 1)
     _ <- IO.println(Str.fromInt(f(1)))
   } yield ()
-""") == "[]" && rejects("@main def main: IO[Unit] =\n  for {\n    f = ((n: Int) => n + 1)\n    _ <- IO.println(Str.fromInt(f(\"s\")))\n  } yield ()\n", "apply arg type mismatch: expected Int, got String") && rejects("""@main def main: IO[Unit] =
+""") == "[]" && rejects("@main def main: IO[Unit] =\n  for {\n    f = ((n: Int) => n + 1)\n    _ <- IO.println(Str.fromInt(f(\"s\")))\n  } yield ()\n", "apply arg type mismatch: expected Int, got String") && Check.check("""@main def main: IO[Unit] =
   for {
     f = (n => n)
     _ <- IO.println(Str.fromInt(f(1)))
   } yield ()
-""", "lambda parameter type is unresolved") && Check.check("@main def main: IO[Unit] =\n  for {\n    f = ((n: String) => n)\n    _ <- IO.println(f(\"s\"))\n  } yield ()\n") == "[]" && Check.check("def right(): Int = (n => n + 1)(1)") == "[]" && rejects("def wrong(): Int = (n => n + 1)(\"s\")", "arithmetic needs Int or Float")
+""") == "[]" && Check.check("@main def main: IO[Unit] =\n  for {\n    f = ((n: String) => n)\n    _ <- IO.println(f(\"s\"))\n  } yield ()\n") == "[]" && Check.check("def right(): Int = (n => n + 1)(1)") == "[]" && rejects("def wrong(): Int = (n => n + 1)(\"s\")", "arithmetic needs Int or Float") && lamPinTypes()
+
+def lamPinTypes(): Bool =
+  Check.check("""@main def main: IO[Unit] =
+  for {
+    f = (n => n)
+    g = m => f(m)
+    _ <- IO.println(Str.fromInt(f(1)))
+  } yield ()
+""") == "[]" && rejects("@main def main: IO[Unit] =\n  for {\n    f = (n => n)\n    _ <- IO.println(Str.fromInt(f(1)))\n    _ <- IO.println(f(\"s\"))\n  } yield ()\n", "apply arg type mismatch: expected Int, got String") && Check.check("@main def main: IO[Unit] =\n  for {\n    f = (n => n)\n    f = \"s\"\n    _ <- IO.println(f)\n  } yield ()\n") == "[]" && Check.check("@main def main: IO[Unit] =\n  for {\n    f = (n => n)\n    g = f => Str.concat(f, \"x\")\n    _ <- IO.println(g(\"a\"))\n  } yield ()\n") == "[]" && lamPinTypes2()
+
+def lamPinTypes2(): Bool =
+  Check.check("""@main def main: IO[Unit] =
+  for {
+    f = n => n + 1
+    _ <- IO.foreach([1, 2], x => IO.println(Str.fromInt(f(x))))
+  } yield ()
+""") == "[]" && Check.check("@main def main: IO[Unit] =\n  for {\n    f = (p => p)\n    t = f(1, \"s\")\n    _ <- IO.println(t._2)\n  } yield ()\n") == "[]" && Check.check("""@main def main: IO[Unit] =
+  for {
+    f = (n => n)
+    _ <- IO.println(Str.fromInt(f.apply(7)))
+  } yield ()
+""") == "[]" && rejects("@main def main: IO[Unit] =\n  for {\n    f = (n => List.isEmpty(n))\n    _ <- IO.println(if (f([1])) \"e\" else \"n\")\n    _ <- IO.println(if (f([\"s\"])) \"e\" else \"n\")\n  } yield ()\n", "apply arg type mismatch: expected List[Int], got List[String]") && lamPinTypes3()
+
+def lamPinTypes3(): Bool =
+  rejects("""@main def main: IO[Unit] =
+  for {
+    f = (n => n)
+    g = f
+    _ <- IO.println(Str.fromInt(g(1)))
+  } yield ()
+""", "lambda parameter type is unresolved") && Check.check("def use[A](x: A): IO[Unit] =\n  for {\n    f = (n => n)\n    y = f(x)\n    _ <- IO.println(\"x\")\n  } yield ()\n") == "[]" && Check.check("@main def main: IO[Unit] =\n  for {\n    f = (n => Str.concat(n, \"!\"))\n    _ <- IO.println(if (true) f(\"a\") else f(\"b\"))\n    x = 1\n    _ <- IO.println(x match {\n      case 1 => f(\"c\")\n      case _ => \"d\"\n    })\n  } yield ()\n") == "[]"
 
 def nestedPatTypes(): Bool =
   Check.check("""enum Inner:
