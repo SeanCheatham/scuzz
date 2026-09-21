@@ -282,6 +282,109 @@ if ! fuzz --seed 42 --iterations 0 "$vacuous_dir" > /tmp/scuzz-vacuous-corpus.lo
 fi
 grep -q 'claim drive never fired: storm' /tmp/scuzz-vacuous-corpus.log
 rm -rf "$vacuous_dir"
+
+# Generation: a compound where keeps both bounds; unbounded Ints reach the
+# overflow edges; strings cover the delimiter alphabet; ADT string fields
+# carry delimiters through both engines.
+gen_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-gen.XXXXXX")"
+mkdir -p "$gen_dir/src"
+cat > "$gen_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "gen"
+MANIFEST
+cat > "$gen_dir/src/Main.scuzz" <<'SOURCE'
+def inBand(n: Int): Bool =
+  n >= 10 && n <= 20
+
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$gen_dir/gen.scuzz_verify" <<'CLAIMS'
+oracle clamped(n: Int where n >= 10 && n <= 20): Bool =
+  Main.inBand(n)
+
+CLAIMS
+"$SCUZZ" check "$gen_dir"
+fuzz --seed 42 --iterations 8 "$gen_dir"
+grep -q 'clamped i>=10&&i<=20' "$gen_dir/build/drivers.txt"
+grep -q 'drive clamped 10' "$gen_dir/build/seeds.txt"
+rm -rf "$gen_dir"
+
+edge_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-edge.XXXXXX")"
+mkdir -p "$edge_dir/src"
+cat > "$edge_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "edge"
+MANIFEST
+cat > "$edge_dir/src/Main.scuzz" <<'SOURCE'
+def notMax(n: Int): Bool =
+  n != 9223372036854775807
+
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$edge_dir/edge.scuzz_verify" <<'CLAIMS'
+oracle edge(n: Int): Bool =
+  Main.notMax(n)
+
+CLAIMS
+if fuzz --seed 43 --iterations 16 "$edge_dir" > /tmp/scuzz-edge.log 2>&1; then
+  echo "search must reach the overflow edge" && exit 1
+fi
+grep -Fqx 'events = ["drive edge 9223372036854775807"]' "$edge_dir/build/fuzz/repro.toml"
+if fuzz --replay "$edge_dir/build/fuzz/repro.toml" "$edge_dir"; then
+  echo "overflow replay must preserve the failure" && exit 1
+fi
+rm -rf "$edge_dir"
+
+str_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-genstr.XXXXXX")"
+mkdir -p "$str_dir/src"
+cat > "$str_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "genstr"
+MANIFEST
+cat > "$str_dir/src/Main.scuzz" <<'SOURCE'
+enum Pair:
+  case a(s: String, n: Int)
+
+def noNewline(s: String): Bool =
+  !Str.contains(s, "\n")
+
+def firstOk(p: Pair): Bool =
+  p match {
+    case Pair.a(s, _n) => !Str.contains(s, ",")
+  }
+
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$str_dir/str.scuzz_verify" <<'CLAIMS'
+oracle strOk(s: String): Bool =
+  Main.noNewline(s)
+
+CLAIMS
+if fuzz --seed 0 --iterations 16 "$str_dir" > /tmp/scuzz-genstr.log 2>&1; then
+  echo "search must reach the newline alphabet" && exit 1
+fi
+grep -Fqx 'events = ["drive strOk \"\\n\""]' "$str_dir/build/fuzz/repro.toml"
+if fuzz --replay "$str_dir/build/fuzz/repro.toml" "$str_dir"; then
+  echo "newline replay must preserve the failure" && exit 1
+fi
+rm -f "$str_dir/str.scuzz_verify"
+cat > "$str_dir/pair.scuzz_verify" <<'CLAIMS'
+oracle pairOk(p: Pair): Bool =
+  Main.firstOk(p)
+
+CLAIMS
+rm -rf "$str_dir/build" "$str_dir/corpus"
+if fuzz --seed 42 --iterations 16 "$str_dir" > /tmp/scuzz-genpair.log 2>&1; then
+  echo "search must reach a delimiter ADT field" && exit 1
+fi
+grep -Fqx 'events = ["drive pairOk a(\"a,b](x)\",9223372036854775806)"]' "$str_dir/build/fuzz/repro.toml"
+if fuzz --replay "$str_dir/build/fuzz/repro.toml" "$str_dir"; then
+  echo "ADT delimiter replay must preserve the failure" && exit 1
+fi
+rm -rf "$str_dir"
 if fuzz --iterations 8 examples/bad-response; then
   echo "fuzz should have found the response failure" && exit 1
 fi

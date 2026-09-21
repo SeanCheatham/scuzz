@@ -1259,6 +1259,9 @@ int64_t sz_drive_nfields(const char *inner);
 int sz_drive_field(const char *inner, int64_t i, char *out, int cap);
 int64_t sz_drive_parse_int(const char *tok);
 int64_t sz_drive_parse_bool(const char *tok);
+/* Decode a drive token into a string value. A bare token copies. A quoted
+ * token drops the quotes and resolves \ \" \n \t \r escapes. */
+SzString *sz_drive_str(const char *tok);
 void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn);
 void sz_driver_run_line(const char *spec);
 void sz_driver_run_script(const char *path);
