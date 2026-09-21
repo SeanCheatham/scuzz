@@ -1257,6 +1257,8 @@ void sz_timeline_compact(void);
 void sz_timeline_compact_loaded(void *tl);
 /* Restore observation from the nearest checkpoint at or before i. */
 void sz_timeline_replay_from(int64_t i);
+/* Fold every state index in order: fn((acc, boxed i), env) -> next acc. */
+void *sz_timeline_fold(void *tl, void *z, SzListMapFn fn, void *env);
 int64_t sz_timeline_forall(void *tl, SzListPred pred, void *env);
 int64_t sz_timeline_exists(void *tl, SzListPred pred, void *env);
 int sz_drive_uncons(const char *tok, const char *name, char *inner, int cap);

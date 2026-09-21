@@ -59,7 +59,7 @@ Filesystem symbolic links, extended metadata preservation, and power-loss durabi
 
 The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. These gaps weaken that strategy. Rank is threat order. Arc: [`vision.md`](vision.md#verification-arc). Locks: [`philosophy.md`](philosophy.md#verification-posture).
 
-1. **Model claims.** Authors walk `Timeline` by index. There is no `Timeline.fold` and no documented reference-model pattern. Do not add a temporal-operator calculus.
+1. **Per-state events.** A timeline state records the last hit and the last drive as levels. Two consecutive `+1` taps produce two states with the same `lastHitHas` and no edge, so a `Timeline.fold` model cannot count taps. It can only bound each step. A per-state event reader is open. Do not add a temporal-operator calculus.
 
 2. **Live transport.** Simulation fakes Fs, loopback Net, and clocks. The live OpenSSL HTTP/1.0 client, URLSession, TLS errors, and Skia pixels have no fuzz home. `--differential` compares Skia backends. Add a sanctioned loopback corpus replay on the live transport, or state that those surfaces have no test home.
 
