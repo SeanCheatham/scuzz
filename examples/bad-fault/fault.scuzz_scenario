@@ -1,6 +1,9 @@
 def setup(): IO[Unit] =
   IO.pure(())
 
+def faults(): List[String] =
+  ["fs"]
+
 def checkNote(body: String): IO[Unit] =
   for {
     _ <- roundTrip(body)

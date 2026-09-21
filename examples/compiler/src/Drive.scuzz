@@ -12,7 +12,7 @@ record FuzzMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, inv
 
 record MutBase(idle: String, tls: List[String], pass: List[FuzzRun])
 
-record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)], oracles: Bool, uiEnv: String, diff: Bool, ens: List[En], ev: Bool, scuzz: String, srv: Ref[(String, Int)])
+record FuzzJob(dir: String, outDir: String, exe: String, name: String, hasUi: Bool, iterations: Int, seed: Int, noFailFast: Bool, files: List[(String, String)], oracles: Bool, uiEnv: String, diff: Bool, ens: List[En], ev: Bool, scuzz: String, srv: Ref[(String, Int)], faults: List[(Int, Int)])
 
 import Manifest.Man
 import Manifest.UiMan
@@ -1293,7 +1293,7 @@ def fuzzLinked(dir: String, outDir: String, iterations: Int, seed: Int, replay: 
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fuzzMan(Manifest.parse(toml), dir, outDir, iterations, seed, replay, files, ens, noFailFast, oracles, differential))
 
 def fuzzMan(m: Man, dir: String, outDir: String, iterations: Int, seed: Int, replay: String, files: List[(String, String)], ens: List[En], noFailFast: Bool, oracles: Bool, differential: Bool): IO[Unit] =
-  manNeed(m).flatMap(_ => fuzzEngine(m.hasUi).flatMap(eng => Ref.of(("", 0)).flatMap(srv => fuzzMan2(FuzzJob(dir, outDir, exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, eng._1, eng._2, srv), replay))))
+  manNeed(m).flatMap(_ => fuzzEngine(m.hasUi).flatMap(eng => Ref.of(("", 0)).flatMap(srv => fuzzReadScenario(dir).flatMap(scn => fuzzMan2(FuzzJob(dir, outDir, exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, eng._1, eng._2, srv, Verify.scenarioFaults(scn)), replay)))))
 
 def fuzzEngine(hasUi: Bool): IO[(Bool, String)] =
   Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (hasUi || e == "compiled") IO.pure((false, "")) else Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))))
@@ -1379,7 +1379,7 @@ def fuzzEngineFallback(job: FuzzJob, why: String): IO[FuzzJob] =
   IO.println(Str.concat("scuzz fuzz: ", Str.concat(why, "; probes run compiled"))).flatMap(_ => IO.pure(fuzzJobCompiled(job)))
 
 def fuzzJobCompiled(job: FuzzJob): FuzzJob =
-  FuzzJob(job.dir, job.outDir, job.exe, job.name, job.hasUi, job.iterations, job.seed, job.noFailFast, job.files, job.oracles, job.uiEnv, job.diff, job.ens, false, "", job.srv)
+  FuzzJob(job.dir, job.outDir, job.exe, job.name, job.hasUi, job.iterations, job.seed, job.noFailFast, job.files, job.oracles, job.uiEnv, job.diff, job.ens, false, "", job.srv, job.faults)
 
 def fuzzUniversals(job: FuzzJob): IO[Unit] =
   fuzzLivePaint(job).flatMap(_ => fuzzSplit(job).flatMap(_ => fuzzDiffFlag(job)))
@@ -1579,14 +1579,14 @@ def fuzzSeedDir(dir: String, name: String, rest: List[(String, Bool)], acc: List
 def fuzzSeedAdd(acc: List[String], src: String, ens: List[En]): List[String] =
   List.concat(acc, Verify.mapSeedE(Verify.parseVerifyEns(src, ens), ens))
 
-def fuzzFaultOf(i: Int): String =
-  if (i <= 0) "" else Str.fromInt(i)
+def fuzzFaultOf(job: FuzzJob, i: Int): String =
+  if (i <= 0 || List.isEmpty(job.faults)) "" else Verify.faultSeed(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1)
 
 def fuzzSearch(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc): IO[FuzzAcc] =
   if (acc.search >= Verify.searchN(job.iterations) || acc.searchFail > 0 && !job.noFailFast) IO.pure(acc) else fuzzSearchRun(job, script, runs, defs, acc, fuzzWorkload(job, script, runs, defs, acc.search, acc.climb))
 
 def fuzzWorkload(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, c: FuzzClimb): FuzzRun =
-  FuzzRun("", "", fuzzWorkloadText(job, script, runs, defs, i, c), Str.fromInt(i), fuzzFaultOf(i))
+  FuzzRun("", "", fuzzWorkloadText(job, script, runs, defs, i, c), Str.fromInt(i), fuzzFaultOf(job, i))
 
 def fuzzWorkloadText(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, c: FuzzClimb): String =
   if (i == 0) fuzzBaseScript(job, script) else fuzzWorkloadPick(job, script, runs, defs, i, if (i % 2 == 1 && c.seed != "") fuzzNudge(c, defs) else "")

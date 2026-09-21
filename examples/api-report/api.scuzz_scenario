@@ -1,6 +1,9 @@
 def setup(): IO[Unit] =
   Fs.write("report.json", "[]")
 
+def faults(): List[String] =
+  ["net", "fs"]
+
 private def reply(status: Int, body: String): IO[(Int, Map[String, String], String)] =
   IO.pure((status, Map.empty(), body))
 

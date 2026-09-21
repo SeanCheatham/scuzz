@@ -1082,6 +1082,79 @@ def paramVar(p: Param, off: Int): Expr =
     case Param(n, _, _, _) => Expr.EVar(n, off)
   }
 
+def scenarioFaults(src: String): List[(Int, Int)] =
+  if (src == "") noFaults() else scenarioFaultsGo(Parse.parse(Lexer.lex(src)))
+
+def noFaults(): List[(Int, Int)] =
+  []
+
+def scenarioFaultsGo(p: Prog): List[(Int, Int)] =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => faultPairs(faultsEntries(defs))
+  }
+
+def faultsEntries(ds: List[Fun]): List[String] =
+  if (List.isEmpty(ds)) noStr() else faultsEntries1(List.at(ds, 0), List.tail(ds))
+
+def faultsEntries1(d: Fun, rest: List[Fun]): List[String] =
+  if (d.name == "faults") faultEntryLits(d.body) else faultsEntries(rest)
+
+def faultEntryLits(e: Expr): List[String] =
+  e match {
+    case Expr.EList(xs) => faultStrLits(xs)
+    case _ => noStr()
+  }
+
+def faultStrLits(xs: List[Expr]): List[String] =
+  if (List.isEmpty(xs)) noStr() else List.concat(faultStrLit(List.at(xs, 0)), faultStrLits(List.tail(xs)))
+
+def faultStrLit(x: Expr): List[String] =
+  x match {
+    case Expr.EStr(s, _) => s :: noStr()
+    case _ => noStr()
+  }
+
+def faultPair(s: String): List[(Int, Int)] =
+  if (s == "fs" || s == "fs:fail") (1, 0) :: noFaults() else if (s == "fs:drop") (1, 1) :: noFaults() else if (s == "fs:corrupt") (1, 2) :: noFaults() else if (s == "net" || s == "net:fail") (2, 0) :: noFaults() else if (s == "net:drop") (2, 1) :: noFaults() else if (s == "net:corrupt") (2, 2) :: noFaults() else if (s == "queue" || s == "queue:fail") (3, 0) :: noFaults() else if (s == "queue:drop") (3, 1) :: noFaults() else if (s == "queue:corrupt") (3, 2) :: noFaults() else noFaults()
+
+def faultPairs(xs: List[String]): List[(Int, Int)] =
+  if (List.isEmpty(xs)) noFaults() else List.concat(faultPair(List.at(xs, 0)), faultPairs(List.tail(xs)))
+
+def faultEntryOk(s: String): Bool =
+  !List.isEmpty(faultPair(s))
+
+def faultSeed(kind: Int, mode: Int, n: Int): String =
+  Str.fromInt(1 + (kind - 1) + 3 * mode + 9 * (n - 1))
+
+def faultRule(src: String, file: String, p: Prog): String =
+  p match {
+    case Prog(_, _, _, _, _, _, defs, _, _) => faultRuleDefs(src, file, defs)
+  }
+
+def faultRuleDefs(src: String, file: String, ds: List[Fun]): String =
+  if (List.isEmpty(ds)) "" else faultRuleHd(src, file, List.at(ds, 0), List.tail(ds))
+
+def faultRuleHd(src: String, file: String, d: Fun, rest: List[Fun]): String =
+  if (d.name != "faults") faultRuleDefs(src, file, rest) else faultRuleDef(src, file, d)
+
+def faultRuleDef(src: String, file: String, d: Fun): String =
+  if (d.priv || !List.isEmpty(d.params) || d.ret != "List[String]") atLoc(file, src, d.off, "faults must be a public def faults(): List[String]") else faultRuleBody(src, file, d)
+
+def faultRuleBody(src: String, file: String, d: Fun): String =
+  d.body match {
+    case Expr.EList(xs) => faultRuleEntries(src, file, d, xs)
+    case _ => atLoc(file, src, d.off, "faults must be a list of string literals")
+  }
+
+def faultRuleEntries(src: String, file: String, d: Fun, xs: List[Expr]): String =
+  if (List.isEmpty(xs)) "" else faultRuleEntry(src, file, d, List.at(xs, 0), List.tail(xs))
+
+def faultRuleEntry(src: String, file: String, d: Fun, x: Expr, rest: List[Expr]): String =
+  x match {
+    case Expr.EStr(s, _) => if (faultEntryOk(s)) faultRuleEntries(src, file, d, rest) else atLoc(file, src, d.off, Str.concat("faults entry ", Str.concat(s, " must be fs, net, or queue with an optional :fail, :drop, or :corrupt mode")))
+    case _ => atLoc(file, src, d.off, "faults must be a list of string literals")
+  }
+
 def scenarioDrvNames(src: String): List[String] =
   if (src == "") noStr() else scenarioDrvNamesGo(Parse.parse(Lexer.lex(src)))
 
@@ -1115,7 +1188,7 @@ def checkScenarioProg(src: String, file: String, live: List[(String, String)], p
   if (p.main != "") Str.concat(file, ":1:1: error: scenario file must not define @main") else if (!List.isEmpty(p.aliases)) Str.concat(file, ":1:1: error: scenario file must not define aliases") else if (!List.isEmpty(p.traits)) Str.concat(file, ":1:1: error: scenario file must not define traits") else if (!List.isEmpty(p.impls)) Str.concat(file, ":1:1: error: scenario file must not define impls") else if (!List.isEmpty(p.imps)) Str.concat(file, ":1:1: error: scenario file must not define imports") else checkScenarioBody(src, file, live, p)
 
 def checkScenarioBody(src: String, file: String, live: List[(String, String)], p: Prog): String =
-  if (defsHaveForbid(p.defs) || exprHasForbid(p.body)) Str.concat(file, ":1:1: error: scenario bodies must not call Property.* or .require") else checkScenarioSetup(src, file, live, p)
+  if (defsHaveForbid(p.defs) || exprHasForbid(p.body)) Str.concat(file, ":1:1: error: scenario bodies must not call Property.* or .require") else if (faultRule(src, file, p) != "") faultRule(src, file, p) else checkScenarioSetup(src, file, live, p)
 
 def checkScenarioSetup(src: String, file: String, live: List[(String, String)], p: Prog): String =
   checkScenarioSetup2(src, file, live, p, setupOf(p.defs))
@@ -1133,7 +1206,7 @@ def checkScenarioPub(src: String, file: String, live: List[(String, String)], p:
   if (d.priv) checkScenarioPublics(src, file, live, p, ctxTy, rest) else checkScenarioPub2(src, file, live, p, ctxTy, d, rest)
 
 def checkScenarioPub2(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun]): String =
-  if (d.name == "setup") checkScenarioPublics(src, file, live, p, ctxTy, rest) else if (hasDot(d.name)) checkScenarioRepl(src, file, live, p, ctxTy, d, rest) else if (Check.isIo(d.ret)) checkScenarioDrv(src, file, live, p, ctxTy, d, rest) else atLoc(file, src, d.off, Str.concat("public def ", Str.concat(d.name, " is not setup, a replacement, or a driver")))
+  if (d.name == "setup" || d.name == "faults") checkScenarioPublics(src, file, live, p, ctxTy, rest) else if (hasDot(d.name)) checkScenarioRepl(src, file, live, p, ctxTy, d, rest) else if (Check.isIo(d.ret)) checkScenarioDrv(src, file, live, p, ctxTy, d, rest) else atLoc(file, src, d.off, Str.concat("public def ", Str.concat(d.name, " is not setup, a replacement, or a driver")))
 
 def checkScenarioRepl(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun]): String =
   if (!Check.isIo(d.ret)) atLoc(file, src, d.off, "replacement must be IO") else checkScenarioRepl2(src, file, live, p, ctxTy, d, rest, liveFunOf(live, replMod(d.name), replLocal(d.name)))

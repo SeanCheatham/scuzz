@@ -24,16 +24,24 @@ def storesAuthenticated(t: Timeline): Verdict =
 })
 
 def unauthorized(t: Timeline): Verdict =
-  Verdict.every(t, i => !(Timeline.driveHas(t, i, "tampered") || Timeline.driveHas(t, i, "wrongKey") || Timeline.driveHas(t, i, "missingSignature") || Timeline.driveHas(t, i, "emptySecret")) || faulted(t, i) || Timeline.fileTextIs(t, i, "status.txt", "401"))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "tampered") || Timeline.driveHas(t, b, "wrongKey") || Timeline.driveHas(t, b, "missingSignature") || Timeline.driveHas(t, b, "emptySecret")) || Timeline.fileTextIs(t, b, "status.txt", "401") || faulted(t, b) && Timeline.fileSame(t, a, b, "status.txt")
+})
 
 def malformed(t: Timeline): Verdict =
-  Verdict.every(t, i => !(Timeline.driveHas(t, i, "badJson") || Timeline.driveHas(t, i, "arrayJson")) || faulted(t, i) || Timeline.fileTextIs(t, i, "status.txt", "400"))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "badJson") || Timeline.driveHas(t, b, "arrayJson")) || Timeline.fileTextIs(t, b, "status.txt", "400") || faulted(t, b) && Timeline.fileSame(t, a, b, "status.txt")
+})
 
 def routes(t: Timeline): Verdict =
-  Verdict.every(t, i => faulted(t, i) || (!Timeline.driveHas(t, i, "wrongPath") || Timeline.fileTextIs(t, i, "status.txt", "404")) && (!Timeline.driveHas(t, i, "wrongMethod") || Timeline.fileTextIs(t, i, "status.txt", "405")))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => (!Timeline.driveHas(t, b, "wrongPath") || Timeline.fileTextIs(t, b, "status.txt", "404")) && (!Timeline.driveHas(t, b, "wrongMethod") || Timeline.fileTextIs(t, b, "status.txt", "405")) || faulted(t, b) && Timeline.fileSame(t, a, b, "status.txt")
+})
 
 def storageStatus(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.driveHas(t, i, "storageFailure") || faulted(t, i) || Timeline.fileTextIs(t, i, "status.txt", "503"))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "storageFailure") || Timeline.fileTextIs(t, b, "status.txt", "503") || faulted(t, b) && Timeline.fileSame(t, a, b, "status.txt")
+})
 
 private def batchPayload(t: Timeline, i: Int): Bool =
   Timeline.fileTextIs(t, i, "webhook.json", "{\"kind\":\"alpha\"}") || Timeline.fileTextIs(t, i, "webhook.json", "{\"kind\":\"beta\"}")
@@ -52,5 +60,7 @@ def continuedStorage(t: Timeline): Verdict =
 })
 
 def batchStatus(t: Timeline): Verdict =
-  Verdict.every(t, i => !(Timeline.driveHas(t, i, "concurrent") || Timeline.driveHas(t, i, "continued")) || faulted(t, i) || Timeline.fileTextIs(t, i, "alpha.status", "200") && Timeline.fileTextIs(t, i, "beta.status", "200") && Timeline.fileTextIs(t, i, "forged.status", "401") && (!Timeline.driveHas(t, i, "continued") || Timeline.fileTextIs(t, i, "final.status", "200")))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "concurrent") || Timeline.driveHas(t, b, "continued")) || (Timeline.fileTextIs(t, b, "alpha.status", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "alpha.status", "503") || Timeline.fileSame(t, a, b, "alpha.status"))) && (Timeline.fileTextIs(t, b, "beta.status", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "beta.status", "503") || Timeline.fileSame(t, a, b, "beta.status"))) && (Timeline.fileTextIs(t, b, "forged.status", "401") || faulted(t, b) && (Timeline.fileTextIs(t, b, "forged.status", "503") || Timeline.fileSame(t, a, b, "forged.status"))) && (!Timeline.driveHas(t, b, "continued") || Timeline.fileTextIs(t, b, "final.status", "200") || faulted(t, b) && (Timeline.fileTextIs(t, b, "final.status", "503") || Timeline.fileSame(t, a, b, "final.status")))
+})
 

@@ -3694,11 +3694,19 @@ int64_t sz_timeline_file_same(void *tl, int64_t a, int64_t b,
   if (!normalized)
     return 0;
   prefix = tl_file_line(normalized, "", 0);
-  sz_free(normalized);
   left = tl_file_contents(before, prefix, strlen(prefix), &left_len);
   right = tl_file_contents(after, prefix, strlen(prefix), &right_len);
-  same = left && right && left_len == right_len &&
-         memcmp(left, right, left_len) == 0;
+  if (left && right)
+    same = left_len == right_len && memcmp(left, right, left_len) == 0;
+  else if (left || right)
+    same = 0;
+  else {
+    /* The snapshot holds files only. A live directory is not a same file;
+     * a path missing at both states is the same. */
+    MemNode *dir = g_fs_fake ? fs_find(normalized) : NULL;
+    same = dir && dir->is_dir ? 0 : 1;
+  }
+  sz_free(normalized);
   free(prefix);
   return same;
 }
