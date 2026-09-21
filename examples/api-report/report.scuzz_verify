@@ -14,7 +14,9 @@ oracle rejectsJson(): Bool =
   Report.decode(200, "{") == Result.Err("API returned invalid JSON") && Report.decode(200, "{}") == Result.Err("API response must be an array") && Report.decode(200, "[{}]") == Result.Err("Each record must have a string state")
 
 def successWrites(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.driveHas(t, i, "success") || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "success") || Timeline.effectHas(t, b, "Fs.write") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
+})
 
 def failuresPreserveReport(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "rejected") || Timeline.driveHas(t, i, "malformed") || Timeline.driveHas(t, i, "badStatus") || Timeline.driveHas(t, i, "timedOut")) || !Timeline.effectHas(t, i, "Fs.write"))
@@ -32,7 +34,9 @@ oracle retryPolicy(status: Int): Bool =
   Report.retryable(status) == (status == 429 || status >= 502 && status <= 504)
 
 def recoveredRequestWrites(t: Timeline): Verdict =
-  Verdict.every(t, i => !Timeline.driveHas(t, i, "recovers") || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !Timeline.driveHas(t, b, "recovers") || Timeline.effectHas(t, b, "Fs.write") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
+})
 
 def retryFailuresPreserveReport(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "exhausted") || Timeline.driveHas(t, i, "retryDeadline") || Timeline.driveHas(t, i, "permanentStatus")) || !Timeline.effectHas(t, i, "Fs.write"))
@@ -47,7 +51,9 @@ oracle retryHeaderPolicy(): Bool =
   Report.retryDelay(429, Map.empty(), 0) == 1000 && Report.retryDelay(503, Map.empty(), 0) == 100 && Report.retryDelay(401, Map.set(Map.empty(), "Retry-After", "1"), 0) == -1 && Report.retryDelay(429, Map.set(Map.empty(), "rEtRy-AfTeR", "2"), 0) == 2000 && Report.retryDelay(503, Map.set(Map.empty(), "Retry-After", "2"), 0) == 2000 && Report.retryDelay(429, Map.set(Map.set(Map.empty(), "Retry-After", "1"), "retry-after", "2"), 0) == -1
 
 def rateLimitRecovery(t: Timeline): Verdict =
-  Verdict.every(t, i => !(Timeline.driveHas(t, i, "dateLimited") || Timeline.driveHas(t, i, "dateExpired") || Timeline.driveHas(t, i, "rateLimited") || Timeline.driveHas(t, i, "zeroRetry")) || Timeline.faultKindHas(t, i, "net") || Timeline.effectHas(t, i, "Fs.write"))
+  Verdict.stepEvery(t, pair => pair match {
+  case (a, b) => !(Timeline.driveHas(t, b, "dateLimited") || Timeline.driveHas(t, b, "dateExpired") || Timeline.driveHas(t, b, "rateLimited") || Timeline.driveHas(t, b, "zeroRetry")) || Timeline.effectHas(t, b, "Fs.write") || (Timeline.faultKindHas(t, b, "net") || Timeline.faultKindHas(t, b, "fs")) && Timeline.fileSame(t, a, b, "report.json")
+})
 
 def rateLimitFailurePreservesReport(t: Timeline): Verdict =
   Verdict.every(t, i => !(Timeline.driveHas(t, i, "dateDeadline") || Timeline.driveHas(t, i, "rateDeadline") || Timeline.driveHas(t, i, "rateExhausted") || Timeline.driveHas(t, i, "badRetryAfter")) || !Timeline.effectHas(t, i, "Fs.write"))

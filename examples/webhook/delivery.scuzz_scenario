@@ -1,5 +1,8 @@
 def setup(): IO[Unit] =
-  Fs.write("webhook.json", "prior").flatMap(_ => Fs.write("status.txt", ""))
+  Fs.write("webhook.json", "prior").flatMap(_ => Fs.write("status.txt", "")).flatMap(_ => Fs.write("alpha.status", "")).flatMap(_ => Fs.write("beta.status", "")).flatMap(_ => Fs.write("forged.status", "")).flatMap(_ => Fs.write("final.status", ""))
+
+def faults(): List[String] =
+  ["net", "fs"]
 
 private def payload(): String =
   "{\"kind\":\"ping\"}"

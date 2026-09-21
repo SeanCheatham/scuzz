@@ -283,6 +283,35 @@ fi
 grep -q 'claim drive never fired: storm' /tmp/scuzz-vacuous-corpus.log
 rm -rf "$vacuous_dir"
 
+# The scenario declares its fault surface. An unknown entry fails check.
+fault_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-faults.XXXXXX")"
+mkdir -p "$fault_dir/src"
+cat > "$fault_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "faults"
+MANIFEST
+cat > "$fault_dir/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$fault_dir/faults.scuzz_scenario" <<'SCENARIO'
+def setup(): IO[Unit] =
+  IO.pure(())
+
+def faults(): List[String] =
+  ["disk"]
+
+def calm(): IO[Unit] =
+  IO.pure(())
+
+SCENARIO
+if "$SCUZZ" check "$fault_dir" > /tmp/scuzz-faults.log 2>&1; then
+  echo "unknown faults entry should fail check" && exit 1
+fi
+cat /tmp/scuzz-faults.log
+grep -q 'faults entry disk must be fs, net, or queue' /tmp/scuzz-faults.log
+rm -rf "$fault_dir"
+
 # Generation: a compound where keeps both bounds; unbounded Ints reach the
 # overflow edges; strings cover the delimiter alphabet; ADT string fields
 # carry delimiters through both engines.
@@ -798,7 +827,7 @@ assert comparison["corpus"]["failures"] == 1
 assert comparison["breadth"]["claimed"]["fileSame"] == ["report.txt"]
 PY_CHECK
 rm -rf "$file_compare_dir"
-fuzz_both_engines examples/io 2 io
+fuzz_both_engines examples/io 16 io
 python3 - <<'PY'
 import json
 with open("examples/io/build/fuzz/summary.json") as f:

@@ -2606,9 +2606,9 @@ static void test_file_timeline(void) {
   assert(!sz_timeline_file_same(timeline, 0, 1, path));
   assert(!sz_timeline_file_same(timeline, 1, 0, path));
   assert(!sz_timeline_file_same(timeline, 0, 2, path));
-  assert(!sz_timeline_file_same(timeline, 2, 2, path));
+  assert(sz_timeline_file_same(timeline, 2, 2, path));
   assert(sz_timeline_file_same(timeline, 0, 3, empty_path));
-  assert(!sz_timeline_file_same(timeline, 1, 2, empty_path));
+  assert(sz_timeline_file_same(timeline, 1, 2, empty_path));
   assert(!sz_timeline_file_same(timeline, 0, 3, directory));
   assert(!sz_timeline_file_same(timeline, -1, 0, path));
   assert(!sz_timeline_file_same(timeline, 0, 4, path));
