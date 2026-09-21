@@ -2,7 +2,7 @@ record Build(ok: Bool, ir: String, diags: String)
 
 record PkgOut(ok: Bool, name: String, ll: String, llPath: String, link: String, diags: String)
 
-record FuzzRun(path: String, src: String, script: String, sched: String, fault: String)
+record FuzzRun(path: String, src: String, script: String, sched: String, fault: String, picks: List[String])
 
 record FuzzClimb(best: Map[String, Int], seed: String, tries: Int, exp: Int, sign: Int)
 
@@ -1473,7 +1473,7 @@ def noRuns(): List[FuzzRun] =
   []
 
 def fuzzRunOf(path: String, src: String): FuzzRun =
-  FuzzRun(path, src, Verify.nls(Verify.parseEvents(src)), Verify.tomlQuoted(src, "schedule_seed"), Verify.tomlQuoted(src, "fault_seed"))
+  FuzzRun(path, src, Verify.nls(Verify.parseEvents(src)), Verify.tomlQuoted(src, "schedule_seed"), Verify.tomlQuoted(src, "fault_seed"), Verify.parseStrArr(src, "schedule_picks"))
 
 def fuzzCorpusFiles(dir: String): IO[List[FuzzRun]] =
   Fs.list(joinSlash(dir, "corpus")).flatMap(ents => fuzzCorpusRead(dir, Verify.sortStrs(fuzzTomlNames(ents, Verify.noStr())))).handleErrorWith(_ => IO.pure(noRuns()))
@@ -1506,7 +1506,7 @@ def fuzzSeedScript(hasUi: Bool, line: String): String =
 """, line) else line
 
 def fuzzSeedRun(seedsPath: String, line: String, hasUi: Bool): FuzzRun =
-  FuzzRun(seedsPath, "", Str.concat(fuzzSeedScript(hasUi, line), Verify.nl()), "", "")
+  FuzzRun(seedsPath, "", Str.concat(fuzzSeedScript(hasUi, line), Verify.nl()), "", "", Verify.noStr())
 
 def fuzzHasScript(runs: List[FuzzRun], script: String): Bool =
   if (List.isEmpty(runs)) false else fuzzHasScriptHd(List.at(runs, 0), List.tail(runs), script)
@@ -1533,13 +1533,13 @@ def fuzzSaveRepro(outDir: String, run: FuzzRun): IO[String] =
   Fs.mkdirs(joinSlash(outDir, "fuzz")).flatMap(_ => fuzzSaveRepro2(outDir, run))
 
 def fuzzSaveRepro2(outDir: String, run: FuzzRun): IO[String] =
-  fuzzSaveRepro3(joinSlash(joinSlash(outDir, "fuzz"), "repro.toml"), run)
+  fuzzReadOr(fuzzSchedPicksPath(outDir)).flatMap(picks => fuzzSaveRepro3(joinSlash(joinSlash(outDir, "fuzz"), "repro.toml"), run, List.filter(Verify.linesOf(picks), l => l != "")))
 
-def fuzzSaveRepro3(path: String, run: FuzzRun): IO[String] =
-  Fs.write(path, fuzzReproBody(run)).flatMap(_ => IO.pure(path))
+def fuzzSaveRepro3(path: String, run: FuzzRun, picks: List[String]): IO[String] =
+  Fs.write(path, fuzzReproBody(run, picks)).flatMap(_ => IO.pure(path))
 
-def fuzzReproBody(run: FuzzRun): String =
-  Verify.withOracle(if (run.src != "") run.src else Verify.reproText(run.sched, run.fault, Verify.linesOf(run.script)), Verify.linesOf(run.script))
+def fuzzReproBody(run: FuzzRun, picks: List[String]): String =
+  Verify.withOracle(if (run.src != "") run.src else Verify.reproText(run.sched, run.fault, picks, Verify.linesOf(run.script)), Verify.linesOf(run.script))
 
 def fuzzDrivePath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "drive.json")
@@ -1586,7 +1586,7 @@ def fuzzSearch(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun
   if (acc.search >= Verify.searchN(job.iterations) || acc.searchFail > 0 && !job.noFailFast) IO.pure(acc) else fuzzSearchRun(job, script, runs, defs, acc, fuzzWorkload(job, script, runs, defs, acc.search, acc.climb))
 
 def fuzzWorkload(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, c: FuzzClimb): FuzzRun =
-  FuzzRun("", "", fuzzWorkloadText(job, script, runs, defs, i, c), Str.fromInt(i), fuzzFaultOf(job, i))
+  FuzzRun("", "", fuzzWorkloadText(job, script, runs, defs, i, c), Str.fromInt(i), fuzzFaultOf(job, i), Verify.noStr())
 
 def fuzzWorkloadText(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], i: Int, c: FuzzClimb): String =
   if (i == 0) fuzzBaseScript(job, script) else fuzzWorkloadPick(job, script, runs, defs, i, if (i % 2 == 1 && c.seed != "") fuzzNudge(c, defs) else "")
@@ -1687,7 +1687,7 @@ def fuzzSearchRun(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[
   fuzzWriteDrive(job.outDir, run.script).flatMap(_ => fuzzProbeJob(job, run).flatMap(bad => fuzzDistRead(job).flatMap(ds => fuzzSearchResult(job, script, runs, defs, FuzzAcc(acc.search, acc.searchFail, acc.corpFail, acc.repro, fuzzClimbNext(acc.climb, run, acc.search, ds)), run, bad))))
 
 def fuzzSearchResult(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun, bad: Int): IO[FuzzAcc] =
-  if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, defs, run).flatMap(small => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path, acc.climb)))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro, acc.climb))
+  if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, defs, run).flatMap(small => fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeJob(job, small).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path, acc.climb)))))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro, acc.climb))
 
 def fuzzConfirm(job: FuzzJob, small: FuzzRun): IO[Unit] =
   if (!job.ev) IO.pure(()) else fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeRun(job.exe, false, job.outDir, small, "").flatMap(bad => if (bad > 0) IO.pure(()) else failMsg("evaluator search failure did not reproduce on the compiled binary", "scuzz fuzz")))
@@ -1704,7 +1704,13 @@ def fuzzShrinkAgain(job: FuzzJob, before: FuzzRun, r: (FuzzRun, Int)): IO[FuzzRu
   }
 
 def fuzzShrinkPass(job: FuzzJob, run: FuzzRun, at: Int, budget: Int): IO[(FuzzRun, Int)] =
-  if (budget <= 0 || at >= List.len(Verify.linesOf(run.script)) || List.len(Verify.linesOf(run.script)) <= 1) IO.pure((run, budget)) else fuzzShrinkTry(job, run, at, budget, FuzzRun("", "", Verify.nls(List.concat(List.take(Verify.linesOf(run.script), at), List.drop(Verify.linesOf(run.script), at + 1))), run.sched, run.fault))
+  if (budget <= 0 || at >= List.len(Verify.linesOf(run.script)) || List.len(Verify.linesOf(run.script)) <= 1) IO.pure((run, budget)) else fuzzShrinkTry(job, run, at, budget, FuzzRun("", "", Verify.nls(List.concat(List.take(Verify.linesOf(run.script), at), List.drop(Verify.linesOf(run.script), at + 1))), run.sched, run.fault, fuzzDropPick(run.picks, run.script, at)))
+
+def fuzzDropPick(picks: List[String], script: String, at: Int): List[String] =
+  if (List.isEmpty(picks)) picks else fuzzDropPickAt(picks, List.len(picks) - List.len(Verify.linesOf(script)) + at)
+
+def fuzzDropPickAt(picks: List[String], i: Int): List[String] =
+  if (i < 0 || i >= List.len(picks)) picks else List.concat(List.take(picks, i), List.drop(picks, i + 1))
 
 def fuzzShrinkTry(job: FuzzJob, run: FuzzRun, at: Int, budget: Int, candidate: FuzzRun): IO[(FuzzRun, Int)] =
   fuzzWriteDrive(job.outDir, candidate.script).flatMap(_ => fuzzProbeJob(job, candidate).flatMap(bad => fuzzShrinkResult(job, run, at, budget, candidate, bad)))
@@ -1736,23 +1742,26 @@ def fuzzShrinkIntMidProbe(job: FuzzJob, defs: List[Fun], run: FuzzRun, line: Int
   fuzzWriteDrive(job.outDir, fuzzShrinkIntRun(run, line, j, mid).script).flatMap(_ => fuzzProbeJob(job, fuzzShrinkIntRun(run, line, j, mid)).flatMap(bad => if (bad > 0) fuzzShrinkIntMid(job, defs, run, line, j, lo, mid, rest, budget - 1) else fuzzShrinkIntMid(job, defs, run, line, j, mid, hi, rest, budget - 1)))
 
 def fuzzShrinkIntRun(run: FuzzRun, line: Int, j: Int, value: Int): FuzzRun =
-  FuzzRun("", "", Verify.nls(List.setAt(Verify.linesOf(run.script), line, fuzzNudgeToks(Verify.scriptToks(List.at(Verify.linesOf(run.script), line)), j + 2, value))), run.sched, run.fault)
+  FuzzRun("", "", Verify.nls(List.setAt(Verify.linesOf(run.script), line, fuzzNudgeToks(Verify.scriptToks(List.at(Verify.linesOf(run.script), line)), j + 2, value))), run.sched, run.fault, run.picks)
 
 def fuzzPromoteFailure(job: FuzzJob, path: String, i: Int): IO[Unit] =
   Fs.read(path).flatMap(src => Fs.mkdirs(joinSlash(job.dir, "corpus")).flatMap(_ => Fs.write(joinSlash(joinSlash(job.dir, "corpus"), Str.concat("search-", Str.concat(Str.fromInt(job.seed), Str.concat("-", Str.concat(Str.fromInt(i), ".toml"))))), src).flatMap(_ => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "promo"), "1"))))
 
 def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun, uiEnv: String): IO[Int] =
-  runProbe(Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, outDir, uiEnv), exe)).flatMap(r => fuzzProbeCodeIo(r))
+  runProbe(Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, run.picks, outDir, uiEnv), exe)).flatMap(r => fuzzProbeCodeIo(r))
 
 def fuzzProbeJob(job: FuzzJob, run: FuzzRun): IO[Int] =
-  if (!job.ev) fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv) else evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", false, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, job.outDir, "")).flatMap(code => IO.pure(if (code == 0) 0 else 1))
+  if (!job.ev) fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv) else evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", false, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, "")).flatMap(code => IO.pure(if (code == 0) 0 else 1))
 
 def kv(pre: String, key: String, val: String): String =
   if (pre == "") Str.concat(key, Str.concat("=", Str.concat(val, """
 """))) else Str.concat(pre, Str.concat(key, Str.concat("=", Str.concat(shQuote(val), " "))))
 
-def fuzzProbeEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String, outDir: String, uiEnv: String): String =
-  Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnv else "", Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir))))))
+def fuzzProbeEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String, picks: List[String], outDir: String, uiEnv: String): String =
+  Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnv else "", Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzPicksEnv(pre, picks), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir)))))))
+
+def fuzzPicksEnv(pre: String, picks: List[String]): String =
+  if (List.isEmpty(picks)) "" else kv(pre, "SCHED_PICKS", List.join(picks, ";"))
 
 def fuzzScriptEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool): String =
   if (hasScript) fuzzDriveEnv(pre, hasUi, scriptPath, dumpPath) else if (hasUi) Str.concat(kv(pre, "UI_TAP", "1"), kv(pre, "FUZZ_DUMP", dumpPath)) else ""
@@ -1773,7 +1782,7 @@ def fuzzDistancePath(outDir: String): String =
   joinSlash(outDir, "distance.txt")
 
 def fuzzReachEnv(pre: String, outDir: String): String =
-  Str.concat(kv(pre, "SOMETIMES_DUMP", fuzzSometimesPath(outDir)), Str.concat(kv(pre, "TRIGGER_DUMP", fuzzTriggerPath(outDir)), Str.concat(kv(pre, "STATE_VARIED_DUMP", fuzzVariedPath(outDir)), kv(pre, "CLAIM_DUMP", fuzzClaimPath(outDir)))))
+  Str.concat(kv(pre, "SOMETIMES_DUMP", fuzzSometimesPath(outDir)), Str.concat(kv(pre, "TRIGGER_DUMP", fuzzTriggerPath(outDir)), Str.concat(kv(pre, "STATE_VARIED_DUMP", fuzzVariedPath(outDir)), Str.concat(kv(pre, "CLAIM_DUMP", fuzzClaimPath(outDir)), kv(pre, "SCHED_PICKS_DUMP", fuzzSchedPicksPath(outDir))))))
 
 def fuzzCoveragePath(outDir: String): String =
   joinSlash(outDir, "coverage.txt")
@@ -1790,13 +1799,18 @@ def fuzzVariedPath(outDir: String): String =
 def fuzzClaimPath(outDir: String): String =
   joinSlash(joinSlash(outDir, "fuzz"), "claims.dump")
 
+def fuzzSchedPicksPath(outDir: String): String =
+  joinSlash(joinSlash(outDir, "fuzz"), "schedule.picks")
+
 def fuzzProbeCode(r: (Int, String, String)): Int =
   r match {
     case (code, _out, _err) => if (code == 0) 0 else 1
   }
 
 def fuzzProbeCodeIo(r: (Int, String, String)): IO[Int] =
-  IO.pure(fuzzProbeCode(r))
+  r match {
+    case (code, _out, err) => if (code > 0 && Str.contains(err, "schedule drift")) IO.println(Verify.driftLine(err)).flatMap(_ => IO.pure(code)) else IO.pure(code)
+  }
 
 def fuzzDone(job: FuzzJob, corpus: Int, acc: FuzzAcc, mut: FuzzMut): IO[Unit] =
   fuzzTomlFloor(job.dir).flatMap(floor => fuzzWriteSummary(job, corpus, acc, mut, floor).flatMap(reach => fuzzReachPrint(reach._1, reach._2, reach._3, reach._4).flatMap(_ => fuzzDoneFloor(acc.searchFail + acc.corpFail, mut, floor, job.iterations, reach._1, reach._2, reach._3))))
@@ -1968,7 +1982,7 @@ def fuzzProbeAtRun(job: FuzzJob, exe: String, mutDir: String, script: String, sc
   if (job.ev) evProbe(job, exe, fuzzProbeAtEnv("", job, mutDir, script, sched, fault)) else runProbe(Str.concat(fuzzProbeAtEnv("SCUZZ_", job, mutDir, script, sched, fault), exe)).flatMap(r => IO.pure(r._1))
 
 def fuzzProbeAtEnv(pre: String, job: FuzzJob, mutDir: String, script: String, sched: String, fault: String): String =
-  Str.concat(fuzzProbeEnv(pre, job.hasUi, joinSlash(mutDir, "drive.json"), joinSlash(mutDir, "dump.json"), script != "", sched, fault, mutDir, job.uiEnv), fuzzTlEnv(pre, joinSlash(mutDir, "timeline.txt")))
+  Str.concat(fuzzProbeEnv(pre, job.hasUi, joinSlash(mutDir, "drive.json"), joinSlash(mutDir, "dump.json"), script != "", sched, fault, Verify.noStr(), mutDir, job.uiEnv), fuzzTlEnv(pre, joinSlash(mutDir, "timeline.txt")))
 
 def fuzzTlEnv(pre: String, path: String): String =
   kv(pre, "TIMELINE_DUMP", path)

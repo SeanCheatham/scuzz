@@ -2609,6 +2609,7 @@ typedef struct Fiber {
   struct Fiber *wait_next;
   struct Fiber *all_next;
   int32_t pct_prio; /* higher wins; PCT demotion goes below every assigned prio */
+  int32_t ordinal;  /* creation order across the probe run */
   int spin; /* 1: a structural node set cur; step it in the same scheduler step */
 } Fiber;
 
@@ -2635,10 +2636,98 @@ typedef struct Sched {
   int32_t pct_low;   /* next demotion priority (0, -1, -2, …) */
   int pct_contention; /* 1-based count of ready_count>1 picks */
   int pct_change[SZ_PCT_K_MAX];
+  int32_t replay[SZ_PCT_STEP_BOUND]; /* recorded picks for this run */
+  int replay_n;         /* recorded pick count; 0 = no replay */
+  int32_t replay_fibers; /* cumulative fiber count the segment recorded */
+  int drift_step;       /* contention step where replay diverged */
+  int32_t drift_want;   /* recorded fiber missing at drift_step */
+  int32_t pick_log[SZ_PCT_STEP_BOUND]; /* picks made this run */
+  int pick_n;
   int bounded;       /* 1 under the fake clock: step and spin limits apply */
 } Sched;
 
 static Sched *g_sched = NULL;
+static int32_t g_fiber_ordinal; /* next fiber ordinal across the probe run */
+
+enum { SZ_PICK_SEG_MAX = 64 };
+static int32_t g_pick_segs[SZ_PICK_SEG_MAX][SZ_PCT_STEP_BOUND];
+static int g_pick_seg_len[SZ_PICK_SEG_MAX];
+static int32_t g_pick_run_fibers[SZ_PICK_SEG_MAX]; /* fiber count per segment */
+static char g_pick_seg_name[SZ_PICK_SEG_MAX][96];
+static int g_pick_seg_used[SZ_PICK_SEG_MAX];
+static int g_pick_seg_n = -1; /* parsed SCUZZ_SCHED_PICKS segments; -1 = unread */
+static const char *g_pick_run_name = ""; /* drive name of the running IO */
+
+/* SCUZZ_SCHED_PICKS: per-run replay segments "name fibers:csv;...". Each
+ * run_io arms from the segment for its drive name; nameless runs consume
+ * nameless segments in order. csv lists the fiber ordinal picked at each
+ * contention step; fibers is the cumulative fiber count of the probe run. */
+static void pick_parse_env(void) {
+  const char *env = getenv("SCUZZ_SCHED_PICKS");
+  const char *p = env;
+  g_pick_seg_n = 0;
+  if (!env || !env[0])
+    return;
+  while (p && g_pick_seg_n < SZ_PICK_SEG_MAX) {
+    char *end = strchr(p, ';');
+    size_t n = end ? (size_t)(end - p) : strlen(p);
+    char seg[1024];
+    char *csv;
+    char *sp;
+    int len = 0;
+    if (n >= sizeof seg)
+      n = sizeof seg - 1;
+    memcpy(seg, p, n);
+    seg[n] = 0;
+    sp = strchr(seg, ' ');
+    csv = sp ? strchr(sp + 1, ':') : NULL;
+    if (sp) {
+      size_t nn = (size_t)(sp - seg);
+      if (nn >= sizeof g_pick_seg_name[0])
+        nn = sizeof g_pick_seg_name[0] - 1;
+      memcpy(g_pick_seg_name[g_pick_seg_n], seg, nn);
+      g_pick_seg_name[g_pick_seg_n][nn] = 0;
+      if (strcmp(g_pick_seg_name[g_pick_seg_n], "-") == 0)
+        g_pick_seg_name[g_pick_seg_n][0] = 0;
+    } else {
+      g_pick_seg_name[g_pick_seg_n][0] = 0;
+    }
+    g_pick_run_fibers[g_pick_seg_n] =
+        sp ? (int32_t)strtol(sp + 1, NULL, 10) : 0;
+    csv = csv ? csv + 1 : seg;
+    while (len < SZ_PCT_STEP_BOUND) {
+      char *comma;
+      long v = strtol(csv, &comma, 10);
+      if (comma == csv)
+        break;
+      g_pick_segs[g_pick_seg_n][len++] = (int32_t)v;
+      if (*comma != ',')
+        break;
+      csv = comma + 1;
+    }
+    g_pick_seg_len[g_pick_seg_n] = len;
+    g_pick_seg_used[g_pick_seg_n] = 0;
+    g_pick_seg_n++;
+    p = end ? end + 1 : NULL;
+  }
+}
+
+void sz_sched_set_pick_name(const char *name) {
+  g_pick_run_name = name ? name : "";
+}
+
+void sz_sched_picks_probe_reset(void) {
+  const char *path = getenv("SCUZZ_SCHED_PICKS_DUMP");
+  FILE *f;
+  g_fiber_ordinal = 0;
+  g_pick_seg_n = -1;
+  g_pick_run_name = "";
+  if (path && path[0]) {
+    f = fopen(path, "w");
+    if (f)
+      fclose(f);
+  }
+}
 
 /* Same LCG as `scuzz fuzz` schedule search. */
 enum { SZ_LCG_M = 2147483647, SZ_LCG_A = 48271, SZ_LCG_SEED_MOD = 2147483646 };
@@ -2729,6 +2818,27 @@ static void sched_arm_from_env(Sched *s) {
   s->pct_k = k;
   s->sched_rng = sched_lcg_seed(rng);
   pct_init_changes(s);
+  s->replay_n = 0;
+  s->replay_fibers = 0;
+  s->drift_step = 0;
+  s->drift_want = 0;
+  s->pick_n = 0;
+  if (g_pick_seg_n < 0)
+    pick_parse_env();
+  {
+    int i;
+    for (i = 0; i < g_pick_seg_n; i++) {
+      if (g_pick_seg_used[i])
+        continue;
+      if (strcmp(g_pick_seg_name[i], g_pick_run_name) != 0)
+        continue;
+      memcpy(s->replay, g_pick_segs[i], sizeof s->replay);
+      s->replay_n = g_pick_seg_len[i];
+      s->replay_fibers = g_pick_run_fibers[i];
+      g_pick_seg_used[i] = 1;
+      break;
+    }
+  }
 }
 
 static ContFrame *cont_push_flatmap(ContFrame *stack, SzCont cont, void *env) {
@@ -2990,8 +3100,41 @@ static int pct_is_change(const Sched *s, int step) {
   return 0;
 }
 
+/* Append this run's recorded picks to SCUZZ_SCHED_PICKS_DUMP:
+ * "name fibers:csv" or "name fibers:-" when no contention ran. */
+static void sched_pick_log_flush(const Sched *s) {
+  const char *path = getenv("SCUZZ_SCHED_PICKS_DUMP");
+  FILE *f;
+  int i;
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "a");
+  if (!f)
+    return;
+  fprintf(f, "%s %d:", g_pick_run_name[0] ? g_pick_run_name : "-",
+          (int)g_fiber_ordinal);
+  if (s->pick_n <= 0) {
+    fprintf(f, "-");
+  } else {
+    for (i = 0; i < s->pick_n; i++)
+      fprintf(f, "%s%d", i ? "," : "", (int)s->pick_log[i]);
+  }
+  fprintf(f, "\n");
+  fclose(f);
+}
+
+static Fiber *ready_find_ordinal(Sched *s, int32_t ord) {
+  Fiber *f;
+  for (f = s->ready_head; f; f = f->ready_next)
+    if (f->ordinal == ord)
+      return f;
+  return NULL;
+}
+
 /* Pick next ready fiber: FIFO when disarmed or n<=1; else PCT (highest prio,
- * with at most k inversions at pre-drawn contention steps). */
+ * with at most k inversions at pre-drawn contention steps). A recorded pick
+ * segment pins the choice at each contention step it covers; a recorded
+ * fiber that is not ready marks drift. */
 static Fiber *ready_dequeue(Sched *s) {
   Fiber *f;
   int n;
@@ -3010,7 +3153,21 @@ static Fiber *ready_dequeue(Sched *s) {
       f->pct_prio = s->pct_low;
     }
   }
-  f = ready_highest(s);
+  if (s->pct_contention <= s->replay_n) {
+    int32_t want = s->replay[s->pct_contention - 1];
+    f = ready_find_ordinal(s, want);
+    if (!f) {
+      s->drift_step = s->pct_contention;
+      s->drift_want = want;
+      return NULL;
+    }
+  } else {
+    f = ready_highest(s);
+  }
+  if (s->pct_contention <= SZ_PCT_STEP_BOUND) {
+    s->pick_log[s->pct_contention - 1] = f->ordinal;
+    s->pick_n = s->pct_contention;
+  }
   ready_remove(s, f);
   return f;
 }
@@ -3217,6 +3374,7 @@ static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
   f->ui_callback = parent && parent->ui_callback ? 1 : 0;
   f->join_kind = jk;
   f->child_slot = slot;
+  f->ordinal = ++g_fiber_ordinal;
   if (g_sched) {
     f->all_next = g_sched->all_fibers;
     g_sched->all_fibers = f;
@@ -4299,6 +4457,8 @@ static SzIoResult run_io(SzIo *root) {
     int deadlocked = 0;
     for (;;) {
       Fiber *f = ready_dequeue(&sched);
+      if (sched.drift_step)
+        break;
       if (f) {
         if (f->state == FIB_CANCELLED || f->state == FIB_DONE)
           continue;
@@ -4334,11 +4494,26 @@ static SzIoResult run_io(SzIo *root) {
   {
     int root_settled = sched.root->state == FIB_DONE ||
                        sched.root->state == FIB_CANCELLED;
-    if (sched.root->state == FIB_DONE && sched.root->result_ok) {
-      result.ok = 1;
-      result.value = sched.root->result_value;
-      sched.root->result_value = NULL;
-    } else if (sched.root->state == FIB_DONE) {
+  if (sched.drift_step) {
+    char msg[128];
+    snprintf(msg, sizeof msg,
+             "schedule drift: recorded fiber %d not ready at contention "
+             "step %d",
+             (int)sched.drift_want, sched.drift_step);
+    result.ok = 0;
+    result.error = sz_error_new(1, msg);
+  } else if (sched.root->state == FIB_DONE && sched.root->result_ok &&
+             (sched.replay_n > sched.pct_contention ||
+              (sched.replay_fibers &&
+               sched.replay_fibers != g_fiber_ordinal))) {
+    result.ok = 0;
+    result.error = sz_error_new(
+        1, "schedule drift: recorded picks outlast the run");
+  } else if (sched.root->state == FIB_DONE && sched.root->result_ok) {
+    result.ok = 1;
+    result.value = sched.root->result_value;
+    sched.root->result_value = NULL;
+  } else if (sched.root->state == FIB_DONE) {
       result.ok = 0;
       result.error = sched.root->result_error;
       sched.root->result_error = NULL;
@@ -4363,6 +4538,7 @@ static SzIoResult run_io(SzIo *root) {
   }
 
   g_sched = previous_sched;
+  sched_pick_log_flush(&sched);
   sched_free_fibers(&sched);
   return result;
 }
@@ -4478,6 +4654,7 @@ static void *sz_runtime_main_worker(void *arg) {
   }
   {
     sz_testrt_fault_hold();
+    sz_sched_picks_probe_reset();
     sz_scenario_run_setup();
     sz_testrt_fault_release();
   }
@@ -4490,7 +4667,9 @@ static void *sz_runtime_main_worker(void *arg) {
       sz_property_session_end();
       a->rc = 0;
     } else {
-      SzIoResult r = sz_io_unsafe_run(a->program);
+      SzIoResult r;
+      sz_sched_set_pick_name("main");
+      r = sz_io_unsafe_run(a->program);
       if (!r.ok) {
         fprintf(stderr, "scuzz: IO failed: %s\n",
                 r.error ? sz_string_cstr(r.error->message) : "unknown");

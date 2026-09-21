@@ -247,6 +247,12 @@ def eventsKey(): String =
 def parseEvents(src: String): List[String] =
   parseEventsAt(src, findIdx(src, eventsKey(), 0))
 
+def parseStrArr(src: String, key: String): List[String] =
+  parseStrArrAt(src, findIdx(src, Str.concat(key, " = ["), 0), Str.len(key) + 4)
+
+def parseStrArrAt(src: String, i: Int, skip: Int): List[String] =
+  if (i < 0) noStr() else parseEvSkip(src, i + skip)
+
 def parseEventsAt(src: String, i: Int): List[String] =
   if (i < 0) noStr() else parseEvSkip(src, i + Str.len(eventsKey()))
 
@@ -286,10 +292,14 @@ def escEv(s: String, i: Int, b: Builder): String =
 def escEvCh(c: Int, s: String, i: Int): String =
   if (c == 92) "\\\\" else if (c == 34) "\\\"" else Str.slice(s, i, i + 1)
 
-def reproText(sched: String, fault: String, events: List[String]): String =
+def reproText(sched: String, fault: String, picks: List[String], events: List[String]): String =
   Str.concat("""[fuzz]
-""", Str.concat(reproOracle(events), Str.concat(reproSched(sched), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), """]
-"""))))))
+""", Str.concat(reproOracle(events), Str.concat(reproSched(sched), Str.concat(reproPicks(picks), Str.concat(reproFault(fault), Str.concat("events = [", Str.concat(quoteEvents(events), """]
+""")))))))
+
+def reproPicks(picks: List[String]): String =
+  if (List.isEmpty(picks)) "" else Str.concat("schedule_picks = [", Str.concat(quoteEvents(picks), """]
+"""))
 
 def reproOracle(events: List[String]): String =
   if (oracleName(events) == "") "" else Str.concat("oracle = \"", Str.concat(oracleName(events), "\"\n"))
@@ -570,6 +580,12 @@ def claimDriveLines(raw: String): List[String] =
 
 def claimDriveFired(line: String): String =
   if (!Str.startsWith(line, "drive\t")) "" else Str.drop(line, 6)
+
+def driftLine(err: String): String =
+  driftLineGo(linesOf(err))
+
+def driftLineGo(xs: List[String]): String =
+  if (List.isEmpty(xs)) "scuzz fuzz: schedule drift" else if (Str.contains(List.at(xs, 0), "schedule drift")) List.at(xs, 0) else driftLineGo(List.tail(xs))
 
 def callLitsFiles(files: List[(String, String)], f: String, idx: Int): List[String] =
   if (List.isEmpty(files)) noStr() else List.concat(callLitsFile(List.at(files, 0), f, idx), callLitsFiles(List.tail(files), f, idx))
