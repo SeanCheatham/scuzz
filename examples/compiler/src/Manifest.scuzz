@@ -237,7 +237,7 @@ def findIdx(s: String, needle: String, i: Int): Int =
   if (Str.len(needle) == 0 || i + Str.len(needle) > Str.len(s)) 0 - 1 else if (Str.slice(s, i, i + Str.len(needle)) == needle) i else findIdx(s, needle, i + 1)
 
 def floorMilliAt(text: String, i: Int): Int =
-  if (i < 0) 0 else floorMilliSkip(text, i, Str.len("score_floor = "))
+  if (i < 0) 1000 else floorMilliSkip(text, i, Str.len("score_floor = "))
 
 def floorMilliSkip(text: String, i: Int, skip: Int): Int =
   parseFloor(trim(Str.slice(text, i + skip, floorEnd(text, i + skip))))

@@ -348,6 +348,59 @@ cat /tmp/scuzz-faults.log
 grep -q 'faults entry disk must be fs, net, or queue' /tmp/scuzz-faults.log
 rm -rf "$fault_dir"
 
+# Mutation results persist per site, keyed by compiler SHA-256. A second
+# campaign reuses them. An edit re-mutates only the changed def. The default
+# floor fails a surviving mutant.
+gate_root="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-mutgate.XXXXXX")"
+mkdir -p "$gate_root"
+cp -R examples/counter "$gate_root/counter"
+cp -R examples/shared "$gate_root/shared"
+rm -rf "$gate_root/counter/build" "$gate_root/counter/.scuzz"
+fuzz --iterations 16 "$gate_root/counter" > /tmp/scuzz-mutgate-1.log 2>&1
+test -f "$gate_root/counter/.scuzz/mutate.results"
+fuzz --iterations 16 "$gate_root/counter" > /tmp/scuzz-mutgate-2.log 2>&1
+python3 - "$gate_root/counter/build/fuzz/summary.json" <<'PY_GATE'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+assert d["fuzz"]["ok"] is True
+assert d["mutate"]["ran"] >= 1
+PY_GATE
+GATE_DIR="$gate_root/counter" python3 - <<'PY_EDIT'
+import os
+from pathlib import Path
+p = Path(os.environ["GATE_DIR"]) / "src" / "Main.scuzz"
+text = p.read_text()
+old = "Str.concat(value, env)"
+assert old in text
+p.write_text(text.replace(old, 'Str.concat(value, Str.concat(env, ""))', 1))
+PY_EDIT
+fuzz --iterations 16 "$gate_root/counter" > /tmp/scuzz-mutgate-3.log 2>&1
+grep -q 'mutant 0: survived at Main.capturedLabel' /tmp/scuzz-mutgate-3.log
+reused2="$(grep -c 'reused' /tmp/scuzz-mutgate-2.log)"
+reused3="$(grep -c 'reused' /tmp/scuzz-mutgate-3.log)"
+test "$reused2" -gt "$reused3"
+rm -rf "$gate_root"
+floordef_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-floordef.XXXXXX")"
+mkdir -p "$floordef_dir/src"
+cat > "$floordef_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "floordef"
+MANIFEST
+cat > "$floordef_dir/src/Main.scuzz" <<'SOURCE'
+def content(n: Int): String =
+  Str.fromInt(n + 1)
+
+@main def main: IO[Unit] =
+  Fs.write("out.txt", content(1))
+SOURCE
+if fuzz --iterations 16 "$floordef_dir" > /tmp/scuzz-floordef.log 2>&1; then
+  echo "default floor must fail a surviving mutant" && exit 1
+fi
+cat /tmp/scuzz-floordef.log
+grep -q 'mutation score 0.000 is below floor 1.000' /tmp/scuzz-floordef.log
+rm -rf "$floordef_dir"
+
 # Generation: a compound where keeps both bounds; unbounded Ints reach the
 # overflow edges; strings cover the delimiter alphabet; ADT string fields
 # carry delimiters through both engines.
