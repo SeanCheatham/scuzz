@@ -8,3 +8,6 @@ default_runtime = "desktop"
 headless_size = [400, 560]
 headless_scale = 1.0
 tap_button = 0
+
+[fuzz]
+score_floor = 0.100

@@ -42,12 +42,11 @@ Closed impurity makes a probe a function of program, seed, script, and schedule 
 
 Slices, in order. Each slice closes with a proof in `examples/`.
 
-1. **Mutation gate.** Mutate only defs that changed since the last fingerprint. Persist per-site kill results keyed by compiler SHA-256. Default `[fuzz].score_floor` on. Proof: a small edit in `examples/counter` mutates that def; a second campaign reuses prior kills; a surviving mutant fails the floor.
-2. **Model claims.** Add `Timeline.fold`. Document a pure reference model over the timeline. Do not add a temporal-operator calculus. Proof: `examples/counter` or `examples/studio` states the model in one claim.
-3. **Live transport.** A sanctioned `--live` corpus replay against the live loopback transport, or an explicit statement that OpenSSL, URLSession, TLS, and Skia pixels have no test home. Simulation stays hermetic. Proof: `examples/webhook` or `examples/api-report` replays one corpus entry on the live client, or `philosophy.md` states the cut.
-4. **ASan replay.** Corpus replay on the compiled engine runs under ASan. Proof: `scripts/ci-fuzz.sh` or a runtime ASan slice replays `examples/io` corpus without a leak report.
-5. **Destructuring binds.** A `for` bind unpacks a constructor. Proof: a compiler helper chain in `examples/compiler` becomes one bind; `scuzz fuzz --iterations 0 examples/tyck` stays green. Update the kernel lock in `philosophy.md`.
-6. **Facts tier.** Name goldens as a facts tier in `philosophy.md`. Keep them as campaign seeds. Make generated-program round-trip and engine parity the compiler's primary oracles. Proof: `examples/tyck`, `examples/codegen`, and `examples/fmt` keep generated oracles as the search workload; goldens stay zero-argument seeds.
+1. **Model claims.** Add `Timeline.fold`. Document a pure reference model over the timeline. Do not add a temporal-operator calculus. Proof: `examples/counter` or `examples/studio` states the model in one claim.
+2. **Live transport.** A sanctioned `--live` corpus replay against the live loopback transport, or an explicit statement that OpenSSL, URLSession, TLS, and Skia pixels have no test home. Simulation stays hermetic. Proof: `examples/webhook` or `examples/api-report` replays one corpus entry on the live client, or `philosophy.md` states the cut.
+3. **ASan replay.** Corpus replay on the compiled engine runs under ASan. Proof: `scripts/ci-fuzz.sh` or a runtime ASan slice replays `examples/io` corpus without a leak report.
+4. **Destructuring binds.** A `for` bind unpacks a constructor. Proof: a compiler helper chain in `examples/compiler` becomes one bind; `scuzz fuzz --iterations 0 examples/tyck` stays green. Update the kernel lock in `philosophy.md`.
+5. **Facts tier.** Name goldens as a facts tier in `philosophy.md`. Keep them as campaign seeds. Make generated-program round-trip and engine parity the compiler's primary oracles. Proof: `examples/tyck`, `examples/codegen`, and `examples/fmt` keep generated oracles as the search workload; goldens stay zero-argument seeds.
 
 ### Success bars
 

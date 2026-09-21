@@ -4,6 +4,12 @@ record Walks(xs: List[Expr], n: Int, hi: Int)
 
 record FunWalk(ds: List[Fun], n: Int)
 
+record DefSite(stem: String, mod: String, name: String, base: Int, span: Int, hash: Int)
+
+record StoreDef(stem: String, mod: String, name: String, hash: Int, sites: List[(Int, String)])
+
+record MutStore(compiler: String, defs: List[StoreDef])
+
 record ImplWalk(xs: List[Im], n: Int)
 
 record ArmWalk(xs: List[Arm], n: Int, hi: Int)
@@ -184,6 +190,149 @@ def countFunsHd(d: Fun, rest: List[Fun], n: Int, o: Bool): Int =
 
 def countExpr(e: Expr, o: Bool): Int =
   walk(e, 0 - 1, 0, false, collectHs(e, noExprs()), 0, o).n
+
+def fnvText(s: String): Int =
+  fnvGo(s, 0, 1469598103934665603)
+
+def fnvGo(s: String, i: Int, h: Int): Int =
+  if (i >= Str.len(s)) h else fnvGo(s, i + 1, (h ^ Str.charAt(s, i)) * 1099511628211)
+
+def defHash(mod: String, name: String, body: Expr): Int =
+  fnvText(Str.concat(mod, Str.concat("""
+""", Str.concat(name, Str.concat("""
+""", Parse.pretty0(body))))))
+
+def defSites(kept: List[(String, String, Prog)], o: Bool): List[DefSite] =
+  defSitesGo(kept, 0, o, noDefSites())._2
+
+def noDefSites(): List[DefSite] =
+  []
+
+def defSitesGo(kept: List[(String, String, Prog)], base: Int, o: Bool, acc: List[DefSite]): (Int, List[DefSite]) =
+  if (List.isEmpty(kept)) (base, List.reverse(acc)) else defSitesHd(List.at(kept, 0), List.tail(kept), base, o, acc)
+
+def defSitesHd(h: (String, String, Prog), rest: List[(String, String, Prog)], base: Int, o: Bool, acc: List[DefSite]): (Int, List[DefSite]) =
+  h match {
+    case (stem, _, p) => if (stem == wrapStem()) defSitesGo(rest, base, o, acc) else defSitesGo(rest, defSitesProg(stem, p, (base, acc), o)._1, o, defSitesProg(stem, p, (base, acc), o)._2)
+  }
+
+def defSitesProg(stem: String, p: Prog, st: (Int, List[DefSite]), o: Bool): (Int, List[DefSite]) =
+  p match {
+    case Prog(_, _, _, _, impls, _, defs, _, body) => defSitesBody(stem, body, defSitesFuns(stem, defs, defSitesImpls(stem, impls, st, o), o), o)
+  }
+
+def defSitesImpls(stem: String, xs: List[Im], st: (Int, List[DefSite]), o: Bool): (Int, List[DefSite]) =
+  if (List.isEmpty(xs)) st else defSitesImpls(stem, List.tail(xs), defSitesFuns(stem, List.at(xs, 0).methods, st, o), o)
+
+def defSitesFuns(stem: String, ds: List[Fun], st: (Int, List[DefSite]), o: Bool): (Int, List[DefSite]) =
+  if (List.isEmpty(ds)) st else defSitesFuns(stem, List.tail(ds), defSitesFun(stem, List.at(ds, 0), st, o), o)
+
+def defSitesFun(stem: String, d: Fun, st: (Int, List[DefSite]), o: Bool): (Int, List[DefSite]) =
+  st match {
+    case (base, acc) => (base + countExpr(d.body, o), DefSite(stem, d.mod, d.name, base, countExpr(d.body, o), defHash(d.mod, d.name, d.body)) :: acc)
+  }
+
+def defSitesBody(stem: String, body: Expr, st: (Int, List[DefSite]), o: Bool): (Int, List[DefSite]) =
+  st match {
+    case (base, acc) => (base + countExpr(body, o), DefSite(stem, "", "@body", base, countExpr(body, o), defHash("", "@body", body)) :: acc)
+  }
+
+def defSiteOf(ds: List[DefSite], site: Int): List[DefSite] =
+  if (List.isEmpty(ds)) noDefSites() else defSiteOfGo(List.at(ds, 0), List.tail(ds), site)
+
+def defSiteOfGo(h: DefSite, rest: List[DefSite], site: Int): List[DefSite] =
+  if (site >= h.base && site < h.base + h.span) h :: noDefSites() else defSiteOf(rest, site)
+
+def noStore(): MutStore =
+  MutStore("", [])
+
+def storeDefOf(defs: List[StoreDef], stem: String, mod: String, name: String): List[StoreDef] =
+  if (List.isEmpty(defs)) [] else storeDefOfGo(List.at(defs, 0), List.tail(defs), stem, mod, name)
+
+def storeDefOfGo(h: StoreDef, rest: List[StoreDef], stem: String, mod: String, name: String): List[StoreDef] =
+  if (h.stem == stem && h.mod == mod && h.name == name) h :: [] else storeDefOf(rest, stem, mod, name)
+
+def storeSiteOf(sites: List[(Int, String)], local: Int): String =
+  if (List.isEmpty(sites)) "" else storeSiteOfGo(List.at(sites, 0), List.tail(sites), local)
+
+def storeSiteOfGo(h: (Int, String), rest: List[(Int, String)], local: Int): String =
+  if (h._1 == local) h._2 else storeSiteOf(rest, local)
+
+def storeReusable(store: MutStore, ds: List[DefSite], site: Int): String =
+  storeReusableGo(store.defs, defSiteOf(ds, site), site)
+
+def storeReusableGo(defs: List[StoreDef], hit: List[DefSite], site: Int): String =
+  if (List.isEmpty(hit)) "" else storeReusableHd(storeDefOf(defs, List.at(hit, 0).stem, List.at(hit, 0).mod, List.at(hit, 0).name), List.at(hit, 0), site)
+
+def storeReusableHd(found: List[StoreDef], d: DefSite, site: Int): String =
+  if (List.isEmpty(found)) "" else storeReusableHash(List.at(found, 0), d, site)
+
+def storeReusableHash(sd: StoreDef, d: DefSite, site: Int): String =
+  if (sd.hash != d.hash) "" else storeSiteOf(sd.sites, site - d.base)
+
+def storeChanged(store: MutStore, ds: List[DefSite]): List[Int] =
+  if (store.compiler == "") noInts() else storeChangedGo(ds, store.defs, noInts())
+
+def storeChangedGo(ds: List[DefSite], defs: List[StoreDef], acc: List[Int]): List[Int] =
+  if (List.isEmpty(ds)) List.reverse(acc) else storeChangedGo(List.tail(ds), defs, storeChangedHd(List.at(ds, 0), storeDefOf(defs, List.at(ds, 0).stem, List.at(ds, 0).mod, List.at(ds, 0).name), acc))
+
+def storeChangedHd(d: DefSite, found: List[StoreDef], acc: List[Int]): List[Int] =
+  if (List.isEmpty(found) || List.at(found, 0).hash != d.hash) storeChangedAdd(d, acc) else acc
+
+def storeChangedAdd(d: DefSite, acc: List[Int]): List[Int] =
+  storeChangedAddGo(d.base, d.base + d.span, acc)
+
+def storeChangedAddGo(i: Int, end: Int, acc: List[Int]): List[Int] =
+  if (i >= end) acc else storeChangedAddGo(i + 1, end, i :: acc)
+
+def storeParse(src: String): MutStore =
+  storeParseGo(Verify.linesOf(src), noStore())
+
+def storeParseGo(lines: List[String], acc: MutStore): MutStore =
+  if (List.isEmpty(lines)) acc else storeParseHd(List.at(lines, 0), List.tail(lines), acc)
+
+def storeParseHd(line: String, rest: List[String], acc: MutStore): MutStore =
+  if (Str.startsWith(line, "compiler ")) storeParseGo(rest, MutStore(Str.drop(line, 9), acc.defs)) else if (Str.startsWith(line, "def ")) storeParseGo(rest, MutStore(acc.compiler, storeParseDef(Str.split(line, " ")) :: acc.defs)) else if (Str.startsWith(line, "site ")) storeParseGo(rest, MutStore(acc.compiler, storeParseSite(Str.split(line, " "), acc.defs))) else storeParseGo(rest, acc)
+
+def storeParseDef(toks: List[String]): StoreDef =
+  StoreDef(List.at(toks, 1), List.at(toks, 2), List.at(toks, 3), Str.toInt(List.at(toks, 4), 0), [])
+
+def storeParseSite(toks: List[String], defs: List[StoreDef]): List[StoreDef] =
+  if (List.isEmpty(defs)) defs else storeParseSiteHd(List.at(defs, 0), List.tail(defs), toks)
+
+def storeParseSiteHd(d: StoreDef, rest: List[StoreDef], toks: List[String]): List[StoreDef] =
+  StoreDef(d.stem, d.mod, d.name, d.hash, List.concat(d.sites, (Str.toInt(List.at(toks, 1), 0), List.at(toks, 2)) :: [])) :: rest
+
+def storeFormat(compiler: String, defs: List[StoreDef]): String =
+  Str.concat("""v 1
+compiler """, Str.concat(compiler, Str.concat("""
+""", storeFormatDefs(defs))))
+
+def storeFormatDefs(defs: List[StoreDef]): String =
+  if (List.isEmpty(defs)) "" else Str.concat(storeFormatDef(List.at(defs, 0)), storeFormatDefs(List.tail(defs)))
+
+def storeFormatDef(d: StoreDef): String =
+  Str.concat("def ", Str.concat(d.stem, Str.concat(" ", Str.concat(d.mod, Str.concat(" ", Str.concat(d.name, Str.concat(" ", Str.concat(Str.fromInt(d.hash), Str.concat("""
+""", storeFormatSites(d.sites))))))))))
+
+def storeFormatSites(sites: List[(Int, String)]): String =
+  if (List.isEmpty(sites)) "" else Str.concat("site ", Str.concat(Str.fromInt(List.at(sites, 0)._1), Str.concat(" ", Str.concat(List.at(sites, 0)._2, Str.concat("""
+""", storeFormatSites(List.tail(sites)))))))
+
+def storeMerge(ds: List[DefSite], store: MutStore, fresh: List[(Int, String)]): List[StoreDef] =
+  storeMergeGo(ds, store.defs, fresh, [])
+
+def storeMergeGo(ds: List[DefSite], defs: List[StoreDef], fresh: List[(Int, String)], acc: List[StoreDef]): List[StoreDef] =
+  if (List.isEmpty(ds)) List.reverse(acc) else storeMergeGo(List.tail(ds), defs, fresh, storeMergeDef(List.at(ds, 0), storeDefOf(defs, List.at(ds, 0).stem, List.at(ds, 0).mod, List.at(ds, 0).name), fresh) :: acc)
+
+def storeMergeDef(d: DefSite, found: List[StoreDef], fresh: List[(Int, String)]): StoreDef =
+  StoreDef(d.stem, d.mod, d.name, d.hash, storeMergeSites(d.base, d.base + d.span, d.base, if (List.isEmpty(found) || List.at(found, 0).hash != d.hash) [] else List.at(found, 0).sites, fresh, []))
+
+def storeMergeSites(i: Int, end: Int, base: Int, stored: List[(Int, String)], fresh: List[(Int, String)], acc: List[(Int, String)]): List[(Int, String)] =
+  if (i >= end) acc else storeMergeSites(i + 1, end, base, stored, fresh, storeMergeOne(i - base, storeSiteOf(fresh, i), storeSiteOf(stored, i - base), acc))
+
+def storeMergeOne(local: Int, got: String, old: String, acc: List[(Int, String)]): List[(Int, String)] =
+  if (got != "") List.concat(acc, (local, got) :: []) else if (old != "") List.concat(acc, (local, old) :: []) else acc
 
 def applyFiles(files: List[(String, String)], site: Int, o: Bool): List[(String, String)] =
   applyKept(parseLive(files), site, o)
@@ -585,8 +734,8 @@ def walkBindsRest(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, 
     case BindWalk(xs, n, h) => BindWalk(b :: xs, n, h)
   }
 
-def fuzzMutLine(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, invalid: Int): String =
-  Str.concat("mutate: ", Str.concat(Str.fromInt(killed), Str.concat(" killed, ", Str.concat(Str.fromInt(survived), Str.concat(" survived, ", Str.concat(Str.fromInt(inert), Str.concat(" inert, ", Str.concat(Str.fromInt(invalid), Str.concat(" invalid (", Str.concat(Str.fromInt(ran), Str.concat(" of ", Str.concat(Str.fromInt(sites), " sites)"))))))))))))
+def fuzzMutLine(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, invalid: Int, reused: Int): String =
+  Str.concat("mutate: ", Str.concat(Str.fromInt(killed), Str.concat(" killed, ", Str.concat(Str.fromInt(survived), Str.concat(" survived, ", Str.concat(Str.fromInt(inert), Str.concat(" inert, ", Str.concat(Str.fromInt(invalid), Str.concat(" invalid, ", Str.concat(Str.fromInt(reused), Str.concat(" reused (", Str.concat(Str.fromInt(ran), Str.concat(" of ", Str.concat(Str.fromInt(sites), " sites)"))))))))))))))
 
 def mutateHead(take: Int, sites: Int, o: Bool): String =
   Str.concat("scuzz fuzz mutate: ", Str.concat(Str.fromInt(take), Str.concat(" of ", Str.concat(Str.fromInt(sites), if (o) " residual oracle sites (negate/flip/0-1/arith/drop); idle + corpus replay" else " live-code sites (flip/if/0-1/map/handler); idle + corpus replay"))))
