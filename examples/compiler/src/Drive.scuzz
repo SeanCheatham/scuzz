@@ -1684,19 +1684,56 @@ def fuzzSearchRun(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[
   fuzzWriteDrive(job.outDir, run.script).flatMap(_ => fuzzProbeJob(job, run).flatMap(bad => fuzzDistRead(job).flatMap(ds => fuzzSearchResult(job, script, runs, defs, FuzzAcc(acc.search, acc.searchFail, acc.corpFail, acc.repro, fuzzClimbNext(acc.climb, run, acc.search, ds)), run, bad))))
 
 def fuzzSearchResult(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc, run: FuzzRun, bad: Int): IO[FuzzAcc] =
-  if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, run, 0, 32).flatMap(small => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path, acc.climb)))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro, acc.climb))
+  if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, defs, run).flatMap(small => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path, acc.climb)))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro, acc.climb))
 
 def fuzzConfirm(job: FuzzJob, small: FuzzRun): IO[Unit] =
   if (!job.ev) IO.pure(()) else fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeRun(job.exe, false, job.outDir, small, "").flatMap(bad => if (bad > 0) IO.pure(()) else failMsg("evaluator search failure did not reproduce on the compiled binary", "scuzz fuzz")))
 
-def fuzzShrink(job: FuzzJob, run: FuzzRun, at: Int, budget: Int): IO[FuzzRun] =
-  if (budget <= 0 || at >= List.len(Verify.linesOf(run.script)) || List.len(Verify.linesOf(run.script)) <= 1) IO.pure(run) else fuzzShrinkTry(job, run, at, budget, FuzzRun("", "", Verify.nls(List.concat(List.take(Verify.linesOf(run.script), at), List.drop(Verify.linesOf(run.script), at + 1))), run.sched, run.fault))
+def fuzzShrink(job: FuzzJob, defs: List[Fun], run: FuzzRun): IO[FuzzRun] =
+  fuzzShrinkLines(job, run, 32).flatMap(small => fuzzShrinkInts(job, defs, small, fuzzNudgePairs(Verify.linesOf(small.script), defs, 0, []), 32))
 
-def fuzzShrinkTry(job: FuzzJob, run: FuzzRun, at: Int, budget: Int, candidate: FuzzRun): IO[FuzzRun] =
+def fuzzShrinkLines(job: FuzzJob, run: FuzzRun, budget: Int): IO[FuzzRun] =
+  fuzzShrinkPass(job, run, 0, budget).flatMap(r => fuzzShrinkAgain(job, run, r))
+
+def fuzzShrinkAgain(job: FuzzJob, before: FuzzRun, r: (FuzzRun, Int)): IO[FuzzRun] =
+  r match {
+    case (shrunk, left) => if (left > 0 && shrunk.script != before.script && List.len(Verify.linesOf(shrunk.script)) > 1) fuzzShrinkLines(job, shrunk, left) else IO.pure(shrunk)
+  }
+
+def fuzzShrinkPass(job: FuzzJob, run: FuzzRun, at: Int, budget: Int): IO[(FuzzRun, Int)] =
+  if (budget <= 0 || at >= List.len(Verify.linesOf(run.script)) || List.len(Verify.linesOf(run.script)) <= 1) IO.pure((run, budget)) else fuzzShrinkTry(job, run, at, budget, FuzzRun("", "", Verify.nls(List.concat(List.take(Verify.linesOf(run.script), at), List.drop(Verify.linesOf(run.script), at + 1))), run.sched, run.fault))
+
+def fuzzShrinkTry(job: FuzzJob, run: FuzzRun, at: Int, budget: Int, candidate: FuzzRun): IO[(FuzzRun, Int)] =
   fuzzWriteDrive(job.outDir, candidate.script).flatMap(_ => fuzzProbeJob(job, candidate).flatMap(bad => fuzzShrinkResult(job, run, at, budget, candidate, bad)))
 
-def fuzzShrinkResult(job: FuzzJob, run: FuzzRun, at: Int, budget: Int, candidate: FuzzRun, bad: Int): IO[FuzzRun] =
-  if (bad > 0) fuzzShrink(job, candidate, at, budget - 1) else fuzzShrink(job, run, at + 1, budget - 1)
+def fuzzShrinkResult(job: FuzzJob, run: FuzzRun, at: Int, budget: Int, candidate: FuzzRun, bad: Int): IO[(FuzzRun, Int)] =
+  if (bad > 0) fuzzShrinkPass(job, candidate, at, budget - 1) else fuzzShrinkPass(job, run, at + 1, budget - 1)
+
+def fuzzShrinkInts(job: FuzzJob, defs: List[Fun], run: FuzzRun, pairs: List[(Int, Int)], budget: Int): IO[FuzzRun] =
+  if (budget <= 0 || List.isEmpty(pairs)) IO.pure(run) else fuzzShrinkInt(job, defs, run, List.at(pairs, 0), List.tail(pairs), budget)
+
+def fuzzShrinkInt(job: FuzzJob, defs: List[Fun], run: FuzzRun, pair: (Int, Int), rest: List[(Int, Int)], budget: Int): IO[FuzzRun] =
+  pair match {
+    case (line, j) => fuzzShrinkIntGo(job, defs, run, Str.split(List.at(Verify.linesOf(run.script), line), " "), line, j, rest, budget)
+  }
+
+def fuzzShrinkIntGo(job: FuzzJob, defs: List[Fun], run: FuzzRun, toks: List[String], line: Int, j: Int, rest: List[(Int, Int)], budget: Int): IO[FuzzRun] =
+  if (List.isEmpty(fuzzDriveDef(toks, defs))) fuzzShrinkInts(job, defs, run, rest, budget) else fuzzShrinkIntTry(job, defs, run, line, j, Str.toInt(List.at(toks, j + 2), 0), Verify.zeroInt(List.at(List.at(fuzzDriveDef(toks, defs), 0).params, j).w), rest, budget)
+
+def fuzzShrinkIntTry(job: FuzzJob, defs: List[Fun], run: FuzzRun, line: Int, j: Int, v: Int, target: Int, rest: List[(Int, Int)], budget: Int): IO[FuzzRun] =
+  if (v == target) fuzzShrinkInts(job, defs, run, rest, budget) else fuzzShrinkIntProbe(job, defs, run, line, j, v, target, rest, budget, fuzzShrinkIntRun(run, line, j, target))
+
+def fuzzShrinkIntProbe(job: FuzzJob, defs: List[Fun], run: FuzzRun, line: Int, j: Int, v: Int, target: Int, rest: List[(Int, Int)], budget: Int, candidate: FuzzRun): IO[FuzzRun] =
+  fuzzWriteDrive(job.outDir, candidate.script).flatMap(_ => fuzzProbeJob(job, candidate).flatMap(bad => if (bad > 0) fuzzShrinkInts(job, defs, candidate, rest, budget - 1) else fuzzShrinkIntMid(job, defs, run, line, j, target, v, rest, budget - 1)))
+
+def fuzzShrinkIntMid(job: FuzzJob, defs: List[Fun], run: FuzzRun, line: Int, j: Int, lo: Int, hi: Int, rest: List[(Int, Int)], budget: Int): IO[FuzzRun] =
+  if (budget <= 0 || lo - hi <= 1 && hi - lo <= 1) fuzzShrinkInts(job, defs, fuzzShrinkIntRun(run, line, j, hi), rest, budget) else fuzzShrinkIntMidProbe(job, defs, run, line, j, lo, hi, lo + (hi - lo) / 2, rest, budget)
+
+def fuzzShrinkIntMidProbe(job: FuzzJob, defs: List[Fun], run: FuzzRun, line: Int, j: Int, lo: Int, hi: Int, mid: Int, rest: List[(Int, Int)], budget: Int): IO[FuzzRun] =
+  fuzzWriteDrive(job.outDir, fuzzShrinkIntRun(run, line, j, mid).script).flatMap(_ => fuzzProbeJob(job, fuzzShrinkIntRun(run, line, j, mid)).flatMap(bad => if (bad > 0) fuzzShrinkIntMid(job, defs, run, line, j, lo, mid, rest, budget - 1) else fuzzShrinkIntMid(job, defs, run, line, j, mid, hi, rest, budget - 1)))
+
+def fuzzShrinkIntRun(run: FuzzRun, line: Int, j: Int, value: Int): FuzzRun =
+  FuzzRun("", "", Verify.nls(List.setAt(Verify.linesOf(run.script), line, fuzzNudgeToks(Str.split(List.at(Verify.linesOf(run.script), line), " "), j + 2, value))), run.sched, run.fault)
 
 def fuzzPromoteFailure(job: FuzzJob, path: String, i: Int): IO[Unit] =
   Fs.read(path).flatMap(src => Fs.mkdirs(joinSlash(job.dir, "corpus")).flatMap(_ => Fs.write(joinSlash(joinSlash(job.dir, "corpus"), Str.concat("search-", Str.concat(Str.fromInt(job.seed), Str.concat("-", Str.concat(Str.fromInt(i), ".toml"))))), src).flatMap(_ => Fs.write(joinSlash(joinSlash(job.outDir, "fuzz"), "promo"), "1"))))
