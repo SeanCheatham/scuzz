@@ -3,3 +3,4 @@ def setup(): IO[Unit] =
 
 def tryCode(code: Int): IO[Unit] =
   IO.println(Main.unlock(code))
+
