@@ -5245,6 +5245,56 @@ static int sz_drive_copy_range(const char *src, size_t n, char *out, int cap) {
   return 1;
 }
 
+/* Advance past a quoted drive token region: from the opening quote to just
+ * past the closing quote, honoring backslash escapes. */
+static const char *sz_drive_skip_quote(const char *p) {
+  p++;
+  while (*p) {
+    if (*p == '\\' && p[1]) {
+      p += 2;
+      continue;
+    }
+    if (*p == '"')
+      return p + 1;
+    p++;
+  }
+  return p;
+}
+
+SzString *sz_drive_str(const char *tok) {
+  size_t n, i, k;
+  char *out;
+  SzString *s;
+  if (!tok || tok[0] != '"')
+    return sz_string_from_cstr(tok ? tok : "");
+  n = strlen(tok);
+  out = (char *)malloc(n + 1);
+  if (!out)
+    sz_panic("drive: out of memory");
+  i = 1;
+  k = 0;
+  while (tok[i] && tok[i] != '"') {
+    if (tok[i] == '\\' && tok[i + 1]) {
+      char e = tok[i + 1];
+      if (e == 'n')
+        out[k++] = '\n';
+      else if (e == 't')
+        out[k++] = '\t';
+      else if (e == 'r')
+        out[k++] = '\r';
+      else
+        out[k++] = e;
+      i += 2;
+    } else {
+      out[k++] = tok[i++];
+    }
+  }
+  out[k] = 0;
+  s = sz_string_from_cstr(out);
+  free(out);
+  return s;
+}
+
 int sz_drive_uncons(const char *tok, const char *name, char *inner, int cap) {
   size_t nlen;
   const char *p;
@@ -5264,6 +5314,10 @@ int sz_drive_uncons(const char *tok, const char *name, char *inner, int cap) {
   p = tok + nlen + 1;
   depth = 0;
   while (*p) {
+    if (*p == '"') {
+      p = sz_drive_skip_quote(p);
+      continue;
+    }
     if (*p == '(' || *p == '[')
       depth++;
     else if (*p == ')' || *p == ']') {
@@ -5290,6 +5344,10 @@ int sz_drive_uncons_list(const char *tok, char *inner, int cap) {
   p = tok + 1;
   depth = 0;
   while (*p) {
+    if (*p == '"') {
+      p = sz_drive_skip_quote(p);
+      continue;
+    }
     if (*p == '(' || *p == '[')
       depth++;
     else if (*p == ')' || *p == ']') {
@@ -5316,6 +5374,11 @@ int64_t sz_drive_nfields(const char *inner) {
   n = 1;
   depth = 0;
   for (i = 0; inner[i]; i++) {
+    if (inner[i] == '"') {
+      const char *q = sz_drive_skip_quote(inner + i);
+      i = (int)(q - inner) - 1;
+      continue;
+    }
     if (inner[i] == '(' || inner[i] == '[')
       depth++;
     else if ((inner[i] == ')' || inner[i] == ']') && depth > 0)
@@ -5335,6 +5398,11 @@ int sz_drive_field(const char *inner, int64_t idx, char *out, int cap) {
     return 0;
   out[0] = 0;
   while (inner[i]) {
+    if (inner[i] == '"') {
+      const char *q = sz_drive_skip_quote(inner + i);
+      i = (int)(q - inner);
+      continue;
+    }
     if (inner[i] == '(' || inner[i] == '[')
       depth++;
     else if ((inner[i] == ')' || inner[i] == ']') && depth > 0)
@@ -5366,18 +5434,30 @@ int64_t sz_drive_parse_bool(const char *tok) {
   return 0;
 }
 
-static int sz_driver_split_rest(const char *rest, char tok[][128], int maxn) {
+/* Split a drive line into encoded tokens. A quoted region (with backslash
+ * escapes) groups across spaces; tokens keep their quotes. */
+static int sz_driver_split_rest(const char *rest, char tok[][1024], int maxn) {
   int n = 0;
   int i = 0;
   while (rest[i] && n < maxn) {
+    int k = 0;
+    int q = 0;
     while (rest[i] == ' ' || rest[i] == '\t' || rest[i] == '\n')
       i++;
     if (!rest[i])
       break;
-    int k = 0;
-    while (rest[i] && rest[i] != ' ' && rest[i] != '\t' && rest[i] != '\n' &&
-           k < 127) {
-      tok[n][k++] = rest[i++];
+    while (rest[i] && (q || (rest[i] != ' ' && rest[i] != '\t' && rest[i] != '\n')) &&
+           k < 1023) {
+      char c = rest[i];
+      tok[n][k++] = c;
+      i++;
+      if (c == '\\' && q && rest[i] && k < 1023) {
+        tok[n][k++] = rest[i];
+        i++;
+        continue;
+      }
+      if (c == '"')
+        q = !q;
     }
     tok[n][k] = 0;
     n++;
@@ -5400,7 +5480,7 @@ static SzIo *driver_closure_io(SzDriver *d, const char *rest) {
   if (d->nargs == 1)
     args = driver_tokens_cons(args, rest);
   else if (d->nargs > 1) {
-    char tok[4][128];
+    char tok[4][1024];
     int ntok = sz_driver_split_rest(rest, tok, 4);
     int j;
     for (j = d->nargs - 1; j >= 0; j--)
@@ -5437,16 +5517,16 @@ void sz_driver_run_line(const char *spec) {
     io = ((SzIo * (*)(void)) d->fn)();
   else if (d->nargs == 1) {
     if (d->kind == 1)
-      io = ((SzIo * (*)(SzString *)) d->fn)(sz_string_from_cstr(rest));
+      io = ((SzIo * (*)(SzString *)) d->fn)(sz_drive_str(rest));
     else if (d->kind == 2)
       io = ((SzIo * (*)(int64_t)) d->fn)(
           (rest[0] && (strcmp(rest, "true") == 0 || strcmp(rest, "1") == 0))
               ? 1
               : 0);
     else
-      io = ((SzIo * (*)(int64_t)) d->fn)((int64_t)atoi(rest));
+      io = ((SzIo * (*)(int64_t)) d->fn)(sz_drive_parse_int(rest));
   } else {
-    char tok[4][128];
+    char tok[4][1024];
     int ntok = sz_driver_split_rest(rest, tok, 4);
     SzList *args = sz_list_nil();
     int j;
@@ -5455,13 +5535,13 @@ void sz_driver_run_line(const char *spec) {
       int64_t k = sz_driver_kind_at(d->kind, j);
       void *head;
       if (k == 1)
-        head = sz_string_from_cstr(t);
+        head = sz_drive_str(t);
       else if (k == 2)
         head = sz_box_i64((t[0] && (strcmp(t, "true") == 0 || strcmp(t, "1") == 0))
                               ? 1
                               : 0);
       else
-        head = sz_box_i64((int64_t)atoi(t));
+        head = sz_box_i64(sz_drive_parse_int(t));
       {
         SzList *old = args;
         args = sz_list_cons(head, old);

@@ -1987,7 +1987,7 @@ def drvArgs(p: EvProg, ps: List[Param], toks: List[String]): List[Value] =
   if (List.isEmpty(ps)) noVals() else drvArg(p, List.at(ps, 0).ty, if (List.isEmpty(toks)) "" else List.at(toks, 0)) :: drvArgs(p, List.tail(ps), if (List.isEmpty(toks)) toks else List.tail(toks))
 
 def drvArg(p: EvProg, ty: String, tok: String): Value =
-  if (ty == "Int") Value.VInt(Str.toInt(tok, 0)) else if (ty == "Bool") Value.VBool(tok == "true" || tok == "1") else if (ty == "String") Value.VStr(tok) else if (tok == "") Value.VErr("drive decode failed") else step(EvStep(Emit.parseGuard(tok), EvEnv(noVars(), "__verify", "")), p)
+  if (ty == "Int") Value.VInt(Str.toInt(tok, 0)) else if (ty == "Bool") Value.VBool(tok == "true" || tok == "1") else if (ty == "String") Value.VStr(Verify.unquoteTok(tok)) else if (tok == "") Value.VErr("drive decode failed") else step(EvStep(Emit.parseGuard(tok), EvEnv(noVars(), "__verify", "")), p)
 
 def claimVerdict(v: Value): Verdict =
   v match {

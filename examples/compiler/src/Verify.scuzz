@@ -1,5 +1,7 @@
 record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String], unclaimed: List[String])
 
+record IBound(lo: Int, hi: Int, onLo: Bool, onHi: Bool, eq: Int, onEq: Bool, ok: Bool)
+
 import Parse.Fun
 import Parse.Param
 import Parse.Prog
@@ -42,7 +44,7 @@ def noEn(): List[En] =
   []
 
 def kindTokE(p: Param, ens: List[En]): String =
-  if (p.ty == "Int") intTok(p.w) else if (p.ty == "String") "s" else if (p.ty == "Bool") "b" else if (isListTy(p.ty)) listTok(p.ty, ens, 0) else adtTok(p.ty, ens, 0)
+  if (p.ty == "Int") intTok(p.name, p.w) else if (p.ty == "String") "s" else if (p.ty == "Bool") "b" else if (isListTy(p.ty)) listTok(p.ty, ens, 0) else adtTok(p.ty, ens, 0)
 
 def isListTy(t: String): Bool =
   Str.len(t) > 6 && Str.slice(t, 0, 5) == "List[" && Str.charAt(t, Str.len(t) - 1) == 93
@@ -101,7 +103,7 @@ def fieldToks(fs: List[Param], ens: List[En], depth: Int): String =
   if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) fieldTok(List.at(fs, 0), ens, depth) else Str.concat(fieldTok(List.at(fs, 0), ens, depth), Str.concat(",", fieldToks(List.tail(fs), ens, depth)))
 
 def fieldTok(p: Param, ens: List[En], depth: Int): String =
-  if (p.ty == "Int") intTok(p.w) else typeTok(p.ty, ens, depth + 1)
+  if (p.ty == "Int") intTok(p.name, p.w) else typeTok(p.ty, ens, depth + 1)
 
 def enumTok(cs: List[EnCase], ens: List[En], depth: Int): String =
   Str.concat("e:", enumCases(if (depth >= 3) leafCases(cs) else cs, ens, depth))
@@ -139,8 +141,11 @@ def caseTok(c: EnCase, ens: List[En], depth: Int): String =
 def noCase(): List[EnCase] =
   []
 
-def intTok(w: String): String =
-  if (w == "") "i" else if (findIdx(w, ">=", 0) >= 0) Str.concat("i>=", trimNum(afterOp(w, ">="))) else if (findIdx(w, "<=", 0) >= 0) Str.concat("i<=", trimNum(afterOp(w, "<="))) else if (findIdx(w, ">", 0) >= 0) Str.concat("i>", trimNum(afterOp(w, ">"))) else if (findIdx(w, "<", 0) >= 0) Str.concat("i<", trimNum(afterOp(w, "<"))) else "i"
+def intTok(name: String, w: String): String =
+  intTokB(whereBounds(name, w))
+
+def intTokB(b: IBound): String =
+  if (!b.ok || !b.onLo && !b.onHi && !b.onEq) "i" else if (b.onEq) Str.concat("i==", Str.fromInt(b.eq)) else Str.concat(if (b.onLo) Str.concat("i>=", Str.fromInt(b.lo)) else "", if (b.onHi) Str.concat(if (b.onLo) "&&i" else "i", Str.concat("<=", Str.fromInt(b.hi))) else "")
 
 def friendly(p: Param, ens: List[En]): Bool =
   friendlyTy(p.ty, ens)
@@ -166,15 +171,15 @@ def hasAdtOrList(ps: List[Param]): Bool =
 def unaryAdtOk(ps: List[Param]): Bool =
   List.len(ps) <= 1 || !hasAdtOrList(ps)
 
-def simpleWhere(w: String): Bool =
-  w == "" || !hasSub(w, "&&") && !hasSub(w, "||")
+def simpleWhere(name: String, w: String): Bool =
+  whereBounds(name, w).ok
 
 def allSimpleWhere(ps: List[Param]): Bool =
   if (List.isEmpty(ps)) true else allSimpleWhere1(List.at(ps, 0), List.tail(ps))
 
 def allSimpleWhere1(p: Param, rest: List[Param]): Bool =
   p match {
-    case Param(_, _, w, _) => simpleWhere(w) && allSimpleWhere(rest)
+    case Param(n, _, w, _) => simpleWhere(n, w) && allSimpleWhere(rest)
   }
 
 def isDrive(d: Fun, ens: List[En]): Bool =
@@ -292,6 +297,46 @@ def reproOracle(events: List[String]): String =
 def oracleName(events: List[String]): String =
   if (List.isEmpty(events)) "" else oracleNameLine(List.at(events, 0), List.tail(events))
 
+def scriptToks(line: String): List[String] =
+  scriptToksGo(line, 0, Builder.empty(), noStr(), false)
+
+def scriptToksGo(line: String, i: Int, cur: Builder, acc: List[String], q: Bool): List[String] =
+  if (i >= Str.len(line)) scriptToksFin(cur, acc) else scriptToksCh(line, i, Str.charAt(line, i), cur, acc, q)
+
+def scriptToksFin(cur: Builder, acc: List[String]): List[String] =
+  if (Builder.result(cur) == "") acc else List.concat(acc, Builder.result(cur) :: noStr())
+
+def scriptToksCh(line: String, i: Int, c: Int, cur: Builder, acc: List[String], q: Bool): List[String] =
+  if (c == 32 && !q) scriptToksGo(line, i + 1, Builder.empty(), scriptToksFin(cur, acc), false) else if (c == 92 && q) scriptToksEsc(line, i, cur, acc, q) else if (c == 34) scriptToksGo(line, i + 1, Builder.append(cur, Str.slice(line, i, i + 1)), acc, !q) else scriptToksGo(line, i + 1, Builder.append(cur, Str.slice(line, i, i + 1)), acc, q)
+
+def scriptToksEsc(line: String, i: Int, cur: Builder, acc: List[String], q: Bool): List[String] =
+  if (i + 1 >= Str.len(line)) scriptToksGo(line, i + 1, Builder.append(cur, Str.slice(line, i, i + 1)), acc, q) else scriptToksGo(line, i + 2, Builder.append(cur, Str.slice(line, i, i + 2)), acc, q)
+
+def quoteTok(s: String): String =
+  Str.concat("\"", Str.concat(quoteTokGo(s, 0, Builder.empty()), "\""))
+
+def quoteTokGo(s: String, i: Int, b: Builder): String =
+  if (i >= Str.len(s)) Builder.result(b) else quoteTokGo(s, i + 1, Builder.append(b, quoteTokCh(Str.charAt(s, i), s, i)))
+
+def quoteTokCh(c: Int, s: String, i: Int): String =
+  if (c == 92) "\\\\" else if (c == 34) "\\\"" else if (c == 10) "\\n" else if (c == 9) "\\t" else if (c == 13) "\\r" else Str.slice(s, i, i + 1)
+
+def unquoteTok(tok: String): String =
+  if (Str.len(tok) < 2 || Str.charAt(tok, 0) != 34) tok else unquoteTokGo(tok, 1, Builder.empty())
+
+def unquoteTokGo(tok: String, i: Int, b: Builder): String =
+  if (i >= Str.len(tok) - 1) Builder.result(b) else unquoteTokCh(tok, i, Str.charAt(tok, i), b)
+
+def unquoteTokCh(tok: String, i: Int, c: Int, b: Builder): String =
+  if (c == 92) unquoteTokEsc(tok, i + 1, b) else unquoteTokGo(tok, i + 1, Builder.append(b, Str.slice(tok, i, i + 1)))
+
+def unquoteTokEsc(tok: String, i: Int, b: Builder): String =
+  if (i >= Str.len(tok) - 1) unquoteTokGo(tok, i, Builder.append(b, "\\")) else unquoteTokGo(tok, i + 1, Builder.append(b, unquoteEscCh(Str.charAt(tok, i), tok, i)))
+
+def unquoteEscCh(c: Int, s: String, i: Int): String =
+  if (c == 110) """
+""" else if (c == 116) "\t" else if (c == 114) "r" else if (c == 34) "\"" else if (c == 92) "\\" else Str.concat("\\", Str.slice(s, i, i + 1))
+
 def oracleNameLine(line: String, rest: List[String]): String =
   if (Str.startsWith(line, "drive ")) oracleDrive(line) else oracleName(rest)
 
@@ -311,7 +356,7 @@ def jJoin(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) List.at(xs, 0) else Str.concat(List.at(xs, 0), Str.concat(",", jJoin(List.tail(xs))))
 
 def jLine(line: String): String =
-  if (line == "" || Str.startsWith(line, "#")) "" else jVerb(line, List.filter(Str.split(line, " "), t => t != ""))
+  if (line == "" || Str.startsWith(line, "#")) "" else jVerb(line, scriptToks(line))
 
 def jVerb(line: String, toks: List[String]): String =
   jVerbGo(line, List.at(toks, 0), List.drop(toks, 1))
@@ -787,7 +832,7 @@ def seedArgsE(ps: List[Param], ens: List[En]): String =
   if (List.isEmpty(ps)) "" else if (List.len(ps) == 1) seedArgE(List.at(ps, 0), ens) else Str.concat(seedArgE(List.at(ps, 0), ens), Str.concat(" ", seedArgsE(List.tail(ps), ens)))
 
 def seedArgE(p: Param, ens: List[En]): String =
-  if (p.ty == "Int") "0" else if (p.ty == "Bool") "false" else if (p.ty == "String") "a" else if (isListTy(p.ty)) "[]" else seedAdt(p.ty, ens)
+  if (p.ty == "Int") Str.fromInt(zeroInt(p.name, p.w)) else if (p.ty == "Bool") "false" else if (p.ty == "String") "\"a\"" else if (isListTy(p.ty)) "[]" else seedAdt(p.ty, ens)
 
 def seedAdt(ty: String, ens: List[En]): String =
   seedHit(findEn(ens, tyHead(ty)), ty, ens)
@@ -815,7 +860,7 @@ def seedCase(c: EnCase, ens: List[En]): String =
   }
 
 def seedCtor(name: String, fs: List[Param], ens: List[En]): String =
-  if (List.isEmpty(fs)) name else Str.concat(name, Str.concat("(", Str.concat(seedFields(fs, ens), ")")))
+  if (List.isEmpty(fs)) Str.concat(name, "()") else Str.concat(name, Str.concat("(", Str.concat(seedFields(fs, ens), ")")))
 
 def seedFields(fs: List[Param], ens: List[En]): String =
   if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) seedArgE(List.at(fs, 0), ens) else Str.concat(seedArgE(List.at(fs, 0), ens), Str.concat(",", seedFields(List.tail(fs), ens)))
@@ -1855,16 +1900,110 @@ def generatedParams(ps: List[Param], ens: List[En], seed: Int, depth: Int, sep: 
   if (List.isEmpty(ps)) "" else Str.concat(generatedParam(List.at(ps, 0), ens, seed, depth), if (List.len(ps) == 1) "" else Str.concat(sep, generatedParams(List.tail(ps), ens, seed + 1, depth, sep)))
 
 def generatedParam(p: Param, ens: List[En], seed: Int, depth: Int): String =
-  if (p.ty == "Int") Str.fromInt(generatedInt(p.w, seed)) else generatedType(p.ty, ens, seed, depth)
+  if (p.ty == "Int") Str.fromInt(generatedInt(p.name, p.w, seed)) else generatedType(p.ty, ens, seed, depth)
 
-def generatedInt(w: String, seed: Int): Int =
-  if (w == "") generatedSigned(seed) else if (hasSub(w, ">=")) Str.toInt(trimNum(afterOp(w, ">=")), 0) + seed % 17 else if (hasSub(w, "<=")) Str.toInt(trimNum(afterOp(w, "<=")), 0) - seed % 17 else if (hasSub(w, ">")) Str.toInt(trimNum(afterOp(w, ">")), 0) + 1 + seed % 17 else if (hasSub(w, "<")) Str.toInt(trimNum(afterOp(w, "<")), 0) - 1 - seed % 17 else Str.toInt(trimNum(afterOp(w, "==")), 0)
+def maxI64(): Int =
+  9223372036854775807
 
-def nudgeInt(w: String, v: Int, delta: Int): Int =
-  if (w == "") v + delta else if (hasSub(w, ">=")) maxInt(v + delta, Str.toInt(trimNum(afterOp(w, ">=")), 0)) else if (hasSub(w, "<=")) minInt(v + delta, Str.toInt(trimNum(afterOp(w, "<=")), 0)) else if (hasSub(w, ">")) maxInt(v + delta, Str.toInt(trimNum(afterOp(w, ">")), 0) + 1) else if (hasSub(w, "<")) minInt(v + delta, Str.toInt(trimNum(afterOp(w, "<")), 0) - 1) else v
+def minI64(): Int =
+  0 - 9223372036854775807 - 1
 
-def zeroInt(w: String): Int =
-  if (w == "") 0 else if (hasSub(w, ">=")) maxInt(0, Str.toInt(trimNum(afterOp(w, ">=")), 0)) else if (hasSub(w, "<=")) minInt(0, Str.toInt(trimNum(afterOp(w, "<=")), 0)) else if (hasSub(w, ">")) maxInt(0, Str.toInt(trimNum(afterOp(w, ">")), 0) + 1) else if (hasSub(w, "<")) minInt(0, Str.toInt(trimNum(afterOp(w, "<")), 0) - 1) else Str.toInt(trimNum(afterOp(w, "==")), 0)
+def satAdd(a: Int, b: Int): Int =
+  if (b > 0 && a > maxI64() - b) maxI64() else if (b < 0 && a < minI64() - b) minI64() else a + b
+
+def satMul(a: Int, b: Int): Int =
+  if (a > 0 && b > maxI64() / a) maxI64() else a * b
+
+def midInt(lo: Int, hi: Int): Int =
+  if (lo < 0 && hi < 0 || lo > 0 && hi > 0) lo + (hi - lo) / 2 else (lo + hi) / 2
+
+def noBound(): IBound =
+  IBound(0, 0, false, false, 0, false, true)
+
+def badBound(): IBound =
+  IBound(0, 0, false, false, 0, false, false)
+
+def whereBounds(name: String, w: String): IBound =
+  if (w == "") noBound() else conjunctsBound(name, whereConjuncts(Check.dfltExpr(w)))
+
+def whereConjuncts(e: Expr): List[Expr] =
+  e match {
+    case Expr.EBin(op, l, r, _) => if (op == "&&") List.concat(whereConjuncts(l), whereConjuncts(r)) else e :: noExpr()
+    case _ => e :: noExpr()
+  }
+
+def conjunctsBound(name: String, cs: List[Expr]): IBound =
+  if (List.isEmpty(cs)) noBound() else boundMerge(conjunctBound(name, List.at(cs, 0)), conjunctsBound(name, List.tail(cs)))
+
+def boundMerge(a: IBound, b: IBound): IBound =
+  if (!a.ok || !b.ok) badBound() else IBound(if (a.onLo && b.onLo) maxInt(a.lo, b.lo) else if (a.onLo) a.lo else b.lo, if (a.onHi && b.onHi) minInt(a.hi, b.hi) else if (a.onHi) a.hi else b.hi, a.onLo || b.onLo, a.onHi || b.onHi, if (a.onEq) a.eq else b.eq, a.onEq || b.onEq, true)
+
+def conjunctBound(name: String, e: Expr): IBound =
+  e match {
+    case Expr.EBin(op, l, r, _) => boundSides(name, op, l, r)
+    case _ => badBound()
+  }
+
+def boundSides(name: String, op: String, l: Expr, r: Expr): IBound =
+  l match {
+    case Expr.EVar(s, _) => if (s != name) badBound() else boundFrom(op, intLitOf(r), false)
+    case _ => r match {
+  case Expr.EVar(s, _) => if (s != name) badBound() else boundFrom(op, intLitOf(l), true)
+  case _ => badBound()
+}
+  }
+
+def intLitOf(e: Expr): (Bool, Int) =
+  e match {
+    case Expr.EInt(n, _) => (true, n)
+    case Expr.EUn(op, x, _) => if (op == "-") negLitOf(x) else (false, 0)
+    case _ => (false, 0)
+  }
+
+def negLitOf(x: Expr): (Bool, Int) =
+  x match {
+    case Expr.EInt(n, _) => (true, 0 - n)
+    case _ => (false, 0)
+  }
+
+def boundFrom(op: String, lit: (Bool, Int), flip: Bool): IBound =
+  if (!lit._1) badBound() else boundOp(if (flip) flipOp(op) else op, lit._2)
+
+def flipOp(op: String): String =
+  if (op == "<") ">" else if (op == ">") "<" else if (op == "<=") ">=" else if (op == ">=") "<=" else op
+
+def boundOp(op: String, k: Int): IBound =
+  if (op == ">=") IBound(k, 0, true, false, 0, false, true) else if (op == ">") IBound(satAdd(k, 1), 0, true, false, 0, false, true) else if (op == "<=") IBound(0, k, false, true, 0, false, true) else if (op == "<") IBound(0, satAdd(k, 0 - 1), false, true, 0, false, true) else if (op == "==") IBound(k, k, true, true, k, true, true) else badBound()
+
+def clampBound(v: Int, b: IBound): Int =
+  if (b.onEq) b.eq else if (b.onLo && v < b.lo) b.lo else if (b.onHi && v > b.hi) b.hi else v
+
+def genSize(seed: Int): Int =
+  seed % 4 + seed / 16 % 8
+
+def generatedInt(name: String, w: String, seed: Int): Int =
+  generatedIntB(whereBounds(name, w), seed)
+
+def generatedIntB(b: IBound, seed: Int): Int =
+  if (b.onEq) b.eq else clampBound(intPoolAt(b, seed, seed % 10), b)
+
+def intPoolAt(b: IBound, seed: Int, pick: Int): Int =
+  if (b.onHi && !b.onLo) intPoolHi(b, seed, pick) else if (b.onLo || b.onHi) intPoolBound(b, seed, pick) else intPoolFree(seed, pick)
+
+def intPoolFree(seed: Int, pick: Int): Int =
+  if (pick == 0) 0 else if (pick == 1) 1 else if (pick == 2) 0 - 1 else if (pick == 3) seed % 17 else if (pick == 4) 0 - seed % 17 else if (pick == 5) maxI64() else if (pick == 6) minI64() else if (pick == 7) maxI64() - 1 else if (pick == 8) minI64() + 1 else satMul(seed % 1000, seed % 1000) * (if (seed % 2 == 0) 0 - 1 else 1)
+
+def intPoolBound(b: IBound, seed: Int, pick: Int): Int =
+  if (pick == 0) 0 else if (pick == 1) 1 else if (pick == 2) 0 - 1 else if (pick == 3) satAdd(b.lo, seed % 17) else if (pick == 4) satAdd(b.lo, 1) else if (pick == 5) if (b.onHi) b.hi else satAdd(b.lo, seed % (17 + seed / 32 % 85)) else if (pick == 6) satAdd(b.lo, seed % (17 + genSize(seed))) else if (pick == 7) satAdd(b.hi, 0 - 1) else if (pick == 8) b.hi else satAdd(b.lo, seed % 101)
+
+def intPoolHi(b: IBound, seed: Int, pick: Int): Int =
+  if (pick == 0) 0 else if (pick == 1) 1 else if (pick == 2) 0 - 1 else if (pick == 3) satAdd(b.hi, 0 - seed % 17) else if (pick == 4) satAdd(b.hi, 0 - 1) else if (pick == 5) b.hi else if (pick == 6) satAdd(b.hi, 0 - seed % (17 + genSize(seed))) else if (pick == 7) satAdd(b.hi, 0 - seed % 101) else if (pick == 8) b.hi else satAdd(b.hi, 0 - seed % (17 + seed / 32 % 85))
+
+def nudgeInt(name: String, w: String, v: Int, delta: Int): Int =
+  clampBound(satAdd(v, delta), whereBounds(name, w))
+
+def zeroInt(name: String, w: String): Int =
+  clampBound(0, whereBounds(name, w))
 
 def maxInt(a: Int, b: Int): Int =
   if (a > b) a else b
@@ -1873,7 +2012,17 @@ def minInt(a: Int, b: Int): Int =
   if (a < b) a else b
 
 def generatedType(ty: String, ens: List[En], seed: Int, depth: Int): String =
-  if (ty == "Int") Str.fromInt(seed % 17) else if (ty == "Bool") generatedBool(seed) else if (ty == "String") Str.repeat("a", 1 + seed % 8) else if (isListTy(ty)) Str.concat("[", Str.concat(generatedList(listInner(ty), ens, seed, depth + 1, if (depth >= 3 || !generationType(listInner(ty), ens, depth + 1)) 0 else seed % 4), "]")) else generatedAdt(findEn(ens, tyHead(ty)), ens, seed, depth)
+  if (ty == "Int") Str.fromInt(seed % 17) else if (ty == "Bool") generatedBool(seed) else if (ty == "String") generatedStr(seed) else if (isListTy(ty)) Str.concat("[", Str.concat(generatedList(listInner(ty), ens, seed, depth + 1, if (depth >= genMaxDepth(seed) || !generationType(listInner(ty), ens, depth + 1)) 0 else seed % (1 + genSize(seed))), "]")) else generatedAdt(findEn(ens, tyHead(ty)), ens, seed, depth)
+
+def generatedStr(seed: Int): String =
+  quoteTok(strValAt(seed, seed % 12))
+
+def strValAt(seed: Int, pick: Int): String =
+  if (pick == 0) "" else if (pick == 1) "a" else if (pick == 2) Str.repeat("a", 1 + genSize(seed)) else if (pick == 3) "\"" else if (pick == 4) """
+""" else if (pick == 5) " " else if (pick == 6) "," else if (pick == 7) "[]" else if (pick == 8) "é" else if (pick == 9) "λü中" else if (pick == 10) "a,b](x)" else Str.concat("a\t\"é\n", Str.fromInt(seed % 100))
+
+def genMaxDepth(seed: Int): Int =
+  3 + seed / 64 % 3
 
 def generatedList(ty: String, ens: List[En], seed: Int, depth: Int, n: Int): String =
   if (n <= 0) "" else Str.concat(generatedType(ty, ens, seed, depth), if (n == 1) "" else Str.concat(",", generatedList(ty, ens, seed + 1, depth, n - 1)))
@@ -1883,15 +2032,18 @@ def generatedAdt(hit: List[En], ens: List[En], seed: Int, depth: Int): String =
 
 def generatedEn(en: En, ens: List[En], seed: Int, depth: Int): String =
   en match {
-    case En(_, _, _, cases) => generatedCases(generationCases(cases, ens, depth), ens, seed, depth)
+    case En(_, _, _, cases) => generatedCases(generatedDepthCases(generationCases(cases, ens, depth), seed, depth), ens, seed, depth)
   }
+
+def generatedDepthCases(cs: List[EnCase], seed: Int, depth: Int): List[EnCase] =
+  if (depth < genMaxDepth(seed) || List.isEmpty(leafCases(cs))) cs else leafCases(cs)
 
 def generatedCases(cases: List[EnCase], ens: List[En], seed: Int, depth: Int): String =
   if (List.isEmpty(cases)) "0" else generatedCase(List.at(cases, seed % List.len(cases)), ens, seed, depth)
 
 def generatedCase(c: EnCase, ens: List[En], seed: Int, depth: Int): String =
   c match {
-    case EnCase(name, fields) => if (List.isEmpty(fields)) name else Str.concat(name, Str.concat("(", Str.concat(generatedParams(fields, ens, seed + 1, depth + 1, ","), ")")))
+    case EnCase(name, fields) => if (List.isEmpty(fields)) Str.concat(name, "()") else Str.concat(name, Str.concat("(", Str.concat(generatedParams(fields, ens, seed + 1, depth + 1, ","), ")")))
   }
 
 def varyWorkload(script: String, seed: Int): String =
@@ -1903,9 +2055,6 @@ def varyLines(lines: List[String], seed: Int): String =
 def workloadSeed(seed: Int): Int =
   (seed % 2147483647 + 2147483647) % 2147483647
 
-def generatedSigned(seed: Int): Int =
-  if (seed % 2 == 0) 0 - seed % 17 else seed % 17
-
 def generatedBool(seed: Int): String =
   if (seed % 2 == 0) "false" else "true"
 
@@ -1916,7 +2065,7 @@ def generationParams(ps: List[Param], ens: List[En], depth: Int): Bool =
   if (List.isEmpty(ps)) true else generationParam(List.at(ps, 0), ens, depth) && generationParams(List.tail(ps), ens, depth)
 
 def generationType(ty: String, ens: List[En], depth: Int): Bool =
-  if (leafTy(ty) || isListTy(ty)) true else if (depth >= 3) false else generationEnum(findEn(ens, tyHead(ty)), ens, depth)
+  if (leafTy(ty) || isListTy(ty)) true else if (depth >= 6) false else generationEnum(findEn(ens, tyHead(ty)), ens, depth)
 
 def generationEnum(hit: List[En], ens: List[En], depth: Int): Bool =
   if (List.isEmpty(hit)) false else generationEn(List.at(hit, 0), ens, depth)

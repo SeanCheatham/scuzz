@@ -361,7 +361,14 @@ def mutationScoreOk(): Bool =
 """) == "[]" && mutationCountsOk()
 
 def mutationCountsOk(): Bool =
-  coverageCountsOk() && mutationSampleOk() && summaryJsonOk() && reachNamesOk() && breadthNamesOk() && campaignOkOracle()
+  coverageCountsOk() && mutationSampleOk() && summaryJsonOk() && reachNamesOk() && breadthNamesOk() && campaignOkOracle() && generatorOk()
+
+def generatorOk(): Bool =
+  Verify.quoteTok("a,b") == "\"a,b\"" && Verify.unquoteTok("\"a,b\"") == "a,b" && Verify.unquoteTok(Verify.quoteTok("a\t\"é\n")) == "a\t\"é\n" && List.join(Verify.scriptToks("drive pairOk a(\"a,b](x)\",3)"), "|") == "drive|pairOk|a(\"a,b](x)\",3)" && List.len(Verify.scriptToks("drive s \"\"")) == 3 && Verify.zeroInt("n", "n >= 10 && n <= 20") == 10 && Verify.clampBound(25, Verify.whereBounds("n", "n >= 10 && n <= 20")) == 20 && Verify.clampBound(5, Verify.whereBounds("n", "n >= 10 && n <= 20")) == 10 && Verify.nudgeInt("n", "n >= 10 && n <= 20", 20, 8) == 20 && Verify.midInt(0, 9223372036854775807) == 4611686018427387903 && Verify.intTok("n", "n >= 10 && n <= 20") == "i>=10&&i<=20" && Verify.simpleWhere("n", "n >= 10 && n <= 20") && !Verify.simpleWhere("y", "y + 1 > y && y == y") && Verify.generatedInt("n", "", 5) == 9223372036854775807 && Verify.generatedInt("n", "", 6) == 0 - 9223372036854775807 - 1 && Verify.strValAt(0, 4) == """
+""" && genBandOk()
+
+def genBandOk(): Bool =
+  List.forall([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 42, 100, 1000], s => Verify.generatedInt("n", "n >= 10 && n <= 20", s) >= 10 && Verify.generatedInt("n", "n >= 10 && n <= 20", s) <= 20)
 
 def campaignOkOracle(): Bool =
   Verify.fuzzBelowFloor(750, 1001) && !Verify.fuzzBelowFloor(750, 500) && !Verify.fuzzBelowFloor(0 - 1, 500) && Verify.fuzzCampaignOk(0, 16, Verify.noStr(), Verify.noStr(), Verify.noStr(), false) && !Verify.fuzzCampaignOk(0, 16, Verify.noStr(), Verify.noStr(), Verify.noStr(), true) && Verify.fuzzCampaignOk(0, 0, "x" :: Verify.noStr(), Verify.noStr(), Verify.noStr(), false) && !Verify.fuzzCampaignOk(1, 16, Verify.noStr(), Verify.noStr(), Verify.noStr(), false) && !Verify.fuzzCampaignOk(0, 16, Verify.noStr(), Verify.noStr(), "recovers" :: Verify.noStr(), false) && Verify.fuzzCampaignOk(0, 0, Verify.noStr(), Verify.noStr(), "recovers" :: Verify.noStr(), false) && Verify.driveClaimRule(srcDriveClaimVerify() :: Verify.noStr(), "deliver" :: Verify.noStr()) == "" && Verify.driveClaimRule(srcDriveClaimVerify() :: Verify.noStr(), "drop" :: Verify.noStr()) == wantDriveClaim()
