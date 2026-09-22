@@ -449,7 +449,7 @@ slice_kernel() {
 }
 
 slice_package() {
-  need_scuzz
+  # package_release.sh builds the product CLI when that binary is missing.
   # Subshell: do not leak PREFIX PATH into later slices in one local run.
   (
     triple="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
