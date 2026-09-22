@@ -1439,10 +1439,10 @@ def pinPredColl(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)
   pinBareNamed(e, "Stream", Str.concat("Stream[", Str.concat(ty, "]")), pinPredMap(e, ty, pinBareNamed(e, "Set", Str.concat("Set[", Str.concat(ty, "]")), pinBareList(e, ty, env))))
 
 def streamPredFn(f: String): Bool =
-  f == "Stream.map" || f == "Stream.flatMap" || f == "Stream.mapConcat" || f == "Stream.filter" || f == "Stream.filterNot" || f == "Stream.takeWhile" || f == "Stream.dropWhile" || f == "Stream.find" || f == "Stream.findLast" || f == "Stream.exists" || f == "Stream.forall"
+  f == "Stream.map" || f == "Stream.flatMap" || f == "Stream.mapConcat" || f == "Stream.evalMap" || f == "Stream.evalTap" || f == "Stream.filter" || f == "Stream.filterNot" || f == "Stream.takeWhile" || f == "Stream.dropWhile" || f == "Stream.find" || f == "Stream.findLast" || f == "Stream.exists" || f == "Stream.forall"
 
 def streamPredMeth(name: String): Bool =
-  name == "takeWhile" || name == "dropWhile" || name == "mapConcat"
+  name == "takeWhile" || name == "dropWhile" || name == "mapConcat" || name == "evalMap" || name == "evalTap"
 
 def pinPredMap(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
   e match {

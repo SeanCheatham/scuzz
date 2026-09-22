@@ -538,7 +538,7 @@ def tyckClosed(): Bool =
   rejects(srcViewNope(), "unknown function View.nope") && rejects(srcViewArity(), "View.button expects") && rejects(srcSigGet(), "Signal.get arg type mismatch") && rejects(srcUiRun(), "Ui.run arg type mismatch") && rejects(srcIoNope(), "unknown function IO.notAKit") && Check.check(srcTimeoutOk()) == "[]" && rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")
 
 def tyckLam(): Bool =
-  tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]" && funArrowTypes() && listAtPin() && listSibPin() && listSeekPin() && mapCollPin() && callPin() && joinPin() && mapKeyPin() && foldPin() && mapValPin() && predPin() && redPin() && setPredPin() && mapLamPin() && mapKeySlotPin() && byPin() && grpPin() && streamPin() && streamFoldPin()
+  tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]" && funArrowTypes() && listAtPin() && listSibPin() && listSeekPin() && mapCollPin() && callPin() && joinPin() && mapKeyPin() && foldPin() && mapValPin() && predPin() && redPin() && setPredPin() && mapLamPin() && mapKeySlotPin() && byPin() && grpPin() && streamPin() && streamFoldPin() && streamEvalPin()
 
 def listAtPin(): Bool =
   Check.check("""def right(): IO[Unit] =
@@ -810,6 +810,33 @@ def streamFoldPin(): Bool =
     _ <- IO.pure(Stream.map(xs, n => IO.println(n)))
   } yield ()
 """, "expected String, got Int") && rejects("def wrong(): IO[Unit] =\n  for {\n    xs = Stream.emits(List.empty())\n    _ <- IO.pure(Stream.scan(xs, \"\", (acc, n) => Str.concat(acc, n)))\n    _ <- IO.pure(Stream.map(xs, n => Str.fromInt(n)))\n  } yield ()\n", "expected Int, got String")
+
+def streamEvalPin(): Bool =
+  Check.check("""def right(): IO[Unit] =
+  for {
+    xs = Stream.emits(List.empty())
+    _ <- IO.pure(Stream.evalMap(xs, n => IO.pure(n + 1)))
+    _ <- IO.pure(Stream.map(xs, n => n + 1))
+  } yield ()
+""") == "[]" && Check.check("""def right(): IO[Unit] =
+  for {
+    xs = Stream.emits(List.empty())
+    _ <- IO.pure(Stream.evalMap(xs, n => IO.pure(n)))
+    _ <- IO.pure(Stream.map(xs, n => IO.println(n)))
+  } yield ()
+""") == "[]" && rejects("""def wrong(): IO[Unit] =
+  for {
+    xs = Stream.emits(List.empty())
+    _ <- IO.pure(Stream.evalMap(xs, n => IO.pure(n + 1)))
+    _ <- IO.pure(Stream.map(xs, n => IO.println(n)))
+  } yield ()
+""", "expected String, got Int") && rejects("""def wrong(): IO[Unit] =
+  for {
+    xs = Stream.emits(List.empty())
+    _ <- IO.pure(Stream.evalTap(xs, n => IO.pure(Str.len(n))))
+    _ <- IO.pure(Stream.map(xs, n => Str.fromInt(n)))
+  } yield ()
+""", "expected Int, got String")
 
 def funArrowTypes(): Bool =
   Type.funFrom("Int => String" :: [], "String") == "(Int => String) => String" && Type.funFrom("Int" :: [], "String") == "Int => String" && Type.funFrom("Int" :: "String" :: [], "Bool") == "(Int, String) => Bool" && Type.substStr("A => A", "A", "Int => String") == "(Int => String) => Int => String" && Check.check(srcFunArrowOk()) == "[]" && rejects(srcFunArrowMis(), "lambda arg type mismatch: expected Int, got Int => String") && rejects(srcFunArrowApply(), "arg type mismatch") && rejects(srcFunListApply(), "apply needs a function") && Check.check(srcFunSubstOk()) == "[]" && rejects(srcFunSubstMis(), "does not match declared") && Check.check(srcFunSubstId()) == "[]" && Check.check(srcFunTupFieldOk()) == "[]" && rejects(srcFunTupFieldMis(), "tuple has no field") && rejects(srcFunTupFieldKeep(), "tuple has no field") && funKitHeadTypes()
@@ -1128,7 +1155,7 @@ def dumpIoFun(): String =
   if (Check.check(srcIoFunApply()) != "[]") Str.concat("ioFunApply ", Check.check(srcIoFunApply())) else if (!rejects(srcIoFunMap(), "unknown function .map")) Str.concat("ioFunMap ", Check.check(srcIoFunMap())) else if (!rejects(srcIoFunFlat(), "flatMap needs IO")) Str.concat("ioFunFlat ", Check.check(srcIoFunFlat())) else if (!rejects(srcIoFunHandle(), "handleErrorWith needs IO")) Str.concat("ioFunHandle ", Check.check(srcIoFunHandle())) else if (!rejects(srcIoFunResMake(), "Resource.make needs IO")) Str.concat("ioFunResMake ", Check.check(srcIoFunResMake())) else if (!rejects(srcIoFunResUse(), "Resource.use needs Resource")) Str.concat("ioFunResUse ", Check.check(srcIoFunResUse())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("ioFunEq ", Check.check(srcFunSubstId())) else "ioFun-other"
 
 def dumpTyckLam(): String =
-  if (!funArrowTypes()) dumpFunArrow() else if (!listAtPin()) dumpListAtPin() else if (!listSibPin()) "listSib" else if (!listSeekPin()) "listSeek" else if (!mapCollPin()) "mapColl" else if (!callPin()) "callPin" else if (!joinPin()) "joinPin" else if (!mapKeyPin()) "mapKey" else if (!foldPin()) "foldPin" else if (!mapValPin()) "mapVal" else if (!predPin()) "predPin" else if (!redPin()) "redPin" else if (!setPredPin()) "setPred" else if (!mapLamPin()) "mapLam" else if (!mapKeySlotPin()) "mapKeySlot" else if (!byPin()) "byPin" else if (!grpPin()) "grpPin" else if (!streamPin()) "streamPin" else if (!streamFoldPin()) "streamFold" else "tyckLam"
+  if (!funArrowTypes()) dumpFunArrow() else if (!listAtPin()) dumpListAtPin() else if (!listSibPin()) "listSib" else if (!listSeekPin()) "listSeek" else if (!mapCollPin()) "mapColl" else if (!callPin()) "callPin" else if (!joinPin()) "joinPin" else if (!mapKeyPin()) "mapKey" else if (!foldPin()) "foldPin" else if (!mapValPin()) "mapVal" else if (!predPin()) "predPin" else if (!redPin()) "redPin" else if (!setPredPin()) "setPred" else if (!mapLamPin()) "mapLam" else if (!mapKeySlotPin()) "mapKeySlot" else if (!byPin()) "byPin" else if (!grpPin()) "grpPin" else if (!streamPin()) "streamPin" else if (!streamFoldPin()) "streamFold" else if (!streamEvalPin()) "streamEval" else "tyckLam"
 
 def dumpListAtPin(): String =
   if (Check.check("""def right(): IO[Unit] =
