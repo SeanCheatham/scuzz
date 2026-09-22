@@ -13,8 +13,14 @@ def afterPlusShowsOne(t: Timeline): Verdict =
 def countStaysNonNeg(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "count") >= 0)
 
+private def countOnHit(t: Timeline, m: CountModel, i: Int): CountModel =
+  if (Timeline.signalInt(t, i, "count") == m.count + 1 && Timeline.lastHitHas(t, i, "button:+1")) CountModel(m.count + 1, -1) else CountModel(m.count, i)
+
+private def countStill(t: Timeline, m: CountModel, i: Int): CountModel =
+  if (Timeline.signalInt(t, i, "count") == m.count) CountModel(m.count, -1) else CountModel(m.count, i)
+
 private def countStep(t: Timeline, m: CountModel, i: Int): CountModel =
-  if (m.badAt >= 0) m else if (Timeline.signalInt(t, i, "count") == m.count || Timeline.signalInt(t, i, "count") == m.count + 1 && Timeline.lastHitHas(t, i, "button:+1")) CountModel(Timeline.signalInt(t, i, "count"), -1) else CountModel(m.count, i)
+  if (m.badAt >= 0) m else if (Timeline.hit(t, i, "button:+1")) countOnHit(t, m, i) else countStill(t, m, i)
 
 private def countVerdict(m: CountModel): Verdict =
   if (m.badAt < 0) Verdict.ok() else Verdict.fail(m.badAt, "count left the tap model")

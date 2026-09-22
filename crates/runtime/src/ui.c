@@ -973,6 +973,8 @@ static void session_set_last_hit(SzUiSession *session, float x, float y,
   session->last_hit_y = y;
   host_free(&session->last_hit_desc);
   session->last_hit_desc = host_dup(desc);
+  if (hit_if_fired)
+    sz_property_note_hit(desc);
 }
 
 static void session_set_hover(SzUiSession *session, float x, float y,

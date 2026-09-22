@@ -13461,6 +13461,38 @@ int main(void) {
     remove(path);
   }
 
+  /* A hit is one state. The last-hit level stays on the next state. */
+  {
+    const char *path = "/tmp/scuzz_test_io_tl_hit.dump";
+    void *tl;
+    SzString *needle;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
+    setenv("SCUZZ_TIMELINE_DUMP", path, 1);
+    sz_property_session_reset();
+    sz_property_stash_last_hit("button:+1");
+    sz_property_note_hit("button:+1");
+    sz_property_session_step();
+    sz_property_stash_last_hit("button:+1");
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TIMELINE_DUMP");
+    unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
+    tl = sz_timeline_load(path);
+    assert(tl);
+    assert(sz_timeline_len(tl) == 2);
+    needle = sz_string_from_cstr("button:+1");
+    assert(sz_timeline_hit(tl, 0, needle) == 1);
+    assert(sz_timeline_last_hit_has(tl, 0, needle) == 1);
+    assert(sz_timeline_hit(tl, 1, needle) == 0);
+    assert(sz_timeline_last_hit_has(tl, 1, needle) == 1);
+    sz_release(needle);
+    sz_timeline_free(tl);
+    remove(path);
+  }
+
   /* Effect log, fiber census, and fault context round-trip on a timeline dump. */
   {
     const char *path = "/tmp/scuzz_test_io_tl_obs.dump";

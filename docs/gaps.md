@@ -59,9 +59,7 @@ Filesystem symbolic links, extended metadata preservation, and power-loss durabi
 
 The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. These gaps weaken that strategy. Rank is threat order. Arc: [`vision.md`](vision.md#verification-arc). Locks: [`philosophy.md`](philosophy.md#verification-posture).
 
-1. **Per-state events.** A timeline state records the last hit and the last drive as levels. Two consecutive `+1` taps produce two states with the same `lastHitHas` and no edge, so a `Timeline.fold` model cannot count taps. It can only bound each step. A per-state event reader is open. Do not add a temporal-operator calculus.
-
-2. **URLSession and Skia pixels.** Host loopback OpenSSL replay is `scuzz fuzz --live`. URLSession, TLS error cases, and Skia pixels have no fuzz home. `--differential` compares structural dumps.
+1. **URLSession and Skia pixels.** Host loopback OpenSSL replay is `scuzz fuzz --live`. URLSession, TLS error cases, and Skia pixels have no fuzz home. `--differential` compares structural dumps.
 
 ### Later
 
