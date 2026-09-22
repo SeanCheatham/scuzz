@@ -145,7 +145,7 @@ Locks (not an API catalog — run `scuzz docs language` and `scuzz docs kits`):
 - Interpolated strings use the same escape rules as ordinary strings. Decode escapes in literal segments once. Parse expressions inside interpolation braces as source. Live code and verification use the same rules.
 - Optional `package`; top-level `def` / `private def` / `oracle` / `import`; `@main def …: IO[Unit]`
 - Payload enums + `record` sugar + thin traits/`impl` (static dispatch) + monomorphized generics
-- A generic def pins its own type parameters for every check in its body. `A` does not match `Int` or `String` there. Call sites still instantiate parameters. Kit argument checks pin the caller type after substitution. They do not pin unbound kit parameters.
+- A generic def pins its own type parameters for every check in its body. `A` does not match `Int` or `String` there. Call sites still instantiate parameters. Kit argument checks pin the caller type after substitution. A bare list pins its element type when `List.at` on that list is checked against a concrete type. Later bindings in that for-comprehension use the pin. Other unbound kit parameters still match through `Type.eq`.
 - Record field lookup substitutes the receiver type arguments into the declared field type. The same rule applies inside callbacks.
 - Constructor patterns compare direct String, Int, and Bool literals before an arm runs. Named fields use their declared positions. A failed literal comparison tries the next arm. Constructor, tuple, cons, as, and `[]` patterns nest in constructor fields and tuple components.
 - A constructor call builds that enum case when the case exists. A kit call with the same prefix stays a kit when the name is not a case.

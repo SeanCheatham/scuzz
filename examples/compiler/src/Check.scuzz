@@ -1080,7 +1080,7 @@ def bindFor(d: Bool, name: String, ty: String, env: List[(String, Ty)], ens: Lis
 
 def refineEnv(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   e match {
-    case Expr.ECall(f, args, _) => refineExprs(args, refineIterCall(f, args, refineOfferCall(f, args, env, funs, ens), funs, ens), funs, ens)
+    case Expr.ECall(f, args, _) => refineExprs(args, refineListPin(f, args, refineIterCall(f, args, refineOfferCall(f, args, env, funs, ens), funs, ens), funs, ens), funs, ens)
     case Expr.EMethod(recv, name, args, _) => refineExprs(args, refineEnv(recv, refineIterMeth(recv, name, args, refineOfferMeth(recv, name, args, env, funs, ens), funs, ens), funs, ens), funs, ens)
     case Expr.EAscribe(inner, _, _) => refineEnv(inner, env, funs, ens)
     case Expr.ENamed(_, inner) => refineEnv(inner, env, funs, ens)
@@ -1114,6 +1114,49 @@ def refineBinds(xs: List[Bind], env: List[(String, Ty)], funs: Ftab, ens: List[E
 def refineBind(b: Bind, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   b match {
     case Bind(_, _, v) => refineEnv(v, env, funs, ens)
+  }
+
+def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (!has(f)) env else pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens)
+
+def pinWantArgs(want: List[String], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (List.isEmpty(want) || List.isEmpty(args)) env else pinWantArgs(List.tail(want), List.tail(args), pinWantArg(List.at(want, 0), List.at(args, 0), env, funs, ens), funs, ens)
+
+def pinWantArg(w: String, arg: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinWantGot(w, stripNamed(arg), infer(stripNamed(arg), env, funs, ens), env)
+
+def pinWantGot(w: String, arg: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (hasErr(o) || !isLoose(tyStr(o)) || !concreteTy(w)) env else pinLooseSrc(arg, w, env)
+
+def concreteTy(t: String): Bool =
+  t != "" && t != "Any" && !looseTy(Type.parse(t))
+
+def looseTy(t: Ty): Bool =
+  t match {
+    case Ty.TVar(_) => true
+    case Ty.App(_, args) => looseTys(args)
+    case Ty.Tuple(ps) => looseTys(ps)
+    case Ty.Arrow(a, r) => looseTy(a) || looseTy(r)
+    case _ => false
+  }
+
+def looseTys(xs: List[Ty]): Bool =
+  if (List.isEmpty(xs)) false else looseTy(List.at(xs, 0)) || looseTys(List.tail(xs))
+
+def pinLooseSrc(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  e match {
+    case Expr.ECall(f, args, _) => if (f == "List.at") pinAtList(args, ty, env) else env
+    case Expr.EMethod(recv, name, _, _) => if (name == "at") pinBareList(stripNamed(recv), ty, env) else env
+    case _ => env
+  }
+
+def pinAtList(args: List[Expr], ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (List.isEmpty(args)) env else pinBareList(stripNamed(List.at(args, 0)), ty, env)
+
+def pinBareList(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  e match {
+    case Expr.EVar(n, _) => if (isBareHandle(getTy(env, n), "List")) envBind(n, Str.concat("List[", Str.concat(ty, "]")), env) else env
+    case _ => env
   }
 
 def refineOfferCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
