@@ -2,8 +2,8 @@
 
 Compile-time performance. Rank: [`gaps.md`](gaps.md). Locks: [`philosophy.md`](philosophy.md). Parse `Param` and `Fun` stay strings. Kit calls compare pre-parsed `Ty` values.
 
-## Return Ty from env lookup
+## Check concreteTy on Ty
 
-`getTy` shows the env type. Callers parse the string again. Return `Ty` from env lookup.
+`concreteTy` parses a shown type. Callers pass `tyStr` of an `Out` that already holds `Ty`. Check that `Ty`. Annotation strings may still parse.
 
 Proof: `scuzz check examples/compiler` stays green. `scuzz fuzz --iterations 0 examples/counter` stays green.

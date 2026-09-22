@@ -45,7 +45,7 @@ Resolve these gaps when they prevent ordinary language use.
 
 1. **Checker residuals** — `Type.eq` matches an unbound type parameter to any type. Pins that already exist stay. Do not add a pin for another kit call. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call.
 
-2. **Compile-time performance** — This is the next thesis gap. `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Env lookup still shows types. Coverage uses the live program when compiled files match live.
+2. **Compile-time performance** — This is the next thesis gap. `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Env lookup returns `Ty`. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. `concreteTy` still parses a shown type. Coverage uses the live program when compiled files match live.
 
 ### Table-stakes
 
