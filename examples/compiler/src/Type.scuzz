@@ -226,8 +226,15 @@ def funEq(arg: Ty, ret: Ty, b: Ty): Bool =
 def eqList(xs: List[Ty], ys: List[Ty]): Bool =
   if (List.isEmpty(xs)) List.isEmpty(ys) else if (List.isEmpty(ys)) false else eq(List.at(xs, 0), List.at(ys, 0)) && eqList(List.tail(xs), List.tail(ys))
 
+def isEmpty(t: Ty): Bool =
+  t match {
+    case Ty.Named(n) => n == ""
+    case Ty.TVar(n) => n == ""
+    case _ => false
+  }
+
 def prefer(a: Ty, b: Ty): Ty =
-  if (show(a) == "") b else if (show(b) == "") a else if (eqStruct(a, b)) a else if (isAny(a) || isParam(a)) b else if (isAny(b) || isParam(b)) a else if (isIo(a) && isIo(b)) tIo(prefer(ioErr(a), ioErr(b)), prefer(ioOk(a), ioOk(b))) else if (appRicher(a, b)) a else if (appRicher(b, a)) b else if (isTup(a) && isTup(b)) tTuple(preferList(tupParts(a), tupParts(b))) else a
+  if (isEmpty(a)) b else if (isEmpty(b)) a else if (eqStruct(a, b)) a else if (isAny(a) || isParam(a)) b else if (isAny(b) || isParam(b)) a else if (isIo(a) && isIo(b)) tIo(prefer(ioErr(a), ioErr(b)), prefer(ioOk(a), ioOk(b))) else if (appRicher(a, b)) a else if (appRicher(b, a)) b else if (isTup(a) && isTup(b)) tTuple(preferList(tupParts(a), tupParts(b))) else a
 
 def eqStruct(a: Ty, b: Ty): Bool =
   show(a) == show(b)
@@ -349,14 +356,23 @@ def substList(xs: List[Ty], param: String, arg: Ty): List[Ty] =
 def substStr(target: String, param: String, arg: String): String =
   show(subst(parse(target), param, parse(arg)))
 
+def eqPinnedTy(a: Ty, b: Ty, names: List[String]): Bool =
+  eq(pin(a, names), pin(b, names))
+
 def eqPinned(a: String, b: String, names: List[String]): Bool =
-  eq(pin(parse(a), names), pin(parse(b), names))
+  eqPinnedTy(parse(a), parse(b), names)
+
+def eqPinGotTy(want: Ty, got: Ty, names: List[String]): Bool =
+  eq(want, pin(got, names))
 
 def eqPinGot(want: String, got: String, names: List[String]): Bool =
-  eq(parse(want), pin(parse(got), names))
+  eqPinGotTy(parse(want), parse(got), names)
+
+def preferPinnedTy(a: Ty, b: Ty, names: List[String]): Ty =
+  prefer(pin(a, names), pin(b, names))
 
 def preferPinned(a: String, b: String, names: List[String]): String =
-  show(prefer(pin(parse(a), names), pin(parse(b), names)))
+  show(preferPinnedTy(parse(a), parse(b), names))
 
 def preferStr(a: String, b: String): String =
   show(prefer(parse(a), parse(b)))
