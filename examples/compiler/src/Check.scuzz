@@ -1267,10 +1267,10 @@ def listSeekMeth(name: String): Bool =
   name == "contains" || name == "indexOf" || name == "lastIndexOf"
 
 def foldFn(f: String): Bool =
-  f == "List.foldLeft" || f == "List.foldRight" || f == "List.scanLeft" || f == "List.scanRight"
+  f == "List.foldLeft" || f == "List.foldRight" || f == "List.scanLeft" || f == "List.scanRight" || f == "Stream.fold" || f == "Stream.scan"
 
 def foldMeth(name: String): Bool =
-  name == "foldLeft" || name == "foldRight" || name == "scanLeft" || name == "scanRight"
+  name == "foldLeft" || name == "foldRight" || name == "scanLeft" || name == "scanRight" || name == "fold" || name == "scan"
 
 def foldElemIx(name: String): Int =
   if (name == "List.foldRight" || name == "List.scanRight" || name == "foldRight" || name == "scanRight") 0 else 1
@@ -1334,7 +1334,10 @@ def pinFoldHit(listE: Expr, seed: String, elem: String, l: Expr, r: Expr, env: L
   pinFoldPair(listE, seed, elem, stripNamed(l), stripNamed(r), env, funs, ens)
 
 def pinFoldPair(listE: Expr, seed: String, elem: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (foldElemVar(l, elem) && foldSideIs(r, seed, env, funs, ens)) pinBareList(listE, seed, env) else if (foldElemVar(r, elem) && foldSideIs(l, seed, env, funs, ens)) pinBareList(listE, seed, env) else env
+  if (foldElemVar(l, elem) && foldSideIs(r, seed, env, funs, ens)) pinFoldColl(listE, seed, env) else if (foldElemVar(r, elem) && foldSideIs(l, seed, env, funs, ens)) pinFoldColl(listE, seed, env) else env
+
+def pinFoldColl(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  pinBareNamed(e, "Stream", Str.concat("Stream[", Str.concat(ty, "]")), pinBareList(e, ty, env))
 
 def foldElemVar(e: Expr, elem: String): Bool =
   e match {
