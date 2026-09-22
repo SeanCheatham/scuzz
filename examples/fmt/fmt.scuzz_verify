@@ -1,3 +1,6 @@
+oracle prettyGenerated(n: Int where n >= 0): Bool =
+  Main.prettyGenerated(n)
+
 oracle fmtHi(): Bool =
   Main.fmtDiff(Main.srcHi(), Main.wantHi())
 

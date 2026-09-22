@@ -1980,6 +1980,15 @@ def stripCtxFun(d: Fun, ctxTy: String): Fun =
   }
 
 def generatedDrive(ds: List[Fun], ens: List[En], seed: Int): String =
+  generatedFrom(paramDrives(ds), ens, seed)
+
+def paramDrives(ds: List[Fun]): List[Fun] =
+  if (List.isEmpty(ds)) noFun() else paramDrive(List.at(ds, 0), List.tail(ds))
+
+def paramDrive(d: Fun, rest: List[Fun]): List[Fun] =
+  if (List.isEmpty(d.params)) paramDrives(rest) else d :: paramDrives(rest)
+
+def generatedFrom(ds: List[Fun], ens: List[En], seed: Int): String =
   if (List.isEmpty(ds)) "" else generatedEligible(List.at(ds, seed % List.len(ds)), ens, seed)
 
 def generatedFun(d: Fun, ens: List[En], seed: Int): String =

@@ -63,8 +63,6 @@ The one testing strategy is mutation, fuzz, properties, simulation, coverage, an
 
 2. **URLSession and Skia pixels.** Host loopback OpenSSL replay is `scuzz fuzz --live`. URLSession, TLS error cases, and Skia pixels have no fuzz home. `--differential` compares structural dumps.
 
-3. **Facts tier.** Zero-argument `oracle` goldens seed campaigns in the compiler, formatter, and CLI packages. Named generated-program oracles exist (`tyckGenerated`, `irGenerated`, `prettyGenerated`). [`philosophy.md`](philosophy.md) does not name goldens as a facts tier. The compiler's primary oracles should be generated-program round-trip and engine parity. Goldens stay seeds.
-
 ### Later
 
 Do not start FFI, plugins, or a package registry. Other later items stay parked.
