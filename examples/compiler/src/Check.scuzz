@@ -1129,7 +1129,7 @@ def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ft
   if (!has(f)) env else pinColl(f, args, pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens), funs, ens)
 
 def pinColl(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (mapKeyFn(f) && List.len(args) == 2) pinMapKey(args, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else if (foldFn(f) && List.len(args) == 3) pinFold(args, foldElemIx(f), env, funs, ens) else if (listPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else if (listRedFn(f) && List.len(args) == 2) pinListRed(args, env, funs, ens) else env
+  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (mapKeyFn(f) && List.len(args) == 2) pinMapKey(args, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else if (foldFn(f) && List.len(args) == 3) pinFold(args, foldElemIx(f), env, funs, ens) else if (listPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else if (listRedFn(f) && List.len(args) == 2) pinListRed(args, env, funs, ens) else if (setPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else env
 
 def mapKeyFn(f: String): Bool =
   f == "Map.contains" || f == "Map.remove" || f == "Map.get"
@@ -1345,7 +1345,7 @@ def pinPredLam(listE: Expr, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens:
   }
 
 def pinPredAnn(listE: Expr, p: String, ann: String, body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (concreteTy(ann)) pinBareList(listE, ann, env) else if (p == "" || p == "_" || p == "__tup") env else pinPredExpr(listE, p, body, env, funs, ens)
+  if (concreteTy(ann)) pinPredColl(listE, ann, env) else if (p == "" || p == "_" || p == "__tup") env else pinPredExpr(listE, p, body, env, funs, ens)
 
 def pinPredExpr(listE: Expr, elem: String, e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   e match {
@@ -1380,7 +1380,7 @@ def pinPredSide(listE: Expr, e: Expr, env: List[(String, Ty)], funs: Ftab, ens: 
   pinPredGot(listE, infer(e, env, funs, ens), env)
 
 def pinPredGot(listE: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (hasErr(o) || !concreteTy(tyStr(o))) env else pinBareList(listE, tyStr(o), env)
+  if (hasErr(o) || !concreteTy(tyStr(o))) env else pinPredColl(listE, tyStr(o), env)
 
 def pinPredCall(f: String, listE: Expr, elem: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   pinPredWants(listE, elem, args, Kits.want(f, List.len(args)), pinPredExprs(listE, elem, args, env, funs, ens))
@@ -1389,7 +1389,13 @@ def pinPredWants(listE: Expr, elem: String, args: List[Expr], wants: List[String
   if (List.isEmpty(args) || List.isEmpty(wants)) env else pinPredWants(listE, elem, List.tail(args), List.tail(wants), pinPredWant(listE, elem, List.at(args, 0), List.at(wants, 0), env))
 
 def pinPredWant(listE: Expr, elem: String, arg: Expr, want: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (foldElemVar(stripNamed(arg), elem) && concreteTy(want)) pinBareList(listE, want, env) else env
+  if (foldElemVar(stripNamed(arg), elem) && concreteTy(want)) pinPredColl(listE, want, env) else env
+
+def pinPredColl(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  pinBareNamed(e, "Set", Str.concat("Set[", Str.concat(ty, "]")), pinBareList(e, ty, env))
+
+def setPredFn(f: String): Bool =
+  f == "Set.map" || f == "Set.filter" || f == "Set.exists" || f == "Set.forall"
 
 def listRedFn(f: String): Bool =
   f == "List.reduceLeft" || f == "List.reduceRight"
