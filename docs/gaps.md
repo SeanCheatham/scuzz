@@ -43,9 +43,9 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 Resolve these gaps when they prevent ordinary language use.
 
-1. **Checker and emit residuals** — A Queue or Deferred payload pins at the first offer or complete in the same for-comprehension, including nested expressions and payloads seen through a lambda parameter over a collection. Applying an env-bound lambda with an unresolved parameter letter to a concrete argument pins the parameter at the first concrete apply in the same for-comprehension. An apply outside that comprehension still asks for an annotation. An unannotated lambda in argument or def-body position binds its parameter from the expected function type, so a loose lambda can no longer escape through an expected function type. A generic def pins its own type parameters for every check in its body. Kit argument checks pin the caller type after substitution. Unbound kit parameters other than a pinned list, map, or set still match through `Type.eq`. Parse Param/Fun stay strings. A path-dep file over 40k keeps def heads with a stub body so Check can resolve a qualified call. Tuple components and constructor fields compare String, Int, and Bool literals. Constructor, tuple, cons, as, and `[]` patterns nest in those positions.
+1. **Checker residuals** — `Type.eq` matches an unbound type parameter to any type. Pins that already exist stay. Do not add a pin for another kit call. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call.
 
-2. **Compile-time performance** — `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Emitted string literals intern to pinned allocations. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
+2. **Compile-time performance** — This is the next thesis gap. `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Emitted string literals intern to pinned allocations. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. Coverage still parses a compiled graph that differs from live.
 
 ### Table-stakes
 
