@@ -411,6 +411,8 @@ SzIo *sz_net_tcp_connect(SzString *host, int64_t port) {
     sz_panic("sz_net_tcp_connect(null)");
   if (sz_testrt_net_is_fake())
     return sz_testrt_net_tcp_connect(host, port);
+  if (sz_net_live_replay() && !sz_net_host_is_loopback(sz_string_cstr(host)))
+    return sz_io_fail_cstr("Net.tcpConnect: live replay rejects non-loopback");
   sz_timeline_log_cstr("Net.tcpConnect", sz_string_cstr(host));
   st = (ConnectSt *)sz_rc_alloc(sizeof(ConnectSt), SZ_RC_BOX);
   memset(st, 0, sizeof(ConnectSt));
@@ -903,6 +905,8 @@ SzIo *sz_net_udp_send(SzNetSock *sock, SzString *host, int64_t port, SzString *d
     sz_panic("sz_net_udp_send(null)");
   if (sz_testrt_net_is_fake())
     return sz_testrt_net_udp_send(sock, host, port, data);
+  if (sz_net_live_replay() && !sz_net_host_is_loopback(sz_string_cstr(host)))
+    return sz_io_fail_cstr("Net.udpSend: live replay rejects non-loopback");
   sz_timeline_log_cstr("Net.udpSend", sz_string_cstr(host));
   st = (UdpSendSt *)sz_rc_alloc(sizeof(UdpSendSt), SZ_RC_BOX);
   memset(st, 0, sizeof(UdpSendSt));

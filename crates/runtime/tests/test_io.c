@@ -2793,6 +2793,43 @@ static void test_http_url(void) {
 
 }
 
+static SzIo *live_ok(void *req, void *env) {
+  SzString *body = sz_string_from_cstr("pong");
+  void *resp;
+  (void)req;
+  (void)env;
+  resp = sz_net_http_resp(200, NULL, body);
+  sz_release(body);
+  return pure_drop(resp);
+}
+
+static void test_live_replay(void) {
+  SzString *url = sz_string_from_cstr("https://127.0.0.1:18087/records");
+  SzString *far = sz_string_from_cstr("https://example.test/records");
+  SzIoResult r;
+  setenv("SCUZZ_TESTRT", "1", 1);
+  setenv("SCUZZ_NET_LIVE", "1", 1);
+  sz_testrt_install();
+  r = sz_io_unsafe_run(both_drop(sz_net_serve_once_tls(18087, live_ok, NULL),
+                                 sz_net_http_get(url, NULL)));
+  if (!r.ok) {
+    fprintf(stderr, "live replay: %s\n",
+            r.error ? sz_string_cstr(r.error->message) : "fail");
+    assert(r.ok);
+  }
+  assert(http_resp_status(((SzPair *)r.value)->right) == 200);
+  sz_release(r.value);
+  r = sz_io_unsafe_run(sz_net_http_get(far, NULL));
+  assert(!r.ok);
+  assert(strstr(sz_string_cstr(r.error->message), "non-loopback"));
+  sz_release(r.error);
+  sz_release(url);
+  sz_release(far);
+  unsetenv("SCUZZ_NET_LIVE");
+  unsetenv("SCUZZ_TESTRT");
+  sz_testrt_reset();
+}
+
 int main(void) {
   test_hmac();
   test_next_link();
@@ -2800,6 +2837,7 @@ int main(void) {
   test_retry_after();
   test_atomic_fs_write();
   test_request_headers();
+  test_live_replay();
   /* List.head_opt: None on empty, Some payload on a cell. C List.head still panics. */
   {
     SzList *xs;

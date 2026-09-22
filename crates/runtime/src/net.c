@@ -106,6 +106,7 @@ typedef struct HttpSt {
   int64_t read_deadline_ms;
   int64_t he_v4_at_ms;
   int http_port;
+  int live_yields; /* refused connects yielded so a forked server can bind */
   struct sockaddr_in dns_ns;
   struct sockaddr_storage peer;
   struct sockaddr_storage peer4;
@@ -560,6 +561,17 @@ static void *http_start(void *env) {
     r->as.err = http_err(st, "invalid URL");
     return r;
   }
+  if (sz_net_live_replay()) {
+    if (!sz_net_host_is_loopback(st->host)) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "live replay rejects non-loopback");
+      return r;
+    }
+    if (sz_net_host_equal(st->host, "localhost")) {
+      memcpy(st->host, "127.0.0.1", 10);
+      is_v6 = 0;
+    }
+  }
   st->http_port = port;
   st->tls = tls;
   memset(&st->peer, 0, sizeof st->peer);
@@ -900,6 +912,12 @@ static void *http_tcp_connect(void *env) {
   }
   fd = tcp_begin((struct sockaddr *)&st->peer, st->peer_len);
   if (fd < 0) {
+    if (sz_net_live_replay() &&
+        (errno == ECONNREFUSED || errno == ECONNRESET) && st->live_yields < 64) {
+      st->live_yields++;
+      r->retry = 1;
+      return r;
+    }
     r->is_err = 1;
     r->as.err = http_err(st, "connect failed");
     return r;
@@ -1015,6 +1033,14 @@ static void *http_check_write(void *env) {
 
   if (!st->tcp_up) {
     if (getsockopt(st->fd, SOL_SOCKET, SO_ERROR, &so, &sl) != 0 || so != 0) {
+      if (sz_net_live_replay() &&
+          (so == ECONNREFUSED || so == ECONNRESET) && st->live_yields < 64) {
+        close(st->fd);
+        st->fd = -1;
+        st->live_yields++;
+        r->retry = 1;
+        return r;
+      }
       r->is_err = 1;
       r->as.err = http_err(st, "connect failed");
       return r;
@@ -1549,14 +1575,37 @@ static void *http_read(void *env) {
 static SzIo *http_poll_write(void *value, void *env);
 static SzIo *http_poll_read(void *value, void *env);
 
+static SzIo *http_yield_reconnect(void *value, void *env);
+static SzIo *http_yield_connected(void *value, void *env);
+
 static SzIo *http_unwrap_write(void *value, void *env) {
   HttpSt *st = (HttpSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
     sz_release(r);
+    if (st->fd < 0 && st->fd4 < 0 && st->fd6 < 0)
+      return fm_drop(sz_io_sleep_ms(1), http_yield_reconnect, st);
     return http_poll_write(NULL, st);
   }
   return unwrap_net(value, NULL);
+}
+
+static SzIo *http_yield_reconnect(void *value, void *env) {
+  (void)value;
+  return fm_drop(sz_io_delay(http_tcp_connect, env), http_yield_connected, env);
+}
+
+static SzIo *http_yield_connected(void *value, void *env) {
+  HttpSt *st = (HttpSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_release(r);
+    return fm_drop(sz_io_sleep_ms(1), http_yield_reconnect, st);
+  }
+  if (!r || r->is_err)
+    return unwrap_net(value, NULL);
+  sz_release(r);
+  return http_poll_write(NULL, st);
 }
 
 static SzIo *http_unwrap_read(void *value, void *env) {
@@ -1678,10 +1727,28 @@ static SzIo *http_poll_dns(void *value, void *env) {
   return fm_drop(ready, http_after_dns_poll, st);
 }
 
+static SzIo *http_connect_unwrap(void *value, void *env);
+static SzIo *http_connect_again(void *value, void *env);
+
+static SzIo *http_connect_again(void *value, void *env) {
+  (void)value;
+  return fm_drop(sz_io_delay(http_tcp_connect, env), http_connect_unwrap, env);
+}
+
+static SzIo *http_connect_unwrap(void *value, void *env) {
+  HttpSt *st = (HttpSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_release(r);
+    return fm_drop(sz_io_sleep_ms(1), http_connect_again, st);
+  }
+  return unwrap_net(value, NULL);
+}
+
 static SzIo *http_after_resolved(void *value, void *env) {
   HttpSt *st = (HttpSt *)env;
   (void)value;
-  return fm_drop(sz_io_delay(http_tcp_connect, st), unwrap_net, NULL);
+  return fm_drop(sz_io_delay(http_tcp_connect, st), http_connect_unwrap, st);
 }
 
 static SzIo *http_after_start(void *value, void *env) {

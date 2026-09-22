@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive success 0"]
