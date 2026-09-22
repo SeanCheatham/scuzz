@@ -494,6 +494,22 @@ static int tomb_take(void *ptr, uint32_t *kind) {
 }
 #endif
 
+#ifndef SZ_ASAN
+enum { SZ_TOMB_KEEP = 1024 };
+
+static size_t *g_tomb_keep[SZ_TOMB_KEEP];
+static unsigned g_tomb_keep_n;
+
+/* Keep 1024 string and resource headers. Free the oldest. */
+static void tomb_keep(size_t *raw) {
+  unsigned i = g_tomb_keep_n % SZ_TOMB_KEEP;
+  if (g_tomb_keep_n >= SZ_TOMB_KEEP && g_tomb_keep[i])
+    free(g_tomb_keep[i]);
+  g_tomb_keep[i] = raw;
+  g_tomb_keep_n++;
+}
+#endif
+
 static void sz_rc_retire(void *ptr) {
   if (!ptr)
     return;
@@ -524,6 +540,7 @@ static void sz_rc_retire(void *ptr) {
     g_live_bytes = 0;
   h->magic = SZ_RC_TOMB;
   h->rc = 0;
+  tomb_keep(raw);
 #endif
 }
 
