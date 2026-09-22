@@ -1129,7 +1129,7 @@ def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ft
   if (!has(f)) env else pinColl(f, args, pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens), funs, ens)
 
 def pinColl(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (mapKeyFn(f) && List.len(args) == 2) pinMapKey(args, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else env
+  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (mapKeyFn(f) && List.len(args) == 2) pinMapKey(args, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else if (foldFn(f) && List.len(args) == 3) pinFold(args, foldElemIx(f), env, funs, ens) else env
 
 def mapKeyFn(f: String): Bool =
   f == "Map.contains" || f == "Map.remove" || f == "Map.get"
@@ -1207,7 +1207,7 @@ def pinListElemAt(args: List[Expr], ei: Int, env: List[(String, Ty)], funs: Ftab
   pinElemOn(List.at(args, 0), infer(stripNamed(List.at(args, ei)), env, funs, ens), env)
 
 def pinListMeth(name: String, recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, pinGet(recv :: args, env, funs, ens), funs, ens) else if (name == "set" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, env, funs, ens) else if (name == "add" && List.len(args) == 1) pinSetAdd(recv :: args, env, funs, ens) else if (name == "setAt" && List.len(args) == 2) pinListElemAt(recv :: args, 2, env, funs, ens) else if (listSeekMeth(name) && List.len(args) == 1) pinMapKey(recv :: args, pinListElemAt(recv :: args, 1, env, funs, ens), funs, ens) else if ((name == "remove" || name == "get") && List.len(args) == 1) pinMapKey(recv :: args, env, funs, ens) else if (listJoinMeth(name) && List.len(args) == 1) pinListElemAt(recv :: args, 1, env, funs, ens) else if (collBinMeth(name) && List.len(args) == 1) pinSetBin(recv :: args, pinMapBin(recv :: args, env, funs, ens), funs, ens) else env
+  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, pinGet(recv :: args, env, funs, ens), funs, ens) else if (name == "set" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, env, funs, ens) else if (name == "add" && List.len(args) == 1) pinSetAdd(recv :: args, env, funs, ens) else if (name == "setAt" && List.len(args) == 2) pinListElemAt(recv :: args, 2, env, funs, ens) else if (listSeekMeth(name) && List.len(args) == 1) pinMapKey(recv :: args, pinListElemAt(recv :: args, 1, env, funs, ens), funs, ens) else if ((name == "remove" || name == "get") && List.len(args) == 1) pinMapKey(recv :: args, env, funs, ens) else if (listJoinMeth(name) && List.len(args) == 1) pinListElemAt(recv :: args, 1, env, funs, ens) else if (collBinMeth(name) && List.len(args) == 1) pinSetBin(recv :: args, pinMapBin(recv :: args, env, funs, ens), funs, ens) else if (foldMeth(name) && List.len(args) == 2) pinFold(recv :: args, foldElemIx(name), env, funs, ens) else env
 
 def listJoinMeth(name: String): Bool =
   name == "append" || name == "intersperse"
@@ -1217,6 +1217,88 @@ def collBinMeth(name: String): Bool =
 
 def listSeekMeth(name: String): Bool =
   name == "contains" || name == "indexOf" || name == "lastIndexOf"
+
+def foldFn(f: String): Bool =
+  f == "List.foldLeft" || f == "List.foldRight" || f == "List.scanLeft" || f == "List.scanRight"
+
+def foldMeth(name: String): Bool =
+  name == "foldLeft" || name == "foldRight" || name == "scanLeft" || name == "scanRight"
+
+def foldElemIx(name: String): Int =
+  if (name == "List.foldRight" || name == "List.scanRight" || name == "foldRight" || name == "scanRight") 0 else 1
+
+def pinFold(args: List[Expr], ei: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinFoldSeed(List.at(args, 0), infer(stripNamed(List.at(args, 1)), env, funs, ens), stripNamed(List.at(args, 2)), ei, env, funs, ens)
+
+def pinFoldSeed(listE: Expr, so: Out, lam: Expr, ei: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (hasErr(so) || !concreteTy(tyStr(so))) env else pinFoldLam(stripNamed(listE), tyStr(so), lam, ei, env, funs, ens)
+
+def pinFoldLam(listE: Expr, seed: String, lam: Expr, ei: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  lam match {
+    case Expr.ELam(_, _, body) => pinFoldMatch(listE, seed, body, ei, env, funs, ens)
+    case Expr.ENamed(_, inner) => pinFoldLam(listE, seed, inner, ei, env, funs, ens)
+    case Expr.EAscribe(inner, _, _) => pinFoldLam(listE, seed, inner, ei, env, funs, ens)
+    case _ => env
+  }
+
+def pinFoldMatch(listE: Expr, seed: String, body: Expr, ei: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  body match {
+    case Expr.EMatch(_, arms, _) => if (List.isEmpty(arms)) env else pinFoldArm(listE, seed, List.at(arms, 0), ei, env, funs, ens)
+    case _ => env
+  }
+
+def pinFoldArm(listE: Expr, seed: String, arm: Arm, ei: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  arm match {
+    case Arm(pat, _, abody) => pinFoldNames(listE, seed, foldPatNames(pat), abody, ei, env, funs, ens)
+  }
+
+def foldPatNames(pat: String): List[String] =
+  if (isTuplePat(pat)) splitComma(Str.slice(pat, 1, Str.len(pat) - 1)) else []
+
+def pinFoldNames(listE: Expr, seed: String, names: List[String], body: Expr, ei: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (List.len(names) != 2) env else pinFoldBody(listE, seed, List.at(names, ei), body, envBind(List.at(names, if (ei == 0) 1 else 0), seed, env), funs, ens)
+
+def pinFoldBody(listE: Expr, seed: String, elem: String, body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (elem == "" || elem == "_") env else pinFoldExpr(listE, seed, elem, body, env, funs, ens)
+
+def pinFoldExpr(listE: Expr, seed: String, elem: String, e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  e match {
+    case Expr.EBin(op, l, r, _) => pinFoldBin(op, listE, seed, elem, l, r, env, funs, ens)
+    case Expr.ECall(f, args, _) => pinFoldCall(f, listE, seed, elem, args, env, funs, ens)
+    case Expr.ENamed(_, inner) => pinFoldExpr(listE, seed, elem, inner, env, funs, ens)
+    case Expr.EAscribe(inner, _, _) => pinFoldExpr(listE, seed, elem, inner, env, funs, ens)
+    case Expr.EUn(_, inner, _) => pinFoldExpr(listE, seed, elem, inner, env, funs, ens)
+    case Expr.EIf(_, t, el, _) => pinFoldExpr(listE, seed, elem, el, pinFoldExpr(listE, seed, elem, t, env, funs, ens), funs, ens)
+    case Expr.ELam(p, _, body) => if (p == elem) env else pinFoldExpr(listE, seed, elem, body, env, funs, ens)
+    case _ => env
+  }
+
+def pinFoldBin(op: String, listE: Expr, seed: String, elem: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (isArith(op)) pinFoldHit(listE, seed, elem, l, r, pinFoldExpr(listE, seed, elem, r, pinFoldExpr(listE, seed, elem, l, env, funs, ens), funs, ens), funs, ens) else pinFoldExpr(listE, seed, elem, r, pinFoldExpr(listE, seed, elem, l, env, funs, ens), funs, ens)
+
+def pinFoldCall(f: String, listE: Expr, seed: String, elem: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (f == "Str.concat" && List.len(args) == 2) pinFoldHit(listE, seed, elem, List.at(args, 0), List.at(args, 1), pinFoldArgs(listE, seed, elem, args, env, funs, ens), funs, ens) else pinFoldArgs(listE, seed, elem, args, env, funs, ens)
+
+def pinFoldArgs(listE: Expr, seed: String, elem: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (List.isEmpty(args)) env else pinFoldArgs(listE, seed, elem, List.tail(args), pinFoldExpr(listE, seed, elem, List.at(args, 0), env, funs, ens), funs, ens)
+
+def pinFoldHit(listE: Expr, seed: String, elem: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinFoldPair(listE, seed, elem, stripNamed(l), stripNamed(r), env, funs, ens)
+
+def pinFoldPair(listE: Expr, seed: String, elem: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (foldElemVar(l, elem) && foldSideIs(r, seed, env, funs, ens)) pinBareList(listE, seed, env) else if (foldElemVar(r, elem) && foldSideIs(l, seed, env, funs, ens)) pinBareList(listE, seed, env) else env
+
+def foldElemVar(e: Expr, elem: String): Bool =
+  e match {
+    case Expr.EVar(n, _) => n == elem
+    case _ => false
+  }
+
+def foldSideIs(e: Expr, seed: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Bool =
+  foldSideGot(infer(e, env, funs, ens), seed)
+
+def foldSideGot(o: Out, seed: String): Bool =
+  !hasErr(o) && tyStr(o) == seed
 
 def pinColon(op: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   if (op != "::") env else pinElemOn(r, infer(stripNamed(l), env, funs, ens), env)
