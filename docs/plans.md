@@ -1,9 +1,9 @@
 # Next slice
 
-Compile-time performance. Rank: [`gaps.md`](gaps.md). Locks: [`philosophy.md`](philosophy.md). Parse `Param` and `Fun` stay strings. Known kit calls compare pre-parsed `Ty` values.
+Compile-time performance. Rank: [`gaps.md`](gaps.md). Locks: [`philosophy.md`](philosophy.md). Parse `Param` and `Fun` stay strings. Kit calls compare pre-parsed `Ty` values.
 
-## Generic kit wants as Ty
+## Keep zipCheck acc as Ty
 
-`resolveGenericKitSig` still passes string params into `genericArgs`, which parses each want at the call. Use `KitSig.params` and compare `Ty` values.
+`zipCheck` stores the accumulated type as a `String`. `ok(acc)` parses it on every known call. Thread `Ty` through `zipCheck`.
 
 Proof: `scuzz check examples/compiler` stays green. `scuzz fuzz --iterations 0 examples/counter` stays green.

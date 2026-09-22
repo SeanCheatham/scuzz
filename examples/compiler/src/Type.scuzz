@@ -239,16 +239,16 @@ def prefer(a: Ty, b: Ty): Ty =
 def eqStruct(a: Ty, b: Ty): Bool =
   show(a) == show(b)
 
-def bindings(want: Ty, got: Ty, params: List[String]): List[(String, String)] =
+def bindings(want: Ty, got: Ty, params: List[String]): List[(String, Ty)] =
   want match {
-    case Ty.TVar(n) => if (List.contains(params, n) && !isParam(got)) [(n, show(got))] else []
+    case Ty.TVar(n) => if (List.contains(params, n) && !isParam(got)) [(n, got)] else []
     case Ty.App(n, args) => if (n != appName(got)) [] else if (n == "IO") bindArgs([ioErrOf(args), ioOkOf(args)], [ioErr(got), ioOk(got)], params) else bindArgs(args, appArgs(got), params)
     case Ty.Tuple(parts) => bindArgs(parts, tupParts(got), params)
     case Ty.Arrow(arg, ret) => if (isFun(got)) List.concat(bindings(arg, funArg(got), params), bindings(ret, funRet(got), params)) else []
     case _ => []
   }
 
-def bindArgs(want: List[Ty], got: List[Ty], params: List[String]): List[(String, String)] =
+def bindArgs(want: List[Ty], got: List[Ty], params: List[String]): List[(String, Ty)] =
   if (List.isEmpty(want) || List.isEmpty(got)) [] else List.concat(bindings(List.at(want, 0), List.at(got, 0), params), bindArgs(List.tail(want), List.tail(got), params))
 
 def appRicher(long: Ty, short: Ty): Bool =
