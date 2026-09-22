@@ -2778,6 +2778,7 @@ void sz_testrt_reset(void) {
 
 static char *g_property_a11y = NULL;
 static char *g_property_last_hit = NULL;
+static char *g_hit_event = NULL;
 static int g_replay;
 static const char *g_replay_a11y;
 static const char *g_replay_last_hit;
@@ -2806,6 +2807,21 @@ int64_t sz_property_a11y_has(SzString *needle) {
   if (!hay || !n[0])
     return 0;
   return strstr(hay, n) != NULL ? 1 : 0;
+}
+
+void sz_property_note_hit(const char *desc) {
+  size_t n;
+  char *copy;
+  free(g_hit_event);
+  g_hit_event = NULL;
+  if (!desc || !desc[0])
+    return;
+  n = strlen(desc);
+  copy = (char *)malloc(n + 1);
+  if (!copy)
+    sz_panic("timeline: out of memory");
+  memcpy(copy, desc, n + 1);
+  g_hit_event = copy;
 }
 
 void sz_property_stash_last_hit(const char *desc) {
@@ -3097,6 +3113,7 @@ typedef struct {
   char *files;
   char *a11y;
   char *last_hit;
+  char *hit;
   char *drive;
   char *effects;
   char *fibers;
@@ -3191,6 +3208,7 @@ static void tl_intern_drop_state(SzTlState *s) {
   tl_intern_drop(s->files);
   tl_intern_drop(s->a11y);
   tl_intern_drop(s->last_hit);
+  tl_intern_drop(s->hit);
   tl_intern_drop(s->drive);
   tl_intern_drop(s->effects);
   tl_intern_drop(s->fibers);
@@ -3404,6 +3422,9 @@ static void tl_push(void) {
   }
   g_tl[g_tl_n].a11y = tl_intern(g_property_a11y);
   g_tl[g_tl_n].last_hit = tl_intern(g_property_last_hit);
+  g_tl[g_tl_n].hit = tl_intern(g_hit_event ? g_hit_event : "");
+  free(g_hit_event);
+  g_hit_event = NULL;
   g_tl[g_tl_n].drive = tl_intern(g_last_drive);
   g_tl[g_tl_n].effects = tl_intern(g_effects);
   tl_fmt_fibers(fibers, sizeof fibers);
@@ -3734,6 +3755,14 @@ int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle) {
   return strstr(s->last_hit, n) != NULL ? 1 : 0;
 }
 
+int64_t sz_timeline_hit(void *tl, int64_t i, SzString *needle) {
+  SzTlState *s = tl_at(tl, i);
+  const char *n = needle ? sz_string_cstr(needle) : "";
+  if (!s || !s->hit || !n[0])
+    return 0;
+  return strstr(s->hit, n) != NULL ? 1 : 0;
+}
+
 static int64_t tl_field_has(const char *field, SzString *needle) {
   const char *n = needle ? sz_string_cstr(needle) : "";
   if (!field || !n[0])
@@ -3871,6 +3900,7 @@ void sz_timeline_compact_loaded(void *tl) {
       free(t->states[i].files);
       free(t->states[i].a11y);
       free(t->states[i].last_hit);
+      free(t->states[i].hit);
       free(t->states[i].drive);
       free(t->states[i].effects);
       free(t->states[i].fibers);
@@ -4148,6 +4178,7 @@ static void tl_dump_file(void) {
   for (i = 0; i < g_tl_n; i++) {
     fprintf(f, "--- %d checkpoint=%d\n", i, g_tl[i].checkpoint ? 1 : 0);
     fprintf(f, "last_hit:\n%s\n", g_tl[i].last_hit ? g_tl[i].last_hit : "");
+    fprintf(f, "hit:\n%s\n", g_tl[i].hit ? g_tl[i].hit : "");
     fprintf(f, "drive:\n%s\n", g_tl[i].drive ? g_tl[i].drive : "");
     fprintf(f, "signals:\n");
     tl_fputs_block(f, g_tl[i].signals);
@@ -4265,6 +4296,7 @@ void sz_timeline_free(void *tl) {
     free(t->states[i].files);
     free(t->states[i].a11y);
     free(t->states[i].last_hit);
+    free(t->states[i].hit);
     free(t->states[i].drive);
     free(t->states[i].effects);
     free(t->states[i].fibers);
@@ -4350,6 +4382,14 @@ void *sz_timeline_load(const char *path) {
     if (!tl_scan_line(&scan, &line, &len))
       goto malformed;
     t->states[i].last_hit = tl_copy_n(line, len);
+    if (tl_scan_peek(&scan, "hit:")) {
+      if (!tl_expect(&scan, "hit:"))
+        goto malformed;
+      if (!tl_scan_line(&scan, &line, &len))
+        goto malformed;
+      t->states[i].hit = tl_copy_n(line, len);
+    } else
+      t->states[i].hit = tl_copy("");
     if (!tl_expect(&scan, "drive:"))
       goto malformed;
     if (!tl_scan_line(&scan, &line, &len))
@@ -5160,6 +5200,8 @@ void sz_property_session_reset(void) {
   tl_free_states();
   free(g_last_drive);
   g_last_drive = NULL;
+  free(g_hit_event);
+  g_hit_event = NULL;
   tl_restore_clear();
   g_varied_flushed = 0;
 }

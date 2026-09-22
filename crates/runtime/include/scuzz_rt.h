@@ -1217,6 +1217,7 @@ void sz_timeline_log_cstr(const char *op, const char *s);
  * 1 = a claim failed, 2 = bad spec or unreadable dump. */
 int sz_judge_rel_main(const char *spec);
 void sz_property_stash_last_hit(const char *desc);
+void sz_property_note_hit(const char *desc);
 int64_t sz_property_last_hit_has(SzString *needle);
 int sz_property_session_armed(void);
 void sz_property_session_step(void);
@@ -1239,6 +1240,7 @@ int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
                                   SzString *needle);
 int64_t sz_timeline_a11y_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_last_hit_has(void *tl, int64_t i, SzString *needle);
+int64_t sz_timeline_hit(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_drive_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_effect_has(void *tl, int64_t i, SzString *needle);
 int64_t sz_timeline_effect_count(void *tl, int64_t i);
