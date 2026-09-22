@@ -1081,13 +1081,13 @@ def bindFor(d: Bool, name: String, ty: String, env: List[(String, Ty)], ens: Lis
 def refineEnv(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   e match {
     case Expr.ECall(f, args, _) => refineExprs(args, refineListPin(f, args, refineIterCall(f, args, refineOfferCall(f, args, env, funs, ens), funs, ens), funs, ens), funs, ens)
-    case Expr.EMethod(recv, name, args, _) => refineExprs(args, refineEnv(recv, refineIterMeth(recv, name, args, refineOfferMeth(recv, name, args, env, funs, ens), funs, ens), funs, ens), funs, ens)
+    case Expr.EMethod(recv, name, args, _) => refineExprs(args, pinListMeth(name, recv, args, refineEnv(recv, refineIterMeth(recv, name, args, refineOfferMeth(recv, name, args, env, funs, ens), funs, ens), funs, ens), funs, ens), funs, ens)
     case Expr.EAscribe(inner, _, _) => refineEnv(inner, env, funs, ens)
     case Expr.ENamed(_, inner) => refineEnv(inner, env, funs, ens)
     case Expr.ELam(_, _, body) => refineEnv(body, env, funs, ens)
     case Expr.EPrint(inner, _) => refineEnv(inner, env, funs, ens)
     case Expr.EField(recv, _, _) => refineEnv(recv, env, funs, ens)
-    case Expr.EBin(_, l, r, _) => refineEnv(r, refineEnv(l, env, funs, ens), funs, ens)
+    case Expr.EBin(op, l, r, _) => pinColon(op, l, r, refineEnv(r, refineEnv(l, env, funs, ens), funs, ens), funs, ens)
     case Expr.EUn(_, inner, _) => refineEnv(inner, env, funs, ens)
     case Expr.EIf(c, t, el, _) => refineEnv(el, refineEnv(t, refineEnv(c, env, funs, ens), funs, ens), funs, ens)
     case Expr.EMatch(s, arms, _) => refineArms(arms, refineEnv(s, env, funs, ens), funs, ens)
@@ -1117,7 +1117,37 @@ def refineBind(b: Bind, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Lis
   }
 
 def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (!has(f)) env else pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens)
+  if (!has(f)) env else pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens)
+
+def pinListSib(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (f == "List.cons" && List.len(args) == 2) pinCons(args, env, funs, ens) else if (f == "List.concat" && List.len(args) == 2) pinConcat(args, env, funs, ens) else if (f == "List.getOrElse" && List.len(args) == 3) pinGet(args, env, funs, ens) else env
+
+def pinListMeth(name: String, recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinGet(recv :: args, env, funs, ens) else env
+
+def pinColon(op: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (op != "::") env else pinElemOn(r, infer(stripNamed(l), env, funs, ens), env)
+
+def pinCons(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinElemOn(List.at(args, 1), infer(stripNamed(List.at(args, 0)), env, funs, ens), env)
+
+def pinGet(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinElemOn(List.at(args, 0), infer(stripNamed(List.at(args, 2)), env, funs, ens), env)
+
+def pinElemOn(listE: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (hasErr(o) || !concreteTy(tyStr(o))) env else pinBareList(stripNamed(listE), tyStr(o), env)
+
+def pinConcat(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinConcatGo(stripNamed(List.at(args, 0)), stripNamed(List.at(args, 1)), infer(stripNamed(List.at(args, 0)), env, funs, ens), infer(stripNamed(List.at(args, 1)), env, funs, ens), env)
+
+def pinConcatGo(a: Expr, b: Expr, ao: Out, bo: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  pinFromList(a, bo, pinFromList(b, ao, env))
+
+def pinFromList(e: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (hasErr(o) || !concreteTy(listElemTy(tyStr(o)))) env else pinBareList(e, listElemTy(tyStr(o)), env)
+
+def listElemTy(t: String): String =
+  if (Str.startsWith(t, "List[")) elemOf(t) else ""
 
 def pinWantArgs(want: List[String], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   if (List.isEmpty(want) || List.isEmpty(args)) env else pinWantArgs(List.tail(want), List.tail(args), pinWantArg(List.at(want, 0), List.at(args, 0), env, funs, ens), funs, ens)
