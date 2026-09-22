@@ -63,11 +63,9 @@ The one testing strategy is mutation, fuzz, properties, simulation, coverage, an
 
 2. **URLSession and Skia pixels.** Host loopback OpenSSL replay is `scuzz fuzz --live`. URLSession, TLS error cases, and Skia pixels have no fuzz home. `--differential` compares structural dumps.
 
-3. **ASan replay.** Corpus replay on the compiled engine does not run under ASan. `Signal`, `Ref`, `Queue`, `Deferred`, and view-list ownership can leak or cycle. RC has no collector.
+3. **Destructuring binds.** A `match` result in a `for` needs a helper def per binding. That multiplies defs, mutation sites, and coverage denominators. A `for` bind that unpacks a constructor is open.
 
-4. **Destructuring binds.** A `match` result in a `for` needs a helper def per binding. That multiplies defs, mutation sites, and coverage denominators. A `for` bind that unpacks a constructor is open.
-
-5. **Facts tier.** Zero-argument `oracle` goldens seed campaigns in the compiler, formatter, and CLI packages. Named generated-program oracles exist (`tyckGenerated`, `irGenerated`, `prettyGenerated`). [`philosophy.md`](philosophy.md) does not name goldens as a facts tier. The compiler's primary oracles should be generated-program round-trip and engine parity. Goldens stay seeds.
+4. **Facts tier.** Zero-argument `oracle` goldens seed campaigns in the compiler, formatter, and CLI packages. Named generated-program oracles exist (`tyckGenerated`, `irGenerated`, `prettyGenerated`). [`philosophy.md`](philosophy.md) does not name goldens as a facts tier. The compiler's primary oracles should be generated-program round-trip and engine parity. Goldens stay seeds.
 
 ### Later
 

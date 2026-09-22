@@ -931,6 +931,13 @@ assert d["fuzz"]["ok"] is True
 assert d["coverage"]["reached"] >= 1
 assert any(r["reached"] for r in d["coverage"]["regions"])
 PY
+# Corpus replay on the compiled engine under AddressSanitizer. Leaks fail.
+if ! fuzz --asan --iterations 0 examples/io | tee /tmp/scuzz-io-asan.log; then
+  echo "examples/io: ASan corpus replay failed" && exit 1
+fi
+if grep -E 'ERROR: (Address|Leak)Sanitizer' /tmp/scuzz-io-asan.log; then
+  echo "examples/io: ASan reported a defect" && exit 1
+fi
 fuzz --iterations 4 examples/hello
 grep -q 'drive greetFact' examples/hello/build/seeds.txt
 # Distance feedback: the evaluator search climbs to `code == 4242` and
