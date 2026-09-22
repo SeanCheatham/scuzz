@@ -38,7 +38,7 @@ def envBind(n: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] 
   if (n == "" || n == "_") env else (n, Type.parse(if (ty == "") "A" else ty)) :: env
 
 def modFile(env: List[(String, Ty)]): String =
-  getTy(env, "#mod")
+  Type.show(getTy(env, "#mod"))
 
 def exprSpan(env: List[(String, Ty)], e: Expr): (String, Int) =
   spanPick(Parse.spanOf(e), (modFile(env), 0 - 1))
@@ -61,8 +61,8 @@ def bad(err: String, span: (String, Int)): Out =
 def hasErr(o: Out): Bool =
   Str.len(o.err) > 0
 
-def getTy(env: List[(String, Ty)], name: String): String =
-  Type.show(lookupEnv(env, name))
+def getTy(env: List[(String, Ty)], name: String): Ty =
+  lookupEnv(env, name)
 
 def bindParams(ps: List[Param], acc: List[(String, Ty)]): List[(String, Ty)] =
   if (List.isEmpty(ps)) acc else bindParamsHd(List.at(ps, 0), List.tail(ps), acc)
@@ -93,7 +93,7 @@ def funRetOf(t: String): String =
   Type.funRetStr(t)
 
 def findFunPrefer(funs: Ftab, name: String, env: List[(String, Ty)]): List[Fun] =
-  findFunPrefer2(funs, name, getTy(env, "#mod"))
+  findFunPrefer2(funs, name, modFile(env))
 
 def findFunPrefer2(funs: Ftab, name: String, mod: String): List[Fun] =
   if (mod == "") ftabGet(funs.tab, name) else findFunPrefer3(ftabGet(funs.tab, name), mod)
@@ -1181,11 +1181,8 @@ def pinMapKeyVar(e: Expr, key: String, env: List[(String, Ty)]): List[(String, T
     case _ => env
   }
 
-def pinMapKeyName(n: String, key: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (mapKeyOpen(ty)) envBind(n, mapTy(key, "A"), env) else if (mapKeySlot(ty)) envBind(n, mapTy(key, mapShownVal(ty)), env) else env
-
-def mapKeySlot(ty: String): Bool =
-  mapKeySlotTy(Type.parse(ty))
+def pinMapKeyName(n: String, key: String, ty: Ty, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (mapKeyOpenTy(ty)) envBind(n, mapTy(key, "A"), env) else if (mapKeySlotTy(ty)) envBind(n, mapTy(key, mapShownValTy(ty)), env) else env
 
 def mapKeySlotTy(t: Ty): Bool =
   t match {
@@ -1193,17 +1190,26 @@ def mapKeySlotTy(t: Ty): Bool =
     case _ => false
   }
 
-def mapShownVal(ty: String): String =
-  mapShownValTy(Type.parse(ty))
-
 def mapShownValTy(t: Ty): String =
   t match {
     case Ty.App(_, args) => if (List.len(args) < 2) "" else Type.show(List.at(args, 1))
     case _ => ""
   }
 
-def mapKeyOpen(ty: String): Bool =
-  ty == "Map" || ty == "Map[A]" || ty == "Map[A, B]" || ty == "Map[A, A]" || mapBothLoose(Type.parse(ty))
+def mapKeyOpenTy(t: Ty): Bool =
+  Type.isNamed(t, "Map") || mapOneA(t) || mapBothLoose(t)
+
+def mapOneA(t: Ty): Bool =
+  t match {
+    case Ty.App(n, args) => n == "Map" && List.len(args) == 1 && paramIsA(List.at(args, 0))
+    case _ => false
+  }
+
+def paramIsA(t: Ty): Bool =
+  t match {
+    case Ty.TVar(n) => n == "A"
+    case _ => false
+  }
 
 def mapBothLoose(t: Ty): Bool =
   t match {
@@ -1253,20 +1259,14 @@ def pinMapGrow(e: Expr, key: String, val: String, env: List[(String, Ty)]): List
     case _ => env
   }
 
-def pinMapGrowName(n: String, key: String, val: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (isBareHandle(ty, "Map")) envBind(n, mapTy(key, val), env) else if (mapValOpen(ty) && mapShownKey(ty) == key) envBind(n, mapTy(key, val), env) else if (mapKeySlot(ty) && mapShownVal(ty) == val) envBind(n, mapTy(key, val), env) else env
-
-def mapValOpen(ty: String): Bool =
-  mapValLoose(Type.parse(ty))
+def pinMapGrowName(n: String, key: String, val: String, ty: Ty, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (isBareHandleTy(ty, "Map")) envBind(n, mapTy(key, val), env) else if (mapValLoose(ty) && mapShownKeyTy(ty) == key) envBind(n, mapTy(key, val), env) else if (mapKeySlotTy(ty) && mapShownValTy(ty) == val) envBind(n, mapTy(key, val), env) else env
 
 def mapValLoose(t: Ty): Bool =
   t match {
     case Ty.App(n, args) => n == "Map" && List.len(args) >= 2 && concreteTy(Type.show(List.at(args, 0))) && looseTy(List.at(args, 1))
     case _ => false
   }
-
-def mapShownKey(ty: String): String =
-  mapShownKeyTy(Type.parse(ty))
 
 def mapShownKeyTy(t: Ty): String =
   t match {
@@ -1288,7 +1288,7 @@ def pinSetElem(e: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
 
 def pinBareNamed(e: Expr, ctor: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
   e match {
-    case Expr.EVar(n, _) => if (isBareHandle(getTy(env, n), ctor)) envBind(n, ty, env) else env
+    case Expr.EVar(n, _) => if (isBareHandleTy(getTy(env, n), ctor)) envBind(n, ty, env) else env
     case _ => env
   }
 
@@ -1509,8 +1509,8 @@ def pinPredMap(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)]
     case _ => env
   }
 
-def pinPredMapName(n: String, ty: String, cur: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (mapKeyOpen(cur)) envBind(n, mapTy("A", ty), env) else if (mapValOpen(cur)) envBind(n, mapTy(mapShownKey(cur), ty), env) else env
+def pinPredMapName(n: String, ty: String, cur: Ty, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (mapKeyOpenTy(cur)) envBind(n, mapTy("A", ty), env) else if (mapValLoose(cur)) envBind(n, mapTy(mapShownKeyTy(cur), ty), env) else env
 
 def mapPredFn(f: String): Bool =
   f == "Map.filter" || f == "Map.exists" || f == "Map.forall" || f == "Map.mapValues"
@@ -1615,7 +1615,7 @@ def pinAtList(args: List[Expr], ty: String, env: List[(String, Ty)]): List[(Stri
 
 def pinBareList(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
   e match {
-    case Expr.EVar(n, _) => if (isBareHandle(getTy(env, n), "List")) envBind(n, Str.concat("List[", Str.concat(ty, "]")), env) else env
+    case Expr.EVar(n, _) => if (isBareHandleTy(getTy(env, n), "List")) envBind(n, Str.concat("List[", Str.concat(ty, "]")), env) else env
     case _ => env
   }
 
@@ -1666,17 +1666,20 @@ def pinIterSource(xs: Expr, pay: String, env: List[(String, Ty)]): List[(String,
   }
 
 def pinIterVar(n: String, pay: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (isBareHandle(iterElemOf(getTy(env, n)), Type.headNameStr(pay))) envBind(n, Str.concat("List[", Str.concat(pay, "]")), env) else env
+  if (isBareHandleTy(listElemTyOf(getTy(env, n)), Type.headNameStr(pay))) envBind(n, Str.concat("List[", Str.concat(pay, "]")), env) else env
 
-def iterElemOf(ty: String): String =
-  if (Str.startsWith(ty, "List[")) elemOf(ty) else ""
+def listElemTyOf(t: Ty): Ty =
+  t match {
+    case Ty.App(n, args) => if (n == "List" && !List.isEmpty(args)) Type.elem(t) else Type.tNamed("")
+    case _ => Type.tNamed("")
+  }
 
 def pinIterElems(es: List[Expr], pay: String, env: List[(String, Ty)]): List[(String, Ty)] =
   if (List.isEmpty(es)) env else pinIterElems(List.tail(es), pay, pinIterElem(List.at(es, 0), pay, env))
 
 def pinIterElem(e: Expr, pay: String, env: List[(String, Ty)]): List[(String, Ty)] =
   e match {
-    case Expr.EVar(n, _) => if (isBareHandle(getTy(env, n), Type.headNameStr(pay))) envBind(n, pay, env) else env
+    case Expr.EVar(n, _) => if (isBareHandleTy(getTy(env, n), Type.headNameStr(pay))) envBind(n, pay, env) else env
     case _ => env
   }
 
@@ -1702,10 +1705,19 @@ def refineHandleName(ctor: String, name: String, pay: String, env: List[(String,
   if (name == "_" || name == "") env else refineHandleName2(ctor, name, pay, lookupEnv(env, name), env)
 
 def refineHandleName2(ctor: String, name: String, pay: String, cur: Ty, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (!isBareHandle(Type.show(cur), ctor)) env else envBind(name, Str.concat(ctor, Str.concat("[", Str.concat(pay, "]"))), env)
+  if (!isBareHandleTy(cur, ctor)) env else envBind(name, Str.concat(ctor, Str.concat("[", Str.concat(pay, "]"))), env)
 
 def isBareHandle(ty: String, ctor: String): Bool =
   ty == ctor || ty == Str.concat(ctor, "[A]")
+
+def isBareHandleTy(t: Ty, ctor: String): Bool =
+  Type.namedName(t) == ctor || appBareA(t, ctor)
+
+def appBareA(t: Ty, ctor: String): Bool =
+  t match {
+    case Ty.App(n, args) => n == ctor && List.len(args) == 1 && paramIsA(List.at(args, 0))
+    case _ => false
+  }
 
 def inferFor2(o: Out, errTy: String): Out =
   if (hasErr(o) || errTy == "") o else ok(ioTy(errTy, tyStr(o)))
@@ -2196,7 +2208,7 @@ def inferApply2(o: Out, args: List[Expr], env: List[(String, Ty)], funs: Ftab, e
 
 def inferMethod2(recv: Expr, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   recv match {
-    case Expr.EVar(en, _) => if (getTy(env, en) != "") inferCall(Str.concat(".", name), recv :: args, env, funs, ens, exprSpan(env, e)) else inferMethodEn(en, name, args, env, funs, ens, e)
+    case Expr.EVar(en, _) => if (!Type.isEmpty(getTy(env, en))) inferCall(Str.concat(".", name), recv :: args, env, funs, ens, exprSpan(env, e)) else inferMethodEn(en, name, args, env, funs, ens, e)
     case _ => inferCall(Str.concat(".", name), recv :: args, env, funs, ens, exprSpan(env, e))
   }
 

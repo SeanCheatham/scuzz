@@ -5165,7 +5165,7 @@ def rwField(recv: Expr, name: String, off: Int, env: List[(String, Ty)], funs: F
   }
 
 def rwFieldVar(en: String, name: String, off: Int, env: List[(String, Ty)], ens: List[En]): Expr =
-  if (hasEn(ens, en)) Expr.EField(Expr.EVar(en, 0), name, off) else rwFieldTy(Expr.EVar(en, 0), name, off, getTy(env, en), ens)
+  if (hasEn(ens, en)) Expr.EField(Expr.EVar(en, 0), name, off) else rwFieldTy(Expr.EVar(en, 0), name, off, Type.show(getTy(env, en)), ens)
 
 def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, off: Int, _env: List[(String, Ty)], funs: Ftab, ens: List[En]): Expr =
   r match {
