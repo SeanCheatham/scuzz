@@ -34,6 +34,9 @@ oracle pureForArguments(): Bool =
 oracle forBindTypes(): Bool =
   Main.forBindTypes()
 
+oracle factsTier(): Bool =
+  Main.factsTier()
+
 oracle genericRecordFields(): Bool =
   Main.genericRecordFields()
 
