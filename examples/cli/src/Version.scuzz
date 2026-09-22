@@ -1,5 +1,5 @@
 def product(): String =
-  "0.2.11"
+  "0.2.12"
 
 def banner(): String =
   Str.concat("scuzz ", product())
