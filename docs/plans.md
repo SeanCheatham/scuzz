@@ -1,9 +1,9 @@
 # Next slice
 
-Compile-time performance. Rank: [`gaps.md`](gaps.md). Locks: [`philosophy.md`](philosophy.md). Parse `Param` and `Fun` stay strings.
+Compile-time performance. Rank: [`gaps.md`](gaps.md). Locks: [`philosophy.md`](philosophy.md). Parse `Param` and `Fun` stay strings. Known kit calls compare pre-parsed `Ty` values.
 
-## Coverage from the live program
+## Generic kit wants as Ty
 
-`Verify.coverageBoth` parses compiled files when they differ from live. Use the live `Prog` when the file set is the same.
+`resolveGenericKitSig` still passes string params into `genericArgs`, which parses each want at the call. Use `KitSig.params` and compare `Ty` values.
 
-Proof: `scuzz fuzz --iterations 0 examples/counter` stays green. `scuzz check examples/compiler` stays green.
+Proof: `scuzz check examples/compiler` stays green. `scuzz fuzz --iterations 0 examples/counter` stays green.
