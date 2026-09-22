@@ -1349,10 +1349,10 @@ def foldSideGot(o: Out, seed: String): Bool =
   !hasErr(o) && tyStr(o) == seed
 
 def listPredFn(f: String): Bool =
-  f == "List.map" || f == "List.flatMap" || f == "List.filter" || f == "List.filterNot" || f == "List.exists" || f == "List.forall" || f == "List.find" || f == "List.findLast" || f == "List.count"
+  f == "List.map" || f == "List.flatMap" || f == "List.filter" || f == "List.filterNot" || f == "List.exists" || f == "List.forall" || f == "List.find" || f == "List.findLast" || f == "List.count" || f == "List.groupBy" || f == "List.distinctBy"
 
 def listPredMeth(name: String): Bool =
-  name == "map" || name == "flatMap" || name == "filter" || name == "filterNot" || name == "exists" || name == "forall" || name == "find" || name == "findLast" || name == "count"
+  name == "map" || name == "flatMap" || name == "filter" || name == "filterNot" || name == "exists" || name == "forall" || name == "find" || name == "findLast" || name == "count" || name == "groupBy" || name == "distinctBy"
 
 def pinListPred(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   pinPredLam(stripNamed(List.at(args, 0)), stripNamed(List.at(args, 1)), env, funs, ens)
