@@ -1117,13 +1117,37 @@ def refineBind(b: Bind, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Lis
   }
 
 def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (!has(f)) env else pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens)
+  if (!has(f)) env else pinColl(f, args, pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens), funs, ens)
+
+def pinColl(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else env
+
+def pinMapAt(args: List[Expr], ki: Int, vi: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinMapPair(List.at(args, 0), infer(stripNamed(List.at(args, ki)), env, funs, ens), infer(stripNamed(List.at(args, vi)), env, funs, ens), env)
+
+def pinMapPair(mapE: Expr, ko: Out, vo: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (hasErr(ko) || hasErr(vo) || !concreteTy(tyStr(ko)) || !concreteTy(tyStr(vo))) env else pinBareNamed(stripNamed(mapE), "Map", mapTy(tyStr(ko), tyStr(vo)), env)
+
+def mapTy(k: String, v: String): String =
+  Str.concat("Map[", Str.concat(k, Str.concat(", ", Str.concat(v, "]"))))
+
+def pinSetAdd(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinSetElem(List.at(args, 0), infer(stripNamed(List.at(args, 1)), env, funs, ens), env)
+
+def pinSetElem(e: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (hasErr(o) || !concreteTy(tyStr(o))) env else pinBareNamed(stripNamed(e), "Set", Str.concat("Set[", Str.concat(tyStr(o), "]")), env)
+
+def pinBareNamed(e: Expr, ctor: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  e match {
+    case Expr.EVar(n, _) => if (isBareHandle(getTy(env, n), ctor)) envBind(n, ty, env) else env
+    case _ => env
+  }
 
 def pinListSib(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   if (f == "List.cons" && List.len(args) == 2) pinCons(args, env, funs, ens) else if (f == "List.concat" && List.len(args) == 2) pinConcat(args, env, funs, ens) else if (f == "List.getOrElse" && List.len(args) == 3) pinGet(args, env, funs, ens) else env
 
 def pinListMeth(name: String, recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinGet(recv :: args, env, funs, ens) else env
+  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, pinGet(recv :: args, env, funs, ens), funs, ens) else if (name == "set" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, env, funs, ens) else if (name == "add" && List.len(args) == 1) pinSetAdd(recv :: args, env, funs, ens) else env
 
 def pinColon(op: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   if (op != "::") env else pinElemOn(r, infer(stripNamed(l), env, funs, ens), env)
