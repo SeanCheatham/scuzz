@@ -27,11 +27,11 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits rel
 
 **Partly proven.** An evaluator written in Scuzz produces the same observable output as the emitted binary on every example. `scuzz fuzz` on `examples/webhook` and `examples/api-report` writes the same `summary.json` on both engines (`scripts/ci-fuzz.sh`). `examples/io` also matches on both engines: a scheduler step is one effect, so the extra `IO` wrapping in the evaluator does not move the interleaving. Speed is even, not better: one `scuzz eval --probe` server per file set checks the package once and forks a child per probe, and the evaluator campaign on `examples/api-report` takes the same wall clock as the compiled one. Every drive step still interprets: the evaluator idle probe on `examples/kernel` (`countdown(1000000)`) takes 12 s and on `examples/fmt` 18 s on the checkout host, under the 20-second deadline, so the `examples/kernel` campaign runs about five times longer than compiled. A slower host falls back to compiled probes at the idle gate.
 
-**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scripts/ci-fuzz.sh` prints wall clock for both engines on `examples/webhook`, `examples/api-report`, and `examples/io` and diffs the summaries. Distance feedback does not move those summaries yet; a package where it does needs a looser check (mutation and corpus equal, evaluator reach a superset). The open half: the evaluator campaign completes faster. Arc and slices: [`vision.md`](vision.md#evaluator-arc).
+**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scripts/ci-fuzz.sh` prints wall clock for both engines on `examples/webhook`, `examples/api-report`, and `examples/io` and diffs the summaries. Distance feedback does not move those summaries yet; a package where it does needs a looser check (mutation and corpus equal, evaluator reach a superset). The open half: the evaluator campaign completes faster. Do not add scheduler-step snapshots or expression coverage until a proof needs them. Locks: [`philosophy.md`](philosophy.md#evaluator).
 
 ## Known gaps
 
-Next work improves general language usability. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Examples prove these capabilities. Locks: [`philosophy.md`](philosophy.md).
+Next work makes the language usable for general programs. The next gap is checker correctness. Compile time follows, after a fresh timing. Standard kits follow that. Locks: [`philosophy.md`](philosophy.md). Order: [`vision.md`](vision.md).
 
 ### Cuts
 
@@ -43,9 +43,9 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 Resolve these gaps when they prevent ordinary language use.
 
-1. **Checker residuals** — `Type.eq` matches an unbound type parameter to any type. Pins that already exist stay. Do not add a pin for another kit call. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call.
+1. **Unbound type parameters** — This is the next thesis gap. `Type.eq` matches an unbound type parameter to any type. One check must bind that parameter to one concrete type. Slice: [`plans.md`](plans.md). Pins that already exist stay. Do not add a pin for another kit call. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call. Compiler sources do not use a `for` pattern bind until a release emits that form.
 
-2. **Compile-time performance** — This is the next thesis gap. `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Env lookup returns `Ty`. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. `concreteTy` still parses a shown type. Coverage uses the live program when compiled files match live.
+2. **Compile-time performance** — `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Re-time both commands before another show-and-parse slice. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Env lookup returns `Ty`. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. `concreteTy` still parses a shown type. Coverage uses the live program when compiled files match live.
 
 ### Table-stakes
 
@@ -53,11 +53,11 @@ Required for CLI, server, and desktop applications.
 
 Filesystem symbolic links, extended metadata preservation, and power-loss durability remain open.
 
-`Map` / `Set` keys beyond `Int` or `String`. The live signal readers (`Property.signal*`, `Property.a11yHas`) and `Fuzz.*` at `Value` (the probe entry calls them natively): the prefixes in `Eval.excludedKits()` (evaluator arc, [`vision.md`](vision.md#evaluator-arc)). `scuzz fuzz` on the evaluator for a `[ui]` package. `View` as a reference-counted value: the tree owns views, a list signal frees the lists `View.each` never mounted, and a view pulled out of a list by hand stays unsafe ([`philosophy.md`](philosophy.md), "The tree owns views"). Docs `Mount.scuzz` does not mount `View.each`. Time parse and zones. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+`Map` / `Set` keys beyond `Int` or `String`. The live signal readers (`Property.signal*`, `Property.a11yHas`) and `Fuzz.*` at `Value` (the probe entry calls them natively): the prefixes in `Eval.excludedKits()` ([`philosophy.md`](philosophy.md#evaluator)). `scuzz fuzz` on the evaluator for a `[ui]` package. `View` as a reference-counted value: the tree owns views, a list signal frees the lists `View.each` never mounted, and a view pulled out of a list by hand stays unsafe ([`philosophy.md`](philosophy.md), "The tree owns views"). Docs `Mount.scuzz` does not mount `View.each`. Time parse and zones. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Verification
 
-The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. These gaps weaken that strategy. Rank is threat order. Arc: [`vision.md`](vision.md#verification-arc). Locks: [`philosophy.md`](philosophy.md#verification-posture).
+The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. These gaps weaken that strategy. Rank is threat order. Locks: [`philosophy.md`](philosophy.md#verification-posture).
 
 1. **URLSession and Skia pixels.** Host loopback OpenSSL replay is `scuzz fuzz --live`. URLSession, TLS error cases, and Skia pixels have no fuzz home. `--differential` compares structural dumps.
 
@@ -65,4 +65,4 @@ The one testing strategy is mutation, fuzz, properties, simulation, coverage, an
 
 Do not start FFI, plugins, or a package registry. Other later items stay parked.
 
-Generated setup inputs. Multiple named scenarios and campaign selection. Fault storms and partial writes. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. Oracle mining. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
+Generated setup inputs. Multiple named scenarios and campaign selection. Fault storms and partial writes. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. Oracle mining. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
