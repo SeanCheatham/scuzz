@@ -1098,13 +1098,14 @@ def lamPinTypes2(): Bool =
 """) == "[]" && rejects("@main def main: IO[Unit] =\n  for {\n    f = (n => List.isEmpty(n))\n    _ <- IO.println(if (f([1])) \"e\" else \"n\")\n    _ <- IO.println(if (f([\"s\"])) \"e\" else \"n\")\n  } yield ()\n", "apply arg type mismatch: expected List[Int], got List[String]") && lamPinTypes3()
 
 def lamPinTypes3(): Bool =
-  rejects("""@main def main: IO[Unit] =
+  Check.check("""@main def main: IO[Unit] =
   for {
     f = (n => n)
     g = f
-    _ <- IO.println(Str.fromInt(g(1)))
+    h = g
+    _ <- IO.println(Str.fromInt(h(1)))
   } yield ()
-""", "lambda parameter type is unresolved") && Check.check("def use[A](x: A): IO[Unit] =\n  for {\n    f = (n => n)\n    y = f(x)\n    _ <- IO.println(\"x\")\n  } yield ()\n") == "[]" && Check.check("@main def main: IO[Unit] =\n  for {\n    f = (n => Str.concat(n, \"!\"))\n    _ <- IO.println(if (true) f(\"a\") else f(\"b\"))\n    x = 1\n    _ <- IO.println(x match {\n      case 1 => f(\"c\")\n      case _ => \"d\"\n    })\n  } yield ()\n") == "[]"
+""") == "[]" && rejects("@main def main: IO[Unit] =\n  for {\n    f = (n => n)\n    g = f\n    _ <- IO.println(Str.fromInt(g(1)))\n    _ <- IO.println(g(\"s\"))\n  } yield ()\n", "apply arg type mismatch: expected Int, got String") && Check.check("def use[A](x: A): IO[Unit] =\n  for {\n    f = (n => n)\n    y = f(x)\n    _ <- IO.println(\"x\")\n  } yield ()\n") == "[]" && Check.check("@main def main: IO[Unit] =\n  for {\n    f = (n => Str.concat(n, \"!\"))\n    _ <- IO.println(if (true) f(\"a\") else f(\"b\"))\n    x = 1\n    _ <- IO.println(x match {\n      case 1 => f(\"c\")\n      case _ => \"d\"\n    })\n  } yield ()\n") == "[]"
 
 def nestedPatTypes(): Bool =
   Check.check("""enum Inner:

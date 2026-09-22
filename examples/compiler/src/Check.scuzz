@@ -895,7 +895,7 @@ def inferBindVal(d: Bool, name: String, v: Expr, rest: List[Bind], body: Expr, e
   inferBindVal2(d, name, v, rest, body, env, funs, ens, infer(v, env, funs, ens))
 
 def inferBindVal2(d: Bool, name: String, v: Expr, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], vo: Out): Out =
-  if (d || hasErr(vo) || !lamPinCand(name, v, vo, ens)) vo else lamPinDo(lamPinArg(name, rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens), v, env, funs, ens, vo)
+  if (d || hasErr(vo) || !lamPinCand(name, v, vo, ens)) vo else lamPinDo(lamPinArg(name, "", rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens), v, env, funs, ens, vo)
 
 def lamPinDo(pin: String, v: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], vo: Out): Out =
   if (pin == "") vo else inferExpected(v, Type.show(Type.tFun(Type.parse(pin), Type.tParam("B"))), env, funs, ens)
@@ -912,80 +912,95 @@ def lamPinName(n: String): Bool =
 def lamPinNameHead(c: Int): Bool =
   c >= 97 && c <= 122 || c >= 65 && c <= 90
 
-def lamPinArg(name: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (List.isEmpty(rest)) lamPinExpr(name, body, env, funs, ens) else lamPinArgB(name, List.at(rest, 0), List.tail(rest), body, env, funs, ens)
+def lamPinArg(name: String, al: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (List.isEmpty(rest)) lamPinExpr(name, al, body, env, funs, ens) else lamPinArgB(name, al, List.at(rest, 0), List.tail(rest), body, env, funs, ens)
 
-def lamPinArgB(name: String, b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+def lamPinArgB(name: String, al: String, b: Bind, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
   b match {
-    case Bind(d, bn, v) => lamPinArgB2(name, d, bn, v, lamPinExpr(name, v, refineEnv(v, env, funs, ens), funs, ens), rest, body, env, funs, ens)
+    case Bind(d, bn, v) => lamPinArgB2(name, al, d, bn, v, lamPinExpr(name, al, v, refineEnv(v, env, funs, ens), funs, ens), rest, body, env, funs, ens)
   }
 
-def lamPinArgB2(name: String, d: Bool, bn: String, v: Expr, found: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (found != "") found else if (bn == name) "" else lamPinArgB3(name, d, bn, infer(v, env, funs, ens), rest, body, refineEnv(v, env, funs, ens), funs, ens)
+def lamPinArgB2(name: String, al: String, d: Bool, bn: String, v: Expr, found: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (found != "") found else if (bn == name) "" else lamPinArgB3(name, lamPinNext(al, d, bn, v, name), d, bn, infer(v, env, funs, ens), rest, body, refineEnv(v, env, funs, ens), funs, ens)
 
-def lamPinArgB3(name: String, d: Bool, bn: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (hasErr(vo)) "" else lamPinArg(name, rest, body, bindFor(d, bn, tyStr(vo), env, ens), funs, ens)
+def lamPinNext(al: String, d: Bool, bn: String, v: Expr, name: String): String =
+  if (!d && lamPinAliasVal(v, name, al)) bn else if (al != "" && bn == al) "" else al
 
-def lamPinExpr(name: String, e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+def lamPinAliasVal(v: Expr, name: String, al: String): Bool =
+  v match {
+    case Expr.EVar(n, _) => n == name || al != "" && n == al
+    case _ => false
+  }
+
+def lamPinSame(name: String, al: String, f: String): Bool =
+  f == name || al != "" && f == al
+
+def lamPinHide(al: String, p: String): String =
+  if (al != "" && al == p) "" else al
+
+def lamPinArgB3(name: String, al: String, d: Bool, bn: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (hasErr(vo)) "" else lamPinArg(name, al, rest, body, bindFor(d, bn, tyStr(vo), env, ens), funs, ens)
+
+def lamPinExpr(name: String, al: String, e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
   e match {
-    case Expr.ECall(f, args, _) => lamPinCall(name, f, args, env, funs, ens)
-    case Expr.EMethod(recv, m, args, _) => lamPinMeth(name, recv, m, args, env, funs, ens)
-    case Expr.EAscribe(inner, _, _) => lamPinExpr(name, inner, env, funs, ens)
-    case Expr.ENamed(_, inner) => lamPinExpr(name, inner, env, funs, ens)
-    case Expr.ELam(p, ann, lbody) => if (p == name) "" else lamPinExpr(name, lbody, lamPinAnnEnv(p, ann, env), funs, ens)
-    case Expr.EPrint(inner, _) => lamPinExpr(name, inner, env, funs, ens)
-    case Expr.EField(recv, _, _) => lamPinExpr(name, recv, env, funs, ens)
-    case Expr.EBin(_, l, r, _) => lamPinExprs(name, l :: r :: noExpr(), env, funs, ens)
-    case Expr.EUn(_, inner, _) => lamPinExpr(name, inner, env, funs, ens)
-    case Expr.EIf(c, t, el, _) => lamPinExprs(name, c :: t :: el :: noExpr(), env, funs, ens)
-    case Expr.EMatch(s, arms, _) => lamPinArms(name, arms, env, funs, ens, lamPinExpr(name, s, env, funs, ens))
-    case Expr.EFor(bs, fb, _) => lamPinArg(name, bs, fb, env, funs, ens)
-    case Expr.EList(xs) => lamPinExprs(name, xs, env, funs, ens)
-    case Expr.ETuple(xs) => lamPinExprs(name, xs, env, funs, ens)
+    case Expr.ECall(f, args, _) => lamPinCall(name, al, f, args, env, funs, ens)
+    case Expr.EMethod(recv, m, args, _) => lamPinMeth(name, al, recv, m, args, env, funs, ens)
+    case Expr.EAscribe(inner, _, _) => lamPinExpr(name, al, inner, env, funs, ens)
+    case Expr.ENamed(_, inner) => lamPinExpr(name, al, inner, env, funs, ens)
+    case Expr.ELam(p, ann, lbody) => if (p == name) "" else lamPinExpr(name, lamPinHide(al, p), lbody, lamPinAnnEnv(p, ann, env), funs, ens)
+    case Expr.EPrint(inner, _) => lamPinExpr(name, al, inner, env, funs, ens)
+    case Expr.EField(recv, _, _) => lamPinExpr(name, al, recv, env, funs, ens)
+    case Expr.EBin(_, l, r, _) => lamPinExprs(name, al, l :: r :: noExpr(), env, funs, ens)
+    case Expr.EUn(_, inner, _) => lamPinExpr(name, al, inner, env, funs, ens)
+    case Expr.EIf(c, t, el, _) => lamPinExprs(name, al, c :: t :: el :: noExpr(), env, funs, ens)
+    case Expr.EMatch(s, arms, _) => lamPinArms(name, al, arms, env, funs, ens, lamPinExpr(name, al, s, env, funs, ens))
+    case Expr.EFor(bs, fb, _) => lamPinArg(name, al, bs, fb, env, funs, ens)
+    case Expr.EList(xs) => lamPinExprs(name, al, xs, env, funs, ens)
+    case Expr.ETuple(xs) => lamPinExprs(name, al, xs, env, funs, ens)
     case _ => ""
   }
 
-def lamPinPick(found: String, name: String, xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (found != "") found else lamPinExprs(name, xs, env, funs, ens)
+def lamPinPick(found: String, name: String, al: String, xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (found != "") found else lamPinExprs(name, al, xs, env, funs, ens)
 
-def lamPinCall(name: String, f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (f == name) lamPinPick(lamPinApplyTy(args, env, funs, ens), name, args, env, funs, ens) else if ((f == "IO.foreach" || f == "IO.foreachDiscard") && List.len(args) == 2) lamPinForeach(name, args, env, funs, ens) else lamPinExprs(name, args, env, funs, ens)
+def lamPinCall(name: String, al: String, f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (lamPinSame(name, al, f)) lamPinPick(lamPinApplyTy(args, env, funs, ens), name, al, args, env, funs, ens) else if ((f == "IO.foreach" || f == "IO.foreachDiscard") && List.len(args) == 2) lamPinForeach(name, al, args, env, funs, ens) else lamPinExprs(name, al, args, env, funs, ens)
 
-def lamPinForeach(name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  lamPinForeach2(lamPinExpr(name, List.at(args, 0), env, funs, ens), name, args, env, funs, ens)
+def lamPinForeach(name: String, al: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  lamPinForeach2(lamPinExpr(name, al, List.at(args, 0), env, funs, ens), name, al, args, env, funs, ens)
 
-def lamPinForeach2(found: String, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (found != "") found else lamPinIterLam(name, List.at(args, 0), List.at(args, 1), env, funs, ens)
+def lamPinForeach2(found: String, name: String, al: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (found != "") found else lamPinIterLam(name, al, List.at(args, 0), List.at(args, 1), env, funs, ens)
 
-def lamPinMeth(name: String, recv: Expr, m: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+def lamPinMeth(name: String, al: String, recv: Expr, m: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
   recv match {
-    case Expr.EVar(n, _) => if (m == "apply" && n == name) lamPinPick(lamPinApplyTy(args, env, funs, ens), name, args, env, funs, ens) else lamPinMethRest(name, recv, m, args, env, funs, ens)
-    case Expr.ELam(p, ann, cont) => if (m == "apply" && List.len(args) == 1) lamPinBindCont(name, p, ann, cont, List.at(args, 0), env, funs, ens) else lamPinMethRest(name, recv, m, args, env, funs, ens)
-    case _ => lamPinMethRest(name, recv, m, args, env, funs, ens)
+    case Expr.EVar(n, _) => if (m == "apply" && lamPinSame(name, al, n)) lamPinPick(lamPinApplyTy(args, env, funs, ens), name, al, args, env, funs, ens) else lamPinMethRest(name, al, recv, m, args, env, funs, ens)
+    case Expr.ELam(p, ann, cont) => if (m == "apply" && List.len(args) == 1) lamPinBindCont(name, al, p, ann, cont, List.at(args, 0), env, funs, ens) else lamPinMethRest(name, al, recv, m, args, env, funs, ens)
+    case _ => lamPinMethRest(name, al, recv, m, args, env, funs, ens)
   }
 
-def lamPinBindCont(name: String, p: String, ann: String, cont: Expr, v: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  lamPinBindCont2(lamPinExpr(name, v, env, funs, ens), name, p, ann, cont, v, env, funs, ens)
+def lamPinBindCont(name: String, al: String, p: String, ann: String, cont: Expr, v: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  lamPinBindCont2(lamPinExpr(name, al, v, env, funs, ens), name, al, p, ann, cont, v, env, funs, ens)
 
-def lamPinBindCont2(found: String, name: String, p: String, ann: String, cont: Expr, v: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (found != "") found else if (p == name) "" else lamPinBindCont3(name, p, ann, cont, infer(v, env, funs, ens), env, funs, ens)
+def lamPinBindCont2(found: String, name: String, al: String, p: String, ann: String, cont: Expr, v: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (found != "") found else if (p == name) "" else lamPinBindCont3(name, lamPinHide(al, p), p, ann, cont, infer(v, env, funs, ens), env, funs, ens)
 
-def lamPinBindCont3(name: String, p: String, ann: String, cont: Expr, vo: Out, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (hasErr(vo)) "" else lamPinExpr(name, cont, lamPinContEnv(p, ann, tyStr(vo), env), funs, ens)
+def lamPinBindCont3(name: String, al: String, p: String, ann: String, cont: Expr, vo: Out, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (hasErr(vo)) "" else lamPinExpr(name, al, cont, lamPinContEnv(p, ann, tyStr(vo), env), funs, ens)
 
 def lamPinContEnv(p: String, ann: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
   if (ann != "") envBind(p, ann, env) else envBind(p, ty, env)
 
-def lamPinMethRest(name: String, recv: Expr, m: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  lamPinMethRest2(lamPinExpr(name, recv, env, funs, ens), name, recv, m, args, env, funs, ens)
+def lamPinMethRest(name: String, al: String, recv: Expr, m: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  lamPinMethRest2(lamPinExpr(name, al, recv, env, funs, ens), name, al, recv, m, args, env, funs, ens)
 
-def lamPinMethRest2(found: String, name: String, recv: Expr, m: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (found != "") found else if ((m == "foreach" || m == "map" || m == "flatMap" || m == "filter") && List.len(args) == 1) lamPinIterLam(name, recv, List.at(args, 0), env, funs, ens) else lamPinExprs(name, args, env, funs, ens)
+def lamPinMethRest2(found: String, name: String, al: String, recv: Expr, m: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (found != "") found else if ((m == "foreach" || m == "map" || m == "flatMap" || m == "filter") && List.len(args) == 1) lamPinIterLam(name, al, recv, List.at(args, 0), env, funs, ens) else lamPinExprs(name, al, args, env, funs, ens)
 
-def lamPinIterLam(name: String, xs: Expr, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+def lamPinIterLam(name: String, al: String, xs: Expr, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
   lam match {
-    case Expr.ELam(p, ann, lbody) => if (p == name) "" else lamPinExpr(name, lbody, lamPinIterEnv(p, ann, xs, env, funs, ens), funs, ens)
-    case _ => lamPinExpr(name, lam, env, funs, ens)
+    case Expr.ELam(p, ann, lbody) => if (p == name) "" else lamPinExpr(name, lamPinHide(al, p), lbody, lamPinIterEnv(p, ann, xs, env, funs, ens), funs, ens)
+    case _ => lamPinExpr(name, al, lam, env, funs, ens)
   }
 
 def lamPinIterEnv(p: String, ann: String, xs: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
@@ -1031,22 +1046,22 @@ def lamPinTyOk(t: Ty, ens: List[En]): Bool =
 def lamPinTyList(xs: List[Ty], ens: List[En]): Bool =
   if (List.isEmpty(xs)) true else lamPinTyOk(List.at(xs, 0), ens) && lamPinTyList(List.tail(xs), ens)
 
-def lamPinExprs(name: String, xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
-  if (List.isEmpty(xs)) "" else lamPinPick(lamPinExpr(name, List.at(xs, 0), env, funs, ens), name, List.tail(xs), env, funs, ens)
+def lamPinExprs(name: String, al: String, xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (List.isEmpty(xs)) "" else lamPinPick(lamPinExpr(name, al, List.at(xs, 0), env, funs, ens), name, al, List.tail(xs), env, funs, ens)
 
-def lamPinArms(name: String, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En], found: String): String =
-  if (found != "") found else if (List.isEmpty(arms)) "" else lamPinArms(name, List.tail(arms), env, funs, ens, lamPinArm(name, List.at(arms, 0), env, funs, ens))
+def lamPinArms(name: String, al: String, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En], found: String): String =
+  if (found != "") found else if (List.isEmpty(arms)) "" else lamPinArms(name, al, List.tail(arms), env, funs, ens, lamPinArm(name, al, List.at(arms, 0), env, funs, ens))
 
-def lamPinArm(name: String, a: Arm, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+def lamPinArm(name: String, al: String, a: Arm, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
   a match {
-    case Arm(_, _, abody) => lamPinExpr(name, abody, env, funs, ens)
+    case Arm(_, _, abody) => lamPinExpr(name, al, abody, env, funs, ens)
   }
 
 def lamPinTyOf(name: String, v: Expr, cont: Expr, defs: Ftab, ens: List[En], ps: List[Param], mod: String): String =
   lamPinTyOf2(name, v, cont, infer(v, bindParams(ps, envSelfMod(mod)), defs, ens), defs, ens, ps, mod)
 
 def lamPinTyOf2(name: String, v: Expr, cont: Expr, vo: Out, defs: Ftab, ens: List[En], ps: List[Param], mod: String): String =
-  if (hasErr(vo) || !lamPinCand(name, v, vo, ens)) "" else lamPinTyOf3(v, vo, lamPinExpr(name, cont, bindParams(ps, envBind(name, tyStr(vo), envSelfMod(mod))), defs, ens), bindParams(ps, envSelfMod(mod)), defs, ens)
+  if (hasErr(vo) || !lamPinCand(name, v, vo, ens)) "" else lamPinTyOf3(v, vo, lamPinExpr(name, "", cont, bindParams(ps, envBind(name, tyStr(vo), envSelfMod(mod))), defs, ens), bindParams(ps, envSelfMod(mod)), defs, ens)
 
 def lamPinTyOf3(v: Expr, vo: Out, pin: String, env: List[(String, Ty)], defs: Ftab, ens: List[En]): String =
   if (pin == "") "" else tyStr(lamPinDo(pin, v, env, defs, ens, vo))
