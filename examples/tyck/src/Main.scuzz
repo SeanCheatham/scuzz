@@ -538,7 +538,22 @@ def tyckClosed(): Bool =
   rejects(srcViewNope(), "unknown function View.nope") && rejects(srcViewArity(), "View.button expects") && rejects(srcSigGet(), "Signal.get arg type mismatch") && rejects(srcUiRun(), "Ui.run arg type mismatch") && rejects(srcIoNope(), "unknown function IO.notAKit") && Check.check(srcTimeoutOk()) == "[]" && rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")
 
 def tyckLam(): Bool =
-  tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]" && funArrowTypes()
+  tyckDiff(srcLamAnn(), wantLamAnn()) && tyckDiff(srcLamMis(), wantLamMis()) && tyckDiff(srcLamArg(), wantLamArg()) && tyckDiff(srcFunBody(), wantFunBody()) && wantLamMis() != "[]" && wantLamArg() != "[]" && wantFunBody() != "[]" && funArrowTypes() && listAtPin()
+
+def listAtPin(): Bool =
+  Check.check("""def right(): IO[Unit] =
+  for {
+    xs = List.empty()
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+  } yield ()
+""") == "[]" && rejects("""def wrong(): IO[Unit] =
+  for {
+    xs = List.empty()
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+    _ <- IO.println(List.at(xs, 0))
+  } yield ()
+""", "expected String, got Int")
 
 def funArrowTypes(): Bool =
   Type.funFrom("Int => String" :: [], "String") == "(Int => String) => String" && Type.funFrom("Int" :: [], "String") == "Int => String" && Type.funFrom("Int" :: "String" :: [], "Bool") == "(Int, String) => Bool" && Type.substStr("A => A", "A", "Int => String") == "(Int => String) => Int => String" && Check.check(srcFunArrowOk()) == "[]" && rejects(srcFunArrowMis(), "lambda arg type mismatch: expected Int, got Int => String") && rejects(srcFunArrowApply(), "arg type mismatch") && rejects(srcFunListApply(), "apply needs a function") && Check.check(srcFunSubstOk()) == "[]" && rejects(srcFunSubstMis(), "does not match declared") && Check.check(srcFunSubstId()) == "[]" && Check.check(srcFunTupFieldOk()) == "[]" && rejects(srcFunTupFieldMis(), "tuple has no field") && rejects(srcFunTupFieldKeep(), "tuple has no field") && funKitHeadTypes()
@@ -857,7 +872,28 @@ def dumpIoFun(): String =
   if (Check.check(srcIoFunApply()) != "[]") Str.concat("ioFunApply ", Check.check(srcIoFunApply())) else if (!rejects(srcIoFunMap(), "unknown function .map")) Str.concat("ioFunMap ", Check.check(srcIoFunMap())) else if (!rejects(srcIoFunFlat(), "flatMap needs IO")) Str.concat("ioFunFlat ", Check.check(srcIoFunFlat())) else if (!rejects(srcIoFunHandle(), "handleErrorWith needs IO")) Str.concat("ioFunHandle ", Check.check(srcIoFunHandle())) else if (!rejects(srcIoFunResMake(), "Resource.make needs IO")) Str.concat("ioFunResMake ", Check.check(srcIoFunResMake())) else if (!rejects(srcIoFunResUse(), "Resource.use needs Resource")) Str.concat("ioFunResUse ", Check.check(srcIoFunResUse())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("ioFunEq ", Check.check(srcFunSubstId())) else "ioFun-other"
 
 def dumpTyckLam(): String =
-  if (!funArrowTypes()) dumpFunArrow() else "tyckLam"
+  if (!funArrowTypes()) dumpFunArrow() else if (!listAtPin()) dumpListAtPin() else "tyckLam"
+
+def dumpListAtPin(): String =
+  if (Check.check("""def right(): IO[Unit] =
+  for {
+    xs = List.empty()
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+  } yield ()
+""") != "[]") Str.concat("listAtOk ", Check.check("""def right(): IO[Unit] =
+  for {
+    xs = List.empty()
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+  } yield ()
+""")) else Str.concat("listAtMis ", Check.check("""def wrong(): IO[Unit] =
+  for {
+    xs = List.empty()
+    _ <- IO.println(Str.fromInt(List.at(xs, 0)))
+    _ <- IO.println(List.at(xs, 0))
+  } yield ()
+"""))
 
 def dumpFunArrow(): String =
   if (Type.funFrom("Int => String" :: [], "String") != "(Int => String) => String") "funFrom" else if (Type.substStr("A => A", "A", "Int => String") != "(Int => String) => Int => String") "substFun" else if (Check.check(srcFunArrowOk()) != "[]") Str.concat("funArrowOk ", Check.check(srcFunArrowOk())) else if (!rejects(srcFunArrowMis(), "lambda arg type mismatch: expected Int, got Int => String")) Str.concat("funArrowMis ", Check.check(srcFunArrowMis())) else if (!rejects(srcFunArrowApply(), "arg type mismatch")) Str.concat("funArrowApply ", Check.check(srcFunArrowApply())) else if (!rejects(srcFunListApply(), "apply needs a function")) Str.concat("funListApply ", Check.check(srcFunListApply())) else if (Check.check(srcFunSubstOk()) != "[]") Str.concat("funSubstOk ", Check.check(srcFunSubstOk())) else if (!rejects(srcFunSubstMis(), "does not match declared")) Str.concat("funSubstMis ", Check.check(srcFunSubstMis())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("funSubstId ", Check.check(srcFunSubstId())) else if (Check.check(srcFunTupFieldOk()) != "[]") Str.concat("funTupFieldOk ", Check.check(srcFunTupFieldOk())) else if (!rejects(srcFunTupFieldMis(), "tuple has no field")) Str.concat("funTupFieldMis ", Check.check(srcFunTupFieldMis())) else if (!rejects(srcFunTupFieldKeep(), "tuple has no field")) Str.concat("funTupFieldKeep ", Check.check(srcFunTupFieldKeep())) else if (!funKitHeadTypes()) dumpFunKitHead() else "funArrow-other"
