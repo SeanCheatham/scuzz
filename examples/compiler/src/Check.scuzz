@@ -352,9 +352,6 @@ def tyEq(a: Ty, b: Ty, ens: List[En]): Bool =
 def tyEqEn(a: String, b: String, ens: List[En]): Bool =
   tyEq(Type.parse(a), Type.parse(b), ens)
 
-def tyEqGot(want: String, got: String, ens: List[En]): Bool =
-  Type.eqPinGotTy(Type.parse(want), Type.parse(got), enNames(ens))
-
 def pinEns(ens: List[En], ts: List[String]): List[En] =
   if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase()) :: ens
 
@@ -432,10 +429,10 @@ def isGenericKit(f: String): Bool =
   f == "List.map" || f == "List.concat" || f == "List.cons" || f == "List.at" || f == "List.filter" || f == "List.filterNot" || f == "List.take" || f == "List.drop" || f == "List.takeWhile" || f == "List.dropWhile" || f == "List.takeRight" || f == "List.dropRight" || f == "List.flatten" || f == "List.flatMap" || f == "IO.attempt" || f == "IO.race" || f == "IO.both" || f == "IO.ensure" || f == "IO.timeout" || f == "IO.forever" || f == "IO.repeatN" || f == "IO.retryN" || f == "IO.foreach" || f == "IO.foreachDiscard" || f == "IO.when" || f == "IO.unless" || Str.startsWith(f, "Ref.") || Str.startsWith(f, "Fiber.") || Str.startsWith(f, "Map.") || Str.startsWith(f, "Set.") || f == "Stream.emit" || f == "Stream.emits" || f == "Stream.eval" || f == "Stream.concat" || f == "Stream.map" || f == "Stream.evalMap" || f == "Stream.filter" || f == "Stream.filterNot" || f == "Stream.take" || f == "Stream.drop" || f == "Stream.takeWhile" || f == "Stream.dropWhile" || f == "Stream.repeatN" || f == "Stream.compileToList" || f == "Stream.head" || f == "Stream.last" || f == "Stream.flatten" || f == "Stream.flatMap" || f == "Stream.mapConcat" || f == "Stream.grouped" || f == "Stream.sliding" || f == "List.foldLeft" || f == "List.foldRight" || f == "List.scanLeft" || f == "List.scanRight" || f == "List.reduceLeft" || f == "List.reduceRight" || f == "Stream.fold" || f == "Stream.scan" || f == "List.zip" || f == "List.zipAll" || f == "List.unzip" || f == "List.zipWithIndex" || f == "Stream.zip" || f == "Stream.zipAll" || f == "Stream.zipWithIndex" || f == "Stream.iterate" || f == "Stream.unfold" || f == "List.fill" || f == "List.tabulate" || f == "List.append" || f == "List.grouped" || f == "List.sliding" || f == "List.intersperse" || f == "List.interleave" || f == "List.getOrElse" || f == "Stream.zipWith" || f == "List.init" || f == "List.distinct" || f == "List.toSet" || f == "List.padTo" || f == "List.contains" || f == "List.groupBy" || f == "Stream.interleave" || f == "Stream.takeRight" || f == "Stream.dropRight" || f == "Stream.evalTap" || f == "Stream.find" || f == "Stream.findLast" || f == "Stream.orElse" || f == "Stream.intersperse" || f == "List.inits" || f == "List.tails" || f == "List.sort" || f == "List.sortBy" || f == "List.distinctBy" || f == "List.max" || f == "List.min" || f == "List.maxBy" || f == "List.minBy" || f == "List.toMap" || f == "List.diff" || f == "List.intersect" || f == "List.setAt" || f == "List.indexOf" || f == "List.lastIndexOf" || f == "List.span" || f == "List.partition" || f == "List.transpose" || f == "List.splitAt" || f == "List.slice" || f == "List.patch" || f == "List.indexOfSlice" || f == "List.lastIndexOfSlice" || f == "List.startsWith" || f == "List.endsWith" || f == "List.sameElements" || f == "Stream.changes" || f == "Stream.exists" || f == "Stream.forall" || f == "Stream.none" || f == "List.find" || f == "List.findLast" || f == "List.exists" || f == "List.forall" || f == "List.count" || f == "List.indexWhere" || f == "List.lastIndexWhere" || f == "List.prefixLength" || f == "List.segmentLength" || f == "Property.force"
 
 def resolveGenericKit(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  resolveGenericKitSig(f, args, env, funs, ens, span, kitRow(funs, f))
+  resolveGenericKitSig(f, args, env, funs, ens, span, kitOf(funs, f))
 
-def resolveGenericKitSig(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), kit: Kit): Out =
-  if (List.isEmpty(args)) ok(funTyFrom(Kits.kitParamsOf(kit), Kits.kitRetOf(kit))) else if (List.len(args) != List.len(Kits.kitParamsOf(kit))) bad(Str.concat(f, " has wrong arity"), span) else genericArgs(f, ["A", "B", "E", "S", "C"], Kits.kitParamsOf(kit), Kits.kitRetOf(kit), args, env, funs, ens, span)
+def resolveGenericKitSig(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), kit: KitSig): Out =
+  if (List.isEmpty(args)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (List.len(args) != List.len(kit.params)) bad(Str.concat(f, " has wrong arity"), span) else genericArgsTy(f, ["A", "B", "E", "S", "C"], kit.params, kit.ret, args, env, funs, ens, span)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.")) resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, kitOf(funs, f))
@@ -681,7 +678,10 @@ def checkGeneric(f: String, ts: List[String], ps: List[Param], ret: String, args
   if (aligned._2 != "") bad(alignErr(f, aligned._2, ps, args), span) else genericArgs(f, ts, paramTys(ps), ret, aligned._1, env, funs, ens, span)
 
 def genericArgs(f: String, ts: List[String], want: List[String], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (List.isEmpty(args)) ok(ret) else genericArg(f, ts, want, ret, args, env, funs, ens, span, inferExpected(stripNamed(List.at(args, 0)), List.at(want, 0), env, funs, ens))
+  genericArgsTy(f, ts, Kits.parseTys(want), Type.parse(ret), args, env, funs, ens, span)
+
+def genericArgsTy(f: String, ts: List[String], want: List[Ty], ret: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(args)) okTy(ret) else genericArgTy(f, ts, want, ret, args, env, funs, ens, span, inferExpectedTy(stripNamed(List.at(args, 0)), List.at(want, 0), env, funs, ens))
 
 def inferExpected(e: Expr, want: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   e match {
@@ -701,20 +701,20 @@ def inferExpectedLam(p: String, ann: String, body: Expr, arg: String, env: List[
 def expectedLamBody(arg: String, body: Out): Out =
   if (hasErr(body)) body else okTy(Type.tFun(Type.parse(arg), body.ty))
 
-def genericArg(f: String, ts: List[String], want: List[String], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: Out): Out =
-  if (hasErr(got)) got else genericBound(f, ts, want, ret, args, env, funs, ens, span, tyStr(got), Type.bindings(Type.parse(List.at(want, 0)), got.ty, ts))
+def genericArgTy(f: String, ts: List[String], want: List[Ty], ret: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: Out): Out =
+  if (hasErr(got)) got else genericBoundTy(f, ts, want, ret, args, env, funs, ens, span, got.ty, Type.bindings(List.at(want, 0), got.ty, ts))
 
-def genericBound(f: String, ts: List[String], want: List[String], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: String, bindings: List[(String, String)]): Out =
-  if (!tyEqGot(applyBindings(List.at(want, 0), bindings), got, ens)) argMismatch(f, applyBindings(List.at(want, 0), bindings), got, span) else genericArgs(f, ts, bindWant(List.tail(want), bindings), applyBindings(ret, bindings), List.tail(args), env, funs, ens, span)
+def genericBoundTy(f: String, ts: List[String], want: List[Ty], ret: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: Ty, bindings: List[(String, Ty)]): Out =
+  genericBoundEq(f, ts, want, ret, args, env, funs, ens, span, got, bindings, applyBindingsTy(List.at(want, 0), bindings))
 
-def applyBindings(ty: String, bindings: List[(String, String)]): String =
-  if (List.isEmpty(bindings)) ty else applyBinding(ty, List.at(bindings, 0), List.tail(bindings))
+def genericBoundEq(f: String, ts: List[String], want: List[Ty], ret: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: Ty, bindings: List[(String, Ty)], w: Ty): Out =
+  if (!Type.eqPinGotTy(w, got, enNames(ens))) argMismatch(f, Type.show(w), Type.show(got), span) else genericArgsTy(f, ts, bindWantTy(List.tail(want), bindings), applyBindingsTy(ret, bindings), List.tail(args), env, funs, ens, span)
 
-def applyBinding(ty: String, binding: (String, String), rest: List[(String, String)]): String =
-  applyBindings(substTy(ty, binding._1, binding._2), rest)
+def applyBindingsTy(ty: Ty, bindings: List[(String, Ty)]): Ty =
+  if (List.isEmpty(bindings)) ty else applyBindingsTy(Type.subst(ty, List.at(bindings, 0)._1, List.at(bindings, 0)._2), List.tail(bindings))
 
-def bindWant(want: List[String], bindings: List[(String, String)]): List[String] =
-  if (List.isEmpty(want)) want else applyBindings(List.at(want, 0), bindings) :: bindWant(List.tail(want), bindings)
+def bindWantTy(want: List[Ty], bindings: List[(String, Ty)]): List[Ty] =
+  if (List.isEmpty(want)) want else applyBindingsTy(List.at(want, 0), bindings) :: bindWantTy(List.tail(want), bindings)
 
 def checkUser(f: String, ps: List[Param], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   checkUserAl(f, ps, ret, args, env, funs, ens, span, alignCall(ps, args))
