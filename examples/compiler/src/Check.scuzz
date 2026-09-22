@@ -1177,7 +1177,34 @@ def pinMapAt(args: List[Expr], ki: Int, vi: Int, env: List[(String, Ty)], funs: 
   pinMapPair(List.at(args, 0), infer(stripNamed(List.at(args, ki)), env, funs, ens), infer(stripNamed(List.at(args, vi)), env, funs, ens), env)
 
 def pinMapPair(mapE: Expr, ko: Out, vo: Out, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (hasErr(ko) || hasErr(vo) || !concreteTy(tyStr(ko)) || !concreteTy(tyStr(vo))) env else pinBareNamed(stripNamed(mapE), "Map", mapTy(tyStr(ko), tyStr(vo)), env)
+  if (hasErr(ko) || hasErr(vo) || !concreteTy(tyStr(ko)) || !concreteTy(tyStr(vo))) env else pinMapGrow(stripNamed(mapE), tyStr(ko), tyStr(vo), env)
+
+def pinMapGrow(e: Expr, key: String, val: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  e match {
+    case Expr.EVar(n, _) => pinMapGrowName(n, key, val, getTy(env, n), env)
+    case _ => env
+  }
+
+def pinMapGrowName(n: String, key: String, val: String, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (isBareHandle(ty, "Map")) envBind(n, mapTy(key, val), env) else if (mapValOpen(ty) && mapShownKey(ty) == key) envBind(n, mapTy(key, val), env) else env
+
+def mapValOpen(ty: String): Bool =
+  mapValLoose(Type.parse(ty))
+
+def mapValLoose(t: Ty): Bool =
+  t match {
+    case Ty.App(n, args) => n == "Map" && List.len(args) >= 2 && concreteTy(Type.show(List.at(args, 0))) && looseTy(List.at(args, 1))
+    case _ => false
+  }
+
+def mapShownKey(ty: String): String =
+  mapShownKeyTy(Type.parse(ty))
+
+def mapShownKeyTy(t: Ty): String =
+  t match {
+    case Ty.App(_, args) => if (List.isEmpty(args)) "" else Type.show(List.at(args, 0))
+    case _ => ""
+  }
 
 def mapTy(k: String, v: String): String =
   Str.concat("Map[", Str.concat(k, Str.concat(", ", Str.concat(v, "]"))))
