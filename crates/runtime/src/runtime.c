@@ -456,30 +456,58 @@ void sz_free(void *ptr) {
 
 /* Last RC release: drop live stats. Under TestRuntime, keep a tombstone for
  * pairing kinds so a second release fails. IO and stream nodes still free.
- * AddressSanitizer catches double-free, so ASan builds free immediately. */
+ * AddressSanitizer frees the block at once so leak detection does not see a
+ * tombstone. A ring of recent pairing frees still fails a second release. */
 static int pairing_kind(uint32_t kind) {
   return kind == SZ_RC_STRING || kind == SZ_RC_RESOURCE;
 }
 
-static int asan_build(void) {
 #ifdef SZ_ASAN
-  return 1;
-#else
-  return 0;
-#endif
+enum { SZ_TOMB_RING = 1024 };
+
+typedef struct SzTombNote {
+  uintptr_t ptr;
+  uint32_t kind;
+} SzTombNote;
+
+static SzTombNote g_tomb_ring[SZ_TOMB_RING];
+static unsigned g_tomb_i;
+
+static void tomb_remember(void *ptr, uint32_t kind) {
+  SzTombNote *s = &g_tomb_ring[g_tomb_i % SZ_TOMB_RING];
+  g_tomb_i++;
+  s->ptr = (uintptr_t)ptr;
+  s->kind = kind;
 }
 
+static int tomb_take(void *ptr, uint32_t *kind) {
+  unsigned i;
+  uintptr_t p = (uintptr_t)ptr;
+  for (i = 0; i < SZ_TOMB_RING; i++) {
+    if (g_tomb_ring[i].ptr == p) {
+      *kind = g_tomb_ring[i].kind;
+      g_tomb_ring[i].ptr = 0;
+      return 1;
+    }
+  }
+  return 0;
+}
+#endif
+
 static void sz_rc_retire(void *ptr) {
-  SzRcHdr *h;
-  size_t *raw;
-  size_t n;
   if (!ptr)
     return;
-  if (asan_build()) {
+#ifdef SZ_ASAN
+  {
+    SzRcHdr *h = sz_rc_hdr(ptr);
+    if (pairing_kind(h->kind) && sz_testrt_tomb_armed())
+      tomb_remember(ptr, h->kind);
     sz_free(ptr);
-    return;
   }
-  h = sz_rc_hdr(ptr);
+#else
+  SzRcHdr *h = sz_rc_hdr(ptr);
+  size_t *raw;
+  size_t n;
   if (!pairing_kind(h->kind) || !sz_testrt_tomb_armed()) {
     sz_free(ptr);
     return;
@@ -496,6 +524,7 @@ static void sz_rc_retire(void *ptr) {
     g_live_bytes = 0;
   h->magic = SZ_RC_TOMB;
   h->rc = 0;
+#endif
 }
 
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count) {
@@ -616,6 +645,17 @@ void sz_release(void *ptr) {
               sz_alloc_kind_name(sz_rc_hdr(ptr)->kind));
       sz_panic("unpaired release: double release");
     }
+#ifdef SZ_ASAN
+    if (sz_testrt_tomb_armed() && ptr && p >= 4096 && (p & 7) == 0 &&
+        !sz_hdr_readable(ptr)) {
+      uint32_t kind = 0;
+      if (tomb_take(ptr, &kind)) {
+        fprintf(stderr, "scuzz: unpaired release: double release (%s)\n",
+                sz_alloc_kind_name(kind));
+        sz_panic("unpaired release: double release");
+      }
+    }
+#endif
     return;
   }
   h = sz_rc_hdr(ptr);
