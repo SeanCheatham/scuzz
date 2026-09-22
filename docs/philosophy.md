@@ -141,6 +141,7 @@ The language `scuzz` implements. Proof is examples (`examples/hello`, `kernel`, 
 Locks (not an API catalog — run `scuzz docs language` and `scuzz docs kits`):
 
 - Expression dialect only: `for` primary binder (`=` pure, `<-` effect); no `val` / statement blocks / `var`
+- A `for` `=` bind can be a constructor, tuple, or cons pattern. The bind stays pure. A pattern that does not match stops the program with `for binding does not match`.
 - Interpolated strings use the same escape rules as ordinary strings. Decode escapes in literal segments once. Parse expressions inside interpolation braces as source. Live code and verification use the same rules.
 - Optional `package`; top-level `def` / `private def` / `oracle` / `import`; `@main def …: IO[Unit]`
 - Payload enums + `record` sugar + thin traits/`impl` (static dispatch) + monomorphized generics

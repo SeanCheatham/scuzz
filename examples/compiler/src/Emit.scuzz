@@ -457,7 +457,7 @@ def joinComma(xs: List[String]): String =
   if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) List.at(xs, 0) else Str.concat(List.at(xs, 0), Str.concat(", ", joinComma(List.tail(xs))))
 
 def wrapEq(name: String, v: Expr, body: Expr): Expr =
-  if (eqIsLet(name)) Expr.EMethod(Expr.ELam(name, "", body), "apply", nameSig(name, v) :: noExpr(), 0) else wrapDraw(name, Expr.ECall("IO.pure", v :: noExpr(), 0), body)
+  if (eqIsLet(name)) Expr.EMethod(Expr.ELam(name, "", body), "apply", nameSig(name, v) :: noExpr(), 0) else Expr.EMatch(v, Arm(name, "", body) :: noArm(), 0 - 1)
 
 def nameSig(name: String, v: Expr): Expr =
   if (name == "_" || !isSimpleBind(name)) v else nameSigGo(name, v)
@@ -3859,14 +3859,14 @@ def slotInt(tys: List[String], k: Int): Bool =
 
 def emitMatch1(se: Slot, arms: List[Arm], moff: Int, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, tys: List[String], asI64: Bool, fid: Int): Slot =
   se match {
-    case Slot(sc, sv, owned) => emitMatchRelease(emitMatchOksFirst(sc, emitOks(arms, moff, prefix, strs, defs, ens, ps, loc, 0, tys, sv, asI64, fid), arms, prefix, sv, ens, strs, tys), sv, owned)
+    case Slot(sc, sv, owned) => emitMatchRelease(emitMatchOksFirst(sc, emitOks(arms, moff, prefix, strs, defs, ens, ps, loc, 0, tys, sv, asI64, fid), arms, prefix, sv, ens, strs, tys, moff), sv, owned)
   }
 
 def emitMatchRelease(result: Slot, value: String, owned: Bool): Slot =
   Slot(join(result.code, if (owned) relPtr(value) else ""), result.val, result.owned)
 
-def emitMatchOksFirst(sc: String, oks: (String, List[String], Bool), arms: List[Arm], prefix: String, sv: String, ens: List[En], strs: List[String], tys: List[String]): Slot =
-  emitMatch2(sc, emitTries(arms, prefix, sv, ens, strs, 0, tys), oks, prefix, isExh(arms))
+def emitMatchOksFirst(sc: String, oks: (String, List[String], Bool), arms: List[Arm], prefix: String, sv: String, ens: List[En], strs: List[String], tys: List[String], moff: Int): Slot =
+  emitMatch2(sc, emitTries(arms, prefix, sv, ens, strs, 0, tys), oks, prefix, isExh(arms), moff, strs)
 
 def isExh(arms: List[Arm]): Bool =
   if (List.isEmpty(arms)) false else isExh2(List.at(arms, 0), List.tail(arms))
@@ -3879,19 +3879,28 @@ def isWild(arm: Arm): Bool =
     case Arm(pat, _, _) => pat == "_"
   }
 
-def emitMatch2(sc: String, tries: String, oks: (String, List[String], Bool), prefix: String, exh: Bool): Slot =
+def emitMatch2(sc: String, tries: String, oks: (String, List[String], Bool), prefix: String, exh: Bool, moff: Int, strs: List[String]): Slot =
   oks match {
-    case (okCode, vals, owned) => emitMatch3(sc, tries, okCode, vals, owned, prefix, exh)
+    case (okCode, vals, owned) => emitMatch3(sc, tries, okCode, vals, owned, prefix, exh, moff, strs)
   }
 
-def emitMatch3(sc: String, tries: String, okCode: String, vals: List[String], owned: Bool, prefix: String, exh: Bool): Slot =
-  Slot(join(sc, join(brTry(prefix), join(tries, join(emitDefault(prefix, owned, exh), join(okCode, emitMatchPhi(vals, owned, prefix, exh)))))), pct(prefix, "phi"), owned)
+def emitMatch3(sc: String, tries: String, okCode: String, vals: List[String], owned: Bool, prefix: String, exh: Bool, moff: Int, strs: List[String]): Slot =
+  Slot(join(sc, join(brTry(prefix), join(tries, join(emitDefault(prefix, owned, exh, moff, strs), join(okCode, emitMatchPhi(vals, owned, prefix, forMissExh(exh, moff))))))), pct(prefix, "phi"), owned)
+
+def forMissExh(exh: Bool, moff: Int): Bool =
+  if (moff < 0) true else exh
 
 def brTry(prefix: String): String =
   line(Str.concat("br label %", Str.concat(prefix, "_try_0_0")))
 
-def emitDefault(prefix: String, owned: Bool, exh: Bool): String =
+def emitDefault(prefix: String, owned: Bool, exh: Bool, moff: Int, strs: List[String]): String =
+  if (moff < 0) emitForMiss(prefix, strs) else emitDefaultGo(prefix, owned, exh)
+
+def emitDefaultGo(prefix: String, owned: Bool, exh: Bool): String =
   if (exh) join(lab(Str.concat(prefix, "_default_0")), line("unreachable")) else if (owned) join(lab(Str.concat(prefix, "_default_0")), line(Str.concat("br label %", Str.concat(prefix, "_merge_0")))) else join(lab(Str.concat(prefix, "_default_0")), join(line(Str.concat(tmp(prefix, "dflt"), "add i64 0, 0")), line(Str.concat("br label %", Str.concat(prefix, "_merge_0")))))
+
+def emitForMiss(prefix: String, strs: List[String]): String =
+  join(lab(Str.concat(prefix, "_default_0")), join(line(Str.concat(pct(prefix, "mg"), internGepRhs("for binding does not match", strs))), join(line(Str.concat("call void @sz_panic(ptr ", Str.concat(pct(prefix, "mg"), ")"))), line("unreachable"))))
 
 def emitTries(arms: List[Arm], prefix: String, scrut: String, ens: List[En], strs: List[String], i: Int, tys: List[String]): String =
   if (List.isEmpty(arms)) "" else emitTries2(List.at(arms, 0), List.tail(arms), prefix, scrut, ens, strs, i, tys)
@@ -4818,7 +4827,7 @@ def emitMatchTail(s: Expr, arms: List[Arm], moff: Int, fname: String, tret: Stri
 
 def emitMatchTail1(se: Slot, arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, tys: List[String]): String =
   se match {
-    case Slot(sc, sv, owned) => join(sc, join(brTry("body"), join(emitTries(arms, "body", sv, ens, strs, 0, tys), join(emitDefault("body", false, true), emitOksTail(arms, moff, fname, tret, strs, defs, ens, ps, loc, 0, tys, sv, if (owned) relPtr(sv) else "")))))
+    case Slot(sc, sv, owned) => join(sc, join(brTry("body"), join(emitTries(arms, "body", sv, ens, strs, 0, tys), join(emitDefault("body", false, true, moff, strs), emitOksTail(arms, moff, fname, tret, strs, defs, ens, ps, loc, 0, tys, sv, if (owned) relPtr(sv) else "")))))
   }
 
 def emitOksTail(arms: List[Arm], moff: Int, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, cleanup: String): String =
@@ -5445,8 +5454,11 @@ def internBranchBinds(bs: List[Bind], loc: String, acc: List[String]): List[Stri
 
 def internBranchBind(b: Bind, loc: String, acc: List[String]): List[String] =
   b match {
-    case Bind(_, _, value) => internBranch(value, loc, acc)
+    case Bind(draw, name, value) => internBranch(value, loc, internForMiss(draw, name, acc))
   }
+
+def internForMiss(draw: Bool, name: String, acc: List[String]): List[String] =
+  if (draw || eqIsLet(name)) acc else intern(acc, "for binding does not match")
 
 def internSigBinds(bs: List[Bind], acc: List[String]): List[String] =
   if (List.isEmpty(bs)) acc else internSigBinds(List.tail(bs), internSigBind(List.at(bs, 0), acc))

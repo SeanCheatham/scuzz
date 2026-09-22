@@ -31,6 +31,9 @@ oracle prettyGenerated(n: Int where n >= 0): Bool =
 oracle pureForArguments(): Bool =
   Main.pureForArguments()
 
+oracle forBindTypes(): Bool =
+  Main.forBindTypes()
+
 oracle genericRecordFields(): Bool =
   Main.genericRecordFields()
 
