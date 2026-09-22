@@ -288,32 +288,35 @@ def firstArgErr(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List
 def firstArgErr2(o: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   if (hasErr(o)) o else firstArgErr(rest, env, funs, ens)
 
-def zipCheck(callee: String, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: String): Out =
-  if (List.isEmpty(want)) ok(acc) else zipCheckHd(callee, List.at(want, 0), List.tail(want), args, env, funs, ens, span, acc)
+def zipCheck(callee: String, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty): Out =
+  if (List.isEmpty(want)) okTy(acc) else zipCheckHd(callee, List.at(want, 0), List.tail(want), args, env, funs, ens, span, acc)
 
-def zipCheckHd(callee: String, w: Ty, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: String): Out =
+def zipCheckHd(callee: String, w: Ty, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty): Out =
   zipCheckArg(callee, w, want, List.at(args, 0), List.tail(args), env, funs, ens, span, acc)
 
-def zipCheckArg(callee: String, w: Ty, want: List[Ty], arg: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: String): Out =
+def zipCheckArg(callee: String, w: Ty, want: List[Ty], arg: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty): Out =
   zipCheckGo(callee, w, want, arg, args, env, funs, ens, span, acc, spanPick(exprSpan(env, stripNamed(arg)), span))
 
-def zipCheckGo(callee: String, w: Ty, want: List[Ty], arg: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
+def zipCheckGo(callee: String, w: Ty, want: List[Ty], arg: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
   if (List.isEmpty(args)) zipCheckLast(inferExpectedTy(stripNamed(arg), w, env, funs, ens), callee, w, asp, acc, ens) else zipCheck2(callee, w, inferExpectedTy(stripNamed(arg), w, env, funs, ens), want, args, env, funs, ens, span, acc, asp)
 
-def zipCheckLast(o: Out, callee: String, w: Ty, span: (String, Int), acc: String, ens: List[En]): Out =
-  if (hasErr(o)) o else if (tyEq(o.ty, w, ens)) ok(if (acc == "") tyStr(o) else acc) else argMismatch(callee, Type.show(w), tyStr(o), span)
+def zipCheckLast(o: Out, callee: String, w: Ty, span: (String, Int), acc: Ty, ens: List[En]): Out =
+  if (hasErr(o)) o else if (tyEq(o.ty, w, ens)) okTy(zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), span)
 
-def zipCheck2(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
+def zipCheck2(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
   if (hasErr(o)) o else zipCheckEq(callee, w, o, want, args, env, funs, ens, span, acc, asp)
 
-def zipCheckEq(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: String, asp: (String, Int)): Out =
-  if (tyEq(o.ty, w, ens)) zipCheck(callee, kitWantFromTy(callee, if (acc == "") tyStr(o) else acc, want), args, env, funs, ens, span, if (acc == "") tyStr(o) else acc) else argMismatch(callee, Type.show(w), tyStr(o), asp)
+def zipCheckEq(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
+  if (tyEq(o.ty, w, ens)) zipCheck(callee, kitWantFromTy(callee, zipAcc(acc, o), want), args, env, funs, ens, span, zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), asp)
 
-def kitWantFromTy(f: String, handleTy: String, want: List[Ty]): List[Ty] =
-  if (List.isEmpty(want)) want else if (f == "Queue.offer" || f == "Deferred.complete") Type.parse(offerElem(handleTy)) :: List.tail(want) else want
+def zipAcc(acc: Ty, o: Out): Ty =
+  if (Type.isEmpty(acc)) o.ty else acc
 
-def offerElem(handleTy: String): String =
-  if (Str.startsWith(handleTy, "Queue[") || Str.startsWith(handleTy, "Deferred[")) elemOf(handleTy) else "A"
+def kitWantFromTy(f: String, handle: Ty, want: List[Ty]): List[Ty] =
+  if (List.isEmpty(want)) want else if (f == "Queue.offer" || f == "Deferred.complete") offerElemTy(handle) :: List.tail(want) else want
+
+def offerElemTy(handle: Ty): Ty =
+  if (Type.appName(handle) == "Queue" || Type.appName(handle) == "Deferred") Type.elem(handle) else Type.tParam("A")
 
 def argMismatch(callee: String, w: String, got: String, span: (String, Int)): Out =
   bad(argMismatchMsg(argMismatchWant(callee, w), got), span)
@@ -393,7 +396,7 @@ def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env
   checkKnownTy(f, Kits.parseTys(want), ret, args, env, funs, ens, span)
 
 def checkKnownTy(f: String, want: List[Ty], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, ""), ret)
+  if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, Type.tNamed("")), ret)
 
 def checkKnownRet(f: String, o: Out, ret: String): Out =
   if (hasErr(o)) o else ok(kitRetFromTy(f, tyStr(o), substKitE(ret, tyStr(o))))
