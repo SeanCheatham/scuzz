@@ -31,7 +31,7 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits rel
 
 ## Known gaps
 
-Next work makes the language usable for general programs. The next gap is checker correctness. Compile time follows, after a fresh timing. Standard kits follow that. Locks: [`philosophy.md`](philosophy.md). Order: [`vision.md`](vision.md).
+Next work makes the language usable for general programs. The next gap is compile time. Re-time the two commands in that gap before another show-and-parse change. Standard kits follow that. Locks: [`philosophy.md`](philosophy.md). Order: [`vision.md`](vision.md).
 
 ### Cuts
 
@@ -43,9 +43,7 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 Resolve these gaps when they prevent ordinary language use.
 
-1. **Unbound type parameters** — This is the next thesis gap. `Type.eq` matches an unbound type parameter to any type. One check must bind that parameter to one concrete type. Slice: [`plans.md`](plans.md). Pins that already exist stay. Do not add a pin for another kit call. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call. Compiler sources do not use a `for` pattern bind until a release emits that form.
-
-2. **Compile-time performance** — `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Re-time both commands before another show-and-parse slice. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Env lookup returns `Ty`. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. `concreteTy` still parses a shown type. Coverage uses the live program when compiled files match live.
+1. **Compile-time performance** — `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Re-time both commands before another show-and-parse slice. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Env lookup returns `Ty`. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. `concreteTy` still parses a shown type. Coverage uses the live program when compiled files match live.
 
 ### Table-stakes
 
