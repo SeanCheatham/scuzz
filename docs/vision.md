@@ -45,7 +45,7 @@ Slices, in order. Each slice closes with a proof in `examples/`.
 1. **Model claims.** In the tree. `Timeline.fold` walks every state and returns a record model. `examples/counter` states the count model in one claim. A compiled fold types its lambda pair from the seed and the element, so a record accumulator with an `Int` element compiles. Not taken: a per-state event reader. `lastHitHas` and `driveHas` read levels, so a model does not count consecutive taps ([`gaps.md`](gaps.md#verification)).
 2. **Live transport.** In the tree. `scuzz fuzz --live` replays the corpus (`--iterations 0`) or one `--replay` file on the compiled binary. Clock, files, random, and sys stay simulated. Net uses host loopback sockets. A non-loopback host fails. Search and mutation stay on the simulated network. URLSession and Skia pixels have no fuzz home. Proof: `scuzz fuzz --live --replay examples/api-report/live.toml examples/api-report`.
 3. **ASan replay.** In the tree. Corpus replay on the compiled engine runs under ASan. Proof: `scripts/ci-fuzz.sh` replays `examples/io` corpus with `scuzz fuzz --asan --iterations 0` without a leak report.
-4. **Destructuring binds.** A `for` bind unpacks a constructor. Proof: a compiler helper chain in `examples/compiler` becomes one bind; `scuzz fuzz --iterations 0 examples/tyck` stays green. Update the kernel lock in `philosophy.md`.
+4. **Destructuring binds.** In the tree. A `for` `=` bind unpacks a constructor, tuple, or cons pattern and stays pure. A miss stops the program with `for binding does not match`. Proof: `examples/kernel` `bindSome` prints `bind:43` on `scuzz run` and `scuzz eval`; `scuzz fuzz --iterations 0 examples/tyck` stays green. Not taken: a helper chain in `examples/compiler`. The bootstrap emitter still lowers that form to a bad continuation, so compiler sources stay on helper defs until a release emits this form.
 5. **Facts tier.** Name goldens as a facts tier in `philosophy.md`. Keep them as campaign seeds. Make generated-program round-trip and engine parity the compiler's primary oracles. Proof: `examples/tyck`, `examples/codegen`, and `examples/fmt` keep generated oracles as the search workload; goldens stay zero-argument seeds.
 
 ### Success bars
@@ -90,7 +90,7 @@ Ranked list: [`gaps.md`](gaps.md).
 | URLSession and Skia pixels have no fuzz home | `--live` replays host loopback OpenSSL. `--differential` compares structural dumps. URLSession and Skia pixels stay outside fuzz |
 | Wall-clock probe deadlines flake on a slow host | Prefer the 1000000-step bound. Size the deadline from the idle probe |
 | RC misses Signal/Ref cycles and view-list leaks | ASan corpus replay on the compiled engine |
-| No `val` / no destructure multiplies helper defs | `for` constructor binds. Update the kernel lock when that lands |
+| No `val` / no destructure multiplies helper defs | A `for` `=` bind unpacks a constructor. Compiler sources keep helper defs until the bootstrap emits that form |
 | `Property.sometimes` verdicts vary with iteration budget | Checked-in corpus keeps reaching prefixes. Summary separates never-reached from not-reached-in-budget |
 | Concrete business facts have no home without unit tests | Concrete-fact `.require` checks are sanctioned oracles. Zero-argument verify oracles seed the campaign. Generated-program properties stay the compiler search workload |
 | “Almost Scala” confusion | Explicit non-goals. Language direction: [`philosophy.md`](philosophy.md). Run `scuzz docs language`. |

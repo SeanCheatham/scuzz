@@ -213,6 +213,12 @@ def describe(o: Opt[Int]): String =
     case Opt.None => "adt:describe:none"
   }
 
+def bindSome(o: Opt[Int]): String =
+  for {
+    Opt.Some(n) = o
+    (a, b) = (n, 1)
+  } yield Str.concat("bind:", Str.fromInt(a + b))
+
 def describeBare(o: Opt[Int]): String =
   o match {
     case Opt.Some(n) => Str.concat("bare:", Str.fromInt(n))
@@ -1029,6 +1035,7 @@ def checkConstructorAlternatives(n: Int): IO[Int] =
   case Color.Blue => IO.println("adt:flip:blue")
 }
     _ <- IO.println(desc)
+    _ <- IO.println(bindSome(o))
     _ <- IO.println(describeBare(o))
     _ <- IO.println(describeBare(noneInt()))
     _ <- IO.println(hueBare(Color.Red))

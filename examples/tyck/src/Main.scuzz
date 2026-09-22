@@ -1306,6 +1306,26 @@ def right(): Bool = accept(for { x = true } yield x)""") == "[]" && rejects("""d
 def wrong(): Bool = accept(for { x = 1 } yield x)""", "expected Bool, got Int") && rejects("""def accept(b: Bool): Bool = b
 def wrong(): Bool = accept(for { x <- IO.pure(true) } yield x)""", "expected Bool, got IO[Bool]")
 
+def forBindTypes(): Bool =
+  Check.check("""enum Opt:
+  case Some(n: Int)
+  case None
+
+def right(o: Opt): Int =
+  for {
+    Opt.Some(n) = o
+    (a, b) = (n, 1)
+  } yield a + b
+""") == "[]" && rejects("""enum Opt:
+  case Some(n: Int)
+  case None
+
+def wrong(o: Opt): Int =
+  for {
+    Opt.Some(n) = o
+  } yield Str.len(n)
+""", "type mismatch")
+
 def genericRecordFields(): Bool =
   Check.check("record Holder[A](item: A)\ndef right(): List[String] = List.flatMap([Holder([\"a\"])], holder => holder.item)") == "[]" && rejects("""record Holder[A](item: A)
 def wrong(holder: Holder[String]): Int = holder.item""", "does not match declared") && Check.check("""record Holder[A](item: A)
