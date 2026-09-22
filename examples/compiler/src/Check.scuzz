@@ -393,31 +393,25 @@ def isTup(t: String): Bool =
   Type.isTupStr(t)
 
 def checkKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  checkKnownTy(f, Kits.parseTys(want), ret, args, env, funs, ens, span)
+  checkKnownTy(f, Kits.parseTys(want), Type.parse(ret), args, env, funs, ens, span)
 
-def checkKnownTy(f: String, want: List[Ty], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+def checkKnownTy(f: String, want: List[Ty], ret: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, Type.tNamed("")), ret)
 
-def checkKnownRet(f: String, o: Out, ret: String): Out =
-  if (hasErr(o)) o else ok(kitRetFromTy(f, tyStr(o), substKitE(ret, tyStr(o))))
+def checkKnownRet(f: String, o: Out, ret: Ty): Out =
+  if (hasErr(o)) o else okTy(kitRetFromGot(f, o.ty, ret))
 
-def substKitE(ret: String, ty: String): String =
-  if (ty == "") ret else substTy(ret, "E", ty)
+def kitRetFromGot(f: String, got: Ty, ret: Ty): Ty =
+  if (f == "List.head") Type.tApp("Option", Type.elem(got) :: Type.noTy()) else if (f == "List.tail" || f == "List.reverse" || f == "List.last") kitRetListTy(got, ret) else if (f == "IO.pure") Type.tIo(Type.tStr(), got) else if (f == "IO.fail") Type.tIo(if (Type.isEmpty(got)) Type.tStr() else got, Type.tParam("A")) else if (f == "Deferred.get") handleGetRet(got, "Deferred") else if (f == "Queue.take") handleGetRet(got, "Queue") else substKitETy(ret, got)
 
-def kitRetFromTy(f: String, ty: String, ret: String): String =
-  if (f == "List.head") kitRetOption(ty) else if (f == "List.tail" || f == "List.reverse" || f == "List.last") kitRetList(ty, ret) else if (f == "IO.pure") ioTy("String", ty) else if (f == "IO.fail") Str.concat("IO[", Str.concat(if (ty == "") "String" else ty, ", A]")) else if (f == "Deferred.get") defGetRet(ty) else if (f == "Queue.take") queueTakeRet(ty) else ret
+def kitRetListTy(got: Ty, ret: Ty): Ty =
+  if (Type.appName(got) == "List") got else ret
 
-def defGetRet(ty: String): String =
-  if (Str.startsWith(ty, "Deferred[")) ioTy("String", elemOf(ty)) else "IO[A]"
+def handleGetRet(got: Ty, n: String): Ty =
+  if (Type.appName(got) == n && !List.isEmpty(Type.appArgs(got))) Type.tIo(Type.tStr(), Type.elem(got)) else Type.tIo(Type.tStr(), Type.tParam("A"))
 
-def queueTakeRet(ty: String): String =
-  if (Str.startsWith(ty, "Queue[")) ioTy("String", elemOf(ty)) else "IO[A]"
-
-def kitRetOption(ty: String): String =
-  Str.concat("Option[", Str.concat(elemOf(ty), "]"))
-
-def kitRetList(ty: String, ret: String): String =
-  if (isListTy(ty)) ty else ret
+def substKitETy(ret: Ty, got: Ty): Ty =
+  if (Type.isEmpty(got)) ret else Type.subst(ret, "E", got)
 
 def resolveCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   resolveCall2(f, args, env, funs, ens, span)
@@ -450,7 +444,7 @@ def resolveScenarioCtx3(d: Fun, span: (String, Int)): Out =
   if (!isIo(d.ret)) bad("setup must return IO", span) else ok(ioOk(d.ret))
 
 def resolveKnownKit(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), kit: KitSig): Out =
-  if (List.isEmpty(args) && !List.isEmpty(kit.params)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (!Kits.arityOf(kit.kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit.kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownTy(f, Kits.wantOfSig(kit, List.len(args)), Kits.kitRetOf(kit.kit), args, env, funs, ens, span)
+  if (List.isEmpty(args) && !List.isEmpty(kit.params)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (!Kits.arityOf(kit.kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit.kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownTy(f, Kits.wantOfSig(kit, List.len(args)), kit.ret, args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
   if (List.isEmpty(ens)) "" else enOfCase1(List.at(ens, 0), List.tail(ens), ctor)
