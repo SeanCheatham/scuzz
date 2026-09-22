@@ -230,6 +230,12 @@ def hueBare(c: Color): String =
     case Red | Blue => "barehue"
   }
 
+def calledHue(): String =
+  hueBare(Color.Red())
+
+def kitRgb(): Int =
+  Color.rgb(1, 2, 3)
+
 def fromBare(n: Int): Opt[Int] =
   if (n > 0) Opt.Some(n) else Opt.None
 
@@ -1039,6 +1045,8 @@ def checkConstructorAlternatives(n: Int): IO[Int] =
     _ <- IO.println(describeBare(o))
     _ <- IO.println(describeBare(noneInt()))
     _ <- IO.println(hueBare(Color.Red))
+    _ <- IO.println(calledHue())
+    _ <- IO.println(Str.fromInt(kitRgb()))
     _ <- IO.println(describeBare(fromBare(2)))
     _ <- IO.println(describeBare(fromBare(0)))
     noneBare = Opt.None

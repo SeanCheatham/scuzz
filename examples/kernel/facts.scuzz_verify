@@ -1,5 +1,5 @@
 oracle adtFacts(): Bool =
-  Main.describe(Opt.Some(42)) == "adt:describe:42" && Main.describeBare(Opt.Some(42)) == "bare:42" && Main.describeBare(Main.noneInt()) == "bare:none" && Main.hueBare(Color.Red) == "barehue"
+  Main.describe(Opt.Some(42)) == "adt:describe:42" && Main.describeBare(Opt.Some(42)) == "bare:42" && Main.describeBare(Main.noneInt()) == "bare:none" && Main.hueBare(Color.Red) == "barehue" && Main.calledHue() == "barehue" && Main.kitRgb() == 4278256131
 
 oracle bindFacts(): Bool =
   Main.bindSome(Opt.Some(42)) == "bind:43"
