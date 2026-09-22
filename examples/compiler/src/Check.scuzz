@@ -1129,7 +1129,31 @@ def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ft
   if (!has(f)) env else pinColl(f, args, pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens), funs, ens)
 
 def pinColl(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else env
+  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (mapKeyFn(f) && List.len(args) == 2) pinMapKey(args, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else env
+
+def mapKeyFn(f: String): Bool =
+  f == "Map.contains" || f == "Map.remove" || f == "Map.get"
+
+def pinMapKey(args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  pinMapKeyGot(List.at(args, 0), infer(stripNamed(List.at(args, 1)), env, funs, ens), env)
+
+def pinMapKeyGot(mapE: Expr, ko: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (hasErr(ko) || !concreteTy(tyStr(ko))) env else pinMapKeyVar(stripNamed(mapE), tyStr(ko), env)
+
+def pinMapKeyVar(e: Expr, key: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  e match {
+    case Expr.EVar(n, _) => if (mapKeyOpen(getTy(env, n))) envBind(n, mapTy(key, "A"), env) else env
+    case _ => env
+  }
+
+def mapKeyOpen(ty: String): Bool =
+  ty == "Map" || ty == "Map[A]" || ty == "Map[A, B]" || ty == "Map[A, A]" || mapBothLoose(Type.parse(ty))
+
+def mapBothLoose(t: Ty): Bool =
+  t match {
+    case Ty.App(n, args) => n == "Map" && List.len(args) >= 2 && looseTy(List.at(args, 0)) && looseTy(List.at(args, 1))
+    case _ => false
+  }
 
 def mapBin(f: String): Bool =
   f == "Map.union" || f == "Map.intersect" || f == "Map.diff"
@@ -1183,7 +1207,7 @@ def pinListElemAt(args: List[Expr], ei: Int, env: List[(String, Ty)], funs: Ftab
   pinElemOn(List.at(args, 0), infer(stripNamed(List.at(args, ei)), env, funs, ens), env)
 
 def pinListMeth(name: String, recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, pinGet(recv :: args, env, funs, ens), funs, ens) else if (name == "set" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, env, funs, ens) else if (name == "add" && List.len(args) == 1) pinSetAdd(recv :: args, env, funs, ens) else if (name == "setAt" && List.len(args) == 2) pinListElemAt(recv :: args, 2, env, funs, ens) else if (listSeekMeth(name) && List.len(args) == 1) pinListElemAt(recv :: args, 1, env, funs, ens) else if (listJoinMeth(name) && List.len(args) == 1) pinListElemAt(recv :: args, 1, env, funs, ens) else if (collBinMeth(name) && List.len(args) == 1) pinSetBin(recv :: args, pinMapBin(recv :: args, env, funs, ens), funs, ens) else env
+  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, pinGet(recv :: args, env, funs, ens), funs, ens) else if (name == "set" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, env, funs, ens) else if (name == "add" && List.len(args) == 1) pinSetAdd(recv :: args, env, funs, ens) else if (name == "setAt" && List.len(args) == 2) pinListElemAt(recv :: args, 2, env, funs, ens) else if (listSeekMeth(name) && List.len(args) == 1) pinMapKey(recv :: args, pinListElemAt(recv :: args, 1, env, funs, ens), funs, ens) else if ((name == "remove" || name == "get") && List.len(args) == 1) pinMapKey(recv :: args, env, funs, ens) else if (listJoinMeth(name) && List.len(args) == 1) pinListElemAt(recv :: args, 1, env, funs, ens) else if (collBinMeth(name) && List.len(args) == 1) pinSetBin(recv :: args, pinMapBin(recv :: args, env, funs, ens), funs, ens) else env
 
 def listJoinMeth(name: String): Bool =
   name == "append" || name == "intersperse"
