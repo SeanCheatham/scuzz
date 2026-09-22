@@ -139,6 +139,8 @@ Options:
           Compare live structural dumps across Skia backends (skia, sk_sw, gpu)
       --live
           Replay the corpus or one --replay file on the host loopback transport. Clock and files stay simulated. Pass --replay or --iterations 0
+      --asan
+          Replay the corpus or one --replay file on the compiled engine under AddressSanitizer. Leak and use-after-free reports fail the probe. Pass --replay or --iterations 0
   -h, --help
           Print help
 
@@ -149,6 +151,7 @@ Examples:
   scuzz fuzz --oracles examples/counter
   scuzz fuzz --replay build/fuzz/repro.toml
   scuzz fuzz --live --replay live.toml examples/api-report
+  scuzz fuzz --asan --iterations 0 examples/io
   scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example
   scuzz fuzz --differential --iterations 0 examples/counter
 

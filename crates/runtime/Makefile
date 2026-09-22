@@ -27,14 +27,15 @@ SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/str
 	src/ui_script.c src/lang_ui.c \
 	src/list.c src/map.c src/fs.c src/sys.c src/clock.c src/hash.c src/hex.c src/base64.c src/bytes.c src/random.c src/uuid.c src/net.c \
 	src/net_http.c src/net_request.c src/net_sock.c src/json.c src/testrt.c src/impurity.c
-OBJ := $(SRC:src/%.c=build/%.o)
+BUILDDIR ?= build
+OBJ := $(SRC:src/%.c=$(BUILDDIR)/%.o)
 
-.PHONY: all clean test test-asan lib ffi-skia
+.PHONY: all clean test test-asan lib lib-asan ffi-skia
 
 all: lib
 
-build:
-	mkdir -p build
+$(BUILDDIR):
+	mkdir -p $@
 
 FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 
@@ -44,12 +45,12 @@ FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 ffi-skia:
 	@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
-build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h | build
+$(BUILDDIR)/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/rt_locale.h src/ui_script.h src/net_transport.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-lib: build/libscuzz_rt.a
+lib: $(BUILDDIR)/libscuzz_rt.a
 
-build/libscuzz_rt.a: $(OBJ)
+$(BUILDDIR)/libscuzz_rt.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
 # Skia CPU prebuilt: C++ + zlib/bz2 (+ Darwin text frameworks).
@@ -94,10 +95,20 @@ test: build/test_io build/test_ui
 	./build/test_ui
 
 # Optional ASan. Not part of default `make test` (slow / host-dependent).
-# Skip if -fsanitize=address cannot link. Exit-time leaks are
-# known (see docs/gaps.md Residuals, Memory). LSan stays off so ASan still
-# catches UAF/OOB without failing the optional CI step on leftover allocs.
+# Skip if -fsanitize=address cannot link. Exit-time leaks in the C tests
+# stay known. LSan stays off so ASan still catches UAF/OOB without failing
+# the optional CI step on leftover allocs. Compiled corpus replay uses
+# `lib-asan` and `scuzz fuzz --asan`, which keep leak detection on.
 ASAN_CFLAGS := -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address -fno-omit-frame-pointer
+lib-asan:
+	@if echo 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o /tmp/scuzz_asan_probe 2>/dev/null; then \
+		rm -f /tmp/scuzz_asan_probe; \
+		$(MAKE) lib BUILDDIR=build/asan CFLAGS='$(ASAN_CFLAGS)'; \
+	else \
+		echo "lib-asan: AddressSanitizer not supported by $(CC) on this host" >&2; \
+		exit 1; \
+	fi
+
 test-asan:
 	@if echo 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o /tmp/scuzz_asan_probe 2>/dev/null; then \
 		rm -f /tmp/scuzz_asan_probe; \

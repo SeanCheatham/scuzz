@@ -15,4 +15,5 @@ Links `crates/ffi-skia`. Optional: `embedder-desktop`, `embedder-mobile`.
 ```bash
 make -C crates/runtime test
 make -C crates/runtime test-asan   # optional ASan; skipped if unsupported
+make -C crates/runtime lib-asan    # ASan runtime for `scuzz fuzz --asan`
 ```

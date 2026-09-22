@@ -455,9 +455,18 @@ void sz_free(void *ptr) {
 }
 
 /* Last RC release: drop live stats. Under TestRuntime, keep a tombstone for
- * pairing kinds so a second release fails. IO and stream nodes still free. */
+ * pairing kinds so a second release fails. IO and stream nodes still free.
+ * AddressSanitizer catches double-free, so ASan builds free immediately. */
 static int pairing_kind(uint32_t kind) {
   return kind == SZ_RC_STRING || kind == SZ_RC_RESOURCE;
+}
+
+static int asan_build(void) {
+#ifdef SZ_ASAN
+  return 1;
+#else
+  return 0;
+#endif
 }
 
 static void sz_rc_retire(void *ptr) {
@@ -466,6 +475,10 @@ static void sz_rc_retire(void *ptr) {
   size_t n;
   if (!ptr)
     return;
+  if (asan_build()) {
+    sz_free(ptr);
+    return;
+  }
   h = sz_rc_hdr(ptr);
   if (!pairing_kind(h->kind) || !sz_testrt_tomb_armed()) {
     sz_free(ptr);
@@ -4686,6 +4699,15 @@ static void *sz_runtime_main_worker(void *arg) {
   sz_timeline_varied_flush();
   sz_property_classify_flush();
   sz_timeline_claim_flush();
+#ifdef SZ_ASAN
+  {
+    const char *tr = getenv("SCUZZ_TESTRT");
+    if (tr && tr[0] == '1') {
+      sz_testrt_reset();
+      sz_alloc_sweep();
+    }
+  }
+#endif
 done:
 #if defined(__APPLE__)
   g_sz_main_worker_done = 1;
