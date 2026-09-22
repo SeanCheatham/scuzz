@@ -1080,7 +1080,7 @@ def bindFor(d: Bool, name: String, ty: String, env: List[(String, Ty)], ens: Lis
 
 def refineEnv(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   e match {
-    case Expr.ECall(f, args, _) => refineExprs(args, refineListPin(f, args, refineIterCall(f, args, refineOfferCall(f, args, env, funs, ens), funs, ens), funs, ens), funs, ens)
+    case Expr.ECall(f, args, _) => refineExprs(args, refineUserPin(f, args, refineListPin(f, args, refineIterCall(f, args, refineOfferCall(f, args, env, funs, ens), funs, ens), funs, ens), funs, ens), funs, ens)
     case Expr.EMethod(recv, name, args, _) => refineExprs(args, pinListMeth(name, recv, args, refineEnv(recv, refineIterMeth(recv, name, args, refineOfferMeth(recv, name, args, env, funs, ens), funs, ens), funs, ens), funs, ens), funs, ens)
     case Expr.EAscribe(inner, _, _) => refineEnv(inner, env, funs, ens)
     case Expr.ENamed(_, inner) => refineEnv(inner, env, funs, ens)
@@ -1115,6 +1115,15 @@ def refineBind(b: Bind, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Lis
   b match {
     case Bind(_, _, v) => refineEnv(v, env, funs, ens)
   }
+
+def refineUserPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (has(f) || List.isEmpty(args)) env else pinUserHit(findFunPrefer(funs, f, env), args, env, funs, ens)
+
+def pinUserHit(hit: List[Fun], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (List.isEmpty(hit)) env else pinUserFun(List.at(hit, 0), args, env, funs, ens)
+
+def pinUserFun(d: Fun, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
+  if (!List.isEmpty(d.tparams)) env else pinWantArgs(paramTys(d.params), args, env, funs, ens)
 
 def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
   if (!has(f)) env else pinColl(f, args, pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens), funs, ens)
@@ -1189,7 +1198,10 @@ def pinWantArg(w: String, arg: Expr, env: List[(String, Ty)], funs: Ftab, ens: L
   pinWantGot(w, stripNamed(arg), infer(stripNamed(arg), env, funs, ens), env)
 
 def pinWantGot(w: String, arg: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
-  if (hasErr(o) || !isLoose(tyStr(o)) || !concreteTy(w)) env else pinLooseSrc(arg, w, env)
+  if (hasErr(o)) env else if (isLoose(tyStr(o)) && concreteTy(w)) pinLooseSrc(arg, w, env) else pinWantColl(w, arg, o, env)
+
+def pinWantColl(w: String, arg: Expr, o: Out, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (!concreteTy(w)) env else if (isBareHandle(tyStr(o), "List") && Str.startsWith(w, "List[") && concreteTy(listElemTy(w))) pinBareList(stripNamed(arg), listElemTy(w), env) else if (isBareHandle(tyStr(o), "Map") && Str.startsWith(w, "Map[")) pinBareNamed(stripNamed(arg), "Map", w, env) else if (isBareHandle(tyStr(o), "Set") && Str.startsWith(w, "Set[")) pinBareNamed(stripNamed(arg), "Set", w, env) else env
 
 def concreteTy(t: String): Bool =
   t != "" && t != "Any" && !looseTy(Type.parse(t))
