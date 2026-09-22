@@ -1,4 +1,4 @@
-record Out(ty: Ty, err: String, span: (String, Int))
+record Out(ty: Ty, err: String, span: (String, Int), binds: List[(String, Ty)], origin: String)
 
 record Ftab(list: List[Fun], tab: Map[String, List[Fun]], kits: Map[String, KitSig])
 
@@ -46,17 +46,60 @@ def exprSpan(env: List[(String, Ty)], e: Expr): (String, Int) =
 def noSpan(): (String, Int) =
   ("", 0 - 1)
 
+def noBinds(): List[(String, Ty)] =
+  []
+
 def ok(ty: String): Out =
-  Out(Type.parse(ty), "", noSpan())
+  Out(Type.parse(ty), "", noSpan(), noBinds(), "")
 
 def okTy(t: Ty): Out =
-  Out(t, "", noSpan())
+  Out(t, "", noSpan(), noBinds(), "")
 
 def tyStr(o: Out): String =
   Type.show(o.ty)
 
 def bad(err: String, span: (String, Int)): Out =
-  Out(Type.tNamed(""), err, span)
+  Out(Type.tNamed(""), err, span, noBinds(), "")
+
+def ret(o: Out, ty: String): Out =
+  if (hasErr(o)) o else Out(Type.parse(ty), "", noSpan(), o.binds, "")
+
+def retTy(o: Out, t: Ty): Out =
+  if (hasErr(o)) o else Out(t, "", noSpan(), o.binds, "")
+
+def withSpan(o: Out, span: (String, Int)): Out =
+  Out(o.ty, o.err, span, o.binds, o.origin)
+
+def varOut(t: Ty, name: String, ens: List[En]): Out =
+  if (isLooseTy(t, ens)) Out(t, "", noSpan(), noBinds(), name) else okTy(t)
+
+def bindGet(bs: List[(String, Ty)], n: String): Ty =
+  if (List.isEmpty(bs)) Type.tNamed("") else bindGet1(List.at(bs, 0), List.tail(bs), n)
+
+def bindGet1(h: (String, Ty), rest: List[(String, Ty)], n: String): Ty =
+  h match {
+    case (k, ty) => if (k == n) ty else bindGet(rest, n)
+  }
+
+def addBinds(o: Out, bs: List[(String, Ty)]): Out =
+  if (hasErr(o) || List.isEmpty(bs)) o else addBind(o, List.at(bs, 0), List.tail(bs))
+
+def addBind(o: Out, h: (String, Ty), rest: List[(String, Ty)]): Out =
+  h match {
+    case (n, ty) => addBind1(o, n, ty, bindGet(o.binds, n), rest)
+  }
+
+def addBind1(o: Out, n: String, ty: Ty, prev: Ty, rest: List[(String, Ty)]): Out =
+  if (Type.isEmpty(prev)) addBinds(Out(o.ty, o.err, o.span, (n, ty) :: o.binds, o.origin), rest) else if (Type.eqStruct(prev, ty)) addBinds(o, rest) else bad(Str.concat("type parameter ", Str.concat(n, Str.concat(" bound to ", Str.concat(Type.show(prev), Str.concat(" and ", Type.show(ty)))))), o.span)
+
+def andBinds(prev: Out, next: Out): Out =
+  if (hasErr(prev)) prev else if (hasErr(next)) next else addBinds(next, prev.binds)
+
+def bindOrigin(o: Out, origin: String, ty: Ty, concrete: Ty, ens: List[En], span: (String, Int)): Out =
+  if (origin != "" && isLooseTy(ty, ens) && Type.ground(concrete)) addBinds(withSpan(o, span), (origin, concrete) :: noBinds()) else o
+
+def bindLoose(o: Out, concrete: Ty, ens: List[En], span: (String, Int)): Out =
+  bindOrigin(o, o.origin, o.ty, concrete, ens, span)
 
 def hasErr(o: Out): Bool =
   Str.len(o.err) > 0
@@ -301,13 +344,16 @@ def zipCheckGo(callee: String, w: Ty, want: List[Ty], arg: Expr, args: List[Expr
   if (List.isEmpty(args)) zipCheckLast(inferExpectedTy(stripNamed(arg), w, env, funs, ens), callee, w, asp, acc, ens) else zipCheck2(callee, w, inferExpectedTy(stripNamed(arg), w, env, funs, ens), want, args, env, funs, ens, span, acc, asp)
 
 def zipCheckLast(o: Out, callee: String, w: Ty, span: (String, Int), acc: Ty, ens: List[En]): Out =
-  if (hasErr(o)) o else if (tyEq(o.ty, w, ens)) okTy(zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), span)
+  if (hasErr(o)) o else if (tyEq(o.ty, w, ens)) retTy(bindOrigin(o, o.origin, o.ty, w, ens, span), zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), span)
 
 def zipCheck2(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
   if (hasErr(o)) o else zipCheckEq(callee, w, o, want, args, env, funs, ens, span, acc, asp)
 
 def zipCheckEq(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
-  if (tyEq(o.ty, w, ens)) zipCheck(callee, kitWantFromTy(callee, zipAcc(acc, o), want), args, env, funs, ens, span, zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), asp)
+  if (tyEq(o.ty, w, ens)) zipCheckBound(bindOrigin(o, o.origin, o.ty, w, ens, asp), callee, kitWantFromTy(callee, zipAcc(acc, o), want), args, env, funs, ens, span, zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), asp)
+
+def zipCheckBound(o: Out, callee: String, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty): Out =
+  if (hasErr(o)) o else andBinds(o, zipCheck(callee, want, args, env, funs, ens, span, acc))
 
 def zipAcc(acc: Ty, o: Out): Ty =
   if (Type.isEmpty(acc)) o.ty else acc
@@ -399,7 +445,7 @@ def checkKnownTy(f: String, want: List[Ty], ret: Ty, args: List[Expr], env: List
   if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownRet(f, zipCheck(f, want, args, env, funs, ens, span, Type.tNamed("")), ret)
 
 def checkKnownRet(f: String, o: Out, ret: Ty): Out =
-  if (hasErr(o)) o else okTy(kitRetFromGot(f, o.ty, ret))
+  if (hasErr(o)) o else retTy(o, kitRetFromGot(f, o.ty, ret))
 
 def kitRetFromGot(f: String, got: Ty, ret: Ty): Ty =
   if (f == "List.head") Type.tApp("Option", Type.elem(got) :: Type.noTy()) else if (f == "List.tail" || f == "List.reverse" || f == "List.last") kitRetListTy(got, ret) else if (f == "IO.pure") Type.tIo(Type.tStr(), got) else if (f == "IO.fail") Type.tIo(if (Type.isEmpty(got)) Type.tStr() else got, Type.tParam("A")) else if (f == "Deferred.get") handleGetRet(got, "Deferred") else if (f == "Queue.take") handleGetRet(got, "Queue") else substKitETy(ret, got)
@@ -652,7 +698,7 @@ def inferFunApply(ty: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab,
   if (List.isEmpty(args)) bad("apply expects 1 arg", span) else if (List.len(args) == 1) inferFunApply1(ty, infer(List.at(args, 0), env, funs, ens), spanPick(exprSpan(env, List.at(args, 0)), span), ens) else inferFunApply1(ty, inferTuple(args, env, funs, ens), span, ens)
 
 def inferFunApply1(ty: Ty, o: Out, span: (String, Int), ens: List[En]): Out =
-  if (hasErr(o)) o else if (Type.isParam(Type.funArg(ty)) && !isLoose(tyStr(o))) bad("lambda parameter type is unresolved; annotate the parameter", span) else if (tyEq(o.ty, Type.funArg(ty), ens)) okTy(Type.funRet(ty)) else argMismatch("apply", Type.show(Type.funArg(ty)), tyStr(o), span)
+  if (hasErr(o)) o else if (Type.isParam(Type.funArg(ty)) && !isLoose(tyStr(o))) bad("lambda parameter type is unresolved; annotate the parameter", span) else if (tyEq(o.ty, Type.funArg(ty), ens)) retTy(bindOrigin(o, o.origin, o.ty, Type.funArg(ty), ens, span), Type.funRet(ty)) else argMismatch("apply", Type.show(Type.funArg(ty)), tyStr(o), span)
 
 def elemOf(t: String): String =
   elemOf2(brackAt(t, 0), t)
@@ -699,7 +745,7 @@ def expectedLamBody(arg: String, body: Out): Out =
   if (hasErr(body)) body else okTy(Type.tFun(Type.parse(arg), body.ty))
 
 def genericArgTy(f: String, ts: List[String], want: List[Ty], ret: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: Out): Out =
-  if (hasErr(got)) got else genericBoundTy(f, ts, want, ret, args, env, funs, ens, span, got.ty, Type.bindings(List.at(want, 0), got.ty, ts))
+  if (hasErr(got)) got else andBinds(got, genericBoundTy(f, ts, want, ret, args, env, funs, ens, span, got.ty, Type.bindings(List.at(want, 0), got.ty, ts)))
 
 def genericBoundTy(f: String, ts: List[String], want: List[Ty], ret: Ty, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), got: Ty, bindings: List[(String, Ty)]): Out =
   genericBoundEq(f, ts, want, ret, args, env, funs, ens, span, got, bindings, applyBindingsTy(List.at(want, 0), bindings))
@@ -728,7 +774,7 @@ def inferPrint(inner: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], 
   inferPrint2(infer(inner, env, funs, ens), env, inner, e, ens)
 
 def inferPrint2(o: Out, env: List[(String, Ty)], inner: Expr, e: Expr, ens: List[En]): Out =
-  if (hasErr(o)) o else if (Type.isStr(o.ty) || isLooseTy(o.ty, ens)) ok("IO[Unit]") else bad(Str.concat("expected String, got ", tyStr(o)), spanPick(exprSpan(env, inner), exprSpan(env, e)))
+  if (hasErr(o)) o else if (Type.isStr(o.ty) || isLooseTy(o.ty, ens)) ret(bindLoose(o, Type.tStr(), ens, spanPick(exprSpan(env, inner), exprSpan(env, e))), "IO[Unit]") else bad(Str.concat("expected String, got ", tyStr(o)), spanPick(exprSpan(env, inner), exprSpan(env, e)))
 
 def inferBin(op: String, l: Expr, r: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   inferBin2(op, infer(l, env, funs, ens), r, env, funs, ens, e)
@@ -737,31 +783,37 @@ def inferBin2(op: String, lo: Out, r: Expr, env: List[(String, Ty)], funs: Ftab,
   if (hasErr(lo)) lo else inferBin3(op, lo, infer(r, env, funs, ens), env, ens, e)
 
 def inferBin3(op: String, lo: Out, ro: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
-  if (hasErr(ro)) ro else inferBin4(op, tyStr(lo), tyStr(ro), exprSpan(env, e), ens)
+  if (hasErr(ro)) ro else inferBinJoin(op, lo, ro, exprSpan(env, e), ens)
 
-def inferBin4(op: String, lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
-  if (isArith(op)) inferArith(lt, rt, span, ens) else if (isEq(op)) inferEq(lt, rt, span, ens) else if (isOrd(op)) inferOrd(lt, rt, span, ens) else if (isLogic(op)) inferLogic(lt, rt, span, ens) else if (isBit(op)) inferBit(lt, rt, span) else if (op == "::") ok(Str.concat("List[", Str.concat(lt, "]"))) else ok(lt)
+def inferBinJoin(op: String, lo: Out, ro: Out, span: (String, Int), ens: List[En]): Out =
+  inferBin4(op, lo, ro, span, ens, andBinds(lo, ro))
 
-def inferArith(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
-  if (numTy(lt, ens) && numTy(rt, ens)) ok(if (lt == "Float" || rt == "Float") "Float" else "Int") else bad(Str.concat("arithmetic needs Int or Float, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
+def inferBin4(op: String, lo: Out, ro: Out, span: (String, Int), ens: List[En], base: Out): Out =
+  if (hasErr(base)) base else if (isArith(op)) inferArith(lo, ro, span, ens, base) else if (isEq(op)) inferEq(lo, ro, span, ens, base) else if (isOrd(op)) inferOrd(lo, ro, span, ens, base) else if (isLogic(op)) inferLogic(lo, ro, span, ens, base) else if (isBit(op)) inferBit(tyStr(lo), tyStr(ro), span, base) else if (op == "::") ret(base, Str.concat("List[", Str.concat(tyStr(lo), "]"))) else ret(base, tyStr(lo))
+
+def numConcrete(lo: Out, ro: Out): Ty =
+  if (Type.isFloat(lo.ty) || Type.isFloat(ro.ty)) Type.tFloat() else Type.tInt()
+
+def inferArith(lo: Out, ro: Out, span: (String, Int), ens: List[En], base: Out): Out =
+  if (numTy(tyStr(lo), ens) && numTy(tyStr(ro), ens)) ret(bindOrigin(bindOrigin(base, lo.origin, lo.ty, numConcrete(lo, ro), ens, span), ro.origin, ro.ty, numConcrete(lo, ro), ens, span), Type.show(numConcrete(lo, ro))) else bad(Str.concat("arithmetic needs Int or Float, got ", Str.concat(tyStr(lo), Str.concat(" and ", tyStr(ro)))), span)
 
 def numTy(t: String, ens: List[En]): Bool =
   t == "Int" || t == "Float" || isLooseEn(t, ens)
 
-def inferEq(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
-  if (tyEqEn(lt, rt, ens)) ok("Bool") else bad(Str.concat("comparison type mismatch ", Str.concat(lt, Str.concat(" vs ", rt))), span)
+def inferEq(lo: Out, ro: Out, span: (String, Int), ens: List[En], base: Out): Out =
+  if (tyEq(lo.ty, ro.ty, ens)) ret(bindOrigin(bindOrigin(base, lo.origin, lo.ty, ro.ty, ens, span), ro.origin, ro.ty, lo.ty, ens, span), "Bool") else bad(Str.concat("comparison type mismatch ", Str.concat(tyStr(lo), Str.concat(" vs ", tyStr(ro)))), span)
 
-def inferOrd(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
-  if (numTy(lt, ens) && numTy(rt, ens)) ok("Bool") else bad("ordered compare needs Int or Float", span)
+def inferOrd(lo: Out, ro: Out, span: (String, Int), ens: List[En], base: Out): Out =
+  if (numTy(tyStr(lo), ens) && numTy(tyStr(ro), ens)) ret(bindOrigin(bindOrigin(base, lo.origin, lo.ty, numConcrete(lo, ro), ens, span), ro.origin, ro.ty, numConcrete(lo, ro), ens, span), "Bool") else bad("ordered compare needs Int or Float", span)
 
-def inferLogic(lt: String, rt: String, span: (String, Int), ens: List[En]): Out =
-  if (logicTy(lt, ens) && logicTy(rt, ens)) ok("Bool") else bad(Str.concat("logic needs Bool, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
+def inferLogic(lo: Out, ro: Out, span: (String, Int), ens: List[En], base: Out): Out =
+  if (logicTy(tyStr(lo), ens) && logicTy(tyStr(ro), ens)) ret(bindOrigin(bindOrigin(base, lo.origin, lo.ty, Type.tBool(), ens, span), ro.origin, ro.ty, Type.tBool(), ens, span), "Bool") else bad(Str.concat("logic needs Bool, got ", Str.concat(tyStr(lo), Str.concat(" and ", tyStr(ro)))), span)
 
 def logicTy(t: String, ens: List[En]): Bool =
   t == "Bool" || isLooseEn(t, ens)
 
-def inferBit(lt: String, rt: String, span: (String, Int)): Out =
-  if (lt == "Int" && rt == "Int") ok("Int") else bad(Str.concat("bitwise needs Int, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
+def inferBit(lt: String, rt: String, span: (String, Int), base: Out): Out =
+  if (lt == "Int" && rt == "Int") ret(base, "Int") else bad(Str.concat("bitwise needs Int, got ", Str.concat(lt, Str.concat(" and ", rt))), span)
 
 def inferUn(op: String, inner: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   inferUn2(op, infer(inner, env, funs, ens), env, ens, e)
@@ -770,13 +822,13 @@ def inferUn2(op: String, o: Out, env: List[(String, Ty)], ens: List[En], e: Expr
   if (hasErr(o)) o else if (op == "!") inferUnBool(o, env, ens, e) else if (op == "-") inferUnNum(o, env, ens, e) else inferUnInt(o, env, ens, e)
 
 def inferUnNum(o: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
-  if (Type.isInt(o.ty) || Type.isFloat(o.ty) || isLooseTy(o.ty, ens)) o else bad(Str.concat("expected Int or Float, got ", tyStr(o)), exprSpan(env, e))
+  if (Type.isInt(o.ty) || Type.isFloat(o.ty) || isLooseTy(o.ty, ens)) bindLoose(o, if (Type.isFloat(o.ty)) Type.tFloat() else Type.tInt(), ens, exprSpan(env, e)) else bad(Str.concat("expected Int or Float, got ", tyStr(o)), exprSpan(env, e))
 
 def inferUnBool(o: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
-  if (Type.isBool(o.ty) || isLooseTy(o.ty, ens)) okTy(Type.tBool()) else bad(Str.concat("expected Bool, got ", tyStr(o)), exprSpan(env, e))
+  if (Type.isBool(o.ty) || isLooseTy(o.ty, ens)) retTy(bindLoose(o, Type.tBool(), ens, exprSpan(env, e)), Type.tBool()) else bad(Str.concat("expected Bool, got ", tyStr(o)), exprSpan(env, e))
 
 def inferUnInt(o: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
-  if (Type.isInt(o.ty) || isLooseTy(o.ty, ens)) okTy(Type.tInt()) else bad(Str.concat("expected Int, got ", tyStr(o)), exprSpan(env, e))
+  if (Type.isInt(o.ty) || isLooseTy(o.ty, ens)) retTy(bindLoose(o, Type.tInt(), ens, exprSpan(env, e)), Type.tInt()) else bad(Str.concat("expected Int, got ", tyStr(o)), exprSpan(env, e))
 
 def inferIf(c: Expr, t: Expr, el: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   inferIf2(infer(c, env, funs, ens), t, el, env, funs, ens, e)
@@ -788,7 +840,7 @@ def inferIf3(to: Out, el: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[E
   if (hasErr(to)) to else inferIf4(to, infer(el, env, funs, ens), env, ens, e)
 
 def inferIf4(to: Out, eo: Out, env: List[(String, Ty)], ens: List[En], e: Expr): Out =
-  if (hasErr(eo)) eo else if (tyEq(to.ty, eo.ty, ens)) okTy(preferTy(to.ty, eo.ty, ens)) else if (ifIoUnit(tyStr(to), tyStr(eo))) ok(ifIoPick(tyStr(to), tyStr(eo))) else bad(Str.concat("type mismatch: expected ", Str.concat(tyStr(to), Str.concat(", got ", tyStr(eo)))), exprSpan(env, e))
+  if (hasErr(eo)) eo else if (tyEq(to.ty, eo.ty, ens)) retTy(bindOrigin(bindOrigin(andBinds(to, eo), to.origin, to.ty, eo.ty, ens, exprSpan(env, e)), eo.origin, eo.ty, to.ty, ens, exprSpan(env, e)), preferTy(to.ty, eo.ty, ens)) else if (ifIoUnit(tyStr(to), tyStr(eo))) andBinds(to, ret(eo, ifIoPick(tyStr(to), tyStr(eo)))) else bad(Str.concat("type mismatch: expected ", Str.concat(tyStr(to), Str.concat(", got ", tyStr(eo)))), exprSpan(env, e))
 
 def ifIoUnit(a: String, b: String): Bool =
   isIo(a) && b == "Unit" || isIo(b) && a == "Unit"
@@ -910,7 +962,7 @@ def inferAscribe2(o: Out, ty: String, span: (String, Int), ens: List[En]): Out =
   inferAscribe3(o, Type.parse(ty), ty, span, ens)
 
 def inferAscribe3(o: Out, want: Ty, ty: String, span: (String, Int), ens: List[En]): Out =
-  if (hasErr(o)) o else if (tyEq(o.ty, want, ens)) okTy(preferTy(want, o.ty, ens)) else bad(Str.concat("type mismatch: expected ", Str.concat(ty, Str.concat(", got ", tyStr(o)))), span)
+  if (hasErr(o)) o else if (tyEq(o.ty, want, ens)) retTy(bindOrigin(o, o.origin, o.ty, want, ens, span), preferTy(want, o.ty, ens)) else bad(Str.concat("type mismatch: expected ", Str.concat(ty, Str.concat(", got ", tyStr(o)))), span)
 
 def inferLam(ty: String, o: Out): Out =
   if (hasErr(o)) o else okTy(Type.tFun(Type.parse(if (ty == "") "A" else ty), o.ty))
@@ -1102,7 +1154,7 @@ def lamPinTyOf3(v: Expr, vo: Out, pin: String, env: List[(String, Ty)], defs: Ft
   if (pin == "") "" else tyStr(lamPinDo(pin, v, env, defs, ens, vo))
 
 def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (hasErr(vo)) vo else if (d) inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span) else inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy)
+  if (hasErr(vo)) vo else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy))
 
 def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   if (Str.startsWith(ty, "Stream") || Str.startsWith(ty, "Resource")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens))
@@ -1720,7 +1772,7 @@ def appBareA(t: Ty, ctor: String): Bool =
   }
 
 def inferFor2(o: Out, errTy: String): Out =
-  if (hasErr(o) || errTy == "") o else ok(ioTy(errTy, tyStr(o)))
+  if (hasErr(o) || errTy == "") o else ret(o, ioTy(errTy, tyStr(o)))
 
 def forHasDraw(bs: List[Bind]): Bool =
   if (List.isEmpty(bs)) false else forHasDraw1(List.at(bs, 0), List.tail(bs))
@@ -1803,7 +1855,7 @@ def inferMatch(s: Expr, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, en
   inferMatch2(infer(s, env, funs, ens), arms, env, funs, ens, span)
 
 def inferMatch2(o: Out, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(o)) o else if (List.isEmpty(arms)) o else inferMatchNest(nestArmsErr(arms, span), arms, tyStr(o), env, funs, ens, span)
+  if (hasErr(o)) o else if (List.isEmpty(arms)) o else andBinds(o, inferMatchNest(nestArmsErr(arms, span), arms, tyStr(o), env, funs, ens, span))
 
 def inferMatchNest(v: Out, arms: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (hasErr(v)) v else inferMatchRest(inferMatchChecked(altArmsErr(arms, scrutTy, ens, span), List.at(arms, 0), scrutTy, env, funs, ens), List.tail(arms), scrutTy, env, funs, ens)
@@ -1856,7 +1908,7 @@ def inferMatchRest(first: Out, rest: List[Arm], scrutTy: String, env: List[(Stri
   if (hasErr(first)) first else if (List.isEmpty(rest)) first else inferMatchArm2(first, inferMatchArm(List.at(rest, 0), scrutTy, env, funs, ens), List.at(rest, 0), List.tail(rest), scrutTy, env, funs, ens)
 
 def inferMatchArm2(first: Out, cur: Out, arm: Arm, rest: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  if (hasErr(cur)) cur else if (tyEq(first.ty, cur.ty, ens)) inferMatchRest(first, rest, scrutTy, env, funs, ens) else bad(Str.concat("type mismatch: expected ", Str.concat(tyStr(first), Str.concat(", got ", tyStr(cur)))), armSpan(arm, env))
+  if (hasErr(cur)) cur else if (tyEq(first.ty, cur.ty, ens)) inferMatchRest(andBinds(first, retTy(cur, preferTy(first.ty, cur.ty, ens))), rest, scrutTy, env, funs, ens) else bad(Str.concat("type mismatch: expected ", Str.concat(tyStr(first), Str.concat(", got ", tyStr(cur)))), armSpan(arm, env))
 
 def armSpan(arm: Arm, env: List[(String, Ty)]): (String, Int) =
   arm match {
@@ -2342,7 +2394,7 @@ def inferVar(s: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span
   inferVar2(s, lookupEnv(env, s), env, funs, ens, span)
 
 def inferVar2(s: String, t: Ty, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (s == "") bad("unexpected token", span) else if (Type.show(t) == "") inferVarFun(s, findFunPrefer(funs, s, env), ens, span) else okTy(t)
+  if (s == "") bad("unexpected token", span) else if (Type.show(t) == "") inferVarFun(s, findFunPrefer(funs, s, env), ens, span) else varOut(t, s, ens)
 
 def inferVarFun(s: String, hit: List[Fun], ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(hit)) inferVarCase(s, ens, span) else okTy(funTyOf(List.at(hit, 0)))
@@ -2365,10 +2417,10 @@ def inferListRest(head: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ft
   if (hasErr(head)) head else if (List.isEmpty(rest)) inferList2(head) else inferListNext(head, infer(List.at(rest, 0), env, funs, ens), rest, env, funs, ens)
 
 def inferListNext(head: Out, next: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  if (hasErr(next)) next else if (!tyEq(head.ty, next.ty, ens)) argMismatch("list element", tyStr(head), tyStr(next), exprSpan(env, List.at(rest, 0))) else inferListRest(okTy(preferTy(head.ty, next.ty, ens)), List.tail(rest), env, funs, ens)
+  if (hasErr(next)) next else if (!tyEq(head.ty, next.ty, ens)) argMismatch("list element", tyStr(head), tyStr(next), exprSpan(env, List.at(rest, 0))) else inferListRest(retTy(bindOrigin(bindOrigin(andBinds(head, next), head.origin, head.ty, next.ty, ens, exprSpan(env, List.at(rest, 0))), next.origin, next.ty, head.ty, ens, exprSpan(env, List.at(rest, 0))), preferTy(head.ty, next.ty, ens)), List.tail(rest), env, funs, ens)
 
 def inferList2(o: Out): Out =
-  if (hasErr(o)) o else ok(Str.concat("List[", Str.concat(tyStr(o), "]")))
+  if (hasErr(o)) o else ret(o, Str.concat("List[", Str.concat(tyStr(o), "]")))
 
 def inferTuple(xs: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   inferTupleAcc(xs, env, funs, ens, "")
@@ -2445,7 +2497,7 @@ def checkDefWrap(name: String, ret: String, body: Expr, o: Out, span: (String, I
   if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o, span, ens, ts)
 
 def checkDefGot(name: String, ret: String, body: Expr, o: Out, span: (String, Int), ens: List[En], ts: List[String]): Out =
-  if (hasErr(o)) o else if (tyEqParams(tyStr(o), ret, ens, ts)) o else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(tyStr(o), Str.concat(" does not match declared ", ret))))), spanPick(Parse.spanOf(body), span))
+  if (hasErr(o)) o else if (tyEqParams(tyStr(o), ret, ens, ts)) bindOrigin(o, o.origin, o.ty, Type.parse(ret), ens, span) else bad(Str.concat("def ", Str.concat(name, Str.concat(" body ", Str.concat(tyStr(o), Str.concat(" does not match declared ", ret))))), spanPick(Parse.spanOf(body), span))
 
 def tyEqParams(a: String, b: String, ens: List[En], ts: List[String]): Bool =
   eqPinned(a, b, List.concat(ts, enNames(ens)))

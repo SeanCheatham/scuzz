@@ -226,6 +226,18 @@ def funEq(arg: Ty, ret: Ty, b: Ty): Bool =
 def eqList(xs: List[Ty], ys: List[Ty]): Bool =
   if (List.isEmpty(xs)) List.isEmpty(ys) else if (List.isEmpty(ys)) false else eq(List.at(xs, 0), List.at(ys, 0)) && eqList(List.tail(xs), List.tail(ys))
 
+def ground(t: Ty): Bool =
+  t match {
+    case Ty.TVar(_) => false
+    case Ty.Named(n) => n != "" && n != "Any"
+    case Ty.App(_, args) => groundList(args)
+    case Ty.Tuple(ps) => groundList(ps)
+    case Ty.Arrow(a, r) => ground(a) && ground(r)
+  }
+
+def groundList(xs: List[Ty]): Bool =
+  if (List.isEmpty(xs)) true else ground(List.at(xs, 0)) && groundList(List.tail(xs))
+
 def isEmpty(t: Ty): Bool =
   t match {
     case Ty.Named(n) => n == ""
