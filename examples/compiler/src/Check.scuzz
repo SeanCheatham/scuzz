@@ -1129,7 +1129,7 @@ def refineListPin(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ft
   if (!has(f)) env else pinColl(f, args, pinListSib(f, args, pinWantArgs(Kits.want(f, List.len(args)), args, env, funs, ens), funs, ens), funs, ens)
 
 def pinColl(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (mapKeyFn(f) && List.len(args) == 2) pinMapKey(args, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else if (foldFn(f) && List.len(args) == 3) pinFold(args, foldElemIx(f), env, funs, ens) else if (listPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else if (listRedFn(f) && List.len(args) == 2) pinListRed(args, env, funs, ens) else if (setPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else env
+  if (f == "Map.set" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (f == "Map.getOrElse" && List.len(args) == 3) pinMapAt(args, 1, 2, env, funs, ens) else if (mapKeyFn(f) && List.len(args) == 2) pinMapKey(args, env, funs, ens) else if (f == "Set.add" && List.len(args) == 2) pinSetAdd(args, env, funs, ens) else if (mapBin(f) && List.len(args) == 2) pinMapBin(args, env, funs, ens) else if (f == "Set.union" && List.len(args) == 2) pinSetBin(args, env, funs, ens) else if (foldFn(f) && List.len(args) == 3) pinFold(args, foldElemIx(f), env, funs, ens) else if (listPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else if (listRedFn(f) && List.len(args) == 2) pinListRed(args, env, funs, ens) else if (setPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else if (mapPredFn(f) && List.len(args) == 2) pinListPred(args, env, funs, ens) else env
 
 def mapKeyFn(f: String): Bool =
   f == "Map.contains" || f == "Map.remove" || f == "Map.get"
@@ -1234,7 +1234,7 @@ def pinListElemAt(args: List[Expr], ei: Int, env: List[(String, Ty)], funs: Ftab
   pinElemOn(List.at(args, 0), infer(stripNamed(List.at(args, ei)), env, funs, ens), env)
 
 def pinListMeth(name: String, recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): List[(String, Ty)] =
-  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, pinGet(recv :: args, env, funs, ens), funs, ens) else if (name == "set" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, env, funs, ens) else if (name == "add" && List.len(args) == 1) pinSetAdd(recv :: args, env, funs, ens) else if (name == "setAt" && List.len(args) == 2) pinListElemAt(recv :: args, 2, env, funs, ens) else if (listSeekMeth(name) && List.len(args) == 1) pinMapKey(recv :: args, pinListElemAt(recv :: args, 1, env, funs, ens), funs, ens) else if ((name == "remove" || name == "get") && List.len(args) == 1) pinMapKey(recv :: args, env, funs, ens) else if (listJoinMeth(name) && List.len(args) == 1) pinListElemAt(recv :: args, 1, env, funs, ens) else if (collBinMeth(name) && List.len(args) == 1) pinSetBin(recv :: args, pinMapBin(recv :: args, env, funs, ens), funs, ens) else if (foldMeth(name) && List.len(args) == 2) pinFold(recv :: args, foldElemIx(name), env, funs, ens) else if (listPredMeth(name) && List.len(args) == 1) pinListPred(recv :: args, env, funs, ens) else if (listRedMeth(name) && List.len(args) == 1) pinListRed(recv :: args, env, funs, ens) else env
+  if (name == "concat" && List.len(args) == 1) pinConcat(recv :: args, env, funs, ens) else if (name == "getOrElse" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, pinGet(recv :: args, env, funs, ens), funs, ens) else if (name == "set" && List.len(args) == 2) pinMapAt(recv :: args, 1, 2, env, funs, ens) else if (name == "add" && List.len(args) == 1) pinSetAdd(recv :: args, env, funs, ens) else if (name == "setAt" && List.len(args) == 2) pinListElemAt(recv :: args, 2, env, funs, ens) else if (listSeekMeth(name) && List.len(args) == 1) pinMapKey(recv :: args, pinListElemAt(recv :: args, 1, env, funs, ens), funs, ens) else if ((name == "remove" || name == "get") && List.len(args) == 1) pinMapKey(recv :: args, env, funs, ens) else if (listJoinMeth(name) && List.len(args) == 1) pinListElemAt(recv :: args, 1, env, funs, ens) else if (collBinMeth(name) && List.len(args) == 1) pinSetBin(recv :: args, pinMapBin(recv :: args, env, funs, ens), funs, ens) else if (foldMeth(name) && List.len(args) == 2) pinFold(recv :: args, foldElemIx(name), env, funs, ens) else if (listPredMeth(name) && List.len(args) == 1) pinListPred(recv :: args, env, funs, ens) else if (name == "mapValues" && List.len(args) == 1) pinListPred(recv :: args, env, funs, ens) else if (listRedMeth(name) && List.len(args) == 1) pinListRed(recv :: args, env, funs, ens) else env
 
 def listJoinMeth(name: String): Bool =
   name == "append" || name == "intersperse"
@@ -1392,7 +1392,19 @@ def pinPredWant(listE: Expr, elem: String, arg: Expr, want: String, env: List[(S
   if (foldElemVar(stripNamed(arg), elem) && concreteTy(want)) pinPredColl(listE, want, env) else env
 
 def pinPredColl(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
-  pinBareNamed(e, "Set", Str.concat("Set[", Str.concat(ty, "]")), pinBareList(e, ty, env))
+  pinPredMap(e, ty, pinBareNamed(e, "Set", Str.concat("Set[", Str.concat(ty, "]")), pinBareList(e, ty, env)))
+
+def pinPredMap(e: Expr, ty: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  e match {
+    case Expr.EVar(n, _) => pinPredMapName(n, ty, getTy(env, n), env)
+    case _ => env
+  }
+
+def pinPredMapName(n: String, ty: String, cur: String, env: List[(String, Ty)]): List[(String, Ty)] =
+  if (mapKeyOpen(cur)) envBind(n, mapTy("A", ty), env) else if (mapValOpen(cur)) envBind(n, mapTy(mapShownKey(cur), ty), env) else env
+
+def mapPredFn(f: String): Bool =
+  f == "Map.filter" || f == "Map.exists" || f == "Map.forall" || f == "Map.mapValues"
 
 def setPredFn(f: String): Bool =
   f == "Set.map" || f == "Set.filter" || f == "Set.exists" || f == "Set.forall"
