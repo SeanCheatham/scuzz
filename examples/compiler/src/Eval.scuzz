@@ -512,7 +512,7 @@ def isUnitExpr(e: Expr): Bool =
   }
 
 def callStep(e: Expr, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (Check.needsPh(e)) holeStep(e, env) else if (Str.contains(f, ".") && isKit(p, f)) kitStep(f, args, env, p, off) else if (Str.startsWith(f, "View.")) valueStep(viewValue(f, stepAll(args, env, p))) else if (hasEn(p, f)) ctorStep(f, f, args, env, p, off) else callCase(enOfCase(p, f), f, args, env, p, off)
+  if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (Str.contains(f, ".") && isKit(p, f)) kitStep(f, args, env, p, off) else if (Str.startsWith(f, "View.")) valueStep(viewValue(f, stepAll(args, env, p))) else if (hasEn(p, f)) ctorStep(f, f, args, env, p, off) else callCase(enOfCase(p, f), f, args, env, p, off)
 
 def callCase(en: String, f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   if (en != "") ctorStep(en, f, args, env, p, off) else callLocal(lookupVars(env.vars, f), f, args, env, p, off)
@@ -623,7 +623,7 @@ def applyValue(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): V
   step(applyStep(fv, vals, env, p, off), p)
 
 def methodStep(e: Expr, recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (Check.needsPh(e)) holeStep(e, env) else if (name == "apply") applyStep(step(EvStep(recv, env), p), stepAll(args, env, p), env, p, off) else methodRecv(recv, name, args, env, p, off)
+  if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (name == "apply") applyStep(step(EvStep(recv, env), p), stepAll(args, env, p), env, p, off) else methodRecv(recv, name, args, env, p, off)
 
 def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   recv match {
@@ -716,7 +716,7 @@ def methodAny(rv: Value, hit: List[Fun], name: String, args: List[Expr], env: Ev
   if (List.isEmpty(hit)) valueStep(errAt(Str.concat("unknown method ", name), env, p, off)) else methodDef(List.at(hit, 0), rv, args, env, p, off)
 
 def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
-  if (Check.needsPh(e)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else fieldRecv(recv, name, env, p, off)
+  if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else fieldRecv(recv, name, env, p, off)
 
 def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   recv match {
@@ -739,7 +739,7 @@ def fieldAt(xs: List[Value], i: Int, name: String, env: EvEnv, p: EvProg, off: I
   if (i < 0 || i >= List.len(xs)) errAt(Str.concat("no field ", name), env, p, off) else List.at(xs, i)
 
 def binValue(e: Expr, op: String, l: Expr, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
-  if (Check.needsPh(e)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else if (op == "&&") andValue(step(EvStep(l, env), p), r, env, p, off) else if (op == "||") orValue(step(EvStep(l, env), p), r, env, p, off) else binVals(op, step(EvStep(l, env), p), step(EvStep(r, env), p), env, p, off)
+  if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else if (op == "&&") andValue(step(EvStep(l, env), p), r, env, p, off) else if (op == "||") orValue(step(EvStep(l, env), p), r, env, p, off) else binVals(op, step(EvStep(l, env), p), step(EvStep(r, env), p), env, p, off)
 
 def andValue(lv: Value, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
   lv match {
@@ -810,7 +810,7 @@ def divInts(a: Int, b: Int, rem: Bool, env: EvEnv, p: EvProg, off: Int): Value =
   if (b == 0) errAt("division by zero", env, p, off) else if (rem) Value.VInt(a % b) else Value.VInt(a / b)
 
 def unValue(e: Expr, op: String, inner: Expr, env: EvEnv, p: EvProg, off: Int): Value =
-  if (Check.needsPh(e)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else unVal(op, step(EvStep(inner, env), p), env, p, off)
+  if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else unVal(op, step(EvStep(inner, env), p), env, p, off)
 
 def unVal(op: String, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   v match {

@@ -59,6 +59,26 @@ def viewKits2(): List[Kit] =
 def extraKits(): List[Kit] =
   k("Timeline.len", "Timeline" :: ns(), "Int") :: k("Timeline.signalInt", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.signalListLen", "Timeline" :: "Int" :: "String" :: ns(), "Int") :: k("Timeline.fileSame", "Timeline" :: "Int" :: "Int" :: "String" :: ns(), "Bool") :: k("Timeline.fileTextIs", "Timeline" :: "Int" :: "String" :: "String" :: ns(), "Bool") :: k("Timeline.signalStrHas", "Timeline" :: "Int" :: "String" :: "String" :: ns(), "Bool") :: k("Timeline.a11yHas", "Timeline" :: "Int" :: "String" :: ns(), "Bool") :: k("Timeline.lastHitHas", "Timeline" :: "Int" :: "String" :: ns(), "Bool") :: k("Timeline.hit", "Timeline" :: "Int" :: "String" :: ns(), "Bool") :: k("Timeline.driveHas", "Timeline" :: "Int" :: "String" :: ns(), "Bool") :: k("Timeline.effectHas", "Timeline" :: "Int" :: "String" :: ns(), "Bool") :: k("Timeline.faultKindHas", "Timeline" :: "Int" :: "String" :: ns(), "Bool") :: k("Timeline.effectCount", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberLive", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberReady", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberParked", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.fiberDone", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.faultN", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.checkpoint", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.nearestCheckpoint", "Timeline" :: "Int" :: ns(), "Int") :: k("Timeline.exists", "Timeline" :: "Int => Bool" :: ns(), "Bool") :: k("Timeline.fold", "Timeline" :: "A" :: "(A, Int) => A" :: ns(), "A") :: k("Property.signalInt", "String" :: ns(), "Int") :: k("Property.signalStr", "String" :: ns(), "String") :: k("Property.signalListLen", "String" :: ns(), "Int") :: k("Property.signalListAt", "String" :: "Int" :: ns(), "String") :: k("Property.sometimes", "String" :: ns(), "Unit") :: k("Property.check", "String" :: "Bool" :: "A" :: ns(), "A") :: k("Property.assert", "String" :: "Bool" :: ns(), "IO[Unit]") :: k("Property.classify", "String" :: "Bool" :: ns(), "Bool") :: k("Property.a11yHas", "String" :: ns(), "Bool") :: k("Property.force", "IO[A]" :: ns(), "A") :: k("Verdict.ok", ns(), "Verdict") :: k("Verdict.fail", "Int" :: "String" :: ns(), "Verdict") :: k("Verdict.and", "Verdict" :: "Verdict" :: ns(), "Verdict") :: k("Verdict.or", "Verdict" :: "Verdict" :: ns(), "Verdict") :: k("Verdict.alwaysHas", "Timeline" :: "String" :: ns(), "Verdict") :: k("Verdict.afterHit", "Timeline" :: "String" :: "String" :: ns(), "Verdict") :: k("Verdict.onHit", "Timeline" :: "String" :: "(Int, Int) => Bool" :: ns(), "Verdict") :: k("Verdict.stepEvery", "Timeline" :: "(Int, Int) => Bool" :: ns(), "Verdict") :: k("Verdict.every", "Timeline" :: "Int => Bool" :: ns(), "Verdict") :: k("Verdict.any", "Timeline" :: "Int => Bool" :: ns(), "Verdict") :: k("Scenario.context", ns(), "A") :: k("Fuzz.setup", "IO[E, A]" :: ns(), "IO[Unit]") :: k("Fuzz.driver", "String" :: "Int" :: "List[String] => IO[Unit]" :: ns(), "IO[Unit]") :: k("Fuzz.verify", "String" :: "Timeline => Verdict" :: ns(), "IO[Unit]") :: k("Fuzz.verifyRel", "String" :: "(Timeline, Timeline) => Verdict" :: ns(), "IO[Unit]") :: k("Fuzz.hit", "String" :: ns(), "Unit") :: k("Fuzz.probe", "IO[Unit]" :: ns(), "IO[Unit]") :: nsKit()
 
+def tab(): Map[String, Kit] =
+  tabOf(allKits())
+
+def tabOf(xs: List[Kit]): Map[String, Kit] =
+  if (List.isEmpty(xs)) Map.empty() else tabHd(List.at(xs, 0), List.tail(xs))
+
+def tabHd(h: Kit, rest: List[Kit]): Map[String, Kit] =
+  h match {
+    case Kit(n, _, _, _, _) => Map.set(tabOf(rest), n, h)
+  }
+
+def findTab(t: Map[String, Kit], f: String): Kit =
+  Map.get(t, f) match {
+    case Some(k) => k
+    case None => miss()
+  }
+
+def hasTab(t: Map[String, Kit], f: String): Bool =
+  Map.contains(t, f)
+
 def find(f: String): Kit =
   findGo(lookupKits(f), f)
 

@@ -1543,6 +1543,9 @@ def rewriteReqProg(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Strin
   Parse.pretty(rewriteReqTree(p, stem, funs, ens))
 
 def rewriteReqTree(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
+  rewriteReqTreeGo(p, stem, funs, Check.withLetterPins(ens))
+
+def rewriteReqTreeGo(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
   p match {
     case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens))
   }
