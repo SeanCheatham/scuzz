@@ -6,7 +6,7 @@ Edit this file when the next-step order changes.
 
 ## Open work
 
-Next: make the language usable for general application development. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Use examples to prove these capabilities through the built-in verification strategy. Harden that strategy on the [verification arc](#verification-arc). Specific application workflows do not define the scope.
+Next: make the language usable for general application development. Prioritize compiler correctness, memory ownership, type composition, standard kits, and tooling. Use examples to prove these capabilities through the built-in verification strategy. The verification arc is in the tree. Kit-call pins are closed. Do not add a pin for another kit call. The next thesis gap is compile-time performance in [`gaps.md`](gaps.md). Specific application workflows do not define the scope.
 
 ### Evaluator arc
 
