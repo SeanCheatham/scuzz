@@ -6357,12 +6357,7 @@ def hoistNethPairs(s: String, pairs: List[(Int, Int)]): String =
   Builder.result(hoistNethRest(s, pairs, hoistNethBodies(s, pairs, pairs, Builder.empty())))
 
 def hoistNethBodies(s: String, pairs: List[(Int, Int)], all: List[(Int, Int)], b: Builder): Builder =
-  if (List.isEmpty(pairs)) b else hoistNethBodiesHd(s, List.at(pairs, 0), List.tail(pairs), all, b)
-
-def hoistNethBodiesHd(s: String, p: (Int, Int), rest: List[(Int, Int)], all: List[(Int, Int)], b: Builder): Builder =
-  p match {
-    case (beg, e) => hoistNethBodies(s, rest, all, copySkip(s, beg + 6, e, childSkips(all, beg, e), b))
-  }
+  if (List.isEmpty(pairs)) b else hoistNethBodies(s, List.tail(pairs), all, copySkip(s, List.at(pairs, 0)._1 + 6, List.at(pairs, 0)._2, childSkips(all, List.at(pairs, 0)._1, List.at(pairs, 0)._2), b))
 
 def childSkips(all: List[(Int, Int)], b: Int, e: Int): List[(Int, Int)] =
   childSkipsGo(all, b, e, [])
@@ -6389,15 +6384,7 @@ def insSkipP(hu: Int, h: (Int, Int), rest: List[(Int, Int)], p: (Int, Int)): Lis
   }
 
 def copySkip(s: String, from: Int, to: Int, skips: List[(Int, Int)], b: Builder): Builder =
-  if (from >= to) b else if (List.isEmpty(skips)) Builder.append(b, Str.slice(s, from, to)) else copySkipHd(s, from, to, List.at(skips, 0), List.tail(skips), b)
-
-def copySkipHd(s: String, from: Int, to: Int, p: (Int, Int), rest: List[(Int, Int)], b: Builder): Builder =
-  p match {
-    case (u, v) => copySkipPick(s, from, to, u, v, rest, b)
-  }
-
-def copySkipPick(s: String, from: Int, to: Int, u: Int, v: Int, rest: List[(Int, Int)], b: Builder): Builder =
-  if (v <= from) copySkip(s, from, to, rest, b) else if (u >= to) Builder.append(b, Str.slice(s, from, to)) else if (u <= from) copySkip(s, v, to, rest, b) else copySkip(s, v, to, rest, Builder.append(b, Str.slice(s, from, u)))
+  if (from >= to) b else if (List.isEmpty(skips)) Builder.append(b, Str.slice(s, from, to)) else if (List.at(skips, 0)._2 <= from) copySkip(s, from, to, List.tail(skips), b) else if (List.at(skips, 0)._1 >= to) Builder.append(b, Str.slice(s, from, to)) else if (List.at(skips, 0)._1 <= from) copySkip(s, List.at(skips, 0)._2, to, List.tail(skips), b) else copySkip(s, List.at(skips, 0)._2, to, List.tail(skips), Builder.append(b, Str.slice(s, from, List.at(skips, 0)._1)))
 
 def hoistNethRest(s: String, pairs: List[(Int, Int)], b: Builder): Builder =
   copySkip(s, 0, Str.len(s), allSkips(pairs, []), b)
