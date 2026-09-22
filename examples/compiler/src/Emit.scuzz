@@ -2889,6 +2889,14 @@ def hasEnHead(h: En, rest: List[En], name: String): Bool =
     case En(_, n, _, _) => if (n == name) true else hasEn(rest, name)
   }
 
+def enHasCase(ens: List[En], en: String, name: String): Bool =
+  if (List.isEmpty(ens)) false else enHasCaseH(List.at(ens, 0), List.tail(ens), en, name)
+
+def enHasCaseH(h: En, rest: List[En], en: String, name: String): Bool =
+  h match {
+    case En(_, n, _, cases) => n == en && hasCase(cases, name) || enHasCase(rest, en, name)
+  }
+
 def isCtorName(f: String): Bool =
   Str.len(f) > 0 && Str.charAt(f, 0) >= 65 && Str.charAt(f, 0) <= 90 && !hasSub(f, ".")
 
@@ -3621,6 +3629,9 @@ def copyArgBox(prefix: String, k: Int, ev: String): String =
   line(Str.concat(tmp(prefix, Str.concat("ub", Str.fromInt(k))), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(ev, ")"))))
 
 def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  if (enHasCase(ens, en, name)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorOrQualKit(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
+
+def emitCtorOrQualKit(en: String, name: String, args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps, loc, fid) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitQual(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
 
 def isEmitKit(f: String): Bool =
