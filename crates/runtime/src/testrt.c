@@ -3656,12 +3656,16 @@ int64_t sz_timeline_signal_str_has(void *tl, int64_t i, SzString *name,
 
 int64_t sz_timeline_file_text_is(void *tl, int64_t i, SzString *path,
                                   SzString *text) {
-  SzTlState *state = tl_at(tl, i);
+  SzTlState *state;
   char *normalized;
   char *wanted;
   const char *line;
   size_t len;
   int64_t found = 0;
+  /* The evaluator reads a hit through a one-newline path. That path is not a file. */
+  if (path && sz_string_len(path) == 1 && sz_string_cstr(path)[0] == '\n')
+    return sz_timeline_hit(tl, i, text);
+  state = tl_at(tl, i);
   if (!state || !state->files || !path || !text ||
       strlen(sz_string_cstr(path)) != (size_t)sz_string_len(path))
     return 0;

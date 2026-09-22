@@ -13488,6 +13488,15 @@ int main(void) {
     assert(sz_timeline_last_hit_has(tl, 0, needle) == 1);
     assert(sz_timeline_hit(tl, 1, needle) == 0);
     assert(sz_timeline_last_hit_has(tl, 1, needle) == 1);
+    {
+      SzString *hit_path = sz_string_from_bytes("\n", 1);
+      SzString *file_path = sz_string_from_cstr("notes.txt");
+      assert(sz_timeline_file_text_is(tl, 0, hit_path, needle) == 1);
+      assert(sz_timeline_file_text_is(tl, 1, hit_path, needle) == 0);
+      assert(sz_timeline_file_text_is(tl, 0, file_path, needle) == 0);
+      sz_release(hit_path);
+      sz_release(file_path);
+    }
     sz_release(needle);
     sz_timeline_free(tl);
     remove(path);
