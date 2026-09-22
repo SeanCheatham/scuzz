@@ -1048,7 +1048,7 @@ void sz_net_test_http_host_header(const char *host, int port, char *out,
 int sz_net_test_serve_v4_is_any(void);
 
 /* TestRuntime — fake interpreters for deterministic scuzz fuzz */
-void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
+void sz_testrt_install(void); /* fake clock+rng+mem FS+sys. SCUZZ_NET_LIVE keeps live Net. */
 void sz_testrt_reset(void);   /* restore live interpreters */
 
 /* PCT schedule (fiber run). SCUZZ_SCHED_SEED arms priority + change-points.

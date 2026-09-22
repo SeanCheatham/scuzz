@@ -2739,7 +2739,13 @@ void sz_testrt_install(void) {
   }
   sz_testrt_random_install(rand_seed);
   sz_testrt_fs_install();
-  sz_testrt_net_install();
+  {
+    const char *live = getenv("SCUZZ_NET_LIVE");
+    if (live && live[0] == '1')
+      sz_testrt_net_reset_live();
+    else
+      sz_testrt_net_install();
+  }
   sz_testrt_sys_install();
 }
 

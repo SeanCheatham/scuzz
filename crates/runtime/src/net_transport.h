@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -33,10 +34,19 @@ static inline int tcp_begin(const struct sockaddr *sa, socklen_t len) {
   }
 #endif
   if (connect(fd, sa, len) != 0 && errno != EINPROGRESS && errno != EAGAIN) {
+    int err = errno;
     close(fd);
+    errno = err;
     return -1;
   }
   return fd;
+}
+
+/* SCUZZ_NET_LIVE with TestRuntime keeps the live sockets. Loopback only. */
+static inline int sz_net_live_replay(void) {
+  const char *live = getenv("SCUZZ_NET_LIVE");
+  const char *tr = getenv("SCUZZ_TESTRT");
+  return live && live[0] == '1' && tr && tr[0] == '1' && !sz_testrt_net_is_fake();
 }
 
 /* Live transport runs after shared validation and simulation dispatch. */
@@ -47,5 +57,10 @@ int sz_net_http_header_valid(const char *name, const char *value);
 int sz_net_http_header_skip(const char *name);
 int sz_net_http_name_equal(const char *a, const char *b);
 int sz_net_host_equal(const char *a, const char *b);
+
+static inline int sz_net_host_is_loopback(const char *host) {
+  return sz_net_host_equal(host, "127.0.0.1") || sz_net_host_equal(host, "::1") ||
+         sz_net_host_equal(host, "localhost");
+}
 
 #endif

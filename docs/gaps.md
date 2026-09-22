@@ -61,7 +61,7 @@ The one testing strategy is mutation, fuzz, properties, simulation, coverage, an
 
 1. **Per-state events.** A timeline state records the last hit and the last drive as levels. Two consecutive `+1` taps produce two states with the same `lastHitHas` and no edge, so a `Timeline.fold` model cannot count taps. It can only bound each step. A per-state event reader is open. Do not add a temporal-operator calculus.
 
-2. **Live transport.** Simulation fakes Fs, loopback Net, and clocks. The live OpenSSL HTTP/1.0 client, URLSession, TLS errors, and Skia pixels have no fuzz home. `--differential` compares Skia backends. Add a sanctioned loopback corpus replay on the live transport, or state that those surfaces have no test home.
+2. **URLSession and Skia pixels.** Host loopback OpenSSL replay is `scuzz fuzz --live`. URLSession, TLS error cases, and Skia pixels have no fuzz home. `--differential` compares structural dumps.
 
 3. **ASan replay.** Corpus replay on the compiled engine does not run under ASan. `Signal`, `Ref`, `Queue`, `Deferred`, and view-list ownership can leak or cycle. RC has no collector.
 

@@ -43,7 +43,7 @@ Closed impurity makes a probe a function of program, seed, script, and schedule 
 Slices, in order. Each slice closes with a proof in `examples/`.
 
 1. **Model claims.** In the tree. `Timeline.fold` walks every state and returns a record model. `examples/counter` states the count model in one claim. A compiled fold types its lambda pair from the seed and the element, so a record accumulator with an `Int` element compiles. Not taken: a per-state event reader. `lastHitHas` and `driveHas` read levels, so a model does not count consecutive taps ([`gaps.md`](gaps.md#verification)).
-2. **Live transport.** A sanctioned `--live` corpus replay against the live loopback transport, or an explicit statement that OpenSSL, URLSession, TLS, and Skia pixels have no test home. Simulation stays hermetic. Proof: `examples/webhook` or `examples/api-report` replays one corpus entry on the live client, or `philosophy.md` states the cut.
+2. **Live transport.** In the tree. `scuzz fuzz --live` replays the corpus (`--iterations 0`) or one `--replay` file on the compiled binary. Clock, files, random, and sys stay simulated. Net uses host loopback sockets. A non-loopback host fails. Search and mutation stay on the simulated network. URLSession and Skia pixels have no fuzz home. Proof: `scuzz fuzz --live --replay examples/api-report/live.toml examples/api-report`.
 3. **ASan replay.** Corpus replay on the compiled engine runs under ASan. Proof: `scripts/ci-fuzz.sh` or a runtime ASan slice replays `examples/io` corpus without a leak report.
 4. **Destructuring binds.** A `for` bind unpacks a constructor. Proof: a compiler helper chain in `examples/compiler` becomes one bind; `scuzz fuzz --iterations 0 examples/tyck` stays green. Update the kernel lock in `philosophy.md`.
 5. **Facts tier.** Name goldens as a facts tier in `philosophy.md`. Keep them as campaign seeds. Make generated-program round-trip and engine parity the compiler's primary oracles. Proof: `examples/tyck`, `examples/codegen`, and `examples/fmt` keep generated oracles as the search workload; goldens stay zero-argument seeds.
@@ -87,7 +87,7 @@ Ranked list: [`gaps.md`](gaps.md).
 | Faulted claims pass without an invariant | Scenario declares its fault surface. Claims drop `faulted` as a pass |
 | Schedule seed replay turns a concurrency failure green | Record the fiber at each contention step. Report drift |
 | Mutation samples too few sites to gate | Diff-scoped mutation. Persisted per-site kills. Default `score_floor` |
-| Transport and Skia bugs have no test home | Sanctioned `--live` loopback replay, or an explicit cut in `philosophy.md` |
+| URLSession and Skia pixels have no fuzz home | `--live` replays host loopback OpenSSL. `--differential` compares structural dumps. URLSession and Skia pixels stay outside fuzz |
 | Wall-clock probe deadlines flake on a slow host | Prefer the 1000000-step bound. Size the deadline from the idle probe |
 | RC misses Signal/Ref cycles and view-list leaks | ASan corpus replay on the compiled engine |
 | No `val` / no destructure multiplies helper defs | `for` constructor binds. Update the kernel lock when that lands |

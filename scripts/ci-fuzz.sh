@@ -866,6 +866,11 @@ assert report["mutate"]["survived"] == 0
 assert report["mutate"]["invalid"] == 0
 PY_CHECK
 
+# One success drive on the host loopback TLS client. Clock and files stay simulated.
+if ! fuzz --live --replay examples/api-report/live.toml examples/api-report | tee /tmp/scuzz-api-report-live.log | grep -q "fuzz replay ok"; then
+  echo "examples/api-report: live loopback replay failed" && exit 1
+fi
+
 # File comparisons judge recorded contents at both states.
 file_compare_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-file-compare.XXXXXX")"
 mkdir -p "$file_compare_dir/src" "$file_compare_dir/corpus"
