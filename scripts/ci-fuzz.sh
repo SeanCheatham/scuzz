@@ -926,6 +926,91 @@ assert comparison["corpus"]["failures"] == 1
 assert comparison["breadth"]["claimed"]["fileSame"] == ["report.txt"]
 PY_CHECK
 rm -rf "$file_compare_dir"
+
+# A storm faults every later call. A partial write keeps the previous file.
+fault_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-fault-plan.XXXXXX")"
+mkdir -p "$fault_dir/src" "$fault_dir/corpus"
+cat > "$fault_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "fault-plan"
+MANIFEST
+cat > "$fault_dir/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$fault_dir/files.scuzz_scenario" <<'SCENARIO'
+def setup(): IO[Unit] =
+  Fs.write("report.txt", "before")
+
+def faults(): List[String] =
+  ["fs"]
+
+def replaceOnce(): IO[Unit] =
+  Fs.write("report.txt", "after-complete").handleErrorWith(_ => IO.pure(()))
+
+def replaceTwice(): IO[Unit] =
+  Fs.write("report.txt", "after-complete").handleErrorWith(_ => Fs.write("report.txt", "second-write").handleErrorWith(_ => IO.pure(())))
+SCENARIO
+cat > "$fault_dir/files.scuzz_verify" <<'CLAIMS'
+private def okTwice(t: Timeline, i: Int): Bool =
+  !Timeline.driveHas(t, i, "replaceTwice") || Timeline.fileTextIs(t, i, "report.txt", "before")
+
+private def okOnce(t: Timeline, i: Int): Bool =
+  !Timeline.driveHas(t, i, "replaceOnce") || (Timeline.effectHas(t, i, "Fs.partial") && Timeline.fileTextIs(t, i, "report.txt", "before"))
+
+def whole(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => okTwice(t, pair._2) && okOnce(t, pair._2))
+CLAIMS
+cat > "$fault_dir/corpus/storm.toml" <<'CORPUS'
+[fuzz]
+fault_seed = "145"
+events = ["drive replaceTwice"]
+CORPUS
+cat > "$fault_dir/corpus/partial.toml" <<'CORPUS'
+[fuzz]
+fault_seed = "289"
+events = ["drive replaceOnce"]
+CORPUS
+fuzz --iterations 0 "$fault_dir"
+
+# Search reaches a partial-write plan. That plan fails a claim that rejects it.
+partial_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-fault-partial.XXXXXX")"
+mkdir -p "$partial_dir/src" "$partial_dir/corpus"
+cat > "$partial_dir/scuzz.toml" <<'MANIFEST'
+[package]
+name = "fault-partial"
+[fuzz]
+score_floor = 0
+MANIFEST
+cat > "$partial_dir/src/Main.scuzz" <<'SOURCE'
+@main def main: IO[Unit] =
+  IO.pure(())
+SOURCE
+cat > "$partial_dir/files.scuzz_scenario" <<'SCENARIO'
+def setup(): IO[Unit] =
+  Fs.write("report.txt", "before")
+
+def faults(): List[String] =
+  ["fs"]
+
+def replaceOnce(): IO[Unit] =
+  Fs.write("report.txt", "after-complete").handleErrorWith(_ => IO.pure(()))
+SCENARIO
+cat > "$partial_dir/files.scuzz_verify" <<'CLAIMS'
+def noPartial(t: Timeline): Verdict =
+  Verdict.stepEvery(t, pair => !Timeline.effectHas(t, pair._2, "Fs.partial"))
+CLAIMS
+cat > "$partial_dir/corpus/one.toml" <<'CORPUS'
+[fuzz]
+fault_seed = "1"
+events = ["drive replaceOnce"]
+CORPUS
+if fuzz --iterations 64 "$partial_dir" > /tmp/scuzz-fault-partial.log 2>&1; then
+  echo "search must reach a partial write" >&2
+  exit 1
+fi
+grep -q 'fault_seed = "289"' "$partial_dir/build/fuzz/repro.toml"
+rm -rf "$fault_dir" "$partial_dir"
 fuzz_both_engines examples/io 16 io
 python3 - <<'PY'
 import json

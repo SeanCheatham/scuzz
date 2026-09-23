@@ -114,8 +114,8 @@ def paginatedPlain(): IO[Unit] =
   pagedRequest(0, "")
 
 def priorReport(n: Int): IO[Unit] =
-  Fs.write("report.json", Str.concat("""Prior report
-""", Str.fromInt(n)))
+  IO.attempt(Fs.write("report.json", Str.concat("""Prior report
+""", Str.fromInt(n)))).map(_ => ())
 
 private def dateMonth(iso: String): String =
   List.at(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], Str.toInt(Str.slice(iso, 5, 7), 1) - 1)
