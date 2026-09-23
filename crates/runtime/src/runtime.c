@@ -1492,6 +1492,24 @@ static uint32_t utf8_decode(const char *p, size_t left, size_t *used) {
   return c;
 }
 
+/* Step one code point back from byte offset i. i is a code-point boundary.
+ * Invalid bytes step one byte, the same rule as utf8_decode. */
+static size_t utf8_step_back(const char *data, size_t i) {
+  size_t back;
+  size_t s;
+  size_t used;
+  if (i == 0)
+    return 0;
+  back = 1;
+  while (back < 4 && back < i && utf8_cont((unsigned char)data[i - back]))
+    back++;
+  s = i - back;
+  utf8_decode(data + s, back, &used);
+  if (used == back)
+    return s;
+  return i - 1;
+}
+
 int64_t sz_string_ulen(const SzString *s) {
   if (!s)
     return 0;
@@ -1500,7 +1518,8 @@ int64_t sz_string_ulen(const SzString *s) {
 
 /* Byte offset of code-point index `cp`. Returns s->len when `cp` is the
  * code-point count (one past the end), or -1 when out of range.
- * A forward walk reuses cp_hint so sequential Str.charAt stays linear. */
+ * A forward or backward walk reuses cp_hint. Sequential Str.charAt stays
+ * linear. A token slice after that scan stays linear. */
 static int64_t utf8_cp_off(const SzString *s, int64_t cp) {
   SzString *mut;
   size_t i;
@@ -1510,7 +1529,23 @@ static int64_t utf8_cp_off(const SzString *s, int64_t cp) {
   if (s->is_ascii)
     return cp <= (int64_t)s->len ? cp : -1;
   mut = (SzString *)s;
-  if (s->cp_hint >= 0 && cp >= s->cp_hint) {
+  if (s->cp_hint >= 0 && s->off_hint >= 0 && (size_t)s->off_hint <= s->len &&
+      cp < s->cp_hint) {
+    i = (size_t)s->off_hint;
+    k = s->cp_hint;
+    while (k > cp && i > 0) {
+      i = utf8_step_back(s->data, i);
+      k--;
+    }
+    if (k == cp) {
+      mut->cp_hint = cp;
+      mut->off_hint = (int64_t)i;
+      return (int64_t)i;
+    }
+    i = 0;
+    k = 0;
+  } else if (s->cp_hint >= 0 && s->off_hint >= 0 &&
+             (size_t)s->off_hint <= s->len && cp >= s->cp_hint) {
     i = (size_t)s->off_hint;
     k = s->cp_hint;
   } else {

@@ -111,7 +111,7 @@ typedef struct SzString {
   int64_t ulen; /* code-point count; Str.len reads this */
   char *data; /* len bytes + trailing NUL */
   uint8_t is_ascii;
-  /* UTF-8 walk cursor. A later code-point index continues from here. */
+  /* UTF-8 walk cursor. A later or earlier code-point index continues from here. */
   int64_t cp_hint;
   int64_t off_hint;
   /* Bytes allocated for `data`, including the trailing NUL. */
