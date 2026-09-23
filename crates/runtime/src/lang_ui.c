@@ -422,6 +422,7 @@ static void *thunk_run_rebuild(void *env) {
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run pump failed");
   sz_testrt_session_baseline_snapshot();
+  sz_signal_session_push();
 
   {
     const char *script = getenv("SCUZZ_UI_SCRIPT");
@@ -476,6 +477,8 @@ static void *finish_run(void *env) {
   sz_ui_session_finish(run->session);
   sz_ui_unmount(run->session);
   run->session = NULL;
+  /* The tree is gone. Put signal values back so the script's lists die. */
+  sz_signal_session_pop();
   sz_testrt_session_baseline_check();
   return NULL;
 }

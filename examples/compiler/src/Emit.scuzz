@@ -986,16 +986,16 @@ def emitListAt(xs: List[Expr], prefix: String, strs: List[String], defs: Ftab, e
   if (List.isEmpty(xs)) Slot(line(Str.concat(tmp(prefix, "0"), "call ptr @sz_list_nil()")), pct(prefix, "0"), true) else emitListCons(List.at(xs, 0), List.tail(xs), prefix, strs, defs, ens, ps, loc, i)
 
 def emitListCons(e: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
-  emitListCons2(emitListAt(rest, prefix, strs, defs, ens, ps, loc, i + 1), emitExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps, loc), prefix, i, exprIsI64(e, ps, defs))
+  emitListCons2(emitListAt(rest, prefix, strs, defs, ens, ps, loc, i + 1), emitExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps, loc), prefix, i, exprIsI64(e, ps, defs), ps)
 
-def emitListCons2(tail: Slot, elem: Slot, prefix: String, i: Int, isInt: Bool): Slot =
+def emitListCons2(tail: Slot, elem: Slot, prefix: String, i: Int, isInt: Bool, ps: List[Param]): Slot =
   tail match {
-    case Slot(tc, tv, _) => emitListCons3(tc, tv, elem, prefix, i, isInt)
+    case Slot(tc, tv, _) => emitListCons3(tc, tv, elem, prefix, i, isInt, ps)
   }
 
-def emitListCons3(tc: String, tv: String, elem: Slot, prefix: String, i: Int, isInt: Bool): Slot =
+def emitListCons3(tc: String, tv: String, elem: Slot, prefix: String, i: Int, isInt: Bool, ps: List[Param]): Slot =
   elem match {
-    case Slot(ec, ev, eo) => emitListCons4(join(tc, ec), tv, ev, eo, prefix, i, isInt)
+    case Slot(ec, ev, eo) => emitListCons4(join(tc, ec), tv, ev, eo || isViewParamVal(ev, ps), prefix, i, isInt)
   }
 
 def emitListCons4(code: String, tv: String, ev: String, eo: Bool, prefix: String, i: Int, isInt: Bool): Slot =
@@ -3164,7 +3164,7 @@ def emitRepeat2(code: String, v: String, n: String, o: Bool, prefix: String): Sl
   Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_string_repeat(ptr ", Str.concat(v, Str.concat(", i64 ", Str.concat(n, ")")))))), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
 
 def emitConsCall(code: String, vals: List[String], owns: List[Bool], prefix: String, args: List[Expr], ps: List[Param], defs: Ftab): Slot =
-  emitConsCall2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix, consHeadInt(args, ps, defs) || isI64Head(arg0(vals), headOwn(owns), ps))
+  emitConsCall2(code, arg0(vals), arg1(vals), headOwn(owns) || isViewParamVal(arg0(vals), ps), headOwn(tailOwn(owns)), prefix, consHeadInt(args, ps, defs) || isI64Head(arg0(vals), headOwn(owns), ps))
 
 def consHeadInt(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   if (List.isEmpty(args)) true else exprIsI64(List.at(args, 0), ps, defs)
@@ -3174,6 +3174,9 @@ def isI64Head(v: String, o: Bool, ps: List[Param]): Bool =
 
 def isI64ParamVal(v: String, ps: List[Param]): Bool =
   Str.len(v) > 0 && Str.charAt(v, 0) == 37 && paramIsI64(ps, Str.slice(v, 1, Str.len(v)))
+
+def isViewParamVal(v: String, ps: List[Param]): Bool =
+  Str.len(v) > 0 && Str.charAt(v, 0) == 37 && paramTy(ps, Str.slice(v, 1, Str.len(v))) == "View"
 
 def emitConsCall2(code: String, h: String, t: String, oh: Bool, ot: Bool, prefix: String, isInt: Bool): Slot =
   if (isInt) emitConsInt(code, h, t, ot, prefix) else emitConsPtr(code, h, t, oh, ot, prefix)

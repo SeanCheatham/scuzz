@@ -124,6 +124,8 @@ typedef void *(*SzSignalMapFn)(void *value, void *env);
 SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name);
 void *sz_signal_read(SzSignal *s);
 void sz_signal_free(SzSignal *s);
+void sz_signal_session_push(void);
+void sz_signal_session_pop(void);
 void *sz_signal_write(SzSignal *s, void *value);
 SzSignal *sz_signal_derive(SzSignal *src, SzSignalMapFn fn, void *env,
                            int64_t kind, SzString *name);

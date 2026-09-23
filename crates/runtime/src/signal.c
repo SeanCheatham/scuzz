@@ -394,6 +394,90 @@ void sz_signal_free(SzSignal *s) {
   sz_free(s);
 }
 
+/* A signal is not reference counted. Ui.run keeps the signals that existed
+ * at session start and drops values the script wrote. Nested runs stack. */
+typedef struct SigHold {
+  SzSignal *sig;
+  void *value;
+  struct SigHold *next;
+} SigHold;
+
+typedef struct SigFrame {
+  int mark;
+  int armed;
+  SigHold *holds;
+  struct SigFrame *prev;
+} SigFrame;
+
+static SigFrame *g_sig_frame = NULL;
+
+static int sig_registered(const SzSignal *s) {
+  SigReg *r;
+  for (r = g_sig_head; r; r = r->next)
+    if (r->sig == s)
+      return 1;
+  return 0;
+}
+
+static void free_signals_from(int mark) {
+  for (;;) {
+    SigReg *r;
+    SigReg *best = NULL;
+    for (r = g_sig_head; r; r = r->next)
+      if (r->id >= mark && (!best || r->id > best->id))
+        best = r;
+    if (!best)
+      return;
+    sz_signal_free((SzSignal *)best->sig);
+  }
+}
+
+static void restore_holds(SigHold *h) {
+  while (h) {
+    SigHold *next = h->next;
+    if (sig_registered(h->sig) && h->sig->value != h->value) {
+      void *cur = h->sig->value;
+      h->sig->value = h->value;
+      h->sig->map_valid = 0;
+      h->value = NULL;
+      sz_release(cur);
+    }
+    sz_release(h->value);
+    sz_free(h);
+    h = next;
+  }
+}
+
+void sz_signal_session_push(void) {
+  SigFrame *f = (SigFrame *)sz_alloc_zero(sizeof(*f));
+  SigReg *r;
+  f->mark = g_sig_next_id;
+  f->armed = sz_testrt_oracles_armed();
+  f->prev = g_sig_frame;
+  if (f->armed) {
+    for (r = g_sig_head; r; r = r->next) {
+      SigHold *h = (SigHold *)sz_alloc_zero(sizeof(*h));
+      h->sig = (SzSignal *)r->sig;
+      h->value = sz_signal_read(h->sig);
+      h->next = f->holds;
+      f->holds = h;
+    }
+  }
+  g_sig_frame = f;
+}
+
+void sz_signal_session_pop(void) {
+  SigFrame *f = g_sig_frame;
+  if (!f)
+    return;
+  g_sig_frame = f->prev;
+  if (f->armed) {
+    free_signals_from(f->mark);
+    restore_holds(f->holds);
+  }
+  sz_free(f);
+}
+
 SzSignalInt *sz_signal_int(int64_t initial) {
   void *box = sz_box_i64(initial);
   SzSignal *s = sz_signal_new(box, 1, NULL);
