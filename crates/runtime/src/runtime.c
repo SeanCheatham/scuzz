@@ -282,21 +282,34 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg) {
 
 typedef struct CoverageHit {
   struct CoverageHit *next;
-  char location[];
+  const char *loc;
+  char *text;
 } CoverageHit;
 
 static CoverageHit *coverage_hits[256];
 static char *coverage_path;
+static FILE *coverage_file;
 static int coverage_probed;
 static int coverage_off;
 static int coverage_own_off;
 
+static void coverage_close(void) {
+  FILE *file = coverage_file;
+  if (!file)
+    return;
+  coverage_file = NULL;
+  if (fclose(file) != 0)
+    sz_panic("coverage: cannot write output");
+}
+
 static void coverage_clear(void) {
   size_t i;
+  coverage_close();
   for (i = 0; i < 256; i++) {
     CoverageHit *hit = coverage_hits[i];
     while (hit) {
       CoverageHit *next = hit->next;
+      free(hit->text);
       free(hit);
       hit = next;
     }
@@ -333,35 +346,58 @@ void sz_coverage_env_refresh(void) {
 
 void sz_coverage_own_off(void) { coverage_own_off = 1; }
 
-static void coverage_hit(const char *loc) {
-  const unsigned char *p;
-  unsigned hash = 2166136261u;
-  CoverageHit *hit;
-  FILE *file;
-  int written;
-  int closed;
-  coverage_probe();
-  if (!coverage_path)
-    return;
-  for (p = (const unsigned char *)loc; *p; p++)
-    hash = (hash ^ *p) * 16777619u;
-  hash %= 256;
-  for (hit = coverage_hits[hash]; hit; hit = hit->next)
-    if (!strcmp(hit->location, loc))
-      return;
-  file = fopen(coverage_path, "a");
-  if (!file)
-    sz_panic("coverage: cannot open output");
-  written = fprintf(file, "%s\n", loc);
-  closed = fclose(file);
-  if (written < 0 || closed)
-    sz_panic("coverage: cannot write output");
-  hit = malloc(sizeof(*hit) + strlen(loc) + 1);
+static int coverage_text_seen(const char *loc) {
+  size_t i;
+  for (i = 0; i < 256; i++) {
+    CoverageHit *hit;
+    for (hit = coverage_hits[i]; hit; hit = hit->next)
+      if (hit->text && strcmp(hit->text, loc) == 0)
+        return 1;
+  }
+  return 0;
+}
+
+static void coverage_remember(const char *loc, char *text, unsigned hash) {
+  CoverageHit *hit = malloc(sizeof(*hit));
   if (!hit)
     sz_panic("coverage: out of memory");
-  strcpy(hit->location, loc);
+  hit->loc = loc;
+  hit->text = text;
   hit->next = coverage_hits[hash];
   coverage_hits[hash] = hit;
+}
+
+static void coverage_hit(const char *loc) {
+  unsigned hash;
+  char *text;
+  int written;
+  coverage_probe();
+  if (!coverage_path || !loc)
+    return;
+  hash = (unsigned)((uintptr_t)loc >> 4) % 256;
+  {
+    CoverageHit *hit;
+    for (hit = coverage_hits[hash]; hit; hit = hit->next)
+      if (hit->loc == loc)
+        return;
+  }
+  if (coverage_text_seen(loc)) {
+    coverage_remember(loc, NULL, hash);
+    return;
+  }
+  if (!coverage_file) {
+    coverage_file = fopen(coverage_path, "a");
+    if (!coverage_file)
+      sz_panic("coverage: cannot open output");
+  }
+  written = fprintf(coverage_file, "%s\n", loc);
+  if (written < 0 || fflush(coverage_file) != 0)
+    sz_panic("coverage: cannot write output");
+  text = malloc(strlen(loc) + 1);
+  if (!text)
+    sz_panic("coverage: out of memory");
+  strcpy(text, loc);
+  coverage_remember(loc, text, hash);
 }
 
 void sz_coverage_hit(const char *loc) {
