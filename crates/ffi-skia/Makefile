@@ -26,7 +26,7 @@ build:
 	mkdir -p build
 
 # Default: pinned Skia prebuilt (fetch if needed). Opt out with SCUZZ_SKIA=sk_sw.
-# SCUZZ_SKIA=gpu: in-tree sk_sw paint + OpenGL present/readback.
+# SCUZZ_SKIA=gpu: OpenGL raster. No CPU paint buffer. Peek reads the framebuffer.
 lib: ensure-prebuilt
 	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ]; then \
 	  $(MAKE) --no-print-directory lib-sk-sw; \

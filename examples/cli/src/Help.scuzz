@@ -136,7 +136,7 @@ Options:
       --relate
           Judge (Timeline, Timeline) => Verdict relation claims: replay each corpus entry under its own and a perturbed schedule, then exit
       --differential
-          Compare live structural dumps across Skia backends (skia, sk_sw, gpu). Compare pixel snapshots of one backend across two repeats
+          Compare live structural dumps across Skia backends (skia, sk_sw, gpu). Compare pixel snapshots of one backend across two repeats. Compare gpu pixels with sk_sw. Each channel stays within 2
       --live
           Replay the corpus or one --replay file on the host loopback transport. Clock and files stay simulated. Pass --replay or --iterations 0
       --session

@@ -25,7 +25,8 @@ SkColor sk_color_argb(uint32_t argb);
 
 /* Offscreen RGBA8888 surface (CPU). */
 SkSurface *sk_surface_make_raster_n32_premul(int width, int height);
-/* Offscreen GPU presenter. Paint stays CPU; peek uploads and reads back.
+/* Offscreen GPU raster surface. Draw commands run on the GPU.
+ * Peek reads the framebuffer. There is no CPU paint buffer.
  * Returns NULL when OpenGL is missing. */
 SkSurface *sk_surface_make_gpu_n32_premul(int width, int height);
 int sk_gpu_available(void);

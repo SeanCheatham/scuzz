@@ -12,7 +12,7 @@ Re-time the two commands in [`gaps.md`](gaps.md) before another compile-time cha
 
 The evaluator, `scuzz fuzz`, and the self-hosted CLI stay as locked in [`philosophy.md`](philosophy.md). A `[ui]` package runs compiled for every fuzz phase. Compiler sources use forms the newest `v*` bootstrap emits. A `for` pattern bind stays out of compiler sources until a release emits it. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call.
 
-Do not start FFI, a package registry, GPU raster, physical-device packaging, or `*.scuzz_tune` in this work.
+Do not start FFI, a package registry, physical-device packaging, or `*.scuzz_tune` in this work.
 
 ## Risks
 
@@ -22,7 +22,7 @@ Do not start FFI, a package registry, GPU raster, physical-device packaging, or 
 | An evaluator campaign stays as slow as a compiled campaign | The idle probe falls back to compiled. Speed stays open in [`gaps.md`](gaps.md) |
 | Evaluator output differs from the emitted binary | Corpus replay runs compiled after an evaluator campaign. A difference fails the campaign |
 | Self-hosting lags one release | Toolchain sources call builtins the newest `v*` release already emits |
-| Mobile hardware and GPU raster stay unproven | Host and simulator proofs do not close them. See [`gaps.md`](gaps.md) |
+| Mobile hardware stays unproven | Host and simulator proofs do not close it. See [`gaps.md`](gaps.md) |
 | A `[ui]` package has no evaluator fuzz | `[ui]` fuzz stays compiled until a proof covers it |
 | Reference counts miss Signal cycles | ASan corpus replay. The tree owns views. A view is reference counted. A list signal frees lists `View.each` never mounted |
 | URLSession and Skia pixels have no fuzz home | `--live` replays host loopback. `--differential` compares structural dumps |

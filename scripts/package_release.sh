@@ -59,7 +59,8 @@ copy_crate embedder-mobile include src Makefile shells
 
 cp -f "$ROOT/scripts/fetch_skia.sh" "$OUT/scripts/fetch_skia.sh"
 cp -f "$ROOT/scripts/skia_triple.sh" "$OUT/scripts/skia_triple.sh"
-chmod +x "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh"
+cp -f "$ROOT/scripts/png_max_delta.py" "$OUT/scripts/png_max_delta.py"
+chmod +x "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh" "$OUT/scripts/png_max_delta.py"
 
 # Skia pin + prebuilt for UI text (default backend). Opt out: SCUZZ_SKIA=sk_sw.
 # fetch_skia.sh substitutes {triple} so Linux/macOS releases get the matching asset.

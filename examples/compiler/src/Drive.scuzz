@@ -927,13 +927,35 @@ def testDiffMan(dir: String, outDir: String, m: Man): IO[Unit] =
   manNeed(m).flatMap(_ => if (!m.hasUi) IO.println("--differential needs a [ui] package").flatMap(_ => IO.fail("differential")) else testDiffBackends(dir, outDir, m.name, "skia" :: "sk_sw" :: "gpu" :: [], []))
 
 def testDiffBackends(dir: String, outDir: String, name: String, rest: List[String], dumps: List[String]): IO[Unit] =
-  if (List.isEmpty(rest)) testDiffDone(dumps) else testDiffOne(dir, outDir, name, List.at(rest, 0), List.tail(rest), dumps)
+  if (List.isEmpty(rest)) testDiffDone(dumps, dir, name) else testDiffOne(dir, outDir, name, List.at(rest, 0), List.tail(rest), dumps)
 
-def testDiffDone(dumps: List[String]): IO[Unit] =
-  if (List.len(dumps) < 2) IO.println("differential needs at least two runnable backends").flatMap(_ => IO.fail("differential")) else testDiffEq(List.at(dumps, 0), List.tail(dumps))
+def testDiffDone(dumps: List[String], dir: String, name: String): IO[Unit] =
+  if (List.len(dumps) < 3) failMsg("differential needs skia, sk_sw, and gpu", "differential") else testDiffEq(List.at(dumps, 0), List.tail(dumps), dir, name)
 
-def testDiffEq(ref: String, rest: List[String]): IO[Unit] =
-  if (List.isEmpty(rest)) IO.println("differential ok") else if (ref == List.at(rest, 0)) testDiffEq(ref, List.tail(rest)) else IO.println("structural dump differs across backends").flatMap(_ => IO.fail("differential"))
+def testDiffEq(ref: String, rest: List[String], dir: String, name: String): IO[Unit] =
+  if (List.isEmpty(rest)) testDiffPx(dir, name) else if (ref == List.at(rest, 0)) testDiffEq(ref, List.tail(rest), dir, name) else failMsg("structural dump differs across backends", "differential")
+
+def diffPng(dir: String, name: String, backend: String): String =
+  joinSlash(joinSlash(dir, "build"), Str.concat(name, Str.concat(".", Str.concat(backend, ".png"))))
+
+def pngDeltaLine(h: String, dir: String, name: String): String =
+  Str.concat("python3 ", Str.concat(shQuote(crateAt(h, "scripts/png_max_delta.py")), Str.concat(" 2 ", Str.concat(shQuote(diffPng(dir, name, "sk_sw")), Str.concat(" ", shQuote(diffPng(dir, name, "gpu")))))))
+
+def testDiffPx(dir: String, name: String): IO[Unit] =
+  crateHome().flatMap(h => runLine(pngDeltaLine(h, dir, name)).flatMap(r => testDiffPxGot(r)))
+
+def testDiffPxGot(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, out, err) => if (code != 0) failMsg(Str.concat("pixels exceed tolerance ", Str.concat(out, err)), "differential") else IO.println("differential ok")
+  }
+
+def testDiffKeepGot(r: (Int, String, String)): IO[Unit] =
+  r match {
+    case (code, _out, err) => if (code != 0) failMsg(err, "differential") else IO.pure(())
+  }
+
+def testDiffKeepPx(dir: String, name: String, backend: String): IO[Unit] =
+  runLine(Str.concat("cp -f ", Str.concat(shQuote(joinSlash(dir, uiSnapRel(name, false))), Str.concat(" ", shQuote(diffPng(dir, name, backend)))))).flatMap(r => testDiffKeepGot(r))
 
 def testDiffOne(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String]): IO[Unit] =
   skiaMake(backend).flatMap(ok => if (!ok) testDiffBackends(dir, outDir, name, rest, dumps) else testDiffEmit(dir, outDir, name, backend, rest, dumps))
@@ -967,13 +989,13 @@ def testDiffCap2(dir: String, outDir: String, name: String, backend: String, res
   Fs.exists(joinSlash(dir, "sample.txt")).flatMap(hit => testDiffCap3(dir, outDir, name, backend, rest, dumps, toml, if (hit) " sample.txt" else ""))
 
 def testDiffCap3(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String], toml: String, arg: String): IO[Unit] =
-  testDiffDump(dir, outDir, name, toml, arg, backend, false, uiSnapRel(name, false)).flatMap(a => testDiffDump(dir, outDir, name, toml, arg, backend, true, uiSnapRel(name, true)).flatMap(b => testDiffPixels(dir, outDir, name, rest, dumps, toml, arg, a, b)))
+  testDiffDump(dir, outDir, name, toml, arg, backend, false, uiSnapRel(name, false)).flatMap(a => testDiffDump(dir, outDir, name, toml, arg, backend, true, uiSnapRel(name, true)).flatMap(b => testDiffPixels(dir, outDir, name, backend, rest, dumps, toml, arg, a, b)))
 
-def testDiffPixels(dir: String, outDir: String, name: String, rest: List[String], dumps: List[String], toml: String, arg: String, a: String, b: String): IO[Unit] =
-  if (a == "" || b == "") testDiffBackends(dir, outDir, name, rest, dumps) else testDiffRepeat(dir, outDir, name, toml, arg).flatMap(tag => testDiffPixelsGot(dir, outDir, name, rest, dumps, a, b, tag))
+def testDiffPixels(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String], toml: String, arg: String, a: String, b: String): IO[Unit] =
+  if (a == "" || b == "") testDiffBackends(dir, outDir, name, rest, dumps) else testDiffRepeat(dir, outDir, name, toml, arg).flatMap(tag => testDiffPixelsGot(dir, outDir, name, backend, rest, dumps, a, b, tag))
 
-def testDiffPixelsGot(dir: String, outDir: String, name: String, rest: List[String], dumps: List[String], a: String, b: String, tag: String): IO[Unit] =
-  if (tag == "missing") failMsg("pixel snapshot missing", "differential") else if (tag == "differ") failMsg("pixels differ across repeats", "differential") else testDiffBackends(dir, outDir, name, rest, Str.concat(a, b) :: dumps)
+def testDiffPixelsGot(dir: String, outDir: String, name: String, backend: String, rest: List[String], dumps: List[String], a: String, b: String, tag: String): IO[Unit] =
+  if (tag == "missing") failMsg("pixel snapshot missing", "differential") else if (tag == "differ") failMsg("pixels differ across repeats", "differential") else testDiffKeepPx(dir, name, backend).flatMap(_ => testDiffBackends(dir, outDir, name, rest, Str.concat(a, b) :: dumps))
 
 def testDiffRepeat(dir: String, outDir: String, name: String, toml: String, arg: String): IO[String] =
   testDiffDump(dir, outDir, name, toml, arg, "", false, uiSnapRepeat(name)).flatMap(again => if (again == "") IO.pure("missing") else testDiffCmp(dir, name))

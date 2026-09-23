@@ -41,10 +41,14 @@ struct SkSurface {
   int width;
   int height;
   int gpu;
-  uint8_t *pixels;  /* RGBA8888 CPU raster */
-  uint8_t *present; /* GPU readback when gpu != 0 */
-  SkCanvas canvas;  /* borrowed through sk_surface_get_canvas */
+  uint8_t *pixels;     /* RGBA8888 CPU raster. NULL on a GPU surface. */
+  SkGpuTarget *target; /* GPU framebuffer when gpu != 0 */
+  SkCanvas canvas;     /* borrowed through sk_surface_get_canvas */
 };
+
+static unsigned cpu_paint_ops;
+
+unsigned sk_sw_cpu_paint_ops(void) { return cpu_paint_ops; }
 
 SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
   SkSurface *s;
@@ -70,28 +74,38 @@ SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
 
 SkSurface *sk_surface_make_gpu_n32_premul(int width, int height) {
   SkSurface *s;
-  size_t n;
+  SkGpuTarget *target;
+  if (width <= 0 || height <= 0)
+    return NULL;
   if (!sk_gpu_available())
     return NULL;
-  s = sk_surface_make_raster_n32_premul(width, height);
-  if (!s)
+  target = sk_gpu_target_new(width, height);
+  if (!target)
     return NULL;
-  n = (size_t)width * (size_t)height * 4;
-  s->present = (uint8_t *)calloc(n, 1);
-  if (!s->present) {
-    sk_surface_unref(s);
+  s = (SkSurface *)calloc(1, sizeof(SkSurface));
+  if (!s) {
+    sk_gpu_target_free(target);
     return NULL;
   }
+  s->width = width;
+  s->height = height;
   s->gpu = 1;
+  s->target = target;
+  s->canvas.surface = s;
+  s->canvas.clip_x0 = 0;
+  s->canvas.clip_y0 = 0;
+  s->canvas.clip_x1 = width;
+  s->canvas.clip_y1 = height;
   return s;
 }
 
 void sk_surface_unref(SkSurface *surface) {
   if (!surface)
     return;
+  if (surface->gpu)
+    sk_gpu_target_free(surface->target);
   free(surface->canvas.saves);
   free(surface->pixels);
-  free(surface->present);
   free(surface);
 }
 
@@ -114,18 +128,9 @@ const uint8_t *sk_surface_peek_pixels(const SkSurface *surface, size_t *out_size
       *out_size = 0;
     return NULL;
   }
+  if (surface->gpu)
+    return sk_gpu_read(surface->target, out_size);
   n = (size_t)surface->width * (size_t)surface->height * 4;
-  if (surface->gpu) {
-    if (!sk_gpu_roundtrip(surface->pixels, surface->present, surface->width,
-                          surface->height)) {
-      if (out_size)
-        *out_size = 0;
-      return NULL;
-    }
-    if (out_size)
-      *out_size = n;
-    return surface->present;
-  }
   if (out_size)
     *out_size = n;
   return surface->pixels;
@@ -169,6 +174,13 @@ void sk_canvas_clear(SkCanvas *canvas, SkColor color) {
   uint8_t pb = color.b;
   if (!canvas || !canvas->surface)
     return;
+  if (canvas->surface->gpu) {
+    sk_gpu_clear(canvas->surface->target, canvas->clip_x0, canvas->clip_y0,
+                 canvas->clip_x1, canvas->clip_y1, color.r, color.g, color.b,
+                 color.a);
+    return;
+  }
+  cpu_paint_ops++;
   if (color.a < 255) {
     pr = (uint8_t)((color.r * color.a) / 255);
     pg = (uint8_t)((color.g * color.a) / 255);
@@ -203,6 +215,15 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
   int x0, y0, x1, y1, ix, iy;
   if (!canvas || !canvas->surface || !paint || w <= 0 || h <= 0)
     return;
+  if (canvas->surface->gpu) {
+    sk_gpu_fill_rect(canvas->surface->target, sw_floor_int(x), sw_floor_int(y),
+                     sw_floor_int(x + w), sw_floor_int(y + h), canvas->clip_x0,
+                     canvas->clip_y0, canvas->clip_x1, canvas->clip_y1,
+                     paint->color.r, paint->color.g, paint->color.b,
+                     paint->color.a);
+    return;
+  }
+  cpu_paint_ops++;
   x0 = sw_floor_int(x);
   y0 = sw_floor_int(y);
   x1 = sw_floor_int(x + w);
@@ -276,7 +297,7 @@ void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
 }
 
 /* 8x8 ASCII font — printable 32..126; bits LSB = left. */
-static const uint8_t FONT8[95][8] = {
+const uint8_t sk_font8[95][8] = {
     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
     {0x18, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x18, 0x00},
     {0x36, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
@@ -429,6 +450,14 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
   const char *p;
   if (!canvas || !canvas->surface || !paint || !text)
     return;
+  if (canvas->surface->gpu) {
+    sk_gpu_draw_text(canvas->surface->target, text, x, y, paint->text_size,
+                     paint->color.r, paint->color.g, paint->color.b,
+                     paint->color.a, canvas->clip_x0, canvas->clip_y0,
+                     canvas->clip_x1, canvas->clip_y1);
+    return;
+  }
+  cpu_paint_ops++;
   size = paint->text_size > 0.f ? paint->text_size : 8.f;
 #ifdef __EMSCRIPTEN__
   {
@@ -466,7 +495,7 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
       clen = 1;
     if (ch < 32 || ch > 126)
       ch = '?';
-    glyph = FONT8[ch - 32];
+    glyph = sk_font8[ch - 32];
     if (scale >= 0.999f && scale <= 1.001f) {
       for (row = 0; row < 8; row++) {
         uint8_t bits = glyph[row];

@@ -17,13 +17,7 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits reload the View and preserve app state. Manifest changes and the r command restart the app. Physical device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
 
-### 2. GPU presenters (Impeller / Skia GPU)
-
-**Unproven.** A GPU rasterizer (Impeller or Skia GPU) behind `sk_capi` keeps identical structural dumps and tolerance-bounded pixels without a CPU paint pass.
-
-**Proof.** `SCUZZ_SKIA=gpu` renders `examples/counter` with unchanged live structural dumps. `scuzz fuzz --differential --iterations 0` on counter is the host proof. Unused GPU stubs do not close the proof.
-
-### 3. Evaluator parity and speed
+### 2. Evaluator parity and speed
 
 **Partly proven.** An evaluator written in Scuzz produces the same observable output as the emitted binary on every example. `scuzz fuzz` on `examples/webhook` and `examples/api-report` writes the same `summary.json` on both engines (`scripts/ci-fuzz.sh`). `examples/io` also matches on both engines: a scheduler step is one effect, so the extra `IO` wrapping in the evaluator does not move the interleaving. Speed is even, not better: one `scuzz eval --probe` server per file set checks the package once and forks a child per probe, and the evaluator campaign on `examples/api-report` takes the same wall clock as the compiled one. Every drive step still interprets: the evaluator idle probe on `examples/kernel` (`countdown(1000000)`) takes 12 s and on `examples/fmt` 18 s on the checkout host, under the 20-second deadline, so the `examples/kernel` campaign runs about five times longer than compiled. A slower host falls back to compiled probes at the idle gate.
 
