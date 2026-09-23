@@ -1,5 +1,5 @@
 def helpRoot(): String =
-  "Scuzz Lang CLI\n\nUsage: scuzz [OPTIONS] <COMMAND>\n\nCommands:\n  build    Compile a Scuzz Lang project to a native executable (LLVM)\n  run      Build and run a Scuzz Lang project\n  watch    Watch sources and rebuild on change (compile loop, not hot reload)\n  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json\n  eval     Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)\n  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)\n  fmt      Format Scuzz Lang sources under src/\n  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation\n  new      Create a new Scuzz Lang project\n  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)\n  devices  List available iOS simulators\n  exec     Send inject ops to a live session started by `scuzz run`\n  package  Package a project for Linux, macOS, Android, iOS, or web\n  docs     Print the technical manual, or one topic, or a kit row\n  help     Print this message or the help of the given subcommand(s)\n\nOptions:\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz docs verify\n  scuzz fuzz --iterations 0\n  scuzz run --target headless --exec \"\"\n\nSee: scuzz docs start\n"
+  "Scuzz Lang CLI\n\nUsage: scuzz [OPTIONS] <COMMAND>\n\nCommands:\n  build    Compile a Scuzz Lang project to a native executable (LLVM)\n  run      Build and run a Scuzz Lang project\n  watch    Watch sources and rebuild on change (compile loop, not hot reload)\n  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json\n  eval     Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)\n  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)\n  fmt      Format Scuzz Lang sources under src/\n  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation\n  diff     Compare the behavior of a git revision with the working tree under TestRuntime\n  new      Create a new Scuzz Lang project\n  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)\n  devices  List available iOS simulators\n  exec     Send inject ops to a live session started by `scuzz run`\n  package  Package a project for Linux, macOS, Android, iOS, or web\n  docs     Print the technical manual, or one topic, or a kit row\n  help     Print this message or the help of the given subcommand(s)\n\nOptions:\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz docs verify\n  scuzz fuzz --iterations 0\n  scuzz run --target headless --exec \"\"\n\nSee: scuzz docs start\n"
 
 def helpEv(): String =
   """Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)
@@ -13,7 +13,7 @@ Options:
       --probe
           Serve fuzz probes on the prepared files in PATH: each `probe` line on stdin runs one and prints its exit code (`scuzz fuzz` spawns this)
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
@@ -35,7 +35,7 @@ Options:
       --check
           Check only (nonzero exit if files need reformat)
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
@@ -57,7 +57,7 @@ Arguments:
 
 Options:
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
@@ -79,7 +79,7 @@ Arguments:
 
 Options:
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
       --out-dir <OUT_DIR>
           Output directory [default: build]
       --full
@@ -98,7 +98,7 @@ See: scuzz docs commands
 """
 
 def helpRun(): String =
-  "Build and run a Scuzz Lang project\n\nUsage: scuzz run [OPTIONS] [PATH]\n\nArguments:\n  [PATH]  [default: .]\n\nOptions:\n      --target <TARGET>\n          Platform to run: linux or macos (must match the host), headless (host build, no display), android (host shell), or ios (simulator; see scuzz devices). Overrides [ui].default_runtime. A package without [ui] accepts only the host platform\n      --device <DEVICE>\n          iOS simulator name or ID (see scuzz devices)\n      --exec <OPS>\n          Finite ops program played after the first pump; the run quiesces and exits when it finishes. Inline JSON when the value starts with '{' or '['; anything else is a path to an inject document (schema v=1). An empty value mounts, paints, and exits\n      --snapshot-out <PATH>\n          PNG snapshot path at finish (headless default: build/snapshot.png)\n      --dump <PATH>\n          Structural dump path at finish (SCUZZ_FUZZ_DUMP)\n      --watch\n          Keep running; host and iOS UI hot-reload Views; IO-only reruns. Rejects --exec, --snapshot-out, and --dump\n      --out-dir <OUT_DIR>\n          [default: build]\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n\nWithout --exec a [ui] run stays live: every runtime watches build/inject.json and rewrites build/debug.json. Drive a live session with `scuzz exec`. Headless exits on a quit op or signal.\n\nExamples:\n  scuzz run\n  scuzz run --target headless --exec \"\"\n  scuzz run --target headless --exec '[{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"id\":\"button:+1\"}]}]'\n  scuzz run --exec examples/studio/build/record.json --dump examples/studio/build/session.json examples/studio\n  scuzz run --watch --target headless\n  scuzz run --target ios --watch\n  scuzz run --target ios --device \"iPhone 17\"\n\nSee: scuzz docs commands\n"
+  "Build and run a Scuzz Lang project\n\nUsage: scuzz run [OPTIONS] [PATH]\n\nArguments:\n  [PATH]  [default: .]\n\nOptions:\n      --target <TARGET>\n          Platform to run: linux or macos (must match the host), headless (host build, no display), android (host shell), or ios (simulator; see scuzz devices). Overrides [ui].default_runtime. A package without [ui] accepts only the host platform\n      --device <DEVICE>\n          iOS simulator name or ID (see scuzz devices)\n      --exec <OPS>\n          Finite ops program played after the first pump; the run quiesces and exits when it finishes. Inline JSON when the value starts with '{' or '['; anything else is a path to an inject document (schema v=1). An empty value mounts, paints, and exits\n      --snapshot-out <PATH>\n          PNG snapshot path at finish (headless default: build/snapshot.png)\n      --dump <PATH>\n          Structural dump path at finish (SCUZZ_FUZZ_DUMP)\n      --watch\n          Keep running; host and iOS UI hot-reload Views; IO-only reruns. Rejects --exec, --snapshot-out, and --dump\n      --out-dir <OUT_DIR>\n          [default: build]\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n\nWithout --exec a [ui] run stays live: every runtime watches build/inject.json and rewrites build/debug.json. Drive a live session with `scuzz exec`. Headless exits on a quit op or signal.\n\nExamples:\n  scuzz run\n  scuzz run --target headless --exec \"\"\n  scuzz run --target headless --exec '[{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"id\":\"button:+1\"}]}]'\n  scuzz run --exec examples/studio/build/record.json --dump examples/studio/build/session.json examples/studio\n  scuzz run --watch --target headless\n  scuzz run --target ios --watch\n  scuzz run --target ios --device \"iPhone 17\"\n\nSee: scuzz docs commands\n"
 
 def helpDevices(): String =
   """List available iOS simulators
@@ -124,7 +124,7 @@ Options:
       --iterations <ITERATIONS>
           Iteration budget. Search then mutation. `0` replays corpus/ only [default: 32]
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
       --seed <SEED>
           Deterministic LCG seed [default: 42]
       --replay <REPLAY>
@@ -161,6 +161,40 @@ Examples:
 See: scuzz docs verify
 """
 
+def helpDiff(): String =
+  """Compare the behavior of a git revision with the working tree under TestRuntime
+
+Usage: scuzz diff [OPTIONS] [REV] [PATH]
+
+Arguments:
+  [REV]   Git revision for side A [default: HEAD]
+  [PATH]  Package directory; side B is the working tree [default: .]
+
+Options:
+      --iterations <ITERATIONS>
+          Divergence search budget after replay. `0` replays corpus/ and seeds only [default: 0]
+      --seed <SEED>
+          Deterministic LCG seed for the search [default: 42]
+      --message-format <MESSAGE_FORMAT>
+          Output format: human (default) or json (prints build/delta/report.json) [default: human] [possible values: human, json]
+  -h, --help
+          Print help
+
+A lone argument that names a package directory is PATH, and REV is HEAD.
+Both sides compile with the current compiler into build/delta/a and build/delta/b.
+Each workload is same, diverged, fixed, regressed, or unrunnable.
+The exit code is 1 only when a workload passes on REV and fails on the working tree.
+Witnesses go to build/delta/witness-<hash>.toml. Replay one with scuzz fuzz --replay.
+
+Examples:
+  scuzz diff
+  scuzz diff HEAD~1 examples/fmt
+  scuzz diff --iterations 16 HEAD examples/counter
+  scuzz diff --message-format=json main
+
+See: scuzz docs verify
+"""
+
 def helpNew(): String =
   """Create a new Scuzz Lang project
 
@@ -171,7 +205,7 @@ Arguments:
 
 Options:
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
       --path <PATH>
           [default: .]
       --ui
@@ -218,7 +252,7 @@ Options:
       --out-dir <OUT_DIR>
           [default: build]
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
@@ -243,7 +277,7 @@ Options:
       --out-dir <OUT_DIR>
           [default: build]
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
@@ -268,7 +302,7 @@ Options:
       --out-dir <OUT_DIR>
           Out dir of the running app [default: build]
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
@@ -297,7 +331,7 @@ Options:
       --out-dir <OUT_DIR>
           [default: build]
       --message-format <MESSAGE_FORMAT>
-          Diagnostic format: human (default) or json (`scuzz check` only) [default: human] [possible values: human, json]
+          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]
   -h, --help
           Print help
 
