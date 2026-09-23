@@ -154,7 +154,7 @@ def readOffMm(s: String, hh: At, neg: Bool): Option[At] =
   }
 
 def offOk(s: String, hh: Int, mm: At, neg: Bool): Option[At] =
-  if (hh > 18 || mm.n > 59 || (hh == 18 && mm.n != 0)) Option.None else zoneEnd(s, mm.i, if (neg) 0 - (hh * 60 + mm.n) else hh * 60 + mm.n)
+  if (hh > 18 || mm.n > 59 || hh == 18 && mm.n != 0) Option.None else zoneEnd(s, mm.i, if (neg) 0 - (hh * 60 + mm.n) else hh * 60 + mm.n)
 
 def zoneEnd(s: String, i: Int, off: Int): Option[At] =
   if (i == Str.len(s)) Option.Some(At(off, i)) else Option.None
@@ -212,3 +212,4 @@ def offPair(m: Int): String =
 
 def two(n: Int): String =
   if (n < 10) Str.concat("0", Str.fromInt(n)) else Str.fromInt(n)
+
