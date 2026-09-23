@@ -80,6 +80,9 @@ oracle hidden(n: Int): Bool =
 def schedSource(): String =
   "@main def main: IO[Unit] =\n  for {\n    order = Signal.makeN(\"order\", 0)\n    q <- Queue.unbounded()\n    _ <- IO.both(Queue.offer(q, \"L\"), Queue.offer(q, \"R\"))\n    first <- Queue.take(q)\n    _ = Signal.set(order, if (Str.eq(first, \"L\")) 1 else 0)\n  } yield ()\n"
 
+def leftFirstSrc(): String =
+  "def leftFirst(t: Timeline): Verdict =\n  if (Timeline.signalInt(t, Timeline.len(t) - 1, \"order\") == 1) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, \"L did not win\")\n"
+
 def coverSource(): String =
   runSrc()
 
@@ -237,13 +240,16 @@ def vizScheduleB(src: String, pool: Ref[Value], a: TryOut, order0: Int): View =
   vizScheduleC(src, a, order0, Eval.tryNowAt(src, 128, pool), pool)
 
 def vizScheduleC(src: String, a: TryOut, order0: Int, b: TryOut, pool: Ref[Value]): View =
-  View.column(code(src), accent("leftFirst: L must win"), View.row(View.expanded(schedCard(0, a, order0)), View.expanded(schedCard(128, b, Eval.poolInt(pool, "order")))))
+  View.column(code(src), quiet("order.scuzz_verify"), code(leftFirstSrc()), accent("leftFirst: L must win"), View.row(View.expanded(schedCard(0, a, order0)), View.expanded(schedCard(128, b, Eval.poolInt(pool, "order")))))
 
 def schedFirst(out: TryOut): String =
   if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"L\""))) "L" else if (List.exists(Eval.traceLines(out.trace), s => Str.contains(s, "first \"R\""))) "R" else "none"
 
+def leftFirstPass(order: Int): Bool =
+  order == 1
+
 def schedVerdict(out: TryOut, order: Int): String =
-  Str.concat("first=", Str.concat(schedFirst(out), if (order == 1) " pass" else " fail"))
+  Str.concat("first=", Str.concat(schedFirst(out), if (leftFirstPass(order)) " pass" else " fail"))
 
 def schedTrace(out: TryOut): String =
   schedTracePick(Eval.traceLines(out.trace), List.filter(Eval.traceLines(out.trace), s => Str.contains(s, "first \"")))
@@ -351,7 +357,7 @@ def diffHd(a: String, b: String, as: List[String], bs: List[String]): List[View]
   if (a == b) paintLine(missColor(), Str.concat("  ", a)) :: diffGo(as, bs) else paintLine(minusColor(), Str.concat("- ", a)) :: paintLine(plusColor(), Str.concat("+ ", b)) :: diffGo(as, bs)
 
 def coverLive(): View =
-  View.column(titleText("Schedule branches"), quiet("Queue.offer L and Queue.offer R race. Two seeds. One branch fails. One branch passes."), View.divider(), vizSchedule(schedSource()), quiet("Coverage paints reached lines of inc. Press Play hits."), vizCover(coverSource()))
+  View.column(titleText("Schedule branches"), quiet("A claim takes one Timeline and returns Verdict. It lives in a verify file."), quiet("Queue.offer L and Queue.offer R race. Two seeds. One branch fails. One branch passes."), View.divider(), vizSchedule(schedSource()), quiet("Coverage paints reached lines of inc. Press Play hits."), vizCover(coverSource()))
 
 def mutationLive(): View =
   View.column(titleText("Mutant"), quiet("A mutant flips + in inc. incAdds rejects it. Live, mutant, and the diff."), View.divider(), vizMutant(mutSource()), quiet("Next: scuzz docs"), View.link("Scuzz on GitHub", "https://github.com/SeanCheatham/scuzz"))
