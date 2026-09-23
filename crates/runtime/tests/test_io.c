@@ -7198,6 +7198,37 @@ int main(void) {
             assert(sz_string_uchar_at(fwd, 26) == 'z');
             sz_string_free(fwd);
           }
+          {
+            /* Scan to the end, then slice behind the cursor. Match a fresh string. */
+            const char bytes[] = {
+                'a', (char)0xc3, (char)0xa9, (char)0xe4, (char)0xb8, (char)0xad,
+                (char)0xf0, (char)0x9f, (char)0x98, (char)0x80, (char)0x80,
+                (char)0xff, (char)0xc3, 'Z'};
+            SzString *scanned = sz_string_from_bytes(bytes, sizeof(bytes));
+            SzString *fresh = sz_string_from_bytes(bytes, sizeof(bytes));
+            int64_t n = sz_string_ulen(scanned);
+            int64_t cp;
+            int64_t start;
+            int64_t end;
+            for (cp = 0; cp < n; cp++)
+              assert(sz_string_uchar_at(scanned, cp) == sz_string_uchar_at(fresh, cp));
+            assert(sz_string_uchar_at(scanned, n) == -1);
+            for (start = 0; start <= n; start++) {
+              for (end = start; end <= n; end++) {
+                SzString *clean = sz_string_from_bytes(bytes, sizeof(bytes));
+                SzString *got = sz_string_uslice(scanned, start, end);
+                SzString *exp = sz_string_uslice(clean, start, end);
+                assert(sz_string_len(got) == sz_string_len(exp));
+                assert(memcmp(sz_string_cstr(got), sz_string_cstr(exp),
+                              (size_t)sz_string_len(exp) + 1) == 0);
+                sz_string_free(got);
+                sz_string_free(exp);
+                sz_string_free(clean);
+              }
+            }
+            sz_string_free(scanned);
+            sz_string_free(fresh);
+          }
           assert(sz_string_uindex_of(u, ndl) == 2);
           assert(sz_string_ulast_index_of(u, ndl) == 2);
           assert(sz_string_uindex_of(u, u) == 0);
