@@ -59,8 +59,14 @@ def gridN(cols: Int, xs: List[View]): View =
 def applyClo(f: Value, x: Value, p: EvProg): Value =
   Eval.applyValue(f, x :: [], Eval.envOf(p), p, 0)
 
-def tap(f: Value, p: EvProg): IO[Unit] =
-  Eval.evUnit(applyClo(f, Value.VUnit, p))
+def tap(f: Value, p: EvProg): Unit =
+  tapVal(applyClo(f, Value.VUnit, p))
+
+def tapVal(v: Value): Unit =
+  v match {
+    case Value.VIo(_) => Property.force(Eval.evUnit(v))
+    case _ => ()
+  }
 
 def isTap(kind: String): Bool =
   kind == "View.button" || kind == "View.iconButton" || kind == "View.fab" || kind == "View.outlinedButton" || kind == "View.textButton" || kind == "View.actionChip"
