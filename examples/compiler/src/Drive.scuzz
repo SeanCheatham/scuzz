@@ -232,7 +232,7 @@ def compileFilesParsed(m: Man, files: List[(String, String)], p: Prog, outDir: S
   compileFilesChecked(m, files, p, Check.check3(files, Check.checkProgOwn(p, [])), outDir, clang, lib)
 
 def compileFilesChecked(m: Man, files: List[(String, String)], p: Prog, diags: String, outDir: String, clang: String, lib: String): PkgOut =
-  if (diags != "[]") PkgOut(false, m.name, "", "", "", diags) else compileFilesOk(m, Str.concat(Emit.preamble(), Emit.emitFilesGot(p, Emit.internFiles(files, []), files)), outDir, clang, lib)
+  if (diags != "[]") PkgOut(false, m.name, "", "", "", diags) else compileFilesOk(m, Str.concat(Emit.preamble(), Emit.emitFilesGot(p, Emit.internFiles(files, Emit.emptyStrs()), files)), outDir, clang, lib)
 
 def compileFilesOk(m: Man, ll: String, outDir: String, clang: String, lib: String): PkgOut =
   PkgOut(true, m.name, ll, llName(outDir, m.name), linkLine(clang, llName(outDir, m.name), lib, exeName(outDir, m.name)), "[]")
