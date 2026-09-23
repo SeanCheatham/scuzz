@@ -1535,6 +1535,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
       need_dump = 1;
     }
   }
+  /* Quit stops the session. The pump succeeds and does not paint. */
+  if (session->lifecycle == SZ_LIFECYCLE_STOP)
+    return 1;
   if (session->signal_revision != sz_signal_revision()) session_mark_dirty(session);
   /* UI-thread hop: apply signal writes posted from completed IO. */
   sz_ui_bridge_flush(session);

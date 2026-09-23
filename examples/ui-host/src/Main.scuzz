@@ -1,0 +1,17 @@
+import Eval.Value
+import Eval.EvProg
+
+def noProg(): List[EvProg] =
+  []
+
+@main def main: IO[Unit] =
+  Sys.args().flatMap(args => mainArgs(args))
+
+def mainArgs(args: List[String]): IO[Unit] =
+  if (List.isEmpty(args)) IO.fail("ui-host: missing probe directory") else Ref.of(noProg()).flatMap(slot => Drive.uiProbe(List.at(args, 0), slot, v => mountOne(slot, v)))
+
+def mountOne(slot: Ref[List[EvProg]], v: Value): IO[Unit] =
+  Ref.get(slot).flatMap(ps => mountProg(ps, v))
+
+def mountProg(ps: List[EvProg], v: Value): IO[Unit] =
+  if (List.isEmpty(ps)) IO.fail("ui-host: no program") else Ui.run(_ => Mount.mount(v, List.at(ps, 0)))

@@ -1,0 +1,11 @@
+[package]
+name = "ui-host"
+version = "0.1.0"
+
+[ui]
+default_runtime = "headless"
+headless_size = [320, 200]
+headless_scale = 1.0
+
+[dependencies]
+compiler = { path = "../compiler" }

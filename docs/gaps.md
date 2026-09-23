@@ -43,7 +43,7 @@ Resolve these gaps when they prevent ordinary language use.
 
 Required for CLI, server, and desktop applications.
 
-`scuzz fuzz` on the evaluator for a `[ui]` package. OS threads.
+OS threads.
 
 ### Verification
 
