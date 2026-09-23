@@ -118,5 +118,14 @@ def reloadCode(dir: String, out: String): IO[Unit] =
   Drive.emitDir(dir, out, false).flatMap(_ => Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => Drive.linkReload(Drive.llName(out, Manifest.parse(toml).name), out, true)))
 
 def reload(dir: String, out: String, now: String): IO[Unit] =
-  reloadCode(dir, out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), now).flatMap(_ => IO.println("Reload the simulator View. Enter r if a capture change needs a restart."))).handleErrorWith(error => IO.println(error).flatMap(_ => IO.println("The running app stays. Save a change or enter r to retry.")))
+  reloadCode(dir, out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), now).flatMap(_ => IO.println("Reload the simulator View. Enter r if a capture change needs a restart."))).handleErrorWith(error => reloadRetry(dir, out, now, error))
+
+def reloadRetry(dir: String, out: String, now: String, error: String): IO[Unit] =
+  stamp(dir).flatMap(again => if (again != now && again != "unreadable sources") reloadOnce(dir, out, again) else reloadDiag(dir, error))
+
+def reloadOnce(dir: String, out: String, now: String): IO[Unit] =
+  reloadCode(dir, out).flatMap(_ => Fs.write(Drive.joinSlash(out, "reload.stamp"), now).flatMap(_ => IO.println("Reload the simulator View. Enter r if a capture change needs a restart."))).handleErrorWith(_ => reloadDiag(dir, "check"))
+
+def reloadDiag(dir: String, error: String): IO[Unit] =
+  Drive.checkDir(dir, false).handleErrorWith(_ => IO.pure(())).flatMap(_ => IO.println(error).flatMap(_ => IO.println("The running app stays. Save a change or enter r to retry.")))
 
