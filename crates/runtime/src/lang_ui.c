@@ -325,25 +325,28 @@ static SzUiSession *web_live_session;
 
 static void web_live_frame(void) {
   SzUiSession *session = web_live_session;
+  int steps;
   if (!session || !sz_ui_session_alive(session)) {
     emscripten_cancel_main_loop();
     sz_web_stop();
     web_live_session = NULL;
     return;
   }
-  if (!sz_ui_session_needs_paint(session)) {
-    sz_web_loop_pause();
-    return;
-  }
-  if (!sz_ui_pump_sync(session)) {
-    if (!sz_ui_session_alive(session)) {
-      emscripten_cancel_main_loop();
-      sz_web_stop();
-      web_live_session = NULL;
-      return;
+  /* Four motion steps and the settled pump. Finish them before this frame
+   * returns. An idle wait then sees a still loop. */
+  for (steps = 0; steps < 5 && sz_ui_session_needs_paint(session); steps++) {
+    if (!sz_ui_pump_sync(session)) {
+      if (!sz_ui_session_alive(session)) {
+        emscripten_cancel_main_loop();
+        sz_web_stop();
+        web_live_session = NULL;
+        return;
+      }
+      sz_panic("Ui.run live pump failed");
     }
-    sz_panic("Ui.run live pump failed");
   }
+  if (!sz_ui_session_needs_paint(session))
+    sz_web_loop_pause();
 }
 #endif
 
