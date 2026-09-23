@@ -112,6 +112,8 @@ typedef struct SzString {
   /* UTF-8 walk cursor. A later code-point index continues from here. */
   int64_t cp_hint;
   int64_t off_hint;
+  /* Bytes allocated for `data`, including the trailing NUL. */
+  size_t cap;
 } SzString;
 
 SzString *sz_string_from_cstr(const char *cstr);
@@ -122,6 +124,8 @@ void sz_string_free(SzString *s);
 
 /* String ops for the kernel dialect */
 SzString *sz_string_concat(const SzString *a, const SzString *b);
+/* Drop one ref to `a`. Reuse `a` when it is the only owner. */
+SzString *sz_string_concat_take(SzString *a, const SzString *b);
 
 typedef struct SzBuilder {
   char *data;
@@ -701,6 +705,8 @@ SzList *sz_list_dropwhile(SzList *xs, SzListPred pred, void *env);
 int64_t sz_list_forall(SzList *xs, SzListPred pred, void *env);
 /* Copy the left spine and share `ys`. Empty `xs` retains `ys`. */
 SzList *sz_list_concat(SzList *xs, SzList *ys);
+/* Drop one ref to `xs`. Splice a unique left spine onto `ys`. */
+SzList *sz_list_concat_take(SzList *xs, SzList *ys);
 /* Concatenate inner lists. Empty `xss` is empty. */
 SzList *sz_list_flatten(SzList *xss);
 /* New spine. `fn` returns an owned pointer. Retain `head` when `fn` yields it.

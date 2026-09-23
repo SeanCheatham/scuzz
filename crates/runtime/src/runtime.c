@@ -977,7 +977,8 @@ static SzString *string_alloc(size_t len) {
     sz_panic("String too large");
   s = (SzString *)sz_rc_alloc(sizeof(SzString), SZ_RC_STRING);
   s->len = len;
-  s->data = (char *)sz_alloc(len + 1);
+  s->cap = len + 1;
+  s->data = (char *)sz_alloc(s->cap);
   s->data[len] = '\0';
   s->cp_hint = 0;
   s->off_hint = 0;
@@ -1075,6 +1076,77 @@ SzString *sz_string_concat(const SzString *a, const SzString *b) {
     /* A split UTF-8 sequence can join at the boundary. */
     string_measure(out);
   }
+  return out;
+}
+
+static int string_bytes_inside(const SzString *host, const char *p) {
+  uintptr_t hp;
+  uintptr_t pp;
+  if (!host || !host->data || !p || host->cap == 0)
+    return 0;
+  hp = (uintptr_t)host->data;
+  pp = (uintptr_t)p;
+  return pp >= hp && pp < hp + host->cap;
+}
+
+static size_t string_fit_cap(size_t cap, size_t need) {
+  if (cap < 64)
+    cap = 64;
+  while (cap < need) {
+    if (cap > SIZE_MAX / 2)
+      sz_panic("Str.concat too large");
+    cap *= 2;
+  }
+  return cap;
+}
+
+static void string_set_join(SzString *s, size_t nlen, int ascii) {
+  s->len = nlen;
+  s->data[nlen] = '\0';
+  s->cp_hint = 0;
+  s->off_hint = 0;
+  if (ascii) {
+    s->is_ascii = 1;
+    s->ulen = (int64_t)nlen;
+  } else
+    string_measure(s);
+}
+
+/* Consume `a`. A unique `a` grows in place. A shared or pinned `a` is copied. */
+SzString *sz_string_concat_take(SzString *a, const SzString *b) {
+  size_t al = a && a->data ? a->len : 0;
+  size_t bl = b && b->data ? b->len : 0;
+  size_t need;
+  int ascii;
+  int unique;
+  SzString *out;
+  if (bl > SIZE_MAX - al)
+    sz_panic("Str.concat too large");
+  need = al + bl + 1;
+  ascii = (!al || (a && a->is_ascii)) && (!bl || (b && b->is_ascii));
+  unique = a && sz_rc_count(a) == 1 && a->data && a != b &&
+           !string_bytes_inside(a, b && b->data ? b->data : NULL);
+  if (unique && a->cap >= need) {
+    if (bl)
+      memcpy(a->data + al, b->data, bl);
+    string_set_join(a, al + bl, ascii);
+    return a;
+  }
+  if (unique) {
+    size_t cap = string_fit_cap(a->cap ? a->cap : al + 1, need);
+    char *d = (char *)sz_alloc(cap);
+    if (al)
+      memcpy(d, a->data, al);
+    if (bl)
+      memcpy(d + al, b->data, bl);
+    sz_free(a->data);
+    a->data = d;
+    a->cap = cap;
+    string_set_join(a, al + bl, ascii);
+    return a;
+  }
+  out = sz_string_concat(a, b);
+  sz_release(a);
   return out;
 }
 
