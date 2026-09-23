@@ -376,6 +376,12 @@ static void fputs_mirror_value(FILE *f, const void *value) {
   fputs_json_value(f, value);
 }
 
+/* A mirrored Value list is a list in the dump. Claims read that type. */
+static int mirror_list_value(const void *value) {
+  return eval_mirror_on() && value && sz_rc_kind(value) == SZ_RC_ADT &&
+         sz_adt_tag((const SzAdt *)value) == 4;
+}
+
 /* Typed session schema: one object per registered signal. Int payloads
  * are numbers. Str payloads are strings. Value and list payloads encode
  * typed (schema v=2). */
@@ -384,12 +390,19 @@ void sz_signal_dump_json(FILE *f) {
   int first = 1;
   fputc('[', f);
   for (r = g_sig_head; r; r = r->next) {
+    void *held = NULL;
+    int value_list = 0;
     if (!first)
       fputc(',', f);
     first = 0;
+    if (r->kind == SIG_VALUE) {
+      held = sz_signal_read((SzSignal *)r->sig);
+      value_list = mirror_list_value(held);
+    }
     fprintf(f, "{\"id\":%d,\"type\":\"", r->id);
     fputs(r->kind == SIG_INT ? "int" : r->kind == SIG_STR ? "str"
-                                     : r->kind == SIG_LIST ? "list" : "value",
+                                     : r->kind == SIG_LIST || value_list ? "list"
+                                                                         : "value",
           f);
     fputs("\",\"name\":\"", f);
     sz_json_fputs_escaped(f, r->name);
@@ -405,9 +418,8 @@ void sz_signal_dump_json(FILE *f) {
       fputc('"', f);
       break;
     case SIG_VALUE: {
-      void *value = sz_signal_read((SzSignal *)r->sig);
-      fputs_mirror_value(f, value);
-      sz_release(value);
+      fputs_mirror_value(f, held);
+      sz_release(held);
       break;
     }
     case SIG_LIST: {
