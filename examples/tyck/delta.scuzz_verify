@@ -1,0 +1,61 @@
+private def tlState(i: Int, count: Int, hit: String): String =
+  Str.concat("--- ", Str.concat(Str.fromInt(i), Str.concat(""" checkpoint=1
+last_hit:
+""", Str.concat(hit, Str.concat("""
+hit:
+""", Str.concat(hit, Str.concat("\ndrive:\nsetup\nsignals:\n[{\"id\":0,\"type\":\"int\",\"name\":\"count\",\"value\":", Str.concat(Str.fromInt(count), Str.concat("},{\"id\":1,\"type\":\"str\",\"name\":\"\",\"value\":\"a,b\"}]\na11y:\ntext:Counter\ntext:count = ", Str.concat(Str.fromInt(count), """
+button:+1
+effects:
+fibers:
+live=1 ready=1 parked=0 done=0
+fault:
+kind=none n=0 mode=fail seed=0 storm=0 partial=0
+files:
+"""))))))))))
+
+private def tlStates(counts: List[Int], i: Int): String =
+  if (List.isEmpty(counts)) "" else Str.concat(tlState(i, List.at(counts, 0), if (i == 0) "" else "button:+1"), tlStates(List.tail(counts), i + 1))
+
+private def tl(counts: List[Int]): String =
+  Str.concat("# timeline v=3 n=", Str.concat(Str.fromInt(List.len(counts)), Str.concat("""
+""", tlStates(counts, 0))))
+
+private def upTo(n: Int, i: Int): List[Int] =
+  if (i >= n) [] else i :: upTo(n, i + 1)
+
+private def bumped(n: Int, at: Int, i: Int): List[Int] =
+  if (i >= n) [] else (if (i >= at) i + 1 else i) :: bumped(n, at, i + 1)
+
+private def tails(n: Int, extra: Int): List[Int] =
+  List.concat(upTo(n, 0), List.map(upTo(extra, 0), k => 100 + k))
+
+private def sameDelta(a: String, b: String): Bool =
+  Delta.json(Delta.diff(a, b)) == Delta.json(Delta.swap(Delta.diff(b, a)))
+
+private def hasChange(a: String, b: String, section: String, key: String, before: String, after: String): Bool =
+  List.exists(Delta.diff(a, b).changes, c => c.section == section && c.key == key && c.before == before && c.after == after)
+
+oracle deltaSelfEmpty(): Bool =
+  Delta.isEmpty(Delta.diff(tl(upTo(4, 0)), tl(upTo(4, 0)))) && Delta.text(Delta.diff(tl(upTo(4, 0)), tl(upTo(4, 0)))) == "same"
+
+oracle deltaFindsState(): Bool =
+  Delta.diff(tl(upTo(4, 0)), tl(bumped(4, 2, 0))).first == 2 && hasChange(tl(upTo(4, 0)), tl(bumped(4, 2, 0)), "signals", "count", "2", "3") && hasChange(tl(upTo(4, 0)), tl(bumped(4, 2, 0)), "a11y", "text", "text:count = 2", "text:count = 3") && !hasChange(tl(upTo(4, 0)), tl(bumped(4, 2, 0)), "signals", "#1", "\"a,b\"", "\"a,b\"")
+
+oracle deltaLength(): Bool =
+  Delta.diff(tl(upTo(3, 0)), tl(upTo(5, 0))).first == 3 && Delta.diff(tl(upTo(3, 0)), tl(upTo(5, 0))).lenB == 5 && !Delta.isEmpty(Delta.diff(tl(upTo(3, 0)), tl(upTo(5, 0))))
+
+oracle deltaSwaps(): Bool =
+  sameDelta(tl(upTo(4, 0)), tl(bumped(4, 1, 0))) && sameDelta(tl(upTo(2, 0)), tl(upTo(5, 0)))
+
+oracle deltaSelfGenerated(n: Int where n >= 0 && n <= 8): Bool =
+  Delta.isEmpty(Delta.diff(tl(upTo(n + 1, 0)), tl(upTo(n + 1, 0))))
+
+oracle deltaSwapGenerated(n: Int where n >= 0 && n <= 8): Bool =
+  sameDelta(tl(upTo(n + 2, 0)), tl(bumped(n + 2, n % (n + 2), 0)))
+
+private def firstKey(d: TlDelta): String =
+  Str.concat(Str.fromInt(d.first), List.join(List.map(d.changes, c => Delta.changeJson(c)), ","))
+
+oracle deltaPrefixSurvives(n: Int where n >= 0 && n <= 8): Bool =
+  firstKey(Delta.diff(tl(tails(3, 0)), tl(bumped(3, 1, 0)))) == firstKey(Delta.diff(tl(tails(3, n)), tl(List.concat(bumped(3, 1, 0), List.map(upTo(n, 0), k => 100 + k))))) && Delta.diff(tl(tails(3, n)), tl(List.concat(bumped(3, 1, 0), List.map(upTo(n, 0), k => 100 + k)))).first == 1
+

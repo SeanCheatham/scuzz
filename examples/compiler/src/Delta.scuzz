@@ -1,0 +1,213 @@
+record DeltaChange(section: String, key: String, before: String, after: String)
+
+record TlDelta(lenA: Int, lenB: Int, first: Int, states: Int, changes: List[DeltaChange])
+
+def noChange(): List[DeltaChange] =
+  []
+
+def noSec(): List[(String, String)] =
+  []
+
+def noState(): List[List[(String, String)]] =
+  []
+
+def diff(a: String, b: String): TlDelta =
+  diffStates(parse(a), parse(b))
+
+def isEmpty(d: TlDelta): Bool =
+  d.first < 0
+
+def diffStates(sa: List[List[(String, String)]], sb: List[List[(String, String)]]): TlDelta =
+  diffEnd(diffGo(sa, sb, 0, TlDelta(List.len(sa), List.len(sb), 0 - 1, 0, noChange())))
+
+def diffEnd(d: TlDelta): TlDelta =
+  if (d.first < 0 && d.lenA != d.lenB) TlDelta(d.lenA, d.lenB, Verify.minInt(d.lenA, d.lenB), 0, noChange()) else d
+
+def diffGo(sa: List[List[(String, String)]], sb: List[List[(String, String)]], i: Int, d: TlDelta): TlDelta =
+  if (List.isEmpty(sa) || List.isEmpty(sb)) d else diffGo(List.tail(sa), List.tail(sb), i + 1, diffStep(d, i, stateChanges(List.at(sa, 0), List.at(sb, 0))))
+
+def diffStep(d: TlDelta, i: Int, cs: List[DeltaChange]): TlDelta =
+  if (List.isEmpty(cs)) d else if (d.first >= 0) TlDelta(d.lenA, d.lenB, d.first, d.states + 1, d.changes) else TlDelta(d.lenA, d.lenB, i, 1, cs)
+
+def parse(text: String): List[List[(String, String)]] =
+  parseStates(Verify.linesOf(text))
+
+def parseStates(ls: List[String]): List[List[(String, String)]] =
+  if (List.isEmpty(ls)) noState() else if (Str.startsWith(List.at(ls, 0), "--- ")) parseState(List.tail(ls), ("checkpoint", checkpointOf(List.at(ls, 0))) :: noSec()) else parseStates(List.tail(ls))
+
+def checkpointOf(line: String): String =
+  if (Str.indexOf(line, "checkpoint=") < 0) "" else Str.drop(line, Str.indexOf(line, "checkpoint=") + 11)
+
+def parseState(ls: List[String], acc: List[(String, String)]): List[List[(String, String)]] =
+  if (List.isEmpty(ls) || Str.startsWith(List.at(ls, 0), "--- ")) List.reverse(acc) :: parseStates(ls) else parseSection(ls, secName(List.at(ls, 0)), acc)
+
+def secName(h: String): String =
+  if (Str.endsWith(h, ":")) Str.slice(h, 0, Str.len(h) - 1) else h
+
+def singleSec(name: String): Bool =
+  name == "last_hit" || name == "hit" || name == "drive" || name == "fibers" || name == "fault"
+
+def nextHeader(name: String): String =
+  if (name == "signals") "a11y:" else if (name == "a11y") "effects:" else if (name == "effects") "fibers:" else "--- "
+
+def parseSection(ls: List[String], name: String, acc: List[(String, String)]): List[List[(String, String)]] =
+  if (singleSec(name)) parseSingle(List.tail(ls), name, acc) else parseBlock(blockGo(List.tail(ls), nextHeader(name), Verify.noStr()), name, acc)
+
+def parseSingle(ls: List[String], name: String, acc: List[(String, String)]): List[List[(String, String)]] =
+  if (List.isEmpty(ls)) parseState(ls, (name, "") :: acc) else parseState(List.tail(ls), (name, List.at(ls, 0)) :: acc)
+
+def parseBlock(r: (List[String], List[String]), name: String, acc: List[(String, String)]): List[List[(String, String)]] =
+  r match {
+    case (body, rest) => parseState(rest, (name, List.join(body, Verify.nl())) :: acc)
+  }
+
+def blockGo(ls: List[String], stop: String, acc: List[String]): (List[String], List[String]) =
+  if (List.isEmpty(ls) || List.at(ls, 0) == stop || Str.startsWith(List.at(ls, 0), "--- ")) (List.reverse(acc), ls) else blockGo(List.tail(ls), stop, List.at(ls, 0) :: acc)
+
+def secNames(a: List[(String, String)], b: List[(String, String)]): List[String] =
+  List.distinct(List.concat(List.map(a, p => p._1), List.map(b, p => p._1)))
+
+def secBody(s: List[(String, String)], name: String): String =
+  if (List.isEmpty(s)) "" else if (List.at(s, 0)._1 == name) List.at(s, 0)._2 else secBody(List.tail(s), name)
+
+def stateChanges(a: List[(String, String)], b: List[(String, String)]): List[DeltaChange] =
+  stateChangesGo(secNames(a, b), a, b)
+
+def stateChangesGo(names: List[String], a: List[(String, String)], b: List[(String, String)]): List[DeltaChange] =
+  if (List.isEmpty(names)) noChange() else List.concat(secChanges(List.at(names, 0), secBody(a, List.at(names, 0)), secBody(b, List.at(names, 0))), stateChangesGo(List.tail(names), a, b))
+
+def secChanges(name: String, x: String, y: String): List[DeltaChange] =
+  if (x == y) noChange() else orderOnly(name, secChangesOf(name, x, y))
+
+def orderOnly(name: String, cs: List[DeltaChange]): List[DeltaChange] =
+  if (List.isEmpty(cs)) DeltaChange(name, "order", "", "") :: noChange() else cs
+
+def secChangesOf(name: String, x: String, y: String): List[DeltaChange] =
+  if (name == "signals") keyedChanges(name, sigPairs(x), sigPairs(y)) else if (name == "fibers" || name == "fault") keyedChanges(name, tokPairs(x), tokPairs(y)) else if (name == "a11y" || name == "effects" || name == "files") lineChanges(name, bodyLines(x), bodyLines(y)) else DeltaChange(name, "", x, y) :: noChange()
+
+def bodyLines(s: String): List[String] =
+  List.filter(Verify.linesOf(s), l => l != "")
+
+def keyedChanges(name: String, a: List[(String, String)], b: List[(String, String)]): List[DeltaChange] =
+  List.concat(keyedBefore(name, a, b), keyedAdded(name, a, b))
+
+def keyedBefore(name: String, a: List[(String, String)], b: List[(String, String)]): List[DeltaChange] =
+  if (List.isEmpty(a)) noChange() else keyedOne(name, List.at(a, 0), keyedFind(b, List.at(a, 0)._1), keyedBefore(name, List.tail(a), b))
+
+def keyedOne(name: String, p: (String, String), hit: List[(String, String)], rest: List[DeltaChange]): List[DeltaChange] =
+  if (List.isEmpty(hit)) DeltaChange(name, p._1, p._2, "") :: rest else if (List.at(hit, 0)._2 == p._2) rest else DeltaChange(name, p._1, p._2, List.at(hit, 0)._2) :: rest
+
+def keyedAdded(name: String, a: List[(String, String)], b: List[(String, String)]): List[DeltaChange] =
+  List.map(List.filter(b, p => List.isEmpty(keyedFind(a, p._1))), p => DeltaChange(name, p._1, "", p._2))
+
+def keyedFind(xs: List[(String, String)], key: String): List[(String, String)] =
+  List.take(List.filter(xs, p => p._1 == key), 1)
+
+def tokPairs(s: String): List[(String, String)] =
+  List.map(List.filter(Str.split(s, " "), t => t != ""), t => tokPair(t))
+
+def tokPair(t: String): (String, String) =
+  if (Str.indexOf(t, "=") < 0) (t, "") else (Str.slice(t, 0, Str.indexOf(t, "=")), Str.drop(t, Str.indexOf(t, "=") + 1))
+
+def lineChanges(name: String, a: List[String], b: List[String]): List[DeltaChange] =
+  linePair(name, minus(a, b), minus(b, a))
+
+def minus(xs: List[String], ys: List[String]): List[String] =
+  if (List.isEmpty(xs)) xs else if (List.contains(ys, List.at(xs, 0))) minus(List.tail(xs), dropOne(ys, List.at(xs, 0))) else List.at(xs, 0) :: minus(List.tail(xs), ys)
+
+def dropOne(xs: List[String], x: String): List[String] =
+  if (List.isEmpty(xs)) xs else if (List.at(xs, 0) == x) List.tail(xs) else List.at(xs, 0) :: dropOne(List.tail(xs), x)
+
+def linePair(name: String, gone: List[String], added: List[String]): List[DeltaChange] =
+  if (List.isEmpty(gone)) List.map(added, l => lineChange(name, "", l)) else linePairHd(name, List.at(gone, 0), List.tail(gone), added, lineMate(name, List.at(gone, 0), added))
+
+def linePairHd(name: String, g: String, rest: List[String], added: List[String], mate: List[String]): List[DeltaChange] =
+  if (List.isEmpty(mate)) lineChange(name, g, "") :: linePair(name, rest, added) else lineChange(name, g, List.at(mate, 0)) :: linePair(name, rest, dropOne(added, List.at(mate, 0)))
+
+def lineMate(name: String, g: String, added: List[String]): List[String] =
+  List.take(List.filter(added, l => lineKey(name, l) == lineKey(name, g)), 1)
+
+def lineChange(name: String, x: String, y: String): DeltaChange =
+  DeltaChange(name, lineKey(name, if (x == "") y else x), lineVal(name, x), lineVal(name, y))
+
+def lineKey(name: String, l: String): String =
+  if (name == "files") Hex.decode(firstTok(l)) else if (name == "effects") firstTok(l) else a11yKey(l)
+
+def lineVal(name: String, l: String): String =
+  if (name != "files" || l == "") l else Hex.decode(Str.drop(l, Str.len(firstTok(l)) + 1))
+
+def firstTok(l: String): String =
+  if (Str.indexOf(l, " ") < 0) l else Str.slice(l, 0, Str.indexOf(l, " "))
+
+def a11yKey(l: String): String =
+  if (Str.startsWith(l, "motion:") && Str.indexOf(l, "=") > 0) Str.slice(l, 0, Str.indexOf(l, "=")) else if (Str.indexOf(l, ":") > 0) Str.slice(l, 0, Str.indexOf(l, ":")) else l
+
+def sigPairs(s: String): List[(String, String)] =
+  List.map(jsonItems(Str.trim(s)), o => (sigKey(o), sigValue(o)))
+
+def sigKey(o: String): String =
+  if (jsonField(o, "name") != "") jsonField(o, "name") else Str.concat("#", sigId(o))
+
+def sigId(o: String): String =
+  if (Str.indexOf(o, "\"id\":") < 0) "" else Str.slice(o, Str.indexOf(o, "\"id\":") + 5, digitsEnd(o, Str.indexOf(o, "\"id\":") + 5))
+
+def digitsEnd(s: String, i: Int): Int =
+  if (i >= Str.len(s) || Str.charAt(s, i) < 48 || Str.charAt(s, i) > 57) i else digitsEnd(s, i + 1)
+
+def sigValue(o: String): String =
+  if (Str.indexOf(o, "\"value\":") < 0) "" else Str.slice(o, Str.indexOf(o, "\"value\":") + 8, Str.len(o) - 1)
+
+def jsonField(o: String, key: String): String =
+  jsonFieldAt(o, Str.indexOf(o, Str.concat("\"", Str.concat(key, "\":\""))), Str.len(key) + 4)
+
+def jsonFieldAt(o: String, i: Int, skip: Int): String =
+  if (i < 0) "" else Str.slice(o, i + skip, strEnd(o, i + skip))
+
+def strEnd(s: String, i: Int): Int =
+  if (i >= Str.len(s) || Str.charAt(s, i) == 34) i else if (Str.charAt(s, i) == 92) strEnd(s, i + 2) else strEnd(s, i + 1)
+
+def jsonItems(s: String): List[String] =
+  if (Str.len(s) < 2 || Str.charAt(s, 0) != 91) Verify.noStr() else itemsGo(s, 1, 1, 0, Verify.noStr())
+
+def itemsGo(s: String, start: Int, i: Int, depth: Int, acc: List[String]): List[String] =
+  if (i >= Str.len(s)) List.reverse(acc) else itemsCh(s, start, i, depth, acc, Str.charAt(s, i))
+
+def itemsCh(s: String, start: Int, i: Int, depth: Int, acc: List[String], c: Int): List[String] =
+  if (c == 34) itemsGo(s, start, strEnd(s, i + 1) + 1, depth, acc) else if (c == 123 || c == 91) itemsGo(s, start, i + 1, depth + 1, acc) else if ((c == 44 || c == 93) && depth == 0) itemsGo(s, i + 1, i + 1, depth, itemAdd(Str.trim(Str.slice(s, start, i)), acc)) else if (c == 125 || c == 93) itemsGo(s, start, i + 1, depth - 1, acc) else itemsGo(s, start, i + 1, depth, acc)
+
+def itemAdd(item: String, acc: List[String]): List[String] =
+  if (item == "") acc else item :: acc
+
+def swap(d: TlDelta): TlDelta =
+  TlDelta(d.lenB, d.lenA, d.first, d.states, List.map(d.changes, c => DeltaChange(c.section, c.key, c.after, c.before)))
+
+def shown(s: String): String =
+  if (s == "") "-" else Check.jsonStr(clip(s))
+
+def clip(s: String): String =
+  if (Str.len(s) <= 72) s else Str.concat(Str.slice(s, 0, 69), "...")
+
+def changeText(c: DeltaChange): String =
+  Str.concat("  ", Str.concat(c.section, Str.concat(if (c.key == "") "" else Str.concat(" ", c.key), Str.concat(": ", Str.concat(shown(c.before), Str.concat(" -> ", shown(c.after)))))))
+
+def headText(d: TlDelta): String =
+  Str.concat("first diverging state ", Str.concat(Str.fromInt(d.first), Str.concat(lenText(d), statesText(d))))
+
+def lenText(d: TlDelta): String =
+  if (d.lenA == d.lenB) Str.concat(" of ", Str.fromInt(d.lenA)) else Str.concat(", length ", Str.concat(Str.fromInt(d.lenA), Str.concat(" -> ", Str.fromInt(d.lenB))))
+
+def statesText(d: TlDelta): String =
+  if (d.states <= 1) "" else Str.concat(", ", Str.concat(Str.fromInt(d.states), " states differ"))
+
+def text(d: TlDelta): String =
+  if (isEmpty(d)) "same" else List.join(headText(d) :: List.map(d.changes, c => changeText(c)), Verify.nl())
+
+def jOpt(s: String): String =
+  if (s == "") "null" else Check.jsonStr(s)
+
+def changeJson(c: DeltaChange): String =
+  Str.concat("{\"section\":", Str.concat(Check.jsonStr(c.section), Str.concat(",\"key\":", Str.concat(Check.jsonStr(c.key), Str.concat(",\"before\":", Str.concat(jOpt(c.before), Str.concat(",\"after\":", Str.concat(jOpt(c.after), "}"))))))))
+
+def json(d: TlDelta): String =
+  Str.concat("{\"len_a\":", Str.concat(Str.fromInt(d.lenA), Str.concat(",\"len_b\":", Str.concat(Str.fromInt(d.lenB), Str.concat(",\"first\":", Str.concat(Str.fromInt(d.first), Str.concat(",\"states\":", Str.concat(Str.fromInt(d.states), Str.concat(",\"changes\":[", Str.concat(List.join(List.map(d.changes, c => changeJson(c)), ","), "]}"))))))))))
+
