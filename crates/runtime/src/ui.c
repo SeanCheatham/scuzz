@@ -106,6 +106,7 @@ __attribute__((weak)) char *sz_mobile_clipboard_get(void) { return NULL; }
 /* Implemented in view.c */
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
+int sz_view_motion_pending(const SzView *root);
 int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_view_handle_text(SzView *root, const char *text);
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
@@ -1648,6 +1649,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
                                                       : NULL);
     sz_property_session_step();
   }
+  /* A step that this pump painted asks for the next pump. */
+  if (need_dump && session->root && sz_view_motion_pending(session->root))
+    session_mark_dirty(session);
   return 1;
 }
 

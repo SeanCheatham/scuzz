@@ -1232,6 +1232,194 @@ static void *quiesce_poster(void *arg) {
   return NULL;
 }
 
+static int dump_has(SzUiSession *session, const char *needle) {
+  SzView *root;
+  SzString *dump;
+  int ok;
+  if (!session || !needle)
+    return 0;
+  root = sz_ui_session_root(session);
+  if (!root)
+    return 0;
+  dump = sz_view_a11y_dump(root);
+  ok = dump && strstr(sz_string_cstr(dump), needle) != NULL;
+  sz_string_free(dump);
+  return ok;
+}
+
+static SzUiSession *mount_kind(SzUiRuntimeKind kind, SzView *root) {
+  SzUiConfig cfg;
+  memset(&cfg, 0, sizeof cfg);
+  cfg.kind = kind;
+  cfg.width = 160;
+  cfg.height = 120;
+  cfg.scale = 1.f;
+  cfg.title = "motion";
+  return sz_ui_mount(&cfg, root);
+}
+
+/* Press, appear, tab change, and list insert share one pump clock. */
+static void test_pump_motion(void) {
+  SzSignalInt *count = sz_signal_int(0);
+  SzView *button = sz_view_button("Go", counter_tap, count);
+  SzUiSession *session = mount_kind(SZ_UI_RUNTIME_HEADLESS, button);
+  SzInputEvent tap;
+  unsigned paints;
+  int step;
+  char needle[64];
+  assert(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_paints(session) == 1);
+  assert(!dump_has(session, "motion:"));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_paints(session) == 1);
+
+  memset(&tap, 0, sizeof tap);
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(button).x + 8.f;
+  tap.y = sz_view_frame(button).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  for (step = 4; step >= 1; step--) {
+    assert(sz_ui_pump_sync(session));
+    snprintf(needle, sizeof needle, "motion:press:Go=%d", step);
+    assert(dump_has(session, needle));
+  }
+  assert(sz_ui_pump_sync(session));
+  assert(!dump_has(session, "motion:press:"));
+  paints = sz_ui_session_paints(session);
+  assert(paints == 6);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_paints(session) == paints);
+  assert(sz_signal_int_get(count) == 1);
+  sz_ui_unmount(session);
+  sz_view_free(button);
+  sz_signal_int_free(count);
+
+  {
+    SzSignalInt *gate = sz_signal_int(0);
+    SzSignalInt *n = sz_signal_int(0);
+    SzView *hidden = sz_view_show_when(gate, 1, sz_view_button("Show", counter_tap, n));
+    session = mount_kind(SZ_UI_RUNTIME_HEADLESS, hidden);
+    assert(session && sz_ui_pump_sync(session));
+    assert(!dump_has(session, "motion:"));
+    assert(!dump_has(session, "button:Show"));
+    sz_signal_int_set(gate, 1);
+    assert(sz_ui_pump_sync(session));
+    assert(dump_has(session, "button:Show"));
+    assert(dump_has(session, "motion:appear:Show=4"));
+    sz_ui_unmount(session);
+    sz_view_free(hidden);
+    sz_signal_int_free(gate);
+    sz_signal_int_free(n);
+  }
+
+  {
+    SzSignalInt *selected = sz_signal_int(0);
+    SzView *sections = sz_view_column();
+    SzView *tabs;
+    sz_view_add_child(sections, sz_view_section("counter", "Counter", sz_view_text("One")));
+    sz_view_add_child(sections, sz_view_section("status", "Status", sz_view_text("Two")));
+    tabs = sz_view_tabs(selected, sections);
+    session = mount_kind(SZ_UI_RUNTIME_HEADLESS, tabs);
+    assert(session && sz_ui_pump_sync(session));
+    assert(!dump_has(session, "motion:"));
+    assert(dump_has(session, "tabpanel:Counter"));
+    sz_signal_int_set(selected, 1);
+    assert(sz_ui_pump_sync(session));
+    assert(dump_has(session, "motion:tab:Tabs=4"));
+    assert(dump_has(session, "motion:appear:Status=4"));
+    assert(dump_has(session, "tabpanel:Status"));
+    sz_ui_unmount(session);
+    sz_view_free(tabs);
+    sz_signal_int_free(selected);
+  }
+
+  {
+    SzSignalInt *selected = sz_signal_int(0);
+    SzView *sections = sz_view_column();
+    SzView *book;
+    sz_view_add_child(sections, sz_view_section("home", "Home", sz_view_text("H")));
+    sz_view_add_child(sections, sz_view_section("tasks", "Tasks", sz_view_text("T")));
+    book = sz_view_index_book(selected, sections);
+    session = mount_kind(SZ_UI_RUNTIME_HEADLESS, book);
+    assert(session && sz_ui_pump_sync(session));
+    sz_signal_int_set(selected, 1);
+    assert(sz_ui_pump_sync(session));
+    assert(!dump_has(session, "motion:tab:"));
+    assert(!dump_has(session, "motion:appear:"));
+    sz_ui_unmount(session);
+    sz_view_free(book);
+    sz_signal_int_free(selected);
+  }
+
+  {
+    SzList *xs = sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil());
+    SzSignalList *items = sz_signal_list(xs);
+    SzView *list = sz_view_each(items);
+    SzList *more;
+    session = mount_kind(SZ_UI_RUNTIME_HEADLESS, list);
+    assert(session && sz_ui_pump_sync(session));
+    assert(dump_has(session, "text:- milk"));
+    assert(!dump_has(session, "motion:insert:"));
+    more = sz_list_cons(sz_string_from_cstr("eggs"), xs);
+    sz_signal_list_set(items, more);
+    sz_release(more);
+    assert(sz_ui_pump_sync(session));
+    assert(dump_has(session, "motion:insert:- eggs=4"));
+    assert(dump_has(session, "text:- milk"));
+    assert(!dump_has(session, "motion:insert:- milk"));
+    sz_ui_unmount(session);
+    sz_view_free(list);
+    sz_signal_list_free(items);
+  }
+
+  {
+    SzSignalInt *a = sz_signal_int(0);
+    SzSignalInt *b = sz_signal_int(0);
+    SzView *left = sz_view_button("Go", counter_tap, a);
+    SzView *right = sz_view_button("Go", counter_tap, b);
+    SzUiSession *head = mount_kind(SZ_UI_RUNTIME_HEADLESS, left);
+    SzUiSession *desk = mount_kind(SZ_UI_RUNTIME_DESKTOP, right);
+    const char *hp = "/tmp/scuzz_motion_h.png";
+    const char *dp = "/tmp/scuzz_motion_d.png";
+    int i;
+    assert(head && desk);
+    assert(sz_ui_pump_sync(head) && sz_ui_pump_sync(desk));
+    assert(sz_ui_snapshot_png_sync(head, hp));
+    assert(sz_ui_snapshot_png_sync(desk, dp));
+    assert(files_equal(hp, dp));
+    memset(&tap, 0, sizeof tap);
+    tap.kind = SZ_INPUT_TAP;
+    tap.x = sz_view_frame(left).x + 8.f;
+    tap.y = sz_view_frame(left).y + 8.f;
+    assert(sz_ui_inject_sync(head, &tap));
+    tap.x = sz_view_frame(right).x + 8.f;
+    tap.y = sz_view_frame(right).y + 8.f;
+    assert(sz_ui_inject_sync(desk, &tap));
+    for (i = 0; i < 5; i++) {
+      SzString *hd;
+      SzString *dd;
+      assert(sz_ui_pump_sync(head) && sz_ui_pump_sync(desk));
+      hd = sz_view_a11y_dump(sz_ui_session_root(head));
+      dd = sz_view_a11y_dump(sz_ui_session_root(desk));
+      assert(strcmp(sz_string_cstr(hd), sz_string_cstr(dd)) == 0);
+      sz_string_free(hd);
+      sz_string_free(dd);
+      assert(sz_ui_snapshot_png_sync(head, hp));
+      assert(sz_ui_snapshot_png_sync(desk, dp));
+      assert(files_equal(hp, dp));
+    }
+    remove(hp);
+    remove(dp);
+    sz_ui_unmount(head);
+    sz_ui_unmount(desk);
+    sz_view_free(left);
+    sz_view_free(right);
+    sz_signal_int_free(a);
+    sz_signal_int_free(b);
+  }
+}
+
 static void test_quiesce(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -17554,6 +17742,7 @@ int main(void) {
   test_each_env_retain_release();
   test_each_orphan_views_freed();
   test_view_show();
+  test_pump_motion();
   test_quiesce();
   puts("runtime ui tests ok");
   return 0;

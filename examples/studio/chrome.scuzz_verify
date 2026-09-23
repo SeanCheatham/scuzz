@@ -13,3 +13,24 @@ def activeTab(t: Timeline): Verdict =
 def tasksIsTheList(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 1 || Timeline.a11yHas(t, i, "button:Add") && Timeline.a11yHas(t, i, "button:Clear") && Timeline.a11yHas(t, i, "textfield:item") && !Timeline.a11yHas(t, i, "chip:Pin") && !Timeline.a11yHas(t, i, "switch:On") && !Timeline.a11yHas(t, i, "actionchip:Go") && !Timeline.a11yHas(t, i, "filterchip:Tag") && !Timeline.a11yHas(t, i, "inputchip:In") && !Timeline.a11yHas(t, i, "choicechip:Day") && !Timeline.a11yHas(t, i, "iconbutton:i") && !Timeline.a11yHas(t, i, "outlined:Edit") && !Timeline.a11yHas(t, i, "circular:") && !Timeline.a11yHas(t, i, "navtile:"))
 
+def staticTreeWaits(t: Timeline): Verdict =
+  Verdict.every(t, i => i != 0 || !Timeline.a11yHas(t, i, "motion:"))
+
+def buttonPressSteps(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:+1", __tup => __tup match {
+  case (before, after) => Timeline.a11yHas(t, after, "motion:press:+1=4")
+})
+
+def tabChangeSteps(t: Timeline): Verdict =
+  Verdict.onHit(t, "tab:Status", __tup => __tup match {
+  case (before, after) => Timeline.a11yHas(t, after, "motion:tab:Tabs=4") && Timeline.a11yHas(t, after, "motion:appear:Status=4")
+})
+
+def listInsertSteps(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Add", __tup => __tup match {
+  case (before, after) => Timeline.a11yHas(t, after, "motion:press:Add=4") && (Timeline.signalListLen(t, after, "items") == Timeline.signalListLen(t, before, "items") || Timeline.a11yHas(t, after, "motion:insert:"))
+})
+
+def motionSettles(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.a11yHas(t, i, "motion:") || Timeline.exists(t, j => j > i && !Timeline.a11yHas(t, j, "motion:")))
+

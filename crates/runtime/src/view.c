@@ -111,6 +111,17 @@ struct SzView {
   int fold_n;
   /* View.tooltip: 1 when the pointer hovers this node. */
   int hover;
+
+  /* Pump-counted motion. 0 is quiet. The step is motion_left. */
+  int motion;
+  int motion_left;
+  /* 1 after this step has been painted. The next pump drops it. */
+  int motion_painted;
+  /* Bit 0: this node has been observed. Bit 1: it was hidden. */
+  int motion_flags;
+  /* View.tabs: 1 after the first paint records the selection. */
+  int tab_ready;
+  int64_t tab_sel;
 };
 
 static void view_drop(void *ptr);
@@ -145,6 +156,157 @@ static int view_is_shown(const SzView *v) {
       sz_signal_int_get(v->show_when_sig) != v->show_when_value)
     return 0;
   return 1;
+}
+
+/* A transition paints this many pumps. The next pump is settled. */
+#define SZ_MOTION_NONE 0
+#define SZ_MOTION_PRESS 1
+#define SZ_MOTION_APPEAR 2
+#define SZ_MOTION_TAB 3
+#define SZ_MOTION_INSERT 4
+#define SZ_MOTION_PUMPS 4
+
+static void motion_start(SzView *v, int kind) {
+  if (!v || kind == SZ_MOTION_NONE)
+    return;
+  v->motion = kind;
+  v->motion_left = SZ_MOTION_PUMPS;
+  v->motion_painted = 0;
+}
+
+static const char *motion_name(int kind) {
+  switch (kind) {
+  case SZ_MOTION_PRESS:
+    return "press";
+  case SZ_MOTION_APPEAR:
+    return "appear";
+  case SZ_MOTION_TAB:
+    return "tab";
+  case SZ_MOTION_INSERT:
+    return "insert";
+  default:
+    return "";
+  }
+}
+
+/* 4 → 40, 3 → 55, 2 → 70, 1 → 85. A settled node stays at 100. */
+static int motion_appear_pct(const SzView *v) {
+  if (!v || v->motion != SZ_MOTION_APPEAR || v->motion_left <= 0)
+    return 100;
+  return 100 - v->motion_left * 15;
+}
+
+static int motion_can_appear(const SzView *v) {
+  if (!v)
+    return 0;
+  if (v->kind == SZ_VIEW_BUTTON)
+    return 1;
+  return v->show_when_sig && v->parent && v->parent->kind == SZ_VIEW_TABS;
+}
+
+static const char *motion_label_src(const SzView *v) {
+  int i;
+  if (!v)
+    return NULL;
+  if (v->kind == SZ_VIEW_SCROLL && v->child_count > 0 &&
+      v->children[0]->a11y_label && v->children[0]->a11y_label[0])
+    return v->children[0]->a11y_label;
+  if (v->a11y_label && v->a11y_label[0])
+    return v->a11y_label;
+  for (i = 0; i < v->child_count; i++) {
+    const char *label = motion_label_src(v->children[i]);
+    if (label && label[0])
+      return label;
+  }
+  return NULL;
+}
+
+static void motion_label_copy(const SzView *v, char *dst, size_t n) {
+  const char *src = motion_label_src(v);
+  size_t i = 0;
+  if (!dst || n == 0)
+    return;
+  if (!src || !src[0])
+    src = "row";
+  while (src[i] && i + 1 < n && i < 64) {
+    char c = src[i];
+    if (c == '\n' || c == '\r')
+      c = ' ';
+    dst[i++] = c;
+  }
+  dst[i] = '\0';
+  if (i == 0)
+    memcpy(dst, "row", 4);
+}
+
+static void motion_note_node(SzView *v) {
+  int shown;
+  int observed;
+  int was_hidden;
+  int i;
+  int64_t sel;
+  if (!v)
+    return;
+  shown = view_is_shown(v);
+  observed = v->motion_flags & 1;
+  was_hidden = v->motion_flags & 2;
+  if (v->kind == SZ_VIEW_TABS && v->sig_int) {
+    sel = sz_signal_int_get(v->sig_int);
+    if (!v->tab_ready) {
+      v->tab_ready = 1;
+      v->tab_sel = sel;
+    } else if (sel != v->tab_sel) {
+      motion_start(v, SZ_MOTION_TAB);
+      v->tab_sel = sel;
+    }
+  }
+  if (observed && was_hidden && shown && motion_can_appear(v) &&
+      v->motion == SZ_MOTION_NONE)
+    motion_start(v, SZ_MOTION_APPEAR);
+  v->motion_flags = 1 | (shown ? 0 : 2);
+  for (i = 0; i < v->child_count; i++)
+    motion_note_node(v->children[i]);
+}
+
+/* Drop a step that this tree already painted. A new step stays for this pump. */
+static void motion_tick_node(SzView *v) {
+  int i;
+  if (!v)
+    return;
+  if (v->motion_left > 0 && v->motion_painted) {
+    v->motion_left -= 1;
+    v->motion_painted = 0;
+    if (v->motion_left == 0)
+      v->motion = SZ_MOTION_NONE;
+  }
+  for (i = 0; i < v->child_count; i++)
+    motion_tick_node(v->children[i]);
+}
+
+static void motion_mark_painted(SzView *v) {
+  int i;
+  if (!v)
+    return;
+  v->motion_painted = v->motion_left > 0 ? 1 : 0;
+  for (i = 0; i < v->child_count; i++)
+    motion_mark_painted(v->children[i]);
+}
+
+static int motion_pending_node(const SzView *v) {
+  int i;
+  if (!v)
+    return 0;
+  if (v->motion_left > 0)
+    return 1;
+  for (i = 0; i < v->child_count; i++)
+    if (motion_pending_node(v->children[i]))
+      return 1;
+  return 0;
+}
+
+/* Return 1 when a transition still owns a later pump. */
+int sz_view_motion_pending(const SzView *root) {
+  return motion_pending_node(root);
 }
 
 static int view_visibility_on(const SzView *v) {
@@ -1494,6 +1656,17 @@ static int a11y_recurse(const SzView *v) {
   return 1;
 }
 
+static void a11y_dump_motion(SzView *v, char **buf, size_t *len, size_t *cap) {
+  char label[80];
+  char line[128];
+  if (!v || v->motion_left <= 0)
+    return;
+  motion_label_copy(v, label, sizeof label);
+  snprintf(line, sizeof line, "motion:%s:%s=%d\n", motion_name(v->motion),
+           label, v->motion_left);
+  sz_dump_append(buf, len, cap, line);
+}
+
 static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
   int i;
   if (!v || !buf || !len || !cap || !view_is_shown(v))
@@ -1506,6 +1679,7 @@ static void a11y_dump_node(SzView *v, char **buf, size_t *len, size_t *cap) {
                    info.num);
     sz_free(info.live);
   }
+  a11y_dump_motion(v, buf, len, cap);
   if (!a11y_recurse(v))
     return;
   for (i = 0; i < v->child_count; i++)
@@ -1534,6 +1708,8 @@ static int a11y_node_dumpable(SzView *v) {
     return 0;
   if (v->a11y_role != SZ_A11Y_NONE)
     return 1;
+  if (v->motion_left > 0)
+    return 1;
   if (!a11y_recurse(v))
     return 0;
   for (i = 0; i < v->child_count; i++) {
@@ -1550,7 +1726,7 @@ static void a11y_json_node(SzView *v, FILE *f, int *first) {
   int i;
   if (!a11y_node_dumpable(v))
     return;
-  if (v->a11y_role == SZ_A11Y_NONE) {
+  if (v->a11y_role == SZ_A11Y_NONE && v->motion_left <= 0) {
     for (i = 0; i < v->child_count; i++)
       a11y_json_node(v->children[i], f, first);
     return;
@@ -1560,11 +1736,14 @@ static void a11y_json_node(SzView *v, FILE *f, int *first) {
   *first = 0;
   info = a11y_node_info(v);
   fputs("{\"role\":\"", f);
-  fputs(a11y_role_name(v->a11y_role), f);
+  if (v->a11y_role == SZ_A11Y_NONE)
+    fputs("motion", f);
+  else
+    fputs(a11y_role_name(v->a11y_role), f);
   fputc('"', f);
-  if (info.cls == 2) {
+  if (v->a11y_role != SZ_A11Y_NONE && info.cls == 2) {
     fprintf(f, ",\"value\":%lld", (long long)info.num);
-  } else {
+  } else if (v->a11y_role != SZ_A11Y_NONE) {
     if (!(info.cls == 1 && a11y_kind_flag(v->kind))) {
       fputs(",\"label\":\"", f);
       sz_json_fputs_escaped(f, info.label);
@@ -1572,6 +1751,15 @@ static void a11y_json_node(SzView *v, FILE *f, int *first) {
     }
     if (info.cls == 1)
       fprintf(f, ",\"on\":%s", info.num ? "true" : "false");
+  }
+  if (v->motion_left > 0) {
+    char label[80];
+    motion_label_copy(v, label, sizeof label);
+    fputs(",\"motion\":\"", f);
+    fputs(motion_name(v->motion), f);
+    fputs("\",\"motionLabel\":\"", f);
+    sz_json_fputs_escaped(f, label);
+    fprintf(f, "\",\"step\":%d", v->motion_left);
   }
   if (a11y_recurse(v)) {
     int any = 0;
@@ -1655,26 +1843,40 @@ static void each_seen_set(SzView *v, SzList *xs) {
   v->each_seen = xs;
 }
 
+static int each_ptr_in(SzList *xs, void *p) {
+  SzList *q;
+  for (q = xs; q; q = q->tail)
+    if (q->head == p)
+      return 1;
+  return 0;
+}
+
 static void sync_each(SzView *v) {
   SzList *xs;
   SzList *p;
+  SzList *old;
+  int first;
+  int grew;
   if (!v || !v->each_sig)
     return;
   xs = sz_signal_list_get(v->each_sig);
   if (xs == v->each_seen)
     return;
+  first = each_seen_is_sentinel(v->each_seen);
+  old = first ? NULL : v->each_seen;
+  grew = !first && sz_list_len(xs) > sz_list_len(old);
   sz_view_clear_children(v);
   for (p = xs; p; p = p->tail) {
     SzString *s = (SzString *)p->head;
+    SzView *row = NULL;
     if (v->each_fn) {
-      SzView *row = v->each_fn(s, v->each_env);
+      row = v->each_fn(s, v->each_env);
       if (row)
         sz_view_add_child(v, row);
     } else if (sz_signal_list_elem_str(v->each_sig)) {
       /* Item text has no length cap. Build "- <text>" without truncation. */
       char *line = NULL;
       size_t line_len = 0, line_cap = 0;
-      SzView *row;
       sz_dump_append(&line, &line_len, &line_cap, "- ");
       if (s)
         sz_dump_append(&line, &line_len, &line_cap, sz_string_cstr(s));
@@ -1682,8 +1884,12 @@ static void sync_each(SzView *v) {
       sz_free(line);
       sz_view_add_child(v, row);
     } else {
-      sz_view_add_child(v, sz_view_text("- <item>"));
+      row = sz_view_text("- <item>");
+      sz_view_add_child(v, row);
     }
+    /* The first sync is the static tree. A longer list marks new heads. */
+    if (row && grew && !each_ptr_in(old, p->head))
+      motion_start(row, SZ_MOTION_INSERT);
   }
   each_seen_set(v, xs);
 }
@@ -4799,6 +5005,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   char buf[256];
   int i;
   float tx, ty;
+  int opacity_save;
 
   if (!v || !c || !view_is_shown(v))
     return;
@@ -4808,6 +5015,10 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     return;
   if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return;
+
+  opacity_save = g_opacity;
+  if (motion_appear_pct(v) < 100)
+    g_opacity = (opacity_save * motion_appear_pct(v)) / 100;
 
 #ifdef __EMSCRIPTEN__
   int excluded = 0;
@@ -4900,12 +5111,23 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                face.w - offset, face.h - offset, theme->border);
     face.w -= offset;
     face.h -= offset;
-    if (v->pressed) {
-      face.x += offset;
-      face.y += offset;
+    {
+      float shift = 0.f;
+      if (v->pressed)
+        shift = offset;
+      if (v->motion == SZ_MOTION_PRESS && v->motion_left > 0) {
+        float step = offset * (float)v->motion_left / (float)SZ_MOTION_PUMPS;
+        if (step > shift)
+          shift = step;
+      }
+      face.x += shift;
+      face.y += shift;
     }
     paint_rect(c, face.x, face.y, face.w, face.h, theme->primary);
-    paint_border(c, face, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
+    paint_border(c, face, (int)(scale_px(theme, 1.f) + 0.5f),
+                 v->motion == SZ_MOTION_PRESS && v->motion_left > 0
+                     ? theme->accent
+                     : theme->border);
     tx = face.x + theme->pad;
     ty = face.y + (face.h + theme->font_px) * 0.5f;
     paint_string(c, buf, tx, ty, theme->on_primary, theme->font_px);
@@ -5864,6 +6086,24 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         paint_node(v->children[i], c, theme);
     }
     paint_border(c, nav, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    /* A tab change paints a rust bar on the selected chip. It steps down. */
+    if (v->kind == SZ_VIEW_TABS && v->motion == SZ_MOTION_TAB &&
+        v->motion_left > 0 && v->sig_int) {
+      SzView *nav_v = v->children[0];
+      SzView *wrap = nav_v && nav_v->child_count > 0 &&
+                             nav_v->children[0]->child_count > 0
+                         ? nav_v->children[0]->children[0]
+                         : NULL;
+      int64_t sel = sz_signal_int_get(v->sig_int);
+      if (wrap && sel >= 0 && sel < wrap->child_count) {
+        SzRect chip = wrap->children[sel]->frame;
+        float bh = scale_px(theme, (float)v->motion_left);
+        if (bh > chip.h)
+          bh = chip.h;
+        if (bh > 0.f && chip.w > 0.f)
+          paint_rect(c, chip.x, chip.y + chip.h - bh, chip.w, bh, theme->accent);
+      }
+    }
     break;
   }
   case SZ_VIEW_SPLIT: {
@@ -5899,6 +6139,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
 #ifdef __EMSCRIPTEN__
   if (web_group) sz_web_group_end();
 #endif
+  g_opacity = opacity_save;
+  /* A new list row paints a rust bar. The bar does not change layout. */
+  if (v->motion == SZ_MOTION_INSERT && v->motion_left > 0) {
+    float bw = scale_px(theme, (float)(v->motion_left * 2));
+    if (bw > v->frame.w)
+      bw = v->frame.w;
+    if (bw > 0.f && v->frame.h > 0.f)
+      paint_rect(c, v->frame.x, v->frame.y, bw, v->frame.h, theme->accent);
+  }
 }
 
 static void paint_hover_bubble(SzView *v, SkCanvas *c, const SzTheme *theme,
@@ -5954,7 +6203,11 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   g_text_color_on = 0;
   g_radius_on = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
+  /* A painted step ends here. A step that starts during layout stays. */
+  motion_tick_node(root);
   sz_view_layout(root, (float)width, (float)height, theme);
+  /* Record press, appear, tab, and insert steps before this frame paints. */
+  motion_note_node(root);
 #ifdef __EMSCRIPTEN__
   web_route_book = NULL;
   sz_web_frame_begin(theme->px_scale > 0 ? theme->px_scale : 1);
@@ -5964,6 +6217,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   sz_web_frame_end();
 #endif
   paint_hover_tooltips(root, canvas, theme, (float)width, (float)height);
+  motion_mark_painted(root);
   return 1;
 }
 
@@ -6634,6 +6888,9 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
        hit->kind == SZ_VIEW_TEXT_BUTTON || hit->kind == SZ_VIEW_ACTION_CHIP ||
        hit->kind == SZ_VIEW_INK_WELL) &&
       hit->on_tap) {
+    /* View.button keeps a press for a fixed pump count. Other taps do not. */
+    if (hit->kind == SZ_VIEW_BUTTON)
+      motion_start(hit, SZ_MOTION_PRESS);
     hit->on_tap(hit, hit->tap_env);
     return 1;
   }
