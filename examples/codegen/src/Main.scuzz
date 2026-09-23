@@ -764,11 +764,52 @@ def evKitsMissing(): List[String] =
 def evSample(ty: String): Value =
   if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Eval.sigNew("", Value.VStr("a"), 0) else if (Str.startsWith(ty, "Signal")) Eval.sigNew("", Value.VInt(1), 0) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap([]) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
 
+def srcLive(): String =
+  """def reads(): Int =
+  for {
+    n = Signal.makeN("count", 4)
+    s = Signal.makeN("label", "hi")
+    xs = Signal.makeN("items", ["a", "b"])
+    _ = Signal.set(n, 9)
+    _ = Signal.set(xs, ["a", "b", "c"])
+    _ = Fuzz.hit("codegen:readers")
+  } yield Property.signalInt("count") + Str.len(Signal.get(s)) + Str.len(Property.signalStr("label")) + Property.signalListLen("items") + Str.len(Property.signalListAt("items", 0)) + Str.len(Property.signalListAt("items", 9)) + (if (Property.a11yHas("absent")) 1 else 0)
+
+def arm(): IO[Unit] =
+  Fuzz.setup(IO.pure(()))
+
+def reg(): IO[Unit] =
+  Fuzz.driver("d", 1, toks => IO.pure(()))
+
+def watch(): IO[Unit] =
+  Fuzz.verify("c", _ => Verdict.ok())
+
+def rel(): IO[Unit] =
+  Fuzz.verifyRel("r", __tup => __tup match {
+    case (_, _) => Verdict.ok()
+  })
+
+def go(): IO[Unit] =
+  Fuzz.probe(IO.pure(()))
+
+@main def main: IO[Unit] =
+  IO.pure(())
+"""
+
+def evExcluded(): Bool =
+  List.exists(Eval.excludedKits(), s => s == "Ui.setEditor") && List.exists(Eval.excludedKits(), s => s == "Ui.editorCaret") && !List.exists(Eval.excludedKits(), s => s == "Property.signal" || s == "Property.a11yHas" || s == "Fuzz.")
+
+def evLive(): Bool =
+  evExcluded() && Check.check(srcLive()) == "[]" && evCall(srcLive(), "reads", []) == "17" && evCall(srcLive(), "arm", []) == "<io>" && evCall(srcLive(), "reg", []) == "<io>" && evCall(srcLive(), "watch", []) == "<io>" && evCall(srcLive(), "rel", []) == "<io>" && evCall(srcLive(), "go", []) == "<io>"
+
 def evAllOk(): Bool =
-  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evKitsCovered()
+  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evKitsCovered() && evLive()
 
 def evDump(): String =
-  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else "ev-other"
+  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
+
+def evLiveDump(): String =
+  if (!evExcluded()) "evExcluded" else if (Check.check(srcLive()) != "[]") Check.check(srcLive()) else if (evCall(srcLive(), "reads", []) != "17") evCall(srcLive(), "reads", []) else if (evCall(srcLive(), "arm", []) != "<io>") "arm" else if (evCall(srcLive(), "reg", []) != "<io>") "reg" else if (evCall(srcLive(), "watch", []) != "<io>") "watch" else if (evCall(srcLive(), "rel", []) != "<io>") "rel" else "go"
 
 def srcCounter(): String =
   "record CounterState(value: Int)\n\ndef countLabel(n: Int): String =\n  Str.concat(\"Count: \", Str.fromInt(n))\n\n@main def main: IO[Unit] =\n  for {\n    state = Signal.make(CounterState(0))\n    count = Signal.map(state, v => v.value)\n    label = Signal.map(count, n => countLabel(n))\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => IO.pure(Signal.set(state, Signal.get(state).copy(value = Signal.get(count) + 1))))))\n  } yield ()\n"
