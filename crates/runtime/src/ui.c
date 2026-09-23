@@ -1574,6 +1574,11 @@ int sz_ui_pump_sync(SzUiSession *session) {
     sz_view_set_hover_at(session->root, session->hover_x, session->hover_y);
   else
     sz_view_clear_hover(session->root);
+  /* Publish screen text before the raster. A mobile CPU frame is large.
+   * The reader must see the new text while that paint is still running. */
+  if (need_dump && session->debug_dump_path &&
+      session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
+    sz_ui_session_write_dump(session, session->debug_dump_path);
   if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
   if (scale != 1.f)
