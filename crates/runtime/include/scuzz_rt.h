@@ -980,6 +980,10 @@ SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync monotonic ms (scheduler, Net, UI); TestRuntime fake clock */
 int64_t sz_net_retry_after_millis(SzString *value, int64_t now_ms);
 SzString *sz_clock_iso8601(int64_t ms); /* UTC ISO-8601 from epoch ms. Caller owns. */
+/* ISO-8601 instant to epoch ms. Some on success. None on bad text. Caller owns. */
+void *sz_clock_parse(const SzString *text);
+/* ISO-8601 at a fixed offset in minutes east of UTC. Offset 0 uses Z. A bad offset is empty. Caller owns. */
+SzString *sz_clock_zone(int64_t ms, int64_t offset_min);
 SzString *sz_hash_hmac_sha256(const SzString *key, const SzString *message);
 int64_t sz_hash_constant_time_equal(const SzString *a, const SzString *b);
 SzString *sz_hash_sha256(const SzString *s); /* Software SHA-256 of UTF-8 bytes as lowercase hex. Caller owns. */

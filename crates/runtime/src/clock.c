@@ -168,7 +168,7 @@ static int http_name(const char *s, size_t n, const char *const *names,
   return -1;
 }
 
-static int64_t http_days(int64_t year, int month, int day) {
+static int64_t days_from_civil(int64_t year, int month, int day) {
   int64_t era, yoe, doy;
   year -= month <= 2;
   era = floor_div(year, 400);
@@ -234,9 +234,9 @@ static int http_date_ms(const char *s, size_t n, int64_t now, int64_t *out) {
     if (current_year < 1 || current_year > 9999)
       return 0;
     year += (int)((current_year + 50) / 100) * 100;
-    boundary = http_days(current_year + 50, current_month, current_day) * 86400000 +
+    boundary = days_from_civil(current_year + 50, current_month, current_day) * 86400000 +
                floor_mod(now, 86400000);
-    if (http_days(year, month, day) * 86400000 +
+    if (days_from_civil(year, month, day) * 86400000 +
         (hour * 3600 + minute * 60 + second) * 1000 > boundary)
       year -= 100;
   }
@@ -247,7 +247,7 @@ static int http_date_ms(const char *s, size_t n, int64_t now, int64_t *out) {
     limit++;
   if (day > limit)
     return 0;
-  days = http_days(year, month, day);
+  days = days_from_civil(year, month, day);
   if (floor_mod(days + 4, 7) != weekday)
     return 0;
   *out = days * 86400000 + (hour * 3600 + minute * 60 + second) * 1000;
@@ -286,4 +286,214 @@ int64_t sz_net_retry_after_millis(SzString *value, int64_t now_ms) {
   if (now_ms < 0 && target > INT64_MAX + now_ms)
     return -1;
   return target - now_ms;
+}
+
+/* Clock.parse and Clock.zone.
+ * The text is a date, T, a time, and a zone.
+ * The fraction is optional. Use 1, 2, or 3 digits.
+ * The zone is Z or ±HH:MM. The offset is at most 18 hours.
+ * Years 0 to 9999 use four digits.
+ * Other years use one to six digits and no leading zero.
+ * A bad text is None. The value is epoch milliseconds.
+ * No leap seconds. Offset 0 uses Z. A bad offset is empty. */
+
+static void *clock_none(void) { return sz_adt_new(0, NULL); }
+
+static void *clock_some(int64_t ms) {
+  void *box = sz_box_i64(ms);
+  void *adt = sz_adt_new(1, box);
+  sz_release(box);
+  return adt;
+}
+
+static int clock_fixed(const char *s, size_t n, size_t *i, int width, int *out) {
+  int v = 0;
+  int k;
+  if (*i + (size_t)width > n)
+    return 0;
+  for (k = 0; k < width; k++) {
+    char c = s[*i + (size_t)k];
+    if (c < '0' || c > '9')
+      return 0;
+    v = v * 10 + (c - '0');
+  }
+  *i += (size_t)width;
+  *out = v;
+  return 1;
+}
+
+static int clock_year(const char *s, size_t n, size_t *i, int64_t *out) {
+  int neg = 0;
+  size_t start;
+  int64_t v = 0;
+  int digits = 0;
+  if (*i < n && s[*i] == '-') {
+    neg = 1;
+    (*i)++;
+  }
+  start = *i;
+  while (*i < n && s[*i] >= '0' && s[*i] <= '9') {
+    if (digits == 6)
+      return 0;
+    v = v * 10 + (s[*i] - '0');
+    digits++;
+    (*i)++;
+  }
+  if (digits == 0)
+    return 0;
+  if (!neg && v <= 9999) {
+    if (digits != 4)
+      return 0;
+  } else if (s[start] == '0')
+    return 0;
+  *out = neg ? -v : v;
+  return 1;
+}
+
+static int clock_leap(int64_t year) {
+  return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
+static int clock_month_limit(int64_t year, int month) {
+  static const int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (month < 1 || month > 12)
+    return 0;
+  if (month == 2 && clock_leap(year))
+    return 29;
+  return days[month - 1];
+}
+
+static int clock_instant(int64_t year, int month, int day, int hour, int minute,
+                         int second, int milli, int off, int64_t *out) {
+  int64_t days, base, extra, local, shift;
+  if (day < 1 || day > clock_month_limit(year, month))
+    return 0;
+  if (hour > 23 || minute > 59 || second > 59)
+    return 0;
+  days = days_from_civil(year, month, day);
+  if (days > INT64_MAX / 86400000 || days < INT64_MIN / 86400000)
+    return 0;
+  base = days * 86400000;
+  extra = ((int64_t)hour * 3600 + (int64_t)minute * 60 + second) * 1000 + milli;
+  if (base > INT64_MAX - extra)
+    return 0;
+  local = base + extra;
+  shift = (int64_t)off * 60000;
+  if (shift > 0 && local < INT64_MIN + shift)
+    return 0;
+  if (shift < 0 && local > INT64_MAX + shift)
+    return 0;
+  *out = local - shift;
+  return 1;
+}
+
+static int clock_frac(const char *s, size_t n, size_t *i, int *milli) {
+  int acc = 0;
+  int w = 0;
+  if (*i >= n || s[*i] != '.') {
+    *milli = 0;
+    return 1;
+  }
+  (*i)++;
+  while (w < 3 && *i < n && s[*i] >= '0' && s[*i] <= '9') {
+    acc = acc * 10 + (s[*i] - '0');
+    (*i)++;
+    w++;
+  }
+  if (w == 0 || (*i < n && s[*i] >= '0' && s[*i] <= '9'))
+    return 0;
+  while (w < 3) {
+    acc *= 10;
+    w++;
+  }
+  *milli = acc;
+  return 1;
+}
+
+static int clock_zone_off(const char *s, size_t n, size_t *i, int *off) {
+  int neg, hh, mm;
+  if (*i < n && s[*i] == 'Z') {
+    (*i)++;
+    *off = 0;
+    return *i == n;
+  }
+  if (*i >= n || (s[*i] != '+' && s[*i] != '-'))
+    return 0;
+  neg = s[*i] == '-';
+  (*i)++;
+  if (!clock_fixed(s, n, i, 2, &hh) || *i >= n || s[*i] != ':')
+    return 0;
+  (*i)++;
+  if (!clock_fixed(s, n, i, 2, &mm) || *i != n)
+    return 0;
+  if (hh > 18 || mm > 59 || (hh == 18 && mm != 0))
+    return 0;
+  *off = (neg ? -1 : 1) * (hh * 60 + mm);
+  return 1;
+}
+
+void *sz_clock_parse(const SzString *text) {
+  const char *s;
+  size_t n, i = 0;
+  int64_t year, ms;
+  int month, day, hour, minute, second, milli, off;
+  if (!text)
+    return clock_none();
+  s = sz_string_cstr(text);
+  n = (size_t)sz_string_len(text);
+  if (!clock_year(s, n, &i, &year) || i >= n || s[i++] != '-')
+    return clock_none();
+  if (!clock_fixed(s, n, &i, 2, &month) || i >= n || s[i++] != '-')
+    return clock_none();
+  if (!clock_fixed(s, n, &i, 2, &day) || i >= n || s[i++] != 'T')
+    return clock_none();
+  if (!clock_fixed(s, n, &i, 2, &hour) || i >= n || s[i++] != ':')
+    return clock_none();
+  if (!clock_fixed(s, n, &i, 2, &minute) || i >= n || s[i++] != ':')
+    return clock_none();
+  if (!clock_fixed(s, n, &i, 2, &second))
+    return clock_none();
+  if (!clock_frac(s, n, &i, &milli) || !clock_zone_off(s, n, &i, &off))
+    return clock_none();
+  if (!clock_instant(year, month, day, hour, minute, second, milli, off, &ms))
+    return clock_none();
+  return clock_some(ms);
+}
+
+static SzString *zone_suffix(SzString *utc, int64_t offset_min) {
+  const char *s;
+  size_t n;
+  char buf[96];
+  int hours, mins, wrote;
+  char sign;
+  if (offset_min == 0)
+    return utc;
+  s = sz_string_cstr(utc);
+  n = (size_t)sz_string_len(utc);
+  if (n == 0 || n >= sizeof buf || s[n - 1] != 'Z') {
+    sz_release(utc);
+    return sz_string_from_cstr("");
+  }
+  memcpy(buf, s, n - 1);
+  sz_release(utc);
+  sign = offset_min < 0 ? '-' : '+';
+  if (offset_min < 0)
+    offset_min = -offset_min;
+  hours = (int)(offset_min / 60);
+  mins = (int)(offset_min % 60);
+  wrote = snprintf(buf + (n - 1), sizeof buf - (n - 1), "%c%02d:%02d", sign, hours, mins);
+  if (wrote < 0 || (size_t)wrote >= sizeof buf - (n - 1))
+    return sz_string_from_cstr("");
+  return sz_string_from_cstr(buf);
+}
+
+SzString *sz_clock_zone(int64_t ms, int64_t offset_min) {
+  int64_t delta, shifted;
+  if (offset_min < -1080 || offset_min > 1080)
+    return sz_string_from_cstr("");
+  delta = offset_min * 60000;
+  if ((delta > 0 && ms > INT64_MAX - delta) || (delta < 0 && ms < INT64_MIN - delta))
+    return sz_string_from_cstr("");
+  shifted = ms + delta;
+  return zone_suffix(sz_clock_iso8601(shifted), offset_min);
 }
