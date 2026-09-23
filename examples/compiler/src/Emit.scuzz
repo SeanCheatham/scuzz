@@ -980,14 +980,26 @@ def funRetI64(defs: Ftab, f: String): Bool =
   isI64Ty(funRetStr(defs, f))
 
 def funRetStr(defs: Ftab, f: String): String =
-  funRetStrL(defs.list, f)
+  funRetNamed(funsNamed(defs, funBare(f)), f)
 
-def funRetStrL(ds: List[Fun], f: String): String =
-  if (List.isEmpty(ds)) "" else funRetStrH(List.at(ds, 0), List.tail(ds), f)
+def funBare(f: String): String =
+  funBareAt(f, Str.len(f) - 1)
 
-def funRetStrH(d: Fun, rest: List[Fun], f: String): String =
+def funBareAt(f: String, i: Int): String =
+  if (i < 0) f else if (Str.charAt(f, i) == 46) Str.slice(f, i + 1, Str.len(f)) else funBareAt(f, i - 1)
+
+def funsNamed(defs: Ftab, name: String): List[Fun] =
+  Map.get(defs.tab, name) match {
+    case Some(xs) => xs
+    case None => noFun()
+  }
+
+def funRetNamed(ds: List[Fun], f: String): String =
+  if (List.isEmpty(ds)) "" else funRetNamedH(List.at(ds, 0), List.tail(ds), f)
+
+def funRetNamedH(d: Fun, rest: List[Fun], f: String): String =
   d match {
-    case Fun(_, _, name, _, _, ret, _, mod, _) => if (qualFun(mod, name) == f || name == f) ret else funRetStrL(rest, f)
+    case Fun(_, _, name, _, _, ret, _, mod, _) => if (qualFun(mod, name) == f || name == f) ret else funRetNamed(rest, f)
   }
 
 def qualFun(mod: String, name: String): String =
