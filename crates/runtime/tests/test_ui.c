@@ -1286,10 +1286,7 @@ static void test_pump_motion(void) {
     snprintf(needle, sizeof needle, "motion:press:Go=%d", step);
     assert(dump_has(session, needle));
     dump = slurp_cstr("/tmp/scuzz_motion_hit.dump");
-    if (step == 4)
-      assert(strstr(dump, "\"desc\":\"button:Go\"") != NULL);
-    else
-      assert(strstr(dump, "\"last_hit\":{") == NULL);
+    assert(strstr(dump, "\"desc\":\"button:Go\"") != NULL);
     free(dump);
   }
   remove("/tmp/scuzz_motion_hit.dump");
@@ -1303,6 +1300,32 @@ static void test_pump_motion(void) {
   sz_ui_unmount(session);
   sz_view_free(button);
   sz_signal_int_free(count);
+
+  /* A script tap finishes the four steps before it writes the dump. */
+  {
+    SzSignalInt *n = sz_signal_int(0);
+    SzView *go = sz_view_button("Go", counter_tap, n);
+    const char *path = "/tmp/scuzz_motion_script.dump";
+    char *dump;
+    session = mount_kind(SZ_UI_RUNTIME_HEADLESS, go);
+    assert(session && sz_ui_pump_sync(session));
+    assert(sz_ui_session_set_debug_dump(session, path));
+    paints = sz_ui_session_paints(session);
+    sz_ui_script_play_json(
+        session,
+        "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"i\":0}]}");
+    assert(sz_signal_int_get(n) == 1);
+    assert(sz_ui_session_paints(session) == paints + 5);
+    assert(!dump_has(session, "motion:press:"));
+    dump = slurp_cstr(path);
+    assert(strstr(dump, "motion:press:") == NULL);
+    assert(strstr(dump, "\"desc\":\"button:Go\"") != NULL);
+    free(dump);
+    remove(path);
+    sz_ui_unmount(session);
+    sz_view_free(go);
+    sz_signal_int_free(n);
+  }
 
   {
     SzSignalInt *gate = sz_signal_int(0);

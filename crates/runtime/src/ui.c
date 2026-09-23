@@ -107,6 +107,7 @@ __attribute__((weak)) char *sz_mobile_clipboard_get(void) { return NULL; }
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
 int sz_view_motion_pending(const SzView *root);
+static int defer_debug_dump(const SzUiSession *session);
 int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_view_handle_text(SzView *root, const char *text);
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
@@ -160,12 +161,16 @@ struct SzUiSession {
   char *inject_path;
   char *inject_fp;
   int inject_playing;
+  /* Script tail: hide a live dump until the four steps and the settled pump end. */
+  int settle_motion;
   char *record_path;
   /* JSON record: event objects so far; the file rewrites on each event. */
   char *record_events;
   size_t record_events_len;
   size_t record_events_cap;
   int last_hit_seen;
+  /* 1 on the pump that took the input. Later pumps do not repeat the timeline hit. */
+  int last_hit_fresh;
   float last_hit_x;
   float last_hit_y;
   char *last_hit_desc;
@@ -906,6 +911,7 @@ static void session_drop_pointer(SzUiSession *session) {
   session->hover_seen = 0;
   host_free(&session->hover_desc);
   session->last_hit_seen = 0;
+  session->last_hit_fresh = 0;
   host_free(&session->last_hit_desc);
   session->last_secondary_seen = 0;
   host_free(&session->last_secondary_desc);
@@ -970,6 +976,7 @@ static void session_set_last_hit(SzUiSession *session, float x, float y,
     return;
   format_last_hit_desc(hit_if_fired, desc, sizeof desc);
   session->last_hit_seen = 1;
+  session->last_hit_fresh = 1;
   session->last_hit_x = x;
   session->last_hit_y = y;
   host_free(&session->last_hit_desc);
@@ -1581,7 +1588,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
   /* Publish screen text before the raster. A mobile CPU frame is large.
    * The reader must see the new text while that paint is still running. */
   if (need_dump && session->debug_dump_path &&
-      session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
+      session->cfg.kind == SZ_UI_RUNTIME_MOBILE && !defer_debug_dump(session))
     sz_ui_session_write_dump(session, session->debug_dump_path);
   if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
@@ -1597,7 +1604,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
    * can stall. The reader must see the runtime while that work runs. */
   if (need_dump && session->debug_dump_path &&
       session->cfg.kind == SZ_UI_RUNTIME_DESKTOP &&
-      session->lifecycle != SZ_LIFECYCLE_STOP)
+      session->lifecycle != SZ_LIFECYCLE_STOP && !defer_debug_dump(session))
     sz_ui_session_write_dump(session, session->debug_dump_path);
   /* Desktop peer: present to OS surface when embedder is available. */
   if (session->lifecycle != SZ_LIFECYCLE_STOP &&
@@ -1636,7 +1643,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
       sz_testrt_ui_idle_snapshot();
     }
   }
-  if (need_dump && session->debug_dump_path)
+  if (need_dump && session->debug_dump_path && !defer_debug_dump(session))
     sz_ui_session_write_dump(session, session->debug_dump_path);
   if (sz_testrt_oracles_armed() &&
       (sz_property_session_armed() || getenv("SCUZZ_TIMELINE_DUMP"))) {
@@ -1645,18 +1652,42 @@ int sz_ui_pump_sync(SzUiSession *session) {
       sz_property_stash_a11y(sz_string_cstr(views));
       sz_string_free(views);
     }
-    sz_property_stash_last_hit(session->last_hit_seen ? session->last_hit_desc
-                                                      : NULL);
+    /* Record the hit on this pump only. The session dump keeps it. */
+    sz_property_stash_last_hit(
+        (session->last_hit_seen && session->last_hit_fresh)
+            ? session->last_hit_desc
+            : NULL);
     sz_property_session_step();
   }
-  /* A step that this pump painted asks for the next pump.
-   * The hit stays on this pump. The next step does not repeat it. */
-  if (need_dump && session->root && sz_view_motion_pending(session->root)) {
+  session->last_hit_fresh = 0;
+  /* A step that this pump painted asks for the next pump. */
+  if (need_dump && session->root && sz_view_motion_pending(session->root))
     session_mark_dirty(session);
-    session->last_hit_seen = 0;
-    host_free(&session->last_hit_desc);
-  }
   return 1;
+}
+
+/* Skip the live dump while a script still owes motion pumps. */
+static int defer_debug_dump(const SzUiSession *session) {
+  return session && session->settle_motion && session->root &&
+         sz_view_motion_pending(session->root);
+}
+
+void sz_ui_pump_after_event(SzUiSession *session) {
+  int steps;
+  if (!session || !sz_ui_session_alive(session))
+    return;
+  /* Four motion steps and the settled pump. Finish them before this
+   * call returns. A quiet event pumps once. */
+  session->settle_motion = 1;
+  for (steps = 0; steps < 5; steps++) {
+    if (!sz_ui_pump_sync(session))
+      sz_panic("Ui.run: script pump failed");
+    if (!sz_ui_session_alive(session))
+      break;
+    if (!session->root || !sz_view_motion_pending(session->root))
+      break;
+  }
+  session->settle_motion = 0;
 }
 
 static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {

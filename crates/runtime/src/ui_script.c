@@ -275,12 +275,10 @@ static void script_secondary_n(SzUiSession *session, int n) {
   script_secondary_xy(session, fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
 }
 
-/* Pump tail after every script event except quit. */
+/* Pump tail after every script event except quit.
+ * A transition finishes before this call returns. */
 static void script_after_event(SzUiSession *session) {
-  if (!sz_ui_session_alive(session))
-    return;
-  if (!sz_ui_pump_sync(session))
-    sz_panic("Ui.run: script pump failed");
+  sz_ui_pump_after_event(session);
 }
 
 /* --- typed session schema v=1 (JSON inject) ------------------------------ */

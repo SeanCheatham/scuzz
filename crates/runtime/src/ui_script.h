@@ -12,6 +12,8 @@ int sz_ui_scroll_index_xy(SzUiSession *session, int index, float dx, float dy);
  * The inject schema v=1 (`{"v":1,"kind":"inject","events":[...]}`) is the
  * only script format. A script path must end in `.json`. */
 void sz_ui_script_play_json(SzUiSession *session, const char *text);
+/* Paint the event, then finish a transition before the caller reads the dump. */
+void sz_ui_pump_after_event(SzUiSession *session);
 void sz_ui_script_run_file(SzUiSession *session, const char *path);
 void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper);
 
