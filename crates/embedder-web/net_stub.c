@@ -13,3 +13,5 @@ SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env) { (void)port; (
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env) { (void)port; (void)handler; (void)env; return no_net(); }
 SzIo *sz_net_serve_once_tls(int64_t port, SzCont handler, void *env) { (void)port; (void)handler; (void)env; return no_net(); }
 SzIo *sz_net_serve_tls(int64_t port, SzCont handler, void *env) { (void)port; (void)handler; (void)env; return no_net(); }
+SzIo *sz_net_serve_once_tls_files(int64_t port, SzString *cert, SzString *key, SzCont handler, void *env) { (void)port; (void)cert; (void)key; (void)handler; (void)env; return no_net(); }
+SzIo *sz_net_serve_tls_files(int64_t port, SzString *cert, SzString *key, SzCont handler, void *env) { (void)port; (void)cert; (void)key; (void)handler; (void)env; return no_net(); }

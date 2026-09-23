@@ -1011,6 +1011,8 @@ SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; o
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; bind 0.0.0.0 and ::; drop bad clients/handlers */
 SzIo *sz_net_serve_once_tls(int64_t port, SzCont handler, void *env); /* IO[Unit]; serveOnce plus TLS with a process cert */
 SzIo *sz_net_serve_tls(int64_t port, SzCont handler, void *env); /* IO[Unit]; serve plus TLS with a process cert */
+SzIo *sz_net_serve_once_tls_files(int64_t port, SzString *cert, SzString *key, SzCont handler, void *env); /* IO[Unit]; serveOnce plus TLS with the cert file and the key file */
+SzIo *sz_net_serve_tls_files(int64_t port, SzString *cert, SzString *key, SzCont handler, void *env); /* IO[Unit]; serve plus TLS with the cert file and the key file */
 typedef struct SzNetSock {
   int fd;
   int fd6;
