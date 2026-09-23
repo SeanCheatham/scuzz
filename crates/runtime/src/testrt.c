@@ -4806,8 +4806,8 @@ static void fuzz_dist_clear(void) {
   g_dist_n = 0;
 }
 
-/* Overwrite SCUZZ_DISTANCE_DUMP with `site d` lines. The file holds one
- * probe, so an empty file means the probe saw no comparison. */
+/* Overwrite SCUZZ_DISTANCE_DUMP with `site d` lines. The file holds the
+ * last drive in the script. An empty file means that drive saw no comparison. */
 static void fuzz_dist_flush(void) {
   const char *path = getenv("SCUZZ_DISTANCE_DUMP");
   FILE *f;
@@ -5768,6 +5768,8 @@ int sz_jev_bool(SzAdt *obj, const char *key) {
  * become the same tokens the driver line uses. */
 void sz_script_drive_json(SzAdt *ev) {
   char *buf = NULL;
+  /* Drop distances from earlier drives. The climb reads the last drive. */
+  fuzz_dist_clear();
   size_t len = 0, cap = 0;
   SzAdt *args;
   SzList *xs, *p;

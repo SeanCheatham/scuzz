@@ -852,7 +852,51 @@ with open("examples/webhook/build/drivers.txt") as f:
 assert "faulted" not in drivers and "rejected" not in drivers
 PY_WEBHOOK
 
-fuzz_both_engines examples/api-report 320 api-report
+fuzz_api_report() {
+  local dir="examples/api-report" iterations=320 name="api-report"
+  fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-summary.log"
+  if grep -q 'probes run compiled' "/tmp/scuzz-$name-summary.log"; then
+    echo "$dir: the evaluator engine fell back to compiled probes" && exit 1
+  fi
+  cp "$dir/build/fuzz/summary.json" "/tmp/scuzz-$name-ev.json"
+  rm -f "$dir/.scuzz/mutate.results"
+  SCUZZ_FUZZ_ENGINE=compiled fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-compiled.log"
+  python3 - "/tmp/scuzz-$name-ev.json" "$dir/build/fuzz/summary.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    ev = json.load(f)
+with open(sys.argv[2]) as f:
+    compiled = json.load(f)
+
+def reached_locs(block):
+    return {r["location"] for r in block["regions"] if r["reached"]}
+
+def reach_names(block):
+    return set(block["reached"])
+
+def subset(kind, left, right):
+    extra = left - right
+    if extra:
+        raise SystemExit(f"compiled {kind} reach is not inside the evaluator: {sorted(extra)[:8]}")
+
+assert ev["fuzz"]["ok"] and compiled["fuzz"]["ok"]
+assert ev["mutate"] == compiled["mutate"], (ev["mutate"], compiled["mutate"])
+assert ev["corpus"] == compiled["corpus"], (ev["corpus"], compiled["corpus"])
+assert ev["coverage"]["total"] == compiled["coverage"]["total"]
+assert ev["coverage"]["branches"]["total"] == compiled["coverage"]["branches"]["total"]
+subset("functions", reached_locs(compiled["coverage"]), reached_locs(ev["coverage"]))
+subset("branches", reached_locs(compiled["coverage"]["branches"]), reached_locs(ev["coverage"]["branches"]))
+for key in ("sometimes", "triggers", "claims"):
+    assert ev[key]["declared"] == compiled[key]["declared"]
+    subset(key, reach_names(compiled[key]), reach_names(ev[key]))
+ev_branches = reached_locs(ev["coverage"]["branches"])
+compiled_branches = reached_locs(compiled["coverage"]["branches"])
+if not (ev_branches - compiled_branches):
+    raise SystemExit("evaluator branch reach is not a strict superset")
+PY
+}
+
+fuzz_api_report
 assert_fuzz_summary examples/api-report/build/fuzz/summary.json /tmp/scuzz-api-report-summary.log
 python3 - <<'PY_CHECK'
 import json

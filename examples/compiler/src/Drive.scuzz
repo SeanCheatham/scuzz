@@ -4,7 +4,7 @@ record PkgOut(ok: Bool, name: String, ll: String, llPath: String, link: String, 
 
 record FuzzRun(path: String, src: String, script: String, sched: String, fault: String, picks: List[String])
 
-record FuzzClimb(best: Map[String, Int], seed: String, tries: Int, exp: Int, sign: Int)
+record FuzzClimb(best: Map[String, Int], seed: String, tries: Int, exp: Int, sign: Int, site: String, lines: Map[String, String])
 
 record FuzzAcc(search: Int, searchFail: Int, corpFail: Int, repro: String, climb: FuzzClimb)
 
@@ -1745,7 +1745,7 @@ def fuzzWorkloadPick(job: FuzzJob, script: String, runs: List[FuzzRun], defs: Li
   if (nudged != "") nudged else Str.concat(Verify.varyWorkload(fuzzCorpusScript(job, script, runs, i), Verify.workloadSeed(job.seed) + i), Verify.generatedDrive(defs, job.ens, Verify.workloadSeed(job.seed) + i))
 
 def climbNew(): FuzzClimb =
-  FuzzClimb(Map.empty(), "", 0, 0, 1)
+  FuzzClimb(Map.empty(), "", 0, 0, 1, "", Map.empty())
 
 def climbExp(c: FuzzClimb): Int =
   c.exp - c.tries / 2
@@ -1763,7 +1763,7 @@ def pow2(n: Int): Int =
   if (n <= 0) 1 else 2 * pow2(n - 1)
 
 def fuzzNudge(c: FuzzClimb, defs: List[Fun]): String =
-  fuzzNudgeAt(Verify.linesOf(c.seed), fuzzNudgePairs(Verify.linesOf(c.seed), defs, 0, []), c, defs)
+  fuzzNudgeAt(Verify.linesOf(c.seed), fuzzLastPairs(Verify.linesOf(c.seed), defs, 0, []), c, defs)
 
 def fuzzNudgeAt(lines: List[String], pairs: List[(Int, Int)], c: FuzzClimb, defs: List[Fun]): String =
   if (List.isEmpty(pairs)) "" else fuzzNudgePick(lines, List.at(pairs, c.tries % List.len(pairs)), climbSign(c) * pow2(climbExp(c)), defs)
@@ -1775,6 +1775,15 @@ def fuzzNudgePick(lines: List[String], pick: (Int, Int), delta: Int, defs: List[
 
 def fuzzNudgePairs(lines: List[String], defs: List[Fun], i: Int, acc: List[(Int, Int)]): List[(Int, Int)] =
   if (List.isEmpty(lines)) List.reverse(acc) else fuzzNudgePairs(List.tail(lines), defs, i + 1, fuzzLinePairs(Verify.scriptToks(List.at(lines, 0)), fuzzDriveDef(Verify.scriptToks(List.at(lines, 0)), defs), i, 0, acc))
+
+def fuzzLastPairs(lines: List[String], defs: List[Fun], i: Int, acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (List.isEmpty(lines)) acc else fuzzLastPairsAt(List.at(lines, 0), List.tail(lines), defs, i, acc)
+
+def fuzzLastPairsAt(line: String, rest: List[String], defs: List[Fun], i: Int, acc: List[(Int, Int)]): List[(Int, Int)] =
+  fuzzLastPairs(rest, defs, i + 1, fuzzLastAcc(fuzzLinePairs(Verify.scriptToks(line), fuzzDriveDef(Verify.scriptToks(line), defs), i, 0, []), acc))
+
+def fuzzLastAcc(pairs: List[(Int, Int)], acc: List[(Int, Int)]): List[(Int, Int)] =
+  if (List.isEmpty(pairs)) acc else pairs
 
 def fuzzDriveDef(toks: List[String], defs: List[Fun]): List[Fun] =
   if (List.len(toks) < 2 || List.at(toks, 0) != "drive") [] else List.filter(defs, d => d.name == List.at(toks, 1) && List.len(d.params) + 2 == List.len(toks))
@@ -1806,12 +1815,6 @@ def noDists(): List[(String, Int)] =
 def fuzzDistParse(lines: List[String]): List[(String, Int)] =
   List.map(List.filter(lines, l => List.len(Str.split(l, " ")) == 2), l => (List.at(Str.split(l, " "), 0), Str.toInt(List.at(Str.split(l, " "), 1), 0)))
 
-def fuzzDistBetter(best: Map[String, Int], ds: List[(String, Int)]): Bool =
-  List.exists(ds, d => d._2 > 0 && d._2 < Map.getOrElse(best, d._1, d._2 + 1))
-
-def fuzzDistGain(best: Map[String, Int], ds: List[(String, Int)]): Int =
-  List.min(List.map(List.filter(ds, d => d._2 > 0 && d._2 < Map.getOrElse(best, d._1, d._2 + 1)), d => d._2))
-
 def fuzzDistMerge(best: Map[String, Int], ds: List[(String, Int)]): Map[String, Int] =
   if (List.isEmpty(ds)) best else fuzzDistMerge(fuzzDistSet(best, List.at(ds, 0)), List.tail(ds))
 
@@ -1821,10 +1824,119 @@ def fuzzDistSet(best: Map[String, Int], d: (String, Int)): Map[String, Int] =
   }
 
 def fuzzClimbNext(c: FuzzClimb, run: FuzzRun, i: Int, ds: List[(String, Int)]): FuzzClimb =
-  if (fuzzDistBetter(c.best, ds)) FuzzClimb(fuzzDistMerge(c.best, ds), run.script, 0, log2Floor(fuzzDistGain(c.best, ds)), if (i % 2 == 1 && c.seed != "") climbSign(c) else 1) else if (i % 2 == 1 && c.seed != "") fuzzClimbTry(FuzzClimb(fuzzDistMerge(c.best, ds), c.seed, c.tries + 1, c.exp, c.sign)) else FuzzClimb(fuzzDistMerge(c.best, ds), c.seed, c.tries, c.exp, c.sign)
+  fuzzClimbWith(c, fuzzClimbLine(run.script), i, ds)
+
+def fuzzClimbWith(c: FuzzClimb, line: String, i: Int, ds: List[(String, Int)]): FuzzClimb =
+  if (line == "") c else fuzzClimbChoose(c, line, i, fuzzDistMerge(c.best, ds), fuzzNoteLines(c.lines, c.best, ds, line), ds, fuzzDistFar(c.best, ds))
+
+def fuzzClimbChoose(c: FuzzClimb, line: String, i: Int, best: Map[String, Int], lines: Map[String, String], ds: List[(String, Int)], far: (String, Int)): FuzzClimb =
+  if (fuzzClimbHit(c, line, ds)) fuzzClimbLock(best, lines, line, log2Floor(fuzzSiteDist(ds, c.site)), fuzzClimbSign(c, i), c.site) else fuzzClimbMiss(c, line, i, best, lines, far)
+
+def fuzzClimbHit(c: FuzzClimb, line: String, ds: List[(String, Int)]): Bool =
+  c.site != "" && fuzzSiteBetter(c.best, ds, c.site)
+
+def fuzzClimbSign(c: FuzzClimb, i: Int): Int =
+  if (i % 2 == 1 && c.seed != "") climbSign(c) else 1
+
+def fuzzClimbMiss(c: FuzzClimb, line: String, i: Int, best: Map[String, Int], lines: Map[String, String], far: (String, Int)): FuzzClimb =
+  if (fuzzClimbSwap(c, far)) fuzzClimbLock(best, lines, line, log2Floor(far._2), 1, far._1) else fuzzClimbKeep(c, i, best, lines)
+
+def fuzzClimbSwap(c: FuzzClimb, far: (String, Int)): Bool =
+  far._1 != "" && (c.site == "" || c.exp <= 4 && far._2 > 32 && far._1 != c.site)
+
+def fuzzClimbKeep(c: FuzzClimb, i: Int, best: Map[String, Int], lines: Map[String, String]): FuzzClimb =
+  if (i % 2 == 1 && c.seed != "") fuzzClimbTry(FuzzClimb(best, c.seed, c.tries + 1, c.exp, c.sign, c.site, lines)) else fuzzClimbIdle(c, best, lines)
+
+def fuzzClimbIdle(c: FuzzClimb, best: Map[String, Int], lines: Map[String, String]): FuzzClimb =
+  if (c.site == "") fuzzClimbPromote(best, lines) else FuzzClimb(best, c.seed, c.tries, c.exp, c.sign, c.site, lines)
+
+def fuzzClimbLock(best: Map[String, Int], lines: Map[String, String], line: String, exp: Int, sign: Int, site: String): FuzzClimb =
+  FuzzClimb(best, line, 0, exp, sign, site, lines)
 
 def fuzzClimbTry(c: FuzzClimb): FuzzClimb =
-  if (climbSpent(c)) FuzzClimb(c.best, "", 0, 0, 1) else c
+  if (climbSpent(c)) fuzzClimbPromote(c.best, Map.remove(c.lines, c.site)) else c
+
+def fuzzClimbPromote(best: Map[String, Int], lines: Map[String, String]): FuzzClimb =
+  fuzzClimbPromoteAt(best, lines, fuzzHoldPick(best, lines))
+
+def fuzzClimbPromoteAt(best: Map[String, Int], lines: Map[String, String], pick: (String, Int)): FuzzClimb =
+  pick match {
+    case (site, dist) => fuzzClimbPromoteGo(best, lines, site, dist, Map.getOrElse(lines, site, ""))
+  }
+
+def fuzzClimbPromoteGo(best: Map[String, Int], lines: Map[String, String], site: String, dist: Int, line: String): FuzzClimb =
+  if (site == "" || line == "") FuzzClimb(best, "", 0, 0, 1, "", lines) else fuzzClimbLock(best, Map.remove(lines, site), line, log2Floor(dist), 1, site)
+
+def fuzzClimbLine(script: String): String =
+  fuzzClimbLineGo(Verify.linesOf(script), "")
+
+def fuzzClimbLineGo(lines: List[String], acc: String): String =
+  if (List.isEmpty(lines)) if (fuzzLineInt(acc)) acc else "" else fuzzClimbLineAt(List.at(lines, 0), List.tail(lines), acc)
+
+def fuzzClimbLineAt(line: String, rest: List[String], acc: String): String =
+  fuzzClimbLineGo(rest, if (line == "") acc else line)
+
+def fuzzLineInt(line: String): Bool =
+  fuzzTokInt(Verify.scriptToks(line), 2)
+
+def fuzzTokInt(toks: List[String], i: Int): Bool =
+  if (i >= List.len(toks) || List.at(toks, 0) != "drive") false else if (isIntTok(List.at(toks, i))) true else fuzzTokInt(toks, i + 1)
+
+def fuzzNoteLines(lines: Map[String, String], best: Map[String, Int], ds: List[(String, Int)], line: String): Map[String, String] =
+  if (line == "" || List.isEmpty(ds)) lines else fuzzNoteOne(lines, best, List.at(ds, 0), List.tail(ds), line)
+
+def fuzzNoteOne(lines: Map[String, String], best: Map[String, Int], d: (String, Int), rest: List[(String, Int)], line: String): Map[String, String] =
+  d match {
+    case (name, v) => fuzzNoteLines(if (fuzzFarTake(best, name, v, 0)) Map.set(lines, name, line) else lines, best, rest, line)
+  }
+
+def fuzzDistFar(best: Map[String, Int], ds: List[(String, Int)]): (String, Int) =
+  fuzzDistFarGo(ds, best, "", 0)
+
+def fuzzDistFarGo(ds: List[(String, Int)], best: Map[String, Int], site: String, dist: Int): (String, Int) =
+  if (List.isEmpty(ds)) (site, dist) else fuzzDistFarAt(List.at(ds, 0), List.tail(ds), best, site, dist)
+
+def fuzzDistFarAt(d: (String, Int), rest: List[(String, Int)], best: Map[String, Int], site: String, dist: Int): (String, Int) =
+  d match {
+    case (name, v) => if (fuzzFarTake(best, name, v, dist)) fuzzDistFarGo(rest, best, name, v) else fuzzDistFarGo(rest, best, site, dist)
+  }
+
+def fuzzFarTake(best: Map[String, Int], name: String, v: Int, dist: Int): Bool =
+  v > 0 && v > dist && v < Map.getOrElse(best, name, v + 1) && log2Floor(v) <= 16
+
+def fuzzSiteBetter(best: Map[String, Int], ds: List[(String, Int)], site: String): Bool =
+  fuzzSiteBetterGo(ds, best, site)
+
+def fuzzSiteBetterGo(ds: List[(String, Int)], best: Map[String, Int], site: String): Bool =
+  if (List.isEmpty(ds)) false else fuzzSiteBetterAt(List.at(ds, 0), List.tail(ds), best, site)
+
+def fuzzSiteBetterAt(d: (String, Int), rest: List[(String, Int)], best: Map[String, Int], site: String): Bool =
+  d match {
+    case (name, v) => if (name == site && v > 0 && v < Map.getOrElse(best, site, v + 1)) true else fuzzSiteBetterGo(rest, best, site)
+  }
+
+def fuzzSiteDist(ds: List[(String, Int)], site: String): Int =
+  fuzzSiteDistGo(ds, site, 0)
+
+def fuzzSiteDistGo(ds: List[(String, Int)], site: String, acc: Int): Int =
+  if (List.isEmpty(ds)) acc else fuzzSiteDistAt(List.at(ds, 0), List.tail(ds), site, acc)
+
+def fuzzSiteDistAt(d: (String, Int), rest: List[(String, Int)], site: String, acc: Int): Int =
+  d match {
+    case (name, v) => if (name == site) v else fuzzSiteDistGo(rest, site, acc)
+  }
+
+def fuzzHoldPick(best: Map[String, Int], lines: Map[String, String]): (String, Int) =
+  fuzzHoldGo(Map.keys(lines), best, "", 0)
+
+def fuzzHoldGo(keys: List[String], best: Map[String, Int], site: String, dist: Int): (String, Int) =
+  if (List.isEmpty(keys)) (site, dist) else fuzzHoldAt(List.at(keys, 0), List.tail(keys), best, site, dist)
+
+def fuzzHoldAt(name: String, rest: List[String], best: Map[String, Int], site: String, dist: Int): (String, Int) =
+  fuzzHoldGo(rest, best, if (fuzzHoldTake(best, name, dist)) name else site, if (fuzzHoldTake(best, name, dist)) Map.getOrElse(best, name, 0) else dist)
+
+def fuzzHoldTake(best: Map[String, Int], name: String, dist: Int): Bool =
+  Map.getOrElse(best, name, 0) > dist && log2Floor(Map.getOrElse(best, name, 0)) <= 16
 
 def fuzzBaseScript(job: FuzzJob, script: String): String =
   if (script == "" && job.hasUi) """tap 0
