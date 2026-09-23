@@ -43,7 +43,7 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 Resolve these gaps when they prevent ordinary language use.
 
-1. **Compile-time performance** — `scuzz check examples/compiler` is 20 s. A cold `scuzz build examples/tyck` is 47 s. Re-time both commands before another show-and-parse slice. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Env lookup returns `Ty`. Remaining cost: RC retain/release churn and `sz_list_concat` in string building. `concreteTy` still parses a shown type. Coverage uses the live program when compiled files match live.
+1. **Compile-time performance** — `scuzz check examples/compiler` is 51 s on this host. A cold `scuzz build examples/tyck` is 56 s on this host. Re-time both commands before another show-and-parse slice. Emitted string literals intern to pinned allocations. Kit signatures parse to `Ty` when the table is built. Generic kit calls compare those `Ty` values. `zipCheck` and `checkKnownRet` keep `Ty`. Env lookup returns `Ty`. A borrowed tail of a live parameter does not retain. Owned concat reuses a unique left value. A shared or pinned left value is copied. Remaining cost: retain and release of other values. `concreteTy` still parses a shown type. Coverage uses the live program when compiled files match live.
 
 ### Table-stakes
 
