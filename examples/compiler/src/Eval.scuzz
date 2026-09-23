@@ -290,7 +290,7 @@ def kitProbe(f: String, vals: List[Value], p: EvProg): Value =
   kitCall(f, vals, EvEnv(noVars(), p.mainMod, "kit-probe"), kitReady(f, vals, p), 0)
 
 def kitReady(f: String, vals: List[Value], p: EvProg): EvProg =
-  if (f == "Property.signalInt") kitHold(sigAnon(strAt(vals, 0), Value.VInt(1), p), p) else if (f == "Property.signalStr") kitHold(sigAnon(strAt(vals, 0), Value.VStr("a"), p), p) else if (Str.startsWith(f, "Property.signalList")) kitHold(sigAnon(strAt(vals, 0), Value.VList(Value.VStr("a") :: noVals()), p), p) else p
+  if (f == "Property.signalInt") kitHold(sigMake(strAt(vals, 0), Value.VInt(1), p), p) else if (f == "Property.signalStr") kitHold(sigMake(strAt(vals, 0), Value.VStr("a"), p), p) else if (Str.startsWith(f, "Property.signalList")) kitHold(sigAnon(strAt(vals, 0), Value.VList(Value.VStr("a") :: noVals()), p), p) else p
 
 def kitHold(_v: Value, p: EvProg): EvProg =
   p
@@ -1997,10 +1997,7 @@ def propLive(f: String, vals: List[Value], p: EvProg): Value =
   if (f == "Property.a11yHas") Value.VBool(Property.a11yHas(strAt(vals, 0))) else if (strAt(vals, 0) == "") propNative(f, vals) else propNamed(f, vals, p)
 
 def propNamed(f: String, vals: List[Value], p: EvProg): Value =
-  propHit(f, vals, propFind(listOf(refGet(List.at(p.sig, 0))), strAt(vals, 0), propKindOf(f)))
-
-def propKindOf(f: String): String =
-  if (f == "Property.signalInt") "int" else if (f == "Property.signalStr") "str" else "list"
+  if (f == "Property.signalInt" || f == "Property.signalStr") propNative(f, vals) else propHit(f, vals, propFind(listOf(refGet(List.at(p.sig, 0))), strAt(vals, 0), "list"))
 
 def propFind(xs: List[Value], name: String, kind: String): (Bool, Value) =
   if (List.isEmpty(xs)) (false, Value.VUnit) else propFindHd(List.at(xs, 0), List.tail(xs), name, kind)
