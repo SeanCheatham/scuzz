@@ -14866,6 +14866,33 @@ int main(void) {
     remove(path);
   }
 
+  {
+    /* One buffer, three keys. The second text is a new site. The third
+     * repeats the first and adds no line. */
+    const char *path = "/tmp/scuzz_test_coverage_key.txt";
+    char buf[64];
+    char text[128] = {0};
+    FILE *file;
+    remove(path);
+    setenv("SCUZZ_COVERAGE_DUMP", path, 1);
+    sz_coverage_env_refresh();
+    strcpy(buf, "Flow.scuzz:1:1@1#t");
+    sz_coverage_hit_key(buf);
+    strcpy(buf, "Flow.scuzz:2:2@2#e");
+    sz_coverage_hit_key(buf);
+    strcpy(buf, "Flow.scuzz:1:1@1#t");
+    sz_coverage_hit_key(buf);
+    unsetenv("SCUZZ_COVERAGE_DUMP");
+    sz_coverage_env_refresh();
+    file = fopen(path, "r");
+    assert(file);
+    assert(fread(text, 1, sizeof(text) - 1, file) ==
+           strlen("Flow.scuzz:1:1@1#t\nFlow.scuzz:2:2@2#e\n"));
+    assert(!strcmp(text, "Flow.scuzz:1:1@1#t\nFlow.scuzz:2:2@2#e\n"));
+    fclose(file);
+    remove(path);
+  }
+
   test_driver_growth();
   test_fuzz_probe_closures();
   test_file_timeline();

@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <regex.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -367,24 +368,24 @@ static void coverage_remember(const char *loc, char *text, unsigned hash) {
   coverage_hits[hash] = hit;
 }
 
-static void coverage_hit(const char *loc) {
-  unsigned hash;
+static unsigned coverage_hash_ptr(const char *loc) {
+  return (unsigned)((uintptr_t)loc >> 4) % 256;
+}
+
+/* FNV-1a. Evaluator keys are heap text, so they share a bucket by text. */
+static unsigned coverage_hash_text(const char *loc) {
+  unsigned h = 2166136261u;
+  const unsigned char *p = (const unsigned char *)loc;
+  while (*p) {
+    h ^= *p++;
+    h *= 16777619u;
+  }
+  return h % 256;
+}
+
+static void coverage_write(const char *loc, const char *id, unsigned hash) {
   char *text;
   int written;
-  coverage_probe();
-  if (!coverage_path || !loc)
-    return;
-  hash = (unsigned)((uintptr_t)loc >> 4) % 256;
-  {
-    CoverageHit *hit;
-    for (hit = coverage_hits[hash]; hit; hit = hit->next)
-      if (hit->loc == loc)
-        return;
-  }
-  if (coverage_text_seen(loc)) {
-    coverage_remember(loc, NULL, hash);
-    return;
-  }
   if (!coverage_file) {
     coverage_file = fopen(coverage_path, "a");
     if (!coverage_file)
@@ -397,7 +398,42 @@ static void coverage_hit(const char *loc) {
   if (!text)
     sz_panic("coverage: out of memory");
   strcpy(text, loc);
-  coverage_remember(loc, text, hash);
+  coverage_remember(id, text, hash);
+}
+
+/* Compiled sites pass a stable literal. Repeat hits match the pointer. */
+static void coverage_hit(const char *loc) {
+  unsigned hash;
+  CoverageHit *hit;
+  coverage_probe();
+  if (!coverage_path || !loc)
+    return;
+  hash = coverage_hash_ptr(loc);
+  for (hit = coverage_hits[hash]; hit; hit = hit->next)
+    if (hit->loc == loc)
+      return;
+  if (coverage_text_seen(loc)) {
+    coverage_remember(loc, NULL, hash);
+    return;
+  }
+  coverage_write(loc, loc, hash);
+}
+
+/* Evaluator keys reuse one buffer, then the caller frees it. Match the
+ * text. Do not store that pointer. */
+static void coverage_hit_text(const char *loc) {
+  unsigned hash;
+  CoverageHit *hit;
+  coverage_probe();
+  if (!coverage_path || !loc)
+    return;
+  hash = coverage_hash_text(loc);
+  for (hit = coverage_hits[hash]; hit; hit = hit->next)
+    if (hit->text && strcmp(hit->text, loc) == 0)
+      return;
+  if (coverage_text_seen(loc))
+    return;
+  coverage_write(loc, NULL, hash);
 }
 
 void sz_coverage_hit(const char *loc) {
@@ -406,7 +442,7 @@ void sz_coverage_hit(const char *loc) {
   coverage_hit(loc);
 }
 
-void sz_coverage_hit_key(const char *loc) { coverage_hit(loc); }
+void sz_coverage_hit_key(const char *loc) { coverage_hit_text(loc); }
 
 void sz_panic_push_src(const char *loc) {
   if (!loc || !loc[0])
@@ -4905,6 +4941,34 @@ done:
   return NULL;
 }
 
+#if defined(__APPLE__)
+/* The main thread parks in CFRunLoop. The worker retries EINTR and keeps
+ * running. A caught signal must still kill the process. Ctrl+C and SIGTERM
+ * stop a session. */
+static void sz_fatal_signal(int sig) {
+  struct sigaction sa;
+  sigset_t set;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sigaction(sig, &sa, NULL);
+  sigemptyset(&set);
+  sigaddset(&set, sig);
+  pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+  raise(sig);
+  _exit(128 + sig);
+}
+
+static void sz_arm_fatal_signals(void) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = sz_fatal_signal;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGINT, &sa, NULL);
+  sigaction(SIGTERM, &sa, NULL);
+}
+#endif
+
 int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   /* Run the program on a heap-allocated stack so generated IR (deep but
    * bounded) does not depend on the process main-thread ulimit. Required on
@@ -4938,6 +5002,7 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   }
 #if defined(__APPLE__)
   g_sz_main_worker_done = 0;
+  sz_arm_fatal_signals();
 #endif
   perr = pthread_create(&thr, &attr, sz_runtime_main_worker, &args);
   pthread_attr_destroy(&attr);
