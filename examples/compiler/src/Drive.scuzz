@@ -1917,7 +1917,8 @@ def shellToReqSp(s: String, i: Int, j: Int, acc: String): String =
   if (i >= Str.len(s)) acc else if (i == j) shellToReqAt(s, j + 1, acc) else shellToReqAt(s, j + 1, Str.concat(acc, shellTokReq(Str.slice(s, i, j))))
 
 def shellTokReq(tok: String): String =
-  if (Str.startsWith(tok, "SCUZZ_") && Str.indexOf(tok, "=") > 6) Str.concat(Str.drop(tok, 6), "\n") else ""
+  if (Str.startsWith(tok, "SCUZZ_") && Str.indexOf(tok, "=") > 6) Str.concat(Str.drop(tok, 6), """
+""") else ""
 
 def fuzzProbeEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String, picks: List[String], outDir: String, uiEnv: String, live: Bool, session: Bool): String =
   Str.concat(if (live || session) kv(pre, "NET_LIVE", "1") else "", Str.concat(if (session) kv(pre, "NET_SESSION", "1") else "", Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnvFor(pre, uiEnv) else "", Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzPicksEnv(pre, picks), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir)))))))))
