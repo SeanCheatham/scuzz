@@ -1950,7 +1950,7 @@ def emitPropCheck(code: String, vals: List[String], owns: List[Bool], _prefix: S
   Slot(join(code, join(line(Str.concat("call void @sz_property_check(ptr ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))), if (headOwn(owns)) relPtr(arg0(vals)) else "")), arg2(vals), headOwn(tailOwn(tailOwn(owns))))
 
 def emitViewKit(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
-  if (f == "View.column" || f == "View.row" || f == "View.stack" || f == "View.wrap" || f == "View.breadcrumb") emitViewBox(viewBoxRt(f), code, vals, prefix) else if (f == "View.grid") emitViewGrid(code, vals, prefix) else if (f == "View.divider") emitViewNil("sz_lang_view_divider", code, prefix) else if (f == "View.verticalDivider") emitViewNil("sz_lang_view_vertical_divider", code, prefix) else if (viewWrap1Rt(f) != "") emitViewPtr1(viewWrap1Rt(f), code, vals, prefix) else if (viewDrop1Rt(f) != "") emitViewDrop1(viewDrop1Rt(f), code, vals, owns, prefix) else if (viewI64PtrRt(f) != "") emitViewI64Ptr(viewI64PtrRt(f), code, vals, prefix) else if (viewI64I64PtrRt(f) != "") emitViewI64I64Ptr(viewI64I64PtrRt(f), code, vals, prefix) else if (tapViewRt(f) != "") emitViewTap(tapViewRt(f), code, vals, owns, prefix) else emitViewKit2(f, code, vals, owns, prefix)
+  if (f == "View.column" || f == "View.row" || f == "View.stack" || f == "View.wrap" || f == "View.breadcrumb") emitViewBox(viewBoxRt(f), code, vals, owns, prefix) else if (f == "View.grid") emitViewGrid(code, vals, owns, prefix) else if (f == "View.divider") emitViewNil("sz_lang_view_divider", code, prefix) else if (f == "View.verticalDivider") emitViewNil("sz_lang_view_vertical_divider", code, prefix) else if (viewWrap1Rt(f) != "") emitViewPtr1(viewWrap1Rt(f), code, vals, prefix) else if (viewDrop1Rt(f) != "") emitViewDrop1(viewDrop1Rt(f), code, vals, owns, prefix) else if (viewI64PtrRt(f) != "") emitViewI64Ptr(viewI64PtrRt(f), code, vals, prefix) else if (viewI64I64PtrRt(f) != "") emitViewI64I64Ptr(viewI64I64PtrRt(f), code, vals, prefix) else if (tapViewRt(f) != "") emitViewTap(tapViewRt(f), code, vals, owns, prefix) else emitViewKit2(f, code, vals, owns, prefix)
 
 def emitViewKit2(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   if (f == "View.section") emitViewSection(code, vals, owns, prefix) else if (f == "View.link") emitViewPtr2("sz_lang_view_link", true, true, code, vals, owns, prefix) else if (f == "View.navTile") emitViewNavTile(code, vals, owns, prefix) else if (viewPtr2Drop1Rt(f) != "") emitViewPtr2(viewPtr2Drop1Rt(f), false, true, code, vals, owns, prefix) else if (viewPtr2Drop0Rt(f) != "") emitViewPtr2(viewPtr2Drop0Rt(f), true, false, code, vals, owns, prefix) else if (viewPtr2Rt(f) != "") emitViewPtr2(viewPtr2Rt(f), false, false, code, vals, owns, prefix) else if (viewRadioRt(f) != "") emitViewRadio(viewRadioRt(f), code, vals, owns, prefix) else if (f == "View.showWhen") emitViewShowWhen(code, vals, prefix) else if (f == "View.split") emitViewPtr3("sz_lang_view_split", code, vals, prefix) else if (f == "View.segmented") emitViewSeg(code, vals, owns, prefix) else if (f == "View.expansionTile") emitViewExp(code, vals, owns, prefix) else if (f == "View.inkWell") emitViewInk(code, vals, owns, prefix) else if (f == "View.listTile") emitViewListTile(code, vals, owns, prefix) else if (f == "View.image") emitViewImage(code, vals, owns, prefix) else if (f == "View.icon") emitViewIcon(code, vals, prefix) else emitViewPtr1("sz_lang_view_center", code, vals, prefix)
@@ -1958,14 +1958,17 @@ def emitViewKit2(f: String, code: String, vals: List[String], owns: List[Bool], 
 def viewBoxRt(f: String): String =
   if (f == "View.column") "sz_lang_view_column" else if (f == "View.row") "sz_lang_view_row" else if (f == "View.wrap") "sz_lang_view_wrap" else if (f == "View.breadcrumb") "sz_lang_view_breadcrumb" else "sz_lang_view_stack"
 
-def emitViewBox(rt: String, code: String, vals: List[String], prefix: String): Slot =
-  Slot(join(code, join(viewBoxNew(rt, prefix), emitViewAdds(pct(prefix, "v"), vals, prefix, 0))), pct(prefix, "v"), true)
+def emitViewBox(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(viewBoxNew(rt, prefix), emitViewAdds(pct(prefix, "v"), vals, owns, prefix, 0))), pct(prefix, "v"), true)
 
 def viewBoxNew(rt: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, "()"))))
 
-def emitViewAdds(parent: String, xs: List[String], prefix: String, i: Int): String =
-  if (List.isEmpty(xs)) "" else join(viewAddLine(parent, List.at(xs, 0), prefix, i), emitViewAdds(parent, List.tail(xs), prefix, i + 1))
+def emitViewAdds(parent: String, xs: List[String], owns: List[Bool], prefix: String, i: Int): String =
+  if (List.isEmpty(xs)) "" else join(viewAddOwn(parent, List.at(xs, 0), headOwn(owns), prefix, i), emitViewAdds(parent, List.tail(xs), tailOwn(owns), prefix, i + 1))
+
+def viewAddOwn(parent: String, child: String, owned: Bool, prefix: String, i: Int): String =
+  join(if (owned) "" else retPtr(child), viewAddLine(parent, child, prefix, i))
 
 def viewAddLine(parent: String, child: String, prefix: String, i: Int): String =
   line(Str.concat(tmp(prefix, Str.concat("ac", Str.fromInt(i))), Str.concat("call ptr @sz_lang_view_add_child(ptr ", Str.concat(parent, Str.concat(", ptr ", Str.concat(child, ")"))))))
@@ -2077,8 +2080,8 @@ def viewRadioRt(f: String): String =
 def emitViewNil(rt: String, code: String, prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, "()"))))), pct(prefix, "v"), true)
 
-def emitViewGrid(code: String, vals: List[String], prefix: String): Slot =
-  Slot(join(code, join(viewGridNew(vals, prefix), emitViewAdds(pct(prefix, "v"), List.tail(vals), prefix, 0))), pct(prefix, "v"), true)
+def emitViewGrid(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  Slot(join(code, join(viewGridNew(vals, prefix), emitViewAdds(pct(prefix, "v"), List.tail(vals), tailOwn(owns), prefix, 0))), pct(prefix, "v"), true)
 
 def viewGridNew(vals: List[String], prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_lang_view_grid(i64 ", Str.concat(arg0(vals), ")"))))
