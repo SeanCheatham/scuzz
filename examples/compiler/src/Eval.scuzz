@@ -281,13 +281,19 @@ def mainFail(e: Value): IO[Value] =
   }
 
 def excludedKits(): List[String] =
-  "Ui.setEditor" :: "Ui.editorCaret" :: "Property.signal" :: "Property.a11yHas" :: "Fuzz." :: noNames()
+  "Ui.setEditor" :: "Ui.editorCaret" :: noNames()
 
 def isExcludedKit(f: String): Bool =
   List.exists(excludedKits(), pre => Str.startsWith(f, pre))
 
 def kitProbe(f: String, vals: List[Value], p: EvProg): Value =
-  kitCall(f, vals, EvEnv(noVars(), p.mainMod, ""), p, 0)
+  kitCall(f, vals, EvEnv(noVars(), p.mainMod, "kit-probe"), kitReady(f, vals, p), 0)
+
+def kitReady(f: String, vals: List[Value], p: EvProg): EvProg =
+  if (f == "Property.signalInt") kitHold(sigMake(strAt(vals, 0), Value.VInt(1), p), p) else if (f == "Property.signalStr") kitHold(sigMake(strAt(vals, 0), Value.VStr("a"), p), p) else if (Str.startsWith(f, "Property.signalList")) kitHold(sigAnon(strAt(vals, 0), Value.VList(Value.VStr("a") :: noVals()), p), p) else p
+
+def kitHold(_v: Value, p: EvProg): EvProg =
+  p
 
 def isUnsupported(v: Value): Bool =
   v match {
@@ -1423,7 +1429,7 @@ def kitCall(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Valu
   logKit(kitDispatch(f, vals, env, p, off), f, env, p, off)
 
 def kitDispatch(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "Map.")) mapKit(f, vals, env, p, off) else if (Str.startsWith(f, "Set.")) setKit(f, vals, env, p, off) else if (Str.startsWith(f, "Json.")) jsonKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else if (Str.startsWith(f, "Stream.")) streamKit(f, vals, env, p, off) else if (Str.startsWith(f, "Fs.") || Str.startsWith(f, "Sys.")) fsKit(f, vals, env, p, off) else if (Str.startsWith(f, "Net.")) netKit(f, vals, env, p, off) else if (isHandleKit(f)) handleKit(f, vals, env, p, off) else if (Str.startsWith(f, "Property.")) propKit(f, vals, env, p, off) else if (Str.startsWith(f, "Timeline.")) tlKit(f, vals, env, p, off) else if (Str.startsWith(f, "Verdict.")) verdictKit(f, vals, env, p, off) else if (isUiKit(f)) uiKit(f, vals, env, p, off) else miscKit(f, vals, env, p, off)
+  if (hasErr(vals)) firstErr(vals) else if (Str.startsWith(f, "Str.")) strKit(f, vals, env, p, off) else if (Str.startsWith(f, "List.")) listKit(f, vals, env, p, off) else if (Str.startsWith(f, "Map.")) mapKit(f, vals, env, p, off) else if (Str.startsWith(f, "Set.")) setKit(f, vals, env, p, off) else if (Str.startsWith(f, "Json.")) jsonKit(f, vals, env, p, off) else if (Str.startsWith(f, "IO.")) ioKit(f, vals, env, p, off) else if (Str.startsWith(f, "Stream.")) streamKit(f, vals, env, p, off) else if (Str.startsWith(f, "Fs.") || Str.startsWith(f, "Sys.")) fsKit(f, vals, env, p, off) else if (Str.startsWith(f, "Net.")) netKit(f, vals, env, p, off) else if (isHandleKit(f)) handleKit(f, vals, env, p, off) else if (Str.startsWith(f, "Property.")) propKit(f, vals, env, p, off) else if (Str.startsWith(f, "Fuzz.")) fuzzKit(f, vals, env, p, off) else if (Str.startsWith(f, "Timeline.")) tlKit(f, vals, env, p, off) else if (Str.startsWith(f, "Verdict.")) verdictKit(f, vals, env, p, off) else if (isUiKit(f)) uiKit(f, vals, env, p, off) else miscKit(f, vals, env, p, off)
 
 def strKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Str.fromInt") Value.VStr(Str.fromInt(intAt(vals, 0))) else if (f == "Str.fromBool") Value.VStr(Str.fromBool(boolOf(List.at(vals, 0)))) else if (f == "Str.concat") Value.VStr(Str.concat(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.len") Value.VInt(Str.len(strAt(vals, 0))) else if (f == "Str.byteLen") Value.VInt(Str.byteLen(strAt(vals, 0))) else if (f == "Str.eq") Value.VBool(strAt(vals, 0) == strAt(vals, 1)) else if (f == "Str.slice") Value.VStr(Str.slice(strAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Str.byteSlice") Value.VStr(Str.byteSlice(strAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Str.charAt") Value.VInt(Str.charAt(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.toInt") Value.VInt(Str.toInt(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.repeat") Value.VStr(Str.repeat(strAt(vals, 0), intAt(vals, 1))) else if (f == "Str.startsWith") Value.VBool(Str.startsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.endsWith") Value.VBool(Str.endsWith(strAt(vals, 0), strAt(vals, 1))) else if (f == "Str.contains") Value.VBool(Str.contains(strAt(vals, 0), strAt(vals, 1))) else strKit2(f, vals, env, p, off)
@@ -1651,6 +1657,19 @@ def uiRun(fv: Value, env: EvEnv, p: EvProg, off: Int): Value =
 
 def sigKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Signal.make") sigMake("", List.at(vals, 0), p) else if (f == "Signal.makeN") sigMake(strAt(vals, 0), List.at(vals, 1), p) else if (f == "Signal.get") sigGet(List.at(vals, 0), env, p, off) else if (f == "Signal.set") sigSet(List.at(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Signal.map") sigMap("", List.at(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Signal.mapN") sigMap(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def sigAnon(name: String, v: Value, p: EvProg): Value =
+  sigAnonAt(name, v, intOf(refGet(List.at(p.sig, 1))), listOf(refGet(List.at(p.sig, 0))), p)
+
+def sigAnonAt(name: String, v: Value, next: Int, pool: List[Value], p: EvProg): Value =
+  sigBump(sigGrow(sigBare(name, v, next), List.take(pool, next), p), next, p)
+
+def sigBare(name: String, v: Value, id: Int): Value =
+  v match {
+    case Value.VInt(n) => Value.VSig(id, name, Signal.make(v), Signal.make(n), Signal.make(""))
+    case Value.VStr(x) => Value.VSig(id, name, Signal.make(v), Signal.make(0), Signal.make(x))
+    case _ => Value.VSig(id, name, Signal.make(v), Signal.make(0), Signal.make(""))
+  }
 
 def sigMake(name: String, v: Value, p: EvProg): Value =
   sigTake(name, v, intOf(refGet(List.at(p.sig, 1))), listOf(refGet(List.at(p.sig, 0))), p)
@@ -1972,7 +1991,101 @@ def seqUnit(_u: Unit): Value =
   Value.VUnit
 
 def propKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Property.sometimes") seqUnit(Property.sometimes(strAt(vals, 0))) else if (f == "Property.check") propCheck(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Property.assert") Value.VIo(unitIo(Property.assert(strAt(vals, 0), boolOf(List.at(vals, 1))))) else if (f == "Property.classify") Value.VBool(Property.classify(strAt(vals, 0), boolOf(List.at(vals, 1)))) else if (f == "Property.force") propForce(List.at(vals, 0), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (Str.startsWith(f, "Property.signal") || f == "Property.a11yHas") propLive(f, vals, p) else if (f == "Property.sometimes") seqUnit(Property.sometimes(strAt(vals, 0))) else if (f == "Property.check") propCheck(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Property.assert") Value.VIo(unitIo(Property.assert(strAt(vals, 0), boolOf(List.at(vals, 1))))) else if (f == "Property.classify") Value.VBool(Property.classify(strAt(vals, 0), boolOf(List.at(vals, 1)))) else if (f == "Property.force") propForce(List.at(vals, 0), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def propLive(f: String, vals: List[Value], p: EvProg): Value =
+  if (f == "Property.a11yHas") Value.VBool(Property.a11yHas(strAt(vals, 0))) else if (strAt(vals, 0) == "") propNative(f, vals) else propNamed(f, vals, p)
+
+def propNamed(f: String, vals: List[Value], p: EvProg): Value =
+  if (f == "Property.signalInt" || f == "Property.signalStr") propNative(f, vals) else propHit(f, vals, propFind(listOf(refGet(List.at(p.sig, 0))), strAt(vals, 0), "list"))
+
+def propFind(xs: List[Value], name: String, kind: String): (Bool, Value) =
+  if (List.isEmpty(xs)) (false, Value.VUnit) else propFindHd(List.at(xs, 0), List.tail(xs), name, kind)
+
+def propFindHd(sv: Value, rest: List[Value], name: String, kind: String): (Bool, Value) =
+  sv match {
+    case Value.VSig(_, n, s, _, _) => if (n == name && propValKind(Signal.get(s)) == kind) (true, sigLive(sv)) else propFind(rest, name, kind)
+    case _ => propFind(rest, name, kind)
+  }
+
+def propValKind(v: Value): String =
+  v match {
+    case Value.VInt(_) => "int"
+    case Value.VStr(_) => "str"
+    case Value.VList(_) => "list"
+    case _ => "value"
+  }
+
+def sigLive(sv: Value): Value =
+  sv match {
+    case Value.VSig(_, _, s, si, ss) => sigRead(Signal.get(s), si, ss)
+    case _ => Value.VUnit
+  }
+
+def propHit(f: String, vals: List[Value], hit: (Bool, Value)): Value =
+  if (hit._1) propUse(f, hit._2, vals) else propNative(f, vals)
+
+def propUse(f: String, v: Value, vals: List[Value]): Value =
+  if (f == "Property.signalListLen") propListLen(v) else if (f == "Property.signalListAt") propListAt(v, intAt(vals, 1)) else v
+
+def propListLen(v: Value): Value =
+  v match {
+    case Value.VList(xs) => Value.VInt(List.len(xs))
+    case _ => Value.VInt(0)
+  }
+
+def propListAt(v: Value, i: Int): Value =
+  if (i < 0) Value.VStr("") else v match {
+  case Value.VList(xs) => propAt(xs, i)
+  case _ => Value.VStr("")
+}
+
+def propAt(xs: List[Value], i: Int): Value =
+  if (i >= List.len(xs)) Value.VStr("") else propHead(List.at(xs, i))
+
+def propHead(v: Value): Value =
+  v match {
+    case Value.VStr(s) => Value.VStr(s)
+    case _ => Value.VStr("")
+  }
+
+def propNative(f: String, vals: List[Value]): Value =
+  if (f == "Property.signalInt") Value.VInt(Property.signalInt(strAt(vals, 0))) else if (f == "Property.signalStr") Value.VStr(Property.signalStr(strAt(vals, 0))) else if (f == "Property.signalListLen") Value.VInt(Property.signalListLen(strAt(vals, 0))) else Value.VStr(Property.signalListAt(strAt(vals, 0), intAt(vals, 1)))
+
+def fuzzKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Fuzz.hit") fuzzHit(strAt(vals, 0), env) else if (f == "Fuzz.setup") fuzzSetup(List.at(vals, 0)) else if (f == "Fuzz.probe") fuzzProbeIo(List.at(vals, 0)) else if (f == "Fuzz.driver") fuzzDriver(strAt(vals, 0), intAt(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Fuzz.verify") fuzzVerify(strAt(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Fuzz.verifyRel") fuzzVerifyRel(strAt(vals, 0), List.at(vals, 1), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def fuzzHit(key: String, env: EvEnv): Value =
+  if (env.loc == "kit-probe") Value.VUnit else seqUnit(Fuzz.hit(key))
+
+def fuzzSetup(v: Value): Value =
+  Value.VIo(unitIo(IO.pure(()).flatMap(_ => Fuzz.setup(ioOf(v)))))
+
+def fuzzProbeIo(v: Value): Value =
+  Value.VIo(unitIo(IO.pure(()).flatMap(_ => Fuzz.probe(unitOf(ioOf(v))))))
+
+def fuzzDriver(name: String, n: Int, fn: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  Value.VIo(unitIo(IO.pure(()).flatMap(_ => Fuzz.driver(name, n, toks => fuzzDrv(fn, toks, env, p, off)))))
+
+def fuzzDrv(fn: Value, toks: List[String], env: EvEnv, p: EvProg, off: Int): IO[Unit] =
+  evUnit(applyValue(fn, Value.VList(fuzzToks(toks)) :: noVals(), env, p, off))
+
+def fuzzToks(toks: List[String]): List[Value] =
+  if (List.isEmpty(toks)) noVals() else Value.VStr(List.at(toks, 0)) :: fuzzToks(List.tail(toks))
+
+def fuzzVerify(name: String, fn: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  Value.VIo(unitIo(IO.pure(()).flatMap(_ => Fuzz.verify(name, t => fuzzClaim(fn, t, env, p, off)))))
+
+def fuzzClaim(fn: Value, t: Timeline, env: EvEnv, p: EvProg, off: Int): Verdict =
+  claimVerdict(apply1(fn, Value.VTimeline(t), env, p, off))
+
+def fuzzVerifyRel(name: String, fn: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  Value.VIo(unitIo(IO.pure(()).flatMap(_ => Fuzz.verifyRel(name, __tup => __tup match {
+  case (a, b) => fuzzRel(fn, a, b, env, p, off)
+}))))
+
+def fuzzRel(fn: Value, a: Timeline, b: Timeline, env: EvEnv, p: EvProg, off: Int): Verdict =
+  claimVerdict(apply2(fn, Value.VTimeline(a), Value.VTimeline(b), env, p, off))
 
 def propForce(v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   v match {
