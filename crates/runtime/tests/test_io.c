@@ -13225,6 +13225,149 @@ int main(void) {
     sz_testrt_oracles_refresh();
   }
 
+  /* A storm faults the n-th Fs call and every later Fs call. */
+  {
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
+    setenv("SCUZZ_FAULT_KIND", "fs", 1);
+    setenv("SCUZZ_FAULT_N", "2", 1);
+    setenv("SCUZZ_FAULT_STORM", "1", 1);
+    sz_testrt_install();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("a.txt"), sz_string_from_cstr("one")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("b.txt"), sz_string_from_cstr("two")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "injected fault") != NULL);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("c.txt"), sz_string_from_cstr("three")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "injected fault") != NULL);
+    sz_error_free(r.error);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_STORM");
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
+  }
+
+  /* One call still faults only the n-th Fs op. */
+  {
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
+    setenv("SCUZZ_FAULT_KIND", "fs", 1);
+    setenv("SCUZZ_FAULT_N", "2", 1);
+    sz_testrt_install();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("a.txt"), sz_string_from_cstr("one")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("b.txt"), sz_string_from_cstr("two")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("c.txt"), sz_string_from_cstr("three")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("c.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "three") == 0);
+    sz_release(r.value);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
+  }
+
+  /* A partial write builds the new bytes and keeps the previous file. */
+  {
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
+    setenv("SCUZZ_FAULT_KIND", "fs", 1);
+    setenv("SCUZZ_FAULT_N", "1", 1);
+    setenv("SCUZZ_FAULT_PARTIAL", "1", 1);
+    sz_testrt_install();
+    sz_testrt_fault_hold();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("note.txt"), sz_string_from_cstr("old")));
+    assert(r.ok);
+    sz_testrt_fault_release();
+    r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("note.txt"),
+                                     sz_string_from_cstr("new-body")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "partial write") != NULL);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("note.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "old") == 0);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("fresh.txt"),
+                                     sz_string_from_cstr("hello")));
+    assert(r.ok);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_PARTIAL");
+    unsetenv("SCUZZ_FAULT_KIND");
+    unsetenv("SCUZZ_FAULT_N");
+    unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
+  }
+
+  /* Seed 1 stays one call. Seed 145 storms. Seed 289 discards the write. */
+  {
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_testrt_oracles_refresh();
+    setenv("SCUZZ_FAULT_SEED", "1", 1);
+    sz_testrt_install();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("s.txt"), sz_string_from_cstr("a")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "injected fault") != NULL);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("s.txt"), sz_string_from_cstr("b")));
+    assert(r.ok);
+    sz_testrt_reset();
+    setenv("SCUZZ_FAULT_SEED", "145", 1);
+    sz_testrt_install();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("s.txt"), sz_string_from_cstr("a")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("s.txt"), sz_string_from_cstr("b")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    sz_testrt_reset();
+    setenv("SCUZZ_FAULT_SEED", "289", 1);
+    sz_testrt_install();
+    sz_testrt_fault_hold();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("s.txt"), sz_string_from_cstr("old")));
+    assert(r.ok);
+    sz_testrt_fault_release();
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("s.txt"), sz_string_from_cstr("new-body")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "partial write") != NULL);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("s.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "old") == 0);
+    sz_release(r.value);
+    sz_testrt_reset();
+    unsetenv("SCUZZ_FAULT_SEED");
+    unsetenv("SCUZZ_TESTRT");
+    sz_testrt_oracles_refresh();
+  }
+
   /* Deadlock oracle: all fibers parked with no timer pending. */
   {
     SzQueue *q = sz_queue_make();

@@ -143,11 +143,18 @@ static SzIo *unwrap_box(void *value, void *env) {
 
 /* Fault plan: SCUZZ_FAULT_KIND + SCUZZ_FAULT_N + SCUZZ_FAULT_MODE, else
  * SCUZZ_FAULT_SEED. Seed 0 / unset is no fault. Seed k>0 decodes as
- * kind=(k-1)%3, mode=((k-1)/3)%3, n=(((k-1)/3)/3)%16+1. */
+ * phase=(k-1)/144, base=(k-1)%144, kind=(base%3)+1,
+ * mode=((base/3)%3), n=(((base/3)/3)%16)+1.
+ * Phase bit 0 faults every later call. Phase bit 1 discards an Fs.write
+ * and keeps the previous file. Seeds 1..144 stay one call.
+ * SCUZZ_FAULT_STORM=1 and SCUZZ_FAULT_PARTIAL=1 set those bits when
+ * SCUZZ_FAULT_KIND is set. */
 static int g_fault_kind;
 static int g_fault_mode;
 static int g_fault_n;
 static int g_fault_seed;
+static int g_fault_storm;
+static int g_fault_partial;
 static int g_fault_count_fs;
 static int g_fault_count_net;
 static int g_fault_count_queue;
@@ -188,9 +195,18 @@ static int fault_mode_from_name(const char *s) {
   return SZ_FAULT_FAIL;
 }
 
+static int env_is_1(const char *name) {
+  const char *s = getenv(name);
+  return s && s[0] == '1';
+}
+
 static void fault_decode_seed(int seed) {
   int idx;
+  int base;
   int rest;
+  int phase;
+  g_fault_storm = 0;
+  g_fault_partial = 0;
   if (seed <= 0) {
     g_fault_kind = 0;
     g_fault_mode = SZ_FAULT_FAIL;
@@ -200,10 +216,14 @@ static void fault_decode_seed(int seed) {
   }
   g_fault_seed = seed;
   idx = seed - 1;
-  g_fault_kind = (idx % 3) + 1;
-  rest = idx / 3;
+  phase = idx / 144;
+  base = idx % 144;
+  g_fault_kind = (base % 3) + 1;
+  rest = base / 3;
   g_fault_mode = rest % 3;
   g_fault_n = (rest / 3) % 16 + 1;
+  g_fault_storm = (phase % 2) == 1;
+  g_fault_partial = ((phase / 2) % 2) == 1;
 }
 
 static void fault_arm_from_env(void) {
@@ -214,6 +234,8 @@ static void fault_arm_from_env(void) {
   g_fault_mode = SZ_FAULT_FAIL;
   g_fault_n = 0;
   g_fault_seed = 0;
+  g_fault_storm = 0;
+  g_fault_partial = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -230,6 +252,8 @@ static void fault_arm_from_env(void) {
     if (g_fault_n < 1)
       g_fault_n = 1;
     g_fault_mode = fault_mode_from_name(getenv("SCUZZ_FAULT_MODE"));
+    g_fault_storm = env_is_1("SCUZZ_FAULT_STORM");
+    g_fault_partial = env_is_1("SCUZZ_FAULT_PARTIAL");
     g_fault_seed = 0;
     return;
   }
@@ -301,6 +325,8 @@ int sz_testrt_fault_tick(int kind) {
   else
     return 0;
   *c += 1;
+  if (g_fault_storm)
+    return *c >= g_fault_n;
   return *c == g_fault_n;
 }
 
@@ -511,8 +537,24 @@ static void *mem_write(void *env) {
   MemNode *n;
   SzString *c = contents ? contents : NULL;
   sz_timeline_log_cstr("Fs.write", path_s ? sz_string_cstr(path_s) : "");
-  if (fs_fault(r))
+  if (sz_testrt_fault_tick(SZ_FAULT_FS)) {
+    if (g_fault_partial) {
+      size_t full = contents && contents->len > 0 ? contents->len : 0;
+      size_t keep = full / 2;
+      char *prefix = (char *)sz_alloc(keep + 1);
+      if (keep && contents && contents->data)
+        memcpy(prefix, contents->data, keep);
+      prefix[keep] = '\0';
+      sz_free(prefix);
+      sz_timeline_log_cstr("Fs.partial", path_s ? sz_string_cstr(path_s) : "");
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, "Fs: partial write");
+      return r;
+    }
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs: injected fault");
     return r;
+  }
   path = norm_path(sz_string_cstr(path_s));
   if (!path) {
     r->is_err = 1;
@@ -2754,6 +2796,8 @@ void sz_testrt_reset(void) {
   g_fault_mode = SZ_FAULT_FAIL;
   g_fault_n = 0;
   g_fault_seed = 0;
+  g_fault_storm = 0;
+  g_fault_partial = 0;
   g_fault_count_fs = 0;
   g_fault_count_net = 0;
   g_fault_count_queue = 0;
@@ -3350,9 +3394,10 @@ static void tl_fmt_fibers(char *buf, size_t cap) {
 }
 
 static void tl_fmt_fault(char *buf, size_t cap) {
-  snprintf(buf, cap, "kind=%s n=%d mode=%s seed=%d",
+  snprintf(buf, cap, "kind=%s n=%d mode=%s seed=%d storm=%d partial=%d",
            tl_fault_kind_name(g_fault_kind), g_fault_n,
-           tl_fault_mode_name(g_fault_mode), g_fault_seed);
+           tl_fault_mode_name(g_fault_mode), g_fault_seed, g_fault_storm ? 1 : 0,
+           g_fault_partial ? 1 : 0);
 }
 
 static int tl_checkpoint_interval(void) {

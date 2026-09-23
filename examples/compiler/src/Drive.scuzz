@@ -1639,7 +1639,10 @@ def fuzzSeedAdd(acc: List[String], src: String, ens: List[En]): List[String] =
   List.concat(acc, Verify.mapSeedE(Verify.parseVerifyEns(src, ens), ens))
 
 def fuzzFaultOf(job: FuzzJob, i: Int): String =
-  if (i <= 0 || List.isEmpty(job.faults)) "" else Verify.faultSeed(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1)
+  if (i <= 0 || List.isEmpty(job.faults)) "" else fuzzFaultAt(job, i)
+
+def fuzzFaultAt(job: FuzzJob, i: Int): String =
+  Verify.faultSeedPhase(List.at(job.faults, (i - 1) % List.len(job.faults))._1, List.at(job.faults, (i - 1) % List.len(job.faults))._2, (i - 1) / List.len(job.faults) % 16 + 1, ((i - 1) / (List.len(job.faults) * 16)) % 4)
 
 def fuzzSearch(job: FuzzJob, script: String, runs: List[FuzzRun], defs: List[Fun], acc: FuzzAcc): IO[FuzzAcc] =
   if (acc.search >= Verify.searchN(job.iterations) || acc.searchFail > 0 && !job.noFailFast) IO.pure(acc) else fuzzSearchRun(job, script, runs, defs, acc, fuzzWorkload(job, script, runs, defs, acc.search, acc.climb))

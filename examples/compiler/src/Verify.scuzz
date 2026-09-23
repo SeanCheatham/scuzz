@@ -1140,7 +1140,10 @@ def faultEntryOk(s: String): Bool =
   !List.isEmpty(faultPair(s))
 
 def faultSeed(kind: Int, mode: Int, n: Int): String =
-  Str.fromInt(1 + (kind - 1) + 3 * mode + 9 * (n - 1))
+  faultSeedPhase(kind, mode, n, 0)
+
+def faultSeedPhase(kind: Int, mode: Int, n: Int, phase: Int): String =
+  Str.fromInt(1 + (kind - 1) + 3 * mode + 9 * (n - 1) + 144 * phase)
 
 def faultRule(src: String, file: String, p: Prog): String =
   p match {
