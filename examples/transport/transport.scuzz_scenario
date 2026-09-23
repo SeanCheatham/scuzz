@@ -1,0 +1,34 @@
+def setup(): IO[Unit] =
+  IO.pure(())
+
+private def handle(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
+  req match {
+    case (_, _, _, _) => IO.pure((200, Map.empty(), "ok"))
+  }
+
+private def save(url: String, path: String): IO[Unit] =
+  IO.attempt(Net.httpGet(url, Map.empty())).flatMap(got => got match {
+  case Result.Ok(_) => Fs.write(path, "ok")
+  case Result.Err(message) => Fs.write(path, message)
+})
+
+private def closeOnce(port: Int): IO[Unit] =
+  for {
+    ln <- Net.tcpListen(port)
+    c <- Net.tcpAccept(ln)
+    _ <- Net.tcpClose(c)
+    _ <- Net.tcpClose(ln)
+  } yield ()
+
+private def capture(port: Int, tls: Bool, path: String): IO[Unit] =
+  for {
+    server <- Fiber.fork(if (tls) Net.serveOnceTls(port, handle) else closeOnce(port))
+    _ <- IO.ensure(save(s"https://127.0.0.1:${Str.fromInt(port)}/x", path), Fiber.interrupt(server))
+  } yield ()
+
+def cases(): IO[Unit] =
+  for {
+    _ <- capture(18491, false, "handshake.txt")
+    _ <- capture(18492, true, "trust.txt")
+  } yield ()
+

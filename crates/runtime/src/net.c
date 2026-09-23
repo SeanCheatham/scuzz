@@ -11,6 +11,7 @@
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +24,8 @@
  * DNS, connect, TLS, write, and read each wait at most 1000ms. A response
  * is (status, headers, body). HEAD finishes at the header. Bodies cap at
  * 1 MiB. Serve binds 0.0.0.0 and/or ::. serveTls terminates TLS with a
- * process cert. A loopback https client skips verify. Failures use SzError
+ * process cert. A loopback https client skips verify. SCUZZ_NET_SESSION=1
+ * verifies that cert and reports certificate rejected. Failures use SzError
  * code 6. */
 
 typedef struct {
@@ -826,6 +828,19 @@ static int http_tls_want(SSL *ssl, int n) {
   return 0;
 }
 
+/* URLSession verifies loopback certificates. The OpenSSL client does not. */
+static int http_session_client(void) {
+  const char *session = getenv("SCUZZ_NET_SESSION");
+  return session && session[0] == '1';
+}
+
+static const char *http_tls_fail(const HttpSt *st) {
+  if (http_session_client() && st && st->ssl &&
+      SSL_get_verify_result(st->ssl) != X509_V_OK)
+    return "certificate rejected";
+  return "TLS failed";
+}
+
 static void *http_tls_step(HttpSt *st, NetResult *r) {
   int n;
   int want;
@@ -845,7 +860,7 @@ static void *http_tls_step(HttpSt *st, NetResult *r) {
     }
     SSL_set_connect_state(st->ssl);
     SSL_set_tlsext_host_name(st->ssl, st->host);
-    if (host_is_loopback(st->host))
+    if (host_is_loopback(st->host) && !http_session_client())
       SSL_set_verify(st->ssl, SSL_VERIFY_NONE, NULL);
     else
       SSL_set1_host(st->ssl, st->host);
@@ -872,7 +887,7 @@ static void *http_tls_step(HttpSt *st, NetResult *r) {
     return r;
   }
   r->is_err = 1;
-  r->as.err = http_err(st, "TLS failed");
+  r->as.err = http_err(st, http_tls_fail(st));
   return r;
 }
 

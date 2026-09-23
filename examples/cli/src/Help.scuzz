@@ -136,9 +136,11 @@ Options:
       --relate
           Judge (Timeline, Timeline) => Verdict relation claims: replay each corpus entry under its own and a perturbed schedule, then exit
       --differential
-          Compare live structural dumps across Skia backends (skia, sk_sw, gpu)
+          Compare live structural dumps across Skia backends (skia, sk_sw, gpu). Compare pixel snapshots of one backend across two repeats
       --live
           Replay the corpus or one --replay file on the host loopback transport. Clock and files stay simulated. Pass --replay or --iterations 0
+      --session
+          Replay the corpus or one --replay file with URLSession certificate checks and TLS errors on host loopback. Clock and files stay simulated. Pass --replay or --iterations 0
       --asan
           Replay the corpus or one --replay file on the compiled engine under AddressSanitizer. Leak and use-after-free reports fail the probe. Pass --replay or --iterations 0
   -h, --help
@@ -151,6 +153,7 @@ Examples:
   scuzz fuzz --oracles examples/counter
   scuzz fuzz --replay build/fuzz/repro.toml
   scuzz fuzz --live --replay live.toml examples/api-report
+  scuzz fuzz --session --iterations 0 examples/transport
   scuzz fuzz --asan --iterations 0 examples/io
   scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example
   scuzz fuzz --differential --iterations 0 examples/counter
