@@ -12,6 +12,8 @@ Re-time the two commands in [`gaps.md`](gaps.md) before another compile-time cha
 
 The evaluator, `scuzz fuzz`, and the self-hosted CLI stay as locked in [`philosophy.md`](philosophy.md). A `[ui]` package runs search, mutation, and coverage on one headless host when the idle timeline matches. Compiler sources use forms the newest `v*` bootstrap emits. A `for` pattern bind stays out of compiler sources until a release emits it. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call.
 
+`scuzz diff` compares a git revision with the working tree under TestRuntime. `scripts/ci-delta.sh` is the proof. Locks: [`philosophy.md`](philosophy.md#verification-posture). Timeline alignment beyond state index, an IDE diff pane, and divergence attribution stay later.
+
 Do not start FFI, a package registry, physical-device packaging, or `*.scuzz_tune` in this work.
 
 ## Risks
