@@ -5111,6 +5111,16 @@ void sz_property_session_step(void) {
   tl_push();
 }
 
+/* Record a trailing effect before signal values go back. The claim reads
+ * that state. A later flush sees an empty effect log. */
+void sz_property_session_flush(void) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  if (!tr || tr[0] != '1')
+    return;
+  if (g_effects_len > 0)
+    tl_push();
+}
+
 static void claim_fail(const char *kind, const char *name, int idx) {
   char buf[256];
   snprintf(buf, sizeof buf, "%s failed: %s at state %d", kind,

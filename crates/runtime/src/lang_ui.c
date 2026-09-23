@@ -477,7 +477,8 @@ static void *finish_run(void *env) {
   sz_ui_session_finish(run->session);
   sz_ui_unmount(run->session);
   run->session = NULL;
-  /* The tree is gone. Put signal values back so the script's lists die. */
+  /* The tree is gone. Record a trailing effect, then put signal values back. */
+  sz_property_session_flush();
   sz_signal_session_pop();
   sz_testrt_session_baseline_check();
   return NULL;

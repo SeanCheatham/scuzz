@@ -1237,6 +1237,7 @@ void sz_property_note_hit(const char *desc);
 int64_t sz_property_last_hit_has(SzString *needle);
 int sz_property_session_armed(void);
 void sz_property_session_step(void);
+void sz_property_session_flush(void);
 void sz_property_session_end(void);
 void sz_property_session_reset(void);
 void sz_timeline_set_drive(const char *line);
