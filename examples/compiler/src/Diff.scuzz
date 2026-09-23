@@ -1,0 +1,314 @@
+record DiffSide(job: FuzzJob, seeds: String, runs: List[FuzzRun], drivers: List[String], vers: List[String], defs: List[Fun])
+
+record DiffOut(code: Int, why: String, unrun: Bool, tl: String, controls: List[String])
+
+record DiffRow(label: String, run: FuzzRun, cls: String, delta: TlDelta, whyA: String, whyB: String, ctlA: List[String], ctlB: List[String])
+
+record DiffHunt(ran: Int, hits: Int, witnesses: List[(String, String, Int)])
+
+record DiffAgg(alpha: List[(String, List[String], List[String])], claimsAdded: List[String], claimsRemoved: List[String], claimsChanged: List[DeltaChange], somA: List[String], somB: List[String], classify: List[DeltaChange])
+
+import Drive.FuzzJob
+import Drive.FuzzRun
+import Drive.PkgOut
+import Delta.TlDelta
+import Delta.DeltaChange
+import Manifest.Man
+import Parse.Fun
+
+def classes(): List[String] =
+  "regressed" :: "fixed" :: "diverged" :: "unrunnable" :: "same" :: Verify.noStr()
+
+def witnessCap(): Int =
+  4
+
+def noRows(): List[DiffRow] =
+  []
+
+def diffDir(path: String, rev: String, iterations: Int, seed: Int, json: Bool): IO[Unit] =
+  for {
+    git <- Drive.runLine("command -v git")
+    _ <- if (git._1 != 0) IO.fail("scuzz diff: git is not on PATH") else IO.pure(())
+    abs <- gitLine(Str.concat("cd ", Str.concat(Drive.shQuote(path), " && pwd -P")), Str.concat(path, " is not a directory"))
+    top <- gitLine(gitIn(abs, "rev-parse --show-toplevel"), Str.concat(path, " is not inside a git work tree"))
+    prefix <- gitLine(gitIn(abs, "rev-parse --show-prefix"), Str.concat(path, " is not inside a git work tree"))
+    sha <- gitLine(gitIn(abs, Str.concat("rev-parse --verify --quiet ", Drive.shQuote(Str.concat(rev, "^{commit}")))), Str.concat("unknown revision ", rev))
+    root = Drive.joinSlash(path, "build/delta")
+    wt = Drive.joinSlash(abs, Str.concat("build/delta/rev-", Str.slice(sha, 0, 12)))
+    _ <- Fs.mkdirs(root)
+    _ <- worktree(top, wt, sha)
+    a <- side(sideDir(wt, prefix), Drive.joinSlash(root, "a"), iterations, seed).handleErrorWith(e => IO.fail(Str.concat("scuzz diff: ", Str.concat(rev, Str.concat(" side failed: ", e)))))
+    b <- side(path, Drive.joinSlash(root, "b"), iterations, seed).handleErrorWith(e => IO.fail(Str.concat("scuzz diff: working tree side failed: ", e)))
+    runs = workloads(a, b)
+    rows <- replay(a, b, runs, noRows())
+    hs <- search(a, b, root, runs, iterations)
+    agg <- aggregate(a, b, rows)
+    report = reportJson(rev, sha, a.job.dir, b.job.dir, rows, agg, iterations, seed, hs)
+    _ <- Fs.write(Drive.joinSlash(root, "report.json"), Str.concat(report, Verify.nl()))
+    _ <- IO.println(if (json) report else human(rev, sha, path, root, rows, agg, hs))
+    _ <- if (count(rows, "regressed") > 0) IO.fail(Str.concat("scuzz diff: ", Str.concat(Str.fromInt(count(rows, "regressed")), " regressed"))) else IO.pure(())
+  } yield ()
+
+def gitIn(dir: String, args: String): String =
+  Str.concat("git -C ", Str.concat(Drive.shQuote(dir), Str.concat(" ", args)))
+
+def gitLine(cmd: String, msg: String): IO[String] =
+  Drive.runLine(Str.concat(cmd, " 2>/dev/null")).flatMap(r => if (r._1 != 0) IO.fail(Str.concat("scuzz diff: ", msg)) else IO.pure(Str.trim(r._2)))
+
+def worktree(top: String, wt: String, sha: String): IO[Unit] =
+  Fs.exists(Drive.joinSlash(wt, ".git")).flatMap(hit => if (hit != 0) IO.pure(()) else worktreeAdd(top, wt, sha))
+
+def worktreeAdd(top: String, wt: String, sha: String): IO[Unit] =
+  Drive.runLine(Str.concat(gitIn(top, "worktree prune"), Str.concat(" && ", gitIn(top, Str.concat("worktree add --detach --quiet ", Str.concat(Drive.shQuote(wt), Str.concat(" ", sha))))))).flatMap(r => if (r._1 != 0) IO.fail(Str.concat("scuzz diff: git worktree add failed: ", firstLine(r._3))) else IO.pure(()))
+
+def sideDir(wt: String, prefix: String): String =
+  if (prefix == "") wt else Drive.joinSlash(wt, if (Str.endsWith(prefix, "/")) Str.slice(prefix, 0, Str.len(prefix) - 1) else prefix)
+
+def firstLine(s: String): String =
+  if (List.isEmpty(Verify.linesOf(s))) "" else List.at(Verify.linesOf(s), 0)
+
+def side(dir: String, outDir: String, iterations: Int, seed: Int): IO[DiffSide] =
+  Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => sideMan(dir, outDir, iterations, seed, toml, Manifest.parse(toml)))
+
+def sideMan(dir: String, outDir: String, iterations: Int, seed: Int, toml: String, m: Man): IO[DiffSide] =
+  for {
+    _ <- Drive.manNeed(m)
+    files <- Drive.fuzzCollect(dir)
+    ens = Verify.ensOfFiles(files)
+    pdir = Drive.joinSlash(outDir, "probe")
+    _ <- Fs.mkdirs(Drive.joinSlash(pdir, "fuzz"))
+    _ <- build(toml, files, outDir, m)
+    _ <- Drive.fuzzWriteTable(dir, outDir, ens)
+    seeds <- Drive.fuzzSeedText(dir, ens)
+    _ <- Fs.write(Drive.joinSlash(outDir, "seeds.txt"), seeds)
+    runs <- Drive.fuzzCorpusFiles(dir)
+    srcs <- Drive.fuzzWorkloadSrcs(dir)
+    vers <- Drive.fuzzVerSrcs(dir)
+    scn <- Drive.fuzzReadScenario(dir)
+    drivers <- Drive.fuzzReadOr(Drive.joinSlash(outDir, "drivers.txt"))
+    srv <- Ref.of(("", 0))
+    _ <- clear(pdir)
+  } yield DiffSide(FuzzJob(dir, pdir, Drive.exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, false, "", srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens))
+
+def build(toml: String, files: List[(String, String)], outDir: String, m: Man): IO[Unit] =
+  Drive.fpText(toml, files).flatMap(fp => Drive.fuzzReadOr(stampPath(outDir)).flatMap(old => Fs.exists(Drive.exeName(outDir, m.name)).flatMap(hit => if (old == fp && hit != 0) IO.pure(()) else buildFresh(toml, files, outDir, m, fp))))
+
+def buildFresh(toml: String, files: List[(String, String)], outDir: String, m: Man, fp: String): IO[Unit] =
+  IO.both(Drive.ensureNative(m.hasUi), Drive.crateHome().flatMap(h => emit(Drive.compileFiles(toml, files, outDir, "clang", Drive.rtLib(h))))).flatMap(_ => Drive.linkExe(m.hasUi, outDir, m.name).flatMap(r => Drive.linkOnlyGot(r).flatMap(_ => Fs.write(stampPath(outDir), fp))))
+
+def emit(p: PkgOut): IO[Unit] =
+  if (p.ok) Fs.write(p.llPath, p.ll) else IO.println(Str.concat("fail:", p.diags)).flatMap(_ => IO.fail("check"))
+
+def stampPath(outDir: String): String =
+  Drive.joinSlash(outDir, "fingerprint.verify")
+
+def clear(probe: String): IO[Unit] =
+  IO.foreachDiscard(Drive.fuzzCoveragePath(probe) :: Drive.fuzzClassPath(probe) :: Drive.fuzzSometimesPath(probe) :: Drive.fuzzTriggerPath(probe) :: Drive.fuzzVariedPath(probe) :: Drive.fuzzClaimPath(probe) :: Drive.fuzzSchedPicksPath(probe) :: Drive.fuzzDistancePath(probe) :: Verify.noStr(), p => Fs.write(p, ""))
+
+def idleRun(): FuzzRun =
+  FuzzRun("idle", "", "", "", "", Verify.noStr())
+
+def seedsLabel(): String =
+  "build/seeds.txt"
+
+def workloads(a: DiffSide, b: DiffSide): List[FuzzRun] =
+  Drive.fuzzAddSeeds(Drive.fuzzAddSeeds(idleRun() :: corpusUnion(List.concat(a.runs, b.runs), Verify.noStr()), seedsLabel(), a.seeds, b.job.hasUi), seedsLabel(), b.seeds, b.job.hasUi)
+
+def corpusUnion(runs: List[FuzzRun], seen: List[String]): List[FuzzRun] =
+  if (List.isEmpty(runs)) runs else corpusUnionHd(List.at(runs, 0), List.tail(runs), seen, srcHash(List.at(runs, 0)))
+
+def corpusUnionHd(h: FuzzRun, rest: List[FuzzRun], seen: List[String], key: String): List[FuzzRun] =
+  if (List.contains(seen, key)) corpusUnion(rest, seen) else h :: corpusUnion(rest, key :: seen)
+
+def srcHash(r: FuzzRun): String =
+  Hash.sha256(r.src)
+
+def label(r: FuzzRun): String =
+  if (r.path == "idle") "idle" else if (r.path == seedsLabel()) Str.concat("seed ", lastLine(r.script)) else if (r.path == "") Str.concat("search ", r.sched) else Str.concat("corpus/", baseName(r.path))
+
+def lastLine(s: String): String =
+  if (List.isEmpty(Verify.linesOf(s))) "" else List.at(List.reverse(Verify.linesOf(s)), 0)
+
+def baseName(p: String): String =
+  if (Str.lastIndexOf(p, "/") < 0) p else Str.drop(p, Str.lastIndexOf(p, "/") + 1)
+
+def probe(job: FuzzJob, run: FuzzRun): IO[DiffOut] =
+  for {
+    _ <- Drive.fuzzWriteDrive(job.outDir, run.script)
+    _ <- Fs.write(Drive.fuzzTlPath(job.outDir), "")
+    _ <- Fs.write(Drive.fuzzDumpPath(job.outDir), "")
+    r <- Drive.runProbe(Str.concat(Drive.fuzzProbeEnv("SCUZZ_", job.hasUi, Drive.fuzzDrivePath(job.outDir), Drive.fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, job.uiEnv, false, false), Str.concat(Drive.fuzzTlEnv("SCUZZ_", Drive.fuzzTlPath(job.outDir)), Drive.shQuote(job.exe))))
+    tl <- Drive.fuzzReadOr(Drive.fuzzTlPath(job.outDir))
+    dump <- Drive.fuzzReadOr(Drive.fuzzDumpPath(job.outDir))
+  } yield DiffOut(r._1, why(r._1, r._3), unrunnable(r._3), tl, controls(dump))
+
+def why(code: Int, err: String): String =
+  if (unrunnable(err)) whyLine(List.filter(Verify.linesOf(err), l => unrunnable(l)), code) else if (code == 0) "" else if (code == 124) "timeout" else whyLine(List.filter(Verify.linesOf(err), l => Str.startsWith(l, "scuzz") && !Str.contains(l, "wrote fuzz dump")), code)
+
+def whyLine(ls: List[String], code: Int): String =
+  if (List.isEmpty(ls)) Str.concat("exit ", Str.fromInt(code)) else List.at(ls, 0)
+
+def unrunnable(err: String): Bool =
+  Str.contains(err, "unknown driver") || Str.contains(err, "button not found") || Str.contains(err, " skipped (") || Str.contains(err, "schedule drift")
+
+def controls(dump: String): List[String] =
+  List.concat(ctlOf(dump, "taps", "tap:"), List.concat(ctlOf(dump, "fields", "field:"), ctlOf(dump, "scrolls", "scroll:")))
+
+def ctlOf(dump: String, key: String, tag: String): List[String] =
+  List.map(Delta.jsonArray(dump, key), o => Str.concat(tag, Delta.jsonField(o, "label")))
+
+def classOf(a: DiffOut, b: DiffOut, d: TlDelta): String =
+  if (a.unrun || b.unrun) "unrunnable" else if (a.code == 0 && b.code != 0) "regressed" else if (a.code != 0 && b.code == 0) "fixed" else if (Delta.isEmpty(d) && a.why == b.why) "same" else "diverged"
+
+def differs(cls: String): Bool =
+  cls == "regressed" || cls == "fixed" || cls == "diverged"
+
+def rowOf(r: FuzzRun, a: DiffOut, b: DiffOut): DiffRow =
+  rowWith(r, a, b, Delta.diff(a.tl, b.tl))
+
+def rowWith(r: FuzzRun, a: DiffOut, b: DiffOut, d: TlDelta): DiffRow =
+  DiffRow(label(r), r, classOf(a, b, d), d, a.why, b.why, a.controls, b.controls)
+
+def pair(a: DiffSide, b: DiffSide, r: FuzzRun): IO[DiffRow] =
+  probe(a.job, r).flatMap(x => probe(b.job, r).map(y => rowOf(r, x, y)))
+
+def replay(a: DiffSide, b: DiffSide, runs: List[FuzzRun], acc: List[DiffRow]): IO[List[DiffRow]] =
+  if (List.isEmpty(runs)) IO.pure(List.reverse(acc)) else pair(a, b, List.at(runs, 0)).flatMap(row => replay(a, b, List.tail(runs), row :: acc))
+
+def count(rows: List[DiffRow], cls: String): Int =
+  List.len(List.filter(rows, r => r.cls == cls))
+
+def sharedDefs(a: DiffSide, b: DiffSide): List[Fun] =
+  List.filter(b.defs, d => List.contains(Verify.mapSpecE(a.defs, a.job.ens), Verify.specOfE(d, b.job.ens)))
+
+def search(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], n: Int): IO[DiffHunt] =
+  hunt(a, b, root, runs, sharedDefs(a, b), n, DiffHunt(0, 0, []))
+
+def hunt(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], defs: List[Fun], n: Int, h: DiffHunt): IO[DiffHunt] =
+  if (h.ran >= n) IO.pure(h) else huntRun(a, b, root, runs, defs, n, h, Drive.fuzzWorkload(b.job, b.seeds, runs, defs, h.ran, Drive.climbNew()))
+
+def huntRun(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], defs: List[Fun], n: Int, h: DiffHunt, run: FuzzRun): IO[DiffHunt] =
+  pair(a, b, run).flatMap(row => if (!differs(row.cls)) hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits, h.witnesses)) else huntHit(a, b, root, runs, defs, n, h, run))
+
+def huntHit(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], defs: List[Fun], n: Int, h: DiffHunt, run: FuzzRun): IO[DiffHunt] =
+  if (List.len(h.witnesses) >= witnessCap()) hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits + 1, h.witnesses)) else shrink(a, b, defs, run).flatMap(small => pair(a, b, small).flatMap(row => witness(root, small, row).flatMap(w => hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits + 1, addWitness(h.witnesses, w))))))
+
+def addWitness(ws: List[(String, String, Int)], w: (String, String, Int)): List[(String, String, Int)] =
+  if (w._1 == "" || List.exists(ws, x => x._1 == w._1)) ws else List.concat(ws, w :: [])
+
+def bad(a: DiffSide, b: DiffSide): FuzzRun => IO[Int] =
+  r => pair(a, b, r).map(row => if (differs(row.cls)) 1 else 0)
+
+def shrink(a: DiffSide, b: DiffSide, defs: List[Fun], run: FuzzRun): IO[FuzzRun] =
+  Drive.fuzzShrinkBy(bad(a, b), defs, run).flatMap(small => shrinkFault(bad(a, b), small).flatMap(r => shrinkPct(bad(a, b), r)))
+
+def shrinkFault(p: FuzzRun => IO[Int], run: FuzzRun): IO[FuzzRun] =
+  if (run.fault == "") IO.pure(run) else keep(p, run, FuzzRun("", "", run.script, run.sched, "", run.picks))
+
+def shrinkPct(p: FuzzRun => IO[Int], run: FuzzRun): IO[FuzzRun] =
+  if (Str.toInt(run.sched, 0) % 8 == 0) IO.pure(run) else keep(p, run, FuzzRun("", "", run.script, Str.fromInt(Str.toInt(run.sched, 0) - Str.toInt(run.sched, 0) % 8), run.fault, run.picks))
+
+def keep(p: FuzzRun => IO[Int], run: FuzzRun, candidate: FuzzRun): IO[FuzzRun] =
+  p(candidate).map(hit => if (hit > 0) candidate else run)
+
+def witnessBody(run: FuzzRun): String =
+  Verify.withOracle(Verify.reproText(run.sched, run.fault, run.picks, Verify.linesOf(run.script)), Verify.linesOf(run.script))
+
+def witness(root: String, run: FuzzRun, row: DiffRow): IO[(String, String, Int)] =
+  if (!differs(row.cls)) IO.pure(("", row.cls, 0)) else witnessAt(Drive.joinSlash(root, Str.concat("witness-", Str.concat(Str.slice(Hash.sha256(witnessBody(run)), 0, 16), ".toml"))), run, row)
+
+def witnessAt(path: String, run: FuzzRun, row: DiffRow): IO[(String, String, Int)] =
+  Fs.write(path, witnessBody(run)).flatMap(_ => IO.pure((path, row.cls, List.len(Verify.linesOf(run.script)))))
+
+def aggregate(a: DiffSide, b: DiffSide, rows: List[DiffRow]): IO[DiffAgg] =
+  for {
+    somA <- Drive.fuzzReadOr(Drive.fuzzSometimesPath(a.job.outDir))
+    somB <- Drive.fuzzReadOr(Drive.fuzzSometimesPath(b.job.outDir))
+    clsA <- Drive.fuzzReadOr(Drive.fuzzClassPath(a.job.outDir))
+    clsB <- Drive.fuzzReadOr(Drive.fuzzClassPath(b.job.outDir))
+  } yield DiffAgg(alphabet(a, b, rows), minus(Verify.claimNames(b.vers), Verify.claimNames(a.vers)), minus(Verify.claimNames(a.vers), Verify.claimNames(b.vers)), claimShifts(Verify.claimNames(a.vers), Verify.claimNames(b.vers), rows), minus(Verify.dumpNames(somA), Verify.dumpNames(somB)), minus(Verify.dumpNames(somB), Verify.dumpNames(somA)), Delta.keyedChanges("classify", classPairs(clsA), classPairs(clsB)))
+
+def minus(xs: List[String], ys: List[String]): List[String] =
+  Verify.sortStrs(List.distinct(List.filter(xs, x => !List.contains(ys, x))))
+
+def alphabet(a: DiffSide, b: DiffSide, rows: List[DiffRow]): List[(String, List[String], List[String])] =
+  alphaRow("controls", ctlAll(rows, true), ctlAll(rows, false)) :: alphaRow("drivers", a.drivers, b.drivers) :: alphaRow("oracles", Verify.oracleNames(a.vers), Verify.oracleNames(b.vers)) :: []
+
+def alphaRow(name: String, xs: List[String], ys: List[String]): (String, List[String], List[String]) =
+  (name, minus(ys, xs), minus(xs, ys))
+
+def ctlAll(rows: List[DiffRow], sideA: Bool): List[String] =
+  if (List.isEmpty(rows)) Verify.noStr() else List.concat(rowCtl(List.at(rows, 0), sideA), ctlAll(List.tail(rows), sideA))
+
+def rowCtl(r: DiffRow, sideA: Bool): List[String] =
+  if (sideA) r.ctlA else r.ctlB
+
+def claimShifts(namesA: List[String], namesB: List[String], rows: List[DiffRow]): List[DeltaChange] =
+  List.filter(List.map(List.filter(namesA, n => List.contains(namesB, n)), n => DeltaChange("claims", n, verdict(n, rows, true), verdict(n, rows, false))), c => c.before != c.after)
+
+def verdict(name: String, rows: List[DiffRow], sideA: Bool): String =
+  if (List.exists(rows, r => Str.contains(if (sideA) r.whyA else r.whyB, Str.concat("claim ", Str.concat(name, " rejected"))))) "fail" else "pass"
+
+def classPairs(raw: String): List[(String, String)] =
+  List.map(Delta.bodyLines(raw), l => (Verify.className(l), Verify.classNums(l)))
+
+def ranked(rows: List[DiffRow]): List[DiffRow] =
+  rankGo(classes(), rows)
+
+def rankGo(cs: List[String], rows: List[DiffRow]): List[DiffRow] =
+  if (List.isEmpty(cs)) noRows() else List.concat(List.filter(rows, r => r.cls == List.at(cs, 0)), rankGo(List.tail(cs), rows))
+
+def countsText(rows: List[DiffRow]): String =
+  List.join(List.map(classes(), c => Str.concat(Str.fromInt(count(rows, c)), Str.concat(" ", c))), ", ")
+
+def human(rev: String, sha: String, path: String, root: String, rows: List[DiffRow], agg: DiffAgg, h: DiffHunt): String =
+  List.join(List.concat(Str.concat("scuzz diff ", Str.concat(rev, Str.concat(" (", Str.concat(Str.slice(sha, 0, 12), Str.concat(") ", Str.concat(path, Str.concat(": ", countsText(rows)))))))) :: List.map(ranked(rows), r => rowText(r)), List.concat(aggText(rev, agg), List.concat(huntText(h), Str.concat("report ", Drive.joinSlash(root, "report.json")) :: Verify.noStr()))), Verify.nl())
+
+def rowText(r: DiffRow): String =
+  Str.concat(r.cls, Str.concat(" ", Str.concat(r.label, Str.concat(rowWhy(r), rowDelta(r)))))
+
+def rowWhy(r: DiffRow): String =
+  if (r.cls == "regressed" || r.cls == "unrunnable" && r.whyB != "") Str.concat(": ", r.whyB) else if (r.cls == "fixed" || r.cls == "unrunnable") Str.concat(": ", r.whyA) else ""
+
+def rowDelta(r: DiffRow): String =
+  if (r.cls == "same" || r.cls == "unrunnable" || Delta.isEmpty(r.delta)) "" else Str.concat(Verify.nl(), indent(Delta.text(TlDelta(r.delta.lenA, r.delta.lenB, r.delta.first, r.delta.states, List.take(r.delta.changes, 6))), moreText(List.len(r.delta.changes) - 6)))
+
+def indent(text: String, more: String): String =
+  List.join(List.map(List.concat(Verify.linesOf(text), if (more == "") Verify.noStr() else more :: Verify.noStr()), l => Str.concat("  ", l)), Verify.nl())
+
+def moreText(n: Int): String =
+  if (n <= 0) "" else Str.concat("  ... ", Str.concat(Str.fromInt(n), " more changes"))
+
+def aggText(rev: String, agg: DiffAgg): List[String] =
+  List.filter(List.concat(List.map(agg.alpha, x => alphaText(x)), claimText(agg) :: somText(Str.concat("sometimes only on ", rev), agg.somA) :: somText("sometimes only on the working tree", agg.somB) :: List.map(agg.classify, c => Str.concat("classify ", Str.concat(c.key, Str.concat(": ", Str.concat(Delta.shown(c.before), Str.concat(" -> ", Delta.shown(c.after)))))))), l => l != "")
+
+def alphaText(x: (String, List[String], List[String])): String =
+  if (List.isEmpty(x._2) && List.isEmpty(x._3)) "" else Str.concat("alphabet ", Str.concat(x._1, Str.concat(":", marks(x._2, x._3))))
+
+def marks(added: List[String], removed: List[String]): String =
+  Str.concat(List.join(List.map(added, s => Str.concat(" +", s)), ""), List.join(List.map(removed, s => Str.concat(" -", s)), ""))
+
+def claimText(agg: DiffAgg): String =
+  if (List.isEmpty(agg.claimsAdded) && List.isEmpty(agg.claimsRemoved) && List.isEmpty(agg.claimsChanged)) "" else Str.concat("claims:", Str.concat(marks(agg.claimsAdded, agg.claimsRemoved), List.join(List.map(agg.claimsChanged, c => Str.concat(" ", Str.concat(c.key, Str.concat(" ", Str.concat(c.before, Str.concat(" -> ", c.after)))))), "")))
+
+def somText(head: String, xs: List[String]): String =
+  if (List.isEmpty(xs)) "" else Str.concat(head, Str.concat(": ", List.join(xs, ", ")))
+
+def huntText(h: DiffHunt): List[String] =
+  if (h.ran == 0) Verify.noStr() else Str.concat("search: ", Str.concat(Str.fromInt(h.ran), Str.concat(" iterations, ", Str.concat(Str.fromInt(h.hits), Str.concat(" divergent, ", Str.concat(Str.fromInt(List.len(h.witnesses)), " witnesses")))))) :: List.map(h.witnesses, w => Str.concat("witness ", Str.concat(w._1, Str.concat(" (", Str.concat(w._2, Str.concat(", ", Str.concat(Str.fromInt(w._3), " events)")))))))
+
+def reportJson(rev: String, sha: String, dirA: String, dirB: String, rows: List[DiffRow], agg: DiffAgg, iterations: Int, seed: Int, h: DiffHunt): String =
+  Str.concat("{\"v\":1,\"kind\":\"diff\",\"rev\":", Str.concat(Check.jsonStr(rev), Str.concat(",\"sha\":", Str.concat(Check.jsonStr(sha), Str.concat(",\"ok\":", Str.concat(Verify.jb(count(rows, "regressed") == 0), Str.concat(",\"sides\":{\"a\":", Str.concat(Check.jsonStr(dirA), Str.concat(",\"b\":", Str.concat(Check.jsonStr(dirB), Str.concat("},\"counts\":{", Str.concat(List.join(List.map(classes(), c => Str.concat(Check.jsonStr(c), Str.concat(":", Str.fromInt(count(rows, c))))), ","), Str.concat("},\"workloads\":[", Str.concat(List.join(List.map(ranked(rows), r => rowJson(r)), ","), Str.concat("]", Str.concat(aggJson(agg), Str.concat(huntJson(iterations, seed, h), "}")))))))))))))))))
+
+def rowJson(r: DiffRow): String =
+  Str.concat("{\"label\":", Str.concat(Check.jsonStr(r.label), Str.concat(",\"class\":", Str.concat(Check.jsonStr(r.cls), Str.concat(",\"events\":", Str.concat(Verify.jStrList(Verify.linesOf(r.run.script)), Str.concat(",\"why_a\":", Str.concat(Delta.jOpt(r.whyA), Str.concat(",\"why_b\":", Str.concat(Delta.jOpt(r.whyB), Str.concat(",\"delta\":", Str.concat(Delta.json(r.delta), "}"))))))))))))
+
+def aggJson(agg: DiffAgg): String =
+  Str.concat(",\"alphabet\":{", Str.concat(List.join(List.map(agg.alpha, x => Str.concat(Check.jsonStr(x._1), Str.concat(":", addRem(x._2, x._3)))), ","), Str.concat("},\"claims\":{\"added\":", Str.concat(Verify.jStrList(agg.claimsAdded), Str.concat(",\"removed\":", Str.concat(Verify.jStrList(agg.claimsRemoved), Str.concat(",\"changed\":[", Str.concat(List.join(List.map(agg.claimsChanged, c => Str.concat("{\"name\":", Str.concat(Check.jsonStr(c.key), Str.concat(",\"a\":", Str.concat(Check.jsonStr(c.before), Str.concat(",\"b\":", Str.concat(Check.jsonStr(c.after), "}"))))))), ","), Str.concat("]},\"sometimes\":{\"only_a\":", Str.concat(Verify.jStrList(agg.somA), Str.concat(",\"only_b\":", Str.concat(Verify.jStrList(agg.somB), Str.concat("},\"classify\":[", Str.concat(List.join(List.map(agg.classify, c => Delta.changeJson(c)), ","), "]"))))))))))))))
+
+def addRem(added: List[String], removed: List[String]): String =
+  Str.concat("{\"added\":", Str.concat(Verify.jStrList(added), Str.concat(",\"removed\":", Str.concat(Verify.jStrList(removed), "}"))))
+
+def huntJson(iterations: Int, seed: Int, h: DiffHunt): String =
+  Str.concat(",\"search\":{\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"ran\":", Str.concat(Str.fromInt(h.ran), Str.concat(",\"divergent\":", Str.concat(Str.fromInt(h.hits), Str.concat("},\"witnesses\":[", Str.concat(List.join(List.map(h.witnesses, w => Str.concat("{\"path\":", Str.concat(Check.jsonStr(w._1), Str.concat(",\"class\":", Str.concat(Check.jsonStr(w._2), Str.concat(",\"events\":", Str.concat(Str.fromInt(w._3), "}"))))))), ","), "]"))))))))))
+

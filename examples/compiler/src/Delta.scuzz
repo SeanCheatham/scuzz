@@ -173,7 +173,13 @@ def itemsGo(s: String, start: Int, i: Int, depth: Int, acc: List[String]): List[
   if (i >= Str.len(s)) List.reverse(acc) else itemsCh(s, start, i, depth, acc, Str.charAt(s, i))
 
 def itemsCh(s: String, start: Int, i: Int, depth: Int, acc: List[String], c: Int): List[String] =
-  if (c == 34) itemsGo(s, start, strEnd(s, i + 1) + 1, depth, acc) else if (c == 123 || c == 91) itemsGo(s, start, i + 1, depth + 1, acc) else if ((c == 44 || c == 93) && depth == 0) itemsGo(s, i + 1, i + 1, depth, itemAdd(Str.trim(Str.slice(s, start, i)), acc)) else if (c == 125 || c == 93) itemsGo(s, start, i + 1, depth - 1, acc) else itemsGo(s, start, i + 1, depth, acc)
+  if (c == 34) itemsGo(s, start, strEnd(s, i + 1) + 1, depth, acc) else if (c == 123 || c == 91) itemsGo(s, start, i + 1, depth + 1, acc) else if (c == 93 && depth == 0) List.reverse(itemAdd(Str.trim(Str.slice(s, start, i)), acc)) else if (c == 44 && depth == 0) itemsGo(s, i + 1, i + 1, depth, itemAdd(Str.trim(Str.slice(s, start, i)), acc)) else if (c == 125 || c == 93) itemsGo(s, start, i + 1, depth - 1, acc) else itemsGo(s, start, i + 1, depth, acc)
+
+def jsonArray(s: String, key: String): List[String] =
+  jsonArrayAt(s, Str.indexOf(s, Str.concat("\"", Str.concat(key, "\":["))), Str.len(key) + 3)
+
+def jsonArrayAt(s: String, i: Int, skip: Int): List[String] =
+  if (i < 0) Verify.noStr() else jsonItems(Str.drop(s, i + skip))
 
 def itemAdd(item: String, acc: List[String]): List[String] =
   if (item == "") acc else item :: acc
