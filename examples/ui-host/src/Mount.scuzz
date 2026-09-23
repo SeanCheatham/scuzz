@@ -15,7 +15,7 @@ def mountKind2(kind: String, args: List[Value], p: EvProg): View =
   if (kind == "View.text") View.text(strAt(args, 0)) else if (kind == "View.code") View.code(strAt(args, 0)) else if (kind == "View.avatar") View.avatar(strAt(args, 0)) else if (kind == "View.bindText") View.bindText(sigStr(args, 0)) else if (kind == "View.editor") View.editor(sigStr(args, 0)) else if (kind == "View.textField") View.textField(sigStr(args, 0), strAt(args, 1)) else if (kind == "View.heading") View.heading(intAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.divider") View.divider() else if (kind == "View.verticalDivider") View.verticalDivider() else if (kind == "View.link") View.link(strAt(args, 0), strAt(args, 1)) else if (kind == "View.icon") View.icon(intAt(args, 0), intAt(args, 1)) else if (kind == "View.navTile") View.navTile(intAt(args, 0), strAt(args, 1), strAt(args, 2)) else if (kind == "View.image") View.image(intAt(args, 0), intAt(args, 1), intAt(args, 2), strAt(args, 3)) else mountKind3(kind, args, p)
 
 def mountKind3(kind: String, args: List[Value], p: EvProg): View =
-  if (kind == "View.section") View.section(strAt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.appShell") View.appShell(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.appBar") View.appBar(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.semantics") View.semantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.mergeSemantics") View.mergeSemantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.tooltip") View.tooltip(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.slider") View.slider(sigInt(args, 0)) else if (kind == "View.progress") View.progress(sigInt(args, 0)) else if (kind == "View.circularProgress") View.circularProgress(sigInt(args, 0)) else if (kind == "View.radio") View.radio(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.choiceChip") View.choiceChip(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.radioListTile") View.radioListTile(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.showWhen") View.showWhen(sigInt(args, 0), intAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.split") View.split(sigInt(args, 0), viewAt(args, 1, p), viewAt(args, 2, p)) else if (kind == "View.segmented") View.segmented(sigInt(args, 0), strAt(args, 1), strAt(args, 2)) else if (kind == "View.expansionTile") View.expansionTile(sigInt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.onSecondary") View.onSecondary(viewAt(args, 0, p), _ => tap(List.at(args, 1), p)) else if (kind == "View.inkWell") View.inkWell(strAt(args, 0), _ => tap(List.at(args, 1), p), viewAt(args, 2, p)) else View.text(Str.concat("evaluator: no mount for ", kind))
+  if (kind == "View.section") View.section(strAt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.appShell") View.appShell(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.appBar") View.appBar(viewAt(args, 0, p), viewAt(args, 1, p)) else if (kind == "View.semantics") View.semantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.mergeSemantics") View.mergeSemantics(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.tooltip") View.tooltip(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.slider") View.slider(sigInt(args, 0)) else if (kind == "View.progress") View.progress(sigInt(args, 0)) else if (kind == "View.circularProgress") View.circularProgress(sigInt(args, 0)) else if (kind == "View.radio") View.radio(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.choiceChip") View.choiceChip(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.radioListTile") View.radioListTile(sigInt(args, 0), intAt(args, 1), strAt(args, 2)) else if (kind == "View.showWhen") View.showWhen(sigInt(args, 0), intAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.split") View.split(sigInt(args, 0), viewAt(args, 1, p), viewAt(args, 2, p)) else if (kind == "View.segmented") View.segmented(sigInt(args, 0), strAt(args, 1), strAt(args, 2)) else if (kind == "View.expansionTile") View.expansionTile(sigInt(args, 0), strAt(args, 1), viewAt(args, 2, p)) else if (kind == "View.onSecondary") View.onSecondary(viewAt(args, 0, p), _ => tap(List.at(args, 1), p)) else if (kind == "View.inkWell") View.inkWell(strAt(args, 0), _ => tap(List.at(args, 1), p), viewAt(args, 2, p)) else if (kind == "View.listTile") View.listTile(strAt(args, 0), viewAt(args, 1, p)) else if (kind == "View.each") mountEach(args, p) else View.text(Str.concat("evaluator: no mount for ", kind))
 
 def isBox(kind: String): Bool =
   kind == "View.column" || kind == "View.row" || kind == "View.stack" || kind == "View.wrap" || kind == "View.breadcrumb"
@@ -118,4 +118,34 @@ def sigInt(args: List[Value], i: Int): Signal[Int] =
 
 def sigStr(args: List[Value], i: Int): Signal[String] =
   Eval.sigStr(List.at(args, i))
+
+def mountEach(args: List[Value], p: EvProg): View =
+  View.each(Signal.mapN("$mirror", sigVal(List.at(args, 0)), v => eachRows(v, cloAt(args), p)), v => v)
+
+def cloAt(args: List[Value]): Value =
+  if (List.len(args) < 2) Value.VUnit else List.at(args, 1)
+
+def eachRows(v: Value, f: Value, p: EvProg): List[View] =
+  v match {
+    case Value.VList(xs) => List.map(xs, x => eachOne(x, f, p))
+    case _ => View.text(Eval.show(v)) :: []
+  }
+
+def eachOne(x: Value, f: Value, p: EvProg): View =
+  f match {
+    case Value.VUnit => rowPlain(x)
+    case _ => mount(applyClo(f, x, p), p)
+  }
+
+def rowPlain(x: Value): View =
+  x match {
+    case Value.VStr(s) => View.text(s)
+    case _ => View.text(Eval.show(x))
+  }
+
+def sigVal(sv: Value): Signal[Value] =
+  sv match {
+    case Value.VSig(_, _, s, _, _) => s
+    case _ => Signal.make(Value.VList([]))
+  }
 
