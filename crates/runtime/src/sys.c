@@ -19,6 +19,9 @@
 #endif
 #include <unistd.h>
 
+/* runtime.c. A forked child drops the macOS fatal-signal handler. */
+void sz_exec_child_signals(void);
+
 /* Process / args / console kit (Sys.args, IO.println, clang link).
  * TestRuntime rejects Sys.exec / Sys.spawn so sim cannot fork a child. */
 
@@ -341,19 +344,28 @@ static void exec_reap_pid(pid_t pid) {
   } while (w < 0 && errno == EINTR);
 }
 
+static void exec_kill_group(ExecSt *st) {
+  if (!st || st->pgid <= 0)
+    return;
+  (void)kill(-st->pgid, SIGKILL);
+  st->pgid = 0;
+}
+
 static void exec_free(ExecSt *st) {
   if (!st)
     return;
-  if (st->pgid > 0) {
-    (void)kill(-st->pgid, SIGKILL);
-    st->pgid = 0;
-  }
+  /* The leader is still alive. Its pid cannot name a new process yet. */
+  if (st->pid > 0)
+    exec_kill_group(st);
   exec_close_fd(&st->out_fd);
   exec_close_fd(&st->err_fd);
   if (st->pid > 0) {
     exec_reap_pid(st->pid);
     st->pid = 0;
   }
+  /* Cancel after the shell exits still kills its group. A reap that already
+   * signaled the group cleared pgid. */
+  exec_kill_group(st);
   sz_free(st->out_buf);
   sz_free(st->err_buf);
   st->out_buf = NULL;
@@ -461,9 +473,14 @@ static void *sys_exec_start(void *env) {
     return r;
   }
   if (pid == 0) {
+    /* Drop the parent's fatal-signal handler before any syscall can run it. */
+    sz_exec_child_signals();
     /* Keep the shell and its children in one cancellation group. */
-    if (setpgid(0, 0) != 0)
+    if (setpgid(0, 0) != 0) {
+      const char msg[] = "setpgid failed\n";
+      (void)write(err_fds[1], msg, sizeof msg - 1);
       _exit(127);
+    }
     close(out_fds[0]);
     close(err_fds[0]);
     if (dup2(out_fds[1], STDOUT_FILENO) < 0)
@@ -476,6 +493,10 @@ static void *sys_exec_start(void *env) {
       close(err_fds[1]);
     exec_close_extra_fds();
     execl("/bin/sh", "sh", "-c", c, (char *)NULL);
+    {
+      const char msg[] = "exec failed\n";
+      (void)write(STDERR_FILENO, msg, sizeof msg - 1);
+    }
     _exit(127);
   }
   /* Both sides set the group before either side can cancel. */
@@ -543,6 +564,8 @@ static SzIo *exec_after_poll(void *value, void *env) {
     if (w > 0) {
       st->status = status;
       st->pid = 0;
+      /* Kill the group before a yield can reuse this pid. */
+      exec_kill_group(st);
     } else if (w < 0)
       return sz_io_fail_cstr("Sys.exec: wait failed");
   }
@@ -759,6 +782,7 @@ static void *sys_spawn_result(void *env) {
     return r;
   }
   if (pid == 0) {
+    sz_exec_child_signals();
     if (dup2(in_fds[0], STDIN_FILENO) < 0)
       _exit(127);
     if (dup2(out_fds[1], STDOUT_FILENO) < 0)

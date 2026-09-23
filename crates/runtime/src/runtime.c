@@ -4842,6 +4842,7 @@ typedef struct {
   int argc;
   char **argv;
   int rc;
+  int block_signals;
 } SzMainArgs;
 
 #if defined(__APPLE__)
@@ -4865,8 +4866,16 @@ static void sz_main_arm_exit(void) {
 }
 #endif
 
+#if defined(__APPLE__)
+static void sz_block_fatal_signals(void);
+#endif
+
 static void *sz_runtime_main_worker(void *arg) {
   SzMainArgs *a = (SzMainArgs *)arg;
+#if defined(__APPLE__)
+  if (a->block_signals)
+    sz_block_fatal_signals();
+#endif
   if (a->argc > 0 && a->argv)
     sz_sys_set_args(a->argc, a->argv);
   {
@@ -4944,14 +4953,13 @@ done:
 #if defined(__APPLE__)
 /* The main thread parks in CFRunLoop. The worker retries EINTR and keeps
  * running. A caught signal must still kill the process. Ctrl+C and SIGTERM
- * stop a session. */
+ * stop a session. The worker blocks these signals so the handler runs on
+ * the main thread. A forked child must not run this handler. */
+static int g_sz_fatal_armed;
+
 static void sz_fatal_signal(int sig) {
-  struct sigaction sa;
   sigset_t set;
-  memset(&sa, 0, sizeof sa);
-  sa.sa_handler = SIG_DFL;
-  sigemptyset(&sa.sa_mask);
-  sigaction(sig, &sa, NULL);
+  signal(sig, SIG_DFL);
   sigemptyset(&set);
   sigaddset(&set, sig);
   pthread_sigmask(SIG_UNBLOCK, &set, NULL);
@@ -4966,8 +4974,35 @@ static void sz_arm_fatal_signals(void) {
   sigemptyset(&sa.sa_mask);
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
+  g_sz_fatal_armed = 1;
+}
+
+static void sz_block_fatal_signals(void) {
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
 }
 #endif
+
+void sz_exec_child_signals(void) {
+#if defined(__APPLE__)
+  sigset_t set;
+  if (!g_sz_fatal_armed)
+    return;
+  /* Drop a signal that arrived before exec. Then use the default action
+   * and unblock, so the new program still stops on SIGINT and SIGTERM. */
+  signal(SIGINT, SIG_IGN);
+  signal(SIGTERM, SIG_IGN);
+  signal(SIGINT, SIG_DFL);
+  signal(SIGTERM, SIG_DFL);
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+#endif
+}
 
 int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   /* Run the program on a heap-allocated stack so generated IR (deep but
@@ -4985,6 +5020,7 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   args.argc = argc;
   args.argv = argv;
   args.rc = 1;
+  args.block_signals = 0;
 
 #ifdef __EMSCRIPTEN__
   sz_runtime_main_worker(&args);
@@ -5003,10 +5039,12 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
 #if defined(__APPLE__)
   g_sz_main_worker_done = 0;
   sz_arm_fatal_signals();
+  args.block_signals = 1;
 #endif
   perr = pthread_create(&thr, &attr, sz_runtime_main_worker, &args);
   pthread_attr_destroy(&attr);
   if (perr != 0) {
+    args.block_signals = 0;
     sz_runtime_main_worker(&args);
     return args.rc;
   }
