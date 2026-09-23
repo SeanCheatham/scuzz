@@ -24,9 +24,9 @@
  * DNS, connect, TLS, write, and read each wait at most 1000ms. A response
  * is (status, headers, body). HEAD finishes at the header. Bodies cap at
  * 1 MiB. Serve binds 0.0.0.0 and/or ::. serveTls terminates TLS with a
- * process cert. A loopback https client skips verify. SCUZZ_NET_SESSION=1
- * verifies that cert and reports certificate rejected. Failures use SzError
- * code 6. */
+ * process cert. serveTlsFiles reads the cert file and the key file.
+ * A loopback https client skips verify. SCUZZ_NET_SESSION=1 verifies that
+ * cert and reports certificate rejected. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -1850,6 +1850,9 @@ typedef struct ServeSt {
   int head_resp;
   char method[16];
   void *vreq_done; /* SzDeferred* for a virtual client; NULL for inject */
+  SSL_CTX *app_ctx; /* owned; NULL uses the process cert */
+  char *cert_path;
+  char *key_path;
 } ServeSt;
 
 static SSL_CTX *g_serve_ssl_ctx;
@@ -1929,6 +1932,35 @@ static SSL_CTX *serve_ssl_ctx(void) {
   return g_serve_ssl_ctx;
 }
 
+static char *serve_path_dup(SzString *s) {
+  if (!s)
+    return NULL;
+  return sz_strdup(sz_string_cstr(s));
+}
+
+/* Load one PEM cert chain and one PEM key. Fail on an empty path, a bad
+ * file, or a key that does not match the cert. */
+static int serve_load_app_ctx(ServeSt *st) {
+  SSL_CTX *ctx;
+  if (!st || !st->cert_path || !st->key_path || st->cert_path[0] == '\0' ||
+      st->key_path[0] == '\0')
+    return 0;
+  if (st->app_ctx)
+    return 1;
+  ctx = SSL_CTX_new(TLS_server_method());
+  if (!ctx)
+    return 0;
+  if (SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1 ||
+      SSL_CTX_use_certificate_chain_file(ctx, st->cert_path) != 1 ||
+      SSL_CTX_use_PrivateKey_file(ctx, st->key_path, SSL_FILETYPE_PEM) != 1 ||
+      SSL_CTX_check_private_key(ctx) != 1) {
+    SSL_CTX_free(ctx);
+    return 0;
+  }
+  st->app_ctx = ctx;
+  return 1;
+}
+
 static void serve_close_conn(ServeSt *st) {
   if (!st)
     return;
@@ -1973,6 +2005,14 @@ static void serve_free(ServeSt *st) {
   sz_testrt_net_cancel_accept(st->port);
   sz_testrt_net_fail_mailbox(st->port, NULL);
   serve_close_fds(st);
+  if (st->app_ctx) {
+    SSL_CTX_free(st->app_ctx);
+    st->app_ctx = NULL;
+  }
+  sz_free(st->cert_path);
+  st->cert_path = NULL;
+  sz_free(st->key_path);
+  st->key_path = NULL;
   sz_free(st->wbuf);
   st->wbuf = NULL;
   st->wlen = 0;
@@ -2116,6 +2156,13 @@ static void *serve_ensure_listen(void *env) {
   if (st->listen_fd >= 0 || st->listen6_fd >= 0) {
     r->is_err = 0;
     return r;
+  }
+  if (st->cert_path || st->key_path) {
+    if (!serve_load_app_ctx(st)) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.serve: TLS cert failed");
+      return r;
+    }
   }
   {
     int fd4 = serve_bind_v4(port);
@@ -2580,7 +2627,7 @@ static void *serve_tls_accept(void *env) {
   int n;
   int want;
   if (!st->ssl) {
-    ctx = serve_ssl_ctx();
+    ctx = st->app_ctx ? st->app_ctx : serve_ssl_ctx();
     if (!ctx) {
       r->is_err = 1;
       r->drop = 1;
@@ -2749,6 +2796,7 @@ typedef struct ServeSpec {
   int64_t port;
   int64_t n;
   int tls;
+  int files; /* 1: pack left is pair(pair(env, cert), key) */
   SzCont handler;
 } ServeSpec;
 
@@ -2767,8 +2815,19 @@ static SzIo *serve_after_kick(void *ignored, void *env) {
   st->listen6_fd = -1;
   st->conn_fd = -1;
   st->handler = spec->handler;
-  sz_retain(pack->left);
-  st->henv = pack->left;
+  {
+    void *henv = pack->left;
+    if (spec->files) {
+      SzPair *with_key = (SzPair *)pack->left;
+      SzPair *paths = with_key ? (SzPair *)with_key->left : NULL;
+      henv = paths ? paths->left : NULL;
+      st->cert_path = serve_path_dup(paths ? (SzString *)paths->right : NULL);
+      st->key_path = serve_path_dup(with_key ? (SzString *)with_key->right : NULL);
+    }
+    if (henv)
+      sz_retain(henv);
+    st->henv = henv;
+  }
   {
     SzIo *io = serve_loop(st);
     SzIo *fin = sz_io_delay(serve_cleanup, st);
@@ -2790,6 +2849,7 @@ static SzIo *net_serve_n(int64_t port, int64_t n, int tls, SzCont handler,
   spec->port = port;
   spec->n = n;
   spec->tls = tls;
+  spec->files = 0;
   spec->handler = handler;
   pack = sz_pair_new(env, spec);
   sz_release(spec);
@@ -2814,4 +2874,42 @@ SzIo *sz_net_serve_tls(int64_t port, SzCont handler, void *env) {
 
 SzIo *sz_net_serve_once_tls(int64_t port, SzCont handler, void *env) {
   return net_serve_n(port, 1, 1, handler, env);
+}
+
+static SzIo *net_serve_files(int64_t port, int64_t n, SzString *cert, SzString *key,
+                             SzCont handler, void *env) {
+  ServeSpec *spec;
+  SzPair *paths;
+  SzPair *with_key;
+  SzPair *pack;
+  if (!handler)
+    sz_panic("sz_net_serve(null handler)");
+  spec = (ServeSpec *)sz_rc_alloc(sizeof(ServeSpec), SZ_RC_BOX);
+  spec->port = port;
+  spec->n = n;
+  spec->tls = 1;
+  spec->files = 1;
+  spec->handler = handler;
+  /* The pair releases the cert and the key if this step does not run. */
+  paths = sz_pair_new(env, cert);
+  with_key = sz_pair_new(paths, key);
+  sz_release(paths);
+  pack = sz_pair_new(with_key, spec);
+  sz_release(with_key);
+  sz_release(spec);
+  {
+    SzIo *io = fm_drop(sz_io_pure(NULL), serve_after_kick, pack);
+    sz_release(pack);
+    return io;
+  }
+}
+
+SzIo *sz_net_serve_tls_files(int64_t port, SzString *cert, SzString *key,
+                             SzCont handler, void *env) {
+  return net_serve_files(port, 0, cert, key, handler, env);
+}
+
+SzIo *sz_net_serve_once_tls_files(int64_t port, SzString *cert, SzString *key,
+                                  SzCont handler, void *env) {
+  return net_serve_files(port, 1, cert, key, handler, env);
 }

@@ -74,6 +74,12 @@ def runHttps(): IO[Unit] =
     _ <- showResp("tls", p)
   } yield ()
 
+def runHttpsFiles(): IO[Unit] =
+  for {
+    p <- IO.both(Net.serveOnceTlsFiles(8084, "examples/io/tls/cert.pem", "examples/io/tls/key.pem", handle), Net.httpGet("https://127.0.0.1:8084/ping", Map.empty()))
+    _ <- showResp("files", p)
+  } yield ()
+
 def runHttpMethods(): IO[Unit] =
   for {
     put <- IO.both(Net.serveOnce(8083, handle), Net.httpPut("http://127.0.0.1:8083/ping", Map.set(Map.empty(), "Content-Type", "text/plain"), "put"))
@@ -99,5 +105,6 @@ def run(): IO[Unit] =
     _ <- runTcp()
     _ <- runUdp()
     _ <- runHttps()
+    _ <- runHttpsFiles()
   } yield ()
 

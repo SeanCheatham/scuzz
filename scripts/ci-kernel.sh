@@ -94,6 +94,7 @@ grep -q "served:POST:/ping:hi" /tmp/io-test.out
 grep -q "ping:200:ok:ok:/ping" /tmp/io-test.out
 grep -q "miss:404:miss:missing" /tmp/io-test.out
 grep -q "tls:200:ok:ok:/ping" /tmp/io-test.out
+grep -q "files:200:ok:ok:/ping" /tmp/io-test.out
 grep -q "iso:1970-01-01T00:00:00.000Z" /tmp/io-test.out
 grep -q "leap:2020-02-29T00:00:00.000Z" /tmp/io-test.out
 grep -q "parse:0" /tmp/io-test.out

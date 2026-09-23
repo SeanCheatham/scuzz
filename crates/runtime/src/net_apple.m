@@ -317,4 +317,20 @@ SzIo *sz_net_serve_once_tls(int64_t port, SzCont handler, void *env) {
   (void)env;
   return sz_io_fail_cstr("Net.serveOnceTls is unavailable on iOS");
 }
+SzIo *sz_net_serve_tls_files(int64_t port, SzString *cert, SzString *key, SzCont handler, void *env) {
+  (void)port;
+  (void)cert;
+  (void)key;
+  (void)handler;
+  (void)env;
+  return sz_io_fail_cstr("Net.serveTlsFiles is unavailable on iOS");
+}
+SzIo *sz_net_serve_once_tls_files(int64_t port, SzString *cert, SzString *key, SzCont handler, void *env) {
+  (void)port;
+  (void)cert;
+  (void)key;
+  (void)handler;
+  (void)env;
+  return sz_io_fail_cstr("Net.serveOnceTlsFiles is unavailable on iOS");
+}
 #endif

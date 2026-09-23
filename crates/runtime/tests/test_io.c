@@ -5,6 +5,11 @@
 #define _DARWIN_C_SOURCE
 #endif
 #include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include "scuzz_rt.h"
 
 #include <arpa/inet.h>
@@ -710,6 +715,138 @@ static SzIo *serve_leak_ok(void *path, void *env) {
   if (g_serve_rounds < SERVE_LEAK_N)
     sz_testrt_net_queue_request("/x");
   return serve_path_ok(path, env);
+}
+
+static int write_app_cert(const char *cert_path, const char *key_path, const char *cn) {
+  EVP_PKEY *pkey;
+  X509 *cert;
+  X509_NAME *name;
+  X509_EXTENSION *ext;
+  X509V3_CTX v3;
+  FILE *cf = NULL;
+  FILE *kf = NULL;
+  char san[128];
+  int ok = 0;
+  pkey = EVP_EC_gen("prime256v1");
+  cert = X509_new();
+  if (!pkey || !cert)
+    goto done;
+  if (X509_set_version(cert, 2) != 1)
+    goto done;
+  if (!ASN1_INTEGER_set(X509_get_serialNumber(cert), 7))
+    goto done;
+  if (!X509_gmtime_adj(X509_get_notBefore(cert), 0))
+    goto done;
+  if (!X509_gmtime_adj(X509_get_notAfter(cert), 60 * 60 * 24 * 365))
+    goto done;
+  if (X509_set_pubkey(cert, pkey) != 1)
+    goto done;
+  name = X509_get_subject_name(cert);
+  if (!X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char *)cn, -1, -1, 0))
+    goto done;
+  if (X509_set_issuer_name(cert, name) != 1)
+    goto done;
+  X509V3_set_ctx_nodb(&v3);
+  X509V3_set_ctx(&v3, cert, cert, NULL, NULL, 0);
+  snprintf(san, sizeof san, "DNS:%s,IP:127.0.0.1", cn);
+  ext = X509V3_EXT_conf_nid(NULL, &v3, NID_subject_alt_name, san);
+  if (!ext)
+    goto done;
+  if (X509_add_ext(cert, ext, -1) != 1) {
+    X509_EXTENSION_free(ext);
+    goto done;
+  }
+  X509_EXTENSION_free(ext);
+  if (X509_sign(cert, pkey, EVP_sha256()) <= 0)
+    goto done;
+  cf = fopen(cert_path, "w");
+  kf = fopen(key_path, "w");
+  if (!cf || !kf)
+    goto files;
+  if (PEM_write_X509(cf, cert) != 1 || PEM_write_PrivateKey(kf, pkey, NULL, NULL, 0, NULL, NULL) != 1)
+    goto files;
+  ok = 1;
+files:
+  if (cf)
+    fclose(cf);
+  if (kf)
+    fclose(kf);
+done:
+  X509_free(cert);
+  EVP_PKEY_free(pkey);
+  return ok;
+}
+
+struct TlsFileCheck {
+  int port;
+  const char *ca;
+  int ok;
+  char body[256];
+};
+
+static void *tls_file_client(void *arg) {
+  struct TlsFileCheck *ck = (struct TlsFileCheck *)arg;
+  SSL_CTX *ctx;
+  SSL *ssl;
+  int fd = -1;
+  int i;
+  struct sockaddr_in addr;
+  const char *req = "GET /x HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+  char buf[1024];
+  size_t total = 0;
+  ck->ok = 0;
+  ck->body[0] = '\0';
+  ctx = SSL_CTX_new(TLS_client_method());
+  if (!ctx)
+    return NULL;
+  if (SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) != 1 ||
+      SSL_CTX_load_verify_locations(ctx, ck->ca, NULL) != 1) {
+    SSL_CTX_free(ctx);
+    return NULL;
+  }
+  SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)ck->port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  for (i = 0; i < 100; i++) {
+    sleep_us(10000);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+      continue;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
+      break;
+    close(fd);
+    fd = -1;
+  }
+  if (fd < 0) {
+    SSL_CTX_free(ctx);
+    return NULL;
+  }
+  ssl = SSL_new(ctx);
+  if (!ssl || SSL_set_fd(ssl, fd) != 1 || SSL_set1_host(ssl, "localhost") != 1 ||
+      SSL_connect(ssl) != 1 || SSL_get_verify_result(ssl) != X509_V_OK) {
+    if (ssl)
+      SSL_free(ssl);
+    close(fd);
+    SSL_CTX_free(ctx);
+    return NULL;
+  }
+  if (SSL_write(ssl, req, (int)strlen(req)) > 0) {
+    int n;
+    while (total + 1 < sizeof buf && (n = SSL_read(ssl, buf + total, (int)(sizeof buf - 1 - total))) > 0)
+      total += (size_t)n;
+    buf[total] = '\0';
+    if (strstr(buf, "ok:/x")) {
+      snprintf(ck->body, sizeof ck->body, "ok:/x");
+      ck->ok = 1;
+    }
+  }
+  SSL_shutdown(ssl);
+  SSL_free(ssl);
+  close(fd);
+  SSL_CTX_free(ctx);
+  return NULL;
 }
 
 static void *live_get_client(void *arg) {
@@ -9560,6 +9697,88 @@ int main(void) {
     assert(strstr(sz_string_cstr(r.error->message), "TLS failed") != NULL);
     assert(strstr(sz_string_cstr(r.error->message), "certificate rejected") == NULL);
     sz_error_free(r.error);
+  }
+
+  /* Live HTTPS serve with the app cert and key files. A client that trusts
+   * that cert completes. A client that trusts a different cert does not. */
+  {
+    char cert[] = "/tmp/scuzz-app-cert.pem";
+    char key[] = "/tmp/scuzz-app-key.pem";
+    char other[] = "/tmp/scuzz-app-other.pem";
+    char other_key[] = "/tmp/scuzz-app-other-key.pem";
+    char bad_key[] = "/tmp/scuzz-app-bad-key.pem";
+    int port = 18492;
+    struct TlsFileCheck ck;
+    pthread_t th;
+    SzString *cert_s;
+    SzString *key_s;
+    assert(write_app_cert(cert, key, "localhost"));
+    assert(write_app_cert(other, other_key, "localhost"));
+    assert(write_app_cert("/tmp/scuzz-app-mismatch-cert.pem", bad_key, "localhost"));
+    cert_s = sz_string_from_cstr(cert);
+    key_s = sz_string_from_cstr(key);
+    ck.port = port;
+    ck.ca = cert;
+    pthread_create(&th, NULL, tls_file_client, &ck);
+    r = sz_io_unsafe_run(sz_net_serve_once_tls_files(port, cert_s, key_s, serve_path_ok, NULL));
+    pthread_join(th, NULL);
+    sz_release(cert_s);
+    sz_release(key_s);
+    assert(r.ok);
+    assert(ck.ok);
+    assert(strcmp(ck.body, "ok:/x") == 0);
+
+    /* The other cert is not the one the server presents. */
+    ck.port = 18493;
+    ck.ca = other;
+    ck.ok = 0;
+    cert_s = sz_string_from_cstr(cert);
+    key_s = sz_string_from_cstr(key);
+    pthread_create(&th, NULL, tls_file_client, &ck);
+    r = sz_io_unsafe_run(sz_net_serve_once_tls_files(18493, cert_s, key_s, serve_path_ok, NULL));
+    pthread_join(th, NULL);
+    sz_release(cert_s);
+    sz_release(key_s);
+    assert(!ck.ok);
+    if (!r.ok)
+      sz_error_free(r.error);
+
+    /* A missing cert file fails before listen. */
+    cert_s = sz_string_from_cstr("/tmp/scuzz-app-missing.pem");
+    key_s = sz_string_from_cstr(key);
+    r = sz_io_unsafe_run(sz_net_serve_once_tls_files(18494, cert_s, key_s, serve_path_ok, NULL));
+    sz_release(cert_s);
+    sz_release(key_s);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "TLS cert"));
+    sz_error_free(r.error);
+
+    /* A key that does not match the cert fails. */
+    cert_s = sz_string_from_cstr("/tmp/scuzz-app-mismatch-cert.pem");
+    key_s = sz_string_from_cstr(key);
+    r = sz_io_unsafe_run(sz_net_serve_tls_files(18495, cert_s, key_s, serve_path_ok, NULL));
+    sz_release(cert_s);
+    sz_release(key_s);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "TLS cert"));
+    sz_error_free(r.error);
+
+    /* An empty path fails. */
+    cert_s = sz_string_from_cstr("");
+    key_s = sz_string_from_cstr(key);
+    r = sz_io_unsafe_run(sz_net_serve_once_tls_files(18496, cert_s, key_s, serve_path_ok, NULL));
+    sz_release(cert_s);
+    sz_release(key_s);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "TLS cert"));
+    sz_error_free(r.error);
+
+    unlink(cert);
+    unlink(key);
+    unlink(other);
+    unlink(other_key);
+    unlink(bad_key);
+    unlink("/tmp/scuzz-app-mismatch-cert.pem");
   }
 
   /* Live TCP echo and a 10000-byte read (drain until n, not a 4096 cap). */
