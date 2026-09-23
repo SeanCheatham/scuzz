@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
@@ -5,10 +6,12 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 /* Blessed filesystem IO — live interpreter or TestRuntime mem FS.
@@ -130,32 +133,266 @@ static SzIo *fs_after_read(void *value, void *env) {
 
 SzIo *sz_fs_read(SzString *path) { return fs_bind(path, fs_after_read); }
 
+enum { FS_PATH_MAX = 4096, FS_LINK_HOPS = 40 };
+
+static int fs_xattr_ignored(int err) {
+  if (err == EPERM || err == EACCES || err == EOPNOTSUPP || err == ENOTSUP ||
+      err == EINVAL)
+    return 1;
+#ifdef ENODATA
+  if (err == ENODATA)
+    return 1;
+#endif
+#ifdef ENOATTR
+  if (err == ENOATTR)
+    return 1;
+#endif
+  return 0;
+}
+
+static ssize_t fs_list_xattr(int fd, char *buf, size_t len) {
+#if defined(__APPLE__)
+  return flistxattr(fd, buf, len, 0);
+#else
+  return flistxattr(fd, buf, len);
+#endif
+}
+
+static ssize_t fs_get_xattr(int fd, const char *name, void *buf, size_t len) {
+#if defined(__APPLE__)
+  return fgetxattr(fd, name, buf, len, 0, 0);
+#else
+  return fgetxattr(fd, name, buf, len);
+#endif
+}
+
+static int fs_set_xattr(int fd, const char *name, const void *buf, size_t len) {
+#if defined(__APPLE__)
+  return fsetxattr(fd, name, buf, len, 0, 0);
+#else
+  return fsetxattr(fd, name, buf, len, 0);
+#endif
+}
+
+static int fs_copy_xattrs(int from_fd, int to_fd) {
+  ssize_t list_len;
+  char *names;
+  char *cursor;
+  char *end;
+  list_len = fs_list_xattr(from_fd, NULL, 0);
+  if (list_len < 0)
+    return fs_xattr_ignored(errno) ? 0 : -1;
+  if (list_len == 0)
+    return 0;
+  names = (char *)sz_alloc((size_t)list_len + 1);
+  list_len = fs_list_xattr(from_fd, names, (size_t)list_len);
+  if (list_len < 0) {
+    int err = errno;
+    sz_free(names);
+    errno = err;
+    return fs_xattr_ignored(err) ? 0 : -1;
+  }
+  names[list_len] = '\0';
+  end = names + list_len;
+  cursor = names;
+  while (cursor < end) {
+    size_t name_len = strlen(cursor);
+    ssize_t value_len;
+    char *value;
+    if (name_len == 0) {
+      cursor++;
+      continue;
+    }
+    value_len = fs_get_xattr(from_fd, cursor, NULL, 0);
+    if (value_len < 0) {
+      int err = errno;
+      if (fs_xattr_ignored(err)) {
+        cursor += name_len + 1;
+        continue;
+      }
+      sz_free(names);
+      errno = err;
+      return -1;
+    }
+    value = (char *)sz_alloc((size_t)value_len + 1);
+    if (value_len > 0) {
+      ssize_t got = fs_get_xattr(from_fd, cursor, value, (size_t)value_len);
+      if (got != value_len) {
+        int err = errno;
+        sz_free(value);
+        if (fs_xattr_ignored(err)) {
+          cursor += name_len + 1;
+          continue;
+        }
+        sz_free(names);
+        errno = err;
+        return -1;
+      }
+    }
+    if (fs_set_xattr(to_fd, cursor, value, (size_t)value_len) != 0) {
+      int err = errno;
+      sz_free(value);
+      if (fs_xattr_ignored(err)) {
+        cursor += name_len + 1;
+        continue;
+      }
+      sz_free(names);
+      errno = err;
+      return -1;
+    }
+    sz_free(value);
+    cursor += name_len + 1;
+  }
+  sz_free(names);
+  return 0;
+}
+
+/* Follow a symbolic link chain. Write the final path that is not a link. */
+static int fs_follow_link(const char *path, char *out, size_t out_sz) {
+  char current[FS_PATH_MAX];
+  int hop;
+  size_t len = strlen(path);
+  if (len == 0 || len >= sizeof current || out_sz == 0) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  memcpy(current, path, len + 1);
+  for (hop = 0; hop < FS_LINK_HOPS; hop++) {
+    struct stat st;
+    char link[FS_PATH_MAX];
+    ssize_t n;
+    char *slash;
+    if (lstat(current, &st) != 0)
+      return -1;
+    if (!S_ISLNK(st.st_mode)) {
+      if (strlen(current) >= out_sz) {
+        errno = ENAMETOOLONG;
+        return -1;
+      }
+      memcpy(out, current, strlen(current) + 1);
+      return 0;
+    }
+    n = readlink(current, link, sizeof link - 1);
+    if (n < 0)
+      return -1;
+    if (n == 0 || n == (ssize_t)(sizeof link - 1)) {
+      errno = n == 0 ? EINVAL : ENAMETOOLONG;
+      return -1;
+    }
+    link[n] = '\0';
+    slash = strrchr(current, '/');
+    if (link[0] == '/' || !slash) {
+      memcpy(current, link, (size_t)n + 1);
+    } else {
+      char joined[FS_PATH_MAX];
+      size_t prefix = (size_t)(slash - current);
+      if (prefix + 1 + (size_t)n >= sizeof joined) {
+        errno = ENAMETOOLONG;
+        return -1;
+      }
+      memcpy(joined, current, prefix);
+      joined[prefix] = '/';
+      memcpy(joined + prefix + 1, link, (size_t)n + 1);
+      memcpy(current, joined, prefix + 1 + (size_t)n + 1);
+    }
+  }
+  errno = ELOOP;
+  return -1;
+}
+
+static void fs_stat_times(const struct stat *st, struct timespec out[2]) {
+#if defined(__APPLE__)
+  out[0] = st->st_atimespec;
+  out[1] = st->st_mtimespec;
+#else
+  out[0] = st->st_atim;
+  out[1] = st->st_mtim;
+#endif
+}
+
+static int fs_sync_parent(const char *file) {
+  const char *slash = strrchr(file, '/');
+  int dfd;
+  int rc;
+  if (!slash)
+    dfd = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  else if (slash == file)
+    dfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  else {
+    size_t n = (size_t)(slash - file);
+    char *dir = (char *)sz_alloc(n + 1);
+    memcpy(dir, file, n);
+    dir[n] = '\0';
+    dfd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    sz_free(dir);
+  }
+  if (dfd < 0)
+    return -1;
+  rc = fsync(dfd);
+  /* A directory sync is not supported on every file system. */
+  if (rc != 0 && errno == EINVAL)
+    rc = 0;
+  {
+    int saved = errno;
+    if (close(dfd) != 0 && rc == 0)
+      return -1;
+    if (rc != 0)
+      errno = saved;
+  }
+  return rc;
+}
+
+/* Replace one regular file. A symbolic link names the regular file at the
+ * end of the link chain. The link stays. Sync the new file and the
+ * destination directory before success. A power loss keeps the previous
+ * file or the complete new file. Copy access mode and timestamps. Copy
+ * owner, group, and extended attributes when the process can set them. */
 static void *fs_write_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = (SzString *)pack->left;
   SzString *contents = (SzString *)pack->right;
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
-  const char *slash = strrchr(p, '/');
+  const char *target = p;
+  const char *slash;
   const char suffix[] = ".scuzz-write-XXXXXX";
-  size_t dir_len = slash ? (size_t)(slash - p) + 1 : 0;
+  char followed[FS_PATH_MAX];
+  size_t dir_len;
   struct stat st;
+  struct stat meta;
+  struct timespec times[2];
   mode_t mode = 0600;
   char *temporary = NULL;
   FILE *f = NULL;
-  int fd, saved_errno, created = 0;
+  int fd, saved_errno, created = 0, renamed = 0, have_old = 0, old_fd = -1;
   sz_timeline_log_cstr("Fs.write", p);
   if (lstat(p, &st) == 0) {
+    if (S_ISLNK(st.st_mode)) {
+      if (fs_follow_link(p, followed, sizeof followed) != 0)
+        goto fail;
+      target = followed;
+      if (lstat(target, &st) != 0) {
+        errno = EINVAL;
+        goto fail;
+      }
+    }
     if (!S_ISREG(st.st_mode)) {
       errno = EINVAL;
       goto fail;
     }
+    have_old = 1;
+    meta = st;
     mode = st.st_mode & 0777;
+    old_fd = open(target, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (old_fd < 0 && errno != EACCES)
+      goto fail;
   } else if (errno != ENOENT) {
     goto fail;
   }
+  slash = strrchr(target, '/');
+  dir_len = slash ? (size_t)(slash - target) + 1 : 0;
   temporary = (char *)sz_alloc(dir_len + sizeof(suffix));
-  memcpy(temporary, p, dir_len);
+  memcpy(temporary, target, dir_len);
   memcpy(temporary + dir_len, suffix, sizeof(suffix));
   fd = mkstemp(temporary);
   if (fd < 0)
@@ -174,23 +411,43 @@ static void *fs_write_result(void *env) {
       errno = EIO;
     goto fail;
   }
-  if (fchmod(fd, mode) != 0)
+  if (fflush(f) != 0)
+    goto fail;
+  if (fchmod(fileno(f), mode) != 0)
+    goto fail;
+  if (have_old) {
+    if (fchown(fileno(f), meta.st_uid, meta.st_gid) != 0 && errno != EPERM)
+      goto fail;
+    if (old_fd >= 0 && fs_copy_xattrs(old_fd, fileno(f)) != 0)
+      goto fail;
+    fs_stat_times(&meta, times);
+    if (futimens(fileno(f), times) != 0)
+      goto fail;
+  }
+  if (fsync(fileno(f)) != 0)
     goto fail;
   if (fclose(f) != 0) {
     f = NULL;
     goto fail;
   }
   f = NULL;
-  if (rename(temporary, p) != 0)
+  if (rename(temporary, target) != 0)
     goto fail;
+  renamed = 1;
+  if (fs_sync_parent(target) != 0)
+    goto fail;
+  if (old_fd >= 0)
+    close(old_fd);
   sz_free(temporary);
   return r;
 fail:
   saved_errno = errno;
   if (f)
     fclose(f);
+  if (old_fd >= 0)
+    close(old_fd);
   if (temporary) {
-    if (created)
+    if (created && !renamed)
       unlink(temporary);
     sz_free(temporary);
   }

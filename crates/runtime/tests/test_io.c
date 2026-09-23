@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #if defined(__APPLE__)
@@ -18,10 +19,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/xattr.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -2488,22 +2491,54 @@ static void test_retry_after(void) {
   sz_release(nul);
 }
 
+static int test_set_xattr(const char *path, const char *name, const char *val) {
+#if defined(__APPLE__)
+  return setxattr(path, name, val, strlen(val), 0, 0);
+#else
+  return setxattr(path, name, val, strlen(val), 0);
+#endif
+}
+
+static ssize_t test_get_xattr(const char *path, const char *name, char *buf,
+                               size_t len) {
+#if defined(__APPLE__)
+  return getxattr(path, name, buf, len, 0, 0);
+#else
+  return getxattr(path, name, buf, len);
+#endif
+}
+
 static void test_atomic_fs_write(void) {
   char directory[] = "/tmp/scuzz_atomic_write.XXXXXX";
-  char filename[256], alias[256], linkname[256];
+  char filename[256], alias[256], linkname[256], relname[256], midname[256];
+  char chainname[256], dangname[256], loopname[256], dirlink[256], fifoname[256];
   SzString *path, *body, *fresh, *bad_path, *empty;
   SzIoResult result;
   struct stat st;
+  struct timespec times[2];
   FILE *old_handle;
   char buf[32] = {0};
+  char xbuf[16];
   pid_t child;
   int status;
   DIR *dir;
   struct dirent *entry;
+  gid_t groups[64];
+  gid_t keep_gid = (gid_t)-1;
+  int ngroups;
+  int gi;
+  ssize_t xn;
   assert(mkdtemp(directory));
   snprintf(filename, sizeof(filename), "%s/report.txt", directory);
   snprintf(alias, sizeof(alias), "%s/alias.txt", directory);
   snprintf(linkname, sizeof(linkname), "%s/link.txt", directory);
+  snprintf(relname, sizeof(relname), "%s/rel.txt", directory);
+  snprintf(midname, sizeof(midname), "%s/mid.txt", directory);
+  snprintf(chainname, sizeof(chainname), "%s/chain.txt", directory);
+  snprintf(dangname, sizeof(dangname), "%s/dangling.txt", directory);
+  snprintf(loopname, sizeof(loopname), "%s/loop.txt", directory);
+  snprintf(dirlink, sizeof(dirlink), "%s/dirlink.txt", directory);
+  snprintf(fifoname, sizeof(fifoname), "%s/pipe", directory);
   path = sz_string_from_cstr(filename);
   body = sz_string_from_cstr("prior report");
   fresh = sz_string_from_bytes("new\0report", 10);
@@ -2524,6 +2559,21 @@ static void test_atomic_fs_write(void) {
   assert(memcmp(sz_string_cstr(result.value), "new\0report", 10) == 0);
   sz_release(result.value);
   assert(stat(filename, &st) == 0 && (st.st_mode & 0777) == 0640);
+  assert(test_set_xattr(filename, "user.scuzz", "keep") == 0);
+  times[0].tv_sec = 1500000000;
+  times[0].tv_nsec = 0;
+  times[1].tv_sec = 1500000001;
+  times[1].tv_nsec = 0;
+  assert(utimensat(AT_FDCWD, filename, times, 0) == 0);
+  ngroups = getgroups(64, groups);
+  for (gi = 0; gi < ngroups; gi++) {
+    if (groups[gi] != getegid()) {
+      keep_gid = groups[gi];
+      break;
+    }
+  }
+  if (keep_gid != (gid_t)-1)
+    assert(chown(filename, geteuid(), keep_gid) == 0);
   bad_path = sz_string_from_bytes(filename, strlen(filename) + 1);
   result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
   assert(!result.ok);
@@ -2537,10 +2587,70 @@ static void test_atomic_fs_write(void) {
   assert(symlink(filename, linkname) == 0);
   bad_path = sz_string_from_cstr(linkname);
   result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(result.ok);
+  sz_release(bad_path);
+  assert(lstat(linkname, &st) == 0 && S_ISLNK(st.st_mode));
+  result = sz_io_unsafe_run(sz_fs_read(path));
+  assert(result.ok && sz_string_len(result.value) == 12);
+  assert(memcmp(sz_string_cstr(result.value), "prior report", 12) == 0);
+  sz_release(result.value);
+  assert(symlink("report.txt", relname) == 0);
+  bad_path = sz_string_from_cstr(relname);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, fresh));
+  assert(result.ok);
+  sz_release(bad_path);
+  assert(lstat(relname, &st) == 0 && S_ISLNK(st.st_mode));
+  result = sz_io_unsafe_run(sz_fs_read(path));
+  assert(result.ok && sz_string_len(result.value) == 10);
+  assert(memcmp(sz_string_cstr(result.value), "new\0report", 10) == 0);
+  sz_release(result.value);
+  assert(symlink(filename, midname) == 0);
+  assert(symlink(midname, chainname) == 0);
+  bad_path = sz_string_from_cstr(chainname);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(result.ok);
+  sz_release(bad_path);
+  assert(lstat(midname, &st) == 0 && S_ISLNK(st.st_mode));
+  assert(lstat(chainname, &st) == 0 && S_ISLNK(st.st_mode));
+  result = sz_io_unsafe_run(sz_fs_read(path));
+  assert(result.ok && sz_string_len(result.value) == 12);
+  assert(memcmp(sz_string_cstr(result.value), "prior report", 12) == 0);
+  sz_release(result.value);
+  assert(symlink("missing-target", dangname) == 0);
+  bad_path = sz_string_from_cstr(dangname);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
   assert(!result.ok);
   sz_release(result.error);
   sz_release(bad_path);
-  assert(lstat(linkname, &st) == 0 && S_ISLNK(st.st_mode));
+  assert(lstat(dangname, &st) == 0 && S_ISLNK(st.st_mode));
+  assert(symlink("loop.txt", loopname) == 0);
+  bad_path = sz_string_from_cstr(loopname);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(!result.ok);
+  sz_release(result.error);
+  sz_release(bad_path);
+  assert(lstat(loopname, &st) == 0 && S_ISLNK(st.st_mode));
+  assert(symlink(directory, dirlink) == 0);
+  bad_path = sz_string_from_cstr(dirlink);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(!result.ok);
+  sz_release(result.error);
+  sz_release(bad_path);
+  assert(lstat(dirlink, &st) == 0 && S_ISLNK(st.st_mode));
+  assert(mkfifo(fifoname, 0600) == 0);
+  bad_path = sz_string_from_cstr(fifoname);
+  result = sz_io_unsafe_run(sz_fs_write(bad_path, body));
+  assert(!result.ok);
+  sz_release(result.error);
+  sz_release(bad_path);
+  assert(lstat(fifoname, &st) == 0 && S_ISFIFO(st.st_mode));
+  assert(stat(filename, &st) == 0);
+  assert((st.st_mode & 0777) == 0640);
+  assert(st.st_mtime == 1500000001);
+  xn = test_get_xattr(filename, "user.scuzz", xbuf, sizeof xbuf);
+  assert(xn == 4 && memcmp(xbuf, "keep", 4) == 0);
+  if (keep_gid != (gid_t)-1)
+    assert(st.st_gid == keep_gid);
 
   child = fork();
   assert(child >= 0);
@@ -2556,8 +2666,8 @@ static void test_atomic_fs_write(void) {
   assert(waitpid(child, &status, 0) == child);
   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
   result = sz_io_unsafe_run(sz_fs_read(path));
-  assert(result.ok && sz_string_len(result.value) == 10);
-  assert(memcmp(sz_string_cstr(result.value), "new\0report", 10) == 0);
+  assert(result.ok && sz_string_len(result.value) == 12);
+  assert(memcmp(sz_string_cstr(result.value), "prior report", 12) == 0);
   sz_release(result.value);
   dir = opendir(directory);
   assert(dir);
@@ -2566,11 +2676,24 @@ static void test_atomic_fs_write(void) {
   closedir(dir);
   assert(sz_io_unsafe_run(sz_fs_write(path, empty)).ok);
   assert(stat(filename, &st) == 0 && st.st_size == 0);
+  assert((st.st_mode & 0777) == 0640);
+  assert(st.st_mtime == 1500000001);
+  xn = test_get_xattr(filename, "user.scuzz", xbuf, sizeof xbuf);
+  assert(xn == 4 && memcmp(xbuf, "keep", 4) == 0);
+  if (keep_gid != (gid_t)-1)
+    assert(st.st_gid == keep_gid);
   sz_release(path);
   sz_release(body);
   sz_release(fresh);
   sz_release(empty);
   assert(unlink(linkname) == 0);
+  assert(unlink(relname) == 0);
+  assert(unlink(midname) == 0);
+  assert(unlink(chainname) == 0);
+  assert(unlink(dangname) == 0);
+  assert(unlink(loopname) == 0);
+  assert(unlink(dirlink) == 0);
+  assert(unlink(fifoname) == 0);
   assert(unlink(alias) == 0);
   assert(unlink(filename) == 0);
   assert(rmdir(directory) == 0);
