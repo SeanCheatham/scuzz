@@ -34,7 +34,7 @@ record EvStep(e: Expr, env: EvEnv)
 
 record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]])
 
 import Parse.Expr
 import Parse.Fun
@@ -77,7 +77,7 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs())
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs())
   }
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
@@ -749,7 +749,13 @@ def bindParams(ps: List[Param], vals: List[Value], acc: List[(String, Value)]): 
   if (List.isEmpty(ps) || List.isEmpty(vals)) acc else bindParams(List.tail(ps), List.tail(vals), (List.at(ps, 0).name, List.at(vals, 0)) :: acc)
 
 def kitStep(f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (List.isEmpty(args) && !List.isEmpty(Kits.params(f))) valueStep(Value.VFun(f, "")) else valueStep(kitCall(f, stepAll(args, env, p), env, p, off))
+  if (List.isEmpty(args) && kitWantsArg(p, f)) valueStep(Value.VFun(f, "")) else valueStep(kitCall(f, stepAll(args, env, p), env, p, off))
+
+def kitWantsArg(p: EvProg, f: String): Bool =
+  Map.get(p.kpars, f) match {
+    case Some(n) => n > 0
+    case None => false
+  }
 
 def ctorStep(en: String, tag: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   ctorAligned(en, tag, Check.alignCall(ctorFields(p, qualTag(en, tag)), args), env, p, off)
@@ -2359,13 +2365,13 @@ def probeExit(e: String): Int =
   if (Str.startsWith(e, "probe exit ")) Str.toInt(Str.drop(e, 11), 1) else 1
 
 def withCtx(p: EvProg, ctx: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.kpars, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log)
 
 def withHost(p: EvProg, host: Ref[Value], pool: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log)
 
 def withLog(p: EvProg, log: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs())
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs())
 
 def sigRefs(): List[Ref[Value]] =
   newRef(Value.VList(noVals())) :: newRef(Value.VInt(0)) :: newRef(Value.VList(noVals())) :: newRef(Value.VBool(false)) :: noRefs()
