@@ -2339,18 +2339,18 @@ def emitPropCheckJoin(ns: Slot, rs: Slot, pred: Expr, recv: Expr, prefix: String
 
 def emitPropCheckJoin2(nc: String, nv: String, no: Bool, rs: Slot, pred: Expr, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   rs match {
-    case Slot(rc, rv, ro) => emitPropCheckPred(join(nc, join(rc, if (ro && exprMentions(pred, recv)) retPtr(rv) else "")), nv, no, rv, ro, emitPropPred(pred, rv, ro, recv, prefix, strs, defs, ens, ps, loc))
+    case Slot(rc, rv, ro) => emitPropCheckPred(join(nc, join(rc, if (ro && exprMentions(pred, recv)) retPtr(rv) else "")), nv, no, rv, ro, emitPropPred(pred, rc, rv, ro, recv, prefix, strs, defs, ens, ps, loc))
   }
 
-def emitPropPred(pred: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+def emitPropPred(pred: Expr, rc: String, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   pred match {
-    case Expr.ENamed(_, inner) => emitPropPred(inner, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
-    case Expr.ELam(p, _, body) => emitPropPredLam(p, body, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
+    case Expr.ENamed(_, inner) => emitPropPred(inner, rc, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
+    case Expr.ELam(p, _, body) => emitPropPredLam(p, body, rc, rv, ro, recv, prefix, strs, defs, ens, ps, loc)
     case _ => emitExpr(pred, Str.concat(prefix, "_p"), strs, defs, ens, ps, loc)
   }
 
-def emitPropPredLam(p: String, body: Expr, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitPropPredLam2(p, body, Slot("", rv, ro), slotBindI64(Slot("", rv, ro), recv, ps, defs), recv, prefix, strs, defs, ens, ps, loc)
+def emitPropPredLam(p: String, body: Expr, rc: String, rv: String, ro: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+  emitPropPredLam2(p, body, Slot("", rv, ro), slotBindI64(Slot(rc, rv, ro), recv, ps, defs), recv, prefix, strs, defs, ens, ps, loc)
 
 def emitPropPredLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, recv: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitApplyLam2(propLamBind(p, boxInt, prefix), propLamBody(p, body, boxInt, prefix), arg, boxInt, applyBindTy(p, recv, defs, ens, ps, loc), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc, 0)
