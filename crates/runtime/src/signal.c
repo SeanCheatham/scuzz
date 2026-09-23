@@ -182,10 +182,20 @@ static void fputs_json_value(FILE *f, const void *value) {
  * compiled ADT shape. SCUZZ_EVAL_TAGS is `En.Case=tag` lines. */
 static char *g_eval_tags;
 static int g_eval_tags_ready;
+static int g_eval_mirror;
+static const char *g_eval_tags_path;
+
+/* Read the mirror env once, before the UI worker starts.
+ * A later getenv races with AppKit on the main thread. */
+static void eval_env_init(void) __attribute__((constructor));
+static void eval_env_init(void) {
+  const char *arm = getenv("SCUZZ_EVAL_MIRROR");
+  g_eval_mirror = arm && arm[0];
+  g_eval_tags_path = getenv("SCUZZ_EVAL_TAGS");
+}
 
 static int eval_mirror_on(void) {
-  const char *arm = getenv("SCUZZ_EVAL_MIRROR");
-  return arm && arm[0];
+  return g_eval_mirror;
 }
 
 static void eval_tags_load(void) {
@@ -195,7 +205,7 @@ static void eval_tags_load(void) {
   if (g_eval_tags_ready)
     return;
   g_eval_tags_ready = 1;
-  path = getenv("SCUZZ_EVAL_TAGS");
+  path = g_eval_tags_path;
   if (!path || !path[0])
     return;
   f = fopen(path, "rb");
@@ -532,9 +542,8 @@ static void *signal_value(SzSignal *s) {
 /* Evaluator mirrors keep Signal.get working and stay out of the dump.
  * SCUZZ_EVAL_MIRROR arms this. The name is $mirror. */
 static int sig_is_mirror(SzString *name) {
-  const char *arm = getenv("SCUZZ_EVAL_MIRROR");
   const char *n;
-  if (!arm || !arm[0] || !name)
+  if (!g_eval_mirror || !name)
     return 0;
   n = sz_string_cstr(name);
   return n && strcmp(n, "$mirror") == 0;
