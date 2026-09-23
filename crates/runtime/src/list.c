@@ -19,11 +19,12 @@ SzList *sz_list_cons(void *head, SzList *tail) {
   return n;
 }
 
-/* Cons, then drop the caller's unique ref to `tail`. Use when `tail` is a
- * fresh spine the caller will not keep. Sharing a live tail uses cons only. */
+/* Move `tail` into the new cell. The caller does not keep `tail`. */
 static SzList *sz_list_cons_take(void *head, SzList *tail) {
-  SzList *n = sz_list_cons(head, tail);
-  sz_release(tail);
+  SzList *n = (SzList *)sz_rc_alloc(sizeof(SzList), SZ_RC_LIST);
+  n->head = head;
+  n->tail = tail;
+  sz_retain(head);
   return n;
 }
 
@@ -336,6 +337,39 @@ SzList *sz_list_concat(SzList *xs, SzList *ys) {
   for (p = acc; p; p = p->tail)
     out = sz_list_cons_take(p->head, out);
   sz_release(acc);
+  return out;
+}
+
+/* 1 when every cell is the only owner and no cell is `ban`. */
+static int list_spine_unique(const SzList *xs, const SzList *ban) {
+  const SzList *p;
+  for (p = xs; p; p = p->tail) {
+    if (p == ban || sz_rc_count(p) != 1)
+      return 0;
+  }
+  return 1;
+}
+
+/* Consume `xs`. A unique spine links `ys` at the end. A shared spine is copied. */
+SzList *sz_list_concat_take(SzList *xs, SzList *ys) {
+  SzList *last;
+  SzList *out;
+  if (!xs) {
+    sz_retain(ys);
+    return ys;
+  }
+  if (list_spine_unique(xs, ys)) {
+    last = xs;
+    while (last->tail)
+      last = last->tail;
+    if (ys) {
+      sz_retain(ys);
+      last->tail = ys;
+    }
+    return xs;
+  }
+  out = sz_list_concat(xs, ys);
+  sz_release(xs);
   return out;
 }
 

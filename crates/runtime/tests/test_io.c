@@ -12632,6 +12632,108 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* List.concat take: a unique spine links the right list. A shared spine copies. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a;
+    SzString *b;
+    SzString *c;
+    SzList *xs;
+    SzList *ys;
+    SzList *inner;
+    SzList *zs;
+    SzList *tail;
+    sz_alloc_stats(&base_bytes, &base_count);
+    a = sz_string_from_cstr("a");
+    b = sz_string_from_cstr("b");
+    c = sz_string_from_cstr("c");
+    inner = sz_list_cons(c, NULL);
+    ys = sz_list_cons(b, inner);
+    sz_release(inner);
+    xs = sz_list_cons(a, NULL);
+    zs = sz_list_concat_take(xs, ys);
+    assert(zs == xs);
+    assert(sz_list_len(zs) == 3);
+    assert(zs->head == a);
+    assert(zs->tail == ys);
+    assert(zs->tail->head == b);
+    sz_list_free(zs);
+    sz_release(ys);
+    ys = sz_list_cons(b, NULL);
+    zs = sz_list_concat_take(NULL, ys);
+    assert(zs == ys);
+    sz_release(zs);
+    xs = sz_list_cons(a, NULL);
+    sz_retain(xs);
+    zs = sz_list_concat_take(xs, ys);
+    assert(zs != xs);
+    assert(sz_list_len(xs) == 1);
+    assert(xs->head == a);
+    assert(sz_list_len(zs) == 2);
+    assert(zs->tail == ys);
+    sz_list_free(zs);
+    sz_release(xs);
+    inner = sz_list_cons(b, NULL);
+    xs = sz_list_cons(a, inner);
+    sz_release(inner);
+    tail = sz_list_tail(xs);
+    zs = sz_list_concat_take(xs, tail);
+    assert(sz_list_len(zs) == 3);
+    assert(zs != tail);
+    sz_list_free(zs);
+    sz_release(ys);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Str.concat take: a unique left grows. A pinned left stays intact. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a;
+    SzString *b;
+    SzString *lit;
+    SzString *out;
+    lit = sz_string_lit("ab");
+    sz_alloc_stats(&base_bytes, &base_count);
+    a = sz_string_from_cstr("a");
+    b = sz_string_from_cstr("b");
+    out = sz_string_concat_take(a, b);
+    assert(out == a);
+    assert(strcmp(sz_string_cstr(out), "ab") == 0);
+    out = sz_string_concat_take(out, b);
+    assert(strcmp(sz_string_cstr(out), "abb") == 0);
+    out = sz_string_concat_take(out, out);
+    assert(strcmp(sz_string_cstr(out), "abbabb") == 0);
+    sz_release(out);
+    out = sz_string_concat_take(NULL, b);
+    assert(strcmp(sz_string_cstr(out), "b") == 0);
+    sz_release(out);
+    a = sz_string_from_cstr("aa");
+    sz_retain(a);
+    out = sz_string_concat_take(a, b);
+    assert(out != a);
+    assert(strcmp(sz_string_cstr(a), "aa") == 0);
+    assert(strcmp(sz_string_cstr(out), "aab") == 0);
+    assert(sz_rc_count(a) == 1);
+    sz_release(a);
+    sz_release(out);
+    out = sz_string_concat_take(lit, b);
+    assert(out != lit);
+    assert(strcmp(sz_string_cstr(lit), "ab") == 0);
+    assert(strcmp(sz_string_cstr(out), "abb") == 0);
+    sz_release(out);
+    sz_release(b);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* Spine combinators loop: 10k cells finish and do not leak. One shared
    * string is the head of every cons. */
   {
