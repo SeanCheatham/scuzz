@@ -29,6 +29,26 @@ static SzIo *pure_drop(void *value);
 
 void sz_testrt_random_reset_live(void); /* random.c; not in the public header */
 
+static void expect_parse(const char *text, int some, int64_t ms) {
+  SzString *s = sz_string_from_cstr(text);
+  SzAdt *o = (SzAdt *)sz_clock_parse(s);
+  assert(o);
+  assert(sz_adt_tag(o) == (some ? 1 : 0));
+  if (some)
+    assert(sz_unbox_i64(sz_adt_payload(o)) == ms);
+  sz_release(o);
+  sz_release(s);
+}
+
+static void expect_round(int64_t ms) {
+  SzString *s = sz_clock_iso8601(ms);
+  SzAdt *o = (SzAdt *)sz_clock_parse(s);
+  assert(sz_adt_tag(o) == 1);
+  assert(sz_unbox_i64(sz_adt_payload(o)) == ms);
+  sz_release(o);
+  sz_release(s);
+}
+
 static SzString *test_list_join(SzList *xs, const char *sep) {
   SzString *s = sz_string_from_cstr(sep ? sep : "");
   SzString *out = sz_list_join(xs, s);
@@ -7363,6 +7383,68 @@ int main(void) {
     s = sz_clock_iso8601(1582979445123);
     assert(strcmp(sz_string_cstr(s), "2020-02-29T12:30:45.123Z") == 0);
     sz_release(s);
+    expect_round(0);
+    expect_round(1);
+    expect_round(-1);
+    expect_round(1582934400000);
+    expect_round(1582979445123);
+    expect_round(-62167219200000);
+    expect_parse("1970-01-01T00:00:00.1Z", 1, 100);
+    expect_parse("1970-01-01T00:00:00.12Z", 1, 120);
+    expect_parse("1970-01-01T00:00:01Z", 1, 1000);
+    expect_parse("1970-01-01T00:00:00.000+00:00", 1, 0);
+    expect_parse("1970-01-01T00:00:00.000+05:30", 1, -19800000);
+    expect_parse("1970-01-01T05:30:00.000+05:30", 1, 0);
+    expect_parse("2020-02-29T18:00:45.123+05:30", 1, 1582979445123);
+    expect_parse("2020-02-28T16:00:00.000-08:00", 1, 1582934400000);
+    expect_parse("2000-02-29T00:00:00.000Z", 1, 951782400000);
+    expect_parse("1900-02-29T00:00:00.000Z", 0, 0);
+    expect_parse("2020-02-29T23:59:60.000Z", 0, 0);
+    expect_parse("2020-02-30T00:00:00.000Z", 0, 0);
+    expect_parse("1970-01-01T00:00:00.000+18:00", 1, -64800000);
+    expect_parse("1970-01-01T00:00:00.000+18:01", 0, 0);
+    expect_parse("1970-01-01T00:00:00.000z", 0, 0);
+    expect_parse("nope", 0, 0);
+    expect_parse("", 0, 0);
+    expect_parse("-1-01-01T00:00:00.000Z", 1, -62198755200000);
+    expect_parse("10000-01-01T00:00:00.000Z", 1, 253402300800000);
+    expect_parse("0000-01-01T00:00:00.000Z", 1, -62167219200000);
+    expect_parse("970-01-01T00:00:00.000Z", 0, 0);
+    s = sz_clock_zone(0, 330);
+    assert(strcmp(sz_string_cstr(s), "1970-01-01T05:30:00.000+05:30") == 0);
+    sz_release(s);
+    s = sz_clock_zone(0, 0);
+    assert(strcmp(sz_string_cstr(s), "1970-01-01T00:00:00.000Z") == 0);
+    sz_release(s);
+    s = sz_clock_zone(1582934400000, -480);
+    assert(strcmp(sz_string_cstr(s), "2020-02-28T16:00:00.000-08:00") == 0);
+    sz_release(s);
+    s = sz_clock_zone(0, 1081);
+    assert(strcmp(sz_string_cstr(s), "") == 0);
+    sz_release(s);
+    s = sz_clock_zone(0, -1081);
+    assert(strcmp(sz_string_cstr(s), "") == 0);
+    sz_release(s);
+    s = sz_clock_zone(INT64_MAX, 1);
+    assert(strcmp(sz_string_cstr(s), "") == 0);
+    sz_release(s);
+    s = sz_clock_zone(INT64_MIN, -1);
+    assert(strcmp(sz_string_cstr(s), "") == 0);
+    sz_release(s);
+    s = sz_clock_zone(0, 330);
+    {
+      SzAdt *o = (SzAdt *)sz_clock_parse(s);
+      assert(sz_adt_tag(o) == 1);
+      assert(sz_unbox_i64(sz_adt_payload(o)) == 0);
+      sz_release(o);
+    }
+    sz_release(s);
+    {
+      SzAdt *o = (SzAdt *)sz_clock_parse(NULL);
+      assert(o);
+      assert(sz_adt_tag(o) == 0);
+      sz_release(o);
+    }
   }
 
   /* TestRuntime: fake clock sleep without wall wait */

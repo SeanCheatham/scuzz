@@ -1,0 +1,225 @@
+/* Evaluator path for Clock.parse and Clock.zone.
+ * Use the same rules as the runtime.
+ * The text is a date, T, a time, and a zone.
+ * The fraction is optional. Use 1, 2, or 3 digits.
+ * The zone is Z or +HH:MM or -HH:MM.
+ * The offset is at most 18 hours.
+ * Years 0 to 9999 use four digits.
+ * Other years use one to six digits and no leading zero.
+ * A bad text is None. The value is epoch milliseconds.
+ * No leap seconds. Offset 0 uses Z. A bad offset is empty. */
+
+record At(n: Int, i: Int)
+
+def parse(s: String): Option[Int] =
+  readYear(s, 0) match {
+    case Option.Some(y) => afterYear(s, y)
+    case Option.None => Option.None
+  }
+
+def zone(ms: Int, off: Int): String =
+  if (off < 0 - 1080 || off > 1080) "" else zoneShift(ms, off)
+
+def ch(s: String, i: Int): Int =
+  if (i < 0 || i >= Str.len(s)) 0 - 1 else Str.charAt(s, i)
+
+def dig(c: Int): Bool =
+  c >= 48 && c <= 57
+
+def readN(s: String, i: Int, w: Int, acc: Int): Option[At] =
+  if (w == 0) Option.Some(At(acc, i)) else if (!dig(ch(s, i))) Option.None else readN(s, i + 1, w - 1, acc * 10 + ch(s, i) - 48)
+
+def expect(s: String, i: Int, c: Int): Option[Int] =
+  if (ch(s, i) == c) Option.Some(i + 1) else Option.None
+
+def readYear(s: String, i: Int): Option[At] =
+  if (ch(s, i) == 45) yearDigits(s, i + 1, 0, 0, true) else yearDigits(s, i, 0, 0, false)
+
+def yearDigits(s: String, i: Int, acc: Int, n: Int, neg: Bool): Option[At] =
+  if (dig(ch(s, i))) yearMore(s, i, acc, n, neg) else yearDone(s, i, acc, n, neg)
+
+def yearMore(s: String, i: Int, acc: Int, n: Int, neg: Bool): Option[At] =
+  if (n >= 6) Option.None else yearDigits(s, i + 1, acc * 10 + ch(s, i) - 48, n + 1, neg)
+
+def yearDone(s: String, i: Int, acc: Int, n: Int, neg: Bool): Option[At] =
+  if (n == 0) Option.None else if (!neg && acc <= 9999) yearFour(i, acc, n) else if (ch(s, i - n) == 48) Option.None else Option.Some(At(if (neg) 0 - acc else acc, i))
+
+def yearFour(i: Int, acc: Int, n: Int): Option[At] =
+  if (n == 4) Option.Some(At(acc, i)) else Option.None
+
+def afterYear(s: String, y: At): Option[Int] =
+  expect(s, y.i, 45) match {
+    case Option.Some(i) => readMonth(s, y.n, i)
+    case Option.None => Option.None
+  }
+
+def readMonth(s: String, year: Int, i: Int): Option[Int] =
+  readN(s, i, 2, 0) match {
+    case Option.Some(m) => afterMonth(s, year, m)
+    case Option.None => Option.None
+  }
+
+def afterMonth(s: String, year: Int, m: At): Option[Int] =
+  if (m.n < 1 || m.n > 12) Option.None else monthDash(s, year, m)
+
+def monthDash(s: String, year: Int, m: At): Option[Int] =
+  expect(s, m.i, 45) match {
+    case Option.Some(i) => readDay(s, year, m.n, i)
+    case Option.None => Option.None
+  }
+
+def readDay(s: String, year: Int, month: Int, i: Int): Option[Int] =
+  readN(s, i, 2, 0) match {
+    case Option.Some(d) => afterDay(s, year, month, d)
+    case Option.None => Option.None
+  }
+
+def afterDay(s: String, year: Int, month: Int, d: At): Option[Int] =
+  if (d.n < 1 || d.n > monthLen(year, month)) Option.None else dayTee(s, year, month, d)
+
+def dayTee(s: String, year: Int, month: Int, d: At): Option[Int] =
+  expect(s, d.i, 84) match {
+    case Option.Some(i) => readHour(s, year, month, d.n, i)
+    case Option.None => Option.None
+  }
+
+def readHour(s: String, year: Int, month: Int, day: Int, i: Int): Option[Int] =
+  readN(s, i, 2, 0) match {
+    case Option.Some(h) => afterHour(s, year, month, day, h)
+    case Option.None => Option.None
+  }
+
+def afterHour(s: String, year: Int, month: Int, day: Int, h: At): Option[Int] =
+  if (h.n > 23) Option.None else hourColon(s, year, month, day, h)
+
+def hourColon(s: String, year: Int, month: Int, day: Int, h: At): Option[Int] =
+  expect(s, h.i, 58) match {
+    case Option.Some(i) => readMinute(s, year, month, day, h.n, i)
+    case Option.None => Option.None
+  }
+
+def readMinute(s: String, year: Int, month: Int, day: Int, hour: Int, i: Int): Option[Int] =
+  readN(s, i, 2, 0) match {
+    case Option.Some(m) => afterMinute(s, year, month, day, hour, m)
+    case Option.None => Option.None
+  }
+
+def afterMinute(s: String, year: Int, month: Int, day: Int, hour: Int, m: At): Option[Int] =
+  if (m.n > 59) Option.None else minuteColon(s, year, month, day, hour, m)
+
+def minuteColon(s: String, year: Int, month: Int, day: Int, hour: Int, m: At): Option[Int] =
+  expect(s, m.i, 58) match {
+    case Option.Some(i) => readSecond(s, year, month, day, hour, m.n, i)
+    case Option.None => Option.None
+  }
+
+def readSecond(s: String, year: Int, month: Int, day: Int, hour: Int, minute: Int, i: Int): Option[Int] =
+  readN(s, i, 2, 0) match {
+    case Option.Some(sec) => afterSecond(s, year, month, day, hour, minute, sec)
+    case Option.None => Option.None
+  }
+
+def afterSecond(s: String, year: Int, month: Int, day: Int, hour: Int, minute: Int, sec: At): Option[Int] =
+  if (sec.n > 59) Option.None else secondFrac(s, year, month, day, hour, minute, sec)
+
+def secondFrac(s: String, year: Int, month: Int, day: Int, hour: Int, minute: Int, sec: At): Option[Int] =
+  readFrac(s, sec.i) match {
+    case Option.Some(ms) => afterFrac(s, year, month, day, hour, minute, sec.n, ms)
+    case Option.None => Option.None
+  }
+
+def readFrac(s: String, i: Int): Option[At] =
+  if (ch(s, i) != 46) Option.Some(At(0, i)) else fracGo(s, i + 1, 0, 0)
+
+def fracGo(s: String, i: Int, acc: Int, w: Int): Option[At] =
+  if (w == 3 || !dig(ch(s, i))) fracDone(s, i, acc, w) else fracGo(s, i + 1, acc * 10 + ch(s, i) - 48, w + 1)
+
+def fracDone(s: String, i: Int, acc: Int, w: Int): Option[At] =
+  if (w == 0 || dig(ch(s, i))) Option.None else Option.Some(At(scaleFrac(acc, w), i))
+
+def scaleFrac(acc: Int, w: Int): Int =
+  if (w >= 3) acc else scaleFrac(acc * 10, w + 1)
+
+def afterFrac(s: String, year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, ms: At): Option[Int] =
+  readZone(s, ms.i) match {
+    case Option.Some(off) => Option.Some(toEpoch(year, month, day, hour, minute, second, ms.n, off.n))
+    case Option.None => Option.None
+  }
+
+def readZone(s: String, i: Int): Option[At] =
+  if (ch(s, i) == 90) zoneEnd(s, i + 1, 0) else if (ch(s, i) == 43 || ch(s, i) == 45) readOff(s, i + 1, ch(s, i) == 45) else Option.None
+
+def readOff(s: String, i: Int, neg: Bool): Option[At] =
+  readN(s, i, 2, 0) match {
+    case Option.Some(hh) => readOffMin(s, hh, neg)
+    case Option.None => Option.None
+  }
+
+def readOffMin(s: String, hh: At, neg: Bool): Option[At] =
+  if (ch(s, hh.i) != 58) Option.None else readOffMm(s, hh, neg)
+
+def readOffMm(s: String, hh: At, neg: Bool): Option[At] =
+  readN(s, hh.i + 1, 2, 0) match {
+    case Option.Some(mm) => offOk(s, hh.n, mm, neg)
+    case Option.None => Option.None
+  }
+
+def offOk(s: String, hh: Int, mm: At, neg: Bool): Option[At] =
+  if (hh > 18 || mm.n > 59 || (hh == 18 && mm.n != 0)) Option.None else zoneEnd(s, mm.i, if (neg) 0 - (hh * 60 + mm.n) else hh * 60 + mm.n)
+
+def zoneEnd(s: String, i: Int, off: Int): Option[At] =
+  if (i == Str.len(s)) Option.Some(At(off, i)) else Option.None
+
+def leap(year: Int): Bool =
+  year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+
+def monthLen(year: Int, month: Int): Int =
+  if (month == 2 && leap(year)) 29 else monthBase(month)
+
+def monthBase(month: Int): Int =
+  if (month == 1 || month == 3 || month == 5 || month == 7 || month == 8 || month == 10 || month == 12) 31 else if (month == 2) 28 else if (month == 4 || month == 6 || month == 9 || month == 11) 30 else 0
+
+def floorDiv(a: Int, b: Int): Int =
+  if (a % b < 0) a / b - 1 else a / b
+
+def daysFrom(year: Int, month: Int, day: Int): Int =
+  daysEra(if (month <= 2) year - 1 else year, month, day)
+
+def daysEra(year: Int, month: Int, day: Int): Int =
+  daysYoe(year, floorDiv(year, 400), month, day)
+
+def daysYoe(year: Int, era: Int, month: Int, day: Int): Int =
+  daysDoy(era, year - era * 400, if (month > 2) month - 3 else month + 9, day)
+
+def daysDoy(era: Int, yoe: Int, mp: Int, day: Int): Int =
+  era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + ((153 * mp + 2) / 5 + day - 1) - 719468
+
+def toEpoch(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, milli: Int, off: Int): Int =
+  daysFrom(year, month, day) * 86400000 + (hour * 3600 + minute * 60 + second) * 1000 + milli - off * 60000
+
+def zoneShift(ms: Int, off: Int): String =
+  addOff(ms, off * 60000) match {
+    case Option.Some(shifted) => zoneAt(Clock.iso8601(shifted), off)
+    case Option.None => ""
+  }
+
+def addOff(ms: Int, delta: Int): Option[Int] =
+  if (delta > 0 && ms > i64Max() - delta) Option.None else if (delta < 0 && ms < i64Min() - delta) Option.None else Option.Some(ms + delta)
+
+def i64Max(): Int =
+  9223372036854775807
+
+def i64Min(): Int =
+  0 - 9223372036854775807 - 1
+
+def zoneAt(text: String, off: Int): String =
+  if (Str.len(text) == 0 || Str.charAt(text, Str.len(text) - 1) != 90) "" else if (off == 0) text else Str.concat(Str.dropRight(text, 1), offSuffix(off))
+
+def offSuffix(off: Int): String =
+  if (off < 0) Str.concat("-", offPair(0 - off)) else Str.concat("+", offPair(off))
+
+def offPair(m: Int): String =
+  Str.concat(two(m / 60), Str.concat(":", two(m % 60)))
+
+def two(n: Int): String =
+  if (n < 10) Str.concat("0", Str.fromInt(n)) else Str.fromInt(n)

@@ -53,7 +53,7 @@ Required for CLI, server, and desktop applications.
 
 Filesystem symbolic links, extended metadata preservation, and power-loss durability remain open.
 
-`Map` / `Set` keys beyond `Int` or `String`. The live signal readers (`Property.signal*`, `Property.a11yHas`) and `Fuzz.*` at `Value` (the probe entry calls them natively): the prefixes in `Eval.excludedKits()` ([`philosophy.md`](philosophy.md#evaluator)). `scuzz fuzz` on the evaluator for a `[ui]` package. `View` as a reference-counted value: the tree owns views, a list signal frees the lists `View.each` never mounted, and a view pulled out of a list by hand stays unsafe ([`philosophy.md`](philosophy.md), "The tree owns views"). Docs `Mount.scuzz` does not mount `View.each`. Time parse and zones. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
+`Map` / `Set` keys beyond `Int` or `String`. The live signal readers (`Property.signal*`, `Property.a11yHas`) and `Fuzz.*` at `Value` (the probe entry calls them natively): the prefixes in `Eval.excludedKits()` ([`philosophy.md`](philosophy.md#evaluator)). `scuzz fuzz` on the evaluator for a `[ui]` package. `View` as a reference-counted value: the tree owns views, a list signal frees the lists `View.each` never mounted, and a view pulled out of a list by hand stays unsafe ([`philosophy.md`](philosophy.md), "The tree owns views"). Docs `Mount.scuzz` does not mount `View.each`. Drive `==` wrap on UI. OS threads. HTTPS serve with app cert and key files.
 
 ### Verification
 
