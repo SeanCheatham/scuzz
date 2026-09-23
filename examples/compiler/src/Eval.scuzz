@@ -2036,9 +2036,9 @@ def propListLen(v: Value): Value =
 
 def propListAt(v: Value, i: Int): Value =
   if (i < 0) Value.VStr("") else v match {
-    case Value.VList(xs) => propAt(xs, i)
-    case _ => Value.VStr("")
-  }
+  case Value.VList(xs) => propAt(xs, i)
+  case _ => Value.VStr("")
+}
 
 def propAt(xs: List[Value], i: Int): Value =
   if (i >= List.len(xs)) Value.VStr("") else propHead(List.at(xs, i))
@@ -2081,8 +2081,8 @@ def fuzzClaim(fn: Value, t: Timeline, env: EvEnv, p: EvProg, off: Int): Verdict 
 
 def fuzzVerifyRel(name: String, fn: Value, env: EvEnv, p: EvProg, off: Int): Value =
   Value.VIo(unitIo(IO.pure(()).flatMap(_ => Fuzz.verifyRel(name, __tup => __tup match {
-    case (a, b) => fuzzRel(fn, a, b, env, p, off)
-  }))))
+  case (a, b) => fuzzRel(fn, a, b, env, p, off)
+}))))
 
 def fuzzRel(fn: Value, a: Timeline, b: Timeline, env: EvEnv, p: EvProg, off: Int): Verdict =
   claimVerdict(apply2(fn, Value.VTimeline(a), Value.VTimeline(b), env, p, off))
