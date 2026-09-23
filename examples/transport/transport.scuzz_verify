@@ -3,3 +3,4 @@ def handshakeFails(t: Timeline): Verdict =
 
 def trustFails(t: Timeline): Verdict =
   Verdict.any(t, i => Timeline.fileTextIs(t, i, "trust.txt", "Net.httpGet: certificate rejected"))
+
