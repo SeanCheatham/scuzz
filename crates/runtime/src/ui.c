@@ -1649,9 +1649,13 @@ int sz_ui_pump_sync(SzUiSession *session) {
                                                       : NULL);
     sz_property_session_step();
   }
-  /* A step that this pump painted asks for the next pump. */
-  if (need_dump && session->root && sz_view_motion_pending(session->root))
+  /* A step that this pump painted asks for the next pump.
+   * The hit stays on this pump. The next step does not repeat it. */
+  if (need_dump && session->root && sz_view_motion_pending(session->root)) {
     session_mark_dirty(session);
+    session->last_hit_seen = 0;
+    host_free(&session->last_hit_desc);
+  }
   return 1;
 }
 

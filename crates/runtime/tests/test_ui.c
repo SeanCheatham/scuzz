@@ -1278,12 +1278,21 @@ static void test_pump_motion(void) {
   tap.kind = SZ_INPUT_TAP;
   tap.x = sz_view_frame(button).x + 8.f;
   tap.y = sz_view_frame(button).y + 8.f;
+  assert(sz_ui_session_set_debug_dump(session, "/tmp/scuzz_motion_hit.dump"));
   assert(sz_ui_inject_sync(session, &tap));
   for (step = 4; step >= 1; step--) {
+    char *dump;
     assert(sz_ui_pump_sync(session));
     snprintf(needle, sizeof needle, "motion:press:Go=%d", step);
     assert(dump_has(session, needle));
+    dump = slurp_cstr("/tmp/scuzz_motion_hit.dump");
+    if (step == 4)
+      assert(strstr(dump, "\"desc\":\"button:Go\"") != NULL);
+    else
+      assert(strstr(dump, "\"last_hit\":{") == NULL);
+    free(dump);
   }
+  remove("/tmp/scuzz_motion_hit.dump");
   assert(sz_ui_pump_sync(session));
   assert(!dump_has(session, "motion:press:"));
   paints = sz_ui_session_paints(session);
