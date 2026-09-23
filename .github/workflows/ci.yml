@@ -54,7 +54,7 @@ jobs:
           - name: apps
             slices: embedders kernel package ui gpu differential new-ui desktop mobile
           - name: fuzz
-            slices: embedders fuzz
+            slices: embedders fuzz delta
           - name: web
             slices: web
     steps:
