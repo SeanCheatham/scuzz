@@ -24,5 +24,5 @@ Do not start FFI, a package registry, GPU raster, physical-device packaging, or 
 | Self-hosting lags one release | Toolchain sources call builtins the newest `v*` release already emits |
 | Mobile hardware and GPU raster stay unproven | Host and simulator proofs do not close them. See [`gaps.md`](gaps.md) |
 | A `[ui]` package has no evaluator fuzz | `[ui]` fuzz stays compiled until a proof covers it |
-| Reference counts miss Signal cycles and unmounted view lists | ASan corpus replay. The tree owns views |
+| Reference counts miss Signal cycles | ASan corpus replay. The tree owns views. A view is reference counted. A list signal frees lists `View.each` never mounted |
 | URLSession and Skia pixels have no fuzz home | `--live` replays host loopback. `--differential` compares structural dumps |
