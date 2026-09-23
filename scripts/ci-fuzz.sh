@@ -871,6 +871,11 @@ if ! fuzz --live --replay examples/api-report/live.toml examples/api-report | te
   echo "examples/api-report: live loopback replay failed" && exit 1
 fi
 
+# URLSession certificate checks and TLS handshake errors on host loopback.
+if ! fuzz --session --iterations 0 examples/transport | tee /tmp/scuzz-transport-session.log | grep -q "fuzz ok"; then
+  echo "examples/transport: session replay failed" && exit 1
+fi
+
 # File comparisons judge recorded contents at both states.
 file_compare_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-file-compare.XXXXXX")"
 mkdir -p "$file_compare_dir/src" "$file_compare_dir/corpus"

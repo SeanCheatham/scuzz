@@ -57,9 +57,7 @@ Filesystem symbolic links, extended metadata preservation, and power-loss durabi
 
 ### Verification
 
-The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. These gaps weaken that strategy. Rank is threat order. Locks: [`philosophy.md`](philosophy.md#verification-posture).
-
-1. **URLSession and Skia pixels.** Host loopback OpenSSL replay is `scuzz fuzz --live`. URLSession, TLS error cases, and Skia pixels have no fuzz home. `--differential` compares structural dumps.
+The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. Locks: [`philosophy.md`](philosophy.md#verification-posture).
 
 ### Later
 

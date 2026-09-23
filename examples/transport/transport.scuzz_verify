@@ -1,0 +1,5 @@
+def handshakeFails(t: Timeline): Verdict =
+  Verdict.any(t, i => Timeline.fileTextIs(t, i, "handshake.txt", "Net.httpGet: TLS failed"))
+
+def trustFails(t: Timeline): Verdict =
+  Verdict.any(t, i => Timeline.fileTextIs(t, i, "trust.txt", "Net.httpGet: certificate rejected"))

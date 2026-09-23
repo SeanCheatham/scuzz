@@ -883,6 +883,32 @@ static void *get_then_rst(void *arg) {
   return (void *)1;
 }
 
+static void *listen_close(void *arg) {
+  int port = *(int *)arg;
+  int fd;
+  int client;
+  int one = 1;
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return (void *)0;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
+      listen(fd, 1) != 0) {
+    close(fd);
+    return (void *)0;
+  }
+  client = accept(fd, NULL, NULL);
+  if (client >= 0)
+    close(client);
+  close(fd);
+  return (void *)1;
+}
+
 static void *connect_close(void *arg) {
   int port = *(int *)arg;
   int fd = -1;
@@ -9294,6 +9320,41 @@ int main(void) {
     assert(strcmp(http_resp_body_cstr(pair->right), "ok:/x") == 0);
     assert(http_resp_status(pair->right) == 200);
     sz_pair_free(pair);
+  }
+
+  /* URLSession rules reject the untrusted loopback process cert. */
+  {
+    SzString *url = sz_string_from_cstr("https://127.0.0.1:18486/x");
+    setenv("SCUZZ_NET_SESSION", "1", 1);
+    r = sz_io_unsafe_run(both_drop(sz_net_serve_once_tls(18486, serve_path_ok, NULL),
+                                  sz_net_http_get(url, NULL)));
+    unsetenv("SCUZZ_NET_SESSION");
+    sz_release(url);
+    assert(!r.ok);
+    assert(r.error);
+    assert(strstr(sz_string_cstr(r.error->message), "certificate rejected") != NULL);
+    sz_error_free(r.error);
+  }
+
+  /* A session client reports a peer that closes during handshake as TLS failed. */
+  {
+    pthread_t th;
+    int port = 18487;
+    void *ret = NULL;
+    SzString *url = sz_string_from_cstr("https://127.0.0.1:18487/x");
+    pthread_create(&th, NULL, listen_close, &port);
+    sleep_us(20000);
+    setenv("SCUZZ_NET_SESSION", "1", 1);
+    r = sz_io_unsafe_run(sz_net_http_get(url, NULL));
+    unsetenv("SCUZZ_NET_SESSION");
+    pthread_join(th, &ret);
+    sz_release(url);
+    assert(ret == (void *)1);
+    assert(!r.ok);
+    assert(r.error);
+    assert(strstr(sz_string_cstr(r.error->message), "TLS failed") != NULL);
+    assert(strstr(sz_string_cstr(r.error->message), "certificate rejected") == NULL);
+    sz_error_free(r.error);
   }
 
   /* Live TCP echo and a 10000-byte read (drain until n, not a 4096 cap). */
