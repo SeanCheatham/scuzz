@@ -154,9 +154,13 @@ with tempfile.TemporaryDirectory(prefix="scuzz-macos-") as temp:
                         {"v": 1, "kind": "inject", "events": [{"op": "quit"}]}))
                 else:
                     watch.send_signal(signal.SIGINT if mode == "interrupt" else signal.SIGTERM)
-                code = watch.wait(timeout=10)
+                try:
+                    code = watch.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    raise AssertionError("session stays up\n" +
+                                         (root / (mode + ".log")).read_text())
                 expected = {"window": (0,), "interrupt": (-signal.SIGINT, 130),
-                            "terminate": (-signal.SIGTERM,)}
+                            "terminate": (-signal.SIGTERM, 128 + signal.SIGTERM)}
                 assert code in expected[mode], "unexpected session exit: " + str(code)
                 wait_for(lambda: worker_gone(worker), "native owner cleanup", 10)
             finally:

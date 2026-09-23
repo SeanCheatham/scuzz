@@ -4986,13 +4986,14 @@ done:
 }
 
 #if defined(__APPLE__)
-/* The main thread parks in CFRunLoop. The worker retries EINTR and keeps
- * running. A caught signal must still kill the process. Ctrl+C and SIGTERM
- * stop a session. The worker blocks these signals so the handler runs on
- * the main thread. A forked child must not run this handler. */
+/* The main thread parks in CFRunLoop. Keep SIGINT and SIGTERM blocked on
+ * every thread. A waiter accepts them and stops the process. The handler
+ * stops the process when a library unblocks the signal. A forked child
+ * drops this mask before exec. */
 static int g_sz_fatal_armed;
+static sigset_t g_sz_fatal_set;
 
-static void sz_fatal_signal(int sig) {
+static void sz_fatal_die(int sig) {
   sigset_t set;
   signal(sig, SIG_DFL);
   sigemptyset(&set);
@@ -5002,22 +5003,61 @@ static void sz_fatal_signal(int sig) {
   _exit(128 + sig);
 }
 
+static void sz_fatal_signal(int sig) { _exit(128 + sig); }
+
+static void *sz_fatal_waiter(void *arg) {
+  (void)arg;
+  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
+  for (;;) {
+    int sig = 0;
+    if (sigwait(&g_sz_fatal_set, &sig) == 0)
+      sz_fatal_die(sig);
+  }
+  return NULL;
+}
+
 static void sz_arm_fatal_signals(void) {
   struct sigaction sa;
+  pthread_t waiter;
   memset(&sa, 0, sizeof sa);
   sa.sa_handler = sz_fatal_signal;
   sigemptyset(&sa.sa_mask);
+  sigemptyset(&g_sz_fatal_set);
+  sigaddset(&g_sz_fatal_set, SIGINT);
+  sigaddset(&g_sz_fatal_set, SIGTERM);
+  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
   g_sz_fatal_armed = 1;
+  if (pthread_create(&waiter, NULL, sz_fatal_waiter, NULL) == 0)
+    pthread_detach(waiter);
+}
+
+/* Put the mask and the handler back. A library can replace them. */
+static void sz_reassert_fatal_signals(void) {
+  struct sigaction sa;
+  if (!g_sz_fatal_armed)
+    return;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = sz_fatal_signal;
+  sigemptyset(&sa.sa_mask);
+  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
+  sigaction(SIGINT, &sa, NULL);
+  sigaction(SIGTERM, &sa, NULL);
+}
+
+static void sz_fatal_check_pending(void) {
+  sigset_t pending;
+  if (!g_sz_fatal_armed || sigpending(&pending) != 0)
+    return;
+  if (sigismember(&pending, SIGINT))
+    sz_fatal_die(SIGINT);
+  if (sigismember(&pending, SIGTERM))
+    sz_fatal_die(SIGTERM);
 }
 
 static void sz_block_fatal_signals(void) {
-  sigset_t set;
-  sigemptyset(&set);
-  sigaddset(&set, SIGINT);
-  sigaddset(&set, SIGTERM);
-  pthread_sigmask(SIG_BLOCK, &set, NULL);
+  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
 }
 #endif
 
@@ -5088,6 +5128,8 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
    * dispatched from the worker can run. A plain pthread_join deadlocks
    * with dispatch_sync to the main queue. */
   while (!g_sz_main_worker_done) {
+    sz_reassert_fatal_signals();
+    sz_fatal_check_pending();
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
   }
   g_sz_main_leaving = 1;

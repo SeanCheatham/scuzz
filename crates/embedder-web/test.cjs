@@ -162,6 +162,28 @@ async function check(browserType, url, mobile) {
     await plusOne.click();
     await expectText('text:Clicks: 0');
     await page.getByRole('tab', {name: 'Check', exact: true}).click();
+    await page.waitForFunction(() => {
+      const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
+      return snap.includes('text:A claim reads a Timeline') &&
+        snap.includes('text:A usual test names one input and one expected output.') &&
+        snap.includes('text:A claim names a rule.') &&
+        snap.includes('text:The rule must hold for a recorded run.') &&
+        snap.includes('text:You write the claim once.') &&
+        snap.includes('text:Scuzz chooses the seeds.') &&
+        snap.includes('text:Each seed is one schedule.') &&
+        snap.includes('text:Scuzz records that schedule as a Timeline.') &&
+        snap.includes('text:The claim reads that timeline after the run.') &&
+        snap.includes('text:The claim does not sit inside the program.') &&
+        snap.includes('text:R won on seed 0.') &&
+        snap.includes('text:The rule says L must win.') &&
+        snap.includes('text:L won on seed 128.') &&
+        snap.includes('def leftFirst(t: Timeline): Verdict =') &&
+        snap.includes('semantics:seed 0') && snap.includes('semantics:seed 128') &&
+        snap.includes('text:first=R fail') && snap.includes('text:first=L pass');
+    }, null, {timeout: 60000}).catch(async error => {
+      console.error({check: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
+      throw error;
+    });
     await expectSection('check');
     await expectText('text:Check 4/8');
     assert.equal(await page.getByRole('tab', {name: 'Main.scuzz', exact: true}).count(), 1);
@@ -230,15 +252,13 @@ async function check(browserType, url, mobile) {
     await expectSection('cover');
     await page.waitForFunction(() => {
       const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
-      return snap.includes('text:leftFirst: L must win') &&
-        snap.includes('semantics:seed 0') && snap.includes('semantics:seed 128') &&
-        snap.includes('text:first=R fail') && snap.includes('text:first=L pass');
+      return snap.includes('text:Paint reached lines') &&
+        snap.includes('text:hits ') && snap.includes('semantics:cover-hit') &&
+        !snap.includes('semantics:seed 0') && !snap.includes('text:leftFirst: L must win');
     }, null, {timeout: 60000}).catch(async error => {
       console.error({cover: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
       throw error;
     });
-    await expectSnap('text:hits ');
-    await expectSnap('semantics:cover-hit');
     await page.getByRole('tab', {name: 'Mutation', exact: true}).click();
     await expectSection('mutation');
     await expectSnap('text:live source');
@@ -252,10 +272,14 @@ async function check(browserType, url, mobile) {
     });
     assert.equal(await page.getByRole('link', {name: 'Scuzz on GitHub', exact: true}).getAttribute('href'),
       'https://github.com/SeanCheatham/scuzz');
-    await page.getByRole('tab', {name: 'Cover', exact: true}).click();
-    await expectSection('cover');
-    await page.getByRole('button', {name: 'Copy', exact: true}).first().click();
-    await page.getByRole('button', {name: 'Copied', exact: true}).first().waitFor();
+    await page.getByRole('tab', {name: 'Check', exact: true}).click();
+    await expectSection('check');
+    const copy = page.getByRole('button', {name: 'Copy', exact: true}).first();
+    await copy.waitFor({timeout: 60000});
+    await reveal(copy);
+    await copy.click();
+    const copied = page.getByRole('button', {name: 'Copied', exact: true}).first();
+    await copied.waitFor();
     if (browserType === chromium) {
       const copied = await page.evaluate(() => navigator.clipboard.readText());
       assert(copied.includes('Queue.offer'), copied);
@@ -264,7 +288,8 @@ async function check(browserType, url, mobile) {
       window.writeClipboard = navigator.clipboard.writeText.bind(navigator.clipboard);
       navigator.clipboard.writeText = async () => { throw new Error('denied'); };
     });
-    await page.getByRole('button', {name: 'Copied', exact: true}).first().click();
+    await reveal(copied);
+    await copied.click();
     await page.getByRole('button', {name: 'Copy failed', exact: true}).first().waitFor();
     await page.evaluate(() => { navigator.clipboard.writeText = window.writeClipboard; });
     // Browser commands must retain their default action.
