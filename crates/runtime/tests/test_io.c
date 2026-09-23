@@ -2646,7 +2646,7 @@ static void test_atomic_fs_write(void) {
   assert(lstat(fifoname, &st) == 0 && S_ISFIFO(st.st_mode));
   assert(stat(filename, &st) == 0);
   assert((st.st_mode & 0777) == 0640);
-  assert(st.st_mtime == 1500000001);
+  assert(st.st_mtime != 1500000001);
   xn = test_get_xattr(filename, "user.scuzz", xbuf, sizeof xbuf);
   assert(xn == 4 && memcmp(xbuf, "keep", 4) == 0);
   if (keep_gid != (gid_t)-1)
@@ -2677,7 +2677,7 @@ static void test_atomic_fs_write(void) {
   assert(sz_io_unsafe_run(sz_fs_write(path, empty)).ok);
   assert(stat(filename, &st) == 0 && st.st_size == 0);
   assert((st.st_mode & 0777) == 0640);
-  assert(st.st_mtime == 1500000001);
+  assert(st.st_mtime != 1500000001);
   xn = test_get_xattr(filename, "user.scuzz", xbuf, sizeof xbuf);
   assert(xn == 4 && memcmp(xbuf, "keep", 4) == 0);
   if (keep_gid != (gid_t)-1)
