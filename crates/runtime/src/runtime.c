@@ -430,9 +430,9 @@ void *sz_alloc_zero(size_t size) {
   return alloc_block(size, 1, SZ_ALLOC_MAGIC, SZ_RC_RAW);
 }
 
-void *sz_alloc_zero_kind(size_t size, uint32_t kind) {
-  return alloc_block(size, 1, SZ_ALLOC_MAGIC, kind);
-}
+static void (*g_view_drop)(void *);
+
+void sz_rc_set_view_drop(void (*fn)(void *)) { g_view_drop = fn; }
 
 void sz_free(void *ptr) {
   SzRcHdr *h;
@@ -960,6 +960,10 @@ void sz_release(void *ptr) {
   }
   case SZ_RC_NETSOCK:
     sz_net_sock_on_free((SzNetSock *)ptr);
+    break;
+  case SZ_RC_VIEW:
+    if (g_view_drop)
+      g_view_drop(ptr);
     break;
   default:
     break;

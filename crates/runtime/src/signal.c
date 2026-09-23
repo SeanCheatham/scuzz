@@ -14,8 +14,6 @@ uint64_t sz_signal_revision(void) { return g_signal_revision; }
 struct SzSignal {
   void *value;
   int elem_str;
-  /* 1 after View.each mounts the current list: a tree owns its views. */
-  int mounted;
   uint64_t version;
   SzSignal *map_src;
   SzSignalMapFn map_fn;
@@ -320,21 +318,10 @@ SzString *sz_property_signal_list_at(SzString *name, int64_t index) {
   return sz_string_from_cstr("");
 }
 
-/* view.c installs `sz_view_free_orphans` with the first view. A program
- * without views links no view code. */
-static void (*g_orphan_hook)(SzList *xs);
-
-void sz_signal_set_orphan_hook(void (*fn)(SzList *xs)) { g_orphan_hook = fn; }
-
-/* Drop the current value. A list no `View.each` mounted and this signal
- * alone holds frees its views, so a `Signal[List[View]]` written twice
- * before a layout does not leak the middle list. A mounted list keeps its
- * views: the tree owns and frees them. */
+/* Drop the current value. A list releases its heads. A view head dies when
+ * this signal alone held that list. */
 static void drop_value(SzSignal *s, void *value) {
-  if (value && g_orphan_hook && !s->mounted &&
-      sz_rc_kind(value) == SZ_RC_LIST && sz_rc_count(value) == 1)
-    g_orphan_hook((SzList *)value);
-  s->mounted = 0;
+  (void)s;
   sz_release(value);
 }
 
@@ -440,10 +427,11 @@ const char *sz_signal_str_get(const SzSignalStr *s) {
 void sz_signal_str_free(SzSignalStr *s) { sz_signal_free(s); }
 SzSignalList *sz_signal_list(SzList *initial) { return sz_signal_new(initial, 3, NULL); }
 void sz_signal_list_set(SzSignalList *s, SzList *value) { sz_signal_write(s, value); }
-void sz_signal_list_mark_mounted(SzSignalList *s) {
-  if (s) s->mounted = 1;
-}
 SzList *sz_signal_list_get(const SzSignalList *s) { return signal_value((SzSignal *)s); }
+SzString *sz_signal_show(const void *sig) {
+  (void)sig;
+  return sz_string_from_cstr("<signal>");
+}
 void sz_signal_list_free(SzSignalList *s) { sz_signal_free(s); }
 int sz_signal_list_elem_str(const SzSignalList *s) {
   return s ? sig_list_heads_str(signal_value((SzSignal *)s), s->elem_str) : 0;
