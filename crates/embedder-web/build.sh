@@ -34,3 +34,26 @@ cp "$ROOT/crates/embedder-web/index.html" "$OUT/index.html"
 "${EMCC[@]}" "${FLAGS[@]}" "$OBJ"/*.o -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=8388608 \
   -sEXPORTED_RUNTIME_METHODS=ccall -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=1048576 -sENVIRONMENT=web \
   -o "$OUT/app.js"
+# EM_ASM addresses live in the glue. A host can cache that glue longer than the module.
+# A new module then calls an address the cached glue does not list. One content version
+# loads the pair together.
+python3 - "$OUT" <<'PY'
+import hashlib
+import pathlib
+import sys
+out = pathlib.Path(sys.argv[1])
+js_path = out / "app.js"
+wasm_path = out / "app.wasm"
+html_path = out / "index.html"
+js = js_path.read_text()
+html = html_path.read_text()
+wasm_load = 'locateFile("app.wasm")'
+html_load = 'src="./app.js"'
+if wasm_load not in js:
+    raise SystemExit("web package: app.js does not load app.wasm")
+if html_load not in html:
+    raise SystemExit("web package: index.html does not load app.js")
+version = hashlib.sha256(wasm_path.read_bytes() + js.encode()).hexdigest()[:16]
+js_path.write_text(js.replace(wasm_load, f'locateFile("app.wasm?v={version}")', 1))
+html_path.write_text(html.replace(html_load, f'src="./app.js?v={version}"', 1))
+PY
