@@ -21,6 +21,8 @@ import Mutate.MutStore
 import Mutate.StoreDef
 import Parse.En
 import Parse.Prog
+import Eval.Value
+import Eval.EvProg
 
 def compileSrc(src: String): Build =
   compileSrc2(Check.check(src), src)
@@ -681,6 +683,12 @@ def evProbeRead(dir: String, stems: List[String], i: Int, acc: List[(String, Str
 
 def evProbeFiles(files: List[(String, String)], human: String): IO[Unit] =
   if (human != "scuzz check ok") IO.println("3").flatMap(_ => evFail(human)) else Eval.probe(files)
+
+def uiProbe(dir: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
+  Fs.read(joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => uiProbeFiles(files, Check.humanFiles(files), slot, mount)))
+
+def uiProbeFiles(files: List[(String, String)], human: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
+  if (human != "scuzz check ok") IO.println("3").flatMap(_ => evFail(human)) else Eval.probeMounted(files, slot, mount)
 
 def evWriteFiles(dir: String, files: List[(String, String)]): IO[Unit] =
   Fs.mkdirs(dir).flatMap(_ => Fs.write(joinSlash(dir, "files.txt"), Verify.nls(evStems(files))).flatMap(_ => evWriteSrcs(dir, files, 0)))
@@ -1391,7 +1399,33 @@ def fuzzManGate(m: Man, dir: String, outDir: String, iterations: Int, seed: Int,
   if (live && m.hasUi) failMsg("--live does not run a [ui] package", "scuzz fuzz") else if (session && m.hasUi) failMsg("--session does not run a [ui] package", "scuzz fuzz") else if (asan && m.hasUi) failMsg("--asan does not run a [ui] package", "scuzz fuzz") else fuzzEngine(m.hasUi).flatMap(eng => Ref.of(("", 0)).flatMap(srv => fuzzReadScenario(dir).flatMap(scn => fuzzMan2(FuzzJob(dir, outDir, if (asan) asanExeName(outDir, m.name) else exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, fuzzUseEv(live || asan || session, eng._1), if (live || asan || session) "" else eng._2, srv, Verify.scenarioFaults(scn), live, asan, session), replay))))
 
 def fuzzEngine(hasUi: Bool): IO[(Bool, String)] =
-  Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (hasUi || e == "compiled") IO.pure((false, "")) else Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))))
+  Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (e == "compiled") IO.pure((false, "")) else if (!hasUi) Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))) else uiHostExe().flatMap(exe => if (exe == "") IO.pure((false, "")) else IO.pure((true, exe))))
+
+def uiHostExe(): IO[String] =
+  Sys.getenv("SCUZZ_HOME").flatMap(home => if (home == "") Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => uiHostWalk(exe, 6)) else uiHostAt(joinSlash(home, "examples/ui-host")))
+
+def uiHostWalk(dir: String, n: Int): IO[String] =
+  if (n <= 0 || dir == "" || dir == "/") IO.pure("") else uiHostTry(dir, n)
+
+def uiHostTry(dir: String, n: Int): IO[String] =
+  uiHostAt(joinSlash(dir, "examples/ui-host")).flatMap(hit => uiHostNext(hit, dir, n))
+
+def uiHostNext(hit: String, dir: String, n: Int): IO[String] =
+  if (hit != "") IO.pure(hit) else uiHostUp(Fs.dirname(dir), dir, n)
+
+def uiHostUp(parent: String, dir: String, n: Int): IO[String] =
+  if (parent == dir) IO.pure("") else uiHostWalk(parent, n - 1)
+
+def uiHostAt(dir: String): IO[String] =
+  Fs.exists(joinSlash(dir, "scuzz.toml")).flatMap(ok => if (ok == 0) IO.pure("") else uiHostBuild(dir).handleErrorWith(_ => IO.pure("")))
+
+def uiHostBuild(dir: String): IO[String] =
+  emitDir(dir, joinSlash(dir, "build"), false).flatMap(_ => linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(r => uiHostBuilt(r, exeName(joinSlash(dir, "build"), "ui-host"))))
+
+def uiHostBuilt(r: (Int, String, String), exe: String): IO[String] =
+  r match {
+    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.pure("")) else IO.pure(exe)
+  }
 
 def fuzzMan2(job: FuzzJob, replay: String): IO[Unit] =
   (if (job.asan) fuzzAsanPrepare(job) else IO.pure(())).flatMap(_ => if (replay != "") fuzzReplayFile(job.outDir, job.exe, job.hasUi, replay, job.uiEnv, job.live, job.asan, job.session) else IO.ensure(fuzzBody(job), evStop(job)))
@@ -1423,8 +1457,14 @@ def fuzzEvDir(outDir: String): String =
 def fuzzBaseExe(job: FuzzJob): String =
   if (job.ev) fuzzEvDir(job.outDir) else job.exe
 
-def evProbeCmd(scuzz: String, dir: String): String =
+def evProbeCmd(job: FuzzJob, dir: String): String =
+  if (job.hasUi) uiProbeCmd(job.scuzz, dir) else ioProbeCmd(job.scuzz, dir)
+
+def ioProbeCmd(scuzz: String, dir: String): String =
   Str.concat("SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec ", Str.concat(shQuote(scuzz), Str.concat(" eval --probe ", shQuote(dir))))))
+
+def uiProbeCmd(host: String, dir: String): String =
+  Str.concat("SCUZZ_EVAL_MIRROR=1 SCUZZ_EVAL_TAGS=", Str.concat(shQuote(joinSlash(dir, "tags.txt")), Str.concat(" SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec ", Str.concat(shQuote(host), Str.concat(" ", shQuote(dir))))))))
 
 def evRequestPath(dir: String): String =
   joinSlash(dir, "request.txt")
@@ -1437,7 +1477,7 @@ def evServer(job: FuzzJob, dir: String): IO[Int] =
   Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure(s._2) else evSpawn(job, dir)) else evStop(job).flatMap(_ => evSpawn(job, dir)))
 
 def evSpawn(job: FuzzJob, dir: String): IO[Int] =
-  Sys.spawn(evProbeCmd(job.scuzz, dir)).flatMap(pid => Ref.set(job.srv, (dir, pid)).flatMap(_ => IO.pure(pid)))
+  Sys.spawn(evProbeCmd(job, dir)).flatMap(pid => Ref.set(job.srv, (dir, pid)).flatMap(_ => IO.pure(pid)))
 
 def evStop(job: FuzzJob): IO[Unit] =
   Ref.get(job.srv).flatMap(s => if (s._2 == 0) IO.pure(()) else Sys.childClose(s._2).handleErrorWith(_ => IO.pure(())).flatMap(_ => Ref.set(job.srv, ("", 0))))
@@ -1849,7 +1889,7 @@ def fuzzProbeRun(exe: String, hasUi: Bool, outDir: String, run: FuzzRun, uiEnv: 
   runProbeAt(asan, Str.concat(asanEnv(asan), Str.concat(fuzzProbeEnv("SCUZZ_", hasUi, fuzzDrivePath(outDir), fuzzDumpPath(outDir), run.script != "", run.sched, run.fault, run.picks, outDir, uiEnv, live, session), exe))).flatMap(r => fuzzProbeCodeIo(r))
 
 def fuzzProbeJob(job: FuzzJob, run: FuzzRun): IO[Int] =
-  if (!job.ev) fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv, job.live, job.asan, job.session) else evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", false, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, "", false, false)).flatMap(code => IO.pure(if (code == 0) 0 else 1))
+  if (!job.ev) fuzzProbeRun(job.exe, job.hasUi, job.outDir, run, job.uiEnv, job.live, job.asan, job.session) else evProbe(job, fuzzEvDir(job.outDir), fuzzProbeEnv("", job.hasUi, fuzzDrivePath(job.outDir), fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, job.uiEnv, false, false)).flatMap(code => IO.pure(if (code == 0) 0 else 1))
 
 def kv(pre: String, key: String, val: String): String =
   if (pre == "") Str.concat(key, Str.concat("=", Str.concat(val, """
@@ -1858,8 +1898,26 @@ def kv(pre: String, key: String, val: String): String =
 def asanEnv(asan: Bool): String =
   if (!asan) "" else "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 "
 
+def uiEnvFor(pre: String, uiEnv: String): String =
+  if (pre == "") shellToReq(uiEnv) else uiEnv
+
+def shellToReq(s: String): String =
+  shellToReqAt(s, 0, "")
+
+def shellToReqAt(s: String, i: Int, acc: String): String =
+  if (i >= Str.len(s)) acc else shellToReqSp(s, i, shellTokEnd(s, i), acc)
+
+def shellTokEnd(s: String, i: Int): Int =
+  if (i >= Str.len(s) || Str.charAt(s, i) == 32) i else shellTokEnd(s, i + 1)
+
+def shellToReqSp(s: String, i: Int, j: Int, acc: String): String =
+  if (i >= Str.len(s)) acc else if (i == j) shellToReqAt(s, j + 1, acc) else shellToReqAt(s, j + 1, Str.concat(acc, shellTokReq(Str.slice(s, i, j))))
+
+def shellTokReq(tok: String): String =
+  if (Str.startsWith(tok, "SCUZZ_") && Str.indexOf(tok, "=") > 6) Str.concat(Str.drop(tok, 6), "\n") else ""
+
 def fuzzProbeEnv(pre: String, hasUi: Bool, scriptPath: String, dumpPath: String, hasScript: Bool, sched: String, fault: String, picks: List[String], outDir: String, uiEnv: String, live: Bool, session: Bool): String =
-  Str.concat(if (live || session) kv(pre, "NET_LIVE", "1") else "", Str.concat(if (session) kv(pre, "NET_SESSION", "1") else "", Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnv else "", Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzPicksEnv(pre, picks), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir)))))))))
+  Str.concat(if (live || session) kv(pre, "NET_LIVE", "1") else "", Str.concat(if (session) kv(pre, "NET_SESSION", "1") else "", Str.concat(testEnvAt(pre), Str.concat(if (hasUi) uiEnvFor(pre, uiEnv) else "", Str.concat(fuzzScriptEnv(pre, hasUi, scriptPath, dumpPath, hasScript), Str.concat(fuzzSchedEnv(pre, sched), Str.concat(fuzzPicksEnv(pre, picks), Str.concat(fuzzFaultEnv(pre, fault), fuzzClassEnv(pre, outDir)))))))))
 
 def fuzzPicksEnv(pre: String, picks: List[String]): String =
   if (List.isEmpty(picks)) "" else kv(pre, "SCHED_PICKS", List.join(picks, ";"))

@@ -177,6 +177,195 @@ static void fputs_json_value(FILE *f, const void *value) {
   }
 }
 
+/* Value case tags from examples/compiler/src/Eval.scuzz. Keep this list
+ * in source order. SCUZZ_EVAL_MIRROR rewrites a stored Value into the
+ * compiled ADT shape. SCUZZ_EVAL_TAGS is `En.Case=tag` lines. */
+static char *g_eval_tags;
+static int g_eval_tags_ready;
+
+static int eval_mirror_on(void) {
+  const char *arm = getenv("SCUZZ_EVAL_MIRROR");
+  return arm && arm[0];
+}
+
+static void eval_tags_load(void) {
+  const char *path;
+  FILE *f;
+  long n;
+  if (g_eval_tags_ready)
+    return;
+  g_eval_tags_ready = 1;
+  path = getenv("SCUZZ_EVAL_TAGS");
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "rb");
+  if (!f)
+    return;
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return;
+  }
+  n = ftell(f);
+  if (n < 0)
+    n = 0;
+  if (n > 1024 * 1024)
+    n = 1024 * 1024;
+  if (fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return;
+  }
+  g_eval_tags = (char *)malloc((size_t)n + 1);
+  if (!g_eval_tags) {
+    fclose(f);
+    return;
+  }
+  n = (long)fread(g_eval_tags, 1, (size_t)n, f);
+  g_eval_tags[n] = 0;
+  fclose(f);
+}
+
+/* 1 and writes *out when En.Case is in the tags file. Tag 0 is valid. */
+static int eval_tag_of(const char *en, const char *name, int *out) {
+  char key[300];
+  const char *p;
+  int n;
+  eval_tags_load();
+  if (!g_eval_tags || !out)
+    return 0;
+  n = snprintf(key, sizeof key, "%s.%s=", en ? en : "", name ? name : "");
+  if (n <= 0 || n >= (int)sizeof key)
+    return 0;
+  p = g_eval_tags;
+  while ((p = strstr(p, key)) != NULL) {
+    if (p == g_eval_tags || p[-1] == '\n') {
+      *out = atoi(p + n);
+      return 1;
+    }
+    p += n;
+  }
+  return 0;
+}
+
+static void fputs_mirror_value(FILE *f, const void *value);
+
+static void fputs_mirror_tuple(FILE *f, const SzList *xs) {
+  if (!xs) {
+    fputs("null", f);
+    return;
+  }
+  if (!xs->tail) {
+    fputs_mirror_value(f, xs->head);
+    return;
+  }
+  fputc('[', f);
+  fputs_mirror_value(f, xs->head);
+  fputc(',', f);
+  if (xs->tail->tail)
+    fputs_mirror_tuple(f, xs->tail);
+  else
+    fputs_mirror_value(f, xs->tail->head);
+  fputc(']', f);
+}
+
+static void fputs_mirror_fields(FILE *f, const SzList *fields) {
+  const SzList *p;
+  int n = 0;
+  for (p = fields; p; p = p->tail)
+    n++;
+  if (n == 0) {
+    fputs("null", f);
+    return;
+  }
+  if (n == 1) {
+    fputs_mirror_value(f, fields->head);
+    return;
+  }
+  fputc('[', f);
+  for (p = fields; p; p = p->tail) {
+    if (p != fields)
+      fputc(',', f);
+    fputs_mirror_value(f, p->head);
+  }
+  fputc(']', f);
+}
+
+static void fputs_mirror_list(FILE *f, const void *payload) {
+  const SzList *p =
+      payload && sz_rc_kind(payload) == SZ_RC_LIST ? (const SzList *)payload : NULL;
+  int first = 1;
+  fputc('[', f);
+  for (; p; p = p->tail) {
+    if (!first)
+      fputc(',', f);
+    first = 0;
+    fputs_mirror_value(f, p->head);
+  }
+  fputc(']', f);
+}
+
+static void fputs_mirror_con(FILE *f, const void *value, const void *pay) {
+  const SzList *xs;
+  const char *en = "";
+  const char *name = "";
+  const SzList *fields = NULL;
+  int tag = 0;
+  if (!pay || sz_rc_kind(pay) != SZ_RC_LIST) {
+    fputs_json_value(f, value);
+    return;
+  }
+  xs = (const SzList *)pay;
+  if (!xs->tail || !xs->tail->tail) {
+    fputs_json_value(f, value);
+    return;
+  }
+  if (xs->head && sz_rc_kind(xs->head) == SZ_RC_STRING)
+    en = sz_string_cstr((const SzString *)xs->head);
+  if (xs->tail->head && sz_rc_kind(xs->tail->head) == SZ_RC_STRING)
+    name = sz_string_cstr((const SzString *)xs->tail->head);
+  if (xs->tail->tail->head && sz_rc_kind(xs->tail->tail->head) == SZ_RC_LIST)
+    fields = (const SzList *)xs->tail->tail->head;
+  if (!eval_tag_of(en, name, &tag)) {
+    fputs_json_value(f, value);
+    return;
+  }
+  fprintf(f, "{\"tag\":%d,\"payload\":", tag);
+  fputs_mirror_fields(f, fields);
+  fputc('}', f);
+}
+
+/* Rewrite interpreter Value ADTs into the compiled dump shape. */
+static void fputs_mirror_value(FILE *f, const void *value) {
+  int tag;
+  const void *pay;
+  if (!eval_mirror_on() || !value || sz_rc_kind(value) != SZ_RC_ADT) {
+    fputs_json_value(f, value);
+    return;
+  }
+  tag = sz_adt_tag((const SzAdt *)value);
+  pay = sz_adt_payload((const SzAdt *)value);
+  if (tag == 0) {
+    fputs("null", f);
+    return;
+  }
+  if (tag == 1 || tag == 2 || tag == 3) {
+    fputs_json_value(f, pay);
+    return;
+  }
+  if (tag == 4) {
+    fputs_mirror_list(f, pay);
+    return;
+  }
+  if (tag == 5) {
+    fputs_mirror_tuple(f, pay && sz_rc_kind(pay) == SZ_RC_LIST ? (const SzList *)pay : NULL);
+    return;
+  }
+  if (tag == 6) {
+    fputs_mirror_con(f, value, pay);
+    return;
+  }
+  fputs_json_value(f, value);
+}
+
 /* Typed session schema: one object per registered signal. Int payloads
  * are numbers. Str payloads are strings. Value and list payloads encode
  * typed (schema v=2). */
@@ -207,7 +396,7 @@ void sz_signal_dump_json(FILE *f) {
       break;
     case SIG_VALUE: {
       void *value = sz_signal_read((SzSignal *)r->sig);
-      fputs_json_value(f, value);
+      fputs_mirror_value(f, value);
       sz_release(value);
       break;
     }
@@ -340,11 +529,24 @@ static void *signal_value(SzSignal *s) {
   return s->value;
 }
 
+/* Evaluator mirrors keep Signal.get working and stay out of the dump.
+ * SCUZZ_EVAL_MIRROR arms this. The name is $mirror. */
+static int sig_is_mirror(SzString *name) {
+  const char *arm = getenv("SCUZZ_EVAL_MIRROR");
+  const char *n;
+  if (!arm || !arm[0] || !name)
+    return 0;
+  n = sz_string_cstr(name);
+  return n && strcmp(n, "$mirror") == 0;
+}
+
 SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name) {
   SzSignal *s = sz_alloc_zero(sizeof(*s));
   sz_retain(value);
   s->value = value;
   s->elem_str = kind == 3;
+  if (sig_is_mirror(name))
+    return s;
   sig_register((SigKind)(kind == 5 ? 3 : kind), s);
   if (name) sz_signal_name(s, sz_string_cstr(name));
   return s;
