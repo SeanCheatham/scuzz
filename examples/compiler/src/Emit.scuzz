@@ -552,11 +552,24 @@ def emitInterpPart(e: Expr, prefix: String, i: Int, strs: List[String], defs: Ft
   }
 
 def emitInterpExpr(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitInterpExpr2(emitExpr(e, prefix, strs, defs, ens, ps, loc), prefix, exprIsI64(e, ps, defs), ps, isFloatExpr(e, ps, defs))
+  emitInterpExpr2(emitExpr(e, prefix, strs, defs, ens, ps, loc), prefix, exprIsI64(e, ps, defs), ps, isFloatExpr(e, ps, defs), exprRetTyEns(e, defs, ens, ps, loc))
 
-def emitInterpExpr2(s: Slot, prefix: String, i64: Bool, ps: List[Param], fl: Bool): Slot =
+def emitInterpExpr2(s: Slot, prefix: String, i64: Bool, ps: List[Param], fl: Bool, ty: String): Slot =
   s match {
-    case Slot(c, v, o) => if (fl) emitInterpFloat(s, prefix) else if (i64 || hasSub(v, "_u")) emitInterpI64(if (thenIsPtr(c, v, o, ps)) unboxBin(s, ps, prefix) else s, prefix) else s
+    case Slot(c, v, o) => if (fl) emitInterpFloat(s, prefix) else if (i64 || hasSub(v, "_u")) emitInterpI64(if (thenIsPtr(c, v, o, ps)) unboxBin(s, ps, prefix) else s, prefix) else emitInterpPtr(s, prefix, ty)
+  }
+
+def emitInterpPtr(s: Slot, prefix: String, ty: String): Slot =
+  if (ty == "View") emitInterpView(s, prefix) else if (tyHead(ty) == "Signal") emitInterpSig(s, prefix) else s
+
+def emitInterpView(s: Slot, prefix: String): Slot =
+  s match {
+    case Slot(c, v, o) => Slot(join(c, join(line(Str.concat(tmp(prefix, "istr"), Str.concat("call ptr @sz_view_show(ptr ", Str.concat(v, ")")))), if (o) relPtr(v) else "")), pct(prefix, "istr"), true)
+  }
+
+def emitInterpSig(s: Slot, prefix: String): Slot =
+  s match {
+    case Slot(c, v, o) => Slot(join(c, join(line(Str.concat(tmp(prefix, "istr"), Str.concat("call ptr @sz_signal_show(ptr ", Str.concat(v, ")")))), if (o) relPtr(v) else "")), pct(prefix, "istr"), true)
   }
 
 def emitInterpFloat(s: Slot, prefix: String): Slot =
@@ -6558,7 +6571,10 @@ def preamble(): String =
   Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), join(signalDecls(), join(decl("ptr @sz_error_value(ptr)"), join(decl("ptr @sz_io_handle_value(ptr, ptr, ptr)"), decls()))))))
 
 def decls(): String =
-  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), join(declsV(), join(declsW(), join(declsX(), nl()))))))))))))))))))))))))
+  join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), join(declsV(), join(declsW(), join(declsX(), join(declsShow(), nl())))))))))))))))))))))))))
+
+def declsShow(): String =
+  join(decl("ptr @sz_view_show(ptr)"), decl("ptr @sz_signal_show(ptr)"))
 
 def declsR(): String =
   join(decl("ptr @sz_string_lines(ptr)"), join(decl("ptr @sz_string_trim(ptr)"), join(decl("ptr @sz_string_to_lower(ptr)"), join(decl("ptr @sz_string_to_upper(ptr)"), join(decl("ptr @sz_string_capitalize(ptr)"), join(decl("ptr @sz_string_ureverse(ptr)"), join(decl("i64 @sz_string_is_empty(ptr)"), join(decl("i64 @sz_string_non_empty(ptr)"), join(decl("i64 @sz_string_is_blank(ptr)"), join(decl("ptr @sz_string_split(ptr, ptr)"), join(decl("ptr @sz_string_strip_prefix(ptr, ptr)"), join(decl("ptr @sz_string_strip_suffix(ptr, ptr)"), join(decl("i64 @sz_string_ends_with(ptr, ptr)"), join(decl("i64 @sz_string_uindex_of(ptr, ptr)"), join(decl("i64 @sz_string_ulast_index_of(ptr, ptr)"), join(decl("ptr @sz_string_replace(ptr, ptr, ptr)"), join(decl("ptr @sz_string_replace_match(ptr, ptr, ptr)"), join(decl("ptr @sz_string_capture(ptr, ptr)"), join(decl("ptr @sz_string_pad_left(ptr, i64, ptr)"), decl("ptr @sz_string_pad_right(ptr, i64, ptr)"))))))))))))))))))))

@@ -1,6 +1,9 @@
 oracle internInterpLit(): Bool =
   Main.internInterpLit()
 
+oracle viewEqShows(): Bool =
+  Main.viewEqShows()
+
 oracle rewriteInterpLit(): Bool =
   Main.rewriteInterpLit()
 

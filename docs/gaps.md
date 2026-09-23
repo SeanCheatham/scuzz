@@ -49,7 +49,7 @@ Resolve these gaps when they prevent ordinary language use.
 
 Required for CLI, server, and desktop applications.
 
-`scuzz fuzz` on the evaluator for a `[ui]` package. `View` as a reference-counted value: the tree owns views, a list signal frees the lists `View.each` never mounted, and a view pulled out of a list by hand stays unsafe ([`philosophy.md`](philosophy.md), "The tree owns views"). Docs `Mount.scuzz` does not mount `View.each`. Drive `==` wrap on UI. OS threads.
+`scuzz fuzz` on the evaluator for a `[ui]` package. OS threads.
 
 ### Verification
 

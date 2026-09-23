@@ -76,6 +76,12 @@ def wantTcoOwn(): String =
 def internInterpLit(): Bool =
   List.join(Emit.internReady(Emit.internInterp(Emit.noStr(), "hi${1}lo", 0, Builder.empty())), ",") == "hi,lo"
 
+def srcViewEq(): String =
+  "oracle sides(v: View): Bool =\n  v == View.text(\"milk\")\n"
+
+def viewEqShows(): Bool =
+  Str.contains(Emit.emit(Verify.wrapSrc("t", srcViewEq())), "call ptr @sz_view_show")
+
 def rewriteInterpLit(): Bool =
   Emit.rewriteInterpStr("hi$n lo", "n", "x") == "hi$x lo" && Emit.rewriteInterpStr("a${n}b", "n", "x") == "a${x}b"
 
