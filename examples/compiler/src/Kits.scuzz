@@ -164,6 +164,17 @@ def has(f: String): Bool =
 def params(f: String): List[String] =
   kitParamsOf(find(f))
 
+def paramCounts(): Map[String, Int] =
+  paramCountsGo(allKits(), Map.empty())
+
+def paramCountsGo(xs: List[Kit], acc: Map[String, Int]): Map[String, Int] =
+  if (List.isEmpty(xs)) acc else paramCountsHd(List.at(xs, 0), List.tail(xs), acc)
+
+def paramCountsHd(h: Kit, rest: List[Kit], acc: Map[String, Int]): Map[String, Int] =
+  h match {
+    case Kit(n, ps, _, _, _) => paramCountsGo(rest, Map.set(acc, n, List.len(ps)))
+  }
+
 def ret(f: String): String =
   kitRetOf(find(f))
 
