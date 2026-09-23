@@ -307,8 +307,11 @@ def kitNames(): List[String] =
 def kitRet(f: String, funs: Ftab): String =
   Kits.kitRetOf(kitRow(funs, f))
 
+def isNetTlsFiles(f: String): Bool =
+  f == "Net.serveTlsFiles" || f == "Net.serveOnceTlsFiles"
+
 def isNetServe(f: String): Bool =
-  f == "Net.serve" || f == "Net.serveOnce" || f == "Net.serveTls" || f == "Net.serveOnceTls"
+  f == "Net.serve" || f == "Net.serveOnce" || f == "Net.serveTls" || f == "Net.serveOnceTls" || isNetTlsFiles(f)
 
 def isArith(op: String): Bool =
   op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
@@ -625,7 +628,19 @@ def netFunOk(ty: String, ens: List[En]): Bool =
   isFunTy(ty) && tyEqEn(funArgOf(ty), netReqTy(), ens) && isIoHttpResp(funRetOf(ty), ens)
 
 def resolveNetServe(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (List.isEmpty(args)) ok(funTyFrom(kitParams(f, funs), kitRet(f, funs))) else if (List.len(args) != 2) bad(Str.concat(f, Str.concat(" expects 2 args, got ", Str.fromInt(List.len(args)))), span) else resolveNetServe2(f, infer(stripNamed(List.at(args, 0)), env, funs, ens), List.at(args, 1), env, funs, ens, span)
+  if (List.isEmpty(args)) ok(funTyFrom(kitParams(f, funs), kitRet(f, funs))) else if (isNetTlsFiles(f)) resolveNetFiles(f, args, env, funs, ens, span) else if (List.len(args) != 2) bad(Str.concat(f, Str.concat(" expects 2 args, got ", Str.fromInt(List.len(args)))), span) else resolveNetServe2(f, infer(stripNamed(List.at(args, 0)), env, funs, ens), List.at(args, 1), env, funs, ens, span)
+
+def resolveNetFiles(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.len(args) != 4) bad(Str.concat(f, Str.concat(" expects 4 args, got ", Str.fromInt(List.len(args)))), span) else resolveNetFilesPort(f, infer(stripNamed(List.at(args, 0)), env, funs, ens), List.tail(args), env, funs, ens, span)
+
+def resolveNetFilesPort(f: String, po: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(po)) po else if (tyEqEn(tyStr(po), "Int", ens)) resolveNetFilesStr(f, "cert", infer(stripNamed(List.at(rest, 0)), env, funs, ens), List.tail(rest), env, funs, ens, span) else argMismatch(f, "Int", tyStr(po), span)
+
+def resolveNetFilesStr(f: String, what: String, so: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(so)) so else if (tyEqEn(tyStr(so), "String", ens)) resolveNetFilesNext(f, what, rest, env, funs, ens, span) else argMismatch(f, "String", tyStr(so), span)
+
+def resolveNetFilesNext(f: String, what: String, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (what == "cert") resolveNetFilesStr(f, "key", infer(stripNamed(List.at(rest, 0)), env, funs, ens), List.tail(rest), env, funs, ens, span) else resolveNetLam(f, List.at(rest, 0), env, funs, ens, span)
 
 def resolveNetServe2(f: String, po: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (hasErr(po)) po else if (tyEqEn(tyStr(po), "Int", ens)) resolveNetLam(f, lam, env, funs, ens, span) else argMismatch(f, "Int", tyStr(po), span)
