@@ -57,6 +57,10 @@ Host build, run, and package commands support file paths with spaces. Host and i
 The browser target uses the shared Signals, View layout, and software paint
 path. Browser font measurement and rasterization use the same monospace font.
 Emscripten keeps the 64-bit runtime layout and lowers the module to wasm32.
+The package stamps `app.js` and `app.wasm` with one content version.
+The page loads that pair together.
+The glue lists EM_ASM addresses from that module.
+A cache that keeps the glue longer than the module cannot load a new module with older glue.
 The app runs on the browser thread. The UI loop paints when the session is
 dirty. The frame loop pauses when nothing changes. An input event or a
 signal write resumes it. The output needs no worker threads or

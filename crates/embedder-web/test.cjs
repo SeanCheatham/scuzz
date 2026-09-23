@@ -361,6 +361,11 @@ async function check(browserType, url, mobile) {
 async function main() {
   const directory = path.resolve(process.argv[2]);
   for (const file of ['index.html', 'app.js', 'app.wasm']) assert(fs.existsSync(path.join(directory, file)), `missing web asset: ${file}`);
+  const html = fs.readFileSync(path.join(directory, 'index.html'), 'utf8');
+  const js = fs.readFileSync(path.join(directory, 'app.js'), 'utf8');
+  const version = html.match(/src="\.\/app\.js\?v=([0-9a-f]{16})"/);
+  assert(version, 'app.js cache version');
+  assert(js.includes(`locateFile("app.wasm?v=${version[1]}")`), 'wasm cache version');
   const server = http.createServer((request, response) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
     const relative = pathname === '/scuzz/' ? 'index.html' : pathname.replace(/^\/scuzz\//, '');
