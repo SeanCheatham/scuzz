@@ -60,7 +60,7 @@ Usage:
   ./scripts/ci.sh <slice>
 
 Slices (same names as ci.yml where one step maps to one slice):
-  pr              macos-smoke + oracles + kernel + ui + fuzz
+  pr              macos-smoke + oracles + kernel + ui + fuzz + delta
   linux-headless  full Linux job minus apt install and artifact upload
   macos-smoke     required Darwin PR job (runtime + hello smoke)
   macos-hello     hello and counter fuzz, kernel check, bad-intent
@@ -87,6 +87,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   gpu             GPU presenter (needs xvfb)
   differential    skia vs sk_sw vs gpu dumps (needs xvfb)
   fuzz            ./scripts/ci-fuzz.sh
+  delta           ./scripts/ci-delta.sh (scuzz diff on a temp git repo)
   new-ui          scuzz new --ui path + cheap search
   desktop         Desktop peer + X11 (needs xvfb)
   mobile          mobile shell + package targets
@@ -592,6 +593,13 @@ slice_fuzz() {
   ./scripts/ci-fuzz.sh
 }
 
+slice_delta() {
+  need_scuzz
+  need_cmd git "sudo apt-get install -y git"
+  need_cmd python3 "sudo apt-get install -y python3"
+  ./scripts/ci-delta.sh
+}
+
 slice_new_ui() {
   need_scuzz
   need_cmd python3 "sudo apt-get install -y python3"
@@ -762,6 +770,7 @@ slice_pr() {
   slice_kernel
   slice_ui
   slice_fuzz
+  slice_delta
 }
 
 slice_linux_headless() {
@@ -779,6 +788,7 @@ slice_linux_headless() {
   slice_gpu
   slice_differential
   slice_fuzz
+  slice_delta
   slice_new_ui
   slice_desktop
   slice_mobile
@@ -812,6 +822,7 @@ case "$SLICE" in
   gpu) slice_gpu ;;
   differential) slice_differential ;;
   fuzz) slice_fuzz ;;
+  delta) slice_delta ;;
   new-ui) slice_new_ui ;;
   desktop) slice_desktop ;;
   mobile) slice_mobile ;;
