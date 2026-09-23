@@ -27,6 +27,19 @@ def checkSrc(): String =
 def signalSrc(): String =
   "def inc(n: Int): Int =\n  n + 1\n\n@main def main: IO[Unit] =\n  for {\n    clicks = Signal.make(0)\n    label = Signal.map(clicks, n => s\"Clicks: $n\")\n    _ <- Ui.run(_ => View.column(View.bindText(label), View.button(\"+1\", _ => Signal.set(clicks, inc(Signal.get(clicks))))))\n  } yield ()\n"
 
+def eachSrc(): String =
+  "@main def main: IO[Unit] =\n  for {\n    rows = Signal.make(\"milk\" :: \"eggs\" :: [])\n    _ <- Ui.run(_ => View.each(rows, s => View.text(s)))\n  } yield ()\n"
+
+def probeMount(out: TryOut): View =
+  if (List.isEmpty(out.prog)) View.text(if (out.diags == "") "each probe missed Ui.run" else out.diags) else Mount.mount(out.view, List.at(out.prog, 0))
+
+def showSides(): IO[Unit] =
+  for {
+    left = View.text("milk")
+    right = View.text("eggs")
+    _ <- if (left == right) IO.pure(()) else IO.println(s"oracle sides rejected left=$left right=$right")
+  } yield ()
+
 def checkVer(): String =
   """oracle incAdds(n: Int): Bool =
   Main.inc(n) == n + 1
@@ -386,6 +399,7 @@ def docsShell(step: Signal[Int], title: Signal[String], src: Signal[String], ver
     tryDiags = Signal.makeN("tryDiags", "")
     tryMounted = Signal.make([View.text("Press Run")])
     tryPool <- Ref.of(Value.VList([]))
+    probe <- Sys.getenv("SCUZZ_EACH_PROBE")
     howCamp = Signal.makeN("howCamp", "Press Fuzz")
     howFail = Signal.mapN("howFail", howCamp, campFailFlag)
     howPass = Signal.mapN("howPass", howCamp, campPassFlag)
@@ -399,6 +413,7 @@ def docsShell(step: Signal[Int], title: Signal[String], src: Signal[String], ver
     mutBody = Signal.make([View.text("")])
     title = Signal.mapN("title", step, n => stageEnter(n, src, ver, fileTab, tryDiags, out, tryMounted, coverBody, mutBody))
     _ = warmup()
+    _ <- if (probe == "1") showSides() else IO.pure(())
     _ <- Ui.setTitle("Scuzz")
-    _ <- Ui.run(_ => docsShell(step, title, src, ver, fileTab, out, tryDiags, tryMounted, tryPool, countNav, runReady, viewReady, checkReady, howCamp, howFail, howPass, howDetail, coverBody, mutBody))
+    _ <- Ui.run(_ => if (probe == "1") View.column(docsShell(step, title, src, ver, fileTab, out, tryDiags, tryMounted, tryPool, countNav, runReady, viewReady, checkReady, howCamp, howFail, howPass, howDetail, coverBody, mutBody), probeMount(Eval.tryNow(eachSrc(), tryPool))) else docsShell(step, title, src, ver, fileTab, out, tryDiags, tryMounted, tryPool, countNav, runReady, viewReady, checkReady, howCamp, howFail, howPass, howDetail, coverBody, mutBody))
   } yield ()

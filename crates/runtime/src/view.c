@@ -113,9 +113,18 @@ struct SzView {
   int hover;
 };
 
+static void view_drop(void *ptr);
+
+static int g_view_drop_ready;
+
 static SzView *view_new(SzViewKind kind) {
-  SzView *v = (SzView *)sz_alloc_zero_kind(sizeof(SzView), SZ_RC_VIEW);
-  sz_signal_set_orphan_hook(sz_view_free_orphans);
+  SzView *v;
+  if (!g_view_drop_ready) {
+    sz_rc_set_view_drop(view_drop);
+    g_view_drop_ready = 1;
+  }
+  v = (SzView *)sz_rc_alloc(sizeof(SzView), SZ_RC_VIEW);
+  memset(v, 0, sizeof *v);
   v->kind = kind;
   return v;
 }
@@ -1355,6 +1364,21 @@ static const char *a11y_role_name(SzA11yRole role) {
   }
 }
 
+SzString *sz_view_show(const SzView *view) {
+  char *buf = NULL;
+  size_t len = 0, cap = 0;
+  SzString *out;
+  if (!view || sz_rc_kind((void *)view) != SZ_RC_VIEW)
+    return sz_string_from_cstr("view");
+  sz_dump_append(&buf, &len, &cap, a11y_role_name(view->a11y_role));
+  sz_dump_append(&buf, &len, &cap, ":");
+  if (view->a11y_label)
+    sz_dump_append(&buf, &len, &cap, view->a11y_label);
+  out = sz_string_from_cstr(buf ? buf : "");
+  sz_free(buf);
+  return out;
+}
+
 /* Append one a11y dump line: `role:label` plus `=N` when has_num. Labels
  * come from app text, so no fixed buffer: grow with sz_dump_append. */
 static void a11y_dump_line(char **buf, size_t *len, size_t *cap,
@@ -1662,7 +1686,6 @@ static void sync_each(SzView *v) {
     }
   }
   each_seen_set(v, xs);
-  sz_signal_list_mark_mounted(v->each_sig);
 }
 
 SzView *sz_view_scroll(SzView *child) {
@@ -1954,13 +1977,26 @@ SzView *sz_view_show_when(SzSignalInt *sig, int64_t value, SzView *child) {
   return child;
 }
 
-void sz_view_free(SzView *view) {
-  int i;
+static void view_drop(void *ptr) {
+  SzView *view = (SzView *)ptr;
+  int i, n;
+  SzView **kids;
   if (!view)
     return;
-  for (i = 0; i < view->child_count; i++)
-    sz_view_free(view->children[i]);
-  sz_free(view->children);
+  n = view->child_count;
+  kids = view->children;
+  view->child_count = 0;
+  view->children = NULL;
+  view->scroll_child = NULL;
+  for (i = 0; i < n; i++) {
+    SzView *c = kids[i];
+    kids[i] = NULL;
+    if (!c)
+      continue;
+    c->parent = NULL;
+    sz_release(c);
+  }
+  sz_free(kids);
   sz_free(view->text);
   sz_free(view->prefix);
   sz_free(view->placeholder);
@@ -2002,33 +2038,27 @@ void sz_view_free(SzView *view) {
     sz_free(view->fold_end);
     sz_free(view->fold_closed);
   }
-  sz_free(view);
 }
 
-void sz_view_free_orphans(SzList *xs) {
-  SzList *p;
-  /* Stop at a shared tail: another list still reads those heads. */
-  for (p = xs; p && sz_rc_count(p) == 1; p = p->tail) {
-    SzView *v = (SzView *)p->head;
-    if (v && sz_alloc_kind_of(v) == SZ_RC_VIEW && !v->parent) {
-      p->head = NULL;
-      sz_view_free(v);
-    }
-  }
-}
+void sz_view_free(SzView *view) { sz_release(view); }
 
 void sz_view_clear_children(SzView *parent) {
-  int i;
+  int i, n;
   if (!parent)
     return;
   if (!view_accepts_children(parent->kind))
     sz_panic("sz_view_clear_children: parent cannot have children");
-  for (i = 0; i < parent->child_count; i++) {
-    parent->children[i]->parent = NULL;
-    sz_view_free(parent->children[i]);
-  }
+  n = parent->child_count;
   parent->child_count = 0;
   parent->scroll_child = NULL;
+  for (i = 0; i < n; i++) {
+    SzView *c = parent->children[i];
+    parent->children[i] = NULL;
+    if (!c)
+      continue;
+    c->parent = NULL;
+    sz_release(c);
+  }
 }
 
 static float text_width(const char *s, float font_px) {

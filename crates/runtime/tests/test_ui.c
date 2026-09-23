@@ -16700,12 +16700,15 @@ static void test_each_env_retain_release(void) {
 
 static SzView *each_row_identity(SzString *item, void *env) {
   (void)env;
+  sz_retain(item);
   return (SzView *)item;
 }
 
-/* One view list per write. The middle list never reaches a layout. */
+/* One view list per write. The caller releases the button after cons. */
 static SzList *orphan_button_list(void *env) {
-  SzList *xs = sz_list_cons(sz_view_button("go", noop_tap, env), sz_list_nil());
+  SzView *btn = sz_view_button("go", noop_tap, env);
+  SzList *xs = sz_list_cons(btn, sz_list_nil());
+  sz_release(btn);
   return xs;
 }
 
@@ -16719,15 +16722,19 @@ static void test_each_orphan_views_freed(void) {
   size_t live_count = 0, live_bytes = 0;
 
   sz_alloc_stats(&base_bytes, &base_count);
-  xs = sz_list_cons(sz_view_text("start"), sz_list_nil());
+  {
+    SzView *start = sz_view_text("start");
+    xs = sz_list_cons(start, sz_list_nil());
+    sz_release(start);
+  }
   items = sz_signal_list(xs);
   sz_release(xs);
   list = sz_view_each_map(items, each_row_identity, NULL);
   sz_view_layout(list, 200.f, 120.f, theme);
+  assert(sz_rc_count(sz_list_head(sz_signal_list_get(items))) == 2);
 
-  /* Two writes before the next layout: the first list is never mounted. Its
-   * button and the env the button retains die with the write. The tree
-   * frees the mounted views; the signal leaves them alone. */
+  /* Two writes before the next layout. The first list is never mounted.
+   * The signal alone holds it, so that write frees its button. */
   cap = sz_string_from_cstr("captured");
   env = sz_list_cons(cap, sz_list_nil());
   sz_release(cap);
@@ -16744,19 +16751,45 @@ static void test_each_orphan_views_freed(void) {
   sz_alloc_stats(&live_bytes, &live_count);
   assert(live_count == base_count);
 
-  /* A list another holder still reads keeps its views. */
-  xs = sz_list_cons(sz_view_text("kept"), sz_list_nil());
-  items = sz_signal_list(xs);
-  held = xs;
-  xs = sz_list_cons(sz_view_text("next"), sz_list_nil());
-  sz_signal_list_set(items, xs);
-  sz_release(xs);
-  assert(sz_alloc_kind_of(held->head) == SZ_RC_VIEW);
-  sz_view_free((SzView *)held->head);
-  sz_release(held);
-  sz_signal_list_free(items);
+  /* A list another holder still reads keeps its views. List.head does not
+   * retain, so a view pulled out by hand stays a borrow. */
+  {
+    SzView *kept = sz_view_text("kept");
+    SzView *next = sz_view_text("next");
+    SzView *pulled;
+    uint32_t rc;
+    xs = sz_list_cons(kept, sz_list_nil());
+    sz_release(kept);
+    items = sz_signal_list(xs);
+    held = xs;
+    xs = sz_list_cons(next, sz_list_nil());
+    sz_release(next);
+    sz_signal_list_set(items, xs);
+    sz_release(xs);
+    assert(sz_alloc_kind_of(held->head) == SZ_RC_VIEW);
+    assert(sz_rc_count(held->head) == 1);
+    rc = sz_rc_count(held->head);
+    pulled = (SzView *)sz_list_head(held);
+    assert(pulled == (SzView *)held->head);
+    assert(sz_rc_count(pulled) == rc);
+    sz_release(held);
+    sz_signal_list_free(items);
+  }
   sz_alloc_stats(&live_bytes, &live_count);
   assert(live_count == base_count);
+}
+
+static void test_view_show(void) {
+  SzView *v = sz_view_text("milk");
+  SzString *s = sz_view_show(v);
+  SzSignalInt *n = sz_signal_int(1);
+  SzString *sig = sz_signal_show(n);
+  assert(strcmp(sz_string_cstr(s), "text:milk") == 0);
+  assert(strcmp(sz_string_cstr(sig), "<signal>") == 0);
+  sz_string_free(s);
+  sz_string_free(sig);
+  sz_view_free(v);
+  sz_signal_int_free(n);
 }
 
 #ifdef __APPLE__
@@ -17520,6 +17553,7 @@ int main(void) {
   test_tap_env_retain_release();
   test_each_env_retain_release();
   test_each_orphan_views_freed();
+  test_view_show();
   test_quiesce();
   puts("runtime ui tests ok");
   return 0;

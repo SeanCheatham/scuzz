@@ -47,8 +47,9 @@ void sz_alloc_set_panic_dump(const char *path);
 const char *sz_alloc_panic_dump_path(void);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
  * streams, resources, errors, Ref / Queue / Deferred, Either, pair,
- * Builder, Net sockets). List cells retain heads and shared tails.
- * IO constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
+ * Builder, Net sockets, views). List cells retain heads and shared tails.
+ * IO constructors take child IO nodes. A view starts at one. Non-RC
+ * sz_alloc pointers no-op. */
 enum {
   SZ_RC_RAW = 0,
   SZ_RC_STRING = 1,
@@ -71,8 +72,9 @@ enum {
   SZ_RC_KIND_COUNT = 18
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
-/* Zeroed non-RC block tagged `kind` for the census (`SZ_RC_VIEW`). */
-void *sz_alloc_zero_kind(size_t size, uint32_t kind);
+/* view.c installs this on the first view. A program with no views links
+ * no view code. The last release of a view calls `fn`, then retires the block. */
+void sz_rc_set_view_drop(void (*fn)(void *ptr));
 void sz_retain(void *ptr);
 void sz_release(void *ptr);
 /* RC kind of `ptr`. A non-RC pointer is `SZ_RC_KIND_COUNT`. */
@@ -1235,6 +1237,7 @@ void sz_property_note_hit(const char *desc);
 int64_t sz_property_last_hit_has(SzString *needle);
 int sz_property_session_armed(void);
 void sz_property_session_step(void);
+void sz_property_session_flush(void);
 void sz_property_session_end(void);
 void sz_property_session_reset(void);
 void sz_timeline_set_drive(const char *line);
