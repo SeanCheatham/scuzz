@@ -218,7 +218,7 @@ SzString *sz_string_replace_match(const SzString *s, const SzString *pat,
 /* Boxed i64 for IO[Int] */
 void *sz_box_i64(int64_t n);
 int64_t sz_unbox_i64(const void *p);
-/* 0 when `key` is a boxed Int, else 1 (String). Null is 1. */
+/* 0 when `key` is a boxed scalar, else 1. Null is 1. Lookup ignores this. */
 int32_t sz_map_infer_key_kind(const void *key);
 /* 1 when pointers match, or both strings, boxed i64, lists, maps, ADTs,
  * pairs, Either, or errors match by value. Other RC kinds stay identity. */
@@ -774,16 +774,16 @@ int64_t sz_list_index_of(SzList *xs, void *x);
 int64_t sz_list_last_index_of(SzList *xs, void *x);
 /* First cell of each equal value. Empty stays empty. */
 SzList *sz_list_distinct(SzList *xs);
-/* First cell of each key that `fn` returns. `key_kind` is 0 for boxed
- * Int, 1 for String. Empty stays empty. */
+/* First cell of each key that `fn` returns. `key_kind` is unused.
+ * Empty stays empty. */
 SzList *sz_list_distinct_by(SzList *xs, SzListMapFn fn, void *env,
                             int32_t key_kind);
 /* Map from `List[(K, V)]`. Duplicate keys keep the last value. A null
- * pair is skipped. Empty is empty. Key kind is boxed Int or String. */
+ * pair is skipped. Empty is empty. */
 SzMap *sz_list_to_map(SzList *pairs);
-/* Set from `List[Int]` or `List[String]`. Duplicate cells collapse.
- * Empty is empty. A non-empty list infers kind from the first cell.
- * `key_kind` is unused then. */
+/* Set from a list. Duplicate cells collapse. Empty is empty. A
+ * non-empty list infers kind from the first cell. `key_kind` is unused
+ * then. */
 SzMap *sz_list_to_set(SzList *xs, int32_t key_kind);
 /* Cells of `xs` that are missing from `ys`. Empty `xs` is empty. */
 SzList *sz_list_diff(SzList *xs, SzList *ys);
@@ -823,9 +823,8 @@ SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env);
 void *sz_list_max(SzList *xs);
 void *sz_list_min(SzList *xs);
 void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max);
-/* Group cells by the `Int` or `String` key that `fn` returns. `key_kind`
- * is 0 for boxed Int, 1 for String. Empty is empty. Cells in a group
- * keep their order. */
+/* Group cells by the key that `fn` returns. `key_kind` is unused.
+ * Empty is empty. Cells in a group keep their order. */
 SzMap *sz_list_group_by(SzList *xs, SzListMapFn fn, void *env, int32_t key_kind);
 /* Sum boxed Int cells. Empty is 0. */
 int64_t sz_list_sum(SzList *xs);
@@ -837,7 +836,10 @@ void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const SzString *sep);
 
 /* Persistent Map / Set (NULL = empty). Weight-balanced by subtree count.
- * key_kind 0 = boxed i64, 1 = String. */
+ * One structural order. A boxed scalar compares as i64. A string
+ * compares as bytes. A list, pair, or tagged value compares by
+ * structure. key_kind 0 is a boxed scalar. key_kind 1 is any other key.
+ * Two maps are equal only when the kinds match. */
 struct SzMap {
   void *key;
   void *val;
@@ -848,7 +850,7 @@ struct SzMap {
 };
 SzMap *sz_map_empty(void);
 /* Empty insert infers kind from `key`. A non-empty tree keeps
- * `m->key_kind`. `key_kind` is unused. */
+ * `m->key_kind`. Lookup does not read the `key_kind` argument. */
 SzMap *sz_map_set(SzMap *m, void *key, void *val, int32_t key_kind);
 void *sz_map_get_or(SzMap *m, void *key, void *dflt);
 /* Option of the value. A miss is None. A hit is Some, including null. */

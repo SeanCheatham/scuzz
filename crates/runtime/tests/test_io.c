@@ -74,6 +74,52 @@ static int map_test_depth(SzMap *m) {
   return 1 + (l > r ? l : r);
 }
 
+static void *test_point(int64_t x, int64_t y) {
+  void *bx = sz_box_i64(x);
+  void *by = sz_box_i64(y);
+  SzList *tail = sz_list_cons(by, NULL);
+  SzList *spine = sz_list_cons(bx, tail);
+  void *adt = sz_adt_new(0, spine);
+  sz_release(bx);
+  sz_release(by);
+  sz_release(tail);
+  sz_release(spine);
+  return adt;
+}
+
+static void *test_tup(int64_t n, const char *text) {
+  void *box = sz_box_i64(n);
+  SzString *s = sz_string_from_cstr(text);
+  void *pair = sz_pair_new(box, s);
+  sz_release(box);
+  sz_release(s);
+  return pair;
+}
+
+static SzList *test_i1(int64_t a) {
+  void *box = sz_box_i64(a);
+  SzList *spine = sz_list_cons(box, NULL);
+  sz_release(box);
+  return spine;
+}
+
+static SzList *test_i2(int64_t a, int64_t b) {
+  void *bb = sz_box_i64(b);
+  void *ba = sz_box_i64(a);
+  SzList *tail = sz_list_cons(bb, NULL);
+  SzList *spine = sz_list_cons(ba, tail);
+  sz_release(ba);
+  sz_release(bb);
+  sz_release(tail);
+  return spine;
+}
+
+static void *test_fbox(double d) {
+  int64_t bits = 0;
+  memcpy(&bits, &d, sizeof(bits));
+  return sz_box_i64(bits);
+}
+
 static void sleep_us(long us) {
   struct timespec ts;
   if (us <= 0)
@@ -13132,6 +13178,153 @@ int main(void) {
     sz_string_free(kx);
     sz_string_free(ky);
     sz_string_free(kz);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Structural keys share one order with equality. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    void *p12 = NULL, *p19 = NULL, *p21 = NULL;
+    void *red = NULL, *blue = NULL;
+    void *bf = NULL, *bt = NULL;
+    void *i1 = NULL, *i2 = NULL;
+    void *f15 = NULL, *f25 = NULL;
+    void *t1a = NULL, *t1b = NULL, *t2a = NULL;
+    SzList *l1 = NULL, *l10 = NULL, *l2 = NULL;
+    SzString *sa = NULL, *sb = NULL, *sc = NULL;
+    SzMap *m0 = NULL, *m1 = NULL, *rec = NULL;
+    SzMap *r0 = NULL, *r1 = NULL, *rev = NULL, *rm = NULL;
+    SzMap *e0 = NULL, *en = NULL;
+    SzMap *b0 = NULL, *bm = NULL;
+    SzMap *n0 = NULL, *nm = NULL;
+    SzMap *f0 = NULL, *fm = NULL;
+    SzMap *u0 = NULL, *u1 = NULL, *um = NULL;
+    SzMap *l0 = NULL, *l1m = NULL, *lm = NULL;
+    SzList *rk = NULL, *ek = NULL, *bk = NULL, *nk = NULL, *fk = NULL;
+    SzList *uk = NULL, *lk = NULL;
+    sz_alloc_stats(&base_bytes, &base_count);
+    sa = sz_string_from_cstr("a");
+    sb = sz_string_from_cstr("b");
+    sc = sz_string_from_cstr("c");
+    p12 = test_point(1, 2);
+    p19 = test_point(1, 9);
+    p21 = test_point(2, 1);
+    m0 = sz_map_set(NULL, p21, sc, 1);
+    m1 = sz_map_set(m0, p19, sb, 1);
+    rec = sz_map_set(m1, p12, sa, 1);
+    rk = sz_map_keys(rec);
+    assert(sz_ptr_eq(sz_list_at(rk, 0), p12) == 1);
+    assert(sz_ptr_eq(sz_list_at(rk, 1), p19) == 1);
+    assert(sz_ptr_eq(sz_list_at(rk, 2), p21) == 1);
+    assert(sz_map_contains(rec, sa) == 0);
+    r0 = sz_map_set(NULL, p12, sa, 1);
+    r1 = sz_map_set(r0, p19, sb, 1);
+    rev = sz_map_set(r1, p21, sc, 1);
+    assert(sz_ptr_eq(rec, rev) == 1);
+    rm = sz_map_remove(rec, p21);
+    assert(sz_map_contains(rm, p21) == 0);
+    assert(sz_map_contains(rm, p12) == 1);
+    red = sz_adt_new(0, NULL);
+    blue = sz_adt_new(1, NULL);
+    e0 = sz_map_set(NULL, blue, sb, 1);
+    en = sz_map_set(e0, red, sa, 1);
+    ek = sz_map_keys(en);
+    assert(sz_ptr_eq(sz_list_at(ek, 0), red) == 1);
+    assert(sz_ptr_eq(sz_list_at(ek, 1), blue) == 1);
+    bf = sz_box_i64(0);
+    bt = sz_box_i64(1);
+    b0 = sz_map_set(NULL, bt, sa, 1);
+    bm = sz_map_set(b0, bf, sb, 1);
+    bk = sz_map_keys(bm);
+    assert(sz_unbox_i64(sz_list_at(bk, 0)) == 0);
+    assert(sz_unbox_i64(sz_list_at(bk, 1)) == 1);
+    i1 = sz_box_i64(1);
+    i2 = sz_box_i64(2);
+    n0 = sz_map_set(NULL, i2, sa, 0);
+    nm = sz_map_set(n0, i1, sb, 0);
+    nk = sz_map_keys(nm);
+    assert(sz_unbox_i64(sz_list_at(nk, 0)) == 1);
+    assert(sz_unbox_i64(sz_list_at(nk, 1)) == 2);
+    f15 = test_fbox(1.5);
+    f25 = test_fbox(2.5);
+    assert(sz_unbox_i64(f15) < sz_unbox_i64(f25));
+    f0 = sz_map_set(NULL, f25, sa, 1);
+    fm = sz_map_set(f0, f15, sb, 1);
+    fk = sz_map_keys(fm);
+    assert(sz_ptr_eq(sz_list_at(fk, 0), f15) == 1);
+    assert(sz_ptr_eq(sz_list_at(fk, 1), f25) == 1);
+    t1a = test_tup(1, "a");
+    t1b = test_tup(1, "b");
+    t2a = test_tup(2, "a");
+    u0 = sz_map_set(NULL, t2a, sa, 1);
+    u1 = sz_map_set(u0, t1b, sb, 1);
+    um = sz_map_set(u1, t1a, sc, 1);
+    uk = sz_map_keys(um);
+    assert(sz_ptr_eq(sz_list_at(uk, 0), t1a) == 1);
+    assert(sz_ptr_eq(sz_list_at(uk, 1), t1b) == 1);
+    assert(sz_ptr_eq(sz_list_at(uk, 2), t2a) == 1);
+    l1 = test_i1(1);
+    l10 = test_i2(1, 0);
+    l2 = test_i1(2);
+    l0 = sz_map_set(NULL, l2, sc, 1);
+    l1m = sz_map_set(l0, l10, sb, 1);
+    lm = sz_map_set(l1m, l1, sa, 1);
+    lk = sz_map_keys(lm);
+    assert(sz_ptr_eq(sz_list_at(lk, 0), l1) == 1);
+    assert(sz_ptr_eq(sz_list_at(lk, 1), l10) == 1);
+    assert(sz_ptr_eq(sz_list_at(lk, 2), l2) == 1);
+    assert(sz_map_contains(lm, l10) == 1);
+    sz_release(lk);
+    sz_release(lm);
+    sz_release(l1m);
+    sz_release(l0);
+    sz_release(l2);
+    sz_release(l10);
+    sz_release(l1);
+    sz_release(uk);
+    sz_release(um);
+    sz_release(u1);
+    sz_release(u0);
+    sz_release(t2a);
+    sz_release(t1b);
+    sz_release(t1a);
+    sz_release(fk);
+    sz_release(fm);
+    sz_release(f0);
+    sz_release(f25);
+    sz_release(f15);
+    sz_release(nk);
+    sz_release(nm);
+    sz_release(n0);
+    sz_release(i2);
+    sz_release(i1);
+    sz_release(bk);
+    sz_release(bm);
+    sz_release(b0);
+    sz_release(bt);
+    sz_release(bf);
+    sz_release(ek);
+    sz_release(en);
+    sz_release(e0);
+    sz_release(blue);
+    sz_release(red);
+    sz_release(rm);
+    sz_release(rev);
+    sz_release(r1);
+    sz_release(r0);
+    sz_release(rk);
+    sz_release(rec);
+    sz_release(m1);
+    sz_release(m0);
+    sz_release(p21);
+    sz_release(p19);
+    sz_release(p12);
+    sz_release(sc);
+    sz_release(sb);
+    sz_release(sa);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
