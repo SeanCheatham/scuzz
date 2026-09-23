@@ -4926,27 +4926,27 @@ def emitTailGuard(gs: Slot, code: String, i: Int, last: Bool): String =
   }
 
 def emitOkTailBody(pat: String, body: Expr, fname: String, tret: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, cleanup: String): String =
-  if (isSelfTail(body, fname)) join(emitOkTailSlot(pat, body, strs, defs, ens, ps, loc, i, tys, sv).code, join(cleanup, line("br label %tco_loop"))) else emitOkTailBase(emitOkSlotPat(pat, body, "body", strs, defs, ens, ps, loc, i, tys, sv, false, 0), tret, ps, i, cleanup)
+  if (isSelfTail(body, fname)) join(emitOkTailSlot(pat, body, strs, defs, ens, ps, loc, i, tys, sv, cleanup != "").code, join(cleanup, line("br label %tco_loop"))) else emitOkTailBase(emitOkSlotPat(pat, body, "body", strs, defs, ens, ps, loc, i, tys, sv, false, 0), tret, ps, i, cleanup)
 
 def emitOkTailBase(s: Slot, tret: String, ps: List[Param], i: Int, cleanup: String): String =
   s match {
     case Slot(c, v, o) => join(c, emitTcoRetSlots(tret, v, o, ps, Str.concat("ok_", Str.fromInt(i)), cleanup))
   }
 
-def emitOkTailSlot(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String): Slot =
-  if (isAsPat(pat)) emitOkTailSlot(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), strs, defs, ens, ps, loc, i, tys, sv) else emitOkTailSlot2(pat, body, strs, defs, ens, ps, loc, i, tys)
+def emitOkTailSlot(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, keep: Bool): Slot =
+  if (isAsPat(pat)) emitOkTailSlot(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), strs, defs, ens, ps, loc, i, tys, sv, keep) else emitOkTailSlot2(pat, body, strs, defs, ens, ps, loc, i, tys, keep)
 
-def emitOkTailSlot2(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
-  if (isOrPat(pat)) emitOkTailSlot2(orLeft(pat), body, strs, defs, ens, ps, loc, i, tys) else if (isConsPat(pat)) emitOkOwned(emitOkConsNest(consTail(pat), "body", i, tys, emitTailLeafTyped(rewriteCons(pat, body, "body", i, slotInt(tys, 0)), strs, defs, ens, ps, consPayloadParams(pat, "body", i, tys, ps), loc, i)), ps) else emitOkTailSlot3(pat, body, strs, defs, ens, ps, loc, i, tys)
+def emitOkTailSlot2(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], keep: Bool): Slot =
+  if (isOrPat(pat)) emitOkTailSlot2(orLeft(pat), body, strs, defs, ens, ps, loc, i, tys, keep) else if (isConsPat(pat)) emitOkOwned(emitOkConsNest(consTail(pat), "body", i, tys, emitTailLeafTyped(rewriteCons(pat, body, "body", i, slotInt(tys, 0)), strs, defs, ens, ps, consPayloadParams(pat, "body", i, tys, ps), loc, i, keep)), ps) else emitOkTailSlot3(pat, body, strs, defs, ens, ps, loc, i, tys, keep)
 
-def emitOkTailSlot3(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String]): Slot =
-  if (isTuplePat(pat)) emitTailLeafTyped(rewriteTuple(pat, body, "body", i, tys, ens), strs, defs, ens, ps, stemBps(pat, "body", i, tys, ens, ps), loc, i) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitTailLeafTyped(rewriteFields(splitPat(patBind(pat)), body, "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), ens), strs, defs, ens, ps, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), "body", i, 0, ens, ps), loc, i) else emitTailLeafBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, strs, defs, ens, ps, patternPayloadParams(pat, "body", i, ens, ps), loc, i)
+def emitOkTailSlot3(pat: String, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], keep: Bool): Slot =
+  if (isTuplePat(pat)) emitTailLeafTyped(rewriteTuple(pat, body, "body", i, tys, ens), strs, defs, ens, ps, stemBps(pat, "body", i, tys, ens, ps), loc, i, keep) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitTailLeafTyped(rewriteFields(splitPat(patBind(pat)), body, "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), ens), strs, defs, ens, ps, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), "body", i, 0, ens, ps), loc, i, keep) else emitTailLeafBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, strs, defs, ens, ps, patternPayloadParams(pat, "body", i, ens, ps), loc, i, keep)
 
-def emitTailLeafTyped(body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int): Slot =
-  Slot(emitSelfTailTyped(body, Str.concat("body_a0_", Str.fromInt(i)), strs, defs, ens, ps, bps, loc), "tco", false)
+def emitTailLeafTyped(body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, keep: Bool): Slot =
+  Slot(emitSelfTailTyped(body, Str.concat("body_a0_", Str.fromInt(i)), strs, defs, ens, ps, bps, loc, keep), "tco", false)
 
-def emitTailLeafBind(bind: String, isInt: Bool, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int): Slot =
-  if (bind == "" || bind == "_") emitTailLeafTyped(body, strs, defs, ens, ps, bps, loc, i) else emitTailLeafTyped(rewriteBind(body, bind, bindStem("body", i, isInt)), strs, defs, ens, ps, bps, loc, i)
+def emitTailLeafBind(bind: String, isInt: Bool, body: Expr, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, keep: Bool): Slot =
+  if (bind == "" || bind == "_") emitTailLeafTyped(body, strs, defs, ens, ps, bps, loc, i, keep) else emitTailLeafTyped(rewriteBind(body, bind, bindStem("body", i, isInt)), strs, defs, ens, ps, bps, loc, i, keep)
 
 def emitDefTcoIf(name: String, mod: String, ret: String, ps: List[Param], c: Expr, t: Expr, el: Expr, ioff: Int, strs: List[String], defs: Ftab, ens: List[En], loc: String): String =
   emitDefTcoIf2(llvmRet(ret), symOf(mod, name), name, defParamsTco(ps), ps, c, t, el, ioff, strs, defs, ens, loc)
@@ -5017,31 +5017,37 @@ def emitTcoRetSlots(ret: String, tv: String, to: Bool, ps: List[Param], tag: Str
   join(if (ret == "ptr" && !to) retPtr(tv) else "", join(cleanup, join(emitTcoReleases(ps, 0, Str.concat(tag, "_rb")), join(panicPop(), line(Str.concat(if (ret == "ptr") "ret ptr " else "ret i64 ", tv))))))
 
 def emitSelfTail(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
-  join(emitSelfTailTyped(e, prefix, strs, defs, ens, ps, ps, loc), line("br label %tco_loop"))
+  join(emitSelfTailTyped(e, prefix, strs, defs, ens, ps, ps, loc, false), line("br label %tco_loop"))
 
-def emitSelfTailTyped(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String): String =
+def emitSelfTailTyped(e: Expr, prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, keep: Bool): String =
   e match {
-    case Expr.ECall(_, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, bps, loc, 0, "", noStr())
-    case Expr.EMethod(_, _, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, bps, loc, 0, "", noStr())
+    case Expr.ECall(_, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, bps, loc, 0, "", noStr(), keep)
+    case Expr.EMethod(_, _, args, _) => emitSelfTailAcc(args, prefix, strs, defs, ens, ps, bps, loc, 0, "", noStr(), keep)
     case _ => ""
   }
 
-def emitSelfTailAcc(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
-  if (List.isEmpty(args)) emitTcoCommit(code, ps, vals, prefix) else emitSelfTailOne(List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, bps, loc, i, code, vals)
+def emitSelfTailAcc(args: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String], keep: Bool): String =
+  if (List.isEmpty(args)) emitTcoCommit(code, ps, vals, prefix) else emitSelfTailOne(List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, bps, loc, i, code, vals, keep)
 
-def emitSelfTailOne(a: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
-  emitSelfTailGot(emitExpr(a, Str.concat(prefix, Str.concat("_targ", Str.fromInt(i))), strs, defs, ens, bps, loc), rest, prefix, strs, defs, ens, ps, bps, loc, i, code, vals)
+def emitSelfTailOne(a: Expr, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String], keep: Bool): String =
+  emitSelfTailGot(emitExpr(a, Str.concat(prefix, Str.concat("_targ", Str.fromInt(i))), strs, defs, ens, bps, loc), rest, prefix, strs, defs, ens, ps, bps, loc, i, code, vals, keep)
 
-def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String]): String =
+def emitSelfTailGot(s: Slot, rest: List[Expr], prefix: String, strs: List[String], defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, code: String, vals: List[String], keep: Bool): String =
   s match {
-    case Slot(c, v, o) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, bps, loc, i + 1, join(code, c), List.concat(vals, tcoMark(v, o) :: noStr()))
+    case Slot(c, v, o) => emitSelfTailAcc(rest, prefix, strs, defs, ens, ps, bps, loc, i + 1, join(code, c), List.concat(vals, tcoMarkArg(v, o, keep) :: noStr()), keep)
   }
 
 def tcoMark(v: String, o: Bool): String =
-  if (o) Str.concat("~", v) else v
+  tcoMarkArg(v, o, false)
+
+def tcoMarkArg(v: String, o: Bool, keep: Bool): String =
+  if (o) Str.concat("~", v) else if (keep) Str.concat("!", v) else v
 
 def tcoVal(v: String): String =
-  if (Str.startsWith(v, "~")) Str.slice(v, 1, Str.len(v)) else v
+  if (Str.startsWith(v, "~") || Str.startsWith(v, "!")) Str.slice(v, 1, Str.len(v)) else v
+
+def tcoKeep(v: String): Bool =
+  Str.startsWith(v, "!")
 
 def emitTcoCommit(code: String, ps: List[Param], vals: List[String], tag: String): String =
   join(code, join(emitTcoAny(ps, vals, tag), join(emitTcoRetains(ps, vals, 0, tag), join(emitTcoReleases(ps, 0, tag), join(emitTcoStores(ps, vals, 0), join(emitTcoHeld(ps, vals, 0, tag), emitTcoTempRels(ps, vals, 0)))))))
@@ -5054,7 +5060,7 @@ def tcoBorrow(ps: List[Param], vals: List[String], i: Int): Bool =
 
 def tcoBorrowOne(p: Param, v: String, ps: List[Param], vals: List[String], i: Int): Bool =
   p match {
-    case Param(_, ty, _, _) => if (!isI64Ty(ty) && !tcoOwned(v)) true else tcoBorrow(ps, vals, i + 1)
+    case Param(_, ty, _, _) => if (!isI64Ty(ty) && !tcoOwned(v) && !tcoKeep(v)) true else tcoBorrow(ps, vals, i + 1)
   }
 
 def tcoPtrN(ps: List[Param], i: Int, n: Int): Int =
@@ -5103,7 +5109,7 @@ def emitTcoRetainOne(p: Param, v: String, ps: List[Param], vals: List[String], i
   }
 
 def emitTcoRetainTy(ty: String, v: String, ps: List[Param], i: Int, tag: String): String =
-  if (isI64Ty(ty)) "" else if (tcoOwned(v)) retPtr(tcoVal(v)) else emitTcoRetainBr(tcoVal(v), ps, i, tag)
+  if (isI64Ty(ty)) "" else if (tcoOwned(v) || tcoKeep(v)) retPtr(tcoVal(v)) else emitTcoRetainBr(tcoVal(v), ps, i, tag)
 
 def emitTcoRetainBr(v: String, ps: List[Param], i: Int, tag: String): String =
   join(line(Str.concat("br i1 ", Str.concat(tcoAnyRef(ps, tag), Str.concat(", label %", Str.concat(tcoLab("keep", i, tag), Str.concat(", label %", tcoLab("nok", i, tag))))))), join(lab(tcoLab("keep", i, tag)), join(retPtr(v), join(line(Str.concat("br label %", tcoLab("nok", i, tag))), lab(tcoLab("nok", i, tag))))))
@@ -5165,7 +5171,7 @@ def emitTcoHeldOne(p: Param, v: String, ps: List[Param], vals: List[String], i: 
   }
 
 def emitTcoHeldStore(n: String, v: String, ps: List[Param], tag: String): String =
-  if (tcoOwned(v)) line(Str.concat("store i1 true, ptr %", Str.concat(n, "_held"))) else line(Str.concat("store i1 ", Str.concat(tcoAnyRef(ps, tag), Str.concat(", ptr %", Str.concat(n, "_held")))))
+  if (tcoOwned(v) || tcoKeep(v)) line(Str.concat("store i1 true, ptr %", Str.concat(n, "_held"))) else line(Str.concat("store i1 ", Str.concat(tcoAnyRef(ps, tag), Str.concat(", ptr %", Str.concat(n, "_held")))))
 
 def contKey(mod: String, name: String): String =
   if (mod == "") name else Str.concat(mod, Str.concat("_", name))
