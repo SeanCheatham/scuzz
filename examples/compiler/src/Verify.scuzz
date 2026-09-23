@@ -151,7 +151,7 @@ def friendly(p: Param, ens: List[En]): Bool =
   friendlyTy(p.ty, ens)
 
 def friendlyTy(t: String, ens: List[En]): Bool =
-  if (t == "Int" || t == "String" || t == "Bool") true else if (isListTy(t)) friendlyTy(listInner(t), ens) else if (opaqueTy(tyHead(t))) false else if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else !List.isEmpty(findEn(ens, tyHead(t)))
+  if (t == "Int" || t == "String" || t == "Bool" || t == "View") true else if (isListTy(t)) friendlyTy(listInner(t), ens) else if (opaqueTy(tyHead(t))) false else if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else !List.isEmpty(findEn(ens, tyHead(t)))
 
 def opaqueTy(t: String): Bool =
   t == "Fiber" || t == "Ref" || t == "Queue" || t == "Deferred" || t == "Resource" || t == "Stream" || t == "Map" || t == "Set"
