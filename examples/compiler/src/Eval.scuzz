@@ -553,10 +553,188 @@ def defStepVals(d: Fun, vals: List[Value], p: EvProg): EvStep =
   if (hasErr(vals)) valueStep(firstErr(vals)) else defBody(d, vals, defLoc(d, p), p)
 
 def defBody(d: Fun, vals: List[Value], loc: String, p: EvProg): EvStep =
-  defBodyLogged(logAdd(p, d.off, "", d.name, EvEnv(noVars(), d.mod, loc)), d, vals, loc)
+  defBodyLogged(logAdd(p, d.off, "", d.name, EvEnv(noVars(), d.mod, loc)), d, vals, loc, p)
 
-def defBodyLogged(_u: Unit, d: Fun, vals: List[Value], loc: String): EvStep =
-  if (loc == "") EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, "")) else hitStep(Fuzz.hit(loc), EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc)))
+def defBodyLogged(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg): EvStep =
+  if (loc == "") tailOr(d, vals, loc, p) else defBodyHit(Fuzz.hit(loc), d, vals, loc, p)
+
+def defBodyHit(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg): EvStep =
+  tailOr(d, vals, loc, p)
+
+def tailSlow(d: Fun, vals: List[Value], loc: String): EvStep =
+  EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc))
+
+def tailOr(d: Fun, vals: List[Value], loc: String, p: EvProg): EvStep =
+  if (!List.isEmpty(d.tparams)) tailSlow(d, vals, loc) else tailOrBody(d, vals, loc, p)
+
+def tailOrBody(d: Fun, vals: List[Value], loc: String, p: EvProg): EvStep =
+  d.body match {
+    case Expr.EIf(c, t, el, off) => tailIf(d, vals, c, t, el, off, loc, p)
+    case Expr.EMatch(s, arms, off) => tailMatch(d, vals, s, arms, off, loc, p)
+    case _ => tailSlow(d, vals, loc)
+  }
+
+def tailParam(d: Fun): String =
+  if (List.len(d.params) != 1) "" else if (List.at(d.params, 0).ty != "Int") "" else List.at(d.params, 0).name
+
+def tailOneInt(d: Fun, vals: List[Value]): Option[Int] =
+  if (tailParam(d) == "" || List.len(vals) != 1) None else tailIntVal(List.at(vals, 0))
+
+def tailIntVal(v: Value): Option[Int] =
+  v match {
+    case Value.VInt(n) => Some(n)
+    case _ => None
+  }
+
+def tailVar(e: Expr, name: String): Bool =
+  e match {
+    case Expr.EVar(n, _) => name != "" && n == name
+    case _ => false
+  }
+
+def tailLit(e: Expr, n: Int): Bool =
+  e match {
+    case Expr.EInt(k, _) => k == n
+    case _ => false
+  }
+
+def tailLitOf(e: Expr): Option[Int] =
+  e match {
+    case Expr.EInt(n, _) => Some(n)
+    case _ => None
+  }
+
+def tailSelfDec(e: Expr, name: String, param: String): Bool =
+  e match {
+    case Expr.ECall(f, args, _) => f == name && tailDecArg(args, param)
+    case _ => false
+  }
+
+def tailDecArg(args: List[Expr], param: String): Bool =
+  List.len(args) == 1 && tailMinus1(List.at(args, 0), param)
+
+def tailMinus1(e: Expr, param: String): Bool =
+  e match {
+    case Expr.EBin(op, l, r, _) => op == "-" && tailVar(l, param) && tailLit(r, 1)
+    case _ => false
+  }
+
+def tailIfShape(c: Expr, t: Expr, el: Expr, param: String, name: String): Option[Int] =
+  c match {
+    case Expr.EBin(op, l, r, _) => if (op == "<=" && tailVar(l, param) && tailLit(r, 0) && tailSelfDec(el, name, param)) tailLitOf(t) else None
+    case _ => None
+  }
+
+def tailIf(d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, loc: String, p: EvProg): EvStep =
+  tailIfLit(tailIfShape(c, t, el, tailParam(d), d.name), d, vals, c, t, el, off, loc, p)
+
+def tailIfLit(hit: Option[Int], d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, loc: String, p: EvProg): EvStep =
+  hit match {
+    case Some(result) => tailIfArg(tailOneInt(d, vals), d, vals, c, t, el, off, result, loc, p)
+    case None => tailSlow(d, vals, loc)
+  }
+
+def tailIfArg(hit: Option[Int], d: Fun, vals: List[Value], c: Expr, t: Expr, el: Expr, off: Int, result: Int, loc: String, p: EvProg): EvStep =
+  hit match {
+    case Some(n) => valueStep(Value.VInt(tailDecDone(tailIfMark(p, d.mod, n, c, t, el, off, loc), n, result)))
+    case None => tailSlow(d, vals, loc)
+  }
+
+def tailDecDone(_u: Unit, n: Int, result: Int): Int =
+  tailDec(n, 0, result)
+
+def tailDec(n: Int, bound: Int, result: Int): Int =
+  if (n <= bound) result else tailDec(n - 1, bound, result)
+
+def tailIfMark(p: EvProg, mod: String, n: Int, c: Expr, t: Expr, el: Expr, off: Int, loc: String): Unit =
+  if (n <= 0) tailIfBase(p, mod, n, c, t, off, loc) else tailIfSteps(p, mod, c, t, el, off, loc)
+
+def tailIfBase(p: EvProg, mod: String, n: Int, c: Expr, t: Expr, off: Int, loc: String): Unit =
+  tailMarkArm(tailDistAt(absInt(n), loc, exprOff(c)), p, mod, t, "t", off, loc)
+
+def tailIfSteps(p: EvProg, mod: String, c: Expr, t: Expr, el: Expr, off: Int, loc: String): Unit =
+  tailIfElse(tailDistAt(0, loc, exprOff(c)), p, mod, t, el, off, loc)
+
+def tailIfElse(_u: Unit, p: EvProg, mod: String, t: Expr, el: Expr, off: Int, loc: String): Unit =
+  tailIfThen(tailMarkArm((), p, mod, el, "e", off, loc), p, mod, t, off, loc)
+
+def tailIfThen(_u: Unit, p: EvProg, mod: String, t: Expr, off: Int, loc: String): Unit =
+  tailMarkArm((), p, mod, t, "t", off, loc)
+
+def exprOff(e: Expr): Int =
+  e match {
+    case Expr.EBin(_, _, _, off) => off
+    case _ => 0
+  }
+
+def tailDistAt(dist: Int, loc: String, off: Int): Unit =
+  if (loc == "") () else tailHit(Fuzz.hit(Str.concat("dist:", Str.concat(Check.covKeyOf(loc, off, "cmp"), Str.concat(":", Str.fromInt(dist))))))
+
+def tailMarkArm(_u: Unit, p: EvProg, mod: String, e: Expr, tag: String, parent: Int, loc: String): Unit =
+  if (isUnitExpr(e)) () else tailMarkArmLog(logAdd(p, Parse.spanOff(e, parent), "", Str.concat("#", tag), EvEnv(noVars(), mod, loc)), e, tag, parent, loc)
+
+def tailMarkArmLog(_u: Unit, e: Expr, tag: String, parent: Int, loc: String): Unit =
+  if (loc == "") () else tailHit(Fuzz.hit(Check.covKeyOf(loc, Parse.spanOff(e, parent), tag)))
+
+def tailHit(_u: Unit): Unit =
+  ()
+
+def tailBaseArm(a: Arm): Bool =
+  a match {
+    case Arm(pat, g, body) => pat == "0" && g == "" && tailIsLit(body)
+  }
+
+def tailIsLit(e: Expr): Bool =
+  e match {
+    case Expr.EInt(_, _) => true
+    case _ => false
+  }
+
+def tailWildArm(a: Arm, name: String, param: String): Bool =
+  a match {
+    case Arm(pat, g, body) => pat == "_" && g == "" && tailSelfDec(body, name, param)
+  }
+
+def tailMatchShape(s: Expr, arms: List[Arm], param: String, name: String): Bool =
+  tailVar(s, param) && List.len(arms) == 2 && tailBaseArm(List.at(arms, 0)) && tailWildArm(List.at(arms, 1), name, param)
+
+def tailMatch(d: Fun, vals: List[Value], s: Expr, arms: List[Arm], off: Int, loc: String, p: EvProg): EvStep =
+  if (!tailMatchShape(s, arms, tailParam(d), d.name)) tailSlow(d, vals, loc) else tailMatchArg(tailOneInt(d, vals), d, vals, arms, off, loc)
+
+def tailMatchArg(hit: Option[Int], d: Fun, vals: List[Value], arms: List[Arm], off: Int, loc: String): EvStep =
+  hit match {
+    case Some(n) => valueStep(Value.VInt(tailEqDone(tailMatchMark(n, tailArmExpr(List.at(arms, 0)), tailArmExpr(List.at(arms, 1)), off, loc), n, tailArmLit(List.at(arms, 0)))))
+    case None => tailSlow(d, vals, loc)
+  }
+
+def tailArmExpr(a: Arm): Expr =
+  a match {
+    case Arm(_, _, body) => body
+  }
+
+def tailArmLit(a: Arm): Int =
+  tailLitN(tailArmExpr(a))
+
+def tailLitN(e: Expr): Int =
+  e match {
+    case Expr.EInt(n, _) => n
+    case _ => 0
+  }
+
+def tailMatchMark(n: Int, base: Expr, wild: Expr, off: Int, loc: String): Unit =
+  if (n == 0) tailMarkMatch(base, "0", off, loc) else if (n < 0) tailMarkMatch(wild, "1", off, loc) else tailMatchPos(tailMarkMatch(wild, "1", off, loc), base, off, loc)
+
+def tailMatchPos(_u: Unit, base: Expr, off: Int, loc: String): Unit =
+  tailMarkMatch(base, "0", off, loc)
+
+def tailMarkMatch(e: Expr, tag: String, parent: Int, loc: String): Unit =
+  if (loc == "") () else tailHit(Fuzz.hit(Check.covKeyOf(loc, Parse.spanOff(e, parent), tag)))
+
+def tailEqDone(_u: Unit, n: Int, result: Int): Int =
+  tailEq(n, 0, result)
+
+def tailEq(n: Int, target: Int, result: Int): Int =
+  if (n == target) result else tailEq(n - 1, target, result)
 
 def defLoc(d: Fun, p: EvProg): String =
   if (List.isEmpty(p.ctx)) "" else Map.getOrElse(Map.getOrElse(p.locs, d.mod, Map.empty()), d.name, "")

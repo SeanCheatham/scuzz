@@ -19,7 +19,7 @@ Do not start FFI, a package registry, physical-device packaging, or `*.scuzz_tun
 | Risk | Mitigation |
 | --- | --- |
 | Compile-time slices do not move the recorded times | Re-time the two commands in [`gaps.md`](gaps.md) before another show-and-parse change |
-| An evaluator campaign stays as slow as a compiled campaign | The idle probe falls back to compiled. Speed stays open in [`gaps.md`](gaps.md) |
+| An evaluator campaign outside the Int tail loop misses the idle deadline | The probe falls back to compiled. The kernel campaign is faster than compiled. See [`gaps.md`](gaps.md) |
 | Evaluator output differs from the emitted binary | Corpus replay runs compiled after an evaluator campaign. A difference fails the campaign |
 | Self-hosting lags one release | Toolchain sources call builtins the newest `v*` release already emits |
 | Mobile hardware stays unproven | Host and simulator proofs do not close it. See [`gaps.md`](gaps.md) |
