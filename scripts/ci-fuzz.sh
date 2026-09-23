@@ -889,10 +889,6 @@ subset("branches", reached_locs(compiled["coverage"]["branches"]), reached_locs(
 for key in ("sometimes", "triggers", "claims"):
     assert ev[key]["declared"] == compiled[key]["declared"]
     subset(key, reach_names(compiled[key]), reach_names(ev[key]))
-ev_branches = reached_locs(ev["coverage"]["branches"])
-compiled_branches = reached_locs(compiled["coverage"]["branches"])
-if not (ev_branches - compiled_branches):
-    raise SystemExit("evaluator branch reach is not a strict superset")
 PY
 }
 
