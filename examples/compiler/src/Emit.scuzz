@@ -889,13 +889,16 @@ def exprIsI64Match(arms: List[Arm], ps: List[Param], defs: Ftab): Bool =
   if (List.isEmpty(arms)) false else exprIsI64Arm(List.at(arms, 0), ps, defs)
 
 def exprCallI64(f: String, args: List[Expr], ps: List[Param], defs: Ftab): Bool =
-  if (f == "Signal.get") signalGetI64(args, ps, defs) else if (f == "Property.check") exprIsI64Recv(args, ps, defs) else if (f == "List.at") headUnbox(args, ps) else if (callIsI64(f, defs)) true else if (f == "Map.getOrElse" || isTyParam(funRetStr(defs, f))) argsHaveI64(args, ps, defs) else false
+  if (f == "Signal.get") signalGetI64(args, ps, defs) else if (f == "Property.check") exprIsI64Recv(args, ps, defs) else if (f == "List.at") headUnbox(args, ps) else if (callIsI64(f, defs)) true else if (f == "Map.getOrElse") mapGetOrI64(args, ps, defs) else if (isTyParam(funRetStr(defs, f))) argsHaveI64(args, ps, defs) else false
 
 def signalGetI64(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   !List.isEmpty(args) && isI64Ty(Check.elemOf(exprRetTy(List.at(args, 0), defs, ps)))
 
 def argsHaveI64(xs: List[Expr], ps: List[Param], defs: Ftab): Bool =
   !List.isEmpty(xs) && (exprIsI64(List.at(xs, 0), ps, defs) || argsHaveI64(List.tail(xs), ps, defs))
+
+def mapGetOrI64(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
+  List.len(args) >= 3 && exprIsI64(List.at(args, 2), ps, defs)
 
 def exprMethI64(recv: Expr, name: String, args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   if (name == "at") headUnbox1(recv, ps) else if (name == "getOrElse" && !List.isEmpty(args)) exprIsI64(List.at(args, 0), ps, defs) else exprMethodI64(recv, name, defs)
