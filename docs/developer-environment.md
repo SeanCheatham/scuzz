@@ -70,7 +70,7 @@ Run all Linux slices in sequence with `./scripts/ci.sh linux-headless`. CI build
 | --- | --- |
 | unset | Skia CPU prebuilt |
 | `SCUZZ_SKIA=sk_sw` | in-tree software |
-| `SCUZZ_SKIA=gpu` | software paint, OpenGL present |
+| `SCUZZ_SKIA=gpu` | OpenGL raster. No CPU paint pass |
 
 ## Web build tools
 

@@ -570,8 +570,8 @@ PY
 slice_gpu() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
-  xvfb-run -a env SCUZZ_SKIA=gpu make -C crates/ffi-skia test -j"$JOBS" CC=clang
-  xvfb-run -a env SCUZZ_SKIA=gpu "$SCUZZ" fuzz --iterations 0 examples/counter
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu make -C crates/ffi-skia test -j"$JOBS" CC=clang
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu "$SCUZZ" fuzz --iterations 0 examples/counter
   make -C crates/ffi-skia clean
   make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }
@@ -579,7 +579,8 @@ slice_gpu() {
 slice_differential() {
   need_scuzz
   need_cmd xvfb-run "sudo apt-get install -y xvfb"
-  xvfb-run -a "$SCUZZ" fuzz --differential --iterations 0 examples/counter
+  need_cmd python3 "sudo apt-get install -y python3"
+  xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 "$SCUZZ" fuzz --differential --iterations 0 examples/counter
   make -C crates/ffi-skia clean
   make -C crates/ffi-skia lib -j"$JOBS" CC=clang
 }

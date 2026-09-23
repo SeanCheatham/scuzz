@@ -1574,6 +1574,11 @@ int sz_ui_pump_sync(SzUiSession *session) {
     sz_view_set_hover_at(session->root, session->hover_x, session->hover_y);
   else
     sz_view_clear_hover(session->root);
+  /* Publish screen text before the raster. A mobile CPU frame is large.
+   * The reader must see the new text while that paint is still running. */
+  if (need_dump && session->debug_dump_path &&
+      session->cfg.kind == SZ_UI_RUNTIME_MOBILE)
+    sz_ui_session_write_dump(session, session->debug_dump_path);
   if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
   if (scale != 1.f)
@@ -1584,8 +1589,15 @@ int sz_ui_pump_sync(SzUiSession *session) {
    * and quiesce sample that work. */
   session->dirty = session->bridge_head != NULL;
   pthread_mutex_unlock(&session->bridge_lock);
+  /* Publish the desktop runtime before AppKit presents. A native window
+   * can stall. The reader must see the runtime while that work runs. */
+  if (need_dump && session->debug_dump_path &&
+      session->cfg.kind == SZ_UI_RUNTIME_DESKTOP &&
+      session->lifecycle != SZ_LIFECYCLE_STOP)
+    sz_ui_session_write_dump(session, session->debug_dump_path);
   /* Desktop peer: present to OS surface when embedder is available. */
-  if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
+  if (session->lifecycle != SZ_LIFECYCLE_STOP &&
+      session->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
     rgba = sk_surface_peek_pixels(session->surface, &nbytes);
     if (rgba) {
       sz_embedder_present(session->cfg.title, session->cfg.width,

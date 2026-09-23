@@ -168,6 +168,7 @@ static int g_h;
 static int g_ready;
 static int g_app_ready;
 static int g_user_quit;
+static int g_became_visible;
 
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
@@ -194,6 +195,24 @@ static void on_main(void (^block)(void)) {
   } else {
     dispatch_sync(dispatch_get_main_queue(), block);
   }
+}
+
+/* Same hop, but do not wait when AppKit is already busy.
+ * Return 1 when the block finished. A late block must not use the
+ * caller's stack. A stalled window must not hide the desktop runtime. */
+static int on_main_soon(void (^block)(void)) {
+  if ([NSThread isMainThread]) {
+    block();
+    return 1;
+  }
+  dispatch_semaphore_t done = dispatch_semaphore_create(0);
+  dispatch_async(dispatch_get_main_queue(), ^{
+    block();
+    dispatch_semaphore_signal(done);
+  });
+  return dispatch_semaphore_wait(
+             done, dispatch_time(DISPATCH_TIME_NOW,
+                                 (int64_t)NSEC_PER_SEC / 4)) == 0;
 }
 
 double sz_embedder_display_scale(void) {
@@ -324,21 +343,23 @@ static int cocoa_drain_events(void) {
 
     [NSApp sendEvent:ev];
   }
-  if (g_win && ![g_win isVisible])
+  /* orderFront can stay invisible for one turn. Quit only after the
+   * window has been on screen and then goes away. */
+  if (g_win && [g_win isVisible])
+    g_became_visible = 1;
+  else if (g_became_visible && g_win && ![g_win isVisible])
     quit = 1;
   return quit;
 }
 
 int sz_embedder_poll_event(SzInputEvent *out) {
   if (g_ready && !g_user_quit) {
-    __block int quit = 0;
-    on_main(^{
+    on_main_soon(^{
       @autoreleasepool {
-        quit = cocoa_drain_events();
+        if (cocoa_drain_events())
+          mark_user_quit();
       }
     });
-    if (quit)
-      mark_user_quit();
   }
   if (!out || g_q_head == g_q_tail)
     return 0;
@@ -463,6 +484,7 @@ static void shutdown_on_main(void) {
   g_content = nil;
   g_view = nil;
   g_ready = 0;
+  g_became_visible = 0;
   g_w = g_h = 0;
   g_q_head = g_q_tail = 0;
 }
@@ -505,7 +527,6 @@ static int ensure_window_on_main(const char *title, int width, int height) {
   [g_win setContentView:g_content];
   [g_win setAcceptsMouseMovedEvents:YES];
   [g_win makeKeyAndOrderFront:nil];
-  [NSApp activateIgnoringOtherApps:YES];
 
   g_w = width;
   g_h = height;
@@ -514,12 +535,25 @@ static int ensure_window_on_main(const char *title, int width, int height) {
   return 1;
 }
 
+struct PresentJob {
+  char *title;
+  uint8_t *px;
+  size_t need;
+  int point_w;
+  int point_h;
+  int pixel_w;
+  int pixel_h;
+  int ok;
+  int done;
+};
+
 int sz_embedder_present(const char *title, int point_w, int point_h,
                         int pixel_w, int pixel_h, const uint8_t *rgba,
                         size_t nbytes) {
+  struct PresentJob *job;
   size_t need;
-  __block int ok = 0;
-  __block int quit = 0;
+  int finished;
+  int ok;
 
   if (g_user_quit)
     return 0;
@@ -530,51 +564,73 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
     return 0;
   if (!sz_embedder_available())
     return 0;
+  job = calloc(1, sizeof *job);
+  if (!job)
+    return 0;
+  job->title = strdup(title ? title : "Scuzz Lang");
+  job->px = malloc(need);
+  if (!job->title || !job->px) {
+    free(job->title);
+    free(job->px);
+    free(job);
+    return 0;
+  }
+  memcpy(job->px, rgba, need);
+  job->need = need;
+  job->point_w = point_w;
+  job->point_h = point_h;
+  job->pixel_w = pixel_w;
+  job->pixel_h = pixel_h;
 
-  on_main(^{
+  finished = on_main_soon(^{
     @autoreleasepool {
-      if (!ensure_window_on_main(title, point_w, point_h))
-        return;
-
-      NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
-          initWithBitmapDataPlanes:NULL
-                        pixelsWide:pixel_w
-                        pixelsHigh:pixel_h
-                     bitsPerSample:8
-                   samplesPerPixel:4
-                          hasAlpha:YES
-                          isPlanar:NO
-                    colorSpaceName:NSDeviceRGBColorSpace
-                       bytesPerRow:(NSInteger)pixel_w * 4
-                      bitsPerPixel:32];
-      if (!rep || ![rep bitmapData]) {
-        fprintf(stderr, "scuzz embedder: bitmap alloc failed\n");
-        return;
+      if (ensure_window_on_main(job->title, job->point_w, job->point_h)) {
+        NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
+            initWithBitmapDataPlanes:NULL
+                          pixelsWide:job->pixel_w
+                          pixelsHigh:job->pixel_h
+                       bitsPerSample:8
+                     samplesPerPixel:4
+                            hasAlpha:YES
+                            isPlanar:NO
+                      colorSpaceName:NSDeviceRGBColorSpace
+                         bytesPerRow:(NSInteger)job->pixel_w * 4
+                        bitsPerPixel:32];
+        if (!rep || ![rep bitmapData]) {
+          fprintf(stderr, "scuzz embedder: bitmap alloc failed\n");
+        } else {
+          memcpy([rep bitmapData], job->px, job->need);
+          /* Point size + pixel buffer → sharp Retina blit (no stretch upsample). */
+          [rep setSize:NSMakeSize((CGFloat)job->point_w, (CGFloat)job->point_h)];
+          NSImage *image = [[NSImage alloc]
+              initWithSize:NSMakeSize((CGFloat)job->point_w, (CGFloat)job->point_h)];
+          [image addRepresentation:rep];
+          [g_view setImageScaling:NSImageScaleAxesIndependently];
+          [g_view setImage:image];
+          [g_view setNeedsDisplay:YES];
+          [g_win displayIfNeeded];
+          if (cocoa_drain_events())
+            mark_user_quit();
+          job->ok = 1;
+        }
       }
-      memcpy([rep bitmapData], rgba, need);
-      /* Point size + pixel buffer → sharp Retina blit (no stretch upsample). */
-      [rep setSize:NSMakeSize((CGFloat)point_w, (CGFloat)point_h)];
-
-      NSImage *image = [[NSImage alloc]
-          initWithSize:NSMakeSize((CGFloat)point_w, (CGFloat)point_h)];
-      [image addRepresentation:rep];
-      [g_view setImageScaling:NSImageScaleAxesIndependently];
-      [g_view setImage:image];
-      [g_view setNeedsDisplay:YES];
-      [g_win displayIfNeeded];
-      if (cocoa_drain_events())
-        quit = 1;
-      ok = 1;
+      free(job->title);
+      free(job->px);
+      job->title = NULL;
+      job->px = NULL;
+      if (__sync_lock_test_and_set(&job->done, 1))
+        free(job);
     }
   });
-
-  if (!ok)
-    return 0;
-  if (quit) {
-    mark_user_quit();
+  if (!finished) {
+    if (__sync_lock_test_and_set(&job->done, 1))
+      free(job);
     return 1;
   }
-  return 1;
+  ok = job->ok;
+  if (__sync_lock_test_and_set(&job->done, 1))
+    free(job);
+  return ok;
 }
 
 int sz_embedder_clipboard_set(const char *text) {

@@ -18,6 +18,7 @@
 #if defined(__APPLE__)
 #include <xlocale.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <dispatch/dispatch.h>
 #endif
 
 #if defined(__has_feature)
@@ -4774,6 +4775,22 @@ typedef struct {
 #if defined(__APPLE__)
 /* Worker finished — main thread may leave the CFRunLoop park. */
 static volatile int g_sz_main_worker_done;
+/* Main has left the park and will join the worker. */
+static volatile int g_sz_main_leaving;
+static int g_sz_main_rc;
+
+/* AppKit can stay inside a window call after the worker is done.
+ * Leave the process so a closed session does not stay up. */
+static void sz_main_force_exit(void *ctx) {
+  (void)ctx;
+  if (!g_sz_main_leaving)
+    _exit(g_sz_main_rc);
+}
+
+static void sz_main_arm_exit(void) {
+  dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, (int64_t)NSEC_PER_SEC),
+                   dispatch_get_global_queue(0, 0), NULL, sz_main_force_exit);
+}
 #endif
 
 static void *sz_runtime_main_worker(void *arg) {
@@ -4843,9 +4860,11 @@ static void *sz_runtime_main_worker(void *arg) {
 #endif
 done:
 #if defined(__APPLE__)
+  g_sz_main_rc = a->rc;
   g_sz_main_worker_done = 1;
   /* Wake the main CFRunLoop so it notices the done flag promptly. */
   CFRunLoopStop(CFRunLoopGetMain());
+  sz_main_arm_exit();
 #endif
   return NULL;
 }
@@ -4897,6 +4916,7 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   while (!g_sz_main_worker_done) {
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
   }
+  g_sz_main_leaving = 1;
 #endif
   perr = pthread_join(thr, NULL);
   if (perr != 0)

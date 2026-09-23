@@ -61,15 +61,33 @@ def proof_ui(command, env, directory):
     inject.unlink(missing_ok=True)
     with (directory / "ui.log").open("w") as output:
         process = subprocess.Popen(command, env=env, stdout=output, stderr=subprocess.STDOUT)
-        def wait(text):
+        seq = 0
+        def tap(label):
+            nonlocal seq
+            seq += 1
+            payload = json.dumps({"v": 1, "kind": "inject", "n": seq, "events": [{"op": "tap", "id": "button:" + label}]})
+            tmp = inject.with_suffix(".tmp")
+            tmp.write_text(payload)
+            os.replace(tmp, inject)
+        def wait(text, retry=None):
             deadline = time.monotonic() + 30
+            nudge = time.monotonic() + 0.25
             while time.monotonic() < deadline:
                 assert process.poll() is None, (directory / "ui.log").read_text()
-                if debug.exists() and text in debug.read_text(): return
+                try:
+                    body = debug.read_text() if debug.exists() else ""
+                except OSError:
+                    body = ""
+                if text in body: return
+                if retry and time.monotonic() >= nudge:
+                    tap(retry)
+                    nudge = time.monotonic() + 0.25
                 time.sleep(0.02)
-            raise AssertionError("screen does not show " + text + "\n" + (directory / "ui.log").read_text())
-        def tap(label):
-            inject.write_text(json.dumps({"v": 1, "kind": "inject", "events": [{"op": "tap", "id": "button:" + label}]}))
+            shown = ""
+            if debug.exists():
+                try: shown = debug.read_text()[-400:]
+                except OSError: shown = ""
+            raise AssertionError("screen does not show " + text + "\n" + (directory / "ui.log").read_text() + shown)
         try:
             wait("Ready")
             tap("Load")
@@ -79,7 +97,7 @@ def proof_ui(command, env, directory):
             assert "Loading" in debug.read_text(), "input waits for the response"
             wait("Failed. Try again.")
             tap("Load")
-            wait("Loading")
+            wait("Loading", "Load")
             wait("Loaded: hello")
             assert "Taps: 1" in debug.read_text(), "request replaces the Signal state"
             print("network UI proof ok", flush=True)
