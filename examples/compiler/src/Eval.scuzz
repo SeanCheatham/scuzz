@@ -2250,7 +2250,8 @@ def sigTagsCases(all: List[En], en: String, cases: List[EnCase], acc: String): S
 
 def sigTagsCase(all: List[En], en: String, c: EnCase, rest: List[EnCase], acc: String): String =
   c match {
-    case EnCase(name, _) => sigTagsCases(all, en, rest, Str.concat(acc, Str.concat(en, Str.concat(".", Str.concat(name, Str.concat("=", Str.concat(Str.fromInt(Emit.ctorTag(all, en, name)), "\n")))))))
+    case EnCase(name, _) => sigTagsCases(all, en, rest, Str.concat(acc, Str.concat(en, Str.concat(".", Str.concat(name, Str.concat("=", Str.concat(Str.fromInt(Emit.ctorTag(all, en, name)), """
+""")))))))
   }
 
 def newRef(v: Value): Ref[Value] =

@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <regex.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -282,21 +283,34 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg) {
 
 typedef struct CoverageHit {
   struct CoverageHit *next;
-  char location[];
+  const char *loc;
+  char *text;
 } CoverageHit;
 
 static CoverageHit *coverage_hits[256];
 static char *coverage_path;
+static FILE *coverage_file;
 static int coverage_probed;
 static int coverage_off;
 static int coverage_own_off;
 
+static void coverage_close(void) {
+  FILE *file = coverage_file;
+  if (!file)
+    return;
+  coverage_file = NULL;
+  if (fclose(file) != 0)
+    sz_panic("coverage: cannot write output");
+}
+
 static void coverage_clear(void) {
   size_t i;
+  coverage_close();
   for (i = 0; i < 256; i++) {
     CoverageHit *hit = coverage_hits[i];
     while (hit) {
       CoverageHit *next = hit->next;
+      free(hit->text);
       free(hit);
       hit = next;
     }
@@ -333,35 +347,93 @@ void sz_coverage_env_refresh(void) {
 
 void sz_coverage_own_off(void) { coverage_own_off = 1; }
 
-static void coverage_hit(const char *loc) {
-  const unsigned char *p;
-  unsigned hash = 2166136261u;
-  CoverageHit *hit;
-  FILE *file;
-  int written;
-  int closed;
-  coverage_probe();
-  if (!coverage_path)
-    return;
-  for (p = (const unsigned char *)loc; *p; p++)
-    hash = (hash ^ *p) * 16777619u;
-  hash %= 256;
-  for (hit = coverage_hits[hash]; hit; hit = hit->next)
-    if (!strcmp(hit->location, loc))
-      return;
-  file = fopen(coverage_path, "a");
-  if (!file)
-    sz_panic("coverage: cannot open output");
-  written = fprintf(file, "%s\n", loc);
-  closed = fclose(file);
-  if (written < 0 || closed)
-    sz_panic("coverage: cannot write output");
-  hit = malloc(sizeof(*hit) + strlen(loc) + 1);
+static int coverage_text_seen(const char *loc) {
+  size_t i;
+  for (i = 0; i < 256; i++) {
+    CoverageHit *hit;
+    for (hit = coverage_hits[i]; hit; hit = hit->next)
+      if (hit->text && strcmp(hit->text, loc) == 0)
+        return 1;
+  }
+  return 0;
+}
+
+static void coverage_remember(const char *loc, char *text, unsigned hash) {
+  CoverageHit *hit = malloc(sizeof(*hit));
   if (!hit)
     sz_panic("coverage: out of memory");
-  strcpy(hit->location, loc);
+  hit->loc = loc;
+  hit->text = text;
   hit->next = coverage_hits[hash];
   coverage_hits[hash] = hit;
+}
+
+static unsigned coverage_hash_ptr(const char *loc) {
+  return (unsigned)((uintptr_t)loc >> 4) % 256;
+}
+
+/* FNV-1a. Evaluator keys are heap text, so they share a bucket by text. */
+static unsigned coverage_hash_text(const char *loc) {
+  unsigned h = 2166136261u;
+  const unsigned char *p = (const unsigned char *)loc;
+  while (*p) {
+    h ^= *p++;
+    h *= 16777619u;
+  }
+  return h % 256;
+}
+
+static void coverage_write(const char *loc, const char *id, unsigned hash) {
+  char *text;
+  int written;
+  if (!coverage_file) {
+    coverage_file = fopen(coverage_path, "a");
+    if (!coverage_file)
+      sz_panic("coverage: cannot open output");
+  }
+  written = fprintf(coverage_file, "%s\n", loc);
+  if (written < 0 || fflush(coverage_file) != 0)
+    sz_panic("coverage: cannot write output");
+  text = malloc(strlen(loc) + 1);
+  if (!text)
+    sz_panic("coverage: out of memory");
+  strcpy(text, loc);
+  coverage_remember(id, text, hash);
+}
+
+/* Compiled sites pass a stable literal. Repeat hits match the pointer. */
+static void coverage_hit(const char *loc) {
+  unsigned hash;
+  CoverageHit *hit;
+  coverage_probe();
+  if (!coverage_path || !loc)
+    return;
+  hash = coverage_hash_ptr(loc);
+  for (hit = coverage_hits[hash]; hit; hit = hit->next)
+    if (hit->loc == loc)
+      return;
+  if (coverage_text_seen(loc)) {
+    coverage_remember(loc, NULL, hash);
+    return;
+  }
+  coverage_write(loc, loc, hash);
+}
+
+/* Evaluator keys reuse one buffer, then the caller frees it. Match the
+ * text. Do not store that pointer. */
+static void coverage_hit_text(const char *loc) {
+  unsigned hash;
+  CoverageHit *hit;
+  coverage_probe();
+  if (!coverage_path || !loc)
+    return;
+  hash = coverage_hash_text(loc);
+  for (hit = coverage_hits[hash]; hit; hit = hit->next)
+    if (hit->text && strcmp(hit->text, loc) == 0)
+      return;
+  if (coverage_text_seen(loc))
+    return;
+  coverage_write(loc, NULL, hash);
 }
 
 void sz_coverage_hit(const char *loc) {
@@ -370,7 +442,7 @@ void sz_coverage_hit(const char *loc) {
   coverage_hit(loc);
 }
 
-void sz_coverage_hit_key(const char *loc) { coverage_hit(loc); }
+void sz_coverage_hit_key(const char *loc) { coverage_hit_text(loc); }
 
 void sz_panic_push_src(const char *loc) {
   if (!loc || !loc[0])
@@ -4770,6 +4842,7 @@ typedef struct {
   int argc;
   char **argv;
   int rc;
+  int block_signals;
 } SzMainArgs;
 
 #if defined(__APPLE__)
@@ -4793,8 +4866,16 @@ static void sz_main_arm_exit(void) {
 }
 #endif
 
+#if defined(__APPLE__)
+static void sz_block_fatal_signals(void);
+#endif
+
 static void *sz_runtime_main_worker(void *arg) {
   SzMainArgs *a = (SzMainArgs *)arg;
+#if defined(__APPLE__)
+  if (a->block_signals)
+    sz_block_fatal_signals();
+#endif
   if (a->argc > 0 && a->argv)
     sz_sys_set_args(a->argc, a->argv);
   {
@@ -4869,6 +4950,60 @@ done:
   return NULL;
 }
 
+#if defined(__APPLE__)
+/* The main thread parks in CFRunLoop. The worker retries EINTR and keeps
+ * running. A caught signal must still kill the process. Ctrl+C and SIGTERM
+ * stop a session. The worker blocks these signals so the handler runs on
+ * the main thread. A forked child must not run this handler. */
+static int g_sz_fatal_armed;
+
+static void sz_fatal_signal(int sig) {
+  sigset_t set;
+  signal(sig, SIG_DFL);
+  sigemptyset(&set);
+  sigaddset(&set, sig);
+  pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+  raise(sig);
+  _exit(128 + sig);
+}
+
+static void sz_arm_fatal_signals(void) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = sz_fatal_signal;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGINT, &sa, NULL);
+  sigaction(SIGTERM, &sa, NULL);
+  g_sz_fatal_armed = 1;
+}
+
+static void sz_block_fatal_signals(void) {
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
+}
+#endif
+
+void sz_exec_child_signals(void) {
+#if defined(__APPLE__)
+  sigset_t set;
+  if (!g_sz_fatal_armed)
+    return;
+  /* Drop a signal that arrived before exec. Then use the default action
+   * and unblock, so the new program still stops on SIGINT and SIGTERM. */
+  signal(SIGINT, SIG_IGN);
+  signal(SIGTERM, SIG_IGN);
+  signal(SIGINT, SIG_DFL);
+  signal(SIGTERM, SIG_DFL);
+  sigemptyset(&set);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+#endif
+}
+
 int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   /* Run the program on a heap-allocated stack so generated IR (deep but
    * bounded) does not depend on the process main-thread ulimit. Required on
@@ -4885,6 +5020,7 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   args.argc = argc;
   args.argv = argv;
   args.rc = 1;
+  args.block_signals = 0;
 
 #ifdef __EMSCRIPTEN__
   sz_runtime_main_worker(&args);
@@ -4902,10 +5038,13 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   }
 #if defined(__APPLE__)
   g_sz_main_worker_done = 0;
+  sz_arm_fatal_signals();
+  args.block_signals = 1;
 #endif
   perr = pthread_create(&thr, &attr, sz_runtime_main_worker, &args);
   pthread_attr_destroy(&attr);
   if (perr != 0) {
+    args.block_signals = 0;
     sz_runtime_main_worker(&args);
     return args.rc;
   }
