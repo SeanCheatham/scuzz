@@ -1,14 +1,3 @@
-/* Evaluator path for Clock.parse and Clock.zone.
- * Use the same rules as the runtime.
- * The text is a date, T, a time, and a zone.
- * The fraction is optional. Use 1, 2, or 3 digits.
- * The zone is Z or +HH:MM or -HH:MM.
- * The offset is at most 18 hours.
- * Years 0 to 9999 use four digits.
- * Other years use one to six digits and no leading zero.
- * A bad text is None. The value is epoch milliseconds.
- * No leap seconds. Offset 0 uses Z. A bad offset is empty. */
-
 record At(n: Int, i: Int)
 
 def parse(s: String): Option[Int] =
