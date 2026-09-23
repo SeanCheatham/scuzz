@@ -165,13 +165,21 @@ async function check(browserType, url, mobile) {
     await page.waitForFunction(() => {
       const snap = Module.ccall('sz_web_snapshot', 'string', [], []);
       return snap.includes('text:A claim reads a Timeline') &&
-        snap.includes('text:A claim is a function from Timeline to Verdict.') &&
-        snap.includes('text:The claim sits outside the run.') &&
-        snap.includes('text:The claim judges the record.') &&
+        snap.includes('text:A usual test names one input and one expected output.') &&
+        snap.includes('text:A claim names a rule.') &&
+        snap.includes('text:The rule must hold for a recorded run.') &&
+        snap.includes('text:You write the claim once.') &&
+        snap.includes('text:Scuzz chooses the seeds.') &&
+        snap.includes('text:Each seed is one schedule.') &&
+        snap.includes('text:Scuzz records that schedule as a Timeline.') &&
+        snap.includes('text:The claim reads that timeline after the run.') &&
+        snap.includes('text:The claim does not sit inside the program.') &&
+        snap.includes('text:R won on seed 0.') &&
+        snap.includes('text:The rule says L must win.') &&
+        snap.includes('text:L won on seed 128.') &&
         snap.includes('def leftFirst(t: Timeline): Verdict =') &&
         snap.includes('semantics:seed 0') && snap.includes('semantics:seed 128') &&
-        snap.includes('text:first=R fail') && snap.includes('text:first=L pass') &&
-        snap.includes('text:Seed 0 fails.') && snap.includes('text:Seed 128 passes.');
+        snap.includes('text:first=R fail') && snap.includes('text:first=L pass');
     }, null, {timeout: 60000}).catch(async error => {
       console.error({check: await page.evaluate(() => Module.ccall('sz_web_snapshot', 'string', [], []))});
       throw error;
