@@ -1402,7 +1402,10 @@ def fuzzEngine(hasUi: Bool): IO[(Bool, String)] =
   Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (e == "compiled") IO.pure((false, "")) else if (!hasUi) Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))) else uiHostExe().flatMap(exe => if (exe == "") IO.pure((false, "")) else IO.pure((true, exe))))
 
 def uiHostExe(): IO[String] =
-  Sys.getenv("SCUZZ_HOME").flatMap(home => if (home == "") Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => uiHostWalk(exe, 6)) else uiHostAt(joinSlash(home, "examples/ui-host")))
+  uiHostAt("examples/ui-host").flatMap(hit => if (hit != "") IO.pure(hit) else uiHostHome())
+
+def uiHostHome(): IO[String] =
+  Sys.getenv("SCUZZ_HOME").flatMap(home => if (home == "") Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => uiHostWalk(Fs.dirname(exe), 8)) else uiHostAt(joinSlash(home, "examples/ui-host")))
 
 def uiHostWalk(dir: String, n: Int): IO[String] =
   if (n <= 0 || dir == "" || dir == "/") IO.pure("") else uiHostTry(dir, n)
@@ -1417,10 +1420,10 @@ def uiHostUp(parent: String, dir: String, n: Int): IO[String] =
   if (parent == dir) IO.pure("") else uiHostWalk(parent, n - 1)
 
 def uiHostAt(dir: String): IO[String] =
-  Fs.exists(joinSlash(dir, "scuzz.toml")).flatMap(ok => if (ok == 0) IO.pure("") else uiHostBuild(dir).handleErrorWith(_ => IO.pure("")))
+  Fs.exists(joinSlash(dir, "scuzz.toml")).flatMap(ok => if (ok == 0) IO.pure("") else uiHostBuild(dir).handleErrorWith(e => IO.println(e).flatMap(_ => IO.pure(""))))
 
 def uiHostBuild(dir: String): IO[String] =
-  emitDir(dir, joinSlash(dir, "build"), false).flatMap(_ => linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(r => uiHostBuilt(r, exeName(joinSlash(dir, "build"), "ui-host"))))
+  Fs.mkdirs(joinSlash(dir, "build")).flatMap(_ => emitDir(dir, joinSlash(dir, "build"), false).flatMap(_ => linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(r => uiHostBuilt(r, exeName(joinSlash(dir, "build"), "ui-host")))))
 
 def uiHostBuilt(r: (Int, String, String), exe: String): IO[String] =
   r match {
