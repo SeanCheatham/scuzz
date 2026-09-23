@@ -2,29 +2,168 @@
 
 #include <string.h>
 
-enum { SZ_MAP_INT = 0, SZ_MAP_STR = 1 };
-
 /* Size-balance ratios. Rotate when one child outweighs the other past
  * DELTA. Prefer a double rotation when the heavy child's inner side
  * outweighs its outer side past GAMMA. */
-enum { SZ_WBT_DELTA = 3, SZ_WBT_GAMMA = 2 };
+enum { SZ_WBT_DELTA = 3, SZ_WBT_GAMMA = 2, SZ_MAP_WALK = 256 };
 
 SzMap *sz_map_empty(void) { return NULL; }
 
 static int64_t map_len(const SzMap *m) { return m ? m->size : 0; }
 
-static int map_cmp(const SzMap *m, const void *k) {
-  if (m->key_kind == SZ_MAP_INT) {
-    int64_t a = sz_unbox_i64(m->key);
-    int64_t b = sz_unbox_i64(k);
-    if (a < b)
-      return -1;
-    if (a > b)
-      return 1;
-    return 0;
+static int value_cmp(const void *a, const void *b);
+static int map_seq_cmp(const SzMap *a, const SzMap *b);
+
+static int cmp_i64(int64_t a, int64_t b) {
+  if (a < b)
+    return -1;
+  if (a > b)
+    return 1;
+  return 0;
+}
+
+static int list_cmp(const SzList *a, const SzList *b) {
+  while (a && b) {
+    int c = value_cmp(a->head, b->head);
+    if (c)
+      return c;
+    a = a->tail;
+    b = b->tail;
   }
-  return strcmp(sz_string_cstr((const SzString *)m->key),
-                sz_string_cstr((const SzString *)k));
+  if (!a && !b)
+    return 0;
+  return a ? 1 : -1;
+}
+
+static int adt_cmp(const SzAdt *a, const SzAdt *b) {
+  if (a->tag != b->tag)
+    return a->tag < b->tag ? -1 : 1;
+  return value_cmp(a->payload, b->payload);
+}
+
+static int pair_cmp(const SzPair *a, const SzPair *b) {
+  int c = value_cmp(a->left, b->left);
+  if (c)
+    return c;
+  return value_cmp(a->right, b->right);
+}
+
+static int either_cmp(const SzEither *a, const SzEither *b) {
+  if (a->is_right != b->is_right)
+    return a->is_right < b->is_right ? -1 : 1;
+  if (a->is_right)
+    return value_cmp(a->as.right, b->as.right);
+  return value_cmp(a->as.left, b->as.left);
+}
+
+static int error_cmp(const SzError *a, const SzError *b) {
+  int c;
+  if (a->code != b->code)
+    return a->code < b->code ? -1 : 1;
+  c = value_cmp(a->message, b->message);
+  if (c)
+    return c;
+  return value_cmp(a->payload, b->payload);
+}
+
+/* Inorder walk. A weight-balanced tree stays far under this cap. */
+typedef struct MapWalk {
+  const SzMap *stack[SZ_MAP_WALK];
+  int n;
+  const SzMap *cur;
+} MapWalk;
+
+static void walk_init(MapWalk *w, const SzMap *m) {
+  w->n = 0;
+  w->cur = m;
+}
+
+static const SzMap *walk_next(MapWalk *w) {
+  const SzMap *n;
+  while (w->cur) {
+    if (w->n >= SZ_MAP_WALK)
+      sz_panic("Map key tree is too deep");
+    w->stack[w->n++] = w->cur;
+    w->cur = w->cur->left;
+  }
+  if (w->n == 0)
+    return NULL;
+  n = w->stack[--w->n];
+  w->cur = n->right;
+  return n;
+}
+
+/* Equal maps can differ in shape. Compare the inorder entries. */
+static int map_seq_cmp(const SzMap *a, const SzMap *b) {
+  MapWalk wa;
+  MapWalk wb;
+  walk_init(&wa, a);
+  walk_init(&wb, b);
+  for (;;) {
+    const SzMap *na = walk_next(&wa);
+    const SzMap *nb = walk_next(&wb);
+    int c;
+    if (!na && !nb) {
+      if (a->key_kind != b->key_kind)
+        return a->key_kind < b->key_kind ? -1 : 1;
+      return 0;
+    }
+    if (!na)
+      return -1;
+    if (!nb)
+      return 1;
+    c = value_cmp(na->key, nb->key);
+    if (c)
+      return c;
+    c = value_cmp(na->val, nb->val);
+    if (c)
+      return c;
+  }
+}
+
+/* Null is less than a value. Two nulls are equal. A boxed scalar uses
+ * signed i64 order. A string uses byte order. A list, pair, tagged
+ * value, map, Either, or error uses structure. A function pointer panics. */
+static int value_cmp(const void *a, const void *b) {
+  uint32_t ka;
+  uint32_t kb;
+  if (a == b)
+    return 0;
+  if (!a)
+    return -1;
+  if (!b)
+    return 1;
+  ka = sz_rc_kind(a);
+  kb = sz_rc_kind(b);
+  if (ka == SZ_RC_KIND_COUNT || kb == SZ_RC_KIND_COUNT)
+    sz_panic("Map key is not ordered");
+  if (ka != kb)
+    return ka < kb ? -1 : 1;
+  switch (ka) {
+  case SZ_RC_BOX:
+    return cmp_i64(sz_unbox_i64(a), sz_unbox_i64(b));
+  case SZ_RC_STRING:
+    return strcmp(sz_string_cstr((const SzString *)a),
+                  sz_string_cstr((const SzString *)b));
+  case SZ_RC_LIST:
+    return list_cmp((const SzList *)a, (const SzList *)b);
+  case SZ_RC_ADT:
+    return adt_cmp((const SzAdt *)a, (const SzAdt *)b);
+  case SZ_RC_PAIR:
+    return pair_cmp((const SzPair *)a, (const SzPair *)b);
+  case SZ_RC_MAP:
+    return map_seq_cmp((const SzMap *)a, (const SzMap *)b);
+  case SZ_RC_EITHER:
+    return either_cmp((const SzEither *)a, (const SzEither *)b);
+  case SZ_RC_ERROR:
+    return error_cmp((const SzError *)a, (const SzError *)b);
+  default:
+    sz_panic("Map key is not ordered");
+  }
+}
+
+static int map_cmp(const SzMap *m, const void *k) {
+  return value_cmp(m->key, k);
 }
 
 /* Fresh node (+1). All inputs borrowed. Caches the subtree count. */

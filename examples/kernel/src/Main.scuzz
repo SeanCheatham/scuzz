@@ -359,6 +359,32 @@ def mapGetEmptyAt(m: Map): Bool =
 def mapParamRoundTrip(n: Int, value: String): Bool =
   Map.getOrElse(Map.set(Map.empty(), "value", n), "value", 0) == n && Map.getOrElse(Map.set(Map.empty(), "value", value), "value", "") == value
 
+def pointKey(p: Point): String =
+  Str.concat(Str.fromInt(p.x), Str.concat(":", Str.fromInt(p.y)))
+
+def colorKey(c: Color): String =
+  c match {
+    case Color.Red => "R"
+    case Color.Blue => "B"
+  }
+
+def optKey(o: Opt[Int]): String =
+  o match {
+    case Opt.Some(_) => "S"
+    case Opt.None => "N"
+  }
+
+def listKey(xs: List[Int]): String =
+  List.join(List.map(xs, n => Str.fromInt(n)), ".")
+
+def boolKey(b: Bool): String =
+  if (b) "t" else "f"
+
+def tupKey(t: (Int, String)): String =
+  t match {
+    case (n, s) => Str.concat(Str.fromInt(n), Str.concat(":", s))
+  }
+
 def mapSetProof(): IO[Unit] =
   for {
     mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
@@ -409,6 +435,41 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"sex:${if (Set.exists(st, x => x == "x")) "y" else "n"}")
     _ <- IO.println(s"sfa:${if (Set.forall(st, x => x != "z")) "y" else "n"}")
     _ <- IO.println(s"tolist:${List.join(List.map(Map.toList(mp), (k, v) => s"$k:$v"), "|")}")
+    rec = Map.set(Map.set(Map.set(Map.empty(), Point(2, 1), "c"), Point(1, 9), "b"), Point(1, 2), "a")
+    _ <- IO.println(s"keyRec:${List.join(List.map(Map.keys(rec), p => pointKey(p)), ",")}")
+    _ <- IO.println(s"keyHit:${Map.getOrElse(rec, Point(1, 9), "no")}")
+    _ <- IO.println(s"keyMiss:${Map.getOrElse(rec, Point(9, 9), "no")}")
+    rev = Map.set(Map.set(Map.set(Map.empty(), Point(1, 2), "a"), Point(1, 9), "b"), Point(2, 1), "c")
+    _ <- IO.println(s"keyEq:${if (rec == rev) "y" else "n"}")
+    rep = Map.set(rec, Point(1, 2), "z")
+    _ <- IO.println(s"keyRep:${Map.getOrElse(rep, Point(1, 2), "?")}:${Map.size(rep)}")
+    rm = Map.remove(rec, Point(2, 1))
+    _ <- IO.println(s"keyRm:${if (Map.contains(rm, Point(2, 1))) "y" else "n"}:${if (Map.contains(rm, Point(1, 2))) "y" else "n"}")
+    sp = Set.add(Set.add(Set.empty(), Point(2, 1)), Point(1, 2))
+    sp2 = Set.add(Set.add(Set.empty(), Point(1, 2)), Point(2, 1))
+    _ <- IO.println(s"keySet:${List.join(List.map(Set.toList(sp), p => pointKey(p)), ",")}:${if (sp == sp2) "y" else "n"}")
+    _ <- IO.println(s"keySub:${if (Set.isSubset(Set.add(Set.empty(), Point(1, 2)), sp)) "y" else "n"}")
+    tm = Map.set(Map.set(Map.set(Map.empty(), (2, "a"), "x"), (1, "b"), "y"), (1, "a"), "z")
+    _ <- IO.println(s"keyTup:${List.join(List.map(Map.keys(tm), t => tupKey(t)), ",")}:${Map.getOrElse(tm, (1, "b"), "?")}")
+    cm = Map.set(Map.set(Map.empty(), Color.Blue, "b"), Color.Red, "r")
+    _ <- IO.println(s"keyEn:${List.join(List.map(Map.keys(cm), c => colorKey(c)), ",")}:${Map.getOrElse(cm, Color.Blue, "?")}")
+    om = Map.set(Map.set(Map.empty(), (Opt.None: Opt[Int]), "n"), Opt.Some(1), "s")
+    _ <- IO.println(s"keyOpt:${List.join(List.map(Map.keys(om), o => optKey(o)), ",")}")
+    bm = Map.set(Map.set(Map.empty(), true, "yes"), false, "no")
+    _ <- IO.println(s"keyBool:${List.join(List.map(Map.keys(bm), b => boolKey(b)), ",")}:${Map.getOrElse(bm, false, "?")}")
+    fm = Map.set(Map.set(Map.empty(), 2.5, "hi"), 1.5, "lo")
+    _ <- IO.println(s"keyFlt:${if (List.at(Map.keys(fm), 0) == 1.5 && List.at(Map.keys(fm), 1) == 2.5 && Map.getOrElse(fm, 1.5, "?") == "lo") "y" else "n"}")
+    lm = Map.set(Map.set(Map.set(Map.empty(), [2], "c"), [1, 0], "b"), [1], "a")
+    _ <- IO.println(s"keyList:${List.join(List.map(Map.keys(lm), xs => listKey(xs)), ",")}:${Map.getOrElse(lm, [1, 0], "?")}")
+    pts = [Point(1, 2), Point(1, 2), Point(2, 1)]
+    gb = List.groupBy(pts, p => p)
+    _ <- IO.println(s"keyGby:${List.join(List.map(Map.keys(gb), p => pointKey(p)), ",")}:${List.join(List.map(Map.values(gb), xs => Str.fromInt(List.len(xs))), ",")}")
+    db = List.distinctBy(pts, p => Point(p.x, 1))
+    _ <- IO.println(s"keyDby:${List.join(List.map(db, p => pointKey(p)), ",")}")
+    tmap = List.toMap([(Point(2, 1), "c"), (Point(1, 2), "a"), (Point(1, 2), "b")])
+    _ <- IO.println(s"keyToMap:${Map.getOrElse(tmap, Point(1, 2), "?")}:${Map.size(tmap)}")
+    tset = List.toSet([Point(2, 1), Point(1, 2), Point(1, 2)])
+    _ <- IO.println(s"keyToSet:${List.join(List.map(Set.toList(tset), p => pointKey(p)), ",")}:${Set.size(tset)}")
   } yield ()
 
 def listProof(): IO[Unit] =
