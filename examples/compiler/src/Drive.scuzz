@@ -682,13 +682,16 @@ def evProbeRead(dir: String, stems: List[String], i: Int, acc: List[(String, Str
   if (List.isEmpty(stems)) IO.pure(List.reverse(acc)) else Fs.read(joinSlash(dir, Str.concat(Str.fromInt(i), ".scuzz"))).flatMap(src => evProbeRead(dir, List.tail(stems), i + 1, (List.at(stems, 0), src) :: acc))
 
 def evProbeFiles(files: List[(String, String)], human: String): IO[Unit] =
-  if (human != "scuzz check ok") IO.println("3").flatMap(_ => evFail(human)) else Eval.probe(files)
+  if (human != "scuzz check ok") probeReject(human) else Eval.probe(files)
+
+def probeReject(human: String): IO[Unit] =
+  Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else IO.println("3").flatMap(_ => evFail(human)))
 
 def uiProbe(dir: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
   Fs.read(joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => uiProbeFiles(files, Check.humanFiles(files), slot, mount)))
 
 def uiProbeFiles(files: List[(String, String)], human: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  if (human != "scuzz check ok") IO.println("3").flatMap(_ => evFail(human)) else Eval.probeMounted(files, slot, mount)
+  if (human != "scuzz check ok") probeReject(human) else Eval.probeMounted(files, slot, mount)
 
 def evWriteFiles(dir: String, files: List[(String, String)]): IO[Unit] =
   Fs.mkdirs(dir).flatMap(_ => Fs.write(joinSlash(dir, "files.txt"), Verify.nls(evStems(files))).flatMap(_ => evWriteSrcs(dir, files, 0)))
@@ -1473,8 +1476,14 @@ def evRequestPath(dir: String): String =
   joinSlash(dir, "request.txt")
 
 def evProbe(job: FuzzJob, dir: String, req: String): IO[Int] =
-  evServer(job, dir).flatMap(pid => Fs.write(evRequestPath(dir), Str.concat(req, kv("", "PROBE_LOG", joinSlash(dir, "probe.log")))).flatMap(_ => Sys.childWrite(pid, """probe
-""").flatMap(_ => evReadCode(job, pid))))
+  evServer(job, dir).flatMap(pid => Fs.write(evRequestPath(dir), Str.concat(req, kv("", "PROBE_LOG", joinSlash(dir, "probe.log")))).flatMap(_ => evProbeSend(job, pid)))
+
+def evProbeSend(job: FuzzJob, pid: Int): IO[Int] =
+  Sys.childWrite(pid, """probe
+""").flatMap(_ => evReadCode(job, pid)).handleErrorWith(e => evProbeClosed(job, pid, e))
+
+def evProbeClosed(job: FuzzJob, pid: Int, e: String): IO[Int] =
+  if (e == "Sys.childWrite: stdin closed") evReadCode(job, pid) else IO.fail(e)
 
 def evServer(job: FuzzJob, dir: String): IO[Int] =
   Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure(s._2) else evSpawn(job, dir)) else evStop(job).flatMap(_ => evSpawn(job, dir)))
