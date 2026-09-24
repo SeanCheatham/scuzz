@@ -1993,7 +1993,7 @@ def ownerCoreErr(core: String, ty: String, ens: List[En]): String =
   ownerCoreErr2(core, tyHead(Type.parse(ty)), ens, dotAt(core, 0))
 
 def ownerCoreErr2(core: String, want: String, ens: List[En], dot: Int): String =
-  if (dot >= 0) ownerQualifiedErr(core, want, ens, dot) else if (hasEn(ens, want) && enOfCase(ens, core) != "" && !List.exists(ens, en => en.name == want && hasCase(en.cases, core))) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+  if (dot >= 0) ownerQualifiedErr(core, want, ens, dot) else if (enOfCase(ens, core) != "" && !List.exists(ens, en => en.name == want && hasCase(en.cases, core))) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
 
 def ownerQualifiedErr(core: String, want: String, ens: List[En], dot: Int): String =
   ownerQualifiedErr2(core, want, Str.take(core, dot), Str.drop(core, dot + 1), ens)
