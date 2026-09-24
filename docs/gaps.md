@@ -23,6 +23,8 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits rel
 
 **Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scripts/ci-fuzz.sh` prints wall clock for both engines on `examples/webhook`, `examples/api-report`, and `examples/io`. It diffs the full summary for `examples/webhook` and `examples/io`. For `examples/api-report` it checks mutation and corpus equality. Compiled function, branch, sometimes, trigger, and claim reach must stay inside evaluator reach. Equal reach passes. The kernel campaign completes faster than compiled. The api-report campaign takes 63 s on the evaluator and 60 s compiled. The remaining cost is the interpreted scheduler step in a zero-delay retry. Do not add scheduler-step snapshots or expression coverage until a proof needs them. Locks: [`philosophy.md`](philosophy.md#evaluator).
 
+**Known divergence.** A lambda can go directly to a user def that takes a function parameter. The compiled body of that lambda then reads the wrong value from a record field of its own parameter. The evaluator reads the correct value. An example is `go(r => IO.pure(Str.len(r.script)), Run("p", "abc"))`. A parameter annotation does not change the result. Compiler sources avoid the bug: the lambda passes its parameter whole to a named def, and that def reads the field.
+
 ## Known gaps
 
 Next work makes the language usable for general programs. The next gap is compile time. Re-time the two commands in that gap before another show-and-parse change. Standard kits follow that. Locks: [`philosophy.md`](philosophy.md). Order: [`vision.md`](vision.md).
