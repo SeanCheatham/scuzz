@@ -1803,7 +1803,7 @@ def emitJsonFloat(code: String, vals: List[String], prefix: String): Slot =
   emitJsonFloat2(code, arg0(vals), prefix)
 
 def emitJsonFloat2(code: String, n: String, prefix: String): Slot =
-  Slot(join(code, join(jsonBoxI64(n, prefix), join(emitAdtNew(prefix, 3, pct(prefix, "ab")), relPtr(pct(prefix, "ab"))))), pct(prefix, "adt"), true)
+  Slot(join(code, join(jsonBoxFloat(n, prefix), join(emitAdtNew(prefix, 3, pct(prefix, "ab")), relPtr(pct(prefix, "ab"))))), pct(prefix, "adt"), true)
 
 def emitJsonFloatOr(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitJsonFloatOr2(code, arg0(vals), arg1(vals), headOwn(owns), prefix)
@@ -1906,6 +1906,9 @@ def emitJsonInt2(code: String, n: String, prefix: String): Slot =
 
 def jsonBoxI64(n: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "ab"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(n, ")"))))
+
+def jsonBoxFloat(n: String, prefix: String): String =
+  line(Str.concat(tmp(prefix, "ab"), Str.concat("call ptr @sz_box_float_bits(i64 ", Str.concat(n, ")"))))
 
 def emitJsonNull(code: String, prefix: String): Slot =
   Slot(join(code, emitAdtNew(prefix, 0, "null")), pct(prefix, "adt"), true)
@@ -3773,9 +3776,6 @@ def emitPayloadInt(arg: Slot, en: String, name: String, prefix: String, ens: Lis
 
 def emitPayloadPtr(arg: Slot, en: String, name: String, prefix: String, ens: List[En]): Slot =
   Slot(join(arg.code, join(emitAdtNew(prefix, ctorTag(ens, en, name), arg.val), if (arg.owned) relPtr(arg.val) else "")), pct(prefix, "adt"), true)
-
-def emitBoxI64(prefix: String, v: String): String =
-  line(Str.concat(tmp(prefix, "box"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(v, ")"))))
 
 def emitBoxScalar(prefix: String, v: String, ty: String): String =
   boxScalarStem(v, ty, prefix, "box")

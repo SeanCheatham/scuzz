@@ -1,4 +1,7 @@
 import Parse.Fun
+import Parse.En
+import Parse.EnCase
+import Parse.Param
 
 def srcOk(): String =
   """def add(n: Int, m: Int): Int =
@@ -1971,9 +1974,12 @@ oracle gen(n: Int where n >= 0): Bool =
 """
 
 def factsTier(): Bool =
-  Str.contains(Verify.seeds(factsSrc()), "drive fact") && Str.contains(Verify.seeds(factsSrc()), "drive gen ") && factsSearch(0) && factsSearch(1) && factsSearch(7) && Verify.generatedDrive(Verify.parseVerify("""oracle fact(): Bool =
+  Str.contains(Verify.seeds(factsSrc()), "drive fact") && Str.contains(Verify.seeds(factsSrc()), "drive gen ") && factsSearch(0) && factsSearch(1) && factsSearch(7) && floatFieldDriveGuard() && Verify.generatedDrive(Verify.parseVerify("""oracle fact(): Bool =
   true
 """), Verify.noEn(), 0) == ""
+
+def floatFieldDriveGuard(): Bool =
+  !Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Outer", [En(true, "Outer", [], [EnCase("Outer", [Param("inner", "Box", "", "")])]), En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Box[Float]", [En(true, "Box", ["T"], [EnCase("Box", [Param("value", "T", "", "")])])]) && Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Int", "", "")])])])
 
 def factsSearch(seed: Int): Bool =
   Str.startsWith(Verify.generatedDrive(Verify.parseVerify(factsSrc()), Verify.noEn(), seed), "drive gen ")
