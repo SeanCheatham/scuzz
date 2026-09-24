@@ -1266,7 +1266,7 @@ def patternOwnerTypes(): Bool =
   rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second") && Check.check(srcQualifiedPatternRight()) == "[]" && forPatternOwnerTypes() && unknownPatternOwnerTypes()
 
 def unknownPatternOwnerTypes(): Bool =
-  rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing") && rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing") && Check.check(srcKnownJsonCase()) == "[]" && Check.check(srcParsedJsonCase()) == "[]"
+  rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing") && rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing") && Check.check(srcKnownJsonCase()) == "[]" && rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result") && Check.check(srcNestedParsedJsonCase()) == "[]"
 
 def srcKnownJsonCase(): String =
   """def ok(v: Json): Int = v match {
@@ -1276,6 +1276,9 @@ def srcKnownJsonCase(): String =
 
 def srcParsedJsonCase(): String =
   "def ok(): Int = Json.parse(\"{}\") match {\n  case Json.Obj(_) => 1\n  case _ => 0\n}"
+
+def srcNestedParsedJsonCase(): String =
+  "def ok(): Int = Json.parse(\"{}\") match {\n  case Result.Ok(Json.Obj(_)) => 1\n  case _ => 0\n}"
 
 def srcUnknownJsonCase(): String =
   """def wrong(v: Json): Int = v match {
@@ -1547,7 +1550,7 @@ def dumpPatternOwner(): String =
   if (!rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else if (Check.check(srcQualifiedPatternRight()) != "[]") Str.concat("valid:", Check.check(srcQualifiedPatternRight())) else if (!rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forPure:", Check.check(srcForPureOwnerWrong())) else if (!rejects(srcForDrawOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forDraw:", Check.check(srcForDrawOwnerWrong())) else dumpUnknownPatternOwner()
 
 def dumpUnknownPatternOwner(): String =
-  if (!rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item")) Str.concat("owner:", Check.check(srcUnknownPatternOwner())) else if (!rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing")) Str.concat("case:", Check.check(srcUnknownPatternCase())) else if (!rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing")) Str.concat("json:", Check.check(srcUnknownJsonCase())) else if (Check.check(srcKnownJsonCase()) != "[]") Str.concat("jsonValid:", Check.check(srcKnownJsonCase())) else if (Check.check(srcParsedJsonCase()) != "[]") Str.concat("jsonParsed:", Check.check(srcParsedJsonCase())) else if (!rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item")) Str.concat("for:", Check.check(srcUnknownForOwner())) else ""
+  if (!rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item")) Str.concat("owner:", Check.check(srcUnknownPatternOwner())) else if (!rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing")) Str.concat("case:", Check.check(srcUnknownPatternCase())) else if (!rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing")) Str.concat("json:", Check.check(srcUnknownJsonCase())) else if (Check.check(srcKnownJsonCase()) != "[]") Str.concat("jsonValid:", Check.check(srcKnownJsonCase())) else if (!rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result")) Str.concat("jsonParsed:", Check.check(srcParsedJsonCase())) else if (Check.check(srcNestedParsedJsonCase()) != "[]") Str.concat("jsonNested:", Check.check(srcNestedParsedJsonCase())) else if (!rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item")) Str.concat("for:", Check.check(srcUnknownForOwner())) else ""
 
 def dumpNamedLetter(): String =
   if (Check.check("""enum E:
