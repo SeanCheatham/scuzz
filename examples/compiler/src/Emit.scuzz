@@ -2772,9 +2772,6 @@ def emitKitUnaryPtr(rt: String, code: String, vals: List[String], owns: List[Boo
   emitKitUnaryPtr2(rt, code, arg0(vals), headOwn(owns), prefix)
 
 def emitKitUnaryPtr2(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
-  if (kitBoxVal(v, o)) emitKitUnaryBox(rt, code, v, prefix) else emitKitUnaryPtr3(rt, code, v, o, prefix)
-
-def emitKitUnaryPtr3(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
   Slot(join(code, join(kitUnaryPre(rt, v, o), join(kitCallPtr1(rt, v, prefix), kitUnaryRel(rt, v, o)))), pct(prefix, "v"), true)
 
 def kitKeepUnaryArg(rt: String): Bool =
@@ -2785,9 +2782,6 @@ def kitUnaryPre(rt: String, v: String, o: Bool): String =
 
 def kitUnaryRel(rt: String, v: String, o: Bool): String =
   if (o && !kitKeepUnaryArg(rt)) relPtr(v) else ""
-
-def kitBoxVal(v: String, o: Bool): Bool =
-  !o && v != "null" && !ioPurePtr(v) && !isPtrSlot(v, noParam()) && !hasSub(v, "_v")
 
 def emitKitUnaryBox(rt: String, code: String, v: String, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "kb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(v, ")")))), join(kitCallPtr1(rt, pct(prefix, "kb"), prefix), kitUnaryRel(rt, pct(prefix, "kb"), true)))), pct(prefix, "v"), true)
@@ -2817,7 +2811,7 @@ def emitKitBinaryPtr(rt: String, code: String, vals: List[String], owns: List[Bo
   emitKitBinaryPtr2(rt, code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
 
 def emitKitBinaryPtr2(rt: String, code: String, a: String, b: String, oa: Bool, ob: Bool, prefix: String): Slot =
-  if (kitBoxVal(b, ob)) emitKitBinaryBoxB(rt, code, a, b, oa, prefix) else Slot(join(code, join(kitCallPtr2(rt, a, b, prefix), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), true)
+  Slot(join(code, join(kitCallPtr2(rt, a, b, prefix), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), true)
 
 def emitKitBinaryBoxB(rt: String, code: String, a: String, b: String, oa: Bool, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "kb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(b, ")")))), join(kitCallPtr2(rt, a, pct(prefix, "kb"), prefix), join(if (oa) relPtr(a) else "", relPtr(pct(prefix, "kb")))))), pct(prefix, "v"), true)
@@ -2829,7 +2823,7 @@ def emitKitBinaryI64(rt: String, code: String, vals: List[String], owns: List[Bo
   emitKitBinaryI642(rt, code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix)
 
 def emitKitBinaryI642(rt: String, code: String, a: String, b: String, oa: Bool, ob: Bool, prefix: String): Slot =
-  if (kitBoxVal(b, ob)) emitKitBinaryI64Box(rt, code, a, b, oa, prefix) else Slot(join(code, join(kitCallI642(rt, a, b, prefix), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), false)
+  Slot(join(code, join(kitCallI642(rt, a, b, prefix), join(if (oa) relPtr(a) else "", if (ob) relPtr(b) else ""))), pct(prefix, "v"), false)
 
 def emitKitBinaryI64Box(rt: String, code: String, a: String, b: String, oa: Bool, prefix: String): Slot =
   Slot(join(code, join(line(Str.concat(tmp(prefix, "kb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(b, ")")))), join(kitCallI642(rt, a, pct(prefix, "kb"), prefix), join(if (oa) relPtr(a) else "", relPtr(pct(prefix, "kb")))))), pct(prefix, "v"), false)
