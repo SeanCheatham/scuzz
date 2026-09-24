@@ -4,6 +4,7 @@ import Parse.Fun
 import Parse.Param
 import Lexer.Tok
 import Lexer.SpTok
+import Check.LineIndex
 
 def lf(): String =
   """
@@ -306,7 +307,7 @@ def renameTokIdent(s: String, rest: List[SpTok], src: String, name: String, nu: 
   if (s == name) renameToks(rest, src, name, nu, off + Str.len(name), Builder.append(Builder.append(b, Str.slice(src, prev, off)), nu)) else renameToks(rest, src, name, nu, prev, b)
 
 def tokensJson(src: String): String =
-  Str.concat("{\"data\":[", Str.concat(tokensJoin(tokenInts(Lexer.lex(src), src, Check.lineIndex(src), 0, 0, [])), "]}"))
+  Str.concat("{\"data\":[", Str.concat(tokensJoin(tokenInts(Lexer.lex(src), src, Check.fastLineIndex(src), 0, 0, [])), "]}"))
 
 def tokTypeK(k: Int): Int =
   if (k >= 1 && k <= 20 || k == 61) 0 else if (k == 55) 1 else if (k == 56 || k == 59) 2 else if (k == 57 || k == 58) 3 else 0 - 1
@@ -317,18 +318,18 @@ def tokLen(t: Tok, src: String, off: Int): Int =
     case _ => Check.tokenEnd(src, off) - off
   }
 
-def tokenInts(toks: List[SpTok], src: String, starts: List[Int], pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenInts(toks: List[SpTok], src: String, starts: LineIndex, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   if (List.isEmpty(toks)) List.reverse(acc) else tokenIntsHd(List.at(toks, 0), List.tail(toks), src, starts, pl, pc, acc)
 
-def tokenIntsHd(sp: SpTok, rest: List[SpTok], src: String, starts: List[Int], pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenIntsHd(sp: SpTok, rest: List[SpTok], src: String, starts: LineIndex, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   sp match {
     case SpTok(tok, off, _) => tokenIntsTok(tok, rest, src, starts, off, pl, pc, acc)
   }
 
-def tokenIntsTok(tok: Tok, rest: List[SpTok], src: String, starts: List[Int], off: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenIntsTok(tok: Tok, rest: List[SpTok], src: String, starts: LineIndex, off: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   tokenIntsTy(tokTypeK(Lexer.kind(tok)), tok, rest, src, starts, off, pl, pc, acc)
 
-def tokenIntsTy(ty: Int, tok: Tok, rest: List[SpTok], src: String, starts: List[Int], off: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenIntsTy(ty: Int, tok: Tok, rest: List[SpTok], src: String, starts: LineIndex, off: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   if (ty < 0) tokenInts(rest, src, starts, pl, pc, acc) else tokenIntsSegments(src, starts, rest, off, off + tokLen(tok, src, off), ty, pl, pc, acc)
 
 def tokenLineEnd(src: String, i: Int, end: Int): Int =
@@ -337,21 +338,21 @@ def tokenLineEnd(src: String, i: Int, end: Int): Int =
 def tokenLineTextEnd(src: String, i: Int, stop: Int, end: Int): Int =
   if (stop < end && stop > i && Str.charAt(src, stop - 1) == 13) stop - 1 else stop
 
-def tokenIntsSegments(src: String, starts: List[Int], rest: List[SpTok], i: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenIntsSegments(src: String, starts: LineIndex, rest: List[SpTok], i: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   if (i >= end) tokenInts(rest, src, starts, pl, pc, acc) else tokenIntsSegmentAt(src, starts, rest, i, tokenLineEnd(src, i, end), end, ty, pl, pc, acc)
 
-def tokenIntsSegmentAt(src: String, starts: List[Int], rest: List[SpTok], i: Int, stop: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenIntsSegmentAt(src: String, starts: LineIndex, rest: List[SpTok], i: Int, stop: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   tokenIntsSegmentText(src, starts, rest, i, stop, tokenLineTextEnd(src, i, stop, end), end, ty, pl, pc, acc)
 
-def tokenIntsSegmentText(src: String, starts: List[Int], rest: List[SpTok], i: Int, stop: Int, textEnd: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenIntsSegmentText(src: String, starts: LineIndex, rest: List[SpTok], i: Int, stop: Int, textEnd: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   if (textEnd <= i) tokenIntsSegments(src, starts, rest, stop + 1, end, ty, pl, pc, acc) else tokenIntsSegmentLoc(Check.lineColIdx(starts, src, i), src, starts, rest, i, stop, textEnd, end, ty, pl, pc, acc)
 
-def tokenIntsSegmentLoc(loc: (Int, Int), src: String, starts: List[Int], rest: List[SpTok], i: Int, stop: Int, textEnd: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenIntsSegmentLoc(loc: (Int, Int), src: String, starts: LineIndex, rest: List[SpTok], i: Int, stop: Int, textEnd: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   loc match {
     case (line, col) => tokenIntsSegmentEmit(src, starts, rest, stop, end, ty, line - 1, col - 1, tokenIntsAcc(line - 1, col - 1, textEnd - i, ty, pl, pc, acc))
   }
 
-def tokenIntsSegmentEmit(src: String, starts: List[Int], rest: List[SpTok], stop: Int, end: Int, ty: Int, ll: Int, cc: Int, acc: List[Int]): List[Int] =
+def tokenIntsSegmentEmit(src: String, starts: LineIndex, rest: List[SpTok], stop: Int, end: Int, ty: Int, ll: Int, cc: Int, acc: List[Int]): List[Int] =
   if (stop >= end) tokenInts(rest, src, starts, ll, cc, acc) else tokenIntsSegments(src, starts, rest, stop + 1, end, ty, ll, cc, acc)
 
 def tokenIntsAcc(ll: Int, cc: Int, n: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
