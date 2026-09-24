@@ -5,6 +5,7 @@
 - [x] Use Float boxes for list literals, cons, callbacks, fold seeds, and single-field enum payloads.
 - [x] Use Float boxes for tuples, `List.fill`, and `List.append`.
 - [x] Use Float boxes for list updates, zip-all defaults, maps, and sets.
+- [x] Use Float boxes for `IO.pure`, `Ref.of`, `Stream.emit`, and `Stream.iterate`.
 - [ ] Audit the remaining typed boxing paths in IO, streams, and other scalar containers.
 - [x] Run kernel, codegen, fuzz, and fixed-point checks.
 - [x] Measure both compiler commands.
