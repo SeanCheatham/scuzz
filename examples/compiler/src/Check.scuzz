@@ -2960,7 +2960,10 @@ def typeOfEns(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], mod: String):
   tyStr(infer(e, bindParams(ps, envSelfMod(mod)), defs, ens))
 
 def specializeEnums(ens: List[En], ty: String): List[En] =
-  if (List.isEmpty(ens)) ens else specializeEnum(List.at(ens, 0), ty) :: specializeEnums(List.tail(ens), ty)
+  if (!Str.contains(ty, "[")) ens else specializeEnumsGo(ens, ty)
+
+def specializeEnumsGo(ens: List[En], ty: String): List[En] =
+  if (List.isEmpty(ens)) ens else specializeEnum(List.at(ens, 0), ty) :: specializeEnumsGo(List.tail(ens), ty)
 
 def specializeEnum(en: En, ty: String): En =
   en match {
