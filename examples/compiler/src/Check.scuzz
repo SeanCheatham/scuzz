@@ -2728,7 +2728,10 @@ def lastStartLe(xs: List[Int], off: Int, line: Int, last: Int): (Int, Int) =
   if (List.isEmpty(xs)) (if (line < 1) 1 else line, last) else lastStartChunk(xs, off, line, last, 64)
 
 def lastStartChunk(xs: List[Int], off: Int, line: Int, last: Int, k: Int): (Int, Int) =
-  if (List.isEmpty(xs)) (if (line < 1) 1 else line, last) else if (k <= 0) lastStartLe(xs, off, line, last) else lastStartOne(List.at(xs, 0), List.tail(xs), off, line, last, k)
+  xs match {
+    case [] => (if (line < 1) 1 else line, last)
+    case s :: rest => if (k <= 0) lastStartLe(xs, off, line, last) else lastStartOne(s, rest, off, line, last, k)
+  }
 
 def lastStartOne(s: Int, rest: List[Int], off: Int, line: Int, last: Int, k: Int): (Int, Int) =
   if (s > off) (if (line < 1) 1 else line, last) else lastStartChunk(rest, off, line + 1, s, k - 1)
