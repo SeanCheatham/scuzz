@@ -523,7 +523,15 @@ def pkgParseOk(): Bool =
   cliDiff(Cli.render(Cli.parse(a3("package", "--target", "foo"))), Drive.badTarget("foo")) && cliDiff(Cli.render(Cli.parse(a3("package", "--target", "host"))), Drive.badTarget("host")) && cliDiff(Cli.show(Cli.parse(a2("package", "--target=macos"))), "package path=. out=build target=macos") && cliDiff(Cli.show(Cli.parse(a2("package", "--target=ios"))), "package path=. out=build target=ios") && cliDiff(Cli.show(Cli.parse(a1("package"))), "package path=. out=build target=")
 
 def pkgOk(): Bool =
-  pkgEnvOk() && pkgIdOk() && pkgAndroidCmdOk() && pkgParseOk()
+  pkgEnvOk() && pkgIdOk() && pkgAndroidCmdOk() && pkgParseOk() && parseCacheOk()
+
+def parseCacheOk(): Bool =
+  for {
+    a = ("Main", "def one(): Int = 1")
+    b = ("Main", "def two(): Int = 2")
+    files = a :: b :: []
+    parsed = Map.set(Map.empty(), "Main", (a._2, Parse.parseFile(a._1, a._2)))
+  } yield Parse.pretty(Drive.parseFilesCached(files, parsed, Parse.emptyProg())) == Parse.pretty(Parse.parseFiles(files))
 
 def driveOk(): Bool =
   manUiOk() && Mutate.sitesOk() && Drive.showMan(Manifest.parse(tomlHello())) == wantHelloMan() && Drive.showMan(Manifest.parse(tomlCli())) == wantCliMan() && Drive.showMan(Manifest.parse(tomlPlugins())) == Str.concat("err:", wantPlugins()) && Drive.showMan(Manifest.parse(tomlLicense())) == Str.concat("err:", wantLicense()) && Drive.showMan(Manifest.parse(tomlStrDep())) == Str.concat("err:", wantStrDep()) && Drive.showMan(Manifest.parse(tomlGit())) == Str.concat("err:", wantGit()) && Drive.showMan(Manifest.parse(tomlNoName())) == Str.concat("err:", wantNoName()) && Drive.showMan(Manifest.parse(tomlEmptyPath())) == Str.concat("err:", wantEmptyPath()) && Drive.showMan(Manifest.parse(tomlNeedPath())) == Str.concat("err:", wantNeedPathToml()) && Drive.showMan(Manifest.parse(tomlEmptyBundle())) == Str.concat("err:", wantEmptyBundle()) && Drive.showMan(Manifest.parse(tomlBadRt())) == Str.concat("err:", wantBadRt()) && Drive.showMan(Manifest.parse(tomlBadSize())) == Str.concat("err:", wantBadSize()) && Drive.bundleIdOf(tomlHello()) == "dev.scuzz.app" && Drive.bundleIdOf(tomlBundle()) == "dev.scuzz.hello" && Drive.compileSrc(srcIrHi()).ok && Drive.compileSrc(srcIrHi()).ir == wantIrHi() && !Drive.compileSrc(srcTyUnbound()).ok && Drive.compileSrc(srcTyUnbound()).diags == wantTyUnbound() && Drive.compileSrc(srcIrHi()).ir == Drive.compileSrc(srcIrHi()).ir && Drive.linkLine("clang", Drive.llName("build", "hello"), "crates/runtime/build/libscuzz_rt.a", Drive.exeName("build", "hello")) == wantLink() && Drive.linkLineHost(true, false, "clang", "a.ll", "rt.a", "app", ".", false) == wantLinkUi() && Drive.linkLineHost(true, true, "clang", "a.ll", "rt.a", "app", ".", false) == wantLinkMacUi() && Drive.missToml("/tmp/empty") == "missing scuzz.toml in /tmp/empty" && Drive.showPkg(Drive.compilePkg(tomlHello(), srcIrHi(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == wantPkg() && Drive.showPkg(Drive.compileFiles(tomlHello(), ("Main", srcIrHi()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a")) == wantPkg() && !Drive.compileFiles(tomlHello(), ("Main", srcTyUnbound()) :: Manifest.noPairs(), "build", "clang", "crates/runtime/build/libscuzz_rt.a").ok && Cli.runCmd(Cli.parse(a1("build")), srcIrHi()) == wantPkg() && pkgOk()

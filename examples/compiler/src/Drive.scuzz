@@ -736,7 +736,7 @@ def checkVerifyGo(dir: String, rel: String, json: Bool, deps: List[(String, Stri
   if (List.isEmpty(ents)) checkVerifyDone(dir, rel, json, deps, own) else checkVerifyHd(dir, rel, json, deps, own, List.at(ents, 0), List.tail(ents))
 
 def checkVerifyDone(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)]): IO[Unit] =
-  if (rel != "") IO.pure(()) else fuzzVerSrcs(dir).flatMap(vers => collectDeps(dir, deps, own).flatMap(files => checkFmtGo(json, files, own, fileStems(own), vers)))
+  if (rel != "") IO.pure(()) else fuzzVerSrcs(dir).flatMap(vers => collectDeps(dir, deps, own).flatMap(files => checkFmtGo(json, files, own, fileStems(own), vers, Map.empty())))
 
 def checkVerifyHd(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ent: (String, Bool), rest: List[(String, Bool)]): IO[Unit] =
   ent match {
@@ -761,14 +761,28 @@ def checkScenarioMsg(dir: String, rel: String, json: Bool, deps: List[(String, S
 def checkVerifyGot(dir: String, rel: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], rest: List[(String, Bool)], msg: String): IO[Unit] =
   if (msg == "scuzz check ok") checkVerifyGo(dir, rel, json, deps, own, rest) else IO.println(msg).flatMap(_ => IO.fail("scuzz check"))
 
-def checkFmtGo(json: Bool, all: List[(String, String)], rest: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  if (List.isEmpty(rest)) checkFmtDone(json, all, stems, vers) else checkFmtHd(json, all, List.at(rest, 0), List.tail(rest), stems, vers)
+def checkFmtGo(json: Bool, all: List[(String, String)], rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
+  if (List.isEmpty(rest)) checkFmtDone(json, all, stems, vers, parsed) else checkFmtHd(json, all, List.at(rest, 0), List.tail(rest), stems, vers, parsed)
 
-def checkFmtDone(json: Bool, all: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  checkFmtDone2(json, stems, sigFiles(all, stems), vers)
+def checkFmtDone(json: Bool, all: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
+  checkFmtDone2(json, stems, sigFiles(all, stems), vers, parsed)
 
-def checkFmtDone2(json: Bool, stems: List[String], sigs: List[(String, String)], vers: List[String]): IO[Unit] =
-  checkDirOut(json, sigs, stems, vers)
+def checkFmtDone2(json: Bool, stems: List[String], sigs: List[(String, String)], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
+  checkDirOutParsed(json, parseFilesCached(sigs, parsed, Parse.emptyProg()), sigs, stems, vers)
+
+def parseFilesCached(files: List[(String, String)], parsed: Map[String, (String, Prog)], acc: Prog): Prog =
+  if (List.isEmpty(files)) acc else parseFilesCachedHd(List.at(files, 0), List.tail(files), parsed, acc)
+
+def parseFilesCachedHd(h: (String, String), rest: List[(String, String)], parsed: Map[String, (String, Prog)], acc: Prog): Prog =
+  h match {
+    case (stem, src) => parseFilesCached(rest, parsed, Parse.merge(acc, parsedFile(parsed, stem, src)))
+  }
+
+def parsedFile(parsed: Map[String, (String, Prog)], stem: String, src: String): Prog =
+  Map.get(parsed, stem) match {
+    case Some((text, p)) => if (text == src) p else Parse.parseFile(stem, src)
+    case None => Parse.parseFile(stem, src)
+  }
 
 def filesForStems(files: List[(String, String)], stems: List[String]): List[(String, String)] =
   if (List.isEmpty(files)) Manifest.noPairs() else filesForStemsHd(List.at(files, 0), List.tail(files), stems)
@@ -778,13 +792,13 @@ def filesForStemsHd(h: (String, String), rest: List[(String, String)], stems: Li
     case (stem, src) => if (hasFileStem(stems, stem)) h :: filesForStems(rest, stems) else filesForStems(rest, stems)
   }
 
-def checkFmtHd(json: Bool, all: List[(String, String)], h: (String, String), rest: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
+def checkFmtHd(json: Bool, all: List[(String, String)], h: (String, String), rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)]): IO[Unit] =
   h match {
-    case (stem, src) => checkFmtSrc(json, all, stem, src, rest, stems, vers)
+    case (stem, src) => checkFmtSrc(json, all, stem, src, rest, stems, vers, parsed, Parse.parseFile(stem, src))
   }
 
-def checkFmtSrc(json: Bool, all: List[(String, String)], stem: String, src: String, rest: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  if (Parse.pretty(Parse.parse(Lexer.lex(src))) == src) checkFmtGo(json, all, rest, stems, vers) else checkFmtFail(stem)
+def checkFmtSrc(json: Bool, all: List[(String, String)], stem: String, src: String, rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)], p: Prog): IO[Unit] =
+  if (Parse.pretty(p) == src) checkFmtGo(json, all, rest, stems, vers, Map.set(parsed, stem, (src, p))) else checkFmtFail(stem)
 
 def fileStems(files: List[(String, String)]): List[String] =
   if (List.isEmpty(files)) [] else fileStemsHd(List.at(files, 0), List.tail(files))
@@ -851,9 +865,6 @@ def lineIsTop(line: String): Bool =
 
 def checkFmtFail(stem: String): IO[Unit] =
   IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail("scuzz check"))
-
-def checkDirOut(json: Bool, sigs: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  checkDirOutParsed(json, Parse.parseFiles(sigs), sigs, stems, vers)
 
 def checkDirOutParsed(json: Bool, p: Prog, sigs: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
   if (json) checkDirJson(Check.check3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers) else checkDirHuman(Check.human3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers)
