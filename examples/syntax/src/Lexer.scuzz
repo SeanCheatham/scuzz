@@ -292,7 +292,7 @@ def _lexName(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
   _lexName2(src, i, _skipIdent(src, i), stem, acc)
 
 def _lexName2(src: String, i: Int, j: Int, stem: String, acc: List[SpTok]): List[SpTok] =
-  if (Str.slice(src, i, j) == "s" && j < Str.len(src) && _ch(src, j) == 34) _lexInterp(src, j + 1, Builder.empty(), i, stem, acc) else lexAt(src, j, stem, _put(_kw(Str.slice(src, i, j)), i, stem, acc))
+  if (j == i + 1 && _ch(src, i) == 115 && j < Str.len(src) && _ch(src, j) == 34) _lexInterp(src, j + 1, Builder.empty(), i, stem, acc) else lexAt(src, j, stem, _put(_kw(Str.slice(src, i, j)), i, stem, acc))
 
 def _lexInterp(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok]): List[SpTok] =
   _lexInterpD(src, i, b, start, stem, acc, 0)
