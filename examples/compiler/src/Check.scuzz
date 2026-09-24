@@ -2466,8 +2466,39 @@ def inferTupleRest(rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: L
 
 def checkDef(d: Fun, funs: Ftab, ens: List[En]): Out =
   d match {
-    case Fun(_, ora, name, ts, ps, ret, body, mod, off) => checkDefOra(ora, name, ret, body, ps, funs, pinEns(ens, ts), ts, mod, off)
+    case Fun(_, ora, name, ts, ps, ret, body, mod, off) => checkDefTypes(ora, name, ts, ps, ret, body, mod, off, funs, pinEns(ens, ts))
   }
+
+def checkDefTypes(ora: Bool, name: String, ts: List[String], ps: List[Param], ret: String, body: Expr, mod: String, off: Int, funs: Ftab, ens: List[En]): Out =
+  checkTyList(ps, ens, ts, (mod, off)) match {
+    case Out(_, err, span, _, _) => if (err != "") bad(err, span) else checkDefRet(ora, name, ts, ps, ret, body, mod, off, funs, ens)
+  }
+
+def checkDefRet(ora: Bool, name: String, ts: List[String], ps: List[Param], ret: String, body: Expr, mod: String, off: Int, funs: Ftab, ens: List[En]): Out =
+  if (!knownTy(Type.parse(ret), ens, ts)) bad(Str.concat("unknown type ", ret), (mod, off)) else checkDefOra(ora, name, ret, body, ps, funs, ens, ts, mod, off)
+
+def checkTyList(ps: List[Param], ens: List[En], ts: List[String], span: (String, Int)): Out =
+  if (List.isEmpty(ps)) ok("Unit") else checkTyParam(List.at(ps, 0), List.tail(ps), ens, ts, span)
+
+def checkTyParam(p: Param, rest: List[Param], ens: List[En], ts: List[String], span: (String, Int)): Out =
+  p match {
+    case Param(_, ty, _, _) => if (!knownTy(Type.parse(ty), ens, ts)) bad(Str.concat("unknown type ", ty), span) else checkTyList(rest, ens, ts, span)
+  }
+
+def knownTy(t: Ty, ens: List[En], ts: List[String]): Bool =
+  t match {
+    case Ty.TVar(_) => true
+    case Ty.Named(n) => builtinTyName(n) || hasEn(ens, n) || List.contains(ts, n)
+    case Ty.App(n, args) => (builtinTyName(n) || hasEn(ens, n) || List.contains(ts, n)) && knownTys(args, ens, ts)
+    case Ty.Tuple(parts) => knownTys(parts, ens, ts)
+    case Ty.Arrow(arg, ret) => knownTy(arg, ens, ts) && knownTy(ret, ens, ts)
+  }
+
+def knownTys(ts0: List[Ty], ens: List[En], ts: List[String]): Bool =
+  if (List.isEmpty(ts0)) true else knownTy(List.at(ts0, 0), ens, ts) && knownTys(List.tail(ts0), ens, ts)
+
+def builtinTyName(n: String): Bool =
+  n == "Any" || n == "Bool" || n == "Builder" || n == "Bytes" || n == "Deferred" || n == "Fiber" || n == "Float" || n == "IO" || n == "Int" || n == "Json" || n == "List" || n == "Map" || n == "Option" || n == "Queue" || n == "Ref" || n == "Resource" || n == "Result" || n == "Set" || n == "Signal" || n == "Stream" || n == "String" || n == "Tcp" || n == "Timeline" || n == "Udp" || n == "Unit" || n == "Verdict" || n == "View"
 
 def checkDefOra(ora: Bool, name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], ts: List[String], mod: String, off: Int): Out =
   if (ora && ret != "Bool") bad(Str.concat("oracle ", Str.concat(name, " must return Bool")), (mod, off)) else checkDefGo(name, ret, body, ps, funs, ens, ts, mod, off)
@@ -2492,30 +2523,33 @@ def checkWhereGo(n: String, w: String, rest: List[Param], env: List[(String, Ty)
 def checkWhereTy(o: Out, n: String, rest: List[Param], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (hasErr(o)) o else if (tyStr(o) == "Bool") checkWheres(rest, env, funs, ens, span) else bad(Str.concat("where on ", Str.concat(n, Str.concat(" must be Bool, got ", tyStr(o)))), span)
 
-def checkEns(ens: List[En], funs: Ftab): Out =
-  checkEnsGo(ens, ens, funs)
+def checkEns(ens: List[En], names: List[String], funs: Ftab): Out =
+  checkEnsGo(ens, ens, names, funs)
 
-def checkEnsGo(rest: List[En], ens: List[En], funs: Ftab): Out =
-  if (List.isEmpty(rest)) ok("Bool") else checkEnHd(List.at(rest, 0), List.tail(rest), ens, funs)
+def checkEnsGo(rest: List[En], ens: List[En], names: List[String], funs: Ftab): Out =
+  if (List.isEmpty(rest)) ok("Bool") else checkEnHd(List.at(rest, 0), List.tail(rest), ens, names, funs)
 
-def checkEnHd(h: En, rest: List[En], ens: List[En], funs: Ftab): Out =
+def checkEnHd(h: En, rest: List[En], ens: List[En], names: List[String], funs: Ftab): Out =
   h match {
-    case En(_, _, _, cases) => checkEnsAfter(checkEnCases(cases, ens, funs), rest, ens, funs)
+    case En(_, _, ts, cases) => checkEnsAfter(checkEnCases(cases, ens, List.concat(ts, names), funs), rest, ens, names, funs)
   }
 
-def checkEnsAfter(o: Out, rest: List[En], ens: List[En], funs: Ftab): Out =
-  if (hasErr(o)) o else checkEnsGo(rest, ens, funs)
+def checkEnsAfter(o: Out, rest: List[En], ens: List[En], names: List[String], funs: Ftab): Out =
+  if (hasErr(o)) o else checkEnsGo(rest, ens, names, funs)
 
-def checkEnCases(cs: List[EnCase], ens: List[En], funs: Ftab): Out =
-  if (List.isEmpty(cs)) ok("Bool") else checkEnCaseHd(List.at(cs, 0), List.tail(cs), ens, funs)
+def checkEnCases(cs: List[EnCase], ens: List[En], ts: List[String], funs: Ftab): Out =
+  if (List.isEmpty(cs)) ok("Bool") else checkEnCaseHd(List.at(cs, 0), List.tail(cs), ens, ts, funs)
 
-def checkEnCaseHd(c: EnCase, rest: List[EnCase], ens: List[En], funs: Ftab): Out =
+def checkEnCaseHd(c: EnCase, rest: List[EnCase], ens: List[En], ts: List[String], funs: Ftab): Out =
   c match {
-    case EnCase(_, fs) => checkEnCasesAfter(checkWheres(fs, bindParams(fs, noEnv()), funs, ens, noSpan()), rest, ens, funs)
+    case EnCase(_, fs) => checkEnCaseTypes(checkTyList(fs, ens, ts, noSpan()), fs, rest, ens, ts, funs)
   }
 
-def checkEnCasesAfter(o: Out, rest: List[EnCase], ens: List[En], funs: Ftab): Out =
-  if (hasErr(o)) o else checkEnCases(rest, ens, funs)
+def checkEnCaseTypes(o: Out, fs: List[Param], rest: List[EnCase], ens: List[En], ts: List[String], funs: Ftab): Out =
+  if (hasErr(o)) o else checkEnCasesAfter(checkWheres(fs, bindParams(fs, noEnv()), funs, ens, noSpan()), rest, ens, ts, funs)
+
+def checkEnCasesAfter(o: Out, rest: List[EnCase], ens: List[En], ts: List[String], funs: Ftab): Out =
+  if (hasErr(o)) o else checkEnCases(rest, ens, ts, funs)
 
 def checkDefWrap(name: String, ret: String, body: Expr, o: Out, span: (String, Int), ens: List[En], ts: List[String]): Out =
   if (hasErr(o)) bad(Str.concat("in ", Str.concat(name, Str.concat(": ", o.err))), o.span) else checkDefGot(name, ret, body, o, span, ens, ts)
@@ -2535,14 +2569,33 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, main, body) => checkProgGo(expandDefs(withImportFuns(imps, implFuns(impls, defs)), aliases), Parse.builtins(enums), main, body, stems)
+    case Prog(_, enums, aliases, _, impls, imps, defs, main, body) => checkProgAliases(checkAliases(aliases, Parse.builtins(enums), aliasNames(aliases)), enums, aliases, impls, imps, defs, main, body, stems)
   }
 
-def checkProgGo(ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
-  checkProgGoTab(ds, withLetterPins(enums), main, body, stems, ftabOfList(ds))
+def checkProgAliases(o: Out, enums: List[En], aliases: List[Alias], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr, stems: List[String]): Out =
+  if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(imps, implFuns(impls, defs)), aliases), Parse.builtins(enums), aliasNames(aliases), main, body, stems)
 
-def checkProgGoTab(ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String], tab: Ftab): Out =
-  checkProgAfterEns(checkEns(enums, tab), tab, ds, enums, main, body, stems)
+def aliasNames(aliases: List[Alias]): List[String] =
+  if (List.isEmpty(aliases)) [] else aliasName(List.at(aliases, 0), List.tail(aliases))
+
+def aliasName(a: Alias, rest: List[Alias]): List[String] =
+  a match {
+    case Alias(name, _, _) => name :: aliasNames(rest)
+  }
+
+def checkAliases(aliases: List[Alias], ens: List[En], names: List[String]): Out =
+  if (List.isEmpty(aliases)) ok("Unit") else checkAlias(List.at(aliases, 0), List.tail(aliases), ens, names)
+
+def checkAlias(a: Alias, rest: List[Alias], ens: List[En], names: List[String]): Out =
+  a match {
+    case Alias(_, ts, target) => if (!knownTy(Type.parse(target), ens, List.concat(ts, names))) bad(Str.concat("unknown type ", target), noSpan()) else checkAliases(rest, ens, names)
+  }
+
+def checkProgGo(ds: List[Fun], enums: List[En], names: List[String], main: String, body: Expr, stems: List[String]): Out =
+  checkProgGoTab(ds, withLetterPins(enums), names, main, body, stems, ftabOfList(ds))
+
+def checkProgGoTab(ds: List[Fun], enums: List[En], names: List[String], main: String, body: Expr, stems: List[String], tab: Ftab): Out =
+  checkProgAfterEns(checkEns(enums, names, tab), tab, ds, enums, main, body, stems)
 
 def checkProgAfterEns(o: Out, tab: Ftab, ds: List[Fun], enums: List[En], main: String, body: Expr, stems: List[String]): Out =
   if (hasErr(o)) o else checkDefsRest(tab, ds, enums, main, body, stems)
