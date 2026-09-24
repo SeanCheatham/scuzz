@@ -845,7 +845,8 @@ def floatStreamEq(): IO[Bool] =
     emitted <- Stream.compileToList(Stream.changes(Stream.concat(Stream.emit(negZero), Stream.emit(0.0))))
     evaluated <- Stream.compileToList(Stream.changes(Stream.concat(Stream.eval(IO.pure(negZero)), Stream.emit(0.0))))
     iterated <- Stream.compileToList(Stream.changes(Stream.iterate(negZero, 2, x => x + 0.0)))
-  } yield emitted == [0.0] && evaluated == [0.0] && iterated == [0.0]
+    unfolded <- Stream.compileToList(Stream.unfold(negZero, x => if (x == 0.0) [(x, 1.0)] else []))
+  } yield emitted == [0.0] && evaluated == [0.0] && iterated == [0.0] && unfolded == [0.0]
 
 def floatIoFailEq(): IO[Bool] =
   for {
