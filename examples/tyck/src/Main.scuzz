@@ -1263,7 +1263,32 @@ def unqualifiedPatternTypes(): Bool =
   rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && Check.check(srcUnqualifiedPatternRight()) == "[]" && Check.check(srcUnqualifiedPatternNamed()) == "[]" && rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && patternOwnerTypes()
 
 def patternOwnerTypes(): Bool =
-  rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second") && Check.check(srcQualifiedPatternRight()) == "[]"
+  rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second") && Check.check(srcQualifiedPatternRight()) == "[]" && forPatternOwnerTypes()
+
+def forPatternOwnerTypes(): Bool =
+  rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second") && rejects(srcForDrawOwnerWrong(), "pattern case First.Item does not belong to Second")
+
+def srcForPureOwnerWrong(): String =
+  """enum First:
+  case Item(value: Int)
+enum Second:
+  case Item(value: Int)
+def wrong(): Int =
+  for {
+    First.Item(n) = Second.Item(7)
+  } yield n
+"""
+
+def srcForDrawOwnerWrong(): String =
+  """enum First:
+  case Item(value: Int)
+enum Second:
+  case Item(value: Int)
+def wrong(): IO[Int] =
+  for {
+    First.Item(n) <- IO.pure(Second.Item(7))
+  } yield n
+"""
 
 def srcQualifiedPatternRight(): String =
   """enum First:
@@ -1476,7 +1501,7 @@ def dumpUnqualifiedPattern(): String =
   if (!rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("wrong:", Check.check(srcUnqualifiedPatternWrong())) else if (Check.check(srcUnqualifiedPatternRight()) != "[]") Str.concat("right:", Check.check(srcUnqualifiedPatternRight())) else if (Check.check(srcUnqualifiedPatternNamed()) != "[]") Str.concat("named:", Check.check(srcUnqualifiedPatternNamed())) else if (!rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("nested:", Check.check(srcNestedUnqualifiedPatternWrong())) else dumpPatternOwner()
 
 def dumpPatternOwner(): String =
-  if (!rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else Str.concat("valid:", Check.check(srcQualifiedPatternRight()))
+  if (!rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else if (Check.check(srcQualifiedPatternRight()) != "[]") Str.concat("valid:", Check.check(srcQualifiedPatternRight())) else if (!rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forPure:", Check.check(srcForPureOwnerWrong())) else Str.concat("forDraw:", Check.check(srcForDrawOwnerWrong()))
 
 def dumpNamedLetter(): String =
   if (Check.check("""enum E:

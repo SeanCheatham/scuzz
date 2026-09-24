@@ -1230,7 +1230,10 @@ def lamPinTyOf3(v: Expr, vo: Out, pin: String, env: List[(String, Ty)], defs: Ft
   if (pin == "") "" else tyStr(lamPinDo(pin, v, env, defs, ens, vo))
 
 def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
-  if (hasErr(vo)) vo else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy))
+  if (hasErr(vo)) vo else inferForBindOwner(ownerPatErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
+
+def inferForBindOwner(err: String, d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (err != "") bad(err, span) else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy))
 
 def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   if (Str.startsWith(ty, "Stream") || Str.startsWith(ty, "Resource")) bad(Str.concat("<- needs IO, got ", ty), span) else inferForDraw2(name, ty, rest, body, env, funs, ens, unifyErr(errTy, ioErr(ty), span, ens))
