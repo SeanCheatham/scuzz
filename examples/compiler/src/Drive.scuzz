@@ -494,24 +494,12 @@ def collectAfterNested(parentDir: String, rest: List[(String, String)], withNest
   collectDepsSeen(parentDir, rest, appendNew(withNested, more), seen)
 
 def hasStem(xs: List[(String, String)], stem: String): Bool =
-  hasStemAt(xs, stem, 0)
+  if (List.isEmpty(xs)) false else hasStemHead(List.at(xs, 0), List.tail(xs), stem)
 
-def hasStemAt(xs: List[(String, String)], stem: String, i: Int): Bool =
-  hasStemAt2(xs, stem, i, List.len(xs))
-
-def hasStemAt2(xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
-  if (i >= n) false else hasStemAt3(xs, stem, i, n)
-
-def hasStemAt3(xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
-  hasStemFrom(List.at(xs, i), xs, stem, i, n)
-
-def hasStemFrom(p: (String, String), xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
+def hasStemHead(p: (String, String), rest: List[(String, String)], stem: String): Bool =
   p match {
-    case (name, src) => hasStemName(name, xs, stem, i, n)
+    case (name, _) => name == stem || hasStem(rest, stem)
   }
-
-def hasStemName(name: String, xs: List[(String, String)], stem: String, i: Int, n: Int): Bool =
-  if (name == stem) true else hasStemAt2(xs, stem, i + 1, n)
 
 def appendNew(acc: List[(String, String)], more: List[(String, String)]): List[(String, String)] =
   if (List.isEmpty(more)) acc else appendNewGo(acc, List.at(more, 0), more)
@@ -2432,4 +2420,3 @@ def relateJudgeGot(r: (Int, String, String)): IO[Int] =
 
 def fuzzRunScript(run: FuzzRun): String =
   run.script
-
