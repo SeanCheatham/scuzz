@@ -58,6 +58,12 @@ import A.Msg
 import A.one as fromA
 import A.Tag
 
+def applyPattern(f: PatternFields => Int, value: PatternFields): Int =
+  f(value)
+
+def applyPatternIo(f: PatternFields => IO[Int], value: PatternFields): IO[Int] =
+  f(value)
+
 def id[T](x: T): T =
   x
 
