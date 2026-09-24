@@ -126,10 +126,13 @@ private def searchKit(): IO[Unit] =
 
 private def intKit(): IO[Unit] =
   for {
+    seed = 3
     ns <- Stream.compileToList(Stream.map(Stream.emits([1, 2]), n => n + 1))
     _ <- IO.println(s"mapN:${headInt(ns)}")
-    fs <- Stream.compileToList(Stream.filter(Stream.emit(4), n => n > 0))
+    fs <- Stream.compileToList(Stream.filter(Stream.emit(seed + 1), n => n > 0))
     _ <- IO.println(s"filterN:${headInt(fs)}")
+    is <- Stream.compileToList(Stream.intersperse(Stream.emits([1, 3]), seed - 1))
+    _ <- IO.println(s"intersperseN:${headInt(List.drop(is, 1))}")
     es <- Stream.compileToList(Stream.evalMap(Stream.eval(IO.pure(5)), n => IO.pure(n + 1)))
     _ <- IO.println(s"evalN:${headInt(es)}")
     cs <- Stream.compileToList(Stream.concat(Stream.take(Stream.emit(6), 1), Stream.drop(Stream.emit(7), 0)))
@@ -365,4 +368,3 @@ def tupleCapture(result: (Int, String, Bool), expected: Int): IO[Bool] =
 
 def openStore(): IO[String] =
   Sys.exec("true").map(_ => "live-store")
-

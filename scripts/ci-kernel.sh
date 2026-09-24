@@ -59,6 +59,8 @@ grep -q "dropWhile:a,b" /tmp/io.out
 grep -q "find:a" /tmp/io.out
 grep -q "exists:1" /tmp/io.out
 grep -q "miss:0" /tmp/io.out
+grep -q "filterN:4" /tmp/io.out
+grep -q "intersperseN:2" /tmp/io.out
 grep -q "real:" /tmp/io.out
 grep -q "mono:" /tmp/io.out
 grep -q "iso:1970-01-01T00:00:00.000Z" /tmp/io.out
@@ -257,4 +259,3 @@ printf 'def counterTitle(): String =\n  "Counter"\n\ndef countLabel(n: Int): Str
 if ! grep -q "^ok$" /tmp/counter-inval.out; then echo "dependency edit should invalidate fingerprint" && exit 1; fi
 cp /tmp/shared-orig.scuzz examples/shared/src/Shared.scuzz
 "$SCUZZ" build --full examples/counter
-
