@@ -16,7 +16,7 @@ enum Expr:
   case EMatch(s: Expr, arms: List[Arm], off: Int)
   case EFor(bs: List[Bind], body: Expr, off: Int)
   case EFloat(s: String)
-  case EInterp(s: String, off: Int)
+  case EInterp(s: String, parts: List[Expr], off: Int)
   case EList(xs: List[Expr])
   case ETuple(xs: List[Expr])
   case ENamed(name: String, e: Expr)
@@ -105,7 +105,7 @@ def spanOf(e: Expr): (String, Int) =
     case Expr.EMatch(_, _, off) => ("", off)
     case Expr.EFor(_, _, off) => ("", off)
     case Expr.EAscribe(_, _, off) => ("", off)
-    case Expr.EInterp(_, off) => ("", off)
+    case Expr.EInterp(_, _, off) => ("", off)
     case _ => ("", 0 - 1)
   }
 
@@ -361,7 +361,7 @@ def parseAtom(toks: Toks, i: Int): (Expr, Int) =
     case Tok.False => (Expr.EBool(false), i + 1)
     case Tok.Str(s) => (Expr.EStr(s, _off(toks, i)), i + 1)
     case Tok.Float(s) => (Expr.EFloat(s), i + 1)
-    case Tok.Interp(s) => (Expr.EInterp(s, _off(toks, i)), i + 1)
+    case Tok.Interp(s) => (Expr.EInterp(s, interpParts(s, 0, Builder.empty(), []), _off(toks, i)), i + 1)
     case Tok.Underscore => parseHole(toks, i)
     case Tok.LParen => if (_is(toks, i + 1, Tok.RParen)) (Expr.EUnit, i + 2) else parseParen(toks, i + 1)
     case Tok.LBracket => parseList(toks, i)
@@ -1087,7 +1087,7 @@ def prettyExpr(e: Expr, n: Int): String =
     case Expr.EFor(bs, body, _) => Str.concat(_pad(n), Str.concat("""for {
 """, Str.concat(prettyBinds(bs, n + 1), Str.concat(_pad(n), Str.concat("} yield ", pretty0(body))))))
     case Expr.EFloat(s) => Str.concat(_pad(n), s)
-    case Expr.EInterp(s, _) => Str.concat(_pad(n), Str.concat("s\"", Str.concat(s, "\"")))
+    case Expr.EInterp(s, _, _) => Str.concat(_pad(n), Str.concat("s\"", Str.concat(s, "\"")))
     case Expr.EList(xs) => Str.concat(_pad(n), Str.concat("[", Str.concat(_commaExprs(xs), "]")))
     case Expr.ETuple(xs) => Str.concat(_pad(n), Str.concat("(", Str.concat(_commaExprs(xs), ")")))
     case Expr.ENamed(name, e) => Str.concat(_pad(n), Str.concat(name, Str.concat(" = ", pretty0(e))))

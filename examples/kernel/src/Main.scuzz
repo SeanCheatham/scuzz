@@ -79,6 +79,9 @@ def greet(name: String, punct: String = "!"): String =
 def idOf(n: UserId): UserId =
   n
 
+def aliasHoleDef(n: UserId): String =
+  s"aliasDef:${(n: UserId)}:${((x: UserId) => x + 1)(n)}"
+
 def joinLabels(xs: Labels): String =
   List.join(xs, ",")
 
@@ -1235,6 +1238,8 @@ b"""
     _ <- IO.println(s"aliasMain:${nextId(mainId)}")
     interpName = "hole"
     _ <- IO.println(s"interpCheck:$interpName:${Str.len(interpName) + 1}")
+    _ <- IO.println(s"aliasHole:${(mainId: UserId)}:${((x: UserId) => x + 1)(mainId)}")
+    _ <- IO.println(aliasHoleDef(mainId))
     _ <- IO.println(s"aliasTag:${showTag("ok")}")
     _ <- mapSetProof()
     _ <- listProof()

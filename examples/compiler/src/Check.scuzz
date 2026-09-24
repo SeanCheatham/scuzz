@@ -952,7 +952,7 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
     case Expr.EBool(_) => okTy(Type.tBool())
     case Expr.EStr(_, _) => okTy(Type.tStr())
     case Expr.EFloat(_) => okTy(Type.tFloat())
-    case Expr.EInterp(s, off) => inferInterp(s, off, env, funs, ens)
+    case Expr.EInterp(_, parts, off) => inferInterp(parts, off, env, funs, ens)
     case Expr.EUnit => okTy(Type.tUnit())
     case Expr.EHole => okTy(Type.tInt())
     case Expr.EVar(s, off) => inferVar(s, env, funs, ens, (modFile(env), off))
@@ -975,8 +975,8 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
 def inferAscribe(inner: Expr, ty: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   inferAscribe2(infer(inner, env, funs, ens), ty, (modFile(env), off), ens)
 
-def inferInterp(s: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  inferInterpParts(Parse.interpParts(s, 0, Builder.empty(), []), env, funs, ens, (modFile(env), off))
+def inferInterp(parts: List[Expr], off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  inferInterpParts(parts, env, funs, ens, (modFile(env), off))
 
 def inferInterpParts(parts: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (List.isEmpty(parts)) okTy(Type.tStr()) else inferInterpPart(List.at(parts, 0), List.tail(parts), env, funs, ens, span)
@@ -1076,7 +1076,7 @@ def lamPinExpr(name: String, al: String, e: Expr, env: List[(String, Ty)], funs:
     case Expr.EFor(bs, fb, _) => lamPinArg(name, al, bs, fb, env, funs, ens)
     case Expr.EList(xs) => lamPinExprs(name, al, xs, env, funs, ens)
     case Expr.ETuple(xs) => lamPinExprs(name, al, xs, env, funs, ens)
-    case Expr.EInterp(s, _) => lamPinExprs(name, al, Parse.interpParts(s, 0, Builder.empty(), []), env, funs, ens)
+    case Expr.EInterp(_, parts, _) => lamPinExprs(name, al, parts, env, funs, ens)
     case _ => ""
   }
 
@@ -2795,7 +2795,7 @@ def checkExprTypes(e: Expr, ens: List[En], aliases: List[Alias], ts: List[String
     case Expr.EFor(bs, body, _) => checkExprTypesFor(checkExprTypesBinds(bs, ens, aliases, ts, span), body, ens, aliases, ts, span)
     case Expr.EList(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
     case Expr.ETuple(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
-    case Expr.EInterp(s, _) => checkExprTypesList(Parse.interpParts(s, 0, Builder.empty(), []), ens, aliases, ts, span)
+    case Expr.EInterp(_, parts, _) => checkExprTypesList(parts, ens, aliases, ts, span)
     case Expr.ENamed(_, inner) => checkExprTypes(inner, ens, aliases, ts, span)
     case _ => ok("Unit")
   }
@@ -3030,6 +3030,7 @@ def expandDef(d: Fun, als: List[Alias]): Fun =
 
 def expandExpr(e: Expr, als: List[Alias]): Expr =
   e match {
+    case Expr.EInterp(s, parts, off) => Expr.EInterp(s, expandExprs(parts, als), off)
     case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(expandExpr(inner, als), expandTy(ty, als), off)
     case Expr.ELam(p, ty, body) => Expr.ELam(p, expandTy(ty, als), expandExpr(body, als))
     case Expr.EPrint(inner, off) => Expr.EPrint(expandExpr(inner, als), off)
