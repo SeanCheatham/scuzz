@@ -22,6 +22,9 @@ oracle hueFacts(): Bool =
 oracle mapParameters(n: Int): Bool =
   Main.mapParamRoundTrip(n, Str.fromInt(n))
 
+oracle numericMapGet(): Bool =
+  Main.intMapGet(7)
+
 oracle constructorStrings(s: String): Bool =
   Main.literalPacket(LiteralPacket.Text(s)) == (if (s == "ready") 1 else 0)
 
