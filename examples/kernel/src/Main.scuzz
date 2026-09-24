@@ -366,13 +366,16 @@ def mapGetEmptyAt(m: Map): Bool =
   Map.contains(m, "e") && Map.get(m, "e") == Option.Some([]: List[String]) && Map.get(m, "z") == (Option.None: Option[List[String]])
 
 def mapParamRoundTrip(n: Int, value: String): Bool =
-  Map.getOrElse(Map.set(Map.empty(), "value", n), "value", 0) == n && Map.getOrElse(Map.set(Map.empty(), "value", value), "value", "") == value && borrowedMapText(Map.empty(), value) == value && borrowedMapText(Map.set(Map.empty(), "missing", value), "other") == value && borrowedMapNumber(Map.empty(), n) == n && borrowedMapNumber(Map.set(Map.empty(), "missing", n), 0) == n
+  Map.getOrElse(Map.set(Map.empty(), "value", n), "value", 0) == n && Map.getOrElse(Map.set(Map.empty(), "value", value), "value", "") == value && borrowedMapText(Map.empty(), value) == value && borrowedMapText(Map.set(Map.empty(), "missing", value), "other") == value && borrowedMapNumber(Map.empty(), n) == n && borrowedMapNumber(Map.set(Map.empty(), "missing", n), 0) == n && borrowedMapKits(Map.empty(), ",")
 
 def borrowedMapText(m: Map[String, String], fallback: String): String =
   Map.getOrElse(m, "missing", fallback)
 
 def borrowedMapNumber(m: Map[String, Int], fallback: Int): Int =
   Map.getOrElse(m, "missing", fallback)
+
+def borrowedMapKits(m: Map[String, String], fallback: String): Bool =
+  Str.trim(Map.getOrElse(m, "missing", fallback)) == "," && List.len(Str.split("a,b", Map.getOrElse(m, "missing", fallback))) == 2 && Str.contains("a,b", Map.getOrElse(m, "missing", fallback))
 
 def intMapGet(k: Int): Bool =
   for {
