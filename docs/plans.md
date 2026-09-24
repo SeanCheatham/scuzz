@@ -13,6 +13,7 @@
 - [x] Use Float boxes for closure captures and dynamic Float arguments and results.
 - [x] Use checked Float types at generic user-call arguments and results.
 - [x] Use Float results for generic method calls and Float comparisons.
+- [x] Use resolved method result types in list literals.
 - [ ] Audit the remaining typed boxing paths in IO, streams, and other scalar containers.
 - [x] Run kernel, codegen, fuzz, and fixed-point checks.
 - [x] Measure both compiler commands.

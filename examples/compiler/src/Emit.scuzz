@@ -979,7 +979,10 @@ def emitListAt(xs: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List
   if (List.isEmpty(xs)) Slot(line(Str.concat(tmp(prefix, "0"), "call ptr @sz_list_nil()")), pct(prefix, "0"), true) else emitListCons(List.at(xs, 0), List.tail(xs), prefix, strs, defs, ens, ps, loc, i)
 
 def emitListCons(e: Expr, rest: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
-  emitListCons2(emitListAt(rest, prefix, strs, defs, ens, ps, loc, i + 1), emitExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps, loc), prefix, i, exprIsI64(e, ps, defs), isFloatExpr(e, ps, defs), ps)
+  emitListConsMethod(e, rest, prefix, strs, defs, ens, ps, loc, i, methodValueTy(e, defs, ens, ps, loc))
+
+def emitListConsMethod(e: Expr, rest: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, methodTy: String): Slot =
+  emitListCons2(emitListAt(rest, prefix, strs, defs, ens, ps, loc, i + 1), emitExpr(e, Str.concat(prefix, Str.concat("_e", Str.fromInt(i))), strs, defs, ens, ps, loc), prefix, i, isI64Ty(methodTy) || exprIsI64(e, ps, defs), methodTy == "Float" || isFloatExpr(e, ps, defs), ps)
 
 def emitListCons2(tail: Slot, elem: Slot, prefix: String, i: Int, isInt: Bool, isFloat: Bool, ps: List[Param]): Slot =
   tail match {

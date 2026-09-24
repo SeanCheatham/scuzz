@@ -828,7 +828,7 @@ def floatBoxEq(): Bool =
   for {
     nan = 0.0 / 0.0
     negZero = 0.0 * (0.0 - 1.0)
-  } yield [nan] != [nan] && !List.contains([nan], nan) && [negZero] == [0.0] && List.contains([negZero], 0.0) && genericList(negZero) == [0.0] && genericList(nan) != genericList(nan) && id(negZero) == 0.0 && id(nan) != id(nan) && Opt.Some(negZero).getOrElse(0.0) == 0.0 && Opt.Some(nan).getOrElse(0.0) != Opt.Some(nan).getOrElse(0.0)
+  } yield [nan] != [nan] && !List.contains([nan], nan) && [negZero] == [0.0] && List.contains([negZero], 0.0) && genericList(negZero) == [0.0] && genericList(nan) != genericList(nan) && id(negZero) == 0.0 && id(nan) != id(nan) && Opt.Some(negZero).getOrElse(0.0) == 0.0 && Opt.Some(nan).getOrElse(0.0) != Opt.Some(nan).getOrElse(0.0) && [Opt.Some(negZero).getOrElse(0.0)] == [0.0]
 
 def floatTupleEq(): Bool =
   for {
