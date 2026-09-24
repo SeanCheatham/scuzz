@@ -594,7 +594,21 @@ def emitPrint2(s: Slot, prefix: String): Slot =
   Slot(join(s.code, join(line(Str.concat(tmp(prefix, "io"), Str.concat("call ptr @sz_io_println(ptr ", Str.concat(s.val, ")")))), if (s.owned) line(Str.concat("call void @sz_release(ptr ", Str.concat(s.val, ")"))) else "")), pct(prefix, "io"), true)
 
 def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (op == "::") emitCall("List.cons", l :: r :: noExpr(), prefix, strs, defs, ens, ps, loc, 0) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps, loc) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps, loc) else emitBinFl(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), op, prefix, ps, isFloatExpr(l, ps, defs) || isFloatExpr(r, ps, defs) || exprRetTyEns(l, defs, ens, ps, loc) == "Float" || exprRetTyEns(r, defs, ens, ps, loc) == "Float", exprIsPtr(l, defs, ens, ps, loc) || exprIsPtr(r, defs, ens, ps, loc))
+  if (op == "::") emitCall("List.cons", l :: r :: noExpr(), prefix, strs, defs, ens, ps, loc, 0) else if (op == "&&") emitSc(true, l, r, prefix, strs, defs, ens, ps, loc) else if (op == "||") emitSc(false, l, r, prefix, strs, defs, ens, ps, loc) else emitBinFl(emitExpr(l, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc), emitExpr(r, Str.concat(prefix, "_r"), strs, defs, ens, ps, loc), op, prefix, ps, isFloatExpr(l, ps, defs) || isFloatExpr(r, ps, defs) || exprRetTyEns(l, defs, ens, ps, loc) == "Float" || exprRetTyEns(r, defs, ens, ps, loc) == "Float" || methodValueTy(l, defs, ens, ps, loc) == "Float" || methodValueTy(r, defs, ens, ps, loc) == "Float", exprIsPtr(l, defs, ens, ps, loc) || exprIsPtr(r, defs, ens, ps, loc))
+
+def methodValueTy(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
+  e match {
+    case Expr.EMethod(recv, name, args, _) => methodValueTyHit(methodHit(defs, recvEnTy(tyHead(exprRetTyEns(recv, defs, ens, ps, loc)), ens, defs, name), name), userArgTys(recv :: args, defs, ens, ps, loc))
+    case _ => ""
+  }
+
+def methodValueTyHit(hit: List[Fun], argTys: List[String]): String =
+  if (List.isEmpty(hit)) "" else methodValueTyFun(List.at(hit, 0), argTys)
+
+def methodValueTyFun(f: Fun, argTys: List[String]): String =
+  f match {
+    case Fun(_, _, _, _, params, ret, _, _, _) => callRetArgTy(params, argTys, ret)
+  }
 
 def isFloatExpr(e: Expr, ps: List[Param], defs: Ftab): Bool =
   e match {
@@ -3315,7 +3329,10 @@ def symOf(mod: String, name: String): String =
   Str.concat(if (mod == "") "Main" else mod, Str.concat("_", name))
 
 def emitUser6(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, params: List[Param], ret: String, argTys: List[String], retTy: String): Slot =
-  if (!isI64Ty(ret) && isI64Ty(retTy)) emitUnboxSlot(emitUser7(f, code, prefix, llvmRet(ret), true, packCall(params, vals, owns, argTys, prefix, 0)), prefix) else emitUser7(f, code, prefix, llvmRet(ret), !isI64Ty(ret), packCall(params, vals, owns, argTys, prefix, 0))
+  if (!isI64Ty(ret) && (isI64Ty(retTy) || isI64Ty(callRetArgTy(params, argTys, ret)))) emitUnboxSlot(emitUser7(f, code, prefix, llvmRet(ret), true, packCall(params, vals, owns, argTys, prefix, 0)), prefix) else emitUser7(f, code, prefix, llvmRet(ret), !isI64Ty(ret), packCall(params, vals, owns, argTys, prefix, 0))
+
+def callRetArgTy(params: List[Param], argTys: List[String], ret: String): String =
+  if (!isTyParam(ret) || List.isEmpty(params) || List.isEmpty(argTys)) "" else if (List.at(params, 0).ty == ret) List.at(argTys, 0) else callRetArgTy(List.tail(params), List.tail(argTys), ret)
 
 def emitUser7(f: String, code: String, prefix: String, ty: String, owned: Bool, p: ((String, String), String)): Slot =
   p match {
@@ -3572,16 +3589,16 @@ def methEnOfH(d: Fun, rest: List[Fun], meth: String): String =
   }
 
 def emitMethodVal(recv: Expr, name: String, args: List[Expr], prefix: String, en: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitMethodVal2(emitExprFid(recv, Str.concat(prefix, "_mr"), strs, defs, ens, ps, loc, fid), emitArgList(args, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid + fmCount(recv)), name, prefix, en, defs, userArgTys(recv :: args, defs, ens, ps, loc))
+  emitMethodVal2(emitExprFid(recv, Str.concat(prefix, "_mr"), strs, defs, ens, ps, loc, fid), emitArgList(args, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid + fmCount(recv)), name, prefix, en, defs, userArgTys(recv :: args, defs, ens, ps, loc), exprRetTyEns(Expr.EMethod(recv, name, args, 0), defs, ens, ps, loc))
 
-def emitMethodVal2(r: Slot, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: Ftab, argTys: List[String]): Slot =
+def emitMethodVal2(r: Slot, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: Ftab, argTys: List[String], retTy: String): Slot =
   r match {
-    case Slot(rc, rv, ro) => emitMethodVal3(rc, rv, ro, ap, name, prefix, en, defs, argTys)
+    case Slot(rc, rv, ro) => emitMethodVal3(rc, rv, ro, ap, name, prefix, en, defs, argTys, retTy)
   }
 
-def emitMethodVal3(rc: String, rv: String, ro: Bool, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: Ftab, argTys: List[String]): Slot =
+def emitMethodVal3(rc: String, rv: String, ro: Bool, ap: (String, List[String], List[Bool]), name: String, prefix: String, en: String, defs: Ftab, argTys: List[String], retTy: String): Slot =
   ap match {
-    case (ac, vals, owns) => emitUserHit(Str.concat(en, Str.concat("_", name)), join(rc, ac), rv :: vals, ro :: owns, prefix, methodHit(defs, en, name), argTys, "")
+    case (ac, vals, owns) => emitUserHit(Str.concat(en, Str.concat("_", name)), join(rc, ac), rv :: vals, ro :: owns, prefix, methodHit(defs, en, name), argTys, retTy)
   }
 
 def methodHit(defs: Ftab, en: String, name: String): List[Fun] =
