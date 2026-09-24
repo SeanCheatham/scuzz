@@ -1257,7 +1257,18 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes()
+
+def memberResolveTypes(): Bool =
+  rejects("""enum E:
+  case A
+def wrong(): E = E.Missing""", "unknown constructor Missing") && rejects("""enum E:
+  case A(n: Int)
+def wrong(): E = E.A""", "A expects 1 args, got 0") && rejects("""record Point(x: Int)
+def wrong(p: Point): Int = p.missing""", "Point has no field missing") && Check.check("""enum E:
+  case A
+def right(): E = E.A""") == "[]" && Check.check("""record Point(x: Int)
+def right(p: Point): Int = p.x""") == "[]"
 
 def ctorArityTypes(): Bool =
   rejects("""enum Pair:

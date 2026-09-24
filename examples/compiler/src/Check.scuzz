@@ -1002,7 +1002,7 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
     case Expr.EList(xs) => inferList(xs, env, funs, ens)
     case Expr.ETuple(xs) => inferTuple(xs, env, funs, ens)
     case Expr.EMethod(recv, name, args, _) => inferMethod(recv, name, args, env, funs, ens, e)
-    case Expr.EField(recv, name, _) => inferField(recv, name, env, funs, ens)
+    case Expr.EField(recv, name, off) => inferField(recv, name, env, funs, ens, (modFile(env), off))
     case Expr.ELam(p, ty, body) => inferLam(ty, infer(body, bindLam(p, ty, env), funs, ens))
     case Expr.EMatch(s, arms, off) => inferMatch(s, arms, env, funs, ens, (modFile(env), off))
     case Expr.EFor(bs, body, _) => inferFor(bs, body, env, funs, ens)
@@ -1867,23 +1867,23 @@ def hasEn(ens: List[En], name: String): Bool =
     case h :: rest => h.name == name || hasEn(rest, name)
   }
 
-def inferField(recv: Expr, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+def inferField(recv: Expr, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   recv match {
-    case Expr.EVar(en, _) => if (hasEn(ens, en)) ok(en) else inferFieldVar(en, name, env, funs, ens)
-    case _ => fieldOf(infer(recv, env, funs, ens), name, ens)
+    case Expr.EVar(en, _) => if (hasEn(ens, en)) inferNamedCtor(en, name, [], env, funs, ens, span, ens) else inferFieldVar(en, name, env, funs, ens, span)
+    case _ => fieldOf(infer(recv, env, funs, ens), name, ens, span)
   }
 
-def inferFieldVar(en: String, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  inferFieldHit(ftabGetMod(funs.tab, en, name), en, name, env, funs, ens)
+def inferFieldVar(en: String, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  inferFieldHit(ftabGetMod(funs.tab, en, name), en, name, env, funs, ens, span)
 
-def inferFieldHit(hit: List[Fun], en: String, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens, noSpan()), name, ens) else okTy(funTyOf(List.at(hit, 0)))
+def inferFieldHit(hit: List[Fun], en: String, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(hit)) fieldOf(inferVar(en, env, funs, ens, span), name, ens, span) else okTy(funTyOf(List.at(hit, 0)))
 
-def fieldOf(o: Out, name: String, ens: List[En]): Out =
-  if (hasErr(o)) o else fieldOf2(tyStr(o), name, ens, o.span)
+def fieldOf(o: Out, name: String, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(o)) o else fieldOf2(tyStr(o), name, ens, span)
 
 def fieldOf2(ty: String, name: String, ens: List[En], span: (String, Int)): Out =
-  if (isTup(ty) && isTupField(name)) tupFieldAt(Type.tupPartsStr(ty), tupIdx(name), name, span) else if (isTup(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else if (Type.isFunStr(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else fieldOf3(fieldNamed(specializeEnums(ens, ty), Type.headNameStr(ty), name), ty)
+  if (isTup(ty) && isTupField(name)) tupFieldAt(Type.tupPartsStr(ty), tupIdx(name), name, span) else if (isTup(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else if (Type.isFunStr(ty) && tupBadName(name)) bad(Str.concat("tuple has no field ", name), span) else fieldOf3(fieldNamed(specializeEnums(ens, ty), Type.headNameStr(ty), name), ty, name, span)
 
 def isTupField(name: String): Bool =
   tupIdx(name) >= 0
@@ -1900,8 +1900,8 @@ def tupBadName(name: String): Bool =
 def tupFieldAt(parts: List[String], i: Int, name: String, span: (String, Int)): Out =
   if (i < 0 || i >= List.len(parts)) bad(Str.concat("tuple has no field ", name), span) else ok(List.at(parts, i))
 
-def fieldOf3(ft: String, ty: String): Out =
-  if (ft == "") ok(ty) else ok(ft)
+def fieldOf3(ft: String, ty: String, name: String, span: (String, Int)): Out =
+  if (ft != "") ok(ft) else if (Type.isTyParam(ty)) ok(ty) else bad(Str.concat(ty, Str.concat(" has no field ", name)), span)
 
 def fieldNamed(ens: List[En], ty: String, name: String): String =
   if (List.isEmpty(ens)) "" else fieldNamed1(List.at(ens, 0), List.tail(ens), ty, name)
