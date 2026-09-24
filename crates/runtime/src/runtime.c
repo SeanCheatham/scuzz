@@ -1615,6 +1615,8 @@ int64_t sz_string_uchar_at(const SzString *s, int64_t index) {
   size_t used;
   if (!s || index < 0)
     return -1;
+  if (s->is_ascii)
+    return (size_t)index < s->len ? (unsigned char)s->data[index] : -1;
   off = utf8_cp_off(s, index);
   if (off < 0 || (size_t)off >= s->len)
     return -1;
