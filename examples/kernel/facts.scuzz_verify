@@ -25,6 +25,9 @@ oracle mapParameters(n: Int): Bool =
 oracle numericMapGet(): Bool =
   Main.intMapGet(7)
 
+oracle numericListElements(): Bool =
+  Main.numericListElements(7)
+
 oracle constructorStrings(s: String): Bool =
   Main.literalPacket(LiteralPacket.Text(s)) == (if (s == "ready") 1 else 0)
 
