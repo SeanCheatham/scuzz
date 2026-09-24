@@ -686,7 +686,23 @@ impl Get[T] for Opt:
       case Opt.Some(x) => x
       case Opt.None => default
     }
-def wrong(): Int = Opt.Some(1.0).getOrElse(0.0)""", "does not match declared")
+def wrong(): Int = Opt.Some(1.0).getOrElse(0.0)""", "does not match declared") && rejects("""record Box[T](value: T)
+trait Extract[T]:
+  def extract(): T
+impl Extract[T] for Box:
+  def extract(): T = self.value
+def wrong(): Int = Box(1.0).extract()""", "does not match declared") && rejects("""enum Opt[T]:
+  case Some(value: T)
+  case None
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[T] for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+def wrong(): Float = Opt.Some(1.0).getOrElse(1)""", "arg type mismatch")
 
 def unknownTypes(): Bool =
   rejects("def wrong(x: Missing): Missing = x", "unknown type Missing") && rejects("def wrong(x: List[Missing]): Int = 1", "unknown type List[Missing]") && rejects("def wrong(): Missing = 1", "unknown type Missing") && rejects("""enum E:
