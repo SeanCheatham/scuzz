@@ -998,6 +998,9 @@ def interpolatedEscapes(s: String): String =
 def interpolatedHole(s: String): String =
   s"${Str.concat("\"", s)}"
 
+def interpolatedTriple(): String =
+  s"triple:${"""a"}b"""}"
+
 def alternativeInt(n: Int): Bool =
   n match {
     case -7 | 2 | 19 => true
@@ -1238,6 +1241,7 @@ b"""
     _ <- IO.println(s"aliasMain:${nextId(mainId)}")
     interpName = "hole"
     _ <- IO.println(s"interpCheck:$interpName:${Str.len(interpName) + 1}")
+    _ <- IO.println(interpolatedTriple())
     _ <- IO.println(s"aliasHole:${(mainId: UserId)}:${((x: UserId) => x + 1)(mainId)}")
     _ <- IO.println(aliasHoleDef(mainId))
     _ <- IO.println(s"aliasTag:${showTag("ok")}")

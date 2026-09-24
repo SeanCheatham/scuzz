@@ -213,7 +213,7 @@ def internInterpSkip(acc: Strs, s: String, i: Int): Strs =
   if (i >= Str.len(s)) acc else if (isIdentCont(Str.charAt(s, i))) internInterpSkip(acc, s, i + 1) else internInterp(acc, s, i, Builder.empty())
 
 def internInterpBrace(acc: Strs, s: String, i: Int): Strs =
-  internInterpBrace2(closeBrace(s, i + 2, 1), acc, s, i)
+  internInterpBrace2(Parse.interpCloseBrace(s, i + 2, 1), acc, s, i)
 
 def internInterpBrace2(j: Int, acc: Strs, s: String, i: Int): Strs =
   internInterp(internHole(acc, Str.slice(s, i + 2, j - 1)), s, j, Builder.empty())
@@ -493,18 +493,6 @@ def isSimpleBind(n: String): Bool =
 
 def emitInterp(parts: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitInterpFold(parts, prefix, strs, defs, ens, ps, loc, 0)
-
-def closeBrace(s: String, i: Int, depth: Int): Int =
-  if (i >= Str.len(s) || depth <= 0) i else closeBraceCh(s, i, depth, Str.charAt(s, i))
-
-def closeBraceCh(s: String, i: Int, depth: Int, c: Int): Int =
-  if (c == 34) closeBrace(s, skipQuoted(s, i + 1), depth) else if (c == 123) closeBrace(s, i + 1, depth + 1) else if (c == 125) closeBrace(s, i + 1, depth - 1) else closeBrace(s, i + 1, depth)
-
-def skipQuoted(s: String, i: Int): Int =
-  if (i >= Str.len(s)) i else skipQuotedCh(s, i, Str.charAt(s, i))
-
-def skipQuotedCh(s: String, i: Int, c: Int): Int =
-  if (c == 34) i + 1 else if (c == 92 && i + 1 < Str.len(s)) skipQuoted(s, i + 2) else skipQuoted(s, i + 1)
 
 def emitInterpFold(parts: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int): Slot =
   if (List.isEmpty(parts)) emitStrAs("", prefix, strs, "s") else emitInterpAcc(emitInterpPart(List.at(parts, 0), prefix, i, strs, defs, ens, ps, loc), List.tail(parts), prefix, strs, defs, ens, ps, loc, i + 1)
@@ -4684,7 +4672,7 @@ def rewriteIdent(n: String, from: String, to: String): String =
   if (n == from) to else n
 
 def rewriteInterpBrace(s: String, i: Int, b: Builder, from: String, to: String): String =
-  rewriteInterpBrace2(closeBrace(s, i + 2, 1), s, i, b, from, to)
+  rewriteInterpBrace2(Parse.interpCloseBrace(s, i + 2, 1), s, i, b, from, to)
 
 def rewriteInterpBrace2(j: Int, s: String, i: Int, b: Builder, from: String, to: String): String =
   rewriteInterpAt(s, j, Builder.append(b, rewriteInterpInner(Str.slice(s, i + 2, j - 1), from, to)), from, to)
