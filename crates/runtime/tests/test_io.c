@@ -3526,6 +3526,28 @@ int main(void) {
     sz_alloc_format_panic(panic, sizeof panic, "probe");
     assert(strstr(panic, "scuzz panic: probe") != NULL);
     assert(strstr(panic, "Main.scuzz:2:14") == NULL);
+    for (int depth = 0; depth < 1024; depth++)
+      sz_panic_push_src("Outer.scuzz:1:1");
+    sz_panic_push_src("Inner.scuzz:2:2");
+    sz_panic_push_src("Deep.scuzz:3:3");
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: Deep.scuzz:3:3: probe") != NULL);
+    sz_panic_pop_src();
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: Inner.scuzz:2:2: probe") != NULL);
+    sz_panic_pop_src();
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: Outer.scuzz:1:1: probe") != NULL);
+    for (int depth = 0; depth < 1024; depth++)
+      sz_panic_pop_src();
+    sz_panic_push_src("Outer.scuzz:1:1");
+    sz_panic_push_src(NULL);
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: Outer.scuzz:1:1: probe") != NULL);
+    sz_panic_pop_src();
+    sz_panic_pop_src();
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: probe") != NULL);
     assert(strstr(panic, "[heap]") != NULL);
     assert(strstr(panic, "live_bytes=") != NULL);
     assert(strstr(panic, "[live]") != NULL);
