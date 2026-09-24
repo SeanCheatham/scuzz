@@ -297,7 +297,7 @@ def showComma(xs: List[Ty]): String =
   if (List.isEmpty(xs)) "" else if (List.isEmpty(List.tail(xs))) show(List.at(xs, 0)) else Str.concat(show(List.at(xs, 0)), Str.concat(", ", showComma(List.tail(xs))))
 
 def parse(s: String): Ty =
-  parseTrim(trim(s))
+  if (s == "Unit") tUnit() else if (s == "Int") tInt() else if (s == "Bool") tBool() else if (s == "String") tStr() else if (s == "Float") tFloat() else if (s == "Any") tAny() else parseTrim(trim(s))
 
 def parseTrim(s: String): Ty =
   if (s == "") tNamed("") else parseArrow(s, arrowAt(s, 0))
