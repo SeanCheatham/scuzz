@@ -82,7 +82,7 @@ def _sp(toks: Toks, i: Int): SpTok =
   if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "") else _spOff(List.at(List.at(toks.groups, i / tokGroup()), i % tokGroup() / tokChunk()), i % tokChunk())
 
 def _spOff(chunk: List[SpTok], i: Int): SpTok =
-  if (List.isEmpty(chunk)) SpTok(Tok.Eof, 0, "") else if (i <= 0) List.at(chunk, 0) else _spOff(List.tail(chunk), i - 1)
+  List.at(chunk, i)
 
 def _at(toks: Toks, i: Int): Tok =
   _sp(toks, i).tok
