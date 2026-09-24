@@ -58,6 +58,15 @@ oracle floatInlineOrder(): Bool =
 oracle floatLocalOrder(): Bool =
   Main.floatLocalOrder()
 
+oracle floatNestedOrder(): Bool =
+  Main.floatNestedOrder([2.0, 0.0 - 1.0, 1.0])
+
+oracle floatDerivedOrder(): Bool =
+  Main.floatDerivedOrder()
+
+oracle floatBoundOrder(): Bool =
+  Main.floatBoundOrder()
+
 oracle floatNaNOrder(): Bool =
   Main.floatNaNOrder()
 

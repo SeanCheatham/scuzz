@@ -513,6 +513,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"floatNaN:${if (floatNaNOrder()) "y" else "n"}")
     _ <- IO.println(s"floatInline:${if (floatInlineOrder()) "y" else "n"}")
     _ <- IO.println(s"floatLocal:${if (floatLocalOrder()) "y" else "n"}")
+    _ <- IO.println(s"floatNested:${if (floatNestedOrder([2.0, 0.0 - 1.0, 1.0])) "y" else "n"}")
+    _ <- IO.println(s"floatDerived:${if (floatDerivedOrder()) "y" else "n"}")
+    _ <- IO.println(s"floatBound:${if (floatBoundOrder()) "y" else "n"}")
     _ <- IO.println(s"zipAllN:${if (numericZipAll(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
@@ -754,20 +757,27 @@ def floatLocalOrder(): Bool =
     xs = [2.0, 0.0 - 1.0, 1.0]
   } yield List.sort(xs) == [0.0 - 1.0, 1.0, 2.0] && List.max(xs) == 2.0 && List.min(xs) == 0.0 - 1.0
 
+def floatNestedOrder(xs: List[Float]): Bool =
+  List.sort(List.take(xs, 2)) == [0.0 - 1.0, 2.0] && List.max(List.take(xs, 2)) == 2.0 && List.min(List.drop(xs, 1)) == 0.0 - 1.0
+
+def floatDerivedOrder(): Bool =
+  for {
+    xs = [2.0, 0.0 - 1.0, 1.0]
+    sorted = List.sort(xs)
+  } yield List.max(sorted) == 2.0 && List.min(sorted) == 0.0 - 1.0
+
+def floatBoundOrder(): Bool =
+  for {
+    x = 2.0
+    xs = [x, 0.0 - 1.0, 1.0]
+    sorted = List.sort(xs)
+  } yield List.max(sorted) == 2.0 && List.min(sorted) == 0.0 - 1.0
+
 def floatNaNOrder(): Bool =
   for {
     nan = 0.0 / 0.0
-    sorted = floatSort([nan, 2.0, 0.0 - 1.0])
-  } yield floatMax(List.take(sorted, 1)) == 0.0 - 1.0 && floatMax(List.take(sorted, 2)) == 2.0 && floatIsNaN(floatMax(List.drop(sorted, 2))) && floatIsNaN(floatMax(sorted)) && floatMin(sorted) == 0.0 - 1.0
-
-def floatMax(xs: List[Float]): Float =
-  List.max(xs)
-
-def floatSort(xs: List[Float]): List[Float] =
-  List.sort(xs)
-
-def floatMin(xs: List[Float]): Float =
-  List.min(xs)
+    sorted = List.sort([nan, 2.0, 0.0 - 1.0])
+  } yield List.max(List.take(sorted, 1)) == 0.0 - 1.0 && List.max(List.take(sorted, 2)) == 2.0 && floatIsNaN(List.max(List.drop(sorted, 2))) && floatIsNaN(List.max(sorted)) && List.min(sorted) == 0.0 - 1.0
 
 def floatIsNaN(x: Float): Bool =
   !(x == x)

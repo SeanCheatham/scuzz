@@ -45,8 +45,6 @@ Required for CLI, server, and desktop applications.
 
 OS threads.
 
-Float ordering from nested list calls can lose the element type during emission. A local value from a nested list call can have the same problem. An explicit `List[Float]` parameter preserves the type.
-
 ### Verification
 
 The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. Locks: [`philosophy.md`](philosophy.md#verification-posture).
