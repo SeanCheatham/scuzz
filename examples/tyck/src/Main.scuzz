@@ -1260,7 +1260,38 @@ def tyckAdt(): Bool =
   Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes() && bareCtorTypes() && kitLetterTypes() && unqualifiedPatternTypes()
 
 def unqualifiedPatternTypes(): Bool =
-  rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && Check.check(srcUnqualifiedPatternRight()) == "[]" && Check.check(srcUnqualifiedPatternNamed()) == "[]" && rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && patternOwnerTypes()
+  rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && Check.check(srcUnqualifiedPatternRight()) == "[]" && Check.check(srcUnqualifiedPatternNamed()) == "[]" && rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && bareScalarPatternTypes() && patternOwnerTypes()
+
+def bareScalarPatternTypes(): Bool =
+  rejects(srcBareScalarWrong(), "pattern case Item does not belong to Int") && rejects(srcBareOptionScalarWrong(), "pattern case Some does not belong to Int") && rejects(srcBareForScalarWrong(), "pattern case Item does not belong to Int") && Check.check(srcBareVariableRight()) == "[]"
+
+def srcBareScalarWrong(): String =
+  """enum Second:
+  case Item(value: Int)
+def wrong(n: Int): Int = n match {
+  case Item(_) => 1
+  case _ => 0
+}"""
+
+def srcBareOptionScalarWrong(): String =
+  """def wrong(n: Int): Int = n match {
+  case Some(_) => 1
+  case _ => 0
+}"""
+
+def srcBareForScalarWrong(): String =
+  """enum Second:
+  case Item(value: Int)
+def wrong(): Int =
+  for {
+    Item(_) = 7
+  } yield 1
+"""
+
+def srcBareVariableRight(): String =
+  """def right(n: Int): Int = n match {
+  case captured => captured
+}"""
 
 def patternOwnerTypes(): Bool =
   rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second") && Check.check(srcQualifiedPatternRight()) == "[]" && forPatternOwnerTypes() && unknownPatternOwnerTypes() && scalarPatternOwnerTypes()
@@ -1570,7 +1601,10 @@ def dumpTyckAdt(): String =
   if (!namedLetterTypes()) dumpNamedLetter() else if (!aliasTypes()) dumpAliasTypes() else if (!unqualifiedPatternTypes()) dumpUnqualifiedPattern() else "tyckAdt"
 
 def dumpUnqualifiedPattern(): String =
-  if (!rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("wrong:", Check.check(srcUnqualifiedPatternWrong())) else if (Check.check(srcUnqualifiedPatternRight()) != "[]") Str.concat("right:", Check.check(srcUnqualifiedPatternRight())) else if (Check.check(srcUnqualifiedPatternNamed()) != "[]") Str.concat("named:", Check.check(srcUnqualifiedPatternNamed())) else if (!rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("nested:", Check.check(srcNestedUnqualifiedPatternWrong())) else dumpPatternOwner()
+  if (!rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("wrong:", Check.check(srcUnqualifiedPatternWrong())) else if (Check.check(srcUnqualifiedPatternRight()) != "[]") Str.concat("right:", Check.check(srcUnqualifiedPatternRight())) else if (Check.check(srcUnqualifiedPatternNamed()) != "[]") Str.concat("named:", Check.check(srcUnqualifiedPatternNamed())) else if (!rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("nested:", Check.check(srcNestedUnqualifiedPatternWrong())) else if (!bareScalarPatternTypes()) dumpBareScalarPattern() else dumpPatternOwner()
+
+def dumpBareScalarPattern(): String =
+  if (!rejects(srcBareScalarWrong(), "pattern case Item does not belong to Int")) Str.concat("scalar:", Check.check(srcBareScalarWrong())) else if (!rejects(srcBareOptionScalarWrong(), "pattern case Some does not belong to Int")) Str.concat("option:", Check.check(srcBareOptionScalarWrong())) else if (!rejects(srcBareForScalarWrong(), "pattern case Item does not belong to Int")) Str.concat("for:", Check.check(srcBareForScalarWrong())) else Str.concat("variable:", Check.check(srcBareVariableRight()))
 
 def dumpPatternOwner(): String =
   if (!rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else if (Check.check(srcQualifiedPatternRight()) != "[]") Str.concat("valid:", Check.check(srcQualifiedPatternRight())) else if (!rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forPure:", Check.check(srcForPureOwnerWrong())) else if (!rejects(srcForDrawOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forDraw:", Check.check(srcForDrawOwnerWrong())) else if (!scalarPatternOwnerTypes()) dumpScalarPatternOwner() else dumpUnknownPatternOwner()
