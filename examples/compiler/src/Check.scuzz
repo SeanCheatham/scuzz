@@ -500,11 +500,9 @@ def resolveKnownKit(f: String, args: List[Expr], env: List[(String, Ty)], funs: 
   if (List.isEmpty(args) && !List.isEmpty(kit.params)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (!Kits.arityOf(kit.kit, List.len(args))) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(Kits.kitParamsOf(kit.kit))), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else checkKnownTy(f, Kits.wantOfSig(kit, List.len(args)), kit.ret, args, env, funs, ens, span)
 
 def enOfCase(ens: List[En], ctor: String): String =
-  if (List.isEmpty(ens)) "" else enOfCase1(List.at(ens, 0), List.tail(ens), ctor)
-
-def enOfCase1(h: En, rest: List[En], ctor: String): String =
-  h match {
-    case En(_, name, _, cases) => if (hasCase(cases, ctor)) name else enOfCase(rest, ctor)
+  ens match {
+    case [] => ""
+    case h :: rest => if (hasCase(h.cases, ctor)) h.name else enOfCase(rest, ctor)
   }
 
 def hasCase(cs: List[EnCase], ctor: String): Bool =
