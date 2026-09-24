@@ -1257,7 +1257,26 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes() && bareCtorTypes()
+
+def bareCtorTypes(): Bool =
+  rejects("""enum E:
+  case A(n: Int)
+def wrong(): E = A""", "A expects 1 args, got 0") && rejects("""record Point(x: Int)
+def wrong(): Point = Point""", "Point expects 1 args, got 0") && rejects("""enum E:
+  case A(n: Int = 1)
+def wrong(): E = E.A""", "A expects 1 args, got 0") && Check.check("""enum E:
+  case A(n: Int = 1)
+def right(): E = E.A()""") == "[]" && Check.check("""enum E:
+  case A(n: Int)
+def right(): E = E.A(1)""") == "[]" && Check.check("""enum E:
+  case A
+def make(n: Int): E = E.A
+def right(): E = make(1)""") == "[]" && Check.check("""enum E:
+  case A
+def right(): E = A""") == "[]" && Check.check("""enum E:
+  case A
+def right(): E = E.A""") == "[]"
 
 def memberResolveTypes(): Bool =
   rejects("""enum E:

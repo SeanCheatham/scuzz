@@ -792,8 +792,11 @@ def checkUser(f: String, ps: List[Param], ret: String, args: List[Expr], env: Li
 
 def checkUserAl(f: String, ps: List[Param], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), al: (List[Expr], String)): Out =
   al match {
-    case (xs, err) => if (err != "") bad(alignErr(f, err, ps, args), span) else checkUserRet(checkKnown(f, paramTys(ps), ret, xs, env, funs, ens, span), f, ps, ret, xs, env, funs, ens, span)
+    case (xs, err) => if (err != "") bad(alignErr(f, err, ps, args), span) else checkUserRet(checkUserKnown(f, paramTys(ps), ret, xs, env, funs, ens, span), f, ps, ret, xs, env, funs, ens, span)
   }
+
+def checkUserKnown(f: String, want: List[String], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.len(want) != List.len(args)) bad(Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(want)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))), span) else retTy(zipCheck(f, Kits.parseTys(want), args, env, funs, ens, span, Type.tNamed("")), Type.parse(ret))
 
 def checkUserRet(o: Out, f: String, ps: List[Param], resultTy: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (hasErr(o) || !Type.isTyParam(resultTy)) o else checkUserRetArg(o, f, directResultArg(ps, args, resultTy, env, funs, ens), receiverResultArg(ps, args, resultTy, env, funs, ens), ens, span)
@@ -1869,7 +1872,7 @@ def hasEn(ens: List[En], name: String): Bool =
 
 def inferField(recv: Expr, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   recv match {
-    case Expr.EVar(en, _) => if (hasEn(ens, en)) inferNamedCtor(en, name, [], env, funs, ens, span, ens) else inferFieldVar(en, name, env, funs, ens, span)
+    case Expr.EVar(en, _) => if (hasEn(ens, en)) inferBareCtor(en, name, env, funs, ens, span) else inferFieldVar(en, name, env, funs, ens, span)
     case _ => fieldOf(infer(recv, env, funs, ens), name, ens, span)
   }
 
@@ -2447,13 +2450,13 @@ def inferVar(s: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span
   inferVar2(s, lookupEnv(env, s), env, funs, ens, span)
 
 def inferVar2(s: String, t: Ty, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (s == "") bad("unexpected token", span) else if (Type.show(t) == "") inferVarFun(s, findFunPrefer(funs, s, env), ens, span) else varOut(t, s, ens)
+  if (s == "") bad("unexpected token", span) else if (Type.show(t) == "") inferVarFun(s, findFunPrefer(funs, s, env), env, funs, ens, span) else varOut(t, s, ens)
 
-def inferVarFun(s: String, hit: List[Fun], ens: List[En], span: (String, Int)): Out =
-  if (List.isEmpty(hit)) inferVarCase(s, ens, span) else okTy(funTyOf(List.at(hit, 0)))
+def inferVarFun(s: String, hit: List[Fun], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(hit)) inferVarCase(s, env, funs, ens, span) else okTy(funTyOf(List.at(hit, 0)))
 
-def inferVarCase(s: String, ens: List[En], span: (String, Int)): Out =
-  if (enOfCase(ens, s) == "") bad(Str.concat("unbound variable ", s), span) else ok(enOfCase(ens, s))
+def inferVarCase(s: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (enOfCase(ens, s) == "") bad(Str.concat("unbound variable ", s), span) else inferBareCtor(enOfCase(ens, s), s, env, funs, ens, span)
 
 def funTyOf(d: Fun): Ty =
   d match {
@@ -3481,6 +3484,24 @@ def specializeField(p: Param, tps: List[String], args: List[Ty]): Param =
 
 def specializeType(ty: String, tps: List[String], args: List[Ty]): String =
   if (List.isEmpty(tps) || List.isEmpty(args)) ty else specializeType(substTy(ty, List.at(tps, 0), Type.show(List.at(args, 0))), List.tail(tps), List.tail(args))
+
+def inferBareCtor(en: String, ctor: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  inferBareCtorFields(en, ctor, env, funs, ens, span, bareCtorFields(ens, en, ctor))
+
+def inferBareCtorFields(en: String, ctor: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), count: Int): Out =
+  if (count < 0) bad(Str.concat("unknown constructor ", ctor), span) else if (count > 0) bad(Str.concat(ctor, Str.concat(" expects ", Str.concat(Str.fromInt(count), " args, got 0"))), span) else inferNamedCtor(en, ctor, [], env, funs, ens, span, ens)
+
+def bareCtorFields(ens: List[En], en: String, ctor: String): Int =
+  ens match {
+    case [] => 0 - 1
+    case h :: rest => if (h.name == en) bareCtorCaseFields(h.cases, ctor) else bareCtorFields(rest, en, ctor)
+  }
+
+def bareCtorCaseFields(cases: List[EnCase], ctor: String): Int =
+  cases match {
+    case [] => 0 - 1
+    case h :: rest => if (h.name == ctor) List.len(h.fields) else bareCtorCaseFields(rest, ctor)
+  }
 
 def inferNamedCtor(en: String, ctor: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), rest: List[En]): Out =
   if (List.isEmpty(rest)) bad(Str.concat("unknown constructor ", ctor), span) else inferNamedCtorEn(List.at(rest, 0), List.tail(rest), en, ctor, args, env, funs, ens, span)
