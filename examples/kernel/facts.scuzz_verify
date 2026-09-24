@@ -49,6 +49,12 @@ oracle floatFoldSeed(): Bool =
 oracle floatListOps(): Bool =
   Main.floatListOps([1.0, 2.0], 0.5)
 
+oracle floatOrderOps(): Bool =
+  Main.floatOrderOps([2.0, 0.0 - 1.0, 1.0])
+
+oracle floatNaNOrder(): Bool =
+  Main.floatNaNOrder()
+
 oracle numericZipAll(): Bool =
   Main.numericZipAll(7)
 

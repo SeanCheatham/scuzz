@@ -12414,6 +12414,46 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    void *low;
+    void *mid;
+    void *high;
+    void *nan;
+    SzList *xs;
+    SzList *out;
+    sz_alloc_stats(&base_bytes, &base_count);
+    low = test_fbox(-1.0);
+    mid = test_fbox(0.0);
+    high = test_fbox(2.0);
+    nan = test_fbox(NAN);
+    xs = sz_list_cons(low, NULL);
+    out = sz_list_append(xs, nan);
+    sz_release(xs);
+    xs = sz_list_append(out, high);
+    sz_release(out);
+    out = sz_list_append(xs, mid);
+    sz_release(xs);
+    xs = out;
+    out = sz_list_sort_float(xs);
+    assert(sz_list_at(out, 0) == low);
+    assert(sz_list_at(out, 1) == mid);
+    assert(sz_list_at(out, 2) == high);
+    assert(sz_list_at(out, 3) == nan);
+    assert(sz_list_max_float(xs) == nan);
+    assert(sz_list_min_float(xs) == low);
+    sz_release(out);
+    sz_release(xs);
+    sz_release(low);
+    sz_release(mid);
+    sz_release(high);
+    sz_release(nan);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* List.groupBy / sum / product. */
   {
     size_t base_bytes = 0, base_count = 0;
