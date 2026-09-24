@@ -832,6 +832,7 @@ def exprIsI64(e: Expr, ps: List[Param], defs: Ftab): Bool =
 def exprIsI64Go(e: Expr, ps: List[Param], defs: Ftab): Bool =
   e match {
     case Expr.EInt(_, _) => true
+    case Expr.EFloat(_, _) => true
     case Expr.EBool(_) => true
     case Expr.EVar(s, _) => paramIsI64(ps, s) || isIntSsa(s)
     case Expr.EBin(op, _, _, _) => op != "::"
@@ -4542,7 +4543,7 @@ def stemBpsAt(ns: List[String], pre: String, sid: Int, tys: List[String], ens: L
   if (List.len(ns) < 2) ps else if (List.len(ns) == 2) addStem(List.at(ns, 0), leftStem(pre, sid, tys), stemTy(tys, 0), ens, addStem(List.at(List.tail(ns), 0), rightStem(pre, sid, tys), stemTy(tys, 1), ens, ps)) else addStem(List.at(ns, 0), leftStem(pre, sid, tys), stemTy(tys, 0), ens, stemBpsAt(List.tail(ns), Str.concat(pre, Str.concat("_n", Str.fromInt(sid))), sid + 1, if (List.isEmpty(tys)) tys else List.tail(tys), ens, ps))
 
 def stemTy(tys: List[String], k: Int): String =
-  if (slotInt(tys, k)) "Int" else if (k <= 0) headOrAny(tys) else secondOrAny(tys)
+  if (k <= 0) headOrAny(tys) else secondOrAny(tys)
 
 def addStem(n: String, stem: String, ty: String, ens: List[En], ps: List[Param]): List[Param] =
   nestBps(n, stem, ty, ens, ps)

@@ -21,6 +21,7 @@ grep -Fxq 'extBy:y' /tmp/kernel.out
 grep -Fxq 'reduceN:y' /tmp/kernel.out
 grep -Fxq 'foldSeed:y' /tmp/kernel.out
 grep -Fxq 'foldNum:y' /tmp/kernel.out
+grep -Fxq 'foldFloat:y' /tmp/kernel.out
 grep -Fxq 'zipAllN:y' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
