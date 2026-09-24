@@ -6514,7 +6514,15 @@ def hoistNeth(ir: String): String =
   hoistNethPairs(ir, findNeths(ir, 0, [], []))
 
 def findNeths(s: String, i: Int, stack: List[Int], acc: List[(Int, Int)]): List[(Int, Int)] =
-  if (i >= Str.len(s)) List.reverse(acc) else if (nethBegAt(s, i)) findNeths(s, i + 6, i :: stack, acc) else if (nethEndAt(s, i) && !List.isEmpty(stack)) findNeths(s, i + 6, List.tail(stack), (List.at(stack, 0), i) :: acc) else findNeths(s, i + 1, stack, acc)
+  if (i >= Str.len(s)) List.reverse(acc) else findNethsChunk(s, i, stack, acc, Str.slice(s, i, i + 4096))
+
+def findNethsChunk(s: String, i: Int, stack: List[Int], acc: List[(Int, Int)], chunk: String): List[(Int, Int)] =
+  findNethsNext(s, i, stack, acc, Str.len(chunk), Str.indexOf(chunk, """NETHB
+"""), Str.indexOf(chunk, """NETHE
+"""))
+
+def findNethsNext(s: String, i: Int, stack: List[Int], acc: List[(Int, Int)], n: Int, begin: Int, end: Int): List[(Int, Int)] =
+  if (begin < 0 && end < 0) findNeths(s, if (n >= 4096) i + n - 5 else i + n, stack, acc) else if (begin >= 0 && (end < 0 || begin < end)) findNeths(s, i + begin + 6, i + begin :: stack, acc) else if (!List.isEmpty(stack)) findNeths(s, i + end + 6, List.tail(stack), (List.at(stack, 0), i + end) :: acc) else findNeths(s, i + end + 1, stack, acc)
 
 def hoistNethPairs(s: String, pairs: List[(Int, Int)]): String =
   Builder.result(hoistNethRest(s, pairs, hoistNethBodies(s, pairs, pairs, Builder.empty())))
@@ -6562,9 +6570,6 @@ def allSkipsHd(p: (Int, Int), rest: List[(Int, Int)], acc: List[(Int, Int)]): Li
 
 def nethBegAt(s: String, i: Int): Bool =
   i + 6 <= Str.len(s) && Str.charAt(s, i) == 78 && Str.charAt(s, i + 1) == 69 && Str.charAt(s, i + 2) == 84 && Str.charAt(s, i + 3) == 72 && Str.charAt(s, i + 4) == 66 && Str.charAt(s, i + 5) == 10
-
-def nethEndAt(s: String, i: Int): Bool =
-  i + 6 <= Str.len(s) && Str.charAt(s, i) == 78 && Str.charAt(s, i + 1) == 69 && Str.charAt(s, i + 2) == 84 && Str.charAt(s, i + 3) == 72 && Str.charAt(s, i + 4) == 69 && Str.charAt(s, i + 5) == 10
 
 def emit(src: String): String =
   emitOne(Parse.parseFiles(("Main", src) :: []), collectToks(Lexer.lex(src), emptyStrs()), ("Main", src) :: [])
