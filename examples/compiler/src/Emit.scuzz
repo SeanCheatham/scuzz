@@ -601,11 +601,17 @@ def isFloatExpr(e: Expr, ps: List[Param], defs: Ftab): Bool =
     case Expr.EFloat(_, _) => true
     case Expr.EVar(s, _) => paramTy(ps, s) == "Float"
     case Expr.ECall(f, _, _) => funRetStr(defs, f) == "Float" || f == "Float.fromInt"
-    case Expr.EMethod(r, n, _, _) => isFloatMeth(r, n) || isFloatExpr(r, ps, defs)
+    case Expr.EMethod(r, n, _, _) => isFloatMeth(r, n) || isFloatCall(r, n, defs) || isFloatExpr(r, ps, defs)
     case Expr.EBin(_, a, b, _) => isFloatExpr(a, ps, defs) || isFloatExpr(b, ps, defs)
     case Expr.EUn(_, inner, _) => isFloatExpr(inner, ps, defs)
     case Expr.ENamed(_, inner) => isFloatExpr(inner, ps, defs)
     case Expr.EAscribe(inner, _, _) => isFloatExpr(inner, ps, defs)
+    case _ => false
+  }
+
+def isFloatCall(r: Expr, n: String, defs: Ftab): Bool =
+  r match {
+    case Expr.EVar(m, _) => funRetStr(defs, qualFun(m, n)) == "Float"
     case _ => false
   }
 
