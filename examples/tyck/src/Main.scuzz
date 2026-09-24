@@ -1397,7 +1397,10 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity()
+  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes()
+
+def orderedListTypes(): Bool =
+  Check.check("def right(): List[Int] = List.sort([2, 1])") == "[]" && Check.check("def right(): List[String] = List.sort([\"b\", \"a\"])") == "[]" && Check.check("def right(): Int = List.max([1, 2])") == "[]" && Check.check("def right(): String = List.min([\"b\", \"a\"])") == "[]" && rejects("def wrong(): List[Float] = List.sort([1.0, 2.0])", "List.sort needs List[Int] or List[String]") && rejects("def wrong(): Float = List.max([1.0, 2.0])", "List.max needs List[Int] or List[String]") && rejects("def wrong(): Bool = List.min([true, false])", "List.min needs List[Int] or List[String]")
 
 def dumpFail(): String =
   if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else "other"
