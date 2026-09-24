@@ -351,7 +351,7 @@ def emitExprGo(e: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], p
     case Expr.EUn(op, inner, _) => emitUn(op, inner, prefix, strs, defs, ens, ps, loc)
     case Expr.ENamed(_, inner) => emitExprFid(inner, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EMethod(recv, name, args, _) => if (isFmName(name)) emitFmRt(fmRt(name), recv, args, prefix, strs, defs, ens, ps, loc, fid) else if (name == "apply") emitApplyRecv(recv, args, prefix, strs, defs, ens, ps, loc, fid) else if (name == "map") emitIoMap(recv, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorCall(recv, name, args, prefix, strs, defs, ens, ps, loc, fid)
-    case Expr.ELam(p, _, body) => emitLam(p, body, prefix, strs, defs, ens, ps, loc)
+    case Expr.ELam(p, ty, body) => if (ty == "") emitLam(p, body, prefix, strs, defs, ens, ps, loc) else emitLamTyped(p, ty, body, prefix, strs, defs, ens, ps, loc)
     case Expr.EIf(c, t, el, off) => emitIfFid(c, t, el, off, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EField(recv, name, _) => emitField(recv, name, prefix, strs, defs, ens, ps, loc)
     case Expr.EMatch(s, arms, off) => emitMatch(s, arms, off, prefix, strs, defs, ens, ps, loc, fid)
@@ -600,7 +600,7 @@ def isFloatExpr(e: Expr, ps: List[Param], defs: Ftab): Bool =
   e match {
     case Expr.EFloat(_, _) => true
     case Expr.EVar(s, _) => paramTy(ps, s) == "Float"
-    case Expr.ECall(f, _, _) => funRetStr(defs, f) == "Float" || f == "Float.fromInt"
+    case Expr.ECall(f, _, _) => funRetStr(defs, f) == "Float" || Type.funRetStr(paramTy(ps, f)) == "Float" || f == "Float.fromInt"
     case Expr.EMethod(r, n, _, _) => isFloatMeth(r, n) || isFloatCall(r, n, defs) || isFloatExpr(r, ps, defs)
     case Expr.EBin(_, a, b, _) => isFloatExpr(a, ps, defs) || isFloatExpr(b, ps, defs)
     case Expr.EUn(_, inner, _) => isFloatExpr(inner, ps, defs)
@@ -1749,6 +1749,9 @@ def stampNethC(ir: String, key: String): String =
 def emitLam(bind: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitLamWithCopy(bind, body, prefix, strs, defs, ens, ps, loc, copyPs(ps))
 
+def emitLamTyped(bind: String, ty: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+  emitLam2(emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, false, ty), emitPackEnv(copyPs(ps), Str.concat(prefix, "_e")), prefix)
+
 def emitLamWithCopy(bind: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, ps2: List[Param]): Slot =
   emitLam2(emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, false), emitPackEnv(ps2, Str.concat(prefix, "_e")), prefix)
 
@@ -2512,11 +2515,14 @@ def emitApply(f: String, args: List[Expr], prefix: String, strs: Strs, defs: Fta
 
 def emitApply1(ty: String, arg: Slot, f: String, prefix: String): Slot =
   arg match {
-    case Slot(ac, av, ao) => emitApplyK(funBoxUnbox(ty), ac, av, ao && !isViewArgTy(ty), f, prefix)
+    case Slot(ac, av, ao) => emitApplyK(funBoxUnbox(ty), ac, av, ao && !isViewArgTy(ty), f, prefix, isFloatFunArg(ty))
   }
 
 def funBoxUnbox(t: String): Int =
-  if (t == "Any" || t == "") 3 else if (Str.startsWith(t, "Int =>")) funBoxUnboxInt(t) else if (Str.startsWith(t, "Bool =>")) funBoxUnboxInt(t) else funBoxUnboxPtr(t)
+  if (t == "Any" || t == "") 3 else if (Str.startsWith(t, "Int =>") || Str.startsWith(t, "Bool =>") || isFloatFunArg(t)) funBoxUnboxInt(t) else funBoxUnboxPtr(t)
+
+def isFloatFunArg(t: String): Bool =
+  Str.startsWith(t, "Float =>")
 
 def funBoxUnboxInt(t: String): Int =
   if (endsRetI64(t)) 3 else 1
@@ -2525,13 +2531,13 @@ def funBoxUnboxPtr(t: String): Int =
   if (endsRetI64(t)) 2 else 0
 
 def endsRetI64(t: String): Bool =
-  if (hasSub(t, "=> Int")) true else hasSub(t, "=> Bool")
+  hasSub(t, "=> Int") || hasSub(t, "=> Bool") || hasSub(t, "=> Float")
 
-def emitApplyK(k: Int, ac: String, av: String, ao: Bool, f: String, prefix: String): Slot =
-  emitApply3(k == 1 || k == 3, k == 2 || k == 3, ac, av, ao, f, prefix)
+def emitApplyK(k: Int, ac: String, av: String, ao: Bool, f: String, prefix: String, isFloat: Bool): Slot =
+  emitApply3(k == 1 || k == 3, k == 2 || k == 3, ac, av, ao, f, prefix, isFloat)
 
-def emitApply3(boxArg: Bool, unbox: Bool, ac: String, av: String, ao: Bool, f: String, prefix: String): Slot =
-  emitApply4(boxArg || needBoxApply(av, ao), unbox, join(ac, join(unpackFn(f, prefix), applyBox(boxArg || needBoxApply(av, ao), av, prefix))), av, ao, prefix)
+def emitApply3(boxArg: Bool, unbox: Bool, ac: String, av: String, ao: Bool, f: String, prefix: String, isFloat: Bool): Slot =
+  emitApply4(boxArg || needBoxApply(av, ao), unbox, join(ac, join(unpackFn(f, prefix), applyBox(boxArg || needBoxApply(av, ao), av, prefix, isFloat))), av, ao, prefix)
 
 def unpackFn(f: String, prefix: String): String =
   unpackFnPtr(Str.concat("%", f), prefix)
@@ -2542,8 +2548,8 @@ def unpackFnPtr(pack: String, prefix: String): String =
 def unpackFnPtr2(pack: String, prefix: String): String =
   join(line(Str.concat(tmp(prefix, "fnp"), Str.concat("call ptr @sz_list_head(ptr ", Str.concat(pack, ")")))), join(line(Str.concat(tmp(prefix, "fnt"), Str.concat("call ptr @sz_list_tail(ptr ", Str.concat(pack, ")")))), line(Str.concat(tmp(prefix, "envp"), Str.concat("call ptr @sz_list_head(ptr ", Str.concat(pct(prefix, "fnt"), ")"))))))
 
-def applyBox(boxArg: Bool, av: String, prefix: String): String =
-  if (boxArg) line(Str.concat(tmp(prefix, "ab"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(av, ")")))) else ""
+def applyBox(boxArg: Bool, av: String, prefix: String, isFloat: Bool): String =
+  if (boxArg) boxScalarStem(av, if (isFloat) "Float" else "Int", prefix, "ab") else ""
 
 def emitApply4(boxArg: Bool, unbox: Bool, code: String, av: String, ao: Bool, prefix: String): Slot =
   emitApply5(unbox, join(code, join(applyCall(boxArg, av, prefix), applyDrop(boxArg, av, ao, prefix))), prefix)
@@ -2657,18 +2663,18 @@ def emitApplyRecvFn(fn: Slot, args: List[Expr], ty: String, prefix: String, strs
 def emitApplyRecvArg(fn: Slot, arg: Slot, ty: String, prefix: String): Slot =
   fn match {
     case Slot(fc, fv, fo) => arg match {
-  case Slot(ac, av, ao) => emitApplyRecvK(funBoxUnbox(ty), join(fc, ac), fv, fo, av, ao && !isViewArgTy(ty), prefix)
+  case Slot(ac, av, ao) => emitApplyRecvK(funBoxUnbox(ty), join(fc, ac), fv, fo, av, ao && !isViewArgTy(ty), prefix, isFloatFunArg(ty))
 }
   }
 
-def emitApplyRecvK(k: Int, code: String, fv: String, fo: Bool, av: String, ao: Bool, prefix: String): Slot =
-  if (isFnPack(fv)) emitApplyRecv3(k == 1 || k == 3, k == 2 || k == 3, code, fv, fo, av, ao, prefix) else Slot(code, fv, fo)
+def emitApplyRecvK(k: Int, code: String, fv: String, fo: Bool, av: String, ao: Bool, prefix: String, isFloat: Bool): Slot =
+  if (isFnPack(fv)) emitApplyRecv3(k == 1 || k == 3, k == 2 || k == 3, code, fv, fo, av, ao, prefix, isFloat) else Slot(code, fv, fo)
 
 def isFnPack(v: String): Bool =
   Str.len(v) > 0 && Str.charAt(v, 0) == 37
 
-def emitApplyRecv3(boxArg: Bool, unbox: Bool, code: String, fv: String, fo: Bool, av: String, ao: Bool, prefix: String): Slot =
-  emitApplyRecv4(unbox, join(code, join(unpackFnPtr(fv, prefix), applyBox(boxArg || needBoxApply(av, ao), av, prefix))), boxArg || needBoxApply(av, ao), av, ao, fv, fo, prefix)
+def emitApplyRecv3(boxArg: Bool, unbox: Bool, code: String, fv: String, fo: Bool, av: String, ao: Bool, prefix: String, isFloat: Bool): Slot =
+  emitApplyRecv4(unbox, join(code, join(unpackFnPtr(fv, prefix), applyBox(boxArg || needBoxApply(av, ao), av, prefix, isFloat))), boxArg || needBoxApply(av, ao), av, ao, fv, fo, prefix)
 
 def needBoxApply(av: String, ao: Bool): Bool =
   !ao && (isI64Lit(av) || isIntSsa(av))
@@ -6223,11 +6229,11 @@ def emitPackCons(p: Param, acc: Slot, prefix: String, i: Int): Slot =
 
 def emitPackConsP(p: Param, code: String, cur: String, prefix: String, i: Int): Slot =
   p match {
-    case Param(n, ty, _, _) => emitPackCons2(n, isI64Ty(ty), code, cur, prefix, i)
+    case Param(n, ty, _, _) => emitPackCons2(n, ty, code, cur, prefix, i)
   }
 
-def emitPackCons2(n: String, box: Bool, code: String, cur: String, prefix: String, i: Int): Slot =
-  if (box) emitPackBox(n, code, cur, prefix, i) else emitPackPtr(n, code, cur, prefix, i)
+def emitPackCons2(n: String, ty: String, code: String, cur: String, prefix: String, i: Int): Slot =
+  if (isI64Ty(ty)) emitPackBox(n, code, cur, prefix, i, ty) else emitPackPtr(n, code, cur, prefix, i)
 
 def emitPackPtr(n: String, code: String, cur: String, prefix: String, i: Int): Slot =
   Slot(join(code, join(emitPackConsCall(prefix, i, Str.concat("%", n), cur), relPtr(cur))), pct(prefix, Str.concat("cap", Str.fromInt(i + 1))), true)
@@ -6235,11 +6241,11 @@ def emitPackPtr(n: String, code: String, cur: String, prefix: String, i: Int): S
 def emitPackConsCall(prefix: String, i: Int, hd: String, cur: String): String =
   line(Str.concat(tmp(prefix, Str.concat("cap", Str.fromInt(i + 1))), Str.concat("call ptr @sz_list_cons(ptr ", Str.concat(hd, Str.concat(", ptr ", Str.concat(cur, ")"))))))
 
-def emitPackBox(n: String, code: String, cur: String, prefix: String, i: Int): Slot =
-  emitPackBox2(n, code, cur, prefix, i, Str.concat("bx", Str.fromInt(i)))
+def emitPackBox(n: String, code: String, cur: String, prefix: String, i: Int, ty: String): Slot =
+  emitPackBox2(n, code, cur, prefix, i, Str.concat("bx", Str.fromInt(i)), ty)
 
-def emitPackBox2(n: String, code: String, cur: String, prefix: String, i: Int, bx: String): Slot =
-  Slot(join(code, join(line(Str.concat(tmp(prefix, bx), Str.concat("call ptr @sz_box_i64(i64 %", Str.concat(n, ")")))), join(emitPackConsCall(prefix, i, pct(prefix, bx), cur), join(relPtr(cur), relPtr(pct(prefix, bx)))))), pct(prefix, Str.concat("cap", Str.fromInt(i + 1))), true)
+def emitPackBox2(n: String, code: String, cur: String, prefix: String, i: Int, bx: String, ty: String): Slot =
+  Slot(join(code, join(boxScalarStem(Str.concat("%", n), ty, prefix, bx), join(emitPackConsCall(prefix, i, pct(prefix, bx), cur), join(relPtr(cur), relPtr(pct(prefix, bx)))))), pct(prefix, Str.concat("cap", Str.fromInt(i + 1))), true)
 
 def emitUnpack(ps: List[Param]): String =
   emitUnpackAt(ps, 0)

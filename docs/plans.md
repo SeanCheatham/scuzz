@@ -10,6 +10,7 @@
 - [x] Use a Float box for the `Stream.unfold` seed.
 - [x] Use Float boxes for multi-field enum and record payloads, including record copies.
 - [x] Use Float boxes for Signal values and match evaluator change detection.
+- [x] Use Float boxes for closure captures and dynamic Float arguments and results.
 - [ ] Audit the remaining typed boxing paths in IO, streams, and other scalar containers.
 - [x] Run kernel, codegen, fuzz, and fixed-point checks.
 - [x] Measure both compiler commands.
