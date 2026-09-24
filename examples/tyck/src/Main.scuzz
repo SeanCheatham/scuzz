@@ -568,7 +568,10 @@ def ioTypeCompatibility(): Bool =
   Type.eqStr("IO[Int]", "IO[String, Int]") && !Type.eqStr("IO[String]", "IO[String, Int]") && !Type.eqStr("IO[Int]", "IO[Int, String]") && !Type.eqStr("IO[String, Int]", "IO[Bool, Int]") && rejects("def wrong(x: IO[String]): IO[String, Int] = x", "does not match declared")
 
 def tyckParse(): Bool =
-  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && unknownTypes() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+
+def unknownTypes(): Bool =
+  rejects("def wrong(x: Missing): Missing = x", "unknown type Missing") && rejects("def wrong(x: List[Missing]): Int = 1", "unknown type List[Missing]") && rejects("def wrong(): Missing = 1", "unknown type Missing") && rejects("enum E:\n  case Wrap(value: Missing)\n", "unknown type Missing") && rejects("type Alias = Missing\ndef right(): Int = 1", "unknown type Missing") && rejects("type Alias = List[Missing]", "unknown type List[Missing]") && Check.check("type Alias = Int\ndef right(x: Alias): Alias = x") == "[]" && Check.check("type Alias = Int\nenum E:\n  case Wrap(value: Alias)") == "[]" && Check.check("def id[Value](x: Value): Value = x") == "[]" && Check.check("enum Box[Value]:\n  case Wrap(value: Value)") == "[]" && Check.check("type Boxed[Value] = List[Value]") == "[]"
 
 def tyckClosed(): Bool =
   rejects(srcViewNope(), "unknown function View.nope") && rejects(srcViewArity(), "View.button expects") && rejects(srcSigGet(), "Signal.get arg type mismatch") && rejects(srcUiRun(), "Ui.run arg type mismatch") && rejects(srcIoNope(), "unknown function IO.notAKit") && Check.check(srcTimeoutOk()) == "[]" && rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")
