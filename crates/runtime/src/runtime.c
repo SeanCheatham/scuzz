@@ -1097,7 +1097,7 @@ SzString *sz_string_from_cstr(const char *cstr) {
  * allocation that retain and release never touch. Cache the static source
  * pointer before the content lookup. */
 #define SZ_LIT_BUCKETS 4096
-#define SZ_LIT_CACHE_SLOTS 4096
+#define SZ_LIT_CACHE_SETS 4096
 typedef struct SzLitEnt {
   struct SzLitEnt *next;
   SzString *s;
@@ -1107,7 +1107,18 @@ typedef struct SzLitCache {
   const char *source;
   SzString *value;
 } SzLitCache;
-static SzLitCache g_lit_cache[SZ_LIT_CACHE_SLOTS];
+typedef struct SzLitCacheSet {
+  SzLitCache recent;
+  SzLitCache prior;
+} SzLitCacheSet;
+static SzLitCacheSet g_lit_cache[SZ_LIT_CACHE_SETS];
+
+static void lit_cache_put(SzLitCacheSet *set, const char *source,
+                          SzString *value) {
+  set->prior = set->recent;
+  set->recent.source = source;
+  set->recent.value = value;
+}
 
 void sz_string_lit_cache_clear(void) {
   memset(g_lit_cache, 0, sizeof g_lit_cache);
@@ -1120,14 +1131,21 @@ SzString *sz_string_lit(const char *cstr) {
   uint32_t hash;
   SzLitEnt *e;
   SzString *s;
-  SzLitCache *cached;
+  SzLitCacheSet *cached;
+  SzLitCache prior;
   if (!cstr)
     sz_panic("sz_string_lit(null)");
   cache_slot = (((uintptr_t)cstr >> 4) ^ ((uintptr_t)cstr >> 16)) &
-               (SZ_LIT_CACHE_SLOTS - 1);
+               (SZ_LIT_CACHE_SETS - 1);
   cached = &g_lit_cache[cache_slot];
-  if (cached->source == cstr)
-    return cached->value;
+  if (cached->recent.source == cstr)
+    return cached->recent.value;
+  if (cached->prior.source == cstr) {
+    prior = cached->recent;
+    cached->recent = cached->prior;
+    cached->prior = prior;
+    return cached->recent.value;
+  }
   len = strlen(cstr);
   hash = 5381;
   for (i = 0; i < len; i++)
@@ -1135,8 +1153,7 @@ SzString *sz_string_lit(const char *cstr) {
   hash %= SZ_LIT_BUCKETS;
   for (e = g_lits[hash]; e; e = e->next)
     if (e->s->len == len && !memcmp(e->s->data, cstr, len)) {
-      cached->value = e->s;
-      cached->source = cstr;
+      lit_cache_put(cached, cstr, e->s);
       return e->s;
     }
   s = sz_string_from_bytes(cstr, len);
@@ -1147,8 +1164,7 @@ SzString *sz_string_lit(const char *cstr) {
   e->s = s;
   e->next = g_lits[hash];
   g_lits[hash] = e;
-  cached->value = s;
-  cached->source = cstr;
+  lit_cache_put(cached, cstr, s);
   return s;
 }
 
