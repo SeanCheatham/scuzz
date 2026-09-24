@@ -792,8 +792,17 @@ def checkUser(f: String, ps: List[Param], ret: String, args: List[Expr], env: Li
 
 def checkUserAl(f: String, ps: List[Param], ret: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), al: (List[Expr], String)): Out =
   al match {
-    case (xs, err) => if (err != "") bad(alignErr(f, err, ps, args), span) else checkKnown(f, paramTys(ps), ret, xs, env, funs, ens, span)
+    case (xs, err) => if (err != "") bad(alignErr(f, err, ps, args), span) else checkUserRet(checkKnown(f, paramTys(ps), ret, xs, env, funs, ens, span), ps, ret, xs, env, funs, ens)
   }
+
+def checkUserRet(o: Out, ps: List[Param], resultTy: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  if (hasErr(o) || !Type.isTyParam(resultTy)) o else checkUserRetArg(o, directResultArg(ps, args, resultTy, env, funs, ens))
+
+def checkUserRetArg(o: Out, ty: String): Out =
+  if (ty == "") o else ret(o, ty)
+
+def directResultArg(ps: List[Param], args: List[Expr], resultTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): String =
+  if (List.isEmpty(ps) || List.isEmpty(args)) "" else if (List.at(ps, 0).ty == resultTy) tyStr(infer(stripNamed(List.at(args, 0)), env, funs, ens)) else directResultArg(List.tail(ps), List.tail(args), resultTy, env, funs, ens)
 
 def inferCall(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   resolveCall(f, args, env, funs, ens, span)
