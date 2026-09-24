@@ -999,7 +999,7 @@ def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, 
   }
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
-  if (f == "IO.fail" && !List.isEmpty(args) && isI64Ty(exprRetTyEns(List.at(args, 0), defs, ens, ps, mod))) emitFailBox(code, arg0(vals), prefix) else if (f == "Net.retryAfterMillis") emitKitPtrI64I64("sz_net_retry_after_millis", code, vals, owns, prefix) else if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
+  if (f == "IO.fail" && !List.isEmpty(args) && isI64Ty(exprRetTyEns(List.at(args, 0), defs, ens, ps, mod))) emitFailBox(code, arg0(vals), prefix) else if (f == "Ref.of" && firstNeedsBox(List.at(args, 0), owns, defs, ens, ps, mod)) emitKitUnaryBox("sz_ref_of", code, arg0(vals), prefix) else if ((f == "Ref.set" || f == "Queue.offer" || f == "Deferred.complete") && secondNeedsBox(List.at(args, 1), owns, defs, ens, ps, mod)) emitKitBinaryBoxB(kitBinaryPtr(f), code, arg0(vals), arg1(vals), headOwn(owns), prefix) else if (f == "Net.retryAfterMillis") emitKitPtrI64I64("sz_net_retry_after_millis", code, vals, owns, prefix) else if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
 
 def isRtExtra(f: String): Bool =
   f == "IO.sleep" || f == "IO.fail" || f == "IO.timeout" || f == "IO.when" || f == "IO.unless" || f == "IO.repeatN" || f == "IO.retryN" || f == "Property.sometimes" || f == "Fuzz.hit" || f == "Stream.range" || f == "Deferred.fail"
@@ -2837,6 +2837,9 @@ def emitListNil(code: String, prefix: String): Slot =
 
 def secondNeedsBox(e: Expr, owns: List[Bool], defs: Ftab, ens: List[En], ps: List[Param], mod: String): Bool =
   isI64Ty(exprRetTyEns(e, defs, ens, ps, mod)) && !headOwn(tailOwn(owns))
+
+def firstNeedsBox(e: Expr, owns: List[Bool], defs: Ftab, ens: List[En], ps: List[Param], mod: String): Bool =
+  isI64Ty(exprRetTyEns(e, defs, ens, ps, mod)) && !headOwn(owns)
 
 def emitMapSet(code: String, vals: List[String], owns: List[Bool], prefix: String, numeric: Bool, boxKey: Bool): Slot =
   if (boxKey) emitMapSetBox(code, vals, owns, prefix, numeric) else emitMapSet2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(owns)), headOwn(tailOwn(tailOwn(owns))), prefix, numeric)
