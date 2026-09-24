@@ -491,6 +491,7 @@ def mapSetProof(): IO[Unit] =
 def listProof(): IO[Unit] =
   for {
     xs = ["a", "b", "c"]
+    _ <- IO.println(s"nlist:${if (numericListElements(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
     _ <- IO.println(s"find:${List.join(List.find(xs, x => x == "b"), ",")}")
@@ -666,6 +667,11 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
     _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
   } yield ()
+
+def numericListElements(k: Int): Bool =
+  for {
+    xs = [k, k + 1, k]
+  } yield List.contains(xs, k) && !List.contains(xs, k + 2) && List.indexOf(xs, k) == 0 && List.lastIndexOf(xs, k) == 2 && List.append(xs, k + 2) == [k, k + 1, k, k + 2] && List.intersperse([k, k + 1], k) == [k, k, k + 1]
 
 def describeList(xs: List[String]): String =
   xs match {
