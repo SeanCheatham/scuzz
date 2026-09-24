@@ -568,7 +568,12 @@ def ioTypeCompatibility(): Bool =
   Type.eqStr("IO[Int]", "IO[String, Int]") && !Type.eqStr("IO[String]", "IO[String, Int]") && !Type.eqStr("IO[Int]", "IO[Int, String]") && !Type.eqStr("IO[String, Int]", "IO[Bool, Int]") && rejects("def wrong(x: IO[String]): IO[String, Int] = x", "does not match declared")
 
 def tyckParse(): Bool =
-  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && unknownTypes() && typeArityChecks() && traitContracts() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+
+def expressionTypeAnnotations(): Bool =
+  rejects("def wrong(): Int = 1: Int[String]", "Int expects 0 type args") && rejects("""type Id[T] = T
+def wrong(): Int = 1: Id[Int, String]""", "Id expects 1 type arg") && rejects("@main def main: IO[Unit] = for { f = (x: Missing) => 1; _ <- IO.println(\"ok\") } yield ()", "unknown type Missing") && rejects("@main def main: IO[Unit] = for { f = (x: List[Int, String]) => 1; _ <- IO.println(\"ok\") } yield ()", "List expects 1 type arg") && Check.check("""type Id = Int
+def right(): Int = 1: Id""") == "[]" && Check.check("def right[T](x: T): T = (x: T)") == "[]"
 
 def typeArityChecks(): Bool =
   rejects("def wrong(x: List[Int, String]): Int = 1", "List expects 1 type arg") && rejects("def wrong(x: Map[String]): Int = 1", "Map expects 2 type args") && rejects("def wrong(x: IO[Int, String, Bool]): Int = 1", "IO expects 1 or 2 type args") && rejects("def wrong(x: Int[String]): Int = 1", "Int expects 0 type args") && rejects("""record Box[T](value: T)

@@ -2637,7 +2637,10 @@ def checkArityTraitsNext(o: Out, p: Prog, stems: List[String]): Out =
   if (hasErr(o)) o else checkArityImplsNext(checkArityImpls(p.impls, p.enums, p.aliases), p, stems)
 
 def checkArityImplsNext(o: Out, p: Prog, stems: List[String]): Out =
-  if (hasErr(o)) o else checkArityDefs(p.defs, stems, p.enums, p.aliases)
+  if (hasErr(o)) o else checkArityMain(checkArityDefs(p.defs, stems, p.enums, p.aliases), p)
+
+def checkArityMain(o: Out, p: Prog): Out =
+  if (hasErr(o)) o else checkExprTypes(p.body, p.enums, p.aliases, [], noSpan())
 
 def checkArityTy(ty: String, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
   checkArityTyError(typeArityError(Type.parse(ty), ens, aliases, ts), span)
@@ -2747,10 +2750,75 @@ def checkArityDefsAfter(o: Out, rest: List[Fun], stems: List[String], ens: List[
   if (hasErr(o)) o else checkArityDefs(rest, stems, ens, aliases)
 
 def checkArityDef(d: Fun, ens: List[En], aliases: List[Alias]): Out =
-  checkArityDefRet(checkArityParams(d.params, ens, aliases, d.tparams, (d.mod, d.off)), d.ret, ens, aliases, d.tparams, (d.mod, d.off))
+  checkArityDefBody(checkArityDefRet(checkArityParams(d.params, ens, aliases, d.tparams, (d.mod, d.off)), d.ret, ens, aliases, d.tparams, (d.mod, d.off)), d, ens, aliases)
+
+def checkArityDefBody(o: Out, d: Fun, ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkExprTypes(d.body, ens, aliases, d.tparams, (d.mod, d.off))
 
 def checkArityDefRet(o: Out, ret: String, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
   if (hasErr(o)) o else checkArityTy(ret, ens, aliases, ts, span)
+
+def checkExprType(ty: String, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (ty == "") ok("Unit") else checkExprTypeKnown(checkArityTy(ty, ens, aliases, ts, span), ty, ens, aliases, ts, span)
+
+def checkExprTypeKnown(o: Out, ty: String, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else if (knownTy(Type.parse(ty), ens, List.concat(ts, aliasNames(aliases)))) ok("Unit") else bad(Str.concat("unknown type ", ty), span)
+
+def checkExprTypes(e: Expr, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  e match {
+    case Expr.EAscribe(inner, ty, _) => checkExprTypesNext(checkExprType(ty, ens, aliases, ts, span), inner, ens, aliases, ts, span)
+    case Expr.ELam(_, ty, body) => checkExprTypesNext(checkExprType(ty, ens, aliases, ts, span), body, ens, aliases, ts, span)
+    case Expr.EPrint(inner, _) => checkExprTypes(inner, ens, aliases, ts, span)
+    case Expr.ECall(_, args, _) => checkExprTypesList(args, ens, aliases, ts, span)
+    case Expr.EMethod(recv, _, args, _) => checkExprTypesAfter(checkExprTypes(recv, ens, aliases, ts, span), args, ens, aliases, ts, span)
+    case Expr.EField(recv, _, _) => checkExprTypes(recv, ens, aliases, ts, span)
+    case Expr.EBin(_, l, r, _) => checkExprTypesNext(checkExprTypes(l, ens, aliases, ts, span), r, ens, aliases, ts, span)
+    case Expr.EUn(_, inner, _) => checkExprTypes(inner, ens, aliases, ts, span)
+    case Expr.EIf(c, t, el, _) => checkExprTypesIf(checkExprTypes(c, ens, aliases, ts, span), t, el, ens, aliases, ts, span)
+    case Expr.EMatch(s, arms, _) => checkExprTypesArmsNext(checkExprTypes(s, ens, aliases, ts, span), arms, ens, aliases, ts, span)
+    case Expr.EFor(bs, body, _) => checkExprTypesFor(checkExprTypesBinds(bs, ens, aliases, ts, span), body, ens, aliases, ts, span)
+    case Expr.EList(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
+    case Expr.ETuple(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
+    case Expr.ENamed(_, inner) => checkExprTypes(inner, ens, aliases, ts, span)
+    case _ => ok("Unit")
+  }
+
+def checkExprTypesNext(o: Out, e: Expr, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkExprTypes(e, ens, aliases, ts, span)
+
+def checkExprTypesAfter(o: Out, xs: List[Expr], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkExprTypesList(xs, ens, aliases, ts, span)
+
+def checkExprTypesIf(o: Out, t: Expr, el: Expr, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkExprTypesNext(checkExprTypes(t, ens, aliases, ts, span), el, ens, aliases, ts, span)
+
+def checkExprTypesList(xs: List[Expr], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (List.isEmpty(xs)) ok("Unit") else checkExprTypesAfter(checkExprTypes(List.at(xs, 0), ens, aliases, ts, span), List.tail(xs), ens, aliases, ts, span)
+
+def checkExprTypesArmsNext(o: Out, arms: List[Arm], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkExprTypesArms(arms, ens, aliases, ts, span)
+
+def checkExprTypesArms(arms: List[Arm], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (List.isEmpty(arms)) ok("Unit") else checkExprTypesArm(List.at(arms, 0), List.tail(arms), ens, aliases, ts, span)
+
+def checkExprTypesArm(arm: Arm, rest: List[Arm], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  arm match {
+    case Arm(_, _, body) => checkExprTypesArmsNext(checkExprTypes(body, ens, aliases, ts, span), rest, ens, aliases, ts, span)
+  }
+
+def checkExprTypesFor(o: Out, body: Expr, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkExprTypes(body, ens, aliases, ts, span)
+
+def checkExprTypesBinds(bs: List[Bind], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (List.isEmpty(bs)) ok("Unit") else checkExprTypesBind(List.at(bs, 0), List.tail(bs), ens, aliases, ts, span)
+
+def checkExprTypesBind(b: Bind, rest: List[Bind], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  b match {
+    case Bind(_, _, value) => checkExprTypesBindsNext(checkExprTypes(value, ens, aliases, ts, span), rest, ens, aliases, ts, span)
+  }
+
+def checkExprTypesBindsNext(o: Out, rest: List[Bind], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkExprTypesBinds(rest, ens, aliases, ts, span)
 
 def checkProgAliases(o: Out, p: Prog, stems: List[String]): Out =
   if (hasErr(o)) o else checkProgTraits(checkTraits(p.traits, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
