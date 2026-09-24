@@ -768,7 +768,7 @@ def checkFmtDone(json: Bool, all: List[(String, String)], stems: List[String], v
   checkFmtDone2(json, stems, sigFiles(all, stems), vers)
 
 def checkFmtDone2(json: Bool, stems: List[String], sigs: List[(String, String)], vers: List[String]): IO[Unit] =
-  checkDirOut(json, Check.checkFilesOwn(sigs, stems), Check.humanFilesOwn(sigs, stems), filesForStems(sigs, stems), vers)
+  checkDirOut(json, sigs, stems, vers)
 
 def filesForStems(files: List[(String, String)], stems: List[String]): List[(String, String)] =
   if (List.isEmpty(files)) Manifest.noPairs() else filesForStemsHd(List.at(files, 0), List.tail(files), stems)
@@ -852,8 +852,8 @@ def lineIsTop(line: String): Bool =
 def checkFmtFail(stem: String): IO[Unit] =
   IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail("scuzz check"))
 
-def checkDirOut(json: Bool, diags: String, human: String, files: List[(String, String)], vers: List[String]): IO[Unit] =
-  if (json) checkDirJson(diags, files, vers) else checkDirHuman(human, files, vers)
+def checkDirOut(json: Bool, sigs: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
+  if (json) checkDirJson(Check.checkFilesOwn(sigs, stems), filesForStems(sigs, stems), vers) else checkDirHuman(Check.humanFilesOwn(sigs, stems), filesForStems(sigs, stems), vers)
 
 def checkDirJson(diags: String, files: List[(String, String)], vers: List[String]): IO[Unit] =
   if (diags == "[]") IO.println(Check.unclaimedJsonVer(files, vers)) else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))

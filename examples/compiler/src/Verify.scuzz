@@ -1816,7 +1816,7 @@ def checkVerifyShape(src: String, file: String, ens: List[En], p: Prog): String 
   if (p.main != "") Str.concat(file, ":1:1: error: verify file must not define @main") else if (!List.isEmpty(p.enums)) Str.concat(file, ":1:1: error: verify file must not define enums") else if (!List.isEmpty(p.aliases)) Str.concat(file, ":1:1: error: verify file must not define aliases") else if (!List.isEmpty(p.traits)) Str.concat(file, ":1:1: error: verify file must not define traits") else if (!List.isEmpty(p.impls)) Str.concat(file, ":1:1: error: verify file must not define impls") else if (!List.isEmpty(p.imps)) Str.concat(file, ":1:1: error: verify file must not define imports") else checkVerifyBody(src, file, ens, p)
 
 def checkVerifyBody(src: String, file: String, ens: List[En], p: Prog): String =
-  if (defsHaveForbid(p.defs) || exprHasForbid(p.body)) Str.concat(file, ":1:1: error: verify bodies must not call Property.* or .require") else checkVerifyDefs(src, file, ens, p)
+  if (defsHaveForbid(p.defs) || exprHasForbid(p.body)) Str.concat(file, ":1:1: error: verify bodies must not call .require or Property.* other than Property.force") else checkVerifyDefs(src, file, ens, p)
 
 def checkVerifyDefs(src: String, file: String, ens: List[En], p: Prog): String =
   checkVerifyDefsGo(src, file, ens, p, p.defs)
@@ -1847,7 +1847,7 @@ def funHasForbid(d: Fun): Bool =
 def exprHasForbid(e: Expr): Bool =
   e match {
     case Expr.EPrint(inner, _) => exprHasForbid(inner)
-    case Expr.ECall(f, args, _) => Str.startsWith(f, "Property.") || listHasForbid(args)
+    case Expr.ECall(f, args, _) => Str.startsWith(f, "Property.") && f != "Property.force" || listHasForbid(args)
     case Expr.EMethod(recv, name, args, _) => name == "require" || exprHasForbid(recv) || listHasForbid(args)
     case Expr.EField(recv, _, _) => exprHasForbid(recv)
     case Expr.EBin(_, l, r, _) => exprHasForbid(l) || exprHasForbid(r)
