@@ -3132,7 +3132,7 @@ def renameFun(d: Fun, alias: String): Fun =
   }
 
 def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
-  List.reverse(expandDefsGo(defs, als, []))
+  if (List.isEmpty(als)) defs else List.reverse(expandDefsGo(defs, als, []))
 
 def expandDefsGo(defs: List[Fun], als: List[Alias], acc: List[Fun]): List[Fun] =
   if (List.isEmpty(defs)) acc else expandDefsGo(List.tail(defs), als, expandDef(List.at(defs, 0), als) :: acc)
@@ -3143,24 +3143,24 @@ def expandDef(d: Fun, als: List[Alias]): Fun =
   }
 
 def expandExpr(e: Expr, als: List[Alias]): Expr =
-  e match {
-    case Expr.EInterp(s, parts, off) => Expr.EInterp(s, expandExprs(parts, als), off)
-    case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(expandExpr(inner, als), expandTy(ty, als), off)
-    case Expr.ELam(p, ty, body) => Expr.ELam(p, expandTy(ty, als), expandExpr(body, als))
-    case Expr.EPrint(inner, off) => Expr.EPrint(expandExpr(inner, als), off)
-    case Expr.ECall(f, args, off) => Expr.ECall(f, expandExprs(args, als), off)
-    case Expr.EMethod(recv, name, args, off) => Expr.EMethod(expandExpr(recv, als), name, expandExprs(args, als), off)
-    case Expr.EField(recv, name, off) => Expr.EField(expandExpr(recv, als), name, off)
-    case Expr.EBin(op, l, r, off) => Expr.EBin(op, expandExpr(l, als), expandExpr(r, als), off)
-    case Expr.EUn(op, inner, off) => Expr.EUn(op, expandExpr(inner, als), off)
-    case Expr.EIf(c, t, el, off) => Expr.EIf(expandExpr(c, als), expandExpr(t, als), expandExpr(el, als), off)
-    case Expr.EMatch(s, arms, off) => Expr.EMatch(expandExpr(s, als), expandArms(arms, als), off)
-    case Expr.EFor(bs, body, off) => Expr.EFor(expandBinds(bs, als), expandExpr(body, als), off)
-    case Expr.EList(xs) => Expr.EList(expandExprs(xs, als))
-    case Expr.ETuple(xs) => Expr.ETuple(expandExprs(xs, als))
-    case Expr.ENamed(n, inner) => Expr.ENamed(n, expandExpr(inner, als))
-    case _ => e
-  }
+  if (List.isEmpty(als)) e else e match {
+  case Expr.EInterp(s, parts, off) => Expr.EInterp(s, expandExprs(parts, als), off)
+  case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(expandExpr(inner, als), expandTy(ty, als), off)
+  case Expr.ELam(p, ty, body) => Expr.ELam(p, expandTy(ty, als), expandExpr(body, als))
+  case Expr.EPrint(inner, off) => Expr.EPrint(expandExpr(inner, als), off)
+  case Expr.ECall(f, args, off) => Expr.ECall(f, expandExprs(args, als), off)
+  case Expr.EMethod(recv, name, args, off) => Expr.EMethod(expandExpr(recv, als), name, expandExprs(args, als), off)
+  case Expr.EField(recv, name, off) => Expr.EField(expandExpr(recv, als), name, off)
+  case Expr.EBin(op, l, r, off) => Expr.EBin(op, expandExpr(l, als), expandExpr(r, als), off)
+  case Expr.EUn(op, inner, off) => Expr.EUn(op, expandExpr(inner, als), off)
+  case Expr.EIf(c, t, el, off) => Expr.EIf(expandExpr(c, als), expandExpr(t, als), expandExpr(el, als), off)
+  case Expr.EMatch(s, arms, off) => Expr.EMatch(expandExpr(s, als), expandArms(arms, als), off)
+  case Expr.EFor(bs, body, off) => Expr.EFor(expandBinds(bs, als), expandExpr(body, als), off)
+  case Expr.EList(xs) => Expr.EList(expandExprs(xs, als))
+  case Expr.ETuple(xs) => Expr.ETuple(expandExprs(xs, als))
+  case Expr.ENamed(n, inner) => Expr.ENamed(n, expandExpr(inner, als))
+  case _ => e
+}
 
 def expandExprs(xs: List[Expr], als: List[Alias]): List[Expr] =
   if (List.isEmpty(xs)) xs else expandExpr(List.at(xs, 0), als) :: expandExprs(List.tail(xs), als)
