@@ -3338,8 +3338,8 @@ def checkFilesOwn(files: List[(String, String)], stems: List[String]): String =
 def check3(files: List[(String, String)], o: Out): String =
   if (hasErr(o)) Str.concat("[", Str.concat(diagJson(files, o), "]")) else "[]"
 
-def unclaimedJsonVer(files: List[(String, String)], vers: List[String]): String =
-  unclaimedWrap(unclaimedLines(files, vers))
+def unclaimedJsonVer(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): String =
+  unclaimedWrap(unclaimedLines(p, files, stems, vers))
 
 def unclaimedWrap(xs: List[String]): String =
   if (List.isEmpty(xs)) "[]" else Str.concat("[", Str.concat(List.join(List.map(xs, s => unclaimedItem(s)), ","), "]"))
@@ -3347,15 +3347,18 @@ def unclaimedWrap(xs: List[String]): String =
 def unclaimedItem(s: String): String =
   Str.concat("{\"severity\":\"info\",\"message\":\"unclaimed ", Str.concat(s, "\",\"line\":1,\"column\":1}"))
 
-def unclaimedLines(files: List[(String, String)], vers: List[String]): List[String] =
-  unclaimedOf(Parse.parseFiles(files), files, List.join(vers, """
+def unclaimedLines(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): List[String] =
+  unclaimedOf(p, files, stems, List.join(vers, """
 """))
 
-def unclaimedOf(p: Prog, files: List[(String, String)], ver: String): List[String] =
-  List.concat(unclaimedDefs(p, ver), List.concat(unclaimedSignals(files, ver), unclaimedControls(files, ver)))
+def unclaimedOf(p: Prog, files: List[(String, String)], stems: List[String], ver: String): List[String] =
+  List.concat(unclaimedDefs(p, stems, ver), List.concat(unclaimedSignals(files, ver), unclaimedControls(files, ver)))
 
-def unclaimedDefs(p: Prog, ver: String): List[String] =
-  unclaimedDefNames(if (p.main == "") p.defs else Fun(false, false, p.main, [], [], "IO[Unit]", p.body, "Main", 0) :: p.defs, ver)
+def unclaimedDefs(p: Prog, stems: List[String], ver: String): List[String] =
+  unclaimedDefNames(if (p.main == "") ownDefs(p.defs, stems) else Fun(false, false, p.main, [], [], "IO[Unit]", p.body, "Main", 0) :: ownDefs(p.defs, stems), ver)
+
+def ownDefs(ds: List[Fun], stems: List[String]): List[Fun] =
+  List.filter(ds, d => hasStem(stems, d.mod))
 
 def unclaimedDefNames(ds: List[Fun], ver: String): List[String] =
   if (List.isEmpty(ds)) [] else unclaimedDefHd(List.at(ds, 0), List.tail(ds), ver)

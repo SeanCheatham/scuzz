@@ -853,16 +853,19 @@ def checkFmtFail(stem: String): IO[Unit] =
   IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail("scuzz check"))
 
 def checkDirOut(json: Bool, sigs: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  if (json) checkDirJson(Check.checkFilesOwn(sigs, stems), filesForStems(sigs, stems), vers) else checkDirHuman(Check.humanFilesOwn(sigs, stems), filesForStems(sigs, stems), vers)
+  checkDirOutParsed(json, Parse.parseFiles(sigs), sigs, stems, vers)
 
-def checkDirJson(diags: String, files: List[(String, String)], vers: List[String]): IO[Unit] =
-  if (diags == "[]") IO.println(Check.unclaimedJsonVer(files, vers)) else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))
+def checkDirOutParsed(json: Bool, p: Prog, sigs: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
+  if (json) checkDirJson(Check.check3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers) else checkDirHuman(Check.human3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers)
 
-def checkDirHuman(human: String, files: List[(String, String)], vers: List[String]): IO[Unit] =
-  if (human == "scuzz check ok") checkDirHumanOk(files, vers) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
+def checkDirJson(diags: String, p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
+  if (diags == "[]") IO.println(Check.unclaimedJsonVer(p, files, stems, vers)) else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))
 
-def checkDirHumanOk(files: List[(String, String)], vers: List[String]): IO[Unit] =
-  IO.println("scuzz check ok").flatMap(_ => checkDirHumanUnclaimed(Check.unclaimedLines(files, vers)))
+def checkDirHuman(human: String, p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
+  if (human == "scuzz check ok") checkDirHumanOk(p, files, stems, vers) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
+
+def checkDirHumanOk(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
+  IO.println("scuzz check ok").flatMap(_ => checkDirHumanUnclaimed(Check.unclaimedLines(p, files, stems, vers)))
 
 def checkDirHumanUnclaimed(lines: List[String]): IO[Unit] =
   if (List.isEmpty(lines)) IO.pure(()) else IO.println(List.join(List.map(lines, s => Str.concat("unclaimed ", s)), """
