@@ -524,6 +524,8 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"floatListKitEq:${if (floatListKitEq()) "y" else "n"}")
     _ <- IO.println(s"floatListUpdateEq:${if (floatListUpdateEq()) "y" else "n"}")
     _ <- IO.println(s"floatMapSetEq:${if (floatMapSetEq()) "y" else "n"}")
+    streamEq <- floatStreamEq()
+    _ <- IO.println(s"floatStreamEq:${if (streamEq) "y" else "n"}")
     _ <- IO.println(s"zipAllN:${if (numericZipAll(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
@@ -834,6 +836,14 @@ def floatMapSetEq(): Bool =
     m = Map.set(Map.empty(), negZero, "x")
     s = Set.add(Set.empty(), negZero)
   } yield Map.contains(m, 0.0) && Map.get(m, 0.0) == Option.Some("x") && Set.contains(s, 0.0) && Map.set(Map.empty(), "x", negZero) == Map.set(Map.empty(), "x", 0.0)
+
+def floatStreamEq(): IO[Bool] =
+  for {
+    negZero = 0.0 * (0.0 - 1.0)
+    emitted <- Stream.compileToList(Stream.changes(Stream.concat(Stream.emit(negZero), Stream.emit(0.0))))
+    evaluated <- Stream.compileToList(Stream.changes(Stream.concat(Stream.eval(IO.pure(negZero)), Stream.emit(0.0))))
+    iterated <- Stream.compileToList(Stream.changes(Stream.iterate(negZero, 2, x => x + 0.0)))
+  } yield emitted == [0.0] && evaluated == [0.0] && iterated == [0.0]
 
 def numericZipAll(k: Int): Bool =
   List.zipAll([k], [k, k + 1], k + 2, k + 3) == [(k, k), (k + 2, k + 1)] && List.zipAll([k, k + 1], [k], k + 2, k + 3) == [(k, k), (k + 1, k + 3)]
