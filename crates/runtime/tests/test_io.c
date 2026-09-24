@@ -12733,6 +12733,21 @@ int main(void) {
     assert(lit == sz_string_lit(second));
   }
 
+  /* Reuse one source address after a code unload. Keep old text intact. */
+  {
+    static char source[] = "old";
+    static const char old_copy[] = "old";
+    SzString *old = sz_string_lit(source);
+    SzString *next;
+    sz_string_lit_cache_clear();
+    memcpy(source, "new", sizeof source);
+    next = sz_string_lit(source);
+    assert(next != old);
+    assert(strcmp(sz_string_cstr(old), "old") == 0);
+    assert(strcmp(sz_string_cstr(next), "new") == 0);
+    assert(old == sz_string_lit(old_copy));
+  }
+
   /* Str.concat take: a unique left grows. A pinned left stays intact. */
   {
     size_t base_bytes = 0, base_count = 0;
