@@ -117,7 +117,7 @@ static SzList *test_i2(int64_t a, int64_t b) {
 static void *test_fbox(double d) {
   int64_t bits = 0;
   memcpy(&bits, &d, sizeof(bits));
-  return sz_box_i64(bits);
+  return sz_box_float_bits(bits);
 }
 
 static void sleep_us(long us) {
