@@ -7090,6 +7090,10 @@ int main(void) {
         assert(sz_string_last_index_of(hay, ba) == 3);
         assert(sz_string_last_index_of(hay, sz_string_from_cstr("z")) == -1);
         assert(sz_string_last_index_of(hay, sz_string_from_cstr("")) == 5);
+        assert(sz_string_uchar_at(hay, 0) == 'a');
+        assert(sz_string_uchar_at(hay, 4) == 'a');
+        assert(sz_string_uchar_at(hay, 5) == -1);
+        assert(sz_string_uchar_at(hay, -1) == -1);
         assert(strcmp(sz_string_cstr(t), "ab") == 0);
         assert(strcmp(sz_string_cstr(d), "baba") == 0);
         assert(strcmp(sz_string_cstr(t0), "") == 0);
