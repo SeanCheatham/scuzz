@@ -79,6 +79,12 @@ oracle floatCallEq(): Bool =
 oracle floatBoxEq(): Bool =
   Main.floatBoxEq()
 
+oracle floatTupleEq(): Bool =
+  Main.floatTupleEq()
+
+oracle floatListKitEq(): Bool =
+  Main.floatListKitEq()
+
 oracle floatNaNOrder(): Bool =
   Main.floatNaNOrder()
 
