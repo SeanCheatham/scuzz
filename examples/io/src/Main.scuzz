@@ -9,9 +9,9 @@ def showParse(s: String): String =
 
 def liveTime(): IO[Unit] =
   for {
-    _ <- IO.println(s"parse:${showParse(Clock.iso8601(0))}")
+    _ <- IO.println(s"parse:${showParse(Clock.iso8601(List.at([0], 0)))}")
     _ <- IO.println(s"parse-neg:${showParse(Clock.iso8601(0 - 1))}")
-    _ <- IO.println(s"parse-off:${showParse(Clock.zone(0, 330))}")
+    _ <- IO.println(s"parse-off:${showParse(Clock.zone(List.at([0], 0), List.at([330], 0)))}")
     _ <- IO.println(s"zone:${Clock.zone(0, 330)}")
     _ <- IO.println(s"zone0:${Clock.zone(0, 0)}")
     _ <- IO.println(s"zone-west:${Clock.zone(1582934400000, 0 - 480)}")
