@@ -573,7 +573,19 @@ def tyckParse(): Bool =
 def expressionTypeAnnotations(): Bool =
   rejects("def wrong(): Int = 1: Int[String]", "Int expects 0 type args") && rejects("""type Id[T] = T
 def wrong(): Int = 1: Id[Int, String]""", "Id expects 1 type arg") && rejects("@main def main: IO[Unit] = for { f = (x: Missing) => 1; _ <- IO.println(\"ok\") } yield ()", "unknown type Missing") && rejects("@main def main: IO[Unit] = for { f = (x: List[Int, String]) => 1; _ <- IO.println(\"ok\") } yield ()", "List expects 1 type arg") && Check.check("""type Id = Int
-def right(): Int = 1: Id""") == "[]" && Check.check("def right[T](x: T): T = (x: T)") == "[]"
+def right(): Int = 1: Id""") == "[]" && Check.check("def right[T](x: T): T = (x: T)") == "[]" && mainAliasAnnotations()
+
+def mainAliasAnnotations(): Bool =
+  Check.check(mainAliasSource()) == "[]"
+
+def mainAliasSource(): String =
+  """type UserId = Int
+@main def main: IO[Unit] =
+  for {
+    id = 1: UserId
+    f = (x: UserId) => x + 1
+    _ <- IO.println(Str.fromInt(f(id)))
+  } yield ()"""
 
 def typeArityChecks(): Bool =
   rejects("def wrong(x: List[Int, String]): Int = 1", "List expects 1 type arg") && rejects("def wrong(x: Map[String]): Int = 1", "Map expects 2 type args") && rejects("def wrong(x: IO[Int, String, Bool]): Int = 1", "IO expects 1 or 2 type args") && rejects("def wrong(x: Int[String]): Int = 1", "Int expects 0 type args") && rejects("""record Box[T](value: T)

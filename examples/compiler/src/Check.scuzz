@@ -2827,7 +2827,7 @@ def checkProgTraits(o: Out, p: Prog, stems: List[String]): Out =
   if (hasErr(o)) o else checkProgImpls(checkImplHeaders(p.impls, p.traits, Parse.builtins(p.enums), p.aliases, aliasNames(p.aliases)), p, stems)
 
 def checkProgImpls(o: Out, p: Prog, stems: List[String]): Out =
-  if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(p.imps, implFuns(p.impls, p.defs)), p.aliases), Parse.builtins(p.enums), aliasNames(p.aliases), p.main, p.body, stems)
+  if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(p.imps, implFuns(p.impls, p.defs)), p.aliases), Parse.builtins(p.enums), aliasNames(p.aliases), p.main, expandExpr(p.body, p.aliases), stems)
 
 def aliasNames(aliases: List[Alias]): List[String] =
   if (List.isEmpty(aliases)) [] else aliasName(List.at(aliases, 0), List.tail(aliases))

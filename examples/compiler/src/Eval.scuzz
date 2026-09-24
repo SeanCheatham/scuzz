@@ -77,7 +77,7 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), body, mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs())
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs())
   }
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
