@@ -67,6 +67,12 @@ oracle floatDerivedOrder(): Bool =
 oracle floatBoundOrder(): Bool =
   Main.floatBoundOrder()
 
+oracle floatIndexed(): Bool =
+  Main.floatIndexed([2.0, 0.0 - 1.0, 1.0])
+
+oracle floatIndexCons(): Bool =
+  Main.floatIndexCons([2.0, 0.0 - 1.0, 1.0])
+
 oracle floatNaNOrder(): Bool =
   Main.floatNaNOrder()
 

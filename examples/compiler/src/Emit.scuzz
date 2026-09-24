@@ -996,7 +996,7 @@ def emitArgList2(s: Slot, rest: List[Expr], prefix: String, strs: Strs, defs: Ft
 
 def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
   p match {
-    case (code, vals, owns) => if (floatOrderKit(f) && floatListArg(args, defs, ens, ps, mod)) emitFloatOrder(f, code, vals, owns, prefix) else emitCall3(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
+    case (code, vals, owns) => if (floatOrderKit(f) && floatListArg(args, defs, ens, ps, mod)) emitFloatOrder(f, code, vals, owns, prefix) else if (f == "List.cons" && !List.isEmpty(args) && exprRetTyEns(List.at(args, 0), defs, ens, ps, mod) == "Float") emitConsCall2(code, arg0(vals), arg1(vals), headOwn(owns), headOwn(tailOwn(owns)), prefix, true) else emitCall3(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
   }
 
 def floatOrderKit(f: String): Bool =
