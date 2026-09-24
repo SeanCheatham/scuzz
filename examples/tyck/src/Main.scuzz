@@ -262,7 +262,7 @@ def tyckFiles(): Bool =
   Str.contains(Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []), "arithmetic needs Int") && duplicateMain()
 
 def duplicateMain(): Bool =
-  Str.contains(Check.check("@main def main: IO[Unit] = IO.println(\"a\")\n@main def main: IO[Unit] = IO.println(\"b\")"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":1")
+  Str.contains(Check.check("@main def main: IO[Unit] = IO.println(\"a\")\n@main def main: IO[Unit] = IO.println(\"b\")"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":1,\"end_line\":2,\"end_column\":6")
 
 def srcLeftover(): String =
   """def n(): Int = 0b21
@@ -1892,7 +1892,10 @@ def sourceOffsets(): Bool =
   List.map(List.range(0, 8), off => Check.lineCol(sourceOffSrc(), off)) == [(1, 1), (1, 2), (1, 3), (2, 1), (3, 1), (3, 2), (3, 3), (4, 1)] && Check.lineCol("", 0) == (1, 1) && Check.lineCol("a", 5) == (1, 2) && Check.lineIndex(sourceOffSrc()) == [0, 3, 4, 7] && Check.lineIndex("") == [0] && Check.lineIndex("a") == [0] && Check.startsOf(Check.fileIndex(("Main", sourceOffSrc()) :: []), "Main") == [0, 3, 4, 7] && Check.startsOf(Check.fileIndex(("Main", "a") :: []), "") == [0] && sourceIndexEdges() && sourceTokenRanges()
 
 def sourceTokenRanges(): Bool =
-  Check.locOf("abc", 0) == (1, 1, 1, 4) && Check.locOf("\"a\"", 0) == (1, 1, 1, 4) && Check.locOf("\"a\nb\"", 0) == (1, 1, 2, 3) && Check.tokenEnd("\"\"\"a\nb\"\"\"", 0) == 9 && Check.locOf("\"\"\"a\nb\"\"\"", 0) == (1, 1, 2, 5) && Str.contains(Check.check("def wrong(): Int = \"\"\"a\nb\"\"\""), "\"line\":1,\"column\":20,\"end_line\":2,\"end_column\":5")
+  Check.locOf("abc", 0) == (1, 1, 1, 4) && Check.locOf("\"a\"", 0) == (1, 1, 1, 4) && Check.locOf("\"a\nb\"", 0) == (1, 1, 2, 3) && Check.tokenEnd("\"\"\"a\nb\"\"\"", 0) == 9 && Check.locOf("\"\"\"a\nb\"\"\"", 0) == (1, 1, 2, 5) && Str.contains(Check.check("def wrong(): Int = \"\"\"a\nb\"\"\""), "\"line\":1,\"column\":20,\"end_line\":2,\"end_column\":5") && compoundTokenRanges()
+
+def compoundTokenRanges(): Bool =
+  Check.tokenEnd("@main", 0) == 5 && Check.tokenEnd("@mainx", 0) == 1 && List.forall(["::", "=>", "==", "!=", "<-", "<=", "<<", ">=", ">>", "&&", "||"], op => Check.tokenEnd(op, 0) == 2) && Check.tokenEnd("s\"hi\"", 0) == 5 && Check.tokenEnd("s\"${a}\"", 0) == 7
 
 def sourceIndexEdges(): Bool =
   Check.lineIndex("""a
