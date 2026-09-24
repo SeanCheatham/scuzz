@@ -508,11 +508,9 @@ def enOfCase1(h: En, rest: List[En], ctor: String): String =
   }
 
 def hasCase(cs: List[EnCase], ctor: String): Bool =
-  if (List.isEmpty(cs)) false else hasCase1(List.at(cs, 0), List.tail(cs), ctor)
-
-def hasCase1(c: EnCase, rest: List[EnCase], ctor: String): Bool =
-  c match {
-    case EnCase(name, _) => name == ctor || hasCase(rest, ctor)
+  cs match {
+    case [] => false
+    case c :: rest => c.name == ctor || hasCase(rest, ctor)
   }
 
 def isInstMeth(f: String): Bool =
@@ -1827,13 +1825,10 @@ def forHasDraw1(b: Bind, rest: List[Bind]): Bool =
   }
 
 def hasEn(ens: List[En], name: String): Bool =
-  hasEnAt(ens, name)
-
-def hasEnAt(ens: List[En], name: String): Bool =
-  if (List.isEmpty(ens)) false else hasEnHit(List.at(ens, 0), List.tail(ens), name)
-
-def hasEnHit(h: En, rest: List[En], name: String): Bool =
-  if (h.name == name) true else hasEnAt(rest, name)
+  ens match {
+    case [] => false
+    case h :: rest => h.name == name || hasEn(rest, name)
+  }
 
 def inferField(recv: Expr, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   recv match {
