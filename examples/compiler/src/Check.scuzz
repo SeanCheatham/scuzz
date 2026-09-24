@@ -2502,6 +2502,55 @@ def knownTys(ts0: List[Ty], ens: List[En], ts: List[String]): Bool =
 def builtinTyName(n: String): Bool =
   n == "Any" || n == "Bool" || n == "Builder" || n == "Bytes" || n == "Deferred" || n == "Fiber" || n == "Float" || n == "IO" || n == "Int" || n == "Json" || n == "List" || n == "Map" || n == "Option" || n == "Queue" || n == "Ref" || n == "Resource" || n == "Result" || n == "Set" || n == "Signal" || n == "Stream" || n == "String" || n == "Tcp" || n == "Timeline" || n == "Udp" || n == "Unit" || n == "Verdict" || n == "View"
 
+def builtinTyArity(n: String): Int =
+  if (n == "Map" || n == "Result") 2 else if (n == "List" || n == "Option" || n == "Set" || n == "Ref" || n == "Queue" || n == "Deferred" || n == "Fiber" || n == "Stream" || n == "Resource" || n == "Signal") 1 else 0
+
+def enumTyArity(ens: List[En], n: String): Int =
+  if (List.isEmpty(ens)) 0 - 1 else enumTyArityAt(List.at(ens, 0), List.tail(ens), n)
+
+def enumTyArityAt(en: En, rest: List[En], n: String): Int =
+  en match {
+    case En(_, name, ts, _) => if (name == n) List.len(ts) else enumTyArity(rest, n)
+  }
+
+def aliasTyArity(aliases: List[Alias], n: String): Int =
+  if (List.isEmpty(aliases)) 0 - 1 else aliasTyArityAt(List.at(aliases, 0), List.tail(aliases), n)
+
+def aliasTyArityAt(a: Alias, rest: List[Alias], n: String): Int =
+  a match {
+    case Alias(name, ts, _) => if (name == n) List.len(ts) else aliasTyArity(rest, n)
+  }
+
+def arityMsg(n: String, want: Int): String =
+  Str.concat(n, Str.concat(" expects ", Str.concat(Str.fromInt(want), if (want == 1) " type arg" else " type args")))
+
+def typeArityError(t: Ty, ens: List[En], aliases: List[Alias], ts: List[String]): String =
+  t match {
+    case Ty.TVar(_) => ""
+    case Ty.Named(_) => ""
+    case Ty.App(n, args) => appArityError(n, args, ens, aliases, ts)
+    case Ty.Tuple(parts) => typeArityErrors(parts, ens, aliases, ts)
+    case Ty.Arrow(arg, ret) => typeArityArrow(typeArityError(arg, ens, aliases, ts), ret, ens, aliases, ts)
+  }
+
+def typeArityArrow(err: String, ret: Ty, ens: List[En], aliases: List[Alias], ts: List[String]): String =
+  if (err != "") err else typeArityError(ret, ens, aliases, ts)
+
+def typeArityErrors(types: List[Ty], ens: List[En], aliases: List[Alias], ts: List[String]): String =
+  if (List.isEmpty(types)) "" else typeArityErrorsNext(typeArityError(List.at(types, 0), ens, aliases, ts), List.tail(types), ens, aliases, ts)
+
+def typeArityErrorsNext(err: String, rest: List[Ty], ens: List[En], aliases: List[Alias], ts: List[String]): String =
+  if (err != "") err else typeArityErrors(rest, ens, aliases, ts)
+
+def appArityError(n: String, args: List[Ty], ens: List[En], aliases: List[Alias], ts: List[String]): String =
+  if (enumTyArity(ens, n) >= 0) appArityFixed(n, List.len(args), enumTyArity(ens, n), args, ens, aliases, ts) else if (aliasTyArity(aliases, n) >= 0) appArityFixed(n, List.len(args), aliasTyArity(aliases, n), args, ens, aliases, ts) else if (n == "IO") appArityIo(args, ens, aliases, ts) else if (builtinTyName(n)) appArityFixed(n, List.len(args), builtinTyArity(n), args, ens, aliases, ts) else if (Type.isTyParam(n) || List.contains(ts, n)) Str.concat("type parameter ", Str.concat(n, " cannot take type args")) else ""
+
+def appArityFixed(n: String, got: Int, want: Int, args: List[Ty], ens: List[En], aliases: List[Alias], ts: List[String]): String =
+  if (got != want) arityMsg(n, want) else typeArityErrors(args, ens, aliases, ts)
+
+def appArityIo(args: List[Ty], ens: List[En], aliases: List[Alias], ts: List[String]): String =
+  if (List.len(args) != 1 && List.len(args) != 2) "IO expects 1 or 2 type args" else typeArityErrors(args, ens, aliases, ts)
+
 def checkDefOra(ora: Bool, name: String, ret: String, body: Expr, ps: List[Param], funs: Ftab, ens: List[En], ts: List[String], mod: String, off: Int): Out =
   if (ora && ret != "Bool") bad(Str.concat("oracle ", Str.concat(name, " must return Bool")), (mod, off)) else checkDefGo(name, ret, body, ps, funs, ens, ts, mod, off)
 
@@ -2570,7 +2619,138 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   }
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
-  checkProgAliases(checkAliases(p.aliases, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
+  checkProgArities(checkTypeArities(p, stems), p, stems)
+
+def checkProgArities(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkProgAliases(checkAliases(p.aliases, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
+
+def checkTypeArities(p: Prog, stems: List[String]): Out =
+  checkArityAliasesNext(checkArityAliases(p.aliases, p.enums, p.aliases), p, stems)
+
+def checkArityAliasesNext(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkArityEnumsNext(checkArityEnums(p.enums, p.enums, p.aliases), p, stems)
+
+def checkArityEnumsNext(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkArityTraitsNext(checkArityTraits(p.traits, p.enums, p.aliases), p, stems)
+
+def checkArityTraitsNext(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkArityImplsNext(checkArityImpls(p.impls, p.enums, p.aliases), p, stems)
+
+def checkArityImplsNext(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkArityDefs(p.defs, stems, p.enums, p.aliases)
+
+def checkArityTy(ty: String, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  checkArityTyError(typeArityError(Type.parse(ty), ens, aliases, ts), span)
+
+def checkArityTyError(err: String, span: (String, Int)): Out =
+  if (err == "") ok("Unit") else bad(err, span)
+
+def checkArityParams(ps: List[Param], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (List.isEmpty(ps)) ok("Unit") else checkArityParam(List.at(ps, 0), List.tail(ps), ens, aliases, ts, span)
+
+def checkArityParam(p: Param, rest: List[Param], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  p match {
+    case Param(_, ty, _, _) => checkArityParamsNext(checkArityTy(ty, ens, aliases, ts, span), rest, ens, aliases, ts, span)
+  }
+
+def checkArityParamsNext(o: Out, rest: List[Param], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkArityParams(rest, ens, aliases, ts, span)
+
+def checkArityStrings(types: List[String], ens: List[En], aliases: List[Alias]): Out =
+  if (List.isEmpty(types)) ok("Unit") else checkArityStringsNext(checkArityTy(List.at(types, 0), ens, aliases, [], noSpan()), List.tail(types), ens, aliases)
+
+def checkArityStringsNext(o: Out, rest: List[String], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityStrings(rest, ens, aliases)
+
+def checkArityAliases(rest: List[Alias], ens: List[En], aliases: List[Alias]): Out =
+  if (List.isEmpty(rest)) ok("Unit") else checkArityAlias(List.at(rest, 0), List.tail(rest), ens, aliases)
+
+def checkArityAlias(a: Alias, rest: List[Alias], ens: List[En], aliases: List[Alias]): Out =
+  a match {
+    case Alias(_, ts, target) => checkArityAliasesAfter(checkArityTy(target, ens, aliases, ts, noSpan()), rest, ens, aliases)
+  }
+
+def checkArityAliasesAfter(o: Out, rest: List[Alias], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityAliases(rest, ens, aliases)
+
+def checkArityEnums(rest: List[En], ens: List[En], aliases: List[Alias]): Out =
+  if (List.isEmpty(rest)) ok("Unit") else checkArityEnum(List.at(rest, 0), List.tail(rest), ens, aliases)
+
+def checkArityEnum(en: En, rest: List[En], ens: List[En], aliases: List[Alias]): Out =
+  en match {
+    case En(_, _, ts, cases) => checkArityEnumsAfter(checkArityCases(cases, ens, aliases, ts), rest, ens, aliases)
+  }
+
+def checkArityEnumsAfter(o: Out, rest: List[En], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityEnums(rest, ens, aliases)
+
+def checkArityCases(cases: List[EnCase], ens: List[En], aliases: List[Alias], ts: List[String]): Out =
+  if (List.isEmpty(cases)) ok("Unit") else checkArityCase(List.at(cases, 0), List.tail(cases), ens, aliases, ts)
+
+def checkArityCase(c: EnCase, rest: List[EnCase], ens: List[En], aliases: List[Alias], ts: List[String]): Out =
+  c match {
+    case EnCase(_, ps) => checkArityCasesAfter(checkArityParams(ps, ens, aliases, ts, noSpan()), rest, ens, aliases, ts)
+  }
+
+def checkArityCasesAfter(o: Out, rest: List[EnCase], ens: List[En], aliases: List[Alias], ts: List[String]): Out =
+  if (hasErr(o)) o else checkArityCases(rest, ens, aliases, ts)
+
+def checkArityTraits(rest: List[Tr], ens: List[En], aliases: List[Alias]): Out =
+  if (List.isEmpty(rest)) ok("Unit") else checkArityTrait(List.at(rest, 0), List.tail(rest), ens, aliases)
+
+def checkArityTrait(t: Tr, rest: List[Tr], ens: List[En], aliases: List[Alias]): Out =
+  t match {
+    case Tr(_, ts, methods) => checkArityTraitsAfter(checkArityTraitMethods(methods, ens, aliases, ts), rest, ens, aliases)
+  }
+
+def checkArityTraitsAfter(o: Out, rest: List[Tr], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityTraits(rest, ens, aliases)
+
+def checkArityTraitMethods(methods: List[TrMethod], ens: List[En], aliases: List[Alias], ts: List[String]): Out =
+  if (List.isEmpty(methods)) ok("Unit") else checkArityTraitMethod(List.at(methods, 0), List.tail(methods), ens, aliases, ts)
+
+def checkArityTraitMethod(m: TrMethod, rest: List[TrMethod], ens: List[En], aliases: List[Alias], ts: List[String]): Out =
+  m match {
+    case TrMethod(_, ps, ret) => checkArityTraitMethodRet(checkArityParams(ps, ens, aliases, ts, noSpan()), ret, rest, ens, aliases, ts)
+  }
+
+def checkArityTraitMethodRet(o: Out, ret: String, rest: List[TrMethod], ens: List[En], aliases: List[Alias], ts: List[String]): Out =
+  if (hasErr(o)) o else checkArityTraitMethodsAfter(checkArityTy(ret, ens, aliases, ts, noSpan()), rest, ens, aliases, ts)
+
+def checkArityTraitMethodsAfter(o: Out, rest: List[TrMethod], ens: List[En], aliases: List[Alias], ts: List[String]): Out =
+  if (hasErr(o)) o else checkArityTraitMethods(rest, ens, aliases, ts)
+
+def checkArityImpls(impls: List[Im], ens: List[En], aliases: List[Alias]): Out =
+  if (List.isEmpty(impls)) ok("Unit") else checkArityImpl(List.at(impls, 0), List.tail(impls), ens, aliases)
+
+def checkArityImpl(im: Im, rest: List[Im], ens: List[En], aliases: List[Alias]): Out =
+  im match {
+    case Im(_, args, forTy, methods) => checkArityImplArgs(checkArityStrings(args, ens, aliases), forTy, methods, rest, ens, aliases)
+  }
+
+def checkArityImplArgs(o: Out, forTy: String, methods: List[Fun], rest: List[Im], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityImplFor(checkArityTy(forTy, ens, aliases, [], noSpan()), methods, rest, ens, aliases)
+
+def checkArityImplFor(o: Out, methods: List[Fun], rest: List[Im], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityImplMethods(checkArityDefs(methods, [], ens, aliases), rest, ens, aliases)
+
+def checkArityImplMethods(o: Out, rest: List[Im], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityImpls(rest, ens, aliases)
+
+def checkArityDefs(defs: List[Fun], stems: List[String], ens: List[En], aliases: List[Alias]): Out =
+  if (List.isEmpty(defs)) ok("Unit") else checkArityDefHd(List.at(defs, 0), List.tail(defs), stems, ens, aliases)
+
+def checkArityDefHd(d: Fun, rest: List[Fun], stems: List[String], ens: List[En], aliases: List[Alias]): Out =
+  if (d.name == "#parse" || !inStems(stems, d.mod)) checkArityDefs(rest, stems, ens, aliases) else checkArityDefsAfter(checkArityDef(d, ens, aliases), rest, stems, ens, aliases)
+
+def checkArityDefsAfter(o: Out, rest: List[Fun], stems: List[String], ens: List[En], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else checkArityDefs(rest, stems, ens, aliases)
+
+def checkArityDef(d: Fun, ens: List[En], aliases: List[Alias]): Out =
+  checkArityDefRet(checkArityParams(d.params, ens, aliases, d.tparams, (d.mod, d.off)), d.ret, ens, aliases, d.tparams, (d.mod, d.off))
+
+def checkArityDefRet(o: Out, ret: String, ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkArityTy(ret, ens, aliases, ts, span)
 
 def checkProgAliases(o: Out, p: Prog, stems: List[String]): Out =
   if (hasErr(o)) o else checkProgTraits(checkTraits(p.traits, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
