@@ -4555,7 +4555,7 @@ def fieldPayloadParam(name: String, fts: List[String], names: List[String], pref
   nestBps(fieldBind(name), fieldStem(prefix, i, fieldIdx(name, k, names), slotInt(fts, fieldIdx(name, k, names))), fieldTyAt2(fts, fieldIdx(name, k, names)), ens, ps)
 
 def nestBps(pat: String, stem: String, ty: String, ens: List[En], ps: List[Param]): List[Param] =
-  if (isAsPat(pat)) nestBps(stripAs(pat), stem, ty, ens, patternParam(asName(pat), stem, ty, ps)) else if (isTuplePat(pat)) stemBpsAt(tupComps(pat), ssaName(stem), 1, tupSlots(ty), ens, ps) else if (isConsPat(pat)) consPayloadParams(pat, nestPreOf(stem), 0, Check.elemOf(ty) :: noStr(), ps) else if (isCtorPat(pat, ens)) fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), nestPreOf(stem), 0, 0, ens, ps) else if (pat == "[]" || pat == "_" || !isPatternName(pat)) ps else Param(stem, ty, "", "") :: dropParam(ps, stem)
+  if (isAsPat(pat)) nestBps(stripAs(pat), stem, ty, ens, patternParam(asName(pat), stem, ty, ps)) else if (isTuplePat(pat)) stemBpsAt(tupComps(pat), ssaName(stem), 1, tupSlots(ty), ens, ps) else if (isConsPat(pat)) consPayloadParams(pat, nestPreOf(stem), 0, Check.elemOf(ty) :: noStr(), ps) else if (isCtorPat(pat, ens) && !hasComma(patBind(pat)) && !namedMulti(pat, ens)) nestBps(fieldBind(patBind(pat)), bindStem(nestPreOf(stem), 0, bindIsInt(pat, ens)), fieldTy(ens, patCore(pat)), ens, ps) else if (isCtorPat(pat, ens)) fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), nestPreOf(stem), 0, 0, ens, ps) else if (pat == "[]" || pat == "_" || !isPatternName(pat)) ps else Param(stem, ty, "", "") :: dropParam(ps, stem)
 
 def emitOkOwned(s: Slot, ps: List[Param]): Slot =
   s match {
@@ -4566,7 +4566,7 @@ def rewriteFields(ns: List[String], body: Expr, prefix: String, i: Int, k: Int, 
   if (List.isEmpty(ns)) body else rewriteFields(List.tail(ns), rewriteNested(fieldBind(List.at(ns, 0)), fieldStem(prefix, i, fieldIdx(List.at(ns, 0), k, names), slotInt(fts, fieldIdx(List.at(ns, 0), k, names))), fieldTyAt2(fts, fieldIdx(List.at(ns, 0), k, names)), ens, body), prefix, i, k + 1, fts, names, ens)
 
 def rewriteNested(pat: String, stem: String, ty: String, ens: List[En], body: Expr): Expr =
-  if (isAsPat(pat)) rewriteBind(rewriteNested(stripAs(pat), stem, ty, ens, body), asName(pat), stem) else if (isTuplePat(pat)) rewriteTupleAt(tupComps(pat), body, ssaName(stem), 1, tupSlots(ty), ens) else if (isConsPat(pat)) rewriteCons(pat, body, nestPreOf(stem), 0, isI64Ty(Check.elemOf(ty))) else if (isCtorPat(pat, ens)) rewriteFields(splitPat(patBind(pat)), body, nestPreOf(stem), 0, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), ens) else if (pat == "_" || isPatternName(pat) && pat != "[]") rewriteBind(body, pat, stem) else body
+  if (isAsPat(pat)) rewriteBind(rewriteNested(stripAs(pat), stem, ty, ens, body), asName(pat), stem) else if (isTuplePat(pat)) rewriteTupleAt(tupComps(pat), body, ssaName(stem), 1, tupSlots(ty), ens) else if (isConsPat(pat)) rewriteCons(pat, body, nestPreOf(stem), 0, isI64Ty(Check.elemOf(ty))) else if (isCtorPat(pat, ens) && !hasComma(patBind(pat)) && !namedMulti(pat, ens)) rewriteNested(fieldBind(patBind(pat)), bindStem(nestPreOf(stem), 0, bindIsInt(pat, ens)), fieldTy(ens, patCore(pat)), ens, body) else if (isCtorPat(pat, ens)) rewriteFields(splitPat(patBind(pat)), body, nestPreOf(stem), 0, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), ens) else if (pat == "_" || isPatternName(pat) && pat != "[]") rewriteBind(body, pat, stem) else body
 
 def fieldIdx(h: String, k: Int, names: List[String]): Int =
   if (isNamedPat(h)) idxOf(names, fieldNameOf(h)) else k
@@ -4785,7 +4785,7 @@ def emitOks2g(g: String, pat: String, val: String, owned: Bool, code: String, p:
   }
 
 def armIsPtr(val: String, owned: Bool, code: String, ps: List[Param]): Bool =
-  owned || val == "null" || isPtrSlot(val, ps) || thenCallPtr(code, val)
+  owned || val == "null" || !isIntSsa(val) && isPtrSlot(val, ps) || thenCallPtr(code, val)
 
 def emitOkBodyG(g: String, pat: String, code: String, prefix: String, i: Int, last: Bool, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
   if (g == "") emitOkBody(code, prefix, i) else emitOkBodyGuard(emitPatternGuard(pat, g, prefix, strs, defs, ens, ps, loc, i), code, prefix, i, last)

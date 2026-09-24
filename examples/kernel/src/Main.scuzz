@@ -1096,6 +1096,18 @@ def jsonPairRoundTrip(n: Int): Bool =
     case Result.Err(_) => false
   }
 
+def jsonNestedString(): String =
+  Json.parse("\"ok\"") match {
+    case Result.Ok(Json.Str(s)) => s
+    case _ => ""
+  }
+
+def jsonNestedInt(): Int =
+  Json.parse("7") match {
+    case Result.Ok(Json.Int(n)) => n
+    case _ => 0
+  }
+
 def tupleProof(): IO[Unit] =
   for {
     (n, s) = (42, "ok")
@@ -1408,6 +1420,8 @@ def checkConstructorAlternatives(n: Int): IO[Int] =
     _ <- IO.println(s"unqualifiedNamedItem:${unqualifiedNamedItem(SecondItem.Item(7, "ok"))}")
     _ <- IO.println(s"nestedUnqualifiedItem:${nestedUnqualifiedItem(ItemBox.Wrap(SecondItem.Item(7, "ok")))}")
     _ <- IO.println(s"nestedNamedItem:${nestedNamedItem(ItemBox.Wrap(SecondItem.Item(7, "ok")))}")
+    _ <- IO.println(s"jsonNested:${jsonNestedString()}")
+    _ <- IO.println(s"jsonNestedInt:${jsonNestedInt()}")
     flipped = flip(c)
     desc = describe(o)
     xs = Color.Blue :: List.empty()

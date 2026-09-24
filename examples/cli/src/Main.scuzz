@@ -613,7 +613,10 @@ def lspMultilineTokens(): Bool =
 
 def lspCr(): String =
   Json.parse("\"\\r\"") match {
-    case Json.Str(s) => s
+    case Result.Ok(j) => j match {
+  case Json.Str(s) => s
+  case _ => ""
+}
     case _ => ""
   }
 
