@@ -1656,7 +1656,7 @@ def pinWantColl(w: String, arg: Expr, o: Out, env: List[(String, Ty)]): List[(St
   if (!concreteTy(w)) env else if (isBareHandle(tyStr(o), "List") && Str.startsWith(w, "List[") && concreteTy(listElemTy(w))) pinBareList(stripNamed(arg), listElemTy(w), env) else if (isBareHandle(tyStr(o), "Map") && Str.startsWith(w, "Map[")) pinBareNamed(stripNamed(arg), "Map", w, env) else if (isBareHandle(tyStr(o), "Set") && Str.startsWith(w, "Set[")) pinBareNamed(stripNamed(arg), "Set", w, env) else env
 
 def concreteTy(t: String): Bool =
-  t != "" && t != "Any" && !hasTypeParamToken(t, 0, Str.len(t))
+  t != "" && t != "Any" && (!hasTypeParamToken(t, 0, Str.len(t)) || !looseTy(Type.parse(t)))
 
 def hasTypeParamToken(t: String, i: Int, n: Int): Bool =
   if (i >= n) false else if (typeParamTokenAt(t, i, n)) true else hasTypeParamToken(t, i + 1, n)
