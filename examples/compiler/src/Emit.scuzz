@@ -666,7 +666,7 @@ def fCmpZext(prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("zext i1 ", Str.concat(pct(prefix, "fc"), " to i64"))))
 
 def llvmFCmp(op: String): String =
-  if (op == "<") "fcmp olt" else if (op == ">") "fcmp ogt" else if (op == "<=") "fcmp ole" else if (op == ">=") "fcmp oge" else if (op == "==") "fcmp oeq" else "fcmp one"
+  if (op == "<") "fcmp olt" else if (op == ">") "fcmp ogt" else if (op == "<=") "fcmp ole" else if (op == ">=") "fcmp oge" else if (op == "==") "fcmp oeq" else "fcmp une"
 
 def isFloatMeth(r: Expr, n: String): Bool =
   r match {
