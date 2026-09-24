@@ -366,7 +366,13 @@ def mapGetEmptyAt(m: Map): Bool =
   Map.contains(m, "e") && Map.get(m, "e") == Option.Some([]: List[String]) && Map.get(m, "z") == (Option.None: Option[List[String]])
 
 def mapParamRoundTrip(n: Int, value: String): Bool =
-  Map.getOrElse(Map.set(Map.empty(), "value", n), "value", 0) == n && Map.getOrElse(Map.set(Map.empty(), "value", value), "value", "") == value
+  Map.getOrElse(Map.set(Map.empty(), "value", n), "value", 0) == n && Map.getOrElse(Map.set(Map.empty(), "value", value), "value", "") == value && borrowedMapText(Map.empty(), value) == value && borrowedMapText(Map.set(Map.empty(), "missing", value), "other") == value && borrowedMapNumber(Map.empty(), n) == n && borrowedMapNumber(Map.set(Map.empty(), "missing", n), 0) == n
+
+def borrowedMapText(m: Map[String, String], fallback: String): String =
+  Map.getOrElse(m, "missing", fallback)
+
+def borrowedMapNumber(m: Map[String, Int], fallback: Int): Int =
+  Map.getOrElse(m, "missing", fallback)
 
 def intMapGet(k: Int): Bool =
   for {
@@ -424,6 +430,7 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"mget:${optStr(Map.get(mp, "a"))}")
     _ <- IO.println(s"mmiss:${optStr(Map.get(mp, "z"))}")
     _ <- IO.println(s"iget:${if (intMapGet(7)) "y" else "n"}")
+    _ <- IO.println(s"mparam:${if (mapParamRoundTrip(7, "seven")) "y" else "n"}")
     empty = Map.set(Map.empty(), "e", []: List[String])
     _ <- IO.println(s"ehas:${if (Map.contains(empty, "e")) "y" else "n"}")
     _ <- IO.println(s"eget:${if (Map.get(empty, "e") == Option.Some([]: List[String])) "Some([])" else "?"}")
