@@ -45,6 +45,8 @@ grep -Fxq 'floatIoFailEq:y' /tmp/kernel.out
 grep -Fxq 'zipAllN:y' /tmp/kernel.out
 grep -Fxq 'unqualifiedItem:8' /tmp/kernel.out
 grep -Fxq 'unqualifiedNamedItem:9' /tmp/kernel.out
+grep -Fxq 'nestedUnqualifiedItem:8' /tmp/kernel.out
+grep -Fxq 'nestedNamedItem:9' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
 diff <(grep -vx ok /tmp/kernel.out) /tmp/kernel-eval.out

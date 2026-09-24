@@ -22,10 +22,14 @@ enum FloatPayload:
   case Pair(value: Float, count: Int)
 
 enum FirstItem:
+  case Other
   case Item(value: String)
 
 enum SecondItem:
   case Item(value: Int, label: String)
+
+enum ItemBox:
+  case Wrap(item: SecondItem)
 
 enum DefaultCase:
   case A(n: Int = 7)
@@ -1176,6 +1180,18 @@ def unqualifiedNamedItem(packet: SecondItem): Int =
     case Item(label = label, value = value) => value + Str.len(label)
   }
 
+def nestedUnqualifiedItem(box: ItemBox): Int =
+  box match {
+    case ItemBox.Wrap(Item(value, _label)) => value + 1
+    case _ => 0
+  }
+
+def nestedNamedItem(box: ItemBox): Int =
+  box match {
+    case ItemBox.Wrap(Item(label = label, value = value)) => value + Str.len(label)
+    case _ => 0
+  }
+
 def literalNamed(packet: LiteralPacket): Int =
   packet match {
     case LiteralPacket.Fields(value = value, enabled = true, version = 2, kind = "event") if value > 0 => value
@@ -1390,6 +1406,8 @@ def checkConstructorAlternatives(n: Int): IO[Int] =
     p = Pair.Pair(7, "ok")
     _ <- IO.println(s"unqualifiedItem:${unqualifiedItem(SecondItem.Item(7, "ok"))}")
     _ <- IO.println(s"unqualifiedNamedItem:${unqualifiedNamedItem(SecondItem.Item(7, "ok"))}")
+    _ <- IO.println(s"nestedUnqualifiedItem:${nestedUnqualifiedItem(ItemBox.Wrap(SecondItem.Item(7, "ok")))}")
+    _ <- IO.println(s"nestedNamedItem:${nestedNamedItem(ItemBox.Wrap(SecondItem.Item(7, "ok")))}")
     flipped = flip(c)
     desc = describe(o)
     xs = Color.Blue :: List.empty()

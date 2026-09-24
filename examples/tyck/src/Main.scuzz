@@ -1260,7 +1260,18 @@ def tyckAdt(): Bool =
   Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes() && bareCtorTypes() && kitLetterTypes() && unqualifiedPatternTypes()
 
 def unqualifiedPatternTypes(): Bool =
-  rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && Check.check(srcUnqualifiedPatternRight()) == "[]" && Check.check(srcUnqualifiedPatternNamed()) == "[]"
+  rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && Check.check(srcUnqualifiedPatternRight()) == "[]" && Check.check(srcUnqualifiedPatternNamed()) == "[]" && rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float")
+
+def srcNestedUnqualifiedPatternWrong(): String =
+  """enum First:
+  case Item(value: String)
+enum Second:
+  case Item(value: Int)
+enum Box:
+  case Wrap(item: First)
+def wrong(b: Box): Int = b match {
+  case Box.Wrap(Item(value)) => value + 1
+}"""
 
 def srcUnqualifiedPatternWrong(): String =
   """enum First:
@@ -1419,7 +1430,7 @@ def dumpTyckAdt(): String =
   if (!namedLetterTypes()) dumpNamedLetter() else if (!aliasTypes()) dumpAliasTypes() else if (!unqualifiedPatternTypes()) dumpUnqualifiedPattern() else "tyckAdt"
 
 def dumpUnqualifiedPattern(): String =
-  if (!rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("wrong:", Check.check(srcUnqualifiedPatternWrong())) else if (Check.check(srcUnqualifiedPatternRight()) != "[]") Str.concat("right:", Check.check(srcUnqualifiedPatternRight())) else Str.concat("named:", Check.check(srcUnqualifiedPatternNamed()))
+  if (!rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("wrong:", Check.check(srcUnqualifiedPatternWrong())) else if (Check.check(srcUnqualifiedPatternRight()) != "[]") Str.concat("right:", Check.check(srcUnqualifiedPatternRight())) else if (Check.check(srcUnqualifiedPatternNamed()) != "[]") Str.concat("named:", Check.check(srcUnqualifiedPatternNamed())) else Str.concat("nested:", Check.check(srcNestedUnqualifiedPatternWrong()))
 
 def dumpNamedLetter(): String =
   if (Check.check("""enum E:
