@@ -529,6 +529,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"floatBoxEq:${if (floatBoxEq()) "y" else "n"}")
     _ <- IO.println(s"floatTupleEq:${if (floatTupleEq()) "y" else "n"}")
     _ <- IO.println(s"floatMultiEq:${if (floatMultiEq()) "y" else "n"}")
+    _ <- IO.println(s"floatSignalEq:${if (floatSignalEq()) "y" else "n"}")
     _ <- IO.println(s"floatListKitEq:${if (floatListKitEq()) "y" else "n"}")
     _ <- IO.println(s"floatListUpdateEq:${if (floatListUpdateEq()) "y" else "n"}")
     _ <- IO.println(s"floatMapSetEq:${if (floatMapSetEq()) "y" else "n"}")
@@ -837,6 +838,28 @@ def floatMultiEq(): Bool =
     pair = FloatRecord(negZero, 1)
     single = FloatSingle(negZero)
   } yield FloatPayload.Pair(negZero, 1) == FloatPayload.Pair(0.0, 1) && FloatPayload.Pair(nan, 1) != FloatPayload.Pair(nan, 1) && pair == FloatRecord(0.0, 1) && pair.copy(value = 0.0) == pair && single.copy(value = 0.0) == single
+
+def floatSignalEq(): Bool =
+  for {
+    nan = 0.0 / 0.0
+    negZero = 0.0 * (0.0 - 1.0)
+    ticks = Signal.make(0)
+    source = Signal.make(nan)
+    mapped = Signal.map(source, x => for {
+  _ = Signal.set(ticks, Signal.get(ticks) + 1)
+} yield x)
+    _ = Signal.get(mapped)
+    _ = Signal.set(source, nan)
+    _ = Signal.get(mapped)
+    zeroTicks = Signal.make(0)
+    zeroSource = Signal.make(negZero)
+    zeroMapped = Signal.map(zeroSource, x => for {
+  _ = Signal.set(zeroTicks, Signal.get(zeroTicks) + 1)
+} yield x)
+    _ = Signal.get(zeroMapped)
+    _ = Signal.set(zeroSource, 0.0)
+    _ = Signal.get(zeroMapped)
+  } yield Signal.get(ticks) == 2 && Signal.get(zeroTicks) == 1
 
 def floatListKitEq(): Bool =
   for {

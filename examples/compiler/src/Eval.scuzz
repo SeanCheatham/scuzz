@@ -1947,7 +1947,7 @@ def sigRead(v: Value, si: Signal[Int], ss: Signal[String]): Value =
 
 def sigSet(sv: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
-    case Value.VSig(id, _, s, si, ss) => sigPush(id, v, listOf(refGet(List.at(p.sig, 2))), sigWrite(Value.VUnit, s, si, ss, v), env, p, off)
+    case Value.VSig(id, _, s, si, ss) => if (valEq(Signal.get(s), v)) Value.VUnit else sigPush(id, v, listOf(refGet(List.at(p.sig, 2))), sigWrite(Value.VUnit, s, si, ss, v), env, p, off)
     case _ => errAt("Signal.set needs a Signal", env, p, off)
   }
 
