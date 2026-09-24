@@ -3182,7 +3182,35 @@ static void test_live_replay(void) {
   sz_testrt_reset();
 }
 
+static void test_float_box_equality(void) {
+  double nan = NAN;
+  double pos = 0.0;
+  double neg = -0.0;
+  int64_t nan_bits, pos_bits, neg_bits;
+  void *nan_box, *pos_box, *neg_box, *int_box;
+  SzList *xs;
+  memcpy(&nan_bits, &nan, sizeof(nan_bits));
+  memcpy(&pos_bits, &pos, sizeof(pos_bits));
+  memcpy(&neg_bits, &neg, sizeof(neg_bits));
+  nan_box = sz_box_float_bits(nan_bits);
+  pos_box = sz_box_float_bits(pos_bits);
+  neg_box = sz_box_float_bits(neg_bits);
+  int_box = sz_box_i64(pos_bits);
+  assert(!sz_ptr_eq(nan_box, nan_box));
+  assert(sz_ptr_eq(pos_box, neg_box));
+  assert(!sz_ptr_eq(pos_box, int_box));
+  xs = sz_list_cons(neg_box, sz_list_nil());
+  assert(sz_list_contains(xs, pos_box));
+  assert(!sz_list_contains(xs, nan_box));
+  sz_release(xs);
+  sz_release(nan_box);
+  sz_release(pos_box);
+  sz_release(neg_box);
+  sz_release(int_box);
+}
+
 int main(void) {
+  test_float_box_equality();
   test_hmac();
   test_next_link();
   test_http_url();

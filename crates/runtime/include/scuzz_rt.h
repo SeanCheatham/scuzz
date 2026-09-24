@@ -69,7 +69,8 @@ enum {
   SZ_RC_BUILDER = 15,
   SZ_RC_NETSOCK = 16,
   SZ_RC_VIEW = 17,
-  SZ_RC_KIND_COUNT = 18
+  SZ_RC_FLOAT_BOX = 18,
+  SZ_RC_KIND_COUNT = 19
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 /* view.c installs this on the first view. A program with no views links
@@ -225,6 +226,7 @@ SzString *sz_string_replace_match(const SzString *s, const SzString *pat,
 
 /* Boxed i64 for IO[Int] */
 void *sz_box_i64(int64_t n);
+void *sz_box_float_bits(int64_t bits);
 int64_t sz_unbox_i64(const void *p);
 /* 0 when `key` is a boxed scalar, else 1. Null is 1. Lookup ignores this. */
 int32_t sz_map_infer_key_kind(const void *key);

@@ -151,7 +151,7 @@ static size_t g_kind_count[SZ_RC_KIND_COUNT];
 static const char *k_kind_names[SZ_RC_KIND_COUNT] = {
     "raw",      "string", "list",     "adt",      "box",  "map",
     "io",       "stream", "resource", "error",    "ref",  "queue",
-    "deferred", "either", "pair", "builder", "netsock", "view"};
+    "deferred", "either", "pair", "builder", "netsock", "view", "float-box"};
 
 static uint32_t kind_idx(uint32_t kind) {
   return kind < SZ_RC_KIND_COUNT ? kind : (uint32_t)SZ_RC_RAW;
@@ -1045,6 +1045,7 @@ void sz_release(void *ptr) {
     return;
   }
   case SZ_RC_BOX:
+  case SZ_RC_FLOAT_BOX:
     break;
   case SZ_RC_BUILDER: {
     SzBuilder *b = (SzBuilder *)ptr;
@@ -2290,6 +2291,12 @@ void *sz_box_i64(int64_t n) {
   return p;
 }
 
+void *sz_box_float_bits(int64_t bits) {
+  int64_t *p = (int64_t *)sz_rc_alloc(sizeof(int64_t), SZ_RC_FLOAT_BOX);
+  *p = bits;
+  return p;
+}
+
 int64_t sz_unbox_i64(const void *p) {
   return p ? *(const int64_t *)p : 0;
 }
@@ -2358,20 +2365,28 @@ static int error_eq(const SzError *a, const SzError *b) {
 
 int sz_ptr_eq(const void *a, const void *b) {
   uint32_t ka;
-  if (a == b)
-    return 1;
+  double x, y;
+  int64_t xb, yb;
   if (!a || !b)
-    return 0;
+    return a == b;
   if (!sz_is_rc(a) || !sz_is_rc(b))
-    return 0;
+    return a == b;
   ka = sz_rc_hdr(a)->kind;
   if (ka != sz_rc_hdr(b)->kind)
     return 0;
+  if (ka != SZ_RC_FLOAT_BOX && a == b)
+    return 1;
   switch (ka) {
   case SZ_RC_STRING:
     return sz_string_eq((const SzString *)a, (const SzString *)b);
   case SZ_RC_BOX:
     return sz_unbox_i64(a) == sz_unbox_i64(b);
+  case SZ_RC_FLOAT_BOX:
+    xb = sz_unbox_i64(a);
+    yb = sz_unbox_i64(b);
+    memcpy(&x, &xb, sizeof(x));
+    memcpy(&y, &yb, sizeof(y));
+    return x == y;
   case SZ_RC_LIST:
     return list_eq((const SzList *)a, (const SzList *)b);
   case SZ_RC_MAP:
