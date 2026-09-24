@@ -1336,7 +1336,10 @@ def mapKitCallEnd(rt: String): String =
   if (rt == "sz_set_map" || rt == "sz_list_group_by" || rt == "sz_list_distinct_by") ", i32 0)" else if (rt == "sz_list_max_by") ", i64 1)" else if (rt == "sz_list_max_by_min") ", i64 0)" else ")"
 
 def emitFoldKit(f: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitFoldKit2(foldKitRt(f), List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, loc)
+  emitFoldKitResult(f, args, emitFoldKit2(foldKitRt(f), List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, loc), prefix, defs, ens, ps, loc)
+
+def emitFoldKitResult(f: String, args: List[Expr], s: Slot, prefix: String, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+  if ((f == "List.foldLeft" || f == "List.foldRight" || f == "Timeline.fold") && isI64Ty(exprRetTyEns(Expr.ECall(f, args, 0), defs, ens, ps, loc))) emitUnboxSlot(s, prefix) else s
 
 def emitFoldKit2(rt: String, a0: Expr, rest: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitFoldKit3(rt, emitExpr(a0, Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), List.at(rest, 0), List.tail(rest), prefix, strs, defs, ens, ps, loc, foldPairTy(rt, a0, List.at(rest, 0), defs, ens, ps, loc))
@@ -1357,7 +1360,12 @@ def foldTupTy(a: String, b: String): String =
   Str.concat("(", Str.concat(a, Str.concat(", ", Str.concat(b, ")"))))
 
 def emitFoldKit3(rt: String, inner: Slot, a1: Expr, rest: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, pty: String): Slot =
-  emitFoldKit4(rt, inner, emitExpr(a1, Str.concat(prefix, "_z"), strs, defs, ens, ps, loc), List.at(rest, 0), prefix, strs, defs, ens, ps, loc, pty)
+  emitFoldKit4(rt, inner, emitFoldSeed(a1, emitExpr(a1, Str.concat(prefix, "_z"), strs, defs, ens, ps, loc), prefix, defs, ens, ps, loc), List.at(rest, 0), prefix, strs, defs, ens, ps, loc, pty)
+
+def emitFoldSeed(e: Expr, s: Slot, prefix: String, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+  s match {
+    case Slot(code, v, o) => if (isI64Ty(exprRetTyEns(e, defs, ens, ps, loc)) && !o) Slot(join(code, pairBox(v, true, prefix, "zb")), pct(prefix, "zb"), true) else s
+  }
 
 def emitFoldKit4(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, pty: String): Slot =
   emitFoldKit4b(rt, inner, z, foldLam(lam), prefix, strs, defs, ens, ps, loc, pty)
@@ -1386,32 +1394,9 @@ def emitFoldNeth(prefix: String, bind: String, body: Expr, strs: Strs, defs: Fta
 def emitFoldKit6(rt: String, ic: String, iv: String, io: Bool, z: Slot, neth: String, env: Slot, prefix: String): Slot =
   z match {
     case Slot(zc, zv, zo) => env match {
-  case Slot(ec, ev, eo) => emitFoldKit7(rt, ic, iv, io, zc, zv, zo, neth, ec, ev, eo, prefix)
+  case Slot(ec, ev, eo) => emitFoldKitCall(rt, ic, iv, io, zc, zv, zo, neth, ec, ev, eo, prefix)
 }
   }
-
-def emitFoldKit7(rt: String, ic: String, iv: String, io: Bool, zc: String, zv: String, zo: Bool, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
-  emitFoldKit7b(foldBoxZ(zv, zo), rt, ic, iv, io, zc, zv, zo, neth, ec, ev, eo, prefix)
-
-def emitFoldKit7b(boxz: Bool, rt: String, ic: String, iv: String, io: Bool, zc: String, zv: String, zo: Bool, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
-  emitFoldKit8(boxz && isListFoldRt(rt), if (boxz) emitFoldKitBox(rt, ic, iv, io, zc, zv, neth, ec, ev, eo, prefix) else emitFoldKitCall(rt, ic, iv, io, zc, zv, zo, neth, ec, ev, eo, prefix), prefix)
-
-def foldBoxZ(zv: String, zo: Bool): Bool =
-  !zo && zv != "null" && !isPtrSlot(zv, noParam())
-
-def isListFoldRt(rt: String): Bool =
-  rt == "sz_list_fold_left" || rt == "sz_list_fold_right" || rt == "sz_timeline_fold"
-
-def emitFoldKit8(unbox: Bool, s: Slot, prefix: String): Slot =
-  if (unbox) unboxFold(s, prefix) else s
-
-def unboxFold(s: Slot, prefix: String): Slot =
-  s match {
-    case Slot(c, v, _) => Slot(join(c, join(line(Str.concat(tmp(prefix, "fu"), Str.concat("call i64 @sz_unbox_i64(ptr ", Str.concat(v, ")")))), relPtr(v))), pct(prefix, "fu"), false)
-  }
-
-def emitFoldKitBox(rt: String, ic: String, iv: String, io: Bool, zc: String, zv: String, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
-  Slot(join(neth, join(ic, join(zc, join(ec, join(line(Str.concat(tmp(prefix, "zb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(zv, ")")))), join(foldCall(rt, iv, pct(prefix, "zb"), prefix, ev), join(if (io) relPtr(iv) else "", join(relPtr(pct(prefix, "zb")), emitFmRel(ev, eo))))))))), pct(prefix, "v"), true)
 
 def emitFoldKitCall(rt: String, ic: String, iv: String, io: Bool, zc: String, zv: String, zo: Bool, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
   Slot(join(neth, join(ic, join(zc, join(ec, join(foldCall(rt, iv, zv, prefix, ev), join(if (io) relPtr(iv) else "", join(if (zo) relPtr(zv) else "", emitFmRel(ev, eo)))))))), pct(prefix, "v"), true)

@@ -505,6 +505,8 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"extTail:${if (numericExtremeTail(7)) "y" else "n"}")
     _ <- IO.println(s"extBy:${if (numericExtremeBy([7, 8, 9])) "y" else "n"}")
     _ <- IO.println(s"reduceN:${if (numericReduceMap([7, 8, 9])) "y" else "n"}")
+    _ <- IO.println(s"foldSeed:${if (borrowedFoldSeed(["a", "b"], "!")) "y" else "n"}")
+    _ <- IO.println(s"foldNum:${if (numericFoldSeed([1, 2, 3], 4)) "y" else "n"}")
     _ <- IO.println(s"zipAllN:${if (numericZipAll(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
@@ -704,6 +706,20 @@ def numericReduceMap(xs: List[Int]): Bool =
 })), "left", 0) == 24 && Map.getOrElse(Map.set(Map.empty(), "right", List.reduceRight(xs, __tup => __tup match {
   case (a, b) => a + b
 })), "right", 0) == 24
+
+def borrowedFoldSeed(xs: List[String], z: String): Bool =
+  List.foldLeft(xs, z, __tup => __tup match {
+  case (acc, x) => Str.concat(acc, x)
+}) == "!ab" && List.foldRight(xs, z, __tup => __tup match {
+  case (x, acc) => Str.concat(x, acc)
+}) == "ab!"
+
+def numericFoldSeed(xs: List[Int], z: Int): Bool =
+  List.foldLeft(xs, z, __tup => __tup match {
+  case (acc, x) => acc + x
+}) == 10 && List.foldRight(xs, z, __tup => __tup match {
+  case (x, acc) => x + acc
+}) == 10
 
 def numericZipAll(k: Int): Bool =
   List.zipAll([k], [k, k + 1], k + 2, k + 3) == [(k, k), (k + 2, k + 1)] && List.zipAll([k, k + 1], [k], k + 2, k + 3) == [(k, k), (k + 1, k + 3)]
