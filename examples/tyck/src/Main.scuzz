@@ -574,7 +574,10 @@ def stringDelimiters(): Bool =
   rejects("def wrong(): String = \"open", "unexpected token") && rejects("def wrong(): String = \"open\\\"", "unexpected token") && rejects("def wrong(): String = \"\"\"open", "unexpected token") && rejects("def wrong(): String = s\"open", "unexpected token") && rejects("def wrong(): String = s\"${1", "unexpected token") && rejects("def wrong(): String = s\"${\"open", "unexpected token") && Check.check("def right(): String = \"closed\"") == "[]" && Check.check("def right(): String = \"\"\"closed\"\"\"") == "[]" && Check.check("def right(): String = s\"${\"closed\"}\"") == "[]"
 
 def interpolationTypes(): Bool =
-  rejects("def wrong(): String = s\"$missing\"", "unbound variable missing") && rejects("def wrong(): String = s\"${1 + true}\"", "arithmetic needs Int or Float") && rejects("def wrong(): String = s\"${1 $ 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1: List[Int, String]}\"", "List expects 1 type arg") && Check.check("def right(n: Int): String = s\"n=$n next=${n + 1}\"") == "[]" && Check.check("def right(): Int = (_ + 1)(8)") == "[]" && Check.check("def right(): Int = ((a, b) => a + b)(2, 3)") == "[]" && interpolationAliases()
+  rejects("def wrong(): String = s\"$missing\"", "unbound variable missing") && rejects("def wrong(): String = s\"${1 + true}\"", "arithmetic needs Int or Float") && rejects("def wrong(): String = s\"${1 $ 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1: List[Int, String]}\"", "List expects 1 type arg") && Check.check("def right(n: Int): String = s\"n=$n next=${n + 1}\"") == "[]" && Check.check("def right(): Int = (_ + 1)(8)") == "[]" && Check.check("def right(): Int = ((a, b) => a + b)(2, 3)") == "[]" && interpolationAliases() && interpolationTriple()
+
+def interpolationTriple(): Bool =
+  Check.check("def right(): String = s\"${\"\"\"a\"}b\"\"\"}\"") == "[]"
 
 def interpolationAliases(): Bool =
   Check.check("type Id = Int\ndef right(): String = s\"${1: Id}\"") == "[]" && Check.check("type Id = Int\ndef right(): String = s\"${((x: Id) => x + 1)(2)}\"") == "[]" && rejects("type Id[T] = T\ndef wrong(): String = s\"${1: Id[Int, String]}\"", "Id expects 1 type arg")
