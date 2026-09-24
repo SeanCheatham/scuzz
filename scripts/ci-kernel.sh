@@ -12,6 +12,7 @@ if [ "${PIPESTATUS[0]}" -ne 0 ]; then
   exit 1
 fi
 grep -Fxq 'triple:a"}b' /tmp/kernel.out
+grep -Fxq 'nested:a}b' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
 diff <(grep -vx ok /tmp/kernel.out) /tmp/kernel-eval.out
