@@ -356,7 +356,7 @@ def emitExprGo(e: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], p
     case Expr.EMatch(s, arms, off) => emitMatch(s, arms, off, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EList(xs) => emitList(xs, prefix, strs, defs, ens, ps, loc)
     case Expr.ETuple(xs) => emitTuple(xs, prefix, strs, defs, ens, ps, loc)
-    case Expr.EInterp(s, _) => emitInterp(s, prefix, strs, defs, ens, ps, loc)
+    case Expr.EInterp(_, parts, _) => emitInterp(parts, prefix, strs, defs, ens, ps, loc)
     case Expr.EFloat(s) => emitFloatBits(s, prefix)
     case Expr.EFor(bs, body, _) => emitExprFid(desugarFor(bs, body), prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EAscribe(inner, _, _) => emitExprFid(inner, prefix, strs, defs, ens, ps, loc, fid)
@@ -491,8 +491,8 @@ def eqIsLet(name: String): Bool =
 def isSimpleBind(n: String): Bool =
   n != "" && parenAt(n, 0) < 0 && !isConsPat(n)
 
-def emitInterp(s: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitInterpFold(Parse.interpParts(s, 0, Builder.empty(), noExpr()), prefix, strs, defs, ens, ps, loc, 0)
+def emitInterp(parts: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+  emitInterpFold(parts, prefix, strs, defs, ens, ps, loc, 0)
 
 def closeBrace(s: String, i: Int, depth: Int): Int =
   if (i >= Str.len(s) || depth <= 0) i else closeBraceCh(s, i, depth, Str.charAt(s, i))
@@ -881,7 +881,14 @@ def mapGetOrI64(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   List.len(args) >= 3 && exprIsI64(List.at(args, 2), ps, defs)
 
 def exprMethI64(recv: Expr, name: String, args: List[Expr], ps: List[Param], defs: Ftab): Bool =
-  if (name == "at") headUnbox1(recv, ps) else if (name == "getOrElse" && !List.isEmpty(args)) exprIsI64(List.at(args, 0), ps, defs) else exprMethodI64(recv, name, defs)
+  if (name == "at") headUnbox1(recv, ps) else if (name == "getOrElse" && !List.isEmpty(args)) exprIsI64(List.at(args, 0), ps, defs) else if (name == "apply") exprApplyI64(recv, ps, defs) else exprMethodI64(recv, name, defs)
+
+def exprApplyI64(recv: Expr, ps: List[Param], defs: Ftab): Bool =
+  recv match {
+    case Expr.ELam(_, _, body) => exprIsI64(body, ps, defs)
+    case Expr.EAscribe(inner, _, _) => exprApplyI64(inner, ps, defs)
+    case _ => exprMethodI64(recv, "apply", defs)
+  }
 
 def exprIsI64Recv(args: List[Expr], ps: List[Param], defs: Ftab): Bool =
   if (List.len(args) < 3) false else exprIsI64(List.at(List.tail(List.tail(args)), 0), ps, defs)
@@ -4630,7 +4637,7 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
     case Expr.EBool(_) => e
     case Expr.EStr(_, _) => e
     case Expr.EFloat(s) => Expr.EFloat(s)
-    case Expr.EInterp(s, off) => Expr.EInterp(rewriteInterpStr(s, from, to), off)
+    case Expr.EInterp(s, parts, off) => Expr.EInterp(rewriteInterpStr(s, from, to), rewriteBindList(parts, from, to), off)
     case Expr.EHole => Expr.EHole
     case Expr.EUnit => Expr.EUnit
   }
@@ -6043,7 +6050,7 @@ def rwAliasFuns(ds: List[Fun], als: List[Alias]): List[Fun] =
 
 def rwAliasFun(d: Fun, als: List[Alias]): Fun =
   d match {
-    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => Fun(priv, ora, name, ts, rwAliasParams(ps, als), rwAliasTy(ret, als), body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => Fun(priv, ora, name, ts, rwAliasParams(ps, als), rwAliasTy(ret, als), Check.expandExpr(body, als), mod, off)
   }
 
 def rwAliasParams(ps: List[Param], als: List[Alias]): List[Param] =
