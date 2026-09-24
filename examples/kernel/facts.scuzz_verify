@@ -52,6 +52,12 @@ oracle floatListOps(): Bool =
 oracle floatOrderOps(): Bool =
   Main.floatOrderOps([2.0, 0.0 - 1.0, 1.0])
 
+oracle floatInlineOrder(): Bool =
+  Main.floatInlineOrder()
+
+oracle floatLocalOrder(): Bool =
+  Main.floatLocalOrder()
+
 oracle floatNaNOrder(): Bool =
   Main.floatNaNOrder()
 

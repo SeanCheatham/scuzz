@@ -511,6 +511,8 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"floatList:${if (floatListOps([1.0, 2.0], 0.5)) "y" else "n"}")
     _ <- IO.println(s"floatOrder:${if (floatOrderOps([2.0, 0.0 - 1.0, 1.0])) "y" else "n"}")
     _ <- IO.println(s"floatNaN:${if (floatNaNOrder()) "y" else "n"}")
+    _ <- IO.println(s"floatInline:${if (floatInlineOrder()) "y" else "n"}")
+    _ <- IO.println(s"floatLocal:${if (floatLocalOrder()) "y" else "n"}")
     _ <- IO.println(s"zipAllN:${if (numericZipAll(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
@@ -743,6 +745,14 @@ def floatListOps(xs: List[Float], z: Float): Bool =
 
 def floatOrderOps(xs: List[Float]): Bool =
   List.sort(xs) == [0.0 - 1.0, 1.0, 2.0] && List.max(xs) == 2.0 && List.min(xs) == 0.0 - 1.0
+
+def floatInlineOrder(): Bool =
+  List.sort([2.0, 0.0 - 1.0, 1.0]) == [0.0 - 1.0, 1.0, 2.0] && List.max([2.0, 0.0 - 1.0, 1.0]) == 2.0 && List.min([2.0, 0.0 - 1.0, 1.0]) == 0.0 - 1.0
+
+def floatLocalOrder(): Bool =
+  for {
+    xs = [2.0, 0.0 - 1.0, 1.0]
+  } yield List.sort(xs) == [0.0 - 1.0, 1.0, 2.0] && List.max(xs) == 2.0 && List.min(xs) == 0.0 - 1.0
 
 def floatNaNOrder(): Bool =
   for {

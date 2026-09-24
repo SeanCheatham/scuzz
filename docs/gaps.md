@@ -45,7 +45,7 @@ Required for CLI, server, and desktop applications.
 
 OS threads.
 
-Float ordering from inferred local lists or nested list calls can lose the element type during emission. An explicit `List[Float]` parameter preserves the type.
+Float ordering from nested list calls can lose the element type during emission. A local value from a nested list call can have the same problem. An explicit `List[Float]` parameter preserves the type.
 
 ### Verification
 
