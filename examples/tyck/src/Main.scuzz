@@ -259,7 +259,10 @@ def wantStrConcatTy(): String =
   "[{\"severity\":\"error\",\"message\":\"type error: def n body String does not match declared Int\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":14,\"end_line\":1,\"end_column\":24}]"
 
 def tyckFiles(): Bool =
-  Str.contains(Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []), "arithmetic needs Int")
+  Str.contains(Check.checkFiles(("Main", srcMainOk()) :: ("Util", srcUtil()) :: []), "arithmetic needs Int") && duplicateMain()
+
+def duplicateMain(): Bool =
+  Str.contains(Check.check("@main def main: IO[Unit] = IO.println(\"a\")\n@main def main: IO[Unit] = IO.println(\"b\")"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":2,\"column\":1")
 
 def srcLeftover(): String =
   """def n(): Int = 0b21
