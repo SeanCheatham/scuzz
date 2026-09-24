@@ -483,5 +483,5 @@ def trim(s: String): String =
   trim2(s, 0, Str.len(s))
 
 def trim2(s: String, a: Int, b: Int): String =
-  if (a >= b) "" else if (Str.charAt(s, a) == 32) trim2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trim2(s, a, b - 1) else Str.slice(s, a, b)
+  if (a >= b) "" else if (Str.charAt(s, a) == 32) trim2(s, a + 1, b) else if (Str.charAt(s, b - 1) == 32) trim2(s, a, b - 1) else if (a == 0 && b == Str.len(s)) s else Str.slice(s, a, b)
 
