@@ -2576,7 +2576,7 @@ def checkProgAliases(o: Out, p: Prog, stems: List[String]): Out =
   if (hasErr(o)) o else checkProgTraits(checkTraits(p.traits, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
 
 def checkProgTraits(o: Out, p: Prog, stems: List[String]): Out =
-  if (hasErr(o)) o else checkProgImpls(checkImplHeaders(p.impls, p.traits, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
+  if (hasErr(o)) o else checkProgImpls(checkImplHeaders(p.impls, p.traits, Parse.builtins(p.enums), p.aliases, aliasNames(p.aliases)), p, stems)
 
 def checkProgImpls(o: Out, p: Prog, stems: List[String]): Out =
   if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(p.imps, implFuns(p.impls, p.defs)), p.aliases), Parse.builtins(p.enums), aliasNames(p.aliases), p.main, p.body, stems)
@@ -2619,27 +2619,88 @@ def checkTraitMethod(m: TrMethod, rest: List[TrMethod], ens: List[En], names: Li
 def checkTraitMethodParams(o: Out, ret: String, rest: List[TrMethod], ens: List[En], names: List[String]): Out =
   if (hasErr(o)) o else if (!knownTy(Type.parse(ret), ens, names)) bad(Str.concat("unknown type ", ret), noSpan()) else checkTraitMethods(rest, ens, names)
 
-def checkImplHeaders(impls: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
-  if (List.isEmpty(impls)) ok("Unit") else checkImplHeader(List.at(impls, 0), List.tail(impls), traits, ens, names)
+def checkImplHeaders(impls: List[Im], traits: List[Tr], ens: List[En], aliases: List[Alias], names: List[String]): Out =
+  if (List.isEmpty(impls)) ok("Unit") else checkImplHeader(List.at(impls, 0), List.tail(impls), traits, ens, aliases, names)
 
-def checkImplHeader(im: Im, rest: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
+def checkImplHeader(im: Im, rest: List[Im], traits: List[Tr], ens: List[En], aliases: List[Alias], names: List[String]): Out =
   im match {
-    case Im(tn, args, forTy, _) => checkImplHeaderArity(traitArity(traits, tn), tn, args, forTy, rest, traits, ens, names)
+    case Im(tn, args, forTy, methods) => checkImplHeaderTrait(findTrait(traits, tn), tn, args, forTy, methods, rest, traits, ens, aliases, names)
   }
 
-def checkImplHeaderArity(arity: Int, tn: String, args: List[String], forTy: String, rest: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
-  if (arity < 0) bad(Str.concat("unknown trait ", tn), noSpan()) else if (arity != List.len(args)) bad(Str.concat(tn, Str.concat(" expects ", Str.concat(Str.fromInt(arity), " type args"))), noSpan()) else checkImplArgs(checkTypeStrings(args, ens, names), forTy, rest, traits, ens, names)
+def checkImplHeaderTrait(t: Tr, tn: String, args: List[String], forTy: String, methods: List[Fun], rest: List[Im], traits: List[Tr], ens: List[En], aliases: List[Alias], names: List[String]): Out =
+  if (t.name == "") bad(Str.concat("unknown trait ", tn), noSpan()) else if (List.len(t.tparams) != List.len(args)) bad(Str.concat(tn, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(t.tparams)), " type args"))), noSpan()) else checkImplArgs(checkTypeStrings(args, ens, names), t, args, forTy, methods, rest, traits, ens, aliases, names)
 
-def checkImplArgs(o: Out, forTy: String, rest: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
-  if (hasErr(o)) o else if (!knownTy(Type.parse(forTy), ens, names)) bad(Str.concat("unknown type ", forTy), noSpan()) else checkImplHeaders(rest, traits, ens, names)
+def checkImplArgs(o: Out, t: Tr, args: List[String], forTy: String, methods: List[Fun], rest: List[Im], traits: List[Tr], ens: List[En], aliases: List[Alias], names: List[String]): Out =
+  if (hasErr(o)) o else if (!knownTy(Type.parse(forTy), ens, names)) bad(Str.concat("unknown type ", forTy), noSpan()) else checkImplMethodsAfter(checkImplMethods(t.methods, methods, t.tparams, args, aliases), rest, traits, ens, aliases, names)
 
-def traitArity(traits: List[Tr], name: String): Int =
-  if (List.isEmpty(traits)) 0 - 1 else traitArityAt(List.at(traits, 0), List.tail(traits), name)
+def checkImplMethodsAfter(o: Out, rest: List[Im], traits: List[Tr], ens: List[En], aliases: List[Alias], names: List[String]): Out =
+  if (hasErr(o)) o else checkImplHeaders(rest, traits, ens, aliases, names)
 
-def traitArityAt(t: Tr, rest: List[Tr], name: String): Int =
+def findTrait(traits: List[Tr], name: String): Tr =
+  if (List.isEmpty(traits)) Tr("", [], []) else findTraitAt(List.at(traits, 0), List.tail(traits), name)
+
+def findTraitAt(t: Tr, rest: List[Tr], name: String): Tr =
   t match {
-    case Tr(n, ts, _) => if (n == name) List.len(ts) else traitArity(rest, name)
+    case Tr(n, _, _) => if (n == name) t else findTrait(rest, name)
   }
+
+def checkImplMethods(decls: List[TrMethod], methods: List[Fun], tps: List[String], args: List[String], aliases: List[Alias]): Out =
+  if (List.isEmpty(decls)) ok("Unit") else checkImplMethod(List.at(decls, 0), List.tail(decls), methods, tps, args, aliases)
+
+def checkImplMethod(decl: TrMethod, rest: List[TrMethod], methods: List[Fun], tps: List[String], args: List[String], aliases: List[Alias]): Out =
+  decl match {
+    case TrMethod(name, ps, ret) => checkImplMethodFound(name, ps, ret, List.filter(methods, m => m.name == name), rest, methods, tps, args, aliases)
+  }
+
+def checkImplMethodFound(name: String, ps: List[Param], ret: String, hit: List[Fun], rest: List[TrMethod], methods: List[Fun], tps: List[String], args: List[String], aliases: List[Alias]): Out =
+  if (List.isEmpty(hit)) bad(Str.concat("missing trait method ", name), noSpan()) else if (List.len(hit) != 1) bad(Str.concat("duplicate trait method ", name), noSpan()) else checkImplMethodSig(List.at(hit, 0), name, ps, ret, rest, methods, tps, args, aliases)
+
+def checkImplMethodSig(method: Fun, name: String, ps: List[Param], ret: String, rest: List[TrMethod], methods: List[Fun], tps: List[String], args: List[String], aliases: List[Alias]): Out =
+  method match {
+    case Fun(_, _, _, _, gotPs, gotRet, _, _, _) => if (List.len(ps) != List.len(gotPs)) bad(Str.concat("trait method ", Str.concat(name, " parameter count")), noSpan()) else checkImplMethodParams(checkImplParamTypes(name, ps, gotPs, tps, args, aliases), name, ret, gotRet, rest, methods, tps, args, aliases)
+  }
+
+def checkImplMethodParams(o: Out, name: String, ret: String, gotRet: String, rest: List[TrMethod], methods: List[Fun], tps: List[String], args: List[String], aliases: List[Alias]): Out =
+  if (hasErr(o)) o else if (!contractTypeEq(ret, gotRet, tps, args, aliases)) bad(Str.concat("trait method ", Str.concat(name, " return type")), noSpan()) else checkImplMethods(rest, methods, tps, args, aliases)
+
+def checkImplParamTypes(name: String, ps: List[Param], gotPs: List[Param], tps: List[String], args: List[String], aliases: List[Alias]): Out =
+  if (List.isEmpty(ps)) ok("Unit") else checkImplParamType(name, List.at(ps, 0), List.at(gotPs, 0), List.tail(ps), List.tail(gotPs), tps, args, aliases)
+
+def checkImplParamType(name: String, want: Param, got: Param, ps: List[Param], gotPs: List[Param], tps: List[String], args: List[String], aliases: List[Alias]): Out =
+  if (!contractTypeEq(want.ty, got.ty, tps, args, aliases)) bad(Str.concat("trait method ", Str.concat(name, " parameter type")), noSpan()) else checkImplParamTypes(name, ps, gotPs, tps, args, aliases)
+
+def contractTypeEq(want: String, got: String, tps: List[String], args: List[String], aliases: List[Alias]): Bool =
+  contractTyEq(Type.parse(expandTy(specializeType(want, tps, Type.mapParse(args)), aliases)), Type.parse(expandTy(got, aliases)))
+
+def contractTyEq(a: Ty, b: Ty): Bool =
+  if (Type.isIo(a) && Type.isIo(b)) contractTyEq(Type.ioErr(a), Type.ioErr(b)) && contractTyEq(Type.ioOk(a), Type.ioOk(b)) else contractTyEqGo(a, b)
+
+def contractTyEqGo(a: Ty, b: Ty): Bool =
+  a match {
+    case Ty.TVar(n) => b match {
+  case Ty.TVar(m) => n == m
+  case _ => false
+}
+    case Ty.Named(n) => b match {
+  case Ty.Named(m) => n == m
+  case _ => false
+}
+    case Ty.App(n, args) => b match {
+  case Ty.App(m, bs) => n == m && contractTyListEq(args, bs)
+  case _ => false
+}
+    case Ty.Tuple(parts) => b match {
+  case Ty.Tuple(bs) => contractTyListEq(parts, bs)
+  case _ => false
+}
+    case Ty.Arrow(arg, ret) => b match {
+  case Ty.Arrow(barg, bret) => contractTyEq(arg, barg) && contractTyEq(ret, bret)
+  case _ => false
+}
+  }
+
+def contractTyListEq(a: List[Ty], b: List[Ty]): Bool =
+  if (List.isEmpty(a)) List.isEmpty(b) else if (List.isEmpty(b)) false else contractTyEq(List.at(a, 0), List.at(b, 0)) && contractTyListEq(List.tail(a), List.tail(b))
 
 def checkTypeStrings(types: List[String], ens: List[En], names: List[String]): Out =
   if (List.isEmpty(types)) ok("Unit") else if (!knownTy(Type.parse(List.at(types, 0)), ens, names)) bad(Str.concat("unknown type ", List.at(types, 0)), noSpan()) else checkTypeStrings(List.tail(types), ens, names)
