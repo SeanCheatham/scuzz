@@ -1263,7 +1263,33 @@ def unqualifiedPatternTypes(): Bool =
   rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && Check.check(srcUnqualifiedPatternRight()) == "[]" && Check.check(srcUnqualifiedPatternNamed()) == "[]" && rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && patternOwnerTypes()
 
 def patternOwnerTypes(): Bool =
-  rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second") && Check.check(srcQualifiedPatternRight()) == "[]" && forPatternOwnerTypes() && unknownPatternOwnerTypes()
+  rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second") && Check.check(srcQualifiedPatternRight()) == "[]" && forPatternOwnerTypes() && unknownPatternOwnerTypes() && scalarPatternOwnerTypes()
+
+def scalarPatternOwnerTypes(): Bool =
+  rejects(srcQualifiedScalarWrong(), "pattern case Second.Item does not belong to Int") && rejects(srcOptionScalarWrong(), "pattern case Option.Some does not belong to Int") && rejects(srcForScalarOwnerWrong(), "pattern case Second.Item does not belong to Int")
+
+def srcQualifiedScalarWrong(): String =
+  """enum Second:
+  case Item(value: Int)
+def wrong(n: Int): Int = n match {
+  case Second.Item(_) => 1
+  case _ => 0
+}"""
+
+def srcOptionScalarWrong(): String =
+  """def wrong(n: Int): Int = n match {
+  case Option.Some(_) => 1
+  case _ => 0
+}"""
+
+def srcForScalarOwnerWrong(): String =
+  """enum Second:
+  case Item(value: Int)
+def wrong(): Int =
+  for {
+    Second.Item(_) = 7
+  } yield 1
+"""
 
 def unknownPatternOwnerTypes(): Bool =
   rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing") && rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing") && Check.check(srcKnownJsonCase()) == "[]" && rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result") && Check.check(srcNestedParsedJsonCase()) == "[]"
@@ -1547,7 +1573,10 @@ def dumpUnqualifiedPattern(): String =
   if (!rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("wrong:", Check.check(srcUnqualifiedPatternWrong())) else if (Check.check(srcUnqualifiedPatternRight()) != "[]") Str.concat("right:", Check.check(srcUnqualifiedPatternRight())) else if (Check.check(srcUnqualifiedPatternNamed()) != "[]") Str.concat("named:", Check.check(srcUnqualifiedPatternNamed())) else if (!rejects(srcNestedUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("nested:", Check.check(srcNestedUnqualifiedPatternWrong())) else dumpPatternOwner()
 
 def dumpPatternOwner(): String =
-  if (!rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else if (Check.check(srcQualifiedPatternRight()) != "[]") Str.concat("valid:", Check.check(srcQualifiedPatternRight())) else if (!rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forPure:", Check.check(srcForPureOwnerWrong())) else if (!rejects(srcForDrawOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forDraw:", Check.check(srcForDrawOwnerWrong())) else dumpUnknownPatternOwner()
+  if (!rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else if (Check.check(srcQualifiedPatternRight()) != "[]") Str.concat("valid:", Check.check(srcQualifiedPatternRight())) else if (!rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forPure:", Check.check(srcForPureOwnerWrong())) else if (!rejects(srcForDrawOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forDraw:", Check.check(srcForDrawOwnerWrong())) else if (!scalarPatternOwnerTypes()) dumpScalarPatternOwner() else dumpUnknownPatternOwner()
+
+def dumpScalarPatternOwner(): String =
+  if (!rejects(srcQualifiedScalarWrong(), "pattern case Second.Item does not belong to Int")) Str.concat("scalar:", Check.check(srcQualifiedScalarWrong())) else if (!rejects(srcOptionScalarWrong(), "pattern case Option.Some does not belong to Int")) Str.concat("option:", Check.check(srcOptionScalarWrong())) else Str.concat("forScalar:", Check.check(srcForScalarOwnerWrong()))
 
 def dumpUnknownPatternOwner(): String =
   if (!rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item")) Str.concat("owner:", Check.check(srcUnknownPatternOwner())) else if (!rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing")) Str.concat("case:", Check.check(srcUnknownPatternCase())) else if (!rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing")) Str.concat("json:", Check.check(srcUnknownJsonCase())) else if (Check.check(srcKnownJsonCase()) != "[]") Str.concat("jsonValid:", Check.check(srcKnownJsonCase())) else if (!rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result")) Str.concat("jsonParsed:", Check.check(srcParsedJsonCase())) else if (Check.check(srcNestedParsedJsonCase()) != "[]") Str.concat("jsonNested:", Check.check(srcNestedParsedJsonCase())) else if (!rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item")) Str.concat("for:", Check.check(srcUnknownForOwner())) else ""
