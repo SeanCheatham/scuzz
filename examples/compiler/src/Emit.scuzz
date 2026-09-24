@@ -956,10 +956,7 @@ def hasDigitStemAt(s: String, stem: String, n: Int): Bool =
   if (n > 12) false else hasSub(s, Str.concat(stem, Str.fromInt(n))) || hasDigitStemAt(s, stem, n + 1)
 
 def hasSub(s: String, sub: String): Bool =
-  hasSubAt(s, sub, 0)
-
-def hasSubAt(s: String, sub: String, i: Int): Bool =
-  if (i + Str.len(sub) > Str.len(s)) false else if (startsAt(s, i, sub)) true else hasSubAt(s, sub, i + 1)
+  Str.contains(s, sub)
 
 def callIsI64(f: String, defs: Ftab): Bool =
   f == "Net.retryAfterMillis" || f == "Str.byteLen" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || Str.startsWith(f, "Icon.") || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.boolOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
@@ -5240,28 +5237,7 @@ def stampNeth(ir: String, key: String): String =
   stampFrom(ir, "@sz_neth_", Str.concat("@sz_neth_", Str.concat(key, "_")))
 
 def stampFrom(s: String, old: String, neu: String): String =
-  Builder.result(stampFromB(s, old, neu, 0, Builder.empty()))
-
-def stampFromB(s: String, old: String, neu: String, i: Int, b: Builder): Builder =
-  if (i >= Str.len(s)) b else stampFromAt(s, old, neu, i, findSub(s, old, i), b)
-
-def stampFromAt(s: String, old: String, neu: String, i: Int, j: Int, b: Builder): Builder =
-  if (j >= Str.len(s)) stampFromEnd(s, i, b) else stampFromB(s, old, neu, j + Str.len(old), Builder.append(Builder.append(b, stampGap(s, i, j)), neu))
-
-def stampFromEnd(s: String, i: Int, b: Builder): Builder =
-  if (i >= Str.len(s)) b else Builder.append(b, if (i == 0) s else Str.slice(s, i, Str.len(s)))
-
-def stampGap(s: String, i: Int, j: Int): String =
-  if (j <= i) "" else Str.slice(s, i, j)
-
-def findSub(s: String, sub: String, i: Int): Int =
-  if (i + Str.len(sub) > Str.len(s)) Str.len(s) else if (startsAt(s, i, sub)) i else findSub(s, sub, i + 1)
-
-def startsAt(s: String, i: Int, old: String): Bool =
-  i + Str.len(old) <= Str.len(s) && startsAtGo(s, i, old, 0)
-
-def startsAtGo(s: String, i: Int, old: String, k: Int): Bool =
-  if (k >= Str.len(old)) true else if (Str.charAt(s, i + k) != Str.charAt(old, k)) false else startsAtGo(s, i, old, k + 1)
+  Str.replace(s, old, neu)
 
 def rwDef(d: Fun, defs: Ftab, ens: List[En]): Fun =
   d match {
