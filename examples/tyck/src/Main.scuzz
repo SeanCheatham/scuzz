@@ -1257,7 +1257,17 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes() && bareCtorTypes()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes() && bareCtorTypes() && kitLetterTypes()
+
+def kitLetterTypes(): Bool =
+  Check.check("""enum E:
+  case A
+def fail(): IO[Float, Int] = IO.fail(1.5)""") == "[]" && Check.check("""enum A:
+  case X
+def pure(): IO[Int] = IO.pure(1)""") == "[]" && rejects("""enum E:
+  case A
+def use(e: E): E = e
+def wrong(): E = use(1.5)""", "use arg type mismatch")
 
 def bareCtorTypes(): Bool =
   rejects("""enum E:
