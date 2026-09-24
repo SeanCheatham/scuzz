@@ -896,7 +896,10 @@ def fmtSource(rel: String, name: String): Bool =
   Drive.isVerify(name) || Drive.isScenario(name) || rel == "src" && Drive.isScuzz(name)
 
 def fmtOnePath(check: Bool, path: String, src: String): IO[Int] =
-  if (Parse.hasParseError(Parse.parse(Lexer.lex(src)))) IO.println(Str.concat(path, ": parse error; source is unchanged")).flatMap(_ => IO.fail("fmt")) else fmtOneGot(check, path, src, fmtSrc(src))
+  fmtOneParsed(check, path, src, Parse.parse(Lexer.lex(src)))
+
+def fmtOneParsed(check: Bool, path: String, src: String, p: Prog): IO[Int] =
+  if (Parse.hasParseError(p)) IO.println(Str.concat(path, ": parse error; source is unchanged")).flatMap(_ => IO.fail("fmt")) else fmtOneGot(check, path, src, Parse.pretty(p))
 
 def fmtOneGot(check: Bool, path: String, src: String, pretty: String): IO[Int] =
   if (pretty == src) IO.pure(0) else fmtOneDirty(check, path, pretty)
