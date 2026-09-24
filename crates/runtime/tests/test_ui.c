@@ -17025,11 +17025,12 @@ static void test_view_show(void) {
 SzIo *scuzz_reload_later;
 
 static void test_session_load_code(void) {
+  static char source[] = "old";
   SzUiConfig cfg;
   SzUiSession *session;
   SzView *root;
   SzSignalInt *count;
-  SzString *a11y, *dump1, *dump2;
+  SzString *a11y, *dump1, *dump2, *cached;
 
   count = sz_signal_int(7);
   root = sz_view_column();
@@ -17085,7 +17086,13 @@ static void test_session_load_code(void) {
   sz_release(later.value);
   assert(sz_signal_int_get(count) == 9);
 
+  cached = sz_string_lit(source);
+  assert(cached == sz_string_lit(source));
   sz_ui_unmount(session);
+  /* A new code image can use the same source address. */
+  memcpy(source, "new", sizeof source);
+  assert(strcmp(sz_string_cstr(cached), "old") == 0);
+  assert(strcmp(sz_string_cstr(sz_string_lit(source)), "new") == 0);
   sz_signal_int_free(count);
 }
 

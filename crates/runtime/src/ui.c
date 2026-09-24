@@ -788,6 +788,11 @@ static int copy_file(const char *src, const char *dst) {
   return 1;
 }
 
+static void close_reload_code(void *handle) {
+  sz_string_lit_cache_clear();
+  dlclose(handle);
+}
+
 int sz_ui_session_load_code(SzUiSession *session, const char *path) {
   char staged[1024];
   void *h;
@@ -809,7 +814,7 @@ int sz_ui_session_load_code(SzUiSession *session, const char *path) {
   }
   fn = (SzUiRebuildFn)dlsym(h, "sz_ui_reload_rebuild");
   if (!fn) {
-    dlclose(h);
+    close_reload_code(h);
     unlink(staged);
     return 0;
   }
@@ -817,7 +822,7 @@ int sz_ui_session_load_code(SzUiSession *session, const char *path) {
   const char *schema = (const char *)dlsym(h, "sz_ui_reload_capture");
   if (!schema || !session->capture_schema || strcmp(schema, session->capture_schema)) {
     fprintf(stderr, "scuzz: reload changes captured bindings or type layouts. Restart the app.\n");
-    dlclose(h);
+    close_reload_code(h);
     return 0;
   }
   /* IO callbacks can retain code from an earlier View. Keep it until unmount. */
@@ -943,7 +948,7 @@ void sz_ui_unmount(SzUiSession *session) {
   while (session->code) {
     ReloadCode *code = session->code;
     session->code = code->next;
-    dlclose(code->handle);
+    close_reload_code(code->handle);
     sz_free(code);
   }
   sz_free(session->capture_schema);

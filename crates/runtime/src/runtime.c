@@ -1109,6 +1109,10 @@ typedef struct SzLitCache {
 } SzLitCache;
 static SzLitCache g_lit_cache[SZ_LIT_CACHE_SLOTS];
 
+void sz_string_lit_cache_clear(void) {
+  memset(g_lit_cache, 0, sizeof g_lit_cache);
+}
+
 SzString *sz_string_lit(const char *cstr) {
   size_t len;
   size_t i;

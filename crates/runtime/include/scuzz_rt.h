@@ -120,6 +120,8 @@ typedef struct SzString {
 
 SzString *sz_string_from_cstr(const char *cstr);
 SzString *sz_string_lit(const char *cstr);
+/* Clear source addresses before generated code unloads. */
+void sz_string_lit_cache_clear(void);
 SzString *sz_string_from_bytes(const char *bytes, size_t len);
 const char *sz_string_cstr(const SzString *s);
 void sz_string_free(SzString *s);
