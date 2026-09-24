@@ -3004,18 +3004,18 @@ def recEn(en: String, ens: List[En]): String =
   if (hasEn(ens, en)) en else enOfCase(ens, en)
 
 def emitPack(vals: List[String], owns: List[Bool], args: List[Expr], prefix: String, i: Int, n: Int, ps: List[Param], defs: Ftab, ens: List[En], mod: String): Slot =
-  if (List.isEmpty(vals)) Slot(line(Str.concat(tmp(prefix, "pl0"), "call ptr @sz_list_nil()")), pct(prefix, "pl0"), true) else emitPack1(List.at(vals, 0), headOwn(owns), !List.isEmpty(args) && isI64Ty(Check.typeOfEns(List.at(args, 0), defs, ens, ps, mod)), emitPack(List.tail(vals), List.tail(owns), if (List.isEmpty(args)) args else List.tail(args), prefix, i + 1, n, ps, defs, ens, mod), prefix, i, n)
+  if (List.isEmpty(vals)) Slot(line(Str.concat(tmp(prefix, "pl0"), "call ptr @sz_list_nil()")), pct(prefix, "pl0"), true) else emitPack1(List.at(vals, 0), headOwn(owns), if (List.isEmpty(args)) "" else Check.typeOfEns(List.at(args, 0), defs, ens, ps, mod), emitPack(List.tail(vals), List.tail(owns), if (List.isEmpty(args)) args else List.tail(args), prefix, i + 1, n, ps, defs, ens, mod), prefix, i, n)
 
-def emitPack1(v: String, o: Bool, num: Bool, rest: Slot, prefix: String, i: Int, n: Int): Slot =
+def emitPack1(v: String, o: Bool, ty: String, rest: Slot, prefix: String, i: Int, n: Int): Slot =
   rest match {
-    case Slot(rc, rp, _) => emitPack2(rc, rp, v, o, num, prefix, i, n)
+    case Slot(rc, rp, _) => emitPack2(rc, rp, v, o, ty, prefix, i, n)
   }
 
-def emitPack2(rc: String, rp: String, v: String, o: Bool, num: Bool, prefix: String, i: Int, n: Int): Slot =
-  Slot(join(rc, join(packBox(v, num, prefix, i), join(packCons(prefix, i, n, packPtr(v, num, prefix, i), rp), join(relPtr(rp), packDrop(v, o, num, prefix, i))))), pct(prefix, Str.concat("pl", Str.fromInt(n - i))), true)
+def emitPack2(rc: String, rp: String, v: String, o: Bool, ty: String, prefix: String, i: Int, n: Int): Slot =
+  Slot(join(rc, join(packBox(v, ty, prefix, i), join(packCons(prefix, i, n, packPtr(v, isI64Ty(ty), prefix, i), rp), join(relPtr(rp), packDrop(v, o, isI64Ty(ty), prefix, i))))), pct(prefix, Str.concat("pl", Str.fromInt(n - i))), true)
 
-def packBox(v: String, num: Bool, prefix: String, i: Int): String =
-  if (num) line(Str.concat(tmp(prefix, Str.concat("bx", Str.fromInt(i))), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(v, ")")))) else ""
+def packBox(v: String, ty: String, prefix: String, i: Int): String =
+  if (isI64Ty(ty)) boxScalarStem(v, ty, prefix, Str.concat("bx", Str.fromInt(i))) else ""
 
 def packPtr(v: String, num: Bool, prefix: String, i: Int): String =
   if (num) pct(prefix, Str.concat("bx", Str.fromInt(i))) else v
@@ -3620,18 +3620,18 @@ def emitCopyOne(c: String, v: String, o: Bool, args: List[Expr], prefix: String,
   emitCopyOneHit(c, v, o, copyOverride(args, 0, name), prefix, en, strs, defs, ens, ps, loc)
 
 def emitCopyOneHit(c: String, v: String, o: Bool, hit: List[Expr], prefix: String, en: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if (List.isEmpty(hit)) emitCopyOneKeep(c, v, o, prefix, en, ens) else emitCopyOneArg(emitExpr(List.at(hit, 0), Str.concat(prefix, "_u0"), strs, defs, ens, ps, loc), isI64Ty(exprRetTyEns(List.at(hit, 0), defs, ens, ps, loc)), c, v, o, prefix, en, ens)
+  if (List.isEmpty(hit)) emitCopyOneKeep(c, v, o, prefix, en, ens) else emitCopyOneArg(emitExpr(List.at(hit, 0), Str.concat(prefix, "_u0"), strs, defs, ens, ps, loc), exprRetTyEns(List.at(hit, 0), defs, ens, ps, loc), c, v, o, prefix, en, ens)
 
 def emitCopyOneKeep(c: String, v: String, o: Bool, prefix: String, en: String, ens: List[En]): Slot =
   Slot(join(c, join(line(Str.concat(tmp(prefix, "pl"), Str.concat("call ptr @sz_adt_payload(ptr ", Str.concat(v, ")")))), join(emitAdtNew(prefix, ctorTag(ens, en, en), pct(prefix, "pl")), if (o) relPtr(v) else ""))), pct(prefix, "adt"), true)
 
-def emitCopyOneArg(s: Slot, scalar: Bool, c: String, v: String, o: Bool, prefix: String, en: String, ens: List[En]): Slot =
+def emitCopyOneArg(s: Slot, ty: String, c: String, v: String, o: Bool, prefix: String, en: String, ens: List[En]): Slot =
   s match {
-    case Slot(ec, ev, eo) => if (scalar) emitCopyOneBox(ec, ev, c, v, o, prefix, en, ens) else Slot(join(c, join(ec, join(emitAdtNew(prefix, ctorTag(ens, en, en), ev), join(if (eo) relPtr(ev) else "", if (o) relPtr(v) else "")))), pct(prefix, "adt"), true)
+    case Slot(ec, ev, eo) => if (isI64Ty(ty)) emitCopyOneBox(ec, ev, c, v, o, prefix, en, ens, ty) else Slot(join(c, join(ec, join(emitAdtNew(prefix, ctorTag(ens, en, en), ev), join(if (eo) relPtr(ev) else "", if (o) relPtr(v) else "")))), pct(prefix, "adt"), true)
   }
 
-def emitCopyOneBox(ec: String, ev: String, c: String, v: String, o: Bool, prefix: String, en: String, ens: List[En]): Slot =
-  Slot(join(c, join(ec, join(emitBoxI64(prefix, ev), join(emitAdtNew(prefix, ctorTag(ens, en, en), pct(prefix, "box")), join(relPtr(pct(prefix, "box")), if (o) relPtr(v) else ""))))), pct(prefix, "adt"), true)
+def emitCopyOneBox(ec: String, ev: String, c: String, v: String, o: Bool, prefix: String, en: String, ens: List[En], ty: String): Slot =
+  Slot(join(c, join(ec, join(boxScalarStem(ev, ty, prefix, "box"), join(emitAdtNew(prefix, ctorTag(ens, en, en), pct(prefix, "box")), join(relPtr(pct(prefix, "box")), if (o) relPtr(v) else ""))))), pct(prefix, "adt"), true)
 
 def emitCopyPackRel(s: Slot, v: String, o: Bool): Slot =
   s match {
@@ -3686,18 +3686,18 @@ def copyKeepLoad2(lhs: String, pl: String, k: String): String =
   line(Str.concat(lhs, Str.concat("call ptr @sz_list_at(ptr ", Str.concat(pl, Str.concat(", i64 ", Str.concat(k, ")"))))))
 
 def emitCopyArg(e: Expr, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
-  emitCopyArg2(emitExpr(e, Str.concat(prefix, Str.concat("_u", Str.fromInt(k))), strs, defs, ens, ps, loc), isI64Ty(exprRetTyEns(e, defs, ens, ps, loc)), code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns)
+  emitCopyArg2(emitExpr(e, Str.concat(prefix, Str.concat("_u", Str.fromInt(k))), strs, defs, ens, ps, loc), exprRetTyEns(e, defs, ens, ps, loc), code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns)
 
-def emitCopyArg2(s: Slot, scalar: Bool, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
+def emitCopyArg2(s: Slot, ty: String, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
   s match {
-    case Slot(ec, ev, eo) => if (scalar) emitCopyArgBox(ec, ev, code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns) else emitCopyPack(join(code, ec), args, prefix, en, names, k + 1, strs, defs, ens, ps, loc, ev :: vals, eo :: owns)
+    case Slot(ec, ev, eo) => if (isI64Ty(ty)) emitCopyArgBox(ec, ev, code, args, prefix, en, names, k, strs, defs, ens, ps, loc, vals, owns, ty) else emitCopyPack(join(code, ec), args, prefix, en, names, k + 1, strs, defs, ens, ps, loc, ev :: vals, eo :: owns)
   }
 
-def emitCopyArgBox(ec: String, ev: String, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool]): Slot =
-  emitCopyPack(join(code, join(ec, copyArgBox(prefix, k, ev))), args, prefix, en, names, k + 1, strs, defs, ens, ps, loc, pct(prefix, Str.concat("ub", Str.fromInt(k))) :: vals, true :: owns)
+def emitCopyArgBox(ec: String, ev: String, code: String, args: List[Expr], prefix: String, en: String, names: List[String], k: Int, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, vals: List[String], owns: List[Bool], ty: String): Slot =
+  emitCopyPack(join(code, join(ec, copyArgBox(prefix, k, ev, ty))), args, prefix, en, names, k + 1, strs, defs, ens, ps, loc, pct(prefix, Str.concat("ub", Str.fromInt(k))) :: vals, true :: owns)
 
-def copyArgBox(prefix: String, k: Int, ev: String): String =
-  line(Str.concat(tmp(prefix, Str.concat("ub", Str.fromInt(k))), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(ev, ")"))))
+def copyArgBox(prefix: String, k: Int, ev: String, ty: String): String =
+  boxScalarStem(ev, ty, prefix, Str.concat("ub", Str.fromInt(k)))
 
 def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (enHasCase(ens, en, name)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorOrQualKit(en, name, args, prefix, strs, defs, ens, ps, loc, fid)

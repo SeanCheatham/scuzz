@@ -18,6 +18,13 @@ enum LiteralPacket:
   case Flag(value: Bool)
   case Fields(kind: String, version: Int, enabled: Bool, value: Int)
 
+enum FloatPayload:
+  case Pair(value: Float, count: Int)
+
+record FloatRecord(value: Float, count: Int)
+
+record FloatSingle(value: Float)
+
 type UserId = Int
 type Labels = List[String]
 type BoxList[T] = List[T]
@@ -521,6 +528,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"floatCallEq:${if (floatCallEq()) "y" else "n"}")
     _ <- IO.println(s"floatBoxEq:${if (floatBoxEq()) "y" else "n"}")
     _ <- IO.println(s"floatTupleEq:${if (floatTupleEq()) "y" else "n"}")
+    _ <- IO.println(s"floatMultiEq:${if (floatMultiEq()) "y" else "n"}")
     _ <- IO.println(s"floatListKitEq:${if (floatListKitEq()) "y" else "n"}")
     _ <- IO.println(s"floatListUpdateEq:${if (floatListUpdateEq()) "y" else "n"}")
     _ <- IO.println(s"floatMapSetEq:${if (floatMapSetEq()) "y" else "n"}")
@@ -821,6 +829,14 @@ def floatTupleEq(): Bool =
     nan = 0.0 / 0.0
     negZero = 0.0 * (0.0 - 1.0)
   } yield (negZero, 1) == (0.0, 1) && (nan, 1) != (nan, 1)
+
+def floatMultiEq(): Bool =
+  for {
+    nan = 0.0 / 0.0
+    negZero = 0.0 * (0.0 - 1.0)
+    pair = FloatRecord(negZero, 1)
+    single = FloatSingle(negZero)
+  } yield FloatPayload.Pair(negZero, 1) == FloatPayload.Pair(0.0, 1) && FloatPayload.Pair(nan, 1) != FloatPayload.Pair(nan, 1) && pair == FloatRecord(0.0, 1) && pair.copy(value = 0.0) == pair && single.copy(value = 0.0) == single
 
 def floatListKitEq(): Bool =
   for {
