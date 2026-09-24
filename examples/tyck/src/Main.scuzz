@@ -574,13 +574,16 @@ def stringDelimiters(): Bool =
   rejects("def wrong(): String = \"open", "unexpected token") && rejects("def wrong(): String = \"open\\\"", "unexpected token") && rejects("def wrong(): String = \"\"\"open", "unexpected token") && rejects("def wrong(): String = s\"open", "unexpected token") && rejects("def wrong(): String = s\"${1", "unexpected token") && rejects("def wrong(): String = s\"${\"open", "unexpected token") && Check.check("def right(): String = \"closed\"") == "[]" && Check.check("def right(): String = \"\"\"closed\"\"\"") == "[]" && Check.check("def right(): String = s\"${\"closed\"}\"") == "[]"
 
 def interpolationTypes(): Bool =
-  rejects("def wrong(): String = s\"$missing\"", "unbound variable missing") && rejects("def wrong(): String = s\"${1 + true}\"", "arithmetic needs Int or Float") && rejects("def wrong(): String = s\"${1 $ 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1: List[Int, String]}\"", "List expects 1 type arg") && Check.check("def right(n: Int): String = s\"n=$n next=${n + 1}\"") == "[]" && Check.check("def right(): Int = (_ + 1)(8)") == "[]" && Check.check("def right(): Int = ((a, b) => a + b)(2, 3)") == "[]" && interpolationAliases() && interpolationTriple() && interpolationSpans()
+  rejects("def wrong(): String = s\"$missing\"", "unbound variable missing") && rejects("def wrong(): String = s\"${1 + true}\"", "arithmetic needs Int or Float") && rejects("def wrong(): String = s\"${1 $ 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1: List[Int, String]}\"", "List expects 1 type arg") && Check.check("def right(n: Int): String = s\"n=$n next=${n + 1}\"") == "[]" && Check.check("def right(): Int = (_ + 1)(8)") == "[]" && Check.check("def right(): Int = ((a, b) => a + b)(2, 3)") == "[]" && interpolationAliases() && interpolationTriple() && interpolationNested() && interpolationSpans()
 
 def interpolationSpans(): Bool =
   Str.contains(Check.check("def wrong(): String = s\"$missing\""), "\"column\":26") && Str.contains(Check.check("def wrong(): String = s\"prefix ${missing}\""), "\"column\":34") && Str.contains(Check.check("def wrong(): String = s\"${1: List[Int, String]}\""), "\"column\":27") && Str.contains(Check.check("def wrong(): String = s\"${1 $ 2}\""), "\"column\":29") && Str.contains(Check.check("def wrong(): String =\n  s\"prefix ${missing}\""), "\"line\":2,\"column\":14") && Str.contains(Check.check("def wrong(): String = s\"${s\"$missing\"}\""), "\"column\":30")
 
 def interpolationTriple(): Bool =
   Check.check("def right(): String = s\"${\"\"\"a\"}b\"\"\"}\"") == "[]"
+
+def interpolationNested(): Bool =
+  Check.check("def right(): String = s\"${s\"${\"ok\"}\"}\"") == "[]" && Check.check("def right(): String = s\"${s\"${\"a}b\"}\"}\"") == "[]" && Check.check("def right(): String = s\"${s\"${\"\"\"a\"}b\"\"\"}\"}\"") == "[]" && rejects("def wrong(): String = s\"${s\"${1 + true}\"}\"", "arithmetic needs Int or Float")
 
 def interpolationAliases(): Bool =
   Check.check("type Id = Int\ndef right(): String = s\"${1: Id}\"") == "[]" && Check.check("type Id = Int\ndef right(): String = s\"${((x: Id) => x + 1)(2)}\"") == "[]" && rejects("type Id[T] = T\ndef wrong(): String = s\"${1: Id[Int, String]}\"", "Id expects 1 type arg")

@@ -289,19 +289,28 @@ def _lexInterpCh3(src: String, i: Int, b: Builder, start: Int, stem: String, acc
   if (depth == 0 && c == 36 && i + 1 < Str.len(src) && _ch(src, i + 1) == 123) _lexInterpD(src, i + 2, Builder.append(b, "${"), start, stem, acc, 1) else _lexInterpCh4(src, i, b, start, stem, acc, depth, c)
 
 def _lexInterpCh4(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
-  if (depth > 0 && c == 34 && i + 2 < Str.len(src) && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) _lexInterpInTriple(src, i + 3, Builder.append(b, "\"\"\""), start, stem, acc, depth) else if (depth > 0 && c == 34) _lexInterpInStr(src, i + 1, Builder.append(b, "\""), start, stem, acc, depth) else _lexInterpCh5(src, i, b, start, stem, acc, depth, c)
+  if (depth > 0 && c == 34) _lexInterpQuote(src, i, b, start, stem, acc, depth) else _lexInterpCh5(src, i, b, start, stem, acc, depth, c)
 
 def _lexInterpCh5(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
   if (depth > 0 && c == 123) _lexInterpD(src, i + 1, Builder.append(b, "{"), start, stem, acc, depth + 1) else if (depth > 0 && c == 125) _lexInterpD(src, i + 1, Builder.append(b, "}"), start, stem, acc, depth - 1) else _lexInterpD(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), start, stem, acc, depth)
 
-def _lexInterpInStr(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int): List[SpTok] =
-  if (i >= Str.len(src)) _lexInterpD(src, i, b, start, stem, acc, depth) else _lexInterpInStrCh(src, i, b, start, stem, acc, depth, _ch(src, i))
+def _lexInterpQuote(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int): List[SpTok] =
+  _lexInterpQuoteAt(src, i, _skipExprQuote(src, i), b, start, stem, acc, depth)
 
-def _lexInterpInStrCh(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int, c: Int): List[SpTok] =
-  if (c == 34) _lexInterpD(src, i + 1, Builder.append(b, "\""), start, stem, acc, depth) else if (c == 92 && i + 1 < Str.len(src)) _lexInterpInStr(src, i + 2, Builder.append(Builder.append(b, "\\"), Str.slice(src, i + 1, i + 2)), start, stem, acc, depth) else _lexInterpInStr(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), start, stem, acc, depth)
+def _lexInterpQuoteAt(src: String, i: Int, j: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int): List[SpTok] =
+  _lexInterpD(src, j, Builder.append(b, Str.slice(src, i, j)), start, stem, acc, depth)
 
-def _lexInterpInTriple(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok], depth: Int): List[SpTok] =
-  if (i + 2 < Str.len(src) && _ch(src, i) == 34 && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) _lexInterpD(src, i + 3, Builder.append(b, "\"\"\""), start, stem, acc, depth) else if (i >= Str.len(src)) _lexInterpD(src, i, b, start, stem, acc, depth) else _lexInterpInTriple(src, i + 1, Builder.append(b, Str.slice(src, i, i + 1)), start, stem, acc, depth)
+def _skipExprQuote(src: String, i: Int): Int =
+  if (i + 2 < Str.len(src) && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) _skipTriple(src, i + 3) else if (i > 0 && _ch(src, i - 1) == 115 && (i == 1 || !_isAlnum(_ch(src, i - 2)))) _skipInterp(src, i + 1, 0) else _skipQuote(src, i + 1)
+
+def _skipQuote(src: String, i: Int): Int =
+  if (i >= Str.len(src)) i else if (_ch(src, i) == 34) i + 1 else if (_ch(src, i) == 92 && i + 1 < Str.len(src)) _skipQuote(src, i + 2) else _skipQuote(src, i + 1)
+
+def _skipTriple(src: String, i: Int): Int =
+  if (i + 2 < Str.len(src) && _ch(src, i) == 34 && _ch(src, i + 1) == 34 && _ch(src, i + 2) == 34) i + 3 else if (i >= Str.len(src)) i else _skipTriple(src, i + 1)
+
+def _skipInterp(src: String, i: Int, depth: Int): Int =
+  if (i >= Str.len(src)) i else if (depth == 0 && _ch(src, i) == 34) i + 1 else if (_ch(src, i) == 92 && i + 1 < Str.len(src)) _skipInterp(src, i + 2, depth) else if (depth == 0 && _ch(src, i) == 36 && i + 1 < Str.len(src) && _ch(src, i + 1) == 123) _skipInterp(src, i + 2, 1) else if (depth > 0 && _ch(src, i) == 34) _skipInterp(src, _skipExprQuote(src, i), depth) else if (depth > 0 && _ch(src, i) == 123) _skipInterp(src, i + 1, depth + 1) else if (depth > 0 && _ch(src, i) == 125) _skipInterp(src, i + 1, depth - 1) else _skipInterp(src, i + 1, depth)
 
 def _lexUnder(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
   lexAt(src, _skipIdent(src, i), stem, _put(Tok.Ident(Str.slice(src, i, _skipIdent(src, i))), i, stem, acc))
