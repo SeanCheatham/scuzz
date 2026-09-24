@@ -6056,7 +6056,7 @@ def kindOf(p: Param): Int =
   if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
 def emitProg(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, List[Int]]): String =
-  emitBits(p.body, Check.ftabOfList(prepDefs(p)), internReady(strs), Parse.builtins(p.enums), files, lidx)
+  emitBits(Check.expandExpr(p.body, p.aliases), Check.ftabOfList(prepDefs(p)), internReady(strs), Parse.builtins(p.enums), files, lidx)
 
 def prepDefs(p: Prog): List[Fun] =
   withSelfFuns(rwAliasFuns(implFuns(p.impls, withImportFuns(p.imps, p.defs)), p.aliases))

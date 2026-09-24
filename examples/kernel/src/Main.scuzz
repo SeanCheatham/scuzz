@@ -1230,6 +1230,9 @@ b"""
     _ <- IO.println(s"aliasLen:${lenBoxes([1, 2, 3])}")
     ascribeId = 4
     _ <- IO.println(s"aliasAscribe:$ascribeId")
+    mainId = 5: UserId
+    nextId = (x: UserId) => x + 1
+    _ <- IO.println(s"aliasMain:${nextId(mainId)}")
     _ <- IO.println(s"aliasTag:${showTag("ok")}")
     _ <- mapSetProof()
     _ <- listProof()
