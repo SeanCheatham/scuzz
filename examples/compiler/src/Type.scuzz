@@ -300,13 +300,16 @@ def parse(s: String): Ty =
   if (s == "Unit") tUnit() else if (s == "Int") tInt() else if (s == "Bool") tBool() else if (s == "String") tStr() else if (s == "Float") tFloat() else if (s == "Any") tAny() else parseTrim(trim(s))
 
 def parseTrim(s: String): Ty =
-  if (s == "") tNamed("") else parseArrow(s, arrowAt(s, 0))
+  if (s == "") tNamed("") else parseArrow(s, arrowAt(s, 0, 0, 0, Str.len(s)))
 
 def parseArrow(s: String, i: Int): Ty =
   if (i < 0) parseAtom(s) else tFun(parse(Str.slice(s, 0, i)), parse(Str.slice(s, i + 4, Str.len(s))))
 
-def arrowAt(s: String, i: Int): Int =
-  if (i + 4 > Str.len(s)) 0 - 1 else if (sliceEq(s, i, " => ") && parenDepth(s, 0, i) == 0 && brackDepth(s, 0, i) == 0) i else arrowAt(s, i + 1)
+def arrowAt(s: String, i: Int, pd: Int, bd: Int, n: Int): Int =
+  if (i + 4 > n) 0 - 1 else if (pd == 0 && bd == 0 && sliceEq(s, i, " => ")) i else arrowAtCh(s, i, pd, bd, n, Str.charAt(s, i))
+
+def arrowAtCh(s: String, i: Int, pd: Int, bd: Int, n: Int, c: Int): Int =
+  if (c == 40) arrowAt(s, i + 1, pd + 1, bd, n) else if (c == 41) arrowAt(s, i + 1, if (pd > 0) pd - 1 else 0, bd, n) else if (c == 91) arrowAt(s, i + 1, pd, bd + 1, n) else if (c == 93) arrowAt(s, i + 1, pd, if (bd > 0) bd - 1 else 0, n) else arrowAt(s, i + 1, pd, bd, n)
 
 def parseAtom(s: String): Ty =
   if (Str.len(s) > 0 && Str.charAt(s, 0) == 40) parseParen(s) else parseName(s)
