@@ -568,19 +568,101 @@ def ioTypeCompatibility(): Bool =
   Type.eqStr("IO[Int]", "IO[String, Int]") && !Type.eqStr("IO[String]", "IO[String, Int]") && !Type.eqStr("IO[Int]", "IO[Int, String]") && !Type.eqStr("IO[String, Int]", "IO[Bool, Int]") && rejects("def wrong(x: IO[String]): IO[String, Int] = x", "does not match declared")
 
 def tyckParse(): Bool =
-  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && unknownTypes() && traitContracts() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && unknownTypes() && typeArityChecks() && traitContracts() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+
+def typeArityChecks(): Bool =
+  rejects("def wrong(x: List[Int, String]): Int = 1", "List expects 1 type arg") && rejects("def wrong(x: Map[String]): Int = 1", "Map expects 2 type args") && rejects("def wrong(x: IO[Int, String, Bool]): Int = 1", "IO expects 1 or 2 type args") && rejects("def wrong(x: Int[String]): Int = 1", "Int expects 0 type args") && rejects("""record Box[T](value: T)
+def wrong(x: Box[Int, String]): Int = 1""", "Box expects 1 type arg") && rejects("""type Id[T] = T
+def wrong(x: Id[Int, String]): Int = 1""", "Id expects 1 type arg") && rejects("def wrong[F](x: F[Int]): Int = 1", "type parameter F cannot take type args") && typeArityDeclarations() && Check.check("def right(xs: List): List = xs") == "[]" && Check.check("def right(io: IO[Int]): IO[String, Int] = io") == "[]"
+
+def typeArityDeclarations(): Bool =
+  rejects("type Bad = List[Int, String]", "List expects 1 type arg") && rejects("""type Id = Int
+def wrong(x: Id[String]): Int = 1""", "Id expects 0 type args") && rejects("""type Id[T] = T
+type Bad = Id[Int, String]""", "Id expects 1 type arg") && rejects("""enum E:
+  case Wrap(value: List[Int, String])""", "List expects 1 type arg") && rejects("""trait Bad:
+  def use(value: List[Int, String]): Int""", "List expects 1 type arg") && rejects("""record Point(n: Int)
+trait Use[T]:
+  def use(x: T): Int
+impl Use[List[Int, String]] for Point:
+  def use(x: List[Int, String]): Int = self.n""", "List expects 1 type arg") && rejects("def wrong(x: Map[String, List[Int, String]]): Int = 1", "List expects 1 type arg") && Check.check("""enum W[T]:
+  case Wrap(value: T)
+def right(x: W[Int]): W[Int] = x""") == "[]"
 
 def traitContracts(): Bool =
-  rejects("record Point(n: Int)\ntrait Show:\n  def show(): String\nimpl Show for Point:\n  def other(): String = \"x\"", "missing trait method show") && rejects("record Point(n: Int)\ntrait Show:\n  def show(): String\nimpl Show for Point:\n  def show(): Int = self.n", "trait method show return type") && rejects("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Int] for Point:\n  def get(default: String): Int = self.n", "trait method get parameter type") && rejects("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Int] for Point:\n  def get(): Int = self.n", "trait method get parameter count") && rejects("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Int] for Point:\n  def get(default: Int): String = \"x\"", "trait method get return type") && traitContractsMore() && Check.check("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Int] for Point:\n  def get(other: Int): Int = self.n") == "[]" && Check.check("record Point(n: Int)\ntype Id = Int\ntrait Get:\n  def get(): Id\nimpl Get for Point:\n  def get(): Int = self.n") == "[]" && Check.check("record Point(n: Int)\ntrait Run:\n  def run(): IO[Int]\nimpl Run for Point:\n  def run(): IO[String, Int] = IO.pure(self.n)") == "[]"
+  rejects("record Point(n: Int)\ntrait Show:\n  def show(): String\nimpl Show for Point:\n  def other(): String = \"x\"", "missing trait method show") && rejects("""record Point(n: Int)
+trait Show:
+  def show(): String
+impl Show for Point:
+  def show(): Int = self.n""", "trait method show return type") && rejects("""record Point(n: Int)
+trait Get[T]:
+  def get(default: T): T
+impl Get[Int] for Point:
+  def get(default: String): Int = self.n""", "trait method get parameter type") && rejects("""record Point(n: Int)
+trait Get[T]:
+  def get(default: T): T
+impl Get[Int] for Point:
+  def get(): Int = self.n""", "trait method get parameter count") && rejects("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Int] for Point:\n  def get(default: Int): String = \"x\"", "trait method get return type") && traitContractsMore() && Check.check("""record Point(n: Int)
+trait Get[T]:
+  def get(default: T): T
+impl Get[Int] for Point:
+  def get(other: Int): Int = self.n""") == "[]" && Check.check("""record Point(n: Int)
+type Id = Int
+trait Get:
+  def get(): Id
+impl Get for Point:
+  def get(): Int = self.n""") == "[]" && Check.check("""record Point(n: Int)
+trait Run:
+  def run(): IO[Int]
+impl Run for Point:
+  def run(): IO[String, Int] = IO.pure(self.n)""") == "[]"
 
 def traitContractsMore(): Bool =
-  rejects("record Point(n: Int)\ntrait Pair:\n  def first(): Int\n  def second(): String\nimpl Pair for Point:\n  def first(): Int = self.n", "missing trait method second") && rejects("record Point(n: Int)\ntrait Read:\n  def read(): List[Int]\nimpl Read for Point:\n  def read(): List[String] = [\"x\"]", "trait method read return type") && rejects("record Point(n: Int)\ntrait Run:\n  def run(): IO[Int]\nimpl Run for Point:\n  def run(): IO[Bool, Int] = IO.pure(self.n)", "trait method run return type") && rejects("record Point(n: Int)\ntrait Get:\n  def get(): Int\nimpl Get for Point:\n  def get(): Int = self.n\n  def get(): Int = 0", "duplicate trait method get")
+  rejects("""record Point(n: Int)
+trait Pair:
+  def first(): Int
+  def second(): String
+impl Pair for Point:
+  def first(): Int = self.n""", "missing trait method second") && rejects("record Point(n: Int)\ntrait Read:\n  def read(): List[Int]\nimpl Read for Point:\n  def read(): List[String] = [\"x\"]", "trait method read return type") && rejects("""record Point(n: Int)
+trait Run:
+  def run(): IO[Int]
+impl Run for Point:
+  def run(): IO[Bool, Int] = IO.pure(self.n)""", "trait method run return type") && rejects("""record Point(n: Int)
+trait Get:
+  def get(): Int
+impl Get for Point:
+  def get(): Int = self.n
+  def get(): Int = 0""", "duplicate trait method get")
 
 def unknownTypes(): Bool =
-  rejects("def wrong(x: Missing): Missing = x", "unknown type Missing") && rejects("def wrong(x: List[Missing]): Int = 1", "unknown type List[Missing]") && rejects("def wrong(): Missing = 1", "unknown type Missing") && rejects("enum E:\n  case Wrap(value: Missing)\n", "unknown type Missing") && rejects("type Alias = Missing\ndef right(): Int = 1", "unknown type Missing") && rejects("type Alias = List[Missing]", "unknown type List[Missing]") && unknownTraitTypes() && Check.check("type Alias = Int\ndef right(x: Alias): Alias = x") == "[]" && Check.check("type Alias = Int\nenum E:\n  case Wrap(value: Alias)") == "[]" && Check.check("def id[Value](x: Value): Value = x") == "[]" && Check.check("enum Box[Value]:\n  case Wrap(value: Value)") == "[]" && Check.check("type Boxed[Value] = List[Value]") == "[]"
+  rejects("def wrong(x: Missing): Missing = x", "unknown type Missing") && rejects("def wrong(x: List[Missing]): Int = 1", "unknown type List[Missing]") && rejects("def wrong(): Missing = 1", "unknown type Missing") && rejects("""enum E:
+  case Wrap(value: Missing)
+""", "unknown type Missing") && rejects("""type Alias = Missing
+def right(): Int = 1""", "unknown type Missing") && rejects("type Alias = List[Missing]", "unknown type List[Missing]") && unknownTraitTypes() && Check.check("""type Alias = Int
+def right(x: Alias): Alias = x""") == "[]" && Check.check("""type Alias = Int
+enum E:
+  case Wrap(value: Alias)""") == "[]" && Check.check("def id[Value](x: Value): Value = x") == "[]" && Check.check("""enum Box[Value]:
+  case Wrap(value: Value)""") == "[]" && Check.check("type Boxed[Value] = List[Value]") == "[]"
 
 def unknownTraitTypes(): Bool =
-  rejects("trait Show:\n  def show(x: Missing): String", "unknown type Missing") && rejects("trait Show:\n  def show(): Missing", "unknown type Missing") && rejects("record Point(n: Int)\ntrait Show:\n  def show(): String\nimpl Show for Missing:\n  def show(): String = \"x\"", "unknown type Missing") && rejects("record Point(n: Int)\nimpl Missing for Point:\n  def show(): String = \"x\"", "unknown trait Missing") && rejects("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Missing] for Point:\n  def get(default: Int): Int = self.n", "unknown type Missing") && rejects("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Int, String] for Point:\n  def get(default: Int): Int = self.n", "expects 1 type args") && rejects("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get for Point:\n  def get(default: Int): Int = self.n", "expects 1 type args") && Check.check("record Point(n: Int)\ntrait Get[T]:\n  def get(default: T): T\nimpl Get[Int] for Point:\n  def get(default: Int): Int = self.n") == "[]"
+  rejects("""trait Show:
+  def show(x: Missing): String""", "unknown type Missing") && rejects("""trait Show:
+  def show(): Missing""", "unknown type Missing") && rejects("record Point(n: Int)\ntrait Show:\n  def show(): String\nimpl Show for Missing:\n  def show(): String = \"x\"", "unknown type Missing") && rejects("record Point(n: Int)\nimpl Missing for Point:\n  def show(): String = \"x\"", "unknown trait Missing") && rejects("""record Point(n: Int)
+trait Get[T]:
+  def get(default: T): T
+impl Get[Missing] for Point:
+  def get(default: Int): Int = self.n""", "unknown type Missing") && rejects("""record Point(n: Int)
+trait Get[T]:
+  def get(default: T): T
+impl Get[Int, String] for Point:
+  def get(default: Int): Int = self.n""", "expects 1 type args") && rejects("""record Point(n: Int)
+trait Get[T]:
+  def get(default: T): T
+impl Get for Point:
+  def get(default: Int): Int = self.n""", "expects 1 type args") && Check.check("""record Point(n: Int)
+trait Get[T]:
+  def get(default: T): T
+impl Get[Int] for Point:
+  def get(default: Int): Int = self.n""") == "[]"
 
 def tyckClosed(): Bool =
   rejects(srcViewNope(), "unknown function View.nope") && rejects(srcViewArity(), "View.button expects") && rejects(srcSigGet(), "Signal.get arg type mismatch") && rejects(srcUiRun(), "Ui.run arg type mismatch") && rejects(srcIoNope(), "unknown function IO.notAKit") && Check.check(srcTimeoutOk()) == "[]" && rejects(srcTimeoutMis(), "IO.timeout arg type mismatch")
