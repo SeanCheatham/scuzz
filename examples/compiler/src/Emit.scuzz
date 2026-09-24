@@ -6701,7 +6701,7 @@ def signalKind(ty: String): Int =
   if (ty == "Int") 1 else if (ty == "String") 2 else if (ty == "List[String]") 3 else if (Str.startsWith(ty, "List[")) 5 else 4
 
 def boxSignalValue(s: Slot, ty: String, prefix: String): Slot =
-  if (isI64Ty(ty)) Slot(join(s.code, line(Str.concat(tmp(prefix, "boxed"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(s.val, ")"))))), pct(prefix, "boxed"), true) else Slot(s.code, s.val, s.owned)
+  if (isI64Ty(ty)) Slot(join(s.code, boxScalarStem(s.val, ty, prefix, "boxed")), pct(prefix, "boxed"), true) else Slot(s.code, s.val, s.owned)
 
 def dropSlot(s: Slot): String =
   if (s.owned) relPtr(s.val) else ""
