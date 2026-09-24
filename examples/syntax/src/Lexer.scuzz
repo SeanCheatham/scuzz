@@ -267,6 +267,27 @@ def _lexNumExp2(src: String, start: Int, j: Int, stem: String, acc: List[SpTok])
 def _lexNumExp3(src: String, start: Int, e: Int, k: Int, stem: String, acc: List[SpTok]): List[SpTok] =
   if (k < Str.len(src) && _isDigit(_ch(src, k))) lexAt(src, _skipDigits(src, k), stem, _put(Tok.Float(Str.slice(src, start, _skipDigits(src, k))), start, stem, acc)) else if (e > start) lexAt(src, e, stem, _put(Tok.Int(Str.toInt(Str.slice(src, start, e), 0)), start, stem, acc)) else lexAt(src, e, stem, _put(Tok.Int(Str.toInt(Str.slice(src, start, e), 0)), start, stem, acc))
 
+def numberEnd(src: String, off: Int): Int =
+  if (off + 1 < Str.len(src) && _ch(src, off) == 48 && (_ch(src, off + 1) == 120 || _ch(src, off + 1) == 88)) numberDigits(src, off + 2, 16) else if (off + 1 < Str.len(src) && _ch(src, off) == 48 && (_ch(src, off + 1) == 98 || _ch(src, off + 1) == 66)) numberDigits(src, off + 2, 2) else numberDecEnd(src, off)
+
+def numberDigits(src: String, i: Int, base: Int): Int =
+  if (i >= Str.len(src)) i else if (numberDigit(_ch(src, i), base)) numberDigits(src, i + 1, base) else if (_ch(src, i) == 95 && i + 1 < Str.len(src) && numberDigit(_ch(src, i + 1), base)) numberDigits(src, i + 1, base) else i
+
+def numberDigit(c: Int, base: Int): Bool =
+  if (base == 16) _isHex(c) else if (base == 2) c == 48 || c == 49 else _isDigit(c)
+
+def numberDecEnd(src: String, off: Int): Int =
+  numberDecTail(src, numberDigits(src, off, 10))
+
+def numberDecTail(src: String, j: Int): Int =
+  if (j + 1 < Str.len(src) && _ch(src, j) == 46 && _isDigit(_ch(src, j + 1))) numberExpEnd(src, _skipDigits(src, j + 1)) else numberExpEnd(src, j)
+
+def numberExpEnd(src: String, j: Int): Int =
+  if (j < Str.len(src) && (_ch(src, j) == 101 || _ch(src, j) == 69)) numberExpDigits(src, j, if (j + 1 < Str.len(src) && (_ch(src, j + 1) == 43 || _ch(src, j + 1) == 45)) j + 2 else j + 1) else j
+
+def numberExpDigits(src: String, e: Int, k: Int): Int =
+  if (k < Str.len(src) && _isDigit(_ch(src, k))) _skipDigits(src, k) else e
+
 def _lexName(src: String, i: Int, stem: String, acc: List[SpTok]): List[SpTok] =
   _lexName2(src, i, _skipIdent(src, i), stem, acc)
 

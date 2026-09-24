@@ -357,7 +357,7 @@ def emitExprGo(e: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], p
     case Expr.EList(xs) => emitList(xs, prefix, strs, defs, ens, ps, loc)
     case Expr.ETuple(xs) => emitTuple(xs, prefix, strs, defs, ens, ps, loc)
     case Expr.EInterp(_, parts, _) => emitInterp(parts, prefix, strs, defs, ens, ps, loc)
-    case Expr.EFloat(s) => emitFloatBits(s, prefix)
+    case Expr.EFloat(s, _) => emitFloatBits(s, prefix)
     case Expr.EFor(bs, body, _) => emitExprFid(desugarFor(bs, body), prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EAscribe(inner, _, _) => emitExprFid(inner, prefix, strs, defs, ens, ps, loc, fid)
     case Expr.EUnit => Slot("", "null", true)
@@ -597,7 +597,7 @@ def emitBin(op: String, l: Expr, r: Expr, prefix: String, strs: Strs, defs: Ftab
 
 def isFloatExpr(e: Expr, ps: List[Param], defs: Ftab): Bool =
   e match {
-    case Expr.EFloat(_) => true
+    case Expr.EFloat(_, _) => true
     case Expr.EVar(s, _) => paramTy(ps, s) == "Float"
     case Expr.ECall(f, _, _) => funRetStr(defs, f) == "Float" || f == "Float.fromInt"
     case Expr.EMethod(r, n, _, _) => isFloatMeth(r, n) || isFloatExpr(r, ps, defs)
@@ -690,7 +690,7 @@ def exprIsPtr(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String):
   e match {
     case Expr.EInt(_, _) => false
     case Expr.EBool(_) => false
-    case Expr.EFloat(_) => false
+    case Expr.EFloat(_, _) => false
     case Expr.EVar(s, _) => ptrFromKnown(paramTy(ps, s))
     case Expr.EStr(_, _) => true
     case _ => ptrFromKnown(exprRetTyEns(e, defs, ens, ps, loc))
@@ -4624,7 +4624,7 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
     case Expr.EInt(_, _) => e
     case Expr.EBool(_) => e
     case Expr.EStr(_, _) => e
-    case Expr.EFloat(s) => Expr.EFloat(s)
+    case Expr.EFloat(s, off) => Expr.EFloat(s, off)
     case Expr.EInterp(s, parts, off) => Expr.EInterp(rewriteInterpStr(s, from, to), rewriteBindList(parts, from, to), off)
     case Expr.EHole => Expr.EHole
     case Expr.EUnit => Expr.EUnit
