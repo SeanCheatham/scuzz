@@ -3958,13 +3958,22 @@ def qualifyMatchArm(arm: Arm, ty: String, ens: List[En]): Arm =
   }
 
 def qualifyMatchPat(pat: String, ty: String, ens: List[En]): String =
-  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) qualifyMatchAlt(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (Check.asAt(pat, 0) >= 0) Str.concat(Str.take(pat, Check.asAt(pat, 0) + 3), qualifyMatchPat(Str.drop(pat, Check.asAt(pat, 0) + 3), ty, ens)) else qualifyMatchCore(pat, ty, ens)
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) qualifyMatchAlt(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (Check.asAt(pat, 0) >= 0) Str.concat(Str.take(pat, Check.asAt(pat, 0) + 3), qualifyMatchPat(Str.drop(pat, Check.asAt(pat, 0) + 3), ty, ens)) else if (isConsPat(pat)) Str.concat(qualifyMatchPat(consHead(pat), Check.elemOf(ty), ens), Str.concat(" :: ", qualifyMatchPat(consTail(pat), ty, ens))) else if (isTuplePat(pat)) Str.concat("(", Str.concat(joinComma(qualifyMatchFields(splitPat(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(ty), noStr(), 0, ens)), ")")) else if (isStrPat(pat) || isIntPat(pat) || isBoolPat(pat)) pat else qualifyMatchCore(pat, ty, ens)
 
 def qualifyMatchAlt(pat: String, ty: String, ens: List[En], i: Int): String =
   Str.concat(qualifyMatchPat(Str.take(pat, i), ty, ens), Str.concat(" | ", qualifyMatchPat(Str.drop(pat, i + 3), ty, ens)))
 
 def qualifyMatchCore(pat: String, ty: String, ens: List[En]): String =
-  Str.concat(Check.patternCoreForTy(patCore(pat), ty, ens), Str.drop(pat, Str.len(patCore(pat))))
+  qualifyMatchCore2(Check.patternCoreForTy(patCore(pat), ty, ens), patBind(pat), ty, ens)
+
+def qualifyMatchCore2(core: String, fields: String, ty: String, ens: List[En]): String =
+  if (fields == "") core else Str.concat(core, Str.concat("(", Str.concat(joinComma(qualifyMatchFields(splitPat(fields), payloadTys(Check.specializeEnums(ens, ty), core), payloadNames(ens, core), 0, ens)), ")")))
+
+def qualifyMatchFields(fields: List[String], tys: List[String], names: List[String], k: Int, ens: List[En]): List[String] =
+  if (List.isEmpty(fields)) fields else qualifyMatchField(List.at(fields, 0), fieldTyAt2(tys, fieldIdx(List.at(fields, 0), k, names)), ens) :: qualifyMatchFields(List.tail(fields), tys, names, k + 1, ens)
+
+def qualifyMatchField(field: String, ty: String, ens: List[En]): String =
+  if (isNamedPat(field)) Str.concat(fieldNameOf(field), Str.concat(" = ", qualifyMatchPat(fieldBind(field), ty, ens))) else qualifyMatchPat(field, ty, ens)
 
 def matchSlots(ty: String): List[String] =
   if (isTupTy(ty)) tupSlots(ty) else listElemSlots(ty)
@@ -4472,7 +4481,7 @@ def isNamedPat(s: String): Bool =
   namedEqAt(s, 0) >= 0
 
 def namedEqAt(s: String, i: Int): Int =
-  if (i + 3 > Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 34) namedEqAt(s, Parse.quotedEnd(s, i)) else if (Str.slice(s, i, i + 3) == " = ") i else namedEqAt(s, i + 1)
+  Check.eqAt(s, i)
 
 def fieldBind(s: String): String =
   if (namedEqAt(s, 0) < 0) s else Str.slice(s, namedEqAt(s, 0) + 3, Str.len(s))
