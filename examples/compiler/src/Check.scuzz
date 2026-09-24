@@ -952,7 +952,7 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
     case Expr.EBool(_) => okTy(Type.tBool())
     case Expr.EStr(_, _) => okTy(Type.tStr())
     case Expr.EFloat(_) => okTy(Type.tFloat())
-    case Expr.EInterp(_) => okTy(Type.tStr())
+    case Expr.EInterp(s, off) => inferInterp(s, off, env, funs, ens)
     case Expr.EUnit => okTy(Type.tUnit())
     case Expr.EHole => okTy(Type.tInt())
     case Expr.EVar(s, off) => inferVar(s, env, funs, ens, (modFile(env), off))
@@ -974,6 +974,21 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
 
 def inferAscribe(inner: Expr, ty: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   inferAscribe2(infer(inner, env, funs, ens), ty, (modFile(env), off), ens)
+
+def inferInterp(s: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  inferInterpParts(Parse.interpParts(s, 0, Builder.empty(), []), env, funs, ens, (modFile(env), off))
+
+def inferInterpParts(parts: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(parts)) okTy(Type.tStr()) else inferInterpPart(List.at(parts, 0), List.tail(parts), env, funs, ens, span)
+
+def inferInterpPart(e: Expr, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  e match {
+    case Expr.EStr(_, _) => inferInterpParts(rest, env, funs, ens, span)
+    case _ => inferInterpPartNext(infer(e, env, funs, ens), rest, env, funs, ens, span)
+  }
+
+def inferInterpPartNext(o: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(o)) bad(o.err, span) else inferInterpParts(rest, env, funs, ens, span)
 
 def inferAscribe2(o: Out, ty: String, span: (String, Int), ens: List[En]): Out =
   inferAscribe3(o, Type.parse(ty), ty, span, ens)
@@ -999,15 +1014,15 @@ def inferBindVal(d: Bool, name: String, v: Expr, rest: List[Bind], body: Expr, e
   inferBindVal2(d, name, v, rest, body, env, funs, ens, infer(v, env, funs, ens))
 
 def inferBindVal2(d: Bool, name: String, v: Expr, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], vo: Out): Out =
-  if (d || hasErr(vo) || !lamPinCand(name, v, vo, ens)) vo else lamPinDo(lamPinArg(name, "", rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens), v, env, funs, ens, vo)
+  if (d || hasErr(vo) || !lamPinCand(name, v, vo, funs, ens)) vo else lamPinDo(lamPinArg(name, "", rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens), v, env, funs, ens, vo)
 
 def lamPinDo(pin: String, v: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], vo: Out): Out =
-  if (pin == "") vo else inferExpected(v, Type.show(Type.tFun(Type.parse(pin), Type.tParam("B"))), env, funs, ens)
+  if (pin == "") vo else inferExpected(if (needsPh(v, funs)) Expr.ELam("_ph", "", rewriteHole(v, "_ph")) else v, Type.show(Type.tFun(Type.parse(pin), Type.tParam("B"))), env, funs, ens)
 
-def lamPinCand(name: String, v: Expr, vo: Out, ens: List[En]): Bool =
+def lamPinCand(name: String, v: Expr, vo: Out, funs: Ftab, ens: List[En]): Bool =
   v match {
     case Expr.ELam(p, ann, _) => ann == "" && lamPinName(p) && lamPinName(name) && Type.isFun(vo.ty) && isLooseEn(Type.show(Type.funArg(vo.ty)), ens)
-    case _ => false
+    case _ => needsPh(v, funs) && lamPinName(name) && Type.isFun(vo.ty) && isLooseEn(Type.show(Type.funArg(vo.ty)), ens)
   }
 
 def lamPinName(n: String): Bool =
@@ -1061,6 +1076,7 @@ def lamPinExpr(name: String, al: String, e: Expr, env: List[(String, Ty)], funs:
     case Expr.EFor(bs, fb, _) => lamPinArg(name, al, bs, fb, env, funs, ens)
     case Expr.EList(xs) => lamPinExprs(name, al, xs, env, funs, ens)
     case Expr.ETuple(xs) => lamPinExprs(name, al, xs, env, funs, ens)
+    case Expr.EInterp(s, _) => lamPinExprs(name, al, Parse.interpParts(s, 0, Builder.empty(), []), env, funs, ens)
     case _ => ""
   }
 
@@ -1165,7 +1181,7 @@ def lamPinTyOf(name: String, v: Expr, cont: Expr, defs: Ftab, ens: List[En], ps:
   lamPinTyOf2(name, v, cont, infer(v, bindParams(ps, envSelfMod(mod)), defs, ens), defs, ens, ps, mod)
 
 def lamPinTyOf2(name: String, v: Expr, cont: Expr, vo: Out, defs: Ftab, ens: List[En], ps: List[Param], mod: String): String =
-  if (hasErr(vo) || !lamPinCand(name, v, vo, ens)) "" else lamPinTyOf3(v, vo, lamPinExpr(name, "", cont, bindParams(ps, envBind(name, tyStr(vo), envSelfMod(mod))), defs, ens), bindParams(ps, envSelfMod(mod)), defs, ens)
+  if (hasErr(vo) || !lamPinCand(name, v, vo, defs, ens)) "" else lamPinTyOf3(v, vo, lamPinExpr(name, "", cont, bindParams(ps, envBind(name, tyStr(vo), envSelfMod(mod))), defs, ens), bindParams(ps, envSelfMod(mod)), defs, ens)
 
 def lamPinTyOf3(v: Expr, vo: Out, pin: String, env: List[(String, Ty)], defs: Ftab, ens: List[En]): String =
   if (pin == "") "" else tyStr(lamPinDo(pin, v, env, defs, ens, vo))
@@ -2263,11 +2279,11 @@ def requirePredOk(ty: String, ens: List[En]): Bool =
 def inferApply(recv: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   recv match {
     case Expr.ELam(_, _, _) => inferApplyLam(recv, args, env, funs, ens, e)
-    case _ => inferApply2(infer(recv, env, funs, ens), args, env, funs, ens, e)
+    case _ => if (needsPh(recv, funs)) inferApplyLam(Expr.ELam("_ph", "", rewriteHole(recv, "_ph")), args, env, funs, ens, e) else inferApply2(infer(recv, env, funs, ens), args, env, funs, ens, e)
   }
 
 def inferApplyLam(lam: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
-  if (List.len(args) != 1) bad("apply expects 1 arg", exprSpan(env, e)) else inferApplyLam2(infer(stripNamed(List.at(args, 0)), env, funs, ens), lam, env, funs, ens, spanPick(exprSpan(env, stripNamed(List.at(args, 0))), exprSpan(env, e)))
+  if (List.isEmpty(args)) bad("apply expects 1 arg", exprSpan(env, e)) else if (List.len(args) == 1) inferApplyLam2(infer(stripNamed(List.at(args, 0)), env, funs, ens), lam, env, funs, ens, spanPick(exprSpan(env, stripNamed(List.at(args, 0))), exprSpan(env, e))) else inferApplyLam2(inferTuple(args, env, funs, ens), lam, env, funs, ens, exprSpan(env, e))
 
 def inferApplyLam2(a: Out, lam: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], asp: (String, Int)): Out =
   if (hasErr(a)) a else inferApplyLam3(inferApplyExpected(lam, tyStr(a), env, funs, ens), tyStr(a), env, ens, asp)
@@ -2779,6 +2795,7 @@ def checkExprTypes(e: Expr, ens: List[En], aliases: List[Alias], ts: List[String
     case Expr.EFor(bs, body, _) => checkExprTypesFor(checkExprTypesBinds(bs, ens, aliases, ts, span), body, ens, aliases, ts, span)
     case Expr.EList(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
     case Expr.ETuple(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
+    case Expr.EInterp(s, _) => checkExprTypesList(Parse.interpParts(s, 0, Builder.empty(), []), ens, aliases, ts, span)
     case Expr.ENamed(_, inner) => checkExprTypes(inner, ens, aliases, ts, span)
     case _ => ok("Unit")
   }

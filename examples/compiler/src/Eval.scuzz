@@ -360,7 +360,7 @@ def step(s: EvStep, p: EvProg): Value =
     case Expr.ETuple(xs) => tupleValue(stepAll(xs, s.env, p))
     case Expr.ENamed(_, inner) => step(EvStep(inner, s.env), p)
     case Expr.EAscribe(inner, _, _) => step(EvStep(inner, s.env), p)
-    case Expr.EInterp(str) => interpAcc(Emit.interpParts(str, 0, Builder.empty(), []), s.env, p, Builder.empty())
+    case Expr.EInterp(str, _) => interpAcc(Parse.interpParts(str, 0, Builder.empty(), []), s.env, p, Builder.empty())
     case Expr.EHole => Value.VClo("_ph", Expr.EVar("_ph", 0), s.env)
     case Expr.EFloat(str) => Value.VFloat(floatLit(Str.replace(str, "_", "")))
   }

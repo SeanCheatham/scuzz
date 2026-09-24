@@ -568,7 +568,10 @@ def ioTypeCompatibility(): Bool =
   Type.eqStr("IO[Int]", "IO[String, Int]") && !Type.eqStr("IO[String]", "IO[String, Int]") && !Type.eqStr("IO[Int]", "IO[Int, String]") && !Type.eqStr("IO[String, Int]", "IO[Bool, Int]") && rejects("def wrong(x: IO[String]): IO[String, Int] = x", "does not match declared")
 
 def tyckParse(): Bool =
-  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && invalidTokens() && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+  rejects(srcLeftover(), "unexpected token") && rejects("def wrong(): List[Int = = []", "unexpected token") && rejects("def wrong(): (Int, Int = = (1, 2)", "unexpected token") && invalidTokens() && interpolationTypes() && unknownTypes() && typeArityChecks() && expressionTypeAnnotations() && traitContracts() && tyckDiff(srcBinBad(), wantBinBad()) && tyckDiff(srcHexX(), wantHexX()) && tyckDiff(srcAscOk(), wantAscOk()) && tyckDiff(srcAscMis(), wantAscMis())
+
+def interpolationTypes(): Bool =
+  rejects("def wrong(): String = s\"$missing\"", "unbound variable missing") && rejects("def wrong(): String = s\"${1 + true}\"", "arithmetic needs Int or Float") && rejects("def wrong(): String = s\"${1 $ 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1 2}\"", "unexpected token") && rejects("def wrong(): String = s\"${1: List[Int, String]}\"", "List expects 1 type arg") && Check.check("def right(n: Int): String = s\"n=$n next=${n + 1}\"") == "[]" && Check.check("def right(): Int = (_ + 1)(8)") == "[]" && Check.check("def right(): Int = ((a, b) => a + b)(2, 3)") == "[]"
 
 def invalidTokens(): Bool =
   Str.contains(Check.check("@main def main: IO[Unit] = for { x = 1; y = 2; _ <- IO.println(Str.fromInt(x + y)) } yield ()"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":39") && Str.contains(Check.check("def wrong(): Int = 1 $ 2"), "\"message\":\"unexpected token\",\"file\":\"Main.scuzz\",\"line\":1,\"column\":22") && Check.check("def right(): String = \"$\"") == "[]"

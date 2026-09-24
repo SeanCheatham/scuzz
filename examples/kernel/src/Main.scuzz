@@ -1233,6 +1233,8 @@ b"""
     mainId = 5: UserId
     nextId = (x: UserId) => x + 1
     _ <- IO.println(s"aliasMain:${nextId(mainId)}")
+    interpName = "hole"
+    _ <- IO.println(s"interpCheck:$interpName:${Str.len(interpName) + 1}")
     _ <- IO.println(s"aliasTag:${showTag("ok")}")
     _ <- mapSetProof()
     _ <- listProof()
