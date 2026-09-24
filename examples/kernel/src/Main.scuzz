@@ -21,6 +21,10 @@ enum LiteralPacket:
 enum FloatPayload:
   case Pair(value: Float, count: Int)
 
+enum DefaultCase:
+  case A(n: Int = 7)
+  case Z
+
 record FloatRecord(value: Float, count: Int)
 
 record FloatSingle(value: Float)
@@ -110,6 +114,15 @@ def showTag(t: Tag): String =
 
 def noneInt(): Opt[Int] =
   Opt.None
+
+def makeDefaultCase(n: Int): DefaultCase =
+  DefaultCase.A(n)
+
+def readDefaultCase(e: DefaultCase): Int =
+  e match {
+    case DefaultCase.A(n) => n
+    case DefaultCase.Z => 0
+  }
 
 def optStr(o: Option[String]): String =
   o match {
@@ -1476,6 +1489,9 @@ b"""
     _ <- IO.println(s"defargN:${addDefault(n = 3)}")
     _ <- IO.println(s"defarg2:${addDefault(3, 4)}")
     _ <- IO.println(s"defargM:${addDefault(3, m = 4)}")
+    _ <- IO.println(s"ctorDefault:${readDefaultCase(DefaultCase.A())}")
+    _ <- IO.println(s"ctorNamed:${readDefaultCase(DefaultCase.A(n = 8))}")
+    _ <- IO.println(s"ctorValue:${readDefaultCase(makeDefaultCase(9))}")
     _ <- IO.println(s"greet:${greet("hi")}")
     _ <- IO.println(s"greetQ:${greet("hi", "?")}")
     _ <- IO.println(s"greetP:${greet("hi", punct = "?")}")

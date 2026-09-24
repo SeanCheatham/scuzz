@@ -3750,6 +3750,9 @@ def emitUserMod(en: String, name: String, code: String, vals: List[String], owns
   emitUserHit(Str.concat(en, Str.concat("_", name)), code, vals, owns, prefix, findDefMod(defs, en, name), argTys, retTy)
 
 def emitPayloadCtor(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  emitPayloadCtorAligned(en, name, alignFill(Check.constructorFields(ens, Str.concat(en, Str.concat(".", name))), args), prefix, strs, defs, ens, ps, loc, fid)
+
+def emitPayloadCtorAligned(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (List.isEmpty(args)) emitCtor(en, name, prefix, ens) else emitPayloadCtorRest(en, name, List.at(args, 0), List.tail(args), prefix, strs, defs, ens, ps, loc, fid)
 
 def emitPayloadCtorRest(en: String, name: String, h: Expr, rest: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
