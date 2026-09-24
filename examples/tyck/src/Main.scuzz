@@ -1524,7 +1524,17 @@ def right(): E = make(1)""") == "[]" && Check.check("""enum E:
   case A
 def right(): E = A""") == "[]" && Check.check("""enum E:
   case A
-def right(): E = E.A""") == "[]"
+def right(): E = E.A""") == "[]" && recordModuleCtorTypes()
+
+def recordModuleCtorTypes(): Bool =
+  Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordCtorModule()) :: []), "unknown constructor Point.Point") && Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordCtorModule()) :: []) == "[]" && Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcWrongRecordCtorModule()) :: []) == "[]" && Check.checkFiles(("PointMod", "record Marker()") :: ("Main", "def right(): Marker = PointMod.Marker") :: []) == "[]" && Str.contains(Check.checkFiles(("PointMod", "record Marker()") :: ("Main", "def wrong(): Marker = Marker.Marker") :: []), "unknown constructor Marker.Marker") && Check.checkFiles(("A", "record RemoteMarker()") :: ("Main", """record Holder(RemoteMarker: Int)
+def read(A: Holder): Int = A.RemoteMarker""") :: []) == "[]"
+
+def srcWrongRecordCtorModule(): String =
+  "def wrong(): Point = Point.Point(3)"
+
+def srcRightRecordCtorModule(): String =
+  "def right(): Point = PointMod.Point(3)"
 
 def memberResolveTypes(): Bool =
   rejects("""enum E:

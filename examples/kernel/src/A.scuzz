@@ -2,6 +2,10 @@ enum Msg:
   case Hi
   case Bye
 
+record RemotePoint(x: Int, y: Int)
+
+record RemoteMarker()
+
 type Tag = String
 def one(): Int =
   1

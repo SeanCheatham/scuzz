@@ -3490,7 +3490,7 @@ def emitField(recv: Expr, name: String, prefix: String, strs: Strs, defs: Ftab, 
 
 def emitFieldEn(recv: Expr, name: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   recv match {
-    case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else emitCtor(en, name, prefix, ens)
+    case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else if (Check.recordModuleCtor(ens, en, name)) emitCtor(name, name, prefix, ens) else emitCtor(en, name, prefix, ens)
     case _ => emitRecFieldFrom(emitExpr(recv, Str.concat(prefix, "_recv"), strs, defs, ens, ps, loc), name, prefix, copyEnAt(recv, ens, defs, ps, loc), ens)
   }
 
@@ -3724,7 +3724,7 @@ def copyArgBox(prefix: String, k: Int, ev: String, ty: String): String =
   boxScalarStem(ev, ty, prefix, Str.concat("ub", Str.fromInt(k)))
 
 def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  if (enHasCase(ens, en, name)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorOrQualKit(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
+  if (Check.recordModuleCtor(ens, en, name)) emitPayloadCtor(name, name, args, prefix, strs, defs, ens, ps, loc, fid) else if (enHasCase(ens, en, name)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorOrQualKit(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
 
 def emitCtorOrQualKit(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps, loc, fid) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitQual(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
