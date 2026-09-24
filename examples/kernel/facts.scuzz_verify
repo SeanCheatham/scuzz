@@ -67,6 +67,9 @@ oracle patternResults(s: String): Bool =
 oracle callbackFields(s: String): Bool =
   List.join(List.flatMap([PatternFields("first", [s]), PatternFields("second", [s])], entry => entry.items), "|") == Str.concat(s, Str.concat("|", s))
 
+oracle directCallbackField(s: String): Bool =
+  Main.applyPattern(entry => Str.len(entry.label), PatternFields(s, [s])) == Str.len(s) && Main.applyPattern(entry => List.len(entry.items), PatternFields(s, [s])) == 1 && Main.applyPattern(value = PatternFields(s, [s]), f = entry => Str.len(entry.label)) == Str.len(s) && Property.force(Main.applyPatternIo(entry => IO.pure(Str.len(entry.label)), PatternFields(s, [s]))) == Str.len(s)
+
 oracle genericCallbackFields(s: String): Bool =
   List.join(List.flatMap([Box([s]), Box([s])], box => box.x), "|") == Str.concat(s, Str.concat("|", s))
 

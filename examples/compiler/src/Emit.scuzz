@@ -5279,12 +5279,12 @@ def paramEnv1(p: Param, rest: List[Param]): List[(String, Ty)] =
 def rwFields(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): Expr =
   e match {
     case Expr.EPrint(inner, off) => Expr.EPrint(rwFields(inner, env, funs, ens, mod), off)
-    case Expr.ECall(f, args, off) => rwCall(f, rwFieldList(args, env, funs, ens, mod), funs, mod, off)
-    case Expr.EMethod(recv, name, args, off) => Expr.EMethod(rwFields(recv, env, funs, ens, mod), name, rwFieldList(args, env, funs, ens, mod), off)
+    case Expr.ECall(f, args, off) => rwCall(f, rwFieldCallArgs(args, funParamsOf(funs, f, mod), env, funs, ens, mod), funs, mod, off)
+    case Expr.EMethod(recv, name, args, off) => Expr.EMethod(rwFields(recv, env, funs, ens, mod), name, rwFieldMethodArgs(recv, name, args, env, funs, ens, mod), off)
     case Expr.EField(recv, name, off) => rwField(rwFields(recv, env, funs, ens, mod), name, off, env, funs, ens)
     case Expr.EBin(op, l, r, off) => Expr.EBin(op, rwFields(l, env, funs, ens, mod), rwFields(r, env, funs, ens, mod), off)
     case Expr.EUn(op, inner, off) => Expr.EUn(op, rwFields(inner, env, funs, ens, mod), off)
-    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rwFields(body, env, funs, ens, mod))
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rwFields(body, envBind(p, ty, env), funs, ens, mod))
     case Expr.EIf(c, t, el, off) => Expr.EIf(rwFields(c, env, funs, ens, mod), rwFields(t, env, funs, ens, mod), rwFields(el, env, funs, ens, mod), off)
     case Expr.EMatch(s, arms, off) => Expr.EMatch(rwFields(s, env, funs, ens, mod), rwFieldArms(arms, env, funs, ens, mod), off)
     case Expr.EList(xs) => Expr.EList(rwFieldList(xs, env, funs, ens, mod))
@@ -5293,6 +5293,30 @@ def rwFields(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: S
     case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rwFields(inner, env, funs, ens, mod), ty, off)
     case Expr.EFor(bs, body, off) => Expr.EFor(rwForBinds(bs, env, funs, ens, mod), rwFields(body, env, funs, ens, mod), off)
     case _ => e
+  }
+
+def rwFieldMethodArgs(recv: Expr, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
+  recv match {
+    case Expr.EVar(owner, _) => rwFieldCallArgs(args, funParamsOf(funs, name, owner), env, funs, ens, mod)
+    case _ => rwFieldList(args, env, funs, ens, mod)
+  }
+
+def rwFieldCallArgs(args: List[Expr], params: List[Param], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
+  rwFieldCallArgsGo(args, params, params, env, funs, ens, mod)
+
+def rwFieldCallArgsGo(args: List[Expr], params: List[Param], all: List[Param], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
+  if (List.isEmpty(args)) noExpr() else if (List.isEmpty(params)) rwFieldList(args, env, funs, ens, mod) else rwFieldCallArg(List.at(args, 0), List.at(params, 0), all, env, funs, ens, mod) :: rwFieldCallArgsGo(List.tail(args), List.tail(params), all, env, funs, ens, mod)
+
+def rwFieldCallArg(arg: Expr, param: Param, all: List[Param], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): Expr =
+  arg match {
+    case Expr.ENamed(name, inner) => Expr.ENamed(name, rwFieldCallArgTy(inner, paramTy(all, name), env, funs, ens, mod))
+    case _ => rwFieldCallArgTy(arg, paramTyOf(param), env, funs, ens, mod)
+  }
+
+def rwFieldCallArgTy(arg: Expr, ty: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): Expr =
+  arg match {
+    case Expr.ELam(p, ann, body) => Expr.ELam(p, ann, rwFields(body, envBind(p, if (ann != "") ann else if (isFunTy(ty)) Type.funArgStr(ty) else "", env), funs, ens, mod))
+    case _ => rwFields(arg, env, funs, ens, mod)
   }
 
 def rwCall(f: String, args: List[Expr], funs: Ftab, mod: String, off: Int): Expr =

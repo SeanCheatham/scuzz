@@ -8,7 +8,7 @@ Edit this file when the next-step order changes.
 
 Next: make the language usable for general application development. Prioritize compiler correctness, then compile time, then standard kits. Prove each slice with examples. Specific application workflows do not define the scope.
 
-Re-time the two commands in [`gaps.md`](gaps.md) before another compile-time change. Then close the table-stakes gaps that block ordinary programs. Ranked list: [`gaps.md`](gaps.md).
+Reduce compile time using the two commands in [`gaps.md`](gaps.md). Measure both after each compile-time change. Then close the table-stakes gaps that block ordinary programs. Ranked list: [`gaps.md`](gaps.md).
 
 The evaluator, `scuzz fuzz`, and the self-hosted CLI stay as locked in [`philosophy.md`](philosophy.md). A `[ui]` package runs search, mutation, and coverage on one headless host when the idle timeline matches. Compiler sources use forms the newest `v*` bootstrap emits. A `for` pattern bind stays out of compiler sources until a release emits it. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body so Check can resolve a qualified call.
 
@@ -20,7 +20,7 @@ Do not start FFI, a package registry, physical-device packaging, or `*.scuzz_tun
 
 | Risk | Mitigation |
 | --- | --- |
-| Compile-time slices do not move the recorded times | Re-time the two commands in [`gaps.md`](gaps.md) before another show-and-parse change |
+| Compile-time slices do not move the recorded times | Measure both commands in [`gaps.md`](gaps.md) after each change |
 | An evaluator campaign outside the Int tail loop misses the idle deadline | The probe falls back to compiled. The kernel campaign is faster than compiled. See [`gaps.md`](gaps.md) |
 | Evaluator output differs from the emitted binary | Corpus replay runs compiled after an evaluator campaign. A difference fails the campaign |
 | Self-hosting lags one release | Toolchain sources call builtins the newest `v*` release already emits |
