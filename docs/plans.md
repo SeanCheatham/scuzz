@@ -8,6 +8,7 @@
 - [x] Use Float boxes for `IO.pure`, `Ref.of`, `Stream.emit`, and `Stream.iterate`.
 - [x] Use a Float box for `IO.fail` error values.
 - [x] Use a Float box for the `Stream.unfold` seed.
+- [x] Use Float boxes for multi-field enum and record payloads, including record copies.
 - [ ] Audit the remaining typed boxing paths in IO, streams, and other scalar containers.
 - [x] Run kernel, codegen, fuzz, and fixed-point checks.
 - [x] Measure both compiler commands.

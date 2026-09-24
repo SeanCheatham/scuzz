@@ -35,6 +35,7 @@ grep -Fxq 'floatCons:y' /tmp/kernel.out
 grep -Fxq 'floatCallEq:y' /tmp/kernel.out
 grep -Fxq 'floatBoxEq:y' /tmp/kernel.out
 grep -Fxq 'floatTupleEq:y' /tmp/kernel.out
+grep -Fxq 'floatMultiEq:y' /tmp/kernel.out
 grep -Fxq 'floatListKitEq:y' /tmp/kernel.out
 grep -Fxq 'floatListUpdateEq:y' /tmp/kernel.out
 grep -Fxq 'floatMapSetEq:y' /tmp/kernel.out
