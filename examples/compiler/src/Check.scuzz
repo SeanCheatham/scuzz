@@ -3185,11 +3185,8 @@ def lastStartLe(xs: List[Int], off: Int, line: Int, last: Int): (Int, Int) =
 def lastStartChunk(xs: List[Int], off: Int, line: Int, last: Int, k: Int): (Int, Int) =
   xs match {
     case [] => (if (line < 1) 1 else line, last)
-    case s :: rest => if (k <= 0) lastStartLe(xs, off, line, last) else lastStartOne(s, rest, off, line, last, k)
+    case s :: rest => if (k <= 0) lastStartLe(xs, off, line, last) else if (s > off) (if (line < 1) 1 else line, last) else lastStartChunk(rest, off, line + 1, s, k - 1)
   }
-
-def lastStartOne(s: Int, rest: List[Int], off: Int, line: Int, last: Int, k: Int): (Int, Int) =
-  if (s > off) (if (line < 1) 1 else line, last) else lastStartChunk(rest, off, line + 1, s, k - 1)
 
 def fileIndex(files: List[(String, String)]): Map[String, List[Int]] =
   fileIndexGo(files, Map.empty())
