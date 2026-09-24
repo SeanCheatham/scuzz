@@ -829,9 +829,12 @@ int64_t sz_list_length_compare(SzList *xs, int64_t n);
 /* Kind comes from the first non-null head (boxed Int or String).
  * Empty max panics. */
 SzList *sz_list_sort(SzList *xs);
+SzList *sz_list_sort_float(SzList *xs);
 SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env);
 void *sz_list_max(SzList *xs);
 void *sz_list_min(SzList *xs);
+void *sz_list_max_float(SzList *xs);
+void *sz_list_min_float(SzList *xs);
 void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max);
 /* Group cells by the key that `fn` returns. `key_kind` is unused.
  * Empty is empty. Cells in a group keep their order. */

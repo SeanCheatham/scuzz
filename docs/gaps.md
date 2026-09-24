@@ -45,7 +45,7 @@ Required for CLI, server, and desktop applications.
 
 OS threads.
 
-Float ordering in `List.sort`, `List.max`, and `List.min`. These kits accept `Int` and `String` elements.
+Float ordering from inferred local lists or nested list calls can lose the element type during emission. An explicit `List[Float]` parameter preserves the type.
 
 ### Verification
 

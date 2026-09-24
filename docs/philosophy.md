@@ -160,6 +160,7 @@ Locks (not an API catalog — run `scuzz docs language` and `scuzz docs kits`):
 - An unannotated lambda bound with `=` pins its parameter type at the first apply of that binding whose argument type is concrete, in the rest of the same for-comprehension. A placeholder lambda such as `_ + 1` uses the same rule. An alias bound with `=` to that binding, or to such an alias, uses the same pin. The body checks under the pin and gives the return type. Later applies must match the pin. Applies with unresolved arguments do not pin. A nested binding or lambda parameter with the same name stops the pin scan. Without a concrete apply the binding stays unresolved and a later concrete apply asks for an annotation. Generic def bodies pin their own type parameters, so the rule does not apply there.
 - File-stem modules; enums namespaced by stem
 - Blessed kits + `Signal` / `View` / `Ui` / `Property.*` / `.require`
+- `List.sort`, `List.max`, and `List.min` order `Int`, `Float`, and `String`. Float order puts NaN after numbers. Equal values keep their input order in `List.sort`.
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ## Language direction

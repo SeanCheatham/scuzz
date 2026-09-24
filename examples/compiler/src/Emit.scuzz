@@ -996,8 +996,17 @@ def emitArgList2(s: Slot, rest: List[Expr], prefix: String, strs: Strs, defs: Ft
 
 def emitCall2(f: String, p: (String, List[String], List[Bool]), prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
   p match {
-    case (code, vals, owns) => emitCall3(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
+    case (code, vals, owns) => if (floatOrderKit(f) && floatListArg(args, defs, ens, ps, mod)) emitFloatOrder(f, code, vals, owns, prefix) else emitCall3(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
   }
+
+def floatOrderKit(f: String): Bool =
+  f == "List.sort" || f == "List.max" || f == "List.min"
+
+def floatListArg(args: List[Expr], defs: Ftab, ens: List[En], ps: List[Param], mod: String): Bool =
+  !List.isEmpty(args) && Check.elemOf(exprRetTyEns(List.at(args, 0), defs, ens, ps, mod)) == "Float"
+
+def emitFloatOrder(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
+  if (f == "List.sort") emitKitUnaryPtr("sz_list_sort_float", code, vals, owns, prefix) else emitListExtreme(if (f == "List.max") "sz_list_max_float" else "sz_list_min_float", code, vals, owns, prefix, true)
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
   if (f == "IO.fail" && !List.isEmpty(args) && isI64Ty(exprRetTyEns(List.at(args, 0), defs, ens, ps, mod))) emitFailBox(code, arg0(vals), prefix) else if (f == "Ref.of" && firstNeedsBox(List.at(args, 0), owns, defs, ens, ps, mod)) emitKitUnaryBox("sz_ref_of", code, arg0(vals), prefix) else if ((f == "Ref.set" || f == "Queue.offer" || f == "Deferred.complete") && secondNeedsBox(List.at(args, 1), owns, defs, ens, ps, mod)) emitKitBinaryBoxB(kitBinaryPtr(f), code, arg0(vals), arg1(vals), headOwn(owns), prefix) else if (f == "Stream.emit" && firstNeedsBox(List.at(args, 0), owns, defs, ens, ps, mod)) emitKitUnaryBox("sz_stream_emit", code, arg0(vals), prefix) else if (f == "Stream.intersperse" && secondNeedsBox(List.at(args, 1), owns, defs, ens, ps, mod)) emitKitBinaryBoxB("sz_stream_intersperse", code, arg0(vals), arg1(vals), headOwn(owns), prefix) else if (f == "Net.retryAfterMillis") emitKitPtrI64I64("sz_net_retry_after_millis", code, vals, owns, prefix) else if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
@@ -6545,7 +6554,10 @@ def decl(s: String): String =
   Str.concat("declare ", Str.concat(s, nl()))
 
 def preamble(): String =
-  Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), join(signalDecls(), join(decl("ptr @sz_error_value(ptr)"), join(decl("ptr @sz_io_handle_value(ptr, ptr, ptr)"), decls()))))))
+  Str.concat("; Scuzz Lang generated LLVM IR", Str.concat(nl(), Str.concat(nl(), join(signalDecls(), join(floatOrderDecls(), join(decl("ptr @sz_error_value(ptr)"), join(decl("ptr @sz_io_handle_value(ptr, ptr, ptr)"), decls())))))))
+
+def floatOrderDecls(): String =
+  join(decl("ptr @sz_list_sort_float(ptr)"), join(decl("ptr @sz_list_max_float(ptr)"), decl("ptr @sz_list_min_float(ptr)")))
 
 def decls(): String =
   join(declsA(), join(declsB(), join(declsC(), join(declsD(), join(declsE(), join(declsF(), join(declsG(), join(declsH(), join(declsI(), join(declsJ(), join(declsK(), join(declsL(), join(declsM(), join(declsN(), join(declsO(), join(declsP(), join(declsQ(), join(declsR(), join(declsS(), join(declsT(), join(declsU(), join(declsV(), join(declsW(), join(declsX(), join(declsShow(), nl())))))))))))))))))))))))))

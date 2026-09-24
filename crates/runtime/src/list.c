@@ -1274,6 +1274,37 @@ static int cmp_str_slots(const void *a, const void *b) {
   return 0;
 }
 
+static int float_ord(void *a, void *b) {
+  int64_t abits = sz_unbox_i64(a);
+  int64_t bbits = sz_unbox_i64(b);
+  double x;
+  double y;
+  memcpy(&x, &abits, sizeof x);
+  memcpy(&y, &bbits, sizeof y);
+  if (x != x)
+    return y != y ? 0 : 1;
+  if (y != y)
+    return -1;
+  if (x < y)
+    return -1;
+  if (x > y)
+    return 1;
+  return 0;
+}
+
+static int cmp_float_slots(const void *a, const void *b) {
+  const SzSortSlot *x = (const SzSortSlot *)a;
+  const SzSortSlot *y = (const SzSortSlot *)b;
+  int c = float_ord(x->value, y->value);
+  if (c)
+    return c;
+  if (x->idx < y->idx)
+    return -1;
+  if (x->idx > y->idx)
+    return 1;
+  return 0;
+}
+
 static int cmp_key_slots(const void *a, const void *b) {
   const SzSortSlot *x = (const SzSortSlot *)a;
   const SzSortSlot *y = (const SzSortSlot *)b;
@@ -1299,16 +1330,14 @@ static SzList *sort_slots(SzSortSlot *slots, size_t n,
   return acc;
 }
 
-SzList *sz_list_sort(SzList *xs) {
+static SzList *list_sort_with(SzList *xs,
+                              int (*cmp)(const void *, const void *)) {
   int64_t n = sz_list_len(xs);
   SzSortSlot *slots;
   SzList *p;
   size_t i;
-  uint32_t kind;
   if (!xs)
     return NULL;
-  kind = list_elem_kind(xs, "List.sort: not Int or String");
-  list_require_kind(xs, kind, "List.sort: not Int or String");
   slots = (SzSortSlot *)sz_alloc((size_t)n * sizeof(SzSortSlot));
   i = 0;
   for (p = xs; p; p = p->tail) {
@@ -1317,8 +1346,23 @@ SzList *sz_list_sort(SzList *xs) {
     slots[i].idx = i;
     i++;
   }
-  return sort_slots(slots, (size_t)n,
-                    kind == SZ_RC_BOX ? cmp_int_slots : cmp_str_slots);
+  return sort_slots(slots, (size_t)n, cmp);
+}
+
+SzList *sz_list_sort(SzList *xs) {
+  uint32_t kind;
+  if (!xs)
+    return NULL;
+  kind = list_elem_kind(xs, "List.sort: not Int or String");
+  list_require_kind(xs, kind, "List.sort: not Int or String");
+  return list_sort_with(xs, kind == SZ_RC_BOX ? cmp_int_slots : cmp_str_slots);
+}
+
+SzList *sz_list_sort_float(SzList *xs) {
+  if (!xs)
+    return NULL;
+  list_require_kind(xs, SZ_RC_BOX, "List.sort: not Float");
+  return list_sort_with(xs, cmp_float_slots);
 }
 
 SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env) {
@@ -1382,6 +1426,31 @@ void *sz_list_max(SzList *xs) {
 
 void *sz_list_min(SzList *xs) {
   return list_extreme(xs, 0, "List.min on empty");
+}
+
+static void *list_extreme_float(SzList *xs, int want_max,
+                                const char *empty_msg) {
+  SzList *p;
+  void *best;
+  if (!xs)
+    sz_panic(empty_msg);
+  list_require_kind(xs, SZ_RC_BOX,
+                    want_max ? "List.max: not Float" : "List.min: not Float");
+  best = xs->head;
+  for (p = xs->tail; p; p = p->tail) {
+    int c = float_ord(p->head, best);
+    if (want_max ? c > 0 : c < 0)
+      best = p->head;
+  }
+  return best;
+}
+
+void *sz_list_max_float(SzList *xs) {
+  return list_extreme_float(xs, 1, "List.max on empty");
+}
+
+void *sz_list_min_float(SzList *xs) {
+  return list_extreme_float(xs, 0, "List.min on empty");
 }
 
 static void *list_reverse_value(void *head, void *env) {

@@ -1660,13 +1660,28 @@ def headKit(xs: List[Value]): Value =
   if (List.isEmpty(xs)) noneV() else someV(List.at(xs, 0))
 
 def sortKit(xs: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.forall(xs, x => isInt(x))) vInts(List.sort(List.map(xs, x => intOf(x)))) else if (List.forall(xs, x => isStr(x))) vStrs(List.sort(List.map(xs, x => strOf(x)))) else errAt("List.sort: not Int or String", env, p, off)
+  if (List.forall(xs, x => isInt(x))) vInts(List.sort(List.map(xs, x => intOf(x)))) else if (List.forall(xs, x => isFloat(x))) Value.VList(floatSort(xs)) else if (List.forall(xs, x => isStr(x))) vStrs(List.sort(List.map(xs, x => strOf(x)))) else errAt("List.sort: not Int, Float, or String", env, p, off)
 
 def extremeKit(f: String, xs: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.isEmpty(xs)) errAt(Str.concat(f, " on empty"), env, p, off) else if (List.forall(xs, x => isInt(x))) Value.VInt(extremeInt(f, List.map(xs, x => intOf(x)))) else if (List.forall(xs, x => isStr(x))) Value.VStr(extremeStr(f, List.map(xs, x => strOf(x)))) else errAt(Str.concat(f, ": not Int or String"), env, p, off)
+  if (List.isEmpty(xs)) errAt(Str.concat(f, " on empty"), env, p, off) else if (List.forall(xs, x => isInt(x))) Value.VInt(extremeInt(f, List.map(xs, x => intOf(x)))) else if (List.forall(xs, x => isFloat(x))) extremeFloat(f, xs) else if (List.forall(xs, x => isStr(x))) Value.VStr(extremeStr(f, List.map(xs, x => strOf(x)))) else errAt(Str.concat(f, ": not Int, Float, or String"), env, p, off)
 
 def extremeInt(f: String, ns: List[Int]): Int =
   if (f == "List.max") List.max(ns) else List.min(ns)
+
+def extremeFloat(f: String, ns: List[Value]): Value =
+  floatExtreme(List.at(ns, 0), List.tail(ns), f == "List.max")
+
+def floatOrder(a: Float, b: Float): Int =
+  if (!(a == a)) if (!(b == b)) 0 else 1 else if (!(b == b)) 0 - 1 else if (a < b) 0 - 1 else if (a > b) 1 else 0
+
+def floatSort(xs: List[Value]): List[Value] =
+  if (List.len(xs) < 2) xs else floatMerge(floatSort(List.take(xs, List.len(xs) / 2)), floatSort(List.drop(xs, List.len(xs) / 2)))
+
+def floatMerge(a: List[Value], b: List[Value]): List[Value] =
+  if (List.isEmpty(a)) b else if (List.isEmpty(b)) a else if (floatOrder(floatOf(List.at(a, 0)), floatOf(List.at(b, 0))) <= 0) List.cons(List.at(a, 0), floatMerge(List.tail(a), b)) else List.cons(List.at(b, 0), floatMerge(a, List.tail(b)))
+
+def floatExtreme(best: Value, rest: List[Value], wantMax: Bool): Value =
+  if (List.isEmpty(rest)) best else if (wantMax && floatOrder(floatOf(List.at(rest, 0)), floatOf(best)) > 0 || !wantMax && floatOrder(floatOf(List.at(rest, 0)), floatOf(best)) < 0) floatExtreme(List.at(rest, 0), List.tail(rest), wantMax) else floatExtreme(best, List.tail(rest), wantMax)
 
 def extremeStr(f: String, ss: List[String]): String =
   if (f == "List.max") List.max(ss) else List.min(ss)
