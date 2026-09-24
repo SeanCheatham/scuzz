@@ -1999,7 +1999,10 @@ def ownerQualifiedErr(core: String, want: String, ens: List[En], dot: Int): Stri
   ownerQualifiedErr2(core, want, Str.take(core, dot), Str.drop(core, dot + 1), ens)
 
 def ownerQualifiedErr2(core: String, want: String, owner: String, name: String, ens: List[En]): String =
-  if (!hasEn(ens, owner)) "" else if (!List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (hasEn(ens, want) && owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+  if (owner == "Json" && jsonPatternCase(name) || !hasEn(ens, owner) && List.exists(ens, en => en.isRec && en.name == name && want == name)) "" else if (!hasEn(ens, owner) || !List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (hasEn(ens, want) && owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+
+def jsonPatternCase(name: String): Bool =
+  name == "Null" || name == "Bool" || name == "Int" || name == "Float" || name == "Str" || name == "Arr" || name == "Obj"
 
 def ownerFieldsErr(pats: List[String], fields: List[Param], i: Int, ens: List[En]): String =
   if (List.isEmpty(pats)) "" else ownerFieldsNext(ownerFieldErr(List.at(pats, 0), fields, i, ens), List.tail(pats), fields, i + 1, ens)
