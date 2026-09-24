@@ -546,7 +546,18 @@ def okCmp(): Bool =
   irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irIdem(srcTco()) && Check.check(srcTco()) == "[]" && irDiff(srcTcoMatch(), wantTcoMatch()) && irIdem(srcTcoMatch()) && Check.check(srcTcoMatch()) == "[]" && irDiff(srcTcoNest(), wantTcoNest()) && irIdem(srcTcoNest()) && Check.check(srcTcoNest()) == "[]" && irDiff(srcTcoOwn(), wantTcoOwn()) && irIdem(srcTcoOwn()) && Check.check(srcTcoOwn()) == "[]"
 
 def okList(): Bool =
-  irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]"
+  irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]" && floatGetOrBox()
+
+def floatGetOrBox(): Bool =
+  Check.check(srcFloatGetOr()) == "[]" && floatGetOrBoxIr(Emit.emit(srcFloatGetOr()))
+
+def floatGetOrBoxIr(ir: String): Bool =
+  Str.contains(ir, "call ptr @sz_box_float_bits") && !Str.contains(ir, "call ptr @sz_box_i64")
+
+def srcFloatGetOr(): String =
+  """def get(xs: List[Float]): Float =
+  List.getOrElse(xs, 9, 0.0)
+"""
 
 def okOpt(): Bool =
   irDiff(srcOpt(), wantOpt()) && irIdem(srcOpt()) && irDiff(srcHead(), wantHead()) && irIdem(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irIdem(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irIdem(srcTail()) && irDiff(srcTok(), wantTok()) && irIdem(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]" && okHeadPair() && okNestCtor() && okNestTupField() && okNestCons()
