@@ -59,19 +59,19 @@ def noEn(): List[En] =
   []
 
 def copyEns(ens: List[En]): List[En] =
-  copyEnsAt(ens, 0)
+  copyEnsAt(ens)
 
-def copyEnsAt(ens: List[En], i: Int): List[En] =
-  if (i >= List.len(ens)) noEn() else List.at(ens, i) :: copyEnsAt(ens, i + 1)
+def copyEnsAt(ens: List[En]): List[En] =
+  if (List.isEmpty(ens)) noEn() else List.at(ens, 0) :: copyEnsAt(List.tail(ens))
 
 def copyPs(ps: List[Param]): List[Param] =
-  copyPsAt(ps, 0)
+  copyPsAt(ps)
 
-def copyPsAt(ps: List[Param], i: Int): List[Param] =
-  if (i >= List.len(ps)) noParam() else copyPsHit(List.at(ps, i), ps, i)
+def copyPsAt(ps: List[Param]): List[Param] =
+  if (List.isEmpty(ps)) noParam() else copyPsHit(List.at(ps, 0), List.tail(ps))
 
-def copyPsHit(h: Param, ps: List[Param], i: Int): List[Param] =
-  h :: copyPsAt(ps, i + 1)
+def copyPsHit(h: Param, rest: List[Param]): List[Param] =
+  h :: copyPsAt(rest)
 
 def nl(): String =
   """
@@ -3814,18 +3814,18 @@ def jsonTag(name: String): Int =
   if (name == "Bool") 1 else if (name == "Int") 2 else if (name == "Float") 3 else if (name == "Str") 4 else if (name == "Arr") 5 else if (name == "Obj") 6 else 0
 
 def ctorTagAt(ens: List[En], en: String, name: String, i: Int): Int =
-  if (i >= List.len(ens)) 0 else ctorTagHit(List.at(ens, i), ens, en, name, i)
+  if (List.isEmpty(ens)) 0 else ctorTagHit(List.at(ens, 0), List.tail(ens), en, name, i)
 
-def ctorTagHit(h: En, ens: List[En], en: String, name: String, i: Int): Int =
+def ctorTagHit(h: En, rest: List[En], en: String, name: String, i: Int): Int =
   h match {
-    case En(_, n, _, cases) => if (n == en) caseTag(cases, name, 0) else ctorTagAt(ens, en, name, i + 1)
+    case En(_, n, _, cases) => if (n == en) caseTag(cases, name, 0) else ctorTagAt(rest, en, name, i + 1)
   }
 
 def caseTag(cs: List[EnCase], name: String, i: Int): Int =
-  if (i >= List.len(cs)) 0 else caseTagHit(List.at(cs, i), cs, name, i)
+  if (List.isEmpty(cs)) 0 else caseTagHit(List.at(cs, 0), List.tail(cs), name, i)
 
-def caseTagHit(c: EnCase, cs: List[EnCase], name: String, i: Int): Int =
-  if (c.name == name) i else caseTag(cs, name, i + 1)
+def caseTagHit(c: EnCase, rest: List[EnCase], name: String, i: Int): Int =
+  if (c.name == name) i else caseTag(rest, name, i + 1)
 
 def dotAt(s: String, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == 46) i else dotAt(s, i + 1)
@@ -5405,14 +5405,14 @@ def intBind(i: Int): String =
   Str.concat(fakeBind(i), "_b0")
 
 def recNames(ens: List[En], ty: String): List[String] =
-  recNamesAt(ens, ty, 0)
+  recNamesAt(ens, ty)
 
-def recNamesAt(ens: List[En], ty: String, i: Int): List[String] =
-  if (i >= List.len(ens)) noStr() else recNamesHit(List.at(ens, i), ens, ty, i)
+def recNamesAt(ens: List[En], ty: String): List[String] =
+  if (List.isEmpty(ens)) noStr() else recNamesHit(List.at(ens, 0), List.tail(ens), ty)
 
-def recNamesHit(h: En, ens: List[En], ty: String, i: Int): List[String] =
+def recNamesHit(h: En, rest: List[En], ty: String): List[String] =
   h match {
-    case En(_, n, _, cases) => if (n == ty || n == tyHead(ty)) recNames2(cases) else recNamesAt(ens, ty, i + 1)
+    case En(_, n, _, cases) => if (n == ty || n == tyHead(ty)) recNames2(cases) else recNamesAt(rest, ty)
   }
 
 def recNames2(cs: List[EnCase]): List[String] =
@@ -5427,14 +5427,14 @@ def recHead(en: String, name: String, ens: List[En], ps: List[Param]): String =
   recHeadHit(tyHead(paramTy(ps, en)), name, ens)
 
 def recHeadHit(ty: String, name: String, ens: List[En]): String =
-  if (!List.isEmpty(recNames(ens, ty))) ty else recHeadField(ens, name, 0)
+  if (!List.isEmpty(recNames(ens, ty))) ty else recHeadField(ens, name)
 
-def recHeadField(ens: List[En], name: String, i: Int): String =
-  if (i >= List.len(ens)) "" else recHeadFieldHit(List.at(ens, i), ens, name, i)
+def recHeadField(ens: List[En], name: String): String =
+  if (List.isEmpty(ens)) "" else recHeadFieldHit(List.at(ens, 0), List.tail(ens), name)
 
-def recHeadFieldHit(h: En, ens: List[En], name: String, i: Int): String =
+def recHeadFieldHit(h: En, rest: List[En], name: String): String =
   h match {
-    case En(_, n, _, cases) => if (hasFieldName(cases, name)) n else recHeadField(ens, name, i + 1)
+    case En(_, n, _, cases) => if (hasFieldName(cases, name)) n else recHeadField(rest, name)
   }
 
 def hasFieldName(cs: List[EnCase], name: String): Bool =
@@ -5454,14 +5454,14 @@ def hasParamName1(p: Param, rest: List[Param], name: String): Bool =
   }
 
 def recTys(ens: List[En], ty: String): List[String] =
-  recTysAt(ens, ty, 0)
+  recTysAt(ens, ty)
 
-def recTysAt(ens: List[En], ty: String, i: Int): List[String] =
-  if (i >= List.len(ens)) noStr() else recTysHit(List.at(ens, i), ens, ty, i)
+def recTysAt(ens: List[En], ty: String): List[String] =
+  if (List.isEmpty(ens)) noStr() else recTysHit(List.at(ens, 0), List.tail(ens), ty)
 
-def recTysHit(h: En, ens: List[En], ty: String, i: Int): List[String] =
+def recTysHit(h: En, rest: List[En], ty: String): List[String] =
   h match {
-    case En(_, n, _, cases) => if (n == ty || n == tyHead(ty)) recTys2(cases) else recTysAt(ens, ty, i + 1)
+    case En(_, n, _, cases) => if (n == ty || n == tyHead(ty)) recTys2(cases) else recTysAt(rest, ty)
   }
 
 def recTys2(cs: List[EnCase]): List[String] =

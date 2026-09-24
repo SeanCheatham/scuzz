@@ -1798,13 +1798,13 @@ def forHasDraw1(b: Bind, rest: List[Bind]): Bool =
   }
 
 def hasEn(ens: List[En], name: String): Bool =
-  hasEnAt(ens, name, 0)
+  hasEnAt(ens, name)
 
-def hasEnAt(ens: List[En], name: String, i: Int): Bool =
-  if (i >= List.len(ens)) false else hasEnHit(List.at(ens, i), ens, name, i)
+def hasEnAt(ens: List[En], name: String): Bool =
+  if (List.isEmpty(ens)) false else hasEnHit(List.at(ens, 0), List.tail(ens), name)
 
-def hasEnHit(h: En, ens: List[En], name: String, i: Int): Bool =
-  if (h.name == name) true else hasEnAt(ens, name, i + 1)
+def hasEnHit(h: En, rest: List[En], name: String): Bool =
+  if (h.name == name) true else hasEnAt(rest, name)
 
 def inferField(recv: Expr, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   recv match {
