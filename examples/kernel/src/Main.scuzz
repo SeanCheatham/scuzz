@@ -23,11 +23,14 @@ enum FloatPayload:
 
 enum DefaultCase:
   case A(n: Int = 7)
+  case Filled(n: Int = 11)
   case Z
 
 record FloatRecord(value: Float, count: Int)
 
 record FloatSingle(value: Float)
+
+record DefaultRecord(n: Int = 13)
 
 type UserId = Int
 type Labels = List[String]
@@ -121,8 +124,12 @@ def makeDefaultCase(n: Int): DefaultCase =
 def readDefaultCase(e: DefaultCase): Int =
   e match {
     case DefaultCase.A(n) => n
+    case DefaultCase.Filled(n) => n
     case DefaultCase.Z => 0
   }
+
+def readDefaultRecord(r: DefaultRecord): Int =
+  r.n
 
 def optStr(o: Option[String]): String =
   o match {
@@ -1491,6 +1498,10 @@ b"""
     _ <- IO.println(s"defargM:${addDefault(3, m = 4)}")
     _ <- IO.println(s"ctorDefault:${readDefaultCase(DefaultCase.A())}")
     _ <- IO.println(s"ctorNamed:${readDefaultCase(DefaultCase.A(n = 8))}")
+    _ <- IO.println(s"ctorUnqualified:${readDefaultCase(Filled())}")
+    _ <- IO.println(s"ctorUnqualifiedNamed:${readDefaultCase(Filled(n = 12))}")
+    _ <- IO.println(s"recordDefault:${readDefaultRecord(DefaultRecord())}")
+    _ <- IO.println(s"recordNamed:${readDefaultRecord(DefaultRecord(n = 14))}")
     _ <- IO.println(s"ctorValue:${readDefaultCase(makeDefaultCase(9))}")
     _ <- IO.println(s"greet:${greet("hi")}")
     _ <- IO.println(s"greetQ:${greet("hi", "?")}")
