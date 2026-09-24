@@ -37,6 +37,12 @@ oracle numericExtremeBy(): Bool =
 oracle numericReduceMap(): Bool =
   Main.numericReduceMap([7, 8, 9])
 
+oracle borrowedFoldSeed(): Bool =
+  Main.borrowedFoldSeed(["a", "b"], "!")
+
+oracle numericFoldSeed(): Bool =
+  Main.numericFoldSeed([1, 2, 3], 4)
+
 oracle numericZipAll(): Bool =
   Main.numericZipAll(7)
 
