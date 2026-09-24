@@ -240,7 +240,10 @@ def paramHasName1(p: Param, rest: List[Param], n: String): Bool =
   }
 
 def alignCall(ps: List[Param], args: List[Expr]): (List[Expr], String) =
-  if (List.isEmpty(ps)) (args, "") else alignAfterSplit(ps, alignSplit(args, noExpr(), noExpr(), false))
+  if (List.isEmpty(ps) || alignPlain(ps, args)) (args, "") else alignAfterSplit(ps, alignSplit(args, noExpr(), noExpr(), false))
+
+def alignPlain(ps: List[Param], args: List[Expr]): Bool =
+  if (List.isEmpty(ps)) List.isEmpty(args) else !List.isEmpty(args) && !isNamedArg(List.at(args, 0)) && alignPlain(List.tail(ps), List.tail(args))
 
 def alignSplit(args: List[Expr], pos: List[Expr], named: List[Expr], seenN: Bool): (List[Expr], List[Expr], String) =
   if (List.isEmpty(args)) (List.reverse(pos), List.reverse(named), "") else alignSplit1(List.at(args, 0), List.tail(args), pos, named, seenN)
@@ -266,30 +269,30 @@ def alignUnknown1(h: Expr, rest: List[Expr], ps: List[Param]): String =
   }
 
 def alignAfterUnknown(ps: List[Param], pos: List[Expr], named: List[Expr], err: String): (List[Expr], String) =
-  if (err != "") (noExpr(), err) else alignFillPs(ps, pos, named, 0, noExpr())
+  if (err != "") (noExpr(), err) else alignFillPs(ps, pos, named, noExpr())
 
-def alignFillPs(ps: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
-  if (List.isEmpty(ps)) alignDone(pos, i, acc) else alignFillHd(List.at(ps, 0), List.tail(ps), pos, named, i, acc)
+def alignFillPs(ps: List[Param], pos: List[Expr], named: List[Expr], acc: List[Expr]): (List[Expr], String) =
+  if (List.isEmpty(ps)) alignDone(pos, acc) else alignFillHd(List.at(ps, 0), List.tail(ps), pos, named, acc)
 
-def alignDone(pos: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
-  if (i < List.len(pos)) (List.reverse(acc), "too many arguments") else (List.reverse(acc), "")
+def alignDone(pos: List[Expr], acc: List[Expr]): (List[Expr], String) =
+  if (!List.isEmpty(pos)) (List.reverse(acc), "too many arguments") else (List.reverse(acc), "")
 
-def alignFillHd(p: Param, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
+def alignFillHd(p: Param, rest: List[Param], pos: List[Expr], named: List[Expr], acc: List[Expr]): (List[Expr], String) =
   p match {
-    case Param(n, _, _, d) => alignFillOne(n, d, rest, pos, named, i, acc)
+    case Param(n, _, _, d) => alignFillOne(n, d, rest, pos, named, acc)
   }
 
-def alignFillOne(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
-  if (i < List.len(pos)) alignFillPos(n, rest, pos, named, i, acc) else alignFillNamed(n, d, rest, pos, named, i, acc)
+def alignFillOne(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], acc: List[Expr]): (List[Expr], String) =
+  if (!List.isEmpty(pos)) alignFillPos(n, rest, pos, named, acc) else alignFillNamed(n, d, rest, pos, named, acc)
 
-def alignFillPos(n: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
-  if (namedHas(n, named)) (noExpr(), Str.concat("duplicate argument ", n)) else alignFillPs(rest, pos, named, i + 1, List.at(pos, i) :: acc)
+def alignFillPos(n: String, rest: List[Param], pos: List[Expr], named: List[Expr], acc: List[Expr]): (List[Expr], String) =
+  if (namedHas(n, named)) (noExpr(), Str.concat("duplicate argument ", n)) else alignFillPs(rest, List.tail(pos), named, List.at(pos, 0) :: acc)
 
-def alignFillNamed(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
-  if (namedHas(n, named)) alignFillPs(rest, pos, named, i, namedLookup(n, named) :: acc) else alignFillDflt(n, d, rest, pos, named, i, acc)
+def alignFillNamed(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], acc: List[Expr]): (List[Expr], String) =
+  if (namedHas(n, named)) alignFillPs(rest, pos, named, namedLookup(n, named) :: acc) else alignFillDflt(n, d, rest, pos, named, acc)
 
-def alignFillDflt(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], i: Int, acc: List[Expr]): (List[Expr], String) =
-  if (d != "") alignFillPs(rest, pos, named, i, dfltExpr(d) :: acc) else (noExpr(), Str.concat("missing argument ", n))
+def alignFillDflt(n: String, d: String, rest: List[Param], pos: List[Expr], named: List[Expr], acc: List[Expr]): (List[Expr], String) =
+  if (d != "") alignFillPs(rest, pos, named, dfltExpr(d) :: acc) else (noExpr(), Str.concat("missing argument ", n))
 
 def alignErr(f: String, err: String, ps: List[Param], args: List[Expr]): String =
   if (arityErr(err, args)) Str.concat(f, Str.concat(" expects ", Str.concat(Str.fromInt(List.len(ps)), Str.concat(" args, got ", Str.fromInt(List.len(args)))))) else err
