@@ -2352,29 +2352,6 @@ def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, T
 def resolveQualHit(en: String, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], hit: List[Fun], e: Expr): Out =
   if (List.isEmpty(hit)) bad(Str.concat("unknown function ", Str.concat(en, Str.concat(".", name))), exprSpan(env, e)) else resolveUser(Str.concat(en, Str.concat(".", name)), args, env, funs, ens, exprSpan(env, e), hit)
 
-def inferCtor(en: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  if (List.isEmpty(args)) ok(en) else inferCtorHead(en, List.at(args, 0), List.tail(args), env, funs, ens)
-
-def inferCtorHead(en: String, h: Expr, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  inferCtorFrom(en, infer(h, env, funs, ens), rest, env, funs, ens)
-
-def inferCtorFrom(en: String, o: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  if (hasErr(o)) o else inferCtorRest(en, o, firstArgErr(rest, env, funs, ens), ens)
-
-def inferCtorRest(en: String, o: Out, restErr: Out, ens: List[En]): Out =
-  if (hasErr(restErr)) restErr else inferCtor2(en, o, ens)
-
-def inferCtor2(en: String, o: Out, ens: List[En]): Out =
-  if (hasErr(o)) o else if (enHasParams(ens, en)) ok(Str.concat(en, Str.concat("[", Str.concat(tyStr(o), "]")))) else ok(en)
-
-def enHasParams(ens: List[En], name: String): Bool =
-  if (List.isEmpty(ens)) false else enHasParams1(List.at(ens, 0), List.tail(ens), name)
-
-def enHasParams1(h: En, rest: List[En], name: String): Bool =
-  h match {
-    case En(_, n, tps, _) => if (n == name) List.len(tps) > 0 else enHasParams(rest, name)
-  }
-
 def isIo(t: String): Bool =
   Type.isIoStr(t)
 
@@ -3506,11 +3483,19 @@ def specializeType(ty: String, tps: List[String], args: List[Ty]): String =
   if (List.isEmpty(tps) || List.isEmpty(args)) ty else specializeType(substTy(ty, List.at(tps, 0), Type.show(List.at(args, 0))), List.tail(tps), List.tail(args))
 
 def inferNamedCtor(en: String, ctor: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), rest: List[En]): Out =
-  if (List.isEmpty(rest)) inferCtor(en, args, env, funs, ens) else inferNamedCtorEn(List.at(rest, 0), List.tail(rest), en, ctor, args, env, funs, ens, span)
+  if (List.isEmpty(rest)) bad(Str.concat("unknown constructor ", ctor), span) else inferNamedCtorEn(List.at(rest, 0), List.tail(rest), en, ctor, args, env, funs, ens, span)
 
 def inferNamedCtorEn(head: En, rest: List[En], en: String, ctor: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   head match {
-    case En(_, name, tps, cases) => if (name != en) inferNamedCtor(en, ctor, args, env, funs, ens, span, rest) else if (List.isEmpty(tps)) inferCtor(en, args, env, funs, ens) else inferGenericCtor(en, ctor, tps, cases, args, env, funs, ens, span)
+    case En(_, name, tps, cases) => if (name != en) inferNamedCtor(en, ctor, args, env, funs, ens, span, rest) else if (List.isEmpty(tps)) inferPlainCtor(en, ctor, cases, args, env, funs, ens, span) else inferGenericCtor(en, ctor, tps, cases, args, env, funs, ens, span)
+  }
+
+def inferPlainCtor(en: String, ctor: String, cases: List[EnCase], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  if (List.isEmpty(cases)) bad(Str.concat("unknown constructor ", ctor), span) else inferPlainCtorCase(en, ctor, List.at(cases, 0), List.tail(cases), args, env, funs, ens, span)
+
+def inferPlainCtorCase(en: String, ctor: String, c: EnCase, rest: List[EnCase], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+  c match {
+    case EnCase(name, ps) => if (name != ctor) inferPlainCtor(en, ctor, rest, args, env, funs, ens, span) else checkUser(ctor, ps, en, args, env, funs, ens, span)
   }
 
 def inferGenericCtor(en: String, ctor: String, tps: List[String], cases: List[EnCase], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =

@@ -1257,7 +1257,17 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes()
+
+def ctorArityTypes(): Bool =
+  rejects("""enum Pair:
+  case Both(left: Int, right: Int)
+def wrong(): Pair = Pair.Both(1)""", "Both expects 2 args, got 1") && rejects("""enum Pair:
+  case Both(left: Int, right: Int)
+def wrong(): Pair = Pair.Both(1, 2, 3)""", "Both expects 2 args, got 3") && rejects("enum Pair:\n  case Both(left: Int, right: Int)\ndef wrong(): Pair = Pair.Both(1, \"x\")", "Both arg type mismatch: expected Int, got String") && rejects("""record Point(x: Int, y: Int)
+def wrong(): Point = Point(1)""", "Point expects 2 args, got 1") && Check.check("""enum Pair:
+  case Both(left: Int, right: Int)
+def right(): Pair = Pair.Both(1, 2)""") == "[]"
 
 def namedLetterTypes(): Bool =
   Check.check("""enum E:
@@ -1979,7 +1989,7 @@ def factsTier(): Bool =
 """), Verify.noEn(), 0) == ""
 
 def floatFieldDriveGuard(): Bool =
-  !Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Outer", [En(true, "Outer", [], [EnCase("Outer", [Param("inner", "Box", "", "")])]), En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Box[Float]", [En(true, "Box", ["T"], [EnCase("Box", [Param("value", "T", "", "")])])]) && Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Int", "", "")])])])
+  !Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Outer", [En(true, "Outer", [], [EnCase("Outer", [Param("inner", "Box", "", "")])]), En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Box[Float]", [En(true, "Box", ["T"], [EnCase("Box", [Param("value", "T", "", "")])])]) && Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Int", "", "")])])]) && Verify.friendlyTy("Term", [En(false, "Term", [], [EnCase("N", [Param("n", "Int", "", "")]), EnCase("Add", [Param("left", "Term", "", ""), Param("right", "Term", "", "")])])])
 
 def factsSearch(seed: Int): Bool =
   Str.startsWith(Verify.generatedDrive(Verify.parseVerify(factsSrc()), Verify.noEn(), seed), "drive gen ")

@@ -155,14 +155,14 @@ def friendlyTy(t: String, ens: List[En]): Bool =
   if (t == "Int" || t == "String" || t == "Bool" || t == "View") true else if (isListTy(t)) friendlyTy(listInner(t), ens) else if (opaqueTy(tyHead(t))) false else if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else !List.isEmpty(findEn(ens, tyHead(t))) && !hasFloatDriveTy(t, ens, 0)
 
 def hasFloatDriveTy(t: String, ens: List[En], depth: Int): Bool =
-  if (t == "Float") true else if (t == "Int" || t == "String" || t == "Bool") false else if (depth >= 3) true else if (isListTy(t)) hasFloatDriveTy(listInner(t), ens, depth + 1) else hasFloatDriveEn(findEn(Check.specializeEnums(ens, t), tyHead(t)), ens, depth)
+  if (t == "Float") true else if (t == "Int" || t == "String" || t == "Bool") false else if (depth >= 8) true else if (isListTy(t)) hasFloatDriveTy(listInner(t), ens, depth + 1) else hasFloatDriveEn(findEn(Check.specializeEnums(ens, t), tyHead(t)), ens, depth)
 
 def hasFloatDriveEn(hit: List[En], ens: List[En], depth: Int): Bool =
   if (List.isEmpty(hit)) false else hasFloatDriveEnCases(List.at(hit, 0), ens, depth)
 
 def hasFloatDriveEnCases(en: En, ens: List[En], depth: Int): Bool =
   en match {
-    case En(_, _, _, cases) => hasFloatDriveCases(cases, ens, depth)
+    case En(isRec, name, _, cases) => hasFloatDriveCases(if (depth >= 3 && !isRec && !recLike(name, cases)) leafCases(cases) else cases, ens, depth)
   }
 
 def hasFloatDriveCases(cases: List[EnCase], ens: List[En], depth: Int): Bool =
