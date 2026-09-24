@@ -28,6 +28,9 @@ oracle numericMapGet(): Bool =
 oracle numericListElements(): Bool =
   Main.numericListElements(7)
 
+oracle numericZipAll(): Bool =
+  Main.numericZipAll(7)
+
 oracle constructorStrings(s: String): Bool =
   Main.literalPacket(LiteralPacket.Text(s)) == (if (s == "ready") 1 else 0)
 
