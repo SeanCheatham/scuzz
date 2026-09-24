@@ -1290,7 +1290,7 @@ def emitNethTy(rt: String, prefix: String, bind: String, body: Expr, strs: Strs,
   emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, pred, mapNethBindTy(rt, bind, body, dropParam(ps, bind), defs, elemTy))
 
 def mapNethBindTy(rt: String, bind: String, body: Expr, rest: List[Param], defs: Ftab, elemTy: String): String =
-  if (nethIdxPred(rt)) "Int" else if (rt == "sz_verdict_step_every" || rt == "sz_verdict_on_hit") "(Int, Int)" else if (rt == "sz_fuzz_driver") "List[String]" else if (rt == "sz_fuzz_verify") "Timeline" else if (rt == "sz_fuzz_verify_rel") "(Timeline, Timeline)" else if (bind == "__tup" || bind == "__p" || bind == "_ph") nethBindTy(bind, body, rest, defs) else if (elemTy != "") elemTy else nethBindTy(bind, body, rest, defs)
+  if (nethIdxPred(rt)) "Int" else if (rt == "sz_verdict_step_every" || rt == "sz_verdict_on_hit") "(Int, Int)" else if (rt == "sz_fuzz_driver") "List[String]" else if (rt == "sz_fuzz_verify") "Timeline" else if (rt == "sz_fuzz_verify_rel") "(Timeline, Timeline)" else if ((rt == "sz_list_reduce_left" || rt == "sz_list_reduce_right") && bind == "__tup" && elemTy != "") foldTupTy(elemTy, elemTy) else if (bind == "__tup" || bind == "__p" || bind == "_ph") nethBindTy(bind, body, rest, defs) else if (elemTy != "") elemTy else nethBindTy(bind, body, rest, defs)
 
 def nethIdxPred(rt: String): Bool =
   rt == "sz_verdict_every" || rt == "sz_verdict_any" || rt == "sz_timeline_exists"
