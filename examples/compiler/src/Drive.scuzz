@@ -2420,3 +2420,4 @@ def relateJudgeGot(r: (Int, String, String)): IO[Int] =
 
 def fuzzRunScript(run: FuzzRun): String =
   run.script
+

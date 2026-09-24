@@ -1940,7 +1940,75 @@ def inferMatch2(o: Out, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, en
   if (hasErr(o)) o else if (List.isEmpty(arms)) o else andBinds(o, inferMatchNest(nestArmsErr(arms, span), arms, tyStr(o), env, funs, ens, span))
 
 def inferMatchNest(v: Out, arms: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(v)) v else inferMatchRest(inferMatchChecked(altArmsErr(arms, scrutTy, ens, span), List.at(arms, 0), scrutTy, env, funs, ens), List.tail(arms), scrutTy, env, funs, ens)
+  if (hasErr(v)) v else inferMatchRest(inferMatchChecked(patternArmsErr(arms, scrutTy, ens, span), List.at(arms, 0), scrutTy, env, funs, ens), List.tail(arms), scrutTy, env, funs, ens)
+
+def patternArmsErr(arms: List[Arm], scrutTy: String, ens: List[En], span: (String, Int)): Out =
+  patternArmsErr2(ownerArmsErr(arms, scrutTy, ens), arms, scrutTy, ens, span)
+
+def patternArmsErr2(err: String, arms: List[Arm], scrutTy: String, ens: List[En], span: (String, Int)): Out =
+  if (err != "") bad(err, span) else altArmsErr(arms, scrutTy, ens, span)
+
+def ownerArmsErr(arms: List[Arm], scrutTy: String, ens: List[En]): String =
+  if (List.isEmpty(arms)) "" else ownerArmsNext(ownerArmErr(List.at(arms, 0), scrutTy, ens), List.tail(arms), scrutTy, ens)
+
+def ownerArmsNext(err: String, rest: List[Arm], scrutTy: String, ens: List[En]): String =
+  if (err != "") err else ownerArmsErr(rest, scrutTy, ens)
+
+def ownerArmErr(arm: Arm, scrutTy: String, ens: List[En]): String =
+  arm match {
+    case Arm(pat, _, _) => ownerPatErr(pat, scrutTy, ens)
+  }
+
+def ownerPatErr(pat: String, ty: String, ens: List[En]): String =
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) ownerAltErr(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (asAt(pat, 0) >= 0) ownerPatErr(Str.drop(pat, asAt(pat, 0) + 3), ty, ens) else if (consAt(pat, 0) >= 0) ownerConsErr(pat, ty, ens) else if (isTuplePat(pat)) ownerTupleErr(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(ty), ens) else if (pat == "_" || pat == "[]" || altStrPat(pat) || altIntPat(pat) || altBoolPat(pat)) "" else ownerCtorErr(pat, ty, ens)
+
+def ownerAltErr(pat: String, ty: String, ens: List[En], i: Int): String =
+  ownerNextErr(ownerPatErr(Str.take(pat, i), ty, ens), Str.drop(pat, i + 3), ty, ens)
+
+def ownerNextErr(err: String, pat: String, ty: String, ens: List[En]): String =
+  if (err != "") err else ownerPatErr(pat, ty, ens)
+
+def ownerConsErr(pat: String, ty: String, ens: List[En]): String =
+  ownerNextErr(ownerPatErr(Str.take(pat, consAt(pat, 0)), elemOf(ty), ens), Str.drop(pat, consAt(pat, 0) + 4), ty, ens)
+
+def ownerTupleErr(pats: List[String], tys: List[String], ens: List[En]): String =
+  if (List.isEmpty(pats)) "" else ownerTupleNext(ownerPatErr(List.at(pats, 0), if (List.isEmpty(tys)) "A" else List.at(tys, 0), ens), List.tail(pats), if (List.isEmpty(tys)) tys else List.tail(tys), ens)
+
+def ownerTupleNext(err: String, pats: List[String], tys: List[String], ens: List[En]): String =
+  if (err != "") err else ownerTupleErr(pats, tys, ens)
+
+def ownerCtorErr(pat: String, ty: String, ens: List[En]): String =
+  ownerCtorCoreErr(patCore(pat), patBind(pat), ty, ens)
+
+def ownerCtorCoreErr(core: String, fields: String, ty: String, ens: List[En]): String =
+  ownerCtorFieldsErr(ownerCoreErr(core, ty, ens), core, fields, ty, ens)
+
+def ownerCtorFieldsErr(err: String, core: String, fields: String, ty: String, ens: List[En]): String =
+  if (err != "" || fields == "") err else ownerFieldsErr(splitComma(fields), constructorFields(specializeEnums(ens, ty), patternCoreForTy(core, ty, ens)), 0, ens)
+
+def ownerCoreErr(core: String, ty: String, ens: List[En]): String =
+  ownerCoreErr2(core, tyHead(Type.parse(ty)), ens, dotAt(core, 0))
+
+def ownerCoreErr2(core: String, want: String, ens: List[En], dot: Int): String =
+  if (dot >= 0) ownerQualifiedErr(core, want, ens, dot) else if (hasEn(ens, want) && enOfCase(ens, core) != "" && !List.exists(ens, en => en.name == want && hasCase(en.cases, core))) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+
+def ownerQualifiedErr(core: String, want: String, ens: List[En], dot: Int): String =
+  ownerQualifiedErr2(core, want, Str.take(core, dot), Str.drop(core, dot + 1), ens)
+
+def ownerQualifiedErr2(core: String, want: String, owner: String, name: String, ens: List[En]): String =
+  if (!hasEn(ens, owner)) "" else if (!List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (hasEn(ens, want) && owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+
+def ownerFieldsErr(pats: List[String], fields: List[Param], i: Int, ens: List[En]): String =
+  if (List.isEmpty(pats)) "" else ownerFieldsNext(ownerFieldErr(List.at(pats, 0), fields, i, ens), List.tail(pats), fields, i + 1, ens)
+
+def ownerFieldsNext(err: String, rest: List[String], fields: List[Param], i: Int, ens: List[En]): String =
+  if (err != "") err else ownerFieldsErr(rest, fields, i, ens)
+
+def ownerFieldErr(pat: String, fields: List[Param], i: Int, ens: List[En]): String =
+  if (eqAt(pat, 0) >= 0) ownerNamedFieldErr(pat, fields, ens, List.filter(fields, p => p.name == Str.take(pat, eqAt(pat, 0)))) else ownerPatErr(pat, if (i < List.len(fields)) List.at(fields, i).ty else "A", ens)
+
+def ownerNamedFieldErr(pat: String, fields: List[Param], ens: List[En], selected: List[Param]): String =
+  ownerPatErr(Str.drop(pat, eqAt(pat, 0) + 3), if (List.isEmpty(selected)) "A" else List.at(selected, 0).ty, ens)
 
 def nestArmsErr(arms: List[Arm], span: (String, Int)): Out =
   if (List.isEmpty(arms)) ok("Unit") else nestArmsErr2(nestArmErr(List.at(arms, 0)), List.tail(arms), span)
