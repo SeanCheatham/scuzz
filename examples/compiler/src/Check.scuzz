@@ -355,16 +355,19 @@ def zipCheckArg(callee: String, w: Ty, want: List[Ty], arg: Expr, args: List[Exp
   zipCheckGo(callee, w, want, arg, args, env, funs, ens, span, acc, spanPick(exprSpan(env, stripNamed(arg)), span))
 
 def zipCheckGo(callee: String, w: Ty, want: List[Ty], arg: Expr, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
-  if (List.isEmpty(args)) zipCheckLast(inferExpectedTy(stripNamed(arg), w, env, funs, ens), callee, w, asp, acc, ens) else zipCheck2(callee, w, inferExpectedTy(stripNamed(arg), w, env, funs, ens), want, args, env, funs, ens, span, acc, asp)
+  if (List.isEmpty(args)) zipCheckLast(inferExpectedTy(stripNamed(arg), w, env, funs, ens), callee, w, asp, acc, ens, isKit(callee, funs)) else zipCheck2(callee, w, inferExpectedTy(stripNamed(arg), w, env, funs, ens), want, args, env, funs, ens, span, acc, asp)
 
-def zipCheckLast(o: Out, callee: String, w: Ty, span: (String, Int), acc: Ty, ens: List[En]): Out =
-  if (hasErr(o)) o else if (tyEq(o.ty, w, ens)) retTy(bindOrigin(o, o.origin, o.ty, w, ens, span), zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), span)
+def zipCheckLast(o: Out, callee: String, w: Ty, span: (String, Int), acc: Ty, ens: List[En], kit: Bool): Out =
+  if (hasErr(o)) o else if (zipTyEq(w, o.ty, ens, kit)) retTy(bindOrigin(o, o.origin, o.ty, w, ens, span), zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), span)
 
 def zipCheck2(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
   if (hasErr(o)) o else zipCheckEq(callee, w, o, want, args, env, funs, ens, span, acc, asp)
 
 def zipCheckEq(callee: String, w: Ty, o: Out, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty, asp: (String, Int)): Out =
-  if (tyEq(o.ty, w, ens)) zipCheckBound(bindOrigin(o, o.origin, o.ty, w, ens, asp), callee, kitWantFromTy(callee, zipAcc(acc, o), want), args, env, funs, ens, span, zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), asp)
+  if (zipTyEq(w, o.ty, ens, isKit(callee, funs))) zipCheckBound(bindOrigin(o, o.origin, o.ty, w, ens, asp), callee, kitWantFromTy(callee, zipAcc(acc, o), want), args, env, funs, ens, span, zipAcc(acc, o)) else argMismatch(callee, Type.show(w), tyStr(o), asp)
+
+def zipTyEq(w: Ty, got: Ty, ens: List[En], kit: Bool): Bool =
+  if (kit) Type.eqPinGotTy(w, got, enNames(ens)) else tyEq(got, w, ens)
 
 def zipCheckBound(o: Out, callee: String, want: List[Ty], args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), acc: Ty): Out =
   if (hasErr(o)) o else andBinds(o, zipCheck(callee, want, args, env, funs, ens, span, acc))
