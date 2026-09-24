@@ -32,7 +32,7 @@ record Bind(draw: Bool, name: String, value: Expr)
 
 record EnCase(name: String, fields: List[Param])
 
-record En(isRec: Bool, name: String, tparams: List[String], cases: List[EnCase])
+record En(isRec: Bool, name: String, tparams: List[String], cases: List[EnCase], mod: String)
 
 record Alias(name: String, tparams: List[String], target: String)
 
@@ -855,7 +855,7 @@ def parseEnumTp(name: String, p: (List[String], Int), toks: Toks): (En, Int) =
   }
 
 def parseEnumCases(name: String, ts: List[String], toks: Toks, i: Int, acc: List[EnCase]): (En, Int) =
-  if (_is(toks, i, Tok.Case)) parseEnumCasesNext(parseEnumCase(toks, i + 1), name, ts, toks, acc) else (En(false, name, ts, List.reverse(acc)), i)
+  if (_is(toks, i, Tok.Case)) parseEnumCasesNext(parseEnumCase(toks, i + 1), name, ts, toks, acc) else (En(false, name, ts, List.reverse(acc), ""), i)
 
 def parseEnumCase(toks: Toks, i: Int): (EnCase, Int) =
   parseEnumCase2(_identOf(_at(toks, i)), toks, i + 1)
@@ -883,7 +883,7 @@ def parseRecTp(name: String, p: (List[String], Int), toks: Toks): (En, Int) =
 
 def parseRecFields(name: String, ts: List[String], p: (List[Param], Int)): (En, Int) =
   p match {
-    case (fs, j) => (En(true, name, ts, EnCase(name, fs) :: []), j)
+    case (fs, j) => (En(true, name, ts, EnCase(name, fs) :: [], ""), j)
   }
 
 def parseAlias(toks: Toks, i: Int): (Alias, Int) =
@@ -1305,8 +1305,14 @@ def stampFuns(mod: String, ds: List[Fun]): List[Fun] =
 
 def stampDefs(mod: String, p: Prog): Prog =
   p match {
-    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, impls, imps, stampFuns(mod, defs), main, body)
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, stampEns(mod, enums), aliases, traits, impls, imps, stampFuns(mod, defs), main, body)
   }
+
+def stampEns(mod: String, ens: List[En]): List[En] =
+  if (List.isEmpty(ens)) ens else stampEn(mod, List.at(ens, 0)) :: stampEns(mod, List.tail(ens))
+
+def stampEn(mod: String, en: En): En =
+  En(en.isRec, en.name, en.tparams, en.cases, mod)
 
 def noEn(): List[En] =
   []
@@ -1330,13 +1336,13 @@ def emptyProg(): Prog =
   Prog("", noEn(), noAl(), noTr(), noIm(), noImp(), noFun(), "", Expr.EUnit)
 
 def optionEn(): En =
-  En(false, "Option", "T" :: [], EnCase("None", []) :: EnCase("Some", Param("x", "T", "", "") :: []) :: [])
+  En(false, "Option", "T" :: [], EnCase("None", []) :: EnCase("Some", Param("x", "T", "", "") :: []) :: [], "")
 
 def builtins(ens: List[En]): List[En] =
   resultBuiltins(if (hasEnName(ens, "Option")) ens else optionEn() :: ens)
 
 def resultBuiltins(ens: List[En]): List[En] =
-  if (hasEnName(ens, "Result")) ens else En(false, "Result", "E" :: "A" :: [], EnCase("Err", Param("error", "E", "", "") :: []) :: EnCase("Ok", Param("value", "A", "", "") :: []) :: []) :: ens
+  if (hasEnName(ens, "Result")) ens else En(false, "Result", "E" :: "A" :: [], EnCase("Err", Param("error", "E", "", "") :: []) :: EnCase("Ok", Param("value", "A", "", "") :: []) :: [], "") :: ens
 
 def hasEnName(ens: List[En], name: String): Bool =
   if (List.isEmpty(ens)) false else hasEnName1(List.at(ens, 0), List.tail(ens), name)

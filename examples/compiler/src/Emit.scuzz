@@ -3875,7 +3875,7 @@ def jsonFieldTy(ctor: String): String =
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
-    case En(_, name, _, cases) => if (name == en) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
   }
 
 def caseFieldTy2(cs: List[EnCase], ctor: String): String =
@@ -3897,7 +3897,7 @@ def caseTys(ens: List[En], en: String, ctor: String): List[String] =
 
 def caseTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
-    case En(_, name, _, cases) => if (name == en) caseTys2(cases, ctor) else caseTys(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseTys2(cases, ctor) else caseTys(rest, en, ctor)
   }
 
 def caseTys2(cs: List[EnCase], ctor: String): List[String] =
@@ -4588,7 +4588,7 @@ def caseNames(ens: List[En], en: String, ctor: String): List[String] =
 
 def caseNames1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
-    case En(_, name, _, cases) => if (name == en) caseNames2(cases, ctor) else caseNames(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseNames2(cases, ctor) else caseNames(rest, en, ctor)
   }
 
 def caseNames2(cs: List[EnCase], ctor: String): List[String] =
