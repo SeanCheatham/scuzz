@@ -489,7 +489,13 @@ def resolveGenericKit(f: String, args: List[Expr], env: List[(String, Ty)], funs
   resolveGenericKitSig(f, args, env, funs, ens, span, kitOf(funs, f))
 
 def resolveGenericKitSig(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int), kit: KitSig): Out =
-  if (List.isEmpty(args)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (List.len(args) != List.len(kit.params)) bad(Str.concat(f, " has wrong arity"), span) else genericArgsTy(f, ["A", "B", "E", "S", "C"], kit.params, kit.ret, args, env, funs, ens, span)
+  if (List.isEmpty(args)) ok(funTyFrom(Kits.kitParamsOf(kit.kit), Kits.kitRetOf(kit.kit))) else if (List.len(args) != List.len(kit.params)) bad(Str.concat(f, " has wrong arity"), span) else orderedListResult(f, genericArgsTy(f, ["A", "B", "E", "S", "C"], kit.params, kit.ret, args, env, funs, ens, span), span)
+
+def orderedListResult(f: String, o: Out, span: (String, Int)): Out =
+  if (hasErr(o) || f != "List.sort" && f != "List.max" && f != "List.min") o else if (orderedListElem(f, o.ty) == "Int" || orderedListElem(f, o.ty) == "String") o else bad(Str.concat(f, " needs List[Int] or List[String]"), span)
+
+def orderedListElem(f: String, ty: Ty): String =
+  Type.show(if (f == "List.sort") Type.elem(ty) else ty)
 
 def resolveKitRest(f: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   if (f == "Scenario.context") resolveScenarioCtx(funs, span) else if (Str.startsWith(f, "Signal.")) resolveGenericKit(f, args, env, funs, ens, span) else if (f == "Resource.make" || f == "Resource.use") resolveResource(f, args, env, funs, ens, span) else if (isNetServe(f)) resolveNetServe(f, args, env, funs, ens, span) else if (f == "View.each") resolveViewEach(args, env, funs, ens, span) else if (f == "Property.check") resolvePropCheck(args, env, funs, ens, span) else resolveKnownKit(f, args, env, funs, ens, span, kitOf(funs, f))

@@ -45,6 +45,8 @@ Required for CLI, server, and desktop applications.
 
 OS threads.
 
+Float ordering in `List.sort`, `List.max`, and `List.min`. These kits accept `Int` and `String` elements.
+
 ### Verification
 
 The one testing strategy is mutation, fuzz, properties, simulation, coverage, and determinism. Locks: [`philosophy.md`](philosophy.md#verification-posture).
