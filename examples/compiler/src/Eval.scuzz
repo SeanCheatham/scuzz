@@ -1203,7 +1203,7 @@ def enOf(core: String): String =
 
 def tryTag(core: String, v: Value, p: EvProg, subs: List[String]): Option[List[(String, Value)]] =
   v match {
-    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && (enOf(core) == "" || enOf(core) == en)) tryFields(subs, fields, ctorFields(p, core), p, 0) else None
+    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && (enOf(core) == "" || enOf(core) == en)) tryFields(subs, fields, ctorFields(p, if (enOf(core) == "") Str.concat(en, Str.concat(".", tag)) else core), p, 0) else None
     case _ => None
   }
 

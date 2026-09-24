@@ -3943,11 +3943,28 @@ def patTag2(dot: Int, pat: String, ens: List[En]): Int =
 def emitMatch(s: Expr, arms: List[Arm], moff: Int, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   s match {
     case Expr.EVar(n, _) => emitMatchV(n, arms, moff, prefix, strs, defs, ens, ps, loc, fid)
-    case _ => emitMatch1(emitExprFid(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc, fid), arms, moff, prefix, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)), exprIsI64(s, ps, defs), fid + fmCount(s))
+    case _ => emitMatch1(emitExprFid(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc, fid), qualifyMatchArms(arms, exprRetTyEns(s, defs, ens, ps, loc), ens), moff, prefix, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)), exprIsI64(s, ps, defs), fid + fmCount(s))
   }
 
 def emitMatchV(n: String, arms: List[Arm], moff: Int, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitMatch1(emitExpr(Expr.EVar(n, 0), Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc), arms, moff, prefix, strs, defs, Check.specializeEnums(ens, paramTy(ps, n)), ps, loc, matchSlots(paramTy(ps, n)), paramIsI64(ps, n), fid)
+  emitMatch1(emitExpr(Expr.EVar(n, 0), Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc), qualifyMatchArms(arms, paramTy(ps, n), ens), moff, prefix, strs, defs, Check.specializeEnums(ens, paramTy(ps, n)), ps, loc, matchSlots(paramTy(ps, n)), paramIsI64(ps, n), fid)
+
+def qualifyMatchArms(arms: List[Arm], ty: String, ens: List[En]): List[Arm] =
+  if (List.isEmpty(arms)) arms else qualifyMatchArm(List.at(arms, 0), ty, ens) :: qualifyMatchArms(List.tail(arms), ty, ens)
+
+def qualifyMatchArm(arm: Arm, ty: String, ens: List[En]): Arm =
+  arm match {
+    case Arm(pat, guard, body) => Arm(qualifyMatchPat(pat, ty, ens), guard, body)
+  }
+
+def qualifyMatchPat(pat: String, ty: String, ens: List[En]): String =
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) qualifyMatchAlt(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (Check.asAt(pat, 0) >= 0) Str.concat(Str.take(pat, Check.asAt(pat, 0) + 3), qualifyMatchPat(Str.drop(pat, Check.asAt(pat, 0) + 3), ty, ens)) else qualifyMatchCore(pat, ty, ens)
+
+def qualifyMatchAlt(pat: String, ty: String, ens: List[En], i: Int): String =
+  Str.concat(qualifyMatchPat(Str.take(pat, i), ty, ens), Str.concat(" | ", qualifyMatchPat(Str.drop(pat, i + 3), ty, ens)))
+
+def qualifyMatchCore(pat: String, ty: String, ens: List[En]): String =
+  Str.concat(Check.patternCoreForTy(patCore(pat), ty, ens), Str.drop(pat, Str.len(patCore(pat))))
 
 def matchSlots(ty: String): List[String] =
   if (isTupTy(ty)) tupSlots(ty) else listElemSlots(ty)
@@ -4934,7 +4951,7 @@ def emitDefTcoMatch(name: String, mod: String, ret: String, ps: List[Param], s: 
   emitDefTcoIf3(llvmRet(ret), symOf(mod, name), defParamsTco(ps), join(emitTcoPrep(ps), emitMatchTail(s, arms, moff, name, llvmRet(ret), strs, defs, ens, ps, loc)), loc, strs)
 
 def emitMatchTail(s: Expr, arms: List[Arm], moff: Int, fname: String, tret: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
-  emitMatchTail1(emitExpr(s, "body_sc", strs, defs, ens, ps, loc), arms, moff, fname, tret, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)))
+  emitMatchTail1(emitExpr(s, "body_sc", strs, defs, ens, ps, loc), qualifyMatchArms(arms, exprRetTyEns(s, defs, ens, ps, loc), ens), moff, fname, tret, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)))
 
 def emitMatchTail1(se: Slot, arms: List[Arm], moff: Int, fname: String, tret: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, tys: List[String]): String =
   se match {
