@@ -46,7 +46,7 @@ record Im(tn: String, targs: List[String], forTy: String, methods: List[Fun])
 
 record Prog(pkg: String, enums: List[En], aliases: List[Alias], traits: List[Tr], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr)
 
-record Toks(groups: List[List[List[SpTok]]], n: Int)
+record Toks(groups: List[List[List[SpTok]]], n: Int, bad: Int)
 
 import Lexer.Tok
 import Lexer.SpTok
@@ -58,19 +58,25 @@ def tokGroup(): Int =
   tokChunk() * tokChunk()
 
 def indexToks(toks: List[SpTok]): Toks =
-  indexToksGo(toks, 0, [], [], 0)
+  indexToksGo(toks, 0, [], [], 0, 0 - 1)
 
-def indexToksGo(toks: List[SpTok], n: Int, cur: List[SpTok], acc: List[List[SpTok]], total: Int): Toks =
-  if (List.isEmpty(toks)) indexToksDone(n, cur, acc, total) else if (n >= tokChunk()) indexToksGo(toks, 0, [], List.reverse(cur) :: acc, total) else indexToksGo(List.tail(toks), n + 1, List.at(toks, 0) :: cur, acc, total + 1)
+def indexToksGo(toks: List[SpTok], n: Int, cur: List[SpTok], acc: List[List[SpTok]], total: Int, bad: Int): Toks =
+  if (List.isEmpty(toks)) indexToksDone(n, cur, acc, total, bad) else if (n >= tokChunk()) indexToksGo(toks, 0, [], List.reverse(cur) :: acc, total, bad) else indexToksGo(List.tail(toks), n + 1, List.at(toks, 0) :: cur, acc, total + 1, tokenBad(List.at(toks, 0), total, bad))
 
-def indexToksDone(n: Int, cur: List[SpTok], acc: List[List[SpTok]], total: Int): Toks =
-  indexToksGroups(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), [], [], 0, total)
+def tokenBad(t: SpTok, i: Int, bad: Int): Int =
+  if (bad >= 0) bad else t.tok match {
+  case Tok.Bad => i
+  case _ => 0 - 1
+}
 
-def indexToksGroups(chunks: List[List[SpTok]], cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n: Int, total: Int): Toks =
-  if (List.isEmpty(chunks)) indexToksGroupsDone(cur, acc, n, total) else if (n >= tokChunk()) indexToksGroups(chunks, [], List.reverse(cur) :: acc, 0, total) else indexToksGroups(List.tail(chunks), List.at(chunks, 0) :: cur, acc, n + 1, total)
+def indexToksDone(n: Int, cur: List[SpTok], acc: List[List[SpTok]], total: Int, bad: Int): Toks =
+  indexToksGroups(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), [], [], 0, total, bad)
 
-def indexToksGroupsDone(cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n: Int, total: Int): Toks =
-  Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total)
+def indexToksGroups(chunks: List[List[SpTok]], cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n: Int, total: Int, bad: Int): Toks =
+  if (List.isEmpty(chunks)) indexToksGroupsDone(cur, acc, n, total, bad) else if (n >= tokChunk()) indexToksGroups(chunks, [], List.reverse(cur) :: acc, 0, total, bad) else indexToksGroups(List.tail(chunks), List.at(chunks, 0) :: cur, acc, n + 1, total, bad)
+
+def indexToksGroupsDone(cur: List[List[SpTok]], acc: List[List[List[SpTok]]], n: Int, total: Int, bad: Int): Toks =
+  Toks(List.reverse(if (n == 0) acc else List.reverse(cur) :: acc), total, bad)
 
 def _sp(toks: Toks, i: Int): SpTok =
   if (i < 0 || i >= toks.n) SpTok(Tok.Eof, 0, "") else _spOff(List.at(List.at(toks.groups, i / tokGroup()), i % tokGroup() / tokChunk()), i % tokChunk())
@@ -946,7 +952,7 @@ def parse(toks: List[SpTok]): Prog =
   parseGo(indexToks(toks))
 
 def parseGo(toks: Toks): Prog =
-  if (_is(toks, 0, Tok.Package)) parsePkgThen(parsePkg(toks, 1), toks) else parseItems(toks, 0, [], [], [], [], [], [], "", Expr.EVar("", 0))
+  if (toks.bad >= 0) parseItemsFail(toks, toks.bad, [], [], [], [], [], [], "", Expr.EVar("", 0)) else if (_is(toks, 0, Tok.Package)) parsePkgThen(parsePkg(toks, 1), toks) else parseItems(toks, 0, [], [], [], [], [], [], "", Expr.EVar("", 0))
 
 def parsePkgThen(p: (String, Int), toks: Toks): Prog =
   p match {
@@ -1311,3 +1317,4 @@ def parseErrorDef(d: Fun): Bool =
 
 def pretty(p: Prog): String =
   Str.concat(prettyPkg(p.pkg), Str.concat(prettyEnums(p.enums), Str.concat(prettyAliases(p.aliases), Str.concat(prettyTraits(p.traits), Str.concat(prettyImpls(p.impls), Str.concat(prettyImps(p.imps, !(List.isEmpty(p.defs) && p.main == "")), Str.concat(prettyDefs(p.defs), prettyMain(p.main, p.body))))))))
+
