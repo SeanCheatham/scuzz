@@ -52,7 +52,7 @@ import Lexer.Tok
 import Lexer.SpTok
 
 def tokChunk(): Int =
-  64
+  32
 
 def tokGroup(): Int =
   tokChunk() * tokChunk()
