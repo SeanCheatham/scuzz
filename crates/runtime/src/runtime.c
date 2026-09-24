@@ -76,9 +76,15 @@ static SzRcHdr *g_live = NULL;
 static int g_in_panic = 0;
 static char g_panic_dump[1024];
 enum { SZ_LIVE_DUMP_ROWS = 32, SZ_LIVE_PANIC_ROWS = 64 };
-enum { SZ_PANIC_SRC_MAX = 64 };
-static const char *g_panic_src[SZ_PANIC_SRC_MAX];
-static int g_panic_src_n = 0;
+enum { SZ_PANIC_SRC_INLINE = 1024 };
+static const char *g_panic_src[SZ_PANIC_SRC_INLINE];
+static const char **g_panic_src_ptr = g_panic_src;
+static size_t g_panic_src_cap = SZ_PANIC_SRC_INLINE;
+static size_t g_panic_src_n = 0;
+
+static const char *panic_src_top(void) {
+  return g_panic_src_n > 0 ? g_panic_src_ptr[g_panic_src_n - 1] : NULL;
+}
 
 static size_t hdr_bytes(const SzRcHdr *h) { return *(((size_t *)h) - 1); }
 
@@ -269,7 +275,7 @@ int sz_alloc_format_panic(char *buf, size_t cap, const char *msg) {
   if (!buf || cap == 0)
     return 0;
   buf[0] = '\0';
-  loc = g_panic_src_n > 0 ? g_panic_src[g_panic_src_n - 1] : NULL;
+  loc = panic_src_top();
   if (loc && loc[0])
     heap_append(buf, cap, &n, "scuzz panic: %s: %s\n", loc, msg ? msg : "(null)");
   else
@@ -445,12 +451,29 @@ void sz_coverage_hit(const char *loc) {
 void sz_coverage_hit_key(const char *loc) { coverage_hit_text(loc); }
 
 void sz_panic_push_src(const char *loc) {
-  if (!loc || !loc[0])
-    return;
-  if (!coverage_off && !coverage_own_off)
+  if (loc && loc[0] && !coverage_off && !coverage_own_off)
     coverage_hit(loc);
-  if (g_panic_src_n < SZ_PANIC_SRC_MAX)
-    g_panic_src[g_panic_src_n++] = loc;
+  if (!loc || !loc[0])
+    loc = panic_src_top();
+  if (g_panic_src_n == g_panic_src_cap) {
+    size_t cap;
+    const char **next;
+    if (g_panic_src_cap > SIZE_MAX / (2 * sizeof(*next)))
+      sz_panic("panic source stack out of memory");
+    cap = g_panic_src_cap * 2;
+    if (g_panic_src_ptr == g_panic_src) {
+      next = malloc(cap * sizeof(*next));
+      if (next)
+        memcpy(next, g_panic_src, g_panic_src_n * sizeof(*next));
+    } else {
+      next = realloc(g_panic_src_ptr, cap * sizeof(*next));
+    }
+    if (!next)
+      sz_panic("panic source stack out of memory");
+    g_panic_src_ptr = next;
+    g_panic_src_cap = cap;
+  }
+  g_panic_src_ptr[g_panic_src_n++] = loc;
 }
 
 void sz_panic_pop_src(void) {
