@@ -144,7 +144,7 @@ def parseTypeParen(toks: Toks, i: Int): (String, Int) =
 
 def parseTypeParen2(p: (List[String], Int), toks: Toks): (String, Int) =
   p match {
-    case (ts, j) => parseTypeArrow(toks, (_parenType(ts), j + 1))
+    case (ts, j) => if (_is(toks, j, Tok.RParen)) parseTypeArrow(toks, (_parenType(ts), j + 1)) else ("", toks.n)
   }
 
 def _parenType(ts: List[String]): String =
@@ -157,11 +157,11 @@ def parseTypeApp(toks: Toks, i: Int): (String, Int) =
   parseTypeBrack(toks, i + 1, _identOf(_at(toks, i)))
 
 def parseTypeBrack(toks: Toks, i: Int, n: String): (String, Int) =
-  if (_is(toks, i, Tok.LBracket)) parseTypeBrackClose(_joinTypes(toks, i + 1, []), n) else (n, i)
+  if (_is(toks, i, Tok.LBracket)) parseTypeBrackClose(_joinTypes(toks, i + 1, []), n, toks) else (n, i)
 
-def parseTypeBrackClose(p: (List[String], Int), n: String): (String, Int) =
+def parseTypeBrackClose(p: (List[String], Int), n: String, toks: Toks): (String, Int) =
   p match {
-    case (ts, j) => (Str.concat(n, Str.concat("[", Str.concat(_joinComma(ts), "]"))), j + 1)
+    case (ts, j) => if (_is(toks, j, Tok.RBracket)) (Str.concat(n, Str.concat("[", Str.concat(_joinComma(ts), "]"))), j + 1) else ("", toks.n)
   }
 
 def parseTypeArrow(toks: Toks, p: (String, Int)): (String, Int) =
@@ -1311,4 +1311,3 @@ def parseErrorDef(d: Fun): Bool =
 
 def pretty(p: Prog): String =
   Str.concat(prettyPkg(p.pkg), Str.concat(prettyEnums(p.enums), Str.concat(prettyAliases(p.aliases), Str.concat(prettyTraits(p.traits), Str.concat(prettyImpls(p.impls), Str.concat(prettyImps(p.imps, !(List.isEmpty(p.defs) && p.main == "")), Str.concat(prettyDefs(p.defs), prettyMain(p.main, p.body))))))))
-
