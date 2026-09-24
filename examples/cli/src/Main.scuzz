@@ -595,7 +595,7 @@ def lspSpanOk(): Bool =
 cd""", 0, 99) == 2 && lspTokenSpans()
 
 def lspTokenSpans(): Bool =
-  Lsp.tokensJson("@main") == "{\"data\":[0,0,5,0,0]}" && Lsp.tokensJson("s\"hi\"") == "{\"data\":[0,0,5,2,0]}"
+  Lsp.tokensJson("@main") == "{\"data\":[0,0,5,0,0]}" && Lsp.tokensJson("s\"hi\"") == "{\"data\":[0,0,5,2,0]}" && Lsp.tokensJson("1.5") == "{\"data\":[0,0,3,3,0]}" && Lsp.tokensJson("1e-3") == "{\"data\":[0,0,4,3,0]}"
 
 def lspWireOpen(): Bool =
   Lsp.openSrc(Lsp.parseJson(lspOpenJ())) == "abc" && Lsp.changeSrc(Lsp.parseJson(lspChangeJ())) == "new"

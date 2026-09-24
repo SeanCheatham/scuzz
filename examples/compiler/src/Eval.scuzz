@@ -362,7 +362,7 @@ def step(s: EvStep, p: EvProg): Value =
     case Expr.EAscribe(inner, _, _) => step(EvStep(inner, s.env), p)
     case Expr.EInterp(_, parts, _) => interpAcc(parts, s.env, p, Builder.empty())
     case Expr.EHole => Value.VClo("_ph", Expr.EVar("_ph", 0), s.env)
-    case Expr.EFloat(str) => Value.VFloat(floatLit(Str.replace(str, "_", "")))
+    case Expr.EFloat(str, _) => Value.VFloat(floatLit(Str.replace(str, "_", "")))
   }
 
 def floatLit(str: String): Float =

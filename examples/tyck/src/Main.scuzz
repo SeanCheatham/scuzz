@@ -1456,7 +1456,10 @@ def dumpFunKitHead(): String =
   if (Type.headName(Type.parse("List[Int] => String")) != "List[Int] => String") "headNameFun" else if (Type.headName(Type.parse("List[Int]")) != "List") "headNameList" else if (Check.check(srcFunListTailOk()) != "[]") Str.concat("funListTailOk ", Check.check(srcFunListTailOk())) else if (!rejects(srcFunListTailMis(), "unknown function .tail")) Str.concat("funListTailMis ", Check.check(srcFunListTailMis())) else if (Check.check(srcFunIoForeverOk()) != "[]") Str.concat("funIoForeverOk ", Check.check(srcFunIoForeverOk())) else if (!rejects(srcFunIoForeverMis(), "unknown function .forever")) Str.concat("funIoForeverMis ", Check.check(srcFunIoForeverMis())) else if (Check.check(srcViewEachOk()) != "[]") Str.concat("viewEachOk ", Check.check(srcViewEachOk())) else if (!rejects(srcFunViewEachMis(), "View.each arg type mismatch")) Str.concat("funViewEachMis ", Check.check(srcFunViewEachMis())) else if (Check.check(srcFunSubstId()) != "[]") Str.concat("funKitHeadEq ", Check.check(srcFunSubstId())) else "funKitHead-other"
 
 def dumpTyckCore(): String =
-  if (!sourceOffsets()) "sourceOffsets" else if (!funLookup()) "funLookup" else "tyckCore"
+  if (!sourceOffsets()) dumpSourceOffsets() else if (!funLookup()) "funLookup" else "tyckCore"
+
+def dumpSourceOffsets(): String =
+  if (!numericTokenRanges()) "numericTokenRanges" else "sourceOffsets"
 
 def dumpTyckFail(): String =
   if (!collectionTypes()) dumpListFilter() else if (!userTypeArgs()) dumpUserTypeArgs() else if (!streamTypes()) dumpStream() else if (!flattenTypes()) dumpFlatten() else if (!foldTypes()) dumpFold() else if (!mapSetTypes()) dumpMapSet() else if (!zipTypes()) dumpZip() else if (!unfoldTypes()) dumpUnfold() else if (!listBuildTypes()) dumpListBuild() else if (!mapProjectTypes()) dumpMapProject() else if (!listRestTypes()) dumpListRest() else if (!streamRestTypes()) dumpStreamRest() else if (!listStructTypes()) dumpListStruct() else if (!listToMapTypes()) dumpListToMap() else if (!listSpanTypes()) dumpListSpan() else if (!listSliceTypes()) dumpListSlice() else if (!setUnionTypes()) dumpSetUnion() else if (!streamChangesTypes()) dumpStreamChanges() else if (!listFindTypes()) dumpListFind() else if (!mapExistsTypes()) dumpMapExists() else if (!listSumTypes()) dumpListSum() else if (!jsonListTypes()) dumpJsonList() else if (!editorListTypes()) dumpEditorList() else if (!propertyForceTypes()) dumpPropertyForce() else if (!namedIoTypes()) dumpNamedIo() else if (!kitLookup()) "kitLookup" else if (!ioCombinators()) dumpIoComb() else "tyckFail"
@@ -1892,10 +1895,19 @@ def sourceOffsets(): Bool =
   List.map(List.range(0, 8), off => Check.lineCol(sourceOffSrc(), off)) == [(1, 1), (1, 2), (1, 3), (2, 1), (3, 1), (3, 2), (3, 3), (4, 1)] && Check.lineCol("", 0) == (1, 1) && Check.lineCol("a", 5) == (1, 2) && Check.lineIndex(sourceOffSrc()) == [0, 3, 4, 7] && Check.lineIndex("") == [0] && Check.lineIndex("a") == [0] && Check.startsOf(Check.fileIndex(("Main", sourceOffSrc()) :: []), "Main") == [0, 3, 4, 7] && Check.startsOf(Check.fileIndex(("Main", "a") :: []), "") == [0] && sourceIndexEdges() && sourceTokenRanges()
 
 def sourceTokenRanges(): Bool =
-  Check.locOf("abc", 0) == (1, 1, 1, 4) && Check.locOf("\"a\"", 0) == (1, 1, 1, 4) && Check.locOf("\"a\nb\"", 0) == (1, 1, 2, 3) && Check.tokenEnd("\"\"\"a\nb\"\"\"", 0) == 9 && Check.locOf("\"\"\"a\nb\"\"\"", 0) == (1, 1, 2, 5) && Str.contains(Check.check("def wrong(): Int = \"\"\"a\nb\"\"\""), "\"line\":1,\"column\":20,\"end_line\":2,\"end_column\":5") && compoundTokenRanges()
+  Check.locOf("abc", 0) == (1, 1, 1, 4) && Check.locOf("\"a\"", 0) == (1, 1, 1, 4) && Check.locOf("\"a\nb\"", 0) == (1, 1, 2, 3) && Check.tokenEnd("\"\"\"a\nb\"\"\"", 0) == 9 && Check.locOf("\"\"\"a\nb\"\"\"", 0) == (1, 1, 2, 5) && Str.contains(Check.check("def wrong(): Int = \"\"\"a\nb\"\"\""), "\"line\":1,\"column\":20,\"end_line\":2,\"end_column\":5") && compoundTokenRanges() && numericTokenRanges()
 
 def compoundTokenRanges(): Bool =
   Check.tokenEnd("@main", 0) == 5 && Check.tokenEnd("@mainx", 0) == 1 && List.forall(["::", "=>", "==", "!=", "<-", "<=", "<<", ">=", ">>", "&&", "||"], op => Check.tokenEnd(op, 0) == 2) && Check.tokenEnd("s\"hi\"", 0) == 5 && Check.tokenEnd("s\"${a}\"", 0) == 7
+
+def numericTokenRanges(): Bool =
+  List.forall(["0", "123", "1_000", "0xff", "0Xf_f", "0b101", "0B1_0", "1.5", "12.34", "1e3", "1e-3", "1.5E+3"], n => Check.tokenEnd(n, 0) == Str.len(n)) && List.forall(["1e", "1e+", "0b21", "0xg", "1_", "1.5+2", "12.34_5", "1_2.34+5"], n => Check.tokenEnd(n, 0) == numericLexEnd(n)) && Str.contains(Check.check("""@main def main: IO[Unit] =
+  1.5"""), "\"line\":2,\"column\":3,\"end_line\":2,\"end_column\":6")
+
+def numericLexEnd(src: String): Int =
+  List.at(List.tail(Lexer.lex(src)), 0) match {
+    case Lexer.SpTok(_, off, _) => off
+  }
 
 def sourceIndexEdges(): Bool =
   Check.lineIndex("""a

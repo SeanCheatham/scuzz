@@ -15,7 +15,7 @@ enum Expr:
   case EIf(c: Expr, t: Expr, e: Expr, off: Int)
   case EMatch(s: Expr, arms: List[Arm], off: Int)
   case EFor(bs: List[Bind], body: Expr, off: Int)
-  case EFloat(s: String)
+  case EFloat(s: String, off: Int)
   case EInterp(s: String, parts: List[Expr], off: Int)
   case EList(xs: List[Expr])
   case ETuple(xs: List[Expr])
@@ -93,6 +93,7 @@ def _off(toks: Toks, i: Int): Int =
 def spanOf(e: Expr): (String, Int) =
   e match {
     case Expr.EInt(_, off) => ("", off)
+    case Expr.EFloat(_, off) => ("", off)
     case Expr.EStr(_, off) => ("", off)
     case Expr.EVar(_, off) => ("", off)
     case Expr.EPrint(_, off) => ("", off)
@@ -357,7 +358,7 @@ def parseAtom(toks: Toks, i: Int): (Expr, Int) =
     case Tok.True => (Expr.EBool(true), i + 1)
     case Tok.False => (Expr.EBool(false), i + 1)
     case Tok.Str(s) => (Expr.EStr(s, _off(toks, i)), i + 1)
-    case Tok.Float(s) => (Expr.EFloat(s), i + 1)
+    case Tok.Float(s) => (Expr.EFloat(s, _off(toks, i)), i + 1)
     case Tok.Interp(s) => (Expr.EInterp(s, interpParts(s, 0, Builder.empty(), [], _off(toks, i) + 2), _off(toks, i)), i + 1)
     case Tok.Underscore => parseHole(toks, i)
     case Tok.LParen => if (_is(toks, i + 1, Tok.RParen)) (Expr.EUnit, i + 2) else parseParen(toks, i + 1)
@@ -1083,7 +1084,7 @@ def prettyExpr(e: Expr, n: Int): String =
 """, Str.concat(prettyArms(arms, n + 1), Str.concat(_pad(n), "}")))))
     case Expr.EFor(bs, body, _) => Str.concat(_pad(n), Str.concat("""for {
 """, Str.concat(prettyBinds(bs, n + 1), Str.concat(_pad(n), Str.concat("} yield ", pretty0(body))))))
-    case Expr.EFloat(s) => Str.concat(_pad(n), s)
+    case Expr.EFloat(s, _) => Str.concat(_pad(n), s)
     case Expr.EInterp(s, _, _) => Str.concat(_pad(n), Str.concat("s\"", Str.concat(s, "\"")))
     case Expr.EList(xs) => Str.concat(_pad(n), Str.concat("[", Str.concat(_commaExprs(xs), "]")))
     case Expr.ETuple(xs) => Str.concat(_pad(n), Str.concat("(", Str.concat(_commaExprs(xs), ")")))
