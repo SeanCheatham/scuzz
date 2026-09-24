@@ -1257,7 +1257,35 @@ def srcPhOk(): String =
 """
 
 def tyckAdt(): Bool =
-  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes() && bareCtorTypes() && kitLetterTypes()
+  Type.eqStr("Either[Int]", "Either[Int, Int]") && Type.eqStr("Either[String]", "Either[Int, String]") && !Type.eqStr("Either[String]", "Either[Int, Int]") && Check.check(srcEitherOk()) == "[]" && rejects(srcEitherMis(), "eitherNum arg type mismatch") && Check.check(srcShowOk()) == "[]" && Check.check(srcSelfGet()) == "[]" && Check.check(srcPhOk()) == "[]" && tyckRecordBind() && namedLetterTypes() && aliasTypes() && matchArmTypes() && ctorArityTypes() && memberResolveTypes() && bareCtorTypes() && kitLetterTypes() && unqualifiedPatternTypes()
+
+def unqualifiedPatternTypes(): Bool =
+  rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float") && Check.check(srcUnqualifiedPatternRight()) == "[]" && Check.check(srcUnqualifiedPatternNamed()) == "[]"
+
+def srcUnqualifiedPatternWrong(): String =
+  """enum First:
+  case Item(value: String)
+def wrong(s: First): Int = s match {
+  case Item(n) => n + 1
+}"""
+
+def srcUnqualifiedPatternRight(): String =
+  """enum First:
+  case Item(value: String)
+enum Second:
+  case Item(value: Int)
+def right(s: Second): Int = s match {
+  case Item(n) => n + 1
+}"""
+
+def srcUnqualifiedPatternNamed(): String =
+  """enum First:
+  case Item(value: String)
+enum Second:
+  case Item(value: Int)
+def right(s: Second): Int = s match {
+  case Item(value = n) => n + 1
+}"""
 
 def kitLetterTypes(): Bool =
   Check.check("""enum E:
@@ -1388,7 +1416,10 @@ def right(): List[UserId] =
 """
 
 def dumpTyckAdt(): String =
-  if (!namedLetterTypes()) dumpNamedLetter() else if (!aliasTypes()) dumpAliasTypes() else "tyckAdt"
+  if (!namedLetterTypes()) dumpNamedLetter() else if (!aliasTypes()) dumpAliasTypes() else if (!unqualifiedPatternTypes()) dumpUnqualifiedPattern() else "tyckAdt"
+
+def dumpUnqualifiedPattern(): String =
+  if (!rejects(srcUnqualifiedPatternWrong(), "arithmetic needs Int or Float")) Str.concat("wrong:", Check.check(srcUnqualifiedPatternWrong())) else if (Check.check(srcUnqualifiedPatternRight()) != "[]") Str.concat("right:", Check.check(srcUnqualifiedPatternRight())) else Str.concat("named:", Check.check(srcUnqualifiedPatternNamed()))
 
 def dumpNamedLetter(): String =
   if (Check.check("""enum E:
