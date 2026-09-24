@@ -1255,11 +1255,14 @@ def srcTimeoutMis(): String =
 def tyckAny(): Bool =
   Kits.anyCount() == 0
 
+def concreteTyParity(): Bool =
+  List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
+
 def allOk(): Bool =
-  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier()
+  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity()
 
 def dumpFail(): String =
-  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else "other"
+  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else "other"
 
 def dumpTyckRes(): String =
   if (!nestedPatTypes()) dumpNestedPat() else if (!namedIoTypes()) dumpNamedIo() else "tyckRes"
