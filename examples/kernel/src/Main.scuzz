@@ -518,6 +518,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"floatBound:${if (floatBoundOrder()) "y" else "n"}")
     _ <- IO.println(s"floatIndexed:${if (floatIndexed([2.0, 0.0 - 1.0, 1.0])) "y" else "n"}")
     _ <- IO.println(s"floatCons:${if (floatIndexCons([2.0, 0.0 - 1.0, 1.0])) "y" else "n"}")
+    _ <- IO.println(s"floatCallEq:${if (floatCallEq()) "y" else "n"}")
     _ <- IO.println(s"zipAllN:${if (numericZipAll(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
@@ -791,6 +792,14 @@ def floatNaNOrder(): Bool =
 
 def floatIsNaN(x: Float): Bool =
   !(x == x)
+
+def floatId(x: Float): Float =
+  x
+
+def floatCallEq(): Bool =
+  for {
+    nan = 0.0 / 0.0
+  } yield !(floatId(nan) == floatId(nan)) && floatId(1.0) == floatId(1.0) && floatId(1.5) + floatId(2.0) == 3.5
 
 def numericZipAll(k: Int): Bool =
   List.zipAll([k], [k, k + 1], k + 2, k + 3) == [(k, k), (k + 2, k + 1)] && List.zipAll([k, k + 1], [k], k + 2, k + 3) == [(k, k), (k + 1, k + 3)]
