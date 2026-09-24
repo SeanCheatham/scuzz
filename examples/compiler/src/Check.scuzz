@@ -1999,7 +1999,10 @@ def ownerQualifiedErr(core: String, want: String, ens: List[En], dot: Int): Stri
   ownerQualifiedErr2(core, want, Str.take(core, dot), Str.drop(core, dot + 1), ens)
 
 def ownerQualifiedErr2(core: String, want: String, owner: String, name: String, ens: List[En]): String =
-  if (owner == "Json") jsonOwnerErr(core, want, name) else if (!hasEn(ens, owner) && List.exists(ens, en => en.isRec && en.mod == owner && en.name == name && want == name)) "" else if (!hasEn(ens, owner) || !List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+  if (owner == "Json") jsonOwnerErr(core, want, name) else if (want == name && List.exists(ens, en => en.isRec && en.name == name)) ownerRecordErr(core, owner, name, ens) else if (!hasEn(ens, owner) || !List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+
+def ownerRecordErr(core: String, owner: String, name: String, ens: List[En]): String =
+  if (List.exists(ens, en => en.isRec && en.mod == owner && en.name == name)) "" else Str.concat("unknown pattern case ", core)
 
 def jsonOwnerErr(core: String, want: String, name: String): String =
   if (!jsonPatternCase(name)) Str.concat("unknown pattern case ", core) else if (want != "Json") Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
