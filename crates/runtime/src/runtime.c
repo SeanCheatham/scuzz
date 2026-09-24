@@ -1094,30 +1094,47 @@ SzString *sz_string_from_cstr(const char *cstr) {
 /* Interned string literals. Emitted code calls this for compile-time
  * literals only; runtime data goes through sz_string_from_cstr. The first
  * call builds the string and pins its rc, so later evaluations share one
- * allocation that retain and release never touch. */
+ * allocation that retain and release never touch. Cache the static source
+ * pointer before the content lookup. */
 #define SZ_LIT_BUCKETS 4096
+#define SZ_LIT_CACHE_SLOTS 4096
 typedef struct SzLitEnt {
   struct SzLitEnt *next;
   SzString *s;
 } SzLitEnt;
 static SzLitEnt *g_lits[SZ_LIT_BUCKETS];
+typedef struct SzLitCache {
+  const char *source;
+  SzString *value;
+} SzLitCache;
+static SzLitCache g_lit_cache[SZ_LIT_CACHE_SLOTS];
 
 SzString *sz_string_lit(const char *cstr) {
   size_t len;
   size_t i;
+  size_t cache_slot;
   uint32_t hash;
   SzLitEnt *e;
   SzString *s;
+  SzLitCache *cached;
   if (!cstr)
     sz_panic("sz_string_lit(null)");
+  cache_slot = (((uintptr_t)cstr >> 4) ^ ((uintptr_t)cstr >> 16)) &
+               (SZ_LIT_CACHE_SLOTS - 1);
+  cached = &g_lit_cache[cache_slot];
+  if (cached->source == cstr)
+    return cached->value;
   len = strlen(cstr);
   hash = 5381;
   for (i = 0; i < len; i++)
     hash = hash * 33 + (unsigned char)cstr[i];
   hash %= SZ_LIT_BUCKETS;
   for (e = g_lits[hash]; e; e = e->next)
-    if (e->s->len == len && !memcmp(e->s->data, cstr, len))
+    if (e->s->len == len && !memcmp(e->s->data, cstr, len)) {
+      cached->value = e->s;
+      cached->source = cstr;
       return e->s;
+    }
   s = sz_string_from_bytes(cstr, len);
   sz_rc_hdr(s)->rc = SZ_RC_PINNED;
   e = (SzLitEnt *)malloc(sizeof(*e));
@@ -1126,6 +1143,8 @@ SzString *sz_string_lit(const char *cstr) {
   e->s = s;
   e->next = g_lits[hash];
   g_lits[hash] = e;
+  cached->value = s;
+  cached->source = cstr;
   return s;
 }
 

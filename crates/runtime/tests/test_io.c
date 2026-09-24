@@ -12722,6 +12722,17 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* A source pointer reuses its pinned literal. Equal text stays interned. */
+  {
+    static const char first[] = "scuzz-lit-cache";
+    static const char second[] = "scuzz-lit-cache";
+    SzString *lit;
+    assert((const void *)first != (const void *)second);
+    lit = sz_string_lit(first);
+    assert(lit == sz_string_lit(first));
+    assert(lit == sz_string_lit(second));
+  }
+
   /* Str.concat take: a unique left grows. A pinned left stays intact. */
   {
     size_t base_bytes = 0, base_count = 0;
