@@ -13,6 +13,8 @@ import Parse.Bind
 import Parse.Alias
 import Parse.Imp
 import Parse.Im
+import Parse.Tr
+import Parse.TrMethod
 import Lexer.lex
 import Type.preferStr
 import Type.eqPinned
@@ -2568,12 +2570,16 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   }
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
-  p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, main, body) => checkProgAliases(checkAliases(aliases, Parse.builtins(enums), aliasNames(aliases)), enums, aliases, impls, imps, defs, main, body, stems)
-  }
+  checkProgAliases(checkAliases(p.aliases, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
 
-def checkProgAliases(o: Out, enums: List[En], aliases: List[Alias], impls: List[Im], imps: List[Imp], defs: List[Fun], main: String, body: Expr, stems: List[String]): Out =
-  if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(imps, implFuns(impls, defs)), aliases), Parse.builtins(enums), aliasNames(aliases), main, body, stems)
+def checkProgAliases(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkProgTraits(checkTraits(p.traits, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
+
+def checkProgTraits(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkProgImpls(checkImplHeaders(p.impls, p.traits, Parse.builtins(p.enums), aliasNames(p.aliases)), p, stems)
+
+def checkProgImpls(o: Out, p: Prog, stems: List[String]): Out =
+  if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(p.imps, implFuns(p.impls, p.defs)), p.aliases), Parse.builtins(p.enums), aliasNames(p.aliases), p.main, p.body, stems)
 
 def aliasNames(aliases: List[Alias]): List[String] =
   if (List.isEmpty(aliases)) [] else aliasName(List.at(aliases, 0), List.tail(aliases))
@@ -2590,6 +2596,53 @@ def checkAlias(a: Alias, rest: List[Alias], ens: List[En], names: List[String]):
   a match {
     case Alias(_, ts, target) => if (!knownTy(Type.parse(target), ens, List.concat(ts, names))) bad(Str.concat("unknown type ", target), noSpan()) else checkAliases(rest, ens, names)
   }
+
+def checkTraits(traits: List[Tr], ens: List[En], names: List[String]): Out =
+  if (List.isEmpty(traits)) ok("Unit") else checkTrait(List.at(traits, 0), List.tail(traits), ens, names)
+
+def checkTrait(t: Tr, rest: List[Tr], ens: List[En], names: List[String]): Out =
+  t match {
+    case Tr(_, ts, methods) => checkTraitRest(checkTraitMethods(methods, ens, List.concat(ts, names)), rest, ens, names)
+  }
+
+def checkTraitRest(o: Out, rest: List[Tr], ens: List[En], names: List[String]): Out =
+  if (hasErr(o)) o else checkTraits(rest, ens, names)
+
+def checkTraitMethods(methods: List[TrMethod], ens: List[En], names: List[String]): Out =
+  if (List.isEmpty(methods)) ok("Unit") else checkTraitMethod(List.at(methods, 0), List.tail(methods), ens, names)
+
+def checkTraitMethod(m: TrMethod, rest: List[TrMethod], ens: List[En], names: List[String]): Out =
+  m match {
+    case TrMethod(_, ps, ret) => checkTraitMethodParams(checkTyList(ps, ens, names, noSpan()), ret, rest, ens, names)
+  }
+
+def checkTraitMethodParams(o: Out, ret: String, rest: List[TrMethod], ens: List[En], names: List[String]): Out =
+  if (hasErr(o)) o else if (!knownTy(Type.parse(ret), ens, names)) bad(Str.concat("unknown type ", ret), noSpan()) else checkTraitMethods(rest, ens, names)
+
+def checkImplHeaders(impls: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
+  if (List.isEmpty(impls)) ok("Unit") else checkImplHeader(List.at(impls, 0), List.tail(impls), traits, ens, names)
+
+def checkImplHeader(im: Im, rest: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
+  im match {
+    case Im(tn, args, forTy, _) => checkImplHeaderArity(traitArity(traits, tn), tn, args, forTy, rest, traits, ens, names)
+  }
+
+def checkImplHeaderArity(arity: Int, tn: String, args: List[String], forTy: String, rest: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
+  if (arity < 0) bad(Str.concat("unknown trait ", tn), noSpan()) else if (arity != List.len(args)) bad(Str.concat(tn, Str.concat(" expects ", Str.concat(Str.fromInt(arity), " type args"))), noSpan()) else checkImplArgs(checkTypeStrings(args, ens, names), forTy, rest, traits, ens, names)
+
+def checkImplArgs(o: Out, forTy: String, rest: List[Im], traits: List[Tr], ens: List[En], names: List[String]): Out =
+  if (hasErr(o)) o else if (!knownTy(Type.parse(forTy), ens, names)) bad(Str.concat("unknown type ", forTy), noSpan()) else checkImplHeaders(rest, traits, ens, names)
+
+def traitArity(traits: List[Tr], name: String): Int =
+  if (List.isEmpty(traits)) 0 - 1 else traitArityAt(List.at(traits, 0), List.tail(traits), name)
+
+def traitArityAt(t: Tr, rest: List[Tr], name: String): Int =
+  t match {
+    case Tr(n, ts, _) => if (n == name) List.len(ts) else traitArity(rest, name)
+  }
+
+def checkTypeStrings(types: List[String], ens: List[En], names: List[String]): Out =
+  if (List.isEmpty(types)) ok("Unit") else if (!knownTy(Type.parse(List.at(types, 0)), ens, names)) bad(Str.concat("unknown type ", List.at(types, 0)), noSpan()) else checkTypeStrings(List.tail(types), ens, names)
 
 def checkProgGo(ds: List[Fun], enums: List[En], names: List[String], main: String, body: Expr, stems: List[String]): Out =
   checkProgGoTab(ds, withLetterPins(enums), names, main, body, stems, ftabOfList(ds))
