@@ -672,7 +672,21 @@ trait Get:
   def get(): Int
 impl Get for Point:
   def get(): Int = self.n
-  def get(): Int = 0""", "duplicate trait method get")
+  def get(): Int = 0""", "duplicate trait method get") && genericMethodResultTypes()
+
+def genericMethodResultTypes(): Bool =
+  rejects("""enum Opt[T]:
+  case Some(value: T)
+  case None
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[T] for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+def wrong(): Int = Opt.Some(1.0).getOrElse(0.0)""", "does not match declared")
 
 def unknownTypes(): Bool =
   rejects("def wrong(x: Missing): Missing = x", "unknown type Missing") && rejects("def wrong(x: List[Missing]): Int = 1", "unknown type List[Missing]") && rejects("def wrong(): Missing = 1", "unknown type Missing") && rejects("""enum E:
