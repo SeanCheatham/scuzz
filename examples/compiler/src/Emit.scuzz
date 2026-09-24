@@ -1197,7 +1197,7 @@ def emitMapKit(f: String, args: List[Expr], prefix: String, strs: Strs, defs: Ft
   emitMapKitResult(f, args, emitMapKitPred(isPredKit(f) || isPredI64(f), mapKitRt(f), args, prefix, strs, defs, ens, ps, loc), prefix, defs, ens, ps, loc)
 
 def emitMapKitResult(f: String, args: List[Expr], s: Slot, prefix: String, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  if ((f == "List.maxBy" || f == "List.minBy") && isI64Ty(exprRetTyEns(Expr.ECall(f, args, 0), defs, ens, ps, loc))) emitUnboxSlot(s, prefix) else s
+  if ((f == "List.maxBy" || f == "List.minBy" || f == "List.reduceLeft" || f == "List.reduceRight") && isI64Ty(exprRetTyEns(Expr.ECall(f, args, 0), defs, ens, ps, loc))) emitUnboxSlot(s, prefix) else s
 
 def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitMapKit2(pred, rt, emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), prefix, strs, defs, ens, ps, loc, mapElemTy(List.at(args, 0), defs, ens, ps, loc))

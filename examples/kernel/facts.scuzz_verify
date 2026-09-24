@@ -34,6 +34,9 @@ oracle numericExtremeTail(): Bool =
 oracle numericExtremeBy(): Bool =
   Main.numericExtremeBy([7, 8, 9])
 
+oracle numericReduceMap(): Bool =
+  Main.numericReduceMap([7, 8, 9])
+
 oracle numericZipAll(): Bool =
   Main.numericZipAll(7)
 
