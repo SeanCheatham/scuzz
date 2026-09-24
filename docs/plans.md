@@ -15,6 +15,7 @@
 - [x] Use Float results for generic method calls and Float comparisons.
 - [x] Use resolved method result types in list literals.
 - [x] Resolve direct generic method result types in the checker.
+- [x] Resolve generic method results from receiver type arguments and reject conflicting call arguments.
 - [ ] Audit the remaining typed boxing paths in IO, streams, and other scalar containers.
 - [x] Run kernel, codegen, fuzz, and fixed-point checks.
 - [x] Measure both compiler commands.

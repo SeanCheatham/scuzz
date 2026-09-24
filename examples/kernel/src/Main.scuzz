@@ -34,6 +34,9 @@ trait Show:
 trait Get[T]:
   def getOrElse(default: T): T
 
+trait Extract[T]:
+  def extract(): T
+
 impl Show for Point:
   def show(): String =
     Str.concat("Point(", Str.concat(Str.fromInt(self.x), Str.concat(",", Str.concat(Str.fromInt(self.y), ")"))))
@@ -59,6 +62,10 @@ impl Get[T] for Opt:
       case Opt.Some(x) => x
       case Opt.None => default
     }
+
+impl Extract[T] for Box:
+  def extract(): T =
+    self.x
 
 import A.tag
 import A.Msg
@@ -828,7 +835,7 @@ def floatBoxEq(): Bool =
   for {
     nan = 0.0 / 0.0
     negZero = 0.0 * (0.0 - 1.0)
-  } yield [nan] != [nan] && !List.contains([nan], nan) && [negZero] == [0.0] && List.contains([negZero], 0.0) && genericList(negZero) == [0.0] && genericList(nan) != genericList(nan) && id(negZero) == 0.0 && id(nan) != id(nan) && Opt.Some(negZero).getOrElse(0.0) == 0.0 && Opt.Some(nan).getOrElse(0.0) != Opt.Some(nan).getOrElse(0.0) && [Opt.Some(negZero).getOrElse(0.0)] == [0.0]
+  } yield [nan] != [nan] && !List.contains([nan], nan) && [negZero] == [0.0] && List.contains([negZero], 0.0) && genericList(negZero) == [0.0] && genericList(nan) != genericList(nan) && id(negZero) == 0.0 && id(nan) != id(nan) && Opt.Some(negZero).getOrElse(0.0) == 0.0 && Opt.Some(nan).getOrElse(0.0) != Opt.Some(nan).getOrElse(0.0) && [Opt.Some(negZero).getOrElse(0.0)] == [0.0] && Box(negZero).extract() == 0.0 && Box(nan).extract() != Box(nan).extract()
 
 def floatTupleEq(): Bool =
   for {
