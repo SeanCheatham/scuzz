@@ -43,6 +43,9 @@ oracle borrowedFoldSeed(): Bool =
 oracle numericFoldSeed(): Bool =
   Main.numericFoldSeed([1, 2, 3], 4)
 
+oracle floatFoldSeed(): Bool =
+  Main.floatFoldSeed([1.0, 2.0], 0.5)
+
 oracle numericZipAll(): Bool =
   Main.numericZipAll(7)
 

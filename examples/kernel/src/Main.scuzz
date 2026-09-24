@@ -507,6 +507,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"reduceN:${if (numericReduceMap([7, 8, 9])) "y" else "n"}")
     _ <- IO.println(s"foldSeed:${if (borrowedFoldSeed(["a", "b"], "!")) "y" else "n"}")
     _ <- IO.println(s"foldNum:${if (numericFoldSeed([1, 2, 3], 4)) "y" else "n"}")
+    _ <- IO.println(s"foldFloat:${if (floatFoldSeed([1.0, 2.0], 0.5)) "y" else "n"}")
     _ <- IO.println(s"zipAllN:${if (numericZipAll(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
@@ -720,6 +721,13 @@ def numericFoldSeed(xs: List[Int], z: Int): Bool =
 }) == 10 && List.foldRight(xs, z, __tup => __tup match {
   case (x, acc) => x + acc
 }) == 10
+
+def floatFoldSeed(xs: List[Float], z: Float): Bool =
+  List.foldLeft(xs, z, __tup => __tup match {
+  case (acc, x) => acc + x
+}) == 3.5 && List.foldRight(xs, z, __tup => __tup match {
+  case (x, acc) => x + acc
+}) == 3.5
 
 def numericZipAll(k: Int): Bool =
   List.zipAll([k], [k, k + 1], k + 2, k + 3) == [(k, k), (k + 2, k + 1)] && List.zipAll([k, k + 1], [k], k + 2, k + 3) == [(k, k), (k + 1, k + 3)]
