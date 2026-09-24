@@ -1323,7 +1323,29 @@ def wrong(): Int =
 """
 
 def unknownPatternOwnerTypes(): Bool =
-  rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing") && rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing") && Check.check(srcKnownJsonCase()) == "[]" && rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result") && Check.check(srcNestedParsedJsonCase()) == "[]"
+  rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing") && rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing") && Check.check(srcKnownJsonCase()) == "[]" && rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result") && Check.check(srcNestedParsedJsonCase()) == "[]" && recordModulePatternTypes()
+
+def recordModulePatternTypes(): Bool =
+  rejects(srcUnknownRecordOwner(), "unknown pattern case Ghost.Point") && Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: []), "unknown pattern case Main.Point") && Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordModule()) :: []) == "[]"
+
+def srcUnknownRecordOwner(): String =
+  """record Point(n: Int)
+def wrong(p: Point): Int = p match {
+  case Ghost.Point(n) => n
+  case _ => 0
+}"""
+
+def srcWrongRecordModule(): String =
+  """def wrong(p: Point): Int = p match {
+  case Main.Point(n) => n
+  case _ => 0
+}"""
+
+def srcRightRecordModule(): String =
+  """def right(p: Point): Int = p match {
+  case PointMod.Point(n) => n + 1
+  case _ => 0
+}"""
 
 def srcKnownJsonCase(): String =
   """def ok(v: Json): Int = v match {
@@ -1613,7 +1635,10 @@ def dumpScalarPatternOwner(): String =
   if (!rejects(srcQualifiedScalarWrong(), "pattern case Second.Item does not belong to Int")) Str.concat("scalar:", Check.check(srcQualifiedScalarWrong())) else if (!rejects(srcOptionScalarWrong(), "pattern case Option.Some does not belong to Int")) Str.concat("option:", Check.check(srcOptionScalarWrong())) else Str.concat("forScalar:", Check.check(srcForScalarOwnerWrong()))
 
 def dumpUnknownPatternOwner(): String =
-  if (!rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item")) Str.concat("owner:", Check.check(srcUnknownPatternOwner())) else if (!rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing")) Str.concat("case:", Check.check(srcUnknownPatternCase())) else if (!rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing")) Str.concat("json:", Check.check(srcUnknownJsonCase())) else if (Check.check(srcKnownJsonCase()) != "[]") Str.concat("jsonValid:", Check.check(srcKnownJsonCase())) else if (!rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result")) Str.concat("jsonParsed:", Check.check(srcParsedJsonCase())) else if (Check.check(srcNestedParsedJsonCase()) != "[]") Str.concat("jsonNested:", Check.check(srcNestedParsedJsonCase())) else if (!rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item")) Str.concat("for:", Check.check(srcUnknownForOwner())) else ""
+  if (!rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item")) Str.concat("owner:", Check.check(srcUnknownPatternOwner())) else if (!rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing")) Str.concat("case:", Check.check(srcUnknownPatternCase())) else if (!rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing")) Str.concat("json:", Check.check(srcUnknownJsonCase())) else if (Check.check(srcKnownJsonCase()) != "[]") Str.concat("jsonValid:", Check.check(srcKnownJsonCase())) else if (!rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result")) Str.concat("jsonParsed:", Check.check(srcParsedJsonCase())) else if (Check.check(srcNestedParsedJsonCase()) != "[]") Str.concat("jsonNested:", Check.check(srcNestedParsedJsonCase())) else if (!rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item")) Str.concat("for:", Check.check(srcUnknownForOwner())) else dumpRecordModulePattern()
+
+def dumpRecordModulePattern(): String =
+  if (!rejects(srcUnknownRecordOwner(), "unknown pattern case Ghost.Point")) Str.concat("ghost:", Check.check(srcUnknownRecordOwner())) else if (!Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: []), "unknown pattern case Main.Point")) Str.concat("wrongModule:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: [])) else Str.concat("rightModule:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordModule()) :: []))
 
 def dumpNamedLetter(): String =
   if (Check.check("""enum E:
@@ -2254,7 +2279,7 @@ def factsTier(): Bool =
 """), Verify.noEn(), 0) == ""
 
 def floatFieldDriveGuard(): Bool =
-  !Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Outer", [En(true, "Outer", [], [EnCase("Outer", [Param("inner", "Box", "", "")])]), En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])])]) && !Verify.friendlyTy("Box[Float]", [En(true, "Box", ["T"], [EnCase("Box", [Param("value", "T", "", "")])])]) && Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Int", "", "")])])]) && Verify.friendlyTy("Term", [En(false, "Term", [], [EnCase("N", [Param("n", "Int", "", "")]), EnCase("Add", [Param("left", "Term", "", ""), Param("right", "Term", "", "")])])])
+  !Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])], "")]) && !Verify.friendlyTy("Outer", [En(true, "Outer", [], [EnCase("Outer", [Param("inner", "Box", "", "")])], ""), En(true, "Box", [], [EnCase("Box", [Param("value", "Float", "", "")])], "")]) && !Verify.friendlyTy("Box[Float]", [En(true, "Box", ["T"], [EnCase("Box", [Param("value", "T", "", "")])], "")]) && Verify.friendlyTy("Box", [En(true, "Box", [], [EnCase("Box", [Param("value", "Int", "", "")])], "")]) && Verify.friendlyTy("Term", [En(false, "Term", [], [EnCase("N", [Param("n", "Int", "", "")]), EnCase("Add", [Param("left", "Term", "", ""), Param("right", "Term", "", "")])], "")])
 
 def factsSearch(seed: Int): Bool =
   Str.startsWith(Verify.generatedDrive(Verify.parseVerify(factsSrc()), Verify.noEn(), seed), "drive gen ")

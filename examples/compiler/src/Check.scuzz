@@ -419,7 +419,7 @@ def tyEqEn(a: String, b: String, ens: List[En]): Bool =
   tyEq(Type.parse(a), Type.parse(b), ens)
 
 def pinEns(ens: List[En], ts: List[String]): List[En] =
-  if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase()) :: ens
+  if (List.isEmpty(ts)) ens else En(false, "#pin", ts, noCase(), "") :: ens
 
 def noCase(): List[EnCase] =
   []
@@ -1999,7 +1999,7 @@ def ownerQualifiedErr(core: String, want: String, ens: List[En], dot: Int): Stri
   ownerQualifiedErr2(core, want, Str.take(core, dot), Str.drop(core, dot + 1), ens)
 
 def ownerQualifiedErr2(core: String, want: String, owner: String, name: String, ens: List[En]): String =
-  if (owner == "Json") jsonOwnerErr(core, want, name) else if (!hasEn(ens, owner) && List.exists(ens, en => en.isRec && en.name == name && want == name)) "" else if (!hasEn(ens, owner) || !List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
+  if (owner == "Json") jsonOwnerErr(core, want, name) else if (!hasEn(ens, owner) && List.exists(ens, en => en.isRec && en.mod == owner && en.name == name && want == name)) "" else if (!hasEn(ens, owner) || !List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
 
 def jsonOwnerErr(core: String, want: String, name: String): String =
   if (!jsonPatternCase(name)) Str.concat("unknown pattern case ", core) else if (want != "Json") Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
@@ -2184,7 +2184,7 @@ def constructorFields(ens: List[En], core: String): List[Param] =
   if (List.exists(ens, en => en.name == core)) List.flatMap(List.filter(ens, en => en.name == core), en => List.flatMap(en.cases, c => c.fields)) else List.flatMap(ens, en => constructorFieldsIn(en, core))
 
 def constructorFieldsIn(en: En, core: String): List[Param] =
-  List.flatMap(en.cases, c => if (core == Str.concat(en.name, Str.concat(".", c.name)) || core == en.name && en.isRec || core == c.name) c.fields else [])
+  List.flatMap(en.cases, c => if (core == Str.concat(en.name, Str.concat(".", c.name)) || core == Str.concat(en.mod, Str.concat(".", en.name)) && en.isRec || core == en.name && en.isRec || core == c.name) c.fields else [])
 
 def bindConstructorFields(names: List[String], fields: List[Param], i: Int, scope: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   if (List.isEmpty(names)) scope else bindConstructorField(List.at(names, 0), List.tail(names), fields, i, scope, ens)
@@ -2308,7 +2308,7 @@ def caseFieldTy(ens: List[En], en: String, ctor: String): String =
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
-    case En(_, name, _, cases) => if (name == en) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
   }
 
 def caseFieldTy2(cs: List[EnCase], ctor: String): String =
@@ -2357,7 +2357,7 @@ def caseFieldTys(ens: List[En], en: String, ctor: String): List[String] =
 
 def caseFieldTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
-    case En(_, name, _, cases) => if (name == en) caseFieldTys2(cases, ctor) else caseFieldTys(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseFieldTys2(cases, ctor) else caseFieldTys(rest, en, ctor)
   }
 
 def caseFieldTys2(cs: List[EnCase], ctor: String): List[String] =
@@ -3549,7 +3549,7 @@ def specializeEnumsGo(ens: List[En], ty: String): List[En] =
 
 def specializeEnum(en: En, ty: String): En =
   en match {
-    case En(priv, name, tps, cases) => if (!List.isEmpty(tps) && Str.startsWith(ty, Str.concat(name, "["))) En(priv, name, tps, specializeCases(cases, tps, Type.appArgs(Type.parse(ty)))) else En(priv, name, tps, cases)
+    case En(priv, name, tps, cases) => if (!List.isEmpty(tps) && Str.startsWith(ty, Str.concat(name, "["))) En(priv, name, tps, specializeCases(cases, tps, Type.appArgs(Type.parse(ty))), en.mod) else en
   }
 
 def specializeCases(cs: List[EnCase], tps: List[String], args: List[Ty]): List[EnCase] =

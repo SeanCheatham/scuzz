@@ -1203,9 +1203,12 @@ def enOf(core: String): String =
 
 def tryTag(core: String, v: Value, p: EvProg, subs: List[String]): Option[List[(String, Value)]] =
   v match {
-    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && (enOf(core) == "" || enOf(core) == en)) tryFields(subs, fields, ctorFields(p, if (enOf(core) == "") Str.concat(en, Str.concat(".", tag)) else core), p, 0) else None
+    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && (enOf(core) == "" || enOf(core) == en || recordPatOwner(core, en, tag, p))) tryFields(subs, fields, ctorFields(p, if (enOf(core) == "" || recordPatOwner(core, en, tag, p)) qualTag(en, tag) else core), p, 0) else None
     case _ => None
   }
+
+def recordPatOwner(core: String, en: String, tag: String, p: EvProg): Bool =
+  en == tag && List.exists(p.ens, declared => declared.isRec && declared.name == tag && declared.mod == enOf(core))
 
 def tryFields(subs: List[String], fields: List[Value], params: List[Param], p: EvProg, i: Int): Option[List[(String, Value)]] =
   if (List.isEmpty(subs)) Some(noVars()) else tryField(List.at(subs, 0), List.tail(subs), fields, params, p, i)

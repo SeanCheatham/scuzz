@@ -751,6 +751,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"lpati:${describeInts([1, 2])}")
     _ <- IO.println(s"cons:${List.join(consPair("a", "b"), ",")}")
     _ <- IO.println(s"npat:${originX(Point(3, 5))}")
+    _ <- IO.println(s"qualifiedRecord:${qualifiedRecordX(Point(3, 5))}")
     _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
     _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
   } yield ()
@@ -961,6 +962,12 @@ def describeInts(xs: List[Int]): String =
 def originX(p: Point): Int =
   p match {
     case Point(x = n) => n
+  }
+
+def qualifiedRecordX(p: Point): Int =
+  p match {
+    case Main.Point(n, _) => n + 1
+    case _ => 0 - 1
   }
 
 def namedY(p: Point): Int =
