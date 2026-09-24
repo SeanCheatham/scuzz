@@ -195,8 +195,8 @@ def parseExprListEnd(p: (Expr, Int), toks: Toks): (Expr, Int) =
     case (e, j) => if (_is(toks, j, Tok.Eof)) p else (Expr.EVar("", _off(toks, j)), toks.n)
   }
 
-def interpParts(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
-  if (i >= Str.len(s)) interpPartsEnd(b, acc) else interpPartsCh(s, i, b, acc, Str.charAt(s, i))
+def interpParts(s: String, i: Int, b: Builder, acc: List[Expr], base: Int): List[Expr] =
+  if (i >= Str.len(s)) interpPartsEnd(b, acc) else interpPartsCh(s, i, b, acc, base, Str.charAt(s, i))
 
 def interpPartsEnd(b: Builder, acc: List[Expr]): List[Expr] =
   interpPartsEndLit(Builder.result(b), acc)
@@ -204,14 +204,14 @@ def interpPartsEnd(b: Builder, acc: List[Expr]): List[Expr] =
 def interpPartsEndLit(lit: String, acc: List[Expr]): List[Expr] =
   if (lit == "") List.reverse(acc) else List.reverse(Expr.EStr(lit, 0) :: acc)
 
-def interpPartsCh(s: String, i: Int, b: Builder, acc: List[Expr], c: Int): List[Expr] =
-  if (c == 92 && i + 1 < Str.len(s)) interpParts(s, i + 2, Builder.append(b, Lexer._escStr(s, i + 1)), acc) else if (c == 36) interpPartsDollar(s, i, b, acc) else interpParts(s, i + 1, Builder.append(b, Str.slice(s, i, i + 1)), acc)
+def interpPartsCh(s: String, i: Int, b: Builder, acc: List[Expr], base: Int, c: Int): List[Expr] =
+  if (c == 92 && i + 1 < Str.len(s)) interpParts(s, i + 2, Builder.append(b, Lexer._escStr(s, i + 1)), acc, base) else if (c == 36) interpPartsDollar(s, i, b, acc, base) else interpParts(s, i + 1, Builder.append(b, Str.slice(s, i, i + 1)), acc, base)
 
-def interpPartsDollar(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
-  if (i + 1 >= Str.len(s)) interpParts(s, i + 1, Builder.append(b, "$"), acc) else interpPartsDollar2(s, i, b, acc, Str.charAt(s, i + 1))
+def interpPartsDollar(s: String, i: Int, b: Builder, acc: List[Expr], base: Int): List[Expr] =
+  if (i + 1 >= Str.len(s)) interpParts(s, i + 1, Builder.append(b, "$"), acc, base) else interpPartsDollar2(s, i, b, acc, base, Str.charAt(s, i + 1))
 
-def interpPartsDollar2(s: String, i: Int, b: Builder, acc: List[Expr], n: Int): List[Expr] =
-  if (n == 123) interpPartsBrace(s, i, b, acc) else if (isIdentStart(n)) interpPartsIdent(s, i + 1, b, acc) else interpParts(s, i + 1, Builder.append(b, "$"), acc)
+def interpPartsDollar2(s: String, i: Int, b: Builder, acc: List[Expr], base: Int, n: Int): List[Expr] =
+  if (n == 123) interpPartsBrace(s, i, b, acc, base) else if (isIdentStart(n)) interpPartsIdent(s, i + 1, b, acc, base) else interpParts(s, i + 1, Builder.append(b, "$"), acc, base)
 
 def isIdentStart(c: Int): Bool =
   c == 95 || c >= 65 && c <= 90 || c >= 97 && c <= 122
@@ -219,20 +219,20 @@ def isIdentStart(c: Int): Bool =
 def isIdentCont(c: Int): Bool =
   isIdentStart(c) || c >= 48 && c <= 57
 
-def interpPartsIdent(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
-  interpPartsIdent2(s, i, i, b, acc)
+def interpPartsIdent(s: String, i: Int, b: Builder, acc: List[Expr], base: Int): List[Expr] =
+  interpPartsIdent2(s, i, i, b, acc, base)
 
-def interpPartsIdent2(s: String, i: Int, start: Int, b: Builder, acc: List[Expr]): List[Expr] =
-  if (i >= Str.len(s)) interpPartsFlush(b, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i) else if (isIdentCont(Str.charAt(s, i))) interpPartsIdent2(s, i + 1, start, b, acc) else interpPartsFlush(b, Expr.EVar(Str.slice(s, start, i), 0), acc, s, i)
+def interpPartsIdent2(s: String, i: Int, start: Int, b: Builder, acc: List[Expr], base: Int): List[Expr] =
+  if (i >= Str.len(s)) interpPartsFlush(b, Expr.EVar(Str.slice(s, start, i), base + start), acc, s, i, base) else if (isIdentCont(Str.charAt(s, i))) interpPartsIdent2(s, i + 1, start, b, acc, base) else interpPartsFlush(b, Expr.EVar(Str.slice(s, start, i), base + start), acc, s, i, base)
 
-def interpPartsFlush(b: Builder, e: Expr, acc: List[Expr], s: String, i: Int): List[Expr] =
-  interpPartsFlushLit(Builder.result(b), e, acc, s, i)
+def interpPartsFlush(b: Builder, e: Expr, acc: List[Expr], s: String, i: Int, base: Int): List[Expr] =
+  interpPartsFlushLit(Builder.result(b), e, acc, s, i, base)
 
-def interpPartsFlushLit(lit: String, e: Expr, acc: List[Expr], s: String, i: Int): List[Expr] =
-  if (lit == "") interpParts(s, i, Builder.empty(), e :: acc) else interpParts(s, i, Builder.empty(), e :: Expr.EStr(lit, 0) :: acc)
+def interpPartsFlushLit(lit: String, e: Expr, acc: List[Expr], s: String, i: Int, base: Int): List[Expr] =
+  if (lit == "") interpParts(s, i, Builder.empty(), e :: acc, base) else interpParts(s, i, Builder.empty(), e :: Expr.EStr(lit, 0) :: acc, base)
 
-def interpPartsBrace(s: String, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
-  interpPartsBrace2(s, interpCloseBrace(s, i + 2, 1), i, b, acc)
+def interpPartsBrace(s: String, i: Int, b: Builder, acc: List[Expr], base: Int): List[Expr] =
+  interpPartsBrace2(s, interpCloseBrace(s, i + 2, 1), i, b, acc, base)
 
 def interpCloseBrace(s: String, i: Int, depth: Int): Int =
   if (i >= Str.len(s) || depth <= 0) i else interpCloseBraceCh(s, i, depth, Str.charAt(s, i))
@@ -249,12 +249,15 @@ def interpSkipQuotedCh(s: String, i: Int, c: Int): Int =
 def interpSkipTriple(s: String, i: Int): Int =
   if (i + 2 < Str.len(s) && Str.charAt(s, i) == 34 && Str.charAt(s, i + 1) == 34 && Str.charAt(s, i + 2) == 34) i + 3 else if (i >= Str.len(s)) i else interpSkipTriple(s, i + 1)
 
-def interpPartsBrace2(s: String, j: Int, i: Int, b: Builder, acc: List[Expr]): List[Expr] =
-  interpPartsBrace3(parseExprList(Lexer.lex(Str.slice(s, i + 2, j - 1)), 0), b, acc, s, j)
+def interpPartsBrace2(s: String, j: Int, i: Int, b: Builder, acc: List[Expr], base: Int): List[Expr] =
+  interpPartsBrace3(parseExprList(interpHoleToks(Str.slice(s, i + 2, j - 1), base + i + 2), 0), b, acc, s, j, base)
 
-def interpPartsBrace3(p: (Expr, Int), b: Builder, acc: List[Expr], s: String, j: Int): List[Expr] =
+def interpHoleToks(s: String, base: Int): List[SpTok] =
+  List.map(Lexer.lex(s), t => SpTok(t.tok, t.off + base, t.stem))
+
+def interpPartsBrace3(p: (Expr, Int), b: Builder, acc: List[Expr], s: String, j: Int, base: Int): List[Expr] =
   p match {
-    case (e, _) => interpPartsFlush(b, e, acc, s, j)
+    case (e, _) => interpPartsFlush(b, e, acc, s, j, base)
   }
 
 def parseAscribe(p: (Expr, Int), toks: Toks): (Expr, Int) =
@@ -364,7 +367,7 @@ def parseAtom(toks: Toks, i: Int): (Expr, Int) =
     case Tok.False => (Expr.EBool(false), i + 1)
     case Tok.Str(s) => (Expr.EStr(s, _off(toks, i)), i + 1)
     case Tok.Float(s) => (Expr.EFloat(s), i + 1)
-    case Tok.Interp(s) => (Expr.EInterp(s, interpParts(s, 0, Builder.empty(), []), _off(toks, i)), i + 1)
+    case Tok.Interp(s) => (Expr.EInterp(s, interpParts(s, 0, Builder.empty(), [], _off(toks, i) + 2), _off(toks, i)), i + 1)
     case Tok.Underscore => parseHole(toks, i)
     case Tok.LParen => if (_is(toks, i + 1, Tok.RParen)) (Expr.EUnit, i + 2) else parseParen(toks, i + 1)
     case Tok.LBracket => parseList(toks, i)

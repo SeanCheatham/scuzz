@@ -952,7 +952,7 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
     case Expr.EBool(_) => okTy(Type.tBool())
     case Expr.EStr(_, _) => okTy(Type.tStr())
     case Expr.EFloat(_) => okTy(Type.tFloat())
-    case Expr.EInterp(_, parts, off) => inferInterp(parts, off, env, funs, ens)
+    case Expr.EInterp(_, parts, _) => inferInterp(parts, env, funs, ens)
     case Expr.EUnit => okTy(Type.tUnit())
     case Expr.EHole => okTy(Type.tInt())
     case Expr.EVar(s, off) => inferVar(s, env, funs, ens, (modFile(env), off))
@@ -975,20 +975,20 @@ def inferGo(e: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
 def inferAscribe(inner: Expr, ty: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   inferAscribe2(infer(inner, env, funs, ens), ty, (modFile(env), off), ens)
 
-def inferInterp(parts: List[Expr], off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
-  inferInterpParts(parts, env, funs, ens, (modFile(env), off))
+def inferInterp(parts: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  inferInterpParts(parts, env, funs, ens)
 
-def inferInterpParts(parts: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (List.isEmpty(parts)) okTy(Type.tStr()) else inferInterpPart(List.at(parts, 0), List.tail(parts), env, funs, ens, span)
+def inferInterpParts(parts: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  if (List.isEmpty(parts)) okTy(Type.tStr()) else inferInterpPart(List.at(parts, 0), List.tail(parts), env, funs, ens)
 
-def inferInterpPart(e: Expr, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
+def inferInterpPart(e: Expr, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
   e match {
-    case Expr.EStr(_, _) => inferInterpParts(rest, env, funs, ens, span)
-    case _ => inferInterpPartNext(infer(e, env, funs, ens), rest, env, funs, ens, span)
+    case Expr.EStr(_, _) => inferInterpParts(rest, env, funs, ens)
+    case _ => inferInterpPartNext(infer(e, env, funs, ens), rest, env, funs, ens)
   }
 
-def inferInterpPartNext(o: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(o)) bad(o.err, span) else inferInterpParts(rest, env, funs, ens, span)
+def inferInterpPartNext(o: Out, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En]): Out =
+  if (hasErr(o)) o else inferInterpParts(rest, env, funs, ens)
 
 def inferAscribe2(o: Out, ty: String, span: (String, Int), ens: List[En]): Out =
   inferAscribe3(o, Type.parse(ty), ty, span, ens)
@@ -2795,7 +2795,7 @@ def checkExprTypes(e: Expr, ens: List[En], aliases: List[Alias], ts: List[String
     case Expr.EFor(bs, body, _) => checkExprTypesFor(checkExprTypesBinds(bs, ens, aliases, ts, span), body, ens, aliases, ts, span)
     case Expr.EList(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
     case Expr.ETuple(xs) => checkExprTypesList(xs, ens, aliases, ts, span)
-    case Expr.EInterp(_, parts, _) => checkExprTypesList(parts, ens, aliases, ts, span)
+    case Expr.EInterp(_, parts, _) => checkInterpExprTypes(parts, ens, aliases, ts, span)
     case Expr.ENamed(_, inner) => checkExprTypes(inner, ens, aliases, ts, span)
     case _ => ok("Unit")
   }
@@ -2811,6 +2811,17 @@ def checkExprTypesIf(o: Out, t: Expr, el: Expr, ens: List[En], aliases: List[Ali
 
 def checkExprTypesList(xs: List[Expr], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
   if (List.isEmpty(xs)) ok("Unit") else checkExprTypesAfter(checkExprTypes(List.at(xs, 0), ens, aliases, ts, span), List.tail(xs), ens, aliases, ts, span)
+
+def checkInterpExprTypes(xs: List[Expr], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (List.isEmpty(xs)) ok("Unit") else checkInterpExprTypesHead(List.at(xs, 0), List.tail(xs), ens, aliases, ts, span)
+
+def checkInterpExprTypesHead(e: Expr, rest: List[Expr], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  span match {
+    case (stem, off) => checkInterpExprTypesNext(checkExprTypes(e, ens, aliases, ts, (stem, Parse.spanOff(e, off))), rest, ens, aliases, ts, span)
+  }
+
+def checkInterpExprTypesNext(o: Out, rest: List[Expr], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
+  if (hasErr(o)) o else checkInterpExprTypes(rest, ens, aliases, ts, span)
 
 def checkExprTypesArmsNext(o: Out, arms: List[Arm], ens: List[En], aliases: List[Alias], ts: List[String], span: (String, Int)): Out =
   if (hasErr(o)) o else checkExprTypesArms(arms, ens, aliases, ts, span)
