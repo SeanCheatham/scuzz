@@ -1955,7 +1955,10 @@ def fuzzConfirm(job: FuzzJob, small: FuzzRun): IO[Unit] =
   if (!job.ev) IO.pure(()) else fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeRun(job.exe, false, job.outDir, small, "", false, false, false).flatMap(bad => if (bad > 0) IO.pure(()) else failMsg("evaluator search failure did not reproduce on the compiled binary", "scuzz fuzz")))
 
 def fuzzShrink(job: FuzzJob, defs: List[Fun], run: FuzzRun): IO[FuzzRun] =
-  fuzzShrinkBy(r => fuzzWriteDrive(job.outDir, r.script).flatMap(_ => fuzzProbeJob(job, r)), defs, run)
+  fuzzShrinkBy(r => fuzzShrinkProbe(job, r), defs, run)
+
+def fuzzShrinkProbe(job: FuzzJob, r: FuzzRun): IO[Int] =
+  fuzzWriteDrive(job.outDir, r.script).flatMap(_ => fuzzProbeJob(job, r))
 
 def fuzzShrinkBy(bad: FuzzRun => IO[Int], defs: List[Fun], run: FuzzRun): IO[FuzzRun] =
   fuzzShrinkLines(bad, run, 32).flatMap(small => fuzzShrinkInts(bad, defs, small, fuzzNudgePairs(Verify.linesOf(small.script), defs, 0, []), 80))
