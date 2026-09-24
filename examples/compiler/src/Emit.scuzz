@@ -1194,7 +1194,10 @@ def foldKitRt(f: String): String =
   if (f == "Stream.fold") "sz_stream_fold" else if (f == "Stream.scan") "sz_stream_scan" else if (f == "List.foldLeft") "sz_list_fold_left" else if (f == "List.foldRight") "sz_list_fold_right" else if (f == "List.scanLeft") "sz_list_scan_left" else if (f == "List.scanRight") "sz_list_scan_right" else if (f == "Timeline.fold") "sz_timeline_fold" else "sz_stream_zip_with"
 
 def emitMapKit(f: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitMapKitPred(isPredKit(f) || isPredI64(f), mapKitRt(f), args, prefix, strs, defs, ens, ps, loc)
+  emitMapKitResult(f, args, emitMapKitPred(isPredKit(f) || isPredI64(f), mapKitRt(f), args, prefix, strs, defs, ens, ps, loc), prefix, defs, ens, ps, loc)
+
+def emitMapKitResult(f: String, args: List[Expr], s: Slot, prefix: String, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+  if ((f == "List.maxBy" || f == "List.minBy") && isI64Ty(exprRetTyEns(Expr.ECall(f, args, 0), defs, ens, ps, loc))) emitUnboxSlot(s, prefix) else s
 
 def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitMapKit2(pred, rt, emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), prefix, strs, defs, ens, ps, loc, mapElemTy(List.at(args, 0), defs, ens, ps, loc))
@@ -1230,7 +1233,10 @@ def isLocalPack(f: String, ps: List[Param]): Bool =
   paramTy(ps, f) != "" && !isI64Ty(paramTy(ps, f))
 
 def emitMapKitPack(rt: String, ic: String, iv: String, io: Bool, f: String, prefix: String): Slot =
-  Slot(join(ic, join(unpackFn(f, prefix), join(line(mapPackCall(rt, iv, prefix)), if (io) relPtr(iv) else ""))), pct(prefix, "v"), mapKitOwned(rt))
+  if (isExtremeRt(rt)) emitMapKitPackExtreme(rt, ic, iv, io, f, prefix) else Slot(join(ic, join(unpackFn(f, prefix), join(line(mapPackCall(rt, iv, prefix)), if (io) relPtr(iv) else ""))), pct(prefix, "v"), mapKitOwned(rt))
+
+def emitMapKitPackExtreme(rt: String, ic: String, iv: String, io: Bool, f: String, prefix: String): Slot =
+  Slot(join(ic, join(unpackFn(f, prefix), join(line(mapPackCall(rt, iv, prefix)), if (io) join(retPtr(pct(prefix, "v")), relPtr(iv)) else ""))), pct(prefix, "v"), io)
 
 def mapPackCall(rt: String, iv: String, prefix: String): String =
   Str.concat(tmp(prefix, "v"), Str.concat(mapKitCallMid(rt), Str.concat(iv, Str.concat(", ptr ", Str.concat(pct(prefix, "fnp"), Str.concat(", ptr ", Str.concat(pct(prefix, "envp"), mapKitCallEnd(rt))))))))
@@ -2179,9 +2185,9 @@ def emitListGetOr(code: String, vals: List[String], owns: List[Bool], prefix: St
   if (numeric) emitListGetOrNum(code, vals, owns, prefix, boxDefault) else emitListGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(tailOwn(owns))), prefix)
 
 def emitListGetOrNum(code: String, vals: List[String], owns: List[Bool], prefix: String, boxDefault: Bool): Slot =
-  if (boxDefault) emitGetOrNum(emitListGetOr2(join(code, pairBox(arg2(vals), true, prefix, "lb")), arg0(vals), arg1(vals), pct(prefix, "lb"), headOwn(owns), true, prefix), prefix) else emitGetOrNum(emitListGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(tailOwn(owns))), prefix), prefix)
+  if (boxDefault) emitUnboxSlot(emitListGetOr2(join(code, pairBox(arg2(vals), true, prefix, "lb")), arg0(vals), arg1(vals), pct(prefix, "lb"), headOwn(owns), true, prefix), prefix) else emitUnboxSlot(emitListGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(tailOwn(owns))), prefix), prefix)
 
-def emitGetOrNum(s: Slot, prefix: String): Slot =
+def emitUnboxSlot(s: Slot, prefix: String): Slot =
   s match {
     case Slot(code, v, o) => Slot(join(code, join(unboxLine(v, prefix), if (o) relPtr(v) else "")), pct(prefix, "u"), false)
   }
@@ -2883,7 +2889,7 @@ def emitMapGetOrPtr(code: String, m: String, k: String, d: String, om: Bool, ok:
   Slot(join(code, join(kitGetOrCall(m, k, d, prefix), join(if (ok) relPtr(k) else "", getOrAfter(m, d, om, od, pct(prefix, "p"))))), pct(prefix, "p"), om || od)
 
 def emitMapGetOrNum(code: String, m: String, k: String, d: String, om: Bool, ok: Bool, od: Bool, prefix: String, boxDefault: Bool): Slot =
-  if (boxDefault) emitGetOrNum(emitMapGetOrPtr(join(code, pairBox(d, true, prefix, "md")), m, k, pct(prefix, "md"), om, ok, true, prefix), prefix) else emitGetOrNum(emitMapGetOrPtr(code, m, k, d, om, ok, od, prefix), prefix)
+  if (boxDefault) emitUnboxSlot(emitMapGetOrPtr(join(code, pairBox(d, true, prefix, "md")), m, k, pct(prefix, "md"), om, ok, true, prefix), prefix) else emitUnboxSlot(emitMapGetOrPtr(code, m, k, d, om, ok, od, prefix), prefix)
 
 def kitGetOrCall(m: String, k: String, d: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "p"), Str.concat("call ptr @sz_map_get_or(ptr ", Str.concat(m, Str.concat(", ptr ", Str.concat(k, Str.concat(", ptr ", Str.concat(d, ")"))))))))

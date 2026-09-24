@@ -31,6 +31,9 @@ oracle numericListElements(): Bool =
 oracle numericExtremeTail(): Bool =
   Main.numericExtremeTail(7)
 
+oracle numericExtremeBy(): Bool =
+  Main.numericExtremeBy([7, 8, 9])
+
 oracle numericZipAll(): Bool =
   Main.numericZipAll(7)
 
