@@ -503,6 +503,7 @@ def listProof(): IO[Unit] =
     xs = ["a", "b", "c"]
     _ <- IO.println(s"nlist:${if (numericListElements(7)) "y" else "n"}")
     _ <- IO.println(s"extTail:${if (numericExtremeTail(7)) "y" else "n"}")
+    _ <- IO.println(s"extBy:${if (numericExtremeBy([7, 8, 9])) "y" else "n"}")
     _ <- IO.println(s"zipAllN:${if (numericZipAll(7)) "y" else "n"}")
     _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
@@ -689,6 +690,12 @@ def numericExtremeTail(k: Int): Bool =
   for {
     xs = [k, k + 1, k + 2]
   } yield List.fill(2, List.max(List.tail(xs))) == [k + 2, k + 2] && List.fill(2, List.min(List.tail(xs))) == [k + 1, k + 1]
+
+def numericExtremeBy(xs: List[Int]): Bool =
+  List.fill(2, List.maxBy(xs, n => n)) == [9, 9] && List.fill(2, List.minBy(xs, n => n)) == [7, 7] && numericExtremeByFn(xs, n => n)
+
+def numericExtremeByFn(xs: List[Int], score: Int => Int): Bool =
+  List.fill(2, List.maxBy(xs, score)) == [9, 9] && List.fill(2, List.minBy(List.reverse(xs), score)) == [7, 7]
 
 def numericZipAll(k: Int): Bool =
   List.zipAll([k], [k, k + 1], k + 2, k + 3) == [(k, k), (k + 2, k + 1)] && List.zipAll([k, k + 1], [k], k + 2, k + 3) == [(k, k), (k + 1, k + 3)]
