@@ -88,7 +88,7 @@ static int json_fmt_double(char *tmp, size_t n, double x) {
 static void *box_f64(double x) {
   int64_t bits = 0;
   memcpy(&bits, &x, sizeof bits);
-  return sz_box_i64(bits);
+  return sz_box_float_bits(bits);
 }
 
 static double unbox_f64(const void *p) {

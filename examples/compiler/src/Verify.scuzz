@@ -152,7 +152,29 @@ def friendly(p: Param, ens: List[En]): Bool =
   friendlyTy(p.ty, ens)
 
 def friendlyTy(t: String, ens: List[En]): Bool =
-  if (t == "Int" || t == "String" || t == "Bool" || t == "View") true else if (isListTy(t)) friendlyTy(listInner(t), ens) else if (opaqueTy(tyHead(t))) false else if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else !List.isEmpty(findEn(ens, tyHead(t)))
+  if (t == "Int" || t == "String" || t == "Bool" || t == "View") true else if (isListTy(t)) friendlyTy(listInner(t), ens) else if (opaqueTy(tyHead(t))) false else if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else !List.isEmpty(findEn(ens, tyHead(t))) && !hasFloatDriveTy(t, ens, 0)
+
+def hasFloatDriveTy(t: String, ens: List[En], depth: Int): Bool =
+  if (t == "Float") true else if (t == "Int" || t == "String" || t == "Bool") false else if (depth >= 3) true else if (isListTy(t)) hasFloatDriveTy(listInner(t), ens, depth + 1) else hasFloatDriveEn(findEn(Check.specializeEnums(ens, t), tyHead(t)), ens, depth)
+
+def hasFloatDriveEn(hit: List[En], ens: List[En], depth: Int): Bool =
+  if (List.isEmpty(hit)) false else hasFloatDriveEnCases(List.at(hit, 0), ens, depth)
+
+def hasFloatDriveEnCases(en: En, ens: List[En], depth: Int): Bool =
+  en match {
+    case En(_, _, _, cases) => hasFloatDriveCases(cases, ens, depth)
+  }
+
+def hasFloatDriveCases(cases: List[EnCase], ens: List[En], depth: Int): Bool =
+  if (List.isEmpty(cases)) false else hasFloatDriveCase(List.at(cases, 0), ens, depth) || hasFloatDriveCases(List.tail(cases), ens, depth)
+
+def hasFloatDriveCase(c: EnCase, ens: List[En], depth: Int): Bool =
+  c match {
+    case EnCase(_, fields) => hasFloatDriveFields(fields, ens, depth)
+  }
+
+def hasFloatDriveFields(fields: List[Param], ens: List[En], depth: Int): Bool =
+  if (List.isEmpty(fields)) false else hasFloatDriveTy(List.at(fields, 0).ty, ens, depth + 1) || hasFloatDriveFields(List.tail(fields), ens, depth)
 
 def opaqueTy(t: String): Bool =
   t == "Fiber" || t == "Ref" || t == "Queue" || t == "Deferred" || t == "Resource" || t == "Stream" || t == "Map" || t == "Set"

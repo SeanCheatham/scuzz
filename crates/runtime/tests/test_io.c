@@ -2346,7 +2346,7 @@ static SzAdt *json_float_of(double x) {
   void *box;
   SzAdt *jf;
   memcpy(&bits, &x, sizeof bits);
-  box = sz_box_i64(bits);
+  box = sz_box_float_bits(bits);
   jf = sz_adt_new(3, box);
   sz_release(box);
   return jf;

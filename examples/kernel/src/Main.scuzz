@@ -537,6 +537,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"floatCons:${if (floatIndexCons([2.0, 0.0 - 1.0, 1.0])) "y" else "n"}")
     _ <- IO.println(s"floatCallEq:${if (floatCallEq()) "y" else "n"}")
     _ <- IO.println(s"floatBoxEq:${if (floatBoxEq()) "y" else "n"}")
+    _ <- IO.println(s"floatJsonEq:${if (floatJsonEq()) "y" else "n"}")
     _ <- IO.println(s"floatTupleEq:${if (floatTupleEq()) "y" else "n"}")
     _ <- IO.println(s"floatMultiEq:${if (floatMultiEq()) "y" else "n"}")
     _ <- IO.println(s"floatSignalEq:${if (floatSignalEq()) "y" else "n"}")
@@ -836,6 +837,12 @@ def floatBoxEq(): Bool =
     nan = 0.0 / 0.0
     negZero = 0.0 * (0.0 - 1.0)
   } yield [nan] != [nan] && !List.contains([nan], nan) && [negZero] == [0.0] && List.contains([negZero], 0.0) && genericList(negZero) == [0.0] && genericList(nan) != genericList(nan) && id(negZero) == 0.0 && id(nan) != id(nan) && Opt.Some(negZero).getOrElse(0.0) == 0.0 && Opt.Some(nan).getOrElse(0.0) != Opt.Some(nan).getOrElse(0.0) && [Opt.Some(negZero).getOrElse(0.0)] == [0.0] && Box(negZero).extract() == 0.0 && Box(nan).extract() != Box(nan).extract() && List.getOrElse([1.0], 9, negZero) == 0.0 && List.getOrElse([1.0], 9, nan) != List.getOrElse([1.0], 9, nan)
+
+def floatJsonEq(): Bool =
+  for {
+    nan = 0.0 / 0.0
+    negZero = 0.0 * (0.0 - 1.0)
+  } yield Json.Float(negZero) == Json.Float(0.0) && Json.Float(nan) != Json.Float(nan) && Json.parse("-0.0") == Json.parse("0.0")
 
 def floatTupleEq(): Bool =
   for {
