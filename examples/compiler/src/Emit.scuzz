@@ -2565,7 +2565,7 @@ def emitApplyLamSlot(p: String, body: Expr, arg: Slot, argE: Expr, prefix: Strin
   emitApplyLamTyped(p, body, arg, slotBindI64(arg, argE, ps, defs), applyBindTyPin(p, body, argE, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc, fid)
 
 def emitApplyLamTyped(p: String, body: Expr, arg: Slot, guess: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitApplyLam2(p, body, arg, guess || isI64Ty(bty), if (guess || isI64Ty(bty)) "Int" else bty, prefix, strs, defs, ens, ps, loc, fid)
+  emitApplyLam2(p, body, arg, guess || isI64Ty(bty), if (bty != "") bty else if (guess) "Int" else "", prefix, strs, defs, ens, ps, loc, fid)
 
 def slotBindI64(s: Slot, e: Expr, ps: List[Param], defs: Ftab): Bool =
   s match {
@@ -2618,7 +2618,7 @@ def shadowBind(p: String, prefix: String, ps: List[Param]): String =
   if (paramKnown(ps, p)) Str.concat("_", Str.concat(prefix, Str.concat("_", p))) else p
 
 def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, if (boxInt) "Int" else bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt)
+  emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt)
 
 def emitApplyLamSkip(ac: String, s: Slot): Slot =
   s match {

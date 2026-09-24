@@ -27,6 +27,9 @@ grep -Fxq 'floatOrder:y' /tmp/kernel.out
 grep -Fxq 'floatNaN:y' /tmp/kernel.out
 grep -Fxq 'floatInline:y' /tmp/kernel.out
 grep -Fxq 'floatLocal:y' /tmp/kernel.out
+grep -Fxq 'floatNested:y' /tmp/kernel.out
+grep -Fxq 'floatDerived:y' /tmp/kernel.out
+grep -Fxq 'floatBound:y' /tmp/kernel.out
 grep -Fxq 'zipAllN:y' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
