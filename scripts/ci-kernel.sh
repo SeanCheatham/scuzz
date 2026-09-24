@@ -15,6 +15,7 @@ grep -Fxq 'triple:a"}b' /tmp/kernel.out
 grep -Fxq 'nested:a}b' /tmp/kernel.out
 grep -Fxq 'iget:y' /tmp/kernel.out
 grep -Fxq 'nlist:y' /tmp/kernel.out
+grep -Fxq 'zipAllN:y' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
 diff <(grep -vx ok /tmp/kernel.out) /tmp/kernel-eval.out
@@ -61,6 +62,7 @@ grep -q "exists:1" /tmp/io.out
 grep -q "miss:0" /tmp/io.out
 grep -q "filterN:4" /tmp/io.out
 grep -q "intersperseN:2" /tmp/io.out
+grep -Fxq 'zipAllN:y' /tmp/io.out
 grep -q "real:" /tmp/io.out
 grep -q "mono:" /tmp/io.out
 grep -q "iso:1970-01-01T00:00:00.000Z" /tmp/io.out
