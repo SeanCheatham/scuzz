@@ -1,22 +1,7 @@
 # Current slice
 
-- [x] Prove boxed Float equality differs from scalar Float equality.
-- [x] Add a distinct Float box to the runtime.
-- [x] Use Float boxes for list literals, cons, callbacks, fold seeds, and single-field enum payloads.
-- [x] Use Float boxes for tuples, `List.fill`, and `List.append`.
-- [x] Use Float boxes for list updates, zip-all defaults, maps, and sets.
-- [x] Use Float boxes for `IO.pure`, `Ref.of`, `Stream.emit`, and `Stream.iterate`.
-- [x] Use a Float box for `IO.fail` error values.
-- [x] Use a Float box for the `Stream.unfold` seed.
-- [x] Use Float boxes for multi-field enum and record payloads, including record copies.
-- [x] Use Float boxes for Signal values and match evaluator change detection.
-- [x] Use Float boxes for closure captures and dynamic Float arguments and results.
-- [x] Use checked Float types at generic user-call arguments and results.
-- [x] Use Float results for generic method calls and Float comparisons.
-- [x] Use resolved method result types in list literals.
-- [x] Resolve direct generic method result types in the checker.
-- [x] Resolve generic method results from receiver type arguments and reject conflicting call arguments.
-- [ ] Audit the remaining typed boxing paths in IO, streams, and other scalar containers.
+- [x] Use a Float box for the `List.getOrElse` fallback.
+- [ ] Audit the remaining scalar boxes in IO, streams, and collections.
 - [x] Run kernel, codegen, fuzz, and fixed-point checks.
 - [x] Measure both compiler commands.
 - [ ] Remove this plan when the typed boxing audit is complete.

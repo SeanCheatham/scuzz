@@ -820,9 +820,6 @@ def emitPair3(lc: String, lv: String, lo: Bool, ln: Bool, lf: Bool, re: Slot, rn
 def emitPair4(code: String, lv: String, lo: Bool, ln: Bool, lf: Bool, rv: String, ro: Bool, rn: Bool, rf: Bool, prefix: String): Slot =
   Slot(join(code, join(pairBoxTyped(lv, ln, lf, prefix, "lb"), join(pairBoxTyped(rv, rn, rf, prefix, "rb"), join(pairNew(prefix, pairPtr(lv, ln, prefix, "lb"), pairPtr(rv, rn, prefix, "rb")), join(pairDrop(lv, lo, ln, prefix, "lb"), pairDrop(rv, ro, rn, prefix, "rb")))))), pct(prefix, "v"), true)
 
-def pairBox(v: String, num: Bool, prefix: String, stem: String): String =
-  if (num) line(Str.concat(tmp(prefix, stem), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(v, ")")))) else ""
-
 def pairBoxTyped(v: String, num: Bool, isFloat: Bool, prefix: String, stem: String): String =
   if (num) boxScalarStem(v, if (isFloat) "Float" else "Int", prefix, stem) else ""
 
@@ -1027,6 +1024,9 @@ def emitFloatOrder(f: String, code: String, vals: List[String], owns: List[Bool]
   if (f == "List.sort") emitKitUnaryPtr("sz_list_sort_float", code, vals, owns, prefix) else emitListExtreme(if (f == "List.max") "sz_list_max_float" else "sz_list_min_float", code, vals, owns, prefix, true)
 
 def emitCall3(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
+  if (f == "List.getOrElse" && List.len(args) >= 3 && exprRetTyEns(List.at(args, 2), defs, ens, ps, mod) == "Float") emitListGetOrNum(code, vals, owns, prefix, thirdNeedsBox(List.at(args, 2), owns, defs, ens, ps, mod), true) else emitCall3Other(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
+
+def emitCall3Other(f: String, code: String, vals: List[String], owns: List[Bool], prefix: String, defs: Ftab, args: List[Expr], ens: List[En], ps: List[Param], mod: String): Slot =
   if (f == "IO.fail" && !List.isEmpty(args) && isI64Ty(exprRetTyEns(List.at(args, 0), defs, ens, ps, mod))) emitFailBox(code, arg0(vals), prefix, exprRetTyEns(List.at(args, 0), defs, ens, ps, mod) == "Float") else if (f == "Ref.of" && firstNeedsBox(List.at(args, 0), owns, defs, ens, ps, mod)) emitKitUnaryBox("sz_ref_of", code, arg0(vals), prefix, exprRetTyEns(List.at(args, 0), defs, ens, ps, mod) == "Float") else if ((f == "Ref.set" || f == "Queue.offer" || f == "Deferred.complete") && secondNeedsBox(List.at(args, 1), owns, defs, ens, ps, mod)) emitKitBinaryBoxB(kitBinaryPtr(f), code, arg0(vals), arg1(vals), headOwn(owns), prefix, exprRetTyEns(List.at(args, 1), defs, ens, ps, mod) == "Float") else if (f == "Stream.emit" && firstNeedsBox(List.at(args, 0), owns, defs, ens, ps, mod)) emitKitUnaryBox("sz_stream_emit", code, arg0(vals), prefix, exprRetTyEns(List.at(args, 0), defs, ens, ps, mod) == "Float") else if (f == "Stream.intersperse" && secondNeedsBox(List.at(args, 1), owns, defs, ens, ps, mod)) emitKitBinaryBoxB("sz_stream_intersperse", code, arg0(vals), arg1(vals), headOwn(owns), prefix, exprRetTyEns(List.at(args, 1), defs, ens, ps, mod) == "Float") else if (f == "Net.retryAfterMillis") emitKitPtrI64I64("sz_net_retry_after_millis", code, vals, owns, prefix) else if (isJsonExtra(f)) emitJsonExtra(f, code, vals, owns, prefix) else if (isRtExtra(f)) emitRtExtra(f, code, vals, owns, prefix) else if (isTlKit(f)) emitTlKit(f, code, vals, owns, prefix) else emitCall3b(f, code, vals, owns, prefix, defs, args, ens, ps, mod)
 
 def isRtExtra(f: String): Bool =
@@ -2201,10 +2201,10 @@ def emitListFillCall(n: String, v: String, prefix: String): String =
   line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @sz_list_fill(i64 ", Str.concat(n, Str.concat(", ptr ", Str.concat(v, ")"))))))
 
 def emitListGetOr(code: String, vals: List[String], owns: List[Bool], prefix: String, numeric: Bool, boxDefault: Bool): Slot =
-  if (numeric) emitListGetOrNum(code, vals, owns, prefix, boxDefault) else emitListGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(tailOwn(owns))), prefix)
+  if (numeric) emitListGetOrNum(code, vals, owns, prefix, boxDefault, false) else emitListGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(tailOwn(owns))), prefix)
 
-def emitListGetOrNum(code: String, vals: List[String], owns: List[Bool], prefix: String, boxDefault: Bool): Slot =
-  if (boxDefault) emitUnboxSlot(emitListGetOr2(join(code, pairBox(arg2(vals), true, prefix, "lb")), arg0(vals), arg1(vals), pct(prefix, "lb"), headOwn(owns), true, prefix), prefix) else emitUnboxSlot(emitListGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(tailOwn(owns))), prefix), prefix)
+def emitListGetOrNum(code: String, vals: List[String], owns: List[Bool], prefix: String, boxDefault: Bool, isFloat: Bool): Slot =
+  if (boxDefault) emitUnboxSlot(emitListGetOr2(join(code, pairBoxTyped(arg2(vals), true, isFloat, prefix, "lb")), arg0(vals), arg1(vals), pct(prefix, "lb"), headOwn(owns), true, prefix), prefix) else emitUnboxSlot(emitListGetOr2(code, arg0(vals), arg1(vals), arg2(vals), headOwn(owns), headOwn(tailOwn(tailOwn(owns))), prefix), prefix)
 
 def emitUnboxSlot(s: Slot, prefix: String): Slot =
   s match {
