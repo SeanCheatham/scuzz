@@ -1876,9 +1876,15 @@ def hasEn(ens: List[En], name: String): Bool =
     case h :: rest => h.name == name || hasEn(rest, name)
   }
 
+def recordNamed(ens: List[En], name: String): Bool =
+  List.exists(ens, en => en.isRec && en.name == name)
+
+def recordModuleCtor(ens: List[En], mod: String, name: String): Bool =
+  List.exists(ens, en => en.isRec && en.mod == mod && en.name == name)
+
 def inferField(recv: Expr, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   recv match {
-    case Expr.EVar(en, _) => if (hasEn(ens, en)) inferBareCtor(en, name, env, funs, ens, span) else inferFieldVar(en, name, env, funs, ens, span)
+    case Expr.EVar(en, _) => if (!Type.isEmpty(getTy(env, en))) fieldOf(inferVar(en, env, funs, ens, span), name, ens, span) else if (recordModuleCtor(ens, en, name)) inferBareCtor(name, name, env, funs, ens, span) else if (en == name && recordNamed(ens, name)) bad(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), span) else if (hasEn(ens, en)) inferBareCtor(en, name, env, funs, ens, span) else inferFieldVar(en, name, env, funs, ens, span)
     case _ => fieldOf(infer(recv, env, funs, ens), name, ens, span)
   }
 
@@ -2436,7 +2442,7 @@ def inferMethodEn(en: String, name: String, args: List[Expr], env: List[(String,
   inferMethodQual(Str.concat(en, Str.concat(".", name)), en, name, args, env, funs, ens, e)
 
 def inferMethodQual(q: String, en: String, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
-  if (isKit(q, funs)) inferCall(q, args, env, funs, ens, exprSpan(env, e)) else if (hasEn(ens, en)) inferNamedCtor(en, name, args, env, funs, ens, exprSpan(env, e), ens) else resolveQual(en, name, args, env, funs, ens, e)
+  if (isKit(q, funs)) inferCall(q, args, env, funs, ens, exprSpan(env, e)) else if (recordModuleCtor(ens, en, name)) inferNamedCtor(name, name, args, env, funs, ens, exprSpan(env, e), ens) else if (en == name && recordNamed(ens, name)) bad(Str.concat("unknown constructor ", q), exprSpan(env, e)) else if (hasEn(ens, en)) inferNamedCtor(en, name, args, env, funs, ens, exprSpan(env, e), ens) else resolveQual(en, name, args, env, funs, ens, e)
 
 def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   resolveQualHit(en, name, args, env, funs, ens, ftabGetMod(funs.tab, en, name), e)

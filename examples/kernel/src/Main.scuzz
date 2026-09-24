@@ -12,6 +12,8 @@ record Box[T](x: T)
 
 record PatternFields(label: String, items: List[String])
 
+record ModuleHolder(RemoteMarker: Int)
+
 enum LiteralPacket:
   case Text(value: String)
   case Number(value: Int)
@@ -751,7 +753,10 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"lpati:${describeInts([1, 2])}")
     _ <- IO.println(s"cons:${List.join(consPair("a", "b"), ",")}")
     _ <- IO.println(s"npat:${originX(Point(3, 5))}")
-    _ <- IO.println(s"qualifiedRecord:${qualifiedRecordX(Point(3, 5))}")
+    _ <- IO.println(s"qualifiedRecord:${qualifiedRecordX(Main.Point(3, 5))}")
+    _ <- IO.println(s"remoteRecord:${remoteRecordX(A.RemotePoint(3, 5))}")
+    _ <- IO.println(s"remoteMarker:${remoteMarkerName(A.RemoteMarker)}")
+    _ <- IO.println(s"shadowModule:${shadowModuleField(ModuleHolder(7))}")
     _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
     _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
   } yield ()
@@ -969,6 +974,21 @@ def qualifiedRecordX(p: Point): Int =
     case Main.Point(n, _) => n + 1
     case _ => 0 - 1
   }
+
+def remoteRecordX(p: RemotePoint): Int =
+  p match {
+    case A.RemotePoint(n, _) => n + 1
+    case _ => 0 - 1
+  }
+
+def remoteMarkerName(m: RemoteMarker): String =
+  m match {
+    case A.RemoteMarker => "ok"
+    case _ => "bad"
+  }
+
+def shadowModuleField(A: ModuleHolder): Int =
+  A.RemoteMarker
 
 def namedY(p: Point): Int =
   p match {

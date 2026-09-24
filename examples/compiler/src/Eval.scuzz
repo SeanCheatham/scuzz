@@ -823,7 +823,7 @@ def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg
   }
 
 def methodQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(Check.ftabGetMod(p.funs.tab, en, name), en, name, args, env, p, off)
+  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (Check.recordModuleCtor(p.ens, en, name)) ctorStep(name, name, args, env, p, off) else if (en == name && Check.recordNamed(p.ens, name)) valueStep(errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off)) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(Check.ftabGetMod(p.funs.tab, en, name), en, name, args, env, p, off)
 
 def methodQualDef(hit: List[Fun], en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   if (List.isEmpty(hit)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else defStep(List.at(hit, 0), args, env, p, off)
@@ -911,7 +911,7 @@ def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: In
 
 def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   recv match {
-    case Expr.EVar(en, _) => if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
+    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
     case _ => fieldOf(step(EvStep(recv, env), p), name, env, p, off)
   }
 
