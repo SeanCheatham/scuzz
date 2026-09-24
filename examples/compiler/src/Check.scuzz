@@ -3365,7 +3365,7 @@ def scanControls(src: String, ver: String): List[String] =
   List.concat(scanQuoted(src, "View.button(\"", ver, "control ", 0, []), List.concat(scanQuoted(src, "View.outlinedButton(\"", ver, "control ", 0, []), scanQuoted(src, "View.textButton(\"", ver, "control ", 0, [])))
 
 def scanNeedle(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
-  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.slice(src, i, i + Str.len(needle)) == needle) scanNeedleHit(src, needle, ver, kind, i, acc) else scanNeedle(src, needle, ver, kind, i + 1, acc)
+  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.charAt(src, i) == Str.charAt(needle, 0) && Str.slice(src, i, i + Str.len(needle)) == needle) scanNeedleHit(src, needle, ver, kind, i, acc) else scanNeedle(src, needle, ver, kind, i + 1, acc)
 
 def scanNeedleHit(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
   scanNeedle(src, needle, ver, kind, i + Str.len(needle), identBefore(src, i, kind, ver, acc))
@@ -3380,7 +3380,7 @@ def identTake(src: String, start: Int, end: Int, kind: String, ver: String, acc:
   if (start >= end) acc else unclaimedAdd(Str.concat(kind, Str.slice(src, start, end)), ver, acc)
 
 def scanQuoted(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
-  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.slice(src, i, i + Str.len(needle)) == needle) scanQuotedHit(src, needle, ver, kind, i, acc) else scanQuoted(src, needle, ver, kind, i + 1, acc)
+  if (i + Str.len(needle) > Str.len(src)) acc else if (Str.charAt(src, i) == Str.charAt(needle, 0) && Str.slice(src, i, i + Str.len(needle)) == needle) scanQuotedHit(src, needle, ver, kind, i, acc) else scanQuoted(src, needle, ver, kind, i + 1, acc)
 
 def scanQuotedHit(src: String, needle: String, ver: String, kind: String, i: Int, acc: List[String]): List[String] =
   scanQuoted(src, needle, ver, kind, i + Str.len(needle), unclaimedAdd(Str.concat(kind, quoteTo(src, i + Str.len(needle))), ver, acc))
