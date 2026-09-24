@@ -33,6 +33,7 @@ grep -Fxq 'floatBound:y' /tmp/kernel.out
 grep -Fxq 'floatIndexed:y' /tmp/kernel.out
 grep -Fxq 'floatCons:y' /tmp/kernel.out
 grep -Fxq 'floatCallEq:y' /tmp/kernel.out
+grep -Fxq 'floatBoxEq:y' /tmp/kernel.out
 grep -Fxq 'zipAllN:y' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out

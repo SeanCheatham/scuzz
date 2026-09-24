@@ -1365,7 +1365,7 @@ SzList *sz_list_sort(SzList *xs) {
 SzList *sz_list_sort_float(SzList *xs) {
   if (!xs)
     return NULL;
-  list_require_kind(xs, SZ_RC_BOX, "List.sort: not Float");
+  list_require_kind(xs, SZ_RC_FLOAT_BOX, "List.sort: not Float");
   return list_sort_with(xs, cmp_float_slots);
 }
 
@@ -1438,7 +1438,7 @@ static void *list_extreme_float(SzList *xs, int want_max,
   void *best;
   if (!xs)
     sz_panic(empty_msg);
-  list_require_kind(xs, SZ_RC_BOX,
+  list_require_kind(xs, SZ_RC_FLOAT_BOX,
                     want_max ? "List.max: not Float" : "List.min: not Float");
   best = xs->head;
   for (p = xs->tail; p; p = p->tail) {

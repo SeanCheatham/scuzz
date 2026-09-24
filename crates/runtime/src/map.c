@@ -121,8 +121,8 @@ static int map_seq_cmp(const SzMap *a, const SzMap *b) {
   }
 }
 
-/* Null is less than a value. Two nulls are equal. A boxed scalar uses
- * signed i64 order. A string uses byte order. A list, pair, tagged
+/* Null is less than a value. Two nulls are equal. A boxed Int uses
+ * signed i64 order. A boxed Float puts NaN last. A string uses byte order. A list, pair, tagged
  * value, map, Either, or error uses structure. A function pointer panics. */
 static int value_cmp(const void *a, const void *b) {
   uint32_t ka;
@@ -142,6 +142,18 @@ static int value_cmp(const void *a, const void *b) {
   switch (ka) {
   case SZ_RC_BOX:
     return cmp_i64(sz_unbox_i64(a), sz_unbox_i64(b));
+  case SZ_RC_FLOAT_BOX: {
+    int64_t ab = sz_unbox_i64(a);
+    int64_t bb = sz_unbox_i64(b);
+    double x, y;
+    memcpy(&x, &ab, sizeof(x));
+    memcpy(&y, &bb, sizeof(y));
+    if (x != x)
+      return y != y ? 0 : 1;
+    if (y != y)
+      return -1;
+    return x < y ? -1 : x > y ? 1 : 0;
+  }
   case SZ_RC_STRING:
     return strcmp(sz_string_cstr((const SzString *)a),
                   sz_string_cstr((const SzString *)b));

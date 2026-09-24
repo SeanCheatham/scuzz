@@ -76,6 +76,9 @@ oracle floatIndexCons(): Bool =
 oracle floatCallEq(): Bool =
   Main.floatCallEq()
 
+oracle floatBoxEq(): Bool =
+  Main.floatBoxEq()
+
 oracle floatNaNOrder(): Bool =
   Main.floatNaNOrder()
 
