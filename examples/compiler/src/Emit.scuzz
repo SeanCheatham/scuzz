@@ -1219,7 +1219,7 @@ def emitMapKitResult(f: String, args: List[Expr], s: Slot, prefix: String, defs:
   if ((f == "List.maxBy" || f == "List.minBy" || f == "List.reduceLeft" || f == "List.reduceRight") && isI64Ty(exprRetTyEns(Expr.ECall(f, args, 0), defs, ens, ps, loc))) emitUnboxSlot(s, prefix) else s
 
 def emitMapKitPred(pred: Bool, rt: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitMapKit2(pred, rt, emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), prefix, strs, defs, ens, ps, loc, mapElemTy(List.at(args, 0), defs, ens, ps, loc))
+  emitMapKit2(pred, rt, emitExpr(List.at(args, 0), Str.concat(prefix, "_a0"), strs, defs, ens, ps, loc), if (List.isEmpty(List.tail(args))) Expr.EUnit else List.at(List.tail(args), 0), prefix, strs, defs, ens, ps, loc, if (rt == "sz_stream_unfold") exprRetTyEns(List.at(args, 0), defs, ens, ps, loc) else mapElemTy(List.at(args, 0), defs, ens, ps, loc))
 
 def isIntElem(e: Expr): Bool =
   e match {
@@ -1302,7 +1302,7 @@ def mapLamBody(e: Expr): Expr =
   }
 
 def emitMapKit3(pred: Bool, rt: String, ic: String, iv: String, io: Bool, bind: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, elemTy: String): Slot =
-  emitMapKit4(rt, ic, iv, io, emitNethTy(rt, prefix, bind, body, strs, defs, ens, ps, loc, pred, elemTy), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
+  emitMapKit4(rt, ic, iv, io, emitNethTy(rt, prefix, bind, body, strs, defs, ens, ps, loc, pred, elemTy), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix, elemTy)
 
 def emitNethTy(rt: String, prefix: String, bind: String, body: Expr, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, pred: Bool, elemTy: String): String =
   emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, pred, mapNethBindTy(rt, bind, body, dropParam(ps, bind), defs, elemTy))
@@ -1313,16 +1313,16 @@ def mapNethBindTy(rt: String, bind: String, body: Expr, rest: List[Param], defs:
 def nethIdxPred(rt: String): Bool =
   rt == "sz_verdict_every" || rt == "sz_verdict_any" || rt == "sz_timeline_exists"
 
-def emitMapKit4(rt: String, ic: String, iv: String, io: Bool, neth: String, env: Slot, prefix: String): Slot =
+def emitMapKit4(rt: String, ic: String, iv: String, io: Bool, neth: String, env: Slot, prefix: String, elemTy: String): Slot =
   env match {
-    case Slot(ec, ev, eo) => if (kitBoxLit(iv, io)) emitMapKitBox(rt, ic, iv, neth, ec, ev, eo, prefix) else emitMapKitCall(rt, ic, iv, io, neth, ec, ev, eo, prefix)
+    case Slot(ec, ev, eo) => if (!io && (rt == "sz_stream_unfold" && isI64Ty(elemTy) || kitBoxLit(iv, io))) emitMapKitBox(rt, ic, iv, neth, ec, ev, eo, prefix, elemTy) else emitMapKitCall(rt, ic, iv, io, neth, ec, ev, eo, prefix)
   }
 
 def kitBoxLit(v: String, o: Bool): Bool =
   !o && Str.len(v) > 0 && Str.charAt(v, 0) != 37 && v != "null"
 
-def emitMapKitBox(rt: String, ic: String, iv: String, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
-  Slot(join(neth, join(ic, join(ec, join(line(Str.concat(tmp(prefix, "zb"), Str.concat("call ptr @sz_box_i64(i64 ", Str.concat(iv, ")")))), join(line(mapKitCall(rt, pct(prefix, "zb"), prefix, ev)), join(relPtr(pct(prefix, "zb")), emitFmRel(ev, eo))))))), pct(prefix, "v"), mapKitOwned(rt))
+def emitMapKitBox(rt: String, ic: String, iv: String, neth: String, ec: String, ev: String, eo: Bool, prefix: String, elemTy: String): Slot =
+  Slot(join(neth, join(ic, join(ec, join(boxScalarStem(iv, elemTy, prefix, "zb"), join(line(mapKitCall(rt, pct(prefix, "zb"), prefix, ev)), join(relPtr(pct(prefix, "zb")), emitFmRel(ev, eo))))))), pct(prefix, "v"), mapKitOwned(rt))
 
 def emitMapKitCall(rt: String, ic: String, iv: String, io: Bool, neth: String, ec: String, ev: String, eo: Bool, prefix: String): Slot =
   if (isExtremeRt(rt)) emitMapKitExtreme(rt, ic, iv, io, neth, ec, ev, eo, prefix) else Slot(join(neth, join(ic, join(ec, join(line(mapKitCall(rt, iv, prefix, ev)), join(if (io) relPtr(iv) else "", emitFmRel(ev, eo)))))), pct(prefix, "v"), mapKitOwned(rt))
