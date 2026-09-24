@@ -799,7 +799,7 @@ def floatId(x: Float): Float =
 def floatCallEq(): Bool =
   for {
     nan = 0.0 / 0.0
-  } yield !(floatId(nan) == floatId(nan)) && floatId(1.0) == floatId(1.0) && floatId(1.5) + floatId(2.0) == 3.5
+  } yield !(nan == nan) && !(floatId(nan) == floatId(nan)) && floatId(1.0) == floatId(1.0) && floatId(1.5) + floatId(2.0) == 3.5
 
 def numericZipAll(k: Int): Bool =
   List.zipAll([k], [k, k + 1], k + 2, k + 3) == [(k, k), (k + 2, k + 1)] && List.zipAll([k, k + 1], [k], k + 2, k + 3) == [(k, k), (k + 1, k + 3)]
