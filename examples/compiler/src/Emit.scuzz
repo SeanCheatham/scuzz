@@ -20,6 +20,7 @@ import Parse.Imp
 import Lexer.Tok
 import Lexer.SpTok
 import Check.Ftab
+import Check.LineIndex
 import Type.Ty
 import Check.getTy
 import Check.noEnv
@@ -137,7 +138,7 @@ def internHas(acc: Strs, s: String): Bool =
 def panicLoc(files: List[(String, String)], mod: String, off: Int): String =
   panicLocAt(files, fileIndex(files), mod, off)
 
-def panicLocAt(files: List[(String, String)], lidx: Map[String, List[Int]], mod: String, off: Int): String =
+def panicLocAt(files: List[(String, String)], lidx: Map[String, LineIndex], mod: String, off: Int): String =
   panicLoc2(fileOf(mod), locOfIdx(startsOf(lidx, mod), srcOfStem(files, mod), off))
 
 def panicLoc2(file: String, loc: (Int, Int, Int, Int)): String =
@@ -148,13 +149,13 @@ def panicLoc2(file: String, loc: (Int, Int, Int, Int)): String =
 def panicLocExpr(files: List[(String, String)], e: Expr): String =
   panicLocExprAt(files, fileIndex(files), e)
 
-def panicLocExprAt(files: List[(String, String)], lidx: Map[String, List[Int]], e: Expr): String =
+def panicLocExprAt(files: List[(String, String)], lidx: Map[String, LineIndex], e: Expr): String =
   panicLocExpr2At(files, lidx, Parse.spanOf(e))
 
 def panicLocExpr2(files: List[(String, String)], sp: (String, Int)): String =
   panicLocExpr2At(files, fileIndex(files), sp)
 
-def panicLocExpr2At(files: List[(String, String)], lidx: Map[String, List[Int]], sp: (String, Int)): String =
+def panicLocExpr2At(files: List[(String, String)], lidx: Map[String, LineIndex], sp: (String, Int)): String =
   sp match {
     case (stem, off) => panicLocAt(files, lidx, stem, off)
   }
@@ -4773,10 +4774,10 @@ def defParams2(ps: List[Param]): String =
 def oneParam(p: Param): String =
   if (isI64Ty(p.ty)) Str.concat("i64 %", p.name) else Str.concat("ptr %", p.name)
 
-def emitDefs(ds: List[Fun], strs: Strs, all: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitDefs(ds: List[Fun], strs: Strs, all: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   Builder.result(emitDefsB(ds, strs, all, ens, files, lidx, Builder.empty()))
 
-def emitDefsB(ds: List[Fun], strs: Strs, all: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]], b: Builder): Builder =
+def emitDefsB(ds: List[Fun], strs: Strs, all: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex], b: Builder): Builder =
   if (List.isEmpty(ds)) b else emitDefsB(List.tail(ds), strs, all, ens, files, lidx, Builder.append(b, emitDef(List.at(ds, 0), strs, all, ens, files, lidx)))
 
 def emitDef3(ty: String, name: String, params: String, body: Slot, loc: String, strs: Strs): String =
@@ -4839,10 +4840,10 @@ def i64Args(vals: List[String]): String =
 def oneVal(v: String): String =
   if (isI64Lit(v) || isIntSsa(v)) Str.concat("i64 ", v) else Str.concat("ptr ", v)
 
-def emitDef(d: Fun, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitDef(d: Fun, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitDefRw(rwDef(d, defs, ens), strs, defs, ens, files, lidx)
 
-def emitDefRw(d: Fun, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitDefRw(d: Fun, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   d match {
     case Fun(_, _, name, _, ps, ret, body, mod, off) => emitDefByRet(name, mod, ret, ps, body, strs, defs, ens, panicLocAt(files, lidx, mod, off))
   }
@@ -5445,7 +5446,7 @@ def bindsSelect(i: Int, n: Int, idx: Int): String =
 def bindOrWild(i: Int, idx: Int): String =
   if (i == idx) fakeBind(i) else "_"
 
-def emitMain(body: Expr, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitMain(body: Expr, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   stampNeth(emitMain2(emitExpr(rwFields(body, noEnv(), defs, ens, "Main"), "build", strs, defs, ens, noParam(), panicLocExprAt(files, lidx, body)), defs, strs, ens, panicLocExprAt(files, lidx, body)), "Main")
 
 def emitMain2(s: Slot, defs: Ftab, strs: Strs, ens: List[En], loc: String): String =
@@ -5530,23 +5531,23 @@ def internRelDefs(ds: List[Fun], acc: Strs): Strs =
 def internRelDef(d: Fun, acc: Strs): Strs =
   if (isRelFun(d) || isSessFun(d)) intern(acc, d.name) else if (isDrv(d)) intern(acc, drvRegName(d.name)) else acc
 
-def internSigProg(p: Prog, files: List[(String, String)], lidx: Map[String, List[Int]], acc: Strs): Strs =
+def internSigProg(p: Prog, files: List[(String, String)], lidx: Map[String, LineIndex], acc: Strs): Strs =
   p match {
     case Prog(_, _, _, _, impls, _, defs, _, body) => internSigDefs(defs, files, lidx, internSigImpls(impls, files, lidx, internBranch(body, panicLocExprAt(files, lidx, body), intern(internSigExpr(body, acc), panicLocExprAt(files, lidx, body)))))
   }
 
-def internSigImpls(xs: List[Im], files: List[(String, String)], lidx: Map[String, List[Int]], acc: Strs): Strs =
+def internSigImpls(xs: List[Im], files: List[(String, String)], lidx: Map[String, LineIndex], acc: Strs): Strs =
   if (List.isEmpty(xs)) acc else internSigImpls(List.tail(xs), files, lidx, internSigImpl(List.at(xs, 0), files, lidx, acc))
 
-def internSigImpl(x: Im, files: List[(String, String)], lidx: Map[String, List[Int]], acc: Strs): Strs =
+def internSigImpl(x: Im, files: List[(String, String)], lidx: Map[String, LineIndex], acc: Strs): Strs =
   x match {
     case Im(_, _, forTy, methods) => internSigDefs(stampMod(methods, forTy, noFun()), files, lidx, acc)
   }
 
-def internSigDefs(ds: List[Fun], files: List[(String, String)], lidx: Map[String, List[Int]], acc: Strs): Strs =
+def internSigDefs(ds: List[Fun], files: List[(String, String)], lidx: Map[String, LineIndex], acc: Strs): Strs =
   if (List.isEmpty(ds)) acc else internSigDefs(List.tail(ds), files, lidx, internSigDef(List.at(ds, 0), files, lidx, acc))
 
-def internSigDef(d: Fun, files: List[(String, String)], lidx: Map[String, List[Int]], acc: Strs): Strs =
+def internSigDef(d: Fun, files: List[(String, String)], lidx: Map[String, LineIndex], acc: Strs): Strs =
   d match {
     case Fun(_, _, _, _, _, _, body, mod, off) => internBranch(body, panicLocAt(files, lidx, mod, off), internSigExpr(body, intern(acc, panicLocAt(files, lidx, mod, off))))
   }
@@ -6003,7 +6004,7 @@ def packKindAt(ps: List[Param], place: Int, acc: Int): Int =
 def kindOf(p: Param): Int =
   if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
-def emitProg(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitProg(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitBits(Check.expandExpr(p.body, p.aliases), Check.ftabOfList(prepDefs(p)), internReady(strs), Parse.builtins(p.enums), files, lidx)
 
 def prepDefs(p: Prog): List[Fun] =
@@ -6060,19 +6061,19 @@ def rwAliasApply(a: Alias, t: String, rest: List[Alias]): String =
 def rwAliasPrefix(target: String, n: String, t: String): String =
   Str.concat(tyHead(target), Str.slice(t, Str.len(n), Str.len(t)))
 
-def emitBits(body: Expr, defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitBits(body: Expr, defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitBitsHeld(body :: noExpr(), defs, strs, ens, files, lidx)
 
-def emitBitsHeld(held: List[Expr], defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitBitsHeld(held: List[Expr], defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitBitsFromConts(emitConts(List.at(held, 0), strs, defs, ens, noParam(), panicLocExprAt(files, lidx, List.at(held, 0))), held, defs, strs, ens, files, lidx)
 
-def emitBitsFromConts(conts: String, held: List[Expr], defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitBitsFromConts(conts: String, held: List[Expr], defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitBitsJoin(emitMainIf(List.at(held, 0), strs, defs, ens, files, lidx), conts, defs, strs, ens, files, lidx)
 
-def emitBitsJoin(main: String, conts: String, defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitBitsJoin(main: String, conts: String, defs: Ftab, strs: Strs, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   Str.concat(emitConsts(strs.xs, 0), Str.concat(if (List.isEmpty(strs.xs)) "" else nl(), hoistNeth(Str.concat(conts, Str.concat(emitDefs(defs.list, strs, defs, ens, files, lidx), main)))))
 
-def emitMainIf(body: Expr, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitMainIf(body: Expr, strs: Strs, defs: Ftab, ens: List[En], files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   if (isEmptyMain(body)) "" else emitMain(body, strs, defs, ens, files, lidx)
 
 def isEmptyMain(e: Expr): Bool =
@@ -6536,7 +6537,7 @@ def emit(src: String): String =
 def emitOne(p: Prog, strs: Strs, files: List[(String, String)]): String =
   emitOneIdx(p, strs, files, fileIndex(files))
 
-def emitOneIdx(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitOneIdx(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitProg(p, internSigProg(p, files, lidx, strs), files, lidx)
 
 def internFiles(files: List[(String, String)], acc: Strs): Strs =
@@ -6553,7 +6554,7 @@ def emitFiles(files: List[(String, String)]): String =
 def emitFilesGot(p: Prog, strs: Strs, files: List[(String, String)]): String =
   emitFilesIdx(p, strs, files, fileIndex(files))
 
-def emitFilesIdx(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, List[Int]]): String =
+def emitFilesIdx(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitProg(p, internSigProg(p, files, lidx, internRel(p, strs)), files, lidx)
 
 def decl(s: String): String =

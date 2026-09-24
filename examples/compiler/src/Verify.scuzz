@@ -13,6 +13,7 @@ import Parse.EnCase
 import Parse.Im
 import Parse.pretty
 import Check.Out
+import Check.LineIndex
 import Type.Ty
 
 def nl(): String =
@@ -696,64 +697,64 @@ def sameFileHd(x: (String, String), y: (String, String)): Bool =
 def coverageBothBuilt(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String]): (List[(String, Bool)], List[(String, Bool)]) =
   coverageBothIdx(p, expected, built, files, compiled, hits, Check.fileIndex(files), Check.fileIndex(compiled))
 
-def coverageBothIdx(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): (List[(String, Bool)], List[(String, Bool)]) =
+def coverageBothIdx(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): (List[(String, Bool)], List[(String, Bool)]) =
   (coverageProgRows(p, expected, built, files, compiled, hits, lidx, cidx), branchProgRows(p, expected, built, files, compiled, hits, lidx, cidx))
 
-def coverageProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def coverageProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   List.distinct(List.concat(coverageDefs(Check.implFuns(p.impls, p.defs), Check.ftabOf(Check.implFuns(expected.impls, expected.defs)), Check.ftabOf(Check.implFuns(built.impls, built.defs)), files, compiled, hits, lidx, cidx), if (p.main == "") [] else [(Emit.panicLocExprAt(files, lidx, p.body), Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocExprAt(compiled, cidx, built.body)))]))
 
-def coverageDefs(defs: List[Fun], expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def coverageDefs(defs: List[Fun], expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   if (List.isEmpty(defs)) [] else coverageDef(List.at(defs, 0), expected, built, files, compiled, hits, lidx, cidx) :: coverageDefs(List.tail(defs), expected, built, files, compiled, hits, lidx, cidx)
 
-def coverageDef(d: Fun, expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): (String, Bool) =
+def coverageDef(d: Fun, expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): (String, Bool) =
   (Emit.panicLocAt(files, lidx, d.mod, d.off), coverageMatched(Check.ftabGetMod(expected, d.mod, d.name), Check.ftabGetMod(built, d.mod, d.name), compiled, hits, cidx))
 
-def coverageMatched(expected: List[Fun], built: List[Fun], compiled: List[(String, String)], hits: List[String], cidx: Map[String, List[Int]]): Bool =
+def coverageMatched(expected: List[Fun], built: List[Fun], compiled: List[(String, String)], hits: List[String], cidx: Map[String, LineIndex]): Bool =
   if (List.isEmpty(expected) || List.isEmpty(built)) false else coverageBody(List.at(expected, 0), List.at(built, 0), compiled, hits, cidx)
 
-def coverageBody(expected: Fun, built: Fun, compiled: List[(String, String)], hits: List[String], cidx: Map[String, List[Int]]): Bool =
+def coverageBody(expected: Fun, built: Fun, compiled: List[(String, String)], hits: List[String], cidx: Map[String, LineIndex]): Bool =
   Parse.pretty0(expected.body) == Parse.pretty0(built.body) && List.contains(hits, Emit.panicLocAt(compiled, cidx, built.mod, built.off))
 
 def branchRowsOf(files: List[(String, String)], compiled: List[(String, String)], hits: String): List[(String, Bool)] =
   coverageBoth(files, compiled, hits)._2
 
-def branchProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchProgRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   List.concat(branchDefs(Check.implFuns(p.impls, p.defs), Check.ftabOf(Check.implFuns(expected.impls, expected.defs)), Check.ftabOf(Check.implFuns(built.impls, built.defs)), files, compiled, hits, lidx, cidx), branchMainRows(p, expected, built, files, compiled, hits, lidx, cidx))
 
-def branchDefs(defs: List[Fun], expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchDefs(defs: List[Fun], expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   if (List.isEmpty(defs)) [] else List.concat(branchDefRows(List.at(defs, 0), expected, built, files, compiled, hits, lidx, cidx), branchDefs(List.tail(defs), expected, built, files, compiled, hits, lidx, cidx))
 
-def branchDefRows(d: Fun, expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchDefRows(d: Fun, expected: Map[String, List[Fun]], built: Map[String, List[Fun]], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   branchDefMatched(d, Check.ftabGetMod(expected, d.mod, d.name), Check.ftabGetMod(built, d.mod, d.name), files, compiled, hits, branchSites(d.body, 0), lidx, cidx)
 
-def branchDefMatched(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], sites: List[(Int, String)], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchDefMatched(d: Fun, expected: List[Fun], built: List[Fun], files: List[(String, String)], compiled: List[(String, String)], hits: List[String], sites: List[(Int, String)], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   if (List.isEmpty(expected) || List.isEmpty(built) || Parse.pretty0(List.at(expected, 0).body) != Parse.pretty0(List.at(built, 0).body)) branchMissRows(files, d, sites, lidx) else branchZipRows(files, d, compiled, List.at(built, 0), hits, sites, branchSites(List.at(built, 0).body, 0), lidx, cidx)
 
-def branchMissRows(files: List[(String, String)], d: Fun, sites: List[(Int, String)], lidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchMissRows(files: List[(String, String)], d: Fun, sites: List[(Int, String)], lidx: Map[String, LineIndex]): List[(String, Bool)] =
   if (List.isEmpty(sites)) [] else (Emit.panicLocAt(files, lidx, d.mod, sitesOff(List.at(sites, 0))), false) :: branchMissRows(files, d, List.tail(sites), lidx)
 
 def sitesOff(site: (Int, String)): Int =
   site._1
 
-def branchZipRows(files: List[(String, String)], d: Fun, compiled: List[(String, String)], bd: Fun, hits: List[String], live: List[(Int, String)], built: List[(Int, String)], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchZipRows(files: List[(String, String)], d: Fun, compiled: List[(String, String)], bd: Fun, hits: List[String], live: List[(Int, String)], built: List[(Int, String)], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   if (List.isEmpty(live) || List.isEmpty(built)) branchMissRows(files, d, live, lidx) else branchZipRow(files, d, compiled, bd, hits, List.at(live, 0), List.at(built, 0), lidx, cidx) :: branchZipRows(files, d, compiled, bd, hits, List.tail(live), List.tail(built), lidx, cidx)
 
-def branchZipRow(files: List[(String, String)], d: Fun, compiled: List[(String, String)], bd: Fun, hits: List[String], live: (Int, String), built: (Int, String), lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): (String, Bool) =
+def branchZipRow(files: List[(String, String)], d: Fun, compiled: List[(String, String)], bd: Fun, hits: List[String], live: (Int, String), built: (Int, String), lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): (String, Bool) =
   (Emit.panicLocAt(files, lidx, d.mod, live._1), List.contains(hits, Check.covKeyOf(Emit.panicLocAt(compiled, cidx, bd.mod, bd.off), built._1, built._2)))
 
-def branchMainRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, List[Int]], cidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchMainRows(p: Prog, expected: Prog, built: Prog, files: List[(String, String)], compiled: List[(String, String)], hits: List[String], lidx: Map[String, LineIndex], cidx: Map[String, LineIndex]): List[(String, Bool)] =
   if (p.main == "" || Parse.pretty0(expected.body) != Parse.pretty0(built.body)) [] else branchMainZip(files, compiled, hits, branchSites(p.body, 0), branchSites(built.body, 0), panicLocMain(compiled, cidx, built.body), lidx)
 
-def panicLocMain(files: List[(String, String)], cidx: Map[String, List[Int]], body: Expr): String =
+def panicLocMain(files: List[(String, String)], cidx: Map[String, LineIndex], body: Expr): String =
   Emit.panicLocExprAt(files, cidx, body)
 
-def branchMainZip(files: List[(String, String)], compiled: List[(String, String)], hits: List[String], live: List[(Int, String)], built: List[(Int, String)], locBuilt: String, lidx: Map[String, List[Int]]): List[(String, Bool)] =
+def branchMainZip(files: List[(String, String)], compiled: List[(String, String)], hits: List[String], live: List[(Int, String)], built: List[(Int, String)], locBuilt: String, lidx: Map[String, LineIndex]): List[(String, Bool)] =
   if (List.isEmpty(live)) [] else if (List.isEmpty(built)) branchMainMiss(files, List.at(live, 0), lidx) :: branchMainZip(files, compiled, hits, List.tail(live), built, locBuilt, lidx) else branchMainRow(files, hits, List.at(live, 0), List.at(built, 0), locBuilt, lidx) :: branchMainZip(files, compiled, hits, List.tail(live), List.tail(built), locBuilt, lidx)
 
-def branchMainMiss(files: List[(String, String)], site: (Int, String), lidx: Map[String, List[Int]]): (String, Bool) =
+def branchMainMiss(files: List[(String, String)], site: (Int, String), lidx: Map[String, LineIndex]): (String, Bool) =
   (Emit.panicLocAt(files, lidx, "Main", site._1), false)
 
-def branchMainRow(files: List[(String, String)], hits: List[String], live: (Int, String), built: (Int, String), locBuilt: String, lidx: Map[String, List[Int]]): (String, Bool) =
+def branchMainRow(files: List[(String, String)], hits: List[String], live: (Int, String), built: (Int, String), locBuilt: String, lidx: Map[String, LineIndex]): (String, Bool) =
   (Emit.panicLocAt(files, lidx, "Main", live._1), List.contains(hits, Check.covKeyOf(locBuilt, built._1, built._2)))
 
 def branchSites(e: Expr, parentOff: Int): List[(Int, String)] =

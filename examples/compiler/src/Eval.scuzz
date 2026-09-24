@@ -34,7 +34,7 @@ record EvStep(e: Expr, env: EvEnv)
 
 record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, List[Int]], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]])
 
 import Parse.Expr
 import Parse.Fun
@@ -45,6 +45,7 @@ import Parse.Arm
 import Parse.Param
 import Parse.Bind
 import Check.Ftab
+import Check.LineIndex
 
 def noVars(): List[(String, Value)] =
   []
