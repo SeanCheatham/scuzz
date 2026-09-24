@@ -329,15 +329,33 @@ def tokenIntsTok(tok: Tok, rest: List[SpTok], src: String, starts: List[Int], of
   tokenIntsTy(tokTypeK(Lexer.kind(tok)), tok, rest, src, starts, off, pl, pc, acc)
 
 def tokenIntsTy(ty: Int, tok: Tok, rest: List[SpTok], src: String, starts: List[Int], off: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
-  if (ty < 0) tokenInts(rest, src, starts, pl, pc, acc) else tokenIntsLoc(Check.locOfIdx(starts, src, off), tokLen(tok, src, off), ty, rest, src, starts, pl, pc, acc)
+  if (ty < 0) tokenInts(rest, src, starts, pl, pc, acc) else tokenIntsSegments(src, starts, rest, off, off + tokLen(tok, src, off), ty, pl, pc, acc)
 
-def tokenIntsLoc(loc: (Int, Int, Int, Int), n: Int, ty: Int, rest: List[SpTok], src: String, starts: List[Int], pl: Int, pc: Int, acc: List[Int]): List[Int] =
+def tokenLineEnd(src: String, i: Int, end: Int): Int =
+  if (i >= end || Str.charAt(src, i) == 10) i else tokenLineEnd(src, i + 1, end)
+
+def tokenLineTextEnd(src: String, i: Int, stop: Int, end: Int): Int =
+  if (stop < end && stop > i && Str.charAt(src, stop - 1) == 13) stop - 1 else stop
+
+def tokenIntsSegments(src: String, starts: List[Int], rest: List[SpTok], i: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+  if (i >= end) tokenInts(rest, src, starts, pl, pc, acc) else tokenIntsSegmentAt(src, starts, rest, i, tokenLineEnd(src, i, end), end, ty, pl, pc, acc)
+
+def tokenIntsSegmentAt(src: String, starts: List[Int], rest: List[SpTok], i: Int, stop: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+  tokenIntsSegmentText(src, starts, rest, i, stop, tokenLineTextEnd(src, i, stop, end), end, ty, pl, pc, acc)
+
+def tokenIntsSegmentText(src: String, starts: List[Int], rest: List[SpTok], i: Int, stop: Int, textEnd: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+  if (textEnd <= i) tokenIntsSegments(src, starts, rest, stop + 1, end, ty, pl, pc, acc) else tokenIntsSegmentLoc(Check.lineColIdx(starts, src, i), src, starts, rest, i, stop, textEnd, end, ty, pl, pc, acc)
+
+def tokenIntsSegmentLoc(loc: (Int, Int), src: String, starts: List[Int], rest: List[SpTok], i: Int, stop: Int, textEnd: Int, end: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
   loc match {
-    case (line, col, _, _) => tokenIntsDelta(line - 1, col - 1, n, ty, rest, src, starts, pl, pc, acc)
+    case (line, col) => tokenIntsSegmentEmit(src, starts, rest, stop, end, ty, line - 1, col - 1, tokenIntsAcc(line - 1, col - 1, textEnd - i, ty, pl, pc, acc))
   }
 
-def tokenIntsDelta(ll: Int, cc: Int, n: Int, ty: Int, rest: List[SpTok], src: String, starts: List[Int], pl: Int, pc: Int, acc: List[Int]): List[Int] =
-  tokenInts(rest, src, starts, ll, cc, 0 :: ty :: (if (n < 1) 1 else n) :: (if (ll == pl) cc - pc else cc) :: ll - pl :: acc)
+def tokenIntsSegmentEmit(src: String, starts: List[Int], rest: List[SpTok], stop: Int, end: Int, ty: Int, ll: Int, cc: Int, acc: List[Int]): List[Int] =
+  if (stop >= end) tokenInts(rest, src, starts, ll, cc, acc) else tokenIntsSegments(src, starts, rest, stop + 1, end, ty, ll, cc, acc)
+
+def tokenIntsAcc(ll: Int, cc: Int, n: Int, ty: Int, pl: Int, pc: Int, acc: List[Int]): List[Int] =
+  0 :: ty :: n :: (if (ll == pl) cc - pc else cc) :: ll - pl :: acc
 
 def tokensJoin(xs: List[Int]): String =
   if (List.isEmpty(xs)) "" else tokensJoinGo(xs, Builder.empty())
