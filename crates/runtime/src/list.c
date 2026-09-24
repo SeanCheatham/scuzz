@@ -79,10 +79,14 @@ int64_t sz_list_len(const SzList *xs) {
 }
 
 void *sz_list_at(const SzList *xs, int64_t index) {
-  const SzList *p = xs;
-  int64_t i = 0;
-  if (index < 0)
+  const SzList *p;
+  int64_t i;
+  if (index < 0 || !xs)
     sz_panic("List.at out of bounds");
+  if (index == 0)
+    return xs->head;
+  p = xs->tail;
+  i = 1;
   while (p) {
     if (i == index)
       return p->head;
