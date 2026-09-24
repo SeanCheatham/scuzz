@@ -671,7 +671,7 @@ def listProof(): IO[Unit] =
 def numericListElements(k: Int): Bool =
   for {
     xs = [k, k + 1, k]
-  } yield List.contains(xs, k) && !List.contains(xs, k + 2) && List.indexOf(xs, k) == 0 && List.lastIndexOf(xs, k) == 2 && List.append(xs, k + 2) == [k, k + 1, k, k + 2] && List.intersperse([k, k + 1], k) == [k, k, k + 1]
+  } yield List.contains(xs, k) && !List.contains(xs, k + 2) && List.indexOf(xs, k) == 0 && List.lastIndexOf(xs, k) == 2 && List.append(xs, k + 2) == [k, k + 1, k, k + 2] && List.intersperse([k, k + 1], k) == [k, k, k + 1] && List.fill(2, k) == [k, k] && List.padTo([k], 3, k + 1) == [k, k + 1, k + 1] && List.setAt(xs, 1, k + 2) == [k, k + 2, k] && List.getOrElse(xs, 1, k + 3) == k + 1 && List.getOrElse(xs, 9, k + 3) == k + 3
 
 def describeList(xs: List[String]): String =
   xs match {
