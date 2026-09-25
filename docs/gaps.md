@@ -37,7 +37,7 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 Resolve these gaps when they prevent ordinary language use.
 
-1. **Compile-time performance** — `scuzz check examples/compiler` takes about 6 s on this host. `scuzz build --full examples/tyck` takes about 15 s. Measure both commands after each compile-time change. Further work must reduce the cost of checking and emitted LLVM text.
+1. **Compile-time performance** — `scuzz check examples/compiler` takes about 4.5 s on this host. `scuzz build --full examples/tyck` takes about 16.5 s. Measure both commands after each compile-time change. Further work must reduce the cost of checking and emitted LLVM text.
 
 ### Table-stakes
 

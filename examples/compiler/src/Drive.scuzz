@@ -715,7 +715,7 @@ def checkDirListed(dir: String, json: Bool, deps: List[(String, String)], ents: 
   readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => checkDriveNames(dir, json, deps, own, ents))
 
 def checkDriveNames(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  fuzzReadScenario(dir).flatMap(scn => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGo(dir, json, deps, own, scn, vers, Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)))))
+  fuzzReadScenario(dir).flatMap(scn => fuzzVerSrcs(dir).flatMap(vers => checkDriveNamesGo(dir, json, deps, own, scn, vers, if (List.isEmpty(vers)) Verify.noStr() else Verify.oracleNamesEns(vers, Verify.ensOfFiles(own)))))
 
 def checkDriveNamesGo(dir: String, json: Bool, deps: List[(String, String)], own: List[(String, String)], scn: String, vers: List[String], oracles: List[String]): IO[Unit] =
   checkDriveNamesRule(dir, json, deps, own, Verify.ruleFirst(Verify.driveRule(List.concat(oracles, Verify.scenarioDrvNames(scn))), Verify.driveClaimRule(vers, Verify.driveClaimNames(scn, oracles))))
