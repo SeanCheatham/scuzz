@@ -757,6 +757,8 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"remoteRecord:${remoteRecordX(A.RemotePoint(y = 5, x = 3))}")
     _ <- IO.println(s"remoteMarker:${remoteMarkerName(A.RemoteMarker)}")
     _ <- IO.println(s"remoteBox:${remoteBoxValue(A.RemoteBox(7))}")
+    _ <- IO.println(s"remotePairDigits:${remotePairDigits(A.RemotePair(right = 4, left = 3))}")
+    _ <- IO.println(s"remotePairText:${remotePairText(A.RemotePair(right = "b", left = "a"))}")
     _ <- IO.println(s"shadowModule:${shadowModuleField(ModuleHolder(7))}")
     _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
     _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
@@ -990,6 +992,14 @@ def remoteMarkerName(m: RemoteMarker): String =
 
 def remoteBoxValue(b: RemoteBox[Int]): Int =
   b.value
+
+def remotePairDigits(p: RemotePair[Int]): Int =
+  p.left * 10 + p.right
+
+def remotePairText(p: RemotePair[String]): String =
+  p match {
+    case A.RemotePair(left = a, right = b) => Str.concat(a, b)
+  }
 
 def shadowModuleField(A: ModuleHolder): Int =
   A.RemoteMarker

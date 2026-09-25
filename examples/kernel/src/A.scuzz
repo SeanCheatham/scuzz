@@ -8,6 +8,8 @@ record RemoteMarker()
 
 record RemoteBox[T](value: T)
 
+record RemotePair[T](left: T, right: T)
+
 type Tag = String
 def one(): Int =
   1
