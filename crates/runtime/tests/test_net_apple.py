@@ -115,8 +115,15 @@ def prove_ios(cli, project, temp, env):
     phone = next(t for t in runtime["supportedDeviceTypes"] if t["productFamily"] == "iPhone")
     device = subprocess.check_output(["xcrun", "simctl", "create", "Scuzz Net proof", phone["identifier"], runtime["identifier"]], text=True).strip()
     try:
-        subprocess.run(["xcrun", "simctl", "boot", device], check=True)
-        subprocess.run(["xcrun", "simctl", "bootstatus", device, "-b"], check=True, timeout=180)
+        # First boot can stall in data migration. Retry a fresh boot.
+        for attempt in range(2):
+            subprocess.run(["xcrun", "simctl", "boot", device], check=True)
+            try:
+                subprocess.run(["xcrun", "simctl", "bootstatus", device, "-b"], check=True, timeout=420)
+                break
+            except subprocess.TimeoutExpired:
+                if attempt == 1: raise
+                subprocess.run(["xcrun", "simctl", "shutdown", device], capture_output=True)
         subprocess.run(["xcrun", "simctl", "keychain", device, "add-root-cert", str(temp / "cert")], check=True)
         subprocess.run([cli, "package", "--target", "ios", str(project)], check=True)
         ios = project / "build/ios-sim"
