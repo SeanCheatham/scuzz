@@ -6,6 +6,8 @@ record RemotePoint(x: Int, y: Int)
 
 record RemoteMarker()
 
+record RemoteBox[T](value: T)
+
 type Tag = String
 def one(): Int =
   1
