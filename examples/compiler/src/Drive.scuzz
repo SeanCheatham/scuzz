@@ -21,6 +21,7 @@ import Mutate.MutStore
 import Mutate.StoreDef
 import Parse.En
 import Parse.Prog
+import Emit.Strs
 import Eval.Value
 import Eval.EvProg
 
@@ -226,13 +227,18 @@ def compileFiles(toml: String, files: List[(String, String)], outDir: String, cl
   compileFiles2(Manifest.parse(toml), files, outDir, clang, lib)
 
 def compileFiles2(m: Man, files: List[(String, String)], outDir: String, clang: String, lib: String): PkgOut =
-  if (!m.ok) PkgOut(false, "", "", "", "", m.err) else compileFilesParsed(m, files, Parse.parseFiles(files), outDir, clang, lib)
+  if (!m.ok) PkgOut(false, "", "", "", "", m.err) else compileFilesPair(m, files, Emit.parseInternFiles(files), outDir, clang, lib)
 
-def compileFilesParsed(m: Man, files: List[(String, String)], p: Prog, outDir: String, clang: String, lib: String): PkgOut =
-  compileFilesChecked(m, files, p, Check.check3(files, Check.checkProgOwn(p, [])), outDir, clang, lib)
+def compileFilesPair(m: Man, files: List[(String, String)], parsed: (Prog, Strs), outDir: String, clang: String, lib: String): PkgOut =
+  parsed match {
+    case (p, strs) => compileFilesParsed(m, files, p, strs, outDir, clang, lib)
+  }
 
-def compileFilesChecked(m: Man, files: List[(String, String)], p: Prog, diags: String, outDir: String, clang: String, lib: String): PkgOut =
-  if (diags != "[]") PkgOut(false, m.name, "", "", "", diags) else compileFilesOk(m, Str.concat(Emit.preamble(), Emit.emitFilesGot(p, Emit.internFiles(files, Emit.emptyStrs()), files)), outDir, clang, lib)
+def compileFilesParsed(m: Man, files: List[(String, String)], p: Prog, strs: Strs, outDir: String, clang: String, lib: String): PkgOut =
+  compileFilesChecked(m, files, p, strs, Check.check3(files, Check.checkProgOwn(p, [])), outDir, clang, lib)
+
+def compileFilesChecked(m: Man, files: List[(String, String)], p: Prog, strs: Strs, diags: String, outDir: String, clang: String, lib: String): PkgOut =
+  if (diags != "[]") PkgOut(false, m.name, "", "", "", diags) else compileFilesOk(m, Str.concat(Emit.preamble(), Emit.emitFilesGot(p, strs, files)), outDir, clang, lib)
 
 def compileFilesOk(m: Man, ll: String, outDir: String, clang: String, lib: String): PkgOut =
   PkgOut(true, m.name, ll, llName(outDir, m.name), linkLine(clang, llName(outDir, m.name), lib, exeName(outDir, m.name)), "[]")

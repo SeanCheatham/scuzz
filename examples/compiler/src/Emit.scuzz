@@ -6592,16 +6592,27 @@ def emitOne(p: Prog, strs: Strs, files: List[(String, String)]): String =
 def emitOneIdx(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitProg(p, internSigProg(p, files, lidx, strs), files, lidx)
 
-def internFiles(files: List[(String, String)], acc: Strs): Strs =
-  if (List.isEmpty(files)) intern(acc, "guard") else internFiles2(List.at(files, 0), List.tail(files), acc)
+def parseInternFiles(files: List[(String, String)]): (Prog, Strs) =
+  parseInternFilesGo(files, Parse.emptyProg(), emptyStrs())
 
-def internFiles2(f: (String, String), rest: List[(String, String)], acc: Strs): Strs =
+def parseInternFilesGo(files: List[(String, String)], p: Prog, strs: Strs): (Prog, Strs) =
+  if (List.isEmpty(files)) (p, intern(strs, "guard")) else parseInternFilesHead(List.at(files, 0), List.tail(files), p, strs)
+
+def parseInternFilesHead(f: (String, String), rest: List[(String, String)], p: Prog, strs: Strs): (Prog, Strs) =
   f match {
-    case (_, src) => internFiles(rest, collectToks(Lexer.lex(src), acc))
+    case (stem, src) => parseInternFilesToks(stem, Lexer.lexStem(src, stem), rest, p, strs)
   }
 
+def parseInternFilesToks(stem: String, toks: List[SpTok], rest: List[(String, String)], p: Prog, strs: Strs): (Prog, Strs) =
+  parseInternFilesGo(rest, Parse.merge(p, Parse.stampDefs(stem, Parse.parse(toks))), collectToks(toks, strs))
+
 def emitFiles(files: List[(String, String)]): String =
-  emitFilesGot(Parse.parseFiles(files), internFiles(files, emptyStrs()), files)
+  emitFilesParsed(parseInternFiles(files), files)
+
+def emitFilesParsed(parsed: (Prog, Strs), files: List[(String, String)]): String =
+  parsed match {
+    case (p, strs) => emitFilesGot(p, strs, files)
+  }
 
 def emitFilesGot(p: Prog, strs: Strs, files: List[(String, String)]): String =
   emitFilesIdx(p, strs, files, fileIndex(files))
