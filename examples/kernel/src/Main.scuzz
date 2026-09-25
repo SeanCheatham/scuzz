@@ -761,6 +761,8 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"remotePairText:${remotePairText(A.RemotePair(right = "b", left = "a"))}")
     _ <- IO.println(s"remotePairTemp:${remotePairTemp()}")
     _ <- IO.println(s"remotePairTempInt:${remotePairTempInt()}")
+    _ <- IO.println(s"remotePairCallField:${remotePairCallField()}")
+    _ <- IO.println(s"remotePairCallText:${remotePairCallText()}")
     _ <- IO.println(s"shadowModule:${shadowModuleField(ModuleHolder(7))}")
     _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
     _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
@@ -1008,6 +1010,18 @@ def remotePairTemp(): String =
 
 def remotePairTempInt(): Int =
   A.RemotePair(right = 4, left = 3).left
+
+def makeRemotePair(): RemotePair[Int] =
+  A.RemotePair(right = 4, left = 3)
+
+def remotePairCallField(): Int =
+  makeRemotePair().left
+
+def makeRemotePairText(): RemotePair[String] =
+  A.RemotePair(right = "b", left = "a")
+
+def remotePairCallText(): String =
+  makeRemotePairText().right
 
 def shadowModuleField(A: ModuleHolder): Int =
   A.RemoteMarker

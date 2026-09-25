@@ -57,6 +57,8 @@ grep -Fxq 'remotePairDigits:34' /tmp/kernel.out
 grep -Fxq 'remotePairText:ab' /tmp/kernel.out
 grep -Fxq 'remotePairTemp:a' /tmp/kernel.out
 grep -Fxq 'remotePairTempInt:3' /tmp/kernel.out
+grep -Fxq 'remotePairCallField:3' /tmp/kernel.out
+grep -Fxq 'remotePairCallText:b' /tmp/kernel.out
 grep -Fxq 'shadowModule:7' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out
