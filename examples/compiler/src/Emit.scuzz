@@ -5350,19 +5350,11 @@ def rwField(recv: Expr, name: String, off: Int, env: List[(String, Ty)], funs: F
 def rwFieldVar(en: String, name: String, off: Int, env: List[(String, Ty)], ens: List[En]): Expr =
   if (hasEn(ens, en)) Expr.EField(Expr.EVar(en, 0), name, off) else rwFieldTy(Expr.EVar(en, 0), name, off, Type.show(getTy(env, en)), ens)
 
-def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, off: Int, _env: List[(String, Ty)], funs: Ftab, ens: List[En]): Expr =
-  r match {
-    case Expr.EVar(mod, _) => rwFieldQualHit(m, args, name, off, ens, findDefMod(funs, mod, m))
-    case _ => rwFieldTy(Expr.EMethod(r, m, args, 0), name, off, copyEn(Expr.EMethod(r, m, args, 0), ens, funs), ens)
-  }
+def rwFieldMethod(r: Expr, m: String, args: List[Expr], name: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Expr =
+  rwFieldMethodRecv(Expr.EMethod(r, m, args, 0), name, off, env, funs, ens)
 
-def rwFieldQualHit(m: String, args: List[Expr], name: String, off: Int, ens: List[En], hit: List[Fun]): Expr =
-  if (List.isEmpty(hit)) Expr.EField(Expr.EMethod(Expr.EVar("", 0), m, args, 0), name, off) else rwFieldQualFun(m, args, name, off, ens, List.at(hit, 0))
-
-def rwFieldQualFun(m: String, args: List[Expr], name: String, off: Int, ens: List[En], d: Fun): Expr =
-  d match {
-    case Fun(_, _, _, _, _, ret, _, mod, _) => rwFieldTy(Expr.EMethod(Expr.EVar(mod, 0), m, args, 0), name, off, ret, ens)
-  }
+def rwFieldMethodRecv(recv: Expr, name: String, off: Int, env: List[(String, Ty)], funs: Ftab, ens: List[En]): Expr =
+  rwFieldTy(recv, name, off, Check.tyStr(Check.infer(recv, env, funs, ens)), ens)
 
 def rwFieldTy(recv: Expr, name: String, off: Int, ty: String, ens: List[En]): Expr =
   if (isTupTy(ty)) tupField(recv, name, ty, off) else recField(recv, name, off, recNames(ens, ty), ty, ens)
