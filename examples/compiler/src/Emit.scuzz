@@ -3849,14 +3849,14 @@ def fieldTy2(dot: Int, core: String, ens: List[En]): String =
   if (dot < 0) fieldTyBare(core, ens) else caseFieldTy(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
 
 def fieldTyBare(core: String, ens: List[En]): String =
-  if (enOfCase(ens, core) == "") recFirstTy(Check.specializeEnums(ens, core), core) else caseFieldTy(ens, enOfCase(ens, core), core)
+  if (enOfCase(ens, core) == "") recFirstTy(ens, core) else caseFieldTy(ens, enOfCase(ens, core), core)
 
 def recFirstTy(ens: List[En], name: String): String =
   if (List.isEmpty(ens)) "" else recFirstTy1(List.at(ens, 0), List.tail(ens), name)
 
 def recFirstTy1(h: En, rest: List[En], name: String): String =
   h match {
-    case En(_, n, _, cases) => if (n == name || n == tyHead(name)) recFirstTy2(cases) else recFirstTy(rest, name)
+    case En(_, n, _, _) => if (n == name || n == tyHead(name)) recFirstTy2(Check.specializeEnum(h, name).cases) else recFirstTy(rest, name)
   }
 
 def recFirstTy2(cs: List[EnCase]): String =
@@ -5371,7 +5371,7 @@ def rwFieldQualFun(m: String, args: List[Expr], name: String, off: Int, ens: Lis
   }
 
 def rwFieldTy(recv: Expr, name: String, off: Int, ty: String, ens: List[En]): Expr =
-  if (isTupTy(ty)) tupField(recv, name, ty, off) else recField(recv, name, off, recNames(copyEns(ens), ty), ty, ens)
+  if (isTupTy(ty)) tupField(recv, name, ty, off) else recField(recv, name, off, recNames(ens, ty), ty, ens)
 
 def isTupTy(ty: String): Bool =
   Str.len(ty) > 0 && Str.charAt(ty, 0) == 40
@@ -5464,14 +5464,14 @@ def hasParamName1(p: Param, rest: List[Param], name: String): Bool =
   }
 
 def recTys(ens: List[En], ty: String): List[String] =
-  recTysAt(Check.specializeEnums(ens, ty), ty)
+  recTysAt(ens, ty)
 
 def recTysAt(ens: List[En], ty: String): List[String] =
   if (List.isEmpty(ens)) noStr() else recTysHit(List.at(ens, 0), List.tail(ens), ty)
 
 def recTysHit(h: En, rest: List[En], ty: String): List[String] =
   h match {
-    case En(_, n, _, cases) => if (n == ty || n == tyHead(ty)) recTys2(cases) else recTysAt(rest, ty)
+    case En(_, n, _, _) => if (n == ty || n == tyHead(ty)) recTys2(Check.specializeEnum(h, ty).cases) else recTysAt(rest, ty)
   }
 
 def recTys2(cs: List[EnCase]): List[String] =
