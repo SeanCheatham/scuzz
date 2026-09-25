@@ -369,7 +369,7 @@ def emitVar(s: String, prefix: String, ens: List[En], ps: List[Param], strs: Str
   if (s == ".closure.value" || paramTy(ps, s) != "") Slot("", Str.concat("%", s), s == ".closure.value" && paramTy(ps, s) == "") else emitFunOrCtor(s, prefix, ens, ps, strs, defs, loc, findDefPrefer(defs, s, modOfLoc(loc)))
 
 def emitFunOrCtor(s: String, prefix: String, ens: List[En], ps: List[Param], strs: Strs, defs: Ftab, loc: String, hit: List[Fun]): Slot =
-  if (List.isEmpty(hit)) emitBareCtor(s, prefix, ens) else emitFunRef(List.at(hit, 0), prefix, strs, defs, ens, ps, loc)
+  if (List.isEmpty(hit)) emitBareCtor(s, prefix, ens, defs.caseOwners) else emitFunRef(List.at(hit, 0), prefix, strs, defs, ens, ps, loc)
 
 def emitFunRef(d: Fun, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   d match {
@@ -384,8 +384,11 @@ def emitFunRef1(name: String, p: Param, prefix: String, strs: Strs, defs: Ftab, 
     case Param(n, _, _, _) => emitLam(n, Expr.ECall(name, Expr.EVar(n, 0) :: noExpr(), 0), prefix, strs, defs, ens, ps, loc)
   }
 
-def emitBareCtor(s: String, prefix: String, ens: List[En]): Slot =
-  if (enOfCase(ens, s) == "") Slot("", Str.concat("%", s), false) else emitCtor(enOfCase(ens, s), s, prefix, ens)
+def emitBareCtor(s: String, prefix: String, ens: List[En], owners: Map[String, String]): Slot =
+  emitBareCtorOwner(s, prefix, ens, Map.getOrElse(owners, s, ""))
+
+def emitBareCtorOwner(s: String, prefix: String, ens: List[En], owner: String): Slot =
+  if (owner == "") Slot("", Str.concat("%", s), false) else emitCtor(owner, s, prefix, ens)
 
 def enOfCase(ens: List[En], name: String): String =
   if (List.isEmpty(ens)) "" else enOfCaseH(List.at(ens, 0), List.tail(ens), name)
@@ -2314,7 +2317,7 @@ def emitCallKitAligned(f: String, args: List[Expr], prefix: String, strs: Strs, 
   emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid), prefix, defs, args, ens, ps, modOfLoc(loc))
 
 def alignCallArgs(f: String, args: List[Expr], defs: Ftab, ens: List[En], mod: String): List[Expr] =
-  if (hasEn(ens, f)) alignFill(Check.constructorFields(ens, f), args) else alignCallArgsCase(f, args, defs, ens, mod, enOfCase(ens, f))
+  if (hasEn(ens, f)) alignFill(Check.constructorFields(ens, f), args) else alignCallArgsCase(f, args, defs, ens, mod, Map.getOrElse(defs.caseOwners, f, ""))
 
 def alignCallArgsCase(f: String, args: List[Expr], defs: Ftab, ens: List[En], mod: String, en: String): List[Expr] =
   if (en != "") alignFill(Check.constructorFields(ens, Str.concat(en, Str.concat(".", f))), args) else if (qualEn(f) != "" && enHasCase(ens, qualEn(f), qualName(f))) alignFill(Check.constructorFields(ens, f), args) else alignArgs(f, args, defs, mod)
@@ -3615,19 +3618,22 @@ def copyEnAt(recv: Expr, ens: List[En], defs: Ftab, ps: List[Param], loc: String
   copyEnOr(Type.headNameStr(exprRetTyEns(recv, defs, ens, ps, loc)), ens)
 
 def copyEnCall(f: String, ens: List[En], defs: Ftab): String =
-  if (ctorHead(f, ens) != "") ctorHead(f, ens) else tyHead(funRetStr(defs, f))
+  copyEnCallHead(f, defs, ctorHead(f, ens, defs.caseOwners))
+
+def copyEnCallHead(f: String, defs: Ftab, head: String): String =
+  if (head != "") head else tyHead(funRetStr(defs, f))
 
 def copyEnOr(h: String, ens: List[En]): String =
   if (h == "" || h == "Any") "" else if (hasEn(ens, h)) h else ""
 
-def ctorHead(f: String, ens: List[En]): String =
-  if (f == "" || f == "Any") "" else if (hasEn(ens, f)) f else ctorHeadDot(f, ens, dotAt(f, 0))
+def ctorHead(f: String, ens: List[En], owners: Map[String, String]): String =
+  if (f == "" || f == "Any") "" else if (hasEn(ens, f)) f else ctorHeadDot(f, ens, owners, dotAt(f, 0))
 
-def ctorHeadDot(f: String, ens: List[En], dot: Int): String =
-  if (dot >= 0) ctorHeadOrCase(Str.slice(f, 0, dot), Str.slice(f, dot + 1, Str.len(f)), ens) else enOfCase(ens, f)
+def ctorHeadDot(f: String, ens: List[En], owners: Map[String, String], dot: Int): String =
+  if (dot >= 0) ctorHeadOrCase(Str.slice(f, 0, dot), Str.slice(f, dot + 1, Str.len(f)), ens, owners) else Map.getOrElse(owners, f, "")
 
-def ctorHeadOrCase(mod: String, name: String, ens: List[En]): String =
-  if (hasEn(ens, mod)) mod else enOfCase(ens, name)
+def ctorHeadOrCase(mod: String, name: String, ens: List[En], owners: Map[String, String]): String =
+  if (hasEn(ens, mod)) mod else Map.getOrElse(owners, name, "")
 
 def emitCopyGo(r: Slot, args: List[Expr], prefix: String, en: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   if (List.isEmpty(args)) r else emitCopyUpd(r, args, prefix, en, recNames(ens, en), strs, defs, ens, ps, loc)
@@ -6058,7 +6064,32 @@ def kindOf(p: Param): Int =
   if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
 def emitProg(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
-  emitBits(Check.expandExpr(p.body, p.aliases), Check.ftabOfList(prepDefs(p)), internReady(strs), Parse.builtins(p.enums), files, lidx)
+  emitProgEns(p, strs, files, lidx, Parse.builtins(p.enums))
+
+def emitProgEns(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex], ens: List[En]): String =
+  emitBits(Check.expandExpr(p.body, p.aliases), emitFtab(prepDefs(p), ens), internReady(strs), ens, files, lidx)
+
+def emitFtab(ds: List[Fun], ens: List[En]): Ftab =
+  emitFtabGot(Check.ftabOfList(ds), ens)
+
+def emitFtabGot(defs: Ftab, ens: List[En]): Ftab =
+  Ftab(defs.list, defs.tab, defs.kits, caseOwners(ens, Map.empty()))
+
+def caseOwners(ens: List[En], acc: Map[String, String]): Map[String, String] =
+  if (List.isEmpty(ens)) acc else caseOwnersEn(List.at(ens, 0), caseOwners(List.tail(ens), acc))
+
+def caseOwnersEn(en: En, acc: Map[String, String]): Map[String, String] =
+  en match {
+    case En(_, name, _, cases) => caseOwnersCases(cases, name, acc)
+  }
+
+def caseOwnersCases(cases: List[EnCase], owner: String, acc: Map[String, String]): Map[String, String] =
+  if (List.isEmpty(cases)) acc else caseOwnersCase(List.at(cases, 0), List.tail(cases), owner, acc)
+
+def caseOwnersCase(c: EnCase, rest: List[EnCase], owner: String, acc: Map[String, String]): Map[String, String] =
+  c match {
+    case EnCase(name, _) => caseOwnersCases(rest, owner, Map.set(acc, name, owner))
+  }
 
 def prepDefs(p: Prog): List[Fun] =
   withSelfFuns(rwAliasFuns(implFuns(p.impls, withImportFuns(p.imps, p.defs)), p.aliases))
