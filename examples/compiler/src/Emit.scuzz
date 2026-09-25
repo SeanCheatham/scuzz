@@ -59,12 +59,6 @@ def noFun(): List[Fun] =
 def noEn(): List[En] =
   []
 
-def copyEns(ens: List[En]): List[En] =
-  copyEnsAt(ens)
-
-def copyEnsAt(ens: List[En]): List[En] =
-  if (List.isEmpty(ens)) noEn() else List.at(ens, 0) :: copyEnsAt(List.tail(ens))
-
 def copyPs(ps: List[Param]): List[Param] =
   copyPsAt(ps)
 
@@ -5318,7 +5312,7 @@ def rwFieldListH(h: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], mo
   rwFieldListT(h, env, funs, ens, mod, List.tail(xs))
 
 def rwFieldListT(h: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String, rest: List[Expr]): List[Expr] =
-  rwFieldListCons(rwFields(h, env, funs, copyEns(ens), mod), rest, env, funs, ens, mod)
+  rwFieldListCons(rwFields(h, env, funs, ens, mod), rest, env, funs, ens, mod)
 
 def rwFieldListCons(e: Expr, rest: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], mod: String): List[Expr] =
   e :: rwFieldList(rest, env, funs, ens, mod)
