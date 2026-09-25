@@ -1,6 +1,6 @@
 record Out(ty: Ty, err: String, span: (String, Int), binds: List[(String, Ty)], origin: String)
 
-record Ftab(list: List[Fun], tab: Map[String, List[Fun]], kits: Map[String, KitSig])
+record Ftab(list: List[Fun], tab: Map[String, List[Fun]], kits: Map[String, KitSig], caseOwners: Map[String, String])
 
 record LineChunk(last: Int, size: Int, starts: List[Int])
 
@@ -162,7 +162,7 @@ def findFunMod(funs: List[Fun], mod: String, name: String): List[Fun] =
   List.filter(funs, h => h.name == name && h.mod == mod)
 
 def ftabOfList(ds: List[Fun]): Ftab =
-  Ftab(ds, ftabOf(ds), Kits.tab())
+  Ftab(ds, ftabOf(ds), Kits.tab(), Map.empty())
 
 def ftabOf(ds: List[Fun]): Map[String, List[Fun]] =
   if (List.isEmpty(ds)) Map.empty() else ftabAdd(ftabOf(List.tail(ds)), List.at(ds, 0))
