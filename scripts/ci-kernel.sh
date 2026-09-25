@@ -52,6 +52,7 @@ grep -Fxq 'jsonNestedInt:7' /tmp/kernel.out
 grep -Fxq 'qualifiedRecord:4' /tmp/kernel.out
 grep -Fxq 'remoteRecord:4' /tmp/kernel.out
 grep -Fxq 'remoteMarker:ok' /tmp/kernel.out
+grep -Fxq 'remoteBox:7' /tmp/kernel.out
 grep -Fxq 'shadowModule:7' /tmp/kernel.out
 # The evaluator is a reference semantics: same stdout as the compiled kernel.
 "$SCUZZ" eval examples/kernel | tee /tmp/kernel-eval.out

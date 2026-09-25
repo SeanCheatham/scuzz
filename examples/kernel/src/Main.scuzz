@@ -754,8 +754,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"cons:${List.join(consPair("a", "b"), ",")}")
     _ <- IO.println(s"npat:${originX(Point(3, 5))}")
     _ <- IO.println(s"qualifiedRecord:${qualifiedRecordX(Main.Point(3, 5))}")
-    _ <- IO.println(s"remoteRecord:${remoteRecordX(A.RemotePoint(3, 5))}")
+    _ <- IO.println(s"remoteRecord:${remoteRecordX(A.RemotePoint(y = 5, x = 3))}")
     _ <- IO.println(s"remoteMarker:${remoteMarkerName(A.RemoteMarker)}")
+    _ <- IO.println(s"remoteBox:${remoteBoxValue(A.RemoteBox(7))}")
     _ <- IO.println(s"shadowModule:${shadowModuleField(ModuleHolder(7))}")
     _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
     _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
@@ -986,6 +987,9 @@ def remoteMarkerName(m: RemoteMarker): String =
     case A.RemoteMarker => "ok"
     case _ => "bad"
   }
+
+def remoteBoxValue(b: RemoteBox[Int]): Int =
+  b.value
 
 def shadowModuleField(A: ModuleHolder): Int =
   A.RemoteMarker

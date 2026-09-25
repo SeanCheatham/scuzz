@@ -3849,14 +3849,14 @@ def fieldTy2(dot: Int, core: String, ens: List[En]): String =
   if (dot < 0) fieldTyBare(core, ens) else caseFieldTy(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
 
 def fieldTyBare(core: String, ens: List[En]): String =
-  if (enOfCase(ens, core) == "") recFirstTy(ens, core) else caseFieldTy(ens, enOfCase(ens, core), core)
+  if (enOfCase(ens, core) == "") recFirstTy(Check.specializeEnums(ens, core), core) else caseFieldTy(ens, enOfCase(ens, core), core)
 
 def recFirstTy(ens: List[En], name: String): String =
   if (List.isEmpty(ens)) "" else recFirstTy1(List.at(ens, 0), List.tail(ens), name)
 
 def recFirstTy1(h: En, rest: List[En], name: String): String =
   h match {
-    case En(_, n, _, cases) => if (n == name) recFirstTy2(cases) else recFirstTy(rest, name)
+    case En(_, n, _, cases) => if (n == name || n == tyHead(name)) recFirstTy2(cases) else recFirstTy(rest, name)
   }
 
 def recFirstTy2(cs: List[EnCase]): String =
@@ -5464,7 +5464,7 @@ def hasParamName1(p: Param, rest: List[Param], name: String): Bool =
   }
 
 def recTys(ens: List[En], ty: String): List[String] =
-  recTysAt(ens, ty)
+  recTysAt(Check.specializeEnums(ens, ty), ty)
 
 def recTysAt(ens: List[En], ty: String): List[String] =
   if (List.isEmpty(ens)) noStr() else recTysHit(List.at(ens, 0), List.tail(ens), ty)
