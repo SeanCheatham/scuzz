@@ -8,11 +8,12 @@ Edit this file when the next-step order changes.
 
 A developer reviews one proposed change at a time. The IDE evaluates the change in-memory next to the working tree. It shows both sides as timelines in two lanes. The lanes are blind: the IDE does not show which lane is the working tree. The developer keeps or rejects the change. Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
-Do the steps in this order:
+The arc steps have landed: in-memory file-set diff on the evaluator, step view, proposal source under `build/proposals/`, the blind deck with Keep/Reject and the decision record, region focus with Randomize, and in-process hover, goto-def, and rename. Each step shipped as a vertical slice with a claim in `examples/editor/chrome.scuzz_verify` and a corpus entry.
 
-1. **In-process LSP.** Move hover, goto-def, and rename from `scuzz lsp` to compiler modules called in-process.
+What stays open:
 
-Each step is a vertical slice with a claim in `examples/editor/chrome.scuzz_verify` and a corpus entry.
+1. **The generator.** How proposals are generated, and how the IDE talks to an LLM, is not decided. The deck works with any generator that writes `build/proposals/`.
+2. **Keep rate.** Measure the keep rate per region before tuning the generator.
 
 ## Supporting work
 
