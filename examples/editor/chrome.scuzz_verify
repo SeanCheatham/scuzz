@@ -133,6 +133,12 @@ def afterRejectRevealsLane(t: Timeline): Verdict =
 def afterSkipShowsNext(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Skip", "text:proposal p2")
 
+def afterDeckShowsSource(t: Timeline): Verdict =
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Proposals"))) Verdict.ok() else if (Timeline.exists(t, i => Timeline.a11yHas(t, i, "IO.println(2)")) && Timeline.exists(t, i => Timeline.a11yHas(t, i, "IO.println(1 + \"x\")"))) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "the deck shows both sides of the changed source")
+
+def afterDeckFlagsUnguarded(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Proposals", "text:unguarded: no claims")
+
 def skipRecordsNothing(t: Timeline): Verdict =
   if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Skip"))) Verdict.ok() else if (Timeline.fileSame(t, 0, Timeline.len(t) - 1, "build/ide/decisions.jsonl")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Skip is not a decision")
 

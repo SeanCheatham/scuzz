@@ -20,6 +20,9 @@ def setHash(files: List[(String, String)]): String =
 def decisionLine(name: String, decision: String, region: String, a: String, b: String): String =
   Str.concat("{\"proposal\":", Str.concat(Check.jsonStr(name), Str.concat(",\"decision\":", Str.concat(Check.jsonStr(decision), Str.concat(",\"region\":", Str.concat(Check.jsonStr(region), Str.concat(",\"a\":", Str.concat(Check.jsonStr(a), Str.concat(",\"b\":", Str.concat(Check.jsonStr(b), "}"))))))))))
 
+def guardLines(vers: List[String]): List[String] =
+  if (List.isEmpty(vers)) ["unguarded: no claims"] else []
+
 def laneOf(flip: Int): String =
   if (flip == 1) "lane 1" else "lane 2"
 
@@ -79,6 +82,9 @@ def changedFiles(disk: List[(String, String)], mutant: List[(String, String)]): 
 
 def mutOut(src: String, site: Int): String =
   List.at(Mutate.applyKept(Mutate.parseLive([("Main", src)]), site, false), 0)._2
+
+def changedTriples(disk: List[(String, String)], propSet: List[(String, String)]): List[(String, String, String)] =
+  List.map(changedFiles(disk, propSet), f => (f._1, List.getOrElse(List.map(disk, d => d._2), List.indexOf(List.map(disk, d => d._1), f._1), ""), f._2))
 
 def regionSet(set: List[(String, String)], cur: String): List[(String, String)] =
   if (Mutate.countFiles(List.filter(set, f => f._1 == cur), false) > 0) List.filter(set, f => f._1 == cur) else set
