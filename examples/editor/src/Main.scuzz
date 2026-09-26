@@ -1,3 +1,7 @@
+record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]])
+
+record DeckS(pending: Signal[List[String]])
+
 def analyze(path: String, body: String): IO[String] =
   for {
     _ <- Fs.write(path, body)
@@ -39,6 +43,97 @@ def diskFiles(root: String, toml: String): IO[List[(String, String)]] =
 
 def compareBuffers(root: String, toml: String, disk: List[(String, String)], buffers: List[(String, String)]): IO[Unit] =
   scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, buffers, 1, cli))
+
+def loadProposals(root: String): IO[List[String]] =
+  for {
+    ents <- Fs.list(Deck.proposalsDir(root)).handleErrorWith(_ => IO.pure([]))
+    raw <- Chrome.readOr(Deck.decisionsPath(root))
+  } yield Deck.pending(Deck.propNames(ents), List.map(Chrome.nonEmptyLines(raw), l => Deck.decidedName(l)))
+
+def readProposal(root: String, name: String): IO[List[(String, String)]] =
+  for {
+    dir = Fs.join(Deck.proposalsDir(root), name)
+    ents <- Fs.walk(dir).handleErrorWith(_ => IO.pure([]))
+    files <- IO.foreach(List.filter(Chrome.filesOf(ents), f => Str.endsWith(f, ".scuzz")), f => Fs.read(Fs.join(dir, f)).map(src => (f, src)))
+  } yield files
+
+def reviewProposal(root: String, toml: String, disk: List[(String, String)], propSet: List[(String, String)]): IO[Unit] =
+  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, propSet, 1, cli))
+
+def recordDecision(root: String, name: String, decision: String, ha: String, hb: String): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs(Fs.dirname(Deck.decisionsPath(root))).handleErrorWith(_ => IO.pure(()))
+    old <- Chrome.readOr(Deck.decisionsPath(root))
+    _ <- Fs.write(Deck.decisionsPath(root), Str.concat(old, Str.concat(Deck.decisionLine(name, decision, ha, hb), """
+""")))
+  } yield ()
+
+def deckEnd(ls: LaneS, ds: DeckS): Unit =
+  Signal.set(ls.status, ["no more proposals"])
+
+def deckNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
+    left <- loadProposals(root)
+    _ = Signal.set(ds.pending, left)
+    _ <- if (List.isEmpty(left)) IO.pure(deckEnd(ls, ds)) else deckShow(root, toml, List.at(left, 0), ls, ds)
+  } yield ()
+
+def deckShow(root: String, toml: String, name: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    _ = Signal.set(ls.status, [Str.concat("reviewing ", name)])
+    disk <- diskFiles(root, toml)
+    props <- readProposal(root, name)
+    propSet = Deck.applyProposal(disk, props)
+    err <- reviewProposal(root, toml, disk, propSet).map(_ => "").handleErrorWith(e => IO.pure(e))
+    _ <- if (!Str.isEmpty(err)) IO.pure(Signal.set(ls.status, [err])) else deckReviewed(root, toml, name, disk, propSet, ls, ds)
+  } yield ()
+
+def deckReviewed(root: String, toml: String, name: String, disk: List[(String, String)], propSet: List[(String, String)], ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    _ <- loadIde(root, ls.status, ls.raw, ls.rev, ls.works, ls.tls, ls.blab)
+    flip <- Random.nextInt(2)
+    _ = Signal.set(ls.rev, "lane 1")
+    _ = Signal.set(ls.blab, "lane 2")
+    _ = if (flip == 0) () else Signal.set(ls.tls, Deck.swapPairs(Signal.get(ls.tls)))
+    _ <- if (Deck.gateFail(Signal.get(ls.raw))) for {
+  _ <- recordDecision(root, name, "auto-reject", Deck.setHash(disk), Deck.setHash(propSet))
+  _ <- deckNext(root, ls, ds)
+} yield () else IO.pure(deckArm(ls))
+  } yield ()
+
+def deckArm(ls: LaneS): Unit =
+  for {
+    ws = Signal.get(ls.works)
+    _ = if (List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(ls.raw), Signal.get(ls.tls), ws, ls.laneA, ls.laneB, ls.rail, ls.step, ls.title, ls.rowsA, ls.rowsB, ls.viewA, ls.viewB)
+  } yield ()
+
+def keepNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    left <- loadProposals(root)
+    _ <- if (List.isEmpty(left)) deckNext(root, ls, ds) else for {
+  name = List.at(left, 0)
+  toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
+  disk <- diskFiles(root, toml)
+  props <- readProposal(root, name)
+  _ <- IO.foreachDiscard(props, p => Fs.mkdirs(Fs.dirname(Fs.join(root, p._1))).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.write(Fs.join(root, p._1), p._2)))
+  _ <- recordDecision(root, name, "keep", Deck.setHash(disk), Deck.setHash(Deck.applyProposal(disk, props)))
+  _ <- deckNext(root, ls, ds)
+} yield ()
+  } yield ()
+
+def rejectNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    left <- loadProposals(root)
+    _ <- if (List.isEmpty(left)) deckNext(root, ls, ds) else for {
+  name = List.at(left, 0)
+  toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
+  disk <- diskFiles(root, toml)
+  props <- readProposal(root, name)
+  _ <- recordDecision(root, name, "reject", Deck.setHash(disk), Deck.setHash(Deck.applyProposal(disk, props)))
+  _ <- deckNext(root, ls, ds)
+} yield ()
+  } yield ()
 
 def loadDelta(root: String, status: Signal[List[String]], raw: Signal[String], rev: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], blab: Signal[String]): IO[Unit] =
   loadLanes(root, "delta", status, raw, rev, works, tls, blab)
@@ -242,7 +337,12 @@ b""", 2) == (1, 0), true)
     rowsB = Signal.make([]: List[String])
     stepViewA = Signal.make([]: List[String])
     stepViewB = Signal.make([]: List[String])
+    deckPending = Signal.make([]: List[String])
+    lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
+    deck = DeckS(deckPending)
     _ <- loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel)
+    pending0 <- loadProposals(root)
+    _ = Signal.set(deckPending, pending0)
     _ = LspClient.frame("{}")
     _ = LspClient.parseLen(Str.concat("Content-Length: 2", Str.concat(LspClient.headerBreak(), "{}")))
     _ = Property.check("need", LspClient.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
@@ -410,7 +510,16 @@ b""", 2) == (1, 0), true)
   _ <- if (Str.isEmpty(err)) loadIde(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel) else IO.pure(Signal.set(deltaStatus, [err]))
   ws = Signal.get(works)
   _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
-} yield ())), View.each(deltaStatus, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
+} yield ()), View.outlinedButton("Proposals", _ => for {
+  _ = Property.sometimes("tappedProposals")
+  _ <- deckNext(Signal.get(dirSig), lanes, deck)
+} yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckPending, ps => if (List.isEmpty(ps)) 0 else 1), 1, View.wrap(View.bindText(Signal.map(deckPending, ps => if (List.isEmpty(ps)) "" else Deck.deckTitle(List.at(ps, 0)))), View.button("Keep", _ => for {
+  _ = Property.sometimes("tappedKeep")
+  _ <- keepNext(Signal.get(dirSig), lanes, deck)
+} yield ()), View.outlinedButton("Reject", _ => for {
+  _ = Property.sometimes("tappedReject")
+  _ <- rejectNext(Signal.get(dirSig), lanes, deck)
+} yield ()))), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
   _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
 } yield ())))), View.bindText(stepTitle), View.row(View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {

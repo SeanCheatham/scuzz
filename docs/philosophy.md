@@ -81,9 +81,10 @@ The primary development loop is a binary decision on one proposed change. Open w
 - **Buffers first.** Compare buffers diffs the open buffers against the files on disk. Workloads are the idle probe and the seeds. The review writes `build/ide/report.json` and timeline files. Corpus replay stays compiled in `scuzz diff`.
 - **Timelines are the view.** Both sides run hermetically under TestRuntime, as in `scuzz diff`. The Timeline landmark shows the workloads that differ. A step rail marks the states that differ. Two lanes show the chosen state of each side with the changed sections first. A step tap also renders the recorded a11y tree of that state as tiles in the lane. A tap on a workload or a step does no IO.
 - **Blind.** The deck randomizes the lane order. It does not show which lane is the working tree until the developer decides.
-- **Keep or reject.** Keep writes the proposal into the working tree. Reject discards it. The deck records each decision with both file set hashes.
+- **Proposal files.** A proposal is a directory under `build/proposals/`. Files inside replace working-tree files at the same relative path. The deck bar shows the next pending proposal.
+- **Keep or reject.** Keep writes the proposal into the working tree. Reject discards it. The deck records each decision with both file set hashes in `build/ide/decisions.jsonl`. The deck advances to the next pending proposal after a decision.
 - **The generator is open.** How proposals are generated, and how the IDE talks to an LLM, is not decided. The review does not depend on the generator.
-- **Claims still decide correctness.** A proposal that fails `check` or a claim does not reach the deck. The human decides preference, not correctness.
+- **Claims still decide correctness.** A proposal that fails `check` or a claim does not reach the deck. The deck records the rejection and advances. The human decides preference, not correctness.
 - **`scuzz diff` stays.** It compares a git revision with the working tree. It uses the same classes, deltas, and timeline files as the review.
 
 ### Self-hosting
