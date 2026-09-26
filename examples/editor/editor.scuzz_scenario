@@ -40,11 +40,19 @@ drive:
 setup
 signals:
 count=0
+a11y:
+text:Counter
+text:count = 0
+button:+1
 --- 1 checkpoint=1
 drive:
 tap button:+1
 signals:
 count=1
+a11y:
+text:Counter
+text:count = 1
+button:+1
 """)
     _ <- Fs.write(Fs.join(delta, "tl-b.txt"), """# timeline v=3 n=2
 --- 0 checkpoint=1
@@ -52,11 +60,19 @@ drive:
 setup
 signals:
 count=0
+a11y:
+text:Counter
+text:count = 0
+button:+1
 --- 1 checkpoint=1
 drive:
 tap button:+1
 signals:
 count=2
+a11y:
+text:Counter
+text:count = 2
+button:+1
 """)
   } yield 1
 
@@ -74,11 +90,19 @@ drive:
 setup
 signals:
 count=0
+a11y:
+text:Counter
+text:count = 0
+button:+1
 --- 1 checkpoint=1
 drive:
 count 1
 signals:
 count=1
+a11y:
+text:Counter
+text:count = 1
+button:+1
 """)
     _ <- Fs.write(Fs.join(ide, "tl-cmp-b.txt"), """# timeline v=3 n=2
 --- 0 checkpoint=1
@@ -86,11 +110,19 @@ drive:
 setup
 signals:
 count=0
+a11y:
+text:Counter
+text:count = 0
+button:+1
 --- 1 checkpoint=1
 drive:
 count 1
 signals:
 count=2
+a11y:
+text:Counter
+text:count = 2
+button:+1
 """)
   } yield ()
 

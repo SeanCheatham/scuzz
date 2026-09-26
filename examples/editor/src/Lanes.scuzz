@@ -108,6 +108,24 @@ def driveText(sb: String, sa: String): String =
 def stepRows(a: List[String], b: List[String], i: Int, sideA: Bool): List[String] =
   if (Str.isEmpty(stateAt(if (sideA) a else b, i))) ["no state"] else rowsOf(sections(stateAt(a, i)), sections(stateAt(b, i)), sideA)
 
+def a11yLines(state: String): List[String] =
+  List.filter(Chrome.nonEmptyLines(secBody(sections(state), "a11y")), l => !Str.startsWith(l, "motion:"))
+
+def a11yRole(l: String): String =
+  if (Str.indexOf(l, ":") < 0) l else Str.take(l, Str.indexOf(l, ":"))
+
+def a11yLabel(l: String): String =
+  if (Str.indexOf(l, ":") < 0) "" else Str.drop(l, Str.indexOf(l, ":") + 1)
+
+def a11yTile(l: String): View =
+  a11yTileRole(a11yRole(l), a11yLabel(l), l)
+
+def a11yTileRole(role: String, label: String, raw: String): View =
+  if (role == "button" || role == "outlined" || role == "textbutton" || role == "choicechip" || role == "chip") View.card(View.text(label)) else if (role == "text") View.text(label) else if (role == "icon" || role == "image") View.card(View.fontSize(12, View.text(label))) else View.fontSize(12, View.textColor(Theme.muted(), View.text(raw)))
+
+def viewCard(lines: Signal[List[String]]): View =
+  View.card(View.column(View.each(lines, l => a11yTile(l))))
+
 def rowsOf(xa: List[(String, String)], xb: List[(String, String)], sideA: Bool): List[String] =
   List.map(List.concat(List.filter(shownNames(xa, xb), n => secBody(xa, n) != secBody(xb, n)), List.filter(shownNames(xa, xb), n => secBody(xa, n) == secBody(xb, n))), n => rowText(n, secBody(xa, n), secBody(xb, n), sideA))
 

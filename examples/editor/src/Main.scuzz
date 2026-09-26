@@ -59,15 +59,17 @@ def loadLanes(root: String, sub: String, status: Signal[List[String]], raw: Sign
     _ = Signal.set(works, List.map(Lanes.workItems(j), w => Lanes.workLabel(w)))
   } yield ()
 
-def showStep(step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], a: List[String], b: List[String], i: Int): Unit =
+def showStep(step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], a: List[String], b: List[String], i: Int): Unit =
   for {
     _ = Signal.set(step, i)
     _ = Signal.set(title, Lanes.stepTitle(a, b, i))
     _ = Signal.set(rowsA, Lanes.stepRows(a, b, i, true))
     _ = Signal.set(rowsB, Lanes.stepRows(a, b, i, false))
+    _ = Signal.set(viewA, Lanes.a11yLines(Lanes.stateAt(a, i)))
+    _ = Signal.set(viewB, Lanes.a11yLines(Lanes.stateAt(b, i)))
   } yield ()
 
-def showWork(w: String, raw: String, tls: List[String], works: List[String], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], stepTitle: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]]): Unit =
+def showWork(w: String, raw: String, tls: List[String], works: List[String], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], stepTitle: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]]): Unit =
   for {
     i = List.indexOf(works, w)
     item = Lanes.workAt(LspClient.parseJson(raw), w)
@@ -76,7 +78,7 @@ def showWork(w: String, raw: String, tls: List[String], works: List[String], lan
     _ = Signal.set(laneA, a)
     _ = Signal.set(laneB, b)
     _ = Signal.set(rail, Lanes.railLabels(a, b))
-    _ = showStep(step, stepTitle, rowsA, rowsB, a, b, if (Lanes.workFirst(item) < 0) 0 else Lanes.workFirst(item))
+    _ = showStep(step, stepTitle, rowsA, rowsB, viewA, viewB, a, b, if (Lanes.workFirst(item) < 0) 0 else Lanes.workFirst(item))
   } yield ()
 
 def startFuzz(root: String): IO[Int] =
@@ -182,6 +184,9 @@ b""", 2) == (1, 0), true)
     _ = Property.check("rowsfirst", Lanes.rowsOf([("a", "1"), ("b", "2")], [("a", "1"), ("b", "3")], false) == [Str.concat("b *", Str.concat(Lanes.nl(), "3")), Str.concat("a", Str.concat(Lanes.nl(), "1"))], true)
     _ = Property.check("sigs", Lanes.shownBody("signals", "[{\"id\":0,\"type\":\"int\",\"name\":\"\",\"value\":1},{\"id\":1,\"type\":\"str\",\"name\":\"label\",\"value\":\"x\"}]") == Str.concat("#0 = 1", Str.concat(Lanes.nl(), "label = \"x\"")), true)
     _ = Property.check("title", Lanes.stepTitle(Lanes.states(tl2), [], 1) == "step 1 of 2 - tap button:+1 - differs", true)
+    _ = Property.check("arole", Lanes.a11yRole("button:+1") == "button", true)
+    _ = Property.check("alabel", Lanes.a11yLabel("button:+1") == "+1", true)
+    _ = Property.check("atiles", Lanes.a11yLines(Str.concat("a11y:", Str.concat(Lanes.nl(), Str.concat("text:Counter", Str.concat(Lanes.nl(), "motion:press:+1=4"))))) == ["text:Counter"], true)
     _ = Property.check("bset", Chrome.bufferFiles([("Main", "a"), ("Dep", "b")], ["Main"], ["a2"]) == [("Main", "a2"), ("Dep", "b")], true)
     _ = Property.check("bclean", Chrome.bufferFiles([("Main", "a")], ["Other"], ["x"]) == [("Main", "a")], true)
     _ = Property.check("blab", Lanes.bLabel("ide") == "b: buffers", true)
@@ -235,6 +240,8 @@ b""", 2) == (1, 0), true)
     stepTitle = Signal.make("")
     rowsA = Signal.make([]: List[String])
     rowsB = Signal.make([]: List[String])
+    stepViewA = Signal.make([]: List[String])
+    stepViewB = Signal.make([]: List[String])
     _ <- loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel)
     _ = LspClient.frame("{}")
     _ = LspClient.parseLen(Str.concat("Content-Length: 2", Str.concat(LspClient.headerBreak(), "{}")))
@@ -402,14 +409,14 @@ b""", 2) == (1, 0), true)
   err <- compareBuffers(root, toml, disk, Chrome.bufferFiles(disk, stems, bs)).map(_ => "").handleErrorWith(e => IO.pure(e))
   _ <- if (Str.isEmpty(err)) loadIde(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel) else IO.pure(Signal.set(deltaStatus, [err]))
   ws = Signal.get(works)
-  _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB)
+  _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
 } yield ())), View.each(deltaStatus, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
-  _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB)
+  _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
 } yield ())))), View.bindText(stepTitle), View.row(View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
   _ = Property.sometimes("tappedStep")
-  _ = showStep(step, stepTitle, rowsA, rowsB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
-} yield ()))), View.expanded(View.column(View.bindText(revLabel), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.bindText(laneBLabel), View.each(rowsB, s => View.code(s))))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+  _ = showStep(step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
+} yield ()))), View.expanded(View.column(View.bindText(revLabel), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.bindText(laneBLabel), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s))))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
   off <- Ui.editorCaret()
   found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
   hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found

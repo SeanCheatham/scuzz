@@ -45,10 +45,9 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 ### Review loop
 
-1. **Step view** — the lanes show dump sections. They do not render the `View` at a chosen step.
-2. **Proposal deck** — there is no proposal source, blind deck, decision record, or region focus. The proposal generator and LLM interaction are not decided.
-3. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
-4. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
+1. **Proposal deck** — there is no proposal source, blind deck, decision record, or region focus. The proposal generator and LLM interaction are not decided.
+2. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
+3. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
 
 ### Thesis-critical
 

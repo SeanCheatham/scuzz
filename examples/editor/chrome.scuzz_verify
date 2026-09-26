@@ -55,6 +55,12 @@ def afterWorkOpensDivergence(t: Timeline): Verdict =
 def afterStepShowsState(t: Timeline): Verdict =
   Verdict.afterHit(t, "textbutton:0", "text:step 0 of 2 - setup - same")
 
+def afterStepRendersView(t: Timeline): Verdict =
+  Verdict.afterHit(t, "textbutton:1*", "text:+1")
+
+def afterStepRendersCounter(t: Timeline): Verdict =
+  Verdict.afterHit(t, "textbutton:1*", "text:Counter")
+
 def afterCompareShowsCounts(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Compare buffers", "text:buffers: 0 regressed, 0 fixed, 1 diverged, 0 unrunnable, 1 same")
 
@@ -70,6 +76,9 @@ def afterCompareMarksSignals(t: Timeline): Verdict =
 
 def afterCompareShowsBuffers(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Compare buffers", "text:b: buffers")
+
+def afterCompareRendersView(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Compare buffers", "text:+1")
 
 def rowsFollowStep(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalListLen(t, i, "rowsA") == 0 || Timeline.signalStrHas(t, i, "stepTitle", Str.concat("step ", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "step")), " of "))))
