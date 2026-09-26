@@ -309,9 +309,9 @@ with open(sys.argv[1]) as f:
     d = json.load(f)
 assert d["fuzz"]["ok"] is False
 assert d["fuzz"]["search_failures"] == 0
-assert d["claims"]["declared"] == ["storm"]
-assert d["claims"]["reached"] == []
-assert d["claims"]["never"] == ["storm"]
+assert d["claim_drives"]["declared"] == ["storm"]
+assert d["claim_drives"]["reached"] == []
+assert d["claim_drives"]["never"] == ["storm"]
 PY_VACUOUS
 if ! fuzz --seed 42 --iterations 0 "$vacuous_dir" > /tmp/scuzz-vacuous-corpus.log 2>&1; then
   echo "corpus-only must report never-fired without failing" && exit 1
@@ -886,7 +886,7 @@ assert ev["coverage"]["total"] == compiled["coverage"]["total"]
 assert ev["coverage"]["branches"]["total"] == compiled["coverage"]["branches"]["total"]
 subset("functions", reached_locs(compiled["coverage"]), reached_locs(ev["coverage"]))
 subset("branches", reached_locs(compiled["coverage"]["branches"]), reached_locs(ev["coverage"]["branches"]))
-for key in ("sometimes", "triggers", "claims"):
+for key in ("sometimes", "triggers", "claim_drives"):
     assert ev[key]["declared"] == compiled[key]["declared"]
     subset(key, reach_names(compiled[key]), reach_names(ev[key]))
 PY

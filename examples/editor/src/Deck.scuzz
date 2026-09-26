@@ -1,3 +1,5 @@
+import Parse.Prog
+
 def proposalsDir(root: String): String =
   Fs.join(Fs.join(root, "build"), "proposals")
 
@@ -81,7 +83,13 @@ def changedFiles(disk: List[(String, String)], mutant: List[(String, String)]): 
   List.filter(mutant, f => List.getOrElse(List.map(disk, d => d._2), List.indexOf(List.map(disk, d => d._1), f._1), "") != f._2)
 
 def mutOut(src: String, site: Int): String =
-  List.at(Mutate.applyKept(Mutate.parseLive([("Main", src)]), site, false), 0)._2
+  List.at(genApply(Mutate.parseLive([("Main", src)]), site), 0)._2
+
+def genCount(set: List[(String, String)]): Int =
+  Mutate.countFiles(set, false) + Mutate.extFiles(set, false)
+
+def genApply(kept: List[(String, String, Prog)], site: Int): List[(String, String)] =
+  if (site < Mutate.countKept(kept, false)) Mutate.applyKept(kept, site, false) else Mutate.extApply(kept, site - Mutate.countKept(kept, false), false)
 
 def changedTriples(disk: List[(String, String)], propSet: List[(String, String)]): List[(String, String, String)] =
   List.map(changedFiles(disk, propSet), f => (f._1, List.getOrElse(List.map(disk, d => d._2), List.indexOf(List.map(disk, d => d._1), f._1), ""), f._2))

@@ -192,7 +192,7 @@ def keepNextGo(root: String, ls: LaneS, ds: DeckS, dirties: List[String]): IO[Un
 
 def writeMutant(root: String, kept: List[(String, String, Prog)], disk: List[(String, String)], site: Int): IO[Unit] =
   for {
-    changed = Deck.changedFiles(disk, Mutate.applyKept(kept, site, false))
+    changed = Deck.changedFiles(disk, Deck.genApply(kept, site))
     dir = Fs.join(Deck.proposalsDir(root), Deck.mutName(site))
     _ <- IO.foreachDiscard(changed, f => Fs.mkdirs(Fs.join(dir, "src")).flatMap(_ => Fs.write(Fs.join(dir, Fs.join("src", Str.concat(f._1, ".scuzz"))), f._2)))
   } yield ()
@@ -203,7 +203,7 @@ def generateProposals(root: String, set: List[(String, String)], cur: String, ls
 def generateProposalsGo(root: String, set: List[(String, String)], ls: LaneS, ds: DeckS): IO[Unit] =
   for {
     _ = Signal.set(ls.status, ["generating proposals"])
-    sites = Mutate.countFiles(set, false)
+    sites = Deck.genCount(set)
     kept = Mutate.parseLive(set)
     seed <- Random.nextInt(1000000)
     _ <- IO.foreachDiscard(Mutate.pickSites(seed, if (sites > 8) 8 else sites, sites), s => writeMutant(root, kept, set, s))
@@ -404,18 +404,12 @@ b""", 2) == (1, 0), true)
     _ = Property.check("skc", Deck.skipPick(["p1", "p2", "p3"], ["p1", "p2"], "p3") == ("p1", []), true)
     _ = Property.check("ske", Deck.skipPick([], [], "") == ("", []), true)
     _ = Property.check("rvl", Deck.revealText("kept", "p1", Deck.laneOf(1)) == "kept p1 (proposal was lane 1)", true)
-    _ = Property.check("msites", Mutate.countFiles([("Main", """def f(n: Int): Int =
+    _ = Property.check("msites", Deck.genCount([("Main", """def f(n: Int): Int =
   for {
     a = 2
     _ <- IO.println(a)
   } yield n + a
-""")], false) == 5, true)
-    _ = Property.check("mdrop", !Str.contains(Deck.mutOut("""def f(n: Int): Int =
-  for {
-    a = 2
-    _ <- IO.println(a)
-  } yield n + a
-""", 0), "a = 2"), true)
+""")]) == 4, true)
     _ = Property.check("mminus", Str.contains(Deck.mutOut("""def f(n: Int): Int =
   for {
     a = 2
@@ -428,6 +422,17 @@ b""", 2) == (1, 0), true)
     _ <- IO.println(a)
   } yield n + a
 """, 2), "a = 3"), true)
+    _ = Property.check("mdrop", Str.contains(Deck.mutOut("""def f(n: Int): Int =
+  for {
+    a = 2
+    _ <- IO.println(a)
+  } yield n + a
+""", 3), "a = 2") && !Str.contains(Deck.mutOut("""def f(n: Int): Int =
+  for {
+    a = 2
+    _ <- IO.println(a)
+  } yield n + a
+""", 3), "IO.println"), true)
     _ = Property.check("rset", Deck.regionSet([("Main", """def f(n: Int): Int =
   n + 1
 """), ("Dep", """def g(n: Int): Int =

@@ -474,7 +474,7 @@ def jb(b: Bool): String =
   if (b) "true" else "false"
 
 def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claims", claimDec, claimHit), Str.concat(jBreadth(br), "}"))))))))))
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), "}"))))))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -1936,7 +1936,7 @@ def fuzzOut2(head: String, search: Int, seed: Int, corpus: Int, observations: St
   Str.concat(head, Str.concat(fuzzStatus(search, failures, seed, corpus, ok), Str.concat(nl(), Str.concat(fuzzCorpus(corpus, corpFail, promoted), Str.concat(nl(), Str.concat(observations, Str.concat(nl(), mut)))))))
 
 def fuzzObservations(rows: List[(String, Bool)], branches: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String]): String =
-  Str.concat("coverage: functions ", Str.concat(coverageRatio(rows), Str.concat(", branches ", Str.concat(coverageRatio(branches), Str.concat(nl(), Str.concat(reachText("sometimes", "reached", somDec, somHit), Str.concat(nl(), Str.concat(reachText("triggers", "fired", trigDec, trigHit), Str.concat(nl(), reachText("claims", "fired", claimDec, claimHit))))))))))
+  Str.concat("coverage: functions ", Str.concat(coverageRatio(rows), Str.concat(", branches ", Str.concat(coverageRatio(branches), Str.concat(nl(), Str.concat(reachText("sometimes", "reached", somDec, somHit), Str.concat(nl(), Str.concat(reachText("triggers", "fired", trigDec, trigHit), Str.concat(nl(), reachText("claim drives", "fired", claimDec, claimHit))))))))))
 
 def coverageRatio(rows: List[(String, Bool)]): String =
   countRatio(List.count(rows, row => row._2), List.len(rows))

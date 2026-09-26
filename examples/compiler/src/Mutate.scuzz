@@ -398,6 +398,181 @@ def applyFunsRest(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWa
     case FunWalk(ds, n) => FunWalk(d :: ds, n)
   }
 
+def extFiles(files: List[(String, String)], o: Bool): Int =
+  extKept(parseLive(files), o)
+
+def extKept(kept: List[(String, String, Prog)], o: Bool): Int =
+  if (List.isEmpty(kept)) 0 else extKeptHd(List.at(kept, 0), List.tail(kept), o)
+
+def extKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)], o: Bool): Int =
+  h match {
+    case (_, _, p) => extProg(p, 0 - 1, o)._2 + extKept(rest, o)
+  }
+
+def extProg(p: Prog, site: Int, o: Bool): (Prog, Int) =
+  p match {
+    case Prog(pkg, ens, als, trs, impls, imps, defs, main, body) => xImpls(impls, site, 0, o) match {
+  case ImplWalk(ims, n0) => xFuns(defs, site, n0, o) match {
+  case FunWalk(ds, n) => xExpr(body, site, n, false, o) match {
+  case Walk(b, n2, _) => (Prog(pkg, ens, als, trs, ims, imps, ds, main, b), n2)
+}
+}
+}
+  }
+
+def xImpls(xs: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
+  if (List.isEmpty(xs)) ImplWalk(Parse.noIm(), seen) else xImplsHd(List.at(xs, 0), List.tail(xs), site, seen, o)
+
+def xImplsHd(im: Im, rest: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
+  im match {
+    case Im(tn, targs, forTy, methods) => xFuns(methods, site, seen, o) match {
+  case FunWalk(ms, n) => xImplsRest(Im(tn, targs, forTy, ms), rest, site, n, o)
+}
+  }
+
+def xImplsRest(im: Im, rest: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
+  xImpls(rest, site, seen, o) match {
+    case ImplWalk(xs, n) => ImplWalk(im :: xs, n)
+  }
+
+def xFuns(ds: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+  if (List.isEmpty(ds)) FunWalk(Parse.noFun(), seen) else xFunsHd(List.at(ds, 0), List.tail(ds), site, seen, o)
+
+def xFunsHd(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+  d match {
+    case Fun(priv, ora, name, tps, ps, ret, body, mod, off) => xExpr(body, site, seen, false, o) match {
+  case Walk(b, n, _) => xFunsRest(Fun(priv, ora, name, tps, ps, ret, b, mod, off), rest, site, n, o)
+}
+  }
+
+def xFunsRest(d: Fun, rest: List[Fun], site: Int, seen: Int, o: Bool): FunWalk =
+  xFuns(rest, site, seen, o) match {
+    case FunWalk(ds, n) => FunWalk(d :: ds, n)
+  }
+
+def xInt(k: Int, e: Expr, target: Int, seen: Int, inO: Bool, o: Bool): Walk =
+  if (!live(inO, o)) Walk(e, seen, 0) else Walk(Expr.EInt(xIntOut(k, target, seen), 0), seen + 2, 0)
+
+def xIntOut(k: Int, target: Int, seen: Int): Int =
+  if (seen == target) k - 1 else if (seen + 1 == target) k + 1 else k
+
+def xExpr(e: Expr, target: Int, seen: Int, inO: Bool, o: Bool): Walk =
+  e match {
+    case Expr.EInt(k, _) => xInt(k, e, target, seen, inO, o)
+    case Expr.EBin(op, l, r, off) => xExpr(l, target, seen, inO, o) match {
+  case Walk(l2, n1, _) => xExpr(r, target, n1, inO, o) match {
+  case Walk(r2, n2, _) => Walk(Expr.EBin(op, l2, r2, off), n2, 0)
+}
+}
+    case Expr.EIf(c, t, el, off) => xExpr(c, target, seen, inO, o) match {
+  case Walk(c2, n1, _) => xExpr(t, target, n1, inO, o) match {
+  case Walk(t2, n2, _) => xExpr(el, target, n2, inO, o) match {
+  case Walk(el2, n3, _) => Walk(Expr.EIf(c2, t2, el2, off), n3, 0)
+}
+}
+}
+    case Expr.ECall(f, args, off) => xListEx(args, target, seen, inO || isOracle(f), o) match {
+  case Walks(xs, n, _) => Walk(Expr.ECall(f, xs, off), n, 0)
+}
+    case Expr.EPrint(inner, off) => xExpr(inner, target, seen, inO, o) match {
+  case Walk(i2, n, _) => Walk(Expr.EPrint(i2, off), n, 0)
+}
+    case Expr.EMethod(recv, name, args, off) => xExpr(recv, target, seen, inO, o) match {
+  case Walk(r2, n1, _) => xListEx(args, target, n1, inO, o) match {
+  case Walks(xs, n2, _) => Walk(Expr.EMethod(r2, name, xs, off), n2, 0)
+}
+}
+    case Expr.EField(recv, name, off) => xExpr(recv, target, seen, inO, o) match {
+  case Walk(r2, n, _) => Walk(Expr.EField(r2, name, off), n, 0)
+}
+    case Expr.EUn(op, inner, off) => xExpr(inner, target, seen, inO, o) match {
+  case Walk(i2, n, _) => Walk(Expr.EUn(op, i2, off), n, 0)
+}
+    case Expr.ELam(p, ty, body) => xExpr(body, target, seen, inO, o) match {
+  case Walk(b2, n, _) => Walk(Expr.ELam(p, ty, b2), n, 0)
+}
+    case Expr.EMatch(s, arms, off) => xExpr(s, target, seen, inO, o) match {
+  case Walk(s2, n1, _) => xArms(arms, target, n1, inO, o) match {
+  case ArmWalk(xs, n2, _) => Walk(Expr.EMatch(s2, xs, off), n2, 0)
+}
+}
+    case Expr.EFor(bs, body, off) => xBinds(bs, target, seen, inO, o) match {
+  case BindWalk(xs, n1, _) => xExpr(body, target, n1, inO, o) match {
+  case Walk(b2, n2, _) => Walk(Expr.EFor(xs, b2, off), n2, 0)
+}
+}
+    case Expr.EList(xs) => xListEx(xs, target, seen, inO, o) match {
+  case Walks(xs2, n, _) => Walk(Expr.EList(xs2), n, 0)
+}
+    case Expr.ETuple(xs) => xListEx(xs, target, seen, inO, o) match {
+  case Walks(xs2, n, _) => Walk(Expr.ETuple(xs2), n, 0)
+}
+    case Expr.ENamed(name, inner) => xExpr(inner, target, seen, inO, o) match {
+  case Walk(i2, n, _) => Walk(Expr.ENamed(name, i2), n, 0)
+}
+    case Expr.EAscribe(inner, ty, off) => xExpr(inner, target, seen, inO, o) match {
+  case Walk(i2, n, _) => Walk(Expr.EAscribe(i2, ty, off), n, 0)
+}
+    case _ => Walk(e, seen, 0)
+  }
+
+def xListEx(xs: List[Expr], target: Int, seen: Int, inO: Bool, o: Bool): Walks =
+  if (List.isEmpty(xs)) Walks(noExprs(), seen, 0) else xExpr(List.at(xs, 0), target, seen, inO, o) match {
+  case Walk(h2, n1, _) => xListRest(h2, List.tail(xs), target, n1, inO, o)
+}
+
+def xListRest(h: Expr, rest: List[Expr], target: Int, seen: Int, inO: Bool, o: Bool): Walks =
+  xListEx(rest, target, seen, inO, o) match {
+    case Walks(xs, n, _) => Walks(h :: xs, n, 0)
+  }
+
+def xArms(xs: List[Arm], target: Int, seen: Int, inO: Bool, o: Bool): ArmWalk =
+  if (List.isEmpty(xs)) ArmWalk(noArms(), seen, 0) else xArmsHd(List.at(xs, 0), List.tail(xs), target, seen, inO, o)
+
+def xArmsHd(a: Arm, rest: List[Arm], target: Int, seen: Int, inO: Bool, o: Bool): ArmWalk =
+  a match {
+    case Arm(pat, g, body) => xExpr(body, target, seen, inO, o) match {
+  case Walk(b2, n, _) => xArmsRest(Arm(pat, g, b2), rest, target, n, inO, o)
+}
+  }
+
+def xArmsRest(a: Arm, rest: List[Arm], target: Int, seen: Int, inO: Bool, o: Bool): ArmWalk =
+  xArms(rest, target, seen, inO, o) match {
+    case ArmWalk(xs, n, _) => ArmWalk(a :: xs, n, 0)
+  }
+
+def xBinds(xs: List[Bind], target: Int, seen: Int, inO: Bool, o: Bool): BindWalk =
+  if (List.isEmpty(xs)) BindWalk(noBinds(), seen, 0) else xBindsHd(List.at(xs, 0), List.tail(xs), target, seen, inO, o)
+
+def xBindsHd(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, o: Bool): BindWalk =
+  b match {
+    case Bind(draw, name, v) => if (draw && live(inO, o) && seen == target) xBinds(rest, target, seen + 1, inO, o) else xExpr(v, target, xSkip(draw, seen, inO, o), inO, o) match {
+  case Walk(v2, n, _) => xBindsRest(Bind(draw, name, v2), rest, target, n, inO, o)
+}
+  }
+
+def xSkip(draw: Bool, seen: Int, inO: Bool, o: Bool): Int =
+  if (draw && live(inO, o)) seen + 1 else seen
+
+def xBindsRest(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, o: Bool): BindWalk =
+  xBinds(rest, target, seen, inO, o) match {
+    case BindWalk(xs, n, _) => BindWalk(b :: xs, n, 0)
+  }
+
+def extApply(kept: List[(String, String, Prog)], site: Int, o: Bool): List[(String, String)] =
+  extApplyGo(kept, site, 0, o)
+
+def extApplyGo(kept: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  if (List.isEmpty(kept)) noFiles() else extApplyHd(List.at(kept, 0), List.tail(kept), site, base, o)
+
+def extApplyHd(h: (String, String, Prog), rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool): List[(String, String)] =
+  h match {
+    case (stem, src, p) => extApplyLive(stem, src, p, rest, site, base, o, extProg(p, 0 - 1, o)._2)
+  }
+
+def extApplyLive(stem: String, src: String, p: Prog, rest: List[(String, String, Prog)], site: Int, base: Int, o: Bool, n: Int): List[(String, String)] =
+  if (site >= base && site < base + n) (stem, Parse.pretty(extProg(p, site - base, o)._1)) :: keptSrc(rest) else (stem, src) :: extApplyGo(rest, site, base + n, o)
+
 def collectHs(e: Expr, acc: List[Expr]): List[Expr] =
   e match {
     case Expr.ECall(f, args, _) => collectHsCall(f, args, acc, e)
@@ -479,10 +654,7 @@ def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o:
   }
 
 def walkInt(k: Int, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
-  if (live(inO, o)) Walk(Expr.EInt(intOut(k, target, seen), 0), seen + 2, hi) else Walk(Expr.EInt(k, 0), seen, hi)
-
-def intOut(k: Int, target: Int, seen: Int): Int =
-  if (seen == target) k - 1 else if (seen + 1 == target) k + 1 else k
+  if ((k == 0 || k == 1) && live(inO, o)) Walk(Expr.EInt(if (seen == target) 1 - k else k, 0), seen + 1, hi) else Walk(Expr.EInt(k, 0), seen, hi)
 
 def walkBool(b: Bool, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
   if (live(inO, o)) Walk(Expr.EBool(if (seen == target) !b else b), seen + 1, hi) else Walk(Expr.EBool(b), seen, hi)
@@ -727,13 +899,10 @@ def walkBinds(xs: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr],
 
 def walkBindsHd(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
   b match {
-    case Bind(draw, name, v) => if (live(inO, o) && seen == target) walkBinds(rest, target, seen + 1, inO, hs, hi, o) else walk(v, target, bindSkip(seen, inO, o), inO, hs, hi, o) match {
+    case Bind(draw, name, v) => walk(v, target, seen, inO, hs, hi, o) match {
   case Walk(v2, n1, h1) => walkBindsRest(Bind(draw, name, v2), rest, target, n1, inO, hs, h1, o)
 }
   }
-
-def bindSkip(seen: Int, inO: Bool, o: Bool): Int =
-  if (live(inO, o)) seen + 1 else seen
 
 def walkBindsRest(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
   walkBinds(rest, target, seen, inO, hs, hi, o) match {
