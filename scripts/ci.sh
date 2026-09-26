@@ -582,6 +582,31 @@ assert row["class"] == "diverged", row
 sections = {c["section"] for c in row["delta"]["changes"]}
 assert "signals" in sections, row
 PY
+  # Live proposal deck: review one proposal and Keep it into the working tree.
+  python3 - <<'PY'
+import json, os
+src = open("scratchpad/review/src/Main.scuzz").read()
+prop = src.replace('"Counter"', '"Counter app"', 1)
+os.makedirs("scratchpad/review/build/proposals/p1/src", exist_ok=True)
+open("scratchpad/review/build/proposals/p1/src/Main.scuzz", "w").write(prop)
+ops = {"v": 1, "kind": "inject", "events": [
+    {"op": "tap", "id": "choicechip:Timeline"},
+    {"op": "tap", "id": "outlined:Proposals"},
+    {"op": "tap", "id": "button:Keep"},
+    {"op": "pump", "k": 50},
+]}
+open("scratchpad/review/ops-deck.json", "w").write(json.dumps(ops))
+PY
+  (cd scratchpad/review && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec ops-deck.json "$ROOT/examples/editor")
+  python3 - <<'PY'
+import json
+src = open("scratchpad/review/src/Main.scuzz").read()
+assert '"Counter app"' in src, src
+line = open("scratchpad/review/build/ide/decisions.jsonl").read().strip()
+d = json.loads(line)
+assert d["proposal"] == "p1" and d["decision"] == "keep", d
+assert len(d["a"]) == 64 and len(d["b"]) == 64 and d["a"] != d["b"], d
+PY
 }
 
 slice_ui_test() {

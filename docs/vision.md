@@ -10,10 +10,8 @@ A developer reviews one proposed change at a time. The IDE evaluates the change 
 
 Do the steps in this order:
 
-1. **Proposal source.** A proposal is a file set: the working tree with some files replaced. The IDE reads one proposal from a directory under `build/`. How proposals are generated, and how the IDE talks to an LLM, stays open until this step.
-2. **Blind deck.** The deck shows one proposal at a time in the two lanes. It randomizes the lane order. Keep writes the proposal files into the working tree. Reject discards them. The deck records each decision with both file set hashes.
-3. **Focus.** The deck picks the next proposal from the same region of the code. A Randomize control picks a new region.
-4. **In-process LSP.** Move hover, goto-def, and rename from `scuzz lsp` to compiler modules called in-process.
+1. **Focus.** The deck picks the next proposal from the same region of the code. A Randomize control picks a new region.
+2. **In-process LSP.** Move hover, goto-def, and rename from `scuzz lsp` to compiler modules called in-process.
 
 Each step is a vertical slice with a claim in `examples/editor/chrome.scuzz_verify` and a corpus entry.
 
