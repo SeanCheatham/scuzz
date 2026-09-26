@@ -1,6 +1,6 @@
 record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]])
 
-record DeckS(pending: Signal[List[String]])
+record DeckS(pending: Signal[List[String]], armed: Signal[String], title: Signal[String])
 
 def analyze(path: String, body: String): IO[String] =
   for {
@@ -69,19 +69,44 @@ def recordDecision(root: String, name: String, decision: String, ha: String, hb:
   } yield ()
 
 def deckEnd(ls: LaneS, ds: DeckS): Unit =
-  Signal.set(ls.status, ["no more proposals"])
+  for {
+    _ = Signal.set(ds.armed, "")
+    _ = Signal.set(ds.title, "")
+    _ = Signal.set(ls.status, ["no more proposals"])
+  } yield ()
 
 def deckNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  deckNextIn(root, [], ls, ds)
+
+def deckNextIn(root: String, region: List[String], ls: LaneS, ds: DeckS): IO[Unit] =
   for {
     toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
     left <- loadProposals(root)
     _ = Signal.set(ds.pending, left)
-    _ <- if (List.isEmpty(left)) IO.pure(deckEnd(ls, ds)) else deckShow(root, toml, List.at(left, 0), ls, ds)
+    pick <- deckPick(root, left, region)
+    _ <- if (Str.isEmpty(pick)) IO.pure(deckEnd(ls, ds)) else deckShow(root, toml, pick, ls, ds)
+  } yield ()
+
+def deckPick(root: String, left: List[String], region: List[String]): IO[String] =
+  if (List.isEmpty(left)) IO.pure("") else if (List.isEmpty(region)) IO.pure(List.at(left, 0)) else for {
+  regions <- IO.foreach(left, n => readProposal(root, n).map(props => Deck.regionOf(props)))
+  hit = List.indexOf(regions, region)
+} yield if (hit < 0) List.at(left, 0) else List.at(left, hit)
+
+def deckRandom(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
+    left <- loadProposals(root)
+    _ = Signal.set(ds.pending, left)
+    i <- Random.nextInt(if (List.isEmpty(left)) 1 else List.len(left))
+    _ <- if (List.isEmpty(left)) IO.pure(deckEnd(ls, ds)) else deckShow(root, toml, List.at(left, i % List.len(left)), ls, ds)
   } yield ()
 
 def deckShow(root: String, toml: String, name: String, ls: LaneS, ds: DeckS): IO[Unit] =
   for {
     _ = Signal.set(ls.status, [Str.concat("reviewing ", name)])
+    _ = Signal.set(ds.armed, name)
+    _ = Signal.set(ds.title, Deck.deckTitle(name))
     disk <- diskFiles(root, toml)
     props <- readProposal(root, name)
     propSet = Deck.applyProposal(disk, props)
@@ -98,7 +123,7 @@ def deckReviewed(root: String, toml: String, name: String, disk: List[(String, S
     _ = if (flip == 0) () else Signal.set(ls.tls, Deck.swapPairs(Signal.get(ls.tls)))
     _ <- if (Deck.gateFail(Signal.get(ls.raw))) for {
   _ <- recordDecision(root, name, "auto-reject", Deck.setHash(disk), Deck.setHash(propSet))
-  _ <- deckNext(root, ls, ds)
+  _ <- deckNextIn(root, Deck.regionOf(propSet), ls, ds)
 } yield () else IO.pure(deckArm(ls))
   } yield ()
 
@@ -111,27 +136,27 @@ def deckArm(ls: LaneS): Unit =
 def keepNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
   for {
     left <- loadProposals(root)
-    _ <- if (List.isEmpty(left)) deckNext(root, ls, ds) else for {
-  name = List.at(left, 0)
+    name = Deck.keepTarget(Signal.get(ds.armed), left)
+    _ <- if (Str.isEmpty(name)) deckNext(root, ls, ds) else for {
   toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
   disk <- diskFiles(root, toml)
   props <- readProposal(root, name)
   _ <- IO.foreachDiscard(props, p => Fs.mkdirs(Fs.dirname(Fs.join(root, p._1))).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.write(Fs.join(root, p._1), p._2)))
   _ <- recordDecision(root, name, "keep", Deck.setHash(disk), Deck.setHash(Deck.applyProposal(disk, props)))
-  _ <- deckNext(root, ls, ds)
+  _ <- deckNextIn(root, Deck.regionOf(props), ls, ds)
 } yield ()
   } yield ()
 
 def rejectNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
   for {
     left <- loadProposals(root)
-    _ <- if (List.isEmpty(left)) deckNext(root, ls, ds) else for {
-  name = List.at(left, 0)
+    name = Deck.keepTarget(Signal.get(ds.armed), left)
+    _ <- if (Str.isEmpty(name)) deckNext(root, ls, ds) else for {
   toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
   disk <- diskFiles(root, toml)
   props <- readProposal(root, name)
   _ <- recordDecision(root, name, "reject", Deck.setHash(disk), Deck.setHash(Deck.applyProposal(disk, props)))
-  _ <- deckNext(root, ls, ds)
+  _ <- deckNextIn(root, Deck.regionOf(props), ls, ds)
 } yield ()
   } yield ()
 
@@ -338,11 +363,14 @@ b""", 2) == (1, 0), true)
     stepViewA = Signal.make([]: List[String])
     stepViewB = Signal.make([]: List[String])
     deckPending = Signal.make([]: List[String])
+    deckArmed = Signal.make("")
+    deckTitle = Signal.make("")
     lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
-    deck = DeckS(deckPending)
+    deck = DeckS(deckPending, deckArmed, deckTitle)
     _ <- loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel)
     pending0 <- loadProposals(root)
     _ = Signal.set(deckPending, pending0)
+    _ = Signal.set(deckTitle, if (List.isEmpty(pending0)) "" else Deck.deckTitle(List.at(pending0, 0)))
     _ = LspClient.frame("{}")
     _ = LspClient.parseLen(Str.concat("Content-Length: 2", Str.concat(LspClient.headerBreak(), "{}")))
     _ = Property.check("need", LspClient.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
@@ -513,12 +541,15 @@ b""", 2) == (1, 0), true)
 } yield ()), View.outlinedButton("Proposals", _ => for {
   _ = Property.sometimes("tappedProposals")
   _ <- deckNext(Signal.get(dirSig), lanes, deck)
-} yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckPending, ps => if (List.isEmpty(ps)) 0 else 1), 1, View.wrap(View.bindText(Signal.map(deckPending, ps => if (List.isEmpty(ps)) "" else Deck.deckTitle(List.at(ps, 0)))), View.button("Keep", _ => for {
+} yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckPending, ps => if (List.isEmpty(ps)) 0 else 1), 1, View.wrap(View.bindText(deckTitle), View.button("Keep", _ => for {
   _ = Property.sometimes("tappedKeep")
   _ <- keepNext(Signal.get(dirSig), lanes, deck)
 } yield ()), View.outlinedButton("Reject", _ => for {
   _ = Property.sometimes("tappedReject")
   _ <- rejectNext(Signal.get(dirSig), lanes, deck)
+} yield ()), View.outlinedButton("Randomize", _ => for {
+  _ = Property.sometimes("tappedRandomize")
+  _ <- deckRandom(Signal.get(dirSig), lanes, deck)
 } yield ()))), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
   _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)

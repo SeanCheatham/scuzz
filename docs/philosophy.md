@@ -83,6 +83,7 @@ The primary development loop is a binary decision on one proposed change. Open w
 - **Blind.** The deck randomizes the lane order. It does not show which lane is the working tree until the developer decides.
 - **Proposal files.** A proposal is a directory under `build/proposals/`. Files inside replace working-tree files at the same relative path. The deck bar shows the next pending proposal.
 - **Keep or reject.** Keep writes the proposal into the working tree. Reject discards it. The deck records each decision with both file set hashes in `build/ide/decisions.jsonl`. The deck advances to the next pending proposal after a decision.
+- **Focus.** After a decision the deck prefers the next pending proposal from the same region. The region of a proposal is the sorted stems it replaces. A Randomize control reviews a random pending proposal.
 - **The generator is open.** How proposals are generated, and how the IDE talks to an LLM, is not decided. The review does not depend on the generator.
 - **Claims still decide correctness.** A proposal that fails `check` or a claim does not reach the deck. The deck records the rejection and advances. The human decides preference, not correctness.
 - **`scuzz diff` stays.** It compares a git revision with the working tree. It uses the same classes, deltas, and timeline files as the review.

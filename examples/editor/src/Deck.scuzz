@@ -44,3 +44,9 @@ def newStems(disk: List[(String, String)], props: List[(String, String)]): List[
 def deckTitle(name: String): String =
   Str.concat("proposal ", name)
 
+def regionOf(props: List[(String, String)]): List[String] =
+  List.sort(List.distinct(List.map(props, p => Chrome.stemOf(p._1))))
+
+def keepTarget(armed: String, left: List[String]): String =
+  if (!Str.isEmpty(armed) && List.contains(left, armed)) armed else if (List.isEmpty(left)) "" else List.at(left, 0)
+

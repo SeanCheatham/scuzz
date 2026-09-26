@@ -45,9 +45,8 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 ### Review loop
 
-1. **Region focus** — the deck takes proposals in directory order. It does not pick the next proposal from the same region of the code. There is no Randomize control.
-2. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
-3. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
+1. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
+2. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
 
 ### Thesis-critical
 
