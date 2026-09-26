@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "2"
+events = ["tap choicechip:Timeline", "tap button:Keep", "tap button:Keep", "tap button:Keep"]

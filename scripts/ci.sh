@@ -605,6 +605,7 @@ assert '"Counter app"' in src, src
 line = open("scratchpad/review/build/ide/decisions.jsonl").read().strip()
 d = json.loads(line)
 assert d["proposal"] == "p1" and d["decision"] == "keep", d
+assert d["region"] == "Main", d
 assert len(d["a"]) == 64 and len(d["b"]) == 64 and d["a"] != d["b"], d
 PY
   # Live generation: mutation sites of the working tree become proposals.

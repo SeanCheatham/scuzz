@@ -17,8 +17,26 @@ def setHash(files: List[(String, String)]): String =
   Hash.sha256(List.join(List.map(files, f => Str.concat(f._1, Str.concat("""
 """, f._2))), ""))
 
-def decisionLine(name: String, decision: String, a: String, b: String): String =
-  Str.concat("{\"proposal\":", Str.concat(Check.jsonStr(name), Str.concat(",\"decision\":", Str.concat(Check.jsonStr(decision), Str.concat(",\"a\":", Str.concat(Check.jsonStr(a), Str.concat(",\"b\":", Str.concat(Check.jsonStr(b), "}"))))))))
+def decisionLine(name: String, decision: String, region: String, a: String, b: String): String =
+  Str.concat("{\"proposal\":", Str.concat(Check.jsonStr(name), Str.concat(",\"decision\":", Str.concat(Check.jsonStr(decision), Str.concat(",\"region\":", Str.concat(Check.jsonStr(region), Str.concat(",\"a\":", Str.concat(Check.jsonStr(a), Str.concat(",\"b\":", Str.concat(Check.jsonStr(b), "}"))))))))))
+
+def laneOf(flip: Int): String =
+  if (flip == 1) "lane 1" else "lane 2"
+
+def revealText(decision: String, name: String, lane: String): String =
+  Str.concat(decision, Str.concat(" ", Str.concat(name, Str.concat(" (proposal was ", Str.concat(lane, ")")))))
+
+def withLast(last: String, xs: List[String]): List[String] =
+  if (Str.isEmpty(last)) xs else last :: xs
+
+def skipPick(left: List[String], skipped: List[String], cur: String): (String, List[String]) =
+  skipPickAt(left, if (Str.isEmpty(cur) || List.contains(skipped, cur)) skipped else List.concat(skipped, cur :: []))
+
+def skipPickAt(left: List[String], skipped: List[String]): (String, List[String]) =
+  if (List.isEmpty(left)) ("", skipped) else skipPickRest(left, List.filter(left, n => !List.contains(skipped, n)), skipped)
+
+def skipPickRest(left: List[String], rest: List[String], skipped: List[String]): (String, List[String]) =
+  if (List.isEmpty(rest)) (List.at(left, 0), []) else (List.at(rest, 0), skipped)
 
 def countOf(raw: String, cls: String): Int =
   Diags.jsonInt(Diags.jsonField(Diags.jsonField(LspClient.parseJson(raw), "counts"), cls))
