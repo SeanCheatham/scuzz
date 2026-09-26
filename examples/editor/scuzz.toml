@@ -1,10 +1,13 @@
 [package]
 name = "editor"
 version = "0.1.0"
-description = "Live, Verify, and Session landmarks. Unnumbered chips. No Docs chapter rail."
+description = "Live, Verify, Session, and Timeline landmarks. Unnumbered chips. No Docs chapter rail."
 
 [ui]
 default_runtime = "desktop"
 headless_size = [960, 560]
 headless_scale = 1.0
 tap_button = 0
+
+[dependencies]
+compiler = { path = "../compiler" }

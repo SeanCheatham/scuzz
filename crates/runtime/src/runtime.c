@@ -143,6 +143,9 @@ static int sz_is_alloc(const void *ptr) {
 
 static size_t g_live_bytes = 0;
 static size_t g_live_count = 0;
+/* Interned literals stay pinned for the process. Leak oracles skip them. */
+static size_t g_lit_bytes = 0;
+static size_t g_lit_count = 0;
 static size_t g_peak_bytes = 0;
 static size_t g_mark_bytes = 0;
 static size_t g_mark_count = 0;
@@ -642,9 +645,9 @@ static void sz_rc_retire(void *ptr) {
 
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count) {
   if (live_bytes)
-    *live_bytes = g_live_bytes;
+    *live_bytes = g_live_bytes - g_lit_bytes;
   if (live_count)
-    *live_count = g_live_count;
+    *live_count = g_live_count - g_lit_count;
 }
 
 uint64_t sz_alloc_rc_sum(void) {
@@ -1180,7 +1183,13 @@ SzString *sz_string_lit(const char *cstr) {
       lit_cache_put(cached, cstr, e->s);
       return e->s;
     }
-  s = sz_string_from_bytes(cstr, len);
+  {
+    size_t bytes0 = g_live_bytes;
+    size_t count0 = g_live_count;
+    s = sz_string_from_bytes(cstr, len);
+    g_lit_bytes += g_live_bytes - bytes0;
+    g_lit_count += g_live_count - count0;
+  }
   sz_rc_hdr(s)->rc = SZ_RC_PINNED;
   e = (SzLitEnt *)malloc(sizeof(*e));
   if (!e)

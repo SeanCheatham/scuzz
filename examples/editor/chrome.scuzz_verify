@@ -12,6 +12,9 @@ def afterCheckStaysLive(t: Timeline): Verdict =
 def afterCheckKeepsDiags(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.lastHitHas(t, i, "outlined:Check") || Timeline.signalListLen(t, Timeline.len(t) - 1, "diags") > 0)
 
+def checkFindsTypeError(t: Timeline): Verdict =
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Check")) || !Timeline.exists(t, i => Timeline.lastHitHas(t, i, "choicechip:Session"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "Main.scuzz|type error")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Check then Session lists the seeded type error")
+
 def sessionHasRun(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 2 || Timeline.a11yHas(t, i, "button:Run") && Timeline.a11yHas(t, i, "outlined:Fuzz"))
 
@@ -34,6 +37,27 @@ def afterClaimStaysVerify(t: Timeline): Verdict =
   case (before, after) => Timeline.signalInt(t, after, "page") == 1 && Timeline.a11yHas(t, after, "choicechip:Verify=1") && Timeline.a11yHas(t, after, "textbutton:greetFact")
 })
 
+def afterDiffShowsCounts(t: Timeline): Verdict =
+  Verdict.afterHit(t, "button:Diff", "text:HEAD: 1 regressed, 0 fixed, 0 diverged, 0 unrunnable, 1 same")
+
+def afterDiffListsChanged(t: Timeline): Verdict =
+  Verdict.afterHit(t, "button:Diff", "textbutton:regressed idle")
+
+def sameWorkStaysHidden(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.a11yHas(t, i, "textbutton:same corpus/same.toml"))
+
+def afterWorkMarksDivergence(t: Timeline): Verdict =
+  Verdict.afterHit(t, "textbutton:regressed idle", "textbutton:1*")
+
+def afterWorkOpensDivergence(t: Timeline): Verdict =
+  Verdict.afterHit(t, "textbutton:regressed idle", "text:step 1 of 2 - tap button:+1 - differs")
+
+def afterStepShowsState(t: Timeline): Verdict =
+  Verdict.afterHit(t, "textbutton:0", "text:step 0 of 2 - setup - same")
+
+def rowsFollowStep(t: Timeline): Verdict =
+  Verdict.every(t, i => Timeline.signalListLen(t, i, "rowsA") == 0 || Timeline.signalStrHas(t, i, "stepTitle", Str.concat("step ", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "step")), " of "))))
+
 def landmarksStayUnnumbered(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Live") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Session") && !Timeline.a11yHas(t, i, "01  Live") && !Timeline.a11yHas(t, i, "02  Verify") && !Timeline.a11yHas(t, i, "03  Session"))
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Live") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Session") && Timeline.a11yHas(t, i, "choicechip:Timeline") && !Timeline.a11yHas(t, i, "01  Live") && !Timeline.a11yHas(t, i, "02  Verify") && !Timeline.a11yHas(t, i, "03  Session"))
 

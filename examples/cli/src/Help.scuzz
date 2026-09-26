@@ -185,6 +185,7 @@ Both sides compile with the current compiler into build/delta/a and build/delta/
 Each workload is same, diverged, fixed, regressed, or unrunnable.
 The exit code is 1 only when a workload passes on REV and fails on the working tree.
 Witnesses go to build/delta/witness-<hash>.toml. Replay one with scuzz fuzz --replay.
+Each workload that differs writes both timelines to build/delta/tl-<hash>-a.txt and -b.txt.
 
 Examples:
   scuzz diff
