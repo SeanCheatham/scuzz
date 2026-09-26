@@ -572,9 +572,11 @@ static void *mem_write(void *env) {
   if (parent[0] != '\0') {
     MemNode *pnode = fs_find(parent);
     if (!pnode) {
+      char msg[2048 + 64];
+      snprintf(msg, sizeof msg, "Fs.write: no parent (mem): %s", path);
       sz_free(path);
       r->is_err = 1;
-      r->as.err = sz_error_new(2, "Fs.write: no parent (mem)");
+      r->as.err = sz_error_new(2, msg);
       goto done;
     }
     if (!pnode->is_dir) {

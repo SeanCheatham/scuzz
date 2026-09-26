@@ -19,9 +19,9 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 ### 2. Evaluator parity and speed
 
-**Partly proven.** The evaluator produces the same observable output as the emitted binary on every example. `scuzz fuzz` writes the same `summary.json` on both engines for `examples/webhook` and `examples/io`. `examples/api-report` matches on mutation and corpus. Compiled reach stays inside evaluator reach. The evaluator campaign on `examples/kernel` is faster than compiled.
+**Partly proven.** The evaluator produces the same observable output as the emitted binary on every example. `scuzz fuzz` writes the same `summary.json` on both engines for `examples/webhook` and `examples/io`. `examples/api-report` matches on mutation and corpus. Compiled reach stays inside evaluator reach. The evaluator campaign on `examples/kernel` is faster than compiled. Counter, studio, and the editor probe on the evaluator.
 
-**Missing.** A call outside the self-tail `Int` loop interprets each step. A zero-delay retry reaches the scheduler step cap in 13 s on the evaluator and in 0.7 s compiled. A mutated page limit hits the 20 s probe deadline on both engines. A slower host falls back to compiled probes at the idle gate. The IDE review loop runs every probe on the evaluator, so this cost limits the loop.
+**Missing.** A call outside the self-tail `Int` loop interprets each step. A zero-delay retry reaches the scheduler step cap in 13 s on the evaluator and in 0.7 s compiled. A mutated page limit hits the 20 s probe deadline on both engines. A slower host falls back to compiled probes at the idle gate. The IDE review loop runs every probe on the evaluator, so this cost limits the loop. The Docs walkthrough falls back to compiled probes: a signal that holds views prints as `<handle>` compiled and as the full description on the evaluator.
 
 **Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scripts/ci-fuzz.sh` prints wall clock for both engines and compares the summaries. Do not add scheduler-step snapshots or expression coverage until a proof needs them. Locks: [`philosophy.md`](philosophy.md#evaluator).
 

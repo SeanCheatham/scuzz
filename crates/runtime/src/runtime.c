@@ -4912,6 +4912,13 @@ static SzIo *ui_callback_error(SzError *error, void *env) {
 }
 
 void sz_io_submit_ui(SzIo *io) {
+  if (io && io->tag == SZ_IO_PURE) {
+    /* A pure tap handler has no IO tail. Compiled handlers submit only when
+     * the closure returns IO; the evaluator host submits its unwrapped Value.
+     * Skipping a pure submission keeps the fiber census identical. */
+    sz_release(io);
+    return;
+  }
   if (!g_sched || !g_sched->current) {
     sz_release(sz_io_unsafe_run_or_die(io));
     return;

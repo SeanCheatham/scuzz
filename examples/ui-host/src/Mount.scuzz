@@ -59,13 +59,13 @@ def gridN(cols: Int, xs: List[View]): View =
 def applyClo(f: Value, x: Value, p: EvProg): Value =
   Eval.applyValue(f, x :: [], Eval.envOf(p), p, 0)
 
-def tap(f: Value, p: EvProg): Unit =
+def tap(f: Value, p: EvProg): IO[Unit] =
   tapVal(applyClo(f, Value.VUnit, p))
 
-def tapVal(v: Value): Unit =
+def tapVal(v: Value): IO[Unit] =
   v match {
-    case Value.VIo(_) => Property.force(Eval.evUnit(v))
-    case _ => ()
+    case Value.VIo(_) => Eval.evUnit(v)
+    case _ => IO.pure(())
   }
 
 def isTap(kind: String): Bool =
