@@ -1437,12 +1437,25 @@ def uiHostAt(dir: String): IO[String] =
   Fs.exists(joinSlash(dir, "scuzz.toml")).flatMap(ok => if (ok == 0) IO.pure("") else uiHostBuild(dir).handleErrorWith(e => IO.println(e).flatMap(_ => IO.pure(""))))
 
 def uiHostBuild(dir: String): IO[String] =
-  Fs.mkdirs(joinSlash(dir, "build")).flatMap(_ => emitDir(dir, joinSlash(dir, "build"), false).flatMap(_ => linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(r => uiHostBuilt(r, exeName(joinSlash(dir, "build"), "ui-host")))))
+  for {
+    _ <- Fs.mkdirs(joinSlash(dir, "build"))
+    toml <- Fs.read(joinSlash(dir, "scuzz.toml"))
+    files <- fuzzLiveCollect(dir)
+    fp <- fpText(toml, files)
+    exe = exeName(joinSlash(dir, "build"), "ui-host")
+    old <- Fs.read(uiHostStampPath(dir)).handleErrorWith(_ => IO.pure(""))
+    hit <- Fs.exists(exe)
+    out <- if (old == fp && hit != 0) IO.pure(exe) else uiHostFresh(dir, fp, exe)
+  } yield out
 
-def uiHostBuilt(r: (Int, String, String), exe: String): IO[String] =
-  r match {
-    case (code, _out, err) => if (code != 0) IO.println(err).flatMap(_ => IO.pure("")) else IO.pure(exe)
-  }
+def uiHostStampPath(dir: String): String =
+  joinSlash(joinSlash(dir, "build"), "fingerprint.link")
+
+def uiHostFresh(dir: String, fp: String, exe: String): IO[String] =
+  emitDir(dir, joinSlash(dir, "build"), false).flatMap(_ => linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(r => uiHostLinked(r, dir, fp, exe)))
+
+def uiHostLinked(r: (Int, String, String), dir: String, fp: String, exe: String): IO[String] =
+  if (r._1 == 0) Fs.write(uiHostStampPath(dir), fp).map(_ => exe) else IO.println(r._3).flatMap(_ => IO.pure(""))
 
 def fuzzMan2(job: FuzzJob, replay: String): IO[Unit] =
   (if (job.asan) fuzzAsanPrepare(job) else IO.pure(())).flatMap(_ => if (replay != "") fuzzReplayFile(job.outDir, job.exe, job.hasUi, replay, job.uiEnv, job.live, job.asan, job.session) else IO.ensure(fuzzBody(job), evStop(job)))
