@@ -2644,27 +2644,30 @@ def nonemptyTy(ty: String, e: Expr, defs: Ftab, ps: List[Param]): String =
 
 def emitApplyLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   arg match {
-    case Slot(ac, av, _) => emitApplyLam3(p, body, ac, av, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid)
+    case Slot(ac, av, ao) => emitApplyLam3(p, body, ac, av, ao && !boxInt && isFnPack(av), boxInt, bty, prefix, strs, defs, ens, ps, loc, fid)
   }
 
-def emitApplyLam3(p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  if (keepBind(p)) emitApplyLamShadow(shadowBind(p, prefix, ps), p, body, ac, av, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid) else emitApplyLamSkip(ac, emitExprFid(body, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc, fid))
+def emitApplyLam3(p: String, body: Expr, ac: String, av: String, ao: Bool, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  if (keepBind(p)) emitApplyLamShadow(shadowBind(p, prefix, ps), p, body, ac, av, ao, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid) else emitApplyLamSkip(join(ac, if (ao) relPtr(av) else ""), emitExprFid(body, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc, fid))
 
 def shadowBind(p: String, prefix: String, ps: List[Param]): String =
   if (paramKnown(ps, p)) Str.concat("_", Str.concat(prefix, Str.concat("_", p))) else p
 
-def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt)
+def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, ao: Bool, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt, ao)
 
 def emitApplyLamSkip(ac: String, s: Slot): Slot =
   s match {
     case Slot(bc, bv, bo) => Slot(join(ac, bc), bv, bo)
   }
 
-def emitApplyLam4(ac: String, s: Slot, av: String, p: String, boxInt: Bool): Slot =
+def emitApplyLam4(ac: String, s: Slot, av: String, p: String, boxInt: Bool, ao: Bool): Slot =
   s match {
-    case Slot(bc, bv, bo) => Slot(join(ac, join(bindAliasTy(p, av, boxInt), bc)), bv, bo)
+    case Slot(bc, bv, bo) => emitApplyLam5(join(ac, join(bindAliasTy(p, av, boxInt), bc)), bv, bo, av, Str.concat("%", p), ao)
   }
+
+def emitApplyLam5(code: String, bv: String, bo: Bool, av: String, pv: String, ao: Bool): Slot =
+  if (!ao) Slot(code, bv, bo) else if (bv == pv || bv == av) Slot(code, bv, true) else if (bo) Slot(join(code, relPtr(pv)), bv, true) else Slot(code, bv, bo)
 
 def bindAliasTy(p: String, av: String, boxInt: Bool): String =
   if (boxInt) line(Str.concat("%", Str.concat(p, Str.concat(" = add i64 ", Str.concat(av, ", 0"))))) else bindAlias(p, av)
@@ -2965,7 +2968,7 @@ def emitFsReadRt(rt: String, code: String, vals: List[String], owns: List[Bool],
   emitFsReadRt2(rt, code, arg0(vals), headOwn(owns), prefix)
 
 def emitFsReadRt2(rt: String, code: String, v: String, o: Bool, prefix: String): Slot =
-  Slot(join(code, join(kitCallPtr1(rt, v, prefix), if (o) relPtr(v) else "")), pct(prefix, "v"), false)
+  Slot(join(code, join(kitCallPtr1(rt, v, prefix), if (o) relPtr(v) else "")), pct(prefix, "v"), true)
 
 def retPtr(p: String): String =
   line(Str.concat("call void @sz_retain(ptr ", Str.concat(p, ")")))
@@ -3241,16 +3244,16 @@ def emitSysArgs(code: String, prefix: String): Slot =
   Slot(join(code, line(Str.concat(tmp(prefix, "v"), "call ptr @sz_sys_args()"))), pct(prefix, "v"), true)
 
 def emitSysI64(rt: String, code: String, vals: List[String], prefix: String): Slot =
-  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(arg0(vals), ")"))))))), pct(prefix, "v"), false)
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(arg0(vals), ")"))))))), pct(prefix, "v"), true)
 
 def emitSysI64I64(rt: String, code: String, vals: List[String], prefix: String): Slot =
-  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))))), pct(prefix, "v"), false)
+  Slot(join(code, line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(arg0(vals), Str.concat(", i64 ", Str.concat(arg1(vals), ")"))))))))), pct(prefix, "v"), true)
 
 def emitSysI64Ptr(rt: String, code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitSysI64Ptr2(rt, code, arg0(vals), arg1(vals), headOwn(tailOwn(owns)), prefix)
 
 def emitSysI64Ptr2(rt: String, code: String, a: String, b: String, ob: Bool, prefix: String): Slot =
-  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, ")")))))))), if (ob) relPtr(b) else "")), pct(prefix, "v"), false)
+  Slot(join(code, join(line(Str.concat(tmp(prefix, "v"), Str.concat("call ptr @", Str.concat(rt, Str.concat("(i64 ", Str.concat(a, Str.concat(", ptr ", Str.concat(b, ")")))))))), if (ob) relPtr(b) else "")), pct(prefix, "v"), true)
 
 def emitFsList(code: String, vals: List[String], owns: List[Bool], prefix: String): Slot =
   emitFsList2(code, arg0(vals), headOwn(owns), prefix)
@@ -6341,7 +6344,10 @@ def peelIo(ty: String): String =
   if (Check.isIo(ty)) Check.ioPayload(ty) else ty
 
 def emitOneContTy(id: Int, body: Expr, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, bind: String, nested: Bool, start: Int, bty: String): String =
-  if (keepBind(bind) || isI64Ty(bty) || isTuplePat(bind) || isTupTy(bty)) emitOneContAlias(id, body, strs, defs, ens, ps, loc, bind, start, bty) else emitOneCont2(id, emitOneCont3(emitUnpack(ps), emitExprFid(rewriteBind(body, bind, ".closure.value"), Str.concat("c", Str.fromInt(id)), strs, defs, ens, ps, loc, start)), loc, strs)
+  if (keepBind(bind) || isI64Ty(bty) || isTuplePat(bind) || isTupTy(bty)) emitOneContAlias(id, body, strs, defs, ens, ps, loc, bind, start, bty) else emitOneCont2(id, emitContSkip(bind, emitOneCont3(emitUnpack(ps), emitExprFid(rewriteBind(body, bind, ".closure.value"), Str.concat("c", Str.fromInt(id)), strs, defs, ens, ps, loc, start)), bty), loc, strs)
+
+def emitContSkip(bind: String, s: Slot, bty: String): Slot =
+  if (bind == "_") emitContDrop(s, bty) else s
 
 def keepBind(bind: String): Bool =
   bind != "" && bind != "_"
@@ -6412,7 +6418,7 @@ def emitOneContAlias2(id: Int, body: Expr, strs: Strs, defs: Ftab, ens: List[En]
   emitOneCont2(id, emitContDrop(emitOneCont3(join(emitUnpack(rest), emitBindAlias(bind, bty)), emitExprFid(body, Str.concat("c", Str.fromInt(id)), strs, defs, ens, bindPsTy(bind, rest, bty), loc, start)), bty), loc, strs)
 
 def emitContDrop(s: Slot, bty: String): Slot =
-  Slot(join(s.code, if (isI64Ty(bty)) "" else relPtr("%.closure.value")), s.val, s.owned)
+  Slot(join(s.code, if (isI64Ty(bty) || bty == "Unit") "" else relPtr("%.closure.value")), s.val, s.owned)
 
 def emitOneCont3(pre: String, s: Slot): Slot =
   s match {

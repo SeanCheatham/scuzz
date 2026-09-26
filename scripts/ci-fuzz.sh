@@ -907,12 +907,12 @@ assert report["mutate"]["invalid"] == 0
 PY_CHECK
 
 # One success drive on the host loopback TLS client. Clock and files stay simulated.
-if ! fuzz --live --replay examples/api-report/live.toml examples/api-report | tee /tmp/scuzz-api-report-live.log | grep -q "fuzz replay ok"; then
+if ! fuzz --live --replay examples/api-report/live.toml examples/api-report | tee /tmp/scuzz-api-report-live.log | grep "fuzz replay ok" >/dev/null; then
   echo "examples/api-report: live loopback replay failed" && exit 1
 fi
 
 # URLSession certificate checks and TLS handshake errors on host loopback.
-if ! fuzz --session --iterations 0 examples/transport | tee /tmp/scuzz-transport-session.log | grep -q "fuzz ok"; then
+if ! fuzz --session --iterations 0 examples/transport | tee /tmp/scuzz-transport-session.log | grep "fuzz ok" >/dev/null; then
   echo "examples/transport: session replay failed" && exit 1
 fi
 

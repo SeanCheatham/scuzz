@@ -9,13 +9,43 @@ def analyze(path: String, body: String): IO[String] =
     above = Fs.dirname(parent)
     up2 <- Fs.exists(Fs.join(above, "scuzz.toml"))
     root = if (hit) here else if (up) parent else if (up2) above else here
-    got <- Sys.exec(Str.concat("scuzz check --message-format=json ", root)).handleErrorWith(_ => IO.pure((Str.len("x"), "[]", "")))
-  } yield if (Str.startsWith(got._2, "[")) got._2 else "[]"
+    toml <- Fs.read(Fs.join(root, "scuzz.toml")).handleErrorWith(_ => IO.pure(""))
+    ents <- Fs.list(Fs.join(root, "src")).handleErrorWith(_ => IO.pure([]))
+    own <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
+    files <- Drive.collectDeps(root, Manifest.parse(toml).deps, own).handleErrorWith(_ => IO.pure(own))
+  } yield Check.checkFilesOwn(files, Drive.fileStems(own))
 
 def runProject(root: String): IO[String] =
   for {
     got <- Sys.exec(Str.concat("scuzz run ", root)).handleErrorWith(_ => IO.pure((Str.len("x"), "", "run fail")))
   } yield Chrome.captureOut(got._2, got._3)
+
+def startDiff(root: String): IO[Int] =
+  for {
+    _ <- Fs.mkdirs(Fs.dirname(Lanes.reportPath(root))).handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.write(Lanes.reportPath(root), "").handleErrorWith(_ => IO.pure(()))
+    pid <- Sys.spawn(Str.concat("scuzz diff ", Lanes.shQuote(root))).handleErrorWith(_ => IO.pure(0))
+  } yield pid
+
+def loadDelta(root: String, status: Signal[List[String]], raw: Signal[String], rev: Signal[String], works: Signal[List[String]], tls: Signal[List[String]]): IO[Unit] =
+  for {
+    text <- Chrome.readOr(Lanes.reportPath(root))
+    j = LspClient.parseJson(text)
+    texts <- IO.foreach(Lanes.workFiles(j), name => Chrome.readOr(Lanes.deltaFile(root, name)))
+    _ = Signal.set(raw, text)
+    _ = Signal.set(status, if (Str.isEmpty(text)) [] else Lanes.statusLines(j))
+    _ = Signal.set(rev, Lanes.revLabel(j))
+    _ = Signal.set(tls, texts)
+    _ = Signal.set(works, List.map(Lanes.workItems(j), w => Lanes.workLabel(w)))
+  } yield ()
+
+def showStep(step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], a: List[String], b: List[String], i: Int): Unit =
+  for {
+    _ = Signal.set(step, i)
+    _ = Signal.set(title, Lanes.stepTitle(a, b, i))
+    _ = Signal.set(rowsA, Lanes.stepRows(a, b, i, true))
+    _ = Signal.set(rowsB, Lanes.stepRows(a, b, i, false))
+  } yield ()
 
 def startFuzz(root: String): IO[Int] =
   Sys.spawn(Str.concat("scuzz fuzz --iterations 0 ", root)).handleErrorWith(_ => IO.pure(0))
@@ -43,10 +73,10 @@ def walkTree(root: String): IO[List[String]] =
   } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepWalk(s)))
 
 def landmarkRail(page: Signal[Int]): View =
-  View.focusGroup(View.wrap(View.choiceChip(page, 0, "Live"), View.choiceChip(page, 1, "Verify"), View.choiceChip(page, 2, "Session")))
+  View.focusGroup(View.wrap(View.choiceChip(page, 0, "Live"), View.choiceChip(page, 1, "Verify"), View.choiceChip(page, 2, "Session"), View.choiceChip(page, 3, "Timeline")))
 
-def landmarkBook(page: Signal[Int], live: View, verify: View, session: View): View =
-  View.semantics("Index book", View.column(landmarkRail(page), View.showWhen(page, 0, View.expanded(live)), View.showWhen(page, 1, View.expanded(verify)), View.showWhen(page, 2, View.expanded(session))))
+def landmarkBook(page: Signal[Int], live: View, verify: View, session: View, timeline: View): View =
+  View.semantics("Index book", View.column(landmarkRail(page), View.showWhen(page, 0, View.expanded(live)), View.showWhen(page, 1, View.expanded(verify)), View.showWhen(page, 2, View.expanded(session)), View.showWhen(page, 3, View.expanded(timeline))))
 
 @main def main: IO[Unit] =
   for {
@@ -75,8 +105,8 @@ def landmarkBook(page: Signal[Int], live: View, verify: View, session: View): Vi
     _ = Property.check("strip", Chrome.stripUri("file://a") == "a", true)
     _ = Property.check("abs", Chrome.resolvePath("d", "/a") == "/a", true)
     _ = Property.check("res", Chrome.resolvePath("d", "b") == Fs.join("d", "b"), true)
-    _ = Property.check("dfile", Check.diagFile("1:1|a.scuzz|m") == "a.scuzz", true)
-    _ = Property.check("dempty", Check.diagFile("1:1||m") == "", true)
+    _ = Property.check("dfile", Diags.diagFile("1:1|a.scuzz|m") == "a.scuzz", true)
+    _ = Property.check("dempty", Diags.diagFile("1:1||m") == "", true)
     _ = Property.check("open", Chrome.openPaths(["a"], "b") == ["a", "b"], true)
     _ = Property.check("reopen", Chrome.openPaths(["a"], "a") == ["a"], true)
     _ = Property.check("drop", Chrome.dropAt(["a", "b", "c"], 1) == ["a", "c"], true)
@@ -110,6 +140,16 @@ bc""", 3)._1 == 1, true)
 b""", 4)._1 == 2, true)
     _ = Property.check("leol", Chrome.lineColAt("""a
 b""", 2) == (1, 0), true)
+    tl2 = List.join(["# timeline v=3 n=2", "--- 0 checkpoint=1", "drive:", "setup", "signals:", "[]", "--- 1 checkpoint=1", "drive:", "tap button:+1"], Lanes.nl())
+    _ = Property.check("states", List.len(Lanes.states(tl2)) == 2, true)
+    _ = Property.check("drive", Lanes.secBody(Lanes.sections(Lanes.stateAt(Lanes.states(tl2), 1)), "drive") == "tap button:+1", true)
+    _ = Property.check("nostate", Lanes.stateAt(Lanes.states(tl2), 2) == "", true)
+    _ = Property.check("rail", Lanes.railLabels(["x", "y"], ["x", "z", "w"]) == ["0", "1*", "2*"], true)
+    _ = Property.check("railix", Lanes.railIndex("12*") == 12, true)
+    _ = Property.check("quote", Lanes.shQuote("a'b") == "'a'\\''b'", true)
+    _ = Property.check("rowsfirst", Lanes.rowsOf([("a", "1"), ("b", "2")], [("a", "1"), ("b", "3")], false) == [Str.concat("b *", Str.concat(Lanes.nl(), "3")), Str.concat("a", Str.concat(Lanes.nl(), "1"))], true)
+    _ = Property.check("sigs", Lanes.shownBody("signals", "[{\"id\":0,\"type\":\"int\",\"name\":\"\",\"value\":1},{\"id\":1,\"type\":\"str\",\"name\":\"label\",\"value\":\"x\"}]") == Str.concat("#0 = 1", Str.concat(Lanes.nl(), "label = \"x\"")), true)
+    _ = Property.check("title", Lanes.stepTitle(Lanes.states(tl2), [], 1) == "step 1 of 2 - tap button:+1 - differs", true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ => IO.pure(Str.len("")))
     file <- Chrome.openBuffer(arg, argListed)
     root = if (argListed == 0) Fs.dirname(file) else arg
@@ -145,15 +185,29 @@ b""", 2) == (1, 0), true)
     findOpen = Signal.make(Str.len(""))
     page = Signal.make(0)
     title = Signal.make(pkg)
-    _ = Lsp.frame("{}")
-    _ = Lsp.parseLen(Str.concat("Content-Length: 2", Str.concat(Lsp.headerBreak(), "{}")))
-    _ = Property.check("need", Lsp.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
-    _ = Property.check("ms", Lsp.msgSlice("aabbcc", Str.len("aa"), Str.len("bb")) == "bb", true)
-    _ = Property.check("idm", Check.jsonInt(Check.jsonField(Lsp.takeIfMatch(Lsp.parseJson("{\"id\":2}"), Str.len("xy")), "id")) == Str.len("xy"), true)
-    _ = Property.check("fix", Lsp.fixText(Lsp.parseJson("{\"result\":[{\"title\":\"fix\",\"edit\":{\"changes\":{\"u\":[{\"newText\":\"fixed\"}]}}}]}"), "x") == "fixed", true)
-    _ = Property.check("rename", Lsp.renameText(Lsp.parseJson("{\"result\":{\"changes\":{\"u\":[{\"newText\":\"renamed\"}]}}}"), "x") == "renamed", true)
-    _ = Property.check("duri", Lsp.defUri(Lsp.parseJson("{\"result\":[{\"uri\":\"file://x\",\"range\":{\"start\":{\"line\":0,\"character\":0}}}]}")) == "file://x", true)
-    _ = Property.check("dobj", Lsp.defUri(Lsp.parseJson("{\"result\":{\"uri\":\"u\"}}")) == "u", true)
+    diffPid = Signal.make(0)
+    deltaRaw = Signal.make("")
+    deltaStatus = Signal.make([]: List[String])
+    revLabel = Signal.make("a: HEAD")
+    works = Signal.make([]: List[String])
+    laneTexts = Signal.make([]: List[String])
+    laneA = Signal.make([]: List[String])
+    laneB = Signal.make([]: List[String])
+    rail = Signal.make([]: List[String])
+    step = Signal.make(0)
+    stepTitle = Signal.make("")
+    rowsA = Signal.make([]: List[String])
+    rowsB = Signal.make([]: List[String])
+    _ <- loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts)
+    _ = LspClient.frame("{}")
+    _ = LspClient.parseLen(Str.concat("Content-Length: 2", Str.concat(LspClient.headerBreak(), "{}")))
+    _ = Property.check("need", LspClient.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
+    _ = Property.check("ms", LspClient.msgSlice("aabbcc", Str.len("aa"), Str.len("bb")) == "bb", true)
+    _ = Property.check("idm", Diags.jsonInt(Diags.jsonField(LspClient.takeIfMatch(LspClient.parseJson("{\"id\":2}"), Str.len("xy")), "id")) == Str.len("xy"), true)
+    _ = Property.check("fix", LspClient.fixText(LspClient.parseJson("{\"result\":[{\"title\":\"fix\",\"edit\":{\"changes\":{\"u\":[{\"newText\":\"fixed\"}]}}}]}"), "x") == "fixed", true)
+    _ = Property.check("rename", LspClient.renameText(LspClient.parseJson("{\"result\":{\"changes\":{\"u\":[{\"newText\":\"renamed\"}]}}}"), "x") == "renamed", true)
+    _ = Property.check("duri", LspClient.defUri(LspClient.parseJson("{\"result\":[{\"uri\":\"file://x\",\"range\":{\"start\":{\"line\":0,\"character\":0}}}]}")) == "file://x", true)
+    _ = Property.check("dobj", LspClient.defUri(LspClient.parseJson("{\"result\":{\"uri\":\"u\"}}")) == "u", true)
     _ <- Ui.setTitle(pkg)
     _ <- Fiber.fork(IO.forever(for {
   _ = Property.sometimes("polledFiles")
@@ -191,6 +245,12 @@ b""", 2) == (1, 0), true)
   _ = Signal.set(fuzzPid, 0)
 } yield ()
 } yield ()
+  dp = Signal.get(diffPid)
+  diffLive <- if (dp == 0) IO.pure(0) else fuzzAlive(dp)
+  _ <- if (dp == 0 || diffLive != 0) IO.pure(()) else for {
+  _ <- loadDelta(dir, deltaStatus, deltaRaw, revLabel, works, laneTexts)
+  _ = Signal.set(diffPid, 0)
+} yield ()
 } yield ()))
     _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.button("Save", _ => for {
   _ = Property.sometimes("tappedSave")
@@ -203,10 +263,10 @@ b""", 2) == (1, 0), true)
 } yield ()), View.outlinedButton("Check", _ => for {
   _ = Property.sometimes("tappedCheck")
   raw <- analyze(Signal.get(pathSig), Signal.get(buf))
-  j = Lsp.parseJson(raw)
-  _ <- Ui.setEditorDiagnostics(Check.diagMarks(j))
-  _ <- Lsp.paintEditor(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf))
-  rows = Check.diagRows(j)
+  j = LspClient.parseJson(raw)
+  _ <- Ui.setEditorDiagnostics(Diags.diagMarks(j))
+  _ <- LspClient.paintEditor(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf))
+  rows = Diags.diagRows(j)
   _ = Signal.set(diags, rows)
   _ = Signal.set(showDiags, Chrome.flagNonEmpty(rows))
 } yield ()), View.outlinedButton("Find", _ => for {
@@ -264,7 +324,7 @@ b""", 2) == (1, 0), true)
   _ = Signal.set(fuzzPid, 0)
 } yield ()
 } yield ())), View.each(fuzzSometimesRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzTriggerRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzStatus, s => View.text(s)), View.showWhen(showDiags, 1, View.focusGroup(View.each(diags, s => View.button(s, _ => for {
-  file = Check.diagFile(s)
+  file = Diags.diagFile(s)
   _ <- if (Str.isEmpty(file)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.get(dirSig), file)
   body <- Fs.read(dest).handleErrorWith(_ => IO.pure(""))
@@ -279,8 +339,33 @@ b""", 2) == (1, 0), true)
   _ = Signal.set(pathSig, List.at(ps, i2))
   _ = Signal.set(page, 0)
 } yield ()
-  _ <- Check.jumpDiag(s)
-} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s)))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+  _ <- Diags.jumpDiag(s)
+} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))))), View.section("timeline", "Timeline", View.scroll(View.column(View.wrap(View.button("Diff", _ => for {
+  _ = Property.sometimes("tappedDiff")
+  root = Signal.get(dirSig)
+  _ = Signal.set(deltaStatus, ["running scuzz diff"])
+  _ = Signal.set(works, []: List[String])
+  pid <- startDiff(root)
+  _ = Signal.set(diffPid, pid)
+  alive <- if (pid == 0) IO.pure(0) else fuzzAlive(pid)
+  _ <- if (alive != 0) IO.pure(()) else for {
+  _ <- loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts)
+  _ = Signal.set(diffPid, 0)
+} yield ()
+} yield ())), View.each(deltaStatus, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
+  _ = Property.sometimes("tappedWork")
+  i = List.indexOf(Signal.get(works), w)
+  item = Lanes.workAt(LspClient.parseJson(Signal.get(deltaRaw)), w)
+  a = Lanes.states(Lanes.laneText(Signal.get(laneTexts), i, true))
+  b = Lanes.states(Lanes.laneText(Signal.get(laneTexts), i, false))
+  _ = Signal.set(laneA, a)
+  _ = Signal.set(laneB, b)
+  _ = Signal.set(rail, Lanes.railLabels(a, b))
+  _ = showStep(step, stepTitle, rowsA, rowsB, a, b, if (Lanes.workFirst(item) < 0) 0 else Lanes.workFirst(item))
+} yield ())))), View.bindText(stepTitle), View.row(View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
+  _ = Property.sometimes("tappedStep")
+  _ = showStep(step, stepTitle, rowsA, rowsB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
+} yield ()))), View.expanded(View.column(View.bindText(revLabel), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.text("b: working tree"), View.each(rowsB, s => View.code(s))))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
   off <- Ui.editorCaret()
   found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
   hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found

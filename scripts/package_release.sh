@@ -82,13 +82,18 @@ else
   cp -a "$ROOT/third_party/skia/prebuilt" "$OUT/third_party/skia/"
 fi
 
-echo "==> bundling IDE package"
-mkdir -p "$OUT/ide"
-(cd "$ROOT/examples/editor" && tar cf - --exclude=build --exclude=goldens --exclude=corpus --exclude='*.actual.*' .) | (cd "$OUT/ide" && tar xf -)
-if [[ ! -f "$OUT/ide/scuzz.toml" ]]; then
-  echo "package_release: missing examples/editor/scuzz.toml" >&2
-  exit 1
-fi
+# The IDE depends on the compiler packages by path (../compiler, ../syntax).
+echo "==> bundling IDE package and its compiler dependencies"
+for pair in editor:ide compiler:compiler syntax:syntax; do
+  src="${pair%%:*}"
+  dst="${pair##*:}"
+  mkdir -p "$OUT/$dst"
+  (cd "$ROOT/examples/$src" && tar cf - --exclude=build --exclude=goldens --exclude=corpus --exclude=.scuzz --exclude='*.actual.*' .) | (cd "$OUT/$dst" && tar xf -)
+  if [[ ! -f "$OUT/$dst/scuzz.toml" ]]; then
+    echo "package_release: missing examples/$src/scuzz.toml" >&2
+    exit 1
+  fi
+done
 
 ver="${SCUZZ_VERSION:-}"
 if [[ -z "$ver" ]] && command -v git >/dev/null 2>&1 && git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

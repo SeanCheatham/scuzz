@@ -476,6 +476,7 @@ slice_package() {
     grep -q "ready." /tmp/rel-hello.out
     scuzz run --out-dir /tmp/scuzz-rel-cli examples/cli | tee /tmp/rel-cli.out
     grep -q "cli-ok" /tmp/rel-cli.out
+    scuzz check "$prefix/share/scuzz/ide"
   )
 }
 

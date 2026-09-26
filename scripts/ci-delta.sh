@@ -71,6 +71,19 @@ for row in report["workloads"]:
     sections = {c["section"] for c in row["delta"]["changes"]}
     assert "a11y" in sections, row
 PY_CHECK
+python3 - "$report" <<'PY_CHECK'
+import json, os, sys
+path = sys.argv[1]
+report = json.load(open(path))
+for row in report["workloads"]:
+    tl = row["timelines"]
+    if row["class"] == "same":
+        assert tl is None, row
+        continue
+    for side in ("a", "b"):
+        text = open(os.path.join(os.path.dirname(path), tl[side])).read()
+        assert text.count("\n--- ") + text.startswith("--- ") >= 1, (row["label"], side)
+PY_CHECK
 reset_tree
 
 # A broken +1 handler fails a claim on the working tree only.

@@ -40,7 +40,7 @@ def diffDir(path: String, rev: String, iterations: Int, seed: Int, json: Bool): 
     a <- side(sideDir(wt, prefix), Drive.joinSlash(root, "a"), iterations, seed).handleErrorWith(e => IO.fail(Str.concat("scuzz diff: ", Str.concat(rev, Str.concat(" side failed: ", e)))))
     b <- side(path, Drive.joinSlash(root, "b"), iterations, seed).handleErrorWith(e => IO.fail(Str.concat("scuzz diff: working tree side failed: ", e)))
     runs = workloads(a, b)
-    rows <- replay(a, b, runs, noRows())
+    rows <- replay(a, b, root, runs, noRows())
     hs <- search(a, b, root, runs, iterations)
     agg <- aggregate(a, b, rows)
     report = reportJson(rev, sha, a.job.dir, b.job.dir, rows, agg, iterations, seed, hs)
@@ -172,8 +172,20 @@ def rowWith(r: FuzzRun, a: DiffOut, b: DiffOut, d: TlDelta): DiffRow =
 def pair(a: DiffSide, b: DiffSide, r: FuzzRun): IO[DiffRow] =
   probe(a.job, r).flatMap(x => probe(b.job, r).map(y => rowOf(r, x, y)))
 
-def replay(a: DiffSide, b: DiffSide, runs: List[FuzzRun], acc: List[DiffRow]): IO[List[DiffRow]] =
-  if (List.isEmpty(runs)) IO.pure(List.reverse(acc)) else pair(a, b, List.at(runs, 0)).flatMap(row => replay(a, b, List.tail(runs), row :: acc))
+def replay(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], acc: List[DiffRow]): IO[List[DiffRow]] =
+  if (List.isEmpty(runs)) IO.pure(List.reverse(acc)) else kept(a, b, root, List.at(runs, 0)).flatMap(row => replay(a, b, root, List.tail(runs), row :: acc))
+
+def kept(a: DiffSide, b: DiffSide, root: String, r: FuzzRun): IO[DiffRow] =
+  probe(a.job, r).flatMap(x => probe(b.job, r).flatMap(y => keepTl(root, rowOf(r, x, y), x.tl, y.tl)))
+
+def keepTl(root: String, row: DiffRow, tlA: String, tlB: String): IO[DiffRow] =
+  if (!differs(row.cls)) IO.pure(row) else Fs.write(Drive.joinSlash(root, tlName(row, "a")), tlA).flatMap(_ => Fs.write(Drive.joinSlash(root, tlName(row, "b")), tlB)).map(_ => row)
+
+def tlName(r: DiffRow, side: String): String =
+  Str.concat("tl-", Str.concat(Str.slice(Hash.sha256(Str.concat(r.label, Str.concat(Verify.nl(), r.run.script))), 0, 16), Str.concat("-", Str.concat(side, ".txt"))))
+
+def tlJson(r: DiffRow): String =
+  if (!differs(r.cls)) "null" else Str.concat("{\"a\":", Str.concat(Check.jsonStr(tlName(r, "a")), Str.concat(",\"b\":", Str.concat(Check.jsonStr(tlName(r, "b")), "}"))))
 
 def count(rows: List[DiffRow], cls: String): Int =
   List.len(List.filter(rows, r => r.cls == cls))
@@ -301,7 +313,7 @@ def reportJson(rev: String, sha: String, dirA: String, dirB: String, rows: List[
   Str.concat("{\"v\":1,\"kind\":\"diff\",\"rev\":", Str.concat(Check.jsonStr(rev), Str.concat(",\"sha\":", Str.concat(Check.jsonStr(sha), Str.concat(",\"ok\":", Str.concat(Verify.jb(count(rows, "regressed") == 0), Str.concat(",\"sides\":{\"a\":", Str.concat(Check.jsonStr(dirA), Str.concat(",\"b\":", Str.concat(Check.jsonStr(dirB), Str.concat("},\"counts\":{", Str.concat(List.join(List.map(classes(), c => Str.concat(Check.jsonStr(c), Str.concat(":", Str.fromInt(count(rows, c))))), ","), Str.concat("},\"workloads\":[", Str.concat(List.join(List.map(ranked(rows), r => rowJson(r)), ","), Str.concat("]", Str.concat(aggJson(agg), Str.concat(huntJson(iterations, seed, h), "}")))))))))))))))))
 
 def rowJson(r: DiffRow): String =
-  Str.concat("{\"label\":", Str.concat(Check.jsonStr(r.label), Str.concat(",\"class\":", Str.concat(Check.jsonStr(r.cls), Str.concat(",\"events\":", Str.concat(Verify.jStrList(Verify.linesOf(r.run.script)), Str.concat(",\"why_a\":", Str.concat(Delta.jOpt(r.whyA), Str.concat(",\"why_b\":", Str.concat(Delta.jOpt(r.whyB), Str.concat(",\"delta\":", Str.concat(Delta.json(r.delta), "}"))))))))))))
+  Str.concat("{\"label\":", Str.concat(Check.jsonStr(r.label), Str.concat(",\"class\":", Str.concat(Check.jsonStr(r.cls), Str.concat(",\"events\":", Str.concat(Verify.jStrList(Verify.linesOf(r.run.script)), Str.concat(",\"why_a\":", Str.concat(Delta.jOpt(r.whyA), Str.concat(",\"why_b\":", Str.concat(Delta.jOpt(r.whyB), Str.concat(",\"delta\":", Str.concat(Delta.json(r.delta), Str.concat(",\"timelines\":", Str.concat(tlJson(r), "}"))))))))))))))
 
 def aggJson(agg: DiffAgg): String =
   Str.concat(",\"alphabet\":{", Str.concat(List.join(List.map(agg.alpha, x => Str.concat(Check.jsonStr(x._1), Str.concat(":", addRem(x._2, x._3)))), ","), Str.concat("},\"claims\":{\"added\":", Str.concat(Verify.jStrList(agg.claimsAdded), Str.concat(",\"removed\":", Str.concat(Verify.jStrList(agg.claimsRemoved), Str.concat(",\"changed\":[", Str.concat(List.join(List.map(agg.claimsChanged, c => Str.concat("{\"name\":", Str.concat(Check.jsonStr(c.key), Str.concat(",\"a\":", Str.concat(Check.jsonStr(c.before), Str.concat(",\"b\":", Str.concat(Check.jsonStr(c.after), "}"))))))), ","), Str.concat("]},\"sometimes\":{\"only_a\":", Str.concat(Verify.jStrList(agg.somA), Str.concat(",\"only_b\":", Str.concat(Verify.jStrList(agg.somB), Str.concat("},\"classify\":[", Str.concat(List.join(List.map(agg.classify, c => Delta.changeJson(c)), ","), "]"))))))))))))))

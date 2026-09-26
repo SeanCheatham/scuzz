@@ -1,8 +1,10 @@
 def setup(): IO[Unit] =
-  Fs.write("scuzz.toml", "[package]\nname = \"editor\"\nversion = \"0.1.0\"\n")
-
-def Main.analyze(_path: String, _body: String): IO[String] =
-  IO.pure("[{\"severity\":\"error\",\"message\":\"x\",\"line\":1,\"column\":1,\"file\":\"Main.scuzz\"}]")
+  for {
+    _ <- Fs.write("scuzz.toml", "[package]\nname = \"editor\"\nversion = \"0.1.0\"\n")
+    _ <- Fs.mkdirs("src")
+    _ <- Fs.write("src/Main.scuzz", "@main def main: IO[Unit] =\n  IO.println(1 + \"x\")\n")
+    _ <- Main.startDiff(".")
+  } yield ()
 
 def Main.runProject(_root: String): IO[String] =
   IO.pure("run ok")
@@ -25,10 +27,43 @@ neverHit
     _ <- Fs.write(Fs.join(fuzz, "summary.json"), "{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":{\"ok\":true}}\n")
   } yield 1
 
+def Main.startDiff(root: String): IO[Int] =
+  for {
+    build = Fs.join(root, "build")
+    delta = Fs.join(build, "delta")
+    _ <- Fs.mkdirs(build).handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.mkdirs(delta).handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.write(Fs.join(delta, "report.json"), "{\"v\":1,\"kind\":\"diff\",\"rev\":\"HEAD\",\"counts\":{\"regressed\":1,\"fixed\":0,\"diverged\":0,\"unrunnable\":0,\"same\":1},\"workloads\":[{\"label\":\"idle\",\"class\":\"regressed\",\"delta\":{\"first\":1},\"timelines\":{\"a\":\"tl-a.txt\",\"b\":\"tl-b.txt\"}},{\"label\":\"corpus/same.toml\",\"class\":\"same\",\"delta\":{\"first\":-1},\"timelines\":null}]}\n")
+    _ <- Fs.write(Fs.join(delta, "tl-a.txt"), """# timeline v=3 n=2
+--- 0 checkpoint=1
+drive:
+setup
+signals:
+count=0
+--- 1 checkpoint=1
+drive:
+tap button:+1
+signals:
+count=1
+""")
+    _ <- Fs.write(Fs.join(delta, "tl-b.txt"), """# timeline v=3 n=2
+--- 0 checkpoint=1
+drive:
+setup
+signals:
+count=0
+--- 1 checkpoint=1
+drive:
+tap button:+1
+signals:
+count=2
+""")
+  } yield 1
+
 def Main.loadClaimNames(_root: String, _rels: List[String]): IO[List[String]] =
   IO.pure(["greetFact"])
 
-def Lsp.lspCall(_root: String, _path: String, _body: String, method: String): IO[Json] =
+def LspClient.lspCall(_root: String, _path: String, _body: String, method: String): IO[Json] =
   IO.pure(parseJson(method match {
   case "textDocument/hover" => "{\"result\":{\"contents\":{\"kind\":\"plaintext\",\"value\":\"hover\"}}}"
   case "textDocument/completion" => "{\"result\":{\"items\":[{\"label\":\"foo\"}]}}"

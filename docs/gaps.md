@@ -9,23 +9,31 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 ## Unknowns
 
-### 1. Mobile on real devices
+### 1. Proposal review in the IDE
 
-**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. OpenSSL on the Android NDK. iOS clients use the Apple transport. Hardware runs need provisioning.
+**Unproven.** The IDE evaluates a proposal and the working tree in its own process, fast enough for one decision every few seconds. A timeline with steps aligned by index shows a human what a change does. A human decides faster from blind timelines than from a source diff. Generated proposals are useful often enough to keep reviewing. How proposals are generated, and how the IDE talks to an LLM, is not decided.
 
-**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. That bar stays host-gated. Hardware device runs stay open.
-
-The local iOS loop targets arm64 simulators on iOS 16 or later. Source edits reload the View and preserve app state. Manifest changes and the r command restart the app. Physical device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
+**Proof.** Edit an open buffer. The Timeline landmark shows the diverging state between the buffer and the file on disk, with no `git` and no native build. Then the deck shows proposals from a directory in random lane order and writes Keep into the working tree. Record the time from tap to lanes and the keep rate per region. Order: [`vision.md`](vision.md#primary-arc-proposal-review-in-the-ide). Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
 ### 2. Evaluator parity and speed
 
-**Partly proven.** An evaluator written in Scuzz produces the same observable output as the emitted binary on every example. `scuzz fuzz` on `examples/webhook` writes the same `summary.json` on both engines (`scripts/ci-fuzz.sh`). `examples/io` also matches on both engines. `examples/api-report` matches on mutation and corpus. Compiled reach stays inside evaluator reach. Equal reach passes. A scheduler step is one effect, so the extra `IO` wrapping in the evaluator does not move the interleaving. One `scuzz eval --probe` server per file set checks the package once and forks a child per probe. `scuzz fuzz --iterations 320 examples/api-report` takes 63 s on the evaluator and 60 s compiled on this host. A self-tail `Int` function runs as a compiled loop when its body is `if (n <= 0) k else f(n - 1)` or `n match { case 0 => k; case _ => f(n - 1) }` and `k` is an `Int` literal. Coverage and distance keep the same final record. The evaluator idle probe on `examples/kernel` takes 0.05 s on this host. `scuzz fuzz --iterations 16 examples/kernel` takes 14 s on the evaluator and 26 s compiled. A zero-delay retry reaches the scheduler step cap in 13 s on the evaluator and in 0.7 s compiled. A mutated page limit still hits the 20 s probe deadline on both engines. A call outside the Int tail loop still interprets each step. Compiled corpus replay takes 9 s of that 14 s (`--iterations 0`). A slower host falls back to compiled probes at the idle gate.
+**Partly proven.** The evaluator produces the same observable output as the emitted binary on every example. `scuzz fuzz` writes the same `summary.json` on both engines for `examples/webhook` and `examples/io`. `examples/api-report` matches on mutation and corpus. Compiled reach stays inside evaluator reach. The evaluator campaign on `examples/kernel` is faster than compiled.
 
-**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scripts/ci-fuzz.sh` prints wall clock for both engines on `examples/webhook`, `examples/api-report`, and `examples/io`. It diffs the full summary for `examples/webhook` and `examples/io`. For `examples/api-report` it checks mutation and corpus equality. Compiled function, branch, sometimes, trigger, and claim reach must stay inside evaluator reach. Equal reach passes. The kernel campaign completes faster than compiled. The api-report campaign takes 63 s on the evaluator and 60 s compiled. The remaining cost is the interpreted scheduler step in a zero-delay retry. Do not add scheduler-step snapshots or expression coverage until a proof needs them. Locks: [`philosophy.md`](philosophy.md#evaluator).
+**Missing.** A call outside the self-tail `Int` loop interprets each step. A zero-delay retry reaches the scheduler step cap in 13 s on the evaluator and in 0.7 s compiled. A mutated page limit hits the 20 s probe deadline on both engines. A slower host falls back to compiled probes at the idle gate. The IDE review loop runs every probe on the evaluator, so this cost limits the loop.
+
+**Proof.** CI diffs `scuzz eval` against `scuzz run` on `examples/hello`, `examples/kernel`, and `examples/io`. `scripts/ci-fuzz.sh` prints wall clock for both engines and compares the summaries. Do not add scheduler-step snapshots or expression coverage until a proof needs them. Locks: [`philosophy.md`](philosophy.md#evaluator).
+
+### 3. Mobile on real devices
+
+**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. OpenSSL on the Android NDK. Hardware runs need provisioning.
+
+**Proof.** One example (counter) runs on one device with `scuzz package` plus the platform toolchain. Simulator runs do not close this gap.
+
+The local iOS loop targets arm64 simulators on iOS 16 or later. Physical device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
 
 ## Known gaps
 
-Next work makes the language usable for general programs. The next gap is compile time. Standard kits follow that. Locks: [`philosophy.md`](philosophy.md). Order: [`vision.md`](vision.md).
+The review loop in the IDE is the primary work. Compile time comes next, because the IDE links the compiler. Standard kits follow. Locks: [`philosophy.md`](philosophy.md). Order: [`vision.md`](vision.md).
 
 ### Cuts
 
@@ -33,11 +41,19 @@ Do not add user FFI, `extern`, or plugins. Determinism and effect capture are no
 
 Do not add library publishing, git or registry deps, or `scuzz add`. Path deps stay. A hosted registry may never ship.
 
+### Review loop
+
+1. **In-memory diff side** — `Diff` reads a side from a directory and builds it natively. It cannot take a file set or run a side on the evaluator.
+2. **Step view** — the lanes show dump sections. They do not render the `View` at a chosen step.
+3. **Proposal deck** — there is no proposal source, blind deck, decision record, or region focus. The proposal generator and LLM interaction are not decided.
+4. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
+5. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
+
 ### Thesis-critical
 
-Resolve these gaps when they prevent ordinary language use.
+Resolve these gaps when they prevent ordinary language use or the review loop.
 
-1. **Compile-time performance** — `scuzz check examples/compiler` takes about 4.5 s on this host. `scuzz build --full examples/tyck` takes about 16 s. Measure both commands after each compile-time change. Further work must reduce the cost of checking and emitted LLVM text.
+1. **Compile-time performance** — `scuzz check examples/compiler` takes about 4.5 s on this host. `scuzz build --full examples/tyck` takes about 16 s. `scuzz check examples/editor` takes about 19 s cold. Measure these commands after each compile-time change. Further work must reduce the cost of checking and emitted LLVM text.
 
 ### Table-stakes
 
@@ -53,4 +69,4 @@ The one testing strategy is mutation, fuzz, properties, simulation, coverage, an
 
 Do not start FFI, plugins, or a package registry. Other later items stay parked.
 
-Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. Oracle mining. `scuzz diff` timeline alignment beyond state index, an IDE diff pane or LSP lens, and divergence attribution to source defs. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
+Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. Oracle mining. A model trained on review decisions. Timeline alignment beyond state index. Divergence attribution to source defs. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.

@@ -1,0 +1,125 @@
+def nl(): String =
+  """
+"""
+
+def sectionNames(): List[String] =
+  ["last_hit", "hit", "drive", "signals", "a11y", "effects", "fibers", "fault", "files"]
+
+def reportPath(root: String): String =
+  Fs.join(Fs.join(Fs.join(root, "build"), "delta"), "report.json")
+
+def deltaFile(root: String, name: String): String =
+  Fs.join(Fs.join(Fs.join(root, "build"), "delta"), name)
+
+def workItems(j: Json): List[Json] =
+  Diags.jsonField(j, "workloads") match {
+    case Json.Arr(xs) => List.filter(xs, w => workPath(w, "a") != "")
+    case _ => []
+  }
+
+def workLabel(w: Json): String =
+  Str.concat(Diags.jsonStr(Diags.jsonField(w, "class")), Str.concat(" ", Diags.jsonStr(Diags.jsonField(w, "label"))))
+
+def workPath(w: Json, side: String): String =
+  Diags.jsonStr(Diags.jsonField(Diags.jsonField(w, "timelines"), side))
+
+def workFiles(j: Json): List[String] =
+  List.flatMap(workItems(j), w => [workPath(w, "a"), workPath(w, "b")])
+
+def laneText(tls: List[String], i: Int, sideA: Bool): String =
+  List.getOrElse(tls, i * 2 + (if (sideA) 0 else 1), "")
+
+def workFirst(w: Json): Int =
+  Diags.jsonInt(Diags.jsonField(Diags.jsonField(w, "delta"), "first"))
+
+def workAt(j: Json, label: String): Json =
+  List.head(List.filter(workItems(j), w => workLabel(w) == label)) match {
+    case Option.Some(w) => w
+    case Option.None => Json.Null()
+  }
+
+def countText(j: Json, cls: String): String =
+  Str.concat(Str.fromInt(Diags.jsonInt(Diags.jsonField(Diags.jsonField(j, "counts"), cls))), Str.concat(" ", cls))
+
+def shQuote(s: String): String =
+  Str.concat("'", Str.concat(Str.replace(s, "'", "'\\''"), "'"))
+
+def statusLines(j: Json): List[String] =
+  if (Diags.jsonStr(Diags.jsonField(j, "kind")) != "diff") ["no diff report. Run scuzz diff in a terminal to see why."] else [Str.concat(Diags.jsonStr(Diags.jsonField(j, "rev")), Str.concat(": ", List.join(List.map(["regressed", "fixed", "diverged", "unrunnable", "same"], c => countText(j, c)), ", ")))]
+
+def revLabel(j: Json): String =
+  Str.concat("a: ", if (Str.isEmpty(Diags.jsonStr(Diags.jsonField(j, "rev")))) "HEAD" else Diags.jsonStr(Diags.jsonField(j, "rev")))
+
+def states(text: String): List[String] =
+  List.reverse(stateClose(List.foldLeft(Str.split(text, nl()), ([]: List[String], []: List[String], false), __tup => __tup match {
+  case (acc, l) => stateLine(acc, l)
+})))
+
+def stateLine(acc: (List[String], List[String], Bool), l: String): (List[String], List[String], Bool) =
+  if (Str.startsWith(l, "--- ")) (stateClose(acc), [], true) else if (acc._3) (acc._1, l :: acc._2, true) else acc
+
+def stateClose(acc: (List[String], List[String], Bool)): List[String] =
+  if (acc._3) List.join(List.reverse(acc._2), nl()) :: acc._1 else acc._1
+
+def stateAt(ss: List[String], i: Int): String =
+  if (i >= 0 && i < List.len(ss)) List.at(ss, i) else ""
+
+def sections(state: String): List[(String, String)] =
+  List.reverse(secPush(List.foldLeft(Str.split(state, nl()), ([]: List[(String, String)], "", []: List[String]), __tup => __tup match {
+  case (acc, l) => secLine(acc, l)
+})))
+
+def secHeader(l: String): String =
+  if (Str.endsWith(l, ":") && List.contains(sectionNames(), Str.stripSuffix(l, ":"))) Str.stripSuffix(l, ":") else ""
+
+def secLine(acc: (List[(String, String)], String, List[String]), l: String): (List[(String, String)], String, List[String]) =
+  if (secHeader(l) != "") (secPush(acc), secHeader(l), []) else (acc._1, acc._2, l :: acc._3)
+
+def secPush(acc: (List[(String, String)], String, List[String])): List[(String, String)] =
+  if (acc._2 == "") acc._1 else (acc._2, Str.trim(List.join(List.reverse(acc._3), nl()))) :: acc._1
+
+def secBody(secs: List[(String, String)], name: String): String =
+  List.head(List.filter(secs, p => p._1 == name)) match {
+    case Option.Some(p) => p._2
+    case Option.None => ""
+  }
+
+def railLabels(a: List[String], b: List[String]): List[String] =
+  List.map(List.indices(if (List.len(a) >= List.len(b)) a else b), i => Str.concat(Str.fromInt(i), if (stateAt(a, i) == stateAt(b, i)) "" else "*"))
+
+def railIndex(label: String): Int =
+  Str.toInt(Str.stripSuffix(label, "*"), 0)
+
+def stepTitle(a: List[String], b: List[String], i: Int): String =
+  Str.concat("step ", Str.concat(Str.fromInt(i), Str.concat(" of ", Str.concat(Str.fromInt(List.len(railLabels(a, b))), Str.concat(driveText(stateAt(b, i), stateAt(a, i)), if (stateAt(a, i) == stateAt(b, i)) " - same" else " - differs")))))
+
+def driveText(sb: String, sa: String): String =
+  if (Str.isEmpty(secBody(sections(if (Str.isEmpty(sb)) sa else sb), "drive"))) "" else Str.concat(" - ", secBody(sections(if (Str.isEmpty(sb)) sa else sb), "drive"))
+
+def stepRows(a: List[String], b: List[String], i: Int, sideA: Bool): List[String] =
+  if (Str.isEmpty(stateAt(if (sideA) a else b, i))) ["no state"] else rowsOf(sections(stateAt(a, i)), sections(stateAt(b, i)), sideA)
+
+def rowsOf(xa: List[(String, String)], xb: List[(String, String)], sideA: Bool): List[String] =
+  List.map(List.concat(List.filter(shownNames(xa, xb), n => secBody(xa, n) != secBody(xb, n)), List.filter(shownNames(xa, xb), n => secBody(xa, n) == secBody(xb, n))), n => rowText(n, secBody(xa, n), secBody(xb, n), sideA))
+
+def shownNames(xa: List[(String, String)], xb: List[(String, String)]): List[String] =
+  List.filter(List.distinct(List.concat(List.map(xa, p => p._1), List.map(xb, p => p._1))), n => secBody(xa, n) != "" || secBody(xb, n) != "")
+
+def rowText(name: String, x: String, y: String, sideA: Bool): String =
+  Str.concat(name, Str.concat(if (x == y) "" else " *", Str.concat(nl(), shownBody(name, if (sideA) x else y))))
+
+def shownBody(name: String, body: String): String =
+  if (name != "signals") body else LspClient.parseJson(body) match {
+  case Json.Arr(xs) => List.join(List.map(xs, o => sigLine(o)), nl())
+  case _ => body
+}
+
+def sigLine(o: Json): String =
+  Str.concat(if (Str.isEmpty(Diags.jsonStr(Diags.jsonField(o, "name")))) Str.concat("#", Str.fromInt(Diags.jsonInt(Diags.jsonField(o, "id")))) else Diags.jsonStr(Diags.jsonField(o, "name")), Str.concat(" = ", valueText(Diags.jsonField(o, "value"))))
+
+def valueText(v: Json): String =
+  Json.stringify(v) match {
+    case Result.Ok(s) => s
+    case Result.Err(_) => "?"
+  }
+

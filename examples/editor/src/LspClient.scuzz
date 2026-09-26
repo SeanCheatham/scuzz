@@ -34,7 +34,7 @@ def encodeJson(j: Json): String =
   }
 
 def takeIfMatch(j: Json, want: Int): Json =
-  if (Check.jsonInt(Check.jsonField(j, "id")) == want) j else Json.Null()
+  if (Diags.jsonInt(Diags.jsonField(j, "id")) == want) j else Json.Null()
 
 def emptyObj(): Json =
   Json.Obj([])
@@ -67,60 +67,60 @@ def requestBody(method: String, uri: String, line: Int, col: Int): String =
 })
 
 def hoverText(j: Json): String =
-  Check.jsonStr(Check.jsonField(Check.jsonField(Check.jsonField(j, "result"), "contents"), "value")) match {
+  Diags.jsonStr(Diags.jsonField(Diags.jsonField(Diags.jsonField(j, "result"), "contents"), "value")) match {
     case s => Property.check("hover", Str.len(s) >= 0, s)
   }
 
 def completeLabels(j: Json): List[String] =
-  Check.jsonField(Check.jsonField(j, "result"), "items") match {
-    case Json.Arr(xs) => List.map(xs, it => Check.jsonStr(Check.jsonField(it, "label")))
+  Diags.jsonField(Diags.jsonField(j, "result"), "items") match {
+    case Json.Arr(xs) => List.map(xs, it => Diags.jsonStr(Diags.jsonField(it, "label")))
     case _ => []
   }
 
 def defLoc(j: Json): Json =
-  Check.jsonField(j, "result") match {
+  Diags.jsonField(j, "result") match {
     case Json.Arr(x :: _) => x
     case other => other
   }
 
 def defUri(j: Json): String =
-  Check.jsonStr(Check.jsonField(defLoc(j), "uri")) match {
+  Diags.jsonStr(Diags.jsonField(defLoc(j), "uri")) match {
     case s => Property.check("defUri", Str.len(s) >= 0, s)
   }
 
 def defLine(j: Json): Int =
-  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(defLoc(j), "range"), "start"), "line")) + Str.len("x") match {
+  Diags.jsonInt(Diags.jsonField(Diags.jsonField(Diags.jsonField(defLoc(j), "range"), "start"), "line")) + Str.len("x") match {
   case n => Property.check("defLine", n > 0, n)
 }
 
 def defCol(j: Json): Int =
-  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(defLoc(j), "range"), "start"), "character")) + Str.len("x") match {
+  Diags.jsonInt(Diags.jsonField(Diags.jsonField(Diags.jsonField(defLoc(j), "range"), "start"), "character")) + Str.len("x") match {
   case n => Property.check("defCol", n > 0, n)
 }
 
 def formatText(j: Json, fallback: String): String =
-  Check.jsonField(j, "result") match {
-    case Json.Arr(x :: _) => Check.jsonStr(Check.jsonField(x, "newText")) match {
+  Diags.jsonField(j, "result") match {
+    case Json.Arr(x :: _) => Diags.jsonStr(Diags.jsonField(x, "newText")) match {
   case t => if (Str.isEmpty(t)) fallback else t
 }
     case _ => fallback
   }
 
 def renameText(j: Json, fallback: String): String =
-  firstNewText(Check.jsonField(Check.jsonField(j, "result"), "changes")) match {
+  firstNewText(Diags.jsonField(Diags.jsonField(j, "result"), "changes")) match {
     case t => if (Str.isEmpty(t)) fallback else t
   }
 
 def fixTitle(j: Json): String =
-  Check.jsonField(j, "result") match {
-    case Json.Arr(x :: _) => Check.jsonStr(Check.jsonField(x, "title"))
+  Diags.jsonField(j, "result") match {
+    case Json.Arr(x :: _) => Diags.jsonStr(Diags.jsonField(x, "title"))
     case _ => ""
   }
 
 def firstNewText(j: Json): String =
   j match {
     case Json.Obj(pairs) => List.find(pairs, p => p._1 == "newText") match {
-  case x :: _ => Check.jsonStr(x._2)
+  case x :: _ => Diags.jsonStr(x._2)
   case [] => List.find(List.map(pairs, p => firstNewText(p._2)), s => Str.nonEmpty(s)) match {
   case h :: _ => h
   case [] => ""
@@ -139,38 +139,38 @@ def fixText(j: Json, fallback: String): String =
   }
 
 def tokenCount(j: Json): Int =
-  Check.jsonField(Check.jsonField(j, "result"), "data") match {
+  Diags.jsonField(Diags.jsonField(j, "result"), "data") match {
     case Json.Arr(xs) => List.len(xs)
     case _ => Str.len("")
   }
 
 def tokenData(j: Json): List[Int] =
-  Check.jsonField(Check.jsonField(j, "result"), "data") match {
-    case Json.Arr(xs) => List.map(xs, Check.jsonInt)
+  Diags.jsonField(Diags.jsonField(j, "result"), "data") match {
+    case Json.Arr(xs) => List.map(xs, Diags.jsonInt)
     case _ => []
   }
 
 def inlayLabel(j: Json): String =
   j match {
     case Json.Str(s) => s
-    case Json.Arr(xs) => List.join(List.map(xs, it => Check.jsonStr(Check.jsonField(it, "value"))), "")
+    case Json.Arr(xs) => List.join(List.map(xs, it => Diags.jsonStr(Diags.jsonField(it, "value"))), "")
     case _ => ""
   }
 
 def inlayHint(item: Json): (Int, Int, String) =
-  (Check.jsonInt(Check.jsonField(Check.jsonField(item, "position"), "line")), Check.jsonInt(Check.jsonField(Check.jsonField(item, "position"), "character")), inlayLabel(Check.jsonField(item, "label")))
+  (Diags.jsonInt(Diags.jsonField(Diags.jsonField(item, "position"), "line")), Diags.jsonInt(Diags.jsonField(Diags.jsonField(item, "position"), "character")), inlayLabel(Diags.jsonField(item, "label")))
 
 def inlayHints(j: Json): List[(Int, Int, String)] =
-  Check.jsonField(j, "result") match {
+  Diags.jsonField(j, "result") match {
     case Json.Arr(xs) => List.map(xs, inlayHint)
     case _ => []
   }
 
 def foldRange(item: Json): (Int, Int) =
-  (Check.jsonInt(Check.jsonField(item, "startLine")), Check.jsonInt(Check.jsonField(item, "endLine")))
+  (Diags.jsonInt(Diags.jsonField(item, "startLine")), Diags.jsonInt(Diags.jsonField(item, "endLine")))
 
 def foldRanges(j: Json): List[(Int, Int)] =
-  Check.jsonField(j, "result") match {
+  Diags.jsonField(j, "result") match {
     case Json.Arr(xs) => List.map(xs, foldRange)
     case _ => []
   }
