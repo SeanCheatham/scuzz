@@ -126,6 +126,15 @@ def a11yTileRole(role: String, label: String, raw: String): View =
 def viewCard(lines: Signal[List[String]]): View =
   View.card(View.column(View.each(lines, l => a11yTile(l))))
 
+def srcSide(f: (String, String, String), flip: Int, lane1: Bool): String =
+  if (lane1) if (flip == 1) f._3 else f._2 else if (flip == 1) f._2 else f._3
+
+def srcFileCard(f: (String, String, String), flip: Int): View =
+  View.card(View.column(View.text(f._1), View.row(View.expanded(View.code(srcSide(f, flip, true))), View.expanded(View.code(srcSide(f, flip, false))))))
+
+def srcSection(files: Signal[List[(String, String, String)]], flip: Signal[Int]): View =
+  View.column(View.each(files, f => srcFileCard(f, Signal.get(flip))))
+
 def rowsOf(xa: List[(String, String)], xb: List[(String, String)], sideA: Bool): List[String] =
   List.map(List.concat(List.filter(shownNames(xa, xb), n => secBody(xa, n) != secBody(xb, n)), List.filter(shownNames(xa, xb), n => secBody(xa, n) == secBody(xb, n))), n => rowText(n, secBody(xa, n), secBody(xb, n), sideA))
 

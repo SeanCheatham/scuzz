@@ -1,4 +1,4 @@
-record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]])
+record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], srcs: Signal[List[(String, String, String)]])
 
 record DeckS(pending: Signal[List[String]], armed: Signal[String], title: Signal[String], flip: Signal[Int], skipped: Signal[List[String]], last: Signal[String], busy: Signal[Int])
 
@@ -73,6 +73,9 @@ def recordDecision(root: String, name: String, decision: String, region: String,
 def dropProposal(root: String, name: String): IO[Unit] =
   Fs.delete(Fs.join(Deck.proposalsDir(root), name)).handleErrorWith(_ => IO.pure(()))
 
+def verifyFilesOf(root: String): IO[List[String]] =
+  Fs.list(root).map(ents => Chrome.verifyFileRels(Chrome.filesOf(ents))).handleErrorWith(_ => IO.pure([]))
+
 def deckGuard(ds: DeckS, io: IO[Unit]): IO[Unit] =
   for {
     busy0 = Signal.get(ds.busy)
@@ -92,6 +95,7 @@ def deckEnd(ls: LaneS, ds: DeckS): Unit =
     _ = Signal.set(ls.rowsB, []: List[String])
     _ = Signal.set(ls.viewA, []: List[String])
     _ = Signal.set(ls.viewB, []: List[String])
+    _ = Signal.set(ls.srcs, []: List[(String, String, String)])
     _ = Signal.set(ls.title, "")
     _ = Signal.set(ls.rev, "a: HEAD")
     _ = Signal.set(ls.blab, "b: working tree")
@@ -143,8 +147,10 @@ def deckReviewed(root: String, toml: String, name: String, disk: List[(String, S
   for {
     _ <- loadIde(root, ls.status, ls.raw, ls.rev, ls.works, ls.tls, ls.blab)
     flip <- Random.nextInt(2)
+    vers <- verifyFilesOf(root)
     _ = Signal.set(ds.flip, flip)
-    _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), Signal.get(ls.status)))
+    _ = Signal.set(ls.srcs, Deck.changedTriples(disk, propSet))
+    _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), List.concat(Deck.guardLines(vers), Signal.get(ls.status))))
     _ = Signal.set(ls.rev, "lane 1")
     _ = Signal.set(ls.blab, "lane 2")
     _ = if (flip == 0) () else Signal.set(ls.tls, Deck.swapPairs(Signal.get(ls.tls)))
@@ -439,6 +445,9 @@ b""", 2) == (1, 0), true)
   n
 """)], true)
     _ = Property.check("wl", Deck.withLast("", ["a"]) == ["a"] && Deck.withLast("l", ["a"]) == ["l", "a"], true)
+    _ = Property.check("ctrip", Deck.changedTriples([("Main", "a")], [("Main", "b")]) == [("Main", "a", "b")], true)
+    _ = Property.check("sside", Lanes.srcSide(("Main", "a", "b"), 1, true) == "b" && Lanes.srcSide(("Main", "a", "b"), 0, true) == "a", true)
+    _ = Property.check("guard", Deck.guardLines([]) == ["unguarded: no claims"] && Deck.guardLines(["x.scuzz_verify"]) == [], true)
     _ = Property.check("blab", Lanes.bLabel("ide") == "b: buffers", true)
     _ = Property.check("ipath", Lanes.reportPathAt("r", "ide") == Fs.join("r", Fs.join("build", Fs.join("ide", "report.json"))), true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ => IO.pure(Str.len("")))
@@ -493,6 +502,7 @@ b""", 2) == (1, 0), true)
     rowsB = Signal.make([]: List[String])
     stepViewA = Signal.make([]: List[String])
     stepViewB = Signal.make([]: List[String])
+    srcFiles = Signal.make([]: List[(String, String, String)])
     playOn = Signal.make(1)
     deckPending = Signal.make([]: List[String])
     deckArmed = Signal.make("")
@@ -501,7 +511,7 @@ b""", 2) == (1, 0), true)
     deckSkipped = Signal.make([]: List[String])
     deckLast = Signal.make("")
     deckBusy = Signal.make(0)
-    lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
+    lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, srcFiles)
     deck = DeckS(deckPending, deckArmed, deckTitle, deckFlip, deckSkipped, deckLast, deckBusy)
     _ <- loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel)
     pending0 <- loadProposals(root)
@@ -680,6 +690,7 @@ b""", 2) == (1, 0), true)
   root = Signal.get(dirSig)
   _ = Signal.set(deltaStatus, ["running scuzz diff"])
   _ = Signal.set(works, []: List[String])
+  _ = Signal.set(srcFiles, []: List[(String, String, String)])
   pid <- startDiff(root)
   _ = Signal.set(diffPid, pid)
   alive <- if (pid == 0) IO.pure(0) else fuzzAlive(pid)
@@ -692,6 +703,7 @@ b""", 2) == (1, 0), true)
   root = Signal.get(dirSig)
   _ = Signal.set(deltaStatus, ["comparing buffers"])
   _ = Signal.set(works, []: List[String])
+  _ = Signal.set(srcFiles, []: List[(String, String, String)])
   toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
   disk <- diskFiles(root, toml)
   i = Signal.get(idx)
@@ -733,7 +745,7 @@ b""", 2) == (1, 0), true)
   _ = Property.sometimes("tappedStep")
   _ = Signal.set(playOn, 0)
   _ = showStep(step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
-} yield ()))), View.expanded(View.column(View.bindText(revLabel), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.bindText(laneBLabel), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s))))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+} yield ()))), View.expanded(View.column(View.bindText(revLabel), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.bindText(laneBLabel), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s)))), Lanes.srcSection(lanes.srcs, deckFlip)))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
   off <- Ui.editorCaret()
   found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
   hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found
