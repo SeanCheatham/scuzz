@@ -35,7 +35,7 @@ void sz_sys_set_args(int argc, char **argv) {
 
 static void *sys_args_thunk(void *env) {
   (void)env;
-  if (sz_testrt_sys_has_args_override())
+  if (sz_testrt_sys_has_args_override() || sz_testrt_sys_is_fake())
     return sz_testrt_sys_args_list();
   {
     SzList *acc = sz_list_nil();
