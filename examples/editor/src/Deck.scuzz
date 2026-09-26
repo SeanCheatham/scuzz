@@ -77,6 +77,12 @@ def mutName(site: Int): String =
 def changedFiles(disk: List[(String, String)], mutant: List[(String, String)]): List[(String, String)] =
   List.filter(mutant, f => List.getOrElse(List.map(disk, d => d._2), List.indexOf(List.map(disk, d => d._1), f._1), "") != f._2)
 
+def mutOut(src: String, site: Int): String =
+  List.at(Mutate.applyKept(Mutate.parseLive([("Main", src)]), site, false), 0)._2
+
+def regionSet(set: List[(String, String)], cur: String): List[(String, String)] =
+  if (Mutate.countFiles(List.filter(set, f => f._1 == cur), false) > 0) List.filter(set, f => f._1 == cur) else set
+
 def keepTarget(armed: String, left: List[String]): String =
   if (!Str.isEmpty(armed) && List.contains(left, armed)) armed else if (List.isEmpty(left)) "" else List.at(left, 0)
 
