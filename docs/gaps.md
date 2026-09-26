@@ -11,9 +11,11 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 ### 1. Proposal review in the IDE
 
-**Unproven.** The IDE evaluates a proposal and the working tree in its own process, fast enough for one decision every few seconds. A timeline with steps aligned by index shows a human what a change does. A human decides faster from blind timelines than from a source diff. Generated proposals are useful often enough to keep reviewing. How proposals are generated, and how the IDE talks to an LLM, is not decided.
+**Partly proven.** The IDE compares the open buffers with the files on disk in its own process. It checks and probes both file sets on the evaluator in forked children. No `git`. No native build of the target package. The lanes open the first diverging state with the changed sections first. A warm compare of `examples/counter` takes about 8.5 s from tap to lanes.
 
-**Proof.** Edit an open buffer. The Timeline landmark shows the diverging state between the buffer and the file on disk, with no `git` and no native build. Then the deck shows proposals from a directory in random lane order and writes Keep into the working tree. Record the time from tap to lanes and the keep rate per region. Order: [`vision.md`](vision.md#primary-arc-proposal-review-in-the-ide). Locks: [`philosophy.md`](philosophy.md#proposal-review).
+**Unproven.** The loop is fast enough for one decision every few seconds. A timeline with steps aligned by index shows a human what a change does. A human decides faster from blind timelines than from a source diff. Generated proposals are useful often enough to keep reviewing. How proposals are generated, and how the IDE talks to an LLM, is not decided.
+
+**Proof.** Then the deck shows proposals from a directory in random lane order and writes Keep into the working tree. Record the time from tap to lanes and the keep rate per region. Order: [`vision.md`](vision.md#primary-arc-proposal-review-in-the-ide). Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
 ### 2. Evaluator parity and speed
 
@@ -43,11 +45,10 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 ### Review loop
 
-1. **In-memory diff side** — `Diff` reads a side from a directory and builds it natively. It cannot take a file set or run a side on the evaluator.
-2. **Step view** — the lanes show dump sections. They do not render the `View` at a chosen step.
-3. **Proposal deck** — there is no proposal source, blind deck, decision record, or region focus. The proposal generator and LLM interaction are not decided.
-4. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
-5. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
+1. **Step view** — the lanes show dump sections. They do not render the `View` at a chosen step.
+2. **Proposal deck** — there is no proposal source, blind deck, decision record, or region focus. The proposal generator and LLM interaction are not decided.
+3. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
+4. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
 
 ### Thesis-critical
 

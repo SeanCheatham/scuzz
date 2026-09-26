@@ -63,6 +63,37 @@ count=2
 def Main.loadClaimNames(_root: String, _rels: List[String]): IO[List[String]] =
   IO.pure(["greetFact"])
 
+def Main.compareBuffers(root: String, toml: String, disk: List[(String, String)], buffers: List[(String, String)]): IO[Unit] =
+  for {
+    ide = Fs.join(Fs.join(root, "build"), "ide")
+    _ <- Fs.mkdirs(ide).handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.write(Fs.join(ide, "report.json"), "{\"v\":1,\"kind\":\"diff\",\"rev\":\"buffers\",\"counts\":{\"regressed\":0,\"fixed\":0,\"diverged\":1,\"unrunnable\":0,\"same\":1},\"workloads\":[{\"label\":\"idle\",\"class\":\"same\",\"delta\":{\"first\":-1},\"timelines\":null},{\"label\":\"seed count 1\",\"class\":\"diverged\",\"delta\":{\"first\":1},\"timelines\":{\"a\":\"tl-cmp-a.txt\",\"b\":\"tl-cmp-b.txt\"}}]}\n")
+    _ <- Fs.write(Fs.join(ide, "tl-cmp-a.txt"), """# timeline v=3 n=2
+--- 0 checkpoint=1
+drive:
+setup
+signals:
+count=0
+--- 1 checkpoint=1
+drive:
+count 1
+signals:
+count=1
+""")
+    _ <- Fs.write(Fs.join(ide, "tl-cmp-b.txt"), """# timeline v=3 n=2
+--- 0 checkpoint=1
+drive:
+setup
+signals:
+count=0
+--- 1 checkpoint=1
+drive:
+count 1
+signals:
+count=2
+""")
+  } yield ()
+
 def LspClient.lspCall(_root: String, _path: String, _body: String, method: String): IO[Json] =
   IO.pure(parseJson(method match {
   case "textDocument/hover" => "{\"result\":{\"contents\":{\"kind\":\"plaintext\",\"value\":\"hover\"}}}"

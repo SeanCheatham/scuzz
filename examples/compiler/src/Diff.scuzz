@@ -71,9 +71,11 @@ def side(dir: String, outDir: String, iterations: Int, seed: Int): IO[DiffSide] 
   Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => sideMan(dir, outDir, iterations, seed, toml, Manifest.parse(toml)))
 
 def sideMan(dir: String, outDir: String, iterations: Int, seed: Int, toml: String, m: Man): IO[DiffSide] =
+  Drive.fuzzCollect(dir).flatMap(files => sideFiles(dir, outDir, iterations, seed, toml, m, files))
+
+def sideFiles(dir: String, outDir: String, iterations: Int, seed: Int, toml: String, m: Man, files: List[(String, String)]): IO[DiffSide] =
   for {
     _ <- Drive.manNeed(m)
-    files <- Drive.fuzzCollect(dir)
     ens = Verify.ensOfFiles(files)
     pdir = Drive.joinSlash(outDir, "probe")
     _ <- Fs.mkdirs(Drive.joinSlash(pdir, "fuzz"))
@@ -105,6 +107,46 @@ def stampPath(outDir: String): String =
 def clear(probe: String): IO[Unit] =
   IO.foreachDiscard(Drive.fuzzCoveragePath(probe) :: Drive.fuzzClassPath(probe) :: Drive.fuzzSometimesPath(probe) :: Drive.fuzzTriggerPath(probe) :: Drive.fuzzVariedPath(probe) :: Drive.fuzzClaimPath(probe) :: Drive.fuzzSchedPicksPath(probe) :: Drive.fuzzDistancePath(probe) :: Verify.noStr(), p => Fs.write(p, ""))
 
+def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: List[(String, String)], seed: Int, scuzz: String): IO[Unit] =
+  for {
+    m = Manifest.parse(toml)
+    _ <- Drive.manNeed(m)
+    root = Drive.joinSlash(dir, Drive.joinSlash("build", "ide"))
+    _ <- Fs.mkdirs(root)
+    filesA <- Drive.fuzzCollectFiles(dir, rawA)
+    filesB <- Drive.fuzzCollectFiles(dir, rawB)
+    host <- if (m.hasUi) Drive.uiHostExe() else IO.pure(scuzz)
+    _ <- if (m.hasUi && host == "") IO.fail("scuzz ide: no headless host for a [ui] package") else IO.pure(())
+    a <- sideEv(dir, Drive.joinSlash(root, "a"), seed, m, filesA, host)
+    b <- sideEv(dir, Drive.joinSlash(root, "b"), seed, m, filesB, host)
+    runs = Drive.fuzzAddSeeds(idleRun() :: Drive.noRuns(), seedsLabel(), a.seeds, m.hasUi)
+    rows <- IO.ensure(replay(a, b, root, runs, noRows()), Drive.evStop(a.job).flatMap(_ => Drive.evStop(b.job)))
+    agg <- aggregate(a, b, rows)
+    hunt = DiffHunt(0, 0, [])
+    report = reportJson("buffers", "", a.job.dir, b.job.dir, rows, agg, 0, seed, hunt)
+    _ <- Fs.write(Drive.joinSlash(root, "report.json"), Str.concat(report, Verify.nl()))
+    _ <- IO.println(human("buffers", "", dir, root, rows, agg, hunt))
+  } yield ()
+
+def sideEv(dir: String, outDir: String, seed: Int, m: Man, files: List[(String, String)], host: String): IO[DiffSide] =
+  for {
+    ens = Verify.ensOfFiles(files)
+    pdir = Drive.joinSlash(outDir, "probe")
+    _ <- Fs.mkdirs(Drive.joinSlash(pdir, "fuzz"))
+    _ <- Drive.evWriteFiles(Drive.fuzzEvDir(pdir), files)
+    _ <- Drive.fuzzWriteTable(dir, outDir, ens)
+    seeds <- Drive.fuzzSeedText(dir, ens)
+    _ <- Fs.write(Drive.joinSlash(outDir, "seeds.txt"), seeds)
+    vers <- Drive.fuzzVerSrcs(dir)
+    scn <- Drive.fuzzReadScenario(dir)
+    drivers <- Drive.fuzzReadOr(Drive.joinSlash(outDir, "drivers.txt"))
+    srv <- Ref.of(("", 0))
+    _ <- clear(pdir)
+  } yield DiffSide(FuzzJob(dir, pdir, "", m.name, m.hasUi, 0, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, true, host, srv, Verify.scenarioFaults(scn), false, false, false), seeds, Drive.noRuns(), Delta.bodyLines(drivers), vers, [])
+
+def evWhy(code: Int): String =
+  if (code == 0) "" else if (code == 3) "check failed" else Str.concat("exit ", Str.fromInt(code))
+
 def idleRun(): FuzzRun =
   FuzzRun("idle", "", "", "", "", Verify.noStr())
 
@@ -133,6 +175,9 @@ def baseName(p: String): String =
   if (Str.lastIndexOf(p, "/") < 0) p else Str.drop(p, Str.lastIndexOf(p, "/") + 1)
 
 def probe(job: FuzzJob, run: FuzzRun): IO[DiffOut] =
+  if (job.ev) probeEv(job, run) else probeBuilt(job, run)
+
+def probeBuilt(job: FuzzJob, run: FuzzRun): IO[DiffOut] =
   for {
     _ <- Drive.fuzzWriteDrive(job.outDir, run.script)
     _ <- Fs.write(Drive.fuzzTlPath(job.outDir), "")
@@ -141,6 +186,16 @@ def probe(job: FuzzJob, run: FuzzRun): IO[DiffOut] =
     tl <- Drive.fuzzReadOr(Drive.fuzzTlPath(job.outDir))
     dump <- Drive.fuzzReadOr(Drive.fuzzDumpPath(job.outDir))
   } yield DiffOut(r._1, why(r._1, r._3), unrunnable(r._3), tl, controls(dump))
+
+def probeEv(job: FuzzJob, run: FuzzRun): IO[DiffOut] =
+  for {
+    _ <- Drive.fuzzWriteDrive(job.outDir, run.script)
+    _ <- Fs.write(Drive.fuzzTlPath(job.outDir), "")
+    _ <- Fs.write(Drive.fuzzDumpPath(job.outDir), "")
+    code <- Drive.evProbe(job, Drive.fuzzEvDir(job.outDir), Str.concat(Drive.fuzzProbeEnv("", job.hasUi, Drive.fuzzDrivePath(job.outDir), Drive.fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, job.uiEnv, false, false), Drive.fuzzTlEnv("", Drive.fuzzTlPath(job.outDir))))
+    tl <- Drive.fuzzReadOr(Drive.fuzzTlPath(job.outDir))
+    dump <- Drive.fuzzReadOr(Drive.fuzzDumpPath(job.outDir))
+  } yield DiffOut(code, evWhy(code), code == 3, tl, controls(dump))
 
 def why(code: Int, err: String): String =
   if (unrunnable(err)) whyLine(List.filter(Verify.linesOf(err), l => unrunnable(l)), code) else if (code == 0) "" else if (code == 124) "timeout" else whyLine(List.filter(Verify.linesOf(err), l => Str.startsWith(l, "scuzz") && !Str.contains(l, "wrote fuzz dump")), code)

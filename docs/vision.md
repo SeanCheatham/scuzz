@@ -10,12 +10,11 @@ A developer reviews one proposed change at a time. The IDE evaluates the change 
 
 Do the steps in this order:
 
-1. **In-memory diff side.** `Diff` accepts a file set in place of a directory. It runs the side on the evaluator. The IDE compares its open buffers with the files on disk without `git` or a native build. Slice: [`plans.md`](plans.md).
-2. **Step view.** A tap on a step replays the side to that state and renders its `View` in the lane.
-3. **Proposal source.** A proposal is a file set: the working tree with some files replaced. The IDE reads one proposal from a directory under `build/`. How proposals are generated, and how the IDE talks to an LLM, stays open until this step.
-4. **Blind deck.** The deck shows one proposal at a time in the two lanes. It randomizes the lane order. Keep writes the proposal files into the working tree. Reject discards them. The deck records each decision with both file set hashes.
-5. **Focus.** The deck picks the next proposal from the same region of the code. A Randomize control picks a new region.
-6. **In-process LSP.** Move hover, goto-def, and rename from `scuzz lsp` to compiler modules called in-process.
+1. **Step view.** A tap on a step replays the side to that state and renders its `View` in the lane.
+2. **Proposal source.** A proposal is a file set: the working tree with some files replaced. The IDE reads one proposal from a directory under `build/`. How proposals are generated, and how the IDE talks to an LLM, stays open until this step.
+3. **Blind deck.** The deck shows one proposal at a time in the two lanes. It randomizes the lane order. Keep writes the proposal files into the working tree. Reject discards them. The deck records each decision with both file set hashes.
+4. **Focus.** The deck picks the next proposal from the same region of the code. A Randomize control picks a new region.
+5. **In-process LSP.** Move hover, goto-def, and rename from `scuzz lsp` to compiler modules called in-process.
 
 Each step is a vertical slice with a claim in `examples/editor/chrome.scuzz_verify` and a corpus entry.
 
