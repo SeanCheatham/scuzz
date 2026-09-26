@@ -2,6 +2,8 @@ record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[Stri
 
 record DeckS(pending: Signal[List[String]], armed: Signal[String], title: Signal[String])
 
+import Parse.Prog
+
 def analyze(path: String, body: String): IO[String] =
   for {
     _ <- Fs.write(path, body)
@@ -148,6 +150,23 @@ def keepNext(root: String, ls: LaneS, ds: DeckS, dirties: List[String]): IO[Unit
   _ <- deckNextIn(root, Deck.regionOf(props), ls, ds)
 } yield ()
 } yield ()
+  } yield ()
+
+def writeMutant(root: String, kept: List[(String, String, Prog)], disk: List[(String, String)], site: Int): IO[Unit] =
+  for {
+    changed = Deck.changedFiles(disk, Mutate.applyKept(kept, site, false))
+    dir = Fs.join(Deck.proposalsDir(root), Deck.mutName(site))
+    _ <- IO.foreachDiscard(changed, f => Fs.mkdirs(Fs.join(dir, "src")).flatMap(_ => Fs.write(Fs.join(dir, Fs.join("src", Str.concat(f._1, ".scuzz"))), f._2)))
+  } yield ()
+
+def generateProposals(root: String, set: List[(String, String)], ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    _ = Signal.set(ls.status, ["generating proposals"])
+    sites = Mutate.countFiles(set, false)
+    kept = Mutate.parseLive(set)
+    seed <- Random.nextInt(1000000)
+    _ <- IO.foreachDiscard(Mutate.pickSites(seed, if (sites > 8) 8 else sites, sites), s => writeMutant(root, kept, set, s))
+    _ <- deckNext(root, ls, ds)
   } yield ()
 
 def rejectNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
@@ -575,6 +594,14 @@ b""", 2) == (1, 0), true)
 } yield ()), View.outlinedButton("Proposals", _ => for {
   _ = Property.sometimes("tappedProposals")
   _ <- deckNext(Signal.get(dirSig), lanes, deck)
+} yield ()), View.outlinedButton("Generate", _ => for {
+  _ = Property.sometimes("tappedGenerate")
+  root = Signal.get(dirSig)
+  ents <- Fs.list(Fs.join(root, "src")).handleErrorWith(_ => IO.pure([]))
+  own <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
+  i = Signal.get(idx)
+  set = Chrome.bufferFiles(own, List.map(Signal.get(paths), p => Chrome.stemOf(p)), List.setAt(Signal.get(bodies), i, Signal.get(buf)))
+  _ <- generateProposals(root, set, lanes, deck)
 } yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckPending, ps => if (List.isEmpty(ps)) 0 else 1), 1, View.wrap(View.bindText(deckTitle), View.button("Keep", _ => for {
   _ = Property.sometimes("tappedKeep")
   bs = List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf))

@@ -87,18 +87,18 @@ def deckStaysBlind(t: Timeline): Verdict =
   if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Proposals"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:lane 1") && Timeline.a11yHas(t, Timeline.len(t) - 1, "text:lane 2") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:b: working tree") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:b: buffers") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:a: HEAD")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "deck lanes stay blind until the decision")
 
 def keepLandsProposal(t: Timeline): Verdict =
-  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:dirty buffer: Main")) Verdict.ok() else if (Timeline.fileTextIs(t, Timeline.len(t) - 1, "src/Main.scuzz", """@main def main: IO[Unit] =
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:dirty buffer: Main") || Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Generate"))) Verdict.ok() else if (Timeline.fileTextIs(t, Timeline.len(t) - 1, "src/Main.scuzz", """@main def main: IO[Unit] =
   IO.println(2)
 """)) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep writes the proposal into the working tree")
 
 def keepRecordsDecision(t: Timeline): Verdict =
-  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:dirty buffer: Main")) Verdict.ok() else if (Timeline.fileTextIs(t, Timeline.len(t) - 1, "build/ide/decisions.jsonl", Str.concat(Deck.decisionLine("p1", "keep", Deck.setHash([("Main", "def twice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(twice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n")]), Deck.setHash([("Main", """@main def main: IO[Unit] =
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:dirty buffer: Main") || Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Generate"))) Verdict.ok() else if (Timeline.fileTextIs(t, Timeline.len(t) - 1, "build/ide/decisions.jsonl", Str.concat(Deck.decisionLine("p1", "keep", Deck.setHash([("Main", "def twice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(twice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n")]), Deck.setHash([("Main", """@main def main: IO[Unit] =
   IO.println(2)
 """)])), """
 """))) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep records the decision with both file set hashes")
 
 def afterKeepFocusesRegion(t: Timeline): Verdict =
-  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:dirty buffer: Main")) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p3") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p2")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep takes the next proposal from the same region")
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || Timeline.a11yHas(t, Timeline.len(t) - 1, "text:dirty buffer: Main") || Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Generate"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p3") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p2")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep takes the next proposal from the same region")
 
 def keepRefusesDirty(t: Timeline): Verdict =
   if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:dirty buffer: Main")) Verdict.ok() else if (Timeline.fileTextIs(t, Timeline.len(t) - 1, "src/Main.scuzz", "def twice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(twice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n") && !Timeline.fileTextIs(t, Timeline.len(t) - 1, "build/ide/decisions.jsonl", Str.concat(Deck.decisionLine("p1", "keep", Deck.setHash([("Main", "def twice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(twice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n")]), Deck.setHash([("Main", """@main def main: IO[Unit] =
@@ -123,6 +123,12 @@ def afterRandomizeBlindsLanes(t: Timeline): Verdict =
 
 def afterRandomizeShowsStep(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Randomize", "text:step 1 of 2 - count 1 - differs")
+
+def afterGenerateShowsMutant(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Generate", "text:proposal m")
+
+def afterKeepLandsMutant(t: Timeline): Verdict =
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep")) || !Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Generate"))) Verdict.ok() else if (!Timeline.fileTextIs(t, Timeline.len(t) - 1, "src/Main.scuzz", "def twice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(twice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep with a generated proposal changes the file")
 
 def afterInfoShowsHover(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Info", "text:IO.println(String): IO[Unit]")

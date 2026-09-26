@@ -53,6 +53,12 @@ def dirtyHits(props: List[(String, String)], dirties: List[String]): List[String
 def dirtyLines(hits: List[String]): List[String] =
   List.map(hits, s => Str.concat("dirty buffer: ", s))
 
+def mutName(site: Int): String =
+  Str.concat("m", Str.fromInt(site))
+
+def changedFiles(disk: List[(String, String)], mutant: List[(String, String)]): List[(String, String)] =
+  List.filter(mutant, f => List.getOrElse(List.map(disk, d => d._2), List.indexOf(List.map(disk, d => d._1), f._1), "") != f._2)
+
 def keepTarget(armed: String, left: List[String]): String =
   if (!Str.isEmpty(armed) && List.contains(left, armed)) armed else if (List.isEmpty(left)) "" else List.at(left, 0)
 

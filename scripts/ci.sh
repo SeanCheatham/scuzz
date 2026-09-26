@@ -607,6 +607,27 @@ d = json.loads(line)
 assert d["proposal"] == "p1" and d["decision"] == "keep", d
 assert len(d["a"]) == 64 and len(d["b"]) == 64 and d["a"] != d["b"], d
 PY
+  # Live generation: mutation sites of the working tree become proposals.
+  python3 - <<'PY'
+import json
+ops = {"v": 1, "kind": "inject", "events": [
+    {"op": "tap", "id": "choicechip:Timeline"},
+    {"op": "tap", "id": "outlined:Generate"},
+    {"op": "pump", "k": 50},
+]}
+open("scratchpad/review/ops-gen.json", "w").write(json.dumps(ops))
+PY
+  (cd scratchpad/review && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec ops-gen.json "$ROOT/examples/editor")
+  python3 - <<'PY'
+import os
+props = [p for p in os.listdir("scratchpad/review/build/proposals") if p.startswith("m")]
+assert props, os.listdir("scratchpad/review/build/proposals")
+first = sorted(props)[0]
+src = os.path.join("scratchpad/review/build/proposals", first, "src", "Main.scuzz")
+assert os.path.isfile(src), src
+disk = open("scratchpad/review/src/Main.scuzz").read()
+assert open(src).read() != disk
+PY
 }
 
 slice_ui_test() {
