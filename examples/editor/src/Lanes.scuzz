@@ -5,11 +5,20 @@ def nl(): String =
 def sectionNames(): List[String] =
   ["last_hit", "hit", "drive", "signals", "a11y", "effects", "fibers", "fault", "files"]
 
+def reportPathAt(root: String, sub: String): String =
+  Fs.join(Fs.join(Fs.join(root, "build"), sub), "report.json")
+
+def fileAt(root: String, sub: String, name: String): String =
+  Fs.join(Fs.join(Fs.join(root, "build"), sub), name)
+
 def reportPath(root: String): String =
-  Fs.join(Fs.join(Fs.join(root, "build"), "delta"), "report.json")
+  reportPathAt(root, "delta")
 
 def deltaFile(root: String, name: String): String =
-  Fs.join(Fs.join(Fs.join(root, "build"), "delta"), name)
+  fileAt(root, "delta", name)
+
+def bLabel(sub: String): String =
+  if (sub == "ide") "b: buffers" else "b: working tree"
 
 def workItems(j: Json): List[Json] =
   Diags.jsonField(j, "workloads") match {

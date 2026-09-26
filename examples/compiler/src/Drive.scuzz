@@ -404,7 +404,10 @@ def fuzzCollectMan(dir: String, m: Man): IO[List[(String, String)]] =
   manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => fuzzCollectListed(dir, m.deps, ents)))
 
 def fuzzCollectListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[List[(String, String)]] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => collectDeps(dir, deps, own).flatMap(files => fuzzReadScenario(dir).flatMap(scn => fuzzCollectVer(dir, Verify.applyScenarioFiles(files, scn), Verify.scenarioWrap(scn)))))
+  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => collectDeps(dir, deps, own).flatMap(files => fuzzCollectFiles(dir, files)))
+
+def fuzzCollectFiles(dir: String, files: List[(String, String)]): IO[List[(String, String)]] =
+  fuzzReadScenario(dir).flatMap(scn => fuzzCollectVer(dir, Verify.applyScenarioFiles(files, scn), Verify.scenarioWrap(scn)))
 
 def isDrivers(name: String): Bool =
   Str.len(name) > 14 && Str.slice(name, Str.len(name) - 14, Str.len(name)) == ".scuzz_drivers"

@@ -550,6 +550,38 @@ PY
   (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec "" "$ROOT/examples/editor")
   test -f examples/editor/build/snapshot.png
   (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" fuzz --iterations 0 "$ROOT/examples/editor")
+  # Live in-memory review: the editor diffs an edited buffer against disk on
+  # the evaluator, with no git and no native build of the target package.
+  rm -rf scratchpad/review scratchpad/shared
+  mkdir -p scratchpad/review
+  cp -R examples/counter/. scratchpad/review/
+  cp -R examples/shared scratchpad/shared
+  rm -rf scratchpad/review/build scratchpad/shared/build
+  python3 - <<'PY'
+import json
+src = open("scratchpad/review/src/Main.scuzz").read()
+i = src.index('"Counter"') + len('"Counter')
+ops = {"v": 1, "kind": "inject", "events": [
+    {"op": "caret", "offset": i},
+    {"op": "type", "value": " app"},
+    {"op": "tap", "id": "choicechip:Timeline"},
+    {"op": "tap", "id": "outlined:Compare buffers"},
+    {"op": "pump", "k": 50},
+]}
+open("scratchpad/review/ops.json", "w").write(json.dumps(ops))
+PY
+  (cd scratchpad/review && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec ops.json "$ROOT/examples/editor")
+  python3 - <<'PY'
+import json
+with open("scratchpad/review/build/ide/report.json") as f:
+    r = json.load(f)
+assert r["kind"] == "diff" and r["rev"] == "buffers", r
+assert r["counts"]["diverged"] == 1, r["counts"]
+row = r["workloads"][0]
+assert row["class"] == "diverged", row
+sections = {c["section"] for c in row["delta"]["changes"]}
+assert "signals" in sections, row
+PY
 }
 
 slice_ui_test() {
