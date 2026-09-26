@@ -12,8 +12,8 @@ The arc steps have landed: in-memory file-set diff on the evaluator, step view, 
 
 What stays open:
 
-1. **The generator.** How proposals are generated, and how the IDE talks to an LLM, is not decided. The deck works with any generator that writes `build/proposals/`.
-2. **Keep rate.** Measure the keep rate per region before tuning the generator.
+1. **The generator.** The built-in baseline writes mutation mutants of the working tree into `build/proposals/`. How the IDE talks to an LLM, and whether generated proposals are useful often enough to keep reviewing, stay open.
+2. **Keep rate.** Measure the keep rate per region from `build/ide/decisions.jsonl` before tuning the generator.
 
 ## Supporting work
 
