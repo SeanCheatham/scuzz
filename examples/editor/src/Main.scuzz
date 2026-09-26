@@ -133,7 +133,7 @@ def deckArm(ls: LaneS): Unit =
     _ = if (List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(ls.raw), Signal.get(ls.tls), ws, ls.laneA, ls.laneB, ls.rail, ls.step, ls.title, ls.rowsA, ls.rowsB, ls.viewA, ls.viewB)
   } yield ()
 
-def keepNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+def keepNext(root: String, ls: LaneS, ds: DeckS, dirties: List[String]): IO[Unit] =
   for {
     left <- loadProposals(root)
     name = Deck.keepTarget(Signal.get(ds.armed), left)
@@ -141,9 +141,12 @@ def keepNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
   toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
   disk <- diskFiles(root, toml)
   props <- readProposal(root, name)
+  hits = Deck.dirtyHits(props, dirties)
+  _ <- if (List.nonEmpty(hits)) IO.pure(Signal.set(ls.status, Deck.dirtyLines(hits))) else for {
   _ <- IO.foreachDiscard(props, p => Fs.mkdirs(Fs.dirname(Fs.join(root, p._1))).handleErrorWith(_ => IO.pure(())).flatMap(_ => Fs.write(Fs.join(root, p._1), p._2)))
   _ <- recordDecision(root, name, "keep", Deck.setHash(disk), Deck.setHash(Deck.applyProposal(disk, props)))
   _ <- deckNextIn(root, Deck.regionOf(props), ls, ds)
+} yield ()
 } yield ()
   } yield ()
 
@@ -310,6 +313,9 @@ b""", 2) == (1, 0), true)
     _ = Property.check("atiles", Lanes.a11yLines(Str.concat("a11y:", Str.concat(Lanes.nl(), Str.concat("text:Counter", Str.concat(Lanes.nl(), "motion:press:+1=4"))))) == ["text:Counter"], true)
     _ = Property.check("bset", Chrome.bufferFiles([("Main", "a"), ("Dep", "b")], ["Main"], ["a2"]) == [("Main", "a2"), ("Dep", "b")], true)
     _ = Property.check("bclean", Chrome.bufferFiles([("Main", "a")], ["Other"], ["x"]) == [("Main", "a")], true)
+    _ = Property.check("dirty", Chrome.dirtyStems(["src/Main.scuzz", "src/Dep.scuzz"], ["a2", "b"], ["a", "b"]) == ["Main"], true)
+    _ = Property.check("dhits", Deck.dirtyHits([("src/Main.scuzz", "x"), ("src/Other.scuzz", "y")], ["Main"]) == ["Main"], true)
+    _ = Property.check("dclean", Deck.dirtyHits([("src/Main.scuzz", "x")], []) == [], true)
     _ = Property.check("blab", Lanes.bLabel("ide") == "b: buffers", true)
     _ = Property.check("ipath", Lanes.reportPathAt("r", "ide") == Fs.join("r", Fs.join("build", Fs.join("ide", "report.json"))), true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ => IO.pure(Str.len("")))
@@ -571,7 +577,9 @@ b""", 2) == (1, 0), true)
   _ <- deckNext(Signal.get(dirSig), lanes, deck)
 } yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckPending, ps => if (List.isEmpty(ps)) 0 else 1), 1, View.wrap(View.bindText(deckTitle), View.button("Keep", _ => for {
   _ = Property.sometimes("tappedKeep")
-  _ <- keepNext(Signal.get(dirSig), lanes, deck)
+  bs = List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf))
+  os = List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))
+  _ <- keepNext(Signal.get(dirSig), lanes, deck, Chrome.dirtyStems(Signal.get(paths), bs, os))
 } yield ()), View.outlinedButton("Reject", _ => for {
   _ = Property.sometimes("tappedReject")
   _ <- rejectNext(Signal.get(dirSig), lanes, deck)

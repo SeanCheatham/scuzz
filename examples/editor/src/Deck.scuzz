@@ -47,6 +47,12 @@ def deckTitle(name: String): String =
 def regionOf(props: List[(String, String)]): List[String] =
   List.sort(List.distinct(List.map(props, p => Chrome.stemOf(p._1))))
 
+def dirtyHits(props: List[(String, String)], dirties: List[String]): List[String] =
+  List.filter(regionOf(props), s => List.contains(dirties, s))
+
+def dirtyLines(hits: List[String]): List[String] =
+  List.map(hits, s => Str.concat("dirty buffer: ", s))
+
 def keepTarget(armed: String, left: List[String]): String =
   if (!Str.isEmpty(armed) && List.contains(left, armed)) armed else if (List.isEmpty(left)) "" else List.at(left, 0)
 
