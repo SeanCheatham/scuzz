@@ -97,8 +97,8 @@ def keepRecordsDecision(t: Timeline): Verdict =
 """)])), """
 """))) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep records the decision with both file set hashes")
 
-def afterKeepEndsDeck(t: Timeline): Verdict =
-  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:no more proposals") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p1")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep advances the deck past the last proposal")
+def afterKeepFocusesRegion(t: Timeline): Verdict =
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Keep"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p3") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p2")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Keep takes the next proposal from the same region")
 
 def rejectKeepsDisk(t: Timeline): Verdict =
   if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Reject"))) Verdict.ok() else if (Timeline.fileTextIs(t, Timeline.len(t) - 1, "src/Main.scuzz", "@main def main: IO[Unit] =\n  IO.println(1 + \"x\")\n")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Reject leaves the working tree alone")
@@ -109,8 +109,14 @@ def rejectRecordsDecision(t: Timeline): Verdict =
 """)])), """
 """))) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Reject records the decision with both file set hashes")
 
-def afterRejectEndsDeck(t: Timeline): Verdict =
-  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Reject"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:no more proposals") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p1")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Reject advances the deck past the last proposal")
+def afterRejectFocusesRegion(t: Timeline): Verdict =
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Reject"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p3") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:proposal p2")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Reject takes the next proposal from the same region")
+
+def afterRandomizeBlindsLanes(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Randomize", "text:lane 1")
+
+def afterRandomizeShowsStep(t: Timeline): Verdict =
+  Verdict.afterHit(t, "outlined:Randomize", "text:step 1 of 2 - count 1 - differs")
 
 def rowsFollowStep(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalListLen(t, i, "rowsA") == 0 || Timeline.signalStrHas(t, i, "stepTitle", Str.concat("step ", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "step")), " of "))))

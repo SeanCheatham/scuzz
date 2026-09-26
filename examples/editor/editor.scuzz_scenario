@@ -7,6 +7,14 @@ def setup(): IO[Unit] =
     _ <- Fs.write("build/proposals/p1/src/Main.scuzz", """@main def main: IO[Unit] =
   IO.println(2)
 """)
+    _ <- Fs.mkdirs("build/proposals/p2/src")
+    _ <- Fs.write("build/proposals/p2/src/Other.scuzz", """def other(): Int =
+  1
+""")
+    _ <- Fs.mkdirs("build/proposals/p3/src")
+    _ <- Fs.write("build/proposals/p3/src/Main.scuzz", """@main def main: IO[Unit] =
+  IO.println(3)
+""")
     _ <- Main.startDiff(".")
   } yield ()
 

@@ -10,8 +10,7 @@ A developer reviews one proposed change at a time. The IDE evaluates the change 
 
 Do the steps in this order:
 
-1. **Focus.** The deck picks the next proposal from the same region of the code. A Randomize control picks a new region.
-2. **In-process LSP.** Move hover, goto-def, and rename from `scuzz lsp` to compiler modules called in-process.
+1. **In-process LSP.** Move hover, goto-def, and rename from `scuzz lsp` to compiler modules called in-process.
 
 Each step is a vertical slice with a claim in `examples/editor/chrome.scuzz_verify` and a corpus entry.
 
