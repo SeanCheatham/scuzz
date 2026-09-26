@@ -61,6 +61,12 @@ def afterStepRendersView(t: Timeline): Verdict =
 def afterStepRendersCounter(t: Timeline): Verdict =
   Verdict.afterHit(t, "textbutton:1*", "text:Counter")
 
+def afterWorkPlaysTimeline(t: Timeline): Verdict =
+  Verdict.afterHit(t, "textbutton:regressed idle", "text:count = 2")
+
+def afterPauseHoldsFrame(t: Timeline): Verdict =
+  Verdict.afterHit(t, "choicechip:Pause", "choicechip:Pause=1")
+
 def afterCompareShowsCounts(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Compare buffers", "text:buffers: 0 regressed, 0 fixed, 1 diverged, 0 unrunnable, 1 same")
 

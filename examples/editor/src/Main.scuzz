@@ -263,6 +263,13 @@ def showStep(step: Signal[Int], title: Signal[String], rowsA: Signal[List[String
     _ = Signal.set(viewB, Lanes.a11yLines(Lanes.stateAt(b, i)))
   } yield ()
 
+def playTick(playOn: Signal[Int], rail: Signal[List[String]], step: Signal[Int], stepTitle: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]]): IO[Unit] =
+  for {
+    _ <- IO.sleep(400)
+    n = List.len(Signal.get(rail))
+    _ <- if (n <= 1 || Signal.get(playOn) == 0) IO.pure(()) else IO.pure(showStep(step, stepTitle, rowsA, rowsB, viewA, viewB, Signal.get(laneA), Signal.get(laneB), (Signal.get(step) + 1) % n))
+  } yield ()
+
 def showWork(w: String, raw: String, tls: List[String], works: List[String], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], stepTitle: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]]): Unit =
   for {
     i = List.indexOf(works, w)
@@ -446,6 +453,7 @@ b""", 2) == (1, 0), true)
     rowsB = Signal.make([]: List[String])
     stepViewA = Signal.make([]: List[String])
     stepViewB = Signal.make([]: List[String])
+    playOn = Signal.make(1)
     deckPending = Signal.make([]: List[String])
     deckArmed = Signal.make("")
     deckTitle = Signal.make("")
@@ -512,6 +520,7 @@ b""", 2) == (1, 0), true)
   _ = Signal.set(diffPid, 0)
 } yield ()
 } yield ()))
+    _ <- Fiber.fork(IO.forever(playTick(playOn, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, laneA, laneB)))
     _ <- Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.button("Save", _ => for {
   _ = Property.sometimes("tappedSave")
   p = Signal.get(pathSig)
@@ -680,8 +689,9 @@ b""", 2) == (1, 0), true)
 } yield ()))), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
   _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
-} yield ())))), View.bindText(stepTitle), View.row(View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
+} yield ())))), View.bindText(stepTitle), View.wrap(View.choiceChip(playOn, 1, "Play"), View.choiceChip(playOn, 0, "Pause")), View.row(View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
   _ = Property.sometimes("tappedStep")
+  _ = Signal.set(playOn, 0)
   _ = showStep(step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
 } yield ()))), View.expanded(View.column(View.bindText(revLabel), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.bindText(laneBLabel), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s))))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
   off <- Ui.editorCaret()
