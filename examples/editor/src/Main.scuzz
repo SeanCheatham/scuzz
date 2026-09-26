@@ -191,8 +191,8 @@ def writeMutant(root: String, kept: List[(String, String, Prog)], disk: List[(St
     _ <- IO.foreachDiscard(changed, f => Fs.mkdirs(Fs.join(dir, "src")).flatMap(_ => Fs.write(Fs.join(dir, Fs.join("src", Str.concat(f._1, ".scuzz"))), f._2)))
   } yield ()
 
-def generateProposals(root: String, set: List[(String, String)], ls: LaneS, ds: DeckS): IO[Unit] =
-  deckGuard(ds, generateProposalsGo(root, set, ls, ds))
+def generateProposals(root: String, set: List[(String, String)], cur: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  deckGuard(ds, generateProposalsGo(root, Deck.regionSet(set, cur), ls, ds))
 
 def generateProposalsGo(root: String, set: List[(String, String)], ls: LaneS, ds: DeckS): IO[Unit] =
   for {
@@ -398,6 +398,46 @@ b""", 2) == (1, 0), true)
     _ = Property.check("skc", Deck.skipPick(["p1", "p2", "p3"], ["p1", "p2"], "p3") == ("p1", []), true)
     _ = Property.check("ske", Deck.skipPick([], [], "") == ("", []), true)
     _ = Property.check("rvl", Deck.revealText("kept", "p1", Deck.laneOf(1)) == "kept p1 (proposal was lane 1)", true)
+    _ = Property.check("msites", Mutate.countFiles([("Main", """def f(n: Int): Int =
+  for {
+    a = 2
+    _ <- IO.println(a)
+  } yield n + a
+""")], false) == 5, true)
+    _ = Property.check("mdrop", !Str.contains(Deck.mutOut("""def f(n: Int): Int =
+  for {
+    a = 2
+    _ <- IO.println(a)
+  } yield n + a
+""", 0), "a = 2"), true)
+    _ = Property.check("mminus", Str.contains(Deck.mutOut("""def f(n: Int): Int =
+  for {
+    a = 2
+    _ <- IO.println(a)
+  } yield n + a
+""", 1), "a = 1"), true)
+    _ = Property.check("mplus", Str.contains(Deck.mutOut("""def f(n: Int): Int =
+  for {
+    a = 2
+    _ <- IO.println(a)
+  } yield n + a
+""", 2), "a = 3"), true)
+    _ = Property.check("rset", Deck.regionSet([("Main", """def f(n: Int): Int =
+  n + 1
+"""), ("Dep", """def g(n: Int): Int =
+  n
+""")], "Main") == [("Main", """def f(n: Int): Int =
+  n + 1
+""")], true)
+    _ = Property.check("rall", Deck.regionSet([("Main", """def f(n: Int): Int =
+  n + 1
+"""), ("Dep", """def g(n: Int): Int =
+  n
+""")], "Other") == [("Main", """def f(n: Int): Int =
+  n + 1
+"""), ("Dep", """def g(n: Int): Int =
+  n
+""")], true)
     _ = Property.check("wl", Deck.withLast("", ["a"]) == ["a"] && Deck.withLast("l", ["a"]) == ["l", "a"], true)
     _ = Property.check("blab", Lanes.bLabel("ide") == "b: buffers", true)
     _ = Property.check("ipath", Lanes.reportPathAt("r", "ide") == Fs.join("r", Fs.join("build", Fs.join("ide", "report.json"))), true)
@@ -671,7 +711,7 @@ b""", 2) == (1, 0), true)
   own <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
   i = Signal.get(idx)
   set = Chrome.bufferFiles(own, List.map(Signal.get(paths), p => Chrome.stemOf(p)), List.setAt(Signal.get(bodies), i, Signal.get(buf)))
-  _ <- generateProposals(root, set, lanes, deck)
+  _ <- generateProposals(root, set, Chrome.stemOf(Signal.get(pathSig)), lanes, deck)
 } yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckPending, ps => if (List.isEmpty(ps)) 0 else 1), 1, View.wrap(View.bindText(deckTitle), View.button("Keep", _ => for {
   _ = Property.sometimes("tappedKeep")
   bs = List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf))

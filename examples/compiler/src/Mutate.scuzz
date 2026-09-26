@@ -479,7 +479,10 @@ def walk(e: Expr, target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o:
   }
 
 def walkInt(k: Int, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
-  if ((k == 0 || k == 1) && live(inO, o)) Walk(Expr.EInt(if (seen == target) 1 - k else k, 0), seen + 1, hi) else Walk(Expr.EInt(k, 0), seen, hi)
+  if (live(inO, o)) Walk(Expr.EInt(intOut(k, target, seen), 0), seen + 2, hi) else Walk(Expr.EInt(k, 0), seen, hi)
+
+def intOut(k: Int, target: Int, seen: Int): Int =
+  if (seen == target) k - 1 else if (seen + 1 == target) k + 1 else k
 
 def walkBool(b: Bool, target: Int, seen: Int, inO: Bool, hi: Int, o: Bool): Walk =
   if (live(inO, o)) Walk(Expr.EBool(if (seen == target) !b else b), seen + 1, hi) else Walk(Expr.EBool(b), seen, hi)
@@ -724,10 +727,13 @@ def walkBinds(xs: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr],
 
 def walkBindsHd(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
   b match {
-    case Bind(draw, name, v) => walk(v, target, seen, inO, hs, hi, o) match {
+    case Bind(draw, name, v) => if (live(inO, o) && seen == target) walkBinds(rest, target, seen + 1, inO, hs, hi, o) else walk(v, target, bindSkip(seen, inO, o), inO, hs, hi, o) match {
   case Walk(v2, n1, h1) => walkBindsRest(Bind(draw, name, v2), rest, target, n1, inO, hs, h1, o)
 }
   }
+
+def bindSkip(seen: Int, inO: Bool, o: Bool): Int =
+  if (live(inO, o)) seen + 1 else seen
 
 def walkBindsRest(b: Bind, rest: List[Bind], target: Int, seen: Int, inO: Bool, hs: List[Expr], hi: Int, o: Bool): BindWalk =
   walkBinds(rest, target, seen, inO, hs, hi, o) match {
