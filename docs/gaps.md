@@ -11,11 +11,11 @@ State what is missing. Do not record what landed. When a gap closes or its asses
 
 ### 1. Proposal review in the IDE
 
-**Partly proven.** The IDE compares the open buffers with the files on disk in its own process. It checks and probes both file sets on the evaluator in forked children. No `git`. No native build of the target package. The lanes open the first diverging state with the changed sections first. A warm compare of `examples/counter` takes about 8.5 s from tap to lanes. The deck reviews one proposal at a time in blind lanes. Keep and Reject land in the working tree and in the decision record.
+**Partly proven.** The IDE compares the open buffers with the files on disk in its own process. It checks and probes both file sets on the evaluator in forked children. No `git`. No native build of the target package. The lanes open the first diverging state with the changed sections first. A warm compare of `examples/counter` takes about 8.5 s from tap to lanes. The deck reviews one proposal at a time in blind lanes. Keep and Reject land in the working tree and in the decision record. The deck prefers the region of the last decision. Hover, goto-def, and rename run in-process.
 
-**Unproven.** The loop is fast enough for one decision every few seconds. A timeline with steps aligned by index shows a human what a change does. A human decides faster from blind timelines than from a source diff. Generated proposals are useful often enough to keep reviewing. How proposals are generated, and how the IDE talks to an LLM, is not decided.
+**Unproven.** The loop is fast enough for one decision every few seconds. A human decides faster from blind timelines than from a source diff. Generated proposals are useful often enough to keep reviewing. How proposals are generated, and how the IDE talks to an LLM, is not decided.
 
-**Proof.** The deck shows proposals from `build/proposals/` in random lane order. Keep writes the proposal into the working tree. The deck records each decision with both file set hashes. Measure the keep rate per region. Order: [`vision.md`](vision.md#primary-arc-proposal-review-in-the-ide). Locks: [`philosophy.md`](philosophy.md#proposal-review).
+**Proof.** Measure the keep rate per region once a generator exists. Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
 ### 2. Evaluator parity and speed
 
@@ -45,7 +45,7 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 ### Review loop
 
-1. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Hover, goto-def, and rename start `scuzz lsp`.
+1. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Completion, formatting, code actions, semantic tokens, inlay hints, and folding start `scuzz lsp`.
 2. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
 
 ### Thesis-critical

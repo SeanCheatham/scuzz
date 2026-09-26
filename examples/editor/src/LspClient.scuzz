@@ -27,6 +27,12 @@ def parseJson(s: String): Json =
     case Result.Err(_) => Json.Null()
   }
 
+def infoCall(root: String, path: String, body: String, method: String, line: Int, col: Int, nu: String): IO[Json] =
+  IO.pure(parseJson(Lsp.resultMsg("2", infoResult(root, path, body, method, line, col, nu))))
+
+def infoResult(root: String, path: String, body: String, method: String, line: Int, col: Int, nu: String): String =
+  if (method == "textDocument/hover") Lsp.hoverJson(Lsp.hoverAt(body, line, col)) else if (method == "textDocument/definition") Lsp.defJson(Str.concat("file://", path), body, line, col) else if (method == "textDocument/rename") Lsp.renameJson(Str.concat("file://", path), body, line, col, nu) else "null"
+
 def encodeJson(j: Json): String =
   Json.stringify(j) match {
     case Result.Ok(s) => s

@@ -281,7 +281,7 @@ def renameJson(uri: String, src: String, line: Int, col: Int, nu: String): Strin
   renameJson2(uri, src, identAt(src, offsetOf(src, line, col)), nu)
 
 def renameJson2(uri: String, src: String, name: String, nu: String): String =
-  if (name == "" || nu == "") "null" else Str.concat("{\"changes\":{", Str.concat(Check.jsonStr(uri), Str.concat(":", Str.concat(wholeEdit(src, renameIdents(src, name, nu)), "}"))))
+  if (name == "" || nu == "") "null" else Str.concat("{\"changes\":{", Str.concat(Check.jsonStr(uri), Str.concat(":", Str.concat(wholeEdit(src, renameIdents(src, name, nu)), "}}"))))
 
 def wholeEdit(src: String, text: String): String =
   Str.concat("[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":", Str.concat(Str.fromInt(lineCount(src)), Str.concat(",\"character\":0}},\"newText\":", Str.concat(Check.jsonStr(text), "}]"))))

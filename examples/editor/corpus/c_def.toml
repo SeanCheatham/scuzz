@@ -1,0 +1,3 @@
+[fuzz]
+schedule_seed = "2"
+events = ["caret 90", "tap outlined:Go to def"]
