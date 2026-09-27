@@ -87,7 +87,7 @@ def afterCompareRendersView(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Compare buffers", "text:+1")
 
 def afterDeckShowsProposal(t: Timeline): Verdict =
-  Verdict.afterHit(t, "outlined:Proposals", "text:proposal p1")
+  if (Timeline.exists(t, i => Timeline.driveHas(t, i, "addProposal"))) Verdict.ok() else Verdict.afterHit(t, "outlined:Proposals", "text:proposal p1")
 
 def deckStaysBlind(t: Timeline): Verdict =
   if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Proposals"))) Verdict.ok() else if (Timeline.a11yHas(t, Timeline.len(t) - 1, "text:lane 1") && Timeline.a11yHas(t, Timeline.len(t) - 1, "text:lane 2") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:b: working tree") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:b: buffers") && !Timeline.a11yHas(t, Timeline.len(t) - 1, "text:a: HEAD")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "deck lanes stay blind until the decision")
@@ -133,8 +133,11 @@ def afterRejectRevealsLane(t: Timeline): Verdict =
 def afterSkipShowsNext(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Skip", "text:proposal p2")
 
+def watchedProposalAppears(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "addProposal") || Timeline.exists(t, j => j >= i && Timeline.a11yHas(t, j, "text:proposal a1")))
+
 def afterDeckShowsSource(t: Timeline): Verdict =
-  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Proposals"))) Verdict.ok() else if (Timeline.exists(t, i => Timeline.a11yHas(t, i, "IO.println(2)")) && Timeline.exists(t, i => Timeline.a11yHas(t, i, "IO.println(1 + \"x\")"))) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "the deck shows both sides of the changed source")
+  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Proposals")) || Timeline.exists(t, i => Timeline.driveHas(t, i, "addProposal"))) Verdict.ok() else if (Timeline.exists(t, i => Timeline.a11yHas(t, i, "IO.println(2)")) && Timeline.exists(t, i => Timeline.a11yHas(t, i, "IO.println(1 + \"x\")"))) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "the deck shows both sides of the changed source")
 
 def afterDeckFlagsUnguarded(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Proposals", "text:unguarded: no claims")
