@@ -213,7 +213,7 @@ int sz_embedder_alive(void) {
 
 /* AppKit must run on the process main thread. The Scuzz IO runtime often
  * executes on a large-stack worker. Hop through the main queue (main parks in
- * CFRunLoop — see sz_runtime_main_args). */
+ * CFRunLoop - see sz_runtime_main_args). */
 static void on_main(void (^block)(void)) {
   if ([NSThread isMainThread]) {
     block();
@@ -675,7 +675,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
           fprintf(stderr, "scuzz embedder: bitmap alloc failed\n");
         } else {
           memcpy([rep bitmapData], job->px, job->need);
-          /* Point size + pixel buffer → sharp Retina blit (no stretch upsample). */
+          /* Point size + pixel buffer -> sharp Retina blit (no stretch upsample). */
           [rep setSize:NSMakeSize((CGFloat)job->point_w, (CGFloat)job->point_h)];
           NSImage *image = [[NSImage alloc]
               initWithSize:NSMakeSize((CGFloat)job->point_w, (CGFloat)job->point_h)];

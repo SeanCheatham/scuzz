@@ -41,7 +41,7 @@ Upstream Scala Native is a reference, not a dependency. Divergence is intentiona
 - Not a ZIO library port
 - Not a cats / cats-effect / Typelevel port
 - Not SwiftUI / UIKit / WinUI wrappers
-- Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
+- Not "every widget rebuild is an `IO`" (`View` build stays sync/pure)
 - Not imperative View trees (`View.addChild`); nested constructors only
 - Not classical unit-test culture (`src/test`, Mockito, fixture-diff suites). Use mutation + fuzz + properties + sim + determinism in `scuzz`. Drivers stay oracle-free. Concrete facts may use `.require`.
 - Not Flutter DevTools / VM patching. `[ui] run --watch` is hot reload. `scuzz watch` only rebuilds. IO-only `run --watch` kills and reruns.
@@ -66,9 +66,9 @@ One CLI. One typer. One formatter. One linter. One compiler. One evaluator. One 
 - **Verification** is built into `scuzz` and the language. The terminal and JSON summary use the same coverage and reachability results. They report reached functions, branch arms, sometimes labels, and triggers. Write `oracle name` for a drive oracle. An oracle returns Bool. `check` rejects an oracle that does not. A public `def` that returns Bool is not an oracle. `private oracle` is a parse error. Boolean drive oracles assert the value of the complete expression. A `for` with only `=` bindings keeps the result type of its body. An equality oracle can report both operands when it fails. A search failure fails `scuzz fuzz`. A mutation survivor does not. The driver registry grows with the package. Drive names must be unique. Catalog: run `scuzz docs verify`.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps `check`. Panic, goto-def, and rename must use Scuzz source spans. Do not grow a second typer or schema.
 - **Dogfood IDE.** `scuzz ide` launches a Scuzz `[ui]` package. Headless stays a peer. Editor landmarks stay unnumbered. The Docs walkthrough does not use Index Book. Index Book stays a kit. The IDE depends on `examples/compiler` by path, as Docs does. The SDK ships `compiler/` and `syntax/` next to `ide/` so the path dependencies resolve. The IDE calls compiler modules in-process, not CLI commands. The Check button calls `Check.checkFilesOwn` on the package and its path dependencies. Info, Go to def, and Rename call `Lsp` module functions in-process. Native builds and `git` stay subprocesses. The compiler modules are the only typer. The IDE does not add a second one. Do not add Desktop-only editor behavior. Do not ship a second `scuzz-ide` binary.
-- **`scuzz.toml` is data** — package, path deps, `[ui]`, optional `[fuzz].score_floor`. No plugin DSL. Unknown keys rejected. `run --target` and `ide --target` take an explicit platform (`linux` / `macos` / `headless` / `android` / `ios`) and override `[ui].default_runtime`. A package without `[ui]` accepts only the host platform. No `scuzz add`. No git or registry deps. No library publishing. A hosted registry may never ship.
+- **`scuzz.toml` is data** - package, path deps, `[ui]`, optional `[fuzz].score_floor`. No plugin DSL. Unknown keys rejected. `run --target` and `ide --target` take an explicit platform (`linux` / `macos` / `headless` / `android` / `ios`) and override `[ui].default_runtime`. A package without `[ui]` accepts only the host platform. No `scuzz add`. No git or registry deps. No library publishing. A hosted registry may never ship.
 - **Docs.** `scuzz docs` prints the technical manual from `examples/manual`. Kit rows come from `examples/compiler/src/Kits.scuzz`. There is no `guide.md`. The `[ui]` package `examples/docs` is a gated walkthrough. It is not a painted copy of the manual. The walkthrough grows one Counter. Stages are Intro, Run, View, Check, State, Search, Cover, and Mutation. Intro is a short language and tooling overview. One stage, one prompt, one live artifact, then Continue. Continue stays off until the stage gate holds. Intro and Cover have no gate. Continue stays above the stage body. The app bar title shows the stage name and `n/8`. Run's `@main` binds `inc(0)`. View mounts a `View`. `+1` does not change the label. Check shows a claim. A claim is a function from `Timeline` to `Verdict`. A usual test names one input and one expected output. A claim names a rule. The rule must hold for a recorded run. You write the claim once. Scuzz chooses the seeds. Each seed is one schedule. Scuzz records that schedule as a `Timeline`. The claim reads that timeline after the run. The claim does not sit inside the program. The claim returns pass or fail. Check shows the `leftFirst` claim as source next to seed 0 and seed 128. Seed 0 fails because R won. The rule says L must win. Seed 128 passes because L won. Check also opens `count.scuzz_verify` and runs `oracle incAdds`. Check and Search show nested local tabs for `Main.scuzz` and `count.scuzz_verify`. State mounts the Counter `Signal`. Continue waits for `+1`. Search fuzzes `oracle hidden` in the verify file. Cover paints reached lines of `inc`. Mutation shows live source, mutant source, and the diff. `incAdds` rejects the mutant. Continue copies the next starter into the live editor and the verify editor when the text still matches the prior starter. Walkthrough snippets do not use an empty `@main`. The walkthrough uses `View.tabs` as a progress strip. It does not use Index Book. Hash ids are `#stage=id`. Stage IDs stay stable when titles change. Install, language, commands, manifest, iOS, web, and IDE stay in `scuzz docs`. Run `scuzz docs kits` and `scuzz docs language`.
-- **Fingerprint** (incremental): miss → rebuild. Cache keys include the SHA-256 of the executing compiler. A compiler change invalidates live and verification artifacts. The runtime supplies this identity through the reserved SCUZZ_EXECUTABLE_SHA256 key in Sys.getenv. A host environment value cannot replace it. Simulation reads this key from its fake environment only. Native make stays quiet on success. Fail on the first missing tool with one install line.
+- **Fingerprint** (incremental): miss -> rebuild. Cache keys include the SHA-256 of the executing compiler. A compiler change invalidates live and verification artifacts. The runtime supplies this identity through the reserved SCUZZ_EXECUTABLE_SHA256 key in Sys.getenv. A host environment value cannot replace it. Simulation reads this key from its fake environment only. Native make stays quiet on success. Fail on the first missing tool with one install line.
 - **`scuzz package`:** `--target` is linux, macos, android, ios, web, or all. linux and macos must match the host. Hardware device runs stay open ([`gaps.md`](gaps.md)).
 - **iOS local loop.** `scuzz devices` lists available iOS simulators. `scuzz run --target ios` selects or boots a simulator, builds and installs the app, and streams app output. `--device` selects an exact name or ID. `--watch` reloads Views after source changes. It preserves Signals. Manifest changes and the r command rebuild and restart. A build error or an incompatible capture preserves the running app. Restart resets app state. Host and simulator reload use the same capture checks. Native UI loops yield to the IO scheduler. IO tap handlers run as session-owned fibers. Session exit cancels their work. Native object caches shorten source rebuilds. The iOS viewport excludes safe areas and the docked keyboard. UIKit layout changes send shared resize events. Live records include viewport, keyboard, and lifecycle changes. Headless replays these events. Run `scuzz docs ios`.
 
@@ -151,21 +151,21 @@ A tap closure runs its synchronous part in the tap. Its `IO` runs on the schedul
 
 | Path | Meaning |
 | --- | --- |
-| **Headless** | `UiRuntime` peer — still `View` / Skia / structural dumps |
+| **Headless** | `UiRuntime` peer - still `View` / Skia / structural dumps |
 | **IO-only** | No `[ui]`, no `Ui.run`; plain `@main: IO[Unit]` exec |
 
-Missing `[ui]` ⇒ Skia omitted from the link. IO-only is **not** a fourth runtime peer.
+Missing `[ui]` => Skia omitted from the link. IO-only is **not** a fourth runtime peer.
 
 ### Kernel dialect
 
 The language `scuzz` implements. Proof is examples (`examples/hello`, `kernel`, `io`, `counter`, `studio`, `scale`).
 
-Locks (not an API catalog — run `scuzz docs language` and `scuzz docs kits`):
+Locks (not an API catalog - run `scuzz docs language` and `scuzz docs kits`):
 
 - Expression dialect only: `for` primary binder (`=` pure, `<-` effect); no `val` / statement blocks / `var`
 - A `for` `=` bind can be a constructor, tuple, or cons pattern. The bind stays pure. A pattern that does not match stops the program with `for binding does not match`.
 - Interpolated strings use the same escape rules as ordinary strings. Decode escapes in literal segments once. Parse expressions inside interpolation braces as source. Check each interpolation hole as an expression. Live code and verification use the same rules.
-- Optional `package`; top-level `def` / `private def` / `oracle` / `import`; `@main def …: IO[Unit]`
+- Optional `package`; top-level `def` / `private def` / `oracle` / `import`; `@main def ...: IO[Unit]`
 - Payload enums + `record` sugar + thin traits/`impl` (static dispatch) + monomorphized generics
 - Named types in declarations, lambda annotations, and expression ascriptions must resolve to a built-in type, an enum, a record, an alias, or a declared type parameter. A single capital letter can be an open type. An `impl` names a declared trait and supplies its declared number of type arguments.
 - A type application in a declaration or expression annotation supplies the declared number of type arguments. `IO` takes one or two type arguments. A bare generic type name stays valid as an open type. A type parameter cannot take type arguments. An unannotated lambda leaves its parameter type open for inference.
@@ -185,7 +185,7 @@ Locks (not an API catalog — run `scuzz docs language` and `scuzz docs kits`):
 
 ## Language direction
 
-Expression-only dialect. **`for` is the kernel binder**. `=` aliases a pure value. `<-` sequences an effect. No `val`. No `var`. No statement blocks. `{ case … }` is a lambda, not a block. Surface sugar elaborates to a small core.
+Expression-only dialect. **`for` is the kernel binder**. `=` aliases a pure value. `<-` sequences an effect. No `val`. No `var`. No statement blocks. `{ case ... }` is a lambda, not a block. Surface sugar elaborates to a small core.
 
 Scala **nouns**, Rust/Cargo **verbs**. No JVM packages. Direction: payload **enums** / **`record`** + thin **traits**. Monomorphize generics early. No classes. Path deps remain the unit of reuse. Do not add a package registry. Details: run `scuzz docs language`. Keep/cut: [`compatibility.md`](compatibility.md).
 
