@@ -31,6 +31,8 @@ WOFF2 off and fails if the fat archive has undefined Brotli symbols. On Linux
 install `zlib1g-dev libbz2-dev`.
 
 **Pin / release:** `third_party/skia/PIN` records the as-needed `skia-cpu-vN`
-URL template (`url=…/skia-{triple}-cpu.tar.gz`). `scripts/package_release.sh`
+URL template (`url=…/skia-{triple}-cpu.tar.gz`) and the header tarball
+(`hdr_url=…/skia-include.tar.gz`, the Skia `include/` tree for the shim relink;
+the gitiles `+archive` endpoint 503s under load). `scripts/package_release.sh`
 fetches the host-matching asset into the release tree (unless
 `SCUZZ_SKIA=sk_sw`). `SCUZZ_SKIA=gpu` rasterizes on OpenGL. Impeller stays deferred (`docs/philosophy.md`).
