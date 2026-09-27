@@ -59,6 +59,15 @@ jobs:
           path: dist/skia-${{ matrix.triple }}-cpu.tar.gz
           if-no-files-found: error
 
+      # Headers are platform-independent; one leg publishes them.
+      - name: Upload header artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: skia-include
+          path: dist/skia-include.tar.gz
+          if-no-files-found: error
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -67,7 +76,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: dist
-          pattern: skia-*-cpu
+          pattern: skia-*
           merge-multiple: true
 
       - name: Publish GitHub Release

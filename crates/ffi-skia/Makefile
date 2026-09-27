@@ -8,7 +8,8 @@ PREBUILT_DIR := $(ROOT)/third_party/skia/prebuilt/$(TRIPLE)
 PREBUILT_LIB := $(PREBUILT_DIR)/libsk_capi.a
 PIN := $(ROOT)/third_party/skia/PIN
 SKIA_BRANCH := $(shell awk -F= '/^skia_branch=/{print substr($$0,13); exit}' "$(PIN)")
-SKIA_HDR_URL := https://skia.googlesource.com/skia/+archive/$(SKIA_BRANCH)/include.tar.gz
+# Release asset, not gitiles: the +archive endpoint 503s under load.
+SKIA_HDR_URL := $(shell awk -F= '/^hdr_url=/{print substr($$0,9); exit}' "$(PIN)")
 INCLUDES := -Iinclude -Isrc
 SRC := src/sk_sw.c src/png_enc.c src/sk_mono.c src/sk_color.c
 OBJ := $(SRC:src/%.c=build/%.o)
@@ -64,6 +65,10 @@ build/sk_gpu.o: src/sk_gpu.c src/sk_gpu.h | build
 # Headers that match the pin's Skia branch. Not a vendored tree.
 build/skia-src/.stamp: | build
 	@mkdir -p build/skia-src/include
+	@if [ -z "$(SKIA_HDR_URL)" ]; then \
+		echo "ffi-skia: no hdr_url= in $(PIN)" >&2; \
+		exit 1; \
+	fi
 	@echo "ffi-skia: fetch $(SKIA_BRANCH) include for shim relink"
 	@"$(ROOT)/scripts/fetch_skia.sh" --download "$(SKIA_HDR_URL)" build/skia-include.tar.gz
 	@rm -rf build/skia-src/include
