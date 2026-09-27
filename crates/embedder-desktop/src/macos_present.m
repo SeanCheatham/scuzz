@@ -14,6 +14,8 @@ static void enqueue_text_edit(const char *text);
 static void enqueue_key(const char *name, const char *text, int mods, int repeat);
 static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button);
 static void enqueue_scroll(float x, float y, float dx, float dy);
+static void enqueue_resize(int width, int height, double scale);
+static int resize_queued(void);
 static int event_content_xy(NSEvent *ev, float *x, float *y);
 static void mark_user_quit(void);
 
@@ -155,6 +157,28 @@ __attribute__((constructor)) static void configure_bundle(void) {
 }
 @end
 
+/* Window resize and backing-scale changes enqueue the shared resize
+ * event; the session lays out and paints at the new size next pump. */
+@interface ScuzzWindowDelegate : NSObject <NSWindowDelegate>
+@end
+
+@implementation ScuzzWindowDelegate
+- (void)windowDidResize:(NSNotification *)notification {
+  NSWindow *win = [notification object];
+  NSView *content = [win contentView];
+  CGFloat scale;
+  if (!content)
+    return;
+  scale = [win backingScaleFactor];
+  enqueue_resize((int)(content.bounds.size.width + 0.5),
+                 (int)(content.bounds.size.height + 0.5), (double)scale);
+}
+- (void)windowDidChangeBackingProperties:(NSNotification *)notification {
+  /* A move across Retina / non-Retina displays changes the scale. */
+  [self windowDidResize:notification];
+}
+@end
+
 #define EVENT_CAP 64
 #define TEXT_RING 64
 #define TEXT_LEN 128
@@ -163,6 +187,7 @@ __attribute__((constructor)) static void configure_bundle(void) {
 static NSWindow *g_win;
 static NSView *g_content;
 static NSImageView *g_view;
+static ScuzzWindowDelegate *g_delegate;
 static int g_w;
 static int g_h;
 static int g_ready;
@@ -282,6 +307,37 @@ static int q_push(const SzInputEvent *ev) {
   return 1;
 }
 
+static int resize_queued(void) {
+  int i;
+  for (i = g_q_head; i != g_q_tail; i = (i + 1) % EVENT_CAP)
+    if (g_queue[i].kind == SZ_INPUT_RESIZE)
+      return 1;
+  return 0;
+}
+
+static void enqueue_resize(int width, int height, double scale) {
+  SzInputEvent ev;
+  if (width <= 0 || height <= 0)
+    return;
+  /* Coalesce consecutive resizes. A live-resize storm must not fill the
+   * queue and starve key events. */
+  if (g_q_head != g_q_tail) {
+    SzInputEvent *last = &g_queue[(g_q_tail + EVENT_CAP - 1) % EVENT_CAP];
+    if (last->kind == SZ_INPUT_RESIZE) {
+      last->width = width;
+      last->height = height;
+      last->scale = scale;
+      return;
+    }
+  }
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_RESIZE;
+  ev.width = width;
+  ev.height = height;
+  ev.scale = scale;
+  q_push(&ev);
+}
+
 static int cocoa_drain_events(void) {
   int quit = 0;
   for (;;) {
@@ -344,10 +400,12 @@ static int cocoa_drain_events(void) {
     [NSApp sendEvent:ev];
   }
   /* orderFront can stay invisible for one turn. Quit only after the
-   * window has been on screen and then goes away. */
-  if (g_win && [g_win isVisible])
+   * window has been on screen and then goes away. A minimized window
+   * is not visible; minimize is not quit. */
+  if (g_win && ([g_win isVisible] || [g_win isMiniaturized]))
     g_became_visible = 1;
-  else if (g_became_visible && g_win && ![g_win isVisible])
+  else if (g_became_visible && g_win && ![g_win isVisible] &&
+           ![g_win isMiniaturized])
     quit = 1;
   return quit;
 }
@@ -477,10 +535,12 @@ static void ensure_app(void) {
 
 static void shutdown_on_main(void) {
   if (g_win) {
+    [g_win setDelegate:nil];
     [g_win orderOut:nil];
     [g_win close];
     g_win = nil;
   }
+  g_delegate = nil;
   g_content = nil;
   g_view = nil;
   g_ready = 0;
@@ -495,16 +555,25 @@ static void mark_user_quit(void) {
 }
 
 static int ensure_window_on_main(const char *title, int width, int height) {
-  if (g_ready && g_w == width && g_h == height)
+  if (g_ready) {
+    /* App-driven size change (inject `resize`): move the window to the
+     * frame. A queued resize event means the user is resizing; the next
+     * present catches up. Never fight the user. */
+    if ((g_w != width || g_h != height) && !resize_queued()) {
+      [g_win setContentSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
+      g_w = width;
+      g_h = height;
+    }
     return 1;
+  }
 
-  shutdown_on_main();
   g_user_quit = 0;
   ensure_app();
 
   NSRect rect = NSMakeRect(100, 100, (CGFloat)width, (CGFloat)height);
   NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                     NSWindowStyleMaskMiniaturizable;
+                     NSWindowStyleMaskMiniaturizable |
+                     NSWindowStyleMaskResizable;
   g_win = [[NSWindow alloc] initWithContentRect:rect
                                       styleMask:style
                                         backing:NSBackingStoreBuffered
@@ -518,11 +587,17 @@ static int ensure_window_on_main(const char *title, int width, int height) {
       title ? [NSString stringWithUTF8String:title] : @"Scuzz Lang";
   [g_win setTitle:nsTitle];
   [g_win setReleasedWhenClosed:NO];
+  [g_win setContentMinSize:NSMakeSize(64, 64)];
+  g_delegate = [[ScuzzWindowDelegate alloc] init];
+  [g_win setDelegate:g_delegate];
 
   g_content = [[ScuzzContentView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
   g_view = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
   [g_view setImageScaling:NSImageScaleAxesIndependently];
   [g_view setAnimates:NO];
+  /* Track the window during a live resize; the stretch holds until the
+   * next present lands a frame at the new size. */
+  [g_view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [g_content addSubview:g_view];
   [g_win setContentView:g_content];
   [g_win setAcceptsMouseMovedEvents:YES];

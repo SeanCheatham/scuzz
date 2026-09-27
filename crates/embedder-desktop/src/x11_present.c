@@ -30,6 +30,8 @@ static char *g_img_data;
 static Atom g_wm_delete;
 static int g_w;
 static int g_h;
+static int g_win_w; /* live window size from ConfigureNotify */
+static int g_win_h;
 static int g_ready;
 static int g_user_quit;
 static int g_probed;
@@ -343,6 +345,34 @@ static int q_push(const SzInputEvent *ev) {
   g_queue[g_q_tail] = *ev;
   g_q_tail = next;
   return 1;
+}
+
+static int resize_queued(void) {
+  int i;
+  for (i = g_q_head; i != g_q_tail; i = (i + 1) % EVENT_CAP)
+    if (g_queue[i].kind == SZ_INPUT_RESIZE)
+      return 1;
+  return 0;
+}
+
+static void enqueue_resize(int width, int height) {
+  SzInputEvent ev;
+  /* Coalesce consecutive resizes. A WM drag storm must not fill the
+   * queue and starve key events. */
+  if (g_q_head != g_q_tail) {
+    SzInputEvent *last = &g_queue[(g_q_tail + EVENT_CAP - 1) % EVENT_CAP];
+    if (last->kind == SZ_INPUT_RESIZE) {
+      last->width = width;
+      last->height = height;
+      return;
+    }
+  }
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_RESIZE;
+  ev.width = width;
+  ev.height = height;
+  ev.scale = 0; /* X11 blits 1:1; keep the session scale */
+  q_push(&ev);
 }
 
 static void x11_drain_pending(void) {
@@ -693,42 +723,70 @@ static uint32_t place_chan(uint8_t v, unsigned long mask) {
   return (((uint32_t)v >> (8 - bits)) << shift) & (uint32_t)mask;
 }
 
-static int ensure_window(const char *title, int width, int height) {
+/* Backing image for the frame size. Reallocates when the size changes;
+ * the window itself is created once and follows with XResizeWindow. */
+static int ensure_frame(int width, int height) {
   size_t need;
+  char *data;
+  XImage *img;
   Visual *vis;
   int depth;
   int screen;
-  char *saved_clip;
-
-  if (g_ready && g_w == width && g_h == height)
+  if (g_img && g_w == width && g_h == height)
     return 1;
-
-  /* The clipboard is session state, not window state. Detach it before
-   * shutdown so a size change does not lose copied text, then re-own the
-   * selection on the new window. Every return path restores g_clip; every
-   * shutdown after this point must see g_clip == NULL to avoid a
-   * double free. */
-  saved_clip = g_clip;
-  g_clip = NULL;
-  sz_embedder_shutdown();
-  g_user_quit = 0;
-
-  if (!frame_bytes(width, height, &need)) {
-    g_clip = saved_clip;
+  if (!frame_bytes(width, height, &need))
+    return 0;
+  data = (char *)malloc(need);
+  if (!data)
+    return 0;
+  screen = DefaultScreen(g_dpy);
+  vis = DefaultVisual(g_dpy, screen);
+  depth = DefaultDepth(g_dpy, screen);
+  img = XCreateImage(g_dpy, vis, (unsigned)depth, ZPixmap, 0, data,
+                     (unsigned)width, (unsigned)height, 32, width * 4);
+  if (!img) {
+    free(data);
     return 0;
   }
+  if (img->bits_per_pixel != 32) {
+    /* Both blit paths write one uint32_t per pixel. A 16-bit display
+     * would get garbage. Fail loudly instead. */
+    fprintf(stderr, "scuzz embedder: need 32 bits/pixel, got %d\n",
+            img->bits_per_pixel);
+    XDestroyImage(img); /* frees data */
+    return 0;
+  }
+  if (g_img) {
+    /* XDestroyImage frees g_img_data */
+    g_img->data = g_img_data;
+    XDestroyImage(g_img);
+  } else {
+    free(g_img_data);
+  }
+  g_img = img;
+  g_img_data = data;
+  g_w = width;
+  g_h = height;
+  return 1;
+}
+
+/* Create the window once. Size changes after creation swap the backing
+ * image (ensure_frame) and, when the app drove the change, resize the
+ * window from present. */
+static int ensure_window(const char *title, int width, int height) {
+  int screen;
+
+  if (g_ready)
+    return 1;
 
   g_dpy = XOpenDisplay(NULL);
   if (!g_dpy) {
     fprintf(stderr, "scuzz embedder: cannot open DISPLAY\n");
-    g_clip = saved_clip;
     return 0;
   }
   XSetErrorHandler(x11_on_error);
 
   screen = DefaultScreen(g_dpy);
-  vis = DefaultVisual(g_dpy, screen);
-  depth = DefaultDepth(g_dpy, screen);
   g_win = XCreateSimpleWindow(g_dpy, RootWindow(g_dpy, screen), 0, 0,
                               (unsigned)width, (unsigned)height, 1,
                               BlackPixel(g_dpy, screen),
@@ -737,44 +795,26 @@ static int ensure_window(const char *title, int width, int height) {
   g_wm_delete = XInternAtom(g_dpy, "WM_DELETE_WINDOW", False);
   XSetWMProtocols(g_dpy, g_win, &g_wm_delete, 1);
   {
-    /* Lock size so a WM resize does not desync the blit. */
+    /* A floor only. A locked min == max would disable WM resize and the
+     * maximize control. */
     XSizeHints hints;
     memset(&hints, 0, sizeof hints);
-    hints.flags = PMinSize | PMaxSize;
-    hints.min_width = hints.max_width = width;
-    hints.min_height = hints.max_height = height;
+    hints.flags = PMinSize;
+    hints.min_width = 64;
+    hints.min_height = 64;
     XSetWMNormalHints(g_dpy, g_win, &hints);
   }
   XSelectInput(g_dpy, g_win,
                ExposureMask | StructureNotifyMask | KeyPressMask |
                    KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                    PointerMotionMask | Button1MotionMask);
+  g_win_w = width;
+  g_win_h = height;
   XMapWindow(g_dpy, g_win);
   g_gc = DefaultGC(g_dpy, screen);
 
-  g_w = width;
-  g_h = height;
-  g_img_data = (char *)malloc(need);
-  if (!g_img_data) {
+  if (!ensure_frame(width, height)) {
     sz_embedder_shutdown();
-    g_clip = saved_clip;
-    return 0;
-  }
-
-  g_img = XCreateImage(g_dpy, vis, (unsigned)depth, ZPixmap, 0, g_img_data,
-                       (unsigned)width, (unsigned)height, 32, width * 4);
-  if (!g_img) {
-    sz_embedder_shutdown();
-    g_clip = saved_clip;
-    return 0;
-  }
-  if (g_img->bits_per_pixel != 32) {
-    /* Both blit paths write one uint32_t per pixel. A 16-bit display
-     * would get garbage. Fail loudly instead. */
-    fprintf(stderr, "scuzz embedder: need 32 bits/pixel, got %d\n",
-            g_img->bits_per_pixel);
-    sz_embedder_shutdown();
-    g_clip = saved_clip;
     return 0;
   }
 
@@ -794,8 +834,7 @@ static int ensure_window(const char *title, int width, int height) {
         /* Dispatch, do not drop: input, close requests, and selection
          * requests that land during the map wait are still real events. */
         if (x11_dispatch_event(&ev)) {
-          /* Window died; shutdown already ran. Keep the clipboard. */
-          g_clip = saved_clip;
+          /* Window died; shutdown already ran. */
           return 0;
         }
       }
@@ -811,8 +850,9 @@ static int ensure_window(const char *title, int width, int height) {
 
   x11_xim_open();
   g_ready = 1;
-  g_clip = saved_clip;
   if (g_clip) {
+    /* The clipboard can be set before the window exists. Own the
+     * selection now that there is a window to serve it. */
     x11_clip_atoms();
     XSetSelectionOwner(g_dpy, g_atom_clipboard, g_win, CurrentTime);
     g_clip_own = XGetSelectionOwner(g_dpy, g_atom_clipboard) == g_win;
@@ -921,6 +961,20 @@ static int x11_dispatch_event(XEvent *ev) {
   }
   if (ev->type == SelectionRequest)
     x11_serve_selection(&ev->xselectionrequest);
+  else if (ev->type == ConfigureNotify) {
+    /* WM resize (drag, maximize, tile). Tell the session; the next pump
+     * lays out and paints at the new size. */
+    if (ev->xconfigure.width != g_win_w ||
+        ev->xconfigure.height != g_win_h) {
+      g_win_w = ev->xconfigure.width;
+      g_win_h = ev->xconfigure.height;
+      enqueue_resize(g_win_w, g_win_h);
+    }
+  } else if (ev->type == Expose && ev->xexpose.count == 0 && g_ready && g_img)
+    /* Re-blit the last frame. Un-cover and de-iconify must repaint even
+     * when the session is idle. */
+    XPutImage(g_dpy, g_win, g_gc, g_img, 0, 0, 0, 0, (unsigned)g_w,
+              (unsigned)g_h);
   else if (ev->type == SelectionClear)
     g_clip_own = 0;
   else if (ev->type == ButtonPress && ev->xbutton.button == 1)
@@ -994,6 +1048,18 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
   /* Do not probe DISPLAY after the connection is open. */
   if (!(g_dpy || ensure_window(title, width, height)))
     return 0;
+  /* Catch events that landed since the pump drained. A user resize in
+   * flight must win over this frame. */
+  x11_drain_pending();
+  if (!g_dpy || !g_ready)
+    return 0; /* shutdown ran during the drain */
+  if (!ensure_frame(width, height))
+    return 0;
+  /* App-driven size change (inject `resize`): move the window to the
+   * frame. A queued resize event means the WM is resizing; the next
+   * present catches up. Never fight the WM. */
+  if ((g_win_w != width || g_win_h != height) && !resize_queued())
+    XResizeWindow(g_dpy, g_win, (unsigned)width, (unsigned)height);
 
   vis = DefaultVisual(g_dpy, DefaultScreen(g_dpy));
   dst = (uint32_t *)g_img_data;
@@ -1041,6 +1107,7 @@ void sz_embedder_shutdown(void) {
   g_win = 0;
   g_ready = 0;
   g_w = g_h = 0;
+  g_win_w = g_win_h = 0;
   g_q_head = g_q_tail = 0;
   g_key_repeat_pending = 0;
   g_key_held = 0;
