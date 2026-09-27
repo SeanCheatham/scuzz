@@ -451,7 +451,33 @@ b""", 2) == (1, 0), true)
 """)], true)
     _ = Property.check("wl", Deck.withLast("", ["a"]) == ["a"] && Deck.withLast("l", ["a"]) == ["l", "a"], true)
     _ = Property.check("ctrip", Deck.changedTriples([("Main", "a")], [("Main", "b")]) == [("Main", "a", "b")], true)
-    _ = Property.check("sside", Lanes.srcSide(("Main", "a", "b"), 1, true) == "b" && Lanes.srcSide(("Main", "a", "b"), 0, true) == "a", true)
+    _ = Property.check("sside", Lanes.srcWin(("Main", "a", "b"), 1, true) == "b" && Lanes.srcWin(("Main", "a", "b"), 0, true) == "a", true)
+    _ = Property.check("spre", Lanes.sharedPrefix(["a", "b", "c"], ["a", "x", "c"], 0) == 1, true)
+    _ = Property.check("ssuf", Lanes.sharedSuffix(["a", "b", "c"], ["a", "x", "c"], 0, 1) == 1, true)
+    _ = Property.check("win", Lanes.srcWindow("""a
+b
+c
+d
+e
+""", """a
+b
+X
+d
+e
+""", 1) == ("""b
+c
+d""", """b
+X
+d"""), true)
+    _ = Property.check("whead", Lanes.srcWindow("""a
+b
+""", """a
+Y
+""", 2) == ("""a
+b
+""", """a
+Y
+"""), true)
     _ = Property.check("guard", Deck.guardLines([]) == ["unguarded: no claims"] && Deck.guardLines(["x.scuzz_verify"]) == [], true)
     _ = Property.check("blab", Lanes.bLabel("ide") == "b: buffers", true)
     _ = Property.check("ipath", Lanes.reportPathAt("r", "ide") == Fs.join("r", Fs.join("build", Fs.join("ide", "report.json"))), true)
@@ -554,6 +580,11 @@ b""", 2) == (1, 0), true)
   _ = Signal.set(scenarios, Chrome.scenarioRels(walked))
   names <- loadClaimNames(dir, Chrome.verifyFileRels(walked))
   _ = Signal.set(claims, names)
+  _ <- if (Signal.get(deckBusy) != 0) IO.pure(()) else for {
+  left <- loadProposals(dir)
+  _ = Signal.set(deckPending, left)
+  _ = if (Str.isEmpty(Signal.get(deckArmed))) Signal.set(deckTitle, if (List.isEmpty(left)) "" else Deck.deckTitle(List.at(left, 0))) else ()
+} yield ()
   fp = Signal.get(fuzzPid)
   _ <- if (fp == 0) IO.pure(()) else for {
   maps <- loadFuzzMaps(dir)

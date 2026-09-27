@@ -91,6 +91,17 @@ button:+1
 def Main.loadClaimNames(_root: String, _rels: List[String]): IO[List[String]] =
   IO.pure(["greetFact"])
 
+def addProposal(name: String): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs(Str.concat(Str.concat("build/proposals/", name), "/src"))
+    _ <- Fs.write(Str.concat(Str.concat("build/proposals/", name), "/src/Main.scuzz"), """@main def main: IO[Unit] =
+  IO.println(4)
+""")
+  } yield ()
+
+def waitMs(n: Int): IO[Unit] =
+  IO.sleep(n)
+
 def Main.reviewProposal(root: String, toml: String, disk: List[(String, String)], propSet: List[(String, String)]): IO[Unit] =
   for {
     ide = Fs.join(Fs.join(root, "build"), "ide")

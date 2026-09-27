@@ -126,11 +126,32 @@ def a11yTileRole(role: String, label: String, raw: String): View =
 def viewCard(lines: Signal[List[String]]): View =
   View.card(View.column(View.each(lines, l => a11yTile(l))))
 
-def srcSide(f: (String, String, String), flip: Int, lane1: Bool): String =
-  if (lane1) if (flip == 1) f._3 else f._2 else if (flip == 1) f._2 else f._3
+def srcWindow(a: String, b: String, ctx: Int): (String, String) =
+  srcWinCut(Str.split(a, nl()), Str.split(b, nl()), sharedPrefix(Str.split(a, nl()), Str.split(b, nl()), 0), sharedSuffix(Str.split(a, nl()), Str.split(b, nl()), 0, 0), ctx)
+
+def sharedPrefix(xs: List[String], ys: List[String], i: Int): Int =
+  if (i >= List.len(xs) || i >= List.len(ys) || List.at(xs, i) != List.at(ys, i)) i else sharedPrefix(xs, ys, i + 1)
+
+def sharedSuffix(xs: List[String], ys: List[String], i: Int, p: Int): Int =
+  if (i >= List.len(xs) - p || i >= List.len(ys) - p || List.at(xs, List.len(xs) - 1 - i) != List.at(ys, List.len(ys) - 1 - i)) i else sharedSuffix(xs, ys, i + 1, p)
+
+def srcWinCut(xs: List[String], ys: List[String], p: Int, s: Int, ctx: Int): (String, String) =
+  (cutWindow(xs, p, s, ctx), cutWindow(ys, p, s, ctx))
+
+def cutWindow(xs: List[String], p: Int, s: Int, ctx: Int): String =
+  List.join(List.slice(xs, lowBound(p - ctx), winHi(List.len(xs), s, ctx)), nl())
+
+def lowBound(n: Int): Int =
+  if (n < 0) 0 else n
+
+def winHi(n: Int, s: Int, ctx: Int): Int =
+  if (n - s + ctx > n) n else if (n - s + ctx < 0) 0 else n - s + ctx
+
+def srcWin(f: (String, String, String), flip: Int, lane1: Bool): String =
+  if (lane1) if (flip == 1) srcWindow(f._2, f._3, 2)._2 else srcWindow(f._2, f._3, 2)._1 else if (flip == 1) srcWindow(f._2, f._3, 2)._1 else srcWindow(f._2, f._3, 2)._2
 
 def srcFileCard(f: (String, String, String), flip: Int): View =
-  View.card(View.column(View.text(f._1), View.row(View.expanded(View.code(srcSide(f, flip, true))), View.expanded(View.code(srcSide(f, flip, false))))))
+  View.card(View.column(View.text(f._1), View.row(View.expanded(View.code(srcWin(f, flip, true))), View.expanded(View.code(srcWin(f, flip, false))))))
 
 def srcSection(files: Signal[List[(String, String, String)]], flip: Signal[Int]): View =
   View.column(View.each(files, f => srcFileCard(f, Signal.get(flip))))
