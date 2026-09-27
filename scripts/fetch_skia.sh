@@ -11,7 +11,7 @@
 # HTTPS fetches retry HTTP 502, 503, and 504, plus a truncated gzip, with
 # backoff. Other HTTP errors fail closed on the first response.
 #
-#   SCUZZ_SKIA_URL=https://…/skia-{triple}-cpu.tar.gz ./scripts/fetch_skia.sh
+#   SCUZZ_SKIA_URL=https://.../skia-{triple}-cpu.tar.gz ./scripts/fetch_skia.sh
 #   SCUZZ_SKIA=sk_sw ./scripts/fetch_skia.sh   # no-op
 #   ./scripts/fetch_skia.sh --download URL DEST  # gzip tarball only (same retry)
 #   SCUZZ_SKIA_FETCH_ATTEMPTS=5               # HTTPS tries (default 5)
@@ -99,7 +99,7 @@ if [[ "${1:-}" == "--download" ]]; then
 fi
 
 if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
-  echo "fetch_skia: SCUZZ_SKIA=sk_sw — skipping download (in-tree software backend)"
+  echo "fetch_skia: SCUZZ_SKIA=sk_sw - skipping download (in-tree software backend)"
   exit 0
 fi
 

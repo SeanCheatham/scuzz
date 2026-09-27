@@ -35,7 +35,7 @@ find_ndk() {
 
 NDK="$(find_ndk || true)"
 if [ -z "$NDK" ]; then
-  echo "missing Android NDK — install the NDK, then set ANDROID_NDK_HOME" >&2
+  echo "missing Android NDK - install the NDK, then set ANDROID_NDK_HOME" >&2
   exit 1
 fi
 HOST="$(ls -1 "$NDK/toolchains/llvm/prebuilt" | head -1)"
@@ -63,12 +63,12 @@ SCUZZ_SKIA=sk_sw "$SCUZZ" build --out-dir "$PROJ/build" "$PROJ"
 sed 's/define i32 @main(/define i32 @scuzz_app_main(/' \
   "$PROJ/build/$NAME.ll" > "$OUT/app.android.ll"
 if ! grep -q 'define i32 @scuzz_app_main(' "$OUT/app.android.ll"; then
-  echo "missing scuzz_app_main — IR main rename failed" >&2
+  echo "missing scuzz_app_main - IR main rename failed" >&2
   exit 1
 fi
 # net.c needs OpenSSL. This target does not ship it. Fail if the app calls Net.
 if grep -E 'call [^@]*@sz_net_' "$OUT/app.android.ll" >/dev/null; then
-  echo "mobile package cannot link Net — this target has no OpenSSL" >&2
+  echo "mobile package cannot link Net - this target has no OpenSSL" >&2
   exit 1
 fi
 
@@ -113,7 +113,7 @@ build_abi() {
 }
 
 if ! build_abi arm64-v8a "aarch64-linux-android${API}"; then
-  echo "missing Android NDK — install the NDK, then set ANDROID_NDK_HOME" >&2
+  echo "missing Android NDK - install the NDK, then set ANDROID_NDK_HOME" >&2
   exit 1
 fi
 build_abi x86_64 "x86_64-linux-android${API}" || true

@@ -35,17 +35,17 @@ static SkSurface *make_session_surface(int pw, int ph) {
   s = sk_surface_make_gpu_n32_premul(pw, ph);
   if (!s) {
 #if defined(__APPLE__)
-    fprintf(stderr, "missing OpenGL — install Xcode, then retry\n");
+    fprintf(stderr, "missing OpenGL - install Xcode, then retry\n");
 #else
     fprintf(stderr,
-            "missing OpenGL — install mesa (libegl1-mesa-dev libgles2-mesa-dev "
+            "missing OpenGL - install mesa (libegl1-mesa-dev libgles2-mesa-dev "
             "libgl1-mesa-dri)\n");
 #endif
   }
   return s;
 }
 
-/* Weak stubs — strong defs from embedder-desktop override when linked. */
+/* Weak stubs - strong defs from embedder-desktop override when linked. */
 __attribute__((weak)) int sz_embedder_available(void) { return 0; }
 __attribute__((weak)) double sz_embedder_display_scale(void) { return 1.0; }
 __attribute__((weak)) int sz_embedder_alive(void) { return 0; }
@@ -73,7 +73,7 @@ __attribute__((weak)) int sz_embedder_clipboard_set(const char *text) {
 }
 __attribute__((weak)) char *sz_embedder_clipboard_get(void) { return NULL; }
 
-/* Weak stubs — strong defs from embedder-mobile override when linked. */
+/* Weak stubs - strong defs from embedder-mobile override when linked. */
 __attribute__((weak)) int sz_mobile_available(void) { return 0; }
 __attribute__((weak)) int sz_mobile_present(const char *title, int point_w,
                                             int point_h, int pixel_w,
@@ -1782,7 +1782,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
                                       event->y);
       session_mark_dirty(session);
     } else if (session->pointer_scroll) {
-      /* Finger down → content follows (positive finger pans content up or left). */
+      /* Finger down -> content follows (positive finger pans content up or left). */
       if (sz_view_scroll_is_h(session->pointer_scroll)) {
         if (dx > 0.5f || dx < -0.5f) {
           sz_view_scroll_by(session->pointer_scroll, -dx);

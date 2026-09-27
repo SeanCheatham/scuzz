@@ -178,17 +178,17 @@ typedef enum SzViewKind {
   SZ_VIEW_STACK,    /* overlay children; paint back-to-front */
   SZ_VIEW_POSITIONED, /* Stack child: offset (x, y) from stack origin */
   SZ_VIEW_PADDING,  /* uniform inset; deflates max constraints */
-  SZ_VIEW_SIZED,    /* tight w×h slot (clamped to incoming max) */
-  SZ_VIEW_MIN_SIZE, /* raise min w×h (clamped to incoming max) */
+  SZ_VIEW_SIZED,    /* tight w x h slot (clamped to incoming max) */
+  SZ_VIEW_MIN_SIZE, /* raise min w x h (clamped to incoming max) */
   SZ_VIEW_BACKGROUND, /* paint color; size to child */
   SZ_VIEW_ASPECT_RATIO, /* largest rw:rh box that fits max constraints */
   SZ_VIEW_FRACTION, /* percent of incoming max; 0 = size to child on that axis */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
   SZ_VIEW_STRETCH, /* Column/Row: tight cross-axis; main axis stays intrinsic */
-  SZ_VIEW_MAX_SIZE, /* lower max w×h; 0 = no cap on that axis */
+  SZ_VIEW_MAX_SIZE, /* lower max w x h; 0 = no cap on that axis */
   SZ_VIEW_CLIP,     /* pass constraints; clip paint to this frame */
-  SZ_VIEW_OPACITY,  /* pass constraints; scale paint alpha (0–100) */
+  SZ_VIEW_OPACITY,  /* pass constraints; scale paint alpha (0-100) */
   SZ_VIEW_MAX_LINES, /* cap wrapped text lines; 0 = no cap */
   SZ_VIEW_IGNORE_POINTER, /* skip hit-test; taps pass through */
   SZ_VIEW_ABSORB_POINTER, /* skip child hit-test; block taps behind */
@@ -273,11 +273,11 @@ SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env);
 SzView *sz_view_checkbox(SzSignalInt *sig, const char *label);
 /* Tap writes `value` into `sig`. Radios that share `sig` form a group. */
 SzView *sz_view_radio(SzSignalInt *sig, int64_t value, const char *label);
-/* Tap/drag writes `sig` from hit x, clamped 0–100. */
+/* Tap/drag writes `sig` from hit x, clamped 0-100. */
 SzView *sz_view_slider(SzSignalInt *sig);
-/* Paints a 0–100 bar from `sig`. Not a tap target. */
+/* Paints a 0-100 bar from `sig`. Not a tap target. */
 SzView *sz_view_progress(SzSignalInt *sig);
-/* Paints a 0–100 square ring from `sig`. Not a tap target. */
+/* Paints a 0-100 square ring from `sig`. Not a tap target. */
 SzView *sz_view_circular_progress(SzSignalInt *sig);
 /* `control_h` disc with `label`. Not a tap target. */
 SzView *sz_view_avatar(const char *label);
@@ -358,12 +358,12 @@ SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 /* Multiline buffer on `text`. Insert includes newline and a two-space soft-tab.
  * Not a TextField: omitted from `[fields]` / field inject indices. */
 SzView *sz_view_editor(SzSignalStr *text);
-/* Row of `start` | handle | `end`. Tap/drag writes `frac` 0–100 from hit x. */
+/* Row of `start` | handle | `end`. Tap/drag writes `frac` 0-100 from hit x. */
 SzView *sz_view_split(SzSignalInt *frac, SzView *start, SzView *end);
 /* When `open` is not 0, fills the parent (compose on `View.stack`). Escape
  * and a backdrop tap write 0. Closed overlay reports size 0. */
 SzView *sz_view_overlay(SzSignalInt *open, SzView *child);
-/* Drag writes `frac` from hit x, clamped 0–100. 1 if `view` is a split. */
+/* Drag writes `frac` from hit x, clamped 0-100. 1 if `view` is a split. */
 int sz_view_split_set_at(SzView *view, float x);
 int sz_view_collect_splits(SzView *root, SzView **out, int cap);
 int sz_view_collect_overlays(SzView *root, SzView **out, int cap);
@@ -397,7 +397,7 @@ SzView *sz_view_align(int ax, int ay, SzView *child);
 SzView *sz_view_positioned(int x, int y, SzView *child);
 /* Uniform inset in px; deflates max width/height for the child. */
 SzView *sz_view_padding(int pad, SzView *child);
-/* Tight w×h slot; clamped to incoming max. Child laid out at origin. */
+/* Tight w x h slot; clamped to incoming max. Child laid out at origin. */
 SzView *sz_view_sized(int w, int h, SzView *child);
 /* Floor on child size; 0 on an axis means no min. Clamped to incoming max. */
 SzView *sz_view_min_size(int w, int h, SzView *child);
@@ -405,7 +405,7 @@ SzView *sz_view_min_size(int w, int h, SzView *child);
 SzView *sz_view_max_size(int w, int h, SzView *child);
 /* Pass constraints through; size to child; clip paint to this frame. */
 SzView *sz_view_clip(SzView *child);
-/* Pass constraints through; size to child; scale paint alpha (`pct` 0–100). */
+/* Pass constraints through; size to child; scale paint alpha (`pct` 0-100). */
 SzView *sz_view_opacity(int pct, SzView *child);
 /* Cap wrapped text lines; `0` = no cap. Nested caps take the tighter value. */
 SzView *sz_view_max_lines(int n, SzView *child);
@@ -431,7 +431,7 @@ SzView *sz_view_radius(int n, SzView *child);
 SzView *sz_view_background(uint32_t argb, SzView *child);
 /* Largest rw:rh box that fits incoming max; child laid out in that tight slot. */
 SzView *sz_view_aspect_ratio(int rw, int rh, SzView *child);
-/* Percent of incoming max (1–100); 0 on an axis sizes to the child. */
+/* Percent of incoming max (1-100); 0 on an axis sizes to the child. */
 SzView *sz_view_fraction(int wpct, int hpct, SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
 SzView *sz_view_icon(char glyph, uint32_t argb);
@@ -454,7 +454,7 @@ SzViewKind sz_view_kind(const SzView *view);
 SzRect sz_view_frame(const SzView *view);
 /* Button, checkbox, slider, and other `tap N` targets (a11y preorder collect). */
 int sz_view_is_tap_target(const SzView *view);
-/* Write slider `sig` from x (clamped 0–100). 1 if `view` is a slider. */
+/* Write slider `sig` from x (clamped 0-100). 1 if `view` is a slider. */
 int sz_view_slider_set_at(SzView *view, float x);
 
 /* Layout + hit-test (also run inside pump / inject). */
@@ -782,7 +782,7 @@ unsigned sz_ui_session_paints(const SzUiSession *session);
 /* 1 when the next pump must paint (dirty or IO bridge work). */
 int sz_ui_session_needs_paint(SzUiSession *session);
 
-/* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
+/* IO -> UI bridge: post signal writes from completed IO; flushed at pump. */
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value);
 
 /* --- language-facing View / Signal (Scuzz Lang-authored UI) ----------- */
@@ -877,7 +877,7 @@ SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 /* Derived Signal[String] from Signal[Int] (recomputed on get / dump). */
 SzView *sz_lang_view_bind_text(SzSignalStr *sig);
 
-/* Mount factory View → pump → optional scripted tap → snapshot → unmount.
+/* Mount factory View -> pump -> optional scripted tap -> snapshot -> unmount.
  * Construction is a factory so stamp-watch can re-run it. Watches
  * SCUZZ_UI_RELOAD_STAMP when set. On stamp change, loads
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that

@@ -142,7 +142,7 @@ jobs:
         run: ./scripts/ci.sh ios
 
   # macOS release packaging. Skip on push/PR.
-  # Trigger manually: Actions → ci → Run workflow.
+  # Trigger manually: Actions -> ci -> Run workflow.
   macos:
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest

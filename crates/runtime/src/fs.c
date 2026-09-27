@@ -20,7 +20,7 @@
 #include <sys/xattr.h>
 #endif
 
-/* Blessed filesystem IO — live interpreter or TestRuntime mem FS.
+/* Blessed filesystem IO - live interpreter or TestRuntime mem FS.
  * Fake vs live is chosen when the IO runs (after sz_testrt_install in
  * runtime_main), not when the graph is built. */
 

@@ -10,7 +10,7 @@ set -euo pipefail
 PROJ="$(cd "${1:-examples/counter}" && pwd)"
 ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 SHELL_DIR="$(cd "$(dirname "$0")" && pwd)"
-SDK_INSTALL="missing Android SDK — install the Android SDK, then set ANDROID_HOME"
+SDK_INSTALL="missing Android SDK - install the Android SDK, then set ANDROID_HOME"
 
 find_sdk() {
   local root ver
@@ -46,7 +46,7 @@ if [ ! -f "$ANDROID_JAR" ]; then
   exit 1
 fi
 if ! command -v javac >/dev/null 2>&1; then
-  echo "missing JDK — install a JDK, then put javac on PATH" >&2
+  echo "missing JDK - install a JDK, then put javac on PATH" >&2
   exit 1
 fi
 
@@ -64,7 +64,7 @@ OUT="$PROJ/build/android"
 SO="$OUT/lib/arm64-v8a/libscuzz.so"
 APK="$OUT/$NAME.apk"
 if [ ! -f "$SO" ]; then
-  echo "missing $SO — run build_ndk.sh first" >&2
+  echo "missing $SO - run build_ndk.sh first" >&2
   exit 1
 fi
 

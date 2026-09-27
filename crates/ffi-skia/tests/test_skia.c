@@ -46,7 +46,7 @@ int main(void) {
   assert(measured > 0.f);
   assert(sk_font_measure_string("", 8.f) == 0.f);
   assert(sk_paint_get_text_size(paint) == 8.f);
-  /* sk_sw is monospace (5 * 8); real Skia is proportional — both OK. */
+  /* sk_sw is monospace (5 * 8); real Skia is proportional - both OK. */
   (void)measured;
   cell = sk_font_mono_cell(8.f);
   assert(cell > 0.f);

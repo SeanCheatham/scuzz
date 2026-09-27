@@ -4109,7 +4109,7 @@ static void test_clip_paint_contains_overflow(void) {
   assert(sz_view_paint(root, canvas, 80, 80, theme));
   px = sk_surface_peek_pixels(surf, &n);
   assert(px && n == 80 * 80 * 4);
-  /* Scroll child sits at pad 12 inside the 40×40 clip. */
+  /* Scroll child sits at pad 12 inside the 40x40 clip. */
   assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
   /* Same canvas, outside the clip frame: theme background. */
   assert(px_rgb(px, 80, 20, 50, 0xF3, 0xEF, 0xE3));
@@ -4977,7 +4977,7 @@ static void test_scroll_h_pointer_drag(void) {
   ev.y = f.y + 8.f;
   assert(sz_ui_inject_sync(session, &ev));
   ev.pointer_phase = SZ_POINTER_MOVE;
-  ev.x = f.x + 8.f - 20.f; /* finger left → content left */
+  ev.x = f.x + 8.f - 20.f; /* finger left -> content left */
   assert(sz_ui_inject_sync(session, &ev));
   ev.pointer_phase = SZ_POINTER_UP;
   assert(sz_ui_inject_sync(session, &ev));
@@ -5348,7 +5348,7 @@ static void test_mobile_pointer_scroll_lifecycle(void) {
   assert(sz_ui_session_lifecycle(session) == SZ_LIFECYCLE_RESUME);
   assert(sz_ui_pump_sync(session));
 
-  /* Soft keyboard: tap TextField → keyboard visible. */
+  /* Soft keyboard: tap TextField -> keyboard visible. */
   sz_view_layout(root, 200.f, 160.f, theme);
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_POINTER;
@@ -5377,7 +5377,7 @@ static void test_mobile_pointer_scroll_lifecycle(void) {
   ev.y = sz_view_frame(scroll).y + 8.f;
   assert(sz_ui_inject_sync(session, &ev));
   ev.pointer_phase = SZ_POINTER_MOVE;
-  ev.y = sz_view_frame(scroll).y + 8.f - 20.f; /* finger up → content up */
+  ev.y = sz_view_frame(scroll).y + 8.f - 20.f; /* finger up -> content up */
   assert(sz_ui_inject_sync(session, &ev));
   ev.pointer_phase = SZ_POINTER_UP;
   assert(sz_ui_inject_sync(session, &ev));
@@ -16569,7 +16569,7 @@ static void test_text_field_edit(void) {
   assert(sz_view_handle_text_edit(root, "", 1));
   assert(strcmp(sz_signal_str_get(draft), "h") == 0);
 
-  /* Inject path: TEXT_EDIT empty → backspace. */
+  /* Inject path: TEXT_EDIT empty -> backspace. */
   {
     SzUiConfig cfg;
     SzUiSession *session;
@@ -16810,7 +16810,7 @@ static void test_alloc_counter_pump_flat(void) {
       max_count = live_count;
   }
   /* live_count flat = no per-pump leak. live_bytes may grow a few bytes when
-   * the mapped label gains digits (for example "9" → "10"). Same allocation count. */
+   * the mapped label gains digits (for example "9" -> "10"). Same allocation count. */
   assert(live_count == base_count);
   assert(live_bytes <= base_bytes + 32);
   assert(max_count <= base_count + 16);

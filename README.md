@@ -1,6 +1,6 @@
 # Scuzz Lang
 
-Scuzz is a functional programming language for native applications. It takes inspiration from Scala’s concise syntax and Flutter’s approach to user interfaces.
+Scuzz is a functional programming language for native applications. It takes inspiration from Scala's concise syntax and Flutter's approach to user interfaces.
 
 Scuzz includes a compiler, a UI toolkit, and command-line tools to build, run, format, and verify apps. It targets command-line tools, servers, desktop apps, and mobile apps. GUI apps can also run in a browser through WebAssembly.
 

@@ -2,8 +2,8 @@
 
 What is unproven or missing, ranked by how much it threatens the thesis in [`philosophy.md`](philosophy.md).
 
-- **Unknowns** — claims not yet shown within our constraints. A bad outcome invalidates later work.
-- **Known gaps** — settled design. Work is unfinished or deferred on purpose.
+- **Unknowns** - claims not yet shown within our constraints. A bad outcome invalidates later work.
+- **Known gaps** - settled design. Work is unfinished or deferred on purpose.
 
 State what is missing. Do not record what landed. When a gap closes or its assessment changes, update this file. If direction changes, also update `philosophy.md`.
 
@@ -45,14 +45,14 @@ Do not add library publishing, git or registry deps, or `scuzz add`. Path deps s
 
 ### Review loop
 
-1. **IDE subprocesses** — Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Completion, formatting, code actions, semantic tokens, inlay hints, and folding start `scuzz lsp`.
-2. **IDE Check scope** — the Check button does not run the format check or the verify-file check of `scuzz check`.
+1. **IDE subprocesses** - Run, Fuzz, and Diff start `scuzz run`, `scuzz fuzz`, and `scuzz diff`. Completion, formatting, code actions, semantic tokens, inlay hints, and folding start `scuzz lsp`.
+2. **IDE Check scope** - the Check button does not run the format check or the verify-file check of `scuzz check`.
 
 ### Thesis-critical
 
 Resolve these gaps when they prevent ordinary language use or the review loop.
 
-1. **Compile-time performance** — `scuzz check examples/compiler` takes about 4.5 s on this host. `scuzz build --full examples/tyck` takes about 16 s. `scuzz check examples/editor` takes about 19 s cold. Measure these commands after each compile-time change. Further work must reduce the cost of checking and emitted LLVM text.
+1. **Compile-time performance** - `scuzz check examples/compiler` takes about 4.5 s on this host. `scuzz build --full examples/tyck` takes about 16 s. `scuzz check examples/editor` takes about 19 s cold. Measure these commands after each compile-time change. Further work must reduce the cost of checking and emitted LLVM text.
 
 ### Table-stakes
 

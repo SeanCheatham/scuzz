@@ -8,9 +8,9 @@
 # `examples/cli` with tagged bootstrap.
 #
 # Sources (first match):
-#   RELEASE_DIR / RELEASE_TGZ — local tree or tarball
-#   checkout — this file sits next to package_release.sh (default in-repo)
-#   GitHub Release — piped `curl | sh`, or SCUZZ_INSTALL_SOURCE=github
+#   RELEASE_DIR / RELEASE_TGZ - local tree or tarball
+#   checkout - this file sits next to package_release.sh (default in-repo)
+#   GitHub Release - piped `curl | sh`, or SCUZZ_INSTALL_SOURCE=github
 set -eu
 
 DEFAULT_REPO="SeanCheatham/scuzz"
@@ -331,7 +331,7 @@ else
   extract_tgz "$tgz"
 fi
 
-echo "==> installing release tree → $SHARE"
+echo "==> installing release tree -> $SHARE"
 rm -rf "$SHARE"
 mkdir -p "$(dirname "$SHARE")" "$BIN"
 mkdir -p "$SHARE"
