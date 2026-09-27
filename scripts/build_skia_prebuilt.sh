@@ -34,7 +34,7 @@ fi
 
 cd "${SKIA}"
 echo "==> sync deps"
-# Skip emsdk — CPU sk_capi prebuilt does not need WASM toolchains.
+# Skip emsdk - CPU sk_capi prebuilt does not need WASM toolchains.
 GIT_SYNC_DEPS_SKIP_EMSDK=1 python3 tools/git-sync-deps
 
 FONT_DIR="${WORK}/fonts"

@@ -3,9 +3,9 @@
 # Opt out of Skia with SCUZZ_SKIA=sk_sw (in-tree sk_sw).
 #
 # Format: key=value lines
-#   skia_branch=…   milestone used to build the assets
-#   url=…           HTTPS (or file://) tarball; embed {triple} for host selection
-#   hdr_url=…       Skia include/ tarball for the shim relink (release asset;
+#   skia_branch=...   milestone used to build the assets
+#   url=...           HTTPS (or file://) tarball; embed {triple} for host selection
+#   hdr_url=...       Skia include/ tarball for the shim relink (release asset;
 #                   platform-independent)
 #
 # {triple} is replaced with the host triple from scripts/skia_triple.sh
