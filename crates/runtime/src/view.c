@@ -189,7 +189,7 @@ static const char *motion_name(int kind) {
   }
 }
 
-/* 4 → 40, 3 → 55, 2 → 70, 1 → 85. A settled node stays at 100. */
+/* 4 -> 40, 3 -> 55, 2 -> 70, 1 -> 85. A settled node stays at 100. */
 static int motion_appear_pct(const SzView *v) {
   if (!v || v->motion != SZ_MOTION_APPEAR || v->motion_left <= 0)
     return 100;
@@ -4625,7 +4625,7 @@ static void paint_placeholder_mark(SkCanvas *c, SzRect f, uint32_t argb) {
   }
 }
 
-/* Clockwise from the top edge. `frac` is 0–1 of the perimeter. */
+/* Clockwise from the top edge. `frac` is 0-1 of the perimeter. */
 static void paint_ring_frac(SkCanvas *c, SzRect f, float t, float frac,
                             uint32_t argb) {
   float w = f.w;

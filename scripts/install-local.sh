@@ -4,8 +4,8 @@
 # bootstrap.sh compiles examples/cli from the checkout sources.
 # package_release.sh assembles a release tree around that CLI.
 # install.sh installs the tree under PREFIX (default: ~/.local):
-#   PREFIX/share/scuzz — release tree
-#   PREFIX/bin/scuzz   — wrapper that sets SCUZZ_HOME
+#   PREFIX/share/scuzz - release tree
+#   PREFIX/bin/scuzz   - wrapper that sets SCUZZ_HOME
 #
 # Override the install root with PREFIX. Pass --dry-run to print the plan.
 set -euo pipefail

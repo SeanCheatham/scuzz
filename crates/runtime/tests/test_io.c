@@ -5083,7 +5083,7 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
-  /* Json.parse / stringify — Result[Json] / Result[String]; compact ASCII. */
+  /* Json.parse / stringify - Result[Json] / Result[String]; compact ASCII. */
   {
     json_expect_roundtrip(
         "[{\"severity\":\"error\",\"message\":\"x\",\"line\":2,\"column\":3}]");
@@ -5662,7 +5662,7 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
-  /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
+  /* Stream - emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
   {
     SzList *xs = sz_list_cons(
         sz_string_from_cstr("a"),
@@ -7387,7 +7387,7 @@ int main(void) {
     sz_string_free(a);
   }
 
-  /* Closed-form sum vs 0+1+…+n */
+  /* Closed-form sum vs 0+1+...+n */
   {
     assert(sz_oracle_sum_to(-3) == 0);
     assert(sz_oracle_sum_to(0) == 0);

@@ -69,7 +69,7 @@ int main(void) {
   const int h = 32;
 
   if (!sk_gpu_available()) {
-    fputs("missing OpenGL — install mesa (libegl1-mesa-dev libgles2-mesa-dev "
+    fputs("missing OpenGL - install mesa (libegl1-mesa-dev libgles2-mesa-dev "
           "libgl1-mesa-dri)\n",
           stderr);
     return 1;

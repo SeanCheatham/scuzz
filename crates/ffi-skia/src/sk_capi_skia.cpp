@@ -1,4 +1,4 @@
-/* Internal Skia-backed helpers for sk_capi (no sk_capi.h — avoids type
+/* Internal Skia-backed helpers for sk_capi (no sk_capi.h - avoids type
  * collisions). Declarations come from the shared header so the C bridge and
  * these definitions are checked against each other. */
 #include "sk_capi_skia.h"

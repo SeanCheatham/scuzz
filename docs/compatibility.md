@@ -7,7 +7,7 @@ What we keep vs cut. Product locks and language direction: [`philosophy.md`](phi
 | Feature | Stance |
 | --- | --- |
 | Scala-like defs, ADTs, pattern matching | Keep |
-| Local `val` / blocks | Cut — use `for` with `=` / `<-` ([philosophy](philosophy.md#language-direction)) |
+| Local `val` / blocks | Cut - use `for` with `=` / `<-` ([philosophy](philosophy.md#language-direction)) |
 | Traits-as-interfaces, `Option`/`Either`-style enums | Keep |
 | Local type inference, generics | Keep (monomorphize early) |
 | Higher-kinded types | Only where effects need them (`IO`) |

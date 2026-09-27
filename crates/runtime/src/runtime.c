@@ -2975,7 +2975,7 @@ typedef struct Sched {
   int32_t sched_rng; /* Lehmer/MINSTD state in 1..2147483646 */
   int pct_d;         /* race-depth bound (2..5) */
   int pct_k;         /* change-points used (0..7) */
-  int32_t pct_low;   /* next demotion priority (0, -1, -2, …) */
+  int32_t pct_low;   /* next demotion priority (0, -1, -2, ...) */
   int pct_contention; /* 1-based count of ready_count>1 picks */
   int pct_change[SZ_PCT_K_MAX];
   int32_t replay[SZ_PCT_STEP_BOUND]; /* recorded picks for this run */
@@ -4976,7 +4976,7 @@ typedef struct {
 } SzMainArgs;
 
 #if defined(__APPLE__)
-/* Worker finished — main thread may leave the CFRunLoop park. */
+/* Worker finished - main thread may leave the CFRunLoop park. */
 static volatile int g_sz_main_worker_done;
 /* Main has left the park and will join the worker. */
 static volatile int g_sz_main_leaving;

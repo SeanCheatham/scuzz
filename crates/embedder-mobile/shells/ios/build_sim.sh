@@ -75,7 +75,7 @@ else
   rm "$OUT/app.ios.ll.tmp"
 fi
 if ! grep -q 'define i32 @scuzz_app_main(' "$OUT/app.ios.ll"; then
-  echo "missing scuzz_app_main — IR main rename failed" >&2
+  echo "missing scuzz_app_main - IR main rename failed" >&2
   exit 1
 fi
 # This target supplies HTTP clients. HTTP servers need the host transport.

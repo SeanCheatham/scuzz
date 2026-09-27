@@ -88,9 +88,9 @@ uint32_t sz_rc_count(const void *ptr);
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
 /* Sum of RC counts on live RC blocks. Raw sz_alloc blocks add 0. */
 uint64_t sz_alloc_rc_sum(void);
-/* Live bytes and count for one kind (`SZ_RC_RAW` … `SZ_RC_NETSOCK`). */
+/* Live bytes and count for one kind (`SZ_RC_RAW` ... `SZ_RC_NETSOCK`). */
 void sz_alloc_kind_stats(uint32_t kind, size_t *bytes, size_t *count);
-/* Dump key for `kind` (`raw`, `string`, …). Unknown kinds use `raw`. */
+/* Dump key for `kind` (`raw`, `string`, ...). Unknown kinds use `raw`. */
 const char *sz_alloc_kind_name(uint32_t kind);
 /* High-water live_bytes since process start or the last reset. */
 size_t sz_alloc_peak_bytes(void);
@@ -100,7 +100,7 @@ void sz_alloc_reset_stats(void);
 void sz_alloc_mark(void);
 /* live minus the last mark (may be negative). */
 void sz_alloc_delta(int64_t *bytes, int64_t *count);
-/* Write census lines (`live_bytes=…` through kind `name=count:bytes`).
+/* Write census lines (`live_bytes=...` through kind `name=count:bytes`).
  * `mark` 1 snapshots live after the write. Truncates to `cap`. Returns
  * bytes written, not counting the NUL. Live debug dumps also write
  * `[live]` through `sz_alloc_format_live`. */
@@ -142,7 +142,7 @@ SzBuilder *sz_builder_new(void);
 SzBuilder *sz_builder_append(SzBuilder *b, const SzString *s);
 SzString *sz_builder_result(const SzBuilder *b);
 void sz_builder_free(SzBuilder *b);
-/* Closed-form 0+1+…+n for n >= 0. n < 0 is 0. Independent of a Scuzz loop. */
+/* Closed-form 0+1+...+n for n >= 0. n < 0 is 0. Independent of a Scuzz loop. */
 int64_t sz_oracle_sum_to(int64_t n);
 int64_t sz_string_len(const SzString *s); /* byte count (internal buffers; `Str.byteLen`) */
 SzString *sz_string_slice(const SzString *s, int64_t start, int64_t end);
@@ -396,13 +396,13 @@ SzIo *sz_io_race(SzIo *left, SzIo *right);
 SzIo *sz_io_both(SzIo *left, SzIo *right);
 /* Run finalizer after inner succeeds, fails, or is cancelled (race loser). */
 SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer);
-/* First-to-settle of sleep(ms) vs inner. Timer wins → fail "timeout" and cancel inner. */
+/* First-to-settle of sleep(ms) vs inner. Timer wins -> fail "timeout" and cancel inner. */
 SzIo *sz_io_timeout(int64_t ms, SzIo *inner);
 /* Rerun inner until it fails or the fiber is cancelled. Never succeeds. */
 SzIo *sz_io_forever(SzIo *inner);
-/* Run inner once, then n extra times (n<0 → 0 extra). Last success value. */
+/* Run inner once, then n extra times (n<0 -> 0 extra). Last success value. */
 SzIo *sz_io_repeat_n(int64_t n, SzIo *inner);
-/* On failure, retry n extra times (n<0 → 0 extra). Last error if all fail. */
+/* On failure, retry n extra times (n<0 -> 0 extra). Last error if all fail. */
 SzIo *sz_io_retry_n(int64_t n, SzIo *inner);
 /* Run f on each list cell in order. Collects results. Empty is IO.pure(nil).
  * Failure or cancel stops later cells. Callee retains xs and env. */
@@ -470,7 +470,7 @@ SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,
 SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env);
 void sz_lang_resource_free(SzLangResource *res);
 
-/* Ref — mutable cell (single-threaded). */
+/* Ref - mutable cell (single-threaded). */
 struct SzRef {
   void *value;
 };
@@ -490,7 +490,7 @@ SzIo *sz_ref_set_cstr(SzRef *ref, const char *value);
 SzIo *sz_ref_update(SzRef *ref, SzListMapFn fn, void *env); /* IO[Unit] */
 SzIo *sz_ref_update_and_get(SzRef *ref, SzListMapFn fn, void *env); /* IO[A] */
 
-/* Deferred — one-shot promise. */
+/* Deferred - one-shot promise. */
 struct SzDeferred {
   int completed;
   int ok;
@@ -514,7 +514,7 @@ SzIo *sz_deferred_fail(SzDeferred *d, SzError *err); /* IO[Unit] */
 /* Get retains the completed value. Caller drops the run result. */
 SzIo *sz_deferred_get(SzDeferred *d); /* IO[A]; parks until complete under the fiber scheduler */
 
-/* Queue — unbounded FIFO of void*. Items sit in a ring. Waiters are FIFO
+/* Queue - unbounded FIFO of void*. Items sit in a ring. Waiters are FIFO
  * (oldest parked take gets the next offer). */
 struct SzQueue {
   void **items;
@@ -540,7 +540,7 @@ void sz_queue_enqueue(SzQueue *q, void *value);
  * Returns 1 if a waiter was cancelled. The value retain transfers like offer. */
 int sz_queue_cancel_ready_handoff(SzQueue *q, void *value);
 
-/* Stream — finite pull: emit / eval / concat / map / evalMap / filter /
+/* Stream - finite pull: emit / eval / concat / map / evalMap / filter /
  * take / takeWhile / drop / dropWhile / find / exists / range / repeatN /
  * zip / zipWithIndex / interleave / intersperse / grouped / flatten /
  * flatMap / scan / fold / forall / changes / filterNot / mapConcat /
@@ -609,7 +609,7 @@ SzStream *sz_stream_range(int64_t from, int64_t until);
 /* Concat `inner` with itself `n` times. `n` <= 0 is empty. */
 SzStream *sz_stream_repeat_n(SzStream *inner, int64_t n);
 SzStream *sz_stream_zip(SzStream *left, SzStream *right); /* pairs; stops at shorter */
-SzStream *sz_stream_interleave(SzStream *left, SzStream *right); /* a0,b0,a1,b1,… */
+SzStream *sz_stream_interleave(SzStream *left, SzStream *right); /* a0,b0,a1,b1,... */
 SzStream *sz_stream_zip_with_index(SzStream *inner); /* (Int, A) pairs */
 SzStream *sz_stream_intersperse(SzStream *inner, void *sep);
 SzStream *sz_stream_grouped(SzStream *inner, int64_t n); /* Stream[List[A]] */
@@ -725,7 +725,7 @@ SzList *sz_list_pad_to(SzList *xs, int64_t n, void *x);
 int sz_list_non_empty(const SzList *xs);
 /* Boxed ints `[from, until)`. Empty when `until` <= `from`. Cons retains each box. */
 SzList *sz_list_range(int64_t from, int64_t until);
-/* `f(0)` … `f(n-1)`. n <= 0 is empty. `fn` sees a boxed index and returns +1. */
+/* `f(0)` ... `f(n-1)`. n <= 0 is empty. `fn` sees a boxed index and returns +1. */
 SzList *sz_list_tabulate(int64_t n, SzListMapFn fn, void *env);
 /* Insert `x` between cells. Empty or one cell shares. Cons retains `x`. */
 SzList *sz_list_intersperse(SzList *xs, void *x);
@@ -749,7 +749,7 @@ SzList *sz_list_inits(SzList *xs);
 SzList *sz_list_tails(SzList *xs);
 /* Matching cells as (A, B) pairs. Stops at the shorter list. */
 SzList *sz_list_zip(SzList *xs, SzList *ys);
-/* x0, y0, x1, y1, … then the leftover tail of the longer list. */
+/* x0, y0, x1, y1, ... then the leftover tail of the longer list. */
 SzList *sz_list_interleave(SzList *xs, SzList *ys);
 /* Zip and pad the shorter list with `x` or `y`. */
 SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y);
@@ -979,7 +979,7 @@ SzAdt *sz_json_drop_at(SzAdt *j, int64_t i);
 /* Process / args / env / console (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
 SzIo *sz_sys_args(void);
-SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks on poll */
+SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF -> ""; parks on poll */
 SzIo *sz_sys_read(int64_t n); /* IO[String]: n stdin bytes (or fewer at EOF); parks on poll */
 SzIo *sz_sys_write(SzString *s); /* IO[Unit]: stdout bytes, no newline */
 SzIo *sz_sys_exec(SzString *cmd); /* IO[(Int, String, String)] code+stdout+stderr; parks on poll; fails under TestRuntime */
@@ -1070,7 +1070,7 @@ void sz_net_test_http_host_header(const char *host, int port, char *out,
 /* Test-only: 1 when HTTP serve v4 bind uses INADDR_ANY (0.0.0.0). */
 int sz_net_test_serve_v4_is_any(void);
 
-/* TestRuntime — fake interpreters for deterministic scuzz fuzz */
+/* TestRuntime - fake interpreters for deterministic scuzz fuzz */
 void sz_testrt_install(void); /* fake clock+rng+mem FS+sys. SCUZZ_NET_LIVE keeps live Net. */
 void sz_testrt_reset(void);   /* restore live interpreters */
 
@@ -1178,7 +1178,7 @@ void sz_testrt_proc_put(int64_t pid); /* fake Sys.alive table */
 int sz_testrt_proc_alive(int64_t pid); /* 1 if registered */
 void sz_testrt_proc_kill(int64_t pid); /* drop from table */
 
-/* Properties — residual checks armed only under SCUZZ_TESTRT=1 */
+/* Properties - residual checks armed only under SCUZZ_TESTRT=1 */
 void sz_property_stash_a11y(const char *dump);
 int64_t sz_property_a11y_has(SzString *needle);
 SzIo *sz_property_assert(SzString *name, int64_t ok);

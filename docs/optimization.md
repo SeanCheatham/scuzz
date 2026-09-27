@@ -2,12 +2,12 @@
 
 Not a current priority. Properties, sim overlays, and `scuzz fuzz` (including schedule search) live in [`philosophy.md`](philosophy.md). This doc is later work: separate performance from meaning. Search finds a machine-specific execution strategy. The same fuzzer verifies it. Do not start this work until a parallel execution strategy exists (OS threads residual in [`gaps.md`](gaps.md)).
 
-## Why this can wait — and why it can work
+## Why this can wait - and why it can work
 
 Separating *performance* from *meaning* works only if the language pins meaning tightly. Then execution strategy can vary without a change in observable behavior. Existing locks already do that:
 
 - **Closed impurity.** All nondeterminism and external I/O go through blessed `IO`. Observational equivalence is well-defined: same signal store, same a11y dump, same property results.
-- **Deterministic fuzz contract.** `(program + sim, seed/config, event script, schedule seed) → exit code + signal store + a11y dump + property results` is a pure function of its inputs.
+- **Deterministic fuzz contract.** `(program + sim, seed/config, event script, schedule seed) -> exit code + signal store + a11y dump + property results` is a pure function of its inputs.
 - **Properties as the oracle.** Correctness is properties over the signal store + a11y dump. Not timing. Not interleaving order. Not pixels.
 
 When this is in scope, the fuzzer also checks equivalence. Any transform that claims to keep meaning (a parallel execution strategy, a tuned build) must replay the same corpus. Observable outputs must match. Properties must not fail. Classic autotuners (Halide schedules, PGO, BOLT) assume their transforms are safe. Scuzz search-verifies them against the fixed observation surface.
@@ -40,7 +40,7 @@ Fuzz answers "does anything break?" Tuning answers "which strategy is fastest?" 
 - **Virtual time measures nothing.** TestRuntime jumps to the next wakeup. Tuned and untuned programs look identical under it. Cost needs deterministic proxies (instruction counts, allocation accounting) or wall-clock measurement on the target machine. Wall-clock makes the manifest machine-specific.
 - **Fuzz scripts are the wrong workload.** They are adversarial/random, not representative. Tuning measures against a separate **bench corpus**: authored or recorded representative sessions. They reuse the same script line protocol (`tap` / `text` / `type` / `key` / `caret` / `hover` / `secondary` / `pump` / `scroll` / `backspace`).
 
-Pipeline: search generates candidate tunings → measure on bench corpus → fuzz-verify equivalence → emit `*.scuzz_tune` → tuned build applies it.
+Pipeline: search generates candidate tunings -> measure on bench corpus -> fuzz-verify equivalence -> emit `*.scuzz_tune` -> tuned build applies it.
 
 ## Staging (when this is in scope)
 

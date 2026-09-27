@@ -68,7 +68,7 @@ mkdir -p "$OUT/third_party/skia"
 cp -f "$ROOT/third_party/skia/README.md" "$OUT/third_party/skia/README.md"
 cp -f "$ROOT/third_party/skia/PIN" "$OUT/third_party/skia/PIN"
 if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
-  echo "==> SCUZZ_SKIA=sk_sw — release keeps in-tree sk_sw only"
+  echo "==> SCUZZ_SKIA=sk_sw - release keeps in-tree sk_sw only"
 else
   echo "==> fetching pinned Skia prebuilt into release tree"
   unset SCUZZ_SKIA_URL || true

@@ -5766,7 +5766,7 @@ int sz_jev_bool(SzAdt *obj, const char *key) {
   return v ? (int)sz_json_bool_or(v, 0) : 0;
 }
 
-/* `{"op":"drive","name":n,"args":[...]}` → the driver line. Typed args
+/* `{"op":"drive","name":n,"args":[...]}` -> the driver line. Typed args
  * become the same tokens the driver line uses. */
 void sz_script_drive_json(SzAdt *ev) {
   char *buf = NULL;

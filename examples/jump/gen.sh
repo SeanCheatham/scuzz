@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT/src"
 rm -rf "$SRC"
 mkdir -p "$SRC"
-# 227 files × 100 defs × 3 lines = 68100 lines. Names match `scuzz fmt`.
+# 227 files x 100 defs x 3 lines = 68100 lines. Names match `scuzz fmt`.
 n=0
 s=0
 while [ "$s" -lt 227 ]; do

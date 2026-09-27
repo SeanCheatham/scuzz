@@ -6,7 +6,7 @@
 set -euo pipefail
 
 APK="${1:-}"
-MISS="no Android device — connect one or start an emulator, then adb install -r"
+MISS="no Android device - connect one or start an emulator, then adb install -r"
 if [ -z "$APK" ] || [ ! -f "$APK" ]; then
   echo "$MISS <apk>"
   exit 0

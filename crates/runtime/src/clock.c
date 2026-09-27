@@ -291,7 +291,7 @@ int64_t sz_net_retry_after_millis(SzString *value, int64_t now_ms) {
 /* Clock.parse and Clock.zone.
  * The text is a date, T, a time, and a zone.
  * The fraction is optional. Use 1, 2, or 3 digits.
- * The zone is Z or ±HH:MM. The offset is at most 18 hours.
+ * The zone is Z or +/-HH:MM. The offset is at most 18 hours.
  * Years 0 to 9999 use four digits.
  * Other years use one to six digits and no leading zero.
  * A bad text is None. The value is epoch milliseconds.
