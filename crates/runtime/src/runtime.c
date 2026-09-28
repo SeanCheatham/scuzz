@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
+#include "net_transport.h"
 #include "rt_locale.h"
 #include "rt_util.h"
 
@@ -4650,8 +4651,9 @@ static int idle_advance(Sched *s) {
         return 1;
       continue;
     }
-    if (sz_testrt_clock_is_fake()) {
-      /* Do not poll with a wall timeout. Virtual time does not move. */
+    if (sz_testrt_clock_is_fake() && !sz_net_live_replay()) {
+      /* Simulated pollers: do not wait on the wall. Virtual time does not
+       * move until a sleeper wins. */
       pr = poll(pfds, (nfds_t)npoll, 0);
       if (pr < 0 && errno == EINTR)
         continue;
@@ -4670,6 +4672,9 @@ static int idle_advance(Sched *s) {
       now = sz_clock_monotonic_ms_sync();
       return wake_sleepers(s, now);
     }
+    /* Live sockets: wait on the kernel. A virtual skip fires connect
+     * timeouts before loopback TCP finishes. Live replay advances the
+     * fake clock by the wall wait so deadlines stay in virtual ms. */
     if (next < 0)
       timeout_ms = -1;
     else {
@@ -4680,9 +4685,24 @@ static int idle_advance(Sched *s) {
         delta = 86400000;
       timeout_ms = (int)delta;
     }
-    pr = poll(pfds, (nfds_t)npoll, timeout_ms);
-    if (pr < 0 && errno == EINTR)
-      continue;
+    {
+      struct timespec w0;
+      struct timespec w1;
+      int fake = sz_testrt_clock_is_fake();
+      if (fake)
+        clock_gettime(CLOCK_MONOTONIC, &w0);
+      pr = poll(pfds, (nfds_t)npoll, timeout_ms);
+      if (pr < 0 && errno == EINTR)
+        continue;
+      if (fake) {
+        int64_t waited;
+        clock_gettime(CLOCK_MONOTONIC, &w1);
+        waited = (int64_t)(w1.tv_sec - w0.tv_sec) * 1000 +
+                 (int64_t)(w1.tv_nsec - w0.tv_nsec) / 1000000;
+        if (waited > 0)
+          sz_testrt_clock_advance(waited);
+      }
+    }
     now = sz_clock_monotonic_ms_sync();
     if (pr > 0 && wake_pollers(s, pfds, fibs, npoll))
       return 1;
