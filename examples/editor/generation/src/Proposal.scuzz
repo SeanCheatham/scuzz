@@ -1,0 +1,191 @@
+def text(j: Json): String =
+  Models.text(j)
+
+def field(j: Json, key: String): Json =
+  Models.field(j, key)
+
+def str(j: Json, key: String): String =
+  Json.getStr(j, key, "")
+
+def keys(j: Json, names: List[String]): Bool =
+  List.sort(Json.keys(j)) == List.sort(names)
+
+def parse(raw: String, max: Int): IO[Json] =
+  if (Str.byteLen(raw) > max) IO.fail("serialized input exceeds its byte limit") else Json.parse(raw) match {
+  case Result.Ok(j) => IO.pure(j)
+  case Result.Err(e) => IO.fail(Str.concat("invalid proposal JSON: ", e))
+}
+
+def pairsJson(files: List[(String, String)]): Json =
+  Json.Arr(List.map(List.sort(List.map(files, f => f._1)), p => Json.Obj([("path", Json.Str(p)), ("content", Json.Str(List.at(files, List.indexOf(List.map(files, f => f._1), p))._2))])))
+
+def pairs(j: Json): List[(String, String)] =
+  List.map(Json.arr(j), f => (str(f, "path"), str(f, "content")))
+
+def setHash(files: List[(String, String)]): String =
+  Hash.sha256(text(pairsJson(files)))
+
+def safePath(path: String): Bool =
+  Str.matches(path, "^src/[A-Za-z_][A-Za-z0-9_]*\\.scuzz$")
+
+def sourceSetOk(files: List[(String, String)]): Bool =
+  List.nonEmpty(files) && List.len(files) <= 3 && List.len(List.distinct(List.map(files, f => f._1))) == List.len(files) && List.forall(files, f => safePath(f._1)) && List.foldLeft(files, 0, p => p._1 + Str.byteLen(p._2._2)) <= 65536
+
+def inside(root: String, path: String): IO[Unit] =
+  for {
+    base <- Fs.canonicalize(root)
+    resolved <- Fs.canonicalize(Fs.join(root, path)).handleErrorWith(_ => Fs.canonicalize(Fs.dirname(Fs.join(root, path))).map(p => Fs.join(p, Fs.basename(path))))
+    _ <- Models.need(resolved == Fs.join(base, path), Str.concat("unsafe resolved path: ", path))
+  } yield ()
+
+def own(root: String): IO[List[(String, String)]] =
+  Fs.list(Fs.join(root, "src")).flatMap(ents => IO.foreach(List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".scuzz")), e => e._1)), p => Fs.read(Fs.join(Fs.join(root, "src"), p)).map(s => (Fs.join("src", p), s))))
+
+def inputPath(path: String): Bool =
+  path == "scuzz.toml" || Str.startsWith(path, "src/") && Str.endsWith(path, ".scuzz") || !Str.startsWith(path, "build/") && !Str.startsWith(path, ".scuzz/") && (Str.endsWith(path, ".scuzz_scenario") || Str.endsWith(path, ".scuzz_verify")) || Str.startsWith(path, "corpus/") && Str.endsWith(path, ".toml")
+
+def packageInputs(root: String, prefix: String, seen: List[String]): IO[List[(String, String)]] =
+  for {
+    abs <- Fs.canonicalize(root)
+    _ <- Models.need(!List.contains(seen, abs), "dependency cycle")
+    walked <- Fs.walk(root)
+    paths = List.sort(List.map(List.filter(walked, e => !e._2 && inputPath(e._1)), e => e._1))
+    files <- IO.foreach(paths, p => for {
+  resolved <- Fs.canonicalize(Fs.join(root, p))
+  s <- Fs.read(Fs.join(root, p))
+} yield [(Fs.join(prefix, p), s), (Str.concat("resolved/", Fs.join(prefix, p)), resolved)])
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    deps <- IO.foreach(Manifest.parse(toml).deps, d => packageInputs(Drive.depDir(root, d._2), Fs.join(Fs.join(prefix, "dependencies"), d._1), abs :: seen))
+  } yield List.concat(List.flatten(files), List.flatten(deps))
+
+def limits(): Json =
+  Json.Obj([("files", Json.Int(3)), ("source_bytes", Json.Int(65536)), ("input_bytes", Json.Int(1048576)), ("response_bytes", Json.Int(131072)), ("context_tokens", Json.Int(4096)), ("output_tokens", Json.Int(1024)), ("request_ms", Json.Int(900000)), ("session_requests", Json.Int(8)), ("search_iterations", Json.Int(32)), ("cards", Json.Int(2)), ("feedback", Json.Int(16))])
+
+def instructions(): String =
+  "Return one JSON object with v, request, baseline, kind, generator, files. Echo the request identity and baseline. kind is behavior. files is a list of objects with path and content. Replace complete allowed source files. Keep claims, scenarios, dependencies, and manifests unchanged. Use Scuzz, a functional native language. Use def and record. Bind effects with for. Example source: @main def main: IO[Unit] = IO.println(\"Hello\"). A stateful UI uses Signal.make(0), View.bindText(Signal.map(count, n => Str.fromInt(n))), and View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)). Produce one small observable change toward the objective. Do not include markdown, reasoning, or extra fields."
+
+def make(root: String, objective: String, allowed: List[String], compiler: String, feedback: List[Json]): IO[Json] =
+  for {
+    id <- Uuid.v4()
+    sources <- own(root)
+    inputs <- packageInputs(root, "package", [])
+    j = Json.Obj([("v", Json.Int(1)), ("request", Json.Str(id)), ("kind", Json.Str("behavior")), ("objective", Json.Str(objective)), ("baseline", Json.Str(setHash(sources))), ("compiler", Json.Str(compiler)), ("inputs", Json.Str(setHash(inputs))), ("sources", pairsJson(List.filter(sources, f => List.contains(allowed, f._1)))), ("allowed", Json.Arr(List.map(allowed, p => Json.Str(p)))), ("feedback", Json.Arr(List.takeRight(feedback, 16))), ("limits", limits()), ("instructions", Json.Str(instructions()))])
+    _ <- validate(root, j, compiler)
+  } yield j
+
+def stringValue(j: Json): Bool =
+  j match {
+    case Json.Str(_) => true
+    case _ => false
+  }
+
+def arrayValue(j: Json): Bool =
+  j match {
+    case Json.Arr(_) => true
+    case _ => false
+  }
+
+def version(j: Json): Bool =
+  field(j, "v") match {
+    case Json.Int(1) => true
+    case _ => false
+  }
+
+def resolvedOutput(path: String): IO[String] =
+  Fs.canonicalize(path).handleErrorWith(_ => if (Fs.dirname(path) == path) IO.fail("candidate parent is unavailable") else resolvedOutput(Fs.dirname(path)).map(parent => Fs.join(parent, Fs.basename(path))))
+
+def within(path: String, dir: String): Bool =
+  path == dir || Str.startsWith(path, Str.concat(dir, "/"))
+
+def outputSafe(root: String, out: String): IO[Unit] =
+  for {
+    _ <- Models.need(out != "" && Fs.basename(out) != "." && Fs.basename(out) != "..", "invalid candidate output directory")
+    base <- Fs.canonicalize(root)
+    dest <- resolvedOutput(out)
+    inputs <- packageInputs(root, "package", [])
+    packages = List.map(List.filter(inputs, f => Str.startsWith(f._1, "resolved/") && Str.endsWith(f._1, "/scuzz.toml")), f => Fs.dirname(f._2))
+    inbox = Fs.join(base, "build/proposals")
+    ownOutput = Fs.dirname(dest) == inbox || Fs.dirname(dest) == base && !List.contains(["src", "corpus", "build", ".scuzz", "scuzz.toml"], Fs.basename(dest))
+    _ <- Models.need(!List.exists(packages, p => within(p, dest) || within(dest, p) && !(p == base && ownOutput)), "candidate output must be outside package inputs, a new package directory, or a new directory in build/proposals")
+    exists <- Fs.exists(out)
+    _ <- Models.need(exists == 0, "candidate output directory already exists")
+  } yield ()
+
+def validate(root: String, j: Json, compiler: String): IO[Unit] =
+  for {
+    _ <- Models.need(keys(j, ["v", "request", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "feedback", "limits", "instructions"]) && version(j) && str(j, "kind") == "behavior", "invalid request fields or version")
+    _ <- Models.need(Str.matches(str(j, "request"), "^[A-Za-z0-9_-]{1,128}$") && Str.byteLen(str(j, "objective")) > 0 && Str.byteLen(str(j, "objective")) <= 2048 && str(j, "instructions") == instructions(), "invalid objective, request identity, or instructions")
+    _ <- Models.need(Str.matches(compiler, "^[a-f0-9]{64}$") && str(j, "compiler") == compiler, "request compiler does not match")
+    _ <- Models.need(text(field(j, "limits")) == text(limits()) && arrayValue(field(j, "feedback")) && List.len(Json.arr(field(j, "feedback"))) <= 16 && Str.byteLen(text(j)) <= 1048576, "invalid request limits")
+    allow = Json.arr(field(j, "allowed"))
+    paths = List.map(allow, p => Json.strOr(p, ""))
+    _ <- Models.need(List.nonEmpty(paths) && List.forall(allow, p => stringValue(p) && safePath(Json.strOr(p, ""))) && List.len(List.distinct(paths)) == List.len(paths), "invalid allowed source paths")
+    _ <- IO.foreachDiscard(paths, p => inside(root, p))
+    disk <- own(root)
+    inputs <- packageInputs(root, "package", [])
+    _ <- Models.need(str(j, "baseline") == setHash(disk) && text(field(j, "sources")) == text(pairsJson(List.filter(disk, f => List.contains(paths, f._1)))) && str(j, "inputs") == setHash(inputs), "stale request baseline or inputs")
+  } yield ()
+
+def response(j: Json, request: Json): IO[List[(String, String)]] =
+  for {
+    _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "generator", "files"]) && version(j) && str(j, "request") == str(request, "request") && str(j, "baseline") == str(request, "baseline") && str(j, "kind") == str(request, "kind"), "invalid or stale proposal identity")
+    _ <- Models.need(Str.byteLen(str(j, "generator")) > 0 && Str.byteLen(str(j, "generator")) <= 1024 && Str.byteLen(text(j)) <= 131072, "invalid generator or response size")
+    fs = Json.arr(field(j, "files"))
+    _ <- Models.need(List.forall(fs, f => keys(f, ["path", "content"]) && stringValue(field(f, "path")) && stringValue(field(f, "content"))), "invalid replacement fields")
+    files = pairs(field(j, "files"))
+    allowed = List.map(Json.arr(field(request, "allowed")), p => Json.strOr(p, ""))
+    _ <- Models.need(sourceSetOk(files) && List.forall(files, f => List.contains(allowed, f._1)), "proposal exceeds source scope or limit")
+  } yield files
+
+def metadata(request: String, baseline: String, generator: String, files: List[(String, String)]): String =
+  text(Json.Obj([("v", Json.Int(1)), ("request", Json.Str(request)), ("baseline", Json.Str(baseline)), ("kind", Json.Str("behavior")), ("generator", Json.Str(generator)), ("files", Json.Arr(List.map(files, f => Json.Obj([("path", Json.Str(f._1)), ("sha256", Json.Str(Hash.sha256(f._2)))]))))]))
+
+def importFrom(root: String, dir: String, request: Json): IO[List[(String, String)]] =
+  for {
+    _ <- inside(dir, "proposal.json")
+    raw <- Fs.read(Fs.join(dir, "proposal.json"))
+    j <- parse(raw, 131072)
+    _ <- Models.need(keys(j, ["v", "request", "baseline", "kind", "generator", "files"]), "invalid publication fields")
+    fs = Json.arr(field(j, "files"))
+    _ <- Models.need(List.nonEmpty(fs) && List.len(fs) <= 3 && List.forall(fs, f => keys(f, ["path", "sha256"]) && safePath(str(f, "path")) && Str.matches(str(f, "sha256"), "^[a-f0-9]{64}$")), "invalid publication source set")
+    files <- IO.foreach(fs, f => for {
+  path = str(f, "path")
+  _ <- inside(dir, path)
+  _ <- inside(root, path)
+  src <- Fs.read(Fs.join(dir, path))
+  _ <- Models.need(Hash.sha256(src) == str(f, "sha256"), "incomplete proposal publication")
+} yield (path, src))
+    normalized = Json.Obj(List.concat(List.filter(Json.pairs(j), p => p._1 != "files"), [("files", pairsJson(files))]))
+    validated <- response(normalized, request)
+    walked <- Fs.walk(dir)
+    actual = List.sort(List.map(List.filter(walked, e => !e._2), e => e._1))
+    _ <- Models.need(actual == List.sort("proposal.json" :: List.map(files, f => f._1)), "undeclared publication file")
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    sources <- own(root)
+    all <- Drive.collectDeps(root, Manifest.parse(toml).deps, List.map(sources, f => (Str.dropRight(Fs.basename(f._1), 6), f._2)))
+    additions = List.filter(files, f => !List.contains(List.map(sources, d => d._1), f._1))
+    _ <- Models.need(!List.exists(additions, f => List.contains(List.map(all, d => d._1), Str.dropRight(Fs.basename(f._1), 6))), "duplicate module stem")
+  } yield validated
+
+def publish(root: String, out: String, request: Json, reply: Json, compiler: String): IO[Unit] =
+  for {
+    _ <- validate(root, request, compiler)
+    _ <- outputSafe(root, out)
+    files <- response(reply, request)
+    exists <- Fs.exists(out)
+    _ <- Models.need(exists == 0, "candidate output directory already exists")
+    nonce <- Uuid.v4()
+    parent = Fs.dirname(out)
+    _ <- Fs.mkdirs(parent)
+    stage = Fs.join(Fs.dirname(parent), Str.concat(".scuzz-publish-", nonce))
+    _ <- IO.ensure(for {
+  _ <- Fs.mkdirs(Fs.join(stage, "src"))
+  _ <- IO.foreachDiscard(files, f => Fs.write(Fs.join(stage, f._1), f._2))
+  _ <- Fs.write(Fs.join(stage, "proposal.json"), metadata(str(request, "request"), str(request, "baseline"), str(reply, "generator"), files))
+  _ <- importFrom(root, stage, request)
+  _ <- validate(root, request, compiler)
+  finalExists <- Fs.exists(out)
+  _ <- Models.need(finalExists == 0, "candidate output directory appeared during generation")
+  _ <- Fs.rename(stage, out)
+} yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
+  } yield ()

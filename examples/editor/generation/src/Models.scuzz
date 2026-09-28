@@ -1,0 +1,183 @@
+record Model(id: String, name: String, repo: String, revision: String, file: String, bytes: Int, sha256: String, memory: Int, license: String, template: String)
+
+record Backend(platform: String, artifact: String, bytes: Int, sha256: String)
+
+def catalog(): List[Model] =
+  [Model("smollm3-3b", "SmolLM3 3B", "ggml-org/SmolLM3-3B-GGUF", "4965cb60b150737b68a0408c36aeefb65078f894", "SmolLM3-Q4_K_M.gguf", 1915305312, "8334b850b7bd46238c16b0c550df2138f0889bf433809008cc17a8b05761863e", 4294967296, "https://huggingface.co/ggml-org/SmolLM3-3B-GGUF/tree/4965cb60b150737b68a0408c36aeefb65078f894", "jinja;reasoning=off"), Model("qwen2.5-coder-7b", "Qwen2.5-Coder 7B Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "13fb94bfda8c8cf22497dc57b78f391a9acb426a", "qwen2.5-coder-7b-instruct-q4_k_m.gguf", 4683073536, "509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c", 8589934592, "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/blob/13fb94bfda8c8cf22497dc57b78f391a9acb426a/LICENSE", "jinja;reasoning=off")]
+
+def select(id: String): IO[Model] =
+  List.head(List.filter(catalog(), m => m.id == id)) match {
+    case Option.Some(m) => IO.pure(m)
+    case Option.None => IO.fail("unknown model ID; use smollm3-3b or qwen2.5-coder-7b")
+  }
+
+def need(ok: Bool, why: String): IO[Unit] =
+  if (ok) IO.pure(()) else IO.fail(why)
+
+def text(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(s) => s
+    case Result.Err(e) => e
+  }
+
+def quote(s: String): String =
+  Str.concat("'", Str.concat(Str.replace(s, "'", "'\"'\"'"), "'"))
+
+def run(cmd: String): IO[String] =
+  Sys.exec(cmd).flatMap(r => if (r._1 == 0) IO.pure(Str.trim(r._2)) else IO.fail(Str.concat("model operation failed: ", Str.take(r._3, 4096))))
+
+def userCache(): IO[String] =
+  for {
+    xdg <- Sys.getenv("XDG_CACHE_HOME")
+    home <- Sys.getenv("HOME")
+    _ <- need(xdg != "" || home != "", "user cache location is unavailable")
+  } yield if (xdg != "") xdg else Fs.join(home, ".cache")
+
+def cacheRoot(): IO[String] =
+  for {
+    hub <- Sys.getenv("HF_HUB_CACHE")
+    hf <- Sys.getenv("HF_HOME")
+    user <- if (hub != "" || hf != "") IO.pure("") else userCache()
+  } yield if (hub != "") hub else if (hf != "") Fs.join(hf, "hub") else Fs.join(user, "huggingface/hub")
+
+def snapshot(cache: String, m: Model): String =
+  Fs.join(Fs.join(Fs.join(cache, Str.concat("models--", Str.replace(m.repo, "/", "--"))), Fs.join("snapshots", m.revision)), m.file)
+
+def hashFile(path: String): IO[String] =
+  run(Str.concat("if command -v sha256sum >/dev/null 2>&1; then sha256sum ", Str.concat(quote(path), Str.concat("; else shasum -a 256 ", Str.concat(quote(path), "; fi"))))).map(s => Str.take(s, 64))
+
+def verifyFile(path: String, bytes: Int, sha: String): IO[Unit] =
+  for {
+    n <- run(Str.concat("test -f ", Str.concat(quote(path), Str.concat(" && wc -c < ", quote(path)))))
+    _ <- need(Str.toInt(n, -1) == bytes, "artifact is incomplete or has an unexpected size")
+    digest <- hashFile(path)
+    _ <- need(digest == sha, "artifact SHA-256 does not match the pinned catalog")
+  } yield ()
+
+def cached(cache: String, m: Model): IO[Bool] =
+  IO.timeout(60000, verifyFile(snapshot(cache, m), m.bytes, m.sha256)).map(_ => true).handleErrorWith(_ => IO.pure(false))
+
+def modelJson(cache: String, m: Model, ready: Bool): Json =
+  Json.Obj([("id", Json.Str(m.id)), ("name", Json.Str(m.name)), ("repository", Json.Str(m.repo)), ("revision", Json.Str(m.revision)), ("file", Json.Str(m.file)), ("quantization", Json.Str("Q4_K_M")), ("weight_bytes", Json.Int(m.bytes)), ("sha256", Json.Str(m.sha256)), ("license", Json.Str("Apache-2.0")), ("license_url", Json.Str(m.license)), ("memory_bytes", Json.Int(m.memory)), ("context_tokens", Json.Int(4096)), ("output_tokens", Json.Int(1024)), ("template", Json.Str(m.template)), ("cache", Json.Str(cache)), ("path", Json.Str(snapshot(cache, m))), ("status", Json.Str(if (ready) "cached" else "unavailable"))])
+
+def listing(): IO[Json] =
+  for {
+    cache <- cacheRoot()
+    models <- IO.foreach(catalog(), m => cached(cache, m).map(ready => modelJson(cache, m, ready)))
+  } yield Json.Obj([("v", Json.Int(1)), ("models", Json.Arr(models))])
+
+def listCommand(json: Bool): IO[Unit] =
+  listing().flatMap(j => if (json) IO.println(text(j)) else IO.foreach(Json.arr(field(j, "models")), m => IO.println(humanModel(m))).map(_ => ()))
+
+def field(j: Json, key: String): Json =
+  List.head(Json.get(j, key)) match {
+    case Option.Some(v) => v
+    case Option.None => Json.Null()
+  }
+
+def humanModel(m: Json): String =
+  List.foldLeft([Json.getStr(m, "id", ""), Json.getStr(m, "status", ""), "Q4_K_M Apache-2.0", Str.concat("Weight bytes: ", Str.fromInt(Json.getInt(m, "weight_bytes", 0))), Str.concat("Memory budget bytes: ", Str.fromInt(Json.getInt(m, "memory_bytes", 0))), Json.getStr(m, "license_url", ""), Json.getStr(m, "path", "")], "", p => Str.concat(p._1, Str.concat(p._2, """
+""")))
+
+def existingParent(path: String): IO[String] =
+  Fs.exists(path).flatMap(hit => if (hit != 0) IO.pure(path) else if (Fs.dirname(path) == path) IO.fail("cache parent is unavailable") else existingParent(Fs.dirname(path)))
+
+def diskRoom(cache: String, bytes: Int): IO[Unit] =
+  for {
+    parent <- existingParent(cache)
+    free <- run(Str.concat("df -Pk ", Str.concat(quote(parent), " | awk 'NR==2 {print $4}'")))
+    _ <- need(Str.toInt(free, 0) * 1024 >= bytes * 2 + 536870912, "insufficient disk space for the artifact and download overhead")
+  } yield ()
+
+def download(id: String): IO[Json] =
+  for {
+    m <- select(id)
+    cache <- cacheRoot()
+    ready <- cached(cache, m)
+    _ <- if (ready) IO.pure(()) else IO.timeout(3600000, for {
+  tool <- Sys.exec("command -v hf")
+  _ <- need(tool._1 == 0, "install the Hub downloader with: pip install huggingface_hub")
+  _ <- diskRoom(cache, m.bytes)
+  returned <- run(Str.concat("HF_HUB_DISABLE_TELEMETRY=1 HF_HUB_DISABLE_UPDATE_CHECK=1 hf download ", Str.concat(quote(m.repo), Str.concat(" ", Str.concat(quote(m.file), Str.concat(" --revision ", Str.concat(quote(m.revision), Str.concat(" --cache-dir ", Str.concat(quote(cache), " --quiet")))))))))
+  resolved <- Fs.canonicalize(snapshot(cache, m))
+  actual <- Fs.canonicalize(returned)
+  _ <- need(actual == resolved, "downloader returned an unexpected snapshot")
+  _ <- verifyFile(snapshot(cache, m), m.bytes, m.sha256)
+} yield ())
+  } yield Json.Obj([("v", Json.Int(1)), ("result", Json.Str("complete")), ("reused", Json.Bool(ready)), ("model", modelJson(cache, m, true))])
+
+def downloadCommand(id: String, json: Bool): IO[Unit] =
+  download(id).flatMap(j => IO.println(if (json) text(j) else Str.concat("Pinned artifact is complete.\n", humanModel(field(j, "model")))))
+
+def backendBuild(): String =
+  "b11146"
+
+def backendLicense(): String =
+  "https://github.com/ggml-org/llama.cpp/blob/b11146/LICENSE"
+
+def backends(): List[Backend] =
+  [Backend("Linux-x86_64", "llama-b11146-bin-ubuntu-x64.tar.gz", 16998357, "c150306eb16b5ab696f76a8bdf810c35fd98a24e82158742e6fa28f420ff8410"), Backend("Linux-aarch64", "llama-b11146-bin-ubuntu-arm64.tar.gz", 13598346, "4aeda6fe68831547e49b7fa87607383ca5352b3d72ca5f70d52ed265f58c131f"), Backend("Darwin-arm64", "llama-b11146-bin-macos-arm64.tar.gz", 11189714, "1ad3f9eff80edb9dbef4259ad564d1720612ef7eea48fa4afed0e54f5f3d5711"), Backend("Darwin-x86_64", "llama-b11146-bin-macos-x64.tar.gz", 11237237, "305f0e3a17d2c01eb205cd0a62128357f1ec3b55329cb084d94e5ec0115d7a3b")]
+
+def hostBackend(): IO[Backend] =
+  for {
+    os <- run("uname -s")
+    arch <- run("uname -m")
+    found <- List.head(List.filter(backends(), b => b.platform == Str.concat(os, Str.concat("-", arch)))) match {
+  case Option.Some(b) => IO.pure(b)
+  case Option.None => IO.fail("local models are unavailable on this host; use External proposals")
+}
+  } yield found
+
+def backendDir(cache: String, b: Backend): String =
+  Fs.join(Fs.join(cache, Fs.join("scuzz/tools/llama", backendBuild())), b.platform)
+
+def backendExe(dir: String): String =
+  Fs.join(dir, "llama-b11146/llama-server")
+
+def setupBackend(allowDownload: Bool): IO[String] =
+  for {
+    b <- hostBackend()
+    cache <- userCache()
+    dir = backendDir(cache, b)
+    archive = Fs.join(dir, "release.tar.gz")
+    present <- Fs.exists(archive)
+    _ <- if (present != 0) verifyFile(archive, b.bytes, b.sha256) else for {
+  _ <- need(allowDownload, "pinned CPU backend is unavailable; use explicit Download or --download")
+  _ <- diskRoom(cache, b.bytes)
+  _ <- Fs.mkdirs(dir)
+  nonce <- Uuid.v4()
+  pending = Fs.join(dir, Str.concat("release.partial-", nonce))
+  url = Str.concat("https://github.com/ggml-org/llama.cpp/releases/download/b11146/", b.artifact)
+  _ <- IO.ensure(IO.timeout(3600000, for {
+  _ <- run(Str.concat("curl -fL --connect-timeout 30 --max-time 3600 --output ", Str.concat(quote(pending), Str.concat(" ", quote(url)))))
+  _ <- verifyFile(pending, b.bytes, b.sha256)
+  _ <- Fs.rename(pending, archive)
+} yield ()), Fs.delete(pending).handleErrorWith(_ => IO.pure(())))
+} yield ()
+    presentExe <- Fs.exists(backendExe(dir))
+    _ <- if (presentExe != 0) IO.pure(()) else for {
+      nonce <- Uuid.v4()
+      stage = Fs.join(dir, Str.concat("extract-", nonce))
+      _ <- IO.ensure(for {
+        _ <- Fs.mkdirs(stage)
+        _ <- run(Str.concat("tar -xzf ", Str.concat(quote(archive), Str.concat(" -C ", quote(stage)))))
+        _ <- verifyBackend(archive, stage)
+        _ <- Fs.rename(Fs.join(stage, "llama-b11146"), Fs.join(dir, "llama-b11146"))
+      } yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
+    } yield ()
+    _ <- verifyBackend(archive, dir)
+    version <- run(Str.concat(quote(backendExe(dir)), " --version 2>&1"))
+    _ <- need(Str.contains(version, "build 11146, commit 7fe450e19"), "pinned backend version does not match")
+  } yield backendExe(dir)
+
+def verifyBackend(archive: String, dir: String): IO[Unit] =
+  for {
+    members <- run(Str.concat("tar -tvzf ", Str.concat(quote(archive), " | awk '$1 ~ /^-/ {print $NF}'")))
+    files = List.filter(Str.split(members, "\n"), path => path != "")
+    _ <- need(List.nonEmpty(files) && List.len(files) <= 128 && List.forall(files, path => Str.startsWith(path, "llama-b11146/") && !Str.contains(path, "..")), "invalid backend archive files")
+    _ <- IO.foreachDiscard(files, path => for {
+      expected <- run(Str.concat("tar -xOf ", Str.concat(quote(archive), Str.concat(" ", Str.concat(quote(path), " | if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi")))))
+      actual <- hashFile(Fs.join(dir, path))
+      _ <- need(actual == Str.take(expected, 64), "cached backend file does not match the pinned artifact")
+    } yield ())
+  } yield ()

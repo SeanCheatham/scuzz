@@ -1,46 +1,46 @@
-# Current slice: generate toward one objective
+# Current slice: keep the next card ready
 
-Status: implementation in progress.
-
-Implement gate 3 of [`vision.md`](vision.md#3-manage-a-local-model-and-generate-toward-one-objective). Follow the proposal review locks in [`philosophy.md`](philosophy.md#proposal-review).
+Implement gate 4 of [`vision.md`](vision.md#4-keep-the-next-card-ready). Follow the proposal review locks in [`philosophy.md`](philosophy.md#proposal-review).
 
 ## Outcome
 
-A session starts with one objective, allowed source paths, mode, and visible limits. Local generation and External proposals use one frozen request and one validated response. The CLI lists and downloads the fixed models. A finite command publishes one suggestion without opening the editor or changing source.
+The session keeps the displayed card and at most one ready successor. It prepares the successor while the developer reviews the displayed card. Each card keeps its frozen request and evidence. Navigation uses cached data.
 
 ## Scope
 
-Use the existing editor and product CLI. Share the catalog, request, parser, publication, and process lifecycle between the two callers. Use one pinned llama.cpp CPU release. Use the supported Hub downloader and shared immutable cache. Keep the two catalog entries and resource profiles in `vision.md`. Do not add package model settings, a provider framework, or new runtime builtins.
+Use the existing editor, importer, managed generator, and shared compiler review. Keep one generation request and one review job at most. Keep all claims, corpus entries, probe limits, and the 32-case search. Mutation stays an explicit diagnostic action. Add no provider, scheduler, renderer, or evaluator protocol.
 
 ## Work order
 
-1. Verify pinned model metadata and a released CPU backend. Record digests, licenses, templates, and supported host artifacts in one catalog. Prove offline listing and exact shared-cache inspection.
-2. Implement explicit download and backend setup. Check disk, memory, context, and deadlines. Keep partial weights unavailable. Keep shared files after cancellation.
-3. Add the objective form and frozen request contract. Validate source scope, identities, limits, and complete publication. Use the same parser for external and local responses.
-4. Implement one owned inference process on private loopback. Tokenize before generation. Enforce request bounds. Stop owned work on pause, switch, timeout, and exit. Require explicit retry.
-5. Add `scuzz models list`, `scuzz models download`, and `scuzz ide generate-suggestion`. Use bounded JSON output and nonzero failure status. Refuse existing output and stale requests.
-6. Prove fake effects and finite live process, HTTP, publication, cancellation, and cleanup. Run the opt-in real default model proof. Keep unavailable host and model checks explicit.
-7. Update `scuzz docs ide` and the current gaps. Measure generation and readiness. Commit the slice and the next plan after required software proofs pass.
+1. Store each card's frozen request. Validate current objective, model, scope, compiler, full input graph, and limits without invalidating a displayed card when the next request gets a new identity.
+2. Add the bounded queue and separate owned generation and review reservations. Bound inbox inspection and import to queue capacity. Match completion to its reservation and baseline. Leave independent inbox candidates pending while paused.
+3. Reuse baseline checking and replay where the shared compiler supports it. Cache evidence by the full review identity. Reject duplicate source sets and observed outcomes within one baseline and objective. Keep automatic exclusions separate from choices.
+4. Refill after baseline choice or abstention. After acceptance, Undo, objective change, or model change, cancel stale work and refill from the current baseline. Expose the invalidation operation for rule installation. Preserve the displayed identity through repeated and late actions.
+5. Show preparation, ready capacity, explicit retry, and exhausted budget. Keep cancellation and cached navigation responsive.
+6. Prove late responses, registration interruption, repeated Generate, capacity, baseline changes, pause, exit, and independent publication. Measure cold readiness, warm readiness, and cached navigation separately.
+7. Update the existing manual and gaps. Commit the slice and the next plan after the required proofs pass.
 
 ## Acceptance criteria
 
-- [ ] The picker and CLI expose only the two fixed model entries.
-- [ ] Model listing works offline without a downloader or workspace writes.
-- [ ] Downloads verify the pinned size and digest through the shared cache.
-- [ ] Explicit setup shows artifact identity, license, cache, and limits.
-- [ ] One objective and allowed source paths bind each bounded request.
-- [ ] External import works without model tools and rejects partial, stale, or changed publication.
-- [ ] Local and external responses use one strict parser.
-- [ ] Context fit is checked before generation. Truncated output fails.
-- [ ] Pause, timeout, switch, and exit stop only owned work.
-- [ ] The finite command publishes one complete candidate and changes no source.
-- [ ] Hermetic and finite live proofs cover both catalog profiles and failure paths.
-- [ ] A real default model yields a checked proposal and a behavioral witness, or the unavailable external proof remains explicit.
-- [ ] The manual matches setup, limits, commands, and publication.
+- [ ] The displayed card and one ready successor are the only prepared cards.
+- [ ] Each card owns immutable request metadata, files, lane order, and evidence.
+- [ ] One generation request and one review job run at most.
+- [ ] Inbox inspection and import stop at available capacity.
+- [ ] A late completion cannot replace the displayed card or enter a new baseline.
+- [ ] Duplicate source sets and observed outcomes are excluded within the objective and baseline.
+- [ ] Baseline choice and abstention can use the existing successor.
+- [ ] Acceptance and Undo cancel stale work and refill from the new baseline.
+- [ ] Objective and model changes invalidate pending work.
+- [ ] Pause and exit stop owned preparation and inference. Independent producers remain available.
+- [ ] Repeated Generate stays inside queue and durable request limits.
+- [ ] A failure requires an explicit retry. Budget exhaustion has a visible status.
+- [ ] Cached card, workload, and step navigation starts no probe, build, or subprocess.
+- [ ] Current measurements report the 250 ms navigation target honestly.
+- [ ] The manual matches the queue controls and lifecycle.
 
 ## Required validation
 
-Rebuild the checkout product CLI after compiler or CLI changes. Use scratch directories for editor and generation proofs. Export the documented `LIBRARY_PATH` for Skia links.
+Rebuild the checkout product CLI after compiler or CLI changes. Run proofs in scratch directories. Export the documented `LIBRARY_PATH` for Skia links.
 
 ```bash
 ./scripts/bootstrap.sh
@@ -55,8 +55,8 @@ Rebuild the checkout product CLI after compiler or CLI changes. Use scratch dire
 git diff --check
 ```
 
-Add finite controlled lifecycle and command proofs to the existing CI path. Ordinary CI uses no weights or external network. Run real download and CPU inference only in the explicit opt-in proof. Record revision, backend identity, prompt time, generation time, tokens, throughput, memory, and readiness. Do not replace real inference with controlled replies.
+Keep the queue proof hermetic. Add finite Headless cases to the existing CI path. Include source changes, dirty buffers, stale publications, job cancellation, restart, and retained pending external directories. Preserve the controlled generator and exact compiled witness parity proofs. Ordinary CI uses no weights or external network.
 
 ## Completion and continuation
 
-Close implemented gaps after their software criteria pass. Keep model usefulness and human evidence unknown. Replace this plan with gate 4. Commit the slice and next plan. Continue the authorized arc through the complete session endpoint. Do not reduce review limits or remove claims and corpus entries.
+Remove the completed gate from `vision.md` and close its implemented gaps. Keep human usefulness and unavailable platform evidence explicit. Replace this plan with gate 5. Commit the slice and next plan. Continue through the complete-session gate. No refinement pass starts before the full session works.

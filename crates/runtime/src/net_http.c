@@ -7,6 +7,29 @@
 
 /* Shared HTTP values and parsing. These functions do not open sockets. */
 
+int64_t sz_net_http_wait_ms(SzMap *headers, int64_t fallback) {
+  SzList *rows = sz_map_to_list(headers);
+  int64_t result = fallback;
+  for (SzList *it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
+    SzPair *kv = sz_list_head(it);
+    const char *name = sz_string_cstr(kv->left);
+    const char *value = sz_string_cstr(kv->right);
+    if (!sz_net_http_name_equal(name, "Prefer") || strncmp(value, "wait=", 5))
+      continue;
+    const char *digits = value + 5;
+    int64_t seconds = 0;
+    if (!*digits)
+      continue;
+    while (*digits >= '0' && *digits <= '9' && seconds <= 900) {
+      seconds = seconds * 10 + *digits++ - '0';
+    }
+    if (!*digits && seconds > 0 && seconds <= 900)
+      result = seconds * 1000;
+  }
+  sz_release(rows);
+  return result;
+}
+
 void *sz_net_http_resp(int64_t status, SzMap *headers, SzString *body) {
   void *st;
   SzString *b = body;

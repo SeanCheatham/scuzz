@@ -11,12 +11,19 @@
 #include <stdarg.h>
 #include <regex.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <locale.h>
+
+static _Atomic int g_runtime_signal;
+static int g_runtime_signals_armed;
+#ifndef __EMSCRIPTEN__
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2, "interrupt flag must be lock-free");
+#endif
 #if defined(__APPLE__)
 #include <xlocale.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -2909,8 +2916,7 @@ typedef enum FiberState {
   FIB_JOIN,
   FIB_FWAIT,
   FIB_DONE,
-  FIB_CANCELLED,
-  FIB_FINALIZING
+  FIB_CANCELLED
 } FiberState;
 
 typedef enum JoinKind {
@@ -2940,6 +2946,7 @@ typedef struct Fiber {
   int win_slot;       /* JOIN_CANCEL_WAIT: child_val slot to resume with */
   SzError *wait_err;  /* JOIN_CANCEL_WAIT: fail with this instead */
   int result_ok;
+  int cancelling; /* cancellation cleanup can park like normal IO */
   void *result_value;
   SzError *result_error;
   int ui_callback; /* 1 scoped child; 2 handler with no public handle */
@@ -2987,6 +2994,9 @@ typedef struct Sched {
   int32_t pick_log[SZ_PCT_STEP_BOUND]; /* picks made this run */
   int pick_n;
   int bounded;       /* 1 under the fake clock: step and spin limits apply */
+  int signal_owner;
+  int interrupted;
+  char pick_name[64];
 } Sched;
 
 static Sched *g_sched = NULL;
@@ -2999,7 +3009,7 @@ static int32_t g_pick_run_fibers[SZ_PICK_SEG_MAX]; /* fiber count per segment */
 static char g_pick_seg_name[SZ_PICK_SEG_MAX][96];
 static int g_pick_seg_used[SZ_PICK_SEG_MAX];
 static int g_pick_seg_n = -1; /* parsed SCUZZ_SCHED_PICKS segments; -1 = unread */
-static const char *g_pick_run_name = ""; /* drive name of the running IO */
+static char g_pick_run_name[64]; /* name for the next IO scheduler */
 
 /* SCUZZ_SCHED_PICKS: per-run replay segments "name fibers:csv;...". Each
  * run_io arms from the segment for its drive name; nameless runs consume
@@ -3056,7 +3066,7 @@ static void pick_parse_env(void) {
 }
 
 void sz_sched_set_pick_name(const char *name) {
-  g_pick_run_name = name ? name : "";
+  snprintf(g_pick_run_name, sizeof g_pick_run_name, "%s", name ? name : "");
 }
 
 void sz_sched_picks_probe_reset(void) {
@@ -3064,7 +3074,7 @@ void sz_sched_picks_probe_reset(void) {
   FILE *f;
   g_fiber_ordinal = 0;
   g_pick_seg_n = -1;
-  g_pick_run_name = "";
+  g_pick_run_name[0] = 0;
   if (path && path[0]) {
     f = fopen(path, "w");
     if (f)
@@ -3173,7 +3183,7 @@ static void sched_arm_from_env(Sched *s) {
     for (i = 0; i < g_pick_seg_n; i++) {
       if (g_pick_seg_used[i])
         continue;
-      if (strcmp(g_pick_seg_name[i], g_pick_run_name) != 0)
+      if (strcmp(g_pick_seg_name[i], s->pick_name) != 0)
         continue;
       memcpy(s->replay, g_pick_segs[i], sizeof s->replay);
       s->replay_n = g_pick_seg_len[i];
@@ -3385,9 +3395,7 @@ static SzIo *take_unstepped_ensure(SzIo *cur) {
 static void ready_enqueue(Sched *s, Fiber *f) {
   if (!f || f->state == FIB_CANCELLED || f->state == FIB_DONE)
     return;
-  /* Keep FIB_FINALIZING so cancel cleanup does not join_child_done as success. */
-  if (f->state != FIB_FINALIZING)
-    f->state = FIB_READY;
+  f->state = FIB_READY;
   f->ready_next = NULL;
   if (!s->ready_tail) {
     s->ready_head = f;
@@ -3454,7 +3462,7 @@ static void sched_pick_log_flush(const Sched *s) {
   f = fopen(path, "a");
   if (!f)
     return;
-  fprintf(f, "%s %d:", g_pick_run_name[0] ? g_pick_run_name : "-",
+  fprintf(f, "%s %d:", s->pick_name[0] ? s->pick_name : "-",
           (int)g_fiber_ordinal);
   if (s->pick_n <= 0) {
     fprintf(f, "-");
@@ -3766,7 +3774,7 @@ static void fiber_cancel(Sched *s, Fiber *f) {
   SzIo *cleanup;
   Fiber *nested;
   if (!f || f->state == FIB_DONE || f->state == FIB_CANCELLED ||
-      f->state == FIB_FINALIZING)
+      f->cancelling)
     return;
   ready_remove(s, f);
   if (f->state == FIB_SLEEP)
@@ -3816,7 +3824,7 @@ static void fiber_cancel(Sched *s, Fiber *f) {
   }
   fiber_set_cur(f, cleanup);
   if (cleanup) {
-    f->state = FIB_FINALIZING;
+    f->cancelling = 1;
     ready_enqueue(s, f);
   } else {
     fiber_settle_cancelled(s, f);
@@ -3866,6 +3874,7 @@ static void parent_after_cancel_wait(Sched *s, Fiber *p) {
 static void fiber_settle_cancelled(Sched *s, Fiber *f) {
   Fiber *p = f->parent;
   f->state = FIB_CANCELLED;
+  f->cancelling = 0;
   f->result_ok = 0;
   if (!f->result_error)
     f->result_error = fiber_interrupt_err();
@@ -3884,7 +3893,7 @@ static int cancel_sibling_then(Sched *s, Fiber *p, int slot, SzError *err) {
   Fiber *sib = p->children[1 - slot];
   if (sib)
     fiber_cancel(s, sib);
-  if (sib && sib->state == FIB_FINALIZING) {
+  if (sib && sib->cancelling) {
     p->join_kind = JOIN_CANCEL_WAIT;
     p->win_slot = slot;
     p->wait_err = err;
@@ -3968,7 +3977,7 @@ static void fiber_finish(Sched *s, Fiber *f, int ok, void *val, SzError *err) {
   if (f->state == FIB_CANCELLED)
     return;
   fiber_clear_qwait(f);
-  if (f->state == FIB_FINALIZING) {
+  if (f->cancelling) {
     cont_free_all(f->stack);
     f->stack = NULL;
     fiber_set_cur(f, NULL);
@@ -4626,6 +4635,9 @@ static int idle_advance(Sched *s) {
     int npoll;
     int timeout_ms;
     int pr;
+    if (s->signal_owner && !s->interrupted &&
+        atomic_load_explicit(&g_runtime_signal, memory_order_relaxed))
+      return 1;
     if (next >= 0 && next <= now)
       return wake_sleepers(s, now);
     npoll = fill_pollfds(s, pfds, fibs, SZ_POLL_CAP);
@@ -4641,6 +4653,8 @@ static int idle_advance(Sched *s) {
       {
         struct timespec ts;
         struct timespec rem;
+        if (s->signal_owner && !s->interrupted && delta > 50)
+          delta = 50;
         ts.tv_sec = (time_t)(delta / 1000);
         ts.tv_nsec = (long)((delta % 1000) * 1000000L);
         if (nanosleep(&ts, &rem) < 0 && errno == EINTR)
@@ -4685,6 +4699,9 @@ static int idle_advance(Sched *s) {
         delta = 86400000;
       timeout_ms = (int)delta;
     }
+    if (s->signal_owner && !s->interrupted &&
+        (timeout_ms < 0 || timeout_ms > 50))
+      timeout_ms = 50;
     {
       struct timespec w0;
       struct timespec w1;
@@ -4809,16 +4826,26 @@ static SzIoResult run_io(SzIo *root) {
   }
 
   memset(&sched, 0, sizeof(sched));
+  snprintf(sched.pick_name, sizeof sched.pick_name, "%s", g_pick_run_name);
   sched_arm_from_env(&sched);
   g_sched = &sched;
   sched.bounded = bounded;
+  sched.signal_owner = !previous_sched && !bounded && g_runtime_signals_armed;
   sched.root = fiber_new(root, NULL, JOIN_NONE, 0);
   ready_enqueue(&sched, sched.root);
 
   {
     int deadlocked = 0;
     for (;;) {
-      Fiber *f = ready_dequeue(&sched);
+      Fiber *f;
+      if (sched.signal_owner && !sched.interrupted) {
+        int sig = atomic_load_explicit(&g_runtime_signal, memory_order_relaxed);
+        if (sig) {
+          sched.interrupted = sig;
+          fiber_cancel(&sched, sched.root);
+        }
+      }
+      f = ready_dequeue(&sched);
       if (sched.drift_step)
         break;
       if (f) {
@@ -4856,7 +4883,9 @@ static SzIoResult run_io(SzIo *root) {
   {
     int root_settled = sched.root->state == FIB_DONE ||
                        sched.root->state == FIB_CANCELLED;
-  if (sched.drift_step) {
+  if (sched.interrupted) {
+    result.error = sz_error_new(1, "interrupted");
+  } else if (sched.drift_step) {
     char msg[128];
     snprintf(msg, sizeof msg,
              "schedule drift: recorded fiber %d not ready at contention "
@@ -5017,14 +5046,14 @@ static void sz_main_arm_exit(void) {
 #endif
 
 #if defined(__APPLE__)
-static void sz_block_fatal_signals(void);
+static void sz_block_interrupt_signals(void);
 #endif
 
 static void *sz_runtime_main_worker(void *arg) {
   SzMainArgs *a = (SzMainArgs *)arg;
 #if defined(__APPLE__)
   if (a->block_signals)
-    sz_block_fatal_signals();
+    sz_block_interrupt_signals();
 #endif
   if (a->argc > 0 && a->argv)
     sz_sys_set_args(a->argc, a->argv);
@@ -5090,6 +5119,11 @@ static void *sz_runtime_main_worker(void *arg) {
   }
 #endif
 done:
+  {
+    int sig = atomic_load_explicit(&g_runtime_signal, memory_order_relaxed);
+    if (sig)
+      a->rc = 128 + sig;
+  }
 #if defined(__APPLE__)
   g_sz_main_rc = a->rc;
   g_sz_main_worker_done = 1;
@@ -5100,86 +5134,97 @@ done:
   return NULL;
 }
 
-#if defined(__APPLE__)
-/* The main thread parks in CFRunLoop. Keep SIGINT and SIGTERM blocked on
- * every thread. A waiter accepts them and stops the process. The handler
- * stops the process when a library unblocks the signal. A forked child
- * drops this mask before exec. */
-static int g_sz_fatal_armed;
-static sigset_t g_sz_fatal_set;
-
-static void sz_fatal_die(int sig) {
-  sigset_t set;
-  signal(sig, SIG_DFL);
-  sigemptyset(&set);
-  sigaddset(&set, sig);
-  pthread_sigmask(SIG_UNBLOCK, &set, NULL);
-  raise(sig);
-  _exit(128 + sig);
+#ifndef __EMSCRIPTEN__
+/* The scheduler cancels its root and drains finalizers after an interrupt. */
+static void sz_interrupt_signal(int sig) {
+  int expected = 0;
+  atomic_compare_exchange_strong_explicit(&g_runtime_signal, &expected, sig,
+                                         memory_order_relaxed,
+                                         memory_order_relaxed);
 }
 
-static void sz_fatal_signal(int sig) { _exit(128 + sig); }
+#if defined(__APPLE__)
+/* CFRunLoop owns the main thread. A waiter records blocked signals. */
+static sigset_t g_sz_interrupt_set;
 
-static void *sz_fatal_waiter(void *arg) {
+static void *sz_interrupt_waiter(void *arg) {
   (void)arg;
-  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
+  pthread_sigmask(SIG_BLOCK, &g_sz_interrupt_set, NULL);
   for (;;) {
     int sig = 0;
-    if (sigwait(&g_sz_fatal_set, &sig) == 0)
-      sz_fatal_die(sig);
+    if (sigwait(&g_sz_interrupt_set, &sig) == 0)
+      sz_interrupt_signal(sig);
   }
   return NULL;
 }
+#endif
 
-static void sz_arm_fatal_signals(void) {
+static void sz_arm_interrupt_signals(void) {
   struct sigaction sa;
+  const char *tr = getenv("SCUZZ_TESTRT");
+#if defined(__APPLE__)
   pthread_t waiter;
+#endif
+  atomic_store_explicit(&g_runtime_signal, 0, memory_order_relaxed);
+  if (tr && tr[0] == '1') {
+    g_runtime_signals_armed = 0;
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+    return;
+  }
   memset(&sa, 0, sizeof sa);
-  sa.sa_handler = sz_fatal_signal;
+  sa.sa_handler = sz_interrupt_signal;
   sigemptyset(&sa.sa_mask);
-  sigemptyset(&g_sz_fatal_set);
-  sigaddset(&g_sz_fatal_set, SIGINT);
-  sigaddset(&g_sz_fatal_set, SIGTERM);
-  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
+#if defined(__APPLE__)
+  sigemptyset(&g_sz_interrupt_set);
+  sigaddset(&g_sz_interrupt_set, SIGINT);
+  sigaddset(&g_sz_interrupt_set, SIGTERM);
+  pthread_sigmask(SIG_BLOCK, &g_sz_interrupt_set, NULL);
+#endif
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
-  g_sz_fatal_armed = 1;
-  if (pthread_create(&waiter, NULL, sz_fatal_waiter, NULL) == 0)
+  g_runtime_signals_armed = 1;
+#if defined(__APPLE__)
+  if (pthread_create(&waiter, NULL, sz_interrupt_waiter, NULL) == 0)
     pthread_detach(waiter);
+#endif
 }
 
+#if defined(__APPLE__)
 /* Put the mask and the handler back. A library can replace them. */
-static void sz_reassert_fatal_signals(void) {
+static void sz_reassert_interrupt_signals(void) {
   struct sigaction sa;
-  if (!g_sz_fatal_armed)
+  if (!g_runtime_signals_armed)
     return;
   memset(&sa, 0, sizeof sa);
-  sa.sa_handler = sz_fatal_signal;
+  sa.sa_handler = sz_interrupt_signal;
   sigemptyset(&sa.sa_mask);
-  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
+  pthread_sigmask(SIG_BLOCK, &g_sz_interrupt_set, NULL);
   sigaction(SIGINT, &sa, NULL);
   sigaction(SIGTERM, &sa, NULL);
 }
 
-static void sz_fatal_check_pending(void) {
+static void sz_interrupt_check_pending(void) {
   sigset_t pending;
-  if (!g_sz_fatal_armed || sigpending(&pending) != 0)
+  if (!g_runtime_signals_armed || sigpending(&pending) != 0)
     return;
   if (sigismember(&pending, SIGINT))
-    sz_fatal_die(SIGINT);
+    sz_interrupt_signal(SIGINT);
   if (sigismember(&pending, SIGTERM))
-    sz_fatal_die(SIGTERM);
+    sz_interrupt_signal(SIGTERM);
 }
 
-static void sz_block_fatal_signals(void) {
-  pthread_sigmask(SIG_BLOCK, &g_sz_fatal_set, NULL);
+static void sz_block_interrupt_signals(void) {
+  if (g_runtime_signals_armed)
+    pthread_sigmask(SIG_BLOCK, &g_sz_interrupt_set, NULL);
 }
+#endif
 #endif
 
 void sz_exec_child_signals(void) {
-#if defined(__APPLE__)
+#ifndef __EMSCRIPTEN__
   sigset_t set;
-  if (!g_sz_fatal_armed)
+  if (!g_runtime_signals_armed)
     return;
   /* Drop a signal that arrived before exec. Then use the default action
    * and unblock, so the new program still stops on SIGINT and SIGTERM. */
@@ -5216,6 +5261,7 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   sz_runtime_main_worker(&args);
   return args.rc;
 #else
+  sz_arm_interrupt_signals();
   perr = pthread_attr_init(&attr);
   if (perr != 0)
     sz_panic("pthread_attr_init failed");
@@ -5228,7 +5274,6 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   }
 #if defined(__APPLE__)
   g_sz_main_worker_done = 0;
-  sz_arm_fatal_signals();
   args.block_signals = 1;
 #endif
   perr = pthread_create(&thr, &attr, sz_runtime_main_worker, &args);
@@ -5243,8 +5288,8 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
    * dispatched from the worker can run. A plain pthread_join deadlocks
    * with dispatch_sync to the main queue. */
   while (!g_sz_main_worker_done) {
-    sz_reassert_fatal_signals();
-    sz_fatal_check_pending();
+    sz_reassert_interrupt_signals();
+    sz_interrupt_check_pending();
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
   }
   g_sz_main_leaving = 1;

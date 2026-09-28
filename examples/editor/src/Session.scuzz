@@ -1,0 +1,171 @@
+record OwnedJob(token: String, fibers: List[Fiber[Unit]], stopping: Bool)
+
+record SessionS(objective: Signal[String], paths: Signal[String], mode: Signal[Int], model: Signal[String], active: Signal[Int], count: Signal[Int], status: Signal[String], request: Signal[String], epoch: Signal[Int], jobs: Ref[OwnedJob], cache: String, config: Signal[String], models: Signal[List[Json]], elapsed: Signal[Int], started: Signal[Int])
+
+def create(root: String): IO[SessionS] =
+  for {
+    files <- Cards.own(root)
+    cache <- Models.cacheRoot().handleErrorWith(_ => IO.pure("shared cache location is unavailable"))
+    jobs <- Ref.of(OwnedJob("", []: List[Fiber[Unit]], false))
+    savedRaw <- Fs.read(Fs.join(Cards.storage(root), "session.json")).handleErrorWith(_ => IO.pure("{}"))
+    saved <- Proposal.parse(savedRaw, 8192)
+    id = Json.getStr(saved, "model", "smollm3-3b")
+    selected <- Models.select(id)
+    resolved = Proposal.field(saved, "resolved_model")
+    _ <- Models.need(Json.getStr(saved, "mode", "external") != "local" || Proposal.str(resolved, "revision") == selected.revision && Proposal.str(resolved, "sha256") == selected.sha256 && Proposal.str(saved, "backend") == Models.backendBuild(), "saved local model identity does not match the pinned catalog")
+    count = Json.getInt(saved, "requests", 0)
+    _ <- Models.need(count >= 0 && count <= 8 && (List.isEmpty(Json.keys(saved)) || Proposal.version(saved)), "local session metadata is invalid")
+    objective = Json.getStr(saved, "objective", "")
+    paths = if (List.isEmpty(Json.keys(saved))) List.join(List.map(files, f => f._1), ",") else List.join(List.map(Json.arr(Proposal.field(saved, "allowed")), j => Json.strOr(j, "")), ",")
+  } yield SessionS(Signal.make(objective), Signal.make(paths), Signal.make(if (Json.getStr(saved, "mode", "external") == "local") 1 else 0), Signal.make(id), Signal.make(0), Signal.make(count), Signal.make("Set one objective and source scope. Start exports a frozen request. Restored sessions start paused."), Signal.make(""), Signal.make(0), jobs, cache, Signal.make(""), Signal.make(List.map(Models.catalog(), m => Models.modelJson(cache, m, false))), Signal.make(0), Signal.make(0))
+
+def pause(s: SessionS): IO[Unit] =
+  for {
+    _ <- IO.pure(())
+    _ = Signal.set(s.active, 0)
+    _ = Signal.set(s.epoch, Signal.get(s.epoch) + 1)
+    current <- Ref.get(s.jobs)
+    _ <- Ref.update(s.jobs, owner => if (owner.token == current.token) OwnedJob(owner.token, owner.fibers, true) else owner)
+    _ <- stop(s, current.token)
+    _ = restoreModels(s)
+    _ = Signal.set(s.status, "Paused. Owned generation and preparation stop. Inbox candidates remain pending.")
+  } yield ()
+
+def allowed(s: SessionS): List[String] =
+  List.map(Str.split(Signal.get(s.paths), ","), path => Str.trim(path))
+
+def exportRequest(root: String, s: SessionS, fresh: Bool): IO[Json] =
+  for {
+    compiler <- Cards.compilerIdentity()
+    request <- if (fresh) Proposal.make(root, Signal.get(s.objective), allowed(s), compiler, []) else restoredRequest(root, s, compiler)
+    _ <- Fs.mkdirs(Fs.join(root, "build/ide"))
+    _ <- Fs.write(Fs.join(root, "build/ide/request.json"), Proposal.text(request))
+    _ = Signal.set(s.request, Proposal.text(request))
+    _ = Signal.set(s.config, settings(s))
+    _ <- Fs.mkdirs(Cards.storage(root))
+    model <- Models.select(Signal.get(s.model))
+    _ <- Fs.write(Fs.join(Cards.storage(root), "session.json"), Proposal.text(Json.Obj([("v", Json.Int(1)), ("objective", Json.Str(Signal.get(s.objective))), ("allowed", Proposal.field(request, "allowed")), ("mode", Json.Str(if (Signal.get(s.mode) == 0) "external" else "local")), ("model", Json.Str(Signal.get(s.model))), ("resolved_model", Models.modelJson(s.cache, model, false)), ("backend", Json.Str(Models.backendBuild())), ("backend_license", Json.Str(Models.backendLicense())), ("requests", Json.Int(Signal.get(s.count))), ("limits", Proposal.limits())])))
+  } yield request
+
+def start(root: String, s: SessionS): IO[Unit] =
+  for {
+    _ <- pause(s)
+    _ <- exportRequest(root, s, false)
+    _ = Signal.set(s.active, 1)
+    _ = Signal.set(s.status, if (Signal.get(s.mode) == 0) "External proposals: publish a complete directory for build/ide/request.json." else "Local model: review setup and limits, then Download or Generate suggestion.")
+    _ <- if (Signal.get(s.mode) == 1) run(s, _ => inspect(s)) else IO.pure(())
+  } yield ()
+
+def release(s: SessionS, token: String): IO[Unit] =
+  Ref.update(s.jobs, owner => if (owner.token != token) owner else for {
+  _ = restoreModels(s)
+} yield OwnedJob("", []: List[Fiber[Unit]], false))
+
+def stop(s: SessionS, token: String): IO[Unit] =
+  Ref.get(s.jobs).flatMap(owner => if (Str.isEmpty(token) || owner.token != token) IO.pure(()) else if (List.isEmpty(owner.fibers)) IO.sleep(1).flatMap(_ => stop(s, token)) else IO.foreachDiscard(owner.fibers, job => Fiber.interrupt(job)).flatMap(_ => release(s, token)))
+
+def run(s: SessionS, action: Unit => IO[Unit]): IO[Unit] =
+  own(s, _ => IO.pure(()), action)
+
+def own(s: SessionS, before: Unit => IO[Unit], action: Unit => IO[Unit]): IO[Unit] =
+  for {
+    _ <- guard(s)
+    token <- Uuid.v4()
+    ready <- Deferred.empty()
+    handed <- Ref.of(false)
+    epoch = Signal.get(s.epoch)
+    _ <- IO.ensure(for {
+  owner <- Ref.updateAndGet(s.jobs, current => if (Str.isEmpty(current.token) && epoch == Signal.get(s.epoch) && Signal.get(s.active) == 1 && Signal.get(s.config) == settings(s)) OwnedJob(token, []: List[Fiber[Unit]], false) else current)
+  _ <- Models.need(owner.token == token, "one owned preparation operation is already running or the session changed")
+  _ <- before(())
+  started <- Clock.monotonic()
+  _ = Signal.set(s.started, started)
+  _ = Signal.set(s.elapsed, 0)
+  job <- Fiber.fork(IO.ensure(for {
+  _ <- Deferred.get(ready)
+  committed <- Ref.get(handed)
+  _ <- if (!committed || epoch != Signal.get(s.epoch) || Signal.get(s.active) != 1) IO.pure(()) else guard(s).flatMap(_ => action(())).handleErrorWith(e => IO.pure(if (epoch == Signal.get(s.epoch)) Signal.set(s.status, Str.concat(e, "; retry explicitly")) else ()))
+} yield (), release(s, token)))
+  registered <- Ref.updateAndGet(s.jobs, current => if (current.token == token) OwnedJob(token, [job], current.stopping) else current)
+  _ <- Ref.set(handed, registered.token == token && !registered.stopping)
+  _ <- Deferred.complete(ready, ())
+} yield (), Ref.get(handed).flatMap(committed => if (committed) IO.pure(()) else release(s, token)).flatMap(_ => Deferred.complete(ready, ())))
+  } yield ()
+
+def download(root: String, s: SessionS): IO[Unit] =
+  run(s, _ => for {
+  _ <- Models.need(Signal.get(s.mode) == 1, "select Local model mode before Download")
+  id = Signal.get(s.model)
+  model <- Models.select(id)
+  _ <- Generate.resources(model)
+  _ <- Models.hostBackend()
+  _ = Signal.set(s.status, "Downloading the pinned model and CPU backend; setup deadline is 60 minutes. Pause cancels setup.")
+  _ <- Models.download(id)
+  _ <- Models.setupBackend(true)
+  _ <- inspect(s)
+  _ = Signal.set(s.status, "Pinned artifacts are cached. Model inference is not loaded. Generate suggestion starts loading.")
+  _ <- exportRequest(root, s, false)
+} yield ())
+
+def generate(root: String, s: SessionS, after: Unit => IO[Unit]): IO[Unit] =
+  own(s, _ => for {
+  _ <- Models.need(Signal.get(s.mode) == 1, "External proposals mode exports a request; it does not run a producer")
+  _ <- Models.need(Signal.get(s.count) < 8, "session request budget is exhausted")
+  _ = Signal.set(s.count, Signal.get(s.count) + 1)
+  savedRaw <- Fs.read(Fs.join(Cards.storage(root), "session.json"))
+  saved <- Proposal.parse(savedRaw, 8192)
+  _ <- Fs.write(Fs.join(Cards.storage(root), "session.json"), Proposal.text(Json.set(saved, "requests", Json.Int(Signal.get(s.count)))))
+} yield (), _ => for {
+  request <- exportRequest(root, s, true)
+  _ = Signal.set(s.status, "Loading and generating one suggestion. Load deadline: 5 minutes. Request deadline: 15 minutes. Pause cancels work.")
+  measured <- Generate.generate(request, Signal.get(s.model), false, message => IO.pure(for {
+  _ = Signal.set(s.status, message)
+  _ = Signal.set(s.models, List.map(Signal.get(s.models), m => if (Proposal.str(m, "id") == Signal.get(s.model)) Json.set(m, "status", Json.Str("loading")) else m))
+} yield ()))
+  _ = restoreModels(s)
+  reply = Proposal.field(measured, "reply")
+  out = Fs.join(Deck.proposalsDir(root), Str.concat("local-", Proposal.str(request, "request")))
+  _ <- Proposal.publish(root, out, request, reply, Proposal.str(request, "compiler"))
+  _ = Signal.set(s.status, "Suggestion is published. Behavioral checks and witness preparation remain.")
+  _ <- after(())
+} yield ())
+
+def changeModel(s: SessionS, id: String): IO[Unit] =
+  pause(s).map(_ => Signal.set(s.model, id))
+
+def view(root: String, s: SessionS, prepare: Unit => IO[Unit], cancelCard: Unit => Unit): View =
+  View.scroll(View.column(View.text("Objective"), View.textField(s.objective, "One short objective"), View.text("Allowed source paths, separated by commas"), View.textField(s.paths, "src/Main.scuzz"), View.wrap(View.choiceChip(s.mode, 0, "External proposals"), View.choiceChip(s.mode, 1, "Local model")), View.text("Limits: 3 files / 64 KiB; input 1 MiB; response 128 KiB; context 4096; output 1024; request 15 minutes; 8 requests; 32 search cases; 2 cards; 16 feedback records."), View.text("Setup: download 60 minutes; load 5 minutes; memory budget 4 GiB or 8 GiB plus 2 GiB host reserve; at most 4 CPU threads."), View.showWhen(s.mode, 1, View.column(View.each(s.models, m => View.column(View.textButton(Proposal.str(m, "name"), _ => changeModel(s, Proposal.str(m, "id"))), View.code(Models.text(m)))), View.bindText(s.model), View.text(Str.concat("CPU backend: llama.cpp ", Str.concat(Models.backendBuild(), Str.concat("; MIT; ", Models.backendLicense())))), View.button("Inspect cache", _ => run(s, _ => inspect(s)).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Download model", _ => download(root, s).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))))), View.wrap(View.button("Start", _ => IO.pure(cancelCard(())).flatMap(_ => start(root, s)).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Pause session", _ => pause(s).map(_ => cancelCard(()))), View.button("Generate suggestion", _ => generate(root, s, prepare).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Export request", _ => exportRequest(root, s, false).map(_ => ()).handleErrorWith(e => IO.pure(Signal.set(s.status, e))))), View.bindText(s.status), View.bindText(Signal.map(s.elapsed, ms => Str.concat("Owned work elapsed seconds: ", Str.fromInt(ms / 1000)))), View.bindText(Signal.map(s.count, n => Str.concat("Generation requests: ", Str.concat(Str.fromInt(n), " / 8"))))))
+
+def settings(s: SessionS): String =
+  Proposal.text(Json.Obj([("objective", Json.Str(Signal.get(s.objective))), ("allowed", Json.Arr(List.map(allowed(s), p => Json.Str(p)))), ("mode", Json.Int(Signal.get(s.mode))), ("model", Json.Str(Signal.get(s.model)))]))
+
+def guard(s: SessionS): IO[Unit] =
+  Models.need(Signal.get(s.active) == 1 && Signal.get(s.config) == settings(s), "Start or resume the current objective and source scope before preparing or choosing work")
+
+def poll(s: SessionS, cancelCard: Unit => Unit): IO[Unit] =
+  for {
+    _ <- if (Signal.get(s.active) == 1 && Signal.get(s.config) != settings(s)) pause(s).map(_ => cancelCard(())) else IO.pure(())
+    jobs <- Ref.get(s.jobs)
+    _ <- if (!Str.isEmpty(jobs.token)) Clock.monotonic().map(now => Signal.set(s.elapsed, now - Signal.get(s.started))) else IO.pure(())
+  } yield ()
+
+def inspect(s: SessionS): IO[Unit] =
+  for {
+    tool <- Sys.exec("command -v hf")
+    supported <- Models.hostBackend().map(_ => true).handleErrorWith(_ => IO.pure(false))
+    catalog <- IO.foreach(Models.catalog(), m => Models.cached(s.cache, m).map(ready => Json.set(Models.modelJson(s.cache, m, ready), "status", Json.Str(if (ready && supported) "cached" else if (supported && tool._1 == 0) "downloadable" else "unavailable"))))
+    _ = Signal.set(s.models, catalog)
+    _ = Signal.set(s.status, if (!supported) "Local inference is unavailable on this host. Use External proposals." else if (tool._1 != 0) "Complete cached artifacts work offline. To download, install the Hub downloader with: pip install huggingface_hub" else "Cache inspection is complete. Download uses only the selected pinned artifact.")
+  } yield ()
+
+def restoredRequest(root: String, s: SessionS, compiler: String): IO[Json] =
+  (for {
+  raw <- Fs.read(Fs.join(root, "build/ide/request.json"))
+  request <- Proposal.parse(raw, 1048576)
+  _ <- Proposal.validate(root, request, compiler)
+  _ <- Models.need(Proposal.str(request, "objective") == Signal.get(s.objective) && Proposal.text(Proposal.field(request, "allowed")) == Proposal.text(Json.Arr(List.map(allowed(s), path => Json.Str(path)))), "request objective or scope changed")
+} yield request).handleErrorWith(_ => Proposal.make(root, Signal.get(s.objective), allowed(s), compiler, []))
+
+def restoreModels(s: SessionS): Unit =
+  Signal.set(s.models, List.map(Signal.get(s.models), m => if (Proposal.str(m, "status") == "loading") Json.set(m, "status", Json.Str("cached")) else m))
+

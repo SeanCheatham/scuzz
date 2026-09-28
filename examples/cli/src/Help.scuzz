@@ -1,5 +1,5 @@
 def helpRoot(): String =
-  "Scuzz Lang CLI\n\nUsage: scuzz [OPTIONS] <COMMAND>\n\nCommands:\n  build    Compile a Scuzz Lang project to a native executable (LLVM)\n  run      Build and run a Scuzz Lang project\n  watch    Watch sources and rebuild on change (compile loop, not hot reload)\n  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json\n  eval     Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)\n  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)\n  fmt      Format Scuzz Lang sources under src/\n  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation\n  diff     Compare the behavior of a git revision with the working tree under TestRuntime\n  new      Create a new Scuzz Lang project\n  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)\n  devices  List available iOS simulators\n  exec     Send inject ops to a live session started by `scuzz run`\n  package  Package a project for Linux, macOS, Android, iOS, or web\n  docs     Print the technical manual, or one topic, or a kit row\n  help     Print this message or the help of the given subcommand(s)\n\nOptions:\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check` and `scuzz diff` only) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz docs verify\n  scuzz fuzz --iterations 0\n  scuzz run --target headless --exec \"\"\n\nSee: scuzz docs start\n"
+  "Scuzz Lang CLI\n\nUsage: scuzz [OPTIONS] <COMMAND>\n\nCommands:\n  build    Compile a Scuzz Lang project to a native executable (LLVM)\n  run      Build and run a Scuzz Lang project\n  watch    Watch sources and rebuild on change (compile loop, not hot reload)\n  check    Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json\n  eval     Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)\n  lsp      Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)\n  fmt      Format Scuzz Lang sources under src/\n  fuzz     Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation\n  diff     Compare the behavior of a git revision with the working tree under TestRuntime\n  new      Create a new Scuzz Lang project\n  ide      Launch the bundled Scuzz IDE (`[ui]` package in the SDK)\n  models   List cached models or download a fixed model\n  devices  List available iOS simulators\n  exec     Send inject ops to a live session started by `scuzz run`\n  package  Package a project for Linux, macOS, Android, iOS, or web\n  docs     Print the technical manual, or one topic, or a kit row\n  help     Print this message or the help of the given subcommand(s)\n\nOptions:\n      --message-format <MESSAGE_FORMAT>\n          Diagnostic format: human (default) or json (`scuzz check`, `scuzz diff`, and `scuzz models`) [default: human] [possible values: human, json]\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz docs verify\n  scuzz fuzz --iterations 0\n  scuzz run --target headless --exec \"\"\n\nSee: scuzz docs start\n"
 
 def helpEv(): String =
   """Run an IO-only project on the evaluator (typecheck, then interpret; no codegen / link)
@@ -268,6 +268,7 @@ def helpIde(): String =
   """Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
 
 Usage: scuzz ide [OPTIONS] [PATH]
+       scuzz ide generate-suggestion <PACKAGE> --request <JSON> --model <MODEL> --out <NEW-DIRECTORY> [--download]
 
 Arguments:
   [PATH]  [default: .]
@@ -366,5 +367,20 @@ Examples:
   scuzz docs kit Str.len
 
 See: scuzz docs start
+"""
+
+def helpModels(): String =
+  """Manage the two fixed CPU text models.
+
+Usage: scuzz models list [--message-format=json]
+       scuzz models download <MODEL> [--message-format=json]
+
+Models:
+  smollm3-3b          SmolLM3 3B, Q4_K_M, Apache-2.0
+  qwen2.5-coder-7b    Qwen2.5-Coder 7B Instruct, Q4_K_M, Apache-2.0
+
+Listing is offline. Download fetches one pinned artifact through hf.
+Both use HF_HUB_CACHE, then HF_HOME, then the standard user cache.
+Download does not start inference or select a session model.
 """
 

@@ -1269,7 +1269,7 @@ with tempfile.TemporaryDirectory(prefix="scuzz-compiler-cache-") as tmp:
         args = ["build"] if kind == "live" else ["fuzz", "--iterations", "0"]
         subprocess.run([str(compiler), *args, str(pkg)], env=env,
                        check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        paths = [pkg / "build/cache-proof.ll", pkg / ".scuzz" / (
+        paths = [pkg / "build/cache-proof.ll", pkg / "build" / (
             "fingerprint" if kind == "live" else "fingerprint.verify")]
         if kind == "verify":
             paths.extend([pkg / "build/live/cache-proof.ll", pkg / "build/live/fingerprint"])
@@ -1287,5 +1287,26 @@ with tempfile.TemporaryDirectory(prefix="scuzz-compiler-cache-") as tmp:
     after = [run(kind, pkg) for kind, pkg in packages]
     assert all(all(a != b for a, b in zip(old, new)) for old, new in zip(before, after))
     assert after == [run(kind, pkg) for kind, pkg in packages]
-print("compiler cache identity ok")
+    mode = root / "output-mode"
+    (mode / "src").mkdir(parents=True)
+    (mode / "scuzz.toml").write_text('[package]\nname = "output-mode"\n')
+    (mode / "src/Main.scuzz").write_text(
+        'def message(): String = "LIVE"\n'
+        '@main def main: IO[Unit] = IO.println(message())\n')
+    (mode / "mode.scuzz_scenario").write_text(
+        'def Main.message(): String = "VERIFY"\n')
+    def command(*args):
+        result = subprocess.run([str(compiler), *args, str(mode)], env=env,
+                                check=True, capture_output=True, text=True)
+        return result.stdout.splitlines()
+    assert "LIVE" in command("run", "--out-dir", "alternate")
+    command("build", "--verify")
+    live = mode / "alternate/fingerprint"
+    verify = mode / "build/fingerprint.verify"
+    stamps = [p.stat().st_mtime_ns for p in (live, verify)]
+    assert "LIVE" in command("run", "--out-dir", "alternate")
+    assert stamps == [p.stat().st_mtime_ns for p in (live, verify)]
+    assert "LIVE" in command("run")
+    assert (mode / "build/fingerprint").is_file() and not verify.exists()
+print("compiler cache identity and output mode ok")
 PY_COMPILER_CACHE

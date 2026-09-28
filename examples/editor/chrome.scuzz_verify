@@ -243,3 +243,20 @@ def expandedQuestionShowsScope(t: Timeline): Verdict =
 def shortestQuestionOpens(t: Timeline): Verdict =
   Verdict.every(t, i => !visibleReadyCard(t, i) || !Timeline.lastHitHas(t, i, "outlined:Proposals") || Timeline.signalStrHas(t, i, "questionWork", "witness 0") && Timeline.signalInt(t, i, "step") == 1 && Timeline.signalInt(t, i, "playOn") == 0 && Timeline.signalInt(t, i, "evidenceDetails") == 0 && Timeline.a11yHas(t, i, "text:signals *"))
 
+def proposalContract(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "proposalFlow") || Timeline.signalInt(t, i, "proposalBlocked") == 1 && Timeline.fileTextIs(t, i, "proposal-proof/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)"))
+
+def generationOwnership(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "generationFlow") || Timeline.signalInt(t, i, "lazyPause") == 1 && Timeline.signalInt(t, i, "stopped") == 1 && Timeline.signalInt(t, i, "lifecycleIdentity") == 1 && Timeline.signalInt(t, i, "generationPublished") + Timeline.signalInt(t, i, "generationCancelled") == 1 && Timeline.fileTextIs(t, i, "generation-proof/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)"))
+
+def outputsPreserveFrozenInputs(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "outputFlow") || Timeline.signalInt(t, i, "outputAccepted") == 1 && Timeline.fileTextIs(t, i, "proof/src/Main.scuzz", """@main def main: IO[Unit] =
+  IO.println(2)
+"""))
+
+def preparationHasOneOwner(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "ownershipFlow") || Timeline.signalInt(t, i, "ownershipBound") == 1)
+
+def generationReservesItsBudget(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "generationBurst") || Timeline.signalInt(t, i, "burstBound") == 1 && Timeline.fileTextIs(t, i, "generation-burst/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)"))
+

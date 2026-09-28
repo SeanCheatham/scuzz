@@ -2167,7 +2167,9 @@ int sz_ui_session_paste(SzUiSession *session, const char *text) {
 int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_len) {
   if (!session || !out || !out_len)
     return 0;
-  if (session->dirty && !sz_ui_pump_sync(session))
+  /* Use the last completed frame after Stop. */
+  if (session->dirty && session->lifecycle != SZ_LIFECYCLE_STOP &&
+      !sz_ui_pump_sync(session))
     return 0;
   return sk_encode_png(session->surface, out, out_len);
 }
@@ -2175,7 +2177,8 @@ int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_le
 int sz_ui_snapshot_png_sync(SzUiSession *session, const char *path) {
   if (!session || !path)
     return 0;
-  if (session->dirty && !sz_ui_pump_sync(session))
+  if (session->dirty && session->lifecycle != SZ_LIFECYCLE_STOP &&
+      !sz_ui_pump_sync(session))
     return 0;
   return sk_encode_png_to_file(session->surface, path);
 }

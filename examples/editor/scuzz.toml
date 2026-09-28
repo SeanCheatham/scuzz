@@ -11,3 +11,4 @@ tap_button = 0
 
 [dependencies]
 compiler = { path = "../compiler" }
+generation = { path = "generation" }

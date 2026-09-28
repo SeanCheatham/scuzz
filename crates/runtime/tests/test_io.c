@@ -11,6 +11,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include "scuzz_rt.h"
+#include "../src/net_transport.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -34,6 +35,46 @@
 #include <unistd.h>
 
 static SzIo *pure_drop(void *value);
+
+static void *nested_pick_name(void *env) {
+  char name[] = "inner";
+  SzIo *io;
+  SzIoResult result;
+  (void)env;
+  sz_sched_set_pick_name(name);
+  memset(name, 'x', sizeof name - 1);
+  io = sz_io_pure(NULL);
+  result = sz_io_unsafe_run(io);
+  sz_release(io);
+  assert(result.ok);
+  return NULL;
+}
+
+static void test_pick_names(void) {
+  const char *path = "/tmp/scuzz_test_pick_names.txt";
+  char name[] = "outer";
+  char text[256] = {0};
+  SzIo *io;
+  SzIoResult result;
+  FILE *file;
+  setenv("SCUZZ_SCHED_PICKS_DUMP", path, 1);
+  sz_sched_picks_probe_reset();
+  sz_sched_set_pick_name(name);
+  memset(name, 'x', sizeof name - 1);
+  io = sz_io_delay(nested_pick_name, NULL);
+  result = sz_io_unsafe_run(io);
+  sz_release(io);
+  assert(result.ok);
+  file = fopen(path, "r");
+  assert(file);
+  assert(fread(text, 1, sizeof text - 1, file) > 0);
+  fclose(file);
+  assert(strncmp(text, "inner ", 6) == 0);
+  assert(strstr(text, "\nouter "));
+  unsetenv("SCUZZ_SCHED_PICKS_DUMP");
+  sz_sched_picks_probe_reset();
+  remove(path);
+}
 
 void sz_testrt_random_reset_live(void); /* random.c; not in the public header */
 
@@ -1899,6 +1940,7 @@ static void *capture_http_req6(void *arg) {
 typedef struct HttpRespArg {
   int port;
   const char *resp;
+  int delay_ms;
 } HttpRespArg;
 
 static void *ipv4_http_resp(void *arg) {
@@ -1926,6 +1968,8 @@ static void *ipv4_http_resp(void *arg) {
     return NULL;
   n = read(cfd, buf, sizeof buf);
   (void)n;
+  if (a->delay_ms > 0)
+    sleep_us(a->delay_ms * 1000);
   if (write(cfd, a->resp, strlen(a->resp)) < 0) {
     close(cfd);
     return NULL;
@@ -6780,6 +6824,17 @@ int main(void) {
     assert(t1 - t0 < 80);
   }
 
+  /* A parked finalizer keeps cancellation state until it completes. */
+  {
+    sz_testrt_install();
+    r = sz_io_unsafe_run(timeout_drop(1, ensure_drop(sz_io_sleep_ms(300),
+                                                   sz_io_sleep_ms(10))));
+    assert(!r.ok);
+    assert(r.error && !strcmp(sz_string_cstr(r.error->message), "timeout"));
+    sz_error_free(r.error);
+    sz_testrt_reset();
+  }
+
   /* race and timeout resume after the loser's finalizer runs. */
   delay_calls = 0;
   r = sz_io_unsafe_run(fm_drop(
@@ -10601,6 +10656,47 @@ int main(void) {
     assert(t1 - t0 < 2500);
   }
 
+  /* An explicit wait permits a slow reply. IO.timeout still cancels it. */
+  {
+    pthread_t th;
+    HttpRespArg arg = {18585, "HTTP/1.0 200 OK\r\nContent-Length: 4\r\n\r\nslow", 1200};
+    SzString *key = sz_string_from_cstr("Prefer");
+    SzString *value = sz_string_from_cstr("wait=3");
+    SzMap *headers = sz_map_set(NULL, key, value, 1);
+    sz_release(key);
+    sz_release(value);
+    assert(sz_net_http_wait_ms(headers, 1000) == 3000);
+    pthread_create(&th, NULL, ipv4_http_resp, &arg);
+    sleep_us(30000);
+    r = sz_io_unsafe_run(sz_net_http_get(sz_string_from_cstr("http://127.0.0.1:18585/x"), headers));
+    pthread_join(th, NULL);
+    assert(r.ok);
+    SzPair *outer = r.value;
+    SzPair *inner = outer->right;
+    assert(sz_unbox_i64(outer->left) == 200);
+    assert(!strcmp(sz_string_cstr(inner->right), "slow"));
+    sz_release(r.value);
+    arg.port = 18586;
+    pthread_create(&th, NULL, ipv4_http_resp, &arg);
+    sleep_us(30000);
+    r = sz_io_unsafe_run(sz_io_timeout(100, sz_net_http_get(sz_string_from_cstr("http://127.0.0.1:18586/x"), headers)));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error && !strcmp(sz_string_cstr(r.error->message), "timeout"));
+    sz_error_free(r.error);
+    sz_release(headers);
+    const char *bad[] = {"wait=", "wait=-1", "wait=0", "wait=901", "wait=99999999999999999999999", "wait=3oops", "respond-async"};
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+      key = sz_string_from_cstr("pReFeR");
+      value = sz_string_from_cstr(bad[i]);
+      headers = sz_map_set(NULL, key, value, 1);
+      sz_release(key);
+      sz_release(value);
+      assert(sz_net_http_wait_ms(headers, 1000) == 1000);
+      sz_release(headers);
+    }
+  }
+
   /* Live httpGet DNS parks on UDP poll; a peer fiber runs before the answer. */
   {
     pthread_t th;
@@ -10783,7 +10879,7 @@ int main(void) {
   {
     pthread_t th;
     char url[64];
-    HttpRespArg arg;
+    HttpRespArg arg = {0};
     arg.port = 18623;
     arg.resp = "HTTP/1.0 200 OK\r\nLink: </prev>; rel=prev\r\n"
                "Link: </next>; rel=next\r\nlink: </last>; rel=last\r\n"
@@ -10804,7 +10900,7 @@ int main(void) {
     pthread_t th;
     int port = 18623;
     char url[64];
-    HttpRespArg arg;
+    HttpRespArg arg = {0};
     arg.port = port;
     arg.resp = "HTTP/1.0 200 OK\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nok:/x";
     snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
@@ -10824,7 +10920,7 @@ int main(void) {
     pthread_t th;
     int port = 18624;
     char url[64];
-    HttpRespArg arg;
+    HttpRespArg arg = {0};
     arg.port = port;
     arg.resp = "HTTP/1.0 200 OK\r\nTransfer-Encoding : chunked\r\n\r\n"
                "5\r\nok:/x\r\n0\r\n\r\n";
@@ -15048,6 +15144,7 @@ int main(void) {
     remove(path);
   }
 
+  test_pick_names();
   test_driver_growth();
   test_fuzz_probe_closures();
   test_file_timeline();

@@ -3999,7 +3999,7 @@ def paramTy1(p: Param, rest: List[Param], n: String): String =
   }
 
 def tupSlots(ty: String): List[String] =
-  if (!isTupTy(ty)) noStr() else splitPat(Str.slice(ty, 1, Str.len(ty) - 1))
+  Type.tupPartsStr(ty)
 
 def slotInt(tys: List[String], k: Int): Bool =
   if (List.isEmpty(tys)) false else if (k <= 0) isI64Ty(List.at(tys, 0)) else slotInt(List.tail(tys), k - 1)

@@ -1,0 +1,134 @@
+record Process(job: Fiber[Unit], exited: Ref[Bool], url: String, key: String, dir: String)
+
+import Models.Model
+
+def progress(message: String): IO[Unit] =
+  Sys.spawn(Str.concat("printf '%s\\n' ", Str.concat(Models.quote(message), " >&2"))).flatMap(pid => IO.ensure(progressDone(pid), Sys.childClose(pid)))
+
+def progressDone(pid: Int): IO[Unit] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(()) else IO.sleep(10).flatMap(_ => progressDone(pid)))
+
+def resources(m: Model): IO[(Int, Bool)] =
+  for {
+    os <- Models.run("uname -s")
+    ram <- if (os == "Linux") Models.run("awk '/MemAvailable:/ {print $2 * 1024}' /proc/meminfo") else Models.run("vm_stat | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"of\") p=$(i+1)} /Pages free:|Pages inactive:/ {gsub(/\\./,\"\",$NF); n+=$NF} END {printf \"%.0f\\n\",n*p}'")
+    _ <- Models.need(Str.toInt(ram, 0) >= m.memory + 2147483648, "insufficient available memory for the model budget and 2 GiB host reserve")
+    _ <- Models.need(m.bytes + 536870912 <= m.memory, "model and context estimate exceeds its memory budget")
+    cpus <- Models.run("getconf _NPROCESSORS_ONLN")
+    threads = Str.toInt(cpus, 1)
+  } yield (if (threads < 1) 1 else if (threads > 4) 4 else threads, os == "Linux")
+
+def start(exe: String, weights: String, m: Model): IO[Process] =
+  for {
+    profile <- resources(m)
+    nonce <- Uuid.v4()
+    port <- Random.nextInt(30000)
+    cache <- Models.userCache()
+    dir = Fs.join(Fs.join(cache, "scuzz/requests"), nonce)
+    _ <- Fs.mkdirs(dir)
+    exited <- Ref.of(false)
+    limit = if (profile._2) Str.concat("ulimit -v ", Str.concat(Str.fromInt(m.memory / 1024), " || exit 1; ")) else ""
+    prefix = Str.concat(limit, Str.concat("printf '%s' \"$$\" > ", Str.concat(Models.quote(Fs.join(dir, "pid")), "; export MALLOC_ARENA_MAX=2; exec ")))
+    args = List.foldLeft([Models.quote(exe), " -m ", Models.quote(weights), " --host 127.0.0.1 --port ", Str.fromInt(port + 30000), " --api-key ", Models.quote(nonce), " --alias ", Models.quote(nonce), " --device none --n-gpu-layers 0 --no-op-offload --fit off --ctx-size 4096 --n-predict 1024 --parallel 1 --cache-ram 0 --no-context-shift --jinja --reasoning off --no-webui --threads ", Str.fromInt(profile._1), " --threads-batch ", Str.fromInt(profile._1)], "", p => Str.concat(p._1, p._2))
+    logs = Str.concat(" > ", Str.concat(Models.quote(Fs.join(dir, "server.log")), " 2>&1"))
+    job <- Fiber.fork(IO.ensure(Sys.exec(Str.concat(prefix, Str.concat(args, logs))).map(_ => ()), Ref.set(exited, true)))
+    _ <- progress(Str.concat(if (profile._2) "Loading model; inference virtual memory limit is enforced; log: " else "Loading model; this host cannot enforce an inference virtual memory limit; log: ", Fs.join(dir, "server.log")))
+  } yield Process(job, exited, Str.concat("http://127.0.0.1:", Str.fromInt(port + 30000)), nonce, dir)
+
+def stop(p: Process): IO[Unit] =
+  Fiber.interrupt(p.job).flatMap(_ => Fs.delete(p.dir).handleErrorWith(_ => IO.pure(())))
+
+def headers(p: Process): Map[String, String] =
+  Map.set(Map.set(Map.set(Map.empty(), "Authorization", Str.concat("Bearer ", p.key)), "Content-Type", "application/json"), "Prefer", "wait=900")
+
+def ready(p: Process): IO[Unit] =
+  for {
+    dead <- Ref.get(p.exited)
+    diagnostic <- if (dead) Fs.read(Fs.join(p.dir, "server.log")).map(s => Str.takeRight(s, 4096)).handleErrorWith(_ => IO.pure("no startup log")) else IO.pure("")
+    _ <- Models.need(!dead, Str.concat("owned inference process exited; retry explicitly: ", diagnostic))
+    response <- IO.attempt(IO.timeout(1000, Net.httpGet(Str.concat(p.url, "/v1/models"), headers(p))))
+    _ <- response match {
+  case Result.Ok(r) => if (r._1 == 200) Proposal.parse(r._3, 131072).flatMap(j => Models.need(List.exists(Json.arr(Proposal.field(j, "data")), model => Proposal.str(model, "id") == p.key), "inference readiness identity does not match")) else if (r._1 == 503) IO.sleep(100).flatMap(_ => ready(p)) else IO.fail("inference port is occupied or readiness failed")
+  case Result.Err(_) => IO.sleep(100).flatMap(_ => ready(p))
+}
+  } yield ()
+
+def post(p: Process, route: String, body: Json): IO[Json] =
+  for {
+    dead <- Ref.get(p.exited)
+    _ <- Models.need(!dead, "owned inference process exited")
+    result <- Net.httpPost(Str.concat(p.url, route), headers(p), Models.text(body))
+    _ <- Models.need(result._1 == 200, Str.concat("local inference HTTP status ", Str.fromInt(result._1)))
+    j <- Proposal.parse(result._3, 131072)
+  } yield j
+
+def messages(request: Json): Json =
+  Json.Arr([Json.Obj([("role", Json.Str("system")), ("content", Json.Str(Proposal.instructions()))]), Json.Obj([("role", Json.Str("user")), ("content", Json.Str(Models.text(request)))])])
+
+def enumString(value: String): Json =
+  Json.Obj([("type", Json.Str("string")), ("enum", Json.Arr([Json.Str(value)]))])
+
+def schema(request: Json, m: Model): Json =
+  for {
+    item = Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("path"), Json.Str("content")])), ("properties", Json.Obj([("path", Json.Obj([("type", Json.Str("string")), ("enum", Proposal.field(request, "allowed"))])), ("content", Json.Obj([("type", Json.Str("string"))]))]))])
+    files = Json.Obj([("type", Json.Str("array")), ("minItems", Json.Int(1)), ("maxItems", Json.Int(3)), ("items", item)])
+    properties = Json.Obj([("v", Json.Obj([("type", Json.Str("integer")), ("enum", Json.Arr([Json.Int(1)]))])), ("request", enumString(Proposal.str(request, "request"))), ("baseline", enumString(Proposal.str(request, "baseline"))), ("kind", enumString("behavior")), ("generator", enumString(m.id)), ("files", files)])
+  } yield Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr(List.map(["v", "request", "baseline", "kind", "generator", "files"], s => Json.Str(s)))), ("properties", properties)])
+
+def complete(p: Process, request: Json, m: Model): IO[Json] =
+  for {
+    template <- post(p, "/apply-template", Json.Obj([("messages", messages(request))]))
+    prompt = Proposal.str(template, "prompt")
+    _ <- Models.need(prompt != "", "model chat template returned no prompt")
+    tokenized <- post(p, "/tokenize", Json.Obj([("content", Json.Str(prompt)), ("add_special", Json.Bool(true)), ("parse_special", Json.Bool(true))]))
+    count = List.len(Json.arr(Proposal.field(tokenized, "tokens")))
+    _ <- Models.need(count > 0 && count + 1024 <= 4096, "request exceeds the model context; reduce allowed source scope")
+    _ <- progress("Generating one suggestion; deadline is 15 minutes")
+    result <- post(p, "/v1/chat/completions", Json.Obj([("model", Json.Str(p.key)), ("messages", messages(request)), ("stream", Json.Bool(false)), ("max_tokens", Json.Int(1024)), ("temperature", Json.Float(0.2)), ("seed", Json.Int(1)), ("cache_prompt", Json.Bool(false)), ("reasoning_effort", Json.Str("none")), ("response_format", Json.Obj([("type", Json.Str("json_schema")), ("json_schema", Json.Obj([("name", Json.Str("proposal")), ("strict", Json.Bool(true)), ("schema", schema(request, m))]))]))]))
+    choices = Json.arr(Proposal.field(result, "choices"))
+    _ <- Models.need(List.len(choices) == 1, "inference did not return one complete choice")
+    choice = List.at(choices, 0)
+    _ <- Models.need(Proposal.str(choice, "finish_reason") == "stop", "inference response is truncated or incomplete")
+    message = Proposal.field(choice, "message")
+    content = Proposal.str(message, "content")
+    _ <- Models.need(content != "" && !Str.contains(content, "<think>"), "inference returned reasoning instead of proposal source")
+    reply <- Proposal.parse(content, 131072)
+    _ <- Proposal.response(reply, request).handleErrorWith(e => IO.fail(Str.concat(e, Str.concat(": ", Str.take(content, 4096)))))
+    _ <- Models.need(Proposal.str(reply, "generator") == m.id, "generated model identity does not match")
+    pid <- Fs.read(Fs.join(p.dir, "pid"))
+    rss <- Models.run(Str.concat("ps -o rss= -p ", Str.fromInt(Str.toInt(Str.trim(pid), 0)))).handleErrorWith(_ => IO.pure("0"))
+    provenance = Models.text(Json.Obj([("model", Json.Str(m.id)), ("revision", Json.Str(m.revision)), ("sha256", Json.Str(m.sha256)), ("backend", Json.Str(Models.backendBuild())), ("context", Json.Int(4096)), ("output", Json.Int(1024)), ("seed", Json.Int(1)), ("temperature", Json.Float(0.2))]))
+  } yield Json.Obj([("reply", Json.set(reply, "generator", Json.Str(provenance))), ("prompt_tokens", Json.Int(count)), ("usage", Proposal.field(result, "usage")), ("timings", Proposal.field(result, "timings")), ("observed_rss_bytes", Json.Int(Str.toInt(Str.trim(rss), 0) * 1024))])
+
+def generate(request: Json, id: String, allowDownload: Bool, notify: String => IO[Unit]): IO[Json] =
+  for {
+    m <- Models.select(id)
+    _ <- resources(m)
+    _ <- Models.hostBackend()
+    cache <- Models.cacheRoot()
+    cached <- Models.cached(cache, m)
+    _ <- if (cached) IO.pure(()) else Models.need(allowDownload, "selected model is unavailable; use explicit Download or --download").flatMap(_ => Models.download(id).map(_ => ()))
+    exe <- Models.setupBackend(allowDownload)
+    _ <- notify("Loading the selected pinned model. Load deadline: 5 minutes. Pause cancels owned inference.")
+    p <- start(exe, Models.snapshot(cache, m), m)
+    result <- IO.ensure(IO.timeout(900000, IO.timeout(300000, ready(p)).flatMap(_ => notify("Generating one suggestion. Request deadline: 15 minutes. Pause cancels owned inference.")).flatMap(_ => complete(p, request, m))).handleErrorWith(e => Fs.read(Fs.join(p.dir, "server.log")).handleErrorWith(_ => IO.pure("no startup log")).flatMap(log => progress(Str.takeRight(log, 4096))).flatMap(_ => IO.fail(e))), stop(p))
+  } yield result
+
+def command(root: String, file: String, id: String, out: String, allowDownload: Bool): IO[Unit] =
+  for {
+    started <- Clock.monotonic()
+    raw <- Fs.read(file)
+    request <- Proposal.parse(raw, 1048576)
+    compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+    _ <- Proposal.validate(root, request, compiler)
+    _ <- Proposal.outputSafe(root, out)
+    exists <- Fs.exists(out)
+    _ <- Models.need(exists == 0, "candidate output directory already exists")
+    _ <- Models.select(id)
+    measured <- generate(request, id, allowDownload, message => progress(message))
+    reply = Proposal.field(measured, "reply")
+    _ <- Proposal.publish(root, out, request, reply, compiler)
+    ended <- Clock.monotonic()
+    result = Json.Obj([("v", Json.Int(1)), ("result", Json.Str("published")), ("request", Proposal.field(request, "request")), ("model", Json.Str(id)), ("candidate", Json.Str(out)), ("baseline", Proposal.field(request, "baseline")), ("elapsed_ms", Json.Int(ended - started)), ("behavioral_review", Json.Str("pending")), ("accepted", Json.Bool(false)), ("measurement", Json.remove(measured, "reply"))])
+    _ <- IO.println(Models.text(result))
+  } yield ()

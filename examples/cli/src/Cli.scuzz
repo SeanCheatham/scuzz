@@ -14,6 +14,8 @@ enum Cmd:
   case Diff(path: String, rev: String, iterations: Int, seed: Int, json: Bool)
   case New(name: String, path: String, ui: Bool)
   case Ide(path: String, outDir: String, target: String)
+  case Models(action: String, model: String, json: Bool)
+  case Generate(path: String, request: String, model: String, out: String, download: Bool)
   case Exec(path: String, outDir: String, ops: List[String])
   case Package(path: String, outDir: String, target: String)
   case Docs(mode: String, arg: String)
@@ -37,7 +39,7 @@ def isVer(s: String): Bool =
   s == "-V" || s == "--version"
 
 def isCmd(s: String): Bool =
-  s == "devices" || s == "build" || s == "run" || s == "watch" || s == "check" || s == "eval" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "diff" || s == "new" || s == "ide" || s == "exec" || s == "package" || s == "docs" || s == "help"
+  s == "models" || s == "devices" || s == "build" || s == "run" || s == "watch" || s == "check" || s == "eval" || s == "lsp" || s == "fmt" || s == "fuzz" || s == "diff" || s == "new" || s == "ide" || s == "exec" || s == "package" || s == "docs" || s == "help"
 
 def unrec(name: String): String =
   Str.concat("error: unrecognized subcommand '", Str.concat(name, """'
@@ -223,7 +225,7 @@ def takeVal3(args: List[String], j: Int): (String, Int) =
   if (j >= List.len(args)) ("", 0 - 1) else (arg(args, j), j + 1)
 
 def helpOf(topic: String): String =
-  if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "eval") Help.helpEv() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "devices") Help.helpDevices() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "diff") Help.helpDiff() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "exec") Help.helpExec() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
+  if (topic == "models") Help.helpModels() else if (topic == "" || topic == "help") Help.helpRoot() else if (topic == "fmt") Help.helpFmt() else if (topic == "check") Help.helpCheck() else if (topic == "eval") Help.helpEv() else if (topic == "build") Help.helpBuild() else if (topic == "run") Help.helpRun() else if (topic == "devices") Help.helpDevices() else if (topic == "fuzz") Help.helpFuzz() else if (topic == "diff") Help.helpDiff() else if (topic == "new") Help.helpNew() else if (topic == "lsp") Help.helpLsp() else if (topic == "watch") Help.helpWatch() else if (topic == "ide") Help.helpIde() else if (topic == "exec") Help.helpExec() else if (topic == "package") Help.helpPkg() else if (topic == "docs") Help.helpDocs() else unrec(topic)
 
 def show(c: Cmd): String =
   c match {
@@ -242,6 +244,8 @@ def show(c: Cmd): String =
     case Cmd.Diff(path, rev, iterations, seed, json) => Str.concat("diff path=", Str.concat(path, Str.concat(" rev=", Str.concat(rev, Str.concat(" iterations=", Str.concat(Str.fromInt(iterations), Str.concat(" seed=", Str.concat(Str.fromInt(seed), Str.concat(" json=", yn(json))))))))))
     case Cmd.New(name, path, ui) => Str.concat("new name=", Str.concat(name, Str.concat(" path=", Str.concat(path, Str.concat(" ui=", yn(ui))))))
     case Cmd.Ide(path, outDir, target) => Str.concat("ide path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", target)))))
+    case Cmd.Models(action, model, json) => Str.concat("models ", Str.concat(action, Str.concat(" model=", Str.concat(model, Str.concat(" json=", yn(json))))))
+    case Cmd.Generate(path, request, model, out, download) => List.foldLeft(["ide generate-suggestion path=", path, " request=", request, " model=", model, " out=", out, " download=", yn(download)], "", p => Str.concat(p._1, p._2))
     case Cmd.Exec(path, outDir, ops) => Str.concat("exec path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" ops=", joinOps(ops))))))
     case Cmd.Package(path, outDir, target) => Str.concat("package path=", Str.concat(path, Str.concat(" out=", Str.concat(outDir, Str.concat(" target=", target)))))
     case Cmd.Docs(mode, arg) => Str.concat("docs mode=", Str.concat(mode, Str.concat(" arg=", arg)))
@@ -260,6 +264,7 @@ def gateJson(c: Cmd, json: Bool): Cmd =
   if (!json) c else c match {
   case Cmd.Check(path, _) => Cmd.Check(path, true)
   case Cmd.Diff(path, rev, iterations, seed, _) => Cmd.Diff(path, rev, iterations, seed, true)
+  case Cmd.Models(action, model, _) => Cmd.Models(action, model, true)
   case Cmd.Help(_) => c
   case Cmd.Version => c
   case Cmd.Fail(_) => c
@@ -290,7 +295,7 @@ def parseHelp(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Help(""), json) else if (isCmd(arg(args, i)) || arg(args, i) == "") gateJson(Cmd.Help(arg(args, i)), json) else gateJson(Cmd.Fail(unrec(arg(args, i))), json)
 
 def parseCmd(args: List[String], cmd: String, i: Int, json: Bool): Cmd =
-  if (cmd == "devices") parseDevices(args, i, json) else if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "eval") parseEv(args, i, json, "", false) else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", "", false, "", false, "", "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false, false, false, false) else if (cmd == "diff") parseDiff(args, i, json, "", "", 0, 42) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", "") else if (cmd == "exec") parseExec(args, i, json, "", "build", []) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "")
+  if (cmd == "models") parseModels(args, i, json, "", "") else if (cmd == "devices") parseDevices(args, i, json) else if (cmd == "fmt") parseFmt(args, i, json, "", false) else if (cmd == "check") parseCheck(args, i, json, "") else if (cmd == "eval") parseEv(args, i, json, "", false) else if (cmd == "build") parseBuild(args, i, json, "", "build", false, false) else if (cmd == "run") parseRun(args, i, json, "", "build", "", false, "", false, "", "", "") else if (cmd == "watch") parseWatch(args, i, json, "", "build") else if (cmd == "lsp") parseLsp(args, i, json, "") else if (cmd == "fuzz") parseFuzz(args, i, json, "", 32, 42, "", false, false, false, false, false, false, false) else if (cmd == "diff") parseDiff(args, i, json, "", "", 0, 42) else if (cmd == "new") parseNew(args, i, json, "", ".", false) else if (cmd == "ide") parseIde(args, i, json, "", "build", "") else if (cmd == "exec") parseExec(args, i, json, "", "build", []) else if (cmd == "docs") parseDocs(args, i, json) else parsePkg(args, i, json, "", "build", "")
 
 def parseDocs(args: List[String], i: Int, json: Bool): Cmd =
   if (i >= List.len(args)) gateJson(Cmd.Docs("list", ""), json) else parseDocsTok(args, i, json, arg(args, i))
@@ -538,7 +543,7 @@ def ideDone(json: Bool, path: String, outDir: String, target: String): Cmd =
   if (!okRunTarget(target)) Cmd.Fail(badRunTarget(target)) else gateJson(Cmd.Ide(orDot(path), outDir, target), json)
 
 def parseIdeTok(args: List[String], i: Int, json: Bool, path: String, outDir: String, target: String, a: String): Cmd =
-  if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--target" || flagPref(a, "--target")) parseIdeTarget(takeVal(args, i, "--target"), args, json, path, outDir) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, target) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, target) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, target)
+  if (a == "generate-suggestion" && path == "" && outDir == "build" && target == "") parseGenerate(args, i + 1, "", "", "", "", false) else if (isHelp(a)) gateJson(Cmd.Help("ide"), json) else if (a == "--target" || flagPref(a, "--target")) parseIdeTarget(takeVal(args, i, "--target"), args, json, path, outDir) else if (a == "--out-dir" || flagPref(a, "--out-dir")) parseIdeOut(takeVal(args, i, "--out-dir"), args, json, path, target) else if (a == "--message-format" || flagPref(a, "--message-format")) parseIdeMsg(takeVal(args, i, "--message-format"), args, path, outDir, target) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz ide [OPTIONS] [PATH]")) else if (path != "") Cmd.Fail(extraArg(a, "scuzz ide [OPTIONS] [PATH]")) else parseIde(args, i + 1, json, a, outDir, target)
 
 def parseIdeTarget(p: (String, Int), args: List[String], json: Bool, path: String, outDir: String): Cmd =
   p match {
@@ -675,12 +680,14 @@ def dispatch(c: Cmd): IO[Unit] =
     case Cmd.Fuzz(path, it, seed, replay, oracles, noFailFast, relate, differential, live, asan, session) => dispatchFuzz(path, it, seed, replay, relate, noFailFast, oracles, differential, live, asan, session)
     case Cmd.Diff(path, rev, it, seed, json) => dispatchDiff(path, rev, it, seed, json)
     case Cmd.Ide(path, outDir, target) => dispatchIde(path, outDir, target)
+    case Cmd.Models(action, model, json) => if (action == "list") Models.listCommand(json) else Models.downloadCommand(model, json)
+    case Cmd.Generate(path, request, model, out, download) => Generate.command(path, request, model, out, download)
     case Cmd.Exec(path, outDir, ops) => dispatchExec(path, outDir, ops)
     case Cmd.Lsp(path) => Lsp.run(path)
     case Cmd.Docs(mode, topic) => dispatchDocs(mode, topic)
     case Cmd.Help(t) => IO.println(helpOf(t))
     case Cmd.Version => IO.println(Version.banner())
-    case Cmd.Fail(m) => IO.println(m).flatMap(_ => IO.fail("scuzz"))
+    case Cmd.Fail(m) => IO.fail(m)
   }
 
 def dispatchDocs(mode: String, topic: String): IO[Unit] =
@@ -693,10 +700,16 @@ def dispatchPkgHost(path: String, outDir: String, target: String, mac: Bool): IO
   if (target == "linux" && mac || target == "macos" && !mac) IO.println(Drive.hostMismatch(target, mac)).flatMap(_ => IO.fail("package")) else Drive.pkgDir(path, if (Str.startsWith(outDir, "/")) outDir else Drive.joinSlash(path, outDir), if (target == "") Drive.hostTarget(mac) else target)
 
 def dispatchFuzz(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool, differential: Bool, live: Bool, asan: Bool, session: Bool): IO[Unit] =
-  Fs.mkdirs(Drive.joinSlash(path, "build")).flatMap(_ => dispatchFuzz2(path, it, seed, replay, relate, noFailFast, oracles, differential, live, asan, session))
-
-def dispatchFuzz2(path: String, it: Int, seed: Int, replay: String, relate: Bool, noFailFast: Bool, oracles: Bool, differential: Bool, live: Bool, asan: Bool, session: Bool): IO[Unit] =
-  if (relate) Drive.fuzzRelate(path, Drive.joinSlash(path, "build")) else Drive.fuzzDir(path, Drive.joinSlash(path, "build"), it, seed, replay, noFailFast, oracles, differential, live, asan, session)
+  for {
+    base = Drive.joinSlash(path, "build")
+    toml <- Fs.read(Drive.joinSlash(path, "scuzz.toml"))
+    self <- Sys.getenv("SCUZZ_EXECUTABLE")
+    current <- Fs.canonicalize(self).handleErrorWith(_ => IO.pure(self))
+    target <- Fs.canonicalize(Drive.exeName(base, Manifest.parse(toml).name)).handleErrorWith(_ => IO.pure(""))
+    out = if (target != "" && target == current) Fs.join(base, "verify") else base
+    _ <- Fs.mkdirs(out)
+    _ <- if (relate) Drive.fuzzRelate(path, out) else Drive.fuzzDir(path, out, it, seed, replay, noFailFast, oracles, differential, live, asan, session)
+  } yield ()
 
 def dispatchDiff(path: String, rev: String, it: Int, seed: Int, json: Bool): IO[Unit] =
   Fs.exists(Drive.joinSlash(rev, "scuzz.toml")).flatMap(pkg => if (path == "." && pkg != 0) Diff.diffDir(rev, "HEAD", it, seed, json) else Diff.diffDir(path, rev, it, seed, json))
@@ -756,7 +769,7 @@ def watchIoLoop(path: String, out: String, name: String): IO[Unit] =
   Sys.spawn(Drive.shQuote(Drive.exeName(out, name))).flatMap(pid => watchIoPoll(path, out, name, pid))
 
 def watchIoPoll(path: String, out: String, name: String, pid: Int): IO[Unit] =
-  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchIoTick(path, out, name, pid, old)))
+  Fs.read(Drive.fpPath(out)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchIoTick(path, out, name, pid, old)))
 
 def watchIoDrain(pid: Int): IO[Unit] =
   IO.timeout(400, Sys.childRead(pid, 4096)).flatMap(s => Sys.write(s).flatMap(_ => watchIoDrainMore(pid, s))).handleErrorWith(_ => IO.pure(()))
@@ -765,7 +778,7 @@ def watchIoDrainMore(pid: Int, s: String): IO[Unit] =
   if (Str.byteLen(s) < 4096) IO.pure(()) else IO.timeout(50, Sys.childRead(pid, 4096)).flatMap(t => Sys.write(t).flatMap(_ => watchIoDrainMore(pid, t))).handleErrorWith(_ => IO.pure(()))
 
 def watchIoTick(path: String, out: String, name: String, pid: Int, old: String): IO[Unit] =
-  Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchIoTick2(path, out, name, pid, old, now)))
+  Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(out)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchIoTick2(path, out, name, pid, old, now)))
 
 def watchIoTick2(path: String, out: String, name: String, pid: Int, old: String, now: String): IO[Unit] =
   Sys.alive(pid).flatMap(live => watchIoTick3(path, out, name, pid, old, now, live))
@@ -774,7 +787,7 @@ def watchIoTick3(path: String, out: String, name: String, pid: Int, old: String,
   if (now != old) Sys.kill(pid).flatMap(_ => Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name))) else if (live == 0) watchIoIdle(path, out, name) else watchIoPoll(path, out, name, pid)
 
 def watchIoIdle(path: String, out: String, name: String): IO[Unit] =
-  Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => IO.sleep(400).flatMap(_ => Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchIoIdle2(path, out, name, old, now)))))
+  Fs.read(Drive.fpPath(out)).handleErrorWith(_ => IO.pure("")).flatMap(old => IO.sleep(400).flatMap(_ => Drive.emitDir(path, out, false).flatMap(_ => Fs.read(Drive.fpPath(out)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchIoIdle2(path, out, name, old, now)))))
 
 def watchIoIdle2(path: String, out: String, name: String, old: String, now: String): IO[Unit] =
   if (now != old) Drive.linkOnly(false, name, out).flatMap(_ => watchIoLoop(path, out, name)) else watchIoIdle(path, out, name)
@@ -811,10 +824,10 @@ def watchUiHold(path: String, out: String, target: String, name: String, gen: In
   Drive.srcText(path).flatMap(text => watchUiPoll(path, out, target, name, gen, pid, text))
 
 def watchUiSame(path: String, out: String, target: String, name: String, gen: Int, pid: Int, hold: String, text: String): IO[Bool] =
-  if (hold != "" && text == hold) watchIoDrain(pid).flatMap(_ => watchUiPoll(path, out, target, name, gen, pid, hold)) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, target, name, gen, pid, old, text)))
+  if (hold != "" && text == hold) watchIoDrain(pid).flatMap(_ => watchUiPoll(path, out, target, name, gen, pid, hold)) else Fs.read(Drive.fpPath(out)).handleErrorWith(_ => IO.pure("")).flatMap(old => watchIoDrain(pid).flatMap(_ => watchUiTick(path, out, target, name, gen, pid, old, text)))
 
 def watchUiTick(path: String, out: String, target: String, name: String, gen: Int, pid: Int, old: String, text: String): IO[Bool] =
-  watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, target, name, gen, pid, text) else Fs.read(Drive.fpPath(path)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, target, name, gen, pid, old, now)))
+  watchUiCompile(path, out).flatMap(ok => if (!ok) watchUiPoll(path, out, target, name, gen, pid, text) else Fs.read(Drive.fpPath(out)).handleErrorWith(_ => IO.pure("")).flatMap(now => watchUiTick2(path, out, target, name, gen, pid, old, now)))
 
 def watchUiCompile(path: String, out: String): IO[Bool] =
   Drive.emitDir(path, out, false).map(_ => true).handleErrorWith(_ => IO.println("Build fails. Fix the source and retry.").map(_ => false))
@@ -960,4 +973,32 @@ def writeNewCorpus(dir: String, ui: Bool): IO[Unit] =
 
 def printNew(dir: String, ui: Bool): IO[Unit] =
   IO.println(if (ui) Str.concat("created ", Str.concat(dir, " (ui) - next: scuzz fuzz --iterations 0 && scuzz run --target headless --exec \"\"")) else Str.concat("created ", Str.concat(dir, " - next: scuzz fuzz --iterations 0 && scuzz run")))
+
+def modelKnown(id: String): Bool =
+  List.exists(Models.catalog(), m => m.id == id)
+
+def parseModels(args: List[String], i: Int, json: Bool, action: String, model: String): Cmd =
+  if (i >= List.len(args)) modelsDone(action, model, json) else parseModelsTok(args, i, json, action, model, arg(args, i))
+
+def modelsDone(action: String, model: String, json: Bool): Cmd =
+  if (action == "list" && model == "" || action == "download" && modelKnown(model)) Cmd.Models(action, model, json) else Cmd.Fail("Usage: scuzz models list [--message-format=json] | download <smollm3-3b|qwen2.5-coder-7b>")
+
+def parseModelsTok(args: List[String], i: Int, json: Bool, action: String, model: String, a: String): Cmd =
+  if (isHelp(a)) Cmd.Help("models") else if (a == "--message-format" || flagPref(a, "--message-format")) parseModelsFmt(takeVal(args, i, "--message-format"), args, action, model) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz models list | download <MODEL>")) else if (action == "" && (a == "list" || a == "download")) parseModels(args, i + 1, json, a, model) else if (action == "download" && model == "" && modelKnown(a)) parseModels(args, i + 1, json, action, a) else Cmd.Fail(extraArg(a, "scuzz models list | download <MODEL>"))
+
+def parseModelsFmt(p: (String, Int), args: List[String], action: String, model: String): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal("--message-format")) else if (v == "json" || v == "human") parseModels(args, n, v == "json", action, model) else Cmd.Fail(badFmt(v))
+  }
+
+def parseGenerate(args: List[String], i: Int, path: String, request: String, model: String, out: String, download: Bool): Cmd =
+  if (i >= List.len(args)) if (path != "" && request != "" && modelKnown(model) && out != "") Cmd.Generate(path, request, model, out, download) else Cmd.Fail("Usage: scuzz ide generate-suggestion <PACKAGE> --request <JSON> --model <MODEL> --out <NEW-DIRECTORY> [--download]") else parseGenerateTok(args, i, path, request, model, out, download, arg(args, i))
+
+def parseGenerateTok(args: List[String], i: Int, path: String, request: String, model: String, out: String, download: Bool, a: String): Cmd =
+  if (isHelp(a)) Cmd.Help("ide") else if (a == "--download" && !download) parseGenerate(args, i + 1, path, request, model, out, true) else if (a == "--request" || flagPref(a, "--request") || a == "--model" || flagPref(a, "--model") || a == "--out" || flagPref(a, "--out")) parseGenerateValue(takeVal(args, i, if (flagPref(a, "--request") || a == "--request") "--request" else if (flagPref(a, "--model") || a == "--model") "--model" else "--out"), args, path, request, model, out, download, a) else if (isFlag(a) || path != "") Cmd.Fail(extraArg(a, "scuzz ide generate-suggestion <PACKAGE> [OPTIONS]")) else parseGenerate(args, i + 1, a, request, model, out, download)
+
+def parseGenerateValue(p: (String, Int), args: List[String], path: String, request: String, model: String, out: String, download: Bool, flag: String): Cmd =
+  p match {
+    case (v, n) => if (n < 0) Cmd.Fail(needVal(flag)) else if ((flag == "--request" || flagPref(flag, "--request")) && request == "") parseGenerate(args, n, path, v, model, out, download) else if ((flag == "--model" || flagPref(flag, "--model")) && model == "" && modelKnown(v)) parseGenerate(args, n, path, request, v, out, download) else if ((flag == "--out" || flagPref(flag, "--out")) && out == "") parseGenerate(args, n, path, request, model, v, download) else Cmd.Fail(extraArg(flag, "scuzz ide generate-suggestion <PACKAGE> [OPTIONS]"))
+  }
 

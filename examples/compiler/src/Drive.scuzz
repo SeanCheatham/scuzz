@@ -260,7 +260,7 @@ def emitDir(dir: String, outDir: String, full: Bool): IO[Unit] =
   if (full) emitDirBump(dir, outDir) else emitDirLive(dir, outDir)
 
 def emitDirBump(dir: String, outDir: String): IO[Unit] =
-  Fs.delete(fpPath(dir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => emitDirLive(dir, outDir))
+  Fs.delete(fpPath(outDir)).handleErrorWith(_ => IO.pure(())).flatMap(_ => emitDirLive(dir, outDir))
 
 def emitDirLive(dir: String, outDir: String): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirMan(dir, outDir, Manifest.parse(toml)))
@@ -277,8 +277,8 @@ def emitDirCollected(dir: String, outDir: String, deps: List[(String, String)], 
 def emitDirReady(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fpText(toml, files).flatMap(fp => emitDirHit(dir, outDir, files, toml, fp)))
 
-def fpPath(dir: String): String =
-  joinSlash(joinSlash(dir, ".scuzz"), "fingerprint")
+def fpPath(outDir: String): String =
+  joinSlash(outDir, "fingerprint")
 
 def fpText(toml: String, files: List[(String, String)]): IO[String] =
   fpIdent().flatMap(id => fpTextJoin(id, toml, files))
@@ -342,7 +342,7 @@ def fpFilesHd(h: (String, String), rest: List[(String, String)], b: Builder): Bu
   }
 
 def emitDirHit(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
-  Fs.read(fpPath(dir)).flatMap(old => emitDirHitGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirFresh(dir, outDir, files, toml, fp))
+  Fs.read(fpPath(outDir)).flatMap(old => emitDirHitGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirFresh(dir, outDir, files, toml, fp))
 
 def emitDirHitGot(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String, old: String): IO[Unit] =
   if (old == fp) emitDirHitArt(dir, outDir, files, toml, fp) else emitDirFresh(dir, outDir, files, toml, fp)
@@ -360,19 +360,19 @@ def emitDirUpMan(_outDir: String, m: Man): IO[Unit] =
   manNeed(m)
 
 def emitDirFresh(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
-  crateHome().flatMap(h => emitDirOut(compileFiles(toml, files, outDir, "clang", rtLib(h))).flatMap(ok => emitDirStored(dir, fp, ok)))
+  crateHome().flatMap(h => emitDirOut(compileFiles(toml, files, outDir, "clang", rtLib(h))).flatMap(ok => emitDirStored(outDir, fp, ok)))
 
-def emitDirStored(dir: String, fp: String, ok: Bool): IO[Unit] =
-  if (!ok) IO.fail("check") else Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpPath(dir), fp).flatMap(_ => Fs.delete(fpVerifyPath(dir)).handleErrorWith(_ => IO.pure(()))))
+def emitDirStored(outDir: String, fp: String, ok: Bool): IO[Unit] =
+  if (!ok) IO.fail("check") else Fs.mkdirs(outDir).flatMap(_ => Fs.write(fpPath(outDir), fp).flatMap(_ => Fs.delete(fpVerifyPath(outDir)).handleErrorWith(_ => IO.pure(()))))
 
 def emitDirAlways(dir: String, outDir: String, own: List[(String, String)]): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir).flatMap(_ => emitVerifyStamp(dir, toml, own)))
+  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => emitDirAlwaysGot(toml, own, outDir).flatMap(_ => emitVerifyStamp(outDir, toml, own)))
 
 def emitDirVerifyLinked(dir: String, outDir: String, files: List[(String, String)]): IO[Unit] =
   Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => fpText(toml, files).flatMap(fp => emitDirVerifyHit(dir, outDir, files, toml, fp)))
 
 def emitDirVerifyHit(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String): IO[Unit] =
-  Fs.read(fpVerifyPath(dir)).flatMap(old => emitDirVerifyGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirVerifyFresh(dir, outDir, files, toml))
+  Fs.read(fpVerifyPath(outDir)).flatMap(old => emitDirVerifyGot(dir, outDir, files, toml, fp, old)).handleErrorWith(_ => emitDirVerifyFresh(dir, outDir, files, toml))
 
 def emitDirVerifyGot(dir: String, outDir: String, files: List[(String, String)], toml: String, fp: String, old: String): IO[Unit] =
   if (old == fp) emitDirVerifyArt(dir, outDir, files, toml, Manifest.parse(toml)) else emitDirVerifyFresh(dir, outDir, files, toml)
@@ -384,16 +384,16 @@ def emitDirVerifyFresh(dir: String, outDir: String, files: List[(String, String)
   emitDirVerifyFreshMan(dir, outDir, files, toml, Manifest.parse(toml))
 
 def emitDirVerifyFreshMan(dir: String, outDir: String, files: List[(String, String)], toml: String, m: Man): IO[Unit] =
-  manNeed(m).flatMap(_ => IO.both(ensureNative(m.hasUi), emitDirAlwaysGot(toml, files, outDir)).flatMap(_ => linkExe(m.hasUi, outDir, m.name).flatMap(r => emitDirVerifyFreshLink(r, dir, toml, files))))
+  manNeed(m).flatMap(_ => IO.both(ensureNative(m.hasUi), emitDirAlwaysGot(toml, files, outDir)).flatMap(_ => linkExe(m.hasUi, outDir, m.name).flatMap(r => emitDirVerifyFreshLink(r, outDir, toml, files))))
 
-def emitDirVerifyFreshLink(r: (Int, String, String), dir: String, toml: String, files: List[(String, String)]): IO[Unit] =
-  linkOnlyGot(r).flatMap(_ => emitVerifyStamp(dir, toml, files))
+def emitDirVerifyFreshLink(r: (Int, String, String), outDir: String, toml: String, files: List[(String, String)]): IO[Unit] =
+  linkOnlyGot(r).flatMap(_ => emitVerifyStamp(outDir, toml, files))
 
-def emitVerifyStamp(dir: String, toml: String, own: List[(String, String)]): IO[Unit] =
-  fpText(toml, own).flatMap(fp => Fs.mkdirs(joinSlash(dir, ".scuzz")).flatMap(_ => Fs.write(fpVerifyPath(dir), fp).flatMap(_ => Fs.delete(fpPath(dir)).handleErrorWith(_ => IO.pure(())))))
+def emitVerifyStamp(outDir: String, toml: String, own: List[(String, String)]): IO[Unit] =
+  fpText(toml, own).flatMap(fp => Fs.mkdirs(outDir).flatMap(_ => Fs.write(fpVerifyPath(outDir), fp).flatMap(_ => Fs.delete(fpPath(outDir)).handleErrorWith(_ => IO.pure(())))))
 
-def fpVerifyPath(dir: String): String =
-  Str.concat(fpPath(dir), ".verify")
+def fpVerifyPath(outDir: String): String =
+  Str.concat(fpPath(outDir), ".verify")
 
 def emitDirAlwaysGot(toml: String, own: List[(String, String)], outDir: String): IO[Unit] =
   crateHome().flatMap(h => emitDirOut(compileFiles(toml, own, outDir, "clang", rtLib(h))).flatMap(ok => if (!ok) IO.fail("check") else IO.pure(())))
@@ -828,13 +828,18 @@ def sigLines(lines: List[String], mode: Int, depth: Int, b: Builder): String =
   if (List.isEmpty(lines)) Builder.result(b) else sigLine(List.at(lines, 0), List.tail(lines), mode, depth, b)
 
 def sigLine(line: String, rest: List[String], mode: Int, depth: Int, b: Builder): String =
-  if (mode == 2) sigSkipLine(line, rest, b) else sigCopyLine(line, rest, b)
+  for {
+    next = sigQuoteDepth(line, 0, depth)
+  } yield if (depth != 0) sigLines(rest, mode, next, b) else if (mode == 2) sigSkipLine(line, rest, next, b) else sigCopyLine(line, rest, next, b)
 
-def sigCopyLine(line: String, rest: List[String], b: Builder): String =
-  if (lineIsDef(line)) sigLines(rest, 2, 0, nlAppend(b, sigDef(line))) else sigLines(rest, 0, 0, nlAppend(b, line))
+def sigCopyLine(line: String, rest: List[String], depth: Int, b: Builder): String =
+  if (lineIsDef(line)) sigLines(rest, 2, depth, nlAppend(b, sigDef(line))) else sigLines(rest, 0, depth, nlAppend(b, line))
 
-def sigSkipLine(line: String, rest: List[String], b: Builder): String =
-  if (lineIsDef(line)) sigLines(rest, 2, 0, nlAppend(b, sigDef(line))) else if (lineIsTop(line)) sigCopyLine(line, rest, b) else sigLines(rest, 2, 0, b)
+def sigSkipLine(line: String, rest: List[String], depth: Int, b: Builder): String =
+  if (lineIsDef(line)) sigLines(rest, 2, depth, nlAppend(b, sigDef(line))) else if (lineIsTop(line)) sigCopyLine(line, rest, depth, b) else sigLines(rest, 2, depth, b)
+
+def sigQuoteDepth(line: String, i: Int, depth: Int): Int =
+  if (i >= Str.len(line)) depth else if (Parse.at3(line, i, 34, 34, 34)) sigQuoteDepth(line, i + 3, if (depth == 0) 1 else 0) else if (depth != 0) sigQuoteDepth(line, i + 1, depth) else if (Str.charAt(line, i) == 47 && i + 1 < Str.len(line) && Str.charAt(line, i + 1) == 47) 0 else if (Str.charAt(line, i) == 34) sigQuoteDepth(line, Lexer._skipExprQuote(line, i), 0) else sigQuoteDepth(line, i + 1, 0)
 
 def sigDef(line: String): String =
   Str.concat(sigDefHead(line), " ()")
@@ -1977,7 +1982,7 @@ def fuzzSearchResult(job: FuzzJob, script: String, runs: List[FuzzRun], defs: Li
   if (bad > 0 && acc.searchFail == 0) fuzzShrink(job, defs, run).flatMap(small => fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeJob(job, small).flatMap(_ => fuzzConfirm(job, small).flatMap(_ => fuzzSaveRepro(job.outDir, small).flatMap(path => fuzzPromoteFailure(job, path, acc.search).flatMap(_ => fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, path, acc.climb)))))))) else fuzzSearch(job, script, runs, defs, FuzzAcc(acc.search + 1, acc.searchFail + bad, acc.corpFail, acc.repro, acc.climb))
 
 def fuzzConfirm(job: FuzzJob, small: FuzzRun): IO[Unit] =
-  if (!job.ev) IO.pure(()) else fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeRun(job.exe, false, job.outDir, small, "", false, false, false).flatMap(bad => if (bad > 0) IO.pure(()) else failMsg("evaluator search failure did not reproduce on the compiled binary", "scuzz fuzz")))
+  if (!job.ev) IO.pure(()) else fuzzWriteDrive(job.outDir, small.script).flatMap(_ => fuzzProbeRun(job.exe, job.hasUi, job.outDir, small, job.uiEnv, false, false, false).flatMap(bad => if (bad > 0) IO.pure(()) else failMsg("evaluator search failure did not reproduce on the compiled binary", "scuzz fuzz")))
 
 def fuzzShrink(job: FuzzJob, defs: List[Fun], run: FuzzRun): IO[FuzzRun] =
   fuzzShrinkBy(r => fuzzShrinkProbe(job, r), defs, run)
