@@ -12,5 +12,5 @@
 # (override with SCUZZ_SKIA_TRIPLE). Published triples from skia-cpu.yml:
 #   x86_64-unknown-linux-gnu, aarch64-apple-darwin
 skia_branch=chrome/m131
-url=https://github.com/SeanCheatham/scuzz/releases/download/skia-cpu-v0.2/skia-{triple}-cpu.tar.gz
-hdr_url=https://github.com/SeanCheatham/scuzz/releases/download/skia-cpu-v0.2/skia-include.tar.gz
+url=https://github.com/SeanCheatham/scuzz/releases/download/skia-cpu-v0.3/skia-{triple}-cpu.tar.gz
+hdr_url=https://github.com/SeanCheatham/scuzz/releases/download/skia-cpu-v0.3/skia-include.tar.gz
