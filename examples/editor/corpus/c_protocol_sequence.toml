@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive laneFlow 0 1", "drive journalFlow 4", "drive staleFlow 3", "drive laneFlow 1 0", "drive unsafeFlow 5"]

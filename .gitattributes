@@ -1,0 +1,2 @@
+# Scuzz formatting ends each definition with a blank line.
+*.scuzz whitespace=-blank-at-eof

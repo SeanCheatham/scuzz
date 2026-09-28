@@ -43,7 +43,7 @@ def diffDir(path: String, rev: String, iterations: Int, seed: Int, json: Bool): 
     rows <- replay(a, b, root, runs, noRows())
     hs <- search(a, b, root, runs, iterations)
     agg <- aggregate(a, b, rows)
-    report = reportJson(rev, sha, a.job.dir, b.job.dir, rows, agg, iterations, seed, hs)
+    report = reportJson(rev, sha, a.job.dir, b.job.dir, rows, agg, iterations, seed, hs, false)
     _ <- Fs.write(Drive.joinSlash(root, "report.json"), Str.concat(report, Verify.nl()))
     _ <- IO.println(if (json) report else human(rev, sha, path, root, rows, agg, hs))
     _ <- if (count(rows, "regressed") > 0) IO.fail(Str.concat("scuzz diff: ", Str.concat(Str.fromInt(count(rows, "regressed")), " regressed"))) else IO.pure(())
@@ -113,6 +113,11 @@ def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: Li
     _ <- Drive.manNeed(m)
     root = Drive.joinSlash(dir, Drive.joinSlash("build", "ide"))
     _ <- Fs.mkdirs(root)
+    ents <- Fs.list(Drive.joinSlash(dir, "src"))
+    own <- Drive.readSrcFiles(Drive.joinSlash(dir, "src"), ents)
+    stems = List.concat(Drive.fileStems(own), List.map(List.filter(rawB, f => !List.contains(Drive.fileStems(rawA), f._1)), f => f._1))
+    vers <- Drive.fuzzVerSrcs(dir)
+    _ <- Drive.checkFmtGo(false, rawB, List.filter(rawB, f => List.contains(stems, f._1)), stems, vers, Map.empty())
     filesA <- Drive.fuzzCollectFiles(dir, rawA)
     filesB <- Drive.fuzzCollectFiles(dir, rawB)
     host <- if (m.hasUi) Drive.uiHostExe() else IO.pure(scuzz)
@@ -123,7 +128,7 @@ def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: Li
     rows <- IO.ensure(replay(a, b, root, runs, noRows()), Drive.evStop(a.job).flatMap(_ => Drive.evStop(b.job)))
     agg <- aggregate(a, b, rows)
     hunt = DiffHunt(0, 0, [])
-    report = reportJson("buffers", "", a.job.dir, b.job.dir, rows, agg, 0, seed, hunt)
+    report = reportJson("buffers", "", a.job.dir, b.job.dir, rows, agg, 0, seed, hunt, true)
     _ <- Fs.write(Drive.joinSlash(root, "report.json"), Str.concat(report, Verify.nl()))
     _ <- IO.println(human("buffers", "", dir, root, rows, agg, hunt))
   } yield ()
@@ -234,13 +239,13 @@ def kept(a: DiffSide, b: DiffSide, root: String, r: FuzzRun): IO[DiffRow] =
   probe(a.job, r).flatMap(x => probe(b.job, r).flatMap(y => keepTl(root, rowOf(r, x, y), x.tl, y.tl)))
 
 def keepTl(root: String, row: DiffRow, tlA: String, tlB: String): IO[DiffRow] =
-  if (!differs(row.cls)) IO.pure(row) else Fs.write(Drive.joinSlash(root, tlName(row, "a")), tlA).flatMap(_ => Fs.write(Drive.joinSlash(root, tlName(row, "b")), tlB)).map(_ => row)
+  Fs.write(Drive.joinSlash(root, tlName(row, "a")), tlA).flatMap(_ => Fs.write(Drive.joinSlash(root, tlName(row, "b")), tlB)).map(_ => row)
 
 def tlName(r: DiffRow, side: String): String =
   Str.concat("tl-", Str.concat(Str.slice(Hash.sha256(Str.concat(r.label, Str.concat(Verify.nl(), r.run.script))), 0, 16), Str.concat("-", Str.concat(side, ".txt"))))
 
-def tlJson(r: DiffRow): String =
-  if (!differs(r.cls)) "null" else Str.concat("{\"a\":", Str.concat(Check.jsonStr(tlName(r, "a")), Str.concat(",\"b\":", Str.concat(Check.jsonStr(tlName(r, "b")), "}"))))
+def tlJson(r: DiffRow, review: Bool): String =
+  if (!review && !differs(r.cls)) "null" else Str.concat("{\"a\":", Str.concat(Check.jsonStr(tlName(r, "a")), Str.concat(",\"b\":", Str.concat(Check.jsonStr(tlName(r, "b")), "}"))))
 
 def count(rows: List[DiffRow], cls: String): Int =
   List.len(List.filter(rows, r => r.cls == cls))
@@ -364,11 +369,11 @@ def somText(head: String, xs: List[String]): String =
 def huntText(h: DiffHunt): List[String] =
   if (h.ran == 0) Verify.noStr() else Str.concat("search: ", Str.concat(Str.fromInt(h.ran), Str.concat(" iterations, ", Str.concat(Str.fromInt(h.hits), Str.concat(" divergent, ", Str.concat(Str.fromInt(List.len(h.witnesses)), " witnesses")))))) :: List.map(h.witnesses, w => Str.concat("witness ", Str.concat(w._1, Str.concat(" (", Str.concat(w._2, Str.concat(", ", Str.concat(Str.fromInt(w._3), " events)")))))))
 
-def reportJson(rev: String, sha: String, dirA: String, dirB: String, rows: List[DiffRow], agg: DiffAgg, iterations: Int, seed: Int, h: DiffHunt): String =
-  Str.concat("{\"v\":1,\"kind\":\"diff\",\"rev\":", Str.concat(Check.jsonStr(rev), Str.concat(",\"sha\":", Str.concat(Check.jsonStr(sha), Str.concat(",\"ok\":", Str.concat(Verify.jb(count(rows, "regressed") == 0), Str.concat(",\"sides\":{\"a\":", Str.concat(Check.jsonStr(dirA), Str.concat(",\"b\":", Str.concat(Check.jsonStr(dirB), Str.concat("},\"counts\":{", Str.concat(List.join(List.map(classes(), c => Str.concat(Check.jsonStr(c), Str.concat(":", Str.fromInt(count(rows, c))))), ","), Str.concat("},\"workloads\":[", Str.concat(List.join(List.map(ranked(rows), r => rowJson(r)), ","), Str.concat("]", Str.concat(aggJson(agg), Str.concat(huntJson(iterations, seed, h), "}")))))))))))))))))
+def reportJson(rev: String, sha: String, dirA: String, dirB: String, rows: List[DiffRow], agg: DiffAgg, iterations: Int, seed: Int, h: DiffHunt, review: Bool): String =
+  Str.concat("{\"v\":1,\"kind\":\"diff\",\"rev\":", Str.concat(Check.jsonStr(rev), Str.concat(",\"sha\":", Str.concat(Check.jsonStr(sha), Str.concat(",\"ok\":", Str.concat(Verify.jb(count(rows, "regressed") == 0), Str.concat(",\"sides\":{\"a\":", Str.concat(Check.jsonStr(dirA), Str.concat(",\"b\":", Str.concat(Check.jsonStr(dirB), Str.concat("},\"counts\":{", Str.concat(List.join(List.map(classes(), c => Str.concat(Check.jsonStr(c), Str.concat(":", Str.fromInt(count(rows, c))))), ","), Str.concat("},\"workloads\":[", Str.concat(List.join(List.map(ranked(rows), r => rowJson(r, review)), ","), Str.concat("]", Str.concat(aggJson(agg), Str.concat(huntJson(iterations, seed, h), "}")))))))))))))))))
 
-def rowJson(r: DiffRow): String =
-  Str.concat("{\"label\":", Str.concat(Check.jsonStr(r.label), Str.concat(",\"class\":", Str.concat(Check.jsonStr(r.cls), Str.concat(",\"events\":", Str.concat(Verify.jStrList(Verify.linesOf(r.run.script)), Str.concat(",\"why_a\":", Str.concat(Delta.jOpt(r.whyA), Str.concat(",\"why_b\":", Str.concat(Delta.jOpt(r.whyB), Str.concat(",\"delta\":", Str.concat(Delta.json(r.delta), Str.concat(",\"timelines\":", Str.concat(tlJson(r), "}"))))))))))))))
+def rowJson(r: DiffRow, review: Bool): String =
+  Str.concat("{\"label\":", Str.concat(Check.jsonStr(r.label), Str.concat(",\"class\":", Str.concat(Check.jsonStr(r.cls), Str.concat(",\"events\":", Str.concat(Verify.jStrList(Verify.linesOf(r.run.script)), Str.concat(",\"why_a\":", Str.concat(Delta.jOpt(r.whyA), Str.concat(",\"why_b\":", Str.concat(Delta.jOpt(r.whyB), Str.concat(",\"delta\":", Str.concat(Delta.json(r.delta), Str.concat(",\"timelines\":", Str.concat(tlJson(r, review), "}"))))))))))))))
 
 def aggJson(agg: DiffAgg): String =
   Str.concat(",\"alphabet\":{", Str.concat(List.join(List.map(agg.alpha, x => Str.concat(Check.jsonStr(x._1), Str.concat(":", addRem(x._2, x._3)))), ","), Str.concat("},\"claims\":{\"added\":", Str.concat(Verify.jStrList(agg.claimsAdded), Str.concat(",\"removed\":", Str.concat(Verify.jStrList(agg.claimsRemoved), Str.concat(",\"changed\":[", Str.concat(List.join(List.map(agg.claimsChanged, c => Str.concat("{\"name\":", Str.concat(Check.jsonStr(c.key), Str.concat(",\"a\":", Str.concat(Check.jsonStr(c.before), Str.concat(",\"b\":", Str.concat(Check.jsonStr(c.after), "}"))))))), ","), Str.concat("]},\"sometimes\":{\"only_a\":", Str.concat(Verify.jStrList(agg.somA), Str.concat(",\"only_b\":", Str.concat(Verify.jStrList(agg.somB), Str.concat("},\"classify\":[", Str.concat(List.join(List.map(agg.classify, c => Delta.changeJson(c)), ","), "]"))))))))))))))

@@ -153,8 +153,8 @@ def bufferFiles(files: List[(String, String)], stems: List[String], bodies: List
 def bufferBody(stem: String, src: String, stems: List[String], bodies: List[String]): String =
   if (List.contains(stems, stem)) List.at(bodies, List.indexOf(stems, stem)) else src
 
-def dirtyStems(paths: List[String], bodies: List[String], origs: List[String]): List[String] =
-  List.map(List.filter(List.indices(paths), i => List.at(bodies, i) != List.at(origs, i)), i => stemOf(List.at(paths, i)))
+def dirtyPaths(paths: List[String], bodies: List[String], origs: List[String]): List[String] =
+  List.map(List.filter(List.indices(paths), i => List.at(bodies, i) != List.at(origs, i)), i => List.at(paths, i))
 
 def declaredPath(root: String, name: String): String =
   Fs.join(Fs.join(root, "build"), name)

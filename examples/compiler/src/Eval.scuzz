@@ -28,13 +28,15 @@ enum Value:
   case VView(kind: String, args: List[Value])
   case VSig(id: Int, name: String, s: Signal[Value], si: Signal[Int], ss: Signal[String])
 
+record UiCall(name: String, args: List[Value])
+
 record EvEnv(vars: List[(String, Value)], mod: String, loc: String)
 
 record EvStep(e: Expr, env: EvEnv)
 
 record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]], ui: List[UiCall => IO[Value]])
 
 import Parse.Expr
 import Parse.Fun
@@ -78,7 +80,7 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs())
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs(), noUi())
   }
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
@@ -911,7 +913,7 @@ def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: In
 
 def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   recv match {
-    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
+    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else if (!isBound(env, en) && isKit(p, Str.concat(en, Str.concat(".", name)))) Value.VFun(Str.concat(en, Str.concat(".", name)), "") else if (!isBound(env, en) && !List.isEmpty(Check.ftabGetMod(p.funs.tab, en, name))) Value.VFun(name, en) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
     case _ => fieldOf(step(EvStep(recv, env), p), name, env, p, off)
   }
 
@@ -1850,7 +1852,16 @@ def isUiKit(f: String): Bool =
   Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Ui.") || Str.startsWith(f, "Icon.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.")
 
 def uiKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (Str.startsWith(f, "View.")) viewValue(f, vals) else if (Str.startsWith(f, "Signal.")) sigKit(f, vals, env, p, off) else if (f == "Ui.run") uiRun(List.at(vals, 0), env, p, off) else if (f == "Ui.setTitle") Value.VIo(pureIo(Value.VUnit)) else if (Str.startsWith(f, "Icon.")) Value.VInt(iconKit(f)) else if (f == "Color.rgb") Value.VInt(Color.rgb(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Color.rgba") Value.VInt(Color.rgba(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2), intAt(vals, 3))) else if (Str.startsWith(f, "Theme.")) Value.VInt(themeKit(f)) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (Str.startsWith(f, "View.")) viewValue(f, vals) else if (Str.startsWith(f, "Signal.")) sigKit(f, vals, env, p, off) else if (f == "Ui.run") uiRun(List.at(vals, 0), env, p, off) else if (f == "Ui.setTitle") if (List.isEmpty(p.ui)) Value.VIo(pureIo(Value.VUnit)) else hostUi(f, vals, p) else if (Str.startsWith(f, "Ui.setEditor") || f == "Ui.editorCaret") editorKit(f, vals, env, p, off) else if (Str.startsWith(f, "Icon.")) Value.VInt(iconKit(f)) else if (f == "Color.rgb") Value.VInt(Color.rgb(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2))) else if (f == "Color.rgba") Value.VInt(Color.rgba(intAt(vals, 0), intAt(vals, 1), intAt(vals, 2), intAt(vals, 3))) else if (Str.startsWith(f, "Theme.")) Value.VInt(themeKit(f)) else unsupported(Str.concat("kit ", f), env, p, off)
+
+def editorKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (List.isEmpty(p.ui)) unsupported(Str.concat("kit ", f), env, p, off) else hostUi(f, vals, p)
+
+def hostUi(f: String, vals: List[Value], p: EvProg): Value =
+  Value.VIo(liftIo(List.at(p.ui, 0)(UiCall(f, vals))))
+
+def noUi(): List[UiCall => IO[Value]] =
+  []
 
 def viewValue(kind: String, vals: List[Value]): Value =
   if (hasErr(vals)) firstErr(vals) else Value.VView(kind, vals)
@@ -2390,13 +2401,13 @@ def probeExit(e: String): Int =
   if (Str.startsWith(e, "probe exit ")) Str.toInt(Str.drop(e, 11), 1) else 1
 
 def withCtx(p: EvProg, ctx: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.kpars, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.kpars, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log, p.ui)
 
 def withHost(p: EvProg, host: Ref[Value], pool: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log, p.ui)
 
 def withLog(p: EvProg, log: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs())
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs(), p.ui)
 
 def sigRefs(): List[Ref[Value]] =
   newRef(Value.VList(noVals())) :: newRef(Value.VInt(0)) :: newRef(Value.VList(noVals())) :: newRef(Value.VBool(false)) :: noRefs()
@@ -2410,8 +2421,8 @@ def sigHideOn(p: EvProg): EvProg =
 def sigHidePut(p: EvProg, _u: Unit): EvProg =
   p
 
-def probeMounted(files: List[(String, String)], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  Ref.of(Value.VUnit).flatMap(ctx => Ref.of(Value.VUnit).flatMap(host => probeMountLoad(load(files), ctx, host, slot, mount)))
+def probeMounted(files: List[(String, String)], slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
+  Ref.of(Value.VUnit).flatMap(ctx => Ref.of(Value.VUnit).flatMap(host => probeMountLoad(load(files).copy(ui = [ui]), ctx, host, slot, mount)))
 
 def probeMountLoad(p: EvProg, ctx: Ref[Value], host: Ref[Value], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
   probeMountArmed(sigHideOn(withHost(withCtx(p, ctx), host, List.at(p.sig, 0))), ctx, slot, mount)

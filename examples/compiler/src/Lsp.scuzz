@@ -559,7 +559,7 @@ def parseLenDigits(head: String, a: Int, b: Int): Int =
   if (b >= Str.len(head) || Str.charAt(head, b) < 48 || Str.charAt(head, b) > 57) Str.toInt(Str.slice(head, a, b), 0) else parseLenDigits(head, a, b + 1)
 
 def readUntilHeader(acc: String): IO[String] =
-  if (headerBody(acc) >= 0) IO.pure(acc) else Sys.read(256).flatMap(c => readUntilGot(acc, c))
+  if (headerBody(acc) >= 0) IO.pure(acc) else Sys.read(1).flatMap(c => readUntilGot(acc, c))
 
 def readUntilGot(acc: String, c: String): IO[String] =
   if (Str.isEmpty(c)) readUntilEof(acc) else readUntilHeader(Str.concat(acc, c))
@@ -568,7 +568,7 @@ def readUntilEof(acc: String): IO[String] =
   if (Str.isEmpty(acc)) IO.pure(acc) else IO.fail("lsp: truncated header")
 
 def fillTo(acc: String, need: Int): IO[String] =
-  if (Str.byteLen(acc) >= need) IO.pure(acc) else Sys.read(256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(Str.concat(acc, c), need))
+  if (Str.byteLen(acc) >= need) IO.pure(acc) else Sys.read(need - Str.byteLen(acc)).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(Str.concat(acc, c), need))
 
 def readMsg(acc: String): IO[(String, String)] =
   readUntilHeader(acc).flatMap(got => readMsgGot(got, headerBody(got)))

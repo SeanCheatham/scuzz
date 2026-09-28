@@ -32,16 +32,6 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device 
 
 ## Known gaps
 
-### Decision integrity
-
-1. **Lane selection.** Keep accepts the proposal although its lane is hidden. The controls do not select the preferred displayed lane.
-2. **Reviewed identity.** Acceptance rereads disk and proposal files. It does not validate their identities against the displayed comparison. An unarmed action can fall back to another pending proposal. Serial actions can reach a later card.
-3. **Recovery.** Multi-file acceptance writes files in sequence. There is no operation journal, restart recovery, or conditional Undo. Dirty buffers protect touched stems, but canonical path identity and stale-input checks are missing.
-4. **Durable evidence.** The decision record lives in `build/ide/decisions.jsonl`. It lacks frozen snapshots, lane mapping, objective, witness, limits, and timing. Reused mutation names can collide with decided proposal names.
-5. **Candidate correctness.** The gate checks regression and unrunnable counts. A claim failure shared by both sides can pass. A verify filename is used as the guard indicator. Failed review can leave old evidence available.
-
-**Proof:** Gate 1 in `vision.md` and the current slice in `plans.md`.
-
 ### Behavioral questions
 
 IDE review runs idle and seeds. It does not replay the corpus or run differential search. It does not shrink a review witness. Playback starts automatically. The card does not summarize complete evidence or claim trigger reach. An accessibility tile view does not reproduce screen layout. File sets with no observed difference can remain pending.
@@ -50,13 +40,13 @@ IDE review runs idle and seeds. It does not replay the corpus or run differentia
 
 ### Objective and generation
 
-There is no managed local model path, objective-driven request contract, session work budget, or scoped source set. Generate creates mutation proposals. It does not provide direction toward a product objective. There is no complete-publication contract, baseline-bound request identity, or source/outcome deduplication. Module stems stand in for file regions.
+There is no managed local model path, objective-driven request contract, session work budget, or scoped source set. Generate creates mutation proposals. It does not provide direction toward a product objective. The importer validates complete publication metadata, source hashes, baselines, and canonical paths. Requests do not bind to an objective or session. Source and outcome deduplication remain missing.
 
 **Proof:** Gate 3. Prove model setup and lifecycle with fake effects, a controlled local child, private loopback, and external directory publication. Test the real downloader, pinned backend, and one small local model separately. Record model revision, backend identity, memory and context limits, readiness time, and Scuzz output quality. External import must need no model resources.
 
 ### Queue and preference feedback
 
-Review prepares a card on demand. There is no ready successor cache, request budget, or complete job cancellation policy for the stream. Full-file siblings can replace accepted work from an older baseline. Skip has no reason. Local model requests and exported producer requests do not consume preferences. There is no retained-acceptance measure or local session summary.
+Review prepares a card on demand. There is no ready successor cache, request budget, or complete job cancellation policy for the stream. Full-file siblings can replace accepted work from an older baseline. Can't decide has no reason. Local model requests and exported producer requests do not consume preferences. There is no retained-acceptance measure or local session summary.
 
 **Proof:** Gates 4 and 5. Exercise late responses, baseline changes, repeated actions, pause, and session exit. Measure the result from local records.
 

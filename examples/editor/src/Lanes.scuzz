@@ -22,7 +22,7 @@ def bLabel(sub: String): String =
 
 def workItems(j: Json): List[Json] =
   Diags.jsonField(j, "workloads") match {
-    case Json.Arr(xs) => List.filter(xs, w => workPath(w, "a") != "")
+    case Json.Arr(xs) => List.filter(xs, w => workPath(w, "a") != "" && Diags.jsonStr(Diags.jsonField(w, "class")) != "same")
     case _ => []
   }
 
@@ -42,7 +42,7 @@ def workFirst(w: Json): Int =
   Diags.jsonInt(Diags.jsonField(Diags.jsonField(w, "delta"), "first"))
 
 def workAt(j: Json, label: String): Json =
-  List.head(List.filter(workItems(j), w => workLabel(w) == label)) match {
+  List.head(List.filter(workItems(j), w => workLabel(w) == label || Diags.jsonStr(Diags.jsonField(w, "label")) == label)) match {
     case Option.Some(w) => w
     case Option.None => Json.Null()
   }
@@ -154,7 +154,7 @@ def srcFileCard(f: (String, String, String), flip: Int): View =
   View.card(View.column(View.text(f._1), View.row(View.expanded(View.code(srcWin(f, flip, true))), View.expanded(View.code(srcWin(f, flip, false))))))
 
 def srcSection(files: Signal[List[(String, String, String)]], flip: Signal[Int]): View =
-  View.column(View.each(files, f => srcFileCard(f, Signal.get(flip))))
+  View.each(Signal.map(flip, n => [n]), n => View.column(View.each(files, f => srcFileCard(f, n))))
 
 def rowsOf(xa: List[(String, String)], xb: List[(String, String)], sideA: Bool): List[String] =
   List.map(List.concat(List.filter(shownNames(xa, xb), n => secBody(xa, n) != secBody(xb, n)), List.filter(shownNames(xa, xb), n => secBody(xa, n) == secBody(xb, n))), n => rowText(n, secBody(xa, n), secBody(xb, n), sideA))

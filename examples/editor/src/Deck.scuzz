@@ -3,51 +3,20 @@ import Parse.Prog
 def proposalsDir(root: String): String =
   Fs.join(Fs.join(root, "build"), "proposals")
 
-def decisionsPath(root: String): String =
-  Fs.join(Fs.join(Fs.join(root, "build"), "ide"), "decisions.jsonl")
-
 def propNames(ents: List[(String, Bool)]): List[String] =
   List.sort(List.map(List.filter(ents, e => e._2), e => e._1))
 
-def decidedName(line: String): String =
-  Diags.jsonStr(Diags.jsonField(LspClient.parseJson(line), "proposal"))
-
-def pending(names: List[String], decided: List[String]): List[String] =
-  List.filter(names, n => !List.contains(decided, n))
-
 def setHash(files: List[(String, String)]): String =
-  Hash.sha256(List.join(List.map(files, f => Str.concat(f._1, Str.concat("""
-""", f._2))), ""))
-
-def decisionLine(name: String, decision: String, region: String, a: String, b: String): String =
-  Str.concat("{\"proposal\":", Str.concat(Check.jsonStr(name), Str.concat(",\"decision\":", Str.concat(Check.jsonStr(decision), Str.concat(",\"region\":", Str.concat(Check.jsonStr(region), Str.concat(",\"a\":", Str.concat(Check.jsonStr(a), Str.concat(",\"b\":", Str.concat(Check.jsonStr(b), "}"))))))))))
+  Cards.setHash(files)
 
 def guardLines(vers: List[String]): List[String] =
   if (List.isEmpty(vers)) ["unguarded: no claims"] else []
-
-def laneOf(flip: Int): String =
-  if (flip == 1) "lane 1" else "lane 2"
 
 def revealText(decision: String, name: String, lane: String): String =
   Str.concat(decision, Str.concat(" ", Str.concat(name, Str.concat(" (proposal was ", Str.concat(lane, ")")))))
 
 def withLast(last: String, xs: List[String]): List[String] =
   if (Str.isEmpty(last)) xs else last :: xs
-
-def skipPick(left: List[String], skipped: List[String], cur: String): (String, List[String]) =
-  skipPickAt(left, if (Str.isEmpty(cur) || List.contains(skipped, cur)) skipped else List.concat(skipped, cur :: []))
-
-def skipPickAt(left: List[String], skipped: List[String]): (String, List[String]) =
-  if (List.isEmpty(left)) ("", skipped) else skipPickRest(left, List.filter(left, n => !List.contains(skipped, n)), skipped)
-
-def skipPickRest(left: List[String], rest: List[String], skipped: List[String]): (String, List[String]) =
-  if (List.isEmpty(rest)) (List.at(left, 0), []) else (List.at(rest, 0), skipped)
-
-def countOf(raw: String, cls: String): Int =
-  Diags.jsonInt(Diags.jsonField(Diags.jsonField(LspClient.parseJson(raw), "counts"), cls))
-
-def gateFail(raw: String): Bool =
-  countOf(raw, "regressed") > 0 || countOf(raw, "unrunnable") > 0
 
 def swapPairs(xs: List[String]): List[String] =
   if (List.len(xs) < 2) xs else List.concat(List.at(xs, 1) :: List.at(xs, 0) :: [], swapPairs(List.drop(xs, 2)))
@@ -65,13 +34,10 @@ def newStems(disk: List[(String, String)], props: List[(String, String)]): List[
   List.map(List.filter(props, p => !List.contains(List.map(disk, f => f._1), Chrome.stemOf(p._1))), p => (Chrome.stemOf(p._1), p._2))
 
 def deckTitle(name: String): String =
-  Str.concat("proposal ", name)
+  "Behavior review"
 
 def regionOf(props: List[(String, String)]): List[String] =
   List.sort(List.distinct(List.map(props, p => Chrome.stemOf(p._1))))
-
-def dirtyHits(props: List[(String, String)], dirties: List[String]): List[String] =
-  List.filter(regionOf(props), s => List.contains(dirties, s))
 
 def dirtyLines(hits: List[String]): List[String] =
   List.map(hits, s => Str.concat("dirty buffer: ", s))
@@ -96,7 +62,4 @@ def changedTriples(disk: List[(String, String)], propSet: List[(String, String)]
 
 def regionSet(set: List[(String, String)], cur: String): List[(String, String)] =
   if (Mutate.countFiles(List.filter(set, f => f._1 == cur), false) > 0) List.filter(set, f => f._1 == cur) else set
-
-def keepTarget(armed: String, left: List[String]): String =
-  if (!Str.isEmpty(armed) && List.contains(left, armed)) armed else if (List.isEmpty(left)) "" else List.at(left, 0)
 

@@ -8,19 +8,9 @@ Edit this file when the order changes. Remove completed work. Keep only the next
 
 A developer sets one objective and reviews a stream of small changes. Each card compares one proposal with the current working tree. Scuzz finds a recorded execution that shows the difference. The developer chooses a blind lane. Accepted changes become the baseline for the next request. Claims constrain the choices. Locks: [`philosophy.md`](philosophy.md#proposal-review).
 
-The first complete feature includes the seven gates below. Implement them in order. A generator transport proof does not prove useful generation. A deterministic session does not prove human preference or speed. Keep those unknowns explicit in `gaps.md`.
+The first complete feature needs the remaining gates below. Implement them in order. A generator transport proof does not prove useful generation. A deterministic session does not prove human preference or speed. Keep those unknowns explicit in `gaps.md`.
 
 ## Implementation gates
-
-### 1. Trust each decision
-
-Replace Keep and Reject with Choose left and Choose right. Add Can't decide. Bind every action to a ready card and its fixed lane order. Remove fallback acceptance of a different pending proposal. A repeated action cannot choose the next card.
-
-Freeze all review inputs and source bytes. Invalidate evidence on an external edit, proposal edit, compiler change, or verification change. Clear stale lanes after a failed review. Preserve dirty buffers. Use canonical paths rather than module stems as file identity.
-
-Store snapshots, decisions, and an operation journal under `.scuzz/ide/`. Add recoverable multi-file acceptance and conditional Undo. Remove the build-directory decision log. Reject malformed or unsafe proposal paths. Check absolute candidate verdicts. A candidate that shares a baseline failure cannot reach a preference card.
-
-**Gate:** Both lane orders select the expected bytes. Baseline choice and abstention write no source. Stale, dirty, failed, and duplicate actions write no source. Interrupted acceptance recovers on restart. Recovery and Undo preserve unrelated edits. Records survive deletion of `build/`. Claims and corpus prove these behaviors. A live Headless run exercises real review and writes.
 
 ### 2. Ask one behavioral question
 
