@@ -1478,6 +1478,12 @@ def checkConstructorAlternatives(n: Int): IO[Int] =
     case _ => IO.pure(0)
   }
 
+private def updatePattern(update: PatternFields => PatternFields, value: PatternFields): PatternFields =
+  update(value)
+
+def copiedCallback(s: String): PatternFields =
+  updatePattern(entry => entry.copy(label = s), PatternFields("before", [s]))
+
 @main def main: IO[Unit] =
   for {
     c = Color.Red

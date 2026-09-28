@@ -45,14 +45,78 @@ def metadata(request: String, baseline: String, generator: String, files: List[(
 
 def importProposal(root: String, name: String): IO[List[(String, String)]] =
   for {
+    request <- proposalRequest(root, name)
+    files <- importFor(root, name, request)
+  } yield files
+
+def requestArchivePath(root: String, id: String): String =
+  Fs.join(Fs.join(storage(root), "requests"), Str.concat(id, ".json"))
+
+def requestArchive(root: String, id: String): IO[Json] =
+  for {
+    _ <- need(Str.matches(id, "^[A-Za-z0-9_-]{1,128}$"), "unsafe request identity")
+    _ <- inside(root, Fs.join(".scuzz/ide/requests", Str.concat(id, ".json")))
+    raw <- Fs.read(requestArchivePath(root, id))
+    archive <- Proposal.parse(raw, 1067008)
+    _ <- need(Proposal.keys(archive, ["v", "request", "session"]) && Proposal.version(archive) && Proposal.stringValue(Proposal.field(archive, "session")) && str(Proposal.field(archive, "request"), "request") == id, "invalid frozen request archive")
+  } yield archive
+
+def rememberRequest(root: String, request: Json): IO[Unit] =
+  for {
+    id = str(request, "request")
+    _ <- need(Str.matches(id, "^[A-Za-z0-9_-]{1,128}$"), "unsafe request identity")
+    _ <- setupStorage(root)
+    _ <- Fs.mkdirs(Fs.join(storage(root), "requests"))
+    _ <- inside(root, Fs.join(".scuzz/ide/requests", Str.concat(id, ".json")))
+    session <- sessionContext(root)
+    archive = text(Json.Obj([("v", Json.Int(1)), ("request", request), ("session", Json.Str(session))]))
+    previous <- readOptional(requestArchivePath(root, id))
+    _ <- need(Str.isEmpty(previous) || previous == archive, "frozen request identity is already stored")
+    _ <- if (Str.isEmpty(previous)) Fs.write(requestArchivePath(root, id), archive) else IO.pure(())
+  } yield ()
+
+def proposalRequest(root: String, name: String): IO[Json] =
+  for {
     _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
-    dir = Fs.join(Deck.proposalsDir(root), name)
-    _ <- inside(root, Fs.join("build/proposals", name))
-    raw <- Fs.read(Fs.join(root, "build/ide/request.json"))
-    request <- Proposal.parse(raw, 1048576)
+    path = Fs.join(Fs.join("build/proposals", name), "proposal.json")
+    _ <- inside(root, path)
+    publicationRaw <- Fs.read(Fs.join(root, path))
+    publication <- Proposal.parse(publicationRaw, 131072)
+    id = str(publication, "request")
+    _ <- need(Str.matches(id, "^[A-Za-z0-9_-]{1,128}$"), "unsafe publication request identity")
+    latestRaw <- Fs.read(Fs.join(root, "build/ide/request.json"))
+    latest <- Proposal.parse(latestRaw, 1048576)
+    archive <- requestArchive(root, id)
+    request = Proposal.field(archive, "request")
+    session <- sessionContext(root)
+    _ <- need(str(archive, "session") == session && requestContext(request) == requestContext(latest), stalePublicationMessage())
     compiler <- compilerIdentity()
+    _ <- Proposal.validate(root, latest, compiler)
     _ <- Proposal.validate(root, request, compiler)
-    files <- Proposal.importFrom(root, dir, request)
+  } yield request
+
+def stalePublicationMessage(): String =
+  "publication request no longer matches the session"
+
+def excludePublication(root: String, name: String, context: String): IO[Unit] =
+  for {
+    _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
+    relative = Fs.join(Fs.join("build/proposals", name), "proposal.json")
+    _ <- inside(root, relative)
+    raw <- Fs.read(Fs.join(root, relative))
+    publication <- Proposal.parse(raw, 131072)
+    id <- Uuid.v4()
+    now <- Clock.monotonic()
+    entry = Json.Obj([("v", Json.Int(1)), ("operation", Json.Str(id)), ("proposal", Json.Str(name)), ("kind", Json.Str("automatic")), ("decision", Json.Str("stale-publication")), ("evidence_status", Json.Str("not-reviewed")), ("input_context", Json.Str(context)), ("publication", publication), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
+    _ <- setupStorage(root)
+    _ <- Fs.write(recordPath(root, id), text(entry))
+  } yield ()
+
+def importFor(root: String, name: String, request: Json): IO[List[(String, String)]] =
+  for {
+    _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
+    _ <- inside(root, Fs.join("build/proposals", name))
+    files <- Proposal.importFrom(root, Fs.join(Deck.proposalsDir(root), name), request)
   } yield files
 
 def inputPath(path: String): Bool =
@@ -74,15 +138,31 @@ def executableIdentity(cli: String): IO[String] =
     _ <- need(got._1 == 0 && Str.matches(digest, "^[a-f0-9]{64}$"), "cannot identify review compiler")
   } yield digest
 
-def inputs(root: String): IO[List[(String, String)]] =
+def requestContext(request: Json): String =
+  text(Json.Obj(List.map(["v", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "limits", "instructions"], key => (key, Proposal.field(request, key)))))
+
+def sessionContext(root: String): IO[String] =
+  for {
+    raw <- readOptional(Fs.join(storage(root), "session.json"))
+    session <- Proposal.parse(if (Str.isEmpty(raw)) "{}" else raw, 8192)
+  } yield sessionFields(session)
+
+def sessionFields(session: Json): String =
+  text(Json.Obj(List.map(["baseline_epoch", "objective", "allowed", "mode", "model", "resolved_model", "backend", "limits"], key => (key, Proposal.field(session, key)))))
+
+def currentInputs(root: String): IO[List[(String, String)]] =
+  Fs.read(Fs.join(root, "build/ide/request.json")).flatMap(raw => Proposal.parse(raw, 1048576)).flatMap(request => inputs(root, request))
+
+def inputs(root: String, request: Json): IO[List[(String, String)]] =
   for {
     files <- packageInputs(root, "package", [])
     compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
-    request <- Fs.read(Fs.join(root, "build/ide/request.json"))
+    session <- sessionContext(root)
     cli <- compilerIdentity()
+    _ <- Proposal.validate(root, request, cli)
     toml <- Fs.read(Fs.join(root, "scuzz.toml"))
     host <- if (Manifest.parse(toml).hasUi) Drive.uiHostExe().flatMap(exe => executableIdentity(exe)) else IO.pure(cli)
-  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("review-host", host), ("request", request), ("objective", str(LspClient.parseJson(request), "objective")), ("limits", "files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")])
+  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("review-host", host), ("request-context", requestContext(request)), ("session-context", session), ("objective", str(request, "objective")), ("limits", "files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")])
 
 def storage(root: String): String =
   Fs.join(root, ".scuzz/ide")
@@ -121,23 +201,30 @@ def setupStorage(root: String): IO[Unit] =
 
 def freeze(root: String, name: String, props: List[(String, String)], flip: Int): IO[Json] =
   for {
-    ins <- inputs(root)
+    ins <- currentInputs(root)
     disk <- own(root)
+    request <- proposalRequest(root, name)
+    imported <- importFor(root, name, request)
+    _ <- need(setHash(imported) == setHash(props), "proposal changed before freezing")
     pub <- Fs.read(Fs.join(Fs.join(Deck.proposalsDir(root), name), "proposal.json"))
     nonce <- Uuid.v4()
     now <- Clock.monotonic()
-    id = identity(ins, props, pub, nonce)
+    id = identity(List.concat(ins, [("frozen-request", text(request))]), props, pub, nonce)
     c = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("proposal", Json.Str(name)), ("publication", Json.Str(pub)), ("objective", Json.Str(List.getOrElse(List.map(ins, f => f._2), List.indexOf(List.map(ins, f => f._1), "objective"), ""))), ("inputs", pairsJson(ins)), ("baseline", pairsJson(disk)), ("proposed", pairsJson(props)), ("a", Json.Str(setHash(disk))), ("b", Json.Str(setHash(applyPaths(disk, props)))), ("flip", Json.Int(flip)), ("started", Json.Int(now)), ("status", Json.Str("preparing"))])
+    frozen = Json.set(c, "request", request)
     _ <- setupStorage(root)
     _ <- Fs.mkdirs(cardDir(root, id))
-    _ <- Fs.write(Fs.join(cardDir(root, id), "card.json"), text(c))
-  } yield c
+    _ <- Fs.write(Fs.join(cardDir(root, id), "card.json"), text(frozen))
+  } yield frozen
 
 def current(root: String, c: Json): IO[Unit] =
   for {
-    ins <- inputs(root)
+    ins <- currentInputs(root)
     _ <- need(setHash(ins) == setHash(pairs(Diags.jsonField(c, "inputs"))), "review inputs changed")
-    props <- importProposal(root, str(c, "proposal"))
+    request = Proposal.field(c, "request")
+    compiler <- compilerIdentity()
+    _ <- Proposal.validate(root, request, compiler)
+    props <- importFor(root, str(c, "proposal"), request)
     pub <- Fs.read(Fs.join(Fs.join(Deck.proposalsDir(root), str(c, "proposal")), "proposal.json"))
     _ <- need(setHash(props) == setHash(pairs(Diags.jsonField(c, "proposed"))) && pub == str(c, "publication"), "proposal changed")
   } yield ()
@@ -173,13 +260,70 @@ def complete(root: String, c: Json, raw: String): IO[Json] =
     bText <- if (List.isEmpty(items)) IO.pure("") else Fs.read(Fs.join(cardDir(root, str(c, "id")), Lanes.workPath(List.at(items, 0), "b")))
     question = if (List.isEmpty(items)) Json.Null() else Json.Obj([("workload", Json.Str(str(List.at(items, 0), "label"))), ("step", Json.Int(Lanes.usefulStep(List.at(items, 0), Lanes.states(aText), Lanes.states(bText))))])
     now <- Clock.monotonic()
-    out = Json.set(Json.set(Json.set(Json.set(c, "status", Json.Str(if (List.isEmpty(items)) "excluded" else "ready")), "evidence", evidence), "ready", Json.Int(now)), "question", question)
+    observed <- outcome(root, c, evidence)
+    hashes <- evidenceHashes(root, c, evidence)
+    out = Json.set(Json.set(Json.set(Json.set(Json.set(Json.set(c, "evidence_files", pairsJson(hashes)), "outcome", Json.Str(observed)), "status", Json.Str(if (List.isEmpty(items)) "excluded" else "ready")), "evidence", evidence), "ready", Json.Int(now)), "question", question)
     _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(out))
     _ <- if (List.nonEmpty(items)) IO.pure(()) else Fs.write(recordPath(root, str(c, "id")), text(Json.Obj([("card", Json.Str(str(c, "id"))), ("decision", Json.Str("no-observed-difference")), ("kind", Json.Str("automatic")), ("evidence_status", Json.Str("excluded")), ("evidence", evidence), ("time", Json.Int(now)), ("writes", Json.Arr([]))])))
   } yield out
 
+def outcome(root: String, c: Json, evidence: Json): IO[String] =
+  IO.foreach(Json.arr(Proposal.field(evidence, "workloads")), w => Fs.read(Fs.join(cardDir(root, str(c, "id")), Lanes.workPath(w, "b"))).map(body => Json.Obj([("label", Proposal.field(w, "label")), ("events", Proposal.field(w, "events")), ("verdict", Proposal.field(w, "why_b")), ("states", Json.Arr(List.map(Delta.parse(body), state => Json.Obj(List.map(state, pair => (pair._1, Json.Str(pair._2)))))))]))).map(rows => Hash.sha256(text(Json.Arr(rows))))
+
+def evidencePaths(evidence: Json): List[String] =
+  List.distinct(List.concat(List.flatMap(Json.arr(Proposal.field(evidence, "workloads")), w => [Lanes.workPath(w, "a"), Lanes.workPath(w, "b")]), List.map(Json.arr(Proposal.field(evidence, "witnesses")), w => str(w, "path"))))
+
+def evidenceHashes(root: String, c: Json, evidence: Json): IO[List[(String, String)]] =
+  IO.foreach(evidencePaths(evidence), name => for {
+  _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+\\.(txt|toml)$"), "unsafe cached evidence path")
+  _ <- inside(root, Fs.join(".scuzz/ide/cards", Fs.join(str(c, "id"), name)))
+  body <- Fs.read(Fs.join(cardDir(root, str(c, "id")), name))
+} yield (name, Hash.sha256(body)))
+
+def cachedEvidence(root: String, c: Json): IO[Bool] =
+  (for {
+  evidence = Proposal.field(c, "evidence")
+  hashes <- evidenceHashes(root, c, evidence)
+  observed <- outcome(root, c, evidence)
+} yield candidateReportPass(evidence) && List.nonEmpty(hashes) && pairsJson(hashes) == Proposal.field(c, "evidence_files") && observed == str(c, "outcome")).handleErrorWith(_ => IO.pure(false))
+
+def known(root: String, context: String): IO[List[Json]] =
+  for {
+    entries <- Fs.list(Fs.join(storage(root), "cards")).handleErrorWith(_ => IO.pure([]))
+    ids = List.sort(List.map(List.filter(entries, e => e._2 && Str.matches(e._1, "^[a-f0-9]{64}$")), e => e._1))
+    cards <- IO.foreach(ids, id => (for {
+  _ <- inside(root, Fs.join(".scuzz/ide/cards", Fs.join(id, "card.json")))
+  raw <- readOptional(Fs.join(cardDir(root, id), "card.json"))
+  c = LspClient.parseJson(raw)
+  metadata = str(c, "id") == id && setHash(pairs(Proposal.field(c, "inputs"))) == context && Str.matches(str(c, "b"), "^[a-f0-9]{64}$")
+  duplicate = str(c, "status") == "excluded" && str(c, "exclusion") == "duplicate-source"
+  complete = List.contains(["ready", "excluded"], str(c, "status")) && candidateReportPass(Proposal.field(c, "evidence")) && Str.matches(str(c, "outcome"), "^[a-f0-9]{64}$")
+  valid <- if (metadata && complete) cachedEvidence(root, c) else IO.pure(false)
+  choiceText <- if (metadata && complete && !valid) readOptional(recordPath(root, id)).flatMap(choice => if (!Str.isEmpty(choice)) IO.pure(choice) else readOptional(recordPath(root, Str.concat("accept-", id)))) else IO.pure("")
+} yield if (!metadata || !duplicate && !valid && Str.isEmpty(choiceText)) Json.Null() else if (duplicate || valid) c else Json.set(c, "outcome", Json.Null())).handleErrorWith(_ => IO.pure(Json.Null())))
+  } yield List.filter(cards, c => !Json.isNull(c))
+
+def seenKeys(cards: List[Json]): List[String] =
+  List.distinct(List.flatMap(cards, c => List.concat([Str.concat("source:", str(c, "b"))], if (Str.matches(str(c, "outcome"), "^[a-f0-9]{64}$")) [Str.concat("outcome:", str(c, "outcome"))] else [])))
+
+def excludedPublications(root: String, context: String): IO[List[String]] =
+  for {
+    entries <- Fs.list(Fs.join(storage(root), "records")).handleErrorWith(_ => IO.pure([]))
+    names = List.map(List.filter(entries, e => !e._2 && Str.matches(e._1, "^[A-Za-z0-9_-]+\\.json$")), e => e._1)
+    records <- IO.foreach(names, name => inside(root, Fs.join(".scuzz/ide/records", name)).flatMap(_ => readOptional(Fs.join(Fs.join(storage(root), "records"), name))).map(raw => LspClient.parseJson(raw)))
+  } yield List.distinct(List.map(List.filter(records, r => str(r, "input_context") == context && str(r, "kind") == "automatic" && str(r, "decision") == "stale-publication"), r => str(r, "proposal")))
+
 def propsOf(c: Json): List[(String, String)] =
   pairs(Diags.jsonField(c, "proposed"))
+
+def automatic(root: String, c: Json, reason: String): IO[Unit] =
+  for {
+    now <- Clock.monotonic()
+    excluded = Json.set(Json.set(c, "status", Json.Str("excluded")), "exclusion", Json.Str(reason))
+    _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(excluded))
+    entry = Json.Obj([("v", Json.Int(1)), ("card", Proposal.field(c, "id")), ("proposal", Proposal.field(c, "proposal")), ("kind", Json.Str("automatic")), ("decision", Json.Str(reason)), ("objective", Proposal.field(c, "objective")), ("a", Proposal.field(c, "a")), ("b", Proposal.field(c, "b")), ("inputs", Proposal.field(c, "inputs")), ("request", Proposal.field(c, "request")), ("evidence_status", Json.Str("excluded")), ("evidence", Proposal.field(c, "evidence")), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
+    _ <- Fs.write(recordPath(root, str(c, "id")), text(entry))
+  } yield ()
 
 def sourceWrites(c: Json): List[Json] =
   List.map(pairs(Diags.jsonField(c, "proposed")), f => Json.Obj([("path", Json.Str(f._1)), ("before", Json.Str(List.getOrElse(List.map(pairs(Diags.jsonField(c, "baseline")), d => d._2), List.indexOf(List.map(pairs(Diags.jsonField(c, "baseline")), d => d._1), f._1), ""))), ("before_exists", Json.Bool(List.contains(List.map(pairs(Diags.jsonField(c, "baseline")), d => d._1), f._1))), ("after", Json.Str(f._2)), ("after_exists", Json.Bool(true))]))
@@ -256,6 +400,8 @@ def decide(root: String, c: Json, lane: Int): IO[Unit] =
     _ <- need(step >= 0 && step < count, "invalid review step")
     _ <- undecided(root, str(c, "id"))
     _ <- current(root, c)
+    valid <- cachedEvidence(root, c)
+    _ <- need(valid, "review evidence changed")
     accepted = lane >= 0 && lane == (if (Json.getInt(c, "flip", 0) == 1) 0 else 1)
     now <- Clock.monotonic()
     op = operation(c, lane, now)

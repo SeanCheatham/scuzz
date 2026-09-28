@@ -1,6 +1,12 @@
 record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], srcs: Signal[List[(String, String, String)]], play: Signal[Int], work: Signal[String], resultA: Signal[String], resultB: Signal[String], flip: Signal[Int], scope: Signal[List[String]], details: Signal[Int])
 
-record DeckS(card: Signal[String], pending: Signal[List[String]], armed: Signal[String], title: Signal[String], flip: Signal[Int], last: Signal[String], busy: Signal[Int])
+record DeckS(card: Signal[String], pending: Signal[List[String]], armed: Signal[String], title: Signal[String], flip: Signal[Int], last: Signal[String], busy: Signal[Int], session: SessionS, queue: Signal[QueueS], queueStatus: Signal[String], root: Signal[String])
+
+record PrepSlot(token: String, role: String, name: String)
+
+record QueueS(epoch: Int, context: String, cards: List[PreparedCard], slots: List[PrepSlot], seen: List[String], ignored: List[String], enabled: Bool, automatic: Bool, retry: Bool)
+
+record PreparedCard(card: Json, texts: List[String], guards: List[String], sources: List[(String, String, String)], outcome: String)
 
 import Parse.Prog
 
@@ -44,7 +50,7 @@ def diskFiles(root: String, toml: String): IO[List[(String, String)]] =
   } yield files
 
 def compareBuffers(root: String, toml: String, disk: List[(String, String)], buffers: List[(String, String)]): IO[Unit] =
-  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, buffers, 1, 32, cli))
+  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, buffers, 1, 32, cli, ""))
 
 def loadProposals(root: String): IO[List[String]] =
   Fs.list(Deck.proposalsDir(root)).map(es => Deck.propNames(es)).handleErrorWith(_ => IO.pure([]))
@@ -53,7 +59,7 @@ def readProposal(root: String, name: String): IO[List[(String, String)]] =
   Cards.importProposal(root, name)
 
 def reviewProposal(root: String, toml: String, disk: List[(String, String)], propSet: List[(String, String)]): IO[Unit] =
-  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, propSet, 1, 32, cli))
+  Cards.currentInputs(root).flatMap(inputs => scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, propSet, 1, 32, cli, Cards.setHash(inputs))))
 
 def dropProposal(root: String, name: String): IO[Unit] =
   Fs.delete(Fs.join(Deck.proposalsDir(root), name)).handleErrorWith(_ => IO.pure(()))
@@ -97,81 +103,265 @@ def deckEnd(ls: LaneS, ds: DeckS): Unit =
     _ = Signal.set(ls.blab, "b: working tree")
   } yield ()
 
-def deckNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
-  deckGuard(ds, _ => deckNextIn(root, [], ls, ds))
+def emptyQueue(epoch: Int): QueueS =
+  QueueS(epoch, "", []: List[PreparedCard], []: List[PrepSlot], []: List[String], []: List[String], false, false, false)
 
-def deckNextIn(root: String, region: List[String], ls: LaneS, ds: DeckS): IO[Unit] =
+def queueRead(ds: DeckS): IO[QueueS] =
+  IO.pure(()).map(_ => Signal.get(ds.queue))
+
+def queueChange(ds: DeckS, update: QueueS => QueueS): IO[QueueS] =
+  IO.pure(()).map(_ => for {
+  next = update(Signal.get(ds.queue))
+  _ = Signal.set(ds.queue, next)
+} yield next)
+
+def queueUpdate(ds: DeckS, update: QueueS => QueueS): IO[Unit] =
+  queueChange(ds, update).map(_ => ())
+
+def queueStatus(ds: DeckS, q: QueueS): Unit =
+  Signal.set(ds.queueStatus, if (q.retry) "Preparation failed. Retry preparation explicitly." else if (!q.enabled) "Preparation is paused." else Str.concat("Ready cards: ", Str.concat(Str.fromInt(List.len(q.cards)), Str.concat(" / 2; reserved: ", Str.concat(Str.fromInt(List.len(q.slots)), if (Signal.get(ds.session.count) >= 8 && q.automatic) "; request budget exhausted" else "")))))
+
+def queueClear(ls: LaneS, ds: DeckS): IO[Unit] =
+  queueUpdate(ds, q => for {
+  next = q.copy(epoch = Signal.get(ds.session.epoch), cards = []: List[PreparedCard], slots = []: List[PrepSlot], enabled = false, retry = false)
+  _ = deckEnd(ls, ds)
+  _ = queueStatus(ds, next)
+} yield next)
+
+def restoreReady(root: String, cards: List[Json], capacity: Int): IO[List[PreparedCard]] =
+  if (capacity <= 0 || List.isEmpty(cards)) IO.pure([]) else for {
+  card = List.at(cards, 0)
+  restored <- IO.attempt(for {
+  _ <- Cards.need(Cards.str(card, "status") == "ready", "cached card is excluded")
+  _ <- Cards.undecided(root, Cards.str(card, "id"))
+  _ <- Cards.current(root, card)
+  toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+  disk <- diskFiles(root, toml)
+  cached <- loadCard(root, card, disk, Cards.propsOf(card))
+} yield cached)
+  ready = restored match {
+  case Result.Ok(cached) => [cached]
+  case Result.Err(_) => []: List[PreparedCard]
+}
+  rest <- restoreReady(root, List.tail(cards), capacity - List.len(ready))
+} yield List.concat(ready, rest)
+
+def queueInit(root: String, ds: DeckS): IO[Unit] =
   for {
-    toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
-    left <- loadProposals(root)
-    _ = Signal.set(ds.pending, left)
-    pick <- deckPick(root, left, region)
-    _ <- if (Str.isEmpty(pick)) IO.pure(deckEnd(ls, ds)) else deckShow(root, toml, pick, ls, ds)
+    _ <- Session.guard(ds.session)
+    epoch = Signal.get(ds.session.epoch)
+    inputs <- Cards.currentInputs(root)
+    context = Cards.setHash(inputs)
+    _ <- Session.guard(ds.session)
+    _ <- Cards.need(epoch == Signal.get(ds.session.epoch), "session changed during queue initialization")
+    previous <- queueRead(ds)
+    _ <- Cards.need(!previous.enabled || Str.isEmpty(previous.context) || previous.context == context, "baseline changed; cancel stale preparation before refill")
+    _ <- if (previous.context == context && previous.epoch == epoch) queueUpdate(ds, q => for {
+  next = q.copy(enabled = true)
+  _ = queueStatus(ds, next)
+} yield next) else for {
+  known <- Cards.known(root, context)
+  excluded <- Cards.excludedPublications(root, context)
+  cached <- restoreReady(root, known, 2)
+  _ <- Session.guard(ds.session)
+  _ <- Cards.need(epoch == Signal.get(ds.session.epoch), "session changed during cache recovery")
+  _ <- queueUpdate(ds, q => if (q.enabled && q.context == context && q.epoch == epoch) q else for {
+  same = q.context == context
+  seen = List.distinct(List.concat(if (same) q.seen else [], Cards.seenKeys(known)))
+  ignored = List.distinct(List.concat(if (same) q.ignored else [], List.concat(List.map(known, c => Cards.str(c, "proposal")), excluded)))
+  next = emptyQueue(epoch).copy(context = context, enabled = true, automatic = q.automatic, cards = cached, seen = seen, ignored = ignored)
+  _ = queueStatus(ds, next)
+} yield next)
+} yield ()
   } yield ()
 
-def deckPick(root: String, left: List[String], region: List[String]): IO[String] =
-  if (List.isEmpty(left)) IO.pure("") else if (List.isEmpty(region)) IO.pure(List.at(left, 0)) else for {
-  regions <- IO.foreach(left, n => readProposal(root, n).map(props => Deck.regionOf(props)))
-  hit = List.indexOf(regions, region)
-} yield if (hit < 0) List.at(left, 0) else List.at(left, hit)
+def queueReserve(ds: DeckS, role: String, token: String): IO[Bool] =
+  for {
+    q <- queueChange(ds, current => if (current.enabled && !current.retry && current.epoch == Signal.get(ds.session.epoch) && Signal.get(ds.session.active) == 1 && Signal.get(ds.session.config) == Session.settings(ds.session) && List.len(current.cards) + List.len(current.slots) < 2 && !List.exists(current.slots, slot => slot.role == role)) current.copy(slots = List.append(current.slots, PrepSlot(token, role, ""))) else current)
+    _ = queueStatus(ds, q)
+  } yield List.exists(q.slots, slot => slot.token == token)
+
+def queueStage(ds: DeckS, token: String, role: String, name: String): IO[Unit] =
+  queueUpdate(ds, q => if (q.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || Signal.get(ds.session.config) != Session.settings(ds.session)) q else q.copy(slots = List.map(q.slots, slot => if (slot.token == token && (slot.role == "generate" && role == "published" || slot.role == "review" && role == "review" && Str.isEmpty(slot.name))) PrepSlot(token, role, name) else slot)))
+
+def queueRelease(ds: DeckS, token: String, failed: Bool): IO[Unit] =
+  queueUpdate(ds, q => for {
+  exists = List.exists(q.slots, slot => slot.token == token)
+  next = q.copy(slots = List.filter(q.slots, slot => slot.token != token), retry = q.retry || failed && exists)
+  _ = queueStatus(ds, next)
+} yield next)
+
+def queueCleanup(ds: DeckS, token: String, role: String): IO[Unit] =
+  queueUpdate(ds, q => if (!List.exists(q.slots, slot => slot.token == token && slot.role == role)) q else for {
+  next = q.copy(slots = List.filter(q.slots, slot => slot.token != token), retry = true)
+  _ = queueStatus(ds, next)
+} yield next)
+
+def queueClaimPublished(ds: DeckS, token: String): IO[PrepSlot] =
+  for {
+    q <- queueChange(ds, current => if (!current.enabled || current.retry || current.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || Signal.get(ds.session.config) != Session.settings(ds.session) || List.exists(current.slots, slot => slot.role == "review")) current else for {
+  published = List.filter(current.slots, slot => slot.role == "published")
+} yield if (List.isEmpty(published)) current else current.copy(slots = List.map(current.slots, slot => if (slot.token == List.at(published, 0).token) PrepSlot(token, "review", slot.name) else slot)))
+    claimed = List.filter(q.slots, slot => slot.token == token)
+  } yield if (List.isEmpty(claimed)) PrepSlot("", "", "") else List.at(claimed, 0)
+
+def queueFail(ds: DeckS, token: String, error: String): IO[Unit] =
+  queueUpdate(ds, q => if (!List.exists(q.slots, slot => slot.token == token)) q else for {
+  next = q.copy(slots = List.filter(q.slots, slot => slot.token != token), retry = true)
+  _ = Signal.set(ds.session.reviewStatus, Str.concat(error, "; retry explicitly"))
+  _ = queueStatus(ds, next)
+} yield next)
+
+def deckNext(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  queueWatch(root, ls, ds).flatMap(_ => queueInit(root, ds)).flatMap(_ => queuePulse(root, ls, ds)).handleErrorWith(e => IO.pure(Signal.set(ds.session.reviewStatus, e)))
+
+def queueRetry(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  queueUpdate(ds, q => q.copy(retry = false)).flatMap(_ => deckNext(root, ls, ds))
+
+def queueRestart(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    active = Signal.get(ds.session.active)
+    _ <- Session.pause(ds.session)
+    _ <- queueClear(ls, ds)
+    _ <- Session.invalidateBaseline(root, ds.session)
+    _ <- if (active == 1) Session.start(root, ds.session).flatMap(_ => queueInit(root, ds)) else IO.pure(())
+  } yield ()
+
+def queueWatch(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  if (Signal.get(ds.session.active) != 1 || Signal.get(ds.busy) != 0) IO.pure(()) else queueRead(ds).flatMap(q => if (!q.enabled || Str.isEmpty(q.context)) IO.pure(()) else Fs.exists(Fs.join(root, "build/ide/request.json")).flatMap(hit => if (hit == 0) Proposal.parse(Signal.get(ds.session.request), 1048576).flatMap(request => Cards.inputs(root, request)) else Cards.currentInputs(root)).map(inputs => Cards.setHash(inputs) == q.context).handleErrorWith(_ => IO.pure(false)).flatMap(same => if (same) IO.pure(()) else queueRestart(root, ls, ds)))
+
+def queueGenerate(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    _ <- queueWatch(root, ls, ds)
+    _ <- queueInit(root, ds)
+    _ <- Cards.need(Signal.get(ds.session.mode) == 1, "select Local model mode before Generate suggestion")
+    _ <- queueUpdate(ds, q => q.copy(automatic = true))
+    _ <- queueGenerateOne(root, ds)
+  } yield ()
+
+def queueGenerateOne(root: String, ds: DeckS): IO[Unit] =
+  for {
+    owner <- Ref.get(ds.session.jobs)
+    _ <- if (!Str.isEmpty(owner.token) || Signal.get(ds.session.count) >= 8) queueRead(ds).map(q => queueStatus(ds, q)) else for {
+  token <- Uuid.v4()
+  _ <- Session.generate(root, ds.session, _ => queueReserve(ds, "generate", token), name => queueStage(ds, token, "published", name), _ => queueCleanup(ds, token, "generate")).handleErrorWith(e => queueFail(ds, token, e))
+} yield ()
+  } yield ()
+
+def queuePulse(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  if (Signal.get(ds.session.active) != 1 || Signal.get(ds.busy) != 0) IO.pure(()) else for {
+  q <- queueRead(ds)
+  _ <- if (!q.enabled || q.retry) IO.pure(()) else for {
+  _ <- if (Str.isEmpty(q.context) || q.epoch != Signal.get(ds.session.epoch)) queueInit(root, ds) else IO.pure(())
+  current <- queueRead(ds)
+  _ = if (Str.isEmpty(Signal.get(ds.armed)) && List.nonEmpty(current.cards)) presentCard(List.at(current.cards, 0), ls, ds) else ()
+  owner <- Ref.get(ds.session.reviews)
+  _ <- if (!Str.isEmpty(owner.token)) IO.pure(()) else queueReviewOne(root, ls, ds)
+  latest <- queueRead(ds)
+  _ <- if (latest.automatic && Signal.get(ds.session.mode) == 1) queueGenerateOne(root, ds) else IO.pure(())
+} yield ()
+} yield ()
+
+def queueReviewOne(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    token <- Uuid.v4()
+    _ <- Session.own(ds.session, false, _ => queueClaimPublished(ds, token).flatMap(claimed => if (claimed.token == token) IO.pure(true) else queueReserve(ds, "review", token)), _ => queueReviewReserved(root, token, ls, ds), _ => queueCleanup(ds, token, "review")).handleErrorWith(e => queueFail(ds, token, e))
+  } yield ()
+
+def queueReviewReserved(root: String, token: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    q <- queueRead(ds)
+    slots = List.filter(q.slots, slot => slot.token == token && slot.role == "review")
+    _ <- Cards.need(List.len(slots) == 1, "review reservation changed")
+    reserved = List.at(slots, 0)
+    names <- if (!Str.isEmpty(reserved.name)) IO.pure([reserved.name]) else loadProposals(root)
+    current <- queueRead(ds)
+    taken = List.concat(current.ignored, List.concat(List.map(current.cards, c => Cards.str(c.card, "proposal")), List.map(List.filter(current.slots, slot => slot.token != token), slot => slot.name)))
+    available = List.filter(names, name => !List.contains(taken, name))
+    _ = Signal.set(ds.pending, List.take(available, 2 - List.len(current.cards)))
+    _ <- if (List.isEmpty(available)) queueRelease(ds, token, false) else for {
+  name = List.at(available, 0)
+  _ <- queueStage(ds, token, "review", name)
+  _ <- queuePrepare(root, name, token, ls, ds)
+} yield ()
+  } yield ()
+
+def queuePrepare(root: String, name: String, token: String, ls: LaneS, ds: DeckS): IO[Unit] =
+  (for {
+  _ <- Cards.recover(root)
+  props <- readProposal(root, name)
+  toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
+  disk <- diskFiles(root, toml)
+  flip <- Random.nextInt(2)
+  card <- Cards.freeze(root, name, props, flip)
+  q <- queueRead(ds)
+  source = Str.concat("source:", Cards.str(card, "b"))
+  _ <- if (List.contains(q.seen, source)) Cards.automatic(root, card, "duplicate-source").flatMap(_ => queueExclude(ds, token, name, [source])) else for {
+  _ <- reviewProposal(root, toml, disk, Deck.applyProposal(disk, props))
+  raw <- Fs.read(Lanes.reportPathAt(root, "ide"))
+  ready <- Cards.complete(root, card, raw)
+  _ <- if (Cards.str(ready, "status") == "excluded") queueExclude(ds, token, name, [source]) else for {
+  cached <- loadCard(root, ready, disk, props)
+  _ <- Cards.current(root, ready)
+  current <- queueRead(ds)
+  outcome = Str.concat("outcome:", cached.outcome)
+  _ <- if (List.contains(current.seen, outcome)) Cards.automatic(root, ready, "duplicate-outcome").flatMap(_ => queueExclude(ds, token, name, [source, outcome])) else queueUpdate(ds, latest => if (latest.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || latest.context != Cards.setHash(Cards.pairs(Proposal.field(ready, "inputs"))) || !List.exists(latest.slots, slot => slot.token == token && slot.role == "review" && slot.name == name)) latest else for {
+  next = latest.copy(cards = List.append(latest.cards, cached), slots = List.filter(latest.slots, slot => slot.token != token), seen = List.distinct(List.concat(latest.seen, [source, outcome])), ignored = List.distinct(name :: latest.ignored))
+  _ = if (List.isEmpty(latest.cards) && Signal.get(ds.busy) == 0) presentCard(cached, ls, ds) else ()
+  _ = queueStatus(ds, next)
+} yield next)
+} yield ()
+} yield ()
+} yield ()).handleErrorWith(e => if (e != Cards.stalePublicationMessage()) IO.fail(e) else for {
+  q <- queueRead(ds)
+  _ <- if (q.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || !List.exists(q.slots, slot => slot.token == token && slot.role == "review" && slot.name == name)) IO.pure(()) else Cards.excludePublication(root, name, q.context).flatMap(_ => queueExclude(ds, token, name, []))
+} yield ())
+
+def queueExclude(ds: DeckS, token: String, name: String, keys: List[String]): IO[Unit] =
+  queueUpdate(ds, q => if (!List.exists(q.slots, slot => slot.token == token)) q else for {
+  next = q.copy(slots = List.filter(q.slots, slot => slot.token != token), seen = List.distinct(List.concat(q.seen, keys)), ignored = List.distinct(name :: q.ignored))
+  _ = queueStatus(ds, next)
+} yield next)
 
 def deckRandom(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
-  deckGuard(ds, _ => deckRandomGo(root, ls, ds))
+  if (Signal.get(ds.busy) != 0 || Signal.get(ds.session.active) != 1) IO.pure(()) else queueUpdate(ds, q => if (q.retry || List.len(q.cards) != 2) q else for {
+  cards = [List.at(q.cards, 1), List.at(q.cards, 0)]
+  _ = presentCard(List.at(cards, 0), ls, ds)
+} yield q.copy(cards = cards))
 
-def deckRandomGo(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
-  for {
-    toml <- Chrome.readOr(Fs.join(root, "scuzz.toml"))
-    left <- loadProposals(root)
-    _ = Signal.set(ds.pending, left)
-    current = Cards.str(LspClient.parseJson(Signal.get(ds.card)), "proposal")
-    choices = List.filter(left, n => n != current)
-    i <- Random.nextInt(if (List.isEmpty(choices)) 1 else List.len(choices))
-    _ <- if (List.isEmpty(left)) IO.pure(deckEnd(ls, ds)) else if (List.isEmpty(choices)) IO.pure(()) else deckShow(root, toml, List.at(choices, i % List.len(choices)), ls, ds)
-  } yield ()
-
-def deckShow(root: String, toml: String, name: String, ls: LaneS, ds: DeckS): IO[Unit] =
-  for {
-    _ = deckEnd(ls, ds)
-    _ = Signal.set(ls.status, ["Preparing review"])
-    _ <- deckReview(root, toml, name, ls, ds).handleErrorWith(e => IO.pure(for {
+def queueAdvance(ls: LaneS, ds: DeckS, id: String): IO[Unit] =
+  queueUpdate(ds, q => if (List.isEmpty(q.cards) || Cards.str(List.at(q.cards, 0).card, "id") != id) q else for {
+  next = q.copy(cards = List.tail(q.cards))
   _ = deckEnd(ls, ds)
-  _ = Signal.set(ls.status, [e])
-} yield ()))
-  } yield ()
+  _ = if (List.isEmpty(next.cards)) () else presentCard(List.at(next.cards, 0), ls, ds)
+  _ = queueStatus(ds, next)
+} yield next)
 
-def deckReview(root: String, toml: String, name: String, ls: LaneS, ds: DeckS): IO[Unit] =
-  for {
-    _ <- Cards.recover(root)
-    props <- readProposal(root, name)
-    disk <- diskFiles(root, toml)
-    flip <- Random.nextInt(2)
-    card <- Cards.freeze(root, name, props, flip)
-    _ <- reviewProposal(root, toml, disk, Deck.applyProposal(disk, props))
-    raw <- Fs.read(Lanes.reportPathAt(root, "ide"))
-    ready <- Cards.complete(root, card, raw)
-    _ <- if (Cards.str(ready, "status") == "excluded") for {
-  _ <- dropProposal(root, name)
-  _ <- deckNextIn(root, Deck.regionOf(props), ls, ds)
-  _ = if (Str.isEmpty(Signal.get(ds.armed))) Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), ["No observed difference within the review budget"])) else ()
-} yield () else presentCard(root, ready, disk, props, flip, ls, ds)
-  } yield ()
-
-def presentCard(root: String, ready: Json, disk: List[(String, String)], props: List[(String, String)], flip: Int, ls: LaneS, ds: DeckS): IO[Unit] =
+def loadCard(root: String, ready: Json, disk: List[(String, String)], props: List[(String, String)]): IO[PreparedCard] =
   for {
     evidence = Diags.jsonField(ready, "evidence")
-    raw = Cards.text(evidence)
-    texts <- IO.foreach(Lanes.workFiles(evidence), name => Fs.read(Fs.join(Cards.cardDir(root, Cards.str(ready, "id")), name)))
-    _ = Signal.set(ls.raw, raw)
-    _ = Signal.set(ls.tls, texts)
+    _ <- Cards.need(Cards.candidateReportPass(evidence) && Str.matches(Cards.str(ready, "outcome"), "^[a-f0-9]{64}$"), "cached evidence is incomplete")
+    valid <- Cards.cachedEvidence(root, ready)
+    _ <- Cards.need(valid, "cached evidence changed; prepare the publication again")
+    texts <- IO.foreach(Lanes.workFiles(evidence), name => Cards.need(Str.matches(name, "^[A-Za-z0-9_-]+\\.txt$"), "unsafe cached timeline path").flatMap(_ => Cards.inside(root, Fs.join(".scuzz/ide/cards", Fs.join(Cards.str(ready, "id"), name)))).flatMap(_ => Fs.read(Fs.join(Cards.cardDir(root, Cards.str(ready, "id")), name))))
     vers <- verifyFilesOf(root)
+  } yield PreparedCard(ready, texts, Deck.guardLines(vers), Deck.changedTriples(disk, Deck.applyProposal(disk, props)), Cards.str(ready, "outcome"))
+
+def presentCard(cached: PreparedCard, ls: LaneS, ds: DeckS): Unit =
+  for {
+    ready = cached.card
+    evidence = Diags.jsonField(ready, "evidence")
+    raw = Cards.text(evidence)
+    flip = Json.getInt(ready, "flip", 0)
+    _ = Signal.set(ls.raw, raw)
+    _ = Signal.set(ls.tls, if (flip == 0) cached.texts else Deck.swapPairs(cached.texts))
     _ = Signal.set(ds.flip, flip)
     _ = Signal.set(ls.works, List.map(Lanes.workItems(LspClient.parseJson(raw)), w => Cards.str(w, "label")))
-    _ = Signal.set(ls.srcs, Deck.changedTriples(disk, Deck.applyProposal(disk, props)))
-    _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), Deck.guardLines(vers)))
+    _ = Signal.set(ls.srcs, cached.sources)
+    _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), cached.guards))
     _ = Signal.set(ls.scope, Lanes.scopeLines(LspClient.parseJson(raw), flip))
     _ = Signal.set(ls.rev, "Left")
     _ = Signal.set(ls.blab, "Right")
-    _ = if (flip == 0) () else Signal.set(ls.tls, Deck.swapPairs(Signal.get(ls.tls)))
     _ = deckArm(ls)
     _ = Signal.set(ds.title, "Behavior review")
     _ = Signal.set(ds.card, Cards.text(ready))
@@ -192,19 +382,23 @@ def chooseCard(root: String, id: String, lane: Int, ls: LaneS, ds: DeckS, dirtie
   proposalLane = if (Json.getInt(c, "flip", 0) == 1) 0 else 1
   hits <- if (lane == proposalLane) Cards.dirtyHits(root, props, dirties(())) else IO.pure([]: List[String])
   _ <- Cards.need(List.isEmpty(hits), List.join(Deck.dirtyLines(hits), Lanes.nl()))
+  accepted = lane >= 0 && lane == proposalLane
+  _ <- if (accepted) Session.pause(ds.session) else IO.pure(())
   _ <- Cards.decide(root, c, lane)
-  accepted = lane >= 0 && lane == (if (Signal.get(ds.flip) == 1) 0 else 1)
+  _ <- if (accepted) Session.invalidateBaseline(root, ds.session) else IO.pure(())
   bytesMatch <- if (accepted) IO.foreach(props, p => Fs.read(Fs.join(root, p._1)).map(src => src == p._2)) else IO.pure([]: List[Bool])
   _ <- Property.assert("accepted frozen bytes", List.forall(bytesMatch, b => b))
   _ <- if (accepted) refresh else IO.pure(())
-  _ = Signal.set(ds.last, Deck.revealText(if (lane < 0) "abstained" else if (lane == (if (Signal.get(ds.flip) == 1) 0 else 1)) "accepted" else "baseline chosen", Cards.str(c, "proposal"), if (Signal.get(ds.flip) == 1) "Left" else "Right"))
-  _ = deckEnd(ls, ds)
+  _ = Signal.set(ds.last, Deck.revealText(if (lane < 0) "abstained" else if (accepted) "accepted" else "baseline chosen", Cards.str(c, "proposal"), if (Signal.get(ds.flip) == 1) "Left" else "Right"))
+  _ <- if (accepted) queueClear(ls, ds).flatMap(_ => Session.start(root, ds.session)).flatMap(_ => queueInit(root, ds)) else queueAdvance(ls, ds, id)
   _ <- dropProposal(root, Cards.str(c, "proposal"))
-  _ <- deckNextIn(root, Deck.regionOf(props), ls, ds)
-} yield ()).handleErrorWith(e => IO.pure(for {
+  _ <- queuePulse(root, ls, ds)
+} yield ()).handleErrorWith(e => if (id != Signal.get(ds.armed)) IO.pure(()) else queueUpdate(ds, q => for {
+  next = q.copy(retry = true)
   _ = deckEnd(ls, ds)
   _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), [e]))
-} yield ()))
+  _ = queueStatus(ds, next)
+} yield next))
 
 def decisionButtons(root: String, id: String, ls: LaneS, ds: DeckS, objectiveSession: SessionS, paths: Signal[List[String]], bodies: Signal[List[String]], origs: Signal[List[String]], idx: Signal[Int], buf: Signal[String], orig: Signal[String]): View =
   View.wrap(View.button("Choose left", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, 0, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig)))), View.button("Choose right", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, 1, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Can't decide", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, -1, ls, ds, _ => [], IO.pure(())))))
@@ -231,18 +425,25 @@ def refreshBuffers(paths: Signal[List[String]], bodies: Signal[List[String]], or
 
 def editorWrite(ls: LaneS, ds: DeckS, io: Unit => IO[Unit]): IO[Unit] =
   if (Signal.get(ds.busy) != 0) IO.pure(()) else deckGuard(ds, _ => for {
-  _ = if (Str.isEmpty(Signal.get(ds.armed))) () else deckEnd(ls, ds)
+  active = Signal.get(ds.session.active)
+  _ <- if (active == 1) Session.pause(ds.session) else IO.pure(())
+  _ <- queueClear(ls, ds)
+  _ <- Session.invalidateBaseline(Signal.get(ds.root), ds.session)
   _ <- io(())
+  _ <- if (active == 1) Session.start(Signal.get(ds.root), ds.session).flatMap(_ => queueInit(Signal.get(ds.root), ds)) else IO.pure(())
 } yield ())
 
 def undoCard(root: String, ls: LaneS, ds: DeckS, dirties: Unit => List[String], refresh: IO[Unit]): IO[Unit] =
   deckGuard(ds, _ => for {
   _ <- Cards.need(List.isEmpty(dirties(())), "save or discard dirty buffers before Undo")
-  _ = deckEnd(ls, ds)
+  active = Signal.get(ds.session.active)
+  _ <- Session.pause(ds.session)
+  _ <- queueClear(ls, ds)
+  _ <- Session.invalidateBaseline(root, ds.session)
   _ <- Cards.undo(root)
   _ <- refresh
   _ = Signal.set(ds.last, "Undo completes")
-  _ <- deckNextIn(root, [], ls, ds)
+  _ <- if (active == 1) Session.start(root, ds.session).flatMap(_ => queueInit(root, ds)) else IO.pure(())
 } yield ()).handleErrorWith(e => IO.pure(Signal.set(ls.status, [e])))
 
 def writeMutant(root: String, kept: List[(String, String, Prog)], disk: List[(String, String)], site: Int): IO[Unit] =
@@ -258,7 +459,7 @@ def writeMutant(root: String, kept: List[(String, String, Prog)], disk: List[(St
   } yield ()
 
 def generateProposals(root: String, set: List[(String, String)], cur: String, ls: LaneS, ds: DeckS): IO[Unit] =
-  deckGuard(ds, _ => generateProposalsGo(root, Deck.regionSet(set, cur), ls, ds))
+  deckGuard(ds, _ => generateProposalsGo(root, Deck.regionSet(set, cur), ls, ds)).flatMap(_ => deckNext(root, ls, ds))
 
 def generateProposalsGo(root: String, set: List[(String, String)], ls: LaneS, ds: DeckS): IO[Unit] =
   for {
@@ -267,7 +468,6 @@ def generateProposalsGo(root: String, set: List[(String, String)], ls: LaneS, ds
     kept = Mutate.parseLive(set)
     seed <- Random.nextInt(1000000)
     _ <- IO.foreachDiscard(Mutate.pickSites(seed, if (sites > 8) 8 else sites, sites), s => writeMutant(root, kept, set, s))
-    _ <- deckNextIn(root, [], ls, ds)
   } yield ()
 
 def loadDelta(root: String, status: Signal[List[String]], raw: Signal[String], rev: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], blab: Signal[String]): IO[Unit] =
@@ -588,12 +788,12 @@ Y
     deckBusy = Signal.make(0)
     lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, srcFiles, playOn, questionWork, resultLeft, resultRight, deckFlip, evidenceScope, evidenceDetails)
     deckCard = Signal.make("")
-    deck = DeckS(deckCard, deckPending, deckArmed, deckTitle, deckFlip, deckLast, deckBusy)
     objectiveSession <- Session.create(root)
+    readyQueue = Signal.makeN("$mirror", emptyQueue(Signal.get(objectiveSession.epoch)).copy(enabled = Signal.get(objectiveSession.active) == 1))
+    readyStatus = Signal.make("")
+    deck = DeckS(deckCard, deckPending, deckArmed, deckTitle, deckFlip, deckLast, deckBusy, objectiveSession, readyQueue, readyStatus, dirSig)
     _ <- if (Str.isEmpty(recoveryError)) loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel) else IO.pure(Signal.set(deltaStatus, [recoveryError]))
-    pending0 <- loadProposals(root)
-    _ = Signal.set(deckPending, pending0)
-    _ = Signal.set(deckTitle, if (List.isEmpty(pending0)) "" else Deck.deckTitle(List.at(pending0, 0)))
+    _ = queueStatus(deck, Signal.get(readyQueue))
     _ = LspClient.frame("{}")
     _ = LspClient.parseLen(Str.concat("Content-Length: 2", Str.concat(LspClient.headerBreak(), "{}")))
     _ = Property.check("need", LspClient.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
@@ -607,7 +807,7 @@ Y
     _ <- Fiber.fork(IO.forever(for {
   _ = Property.sometimes("polledFiles")
   _ <- IO.sleep(300)
-  _ <- Session.poll(objectiveSession, _ => deckEnd(lanes, deck))
+  _ <- Session.poll(Signal.get(dirSig), objectiveSession, _ => queueClear(lanes, deck))
   ps = Signal.get(paths)
   i = Signal.get(idx)
   curB = Signal.get(buf)
@@ -627,11 +827,7 @@ Y
   _ = Signal.set(scenarios, Chrome.scenarioRels(walked))
   names <- loadClaimNames(dir, Chrome.verifyFileRels(walked))
   _ = Signal.set(claims, names)
-  _ <- if (Signal.get(deckBusy) != 0) IO.pure(()) else for {
-  left <- loadProposals(dir)
-  _ = Signal.set(deckPending, left)
-  _ = if (Str.isEmpty(Signal.get(deckArmed))) Signal.set(deckTitle, if (List.isEmpty(left)) "" else Deck.deckTitle(List.at(left, 0))) else ()
-} yield ()
+  _ <- queueWatch(dir, lanes, deck).flatMap(_ => queuePulse(dir, lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.reviewStatus, e)))
   fp = Signal.get(fuzzPid)
   _ <- if (fp == 0) IO.pure(()) else for {
   maps <- loadFuzzMaps(dir)
@@ -731,7 +927,7 @@ Y
 } yield ())), View.each(scenarios, s => View.textButton(s, _ => for {
   _ = Property.sometimes("tappedVerify")
   _ = Signal.set(page, 1)
-} yield ())))), View.section("session", "Session", View.column(Session.view(Signal.get(dirSig), objectiveSession, _ => deckNext(Signal.get(dirSig), lanes, deck), _ => deckEnd(lanes, deck)), View.wrap(View.button("Run", _ => for {
+} yield ())))), View.section("session", "Session", View.column(Session.view(Signal.get(dirSig), objectiveSession, _ => deckNext(Signal.get(dirSig), lanes, deck), _ => queueGenerate(Signal.get(dirSig), lanes, deck), _ => queueClear(lanes, deck)), View.wrap(View.button("Run", _ => for {
   _ = Property.sometimes("tappedRun")
   line <- runProject(Signal.get(dirSig))
   runOut = List.append(Signal.get(output), line)
@@ -801,7 +997,7 @@ Y
   _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
 } yield ())), View.outlinedButton("Proposals", _ => for {
   _ = Property.sometimes("tappedProposals")
-  _ <- Session.run(objectiveSession, _ => deckNext(Signal.get(dirSig), lanes, deck))
+  _ <- deckNext(Signal.get(dirSig), lanes, deck)
 } yield ()), View.outlinedButton("Generate", _ => for {
   _ = Property.sometimes("tappedGenerate")
   root = Signal.get(dirSig)
@@ -810,7 +1006,7 @@ Y
   i = Signal.get(idx)
   set = Chrome.bufferFiles(own, List.map(Signal.get(paths), p => Chrome.stemOf(p)), List.setAt(Signal.get(bodies), i, Signal.get(buf)))
   _ <- generateProposals(root, set, Chrome.stemOf(Signal.get(pathSig)), lanes, deck)
-} yield ())), View.bindText(objectiveSession.objective), View.bindText(objectiveSession.status), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckArmed, s => if (Str.isEmpty(s)) 0 else 1), 1, View.column(View.bindText(deckTitle), View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => decisionButtons(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.wrap(View.choiceChip(evidenceDetails, 1, "More evidence"), View.choiceChip(evidenceDetails, 0, "Question")), View.showWhen(evidenceDetails, 1, View.column(View.each(evidenceScope, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
+} yield ())), View.bindText(objectiveSession.objective), View.bindText(objectiveSession.status), View.bindText(readyStatus), View.button("Retry preparation", _ => queueRetry(Signal.get(dirSig), lanes, deck)), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckArmed, s => if (Str.isEmpty(s)) 0 else 1), 1, View.column(View.bindText(deckTitle), View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => decisionButtons(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.wrap(View.choiceChip(evidenceDetails, 1, "More evidence"), View.choiceChip(evidenceDetails, 0, "Question")), View.showWhen(evidenceDetails, 1, View.column(View.each(evidenceScope, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
   _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
 } yield ())))))), View.bindText(questionWork), View.bindText(stepTitle), View.wrap(View.choiceChip(playOn, 1, "Play"), View.choiceChip(playOn, 0, "Pause")), View.row(View.showWhen(evidenceDetails, 1, View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
@@ -839,5 +1035,5 @@ Y
   _ = if (same) () else Signal.set(dirty, Str.len("x"))
   _ = if (same) () else Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), nu))
   _ = Signal.set(infoLine, if (same) "no rename" else "renamed")
-} yield ())))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => stopOwned(fuzzPid, diffPid)))
+} yield ())))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => queueClear(lanes, deck)).flatMap(_ => stopOwned(fuzzPid, diffPid)))
   } yield ()

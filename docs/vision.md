@@ -12,14 +12,6 @@ The first complete feature needs the remaining gates below. Implement them in or
 
 ## Implementation gates
 
-### 4. Keep the next card ready
-
-Prepare one successor while the developer reviews the current card. Reuse baseline checking and replay where the existing compiler permits it. Cache by full review identity. Keep one local generation request and one review job at most. Bound inbox inspection and import to the ready queue capacity. Generation and review can run while navigation remains responsive.
-
-After acceptance, Undo, rule installation, objective change, or model change, cancel stale work and refill from the new baseline. A successor prepared for the old baseline is usable after baseline choice or abstention only. Show preparation status while the new baseline has no ready card. Do not reuse old replacement files as new proposals. Suppress duplicate source sets and observed outcomes within one baseline and objective. End the queue with a visible status when the request budget is exhausted.
-
-**Gate:** Cached card, workload, and step navigation starts no probe, build, or subprocess. A late response cannot replace the displayed card or enter the next baseline. No owned job remains after pause or exit. Pause stops local generation, owned inference, and candidate preparation. It does not stop independent producers. Leave new inbox candidates pending until resume. Repeated Generate actions cannot exceed queue or request limits. Measure cold readiness, warm readiness, and navigation separately. Target warm cached navigation below 250 ms on the measurement host. Record an unmet target; do not weaken checks to reach it.
-
 ### 5. Learn from local choices
 
 Send bounded recent preferences, abstention reasons, and Undo results with local model requests and exported generation requests. Keep candidate rationale hidden before a blind choice. Show the reveal and a short result after the choice. Let the developer retain region focus or select another region.

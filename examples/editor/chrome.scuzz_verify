@@ -260,3 +260,33 @@ def preparationHasOneOwner(t: Timeline): Verdict =
 def generationReservesItsBudget(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.driveHas(t, i, "generationBurst") || Timeline.signalInt(t, i, "burstBound") == 1 && Timeline.fileTextIs(t, i, "generation-burst/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)"))
 
+def requestsKeepFrozenCards(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "requestFlow") || Timeline.signalInt(t, i, "requestStable") == 1 && Timeline.fileTextIs(t, i, "proof/src/Main.scuzz", if (Timeline.signalInt(t, i, "requestAccepted") == 1) """@main def main: IO[Unit] =
+  IO.println(2)
+""" else """@main def main: IO[Unit] =
+  IO.println(1)
+"""))
+
+def generationAndReviewHaveSeparateOwners(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "dualOwnershipFlow") || Timeline.signalInt(t, i, "ownersBound") == 1)
+
+def publicationsKeepTheirRequests(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "requestImportFlow") || Timeline.signalInt(t, i, "requestImportBound") == 1)
+
+def cachedCardsKeepEvidence(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "cachedCardFlow") || Timeline.signalInt(t, i, "cachedCardBound") == 1)
+
+def readyQueueStaysBounded(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "queueFlow") || Timeline.signalInt(t, i, "queueBound") == 1)
+
+def requestArchivesBindTheModel(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "requestModelFlow") || Timeline.signalInt(t, i, "requestModelBound") == 1 && Timeline.fileTextIs(t, i, "proof/src/Main.scuzz", """@main def main: IO[Unit] =
+  IO.println(1)
+"""))
+
+def queueAdmissionReleasesCapacity(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "queueAdmissionFlow") || Timeline.signalInt(t, i, "quotaAdmissionBound") == 1)
+
+def readyQueueRestoresFrozenEvidence(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "queueCacheFlow") || Timeline.signalInt(t, i, "queueCacheBound") == 1)
+

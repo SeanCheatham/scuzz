@@ -2314,7 +2314,18 @@ def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: Strs, defs: 
   if (f == "Property.force") emitPropForce(List.at(args, 0), prefix, strs, defs, ens, ps, loc) else if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps, loc) else emitCallKitAligned(f, alignCallArgs(f, args, defs, ens, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, fid)
 
 def emitCallKitAligned(f: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitCall2(f, emitArgList(args, prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid), prefix, defs, args, ens, ps, modOfLoc(loc))
+  emitCall2(f, emitArgList(callLambdaArgs(args, funParamsOf(defs, f, modOfLoc(loc))), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid), prefix, defs, args, ens, ps, modOfLoc(loc))
+
+def callLambdaArgs(args: List[Expr], params: List[Param]): List[Expr] =
+  if (List.isEmpty(args) || List.isEmpty(params)) args else callLambdaArg(List.at(args, 0), List.at(params, 0).ty) :: callLambdaArgs(List.tail(args), List.tail(params))
+
+def callLambdaArg(arg: Expr, expected: String): Expr =
+  arg match {
+    case Expr.ELam(bind, ann, body) => if (ann != "" || !Type.isFun(Type.parse(expected))) arg else for {
+  input = Type.show(Type.funArg(Type.parse(expected)))
+} yield if (Check.concreteTy(input)) Expr.ELam(bind, input, body) else arg
+    case _ => arg
+  }
 
 def alignCallArgs(f: String, args: List[Expr], defs: Ftab, ens: List[En], mod: String): List[Expr] =
   if (hasEn(ens, f)) alignFill(Check.constructorFields(ens, f), args) else alignCallArgsCase(f, args, defs, ens, mod, Map.getOrElse(defs.caseOwners, f, ""))
@@ -3748,7 +3759,7 @@ def isUiKit(f: String): Bool =
   Str.startsWith(f, "View.") || Str.startsWith(f, "Signal.") || Str.startsWith(f, "Color.") || Str.startsWith(f, "Theme.") || Str.startsWith(f, "Icon.") || Str.startsWith(f, "Property.") || Str.startsWith(f, "Ui.")
 
 def emitQual(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitQual2(en, name, emitArgList(alignFill(funParamsOfHit(findDefMod(defs, en, name)), args), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid), prefix, defs, userArgTys(alignFill(funParamsOfHit(findDefMod(defs, en, name)), args), defs, ens, ps, loc), exprRetTyEns(Expr.ECall(Str.concat(en, Str.concat(".", name)), args, 0), defs, ens, ps, loc))
+  emitQual2(en, name, emitArgList(callLambdaArgs(alignFill(funParamsOfHit(findDefMod(defs, en, name)), args), funParamsOfHit(findDefMod(defs, en, name))), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid), prefix, defs, userArgTys(alignFill(funParamsOfHit(findDefMod(defs, en, name)), args), defs, ens, ps, loc), exprRetTyEns(Expr.ECall(Str.concat(en, Str.concat(".", name)), args, 0), defs, ens, ps, loc))
 
 def emitQual2(en: String, name: String, p: (String, List[String], List[Bool]), prefix: String, defs: Ftab, argTys: List[String], retTy: String): Slot =
   p match {

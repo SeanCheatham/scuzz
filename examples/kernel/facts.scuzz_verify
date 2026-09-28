@@ -229,3 +229,8 @@ oracle constructorAlternativeTexts(s: String): Bool =
 oracle constructorAlternativeGuards(n: Int): Bool =
   Main.constructorAlternativeGuard(LiteralPacket.Number(n)) == (if (n > 0) n else 0) && Main.constructorAlternativeGuard(LiteralPacket.Fields("ready", 0, false, n)) == (if (n > 0) n else 0)
 
+oracle callbackCopiesKeepFields(s: String): Bool =
+  for {
+    copied = Main.copiedCallback(s)
+  } yield copied.label == s && copied.items == [s] && Main.applyPattern(entry => Str.len(entry.copy(label = s).label), PatternFields("before", [s])) == Str.len(s) && Property.force(Main.applyPatternIo(entry => IO.pure(Str.len(entry.copy(label = s).label)), PatternFields("before", [s]))) == Str.len(s)
+

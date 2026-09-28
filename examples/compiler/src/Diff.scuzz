@@ -1,4 +1,4 @@
-record DiffSide(job: FuzzJob, seeds: String, runs: List[FuzzRun], drivers: List[String], vers: List[String], defs: List[Fun])
+record DiffSide(job: FuzzJob, seeds: String, runs: List[FuzzRun], drivers: List[String], vers: List[String], defs: List[Fun], cache: String, cacheUse: Ref[(Int, Int)])
 
 record DiffOut(code: Int, why: String, unrun: Bool, tl: String, controls: List[String])
 
@@ -89,8 +89,9 @@ def sideFiles(dir: String, outDir: String, iterations: Int, seed: Int, toml: Str
     scn <- Drive.fuzzReadScenario(dir)
     drivers <- Drive.fuzzReadOr(Drive.joinSlash(outDir, "drivers.txt"))
     srv <- Ref.of(("", 0))
+    cacheUse <- Ref.of((0, 0))
     _ <- clear(pdir)
-  } yield DiffSide(FuzzJob(dir, pdir, Drive.exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, false, "", srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens))
+  } yield DiffSide(FuzzJob(dir, pdir, Drive.exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, false, "", srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens), "", cacheUse)
 
 def build(toml: String, files: List[(String, String)], outDir: String, m: Man): IO[Unit] =
   Drive.fpText(toml, files).flatMap(fp => Drive.fuzzReadOr(stampPath(outDir)).flatMap(old => Fs.exists(Drive.exeName(outDir, m.name)).flatMap(hit => if (old == fp && hit != 0) IO.pure(()) else buildFresh(toml, files, outDir, m, fp))))
@@ -107,7 +108,7 @@ def stampPath(outDir: String): String =
 def clear(probe: String): IO[Unit] =
   IO.foreachDiscard(Drive.fuzzCoveragePath(probe) :: Drive.fuzzClassPath(probe) :: Drive.fuzzSometimesPath(probe) :: Drive.fuzzTriggerPath(probe) :: Drive.fuzzVariedPath(probe) :: Drive.fuzzClaimPath(probe) :: Drive.fuzzSchedPicksPath(probe) :: Drive.fuzzDistancePath(probe) :: Verify.noStr(), p => Fs.write(p, ""))
 
-def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: List[(String, String)], seed: Int, iterations: Int, scuzz: String): IO[Unit] =
+def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: List[(String, String)], seed: Int, iterations: Int, scuzz: String, context: String): IO[Unit] =
   for {
     m = Manifest.parse(toml)
     _ <- Drive.manNeed(m)
@@ -123,7 +124,10 @@ def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: Li
     filesB <- Drive.fuzzCollectFiles(dir, rawB)
     host <- if (m.hasUi) Drive.uiHostExe() else IO.pure(scuzz)
     _ <- if (m.hasUi && host == "") IO.fail("scuzz ide: no headless host for a [ui] package") else IO.pure(())
-    a <- sideEv(dir, Drive.joinSlash(root, "a"), seed, m, filesA, host)
+    baseline <- sideEv(dir, Drive.joinSlash(root, "a"), seed, m, filesA, host)
+    cache = if (Str.matches(context, "^[a-f0-9]{64}$")) Drive.joinSlash(root, Drive.joinSlash("baseline", baselineKey(context, toml, filesA, host, seed))) else ""
+    _ <- if (cache == "") IO.pure(()) else Fs.mkdirs(cache)
+    a = baseline.copy(cache = cache)
     b <- sideEv(dir, Drive.joinSlash(root, "b"), seed, m, filesB, host)
     _ <- if (iterations < 0 || iterations > 32) IO.fail("scuzz ide: review search budget must be 0..32") else IO.pure(())
     runs = workloads(a, b)
@@ -149,9 +153,10 @@ def reviewScope(a: DiffSide, b: DiffSide, runs: List[FuzzRun], rows: List[DiffRo
     pairs = List.map(a.vers, src => ("", src))
     claims = Verify.claimNames(a.vers)
     triggers = Verify.triggersOf(pairs)
+    cacheUse <- Ref.get(a.cacheUse)
     corpus = List.len(List.filter(runs, r => r.path != "idle" && r.path != seedsLabel()))
     seeds = List.len(List.filter(runs, r => r.path == seedsLabel()))
-  } yield Json.Obj([("complete", Json.Bool(h.ran == iterations)), ("required", Json.Int(List.len(runs))), ("completed_required", Json.Int(List.len(runs))), ("recorded_workloads", Json.Int(List.len(rows))), ("corpus", Json.Int(corpus)), ("corpus_files", Json.Int(List.len(a.runs))), ("seeds", Json.Int(seeds)), ("registered_claims", Json.Arr(List.map(claims, n => Json.Str(n)))), ("declared_triggers", Json.Arr(List.map(triggers, n => Json.Str(n)))), ("reached_a", Json.Arr(List.map(Verify.triggerReached(trigA), n => Json.Str(n)))), ("reached_b", Json.Arr(List.map(Verify.triggerReached(trigB), n => Json.Str(n)))), ("reach_scope", Json.Str("required workloads, search, and shrinking probes")), ("parity", Json.Str("evaluator evidence; compiled witness parity is a separate check")), ("alignment", Json.Str("states align by index; added or removed steps can shift the comparison"))])
+  } yield Json.Obj([("complete", Json.Bool(h.ran == iterations)), ("baseline_reused", Json.Int(cacheUse._1)), ("baseline_probes", Json.Int(cacheUse._2)), ("required", Json.Int(List.len(runs))), ("completed_required", Json.Int(List.len(runs))), ("recorded_workloads", Json.Int(List.len(rows))), ("corpus", Json.Int(corpus)), ("corpus_files", Json.Int(List.len(a.runs))), ("seeds", Json.Int(seeds)), ("registered_claims", Json.Arr(List.map(claims, n => Json.Str(n)))), ("declared_triggers", Json.Arr(List.map(triggers, n => Json.Str(n)))), ("reached_a", Json.Arr(List.map(Verify.triggerReached(trigA), n => Json.Str(n)))), ("reached_b", Json.Arr(List.map(Verify.triggerReached(trigB), n => Json.Str(n)))), ("reach_scope", Json.Str("required workloads, search, and shrinking probes")), ("parity", Json.Str("evaluator evidence; compiled witness parity is a separate check")), ("alignment", Json.Str("states align by index; added or removed steps can shift the comparison"))])
 
 def withReview(report: String, scope: Json): String =
   Json.parse(report) match {
@@ -177,8 +182,9 @@ def sideEv(dir: String, outDir: String, seed: Int, m: Man, files: List[(String, 
     scn <- Drive.fuzzReadScenario(dir)
     drivers <- Drive.fuzzReadOr(Drive.joinSlash(outDir, "drivers.txt"))
     srv <- Ref.of(("", 0))
+    cacheUse <- Ref.of((0, 0))
     _ <- clear(pdir)
-  } yield DiffSide(FuzzJob(dir, pdir, "", m.name, m.hasUi, 0, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, true, host, srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens))
+  } yield DiffSide(FuzzJob(dir, pdir, "", m.name, m.hasUi, 0, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, true, host, srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens), "", cacheUse)
 
 def evWhy(code: Int, err: String): String =
   if (code == 3) "check failed" else why(code, err)
@@ -209,6 +215,69 @@ def lastLine(s: String): String =
 
 def baseName(p: String): String =
   if (Str.lastIndexOf(p, "/") < 0) p else Str.drop(p, Str.lastIndexOf(p, "/") + 1)
+
+def cacheText(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(text) => text
+    case Result.Err(_) => ""
+  }
+
+def baselineKey(context: String, toml: String, files: List[(String, String)], host: String, seed: Int): String =
+  Hash.sha256(cacheText(Json.Arr([Json.Str(context), Json.Str(toml), Json.Arr(List.map(files, f => Json.Arr([Json.Str(f._1), Json.Str(f._2)]))), Json.Str(host), Json.Int(seed)])))
+
+def cacheRunKey(run: FuzzRun): String =
+  Hash.sha256(cacheText(Json.Arr([Json.Str(run.src), Json.Str(witnessBody(run))])))
+
+def cacheAudits(job: FuzzJob): List[String] =
+  [Drive.fuzzClassPath(job.outDir), Drive.fuzzSometimesPath(job.outDir), Drive.fuzzTriggerPath(job.outDir)]
+
+def cachePayload(out: DiffOut, audits: List[String]): Json =
+  Json.Obj([("code", Json.Int(out.code)), ("why", Json.Str(out.why)), ("unrun", Json.Bool(out.unrun)), ("timeline", Json.Str(out.tl)), ("controls", Json.Arr(List.map(out.controls, c => Json.Str(c)))), ("audits", Json.Arr(List.map(audits, text => Json.Str(text))))])
+
+def cacheable(out: DiffOut): Bool =
+  !out.unrun && (out.code == 0 || out.why == "check failed" || constraintFailure(out.why))
+
+def cachedOut(j: Json): DiffOut =
+  DiffOut(Json.getInt(j, "code", -1), Json.getStr(j, "why", ""), Json.getBool(j, "unrun", true), Json.getStr(j, "timeline", ""), List.map(Json.arr(Lsp.jGet(j, "controls")), c => Json.strOr(c, "")))
+
+def cacheRead(path: String, key: String): IO[Json] =
+  Drive.fuzzReadOr(path).map(raw => Json.parse(raw) match {
+  case Result.Ok(j) => for {
+  payload = Lsp.jGet(j, "payload")
+  audits = Json.arr(Lsp.jGet(payload, "audits"))
+} yield if (Json.getStr(j, "key", "") == key && Json.getStr(j, "hash", "") == Hash.sha256(cacheText(payload)) && cacheable(cachedOut(payload)) && List.len(audits) == 3 && List.forall(audits, text => Json.isStr(text))) payload else Json.Null()
+  case Result.Err(_) => Json.Null()
+})
+
+def cacheRestore(job: FuzzJob, audits: List[String]): IO[Unit] =
+  IO.foreachDiscard(List.range(0, 3), i => for {
+  path = List.at(cacheAudits(job), i)
+  old <- if (i == 0) IO.pure("") else Drive.fuzzReadOr(path)
+  _ <- Fs.write(path, Str.concat(old, List.at(audits, i)))
+} yield ())
+
+def probeSide(side: DiffSide, run: FuzzRun): IO[DiffOut] =
+  if (side.cache == "") Ref.get(side.cacheUse).flatMap(use => probe(side.job, run).flatMap(out => Ref.set(side.cacheUse, (use._1, use._2 + 1)).map(_ => out))) else for {
+  key = cacheRunKey(run)
+  path = Drive.joinSlash(side.cache, Str.concat(key, ".json"))
+  cached <- cacheRead(path, key)
+  use <- Ref.get(side.cacheUse)
+  out <- if (!Json.isNull(cached)) for {
+  _ <- cacheRestore(side.job, List.map(Json.arr(Lsp.jGet(cached, "audits")), text => Json.strOr(text, "")))
+  _ <- Ref.set(side.cacheUse, (use._1 + 1, use._2))
+} yield cachedOut(cached) else for {
+  paths = List.tail(cacheAudits(side.job))
+  old <- IO.foreach(paths, p => Drive.fuzzReadOr(p))
+  _ <- IO.foreachDiscard(paths, p => Fs.write(p, ""))
+  out <- IO.ensure(for {
+  result <- probe(side.job, run)
+  audits <- IO.foreach(cacheAudits(side.job), p => Drive.fuzzReadOr(p))
+  payload = cachePayload(result, audits)
+  _ <- if (!cacheable(result)) IO.pure(()) else Fs.write(path, cacheText(Json.Obj([("key", Json.Str(key)), ("hash", Json.Str(Hash.sha256(cacheText(payload)))), ("payload", payload)])))
+} yield result, IO.foreachDiscard(List.range(0, 2), i => Drive.fuzzReadOr(List.at(paths, i)).flatMap(current => Fs.write(List.at(paths, i), Str.concat(List.at(old, i), current)))))
+  _ <- Ref.set(side.cacheUse, (use._1, use._2 + 1))
+} yield out
+} yield out
 
 def probe(job: FuzzJob, run: FuzzRun): IO[DiffOut] =
   if (job.ev) probeEv(job, run) else probeBuilt(job, run)
@@ -264,7 +333,7 @@ def rowWith(r: FuzzRun, a: DiffOut, b: DiffOut, d: TlDelta): DiffRow =
   DiffRow(label(r), r, classOf(a, b, d), d, a.why, b.why, a.controls, b.controls)
 
 def pair(a: DiffSide, b: DiffSide, r: FuzzRun): IO[DiffRow] =
-  probe(a.job, r).flatMap(x => probe(b.job, r).map(y => rowOf(r, x, y)))
+  probeSide(a, r).flatMap(x => probeSide(b, r).map(y => rowOf(r, x, y)))
 
 def replay(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], acc: List[DiffRow]): IO[List[DiffRow]] =
   if (List.isEmpty(runs)) IO.pure(List.reverse(acc)) else (if (a.job.ev) keptAs(a, b, root, List.at(runs, 0), Str.concat(label(List.at(runs, 0)), Str.concat(" [", Str.concat(Str.fromInt(List.len(acc)), "]")))) else kept(a, b, root, List.at(runs, 0))).flatMap(row => (if (a.job.ev) reviewGate(root, row, List.reverse(acc)) else IO.pure(())).flatMap(_ => replay(a, b, root, List.tail(runs), row :: acc)))
@@ -273,7 +342,7 @@ def kept(a: DiffSide, b: DiffSide, root: String, r: FuzzRun): IO[DiffRow] =
   keptAs(a, b, root, r, label(r))
 
 def keptAs(a: DiffSide, b: DiffSide, root: String, r: FuzzRun, name: String): IO[DiffRow] =
-  probe(a.job, r).flatMap(x => probe(b.job, r).flatMap(y => keepTl(root, namedRow(rowOf(r, x, y), name), x.tl, y.tl)))
+  probeSide(a, r).flatMap(x => probeSide(b, r).flatMap(y => keepTl(root, namedRow(rowOf(r, x, y), name), x.tl, y.tl)))
 
 def namedRow(row: DiffRow, name: String): DiffRow =
   DiffRow(name, row.run, row.cls, row.delta, row.whyA, row.whyB, row.ctlA, row.ctlB)

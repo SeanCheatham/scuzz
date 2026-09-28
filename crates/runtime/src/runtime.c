@@ -2623,6 +2623,7 @@ static SzIo *handle_value(SzError *err, void *env) {
   SzCont handler = (SzCont)pack->left;
   void *value = err ? err->payload : NULL;
   sz_retain(value);
+  sz_error_free(err);
   return handler(value, pack->right);
 }
 
@@ -3914,7 +3915,7 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
   if (!p || p->state == FIB_CANCELLED || p->state == FIB_DONE)
     return;
   slot = child->child_slot;
-  if (slot < 0 || slot > 1)
+  if (slot < 0 || slot > 1 || p->children[slot] != child)
     return;
   p->child_val[slot] = val;
   p->child_err[slot] = err;
