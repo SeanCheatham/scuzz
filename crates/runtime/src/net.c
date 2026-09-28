@@ -21,7 +21,8 @@
 #include <unistd.h>
 
 /* Blessed Net HTTP/1.0 client and serve. HTTPS uses OpenSSL.
- * DNS, connect, TLS, write, and read each wait at most 1000ms. A response
+ * DNS, connect, TLS, write, and read each wait at most 1000ms by default.
+ * Prefer: wait=N sets a bounded response wait. A response
  * is (status, headers, body). HEAD finishes at the header. Bodies cap at
  * 1 MiB. Serve binds 0.0.0.0 and/or ::. serveTls terminates TLS with a
  * process cert. serveTlsFiles reads the cert file and the key file.
@@ -106,6 +107,7 @@ typedef struct HttpSt {
   int64_t connect_deadline_ms;
   int64_t write_deadline_ms;
   int64_t read_deadline_ms;
+  int64_t read_wait_ms;
   int64_t he_v4_at_ms;
   int http_port;
   int live_yields; /* refused connects yielded so a forked server can bind */
@@ -1696,7 +1698,7 @@ static SzIo *http_poll_read(void *value, void *env) {
   int64_t left;
   (void)value;
   if (st->read_deadline_ms == 0)
-    st->read_deadline_ms = sz_clock_monotonic_ms_sync() + HE_READ_MS;
+    st->read_deadline_ms = sz_clock_monotonic_ms_sync() + st->read_wait_ms;
   left = st->read_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
@@ -1798,6 +1800,7 @@ SzIo *sz_net_live_http_req(const char *method, SzString *url, SzMap *headers,
   sz_retain(url);
   st->url = url;
   st->req_headers = headers;
+  st->read_wait_ms = sz_net_http_wait_ms(headers, HE_READ_MS);
   sz_retain(headers);
   if (body) {
     sz_retain(body);

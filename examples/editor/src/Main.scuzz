@@ -206,8 +206,8 @@ def chooseCard(root: String, id: String, lane: Int, ls: LaneS, ds: DeckS, dirtie
   _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), [e]))
 } yield ()))
 
-def decisionButtons(root: String, id: String, ls: LaneS, ds: DeckS, paths: Signal[List[String]], bodies: Signal[List[String]], origs: Signal[List[String]], idx: Signal[Int], buf: Signal[String], orig: Signal[String]): View =
-  View.wrap(View.button("Choose left", _ => chooseCard(root, id, 0, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.button("Choose right", _ => chooseCard(root, id, 1, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.outlinedButton("Can't decide", _ => chooseCard(root, id, -1, ls, ds, _ => [], IO.pure(()))))
+def decisionButtons(root: String, id: String, ls: LaneS, ds: DeckS, objectiveSession: SessionS, paths: Signal[List[String]], bodies: Signal[List[String]], origs: Signal[List[String]], idx: Signal[Int], buf: Signal[String], orig: Signal[String]): View =
+  View.wrap(View.button("Choose left", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, 0, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig)))), View.button("Choose right", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, 1, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Can't decide", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, -1, ls, ds, _ => [], IO.pure(())))))
 
 def refreshBuffers(paths: Signal[List[String]], bodies: Signal[List[String]], origs: Signal[List[String]], idx: Signal[Int], buf: Signal[String], orig: Signal[String]): IO[Unit] =
   IO.sleep(0).flatMap(_ => IO.foreachDiscard(List.indices(Signal.get(paths)), i => if (i >= List.len(Signal.get(paths))) IO.pure(()) else for {
@@ -252,7 +252,9 @@ def writeMutant(root: String, kept: List[(String, String, Prog)], disk: List[(St
     baseline <- Cards.own(root)
     _ <- IO.foreachDiscard(changed, f => Fs.mkdirs(Fs.join(dir, "src")).flatMap(_ => Fs.write(Fs.join(dir, Fs.join("src", Str.concat(f._1, ".scuzz"))), f._2)))
     props = List.map(changed, f => (Fs.join("src", Str.concat(f._1, ".scuzz")), f._2))
-    _ <- Fs.write(Fs.join(dir, "proposal.json"), Cards.metadata("mutation", Cards.setHash(baseline), "mutation", props))
+    requestRaw <- Fs.read(Fs.join(root, "build/ide/request.json"))
+    request <- Proposal.parse(requestRaw, 1048576)
+    _ <- Fs.write(Fs.join(dir, "proposal.json"), Cards.metadata(Proposal.str(request, "request"), Cards.setHash(baseline), "mutation", props))
   } yield ()
 
 def generateProposals(root: String, set: List[(String, String)], cur: String, ls: LaneS, ds: DeckS): IO[Unit] =
@@ -353,6 +355,9 @@ def landmarkRail(page: Signal[Int]): View =
 
 def landmarkBook(page: Signal[Int], live: View, verify: View, session: View, timeline: View): View =
   View.semantics("Index book", View.column(landmarkRail(page), View.showWhen(page, 0, View.expanded(live)), View.showWhen(page, 1, View.expanded(verify)), View.showWhen(page, 2, View.expanded(session)), View.showWhen(page, 3, View.expanded(timeline))))
+
+def initialPage(): IO[Int] =
+  IO.pure(2)
 
 @main def main: IO[Unit] =
   for {
@@ -549,7 +554,8 @@ Y
     replQ = Signal.make("")
     renameCaret = Signal.make(-1)
     findOpen = Signal.make(Str.len(""))
-    page = Signal.make(0)
+    firstPage <- initialPage()
+    page = Signal.make(firstPage)
     title = Signal.make(pkg)
     diffPid = Signal.make(0)
     deltaRaw = Signal.make("")
@@ -583,6 +589,7 @@ Y
     lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, srcFiles, playOn, questionWork, resultLeft, resultRight, deckFlip, evidenceScope, evidenceDetails)
     deckCard = Signal.make("")
     deck = DeckS(deckCard, deckPending, deckArmed, deckTitle, deckFlip, deckLast, deckBusy)
+    objectiveSession <- Session.create(root)
     _ <- if (Str.isEmpty(recoveryError)) loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel) else IO.pure(Signal.set(deltaStatus, [recoveryError]))
     pending0 <- loadProposals(root)
     _ = Signal.set(deckPending, pending0)
@@ -600,6 +607,7 @@ Y
     _ <- Fiber.fork(IO.forever(for {
   _ = Property.sometimes("polledFiles")
   _ <- IO.sleep(300)
+  _ <- Session.poll(objectiveSession, _ => deckEnd(lanes, deck))
   ps = Signal.get(paths)
   i = Signal.get(idx)
   curB = Signal.get(buf)
@@ -723,7 +731,7 @@ Y
 } yield ())), View.each(scenarios, s => View.textButton(s, _ => for {
   _ = Property.sometimes("tappedVerify")
   _ = Signal.set(page, 1)
-} yield ())))), View.section("session", "Session", View.column(View.wrap(View.button("Run", _ => for {
+} yield ())))), View.section("session", "Session", View.column(Session.view(Signal.get(dirSig), objectiveSession, _ => deckNext(Signal.get(dirSig), lanes, deck), _ => deckEnd(lanes, deck)), View.wrap(View.button("Run", _ => for {
   _ = Property.sometimes("tappedRun")
   line <- runProject(Signal.get(dirSig))
   runOut = List.append(Signal.get(output), line)
@@ -793,7 +801,7 @@ Y
   _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
 } yield ())), View.outlinedButton("Proposals", _ => for {
   _ = Property.sometimes("tappedProposals")
-  _ <- deckNext(Signal.get(dirSig), lanes, deck)
+  _ <- Session.run(objectiveSession, _ => deckNext(Signal.get(dirSig), lanes, deck))
 } yield ()), View.outlinedButton("Generate", _ => for {
   _ = Property.sometimes("tappedGenerate")
   root = Signal.get(dirSig)
@@ -802,7 +810,7 @@ Y
   i = Signal.get(idx)
   set = Chrome.bufferFiles(own, List.map(Signal.get(paths), p => Chrome.stemOf(p)), List.setAt(Signal.get(bodies), i, Signal.get(buf)))
   _ <- generateProposals(root, set, Chrome.stemOf(Signal.get(pathSig)), lanes, deck)
-} yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckArmed, s => if (Str.isEmpty(s)) 0 else 1), 1, View.column(View.bindText(deckTitle), View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => decisionButtons(Signal.get(dirSig), id, lanes, deck, paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.wrap(View.choiceChip(evidenceDetails, 1, "More evidence"), View.choiceChip(evidenceDetails, 0, "Question")), View.showWhen(evidenceDetails, 1, View.column(View.each(evidenceScope, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
+} yield ())), View.bindText(objectiveSession.objective), View.bindText(objectiveSession.status), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckArmed, s => if (Str.isEmpty(s)) 0 else 1), 1, View.column(View.bindText(deckTitle), View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => decisionButtons(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.wrap(View.choiceChip(evidenceDetails, 1, "More evidence"), View.choiceChip(evidenceDetails, 0, "Question")), View.showWhen(evidenceDetails, 1, View.column(View.each(evidenceScope, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
   _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
 } yield ())))))), View.bindText(questionWork), View.bindText(stepTitle), View.wrap(View.choiceChip(playOn, 1, "Play"), View.choiceChip(playOn, 0, "Pause")), View.row(View.showWhen(evidenceDetails, 1, View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
@@ -831,5 +839,5 @@ Y
   _ = if (same) () else Signal.set(dirty, Str.len("x"))
   _ = if (same) () else Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), nu))
   _ = Signal.set(infoLine, if (same) "no rename" else "renamed")
-} yield ())))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), stopOwned(fuzzPid, diffPid))
+} yield ())))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => stopOwned(fuzzPid, diffPid)))
   } yield ()

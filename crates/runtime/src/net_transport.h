@@ -56,6 +56,7 @@ const char *sz_net_http_op(const char *method);
 int sz_net_http_header_valid(const char *name, const char *value);
 int sz_net_http_header_skip(const char *name);
 int sz_net_http_name_equal(const char *a, const char *b);
+int64_t sz_net_http_wait_ms(SzMap *headers, int64_t fallback);
 int sz_net_host_equal(const char *a, const char *b);
 
 static inline int sz_net_host_is_loopback(const char *host) {

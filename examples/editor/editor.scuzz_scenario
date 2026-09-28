@@ -16,6 +16,7 @@ def setup(): IO[Unit] =
   IO.println(3)
 """)
     baseline <- Cards.own(".")
+    _ <- writeManualRequest(".")
     _ <- IO.foreachDiscard(["p1", "p2", "p3"], n => for {
   dir = Fs.join("build/proposals", n)
   ents <- Fs.walk(dir)
@@ -107,6 +108,7 @@ def addProposal(name: String): IO[Unit] =
     _ <- Fs.mkdirs(Fs.join(dir, "src"))
     _ <- Fs.write(Fs.join(dir, "src/Main.scuzz"), src)
     baseline <- Cards.own(".")
+    _ <- writeManualRequest(".")
     _ <- Fs.write(Fs.join(dir, "proposal.json"), Cards.metadata("manual", Cards.setHash(baseline), "manual", [("src/Main.scuzz", src)]))
   } yield ()
 
@@ -246,6 +248,21 @@ def LspClient.lspCall(_root: String, _path: String, _body: String, method: Strin
 def Cards.compilerIdentity(): IO[String] =
   Fs.read("proof/compiler-id").handleErrorWith(_ => IO.pure(Hash.sha256("controlled review compiler")))
 
+private def writeManualRequest(root: String): IO[Unit] =
+  for {
+    compiler <- Cards.compilerIdentity()
+    request <- Proposal.make(root, "Review behavior", ["src/Main.scuzz", "src/Other.scuzz"], compiler, [])
+    _ <- Fs.mkdirs(Fs.join(root, "build/ide"))
+    _ <- Fs.write(Fs.join(root, "build/ide/request.json"), Proposal.text(Json.set(request, "request", Json.Str("manual"))))
+  } yield ()
+
+def Session.create(root: String): IO[SessionS] =
+  for {
+    _ <- writeManualRequest(root)
+    request <- Fs.read(Fs.join(root, "build/ide/request.json"))
+    jobs <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
+  } yield SessionS(Signal.make("Review behavior"), Signal.make("src/Main.scuzz,src/Other.scuzz"), Signal.make(0), Signal.make("smollm3-3b"), Signal.make(1), Signal.make(0), Signal.make("External proposals"), Signal.make(request), Signal.make(0), jobs, "model-cache", Signal.make(Proposal.text(Json.Obj([("objective", Json.Str("Review behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz"), Json.Str("src/Other.scuzz")])), ("mode", Json.Int(0)), ("model", Json.Str("smollm3-3b"))]))), Signal.make(List.map(Models.catalog(), m => Models.modelJson("model-cache", m, false))), Signal.make(0), Signal.make(0))
+
 def proofCard(flip: Int): IO[Json] =
   for {
     _ <- Fs.delete("proof").handleErrorWith(_ => IO.pure(()))
@@ -268,6 +285,7 @@ def proofCard(flip: Int): IO[Json] =
 """)]
     _ <- IO.foreachDiscard(props, p => Fs.write(Fs.join("proof/build/proposals/p", p._1), p._2))
     disk <- Cards.own("proof")
+    _ <- writeManualRequest("proof")
     _ <- Fs.write("proof/build/proposals/p/proposal.json", Cards.metadata("manual", Cards.setHash(disk), "manual", props))
     imported <- Cards.importProposal("proof", "p")
     c <- Cards.freeze("proof", "p", imported, flip)
@@ -391,5 +409,151 @@ def incompleteFlow(mode: Int): IO[Unit] =
     blocked <- Cards.complete("proof", c, Cards.text(broken)).map(_ => 0).handleErrorWith(_ => IO.pure(1))
     evidenceBlocked = Signal.make(blocked)
     _ = Signal.set(evidenceBlocked, blocked)
+  } yield ()
+
+def Main.initialPage(): IO[Int] =
+  IO.pure(0)
+
+def proposalFlow(mode: Int): IO[Unit] =
+  for {
+    _ <- Fs.delete("proposal-proof").handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.mkdirs("proposal-proof/src")
+    _ <- Fs.write("proposal-proof/scuzz.toml", "[package]\nname = \"proposal-proof\"\n")
+    source = "@main def main: IO[Unit] = IO.println(1)"
+    _ <- Fs.write("proposal-proof/src/Main.scuzz", source)
+    compiler <- Cards.compilerIdentity()
+    request <- Proposal.make("proposal-proof", "Print two", ["src/Main.scuzz"], compiler, [])
+    reply = Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("behavior")), ("generator", Json.Str("controlled")), ("files", Proposal.pairsJson([("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(2)")]))])
+    candidate = "proposal-proof/build/proposals/p"
+    blocked <- (if (mode == 0) Proposal.publish("proposal-proof", candidate, request, reply, compiler).flatMap(_ => Proposal.publish("proposal-proof", candidate, request, reply, compiler)) else if (mode == 1) Proposal.validate("proposal-proof", Json.set(request, "unknown", Json.Int(1)), compiler) else if (mode == 2) Proposal.validate("proposal-proof", Json.set(request, "feedback", Json.Str("wrong type")), compiler) else if (mode == 3) Proposal.validate("proposal-proof", Json.set(request, "baseline", Json.Str(Hash.sha256("stale"))), compiler) else if (mode == 4) Proposal.response(Json.set(reply, "unknown", Json.Int(1)), request).map(_ => ()) else if (mode == 5) Proposal.publish("proposal-proof", "proposal-proof/src/New.scuzz", request, reply, compiler) else if (mode == 6) for {
+  _ <- Fs.mkdirs(Fs.join(candidate, "src"))
+  _ <- Fs.write(Fs.join(candidate, "src/Main.scuzz"), "partial")
+  _ <- Fs.write(Fs.join(candidate, "proposal.json"), Proposal.metadata(Proposal.str(request, "request"), Proposal.str(request, "baseline"), "controlled", [("src/Main.scuzz", "complete")]))
+  _ <- Proposal.importFrom("proposal-proof", candidate, request)
+} yield () else if (mode == 7) Proposal.validate("proposal-proof", Json.set(request, "allowed", Json.Arr([Json.Str("../Main.scuzz")])), compiler) else if (mode == 8) Proposal.response(Json.set(reply, "files", Proposal.pairsJson([("src/Main.scuzz", "a"), ("src/Main.scuzz", "b")])), request).map(_ => ()) else if (mode == 9) Proposal.response(Json.set(reply, "request", Json.Str("late")), request).map(_ => ()) else if (mode == 10) Proposal.validate("proposal-proof", Json.set(request, "limits", Json.Obj([])), compiler) else Proposal.response(Json.set(reply, "files", Proposal.pairsJson([("src/Main.scuzz", Str.repeat("x", 65537))])), request).map(_ => ())).map(_ => 0).handleErrorWith(_ => IO.pure(1))
+    proposalBlocked = Signal.make(blocked)
+    _ = Signal.set(proposalBlocked, blocked)
+  } yield ()
+
+def Generate.generate(request: Json, id: String, allowDownload: Bool, notify: String => IO[Unit]): IO[Json] =
+  for {
+    model <- Models.select(id)
+    _ <- notify("Loading controlled model")
+    _ <- IO.sleep(100)
+    reply = Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("behavior")), ("generator", Json.Str(model.id)), ("files", Proposal.pairsJson([("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(2)")]))])
+    _ <- Proposal.response(reply, request)
+  } yield Json.Obj([("reply", reply)])
+
+def generationFlow(model: Int, cancel: Int): IO[Unit] =
+  for {
+    _ <- Fs.delete("generation-proof").handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.mkdirs("generation-proof/src")
+    _ <- Fs.write("generation-proof/scuzz.toml", "[package]\nname = \"generation-proof\"\n")
+    _ <- Fs.write("generation-proof/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)")
+    session <- Session.create("generation-proof")
+    _ = Signal.set(session.mode, 1)
+    _ = Signal.set(session.model, if (model == 0) "smollm3-3b" else "qwen2.5-coder-7b")
+    _ = Signal.set(session.objective, "Print two")
+    _ = Signal.set(session.paths, "src/Main.scuzz")
+    _ = Signal.set(session.config, Session.settings(session))
+    _ <- Session.start("generation-proof", session).flatMap(_ => IO.sleep(500))
+    cleanup = Session.pause(session)
+    lazyPause = Signal.make(if (Signal.get(session.active) == 1) 1 else 0)
+    _ = Signal.set(lazyPause, if (Signal.get(session.active) == 1) 1 else 0)
+    _ <- Session.generate("generation-proof", session, _ => IO.pure(()))
+    _ <- if (cancel == 0) IO.sleep(500) else if (cancel == 2) Session.changeModel(session, if (model == 0) "qwen2.5-coder-7b" else "smollm3-3b") else if (cancel == 3) IO.ensure(IO.pure(()), cleanup) else cleanup
+    frozen <- Fs.read("generation-proof/build/ide/request.json")
+    _ <- if (cancel == 4) Session.start("generation-proof", session).flatMap(_ => IO.sleep(500)).flatMap(_ => Session.pause(session)) else IO.pure(())
+    _ <- if (cancel == 0) Session.pause(session) else IO.pure(())
+    frozenRequest = Signal.make(frozen)
+    resumedRequest = Signal.make(Signal.get(session.request))
+    _ = Signal.set(frozenRequest, frozen)
+    _ = Signal.set(resumedRequest, Signal.get(session.request))
+    lifecycleIdentity = Signal.make(if ((cancel != 2 || Signal.get(session.model) == (if (model == 0) "qwen2.5-coder-7b" else "smollm3-3b")) && (cancel != 4 || Signal.get(session.request) == frozen)) 1 else 0)
+    _ = Signal.set(lifecycleIdentity, if ((cancel != 2 || Signal.get(session.model) == (if (model == 0) "qwen2.5-coder-7b" else "smollm3-3b")) && (cancel != 4 || Signal.get(session.request) == frozen)) 1 else 0)
+    jobs <- Ref.get(session.jobs)
+    savedRaw <- Fs.read(Fs.join(Cards.storage("generation-proof"), "session.json"))
+    saved <- Proposal.parse(savedRaw, 8192)
+    stopped = Signal.make(if (Str.isEmpty(jobs.token) && List.isEmpty(jobs.fibers) && Signal.get(session.active) == 0 && Signal.get(session.count) == 1 && Json.getInt(saved, "requests", 0) == 1) 1 else 0)
+    _ = Signal.set(stopped, if (Str.isEmpty(jobs.token) && List.isEmpty(jobs.fibers) && Signal.get(session.active) == 0 && Signal.get(session.count) == 1 && Json.getInt(saved, "requests", 0) == 1) 1 else 0)
+    requestRaw <- Fs.read("generation-proof/build/ide/request.json")
+    request <- Proposal.parse(requestRaw, 1048576)
+    candidate = Fs.join("generation-proof/build/proposals", Str.concat("local-", Proposal.str(request, "request")))
+    exists <- Fs.exists(candidate)
+    generationPublished = Signal.make(if (exists != 0) 1 else 0)
+    generationCancelled = Signal.make(if (cancel == 0) 0 else 1)
+    _ = Signal.set(generationPublished, if (exists != 0) 1 else 0)
+    _ = Signal.set(generationCancelled, if (cancel == 0) 0 else 1)
+  } yield ()
+
+def outputFlow(kind: Int): IO[Unit] =
+  for {
+    card <- proofCard(1)
+    path = if (kind == 0) "proof/build/unrelated.toml" else if (kind == 1) "proof/.scuzz/unrelated.toml" else "proof/notes.toml"
+    _ <- Fs.write(path, "unrelated output")
+    accepted <- Cards.decide("proof", card, 0).map(_ => 1).handleErrorWith(_ => IO.pure(0))
+    outputAccepted = Signal.make(accepted)
+    _ = Signal.set(outputAccepted, accepted)
+  } yield ()
+
+private def ownershipAction(started: Signal[Int], active: Signal[Int], peak: Signal[Int], ended: Signal[Int]): IO[Unit] =
+  IO.ensure(IO.pure(()).map(_ => for {
+  _ = Signal.set(started, Signal.get(started) + 1)
+  _ = Signal.set(active, Signal.get(active) + 1)
+  _ = Signal.set(peak, if (Signal.get(peak) > Signal.get(active)) Signal.get(peak) else Signal.get(active))
+} yield ()).flatMap(_ => IO.sleep(100)), IO.pure(()).map(_ => for {
+  _ = Signal.set(active, Signal.get(active) - 1)
+  _ = Signal.set(ended, Signal.get(ended) + 1)
+} yield ()))
+
+def ownershipFlow(phase: Int): IO[Unit] =
+  for {
+    jobs <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
+    s = SessionS(Signal.make("One objective"), Signal.make("src/Main.scuzz"), Signal.make(0), Signal.make("smollm3-3b"), Signal.make(1), Signal.make(0), Signal.make(""), Signal.make(""), Signal.make(0), jobs, "", Signal.make(""), Signal.make([]: List[Json]), Signal.make(0), Signal.make(0))
+    _ = Signal.set(s.config, Session.settings(s))
+    started = Signal.make(0)
+    active = Signal.make(0)
+    peak = Signal.make(0)
+    ended = Signal.make(0)
+    a <- Fiber.fork(IO.attempt(Session.run(s, _ => ownershipAction(started, active, peak, ended))).map(_ => ()))
+    b <- Fiber.fork(IO.attempt(Session.run(s, _ => ownershipAction(started, active, peak, ended))).map(_ => ()))
+    _ <- if (phase == 0) Fiber.join(a).flatMap(_ => Fiber.join(b)).flatMap(_ => IO.sleep(1)).flatMap(_ => Session.pause(s)) else if (phase == 1) Session.pause(s) else if (phase == 2) IO.sleep(1).flatMap(_ => Session.pause(s)) else if (phase == 3) Fiber.interrupt(a).flatMap(_ => Session.pause(s)) else if (phase == 4) IO.both(Session.pause(s), Session.pause(s)).map(_ => ()) else if (phase == 5) Session.changeModel(s, "qwen2.5-coder-7b") else IO.ensure(IO.sleep(1), Session.pause(s))
+    _ <- IO.attempt(Fiber.join(a))
+    _ <- IO.attempt(Fiber.join(b))
+    _ <- IO.sleep(1)
+    owner <- Ref.get(s.jobs)
+    ownershipBound = Signal.make(0)
+    _ = Signal.set(ownershipBound, if (Signal.get(peak) <= 1 && Signal.get(active) == 0 && Signal.get(started) == Signal.get(ended) && Str.isEmpty(owner.token) && List.isEmpty(owner.fibers) && Signal.get(s.active) == 0) 1 else 0)
+  } yield ()
+
+def generationBurst(model: Int): IO[Unit] =
+  for {
+    _ <- Fs.delete("generation-burst").handleErrorWith(_ => IO.pure(()))
+    _ <- Fs.mkdirs("generation-burst/src")
+    _ <- Fs.write("generation-burst/scuzz.toml", "[package]\nname=\"generation-burst\"\n")
+    _ <- Fs.write("generation-burst/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)")
+    session <- Session.create("generation-burst")
+    _ = Signal.set(session.mode, 1)
+    _ = Signal.set(session.model, if (model == 0) "smollm3-3b" else "qwen2.5-coder-7b")
+    _ = Signal.set(session.objective, "Print two")
+    _ = Signal.set(session.paths, "src/Main.scuzz")
+    _ = Signal.set(session.config, Session.settings(session))
+    _ <- Session.start("generation-burst", session).flatMap(_ => IO.sleep(500))
+    _ = Signal.set(session.count, 7)
+    savedRaw <- Fs.read(Fs.join(Cards.storage("generation-burst"), "session.json"))
+    saved <- Proposal.parse(savedRaw, 8192)
+    _ <- Fs.write(Fs.join(Cards.storage("generation-burst"), "session.json"), Proposal.text(Json.set(saved, "requests", Json.Int(7))))
+    a <- Fiber.fork(IO.attempt(Session.generate("generation-burst", session, _ => IO.pure(()))).map(_ => ()))
+    b <- Fiber.fork(IO.attempt(Session.generate("generation-burst", session, _ => IO.pure(()))).map(_ => ()))
+    _ <- Fiber.join(a)
+    _ <- Fiber.join(b)
+    _ <- IO.sleep(500)
+    _ <- Session.pause(session)
+    countedRaw <- Fs.read(Fs.join(Cards.storage("generation-burst"), "session.json"))
+    counted <- Proposal.parse(countedRaw, 8192)
+    published <- Fs.list(Deck.proposalsDir("generation-burst")).handleErrorWith(_ => IO.pure([]))
+    owner <- Ref.get(session.jobs)
+    burstBound = Signal.make(0)
+    _ = Signal.set(burstBound, if (Signal.get(session.count) == 8 && Json.getInt(counted, "requests", 0) == 8 && List.len(List.filter(published, entry => entry._2)) == 1 && Str.isEmpty(owner.token) && List.isEmpty(owner.fibers)) 1 else 0)
   } yield ()
 

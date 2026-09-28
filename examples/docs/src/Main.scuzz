@@ -101,10 +101,10 @@ def starter(n: Int): String =
 def verStarter(n: Int): String =
   if (n < 3) "" else if (n <= 4) checkVer() else searchVer()
 
-def tryRun(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], countNav: Signal[List[View]], step: Signal[Int]): IO[Unit] =
+def tryRun(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Signal[Value], countNav: Signal[List[View]], step: Signal[Int]): IO[Unit] =
   IO.pure(tryShow(Eval.tryNow(Signal.get(src), pool), diags, mounted, pool, countNav, step))
 
-def tryShow(out: TryOut, diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], countNav: Signal[List[View]], step: Signal[Int]): Unit =
+def tryShow(out: TryOut, diags: Signal[String], mounted: Signal[List[View]], pool: Signal[Value], countNav: Signal[List[View]], step: Signal[Int]): Unit =
   (Signal.set(diags, if (out.diags == "") "ok" else out.diags), (Signal.set(mounted, List.map(out.prog, p => Mount.mount(out.view, p))), armCount(pool, countNav, step))._2)._2
 
 def bindShown(out: TryOut, name: String): String =
@@ -116,7 +116,7 @@ def bindShownGo(xs: List[String], name: String): String =
 def bindPick(parts: List[String], name: String, rest: List[String]): String =
   if (List.len(parts) >= 3 && List.at(parts, 1) == name) List.join(List.drop(parts, 2), " ") else bindShownGo(rest, name)
 
-def runInc(src: Signal[String], out: Signal[String], pool: Ref[Value]): Unit =
+def runInc(src: Signal[String], out: Signal[String], pool: Signal[Value]): Unit =
   Signal.set(out, bindShown(Eval.tryNow(Signal.get(src), pool), "n"))
 
 def checkShown(s: String): String =
@@ -155,10 +155,10 @@ def editorPane(src: Signal[String]): View =
 def previewCard(mounted: Signal[List[View]]): View =
   View.card(View.each(mounted, v => v))
 
-def runLive(src: Signal[String], out: Signal[String], pool: Ref[Value]): View =
+def runLive(src: Signal[String], out: Signal[String], pool: Signal[Value]): View =
   View.column(titleText("Run inc"), quiet("inc adds one. Press Run. See 1."), View.divider(), editorPane(src), View.button("Run", _ => runInc(src, out, pool)), resultCard("runOutShown", out))
 
-def viewLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], countNav: Signal[List[View]], step: Signal[Int]): View =
+def viewLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Signal[Value], countNav: Signal[List[View]], step: Signal[Int]): View =
   View.column(titleText("Show a View"), quiet("The program now builds a View. Press Run. Tap +1. The label stays Clicks: 0."), View.divider(), editorPane(src), View.button("Run", _ => tryRun(src, diags, mounted, pool, countNav, step)), errorLine("viewErr", diags), previewCard(mounted))
 
 def livePane(src: Signal[String]): View =
@@ -173,8 +173,8 @@ def fileTabs(tab: Signal[Int], src: Signal[String], ver: Signal[String]): View =
 def checkLive(src: Signal[String], ver: Signal[String], tab: Signal[Int], out: Signal[String], claimBody: Signal[List[View]]): View =
   View.column(titleText("A claim reads a Timeline"), quiet("A claim is a function from Timeline to Verdict."), quiet("A usual test names one input and one expected output."), quiet("A claim names a rule."), quiet("The rule must hold for a recorded run."), quiet("You write the claim once."), quiet("Scuzz chooses the seeds."), quiet("Each seed is one schedule."), quiet("Scuzz records that schedule as a Timeline."), quiet("The claim reads that timeline after the run."), quiet("The claim does not sit inside the program."), quiet("The claim returns pass or fail."), View.divider(), View.each(claimBody, v => v), View.divider(), quiet("Live source is Main.scuzz. The oracle incAdds lives in count.scuzz_verify."), quiet("Press Check. See true."), fileTabs(tab, src, ver), View.button("Check", _ => checkOk(src, ver, out)), resultCard("checkOutShown", out))
 
-def poolVals(pool: Ref[Value]): List[Value] =
-  poolValsOf(Property.force(Ref.get(pool)))
+def poolVals(pool: Signal[Value]): List[Value] =
+  poolValsOf(Signal.get(pool))
 
 def poolValsOf(v: Value): List[Value] =
   v match {
@@ -182,7 +182,7 @@ def poolValsOf(v: Value): List[Value] =
     case _ => []
   }
 
-def armCount(pool: Ref[Value], countNav: Signal[List[View]], step: Signal[Int]): Unit =
+def armCount(pool: Signal[Value], countNav: Signal[List[View]], step: Signal[Int]): Unit =
   armCountGo(poolVals(pool), countNav, step)
 
 def armCountGo(xs: List[Value], countNav: Signal[List[View]], step: Signal[Int]): Unit =
@@ -203,7 +203,7 @@ def armCountReady(si: Signal[Int], countNav: Signal[List[View]], step: Signal[In
 def countGate(ready: Signal[Int], step: Signal[Int]): View =
   View.column(View.showWhen(ready, 1, View.button("Continue", _ => Signal.set(step, 5))), View.showWhen(ready, 0, countHint()))
 
-def signalLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], countNav: Signal[List[View]], step: Signal[Int]): View =
+def signalLive(src: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Signal[Value], countNav: Signal[List[View]], step: Signal[Int]): View =
   View.column(titleText("Hold state"), quiet("Press Run. Tap +1. The count stays when you change stages."), View.divider(), editorPane(src), View.button("Run", _ => tryRun(src, diags, mounted, pool, countNav, step)), errorLine("stateErr", diags), previewCard(mounted))
 
 def campFailFlag(s: String): Int =
@@ -224,22 +224,22 @@ def fuzzHidden(src: Signal[String], ver: Signal[String], camp: Signal[String]): 
 def searchLive(src: Signal[String], ver: Signal[String], tab: Signal[Int], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String]): View =
   View.column(titleText("Search an oracle"), quiet("Write oracle hidden in count.scuzz_verify."), quiet("Fuzz calls hidden(0) through hidden(8). false is a fail. hidden(3) is false."), View.divider(), fileTabs(tab, src, ver), View.button("Fuzz", _ => fuzzHidden(src, ver, camp)), campCard(camp, fail, pass, detail))
 
-def vizPool(): Ref[Value] =
-  Property.force(Ref.of(Value.VList([])))
+def vizPool(): Signal[Value] =
+  Signal.makeN("$mirror", Value.VList([]))
 
 def vizSchedule(src: String): View =
   vizScheduleAt(src, vizPool())
 
-def vizScheduleAt(src: String, pool: Ref[Value]): View =
+def vizScheduleAt(src: String, pool: Signal[Value]): View =
   vizScheduleA(src, pool, Eval.tryNowAt(src, 0, pool))
 
-def vizScheduleA(src: String, pool: Ref[Value], a: TryOut): View =
+def vizScheduleA(src: String, pool: Signal[Value], a: TryOut): View =
   vizScheduleB(src, pool, a, Eval.poolInt(pool, "order"))
 
-def vizScheduleB(src: String, pool: Ref[Value], a: TryOut, order0: Int): View =
+def vizScheduleB(src: String, pool: Signal[Value], a: TryOut, order0: Int): View =
   vizScheduleC(src, a, order0, Eval.tryNowAt(src, 128, pool), pool)
 
-def vizScheduleC(src: String, a: TryOut, order0: Int, b: TryOut, pool: Ref[Value]): View =
+def vizScheduleC(src: String, a: TryOut, order0: Int, b: TryOut, pool: Signal[Value]): View =
   View.column(quiet("The program offers L and R."), quiet("The two offers race."), code(src), quiet("order.scuzz_verify"), code(leftFirstSrc()), accent("leftFirst: L must win"), quiet("Seed 0 fails."), quiet("R won on seed 0."), quiet("The rule says L must win."), quiet("Seed 128 passes."), quiet("L won on seed 128."), View.row(View.expanded(schedCard(0, a, order0)), View.expanded(schedCard(128, b, Eval.poolInt(pool, "order")))))
 
 def schedFirst(out: TryOut): String =
@@ -365,7 +365,7 @@ def mutationLive(): View =
 def one(v: View): List[View] =
   v :: []
 
-def tourTabs(step: Signal[Int], src: Signal[String], ver: Signal[String], tab: Signal[Int], out: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], countNav: Signal[List[View]], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String], claimBody: Signal[List[View]], coverBody: Signal[List[View]], mutBody: Signal[List[View]]): View =
+def tourTabs(step: Signal[Int], src: Signal[String], ver: Signal[String], tab: Signal[Int], out: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Signal[Value], countNav: Signal[List[View]], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String], claimBody: Signal[List[View]], coverBody: Signal[List[View]], mutBody: Signal[List[View]]): View =
   View.tabs(step, View.column(View.section("intro", "Intro", introLive()), View.section("run", "Run", runLive(src, out, pool)), View.section("view", "View", viewLive(src, diags, mounted, pool, countNav, step)), View.section("check", "Check", checkLive(src, ver, tab, out, claimBody)), View.section("state", "State", signalLive(src, diags, mounted, pool, countNav, step)), View.section("search", "Search", searchLive(src, ver, tab, camp, fail, pass, detail)), View.section("cover", "Cover", View.each(coverBody, v => v)), View.section("mutation", "Mutation", View.each(mutBody, v => v))))
 
 def isStarter(cur: String, i: Int, n: Int): Bool =
@@ -405,15 +405,15 @@ def fillMut(n: Int, mutBody: Signal[List[View]]): Unit =
   Signal.set(mutBody, if (n == 7) one(mutationLive()) else [])
 
 def warmup(): Unit =
-  warmupAt(Property.force(Ref.of(Value.VList([]))))
+  warmupAt(Signal.makeN("$mirror", Value.VList([])))
 
-def warmupAt(p: Ref[Value]): Unit =
+def warmupAt(p: Signal[Value]): Unit =
   warmupRun(Eval.tryNow(runSrc(), p), p)
 
-def warmupRun(_out: TryOut, p: Ref[Value]): Unit =
+def warmupRun(_out: TryOut, p: Signal[Value]): Unit =
   warmupView(Eval.tryNow(viewSrc(), p), p)
 
-def warmupView(_out: TryOut, p: Ref[Value]): Unit =
+def warmupView(_out: TryOut, p: Signal[Value]): Unit =
   (Eval.tryNow(signalSrc(), p), ())._2
 
 def trailOf(n: Int): String =
@@ -422,7 +422,7 @@ def trailOf(n: Int): String =
 def navFooter(step: Signal[Int], runReady: Signal[Int], viewReady: Signal[Int], checkReady: Signal[Int], countNav: Signal[List[View]], howFail: Signal[Int]): View =
   View.column(View.showWhen(step, 0, ungatedContinue(step, 1)), View.showWhen(step, 1, navPair(step, 0, runReady, 2, "Press Run, then Continue.")), View.showWhen(step, 2, navPair(step, 1, viewReady, 3, "Press Run, then Continue.")), View.showWhen(step, 3, navPair(step, 2, checkReady, 4, "Press Check, then Continue.")), View.showWhen(step, 4, View.column(View.row(backBtn(step, 3)), View.each(countNav, v => v))), View.showWhen(step, 5, navPair(step, 4, howFail, 6, "Press Fuzz, then Continue.")), View.showWhen(step, 6, View.row(backBtn(step, 5), ungatedContinue(step, 7))), View.showWhen(step, 7, backBtn(step, 6)))
 
-def docsShell(step: Signal[Int], title: Signal[String], src: Signal[String], ver: Signal[String], tab: Signal[Int], out: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Ref[Value], countNav: Signal[List[View]], runReady: Signal[Int], viewReady: Signal[Int], checkReady: Signal[Int], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String], claimBody: Signal[List[View]], coverBody: Signal[List[View]], mutBody: Signal[List[View]]): View =
+def docsShell(step: Signal[Int], title: Signal[String], src: Signal[String], ver: Signal[String], tab: Signal[Int], out: Signal[String], diags: Signal[String], mounted: Signal[List[View]], pool: Signal[Value], countNav: Signal[List[View]], runReady: Signal[Int], viewReady: Signal[Int], checkReady: Signal[Int], camp: Signal[String], fail: Signal[Int], pass: Signal[Int], detail: Signal[String], claimBody: Signal[List[View]], coverBody: Signal[List[View]], mutBody: Signal[List[View]]): View =
   View.appShell(View.appBar(View.bindText(title), View.text("")), View.column(navFooter(step, runReady, viewReady, checkReady, countNav, fail), View.expanded(tourTabs(step, src, ver, tab, out, diags, mounted, pool, countNav, camp, fail, pass, detail, claimBody, coverBody, mutBody))))
 
 @main def main: IO[Unit] =
@@ -434,7 +434,7 @@ def docsShell(step: Signal[Int], title: Signal[String], src: Signal[String], ver
     out = Signal.makeN("tryOut", "")
     tryDiags = Signal.makeN("tryDiags", "")
     tryMounted = Signal.make([quiet("Press Run")])
-    tryPool <- Ref.of(Value.VList([]))
+    tryPool = Signal.makeN("$mirror", Value.VList([]))
     probe <- Sys.getenv("SCUZZ_EACH_PROBE")
     howCamp = Signal.makeN("howCamp", "Press Fuzz")
     howFail = Signal.mapN("howFail", howCamp, campFailFlag)

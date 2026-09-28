@@ -119,10 +119,32 @@ oracle iosDefault(): Bool =
 oracle iosRunArgs(): Bool =
   Cli.show(Cli.parse(Main.a4("run", "--target=ios", "--device=phone-new", "--watch"))) == "run path=. out=build target=ios watch=true exec= hasExec=false dump= snap= device=phone-new" && Cli.show(Cli.parse(Main.a4("run", "--device=phone-new", "app", "--target=ios"))) == "run path=app out=build target=ios watch=false exec= hasExec=false dump= snap= device=phone-new" && Str.startsWith(Cli.show(Cli.parse(Main.a2("run", "--device=phone-new"))), "fail:") && Str.startsWith(Cli.show(Cli.parse(Main.a3("run", "--target=ios", "--headless"))), "fail:") && Str.startsWith(Cli.show(Cli.parse(Main.a3("run", "--target=ios", "--script=events.json"))), "fail:") && Cli.show(Cli.parse(Main.a2("run", "--target=android"))) == "run path=. out=build target=android watch=false exec= hasExec=false dump= snap= device=" && Cli.show(Cli.parse(Main.a1("devices"))) == "devices" && Cli.render(Cli.parse(Main.a2("devices", "--help"))) == Help.helpDevices()
 
+oracle modelsFixed(): Bool =
+  for {
+    models = Models.catalog()
+  } yield List.map(models, m => m.id) == ["smollm3-3b", "qwen2.5-coder-7b"] && List.forall(models, m => Str.matches(m.revision, "^[a-f0-9]{40}$") && Str.matches(m.sha256, "^[a-f0-9]{64}$") && m.bytes > 1000000000 && m.bytes < m.memory && Str.startsWith(m.license, "https://huggingface.co/")) && List.at(models, 0).bytes == 1915305312 && List.at(models, 1).bytes == 4683073536
+
+oracle modelCommands(): Bool =
+  Cli.show(Cli.parse(["models", "list", "--message-format=json"])) == "models list model= json=true" && Cli.show(Cli.parse(["--message-format=json", "models", "download", "smollm3-3b"])) == "models download model=smollm3-3b json=true" && Str.startsWith(Cli.show(Cli.parse(["models", "download", "unknown"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["models", "list", "arbitrary.gguf"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["models", "download", "smollm3-3b", "--model-path", "x"])), "fail:")
+
+oracle generationCommand(): Bool =
+  Cli.show(Cli.parse(["ide", "generate-suggestion", "app", "--request", "request.json", "--model", "smollm3-3b", "--out", "candidate"])) == "ide generate-suggestion path=app request=request.json model=smollm3-3b out=candidate download=false" && Str.startsWith(Cli.show(Cli.parse(["ide", "generate-suggestion", "app", "--request", "request.json", "--model", "unknown", "--out", "candidate"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "generate-suggestion", "app"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "generate-suggestion", "app", "--request", "r", "--request", "other", "--model", "smollm3-3b", "--out", "candidate"])), "fail:")
+
 oracle campTapIds(): Bool =
   Verify.scriptJson("""tap button:Add one
 tap link:Open the iOS topic
 tap 7
 tap
 """) == "{\"v\":1,\"kind\":\"inject\",\"events\":[{\"op\":\"tap\",\"id\":\"button:Add one\"},{\"op\":\"tap\",\"id\":\"link:Open the iOS topic\"},{\"op\":\"tap\",\"i\":7},{\"op\":\"tap\",\"i\":0}]}"
+
+oracle dependencySignatureStrings(): Bool =
+  for {
+    quote = Str.repeat("\"", 3)
+    source = List.join(["def docs(): String =", Str.concat("  ", quote), "record Ghost(x: Int)", "def ghost(): Int = 99", "@main def main: IO[Unit] = IO.pure(())", quote, "record Real(x: Int)", "def real(): Int =", "  1"], """
+""")
+    expected = """def docs(): String = ()
+record Real(x: Int)
+def real(): Int = ()
+"""
+  } yield Drive.sigSrc(source) == expected
 

@@ -7,3 +7,4 @@ description = "Scuzz CLI: argv parse, help, fmt dispatch, driver"
 syntax = { path = "../syntax" }
 compiler = { path = "../compiler" }
 manual = { path = "../manual" }
+generation = { path = "../editor/generation" }

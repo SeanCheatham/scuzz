@@ -589,6 +589,7 @@ import json
 src = open("scratchpad/review/src/Main.scuzz").read()
 i = src.index('"Counter"') + len('"Counter')
 ops = {"v": 1, "kind": "inject", "events": [
+    {"op": "tap", "id": "choicechip:Live"},
     {"op": "caret", "offset": i},
     {"op": "type", "value": " app"},
     {"op": "tap", "id": "choicechip:Timeline"},
@@ -731,6 +732,377 @@ finally:
     proc.terminate()
     proc.wait(timeout=10)
 PYLSP
+  python3 - <<'PYUILIFECYCLE'
+import json, os, pathlib, shutil, subprocess
+root = pathlib.Path.cwd() / "scratchpad/ui-lifecycle"
+shutil.rmtree(root, ignore_errors=True)
+(root / "src").mkdir(parents=True)
+(root / "corpus").mkdir()
+(root / "scuzz.toml").write_text('[package]\nname="ui-lifecycle"\n[ui]\ndefault_runtime="headless"\n')
+(root / "src/Main.scuzz").write_text('''@main def main: IO[Unit] =
+  for {
+    active = Signal.make(1)
+    seen = Signal.make(0)
+    catalog = Signal.make([Json.Obj([("id", Json.Str("one")), ("size", Json.Int(4683073536)), ("cached", Json.Bool(false)), ("profiles", Json.Arr([Json.Null(), Json.Str("cpu")]))])])
+    _ <- IO.ensure(Ui.run(_ => View.column(View.bindText(Signal.map(active, n => Str.fromInt(n))), View.each(catalog, m => View.text(Json.getStr(m, "id", ""))), View.button("Observe", _ => IO.pure(()).map(_ => for {
+  local = Signal.make(1)
+  derived = Signal.map(local, n => n + 1)
+  _ = Signal.set(seen, Signal.get(active) + Signal.get(derived) - 2)
+} yield ())))), IO.pure(()).map(_ => Signal.set(active, 0)))
+  } yield ()
+''')
+(root / "lifecycle.scuzz_verify").write_text('''def activeAtInput(t: Timeline): Verdict =
+  Verdict.onHit(t, "button:Observe", (a, b) => Timeline.signalInt(t, b, "active") == 1)
+
+def observeCompletes(t: Timeline): Verdict =
+  if (!Timeline.exists(t, i => Timeline.hit(t, i, "button:Observe"))) Verdict.ok() else if (Timeline.signalInt(t, Timeline.len(t) - 1, "seen") == 1 && Timeline.signalInt(t, Timeline.len(t) - 1, "local") == 1 && Timeline.signalInt(t, Timeline.len(t) - 1, "derived") == 2 && Timeline.signalInt(t, Timeline.len(t) - 1, "active") == 1) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "callback signals complete during the active session")
+''')
+(root / "corpus/observe.toml").write_text('[fuzz]\nevents=["tap button:Observe"]\n')
+result = subprocess.run([os.environ["SCUZZ"], "fuzz", "--iterations", "0", str(root)], capture_output=True, text=True, timeout=240)
+assert result.returncode == 0, result.stdout + result.stderr
+assert "probes run compiled" not in result.stdout + result.stderr, result.stdout + result.stderr
+summary = json.loads((root / "build/fuzz/summary.json").read_text())
+assert summary["fuzz"]["ok"] and summary["corpus"]["entries"] == 1 and summary["corpus"]["failures"] == 0
+print("UI lifecycle: evaluator and compiled JSON snapshots match; active state and callback signal cleanup pass")
+PYUILIFECYCLE
+  # Fixed catalog inspection and bounded private transport use no weights.
+  python3 - <<'PYGENERATION'
+import hashlib, json, os, pathlib, shutil, signal, subprocess, time
+repo = pathlib.Path.cwd()
+cli = pathlib.Path(os.environ["SCUZZ"])
+root = repo / "scratchpad/generation-contract"
+shutil.rmtree(root, ignore_errors=True)
+(root / "src").mkdir(parents=True)
+cache = root / "hub"
+cache.mkdir()
+env = dict(os.environ, HF_HUB_CACHE=str(cache), HF_HUB_OFFLINE="1")
+listed = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=env, check=True, capture_output=True, text=True, timeout=30)
+models = json.loads(listed.stdout)["models"]
+assert [m["id"] for m in models] == ["smollm3-3b", "qwen2.5-coder-7b"]
+assert all(m["status"] == "unavailable" for m in models)
+assert not list(cache.iterdir())
+no_tools = dict(env, PATH="")
+for key in ("HF_HUB_CACHE", "HF_HOME", "XDG_CACHE_HOME", "HOME"):
+ no_tools.pop(key, None)
+for locations, expected in (({"HF_HUB_CACHE": str(cache), "HF_HOME": str(root / "hf"), "XDG_CACHE_HOME": str(root / "xdg")}, cache), ({"HF_HOME": str(root / "hf"), "XDG_CACHE_HOME": str(root / "xdg")}, root / "hf/hub"), ({"XDG_CACHE_HOME": str(root / "xdg")}, root / "xdg/huggingface/hub")):
+ offline = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=dict(no_tools, **locations), capture_output=True, text=True, check=True, timeout=30)
+ rows = json.loads(offline.stdout)["models"]
+ assert [m["id"] for m in rows] == ["smollm3-3b", "qwen2.5-coder-7b"]
+ assert all(m["cache"] == str(expected) and m["status"] == "unavailable" for m in rows)
+ assert not list(cache.iterdir()) and not (root / "hf").exists() and not (root / "xdg").exists()
+missing_cache = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=no_tools, capture_output=True, text=True, timeout=30)
+assert missing_cache.returncode != 0 and not missing_cache.stdout and "user cache location is unavailable" in missing_cache.stderr
+partial = pathlib.Path(models[0]["path"])
+partial.parent.mkdir(parents=True)
+partial.write_bytes(b"incomplete")
+again = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=env, check=True, capture_output=True, text=True, timeout=30)
+assert all(m["status"] == "unavailable" for m in json.loads(again.stdout)["models"])
+assert partial.read_bytes() == b"incomplete"
+unknown = subprocess.run([str(cli), "models", "download", "unlisted-model"], env=env, capture_output=True, timeout=30)
+assert unknown.returncode != 0
+tools = root / "tools"
+tools.mkdir()
+hf = tools / "hf"
+hf.write_text("#!/bin/sh\nprintf '%s\\n' 'controlled downloader failure' >&2\nexit 7\n")
+hf.chmod(0o700)
+fake_env = dict(env, PATH=str(tools)+os.pathsep+os.environ["PATH"])
+failed = subprocess.run([str(cli), "models", "download", "smollm3-3b", "--message-format=json"], env=fake_env, capture_output=True, timeout=30)
+assert failed.returncode != 0 and b"controlled downloader failure" in failed.stderr
+assert partial.read_bytes() == b"incomplete"
+(root / "scuzz.toml").write_text('[package]\nname="generation-contract"\nversion="0.1.0"\n[dependencies]\ngeneration={path="../../examples/editor/generation"}\n')
+server = root / "server.py"
+server.write_text(r'''import http.server,json,os,pathlib,sys,time
+key,port,mode,pidfile=sys.argv[1:]
+pathlib.Path(pidfile).write_text(str(os.getpid()))
+(pathlib.Path(pidfile).parent.parent / "pid").write_text(str(os.getpid()))
+class Handler(http.server.BaseHTTPRequestHandler):
+ def log_message(self,*args): pass
+ def reply(self,value):
+  body=json.dumps(value).encode();self.send_response(200);self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body)
+ def do_GET(self):
+  assert self.headers["Authorization"]=="Bearer "+key
+  self.reply({"data":[{"id":key}]})
+ def do_POST(self):
+  assert self.headers["Authorization"]=="Bearer "+key
+  assert self.headers["Prefer"]=="wait=900"
+  body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+  if self.path=="/apply-template": self.reply({"prompt":"controlled prompt"});return
+  if self.path=="/tokenize": self.reply({"tokens":list(range(3073 if mode=="context" else 10))});return
+  assert body["stream"] is False and body["max_tokens"]==1024 and body["reasoning_effort"]=="none"
+  schema=body["response_format"]["json_schema"]["schema"]
+  assert schema["additionalProperties"] is False and schema["properties"]["files"]["maxItems"]==3
+  req=json.loads(body["messages"][1]["content"])
+  reply={"v":1,"request":req["request"],"baseline":req["baseline"],"kind":"behavior","generator":schema["properties"]["generator"]["enum"][0],"files":[{"path":"src/Main.scuzz","content":"@main def main: IO[Unit] = IO.println(2)"}]}
+  if mode=="stale": reply["request"]="stale"
+  if mode=="timeout": time.sleep(5)
+  if mode=="interrupt": time.sleep(120)
+  self.reply({"choices":[{"finish_reason":"length" if mode=="truncated" else "stop","message":{"content":"<think>reasoning" if mode=="reasoning" else json.dumps(reply)}}],"usage":{},"timings":{}})
+http.server.HTTPServer(("127.0.0.1",int(port)),Handler).serve_forever()
+''')
+(root / "src/Main.scuzz").write_text('''@main def main: IO[Unit] =
+  for {
+    mode <- Sys.getenv("GENERATION_PROOF_MODE")
+    _ <- if (mode == "request") exportRequest() else if (mode == "download") IO.attempt(IO.timeout(3000, Models.download("smollm3-3b"))).flatMap(result => result match {
+      case Result.Ok(_) => IO.fail("controlled download completes unexpectedly")
+      case Result.Err(e) => Models.need(e == "timeout", Str.concat("download cancellation did not reach its deadline: ", e))
+    }) else transport()
+  } yield ()
+
+def exportRequest(): IO[Unit] =
+  for {
+    root <- Sys.getenv("GENERATION_PROOF_ROOT")
+    compiler <- Sys.getenv("COMMAND_PROOF_COMPILER")
+    request <- Proposal.make(root, "Check finite command refusals", ["src/Main.scuzz"], compiler, [])
+    _ <- Fs.mkdirs(Fs.join(root, "build"))
+    _ <- Fs.write(Fs.join(root, "build/command-request.json"), Proposal.text(request))
+  } yield ()
+
+def transport(): IO[Unit] =
+  for {
+    root <- Sys.getenv("GENERATION_PROOF_ROOT")
+    mode <- Sys.getenv("GENERATION_PROOF_MODE")
+    id <- Sys.getenv("GENERATION_PROOF_MODEL")
+    port <- Random.nextInt(20000)
+    key <- Uuid.v4()
+    dir = Fs.join(root, "owned")
+    _ <- Fs.mkdirs(dir)
+    exited <- Ref.of(false)
+    script = Fs.join(root, "server.py")
+    command = List.join(["exec python3", Models.quote(script), Models.quote(key), Str.fromInt(port + 30000), Models.quote(mode), Models.quote(Fs.join(dir, "pid"))], " ")
+    job <- Fiber.fork(IO.ensure(Sys.exec(command).map(_ => ()), Ref.set(exited, true)))
+    process = Generate.Process(job, exited, Str.concat("http://127.0.0.1:", Str.fromInt(port + 30000)), key, dir)
+    model <- Models.select(id)
+    request = Json.Obj([("request", Json.Str("controlled")), ("baseline", Json.Str(Hash.sha256("baseline"))), ("kind", Json.Str("behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz")]))])
+    result <- IO.ensure(IO.attempt(IO.timeout(if (mode == "timeout") 500 else 5000, Generate.ready(process).flatMap(_ => Generate.complete(process, request, model)))), Generate.stop(process))
+    _ <- result match {
+      case Result.Ok(_) => Models.need(mode == "ok", "invalid controlled reply passed")
+      case Result.Err(e) => if (mode == "ok") IO.fail(e) else IO.pure(())
+    }
+    _ <- IO.println("controlled transport ok")
+  } yield ()
+''')
+# Build once. Each native run owns a fresh process and private key.
+subprocess.run([str(cli), "run", str(root)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="ok", GENERATION_PROOF_MODEL="smollm3-3b"), check=True, timeout=240, stdout=subprocess.DEVNULL)
+exe = root / "build/generation-contract"
+subprocess.run([str(exe)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="request", COMMAND_PROOF_COMPILER=hashlib.sha256(cli.read_bytes()).hexdigest()), check=True, timeout=30)
+request = json.loads((root / "build/command-request.json").read_text())
+source = (root / "src/Main.scuzz").read_bytes()
+existing = root / "build/proposals/existing"
+existing.mkdir(parents=True)
+(existing / "preserve").write_text("existing publication")
+cases = []
+for name, key, value in (("version", "v", 2), ("baseline", "baseline", "0" * 64), ("compiler", "compiler", "0" * 64), ("scope", "allowed", ["../Main.scuzz"]), ("limits", "limits", {}), ("feedback", "feedback", {}), ("unknown-field", "extra", 1)):
+ changed = dict(request)
+ changed[key] = value
+ cases.append((name, changed, "smollm3-3b", root / "build/proposals" / name))
+cases.extend((("unknown-model", request, "unlisted", root / "build/proposals/unknown-model"), ("existing", request, "smollm3-3b", existing), ("source-output", request, "smollm3-3b", root / "src/forbidden"), ("build-output", request, "smollm3-3b", root / "build/forbidden"), ("unavailable", request, "smollm3-3b", root / "build/proposals/unavailable")))
+for name, body, model, out in cases:
+ file = root / "build" / (name + ".json")
+ file.write_text(json.dumps(body))
+ refused = subprocess.run([str(cli), "ide", "generate-suggestion", str(root), "--request", str(file), "--model", model, "--out", str(out)], env=env, capture_output=True, timeout=30)
+ assert refused.returncode != 0 and not refused.stdout and refused.stderr, (name, refused.stdout, refused.stderr)
+ assert b"Loading model" not in refused.stderr
+ assert (root / "src/Main.scuzz").read_bytes() == source
+ assert (existing / "preserve").read_text() == "existing publication"
+ if name != "existing": assert not out.exists(), name
+def alive(pid):
+ try:
+  os.kill(pid,0)
+  state = pathlib.Path("/proc") / str(pid) / "stat"
+  return not (state.exists() and state.read_text().rsplit(")",1)[1].split()[0] == "Z")
+ except (ProcessLookupError,FileNotFoundError): return False
+unrelated = subprocess.Popen(["sleep", "120"])
+try:
+ for model in ("smollm3-3b", "qwen2.5-coder-7b"):
+  for sig in (signal.SIGINT, signal.SIGTERM):
+   (root / "pid").unlink(missing_ok=True)
+   runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="interrupt", GENERATION_PROOF_MODEL=model)
+   child = subprocess.Popen([str(exe)], env=runenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+   try:
+    deadline = time.monotonic()+5
+    while not (root / "pid").exists() and time.monotonic()<deadline:
+     assert child.poll() is None
+     time.sleep(.005)
+    pid = int((root / "pid").read_text())
+    assert alive(pid)
+    child.send_signal(sig)
+    assert child.wait(timeout=5) == 128 + sig
+    deadline = time.monotonic()+2
+    while alive(pid) and time.monotonic()<deadline: time.sleep(.02)
+    assert not alive(pid), (model,sig,pid)
+    assert not (root / "owned").exists() and unrelated.poll() is None
+   finally:
+    if child.poll() is None:
+     child.kill();child.wait(timeout=5)
+ for model in ("smollm3-3b", "qwen2.5-coder-7b"):
+  for mode in ("ok", "stale", "truncated", "reasoning", "context", "timeout"):
+   (root / "pid").unlink(missing_ok=True)
+   runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE=mode, GENERATION_PROOF_MODEL=model)
+   subprocess.run([str(exe)], env=runenv, check=True, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+   pid = int((root / "pid").read_text())
+   deadline = time.monotonic()+2
+   while alive(pid) and time.monotonic()<deadline: time.sleep(.02)
+   assert not alive(pid), (model,mode,pid)
+   assert not (root / "owned").exists()
+   assert unrelated.poll() is None
+ hf.write_text("#!/bin/sh\nprintf '%s' \"$$\" > \"$DOWNLOADER_PROOF_PID\"\nsleep 120 &\nprintf '%s' \"$!\" > \"$DOWNLOADER_PROOF_CHILD\"\nwait\n")
+ cancelenv = dict(fake_env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="download", DOWNLOADER_PROOF_PID=str(root / "downloader-pid"), DOWNLOADER_PROOF_CHILD=str(root / "downloader-child"))
+ subprocess.run([str(exe)], env=cancelenv, check=True, timeout=10, stdout=subprocess.DEVNULL)
+ for path in (root / "downloader-pid", root / "downloader-child"):
+  pid = int(path.read_text())
+  deadline = time.monotonic()+2
+  while alive(pid) and time.monotonic()<deadline: time.sleep(.02)
+  assert not alive(pid), (path,pid)
+ assert partial.read_bytes() == b"incomplete" and unrelated.poll() is None
+finally:
+ unrelated.terminate();unrelated.wait(timeout=5)
+print("Generation: offline catalog, finite command refusals, both controlled profiles, strict schema, context, timeout, signals, private HTTP, and owned cleanup")
+PYGENERATION
+  # Controlled artifacts exercise the shared finite command without weights.
+  python3 - <<'PYGENCOMMAND'
+import hashlib, io, json, os, pathlib, platform, re, shlex, shutil, signal, subprocess, tarfile, tempfile, time
+
+repo = pathlib.Path.cwd()
+cli = pathlib.Path(os.environ["SCUZZ"])
+root = pathlib.Path(tempfile.mkdtemp(prefix='scuzz-gate3-command-live-'))
+generation = root / 'generation'
+shutil.copytree(repo / 'examples/editor/generation', generation, ignore=shutil.ignore_patterns('build'))
+(generation / 'scuzz.toml').write_text('[package]\nname="generation"\n[dependencies]\ncompiler={path="' + os.path.relpath(repo / 'examples/compiler', generation) + '"}\n')
+server = b'''#!/usr/bin/env python3
+import http.server,json,os,pathlib,sys,time
+if '--version' in sys.argv:
+ print('build 11146, commit 7fe450e19');sys.exit(0)
+def arg(name): return sys.argv[sys.argv.index(name)+1]
+assert arg('--host')=='127.0.0.1' and arg('--parallel')=='1' and arg('--ctx-size')=='4096'
+key=arg('--api-key')
+pathlib.Path(os.environ['CONTROLLED_PID']).write_text(str(os.getpid()))
+class Handler(http.server.BaseHTTPRequestHandler):
+ def log_message(self,*args): pass
+ def reply(self,value):
+  data=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+ def do_GET(self):
+  assert self.headers['Authorization']=='Bearer '+key
+  self.reply({'data':[{'id':key}]})
+ def do_POST(self):
+  assert self.headers['Authorization']=='Bearer '+key and self.headers['Prefer']=='wait=900'
+  body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+  if self.path=='/apply-template': self.reply({'prompt':'controlled prompt'});return
+  if self.path=='/tokenize': self.reply({'tokens':[1,2,3]});return
+  assert body['model']==key and not body['stream'] and body['max_tokens']==1024
+  schema=body['response_format']['json_schema']['schema']
+  request=json.loads(body['messages'][1]['content'])
+  proposal={'v':1,'request':request['request'],'baseline':request['baseline'],'kind':'behavior','generator':schema['properties']['generator']['enum'][0],'files':[{'path':'src/Main.scuzz','content':'@main def main: IO[Unit] = IO.println(2)'}]}
+  pathlib.Path(os.environ['CONTROLLED_RECEIVED']).write_text('ready')
+  if os.environ.get('CONTROLLED_ACTION')=='hang': time.sleep(120)
+  self.reply({'choices':[{'finish_reason':'stop','message':{'content':json.dumps(proposal)}}]})
+http.server.HTTPServer(('127.0.0.1',int(arg('--port'))),Handler).serve_forever()
+'''
+archive = io.BytesIO()
+with tarfile.open(fileobj=archive, mode='w:gz') as tar:
+ entry = tarfile.TarInfo('llama-b11146/llama-server')
+ entry.size = len(server)
+ entry.mode = 0o700
+ tar.addfile(entry, io.BytesIO(server))
+artifact = archive.getvalue()
+weights = b'controlled weights'
+models = generation / 'src/Models.scuzz'
+source = models.read_text()
+for count, digest in ((1915305312, '8334b850b7bd46238c16b0c550df2138f0889bf433809008cc17a8b05761863e'), (4683073536, '509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c')):
+ source = source.replace(str(count), str(len(weights))).replace(digest, hashlib.sha256(weights).hexdigest())
+source = re.sub(r'Backend\("([^"]+)", "([^"]+)", [0-9]+, "[a-f0-9]+"\)', lambda m: 'Backend("' + m[1] + '", "' + m[2] + '", ' + str(len(artifact)) + ', "' + hashlib.sha256(artifact).hexdigest() + '")', source)
+models.write_text(source)
+cache = root / 'cache'
+backend = cache / 'scuzz/tools/llama/b11146' / (platform.system() + '-' + platform.machine())
+backend.mkdir(parents=True)
+(backend / 'release.tar.gz').write_bytes(artifact)
+hub = root / 'hub'
+for repo_name, revision, filename in [('ggml-org/SmolLM3-3B-GGUF','4965cb60b150737b68a0408c36aeefb65078f894','SmolLM3-Q4_K_M.gguf'),('Qwen/Qwen2.5-Coder-7B-Instruct-GGUF','13fb94bfda8c8cf22497dc57b78f391a9acb426a','qwen2.5-coder-7b-instruct-q4_k_m.gguf')]:
+ path = hub / ('models--'+repo_name.replace('/','--')) / 'snapshots' / revision / filename
+ path.parent.mkdir(parents=True)
+ path.write_bytes(weights)
+(root / 'src').mkdir()
+(root / 'scuzz.toml').write_text('[package]\nname="controlled-command"\n[dependencies]\ngeneration={path="generation"}\n')
+(root / 'src/Main.scuzz').write_text('''@main def main: IO[Unit] =
+  for {
+    root <- Sys.getenv("CONTROLLED_ROOT")
+    model <- Sys.getenv("CONTROLLED_MODEL")
+    compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+    deadline <- Sys.getenv("CONTROLLED_TIMEOUT")
+    request <- Proposal.make(root, "Print two", ["src/Main.scuzz"], compiler, [])
+    file = Fs.join(root, "request.json")
+    _ <- Fs.write(file, Proposal.text(request))
+    _ <- if (model == "") IO.pure(()) else if (deadline == "yes") IO.timeout(3000, Generate.command(root, file, model, Fs.join(root, "candidate"), false)) else Generate.command(root, file, model, Fs.join(root, "candidate"), false)
+  } yield ()
+''')
+target = root / 'target'
+(target / 'src').mkdir(parents=True)
+(target / 'scuzz.toml').write_text('[package]\nname="target"\n')
+original = b'@main def main: IO[Unit] = IO.println(1)'
+(target / 'src/Main.scuzz').write_bytes(original)
+tools = root / 'tools'
+tools.mkdir()
+real_awk = shutil.which('awk')
+assert real_awk
+(tools / 'awk').write_text('#!/bin/sh\ncase "$1" in *MemAvailable:*) printf \'34359738368\\n\';; *"Pages free:"*) printf \'34359738368\\n\';; *) exec ' + shlex.quote(real_awk) + ' "$@";; esac\n')
+(tools / 'awk').chmod(0o700)
+env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ['PATH'], XDG_CACHE_HOME=str(cache), HF_HUB_CACHE=str(hub), HF_HUB_OFFLINE='1', CONTROLLED_ROOT=str(target), CONTROLLED_PID=str(root/'pid'), CONTROLLED_RECEIVED=str(root/'received'), CONTROLLED_MODEL='smollm3-3b')
+subprocess.run([str(cli), 'run', str(root)], env=dict(env, CONTROLLED_MODEL=''), check=True, timeout=240)
+exe = root / 'build/controlled-command'
+unrelated = subprocess.Popen(['sleep','120'])
+try:
+ for model in ('smollm3-3b','qwen2.5-coder-7b'):
+  result = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model), check=True, capture_output=True, text=True, timeout=30)
+  output = json.loads(result.stdout)
+  assert output['result']=='published' and output['model']==model and output['behavioral_review']=='pending' and not output['accepted']
+  candidate = target / 'candidate'
+  metadata = json.loads((candidate / 'proposal.json').read_text())
+  content = (candidate / 'src/Main.scuzz').read_bytes()
+  assert metadata['request']==output['request'] and metadata['baseline']==output['baseline'] and metadata['files'][0]['sha256']==hashlib.sha256(content).hexdigest()
+  assert (target / 'src/Main.scuzz').read_bytes()==original and content!=original
+  pid = int((root / 'pid').read_text())
+  try: os.kill(pid,0)
+  except ProcessLookupError: pass
+  else: raise AssertionError(('owned backend remains',pid))
+  assert unrelated.poll() is None and not list((cache/'scuzz/requests').iterdir())
+  print('Controlled finite command:',model,'structured publication, no source writes, pending review, owned cleanup',flush=True)
+  shutil.rmtree(candidate)
+ for model in ('smollm3-3b','qwen2.5-coder-7b'):
+  for sig in (signal.SIGINT, signal.SIGTERM):
+   (root / 'received').unlink(missing_ok=True)
+   child = subprocess.Popen([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+   try:
+    deadline = time.monotonic()+10
+    while not (root / 'received').exists() and time.monotonic()<deadline:
+     assert child.poll() is None
+     time.sleep(.01)
+    assert (root / 'received').exists()
+    pid = int((root / 'pid').read_text())
+    child.send_signal(sig)
+    stdout, stderr = child.communicate(timeout=5)
+    assert child.returncode == 128 + sig and not stdout, (model,sig,child.returncode,stderr)
+   finally:
+    if child.poll() is None:
+     child.kill();child.wait(timeout=5)
+   try: os.kill(pid,0)
+   except ProcessLookupError: pass
+   else: raise AssertionError(('interrupted backend remains',pid))
+   assert not (target / 'candidate').exists() and (target / 'src/Main.scuzz').read_bytes()==original
+   assert not list((cache/'scuzz/requests').iterdir()) and unrelated.poll() is None
+  (root / 'received').unlink(missing_ok=True)
+  timed = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang', CONTROLLED_TIMEOUT='yes'), capture_output=True, text=True, timeout=10)
+  assert timed.returncode != 0 and not timed.stdout and 'timeout' in timed.stderr and (root / 'received').exists(), (model,timed.returncode,timed.stderr)
+  pid = int((root / 'pid').read_text())
+  try: os.kill(pid,0)
+  except ProcessLookupError: pass
+  else: raise AssertionError(('timed-out backend remains',pid))
+  assert not (target / 'candidate').exists() and (target / 'src/Main.scuzz').read_bytes()==original
+  assert not list((cache/'scuzz/requests').iterdir()) and unrelated.poll() is None
+  assert (backend/'release.tar.gz').read_bytes()==artifact
+  assert not list(root.glob('.scuzz-publish-*'))
+  print('Controlled finite command:',model,'interruptions and timeout preserve source and cache, remove incomplete output, and stop only owned work',flush=True)
+finally:
+ unrelated.terminate();unrelated.wait(timeout=5)
+PYGENCOMMAND
   # Live choices select the displayed lane and retain complete local evidence.
   python3 - <<'PYDECK'
 import hashlib, json, os, subprocess, time
@@ -742,13 +1114,13 @@ prop = src.replace('"Counter"', '"Counter app"', 1)
 d = root / "build/proposals/p1"
 (d / "src").mkdir(parents=True, exist_ok=True)
 (d / "src/Main.scuzz").write_text(prop)
+session_dir = root / ".scuzz/ide"
+session_dir.mkdir(parents=True, exist_ok=True)
+(session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "smollm3-3b", "requests": 0}))
 records = [{"path": "src/" + p.name, "content": p.read_text()} for p in sorted((root / "src").glob("*.scuzz"))]
 baseline = hashlib.sha256(json.dumps(records, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
-(d / "proposal.json").write_text(json.dumps({"v": 1, "request": "manual", "baseline": baseline, "kind": "behavior", "generator": "manual", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(prop.encode()).hexdigest()}]}))
-ops = {"v": 1, "kind": "inject", "events": [
-    {"op": "tap", "id": "choicechip:Timeline"},
-    {"op": "tap", "id": "outlined:Proposals"},
-]}
+
+ops = {"v": 1, "kind": "inject", "events": [{"op": "tap", "id": "button:Start"}]}
 path = root / "ops-deck.json"
 path.write_text(json.dumps(ops))
 env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(path), SCUZZ_UI_INJECT=str(path), SCUZZ_UI_DEBUG_DUMP=str(root / "deck-debug.json"))
@@ -774,6 +1146,11 @@ with open(root / "deck-live.log", "w") as log:
         temp.write_text(json.dumps({"v": 1, "kind": "inject", "events": events}))
         temp.replace(path)
     try:
+        await_state(lambda: (root / "build/ide/request.json").is_file())
+        request = json.loads((root / "build/ide/request.json").read_text())
+        assert request["objective"] == "Review behavior"
+        (d / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(prop.encode()).hexdigest()}]}))
+        inject([{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
         await_state(ready)
         inject([{"op": "tap", "id": "button:Choose left"}])
         await_state(lambda: len(list((root / ".scuzz/ide/records").glob("*.json"))) == 1)
@@ -864,11 +1241,17 @@ def read_ui(where):
 def publish(where, files):
     dest = where / "build/proposals/p"
     (dest / "src").mkdir(parents=True, exist_ok=True)
-    records = [{"path": "src/" + p.name, "content": p.read_text()} for p in sorted((where / "src").glob("*.scuzz"))]
-    baseline = hashlib.sha256(json.dumps(records, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+    session_dir = where / ".scuzz/ide"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "smollm3-3b", "requests": 0}))
     for path, content in files:
         (dest / path).write_text(content)
-    (dest / "proposal.json").write_text(json.dumps({"v": 1, "request": "manual", "baseline": baseline, "kind": "behavior", "generator": "manual", "files": [{"path": p, "sha256": hashlib.sha256(c.encode()).hexdigest()} for p, c in files]}))
+
+def bind_publication(where):
+    request = json.loads((where / "build/ide/request.json").read_text())
+    dest = where / "build/proposals/p"
+    files = [{"path": "src/" + p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted((dest / "src").glob("*.scuzz"))]
+    (dest / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": files}))
 
 def write_ops(where, events):
     path = where / "inject.json"
@@ -878,10 +1261,42 @@ def write_ops(where, events):
     return path
 
 def batch(where, events):
+    if len(events) > 1 and events[0] == {"op": "tap", "id": "button:Start"}:
+        return started_batch(where, events)
     path = write_ops(where, events)
     env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SCRIPT=str(path), SCUZZ_UI_DEBUG_DUMP=str(where / "debug.json"))
     env.pop("SCUZZ_UI_SERVE", None)
     subprocess.run([str(editor)], cwd=where, env=env, check=True, timeout=180, stdout=subprocess.DEVNULL)
+
+def started_batch(where, events):
+    path = write_ops(where, events[:1])
+    (where / "debug.json").unlink(missing_ok=True)
+    env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(path), SCUZZ_UI_INJECT=str(path), SCUZZ_UI_DEBUG_DUMP=str(where / "debug.json"))
+    log = open(where / "batch.log", "w")
+    proc = subprocess.Popen([str(editor)], cwd=where, env=env, stdout=log, stderr=log)
+    def await_ui(predicate):
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            assert proc.poll() is None, (where / "batch.log").read_text()[-3000:]
+            try:
+                ui = json.loads((where / "debug.json").read_text())
+                if predicate(ui): return ui
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass
+            time.sleep(.05)
+        raise AssertionError("started review deadline: " + str(where))
+    try:
+        ui = await_ui(lambda ui: "External proposals: publish a complete directory" in json.dumps(ui) or "unsafe resolved path" in json.dumps(ui))
+        if "unsafe resolved path" not in json.dumps(ui):
+            write_ops(where, events[1:])
+            await_ui(lambda ui: any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui["signals"]) and ((where / "build/ide/report.json").is_file() or "unsafe resolved path" in json.dumps(ui)))
+        write_ops(where, [{"op": "quit"}])
+        assert proc.wait(timeout=15) == 0
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=15)
+        log.close()
 
 publish(root, [("src/Main.scuzz", proposed), ("src/Other.scuzz", "def other(): Int =\n  3\n\n")])
 fault = root / "fault.c"
@@ -906,7 +1321,7 @@ int rename(const char *from, const char *to) {
 if os.uname().sysname == "Linux":
     library = root / "fault.so"
     subprocess.run(["clang", "-shared", "-fPIC", str(fault), "-ldl", "-o", str(library)], check=True)
-    inject = write_ops(root, [{"op": "caret", "i": 0, "offset": 0}, {"op": "key", "key": "x", "text": "x"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+    inject = write_ops(root, [{"op": "tap", "id": "button:Start"}])
     env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(inject), SCUZZ_UI_INJECT=str(inject), SCUZZ_UI_DEBUG_DUMP=str(root / "debug.json"), LD_PRELOAD=str(library))
     log = open(root / "live.log", "w")
     review_wall_start = time.monotonic()
@@ -917,7 +1332,7 @@ if os.uname().sysname == "Linux":
             assert proc.poll() is None, (root / "live.log").read_text()[-3000:]
             try:
                 result = predicate()
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, FileNotFoundError):
                 result = None
             if result:
                 return result
@@ -934,6 +1349,13 @@ if os.uname().sysname == "Linux":
                 if idle and armed and "Choose left" in json.dumps(ui.get("taps", [])):
                     return c
     try:
+        await_state(lambda: (root / "build/ide/request.json").is_file())
+        write_ops(root, [{"op": "tap", "id": "choicechip:Live"}])
+        await_state(lambda: read_ui(root).get("editors"))
+        write_ops(root, [{"op": "caret", "offset": len(original)}, {"op": "key", "key": "x", "text": "x"}])
+        await_state(lambda: any(v.get("name") == "buf" and v.get("value") == original + "x" for v in read_ui(root)["signals"]))
+        bind_publication(root)
+        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
         ui = read_ui(root)
         values = {v["name"]: v["value"] for v in ui["signals"]}
@@ -992,9 +1414,14 @@ if os.uname().sysname == "Linux":
         assert any(v.get("name") == "buf" and v.get("value") == dirty for v in ui["signals"])
         write_ops(root, [{"op": "quit"}])
         assert proc.wait(timeout=15) == 0
-        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+        previous_request = (root / "build/ide/request.json").read_text()
+        write_ops(root, [{"op": "tap", "id": "button:Start"}])
+        (root / "debug.json").unlink()
         review_wall_start = time.monotonic()
         proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
+        await_state(lambda: "External proposals: publish a complete directory" in json.dumps(read_ui(root)))
+        bind_publication(root)
+        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
         print("Counter repeated card readiness:", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; freeze to ready:", c["ready"] - c["started"], "ms")
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
@@ -1026,11 +1453,14 @@ if os.uname().sysname == "Linux":
     assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 2
     publish(root, [("src/Main.scuzz", proposed), ("src/Other.scuzz", "def other(): Int =\n  3\n\n")])
     env.pop("LD_PRELOAD", None)
-    write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+    write_ops(root, [{"op": "tap", "id": "button:Start"}])
     log = open(root / "live.log", "a")
     review_wall_start = time.monotonic()
     proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
     try:
+        await_state(lambda: (root / "build/ide/request.json").is_file())
+        bind_publication(root)
+        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
         write_ops(root, [{"op": "tap", "id": "button:" + lane}, {"op": "tap", "id": "button:" + lane}])
@@ -1063,7 +1493,9 @@ shutil.rmtree(failure, ignore_errors=True)
 shutil.copytree(repo / "examples/counter", failure, ignore=shutil.ignore_patterns("build", ".scuzz"))
 (failure / "failure.scuzz_verify").write_text('def sharedFailure(t: Timeline): Verdict =\n  Verdict.fail(0, "shared failure")\n\n')
 publish(failure, [("src/Main.scuzz", proposed)])
-batch(failure, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+batch(failure, [{"op": "tap", "id": "button:Start"}])
+bind_publication(failure)
+batch(failure, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
 report = json.loads((failure / "build/ide/report.json").read_text())
 assert not report["review"]["complete"] and any(w["why_b"] for w in report["workloads"]), report
 assert (failure / "src/Main.scuzz").read_text() == original
@@ -1074,7 +1506,9 @@ source_only = repo / "scratchpad/review-source-only"
 shutil.rmtree(source_only, ignore_errors=True)
 shutil.copytree(repo / "examples/counter", source_only, ignore=shutil.ignore_patterns("build", ".scuzz"))
 publish(source_only, [("src/Main.scuzz", original.replace("noteDrive(n:", "noteDrive(steps:").replace("steps: Int where n >= 0", "steps: Int where steps >= 0"))])
-batch(source_only, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+batch(source_only, [{"op": "tap", "id": "button:Start"}])
+bind_publication(source_only)
+batch(source_only, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
 assert (source_only / "src/Main.scuzz").read_text() == original
 records = [json.loads(p.read_text()) for p in (source_only / ".scuzz/ide/records").glob("*.json")]
 assert len(records) == 1 and records[0]["decision"] == "no-observed-difference" and records[0]["kind"] == "automatic", records
@@ -1091,7 +1525,9 @@ shutil.copytree(repo / "examples/counter", repair, ignore=shutil.ignore_patterns
 (repair / "src/Main.scuzz").write_text(original.replace("Signal.get(count) + 1", 'Signal.get(count) + "x"'))
 assert (repair / "src/Main.scuzz").read_text() != original
 publish(repair, [("src/Main.scuzz", proposed)])
-batch(repair, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+batch(repair, [{"op": "tap", "id": "button:Start"}])
+bind_publication(repair)
+batch(repair, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
 cards = [json.loads(p.read_text()) for p in (repair / ".scuzz/ide/cards").glob("*/card.json")]
 assert len(cards) == 1 and cards[0]["status"] == "ready", cards
 assert all(w["why_a"] == "check failed" and w["why_b"] is None for w in cards[0]["evidence"]["workloads"])
@@ -1101,12 +1537,14 @@ for side in ("publication", "target"):
     shutil.rmtree(unsafe, ignore_errors=True)
     shutil.copytree(repo / "examples/counter", unsafe, ignore=shutil.ignore_patterns("build", ".scuzz"))
     publish(unsafe, [("src/Main.scuzz", proposed)])
+    batch(unsafe, [{"op": "tap", "id": "button:Start"}])
+    bind_publication(unsafe)
     linked = unsafe / ("build/proposals/p/src/Main.scuzz" if side == "publication" else "src/Main.scuzz")
     outside = unsafe / "outside.scuzz"
     outside.write_text(linked.read_text())
     linked.unlink()
     linked.symlink_to(outside)
-    batch(unsafe, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+    batch(unsafe, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
     assert outside.read_text() == (proposed if side == "publication" else original)
     assert not list((unsafe / ".scuzz/ide/cards").glob("*/card.json"))
     assert not list((unsafe / ".scuzz/ide/records").glob("*.json"))
@@ -1119,6 +1557,7 @@ ops = {"v": 1, "kind": "inject", "events": [
     {"op": "tap", "id": "outlined:Generate"},
     {"op": "pump", "k": 50},
 ]}
+ops["events"].insert(0, {"op": "tap", "id": "button:Start"})
 open("scratchpad/review/ops-gen.json", "w").write(json.dumps(ops))
 PY
   (cd scratchpad/review && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec ops-gen.json "$ROOT/examples/editor")

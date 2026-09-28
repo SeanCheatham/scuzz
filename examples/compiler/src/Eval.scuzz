@@ -36,7 +36,7 @@ record EvStep(e: Expr, env: EvEnv)
 
 record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Ref[Value]], log: List[Ref[Value]], ui: List[UiCall => IO[Value]])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Signal[Value]], log: List[Ref[Value]], ui: List[UiCall => IO[Value]])
 
 import Parse.Expr
 import Parse.Fun
@@ -80,7 +80,7 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigRefs(), noRefs(), noUi())
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigSlots(), noRefs(), noUi())
   }
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
@@ -137,16 +137,16 @@ def runMain(p: EvProg): IO[Unit] =
 def envOf(p: EvProg): EvEnv =
   EvEnv(noVars(), p.mainMod, "")
 
-def tryIt(src: String, pool: Ref[Value]): IO[TryOut] =
+def tryIt(src: String, pool: Signal[Value]): IO[TryOut] =
   tryChecked(src, Check.human(src), pool)
 
-def tryNow(src: String, pool: Ref[Value]): TryOut =
+def tryNow(src: String, pool: Signal[Value]): TryOut =
   Property.force(tryIt(src, pool))
 
-def tryNowAt(src: String, seed: Int, pool: Ref[Value]): TryOut =
+def tryNowAt(src: String, seed: Int, pool: Signal[Value]): TryOut =
   tryNowRest(Fuzz.hit(Str.concat("seed:", Str.fromInt(seed))), src, pool)
 
-def tryNowRest(_u: Unit, src: String, pool: Ref[Value]): TryOut =
+def tryNowRest(_u: Unit, src: String, pool: Signal[Value]): TryOut =
   tryNowDone(tryNow(src, pool))
 
 def tryNowDone(out: TryOut): TryOut =
@@ -193,8 +193,8 @@ def campSearchAt(p: EvProg, name: String, i: Int, hi: Int, mod: String, v: Value
 def campFail(name: String, i: Int): String =
   Str.concat("fail ", Str.concat(name, Str.concat(" ", Str.fromInt(i))))
 
-def poolInt(pool: Ref[Value], name: String): Int =
-  poolIntGo(listOf(refGet(pool)), name)
+def poolInt(pool: Signal[Value], name: String): Int =
+  poolIntGo(listOf(Signal.get(pool)), name)
 
 def poolIntGo(xs: List[Value], name: String): Int =
   if (List.isEmpty(xs)) 0 else poolIntHd(List.at(xs, 0), List.tail(xs), name)
@@ -205,7 +205,7 @@ def poolIntHd(v: Value, rest: List[Value], name: String): Int =
     case _ => poolIntGo(rest, name)
   }
 
-def tryChecked(src: String, diags: String, pool: Ref[Value]): IO[TryOut] =
+def tryChecked(src: String, diags: String, pool: Signal[Value]): IO[TryOut] =
   if (diags != "scuzz check ok") IO.pure(TryOut(diags, Value.VUnit, [], Value.VList(noVals()))) else Ref.of(Value.VUnit).flatMap(host => Ref.of(Value.VList(noVals())).flatMap(log => tryHost(withLog(withHost(load(("Main", src) :: []), host, pool), log), host)))
 
 def tryHost(p: EvProg, host: Ref[Value]): IO[TryOut] =
@@ -1873,13 +1873,13 @@ def themeKit(f: String): Int =
   if (f == "Theme.accent") Theme.accent() else if (f == "Theme.primary") Theme.primary() else if (f == "Theme.muted") Theme.muted() else Theme.foreground()
 
 def uiRun(fv: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  if (List.isEmpty(p.host)) errAt("Ui.run needs a UI host", env, p, off) else Value.VIo(unitIo(Ref.set(List.at(p.host, 0), applyValue(fv, Value.VUnit :: noVals(), env, p, off))))
+  if (List.isEmpty(p.host)) errAt("Ui.run needs a UI host", env, p, off) else if (List.nonEmpty(p.ui)) hostUi("Ui.run", [applyValue(fv, Value.VUnit :: noVals(), env, p, off)], p) else Value.VIo(unitIo(Ref.set(List.at(p.host, 0), applyValue(fv, Value.VUnit :: noVals(), env, p, off))))
 
 def sigKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "Signal.make") sigMake("", List.at(vals, 0), p) else if (f == "Signal.makeN") sigMake(strAt(vals, 0), List.at(vals, 1), p) else if (f == "Signal.get") sigGet(List.at(vals, 0), env, p, off) else if (f == "Signal.set") sigSet(List.at(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Signal.map") sigMap("", List.at(vals, 0), List.at(vals, 1), env, p, off) else if (f == "Signal.mapN") sigMap(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
 
 def sigAnon(name: String, v: Value, p: EvProg): Value =
-  sigAnonAt(name, v, intOf(refGet(List.at(p.sig, 1))), listOf(refGet(List.at(p.sig, 0))), p)
+  sigAnonAt(name, v, intOf(Signal.get(List.at(p.sig, 1))), listOf(Signal.get(List.at(p.sig, 0))), p)
 
 def sigAnonAt(name: String, v: Value, next: Int, pool: List[Value], p: EvProg): Value =
   sigBump(sigGrow(sigBare(name, v, next), List.take(pool, next), p), next, p)
@@ -1892,7 +1892,7 @@ def sigBare(name: String, v: Value, id: Int): Value =
   }
 
 def sigMake(name: String, v: Value, p: EvProg): Value =
-  sigTake(name, v, intOf(refGet(List.at(p.sig, 1))), listOf(refGet(List.at(p.sig, 0))), p)
+  sigTake(name, v, intOf(Signal.get(List.at(p.sig, 1))), listOf(Signal.get(List.at(p.sig, 0))), p)
 
 def sigTake(name: String, v: Value, next: Int, pool: List[Value], p: EvProg): Value =
   if (next < List.len(pool) && sigFits(List.at(pool, next), name, v)) sigBump(sigStore(List.at(pool, next), v), next, p) else sigBump(sigGrow(sigNew(name, v, next, sigHide(p)), List.take(pool, next), p), next, p)
@@ -1911,10 +1911,10 @@ def sigKind(v: Value): String =
   }
 
 def sigBump(sv: Value, next: Int, p: EvProg): Value =
-  sigAfter(refPut(List.at(p.sig, 1), Value.VInt(next + 1)), sv)
+  sigAfter(Signal.set(List.at(p.sig, 1), Value.VInt(next + 1)), sv)
 
 def sigGrow(sv: Value, pool: List[Value], p: EvProg): Value =
-  sigAfter(refPut(List.at(p.sig, 0), Value.VList(List.append(pool, sv))), sv)
+  sigAfter(Signal.set(List.at(p.sig, 0), Value.VList(List.append(pool, sv))), sv)
 
 def sigAfter(_u: Unit, sv: Value): Value =
   sv
@@ -1964,7 +1964,7 @@ def sigRead(v: Value, si: Signal[Int], ss: Signal[String]): Value =
 
 def sigSet(sv: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   sv match {
-    case Value.VSig(id, _, s, si, ss) => if (valEq(Signal.get(s), v)) Value.VUnit else sigPush(id, v, listOf(refGet(List.at(p.sig, 2))), sigWrite(Value.VUnit, s, si, ss, v), env, p, off)
+    case Value.VSig(id, _, s, si, ss) => if (valEq(Signal.get(s), v)) Value.VUnit else sigPush(id, v, listOf(Signal.get(List.at(p.sig, 2))), sigWrite(Value.VUnit, s, si, ss, v), env, p, off)
     case _ => errAt("Signal.set needs a Signal", env, p, off)
   }
 
@@ -1987,7 +1987,7 @@ def sigMap(name: String, sv: Value, f: Value, env: EvEnv, p: EvProg, off: Int): 
   }
 
 def sigMapDst(id: Int, f: Value, dst: Value, p: EvProg): Value =
-  if (isErr(dst)) dst else sigMapDep(dst, refPut(List.at(p.sig, 2), Value.VList(List.append(listOf(refGet(List.at(p.sig, 2))), Value.VTuple(Value.VInt(id) :: f :: dst :: noVals())))))
+  if (isErr(dst)) dst else sigMapDep(dst, Signal.set(List.at(p.sig, 2), Value.VList(List.append(listOf(Signal.get(List.at(p.sig, 2))), Value.VTuple(Value.VInt(id) :: f :: dst :: noVals())))))
 
 def sigMapDep(dst: Value, _u: Unit): Value =
   dst
@@ -2227,7 +2227,7 @@ def propLive(f: String, vals: List[Value], p: EvProg): Value =
   if (f == "Property.a11yHas") Value.VBool(Property.a11yHas(strAt(vals, 0))) else if (strAt(vals, 0) == "") propNative(f, vals) else propNamed(f, vals, p)
 
 def propNamed(f: String, vals: List[Value], p: EvProg): Value =
-  if (f == "Property.signalInt" || f == "Property.signalStr") propNative(f, vals) else propHit(f, vals, propFind(listOf(refGet(List.at(p.sig, 0))), strAt(vals, 0), "list"))
+  if (f == "Property.signalInt" || f == "Property.signalStr") propNative(f, vals) else propHit(f, vals, propFind(listOf(Signal.get(List.at(p.sig, 0))), strAt(vals, 0), "list"))
 
 def propFind(xs: List[Value], name: String, kind: String): (Bool, Value) =
   if (List.isEmpty(xs)) (false, Value.VUnit) else propFindHd(List.at(xs, 0), List.tail(xs), name, kind)
@@ -2403,44 +2403,44 @@ def probeExit(e: String): Int =
 def withCtx(p: EvProg, ctx: Ref[Value]): EvProg =
   EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.kpars, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log, p.ui)
 
-def withHost(p: EvProg, host: Ref[Value], pool: Ref[Value]): EvProg =
+def withHost(p: EvProg, host: Ref[Value], pool: Signal[Value]): EvProg =
   EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log, p.ui)
 
 def withLog(p: EvProg, log: Ref[Value]): EvProg =
   EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs(), p.ui)
 
-def sigRefs(): List[Ref[Value]] =
-  newRef(Value.VList(noVals())) :: newRef(Value.VInt(0)) :: newRef(Value.VList(noVals())) :: newRef(Value.VBool(false)) :: noRefs()
+def sigSlots(): List[Signal[Value]] =
+  [Signal.makeN("$mirror", Value.VList(noVals())), Signal.makeN("$mirror", Value.VInt(0)), Signal.makeN("$mirror", Value.VList(noVals())), Signal.makeN("$mirror", Value.VBool(false))]
 
 def sigHide(p: EvProg): Bool =
-  boolOf(refGet(List.at(p.sig, 3)))
+  boolOf(Signal.get(List.at(p.sig, 3)))
 
 def sigHideOn(p: EvProg): EvProg =
-  sigHidePut(p, refPut(List.at(p.sig, 3), Value.VBool(true)))
+  sigHidePut(p, Signal.set(List.at(p.sig, 3), Value.VBool(true)))
 
 def sigHidePut(p: EvProg, _u: Unit): EvProg =
   p
 
 def probeMounted(files: List[(String, String)], slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
-  Ref.of(Value.VUnit).flatMap(ctx => Ref.of(Value.VUnit).flatMap(host => probeMountLoad(load(files).copy(ui = [ui]), ctx, host, slot, mount)))
+  Ref.of(Value.VUnit).flatMap(ctx => Ref.of(Value.VUnit).flatMap(host => probeMountLoad(load(files).copy(ui = [call => probeUiCall(call, mount, ui)]), ctx, host, slot)))
 
-def probeMountLoad(p: EvProg, ctx: Ref[Value], host: Ref[Value], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  probeMountArmed(sigHideOn(withHost(withCtx(p, ctx), host, List.at(p.sig, 0))), ctx, slot, mount)
+def probeUiCall(call: UiCall, mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Value] =
+  if (call.name == "Ui.run") mount(List.at(call.args, 0)).map(_ => Value.VUnit) else ui(call)
 
-def probeMountArmed(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  sigTagWrite(p).flatMap(_ => probeServeUi(p, ctx, slot, mount))
+def probeMountLoad(p: EvProg, ctx: Ref[Value], host: Ref[Value], slot: Ref[List[EvProg]]): IO[Unit] =
+  probeMountArmed(sigHideOn(withHost(withCtx(p, ctx), host, List.at(p.sig, 0))), ctx, slot)
 
-def probeServeUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else probeOnceUi(p, ctx, slot, mount).flatMap(code => IO.println(Str.fromInt(code)).flatMap(_ => probeServeUi(p, ctx, slot, mount))))
+def probeMountArmed(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]]): IO[Unit] =
+  sigTagWrite(p).flatMap(_ => probeServeUi(p, ctx, slot))
 
-def probeOnceUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Int] =
-  probeProgUi(p, ctx, slot, mount).map(_ => 0).handleErrorWith(e => IO.pure(probeExit(e)))
+def probeServeUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]]): IO[Unit] =
+  Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else probeOnceUi(p, ctx, slot).flatMap(code => IO.println(Str.fromInt(code)).flatMap(_ => probeServeUi(p, ctx, slot))))
 
-def probeProgUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Fuzz.probe(IO.pure(()).flatMap(_ => probeMain(p)).flatMap(_ => probeMountCall(p, slot, mount)))))
+def probeOnceUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]]): IO[Int] =
+  probeProgUi(p, ctx, slot).map(_ => 0).handleErrorWith(e => IO.pure(probeExit(e)))
 
-def probeMountCall(p: EvProg, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  Ref.get(List.at(p.host, 0)).flatMap(v => Ref.set(slot, oneProg(p)).flatMap(_ => mount(v)))
+def probeProgUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]]): IO[Unit] =
+  probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Ref.set(slot, oneProg(p)).flatMap(_ => Fuzz.probe(IO.pure(()).flatMap(_ => probeMain(p))))))
 
 def oneProg(p: EvProg): List[EvProg] =
   p :: noProg()
@@ -2455,7 +2455,9 @@ def sigTagWriteAt(path: String, ens: List[En]): IO[Unit] =
   if (path == "") IO.pure(()) else Fs.write(path, sigTagText(ens))
 
 def sigTagText(ens: List[En]): String =
-  sigTagsGo(ens, "")
+  sigTagsGo(ens, Str.concat(List.join(List.map(["Null", "Bool", "Int", "Float", "Str", "Arr", "Obj"], name => Str.concat("Json.", Str.concat(name, Str.concat("=", Str.fromInt(Emit.ctorTag(ens, "Json", name)))))), """
+"""), """
+"""))
 
 def sigTagsGo(ens: List[En], acc: String): String =
   if (List.isEmpty(ens)) acc else sigTagsEn(ens, List.at(ens, 0), List.tail(ens), acc)

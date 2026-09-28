@@ -22,6 +22,7 @@ enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
 @property(nonatomic) BOOL cancelled;
 @property(nonatomic) int readFd;
 @property(nonatomic) int writeFd;
+@property(nonatomic) NSTimeInterval responseWait;
 - (void)start;
 - (void)close;
 @end
@@ -61,8 +62,8 @@ enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
   config.HTTPShouldSetCookies = NO;
   config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
   /* Idle bounds only. IO.timeout cancels the task through the finalizer. */
-  config.timeoutIntervalForRequest = 30;
-  config.timeoutIntervalForResource = 60;
+  config.timeoutIntervalForRequest = self.responseWait;
+  config.timeoutIntervalForResource = self.responseWait > 60 ? self.responseWait : 60;
   config.waitsForConnectivity = NO;
   NSOperationQueue *queue = [NSOperationQueue new];
   queue.maxConcurrentOperationCount = 1;
@@ -239,6 +240,7 @@ static ScuzzHttpRequest *apple_http_request(SzPair *parameters) {
   SzMap *headers = payload->left;
   SzString *body = payload->right;
   ScuzzHttpRequest *state = [ScuzzHttpRequest new];
+  state.responseWait = (NSTimeInterval)sz_net_http_wait_ms(headers, 30000) / 1000;
   NSString *urlText = [[NSString alloc] initWithBytes:sz_string_cstr(url)
                                             length:sz_string_len(url)
                                           encoding:NSUTF8StringEncoding];

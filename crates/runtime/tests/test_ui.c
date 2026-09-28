@@ -2219,8 +2219,9 @@ static void test_session_dump_now_needs_path(void) {
   SzUiSession *session;
   SzView *root;
 
+  SzSignalInt *count = sz_signal_int(0);
   root = sz_view_column();
-  sz_view_add_child(root, sz_view_text("x"));
+  sz_view_add_child(root, sz_view_text_signal_int(count, "n="));
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
   cfg.width = 80;
@@ -2232,12 +2233,30 @@ static void test_session_dump_now_needs_path(void) {
   assert(!sz_ui_session_dump_now(session));
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_pumps(session) == 1);
+  uint8_t *before = NULL, *after = NULL;
+  size_t before_len = 0, after_len = 0;
+  assert(sz_ui_snapshot_png_bytes(session, &before, &before_len));
+  assert(sz_ui_snapshot_png_sync(session, "/tmp/scuzz_stop_before.png"));
+  sz_signal_int_set(count, 1);
+  SzInputEvent miss = {0};
+  miss.kind = SZ_INPUT_TAP;
+  miss.x = -1; miss.y = -1;
+  assert(sz_ui_inject_sync(session, &miss));
+  assert(sz_ui_session_needs_paint(session));
   sz_ui_session_request_stop(session);
   assert(!sz_ui_session_alive(session));
   assert(sz_ui_session_lifecycle(session) == SZ_LIFECYCLE_STOP);
   assert(!sz_ui_pump_sync(session));
   assert(sz_ui_session_pumps(session) == 1);
+  assert(sz_ui_snapshot_png_bytes(session, &after, &after_len));
+  assert(before_len == after_len && memcmp(before, after, before_len) == 0);
+  assert(sz_ui_snapshot_png_sync(session, "/tmp/scuzz_stop_after.png"));
+  assert(files_equal("/tmp/scuzz_stop_before.png", "/tmp/scuzz_stop_after.png"));
+  assert(sz_ui_session_pumps(session) == 1);
+  free(before);
+  free(after);
   sz_ui_unmount(session);
+  sz_signal_int_free(count);
 }
 
 static void test_session_inject_scroll(void) {
@@ -17172,7 +17191,66 @@ static void test_stamp_loads_reload_code(void) {
   }
 }
 
-int main(void) {
+static void test_mirror_signal_session(void) {
+  SzString *name = sz_string_from_cstr("$mirror");
+  void *initial = sz_box_i64(1);
+  SzSignal *pool = sz_signal_new(initial, 4, name);
+  size_t before_bytes, before_count, after_bytes, after_count;
+  sz_release(initial);
+  setenv("SCUZZ_TESTRT", "1", 1);
+  sz_testrt_oracles_refresh();
+  sz_alloc_stats(&before_bytes, &before_count);
+  sz_signal_session_push();
+  void *next = sz_box_i64(2);
+  sz_signal_write(pool, next);
+  sz_release(next);
+  sz_signal_session_push();
+  next = sz_box_i64(3);
+  sz_signal_write(pool, next);
+  sz_signal_new(next, 4, name);
+  sz_release(next);
+  SzString *dump = sz_signal_dump_json_string();
+  assert(strcmp(sz_string_cstr(dump), "[]") == 0);
+  sz_release(dump);
+  sz_signal_session_pop();
+  next = sz_signal_read(pool);
+  assert(sz_unbox_i64(next) == 2);
+  sz_release(next);
+  sz_signal_session_pop();
+  next = sz_signal_read(pool);
+  assert(sz_unbox_i64(next) == 1);
+  sz_release(next);
+  sz_alloc_stats(&after_bytes, &after_count);
+  assert(after_count == before_count && after_bytes == before_bytes);
+  sz_signal_free(pool);
+  sz_release(name);
+  SzSignalInt *visible = sz_signal_int(7);
+  sz_signal_name(visible, "visible");
+  dump = sz_signal_dump_json_string();
+  assert(strcmp(sz_string_cstr(dump),
+                "[{\"id\":0,\"type\":\"int\",\"name\":\"visible\",\"value\":7}]") == 0);
+  sz_release(dump);
+  sz_signal_int_free(visible);
+}
+
+int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "--mirror-session") == 0) {
+    test_mirror_signal_session();
+    return 0;
+  }
+  for (int mode = 0; mode < 2; mode++) {
+    pid_t mirror = fork();
+    assert(mirror >= 0);
+    if (mirror == 0) {
+      if (mode) setenv("SCUZZ_EVAL_MIRROR", "1", 1);
+      else unsetenv("SCUZZ_EVAL_MIRROR");
+      execl(argv[0], argv[0], "--mirror-session", (char *)NULL);
+      _exit(127);
+    }
+    int mirror_status;
+    assert(waitpid(mirror, &mirror_status, 0) == mirror);
+    assert(WIFEXITED(mirror_status) && WEXITSTATUS(mirror_status) == 0);
+  }
   test_control_labels_use_text();
   test_script_scroll_targets_outer_container();
   test_nested_scroll_wheel_bubbles();

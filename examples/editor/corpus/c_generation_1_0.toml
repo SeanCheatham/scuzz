@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive generationFlow 1 0"]

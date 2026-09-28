@@ -16,11 +16,11 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Unproven.** Full corpus replay plus bounded search fits a frequent decision loop. Evaluator timelines remain equal to compiled timelines on new generated proposals. Index-based state alignment remains clear when a proposal adds or removes steps.
 
-**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 25.2 s from editor launch to the visible question. The evaluator host is cached. A repeated card takes 3.4 s. Frozen-card preparation takes 3.7 s and 3.1 s. Cached workload navigation takes 55 ms. Cached step navigation takes 74 ms. The 250 ms navigation target is met. Each value is one sample. Both runs start a new editor process. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It is not a cold host-build measurement.
+**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 24.6 s from editor launch to the visible question. The evaluator host is cached. A repeated card takes 3.3 s. Frozen-card preparation takes 2.97 s and 3.03 s. Cached workload navigation takes 62 ms. Cached step navigation takes 62 ms. The 250 ms navigation target is met. Each value is one sample. Both runs start a new editor process. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It is not a cold host-build measurement.
 
-The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `b7dff0752f1016ebf73f53c537d67dad25b6d9442d4e3f3cc6282f1427e5e137`. The evaluator host SHA-256 is `8478e1f49243757c37905cb3e45804aecaaff62b987c1a63ec7a121c76d7f0d2`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
+The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `cea67a67b6aa45a31aa676e21802d115ff6e2e5403572e3ce0fc01e00ab1fd2a`. The evaluator host SHA-256 is `a23522ed0f470b9ab996d6b7d480f2bb765f11f75302f4cc585a00c81ed87bc7`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
 
-**Known cost.** A zero-delay retry reaches the scheduler step cap in about 13 s on the evaluator and 0.7 s compiled. A mutated page limit reaches the 20 s probe deadline on both engines. Docs can differ on the representation of a signal that holds views. Do not hide these differences with a successful card.
+**Known cost.** A zero-delay retry reaches the scheduler step cap in about 13 s on the evaluator and 0.7 s compiled. A mutated page limit reaches the 20 s probe deadline on both engines. The type-checker, code-generation, and CLI idle probes exceed their evaluator deadlines during concurrent validation. Their campaigns run compiled. They do not prove evaluator parity. Docs can differ on the representation of a signal that holds views. Do not hide these differences with a successful card.
 
 **Proof.** Replay selected UI and IO witnesses compiled. Keep the existing campaign parity checks. Measure cold readiness, warm readiness, and cached navigation separately. Target cached navigation below 250 ms. Report an unmet target. Optimize demonstrated costs without reducing evidence. Semantic timeline alignment stays later.
 
@@ -34,15 +34,9 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device 
 
 ## Known gaps
 
-### Objective and generation
-
-There is no managed local model path, objective-driven request contract, session work budget, or scoped source set. Generate creates mutation proposals. It does not provide direction toward a product objective. The importer validates complete publication metadata, source hashes, baselines, and canonical paths. Requests do not bind to an objective or session. Source and outcome deduplication remain missing.
-
-**Proof:** Gate 3. Prove model setup and lifecycle with fake effects, a controlled local child, private loopback, and external directory publication. Test the real downloader, pinned backend, and one small local model separately. Record model revision, backend identity, memory and context limits, readiness time, and Scuzz output quality. External import must need no model resources.
-
 ### Queue and preference feedback
 
-Review prepares a card on demand. There is no ready successor cache, request budget, or complete job cancellation policy for the stream. Full-file siblings can replace accepted work from an older baseline. Can't decide has no reason. Local model requests and exported producer requests do not consume preferences. There is no retained-acceptance measure or local session summary.
+Review prepares a card on demand. There is no ready successor cache or complete job cancellation policy for the stream. Full-file siblings can replace accepted work from an older baseline. Can't decide has no reason. Local model requests and exported producer requests do not consume preferences. There is no retained-acceptance measure or local session summary.
 
 **Proof:** Gates 4 and 5. Exercise late responses, baseline changes, repeated actions, pause, and session exit. Measure the result from local records.
 
@@ -54,24 +48,27 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Supporting compiler and editor work
 
-- **Compile time.** `scuzz check examples/compiler` is recorded at about 4.5 s. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
+- **Compile time.** `scuzz check examples/compiler` takes 5.46 s in one current sample. The CLI SHA-256 is `cea67a67b6aa45a31aa676e21802d115ff6e2e5403572e3ce0fc01e00ab1fd2a`. The editor campaign and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
 - **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.
 - **Check scope.** The editor Check button does not perform all format and verify-file checks of `scuzz check`. Candidate gating must use the required shared checks even if the general button stays separate.
 - **Standard kits.** OS threads remain missing. Add kit work only when it blocks an ordinary program or a required review proof.
 
-### Finite CLI generation
+### Local model evidence
 
-`scuzz ide` launches the editor. It has no finite suggestion command. Testing generation needs a shared operation that runs without UI input and stops after one result.
+macOS and Linux ARM64 backend execution remain unverified. Peak memory and useful Scuzz generation quality remain unknown. Larger source scopes can exceed the fixed context. Controlled replies do not prove usefulness.
 
-**Proof:** Gate 3. Implement `scuzz ide generate-suggestion` with the same catalog, request, parser, and process lifecycle as the IDE. Prove structured output, nonzero failure status, no source writes, complete publication, and child cleanup. Run the real CPU generation proof through it. Behavioral approval still needs the shared review path.
+**Proof.** Run the pinned backend on each supported host. Measure peak memory and useful output for the fixed catalog. Use real weights and the shared request, parser, and behavioral review. Report unavailable hosts separately. Do not expand the catalog or claim quality from model size.
 
-### Managed local models
+**Measurement.** The host uses the pinned Q4_K_M artifacts and llama.cpp b11146 with CPU inference. Context is 4096 tokens. Output is at most 1024 tokens. Each row shows one measured finite command. Weights are cached. Compiler work can run at the same time. These samples do not establish stable latency or generation quality.
 
-The cache, download, and inference lifecycle are missing. Compatibility with shared cache locks, immutable revisions, interrupted downloads, and offline reuse needs proof. CPU runtime acquisition and model startup need a bounded implementation. The fixed 3B and 7B catalog needs download, template, resource, and cache-state proofs. CLI model listing and download are missing. CPU latency, peak memory, and useful Scuzz output are unmeasured for both options. Local model context may be too small for the selected source set. Generated Scuzz may be invalid or directionless. Useful quality on an ordinary host is unproven.
+| Model | Command elapsed | Prompt | Prompt tokens | Generation | Output tokens | Generation tokens/s | Observed RSS at completion |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SmolLM3 3B | 54.0 s | 12.9 s | 639 | 20.3 s | 124 | 6.06 | 3,738,292,224 bytes |
+| Qwen2.5-Coder 7B Instruct | 112.8 s | 32.2 s | 695 | 51.6 s | 190 | 3.66 | 8,279,842,816 bytes |
 
-**Proof:** Gate 3. Use the published Hugging Face cache through its downloader. Use one pinned llama.cpp CPU backend and single-file GGUF. Prove lifecycle failures without weights in ordinary CI. Prove offline `scuzz models list` and bounded `scuzz models download <model-id>` through the same catalog and downloader. Run one opt-in real CPU session with the default 3B option. Check the 7B option on a host with enough memory. Keep an unavailable larger-model check explicit. Record prompt and generation time, tokens per second, observed memory, and review latency. Do not expand the catalog or claim throughput from model size. A grammar-valid JSON response is not evidence of a useful code change.
+Sampling uses seed 1 and temperature 0.2. The pinned revisions and artifact digests are in the [generation catalog](../examples/editor/generation/src/Models.scuzz). Prompt processing is 49.40 tokens/s for 3B and 21.56 tokens/s for 7B. The default sample uses CLI SHA-256 `cea67a67b6aa45a31aa676e21802d115ff6e2e5403572e3ce0fc01e00ab1fd2a`. The 7B sample does not retain its compiler identity.
 
-**Current host limit:** The downloader is available on the inspected host. `llama-server` is not on PATH. Real inference still needs backend setup and a selected artifact. Do not treat mocked inference as that proof.
+The 7B model load has one observed sample of 3.9 s. The current 3B command does not measure load time separately. The process budgets are 4 GiB and 8 GiB. Linux enforces their virtual memory limits. The default finite proposal changes `greeting.txt` from `Hello` to `Hello Scuzz` under simulation. Its target has no registered claims. Its review completes all required workloads and 32 search cases. Finite Headless review retains a zero-event witness and exits normally. Frozen-card preparation takes 1.736 s in one sample. This interval excludes generation, editor startup, and input collection before the card freezes. The target has one required idle workload and no seeds or corpus files. It changes no source before a choice. A console-only proposal has no recorded difference. These cases do not measure human preference or application quality.
 
 ## Cuts and later work
 

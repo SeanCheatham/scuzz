@@ -23,14 +23,15 @@ struct SzSignal {
 };
 
 /* --- signal store registry (fuzz / dump oracle) --------------------------- */
-/* Every live signal, in creation order. Ids are monotonic. A dump stays
-   stable across frees. */
+/* Register every live signal for session cleanup. Hidden signals have no
+ * dump ID. Visible IDs increase in creation order and stay stable after free. */
 
 typedef enum { SIG_INT = 1, SIG_STR = 2, SIG_LIST = 3, SIG_VALUE = 4 } SigKind;
 
 typedef struct SigReg {
   SigKind kind;
   int id;
+  uint64_t serial;
   char *name;
   const void *sig;
   struct SigReg *next;
@@ -39,11 +40,13 @@ typedef struct SigReg {
 static SigReg *g_sig_head = NULL;
 static SigReg *g_sig_tail = NULL;
 static int g_sig_next_id = 0;
+static uint64_t g_sig_next_serial = 0;
 
-static void sig_register(SigKind kind, const void *sig) {
+static void sig_register(SigKind kind, const void *sig, int hidden) {
   SigReg *r = (SigReg *)sz_alloc_zero(sizeof(SigReg));
   r->kind = kind;
-  r->id = g_sig_next_id++;
+  r->id = hidden ? -1 : g_sig_next_id++;
+  r->serial = g_sig_next_serial++;
   r->name = sz_strdup("");
   r->sig = sig;
   if (g_sig_tail)
@@ -66,7 +69,7 @@ void sz_signal_name(const void *sig, const char *name) {
       break;
     }
   }
-  if (!mine)
+  if (!mine || mine->id < 0)
     return;
   if (strcmp(mine->name, n) == 0)
     return;
@@ -106,7 +109,7 @@ static SigReg *sig_find(SigKind kind, const char *name) {
   if (!name || !name[0])
     return NULL;
   for (r = g_sig_head; r; r = r->next) {
-    if (r->kind == kind && strcmp(r->name, name) == 0)
+    if (r->id >= 0 && r->kind == kind && strcmp(r->name, name) == 0)
       return r;
   }
   return NULL;
@@ -392,6 +395,8 @@ void sz_signal_dump_json(FILE *f) {
   for (r = g_sig_head; r; r = r->next) {
     void *held = NULL;
     int value_list = 0;
+    if (r->id < 0)
+      continue;
     if (!first)
       fputc(',', f);
     first = 0;
@@ -551,11 +556,11 @@ static void *signal_value(SzSignal *s) {
   return s->value;
 }
 
-/* Evaluator mirrors keep Signal.get working and stay out of the dump.
- * SCUZZ_EVAL_MIRROR arms this. The name is $mirror. */
+/* Internal mirrors keep Signal.get working and stay out of every dump.
+ * The name is $mirror. */
 static int sig_is_mirror(SzString *name) {
   const char *n;
-  if (!g_eval_mirror || !name)
+  if (!name)
     return 0;
   n = sz_string_cstr(name);
   return n && strcmp(n, "$mirror") == 0;
@@ -566,9 +571,7 @@ SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name) {
   sz_retain(value);
   s->value = value;
   s->elem_str = kind == 3;
-  if (sig_is_mirror(name))
-    return s;
-  sig_register((SigKind)(kind == 5 ? 3 : kind), s);
+  sig_register((SigKind)(kind == 5 ? 3 : kind), s, sig_is_mirror(name));
   if (name) sz_signal_name(s, sz_string_cstr(name));
   return s;
 }
@@ -626,7 +629,7 @@ typedef struct SigHold {
 } SigHold;
 
 typedef struct SigFrame {
-  int mark;
+  uint64_t mark;
   int armed;
   SigHold *holds;
   struct SigFrame *prev;
@@ -642,12 +645,12 @@ static int sig_registered(const SzSignal *s) {
   return 0;
 }
 
-static void free_signals_from(int mark) {
+static void free_signals_from(uint64_t mark) {
   for (;;) {
     SigReg *r;
     SigReg *best = NULL;
     for (r = g_sig_head; r; r = r->next)
-      if (r->id >= mark && (!best || r->id > best->id))
+      if (r->serial >= mark && (!best || r->serial > best->serial))
         best = r;
     if (!best)
       return;
@@ -674,7 +677,7 @@ static void restore_holds(SigHold *h) {
 void sz_signal_session_push(void) {
   SigFrame *f = (SigFrame *)sz_alloc_zero(sizeof(*f));
   SigReg *r;
-  f->mark = g_sig_next_id;
+  f->mark = g_sig_next_serial;
   f->armed = sz_testrt_oracles_armed();
   f->prev = g_sig_frame;
   if (f->armed) {

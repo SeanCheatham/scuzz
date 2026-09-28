@@ -8,37 +8,31 @@ def str(j: Json, key: String): String =
   Json.getStr(j, key, "")
 
 def pairsJson(files: List[(String, String)]): Json =
-  Json.Arr(List.map(List.map(List.sort(List.map(files, f => f._1)), p => List.at(files, List.indexOf(List.map(files, f => f._1), p))), f => Json.Obj([("path", Json.Str(f._1)), ("content", Json.Str(f._2))])))
+  Proposal.pairsJson(files)
 
 def pairs(j: Json): List[(String, String)] =
-  List.map(Json.arr(j), f => (str(f, "path"), str(f, "content")))
+  Proposal.pairs(j)
 
 def setHash(files: List[(String, String)]): String =
-  Hash.sha256(text(pairsJson(files)))
+  Proposal.setHash(files)
 
 def applyPaths(disk: List[(String, String)], props: List[(String, String)]): List[(String, String)] =
   List.concat(List.map(disk, d => (d._1, List.getOrElse(List.map(props, p => p._2), List.indexOf(List.map(props, p => p._1), d._1), d._2))), List.filter(props, p => !List.contains(List.map(disk, d => d._1), p._1)))
 
 def safePath(path: String): Bool =
-  Str.matches(path, "^src/[A-Za-z_][A-Za-z0-9_]*\\.scuzz$")
+  Proposal.safePath(path)
 
 def sourceSetOk(files: List[(String, String)]): Bool =
-  List.nonEmpty(files) && List.len(files) <= 3 && List.len(List.distinct(List.map(files, f => f._1))) == List.len(files) && List.forall(files, f => safePath(f._1)) && List.foldLeft(files, 0, acc => acc match {
-  case (n, f) => n + Str.byteLen(f._2)
-}) <= 65536
+  Proposal.sourceSetOk(files)
 
 def need(ok: Bool, why: String): IO[Unit] =
   if (ok) IO.pure(()) else IO.fail(why)
 
 def own(root: String): IO[List[(String, String)]] =
-  Fs.list(Fs.join(root, "src")).flatMap(ents => IO.foreach(List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".scuzz")), e => e._1)), p => Fs.read(Fs.join(Fs.join(root, "src"), p)).map(s => (Fs.join("src", p), s))))
+  Proposal.own(root)
 
 def inside(root: String, path: String): IO[Unit] =
-  for {
-    base <- Fs.canonicalize(root)
-    resolved <- Fs.canonicalize(Fs.join(root, path)).handleErrorWith(_ => Fs.canonicalize(Fs.dirname(Fs.join(root, path))).map(p => Fs.join(p, Fs.basename(path))))
-    _ <- need(resolved == Fs.join(base, path), Str.concat("unsafe resolved path: ", path))
-  } yield ()
+  Proposal.inside(root, path)
 
 def dirtyHits(root: String, props: List[(String, String)], dirties: List[String]): IO[List[String]] =
   for {
@@ -47,56 +41,25 @@ def dirtyHits(root: String, props: List[(String, String)], dirties: List[String]
   } yield List.map(List.filter(List.indices(props), i => List.contains(dirty, List.at(touched, i))), i => List.at(props, i)._1)
 
 def metadata(request: String, baseline: String, generator: String, files: List[(String, String)]): String =
-  text(Json.Obj([("v", Json.Int(1)), ("request", Json.Str(request)), ("baseline", Json.Str(baseline)), ("kind", Json.Str("behavior")), ("generator", Json.Str(generator)), ("files", Json.Arr(List.map(files, f => Json.Obj([("path", Json.Str(f._1)), ("sha256", Json.Str(Hash.sha256(f._2)))]))))]))
+  Proposal.metadata(request, baseline, generator, files)
 
 def importProposal(root: String, name: String): IO[List[(String, String)]] =
   for {
     _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
     dir = Fs.join(Deck.proposalsDir(root), name)
     _ <- inside(root, Fs.join("build/proposals", name))
-    _ <- inside(dir, "proposal.json")
-    raw <- Fs.read(Fs.join(dir, "proposal.json"))
-    _ <- need(Str.byteLen(raw) <= 131072, "proposal metadata exceeds limit")
-    j = LspClient.parseJson(raw)
-    fs = Json.arr(Diags.jsonField(j, "files"))
-    _ <- need(List.sort(Json.keys(j)) == List.sort(["v", "request", "baseline", "kind", "generator", "files"]) && Json.getInt(j, "v", 0) == 1 && str(j, "kind") == "behavior" && !Str.isEmpty(str(j, "request")) && !Str.isEmpty(str(j, "generator")), "invalid proposal metadata")
-    _ <- need(List.nonEmpty(fs) && List.len(fs) <= 3 && List.forall(fs, f => List.sort(Json.keys(f)) == ["path", "sha256"] && safePath(str(f, "path"))), "invalid proposal source set")
-    _ <- need(List.len(List.distinct(List.map(fs, f => str(f, "path")))) == List.len(fs), "duplicate proposal path")
-    files <- IO.foreach(fs, f => for {
-  path = str(f, "path")
-  _ <- inside(dir, path)
-  _ <- inside(root, path)
-  src <- Fs.read(Fs.join(dir, path))
-  _ <- need(Hash.sha256(src) == str(f, "sha256"), "incomplete proposal publication")
-} yield (path, src))
-    _ <- need(sourceSetOk(files), "proposal source limit")
-    disk <- own(root)
-    _ <- need(str(j, "baseline") == setHash(disk), "stale proposal baseline")
-    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
-    all <- Main.diskFiles(root, toml)
-    additions = List.filter(files, f => !List.contains(List.map(disk, d => d._1), f._1))
-    _ <- need(!List.exists(additions, f => List.contains(List.map(all, d => d._1), Chrome.stemOf(f._1))), "duplicate module stem")
-    walked <- Fs.walk(dir)
-    actual = List.sort(List.map(List.filter(walked, e => !e._2), e => e._1))
-    _ <- need(actual == List.sort("proposal.json" :: List.map(files, f => f._1)), "undeclared proposal file")
+    raw <- Fs.read(Fs.join(root, "build/ide/request.json"))
+    request <- Proposal.parse(raw, 1048576)
+    compiler <- compilerIdentity()
+    _ <- Proposal.validate(root, request, compiler)
+    files <- Proposal.importFrom(root, dir, request)
   } yield files
 
 def inputPath(path: String): Bool =
-  path == "scuzz.toml" || Str.startsWith(path, "src/") && Str.endsWith(path, ".scuzz") || !Str.startsWith(path, "build/") && !Str.startsWith(path, ".scuzz/") && (Str.endsWith(path, ".scuzz_scenario") || Str.endsWith(path, ".scuzz_verify")) || Str.startsWith(path, "corpus/") && Str.endsWith(path, ".toml")
+  Proposal.inputPath(path)
 
 def packageInputs(root: String, prefix: String, seen: List[String]): IO[List[(String, String)]] =
-  for {
-    abs <- Fs.canonicalize(root)
-    _ <- need(!List.contains(seen, abs), "dependency cycle")
-    walked <- Fs.walk(root)
-    paths = List.sort(List.filter(Chrome.filesOf(walked), p => inputPath(p)))
-    files <- IO.foreach(paths, p => for {
-  resolved <- Fs.canonicalize(Fs.join(root, p))
-  s <- Fs.read(Fs.join(root, p))
-} yield [(Fs.join(prefix, p), s), (Str.concat("resolved/", Fs.join(prefix, p)), resolved)])
-    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
-    deps <- IO.foreach(Manifest.parse(toml).deps, d => packageInputs(Drive.depDir(root, d._2), Fs.join(Fs.join(prefix, "dependencies"), d._1), abs :: seen))
-  } yield List.concat(List.flatten(files), List.flatten(deps))
+  Proposal.packageInputs(root, prefix, seen)
 
 def compilerIdentity(): IO[String] =
   for {
@@ -115,10 +78,11 @@ def inputs(root: String): IO[List[(String, String)]] =
   for {
     files <- packageInputs(root, "package", [])
     compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+    request <- Fs.read(Fs.join(root, "build/ide/request.json"))
     cli <- compilerIdentity()
     toml <- Fs.read(Fs.join(root, "scuzz.toml"))
     host <- if (Manifest.parse(toml).hasUi) Drive.uiHostExe().flatMap(exe => executableIdentity(exe)) else IO.pure(cli)
-  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("review-host", host), ("objective", "Review behavior"), ("limits", "files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")])
+  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("review-host", host), ("request", request), ("objective", str(LspClient.parseJson(request), "objective")), ("limits", "files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")])
 
 def storage(root: String): String =
   Fs.join(root, ".scuzz/ide")
@@ -163,7 +127,7 @@ def freeze(root: String, name: String, props: List[(String, String)], flip: Int)
     nonce <- Uuid.v4()
     now <- Clock.monotonic()
     id = identity(ins, props, pub, nonce)
-    c = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("proposal", Json.Str(name)), ("publication", Json.Str(pub)), ("objective", Json.Str("Review behavior")), ("inputs", pairsJson(ins)), ("baseline", pairsJson(disk)), ("proposed", pairsJson(props)), ("a", Json.Str(setHash(disk))), ("b", Json.Str(setHash(applyPaths(disk, props)))), ("flip", Json.Int(flip)), ("started", Json.Int(now)), ("status", Json.Str("preparing"))])
+    c = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("proposal", Json.Str(name)), ("publication", Json.Str(pub)), ("objective", Json.Str(List.getOrElse(List.map(ins, f => f._2), List.indexOf(List.map(ins, f => f._1), "objective"), ""))), ("inputs", pairsJson(ins)), ("baseline", pairsJson(disk)), ("proposed", pairsJson(props)), ("a", Json.Str(setHash(disk))), ("b", Json.Str(setHash(applyPaths(disk, props)))), ("flip", Json.Int(flip)), ("started", Json.Int(now)), ("status", Json.Str("preparing"))])
     _ <- setupStorage(root)
     _ <- Fs.mkdirs(cardDir(root, id))
     _ <- Fs.write(Fs.join(cardDir(root, id), "card.json"), text(c))
