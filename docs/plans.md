@@ -1,46 +1,52 @@
-# Current slice: ask one behavioral question
+# Current slice: generate toward one objective
 
 Status: implementation in progress.
 
-Implement gate 2 of [`vision.md`](vision.md#2-ask-one-behavioral-question). Follow the proposal review locks in [`philosophy.md`](philosophy.md#proposal-review).
+Implement gate 3 of [`vision.md`](vision.md#3-manage-a-local-model-and-generate-toward-one-objective). Follow the proposal review locks in [`philosophy.md`](philosophy.md#proposal-review).
 
 ## Outcome
 
-Each behavior card opens a short recorded difference at its first useful step. Playback starts paused. The developer can inspect both results, the trigger, other workloads, recorded structure, and changed source. Evidence states its finite scope.
+A session starts with one objective, allowed source paths, mode, and visible limits. Local generation and External proposals use one frozen request and one validated response. The CLI lists and downloads the fixed models. A finite command publishes one suggestion without opening the editor or changing source.
 
 ## Scope
 
-Use the existing editor, shared `Diff` review, evaluator probes, scenario claims, and CI paths. Add no checker, probe protocol, renderer, or alignment engine. Keep idle and all seeds. Add complete corpus replay and 32 differential search iterations with seed 1. Keep existing per-probe limits. Freeze the review budget and evaluator host identity in each card. Native witness replay stays an explicit parity proof outside navigation.
+Use the existing editor and product CLI. Share the catalog, request, parser, publication, and process lifecycle between the two callers. Use one pinned llama.cpp CPU release. Use the supported Hub downloader and shared immutable cache. Keep the two catalog entries and resource profiles in `vision.md`. Do not add package model settings, a provider framework, or new runtime builtins.
 
 ## Work order
 
-1. Read the corpus and shared driver definitions for evaluator review. Replay the complete required workload set. Run bounded differential search. Reuse the existing shrinker. Preserve every candidate verdict. A shared failure, timeout, crash, drift, or incomplete report blocks readiness.
-2. Keep the shortest divergent witnesses with both timelines and scripts. Select the shortest available question. Open its first useful difference, paused. Keep source and behavior under the same fixed lane mapping.
-3. Show planned and completed workloads, search work, registered claims, reached triggers, and untriggered claims. Show evaluator and index alignment limits. Label accessibility tiles as recorded structure.
-4. Remove proposals with no observed difference after the complete budget. Store an automatic exclusion with the frozen evidence. Do not count it as a choice or claim equivalence.
-5. Add scenario claims and corpus entries for presentation, lane order, evidence scope, failures, and source-only exclusion. Add finite real UI and IO review proofs. Replay selected witnesses compiled and compare the evaluator evidence.
-6. Update `scuzz docs ide` with the shipped question view and evidence limits. Measure readiness and cached navigation on one host.
+1. Verify pinned model metadata and a released CPU backend. Record digests, licenses, templates, and supported host artifacts in one catalog. Prove offline listing and exact shared-cache inspection.
+2. Implement explicit download and backend setup. Check disk, memory, context, and deadlines. Keep partial weights unavailable. Keep shared files after cancellation.
+3. Add the objective form and frozen request contract. Validate source scope, identities, limits, and complete publication. Use the same parser for external and local responses.
+4. Implement one owned inference process on private loopback. Tokenize before generation. Enforce request bounds. Stop owned work on pause, switch, timeout, and exit. Require explicit retry.
+5. Add `scuzz models list`, `scuzz models download`, and `scuzz ide generate-suggestion`. Use bounded JSON output and nonzero failure status. Refuse existing output and stale requests.
+6. Prove fake effects and finite live process, HTTP, publication, cancellation, and cleanup. Run the opt-in real default model proof. Keep unavailable host and model checks explicit.
+7. Update `scuzz docs ide` and the current gaps. Measure generation and readiness. Commit the slice and the next plan after required software proofs pass.
 
 ## Acceptance criteria
 
-- [ ] Corpus-only differences explain or block the candidate.
-- [ ] Search finds a difference absent from idle and seeds. Shrinking preserves it.
-- [ ] Every candidate workload passes its absolute gate. Incomplete evidence cannot pass.
-- [ ] A shared claim failure blocks the card. Untriggered claims remain visible.
-- [ ] The shortest available witness opens at its first difference, paused.
-- [ ] Both lane orders keep source, results, and recorded structure aligned.
-- [ ] Workload and step navigation uses cached evidence without IO.
-- [ ] Source-only proposals leave the behavior queue with a durable No observed difference result.
-- [ ] UI and IO witnesses have compiled parity proofs.
-- [ ] The manual matches the controls and finite evidence scope.
+- [ ] The picker and CLI expose only the two fixed model entries.
+- [ ] Model listing works offline without a downloader or workspace writes.
+- [ ] Downloads verify the pinned size and digest through the shared cache.
+- [ ] Explicit setup shows artifact identity, license, cache, and limits.
+- [ ] One objective and allowed source paths bind each bounded request.
+- [ ] External import works without model tools and rejects partial, stale, or changed publication.
+- [ ] Local and external responses use one strict parser.
+- [ ] Context fit is checked before generation. Truncated output fails.
+- [ ] Pause, timeout, switch, and exit stop only owned work.
+- [ ] The finite command publishes one complete candidate and changes no source.
+- [ ] Hermetic and finite live proofs cover both catalog profiles and failure paths.
+- [ ] A real default model yields a checked proposal and a behavioral witness, or the unavailable external proof remains explicit.
+- [ ] The manual matches setup, limits, commands, and publication.
 
 ## Required validation
 
-Use the checkout product CLI. Rebuild it after compiler or CLI changes. Use scratch working directories for finite editor runs. Export the documented `LIBRARY_PATH` for Skia links.
+Rebuild the checkout product CLI after compiler or CLI changes. Use scratch directories for editor and generation proofs. Export the documented `LIBRARY_PATH` for Skia links.
 
 ```bash
 ./scripts/bootstrap.sh
+./examples/cli/build/cli check examples/cli
 ./examples/cli/build/cli check examples/editor
+./examples/cli/build/cli fuzz --iterations 0 examples/cli
 ./examples/cli/build/cli fuzz --iterations 0 examples/editor
 ./examples/cli/build/cli fuzz --iterations 32 examples/editor
 ./scripts/ci.sh ui
@@ -49,8 +55,8 @@ Use the checkout product CLI. Rebuild it after compiler or CLI changes. Use scra
 git diff --check
 ```
 
-Run targeted proofs during implementation. Run required checks on stable source. Do not remove claims or corpus entries to pass. Do not reduce probe limits. Report unavailable external validation separately.
+Add finite controlled lifecycle and command proofs to the existing CI path. Ordinary CI uses no weights or external network. Run real download and CPU inference only in the explicit opt-in proof. Record revision, backend identity, prompt time, generation time, tokens, throughput, memory, and readiness. Do not replace real inference with controlled replies.
 
 ## Completion and continuation
 
-Remove the closed behavioral question gap and gate 2 after all software criteria pass. Replace this plan with the first remaining gate. Commit the completed slice and the next plan. Continue the authorized arc through the complete session endpoint. Keep external model and human evidence limits explicit.
+Close implemented gaps after their software criteria pass. Keep model usefulness and human evidence unknown. Replace this plan with gate 4. Commit the slice and next plan. Continue the authorized arc through the complete session endpoint. Do not reduce review limits or remove claims and corpus entries.

@@ -950,7 +950,12 @@ def probeClaim(seen: Ref[Int], t: Timeline): Verdict =
   probeClaimAt(Property.force(Ref.update(seen, x => x + Timeline.len(t))), t)
 
 def probeClaimAt(_u: Unit, t: Timeline): Verdict =
-  if (Timeline.exists(t, i => Timeline.driveHas(t, i, "evAdd 3"))) Verdict.ok() else Verdict.fail(0, "evAdd 3 is not in the timeline")
+  if (probeReached(t, 0) && !probeReached(t, Timeline.len(t))) Verdict.ok() else Verdict.fail(0, "evAdd 3 is not in the timeline")
+
+def probeReached(t: Timeline, start: Int): Bool =
+  (start, Timeline.len(t)) match {
+    case (first, end) => Timeline.exists(t, i => i >= first && i < end && Timeline.driveHas(t, i, "evAdd 3"))
+  }
 
 def probeRel(a: Timeline, b: Timeline): Verdict =
   if (Timeline.len(a) == Timeline.len(b)) Verdict.ok() else Verdict.fail(0, "lengths differ")

@@ -101,6 +101,11 @@ def packageInputs(root: String, prefix: String, seen: List[String]): IO[List[(St
 def compilerIdentity(): IO[String] =
   for {
     cli <- Main.scuzzCli()
+    digest <- executableIdentity(cli)
+  } yield digest
+
+def executableIdentity(cli: String): IO[String] =
+  for {
     got <- Sys.exec(Str.concat("review_cli=$(command -v ", Str.concat(Lanes.shQuote(cli), ") && if command -v sha256sum >/dev/null 2>&1; then sha256sum \"$review_cli\"; else shasum -a 256 \"$review_cli\"; fi")))
     digest = Str.take(Str.trim(got._2), 64)
     _ <- need(got._1 == 0 && Str.matches(digest, "^[a-f0-9]{64}$"), "cannot identify review compiler")
@@ -111,7 +116,9 @@ def inputs(root: String): IO[List[(String, String)]] =
     files <- packageInputs(root, "package", [])
     compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
     cli <- compilerIdentity()
-  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("objective", "Review behavior"), ("limits", "files=3;source=65536;review=idle,seeds;seed=1")])
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    host <- if (Manifest.parse(toml).hasUi) Drive.uiHostExe().flatMap(exe => executableIdentity(exe)) else IO.pure(cli)
+  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("review-host", host), ("objective", "Review behavior"), ("limits", "files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")])
 
 def storage(root: String): String =
   Fs.join(root, ".scuzz/ide")
@@ -126,7 +133,15 @@ def candidatePass(raw: String): Bool =
   candidateReportPass(LspClient.parseJson(raw))
 
 def candidateReportPass(j: Json): Bool =
-  str(j, "kind") == "diff" && List.nonEmpty(Json.arr(Diags.jsonField(j, "workloads"))) && List.forall(Json.arr(Diags.jsonField(j, "workloads")), w => Json.has(w, "why_b") && Json.isNull(Diags.jsonField(w, "why_b")) && (str(w, "class") != "unrunnable" || str(w, "why_a") == "check failed") && !Str.isEmpty(Lanes.workPath(w, "a")) && !Str.isEmpty(Lanes.workPath(w, "b")))
+  for {
+    review = Diags.jsonField(j, "review")
+    search = Diags.jsonField(j, "search")
+    rows = Json.arr(Diags.jsonField(j, "workloads"))
+    required = Json.getInt(review, "required", 0)
+  } yield str(j, "kind") == "diff" && Json.getBool(review, "complete", false) && required >= 1 && Json.getInt(review, "completed_required", -1) == required && Json.getInt(search, "iterations", -1) == 32 && Json.getInt(search, "ran", -1) == 32 && Json.getInt(search, "seed", -1) == 1 && Json.getInt(review, "recorded_workloads", -1) == List.len(rows) && List.len(rows) >= required + 32 && List.len(List.distinct(List.map(rows, w => str(w, "label")))) == List.len(rows) && List.forall(rows, w => candidateRowPass(w))
+
+def candidateRowPass(w: Json): Bool =
+  Json.has(w, "why_a") && Json.has(w, "why_b") && Json.isNull(Diags.jsonField(w, "why_b")) && (Json.isNull(Diags.jsonField(w, "why_a")) || str(w, "why_a") == "check failed" || Diff.constraintFailure(str(w, "why_a"))) && (str(w, "class") != "unrunnable" || str(w, "why_a") == "check failed") && List.contains(["same", "fixed", "diverged", "regressed", "unrunnable"], str(w, "class")) && !Str.isEmpty(str(w, "label")) && !Str.isEmpty(Lanes.workPath(w, "a")) && !Str.isEmpty(Lanes.workPath(w, "b"))
 
 def setupStorage(root: String): IO[Unit] =
   for {
@@ -163,7 +178,7 @@ def current(root: String, c: Json): IO[Unit] =
     _ <- need(setHash(props) == setHash(pairs(Diags.jsonField(c, "proposed"))) && pub == str(c, "publication"), "proposal changed")
   } yield ()
 
-def ready(root: String, c: Json, raw: String): IO[Json] =
+def complete(root: String, c: Json, raw: String): IO[Json] =
   for {
     _ <- need(candidatePass(raw), "candidate fails required review")
     _ <- current(root, c)
@@ -171,13 +186,32 @@ def ready(root: String, c: Json, raw: String): IO[Json] =
     files = List.distinct(List.flatMap(Json.arr(Diags.jsonField(j, "workloads")), w => [Lanes.workPath(w, "a"), Lanes.workPath(w, "b")]))
     _ <- IO.foreachDiscard(files, p => for {
   _ <- need(Str.matches(p, "^[A-Za-z0-9_-]+\\.txt$"), "unsafe evidence path")
+  _ <- inside(root, Fs.join("build/ide", p))
   body <- Fs.read(Lanes.fileAt(root, "ide", p))
-  _ <- need(!Str.isEmpty(body) || List.exists(Json.arr(Diags.jsonField(j, "workloads")), w => Lanes.workPath(w, "a") == p && str(w, "why_a") == "check failed"), "missing review timeline")
+  _ <- need(List.nonEmpty(Lanes.states(body)) || List.exists(Json.arr(Diags.jsonField(j, "workloads")), w => Lanes.workPath(w, "a") == p && str(w, "why_a") == "check failed"), "missing review timeline")
   _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), p), body)
 } yield ())
+    witnesses <- IO.foreach(Json.arr(Diags.jsonField(j, "witnesses")), w => for {
+  path = str(w, "path")
+  name = Fs.basename(path)
+  _ <- need(Str.matches(name, "^witness-[a-f0-9]{16}\\.toml$"), "unsafe witness path")
+  source <- Fs.canonicalize(path)
+  expected <- Fs.canonicalize(Lanes.fileAt(root, "ide", name))
+  _ <- need(source == expected, "unsafe resolved witness path")
+  body <- Fs.read(source)
+  _ <- need(!Str.isEmpty(body), "missing review witness")
+  _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), name), body)
+} yield Json.set(w, "path", Json.Str(name)))
+    evidence = Json.set(j, "witnesses", Json.Arr(witnesses))
+    items = Lanes.workItems(evidence)
+    _ <- need(List.isEmpty(items) || !Str.isEmpty(Lanes.workPath(List.at(items, 0), "a")) && !Str.isEmpty(Lanes.workPath(List.at(items, 0), "b")), "missing question timeline paths")
+    aText <- if (List.isEmpty(items)) IO.pure("") else Fs.read(Fs.join(cardDir(root, str(c, "id")), Lanes.workPath(List.at(items, 0), "a")))
+    bText <- if (List.isEmpty(items)) IO.pure("") else Fs.read(Fs.join(cardDir(root, str(c, "id")), Lanes.workPath(List.at(items, 0), "b")))
+    question = if (List.isEmpty(items)) Json.Null() else Json.Obj([("workload", Json.Str(str(List.at(items, 0), "label"))), ("step", Json.Int(Lanes.usefulStep(List.at(items, 0), Lanes.states(aText), Lanes.states(bText))))])
     now <- Clock.monotonic()
-    out = Json.set(Json.set(Json.set(c, "status", Json.Str("ready")), "evidence", j), "ready", Json.Int(now))
+    out = Json.set(Json.set(Json.set(Json.set(c, "status", Json.Str(if (List.isEmpty(items)) "excluded" else "ready")), "evidence", evidence), "ready", Json.Int(now)), "question", question)
     _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(out))
+    _ <- if (List.nonEmpty(items)) IO.pure(()) else Fs.write(recordPath(root, str(c, "id")), text(Json.Obj([("card", Json.Str(str(c, "id"))), ("decision", Json.Str("no-observed-difference")), ("kind", Json.Str("automatic")), ("evidence_status", Json.Str("excluded")), ("evidence", evidence), ("time", Json.Int(now)), ("writes", Json.Arr([]))])))
   } yield out
 
 def propsOf(c: Json): List[(String, String)] =
@@ -241,13 +275,21 @@ def operation(c: Json, lane: Int, now: Int): Json =
     accepted = lane >= 0 && lane == (if (Json.getInt(c, "flip", 0) == 1) 0 else 1)
     decision = if (lane < 0) "abstain" else if (accepted) "accept" else "baseline"
     id = Str.concat("accept-", str(c, "id"))
-  } yield Json.Obj([("operation", Json.Str(id)), ("card", Json.Str(str(c, "id"))), ("proposal", Json.Str(str(c, "proposal"))), ("decision", Json.Str(decision)), ("lane", Json.Int(lane)), ("flip", Diags.jsonField(c, "flip")), ("a", Diags.jsonField(c, "a")), ("b", Diags.jsonField(c, "b")), ("objective", Diags.jsonField(c, "objective")), ("generator", Json.Str(str(LspClient.parseJson(str(c, "publication")), "generator"))), ("evidence_status", Diags.jsonField(c, "status")), ("started", Diags.jsonField(c, "started")), ("ready", Diags.jsonField(c, "ready")), ("limits", Json.Str("files=3;source=65536;review=idle,seeds;seed=1")), ("region", Json.Arr(List.map(propsOf(c), f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(if (accepted) sourceWrites(c) else []))])
+  } yield Json.Obj([("operation", Json.Str(id)), ("card", Json.Str(str(c, "id"))), ("proposal", Json.Str(str(c, "proposal"))), ("decision", Json.Str(decision)), ("lane", Json.Int(lane)), ("flip", Diags.jsonField(c, "flip")), ("a", Diags.jsonField(c, "a")), ("b", Diags.jsonField(c, "b")), ("objective", Diags.jsonField(c, "objective")), ("generator", Json.Str(str(LspClient.parseJson(str(c, "publication")), "generator"))), ("evidence_status", Diags.jsonField(c, "status")), ("question", Diags.jsonField(c, "question")), ("started", Diags.jsonField(c, "started")), ("ready", Diags.jsonField(c, "ready")), ("limits", Json.Str("files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")), ("region", Json.Arr(List.map(propsOf(c), f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(if (accepted) sourceWrites(c) else []))])
 
 def decide(root: String, c: Json, lane: Int): IO[Unit] =
   for {
     _ <- recover(root)
     _ <- need(lane == -1 || lane == 0 || lane == 1, "invalid choice lane")
     _ <- need(str(c, "status") == "ready", "card is not ready")
+    question = Diags.jsonField(c, "question")
+    work = Lanes.workAt(Diags.jsonField(c, "evidence"), str(question, "workload"))
+    _ <- need(!Json.isNull(work), "invalid review question")
+    timelineA <- Fs.read(Fs.join(cardDir(root, str(c, "id")), Lanes.workPath(work, "a")))
+    timelineB <- Fs.read(Fs.join(cardDir(root, str(c, "id")), Lanes.workPath(work, "b")))
+    count = List.len(Lanes.railLabels(Lanes.states(timelineA), Lanes.states(timelineB)))
+    step = Json.getInt(question, "step", -1)
+    _ <- need(step >= 0 && step < count, "invalid review step")
     _ <- undecided(root, str(c, "id"))
     _ <- current(root, c)
     accepted = lane >= 0 && lane == (if (Json.getInt(c, "flip", 0) == 1) 0 else 1)

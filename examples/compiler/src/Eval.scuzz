@@ -2437,7 +2437,7 @@ def probeOnceUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]], mount: Valu
   probeProgUi(p, ctx, slot, mount).map(_ => 0).handleErrorWith(e => IO.pure(probeExit(e)))
 
 def probeProgUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Fuzz.probe(probeMain(p).flatMap(_ => probeMountCall(p, slot, mount)))))
+  probeSetup(p, ctx).flatMap(_ => probeRegs(p, p.funs.list).flatMap(_ => Fuzz.probe(IO.pure(()).flatMap(_ => probeMain(p)).flatMap(_ => probeMountCall(p, slot, mount)))))
 
 def probeMountCall(p: EvProg, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
   Ref.get(List.at(p.host, 0)).flatMap(v => Ref.set(slot, oneProg(p)).flatMap(_ => mount(v)))

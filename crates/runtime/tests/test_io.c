@@ -14419,6 +14419,8 @@ int main(void) {
     sz_property_session_reset();
     sz_verify_register("countOk", verify_len_ok);
     sz_verify_register("kitCombo", verify_kit_combo);
+    for (int i = 0; i < 70; i++)
+      sz_verify_register("moreClaims", verify_len_ok);
     assert(sz_property_session_armed());
     sz_property_session_step();
     sz_property_session_end();
@@ -14435,6 +14437,8 @@ int main(void) {
       setenv("SCUZZ_TESTRT", "1", 1);
       sz_testrt_oracles_refresh();
       sz_property_session_reset();
+      for (int i = 0; i < 70; i++)
+        sz_verify_register("moreClaims", verify_len_ok);
       sz_verify_register("countOk", verify_never);
       sz_property_session_step();
       sz_property_session_end();

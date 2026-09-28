@@ -3113,6 +3113,7 @@ void sz_property_classify_flush(void) {
 
 /* Session claims, always, eventually, and response thunks share this cap. */
 #define SZ_SESSION_MAX 64
+#define SZ_VERIFY_MAX 128
 typedef struct {
   char *name;
   int64_t (*fn)(void);
@@ -3141,7 +3142,7 @@ typedef struct {
   void *env;
 } SzVerifyProp;
 
-static SzVerifyProp g_verify[SZ_SESSION_MAX];
+static SzVerifyProp g_verify[SZ_VERIFY_MAX];
 static int g_verify_n;
 
 typedef struct {
@@ -3151,7 +3152,7 @@ typedef struct {
   void *env;
 } SzVerifyRel;
 
-static SzVerifyRel g_verify_rel[SZ_SESSION_MAX];
+static SzVerifyRel g_verify_rel[SZ_VERIFY_MAX];
 static int g_verify_rel_n;
 
 typedef struct {
@@ -4695,7 +4696,7 @@ void sz_verify_register(const char *name, SzVerdict *(*fn)(void *)) {
   char *copy;
   if (!fn || !s[0])
     return;
-  if (g_verify_n >= SZ_SESSION_MAX)
+  if (g_verify_n >= SZ_VERIFY_MAX)
     sz_panic("sz_property session: too many verify predicates");
   len = strlen(s);
   copy = (char *)sz_alloc(len + 1);
@@ -4711,7 +4712,7 @@ void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *)) 
   char *copy;
   if (!fn || !s[0])
     return;
-  if (g_verify_rel_n >= SZ_SESSION_MAX)
+  if (g_verify_rel_n >= SZ_VERIFY_MAX)
     sz_panic("sz_property session: too many verify relations");
   len = strlen(s);
   copy = (char *)sz_alloc(len + 1);
@@ -4724,7 +4725,7 @@ void sz_verify_register_rel(const char *name, SzVerdict *(*fn)(void *, void *)) 
 SzIo *sz_fuzz_verify(SzString *name, void *fn, void *env) {
   const char *s = name ? sz_string_cstr(name) : "";
   if (fn && s[0]) {
-    if (g_verify_n >= SZ_SESSION_MAX)
+    if (g_verify_n >= SZ_VERIFY_MAX)
       sz_panic("sz_property session: too many verify predicates");
     g_verify[g_verify_n].name = dup_cstr(s);
     g_verify[g_verify_n].fn = NULL;
@@ -4739,7 +4740,7 @@ SzIo *sz_fuzz_verify(SzString *name, void *fn, void *env) {
 SzIo *sz_fuzz_verify_rel(SzString *name, void *fn, void *env) {
   const char *s = name ? sz_string_cstr(name) : "";
   if (fn && s[0]) {
-    if (g_verify_rel_n >= SZ_SESSION_MAX)
+    if (g_verify_rel_n >= SZ_VERIFY_MAX)
       sz_panic("sz_property session: too many verify relations");
     g_verify_rel[g_verify_rel_n].name = dup_cstr(s);
     g_verify_rel[g_verify_rel_n].fn = NULL;

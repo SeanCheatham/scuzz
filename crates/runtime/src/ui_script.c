@@ -198,23 +198,46 @@ static void script_tap_n(SzUiSession *session, int n) {
 }
 
 static void script_tap_id(SzUiSession *session, const char *id) {
-  SzView *buttons[64];
+  SzView **buttons = NULL;
   char desc[160];
+  int cap = 64;
   int count;
   int i;
   if (!id || !id[0]) {
     fprintf(stderr, "scuzz: script tap skipped (empty id)\n");
     return;
   }
-  count = sz_ui_collect_buttons(session, buttons, 64);
+  for (;;) {
+    if ((size_t)cap > SIZE_MAX / sizeof *buttons) {
+      free(buttons);
+      sz_panic("Ui.run: too many tap targets");
+    }
+    SzView **next = realloc(buttons, (size_t)cap * sizeof *buttons);
+    if (!next) {
+      free(buttons);
+      sz_panic("Ui.run: script tap lookup failed");
+    }
+    buttons = next;
+    count = sz_ui_collect_buttons(session, buttons, cap);
+    if (count < cap)
+      break;
+    if (cap > INT_MAX / 2) {
+      free(buttons);
+      sz_panic("Ui.run: too many tap targets");
+    }
+    cap *= 2;
+  }
   for (i = 0; i < count; i++) {
-    sz_view_format_hit_id(buttons[i], desc, sizeof desc);
+    SzView *hit = buttons[i];
+    sz_view_format_hit_id(hit, desc, sizeof desc);
     if (strcmp(desc, id) != 0)
       continue;
-    if (!sz_ui_session_activate_view(session, buttons[i]))
+    free(buttons);
+    if (!sz_ui_session_activate_view(session, hit))
       sz_panic("Ui.run: script tap activate failed");
     return;
   }
+  free(buttons);
   fprintf(stderr, "scuzz: script tap %s skipped (%d tap targets)\n", id, count);
 }
 

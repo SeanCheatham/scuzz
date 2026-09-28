@@ -1,4 +1,4 @@
-record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], srcs: Signal[List[(String, String, String)]])
+record LaneS(status: Signal[List[String]], raw: Signal[String], rev: Signal[String], blab: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], title: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], srcs: Signal[List[(String, String, String)]], play: Signal[Int], work: Signal[String], resultA: Signal[String], resultB: Signal[String], flip: Signal[Int], scope: Signal[List[String]], details: Signal[Int])
 
 record DeckS(card: Signal[String], pending: Signal[List[String]], armed: Signal[String], title: Signal[String], flip: Signal[Int], last: Signal[String], busy: Signal[Int])
 
@@ -44,7 +44,7 @@ def diskFiles(root: String, toml: String): IO[List[(String, String)]] =
   } yield files
 
 def compareBuffers(root: String, toml: String, disk: List[(String, String)], buffers: List[(String, String)]): IO[Unit] =
-  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, buffers, 1, cli))
+  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, buffers, 1, 32, cli))
 
 def loadProposals(root: String): IO[List[String]] =
   Fs.list(Deck.proposalsDir(root)).map(es => Deck.propNames(es)).handleErrorWith(_ => IO.pure([]))
@@ -53,7 +53,7 @@ def readProposal(root: String, name: String): IO[List[(String, String)]] =
   Cards.importProposal(root, name)
 
 def reviewProposal(root: String, toml: String, disk: List[(String, String)], propSet: List[(String, String)]): IO[Unit] =
-  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, propSet, 1, cli))
+  scuzzCli().flatMap(cli => Diff.reviewSets(root, toml, disk, propSet, 1, 32, cli))
 
 def dropProposal(root: String, name: String): IO[Unit] =
   Fs.delete(Fs.join(Deck.proposalsDir(root), name)).handleErrorWith(_ => IO.pure(()))
@@ -78,6 +78,13 @@ def deckEnd(ls: LaneS, ds: DeckS): Unit =
     _ = Signal.set(ls.works, []: List[String])
     _ = Signal.set(ls.rail, []: List[String])
     _ = Signal.set(ls.step, 0)
+    _ = Signal.set(ls.play, 0)
+    _ = Signal.set(ls.work, "")
+    _ = Signal.set(ls.resultA, "")
+    _ = Signal.set(ls.resultB, "")
+    _ = Signal.set(ls.flip, 0)
+    _ = Signal.set(ls.scope, []: List[String])
+    _ = Signal.set(ls.details, 0)
     _ = Signal.set(ls.laneA, []: List[String])
     _ = Signal.set(ls.laneB, []: List[String])
     _ = Signal.set(ls.rowsA, []: List[String])
@@ -141,13 +148,27 @@ def deckReview(root: String, toml: String, name: String, ls: LaneS, ds: DeckS): 
     card <- Cards.freeze(root, name, props, flip)
     _ <- reviewProposal(root, toml, disk, Deck.applyProposal(disk, props))
     raw <- Fs.read(Lanes.reportPathAt(root, "ide"))
-    ready <- Cards.ready(root, card, raw)
-    _ <- loadIde(root, ls.status, ls.raw, ls.rev, ls.works, ls.tls, ls.blab)
+    ready <- Cards.complete(root, card, raw)
+    _ <- if (Cards.str(ready, "status") == "excluded") for {
+  _ <- dropProposal(root, name)
+  _ <- deckNextIn(root, Deck.regionOf(props), ls, ds)
+  _ = if (Str.isEmpty(Signal.get(ds.armed))) Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), ["No observed difference within the review budget"])) else ()
+} yield () else presentCard(root, ready, disk, props, flip, ls, ds)
+  } yield ()
+
+def presentCard(root: String, ready: Json, disk: List[(String, String)], props: List[(String, String)], flip: Int, ls: LaneS, ds: DeckS): IO[Unit] =
+  for {
+    evidence = Diags.jsonField(ready, "evidence")
+    raw = Cards.text(evidence)
+    texts <- IO.foreach(Lanes.workFiles(evidence), name => Fs.read(Fs.join(Cards.cardDir(root, Cards.str(ready, "id")), name)))
+    _ = Signal.set(ls.raw, raw)
+    _ = Signal.set(ls.tls, texts)
     vers <- verifyFilesOf(root)
     _ = Signal.set(ds.flip, flip)
     _ = Signal.set(ls.works, List.map(Lanes.workItems(LspClient.parseJson(raw)), w => Cards.str(w, "label")))
     _ = Signal.set(ls.srcs, Deck.changedTriples(disk, Deck.applyProposal(disk, props)))
     _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), Deck.guardLines(vers)))
+    _ = Signal.set(ls.scope, Lanes.scopeLines(LspClient.parseJson(raw), flip))
     _ = Signal.set(ls.rev, "Left")
     _ = Signal.set(ls.blab, "Right")
     _ = if (flip == 0) () else Signal.set(ls.tls, Deck.swapPairs(Signal.get(ls.tls)))
@@ -160,12 +181,12 @@ def deckReview(root: String, toml: String, name: String, ls: LaneS, ds: DeckS): 
 def deckArm(ls: LaneS): Unit =
   for {
     ws = Signal.get(ls.works)
-    _ = if (List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(ls.raw), Signal.get(ls.tls), ws, ls.laneA, ls.laneB, ls.rail, ls.step, ls.title, ls.rowsA, ls.rowsB, ls.viewA, ls.viewB)
+    _ = if (List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(ls.raw), Signal.get(ls.tls), ws, ls.laneA, ls.laneB, ls.rail, ls.step, ls.title, ls.rowsA, ls.rowsB, ls.viewA, ls.viewB, ls.play, ls.work, ls.resultA, ls.resultB, ls.flip)
   } yield ()
 
 def chooseCard(root: String, id: String, lane: Int, ls: LaneS, ds: DeckS, dirties: Unit => List[String], refresh: IO[Unit]): IO[Unit] =
   if (Signal.get(ds.busy) != 0 || Str.isEmpty(id) || id != Signal.get(ds.armed)) IO.pure(()) else deckGuard(ds, _ => for {
-  c = LspClient.parseJson(Signal.get(ds.card))
+  c = Json.set(LspClient.parseJson(Signal.get(ds.card)), "question", Json.Obj([("workload", Json.Str(Signal.get(ls.work))), ("step", Json.Int(Signal.get(ls.step)))]))
   props = Cards.pairs(Diags.jsonField(c, "proposed"))
   _ <- Cards.need(id == Signal.get(ds.armed) && Cards.str(c, "id") == id, "expired card action")
   proposalLane = if (Json.getInt(c, "flip", 0) == 1) 0 else 1
@@ -283,16 +304,20 @@ def playTick(playOn: Signal[Int], rail: Signal[List[String]], step: Signal[Int],
     _ <- if (n <= 1 || Signal.get(playOn) == 0) IO.pure(()) else IO.pure(showStep(step, stepTitle, rowsA, rowsB, viewA, viewB, Signal.get(laneA), Signal.get(laneB), (Signal.get(step) + 1) % n))
   } yield ()
 
-def showWork(w: String, raw: String, tls: List[String], works: List[String], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], stepTitle: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]]): Unit =
+def showWork(w: String, raw: String, tls: List[String], works: List[String], laneA: Signal[List[String]], laneB: Signal[List[String]], rail: Signal[List[String]], step: Signal[Int], stepTitle: Signal[String], rowsA: Signal[List[String]], rowsB: Signal[List[String]], viewA: Signal[List[String]], viewB: Signal[List[String]], play: Signal[Int], selected: Signal[String], resultA: Signal[String], resultB: Signal[String], flip: Signal[Int]): Unit =
   for {
+    _ = Signal.set(play, 0)
+    _ = Signal.set(selected, w)
     i = List.indexOf(works, w)
     item = Lanes.workAt(LspClient.parseJson(raw), w)
     a = Lanes.states(Lanes.laneText(tls, i, true))
     b = Lanes.states(Lanes.laneText(tls, i, false))
+    _ = Signal.set(resultA, Lanes.resultLine(item, if (Signal.get(flip) == 0) "a" else "b"))
+    _ = Signal.set(resultB, Lanes.resultLine(item, if (Signal.get(flip) == 0) "b" else "a"))
     _ = Signal.set(laneA, a)
     _ = Signal.set(laneB, b)
     _ = Signal.set(rail, Lanes.railLabels(a, b))
-    _ = showStep(step, stepTitle, rowsA, rowsB, viewA, viewB, a, b, if (Lanes.workFirst(item) < 0) 0 else Lanes.workFirst(item))
+    _ = showStep(step, stepTitle, rowsA, rowsB, viewA, viewB, a, b, Lanes.usefulStep(item, a, b))
   } yield ()
 
 def stopOwned(fuzzPid: Signal[Int], diffPid: Signal[Int]): IO[Unit] =
@@ -522,6 +547,7 @@ Y
     offChip = Signal.make(0)
     findQ = Signal.make("")
     replQ = Signal.make("")
+    renameCaret = Signal.make(-1)
     findOpen = Signal.make(Str.len(""))
     page = Signal.make(0)
     title = Signal.make(pkg)
@@ -542,14 +568,19 @@ Y
     stepViewA = Signal.make([]: List[String])
     stepViewB = Signal.make([]: List[String])
     srcFiles = Signal.make([]: List[(String, String, String)])
-    playOn = Signal.make(1)
+    playOn = Signal.make(0)
+    evidenceScope = Signal.make([]: List[String])
+    evidenceDetails = Signal.make(1)
+    questionWork = Signal.make("")
+    resultLeft = Signal.make("")
+    resultRight = Signal.make("")
     deckPending = Signal.make([]: List[String])
     deckArmed = Signal.make("")
     deckTitle = Signal.make("")
     deckFlip = Signal.make(0)
     deckLast = Signal.make("")
     deckBusy = Signal.make(0)
-    lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, srcFiles)
+    lanes = LaneS(deltaStatus, deltaRaw, revLabel, laneBLabel, works, laneTexts, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, srcFiles, playOn, questionWork, resultLeft, resultRight, deckFlip, evidenceScope, evidenceDetails)
     deckCard = Signal.make("")
     deck = DeckS(deckCard, deckPending, deckArmed, deckTitle, deckFlip, deckLast, deckBusy)
     _ <- if (Str.isEmpty(recoveryError)) loadDelta(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel) else IO.pure(Signal.set(deltaStatus, [recoveryError]))
@@ -730,6 +761,7 @@ Y
   _ <- Diags.jumpDiag(s)
 } yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))))), View.section("timeline", "Timeline", View.scroll(View.column(View.wrap(View.button("Diff", _ => deckGuard(deck, _ => for {
   _ = deckEnd(lanes, deck)
+  _ = Signal.set(evidenceDetails, 1)
   _ = Property.sometimes("tappedDiff")
   root = Signal.get(dirSig)
   _ = Signal.set(deltaStatus, ["running scuzz diff"])
@@ -744,6 +776,7 @@ Y
 } yield ()
 } yield ())), View.outlinedButton("Compare buffers", _ => deckGuard(deck, _ => for {
   _ = deckEnd(lanes, deck)
+  _ = Signal.set(evidenceDetails, 1)
   _ = Property.sometimes("tappedCompare")
   root = Signal.get(dirSig)
   _ = Signal.set(deltaStatus, ["comparing buffers"])
@@ -757,7 +790,7 @@ Y
   err <- compareBuffers(root, toml, disk, Chrome.bufferFiles(disk, stems, bs)).map(_ => "").handleErrorWith(e => IO.pure(e))
   _ <- if (Str.isEmpty(err)) loadIde(root, deltaStatus, deltaRaw, revLabel, works, laneTexts, laneBLabel) else IO.pure(Signal.set(deltaStatus, [err]))
   ws = Signal.get(works)
-  _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
+  _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
 } yield ())), View.outlinedButton("Proposals", _ => for {
   _ = Property.sometimes("tappedProposals")
   _ <- deckNext(Signal.get(dirSig), lanes, deck)
@@ -769,14 +802,14 @@ Y
   i = Signal.get(idx)
   set = Chrome.bufferFiles(own, List.map(Signal.get(paths), p => Chrome.stemOf(p)), List.setAt(Signal.get(bodies), i, Signal.get(buf)))
   _ <- generateProposals(root, set, Chrome.stemOf(Signal.get(pathSig)), lanes, deck)
-} yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckArmed, s => if (Str.isEmpty(s)) 0 else 1), 1, View.column(View.bindText(deckTitle), View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => decisionButtons(Signal.get(dirSig), id, lanes, deck, paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
+} yield ())), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckArmed, s => if (Str.isEmpty(s)) 0 else 1), 1, View.column(View.bindText(deckTitle), View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => decisionButtons(Signal.get(dirSig), id, lanes, deck, paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.wrap(View.choiceChip(evidenceDetails, 1, "More evidence"), View.choiceChip(evidenceDetails, 0, "Question")), View.showWhen(evidenceDetails, 1, View.column(View.each(evidenceScope, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
-  _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB)
-} yield ())))), View.bindText(stepTitle), View.wrap(View.choiceChip(playOn, 1, "Play"), View.choiceChip(playOn, 0, "Pause")), View.row(View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
+  _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
+} yield ())))))), View.bindText(questionWork), View.bindText(stepTitle), View.wrap(View.choiceChip(playOn, 1, "Play"), View.choiceChip(playOn, 0, "Pause")), View.row(View.showWhen(evidenceDetails, 1, View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
   _ = Property.sometimes("tappedStep")
   _ = Signal.set(playOn, 0)
   _ = showStep(step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
-} yield ()))), View.expanded(View.column(View.bindText(revLabel), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.bindText(laneBLabel), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s)))), Lanes.srcSection(lanes.srcs, deckFlip)))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+} yield ())))), View.expanded(View.column(View.bindText(revLabel), View.bindText(resultLeft), Lanes.viewCard(stepViewA), View.showWhen(evidenceDetails, 0, View.each(Signal.map(rowsA, rows => Lanes.changedRows(rows)), s => View.code(s))), View.showWhen(evidenceDetails, 1, View.each(rowsA, s => View.code(s))))), View.expanded(View.column(View.bindText(laneBLabel), View.bindText(resultRight), Lanes.viewCard(stepViewB), View.showWhen(evidenceDetails, 0, View.each(Signal.map(rowsB, rows => Lanes.changedRows(rows)), s => View.code(s))), View.showWhen(evidenceDetails, 1, View.each(rowsB, s => View.code(s))))), View.showWhen(evidenceDetails, 1, Lanes.srcSection(lanes.srcs, deckFlip))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
   off <- Ui.editorCaret()
   found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
   hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found
@@ -789,13 +822,14 @@ Y
 } yield ()), View.button("Rename", _ => if (Signal.get(deckBusy) != 0) IO.pure(()) else for {
   _ = Property.sometimes("tappedRename")
   off <- Ui.editorCaret()
+  _ = Signal.set(renameCaret, off)
   lc = Chrome.lineColAt(Signal.get(buf), off)
   j <- LspClient.infoCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/rename", lc._1, lc._2, Signal.get(replQ))
   nu = LspClient.renameText(j, Signal.get(buf))
   same = nu == Signal.get(buf)
   _ = Signal.set(buf, nu)
-  _ = Signal.set(dirty, Str.len("x"))
-  _ = Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), nu))
+  _ = if (same) () else Signal.set(dirty, Str.len("x"))
+  _ = if (same) () else Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), nu))
   _ = Signal.set(infoLine, if (same) "no rename" else "renamed")
 } yield ())))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), stopOwned(fuzzPid, diffPid))
   } yield ()
