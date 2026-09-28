@@ -5,13 +5,21 @@ def noProg(): List[EvProg] =
   []
 
 def mainArgs(args: List[String]): IO[Unit] =
-  if (List.isEmpty(args)) IO.fail("ui-host: missing probe directory") else Ref.of(noProg()).flatMap(slot => Drive.uiProbe(List.at(args, 0), slot, v => mountOne(slot, v)))
+  if (List.isEmpty(args)) IO.fail("ui-host: missing probe directory") else Ref.of(noProg()).flatMap(slot => Drive.uiProbe(List.at(args, 0), slot, v => mountOne(slot, v), call => editorCall(call.name, call.args)))
 
 def mountOne(slot: Ref[List[EvProg]], v: Value): IO[Unit] =
   Ref.get(slot).flatMap(ps => mountProg(ps, v))
 
 def mountProg(ps: List[EvProg], v: Value): IO[Unit] =
   if (List.isEmpty(ps)) IO.fail("ui-host: no program") else Ui.run(_ => Mount.mount(v, List.at(ps, 0)))
+
+def editorCall(f: String, vals: List[Value]): IO[Value] =
+  if (f == "Ui.editorCaret") Ui.editorCaret().map(n => Value.VInt(n)) else for {
+  _ <- if (f == "Ui.setTitle") Ui.setTitle(Eval.strAt(vals, 0)) else if (f == "Ui.setEditorCaret") Ui.setEditorCaret(Eval.intAt(vals, 0), Eval.intAt(vals, 1)) else if (f == "Ui.setEditorTokens") Ui.setEditorTokens(List.map(Eval.listOf(List.at(vals, 0)), v => Eval.intOf(v))) else if (f == "Ui.setEditorDiagnostics") Ui.setEditorDiagnostics(editorPairs(List.at(vals, 0))) else if (f == "Ui.setEditorFolds") Ui.setEditorFolds(editorPairs(List.at(vals, 0))) else if (f == "Ui.setEditorInlays") Ui.setEditorInlays(List.map(Eval.listOf(List.at(vals, 0)), v => (Eval.intAt(Eval.tupleOf(v), 0), Eval.intAt(Eval.tupleOf(v), 1), Eval.strAt(Eval.tupleOf(v), 2)))) else IO.fail(Str.concat("unsupported UI host effect: ", f))
+} yield Value.VUnit
+
+def editorPairs(v: Value): List[(Int, Int)] =
+  List.map(Eval.listOf(v), item => (Eval.intAt(Eval.tupleOf(item), 0), Eval.intAt(Eval.tupleOf(item), 1)))
 
 @main def main: IO[Unit] =
   Sys.args().flatMap(args => mainArgs(args))

@@ -1,0 +1,2 @@
+[fuzz]
+events = ["drive staleFlow 6"]

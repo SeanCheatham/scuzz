@@ -24,6 +24,7 @@ import Parse.Prog
 import Emit.Strs
 import Eval.Value
 import Eval.EvProg
+import Eval.UiCall
 
 def compileSrc(src: String): Build =
   compileSrc2(Check.check(src), src)
@@ -684,11 +685,11 @@ def evProbeFiles(files: List[(String, String)], human: String): IO[Unit] =
 def probeReject(human: String): IO[Unit] =
   Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else IO.println("3").flatMap(_ => evFail(human)))
 
-def uiProbe(dir: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  Fs.read(joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => uiProbeFiles(files, Check.humanFiles(files), slot, mount)))
+def uiProbe(dir: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
+  Fs.read(joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => uiProbeFiles(files, Check.humanFiles(files), slot, mount, ui)))
 
-def uiProbeFiles(files: List[(String, String)], human: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit]): IO[Unit] =
-  if (human != "scuzz check ok") probeReject(human) else Eval.probeMounted(files, slot, mount)
+def uiProbeFiles(files: List[(String, String)], human: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
+  if (human != "scuzz check ok") probeReject(human) else Eval.probeMounted(files, slot, mount, ui)
 
 def evWriteFiles(dir: String, files: List[(String, String)]): IO[Unit] =
   Fs.mkdirs(dir).flatMap(_ => Fs.write(joinSlash(dir, "files.txt"), Verify.nls(evStems(files))).flatMap(_ => evWriteSrcs(dir, files, 0)))
@@ -1494,7 +1495,7 @@ def ioProbeCmd(scuzz: String, dir: String): String =
   Str.concat("SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec ", Str.concat(shQuote(scuzz), Str.concat(" eval --probe ", shQuote(dir))))))
 
 def uiProbeCmd(host: String, dir: String): String =
-  Str.concat("SCUZZ_EVAL_MIRROR=1 SCUZZ_EVAL_TAGS=", Str.concat(shQuote(joinSlash(dir, "tags.txt")), Str.concat(" SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec ", Str.concat(shQuote(host), Str.concat(" ", shQuote(dir))))))))
+  Str.concat("SCUZZ_EVAL_MIRROR=1 SCUZZ_EVAL_TAGS=", Str.concat(shQuote(joinSlash(dir, "tags.txt")), Str.concat(" SCUZZ_EV_REQUEST=", Str.concat(shQuote(evRequestPath(dir)), Str.concat(" exec env -u SCUZZ_UI_SCRIPT -u SCUZZ_UI_INJECT -u SCUZZ_UI_TAP -u SCUZZ_UI_TEXT -u SCUZZ_UI_SERVE -u SCUZZ_UI_RECORD -u SCUZZ_UI_DEBUG_DUMP -u SCUZZ_UI_RELOAD_STAMP -u SCUZZ_LIVE_FRAMES ", Str.concat(shQuote(host), Str.concat(" ", shQuote(dir))))))))
 
 def evRequestPath(dir: String): String =
   joinSlash(dir, "request.txt")

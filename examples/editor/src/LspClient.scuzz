@@ -191,46 +191,51 @@ def paintEditor(root: String, path: String, body: String): IO[Json] =
     _ <- Ui.setEditorFolds(foldRanges(fld))
   } yield tok
 
-def readUntil(pid: Int, acc: String, needle: String): IO[String] =
-  if (Str.indexOf(acc, needle) >= 0) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else readUntil(pid, Str.concat(acc, c), needle))
+def readUntil(pid: Int, acc: String): IO[String] =
+  if (Lsp.headerBody(acc) >= 0) IO.pure(acc) else Sys.childRead(pid, 1).flatMap(c => if (Str.isEmpty(c)) IO.fail("LSP: incomplete header") else readUntil(pid, Str.concat(acc, c)))
 
 def fillTo(pid: Int, acc: String, need: Int): IO[String] =
-  if (Str.byteLen(acc) >= need) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(pid, Str.concat(acc, c), need))
+  if (Str.byteLen(acc) >= need) IO.pure(acc) else Sys.childRead(pid, need - Str.byteLen(acc)).flatMap(c => if (Str.isEmpty(c)) IO.fail("LSP: incomplete body") else fillTo(pid, Str.concat(acc, c), need))
 
-def readMsg(pid: Int): IO[String] =
+def readMsg(pid: Int, buffer: Ref[String]): IO[String] =
   for {
-    acc <- readUntil(pid, "", headerBreak())
-    split = Str.indexOf(acc, headerBreak())
-    len = parseLen(Str.take(acc, split))
-    start = needLen(split, Str.len(headerBreak()))
-    full <- fillTo(pid, acc, needLen(start, len))
-  } yield msgSlice(full, start, len)
+    cached <- Ref.get(buffer)
+    acc <- readUntil(pid, cached)
+    start = Lsp.headerBody(acc)
+    len = Lsp.parseLen(acc)
+    _ <- Cards.need(start >= 0 && len > 0 && len <= 1048576, "LSP: invalid message length")
+    full <- fillTo(pid, acc, start + len)
+    parts = Lsp.readMsg5(full, start, len)
+    _ <- Ref.set(buffer, parts._2)
+  } yield parts._1
 
-def readResult(pid: Int, want: Int): IO[Json] =
+def readResult(pid: Int, buffer: Ref[String], want: Int): IO[Json] =
   for {
-    raw <- readMsg(pid)
+    raw <- readMsg(pid, buffer)
     j = parseJson(raw)
     hit = takeIfMatch(j, want)
     out <- hit match {
-  case Json.Null => readResult(pid, want)
+  case Json.Null => readResult(pid, buffer, want)
   case _ => IO.pure(hit)
 }
   } yield out
 
 def lspCall(root: String, path: String, body: String, method: String): IO[Json] =
   for {
-    pid <- Sys.spawn("scuzz lsp")
-    abs <- Fs.canonicalize(path).handleErrorWith(_ => IO.pure(path))
-    rootAbs <- Fs.canonicalize(root).handleErrorWith(_ => IO.pure(root))
-    uri = Str.concat("file://", abs)
-    rootUri = Str.concat("file://", rootAbs)
-    _ <- Sys.childWrite(pid, frame(initBody(rootUri)))
-    _ <- readResult(pid, Str.len("x"))
-    _ <- Sys.childWrite(pid, frame(initializedBody()))
-    _ <- Sys.childWrite(pid, frame(didOpenBody(uri, body)))
-    _ <- Sys.childWrite(pid, frame(requestBody(method, uri, Str.len(""), Str.len(""))))
-    j <- readResult(pid, Str.len("xy"))
-    _ <- Sys.childClose(pid)
-    _ <- Sys.kill(pid)
+    cli <- Main.scuzzCli()
+    pid <- Sys.spawn(Str.concat("exec ", Str.concat(Lanes.shQuote(cli), " lsp")))
+    buffer <- Ref.of("")
+    j <- IO.ensure(IO.timeout(30000, for {
+  abs <- Fs.canonicalize(path).handleErrorWith(_ => IO.pure(path))
+  rootAbs <- Fs.canonicalize(root).handleErrorWith(_ => IO.pure(root))
+  uri = Str.concat("file://", abs)
+  rootUri = Str.concat("file://", rootAbs)
+  _ <- Sys.childWrite(pid, frame(initBody(rootUri)))
+  _ <- readResult(pid, buffer, Str.len("x"))
+  _ <- Sys.childWrite(pid, frame(initializedBody()))
+  _ <- Sys.childWrite(pid, frame(didOpenBody(uri, body)))
+  _ <- Sys.childWrite(pid, frame(requestBody(method, uri, Str.len(""), Str.len(""))))
+  result <- readResult(pid, buffer, Str.len("xy"))
+} yield result), Sys.kill(pid).handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(pid).handleErrorWith(_ => IO.pure(()))))
   } yield j
 

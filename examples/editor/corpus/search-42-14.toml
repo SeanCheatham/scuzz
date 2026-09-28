@@ -1,0 +1,4 @@
+[fuzz]
+schedule_seed = "14"
+schedule_picks = ["setup 1:-"]
+events = ["tap outlined:Check"]

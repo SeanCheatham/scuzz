@@ -582,32 +582,333 @@ assert row["class"] == "diverged", row
 sections = {c["section"] for c in row["delta"]["changes"]}
 assert "signals" in sections, row
 PY
-  # Live proposal deck: review one proposal and Keep it into the working tree.
-  python3 - <<'PY'
-import json, os
-src = open("scratchpad/review/src/Main.scuzz").read()
+  python3 - <<'PYLSP'
+import json, os, select, subprocess, time
+from pathlib import Path
+root = (Path.cwd() / "scratchpad/review").resolve()
+proc = subprocess.Popen([os.environ["SCUZZ"], "lsp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+buffer = bytearray()
+def frame(message):
+    body = json.dumps(message, ensure_ascii=False, separators=(',', ':')).encode()
+    return b'Content-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body
+def result(want):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        cut = buffer.find(b'\r\n\r\n')
+        width = 4
+        if cut < 0:
+            cut = buffer.find(b'\n\n')
+            width = 2
+        if cut >= 0:
+            size = int(bytes(buffer[:cut]).split(b':', 1)[1])
+            end = cut + width + size
+            if len(buffer) >= end:
+                message = json.loads(bytes(buffer[cut + width:end]))
+                del buffer[:end]
+                if message.get('id') == want:
+                    return message
+                continue
+        assert proc.poll() is None, "LSP exits before its result"
+        if select.select([proc.stdout], [], [], max(0, deadline - time.monotonic()))[0]:
+            buffer.extend(os.read(proc.stdout.fileno(), 8192))
+    raise AssertionError("LSP frame deadline")
+try:
+    initial = frame({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}})
+    assert len(initial) < 256
+    proc.stdin.write(initial[:8])
+    proc.stdin.flush()
+    proc.stdin.write(initial[8:])
+    proc.stdin.flush()
+    assert 'capabilities' in result(1)['result']
+    uri = (root / 'src/Main.scuzz').as_uri()
+    source = (root / 'src/Main.scuzz').read_text().replace('"Counter"', '"Café"', 1)
+    opened = frame({'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {'uri': uri, 'languageId': 'scuzz', 'version': 1, 'text': source}}})
+    tokens = frame({'jsonrpc': '2.0', 'id': 2, 'method': 'textDocument/semanticTokens/full', 'params': {'textDocument': {'uri': uri}}})
+    again = frame({'jsonrpc': '2.0', 'id': 3, 'method': 'textDocument/semanticTokens/full', 'params': {'textDocument': {'uri': uri}}})
+    proc.stdin.write(opened + tokens + again)
+    proc.stdin.flush()
+    data = result(2)['result']['data']
+    assert data and result(3)['result']['data'] == data
+finally:
+    proc.terminate()
+    proc.wait(timeout=10)
+PYLSP
+  # Live choices select the displayed lane and retain complete local evidence.
+  python3 - <<'PYDECK'
+import hashlib, json, os, subprocess, time
+from pathlib import Path
+repo = Path.cwd()
+root = (repo / "scratchpad/review").resolve()
+src = (root / "src/Main.scuzz").read_text()
 prop = src.replace('"Counter"', '"Counter app"', 1)
-os.makedirs("scratchpad/review/build/proposals/p1/src", exist_ok=True)
-open("scratchpad/review/build/proposals/p1/src/Main.scuzz", "w").write(prop)
+d = root / "build/proposals/p1"
+(d / "src").mkdir(parents=True, exist_ok=True)
+(d / "src/Main.scuzz").write_text(prop)
+records = [{"path": "src/" + p.name, "content": p.read_text()} for p in sorted((root / "src").glob("*.scuzz"))]
+baseline = hashlib.sha256(json.dumps(records, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+(d / "proposal.json").write_text(json.dumps({"v": 1, "request": "manual", "baseline": baseline, "kind": "behavior", "generator": "manual", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(prop.encode()).hexdigest()}]}))
 ops = {"v": 1, "kind": "inject", "events": [
     {"op": "tap", "id": "choicechip:Timeline"},
     {"op": "tap", "id": "outlined:Proposals"},
-    {"op": "tap", "id": "button:Keep"},
-    {"op": "pump", "k": 50},
 ]}
-open("scratchpad/review/ops-deck.json", "w").write(json.dumps(ops))
-PY
-  (cd scratchpad/review && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec ops-deck.json "$ROOT/examples/editor")
-  python3 - <<'PY'
+path = root / "ops-deck.json"
+path.write_text(json.dumps(ops))
+env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(path), SCUZZ_UI_INJECT=str(path), SCUZZ_UI_DEBUG_DUMP=str(root / "deck-debug.json"))
+with open(root / "deck-live.log", "w") as log:
+    proc = subprocess.Popen([str(repo / "examples/editor/build/editor")], cwd=root, env=env, stdout=log, stderr=log)
+    def await_state(predicate):
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            assert proc.poll() is None, (root / "deck-live.log").read_text()[-3000:]
+            try:
+                result = predicate()
+            except (FileNotFoundError, json.JSONDecodeError):
+                result = False
+            if result:
+                return result
+            time.sleep(0.05)
+        raise AssertionError("live lane choice deadline")
+    def ready():
+        ui = json.loads((root / "deck-debug.json").read_text())
+        return any(v.get("name") == "deckArmed" and v.get("value") for v in ui["signals"]) and any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui["signals"]) and "Choose left" in json.dumps(ui.get("taps", []))
+    def inject(events):
+        temp = root / "ops-deck.tmp"
+        temp.write_text(json.dumps({"v": 1, "kind": "inject", "events": events}))
+        temp.replace(path)
+    try:
+        await_state(ready)
+        inject([{"op": "tap", "id": "button:Choose left"}])
+        await_state(lambda: len(list((root / ".scuzz/ide/records").glob("*.json"))) == 1)
+        inject([{"op": "quit"}])
+        assert proc.wait(timeout=15) == 0
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=15)
+PYDECK
+  python3 - <<'PYDECK'
 import json
-src = open("scratchpad/review/src/Main.scuzz").read()
-assert '"Counter app"' in src, src
-line = open("scratchpad/review/build/ide/decisions.jsonl").read().strip()
-d = json.loads(line)
-assert d["proposal"] == "p1" and d["decision"] == "keep", d
-assert d["region"] == "Main", d
-assert len(d["a"]) == 64 and len(d["b"]) == 64 and d["a"] != d["b"], d
-PY
+from pathlib import Path
+root = Path("scratchpad/review")
+records = list((root / ".scuzz/ide/records").glob("*.json"))
+assert len(records) == 1, records
+d = json.loads(records[0].read_text())
+c = json.loads((root / ".scuzz/ide/cards" / d["card"] / "card.json").read_text())
+assert d["proposal"] == "p1" and d["lane"] == 0, d
+accepted = d["flip"] == 1
+assert d["decision"] == ("accept" if accepted else "baseline"), d
+expected = {f["path"]: f["content"] for f in c["proposed"] if accepted} if accepted else {f["path"]: f["content"] for f in c["baseline"]}
+assert (root / "src/Main.scuzz").read_text() == expected["src/Main.scuzz"]
+assert len(c["a"]) == 64 and len(c["b"]) == 64 and c["a"] != c["b"], c
+assert c["status"] == "ready" and c["evidence"]["workloads"], c
+for w in c["evidence"]["workloads"]:
+    for side in ["a", "b"]:
+        assert (root / ".scuzz/ide/cards" / c["id"] / w["timelines"][side]).is_file()
+assert not (root / "build/ide/decisions.jsonl").exists()
+PYDECK
+  # A real write failure leaves a journal. Restart and Undo use that journal.
+  python3 - <<'PYINTEGRITY'
+import hashlib, json, os, shutil, subprocess, time
+from pathlib import Path
+repo = Path.cwd()
+cli = Path(os.environ["SCUZZ"])
+editor = repo / "examples/editor/build/editor"
+root = repo / "scratchpad/integrity"
+shutil.rmtree(root, ignore_errors=True)
+shutil.copytree(repo / "examples/counter", root, ignore=shutil.ignore_patterns("build", ".scuzz"))
+original = (root / "src/Main.scuzz").read_text()
+proposed = original.replace('"Counter"', '"Counter proof"', 1)
+
+def publish(where, files):
+    dest = where / "build/proposals/p"
+    (dest / "src").mkdir(parents=True, exist_ok=True)
+    records = [{"path": "src/" + p.name, "content": p.read_text()} for p in sorted((where / "src").glob("*.scuzz"))]
+    baseline = hashlib.sha256(json.dumps(records, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+    for path, content in files:
+        (dest / path).write_text(content)
+    (dest / "proposal.json").write_text(json.dumps({"v": 1, "request": "manual", "baseline": baseline, "kind": "behavior", "generator": "manual", "files": [{"path": p, "sha256": hashlib.sha256(c.encode()).hexdigest()} for p, c in files]}))
+
+def write_ops(where, events):
+    path = where / "inject.json"
+    temp = where / "inject.tmp"
+    temp.write_text(json.dumps({"v": 1, "kind": "inject", "events": events}))
+    temp.replace(path)
+    return path
+
+def batch(where, events):
+    path = write_ops(where, events)
+    env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SCRIPT=str(path), SCUZZ_UI_DEBUG_DUMP=str(where / "debug.json"))
+    env.pop("SCUZZ_UI_SERVE", None)
+    subprocess.run([str(editor)], cwd=where, env=env, check=True, timeout=180, stdout=subprocess.DEVNULL)
+
+publish(root, [("src/Main.scuzz", proposed), ("src/Other.scuzz", "def other(): Int =\n  3\n\n")])
+fault = root / "fault.c"
+fault.write_text(r'''#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <errno.h>
+#include <string.h>
+int rename(const char *from, const char *to) {
+  static int failed;
+  const char *suffix = "/src/Other.scuzz";
+  size_t n = strlen(to), m = strlen(suffix);
+  if (!failed && (strcmp(to, "src/Other.scuzz") == 0 || (n >= m && strcmp(to + n - m, suffix) == 0))) {
+    failed = 1;
+    errno = EIO;
+    return -1;
+  }
+  int (*next)(const char *, const char *) = dlsym(RTLD_NEXT, "rename");
+  return next(from, to);
+}
+''')
+# This host proof uses an owned process with a frame limit and a wall deadline.
+if os.uname().sysname == "Linux":
+    library = root / "fault.so"
+    subprocess.run(["clang", "-shared", "-fPIC", str(fault), "-ldl", "-o", str(library)], check=True)
+    inject = write_ops(root, [{"op": "caret", "i": 0, "offset": 0}, {"op": "key", "key": "x", "text": "x"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+    env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(inject), SCUZZ_UI_INJECT=str(inject), SCUZZ_UI_DEBUG_DUMP=str(root / "debug.json"), LD_PRELOAD=str(library))
+    log = open(root / "live.log", "w")
+    proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
+    def await_state(predicate):
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            assert proc.poll() is None, (root / "live.log").read_text()[-3000:]
+            try:
+                result = predicate()
+            except json.JSONDecodeError:
+                result = None
+            if result:
+                return result
+            time.sleep(0.05)
+        raise AssertionError("live review deadline")
+    def ready_card():
+        for path in (root / ".scuzz/ide/cards").glob("*/card.json"):
+            c = json.loads(path.read_text())
+            debug = root / "debug.json"
+            if c["status"] == "ready" and debug.exists():
+                ui = json.loads(debug.read_text())
+                idle = any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui.get("signals", []))
+                armed = any(v.get("name") == "deckArmed" and v.get("value") == c["id"] for v in ui.get("signals", []))
+                if idle and armed and "Choose left" in json.dumps(ui.get("taps", [])):
+                    return c
+    try:
+        c = await_state(ready_card)
+        ui = json.loads((root / "debug.json").read_text())
+        dirty = next(v["value"] for v in ui["signals"] if v.get("name") == "buf")
+        assert dirty == original + "x", dirty
+        lane = "Choose left" if c["flip"] == 1 else "Choose right"
+        write_ops(root, [{"op": "tap", "id": "button:" + lane}])
+        def refused_dirty():
+            ui = json.loads((root / "debug.json").read_text())
+            return any(v.get("name") == "deltaStatus" and "dirty buffer:" in json.dumps(v.get("value")) for v in ui.get("signals", []))
+        await_state(refused_dirty)
+        assert (root / "src/Main.scuzz").read_text() == original
+        assert not (root / "src/Other.scuzz").exists()
+        assert not list((root / ".scuzz/ide/records").glob("*.json"))
+        ui = json.loads((root / "debug.json").read_text())
+        assert any(v.get("name") == "buf" and v.get("value") == dirty for v in ui["signals"])
+        write_ops(root, [{"op": "quit"}])
+        assert proc.wait(timeout=15) == 0
+        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+        proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
+        c = await_state(ready_card)
+        lane = "Choose left" if c["flip"] == 1 else "Choose right"
+        write_ops(root, [{"op": "tap", "id": "button:" + lane}])
+        journal = root / ".scuzz/ide/journal.json"
+        await_state(lambda: journal.exists() and journal.read_text() and (root / "src/Main.scuzz").read_text() == proposed)
+        assert not (root / "src/Other.scuzz").exists()
+        write_ops(root, [{"op": "quit"}])
+        assert proc.wait(timeout=15) == 0
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=15)
+        log.close()
+    batch(root, [])
+    assert (root / "src/Main.scuzz").read_text() == proposed
+    assert any(v.get("name") == "buf" and v.get("value") == proposed for v in json.loads((root / "debug.json").read_text())["signals"])
+    assert (root / "src/Other.scuzz").read_text() == "def other(): Int =\n  3\n\n"
+    assert journal.read_text() == ""
+    records = list((root / ".scuzz/ide/records").glob("*.json"))
+    assert len(records) == 1, records
+    shutil.rmtree(root / "build")
+    batch(root, [])
+    assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 1
+    batch(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Undo"}])
+    assert (root / "src/Main.scuzz").read_text() == original
+    assert any(v.get("name") == "buf" and v.get("value") == original for v in json.loads((root / "debug.json").read_text())["signals"])
+    assert not (root / "src/Other.scuzz").exists()
+    assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 2
+    publish(root, [("src/Main.scuzz", proposed), ("src/Other.scuzz", "def other(): Int =\n  3\n\n")])
+    env.pop("LD_PRELOAD", None)
+    write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+    log = open(root / "live.log", "a")
+    proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
+    try:
+        c = await_state(ready_card)
+        lane = "Choose left" if c["flip"] == 1 else "Choose right"
+        write_ops(root, [{"op": "tap", "id": "button:" + lane}, {"op": "tap", "id": "button:" + lane}])
+        def accepted_clean():
+            ui = json.loads((root / "debug.json").read_text())
+            idle = any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui["signals"])
+            return idle and len(list((root / ".scuzz/ide/records").glob("*.json"))) == 3 and any(v.get("name") == "buf" and v.get("value") == proposed for v in ui["signals"])
+        await_state(accepted_clean)
+        write_ops(root, [{"op": "tap", "id": "outlined:Check"}])
+        def checked_acceptance():
+            ui = json.loads((root / "debug.json").read_text())
+            checked = any(v.get("name") == "checkedSource" and v.get("value") == proposed for v in ui["signals"])
+            return checked and any(v.get("tokens", 0) > 0 for v in ui.get("editors", []))
+        await_state(checked_acceptance)
+        assert (root / "src/Main.scuzz").read_text() == proposed
+        assert (root / "src/Other.scuzz").read_text() == "def other(): Int =\n  3\n\n"
+        assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 3
+        write_ops(root, [{"op": "quit"}])
+        assert proc.wait(timeout=15) == 0
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=15)
+        log.close()
+else:
+    print("live filesystem fault injection: unverified on this host")
+
+failure = repo / "scratchpad/review-failure"
+shutil.rmtree(failure, ignore_errors=True)
+shutil.copytree(repo / "examples/counter", failure, ignore=shutil.ignore_patterns("build", ".scuzz"))
+(failure / "failure.scuzz_verify").write_text('def sharedFailure(t: Timeline): Verdict =\n  Verdict.fail(0, "shared failure")\n\n')
+publish(failure, [("src/Main.scuzz", proposed)])
+batch(failure, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+report = json.loads((failure / "build/ide/report.json").read_text())
+assert any(w["why_b"] for w in report["workloads"]), report
+assert (failure / "src/Main.scuzz").read_text() == original
+assert not list((failure / ".scuzz/ide/records").glob("*.json"))
+assert all(json.loads(p.read_text())["status"] != "ready" for p in (failure / ".scuzz/ide/cards").glob("*/card.json"))
+
+repair = repo / "scratchpad/review-repair"
+shutil.rmtree(repair, ignore_errors=True)
+shutil.copytree(repo / "examples/counter", repair, ignore=shutil.ignore_patterns("build", ".scuzz"))
+(repair / "src/Main.scuzz").write_text(original.replace("Signal.get(count) + 1", 'Signal.get(count) + "x"'))
+assert (repair / "src/Main.scuzz").read_text() != original
+publish(repair, [("src/Main.scuzz", proposed)])
+batch(repair, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+cards = [json.loads(p.read_text()) for p in (repair / ".scuzz/ide/cards").glob("*/card.json")]
+assert len(cards) == 1 and cards[0]["status"] == "ready", cards
+assert all(w["why_a"] == "check failed" and w["why_b"] is None for w in cards[0]["evidence"]["workloads"])
+
+for side in ("publication", "target"):
+    unsafe = repo / ("scratchpad/review-unsafe-" + side)
+    shutil.rmtree(unsafe, ignore_errors=True)
+    shutil.copytree(repo / "examples/counter", unsafe, ignore=shutil.ignore_patterns("build", ".scuzz"))
+    publish(unsafe, [("src/Main.scuzz", proposed)])
+    linked = unsafe / ("build/proposals/p/src/Main.scuzz" if side == "publication" else "src/Main.scuzz")
+    outside = unsafe / "outside.scuzz"
+    outside.write_text(linked.read_text())
+    linked.unlink()
+    linked.symlink_to(outside)
+    batch(unsafe, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+    assert outside.read_text() == (proposed if side == "publication" else original)
+    assert not list((unsafe / ".scuzz/ide/cards").glob("*/card.json"))
+    assert not list((unsafe / ".scuzz/ide/records").glob("*.json"))
+PYINTEGRITY
   # Live generation: mutation sites of the working tree become proposals.
   python3 - <<'PY'
 import json

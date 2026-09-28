@@ -1,0 +1,279 @@
+def text(j: Json): String =
+  Json.stringify(j) match {
+    case Result.Ok(s) => s
+    case Result.Err(e) => e
+  }
+
+def str(j: Json, key: String): String =
+  Json.getStr(j, key, "")
+
+def pairsJson(files: List[(String, String)]): Json =
+  Json.Arr(List.map(List.map(List.sort(List.map(files, f => f._1)), p => List.at(files, List.indexOf(List.map(files, f => f._1), p))), f => Json.Obj([("path", Json.Str(f._1)), ("content", Json.Str(f._2))])))
+
+def pairs(j: Json): List[(String, String)] =
+  List.map(Json.arr(j), f => (str(f, "path"), str(f, "content")))
+
+def setHash(files: List[(String, String)]): String =
+  Hash.sha256(text(pairsJson(files)))
+
+def applyPaths(disk: List[(String, String)], props: List[(String, String)]): List[(String, String)] =
+  List.concat(List.map(disk, d => (d._1, List.getOrElse(List.map(props, p => p._2), List.indexOf(List.map(props, p => p._1), d._1), d._2))), List.filter(props, p => !List.contains(List.map(disk, d => d._1), p._1)))
+
+def safePath(path: String): Bool =
+  Str.matches(path, "^src/[A-Za-z_][A-Za-z0-9_]*\\.scuzz$")
+
+def sourceSetOk(files: List[(String, String)]): Bool =
+  List.nonEmpty(files) && List.len(files) <= 3 && List.len(List.distinct(List.map(files, f => f._1))) == List.len(files) && List.forall(files, f => safePath(f._1)) && List.foldLeft(files, 0, acc => acc match {
+  case (n, f) => n + Str.byteLen(f._2)
+}) <= 65536
+
+def need(ok: Bool, why: String): IO[Unit] =
+  if (ok) IO.pure(()) else IO.fail(why)
+
+def own(root: String): IO[List[(String, String)]] =
+  Fs.list(Fs.join(root, "src")).flatMap(ents => IO.foreach(List.sort(List.map(List.filter(ents, e => !e._2 && Str.endsWith(e._1, ".scuzz")), e => e._1)), p => Fs.read(Fs.join(Fs.join(root, "src"), p)).map(s => (Fs.join("src", p), s))))
+
+def inside(root: String, path: String): IO[Unit] =
+  for {
+    base <- Fs.canonicalize(root)
+    resolved <- Fs.canonicalize(Fs.join(root, path)).handleErrorWith(_ => Fs.canonicalize(Fs.dirname(Fs.join(root, path))).map(p => Fs.join(p, Fs.basename(path))))
+    _ <- need(resolved == Fs.join(base, path), Str.concat("unsafe resolved path: ", path))
+  } yield ()
+
+def dirtyHits(root: String, props: List[(String, String)], dirties: List[String]): IO[List[String]] =
+  for {
+    dirty <- IO.foreach(dirties, p => Fs.canonicalize(p))
+    touched <- IO.foreach(props, p => Fs.canonicalize(Fs.join(root, p._1)).handleErrorWith(_ => Fs.canonicalize(Fs.dirname(Fs.join(root, p._1))).map(dir => Fs.join(dir, Fs.basename(p._1)))))
+  } yield List.map(List.filter(List.indices(props), i => List.contains(dirty, List.at(touched, i))), i => List.at(props, i)._1)
+
+def metadata(request: String, baseline: String, generator: String, files: List[(String, String)]): String =
+  text(Json.Obj([("v", Json.Int(1)), ("request", Json.Str(request)), ("baseline", Json.Str(baseline)), ("kind", Json.Str("behavior")), ("generator", Json.Str(generator)), ("files", Json.Arr(List.map(files, f => Json.Obj([("path", Json.Str(f._1)), ("sha256", Json.Str(Hash.sha256(f._2)))]))))]))
+
+def importProposal(root: String, name: String): IO[List[(String, String)]] =
+  for {
+    _ <- need(Str.matches(name, "^[A-Za-z0-9_-]+$"), "unsafe proposal name")
+    dir = Fs.join(Deck.proposalsDir(root), name)
+    _ <- inside(root, Fs.join("build/proposals", name))
+    _ <- inside(dir, "proposal.json")
+    raw <- Fs.read(Fs.join(dir, "proposal.json"))
+    _ <- need(Str.byteLen(raw) <= 131072, "proposal metadata exceeds limit")
+    j = LspClient.parseJson(raw)
+    fs = Json.arr(Diags.jsonField(j, "files"))
+    _ <- need(List.sort(Json.keys(j)) == List.sort(["v", "request", "baseline", "kind", "generator", "files"]) && Json.getInt(j, "v", 0) == 1 && str(j, "kind") == "behavior" && !Str.isEmpty(str(j, "request")) && !Str.isEmpty(str(j, "generator")), "invalid proposal metadata")
+    _ <- need(List.nonEmpty(fs) && List.len(fs) <= 3 && List.forall(fs, f => List.sort(Json.keys(f)) == ["path", "sha256"] && safePath(str(f, "path"))), "invalid proposal source set")
+    _ <- need(List.len(List.distinct(List.map(fs, f => str(f, "path")))) == List.len(fs), "duplicate proposal path")
+    files <- IO.foreach(fs, f => for {
+  path = str(f, "path")
+  _ <- inside(dir, path)
+  _ <- inside(root, path)
+  src <- Fs.read(Fs.join(dir, path))
+  _ <- need(Hash.sha256(src) == str(f, "sha256"), "incomplete proposal publication")
+} yield (path, src))
+    _ <- need(sourceSetOk(files), "proposal source limit")
+    disk <- own(root)
+    _ <- need(str(j, "baseline") == setHash(disk), "stale proposal baseline")
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    all <- Main.diskFiles(root, toml)
+    additions = List.filter(files, f => !List.contains(List.map(disk, d => d._1), f._1))
+    _ <- need(!List.exists(additions, f => List.contains(List.map(all, d => d._1), Chrome.stemOf(f._1))), "duplicate module stem")
+    walked <- Fs.walk(dir)
+    actual = List.sort(List.map(List.filter(walked, e => !e._2), e => e._1))
+    _ <- need(actual == List.sort("proposal.json" :: List.map(files, f => f._1)), "undeclared proposal file")
+  } yield files
+
+def inputPath(path: String): Bool =
+  path == "scuzz.toml" || Str.startsWith(path, "src/") && Str.endsWith(path, ".scuzz") || !Str.startsWith(path, "build/") && !Str.startsWith(path, ".scuzz/") && (Str.endsWith(path, ".scuzz_scenario") || Str.endsWith(path, ".scuzz_verify")) || Str.startsWith(path, "corpus/") && Str.endsWith(path, ".toml")
+
+def packageInputs(root: String, prefix: String, seen: List[String]): IO[List[(String, String)]] =
+  for {
+    abs <- Fs.canonicalize(root)
+    _ <- need(!List.contains(seen, abs), "dependency cycle")
+    walked <- Fs.walk(root)
+    paths = List.sort(List.filter(Chrome.filesOf(walked), p => inputPath(p)))
+    files <- IO.foreach(paths, p => for {
+  resolved <- Fs.canonicalize(Fs.join(root, p))
+  s <- Fs.read(Fs.join(root, p))
+} yield [(Fs.join(prefix, p), s), (Str.concat("resolved/", Fs.join(prefix, p)), resolved)])
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    deps <- IO.foreach(Manifest.parse(toml).deps, d => packageInputs(Drive.depDir(root, d._2), Fs.join(Fs.join(prefix, "dependencies"), d._1), abs :: seen))
+  } yield List.concat(List.flatten(files), List.flatten(deps))
+
+def compilerIdentity(): IO[String] =
+  for {
+    cli <- Main.scuzzCli()
+    got <- Sys.exec(Str.concat("review_cli=$(command -v ", Str.concat(Lanes.shQuote(cli), ") && if command -v sha256sum >/dev/null 2>&1; then sha256sum \"$review_cli\"; else shasum -a 256 \"$review_cli\"; fi")))
+    digest = Str.take(Str.trim(got._2), 64)
+    _ <- need(got._1 == 0 && Str.matches(digest, "^[a-f0-9]{64}$"), "cannot identify review compiler")
+  } yield digest
+
+def inputs(root: String): IO[List[(String, String)]] =
+  for {
+    files <- packageInputs(root, "package", [])
+    compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+    cli <- compilerIdentity()
+  } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("objective", "Review behavior"), ("limits", "files=3;source=65536;review=idle,seeds;seed=1")])
+
+def storage(root: String): String =
+  Fs.join(root, ".scuzz/ide")
+
+def cardDir(root: String, id: String): String =
+  Fs.join(Fs.join(storage(root), "cards"), id)
+
+def identity(inputs0: List[(String, String)], props: List[(String, String)], publication: String, nonce: String): String =
+  Hash.sha256(text(Json.Arr([pairsJson(inputs0), pairsJson(props), Json.Str(publication), Json.Str(nonce)])))
+
+def candidatePass(raw: String): Bool =
+  candidateReportPass(LspClient.parseJson(raw))
+
+def candidateReportPass(j: Json): Bool =
+  str(j, "kind") == "diff" && List.nonEmpty(Json.arr(Diags.jsonField(j, "workloads"))) && List.forall(Json.arr(Diags.jsonField(j, "workloads")), w => Json.has(w, "why_b") && Json.isNull(Diags.jsonField(w, "why_b")) && (str(w, "class") != "unrunnable" || str(w, "why_a") == "check failed") && !Str.isEmpty(Lanes.workPath(w, "a")) && !Str.isEmpty(Lanes.workPath(w, "b")))
+
+def setupStorage(root: String): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs(Fs.join(root, ".scuzz"))
+    _ <- inside(root, ".scuzz")
+    _ <- Fs.mkdirs(storage(root))
+    _ <- inside(root, ".scuzz/ide")
+    _ <- Fs.mkdirs(Fs.join(storage(root), "cards"))
+    _ <- Fs.mkdirs(Fs.join(storage(root), "records"))
+    _ <- inside(root, ".scuzz/ide/cards")
+    _ <- inside(root, ".scuzz/ide/records")
+  } yield ()
+
+def freeze(root: String, name: String, props: List[(String, String)], flip: Int): IO[Json] =
+  for {
+    ins <- inputs(root)
+    disk <- own(root)
+    pub <- Fs.read(Fs.join(Fs.join(Deck.proposalsDir(root), name), "proposal.json"))
+    nonce <- Uuid.v4()
+    now <- Clock.monotonic()
+    id = identity(ins, props, pub, nonce)
+    c = Json.Obj([("v", Json.Int(1)), ("id", Json.Str(id)), ("proposal", Json.Str(name)), ("publication", Json.Str(pub)), ("objective", Json.Str("Review behavior")), ("inputs", pairsJson(ins)), ("baseline", pairsJson(disk)), ("proposed", pairsJson(props)), ("a", Json.Str(setHash(disk))), ("b", Json.Str(setHash(applyPaths(disk, props)))), ("flip", Json.Int(flip)), ("started", Json.Int(now)), ("status", Json.Str("preparing"))])
+    _ <- setupStorage(root)
+    _ <- Fs.mkdirs(cardDir(root, id))
+    _ <- Fs.write(Fs.join(cardDir(root, id), "card.json"), text(c))
+  } yield c
+
+def current(root: String, c: Json): IO[Unit] =
+  for {
+    ins <- inputs(root)
+    _ <- need(setHash(ins) == setHash(pairs(Diags.jsonField(c, "inputs"))), "review inputs changed")
+    props <- importProposal(root, str(c, "proposal"))
+    pub <- Fs.read(Fs.join(Fs.join(Deck.proposalsDir(root), str(c, "proposal")), "proposal.json"))
+    _ <- need(setHash(props) == setHash(pairs(Diags.jsonField(c, "proposed"))) && pub == str(c, "publication"), "proposal changed")
+  } yield ()
+
+def ready(root: String, c: Json, raw: String): IO[Json] =
+  for {
+    _ <- need(candidatePass(raw), "candidate fails required review")
+    _ <- current(root, c)
+    j = LspClient.parseJson(raw)
+    files = List.distinct(List.flatMap(Json.arr(Diags.jsonField(j, "workloads")), w => [Lanes.workPath(w, "a"), Lanes.workPath(w, "b")]))
+    _ <- IO.foreachDiscard(files, p => for {
+  _ <- need(Str.matches(p, "^[A-Za-z0-9_-]+\\.txt$"), "unsafe evidence path")
+  body <- Fs.read(Lanes.fileAt(root, "ide", p))
+  _ <- need(!Str.isEmpty(body) || List.exists(Json.arr(Diags.jsonField(j, "workloads")), w => Lanes.workPath(w, "a") == p && str(w, "why_a") == "check failed"), "missing review timeline")
+  _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), p), body)
+} yield ())
+    now <- Clock.monotonic()
+    out = Json.set(Json.set(Json.set(c, "status", Json.Str("ready")), "evidence", j), "ready", Json.Int(now))
+    _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(out))
+  } yield out
+
+def propsOf(c: Json): List[(String, String)] =
+  pairs(Diags.jsonField(c, "proposed"))
+
+def sourceWrites(c: Json): List[Json] =
+  List.map(pairs(Diags.jsonField(c, "proposed")), f => Json.Obj([("path", Json.Str(f._1)), ("before", Json.Str(List.getOrElse(List.map(pairs(Diags.jsonField(c, "baseline")), d => d._2), List.indexOf(List.map(pairs(Diags.jsonField(c, "baseline")), d => d._1), f._1), ""))), ("before_exists", Json.Bool(List.contains(List.map(pairs(Diags.jsonField(c, "baseline")), d => d._1), f._1))), ("after", Json.Str(f._2)), ("after_exists", Json.Bool(true))]))
+
+def matches(root: String, w: Json, side: String): IO[Bool] =
+  for {
+    _ <- inside(root, str(w, "path"))
+    hit <- Fs.exists(Fs.join(root, str(w, "path")))
+    src <- if (hit == 0) IO.pure("") else Fs.read(Fs.join(root, str(w, "path")))
+  } yield hit != 0 == Json.getBool(w, Str.concat(side, "_exists"), false) && src == str(w, side)
+
+def writeOne(root: String, w: Json): IO[Unit] =
+  for {
+    after <- matches(root, w, "after")
+    before <- matches(root, w, "before")
+    _ <- need(after || before, Str.concat("recovery conflict: ", str(w, "path")))
+    _ <- if (after) IO.pure(()) else if (Json.getBool(w, "after_exists", false)) Fs.write(Fs.join(root, str(w, "path")), str(w, "after")) else Fs.delete(Fs.join(root, str(w, "path")))
+    finalMatch <- matches(root, w, "after")
+    _ <- need(finalMatch, Str.concat("external write conflict: ", str(w, "path")))
+  } yield ()
+
+def recordPath(root: String, id: String): String =
+  Fs.join(Fs.join(storage(root), "records"), Str.concat(id, ".json"))
+
+def finish(root: String, op: Json): IO[Unit] =
+  for {
+    id = str(op, "operation")
+    ws = Json.arr(Diags.jsonField(op, "writes"))
+    _ <- need(Str.matches(id, "^(accept|undo)-[a-f0-9]{64}$") && List.nonEmpty(ws) && List.len(ws) <= 3 && List.len(List.distinct(List.map(ws, w => str(w, "path")))) == List.len(ws) && List.forall(ws, w => safePath(str(w, "path")) && Json.isStr(Diags.jsonField(w, "before")) && Json.isStr(Diags.jsonField(w, "after")) && Json.isBool(Diags.jsonField(w, "before_exists")) && Json.isBool(Diags.jsonField(w, "after_exists"))), "invalid recovery journal")
+    checks <- IO.foreach(ws, w => matches(root, w, "before").flatMap(b => matches(root, w, "after").map(a => b || a)))
+    _ <- need(List.forall(checks, b => b), "recovery conflict: preserve external edits")
+    _ <- IO.foreachDiscard(ws, w => writeOne(root, w))
+    _ <- Fs.write(recordPath(root, id), text(op))
+    _ <- Fs.write(Fs.join(storage(root), "last.json"), if (str(op, "decision") == "accept") text(op) else "")
+    _ <- Fs.write(Fs.join(storage(root), "journal.json"), "")
+  } yield ()
+
+def readOptional(path: String): IO[String] =
+  Fs.exists(path).flatMap(hit => if (hit == 0) IO.pure("") else Fs.read(path))
+
+def recover(root: String): IO[Unit] =
+  for {
+    _ <- setupStorage(root)
+    raw <- readOptional(Fs.join(storage(root), "journal.json"))
+    _ <- if (Str.isEmpty(raw)) IO.pure(()) else finish(root, LspClient.parseJson(raw))
+  } yield ()
+
+def undecided(root: String, id: String): IO[Unit] =
+  for {
+    choice <- Fs.exists(recordPath(root, id))
+    accepted <- Fs.exists(recordPath(root, Str.concat("accept-", id)))
+    _ <- need(choice == 0 && accepted == 0, "card is already decided")
+  } yield ()
+
+def operation(c: Json, lane: Int, now: Int): Json =
+  for {
+    accepted = lane >= 0 && lane == (if (Json.getInt(c, "flip", 0) == 1) 0 else 1)
+    decision = if (lane < 0) "abstain" else if (accepted) "accept" else "baseline"
+    id = Str.concat("accept-", str(c, "id"))
+  } yield Json.Obj([("operation", Json.Str(id)), ("card", Json.Str(str(c, "id"))), ("proposal", Json.Str(str(c, "proposal"))), ("decision", Json.Str(decision)), ("lane", Json.Int(lane)), ("flip", Diags.jsonField(c, "flip")), ("a", Diags.jsonField(c, "a")), ("b", Diags.jsonField(c, "b")), ("objective", Diags.jsonField(c, "objective")), ("generator", Json.Str(str(LspClient.parseJson(str(c, "publication")), "generator"))), ("evidence_status", Diags.jsonField(c, "status")), ("started", Diags.jsonField(c, "started")), ("ready", Diags.jsonField(c, "ready")), ("limits", Json.Str("files=3;source=65536;review=idle,seeds;seed=1")), ("region", Json.Arr(List.map(propsOf(c), f => Json.Str(f._1)))), ("time", Json.Int(now)), ("writes", Json.Arr(if (accepted) sourceWrites(c) else []))])
+
+def decide(root: String, c: Json, lane: Int): IO[Unit] =
+  for {
+    _ <- recover(root)
+    _ <- need(lane == -1 || lane == 0 || lane == 1, "invalid choice lane")
+    _ <- need(str(c, "status") == "ready", "card is not ready")
+    _ <- undecided(root, str(c, "id"))
+    _ <- current(root, c)
+    accepted = lane >= 0 && lane == (if (Json.getInt(c, "flip", 0) == 1) 0 else 1)
+    now <- Clock.monotonic()
+    op = operation(c, lane, now)
+    _ <- if (accepted) Fs.write(Fs.join(storage(root), "journal.json"), text(op)).flatMap(_ => finish(root, op)) else Fs.write(recordPath(root, str(c, "id")), text(op))
+  } yield ()
+
+def undo(root: String): IO[Unit] =
+  for {
+    _ <- recover(root)
+    raw <- readOptional(Fs.join(storage(root), "last.json"))
+    _ <- need(!Str.isEmpty(raw), "no accepted change to undo")
+    prior = LspClient.parseJson(raw)
+    ws = Json.arr(Diags.jsonField(prior, "writes"))
+    checks <- IO.foreach(ws, w => matches(root, w, "after"))
+    _ <- need(List.forall(checks, b => b), "undo conflict: preserve external edits")
+    now <- Clock.monotonic()
+    op = undoOperation(prior, now)
+    _ <- Fs.write(Fs.join(storage(root), "journal.json"), text(op))
+    _ <- finish(root, op)
+  } yield ()
+
+def undoOperation(prior: Json, now: Int): Json =
+  for {
+    ws = Json.arr(Diags.jsonField(prior, "writes"))
+    reverse = List.map(ws, w => Json.Obj([("path", Diags.jsonField(w, "path")), ("before", Diags.jsonField(w, "after")), ("before_exists", Diags.jsonField(w, "after_exists")), ("after", Diags.jsonField(w, "before")), ("after_exists", Diags.jsonField(w, "before_exists"))]))
+  } yield Json.set(Json.set(Json.set(Json.set(prior, "operation", Json.Str(Str.concat("undo-", str(prior, "card")))), "decision", Json.Str("undo")), "writes", Json.Arr(reverse)), "time", Json.Int(now))
+

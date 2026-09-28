@@ -780,6 +780,14 @@ def evGenerated(n: Int where n >= 0): Bool =
 def evMatch(): Bool =
   evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) == "36" && evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(500)]), Value.VCon("Shape", "Circle", [Value.VInt(1)]), Value.VCon("Pt", "Pt", [Value.VInt(0), Value.VInt(0)]), Value.VStr("z")]) == "1" && evCall(srcEvMatch(), "pick", [Value.VList([]), Value.VCon("Shape", "Circle", [Value.VInt(1)]), Value.VCon("Pt", "Pt", [Value.VInt(0), Value.VInt(0)]), Value.VStr("z")]) == "0" && evCall(srcEvMatch(), "area", [Value.VCon("Shape", "Circle", [Value.VInt(2)])]) == "12" && evCall(srcEvMatch(), "tag", [Value.VStr("c")]) == "20" && evCall(srcEvMatch(), "tag", [Value.VStr("q")]) == "30" && evCall(srcEvMatch(), "opt", [Value.VCon("Option", "Some", [Value.VInt(9)])]) == "9" && evCall(srcEvMatch(), "opt", [Value.VCon("Option", "None", [])]) == "-1" && evCall(srcEvMatch(), "pair", [Value.VTuple([Value.VInt(4), Value.VStr("k")])]) == "\"k=5\"" && evCall(srcEvMatch(), "lam", []) == "2" && evCall(srcEvMatch(), "divs", []) == "[3, -3, 1, -1, 1]" && Check.check(srcEvMatch()) == "[]"
 
+def evQualified(): Bool =
+  for {
+    src = "def user(): List[Int] =\n  List.map([\"a\", \"long\"], Helpers.length)\n\ndef kit(): List[Int] =\n  List.map([\"a\", \"long\"], Str.len)\n\n@main def main: IO[Unit] =\n  IO.pure(())\n"
+    p = Eval.load([("Main", src), ("Helpers", """def length(s: String): Int =
+  Str.len(s) + 1
+""")])
+  } yield Eval.show(Eval.callPure(p, "Main", "user", [])) == "[2, 5]" && Eval.show(Eval.callPure(p, "Main", "kit", [])) == "[1, 4]"
+
 def evKitsCovered(): Bool =
   List.isEmpty(evKitsMissing())
 
@@ -799,10 +807,10 @@ def evLive(): Bool =
   evExcluded() && Check.check(srcLive()) == "[]" && evCall(srcLive(), "reads", []) == "17" && evCall(srcLive(), "arm", []) == "<io>" && evCall(srcLive(), "reg", []) == "<io>" && evCall(srcLive(), "watch", []) == "<io>" && evCall(srcLive(), "rel", []) == "<io>" && evCall(srcLive(), "go", []) == "<io>"
 
 def evAllOk(): Bool =
-  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evKitsCovered() && evLive()
+  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evQualified() && evKitsCovered() && evLive()
 
 def evDump(): String =
-  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
+  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evQualified()) "evQualified" else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
 
 def evLiveDump(): String =
   if (!evExcluded()) "evExcluded" else if (Check.check(srcLive()) != "[]") Check.check(srcLive()) else if (evCall(srcLive(), "reads", []) != "17") evCall(srcLive(), "reads", []) else if (evCall(srcLive(), "arm", []) != "<io>") "arm" else if (evCall(srcLive(), "reg", []) != "<io>") "reg" else if (evCall(srcLive(), "watch", []) != "<io>") "watch" else if (evCall(srcLive(), "rel", []) != "<io>") "rel" else "go"
