@@ -12,14 +12,6 @@ The first complete feature needs the remaining gates below. Implement them in or
 
 ## Implementation gates
 
-### 2. Ask one behavioral question
-
-Add required corpus replay to idle and seed workloads in IDE review. Reuse differential search and shrinking from `Diff`. Give search an explicit budget. Keep evaluator and emitted meanings aligned. Do not turn a timeout, drift, or incomplete workload set into a successful review.
-
-Open the shortest available divergent witness at its first useful difference. Start paused. Show the trigger and both results. Expand to other workloads, the step rail, and changed source. Show evidence scope and claim trigger reach. Keep structure tiles clearly identified. Remove source-only results from the behavior queue after the configured search ends.
-
-**Gate:** A difference found only by a corpus entry blocks or explains the candidate. Search finds a difference absent from idle and seeds. Shrinking preserves it. A shared claim failure blocks the card. An untriggered claim is visible as such. Both lane orders keep behavior and source aligned. A no-difference result does not claim equivalence. IO and UI packages have compiled witness parity proofs.
-
 ### 3. Manage a local model and generate toward one objective
 
 Open the review session on an objective form. Add allowed source paths, Local model and External proposals modes, Start, Pause, and visible work limits. Keep source editing available from the existing landmarks. Implement one managed local backend and directory import. Both supply one validated proposal type. Keep configuration local to the IDE. Do not add model settings to the package manifest. Remove the executable generator and configurable inference endpoint designs.

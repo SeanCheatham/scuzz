@@ -358,6 +358,19 @@ def tailValue(text: String, count: Int): String =
     case MemoryRecord(label, _) => label
   }
 
+def guardValue(raw: String): String =
+  Str.concat(raw, "").require(text => Str.len(text) > 0)
+
+def reviewReady(raw: String, complete: Bool): Bool =
+  for {
+    parsed = Json.parse(raw)
+    pieces = Str.split(raw, ",")
+    label = Str.concat(raw, "!")
+  } yield complete && List.len(pieces) > 0 && Str.len(label) > 0 && (parsed match {
+    case Result.Ok(j) => Json.getBool(j, "complete", false)
+    case Result.Err(_) => false
+  })
+
 @main def main: IO[Unit] =
   IO.println(value("ok"))
 SOURCE
@@ -367,7 +380,7 @@ from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 s = p.read_text()
-for ty, name in (("i64", "size"), ("ptr", "value"), ("i64", "recordSize"), ("ptr", "recordValue"), ("i64", "tailSize"), ("ptr", "tailValue")):
+for ty, name in (("i64", "size"), ("ptr", "value"), ("i64", "recordSize"), ("ptr", "recordValue"), ("i64", "tailSize"), ("ptr", "tailValue"), ("i64", "reviewReady"), ("ptr", "guardValue")):
     old = f"define internal {ty} @sz_user_Main_{name}("
     assert s.count(old) == 1
     s = s.replace(old, f"define {ty} @sz_user_Main_{name}(")
@@ -378,6 +391,8 @@ PY_IR
 #include "scuzz_rt.h"
 #include <stdio.h>
 #include <assert.h>
+extern SzString *sz_user_Main_guardValue(SzString *);
+extern int64_t sz_user_Main_reviewReady(SzString *, int64_t);
 extern int64_t sz_user_Main_size(SzString *);
 extern SzString *sz_user_Main_value(SzString *);
 extern int64_t sz_user_Main_recordSize(SzString *);
@@ -386,23 +401,34 @@ extern int64_t sz_user_Main_tailSize(SzString *, int64_t);
 extern SzString *sz_user_Main_tailValue(SzString *, int64_t);
 int main(void) {
   SzString *input = sz_string_from_cstr("payload");
+  SzString *report = sz_string_from_cstr("{\"complete\":true}");
   size_t before, after;
   {
     /* Warm up: interned string literals pin on first evaluation. */
     SzString *warm = sz_user_Main_value(input);
     sz_release(warm);
+    warm = sz_user_Main_guardValue(input);
+    assert(sz_string_eq(input, warm));
+    sz_release(warm);
     warm = sz_user_Main_recordValue(input);
     sz_release(warm);
     warm = sz_user_Main_tailValue(input, 1);
     sz_release(warm);
+    assert(sz_user_Main_reviewReady(report, 1));
+    assert(!sz_user_Main_reviewReady(report, 0));
     assert(sz_user_Main_size(input) == 7);
     assert(sz_user_Main_recordSize(input) == 7);
     assert(sz_user_Main_tailSize(input, 1) == 7);
   }
   sz_alloc_stats(&before, NULL);
   for (int i = 0; i < 1000; ++i) {
+    assert(sz_user_Main_reviewReady(report, 1));
+    assert(!sz_user_Main_reviewReady(report, 0));
     assert(sz_user_Main_size(input) == 7);
-    SzString *output = sz_user_Main_value(input);
+    SzString *output = sz_user_Main_guardValue(input);
+    assert(sz_string_eq(input, output));
+    sz_release(output);
+    output = sz_user_Main_value(input);
     assert(sz_string_eq(input, output));
     sz_release(output);
     assert(sz_user_Main_recordSize(input) == 7);
@@ -417,6 +443,7 @@ int main(void) {
   sz_alloc_stats(&after, NULL);
   printf("live allocation delta: %zu bytes\n", after-before);
   sz_release(input);
+  sz_release(report);
   return after == before ? 0 : 1;
 }
 C_SOURCE
@@ -576,12 +603,83 @@ import json
 with open("scratchpad/review/build/ide/report.json") as f:
     r = json.load(f)
 assert r["kind"] == "diff" and r["rev"] == "buffers", r
-assert r["counts"]["diverged"] == 1, r["counts"]
+assert r["counts"]["diverged"] >= 1, r["counts"]
+assert r["review"]["complete"] and r["review"]["required"] == r["review"]["completed_required"], r["review"]
+assert r["search"]["ran"] == r["search"]["iterations"] == 32, r["search"]
+assert r["review"]["recorded_workloads"] == len(r["workloads"])
+assert all(w["why_b"] is None for w in r["workloads"]), r["workloads"]
 row = r["workloads"][0]
 assert row["class"] == "diverged", row
 sections = {c["section"] for c in row["delta"]["changes"]}
 assert "signals" in sections, row
 PY
+  python3 - <<'PYREVIEWIO'
+import difflib, json, os, shutil, subprocess
+from pathlib import Path
+repo = Path.cwd()
+cli = Path(os.environ["SCUZZ"])
+proof = repo / "scratchpad/review-io"
+shutil.rmtree(proof, ignore_errors=True)
+target = proof / "target"
+for directory in (proof / "src", target / "src", target / "corpus"):
+    directory.mkdir(parents=True, exist_ok=True)
+(proof / "scuzz.toml").write_text('[package]\nname = "review-proof"\n[dependencies]\ncompiler = { path = "../../examples/compiler" }\n')
+(target / "scuzz.toml").write_text('[package]\nname = "review-io"\n')
+baseline = 'def value(n: Int): String =\n  if (n == 3) "one" else "same"\n\n@main def main: IO[Unit] =\n  IO.pure(())\n'
+(target / "src/Main.scuzz").write_text(baseline)
+(target / "scenario.scuzz_scenario").write_text('def setup(): IO[Unit] =\n  IO.pure(())\n\ndef emit(n: Int where n >= 1 && n <= 3): IO[Unit] =\n  Fs.write("value.txt", Main.value(n))\n\n')
+corpus = target / "corpus/only.toml"
+corpus.write_text('[fuzz]\nschedule_seed = "2"\nevents = ["drive emit 3"]\n')
+(proof / "src/Main.scuzz").write_text("""@main def main: IO[Unit] =
+  for {
+    root <- Sys.getenv("SCUZZ_REVIEW_TARGET")
+    cli <- Sys.getenv("SCUZZ_REVIEW_CLI")
+    same <- Sys.getenv("SCUZZ_REVIEW_SAME")
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    baseline <- Fs.read(Fs.join(root, "src/Main.scuzz"))
+    candidate = if (same == "1") baseline else Str.replace(baseline, "one", "two")
+    _ <- Diff.reviewSets(root, toml, [("Main", baseline)], [("Main", candidate)], 1, 32, cli)
+  } yield ()
+""")
+env = dict(os.environ, SCUZZ_REVIEW_TARGET=str(target), SCUZZ_REVIEW_CLI=str(cli))
+def run(*args, **kwargs):
+    return subprocess.run([str(cli), *map(str, args)], env=env, check=True, timeout=180, stdout=subprocess.DEVNULL, **kwargs)
+run("fmt", target)
+run("run", proof)
+exe = proof / "build/review-proof"
+def review():
+    subprocess.run([str(exe)], env=env, check=True, timeout=180, stdout=subprocess.DEVNULL)
+    report = json.loads((target / "build/ide/report.json").read_text())
+    assert report["review"]["complete"] and report["search"]["ran"] == 32
+    assert all(w["why_b"] is None for w in report["workloads"])
+    return report
+report = json.loads((target / "build/ide/report.json").read_text())
+assert next(w for w in report["workloads"] if w["label"].startswith("idle"))["class"] == "same"
+assert next(w for w in report["workloads"] if w["label"].startswith("corpus/"))["class"] == "diverged"
+corpus.unlink()
+report = review()
+assert report["review"]["corpus"] == report["review"]["seeds"] == 0
+assert next(w for w in report["workloads"] if w["label"].startswith("idle"))["class"] == "same"
+assert report["search"]["divergent"] > 0 and report["witnesses"]
+question = min((w for w in report["workloads"] if w["label"].startswith("witness ")), key=lambda w: len(w["events"]))
+assert len(question["events"]) == 1
+witness = Path(report["witnesses"][0]["path"])
+# Compile and replay both sides of the same retained witness.
+for side, source in (("a", baseline), ("b", baseline.replace("one", "two"))):
+    (target / "src/Main.scuzz").write_text(source)
+    run("fuzz", "--replay", witness, target)
+    timeline = proof / ("compiled-" + side + ".txt")
+    probe_env = dict(env, SCUZZ_TESTRT="1", SCUZZ_SERVE="1", SCUZZ_KIT="sealed", SCUZZ_SCHED_SEED="0", SCUZZ_DRIVE_SCRIPT=str(target / "build/fuzz/drive.json"), SCUZZ_TIMELINE_DUMP=str(timeline))
+    subprocess.run([str(target / "build/review-io")], env=probe_env, check=True, timeout=20, stdout=subprocess.DEVNULL)
+    expected = (target / "build/ide" / question["timelines"][side]).read_text()
+    actual = timeline.read_text()
+    assert actual == expected, "".join(difflib.unified_diff(expected.splitlines(True), actual.splitlines(True)))
+(target / "src/Main.scuzz").write_text(baseline)
+env["SCUZZ_REVIEW_SAME"] = "1"
+report = review()
+assert all(w["class"] == "same" for w in report["workloads"])
+print("IO review: corpus, search, shrinking, compiled parity, and complete no-difference budget")
+PYREVIEWIO
   python3 - <<'PYLSP'
 import json, os, select, subprocess, time
 from pathlib import Path
@@ -706,6 +804,40 @@ for w in c["evidence"]["workloads"]:
         assert (root / ".scuzz/ide/cards" / c["id"] / w["timelines"][side]).is_file()
 assert not (root / "build/ide/decisions.jsonl").exists()
 PYDECK
+  # Replay a retained UI witness on both compiled source sets.
+  python3 - <<'PYREVIEWUI'
+import difflib, json, os, shutil, subprocess, tomllib
+from pathlib import Path
+repo = Path.cwd()
+cli = Path(os.environ["SCUZZ"])
+root = repo / "scratchpad/review"
+record = json.loads(next((root / ".scuzz/ide/records").glob("*.json")).read_text())
+card_dir = root / ".scuzz/ide/cards" / record["card"]
+card = json.loads((card_dir / "card.json").read_text())
+assert card["evidence"]["witnesses"]
+witness = card_dir / card["evidence"]["witnesses"][0]["path"]
+script = tomllib.loads(witness.read_text())["fuzz"]
+question = next(w for w in card["evidence"]["workloads"] if w["label"].startswith("witness ") and w["events"] == script.get("events", []))
+target = repo / "scratchpad/review-ui-parity"
+shutil.rmtree(target, ignore_errors=True)
+shutil.copytree(repo / "examples/counter", target, ignore=shutil.ignore_patterns("build", ".scuzz"))
+env = dict(os.environ, SCUZZ_HOME=str(repo))
+for side, files in (("a", card["baseline"]), ("b", card["proposed"])):
+    for item in card["baseline"]:
+        (target / item["path"]).write_text(item["content"])
+    for item in files:
+        (target / item["path"]).write_text(item["content"])
+    subprocess.run([str(cli), "fuzz", "--replay", str(witness), str(target)], env=env, check=True, timeout=180, stdout=subprocess.DEVNULL)
+    timeline = target / ("compiled-" + side + ".txt")
+    probe_env = dict(env, SCUZZ_TESTRT="1", SCUZZ_SERVE="1", SCUZZ_KIT="sealed", SCUZZ_SCHED_SEED=script.get("schedule_seed", "0"), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_SCRIPT=str(target / "build/fuzz/drive.json"), SCUZZ_FUZZ_DUMP=str(target / "compiled-dump.json"), SCUZZ_TIMELINE_DUMP=str(timeline))
+    probe_env["SCUZZ_SCHED_PICKS"] = ";".join(script.get("schedule_picks", []))
+    probe_env["SCUZZ_FAULT_SEED"] = script.get("fault_seed", "")
+    subprocess.run([str(target / "build/counter")], cwd=target, env=probe_env, check=True, timeout=20, stdout=subprocess.DEVNULL)
+    expected = (card_dir / question["timelines"][side]).read_text()
+    actual = timeline.read_text()
+    assert actual == expected, "".join(difflib.unified_diff(expected.splitlines(True), actual.splitlines(True)))
+print("UI review: retained witness has exact compiled parity on both sides")
+PYREVIEWUI
   # A real write failure leaves a journal. Restart and Undo use that journal.
   python3 - <<'PYINTEGRITY'
 import hashlib, json, os, shutil, subprocess, time
@@ -718,6 +850,16 @@ shutil.rmtree(root, ignore_errors=True)
 shutil.copytree(repo / "examples/counter", root, ignore=shutil.ignore_patterns("build", ".scuzz"))
 original = (root / "src/Main.scuzz").read_text()
 proposed = original.replace('"Counter"', '"Counter proof"', 1)
+
+def read_ui(where):
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            return json.loads((where / "debug.json").read_text())
+        except json.JSONDecodeError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.005)
 
 def publish(where, files):
     dest = where / "build/proposals/p"
@@ -767,6 +909,7 @@ if os.uname().sysname == "Linux":
     inject = write_ops(root, [{"op": "caret", "i": 0, "offset": 0}, {"op": "key", "key": "x", "text": "x"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
     env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(inject), SCUZZ_UI_INJECT=str(inject), SCUZZ_UI_DEBUG_DUMP=str(root / "debug.json"), LD_PRELOAD=str(library))
     log = open(root / "live.log", "w")
+    review_wall_start = time.monotonic()
     proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
     def await_state(predicate):
         deadline = time.monotonic() + 180
@@ -792,25 +935,68 @@ if os.uname().sysname == "Linux":
                     return c
     try:
         c = await_state(ready_card)
-        ui = json.loads((root / "debug.json").read_text())
+        ui = read_ui(root)
+        values = {v["name"]: v["value"] for v in ui["signals"]}
+        assert values["playOn"] == 0 and values["evidenceDetails"] == 0, values
+        evidence = c["evidence"]
+        questions = [w for w in evidence["workloads"] if w["class"] != "same"]
+        selected = next(w for w in questions if w["label"] == values["questionWork"])
+        assert len(selected["events"]) == min(len(w["events"]) for w in questions), selected
+        assert c["question"]["workload"] == values["questionWork"] and c["question"]["step"] == values["step"]
+        assert values["resultLeft"] and values["resultRight"]
+        assert "review-host" in {f["path"] for f in c["inputs"]}
+        for witness in evidence.get("witnesses", []):
+            assert (root / ".scuzz/ide/cards" / c["id"] / witness["path"]).is_file()
+        print("Counter first card readiness (fresh target; cached host):", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; freeze to ready:", c["ready"] - c["started"], "ms; required:", evidence["review"]["required"], "; search:", evidence["search"]["ran"])
+        # Navigation uses the loaded evidence while its files are unavailable.
+        other = max(questions, key=lambda w: len(w["events"]))
+        assert other["label"] != selected["label"] and other["events"]
+        cached = root / ".scuzz/ide/cards" / c["id"]
+        held = cached.with_name(cached.name + "-held")
+        build = root / "build"
+        held_build = root / "build-held"
+        cached.rename(held)
+        build.rename(held_build)
+        try:
+            write_ops(root, [{"op": "tap", "id": "choicechip:More evidence"}])
+            await_state(lambda: any(v.get("name") == "evidenceDetails" and v.get("value") == 1 for v in read_ui(root)["signals"]))
+            start = time.monotonic()
+            write_ops(root, [{"op": "tap", "id": "textbutton:" + other["label"]}])
+            await_state(lambda: any(v.get("name") == "questionWork" and v.get("value") == other["label"] for v in read_ui(root)["signals"]))
+            work_ms = (time.monotonic() - start) * 1000
+            current = {v["name"]: v["value"] for v in read_ui(root)["signals"]}
+            index = 0 if current["step"] != 0 else 1
+            assert len(current["rail"]) > index
+            start = time.monotonic()
+            write_ops(root, [{"op": "tap", "id": "textbutton:" + current["rail"][index]}])
+            await_state(lambda: any(v.get("name") == "step" and v.get("value") == index for v in read_ui(root)["signals"]))
+            step_ms = (time.monotonic() - start) * 1000
+            current = {v["name"]: v["value"] for v in read_ui(root)["signals"]}
+            assert current["playOn"] == 0 and current["deckArmed"] == c["id"] and current["resultLeft"] and current["resultRight"]
+            print("Counter cached navigation:", round(work_ms, 1), "ms workload;", round(step_ms, 1), "ms step; 250 ms target:", "met" if max(work_ms, step_ms) < 250 else "unmet")
+        finally:
+            held_build.rename(build)
+            held.rename(cached)
         dirty = next(v["value"] for v in ui["signals"] if v.get("name") == "buf")
         assert dirty == original + "x", dirty
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
         write_ops(root, [{"op": "tap", "id": "button:" + lane}])
         def refused_dirty():
-            ui = json.loads((root / "debug.json").read_text())
+            ui = read_ui(root)
             return any(v.get("name") == "deltaStatus" and "dirty buffer:" in json.dumps(v.get("value")) for v in ui.get("signals", []))
         await_state(refused_dirty)
         assert (root / "src/Main.scuzz").read_text() == original
         assert not (root / "src/Other.scuzz").exists()
         assert not list((root / ".scuzz/ide/records").glob("*.json"))
-        ui = json.loads((root / "debug.json").read_text())
+        ui = read_ui(root)
         assert any(v.get("name") == "buf" and v.get("value") == dirty for v in ui["signals"])
         write_ops(root, [{"op": "quit"}])
         assert proc.wait(timeout=15) == 0
         write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+        review_wall_start = time.monotonic()
         proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
         c = await_state(ready_card)
+        print("Counter repeated card readiness:", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; freeze to ready:", c["ready"] - c["started"], "ms")
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
         write_ops(root, [{"op": "tap", "id": "button:" + lane}])
         journal = root / ".scuzz/ide/journal.json"
@@ -825,7 +1011,7 @@ if os.uname().sysname == "Linux":
         log.close()
     batch(root, [])
     assert (root / "src/Main.scuzz").read_text() == proposed
-    assert any(v.get("name") == "buf" and v.get("value") == proposed for v in json.loads((root / "debug.json").read_text())["signals"])
+    assert any(v.get("name") == "buf" and v.get("value") == proposed for v in read_ui(root)["signals"])
     assert (root / "src/Other.scuzz").read_text() == "def other(): Int =\n  3\n\n"
     assert journal.read_text() == ""
     records = list((root / ".scuzz/ide/records").glob("*.json"))
@@ -835,26 +1021,27 @@ if os.uname().sysname == "Linux":
     assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 1
     batch(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Undo"}])
     assert (root / "src/Main.scuzz").read_text() == original
-    assert any(v.get("name") == "buf" and v.get("value") == original for v in json.loads((root / "debug.json").read_text())["signals"])
+    assert any(v.get("name") == "buf" and v.get("value") == original for v in read_ui(root)["signals"])
     assert not (root / "src/Other.scuzz").exists()
     assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 2
     publish(root, [("src/Main.scuzz", proposed), ("src/Other.scuzz", "def other(): Int =\n  3\n\n")])
     env.pop("LD_PRELOAD", None)
     write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
     log = open(root / "live.log", "a")
+    review_wall_start = time.monotonic()
     proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
     try:
         c = await_state(ready_card)
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
         write_ops(root, [{"op": "tap", "id": "button:" + lane}, {"op": "tap", "id": "button:" + lane}])
         def accepted_clean():
-            ui = json.loads((root / "debug.json").read_text())
+            ui = read_ui(root)
             idle = any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui["signals"])
             return idle and len(list((root / ".scuzz/ide/records").glob("*.json"))) == 3 and any(v.get("name") == "buf" and v.get("value") == proposed for v in ui["signals"])
         await_state(accepted_clean)
         write_ops(root, [{"op": "tap", "id": "outlined:Check"}])
         def checked_acceptance():
-            ui = json.loads((root / "debug.json").read_text())
+            ui = read_ui(root)
             checked = any(v.get("name") == "checkedSource" and v.get("value") == proposed for v in ui["signals"])
             return checked and any(v.get("tokens", 0) > 0 for v in ui.get("editors", []))
         await_state(checked_acceptance)
@@ -878,10 +1065,25 @@ shutil.copytree(repo / "examples/counter", failure, ignore=shutil.ignore_pattern
 publish(failure, [("src/Main.scuzz", proposed)])
 batch(failure, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
 report = json.loads((failure / "build/ide/report.json").read_text())
-assert any(w["why_b"] for w in report["workloads"]), report
+assert not report["review"]["complete"] and any(w["why_b"] for w in report["workloads"]), report
 assert (failure / "src/Main.scuzz").read_text() == original
 assert not list((failure / ".scuzz/ide/records").glob("*.json"))
 assert all(json.loads(p.read_text())["status"] != "ready" for p in (failure / ".scuzz/ide/cards").glob("*/card.json"))
+
+source_only = repo / "scratchpad/review-source-only"
+shutil.rmtree(source_only, ignore_errors=True)
+shutil.copytree(repo / "examples/counter", source_only, ignore=shutil.ignore_patterns("build", ".scuzz"))
+publish(source_only, [("src/Main.scuzz", original.replace("noteDrive(n:", "noteDrive(steps:").replace("steps: Int where n >= 0", "steps: Int where steps >= 0"))])
+batch(source_only, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+assert (source_only / "src/Main.scuzz").read_text() == original
+records = [json.loads(p.read_text()) for p in (source_only / ".scuzz/ide/records").glob("*.json")]
+assert len(records) == 1 and records[0]["decision"] == "no-observed-difference" and records[0]["kind"] == "automatic", records
+assert not records[0]["writes"] and records[0]["evidence"]["review"]["complete"]
+assert records[0]["evidence"]["search"]["ran"] == 32
+assert not (source_only / "build/proposals/p").exists()
+assert not (source_only / ".scuzz/ide/last.json").exists()
+ui = read_ui(source_only)
+assert not any(v.get("name") == "deckArmed" and v.get("value") for v in ui["signals"])
 
 repair = repo / "scratchpad/review-repair"
 shutil.rmtree(repair, ignore_errors=True)

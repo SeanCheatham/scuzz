@@ -1511,13 +1511,13 @@ def evProbeClosed(job: FuzzJob, pid: Int, e: String): IO[Int] =
   if (e == "Sys.childWrite: stdin closed") evReadCode(job, pid) else IO.fail(e)
 
 def evServer(job: FuzzJob, dir: String): IO[Int] =
-  Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure(s._2) else evSpawn(job, dir)) else evStop(job).flatMap(_ => evSpawn(job, dir)))
+  Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure(s._2) else evStop(job).flatMap(_ => evSpawn(job, dir))) else evStop(job).flatMap(_ => evSpawn(job, dir)))
 
 def evSpawn(job: FuzzJob, dir: String): IO[Int] =
   Sys.spawn(evProbeCmd(job, dir)).flatMap(pid => Ref.set(job.srv, (dir, pid)).flatMap(_ => IO.pure(pid)))
 
 def evStop(job: FuzzJob): IO[Unit] =
-  Ref.get(job.srv).flatMap(s => if (s._2 == 0) IO.pure(()) else Sys.childClose(s._2).handleErrorWith(_ => IO.pure(())).flatMap(_ => Ref.set(job.srv, ("", 0))))
+  Ref.get(job.srv).flatMap(s => if (s._2 == 0) IO.pure(()) else Sys.kill(s._2).handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(s._2).handleErrorWith(_ => IO.pure(()))).flatMap(_ => Ref.set(job.srv, ("", 0))))
 
 def evReadCode(job: FuzzJob, pid: Int): IO[Int] =
   IO.timeout(30000, evReadLine(pid, "")).handleErrorWith(e => if (e == "timeout") IO.pure("") else IO.fail(e)).flatMap(line => if (Str.trim(line) == "") evStop(job).flatMap(_ => IO.pure(1)) else IO.pure(Str.toInt(Str.trim(line), 1)))

@@ -22,9 +22,24 @@ def bLabel(sub: String): String =
 
 def workItems(j: Json): List[Json] =
   Diags.jsonField(j, "workloads") match {
-    case Json.Arr(xs) => List.filter(xs, w => workPath(w, "a") != "" && Diags.jsonStr(Diags.jsonField(w, "class")) != "same")
+    case Json.Arr(xs) => for {
+  visible = List.filter(xs, w => workPath(w, "a") != "" && Diags.jsonStr(Diags.jsonField(w, "class")) != "same")
+} yield if (Json.has(j, "review")) questionOrder(visible) else visible
     case _ => []
   }
+
+def questionOrder(items: List[Json]): List[Json] =
+  List.sortBy(items, w => List.len(Json.arr(Diags.jsonField(w, "events"))))
+
+def resultLine(w: Json, side: String): String =
+  if (Json.isNull(w)) "" else Diags.jsonField(w, Str.concat("why_", side)) match {
+  case Json.Null => "Result: execution passes its checks"
+  case Json.Str(why) => Str.concat("Result: ", why)
+  case _ => "Result: incomplete"
+}
+
+def usefulStep(w: Json, a: List[String], b: List[String]): Int =
+  if (workFirst(w) >= 0) workFirst(w) else if (List.len(railLabels(a, b)) > 0) List.len(railLabels(a, b)) - 1 else 0
 
 def workLabel(w: Json): String =
   Str.concat(Diags.jsonStr(Diags.jsonField(w, "class")), Str.concat(" ", Diags.jsonStr(Diags.jsonField(w, "label"))))
@@ -55,6 +70,18 @@ def shQuote(s: String): String =
 
 def statusLines(j: Json): List[String] =
   if (Diags.jsonStr(Diags.jsonField(j, "kind")) != "diff") ["no diff report. Run scuzz diff in a terminal to see why."] else [Str.concat(Diags.jsonStr(Diags.jsonField(j, "rev")), Str.concat(": ", List.join(List.map(["regressed", "fixed", "diverged", "unrunnable", "same"], c => countText(j, c)), ", ")))]
+
+def scopeLines(j: Json, flip: Int): List[String] =
+  if (!Json.has(j, "review")) [] else for {
+  r = Diags.jsonField(j, "review")
+  search = Diags.jsonField(j, "search")
+  claims = List.map(Json.arr(Diags.jsonField(r, "registered_claims")), x => Diags.jsonStr(x))
+  left = List.map(Json.arr(Diags.jsonField(r, if (flip == 0) "reached_a" else "reached_b")), x => Diags.jsonStr(x))
+  right = List.map(Json.arr(Diags.jsonField(r, if (flip == 0) "reached_b" else "reached_a")), x => Diags.jsonStr(x))
+  triggers = List.map(Json.arr(Diags.jsonField(r, "declared_triggers")), x => Diags.jsonStr(x))
+  counts = Str.concat("Required workloads: ", Str.concat(Str.fromInt(Json.getInt(r, "completed_required", 0)), Str.concat(" / ", Str.fromInt(Json.getInt(r, "required", 0)))))
+  searched = Str.concat("Search: ", Str.concat(Str.fromInt(Json.getInt(search, "ran", 0)), Str.concat(" / ", Str.concat(Str.fromInt(Json.getInt(search, "iterations", 0)), " iterations; seed 1"))))
+} yield List.concat([counts, Str.concat("Corpus workloads: ", Str.fromInt(Json.getInt(r, "corpus", 0))), Str.concat("Seed workloads: ", Str.fromInt(Json.getInt(r, "seeds", 0))), searched, if (List.isEmpty(claims)) "Unguarded: no registered claims" else Str.concat("Registered claims: ", List.join(claims, ", ")), Str.concat("Declared triggers: ", List.join(triggers, ", ")), Str.concat("Trigger reach includes ", Diags.jsonStr(Diags.jsonField(r, "reach_scope"))), Diags.jsonStr(Diags.jsonField(r, "parity")), Diags.jsonStr(Diags.jsonField(r, "alignment")), "No observed difference does not establish equivalence"], List.map(triggers, n => Str.concat(Str.concat("Claim trigger ", n), Str.concat(": Left ", Str.concat(if (List.contains(left, n)) "trigger reached" else "untriggered", Str.concat("; Right ", if (List.contains(right, n)) "trigger reached" else "untriggered"))))))
 
 def revLabel(j: Json): String =
   Str.concat("a: ", if (Str.isEmpty(Diags.jsonStr(Diags.jsonField(j, "rev")))) "HEAD" else Diags.jsonStr(Diags.jsonField(j, "rev")))
@@ -108,6 +135,9 @@ def driveText(sb: String, sa: String): String =
 def stepRows(a: List[String], b: List[String], i: Int, sideA: Bool): List[String] =
   if (Str.isEmpty(stateAt(if (sideA) a else b, i))) ["no state"] else rowsOf(sections(stateAt(a, i)), sections(stateAt(b, i)), sideA)
 
+def changedRows(rows: List[String]): List[String] =
+  List.filter(rows, row => Str.contains(row, Str.concat(" *", nl())))
+
 def a11yLines(state: String): List[String] =
   List.filter(Chrome.nonEmptyLines(secBody(sections(state), "a11y")), l => !Str.startsWith(l, "motion:"))
 
@@ -124,7 +154,7 @@ def a11yTileRole(role: String, label: String, raw: String): View =
   if (role == "button" || role == "outlined" || role == "textbutton" || role == "choicechip" || role == "chip") View.card(View.text(label)) else if (role == "text") View.text(label) else if (role == "icon" || role == "image") View.card(View.fontSize(12, View.text(label))) else View.fontSize(12, View.textColor(Theme.muted(), View.text(raw)))
 
 def viewCard(lines: Signal[List[String]]): View =
-  View.card(View.column(View.each(lines, l => a11yTile(l))))
+  View.card(View.column(View.text("Recorded structure"), View.each(lines, l => a11yTile(l))))
 
 def srcWindow(a: String, b: String, ctx: Int): (String, String) =
   srcWinCut(Str.split(a, nl()), Str.split(b, nl()), sharedPrefix(Str.split(a, nl()), Str.split(b, nl()), 0), sharedSuffix(Str.split(a, nl()), Str.split(b, nl()), 0, 0), ctx)

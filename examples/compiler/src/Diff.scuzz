@@ -4,7 +4,7 @@ record DiffOut(code: Int, why: String, unrun: Bool, tl: String, controls: List[S
 
 record DiffRow(label: String, run: FuzzRun, cls: String, delta: TlDelta, whyA: String, whyB: String, ctlA: List[String], ctlB: List[String])
 
-record DiffHunt(ran: Int, hits: Int, witnesses: List[(String, String, Int)])
+record DiffHunt(ran: Int, hits: Int, witnesses: List[(String, String, Int)], rows: List[DiffRow])
 
 record DiffAgg(alpha: List[(String, List[String], List[String])], claimsAdded: List[String], claimsRemoved: List[String], claimsChanged: List[DeltaChange], somA: List[String], somB: List[String], classify: List[DeltaChange])
 
@@ -107,12 +107,13 @@ def stampPath(outDir: String): String =
 def clear(probe: String): IO[Unit] =
   IO.foreachDiscard(Drive.fuzzCoveragePath(probe) :: Drive.fuzzClassPath(probe) :: Drive.fuzzSometimesPath(probe) :: Drive.fuzzTriggerPath(probe) :: Drive.fuzzVariedPath(probe) :: Drive.fuzzClaimPath(probe) :: Drive.fuzzSchedPicksPath(probe) :: Drive.fuzzDistancePath(probe) :: Verify.noStr(), p => Fs.write(p, ""))
 
-def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: List[(String, String)], seed: Int, scuzz: String): IO[Unit] =
+def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: List[(String, String)], seed: Int, iterations: Int, scuzz: String): IO[Unit] =
   for {
     m = Manifest.parse(toml)
     _ <- Drive.manNeed(m)
     root = Drive.joinSlash(dir, Drive.joinSlash("build", "ide"))
     _ <- Fs.mkdirs(root)
+    _ <- Fs.write(Drive.joinSlash(root, "report.json"), "")
     ents <- Fs.list(Drive.joinSlash(dir, "src"))
     own <- Drive.readSrcFiles(Drive.joinSlash(dir, "src"), ents)
     stems = List.concat(Drive.fileStems(own), List.map(List.filter(rawB, f => !List.contains(Drive.fileStems(rawA), f._1)), f => f._1))
@@ -124,14 +125,42 @@ def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: Li
     _ <- if (m.hasUi && host == "") IO.fail("scuzz ide: no headless host for a [ui] package") else IO.pure(())
     a <- sideEv(dir, Drive.joinSlash(root, "a"), seed, m, filesA, host)
     b <- sideEv(dir, Drive.joinSlash(root, "b"), seed, m, filesB, host)
-    runs = Drive.fuzzAddSeeds(idleRun() :: Drive.noRuns(), seedsLabel(), a.seeds, m.hasUi)
-    rows <- IO.ensure(replay(a, b, root, runs, noRows()), Drive.evStop(a.job).flatMap(_ => Drive.evStop(b.job)))
+    _ <- if (iterations < 0 || iterations > 32) IO.fail("scuzz ide: review search budget must be 0..32") else IO.pure(())
+    runs = workloads(a, b)
+    result <- IO.ensure(for {
+  required <- replay(a, b, root, runs, noRows())
+  _ <- IO.foreachDiscard(required, row => reviewNeed(row))
+  _ <- reviewIncomplete(root, List.map(required, row => rowJson(row, true)), "search pending")
+  hunt <- search(a, b, root, runs, iterations)
+} yield (required, hunt), Drive.evStop(a.job).flatMap(_ => Drive.evStop(b.job)))
+    hunt = result._2
+    rows = List.concat(result._1, hunt.rows)
     agg <- aggregate(a, b, rows)
-    hunt = DiffHunt(0, 0, [])
-    report = reportJson("buffers", "", a.job.dir, b.job.dir, rows, agg, 0, seed, hunt, true)
+    scope <- reviewScope(a, b, runs, rows, hunt, iterations)
+    report = withReview(reportJson("buffers", "", a.job.dir, b.job.dir, rows, agg, iterations, seed, hunt, true), scope)
     _ <- Fs.write(Drive.joinSlash(root, "report.json"), Str.concat(report, Verify.nl()))
     _ <- IO.println(human("buffers", "", dir, root, rows, agg, hunt))
   } yield ()
+
+def reviewScope(a: DiffSide, b: DiffSide, runs: List[FuzzRun], rows: List[DiffRow], h: DiffHunt, iterations: Int): IO[Json] =
+  for {
+    trigA <- Drive.fuzzReadOr(Drive.fuzzTriggerPath(a.job.outDir))
+    trigB <- Drive.fuzzReadOr(Drive.fuzzTriggerPath(b.job.outDir))
+    pairs = List.map(a.vers, src => ("", src))
+    claims = Verify.claimNames(a.vers)
+    triggers = Verify.triggersOf(pairs)
+    corpus = List.len(List.filter(runs, r => r.path != "idle" && r.path != seedsLabel()))
+    seeds = List.len(List.filter(runs, r => r.path == seedsLabel()))
+  } yield Json.Obj([("complete", Json.Bool(h.ran == iterations)), ("required", Json.Int(List.len(runs))), ("completed_required", Json.Int(List.len(runs))), ("recorded_workloads", Json.Int(List.len(rows))), ("corpus", Json.Int(corpus)), ("corpus_files", Json.Int(List.len(a.runs))), ("seeds", Json.Int(seeds)), ("registered_claims", Json.Arr(List.map(claims, n => Json.Str(n)))), ("declared_triggers", Json.Arr(List.map(triggers, n => Json.Str(n)))), ("reached_a", Json.Arr(List.map(Verify.triggerReached(trigA), n => Json.Str(n)))), ("reached_b", Json.Arr(List.map(Verify.triggerReached(trigB), n => Json.Str(n)))), ("reach_scope", Json.Str("required workloads, search, and shrinking probes")), ("parity", Json.Str("evaluator evidence; compiled witness parity is a separate check")), ("alignment", Json.Str("states align by index; added or removed steps can shift the comparison"))])
+
+def withReview(report: String, scope: Json): String =
+  Json.parse(report) match {
+    case Result.Ok(j) => Json.stringify(Json.set(j, "review", scope)) match {
+  case Result.Ok(s) => s
+  case Result.Err(_) => ""
+}
+    case Result.Err(_) => ""
+  }
 
 def sideEv(dir: String, outDir: String, seed: Int, m: Man, files: List[(String, String)], host: String): IO[DiffSide] =
   for {
@@ -143,14 +172,16 @@ def sideEv(dir: String, outDir: String, seed: Int, m: Man, files: List[(String, 
     seeds <- Drive.fuzzSeedText(dir, ens)
     _ <- Fs.write(Drive.joinSlash(outDir, "seeds.txt"), seeds)
     vers <- Drive.fuzzVerSrcs(dir)
+    runs <- Drive.fuzzCorpusFiles(dir)
+    srcs <- Drive.fuzzWorkloadSrcs(dir)
     scn <- Drive.fuzzReadScenario(dir)
     drivers <- Drive.fuzzReadOr(Drive.joinSlash(outDir, "drivers.txt"))
     srv <- Ref.of(("", 0))
     _ <- clear(pdir)
-  } yield DiffSide(FuzzJob(dir, pdir, "", m.name, m.hasUi, 0, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, true, host, srv, Verify.scenarioFaults(scn), false, false, false), seeds, Drive.noRuns(), Delta.bodyLines(drivers), vers, [])
+  } yield DiffSide(FuzzJob(dir, pdir, "", m.name, m.hasUi, 0, seed, false, files, false, if (m.hasUi) Drive.headlessEnvMan(m) else "", false, ens, true, host, srv, Verify.scenarioFaults(scn), false, false, false), seeds, runs, Delta.bodyLines(drivers), vers, Verify.workloadDefs(Verify.sortStrs(srcs), ens))
 
-def evWhy(code: Int): String =
-  if (code == 0) "" else if (code == 3) "check failed" else Str.concat("exit ", Str.fromInt(code))
+def evWhy(code: Int, err: String): String =
+  if (code == 3) "check failed" else why(code, err)
 
 def idleRun(): FuzzRun =
   FuzzRun("idle", "", "", "", "", Verify.noStr())
@@ -159,7 +190,7 @@ def seedsLabel(): String =
   "build/seeds.txt"
 
 def workloads(a: DiffSide, b: DiffSide): List[FuzzRun] =
-  Drive.fuzzAddSeeds(Drive.fuzzAddSeeds(idleRun() :: corpusUnion(List.concat(a.runs, b.runs), Verify.noStr()), seedsLabel(), a.seeds, b.job.hasUi), seedsLabel(), b.seeds, b.job.hasUi)
+  List.concat(idleRun() :: (if (a.job.ev) a.runs else corpusUnion(List.concat(a.runs, b.runs), Verify.noStr())), Drive.fuzzAddSeeds(Drive.fuzzAddSeeds(Drive.noRuns(), seedsLabel(), a.seeds, b.job.hasUi), seedsLabel(), b.seeds, b.job.hasUi))
 
 def corpusUnion(runs: List[FuzzRun], seen: List[String]): List[FuzzRun] =
   if (List.isEmpty(runs)) runs else corpusUnionHd(List.at(runs, 0), List.tail(runs), seen, srcHash(List.at(runs, 0)))
@@ -197,10 +228,13 @@ def probeEv(job: FuzzJob, run: FuzzRun): IO[DiffOut] =
     _ <- Drive.fuzzWriteDrive(job.outDir, run.script)
     _ <- Fs.write(Drive.fuzzTlPath(job.outDir), "")
     _ <- Fs.write(Drive.fuzzDumpPath(job.outDir), "")
+    logPath = Drive.joinSlash(Drive.fuzzEvDir(job.outDir), "probe.log")
+    _ <- Fs.write(logPath, "")
     code <- Drive.evProbe(job, Drive.fuzzEvDir(job.outDir), Str.concat(Drive.fuzzProbeEnv("", job.hasUi, Drive.fuzzDrivePath(job.outDir), Drive.fuzzDumpPath(job.outDir), run.script != "", run.sched, run.fault, run.picks, job.outDir, job.uiEnv, false, false), Drive.fuzzTlEnv("", Drive.fuzzTlPath(job.outDir))))
     tl <- Drive.fuzzReadOr(Drive.fuzzTlPath(job.outDir))
     dump <- Drive.fuzzReadOr(Drive.fuzzDumpPath(job.outDir))
-  } yield DiffOut(code, evWhy(code), code == 3, tl, controls(dump))
+    log <- Drive.fuzzReadOr(logPath)
+  } yield DiffOut(code, evWhy(code, log), code == 3 || unrunnable(log), tl, controls(dump))
 
 def why(code: Int, err: String): String =
   if (unrunnable(err)) whyLine(List.filter(Verify.linesOf(err), l => unrunnable(l)), code) else if (code == 0) "" else if (code == 124) "timeout" else whyLine(List.filter(Verify.linesOf(err), l => Str.startsWith(l, "scuzz") && !Str.contains(l, "wrote fuzz dump")), code)
@@ -233,16 +267,22 @@ def pair(a: DiffSide, b: DiffSide, r: FuzzRun): IO[DiffRow] =
   probe(a.job, r).flatMap(x => probe(b.job, r).map(y => rowOf(r, x, y)))
 
 def replay(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], acc: List[DiffRow]): IO[List[DiffRow]] =
-  if (List.isEmpty(runs)) IO.pure(List.reverse(acc)) else kept(a, b, root, List.at(runs, 0)).flatMap(row => replay(a, b, root, List.tail(runs), row :: acc))
+  if (List.isEmpty(runs)) IO.pure(List.reverse(acc)) else (if (a.job.ev) keptAs(a, b, root, List.at(runs, 0), Str.concat(label(List.at(runs, 0)), Str.concat(" [", Str.concat(Str.fromInt(List.len(acc)), "]")))) else kept(a, b, root, List.at(runs, 0))).flatMap(row => (if (a.job.ev) reviewGate(root, row, List.reverse(acc)) else IO.pure(())).flatMap(_ => replay(a, b, root, List.tail(runs), row :: acc)))
 
 def kept(a: DiffSide, b: DiffSide, root: String, r: FuzzRun): IO[DiffRow] =
-  probe(a.job, r).flatMap(x => probe(b.job, r).flatMap(y => keepTl(root, rowOf(r, x, y), x.tl, y.tl)))
+  keptAs(a, b, root, r, label(r))
+
+def keptAs(a: DiffSide, b: DiffSide, root: String, r: FuzzRun, name: String): IO[DiffRow] =
+  probe(a.job, r).flatMap(x => probe(b.job, r).flatMap(y => keepTl(root, namedRow(rowOf(r, x, y), name), x.tl, y.tl)))
+
+def namedRow(row: DiffRow, name: String): DiffRow =
+  DiffRow(name, row.run, row.cls, row.delta, row.whyA, row.whyB, row.ctlA, row.ctlB)
 
 def keepTl(root: String, row: DiffRow, tlA: String, tlB: String): IO[DiffRow] =
   Fs.write(Drive.joinSlash(root, tlName(row, "a")), tlA).flatMap(_ => Fs.write(Drive.joinSlash(root, tlName(row, "b")), tlB)).map(_ => row)
 
 def tlName(r: DiffRow, side: String): String =
-  Str.concat("tl-", Str.concat(Str.slice(Hash.sha256(Str.concat(r.label, Str.concat(Verify.nl(), r.run.script))), 0, 16), Str.concat("-", Str.concat(side, ".txt"))))
+  Str.concat("tl-", Str.concat(Str.slice(Hash.sha256(Str.concat(r.label, Str.concat(Verify.nl(), witnessBody(r.run)))), 0, 16), Str.concat("-", Str.concat(side, ".txt"))))
 
 def tlJson(r: DiffRow, review: Bool): String =
   if (!review && !differs(r.cls)) "null" else Str.concat("{\"a\":", Str.concat(Check.jsonStr(tlName(r, "a")), Str.concat(",\"b\":", Str.concat(Check.jsonStr(tlName(r, "b")), "}"))))
@@ -254,22 +294,62 @@ def sharedDefs(a: DiffSide, b: DiffSide): List[Fun] =
   List.filter(b.defs, d => List.contains(Verify.mapSpecE(a.defs, a.job.ens), Verify.specOfE(d, b.job.ens)))
 
 def search(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], n: Int): IO[DiffHunt] =
-  hunt(a, b, root, runs, sharedDefs(a, b), n, DiffHunt(0, 0, []))
+  hunt(a, b, root, runs, sharedDefs(a, b), n, DiffHunt(0, 0, [], noRows()))
 
 def hunt(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], defs: List[Fun], n: Int, h: DiffHunt): IO[DiffHunt] =
   if (h.ran >= n) IO.pure(h) else huntRun(a, b, root, runs, defs, n, h, Drive.fuzzWorkload(b.job, b.seeds, runs, defs, h.ran, Drive.climbNew()))
 
+def reviewNeed(row: DiffRow): IO[Unit] =
+  if (row.whyB != "") IO.fail(Str.concat("scuzz ide: candidate workload fails: ", Str.concat(row.label, Str.concat(": ", row.whyB)))) else if (row.whyA != "" && row.whyA != "check failed" && !constraintFailure(row.whyA) || row.cls == "unrunnable" && row.whyA != "check failed") IO.fail(Str.concat("scuzz ide: incomplete workload: ", row.label)) else IO.pure(())
+
+def reviewGate(root: String, row: DiffRow, prior: List[DiffRow]): IO[Unit] =
+  reviewNeed(row).handleErrorWith(e => for {
+  raw <- Drive.fuzzReadOr(Drive.joinSlash(root, "report.json"))
+  recorded = Json.parse(raw) match {
+  case Result.Ok(j) => List.map(Json.arr(reviewField(j, "workloads")), w => Json.stringify(w) match {
+  case Result.Ok(s) => s
+  case Result.Err(_) => "null"
+})
+  case Result.Err(_) => []: List[String]
+}
+  _ <- reviewIncomplete(root, List.concat(recorded, List.map(List.concat(prior, [row]), r => rowJson(r, true))), e)
+  _ <- IO.fail(e)
+} yield ())
+
+def reviewField(j: Json, key: String): Json =
+  List.head(Json.get(j, key)) match {
+    case Option.Some(value) => value
+    case Option.None => Json.Null()
+  }
+
+def reviewIncomplete(root: String, rows: List[String], why: String): IO[Unit] =
+  Fs.write(Drive.joinSlash(root, "report.json"), Str.concat("{\"v\":1,\"kind\":\"diff\",\"review\":{\"complete\":false},\"reason\":", Str.concat(Check.jsonStr(why), Str.concat(",\"workloads\":[", Str.concat(List.join(rows, ","), "]}")))))
+
+def constraintFailure(why: String): Bool =
+  Str.startsWith(why, "scuzz: claim ") || Str.startsWith(why, "scuzz: oracle ") || Str.startsWith(why, "scuzz: property check failed:")
+
 def huntRun(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], defs: List[Fun], n: Int, h: DiffHunt, run: FuzzRun): IO[DiffHunt] =
-  pair(a, b, run).flatMap(row => if (!differs(row.cls)) hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits, h.witnesses)) else huntHit(a, b, root, runs, defs, n, h, run))
+  for {
+    row <- if (a.job.ev) keptAs(a, b, root, run, Str.concat("search ", Str.fromInt(h.ran))) else pair(a, b, run)
+    _ <- if (a.job.ev) reviewGate(root, row, h.rows) else IO.pure(())
+    next = DiffHunt(h.ran, h.hits, h.witnesses, if (a.job.ev) List.concat(h.rows, [row]) else h.rows)
+    found <- if (!differs(row.cls)) hunt(a, b, root, runs, defs, n, DiffHunt(next.ran + 1, next.hits, next.witnesses, next.rows)) else huntHit(a, b, root, runs, defs, n, next, run)
+  } yield found
 
 def huntHit(a: DiffSide, b: DiffSide, root: String, runs: List[FuzzRun], defs: List[Fun], n: Int, h: DiffHunt, run: FuzzRun): IO[DiffHunt] =
-  if (List.len(h.witnesses) >= witnessCap()) hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits + 1, h.witnesses)) else shrink(a, b, defs, run).flatMap(small => pair(a, b, small).flatMap(row => witness(root, small, row).flatMap(w => hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits + 1, addWitness(h.witnesses, w))))))
+  if (List.len(h.witnesses) >= witnessCap()) hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits + 1, h.witnesses, h.rows)) else for {
+  small <- shrink(a, b, defs, run)
+  row <- if (a.job.ev) keptAs(a, b, root, small, Str.concat("witness ", Str.fromInt(h.ran))) else pair(a, b, small)
+  _ <- if (a.job.ev) reviewGate(root, row, h.rows) else IO.pure(())
+  w <- witness(root, small, row)
+  found <- hunt(a, b, root, runs, defs, n, DiffHunt(h.ran + 1, h.hits + 1, addWitness(h.witnesses, w), if (a.job.ev) List.concat(h.rows, [row]) else h.rows))
+} yield found
 
 def addWitness(ws: List[(String, String, Int)], w: (String, String, Int)): List[(String, String, Int)] =
   if (w._1 == "" || List.exists(ws, x => x._1 == w._1)) ws else List.concat(ws, w :: [])
 
 def bad(a: DiffSide, b: DiffSide): FuzzRun => IO[Int] =
-  r => pair(a, b, r).map(row => if (differs(row.cls)) 1 else 0)
+  r => pair(a, b, r).flatMap(row => (if (a.job.ev) reviewNeed(row) else IO.pure(())).map(_ => if (differs(row.cls)) 1 else 0))
 
 def shrink(a: DiffSide, b: DiffSide, defs: List[Fun], run: FuzzRun): IO[FuzzRun] =
   Drive.fuzzShrinkBy(bad(a, b), defs, run).flatMap(small => shrinkFault(bad(a, b), small).flatMap(r => shrinkPct(bad(a, b), r)))

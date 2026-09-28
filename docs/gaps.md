@@ -16,7 +16,9 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Unproven.** Full corpus replay plus bounded search fits a frequent decision loop. Evaluator timelines remain equal to compiled timelines on new generated proposals. Index-based state alignment remains clear when a proposal adds or removes steps.
 
-**Measurement to refresh.** A warm Counter comparison is recorded at about 8.5 s from tap to lanes with idle and seed workloads. This is not a measurement of the expanded review. Editor check is recorded at about 19 s cold. Its fuzz probe build is recorded at 55 s to 75 s. Record host, compiler identity, workload count, search budget, and cold or warm state when measuring again.
+**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 25.2 s from editor launch to the visible question. The evaluator host is cached. A repeated card takes 3.4 s. Frozen-card preparation takes 3.7 s and 3.1 s. Cached workload navigation takes 55 ms. Cached step navigation takes 74 ms. The 250 ms navigation target is met. Each value is one sample. Both runs start a new editor process. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It is not a cold host-build measurement.
+
+The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `b7dff0752f1016ebf73f53c537d67dad25b6d9442d4e3f3cc6282f1427e5e137`. The evaluator host SHA-256 is `8478e1f49243757c37905cb3e45804aecaaff62b987c1a63ec7a121c76d7f0d2`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
 
 **Known cost.** A zero-delay retry reaches the scheduler step cap in about 13 s on the evaluator and 0.7 s compiled. A mutated page limit reaches the 20 s probe deadline on both engines. Docs can differ on the representation of a signal that holds views. Do not hide these differences with a successful card.
 
@@ -31,12 +33,6 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
 
 ## Known gaps
-
-### Behavioral questions
-
-IDE review runs idle and seeds. It does not replay the corpus or run differential search. It does not shrink a review witness. Playback starts automatically. The card does not summarize complete evidence or claim trigger reach. An accessibility tile view does not reproduce screen layout. File sets with no observed difference can remain pending.
-
-**Proof:** Gate 2. Keep recorded structure distinct from a pixel preview. Show finite evidence limits.
 
 ### Objective and generation
 

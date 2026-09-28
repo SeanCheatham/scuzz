@@ -915,7 +915,7 @@ def callIsI64(f: String, defs: Ftab): Bool =
   f == "Net.retryAfterMillis" || f == "Str.byteLen" || f == "Property.a11yHas" || f == "Property.signalListLen" || f == "Property.signalInt" || f == "Color.rgb" || f == "Color.rgba" || f == "Theme.accent" || f == "Theme.primary" || f == "Theme.muted" || f == "Theme.foreground" || Str.startsWith(f, "Icon.") || f == "Str.len" || f == "Str.charAt" || f == "Str.toInt" || f == "Str.startsWith" || f == "Str.eq" || f == "Str.contains" || f == "List.len" || f == "List.isEmpty" || f == "Map.size" || f == "Set.size" || f == "Map.contains" || f == "Set.contains" || f == "Json.has" || f == "Json.getBool" || f == "Json.getInt" || f == "Json.intOr" || f == "Json.boolOr" || f == "Json.isNull" || f == "Json.isObj" || f == "Json.isArr" || kitUnaryI64(f) != "" || kitBinaryI64(f) != "" || isTlI64Call(f) || funRetI64(defs, f)
 
 def isTlI64Call(f: String): Bool =
-  f == "Timeline.len" || f == "Timeline.signalInt" || f == "Timeline.signalListLen" || (f == "Timeline.signalStrHas" || f == "Timeline.fileTextIs" || f == "Timeline.fileSame") || tlHasRt(f) != "" || tlI64Rt(f) != ""
+  f == "Timeline.len" || f == "Timeline.exists" || f == "Timeline.signalInt" || f == "Timeline.signalListLen" || (f == "Timeline.signalStrHas" || f == "Timeline.fileTextIs" || f == "Timeline.fileSame") || tlHasRt(f) != "" || tlI64Rt(f) != ""
 
 def exprMethodI64(recv: Expr, name: String, defs: Ftab): Bool =
   if (name == "require") exprIsI64(recv, noParam(), defs) else exprMethodI64Go(recv, name, defs)
@@ -2370,8 +2370,8 @@ def emitPropPred(pred: Expr, rc: String, rv: String, ro: Bool, recv: Expr, prefi
     case _ => emitExpr(pred, Str.concat(prefix, "_p"), strs, defs, ens, ps, loc)
   }
 
-def emitPropPredLam(p: String, body: Expr, rc: String, rv: String, ro: Bool, recv: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitPropPredLam2(p, body, Slot("", rv, ro), slotBindI64(Slot(rc, rv, ro), recv, ps, defs), recv, prefix, strs, defs, ens, ps, loc)
+def emitPropPredLam(p: String, body: Expr, rc: String, rv: String, _ro: Bool, recv: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
+  emitPropPredLam2(p, body, Slot("", rv, false), slotBindI64(Slot(rc, rv, false), recv, ps, defs), recv, prefix, strs, defs, ens, ps, loc)
 
 def emitPropPredLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, recv: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   emitApplyLam2(propLamBind(p, boxInt, prefix), propLamBody(p, body, boxInt, prefix), arg, boxInt, applyBindTy(p, recv, defs, ens, ps, loc), Str.concat(prefix, "_p"), strs, defs, ens, ps, loc, 0)
@@ -2654,20 +2654,20 @@ def shadowBind(p: String, prefix: String, ps: List[Param]): String =
   if (paramKnown(ps, p)) Str.concat("_", Str.concat(prefix, Str.concat("_", p))) else p
 
 def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, ao: Bool, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt, ao)
+  emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt, ao, isI64Ty(exprRetTyEns(body, defs, ens, Param(p, bty, "", "") :: dropParam(ps, p), loc)))
 
 def emitApplyLamSkip(ac: String, s: Slot): Slot =
   s match {
     case Slot(bc, bv, bo) => Slot(join(ac, bc), bv, bo)
   }
 
-def emitApplyLam4(ac: String, s: Slot, av: String, p: String, boxInt: Bool, ao: Bool): Slot =
+def emitApplyLam4(ac: String, s: Slot, av: String, p: String, boxInt: Bool, ao: Bool, scalar: Bool): Slot =
   s match {
-    case Slot(bc, bv, bo) => emitApplyLam5(join(ac, join(bindAliasTy(p, av, boxInt), bc)), bv, bo, av, Str.concat("%", p), ao)
+    case Slot(bc, bv, bo) => emitApplyLam5(join(ac, join(bindAliasTy(p, av, boxInt), bc)), bv, bo, av, Str.concat("%", p), ao, scalar)
   }
 
-def emitApplyLam5(code: String, bv: String, bo: Bool, av: String, pv: String, ao: Bool): Slot =
-  if (!ao) Slot(code, bv, bo) else if (bv == pv || bv == av) Slot(code, bv, true) else if (bo) Slot(join(code, relPtr(pv)), bv, true) else Slot(code, bv, bo)
+def emitApplyLam5(code: String, bv: String, bo: Bool, av: String, pv: String, ao: Bool, scalar: Bool): Slot =
+  if (!ao) Slot(code, bv, bo) else if (bv == pv || bv == av) Slot(code, bv, true) else if (bo || scalar) Slot(join(code, relPtr(pv)), bv, bo) else Slot(code, bv, bo)
 
 def bindAliasTy(p: String, av: String, boxInt: Bool): String =
   if (boxInt) line(Str.concat("%", Str.concat(p, Str.concat(" = add i64 ", Str.concat(av, ", 0"))))) else bindAlias(p, av)

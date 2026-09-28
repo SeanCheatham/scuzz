@@ -113,11 +113,23 @@ def addProposal(name: String): IO[Unit] =
 def waitMs(n: Int): IO[Unit] =
   IO.sleep(n)
 
+private def reviewFixture(raw: String): String =
+  for {
+    j = LspClient.parseJson(raw)
+    initial = List.map(Json.arr(Diags.jsonField(j, "workloads")), w => Json.set(Json.set(w, "why_a", Json.Null()), "events", Json.Arr([Json.Str("count 1"), Json.Str("count 2")])))
+    base = List.at(initial, 0)
+    search = List.map(List.range(0, 32), i => Json.set(base, "label", Json.Str(Str.concat("search ", Str.fromInt(i)))))
+    short = Json.set(Json.set(List.at(initial, 1), "label", Json.Str("witness 0")), "events", Json.Arr([Json.Str("count 1")]))
+    rows = List.concat(List.concat(initial, search), [short])
+    scope = Json.Obj([("complete", Json.Bool(true)), ("required", Json.Int(List.len(initial))), ("completed_required", Json.Int(List.len(initial))), ("recorded_workloads", Json.Int(List.len(rows))), ("corpus", Json.Int(0)), ("seeds", Json.Int(1)), ("registered_claims", Json.Arr([Json.Str("greetFact")])), ("declared_triggers", Json.Arr([Json.Str("button:+1")])), ("reached_a", Json.Arr([])), ("reached_b", Json.Arr([])), ("reach_scope", Json.Str("required workloads, search, and shrinking probes")), ("parity", Json.Str("evaluator evidence; compiled witness parity is a separate check")), ("alignment", Json.Str("states align by index; added or removed steps can shift the comparison"))])
+    report = Json.set(Json.set(Json.set(j, "workloads", Json.Arr(rows)), "review", scope), "search", Json.Obj([("iterations", Json.Int(32)), ("ran", Json.Int(32)), ("seed", Json.Int(1))]))
+  } yield Cards.text(report)
+
 def Main.reviewProposal(root: String, toml: String, disk: List[(String, String)], propSet: List[(String, String)]): IO[Unit] =
   for {
     ide = Fs.join(Fs.join(root, "build"), "ide")
     _ <- Fs.mkdirs(ide).handleErrorWith(_ => IO.pure(()))
-    _ <- Fs.write(Fs.join(ide, "report.json"), "{\"v\":1,\"kind\":\"diff\",\"rev\":\"proposal\",\"counts\":{\"regressed\":0,\"fixed\":0,\"diverged\":1,\"unrunnable\":0,\"same\":1},\"workloads\":[{\"label\":\"idle\",\"class\":\"same\",\"why_b\":null,\"delta\":{\"first\":-1},\"timelines\":{\"a\":\"tl-same.txt\",\"b\":\"tl-same.txt\"}},{\"label\":\"seed count 1\",\"class\":\"diverged\",\"why_b\":null,\"delta\":{\"first\":1},\"timelines\":{\"a\":\"tl-deck-a.txt\",\"b\":\"tl-deck-b.txt\"}}]}\n")
+    _ <- Fs.write(Fs.join(ide, "report.json"), reviewFixture("{\"v\":1,\"kind\":\"diff\",\"rev\":\"proposal\",\"counts\":{\"regressed\":0,\"fixed\":0,\"diverged\":1,\"unrunnable\":0,\"same\":1},\"workloads\":[{\"label\":\"idle\",\"class\":\"same\",\"why_b\":null,\"delta\":{\"first\":-1},\"timelines\":{\"a\":\"tl-same.txt\",\"b\":\"tl-same.txt\"}},{\"label\":\"seed count 1\",\"class\":\"diverged\",\"why_b\":null,\"delta\":{\"first\":1},\"timelines\":{\"a\":\"tl-deck-a.txt\",\"b\":\"tl-deck-b.txt\"}}]}\n"))
     _ <- Fs.write(Fs.join(ide, "tl-same.txt"), """# timeline v=3 n=1
 --- 0 checkpoint=1
 a11y:
@@ -169,7 +181,7 @@ def Main.compareBuffers(root: String, toml: String, disk: List[(String, String)]
   for {
     ide = Fs.join(Fs.join(root, "build"), "ide")
     _ <- Fs.mkdirs(ide).handleErrorWith(_ => IO.pure(()))
-    _ <- Fs.write(Fs.join(ide, "report.json"), "{\"v\":1,\"kind\":\"diff\",\"rev\":\"buffers\",\"counts\":{\"regressed\":0,\"fixed\":0,\"diverged\":1,\"unrunnable\":0,\"same\":1},\"workloads\":[{\"label\":\"idle\",\"class\":\"same\",\"why_b\":null,\"delta\":{\"first\":-1},\"timelines\":{\"a\":\"tl-same.txt\",\"b\":\"tl-same.txt\"}},{\"label\":\"seed count 1\",\"class\":\"diverged\",\"why_b\":null,\"delta\":{\"first\":1},\"timelines\":{\"a\":\"tl-cmp-a.txt\",\"b\":\"tl-cmp-b.txt\"}}]}\n")
+    _ <- Fs.write(Fs.join(ide, "report.json"), reviewFixture("{\"v\":1,\"kind\":\"diff\",\"rev\":\"buffers\",\"counts\":{\"regressed\":0,\"fixed\":0,\"diverged\":1,\"unrunnable\":0,\"same\":1},\"workloads\":[{\"label\":\"idle\",\"class\":\"same\",\"why_b\":null,\"delta\":{\"first\":-1},\"timelines\":{\"a\":\"tl-same.txt\",\"b\":\"tl-same.txt\"}},{\"label\":\"seed count 1\",\"class\":\"diverged\",\"why_b\":null,\"delta\":{\"first\":1},\"timelines\":{\"a\":\"tl-cmp-a.txt\",\"b\":\"tl-cmp-b.txt\"}}]}\n"))
     _ <- Fs.write(Fs.join(ide, "tl-same.txt"), """# timeline v=3 n=1
 --- 0 checkpoint=1
 a11y:
@@ -261,7 +273,7 @@ def proofCard(flip: Int): IO[Json] =
     c <- Cards.freeze("proof", "p", imported, flip)
     _ <- Main.reviewProposal("proof", "", [], [])
     raw <- Fs.read("proof/build/ide/report.json")
-    ready <- Cards.ready("proof", c, raw)
+    ready <- Cards.complete("proof", c, raw)
   } yield ready
 
 def laneFlow(flip: Int, lane: Int): IO[Unit] =
@@ -356,5 +368,28 @@ def bufferedFrames(n: Int): IO[Unit] =
     _ = Signal.set(frameSecond, Json.getInt(b, "id", 0))
     _ = Signal.set(frameValue, Json.getStr(a, "result", ""))
     _ = Signal.set(frameRest, Str.byteLen(rest))
+  } yield ()
+
+def exclusionFlow(): IO[Unit] =
+  for {
+    c <- proofCard(0)
+    evidence = Diags.jsonField(c, "evidence")
+    rows = List.map(Json.arr(Diags.jsonField(evidence, "workloads")), w => Json.set(w, "class", Json.Str("same")))
+    allSame = Json.set(evidence, "workloads", Json.Arr(rows))
+    excluded <- Cards.complete("proof", c, Cards.text(allSame))
+    exclusion = Signal.make(Cards.str(excluded, "id"))
+    _ = Signal.set(exclusion, Cards.str(excluded, "id"))
+  } yield ()
+
+def incompleteFlow(mode: Int): IO[Unit] =
+  for {
+    c <- proofCard(0)
+    evidence = Diags.jsonField(c, "evidence")
+    review = Diags.jsonField(evidence, "review")
+    search = Diags.jsonField(evidence, "search")
+    broken = if (mode == 0) Json.set(evidence, "review", Json.set(review, "complete", Json.Bool(false))) else if (mode == 1) Json.set(evidence, "search", Json.set(search, "ran", Json.Int(31))) else Json.set(evidence, "workloads", Json.Arr(List.map(Json.arr(Diags.jsonField(evidence, "workloads")), w => Json.set(w, "why_b", Json.Str("scuzz: claim shared failure")))))
+    blocked <- Cards.complete("proof", c, Cards.text(broken)).map(_ => 0).handleErrorWith(_ => IO.pure(1))
+    evidenceBlocked = Signal.make(blocked)
+    _ = Signal.set(evidenceBlocked, blocked)
   } yield ()
 

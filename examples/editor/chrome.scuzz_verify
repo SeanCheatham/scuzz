@@ -117,7 +117,7 @@ private def visibleReadyCard(t: Timeline, i: Int): Bool =
   Timeline.signalInt(t, i, "page") == 3 && Timeline.signalStrHas(t, i, "deckCard", "\"status\":\"ready\"")
 
 def afterDeckShowsSource(t: Timeline): Verdict =
-  Verdict.every(t, i => !visibleReadyCard(t, i) || !Timeline.signalStrHas(t, i, "deckCard", "\"proposal\":\"p1\"") || Timeline.a11yHas(t, i, "IO.println(2)") && Timeline.signalListLen(t, i, "srcFiles") == 1)
+  Verdict.every(t, i => !visibleReadyCard(t, i) || !Timeline.signalStrHas(t, i, "deckCard", "\"proposal\":\"p1\"") || Timeline.signalListLen(t, i, "srcFiles") == 1 && (Timeline.signalInt(t, i, "evidenceDetails") == 0 || Timeline.a11yHas(t, i, "IO.println(2)")))
 
 def afterDeckFlagsUnguarded(t: Timeline): Verdict =
   Verdict.every(t, i => !visibleReadyCard(t, i) || Timeline.a11yHas(t, i, "text:unguarded: no claims"))
@@ -147,10 +147,14 @@ def afterDefKeepsBuffer(t: Timeline): Verdict =
   if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "outlined:Go to def"))) Verdict.ok() else if (Timeline.signalStrHas(t, Timeline.len(t) - 1, "buf", "def twice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(twice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Go to def keeps the buffer")
 
 def afterRenameRenamesDef(t: Timeline): Verdict =
-  if (!Timeline.exists(t, i => Timeline.lastHitHas(t, i, "button:Rename"))) Verdict.ok() else if (Timeline.signalStrHas(t, Timeline.len(t) - 1, "buf", "def thrice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(thrice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n")) Verdict.ok() else Verdict.fail(Timeline.len(t) - 1, "Rename rewrites the identifier in the buffer")
+  Verdict.onHit(t, "button:Rename", __tup => __tup match {
+  case (before, after) => Timeline.exists(t, i => i >= after && (Timeline.signalStrHas(t, i, "infoLine", "no rename") || Timeline.signalStrHas(t, i, "infoLine", "renamed")) && (!Timeline.signalStrHas(t, before, "replQ", "thrice") || Timeline.signalInt(t, i, "renameCaret") != 90 || !Timeline.signalStrHas(t, before, "buf", "def twice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(twice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n") || Timeline.signalStrHas(t, i, "buf", "def thrice(n: Int): Int =\n  n + n\n\n@main def main: IO[Unit] =\n  for {\n    _ <- IO.println(thrice(2))\n    _ <- IO.println(1 + \"x\")\n  } yield ()\n")))
+})
 
 def afterRenameConfirms(t: Timeline): Verdict =
-  Verdict.afterHit(t, "button:Rename", "text:renamed")
+  Verdict.onHit(t, "button:Rename", __tup => __tup match {
+  case (before, after) => Timeline.exists(t, i => i >= after && (if (Timeline.signalStrHas(t, before, "replQ", "")) Timeline.a11yHas(t, i, "text:no rename") && Timeline.signalInt(t, i, "dirty") == Timeline.signalInt(t, before, "dirty") else if (Timeline.a11yHas(t, i, "text:no rename")) Timeline.signalInt(t, i, "dirty") == Timeline.signalInt(t, before, "dirty") else Timeline.a11yHas(t, i, "text:renamed") && Timeline.signalInt(t, i, "dirty") == 1))
+})
 
 def rowsFollowStep(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalListLen(t, i, "rowsA") == 0 || Timeline.signalStrHas(t, i, "stepTitle", Str.concat("step ", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "step")), " of "))))
@@ -209,11 +213,33 @@ def jobsStartFromTheirControls(t: Timeline): Verdict =
 def timelineCursorStaysInRange(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "step") >= 0 && (if (Timeline.signalListLen(t, i, "rail") == 0) Timeline.signalInt(t, i, "step") == 0 else Timeline.signalInt(t, i, "step") < Timeline.signalListLen(t, i, "rail")))
 
-def timelineStartsWithPlayback(t: Timeline): Verdict =
+def timelineStartsPaused(t: Timeline): Verdict =
   Verdict.onHit(t, "choicechip:Timeline", __tup => __tup match {
-  case (before, after) => Timeline.exists(t, j => j <= before && Timeline.lastHitHas(t, j, "choicechip:Timeline")) || Timeline.a11yHas(t, after, "choicechip:Play=1")
+  case (before, after) => Timeline.exists(t, j => j <= before && Timeline.lastHitHas(t, j, "choicechip:Timeline")) || Timeline.a11yHas(t, after, "choicechip:Play=0")
 })
 
 def bufferedRepliesStayComplete(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.driveHas(t, i, "bufferedFrames") || Timeline.signalInt(t, i, "frameFirst") == 1 && Timeline.signalInt(t, i, "frameSecond") == 2 && Timeline.signalStrHas(t, i, "frameValue", "é") && Timeline.signalInt(t, i, "frameRest") == 0)
+
+def questionChangePauses(t: Timeline): Verdict =
+  Verdict.every(t, i => !visibleReadyCard(t, i) || !Timeline.lastHitHas(t, i, "outlined:Proposals") && !Timeline.lastHitHas(t, i, "outlined:Randomize") && !Timeline.lastHitHas(t, i, "textbutton:") || Timeline.signalInt(t, i, "playOn") == 0)
+
+def readyQuestionHasResults(t: Timeline): Verdict =
+  Verdict.every(t, i => !visibleReadyCard(t, i) || Timeline.a11yHas(t, i, "text:Recorded structure") && Timeline.a11yHas(t, i, "text:Result: execution passes its checks"))
+
+def incompleteEvidenceBlocks(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "incompleteFlow") || Timeline.signalInt(t, i, "evidenceBlocked") == 1 && Timeline.fileTextIs(t, i, "proof/src/Main.scuzz", """@main def main: IO[Unit] =
+  IO.println(1)
+"""))
+
+def automaticExclusionPreservesSource(t: Timeline): Verdict =
+  Verdict.every(t, i => !Timeline.driveHas(t, i, "exclusionFlow") || Timeline.fileTextIs(t, i, "proof/src/Main.scuzz", """@main def main: IO[Unit] =
+  IO.println(1)
+""") && Timeline.fileSame(t, 0, i, "proof/src/Other.scuzz"))
+
+def expandedQuestionShowsScope(t: Timeline): Verdict =
+  Verdict.every(t, i => !visibleReadyCard(t, i) || Timeline.signalInt(t, i, "evidenceDetails") != 1 || Timeline.a11yHas(t, i, "text:Required workloads: 2 / 2") && Timeline.a11yHas(t, i, "text:Search: 32 / 32 iterations; seed 1") && Timeline.a11yHas(t, i, "text:Claim trigger button:+1: Left untriggered; Right untriggered") && Timeline.a11yHas(t, i, "text:No observed difference does not establish equivalence"))
+
+def shortestQuestionOpens(t: Timeline): Verdict =
+  Verdict.every(t, i => !visibleReadyCard(t, i) || !Timeline.lastHitHas(t, i, "outlined:Proposals") || Timeline.signalStrHas(t, i, "questionWork", "witness 0") && Timeline.signalInt(t, i, "step") == 1 && Timeline.signalInt(t, i, "playOn") == 0 && Timeline.signalInt(t, i, "evidenceDetails") == 0 && Timeline.a11yHas(t, i, "text:signals *"))
 

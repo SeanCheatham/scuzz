@@ -1066,7 +1066,8 @@ static void test_script_tap_named_id(void) {
   decoy = sz_signal_int(0);
   count = sz_signal_int(0);
   root = sz_view_column();
-  sz_view_add_child(root, sz_view_button("skip", counter_tap, decoy));
+  for (int i = 0; i < 70; i++)
+    sz_view_add_child(root, sz_view_button("skip", counter_tap, decoy));
   sz_view_add_child(root, sz_view_button("+1", counter_tap, count));
 
   memset(&cfg, 0, sizeof(cfg));
@@ -1079,12 +1080,12 @@ static void test_script_tap_named_id(void) {
   sz_ui_session_take_root(session);
   assert(sz_ui_pump_sync(session));
   {
-    SzView *taps[8];
-    int n = sz_ui_collect_buttons(session, taps, 8);
-    assert(n == 2);
+    SzView *taps[72];
+    int n = sz_ui_collect_buttons(session, taps, 72);
+    assert(n == 71);
     sz_view_format_hit_id(taps[0], id, sizeof id);
     assert(strcmp(id, "button:skip") == 0);
-    sz_view_format_hit_id(taps[1], id, sizeof id);
+    sz_view_format_hit_id(taps[70], id, sizeof id);
     assert(strcmp(id, "button:+1") == 0);
   }
 
