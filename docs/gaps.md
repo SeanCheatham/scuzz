@@ -16,9 +16,9 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Unproven.** Full corpus replay plus bounded search fits a frequent decision loop. Evaluator timelines remain equal to compiled timelines on new generated proposals. Index-based state alignment remains clear when a proposal adds or removes steps.
 
-**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 24.6 s from editor launch to the visible question. The evaluator host is cached. A repeated card takes 3.3 s. Frozen-card preparation takes 2.97 s and 3.03 s. Cached workload navigation takes 62 ms. Cached step navigation takes 62 ms. The 250 ms navigation target is met. Each value is one sample. Both runs start a new editor process. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It is not a cold host-build measurement.
+**Measurement.** Counter review uses four required workloads: idle and three corpus files. It has no seeds. It runs 32 search iterations with seed 1. A first card in a fresh target takes 27.40 s from editor launch to the visible question. The evaluator host is cached. Frozen card preparation takes 3.98 s. Restart restores the saved cards in 743 ms. Cached card navigation takes 61 ms. Cached workload navigation takes 67 ms. Cached step navigation takes 61 ms. The 250 ms navigation target is met. Each value is one Headless sample. The first sequence also edits an unsaved buffer. The cold value includes startup and input preparation. It does not measure a cold host build. The warm run starts a new editor process and reuses the saved card identities and evidence. The editor mutation campaign runs at the same time.
 
-The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `cea67a67b6aa45a31aa676e21802d115ff6e2e5403572e3ce0fc01e00ab1fd2a`. The evaluator host SHA-256 is `a23522ed0f470b9ab996d6b7d480f2bb765f11f75302f4cc585a00c81ed87bc7`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
+The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with about 31 GiB of memory. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor SHA-256 is `8b98ef68457917acb0d9498ffd5a1046a80f12ce679c8a3a73f2d5a635fcda0f`. The evaluator host SHA-256 is `cb8d264b1dcabee9995f75e290fed230feae5c5dd97fb4cbb8a50f931c2f5a23`. The source limit is 65,536 bytes across at most three proposed files. The existing probe limits apply.
 
 **Known cost.** A zero-delay retry reaches the scheduler step cap in about 13 s on the evaluator and 0.7 s compiled. A mutated page limit reaches the 20 s probe deadline on both engines. The type-checker, code-generation, and CLI idle probes exceed their evaluator deadlines during concurrent validation. Their campaigns run compiled. They do not prove evaluator parity. Docs can differ on the representation of a signal that holds views. Do not hide these differences with a successful card.
 
@@ -34,11 +34,11 @@ The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device 
 
 ## Known gaps
 
-### Queue and preference feedback
+### Local choice feedback
 
-Review prepares a card on demand. There is no ready successor cache or complete job cancellation policy for the stream. Full-file siblings can replace accepted work from an older baseline. Can't decide has no reason. Local model requests and exported producer requests do not consume preferences. There is no retained-acceptance measure or local session summary.
+Can't decide has no reason. Local model requests and exported producer requests do not consume preferences. There is no retained-acceptance measure or local session summary. Region focus needs controls to retain or select a region after a result.
 
-**Proof:** Gates 4 and 5. Exercise late responses, baseline changes, repeated actions, pause, and session exit. Measure the result from local records.
+**Proof:** Gate 5. Exercise bounded feedback, abstention reasons, region focus, isolated reveals, Undo, later replacement, pause, and restart. Reproduce summary totals from primary local records. Measure retained acceptances per active review minute. Keep human usefulness unproven.
 
 ### Rule review
 
@@ -48,7 +48,7 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Supporting compiler and editor work
 
-- **Compile time.** `scuzz check examples/compiler` takes 5.46 s in one current sample. The CLI SHA-256 is `cea67a67b6aa45a31aa676e21802d115ff6e2e5403572e3ce0fc01e00ab1fd2a`. The editor campaign and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
+- **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
 - **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.
 - **Check scope.** The editor Check button does not perform all format and verify-file checks of `scuzz check`. Candidate gating must use the required shared checks even if the general button stays separate.
 - **Standard kits.** OS threads remain missing. Add kit work only when it blocks an ordinary program or a required review proof.
@@ -68,7 +68,7 @@ macOS and Linux ARM64 backend execution remain unverified. Peak memory and usefu
 
 Sampling uses seed 1 and temperature 0.2. The pinned revisions and artifact digests are in the [generation catalog](../examples/editor/generation/src/Models.scuzz). Prompt processing is 49.40 tokens/s for 3B and 21.56 tokens/s for 7B. The default sample uses CLI SHA-256 `cea67a67b6aa45a31aa676e21802d115ff6e2e5403572e3ce0fc01e00ab1fd2a`. The 7B sample does not retain its compiler identity.
 
-The 7B model load has one observed sample of 3.9 s. The current 3B command does not measure load time separately. The process budgets are 4 GiB and 8 GiB. Linux enforces their virtual memory limits. The default finite proposal changes `greeting.txt` from `Hello` to `Hello Scuzz` under simulation. Its target has no registered claims. Its review completes all required workloads and 32 search cases. Finite Headless review retains a zero-event witness and exits normally. Frozen-card preparation takes 1.736 s in one sample. This interval excludes generation, editor startup, and input collection before the card freezes. The target has one required idle workload and no seeds or corpus files. It changes no source before a choice. A console-only proposal has no recorded difference. These cases do not measure human preference or application quality.
+The 7B model load has one observed sample of 3.9 s. The current 3B command does not measure load time separately. The process budgets are 4 GiB and 8 GiB. Linux enforces their virtual memory limits. The default finite proposal changes `greeting.txt` from `Hello` to `Hello Scuzz` under simulation. Its target has no registered claims. Its review completes all required workloads and 32 search cases. Finite Headless review retains a zero-event witness and exits normally. Frozen card preparation takes 1.736 s in one sample. This interval excludes generation, editor startup, and input collection before the card freezes. The target has one required idle workload and no seeds or corpus files. It changes no source before a choice. A console-only proposal has no recorded difference. These cases do not measure human preference or application quality.
 
 ## Cuts and later work
 

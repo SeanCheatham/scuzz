@@ -2227,6 +2227,19 @@ static SzIo *after_sleep_tag(void *value, void *env) {
   return pure_drop(env);
 }
 
+static SzIo *fork_join_left(void *value, void *env) {
+  (void)value;
+  (void)env;
+  return fm_drop(sz_io_sleep_ms(10), after_sleep_tag, (void *)(intptr_t)10);
+}
+
+static SzIo *fork_then_both(void *fiber, void *gate) {
+  (void)fiber;
+  return both_drop(
+      fm_drop(sz_deferred_complete(gate, NULL), fork_join_left, NULL),
+      fm_drop(sz_io_sleep_ms(20), after_sleep_tag, (void *)(intptr_t)20));
+}
+
 typedef struct {
   int n;
   int strings;
@@ -6848,6 +6861,23 @@ int main(void) {
       handle_delay_calls, NULL));
   assert(r.ok);
   assert((intptr_t)r.value == 1);
+
+  /* A separate fork cannot complete a structured join. */
+  {
+    SzDeferred *gate = sz_deferred_make();
+    SzPair *pair;
+    sz_testrt_install();
+    r = sz_io_unsafe_run(fm_drop(
+        fork_drop(fm_drop(sz_deferred_get(gate), after_sleep_tag,
+                          (void *)(intptr_t)30)),
+        fork_then_both, gate));
+    assert(r.ok);
+    pair = r.value;
+    assert(pair && (intptr_t)pair->left == 10 && (intptr_t)pair->right == 20);
+    sz_pair_free(pair);
+    sz_deferred_free(gate);
+    sz_testrt_reset();
+  }
 
   /* both */
   r = sz_io_unsafe_run(
@@ -15072,6 +15102,8 @@ int main(void) {
   }
 
   {
+    size_t base_bytes, base_count, live_bytes, live_count;
+    sz_alloc_stats(&base_bytes, &base_count);
     void *payload = sz_box_i64(37);
     SzError *err = sz_error_value(payload);
     SzIo *failed = sz_io_fail(err);
@@ -15094,6 +15126,8 @@ int main(void) {
     sz_release(failed);
     sz_release(err);
     sz_release(payload);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count && live_bytes == base_bytes);
   }
 
   {

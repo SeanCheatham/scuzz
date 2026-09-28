@@ -1,46 +1,41 @@
-# Current slice: keep the next card ready
+# Current slice: learn from local choices
 
-Implement gate 4 of [`vision.md`](vision.md#4-keep-the-next-card-ready). Follow the proposal review locks in [`philosophy.md`](philosophy.md#proposal-review).
+Status: implementation is open. Implement gate 5 of [`vision.md`](vision.md#5-learn-from-local-choices). Read `HUMANS.md`. Follow the proposal review locks in [`philosophy.md`](philosophy.md#proposal-review). Keep human usefulness and unavailable platform evidence explicit in [`gaps.md`](gaps.md).
 
 ## Outcome
 
-The session keeps the displayed card and at most one ready successor. It prepares the successor while the developer reviews the displayed card. Each card keeps its frozen request and evidence. Navigation uses cached data.
+The next request uses bounded local feedback. A choice shows its reveal and result without exposing the next card. A local summary reports choices, exclusions, Undo, readiness, waiting time, and retained acceptances per active review minute.
 
 ## Scope
 
-Use the existing editor, importer, managed generator, and shared compiler review. Keep one generation request and one review job at most. Keep all claims, corpus entries, probe limits, and the 32-case search. Mutation stays an explicit diagnostic action. Add no provider, scheduler, renderer, or evaluator protocol.
+Use the existing editor, generator request, and primary local records under `.scuzz/ide/`. Keep one objective, the two-card queue, separate owned jobs, and all current work limits. Feedback uses at most 16 recent records. Add no telemetry, model training, provider, or second log. Rule suggestion and installation belong to gate 6.
 
 ## Work order
 
-1. Store each card's frozen request. Validate current objective, model, scope, compiler, full input graph, and limits without invalidating a displayed card when the next request gets a new identity.
-2. Add the bounded queue and separate owned generation and review reservations. Bound inbox inspection and import to queue capacity. Match completion to its reservation and baseline. Leave independent inbox candidates pending while paused.
-3. Reuse baseline checking and replay where the shared compiler supports it. Cache evidence by the full review identity. Reject duplicate source sets and observed outcomes within one baseline and objective. Keep automatic exclusions separate from choices.
-4. Refill after baseline choice or abstention. After acceptance, Undo, objective change, or model change, cancel stale work and refill from the current baseline. Expose the invalidation operation for rule installation. Preserve the displayed identity through repeated and late actions.
-5. Show preparation, ready capacity, explicit retry, and exhausted budget. Keep cancellation and cached navigation responsive.
-6. Prove late responses, registration interruption, repeated Generate, capacity, baseline changes, pause, exit, and independent publication. Measure cold readiness, warm readiness, and cached navigation separately.
-7. Update the existing manual and gaps. Commit the slice and the next plan after the required proofs pass.
+1. Add optional abstention reasons: No visible difference, Need another scenario, and Outside my goal. An abstention is not a rejection. An automatic exclusion is not a human choice.
+2. Use recent preferences, reasons, and Undo results in local and exported requests. Bind each request to the current baseline and scope. Keep candidate rationale hidden before the choice.
+3. Show a short reveal and result for the decided card. Preserve that card's identity. Do not reveal the next card's mapping. Let the developer keep or change region focus.
+4. Record active review intervals, paused intervals, and waiting time. Active review starts when a ready card appears and ends at its choice or abstention. Exclude paused time and generation waits.
+5. Add the local session summary. Report accepted choices, baseline choices, abstentions by reason, automatic exclusions, duplicates, Undo, readiness, active review time, and waiting time. Count an acceptance as retained only if it is not undone and all touched files still match its accepted bytes at session end. Keep source hashes. Label this as a conservative source measure. It does not prove that later edits preserve the intended behavior.
+6. Prove bounded feedback, abstentions without negative preference labels, isolated reveals, region changes, restart, pause, Undo, later replacement, and totals from primary records. Add finite Headless proof through the existing CI path. Preserve all claims, corpus entries, replay checks, and the 32-case review search.
+7. Update `scuzz docs ide` and `gaps.md`. Complete the required checks before commit.
 
 ## Acceptance criteria
 
-- [ ] The displayed card and one ready successor are the only prepared cards.
-- [ ] Each card owns immutable request metadata, files, lane order, and evidence.
-- [ ] One generation request and one review job run at most.
-- [ ] Inbox inspection and import stop at available capacity.
-- [ ] A late completion cannot replace the displayed card or enter a new baseline.
-- [ ] Duplicate source sets and observed outcomes are excluded within the objective and baseline.
-- [ ] Baseline choice and abstention can use the existing successor.
-- [ ] Acceptance and Undo cancel stale work and refill from the new baseline.
-- [ ] Objective and model changes invalidate pending work.
-- [ ] Pause and exit stop owned preparation and inference. Independent producers remain available.
-- [ ] Repeated Generate stays inside queue and durable request limits.
-- [ ] A failure requires an explicit retry. Budget exhaustion has a visible status.
-- [ ] Cached card, workload, and step navigation starts no probe, build, or subprocess.
-- [ ] Current measurements report the 250 ms navigation target honestly.
-- [ ] The manual matches the queue controls and lifecycle.
+- [ ] Both local and exported requests contain bounded feedback for the current baseline.
+- [ ] Abstentions and automatic exclusions do not become negative preferences.
+- [ ] The reveal names only the decided card's lane mapping.
+- [ ] Region focus remains explicit and changes the next request safely.
+- [ ] Primary local records reproduce all summary totals.
+- [ ] Undo and later source replacement change retention correctly.
+- [ ] Active review time excludes paused time and generation waits.
+- [ ] Zero active review time has a defined result without division by zero.
+- [ ] Restart preserves durable results and does not count old waiting time as active review.
+- [ ] The manual matches the shipped controls and summary limits.
 
 ## Required validation
 
-Rebuild the checkout product CLI after compiler or CLI changes. Run proofs in scratch directories. Export the documented `LIBRARY_PATH` for Skia links.
+Rebuild the checkout product CLI after compiler, CLI, or manual changes. Run proofs in scratch directories. Export the documented `LIBRARY_PATH` for Skia links.
 
 ```bash
 ./scripts/bootstrap.sh
@@ -55,8 +50,6 @@ Rebuild the checkout product CLI after compiler or CLI changes. Run proofs in sc
 git diff --check
 ```
 
-Keep the queue proof hermetic. Add finite Headless cases to the existing CI path. Include source changes, dirty buffers, stale publications, job cancellation, restart, and retained pending external directories. Preserve the controlled generator and exact compiled witness parity proofs. Ordinary CI uses no weights or external network.
-
 ## Completion and continuation
 
-Remove the completed gate from `vision.md` and close its implemented gaps. Keep human usefulness and unavailable platform evidence explicit. Replace this plan with gate 5. Commit the slice and next plan. Continue through the complete-session gate. No refinement pass starts before the full session works.
+Remove gate 5 from `vision.md` after its software proofs pass. Close only implemented gaps. Keep real model quality, human usefulness, and unavailable host evidence open. Replace this plan with gate 6 and commit the slice. Continue in order through gate 7 when the full arc is authorized. Measured refinement passes used: 0. No measured refinement pass starts before the complete session works. At most two measured refinement passes are allowed. Stop at the complete-session endpoint.

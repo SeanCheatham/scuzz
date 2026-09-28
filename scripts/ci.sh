@@ -615,7 +615,7 @@ sections = {c["section"] for c in row["delta"]["changes"]}
 assert "signals" in sections, row
 PY
   python3 - <<'PYREVIEWIO'
-import difflib, json, os, shutil, subprocess
+import difflib, hashlib, json, os, shutil, subprocess
 from pathlib import Path
 repo = Path.cwd()
 cli = Path(os.environ["SCUZZ"])
@@ -636,19 +636,26 @@ corpus.write_text('[fuzz]\nschedule_seed = "2"\nevents = ["drive emit 3"]\n')
     root <- Sys.getenv("SCUZZ_REVIEW_TARGET")
     cli <- Sys.getenv("SCUZZ_REVIEW_CLI")
     same <- Sys.getenv("SCUZZ_REVIEW_SAME")
+    context <- Sys.getenv("SCUZZ_REVIEW_CONTEXT")
     toml <- Fs.read(Fs.join(root, "scuzz.toml"))
     baseline <- Fs.read(Fs.join(root, "src/Main.scuzz"))
     candidate = if (same == "1") baseline else Str.replace(baseline, "one", "two")
-    _ <- Diff.reviewSets(root, toml, [("Main", baseline)], [("Main", candidate)], 1, 32, cli)
+    _ <- Diff.reviewSets(root, toml, [("Main", baseline)], [("Main", candidate)], 1, 32, cli, context)
   } yield ()
 """)
 env = dict(os.environ, SCUZZ_REVIEW_TARGET=str(target), SCUZZ_REVIEW_CLI=str(cli))
+def review_context():
+    files = [(str(p.relative_to(target)), p.read_text()) for p in sorted(target.rglob("*")) if p.is_file() and "build" not in p.relative_to(target).parts]
+    return hashlib.sha256(json.dumps([hashlib.sha256(cli.read_bytes()).hexdigest(), files], separators=(',', ':')).encode()).hexdigest()
+env["SCUZZ_REVIEW_CONTEXT"] = review_context()
 def run(*args, **kwargs):
     return subprocess.run([str(cli), *map(str, args)], env=env, check=True, timeout=180, stdout=subprocess.DEVNULL, **kwargs)
 run("fmt", target)
+env["SCUZZ_REVIEW_CONTEXT"] = review_context()
 run("run", proof)
 exe = proof / "build/review-proof"
 def review():
+    env["SCUZZ_REVIEW_CONTEXT"] = review_context()
     subprocess.run([str(exe)], env=env, check=True, timeout=180, stdout=subprocess.DEVNULL)
     report = json.loads((target / "build/ide/report.json").read_text())
     assert report["review"]["complete"] and report["search"]["ran"] == 32
@@ -657,6 +664,20 @@ def review():
 report = json.loads((target / "build/ide/report.json").read_text())
 assert next(w for w in report["workloads"] if w["label"].startswith("idle"))["class"] == "same"
 assert next(w for w in report["workloads"] if w["label"].startswith("corpus/"))["class"] == "diverged"
+shutil.rmtree(target / "build/ide/baseline")
+cold = review()
+assert cold["review"]["baseline_probes"] > 0, cold["review"]
+warm = review()
+assert warm["review"]["baseline_probes"] == 0 and warm["review"]["baseline_reused"] >= warm["review"]["required"] + 32, warm["review"]
+assert warm["workloads"] == cold["workloads"] and warm["witnesses"] == cold["witnesses"]
+assert warm["review"]["reached_a"] == cold["review"]["reached_a"]
+cache_files = list((target / "build/ide/baseline").glob("*/*.json"))
+assert cache_files
+for path in cache_files:
+    path.write_text("interrupted cache write")
+recovered = review()
+assert recovered["review"]["baseline_probes"] > 0 and recovered["workloads"] == cold["workloads"]
+print("IO baseline reuse: exact workloads and witnesses; damaged cache requires fresh probes")
 corpus.unlink()
 report = review()
 assert report["review"]["corpus"] == report["review"]["seeds"] == 0
@@ -1256,7 +1277,7 @@ def bind_publication(where):
 def write_ops(where, events):
     path = where / "inject.json"
     temp = where / "inject.tmp"
-    temp.write_text(json.dumps({"v": 1, "kind": "inject", "events": events}))
+    temp.write_text(json.dumps({"v": 1, "kind": "inject", "stamp": time.monotonic_ns(), "events": events}))
     temp.replace(path)
     return path
 
@@ -1289,7 +1310,14 @@ def started_batch(where, events):
         ui = await_ui(lambda ui: "External proposals: publish a complete directory" in json.dumps(ui) or "unsafe resolved path" in json.dumps(ui))
         if "unsafe resolved path" not in json.dumps(ui):
             write_ops(where, events[1:])
-            await_ui(lambda ui: any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui["signals"]) and ((where / "build/ide/report.json").is_file() or "unsafe resolved path" in json.dumps(ui)))
+            def preparation_done(ui):
+                idle = any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui["signals"])
+                status = json.dumps(ui)
+                ready = any(v.get("name") == "deckArmed" and v.get("value") for v in ui["signals"])
+                excluded = any(json.loads(p.read_text()).get("decision") == "no-observed-difference" for p in (where / ".scuzz/ide/records").glob("*.json"))
+                failed = "Retry preparation explicitly" in status or "unsafe resolved path" in status
+                return idle and (ready or excluded or failed)
+            await_ui(preparation_done)
         write_ops(where, [{"op": "quit"}])
         assert proc.wait(timeout=15) == 0
     finally:
@@ -1370,6 +1398,27 @@ if os.uname().sysname == "Linux":
         for witness in evidence.get("witnesses", []):
             assert (root / ".scuzz/ide/cards" / c["id"] / witness["path"]).is_file()
         print("Counter first card readiness (fresh target; cached host):", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; freeze to ready:", c["ready"] - c["started"], "ms; required:", evidence["review"]["required"], "; search:", evidence["search"]["ran"])
+        successor_source = original.replace('"Counter"', '"Counter successor"', 1)
+        successor_dir = root / "build/proposals/p-next"
+        (successor_dir / "src").mkdir(parents=True)
+        (successor_dir / "src/Main.scuzz").write_text(successor_source)
+        request = json.loads((root / "build/ide/request.json").read_text())
+        (successor_dir / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "controlled-successor", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(successor_source.encode()).hexdigest()}]}))
+        await_state(lambda: "Ready cards: 2 / 2; reserved: 0" in json.dumps(read_ui(root)))
+        assert next(v["value"] for v in read_ui(root)["signals"] if v.get("name") == "deckArmed") == c["id"]
+        unread = root / "build/proposals/p-unread"
+        unread.mkdir()
+        (unread / "proposal.json").write_text("incomplete independent publication")
+        time.sleep(.4)
+        assert "Ready cards: 2 / 2; reserved: 0" in json.dumps(read_ui(root))
+        assert not any(json.loads(path.read_text()).get("proposal") == "p-unread" for path in (root / ".scuzz/ide/cards").glob("*/card.json"))
+        start = time.monotonic()
+        write_ops(root, [{"op": "tap", "id": "outlined:Randomize"}])
+        await_state(lambda: next(v["value"] for v in read_ui(root)["signals"] if v.get("name") == "deckArmed") != c["id"])
+        card_ms = (time.monotonic() - start) * 1000
+        write_ops(root, [{"op": "tap", "id": "outlined:Randomize"}])
+        await_state(lambda: next(v["value"] for v in read_ui(root)["signals"] if v.get("name") == "deckArmed") == c["id"])
+        print("Counter cached card navigation:", round(card_ms, 1), "ms; 250 ms target:", "met" if card_ms < 250 else "unmet")
         # Navigation uses the loaded evidence while its files are unavailable.
         other = max(questions, key=lambda w: len(w["events"]))
         assert other["label"] != selected["label"] and other["events"]
@@ -1380,6 +1429,8 @@ if os.uname().sysname == "Linux":
         cached.rename(held)
         build.rename(held_build)
         try:
+            time.sleep(.55)
+            assert next(v["value"] for v in read_ui(root)["signals"] if v.get("name") == "deckArmed") == c["id"]
             write_ops(root, [{"op": "tap", "id": "choicechip:More evidence"}])
             await_state(lambda: any(v.get("name") == "evidenceDetails" and v.get("value") == 1 for v in read_ui(root)["signals"]))
             start = time.monotonic()
@@ -1407,6 +1458,12 @@ if os.uname().sysname == "Linux":
             ui = read_ui(root)
             return any(v.get("name") == "deltaStatus" and "dirty buffer:" in json.dumps(v.get("value")) for v in ui.get("signals", []))
         await_state(refused_dirty)
+        time.sleep(.7)
+        assert refused_dirty()
+        ui = read_ui(root)
+        assert any(v.get("name") == "deckArmed" and not v.get("value") for v in ui["signals"])
+        assert "Retry preparation explicitly" in json.dumps(ui)
+        assert not any(v.get("label") in ("Choose left", "Choose right", "Can't decide") for v in ui.get("taps", []))
         assert (root / "src/Main.scuzz").read_text() == original
         assert not (root / "src/Other.scuzz").exists()
         assert not list((root / ".scuzz/ide/records").glob("*.json"))
@@ -1414,7 +1471,10 @@ if os.uname().sysname == "Linux":
         assert any(v.get("name") == "buf" and v.get("value") == dirty for v in ui["signals"])
         write_ops(root, [{"op": "quit"}])
         assert proc.wait(timeout=15) == 0
+        assert successor_dir.is_dir() and unread.is_dir()
         previous_request = (root / "build/ide/request.json").read_text()
+        previous_card = c
+        previous_report = (root / "build/ide/report.json").read_bytes()
         write_ops(root, [{"op": "tap", "id": "button:Start"}])
         (root / "debug.json").unlink()
         review_wall_start = time.monotonic()
@@ -1423,7 +1483,16 @@ if os.uname().sysname == "Linux":
         bind_publication(root)
         write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
-        print("Counter repeated card readiness:", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; freeze to ready:", c["ready"] - c["started"], "ms")
+        if c["id"] != previous_card["id"]:
+            write_ops(root, [{"op": "tap", "id": "outlined:Randomize"}])
+            c = await_state(lambda: (candidate if (candidate := ready_card()) and candidate["id"] == previous_card["id"] else None))
+        assert "Ready cards: 2 / 2; reserved: 0" in json.dumps(read_ui(root))
+        assert successor_dir.is_dir() and unread.is_dir()
+        successor_dir.rename(root / "retained-successor")
+        unread.rename(root / "retained-independent")
+        assert c == previous_card and (root / "build/ide/request.json").read_text() == previous_request
+        assert (root / "build/ide/report.json").read_bytes() == previous_report
+        print("Counter warm card readiness:", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; saved card identity and evidence reused")
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
         write_ops(root, [{"op": "tap", "id": "button:" + lane}])
         journal = root / ".scuzz/ide/journal.json"
@@ -1514,7 +1583,10 @@ records = [json.loads(p.read_text()) for p in (source_only / ".scuzz/ide/records
 assert len(records) == 1 and records[0]["decision"] == "no-observed-difference" and records[0]["kind"] == "automatic", records
 assert not records[0]["writes"] and records[0]["evidence"]["review"]["complete"]
 assert records[0]["evidence"]["search"]["ran"] == 32
-assert not (source_only / "build/proposals/p").exists()
+assert (source_only / "build/proposals/p/proposal.json").is_file()
+excluded = [json.loads(p.read_text()) for p in (source_only / ".scuzz/ide/cards").glob("*/card.json")]
+assert len(excluded) == 1 and excluded[0]["status"] == "excluded", excluded
+assert excluded[0]["proposal"] == "p" and records[0]["card"] == excluded[0]["id"]
 assert not (source_only / ".scuzz/ide/last.json").exists()
 ui = read_ui(source_only)
 assert not any(v.get("name") == "deckArmed" and v.get("value") for v in ui["signals"])
@@ -1548,6 +1620,59 @@ for side in ("publication", "target"):
     assert outside.read_text() == (proposed if side == "publication" else original)
     assert not list((unsafe / ".scuzz/ide/cards").glob("*/card.json"))
     assert not list((unsafe / ".scuzz/ide/records").glob("*.json"))
+
+paused_root = repo / "scratchpad/paused-settings"
+shutil.rmtree(paused_root, ignore_errors=True)
+shutil.copytree(repo / "examples/counter", paused_root, ignore=shutil.ignore_patterns("build", ".scuzz"))
+paused_storage = paused_root / ".scuzz/ide"
+paused_storage.mkdir(parents=True)
+paused_metadata = paused_storage / "session.json"
+paused_metadata.write_text(json.dumps({"v": 1, "baseline_epoch": "restored-paused-source", "objective": "Review paused settings", "allowed": ["src/Main.scuzz"], "mode": "external", "model": "smollm3-3b", "requests": 0}))
+paused_source = (paused_root / "src/Main.scuzz").read_text()
+paused_inject = write_ops(paused_root, [{"op": "tap", "id": "choicechip:Session"}])
+paused_env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(paused_inject), SCUZZ_UI_INJECT=str(paused_inject), SCUZZ_UI_DEBUG_DUMP=str(paused_root / "debug.json"))
+paused_log = open(paused_root / "live.log", "w")
+paused_proc = subprocess.Popen([str(editor)], cwd=paused_root, env=paused_env, stdout=paused_log, stderr=paused_log)
+def paused_wait(predicate):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        assert paused_proc.poll() is None, (paused_root / "live.log").read_text()[-1000:]
+        try:
+            result = predicate()
+            if result: return result
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        time.sleep(.025)
+    raise AssertionError("paused settings deadline")
+def paused_saved():
+    return json.loads(paused_metadata.read_text())
+def paused_ready_ui():
+    value = read_ui(paused_root)
+    return value if any(f.get("label") == "One short objective" for f in value.get("fields", [])) else None
+try:
+    ui = paused_wait(paused_ready_ui)
+    initial = paused_saved()
+    expected = {"objective": initial["objective"], "allowed": initial["allowed"], "mode": 0, "model": initial["model"]}
+    assert any(v.get("type") == "str" and v.get("value") == json.dumps(expected, separators=(',', ':')) for v in ui["signals"])
+    index = next(f["i"] for f in ui["fields"] if f.get("label") == "One short objective")
+    write_ops(paused_root, [{"op": "text", "i": index, "value": "Another paused objective"}])
+    changed = paused_wait(lambda: (value if (value := paused_saved())["objective"] == "Another paused objective" and value["baseline_epoch"] != initial["baseline_epoch"] else None))
+    time.sleep(.7)
+    assert paused_saved()["baseline_epoch"] == changed["baseline_epoch"]
+    write_ops(paused_root, [{"op": "text", "i": index, "value": initial["objective"]}])
+    restored = paused_wait(lambda: (value if (value := paused_saved())["objective"] == initial["objective"] and value["baseline_epoch"] != changed["baseline_epoch"] else None))
+    assert restored["baseline_epoch"] != initial["baseline_epoch"]
+    assert restored["requests"] == 0 and not (paused_root / "build/ide/request.json").exists()
+    assert (paused_root / "src/Main.scuzz").read_text() == paused_source
+    write_ops(paused_root, [{"op": "quit"}])
+    assert paused_proc.wait(timeout=15) == 0
+    print("Headless session restores its settings. Paused objective changes advance the baseline once. No request or source write starts.")
+finally:
+    if paused_proc.poll() is None:
+        paused_proc.terminate()
+        paused_proc.wait(timeout=15)
+    paused_log.close()
+
 PYINTEGRITY
   # Live generation: mutation sites of the working tree become proposals.
   python3 - <<'PY'
