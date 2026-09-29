@@ -1824,6 +1824,7 @@ slice_mobile() {
 slice_macos_app() {
   need_scuzz
   need_cmd python3 "Install the Xcode command-line tools"
+  make -C crates/embedder-desktop test CC=clang
   python3 crates/embedder-desktop/tests/test_package.py "$SCUZZ"
   python3 crates/runtime/tests/test_net_apple.py
 }
