@@ -52,13 +52,17 @@ build/net_apple.o: $(RUNTIME)/src/net_apple.m $(RUNTIME)/src/net_transport.h $(R
 build/%.o: src/%.m include/scuzz_embedder.h | build
 	$(CC) $(OBJCFLAGS) $(INCLUDES) -c $< -o $@
 
+build/test_macos_events: tests/test_macos_events.m build/libscuzz_embedder.a | build
+	$(CC) $(OBJCFLAGS) $(INCLUDES) tests/test_macos_events.m -Lbuild \
+		-lscuzz_embedder -framework Cocoa -framework CoreGraphics -o $@
+
 lib: build/libscuzz_embedder.a
 
 build/libscuzz_embedder.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-test: lib
-	@echo "embedder-desktop: lib ok (Cocoa present)"
+test: lib build/test_macos_events
+	./build/test_macos_events
 
 else
 

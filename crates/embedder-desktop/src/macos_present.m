@@ -530,6 +530,9 @@ static void ensure_app(void) {
     return;
   [NSApplication sharedApplication];
   [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+  /* NSApplication.run calls this before it starts its event loop. Scuzz
+   * owns the event pump, so complete the AppKit launch here. */
+  [NSApp finishLaunching];
   g_app_ready = 1;
 }
 
