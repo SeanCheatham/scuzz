@@ -1,4 +1,4 @@
 [fuzz]
 schedule_seed = "18"
 schedule_picks = ["setup 1:-"]
-events = ["tap choicechip:Session", "tap outlined:Check"]
+events = ["tap choicechip:Develop", "tap outlined:Check"]

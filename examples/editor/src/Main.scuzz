@@ -522,11 +522,16 @@ def showWork(w: String, raw: String, tls: List[String], works: List[String], lan
     _ = showStep(step, stepTitle, rowsA, rowsB, viewA, viewB, a, b, Lanes.usefulStep(item, a, b))
   } yield ()
 
-def stopOwned(fuzzPid: Signal[Int], diffPid: Signal[Int]): IO[Unit] =
-  IO.foreachDiscard([Signal.get(fuzzPid), Signal.get(diffPid)], pid => if (pid == 0) IO.pure(()) else Sys.kill(pid).handleErrorWith(_ => IO.pure(())))
+def stopOwned(fuzzPid: Signal[Int], diffPid: Signal[Int], packagePid: Signal[Int]): IO[Unit] =
+  IO.foreachDiscard([Signal.get(fuzzPid), Signal.get(diffPid), Signal.get(packagePid)], pid => if (pid == 0) IO.pure(()) else Sys.kill(pid).handleErrorWith(_ => IO.pure(())))
 
 def startFuzz(root: String): IO[Int] =
-  Sys.spawn(Str.concat("scuzz fuzz --iterations 0 ", root)).handleErrorWith(_ => IO.pure(0))
+  for {
+    log = Fs.join(root, "build/ide/fuzz.log")
+    _ <- Fs.mkdirs(Fs.dirname(log))
+    _ <- Fs.write(log, "")
+    pid <- Sys.spawn(Str.concat("exec scuzz fuzz --iterations 32 ", Str.concat(Lanes.shQuote(root), Str.concat(" > ", Str.concat(Lanes.shQuote(log), " 2>&1"))))).handleErrorWith(_ => IO.pure(0))
+  } yield pid
 
 def fuzzAlive(pid: Int): IO[Int] =
   Sys.alive(pid).handleErrorWith(_ => IO.pure(0))
@@ -542,6 +547,38 @@ def loadFuzzMaps(root: String): IO[(List[String], List[String])] =
 def loadFuzzStatus(root: String): IO[List[String]] =
   Chrome.readOr(Chrome.fuzzFile(root, "summary.json")).map(raw => Chrome.statusLines(raw))
 
+def fuzzLogStatus(root: String): IO[List[String]] =
+  Chrome.readOr(Fs.join(root, "build/ide/fuzz.log")).map(raw => Chrome.nonEmptyLines(raw))
+
+def packageTarget(index: Int): String =
+  if (index == 0) "linux" else if (index == 1) "macos" else if (index == 2) "android" else if (index == 3) "ios" else "web"
+
+def packagePoll(pid: Int, active: Signal[Int], status: Signal[String], output: Signal[String]): IO[Unit] =
+  for {
+    chunk <- IO.timeout(250, Sys.childRead(pid, 4096)).handleErrorWith(_ => IO.pure(""))
+    combined = Str.concat(Signal.get(output), chunk)
+    kept = if (Str.len(combined) > 32768) Str.slice(combined, Str.len(combined) - 32768, 32768) else combined
+    _ = Signal.set(output, kept)
+    alive <- Sys.alive(pid)
+    _ <- if (alive != 0) packagePoll(pid, active, status, output) else for {
+  _ = Signal.set(active, 0)
+  _ = Signal.set(status, "Package command ended. Read its result and check build/package.")
+} yield ()
+  } yield ()
+
+def startPackage(root: String, target: String, active: Signal[Int], status: Signal[String], output: Signal[String]): IO[Unit] =
+  for {
+    cli <- scuzzCli()
+    _ <- if (Signal.get(active) != 0) IO.pure(()) else for {
+  _ = Signal.set(status, Str.concat("Building ", Str.concat(target, " package")))
+  _ = Signal.set(output, "")
+  command = Str.concat("exec ", Str.concat(Lanes.shQuote(cli), Str.concat(" package --target ", Str.concat(target, Str.concat(" ", Str.concat(Lanes.shQuote(root), " --message-format=json"))))))
+  pid <- Sys.spawn(command).handleErrorWith(e => IO.pure(0))
+  _ = Signal.set(active, pid)
+  _ <- if (pid == 0) IO.pure(Signal.set(status, "Could not start package build")) else Fiber.fork(packagePoll(pid, active, status, output)).map(_ => ())
+} yield ()
+  } yield ()
+
 def loadClaimNames(root: String, rels: List[String]): IO[List[String]] =
   IO.foreach(rels, rel => Chrome.readOr(Fs.join(root, rel)).map(src => Chrome.claimNames(src))).map(xss => List.distinct(List.flatten(xss)))
 
@@ -551,13 +588,16 @@ def walkTree(root: String): IO[List[String]] =
   } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepWalk(s)))
 
 def landmarkRail(page: Signal[Int]): View =
-  View.focusGroup(View.wrap(View.choiceChip(page, 0, "Live"), View.choiceChip(page, 1, "Verify"), View.choiceChip(page, 2, "Session"), View.choiceChip(page, 3, "Timeline")))
+  View.focusGroup(View.wrap(View.choiceChip(page, 0, "Develop"), View.choiceChip(page, 1, "Verify"), View.choiceChip(page, 2, "Run")))
 
-def landmarkBook(page: Signal[Int], live: View, verify: View, session: View, timeline: View): View =
-  View.semantics("Index book", View.column(landmarkRail(page), View.showWhen(page, 0, View.expanded(live)), View.showWhen(page, 1, View.expanded(verify)), View.showWhen(page, 2, View.expanded(session)), View.showWhen(page, 3, View.expanded(timeline))))
+def developBook(section: Signal[Int], objective: View, timeline: View, source: View): View =
+  View.column(View.focusGroup(View.wrap(View.choiceChip(section, 0, "Review"), View.choiceChip(section, 1, "Code"))), View.showWhen(section, 0, View.expanded(View.scroll(View.column(objective, timeline)))), View.showWhen(section, 1, View.expanded(source)))
+
+def landmarkBook(page: Signal[Int], developSection: Signal[Int], source: View, verify: View, objective: View, campaign: View, run: View, timeline: View): View =
+  View.semantics("Workspace", View.column(landmarkRail(page), View.showWhen(page, 0, View.expanded(developBook(developSection, objective, timeline, source))), View.showWhen(page, 1, View.expanded(View.scroll(View.column(verify, campaign)))), View.showWhen(page, 2, View.expanded(View.scroll(run)))))
 
 def initialPage(): IO[Int] =
-  IO.pure(2)
+  IO.pure(0)
 
 @main def main: IO[Unit] =
   for {
@@ -748,6 +788,10 @@ Y
     fuzzSometimesRows = Signal.make([]: List[String])
     fuzzTriggerRows = Signal.make([]: List[String])
     fuzzStatus = Signal.make([]: List[String])
+    packagePid = Signal.make(0)
+    packageStatus = Signal.make("Choose a target and build a package")
+    packageOutput = Signal.make("")
+    packageChoice = Signal.make(-1)
     onChip = Signal.make(1)
     offChip = Signal.make(0)
     findQ = Signal.make("")
@@ -756,6 +800,7 @@ Y
     findOpen = Signal.make(Str.len(""))
     firstPage <- initialPage()
     page = Signal.make(firstPage)
+    developSection = Signal.make(0)
     title = Signal.make(pkg)
     diffPid = Signal.make(0)
     deltaRaw = Signal.make("")
@@ -834,7 +879,7 @@ Y
   _ = Signal.set(fuzzSometimesRows, maps._1)
   _ = Signal.set(fuzzTriggerRows, maps._2)
   alive <- fuzzAlive(fp)
-  _ <- if (alive != 0) IO.pure(()) else for {
+  _ <- if (alive != 0) fuzzLogStatus(dir).map(rows => Signal.set(fuzzStatus, if (List.isEmpty(rows)) ["Fuzz and mutation campaign is running"] else List.drop(rows, if (List.len(rows) > 20) List.len(rows) - 20 else 0))) else for {
   lines <- loadFuzzStatus(dir)
   _ = Signal.set(fuzzStatus, lines)
   _ = Signal.set(fuzzPid, 0)
@@ -857,7 +902,7 @@ Y
   _ = Signal.set(origs, List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(buf)))
   _ = Signal.set(dirty, Str.len(""))
 } yield ())), View.outlinedButton("Check", _ => for {
-  _ = Signal.set(page, 0)
+  _ = Signal.set(page, 1)
   _ <- editorWrite(lanes, deck, _ => for {
   _ = Property.sometimes("tappedCheck")
   checked = Signal.get(buf)
@@ -907,7 +952,7 @@ Y
   _ = Signal.set(origs, os)
   _ = Signal.set(orig, List.at(os, Signal.get(idx)))
   _ = Signal.set(dirty, Str.len(""))
-} yield ())))), View.stack(landmarkBook(page, View.section("live", "Live", View.column(View.each(lives, s => View.textButton(Chrome.stemOf(s), _ => for {
+} yield ())))), View.column(View.stack(landmarkBook(page, developSection, View.section("source", "Source", View.column(View.each(lives, s => View.textButton(Chrome.stemOf(s), _ => for {
   _ = Property.sometimes("tappedLive")
   next = Chrome.joinChild(Signal.get(dirSig), s)
   body <- Fs.read(next).handleErrorWith(_ => IO.pure(""))
@@ -921,32 +966,29 @@ Y
   _ = Signal.set(dirty, d)
   _ = Signal.set(pathSig, List.at(ps, i2))
   _ = Signal.set(page, 0)
+  _ = Signal.set(developSection, 1)
 } yield ())), View.editor(buf), View.showWhen(Signal.map(infoLine, s => if (Str.isEmpty(s)) 0 else 1), 1, View.bindText(infoLine)))), View.section("verify", "Verify", View.column(View.each(claims, name => View.textButton(name, _ => for {
   _ = Property.sometimes("tappedVerify")
   _ = Signal.set(page, 1)
 } yield ())), View.each(scenarios, s => View.textButton(s, _ => for {
   _ = Property.sometimes("tappedVerify")
   _ = Signal.set(page, 1)
-} yield ())))), View.section("session", "Session", View.column(Session.view(Signal.get(dirSig), objectiveSession, _ => deckNext(Signal.get(dirSig), lanes, deck), _ => queueGenerate(Signal.get(dirSig), lanes, deck), _ => queueClear(lanes, deck)), View.wrap(View.button("Run", _ => for {
-  _ = Property.sometimes("tappedRun")
-  line <- runProject(Signal.get(dirSig))
-  runOut = List.append(Signal.get(output), line)
-  _ = Signal.set(output, runOut)
-} yield ()), View.outlinedButton("Fuzz", _ => for {
+} yield ())))), View.section("objective", "Objective", View.column(Session.view(Signal.get(dirSig), objectiveSession, _ => deckNext(Signal.get(dirSig), lanes, deck), _ => queueGenerate(Signal.get(dirSig), lanes, deck), _ => queueClear(lanes, deck)), View.bindText(readyStatus))), View.section("campaign", "Fuzz, mutation, and coverage", View.column(View.button("Fuzz and mutate", _ => for {
   _ = Property.sometimes("tappedFuzz")
   root = Signal.get(dirSig)
-  pid <- startFuzz(root)
+  _ = Signal.set(fuzzStatus, ["Running fuzz and mutation campaign (32 iterations)"])
+  pid <- if (Signal.get(fuzzPid) == 0) startFuzz(root) else IO.pure(Signal.get(fuzzPid))
   _ = Signal.set(fuzzPid, pid)
   maps <- loadFuzzMaps(root)
   _ = Signal.set(fuzzSometimesRows, maps._1)
   _ = Signal.set(fuzzTriggerRows, maps._2)
   alive <- if (pid == 0) IO.pure(0) else fuzzAlive(pid)
-  _ <- if (alive != 0) IO.pure(()) else for {
+  _ <- if (pid == 0) IO.pure(Signal.set(fuzzStatus, ["Could not start fuzz and mutation campaign"])) else if (alive != 0) IO.pure(()) else for {
   lines <- loadFuzzStatus(root)
   _ = Signal.set(fuzzStatus, lines)
   _ = Signal.set(fuzzPid, 0)
 } yield ()
-} yield ())), View.each(fuzzSometimesRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzTriggerRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzStatus, s => View.text(s)), View.showWhen(showDiags, 1, View.focusGroup(View.each(diags, s => View.button(s, _ => for {
+} yield ()), View.each(fuzzSometimesRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzTriggerRows, row => View.chip(if (Chrome.rowOn(row) != 0) onChip else offChip, Chrome.rowName(row))), View.each(fuzzStatus, s => View.text(s)), View.showWhen(showDiags, 1, View.focusGroup(View.each(diags, s => View.button(s, _ => for {
   file = Diags.diagFile(s)
   _ <- if (Str.isEmpty(file)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.get(dirSig), file)
@@ -961,12 +1003,20 @@ Y
   _ = Signal.set(dirty, d)
   _ = Signal.set(pathSig, List.at(ps, i2))
   _ = Signal.set(page, 0)
+  _ = Signal.set(developSection, 1)
 } yield ()
   _ <- Diags.jumpDiag(s)
-} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))))), View.section("timeline", "Timeline", View.scroll(View.column(View.wrap(View.button("Diff", _ => deckGuard(deck, _ => for {
+} yield ())))))), View.section("run", "Run", View.column(View.button("Run locally", _ => for {
+  _ = Property.sometimes("tappedRun")
+  line <- runProject(Signal.get(dirSig))
+  runOut = List.append(Signal.get(output), line)
+  _ = Signal.set(output, runOut)
+} yield ()), View.text("Package target"), View.wrap(View.choiceChip(packageChoice, 0, "Linux"), View.choiceChip(packageChoice, 1, "macOS"), View.choiceChip(packageChoice, 2, "Android"), View.choiceChip(packageChoice, 3, "iOS"), View.choiceChip(packageChoice, 4, "Web")), View.button("Build package", _ => if (Signal.get(packageChoice) < 0) IO.pure(Signal.set(packageStatus, "Select a target before you build")) else startPackage(Signal.get(dirSig), packageTarget(Signal.get(packageChoice)), packagePid, packageStatus, packageOutput)), View.bindText(packageStatus), View.bindText(packageOutput), View.showWhen(showOut, 1, View.each(output, s => View.text(s))))), View.section("review", "Suggested changes", View.scroll(View.column(View.wrap(View.button("Diff", _ => deckGuard(deck, _ => for {
   _ = deckEnd(lanes, deck)
   _ = Signal.set(evidenceDetails, 1)
   _ = Property.sometimes("tappedDiff")
+  _ = Signal.set(page, 0)
+  _ = Signal.set(developSection, 0)
   root = Signal.get(dirSig)
   _ = Signal.set(deltaStatus, ["running scuzz diff"])
   _ = Signal.set(works, []: List[String])
@@ -997,9 +1047,13 @@ Y
   _ = if (!Str.isEmpty(err) || List.isEmpty(ws)) () else showWork(List.at(ws, 0), Signal.get(deltaRaw), Signal.get(laneTexts), ws, laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
 } yield ())), View.outlinedButton("Proposals", _ => for {
   _ = Property.sometimes("tappedProposals")
+  _ = Signal.set(page, 0)
+  _ = Signal.set(developSection, 0)
   _ <- deckNext(Signal.get(dirSig), lanes, deck)
 } yield ()), View.outlinedButton("Generate", _ => for {
   _ = Property.sometimes("tappedGenerate")
+  _ = Signal.set(page, 0)
+  _ = Signal.set(developSection, 0)
   root = Signal.get(dirSig)
   ents <- Fs.list(Fs.join(root, "src")).handleErrorWith(_ => IO.pure([]))
   own <- Drive.readSrcFiles(Fs.join(root, "src"), ents)
@@ -1035,5 +1089,5 @@ Y
   _ = if (same) () else Signal.set(dirty, Str.len("x"))
   _ = if (same) () else Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), nu))
   _ = Signal.set(infoLine, if (same) "no rename" else "renamed")
-} yield ())))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => queueClear(lanes, deck)).flatMap(_ => stopOwned(fuzzPid, diffPid)))
+} yield ()))))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => queueClear(lanes, deck)).flatMap(_ => stopOwned(fuzzPid, diffPid, packagePid)))
   } yield ()
