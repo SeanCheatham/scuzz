@@ -1,3 +1,3 @@
 [fuzz]
 schedule_seed = "12"
-events = ["tap choicechip:Session", "tap button:Run"]
+events = ["tap choicechip:Run", "tap button:Run locally"]
