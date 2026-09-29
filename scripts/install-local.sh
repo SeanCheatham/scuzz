@@ -11,6 +11,13 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Prefer the compiler from this checkout when it is available. A release
+# compiler can predate compiler APIs used by the current source tree.
+if [ -z "${SCUZZ_BOOTSTRAP:-}" ] && [ -x "$ROOT/examples/cli/build/cli" ]; then
+  SCUZZ_BOOTSTRAP="$ROOT/examples/cli/build/cli"
+  export SCUZZ_BOOTSTRAP
+fi
+
 "$ROOT/scripts/bootstrap.sh"
 
 DIST_ROOT="${DIST_ROOT:-$ROOT/dist}"
