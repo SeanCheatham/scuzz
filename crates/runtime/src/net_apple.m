@@ -5,16 +5,17 @@
 #include "rt_util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
 #include <unistd.h>
 
 enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
 
 /* Delegate callbacks own only Foundation values. The fiber owns runtime values. */
-@interface ScuzzHttpRequest : NSObject <NSURLSessionDataDelegate>
+@interface ScuzzHttpRequest : NSObject <NSURLSessionDataDelegate, NSURLSessionDownloadDelegate>
 @property(nonatomic) NSLock *lock;
 @property(nonatomic) NSURLRequest *request;
 @property(nonatomic) NSURLSession *session;
-@property(nonatomic) NSURLSessionDataTask *task;
+@property(nonatomic) NSURLSessionTask *task;
 @property(nonatomic) NSHTTPURLResponse *response;
 @property(nonatomic) NSMutableData *data;
 @property(nonatomic) NSString *failure;
@@ -23,6 +24,8 @@ enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
 @property(nonatomic) int readFd;
 @property(nonatomic) int writeFd;
 @property(nonatomic) NSTimeInterval responseWait;
+@property(nonatomic) NSString *streamPath;
+@property(nonatomic) int64_t streamBytes;
 - (void)start;
 - (void)close;
 @end
@@ -68,7 +71,12 @@ enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
   NSOperationQueue *queue = [NSOperationQueue new];
   queue.maxConcurrentOperationCount = 1;
   self.session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:queue];
-  self.task = [self.session dataTaskWithRequest:self.request];
+  if (self.streamPath) {
+    [[NSFileManager defaultManager] removeItemAtPath:self.streamPath error:nil];
+    self.task = [self.session downloadTaskWithRequest:self.request];
+  } else {
+    self.task = [self.session dataTaskWithRequest:self.request];
+  }
   [self.task resume];
 }
 
@@ -90,13 +98,42 @@ enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
     }
     if (size > HTTP_HEADERS_MAX)
       self.failure = @"response headers too large";
-    if (response.expectedContentLength > HTTP_BODY_MAX &&
+    if (!self.streamPath && response.expectedContentLength > HTTP_BODY_MAX &&
         ![self.request.HTTPMethod isEqualToString:@"HEAD"])
       self.failure = @"response body too large";
   }
   BOOL reject = self.cancelled || self.failure != nil;
   [self.lock unlock];
   completion(reject ? NSURLSessionResponseCancel : NSURLSessionResponseAllow);
+}
+
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)task
+ didWriteData:(int64_t)bytesWritten totalBytesWritten:(int64_t)totalBytesWritten
+totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite {
+  (void)session;
+  (void)task;
+  (void)bytesWritten;
+  (void)totalBytesExpectedToWrite;
+  [self.lock lock];
+  self.streamBytes = totalBytesWritten;
+  [self.lock unlock];
+}
+
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)task
+ didFinishDownloadingToURL:(NSURL *)location {
+  (void)session;
+  (void)task;
+  [self.lock lock];
+  NSError *error = nil;
+  if ([task.response isKindOfClass:NSHTTPURLResponse.class])
+    self.response = (NSHTTPURLResponse *)task.response;
+  NSURL *destination = [NSURL fileURLWithPath:self.streamPath];
+  if (![[NSFileManager defaultManager] moveItemAtURL:location toURL:destination error:&error])
+    self.failure = error.localizedDescription ?: @"cannot save response file";
+  NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:self.streamPath error:nil];
+  if (!self.failure && attributes)
+    self.streamBytes = [attributes fileSize];
+  [self.lock unlock];
 }
 
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task
@@ -126,11 +163,14 @@ enum { HTTP_BODY_MAX = 1024 * 1024, HTTP_HEADERS_MAX = 16384 };
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
  didCompleteWithError:(NSError *)error {
-  (void)task;
   [self.lock lock];
+  if (!self.response && [task.response isKindOfClass:NSHTTPURLResponse.class])
+    self.response = (NSHTTPURLResponse *)task.response;
   if (!self.cancelled) {
     if (error && !self.failure)
       self.failure = error.localizedDescription;
+    if (self.streamPath && self.failure)
+      [[NSFileManager defaultManager] removeItemAtPath:self.streamPath error:nil];
     self.finished = YES;
     if (self.writeFd >= 0) {
       char byte = 1;
@@ -214,10 +254,22 @@ static SzIo *apple_http_result(void *unused, void *value) {
       sz_release(v);
       headers = next;
     }
-    SzString *body = sz_string_from_bytes(request.data.bytes, request.data.length);
-    void *response = sz_net_http_resp(request.response.statusCode, headers, body);
+    void *response;
+    SzString *body = NULL;
+    if (request.streamPath) {
+      void *status = sz_box_i64(request.response.statusCode);
+      void *count = sz_box_i64(request.streamBytes);
+      SzPair *inner = sz_pair_new(headers, count);
+      response = sz_pair_new(status, inner);
+      sz_release(status);
+      sz_release(count);
+      sz_release(inner);
+    } else {
+      body = sz_string_from_bytes(request.data.bytes, request.data.length);
+      response = sz_net_http_resp(request.response.statusCode, headers, body);
+    }
     sz_release(headers);
-    sz_release(body);
+    if (body) sz_release(body);
     [request.lock unlock];
     return pure_drop(response);
   }
@@ -250,7 +302,8 @@ static ScuzzHttpRequest *apple_http_request(SzPair *parameters) {
     return state;
   }
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:target];
-  request.HTTPMethod = [NSString stringWithUTF8String:method];
+  BOOL stream = strcmp(method, "GET_TO_FILE") == 0;
+  request.HTTPMethod = stream ? @"GET" : [NSString stringWithUTF8String:method];
   [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
   SzList *rows = sz_map_to_list(headers);
   for (SzList *it = rows; it && !sz_list_is_empty(it); it = sz_list_tail(it)) {
@@ -265,7 +318,15 @@ static ScuzzHttpRequest *apple_http_request(SzPair *parameters) {
     [request setValue:value forHTTPHeaderField:name];
   }
   sz_release(rows);
-  if (body)
+  if (stream && body) {
+    state.streamPath = [[NSString alloc] initWithBytes:sz_string_cstr(body)
+                                                length:sz_string_len(body)
+                                              encoding:NSUTF8StringEncoding];
+    if (!state.streamPath || !state.streamPath.length) {
+      state.failure = @"invalid output path";
+      return state;
+    }
+  } else if (body)
     request.HTTPBody = [NSData dataWithBytes:sz_string_cstr(body) length:sz_string_len(body)];
   state.request = request;
   return state;
@@ -276,6 +337,28 @@ SzIo *sz_net_live_http_req(const char *method, SzString *url, SzMap *headers, Sz
   env->operation = sz_net_http_op(method);
   SzString *name = sz_string_from_cstr(method);
   SzPair *payload = sz_pair_new(headers, body);
+  SzPair *arguments = sz_pair_new(name, payload);
+  SzPair *parameters = sz_pair_new(url, arguments);
+  SzPair *pack = sz_pair_new(parameters, env);
+  sz_release(name);
+  sz_release(payload);
+  sz_release(arguments);
+  sz_release(parameters);
+  SzIo *inner = fm_drop(sz_io_delay(apple_http_start, pack), apple_http_wait, env);
+  SzIo *finalizer = sz_io_delay(apple_http_close, env);
+  SzIo *io = sz_io_ensure(inner, finalizer);
+  sz_release(pack);
+  sz_release(inner);
+  sz_release(finalizer);
+  sz_release(env);
+  return io;
+}
+
+SzIo *sz_net_live_http_get_to_file(SzString *url, SzMap *headers, SzString *path) {
+  AppleHttpEnv *env = rc_box_zero(sizeof *env);
+  env->operation = "Net.httpGetToFile";
+  SzString *name = sz_string_from_cstr("GET_TO_FILE");
+  SzPair *payload = sz_pair_new(headers, path);
   SzPair *arguments = sz_pair_new(name, payload);
   SzPair *parameters = sz_pair_new(url, arguments);
   SzPair *pack = sz_pair_new(parameters, env);

@@ -417,6 +417,8 @@ int sz_net_http_header_valid(const char *name, const char *val) {
 
 
 const char *sz_net_http_op(const char *method) {
+  if (method && strcmp(method, "GET_TO_FILE") == 0)
+    return "Net.httpGetToFile";
   if (method && strcmp(method, "POST") == 0)
     return "Net.httpPost";
   if (method && strcmp(method, "PUT") == 0)

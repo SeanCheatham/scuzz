@@ -1,6 +1,7 @@
-record Process(job: Fiber[Unit], exited: Ref[Bool], url: String, key: String, dir: String)
+record Process(job: Fiber[Unit], exited: Ref[Bool], url: String, key: String, dir: String, device: String)
 
 import Models.Model
+import Models.gpuAvailable
 
 def progress(message: String): IO[Unit] =
   Sys.spawn(Str.concat("printf '%s\\n' ", Str.concat(Models.quote(message), " >&2"))).flatMap(pid => IO.ensure(progressDone(pid), Sys.childClose(pid)))
@@ -21,6 +22,7 @@ def resources(m: Model): IO[(Int, Bool)] =
 def start(exe: String, weights: String, m: Model): IO[Process] =
   for {
     profile <- resources(m)
+    device <- gpuAvailable(exe)
     nonce <- Uuid.v4()
     port <- Random.nextInt(30000)
     cache <- Models.userCache()
@@ -29,11 +31,12 @@ def start(exe: String, weights: String, m: Model): IO[Process] =
     exited <- Ref.of(false)
     limit = if (profile._2) Str.concat("ulimit -v ", Str.concat(Str.fromInt(m.memory / 1024), " || exit 1; ")) else ""
     prefix = Str.concat(limit, Str.concat("printf '%s' \"$$\" > ", Str.concat(Models.quote(Fs.join(dir, "pid")), "; export MALLOC_ARENA_MAX=2; exec ")))
-    args = List.foldLeft([Models.quote(exe), " -m ", Models.quote(weights), " --host 127.0.0.1 --port ", Str.fromInt(port + 30000), " --api-key ", Models.quote(nonce), " --alias ", Models.quote(nonce), " --device none --n-gpu-layers 0 --no-op-offload --fit off --ctx-size 4096 --n-predict 1024 --parallel 1 --cache-ram 0 --no-context-shift --jinja --reasoning off --no-webui --threads ", Str.fromInt(profile._1), " --threads-batch ", Str.fromInt(profile._1)], "", p => Str.concat(p._1, p._2))
+    deviceArgs = if (device != "") Str.concat(" --device ", Str.concat(Models.quote(device), " --n-gpu-layers auto --fit on")) else " --device none --n-gpu-layers 0 --no-op-offload --fit off"
+    args = List.foldLeft([Models.quote(exe), " -m ", Models.quote(weights), " --host 127.0.0.1 --port ", Str.fromInt(port + 30000), " --api-key ", Models.quote(nonce), " --alias ", Models.quote(nonce), deviceArgs, " --ctx-size 4096 --n-predict 1024 --parallel 1 --cache-ram 0 --no-context-shift --jinja --reasoning off --no-webui --threads ", Str.fromInt(profile._1), " --threads-batch ", Str.fromInt(profile._1)], "", p => Str.concat(p._1, p._2))
     logs = Str.concat(" > ", Str.concat(Models.quote(Fs.join(dir, "server.log")), " 2>&1"))
     job <- Fiber.fork(IO.ensure(Sys.exec(Str.concat(prefix, Str.concat(args, logs))).map(_ => ()), Ref.set(exited, true)))
-    _ <- progress(Str.concat(if (profile._2) "Loading model; inference virtual memory limit is enforced; log: " else "Loading model; this host cannot enforce an inference virtual memory limit; log: ", Fs.join(dir, "server.log")))
-  } yield Process(job, exited, Str.concat("http://127.0.0.1:", Str.fromInt(port + 30000)), nonce, dir)
+    _ <- progress(Str.concat(if (device != "") "GPU device selected. " else "CPU inference selected. ", Str.concat(if (profile._2) "Loading model; inference virtual memory limit is enforced; log: " else "Loading model; this host cannot enforce an inference virtual memory limit; log: ", Fs.join(dir, "server.log"))))
+  } yield Process(job, exited, Str.concat("http://127.0.0.1:", Str.fromInt(port + 30000)), nonce, dir, if (device != "") device else "cpu")
 
 def stop(p: Process): IO[Unit] =
   Fiber.interrupt(p.job).flatMap(_ => Fs.delete(p.dir).handleErrorWith(_ => IO.pure(())))
@@ -97,8 +100,8 @@ def complete(p: Process, request: Json, m: Model): IO[Json] =
     _ <- Models.need(Proposal.str(reply, "generator") == m.id, "generated model identity does not match")
     pid <- Fs.read(Fs.join(p.dir, "pid"))
     rss <- Models.run(Str.concat("ps -o rss= -p ", Str.fromInt(Str.toInt(Str.trim(pid), 0)))).handleErrorWith(_ => IO.pure("0"))
-    provenance = Models.text(Json.Obj([("model", Json.Str(m.id)), ("revision", Json.Str(m.revision)), ("sha256", Json.Str(m.sha256)), ("backend", Json.Str(Models.backendBuild())), ("context", Json.Int(4096)), ("output", Json.Int(1024)), ("seed", Json.Int(1)), ("temperature", Json.Float(0.2))]))
-  } yield Json.Obj([("reply", Json.set(reply, "generator", Json.Str(provenance))), ("prompt_tokens", Json.Int(count)), ("usage", Proposal.field(result, "usage")), ("timings", Proposal.field(result, "timings")), ("observed_rss_bytes", Json.Int(Str.toInt(Str.trim(rss), 0) * 1024))])
+    provenance = Models.text(Json.Obj([("model", Json.Str(m.id)), ("revision", Json.Str(m.revision)), ("sha256", Json.Str(m.sha256)), ("backend", Json.Str(Models.backendBuild())), ("device", Json.Str(p.device)), ("context", Json.Int(4096)), ("output", Json.Int(1024)), ("seed", Json.Int(1)), ("temperature", Json.Float(0.2))]))
+  } yield Json.Obj([("reply", Json.set(reply, "generator", Json.Str(provenance))), ("device", Json.Str(p.device)), ("prompt_tokens", Json.Int(count)), ("usage", Proposal.field(result, "usage")), ("timings", Proposal.field(result, "timings")), ("observed_rss_bytes", Json.Int(Str.toInt(Str.trim(rss), 0) * 1024))])
 
 def generate(request: Json, id: String, allowDownload: Bool, notify: String => IO[Unit]): IO[Json] =
   for {
@@ -132,3 +135,4 @@ def command(root: String, file: String, id: String, out: String, allowDownload: 
     result = Json.Obj([("v", Json.Int(1)), ("result", Json.Str("published")), ("request", Proposal.field(request, "request")), ("model", Json.Str(id)), ("candidate", Json.Str(out)), ("baseline", Proposal.field(request, "baseline")), ("elapsed_ms", Json.Int(ended - started)), ("behavioral_review", Json.Str("pending")), ("accepted", Json.Bool(false)), ("measurement", Json.remove(measured, "reply"))])
     _ <- IO.println(Models.text(result))
   } yield ()
+

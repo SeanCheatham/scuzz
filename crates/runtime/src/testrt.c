@@ -1622,6 +1622,54 @@ SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzMap *headers, 
   return io;
 }
 
+static SzIo *testrt_http_file_written(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
+  void *status = pack ? pack->left : NULL;
+  SzPair *inner = pack ? (SzPair *)pack->right : NULL;
+  SzMap *headers = inner ? (SzMap *)inner->left : NULL;
+  SzString *body = inner ? (SzString *)inner->right : NULL;
+  void *count;
+  SzPair *tail, *result;
+  (void)value;
+  count = sz_box_i64(body ? sz_string_len(body) : 0);
+  tail = sz_pair_new(headers, count);
+  result = sz_pair_new(status, tail);
+  sz_release(count);
+  sz_release(tail);
+  return pure_drop(result);
+}
+
+static SzIo *testrt_http_file_response(void *value, void *env) {
+  SzPair *request = (SzPair *)env;
+  SzString *path = request ? (SzString *)request->right : NULL;
+  SzPair *response = (SzPair *)value;
+  SzPair *parts = response ? (SzPair *)response->right : NULL;
+  SzString *body = parts ? (SzString *)parts->right : NULL;
+  SzPair *inner;
+  SzPair *pack;
+  SzIo *io;
+  if (!response || !response->left || !parts || !path)
+    return sz_io_fail_cstr("Net.httpGetToFile: invalid response");
+  inner = sz_pair_new(parts->left, body);
+  pack = sz_pair_new(response->left, inner);
+  sz_release(inner);
+  io = fm_drop(sz_fs_write(path, body), testrt_http_file_written, pack);
+  sz_release(pack);
+  return io;
+}
+
+SzIo *sz_testrt_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path) {
+  SzPair *request;
+  SzIo *io;
+  if (!url || !path)
+    sz_panic("sz_testrt_net_http_get_to_file(null)");
+  request = sz_pair_new(url, path);
+  io = fm_drop(sz_testrt_net_http_req("GET", url, headers, NULL),
+               testrt_http_file_response, request);
+  sz_release(request);
+  return io;
+}
+
 const char *sz_testrt_net_last_serve_body(void) {
   return g_last_serve_body ? g_last_serve_body : "";
 }

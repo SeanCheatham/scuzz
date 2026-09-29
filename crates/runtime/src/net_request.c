@@ -66,9 +66,13 @@ static SzIo *http_after_dispatch(void *value, void *env) {
     return fail_drop(sz_error_new(6, "Net: invalid URL"));
   if (!request_headers_valid(headers))
     return fail_drop(sz_error_new(6, "Net: invalid request headers"));
+  if ((intptr_t)value && strcmp(method, "GET_TO_FILE") == 0)
+    return sz_testrt_net_http_get_to_file(url, headers, body);
   if ((intptr_t)value)
     return sz_testrt_net_http_req(method, url, headers, body);
   sz_timeline_log_cstr(sz_net_http_op(method), sz_string_cstr(url));
+  if (strcmp(method, "GET_TO_FILE") == 0)
+    return sz_net_live_http_get_to_file(url, headers, body);
   return sz_net_live_http_req(method, url, headers, body);
 }
 
@@ -92,6 +96,26 @@ static SzIo *sz_net_http_req(const char *method, SzString *url, SzMap *headers, 
 }
 
 SzIo *sz_net_http_get(SzString *url, SzMap *headers) { return sz_net_http_req("GET", url, headers, NULL); }
+
+SzIo *sz_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path) {
+  SzString *ms;
+  SzPair *payload;
+  SzPair *inner;
+  SzPair *pack;
+  SzIo *io;
+  if (!url || !path)
+    sz_panic("sz_net_http_get_to_file(null)");
+  ms = sz_string_from_cstr("GET_TO_FILE");
+  payload = sz_pair_new(headers, path);
+  inner = sz_pair_new(ms, payload);
+  sz_release(payload);
+  pack = sz_pair_new(url, inner);
+  sz_release(ms);
+  sz_release(inner);
+  io = fm_drop(sz_io_delay(http_dispatch, pack), http_after_dispatch, pack);
+  sz_release(pack);
+  return io;
+}
 
 SzIo *sz_net_http_post(SzString *url, SzMap *headers, SzString *body) {
   if (!url || !body)

@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int failures;
 static void check(int ok, const char *name) {
@@ -40,6 +42,15 @@ static void check_http(SzIoResult result, int expected, const char *name) {
 static const char *body(SzIoResult result) {
   return sz_string_cstr(((SzPair *)((SzPair *)result.value)->right)->right);
 }
+static SzIo *stream_request(const char *base, const char *path, const char *output) {
+  char text[2048];
+  snprintf(text, sizeof text, "%s%s", base, path);
+  SzString *url = sz_string_from_cstr(text), *file = sz_string_from_cstr(output);
+  SzIo *io = sz_net_http_get_to_file(url, NULL, file);
+  sz_release(url);
+  sz_release(file);
+  return io;
+}
 static int descriptors(void) {
   int count = 0;
   for (int fd = 0; fd < 1024; fd++) if (fcntl(fd, F_GETFD) >= 0) count++;
@@ -69,6 +80,31 @@ int scuzz_net_apple_proof(void) {
   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++) {
     r = run(request(base, invalid[i], "GET", NULL)); check(!r.ok, invalid[i]); drop(r);
   }
+  char output[] = "/tmp/scuzz-net-stream-XXXXXX";
+  int output_fd = mkstemp(output);
+  check(output_fd >= 0, "create stream output path");
+  if (output_fd >= 0) close(output_fd);
+  const char *stream_paths[] = {"/large", "/stream-large"};
+  const int64_t stream_sizes[] = {1024 * 1024 + 1, 17 * 65536};
+  for (size_t i = 0; i < 2; i++) {
+    r = run(stream_request(base, stream_paths[i], output));
+    check_http(r, 200, stream_paths[i]);
+    if (r.ok) {
+      SzPair *inner = ((SzPair *)r.value)->right;
+      check(sz_unbox_i64(inner->right) == stream_sizes[i], "stream byte count");
+      struct stat info;
+      check(stat(output, &info) == 0 && info.st_size == stream_sizes[i], "stream file size");
+    }
+    drop(r);
+    unlink(output);
+  }
+  SzIo *inner = stream_request(base, "/slow", output);
+  SzIo *bounded = sz_io_timeout(30, inner);
+  sz_release(inner);
+  r = run(bounded);
+  check(!r.ok && access(output, F_OK) != 0, "cancelled stream removes output file");
+  drop(r);
+  unlink(output);
   SzMap *bad = header(NULL, "Host", "wrong");
   r = run(request(base, "/forbidden", "GET", bad)); check(!r.ok, "reject reserved header"); drop(r); sz_release(bad);
   bad = header(header(NULL, "X-Proof", "one"), "x-proof", "two");

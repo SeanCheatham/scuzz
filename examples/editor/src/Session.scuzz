@@ -10,7 +10,7 @@ def create(root: String): IO[SessionS] =
     reviews <- Ref.of(OwnedJob("", []: List[Fiber[Unit]], false))
     savedRaw <- Fs.read(Fs.join(Cards.storage(root), "session.json")).handleErrorWith(_ => IO.pure("{}"))
     saved <- Proposal.parse(savedRaw, 8192)
-    id = Json.getStr(saved, "model", "smollm3-3b")
+    id = Json.getStr(saved, "model", "qwen3.5-4b")
     selected <- Models.select(id)
     resolved = Proposal.field(saved, "resolved_model")
     _ <- Models.need(Json.getStr(saved, "mode", "external") != "local" || Proposal.str(resolved, "revision") == selected.revision && Proposal.str(resolved, "sha256") == selected.sha256 && Proposal.str(saved, "backend") == Models.backendBuild(), "saved local model identity does not match the pinned catalog")
@@ -133,7 +133,7 @@ def download(root: String, s: SessionS): IO[Unit] =
   model <- Models.select(id)
   _ <- Generate.resources(model)
   _ <- Models.hostBackend()
-  _ = Signal.set(s.status, "Downloading the pinned model and CPU backend; setup deadline is 60 minutes. Pause cancels setup.")
+  _ = Signal.set(s.status, "Downloading the pinned model and inference backend; setup deadline is 60 minutes. Pause cancels setup.")
   _ <- Models.download(id)
   _ <- Models.setupBackend(true)
   _ <- inspect(s)
@@ -180,7 +180,7 @@ def selectModel(root: String, s: SessionS, id: String, prepare: Unit => IO[Unit]
   } yield ()
 
 def view(root: String, s: SessionS, prepare: Unit => IO[Unit], generateNext: Unit => IO[Unit], cancelCard: Unit => IO[Unit]): View =
-  View.scroll(View.column(View.text("Objective"), View.textField(s.objective, "One short objective"), View.text("Allowed source paths, separated by commas"), View.textField(s.paths, "src/Main.scuzz"), View.wrap(View.choiceChip(s.mode, 0, "External proposals"), View.choiceChip(s.mode, 1, "Local model")), View.text("Limits: 3 files / 64 KiB; input 1 MiB; response 128 KiB; context 4096; output 1024; request 15 minutes; 8 requests; 32 search cases; 2 cards; 16 feedback records."), View.text("Setup: download 60 minutes; load 5 minutes; memory budget 4 GiB or 8 GiB plus 2 GiB host reserve; at most 4 CPU threads."), View.showWhen(s.mode, 1, View.column(View.each(s.models, m => View.column(View.textButton(Proposal.str(m, "name"), _ => selectModel(root, s, Proposal.str(m, "id"), prepare, cancelCard)), View.code(Models.text(m)))), View.bindText(s.model), View.text(Str.concat("CPU backend: llama.cpp ", Str.concat(Models.backendBuild(), Str.concat("; MIT; ", Models.backendLicense())))), View.button("Inspect cache", _ => run(s, _ => inspect(s)).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Download model", _ => download(root, s).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))))), View.wrap(View.button("Start", _ => cancelCard(()).flatMap(_ => start(root, s)).flatMap(_ => prepare(())).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Pause session", _ => pause(s).flatMap(_ => cancelCard(()))), View.button("Generate suggestion", _ => generateNext(()).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Export request", _ => exportRequest(root, s, false).map(_ => ()).handleErrorWith(e => IO.pure(Signal.set(s.status, e))))), View.bindText(s.status), View.bindText(s.reviewStatus), View.bindText(Signal.map(s.elapsed, ms => Str.concat("Owned work elapsed seconds: ", Str.fromInt(ms / 1000)))), View.bindText(Signal.map(s.count, n => Str.concat("Generation requests: ", Str.concat(Str.fromInt(n), " / 8"))))))
+  View.scroll(View.column(View.text("Objective"), View.textField(s.objective, "One short objective"), View.text("Allowed source paths, separated by commas"), View.textField(s.paths, "src/Main.scuzz"), View.wrap(View.choiceChip(s.mode, 0, "External proposals"), View.choiceChip(s.mode, 1, "Local model")), View.text("Limits: 3 files / 64 KiB; input 1 MiB; response 128 KiB; context 4096; output 1024; request 15 minutes; 8 requests; 32 search cases; 2 cards; 16 feedback records."), View.text("Setup: download 60 minutes; load 5 minutes; memory budget 4 GiB or 8 GiB plus 2 GiB host reserve; at most 4 CPU threads."), View.showWhen(s.mode, 1, View.column(View.each(s.models, m => View.column(View.textButton(Proposal.str(m, "name"), _ => selectModel(root, s, Proposal.str(m, "id"), prepare, cancelCard)), View.code(Models.text(m)))), View.bindText(s.model), View.text(Str.concat("Inference backend: llama.cpp ", Str.concat(Models.backendBuild(), Str.concat("; automatic GPU selection with CPU fallback; MIT; ", Models.backendLicense())))), View.button("Inspect cache", _ => run(s, _ => inspect(s)).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Download model", _ => download(root, s).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))))), View.wrap(View.button("Start", _ => cancelCard(()).flatMap(_ => start(root, s)).flatMap(_ => prepare(())).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Pause session", _ => pause(s).flatMap(_ => cancelCard(()))), View.button("Generate suggestion", _ => generateNext(()).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Export request", _ => exportRequest(root, s, false).map(_ => ()).handleErrorWith(e => IO.pure(Signal.set(s.status, e))))), View.bindText(s.status), View.bindText(s.reviewStatus), View.bindText(Signal.map(s.elapsed, ms => Str.concat("Owned work elapsed seconds: ", Str.fromInt(ms / 1000)))), View.bindText(Signal.map(s.count, n => Str.concat("Generation requests: ", Str.concat(Str.fromInt(n), " / 8"))))))
 
 def settings(s: SessionS): String =
   Proposal.text(Json.Obj([("objective", Json.Str(Signal.get(s.objective))), ("allowed", Json.Arr(List.map(allowed(s), p => Json.Str(p)))), ("mode", Json.Int(Signal.get(s.mode))), ("model", Json.Str(Signal.get(s.model)))]))
@@ -197,11 +197,10 @@ def poll(root: String, s: SessionS, cancelCard: Unit => IO[Unit]): IO[Unit] =
 
 def inspect(s: SessionS): IO[Unit] =
   for {
-    tool <- Sys.exec("command -v hf")
     supported <- Models.hostBackend().map(_ => true).handleErrorWith(_ => IO.pure(false))
-    catalog <- IO.foreach(Models.catalog(), m => Models.cached(s.cache, m).map(ready => Json.set(Models.modelJson(s.cache, m, ready), "status", Json.Str(if (ready && supported) "cached" else if (supported && tool._1 == 0) "downloadable" else "unavailable"))))
+    catalog <- IO.foreach(Models.catalog(), m => Models.cached(s.cache, m).map(ready => Json.set(Models.modelJson(s.cache, m, ready), "status", Json.Str(if (ready && supported) "cached" else if (supported) "downloadable" else "unavailable"))))
     _ = Signal.set(s.models, catalog)
-    _ = Signal.set(s.status, if (!supported) "Local inference is unavailable on this host. Use External proposals." else if (tool._1 != 0) "Complete cached artifacts work offline. To download, install the Hub downloader with: pip install huggingface_hub" else "Cache inspection is complete. Download uses only the selected pinned artifact.")
+    _ = Signal.set(s.status, if (!supported) "Local inference is unavailable on this host. Use External proposals." else "Cache inspection is complete. Download streams the selected pinned artifact from Hugging Face.")
   } yield ()
 
 def restoredRequest(root: String, s: SessionS, compiler: String, session: String): IO[Json] =

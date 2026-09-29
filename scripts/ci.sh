@@ -794,25 +794,27 @@ cli = pathlib.Path(os.environ["SCUZZ"])
 root = repo / "scratchpad/generation-contract"
 shutil.rmtree(root, ignore_errors=True)
 (root / "src").mkdir(parents=True)
-cache = root / "hub"
+cache = root / "scuzz-models"
 cache.mkdir()
-env = dict(os.environ, HF_HUB_CACHE=str(cache), HF_HUB_OFFLINE="1")
+env = dict(os.environ, SCUZZ_MODEL_CACHE=str(cache))
 listed = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=env, check=True, capture_output=True, text=True, timeout=30)
 models = json.loads(listed.stdout)["models"]
-assert [m["id"] for m in models] == ["smollm3-3b", "qwen2.5-coder-7b"]
+assert [m["id"] for m in models] == ["qwen3.5-4b", "qwen2.5-coder-7b"]
 assert all(m["status"] == "unavailable" for m in models)
 assert not list(cache.iterdir())
 no_tools = dict(env, PATH="")
-for key in ("HF_HUB_CACHE", "HF_HOME", "XDG_CACHE_HOME", "HOME"):
+for key in ("SCUZZ_MODEL_CACHE", "XDG_CACHE_HOME", "HOME"):
  no_tools.pop(key, None)
-for locations, expected in (({"HF_HUB_CACHE": str(cache), "HF_HOME": str(root / "hf"), "XDG_CACHE_HOME": str(root / "xdg")}, cache), ({"HF_HOME": str(root / "hf"), "XDG_CACHE_HOME": str(root / "xdg")}, root / "hf/hub"), ({"XDG_CACHE_HOME": str(root / "xdg")}, root / "xdg/huggingface/hub")):
+for locations, expected in (({"SCUZZ_MODEL_CACHE": str(cache), "XDG_CACHE_HOME": str(root / "xdg"), "HOME": str(root / "home")}, cache), ({"XDG_CACHE_HOME": str(root / "xdg"), "HOME": str(root / "home")}, root / "xdg/scuzz/models"), ({"HOME": str(root / "home")}, root / "home/.cache/scuzz/models")):
  offline = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=dict(no_tools, **locations), capture_output=True, text=True, check=True, timeout=30)
  rows = json.loads(offline.stdout)["models"]
- assert [m["id"] for m in rows] == ["smollm3-3b", "qwen2.5-coder-7b"]
+ assert [m["id"] for m in rows] == ["qwen3.5-4b", "qwen2.5-coder-7b"]
  assert all(m["cache"] == str(expected) and m["status"] == "unavailable" for m in rows)
- assert not list(cache.iterdir()) and not (root / "hf").exists() and not (root / "xdg").exists()
+ assert not list(cache.iterdir())
 missing_cache = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=no_tools, capture_output=True, text=True, timeout=30)
 assert missing_cache.returncode != 0 and not missing_cache.stdout and "user cache location is unavailable" in missing_cache.stderr
+default = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=dict(no_tools, HOME=str(root / "home")), capture_output=True, text=True, check=True, timeout=30)
+assert all(m["cache"] == str(root / "home/.cache/scuzz/models") for m in json.loads(default.stdout)["models"])
 partial = pathlib.Path(models[0]["path"])
 partial.parent.mkdir(parents=True)
 partial.write_bytes(b"incomplete")
@@ -821,15 +823,6 @@ assert all(m["status"] == "unavailable" for m in json.loads(again.stdout)["model
 assert partial.read_bytes() == b"incomplete"
 unknown = subprocess.run([str(cli), "models", "download", "unlisted-model"], env=env, capture_output=True, timeout=30)
 assert unknown.returncode != 0
-tools = root / "tools"
-tools.mkdir()
-hf = tools / "hf"
-hf.write_text("#!/bin/sh\nprintf '%s\\n' 'controlled downloader failure' >&2\nexit 7\n")
-hf.chmod(0o700)
-fake_env = dict(env, PATH=str(tools)+os.pathsep+os.environ["PATH"])
-failed = subprocess.run([str(cli), "models", "download", "smollm3-3b", "--message-format=json"], env=fake_env, capture_output=True, timeout=30)
-assert failed.returncode != 0 and b"controlled downloader failure" in failed.stderr
-assert partial.read_bytes() == b"incomplete"
 (root / "scuzz.toml").write_text('[package]\nname="generation-contract"\nversion="0.1.0"\n[dependencies]\ngeneration={path="../../examples/editor/generation"}\n')
 server = root / "server.py"
 server.write_text(r'''import http.server,json,os,pathlib,sys,time
@@ -863,10 +856,7 @@ http.server.HTTPServer(("127.0.0.1",int(port)),Handler).serve_forever()
 (root / "src/Main.scuzz").write_text('''@main def main: IO[Unit] =
   for {
     mode <- Sys.getenv("GENERATION_PROOF_MODE")
-    _ <- if (mode == "request") exportRequest() else if (mode == "download") IO.attempt(IO.timeout(3000, Models.download("smollm3-3b"))).flatMap(result => result match {
-      case Result.Ok(_) => IO.fail("controlled download completes unexpectedly")
-      case Result.Err(e) => Models.need(e == "timeout", Str.concat("download cancellation did not reach its deadline: ", e))
-    }) else transport()
+    _ <- if (mode == "request") exportRequest() else transport()
   } yield ()
 
 def exportRequest(): IO[Unit] =
@@ -903,7 +893,7 @@ def transport(): IO[Unit] =
   } yield ()
 ''')
 # Build once. Each native run owns a fresh process and private key.
-subprocess.run([str(cli), "run", str(root)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="ok", GENERATION_PROOF_MODEL="smollm3-3b"), check=True, timeout=240, stdout=subprocess.DEVNULL)
+subprocess.run([str(cli), "run", str(root)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="ok", GENERATION_PROOF_MODEL="qwen3.5-4b"), check=True, timeout=240, stdout=subprocess.DEVNULL)
 exe = root / "build/generation-contract"
 subprocess.run([str(exe)], env=dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="request", COMMAND_PROOF_COMPILER=hashlib.sha256(cli.read_bytes()).hexdigest()), check=True, timeout=30)
 request = json.loads((root / "build/command-request.json").read_text())
@@ -915,8 +905,8 @@ cases = []
 for name, key, value in (("version", "v", 2), ("baseline", "baseline", "0" * 64), ("compiler", "compiler", "0" * 64), ("scope", "allowed", ["../Main.scuzz"]), ("limits", "limits", {}), ("feedback", "feedback", {}), ("unknown-field", "extra", 1)):
  changed = dict(request)
  changed[key] = value
- cases.append((name, changed, "smollm3-3b", root / "build/proposals" / name))
-cases.extend((("unknown-model", request, "unlisted", root / "build/proposals/unknown-model"), ("existing", request, "smollm3-3b", existing), ("source-output", request, "smollm3-3b", root / "src/forbidden"), ("build-output", request, "smollm3-3b", root / "build/forbidden"), ("unavailable", request, "smollm3-3b", root / "build/proposals/unavailable")))
+ cases.append((name, changed, "qwen3.5-4b", root / "build/proposals" / name))
+cases.extend((("unknown-model", request, "unlisted", root / "build/proposals/unknown-model"), ("existing", request, "qwen3.5-4b", existing), ("source-output", request, "qwen3.5-4b", root / "src/forbidden"), ("build-output", request, "qwen3.5-4b", root / "build/forbidden"), ("unavailable", request, "qwen3.5-4b", root / "build/proposals/unavailable")))
 for name, body, model, out in cases:
  file = root / "build" / (name + ".json")
  file.write_text(json.dumps(body))
@@ -934,7 +924,7 @@ def alive(pid):
  except (ProcessLookupError,FileNotFoundError): return False
 unrelated = subprocess.Popen(["sleep", "120"])
 try:
- for model in ("smollm3-3b", "qwen2.5-coder-7b"):
+ for model in ("qwen3.5-4b", "qwen2.5-coder-7b"):
   for sig in (signal.SIGINT, signal.SIGTERM):
    (root / "pid").unlink(missing_ok=True)
    runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="interrupt", GENERATION_PROOF_MODEL=model)
@@ -955,7 +945,7 @@ try:
    finally:
     if child.poll() is None:
      child.kill();child.wait(timeout=5)
- for model in ("smollm3-3b", "qwen2.5-coder-7b"):
+ for model in ("qwen3.5-4b", "qwen2.5-coder-7b"):
   for mode in ("ok", "stale", "truncated", "reasoning", "context", "timeout"):
    (root / "pid").unlink(missing_ok=True)
    runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE=mode, GENERATION_PROOF_MODEL=model)
@@ -966,14 +956,6 @@ try:
    assert not alive(pid), (model,mode,pid)
    assert not (root / "owned").exists()
    assert unrelated.poll() is None
- hf.write_text("#!/bin/sh\nprintf '%s' \"$$\" > \"$DOWNLOADER_PROOF_PID\"\nsleep 120 &\nprintf '%s' \"$!\" > \"$DOWNLOADER_PROOF_CHILD\"\nwait\n")
- cancelenv = dict(fake_env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="download", DOWNLOADER_PROOF_PID=str(root / "downloader-pid"), DOWNLOADER_PROOF_CHILD=str(root / "downloader-child"))
- subprocess.run([str(exe)], env=cancelenv, check=True, timeout=10, stdout=subprocess.DEVNULL)
- for path in (root / "downloader-pid", root / "downloader-child"):
-  pid = int(path.read_text())
-  deadline = time.monotonic()+2
-  while alive(pid) and time.monotonic()<deadline: time.sleep(.02)
-  assert not alive(pid), (path,pid)
  assert partial.read_bytes() == b"incomplete" and unrelated.poll() is None
 finally:
  unrelated.terminate();unrelated.wait(timeout=5)
@@ -993,8 +975,11 @@ server = b'''#!/usr/bin/env python3
 import http.server,json,os,pathlib,sys,time
 if '--version' in sys.argv:
  print('build 11146, commit 7fe450e19');sys.exit(0)
+if '--list-devices' in sys.argv:
+ print('Available devices:\\n  Vulkan0: Controlled GPU');sys.exit(0)
 def arg(name): return sys.argv[sys.argv.index(name)+1]
 assert arg('--host')=='127.0.0.1' and arg('--parallel')=='1' and arg('--ctx-size')=='4096'
+assert arg('--device')=='Vulkan0' and arg('--n-gpu-layers')=='auto'
 key=arg('--api-key')
 pathlib.Path(os.environ['CONTROLLED_PID']).write_text(str(os.getpid()))
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -1028,17 +1013,19 @@ artifact = archive.getvalue()
 weights = b'controlled weights'
 models = generation / 'src/Models.scuzz'
 source = models.read_text()
-for count, digest in ((1915305312, '8334b850b7bd46238c16b0c550df2138f0889bf433809008cc17a8b05761863e'), (4683073536, '509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c')):
+for count, digest in ((2740937888, '00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4'), (4683073536, '509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c')):
  source = source.replace(str(count), str(len(weights))).replace(digest, hashlib.sha256(weights).hexdigest())
 source = re.sub(r'Backend\("([^"]+)", "([^"]+)", [0-9]+, "[a-f0-9]+"\)', lambda m: 'Backend("' + m[1] + '", "' + m[2] + '", ' + str(len(artifact)) + ', "' + hashlib.sha256(artifact).hexdigest() + '")', source)
 models.write_text(source)
 cache = root / 'cache'
-backend = cache / 'scuzz/tools/llama/b11146' / (platform.system() + '-' + platform.machine())
+backend_platform = platform.system() + '-' + platform.machine()
+if backend_platform in ('Linux-x86_64', 'Linux-aarch64'): backend_platform += '-vulkan'
+backend = cache / 'scuzz/tools/llama/b11146' / backend_platform
 backend.mkdir(parents=True)
 (backend / 'release.tar.gz').write_bytes(artifact)
-hub = root / 'hub'
-for repo_name, revision, filename in [('ggml-org/SmolLM3-3B-GGUF','4965cb60b150737b68a0408c36aeefb65078f894','SmolLM3-Q4_K_M.gguf'),('Qwen/Qwen2.5-Coder-7B-Instruct-GGUF','13fb94bfda8c8cf22497dc57b78f391a9acb426a','qwen2.5-coder-7b-instruct-q4_k_m.gguf')]:
- path = hub / ('models--'+repo_name.replace('/','--')) / 'snapshots' / revision / filename
+model_cache = root / 'models-cache'
+for model_id, revision, filename in [('qwen3.5-4b','e87f176479d0855a907a41277aca2f8ee7a09523','Qwen3.5-4B-Q4_K_M.gguf'),('qwen2.5-coder-7b','13fb94bfda8c8cf22497dc57b78f391a9acb426a','qwen2.5-coder-7b-instruct-q4_k_m.gguf')]:
+ path = model_cache / model_id / revision / filename
  path.parent.mkdir(parents=True)
  path.write_bytes(weights)
 (root / 'src').mkdir()
@@ -1066,12 +1053,12 @@ real_awk = shutil.which('awk')
 assert real_awk
 (tools / 'awk').write_text('#!/bin/sh\ncase "$1" in *MemAvailable:*) printf \'34359738368\\n\';; *"Pages free:"*) printf \'34359738368\\n\';; *) exec ' + shlex.quote(real_awk) + ' "$@";; esac\n')
 (tools / 'awk').chmod(0o700)
-env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ['PATH'], XDG_CACHE_HOME=str(cache), HF_HUB_CACHE=str(hub), HF_HUB_OFFLINE='1', CONTROLLED_ROOT=str(target), CONTROLLED_PID=str(root/'pid'), CONTROLLED_RECEIVED=str(root/'received'), CONTROLLED_MODEL='smollm3-3b')
+env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ['PATH'], XDG_CACHE_HOME=str(cache), SCUZZ_MODEL_CACHE=str(model_cache), CONTROLLED_ROOT=str(target), CONTROLLED_PID=str(root/'pid'), CONTROLLED_RECEIVED=str(root/'received'), CONTROLLED_MODEL='qwen3.5-4b')
 subprocess.run([str(cli), 'run', str(root)], env=dict(env, CONTROLLED_MODEL=''), check=True, timeout=240)
 exe = root / 'build/controlled-command'
 unrelated = subprocess.Popen(['sleep','120'])
 try:
- for model in ('smollm3-3b','qwen2.5-coder-7b'):
+ for model in ('qwen3.5-4b','qwen2.5-coder-7b'):
   result = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model), check=True, capture_output=True, text=True, timeout=30)
   output = json.loads(result.stdout)
   assert output['result']=='published' and output['model']==model and output['behavioral_review']=='pending' and not output['accepted']
@@ -1087,7 +1074,7 @@ try:
   assert unrelated.poll() is None and not list((cache/'scuzz/requests').iterdir())
   print('Controlled finite command:',model,'structured publication, no source writes, pending review, owned cleanup',flush=True)
   shutil.rmtree(candidate)
- for model in ('smollm3-3b','qwen2.5-coder-7b'):
+ for model in ('qwen3.5-4b','qwen2.5-coder-7b'):
   for sig in (signal.SIGINT, signal.SIGTERM):
    (root / 'received').unlink(missing_ok=True)
    child = subprocess.Popen([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1137,7 +1124,7 @@ d = root / "build/proposals/p1"
 (d / "src/Main.scuzz").write_text(prop)
 session_dir = root / ".scuzz/ide"
 session_dir.mkdir(parents=True, exist_ok=True)
-(session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "smollm3-3b", "requests": 0}))
+(session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "qwen3.5-4b", "requests": 0}))
 records = [{"path": "src/" + p.name, "content": p.read_text()} for p in sorted((root / "src").glob("*.scuzz"))]
 baseline = hashlib.sha256(json.dumps(records, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
 
@@ -1264,7 +1251,7 @@ def publish(where, files):
     (dest / "src").mkdir(parents=True, exist_ok=True)
     session_dir = where / ".scuzz/ide"
     session_dir.mkdir(parents=True, exist_ok=True)
-    (session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "smollm3-3b", "requests": 0}))
+    (session_dir / "session.json").write_text(json.dumps({"v": 1, "objective": "Review behavior", "allowed": ["src/Main.scuzz", "src/Other.scuzz"], "mode": "external", "model": "qwen3.5-4b", "requests": 0}))
     for path, content in files:
         (dest / path).write_text(content)
 
@@ -1627,7 +1614,7 @@ shutil.copytree(repo / "examples/counter", paused_root, ignore=shutil.ignore_pat
 paused_storage = paused_root / ".scuzz/ide"
 paused_storage.mkdir(parents=True)
 paused_metadata = paused_storage / "session.json"
-paused_metadata.write_text(json.dumps({"v": 1, "baseline_epoch": "restored-paused-source", "objective": "Review paused settings", "allowed": ["src/Main.scuzz"], "mode": "external", "model": "smollm3-3b", "requests": 0}))
+paused_metadata.write_text(json.dumps({"v": 1, "baseline_epoch": "restored-paused-source", "objective": "Review paused settings", "allowed": ["src/Main.scuzz"], "mode": "external", "model": "qwen3.5-4b", "requests": 0}))
 paused_source = (paused_root / "src/Main.scuzz").read_text()
 paused_inject = write_ops(paused_root, [{"op": "tap", "id": "choicechip:Session"}])
 paused_env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless", SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SERVE="1", SCUZZ_LIVE_FRAMES="15000", SCUZZ_UI_SCRIPT=str(paused_inject), SCUZZ_UI_INJECT=str(paused_inject), SCUZZ_UI_DEBUG_DUMP=str(paused_root / "debug.json"))
