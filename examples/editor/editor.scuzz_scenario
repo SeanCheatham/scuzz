@@ -267,7 +267,7 @@ def Session.create(root: String): IO[SessionS] =
     request <- Fs.read(Fs.join(root, "build/ide/request.json"))
     jobs <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
     reviews <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
-  } yield SessionS(Signal.make("Review behavior"), Signal.make("src/Main.scuzz,src/Other.scuzz"), Signal.make(0), Signal.make("smollm3-3b"), Signal.make(1), Signal.make(0), Signal.make("External proposals"), Signal.make(request), Signal.make(0), jobs, reviews, Signal.make(""), "model-cache", Signal.make(Proposal.text(Json.Obj([("objective", Json.Str("Review behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz"), Json.Str("src/Other.scuzz")])), ("mode", Json.Int(0)), ("model", Json.Str("smollm3-3b"))]))), Signal.make(List.map(Models.catalog(), m => Models.modelJson("model-cache", m, false))), Signal.make(0), Signal.make(0))
+  } yield SessionS(Signal.make("Review behavior"), Signal.make("src/Main.scuzz,src/Other.scuzz"), Signal.make(0), Signal.make("qwen3.5-4b"), Signal.make(1), Signal.make(0), Signal.make("External proposals"), Signal.make(request), Signal.make(0), jobs, reviews, Signal.make(""), "model-cache", Signal.make(Proposal.text(Json.Obj([("objective", Json.Str("Review behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz"), Json.Str("src/Other.scuzz")])), ("mode", Json.Int(0)), ("model", Json.Str("qwen3.5-4b"))]))), Signal.make(List.map(Models.catalog(), m => Models.modelJson("model-cache", m, false))), Signal.make(0), Signal.make(0))
 
 def proofCard(flip: Int): IO[Json] =
   for {
@@ -275,7 +275,7 @@ def proofCard(flip: Int): IO[Json] =
     _ <- Fs.mkdirs("proof/src")
     _ <- Fs.write("proof/compiler-id", Hash.sha256("controlled review compiler"))
     _ <- Cards.setupStorage("proof")
-    _ <- Fs.write("proof/.scuzz/ide/session.json", "{\"model\":\"smollm3-3b\"}")
+    _ <- Fs.write("proof/.scuzz/ide/session.json", "{\"model\":\"qwen3.5-4b\"}")
     _ <- Fs.mkdirs("proof/dependency/src")
     _ <- Fs.write("proof/dependency/scuzz.toml", "[package]\nname = \"dependency\"\n")
     _ <- Fs.write("proof/dependency/src/Dependency.scuzz", """def value(): Int =
@@ -317,7 +317,7 @@ def laneFlow(flip: Int, lane: Int): IO[Unit] =
 def requestFlow(mode: Int where mode >= 0 && mode <= 6): IO[Unit] =
   for {
     original <- proofCard(1)
-    _ <- Fs.write("proof/.scuzz/ide/session.json", "{\"model\":\"smollm3-3b\"}")
+    _ <- Fs.write("proof/.scuzz/ide/session.json", "{\"model\":\"qwen3.5-4b\"}")
     frozen <- Cards.freeze("proof", "p", Cards.propsOf(original), 1)
     card <- Cards.complete("proof", frozen, Cards.text(Proposal.field(original, "evidence")))
     rawRequest <- Fs.read("proof/build/ide/request.json")
@@ -701,7 +701,7 @@ def queueCacheFlow(phase: Int where phase >= 0 && phase <= 16): IO[Unit] =
   _ = Signal.set(session.objective, originalObjective)
   _ <- Session.start("proof", session)
   _ <- Main.queueInit("proof", restoredDeck)
-} yield () else Session.selectModel("proof", session, "qwen2.5-coder-7b", _ => Main.deckNext("proof", restoredLanes, restoredDeck), _ => Main.queueClear(restoredLanes, restoredDeck)).flatMap(_ => waitPreparation(session, 2000)).flatMap(_ => Session.selectModel("proof", session, "smollm3-3b", _ => Main.deckNext("proof", restoredLanes, restoredDeck), _ => Main.queueClear(restoredLanes, restoredDeck)))
+} yield () else Session.selectModel("proof", session, "qwen2.5-coder-7b", _ => Main.deckNext("proof", restoredLanes, restoredDeck), _ => Main.queueClear(restoredLanes, restoredDeck)).flatMap(_ => waitPreparation(session, 2000)).flatMap(_ => Session.selectModel("proof", session, "qwen3.5-4b", _ => Main.deckNext("proof", restoredLanes, restoredDeck), _ => Main.queueClear(restoredLanes, restoredDeck)))
   _ <- waitPreparation(session, 2000)
   invalidated <- Main.queueRead(restoredDeck)
   _ <- Main.queuePulse("proof", restoredLanes, restoredDeck)
@@ -946,7 +946,7 @@ def generationFlow(model: Int, cancel: Int): IO[Unit] =
     _ <- Fs.write("generation-proof/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)")
     session <- Session.create("generation-proof")
     _ = Signal.set(session.mode, 1)
-    _ = Signal.set(session.model, if (model == 0) "smollm3-3b" else "qwen2.5-coder-7b")
+    _ = Signal.set(session.model, if (model == 0) "qwen3.5-4b" else "qwen2.5-coder-7b")
     _ = Signal.set(session.objective, "Print two")
     _ = Signal.set(session.paths, "src/Main.scuzz")
     _ = Signal.set(session.config, Session.settings(session))
@@ -955,7 +955,7 @@ def generationFlow(model: Int, cancel: Int): IO[Unit] =
     lazyPause = Signal.make(if (Signal.get(session.active) == 1) 1 else 0)
     _ = Signal.set(lazyPause, if (Signal.get(session.active) == 1) 1 else 0)
     _ <- Session.generate("generation-proof", session, _ => IO.pure(true), _ => IO.pure(()), _ => IO.pure(()))
-    _ <- if (cancel == 0) IO.sleep(500) else if (cancel == 2) Session.changeModel(session, if (model == 0) "qwen2.5-coder-7b" else "smollm3-3b") else if (cancel == 3) IO.ensure(IO.pure(()), cleanup) else cleanup
+    _ <- if (cancel == 0) IO.sleep(500) else if (cancel == 2) Session.changeModel(session, if (model == 0) "qwen2.5-coder-7b" else "qwen3.5-4b") else if (cancel == 3) IO.ensure(IO.pure(()), cleanup) else cleanup
     frozen <- Fs.read("generation-proof/build/ide/request.json")
     _ <- if (cancel == 4) Session.start("generation-proof", session).flatMap(_ => IO.sleep(500)).flatMap(_ => Session.pause(session)) else IO.pure(())
     _ <- if (cancel == 0) Session.pause(session) else IO.pure(())
@@ -963,8 +963,8 @@ def generationFlow(model: Int, cancel: Int): IO[Unit] =
     resumedRequest = Signal.make(Signal.get(session.request))
     _ = Signal.set(frozenRequest, frozen)
     _ = Signal.set(resumedRequest, Signal.get(session.request))
-    lifecycleIdentity = Signal.make(if ((cancel != 2 || Signal.get(session.model) == (if (model == 0) "qwen2.5-coder-7b" else "smollm3-3b")) && (cancel != 4 || Signal.get(session.request) == frozen)) 1 else 0)
-    _ = Signal.set(lifecycleIdentity, if ((cancel != 2 || Signal.get(session.model) == (if (model == 0) "qwen2.5-coder-7b" else "smollm3-3b")) && (cancel != 4 || Signal.get(session.request) == frozen)) 1 else 0)
+    lifecycleIdentity = Signal.make(if ((cancel != 2 || Signal.get(session.model) == (if (model == 0) "qwen2.5-coder-7b" else "qwen3.5-4b")) && (cancel != 4 || Signal.get(session.request) == frozen)) 1 else 0)
+    _ = Signal.set(lifecycleIdentity, if ((cancel != 2 || Signal.get(session.model) == (if (model == 0) "qwen2.5-coder-7b" else "qwen3.5-4b")) && (cancel != 4 || Signal.get(session.request) == frozen)) 1 else 0)
     jobs <- Ref.get(session.jobs)
     reviews <- Ref.get(session.reviews)
     savedRaw <- Fs.read(Fs.join(Cards.storage("generation-proof"), "session.json"))
@@ -1005,7 +1005,7 @@ private def ownershipSession(): IO[SessionS] =
   for {
     jobs <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
     reviews <- Ref.of(Session.OwnedJob("", []: List[Fiber[Unit]], false))
-    s = SessionS(Signal.make("One objective"), Signal.make("src/Main.scuzz"), Signal.make(0), Signal.make("smollm3-3b"), Signal.make(1), Signal.make(0), Signal.make(""), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), "", Signal.make(""), Signal.make([]: List[Json]), Signal.make(0), Signal.make(0))
+    s = SessionS(Signal.make("One objective"), Signal.make("src/Main.scuzz"), Signal.make(0), Signal.make("qwen3.5-4b"), Signal.make(1), Signal.make(0), Signal.make(""), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), "", Signal.make(""), Signal.make([]: List[Json]), Signal.make(0), Signal.make(0))
     _ = Signal.set(s.config, Session.settings(s))
   } yield s
 
@@ -1089,7 +1089,7 @@ def generationBurst(model: Int): IO[Unit] =
     _ <- Fs.write("generation-burst/src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)")
     session <- Session.create("generation-burst")
     _ = Signal.set(session.mode, 1)
-    _ = Signal.set(session.model, if (model == 0) "smollm3-3b" else "qwen2.5-coder-7b")
+    _ = Signal.set(session.model, if (model == 0) "qwen3.5-4b" else "qwen2.5-coder-7b")
     _ = Signal.set(session.objective, "Print two")
     _ = Signal.set(session.paths, "src/Main.scuzz")
     _ = Signal.set(session.config, Session.settings(session))

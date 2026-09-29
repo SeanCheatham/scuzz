@@ -9,7 +9,7 @@ def printResp(tag: String, resp: (Int, Map[String, String], String)): IO[Unit] =
   }
 
 def reply(path: String): (Int, Map[String, String], String) =
-  if (path == "/ping") (200, Map.set(Map.empty(), "X-Trace", "ok"), s"ok:$path") else (404, Map.set(Map.empty(), "X-Trace", "miss"), "missing")
+  if (path == "/large") (200, Map.empty(), Str.repeat("x", 2097152)) else if (path == "/ping") (200, Map.set(Map.empty(), "X-Trace", "ok"), s"ok:$path") else (404, Map.set(Map.empty(), "X-Trace", "miss"), "missing")
 
 def handle(req: (String, String, Map[String, String], String)): IO[(Int, Map[String, String], String)] =
   req match {
@@ -26,6 +26,25 @@ def runHttpMiss(): IO[Unit] =
   for {
     p <- IO.both(Net.serveOnce(8081, handle), Net.httpGet("http://127.0.0.1:8081/nope", Map.empty()))
     _ <- showResp("miss", p)
+  } yield ()
+
+def runHttpFile(): IO[Unit] =
+  for {
+    response <- IO.both(Net.serveOnce(8085, handle), Net.httpGetToFile("http://127.0.0.1:8085/ping", Map.empty(), "net-stream.txt"))
+    status = response._2._1
+    bytes = response._2._3
+    body <- Fs.read("net-stream.txt")
+    _ <- IO.println(s"file:$status:$bytes:$body")
+    _ <- Fs.delete("net-stream.txt")
+  } yield ()
+
+def runHttpLargeFile(): IO[Unit] =
+  for {
+    response <- IO.both(Net.serveOnce(8086, handle), Net.httpGetToFile("http://127.0.0.1:8086/large", Map.empty(), "net-large.txt"))
+    status = response._2._1
+    bytes = response._2._3
+    _ <- IO.println(s"large-file:$status:$bytes")
+    _ <- Fs.delete("net-large.txt")
   } yield ()
 
 def echoServer(ln: Tcp): IO[Unit] =
@@ -102,6 +121,8 @@ def runHttp(): IO[Unit] =
 def run(): IO[Unit] =
   for {
     _ <- runHttp()
+    _ <- runHttpFile()
+    _ <- runHttpLargeFile()
     _ <- runTcp()
     _ <- runUdp()
     _ <- runHttps()

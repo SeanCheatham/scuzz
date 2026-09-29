@@ -1015,6 +1015,7 @@ void sz_random_fill(unsigned char *buf, size_t n); /* Blessed Random bytes. Live
 SzIo *sz_uuid_v4(void); /* IO[String] RFC 4122 version 4. Uses blessed Random. */
 
 SzIo *sz_net_http_get(SzString *url, SzMap *headers); /* IO[(Int, Map, String)]; status, headers, body; 1 MiB; http:// or https:// */
+SzIo *sz_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path); /* IO[(Int, Map, Int)]; stream response body to file */
 SzIo *sz_net_http_post(SzString *url, SzMap *headers, SzString *body);
 SzIo *sz_net_http_put(SzString *url, SzMap *headers, SzString *body);
 SzIo *sz_net_http_patch(SzString *url, SzMap *headers, SzString *body);
@@ -1140,6 +1141,7 @@ int sz_testrt_net_serve_pending(void);
 char *sz_testrt_net_pop_request(void); /* owned; NULL if empty */
 int sz_testrt_net_is_fake(void);
 SzIo *sz_testrt_net_http_req(const char *method, SzString *url, SzMap *headers, SzString *body);
+SzIo *sz_testrt_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path);
 SzIo *sz_testrt_net_accept(int64_t port); /* IO[(req, Deferred|null)] */
 SzIo *sz_testrt_net_tcp_connect(SzString *host, int64_t port);
 SzIo *sz_testrt_net_tcp_listen(int64_t port);

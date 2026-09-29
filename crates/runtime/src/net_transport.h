@@ -52,6 +52,7 @@ static inline int sz_net_live_replay(void) {
 /* Live transport runs after shared validation and simulation dispatch. */
 SzIo *sz_net_live_http_req(const char *method, SzString *url, SzMap *headers,
                          SzString *body);
+SzIo *sz_net_live_http_get_to_file(SzString *url, SzMap *headers, SzString *path);
 const char *sz_net_http_op(const char *method);
 int sz_net_http_header_valid(const char *name, const char *value);
 int sz_net_http_header_skip(const char *name);

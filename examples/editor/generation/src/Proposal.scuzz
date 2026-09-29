@@ -189,3 +189,4 @@ def publish(root: String, out: String, request: Json, reply: Json, compiler: Str
   _ <- Fs.rename(stage, out)
 } yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
   } yield ()
+

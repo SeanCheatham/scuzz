@@ -48,7 +48,7 @@ Unavailable local model resources or human availability do not prevent determini
 
 Compile time and evaluator parity support this arc. Measure changes that affect them. Standard kits follow when an ordinary program or this review loop needs them. Ranked work: [`gaps.md`](gaps.md).
 
-Do not start FFI, a registry, plugins, provider SDKs, a remote generator service, model training, physical-device packaging, or `*.scuzz_tune`. Keep one CPU inference backend and one model format. General Hub browsing, GPU variants, gated-model login, model conversion, and training stay later. Do not add pixel preview infrastructure, semantic timeline alignment, social accounts, public feeds, ranking algorithms, or swipe animation frameworks. Keep keyboard and shared Headless input as peers. Native file dialogs, menus, multi-window, debugger, and general editor expansion stay later.
+Do not start FFI, a registry, plugins, provider SDKs, a remote generator service, model training, physical-device packaging, or `*.scuzz_tune`. Keep one pinned llama.cpp release and one model format. Use Metal on Apple Silicon and Vulkan on Linux when a supported GPU is available. Fall back to CPU inference when the platform backend or GPU is unavailable. General Hub browsing, gated-model login, model conversion, and training stay later. Do not add pixel preview infrastructure, semantic timeline alignment, social accounts, public feeds, ranking algorithms, or swipe animation frameworks. Keep keyboard and shared Headless input as peers. Native file dialogs, menus, multi-window, debugger, and general editor expansion stay later.
 
 ## Risks
 
@@ -62,8 +62,8 @@ Do not start FFI, a registry, plugins, provider SDKs, a remote generator service
 | A claim never triggers | Show trigger reach; do not call an untriggered rule verified |
 | A generator rewrites accepted work | Bind requests to a baseline and discard stale results |
 | The stream consumes unlimited work | Explicit limits, bounded queues, and cancellation |
-| Model setup expands into an inference platform | One pinned CPU backend, two catalog entries, one format, and explicit setup limits |
-| Model weights duplicate or damage another tool's cache | Use the shared downloader and immutable snapshots; do not prune |
+| Model setup expands into an inference platform | One pinned llama.cpp release, Metal and Vulkan device discovery, CPU fallback, two catalog entries, one format, and explicit setup limits |
+| Model weights duplicate or damage another tool's cache | Use a Scuzz-owned cache. Verify each temporary download before rename. Do not prune |
 | A local model cannot generate useful Scuzz changes | Measure a small model through the same behavioral gates |
 | A model consumes the target probe budget | Separate inference limits from correctness probe limits |
 | An external candidate is read before publication ends | Complete metadata, content hashes, and one importer |

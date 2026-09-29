@@ -3,12 +3,12 @@ record Model(id: String, name: String, repo: String, revision: String, file: Str
 record Backend(platform: String, artifact: String, bytes: Int, sha256: String)
 
 def catalog(): List[Model] =
-  [Model("smollm3-3b", "SmolLM3 3B", "ggml-org/SmolLM3-3B-GGUF", "4965cb60b150737b68a0408c36aeefb65078f894", "SmolLM3-Q4_K_M.gguf", 1915305312, "8334b850b7bd46238c16b0c550df2138f0889bf433809008cc17a8b05761863e", 4294967296, "https://huggingface.co/ggml-org/SmolLM3-3B-GGUF/tree/4965cb60b150737b68a0408c36aeefb65078f894", "jinja;reasoning=off"), Model("qwen2.5-coder-7b", "Qwen2.5-Coder 7B Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "13fb94bfda8c8cf22497dc57b78f391a9acb426a", "qwen2.5-coder-7b-instruct-q4_k_m.gguf", 4683073536, "509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c", 8589934592, "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/blob/13fb94bfda8c8cf22497dc57b78f391a9acb426a/LICENSE", "jinja;reasoning=off")]
+  [Model("qwen3.5-4b", "Qwen3.5 4B", "unsloth/Qwen3.5-4B-GGUF", "e87f176479d0855a907a41277aca2f8ee7a09523", "Qwen3.5-4B-Q4_K_M.gguf", 2740937888, "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4", 4294967296, "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF", "jinja;reasoning=off"), Model("qwen2.5-coder-7b", "Qwen2.5-Coder 7B Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF", "13fb94bfda8c8cf22497dc57b78f391a9acb426a", "qwen2.5-coder-7b-instruct-q4_k_m.gguf", 4683073536, "509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c", 8589934592, "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/blob/13fb94bfda8c8cf22497dc57b78f391a9acb426a/LICENSE", "jinja;reasoning=off")]
 
 def select(id: String): IO[Model] =
   List.head(List.filter(catalog(), m => m.id == id)) match {
     case Option.Some(m) => IO.pure(m)
-    case Option.None => IO.fail("unknown model ID; use smollm3-3b or qwen2.5-coder-7b")
+    case Option.None => IO.fail("unknown model ID; use qwen3.5-4b or qwen2.5-coder-7b")
   }
 
 def need(ok: Bool, why: String): IO[Unit] =
@@ -35,13 +35,12 @@ def userCache(): IO[String] =
 
 def cacheRoot(): IO[String] =
   for {
-    hub <- Sys.getenv("HF_HUB_CACHE")
-    hf <- Sys.getenv("HF_HOME")
-    user <- if (hub != "" || hf != "") IO.pure("") else userCache()
-  } yield if (hub != "") hub else if (hf != "") Fs.join(hf, "hub") else Fs.join(user, "huggingface/hub")
+    configured <- Sys.getenv("SCUZZ_MODEL_CACHE")
+    user <- if (configured != "") IO.pure("") else userCache()
+  } yield if (configured != "") configured else Fs.join(user, "scuzz/models")
 
 def snapshot(cache: String, m: Model): String =
-  Fs.join(Fs.join(Fs.join(cache, Str.concat("models--", Str.replace(m.repo, "/", "--"))), Fs.join("snapshots", m.revision)), m.file)
+  Fs.join(Fs.join(Fs.join(cache, m.id), m.revision), m.file)
 
 def hashFile(path: String): IO[String] =
   run(Str.concat("if command -v sha256sum >/dev/null 2>&1; then sha256sum ", Str.concat(quote(path), Str.concat("; else shasum -a 256 ", Str.concat(quote(path), "; fi"))))).map(s => Str.take(s, 64))
@@ -95,19 +94,47 @@ def download(id: String): IO[Json] =
     cache <- cacheRoot()
     ready <- cached(cache, m)
     _ <- if (ready) IO.pure(()) else IO.timeout(3600000, for {
-  tool <- Sys.exec("command -v hf")
-  _ <- need(tool._1 == 0, "install the Hub downloader with: pip install huggingface_hub")
   _ <- diskRoom(cache, m.bytes)
-  returned <- run(Str.concat("HF_HUB_DISABLE_TELEMETRY=1 HF_HUB_DISABLE_UPDATE_CHECK=1 hf download ", Str.concat(quote(m.repo), Str.concat(" ", Str.concat(quote(m.file), Str.concat(" --revision ", Str.concat(quote(m.revision), Str.concat(" --cache-dir ", Str.concat(quote(cache), " --quiet")))))))))
-  resolved <- Fs.canonicalize(snapshot(cache, m))
-  actual <- Fs.canonicalize(returned)
-  _ <- need(actual == resolved, "downloader returned an unexpected snapshot")
-  _ <- verifyFile(snapshot(cache, m), m.bytes, m.sha256)
+  _ <- Fs.mkdirs(Fs.dirname(snapshot(cache, m)))
+  nonce <- Uuid.v4()
+  target = snapshot(cache, m)
+  pending = Str.concat(target, Str.concat(".partial-", nonce))
+  _ <- IO.ensure(for {
+  _ <- fetchFile(modelUrl(m), pending, 5)
+  _ <- verifyFile(pending, m.bytes, m.sha256)
+  _ <- Fs.rename(pending, target)
+} yield (), Fs.delete(pending).handleErrorWith(_ => IO.pure(())))
 } yield ())
   } yield Json.Obj([("v", Json.Int(1)), ("result", Json.Str("complete")), ("reused", Json.Bool(ready)), ("model", modelJson(cache, m, true))])
 
+def modelUrl(m: Model): String =
+  Str.concat("https://huggingface.co/", Str.concat(m.repo, Str.concat("/resolve/", Str.concat(m.revision, Str.concat("/", m.file)))))
+
+def responseHeader(headers: Map[String, String], name: String): String =
+  Map.get(headers, name) match {
+    case Option.Some(value) => value
+    case Option.None => Map.get(headers, Str.toLower(name)) match {
+  case Option.Some(value) => value
+  case Option.None => ""
+}
+  }
+
+def fetchFile(url: String, path: String, redirects: Int): IO[Unit] =
+  for {
+    _ <- need(redirects >= 0, "model download has too many redirects")
+    response <- Net.httpGetToFile(url, Map.empty(), path)
+    status = response._1
+    _ <- if (status >= 300 && status < 400) for {
+  _ <- need(redirects > 0, "model download has too many redirects")
+  location = responseHeader(response._2, "Location")
+  _ <- need(Str.startsWith(location, "https://"), "model server returned an invalid redirect")
+  _ <- fetchFile(location, path, redirects - 1)
+} yield () else need(status >= 200 && status < 300, Str.concat("model server returned HTTP ", Str.fromInt(status)))
+  } yield ()
+
 def downloadCommand(id: String, json: Bool): IO[Unit] =
-  download(id).flatMap(j => IO.println(if (json) text(j) else Str.concat("Pinned artifact is complete.\n", humanModel(field(j, "model")))))
+  download(id).flatMap(j => IO.println(if (json) text(j) else Str.concat("""Pinned artifact is complete.
+""", humanModel(field(j, "model")))))
 
 def backendBuild(): String =
   "b11146"
@@ -116,17 +143,56 @@ def backendLicense(): String =
   "https://github.com/ggml-org/llama.cpp/blob/b11146/LICENSE"
 
 def backends(): List[Backend] =
-  [Backend("Linux-x86_64", "llama-b11146-bin-ubuntu-x64.tar.gz", 16998357, "c150306eb16b5ab696f76a8bdf810c35fd98a24e82158742e6fa28f420ff8410"), Backend("Linux-aarch64", "llama-b11146-bin-ubuntu-arm64.tar.gz", 13598346, "4aeda6fe68831547e49b7fa87607383ca5352b3d72ca5f70d52ed265f58c131f"), Backend("Darwin-arm64", "llama-b11146-bin-macos-arm64.tar.gz", 11189714, "1ad3f9eff80edb9dbef4259ad564d1720612ef7eea48fa4afed0e54f5f3d5711"), Backend("Darwin-x86_64", "llama-b11146-bin-macos-x64.tar.gz", 11237237, "305f0e3a17d2c01eb205cd0a62128357f1ec3b55329cb084d94e5ec0115d7a3b")]
+  [Backend("Linux-x86_64-vulkan", "llama-b11146-bin-ubuntu-vulkan-x64.tar.gz", 30598492, "d3ce40fce7403cc93bcf5718fc46c6efb61ed9709f8e5d9f10c86bf0e30e8fb3"), Backend("Linux-aarch64-vulkan", "llama-b11146-bin-ubuntu-vulkan-arm64.tar.gz", 24410274, "5dcebe3ecbcb43a1ed85e3284453f9edf54dcca833e1cb1f54b4022b753c1da5"), Backend("Linux-x86_64", "llama-b11146-bin-ubuntu-x64.tar.gz", 16998357, "c150306eb16b5ab696f76a8bdf810c35fd98a24e82158742e6fa28f420ff8410"), Backend("Linux-aarch64", "llama-b11146-bin-ubuntu-arm64.tar.gz", 13598346, "4aeda6fe68831547e49b7fa87607383ca5352b3d72ca5f70d52ed265f58c131f"), Backend("Darwin-arm64", "llama-b11146-bin-macos-arm64.tar.gz", 11189714, "1ad3f9eff80edb9dbef4259ad564d1720612ef7eea48fa4afed0e54f5f3d5711"), Backend("Darwin-x86_64", "llama-b11146-bin-macos-x64.tar.gz", 11237237, "305f0e3a17d2c01eb205cd0a62128357f1ec3b55329cb084d94e5ec0115d7a3b")]
 
 def hostBackend(): IO[Backend] =
   for {
     os <- run("uname -s")
     arch <- run("uname -m")
-    found <- List.head(List.filter(backends(), b => b.platform == Str.concat(os, Str.concat("-", arch)))) match {
+    platform = Str.concat(os, Str.concat("-", arch))
+    available = List.filter(backends(), b => b.platform == platform || b.platform == Str.concat(platform, "-vulkan"))
+    found <- List.head(List.filter(available, b => Str.endsWith(b.platform, "-vulkan"))) match {
+  case Option.Some(b) => IO.pure(b)
+  case Option.None => List.head(available) match {
   case Option.Some(b) => IO.pure(b)
   case Option.None => IO.fail("local models are unavailable on this host; use External proposals")
 }
+}
   } yield found
+
+def cpuBackend(b: Backend): IO[Backend] =
+  List.head(List.filter(backends(), candidate => candidate.platform == Str.replace(b.platform, "-vulkan", ""))) match {
+    case Option.Some(found) => IO.pure(found)
+    case Option.None => IO.pure(b)
+  }
+
+def deviceList(exe: String): IO[String] =
+  Sys.exec(Str.concat(quote(exe), " --list-devices")).map(result => if (result._1 == 0) Str.concat(result._2, result._3) else "")
+
+def gpuNameLine(line: String): String =
+  List.head(Str.split(line, ":")) match {
+    case Option.Some(name) => gpuNameValue(line, name)
+    case Option.None => ""
+  }
+
+def gpuNameValue(line: String, name: String): String =
+  if (gpuSupported(name) && !gpuSoftware(line)) Str.trim(name) else ""
+
+def gpuSupported(name: String): Bool =
+  Str.startsWith(Str.toLower(Str.trim(name)), "mtl") || Str.startsWith(Str.toLower(Str.trim(name)), "cuda") || Str.startsWith(Str.toLower(Str.trim(name)), "vulkan")
+
+def gpuSoftware(line: String): Bool =
+  Str.contains(Str.toLower(line), "llvmpipe") || Str.contains(Str.toLower(line), "lavapipe") || Str.contains(Str.toLower(line), "swiftshader")
+
+def gpuDevice(devices: String): String =
+  List.head(List.filter(List.map(Str.split(devices, """
+"""), gpuNameLine), name => name != "")) match {
+    case Option.Some(name) => name
+    case Option.None => ""
+  }
+
+def gpuAvailable(exe: String): IO[String] =
+  deviceList(exe).map(devices => gpuDevice(devices))
 
 def backendDir(cache: String, b: Backend): String =
   Fs.join(Fs.join(cache, Fs.join("scuzz/tools/llama", backendBuild())), b.platform)
@@ -134,15 +200,14 @@ def backendDir(cache: String, b: Backend): String =
 def backendExe(dir: String): String =
   Fs.join(dir, "llama-b11146/llama-server")
 
-def setupBackend(allowDownload: Bool): IO[String] =
+def installBackend(allowDownload: Bool, b: Backend): IO[String] =
   for {
-    b <- hostBackend()
     cache <- userCache()
     dir = backendDir(cache, b)
     archive = Fs.join(dir, "release.tar.gz")
     present <- Fs.exists(archive)
     _ <- if (present != 0) verifyFile(archive, b.bytes, b.sha256) else for {
-  _ <- need(allowDownload, "pinned CPU backend is unavailable; use explicit Download or --download")
+  _ <- need(allowDownload, "pinned inference backend is unavailable; use explicit Download or --download")
   _ <- diskRoom(cache, b.bytes)
   _ <- Fs.mkdirs(dir)
   nonce <- Uuid.v4()
@@ -156,28 +221,47 @@ def setupBackend(allowDownload: Bool): IO[String] =
 } yield ()
     presentExe <- Fs.exists(backendExe(dir))
     _ <- if (presentExe != 0) IO.pure(()) else for {
-      nonce <- Uuid.v4()
-      stage = Fs.join(dir, Str.concat("extract-", nonce))
-      _ <- IO.ensure(for {
-        _ <- Fs.mkdirs(stage)
-        _ <- run(Str.concat("tar -xzf ", Str.concat(quote(archive), Str.concat(" -C ", quote(stage)))))
-        _ <- verifyBackend(archive, stage)
-        _ <- Fs.rename(Fs.join(stage, "llama-b11146"), Fs.join(dir, "llama-b11146"))
-      } yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
-    } yield ()
+  nonce <- Uuid.v4()
+  stage = Fs.join(dir, Str.concat("extract-", nonce))
+  _ <- IO.ensure(for {
+  _ <- Fs.mkdirs(stage)
+  _ <- run(Str.concat("tar -xzf ", Str.concat(quote(archive), Str.concat(" -C ", quote(stage)))))
+  _ <- verifyBackend(archive, stage)
+  _ <- Fs.rename(Fs.join(stage, "llama-b11146"), Fs.join(dir, "llama-b11146"))
+} yield (), Fs.delete(stage).handleErrorWith(_ => IO.pure(())))
+} yield ()
     _ <- verifyBackend(archive, dir)
     version <- run(Str.concat(quote(backendExe(dir)), " --version 2>&1"))
     _ <- need(Str.contains(version, "build 11146, commit 7fe450e19"), "pinned backend version does not match")
   } yield backendExe(dir)
 
+def setupBackend(allowDownload: Bool): IO[String] =
+  for {
+    preferred <- hostBackend()
+    selected <- if (allowDownload || !Str.endsWith(preferred.platform, "-vulkan")) IO.pure(preferred) else for {
+  cache <- userCache()
+  ready <- Fs.exists(Fs.join(backendDir(cache, preferred), "release.tar.gz"))
+  cpu <- cpuBackend(preferred)
+  cpuReady <- Fs.exists(Fs.join(backendDir(cache, cpu), "release.tar.gz"))
+} yield if (ready != 0 || cpuReady == 0) preferred else cpu
+    exe <- IO.attempt(installBackend(allowDownload, selected)).flatMap(result => result match {
+  case Result.Ok(path) => IO.pure(path)
+  case Result.Err(error) => if (Str.endsWith(selected.platform, "-vulkan")) cpuBackend(selected).flatMap(b => installBackend(allowDownload, b)) else IO.fail(error)
+})
+    device <- gpuAvailable(exe)
+    fallback <- if (device != "" || !Str.endsWith(selected.platform, "-vulkan")) IO.pure(exe) else cpuBackend(selected).flatMap(b => installBackend(allowDownload, b))
+  } yield if (device != "") exe else fallback
+
 def verifyBackend(archive: String, dir: String): IO[Unit] =
   for {
     members <- run(Str.concat("tar -tvzf ", Str.concat(quote(archive), " | awk '$1 ~ /^-/ {print $NF}'")))
-    files = List.filter(Str.split(members, "\n"), path => path != "")
+    files = List.filter(Str.split(members, """
+"""), path => path != "")
     _ <- need(List.nonEmpty(files) && List.len(files) <= 128 && List.forall(files, path => Str.startsWith(path, "llama-b11146/") && !Str.contains(path, "..")), "invalid backend archive files")
     _ <- IO.foreachDiscard(files, path => for {
-      expected <- run(Str.concat("tar -xOf ", Str.concat(quote(archive), Str.concat(" ", Str.concat(quote(path), " | if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi")))))
-      actual <- hashFile(Fs.join(dir, path))
-      _ <- need(actual == Str.take(expected, 64), "cached backend file does not match the pinned artifact")
-    } yield ())
+  expected <- run(Str.concat("tar -xOf ", Str.concat(quote(archive), Str.concat(" ", Str.concat(quote(path), " | if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi")))))
+  actual <- hashFile(Fs.join(dir, path))
+  _ <- need(actual == Str.take(expected, 64), "cached backend file does not match the pinned artifact")
+} yield ())
   } yield ()
+

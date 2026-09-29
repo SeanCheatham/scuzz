@@ -68,7 +68,7 @@ diff <(grep -vx ok /tmp/kernel.out) /tmp/kernel-eval.out
 grep -q "mapn:3048" /tmp/scale.out
 grep -q "maps:2098176" /tmp/scale.out
 grep -q "hit:0:49" /tmp/scale.out
-"$SCUZZ" run examples/io | tee /tmp/io.out
+SCUZZ_SERVE=1 "$SCUZZ" run examples/io | tee /tmp/io.out
 grep -q "ref-ok" /tmp/io.out
 grep -q "queue-ok" /tmp/io.out
 grep -q "deferred-ok" /tmp/io.out
@@ -87,6 +87,8 @@ grep -q "queueN:7" /tmp/io.out
 grep -q "defN:8" /tmp/io.out
 grep -q "forkN:9" /tmp/io.out
 grep -q "fs:fs-note" /tmp/io.out
+grep -q "file:200:8:ok:/ping" /tmp/io.out
+grep -q "large-file:200:2097152" /tmp/io.out
 grep -q "rand:ok" /tmp/io.out
 grep -q "use:token" /tmp/io.out
 grep -q "release:token" /tmp/io.out

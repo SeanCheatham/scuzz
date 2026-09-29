@@ -19,6 +19,7 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 /* Blessed Net HTTP/1.0 client and serve. HTTPS uses OpenSSL.
  * DNS, connect, TLS, write, and read each wait at most 1000ms by default.
@@ -84,6 +85,8 @@ typedef struct HttpSt {
   SzString *url;
   SzString *req_body;
   SzMap *req_headers;
+  SzString *stream_path;
+  SzMap *stream_headers;
   char method[16];
   int tls;
   int tls_up;
@@ -127,6 +130,22 @@ typedef struct HttpSt {
   char *acc;
   size_t acc_cap;
   size_t total;
+  int stream_fd;
+  int stream_mode;
+  int stream_opened;
+  int stream_headers_done;
+  int stream_has_length;
+  int stream_chunked;
+  int stream_chunk_state;
+  int stream_chunk_crlf;
+  int stream_line_cr;
+  int stream_complete;
+  int stream_status;
+  uint64_t stream_expected;
+  uint64_t stream_bytes;
+  uint64_t stream_chunk_remaining;
+  char stream_line[128];
+  size_t stream_line_len;
 } HttpSt;
 
 static SzError *http_err(const HttpSt *st, const char *tail) {
@@ -499,6 +518,7 @@ static void addr_set_v6(struct sockaddr_storage *ss, socklen_t *len,
 #define HE_REQ_MS 1000
 #define HE_WRITE_MS 1000
 #define HE_BODY_MAX (1024u * 1024u)
+#define HE_HEADER_MAX (16u * 1024u)
 
 /* Close sockets and drop URL/buffers. A second call is a no-op. Cancel and
  * success both run this through IO.ensure. */
@@ -519,6 +539,12 @@ static void http_free(HttpSt *st) {
     close(st->dns_fd);
     st->dns_fd = -1;
   }
+  if (st->stream_fd >= 0) {
+    close(st->stream_fd);
+    st->stream_fd = -1;
+  }
+  if (st->stream_mode && st->stream_opened && !st->stream_complete && st->stream_path)
+    unlink(sz_string_cstr(st->stream_path));
   if (st->ssl) {
     SSL_free(st->ssl);
     st->ssl = NULL;
@@ -534,6 +560,10 @@ static void http_free(HttpSt *st) {
   st->acc_cap = 0;
   sz_release(st->url);
   st->url = NULL;
+  sz_release(st->stream_path);
+  st->stream_path = NULL;
+  sz_release(st->stream_headers);
+  st->stream_headers = NULL;
 }
 
 static void *http_cleanup(void *env) {
@@ -564,6 +594,22 @@ static void *http_start(void *env) {
     r->is_err = 1;
     r->as.err = http_err(st, "invalid URL");
     return r;
+  }
+  if (st->stream_mode) {
+    if (!st->stream_path || !sz_string_len(st->stream_path) ||
+        strlen(sz_string_cstr(st->stream_path)) != (size_t)sz_string_len(st->stream_path)) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "invalid output path");
+      return r;
+    }
+    st->stream_fd = open(sz_string_cstr(st->stream_path),
+                         O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (st->stream_fd < 0) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "cannot create output file");
+      return r;
+    }
+    st->stream_opened = 1;
   }
   if (sz_net_live_replay()) {
     if (!sz_net_host_is_loopback(st->host)) {
@@ -1365,6 +1411,316 @@ static void http_finish_resp(HttpSt *st, NetResult *r, int status, size_t hdr,
   sz_release(payload);
 }
 
+static int http_content_length_stream(const char *acc, size_t hdr_len,
+                                      uint64_t *out) {
+  size_t i = 0;
+  int found = 0;
+  while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n')) i++;
+  i += 2;
+  while (i < hdr_len) {
+    size_t start = i, colon;
+    if (acc[i] == '\r') break;
+    while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n')) i++;
+    colon = start;
+    while (colon < i && acc[colon] != ':') colon++;
+    if (colon < i && http_field_name_eq(acc, start, colon, "Content-Length")) {
+      size_t p = colon + 1;
+      uint64_t value = 0;
+      if (found) return 0;
+      while (p < i && (acc[p] == ' ' || acc[p] == '\t')) p++;
+      if (p >= i || acc[p] < '0' || acc[p] > '9') return 0;
+      while (p < i && acc[p] >= '0' && acc[p] <= '9') {
+        unsigned digit = (unsigned)(acc[p++] - '0');
+        if (value > (UINT64_MAX - digit) / 10) return 0;
+        value = value * 10 + digit;
+      }
+      while (p < i && (acc[p] == ' ' || acc[p] == '\t')) p++;
+      if (p != i) return 0;
+      *out = value;
+      found = 1;
+    }
+    i += 2;
+  }
+  return found;
+}
+
+static int http_header_value_is(const char *acc, size_t hdr_len,
+                                const char *name, const char *wanted) {
+  size_t i = 0;
+  while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n')) i++;
+  i += 2;
+  while (i < hdr_len) {
+    size_t start = i, colon, end, value;
+    if (acc[i] == '\r') break;
+    while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n')) i++;
+    end = i;
+    colon = start;
+    while (colon < end && acc[colon] != ':') colon++;
+    if (colon < end && http_field_name_eq(acc, start, colon, name)) {
+      value = colon + 1;
+      while (value < end && (acc[value] == ' ' || acc[value] == '\t')) value++;
+      while (end > value && (acc[end - 1] == ' ' || acc[end - 1] == '\t')) end--;
+      return ascii_ieq(acc + value, wanted, end - value);
+    }
+    i += 2;
+  }
+  return 0;
+}
+
+static int http_stream_write(HttpSt *st, const char *data, size_t len) {
+  size_t off = 0;
+  if (st->stream_bytes > (uint64_t)INT64_MAX ||
+      (uint64_t)len > (uint64_t)INT64_MAX - st->stream_bytes)
+    return 0;
+  while (off < len) {
+    ssize_t n = write(st->stream_fd, data + off, len - off);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return 0;
+    off += (size_t)n;
+  }
+  st->stream_bytes += len;
+  return 1;
+}
+
+static void http_finish_file_resp(HttpSt *st, NetResult *r) {
+  void *status = sz_box_i64(st->stream_status);
+  void *bytes = sz_box_i64((int64_t)st->stream_bytes);
+  SzPair *inner = sz_pair_new(st->stream_headers, bytes);
+  SzPair *outer = sz_pair_new(status, inner);
+  if (fsync(st->stream_fd) != 0) {
+    sz_release(status);
+    sz_release(bytes);
+    sz_release(inner);
+    sz_release(outer);
+    r->is_err = 1;
+    r->as.err = http_err(st, "cannot sync output file");
+    return;
+  }
+  st->stream_complete = 1;
+  r->is_err = 0;
+  r->as.ok = outer;
+  sz_release(status);
+  sz_release(bytes);
+  sz_release(inner);
+}
+
+static int http_stream_chunks(HttpSt *st, const char *data, size_t len, int eof,
+                              NetResult *r) {
+  size_t i = 0;
+  while (i < len) {
+    if (st->stream_chunk_state == 0 || st->stream_chunk_state == 3) {
+      char c = data[i++];
+      if (st->stream_line_cr) {
+        st->stream_line_cr = 0;
+        if (c != '\n') {
+          r->is_err = 1;
+          r->as.err = http_err(st, "invalid chunk framing");
+          return 1;
+        }
+        if (st->stream_chunk_state == 0) {
+          size_t p = 0;
+          uint64_t chunk = 0;
+          int digits = 0;
+          while (p < st->stream_line_len && st->stream_line[p] != ';') {
+            int digit;
+            char h = st->stream_line[p++];
+            if (h >= '0' && h <= '9') digit = h - '0';
+            else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+            else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+            else {
+              r->is_err = 1;
+              r->as.err = http_err(st, "invalid chunk size");
+              return 1;
+            }
+            if (chunk > (UINT64_MAX - (unsigned)digit) / 16) {
+              r->is_err = 1;
+              r->as.err = http_err(st, "invalid chunk size");
+              return 1;
+            }
+            chunk = chunk * 16 + (unsigned)digit;
+            digits++;
+          }
+          if (!digits || chunk > (uint64_t)INT64_MAX - st->stream_bytes) {
+            r->is_err = 1;
+            r->as.err = http_err(st, "invalid chunk size");
+            return 1;
+          }
+          st->stream_chunk_remaining = chunk;
+          st->stream_chunk_state = chunk ? 1 : 3;
+        } else if (st->stream_line_len == 0) {
+          st->stream_chunk_state = 4;
+          http_finish_file_resp(st, r);
+          return 1;
+        }
+        st->stream_line_len = 0;
+      } else if (c == '\r') {
+        st->stream_line_cr = 1;
+      } else if (c == '\n') {
+        r->is_err = 1;
+        r->as.err = http_err(st, "invalid chunk framing");
+        return 1;
+      } else {
+        if (st->stream_line_len >= sizeof st->stream_line - 1) {
+          r->is_err = 1;
+          r->as.err = http_err(st, "chunk line too large");
+          return 1;
+        }
+        st->stream_line[st->stream_line_len++] = c;
+      }
+    } else if (st->stream_chunk_state == 1) {
+      uint64_t left = st->stream_chunk_remaining;
+      size_t take = len - i;
+      if ((uint64_t)take > left) take = (size_t)left;
+      if (take && !http_stream_write(st, data + i, take)) {
+        r->is_err = 1;
+        r->as.err = http_err(st, "cannot write output file");
+        return 1;
+      }
+      i += take;
+      st->stream_chunk_remaining -= take;
+      if (st->stream_chunk_remaining == 0) {
+        st->stream_chunk_state = 2;
+        st->stream_chunk_crlf = 0;
+      }
+    } else if (st->stream_chunk_state == 2) {
+      char wanted = st->stream_chunk_crlf == 0 ? '\r' : '\n';
+      if (data[i++] != wanted) {
+        r->is_err = 1;
+        r->as.err = http_err(st, "invalid chunk framing");
+        return 1;
+      }
+      if (++st->stream_chunk_crlf == 2) st->stream_chunk_state = 0;
+    } else if (st->stream_chunk_state == 4) {
+      break;
+    }
+  }
+  if (eof) {
+    r->is_err = 1;
+    r->as.err = http_err(st, "response ended before final chunk");
+    return 1;
+  }
+  r->retry = 1;
+  return 1;
+}
+
+static int http_stream_feed(HttpSt *st, const char *data, size_t len, int eof,
+                            NetResult *r) {
+  size_t hdr, body_off = 0, body_len = 0;
+  if (!st->stream_headers_done) {
+    if (st->total > HE_HEADER_MAX + 4096u || len > HE_HEADER_MAX + 4096u - st->total) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "response headers too large");
+      return 1;
+    }
+    if (st->total + len + 1 > st->acc_cap) {
+      size_t cap = st->total + len + 1;
+      char *next = (char *)sz_alloc(cap);
+      if (st->total) memcpy(next, st->acc, st->total);
+      sz_free(st->acc);
+      st->acc = next;
+      st->acc_cap = cap;
+    }
+    if (len) memcpy(st->acc + st->total, data, len);
+    st->total += len;
+    st->acc[st->total] = 0;
+    hdr = http_hdr_len(st->acc, st->total);
+    if (!hdr) {
+      if (st->total > HE_HEADER_MAX) {
+        r->is_err = 1;
+        r->as.err = http_err(st, "response headers too large");
+        return 1;
+      }
+      if (eof) {
+        r->is_err = 1;
+        r->as.err = http_err(st, "malformed response headers");
+        return 1;
+      }
+      r->retry = 1;
+      return 1;
+    }
+    st->stream_status = http_status_code(st->acc, hdr);
+    if (st->stream_status < 0) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "malformed response");
+      return 1;
+    }
+    if (hdr > HE_HEADER_MAX) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "response headers too large");
+      return 1;
+    }
+    if (http_header_present(st->acc, hdr, "Transfer-Encoding")) {
+      if (!http_header_value_is(st->acc, hdr, "Transfer-Encoding", "chunked")) {
+        r->is_err = 1;
+        r->as.err = http_err(st, "unsupported transfer encoding");
+        return 1;
+      }
+      st->stream_chunked = 1;
+    }
+    if (http_header_present(st->acc, hdr, "Content-Length")) {
+      if (!http_content_length_stream(st->acc, hdr, &st->stream_expected)) {
+        r->is_err = 1;
+        r->as.err = http_err(st, "malformed response");
+        return 1;
+      }
+      st->stream_has_length = 1;
+    }
+    if (st->stream_chunked && st->stream_has_length) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "conflicting response length");
+      return 1;
+    }
+    st->stream_headers = http_parse_headers(st->acc, hdr);
+    st->stream_headers_done = 1;
+    body_off = hdr;
+    body_len = st->total - hdr;
+    if (!st->stream_chunked && body_len > st->stream_expected && st->stream_has_length) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "response exceeds content length");
+      return 1;
+    }
+    if (st->stream_chunked) {
+      http_stream_chunks(st, st->acc + body_off, body_len, eof, r);
+      return 1;
+    }
+    if (body_len && !http_stream_write(st, st->acc + body_off, body_len)) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "cannot write output file");
+      return 1;
+    }
+    sz_free(st->acc);
+    st->acc = NULL;
+    st->acc_cap = st->total = 0;
+  } else if (st->stream_chunked) {
+    http_stream_chunks(st, data, len, eof, r);
+    return 1;
+  } else if (len && !http_stream_write(st, data, len)) {
+    r->is_err = 1;
+    r->as.err = http_err(st, "cannot write output file");
+    return 1;
+  }
+  if (st->stream_has_length && st->stream_bytes == st->stream_expected) {
+    http_finish_file_resp(st, r);
+    return 1;
+  }
+  if (st->stream_has_length && st->stream_bytes > st->stream_expected) {
+    r->is_err = 1;
+    r->as.err = http_err(st, "response exceeds content length");
+    return 1;
+  }
+  if (eof) {
+    if (st->stream_has_length) {
+      r->is_err = 1;
+      r->as.err = http_err(st, "response ended before content length");
+      return 1;
+    }
+    http_finish_file_resp(st, r);
+    return 1;
+  }
+  r->retry = 1;
+  return 1;
+}
+
 static char *http_format_resp(int64_t status, SzMap *headers, const char *data,
                               size_t len, int head, size_t *out_len) {
   SzList *rows;
@@ -1543,6 +1899,12 @@ static void *http_read(void *env) {
       r->as.err = http_err(st, "read failed");
       return r;
     }
+  }
+  if (st->stream_mode) {
+    if (n > 0)
+      st->read_deadline_ms = 0;
+    http_stream_feed(st, n > 0 ? buf : NULL, n > 0 ? (size_t)n : 0, n == 0, r);
+    return r;
   }
   if (n > 0) {
     size_t add = (size_t)n;
@@ -1811,6 +2173,37 @@ SzIo *sz_net_live_http_req(const char *method, SzString *url, SzMap *headers,
   st->fd4 = -1;
   st->fd6 = -1;
   st->dns_fd = -1;
+  st->stream_fd = -1;
+  io = fm_drop(sz_io_delay(http_start, st), http_after_start, st);
+  io = fm_drop(io, http_after_connect, st);
+  {
+    SzIo *fin = sz_io_delay(http_cleanup, st);
+    SzIo *ens = sz_io_ensure(io, fin);
+    sz_release(io);
+    sz_release(fin);
+    sz_release(st);
+    return ens;
+  }
+}
+
+#if defined(__APPLE__)
+__attribute__((weak))
+#endif
+SzIo *sz_net_live_http_get_to_file(SzString *url, SzMap *headers, SzString *path) {
+  HttpSt *st;
+  SzIo *io;
+  st = (HttpSt *)sz_rc_alloc(sizeof(HttpSt), SZ_RC_BOX);
+  memset(st, 0, sizeof(HttpSt));
+  sz_retain(url);
+  st->url = url;
+  sz_retain(path);
+  st->stream_path = path;
+  st->stream_mode = 1;
+  st->req_headers = headers;
+  sz_retain(headers);
+  st->read_wait_ms = sz_net_http_wait_ms(headers, 30000);
+  memcpy(st->method, "GET", 4);
+  st->fd = st->fd4 = st->fd6 = st->dns_fd = st->stream_fd = -1;
   io = fm_drop(sz_io_delay(http_start, st), http_after_start, st);
   io = fm_drop(io, http_after_connect, st);
   {

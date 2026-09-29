@@ -981,7 +981,7 @@ def parseModels(args: List[String], i: Int, json: Bool, action: String, model: S
   if (i >= List.len(args)) modelsDone(action, model, json) else parseModelsTok(args, i, json, action, model, arg(args, i))
 
 def modelsDone(action: String, model: String, json: Bool): Cmd =
-  if (action == "list" && model == "" || action == "download" && modelKnown(model)) Cmd.Models(action, model, json) else Cmd.Fail("Usage: scuzz models list [--message-format=json] | download <smollm3-3b|qwen2.5-coder-7b>")
+  if (action == "list" && model == "" || action == "download" && modelKnown(model)) Cmd.Models(action, model, json) else Cmd.Fail("Usage: scuzz models list [--message-format=json] | download <qwen3.5-4b|qwen2.5-coder-7b>")
 
 def parseModelsTok(args: List[String], i: Int, json: Bool, action: String, model: String, a: String): Cmd =
   if (isHelp(a)) Cmd.Help("models") else if (a == "--message-format" || flagPref(a, "--message-format")) parseModelsFmt(takeVal(args, i, "--message-format"), args, action, model) else if (isFlag(a)) Cmd.Fail(unexp(a, "scuzz models list | download <MODEL>")) else if (action == "" && (a == "list" || a == "download")) parseModels(args, i + 1, json, a, model) else if (action == "download" && model == "" && modelKnown(a)) parseModels(args, i + 1, json, action, a) else Cmd.Fail(extraArg(a, "scuzz models list | download <MODEL>"))

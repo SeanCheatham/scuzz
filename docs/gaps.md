@@ -30,7 +30,7 @@ The host runs Linux 7.0.0-34-generic on an Intel Core i7-10875H at 2.30 GHz with
 
 **Proof.** Run Counter on one device with `scuzz package` and the platform toolchain. Physical-device work is outside the review arc.
 
-The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
+The local iOS loop targets arm64 simulators on iOS 16 or later. Physical-device signing and release distribution remain open. iOS supports Net clients with platform certificate trust. iOS `Net.httpGetToFile` compiles, but the current Net proof app does not launch with the SDK scene-lifecycle requirement. Its runtime proof stays open. Net HTTP servers remain host-only. Android packages reject Net calls because they do not link OpenSSL.
 
 ## Known gaps
 
@@ -55,23 +55,22 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Local model evidence
 
-macOS and Linux ARM64 backend execution remain unverified. Peak memory and useful Scuzz generation quality remain unknown. Larger source scopes can exceed the fixed context. Controlled replies do not prove usefulness.
+Qwen3.5 4B execution on macOS Metal and Linux x86-64 and ARM64 Vulkan remains unverified. GPU detection and CPU fallback need host proof for this model. Peak memory and useful Scuzz generation quality remain unknown. Larger source scopes can exceed the fixed context. Controlled replies do not prove usefulness.
 
 **Proof.** Run the pinned backend on each supported host. Measure peak memory and useful output for the fixed catalog. Use real weights and the shared request, parser, and behavioral review. Report unavailable hosts separately. Do not expand the catalog or claim quality from model size.
 
-**Measurement.** The host uses the pinned Q4_K_M artifacts and llama.cpp b11146 with CPU inference. Context is 4096 tokens. Output is at most 1024 tokens. Each row shows one measured finite command. Weights are cached. Compiler work can run at the same time. These samples do not establish stable latency or generation quality.
+**Measurement.** These earlier host samples use the pinned Q4_K_M artifacts and llama.cpp b11146 with CPU inference. Context is 4096 tokens. Output is at most 1024 tokens. Each row shows one measured finite command. Weights are cached. Compiler work can run at the same time. These samples do not establish GPU latency, stable latency, or generation quality.
 
 | Model | Command elapsed | Prompt | Prompt tokens | Generation | Output tokens | Generation tokens/s | Observed RSS at completion |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SmolLM3 3B | 54.0 s | 12.9 s | 639 | 20.3 s | 124 | 6.06 | 3,738,292,224 bytes |
 | Qwen2.5-Coder 7B Instruct | 112.8 s | 32.2 s | 695 | 51.6 s | 190 | 3.66 | 8,279,842,816 bytes |
 
-Sampling uses seed 1 and temperature 0.2. The pinned revisions and artifact digests are in the [generation catalog](../examples/editor/generation/src/Models.scuzz). Prompt processing is 49.40 tokens/s for 3B and 21.56 tokens/s for 7B. The default sample uses CLI SHA-256 `cea67a67b6aa45a31aa676e21802d115ff6e2e5403572e3ce0fc01e00ab1fd2a`. The 7B sample does not retain its compiler identity.
+Sampling uses seed 1 and temperature 0.2. The pinned revisions and artifact digests are in the [generation catalog](../examples/editor/generation/src/Models.scuzz). Prompt processing is 21.56 tokens/s for 7B. The 7B sample does not retain its compiler identity.
 
-The 7B model load has one observed sample of 3.9 s. The current 3B command does not measure load time separately. The process budgets are 4 GiB and 8 GiB. Linux enforces their virtual memory limits. The default finite proposal changes `greeting.txt` from `Hello` to `Hello Scuzz` under simulation. Its target has no registered claims. Its review completes all required workloads and 32 search cases. Finite Headless review retains a zero-event witness and exits normally. Frozen card preparation takes 1.736 s in one sample. This interval excludes generation, editor startup, and input collection before the card freezes. The target has one required idle workload and no seeds or corpus files. It changes no source before a choice. A console-only proposal has no recorded difference. These cases do not measure human preference or application quality.
+The 7B model load has one observed sample of 3.9 s. The Qwen3.5 4B command does not measure load time yet. The process budgets are 4 GiB and 8 GiB. Linux enforces their virtual memory limits. The default finite proposal changes `greeting.txt` from `Hello` to `Hello Scuzz` under simulation. Its target has no registered claims. Its review completes all required workloads and 32 search cases. Finite Headless review retains a zero-event witness and exits normally. Frozen card preparation takes 1.736 s in one sample. This interval excludes generation, editor startup, and input collection before the card freezes. The target has one required idle workload and no seeds or corpus files. It changes no source before a choice. A console-only proposal has no recorded difference. These cases do not measure human preference or application quality.
 
 ## Cuts and later work
 
 Do not add user FFI, `extern`, plugins, library publishing, git or registry dependencies, or `scuzz add`. Do not start a provider framework, remote generator service, telemetry, or model training. Limits and exclusions for the current arc live in `vision.md`.
 
-Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. General model browsing. GPU inference variants. Gated-model login. Model conversion. Automatic oracle mining. Semantic timeline alignment. Divergence attribution to source defs. Pixel previews. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.
+Generated setup inputs. Multiple named scenarios and campaign selection. Session event journal and live time ops. Stable scroll keys. Windows desktop. OS IME candidate windows. macOS release packaging in default CI. Developer ID signing and notarization. Full web accessibility. Real phone and screen-reader checks. Hot reload on web. Multiple UI factories in host hot reload. General model browsing. Metal and Vulkan performance measurements. Gated-model login. Model conversion. Automatic oracle mining. Semantic timeline alignment. Divergence attribution to source defs. Pixel previews. Emit scalar fallbacks. Dogfood IDE: native file dialogs, menus, multi-window, multi-cursor, minimap, Git UI, debugger, plugin host, custom canvas kit.

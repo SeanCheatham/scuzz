@@ -370,17 +370,17 @@ See: scuzz docs start
 """
 
 def helpModels(): String =
-  """Manage the two fixed CPU text models.
+  """Manage the two fixed local text models.
 
 Usage: scuzz models list [--message-format=json]
        scuzz models download <MODEL> [--message-format=json]
 
 Models:
-  smollm3-3b          SmolLM3 3B, Q4_K_M, Apache-2.0
+  qwen3.5-4b          Qwen3.5 4B, Q4_K_M, Apache-2.0
   qwen2.5-coder-7b    Qwen2.5-Coder 7B Instruct, Q4_K_M, Apache-2.0
 
-Listing is offline. Download fetches one pinned artifact through hf.
-Both use HF_HUB_CACHE, then HF_HOME, then the standard user cache.
+Listing is offline. Download streams one pinned artifact from Hugging Face.
+Set SCUZZ_MODEL_CACHE to select the cache. The default is ~/.cache/scuzz/models.
 Download does not start inference or select a session model.
 """
 
