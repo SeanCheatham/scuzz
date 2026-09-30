@@ -388,6 +388,7 @@ def presentCard(cached: PreparedCard, ls: LaneS, ds: DeckS): Unit =
     _ = Signal.set(ls.scope, Lanes.scopeLines(LspClient.parseJson(raw), flip))
     _ = Signal.set(ls.rev, "Left")
     _ = Signal.set(ls.blab, "Right")
+    _ = Signal.set(ls.details, 0)
     _ = deckArm(ls)
     _ = Signal.set(ds.title, "Behavior review")
     _ = Signal.set(ds.card, Cards.text(ready))
