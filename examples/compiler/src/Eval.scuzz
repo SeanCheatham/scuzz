@@ -38,6 +38,7 @@ record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
 record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Signal[Value]], log: List[Ref[Value]], ui: List[UiCall => IO[Value]])
 
+import Manifest.Man
 import Parse.Expr
 import Parse.Fun
 import Parse.Prog
@@ -2166,7 +2167,7 @@ def respIo(io: IO[(Int, Map[String, String], String)]): IO[Value, Value] =
   liftIo(io.map(t => respVal(t)))
 
 def respFileIo(url: String, headers: Map[String, String], path: String): IO[Value, Value] =
-  liftIo(Net.httpGet(url, headers).flatMap(t => Fs.write(path, t._3).map(_ => Value.VTuple(Value.VInt(t._1) :: vMapOf(t._2) :: Value.VInt(Str.byteLen(t._3)) :: noVals()))))
+  liftIo(Net.httpGetToFile(url, headers, path).map(t => Value.VTuple(Value.VInt(t._1) :: vMapOf(t._2) :: Value.VInt(t._3) :: noVals())))
 
 def natResp(v: Value): (Int, Map[String, String], String) =
   v match {
@@ -2533,4 +2534,37 @@ def errText(e: Value): String =
     case Value.VErr(msg) => msg
     case _ => show(e)
   }
+
+def evDir(dir: String): IO[Unit] =
+  Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => evDirMan(dir, Manifest.parse(toml)))
+
+def evDirMan(dir: String, m: Man): IO[Unit] =
+  if (m.hasUi) evFail("eval: [ui] packages are not supported yet") else Drive.manNeed(m).flatMap(_ => Fs.list(Drive.joinSlash(dir, "src")).flatMap(ents => evDirListed(dir, m.deps, ents)))
+
+def evDirListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
+  Drive.readSrcFiles(Drive.joinSlash(dir, "src"), ents).flatMap(own => Drive.collectDeps(dir, deps, own).flatMap(files => evFiles(files, Check.humanFiles(files))))
+
+def evFiles(files: List[(String, String)], human: String): IO[Unit] =
+  if (human != "scuzz check ok") evFail(human) else runMain(load(files))
+
+def evFail(msg: String): IO[Unit] =
+  IO.println(msg).flatMap(_ => IO.fail("eval"))
+
+def evProbeDir(dir: String): IO[Unit] =
+  Fs.read(Drive.joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => evProbeFiles(files, Check.humanFiles(files))))
+
+def evProbeRead(dir: String, stems: List[String], i: Int, acc: List[(String, String)]): IO[List[(String, String)]] =
+  if (List.isEmpty(stems)) IO.pure(List.reverse(acc)) else Fs.read(Drive.joinSlash(dir, Str.concat(Str.fromInt(i), ".scuzz"))).flatMap(src => evProbeRead(dir, List.tail(stems), i + 1, (List.at(stems, 0), src) :: acc))
+
+def evProbeFiles(files: List[(String, String)], human: String): IO[Unit] =
+  if (human != "scuzz check ok") probeReject(human) else probe(files)
+
+def probeReject(human: String): IO[Unit] =
+  Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else IO.println("3").flatMap(_ => evFail(human)))
+
+def uiProbe(dir: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
+  Fs.read(Drive.joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => uiProbeFiles(files, Check.humanFiles(files), slot, mount, ui)))
+
+def uiProbeFiles(files: List[(String, String)], human: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
+  if (human != "scuzz check ok") probeReject(human) else probeMounted(files, slot, mount, ui)
 

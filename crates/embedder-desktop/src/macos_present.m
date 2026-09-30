@@ -48,6 +48,10 @@ __attribute__((constructor)) static void configure_bundle(void) {
 - (BOOL)acceptsFirstResponder {
   return YES;
 }
+- (BOOL)acceptsFirstMouse:(NSEvent *)event {
+  (void)event;
+  return YES;
+}
 - (void)viewDidMoveToWindow {
   if (self.window)
     [self.window makeFirstResponder:self];

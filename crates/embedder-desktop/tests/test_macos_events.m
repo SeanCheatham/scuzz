@@ -10,7 +10,7 @@
 
 #define TITLE "scuzz-macos-event-test"
 #define W 80
-#define H 60
+#define H 80
 #define W2 120
 #define H2 90
 

@@ -18,7 +18,7 @@ async function check(browserType, url, mobile) {
     if (browserType === chromium) await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const page = await context.newPage();
     const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', error => errors.push(error.stack));
     page.on('console', msg => {
       if (/Unable to preventDefault inside passive/.test(msg.text())) errors.push(msg.text());
     });

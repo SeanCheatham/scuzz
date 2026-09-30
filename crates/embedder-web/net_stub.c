@@ -4,6 +4,7 @@
 static SzIo *no_net(void) { return sz_io_fail_cstr("Net: not available on web"); }
 
 SzIo *sz_net_http_get(SzString *url, SzMap *headers) { (void)url; (void)headers; return no_net(); }
+SzIo *sz_net_http_get_to_file(SzString *url, SzMap *headers, SzString *path) { (void)url; (void)headers; (void)path; return no_net(); }
 SzIo *sz_net_http_post(SzString *url, SzMap *headers, SzString *body) { (void)url; (void)headers; (void)body; return no_net(); }
 SzIo *sz_net_http_put(SzString *url, SzMap *headers, SzString *body) { (void)url; (void)headers; (void)body; return no_net(); }
 SzIo *sz_net_http_patch(SzString *url, SzMap *headers, SzString *body) { (void)url; (void)headers; (void)body; return no_net(); }

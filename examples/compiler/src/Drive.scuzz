@@ -22,9 +22,6 @@ import Mutate.StoreDef
 import Parse.En
 import Parse.Prog
 import Emit.Strs
-import Eval.Value
-import Eval.EvProg
-import Eval.UiCall
 
 def compileSrc(src: String): Build =
   compileSrc2(Check.check(src), src)
@@ -657,39 +654,6 @@ def checkDir(dir: String, json: Bool): IO[Unit] =
 
 def checkDirMan(dir: String, json: Bool, m: Man): IO[Unit] =
   manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => checkDirListed(dir, json, m.deps, ents)))
-
-def evDir(dir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "scuzz.toml")).flatMap(toml => evDirMan(dir, Manifest.parse(toml)))
-
-def evDirMan(dir: String, m: Man): IO[Unit] =
-  if (m.hasUi) evFail("eval: [ui] packages are not supported yet") else manNeed(m).flatMap(_ => Fs.list(joinSlash(dir, "src")).flatMap(ents => evDirListed(dir, m.deps, ents)))
-
-def evDirListed(dir: String, deps: List[(String, String)], ents: List[(String, Bool)]): IO[Unit] =
-  readSrcFiles(joinSlash(dir, "src"), ents).flatMap(own => collectDeps(dir, deps, own).flatMap(files => evFiles(files, Check.humanFiles(files))))
-
-def evFiles(files: List[(String, String)], human: String): IO[Unit] =
-  if (human != "scuzz check ok") evFail(human) else Eval.runMain(Eval.load(files))
-
-def evFail(msg: String): IO[Unit] =
-  IO.println(msg).flatMap(_ => IO.fail("eval"))
-
-def evProbeDir(dir: String): IO[Unit] =
-  Fs.read(joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => evProbeFiles(files, Check.humanFiles(files))))
-
-def evProbeRead(dir: String, stems: List[String], i: Int, acc: List[(String, String)]): IO[List[(String, String)]] =
-  if (List.isEmpty(stems)) IO.pure(List.reverse(acc)) else Fs.read(joinSlash(dir, Str.concat(Str.fromInt(i), ".scuzz"))).flatMap(src => evProbeRead(dir, List.tail(stems), i + 1, (List.at(stems, 0), src) :: acc))
-
-def evProbeFiles(files: List[(String, String)], human: String): IO[Unit] =
-  if (human != "scuzz check ok") probeReject(human) else Eval.probe(files)
-
-def probeReject(human: String): IO[Unit] =
-  Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else IO.println("3").flatMap(_ => evFail(human)))
-
-def uiProbe(dir: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
-  Fs.read(joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => uiProbeFiles(files, Check.humanFiles(files), slot, mount, ui)))
-
-def uiProbeFiles(files: List[(String, String)], human: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
-  if (human != "scuzz check ok") probeReject(human) else Eval.probeMounted(files, slot, mount, ui)
 
 def evWriteFiles(dir: String, files: List[(String, String)]): IO[Unit] =
   Fs.mkdirs(dir).flatMap(_ => Fs.write(joinSlash(dir, "files.txt"), Verify.nls(evStems(files))).flatMap(_ => evWriteSrcs(dir, files, 0)))

@@ -5,7 +5,7 @@ def noProg(): List[EvProg] =
   []
 
 def mainArgs(args: List[String]): IO[Unit] =
-  if (List.isEmpty(args)) IO.fail("ui-host: missing probe directory") else Ref.of(noProg()).flatMap(slot => Drive.uiProbe(List.at(args, 0), slot, v => mountOne(slot, v), call => editorCall(call.name, call.args)))
+  if (List.isEmpty(args)) IO.fail("ui-host: missing probe directory") else Ref.of(noProg()).flatMap(slot => Eval.uiProbe(List.at(args, 0), slot, v => mountOne(slot, v), call => editorCall(call.name, call.args)))
 
 def mountOne(slot: Ref[List[EvProg]], v: Value): IO[Unit] =
   Ref.get(slot).flatMap(ps => mountProg(ps, v))
