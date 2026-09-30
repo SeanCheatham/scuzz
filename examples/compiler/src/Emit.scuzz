@@ -3551,7 +3551,18 @@ def emitTupField(recv: Expr, name: String, prefix: String, strs: Strs, defs: Fta
 
 def emitTupFrom(s: Slot, name: String, prefix: String, recv: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   s match {
-    case Slot(code, v, _) => emitTupSelJoin2(code, emitTupSel(v, tupSlots(exprRetTyEns(recv, defs, ens, ps, loc)), tupIdx(name), prefix, 0))
+    case Slot(code, v, own) => emitTupFromTake(code, v, own, tupSlots(exprRetTyEns(recv, defs, ens, ps, loc)), tupIdx(name), prefix)
+  }
+
+def emitTupFromTake(code: String, tuple: String, own: Bool, tys: List[String], k: Int, prefix: String): Slot =
+  emitTupFromFinish(code, tuple, own, !isI64Ty(tupFieldTy(tys, k)), emitTupSel(tuple, tys, k, prefix, 0))
+
+def tupFieldTy(tys: List[String], k: Int): String =
+  if (k <= 0) headOrAny(tys) else if (List.isEmpty(tys) || List.len(tys) == 2) secondOrAny(tys) else tupFieldTy(tailOrEmpty(tys), k - 1)
+
+def emitTupFromFinish(pre: String, tuple: String, own: Bool, heap: Bool, field: Slot): Slot =
+  field match {
+    case Slot(code, value, _) => Slot(join(pre, join(code, join(if (own && heap) retPtr(value) else "", if (own) relPtr(tuple) else ""))), value, own && heap)
   }
 
 def emitTupSel(scrut: String, tys: List[String], k: Int, prefix: String, i: Int): Slot =

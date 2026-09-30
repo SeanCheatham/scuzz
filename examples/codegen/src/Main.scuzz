@@ -417,7 +417,7 @@ def srcTup1(): String =
 """
 
 def wantTup1(): String =
-  "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_tf_0_lb = call ptr @sz_box_i64(i64 1)\n  %build_e_arg0_tf_0_rb = call ptr @sz_box_i64(i64 2)\n  %build_e_arg0_tf_0_v = call ptr @sz_pair_new(ptr %build_e_arg0_tf_0_lb, ptr %build_e_arg0_tf_0_rb)\n  call void @sz_release(ptr %build_e_arg0_tf_0_lb)\n  call void @sz_release(ptr %build_e_arg0_tf_0_rb)\n  %build_e_arg0_p = call ptr @sz_pair_left(ptr %build_e_arg0_tf_0_v)\n  %build_e_arg0_v = call i64 @sz_unbox_i64(ptr %build_e_arg0_p)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
+  "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_tf_0_lb = call ptr @sz_box_i64(i64 1)\n  %build_e_arg0_tf_0_rb = call ptr @sz_box_i64(i64 2)\n  %build_e_arg0_tf_0_v = call ptr @sz_pair_new(ptr %build_e_arg0_tf_0_lb, ptr %build_e_arg0_tf_0_rb)\n  call void @sz_release(ptr %build_e_arg0_tf_0_lb)\n  call void @sz_release(ptr %build_e_arg0_tf_0_rb)\n  %build_e_arg0_p = call ptr @sz_pair_left(ptr %build_e_arg0_tf_0_v)\n  %build_e_arg0_v = call i64 @sz_unbox_i64(ptr %build_e_arg0_p)\n  call void @sz_release(ptr %build_e_arg0_tf_0_v)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def srcTup3(): String =
   """@main def main: IO[Unit] =
@@ -443,7 +443,7 @@ def srcMixed(): String =
 """
 
 def wantTup3(): String =
-  "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_tf_1_lb = call ptr @sz_box_i64(i64 2)\n  %build_e_arg0_tf_1_rb = call ptr @sz_box_i64(i64 3)\n  %build_e_arg0_tf_1_v = call ptr @sz_pair_new(ptr %build_e_arg0_tf_1_lb, ptr %build_e_arg0_tf_1_rb)\n  call void @sz_release(ptr %build_e_arg0_tf_1_lb)\n  call void @sz_release(ptr %build_e_arg0_tf_1_rb)\n  %build_e_arg0_tf_p0_lb = call ptr @sz_box_i64(i64 1)\n  %build_e_arg0_tf_p0_v = call ptr @sz_pair_new(ptr %build_e_arg0_tf_p0_lb, ptr %build_e_arg0_tf_1_v)\n  call void @sz_release(ptr %build_e_arg0_tf_p0_lb)\n  call void @sz_release(ptr %build_e_arg0_tf_1_v)\n  %build_e_arg0_tr0 = call ptr @sz_pair_right(ptr %build_e_arg0_tf_p0_v)\n  %build_e_arg0_p = call ptr @sz_pair_right(ptr %build_e_arg0_tr0)\n  %build_e_arg0_v = call i64 @sz_unbox_i64(ptr %build_e_arg0_p)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
+  "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_tf_1_lb = call ptr @sz_box_i64(i64 2)\n  %build_e_arg0_tf_1_rb = call ptr @sz_box_i64(i64 3)\n  %build_e_arg0_tf_1_v = call ptr @sz_pair_new(ptr %build_e_arg0_tf_1_lb, ptr %build_e_arg0_tf_1_rb)\n  call void @sz_release(ptr %build_e_arg0_tf_1_lb)\n  call void @sz_release(ptr %build_e_arg0_tf_1_rb)\n  %build_e_arg0_tf_p0_lb = call ptr @sz_box_i64(i64 1)\n  %build_e_arg0_tf_p0_v = call ptr @sz_pair_new(ptr %build_e_arg0_tf_p0_lb, ptr %build_e_arg0_tf_1_v)\n  call void @sz_release(ptr %build_e_arg0_tf_p0_lb)\n  call void @sz_release(ptr %build_e_arg0_tf_1_v)\n  %build_e_arg0_tr0 = call ptr @sz_pair_right(ptr %build_e_arg0_tf_p0_v)\n  %build_e_arg0_p = call ptr @sz_pair_right(ptr %build_e_arg0_tr0)\n  %build_e_arg0_v = call i64 @sz_unbox_i64(ptr %build_e_arg0_p)\n  call void @sz_release(ptr %build_e_arg0_tf_p0_v)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_v)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def srcMatchX(): String =
   """record Pt(x: Int, y: Int)
@@ -995,6 +995,16 @@ def probeGo(): IO[Unit] =
 def probeMain(): IO[Unit] =
   Sys.getenv("SCUZZ_EV_TESTRT").flatMap(ev => if (ev == "") IO.println("probe-skip") else probeGo())
 
+def temporaryTuple(n: Int): (String, Int, List[Int]) =
+  (Str.concat("value=", Str.fromInt(n)), n, [n, n + 1])
+
+def temporaryTupleFields(): IO[Unit] =
+  for {
+    _ <- IO.pure(temporaryTuple(7)._1.require(s => s == "value=7"))
+    _ <- IO.pure(temporaryTuple(7)._2.require(n => n == 7))
+    _ <- IO.pure(temporaryTuple(7)._3.require(ns => ns == [7, 8]))
+  } yield ()
+
 def httpTuplePayload(): IO[Unit] =
   for {
     result <- IO.attempt(IO.pure((200, Map.set(Map.empty(), "type", "json"), "body")))
@@ -1005,4 +1015,4 @@ def httpTuplePayload(): IO[Unit] =
   } yield ()
 
 @main def main: IO[Unit] =
-  httpTuplePayload().flatMap(_ => IO.println(if (allOk()) "ir-ok" else dumpAll())).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => evTraceMain()).flatMap(_ => probeMain())
+  temporaryTupleFields().flatMap(_ => httpTuplePayload()).flatMap(_ => IO.println(if (allOk()) "ir-ok" else dumpAll())).flatMap(_ => IO.println(if (evAllOk()) "eval-ok" else evDump())).flatMap(_ => evUiMain()).flatMap(_ => evTraceMain()).flatMap(_ => probeMain())
