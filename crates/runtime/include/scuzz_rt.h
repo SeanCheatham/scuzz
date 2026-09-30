@@ -722,7 +722,7 @@ SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env);
 SzList *sz_list_flat_map(SzList *xs, SzListMapFn fn, void *env);
 /* Pad with `x` until length `n`. n <= len leaves the list. n <= 0 leaves the list. */
 SzList *sz_list_pad_to(SzList *xs, int64_t n, void *x);
-int sz_list_non_empty(const SzList *xs);
+int64_t sz_list_non_empty(const SzList *xs);
 /* Boxed ints `[from, until)`. Empty when `until` <= `from`. Cons retains each box. */
 SzList *sz_list_range(int64_t from, int64_t until);
 /* `f(0)` ... `f(n-1)`. n <= 0 is empty. `fn` sees a boxed index and returns +1. */
