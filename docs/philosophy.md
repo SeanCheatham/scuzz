@@ -107,9 +107,9 @@ These are the target design locks. Missing behavior stays in [`gaps.md`](gaps.md
 
 ### Self-hosting
 
-The product CLI is Scuzz (`examples/cli`). `scripts/bootstrap.sh` fetches the newest GitHub `v*` release. It builds a temporary compiler from the checkout. That compiler builds the product CLI with the current emission rules. The script removes the temporary compiler. Do not ship two toolchains. Product version lives in `VERSION`.
+The product CLI is Scuzz (`examples/cli`). `scripts/bootstrap.sh` fetches the newest GitHub `v*` release. It builds a temporary compiler from `examples/compiler` with one build entry point. That compiler builds the full product CLI with the current emission rules. The script removes the temporary compiler. Do not ship two toolchains. Product version lives in `VERSION`.
 
-`examples/syntax` is the lexer and parser. `examples/compiler` is the checker, evaluator, emit, and compile pipeline. `examples/fmt`, `examples/tyck`, and `examples/codegen` prove printer, checker, evaluator, and emitter. Toolchain sources only call builtins that the newest `v*` bootstrap already emits. They use only forms that release emits. A `for` pattern bind stays out of compiler sources until a release emits it. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body, so Check can resolve a qualified call.
+`examples/syntax` is the lexer and parser. `examples/compiler` is the checker, evaluator, emit, and compile pipeline. `examples/fmt`, `examples/tyck`, and `examples/codegen` prove printer, checker, evaluator, and emitter. Syntax and compiler sources only call builtins that the newest `v*` bootstrap emits. They use only forms that release emits. The full CLI can call builtins that the checkout compiler emits. A `for` pattern bind stays out of compiler sources until a release emits it. Parse `Param` and `Fun` stay strings. A path-dependent file over 40k keeps def heads and a stub body, so Check can resolve a qualified call.
 
 ### Evaluator
 

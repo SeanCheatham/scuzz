@@ -196,11 +196,24 @@ echo "==> make -C crates/runtime lib -j$JOBS" >&2
 make -C "$ROOT/crates/runtime" lib -j"$JOBS" CC=clang &
 mk=$!
 
-stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-bootstrap-compiler.XXXXXX")"
+mkdir -p "$ROOT/.bootstrap"
+stage_dir="$(mktemp -d "$ROOT/.bootstrap/compiler.XXXXXX")"
 trap 'rm -rf "$stage_dir"' EXIT
 
-echo "==> $BOOTSTRAP build --out-dir $stage_dir examples/cli" >&2
-"$BOOTSTRAP" build --out-dir "$stage_dir" examples/cli
+mkdir -p "$stage_dir/src"
+cat > "$stage_dir/scuzz.toml" <<'EOF'
+[package]
+name = "compiler"
+
+[dependencies]
+compiler = { path = "../../examples/compiler" }
+EOF
+cat > "$stage_dir/src/Bootstrap.scuzz" <<'EOF'
+@main def main: IO[Unit] =
+  Fs.mkdirs("examples/cli/build").flatMap(_ => Drive.emitDir("examples/cli", "examples/cli/build", true))
+EOF
+echo "==> $BOOTSTRAP build --out-dir $stage_dir/build $stage_dir" >&2
+"$BOOTSTRAP" build --out-dir "$stage_dir/build" "$stage_dir"
 SRC="$ROOT/examples/cli/build/cli"
 RT="$ROOT/crates/runtime/build/libscuzz_rt.a"
 wait "$mk" || die "runtime make failed"
@@ -208,9 +221,9 @@ if [ ! -f "$RT" ]; then
   die "runtime make did not write $RT"
 fi
 
-"$ROOT/scripts/link_cli.sh" "$stage_dir/cli.ll" "$stage_dir/cli"
+"$ROOT/scripts/link_cli.sh" "$stage_dir/build/compiler.ll" "$stage_dir/build/compiler"
 echo "==> compile product with checkout compiler" >&2
-"$stage_dir/cli" build --full examples/cli
+"$stage_dir/build/compiler"
 "$ROOT/scripts/link_cli.sh" "$ROOT/examples/cli/build/cli.ll" "$SRC"
 if [ ! -x "$SRC" ]; then
   die "clang -O2 did not produce $SRC"
