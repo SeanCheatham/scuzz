@@ -1543,7 +1543,7 @@ int64_t sz_list_length_compare(SzList *xs, int64_t n) {
   return 0;
 }
 
-int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
+int64_t sz_list_non_empty(const SzList *xs) { return xs != NULL; }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }
 
