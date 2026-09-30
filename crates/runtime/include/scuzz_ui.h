@@ -531,6 +531,8 @@ int sz_view_has_focused_text_field(SzView *root);
 int sz_view_collect_text_fields(SzView *root, SzView **out, int cap);
 /* Shown editors in a11y preorder (cap 64 for `[editor]` dump). */
 int sz_view_collect_editors(SzView *root, SzView **out, int cap);
+/* Find the first editor, including hidden editors, for source marks. */
+SzView *sz_view_first_editor(SzView *root);
 /* Shown tap targets in a11y preorder (cap 64 for dump / `tap N` / `tap id`). */
 int sz_view_collect_tap_targets(SzView *root, SzView **out, int cap);
 /* Fire the first tap target whose a11y label equals `label`. 1 if it fired. */
