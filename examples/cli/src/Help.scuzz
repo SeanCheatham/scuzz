@@ -268,6 +268,8 @@ def helpIde(): String =
   """Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
 
 Usage: scuzz ide [OPTIONS] [PATH]
+       scuzz ide export-request <PACKAGE> --objective <TEXT> --out <JSON>
+       scuzz ide review-suggestion <PACKAGE> --request <JSON> --candidate <DIRECTORY>
        scuzz ide generate-suggestion <PACKAGE> --request <JSON> --model <MODEL> --out <NEW-DIRECTORY> [--download]
 
 Arguments:
@@ -377,7 +379,7 @@ Usage: scuzz models list [--message-format=json]
 
 Models:
   qwen3.5-4b          Qwen3.5 4B, Q4_K_M, Apache-2.0
-  qwen2.5-coder-7b    Qwen2.5-Coder 7B Instruct, Q4_K_M, Apache-2.0
+  qwen3.5-9b          Qwen3.5 9B, Q4_K_M, Apache-2.0
 
 Listing is offline. Download streams one pinned artifact from Hugging Face.
 Set SCUZZ_MODEL_CACHE to select the cache. The default is ~/.cache/scuzz/models.

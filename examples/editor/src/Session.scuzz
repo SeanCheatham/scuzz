@@ -18,7 +18,7 @@ def create(root: String): IO[SessionS] =
     _ <- Models.need(count >= 0 && count <= 8 && (List.isEmpty(Json.keys(saved)) || Proposal.version(saved)), "local session metadata is invalid")
     objective = Json.getStr(saved, "objective", "")
     paths = if (List.isEmpty(Json.keys(saved))) List.join(List.map(files, f => f._1), ",") else List.join(List.map(Json.arr(Proposal.field(saved, "allowed")), j => Json.strOr(j, "")), ",")
-    created = SessionS(Signal.make(objective), Signal.make(paths), Signal.make(if (Json.getStr(saved, "mode", "external") == "local") 1 else 0), Signal.make(id), Signal.make(0), Signal.make(count), Signal.make("Set one objective and source scope. Start exports a frozen request. Restored sessions start paused."), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), cache, Signal.make(""), Signal.make(List.map(Models.catalog(), m => Models.modelJson(cache, m, false))), Signal.make(0), Signal.make(0))
+    created = SessionS(Signal.make(objective), Signal.make(paths), Signal.make(if (Json.getStr(saved, "mode", "external") == "local") 1 else 0), Signal.make(id), Signal.make(0), Signal.make(count), Signal.make("Set an objective, then select Start."), Signal.make(""), Signal.make(0), jobs, reviews, Signal.make(""), cache, Signal.make(""), Signal.make(List.map(Models.catalog(), m => Models.modelJson(cache, m, false))), Signal.make(0), Signal.make(0))
     _ = if (List.isEmpty(Json.keys(saved))) () else Signal.set(created.config, settings(created))
   } yield created
 
@@ -60,7 +60,8 @@ def exportRequest(root: String, s: SessionS, fresh: Bool): IO[Json] =
   for {
     compiler <- Cards.compilerIdentity()
     saved <- sessionDocument(root, s)
-    request <- if (fresh) Proposal.make(root, Signal.get(s.objective), allowed(s), compiler, []) else restoredRequest(root, s, compiler, Cards.sessionFields(saved))
+    failed <- if (fresh) Cards.currentInputs(root).flatMap(inputs => Cards.known(root, Cards.setHash(inputs))).map(cards => List.map(List.takeRight(List.sortBy(List.filter(cards, c => List.contains(["candidate-failed", "duplicate-source", "duplicate-outcome", "no-observed-difference", "unchanged-source"], Cards.str(c, "exclusion"))), c => Json.getInt(c, "feedback_time", 0)), 3), c => Json.Obj([("kind", Json.Str("automatic")), ("decision", Proposal.field(c, "exclusion")), ("diagnostic", Proposal.field(c, "diagnostic")), ("source", Proposal.pairsJson(Cards.propsOf(c)))]))) else IO.pure([]: List[Json])
+    request <- if (fresh) Proposal.make(root, Signal.get(s.objective), allowed(s), compiler, failed) else restoredRequest(root, s, compiler, Cards.sessionFields(saved))
     _ <- Cards.setupStorage(root)
     _ <- Fs.write(Fs.join(Cards.storage(root), "session.json"), Proposal.text(saved))
     _ <- Cards.rememberRequest(root, request)
@@ -77,6 +78,16 @@ def start(root: String, s: SessionS): IO[Unit] =
     _ = Signal.set(s.active, 1)
     _ = Signal.set(s.status, if (Signal.get(s.mode) == 0) "External proposals: publish a complete directory for build/ide/request.json." else "Local model: review setup and limits, then Download or Generate suggestion.")
     _ <- if (Signal.get(s.mode) == 1) run(s, _ => inspect(s)) else IO.pure(())
+  } yield ()
+
+def newSession(root: String, s: SessionS, prepare: Unit => IO[Unit], cancelCard: Unit => IO[Unit]): IO[Unit] =
+  for {
+    _ <- pause(s)
+    _ <- cancelCard(())
+    _ = Signal.set(s.count, 0)
+    _ <- invalidateBaseline(root, s)
+    _ <- start(root, s)
+    _ <- prepare(())
   } yield ()
 
 def ownerRef(s: SessionS, modelWork: Bool): Ref[OwnedJob] =
@@ -117,7 +128,7 @@ def own(s: SessionS, modelWork: Bool, before: Unit => IO[Bool], action: Unit => 
   job <- Fiber.fork(IO.ensure(for {
   _ <- Deferred.get(ready)
   committed <- Ref.get(handed)
-  _ <- if (!committed || epoch != Signal.get(s.epoch) || Signal.get(s.active) != 1) IO.pure(()) else guard(s).flatMap(_ => action(())).handleErrorWith(e => IO.pure(if (epoch == Signal.get(s.epoch)) Signal.set(if (modelWork) s.status else s.reviewStatus, Str.concat(e, "; retry explicitly")) else ()))
+  _ <- if (!committed || epoch != Signal.get(s.epoch) || Signal.get(s.active) != 1) IO.pure(()) else guard(s).flatMap(_ => action(())).handleErrorWith(e => IO.pure(if (epoch == Signal.get(s.epoch)) Signal.set(if (modelWork) s.status else s.reviewStatus, if (modelWork && Str.startsWith(e, "scuzz generate: candidate failed:")) e else Str.concat(e, "; retry explicitly")) else ()))
 } yield (), cleanup(()).flatMap(_ => release(s, modelWork, token))))
   registered <- Ref.updateAndGet(ownerRef(s, modelWork), current => if (current.token == token) OwnedJob(token, [job], current.stopping) else current)
   _ <- Ref.set(handed, registered.token == token && !registered.stopping)
@@ -158,8 +169,9 @@ def generate(root: String, s: SessionS, admit: Unit => IO[Bool], after: String =
   measured <- Generate.generate(request, Signal.get(s.model), false, message => IO.pure(for {
   _ = Signal.set(s.status, message)
   _ = Signal.set(s.models, List.map(Signal.get(s.models), m => if (Proposal.str(m, "id") == Signal.get(s.model)) Json.set(m, "status", Json.Str("loading")) else m))
-} yield ()))
+} yield ()), response => Generate.saveMeasurement(root, request, Json.Obj([("response", response)])))
   _ = restoreModels(s)
+  _ <- Generate.saveMeasurement(root, request, measured)
   reply = Proposal.field(measured, "reply")
   out = Fs.join(Deck.proposalsDir(root), Str.concat("local-", Proposal.str(request, "request")))
   _ <- Proposal.publish(root, out, request, reply, Proposal.str(request, "compiler"))
@@ -180,7 +192,7 @@ def selectModel(root: String, s: SessionS, id: String, prepare: Unit => IO[Unit]
   } yield ()
 
 def view(root: String, s: SessionS, prepare: Unit => IO[Unit], generateNext: Unit => IO[Unit], cancelCard: Unit => IO[Unit]): View =
-  View.scroll(View.column(View.text("Objective"), View.textField(s.objective, "One short objective"), View.text("Allowed source paths, separated by commas"), View.textField(s.paths, "src/Main.scuzz"), View.wrap(View.choiceChip(s.mode, 0, "External proposals"), View.choiceChip(s.mode, 1, "Local model")), View.text("Limits: 3 files / 64 KiB; input 1 MiB; response 128 KiB; context 4096; output 1024; request 15 minutes; 8 requests; 32 search cases; 2 cards; 16 feedback records."), View.text("Setup: download 60 minutes; load 5 minutes; memory budget 4 GiB or 8 GiB plus 2 GiB host reserve; at most 4 CPU threads."), View.showWhen(s.mode, 1, View.column(View.each(s.models, m => View.column(View.textButton(Proposal.str(m, "name"), _ => selectModel(root, s, Proposal.str(m, "id"), prepare, cancelCard)), View.code(Models.text(m)))), View.bindText(s.model), View.text(Str.concat("Inference backend: llama.cpp ", Str.concat(Models.backendBuild(), Str.concat("; automatic GPU selection with CPU fallback; MIT; ", Models.backendLicense())))), View.button("Inspect cache", _ => run(s, _ => inspect(s)).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Download model", _ => download(root, s).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))))), View.wrap(View.button("Start", _ => cancelCard(()).flatMap(_ => start(root, s)).flatMap(_ => prepare(())).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Pause session", _ => pause(s).flatMap(_ => cancelCard(()))), View.button("Generate suggestion", _ => generateNext(()).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Export request", _ => exportRequest(root, s, false).map(_ => ()).handleErrorWith(e => IO.pure(Signal.set(s.status, e))))), View.bindText(s.status), View.bindText(s.reviewStatus), View.bindText(Signal.map(s.elapsed, ms => Str.concat("Owned work elapsed seconds: ", Str.fromInt(ms / 1000)))), View.bindText(Signal.map(s.count, n => Str.concat("Generation requests: ", Str.concat(Str.fromInt(n), " / 8"))))))
+  View.column(View.text("Objective"), View.textField(s.objective, "One short objective"), View.text("Allowed source paths"), View.textField(s.paths, "src/Main.scuzz"), View.wrap(View.choiceChip(s.mode, 0, "External proposals"), View.choiceChip(s.mode, 1, "Local model")), View.showWhen(s.mode, 1, View.column(View.each(s.models, m => View.column(View.textButton(Proposal.str(m, "name"), _ => selectModel(root, s, Proposal.str(m, "id"), prepare, cancelCard)), View.showWhen(Signal.map(s.model, id => if (id == Proposal.str(m, "id")) 1 else 0), 1, View.column(View.text(Str.concat(Proposal.str(m, "status"), Str.concat("; download MiB: ", Str.fromInt(Json.getInt(m, "weight_bytes", 0) / 1048576)))), View.link("Model license", Proposal.str(m, "license_url")))))), View.wrap(View.button("Inspect cache", _ => run(s, _ => inspect(s)).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Download model", _ => download(root, s).handleErrorWith(e => IO.pure(Signal.set(s.status, e))))))), View.wrap(View.button("Start", _ => cancelCard(()).flatMap(_ => start(root, s)).flatMap(_ => prepare(())).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Pause session", _ => pause(s).flatMap(_ => cancelCard(()))), View.button("New session", _ => newSession(root, s, prepare, cancelCard).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Generate suggestion", _ => generateNext(()).handleErrorWith(e => IO.pure(Signal.set(s.status, e)))), View.button("Export request", _ => exportRequest(root, s, false).map(_ => ()).handleErrorWith(e => IO.pure(Signal.set(s.status, e))))), View.text("Limits: 8 requests; 3 files; 64 KiB; 15 minutes per request."), View.bindText(s.status), View.bindText(s.reviewStatus), View.bindText(Signal.map(s.count, n => Str.concat("Generation requests: ", Str.concat(Str.fromInt(n), " / 8")))))
 
 def settings(s: SessionS): String =
   Proposal.text(Json.Obj([("objective", Json.Str(Signal.get(s.objective))), ("allowed", Json.Arr(List.map(allowed(s), p => Json.Str(p)))), ("mode", Json.Int(Signal.get(s.mode))), ("model", Json.Str(Signal.get(s.model)))]))

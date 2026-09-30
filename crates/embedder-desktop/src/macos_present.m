@@ -52,6 +52,51 @@ __attribute__((constructor)) static void configure_bundle(void) {
   if (self.window)
     [self.window makeFirstResponder:self];
 }
+/* AppKit handles window borders before it sends content input here. */
+- (NSView *)hitTest:(NSPoint)point {
+  return [super hitTest:point] ? self : nil;
+}
+- (void)pointerEvent:(NSEvent *)event phase:(SzPointerPhase)phase button:(int)button {
+  float x, y;
+  if (event_content_xy(event, &x, &y))
+    enqueue_pointer(phase, x, y, button);
+}
+- (void)mouseDown:(NSEvent *)event {
+  [self pointerEvent:event phase:SZ_POINTER_DOWN button:1];
+}
+- (void)mouseDragged:(NSEvent *)event {
+  [self pointerEvent:event phase:SZ_POINTER_MOVE button:1];
+}
+- (void)mouseUp:(NSEvent *)event {
+  [self pointerEvent:event phase:SZ_POINTER_UP button:1];
+}
+- (void)rightMouseDown:(NSEvent *)event {
+  [self pointerEvent:event phase:SZ_POINTER_DOWN button:3];
+}
+- (void)rightMouseDragged:(NSEvent *)event {
+  [self pointerEvent:event phase:SZ_POINTER_MOVE button:3];
+}
+- (void)rightMouseUp:(NSEvent *)event {
+  [self pointerEvent:event phase:SZ_POINTER_UP button:3];
+}
+- (void)mouseMoved:(NSEvent *)event {
+  [self pointerEvent:event phase:SZ_POINTER_MOVE button:0];
+}
+- (void)scrollWheel:(NSEvent *)event {
+  float x, y;
+  if (!event_content_xy(event, &x, &y))
+    return;
+  float dx = (float)event.scrollingDeltaX;
+  float dy = (float)event.scrollingDeltaY;
+  if ((event.modifierFlags & NSEventModifierFlagShift) && dx == 0.f) {
+    dx = dy;
+    dy = 0.f;
+  }
+  enqueue_scroll(x, y, dx, dy);
+}
+- (void)keyDown:(NSEvent *)event {
+  [self interpretKeyEvents:@[event]];
+}
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
   (void)range;
   if (actualRange)
@@ -348,55 +393,6 @@ static int cocoa_drain_events(void) {
     if (!ev)
       break;
 
-    {
-      NSEventType t = [ev type];
-      float x, y;
-      if (t == NSEventTypeLeftMouseDown && event_content_xy(ev, &x, &y)) {
-        enqueue_pointer(SZ_POINTER_DOWN, x, y, 1);
-        continue;
-      }
-      if (t == NSEventTypeLeftMouseDragged && event_content_xy(ev, &x, &y)) {
-        enqueue_pointer(SZ_POINTER_MOVE, x, y, 1);
-        continue;
-      }
-      if (t == NSEventTypeLeftMouseUp && event_content_xy(ev, &x, &y)) {
-        enqueue_pointer(SZ_POINTER_UP, x, y, 1);
-        continue;
-      }
-      if (t == NSEventTypeRightMouseDown && event_content_xy(ev, &x, &y)) {
-        enqueue_pointer(SZ_POINTER_DOWN, x, y, 3);
-        continue;
-      }
-      if (t == NSEventTypeRightMouseDragged && event_content_xy(ev, &x, &y)) {
-        enqueue_pointer(SZ_POINTER_MOVE, x, y, 3);
-        continue;
-      }
-      if (t == NSEventTypeRightMouseUp && event_content_xy(ev, &x, &y)) {
-        enqueue_pointer(SZ_POINTER_UP, x, y, 3);
-        continue;
-      }
-      if (t == NSEventTypeMouseMoved && event_content_xy(ev, &x, &y)) {
-        enqueue_pointer(SZ_POINTER_MOVE, x, y, 0);
-        continue;
-      }
-      if (t == NSEventTypeScrollWheel && event_content_xy(ev, &x, &y)) {
-        float dx = (float)[ev scrollingDeltaX];
-        float dy = (float)[ev scrollingDeltaY];
-        if (([ev modifierFlags] & NSEventModifierFlagShift) && dx == 0.f) {
-          dx = dy;
-          dy = 0.f;
-        }
-        enqueue_scroll(x, y, dx, dy);
-        continue;
-      }
-    }
-
-    if ([ev type] == NSEventTypeKeyDown) {
-      if (g_content)
-        [(ScuzzContentView *)g_content interpretKeyEvents:@[ev]];
-      continue;
-    }
-
     [NSApp sendEvent:ev];
   }
   /* orderFront can stay invisible for one turn. Quit only after the
@@ -511,7 +507,7 @@ static int event_content_xy(NSEvent *ev, float *x, float *y) {
   NSView *content;
   NSPoint loc;
   NSPoint inView;
-  if (!ev || !g_win || !x || !y)
+  if (!ev || !g_win || ev.window != g_win || !x || !y)
     return 0;
   content = [g_win contentView];
   if (!content)
@@ -521,7 +517,7 @@ static int event_content_xy(NSEvent *ev, float *x, float *y) {
   if (!NSPointInRect(inView, [content bounds]))
     return 0;
   *x = (float)inView.x;
-  *y = (float)(content.bounds.size.height - inView.y);
+  *y = (float)inView.y;
   return 1;
 }
 

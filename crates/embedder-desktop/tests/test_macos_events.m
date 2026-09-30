@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #define TITLE "scuzz-macos-event-test"
 #define W 80
@@ -42,13 +43,31 @@ static void drain_events(void) {
     memset(&ev, 0, sizeof ev);
 }
 
+static void post_click(NSWindow *window, NSPoint point) {
+  for (int i = 0; i < 2; i++) {
+    NSEvent *event = [NSEvent
+        mouseEventWithType:i == 0 ? NSEventTypeLeftMouseDown : NSEventTypeLeftMouseUp
+                  location:point
+             modifierFlags:0
+                 timestamp:NSProcessInfo.processInfo.systemUptime
+              windowNumber:window.windowNumber
+                   context:nil
+               eventNumber:i + 1
+                clickCount:1
+                  pressure:i == 0 ? 1.0 : 0.0];
+    [NSApp postEvent:event atStart:NO];
+  }
+}
+
 int main(void) {
   static unsigned char pixels[W * H * 4];
   ScuzzLaunchProbe *probe;
   NSWindow *window;
   SzInputEvent ev;
   int got_pointer = 0;
+  int got_release = 0;
   int got_resize = 0;
+  __block int native_down = 0;
 
   if (!sz_embedder_available()) {
     printf("test_macos_events: skip (no display)\n");
@@ -69,34 +88,57 @@ int main(void) {
     check(probe.finished == 1, "application finishes launch");
     window = [[NSApp windows] firstObject];
     check(window != nil, "window exists");
+    id monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+                                                      handler:^NSEvent *(NSEvent *event) {
+      native_down++;
+      return event;
+    }];
 
     drain_events();
     if (window) {
       [window setContentSize:NSMakeSize(W2, H2)];
-      NSEvent *down = [NSEvent
-          mouseEventWithType:NSEventTypeLeftMouseDown
-                    location:NSMakePoint(8, 8)
-               modifierFlags:0
-                   timestamp:0
-                windowNumber:window.windowNumber
-                     context:nil
-                 eventNumber:1
-                  clickCount:1
-                    pressure:1.0];
-      [NSApp postEvent:down atStart:NO];
+      post_click(window, NSMakePoint(30, 30));
     }
 
     memset(&ev, 0, sizeof ev);
     while (sz_embedder_poll_event(&ev)) {
       if (ev.kind == SZ_INPUT_POINTER &&
-          ev.pointer_phase == SZ_POINTER_DOWN)
+          ev.pointer_phase == SZ_POINTER_DOWN) {
         got_pointer = 1;
+        if (fabsf(ev.x - 30) >= 1 || fabsf(ev.y - (H2 - 30)) >= 1)
+          fprintf(stderr, "pointer: %.1f, %.1f\n", ev.x, ev.y);
+        check(fabsf(ev.x - 30) < 1 && fabsf(ev.y - (H2 - 30)) < 1,
+              "pointer uses top-left content coordinates");
+      }
+      if (ev.kind == SZ_INPUT_POINTER && ev.pointer_phase == SZ_POINTER_UP)
+        got_release = 1;
       if (ev.kind == SZ_INPUT_RESIZE && ev.width == W2 && ev.height == H2)
         got_resize = 1;
       memset(&ev, 0, sizeof ev);
     }
     check(got_pointer, "poll receives pointer after first frame");
+    check(got_release, "poll receives pointer release through AppKit");
     check(got_resize, "poll receives resize after first frame");
+    check(native_down == 1, "AppKit receives content input");
+
+    if (window)
+      post_click(window, NSMakePoint(1, H2 / 2));
+    drain_events();
+    check(native_down == 2, "AppKit receives window border input");
+    [NSEvent removeMonitor:monitor];
+
+    if (window) {
+      NSView *content = window.contentView;
+      NSImageView *image = (NSImageView *)content.subviews.firstObject;
+      check(NSEqualRects(image.frame, content.bounds),
+            "image fills resized content bounds");
+      static unsigned char resized[W2 * H2 * 4];
+      memset(resized, 0x40, sizeof resized);
+      check(sz_embedder_present(TITLE, W2, H2, W2, H2, resized, sizeof resized),
+            "present resized frame");
+      check(NSEqualRects(image.frame, content.bounds),
+            "image fills content after presentation");
+    }
 
     [[NSNotificationCenter defaultCenter] removeObserver:probe];
     sz_embedder_shutdown();

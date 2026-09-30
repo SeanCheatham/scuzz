@@ -50,24 +50,17 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
 - **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.
+- **Editor comparison.** The compiled `c_compare` corpus workload fails the session heap baseline. It retains live blocks at session exit. Resolve this failure before claiming a complete editor corpus pass.
 - **Check scope.** The editor Check button does not perform all format and verify-file checks of `scuzz check`. Candidate gating must use the required shared checks even if the general button stays separate.
 - **Standard kits.** OS threads remain missing. Add kit work only when it blocks an ordinary program or a required review proof.
 
 ### Local model evidence
 
-Qwen3.5 4B execution on macOS Metal and Linux x86-64 and ARM64 Vulkan remains unverified. GPU detection and CPU fallback need host proof for this model. Peak memory and useful Scuzz generation quality remain unknown. Larger source scopes can exceed the fixed context. Controlled replies do not prove usefulness.
+The pinned Qwen3.5 9B model runs on macOS ARM64 Metal. It produces a message input and a Send action that retains messages in a visible list. Each candidate passes all three required workloads and 32 search cases with no regression. A native interaction proof enters a message, selects Send, and checks the retained message and cleared input. These finite cases do not prove sustained useful generation. Qwen3.5 4B execution and Linux x86-64 and ARM64 Vulkan execution remain unverified. GPU detection and CPU fallback need further host proof. Peak memory remains unknown. Larger source scopes can exceed the fixed context. Controlled replies do not prove usefulness.
 
 **Proof.** Run the pinned backend on each supported host. Measure peak memory and useful output for the fixed catalog. Use real weights and the shared request, parser, and behavioral review. Report unavailable hosts separately. Do not expand the catalog or claim quality from model size.
 
-**Measurement.** These earlier host samples use the pinned Q4_K_M artifacts and llama.cpp b11146 with CPU inference. Context is 4096 tokens. Output is at most 1024 tokens. Each row shows one measured finite command. Weights are cached. Compiler work can run at the same time. These samples do not establish GPU latency, stable latency, or generation quality.
-
-| Model | Command elapsed | Prompt | Prompt tokens | Generation | Output tokens | Generation tokens/s | Observed RSS at completion |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Qwen2.5-Coder 7B Instruct | 112.8 s | 32.2 s | 695 | 51.6 s | 190 | 3.66 | 8,279,842,816 bytes |
-
-Sampling uses seed 1 and temperature 0.2. The pinned revisions and artifact digests are in the [generation catalog](../examples/editor/generation/src/Models.scuzz). Prompt processing is 21.56 tokens/s for 7B. The 7B sample does not retain its compiler identity.
-
-The 7B model load has one observed sample of 3.9 s. The Qwen3.5 4B command does not measure load time yet. The process budgets are 4 GiB and 8 GiB. Linux enforces their virtual memory limits. The default finite proposal changes `greeting.txt` from `Hello` to `Hello Scuzz` under simulation. Its target has no registered claims. Its review completes all required workloads and 32 search cases. Finite Headless review retains a zero-event witness and exits normally. Frozen card preparation takes 1.736 s in one sample. This interval excludes generation, editor startup, and input collection before the card freezes. The target has one required idle workload and no seeds or corpus files. It changes no source before a choice. A console-only proposal has no recorded difference. These cases do not measure human preference or application quality.
+**Measurement.** One successful macOS Metal 9B correction takes 41.2 s from request start to publication. It uses 2,025 prompt tokens and 463 output tokens. This sample does not establish a latency bound. Peak memory for the current catalog remains unverified. The pinned revisions and artifact digests are in the [generation catalog](../examples/editor/generation/src/Models.scuzz). The process budgets are 4 GiB and 8 GiB. Linux enforces their virtual memory limits. The default finite proposal changes `greeting.txt` from `Hello` to `Hello Scuzz` under simulation. Its target has no registered claims. Its review completes all required workloads and 32 search cases. Finite Headless review retains a zero-event witness and exits normally. Frozen card preparation takes 1.736 s in one sample. This interval excludes generation, editor startup, and input collection before the card freezes. The target has one required idle workload and no seeds or corpus files. It changes no source before a choice. A console-only proposal has no recorded difference. These cases do not measure human preference or application quality.
 
 ## Cuts and later work
 

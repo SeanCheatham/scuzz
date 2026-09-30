@@ -84,7 +84,7 @@ fi
 
 # The IDE depends on the compiler packages by path (../compiler, ../syntax).
 echo "==> bundling IDE package and its compiler dependencies"
-for pair in editor:ide compiler:compiler syntax:syntax; do
+for pair in editor:ide compiler:compiler syntax:syntax ui-host:ui-host; do
   src="${pair%%:*}"
   dst="${pair##*:}"
   mkdir -p "$OUT/$dst"

@@ -119,10 +119,12 @@ def reviewSets(dir: String, toml: String, rawA: List[(String, String)], rawB: Li
     own <- Drive.readSrcFiles(Drive.joinSlash(dir, "src"), ents)
     stems = List.concat(Drive.fileStems(own), List.map(List.filter(rawB, f => !List.contains(Drive.fileStems(rawA), f._1)), f => f._1))
     vers <- Drive.fuzzVerSrcs(dir)
+    diagnostic = Check.humanFilesOwn(rawB, stems)
+    _ <- if (diagnostic == "scuzz check ok") IO.pure(()) else IO.fail(Str.concat("scuzz check: ", diagnostic))
     _ <- Drive.checkFmtGo(false, rawB, List.filter(rawB, f => List.contains(stems, f._1)), stems, vers, Map.empty())
     filesA <- Drive.fuzzCollectFiles(dir, rawA)
     filesB <- Drive.fuzzCollectFiles(dir, rawB)
-    host <- if (m.hasUi) Drive.uiHostExe() else IO.pure(scuzz)
+    host <- if (m.hasUi) Drive.uiHostExe(scuzz) else IO.pure(scuzz)
     _ <- if (m.hasUi && host == "") IO.fail("scuzz ide: no headless host for a [ui] package") else IO.pure(())
     baseline <- sideEv(dir, Drive.joinSlash(root, "a"), seed, m, filesA, host)
     cache = if (Str.matches(context, "^[a-f0-9]{64}$")) Drive.joinSlash(root, Drive.joinSlash("baseline", baselineKey(context, toml, filesA, host, seed))) else ""

@@ -62,16 +62,19 @@ def limits(): Json =
   Json.Obj([("files", Json.Int(3)), ("source_bytes", Json.Int(65536)), ("input_bytes", Json.Int(1048576)), ("response_bytes", Json.Int(131072)), ("context_tokens", Json.Int(4096)), ("output_tokens", Json.Int(1024)), ("request_ms", Json.Int(900000)), ("session_requests", Json.Int(8)), ("search_iterations", Json.Int(32)), ("cards", Json.Int(2)), ("feedback", Json.Int(16))])
 
 def instructions(): String =
-  "Return one JSON object with v, request, baseline, kind, generator, files. Echo the request identity and baseline. kind is behavior. files is a list of objects with path and content. Replace complete allowed source files. Keep claims, scenarios, dependencies, and manifests unchanged. Use Scuzz, a functional native language. Use def and record. Bind effects with for. Example source: @main def main: IO[Unit] = IO.println(\"Hello\"). A stateful UI uses Signal.make(0), View.bindText(Signal.map(count, n => Str.fromInt(n))), and View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)). Produce one small observable change toward the objective. Do not include markdown, reasoning, or extra fields."
+  "The objective is a long-term direction. Select one small useful addition toward it. Add one input or one action in this request. Keep all existing labels, controls, signals, and helper functions. Keep each existing View.textField and View.button in the replacement source. Keep the current behavior and all fixed checks true. A title change alone is not progress. Keep verification files, scenarios, dependencies, and manifests unchanged.\nRead task, sources, checks, and feedback. For a correction, preserve the intended small addition and correct the reported failure. For a duplicate, select a different useful addition. Do not repeat excluded source.\nUse Scuzz syntax. Scuzz has no statement blocks, val, var, or List(...) constructors. Use String for text, lists as [a, b], List.map(xs, x => ...), and records as record Message(text: String). Bind pure values with name = value in for. Bind IO with name <- effect. Return the final value with yield. Use lambdas for button callbacks. Use named def functions for callbacks with multiple arguments. Use one untyped parameter for a lambda, such as x => ... . Omit markdown and explanations.\nList functions:\nList.append(values: List[A], value: A): List[A]\nList.isEmpty(values: List[A]): Bool\nList.len(values: List[A]): Int\nList.take(values: List[A], count: Int): List[A]\nList.drop(values: List[A], count: Int): List[A]\nList.head(values: List[A]): A\nUse List.isEmpty(values), not values.isEmpty. Use List.take(values, count), not values.take(count).\nUI signatures:\nSignal.make(value: A): Signal[A]\nSignal.get(signal: Signal[A]): A\nSignal.set(signal: Signal[A], value: A): Unit\nSignal.map(signal: Signal[A], f: A => B): Signal[B]\nView.text(value: String): View\nView.bindText(value: Signal[String]): View\nView.textField(value: Signal[String], hint: String): View\nBind a text field to a source Signal[String]. Use Signal.make(\"\") for a new input. Name each control for its actual action. A Send action retains the message before it clears the input.\nView.button(label: String, action: Unit => Unit): View\nView.column(children: View*): View\nView.row(children: View*): View\nView.each(values: Signal[List[A]], render: A => View): View\nUi.run(render: Unit => View): IO[Unit]\nExample: add a draft field to an existing counter. Preserve the Counter label, count signal, and +1 action.\n@main def main: IO[Unit] =\n  for {\n    count = Signal.make(0)\n    draft = Signal.make(\"\")\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(View.text(\"Counter\"), View.bindText(label), View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)), View.textField(draft, \"Message\")))\n  } yield ()\nExample: a typed empty list and a callback with two actions.\ndef addMessage(messages: Signal[List[String]], draft: Signal[String]): Unit =\n  for {\n    _ = Signal.set(messages, List.append(Signal.get(messages), Signal.get(draft)))\n    _ = Signal.set(draft, \"\")\n  } yield ()\n\ndef messageView(): View =\n  for {\n    messages = Signal.make([]: List[String])\n    draft = Signal.make(\"\")\n  } yield View.column(View.textField(draft, \"Message\"), View.button(\"Send\", _ => addMessage(messages, draft)), View.each(messages, message => View.text(message)))\nFor the first addition, prefer one input or one action. Add only the state that this addition needs. Use the existing source as the base. Copy only the relevant syntax from an example. Do not replace the app with an example.\nSelect examples that apply to the current source. Preserve existing helper definitions. Implement one addition in this request. Formatting is automatic.\n"
 
 def make(root: String, objective: String, allowed: List[String], compiler: String, feedback: List[Json]): IO[Json] =
   for {
     id <- Uuid.v4()
     sources <- own(root)
     inputs <- packageInputs(root, "package", [])
-    j = Json.Obj([("v", Json.Int(1)), ("request", Json.Str(id)), ("kind", Json.Str("behavior")), ("objective", Json.Str(objective)), ("baseline", Json.Str(setHash(sources))), ("compiler", Json.Str(compiler)), ("inputs", Json.Str(setHash(inputs))), ("sources", pairsJson(List.filter(sources, f => List.contains(allowed, f._1)))), ("allowed", Json.Arr(List.map(allowed, p => Json.Str(p)))), ("feedback", Json.Arr(List.takeRight(feedback, 16))), ("limits", limits()), ("instructions", Json.Str(instructions()))])
+    j = Json.Obj([("v", Json.Int(1)), ("request", Json.Str(id)), ("kind", Json.Str("behavior")), ("objective", Json.Str(objective)), ("baseline", Json.Str(setHash(sources))), ("compiler", Json.Str(compiler)), ("inputs", Json.Str(setHash(inputs))), ("sources", pairsJson(List.filter(sources, f => List.contains(allowed, f._1)))), ("allowed", Json.Arr(List.map(allowed, p => Json.Str(p)))), ("checks", pairsJson(checkInputs(inputs))), ("feedback", Json.Arr(List.takeRight(feedback, 16))), ("limits", limits()), ("instructions", Json.Str(instructions()))])
     _ <- validate(root, j, compiler)
   } yield j
+
+def checkInputs(inputs: List[(String, String)]): List[(String, String)] =
+  List.filter(inputs, f => Str.startsWith(f._1, "package/") && (Str.endsWith(f._1, ".scuzz_verify") || Str.endsWith(f._1, ".scuzz_scenario") || Str.startsWith(f._1, "package/corpus/") && Str.endsWith(f._1, ".toml")))
 
 def stringValue(j: Json): Bool =
   j match {
@@ -113,7 +116,7 @@ def outputSafe(root: String, out: String): IO[Unit] =
 
 def validate(root: String, j: Json, compiler: String): IO[Unit] =
   for {
-    _ <- Models.need(keys(j, ["v", "request", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "feedback", "limits", "instructions"]) && version(j) && str(j, "kind") == "behavior", "invalid request fields or version")
+    _ <- Models.need(keys(j, ["v", "request", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "checks", "feedback", "limits", "instructions"]) && version(j) && str(j, "kind") == "behavior", "invalid request fields or version")
     _ <- Models.need(Str.matches(str(j, "request"), "^[A-Za-z0-9_-]{1,128}$") && Str.byteLen(str(j, "objective")) > 0 && Str.byteLen(str(j, "objective")) <= 2048 && str(j, "instructions") == instructions(), "invalid objective, request identity, or instructions")
     _ <- Models.need(Str.matches(compiler, "^[a-f0-9]{64}$") && str(j, "compiler") == compiler, "request compiler does not match")
     _ <- Models.need(text(field(j, "limits")) == text(limits()) && arrayValue(field(j, "feedback")) && List.len(Json.arr(field(j, "feedback"))) <= 16 && Str.byteLen(text(j)) <= 1048576, "invalid request limits")
@@ -123,7 +126,7 @@ def validate(root: String, j: Json, compiler: String): IO[Unit] =
     _ <- IO.foreachDiscard(paths, p => inside(root, p))
     disk <- own(root)
     inputs <- packageInputs(root, "package", [])
-    _ <- Models.need(str(j, "baseline") == setHash(disk) && text(field(j, "sources")) == text(pairsJson(List.filter(disk, f => List.contains(paths, f._1)))) && str(j, "inputs") == setHash(inputs), "stale request baseline or inputs")
+    _ <- Models.need(str(j, "baseline") == setHash(disk) && text(field(j, "sources")) == text(pairsJson(List.filter(disk, f => List.contains(paths, f._1)))) && str(j, "inputs") == setHash(inputs) && text(field(j, "checks")) == text(pairsJson(checkInputs(inputs))), "stale request baseline or inputs")
   } yield ()
 
 def response(j: Json, request: Json): IO[List[(String, String)]] =
@@ -171,7 +174,16 @@ def publish(root: String, out: String, request: Json, reply: Json, compiler: Str
   for {
     _ <- validate(root, request, compiler)
     _ <- outputSafe(root, out)
-    files <- response(reply, request)
+    rawFiles <- response(reply, request)
+    sources <- own(root)
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    changed = List.concat(List.filter(sources, f => !List.contains(List.map(rawFiles, r => r._1), f._1)), rawFiles)
+    candidate <- Drive.collectDeps(root, Manifest.parse(toml).deps, List.map(changed, f => (Str.dropRight(Fs.basename(f._1), 6), f._2)))
+    valid = Check.checkFilesOwn(candidate, List.map(changed, f => Str.dropRight(Fs.basename(f._1), 6))) == "[]"
+    files = if (!valid) rawFiles else List.map(rawFiles, f => for {
+  parsed = Parse.parseFile(Str.dropRight(Fs.basename(f._1), 6), f._2)
+} yield (f._1, if (Parse.hasParseError(parsed)) f._2 else Parse.pretty(parsed)))
+    _ <- response(Json.set(reply, "files", pairsJson(files)), request)
     exists <- Fs.exists(out)
     _ <- Models.need(exists == 0, "candidate output directory already exists")
     nonce <- Uuid.v4()

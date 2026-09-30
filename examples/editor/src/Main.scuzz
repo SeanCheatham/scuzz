@@ -40,7 +40,10 @@ def startDiff(root: String): IO[Int] =
   } yield pid
 
 def scuzzCli(): IO[String] =
-  Sys.getenv("SCUZZ").map(v => if (Str.isEmpty(v)) "scuzz" else v)
+  Sys.getenv("SCUZZ").flatMap(v => if (!Str.isEmpty(v)) IO.pure(v) else Sys.getenv("SCUZZ_HOME").flatMap(home => if (Str.isEmpty(home)) IO.pure("scuzz") else for {
+  path = Fs.join(home, "bin/scuzz")
+  hit <- Fs.exists(path)
+} yield if (hit != 0) path else "scuzz"))
 
 def diskFiles(root: String, toml: String): IO[List[(String, String)]] =
   for {
@@ -119,7 +122,10 @@ def queueUpdate(ds: DeckS, update: QueueS => QueueS): IO[Unit] =
   queueChange(ds, update).map(_ => ())
 
 def queueStatus(ds: DeckS, q: QueueS): Unit =
-  Signal.set(ds.queueStatus, if (q.retry) "Preparation failed. Retry preparation explicitly." else if (!q.enabled) "Preparation is paused." else Str.concat("Ready cards: ", Str.concat(Str.fromInt(List.len(q.cards)), Str.concat(" / 2; reserved: ", Str.concat(Str.fromInt(List.len(q.slots)), if (Signal.get(ds.session.count) >= 8 && q.automatic) "; request budget exhausted" else "")))))
+  for {
+    _ = Signal.set(ds.queueStatus, if (q.retry) Str.concat("Preparation failed. ", Signal.get(ds.session.reviewStatus)) else if (!q.enabled) "Preparation is paused." else Str.concat("Ready cards: ", Str.concat(Str.fromInt(List.len(q.cards)), Str.concat(" / 2; reserved: ", Str.concat(Str.fromInt(List.len(q.slots)), if (Signal.get(ds.session.count) >= 8 && q.automatic) "; request budget exhausted" else "")))))
+    _ = if (q.enabled && q.automatic && !q.retry && Signal.get(ds.session.count) >= 8 && List.isEmpty(q.cards) && List.isEmpty(q.slots)) Signal.set(ds.session.status, "The 8-request limit is reached. No comparison is ready.") else ()
+  } yield ()
 
 def queueClear(ls: LaneS, ds: DeckS): IO[Unit] =
   queueUpdate(ds, q => for {
@@ -177,7 +183,7 @@ def queueInit(root: String, ds: DeckS): IO[Unit] =
 
 def queueReserve(ds: DeckS, role: String, token: String): IO[Bool] =
   for {
-    q <- queueChange(ds, current => if (current.enabled && !current.retry && current.epoch == Signal.get(ds.session.epoch) && Signal.get(ds.session.active) == 1 && Signal.get(ds.session.config) == Session.settings(ds.session) && List.len(current.cards) + List.len(current.slots) < 2 && !List.exists(current.slots, slot => slot.role == role)) current.copy(slots = List.append(current.slots, PrepSlot(token, role, ""))) else current)
+    q <- queueChange(ds, current => if (current.enabled && !current.retry && current.epoch == Signal.get(ds.session.epoch) && Signal.get(ds.session.active) == 1 && Signal.get(ds.session.config) == Session.settings(ds.session) && List.len(current.cards) + List.len(current.slots) < 2 && !List.exists(current.slots, slot => slot.role == role) && (role != "generate" || List.isEmpty(current.slots))) current.copy(slots = List.append(current.slots, PrepSlot(token, role, ""))) else current)
     _ = queueStatus(ds, q)
   } yield List.exists(q.slots, slot => slot.token == token)
 
@@ -193,7 +199,7 @@ def queueRelease(ds: DeckS, token: String, failed: Bool): IO[Unit] =
 
 def queueCleanup(ds: DeckS, token: String, role: String): IO[Unit] =
   queueUpdate(ds, q => if (!List.exists(q.slots, slot => slot.token == token && slot.role == role)) q else for {
-  next = q.copy(slots = List.filter(q.slots, slot => slot.token != token), retry = true)
+  next = q.copy(slots = List.filter(q.slots, slot => slot.token != token), retry = q.retry || !(role == "generate" && Str.startsWith(Signal.get(ds.session.status), "scuzz generate: candidate failed:")))
   _ = queueStatus(ds, next)
 } yield next)
 
@@ -242,7 +248,8 @@ def queueGenerate(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
 def queueGenerateOne(root: String, ds: DeckS): IO[Unit] =
   for {
     owner <- Ref.get(ds.session.jobs)
-    _ <- if (!Str.isEmpty(owner.token) || Signal.get(ds.session.count) >= 8) queueRead(ds).map(q => queueStatus(ds, q)) else for {
+    queue <- queueRead(ds)
+    _ <- if (!Str.isEmpty(owner.token) || List.nonEmpty(queue.slots) || Signal.get(ds.session.count) >= 8) queueRead(ds).map(q => queueStatus(ds, q)) else for {
   token <- Uuid.v4()
   _ <- Session.generate(root, ds.session, _ => queueReserve(ds, "generate", token), name => queueStage(ds, token, "published", name), _ => queueCleanup(ds, token, "generate")).handleErrorWith(e => queueFail(ds, token, e))
 } yield ()
@@ -264,8 +271,14 @@ def queuePulse(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
 
 def queueReviewOne(root: String, ls: LaneS, ds: DeckS): IO[Unit] =
   for {
-    token <- Uuid.v4()
-    _ <- Session.own(ds.session, false, _ => queueClaimPublished(ds, token).flatMap(claimed => if (claimed.token == token) IO.pure(true) else queueReserve(ds, "review", token)), _ => queueReviewReserved(root, token, ls, ds), _ => queueCleanup(ds, token, "review")).handleErrorWith(e => queueFail(ds, token, e))
+    q <- queueRead(ds)
+    names <- loadProposals(root)
+    taken = List.concat(q.ignored, List.concat(List.map(q.cards, c => Cards.str(c.card, "proposal")), List.map(q.slots, slot => slot.name)))
+    available = List.filter(names, name => !List.contains(taken, name))
+    _ <- if (!List.exists(q.slots, slot => slot.role == "published") && List.isEmpty(available)) IO.pure(()) else for {
+  token <- Uuid.v4()
+  _ <- Session.own(ds.session, false, _ => queueClaimPublished(ds, token).flatMap(claimed => if (claimed.token == token) IO.pure(true) else queueReserve(ds, "review", token)), _ => queueReviewReserved(root, token, ls, ds), _ => queueCleanup(ds, token, "review")).handleErrorWith(e => queueFail(ds, token, e))
+} yield ()
   } yield ()
 
 def queueReviewReserved(root: String, token: String, ls: LaneS, ds: DeckS): IO[Unit] =
@@ -296,8 +309,9 @@ def queuePrepare(root: String, name: String, token: String, ls: LaneS, ds: DeckS
   card <- Cards.freeze(root, name, props, flip)
   q <- queueRead(ds)
   source = Str.concat("source:", Cards.str(card, "b"))
-  _ <- if (List.contains(q.seen, source)) Cards.automatic(root, card, "duplicate-source").flatMap(_ => queueExclude(ds, token, name, [source])) else for {
-  _ <- reviewProposal(root, toml, disk, Deck.applyProposal(disk, props))
+  _ <- if (Cards.str(card, "a") == Cards.str(card, "b")) Cards.automatic(root, card, "unchanged-source").flatMap(_ => queueExclude(ds, token, name, [source])) else if (List.contains(q.seen, source)) Cards.automatic(root, card, "duplicate-source").flatMap(_ => queueExclude(ds, token, name, [source])) else for {
+  reviewed <- reviewProposal(root, toml, disk, Deck.applyProposal(disk, props)).map(_ => true).handleErrorWith(e => if (q.automatic && Signal.get(ds.session.mode) == 1 && Str.startsWith(name, "local-") && (e == "scuzz check" || Str.startsWith(e, "scuzz check: ") || Str.startsWith(e, "scuzz ide: candidate workload fails:"))) queueReject(root, name, token, card, e, ds).map(_ => false) else IO.fail(e))
+  _ <- if (!reviewed) IO.pure(()) else for {
   raw <- Fs.read(Lanes.reportPathAt(root, "ide"))
   ready <- Cards.complete(root, card, raw)
   _ <- if (Cards.str(ready, "status") == "excluded") queueExclude(ds, token, name, [source]) else for {
@@ -312,10 +326,22 @@ def queuePrepare(root: String, name: String, token: String, ls: LaneS, ds: DeckS
 } yield next)
 } yield ()
 } yield ()
+} yield ()
 } yield ()).handleErrorWith(e => if (e != Cards.stalePublicationMessage()) IO.fail(e) else for {
   q <- queueRead(ds)
   _ <- if (q.epoch != Signal.get(ds.session.epoch) || Signal.get(ds.session.active) != 1 || !List.exists(q.slots, slot => slot.token == token && slot.role == "review" && slot.name == name)) IO.pure(()) else Cards.excludePublication(root, name, q.context).flatMap(_ => queueExclude(ds, token, name, []))
 } yield ())
+
+def queueReject(root: String, name: String, token: String, card: Json, error: String, ds: DeckS): IO[Unit] =
+  for {
+    _ <- Cards.current(root, card)
+    raw <- Chrome.readOr(Lanes.reportPathAt(root, "ide"))
+    rejected = Json.set(Json.set(card, "diagnostic", Json.Str(error)), "evidence", LspClient.parseJson(raw))
+    _ <- Cards.automatic(root, rejected, "candidate-failed")
+    _ <- queueExclude(ds, token, name, [Str.concat("source:", Cards.str(card, "b"))])
+    _ = if (Signal.get(ds.session.active) == 1) Signal.set(ds.session.reviewStatus, "Suggestion fails checks. Another suggestion is required.") else ()
+    _ = if (Signal.get(ds.session.active) == 1) Signal.set(ds.session.status, if (Signal.get(ds.session.count) < 8) "Suggestion fails checks. Preparing another suggestion." else "The 8-request limit is reached. No comparison is ready.") else ()
+  } yield ()
 
 def queueExclude(ds: DeckS, token: String, name: String, keys: List[String]): IO[Unit] =
   queueUpdate(ds, q => if (!List.exists(q.slots, slot => slot.token == token)) q else for {
@@ -397,11 +423,15 @@ def chooseCard(root: String, id: String, lane: Int, ls: LaneS, ds: DeckS, dirtie
   next = q.copy(retry = true)
   _ = deckEnd(ls, ds)
   _ = Signal.set(ls.status, Deck.withLast(Signal.get(ds.last), [e]))
+  _ = Signal.set(ds.session.reviewStatus, e)
   _ = queueStatus(ds, next)
 } yield next))
 
-def decisionButtons(root: String, id: String, ls: LaneS, ds: DeckS, objectiveSession: SessionS, paths: Signal[List[String]], bodies: Signal[List[String]], origs: Signal[List[String]], idx: Signal[Int], buf: Signal[String], orig: Signal[String]): View =
-  View.wrap(View.button("Choose left", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, 0, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig)))), View.button("Choose right", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, 1, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Can't decide", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, -1, ls, ds, _ => [], IO.pure(())))))
+def laneChoice(root: String, id: String, ls: LaneS, ds: DeckS, objectiveSession: SessionS, paths: Signal[List[String]], bodies: Signal[List[String]], origs: Signal[List[String]], idx: Signal[Int], buf: Signal[String], orig: Signal[String], lane: Int): View =
+  View.button(if (lane == 0) "Choose left" else "Choose right", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(root, id, lane, ls, ds, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))))
+
+def reviewLane(label: String, structure: Signal[List[String]], rows: Signal[List[String]], choice: View): View =
+  View.column(View.text(label), View.expanded(View.scroll(View.column(View.showWhen(Signal.map(structure, lines => if (List.nonEmpty(lines)) 1 else 0), 1, View.each(structure, line => Lanes.a11yTile(line))), View.showWhen(Signal.map(structure, lines => if (List.isEmpty(lines)) 1 else 0), 1, View.each(Signal.map(rows, items => Lanes.changedRows(items)), row => View.code(row)))))), choice)
 
 def refreshBuffers(paths: Signal[List[String]], bodies: Signal[List[String]], origs: Signal[List[String]], idx: Signal[Int], buf: Signal[String], orig: Signal[String]): IO[Unit] =
   IO.sleep(0).flatMap(_ => IO.foreachDiscard(List.indices(Signal.get(paths)), i => if (i >= List.len(Signal.get(paths))) IO.pure(()) else for {
@@ -463,11 +493,12 @@ def generateProposals(root: String, set: List[(String, String)], cur: String, ls
 
 def generateProposalsGo(root: String, set: List[(String, String)], ls: LaneS, ds: DeckS): IO[Unit] =
   for {
-    _ = Signal.set(ls.status, ["generating proposals"])
+    _ = Signal.set(ls.status, ["Generating mutation proposals"])
     sites = Deck.genCount(set)
     kept = Mutate.parseLive(set)
     seed <- Random.nextInt(1000000)
     _ <- IO.foreachDiscard(Mutate.pickSites(seed, if (sites > 8) 8 else sites, sites), s => writeMutant(root, kept, set, s))
+    _ = Signal.set(ls.status, ["Mutation proposals are ready. Review checks each proposal against the rules."])
   } yield ()
 
 def loadDelta(root: String, status: Signal[List[String]], raw: Signal[String], rev: Signal[String], works: Signal[List[String]], tls: Signal[List[String]], blab: Signal[String]): IO[Unit] =
@@ -591,10 +622,10 @@ def landmarkRail(page: Signal[Int]): View =
   View.focusGroup(View.wrap(View.choiceChip(page, 0, "Develop"), View.choiceChip(page, 1, "Verify"), View.choiceChip(page, 2, "Run")))
 
 def developBook(section: Signal[Int], objective: View, timeline: View, source: View): View =
-  View.column(View.focusGroup(View.wrap(View.choiceChip(section, 0, "Review"), View.choiceChip(section, 1, "Code"))), View.showWhen(section, 0, View.expanded(View.scroll(View.column(objective, timeline)))), View.showWhen(section, 1, View.expanded(source)))
+  View.column(View.showWhen(Signal.map(section, n => if (n == 0) 0 else 1), 1, View.focusGroup(View.wrap(View.choiceChip(section, 0, "Review"), View.choiceChip(section, 1, "Code"), View.choiceChip(section, 2, "Session")))), View.showWhen(section, 0, View.expanded(timeline)), View.showWhen(section, 1, View.expanded(source)), View.showWhen(section, 2, View.expanded(View.scroll(objective))))
 
 def landmarkBook(page: Signal[Int], developSection: Signal[Int], source: View, verify: View, objective: View, campaign: View, run: View, timeline: View): View =
-  View.semantics("Workspace", View.column(landmarkRail(page), View.showWhen(page, 0, View.expanded(developBook(developSection, objective, timeline, source))), View.showWhen(page, 1, View.expanded(View.scroll(View.column(verify, campaign)))), View.showWhen(page, 2, View.expanded(View.scroll(run)))))
+  View.semantics("Workspace", View.column(View.showWhen(page, 0, View.expanded(developBook(developSection, objective, timeline, source))), View.showWhen(page, 1, View.expanded(View.scroll(View.column(verify, campaign)))), View.showWhen(page, 2, View.expanded(View.scroll(run)))))
 
 def initialPage(): IO[Int] =
   IO.pure(0)
@@ -821,7 +852,7 @@ Y
     srcFiles = Signal.make([]: List[(String, String, String)])
     playOn = Signal.make(0)
     evidenceScope = Signal.make([]: List[String])
-    evidenceDetails = Signal.make(1)
+    evidenceDetails = Signal.make(0)
     questionWork = Signal.make("")
     resultLeft = Signal.make("")
     resultRight = Signal.make("")
@@ -893,7 +924,7 @@ Y
 } yield ()
 } yield ()))
     _ <- Fiber.fork(IO.forever(playTick(playOn, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, laneA, laneB)))
-    _ <- IO.ensure(Ui.run(_ => View.appShell(View.appBar(View.bindText(title), View.wrap(View.button("Save", _ => editorWrite(lanes, deck, _ => for {
+    _ <- IO.ensure(Ui.run(_ => View.appShell(View.appBar(View.bindText(title), landmarkRail(page)), landmarkBook(page, developSection, View.stack(View.section("source", "Source", View.column(View.wrap(View.button("Save", _ => editorWrite(lanes, deck, _ => for {
   _ = Property.sometimes("tappedSave")
   p = Signal.get(pathSig)
   _ <- Fs.write(p, Signal.get(buf))
@@ -901,20 +932,7 @@ Y
   _ = Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)))
   _ = Signal.set(origs, List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(buf)))
   _ = Signal.set(dirty, Str.len(""))
-} yield ())), View.outlinedButton("Check", _ => for {
-  _ = Signal.set(page, 1)
-  _ <- editorWrite(lanes, deck, _ => for {
-  _ = Property.sometimes("tappedCheck")
-  checked = Signal.get(buf)
-  raw <- analyze(Signal.get(pathSig), checked)
-  j = LspClient.parseJson(raw)
-  _ <- Ui.setEditorDiagnostics(Diags.diagMarks(j))
-  _ <- LspClient.paintEditor(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf))
-  rows = Diags.diagRows(j)
-  _ = Signal.set(diags, rows)
-  _ = Signal.set(checkedSource, checked)
-} yield ())
-} yield ()), View.outlinedButton("Find", _ => for {
+} yield ())), View.outlinedButton("Find", _ => for {
   _ = Property.sometimes("tappedFind")
   _ = Signal.set(findOpen, Str.len("x"))
   _ <- IO.pure(())
@@ -952,7 +970,7 @@ Y
   _ = Signal.set(origs, os)
   _ = Signal.set(orig, List.at(os, Signal.get(idx)))
   _ = Signal.set(dirty, Str.len(""))
-} yield ())))), View.column(View.stack(landmarkBook(page, developSection, View.section("source", "Source", View.column(View.each(lives, s => View.textButton(Chrome.stemOf(s), _ => for {
+} yield ()))), View.each(lives, s => View.textButton(Chrome.stemOf(s), _ => for {
   _ = Property.sometimes("tappedLive")
   next = Chrome.joinChild(Signal.get(dirSig), s)
   body <- Fs.read(next).handleErrorWith(_ => IO.pure(""))
@@ -967,7 +985,42 @@ Y
   _ = Signal.set(pathSig, List.at(ps, i2))
   _ = Signal.set(page, 0)
   _ = Signal.set(developSection, 1)
-} yield ())), View.editor(buf), View.showWhen(Signal.map(infoLine, s => if (Str.isEmpty(s)) 0 else 1), 1, View.bindText(infoLine)))), View.section("verify", "Verify", View.column(View.each(claims, name => View.textButton(name, _ => for {
+} yield ())), View.editor(buf), View.showWhen(Signal.map(infoLine, s => if (Str.isEmpty(s)) 0 else 1), 1, View.bindText(infoLine)))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
+  off <- Ui.editorCaret()
+  found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
+  hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found
+  lc = Chrome.lineColAt(Signal.get(buf), hit)
+  _ <- if (hit < 0) IO.pure(()) else Ui.setEditorCaret(lc._1, lc._2)
+} yield ()), View.button("Replace", _ => if (Signal.get(deckBusy) != 0) IO.pure(()) else for {
+  _ = Signal.set(buf, Str.replace(Signal.get(buf), Signal.get(findQ), Signal.get(replQ)))
+  _ = Signal.set(dirty, Str.len("x"))
+  _ = Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)))
+} yield ()), View.button("Rename", _ => if (Signal.get(deckBusy) != 0) IO.pure(()) else for {
+  _ = Property.sometimes("tappedRename")
+  off <- Ui.editorCaret()
+  _ = Signal.set(renameCaret, off)
+  lc = Chrome.lineColAt(Signal.get(buf), off)
+  j <- LspClient.infoCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/rename", lc._1, lc._2, Signal.get(replQ))
+  nu = LspClient.renameText(j, Signal.get(buf))
+  same = nu == Signal.get(buf)
+  _ = Signal.set(buf, nu)
+  _ = if (same) () else Signal.set(dirty, Str.len("x"))
+  _ = if (same) () else Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), nu))
+  _ = Signal.set(infoLine, if (same) "no rename" else "renamed")
+} yield ())))), View.section("verify", "Verify", View.column(View.outlinedButton("Check", _ => for {
+  _ = Signal.set(page, 1)
+  _ <- editorWrite(lanes, deck, _ => for {
+  _ = Property.sometimes("tappedCheck")
+  checked = Signal.get(buf)
+  raw <- analyze(Signal.get(pathSig), checked)
+  j = LspClient.parseJson(raw)
+  _ <- Ui.setEditorDiagnostics(Diags.diagMarks(j))
+  _ <- LspClient.paintEditor(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf))
+  rows = Diags.diagRows(j)
+  _ = Signal.set(diags, rows)
+  _ = Signal.set(checkedSource, checked)
+} yield ())
+} yield ()), View.each(claims, name => View.textButton(name, _ => for {
   _ = Property.sometimes("tappedVerify")
   _ = Signal.set(page, 1)
 } yield ())), View.each(scenarios, s => View.textButton(s, _ => for {
@@ -1011,7 +1064,7 @@ Y
   line <- runProject(Signal.get(dirSig))
   runOut = List.append(Signal.get(output), line)
   _ = Signal.set(output, runOut)
-} yield ()), View.text("Package target"), View.wrap(View.choiceChip(packageChoice, 0, "Linux"), View.choiceChip(packageChoice, 1, "macOS"), View.choiceChip(packageChoice, 2, "Android"), View.choiceChip(packageChoice, 3, "iOS"), View.choiceChip(packageChoice, 4, "Web")), View.button("Build package", _ => if (Signal.get(packageChoice) < 0) IO.pure(Signal.set(packageStatus, "Select a target before you build")) else startPackage(Signal.get(dirSig), packageTarget(Signal.get(packageChoice)), packagePid, packageStatus, packageOutput)), View.bindText(packageStatus), View.bindText(packageOutput), View.showWhen(showOut, 1, View.each(output, s => View.text(s))))), View.section("review", "Suggested changes", View.scroll(View.column(View.wrap(View.button("Diff", _ => deckGuard(deck, _ => for {
+} yield ()), View.text("Package target"), View.wrap(View.choiceChip(packageChoice, 0, "Linux"), View.choiceChip(packageChoice, 1, "macOS"), View.choiceChip(packageChoice, 2, "Android"), View.choiceChip(packageChoice, 3, "iOS"), View.choiceChip(packageChoice, 4, "Web")), View.button("Build package", _ => if (Signal.get(packageChoice) < 0) IO.pure(Signal.set(packageStatus, "Select a target before you build")) else startPackage(Signal.get(dirSig), packageTarget(Signal.get(packageChoice)), packagePid, packageStatus, packageOutput)), View.bindText(packageStatus), View.bindText(packageOutput), View.showWhen(showOut, 1, View.each(output, s => View.text(s))))), View.column(View.maxSize(0, 64, View.row(View.expanded(View.textField(objectiveSession.objective, "One short objective")), View.wrap(View.showWhen(objectiveSession.active, 0, View.button("Start", _ => queueClear(lanes, deck).flatMap(_ => Session.start(Signal.get(dirSig), objectiveSession)).flatMap(_ => deckNext(Signal.get(dirSig), lanes, deck)).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e))))), View.showWhen(Signal.map(objectiveSession.active, active => if (active == 1 && Signal.get(objectiveSession.mode) == 1 && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.button("Generate suggestion", _ => queueGenerate(Signal.get(dirSig), lanes, deck).handleErrorWith(e => IO.pure(Signal.set(objectiveSession.status, e))))), View.showWhen(Signal.map(readyQueue, q => if (q.retry) 1 else 0), 1, View.button("Retry preparation", _ => queueRetry(Signal.get(dirSig), lanes, deck))), View.choiceChip(developSection, 1, "Code"), View.choiceChip(developSection, 2, "Session")))), View.showWhen(Signal.map(evidenceScope, rows => if (List.exists(rows, row => Str.startsWith(row, "unguarded:"))) 1 else 0), 1, View.fontSize(12, View.text("unguarded: no claims"))), View.showWhen(Signal.map(readyQueue, q => if (q.retry && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.bindText(readyStatus)), View.showWhen(Signal.map(readyQueue, q => if (!q.retry && Str.isEmpty(Signal.get(deckArmed))) 1 else 0), 1, View.bindText(objectiveSession.status)), View.showWhen(evidenceDetails, 0, View.expanded(View.column(View.showWhen(Signal.map(deckArmed, id => if (Str.isEmpty(id)) 0 else 1), 1, View.expanded(View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => View.column(View.expanded(View.row(View.expanded(reviewLane("Left", stepViewA, rowsA, laneChoice(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig, 0))), View.expanded(reviewLane("Right", stepViewB, rowsB, laneChoice(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig, 1))))), View.row(View.outlinedButton("Can't decide", _ => Session.guard(objectiveSession).flatMap(_ => chooseCard(Signal.get(dirSig), id, -1, lanes, deck, _ => [], IO.pure(())))), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.choiceChip(evidenceDetails, 1, "More evidence"), View.fontSize(12, View.text("Recorded structure"))))))), View.showWhen(Signal.map(deckArmed, id => if (Str.isEmpty(id)) 1 else 0), 1, View.expanded(View.column(View.expanded(View.row(View.expanded(reviewLane("Left", stepViewA, rowsA, View.text(""))), View.expanded(reviewLane("Right", stepViewB, rowsB, View.text(""))))), View.row(View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.choiceChip(evidenceDetails, 1, "More evidence"))))), View.showWhen(Signal.map(deckLast, text => if (Str.isEmpty(text)) 0 else 1), 1, View.bindText(deckLast))))), View.showWhen(evidenceDetails, 1, View.expanded(View.column(View.choiceChip(evidenceDetails, 0, "Question"), View.expanded(View.scroll(View.column(View.wrap(View.button("Diff", _ => deckGuard(deck, _ => for {
   _ = deckEnd(lanes, deck)
   _ = Signal.set(evidenceDetails, 1)
   _ = Property.sometimes("tappedDiff")
@@ -1050,7 +1103,8 @@ Y
   _ = Signal.set(page, 0)
   _ = Signal.set(developSection, 0)
   _ <- deckNext(Signal.get(dirSig), lanes, deck)
-} yield ()), View.outlinedButton("Generate", _ => for {
+  _ = Signal.set(evidenceDetails, 0)
+} yield ()), View.outlinedButton("Generate mutations", _ => for {
   _ = Property.sometimes("tappedGenerate")
   _ = Signal.set(page, 0)
   _ = Signal.set(developSection, 0)
@@ -1060,34 +1114,12 @@ Y
   i = Signal.get(idx)
   set = Chrome.bufferFiles(own, List.map(Signal.get(paths), p => Chrome.stemOf(p)), List.setAt(Signal.get(bodies), i, Signal.get(buf)))
   _ <- generateProposals(root, set, Chrome.stemOf(Signal.get(pathSig)), lanes, deck)
-} yield ())), View.bindText(objectiveSession.objective), View.bindText(objectiveSession.status), View.bindText(readyStatus), View.button("Retry preparation", _ => queueRetry(Signal.get(dirSig), lanes, deck)), View.each(deltaStatus, s => View.text(s)), View.showWhen(Signal.map(deckArmed, s => if (Str.isEmpty(s)) 0 else 1), 1, View.column(View.bindText(deckTitle), View.each(Signal.map(deckArmed, id => if (Str.isEmpty(id)) []: List[String] else [id]), id => decisionButtons(Signal.get(dirSig), id, lanes, deck, objectiveSession, paths, bodies, origs, idx, buf, orig)))), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.outlinedButton("Undo", _ => undoCard(Signal.get(dirSig), lanes, deck, _ => Chrome.dirtyPaths(Signal.get(paths), List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)), List.setAt(Signal.get(origs), Signal.get(idx), Signal.get(orig))), refreshBuffers(paths, bodies, origs, idx, buf, orig))), View.wrap(View.choiceChip(evidenceDetails, 1, "More evidence"), View.choiceChip(evidenceDetails, 0, "Question")), View.showWhen(evidenceDetails, 1, View.column(View.each(evidenceScope, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
+} yield ())), View.outlinedButton("Randomize", _ => deckRandom(Signal.get(dirSig), lanes, deck)), View.bindText(deckTitle), View.each(deltaStatus, s => View.text(s)), View.each(evidenceScope, s => View.text(s)), View.focusGroup(View.column(View.each(works, w => View.textButton(w, _ => for {
   _ = Property.sometimes("tappedWork")
   _ = showWork(w, Signal.get(deltaRaw), Signal.get(laneTexts), Signal.get(works), laneA, laneB, rail, step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, playOn, questionWork, resultLeft, resultRight, deckFlip)
-} yield ())))))), View.bindText(questionWork), View.bindText(stepTitle), View.wrap(View.choiceChip(playOn, 1, "Play"), View.choiceChip(playOn, 0, "Pause")), View.row(View.showWhen(evidenceDetails, 1, View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
+} yield ())))), View.bindText(questionWork), View.bindText(stepTitle), View.wrap(View.choiceChip(playOn, 1, "Play"), View.choiceChip(playOn, 0, "Pause")), View.row(View.maxSize(72, 0, View.each(rail, s => View.textButton(s, _ => for {
   _ = Property.sometimes("tappedStep")
   _ = Signal.set(playOn, 0)
   _ = showStep(step, stepTitle, rowsA, rowsB, stepViewA, stepViewB, Signal.get(laneA), Signal.get(laneB), Lanes.railIndex(s))
-} yield ())))), View.expanded(View.column(View.bindText(revLabel), View.bindText(resultLeft), Lanes.viewCard(stepViewA), View.showWhen(evidenceDetails, 0, View.each(Signal.map(rowsA, rows => Lanes.changedRows(rows)), s => View.code(s))), View.showWhen(evidenceDetails, 1, View.each(rowsA, s => View.code(s))))), View.expanded(View.column(View.bindText(laneBLabel), View.bindText(resultRight), Lanes.viewCard(stepViewB), View.showWhen(evidenceDetails, 0, View.each(Signal.map(rowsB, rows => Lanes.changedRows(rows)), s => View.code(s))), View.showWhen(evidenceDetails, 1, View.each(rowsB, s => View.code(s))))), View.showWhen(evidenceDetails, 1, Lanes.srcSection(lanes.srcs, deckFlip))))))), View.overlay(findOpen, View.column(View.fontSize(20, View.text("Find")), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => for {
-  off <- Ui.editorCaret()
-  found = Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), off + 1)
-  hit = if (found < 0) Chrome.findNextOffset(Signal.get(buf), Signal.get(findQ), 0) else found
-  lc = Chrome.lineColAt(Signal.get(buf), hit)
-  _ <- if (hit < 0) IO.pure(()) else Ui.setEditorCaret(lc._1, lc._2)
-} yield ()), View.button("Replace", _ => if (Signal.get(deckBusy) != 0) IO.pure(()) else for {
-  _ = Signal.set(buf, Str.replace(Signal.get(buf), Signal.get(findQ), Signal.get(replQ)))
-  _ = Signal.set(dirty, Str.len("x"))
-  _ = Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), Signal.get(buf)))
-} yield ()), View.button("Rename", _ => if (Signal.get(deckBusy) != 0) IO.pure(()) else for {
-  _ = Property.sometimes("tappedRename")
-  off <- Ui.editorCaret()
-  _ = Signal.set(renameCaret, off)
-  lc = Chrome.lineColAt(Signal.get(buf), off)
-  j <- LspClient.infoCall(Signal.get(dirSig), Signal.get(pathSig), Signal.get(buf), "textDocument/rename", lc._1, lc._2, Signal.get(replQ))
-  nu = LspClient.renameText(j, Signal.get(buf))
-  same = nu == Signal.get(buf)
-  _ = Signal.set(buf, nu)
-  _ = if (same) () else Signal.set(dirty, Str.len("x"))
-  _ = if (same) () else Signal.set(bodies, List.setAt(Signal.get(bodies), Signal.get(idx), nu))
-  _ = Signal.set(infoLine, if (same) "no rename" else "renamed")
-} yield ()))))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => queueClear(lanes, deck)).flatMap(_ => stopOwned(fuzzPid, diffPid, packagePid)))
+} yield ()))), View.expanded(View.column(View.bindText(revLabel), Lanes.viewCard(stepViewA), View.each(rowsA, s => View.code(s)))), View.expanded(View.column(View.bindText(laneBLabel), Lanes.viewCard(stepViewB), View.each(rowsB, s => View.code(s))))), Lanes.srcSection(lanes.srcs, deckFlip))))))))))).require(Str.len(Property.signalStr("buf")) >= 0).require(Property.signalListLen("paths") >= 0), Session.pause(objectiveSession).flatMap(_ => queueClear(lanes, deck)).flatMap(_ => stopOwned(fuzzPid, diffPid, packagePid)))
   } yield ()
