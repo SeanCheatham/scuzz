@@ -1,5 +1,5 @@
 def chrome(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Develop") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Run") && (Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "choicechip:Review") && Timeline.a11yHas(t, i, "choicechip:Code")) && Timeline.a11yHas(t, i, "semantics:Workspace") && Timeline.a11yHas(t, i, "button:Save") && Timeline.a11yHas(t, i, "outlined:Check") && Timeline.signalStrHas(t, i, "title", "editor") && Timeline.a11yHas(t, i, "text:editor") && !Timeline.a11yHas(t, i, "x Main.scuzz") && !Timeline.a11yHas(t, i, "01  Develop") && !Timeline.a11yHas(t, i, "02  Verify") && !Timeline.a11yHas(t, i, "03  Run") && !Timeline.a11yHas(t, i, "navtile:"))
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Develop") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Run") && (Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "choicechip:Code") && Timeline.a11yHas(t, i, "choicechip:Session")) && Timeline.a11yHas(t, i, "semantics:Workspace") && (Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 1 || Timeline.a11yHas(t, i, "button:Save")) && (Timeline.signalInt(t, i, "page") != 1 || Timeline.a11yHas(t, i, "outlined:Check")) && Timeline.signalStrHas(t, i, "title", "editor") && Timeline.a11yHas(t, i, "text:editor") && !Timeline.a11yHas(t, i, "x Main.scuzz") && !Timeline.a11yHas(t, i, "01  Develop") && !Timeline.a11yHas(t, i, "02  Verify") && !Timeline.a11yHas(t, i, "03  Run") && !Timeline.a11yHas(t, i, "navtile:"))
 
 def editorStays(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalInt(t, i, "page") != 0 || Timeline.signalInt(t, i, "developSection") != 1 || Timeline.a11yHas(t, i, "editor:editor"))
@@ -90,7 +90,7 @@ def afterCompareRendersView(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Compare buffers", "text:+1")
 
 def afterDeckShowsCard(t: Timeline): Verdict =
-  Verdict.every(t, i => !visibleReadyCard(t, i) || Timeline.a11yHas(t, i, "text:Behavior review"))
+  Verdict.every(t, i => !visibleReadyCard(t, i) || Timeline.a11yHas(t, i, "text:Left") && Timeline.a11yHas(t, i, "text:Right"))
 
 def deckStaysBlind(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.a11yHas(t, i, "button:Choose left") || Timeline.a11yHas(t, i, "text:Left") && Timeline.a11yHas(t, i, "text:Right") && !Timeline.a11yHas(t, i, "text:proposal p") && !Timeline.a11yHas(t, i, "text:b: buffers") && !Timeline.a11yHas(t, i, "text:a: HEAD"))
@@ -138,7 +138,7 @@ def afterRandomizeShowsStep(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Randomize", "text:step 1 of 2 - count 1 - differs")
 
 def afterGenerateShowsCard(t: Timeline): Verdict =
-  Verdict.afterHit(t, "outlined:Generate", "text:Behavior review")
+  Verdict.afterHit(t, "outlined:Generate mutations", "text:Left")
 
 def afterInfoShowsHover(t: Timeline): Verdict =
   Verdict.afterHit(t, "outlined:Info", "text:IO.println(String): IO[Unit]")
@@ -163,7 +163,7 @@ def rowsFollowStep(t: Timeline): Verdict =
   Verdict.every(t, i => Timeline.signalListLen(t, i, "rowsA") == 0 || Timeline.signalStrHas(t, i, "stepTitle", Str.concat("step ", Str.concat(Str.fromInt(Timeline.signalInt(t, i, "step")), " of "))))
 
 def landmarksStayUnnumbered(t: Timeline): Verdict =
-  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Develop") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Run") && (Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "choicechip:Review") && Timeline.a11yHas(t, i, "choicechip:Code")) && !Timeline.a11yHas(t, i, "01  Develop") && !Timeline.a11yHas(t, i, "02  Verify") && !Timeline.a11yHas(t, i, "03  Run"))
+  Verdict.every(t, i => Timeline.a11yHas(t, i, "choicechip:Develop") && Timeline.a11yHas(t, i, "choicechip:Verify") && Timeline.a11yHas(t, i, "choicechip:Run") && (Timeline.signalInt(t, i, "page") != 0 || Timeline.a11yHas(t, i, "choicechip:Code") && Timeline.a11yHas(t, i, "choicechip:Session")) && !Timeline.a11yHas(t, i, "01  Develop") && !Timeline.a11yHas(t, i, "02  Verify") && !Timeline.a11yHas(t, i, "03  Run"))
 
 def explicitLaneProof(t: Timeline): Verdict =
   Verdict.every(t, i => !Timeline.driveHas(t, i, "laneFlow") || (for {
@@ -218,7 +218,7 @@ def timelineCursorStaysInRange(t: Timeline): Verdict =
 
 def timelineStartsPaused(t: Timeline): Verdict =
   Verdict.onHit(t, "choicechip:Review", __tup => __tup match {
-  case (before, after) => Timeline.exists(t, j => j <= before && Timeline.lastHitHas(t, j, "choicechip:Review")) || Timeline.a11yHas(t, after, "choicechip:Play=0")
+  case (before, after) => Timeline.exists(t, j => j <= before && Timeline.lastHitHas(t, j, "choicechip:Review")) || Timeline.signalInt(t, after, "playOn") == 0
 })
 
 def bufferedRepliesStayComplete(t: Timeline): Verdict =

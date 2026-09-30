@@ -498,6 +498,60 @@ slice_package() {
     grep -qx skia "$prefix/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
     scuzz run --target headless --exec "" /tmp/scuzz-release-app
     test -f /tmp/scuzz-release-app/build/snapshot.png
+    python3 - "$prefix" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+prefix = Path(sys.argv[1])
+home = prefix / "share/scuzz"
+root = Path("/tmp/scuzz-release-app")
+out = root / "build/ide-host"
+out.mkdir(parents=True, exist_ok=True)
+inject = out / "inject.json"
+inject.write_text(json.dumps({"v": 1, "kind": "inject", "events": [
+    {"op": "tap", "id": "choicechip:Session"},
+    {"op": "text", "i": 0, "value": "Increase the counter"},
+    {"op": "text", "i": 1, "value": "src/Main.scuzz"},
+    {"op": "tap", "id": "choicechip:Review"},
+    {"op": "tap", "id": "button:Start"}]}))
+env = dict(os.environ, SCUZZ_UI_SCRIPT=str(inject))
+with (out / "host.log").open("w") as log:
+    proc = subprocess.Popen([str(prefix / "bin/scuzz"), "ide", "--target", "headless",
+                             "--out-dir", str(out)], cwd=root, env=env,
+                            stdout=log, stderr=subprocess.STDOUT)
+    try:
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            assert proc.poll() is None, (out / "host.log").read_text()
+            request = root / "build/ide/request.json"
+            debug = out / "debug.json"
+            if request.exists() and debug.exists():
+                ui = json.loads(debug.read_text())
+                if any(v.get("label", "").startswith("Ready cards:")
+                       for v in ui.get("taps", [])) or any(
+                       v.get("value", "").startswith("Ready cards:")
+                       for v in ui.get("signals", []) if v.get("type") == "str"):
+                    break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("SDK review preparation does not finish")
+        expected = hashlib.sha256((home / "bin/scuzz").read_bytes()).hexdigest()
+        assert json.loads(request.read_text())["compiler"] == expected
+        assert (home / "ui-host/build/ui-host").is_file()
+    finally:
+        (out / "inject.json").write_text(json.dumps({"v": 1, "kind": "inject",
+                                                      "events": [{"op": "quit"}]}))
+        try:
+            proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            proc.wait(timeout=20)
+PY
     scuzz run examples/hello | tee /tmp/rel-hello.out
     grep -q "Hello, Scuzz!" /tmp/rel-hello.out
     grep -q "ready." /tmp/rel-hello.out
@@ -576,6 +630,29 @@ PY
   mkdir -p scratchpad/editor
   (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" run --target headless --exec "" "$ROOT/examples/editor")
   test -f examples/editor/build/snapshot.png
+  python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+
+repo = Path.cwd()
+root = repo / "scratchpad/editor"
+script = root / "layout.json"
+dump = root / "layout-dump.json"
+script.write_text(json.dumps({"v": 1, "kind": "inject", "events": [
+    {"op": "tap", "id": "choicechip:Session"},
+    {"op": "xy", "x": 200, "y": 350},
+    {"op": "key", "key": "x", "text": "scope"}]}))
+env = dict(os.environ, SCUZZ_HOME=str(repo), SCUZZ_UI_RUNTIME="headless",
+           SCUZZ_UI_WIDTH="960", SCUZZ_UI_HEIGHT="560", SCUZZ_UI_SCALE="1",
+           SCUZZ_LIVE_FRAMES="2", SCUZZ_UI_SCRIPT=str(script),
+           SCUZZ_UI_DEBUG_DUMP=str(dump))
+subprocess.run([str(repo / "examples/editor/build/editor")], cwd=root,
+               env=env, check=True, timeout=30)
+ui = json.loads(dump.read_text())
+assert ui["fields"][1]["value"].endswith("scope"), "source scope field is clipped"
+PY
   (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" fuzz --iterations 0 "$ROOT/examples/editor")
   # Live in-memory review: the editor diffs an edited buffer against disk on
   # the evaluator, with no git and no native build of the target package.
@@ -589,10 +666,10 @@ import json
 src = open("scratchpad/review/src/Main.scuzz").read()
 i = src.index('"Counter"') + len('"Counter')
 ops = {"v": 1, "kind": "inject", "events": [
-    {"op": "tap", "id": "choicechip:Live"},
+    {"op": "tap", "id": "choicechip:Code"},
     {"op": "caret", "offset": i},
     {"op": "type", "value": " app"},
-    {"op": "tap", "id": "choicechip:Timeline"},
+    {"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"},
     {"op": "tap", "id": "outlined:Compare buffers"},
     {"op": "pump", "k": 50},
 ]}
@@ -764,7 +841,7 @@ shutil.rmtree(root, ignore_errors=True)
   for {
     active = Signal.make(1)
     seen = Signal.make(0)
-    catalog = Signal.make([Json.Obj([("id", Json.Str("one")), ("size", Json.Int(4683073536)), ("cached", Json.Bool(false)), ("profiles", Json.Arr([Json.Null(), Json.Str("cpu")]))])])
+    catalog = Signal.make([Json.Obj([("id", Json.Str("one")), ("size", Json.Int(5680522464)), ("cached", Json.Bool(false)), ("profiles", Json.Arr([Json.Null(), Json.Str("cpu")]))])])
     _ <- IO.ensure(Ui.run(_ => View.column(View.bindText(Signal.map(active, n => Str.fromInt(n))), View.each(catalog, m => View.text(Json.getStr(m, "id", ""))), View.button("Observe", _ => IO.pure(()).map(_ => for {
   local = Signal.make(1)
   derived = Signal.map(local, n => n + 1)
@@ -799,7 +876,7 @@ cache.mkdir()
 env = dict(os.environ, SCUZZ_MODEL_CACHE=str(cache))
 listed = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=env, check=True, capture_output=True, text=True, timeout=30)
 models = json.loads(listed.stdout)["models"]
-assert [m["id"] for m in models] == ["qwen3.5-4b", "qwen2.5-coder-7b"]
+assert [m["id"] for m in models] == ["qwen3.5-4b", "qwen3.5-9b"]
 assert all(m["status"] == "unavailable" for m in models)
 assert not list(cache.iterdir())
 no_tools = dict(env, PATH="")
@@ -808,7 +885,7 @@ for key in ("SCUZZ_MODEL_CACHE", "XDG_CACHE_HOME", "HOME"):
 for locations, expected in (({"SCUZZ_MODEL_CACHE": str(cache), "XDG_CACHE_HOME": str(root / "xdg"), "HOME": str(root / "home")}, cache), ({"XDG_CACHE_HOME": str(root / "xdg"), "HOME": str(root / "home")}, root / "xdg/scuzz/models"), ({"HOME": str(root / "home")}, root / "home/.cache/scuzz/models")):
  offline = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=dict(no_tools, **locations), capture_output=True, text=True, check=True, timeout=30)
  rows = json.loads(offline.stdout)["models"]
- assert [m["id"] for m in rows] == ["qwen3.5-4b", "qwen2.5-coder-7b"]
+ assert [m["id"] for m in rows] == ["qwen3.5-4b", "qwen3.5-9b"]
  assert all(m["cache"] == str(expected) and m["status"] == "unavailable" for m in rows)
  assert not list(cache.iterdir())
 missing_cache = subprocess.run([str(cli), "models", "list", "--message-format=json"], env=no_tools, capture_output=True, text=True, timeout=30)
@@ -844,9 +921,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
   if self.path=="/tokenize": self.reply({"tokens":list(range(3073 if mode=="context" else 10))});return
   assert body["stream"] is False and body["max_tokens"]==1024 and body["reasoning_effort"]=="none"
   schema=body["response_format"]["json_schema"]["schema"]
-  assert schema["additionalProperties"] is False and schema["properties"]["files"]["maxItems"]==3
-  req=json.loads(body["messages"][1]["content"])
-  reply={"v":1,"request":req["request"],"baseline":req["baseline"],"kind":"behavior","generator":schema["properties"]["generator"]["enum"][0],"files":[{"path":"src/Main.scuzz","content":"@main def main: IO[Unit] = IO.println(2)"}]}
+  assert schema["additionalProperties"] is False and schema["properties"]["edits"]["maxItems"]==3
+  req=json.JSONDecoder().raw_decode(body["messages"][1]["content"])[0]
+  reply={"change":"Print two.","edits":[{"path":"src/Main.scuzz","search":req["sources"][0]["content"].strip(),"replacement":"@main def main: IO[Unit] = IO.println(2)"}]}
   if mode=="stale": reply["request"]="stale"
   if mode=="timeout": time.sleep(5)
   if mode=="interrupt": time.sleep(120)
@@ -881,10 +958,10 @@ def transport(): IO[Unit] =
     script = Fs.join(root, "server.py")
     command = List.join(["exec python3", Models.quote(script), Models.quote(key), Str.fromInt(port + 30000), Models.quote(mode), Models.quote(Fs.join(dir, "pid"))], " ")
     job <- Fiber.fork(IO.ensure(Sys.exec(command).map(_ => ()), Ref.set(exited, true)))
-    process = Generate.Process(job, exited, Str.concat("http://127.0.0.1:", Str.fromInt(port + 30000)), key, dir)
+    process = Generate.Process(job, exited, Str.concat("http://127.0.0.1:", Str.fromInt(port + 30000)), key, dir, "cpu")
     model <- Models.select(id)
-    request = Json.Obj([("request", Json.Str("controlled")), ("baseline", Json.Str(Hash.sha256("baseline"))), ("kind", Json.Str("behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz")]))])
-    result <- IO.ensure(IO.attempt(IO.timeout(if (mode == "timeout") 500 else 5000, Generate.ready(process).flatMap(_ => Generate.complete(process, request, model)))), Generate.stop(process))
+    request = Json.Obj([("request", Json.Str("controlled")), ("baseline", Json.Str(Hash.sha256("baseline"))), ("kind", Json.Str("behavior")), ("allowed", Json.Arr([Json.Str("src/Main.scuzz")])), ("sources", Proposal.pairsJson([("src/Main.scuzz", "@main def main: IO[Unit] = IO.println(1)")]))])
+    result <- IO.ensure(IO.attempt(IO.timeout(if (mode == "timeout") 500 else 5000, Generate.ready(process).flatMap(_ => Generate.complete(process, request, model, _ => IO.pure(()))))), Generate.stop(process))
     _ <- result match {
       case Result.Ok(_) => Models.need(mode == "ok", "invalid controlled reply passed")
       case Result.Err(e) => if (mode == "ok") IO.fail(e) else IO.pure(())
@@ -924,7 +1001,7 @@ def alive(pid):
  except (ProcessLookupError,FileNotFoundError): return False
 unrelated = subprocess.Popen(["sleep", "120"])
 try:
- for model in ("qwen3.5-4b", "qwen2.5-coder-7b"):
+ for model in ("qwen3.5-4b", "qwen3.5-9b"):
   for sig in (signal.SIGINT, signal.SIGTERM):
    (root / "pid").unlink(missing_ok=True)
    runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE="interrupt", GENERATION_PROOF_MODEL=model)
@@ -945,7 +1022,7 @@ try:
    finally:
     if child.poll() is None:
      child.kill();child.wait(timeout=5)
- for model in ("qwen3.5-4b", "qwen2.5-coder-7b"):
+ for model in ("qwen3.5-4b", "qwen3.5-9b"):
   for mode in ("ok", "stale", "truncated", "reasoning", "context", "timeout"):
    (root / "pid").unlink(missing_ok=True)
    runenv = dict(env, GENERATION_PROOF_ROOT=str(root), GENERATION_PROOF_MODE=mode, GENERATION_PROOF_MODEL=model)
@@ -967,7 +1044,7 @@ import hashlib, io, json, os, pathlib, platform, re, shlex, shutil, signal, subp
 
 repo = pathlib.Path.cwd()
 cli = pathlib.Path(os.environ["SCUZZ"])
-root = pathlib.Path(tempfile.mkdtemp(prefix='scuzz-gate3-command-live-'))
+root = pathlib.Path(tempfile.mkdtemp(prefix='scuzz-gate3-command-live-')).resolve()
 generation = root / 'generation'
 shutil.copytree(repo / 'examples/editor/generation', generation, ignore=shutil.ignore_patterns('build'))
 (generation / 'scuzz.toml').write_text('[package]\nname="generation"\n[dependencies]\ncompiler={path="' + os.path.relpath(repo / 'examples/compiler', generation) + '"}\n')
@@ -996,8 +1073,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
   if self.path=='/tokenize': self.reply({'tokens':[1,2,3]});return
   assert body['model']==key and not body['stream'] and body['max_tokens']==1024
   schema=body['response_format']['json_schema']['schema']
-  request=json.loads(body['messages'][1]['content'])
-  proposal={'v':1,'request':request['request'],'baseline':request['baseline'],'kind':'behavior','generator':schema['properties']['generator']['enum'][0],'files':[{'path':'src/Main.scuzz','content':'@main def main: IO[Unit] = IO.println(2)'}]}
+  request=json.JSONDecoder().raw_decode(body['messages'][1]['content'])[0]
+  proposal={'change':'Print two.','edits':[{'path':'src/Main.scuzz','search':request['sources'][0]['content'].strip(),'replacement':'@main def main: IO[Unit] = IO.println(2)'}]}
   pathlib.Path(os.environ['CONTROLLED_RECEIVED']).write_text('ready')
   if os.environ.get('CONTROLLED_ACTION')=='hang': time.sleep(120)
   self.reply({'choices':[{'finish_reason':'stop','message':{'content':json.dumps(proposal)}}]})
@@ -1013,7 +1090,7 @@ artifact = archive.getvalue()
 weights = b'controlled weights'
 models = generation / 'src/Models.scuzz'
 source = models.read_text()
-for count, digest in ((2740937888, '00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4'), (4683073536, '509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c')):
+for count, digest in ((2740937888, '00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4'), (5680522464, '03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8')):
  source = source.replace(str(count), str(len(weights))).replace(digest, hashlib.sha256(weights).hexdigest())
 source = re.sub(r'Backend\("([^"]+)", "([^"]+)", [0-9]+, "[a-f0-9]+"\)', lambda m: 'Backend("' + m[1] + '", "' + m[2] + '", ' + str(len(artifact)) + ', "' + hashlib.sha256(artifact).hexdigest() + '")', source)
 models.write_text(source)
@@ -1024,7 +1101,7 @@ backend = cache / 'scuzz/tools/llama/b11146' / backend_platform
 backend.mkdir(parents=True)
 (backend / 'release.tar.gz').write_bytes(artifact)
 model_cache = root / 'models-cache'
-for model_id, revision, filename in [('qwen3.5-4b','e87f176479d0855a907a41277aca2f8ee7a09523','Qwen3.5-4B-Q4_K_M.gguf'),('qwen2.5-coder-7b','13fb94bfda8c8cf22497dc57b78f391a9acb426a','qwen2.5-coder-7b-instruct-q4_k_m.gguf')]:
+for model_id, revision, filename in [('qwen3.5-4b','e87f176479d0855a907a41277aca2f8ee7a09523','Qwen3.5-4B-Q4_K_M.gguf'),('qwen3.5-9b','3885219b6810b007914f3a7950a8d1b469d598a5','Qwen3.5-9B-Q4_K_M.gguf')]:
  path = model_cache / model_id / revision / filename
  path.parent.mkdir(parents=True)
  path.write_bytes(weights)
@@ -1058,7 +1135,7 @@ subprocess.run([str(cli), 'run', str(root)], env=dict(env, CONTROLLED_MODEL=''),
 exe = root / 'build/controlled-command'
 unrelated = subprocess.Popen(['sleep','120'])
 try:
- for model in ('qwen3.5-4b','qwen2.5-coder-7b'):
+ for model in ('qwen3.5-4b','qwen3.5-9b'):
   result = subprocess.run([str(exe)], env=dict(env, CONTROLLED_MODEL=model), check=True, capture_output=True, text=True, timeout=30)
   output = json.loads(result.stdout)
   assert output['result']=='published' and output['model']==model and output['behavioral_review']=='pending' and not output['accepted']
@@ -1074,7 +1151,7 @@ try:
   assert unrelated.poll() is None and not list((cache/'scuzz/requests').iterdir())
   print('Controlled finite command:',model,'structured publication, no source writes, pending review, owned cleanup',flush=True)
   shutil.rmtree(candidate)
- for model in ('qwen3.5-4b','qwen2.5-coder-7b'):
+ for model in ('qwen3.5-4b','qwen3.5-9b'):
   for sig in (signal.SIGINT, signal.SIGTERM):
    (root / 'received').unlink(missing_ok=True)
    child = subprocess.Popen([str(exe)], env=dict(env, CONTROLLED_MODEL=model, CONTROLLED_ACTION='hang'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1158,7 +1235,7 @@ with open(root / "deck-live.log", "w") as log:
         request = json.loads((root / "build/ide/request.json").read_text())
         assert request["objective"] == "Review behavior"
         (d / "proposal.json").write_text(json.dumps({"v": 1, "request": request["request"], "baseline": request["baseline"], "kind": "behavior", "generator": "manual", "files": [{"path": "src/Main.scuzz", "sha256": hashlib.sha256(prop.encode()).hexdigest()}]}))
-        inject([{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+        inject([{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
         await_state(ready)
         inject([{"op": "tap", "id": "button:Choose left"}])
         await_state(lambda: len(list((root / ".scuzz/ide/records").glob("*.json"))) == 1)
@@ -1365,12 +1442,12 @@ if os.uname().sysname == "Linux":
                     return c
     try:
         await_state(lambda: (root / "build/ide/request.json").is_file())
-        write_ops(root, [{"op": "tap", "id": "choicechip:Live"}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:Code"}])
         await_state(lambda: read_ui(root).get("editors"))
         write_ops(root, [{"op": "caret", "offset": len(original)}, {"op": "key", "key": "x", "text": "x"}])
         await_state(lambda: any(v.get("name") == "buf" and v.get("value") == original + "x" for v in read_ui(root)["signals"]))
         bind_publication(root)
-        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
         ui = read_ui(root)
         values = {v["name"]: v["value"] for v in ui["signals"]}
@@ -1468,7 +1545,7 @@ if os.uname().sysname == "Linux":
         proc = subprocess.Popen([str(editor)], cwd=root, env=env, stdout=log, stderr=log)
         await_state(lambda: "External proposals: publish a complete directory" in json.dumps(read_ui(root)))
         bind_publication(root)
-        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
         if c["id"] != previous_card["id"]:
             write_ops(root, [{"op": "tap", "id": "outlined:Randomize"}])
@@ -1502,7 +1579,7 @@ if os.uname().sysname == "Linux":
     shutil.rmtree(root / "build")
     batch(root, [])
     assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 1
-    batch(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Undo"}])
+    batch(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Undo"}])
     assert (root / "src/Main.scuzz").read_text() == original
     assert any(v.get("name") == "buf" and v.get("value") == original for v in read_ui(root)["signals"])
     assert not (root / "src/Other.scuzz").exists()
@@ -1516,7 +1593,7 @@ if os.uname().sysname == "Linux":
     try:
         await_state(lambda: (root / "build/ide/request.json").is_file())
         bind_publication(root)
-        write_ops(root, [{"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
         write_ops(root, [{"op": "tap", "id": "button:" + lane}, {"op": "tap", "id": "button:" + lane}])
@@ -1551,7 +1628,7 @@ shutil.copytree(repo / "examples/counter", failure, ignore=shutil.ignore_pattern
 publish(failure, [("src/Main.scuzz", proposed)])
 batch(failure, [{"op": "tap", "id": "button:Start"}])
 bind_publication(failure)
-batch(failure, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+batch(failure, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
 report = json.loads((failure / "build/ide/report.json").read_text())
 assert not report["review"]["complete"] and any(w["why_b"] for w in report["workloads"]), report
 assert (failure / "src/Main.scuzz").read_text() == original
@@ -1564,7 +1641,7 @@ shutil.copytree(repo / "examples/counter", source_only, ignore=shutil.ignore_pat
 publish(source_only, [("src/Main.scuzz", original.replace("noteDrive(n:", "noteDrive(steps:").replace("steps: Int where n >= 0", "steps: Int where steps >= 0"))])
 batch(source_only, [{"op": "tap", "id": "button:Start"}])
 bind_publication(source_only)
-batch(source_only, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+batch(source_only, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
 assert (source_only / "src/Main.scuzz").read_text() == original
 records = [json.loads(p.read_text()) for p in (source_only / ".scuzz/ide/records").glob("*.json")]
 assert len(records) == 1 and records[0]["decision"] == "no-observed-difference" and records[0]["kind"] == "automatic", records
@@ -1586,7 +1663,7 @@ assert (repair / "src/Main.scuzz").read_text() != original
 publish(repair, [("src/Main.scuzz", proposed)])
 batch(repair, [{"op": "tap", "id": "button:Start"}])
 bind_publication(repair)
-batch(repair, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+batch(repair, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
 cards = [json.loads(p.read_text()) for p in (repair / ".scuzz/ide/cards").glob("*/card.json")]
 assert len(cards) == 1 and cards[0]["status"] == "ready", cards
 assert all(w["why_a"] == "check failed" and w["why_b"] is None for w in cards[0]["evidence"]["workloads"])
@@ -1603,7 +1680,7 @@ for side in ("publication", "target"):
     outside.write_text(linked.read_text())
     linked.unlink()
     linked.symlink_to(outside)
-    batch(unsafe, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Timeline"}, {"op": "tap", "id": "outlined:Proposals"}])
+    batch(unsafe, [{"op": "tap", "id": "button:Start"}, {"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
     assert outside.read_text() == (proposed if side == "publication" else original)
     assert not list((unsafe / ".scuzz/ide/cards").glob("*/card.json"))
     assert not list((unsafe / ".scuzz/ide/records").glob("*.json"))
@@ -1665,8 +1742,8 @@ PYINTEGRITY
   python3 - <<'PY'
 import json
 ops = {"v": 1, "kind": "inject", "events": [
-    {"op": "tap", "id": "choicechip:Timeline"},
-    {"op": "tap", "id": "outlined:Generate"},
+    {"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"},
+    {"op": "tap", "id": "outlined:Generate mutations"},
     {"op": "pump", "k": 50},
 ]}
 ops["events"].insert(0, {"op": "tap", "id": "button:Start"})

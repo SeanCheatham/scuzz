@@ -122,7 +122,7 @@ oracle iosRunArgs(): Bool =
 oracle modelsFixed(): Bool =
   for {
     models = Models.catalog()
-  } yield List.map(models, m => m.id) == ["qwen3.5-4b", "qwen2.5-coder-7b"] && List.forall(models, m => Str.matches(m.revision, "^[a-f0-9]{40}$") && Str.matches(m.sha256, "^[a-f0-9]{64}$") && m.bytes > 1000000000 && m.bytes < m.memory && Str.startsWith(m.license, "https://huggingface.co/")) && List.at(models, 0).bytes == 2740937888 && List.at(models, 1).bytes == 4683073536
+  } yield List.map(models, m => m.id) == ["qwen3.5-4b", "qwen3.5-9b"] && List.forall(models, m => Str.matches(m.revision, "^[a-f0-9]{40}$") && Str.matches(m.sha256, "^[a-f0-9]{64}$") && m.bytes > 1000000000 && m.bytes < m.memory && Str.startsWith(m.license, "https://huggingface.co/")) && List.at(models, 0).bytes == 2740937888 && List.at(models, 1).bytes == 5680522464
 
 oracle modelCommands(): Bool =
   Cli.show(Cli.parse(["models", "list", "--message-format=json"])) == "models list model= json=true" && Cli.show(Cli.parse(["--message-format=json", "models", "download", "qwen3.5-4b"])) == "models download model=qwen3.5-4b json=true" && Str.startsWith(Cli.show(Cli.parse(["models", "download", "unknown"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["models", "list", "arbitrary.gguf"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["models", "download", "qwen3.5-4b", "--model-path", "x"])), "fail:")
@@ -147,4 +147,28 @@ record Real(x: Int)
 def real(): Int = ()
 """
   } yield Drive.sigSrc(source) == expected
+
+oracle generationReviewCli(): Bool =
+  Cli.show(Cli.parse(["ide", "export-request", "app", "--objective", "Add an input", "--out", "request.json"])) == "ide export-request app" && Cli.show(Cli.parse(["ide", "review-suggestion", "app", "--request=request.json", "--candidate=proposal"])) == "ide review-suggestion app" && Str.startsWith(Cli.show(Cli.parse(["ide", "export-request", "app", "--objective", "Add an input"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "export-request", "app", "--objective", "a", "--objective", "b", "--out", "r"])), "fail:") && Str.startsWith(Cli.show(Cli.parse(["ide", "review-suggestion", "app", "--request", "r", "--out", "p"])), "fail:")
+
+oracle generationAnchors(): Bool =
+  for {
+    request = Json.Obj([("sources", Proposal.pairsJson([("src/Main.scuzz", """same
+unique
+same
+""")])), ("allowed", Json.Arr([Json.Str("src/Main.scuzz")]))])
+  } yield List.contains(Generate.anchors(request, "src/Main.scuzz"), "unique") && !List.contains(Generate.anchors(request, "src/Main.scuzz"), "same") && List.contains(Generate.anchors(request, "src/Main.scuzz"), """same
+unique""") && Generate.anchors(request, "src/New.scuzz") == [""] && Proposal.str(Generate.schema(request), "type") == "object" && List.contains(Json.keys(Proposal.field(Generate.schema(request), "properties")), "edits")
+
+oracle generationRepairSources(): Bool =
+  for {
+    baseline = [("src/Main.scuzz", "before"), ("src/Other.scuzz", "keep")]
+    failed = [("src/Main.scuzz", """candidate
+line two
+line three
+line four
+""")]
+    request = Json.Obj([("sources", Proposal.pairsJson(baseline)), ("allowed", Json.Arr([Json.Str("src/Main.scuzz"), Json.Str("src/Other.scuzz")])), ("feedback", Json.Arr([Json.Obj([("decision", Json.Str("candidate-failed")), ("source", Proposal.pairsJson(failed))])]))])
+    blocked = Json.set(request, "feedback", Json.Arr([Json.Obj([("decision", Json.Str("candidate-failed")), ("source", Proposal.pairsJson([("src/Unsafe.scuzz", "outside")]))])]))
+  } yield List.contains(Generate.workingSources(request), List.at(failed, 0)) && List.contains(Generate.workingSources(request), ("src/Other.scuzz", "keep")) && Generate.workingSources(blocked) == baseline && List.contains(Generate.anchors(request, "src/Main.scuzz"), List.at(failed, 0)._2)
 

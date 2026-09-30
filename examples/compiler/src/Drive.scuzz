@@ -796,7 +796,7 @@ def checkFmtHd(json: Bool, all: List[(String, String)], h: (String, String), res
   }
 
 def checkFmtSrc(json: Bool, all: List[(String, String)], stem: String, src: String, rest: List[(String, String)], stems: List[String], vers: List[String], parsed: Map[String, (String, Prog)], p: Prog): IO[Unit] =
-  if (Parse.pretty(p) == src) checkFmtGo(json, all, rest, stems, vers, Map.set(parsed, stem, (src, p))) else checkFmtFail(stem)
+  if (Parse.hasParseError(p)) IO.fail(Str.concat("scuzz check: ", Check.human(src))) else if (Parse.pretty(p) == src) checkFmtGo(json, all, rest, stems, vers, Map.set(parsed, stem, (src, p))) else checkFmtFail(stem)
 
 def fileStems(files: List[(String, String)]): List[String] =
   if (List.isEmpty(files)) [] else fileStemsHd(List.at(files, 0), List.tail(files))
@@ -867,7 +867,7 @@ def lineIsTop(line: String): Bool =
   lineIsDef(line) || Str.startsWith(line, "enum ") || Str.startsWith(line, "record ") || Str.startsWith(line, "import ") || Str.startsWith(line, "type ") || Str.startsWith(line, "opaque ") || Str.startsWith(line, "trait ") || Str.startsWith(line, "impl ") || Str.startsWith(line, "package ") || Str.startsWith(line, "@")
 
 def checkFmtFail(stem: String): IO[Unit] =
-  IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail("scuzz check"))
+  IO.println(Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)")).flatMap(_ => IO.fail(Str.concat("scuzz check: ", Str.concat(stem, ".scuzz:1:1: error: needs formatting (run scuzz fmt)"))))
 
 def checkDirOutParsed(json: Bool, p: Prog, sigs: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
   if (json) checkDirJson(Check.check3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers) else checkDirHuman(Check.human3(sigs, Check.checkProgOwn(p, stems)), p, filesForStems(sigs, stems), stems, vers)
@@ -876,7 +876,7 @@ def checkDirJson(diags: String, p: Prog, files: List[(String, String)], stems: L
   if (diags == "[]") IO.println(Check.unclaimedJsonVer(p, files, stems, vers)) else IO.println(diags).flatMap(_ => IO.fail("scuzz check"))
 
 def checkDirHuman(human: String, p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
-  if (human == "scuzz check ok") checkDirHumanOk(p, files, stems, vers) else IO.println(human).flatMap(_ => IO.fail("scuzz check"))
+  if (human == "scuzz check ok") checkDirHumanOk(p, files, stems, vers) else IO.println(human).flatMap(_ => IO.fail(Str.concat("scuzz check: ", human)))
 
 def checkDirHumanOk(p: Prog, files: List[(String, String)], stems: List[String], vers: List[String]): IO[Unit] =
   IO.println("scuzz check ok").flatMap(_ => checkDirHumanUnclaimed(Check.unclaimedLines(p, files, stems, vers)))
@@ -1419,30 +1419,30 @@ def fuzzManGate(m: Man, dir: String, outDir: String, iterations: Int, seed: Int,
   if (live && m.hasUi) failMsg("--live does not run a [ui] package", "scuzz fuzz") else if (session && m.hasUi) failMsg("--session does not run a [ui] package", "scuzz fuzz") else if (asan && m.hasUi) failMsg("--asan does not run a [ui] package", "scuzz fuzz") else fuzzEngine(m.hasUi).flatMap(eng => Ref.of(("", 0)).flatMap(srv => fuzzReadScenario(dir).flatMap(scn => fuzzMan2(FuzzJob(dir, outDir, if (asan) asanExeName(outDir, m.name) else exeName(outDir, m.name), m.name, m.hasUi, iterations, seed, noFailFast, files, oracles, if (m.hasUi) headlessEnvMan(m) else "", differential, ens, fuzzUseEv(live || asan || session, eng._1), if (live || asan || session) "" else eng._2, srv, Verify.scenarioFaults(scn), live, asan, session), replay))))
 
 def fuzzEngine(hasUi: Bool): IO[(Bool, String)] =
-  Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (e == "compiled") IO.pure((false, "")) else if (!hasUi) Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))) else uiHostExe().flatMap(exe => if (exe == "") IO.pure((false, "")) else IO.pure((true, exe))))
+  Sys.getenv("SCUZZ_FUZZ_ENGINE").flatMap(e => if (e == "compiled") IO.pure((false, "")) else if (!hasUi) Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => IO.pure((true, exe))) else Sys.getenv("SCUZZ_EXECUTABLE").flatMap(scuzz => uiHostExe(scuzz)).flatMap(exe => if (exe == "") IO.pure((false, "")) else IO.pure((true, exe))))
 
-def uiHostExe(): IO[String] =
-  uiHostAt("examples/ui-host").flatMap(hit => if (hit != "") IO.pure(hit) else uiHostHome())
+def uiHostExe(scuzz: String): IO[String] =
+  uiHostAt("examples/ui-host", scuzz).flatMap(hit => if (hit != "") IO.pure(hit) else uiHostHome(scuzz))
 
-def uiHostHome(): IO[String] =
-  Sys.getenv("SCUZZ_HOME").flatMap(home => if (home == "") Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => uiHostWalk(Fs.dirname(exe), 8)) else uiHostAt(joinSlash(home, "examples/ui-host")))
+def uiHostHome(scuzz: String): IO[String] =
+  Sys.getenv("SCUZZ_HOME").flatMap(home => if (home == "") Sys.getenv("SCUZZ_EXECUTABLE").flatMap(exe => uiHostWalk(Fs.dirname(exe), 8, scuzz)) else Fs.exists(joinSlash(home, "bin/scuzz")).flatMap(installed => uiHostAt(joinSlash(home, if (installed != 0) "ui-host" else "examples/ui-host"), scuzz)))
 
-def uiHostWalk(dir: String, n: Int): IO[String] =
-  if (n <= 0 || dir == "" || dir == "/") IO.pure("") else uiHostTry(dir, n)
+def uiHostWalk(dir: String, n: Int, scuzz: String): IO[String] =
+  if (n <= 0 || dir == "" || dir == "/") IO.pure("") else uiHostTry(dir, n, scuzz)
 
-def uiHostTry(dir: String, n: Int): IO[String] =
-  uiHostAt(joinSlash(dir, "examples/ui-host")).flatMap(hit => uiHostNext(hit, dir, n))
+def uiHostTry(dir: String, n: Int, scuzz: String): IO[String] =
+  uiHostAt(joinSlash(dir, "examples/ui-host"), scuzz).flatMap(hit => uiHostNext(hit, dir, n, scuzz))
 
-def uiHostNext(hit: String, dir: String, n: Int): IO[String] =
-  if (hit != "") IO.pure(hit) else uiHostUp(Fs.dirname(dir), dir, n)
+def uiHostNext(hit: String, dir: String, n: Int, scuzz: String): IO[String] =
+  if (hit != "") IO.pure(hit) else uiHostUp(Fs.dirname(dir), dir, n, scuzz)
 
-def uiHostUp(parent: String, dir: String, n: Int): IO[String] =
-  if (parent == dir) IO.pure("") else uiHostWalk(parent, n - 1)
+def uiHostUp(parent: String, dir: String, n: Int, scuzz: String): IO[String] =
+  if (parent == dir) IO.pure("") else uiHostWalk(parent, n - 1, scuzz)
 
-def uiHostAt(dir: String): IO[String] =
-  Fs.exists(joinSlash(dir, "scuzz.toml")).flatMap(ok => if (ok == 0) IO.pure("") else uiHostBuild(dir).handleErrorWith(e => IO.println(e).flatMap(_ => IO.pure(""))))
+def uiHostAt(dir: String, scuzz: String): IO[String] =
+  Fs.exists(joinSlash(dir, "scuzz.toml")).flatMap(ok => if (ok == 0) IO.pure("") else uiHostBuild(dir, scuzz).handleErrorWith(e => IO.println(e).flatMap(_ => IO.pure(""))))
 
-def uiHostBuild(dir: String): IO[String] =
+def uiHostBuild(dir: String, scuzz: String): IO[String] =
   for {
     _ <- Fs.mkdirs(joinSlash(dir, "build"))
     toml <- Fs.read(joinSlash(dir, "scuzz.toml"))
@@ -1451,14 +1451,14 @@ def uiHostBuild(dir: String): IO[String] =
     exe = exeName(joinSlash(dir, "build"), "ui-host")
     old <- Fs.read(uiHostStampPath(dir)).handleErrorWith(_ => IO.pure(""))
     hit <- Fs.exists(exe)
-    out <- if (old == fp && hit != 0) IO.pure(exe) else uiHostFresh(dir, fp, exe)
+    out <- if (old == fp && hit != 0) IO.pure(exe) else uiHostFresh(dir, fp, exe, scuzz)
   } yield out
 
 def uiHostStampPath(dir: String): String =
   joinSlash(joinSlash(dir, "build"), "fingerprint.link")
 
-def uiHostFresh(dir: String, fp: String, exe: String): IO[String] =
-  emitDir(dir, joinSlash(dir, "build"), false).flatMap(_ => linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(r => uiHostLinked(r, dir, fp, exe)))
+def uiHostFresh(dir: String, fp: String, exe: String, scuzz: String): IO[String] =
+  runLine(Str.concat(shQuote(scuzz), Str.concat(" build --out-dir ", Str.concat(shQuote(joinSlash(dir, "build")), Str.concat(" ", shQuote(dir)))))).flatMap(r => if (r._1 != 0) uiHostLinked(r, dir, fp, exe) else linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(link => uiHostLinked(link, dir, fp, exe)))
 
 def uiHostLinked(r: (Int, String, String), dir: String, fp: String, exe: String): IO[String] =
   if (r._1 == 0) Fs.write(uiHostStampPath(dir), fp).map(_ => exe) else IO.println(r._3).flatMap(_ => IO.pure(""))

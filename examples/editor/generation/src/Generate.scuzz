@@ -13,7 +13,7 @@ def resources(m: Model): IO[(Int, Bool)] =
   for {
     os <- Models.run("uname -s")
     ram <- if (os == "Linux") Models.run("awk '/MemAvailable:/ {print $2 * 1024}' /proc/meminfo") else Models.run("vm_stat | awk 'NR==1 {for(i=1;i<=NF;i++) if($i==\"of\") p=$(i+1)} /Pages free:|Pages inactive:/ {gsub(/\\./,\"\",$NF); n+=$NF} END {printf \"%.0f\\n\",n*p}'")
-    _ <- Models.need(Str.toInt(ram, 0) >= m.memory + 2147483648, "insufficient available memory for the model budget and 2 GiB host reserve")
+    _ <- if (Str.toInt(ram, 0) >= m.memory + 2147483648) IO.pure(()) else progress("Warning: available host memory is below the model budget plus 2 GiB. The operation continues.")
     _ <- Models.need(m.bytes + 536870912 <= m.memory, "model and context estimate exceeds its memory budget")
     cpus <- Models.run("getconf _NPROCESSORS_ONLN")
     threads = Str.toInt(cpus, 1)
@@ -66,19 +66,77 @@ def post(p: Process, route: String, body: Json): IO[Json] =
   } yield j
 
 def messages(request: Json): Json =
-  Json.Arr([Json.Obj([("role", Json.Str("system")), ("content", Json.Str(Proposal.instructions()))]), Json.Obj([("role", Json.Str("user")), ("content", Json.Str(Models.text(request)))])])
-
-def enumString(value: String): Json =
-  Json.Obj([("type", Json.Str("string")), ("enum", Json.Arr([Json.Str(value)]))])
-
-def schema(request: Json, m: Model): Json =
   for {
-    item = Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("path"), Json.Str("content")])), ("properties", Json.Obj([("path", Json.Obj([("type", Json.Str("string")), ("enum", Proposal.field(request, "allowed"))])), ("content", Json.Obj([("type", Json.Str("string"))]))]))])
-    files = Json.Obj([("type", Json.Str("array")), ("minItems", Json.Int(1)), ("maxItems", Json.Int(3)), ("items", item)])
-    properties = Json.Obj([("v", Json.Obj([("type", Json.Str("integer")), ("enum", Json.Arr([Json.Int(1)]))])), ("request", enumString(Proposal.str(request, "request"))), ("baseline", enumString(Proposal.str(request, "baseline"))), ("kind", enumString("behavior")), ("generator", enumString(m.id)), ("files", files)])
-  } yield Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr(List.map(["v", "request", "baseline", "kind", "generator", "files"], s => Json.Str(s)))), ("properties", properties)])
+    feedback = Json.arr(Proposal.field(request, "feedback"))
+    latest = List.getOrElse(feedback, List.len(feedback) - 1, Json.Null())
+    decision = Proposal.str(latest, "decision")
+    task = if (decision == "candidate-failed") "Correct the latest candidate. Preserve its intended small addition and satisfy the reported diagnostic and fixed checks. Change the source that causes the failure. For a callback with multiple actions, put those actions in a named def before main. Replace the callback body with a call to that def. Do not use a lambda statement block such as => { ... }. If the failed block spans more than three lines, select the complete file as search and supply the complete corrected file as replacement. Remove all parts of the failed block." else if (Str.startsWith(decision, "duplicate") || decision == "no-observed-difference" || decision == "unchanged-source") "Select a different small useful addition. The latest candidate is excluded. Do not repeat it." else "Select and implement one small useful addition toward the objective. Preserve the current behavior and fixed checks."
+    sources = workingSources(request)
+    correcting = sources != Proposal.pairs(Proposal.field(request, "sources"))
+    history = if (correcting) Json.Arr(List.map(feedback, f => Json.remove(f, "source"))) else Proposal.field(request, "feedback")
+    input = Json.Obj([("objective", Proposal.field(request, "objective")), ("task", Json.Str(task)), ("sources", Proposal.pairsJson(sources)), ("baseline_sources", if (correcting) Proposal.field(request, "sources") else Json.Null()), ("allowed", Proposal.field(request, "allowed")), ("checks", Proposal.field(request, "checks")), ("feedback", history), ("limits", Json.Obj([("files", Json.Int(3)), ("source_bytes", Json.Int(65536))]))])
+  } yield Json.Arr([Json.Obj([("role", Json.Str("system")), ("content", Json.Str(Str.concat("Return one JSON object with change and edits. First state one small change in change. Use one short sentence. Then supply only the edits for that change. Each edit has path, search, and replacement. Make one to three edits. search must equal one complete source block from the allowed anchors. replacement contains the new complete source block, with source indentation. Keep existing source in the replacement when it still applies. Use a unique anchor once. Apply edits to sources. For a correction, sources contains the failed candidate and baseline_sources contains the unchanged working tree. Correct sources and preserve the baseline behavior. Scuzz supplies all unchanged source and publication metadata. Do not repeat source above or below the selected block. To insert a helper before main, select the @main def line. Put the helper source before that same @main def line in replacement. Keep the existing main body unchanged.\nExample: insert a draft signal and add an input. Use anchors from the actual source.\n{\"change\":\"Add one message input.\",\"edits\":[{\"path\":\"src/Main.scuzz\",\"search\":\"    count = Signal.make(0)\",\"replacement\":\"    count = Signal.make(0)\\n    draft = Signal.make(\\\"\\\")\"},{\"path\":\"src/Main.scuzz\",\"search\":\"    _ <- Ui.run(_ => View.column(View.text(\\\"Counter\\\"), View.bindText(label), View.button(\\\"+1\\\", _ => Signal.set(count, Signal.get(count) + 1))))\",\"replacement\":\"    _ <- Ui.run(_ => View.column(View.text(\\\"Counter\\\"), View.bindText(label), View.button(\\\"+1\\\", _ => Signal.set(count, Signal.get(count) + 1)), View.textField(draft, \\\"Message\\\")))\"}]}\n", Proposal.instructions())))]), Json.Obj([("role", Json.Str("user")), ("content", Json.Str(Str.concat(Models.text(input), Str.concat("""
+""", Str.concat(task, if (decision == "candidate-failed") Str.concat("""
+Correct this diagnostic: """, Proposal.str(latest, "diagnostic")) else "")))))])])
 
-def complete(p: Process, request: Json, m: Model): IO[Json] =
+def workingSources(request: Json): List[(String, String)] =
+  for {
+    baseline = Proposal.pairs(Proposal.field(request, "sources"))
+    feedback = Json.arr(Proposal.field(request, "feedback"))
+    latest = List.getOrElse(feedback, List.len(feedback) - 1, Json.Null())
+    raw = Proposal.field(latest, "source")
+    failed = Proposal.pairs(raw)
+    allowed = List.map(Json.arr(Proposal.field(request, "allowed")), p => Json.strOr(p, ""))
+    valid = Proposal.str(latest, "decision") == "candidate-failed" && Proposal.arrayValue(raw) && Proposal.sourceSetOk(failed) && List.forall(Json.arr(raw), f => Proposal.keys(f, ["path", "content"]) && Proposal.stringValue(Proposal.field(f, "content")) && List.contains(allowed, Proposal.str(f, "path")))
+  } yield if (!valid) baseline else List.concat(List.filter(baseline, f => !List.contains(List.map(failed, r => r._1), f._1)), failed)
+
+def anchors(request: Json, path: String): List[String] =
+  for {
+    sources = workingSources(request)
+    source = List.getOrElse(List.map(sources, f => f._2), List.indexOf(List.map(sources, f => f._1), path), "")
+    lines = Str.split(source, """
+""")
+    blocks = List.flatten(List.map(List.indices(lines), i => List.map([1, 2, 3], size => List.join(List.take(List.drop(lines, i), size), """
+"""))))
+  } yield if (source == "") [""] else List.distinct(List.concat(List.filter(blocks, block => Str.trim(block) != "" && List.len(Str.split(source, block)) == 2), if (Proposal.str(List.getOrElse(Json.arr(Proposal.field(request, "feedback")), List.len(Json.arr(Proposal.field(request, "feedback"))) - 1, Json.Null()), "decision") == "candidate-failed") [source] else []))
+
+def schema(request: Json): Json =
+  for {
+    allowed = List.map(Json.arr(Proposal.field(request, "allowed")), p => Json.strOr(p, ""))
+    searches = Json.Arr(List.map(List.distinct(List.flatten(List.map(allowed, p => anchors(request, p)))), line => Json.Str(line)))
+    item = Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("path"), Json.Str("search"), Json.Str("replacement")])), ("properties", Json.Obj([("path", Json.Obj([("type", Json.Str("string")), ("enum", Proposal.field(request, "allowed"))])), ("search", Json.Obj([("type", Json.Str("string")), ("enum", searches)])), ("replacement", Json.Obj([("type", Json.Str("string"))]))]))])
+    edits = Json.Obj([("type", Json.Str("array")), ("minItems", Json.Int(1)), ("maxItems", Json.Int(3)), ("items", item)])
+  } yield Json.Obj([("type", Json.Str("object")), ("additionalProperties", Json.Bool(false)), ("required", Json.Arr([Json.Str("change"), Json.Str("edits")])), ("properties", Json.Obj([("change", Json.Obj([("type", Json.Str("string"))])), ("edits", edits)]))])
+
+def applyEdits(source: String, edits: List[Json]): IO[String] =
+  if (List.isEmpty(edits)) IO.pure(source) else for {
+  edit = List.at(edits, 0)
+  search = Proposal.str(edit, "search")
+  _ <- Models.need(if (search == "") source == "" else List.len(Str.split(source, search)) == 2, "generated edit does not have one exact source match")
+  next = if (search == "") Proposal.str(edit, "replacement") else Str.replace(source, search, Proposal.str(edit, "replacement"))
+  result <- applyEdits(next, List.tail(edits))
+} yield result
+
+def editedFiles(request: Json, body: Json): IO[List[(String, String)]] =
+  for {
+    _ <- Models.need(Proposal.keys(body, ["change", "edits"]) && Proposal.stringValue(Proposal.field(body, "change")) && Str.byteLen(Proposal.str(body, "change")) > 0 && Str.byteLen(Proposal.str(body, "change")) <= 240 && Proposal.arrayValue(Proposal.field(body, "edits")), "invalid generated reply fields")
+    edits = Json.arr(Proposal.field(body, "edits"))
+    _ <- Models.need(List.nonEmpty(edits) && List.len(edits) <= 3, "invalid generated edit count")
+    allowed = List.map(Json.arr(Proposal.field(request, "allowed")), p => Json.strOr(p, ""))
+    _ <- Models.need(List.forall(edits, e => Proposal.keys(e, ["path", "search", "replacement"]) && Proposal.stringValue(Proposal.field(e, "search")) && Proposal.stringValue(Proposal.field(e, "replacement")) && List.contains(allowed, Proposal.str(e, "path")) && List.contains(anchors(request, Proposal.str(e, "path")), Proposal.str(e, "search"))), "invalid generated edit path, anchor, or replacement")
+    _ <- Models.need(List.len(List.distinct(List.map(edits, e => (Proposal.str(e, "path"), Proposal.str(e, "search"))))) == List.len(edits), "duplicate generated edit anchor")
+    sources = workingSources(request)
+    baseline = Proposal.pairs(Proposal.field(request, "sources"))
+    retained = List.map(List.filter(sources, f => !List.contains(baseline, f)), f => f._1)
+    paths = List.distinct(List.concat(List.map(edits, e => Proposal.str(e, "path")), retained))
+    files <- IO.foreach(paths, path => for {
+  source = List.getOrElse(List.map(sources, f => f._2), List.indexOf(List.map(sources, f => f._1), path), "")
+  result <- applyEdits(source, List.filter(edits, e => Proposal.str(e, "path") == path))
+} yield (path, result))
+    _ <- Models.need(Proposal.sourceSetOk(files), "generated source exceeds its limits")
+  } yield files
+
+def complete(p: Process, request: Json, m: Model, saveReply: Json => IO[Unit]): IO[Json] =
   for {
     template <- post(p, "/apply-template", Json.Obj([("messages", messages(request))]))
     prompt = Proposal.str(template, "prompt")
@@ -87,23 +145,26 @@ def complete(p: Process, request: Json, m: Model): IO[Json] =
     count = List.len(Json.arr(Proposal.field(tokenized, "tokens")))
     _ <- Models.need(count > 0 && count + 1024 <= 4096, "request exceeds the model context; reduce allowed source scope")
     _ <- progress("Generating one suggestion; deadline is 15 minutes")
-    result <- post(p, "/v1/chat/completions", Json.Obj([("model", Json.Str(p.key)), ("messages", messages(request)), ("stream", Json.Bool(false)), ("max_tokens", Json.Int(1024)), ("temperature", Json.Float(0.2)), ("seed", Json.Int(1)), ("cache_prompt", Json.Bool(false)), ("reasoning_effort", Json.Str("none")), ("response_format", Json.Obj([("type", Json.Str("json_schema")), ("json_schema", Json.Obj([("name", Json.Str("proposal")), ("strict", Json.Bool(true)), ("schema", schema(request, m))]))]))]))
+    seed <- Random.nextInt(2147483647)
+    result <- post(p, "/v1/chat/completions", Json.Obj([("model", Json.Str(p.key)), ("messages", messages(request)), ("stream", Json.Bool(false)), ("max_tokens", Json.Int(1024)), ("temperature", Json.Float(0.7)), ("top_p", Json.Float(0.8)), ("top_k", Json.Int(20)), ("min_p", Json.Float(0.0)), ("seed", Json.Int(seed)), ("cache_prompt", Json.Bool(false)), ("reasoning_effort", Json.Str("none")), ("response_format", Json.Obj([("type", Json.Str("json_schema")), ("json_schema", Json.Obj([("name", Json.Str("proposal")), ("strict", Json.Bool(true)), ("schema", schema(request))]))]))]))
+    _ <- saveReply(result)
     choices = Json.arr(Proposal.field(result, "choices"))
     _ <- Models.need(List.len(choices) == 1, "inference did not return one complete choice")
     choice = List.at(choices, 0)
-    _ <- Models.need(Proposal.str(choice, "finish_reason") == "stop", "inference response is truncated or incomplete")
+    _ <- Models.need(Proposal.str(choice, "finish_reason") == "stop", "scuzz generate: candidate failed: inference response is truncated or incomplete")
     message = Proposal.field(choice, "message")
     content = Proposal.str(message, "content")
-    _ <- Models.need(content != "" && !Str.contains(content, "<think>"), "inference returned reasoning instead of proposal source")
-    reply <- Proposal.parse(content, 131072)
+    _ <- Models.need(content != "" && !Str.contains(content, "<think>"), "scuzz generate: candidate failed: inference returned reasoning instead of proposal source")
+    body <- Proposal.parse(content, 131072).handleErrorWith(e => IO.fail(Str.concat("scuzz generate: candidate failed: ", e)))
+    files <- editedFiles(request, body).handleErrorWith(e => IO.fail(Str.concat("scuzz generate: candidate failed: ", e)))
+    reply = Json.Obj([("v", Json.Int(1)), ("request", Proposal.field(request, "request")), ("baseline", Proposal.field(request, "baseline")), ("kind", Json.Str("behavior")), ("generator", Json.Str(m.id)), ("files", Proposal.pairsJson(files))])
     _ <- Proposal.response(reply, request).handleErrorWith(e => IO.fail(Str.concat(e, Str.concat(": ", Str.take(content, 4096)))))
-    _ <- Models.need(Proposal.str(reply, "generator") == m.id, "generated model identity does not match")
     pid <- Fs.read(Fs.join(p.dir, "pid"))
     rss <- Models.run(Str.concat("ps -o rss= -p ", Str.fromInt(Str.toInt(Str.trim(pid), 0)))).handleErrorWith(_ => IO.pure("0"))
-    provenance = Models.text(Json.Obj([("model", Json.Str(m.id)), ("revision", Json.Str(m.revision)), ("sha256", Json.Str(m.sha256)), ("backend", Json.Str(Models.backendBuild())), ("device", Json.Str(p.device)), ("context", Json.Int(4096)), ("output", Json.Int(1024)), ("seed", Json.Int(1)), ("temperature", Json.Float(0.2))]))
-  } yield Json.Obj([("reply", Json.set(reply, "generator", Json.Str(provenance))), ("device", Json.Str(p.device)), ("prompt_tokens", Json.Int(count)), ("usage", Proposal.field(result, "usage")), ("timings", Proposal.field(result, "timings")), ("observed_rss_bytes", Json.Int(Str.toInt(Str.trim(rss), 0) * 1024))])
+    provenance = Models.text(Json.Obj([("model", Json.Str(m.id)), ("revision", Json.Str(m.revision)), ("sha256", Json.Str(m.sha256)), ("backend", Json.Str(Models.backendBuild())), ("device", Json.Str(p.device)), ("context", Json.Int(4096)), ("output", Json.Int(1024)), ("seed", Json.Int(seed)), ("temperature", Json.Float(0.7)), ("top_p", Json.Float(0.8)), ("top_k", Json.Int(20)), ("min_p", Json.Float(0.0))]))
+  } yield Json.Obj([("reply", Json.set(reply, "generator", Json.Str(provenance))), ("device", Json.Str(p.device)), ("prompt_tokens", Json.Int(count)), ("response", result), ("usage", Proposal.field(result, "usage")), ("timings", Proposal.field(result, "timings")), ("observed_rss_bytes", Json.Int(Str.toInt(Str.trim(rss), 0) * 1024))])
 
-def generate(request: Json, id: String, allowDownload: Bool, notify: String => IO[Unit]): IO[Json] =
+def generate(request: Json, id: String, allowDownload: Bool, notify: String => IO[Unit], saveReply: Json => IO[Unit]): IO[Json] =
   for {
     m <- Models.select(id)
     _ <- resources(m)
@@ -114,7 +175,7 @@ def generate(request: Json, id: String, allowDownload: Bool, notify: String => I
     exe <- Models.setupBackend(allowDownload)
     _ <- notify("Loading the selected pinned model. Load deadline: 5 minutes. Pause cancels owned inference.")
     p <- start(exe, Models.snapshot(cache, m), m)
-    result <- IO.ensure(IO.timeout(900000, IO.timeout(300000, ready(p)).flatMap(_ => notify("Generating one suggestion. Request deadline: 15 minutes. Pause cancels owned inference.")).flatMap(_ => complete(p, request, m))).handleErrorWith(e => Fs.read(Fs.join(p.dir, "server.log")).handleErrorWith(_ => IO.pure("no startup log")).flatMap(log => progress(Str.takeRight(log, 4096))).flatMap(_ => IO.fail(e))), stop(p))
+    result <- IO.ensure(IO.timeout(900000, IO.timeout(300000, ready(p)).flatMap(_ => notify("Generating one suggestion. Request deadline: 15 minutes. Pause cancels owned inference.")).flatMap(_ => complete(p, request, m, saveReply))).handleErrorWith(e => Fs.read(Fs.join(p.dir, "server.log")).handleErrorWith(_ => IO.pure("no startup log")).flatMap(log => progress(Str.takeRight(log, 4096))).flatMap(_ => IO.fail(e))), stop(p))
   } yield result
 
 def command(root: String, file: String, id: String, out: String, allowDownload: Bool): IO[Unit] =
@@ -128,11 +189,54 @@ def command(root: String, file: String, id: String, out: String, allowDownload: 
     exists <- Fs.exists(out)
     _ <- Models.need(exists == 0, "candidate output directory already exists")
     _ <- Models.select(id)
-    measured <- generate(request, id, allowDownload, message => progress(message))
+    measured <- generate(request, id, allowDownload, message => progress(message), response => saveMeasurement(root, request, Json.Obj([("response", response)])))
+    _ <- saveMeasurement(root, request, measured)
     reply = Proposal.field(measured, "reply")
     _ <- Proposal.publish(root, out, request, reply, compiler)
     ended <- Clock.monotonic()
-    result = Json.Obj([("v", Json.Int(1)), ("result", Json.Str("published")), ("request", Proposal.field(request, "request")), ("model", Json.Str(id)), ("candidate", Json.Str(out)), ("baseline", Proposal.field(request, "baseline")), ("elapsed_ms", Json.Int(ended - started)), ("behavioral_review", Json.Str("pending")), ("accepted", Json.Bool(false)), ("measurement", Json.remove(measured, "reply"))])
+    result = Json.Obj([("v", Json.Int(1)), ("result", Json.Str("published")), ("request", Proposal.field(request, "request")), ("model", Json.Str(id)), ("candidate", Json.Str(out)), ("baseline", Proposal.field(request, "baseline")), ("elapsed_ms", Json.Int(ended - started)), ("behavioral_review", Json.Str("pending")), ("accepted", Json.Bool(false)), ("measurement", Json.remove(Json.remove(measured, "reply"), "response"))])
     _ <- IO.println(Models.text(result))
+  } yield ()
+
+def saveMeasurement(root: String, request: Json, measured: Json): IO[Unit] =
+  for {
+    dir = Fs.join(root, "build/ide/generation")
+    _ <- Fs.mkdirs(dir)
+    _ <- Fs.write(Fs.join(dir, Str.concat(Proposal.str(request, "request"), ".json")), Models.text(Json.Obj([("request", request), ("measurement", measured)])))
+  } yield ()
+
+def exportCommand(root: String, objective: String, out: String): IO[Unit] =
+  for {
+    compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+    sources <- Proposal.own(root)
+    request <- Proposal.make(root, objective, List.map(sources, f => f._1), compiler, [])
+    exists <- Fs.exists(out)
+    _ <- Models.need(exists == 0, "request output file already exists")
+    _ <- Fs.mkdirs(Fs.dirname(out))
+    _ <- Fs.write(out, Models.text(request))
+    _ <- IO.println(out)
+  } yield ()
+
+def reviewCommand(root: String, file: String, candidate: String): IO[Unit] =
+  for {
+    raw <- Fs.read(file)
+    request <- Proposal.parse(raw, 1048576)
+    compiler <- Sys.getenv("SCUZZ_EXECUTABLE_SHA256")
+    _ <- Proposal.validate(root, request, compiler)
+    files <- Proposal.importFrom(root, candidate, request)
+    toml <- Fs.read(Fs.join(root, "scuzz.toml"))
+    sources <- Proposal.own(root)
+    own = List.map(sources, f => (Str.dropRight(Fs.basename(f._1), 6), f._2))
+    disk <- Drive.collectDeps(root, Manifest.parse(toml).deps, own)
+    replacement = List.map(files, f => (Str.dropRight(Fs.basename(f._1), 6), f._2))
+    changed = List.concat(List.filter(disk, f => !List.contains(List.map(replacement, r => r._1), f._1)), replacement)
+    _ <- Models.need(Proposal.setHash(disk) != Proposal.setHash(changed), "candidate source is unchanged")
+    scuzz <- Sys.getenv("SCUZZ_EXECUTABLE")
+    _ <- Diff.reviewSets(root, toml, disk, changed, 1, 32, scuzz, Proposal.str(request, "inputs"))
+    _ <- Proposal.validate(root, request, compiler)
+    current <- Proposal.importFrom(root, candidate, request)
+    _ <- Models.need(Proposal.setHash(current) == Proposal.setHash(files), "candidate changes during review")
+    report <- Fs.read(Fs.join(root, "build/ide/report.json"))
+    _ <- IO.println(report)
   } yield ()
 

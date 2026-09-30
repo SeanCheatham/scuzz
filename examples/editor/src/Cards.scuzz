@@ -56,6 +56,8 @@ def requestArchive(root: String, id: String): IO[Json] =
   for {
     _ <- need(Str.matches(id, "^[A-Za-z0-9_-]{1,128}$"), "unsafe request identity")
     _ <- inside(root, Fs.join(".scuzz/ide/requests", Str.concat(id, ".json")))
+    exists <- Fs.exists(requestArchivePath(root, id))
+    _ <- need(exists != 0, stalePublicationMessage())
     raw <- Fs.read(requestArchivePath(root, id))
     archive <- Proposal.parse(raw, 1067008)
     _ <- need(Proposal.keys(archive, ["v", "request", "session"]) && Proposal.version(archive) && Proposal.stringValue(Proposal.field(archive, "session")) && str(Proposal.field(archive, "request"), "request") == id, "invalid frozen request archive")
@@ -139,7 +141,7 @@ def executableIdentity(cli: String): IO[String] =
   } yield digest
 
 def requestContext(request: Json): String =
-  text(Json.Obj(List.map(["v", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "limits", "instructions"], key => (key, Proposal.field(request, key)))))
+  text(Json.Obj(List.map(["v", "kind", "objective", "baseline", "compiler", "inputs", "sources", "allowed", "checks", "limits", "instructions"], key => (key, Proposal.field(request, key)))))
 
 def sessionContext(root: String): IO[String] =
   for {
@@ -161,7 +163,7 @@ def inputs(root: String, request: Json): IO[List[(String, String)]] =
     cli <- compilerIdentity()
     _ <- Proposal.validate(root, request, cli)
     toml <- Fs.read(Fs.join(root, "scuzz.toml"))
-    host <- if (Manifest.parse(toml).hasUi) Drive.uiHostExe().flatMap(exe => executableIdentity(exe)) else IO.pure(cli)
+    host <- if (Manifest.parse(toml).hasUi) Main.scuzzCli().flatMap(scuzz => Drive.uiHostExe(scuzz)).flatMap(exe => need(exe != "", "UI review host is unavailable").flatMap(_ => executableIdentity(exe))) else IO.pure(cli)
   } yield List.concat(files, [("compiler", compiler), ("review-compiler", cli), ("review-host", host), ("request-context", requestContext(request)), ("session-context", session), ("objective", str(request, "objective")), ("limits", "files=3;source=65536;review=idle,seeds,corpus;search=32;seed=1")])
 
 def storage(root: String): String =
@@ -262,7 +264,8 @@ def complete(root: String, c: Json, raw: String): IO[Json] =
     now <- Clock.monotonic()
     observed <- outcome(root, c, evidence)
     hashes <- evidenceHashes(root, c, evidence)
-    out = Json.set(Json.set(Json.set(Json.set(Json.set(Json.set(c, "evidence_files", pairsJson(hashes)), "outcome", Json.Str(observed)), "status", Json.Str(if (List.isEmpty(items)) "excluded" else "ready")), "evidence", evidence), "ready", Json.Int(now)), "question", question)
+    readyCard = Json.set(Json.set(Json.set(Json.set(Json.set(Json.set(c, "evidence_files", pairsJson(hashes)), "outcome", Json.Str(observed)), "status", Json.Str(if (List.isEmpty(items)) "excluded" else "ready")), "evidence", evidence), "ready", Json.Int(now)), "question", question)
+    out = if (List.nonEmpty(items)) readyCard else Json.set(Json.set(readyCard, "exclusion", Json.Str("no-observed-difference")), "feedback_time", Json.Int(now))
     _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(out))
     _ <- if (List.nonEmpty(items)) IO.pure(()) else Fs.write(recordPath(root, str(c, "id")), text(Json.Obj([("card", Json.Str(str(c, "id"))), ("decision", Json.Str("no-observed-difference")), ("kind", Json.Str("automatic")), ("evidence_status", Json.Str("excluded")), ("evidence", evidence), ("time", Json.Int(now)), ("writes", Json.Arr([]))])))
   } yield out
@@ -296,11 +299,12 @@ def known(root: String, context: String): IO[List[Json]] =
   raw <- readOptional(Fs.join(cardDir(root, id), "card.json"))
   c = LspClient.parseJson(raw)
   metadata = str(c, "id") == id && setHash(pairs(Proposal.field(c, "inputs"))) == context && Str.matches(str(c, "b"), "^[a-f0-9]{64}$")
-  duplicate = str(c, "status") == "excluded" && str(c, "exclusion") == "duplicate-source"
+  duplicate = str(c, "status") == "excluded" && List.contains(["duplicate-source", "unchanged-source"], str(c, "exclusion"))
+  rejected = str(c, "status") == "excluded" && str(c, "exclusion") == "candidate-failed" && str(c, "diagnostic") != ""
   complete = List.contains(["ready", "excluded"], str(c, "status")) && candidateReportPass(Proposal.field(c, "evidence")) && Str.matches(str(c, "outcome"), "^[a-f0-9]{64}$")
   valid <- if (metadata && complete) cachedEvidence(root, c) else IO.pure(false)
   choiceText <- if (metadata && complete && !valid) readOptional(recordPath(root, id)).flatMap(choice => if (!Str.isEmpty(choice)) IO.pure(choice) else readOptional(recordPath(root, Str.concat("accept-", id)))) else IO.pure("")
-} yield if (!metadata || !duplicate && !valid && Str.isEmpty(choiceText)) Json.Null() else if (duplicate || valid) c else Json.set(c, "outcome", Json.Null())).handleErrorWith(_ => IO.pure(Json.Null())))
+} yield if (!metadata || !duplicate && !rejected && !valid && Str.isEmpty(choiceText)) Json.Null() else if (duplicate || rejected || valid) c else Json.set(c, "outcome", Json.Null())).handleErrorWith(_ => IO.pure(Json.Null())))
   } yield List.filter(cards, c => !Json.isNull(c))
 
 def seenKeys(cards: List[Json]): List[String] =
@@ -319,9 +323,9 @@ def propsOf(c: Json): List[(String, String)] =
 def automatic(root: String, c: Json, reason: String): IO[Unit] =
   for {
     now <- Clock.monotonic()
-    excluded = Json.set(Json.set(c, "status", Json.Str("excluded")), "exclusion", Json.Str(reason))
+    excluded = Json.set(Json.set(Json.set(c, "status", Json.Str("excluded")), "exclusion", Json.Str(reason)), "feedback_time", Json.Int(now))
     _ <- Fs.write(Fs.join(cardDir(root, str(c, "id")), "card.json"), text(excluded))
-    entry = Json.Obj([("v", Json.Int(1)), ("card", Proposal.field(c, "id")), ("proposal", Proposal.field(c, "proposal")), ("kind", Json.Str("automatic")), ("decision", Json.Str(reason)), ("objective", Proposal.field(c, "objective")), ("a", Proposal.field(c, "a")), ("b", Proposal.field(c, "b")), ("inputs", Proposal.field(c, "inputs")), ("request", Proposal.field(c, "request")), ("evidence_status", Json.Str("excluded")), ("evidence", Proposal.field(c, "evidence")), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
+    entry = Json.Obj([("v", Json.Int(1)), ("card", Proposal.field(c, "id")), ("proposal", Proposal.field(c, "proposal")), ("kind", Json.Str("automatic")), ("decision", Json.Str(reason)), ("diagnostic", Proposal.field(c, "diagnostic")), ("objective", Proposal.field(c, "objective")), ("a", Proposal.field(c, "a")), ("b", Proposal.field(c, "b")), ("inputs", Proposal.field(c, "inputs")), ("request", Proposal.field(c, "request")), ("evidence_status", Json.Str("excluded")), ("evidence", Proposal.field(c, "evidence")), ("time", Json.Int(now)), ("writes", Json.Arr([]))])
     _ <- Fs.write(recordPath(root, str(c, "id")), text(entry))
   } yield ()
 

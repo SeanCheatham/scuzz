@@ -1,3 +1,3 @@
 [fuzz]
 schedule_seed = "2"
-events = ["tap choicechip:Review", "drive addProposal a1", "tap outlined:Proposals"]
+events = ["tap choicechip:Review", "drive addProposal a1", "tap choicechip:Review", "tap choicechip:More evidence", "tap outlined:Proposals"]
