@@ -999,11 +999,8 @@ def temporaryTuple(n: Int): (String, Int, List[Int]) =
   (Str.concat("value=", Str.fromInt(n)), n, [n, n + 1])
 
 def temporaryTupleFields(): IO[Unit] =
-  for {
-    _ <- IO.pure(temporaryTuple(7)._1.require(s => s == "value=7"))
-    _ <- IO.pure(temporaryTuple(7)._2.require(n => n == 7))
-    _ <- IO.pure(temporaryTuple(7)._3.require(ns => ns == [7, 8]))
-  } yield ()
+  if (temporaryTuple(7)._1 == "value=7" && temporaryTuple(7)._2 == 7 && temporaryTuple(7)._3 == [7, 8]) IO.pure(()) else IO.fail("temporary tuple fields differ")
+
 
 def httpTuplePayload(): IO[Unit] =
   for {

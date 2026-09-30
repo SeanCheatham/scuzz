@@ -123,7 +123,7 @@ def queueUpdate(ds: DeckS, update: QueueS => QueueS): IO[Unit] =
 
 def queueStatus(ds: DeckS, q: QueueS): Unit =
   for {
-    _ = Signal.set(ds.queueStatus, if (q.retry) Str.concat("Preparation failed. ", Signal.get(ds.session.reviewStatus)) else if (!q.enabled) "Preparation is paused." else Str.concat("Ready cards: ", Str.concat(Str.fromInt(List.len(q.cards)), Str.concat(" / 2; reserved: ", Str.concat(Str.fromInt(List.len(q.slots)), if (Signal.get(ds.session.count) >= 8 && q.automatic) "; request budget exhausted" else "")))))
+    _ = Signal.set(ds.queueStatus, if (q.retry) Str.concat("Preparation failed. Retry preparation explicitly. ", Signal.get(ds.session.reviewStatus)) else if (!q.enabled) "Preparation is paused." else Str.concat("Ready cards: ", Str.concat(Str.fromInt(List.len(q.cards)), Str.concat(" / 2; reserved: ", Str.concat(Str.fromInt(List.len(q.slots)), if (Signal.get(ds.session.count) >= 8 && q.automatic) "; request budget exhausted" else "")))))
     _ = if (q.enabled && q.automatic && !q.retry && Signal.get(ds.session.count) >= 8 && List.isEmpty(q.cards) && List.isEmpty(q.slots)) Signal.set(ds.session.status, "The 8-request limit is reached. No comparison is ready.") else ()
   } yield ()
 
