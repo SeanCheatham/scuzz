@@ -6984,6 +6984,16 @@ int sz_view_collect_text_fields(SzView *root, SzView **out, int cap) {
   return collect_text_fields_node(root, out, cap, 0);
 }
 
+SzView *sz_view_first_editor(SzView *root) {
+  if (!root) return NULL;
+  if (root->kind == SZ_VIEW_EDITOR) return root;
+  for (int i = 0; i < root->child_count; i++) {
+    SzView *editor = sz_view_first_editor(root->children[i]);
+    if (editor) return editor;
+  }
+  return NULL;
+}
+
 static int collect_editors_node(SzView *v, SzView **out, int cap, int n) {
   int i;
   if (!v || !view_is_shown(v) || n >= cap)

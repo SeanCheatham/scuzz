@@ -238,7 +238,7 @@ One `*.scuzz_scenario` file per project that uses scenarios. Multiple named scen
 
 Scuzz Style is the default UI design language. Use warm paper, dark text, square controls, and clear borders. Use yellow for primary actions. Use dark rust for accent text. Headless, Desktop, and Mobile use the same paint path. Color ratios do not prove full accessibility conformance.
 
-`View.indexBook` groups named pages around a persistent index. Index Book stays a kit. The Docs walkthrough does not use it. The walkthrough uses `View.tabs` as a progress strip. Check and Search nest a second `View.tabs` for `Main.scuzz` and `count.scuzz_verify`. Nested local tabs do not change `#stage=id`. The editor uses unnumbered landmarks. It does not paint Index Book chapter numbers.
+`View.indexBook` groups named pages around a persistent index. Index Book stays a kit. The Docs walkthrough does not use it. The walkthrough uses `View.tabs` as a progress strip. Check and Search nest a second `View.tabs` for `Main.scuzz` and `count.scuzz_verify`. Nested local tabs do not change `#stage=id`. The editor uses unnumbered landmarks. Source marks update while the source editor is hidden. It does not paint Index Book chapter numbers.
 
 **Flutter-style constraints** (constraints down, sizes up). Nested constructors only. Do not drift into CSS-ish ad-hoc rules. Diagnose through structural dumps + `*.scuzz_verify` + `.require`. Widget catalog: run `scuzz docs kits`. GUI catalog: run `scuzz docs gui`.
 

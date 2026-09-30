@@ -1477,10 +1477,10 @@ if os.uname().sysname == "Linux":
         assert "Ready cards: 2 / 2; reserved: 0" in json.dumps(read_ui(root))
         assert not any(json.loads(path.read_text()).get("proposal") == "p-unread" for path in (root / ".scuzz/ide/cards").glob("*/card.json"))
         start = time.monotonic()
-        write_ops(root, [{"op": "tap", "id": "outlined:Randomize"}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Randomize"}])
         await_state(lambda: next(v["value"] for v in read_ui(root)["signals"] if v.get("name") == "deckArmed") != c["id"])
         card_ms = (time.monotonic() - start) * 1000
-        write_ops(root, [{"op": "tap", "id": "outlined:Randomize"}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Randomize"}])
         await_state(lambda: next(v["value"] for v in read_ui(root)["signals"] if v.get("name") == "deckArmed") == c["id"])
         print("Counter cached card navigation:", round(card_ms, 1), "ms; 250 ms target:", "met" if card_ms < 250 else "unmet")
         # Navigation uses the loaded evidence while its files are unavailable.
@@ -1517,7 +1517,7 @@ if os.uname().sysname == "Linux":
         dirty = next(v["value"] for v in ui["signals"] if v.get("name") == "buf")
         assert dirty == original + "x", dirty
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
-        write_ops(root, [{"op": "tap", "id": "button:" + lane}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:Question"}, {"op": "tap", "id": "button:" + lane}])
         def refused_dirty():
             ui = read_ui(root)
             return any(v.get("name") == "deltaStatus" and "dirty buffer:" in json.dumps(v.get("value")) for v in ui.get("signals", []))
@@ -1548,7 +1548,7 @@ if os.uname().sysname == "Linux":
         write_ops(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Proposals"}])
         c = await_state(ready_card)
         if c["id"] != previous_card["id"]:
-            write_ops(root, [{"op": "tap", "id": "outlined:Randomize"}])
+            write_ops(root, [{"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Randomize"}])
             c = await_state(lambda: (candidate if (candidate := ready_card()) and candidate["id"] == previous_card["id"] else None))
         assert "Ready cards: 2 / 2; reserved: 0" in json.dumps(read_ui(root))
         assert successor_dir.is_dir() and unread.is_dir()
@@ -1558,7 +1558,7 @@ if os.uname().sysname == "Linux":
         assert (root / "build/ide/report.json").read_bytes() == previous_report
         print("Counter warm card readiness:", round((time.monotonic() - review_wall_start) * 1000, 1), "ms wall; saved card identity and evidence reused")
         lane = "Choose left" if c["flip"] == 1 else "Choose right"
-        write_ops(root, [{"op": "tap", "id": "button:" + lane}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:Question"}, {"op": "tap", "id": "button:" + lane}])
         journal = root / ".scuzz/ide/journal.json"
         await_state(lambda: journal.exists() and journal.read_text() and (root / "src/Main.scuzz").read_text() == proposed)
         assert not (root / "src/Other.scuzz").exists()
@@ -1602,7 +1602,9 @@ if os.uname().sysname == "Linux":
             idle = any(v.get("name") == "deckBusy" and v.get("value") == 0 for v in ui["signals"])
             return idle and len(list((root / ".scuzz/ide/records").glob("*.json"))) == 3 and any(v.get("name") == "buf" and v.get("value") == proposed for v in ui["signals"])
         await_state(accepted_clean)
-        write_ops(root, [{"op": "tap", "id": "outlined:Check"}])
+        write_ops(root, [{"op": "tap", "id": "choicechip:Verify"}, {"op": "tap", "id": "outlined:Check"}])
+        await_state(lambda: any(v.get("name") == "checkedSource" and v.get("value") == proposed for v in read_ui(root)["signals"]))
+        write_ops(root, [{"op": "tap", "id": "choicechip:Develop"}, {"op": "tap", "id": "choicechip:Code"}])
         def checked_acceptance():
             ui = read_ui(root)
             checked = any(v.get("name") == "checkedSource" and v.get("value") == proposed for v in ui["signals"])

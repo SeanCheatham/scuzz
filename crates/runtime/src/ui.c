@@ -2278,9 +2278,15 @@ static void *thunk_editor_caret(void *env) {
 
 SzIo *sz_lang_ui_editor_caret(void) { return sz_io_delay(thunk_editor_caret, NULL); }
 
+static SzView *live_annotation_editor(void) {
+  SzView *editor = live_first_editor();
+  if (editor || !g_live_session) return editor;
+  return sz_view_first_editor(g_live_session->root);
+}
+
 static void *thunk_set_editor_diagnostics(void *env) {
   SzList *marks = (SzList *)env;
-  SzView *ed = live_first_editor();
+  SzView *ed = live_annotation_editor();
   int n;
   int i;
   int *lines;
@@ -2323,7 +2329,7 @@ SzIo *sz_lang_ui_set_editor_diagnostics(SzList *marks) {
 
 static void *thunk_set_editor_tokens(void *env) {
   SzList *data = (SzList *)env;
-  SzView *ed = live_first_editor();
+  SzView *ed = live_annotation_editor();
   int n;
   int i;
   int *vals;
@@ -2356,7 +2362,7 @@ SzIo *sz_lang_ui_set_editor_tokens(SzList *data) {
 
 static void *thunk_set_editor_inlays(void *env) {
   SzList *hints = (SzList *)env;
-  SzView *ed = live_first_editor();
+  SzView *ed = live_annotation_editor();
   int n;
   int i;
   int *lines;
@@ -2406,7 +2412,7 @@ SzIo *sz_lang_ui_set_editor_inlays(SzList *hints) {
 
 static void *thunk_set_editor_folds(void *env) {
   SzList *ranges = (SzList *)env;
-  SzView *ed = live_first_editor();
+  SzView *ed = live_annotation_editor();
   int n;
   int i;
   int *starts;

@@ -15549,6 +15549,43 @@ static void test_alloc_each_pump_flat(void) {
   sz_signal_list_free(items);
 }
 
+static void test_hidden_editor_marks(void) {
+  SzSignalStr *buffer = sz_signal_str("abc");
+  SzSignalInt *shown = sz_signal_int(0);
+  SzView *editor = sz_view_editor(buffer);
+  SzView *root = sz_view_show_when(shown, 1, editor);
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *visible[1];
+  SzList *data = NULL;
+  int values[] = {0, 0, 1, 8, 0};
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 120;
+  cfg.scale = 1;
+  session = sz_ui_mount(&cfg, root);
+  assert(session && sz_ui_pump_sync(session));
+  assert(sz_view_collect_editors(root, visible, 1) == 0);
+  for (int i = 4; i >= 0; i--) {
+    void *value = sz_box_i64(values[i]);
+    SzList *next = sz_list_cons(value, data);
+    sz_release(value);
+    sz_release(data);
+    data = next;
+  }
+  assert(sz_io_unsafe_run(sz_lang_ui_set_editor_tokens(data)).ok);
+  sz_release(data);
+  assert(sz_view_editor_token_count(editor) == 1);
+  sz_signal_int_set(shown, 1);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_collect_editors(root, visible, 1) == 1);
+  assert(visible[0] == editor && sz_view_editor_token_count(editor) == 1);
+  sz_ui_unmount(session);
+  sz_signal_int_free(shown);
+  sz_signal_str_free(buffer);
+}
+
 static void test_view_editor(void) {
   SzSignalStr *buf, *field_sig;
   SzView *root, *ed, *field, *btn;
@@ -17840,6 +17877,7 @@ int main(int argc, char **argv) {
   test_signal_list_mixed_kinds();
   test_property_replay_str_list();
   test_text_field_edit();
+  test_hidden_editor_marks();
   test_view_editor();
   test_view_editor_viewport();
   test_view_editor_undo_gutter();
