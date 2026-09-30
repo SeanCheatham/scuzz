@@ -1001,7 +1001,6 @@ def temporaryTuple(n: Int): (String, Int, List[Int]) =
 def temporaryTupleFields(): IO[Unit] =
   if (temporaryTuple(7)._1 == "value=7" && temporaryTuple(7)._2 == 7 && temporaryTuple(7)._3 == [7, 8]) IO.pure(()) else IO.fail("temporary tuple fields differ")
 
-
 def httpTuplePayload(): IO[Unit] =
   for {
     result <- IO.attempt(IO.pure((200, Map.set(Map.empty(), "type", "json"), "body")))
