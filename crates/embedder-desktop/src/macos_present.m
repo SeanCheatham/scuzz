@@ -605,6 +605,7 @@ static int ensure_window_on_main(const char *title, int width, int height) {
   [g_win setContentView:g_content];
   [g_win setAcceptsMouseMovedEvents:YES];
   [g_win makeKeyAndOrderFront:nil];
+  [NSApp activateIgnoringOtherApps:YES];
 
   g_w = width;
   g_h = height;
