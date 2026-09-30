@@ -15,13 +15,13 @@ app_alive() {
 }
 
 stop_app() {
-  if [ -n "$BUNDLE" ]; then
-    xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
-  fi
   if [ -n "$CONSOLE" ]; then
     kill "$CONSOLE" 2>/dev/null || true
     wait "$CONSOLE" 2>/dev/null || true
     CONSOLE=""
+  fi
+  if [ -n "$BUNDLE" ]; then
+    xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
   fi
   n=0
   while app_alive && [ "$n" -lt 100 ]; do
@@ -48,7 +48,6 @@ launch() {
   BUNDLE="$next_bundle"
   echo "Launch $BUNDLE."
   (
-    result=0
     export SIMCTL_CHILD_SCUZZ_UI_DEBUG_DUMP="$OUT/debug.json"
     export SIMCTL_CHILD_SCUZZ_UI_RECORD="$OUT/record.json"
     export SIMCTL_CHILD_SCUZZ_UI_INJECT="$OUT/inject.json"
@@ -56,8 +55,7 @@ launch() {
       export SIMCTL_CHILD_SCUZZ_UI_RELOAD_STAMP="$OUT/reload.stamp"
       export SIMCTL_CHILD_SCUZZ_UI_RELOAD_CODE="$OUT/reload.dylib"
     fi
-    xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" || result=$?
-    echo "App output session ends (status $result). Enter r to restart or q to stop."
+    exec xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE"
   ) &
   CONSOLE=$!
 }

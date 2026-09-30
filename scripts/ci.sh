@@ -1579,7 +1579,7 @@ if os.uname().sysname == "Linux":
     shutil.rmtree(root / "build")
     batch(root, [])
     assert len(list((root / ".scuzz/ide/records").glob("*.json"))) == 1
-    batch(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "choicechip:More evidence"}, {"op": "tap", "id": "outlined:Undo"}])
+    batch(root, [{"op": "tap", "id": "choicechip:Review"}, {"op": "tap", "id": "outlined:Undo"}])
     assert (root / "src/Main.scuzz").read_text() == original
     assert any(v.get("name") == "buf" and v.get("value") == original for v in read_ui(root)["signals"])
     assert not (root / "src/Other.scuzz").exists()
