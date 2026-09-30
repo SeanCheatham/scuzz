@@ -206,8 +206,13 @@ cat > "$stage_dir/scuzz.toml" <<'EOF'
 name = "compiler"
 
 [dependencies]
-compiler = { path = "../../examples/compiler" }
+syntax = { path = "../../examples/syntax" }
 EOF
+for source in "$ROOT/examples/compiler/src/"*.scuzz; do
+  if [ "$(basename "$source")" != Eval.scuzz ]; then
+    ln -s "$source" "$stage_dir/src/$(basename "$source")"
+  fi
+done
 cat > "$stage_dir/src/Bootstrap.scuzz" <<'EOF'
 @main def main: IO[Unit] =
   Fs.mkdirs("examples/cli/build").flatMap(_ => Drive.emitDir("examples/cli", "examples/cli/build", true))
