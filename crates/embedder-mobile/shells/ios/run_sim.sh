@@ -10,23 +10,31 @@ CONSOLE=""
 BUNDLE=""
 APP_NAME=""
 
+app_pids() {
+  [ -n "$APP_NAME" ] && pgrep -f "/${DEVICE}/.*/${APP_NAME}.app/${APP_NAME}([[:space:]]|$)" || true
+}
+
 app_alive() {
-  [ -n "$APP_NAME" ] && pgrep -f "/${APP_NAME}.app/${APP_NAME}" >/dev/null
+  [ -n "$(app_pids)" ]
 }
 
 stop_app() {
   if [ -n "$CONSOLE" ]; then
-    kill "$CONSOLE" 2>/dev/null || true
+    kill -KILL "$CONSOLE" 2>/dev/null || true
     wait "$CONSOLE" 2>/dev/null || true
     CONSOLE=""
   fi
-  if [ -n "$BUNDLE" ]; then
-    xcrun simctl terminate "$DEVICE" "$BUNDLE" >/dev/null 2>&1 || true
-  fi
+  local pid n
+  for pid in $(app_pids); do
+    kill "$pid" 2>/dev/null || true
+  done
   n=0
-  while app_alive && [ "$n" -lt 100 ]; do
+  while app_alive && [ "$n" -lt 50 ]; do
     n=$((n + 1))
     sleep 0.1
+  done
+  for pid in $(app_pids); do
+    kill -KILL "$pid" 2>/dev/null || true
   done
 }
 
