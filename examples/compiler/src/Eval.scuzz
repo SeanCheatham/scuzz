@@ -36,7 +36,7 @@ record EvStep(e: Expr, env: EvEnv)
 
 record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
-record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Signal[Value]], log: List[Ref[Value]], ui: List[UiCall => IO[Value]])
+record EvProg(funs: Ftab, ens: List[En], main: Expr, mainMod: String, files: List[(String, String)], idx: Map[String, LineIndex], ctx: List[Ref[Value]], kits: Set[String], kpars: Map[String, Int], enNames: Set[String], caseEn: Map[String, String], locs: Map[String, Map[String, String]], ctorFields: Map[String, List[Param]], host: List[Ref[Value]], sig: List[Signal[Value]], log: List[Ref[Value]], ui: List[UiCall => IO[Value]], funMods: Map[String, Map[String, List[Fun]]])
 
 import Manifest.Man
 import Parse.Expr
@@ -81,8 +81,28 @@ def noRefs(): List[Ref[Value]] =
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
-    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => EvProg(Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases))), Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigSlots(), noRefs(), noUi())
+    case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => for {
+  funs = Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases)))
+} yield EvProg(funs, Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigSlots(), noRefs(), noUi(), funIndex(funs.list, Map.empty()))
   }
+
+def funIndex(ds: List[Fun], acc: Map[String, Map[String, List[Fun]]]): Map[String, Map[String, List[Fun]]] =
+  if (List.isEmpty(ds)) acc else funIndex(List.tail(ds), funIndexAdd(acc, List.at(ds, 0)))
+
+def funIndexAdd(acc: Map[String, Map[String, List[Fun]]], d: Fun): Map[String, Map[String, List[Fun]]] =
+  Map.set(acc, d.mod, Map.set(Map.getOrElse(acc, d.mod, Map.empty()), d.name, List.append(funIndexGet(acc, d.mod, d.name), d)))
+
+def funIndexGet(index: Map[String, Map[String, List[Fun]]], mod: String, name: String): List[Fun] =
+  Map.getOrElse(Map.getOrElse(index, mod, Map.empty()), name, []: List[Fun])
+
+def funMod(p: EvProg, mod: String, name: String): List[Fun] =
+  funIndexGet(p.funMods, mod, name)
+
+def funPrefer(p: EvProg, mod: String, name: String): List[Fun] =
+  if (mod == "") Check.ftabGet(p.funs.tab, name) else funPreferHit(funMod(p, mod, name), p, name)
+
+def funPreferHit(hit: List[Fun], p: EvProg, name: String): List[Fun] =
+  if (List.isEmpty(hit)) Check.ftabGet(p.funs.tab, name) else hit
 
 def kitSet(names: List[String], acc: Set[String]): Set[String] =
   if (List.isEmpty(names)) acc else kitSet(List.tail(names), Set.add(acc, List.at(names, 0)))
@@ -127,7 +147,7 @@ def ctorFieldCase(en: String, c: String, all: List[En], acc: Map[String, List[Pa
   Map.set(Map.set(acc, c, Check.constructorFields(all, c)), Str.concat(en, Str.concat(".", c)), Check.constructorFields(all, Str.concat(en, Str.concat(".", c))))
 
 def callPure(p: EvProg, mod: String, name: String, args: List[Value]): Value =
-  callPureHit(Check.ftabGetMod(p.funs.tab, mod, name), mod, name, args, p)
+  callPureHit(funMod(p, mod, name), mod, name, args, p)
 
 def callPureHit(hit: List[Fun], mod: String, name: String, args: List[Value], p: EvProg): Value =
   if (List.isEmpty(hit)) Value.VErr(Str.concat("eval: unknown function ", Str.concat(mod, Str.concat(".", name)))) else step(defStepVals(List.at(hit, 0), args, p), p)
@@ -172,10 +192,10 @@ def campSearchOra(p: EvProg, name: String, hi: Int): String =
   campSearchOraAt(p, name, hi, oraHome(p, name))
 
 def oraHome(p: EvProg, name: String): String =
-  if (List.isEmpty(Check.ftabGetMod(p.funs.tab, "__verify", name))) "Main" else "__verify"
+  if (List.isEmpty(funMod(p, "__verify", name))) "Main" else "__verify"
 
 def campSearchOraAt(p: EvProg, name: String, hi: Int, mod: String): String =
-  campSearchOraHit(Check.ftabGetMod(p.funs.tab, mod, name), p, name, hi, mod)
+  campSearchOraHit(funMod(p, mod, name), p, name, hi, mod)
 
 def campSearchOraHit(hit: List[Fun], p: EvProg, name: String, hi: Int, mod: String): String =
   if (List.isEmpty(hit)) Str.concat("no oracle ", name) else if (List.at(hit, 0).ora) campSearchGo(p, name, 0, hi, mod) else Str.concat(name, " is not an oracle")
@@ -445,7 +465,7 @@ def isBound(env: EvEnv, name: String): Bool =
 def varValue(name: String, env: EvEnv, p: EvProg, off: Int): Value =
   lookupVars(env.vars, name) match {
     case Some(v) => v
-    case None => varGlobal(Check.findFunPrefer2(p.funs, name, env.mod), name, env, p, off)
+    case None => varGlobal(funPrefer(p, env.mod, name), name, env, p, off)
   }
 
 def varGlobal(hit: List[Fun], name: String, env: EvEnv, p: EvProg, off: Int): Value =
@@ -530,7 +550,7 @@ def callCase(en: String, f: String, args: List[Expr], env: EvEnv, p: EvProg, off
 def callLocal(bound: Option[Value], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   bound match {
     case Some(fv) => applyStep(fv, stepAll(args, env, p), env, p, off)
-    case None => callDef(Check.findFunPrefer2(p.funs, f, env.mod), f, args, env, p, off)
+    case None => callDef(funPrefer(p, env.mod, f), f, args, env, p, off)
   }
 
 def callDef(hit: List[Fun], f: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
@@ -799,7 +819,7 @@ def bindArgPat(bound: Option[List[(String, Value)]], cenv: EvEnv, body: Expr, en
   }
 
 def applyFun(name: String, mod: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (isKit(p, name)) valueStep(kitCall(name, vals, env, p, off)) else applyFunHit(Check.ftabGetMod(p.funs.tab, mod, name), name, vals, env, p, off)
+  if (isKit(p, name)) valueStep(kitCall(name, vals, env, p, off)) else applyFunHit(funMod(p, mod, name), name, vals, env, p, off)
 
 def applyFunHit(hit: List[Fun], name: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): EvStep =
   if (List.isEmpty(hit)) valueStep(errAt(Str.concat("unknown function ", name), env, p, off)) else defStepVals(List.at(hit, 0), spreadArgs(List.len(List.at(hit, 0).params), vals), p)
@@ -826,13 +846,13 @@ def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg
   }
 
 def methodQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (Check.recordModuleCtor(p.ens, en, name)) ctorStep(name, name, args, env, p, off) else if (en == name && Check.recordNamed(p.ens, name)) valueStep(errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off)) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(Check.ftabGetMod(p.funs.tab, en, name), en, name, args, env, p, off)
+  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (Check.recordModuleCtor(p.ens, en, name)) ctorStep(name, name, args, env, p, off) else if (en == name && Check.recordNamed(p.ens, name)) valueStep(errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off)) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(funMod(p, en, name), en, name, args, env, p, off)
 
 def methodQualDef(hit: List[Fun], en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   if (List.isEmpty(hit)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else defStep(List.at(hit, 0), args, env, p, off)
 
 def methodValue(rv: Value, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (isErr(rv)) valueStep(rv) else if (name == "require") valueStep(rv) else if (name == "copy" && isCon(rv)) valueStep(copyValue(rv, args, env, p, off)) else if (name == "handleErrorWith" && isIo(rv)) valueStep(ioHandle(rv, stepAll(args, env, p), env, p, off)) else if (name == "flatMap" && isIo(rv)) valueStep(ioBind(rv, stepAll(args, env, p), env, p, off, true)) else if (name == "map" && isIo(rv)) valueStep(ioBind(rv, stepAll(args, env, p), env, p, off, false)) else methodUser(rv, Check.ftabGetMod(p.funs.tab, tyHeadOf(rv), name), name, args, env, p, off)
+  if (isErr(rv)) valueStep(rv) else if (name == "require") valueStep(rv) else if (name == "copy" && isCon(rv)) valueStep(copyValue(rv, args, env, p, off)) else if (name == "handleErrorWith" && isIo(rv)) valueStep(ioHandle(rv, stepAll(args, env, p), env, p, off)) else if (name == "flatMap" && isIo(rv)) valueStep(ioBind(rv, stepAll(args, env, p), env, p, off, true)) else if (name == "map" && isIo(rv)) valueStep(ioBind(rv, stepAll(args, env, p), env, p, off, false)) else methodUser(rv, funMod(p, tyHeadOf(rv), name), name, args, env, p, off)
 
 def isCon(v: Value): Bool =
   v match {
@@ -914,7 +934,7 @@ def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: In
 
 def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   recv match {
-    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else if (!isBound(env, en) && isKit(p, Str.concat(en, Str.concat(".", name)))) Value.VFun(Str.concat(en, Str.concat(".", name)), "") else if (!isBound(env, en) && !List.isEmpty(Check.ftabGetMod(p.funs.tab, en, name))) Value.VFun(name, en) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
+    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else if (!isBound(env, en) && isKit(p, Str.concat(en, Str.concat(".", name)))) Value.VFun(Str.concat(en, Str.concat(".", name)), "") else if (!isBound(env, en) && !List.isEmpty(funMod(p, en, name))) Value.VFun(name, en) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
     case _ => fieldOf(step(EvStep(recv, env), p), name, env, p, off)
   }
 
@@ -2393,7 +2413,10 @@ def scenarioCtx(p: EvProg, env: EvEnv, off: Int): Value =
   if (List.isEmpty(p.ctx)) errAt("Scenario.context outside scuzz fuzz", env, p, off) else Property.force(Ref.get(List.at(p.ctx, 0)))
 
 def probe(files: List[(String, String)]): IO[Unit] =
-  Ref.of(Value.VUnit).flatMap(ctx => probeServe(sigHideOn(withCtx(load(files), ctx)), ctx))
+  Ref.of(Value.VUnit).flatMap(ctx => probeStart(sigHideOn(withCtx(load(files), ctx)), ctx))
+
+def probeStart(p: EvProg, ctx: Ref[Value]): IO[Unit] =
+  IO.println("ready").flatMap(_ => probeServe(p, ctx))
 
 def probeServe(p: EvProg, ctx: Ref[Value]): IO[Unit] =
   Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else probeOnce(p, ctx).flatMap(code => IO.println(Str.fromInt(code)).flatMap(_ => probeServe(p, ctx))))
@@ -2405,13 +2428,13 @@ def probeExit(e: String): Int =
   if (Str.startsWith(e, "probe exit ")) Str.toInt(Str.drop(e, 11), 1) else 1
 
 def withCtx(p: EvProg, ctx: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.kpars, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log, p.ui)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, ctx :: noRefs(), p.kits, p.kpars, p.enNames, p.caseEn, funLocs(p.funs.list, p, Map.empty()), p.ctorFields, p.host, p.sig, p.log, p.ui, p.funMods)
 
 def withHost(p: EvProg, host: Ref[Value], pool: Signal[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log, p.ui)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, host :: noRefs(), pool :: List.tail(p.sig), p.log, p.ui, p.funMods)
 
 def withLog(p: EvProg, log: Ref[Value]): EvProg =
-  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs(), p.ui)
+  EvProg(p.funs, p.ens, p.main, p.mainMod, p.files, p.idx, p.ctx, p.kits, p.kpars, p.enNames, p.caseEn, p.locs, p.ctorFields, p.host, p.sig, log :: noRefs(), p.ui, p.funMods)
 
 def sigSlots(): List[Signal[Value]] =
   [Signal.makeN("$mirror", Value.VList(noVals())), Signal.makeN("$mirror", Value.VInt(0)), Signal.makeN("$mirror", Value.VList(noVals())), Signal.makeN("$mirror", Value.VBool(false))]
@@ -2435,7 +2458,7 @@ def probeMountLoad(p: EvProg, ctx: Ref[Value], host: Ref[Value], slot: Ref[List[
   probeMountArmed(sigHideOn(withHost(withCtx(p, ctx), host, List.at(p.sig, 0))), ctx, slot)
 
 def probeMountArmed(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]]): IO[Unit] =
-  sigTagWrite(p).flatMap(_ => probeServeUi(p, ctx, slot))
+  sigTagWrite(p).flatMap(_ => IO.println("ready").flatMap(_ => probeServeUi(p, ctx, slot)))
 
 def probeServeUi(p: EvProg, ctx: Ref[Value], slot: Ref[List[EvProg]]): IO[Unit] =
   Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else probeOnceUi(p, ctx, slot).flatMap(code => IO.println(Str.fromInt(code)).flatMap(_ => probeServeUi(p, ctx, slot))))
@@ -2496,7 +2519,7 @@ def hitStepIo(_u: Unit, io: IO[Unit]): IO[Unit] =
   io
 
 def probeSetup(p: EvProg, ctx: Ref[Value]): IO[Unit] =
-  if (List.isEmpty(Check.ftabGetMod(p.funs.tab, "__verify", "setup"))) IO.pure(()) else Fuzz.setup(IO.pure(()).flatMap(_ => evValue(callPure(p, "__verify", "setup", noVals()))).flatMap(v => Ref.set(ctx, v)))
+  if (List.isEmpty(funMod(p, "__verify", "setup"))) IO.pure(()) else Fuzz.setup(IO.pure(()).flatMap(_ => evValue(callPure(p, "__verify", "setup", noVals()))).flatMap(v => Ref.set(ctx, v)))
 
 def probeRegs(p: EvProg, ds: List[Fun]): IO[Unit] =
   if (List.isEmpty(ds)) IO.pure(()) else probeReg(p, List.at(ds, 0)).flatMap(_ => probeRegs(p, List.tail(ds)))
@@ -2560,7 +2583,7 @@ def evProbeFiles(files: List[(String, String)], human: String): IO[Unit] =
   if (human != "scuzz check ok") probeReject(human) else probe(files)
 
 def probeReject(human: String): IO[Unit] =
-  Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else IO.println("3").flatMap(_ => evFail(human)))
+  IO.println("3").flatMap(_ => evFail(human))
 
 def uiProbe(dir: String, slot: Ref[List[EvProg]], mount: Value => IO[Unit], ui: UiCall => IO[Value]): IO[Unit] =
   Fs.read(Drive.joinSlash(dir, "files.txt")).flatMap(list => evProbeRead(dir, Verify.linesOf(list), 0, Manifest.noPairs()).flatMap(files => uiProbeFiles(files, Check.humanFiles(files), slot, mount, ui)))

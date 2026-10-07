@@ -73,3 +73,6 @@ oracle evMatch(): Bool =
 oracle evKitsCovered(): Bool =
   Main.evKitsCovered()
 
+oracle evLookup(): Bool =
+  Main.evLookup()
+

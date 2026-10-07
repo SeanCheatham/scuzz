@@ -6,7 +6,7 @@ Edit this file when the order changes. Remove completed work. Keep only the next
 
 ## First: evaluator reliability and parity
 
-Reduce the measured compiler evaluator costs before local choice feedback. Separate server startup from probe execution. Correct the first-response timeout risk. Preserve exact timeline and claim comparisons for selected compiler and editor workloads. Keep probe deadlines, claims, corpus entries, and search scope. A compiled fallback does not prove evaluator parity.
+Reduce the remaining compiler evaluator costs before local choice feedback. Measure server startup and probe execution separately. Preserve exact timeline and claim comparisons for selected compiler and editor workloads. Keep probe deadlines, claims, corpus entries, and search scope. A compiled fallback does not prove evaluator parity.
 
 ## Primary arc: development through decisions
 
