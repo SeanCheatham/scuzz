@@ -5,3 +5,4 @@ description = "Kernel typechecker: JSON diagnostic oracles"
 
 [dependencies]
 compiler = { path = "../compiler" }
+cases = { path = "../compiler-cases" }

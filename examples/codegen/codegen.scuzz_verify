@@ -19,29 +19,29 @@ oracle irSum(): Bool =
 oracle irAdd(): Bool =
   Main.irDiff(Main.srcAdd(), Main.wantAdd())
 
-oracle irIdemHi(): Bool =
-  Main.irIdem(Main.srcHi())
+oracle irCheckedHi(): Bool =
+  Main.irChecked(Main.srcHi())
 
-oracle irIdemSum(): Bool =
-  Main.irIdem(Main.srcSum())
+oracle irCheckedSum(): Bool =
+  Main.irChecked(Main.srcSum())
 
-oracle irIdemAdd(): Bool =
-  Main.irIdem(Main.srcAdd())
+oracle irCheckedAdd(): Bool =
+  Main.irChecked(Main.srcAdd())
 
 oracle irHello(): Bool =
   Main.irDiff(Main.srcHello(), Main.wantHello())
 
-oracle irIdemHello(): Bool =
-  Main.irIdem(Main.srcHello())
+oracle irCheckedHello(): Bool =
+  Main.irChecked(Main.srcHello())
 
 oracle irFullHello(): Bool =
   Emit.emitFull(Main.srcHello()) == Str.concat(Emit.preamble(), Main.wantHello())
 
-oracle irIdemGenSeed(): Bool =
-  Main.irIdemGen(0)
+oracle generatedSeed(): Bool =
+  Main.irGenerated(0)
 
 oracle irGenerated(n: Int where n >= 0): Bool =
-  Main.irIdemGen(n)
+  Main.irGenerated(n)
 
 oracle reloadCaptureOrder(): Bool =
   Main.reloadCaptureOrder()

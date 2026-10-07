@@ -748,7 +748,7 @@ def parsePostDot(toks: Toks, e: Expr, i: Int): (Expr, Int) =
   parsePostDotName(e, _identOf(_at(toks, i)), toks, i + 1)
 
 def parsePostDotName(e: Expr, m: String, toks: Toks, i: Int): (Expr, Int) =
-  if (_is(toks, i, Tok.LParen)) parsePostDot2(e, m, parseCallArgs(toks, i)) else if (_is(toks, i, Tok.LBrace) && _is(toks, i + 1, Tok.Case)) parsePostDot2(e, m, parseBraceArg(toks, i)) else (Expr.EField(e, m, spanOff(e, _off(toks, i - 1))), i)
+  if (_is(toks, i, Tok.LParen) && !forBindAfter(toks, i)) parsePostDot2(e, m, parseCallArgs(toks, i)) else if (_is(toks, i, Tok.LBrace) && _is(toks, i + 1, Tok.Case)) parsePostDot2(e, m, parseBraceArg(toks, i)) else (Expr.EField(e, m, spanOff(e, _off(toks, i - 1))), i)
 
 def parseBraceArg(toks: Toks, i: Int): (List[Expr], Int) =
   parseBraceArg2(parseMatchLam(toks, i))

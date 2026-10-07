@@ -1,0 +1,130 @@
+def bounded(seed: Int): Int =
+  seed % 4096
+
+def family(seed: Int): Int =
+  bounded(seed) % 6
+
+def input(seed: Int): Int =
+  bounded(seed) / 6 % 17 - 8
+
+def depth(seed: Int): Int =
+  bounded(seed) / 102 % 3 + 1
+
+def number(n: Int): String =
+  if (n < 0) s"(0 - ${0 - n})" else Str.fromInt(n)
+
+def model(seed: Int, levels: Int, x: Int): Int =
+  if (levels == 0) x else for {
+  value = model(seed / 4, levels - 1, x)
+  amount = seed % 5 + 1
+} yield (seed % 4) match {
+  case 0 => value + amount
+  case 1 => value - amount
+  case 2 => if (value < 0) 0 - value else value
+  case _ => value * 2
+}
+
+def expression(seed: Int, levels: Int): String =
+  if (levels == 0) "x" else for {
+  inner = expression(seed / 4, levels - 1)
+  amount = Str.fromInt(seed % 5 + 1)
+} yield (seed % 4) match {
+  case 0 => s"($inner + $amount)"
+  case 1 => s"(for { value = $inner } yield value - $amount)"
+  case 2 => s"($inner match { case value if value < 0 => 0 - value case value => value })"
+  case _ => s"((value: Int) => value * 2)($inner)"
+}
+
+def value(seed: Int): Int =
+  model(bounded(seed) / 6, depth(seed), input(seed))
+
+def result(seed: Int): String =
+  family(seed) match {
+    case 0 => s"match:${value(seed)}"
+    case 1 => s"closure:${value(seed) + 3}"
+    case 2 => s"box:${value(seed)}:1"
+    case 3 => s"heap:${value(seed)}:${value(seed) + 1}"
+    case 4 => s"list:${value(seed) * 3 + 3}"
+    case _ => s"io:${value(seed)}"
+  }
+
+def output(seed: Int): String =
+  if (family(seed) == 5) Str.concat(result(seed), ":2") else result(seed)
+
+def body(seed: Int): String =
+  for {
+    expr = expression(bounded(seed) / 6, depth(seed))
+    prefix = """def calculate(x: Int): Int =
+  """
+    calculation = Str.concat(prefix, Str.concat(expr, """
+
+"""))
+    code = family(seed) match {
+  case 0 => "enum Packet:\n  case Wrap(value: Option[(Int, String)])\n  case Empty\n\ndef f(x: Int): String =\n  Packet.Wrap(Some((calculate(x), \"match\"))) match {\n    case Packet.Wrap(Some((n, label))) => s\"$label:$n\"\n    case _ => \"empty\"\n  }\n"
+  case 1 => "def f(x: Int): String =\n  for {\n    n = calculate(x)\n    label = \"closure\"\n    add = (offset: Int) => s\"$label:${n + offset}\"\n    alias = add\n  } yield alias(3)\n"
+  case 2 => "record Box[T](value: T)\n\ndef wrap[T](value: T): Box[T] =\n  Box(value)\n\ndef f(x: Int): String =\n  for {\n    box = wrap([s\"box:${calculate(x)}\", \"tail\"])\n    head :: tail = box.value\n    (text, size) = (head, List.len(tail))\n  } yield s\"$text:$size\"\n"
+  case 3 => "def pair(x: Int): (List[Int], String) =\n  (List.map([calculate(x), calculate(x) + 1], n => n), \"heap\")\n\ndef f(x: Int): String =\n  s\"${pair(x)._2}:${List.at(pair(x)._1, 0)}:${List.at(pair(x)._1, 1)}\"\n"
+  case 4 => "def sum(values: List[Int]): Int =\n  values match {\n    case head :: tail => head + sum(tail)\n    case [] => 0\n  }\n\ndef f(x: Int): String =\n  for {\n    n = calculate(x)\n    values = List.map([n, n + 1, n + 2], item => item)\n  } yield s\"list:${sum(values)}\"\n"
+  case _ => "def f(x: Int): String =\n  s\"io:${calculate(x)}\"\n"
+}
+    emit = if (family(seed) == 5) "\ndef emit(x: Int): IO[Unit] =\n  IO.pure((f(x), [x, x + 1])).flatMap(pair => IO.println(s\"${pair._1}:${List.len(pair._2)}\"))\n" else """
+def emit(x: Int): IO[Unit] =
+  IO.println(f(x))
+"""
+  } yield Str.concat(calculation, Str.concat(Str.replace(Str.replace(code, "Packet", s"Packet${bounded(seed)}"), "Box", s"Box${bounded(seed)}"), emit))
+
+def source(seed: Int): String =
+  Str.concat(body(seed), s"\n@main def main: IO[Unit] =\n  emit(${number(input(seed))})\n")
+
+def invalid(seed: Int): String =
+  Str.concat(source(seed), (seed % 4) match {
+  case 0 => """
+def invalid(): String =
+  1
+"""
+  case 1 => """
+def invalid[T](value: T): T =
+  1
+"""
+  case 2 => """
+def invalid(): Int =
+  List.len(1)
+"""
+  case _ => """
+def invalid(): Int =
+  ((text: String) => Str.len(text))(1)
+"""
+})
+
+def checked(seed: Int): Bool =
+  Check.check(source(seed)) == "[]"
+
+def rejected(seed: Int): Bool =
+  Str.contains(Check.check(invalid(seed)), "type error")
+
+def roundtrip(seed: Int): Bool =
+  for {
+    original = source(seed)
+    pretty = Parse.pretty(Parse.parse(Lexer.lex(original)))
+    again = Parse.pretty(Parse.parse(Lexer.lex(pretty)))
+    program = Eval.load([("Main", pretty)])
+    got = Eval.show(Eval.callPure(program, "Main", "f", [Value.VInt(input(seed))]))
+  } yield checked(seed) && pretty == again && Check.check(pretty) == "[]" && got == Eval.show(Value.VStr(result(seed)))
+
+def evaluated(seed: Int): Bool =
+  for {
+    program = Eval.load([("Main", source(seed))])
+    got = Eval.show(Eval.callPure(program, "Main", "f", [Value.VInt(input(seed))]))
+  } yield checked(seed) && got == Eval.show(Value.VStr(result(seed)))
+
+def caseSeeds(): List[Int] =
+  List.flatMap([0, 102, 204], level => List.flatMap([0, 48, 96], arg => List.map([0, 1, 2, 3, 4, 5], kind => level + arg + kind)))
+
+def exported(seed: Int): Json =
+  Json.Obj([("seed", Json.Int(seed)), ("family", Json.Int(family(seed))), ("input", Json.Int(input(seed))), ("body", Json.Str(body(seed))), ("source", Json.Str(source(seed))), ("invalid", Json.Str(invalid(seed))), ("result", Json.Str(result(seed))), ("output", Json.Str(output(seed)))])
+
+@main def main: IO[Unit] =
+  Json.stringify(Json.Arr(List.map(Cases.caseSeeds(), seed => Cases.exported(seed)))) match {
+    case Result.Ok(text) => IO.println(text)
+    case Result.Err(error) => IO.fail(error)
+  }

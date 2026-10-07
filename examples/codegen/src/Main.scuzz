@@ -91,19 +91,11 @@ def internOrder(): Bool =
 def irDiff(src: String, want: String): Bool =
   Emit.emit(src) == want
 
-def irIdem(src: String): Bool =
-  Emit.emit(src) == Emit.emit(src)
+def irChecked(src: String): Bool =
+  Check.check(src) == "[]" && !Str.isEmpty(Emit.emit(src))
 
-def genProg(n: Int): String =
-  Str.concat("""def f(x: Int): Int =
-  x + """, Str.concat(Str.fromInt(n % 8), """
-
-@main def main: IO[Unit] =
-  IO.println(Str.fromInt(f(1)))
-"""))
-
-def irIdemGen(n: Int where n >= 0): Bool =
-  irIdem(genProg(n))
+def irGenerated(n: Int where n >= 0): Bool =
+  Cases.checked(n) && Cases.evaluated(n) && Str.contains(Emit.emitFull(Cases.source(n)), "define i32 @main")
 
 def srcHello(): String =
   "@main def main: IO[Unit] =\n  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n"
@@ -348,8 +340,8 @@ def wantMod(): String =
 def irDiffFiles(files: List[(String, String)], want: String): Bool =
   Emit.emitFiles(files) == want
 
-def irIdemFiles(files: List[(String, String)]): Bool =
-  Emit.emitFiles(files) == Emit.emitFiles(files)
+def irCheckedFiles(files: List[(String, String)]): Bool =
+  Check.checkFiles(files) == "[]" && !Str.isEmpty(Emit.emitFiles(files))
 
 def srcNil(): String =
   """def take(xs: List[String]): Int =
@@ -537,16 +529,16 @@ def wantPure(): String =
   "@.str0 = private unnamed_addr constant [3 x i8] c\"hi\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:2:3\\00\", align 1\n\ndefine internal ptr @sz_cont_0(ptr %.closure.value, ptr %.closure.env) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %s = bitcast ptr %.closure.value to ptr\n  %c0_io = call ptr @sz_io_println(ptr %s)\n  call void @sz_release(ptr %.closure.value)\n  call void @sz_panic_pop_src()\n  ret ptr %c0_io\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_in_p_gep = getelementptr inbounds [3 x i8], ptr @.str0, i64 0, i64 0\n  %build_in_p_s = call ptr @sz_string_lit(ptr %build_in_p_gep)\n  %build_in_io = call ptr @sz_io_pure(ptr %build_in_p_s)\n  call void @sz_release(ptr %build_in_p_s)\n  %build_fm = call ptr @sz_io_flatmap(ptr %build_in_io, ptr @sz_cont_0, ptr null)\n  call void @sz_release(ptr %build_in_io)\n  call void @sz_release(ptr null)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_fm, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def okHi(): Bool =
-  internInterpLit() && rewriteInterpLit() && internOrder() && irDiff(srcHi(), wantHi()) && irIdem(srcHi()) && irDiff(srcSum(), wantSum()) && irIdem(srcSum()) && irDiff(srcAdd(), wantAdd()) && irIdem(srcAdd()) && irDiff(srcLib(), wantLib()) && irIdem(srcLib()) && irDiff(srcHello(), wantHello()) && irIdem(srcHello()) && Check.check(srcHello()) == "[]" && Str.startsWith(Emit.emitFull(srcHello()), "; Scuzz Lang generated LLVM IR") && Str.startsWith(Emit.emitFull(srcHello()), Emit.preamble()) && Emit.emitFull(srcHello()) == Str.concat(Emit.preamble(), wantHello())
+  internInterpLit() && rewriteInterpLit() && internOrder() && irDiff(srcHi(), wantHi()) && irChecked(srcHi()) && irDiff(srcSum(), wantSum()) && irChecked(srcSum()) && irDiff(srcAdd(), wantAdd()) && irChecked(srcAdd()) && irDiff(srcLib(), wantLib()) && irChecked(srcLib()) && irDiff(srcHello(), wantHello()) && irChecked(srcHello()) && Check.check(srcHello()) == "[]" && Str.startsWith(Emit.emitFull(srcHello()), "; Scuzz Lang generated LLVM IR") && Str.startsWith(Emit.emitFull(srcHello()), Emit.preamble()) && Emit.emitFull(srcHello()) == Str.concat(Emit.preamble(), wantHello())
 
 def okIf(): Bool =
-  irDiff(srcIf(), wantIf()) && irIdem(srcIf()) && irDiff(srcTag(), wantTag()) && irIdem(srcTag()) && irDiff(srcCat(), wantCat()) && irIdem(srcCat()) && irDiff(srcFmt(), wantFmt()) && irIdem(srcFmt()) && Check.check(srcIf()) == "[]" && Check.check(srcTag()) == "[]" && Check.check(srcCat()) == "[]" && Check.check(srcFmt()) == "[]" && Emit.emitFull(srcFmt()) == Str.concat(Emit.preamble(), wantFmt())
+  irDiff(srcIf(), wantIf()) && irChecked(srcIf()) && irDiff(srcTag(), wantTag()) && irChecked(srcTag()) && irDiff(srcCat(), wantCat()) && irChecked(srcCat()) && irDiff(srcFmt(), wantFmt()) && irChecked(srcFmt()) && Check.check(srcIf()) == "[]" && Check.check(srcTag()) == "[]" && Check.check(srcCat()) == "[]" && Check.check(srcFmt()) == "[]" && Emit.emitFull(srcFmt()) == Str.concat(Emit.preamble(), wantFmt())
 
 def okCmp(): Bool =
-  irDiff(srcCmp(), wantCmp()) && irIdem(srcCmp()) && irDiff(srcColor(), wantColor()) && irIdem(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irIdem(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irIdem(srcTco()) && Check.check(srcTco()) == "[]" && irDiff(srcTcoMatch(), wantTcoMatch()) && irIdem(srcTcoMatch()) && Check.check(srcTcoMatch()) == "[]" && irDiff(srcTcoNest(), wantTcoNest()) && irIdem(srcTcoNest()) && Check.check(srcTcoNest()) == "[]" && irDiff(srcTcoOwn(), wantTcoOwn()) && irIdem(srcTcoOwn()) && Check.check(srcTcoOwn()) == "[]"
+  irDiff(srcCmp(), wantCmp()) && irChecked(srcCmp()) && irDiff(srcColor(), wantColor()) && irChecked(srcColor()) && Check.check(srcCmp()) == "[]" && Check.check(srcColor()) == "[]" && Check.check(srcAbs()) == "[]" && irDiff(srcAbs(), wantAbs()) && irChecked(srcAbs()) && Emit.emitFull(srcColor()) == Str.concat(Emit.preamble(), wantColor()) && irDiff(srcTco(), wantTco()) && irChecked(srcTco()) && Check.check(srcTco()) == "[]" && irDiff(srcTcoMatch(), wantTcoMatch()) && irChecked(srcTcoMatch()) && Check.check(srcTcoMatch()) == "[]" && irDiff(srcTcoNest(), wantTcoNest()) && irChecked(srcTcoNest()) && Check.check(srcTcoNest()) == "[]" && irDiff(srcTcoOwn(), wantTcoOwn()) && irChecked(srcTcoOwn()) && Check.check(srcTcoOwn()) == "[]"
 
 def okList(): Bool =
-  irDiff(srcList(), wantList()) && irIdem(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irIdem(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irIdem(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irIdem(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]" && floatGetOrBox()
+  irDiff(srcList(), wantList()) && irChecked(srcList()) && irDiff(srcEmpty(), wantEmpty()) && irChecked(srcEmpty()) && irDiff(srcListCat(), wantListCat()) && irChecked(srcListCat()) && irDiff(srcListRev(), wantListRev()) && irChecked(srcListRev()) && Check.check(srcList()) == "[]" && Check.check(srcEmpty()) == "[]" && Check.check(srcListCat()) == "[]" && Check.check(srcListRev()) == "[]" && floatGetOrBox()
 
 def floatGetOrBox(): Bool =
   Check.check(srcFloatGetOr()) == "[]" && floatGetOrBoxIr(Emit.emit(srcFloatGetOr()))
@@ -560,16 +552,16 @@ def srcFloatGetOr(): String =
 """
 
 def okOpt(): Bool =
-  irDiff(srcOpt(), wantOpt()) && irIdem(srcOpt()) && irDiff(srcHead(), wantHead()) && irIdem(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irIdem(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irIdem(srcTail()) && irDiff(srcTok(), wantTok()) && irIdem(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]" && okHeadPair() && okNestCtor() && okNestTupField() && okNestCons()
+  irDiff(srcOpt(), wantOpt()) && irChecked(srcOpt()) && irDiff(srcHead(), wantHead()) && irChecked(srcHead()) && irDiff(srcEmptyQ(), wantEmptyQ()) && irChecked(srcEmptyQ()) && irDiff(srcTail(), wantTail()) && irChecked(srcTail()) && irDiff(srcTok(), wantTok()) && irChecked(srcTok()) && Check.check(srcOpt()) == "[]" && Check.check(srcHead()) == "[]" && Check.check(srcEmptyQ()) == "[]" && Check.check(srcTail()) == "[]" && Check.check(srcTok()) == "[]" && okHeadPair() && okNestCtor() && okNestTupField() && okNestCons()
 
 def okNestCtor(): Bool =
-  Check.check(srcNestCtor()) == "[]" && hasNestCtor(Emit.emit(srcNestCtor())) && irIdem(srcNestCtor())
+  Check.check(srcNestCtor()) == "[]" && hasNestCtor(Emit.emit(srcNestCtor())) && irChecked(srcNestCtor())
 
 def okNestTupField(): Bool =
-  Check.check(srcNestTupField()) == "[]" && hasNestTupField(Emit.emit(srcNestTupField())) && irIdem(srcNestTupField())
+  Check.check(srcNestTupField()) == "[]" && hasNestTupField(Emit.emit(srcNestTupField())) && irChecked(srcNestTupField())
 
 def okNestCons(): Bool =
-  Check.check(srcNestCons()) == "[]" && hasNestCons(Emit.emit(srcNestCons())) && irIdem(srcNestCons())
+  Check.check(srcNestCons()) == "[]" && hasNestCons(Emit.emit(srcNestCons())) && irChecked(srcNestCons())
 
 def srcNestCtor(): String =
   """enum Inner:
@@ -625,16 +617,16 @@ def hasHeadPairBox(ir: String): Bool =
   Str.contains(ir, "call i64 @sz_unbox_i64(ptr %body_p0_0_ch)") && Str.contains(ir, "call ptr @sz_box_i64(i64 %body_p0_0_cu)") && Str.contains(ir, "call ptr @sz_pair_new(ptr %body_a0_0_0_lb, ptr %body_a0_0_0_rb)")
 
 def okKw(): Bool =
-  irDiff(srcKw(), wantKw()) && irIdem(srcKw()) && irDiff(srcPunct(), wantPunct()) && irIdem(srcPunct()) && irDiff(srcCons(), wantCons()) && irIdem(srcCons()) && irDiff(srcCh(), wantCh()) && irIdem(srcCh()) && irDiff(srcSl(), wantSl()) && irIdem(srcSl()) && irDiff(srcBld(), wantBld()) && irIdem(srcBld()) && Check.check(srcKw()) == "[]" && Check.check(srcPunct()) == "[]" && Check.check(srcCons()) == "[]" && Check.check(srcCh()) == "[]" && Check.check(srcSl()) == "[]" && Check.check(srcBld()) == "[]"
+  irDiff(srcKw(), wantKw()) && irChecked(srcKw()) && irDiff(srcPunct(), wantPunct()) && irChecked(srcPunct()) && irDiff(srcCons(), wantCons()) && irChecked(srcCons()) && irDiff(srcCh(), wantCh()) && irChecked(srcCh()) && irDiff(srcSl(), wantSl()) && irChecked(srcSl()) && irDiff(srcBld(), wantBld()) && irChecked(srcBld()) && Check.check(srcKw()) == "[]" && Check.check(srcPunct()) == "[]" && Check.check(srcCons()) == "[]" && Check.check(srcCh()) == "[]" && Check.check(srcSl()) == "[]" && Check.check(srcBld()) == "[]"
 
 def okPair(): Bool =
-  irDiff(srcToInt(), wantToInt()) && irIdem(srcToInt()) && irDiff(srcPair(), wantPair()) && irIdem(srcPair()) && Check.check(srcToInt()) == "[]" && Check.check(srcPair()) == "[]" && irDiff(srcAt(), wantAt()) && irIdem(srcAt()) && irDiff(srcRec(), wantRec()) && irIdem(srcRec()) && Check.check(srcAt()) == "[]" && Check.check(srcRec()) == "[]"
+  irDiff(srcToInt(), wantToInt()) && irChecked(srcToInt()) && irDiff(srcPair(), wantPair()) && irChecked(srcPair()) && Check.check(srcToInt()) == "[]" && Check.check(srcPair()) == "[]" && irDiff(srcAt(), wantAt()) && irChecked(srcAt()) && irDiff(srcRec(), wantRec()) && irChecked(srcRec()) && Check.check(srcAt()) == "[]" && Check.check(srcRec()) == "[]"
 
 def okMod(): Bool =
-  irDiffFiles(srcModFiles(), wantMod()) && irIdemFiles(srcModFiles()) && Check.checkFiles(srcModFiles()) == "[]" && Check.check(srcNil()) == "[]" && Check.check(srcFld()) == "[]" && irDiff(srcFld(), wantFld()) && irIdem(srcFld()) && irDiff(srcCopyFld(), wantCopyFld()) && irIdem(srcCopyFld()) && Check.check(srcCopyFld()) == "[]" && irDiff(srcCopyRec(), wantCopyRec()) && irIdem(srcCopyRec()) && Check.check(srcCopyRec()) == "[]" && irDiff(srcFieldCall(), wantFieldCall()) && irIdem(srcFieldCall()) && Check.check(srcFieldCall()) == "[]" && irDiff(srcFieldIf(), wantFieldIf()) && irIdem(srcFieldIf()) && Check.check(srcFieldIf()) == "[]" && irDiff(srcTup1(), wantTup1()) && irIdem(srcTup1()) && Check.check(srcTup1()) == "[]" && irDiff(srcTup3(), wantTup3()) && irIdem(srcTup3()) && Check.check(srcTup3()) == "[]" && Check.check(srcTup5()) == "[]" && Check.check(srcTup8()) == "[]" && Check.check(srcMixed()) == "[]" && irDiff(srcMatchX(), wantMatchX()) && irIdem(srcMatchX()) && Check.check(srcMatchX()) == "[]" && irDiff(srcRep(), wantRep()) && irIdem(srcRep()) && Check.check(srcRep()) == "[]"
+  irDiffFiles(srcModFiles(), wantMod()) && irCheckedFiles(srcModFiles()) && Check.checkFiles(srcModFiles()) == "[]" && Check.check(srcNil()) == "[]" && Check.check(srcFld()) == "[]" && irDiff(srcFld(), wantFld()) && irChecked(srcFld()) && irDiff(srcCopyFld(), wantCopyFld()) && irChecked(srcCopyFld()) && Check.check(srcCopyFld()) == "[]" && irDiff(srcCopyRec(), wantCopyRec()) && irChecked(srcCopyRec()) && Check.check(srcCopyRec()) == "[]" && irDiff(srcFieldCall(), wantFieldCall()) && irChecked(srcFieldCall()) && Check.check(srcFieldCall()) == "[]" && irDiff(srcFieldIf(), wantFieldIf()) && irChecked(srcFieldIf()) && Check.check(srcFieldIf()) == "[]" && irDiff(srcTup1(), wantTup1()) && irChecked(srcTup1()) && Check.check(srcTup1()) == "[]" && irDiff(srcTup3(), wantTup3()) && irChecked(srcTup3()) && Check.check(srcTup3()) == "[]" && Check.check(srcTup5()) == "[]" && Check.check(srcTup8()) == "[]" && Check.check(srcMixed()) == "[]" && irDiff(srcMatchX(), wantMatchX()) && irChecked(srcMatchX()) && Check.check(srcMatchX()) == "[]" && irDiff(srcRep(), wantRep()) && irChecked(srcRep()) && Check.check(srcRep()) == "[]"
 
 def okPtr(): Bool =
-  irDiff(srcIfPtr(), wantIfPtr()) && irIdem(srcIfPtr()) && Check.check(srcIfPtr()) == "[]" && irDiff(srcTCons(), wantTCons()) && irIdem(srcTCons()) && Check.check(srcTCons()) == "[]" && irDiff(srcTupPtr(), wantTupPtr()) && irIdem(srcTupPtr()) && Check.check(srcTupPtr()) == "[]" && irDiff(srcT3(), wantT3()) && irIdem(srcT3()) && Check.check(srcT3()) == "[]" && irDiff(srcIfTup(), wantIfTup()) && irIdem(srcIfTup()) && Check.check(srcIfTup()) == "[]" && irDiff(srcNestTup(), wantNestTup()) && irIdem(srcNestTup()) && Check.check(srcNestTup()) == "[]"
+  irDiff(srcIfPtr(), wantIfPtr()) && irChecked(srcIfPtr()) && Check.check(srcIfPtr()) == "[]" && irDiff(srcTCons(), wantTCons()) && irChecked(srcTCons()) && Check.check(srcTCons()) == "[]" && irDiff(srcTupPtr(), wantTupPtr()) && irChecked(srcTupPtr()) && Check.check(srcTupPtr()) == "[]" && irDiff(srcT3(), wantT3()) && irChecked(srcT3()) && Check.check(srcT3()) == "[]" && irDiff(srcIfTup(), wantIfTup()) && irChecked(srcIfTup()) && Check.check(srcIfTup()) == "[]" && irDiff(srcNestTup(), wantNestTup()) && irChecked(srcNestTup()) && Check.check(srcNestTup()) == "[]"
 
 def srcJoin(): String =
   "@main def main: IO[Unit] =\n  IO.println(List.join([\"a\", \"b\"], \",\"))\n"
@@ -654,7 +646,7 @@ def wantApply(): String =
   "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:5:3\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:5\\00\", align 1\n\ndefine internal i64 @sz_user_Main_applyInt(ptr %f, i64 %n) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %body_fnp = call ptr @sz_list_head(ptr %f)\n  %body_fnt = call ptr @sz_list_tail(ptr %f)\n  %body_envp = call ptr @sz_list_head(ptr %body_fnt)\n  %body_ab = call ptr @sz_box_i64(i64 %n)\n  %body_v = call ptr %body_fnp(ptr %body_ab, ptr %body_envp)\n  call void @sz_release(ptr %body_ab)\n  %body_u = call i64 @sz_unbox_i64(ptr %body_v)\n  call void @sz_release(ptr %body_v)\n  call void @sz_panic_pop_src()\n  ret i64 %body_u\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_v = call ptr @sz_string_from_int(i64 0)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def okFs(): Bool =
-  irDiff(srcFs(), wantFs()) && irIdem(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irIdem(srcIfIo()) && Check.check(srcIfIo()) == "[]" && irDiff(srcListFs(), wantListFs()) && irIdem(srcListFs()) && Check.check(srcListFs()) == "[]" && irDiff(srcPure(), wantPure()) && irIdem(srcPure()) && Check.check(srcPure()) == "[]" && irDiff(srcJoin(), wantJoin()) && irIdem(srcJoin()) && Check.check(srcJoin()) == "[]" && irDiff(srcApply(), wantApply()) && irIdem(srcApply()) && Check.check(srcApply()) == "[]" && irDiff(srcInterp(), wantInterp()) && irIdem(srcInterp()) && Check.check(srcInterp()) == "[]" && irDiff(srcFor(), wantFor()) && irIdem(srcFor()) && Check.check(srcFor()) == "[]" && irDiff(srcForEq(), wantForEq()) && irIdem(srcForEq()) && Check.check(srcForEq()) == "[]" && irDiff(srcInterpQ(), wantInterpQ()) && irIdem(srcInterpQ()) && Check.check(srcInterpQ()) == "[]" && irDiff(srcIfFm(), wantIfFm()) && irIdem(srcIfFm()) && Check.check(srcIfFm()) == "[]"
+  irDiff(srcFs(), wantFs()) && irChecked(srcFs()) && Check.check(srcFs()) == "[]" && Emit.emitFull(srcFs()) == Str.concat(Emit.preamble(), wantFs()) && irDiff(srcIfIo(), wantIfIo()) && irChecked(srcIfIo()) && Check.check(srcIfIo()) == "[]" && irDiff(srcListFs(), wantListFs()) && irChecked(srcListFs()) && Check.check(srcListFs()) == "[]" && irDiff(srcPure(), wantPure()) && irChecked(srcPure()) && Check.check(srcPure()) == "[]" && irDiff(srcJoin(), wantJoin()) && irChecked(srcJoin()) && Check.check(srcJoin()) == "[]" && irDiff(srcApply(), wantApply()) && irChecked(srcApply()) && Check.check(srcApply()) == "[]" && irDiff(srcInterp(), wantInterp()) && irChecked(srcInterp()) && Check.check(srcInterp()) == "[]" && irDiff(srcFor(), wantFor()) && irChecked(srcFor()) && Check.check(srcFor()) == "[]" && irDiff(srcForEq(), wantForEq()) && irChecked(srcForEq()) && Check.check(srcForEq()) == "[]" && irDiff(srcInterpQ(), wantInterpQ()) && irChecked(srcInterpQ()) && Check.check(srcInterpQ()) == "[]" && irDiff(srcIfFm(), wantIfFm()) && irChecked(srcIfFm()) && Check.check(srcIfFm()) == "[]"
 
 def srcInterp(): String =
   "@main def main: IO[Unit] =\n  IO.println(s\"n:${Str.fromInt(3)}\")\n"
@@ -697,7 +689,7 @@ def wantLam(): String =
   "@.str0 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:5:3\\00\", align 1\n@.str1 = private unnamed_addr constant [15 x i8] c\"Main.scuzz:1:5\\00\", align 1\n\ndefine internal ptr @sz_neth_Main_plusOne_body(ptr %.closure.value, ptr %.closure.env) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %n = call i64 @sz_unbox_i64(ptr %.closure.value)\n  %nbody_v = add i64 %n, 1\n  %body_nr = call ptr @sz_box_i64(i64 %nbody_v)\n  call void @sz_panic_pop_src()\n  ret ptr %body_nr\n}\ndefine internal ptr @sz_user_Main_plusOne() {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str1, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %body_cl0 = call ptr @sz_list_nil()\n  %body_cl1 = call ptr @sz_list_cons(ptr null, ptr %body_cl0)\n  call void @sz_release(ptr %body_cl0)\n  %body_cl2 = call ptr @sz_list_cons(ptr @sz_neth_Main_plusOne_body, ptr %body_cl1)\n  call void @sz_release(ptr %body_cl1)\n  call void @sz_panic_pop_src()\n  ret ptr %body_cl2\n}\n\ndefine i32 @main(i32 %argc, ptr %argv) {\n.entry:\n  %szlocg0 = getelementptr inbounds [15 x i8], ptr @.str0, i64 0, i64 0\n  call void @sz_panic_push_src(ptr %szlocg0)\n  %build_e_arg0_fn_v = call ptr @sz_user_Main_plusOne()\n  %build_e_arg0_fnp = call ptr @sz_list_head(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_fnt = call ptr @sz_list_tail(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_envp = call ptr @sz_list_head(ptr %build_e_arg0_fnt)\n  %build_e_arg0_ab = call ptr @sz_box_i64(i64 5)\n  %build_e_arg0_v = call ptr %build_e_arg0_fnp(ptr %build_e_arg0_ab, ptr %build_e_arg0_envp)\n  call void @sz_release(ptr %build_e_arg0_ab)\n  call void @sz_release(ptr %build_e_arg0_fn_v)\n  %build_e_arg0_u = call i64 @sz_unbox_i64(ptr %build_e_arg0_v)\n  call void @sz_release(ptr %build_e_arg0_v)\n  %build_e_v = call ptr @sz_string_from_int(i64 %build_e_arg0_u)\n  %build_io = call ptr @sz_io_println(ptr %build_e_v)\n  call void @sz_release(ptr %build_e_v)\n  %rc = call i32 @sz_runtime_main_args(ptr %build_io, i32 %argc, ptr %argv)\n  call void @sz_panic_pop_src()\n  ret i32 %rc\n}"
 
 def allOk(): Bool =
-  Str.contains(Emit.preamble(), "declare i32 @sz_adt_tag(ptr) readonly") && okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irIdem(srcLam()) && contInCtor() && fmParamBorrowed() && hoistChunkOk()
+  Str.contains(Emit.preamble(), "declare i32 @sz_adt_tag(ptr) readonly") && okHi() && okIf() && okCmp() && okList() && okOpt() && okKw() && okPair() && okMod() && okPtr() && okFs() && irDiff(srcLam(), wantLam()) && irChecked(srcLam()) && contInCtor() && fmParamBorrowed() && hoistChunkOk()
 
 def hoistChunkOk(): Bool =
   for {
@@ -708,10 +700,10 @@ tail""")
   } yield Emit.hoistNeth(marked) == Str.concat("body", Str.concat(prefix, "tail"))
 
 def dumpAll(): String =
-  if (!okHi()) "okHi" else if (!okIf()) "okIf" else if (!okCmp()) "okCmp" else if (!okList()) "okList" else if (!okOpt()) dumpOpt() else if (!okKw()) "okKw" else if (!okPair()) "okPair" else if (!okMod()) "okMod" else if (!okPtr()) dumpPtr() else if (!okFs()) "okFs" else if (!irDiff(srcLam(), wantLam()) || !irIdem(srcLam())) "okLam" else if (!contInCtor()) "contInCtor" else if (!fmParamBorrowed()) "fmParamBorrowed" else if (!hoistChunkOk()) "hoistChunkOk" else "other"
+  if (!okHi()) "okHi" else if (!okIf()) "okIf" else if (!okCmp()) "okCmp" else if (!okList()) "okList" else if (!okOpt()) dumpOpt() else if (!okKw()) "okKw" else if (!okPair()) "okPair" else if (!okMod()) "okMod" else if (!okPtr()) dumpPtr() else if (!okFs()) "okFs" else if (!irDiff(srcLam(), wantLam()) || !irChecked(srcLam())) "okLam" else if (!contInCtor()) "contInCtor" else if (!fmParamBorrowed()) "fmParamBorrowed" else if (!hoistChunkOk()) "hoistChunkOk" else "other"
 
 def dumpPtr(): String =
-  if (!irDiff(srcIfPtr(), wantIfPtr()) || !irIdem(srcIfPtr())) "srcIfPtr" else if (!irDiff(srcTCons(), wantTCons()) || !irIdem(srcTCons())) "srcTCons" else if (!irDiff(srcTupPtr(), wantTupPtr()) || !irIdem(srcTupPtr())) "srcTupPtr" else if (!irDiff(srcT3(), wantT3()) || !irIdem(srcT3())) "srcT3" else if (!irDiff(srcIfTup(), wantIfTup()) || !irIdem(srcIfTup())) "srcIfTup" else if (!irDiff(srcNestTup(), wantNestTup()) || !irIdem(srcNestTup())) "srcNestTup" else "okPtr-other"
+  if (!irDiff(srcIfPtr(), wantIfPtr()) || !irChecked(srcIfPtr())) "srcIfPtr" else if (!irDiff(srcTCons(), wantTCons()) || !irChecked(srcTCons())) "srcTCons" else if (!irDiff(srcTupPtr(), wantTupPtr()) || !irChecked(srcTupPtr())) "srcTupPtr" else if (!irDiff(srcT3(), wantT3()) || !irChecked(srcT3())) "srcT3" else if (!irDiff(srcIfTup(), wantIfTup()) || !irChecked(srcIfTup())) "srcIfTup" else if (!irDiff(srcNestTup(), wantNestTup()) || !irChecked(srcNestTup())) "srcNestTup" else "okPtr-other"
 
 def dumpOpt(): String =
   if (!irDiff(srcOpt(), wantOpt())) "srcOpt" else if (!irDiff(srcHead(), wantHead())) "srcHead" else if (!okHeadPair()) "okHeadPair" else if (!okNestCtor()) "okNestCtor" else if (!okNestTupField()) "okNestTupField" else if (!okNestCons()) "okNestCons" else "okOpt-other"
@@ -775,7 +767,7 @@ def evTcoMatch(): Bool =
   evCall(srcTcoMatch(), "countdownMatch", [Value.VInt(100000)]) == "0"
 
 def evGenerated(n: Int where n >= 0): Bool =
-  evCall(genProg(n), "f", [Value.VInt(1)]) == Str.fromInt(1 + n % 8)
+  Cases.evaluated(n)
 
 def evMatch(): Bool =
   evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) == "36" && evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(500)]), Value.VCon("Shape", "Circle", [Value.VInt(1)]), Value.VCon("Pt", "Pt", [Value.VInt(0), Value.VInt(0)]), Value.VStr("z")]) == "1" && evCall(srcEvMatch(), "pick", [Value.VList([]), Value.VCon("Shape", "Circle", [Value.VInt(1)]), Value.VCon("Pt", "Pt", [Value.VInt(0), Value.VInt(0)]), Value.VStr("z")]) == "0" && evCall(srcEvMatch(), "area", [Value.VCon("Shape", "Circle", [Value.VInt(2)])]) == "12" && evCall(srcEvMatch(), "tag", [Value.VStr("c")]) == "20" && evCall(srcEvMatch(), "tag", [Value.VStr("q")]) == "30" && evCall(srcEvMatch(), "opt", [Value.VCon("Option", "Some", [Value.VInt(9)])]) == "9" && evCall(srcEvMatch(), "opt", [Value.VCon("Option", "None", [])]) == "-1" && evCall(srcEvMatch(), "pair", [Value.VTuple([Value.VInt(4), Value.VStr("k")])]) == "\"k=5\"" && evCall(srcEvMatch(), "lam", []) == "2" && evCall(srcEvMatch(), "divs", []) == "[3, -3, 1, -1, 1]" && Check.check(srcEvMatch()) == "[]"

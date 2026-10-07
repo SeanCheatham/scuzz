@@ -158,13 +158,15 @@ grep -q 'termDiff e:N' examples/kernel/build/drivers.txt
 fuzz --iterations 16 examples/kernel
 fuzz --iterations 8 examples/scale
 fuzz --iterations 8 examples/fmt
+# Generated compiler checks run in the regular verification path.
+"$ROOT/scripts/ci.sh" compiler-cases
 # Compiler corpus replays run in separate CI slices. Full campaigns use source copies.
 # Set SCUZZ_COMPILER_FUZZ=1 for the search campaign.
 compiler_campaigns() (
   campaign_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-compiler-fuzz.XXXXXX")"
   trap 'status=$?; if [ "$status" -eq 0 ]; then rm -rf "$campaign_dir"; else echo "Compiler campaign artifacts: $campaign_dir" >&2; fi' EXIT
   cp "$SCUZZ" "$campaign_dir/scuzz"
-  for pkg in syntax compiler tyck codegen; do
+  for pkg in syntax compiler compiler-cases tyck codegen; do
     mkdir -p "$campaign_dir/$pkg"
     cp "examples/$pkg/scuzz.toml" "$campaign_dir/$pkg/"
     cp -R "examples/$pkg/src" "$campaign_dir/$pkg/"

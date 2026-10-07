@@ -78,6 +78,7 @@ Slices (same names as ci.yml where one step maps to one slice):
   codegen         codegen emit + oracle
   tyck-replay     typechecker corpus replay
   codegen-replay  code-generation corpus replay
+  compiler-cases  bounded generated compiler checks
   hello-outdir    hello via --out-dir
   fixedpoint      LLVM IR fixed-point
   kernel          ./scripts/ci-kernel.sh
@@ -457,6 +458,151 @@ C_SOURCE
   "$memory_dir/probe"
   rm -rf "$memory_dir"
 }
+
+slice_compiler_cases() (
+  need_scuzz
+  need_cmd python3 'Install Python 3 for generated compiler checks'
+  local cases_dir
+  cases_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-compiler-cases.XXXXXX")"
+  trap 'status=$?; if [ "$status" -eq 0 ]; then rm -rf "$cases_dir"; else echo "Generated compiler artifacts: $cases_dir" >&2; fi' EXIT
+  "$SCUZZ" run examples/compiler-cases > "$cases_dir/export.log"
+  python3 - "$SCUZZ" "$cases_dir" <<'PY_CASES'
+import json
+import pathlib
+import subprocess
+import sys
+
+cli = pathlib.Path(sys.argv[1]).resolve()
+root = pathlib.Path(sys.argv[2])
+rows = [json.loads(line) for line in (root / 'export.log').read_text().splitlines() if line.startswith('[')]
+assert len(rows) == 1
+cases = rows[0]
+assert len(cases) == 54 and len({c['seed'] for c in cases}) == 54
+assert {c['family'] for c in cases} == set(range(6))
+assert {c['input'] for c in cases} == {-8, 0, 8}
+
+# The host model does not parse source or call either execution engine.
+def reference(seed):
+    n = seed % 4096
+    x = n // 6 % 17 - 8
+    def expression_value(choice, levels):
+        if levels == 0:
+            return x
+        value = expression_value(choice // 4, levels - 1)
+        amount = choice % 5 + 1
+        return (value + amount, value - amount, abs(value), value * 2)[choice % 4]
+    value = expression_value(n // 6, n // 102 % 3 + 1)
+    result = (f'match:{value}', f'closure:{value + 3}', f'box:{value}:1',
+              f'heap:{value}:{value + 1}', f'list:{value * 3 + 3}', f'io:{value}')[n % 6]
+    return result, result + ':2' if n % 6 == 5 else result
+
+def command(args, label, success=True):
+    result = subprocess.run([str(cli), *map(str, args)], capture_output=True, text=True, timeout=180)
+    (root / (label + '.stdout')).write_text(result.stdout)
+    (root / (label + '.stderr')).write_text(result.stderr)
+    if (result.returncode == 0) != success:
+        raise AssertionError(f'{label}: exit {result.returncode}\n{result.stdout}\n{result.stderr}')
+    return result
+
+def require_output(actual, expected, label):
+    if actual != expected:
+        raise AssertionError(f'{label}: expected {expected!r}, got {actual!r}')
+
+def native(package, label):
+    command(['run', package], label + '-build')
+    result = subprocess.run([str(package / 'build/generated')], capture_output=True, text=True, timeout=20)
+    (root / (label + '.native')).write_text(result.stdout)
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+package = root / 'valid'
+(package / 'src').mkdir(parents=True)
+(package / 'scuzz.toml').write_text('[package]\nname="generated"\n')
+main = []
+claims = []
+expected = ''
+for i, case in enumerate(cases):
+    value, output = reference(case['seed'])
+    assert case['result'] == value and case['output'] == output, case
+    (package / f'src/Case{i}.scuzz').write_text(case['body'])
+    argument = str(case['input']) if case['input'] >= 0 else f"(0 - {-case['input']})"
+    main.append(f'    _ <- Case{i}.emit({argument})')
+    claims.append(f'oracle case{i}(): Bool =\n  Case{i}.f({argument}) == {json.dumps(value)}\n')
+    expected += output + '\n'
+(package / 'src/Main.scuzz').write_text('@main def main: IO[Unit] =\n  for {\n' + '\n'.join(main) + '\n  } yield ()\n')
+(package / 'generated.scuzz_verify').write_text('\n'.join(claims))
+(root / 'expected.txt').write_text(expected)
+require_output(command(['eval', package], 'original-eval').stdout, expected, 'original evaluator model')
+command(['fmt', package], 'valid-format')
+formatted = {path: path.read_bytes() for path in (package / 'src').glob('*.scuzz')}
+command(['fmt', package], 'valid-format-again')
+assert all(path.read_bytes() == content for path, content in formatted.items()), 'formatter is not stable'
+command(['check', package], 'valid-check')
+require_output(command(['eval', package], 'valid-eval').stdout, expected, 'evaluator model')
+require_output(native(package, 'valid'), expected, 'native model')
+command(['fuzz', '--iterations', '16', '--seed', '41', package], 'valid-campaign')
+summary = json.loads((package / 'build/fuzz/summary.json').read_text())
+assert summary['fuzz']['ok'] and summary['fuzz']['search'] == 10
+assert summary['mutate']['ran'] > 0 and summary['mutate']['killed'] > 0
+
+invalid = root / 'invalid'
+(invalid / 'src').mkdir(parents=True)
+(invalid / 'scuzz.toml').write_text('[package]\nname="invalid"\n')
+for i, case in enumerate(cases):
+    (invalid / 'src/Main.scuzz').write_text(case['invalid'])
+    command(['fmt', invalid], f'invalid-{i}-format')
+    rejected = command(['check', '--message-format=json', invalid], f'invalid-{i}-check', success=False)
+    assert 'type error' in rejected.stdout and 'unexpected token' not in rejected.stdout, rejected.stdout
+
+# Both engines can agree on a wrong result. The model and oracle must reject it.
+mutant = root / 'mutant'
+(mutant / 'src').mkdir(parents=True)
+(mutant / 'scuzz.toml').write_text('[package]\nname="generated"\n')
+case = cases[0]
+body = case['body']
+start = body.index('def f(x: Int): String =')
+end = body.index('def emit(x: Int): IO[Unit] =', start)
+(mutant / 'src/Case0.scuzz').write_text(body[:start] + 'def f(x: Int): String =\n  s"wrong:$x"\n\n' + body[end:])
+(mutant / 'src/Main.scuzz').write_text('@main def main: IO[Unit] =\n  Case0.emit(0 - 8)\n')
+(mutant / 'generated.scuzz_verify').write_text(claims[0])
+command(['fmt', mutant], 'mutant-format')
+ev = command(['eval', mutant], 'mutant-eval').stdout
+compiled = native(mutant, 'mutant')
+assert ev == compiled
+for label, actual in [('evaluator', ev), ('native', compiled)]:
+    try:
+        require_output(actual, reference(case['seed'])[1] + '\n', label)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f'{label}: model accepts a wrong result')
+command(['fuzz', '--iterations', '0', mutant], 'mutant-campaign', success=False)
+rejected = json.loads((mutant / 'build/fuzz/summary.json').read_text())
+assert not rejected['fuzz']['ok'] and rejected['corpus']['failures'] == 1
+print('Generated compiler checks: 54 cases, six families, three input signs, three depths, invalid types, evaluator/native models, search, mutation, and wrong-result rejection')
+PY_CASES
+  mkdir -p "$cases_dir/generator/src"
+  cp examples/compiler-cases/src/*.scuzz "$cases_dir/generator/src/"
+  cp examples/compiler-cases/*.scuzz_verify "$cases_dir/generator/"
+  python3 - "$ROOT" "$cases_dir/generator" <<'PY_GENERATOR'
+import os
+import pathlib
+import sys
+root, target = map(pathlib.Path, sys.argv[1:])
+compiler = os.path.relpath(root / 'examples/compiler', target)
+(target / 'scuzz.toml').write_text('[package]\nname="compiler-cases"\n[dependencies]\ncompiler={path="' + compiler + '"}\n')
+PY_GENERATOR
+  "$SCUZZ" fuzz --iterations 16 --seed 41 "$cases_dir/generator" > "$cases_dir/generator-campaign.log" 2>&1
+  python3 - "$cases_dir/generator/build/fuzz/summary.json" <<'PY_SUMMARY'
+import json
+import pathlib
+import sys
+summary = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert summary['fuzz']['ok'] and summary['fuzz']['search'] == 10
+assert summary['mutate']['ran'] > 0 and summary['mutate']['killed'] > 0
+print(f"Compiler generator: {summary['fuzz']['search']} search cases, {summary['mutate']['killed']} mutations killed")
+PY_SUMMARY
+)
 
 slice_hello_outdir() {
   need_scuzz
@@ -2025,6 +2171,7 @@ case "$SLICE" in
   tyck) slice_tyck ;;
   kits) slice_kits ;;
   codegen) slice_codegen ;;
+  compiler-cases) slice_compiler_cases ;;
   tyck-replay) slice_tyck_replay ;;
   codegen-replay) slice_codegen_replay ;;
   hello-outdir) slice_hello_outdir ;;

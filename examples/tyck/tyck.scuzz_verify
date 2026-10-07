@@ -40,3 +40,6 @@ oracle factsTier(): Bool =
 oracle genericRecordFields(): Bool =
   Main.genericRecordFields()
 
+oracle fieldBeforeTupleBinding(): Bool =
+  Main.fieldBeforeTupleBinding()
+
