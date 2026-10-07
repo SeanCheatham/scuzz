@@ -1,0 +1,12 @@
+oracle generatedCheck(seed: Int where seed >= 0 && seed < 4096): Bool =
+  Cases.checked(seed)
+
+oracle generatedReject(seed: Int where seed >= 0 && seed < 4096): Bool =
+  Cases.rejected(seed)
+
+oracle generatedRoundtrip(seed: Int where seed >= 0 && seed < 4096): Bool =
+  Cases.roundtrip(seed)
+
+oracle generatedEval(seed: Int where seed >= 0 && seed < 4096): Bool =
+  Cases.evaluated(seed)
+

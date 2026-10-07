@@ -48,6 +48,8 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Supporting compiler and editor work
 
+- **Type names across files.** Constructor field lookup combines fields from repeated short type names. A generated package with multiple `Packet.Wrap` definitions passes checking but fails evaluator execution with a missing argument. Generated cases use distinct type names. Same-name types across modules need a separate proof and a shared resolution rule.
+
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
 - **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.
 - **Editor comparison.** The compiled `c_compare` corpus workload fails the session heap baseline. It retains live blocks at session exit. Resolve this failure before claiming a complete editor corpus pass.

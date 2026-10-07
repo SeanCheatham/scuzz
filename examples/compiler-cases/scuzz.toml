@@ -1,0 +1,7 @@
+[package]
+name = "compiler-cases"
+version = "0.1.0"
+description = "Bounded generated compiler proofs"
+
+[dependencies]
+compiler = { path = "../compiler" }

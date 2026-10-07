@@ -131,6 +131,6 @@ Set `SCUZZ_IOS_DEVICE` to select a simulator name or ID.
 
 ## Compiler campaigns
 
-Default `./scripts/ci.sh fuzz` replays `examples/tyck` and `examples/codegen` with `scuzz fuzz --iterations 0`. That path uses generated-program oracles plus fixture seeds.
+Regular `./scripts/ci.sh fuzz` runs `./scripts/ci.sh compiler-cases`. This slice uses one bounded source generator. It checks 54 fixed cases across six source families, three input signs, and three expression depths. It compares evaluator and native output with an independent host model. It rejects invalid types and proves that the model rejects a wrong result when both engines agree. It runs 16-iteration search and mutation campaigns on the generated programs and the generator. Native subprocesses run outside simulation. Campaigns use temporary packages. A failure keeps the packages and logs.
 
-Set `SCUZZ_COMPILER_FUZZ=1` to run a short search campaign on a source copy. That path is slower. Use it for a nightly or local extra check. The env var is the real opt-in. `./scripts/ci-fuzz.sh` invokes it.
+The separate `tyck-replay` and `codegen-replay` slices preserve compiler corpus replay. Set `SCUZZ_COMPILER_FUZZ=1` to add the larger proof packages to the search campaign on source copies. These extra campaigns are slower. The bounded checks are finite. They do not prove correctness for every program.

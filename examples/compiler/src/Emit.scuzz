@@ -4412,6 +4412,9 @@ def isCtorPat(pat: String, ens: List[En]): Bool =
   if (isAsPat(pat) || isConsPat(pat) || isTuplePat(pat) || isOrPat(pat) || isStrPat(pat) || isIntPat(pat) || isBoolPat(pat) || pat == "_" || pat == "[]" || pat == "") false else patBind(pat) != "" || dotAt(patCore(pat), 0) >= 0 || enOfCase(ens, patCore(pat)) != ""
 
 def emitFieldTest(pat: String, value: String, ty: String, armPrefix: String, armI: Int, ens: List[En], strs: Strs, last: Bool): String =
+  emitFieldTestTyped(pat, value, ty, armPrefix, armI, Check.specializeEnums(ens, ty), strs, last)
+
+def emitFieldTestTyped(pat: String, value: String, ty: String, armPrefix: String, armI: Int, ens: List[En], strs: Strs, last: Bool): String =
   if (isAsPat(pat)) emitFieldTest(stripAs(pat), value, ty, armPrefix, armI, ens, strs, last) else if (isStrPat(pat) || isIntPat(pat) || isBoolPat(pat)) literalFieldTestTo(pat, value, nestPreOf(value), 0, "lit", strs, nextLab(armPrefix, armI, last)) else if (pat == "[]") emitNestedNil(value, nestPreOf(value), nextLab(armPrefix, armI, last)) else if (isConsPat(pat)) emitNestedCons(pat, value, nestPreOf(value), armPrefix, armI, last, ens, strs, ty) else if (isTuplePat(pat)) emitTuplePeel(ssaName(value), 1, value, tupSlots(ty), tupComps(pat), armPrefix, armI, last, strs, false, ens) else if (isCtorPat(pat, ens)) emitNestedCtor(pat, value, nestPreOf(value), armPrefix, armI, last, ens, strs) else ""
 
 def emitNestedNil(value: String, pre: String, fail: String): String =
@@ -4492,7 +4495,7 @@ def isVarPat(pat: String, ens: List[En]): Bool =
   isSimpleBind(pat) && !isOrPat(pat) && !isTuplePat(pat) && dotAt(pat, 0) < 0 && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
 
 def emitOkVar(pat: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, sv: String, asI64: Bool, fid: Int): Slot =
-  emitOkVarBps(pat, body, prefix, strs, defs, ens, Param(pat, if (asI64) "Int" else "", "", "") :: dropParam(ps, pat), loc, i, sv, asI64, fid)
+  emitOkVarBps(bindStem(prefix, i, asI64), rewriteBind(body, pat, bindStem(prefix, i, asI64)), prefix, strs, defs, ens, Param(bindStem(prefix, i, asI64), if (asI64) "Int" else "", "", "") :: dropParam(ps, pat), loc, i, sv, asI64, fid)
 
 def emitOkVarBps(pat: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], bps: List[Param], loc: String, i: Int, sv: String, asI64: Bool, fid: Int): Slot =
   emitOkVar2(bindAliasTy(pat, sv, asI64), emitOkOwned(emitExprFid(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, bps, loc, fid), bps), asI64)
@@ -4589,6 +4592,9 @@ def fieldPayloadParam(name: String, fts: List[String], names: List[String], pref
   nestBps(fieldBind(name), fieldStem(prefix, i, fieldIdx(name, k, names), slotInt(fts, fieldIdx(name, k, names))), fieldTyAt2(fts, fieldIdx(name, k, names)), ens, ps)
 
 def nestBps(pat: String, stem: String, ty: String, ens: List[En], ps: List[Param]): List[Param] =
+  nestBpsTyped(pat, stem, ty, Check.specializeEnums(ens, ty), ps)
+
+def nestBpsTyped(pat: String, stem: String, ty: String, ens: List[En], ps: List[Param]): List[Param] =
   if (isAsPat(pat)) nestBps(stripAs(pat), stem, ty, ens, patternParam(asName(pat), stem, ty, ps)) else if (isTuplePat(pat)) stemBpsAt(tupComps(pat), ssaName(stem), 1, tupSlots(ty), ens, ps) else if (isConsPat(pat)) consPayloadParams(pat, nestPreOf(stem), 0, Check.elemOf(ty) :: noStr(), ps) else if (isCtorPat(pat, ens) && !hasComma(patBind(pat)) && !namedMulti(pat, ens)) nestBps(fieldBind(patBind(pat)), bindStem(nestPreOf(stem), 0, bindIsInt(pat, ens)), fieldTy(ens, patCore(pat)), ens, ps) else if (isCtorPat(pat, ens)) fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), nestPreOf(stem), 0, 0, ens, ps) else if (pat == "[]" || pat == "_" || !isPatternName(pat)) ps else Param(stem, ty, "", "") :: dropParam(ps, stem)
 
 def emitOkOwned(s: Slot, ps: List[Param]): Slot =
@@ -4600,6 +4606,9 @@ def rewriteFields(ns: List[String], body: Expr, prefix: String, i: Int, k: Int, 
   if (List.isEmpty(ns)) body else rewriteFields(List.tail(ns), rewriteNested(fieldBind(List.at(ns, 0)), fieldStem(prefix, i, fieldIdx(List.at(ns, 0), k, names), slotInt(fts, fieldIdx(List.at(ns, 0), k, names))), fieldTyAt2(fts, fieldIdx(List.at(ns, 0), k, names)), ens, body), prefix, i, k + 1, fts, names, ens)
 
 def rewriteNested(pat: String, stem: String, ty: String, ens: List[En], body: Expr): Expr =
+  rewriteNestedTyped(pat, stem, ty, Check.specializeEnums(ens, ty), body)
+
+def rewriteNestedTyped(pat: String, stem: String, ty: String, ens: List[En], body: Expr): Expr =
   if (isAsPat(pat)) rewriteBind(rewriteNested(stripAs(pat), stem, ty, ens, body), asName(pat), stem) else if (isTuplePat(pat)) rewriteTupleAt(tupComps(pat), body, ssaName(stem), 1, tupSlots(ty), ens) else if (isConsPat(pat)) rewriteCons(pat, body, nestPreOf(stem), 0, isI64Ty(Check.elemOf(ty))) else if (isCtorPat(pat, ens) && !hasComma(patBind(pat)) && !namedMulti(pat, ens)) rewriteNested(fieldBind(patBind(pat)), bindStem(nestPreOf(stem), 0, bindIsInt(pat, ens)), fieldTy(ens, patCore(pat)), ens, body) else if (isCtorPat(pat, ens)) rewriteFields(splitPat(patBind(pat)), body, nestPreOf(stem), 0, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), ens) else if (pat == "_" || isPatternName(pat) && pat != "[]") rewriteBind(body, pat, stem) else body
 
 def fieldIdx(h: String, k: Int, names: List[String]): Int =
@@ -4719,14 +4728,14 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
     case Expr.EField(recv, name, off) => Expr.EField(rewriteBind(recv, from, to), name, off)
     case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteBind(l, from, to), rewriteBind(r, from, to), off)
     case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteBind(inner, from, to), off)
-    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, rewriteBind(body, from, to))
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, if (patternBindsName(p, from)) body else rewriteBind(body, from, to))
     case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteBind(c, from, to), rewriteBind(t, from, to), rewriteBind(el, from, to), off)
     case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteBind(s, from, to), rewriteBindArms(arms, from, to), off)
     case Expr.EList(xs) => Expr.EList(rewriteBindList(xs, from, to))
     case Expr.ETuple(xs) => Expr.ETuple(rewriteBindList(xs, from, to))
     case Expr.ENamed(n, inner) => Expr.ENamed(n, rewriteBind(inner, from, to))
     case Expr.EAscribe(inner, ty, off) => Expr.EAscribe(rewriteBind(inner, from, to), ty, off)
-    case Expr.EFor(bs, body, off) => Expr.EFor(rewriteBindBinds(bs, from, to), rewriteBind(body, from, to), off)
+    case Expr.EFor(bs, body, off) => Expr.EFor(rewriteBindBinds(bs, from, to), if (List.exists(bs, b => bindShadows(b, from))) body else rewriteBind(body, from, to), off)
     case Expr.EInt(_, _) => e
     case Expr.EBool(_) => e
     case Expr.EStr(_, _) => e
@@ -4736,10 +4745,12 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
     case Expr.EUnit => Expr.EUnit
   }
 
-def rewriteBindBinds(bs: List[Bind], from: String, to: String): List[Bind] =
-  if (List.isEmpty(bs)) bs else rewriteBindBindsHit(bs, from, to)
+def bindShadows(b: Bind, name: String): Bool =
+  b match {
+    case Bind(_, pat, _) => patternBindsName(pat, name)
+  }
 
-def rewriteBindBindsHit(bs: List[Bind], from: String, to: String): List[Bind] =
+def rewriteBindBinds(bs: List[Bind], from: String, to: String): List[Bind] =
   bs match {
     case b :: rest => rewriteBindBinds1(b, rest, from, to)
     case [] => bs
@@ -4747,7 +4758,7 @@ def rewriteBindBindsHit(bs: List[Bind], from: String, to: String): List[Bind] =
 
 def rewriteBindBinds1(b: Bind, rest: List[Bind], from: String, to: String): List[Bind] =
   b match {
-    case Bind(d, n, v) => Bind(d, n, rewriteBind(v, from, to)) :: rewriteBindBinds(rest, from, to)
+    case Bind(draw, pat, value) => Bind(draw, pat, rewriteBind(value, from, to)) :: (if (patternBindsName(pat, from)) rest else rewriteBindBinds(rest, from, to))
   }
 
 def rewriteInterpStr(s: String, from: String, to: String): String =
@@ -4805,24 +4816,27 @@ def rewriteBindArms2(h: Arm, t: List[Arm], from: String, to: String): List[Arm] 
 
 def rewriteBindArm(arm: Arm, from: String, to: String): Arm =
   arm match {
-    case Arm(pat, g, body) => Arm(pat, g, rewriteBind(body, from, to))
+    case Arm(pat, g, body) => if (patternBindsName(pat, from)) arm else Arm(pat, if (g == "") g else Parse.pretty0(rewriteBind(parseGuard(g), from, to)), rewriteBind(body, from, to))
   }
 
 def emitOks1g(g: String, pat: String, s: Slot, rest: List[Arm], moff: Int, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, last: Bool, asI64: Bool, fid: Int, borrow: Bool): (String, List[String], Bool, Bool) =
   s match {
-    case Slot(code, val, owned) => emitOks2g(g, pat, val, owned, code, emitOks(rest, moff, prefix, strs, defs, ens, ps, loc, i + 1, tys, sv, asI64, fid, borrow), prefix, i, last, strs, defs, ens, ps, loc)
+    case Slot(code, val, owned) => emitOks2g(g, pat, val, owned, code, emitOks(rest, moff, prefix, strs, defs, ens, ps, loc, i + 1, tys, sv, asI64, fid, borrow), prefix, i, last, strs, defs, ens, ps, loc, sv, asI64)
   }
 
-def emitOks2g(g: String, pat: String, val: String, owned: Bool, code: String, p: (String, List[String], Bool, Bool), prefix: String, i: Int, last: Bool, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): (String, List[String], Bool, Bool) =
+def emitOks2g(g: String, pat: String, val: String, owned: Bool, code: String, p: (String, List[String], Bool, Bool), prefix: String, i: Int, last: Bool, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, sv: String, asI64: Bool): (String, List[String], Bool, Bool) =
   p match {
-    case (restCode, vals, restOwned, restPtr) => (join(emitOkBodyG(g, pat, code, prefix, i, last, strs, defs, ens, ps, loc), restCode), val :: vals, owned || restOwned, armIsPtr(val, owned, code, ps) || restPtr)
+    case (restCode, vals, restOwned, restPtr) => (join(emitOkBodyG(g, pat, code, prefix, i, last, strs, defs, ens, ps, loc, sv, asI64), restCode), val :: vals, owned || restOwned, armIsPtr(val, owned, code, ps) || restPtr)
   }
 
 def armIsPtr(val: String, owned: Bool, code: String, ps: List[Param]): Bool =
   owned || val == "null" || !isIntSsa(val) && isPtrSlot(val, ps) || thenCallPtr(code, val)
 
-def emitOkBodyG(g: String, pat: String, code: String, prefix: String, i: Int, last: Bool, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): String =
-  if (g == "") emitOkBody(code, prefix, i) else emitOkBodyGuard(emitPatternGuard(pat, g, prefix, strs, defs, ens, ps, loc, i), code, prefix, i, last)
+def emitOkBodyG(g: String, pat: String, code: String, prefix: String, i: Int, last: Bool, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, sv: String, asI64: Bool): String =
+  if (g == "") emitOkBody(code, prefix, i) else emitOkBodyGuard(emitBoundGuard(pat, g, prefix, strs, defs, ens, ps, loc, i, sv, asI64), code, prefix, i, last)
+
+def emitBoundGuard(pat: String, g: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, sv: String, asI64: Bool): Slot =
+  if (isVarPat(pat, ens)) emitExpr(rewriteBind(parseGuard(g), pat, ssaName(sv)), Str.concat(prefix, Str.concat("_g0_", Str.fromInt(i))), strs, defs, ens, Param(ssaName(sv), if (asI64) "Int" else paramTy(ps, ssaName(sv)), "", "") :: ps, loc) else emitPatternGuard(pat, g, prefix, strs, defs, ens, ps, loc, i)
 
 def parseGuard(g: String): Expr =
   parseGuard1(Parse.parseExprList(Lexer.lex(g), 0))

@@ -5,3 +5,4 @@ description = "Kernel codegen: LLVM IR oracles"
 
 [dependencies]
 compiler = { path = "../compiler" }
+cases = { path = "../compiler-cases" }
