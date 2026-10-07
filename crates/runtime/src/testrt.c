@@ -4811,23 +4811,29 @@ static int g_fuzz_armed;
 /* Comparison distance per site: the smallest |a - b| this probe saw. */
 typedef struct {
   char *site;
+  size_t site_len;
   int64_t d;
+  size_t next;
 } SzDist;
 static SzDist *g_dist;
 static size_t g_dist_n;
 static size_t g_dist_cap;
+static size_t g_dist_buckets[1024];
 
 static void fuzz_dist_record(const char *body) {
   const char *colon = strrchr(body, ':');
   size_t len;
   int64_t d;
-  size_t i;
+  size_t i, bucket;
   if (!colon || colon == body || !colon[1])
     return;
   d = strtoll(colon + 1, NULL, 10);
   len = (size_t)(colon - body);
-  for (i = 0; i < g_dist_n; i++) {
-    if (strlen(g_dist[i].site) == len && !memcmp(g_dist[i].site, body, len)) {
+  bucket = tl_hash_bytes(body, len) % 1024;
+  for (size_t entry = g_dist_buckets[bucket]; entry;
+       entry = g_dist[entry - 1].next) {
+    i = entry - 1;
+    if (g_dist[i].site_len == len && !memcmp(g_dist[i].site, body, len)) {
       if (d < g_dist[i].d)
         g_dist[i].d = d;
       return;
@@ -4846,7 +4852,10 @@ static void fuzz_dist_record(const char *body) {
   g_dist[g_dist_n].site = (char *)sz_alloc(len + 1);
   memcpy(g_dist[g_dist_n].site, body, len);
   g_dist[g_dist_n].site[len] = 0;
+  g_dist[g_dist_n].site_len = len;
   g_dist[g_dist_n].d = d;
+  g_dist[g_dist_n].next = g_dist_buckets[bucket];
+  g_dist_buckets[bucket] = g_dist_n + 1;
   g_dist_n++;
 }
 
@@ -4855,6 +4864,7 @@ static void fuzz_dist_clear(void) {
   for (i = 0; i < g_dist_n; i++)
     sz_free(g_dist[i].site);
   g_dist_n = 0;
+  memset(g_dist_buckets, 0, sizeof g_dist_buckets);
 }
 
 /* Overwrite SCUZZ_DISTANCE_DUMP with `site d` lines. The file holds the
