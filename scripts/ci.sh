@@ -2089,7 +2089,8 @@ cases = {
         {'op': 'drive', 'name': 'prettyGenerated', 'args': [7]}])],
     'codegen': [('generated', [
         {'op': 'drive', 'name': 'irGenerated', 'args': [7]},
-        {'op': 'drive', 'name': 'evGenerated', 'args': [7]}])],
+        {'op': 'drive', 'name': 'evGenerated', 'args': [7]}]),
+        ('lookup', [{'op': 'drive', 'name': 'evLookup', 'args': []}])],
     'editor': [('idle', None), ('queue-cache', [
         {'op': 'drive', 'name': 'queueCacheFlow', 'args': [3]}]),
         ('protocol', [
@@ -2153,7 +2154,7 @@ def replay(package, executable, label, events, ui=False):
             detail += (out / 'probe.log').read_text()
         assert result.returncode == 0, (name, label, engine, detail)
         if engine == 'eval':
-            assert result.stdout == '0\n', (name, label, detail)
+            assert result.stdout == 'ready\n0\n', (name, label, detail)
         print(f'{name} {label} {engine}: {time.monotonic() - started:.2f} s', flush=True)
     for suffix in ['timeline', 'claims']:
         assert (out / f'eval.{suffix}').read_bytes() == (out / f'native.{suffix}').read_bytes(), (
@@ -2204,6 +2205,97 @@ slice_tyck_replay() {
   need_scuzz
   "$SCUZZ" fuzz --iterations 0 examples/tyck
   prove_evaluator_replay tyck
+}
+
+prove_probe_startup() {
+  python3 - "$ROOT" "$SCUZZ" <<'PY_STARTUP'
+import os, pathlib, subprocess, sys, tempfile, time
+
+repo, cli = map(pathlib.Path, sys.argv[1:])
+env = {k: v for k, v in os.environ.items() if not k.startswith('SCUZZ_')}
+with tempfile.TemporaryDirectory(prefix='scuzz-probe-startup-') as directory:
+    target = pathlib.Path(directory)
+    (target / 'src').mkdir()
+    (target / 'probe').mkdir()
+    (target / 'scuzz.toml').write_text(
+        '[package]\nname="probe-startup"\n[dependencies]\ncompiler={path="' +
+        os.path.relpath(repo / 'examples/compiler', target) + '"}\n')
+    (target / 'src/Main.scuzz').write_text('''import Drive.FuzzJob
+import Parse.En
+
+def waitStopped(pid: Int): IO[Int] =
+  Sys.alive(pid).flatMap(alive => if (alive == 0) IO.pure(0) else IO.sleep(10).flatMap(_ => waitStopped(pid)))
+
+@main def main: IO[Unit] =
+  for {
+    server <- Sys.getenv("PROBE_SERVER")
+    dir <- Sys.getenv("PROBE_DIR")
+    mode <- Sys.getenv("PROBE_MODE")
+    srv <- Ref.of(("", 0))
+    files = []: List[(String, String)]
+    ens = []: List[En]
+    faults = []: List[(Int, Int)]
+    job = FuzzJob(dir, dir, "", "probe", false, 0, 42, false, files, false, "", false, ens, true, server, srv, faults, false, false, false)
+    first <- Drive.evProbe(job, dir, "KIT=sealed\\n")
+    before <- Ref.get(srv)
+    second <- if (mode == "slow") Drive.evProbe(job, dir, "KIT=sealed\\n") else IO.pure(1)
+    after <- Ref.get(srv)
+    _ <- Drive.evStop(job)
+    alive <- if (before._2 == 0) IO.pure(0) else IO.timeout(1000, waitStopped(before._2))
+    valid = if (mode == "slow") first == 0 && second == 124 && before._2 != 0 && before == after else first == (if (mode == "reject") 3 else 1) && before._2 == 0 && after._2 == 0
+    _ <- if (valid && alive == 0) IO.println("probe-startup-ok") else IO.fail(s"probe startup differs: first=$first second=$second before=${before._2} after=${after._2} alive=$alive")
+  } yield ()
+''')
+    rejected = target / 'rejected'
+    rejected.mkdir()
+    (rejected / 'files.txt').write_text('Main\n')
+    (rejected / '0.scuzz').write_text('def invalid(): String = 1\n@main def main: IO[Unit] = IO.pure(())\n')
+    result = subprocess.run([str(cli), 'eval', '--probe', str(rejected)],
+                            input='', env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0 and result.stdout.startswith('3\n'), result.stdout + result.stderr
+    assert 'type error' in result.stdout + result.stderr, result.stdout + result.stderr
+    print('Probe startup: invalid source reports its check failure before a request', flush=True)
+    server = target / 'server'
+    server.write_text('''#!/usr/bin/env python3
+import os, sys, time
+mode = os.environ['PROBE_MODE']
+if mode == 'closed':
+    sys.exit(1)
+if mode in ['bad', 'reject']:
+    print('3' if mode == 'reject' else 'invalid', flush=True)
+    time.sleep(60)
+    sys.exit(1)
+time.sleep(12)
+print('ready', flush=True)
+for number, line in enumerate(sys.stdin):
+    assert line.strip() == 'probe'
+    if number == 0:
+        time.sleep(19)
+    print('0' if number == 0 else '124', flush=True)
+''')
+    server.chmod(0o755)
+    subprocess.run([str(cli), 'fmt', str(target)], env=env, check=True,
+                   capture_output=True, text=True, timeout=30)
+    native_env = dict(env, PROBE_SERVER=str(server), PROBE_DIR=str(target / 'probe'), PROBE_MODE='closed')
+    result = subprocess.run([str(cli), 'run', str(target)], env=native_env,
+                            capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0 and 'probe-startup-ok' in result.stdout, result.stdout + result.stderr
+    for mode in ['bad', 'reject', 'slow']:
+        started = time.monotonic()
+        native_env['PROBE_MODE'] = mode
+        result = subprocess.run([str(target / 'build/probe-startup')], env=native_env,
+                                capture_output=True, text=True, timeout=45)
+        seconds = time.monotonic() - started
+        assert result.returncode == 0 and result.stdout == 'probe-startup-ok\n', result.stdout + result.stderr
+        if mode == 'slow':
+            assert seconds >= 30, seconds
+        print(f'Probe startup {mode}: {seconds:.2f} s; separate waits, server reuse, and shutdown pass', flush=True)
+    native_env.update(PROBE_SERVER=str(cli), PROBE_DIR=str(rejected), PROBE_MODE='reject')
+    result = subprocess.run([str(target / 'build/probe-startup')], env=native_env,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0 and result.stdout == 'probe-startup-ok\n', result.stdout + result.stderr
+    print('Probe startup: the client preserves invalid-source status 3', flush=True)
+PY_STARTUP
 }
 
 prove_lexer_stack() {
@@ -2257,6 +2349,7 @@ slice_codegen_replay() {
   "$SCUZZ" fuzz --iterations 0 examples/codegen
   prove_evaluator_replay codegen
   prove_lexer_stack
+  prove_probe_startup
 }
 
 slice_oracles() {

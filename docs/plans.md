@@ -1,6 +1,6 @@
 # Current slice: evaluator reliability and parity
 
-Status: selected IO and editor parity checks pass. Runtime, AddressSanitizer, compiler, corpus, generated-case, and search-feedback checks pass. Compiler idle costs remain open. Complete this slice before local choice feedback. Read `HUMANS.md` and the evaluator locks in `philosophy.md`.
+Status: the server uses separate startup and response waits. An index reduces measured function lookup costs. Compiler, generated program, startup, IO signal, Headless UI, and search-feedback checks pass. Compiler idle costs remain open. Complete this slice before local choice feedback. Read `HUMANS.md` and the evaluator locks in `philosophy.md`.
 
 ## Outcome
 
@@ -8,8 +8,8 @@ Selected compiler and editor workloads run on the evaluator with the same result
 
 ## Work order
 
-1. Profile the compiler idle probes. Use the two-request measurements in `gaps.md` to separate startup from probe execution. `scuzz fuzz --iterations 0 examples/tyck` and `scuzz fuzz --iterations 0 examples/codegen` preserve probe sources and requests under `build/fuzz/ev`.
-2. Correct demonstrated costs and the first-response timeout risk. Keep the 20-second probe deadline, memory limits, scheduler limits, claims, and workload scope. Add the smallest proof for each correction.
+1. Profile the remaining compiler idle costs. Measure startup and two probes separately. `scuzz fuzz --iterations 0 examples/tyck` and `scuzz fuzz --iterations 0 examples/codegen` preserve probe sources and requests under `build/fuzz/ev`.
+2. Correct demonstrated costs. Keep the 20-second probe deadline, memory limits, scheduler limits, claims, and workload scope. Add the smallest proof for each correction.
 3. Preserve exact IO and Headless UI parity, corpus replay, and bounded search.
 4. Restore the next local choice feedback plan when this slice is complete.
 

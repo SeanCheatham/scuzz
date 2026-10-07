@@ -1470,7 +1470,7 @@ def evRequestPath(dir: String): String =
   joinSlash(dir, "request.txt")
 
 def evProbe(job: FuzzJob, dir: String, req: String): IO[Int] =
-  evServer(job, dir).flatMap(pid => Fs.write(evRequestPath(dir), Str.concat(req, kv("", "PROBE_LOG", joinSlash(dir, "probe.log")))).flatMap(_ => evProbeSend(job, pid)))
+  evServer(job, dir).flatMap(s => if (s._1 == 0) IO.pure(s._2) else Fs.write(evRequestPath(dir), Str.concat(req, kv("", "PROBE_LOG", joinSlash(dir, "probe.log")))).flatMap(_ => evProbeSend(job, s._1)))
 
 def evProbeSend(job: FuzzJob, pid: Int): IO[Int] =
   Sys.childWrite(pid, """probe
@@ -1479,11 +1479,14 @@ def evProbeSend(job: FuzzJob, pid: Int): IO[Int] =
 def evProbeClosed(job: FuzzJob, pid: Int, e: String): IO[Int] =
   if (e == "Sys.childWrite: stdin closed" || e == "Sys.childWrite: unknown pid") evReadCode(job, pid) else IO.fail(e)
 
-def evServer(job: FuzzJob, dir: String): IO[Int] =
-  Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure(s._2) else evStop(job).flatMap(_ => evSpawn(job, dir))) else evStop(job).flatMap(_ => evSpawn(job, dir)))
+def evServer(job: FuzzJob, dir: String): IO[(Int, Int)] =
+  Ref.get(job.srv).flatMap(s => if (s._1 == dir && s._2 != 0) Sys.alive(s._2).flatMap(a => if (a != 0) IO.pure((s._2, 0)) else evStop(job).flatMap(_ => evSpawn(job, dir))) else evStop(job).flatMap(_ => evSpawn(job, dir)))
 
-def evSpawn(job: FuzzJob, dir: String): IO[Int] =
-  Sys.spawn(evProbeCmd(job, dir)).flatMap(pid => Ref.set(job.srv, (dir, pid)).flatMap(_ => IO.pure(pid)))
+def evSpawn(job: FuzzJob, dir: String): IO[(Int, Int)] =
+  Sys.spawn(evProbeCmd(job, dir)).flatMap(pid => Ref.set(job.srv, (dir, pid)).flatMap(_ => evReady(job, pid)))
+
+def evReady(job: FuzzJob, pid: Int): IO[(Int, Int)] =
+  IO.timeout(30000, evReadLine(pid, "")).handleErrorWith(e => if (e == "timeout" || e == "Sys.childRead: unknown pid") IO.pure("") else IO.fail(e)).flatMap(line => if (Str.trim(line) == "ready") IO.pure((pid, 0)) else evStop(job).flatMap(_ => IO.pure((0, if (Str.trim(line) == "3") 3 else 1))))
 
 def evStop(job: FuzzJob): IO[Unit] =
   Ref.get(job.srv).flatMap(s => if (s._2 == 0) IO.pure(()) else Sys.kill(s._2).handleErrorWith(_ => IO.pure(())).flatMap(_ => Sys.childClose(s._2).handleErrorWith(_ => IO.pure(()))).flatMap(_ => Ref.set(job.srv, ("", 0))))
