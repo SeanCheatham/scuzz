@@ -15042,6 +15042,30 @@ static void *map_counting_int(void *value, void *env) {
   return sz_string_from_int(v);
 }
 
+static void test_signal_mirror_revision(void) {
+  SzString *name = sz_string_from_cstr("$mirror");
+  void *value = sz_box_i64(7);
+  SzSignal *mirror = sz_signal_new(value, 1, name);
+  SzSignal *visible = sz_signal_new(value, 1, NULL);
+  SzSignal *derived = sz_signal_derive(mirror, map_counting_int, NULL, 2, name);
+  uint64_t revision = sz_signal_revision();
+  sz_release(value);
+  value = sz_box_i64(8);
+  sz_signal_write(mirror, value);
+  assert(sz_signal_revision() == revision);
+  assert(sz_signal_int_get(mirror) == 8);
+  assert(!strcmp(sz_signal_str_get(derived), "8"));
+  sz_signal_write(visible, value);
+  assert(sz_signal_revision() == revision + 1);
+  sz_signal_write(visible, value);
+  assert(sz_signal_revision() == revision + 1);
+  sz_release(value);
+  sz_release(name);
+  sz_signal_free(derived);
+  sz_signal_free(visible);
+  sz_signal_free(mirror);
+}
+
 static void test_signal_map_caches_unchanged_source(void) {
   SzSignalInt *count;
   SzSignalStr *label;
@@ -17871,6 +17895,7 @@ int main(int argc, char **argv) {
   test_signal_name_unregistered_clears_nothing();
   test_generic_signal_chain();
   test_signal_map_source_free();
+  test_signal_mirror_revision();
   test_signal_map_caches_unchanged_source();
   test_signal_list_elem_str_flag();
   test_signal_dump_long_name();

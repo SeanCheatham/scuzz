@@ -1925,6 +1925,7 @@ PY
   "$SCUZZ" fuzz --iterations 0 examples/studio
   mkdir -p scratchpad/editor
   (cd scratchpad/editor && SCUZZ_HOME="$ROOT" "$SCUZZ" fuzz --iterations 0 "$ROOT/examples/editor")
+  prove_evaluator_replay editor
 }
 
 slice_gpu() {
@@ -2072,14 +2073,190 @@ slice_macos_smoke() {
   if [ "$(uname -s)" = Darwin ]; then slice_macos_app; fi
 }
 
+prove_evaluator_replay() {
+  python3 - "$ROOT" "$SCUZZ" "$1" <<'PY_PARITY'
+import json, os, pathlib, resource, shutil, subprocess, sys, time
+
+repo, cli = map(pathlib.Path, sys.argv[1:3])
+name = sys.argv[3]
+package = repo / 'examples' / name
+build = package / 'build'
+source = build / 'fuzz/ev'
+ui = name == 'editor'
+cases = {
+    'tyck': [('generated', [
+        {'op': 'drive', 'name': 'tyckGenerated', 'args': [7]},
+        {'op': 'drive', 'name': 'prettyGenerated', 'args': [7]}])],
+    'codegen': [('generated', [
+        {'op': 'drive', 'name': 'irGenerated', 'args': [7]},
+        {'op': 'drive', 'name': 'evGenerated', 'args': [7]}])],
+    'editor': [('idle', None), ('queue-cache', [
+        {'op': 'drive', 'name': 'queueCacheFlow', 'args': [3]}]),
+        ('protocol', [
+            {'op': 'drive', 'name': 'laneFlow', 'args': [0, 1]},
+            {'op': 'drive', 'name': 'journalFlow', 'args': [4]},
+            {'op': 'drive', 'name': 'staleFlow', 'args': [3]},
+            {'op': 'drive', 'name': 'laneFlow', 'args': [1, 0]},
+            {'op': 'drive', 'name': 'unsafeFlow', 'args': [5]}])],
+}[name]
+base_env = {k: v for k, v in os.environ.items() if not k.startswith('SCUZZ_')}
+base_env['SCUZZ_HOME'] = str(repo)
+
+def limit():
+    if sys.platform.startswith('linux'):
+        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
+
+def replay(package, executable, label, events, ui=False):
+    build = package / 'build'
+    source = build / 'fuzz/ev'
+    out = build / 'fuzz/parity' / label
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    request = {'TESTRT': '1', 'SERVE': '1', 'KIT': 'sealed'}
+    if events is not None:
+        script = out / 'drive.json'
+        script.write_text(json.dumps({'v': 1, 'kind': 'inject', 'events': events}))
+        request['UI_SCRIPT' if ui else 'DRIVE_SCRIPT'] = str(script)
+    if ui:
+        request.update(UI_RUNTIME='headless', UI_WIDTH='960', UI_HEIGHT='560',
+                       UI_SCALE='1.0', UI_TAP='1')
+    for engine in ['eval', 'native']:
+        work = out / 'work'
+        shutil.rmtree(work, ignore_errors=True)
+        work.mkdir()
+        req = dict(request, TIMELINE_DUMP=str(out / f'{engine}.timeline'),
+                   CLAIM_DUMP=str(out / f'{engine}.claims'))
+        env = dict(base_env)
+        if ui:
+            req['FUZZ_DUMP'] = str(out / f'{engine}.json')
+        if engine == 'eval':
+            req['PROBE_LOG'] = str(out / 'probe.log')
+            path = out / 'request.txt'
+            path.write_text(''.join(f'{k}={v}\n' for k, v in req.items()))
+            env['SCUZZ_EV_REQUEST'] = str(path)
+            command = [str(cli), 'eval', '--probe', str(source)]
+            if ui:
+                command = [str(repo / 'examples/ui-host/build/ui-host'), str(source)]
+                env.update(SCUZZ_EVAL_MIRROR='1', SCUZZ_UI_RUNTIME='headless',
+                           SCUZZ_EVAL_TAGS=str(out / 'tags.txt'))
+        else:
+            env.update({'SCUZZ_' + k: v for k, v in req.items()})
+            command = [str(build / executable)]
+        started = time.monotonic()
+        result = subprocess.run(command, input='probe\n' if engine == 'eval' else None,
+                                text=True, capture_output=True, env=env, cwd=work,
+                                timeout=45 if engine == 'eval' else 20,
+                                preexec_fn=None if engine == 'eval' else limit)
+        (out / f'{engine}.log').write_text(result.stdout + result.stderr)
+        detail = result.stdout + result.stderr
+        if engine == 'eval' and (out / 'probe.log').exists():
+            detail += (out / 'probe.log').read_text()
+        assert result.returncode == 0, (name, label, engine, detail)
+        if engine == 'eval':
+            assert result.stdout == '0\n', (name, label, detail)
+        print(f'{name} {label} {engine}: {time.monotonic() - started:.2f} s', flush=True)
+    for suffix in ['timeline', 'claims']:
+        assert (out / f'eval.{suffix}').read_bytes() == (out / f'native.{suffix}').read_bytes(), (
+            name, label, suffix, str(out))
+    print(f'{name} {label}: exact evaluator and compiled timelines and claims', flush=True)
+    return out
+
+for label, events in cases:
+    replay(package, name, label, events, ui)
+
+if name == 'tyck':
+    target = build / 'fuzz/parity/signals'
+    shutil.rmtree(target, ignore_errors=True)
+    (target / 'src').mkdir(parents=True)
+    (target / 'work').mkdir()
+    (target / 'scuzz.toml').write_text(
+        '[package]\nname="signal-parity"\n[dependencies]\ncompiler={path="' +
+        os.path.relpath(repo / 'examples/compiler', target) + '"}\n')
+    (target / 'src/Main.scuzz').write_text('''def signals(): Bool =
+  for {
+    count = Signal.makeN("count", 4)
+    label = Signal.makeN("label", "ready")
+    _ = Eval.load([("Main", "def answer(): Int = 42\\n")])
+  } yield Signal.get(count) == 4 && Signal.get(label) == "ready"
+
+@main def main: IO[Unit] =
+  IO.pure(())
+''')
+    (target / 'signals.scuzz_verify').write_text('oracle signals(): Bool =\n  Main.signals()\n')
+    subprocess.run([str(cli), 'fmt', str(target)], env=base_env, check=True,
+                   capture_output=True, text=True, timeout=30)
+    result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(target)],
+                            env=base_env, cwd=target / 'work', capture_output=True,
+                            text=True, timeout=180)
+    detail = result.stdout + result.stderr
+    (target / 'campaign.log').write_text(detail)
+    assert result.returncode == 0 and 'probes run compiled' not in detail, detail
+    out = replay(target, 'signal-parity', 'signals', [
+        {'op': 'drive', 'name': 'signals', 'args': []}])
+    ev = (out / 'eval.timeline').read_bytes()
+    signals = json.loads(ev.decode().split('signals:\n', 1)[1].split('\n', 1)[0])
+    assert [(s['name'], s['value']) for s in signals] == [('count', 4), ('label', 'ready')], signals
+    print('IO probe: user signals stay visible; internal signal storage stays hidden', flush=True)
+PY_PARITY
+}
+
 slice_tyck_replay() {
   need_scuzz
   "$SCUZZ" fuzz --iterations 0 examples/tyck
+  prove_evaluator_replay tyck
+}
+
+prove_lexer_stack() {
+  python3 - "$ROOT" "$SCUZZ" <<'PY_LEXER'
+import os, pathlib, resource, subprocess, sys, tempfile
+
+repo, cli = map(pathlib.Path, sys.argv[1:])
+with tempfile.TemporaryDirectory(prefix='scuzz-lexer-') as directory:
+    target = pathlib.Path(directory)
+    (target / 'src').mkdir()
+    (target / 'scuzz.toml').write_text(
+        '[package]\nname="lexer-stack"\n[dependencies]\nsyntax={path="' +
+        os.path.relpath(repo / 'examples/syntax', target) + '"}\n')
+    (target / 'src/Main.scuzz').write_text('''import Lexer.SpTok
+import Lexer.Tok
+
+def tokenOk(p: SpTok, i: Int, n: Int): Bool =
+  p.stem == "batch" && p.off == i * 5 && (p.tok match {
+    case Tok.Ident(name) => i < n && name == "item"
+    case Tok.Eof => i == n
+    case _ => false
+  })
+
+def batchOk(n: Int): Bool =
+  for {
+    text = List.join(List.fill(n, "item "), "")
+    tokens = Lexer.lexStem(text, "batch")
+  } yield List.len(tokens) == n + 1 && List.forall(List.zipWithIndex(tokens), row => tokenOk(row._2, row._1, n))
+
+@main def main: IO[Unit] =
+  IO.pure(()).flatMap(_ => if (List.forall([0, 1, 100000], n => batchOk(n))) IO.println("lexer-stack-ok") else IO.fail("lexer token names, offsets, or end marker differ"))
+''')
+    subprocess.run([str(cli), 'fmt', str(target)], check=True,
+                   capture_output=True, text=True, timeout=30)
+    result = subprocess.run([str(cli), 'run', str(target)],
+                            capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0 and 'lexer-stack-ok' in result.stdout, result.stdout + result.stderr
+    def limit():
+        if sys.platform.startswith('linux'):
+            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
+            resource.setrlimit(resource.RLIMIT_STACK, (8 * 1024 * 1024,) * 2)
+    result = subprocess.run([str(target / 'build/lexer-stack')],
+                            capture_output=True, text=True, timeout=20, preexec_fn=limit)
+    assert result.returncode == 0 and result.stdout == 'lexer-stack-ok\n', result.stdout + result.stderr
+    print('Native lexer: 100,000 identifiers, exact names, offsets, and end marker; 8 MiB stack', flush=True)
+PY_LEXER
 }
 
 slice_codegen_replay() {
   need_scuzz
   "$SCUZZ" fuzz --iterations 0 examples/codegen
+  prove_evaluator_replay codegen
+  prove_lexer_stack
 }
 
 slice_oracles() {

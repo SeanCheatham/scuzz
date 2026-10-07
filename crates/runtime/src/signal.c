@@ -14,6 +14,7 @@ uint64_t sz_signal_revision(void) { return g_signal_revision; }
 struct SzSignal {
   void *value;
   int elem_str;
+  int hidden;
   uint64_t version;
   SzSignal *map_src;
   SzSignalMapFn map_fn;
@@ -571,7 +572,8 @@ SzSignal *sz_signal_new(void *value, int64_t kind, SzString *name) {
   sz_retain(value);
   s->value = value;
   s->elem_str = kind == 3;
-  sig_register((SigKind)(kind == 5 ? 3 : kind), s, sig_is_mirror(name));
+  s->hidden = sig_is_mirror(name);
+  sig_register((SigKind)(kind == 5 ? 3 : kind), s, s->hidden);
   if (name) sz_signal_name(s, sz_string_cstr(name));
   return s;
 }
@@ -589,7 +591,7 @@ void *sz_signal_write(SzSignal *s, void *value) {
   drop_value(s, s->value);
   s->value = value;
   s->version++;
-  g_signal_revision++;
+  if (!s->hidden) g_signal_revision++;
   return NULL;
 }
 

@@ -2545,6 +2545,70 @@ static void test_driver_growth(void) {
   sz_testrt_reset();
 }
 
+static SzIo *distance_driver(int64_t stage) {
+  char key[128];
+  int count = stage == 0 ? 4096 : 2;
+  for (int i = 0; i < count; i++) {
+    for (int j = 0; j < 3; j++) {
+      SzString *text;
+      int value = j == 0 ? 7 : j == 1 ? 3 : 9;
+      snprintf(key, sizeof key, "dist:distance.scuzz:%d:1@%d#cmp:%d", i, i, value);
+      text = sz_string_from_cstr(key);
+      sz_fuzz_hit(text);
+      sz_release(text);
+    }
+  }
+  return sz_io_pure(NULL);
+}
+
+static void test_comparison_distances(void) {
+  const char *path = "/tmp/scuzz_test_distance.txt";
+  const char *script = "/tmp/scuzz_test_distance.json";
+  SzString *name = sz_string_from_cstr("distanceSites");
+  sz_testrt_reset();
+  sz_driver_register(name, 1, 0, (void *)distance_driver);
+  sz_release(name);
+  setenv("SCUZZ_EV_TESTRT", "1", 1);
+  setenv("SCUZZ_EV_DISTANCE_DUMP", path, 1);
+  setenv("SCUZZ_EV_DRIVE_SCRIPT", script, 1);
+  for (int stage = 0; stage < 2; stage++) {
+    FILE *file = fopen(script, "w");
+    SzIo *unit = sz_io_pure(NULL);
+    SzIo *probe = sz_fuzz_probe(unit);
+    SzIoResult result;
+    char line[128], want[128];
+    int count = stage == 0 ? 4096 : 2;
+    assert(file);
+    fputs("{\"v\":1,\"kind\":\"inject\",\"events\":[", file);
+    if (stage == 1)
+      fputs("{\"op\":\"drive\",\"name\":\"distanceSites\",\"args\":[0]},", file);
+    fprintf(file, "{\"op\":\"drive\",\"name\":\"distanceSites\",\"args\":[%d]}]}", stage);
+    fclose(file);
+    result = sz_io_unsafe_run(probe);
+    assert(result.ok);
+    sz_release(probe);
+    sz_release(unit);
+    file = fopen(path, "r");
+    assert(file);
+    for (int i = 0; i < count; i++) {
+      snprintf(want, sizeof want, "distance.scuzz:%d:1@%d#cmp 3\n", i, i);
+      assert(fgets(line, sizeof line, file));
+      assert(!strcmp(line, want));
+    }
+    assert(!fgets(line, sizeof line, file));
+    fclose(file);
+  }
+  unsetenv("SCUZZ_EV_TESTRT");
+  unsetenv("SCUZZ_EV_DISTANCE_DUMP");
+  unsetenv("SCUZZ_EV_DRIVE_SCRIPT");
+  unsetenv("SCUZZ_TESTRT");
+  unsetenv("SCUZZ_DISTANCE_DUMP");
+  unsetenv("SCUZZ_DRIVE_SCRIPT");
+  sz_testrt_reset();
+  remove(path);
+  remove(script);
+}
+
 static int64_t closure_sum;
 static int closure_pair_ok;
 static int closure_verify_ran;
@@ -15181,6 +15245,7 @@ int main(void) {
   test_pick_names();
   test_driver_growth();
   test_fuzz_probe_closures();
+  test_comparison_distances();
   test_file_timeline();
   puts("runtime io tests ok");
   return 0;

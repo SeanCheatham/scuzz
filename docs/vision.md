@@ -4,6 +4,10 @@ Open work and implementation order. Design locks: [`philosophy.md`](philosophy.m
 
 Edit this file when the order changes. Remove completed work. Keep only the next slice in `plans.md`.
 
+## First: evaluator reliability and parity
+
+Reduce the measured compiler evaluator costs before local choice feedback. Separate server startup from probe execution. Correct the first-response timeout risk. Preserve exact timeline and claim comparisons for selected compiler and editor workloads. Keep probe deadlines, claims, corpus entries, and search scope. A compiled fallback does not prove evaluator parity.
+
 ## Primary arc: development through decisions
 
 A developer sets one objective and reviews a stream of small changes. Each card compares one proposal with the current working tree. Scuzz finds a recorded execution that shows the difference. The developer chooses a blind lane. Accepted changes become the baseline for the next request. Claims constrain the choices. Locks: [`philosophy.md`](philosophy.md#proposal-review).

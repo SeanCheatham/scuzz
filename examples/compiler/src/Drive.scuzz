@@ -1422,7 +1422,7 @@ def uiHostStampPath(dir: String): String =
   joinSlash(joinSlash(dir, "build"), "fingerprint.link")
 
 def uiHostFresh(dir: String, fp: String, exe: String, scuzz: String): IO[String] =
-  runLine(Str.concat(shQuote(scuzz), Str.concat(" build --out-dir ", Str.concat(shQuote(joinSlash(dir, "build")), Str.concat(" ", shQuote(dir)))))).flatMap(r => if (r._1 != 0) uiHostLinked(r, dir, fp, exe) else linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(link => uiHostLinked(link, dir, fp, exe)))
+  runLine(Str.concat(shQuote(scuzz), Str.concat(" build ", shQuote(dir)))).flatMap(r => if (r._1 != 0) uiHostLinked(r, dir, fp, exe) else linkExe(true, joinSlash(dir, "build"), "ui-host").flatMap(link => uiHostLinked(link, dir, fp, exe)))
 
 def uiHostLinked(r: (Int, String, String), dir: String, fp: String, exe: String): IO[String] =
   if (r._1 == 0) Fs.write(uiHostStampPath(dir), fp).map(_ => exe) else IO.println(r._3).flatMap(_ => IO.pure(""))

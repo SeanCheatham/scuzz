@@ -120,16 +120,10 @@ def sigStr(args: List[Value], i: Int): Signal[String] =
   Eval.sigStr(List.at(args, i))
 
 def mountEach(args: List[Value], p: EvProg): View =
-  View.each(Signal.mapN("$mirror", sigVal(List.at(args, 0)), v => eachRows(v, cloAt(args), p)), v => v)
+  View.each(Signal.mapN("$mirror", sigVal(List.at(args, 0)), v => Eval.listOf(v)), v => eachOne(v, cloAt(args), p))
 
 def cloAt(args: List[Value]): Value =
   if (List.len(args) < 2) Value.VUnit else List.at(args, 1)
-
-def eachRows(v: Value, f: Value, p: EvProg): List[View] =
-  v match {
-    case Value.VList(xs) => List.map(xs, x => eachOne(x, f, p))
-    case _ => View.text(Eval.show(v)) :: []
-  }
 
 def eachOne(x: Value, f: Value, p: EvProg): View =
   f match {

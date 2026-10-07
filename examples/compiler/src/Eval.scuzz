@@ -2393,7 +2393,7 @@ def scenarioCtx(p: EvProg, env: EvEnv, off: Int): Value =
   if (List.isEmpty(p.ctx)) errAt("Scenario.context outside scuzz fuzz", env, p, off) else Property.force(Ref.get(List.at(p.ctx, 0)))
 
 def probe(files: List[(String, String)]): IO[Unit] =
-  Ref.of(Value.VUnit).flatMap(ctx => probeServe(withCtx(load(files), ctx), ctx))
+  Ref.of(Value.VUnit).flatMap(ctx => probeServe(sigHideOn(withCtx(load(files), ctx)), ctx))
 
 def probeServe(p: EvProg, ctx: Ref[Value]): IO[Unit] =
   Sys.readLine().flatMap(line => if (Str.trim(line) != "probe") IO.pure(()) else probeOnce(p, ctx).flatMap(code => IO.println(Str.fromInt(code)).flatMap(_ => probeServe(p, ctx))))
