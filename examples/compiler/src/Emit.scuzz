@@ -2659,10 +2659,7 @@ def emitApplyLam2(p: String, body: Expr, arg: Slot, boxInt: Bool, bty: String, p
   }
 
 def emitApplyLam3(p: String, body: Expr, ac: String, av: String, ao: Bool, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  if (keepBind(p)) emitApplyLamShadow(shadowBind(p, prefix, ps), p, body, ac, av, ao, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid) else emitApplyLamSkip(join(ac, if (ao) relPtr(av) else ""), emitExprFid(body, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc, fid))
-
-def shadowBind(p: String, prefix: String, ps: List[Param]): String =
-  if (paramKnown(ps, p)) Str.concat("_", Str.concat(prefix, Str.concat("_", p))) else p
+  if (keepBind(p)) emitApplyLamShadow(Str.concat("_", Str.concat(prefix, Str.concat("_", p))), p, body, ac, av, ao, boxInt, bty, prefix, strs, defs, ens, ps, loc, fid) else emitApplyLamSkip(join(ac, if (ao) relPtr(av) else ""), emitExprFid(body, Str.concat(prefix, "_l"), strs, defs, ens, ps, loc, fid))
 
 def emitApplyLamShadow(fresh: String, p: String, body: Expr, ac: String, av: String, ao: Bool, boxInt: Bool, bty: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLam4(ac, emitExprFid(if (fresh == p) body else rewriteBind(body, p, fresh), Str.concat(prefix, "_l"), strs, defs, ens, Param(fresh, bty, "", "") :: dropParam(ps, p), loc, fid), av, fresh, boxInt, ao, isI64Ty(exprRetTyEns(body, defs, ens, Param(p, bty, "", "") :: dropParam(ps, p), loc)))
@@ -3977,7 +3974,7 @@ def patTag2(dot: Int, pat: String, ens: List[En]): Int =
 def emitMatch(s: Expr, arms: List[Arm], moff: Int, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   s match {
     case Expr.EVar(n, _) => emitMatchV(n, arms, moff, prefix, strs, defs, ens, ps, loc, fid)
-    case _ => emitMatch1(emitExprFid(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc, fid), qualifyMatchArms(arms, exprRetTyEns(s, defs, ens, ps, loc), ens), moff, prefix, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)), exprIsI64(s, ps, defs), fid + fmCount(s))
+    case _ => emitMatch1(emitExprFid(s, Str.concat(prefix, "_sc"), strs, defs, ens, ps, loc, fid), qualifyMatchArms(arms, exprRetTyEns(s, defs, ens, ps, loc), ens), moff, prefix, strs, defs, Check.specializeEnums(ens, exprRetTyEns(s, defs, ens, ps, loc)), ps, loc, matchSlots(exprRetTyEns(s, defs, ens, ps, loc)), isI64Ty(exprRetTyEns(s, defs, ens, ps, loc)) || exprIsI64(s, ps, defs), fid + fmCount(s))
   }
 
 def emitMatchV(n: String, arms: List[Arm], moff: Int, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
@@ -4723,7 +4720,7 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
   e match {
     case Expr.EVar(s, off) => if (s == from) Expr.EVar(to, off) else e
     case Expr.EPrint(inner, off) => Expr.EPrint(rewriteBind(inner, from, to), off)
-    case Expr.ECall(f, args, off) => Expr.ECall(f, rewriteBindList(args, from, to), off)
+    case Expr.ECall(f, args, off) => Expr.ECall(if (f == from) to else f, rewriteBindList(args, from, to), off)
     case Expr.EMethod(recv, name, args, off) => Expr.EMethod(rewriteBind(recv, from, to), name, rewriteBindList(args, from, to), off)
     case Expr.EField(recv, name, off) => Expr.EField(rewriteBind(recv, from, to), name, off)
     case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteBind(l, from, to), rewriteBind(r, from, to), off)
