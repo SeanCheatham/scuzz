@@ -4454,7 +4454,7 @@ def emitPayload(pat: String, prefix: String, i: Int, scrut: String, ens: List[En
   if (patBind(pat) == "") "" else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitPayloadN(prefix, i, scrut, splitPat(patBind(pat)), 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat))) else emitPayload2(prefix, i, scrut, bindIsInt(pat, ens))
 
 def emitPayloadN(prefix: String, i: Int, scrut: String, ns: List[String], k: Int, fts: List[String], names: List[String]): String =
-  if (k == 0) join(line(Str.concat(tmp(fpre(prefix, i), "pl"), Str.concat("call ptr @sz_adt_payload(ptr ", Str.concat(scrut, ")")))), emitPayloadN(prefix, i, scrut, ns, 1, fts, names)) else if (List.isEmpty(ns)) "" else join(emitFieldAt(prefix, i, fieldIdx(List.at(ns, 0), k - 1, names), slotInt(fts, fieldIdx(List.at(ns, 0), k - 1, names))), emitPayloadN(prefix, i, scrut, List.tail(ns), k + 1, fts, names))
+  if (k == 0) join(line(Str.concat(tmp(fpre(prefix, i), "pl"), Str.concat("call ptr @sz_adt_payload(ptr ", Str.concat(scrut, ")")))), emitPayloadN(prefix, i, scrut, ns, 1, fts, names)) else if (List.isEmpty(ns)) "" else join(if (fieldBind(List.at(ns, 0)) == "_") "" else emitFieldAt(prefix, i, fieldIdx(List.at(ns, 0), k - 1, names), slotInt(fts, fieldIdx(List.at(ns, 0), k - 1, names))), emitPayloadN(prefix, i, scrut, List.tail(ns), k + 1, fts, names))
 
 def emitFieldAt(prefix: String, i: Int, k: Int, isInt: Bool): String =
   join(fieldCell(prefix, i, k), if (isInt) fieldUnbox(prefix, i, k) else "")
@@ -5440,10 +5440,10 @@ def recFieldPair(recv: Expr, name: String, off: Int, ty: String, ens: List[En], 
   }
 
 def recField2(recv: Expr, name: String, off: Int, idx: Int, n: Int, ty: String, tys: List[String]): Expr =
-  if (idx < 0) Expr.EField(recv, name, off) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys), ")"))), "", Expr.EVar(pickBind(idx, tys), 0)) :: noArm(), off)
+  if (idx < 0) Expr.EField(recv, name, off) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys, idx), ")"))), "", Expr.EVar(pickBind(idx, tys), 0)) :: noArm(), off)
 
-def bindsTyped(i: Int, n: Int, tys: List[String]): String =
-  if (i >= n) "" else if (i + 1 == n) pickBind(i, tys) else Str.concat(pickBind(i, tys), Str.concat(", ", bindsTyped(i + 1, n, tys)))
+def bindsTyped(i: Int, n: Int, tys: List[String], idx: Int): String =
+  if (i >= n) "" else if (i + 1 == n) if (i == idx) pickBind(i, tys) else "_" else Str.concat(if (i == idx) pickBind(i, tys) else "_", Str.concat(", ", bindsTyped(i + 1, n, tys, idx)))
 
 def pickBind(idx: Int, tys: List[String]): String =
   if (slotInt(tys, idx)) intBind(idx) else fakeBind(idx)
