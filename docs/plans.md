@@ -1,6 +1,6 @@
 # Current slice: evaluator reliability and parity
 
-Status: the server uses separate startup and response waits. An index reduces measured function lookup costs. Evaluator maps use a balanced tree. Map model, API, compiler, generated program, startup, IO signal, Headless UI, and search-feedback checks pass. Constructor field selection and View signal dumps have equal timelines and claims on selected replays. The Docs corpus passes. Module type identity remains open. Compiler idle costs remain open. Complete this slice before local choice feedback. Read `HUMANS.md` and the evaluator locks in `philosophy.md`.
+Status: the server uses separate startup and response waits. An index reduces measured function lookup costs. Evaluator maps use a balanced tree. Map model, API, compiler, generated program, startup, IO signal, Headless UI, and search-feedback checks pass. Constructor field selection and View signal dumps have equal timelines and claims on selected replays. The Docs corpus passes. Inline bindings use names from their expression scopes. Generated proofs check repeated local names and closure calls in separate match arms. Module type identity remains open. Compiler idle costs remain open. Complete this slice before local choice feedback. Read `HUMANS.md` and the evaluator locks in `philosophy.md`.
 
 ## Outcome
 

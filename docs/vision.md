@@ -8,7 +8,7 @@ Edit this file when the order changes. Remove completed work. Keep only the next
 
 Reduce the remaining compiler evaluator costs before local choice feedback. Measure server startup and probe execution separately. Preserve exact timeline and claim comparisons for selected compiler and editor workloads. Keep probe deadlines, claims, corpus entries, and search scope. A compiled fallback does not prove evaluator parity.
 
-Measure value allocation and release in compiler idle probes. Use fixed sources to compare each change. Correct the largest demonstrated cost first.
+Correct compiler errors that block a valid program or a required proof. Measure value allocation and release in compiler idle probes. Use fixed sources to compare each change. Correct the largest demonstrated cost first.
 
 ## Primary arc: development through decisions
 
