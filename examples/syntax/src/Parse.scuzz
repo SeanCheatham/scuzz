@@ -91,29 +91,33 @@ def _off(toks: Toks, i: Int): Int =
   _sp(toks, i).off
 
 def spanOf(e: Expr): (String, Int) =
+  ("", spanOffset(e))
+
+def spanOffset(e: Expr): Int =
   e match {
-    case Expr.EInt(_, off) => ("", off)
-    case Expr.EFloat(_, off) => ("", off)
-    case Expr.EStr(_, off) => ("", off)
-    case Expr.EVar(_, off) => ("", off)
-    case Expr.EPrint(_, off) => ("", off)
-    case Expr.ECall(_, _, off) => ("", off)
-    case Expr.EMethod(_, _, _, off) => ("", off)
-    case Expr.EField(_, _, off) => ("", off)
-    case Expr.EBin(_, _, _, off) => ("", off)
-    case Expr.EUn(_, _, off) => ("", off)
-    case Expr.EIf(_, _, _, off) => ("", off)
-    case Expr.EMatch(_, _, off) => ("", off)
-    case Expr.EFor(_, _, off) => ("", off)
-    case Expr.EAscribe(_, _, off) => ("", off)
-    case Expr.EInterp(_, _, off) => ("", off)
-    case _ => ("", 0 - 1)
+    case Expr.EInt(_, off) => off
+    case Expr.EFloat(_, off) => off
+    case Expr.EStr(_, off) => off
+    case Expr.EVar(_, off) => off
+    case Expr.EPrint(_, off) => off
+    case Expr.ECall(_, _, off) => off
+    case Expr.EMethod(_, _, _, off) => off
+    case Expr.EField(_, _, off) => off
+    case Expr.EBin(_, _, _, off) => off
+    case Expr.EUn(_, _, off) => off
+    case Expr.EIf(_, _, _, off) => off
+    case Expr.EMatch(_, _, off) => off
+    case Expr.EFor(_, _, off) => off
+    case Expr.EAscribe(_, _, off) => off
+    case Expr.EInterp(_, _, off) => off
+    case _ => 0 - 1
   }
 
 def spanOff(e: Expr, alt: Int): Int =
-  spanOf(e) match {
-    case (_, off) => if (off < 0) alt else off
-  }
+  spanOr(spanOffset(e), alt)
+
+def spanOr(off: Int, alt: Int): Int =
+  if (off < 0) alt else off
 
 def _is(toks: Toks, i: Int, t: Tok): Bool =
   Lexer.kind(_at(toks, i)) == Lexer.kind(t)
