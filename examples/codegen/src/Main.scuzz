@@ -766,6 +766,12 @@ def evTco(): Bool =
 def evTcoMatch(): Bool =
   evCall(srcTcoMatch(), "countdownMatch", [Value.VInt(100000)]) == "0"
 
+def srcEvHeapTail(): String =
+  "def text(n: Int, value: String): String =\n  if (n > 0 && Str.len(value) > 0) text(n - 1, value) else Str.concat(value, \"!\")\n\ndef numbers(n: Int, value: List[Int]): List[Int] =\n  n match {\n    case 0 => List.append(value, 7)\n    case _ => numbers(n - 1, value)\n  }\n\n@main def main: IO[Unit] =\n  IO.println(text(1, \"payload\"))\n"
+
+def evHeapTail(): Bool =
+  Check.check(srcEvHeapTail()) == "[]" && evCall(srcEvHeapTail(), "text", [Value.VInt(20000), Value.VStr("payload")]) == "\"payload!\"" && evCall(srcEvHeapTail(), "numbers", [Value.VInt(20000), Value.VList([Value.VInt(2), Value.VInt(3)])]) == "[2, 3, 7]"
+
 def evGenerated(n: Int where n >= 0): Bool =
   Cases.evaluated(n)
 
@@ -869,10 +875,10 @@ def evLive(): Bool =
   evExcluded() && Check.check(srcLive()) == "[]" && evCall(srcLive(), "reads", []) == "17" && evCall(srcLive(), "arm", []) == "<io>" && evCall(srcLive(), "reg", []) == "<io>" && evCall(srcLive(), "watch", []) == "<io>" && evCall(srcLive(), "rel", []) == "<io>" && evCall(srcLive(), "go", []) == "<io>"
 
 def evAllOk(): Bool =
-  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evQualified() && evLookup() && evConstructors() && evMapModel(0) && evMapModel(1) && evMapModel(2) && evKitsCovered() && evLive()
+  evAdd() && evTco() && evTcoMatch() && evHeapTail() && evGenerated(0) && evGenerated(13) && evMatch() && evQualified() && evLookup() && evConstructors() && evMapModel(0) && evMapModel(1) && evMapModel(2) && evKitsCovered() && evLive()
 
 def evDump(): String =
-  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evQualified()) "evQualified" else if (!evLookup()) "evLookup" else if (!evConstructors()) "evConstructors" else if (!evMapModel(0) || !evMapModel(1) || !evMapModel(2)) "evMapModel" else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
+  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evHeapTail()) "evHeapTail" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evQualified()) "evQualified" else if (!evLookup()) "evLookup" else if (!evConstructors()) "evConstructors" else if (!evMapModel(0) || !evMapModel(1) || !evMapModel(2)) "evMapModel" else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
 
 def evLiveDump(): String =
   if (!evExcluded()) "evExcluded" else if (Check.check(srcLive()) != "[]") Check.check(srcLive()) else if (evCall(srcLive(), "reads", []) != "17") evCall(srcLive(), "reads", []) else if (evCall(srcLive(), "arm", []) != "<io>") "arm" else if (evCall(srcLive(), "reg", []) != "<io>") "reg" else if (evCall(srcLive(), "watch", []) != "<io>") "watch" else if (evCall(srcLive(), "rel", []) != "<io>") "rel" else "go"

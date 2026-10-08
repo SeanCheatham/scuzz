@@ -36,7 +36,9 @@ record UiCall(name: String, args: List[Value])
 
 record EvEnv(vars: List[(String, Value)], mod: String, loc: String)
 
-record EvStep(e: Expr, env: EvEnv)
+enum EvStep:
+  case Next(e: Expr, env: EvEnv)
+  case Ready(v: Value)
 
 record TryOut(diags: String, view: Value, prog: List[EvProg], trace: Value)
 
@@ -157,7 +159,7 @@ def callPureHit(hit: List[Fun], mod: String, name: String, args: List[Value], p:
   if (List.isEmpty(hit)) Value.VErr(Str.concat("eval: unknown function ", Str.concat(mod, Str.concat(".", name)))) else step(defStepVals(List.at(hit, 0), args, p), p)
 
 def runMain(p: EvProg): IO[Unit] =
-  mainIo(step(EvStep(p.main, envOf(p)), p))
+  mainIo(step(EvStep.Next(p.main, envOf(p)), p))
 
 def envOf(p: EvProg): EvEnv =
   EvEnv(noVars(), p.mainMod, "")
@@ -234,7 +236,7 @@ def tryChecked(src: String, diags: String, pool: Signal[Value]): IO[TryOut] =
   if (diags != "scuzz check ok") IO.pure(TryOut(diags, Value.VUnit, [], Value.VList(noVals()))) else Ref.of(Value.VUnit).flatMap(host => Ref.of(Value.VList(noVals())).flatMap(log => tryHost(withLog(withHost(load(("Main", src) :: []), host, pool), log), host)))
 
 def tryHost(p: EvProg, host: Ref[Value]): IO[TryOut] =
-  tryMain(step(EvStep(p.main, envOf(p)), p)).flatMap(msg => Ref.get(host).map(v => tryOut(msg, v, p)))
+  tryMain(step(EvStep.Next(p.main, envOf(p)), p)).flatMap(msg => Ref.get(host).map(v => tryOut(msg, v, p)))
 
 def tryOut(msg: String, v: Value, p: EvProg): TryOut =
   v match {
@@ -368,29 +370,30 @@ def showAll(xs: List[Value]): String =
   List.join(List.map(xs, x => show(x)), ", ")
 
 def step(s: EvStep, p: EvProg): Value =
-  s.e match {
-    case Expr.EInt(n, _) => Value.VInt(n)
-    case Expr.EBool(b) => Value.VBool(b)
-    case Expr.EStr(str, _) => Value.VStr(str)
-    case Expr.EUnit => Value.VUnit
-    case Expr.EVar(name, off) => varValue(name, s.env, p, off)
-    case Expr.EPrint(inner, off) => printValue(step(EvStep(inner, s.env), p), s.env, p, off)
-    case Expr.ECall(f, args, off) => step(callStep(s.e, f, args, s.env, p, off), p)
-    case Expr.EMethod(recv, name, args, off) => step(methodStep(s.e, recv, name, args, s.env, p, off), p)
-    case Expr.EField(recv, name, off) => fieldValue(s.e, recv, name, s.env, p, off)
-    case Expr.EBin(op, l, r, off) => binValue(s.e, op, l, r, s.env, p, off)
-    case Expr.EUn(op, inner, off) => unValue(s.e, op, inner, s.env, p, off)
-    case Expr.ELam(param, _, body) => Value.VClo(param, body, s.env)
-    case Expr.EIf(c, t, el, off) => step(ifStep(step(EvStep(c, s.env), p), t, el, s.env, p, off), p)
-    case Expr.EMatch(scr, arms, off) => step(matchStep(step(EvStep(scr, s.env), p), arms, s.env, p, off), p)
-    case Expr.EFor(bs, body, off) => forValue(bs, body, s.env, p, off, false)
-    case Expr.EList(xs) => listValue(stepAll(xs, s.env, p))
-    case Expr.ETuple(xs) => tupleValue(stepAll(xs, s.env, p))
-    case Expr.ENamed(_, inner) => step(EvStep(inner, s.env), p)
-    case Expr.EAscribe(inner, _, _) => step(EvStep(inner, s.env), p)
-    case Expr.EInterp(_, parts, _) => interpAcc(parts, s.env, p, Builder.empty())
-    case Expr.EHole => Value.VClo("_ph", Expr.EVar("_ph", 0), s.env)
-    case Expr.EFloat(str, _) => Value.VFloat(floatLit(Str.replace(str, "_", "")))
+  s match {
+    case EvStep.Ready(v) => v
+    case EvStep.Next(Expr.EInt(n, _), _) => Value.VInt(n)
+    case EvStep.Next(Expr.EBool(b), _) => Value.VBool(b)
+    case EvStep.Next(Expr.EStr(str, _), _) => Value.VStr(str)
+    case EvStep.Next(Expr.EUnit, _) => Value.VUnit
+    case EvStep.Next(Expr.EVar(name, off), env) => varValue(name, env, p, off)
+    case EvStep.Next(Expr.EPrint(inner, off), env) => printValue(step(EvStep.Next(inner, env), p), env, p, off)
+    case EvStep.Next(e @ Expr.ECall(f, args, off), env) => step(callStep(e, f, args, env, p, off), p)
+    case EvStep.Next(e @ Expr.EMethod(recv, name, args, off), env) => step(methodStep(e, recv, name, args, env, p, off), p)
+    case EvStep.Next(e @ Expr.EField(recv, name, off), env) => fieldValue(e, recv, name, env, p, off)
+    case EvStep.Next(e @ Expr.EBin(op, l, r, off), env) => binValue(e, op, l, r, env, p, off)
+    case EvStep.Next(e @ Expr.EUn(op, inner, off), env) => unValue(e, op, inner, env, p, off)
+    case EvStep.Next(Expr.ELam(param, _, body), env) => Value.VClo(param, body, env)
+    case EvStep.Next(Expr.EIf(c, t, el, off), env) => step(ifStep(step(EvStep.Next(c, env), p), t, el, env, p, off), p)
+    case EvStep.Next(Expr.EMatch(scr, arms, off), env) => step(matchStep(step(EvStep.Next(scr, env), p), arms, env, p, off), p)
+    case EvStep.Next(Expr.EFor(bs, body, off), env) => forValue(bs, body, env, p, off, false)
+    case EvStep.Next(Expr.EList(xs), env) => listValue(stepAll(xs, env, p))
+    case EvStep.Next(Expr.ETuple(xs), env) => tupleValue(stepAll(xs, env, p))
+    case EvStep.Next(Expr.ENamed(_, inner), env) => step(EvStep.Next(inner, env), p)
+    case EvStep.Next(Expr.EAscribe(inner, _, _), env) => step(EvStep.Next(inner, env), p)
+    case EvStep.Next(Expr.EInterp(_, parts, _), env) => interpAcc(parts, env, p, Builder.empty())
+    case EvStep.Next(Expr.EHole, env) => Value.VClo("_ph", Expr.EVar("_ph", 0), env)
+    case EvStep.Next(Expr.EFloat(str, _), _) => Value.VFloat(floatLit(Str.replace(str, "_", "")))
   }
 
 def floatLit(str: String): Float =
@@ -415,10 +418,10 @@ def pow10(k: Int): Int =
   if (k <= 0) 1 else 10 * pow10(k - 1)
 
 def stepAll(xs: List[Expr], env: EvEnv, p: EvProg): List[Value] =
-  if (List.isEmpty(xs)) noVals() else step(EvStep(List.at(xs, 0), env), p) :: stepAll(List.tail(xs), env, p)
+  if (List.isEmpty(xs)) noVals() else step(EvStep.Next(List.at(xs, 0), env), p) :: stepAll(List.tail(xs), env, p)
 
 def valueStep(v: Value): EvStep =
-  EvStep(Expr.EVar("#v", 0), EvEnv(("#v", v) :: noVars(), "", ""))
+  EvStep.Ready(v)
 
 def holeStep(e: Expr, env: EvEnv): EvStep =
   valueStep(Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env))
@@ -528,13 +531,13 @@ def ifStep(cv: Value, t: Expr, el: Expr, env: EvEnv, p: EvProg, off: Int): EvSte
   }
 
 def ifArmStep(e: Expr, tag: String, env: EvEnv, parentOff: Int, p: EvProg): EvStep =
-  if (isUnitExpr(e)) EvStep(e, env) else ifArmLogged(logAdd(p, Parse.spanOff(e, parentOff), "", Str.concat("#", tag), env), e, tag, env, parentOff)
+  if (isUnitExpr(e)) EvStep.Next(e, env) else ifArmLogged(logAdd(p, Parse.spanOff(e, parentOff), "", Str.concat("#", tag), env), e, tag, env, parentOff)
 
 def ifArmLogged(_u: Unit, e: Expr, tag: String, env: EvEnv, parentOff: Int): EvStep =
-  if (isUnitExpr(e)) EvStep(e, env) else armStep(e, tag, env, parentOff)
+  if (isUnitExpr(e)) EvStep.Next(e, env) else armStep(e, tag, env, parentOff)
 
 def armStep(e: Expr, tag: String, env: EvEnv, parentOff: Int): EvStep =
-  if (env.loc == "") EvStep(e, env) else hitStep(Fuzz.hit(Check.covKeyOf(env.loc, Parse.spanOff(e, parentOff), tag)), EvStep(e, env))
+  if (env.loc == "") EvStep.Next(e, env) else hitStep(Fuzz.hit(Check.covKeyOf(env.loc, Parse.spanOff(e, parentOff), tag)), EvStep.Next(e, env))
 
 def hitStep(_u: Unit, s: EvStep): EvStep =
   s
@@ -590,7 +593,7 @@ def defBodyHit(_u: Unit, d: Fun, vals: List[Value], loc: String, p: EvProg): EvS
   tailOr(d, vals, loc, p)
 
 def tailSlow(d: Fun, vals: List[Value], loc: String): EvStep =
-  EvStep(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc))
+  EvStep.Next(d.body, EvEnv(bindParams(d.params, vals, noVars()), d.mod, loc))
 
 def tailOr(d: Fun, vals: List[Value], loc: String, p: EvProg): EvStep =
   if (!List.isEmpty(d.tparams)) tailSlow(d, vals, loc) else tailOrBody(d, vals, loc, p)
@@ -814,11 +817,11 @@ def applyArg(vals: List[Value]): Value =
   if (List.len(vals) == 1) List.at(vals, 0) else Value.VTuple(vals)
 
 def bindArg(param: String, arg: Value, cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (param == "" || param == "()") EvStep(body, cenv) else bindArgPat(tryPat(param, arg, p), cenv, body, env, p, off)
+  if (param == "" || param == "()") EvStep.Next(body, cenv) else bindArgPat(tryPat(param, arg, p), cenv, body, env, p, off)
 
 def bindArgPat(bound: Option[List[(String, Value)]], cenv: EvEnv, body: Expr, env: EvEnv, p: EvProg, off: Int): EvStep =
   bound match {
-    case Some(bs) => EvStep(body, EvEnv(List.concat(bs, cenv.vars), cenv.mod, cenv.loc))
+    case Some(bs) => EvStep.Next(body, EvEnv(List.concat(bs, cenv.vars), cenv.mod, cenv.loc))
     case None => valueStep(errAt("lambda argument does not match its parameter", env, p, off))
   }
 
@@ -841,12 +844,12 @@ def applyValue(fv: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): V
   step(applyStep(fv, vals, env, p, off), p)
 
 def methodStep(e: Expr, recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (name == "apply") applyStep(step(EvStep(recv, env), p), stepAll(args, env, p), env, p, off) else methodRecv(recv, name, args, env, p, off)
+  if (Check.needsPh(e, p.funs)) holeStep(e, env) else if (name == "apply") applyStep(step(EvStep.Next(recv, env), p), stepAll(args, env, p), env, p, off) else methodRecv(recv, name, args, env, p, off)
 
 def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   recv match {
     case Expr.EVar(en, _) => if (isBound(env, en)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else methodQual(en, name, args, env, p, off)
-    case _ => methodValue(step(EvStep(recv, env), p), name, args, env, p, off)
+    case _ => methodValue(step(EvStep.Next(recv, env), p), name, args, env, p, off)
   }
 
 def methodQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
@@ -874,7 +877,7 @@ def copyFields(ps: List[Param], fields: List[Value], args: List[Expr], k: Int, e
   if (List.isEmpty(ps) || List.isEmpty(fields)) noVals() else copyField(Emit.copyOverride(args, k, List.at(ps, 0).name), List.at(fields, 0), env, p) :: copyFields(List.tail(ps), List.tail(fields), args, k + 1, env, p)
 
 def copyField(hit: List[Expr], old: Value, env: EvEnv, p: EvProg): Value =
-  if (List.isEmpty(hit)) old else step(EvStep(List.at(hit, 0), env), p)
+  if (List.isEmpty(hit)) old else step(EvStep.Next(List.at(hit, 0), env), p)
 
 def isIo(v: Value): Bool =
   v match {
@@ -938,8 +941,8 @@ def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: In
 
 def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   recv match {
-    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else if (!isBound(env, en) && isKit(p, Str.concat(en, Str.concat(".", name)))) Value.VFun(Str.concat(en, Str.concat(".", name)), "") else if (!isBound(env, en) && !List.isEmpty(funMod(p, en, name))) Value.VFun(name, en) else fieldOf(step(EvStep(recv, env), p), name, env, p, off)
-    case _ => fieldOf(step(EvStep(recv, env), p), name, env, p, off)
+    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else if (!isBound(env, en) && isKit(p, Str.concat(en, Str.concat(".", name)))) Value.VFun(Str.concat(en, Str.concat(".", name)), "") else if (!isBound(env, en) && !List.isEmpty(funMod(p, en, name))) Value.VFun(name, en) else fieldOf(step(EvStep.Next(recv, env), p), name, env, p, off)
+    case _ => fieldOf(step(EvStep.Next(recv, env), p), name, env, p, off)
   }
 
 def fieldOf(rv: Value, name: String, env: EvEnv, p: EvProg, off: Int): Value =
@@ -957,18 +960,18 @@ def fieldAt(xs: List[Value], i: Int, name: String, env: EvEnv, p: EvProg, off: I
   if (i < 0 || i >= List.len(xs)) errAt(Str.concat("no field ", name), env, p, off) else List.at(xs, i)
 
 def binValue(e: Expr, op: String, l: Expr, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
-  if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else if (op == "&&") andValue(step(EvStep(l, env), p), r, env, p, off) else if (op == "||") orValue(step(EvStep(l, env), p), r, env, p, off) else binVals(op, step(EvStep(l, env), p), step(EvStep(r, env), p), env, p, off)
+  if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else if (op == "&&") andValue(step(EvStep.Next(l, env), p), r, env, p, off) else if (op == "||") orValue(step(EvStep.Next(l, env), p), r, env, p, off) else binVals(op, step(EvStep.Next(l, env), p), step(EvStep.Next(r, env), p), env, p, off)
 
 def andValue(lv: Value, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
   lv match {
-    case Value.VBool(b) => if (b) step(EvStep(r, env), p) else lv
+    case Value.VBool(b) => if (b) step(EvStep.Next(r, env), p) else lv
     case Value.VErr(_) => lv
     case _ => errAt("&& needs Bool", env, p, off)
   }
 
 def orValue(lv: Value, r: Expr, env: EvEnv, p: EvProg, off: Int): Value =
   lv match {
-    case Value.VBool(b) => if (b) lv else step(EvStep(r, env), p)
+    case Value.VBool(b) => if (b) lv else step(EvStep.Next(r, env), p)
     case Value.VErr(_) => lv
     case _ => errAt("|| needs Bool", env, p, off)
   }
@@ -1028,7 +1031,7 @@ def divInts(a: Int, b: Int, rem: Bool, env: EvEnv, p: EvProg, off: Int): Value =
   if (b == 0) errAt("division by zero", env, p, off) else if (rem) Value.VInt(a % b) else Value.VInt(a / b)
 
 def unValue(e: Expr, op: String, inner: Expr, env: EvEnv, p: EvProg, off: Int): Value =
-  if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else unVal(op, step(EvStep(inner, env), p), env, p, off)
+  if (Check.needsPh(e, p.funs)) Value.VClo("_ph", Check.rewriteHole(e, "_ph"), env) else unVal(op, step(EvStep.Next(inner, env), p), env, p, off)
 
 def unVal(op: String, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
   v match {
@@ -1141,7 +1144,7 @@ def matchBound(v: Value, bound: Option[List[(String, Value)]], g: String, body: 
   }
 
 def matchGuard(v: Value, benv: EvEnv, g: String, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): EvStep =
-  if (g == "") armStep(body, Str.fromInt(i), benv, off) else matchGuardVal(v, step(EvStep(Emit.parseGuard(g), benv), p), benv, body, rest, env, p, off, i)
+  if (g == "") armStep(body, Str.fromInt(i), benv, off) else matchGuardVal(v, step(EvStep.Next(Emit.parseGuard(g), benv), p), benv, body, rest, env, p, off, i)
 
 def matchGuardVal(v: Value, gv: Value, benv: EvEnv, body: Expr, rest: List[Arm], env: EvEnv, p: EvProg, off: Int, i: Int): EvStep =
   gv match {
@@ -1256,14 +1259,14 @@ def tryFieldNext(l: Option[List[(String, Value)]], rest: List[String], fields: L
   }
 
 def forValue(bs: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
-  if (List.isEmpty(bs)) forBody(step(EvStep(body, env), p), drew) else forBind(List.at(bs, 0), List.tail(bs), body, env, p, off, drew)
+  if (List.isEmpty(bs)) forBody(step(EvStep.Next(body, env), p), drew) else forBind(List.at(bs, 0), List.tail(bs), body, env, p, off, drew)
 
 def forBody(v: Value, drew: Bool): Value =
   if (drew) Value.VIo(ioOfPure(v)) else v
 
 def forBind(b: Bind, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
   b match {
-    case Bind(draw, name, value) => forBound(draw, name, step(EvStep(if (draw) value else Emit.nameSig(name, value), env), p), rest, body, env, p, Parse.spanOff(value, off), drew)
+    case Bind(draw, name, value) => forBound(draw, name, step(EvStep.Next(if (draw) value else Emit.nameSig(name, value), env), p), rest, body, env, p, Parse.spanOff(value, off), drew)
   }
 
 def forBound(draw: Bool, name: String, v: Value, rest: List[Bind], body: Expr, env: EvEnv, p: EvProg, off: Int, drew: Bool): Value =
@@ -1307,7 +1310,7 @@ def tupleValue(vals: List[Value]): Value =
   if (hasErr(vals)) firstErr(vals) else if (List.isEmpty(vals)) Value.VUnit else Value.VTuple(vals)
 
 def interpAcc(parts: List[Expr], env: EvEnv, p: EvProg, b: Builder): Value =
-  if (List.isEmpty(parts)) Value.VStr(Builder.result(b)) else interpPart(step(EvStep(List.at(parts, 0), env), p), List.tail(parts), env, p, b)
+  if (List.isEmpty(parts)) Value.VStr(Builder.result(b)) else interpPart(step(EvStep.Next(List.at(parts, 0), env), p), List.tail(parts), env, p, b)
 
 def interpPart(v: Value, rest: List[Expr], env: EvEnv, p: EvProg, b: Builder): Value =
   v match {
@@ -2604,7 +2607,7 @@ def mainLoc(p: EvProg): String =
   Emit.panicLocExprAt(p.files, p.idx, p.main)
 
 def probeMain(p: EvProg): IO[Unit] =
-  hitStepIo(Fuzz.hit(mainLoc(p)), evUnit(step(EvStep(p.main, EvEnv(noVars(), p.mainMod, mainLoc(p))), p)))
+  hitStepIo(Fuzz.hit(mainLoc(p)), evUnit(step(EvStep.Next(p.main, EvEnv(noVars(), p.mainMod, mainLoc(p))), p)))
 
 def hitStepIo(_u: Unit, io: IO[Unit]): IO[Unit] =
   io
@@ -2627,7 +2630,7 @@ def drvArgs(p: EvProg, ps: List[Param], toks: List[String]): List[Value] =
   if (List.isEmpty(ps)) noVals() else drvArg(p, List.at(ps, 0).ty, if (List.isEmpty(toks)) "" else List.at(toks, 0)) :: drvArgs(p, List.tail(ps), if (List.isEmpty(toks)) toks else List.tail(toks))
 
 def drvArg(p: EvProg, ty: String, tok: String): Value =
-  if (ty == "Int") Value.VInt(Str.toInt(tok, 0)) else if (ty == "Bool") Value.VBool(tok == "true" || tok == "1") else if (ty == "String") Value.VStr(Verify.unquoteTok(tok)) else if (tok == "") Value.VErr("drive decode failed") else step(EvStep(Emit.parseGuard(tok), EvEnv(noVars(), "__verify", "")), p)
+  if (ty == "Int") Value.VInt(Str.toInt(tok, 0)) else if (ty == "Bool") Value.VBool(tok == "true" || tok == "1") else if (ty == "String") Value.VStr(Verify.unquoteTok(tok)) else if (tok == "") Value.VErr("drive decode failed") else step(EvStep.Next(Emit.parseGuard(tok), EvEnv(noVars(), "__verify", "")), p)
 
 def claimVerdict(v: Value): Verdict =
   v match {
