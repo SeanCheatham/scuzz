@@ -1,0 +1,327 @@
+record Index(types: Map[String, List[String]], records: Set[String], cases: Map[String, List[String]], imps: List[Imp], modules: Set[String])
+
+record Scope(index: Index, mod: String, params: List[String], locals: List[String])
+
+record PathTokens(name: String, rest: List[SpTok], end: Int)
+
+import Parse.Prog
+import Parse.En
+import Parse.EnCase
+import Parse.Alias
+import Parse.Tr
+import Parse.TrMethod
+import Parse.Im
+import Parse.Imp
+import Parse.Fun
+import Parse.Param
+import Parse.Expr
+import Parse.Arm
+import Parse.Bind
+import Type.Ty
+import Lexer.Tok
+import Lexer.SpTok
+
+def prefix(): String =
+  "__ScuzzType_"
+
+def identity(mod: String, name: String): String =
+  if (mod == "" || Str.startsWith(name, prefix())) name else Str.concat(prefix(), Str.concat(Str.fromInt(Str.len(mod)), Str.concat("_", Str.concat(mod, Str.concat("_", name)))))
+
+def short(name: String): String =
+  if (!Str.startsWith(name, prefix())) name else Str.drop(name, identityEnd(name) + 1)
+
+def owner(name: String): String =
+  if (!Str.startsWith(name, prefix())) "" else Str.slice(name, identityBegin(name), identityEnd(name))
+
+def identityBegin(name: String): Int =
+  underscore(name, Str.len(prefix())) + 1
+
+def identityEnd(name: String): Int =
+  identityBegin(name) + Str.toInt(Str.slice(name, Str.len(prefix()), identityBegin(name) - 1), 0)
+
+def underscore(name: String, i: Int): Int =
+  if (i >= Str.len(name)) i else if (Str.charAt(name, i) == 95) i else underscore(name, i + 1)
+
+def display(name: String): String =
+  if (!Str.startsWith(name, prefix())) name else Str.concat(owner(name), Str.concat(".", short(name)))
+
+def qualified(mod: String, name: String): String =
+  if (mod == "") short(name) else Str.concat(mod, Str.concat(".", short(name)))
+
+def addName(tab: Map[String, List[String]], key: String, value: String): Map[String, List[String]] =
+  if (List.contains(Map.getOrElse(tab, key, []), value)) tab else Map.set(tab, key, value :: Map.getOrElse(tab, key, []))
+
+def addType(index: Index, mod: String, name: String): Index =
+  index.copy(types = addName(addName(addName(index.types, short(name), identity(mod, name)), qualified(mod, name), identity(mod, name)), identity(mod, name), identity(mod, name)))
+
+def indexOf(p: Prog): Index =
+  List.foldLeft(p.traits, List.foldLeft(p.aliases, List.foldLeft(p.enums, Index(Map.empty(), Set.empty(), Map.empty(), p.imps, moduleSet(List.concat(List.map(Kits.names(), name => rootName(name)), List.concat(List.map(p.defs, fn => fn.mod), List.concat(List.map(p.enums, en => en.mod), List.concat(List.map(p.aliases, a => a.mod), List.map(p.traits, tr => tr.mod))))))), (entry: (Index, En)) => indexEnum(entry._1, entry._2)), (entry: (Index, Alias)) => addType(entry._1, entry._2.mod, entry._2.name)), (entry: (Index, Tr)) => addType(entry._1, entry._2.mod, entry._2.name))
+
+def indexEnum(index: Index, en: En): Index =
+  List.foldLeft(en.cases, addType(index.copy(records = if (en.isRec) Set.add(index.records, identity(en.mod, en.name)) else index.records), en.mod, en.name), (entry: (Index, EnCase)) => indexCase(entry._1, entry._2, identity(en.mod, en.name)))
+
+def indexCase(index: Index, c: EnCase, own: String): Index =
+  index.copy(cases = addName(index.cases, short(c.name), own))
+
+def select(scope: Scope, name: String, candidates: List[String]): String =
+  if (List.isEmpty(candidates)) name else selectLocal(scope, name, candidates, List.filter(candidates, candidate => owner(candidate) == scope.mod))
+
+def selectLocal(scope: Scope, name: String, candidates: List[String], local: List[String]): String =
+  if (!List.isEmpty(local)) selectOne(name, local) else selectImported(name, candidates, List.filter(candidates, candidate => imported(scope, name, candidate)))
+
+def selectImported(name: String, candidates: List[String], hits: List[String]): String =
+  selectOne(name, if (List.isEmpty(hits)) candidates else hits)
+
+def selectOne(name: String, candidates: List[String]): String =
+  if (List.len(candidates) == 1) List.at(candidates, 0) else Str.concat("__ScuzzAmbiguous_", name)
+
+def imported(scope: Scope, name: String, candidate: String): Bool =
+  List.exists(scope.index.imps, imp => imp.owner == scope.mod && imp.mod == owner(candidate) && (imp.name == "*" || imp.name == short(candidate) && (imp.alias == "" || imp.alias == name)))
+
+def typeName(scope: Scope, name: String): String =
+  if (List.contains(scope.params, name)) name else select(scope, name, typeCandidates(scope, name))
+
+def typeCandidates(scope: Scope, name: String): List[String] =
+  List.foldLeft(List.concat(Map.getOrElse(scope.index.types, name, []), List.flatMap(List.filter(scope.index.imps, imp => imp.owner == scope.mod && imp.alias == name), imp => Map.getOrElse(scope.index.types, qualified(imp.mod, imp.name), []))), [], pair => if (List.contains(pair._1, pair._2)) pair._1 else pair._2 :: pair._1)
+
+def ty(scope: Scope, value: String): String =
+  if (value == "") value else Type.show(typeTree(scope, Type.parse(value)))
+
+def typeTree(scope: Scope, value: Ty): Ty =
+  value match {
+    case Ty.Named(name) => Ty.Named(typeName(scope, name))
+    case Ty.TVar(name) => if (List.contains(scope.params, name)) value else Type.parse(typeName(scope, name))
+    case Ty.App(name, args) => Ty.App(typeName(scope, name), List.map(args, arg => typeTree(scope, arg)))
+    case Ty.Tuple(parts) => Ty.Tuple(List.map(parts, part => typeTree(scope, part)))
+    case Ty.Arrow(arg, ret) => Ty.Arrow(typeTree(scope, arg), typeTree(scope, ret))
+  }
+
+def prog(p: Prog): Prog =
+  program(p, indexOf(p))
+
+def program(p: Prog, index: Index): Prog =
+  Prog(p.pkg, sortEnums(List.map(p.enums, en => enumDecl(en, Scope(index, en.mod, en.tparams, [])))), List.map(p.aliases, a => Alias(identity(a.mod, a.name), a.tparams, ty(Scope(index, a.mod, a.tparams, []), a.target), a.mod)), List.map(p.traits, tr => traitDecl(tr, Scope(index, tr.mod, tr.tparams, []))), List.map(p.impls, im => implDecl(im, Scope(index, im.mod, [], ["self"]))), p.imps, List.map(p.defs, fn => fun(fn, Scope(index, fn.mod, fn.tparams, []))), p.main, expr(p.body, Scope(index, p.mod, [], [])), p.mod)
+
+def enumDecl(en: En, scope: Scope): En =
+  En(en.isRec, identity(en.mod, en.name), en.tparams, List.map(en.cases, c => EnCase(if (en.isRec) identity(en.mod, en.name) else c.name, params(c.fields, scope))), en.mod)
+
+def traitDecl(tr: Tr, scope: Scope): Tr =
+  Tr(identity(tr.mod, tr.name), tr.tparams, List.map(tr.methods, method => TrMethod(method.name, params(method.params, scope), ty(scope, method.ret))), tr.mod)
+
+def implDecl(im: Im, scope: Scope): Im =
+  Im(typeName(scope, im.tn), List.map(im.targs, arg => ty(scope, arg)), ty(scope, im.forTy), List.map(im.methods, fn => fun(fn, scope.copy(params = fn.tparams))), im.mod)
+
+def params(ps: List[Param], scope: Scope): List[Param] =
+  List.map(ps, p => Param(p.name, ty(scope, p.ty), text(p.w, scope.copy(locals = List.concat(List.map(ps, param => param.name), scope.locals))), text(p.d, scope)))
+
+def fun(fn: Fun, scope: Scope): Fun =
+  Fun(fn.priv, fn.ora, funName(fn.name, scope), fn.tparams, params(fn.params, scope), ty(scope, fn.ret), expr(fn.body, scope.copy(locals = List.concat(List.map(fn.params, p => p.name), scope.locals))), fn.mod, fn.off)
+
+def funName(name: String, scope: Scope): String =
+  if (lastDot(name, 0, 0 - 1) < 0) name else Str.concat(typeName(scope, Str.take(name, lastDot(name, 0, 0 - 1))), Str.drop(name, lastDot(name, 0, 0 - 1)))
+
+def bound(scope: Scope, name: String): Bool =
+  List.contains(scope.locals, rootName(name))
+
+def rootName(name: String): String =
+  if (dot(name, 0) < 0) name else Str.take(name, dot(name, 0))
+
+def dot(name: String, i: Int): Int =
+  if (i >= Str.len(name)) 0 - 1 else if (Str.charAt(name, i) == 46) i else dot(name, i + 1)
+
+def lastDot(name: String, i: Int, prev: Int): Int =
+  if (i >= Str.len(name)) prev else lastDot(name, i + 1, if (Str.charAt(name, i) == 46) i else prev)
+
+def constructor(scope: Scope, name: String): String =
+  if (bound(scope, name)) name else constructorType(scope, name, typeName(scope, name))
+
+def constructorType(scope: Scope, name: String, resolved: String): String =
+  if (Set.contains(scope.index.records, resolved) || Str.startsWith(resolved, "__ScuzzAmbiguous_")) resolved else if (lastDot(name, 0, 0 - 1) >= 0) constructorMember(scope, name, lastDot(name, 0, 0 - 1)) else if (Map.contains(scope.index.types, resolved)) resolved else constructorBare(scope, name)
+
+def constructorMember(scope: Scope, name: String, at: Int): String =
+  constructorMemberType(scope, name, typeName(scope, Str.take(name, at)), Str.drop(name, at + 1))
+
+def constructorMemberType(scope: Scope, name: String, own: String, tag: String): String =
+  if (List.contains(Map.getOrElse(scope.index.cases, tag, []), own)) Str.concat(own, Str.concat(".", tag)) else name
+
+def constructorBare(scope: Scope, name: String): String =
+  if (name == "Some" || name == "None" || name == "Ok" || name == "Err") name else constructorBareOwner(name, select(scope, name, Map.getOrElse(scope.index.cases, name, [])))
+
+def constructorBareOwner(name: String, own: String): String =
+  if (own == name || Str.startsWith(own, "__ScuzzAmbiguous_")) own else Str.concat(own, Str.concat(".", name))
+
+def path(e: Expr): String =
+  e match {
+    case Expr.EVar(name, _) => name
+    case Expr.EField(recv, name, _) => if (path(recv) == "") "" else Str.concat(path(recv), Str.concat(".", name))
+    case _ => ""
+  }
+
+def reference(name: String, off: Int): Expr =
+  if (dot(name, 0) < 0) Expr.EVar(name, off) else Expr.EField(Expr.EVar(Str.take(name, dot(name, 0)), off), Str.drop(name, dot(name, 0) + 1), off)
+
+def call(name: String, args: List[Expr], off: Int): Expr =
+  if (Str.startsWith(name, prefix()) && dot(name, 0) >= 0) Expr.EMethod(Expr.EVar(Str.take(name, dot(name, 0)), off), Str.drop(name, dot(name, 0) + 1), args, off) else Expr.ECall(name, args, off)
+
+def expr(e: Expr, scope: Scope): Expr =
+  e match {
+    case Expr.EVar(name, off) => reference(constructor(scope, name), off)
+    case Expr.ECall(name, args, off) => call(constructor(scope, name), expressions(args, scope), off)
+    case Expr.EField(recv, name, off) => field(e, recv, name, off, scope)
+    case Expr.EMethod(recv, name, args, off) => method(recv, name, args, off, scope)
+    case Expr.EPrint(value, off) => Expr.EPrint(expr(value, scope), off)
+    case Expr.EBin(op, left, right, off) => Expr.EBin(op, expr(left, scope), expr(right, scope), off)
+    case Expr.EUn(op, value, off) => Expr.EUn(op, expr(value, scope), off)
+    case Expr.ELam(name, ann, body) => Expr.ELam(name, ty(scope, ann), expr(body, scope.copy(locals = name :: scope.locals)))
+    case Expr.EIf(cond, yes, no, off) => Expr.EIf(expr(cond, scope), expr(yes, scope), expr(no, scope), off)
+    case Expr.EMatch(value, arms, off) => Expr.EMatch(expr(value, scope), List.map(arms, a => arm(a, scope)), off)
+    case Expr.EFor(bs, body, off) => binds(bs, body, off, scope)
+    case Expr.EInterp(value, parts, off) => Expr.EInterp(value, expressions(parts, scope), off)
+    case Expr.EList(values) => Expr.EList(expressions(values, scope))
+    case Expr.ETuple(values) => Expr.ETuple(expressions(values, scope))
+    case Expr.ENamed(name, value) => Expr.ENamed(name, expr(value, scope))
+    case Expr.EAscribe(value, ann, off) => Expr.EAscribe(expr(value, scope), ty(scope, ann), off)
+    case _ => e
+  }
+
+def expressions(es: List[Expr], scope: Scope): List[Expr] =
+  List.map(es, e => expr(e, scope))
+
+def field(e: Expr, recv: Expr, name: String, off: Int, scope: Scope): Expr =
+  fieldName(e, recv, name, off, scope, if (path(e) == "") "" else constructor(scope, path(e)))
+
+def fieldName(e: Expr, recv: Expr, name: String, off: Int, scope: Scope, resolved: String): Expr =
+  if (resolved != "" && resolved != path(e)) reference(resolved, off) else Expr.EField(receiver(recv, scope), name, off)
+
+def method(recv: Expr, name: String, args: List[Expr], off: Int, scope: Scope): Expr =
+  methodName(recv, name, args, off, scope, if (path(recv) == "") "" else constructor(scope, Str.concat(path(recv), Str.concat(".", name))))
+
+def methodName(recv: Expr, name: String, args: List[Expr], off: Int, scope: Scope, resolved: String): Expr =
+  if (resolved != "" && resolved != Str.concat(path(recv), Str.concat(".", name))) call(resolved, expressions(args, scope), off) else Expr.EMethod(receiver(recv, scope), name, expressions(args, scope), off)
+
+def receiver(recv: Expr, scope: Scope): Expr =
+  if (!bound(scope, path(recv)) && Set.contains(scope.index.modules, path(recv))) recv else expr(recv, scope)
+
+def arm(a: Arm, scope: Scope): Arm =
+  Arm(pattern(a.pat, scope), text(a.g, scope.copy(locals = List.concat(patternNames(a.pat, scope), scope.locals))), expr(a.body, scope.copy(locals = List.concat(patternNames(a.pat, scope), scope.locals))))
+
+def binds(bs: List[Bind], body: Expr, off: Int, scope: Scope): Expr =
+  if (List.isEmpty(bs)) Expr.EFor([], expr(body, scope), off) else bindsNext(List.at(bs, 0), List.tail(bs), body, off, scope)
+
+def bindsNext(b: Bind, rest: List[Bind], body: Expr, off: Int, scope: Scope): Expr =
+  prependBind(Bind(b.draw, pattern(b.name, scope), expr(b.value, scope)), binds(rest, body, off, scope.copy(locals = List.concat(patternNames(b.name, scope), scope.locals))))
+
+def prependBind(b: Bind, e: Expr): Expr =
+  e match {
+    case Expr.EFor(bs, body, off) => Expr.EFor(b :: bs, body, off)
+    case _ => e
+  }
+
+def pattern(value: String, scope: Scope): String =
+  patternTokens(value, Lexer.lex(value), scope, 0)
+
+def patternTokens(value: String, tokens: List[SpTok], scope: Scope, start: Int): String =
+  if (List.isEmpty(tokens)) Str.drop(value, start) else patternToken(value, List.at(tokens, 0), List.tail(tokens), scope, start)
+
+def patternToken(value: String, token: SpTok, rest: List[SpTok], scope: Scope, start: Int): String =
+  token.tok match {
+    case Tok.Ident(name) => patternIdent(value, tokensName(name, rest), token.off, scope, start)
+    case _ => patternTokens(value, rest, scope, start)
+  }
+
+def tokensName(name: String, rest: List[SpTok]): PathTokens =
+  if (List.len(rest) >= 2 && List.at(rest, 0).tok == Tok.Dot) tokensNameNext(name, rest) else PathTokens(name, rest, if (List.isEmpty(rest)) 0 - 1 else List.at(rest, 0).off)
+
+def tokensNameNext(name: String, rest: List[SpTok]): PathTokens =
+  List.at(rest, 1).tok match {
+    case Tok.Ident(next) => tokensName(Str.concat(name, Str.concat(".", next)), List.tail(List.tail(rest)))
+    case _ => PathTokens(name, rest, List.at(rest, 0).off)
+  }
+
+def patternIdent(value: String, name: PathTokens, at: Int, scope: Scope, start: Int): String =
+  if (!List.isEmpty(name.rest) && (List.at(name.rest, 0).tok == Tok.Eq || List.at(name.rest, 0).tok == Tok.At)) patternTokens(value, name.rest, scope, start) else patternReplace(value, name, at, scope, start, if (dot(name.name, 0) >= 0) constructor(scope, name.name) else if (Set.contains(scope.index.records, typeName(scope, name.name))) typeName(scope, name.name) else name.name)
+
+def patternReplace(value: String, name: PathTokens, at: Int, scope: Scope, start: Int, resolved: String): String =
+  if (resolved == name.name) patternTokens(value, name.rest, scope, start) else Str.concat(Str.slice(value, start, at), Str.concat(resolved, patternTokens(value, name.rest, scope, at + Str.len(name.name))))
+
+def patternNames(value: String, scope: Scope): List[String] =
+  namesTokens(Lexer.lex(value), scope)
+
+def namesTokens(tokens: List[SpTok], scope: Scope): List[String] =
+  if (List.isEmpty(tokens)) [] else namesToken(List.at(tokens, 0), List.tail(tokens), scope)
+
+def namesToken(token: SpTok, rest: List[SpTok], scope: Scope): List[String] =
+  token.tok match {
+    case Tok.Ident(name) => namesIdent(tokensName(name, rest), scope)
+    case _ => namesTokens(rest, scope)
+  }
+
+def namesIdent(name: PathTokens, scope: Scope): List[String] =
+  if (dot(name.name, 0) >= 0 || name.name == "_" || !List.isEmpty(name.rest) && (List.at(name.rest, 0).tok == Tok.LParen || List.at(name.rest, 0).tok == Tok.Eq) || Map.contains(scope.index.cases, name.name)) namesTokens(name.rest, scope) else name.name :: namesTokens(name.rest, scope)
+
+def text(value: String, scope: Scope): String =
+  if (value == "") value else Parse.pretty0(expr(parsedExpr(Parse.parseExprList(Lexer.lex(value), 0)), scope))
+
+def parsedExpr(value: (Expr, Int)): Expr =
+  value._1
+
+def displayText(value: String): String =
+  displayTokens(value, 0, 0)
+
+def displayTokens(value: String, i: Int, start: Int): String =
+  if (i >= Str.len(value)) Str.drop(value, start) else if (Str.startsWith(Str.drop(value, i), prefix()) || Str.startsWith(Str.drop(value, i), "__ScuzzAmbiguous_")) displayToken(value, i, start, identifierEnd(value, i)) else displayTokens(value, i + 1, start)
+
+def identifierEnd(value: String, i: Int): Int =
+  if (i >= Str.len(value)) i else if (identifierChar(Str.charAt(value, i))) identifierEnd(value, i + 1) else i
+
+def identifierChar(ch: Int): Bool =
+  ch == 95 || ch >= 48 && ch <= 57 || ch >= 65 && ch <= 90 || ch >= 97 && ch <= 122
+
+def displayToken(value: String, i: Int, start: Int, end: Int): String =
+  Str.concat(Str.slice(value, start, i), Str.concat(displayName(Str.slice(value, i, end)), displayTokens(value, end, end)))
+
+def displayName(name: String): String =
+  if (Str.startsWith(name, "__ScuzzAmbiguous_")) Str.concat("ambiguous name ", Str.drop(name, Str.len("__ScuzzAmbiguous_"))) else display(name)
+
+def moduleSet(mods: List[String]): Set[String] =
+  List.foldLeft(mods, Set.empty(), pair => Set.add(pair._1, pair._2))
+
+def sourceError(p: Prog): String =
+  sourceDuplicates(p, duplicateNames(List.concat(List.map(p.enums, en => identity(en.mod, en.name)), List.concat(List.map(p.aliases, a => identity(a.mod, a.name)), List.map(p.traits, tr => identity(tr.mod, tr.name)))), Set.empty()))
+
+def sourceDuplicates(p: Prog, err: String): String =
+  if (err != "") err else reservedError(Lexer.lex(Parse.pretty(p)))
+
+def duplicateNames(names: List[String], seen: Set[String]): String =
+  if (List.isEmpty(names)) "" else if (Set.contains(seen, List.at(names, 0))) Str.concat("duplicate type ", List.at(names, 0)) else duplicateNames(List.tail(names), Set.add(seen, List.at(names, 0)))
+
+def reservedError(tokens: List[SpTok]): String =
+  if (List.isEmpty(tokens)) "" else reservedToken(List.at(tokens, 0).tok, List.tail(tokens))
+
+def reservedToken(token: Tok, rest: List[SpTok]): String =
+  token match {
+    case Tok.Ident(name) => if (Str.startsWith(name, "__Scuzz")) Str.concat("reserved name ", name) else reservedError(rest)
+    case _ => reservedError(rest)
+  }
+
+def sortEnums(ens: List[En]): List[En] =
+  List.map(List.sort(List.map(ens, en => en.name)), name => List.at(List.filter(ens, en => en.name == name), 0))
+
+def source(p: Prog): String =
+  sourceText(Parse.pretty(p.copy(enums = List.map(p.enums, en => en.copy(name = short(en.name), cases = List.map(en.cases, c => c.copy(name = if (en.isRec) short(c.name) else c.name)))), aliases = List.map(p.aliases, a => a.copy(name = short(a.name))), traits = List.map(p.traits, tr => tr.copy(name = short(tr.name))))))
+
+def sourceText(value: String): String =
+  sourceTokens(value, Lexer.lex(value), 0)
+
+def sourceTokens(value: String, tokens: List[SpTok], start: Int): String =
+  if (List.isEmpty(tokens)) Str.drop(value, start) else sourceToken(value, List.at(tokens, 0), List.tail(tokens), start)
+
+def sourceToken(value: String, token: SpTok, rest: List[SpTok], start: Int): String =
+  token.tok match {
+    case Tok.Ident(name) => if (Str.startsWith(name, prefix())) Str.concat(Str.slice(value, start, token.off), Str.concat(display(name), sourceTokens(value, rest, token.off + Str.len(name)))) else sourceTokens(value, rest, start)
+    case _ => sourceTokens(value, rest, start)
+  }
+
+def scopeEnums(ens: List[En]): Scope =
+  Scope(List.foldLeft(ens, Index(Map.empty(), Set.empty(), Map.empty(), [], Set.empty()), (entry: (Index, En)) => indexEnum(entry._1, entry._2)), "", [], [])
+

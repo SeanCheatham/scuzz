@@ -62,10 +62,10 @@ enum Tok:
   case Interp(s: String)
   case Bad
 
-record SpTok(tok: Tok, off: Int, stem: String)
+record SpTok(tok: Tok, off: Int, stem: String, column: Int)
 
 def _put(t: Tok, off: Int, stem: String, acc: List[SpTok]): List[SpTok] =
-  SpTok(t, off, stem) :: acc
+  SpTok(t, off, stem, 0) :: acc
 
 def kind(t: Tok): Int =
   t match {
@@ -292,7 +292,7 @@ def _lexName(src: String, i: Int, stem: String, acc: List[SpTok]): (Int, List[Sp
   _lexName2(src, i, _skipIdent(src, i), stem, acc)
 
 def _lexName2(src: String, i: Int, j: Int, stem: String, acc: List[SpTok]): (Int, List[SpTok]) =
-  if (j == i + 1 && _ch(src, i) == 115 && j < Str.len(src) && _ch(src, j) == 34) _lexInterp(src, j + 1, Builder.empty(), i, stem, acc) else (j, _put(_kw(Str.slice(src, i, j)), i, stem, acc))
+  if (j == i + 1 && _ch(src, i) == 115 && j < Str.len(src) && _ch(src, j) == 34) _lexInterp(src, j + 1, Builder.empty(), i, stem, acc) else (j, SpTok(_kw(Str.slice(src, i, j)), i, stem, if (Str.slice(src, i, j) == "def") columnAt(src, i - 1, 0) else 0) :: acc)
 
 def _lexInterp(src: String, i: Int, b: Builder, start: Int, stem: String, acc: List[SpTok]): (Int, List[SpTok]) =
   _lexInterpD(src, i, b, start, stem, acc, 0)
@@ -351,5 +351,8 @@ def lex(src: String): List[SpTok] =
   lexStem(src, "")
 
 def lexStem(src: String, stem: String): List[SpTok] =
-  List.reverse(SpTok(Tok.Eof, Str.len(src), stem) :: lexAt(src, 0, stem, []))
+  List.reverse(SpTok(Tok.Eof, Str.len(src), stem, 0) :: lexAt(src, 0, stem, []))
+
+def columnAt(src: String, i: Int, column: Int): Int =
+  if (i < 0 || Str.charAt(src, i) == 10) column else columnAt(src, i - 1, column + 1)
 

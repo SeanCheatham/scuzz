@@ -16,6 +16,8 @@
 #include <time.h>
 #include <unistd.h>
 
+const int32_t sz_eval_value_tag_base = 42;
+
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
 int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event);
@@ -17293,13 +17295,13 @@ static void test_mirror_signal_session(void) {
   sz_release(dump);
   sz_signal_int_free(visible);
   void *view = getenv("SCUZZ_EVAL_MIRROR")
-                   ? (void *)sz_adt_new(26, NULL)
+                   ? (void *)sz_adt_new(sz_eval_value_tag_base + 26, NULL)
                    : (void *)sz_view_text("value");
   SzString *view_name = sz_string_from_cstr("view");
   SzSignal *view_signal = sz_signal_new(view, 4, view_name);
   SzList *views = sz_list_cons(view, sz_list_nil());
   void *list = getenv("SCUZZ_EVAL_MIRROR")
-                   ? (void *)sz_adt_new(4, views)
+                   ? (void *)sz_adt_new(sz_eval_value_tag_base + 4, views)
                    : (void *)views;
   if (list == views) sz_retain(list);
   SzString *list_name = sz_string_from_cstr("views");

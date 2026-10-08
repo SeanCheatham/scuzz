@@ -1,12 +1,12 @@
 # Scuzz Lang vision
 
-Open work and implementation order. Design locks: [`philosophy.md`](philosophy.md). Ranked gaps: [`gaps.md`](gaps.md). Current slice: [`plans.md`](plans.md). Platforms and toolchain: [`compatibility.md`](compatibility.md). Later tune work: [`optimization.md`](optimization.md).
+Open work and implementation order. Design locks: [`philosophy.md`](philosophy.md). Ranked gaps: [`gaps.md`](gaps.md). Platforms and toolchain: [`compatibility.md`](compatibility.md). Later tune work: [`optimization.md`](optimization.md).
 
 Edit this file when the order changes. Remove completed work. Keep only the next slice in `plans.md`.
 
 ## First: language and verification guarantees
 
-Improve the ability to write correct applications before local choice feedback. First give module declarations separate type identities. Then make excluded verification workloads explicit. Keep production input validation separate from verification assumptions. Use small reference models to check application state and effects.
+Improve the ability to write correct applications before local choice feedback. Make excluded verification workloads explicit. Report reached claims and the checked input scope. An excluded workload does not count as a passing workload. Keep production input validation separate from verification assumptions. Use small reference models to check application state and effects.
 
 Keep one compiler, one verification command, and the existing simulation runtime. Preserve exact evaluator and native replay. Keep probe deadlines, claims, corpus entries, and search scope. General compiler speed work follows only from a demonstrated application or proof blocker.
 

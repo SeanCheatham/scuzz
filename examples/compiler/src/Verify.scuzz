@@ -11,6 +11,7 @@ import Parse.Bind
 import Parse.En
 import Parse.EnCase
 import Parse.Im
+import Parse.Alias
 import Parse.pretty
 import Check.Out
 import Check.LineIndex
@@ -60,7 +61,7 @@ def typeTok(t: String, ens: List[En], depth: Int): String =
   if (t == "Int") "i" else if (t == "String") "s" else if (t == "Bool") "b" else if (isListTy(t)) listTok(t, ens, depth) else adtTok(t, ens, depth)
 
 def adtTok(ty: String, ens: List[En], depth: Int): String =
-  adtTokHit(findEn(ens, tyHead(ty)), ty, ens, depth)
+  adtTokHit(findEnTy(ens, ty), ty, ens, depth)
 
 def tyHead(t: String): String =
   tyHeadAt(t, 0)
@@ -69,12 +70,13 @@ def tyHeadAt(t: String, i: Int): String =
   if (i >= Str.len(t)) t else if (Str.charAt(t, i) == 91) Str.slice(t, 0, i) else tyHeadAt(t, i + 1)
 
 def findEn(ens: List[En], name: String): List[En] =
-  if (List.isEmpty(ens)) noEn() else findEn1(List.at(ens, 0), List.tail(ens), name)
+  findEnResolved(ens, Resolve.typeName(Resolve.scopeEnums(ens), name))
 
-def findEn1(h: En, rest: List[En], name: String): List[En] =
-  h match {
-    case En(_, n, _, _) => if (n == name) h :: noEn() else findEn(rest, name)
-  }
+def findEnResolved(ens: List[En], name: String): List[En] =
+  List.filter(ens, en => en.name == name)
+
+def findEnTy(ens: List[En], ty: String): List[En] =
+  List.map(findEn(ens, tyHead(ty)), en => Check.specializeEnum(en, Type.show(if (List.isEmpty(Type.appArgs(Type.parse(ty)))) Type.tNamed(en.name) else Type.tApp(en.name, Type.appArgs(Type.parse(ty))))))
 
 def adtTokHit(hit: List[En], ty: String, ens: List[En], depth: Int): String =
   if (List.isEmpty(hit)) ty else adtTokEn(List.at(hit, 0), ens, depth)
@@ -93,7 +95,7 @@ def recLikeName(c: EnCase, name: String): Bool =
   }
 
 def recTok(name: String, cs: List[EnCase], ens: List[En], depth: Int): String =
-  Str.concat(name, Str.concat("(", Str.concat(caseFields(List.at(cs, 0), ens, depth), ")")))
+  Str.concat(Resolve.short(name), Str.concat("(", Str.concat(caseFields(List.at(cs, 0), ens, depth), ")")))
 
 def caseFields(c: EnCase, ens: List[En], depth: Int): String =
   c match {
@@ -155,7 +157,7 @@ def friendlyTy(t: String, ens: List[En]): Bool =
   if (t == "Int" || t == "String" || t == "Bool" || t == "View") true else if (isListTy(t)) friendlyTy(listInner(t), ens) else if (opaqueTy(tyHead(t))) false else if (t == "" || t == "Unit" || t == "Any" || t == "Float" || t == "Timeline" || t == "Verdict") false else if (Str.startsWith(t, "IO")) false else if (hasSub(t, "=>")) false else !List.isEmpty(findEn(ens, tyHead(t))) && !hasFloatDriveTy(t, ens, 0)
 
 def hasFloatDriveTy(t: String, ens: List[En], depth: Int): Bool =
-  if (t == "Float") true else if (t == "Int" || t == "String" || t == "Bool") false else if (depth >= 8) true else if (isListTy(t)) hasFloatDriveTy(listInner(t), ens, depth + 1) else hasFloatDriveEn(findEn(Check.specializeEnums(ens, t), tyHead(t)), ens, depth)
+  if (t == "Float") true else if (t == "Int" || t == "String" || t == "Bool") false else if (depth >= 8) true else if (isListTy(t)) hasFloatDriveTy(listInner(t), ens, depth + 1) else hasFloatDriveEn(findEnTy(ens, t), ens, depth)
 
 def hasFloatDriveEn(hit: List[En], ens: List[En], depth: Int): Bool =
   if (List.isEmpty(hit)) false else hasFloatDriveEnCases(List.at(hit, 0), ens, depth)
@@ -874,7 +876,7 @@ def seedArgE(p: Param, ens: List[En]): String =
   if (p.ty == "Int") Str.fromInt(zeroInt(p.name, p.w)) else if (p.ty == "Bool") "false" else if (p.ty == "String") "\"a\"" else if (isListTy(p.ty)) "[]" else seedAdt(p.ty, ens)
 
 def seedAdt(ty: String, ens: List[En]): String =
-  seedHit(findEn(ens, tyHead(ty)), ty, ens)
+  seedHit(findEnTy(ens, ty), ty, ens)
 
 def seedHit(hit: List[En], ty: String, ens: List[En]): String =
   if (List.isEmpty(hit)) "0" else seedEn(List.at(hit, 0), ens)
@@ -899,7 +901,7 @@ def seedCase(c: EnCase, ens: List[En]): String =
   }
 
 def seedCtor(name: String, fs: List[Param], ens: List[En]): String =
-  if (List.isEmpty(fs)) Str.concat(name, "()") else Str.concat(name, Str.concat("(", Str.concat(seedFields(fs, ens), ")")))
+  if (List.isEmpty(fs)) Str.concat(Resolve.short(name), "()") else Str.concat(Resolve.short(name), Str.concat("(", Str.concat(seedFields(fs, ens), ")")))
 
 def seedFields(fs: List[Param], ens: List[En]): String =
   if (List.isEmpty(fs)) "" else if (List.len(fs) == 1) seedArgE(List.at(fs, 0), ens) else Str.concat(seedArgE(List.at(fs, 0), ens), Str.concat(",", seedFields(List.tail(fs), ens)))
@@ -946,7 +948,7 @@ def wrapSrcEns(stem: String, src: String, ens: List[En]): String =
 
 def wrapVerifyProg(stem: String, p: Prog, ens: List[En]): String =
   p match {
-    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Str.concat(Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, List.filter(defs, d => d.priv), main, body)), Str.concat(wrapFuns(stem, drives(defs, ens)), wrapRelFuns(claims(defs))))
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Str.concat(Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, List.filter(defs, d => d.priv), main, body, p.mod)), Str.concat(wrapFuns(stem, drives(defs, ens)), wrapRelFuns(claims(defs))))
   }
 
 def wrapFuns(stem: String, ds: List[Fun]): String =
@@ -1005,7 +1007,7 @@ def wrapFilesEns2(h: (String, String), rest: List[(String, String)], ens: List[E
 
 def applySimLive(live: Prog, sdefs: List[Fun]): String =
   live match {
-    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, swapDefs(defs, sdefs), main, body))
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Parse.pretty(Prog(pkg, enums, aliases, traits, impls, imps, swapDefs(defs, sdefs), main, body, live.mod))
   }
 
 def swapDefs(ds: List[Fun], sim: List[Fun]): List[Fun] =
@@ -1070,7 +1072,7 @@ def scenarioWrap(src: String): String =
 
 def scenarioWrapProg(p: Prog): String =
   p match {
-    case Prog(_, enums, _, _, _, _, defs, _, _) => Parse.pretty(Prog("", enums, Parse.noAl(), Parse.noTr(), Parse.noIm(), Parse.noImp(), wrapScenarioDefs(defs, ctxTyOf(defs)), "", Expr.EUnit))
+    case Prog(_, enums, _, _, _, _, defs, _, _) => Parse.pretty(Prog("", enums, Parse.noAl(), Parse.noTr(), Parse.noIm(), Parse.noImp(), wrapScenarioDefs(defs, ctxTyOf(defs)), "", Expr.EUnit, ""))
   }
 
 def ctxTyOf(ds: List[Fun]): String =
@@ -1292,7 +1294,7 @@ def checkScenarioDrv(src: String, file: String, live: List[(String, String)], p:
   if (isCtxTy(ctxTy) && (List.isEmpty(d.params) || headTy(d.params) != ctxTy)) atLoc(file, src, d.off, Str.concat("driver ", Str.concat(d.name, Str.concat(" must take ", Str.concat(ctxTy, " as the first param"))))) else checkScenarioDrv2(src, file, live, p, ctxTy, d, rest, drvGenPs(d.params, ctxTy))
 
 def checkScenarioDrv2(src: String, file: String, live: List[(String, String)], p: Prog, ctxTy: String, d: Fun, rest: List[Fun], ps: List[Param]): String =
-  if (List.len(ps) > 3 || !allFriendly(ps, ensOfProg(p)) || !unaryAdtOk(ps) || !allSimpleWhere(ps)) atLoc(file, src, d.off, Str.concat("drive ", Str.concat(d.name, " params must be generator-friendly (at most 3; ADT or List only as the sole param)"))) else checkScenarioPublics(src, file, live, p, ctxTy, rest)
+  if (List.len(ps) > 3 || !allFriendly(ps, ensOfResolved(Resolve.prog(p))) || !unaryAdtOk(ps) || !allSimpleWhere(ps)) atLoc(file, src, d.off, Str.concat("drive ", Str.concat(d.name, " params must be generator-friendly (at most 3; ADT or List only as the sole param)"))) else checkScenarioPublics(src, file, live, p, ctxTy, rest)
 
 def drvGenPs(ps: List[Param], ctxTy: String): List[Param] =
   if (isCtxTy(ctxTy) && !List.isEmpty(ps) && headTy(ps) == ctxTy) List.tail(ps) else ps
@@ -1344,7 +1346,16 @@ def rewriteReqFiles(files: List[(String, String)]): List[(String, String)] =
   rewriteReqFromKept(parseKept(files))
 
 def rewriteReqFromKept(kept: List[(String, String, Prog)]): List[(String, String)] =
-  rewriteReqKeptGo(kept, mergeKept(kept))
+  rewriteReqResolved(kept, Resolve.prog(mergeKept(kept)))
+
+def rewriteReqResolved(kept: List[(String, String, Prog)], p: Prog): List[(String, String)] =
+  rewriteReqKeptGo(resolveKept(kept, p), p.copy(defs = Check.expandDefs(p.defs, p.aliases), enums = Check.expandEnums(p.enums, p.aliases)))
+
+def resolveKept(kept: List[(String, String, Prog)], p: Prog): List[(String, String, Prog)] =
+  List.map(kept, entry => (entry._1, entry._2, resolveKeptProg(Resolve.program(entry._3, Resolve.indexOf(p)), p.aliases)))
+
+def resolveKeptProg(p: Prog, aliases: List[Alias]): Prog =
+  p.copy(enums = Check.expandEnums(p.enums, aliases), defs = Check.expandDefs(p.defs, aliases), body = Check.expandExpr(p.body, aliases), impls = List.map(p.impls, im => im.copy(methods = Check.expandDefs(im.methods, aliases))))
 
 def rewriteReqKeptGo(kept: List[(String, String, Prog)], p: Prog): List[(String, String)] =
   p match {
@@ -1363,11 +1374,14 @@ def rewriteReqKeep(src: String, p: Prog, stem: String, funs: List[Fun], ens: Lis
   if (progHasReq(p) || progNeedsWhere(p, funs, ens)) rewriteReqProg(p, stem, funs, ens) else src
 
 def expectedFromKept(kept: List[(String, String, Prog)]): Prog =
-  expectedFromKeptP(kept, mergeKept(kept))
+  expectedFromResolved(kept, Resolve.prog(mergeKept(kept)))
+
+def expectedFromResolved(kept: List[(String, String, Prog)], p: Prog): Prog =
+  expectedFromKeptP(resolveKept(kept, p), p.copy(defs = Check.expandDefs(p.defs, p.aliases), enums = Check.expandEnums(p.enums, p.aliases)))
 
 def expectedFromKeptP(kept: List[(String, String, Prog)], p: Prog): Prog =
   p match {
-    case Prog(_, enums, _, _, _, _, defs, _, _) => if (keptNeedsRewrite(kept, defs, enums)) mergeKept(rewriteKeptTrees(kept, defs, enums)) else p
+    case Prog(_, enums, _, _, _, _, defs, _, _) => if (keptNeedsRewrite(kept, defs, enums)) mergeKept(rewriteKeptTrees(kept, defs, enums)) else Parse.parseFiles(List.map(kept, entry => (entry._1, entry._2)))
   }
 
 def keptNeedsRewrite(kept: List[(String, String, Prog)], funs: List[Fun], ens: List[En]): Bool =
@@ -1387,7 +1401,7 @@ def rewriteKeptHd(h: (String, String, Prog), rest: List[(String, String, Prog)],
   }
 
 def rewriteReqKeepProg(src: String, p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
-  if (progHasReq(p) || progNeedsWhere(p, funs, ens)) rewriteReqTree(p, stem, funs, ens) else p
+  if (progHasReq(p) || progNeedsWhere(p, funs, ens)) Parse.parseFile(stem, Resolve.source(rewriteReqTree(p, stem, funs, ens))) else Parse.parseFile(stem, src)
 
 def expectedTreeOk(): Bool =
   expectedTreeSrc("def n(): Int = 1") && expectedTreeSrc("def n(): Int = 1.require(true)") && parseEvLit()
@@ -1566,14 +1580,14 @@ def bindHasReq(b: Bind): Bool =
   }
 
 def rewriteReqProg(p: Prog, stem: String, funs: List[Fun], ens: List[En]): String =
-  Parse.pretty(rewriteReqTree(p, stem, funs, ens))
+  Resolve.source(rewriteReqTree(p, stem, funs, ens))
 
 def rewriteReqTree(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
   rewriteReqTreeGo(p, stem, funs, Check.withLetterPins(ens))
 
 def rewriteReqTreeGo(p: Prog, stem: String, funs: List[Fun], ens: List[En]): Prog =
   p match {
-    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens))
+    case Prog(pkg, enums, aliases, traits, impls, imps, defs, main, body) => Prog(pkg, enums, aliases, traits, rewriteReqImpls(impls, funs, ens), imps, rewriteReqDefs(defs, funs, ens), main, rewriteReq(body, mainEnv(stem), funs, ens), p.mod)
   }
 
 def mainEnv(stem: String): List[(String, Ty)] =
@@ -1584,7 +1598,7 @@ def rewriteReqImpls(xs: List[Im], funs: List[Fun], ens: List[En]): List[Im] =
 
 def rewriteReqIm(im: Im, funs: List[Fun], ens: List[En]): Im =
   im match {
-    case Im(tn, targs, forTy, methods) => Im(tn, targs, forTy, rewriteReqDefs(methods, funs, ens))
+    case Im(tn, targs, forTy, methods) => Im(tn, targs, forTy, rewriteReqDefs(methods, funs, ens), im.mod)
   }
 
 def rewriteReqDefs(ds: List[Fun], funs: List[Fun], ens: List[En]): List[Fun] =
@@ -1719,17 +1733,10 @@ def parseVerifyAllEns(srcs: List[String], ens: List[En]): List[Fun] =
   if (List.isEmpty(srcs)) noFun() else List.concat(parseVerifyEns(List.at(srcs, 0), ens), parseVerifyAllEns(List.tail(srcs), ens))
 
 def ensOfFiles(files: List[(String, String)]): List[En] =
-  if (List.isEmpty(files)) noEn() else List.concat(ensOfFile(List.at(files, 0)), ensOfFiles(List.tail(files)))
+  ensOfResolved(Resolve.prog(Parse.parseFiles(files)))
 
-def ensOfFile(h: (String, String)): List[En] =
-  h match {
-    case (_, src) => ensOfProg(Parse.parse(Lexer.lex(src)))
-  }
-
-def ensOfProg(p: Prog): List[En] =
-  p match {
-    case Prog(_, enums, _, _, _, _, _, _, _) => enums
-  }
+def ensOfResolved(p: Prog): List[En] =
+  Check.expandEnums(p.enums, p.aliases)
 
 def emptyVerify(file: String): String =
   Str.concat(file, ":1:1: error: verify file needs a Timeline => Verdict claim or a drive oracle; write a claim or delete the file")
@@ -2139,7 +2146,7 @@ def minInt(a: Int, b: Int): Int =
   if (a < b) a else b
 
 def generatedType(ty: String, ens: List[En], seed: Int, depth: Int): String =
-  if (ty == "Int") Str.fromInt(seed % 17) else if (ty == "Bool") generatedBool(seed) else if (ty == "String") generatedStr(seed) else if (isListTy(ty)) Str.concat("[", Str.concat(generatedList(listInner(ty), ens, seed, depth + 1, if (depth >= genMaxDepth(seed) || !generationType(listInner(ty), ens, depth + 1)) 0 else seed % (1 + genSize(seed))), "]")) else generatedAdt(findEn(ens, tyHead(ty)), ens, seed, depth)
+  if (ty == "Int") Str.fromInt(seed % 17) else if (ty == "Bool") generatedBool(seed) else if (ty == "String") generatedStr(seed) else if (isListTy(ty)) Str.concat("[", Str.concat(generatedList(listInner(ty), ens, seed, depth + 1, if (depth >= genMaxDepth(seed) || !generationType(listInner(ty), ens, depth + 1)) 0 else seed % (1 + genSize(seed))), "]")) else generatedAdt(findEnTy(ens, ty), ens, seed, depth)
 
 def generatedStr(seed: Int): String =
   quoteTok(strValAt(seed, seed % 12))
@@ -2170,7 +2177,7 @@ def generatedCases(cases: List[EnCase], ens: List[En], seed: Int, depth: Int): S
 
 def generatedCase(c: EnCase, ens: List[En], seed: Int, depth: Int): String =
   c match {
-    case EnCase(name, fields) => if (List.isEmpty(fields)) Str.concat(name, "()") else Str.concat(name, Str.concat("(", Str.concat(generatedParams(fields, ens, seed + 1, depth + 1, ","), ")")))
+    case EnCase(name, fields) => if (List.isEmpty(fields)) Str.concat(Resolve.short(name), "()") else Str.concat(Resolve.short(name), Str.concat("(", Str.concat(generatedParams(fields, ens, seed + 1, depth + 1, ","), ")")))
   }
 
 def varyWorkload(script: String, seed: Int): String =
@@ -2192,7 +2199,7 @@ def generationParams(ps: List[Param], ens: List[En], depth: Int): Bool =
   if (List.isEmpty(ps)) true else generationParam(List.at(ps, 0), ens, depth) && generationParams(List.tail(ps), ens, depth)
 
 def generationType(ty: String, ens: List[En], depth: Int): Bool =
-  if (leafTy(ty) || isListTy(ty)) true else if (depth >= 6) false else generationEnum(findEn(ens, tyHead(ty)), ens, depth)
+  if (leafTy(ty) || isListTy(ty)) true else if (depth >= 6) false else generationEnum(findEnTy(ens, ty), ens, depth)
 
 def generationEnum(hit: List[En], ens: List[En], depth: Int): Bool =
   if (List.isEmpty(hit)) false else generationEn(List.at(hit, 0), ens, depth)
