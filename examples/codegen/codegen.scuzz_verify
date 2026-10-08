@@ -76,3 +76,9 @@ oracle evKitsCovered(): Bool =
 oracle evLookup(): Bool =
   Main.evLookup()
 
+oracle evMaps(): Bool =
+  Main.evMapModel(0) && Main.evMapModel(1) && Main.evMapModel(2)
+
+oracle evConstructors(): Bool =
+  Main.evConstructors()
+

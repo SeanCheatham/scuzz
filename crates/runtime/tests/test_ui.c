@@ -17292,6 +17292,31 @@ static void test_mirror_signal_session(void) {
                 "[{\"id\":0,\"type\":\"int\",\"name\":\"visible\",\"value\":7}]") == 0);
   sz_release(dump);
   sz_signal_int_free(visible);
+  void *view = getenv("SCUZZ_EVAL_MIRROR")
+                   ? (void *)sz_adt_new(26, NULL)
+                   : (void *)sz_view_text("value");
+  SzString *view_name = sz_string_from_cstr("view");
+  SzSignal *view_signal = sz_signal_new(view, 4, view_name);
+  SzList *views = sz_list_cons(view, sz_list_nil());
+  void *list = getenv("SCUZZ_EVAL_MIRROR")
+                   ? (void *)sz_adt_new(4, views)
+                   : (void *)views;
+  if (list == views) sz_retain(list);
+  SzString *list_name = sz_string_from_cstr("views");
+  SzSignal *list_signal = sz_signal_new(list, 4, list_name);
+  dump = sz_signal_dump_json_string();
+  assert(strstr(sz_string_cstr(dump),
+                "\"name\":\"view\",\"value\":\"<handle>\"") != NULL);
+  assert(strstr(sz_string_cstr(dump),
+                "\"name\":\"views\",\"value\":[\"<handle>\"]") != NULL);
+  sz_release(dump);
+  sz_signal_free(view_signal);
+  sz_signal_free(list_signal);
+  sz_release(view_name);
+  sz_release(list_name);
+  sz_release(list);
+  sz_release(views);
+  sz_release(view);
 }
 
 int main(int argc, char **argv) {

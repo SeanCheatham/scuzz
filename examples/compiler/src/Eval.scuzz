@@ -11,7 +11,7 @@ enum Value:
   case VIo(io: IO[Value, Value])
   case VErr(msg: String)
   case VFloat(f: Float)
-  case VMap(kvs: List[(Value, Value)])
+  case VMap(tree: EvMap)
   case VSet(xs: List[Value])
   case VBuilder(b: Builder)
   case VBytes(b: Bytes)
@@ -27,6 +27,10 @@ enum Value:
   case VVerdict(v: Verdict)
   case VView(kind: String, args: List[Value])
   case VSig(id: Int, name: String, s: Signal[Value], si: Signal[Int], ss: Signal[String])
+
+enum EvMap:
+  case MEmpty
+  case MNode(key: Value, value: Value, left: EvMap, right: EvMap, height: Int, size: Int)
 
 record UiCall(name: String, args: List[Value])
 
@@ -339,7 +343,7 @@ def show(v: Value): String =
     case Value.VIo(_) => "<io>"
     case Value.VErr(msg) => msg
     case Value.VFloat(f) => fmtFloat(f)
-    case Value.VMap(kvs) => Str.concat("Map(", Str.concat(showAll(pairsToTuples(kvs)), ")"))
+    case Value.VMap(kvs) => Str.concat("Map(", Str.concat(showAll(pairsToTuples(mapPairs(kvs, noPairs()))), ")"))
     case Value.VSet(xs) => Str.concat("Set(", Str.concat(showAll(xs), ")"))
     case Value.VBuilder(_) => "<builder>"
     case Value.VBytes(_) => "<bytes>"
@@ -1045,7 +1049,7 @@ def valEq(a: Value, b: Value): Bool =
     case Value.VTuple(xs) => eqTuple(xs, b)
     case Value.VCon(_, tag, fields) => eqCon(tag, fields, b)
     case Value.VFloat(x) => eqFloat(x, b)
-    case Value.VMap(kvs) => eqList(pairsToTuples(kvs), mapTuples(b))
+    case Value.VMap(kvs) => eqList(pairsToTuples(mapPairs(kvs, noPairs())), mapTuples(b))
     case Value.VSet(xs) => eqList(xs, setTuples(b))
     case _ => false
   }
@@ -1061,7 +1065,7 @@ def containsValue(xs: List[Value], v: Value): Bool =
 
 def mapTuples(b: Value): Value =
   b match {
-    case Value.VMap(kvs) => Value.VList(pairsToTuples(kvs))
+    case Value.VMap(kvs) => Value.VList(pairsToTuples(mapPairs(kvs, noPairs())))
     case _ => Value.VUnit
   }
 
@@ -1345,10 +1349,10 @@ def listOf(v: Value): List[Value] =
     case _ => noVals()
   }
 
-def mapOf(v: Value): List[(Value, Value)] =
+def mapOf(v: Value): EvMap =
   v match {
     case Value.VMap(kvs) => kvs
-    case _ => noPairs()
+    case _ => emptyMap()
   }
 
 def setOf(v: Value): List[Value] =
@@ -1471,7 +1475,7 @@ def scalarOf(v: Value): Int =
   }
 
 def cmpFloatNum(x: Float, y: Float): Int =
-  if (x < y) 0 - 1 else if (x > y) 1 else 0
+  if (x != x) if (y != y) 0 else 1 else if (y != y) 0 - 1 else if (x < y) 0 - 1 else if (x > y) 1 else 0
 
 def cmpScalar(a: Value, b: Value): Int =
   if (isFloat(a) && isFloat(b)) cmpFloatNum(floatOf(a), floatOf(b)) else if (isFloat(a)) 1 else if (isFloat(b)) 0 - 1 else cmpInt(scalarOf(a), scalarOf(b))
@@ -1485,7 +1489,7 @@ def keyRank(v: Value): Int =
     case Value.VInt(_) => 4
     case Value.VBool(_) => 4
     case Value.VFloat(_) => 4
-    case Value.VMap(kvs) => if (List.isEmpty(kvs)) 0 else 5
+    case Value.VMap(kvs) => if (mapSize(kvs) == 0) 0 else 5
     case Value.VSet(xs) => if (List.isEmpty(xs)) 0 else 5
     case Value.VTuple(xs) => if (List.isEmpty(xs)) 0 else 14
     case _ => 100
@@ -1523,7 +1527,7 @@ def cmpPairVals(c: Int, xs: List[(Value, Value)], ys: List[(Value, Value)], ens:
 
 def cmpMap(kvs: List[(Value, Value)], b: Value, ens: List[En]): Int =
   b match {
-    case Value.VMap(ys) => cmpPairs(kvs, ys, ens)
+    case Value.VMap(ys) => cmpPairs(kvs, mapPairs(ys, noPairs()), ens)
     case Value.VSet(xs) => cmpPairs(kvs, setAsMap(xs), ens)
     case _ => 1
   }
@@ -1546,7 +1550,7 @@ def cmpSame(a: Value, b: Value, ens: List[En]): Int =
     case Value.VList(xs) => cmpList(xs, listOf(b), ens)
     case Value.VTuple(xs) => cmpList(xs, tupleOf(b), ens)
     case Value.VCon(en, tag, fs) => cmpCon(en, tag, fs, b, ens)
-    case Value.VMap(kvs) => cmpMap(kvs, b, ens)
+    case Value.VMap(kvs) => cmpMap(mapPairs(kvs, noPairs()), b, ens)
     case Value.VSet(xs) => cmpMap(setAsMap(xs), b, ens)
     case _ => 1
   }
@@ -1569,26 +1573,110 @@ def keyOk(k: Value): Bool =
 def keysOk(ks: List[Value]): Bool =
   List.forall(ks, k => keyOk(k))
 
-def mapPut(kvs: List[(Value, Value)], k: Value, v: Value, ens: List[En]): List[(Value, Value)] =
-  if (List.isEmpty(kvs)) (k, v) :: noPairs() else mapPutHd(List.at(kvs, 0), List.tail(kvs), k, v, ens)
+def emptyMap(): EvMap =
+  EvMap.MEmpty
 
-def mapPutHd(h: (Value, Value), rest: List[(Value, Value)], k: Value, v: Value, ens: List[En]): List[(Value, Value)] =
-  if (cmpValue(k, pairFst(h), ens) < 0) (k, v) :: h :: rest else if (cmpValue(k, pairFst(h), ens) == 0) (k, v) :: rest else h :: mapPut(rest, k, v, ens)
+def mapSize(m: EvMap): Int =
+  m match {
+    case EvMap.MEmpty => 0
+    case EvMap.MNode(_, _, _, _, _, n) => n
+  }
 
-def mapPutAll(kvs: List[(Value, Value)], more: List[(Value, Value)], ens: List[En]): List[(Value, Value)] =
-  if (List.isEmpty(more)) kvs else mapPutAll(mapPut(kvs, pairFst(List.at(more, 0)), pairSnd(List.at(more, 0)), ens), List.tail(more), ens)
+def mapHeight(m: EvMap): Int =
+  m match {
+    case EvMap.MEmpty => 0
+    case EvMap.MNode(_, _, _, _, h, _) => h
+  }
 
-def mapFind(kvs: List[(Value, Value)], k: Value, ens: List[En]): Option[Value] =
-  if (List.isEmpty(kvs)) None else mapFindHd(List.at(kvs, 0), List.tail(kvs), k, ens)
+def mapNode(k: Value, v: Value, l: EvMap, r: EvMap): EvMap =
+  EvMap.MNode(k, v, l, r, 1 + (if (mapHeight(l) > mapHeight(r)) mapHeight(l) else mapHeight(r)), 1 + mapSize(l) + mapSize(r))
 
-def mapFindHd(h: (Value, Value), rest: List[(Value, Value)], k: Value, ens: List[En]): Option[Value] =
-  if (cmpValue(k, pairFst(h), ens) == 0) Some(pairSnd(h)) else if (cmpValue(k, pairFst(h), ens) < 0) None else mapFind(rest, k, ens)
+def mapBalance(k: Value, v: Value, l: EvMap, r: EvMap): EvMap =
+  if (mapHeight(l) > mapHeight(r) + 1) mapLeft(k, v, l, r) else if (mapHeight(r) > mapHeight(l) + 1) mapRight(k, v, l, r) else mapNode(k, v, l, r)
 
-def mapHas(kvs: List[(Value, Value)], k: Value, ens: List[En]): Bool =
-  isSome(mapFind(kvs, k, ens))
+def mapLeft(k: Value, v: Value, l: EvMap, r: EvMap): EvMap =
+  l match {
+    case EvMap.MNode(lk, lv, ll, lr, _, _) => if (mapHeight(ll) >= mapHeight(lr)) mapNode(lk, lv, ll, mapNode(k, v, lr, r)) else mapLeftInner(k, v, lk, lv, ll, lr, r)
+    case EvMap.MEmpty => mapNode(k, v, l, r)
+  }
 
-def mapDel(kvs: List[(Value, Value)], k: Value, ens: List[En]): List[(Value, Value)] =
-  List.filter(kvs, pr => cmpValue(pairFst(pr), k, ens) != 0)
+def mapLeftInner(k: Value, v: Value, lk: Value, lv: Value, ll: EvMap, lr: EvMap, r: EvMap): EvMap =
+  lr match {
+    case EvMap.MNode(mk, mv, ml, mr, _, _) => mapNode(mk, mv, mapNode(lk, lv, ll, ml), mapNode(k, v, mr, r))
+    case EvMap.MEmpty => mapNode(lk, lv, ll, mapNode(k, v, lr, r))
+  }
+
+def mapRight(k: Value, v: Value, l: EvMap, r: EvMap): EvMap =
+  r match {
+    case EvMap.MNode(rk, rv, rl, rr, _, _) => if (mapHeight(rr) >= mapHeight(rl)) mapNode(rk, rv, mapNode(k, v, l, rl), rr) else mapRightInner(k, v, l, rk, rv, rl, rr)
+    case EvMap.MEmpty => mapNode(k, v, l, r)
+  }
+
+def mapRightInner(k: Value, v: Value, l: EvMap, rk: Value, rv: Value, rl: EvMap, rr: EvMap): EvMap =
+  rl match {
+    case EvMap.MNode(mk, mv, ml, mr, _, _) => mapNode(mk, mv, mapNode(k, v, l, ml), mapNode(rk, rv, mr, rr))
+    case EvMap.MEmpty => mapNode(rk, rv, mapNode(k, v, l, rl), rr)
+  }
+
+def mapPut(m: EvMap, k: Value, v: Value, ens: List[En]): EvMap =
+  m match {
+    case EvMap.MEmpty => mapNode(k, v, emptyMap(), emptyMap())
+    case EvMap.MNode(old, value, l, r, _, _) => mapPutAt(cmpValue(k, old, ens), old, value, l, r, k, v, ens)
+  }
+
+def mapPutAt(c: Int, old: Value, value: Value, l: EvMap, r: EvMap, k: Value, v: Value, ens: List[En]): EvMap =
+  if (c < 0) mapBalance(old, value, mapPut(l, k, v, ens), r) else if (c > 0) mapBalance(old, value, l, mapPut(r, k, v, ens)) else mapNode(k, v, l, r)
+
+def mapPutAll(m: EvMap, more: List[(Value, Value)], ens: List[En]): EvMap =
+  if (List.isEmpty(more)) m else mapPutAll(mapPut(m, pairFst(List.at(more, 0)), pairSnd(List.at(more, 0)), ens), List.tail(more), ens)
+
+def mapFind(m: EvMap, k: Value, ens: List[En]): Option[Value] =
+  m match {
+    case EvMap.MEmpty => None
+    case EvMap.MNode(old, v, l, r, _, _) => mapFindAt(cmpValue(k, old, ens), v, l, r, k, ens)
+  }
+
+def mapFindAt(c: Int, v: Value, l: EvMap, r: EvMap, k: Value, ens: List[En]): Option[Value] =
+  if (c < 0) mapFind(l, k, ens) else if (c > 0) mapFind(r, k, ens) else Some(v)
+
+def mapHas(m: EvMap, k: Value, ens: List[En]): Bool =
+  isSome(mapFind(m, k, ens))
+
+def mapDel(m: EvMap, k: Value, ens: List[En]): EvMap =
+  m match {
+    case EvMap.MEmpty => m
+    case EvMap.MNode(old, v, l, r, _, _) => mapDelAt(cmpValue(k, old, ens), old, v, l, r, k, ens)
+  }
+
+def mapDelAt(c: Int, old: Value, v: Value, l: EvMap, r: EvMap, k: Value, ens: List[En]): EvMap =
+  if (c < 0) mapBalance(old, v, mapDel(l, k, ens), r) else if (c > 0) mapBalance(old, v, l, mapDel(r, k, ens)) else mapJoin(l, r)
+
+def mapJoin(l: EvMap, r: EvMap): EvMap =
+  r match {
+    case EvMap.MEmpty => l
+    case EvMap.MNode(_, _, _, _, _, _) => mapJoinFirst(mapFirst(r), l, mapDropFirst(r))
+  }
+
+def mapFirst(m: EvMap): (Value, Value) =
+  m match {
+    case EvMap.MEmpty => (Value.VUnit, Value.VUnit)
+    case EvMap.MNode(k, v, l, _, _, _) => if (mapSize(l) == 0) (k, v) else mapFirst(l)
+  }
+
+def mapDropFirst(m: EvMap): EvMap =
+  m match {
+    case EvMap.MEmpty => m
+    case EvMap.MNode(k, v, l, r, _, _) => if (mapSize(l) == 0) r else mapBalance(k, v, mapDropFirst(l), r)
+  }
+
+def mapJoinFirst(pr: (Value, Value), l: EvMap, r: EvMap): EvMap =
+  mapBalance(pairFst(pr), pairSnd(pr), l, r)
+
+def mapPairs(m: EvMap, acc: List[(Value, Value)]): List[(Value, Value)] =
+  m match {
+    case EvMap.MEmpty => acc
+    case EvMap.MNode(k, v, l, r, _, _) => mapPairs(l, (k, v) :: mapPairs(r, acc))
+  }
 
 def pairKeys(kvs: List[(Value, Value)]): List[Value] =
   List.map(kvs, pr => pairFst(pr))
@@ -1722,7 +1810,7 @@ def toSetKit(xs: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (keysOk(xs)) Value.VSet(setPutAll(noVals(), xs, p.ens)) else errAt("Set element is not ordered", env, p, off)
 
 def toMapKit(ps: List[(Value, Value)], env: EvEnv, p: EvProg, off: Int): Value =
-  if (keysOk(pairKeys(ps))) Value.VMap(mapPutAll(noPairs(), ps, p.ens)) else errAt("Map key is not ordered", env, p, off)
+  if (keysOk(pairKeys(ps))) Value.VMap(mapPutAll(emptyMap(), ps, p.ens)) else errAt("Map key is not ordered", env, p, off)
 
 def listFnKit(f: String, xs: List[Value], fn: Value, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
   if (f == "List.map") mapValsThen(xs, fn, env, p, off, rs => Value.VList(rs)) else if (f == "List.flatMap") mapValsThen(xs, fn, env, p, off, rs => Value.VList(List.flatten(List.map(rs, r => listOf(r))))) else if (f == "List.filter") mapValsThen(xs, fn, env, p, off, rs => Value.VList(keepWhere(xs, rs, true))) else if (f == "List.filterNot") mapValsThen(xs, fn, env, p, off, rs => Value.VList(keepWhere(xs, rs, false))) else if (f == "List.count") mapValsThen(xs, fn, env, p, off, rs => Value.VInt(List.count(rs, r => boolOf(r)))) else if (f == "List.partition") mapValsThen(xs, fn, env, p, off, rs => Value.VList(Value.VList(keepWhere(xs, rs, true)) :: Value.VList(keepWhere(xs, rs, false)) :: noVals())) else if (f == "List.findLast") mapValsThen(xs, fn, env, p, off, rs => lastHit(xs, lastTrue(rs, 0, 0 - 1))) else if (f == "List.lastIndexWhere") mapValsThen(xs, fn, env, p, off, rs => Value.VInt(lastTrue(rs, 0, 0 - 1))) else if (f == "List.sortBy") mapValsThen(xs, fn, env, p, off, rs => Value.VList(List.map(List.sortBy(List.zip(xs, rs), pr => intOf(pairSnd(pr))), pr => pairFst(pr)))) else if ((f == "List.maxBy" || f == "List.minBy") && List.isEmpty(xs)) errAt(Str.concat(f, " on empty"), env, p, off) else if (f == "List.maxBy") mapValsThen(xs, fn, env, p, off, rs => pairFst(List.maxBy(List.zip(xs, rs), pr => intOf(pairSnd(pr))))) else if (f == "List.minBy") mapValsThen(xs, fn, env, p, off, rs => pairFst(List.minBy(List.zip(xs, rs), pr => intOf(pairSnd(pr))))) else if (f == "List.groupBy") mapValsThen(xs, fn, env, p, off, rs => groupByKit(List.zip(xs, rs), env, p, off)) else if (f == "List.distinctBy") mapValsThen(xs, fn, env, p, off, rs => distinctByKit(List.zip(xs, rs), noVals(), noVals(), env, p, off)) else listScanKit(f, xs, fn, vals, env, p, off)
@@ -1731,9 +1819,9 @@ def lastHit(xs: List[Value], i: Int): Value =
   if (i < 0) Value.VList(noVals()) else Value.VList(List.at(xs, i) :: noVals())
 
 def groupByKit(prs: List[(Value, Value)], env: EvEnv, p: EvProg, off: Int): Value =
-  if (keysOk(pairVals(prs))) Value.VMap(groupInto(prs, noPairs(), p.ens)) else errAt("Map key is not ordered", env, p, off)
+  if (keysOk(pairVals(prs))) Value.VMap(groupInto(prs, emptyMap(), p.ens)) else errAt("Map key is not ordered", env, p, off)
 
-def groupInto(prs: List[(Value, Value)], acc: List[(Value, Value)], ens: List[En]): List[(Value, Value)] =
+def groupInto(prs: List[(Value, Value)], acc: EvMap, ens: List[En]): EvMap =
   if (List.isEmpty(prs)) acc else groupInto(List.tail(prs), mapPut(acc, pairSnd(List.at(prs, 0)), Value.VList(List.append(listOf(optOr(mapFind(acc, pairSnd(List.at(prs, 0)), ens), Value.VList(noVals()))), pairFst(List.at(prs, 0)))), ens), ens)
 
 def distinctByKit(prs: List[(Value, Value)], seen: List[Value], acc: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
@@ -1767,13 +1855,16 @@ def reduceKit(xs: List[Value], fn: Value, right: Bool, env: EvEnv, p: EvProg, of
   if (List.isEmpty(xs)) errAt(if (right) "List.reduceRight on empty" else "List.reduceLeft on empty", env, p, off) else if (right) foldRightKit(List.tail(xs), List.at(xs, 0), fn, env, p, off) else foldKit(List.tail(xs), List.at(xs, 0), fn, env, p, off)
 
 def mapKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Map.empty") Value.VMap(noPairs()) else if (f == "Map.set") mapSetKit(mapOf(List.at(vals, 0)), List.at(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Map.keys") Value.VList(pairKeys(mapOf(List.at(vals, 0)))) else if (f == "Map.values") Value.VList(pairVals(mapOf(List.at(vals, 0)))) else if (f == "Map.size") Value.VInt(List.len(mapOf(List.at(vals, 0)))) else if (f == "Map.contains") Value.VBool(mapHas(mapOf(List.at(vals, 0)), List.at(vals, 1), p.ens)) else if (f == "Map.get") optValue(mapFind(mapOf(List.at(vals, 0)), List.at(vals, 1), p.ens)) else if (f == "Map.getOrElse") optOr(mapFind(mapOf(List.at(vals, 0)), List.at(vals, 1), p.ens), List.at(vals, 2)) else if (f == "Map.remove") Value.VMap(mapDel(mapOf(List.at(vals, 0)), List.at(vals, 1), p.ens)) else if (f == "Map.toList") Value.VList(pairsToTuples(mapOf(List.at(vals, 0)))) else if (f == "Map.isEmpty") Value.VBool(List.isEmpty(mapOf(List.at(vals, 0)))) else if (f == "Map.nonEmpty") Value.VBool(List.nonEmpty(mapOf(List.at(vals, 0)))) else mapKit2(f, mapOf(List.at(vals, 0)), List.at(vals, 1), env, p, off)
+  if (f == "Map.empty") Value.VMap(emptyMap()) else mapKitTree(f, mapOf(List.at(vals, 0)), vals, env, p, off)
 
-def mapSetKit(kvs: List[(Value, Value)], k: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  if (keyOk(k)) Value.VMap(mapPut(kvs, k, v, p.ens)) else errAt("Map key is not ordered", env, p, off)
+def mapKitTree(f: String, m: EvMap, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Map.set") mapSetKit(m, List.at(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Map.keys") Value.VList(pairKeys(mapPairs(m, noPairs()))) else if (f == "Map.values") Value.VList(pairVals(mapPairs(m, noPairs()))) else if (f == "Map.size") Value.VInt(mapSize(m)) else if (f == "Map.contains") Value.VBool(mapHas(m, List.at(vals, 1), p.ens)) else if (f == "Map.get") optValue(mapFind(m, List.at(vals, 1), p.ens)) else if (f == "Map.getOrElse") optOr(mapFind(m, List.at(vals, 1), p.ens), List.at(vals, 2)) else if (f == "Map.remove") Value.VMap(mapDel(m, List.at(vals, 1), p.ens)) else if (f == "Map.toList") Value.VList(pairsToTuples(mapPairs(m, noPairs()))) else if (f == "Map.isEmpty") Value.VBool(mapSize(m) == 0) else if (f == "Map.nonEmpty") Value.VBool(mapSize(m) != 0) else mapKit2(f, m, mapPairs(m, noPairs()), List.at(vals, 1), env, p, off)
 
-def mapKit2(f: String, kvs: List[(Value, Value)], arg: Value, env: EvEnv, p: EvProg, off: Int): Value =
-  if (f == "Map.union") Value.VMap(mapPutAll(kvs, mapOf(arg), p.ens)) else if (f == "Map.intersect") Value.VMap(List.filter(kvs, pr => mapHas(mapOf(arg), pairFst(pr), p.ens))) else if (f == "Map.diff") Value.VMap(List.filter(kvs, pr => !mapHas(mapOf(arg), pairFst(pr), p.ens))) else if (f == "Map.filter") mapValsThen(pairVals(kvs), arg, env, p, off, rs => Value.VMap(List.map(List.filter(List.zip(kvs, rs), zr => boolOf(pairSndZ(zr))), zr => pairFstZ(zr)))) else if (f == "Map.mapValues") mapValsThen(pairVals(kvs), arg, env, p, off, rs => Value.VMap(List.zip(pairKeys(kvs), rs))) else if (f == "Map.exists") withIdx(scanPred(pairVals(kvs), arg, true, 0, env, p, off), i => Value.VBool(intOf(i) >= 0)) else if (f == "Map.forall") withIdx(scanPred(pairVals(kvs), arg, false, 0, env, p, off), i => Value.VBool(intOf(i) < 0)) else unsupported(Str.concat("kit ", f), env, p, off)
+def mapSetKit(m: EvMap, k: Value, v: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  if (keyOk(k)) Value.VMap(mapPut(m, k, v, p.ens)) else errAt("Map key is not ordered", env, p, off)
+
+def mapKit2(f: String, m: EvMap, kvs: List[(Value, Value)], arg: Value, env: EvEnv, p: EvProg, off: Int): Value =
+  if (f == "Map.union") Value.VMap(mapPutAll(m, mapPairs(mapOf(arg), noPairs()), p.ens)) else if (f == "Map.intersect") Value.VMap(mapPutAll(emptyMap(), List.filter(kvs, pr => mapHas(mapOf(arg), pairFst(pr), p.ens)), p.ens)) else if (f == "Map.diff") Value.VMap(mapPutAll(emptyMap(), List.filter(kvs, pr => !mapHas(mapOf(arg), pairFst(pr), p.ens)), p.ens)) else if (f == "Map.filter") mapValsThen(pairVals(kvs), arg, env, p, off, rs => Value.VMap(mapPutAll(emptyMap(), List.map(List.filter(List.zip(kvs, rs), zr => boolOf(pairSndZ(zr))), zr => pairFstZ(zr)), p.ens))) else if (f == "Map.mapValues") mapValsThen(pairVals(kvs), arg, env, p, off, rs => Value.VMap(mapPutAll(emptyMap(), List.zip(pairKeys(kvs), rs), p.ens))) else if (f == "Map.exists") withIdx(scanPred(pairVals(kvs), arg, true, 0, env, p, off), i => Value.VBool(intOf(i) >= 0)) else if (f == "Map.forall") withIdx(scanPred(pairVals(kvs), arg, false, 0, env, p, off), i => Value.VBool(intOf(i) < 0)) else unsupported(Str.concat("kit ", f), env, p, off)
 
 def pairFstZ(zr: ((Value, Value), Value)): (Value, Value) =
   zr match {
@@ -2170,13 +2261,13 @@ def hdrPair(kv: (String, String)): (Value, Value) =
   }
 
 def vMapOf(m: Map[String, String]): Value =
-  Value.VMap(List.map(Map.toList(m), kv => hdrPair(kv)))
+  Value.VMap(mapPutAll(emptyMap(), List.map(Map.toList(m), kv => hdrPair(kv)), []: List[En]))
 
 def natMapGo(kvs: List[(Value, Value)], acc: Map[String, String]): Map[String, String] =
   if (List.isEmpty(kvs)) acc else natMapGo(List.tail(kvs), Map.set(acc, strOf(pairFst(List.at(kvs, 0))), strOf(pairSnd(List.at(kvs, 0)))))
 
 def natMap(v: Value): Map[String, String] =
-  natMapGo(mapOf(v), Map.empty())
+  natMapGo(mapPairs(mapOf(v), noPairs()), Map.empty())
 
 def respVal(t: (Int, Map[String, String], String)): Value =
   t match {

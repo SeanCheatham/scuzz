@@ -2090,7 +2090,9 @@ cases = {
     'codegen': [('generated', [
         {'op': 'drive', 'name': 'irGenerated', 'args': [7]},
         {'op': 'drive', 'name': 'evGenerated', 'args': [7]}]),
-        ('lookup', [{'op': 'drive', 'name': 'evLookup', 'args': []}])],
+        ('lookup', [{'op': 'drive', 'name': 'evLookup', 'args': []}]),
+        ('constructors', [{'op': 'drive', 'name': 'evConstructors', 'args': []}]),
+        ('maps', [{'op': 'drive', 'name': 'evMaps', 'args': []}])],
     'editor': [('idle', None), ('queue-cache', [
         {'op': 'drive', 'name': 'queueCacheFlow', 'args': [3]}]),
         ('protocol', [
@@ -2164,6 +2166,103 @@ def replay(package, executable, label, events, ui=False):
 
 for label, events in cases:
     replay(package, name, label, events, ui)
+
+if name == 'codegen':
+    target = build / 'fuzz/parity/map-api'
+    shutil.rmtree(target, ignore_errors=True)
+    (target / 'src').mkdir(parents=True)
+    (target / 'work').mkdir()
+    (target / 'scuzz.toml').write_text('[package]\nname="map-parity"\n')
+    (target / 'src/Main.scuzz').write_text('''enum MapKey:
+  case First(n: Int)
+  case Last(n: Int)
+
+def maps(): Bool =
+  for {
+    order = Signal.makeN("order", "")
+    m = List.toMap([("c", 3), ("a", 0), ("b", 2), ("a", 1)])
+    doubled = Map.mapValues(m, v => for {
+      _ = Signal.set(order, Str.concat(Signal.get(order), s"${v}"))
+    } yield v * 2)
+    other = List.toMap([("b", 8), ("d", 4)])
+    groups = List.groupBy([3, 1, 4, 2], (v: Int) => v % 2)
+    tuples = List.toMap([((2, "a"), 3), ((1, "b"), 2), ((1, "a"), 1)])
+    lists = List.toMap([([2], 3), ([1, 2], 2), ([1], 1)])
+    enums = List.toMap([(MapKey.Last(0), 3), (MapKey.First(2), 2), (MapKey.First(1), 1)])
+    nested = List.toMap([(List.toMap([(2, 1)]), 2), (Map.empty(): Map[Int, Int], 0), (List.toMap([(1, 1)]), 1)])
+    nan = 0.0 / 0.0
+    floats = List.toMap([(nan, 7), (2.0, 2), (0.0, 0), ((0.0 - 1.0) * 0.0, 4), (0.0 - 1.0, 1), (nan, 9)])
+    floatKeys = Map.keys(floats)
+    floatSet = Set.add(Set.add(Set.add(Set.empty(), nan), 2.0), nan)
+    fractional = Map.mapValues(List.toMap([("a", 1.5), ("b", 2.5)]), v => v + 0.5)
+    flags = List.toMap([("a", false), ("b", true)])
+  } yield Signal.get(order) == "123" && Map.keys(m) == ["a", "b", "c"] && Map.values(m) == [1, 2, 3] && Map.toList(doubled) == [("a", 2), ("b", 4), ("c", 6)] && Map.size(m) == 3 && Map.nonEmpty(m) && !Map.isEmpty(m) && Map.contains(m, "b") && Map.get(m, "b") == Some(2) && Map.get(m, "z") == None && Map.getOrElse(m, "z", 9) == 9 && Map.remove(m, "z") == m && Map.keys(Map.remove(m, "b")) == ["a", "c"] && Map.toList(Map.union(m, other)) == [("a", 1), ("b", 8), ("c", 3), ("d", 4)] && Map.toList(Map.intersect(m, other)) == [("b", 2)] && Map.keys(Map.diff(m, other)) == ["a", "c"] && Map.keys(Map.filter(m, v => v > 1)) == ["b", "c"] && Map.exists(m, v => v == 2) && Map.forall(m, v => v > 0) && Map.toList(groups) == [(0, [4, 2]), (1, [3, 1])] && Map.values(tuples) == [1, 2, 3] && Map.values(lists) == [1, 2, 3] && Map.values(enums) == [1, 2, 3] && Map.values(nested) == [0, 1, 2] && Map.size(floats) == 4 && Map.values(floats) == [1, 4, 2, 9] && List.at(floatKeys, 0) == 0.0 - 1.0 && List.at(floatKeys, 3) != List.at(floatKeys, 3) && Map.getOrElse(floats, nan, 0) == 9 && Map.getOrElse(floats, 0.0, 0) == 4 && Map.size(Map.remove(floats, nan)) == 3 && Set.size(floatSet) == 2 && Set.contains(floatSet, nan) && Set.size(Set.remove(floatSet, nan)) == 1 && Map.values(fractional) == [2.0, 3.0] && Map.exists(flags, v => v) && !Map.forall(flags, v => v) && Map.keys(Map.filter(flags, v => v)) == ["b"]
+
+@main def main: IO[Unit] =
+  IO.pure(())
+''')
+    (target / 'maps.scuzz_verify').write_text('oracle maps(): Bool =\n  Main.maps()\n')
+    subprocess.run([str(cli), 'fmt', str(target)], env=base_env, check=True,
+                   capture_output=True, text=True, timeout=30)
+    result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(target)],
+                            env=base_env, cwd=target / 'work', capture_output=True,
+                            text=True, timeout=180)
+    detail = result.stdout + result.stderr
+    (target / 'campaign.log').write_text(detail)
+    assert result.returncode == 0 and 'probes run compiled' not in detail, detail
+    out = replay(target, 'map-parity', 'map-api', [
+        {'op': 'drive', 'name': 'maps', 'args': []}])
+    signals = json.loads((out / 'eval.timeline').read_text().split('signals:\n', 1)[1].split('\n', 1)[0])
+    assert [(s['name'], s['value']) for s in signals] == [('order', '123')], signals
+    print('Map API: ordered callbacks, immutable values, compound keys, and NaN order', flush=True)
+
+if name == 'codegen':
+    for reverse in [False, True]:
+        target = build / f'fuzz/parity/constructor-order-{int(reverse)}'
+        shutil.rmtree(target, ignore_errors=True)
+        (target / 'src').mkdir(parents=True)
+        (target / 'work').mkdir()
+        (target / 'scuzz.toml').write_text('[package]\nname="constructor-parity"\n')
+        declarations = [
+            'enum Packet:\n  case Wrap(value: Int = 7)\n  case Empty\nrecord Parcel(value: Int = 11)\n',
+            'enum Packet:\n  case Wrap(value: Int, text: String)\n  case Empty\nrecord Parcel(value: Int, text: String)\n']
+        if reverse:
+            declarations.reverse()
+        for stem, source_text in zip(['A', 'B'], declarations):
+            (target / f'src/{stem}.scuzz').write_text(source_text)
+        body = ('Packet.Wrap(text = "b", value = 9) match { case Packet.Wrap(text = label, value = n) => n + Str.len(label) + Parcel(text = "cd", value = 13).value case _ => 0 }'
+                if reverse else 'Packet.Wrap() match { case Packet.Wrap(value = n) => n + Parcel().value case _ => 0 }')
+        (target / 'src/Main.scuzz').write_text('def result(): Int =\n  ' + body + '\n@main def main: IO[Unit] =\n  IO.pure(())\n')
+        (target / 'constructors.scuzz_verify').write_text('oracle result(): Bool =\n  Main.result() == ' + ('23' if reverse else '18') + '\n')
+        subprocess.run([str(cli), 'fmt', str(target)], env=base_env, check=True,
+                       capture_output=True, text=True, timeout=30)
+        result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(target)],
+                                env=base_env, cwd=target / 'work', capture_output=True,
+                                text=True, timeout=180)
+        detail = result.stdout + result.stderr
+        (target / 'campaign.log').write_text(detail)
+        assert result.returncode == 0 and 'probes run compiled' not in detail, detail
+        replay(target, 'constructor-parity', 'constructors', [
+            {'op': 'drive', 'name': 'result', 'args': []}])
+    target = build / 'fuzz/parity/view-signals'
+    shutil.rmtree(target, ignore_errors=True)
+    (target / 'src').mkdir(parents=True)
+    (target / 'work').mkdir()
+    (target / 'scuzz.toml').write_text('[package]\nname="view-parity"\n[ui]\ndefault_runtime="headless"\nheadless_size=[960, 560]\nheadless_scale=1.0\n')
+    (target / 'src/Main.scuzz').write_text('@main def main: IO[Unit] =\n  for {\n    view = Signal.makeN("view", View.text("a"))\n    views = Signal.makeN("views", [View.text("b")])\n    nested = Signal.makeN("nested", (View.text("c"), [View.text("d")]))\n    _ <- Ui.run(_ => View.button("replace", _ => Signal.set(view, View.text("updated"))))\n  } yield ()\n')
+    subprocess.run([str(cli), 'fmt', str(target)], env=base_env, check=True,
+                   capture_output=True, text=True, timeout=30)
+    result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(target)],
+                            env=base_env, cwd=target / 'work', capture_output=True,
+                            text=True, timeout=180)
+    (target / 'campaign.log').write_text(result.stdout + result.stderr)
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = replay(target, 'view-parity', 'view-signals', None, ui=True)
+    signals = json.loads((out / 'eval.timeline').read_text().split('signals:\n', 1)[1].split('\n', 1)[0])
+    assert [(s['name'], s['value']) for s in signals] == [
+        ('view', '<handle>'), ('views', ['<handle>']),
+        ('nested', ['<handle>', ['<handle>']])], signals
+    print('View signals: direct, list, and nested tuple values match native handles', flush=True)
 
 if name == 'tyck':
     target = build / 'fuzz/parity/signals'

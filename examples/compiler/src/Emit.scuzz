@@ -1238,7 +1238,7 @@ def mapElemTy(e: Expr, defs: Ftab, ens: List[En], ps: List[Param], loc: String):
   if (isIntElem(e)) "Int" else mapElemTyOf(exprRetTyEns(e, defs, ens, ps, loc))
 
 def mapElemTyOf(ty: String): String =
-  if (Check.isRes(ty)) Check.resPayload(ty) else if (Check.isIo(ty)) Check.ioPayload(ty) else listElemTy(ty)
+  if (Str.startsWith(ty, "Map[")) Check.mapShownValTy(Type.parse(ty)) else if (Check.isRes(ty)) Check.resPayload(ty) else if (Check.isIo(ty)) Check.ioPayload(ty) else listElemTy(ty)
 
 def listElemTy(ty: String): String =
   Check.elemOf(ty)

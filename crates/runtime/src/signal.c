@@ -377,6 +377,10 @@ static void fputs_mirror_value(FILE *f, const void *value) {
     fputs_mirror_con(f, value, pay);
     return;
   }
+  if (tag == 26) {
+    fputs("\"<handle>\"", f);
+    return;
+  }
   fputs_json_value(f, value);
 }
 
