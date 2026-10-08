@@ -540,6 +540,34 @@ assert all(path.read_bytes() == content for path, content in formatted.items()),
 command(['check', package], 'valid-check')
 require_output(command(['eval', package], 'valid-eval').stdout, expected, 'evaluator model')
 require_output(native(package, 'valid'), expected, 'native model')
+# Check separate module types with both declaration orders.
+for case in cases[:6]:
+    for reverse in [False, True]:
+        label = f"modules-{case['seed']}-{int(reverse)}"
+        modules = root / label
+        (modules / 'src').mkdir(parents=True)
+        (modules / 'scuzz.toml').write_text('[package]\nname="generated"\n')
+        for stem, source in case['modules']:
+            if reverse:
+                stem = {'A': 'Z', 'B': 'A'}.get(stem, stem)
+                source = source.replace('A.', 'Z.').replace('B.', 'A.').replace('shadow(A: Holder)', 'shadow(Z: Holder)')
+            (modules / f'src/{stem}.scuzz').write_text(source)
+        module_claims = '\n'.join([
+            'oracle fromA(c: A.Choice[String]): Bool =\n  c match { case A.Choice.Wrap(A.Box(text)) => A.read(c) == Str.len(text) case A.Choice.End => A.read(c) == 0 }\n',
+            'oracle fromB(c: B.Choice[Int]): Bool =\n  c match { case B.Choice.Wrap(marker, B.Box(_, value)) => B.read(c) == marker + value case B.Choice.End => B.read(c) == 0 }\n',
+        ])
+        if reverse:
+            module_claims = module_claims.replace('A.', 'Z.').replace('B.', 'A.')
+        (modules / 'modules.scuzz_verify').write_text(module_claims)
+        expected_module = str(21 + 2 * (case['seed'] % 6)) + '\n'
+        command(['fmt', modules], label + '-format')
+        command(['check', modules], label + '-check')
+        require_output(command(['eval', modules], label + '-eval').stdout, expected_module, label + ' evaluator')
+        require_output(native(modules, label), expected_module, label + ' native')
+        command(['fuzz', '--iterations', '6', '--seed', '41', modules], label + '-campaign')
+        module_summary = json.loads((modules / 'build/fuzz/summary.json').read_text())
+        assert module_summary['fuzz']['ok'] and module_summary['fuzz']['search'] > 0
+
 command(['fuzz', '--iterations', '16', '--seed', '41', package], 'valid-campaign')
 summary = json.loads((package / 'build/fuzz/summary.json').read_text())
 assert summary['fuzz']['ok'] and summary['fuzz']['search'] == 10
@@ -579,7 +607,7 @@ for label, actual in [('evaluator', ev), ('native', compiled)]:
 command(['fuzz', '--iterations', '0', mutant], 'mutant-campaign', success=False)
 rejected = json.loads((mutant / 'build/fuzz/summary.json').read_text())
 assert not rejected['fuzz']['ok'] and rejected['corpus']['failures'] == 1
-print('Generated compiler checks: 54 cases, six families, three input signs, three depths, invalid types, evaluator/native models, search, mutation, and wrong-result rejection')
+print('Generated compiler checks: 54 cases, six families, three input signs, three depths, invalid types, 12 module checks, evaluator/native models, search, mutation, and wrong-result rejection')
 PY_CASES
   mkdir -p "$cases_dir/generator/src"
   cp examples/compiler-cases/src/*.scuzz "$cases_dir/generator/src/"
@@ -2092,7 +2120,9 @@ cases = {
         {'op': 'drive', 'name': 'evGenerated', 'args': [7]}]),
         ('lookup', [{'op': 'drive', 'name': 'evLookup', 'args': []}]),
         ('constructors', [{'op': 'drive', 'name': 'evConstructors', 'args': []}]),
-        ('maps', [{'op': 'drive', 'name': 'evMaps', 'args': []}])],
+        ('maps', [{'op': 'drive', 'name': 'evMaps', 'args': []}])] + [
+        (f'module-{seed}', [{'op': 'drive', 'name': 'evModules', 'args': [seed]}])
+        for seed in range(6)],
     'editor': [('idle', None), ('queue-cache', [
         {'op': 'drive', 'name': 'queueCacheFlow', 'args': [3]}]),
         ('protocol', [
@@ -2230,10 +2260,13 @@ if name == 'codegen':
             declarations.reverse()
         for stem, source_text in zip(['A', 'B'], declarations):
             (target / f'src/{stem}.scuzz').write_text(source_text)
-        body = ('Packet.Wrap(text = "b", value = 9) match { case Packet.Wrap(text = label, value = n) => n + Str.len(label) + Parcel(text = "cd", value = 13).value case _ => 0 }'
-                if reverse else 'Packet.Wrap() match { case Packet.Wrap(value = n) => n + Parcel().value case _ => 0 }')
-        (target / 'src/Main.scuzz').write_text('def result(): Int =\n  ' + body + '\n@main def main: IO[Unit] =\n  IO.pure(())\n')
-        (target / 'constructors.scuzz_verify').write_text('oracle result(): Bool =\n  Main.result() == ' + ('23' if reverse else '18') + '\n')
+        first, second = ('B', 'A') if reverse else ('A', 'B')
+        body = (
+            f'def first(): Int =\n  {first}.Packet.Wrap() match {{ case {first}.Packet.Wrap(value = n) => n + {first}.Parcel().value case _ => 0 }}\n'
+            f'def second(): Int =\n  {second}.Packet.Wrap(text = "b", value = 9) match {{ case {second}.Packet.Wrap(text = label, value = n) => n + Str.len(label) + {second}.Parcel(text = "cd", value = 13).value case _ => 0 }}\n'
+            'def result(): Int = first() + second()\n@main def main: IO[Unit] =\n  IO.pure(())\n')
+        (target / 'src/Main.scuzz').write_text(body)
+        (target / 'constructors.scuzz_verify').write_text('oracle result(): Bool =\n  Main.result() == 41\n')
         subprocess.run([str(cli), 'fmt', str(target)], env=base_env, check=True,
                        capture_output=True, text=True, timeout=30)
         result = subprocess.run([str(cli), 'fuzz', '--iterations', '0', str(target)],

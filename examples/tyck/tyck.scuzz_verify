@@ -49,3 +49,6 @@ oracle matchCoverage(seed: Int where seed >= 0 && seed < 128): Bool =
 oracle closedPatternCoverage(): Bool =
   Main.closedPatternCoverage()
 
+oracle moduleIdentity(): Bool =
+  Main.moduleIdentity()
+

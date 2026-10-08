@@ -366,7 +366,7 @@ def emitFloatBits(s: String, prefix: String): Slot =
   Slot(line(Str.concat(tmp(prefix, "fb"), Str.concat("bitcast double ", Str.concat(s, " to i64")))), pct(prefix, "fb"), false)
 
 def emitVar(s: String, prefix: String, ens: List[En], ps: List[Param], strs: Strs, defs: Ftab, loc: String): Slot =
-  if (s == ".closure.value" || paramTy(ps, s) != "") Slot("", Str.concat("%", s), s == ".closure.value" && paramTy(ps, s) == "") else emitFunOrCtor(s, prefix, ens, ps, strs, defs, loc, findDefPrefer(defs, s, modOfLoc(loc)))
+  if (s == ".closure.value" || hasParam(ps, s)) Slot("", Str.concat("%", s), s == ".closure.value" && paramTy(ps, s) == "") else emitFunOrCtor(s, prefix, ens, ps, strs, defs, loc, findDefPrefer(defs, s, modOfLoc(loc)))
 
 def emitFunOrCtor(s: String, prefix: String, ens: List[En], ps: List[Param], strs: Strs, defs: Ftab, loc: String, hit: List[Fun]): Slot =
   if (List.isEmpty(hit)) emitBareCtor(s, prefix, ens, defs.caseOwners) else emitFunRef(List.at(hit, 0), prefix, strs, defs, ens, ps, loc)
@@ -1282,7 +1282,7 @@ def phCall(f: String): Expr =
   Expr.ELam("_ph", "", Expr.ECall(f, Expr.EVar("_ph", 0) :: noExpr(), 0))
 
 def etaVar(f: String, ps: List[Param], defs: Ftab, mod: String): Bool =
-  if (kitEta1(f)) true else paramTy(ps, f) == "" && etaFun1(findDefPrefer(defs, f, mod))
+  !hasParam(ps, f) && (kitEta1(f) || etaFun1(findDefPrefer(defs, f, mod)))
 
 def etaFun1(hit: List[Fun]): Bool =
   !List.isEmpty(hit) && funArity1(List.at(hit, 0))
@@ -1410,14 +1410,20 @@ def etaFold(f: String): Expr =
 
 def emitFoldKit4b(rt: String, inner: Slot, z: Slot, lam: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, pty: String): Slot =
   inner match {
-    case Slot(ic, iv, io) => emitFoldKit5(rt, ic, iv, io, z, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc, pty)
+    case Slot(ic, iv, io) => emitFoldKit5(rt, ic, iv, io, z, mapLamBind(lam), mapLamBody(lam), prefix, strs, defs, ens, ps, loc, mapLamTy(lam, pty))
   }
 
 def emitFoldKit5(rt: String, ic: String, iv: String, io: Bool, z: Slot, bind: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, pty: String): Slot =
   emitFoldKit6(rt, ic, iv, io, z, emitFoldNeth(prefix, bind, body, strs, defs, ens, ps, loc, pty), emitPackEnv(ps, Str.concat(prefix, "_e")), prefix)
 
+def mapLamTy(lam: Expr, fallback: String): String =
+  lam match {
+    case Expr.ELam(_, ann, _) => if (ann == "") fallback else ann
+    case _ => fallback
+  }
+
 def emitFoldNeth(prefix: String, bind: String, body: Expr, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, pty: String): String =
-  if (bind == "__tup" && pty != "") emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, false, pty) else emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, false)
+  if (pty != "") emitNethGoTy(prefix, bind, body, dropParam(ps, bind), strs, defs, ens, loc, false, pty) else emitNeth(prefix, bind, body, strs, defs, ens, ps, loc, false)
 
 def emitFoldKit6(rt: String, ic: String, iv: String, io: Bool, z: Slot, neth: String, env: Slot, prefix: String): Slot =
   z match {
@@ -3507,7 +3513,7 @@ def emitField(recv: Expr, name: String, prefix: String, strs: Strs, defs: Ftab, 
 
 def emitFieldEn(recv: Expr, name: String, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
   recv match {
-    case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else if (Check.recordModuleCtor(ens, en, name)) emitCtor(name, name, prefix, ens) else emitCtor(en, name, prefix, ens)
+    case Expr.EVar(en, _) => if (paramTy(ps, en) != "") emitRecFieldVar(en, name, prefix, ens, ps) else emitCtor(en, name, prefix, ens)
     case _ => emitRecFieldFrom(emitExpr(recv, Str.concat(prefix, "_recv"), strs, defs, ens, ps, loc), name, prefix, copyEnAt(recv, ens, defs, ps, loc), ens)
   }
 
@@ -3755,7 +3761,7 @@ def copyArgBox(prefix: String, k: Int, ev: String, ty: String): String =
   boxScalarStem(ev, ty, prefix, Str.concat("ub", Str.fromInt(k)))
 
 def emitCtorOrQual(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  if (Check.recordModuleCtor(ens, en, name)) emitPayloadCtor(name, name, args, prefix, strs, defs, ens, ps, loc, fid) else if (enHasCase(ens, en, name)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorOrQualKit(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
+  if (enHasCase(ens, en, name)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitCtorOrQualKit(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
 
 def emitCtorOrQualKit(en: String, name: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   if (isEmitKit(Str.concat(en, Str.concat(".", name)))) emitCall(Str.concat(en, Str.concat(".", name)), args, prefix, strs, defs, ens, ps, loc, fid) else if (hasEn(ens, en)) emitPayloadCtor(en, name, args, prefix, strs, defs, ens, ps, loc, fid) else emitQual(en, name, args, prefix, strs, defs, ens, ps, loc, fid)
@@ -3827,7 +3833,7 @@ def emitCtor(en: String, name: String, prefix: String, ens: List[En]): Slot =
   Slot(emitAdtNew(prefix, ctorTag(ens, en, name), "null"), pct(prefix, "adt"), true)
 
 def ctorTag(ens: List[En], en: String, name: String): Int =
-  if (en == "Option") optionTag(name) else if (en == "Result") resultTag(name) else if (en == "Json") jsonTag(name) else ctorTagAt(ens, en, name, 0)
+  if (en == "Option") optionTag(name) else if (en == "Result") resultTag(name) else if (en == "Json") jsonTag(name) else ctorTagAt(ens, en, name, 16)
 
 def optionTag(name: String): Int =
   if (name == "Some") 1 else 0
@@ -3843,7 +3849,7 @@ def ctorTagAt(ens: List[En], en: String, name: String, i: Int): Int =
 
 def ctorTagHit(h: En, rest: List[En], en: String, name: String, i: Int): Int =
   h match {
-    case En(_, n, _, cases) => if (n == en) caseTag(cases, name, 0) else ctorTagAt(rest, en, name, i + 1)
+    case En(_, n, _, cases) => if (n == en) i + caseTag(cases, name, 0) else ctorTagAt(rest, en, name, i + (if (n == "Option" || n == "Result") 0 else List.len(cases)))
   }
 
 def caseTag(cs: List[EnCase], name: String, i: Int): Int =
@@ -3906,7 +3912,7 @@ def jsonFieldTy(ctor: String): String =
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
-    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
   }
 
 def caseFieldTy2(cs: List[EnCase], ctor: String): String =
@@ -3928,7 +3934,7 @@ def caseTys(ens: List[En], en: String, ctor: String): List[String] =
 
 def caseTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
-    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseTys2(cases, ctor) else caseTys(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en) caseTys2(cases, ctor) else caseTys(rest, en, ctor)
   }
 
 def caseTys2(cs: List[EnCase], ctor: String): List[String] =
@@ -4011,6 +4017,9 @@ def matchSlots(ty: String): List[String] =
 
 def listElemSlots(ty: String): List[String] =
   if (Str.startsWith(ty, "List[") && Str.len(ty) > 6) Str.slice(ty, 5, Str.len(ty) - 1) :: noStr() else noStr()
+
+def hasParam(ps: List[Param], n: String): Bool =
+  List.exists(ps, p => p.name == n)
 
 def paramTy(ps: List[Param], n: String): String =
   if (List.isEmpty(ps)) "" else paramTy1(List.at(ps, 0), List.tail(ps), n)
@@ -4628,7 +4637,7 @@ def caseNames(ens: List[En], en: String, ctor: String): List[String] =
 
 def caseNames1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
-    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseNames2(cases, ctor) else caseNames(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en) caseNames2(cases, ctor) else caseNames(rest, en, ctor)
   }
 
 def caseNames2(cs: List[EnCase], ctor: String): List[String] =
@@ -5440,7 +5449,7 @@ def recFieldPair(recv: Expr, name: String, off: Int, ty: String, ens: List[En], 
   }
 
 def recField2(recv: Expr, name: String, off: Int, idx: Int, n: Int, ty: String, tys: List[String]): Expr =
-  if (idx < 0) Expr.EField(recv, name, off) else Expr.EMatch(recv, Arm(Str.concat(ty, Str.concat("(", Str.concat(bindsTyped(0, n, tys, idx), ")"))), "", Expr.EVar(pickBind(idx, tys), 0)) :: noArm(), off)
+  if (idx < 0) Expr.EField(recv, name, off) else Expr.EMatch(recv, Arm(Str.concat(tyHead(ty), Str.concat("(", Str.concat(bindsTyped(0, n, tys, idx), ")"))), "", Expr.EVar(pickBind(idx, tys), 0)) :: noArm(), off)
 
 def bindsTyped(i: Int, n: Int, tys: List[String], idx: Int): String =
   if (i >= n) "" else if (i + 1 == n) if (i == idx) pickBind(i, tys) else "_" else Str.concat(if (i == idx) pickBind(i, tys) else "_", Str.concat(", ", bindsTyped(i + 1, n, tys, idx)))
@@ -5621,7 +5630,7 @@ def internCases(cs: List[EnCase], acc: Strs): Strs =
   if (List.isEmpty(cs)) acc else internCases(List.tail(cs), internCase(List.at(cs, 0), acc))
 
 def internCase(c: EnCase, acc: Strs): Strs =
-  intern(acc, c.name)
+  intern(acc, Resolve.short(c.name))
 
 def internRelDefs(ds: List[Fun], acc: Strs): Strs =
   if (List.isEmpty(ds)) acc else internRelDefs(List.tail(ds), internRelDef(List.at(ds, 0), acc))
@@ -5860,7 +5869,7 @@ def decFromCstrCode(tok: String, prefix: String, n: Int): String =
   line(Str.concat(decPct(prefix, "s", n), Str.concat(" = call ptr @sz_string_from_cstr(ptr ", Str.concat(tok, ")"))))
 
 def decodeAdt(tok: String, ty: String, ens: List[En], strs: Strs, prefix: String, n: Int, depth: Int): Dec =
-  decodeAdtHit(tok, findEnNm(ens, tyHead(ty)), ens, strs, prefix, n, depth)
+  decodeAdtHit(tok, List.map(findEnNm(ens, tyHead(ty)), en => Check.specializeEnum(en, ty)), ens, strs, prefix, n, depth)
 
 def findEnNm(ens: List[En], name: String): List[En] =
   if (List.isEmpty(ens)) noEn() else findEnNm1(List.at(ens, 0), List.tail(ens), name)
@@ -5875,7 +5884,7 @@ def decodeAdtHit(tok: String, hit: List[En], ens: List[En], strs: Strs, prefix: 
 
 def decodeAdtEn(tok: String, e: En, ens: List[En], strs: Strs, prefix: String, n: Int, depth: Int): Dec =
   e match {
-    case En(isRec, name, _, cases) => decodeAdtBody(tok, pickCases(isRec, name, cases, depth), ens, strs, prefix, n, depth)
+    case En(isRec, name, _, cases) => decodeAdtBody(tok, List.map(pickCases(isRec, name, cases, depth), c => EnCase(Str.concat(name, Str.concat(".", c.name)), c.fields)), ens, strs, prefix, n, depth)
   }
 
 def pickCases(isRec: Bool, name: String, cases: List[EnCase], depth: Int): List[EnCase] =
@@ -5921,7 +5930,7 @@ def decodeTry(tok: String, cases: List[EnCase], c: EnCase, i: Int, k: Int, base:
   }
 
 def decodeTry2(tok: String, cases: List[EnCase], cname: String, fs: List[Param], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, n: Int, phi: String, ens: List[En], strs: Strs, depth: Int, inner: Int, code: String, first: Int): Dec =
-  decodeTry3(internGep(cname, strs, prefix, n), tok, cases, fs, i, k, base, fail, joinL, prefix, n + 1, phi, ens, strs, depth, inner, code, first)
+  decodeTry3(internGep(Resolve.short(qualName(cname)), strs, prefix, n), tok, cases, fs, i, k, base, fail, joinL, prefix, n + 1, phi, ens, strs, depth, inner, code, first)
 
 def internGep(s: String, strs: Strs, prefix: String, n: Int): String =
   line(Str.concat(decPct(prefix, "g", n), internGepRhs(s, strs)))
@@ -5949,7 +5958,7 @@ def decBr(prefix: String, dest: Int): String =
 
 def decodeConstruct(fields: Decs, tok: String, cases: List[EnCase], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, phi: String, ens: List[En], strs: Strs, depth: Int, inner: Int, head: String): Dec =
   fields match {
-    case Decs(fc, ds, n2) => decodeConstruct2(buildAdt(i, ds, prefix, n2), tok, cases, i, k, base, fail, joinL, prefix, phi, ens, strs, depth, inner, join(head, join(lab(decLab(prefix, base + k + i)), fc)))
+    case Decs(fc, ds, n2) => decodeConstruct2(buildAdt(ctorTag(ens, qualEn(List.at(cases, i).name), qualName(List.at(cases, i).name)), ds, prefix, n2), tok, cases, i, k, base, fail, joinL, prefix, phi, ens, strs, depth, inner, join(head, join(lab(decLab(prefix, base + k + i)), fc)))
   }
 
 def decodeConstruct2(built: Dec, tok: String, cases: List[EnCase], i: Int, k: Int, base: Int, fail: Int, joinL: Int, prefix: String, phi: String, ens: List[En], strs: Strs, depth: Int, inner: Int, head: String): Dec =
@@ -6106,7 +6115,10 @@ def emitProg(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[Strin
   emitProgEns(p, strs, files, lidx, Parse.builtins(Check.expandEnums(p.enums, p.aliases)))
 
 def emitProgEns(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex], ens: List[En]): String =
-  emitBits(Check.expandExpr(p.body, p.aliases), emitFtab(prepDefs(p), ens), internReady(strs), ens, files, lidx)
+  Str.concat(emitEvalValueBase(ens), emitBits(Check.expandExpr(p.body, p.aliases), emitFtab(prepDefs(p), ens), internReady(strs), ens, files, lidx))
+
+def emitEvalValueBase(ens: List[En]): String =
+  if (!hasEn(ens, Resolve.identity("Eval", "Value"))) "" else Str.concat("@sz_eval_value_tag_base = constant i32 ", Str.concat(Str.fromInt(ctorTag(ens, Resolve.identity("Eval", "Value"), "VUnit")), nl()))
 
 def emitFtab(ds: List[Fun], ens: List[En]): Ftab =
   emitFtabGot(Check.ftabOfList(ds), ens)
@@ -6669,6 +6681,9 @@ def emitOne(p: Prog, strs: Strs, files: List[(String, String)]): String =
   emitOneIdx(p, strs, files, fileIndex(files))
 
 def emitOneIdx(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
+  emitOneResolved(Resolve.prog(p), strs, files, lidx)
+
+def emitOneResolved(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitProg(p, internSigProg(p, files, lidx, strs), files, lidx)
 
 def parseInternFiles(files: List[(String, String)]): (Prog, Strs) =
@@ -6697,6 +6712,9 @@ def emitFilesGot(p: Prog, strs: Strs, files: List[(String, String)]): String =
   emitFilesIdx(p, strs, files, fileIndex(files))
 
 def emitFilesIdx(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
+  emitFilesResolved(Resolve.prog(p), strs, files, lidx)
+
+def emitFilesResolved(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
   emitProg(p, internSigProg(p, files, lidx, internRel(p, strs)), files, lidx)
 
 def decl(s: String): String =

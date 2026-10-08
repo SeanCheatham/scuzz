@@ -359,7 +359,7 @@ def applyProg(p: Prog, site: Int, o: Bool): Prog =
     case Prog(pkg, ens, als, trs, impls, imps, defs, main, body) => applyImpls(impls, site, 0, o) match {
   case ImplWalk(ims, n0) => applyFuns(defs, site, n0, o) match {
   case FunWalk(ds, n) => walk(body, site, n, false, collectHs(body, noExprs()), 0, o) match {
-  case Walk(b, _, _) => Prog(pkg, ens, als, trs, ims, imps, ds, main, b)
+  case Walk(b, _, _) => Prog(pkg, ens, als, trs, ims, imps, ds, main, b, p.mod)
 }
 }
 }
@@ -371,7 +371,7 @@ def applyImpls(xs: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
 def applyImplsHd(im: Im, rest: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
   im match {
     case Im(tn, targs, forTy, methods) => applyFuns(methods, site, seen, o) match {
-  case FunWalk(ms, n) => applyImplsRest(Im(tn, targs, forTy, ms), rest, site, n, o)
+  case FunWalk(ms, n) => applyImplsRest(Im(tn, targs, forTy, ms, im.mod), rest, site, n, o)
 }
   }
 
@@ -414,7 +414,7 @@ def extProg(p: Prog, site: Int, o: Bool): (Prog, Int) =
     case Prog(pkg, ens, als, trs, impls, imps, defs, main, body) => xImpls(impls, site, 0, o) match {
   case ImplWalk(ims, n0) => xFuns(defs, site, n0, o) match {
   case FunWalk(ds, n) => xExpr(body, site, n, false, o) match {
-  case Walk(b, n2, _) => (Prog(pkg, ens, als, trs, ims, imps, ds, main, b), n2)
+  case Walk(b, n2, _) => (Prog(pkg, ens, als, trs, ims, imps, ds, main, b, p.mod), n2)
 }
 }
 }
@@ -426,7 +426,7 @@ def xImpls(xs: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
 def xImplsHd(im: Im, rest: List[Im], site: Int, seen: Int, o: Bool): ImplWalk =
   im match {
     case Im(tn, targs, forTy, methods) => xFuns(methods, site, seen, o) match {
-  case FunWalk(ms, n) => xImplsRest(Im(tn, targs, forTy, ms), rest, site, n, o)
+  case FunWalk(ms, n) => xImplsRest(Im(tn, targs, forTy, ms, im.mod), rest, site, n, o)
 }
   }
 

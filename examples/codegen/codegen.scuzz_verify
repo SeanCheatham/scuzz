@@ -82,3 +82,27 @@ oracle evMaps(): Bool =
 oracle evConstructors(): Bool =
   Main.evConstructors()
 
+oracle evModules(seed: Int where seed >= 0 && seed < 6): Bool =
+  Main.evModules(seed)
+
+oracle evModule0(): Bool =
+  Main.evModules(0)
+
+oracle evModule1(): Bool =
+  Main.evModules(1)
+
+oracle evModule2(): Bool =
+  Main.evModules(2)
+
+oracle evModule3(): Bool =
+  Main.evModules(3)
+
+oracle evModule4(): Bool =
+  Main.evModules(4)
+
+oracle evModule5(): Bool =
+  Main.evModules(5)
+
+oracle boundCallback(): Bool =
+  Main.irBoundCallback()
+

@@ -158,7 +158,42 @@ def caseSeeds(): List[Int] =
   List.flatMap([0, 102, 204], level => List.flatMap([0, 48, 96], arg => List.map([0, 1, 2, 3, 4, 5], kind => level + arg + kind)))
 
 def exported(seed: Int): Json =
-  Json.Obj([("seed", Json.Int(seed)), ("family", Json.Int(family(seed))), ("input", Json.Int(input(seed))), ("body", Json.Str(body(seed))), ("source", Json.Str(source(seed))), ("invalid", Json.Str(invalid(seed))), ("result", Json.Str(result(seed))), ("output", Json.Str(output(seed)))])
+  Json.Obj([("seed", Json.Int(seed)), ("modules", moduleExport(seed)), ("family", Json.Int(family(seed))), ("input", Json.Int(input(seed))), ("body", Json.Str(body(seed))), ("source", Json.Str(source(seed))), ("invalid", Json.Str(invalid(seed))), ("result", Json.Str(result(seed))), ("output", Json.Str(output(seed)))])
+
+def moduleA(): String =
+  "record Box[T](value: T)\nrecord Marker()\nenum Choice[T]:\n  case Wrap(box: Box[T])\n  case End\ntype Payload = Choice[String]\ndef make(): Payload = Choice.Wrap(Box(\"alpha\"))\ndef read(c: Payload): Int =\n  c match {\n    case Choice.Wrap(Box(text)) => Str.len(text)\n    case Choice.End => 0\n  }\ndef shadow(Box: String): Int = Str.len(Box)\ndef call(x: String, y: String, z: String): String = Str.concat(x, Str.concat(y, z))\ndef score(m: Marker): Int = m.score(1)\ntrait Score:\n  def score(n: Int): Int\nimpl Score for Marker:\n  def score(n: Int): Int = n + 1\n"
+
+def moduleB(seed: Int): String =
+  Str.concat("""record Box[T](marker: String, value: T)
+record Marker()
+enum Choice[T]:
+  case Wrap(marker: Int, box: Box[T])
+  case End
+type Payload = Choice[Int]
+def make(): Payload = Choice.Wrap(""", Str.concat(Str.fromInt(seed), Str.concat(", Box(\"unused\", ", Str.concat(Str.fromInt(seed + 1), """))
+def read(c: Payload): Int =
+  c match {
+    case Choice.Wrap(n, Box(_, value)) => n + value
+    case Choice.End => 0
+  }
+def score(m: Marker): Int = m.score(1)
+trait Score:
+  def score(n: Int): Int
+impl Score for Marker:
+  def score(n: Int): Int = n + 2
+"""))))
+
+def moduleMain(): String =
+  "import A.Box as First\nrecord Holder(value: Int)\nrecord Callbacks(run: List[String => String])\ndef forward(value: String): String = value\ndef callback(): String = List.at(Callbacks([call => forward(call)]).run, 0)(\"kept\")\ndef qualified(c: A.Choice[String]): Int =\n  c match {\n    case A.Choice.Wrap(A.Box(text)) => Str.len(text)\n    case A.Choice.End => 0\n  }\ndef imported(x: First[String]): String = x.value\ndef shadow(A: Holder): Int = A.value\ndef folded(): String = List.foldLeft([A.Box(\"a\"), A.Box(\"b\")], \"\", entry => Str.concat(entry._1, entry._2.value))\ndef result(): Int = Str.len(callback()) - 4 + Str.len(folded()) + A.read(A.make()) + B.read(B.make()) + qualified(A.make()) + Str.len(imported(First(\"abc\"))) + A.score(A.Marker()) + B.score(B.Marker())\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(result()))\n"
+
+def moduleFiles(seed: Int, reverse: Bool): List[(String, String)] =
+  List.concat(if (reverse) [("B", moduleB(seed)), ("A", moduleA())] else [("A", moduleA()), ("B", moduleB(seed))], [("Main", moduleMain())])
+
+def moduleChecked(seed: Int): Bool =
+  Check.checkFiles(moduleFiles(seed % 6, false)) == "[]" && Check.checkFiles(moduleFiles(seed % 6, true)) == "[]"
+
+def moduleExport(seed: Int): Json =
+  Json.Arr(List.map(moduleFiles(seed % 6, false), pair => Json.Arr([Json.Str(pair._1), Json.Str(pair._2)])))
 
 @main def main: IO[Unit] =
   Json.stringify(Json.Arr(List.map(Cases.caseSeeds(), seed => Cases.exported(seed)))) match {

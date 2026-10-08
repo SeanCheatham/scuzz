@@ -67,7 +67,7 @@ def tyStr(o: Out): String =
   Type.show(o.ty)
 
 def bad(err: String, span: (String, Int)): Out =
-  Out(Type.tNamed(""), err, span, noBinds(), "")
+  Out(Type.tNamed(""), Resolve.displayText(err), span, noBinds(), "")
 
 def ret(o: Out, ty: String): Out =
   if (hasErr(o)) o else Out(Type.parse(ty), "", noSpan(), o.binds, "")
@@ -1879,12 +1879,9 @@ def hasEn(ens: List[En], name: String): Bool =
 def recordNamed(ens: List[En], name: String): Bool =
   List.exists(ens, en => en.isRec && en.name == name)
 
-def recordModuleCtor(ens: List[En], mod: String, name: String): Bool =
-  List.exists(ens, en => en.isRec && en.mod == mod && en.name == name)
-
 def inferField(recv: Expr, name: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
   recv match {
-    case Expr.EVar(en, _) => if (!Type.isEmpty(getTy(env, en))) fieldOf(inferVar(en, env, funs, ens, span), name, ens, span) else if (recordModuleCtor(ens, en, name)) inferBareCtor(name, name, env, funs, ens, span) else if (en == name && recordNamed(ens, name)) bad(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), span) else if (hasEn(ens, en)) inferBareCtor(en, name, env, funs, ens, span) else inferFieldVar(en, name, env, funs, ens, span)
+    case Expr.EVar(en, _) => if (!Type.isEmpty(getTy(env, en))) fieldOf(inferVar(en, env, funs, ens, span), name, ens, span) else if (en == name && recordNamed(ens, name)) bad(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), span) else if (hasEn(ens, en)) inferBareCtor(en, name, env, funs, ens, span) else inferFieldVar(en, name, env, funs, ens, span)
     case _ => fieldOf(infer(recv, env, funs, ens), name, ens, span)
   }
 
@@ -2014,7 +2011,7 @@ def coverSpecializeHead(pat: String, rest: List[String], ty: String, c: EnCase, 
   if (c.name == "()" && pat == "()") [rest] else if (c.name == "#tuple" && isTuplePat(pat)) [List.concat(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), rest)] else if (c.name == "::" && consAt(pat, 0) >= 0) [List.concat([Str.take(pat, consAt(pat, 0)), Str.drop(pat, consAt(pat, 0) + 4)], rest)] else if (coverCore(patCore(pat), ty, ens) == c.name) [List.concat(coverFields(if (patBind(pat) == "") [] else splitComma(patBind(pat)), c.fields, 0), rest)] else []
 
 def coverCore(core: String, ty: String, ens: List[En]): String =
-  if (List.exists(ens, en => en.isRec && en.name == tyHead(Type.parse(ty)) && (core == en.name || core == Str.concat(en.mod, Str.concat(".", en.name))))) tyHead(Type.parse(ty)) else patternCoreForTy(core, ty, ens)
+  if (List.exists(ens, en => en.isRec && en.name == tyHead(Type.parse(ty)) && core == en.name)) tyHead(Type.parse(ty)) else patternCoreForTy(core, ty, ens)
 
 def coverFields(pats: List[String], fields: List[Param], i: Int): List[String] =
   if (List.isEmpty(fields)) [] else coverField(pats, List.at(fields, 0).name, i) :: coverFields(pats, List.tail(fields), i + 1)
@@ -2085,10 +2082,7 @@ def ownerQualifiedErr(core: String, want: String, ens: List[En], dot: Int): Stri
   ownerQualifiedErr2(core, want, Str.take(core, dot), Str.drop(core, dot + 1), ens)
 
 def ownerQualifiedErr2(core: String, want: String, owner: String, name: String, ens: List[En]): String =
-  if (owner == "Json") jsonOwnerErr(core, want, name) else if (want == name && List.exists(ens, en => en.isRec && en.name == name)) ownerRecordErr(core, owner, name, ens) else if (!hasEn(ens, owner) || !List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
-
-def ownerRecordErr(core: String, owner: String, name: String, ens: List[En]): String =
-  if (List.exists(ens, en => en.isRec && en.mod == owner && en.name == name)) "" else Str.concat("unknown pattern case ", core)
+  if (owner == "Json") jsonOwnerErr(core, want, name) else if (!hasEn(ens, owner) || !List.exists(ens, en => en.name == owner && hasCase(en.cases, name))) Str.concat("unknown pattern case ", core) else if (owner != want) Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
 
 def jsonOwnerErr(core: String, want: String, name: String): String =
   if (!jsonPatternCase(name)) Str.concat("unknown pattern case ", core) else if (want != "Json") Str.concat("pattern case ", Str.concat(core, Str.concat(" does not belong to ", want))) else ""
@@ -2279,7 +2273,7 @@ def patternCoreForEn(core: String, owner: String, ens: List[En]): String =
   if (dotAt(core, 0) >= 0 || !List.exists(ens, en => en.name == owner && hasCase(en.cases, core))) core else Str.concat(owner, Str.concat(".", core))
 
 def constructorFields(ens: List[En], core: String): List[Param] =
-  if (Str.startsWith(core, "Json.")) jsonPatternFields(core) else constructorFieldsOwned(List.filter(ens, en => en.name == core || Str.startsWith(core, Str.concat(en.name, ".")) || en.isRec && core == Str.concat(en.mod, Str.concat(".", en.name))), ens, core)
+  if (Str.startsWith(core, "Json.")) jsonPatternFields(core) else constructorFieldsOwned(List.filter(ens, en => en.name == core || Str.startsWith(core, Str.concat(en.name, "."))), ens, core)
 
 def jsonPatternFields(core: String): List[Param] =
   if (core == "Json.Null") [] else [Param("value", if (core == "Json.Bool") "Bool" else if (core == "Json.Int") "Int" else if (core == "Json.Float") "Float" else if (core == "Json.Str") "String" else if (core == "Json.Arr") "List[Json]" else "List[(String, Json)]", "", "")]
@@ -2291,7 +2285,7 @@ def constructorFieldsCase(ens: List[En], core: String): List[Param] =
   if (List.isEmpty(ens)) [] else if (hasCase(List.at(ens, 0).cases, core)) constructorFieldsIn(List.at(ens, 0), core) else constructorFieldsCase(List.tail(ens), core)
 
 def constructorFieldsIn(en: En, core: String): List[Param] =
-  constructorFieldsHit(List.filter(en.cases, c => core == Str.concat(en.name, Str.concat(".", c.name)) || core == Str.concat(en.mod, Str.concat(".", en.name)) && en.isRec || core == en.name && en.isRec || core == c.name))
+  constructorFieldsHit(List.filter(en.cases, c => core == Str.concat(en.name, Str.concat(".", c.name)) || core == en.name && en.isRec || core == c.name))
 
 def constructorFieldsHit(cases: List[EnCase]): List[Param] =
   if (List.isEmpty(cases)) [] else List.at(cases, 0).fields
@@ -2418,7 +2412,7 @@ def caseFieldTy(ens: List[En], en: String, ctor: String): String =
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
-    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en) caseFieldTy2(cases, ctor) else caseFieldTy(rest, en, ctor)
   }
 
 def caseFieldTy2(cs: List[EnCase], ctor: String): String =
@@ -2467,7 +2461,7 @@ def caseFieldTys(ens: List[En], en: String, ctor: String): List[String] =
 
 def caseFieldTys1(h: En, rest: List[En], en: String, ctor: String): List[String] =
   h match {
-    case En(_, name, _, cases) => if (name == en || h.isRec && h.mod == en && name == ctor) caseFieldTys2(cases, ctor) else caseFieldTys(rest, en, ctor)
+    case En(_, name, _, cases) => if (name == en) caseFieldTys2(cases, ctor) else caseFieldTys(rest, en, ctor)
   }
 
 def caseFieldTys2(cs: List[EnCase], ctor: String): List[String] =
@@ -2543,7 +2537,7 @@ def inferMethodEn(en: String, name: String, args: List[Expr], env: List[(String,
   inferMethodQual(Str.concat(en, Str.concat(".", name)), en, name, args, env, funs, ens, e)
 
 def inferMethodQual(q: String, en: String, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
-  if (isKit(q, funs)) inferCall(q, args, env, funs, ens, exprSpan(env, e)) else if (recordModuleCtor(ens, en, name)) inferNamedCtor(name, name, args, env, funs, ens, exprSpan(env, e), ens) else if (en == name && recordNamed(ens, name)) bad(Str.concat("unknown constructor ", q), exprSpan(env, e)) else if (hasEn(ens, en)) inferNamedCtor(en, name, args, env, funs, ens, exprSpan(env, e), ens) else resolveQual(en, name, args, env, funs, ens, e)
+  if (isKit(q, funs)) inferCall(q, args, env, funs, ens, exprSpan(env, e)) else if (en == name && recordNamed(ens, name)) bad(Str.concat("unknown constructor ", q), exprSpan(env, e)) else if (hasEn(ens, en)) inferNamedCtor(en, name, args, env, funs, ens, exprSpan(env, e), ens) else resolveQual(en, name, args, env, funs, ens, e)
 
 def resolveQual(en: String, name: String, args: List[Expr], env: List[(String, Ty)], funs: Ftab, ens: List[En], e: Expr): Out =
   resolveQualHit(en, name, args, env, funs, ens, ftabGetMod(funs.tab, en, name), e)
@@ -2845,6 +2839,12 @@ def spanPick(a: (String, Int), b: (String, Int)): (String, Int) =
   }
 
 def checkProgOwn(p: Prog, stems: List[String]): Out =
+  checkSourceProg(p, stems, Resolve.sourceError(p))
+
+def checkSourceProg(p: Prog, stems: List[String], err: String): Out =
+  if (err != "") bad(err, noSpan()) else checkResolvedProg(Resolve.prog(p), stems)
+
+def checkResolvedProg(p: Prog, stems: List[String]): Out =
   checkProgArities(checkTypeArities(p, stems), p, stems)
 
 def checkProgArities(o: Out, p: Prog, stems: List[String]): Out =
@@ -3123,7 +3123,7 @@ def checkImplMethodsAfter(o: Out, rest: List[Im], traits: List[Tr], ens: List[En
   if (hasErr(o)) o else checkImplHeaders(rest, traits, ens, aliases, names)
 
 def findTrait(traits: List[Tr], name: String): Tr =
-  if (List.isEmpty(traits)) Tr("", [], []) else findTraitAt(List.at(traits, 0), List.tail(traits), name)
+  if (List.isEmpty(traits)) Tr("", [], [], "") else findTraitAt(List.at(traits, 0), List.tail(traits), name)
 
 def findTraitAt(t: Tr, rest: List[Tr], name: String): Tr =
   t match {

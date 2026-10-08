@@ -1,6 +1,6 @@
 # Gaps and unknowns
 
-Missing behavior and unproven claims, ranked by risk to [`philosophy.md`](philosophy.md). Implementation order: [`vision.md`](vision.md). Current slice: [`plans.md`](plans.md).
+Missing behavior and unproven claims, ranked by risk to [`philosophy.md`](philosophy.md). Implementation order: [`vision.md`](vision.md).
 
 Remove closed gaps. Keep current measurements and their limits. Do not keep a history of completed work.
 
@@ -64,9 +64,13 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 **Proof:** Gate 6. Show a separately approved rule that constrains a later proposal. Preserve existing claims. Reject an untriggered rule as unverified.
 
-### Supporting compiler and editor work
+### Verification scope and application correctness
 
-- **Type names across files.** Constructor checking, field lookup, and native tags select the first matching declaration in file order. Fields from repeated short names stay separate. CI checks two declaration orders against fixed results. Short type names do not give repeated declarations separate module identities. Use distinct type names for separate layouts. Module type identity remains open.
+- **Excluded workloads.** A failed verification assumption can remove an input from the checked scope. Reports must identify excluded workloads and give their reasons. Keep excluded, failed, and passing workloads separate. Show claim reach and the checked input scope. An exclusion must not hide a failed required workload.
+- **Production validation.** Verification assumptions do not validate live input. Give app authors a clear path to parse and validate external data with explicit success and failure values. Keep live validation in the app.
+- **Application models.** Use a small reference model to check state changes and effect results. Add examples that check failure paths and recovery. Finite model checks do not prove every input correct.
+
+### Supporting compiler and editor work
 
 - **Unit effect binding.** `() <- IO.pure(())` passes checking. Native emission produces invalid LLVM IR. Reject the unsupported binding or emit it correctly. A Unit match and a nested Unit pattern execute on both engines.
 

@@ -86,6 +86,9 @@ def noRefs(): List[Ref[Value]] =
   []
 
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
+  loadResolvedProg(Resolve.prog(p), mainMod, files)
+
+def loadResolvedProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
     case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => for {
   ens = Parse.builtins(Check.expandEnums(enums, aliases))
@@ -340,7 +343,7 @@ def show(v: Value): String =
     case Value.VStr(s) => Check.jsonStr(s)
     case Value.VList(xs) => Str.concat("[", Str.concat(showAll(xs), "]"))
     case Value.VTuple(xs) => Str.concat("(", Str.concat(showAll(xs), ")"))
-    case Value.VCon(_, tag, fields) => if (List.isEmpty(fields)) tag else Str.concat(tag, Str.concat("(", Str.concat(showAll(fields), ")")))
+    case Value.VCon(_, tag, fields) => if (List.isEmpty(fields)) Resolve.short(tag) else Str.concat(Resolve.short(tag), Str.concat("(", Str.concat(showAll(fields), ")")))
     case Value.VClo(_, _, _) => "<closure>"
     case Value.VFun(name, _) => Str.concat("<fun ", Str.concat(name, ">"))
     case Value.VIo(_) => "<io>"
@@ -854,7 +857,7 @@ def methodRecv(recv: Expr, name: String, args: List[Expr], env: EvEnv, p: EvProg
   }
 
 def methodQual(en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
-  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (Check.recordModuleCtor(p.ens, en, name)) ctorStep(name, name, args, env, p, off) else if (en == name && Check.recordNamed(p.ens, name)) valueStep(errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off)) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(funMod(p, en, name), en, name, args, env, p, off)
+  if (isKit(p, Str.concat(en, Str.concat(".", name)))) kitStep(Str.concat(en, Str.concat(".", name)), args, env, p, off) else if (en == name && Check.recordNamed(p.ens, name)) valueStep(errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off)) else if (hasEn(p, en)) ctorStep(en, name, args, env, p, off) else methodQualDef(funMod(p, en, name), en, name, args, env, p, off)
 
 def methodQualDef(hit: List[Fun], en: String, name: String, args: List[Expr], env: EvEnv, p: EvProg, off: Int): EvStep =
   if (List.isEmpty(hit)) methodValue(varValue(en, env, p, off), name, args, env, p, off) else defStep(List.at(hit, 0), args, env, p, off)
@@ -942,7 +945,7 @@ def fieldValue(e: Expr, recv: Expr, name: String, env: EvEnv, p: EvProg, off: In
 
 def fieldRecv(recv: Expr, name: String, env: EvEnv, p: EvProg, off: Int): Value =
   recv match {
-    case Expr.EVar(en, _) => if (!isBound(env, en) && Check.recordModuleCtor(p.ens, en, name)) Value.VCon(name, name, noVals()) else if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else if (!isBound(env, en) && isKit(p, Str.concat(en, Str.concat(".", name)))) Value.VFun(Str.concat(en, Str.concat(".", name)), "") else if (!isBound(env, en) && !List.isEmpty(funMod(p, en, name))) Value.VFun(name, en) else fieldOf(step(EvStep.Next(recv, env), p), name, env, p, off)
+    case Expr.EVar(en, _) => if (!isBound(env, en) && en == name && Check.recordNamed(p.ens, name)) errAt(Str.concat("unknown constructor ", Str.concat(en, Str.concat(".", name))), env, p, off) else if (!isBound(env, en) && hasEn(p, en)) Value.VCon(en, name, noVals()) else if (!isBound(env, en) && isKit(p, Str.concat(en, Str.concat(".", name)))) Value.VFun(Str.concat(en, Str.concat(".", name)), "") else if (!isBound(env, en) && !List.isEmpty(funMod(p, en, name))) Value.VFun(name, en) else fieldOf(step(EvStep.Next(recv, env), p), name, env, p, off)
     case _ => fieldOf(step(EvStep.Next(recv, env), p), name, env, p, off)
   }
 
@@ -1051,7 +1054,7 @@ def valEq(a: Value, b: Value): Bool =
     case Value.VStr(x) => eqStr(x, b)
     case Value.VList(xs) => eqList(xs, b)
     case Value.VTuple(xs) => eqTuple(xs, b)
-    case Value.VCon(_, tag, fields) => eqCon(tag, fields, b)
+    case Value.VCon(en, tag, fields) => eqCon(en, tag, fields, b)
     case Value.VFloat(x) => eqFloat(x, b)
     case Value.VMap(kvs) => eqList(pairsToTuples(mapPairs(kvs, noPairs())), mapTuples(b))
     case Value.VSet(xs) => eqList(xs, setTuples(b))
@@ -1115,9 +1118,9 @@ def eqTuple(xs: List[Value], b: Value): Bool =
     case _ => false
   }
 
-def eqCon(tag: String, fields: List[Value], b: Value): Bool =
+def eqCon(en: String, tag: String, fields: List[Value], b: Value): Bool =
   b match {
-    case Value.VCon(_, tag2, fields2) => tag == tag2 && eqAll(fields, fields2)
+    case Value.VCon(en2, tag2, fields2) => en == en2 && tag == tag2 && eqAll(fields, fields2)
     case _ => false
   }
 
@@ -1234,15 +1237,12 @@ def enOf(core: String): String =
 
 def tryTag(core: String, v: Value, p: EvProg, subs: List[String]): Option[List[(String, Value)]] =
   v match {
-    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && tagOwnerOk(core, en, tag, p)) tryFields(subs, fields, ctorFields(p, if (enOf(core) == "" || recordPatOwner(core, en, tag, p)) qualTag(en, tag) else core), p, 0) else None
+    case Value.VCon(en, tag, fields) => if (tagOf(core) == tag && tagOwnerOk(core, en)) tryFields(subs, fields, ctorFields(p, if (enOf(core) == "") qualTag(en, tag) else core), p, 0) else None
     case _ => None
   }
 
-def tagOwnerOk(core: String, en: String, tag: String, p: EvProg): Bool =
-  enOf(core) == "" || (if (List.exists(p.ens, declared => declared.isRec && declared.name == en)) recordPatOwner(core, en, tag, p) else enOf(core) == en)
-
-def recordPatOwner(core: String, en: String, tag: String, p: EvProg): Bool =
-  en == tag && List.exists(p.ens, declared => declared.isRec && declared.name == tag && declared.mod == enOf(core))
+def tagOwnerOk(core: String, en: String): Bool =
+  enOf(core) == "" || enOf(core) == en
 
 def tryFields(subs: List[String], fields: List[Value], params: List[Param], p: EvProg, i: Int): Option[List[(String, Value)]] =
   if (List.isEmpty(subs)) Some(noVars()) else tryField(List.at(subs, 0), List.tail(subs), fields, params, p, i)
@@ -2631,7 +2631,39 @@ def drvArgs(p: EvProg, ps: List[Param], toks: List[String]): List[Value] =
   if (List.isEmpty(ps)) noVals() else drvArg(p, List.at(ps, 0).ty, if (List.isEmpty(toks)) "" else List.at(toks, 0)) :: drvArgs(p, List.tail(ps), if (List.isEmpty(toks)) toks else List.tail(toks))
 
 def drvArg(p: EvProg, ty: String, tok: String): Value =
-  if (ty == "Int") Value.VInt(Str.toInt(tok, 0)) else if (ty == "Bool") Value.VBool(tok == "true" || tok == "1") else if (ty == "String") Value.VStr(Verify.unquoteTok(tok)) else if (tok == "") Value.VErr("drive decode failed") else step(EvStep.Next(Emit.parseGuard(tok), EvEnv(noVars(), "__verify", "")), p)
+  if (ty == "Int") Value.VInt(Str.toInt(tok, 0)) else if (ty == "Bool") Value.VBool(tok == "true" || tok == "1") else if (ty == "String") Value.VStr(Verify.unquoteTok(tok)) else if (tok == "") Value.VErr("drive decode failed") else drvValue(p, ty, Emit.parseGuard(tok))
+
+def drvValue(p: EvProg, ty: String, e: Expr): Value =
+  e match {
+    case Expr.EList(es) => drvList(p, Check.elemOf(ty), es)
+    case Expr.ETuple(es) => Value.VTuple(drvValues(p, List.map(Type.tupPartsStr(ty), t => Param("", t, "", "")), es))
+    case Expr.EVar(name, _) => drvConstructor(p, ty, name, [])
+    case Expr.ECall(name, es, _) => drvConstructor(p, ty, name, es)
+    case Expr.EField(_, _, _) => drvConstructor(p, ty, Resolve.path(e), [])
+    case Expr.EMethod(recv, name, es, _) => drvConstructor(p, ty, Str.concat(Resolve.path(recv), Str.concat(".", name)), es)
+    case _ => step(EvStep.Next(e, EvEnv(noVars(), "__verify", "")), p)
+  }
+
+def drvList(p: EvProg, ty: String, es: List[Expr]): Value =
+  Value.VList(List.map(es, e => drvValue(p, ty, e)))
+
+def drvConstructor(p: EvProg, ty: String, name: String, es: List[Expr]): Value =
+  drvConstructorEnums(p, List.map(List.filter(p.ens, en => en.name == Type.headNameStr(ty)), en => Check.specializeEnum(en, ty)), name, es)
+
+def drvConstructorEnums(p: EvProg, ens: List[En], name: String, es: List[Expr]): Value =
+  if (List.isEmpty(ens)) Value.VErr("drive decode failed") else drvConstructorCases(p, List.at(ens, 0), List.filter(List.at(ens, 0).cases, c => Resolve.short(c.name) == name), es)
+
+def drvConstructorCases(p: EvProg, en: En, cs: List[EnCase], es: List[Expr]): Value =
+  if (List.isEmpty(cs)) Value.VErr("drive decode failed") else drvConstructorFields(p, en.name, List.at(cs, 0), drvValues(p, List.at(cs, 0).fields, es))
+
+def drvConstructorFields(p: EvProg, owner: String, c: EnCase, values: List[Value]): Value =
+  if (hasErr(values)) firstErr(values) else Value.VCon(owner, c.name, values)
+
+def drvValues(p: EvProg, ps: List[Param], es: List[Expr]): List[Value] =
+  if (List.len(ps) != List.len(es)) [Value.VErr("drive decode failed")] else drvValuesSame(p, ps, es)
+
+def drvValuesSame(p: EvProg, ps: List[Param], es: List[Expr]): List[Value] =
+  if (List.isEmpty(ps)) [] else drvValue(p, List.at(ps, 0).ty, List.at(es, 0)) :: drvValuesSame(p, List.tail(ps), List.tail(es))
 
 def claimVerdict(v: Value): Verdict =
   v match {

@@ -184,6 +184,14 @@ static void fputs_json_value(FILE *f, const void *value) {
 /* Value case tags from examples/compiler/src/Eval.scuzz. Keep this list
  * in source order. SCUZZ_EVAL_MIRROR rewrites a stored Value into the
  * compiled ADT shape. SCUZZ_EVAL_TAGS is `En.Case=tag` lines. */
+/* The compiler exports the tag of Eval.Value.VUnit.
+ * Other Value tags follow the source order. */
+extern const int32_t sz_eval_value_tag_base __attribute__((weak));
+
+static int eval_value_base(void) {
+  return &sz_eval_value_tag_base ? sz_eval_value_tag_base : -1;
+}
+
 static char *g_eval_tags;
 static int g_eval_tags_ready;
 static int g_eval_mirror;
@@ -355,7 +363,11 @@ static void fputs_mirror_value(FILE *f, const void *value) {
     fputs_json_value(f, value);
     return;
   }
-  tag = sz_adt_tag((const SzAdt *)value);
+  if (eval_value_base() < 0) {
+    fputs_json_value(f, value);
+    return;
+  }
+  tag = sz_adt_tag((const SzAdt *)value) - eval_value_base();
   pay = sz_adt_payload((const SzAdt *)value);
   if (tag == 0) {
     fputs("null", f);
@@ -387,7 +399,8 @@ static void fputs_mirror_value(FILE *f, const void *value) {
 /* A mirrored Value list is a list in the dump. Claims read that type. */
 static int mirror_list_value(const void *value) {
   return eval_mirror_on() && value && sz_rc_kind(value) == SZ_RC_ADT &&
-         sz_adt_tag((const SzAdt *)value) == 4;
+         eval_value_base() >= 0 &&
+         sz_adt_tag((const SzAdt *)value) == eval_value_base() + 4;
 }
 
 /* Typed session schema: one object per registered signal. Int payloads

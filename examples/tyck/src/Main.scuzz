@@ -1286,10 +1286,10 @@ def srcBareVariableRight(): String =
 }"""
 
 def patternOwnerTypes(): Bool =
-  rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second") && Check.check(srcQualifiedPatternRight()) == "[]" && forPatternOwnerTypes() && unknownPatternOwnerTypes() && scalarPatternOwnerTypes()
+  rejects(srcQualifiedPatternWrong(), "pattern case Main.First.Item does not belong to Main.Second") && rejects(srcNestedQualifiedPatternWrong(), "pattern case Main.First.Item does not belong to Main.Second") && rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Main.Second") && Check.check(srcQualifiedPatternRight()) == "[]" && forPatternOwnerTypes() && unknownPatternOwnerTypes() && scalarPatternOwnerTypes()
 
 def scalarPatternOwnerTypes(): Bool =
-  rejects(srcQualifiedScalarWrong(), "pattern case Second.Item does not belong to Int") && rejects(srcOptionScalarWrong(), "pattern case Option.Some does not belong to Int") && rejects(srcForScalarOwnerWrong(), "pattern case Second.Item does not belong to Int")
+  rejects(srcQualifiedScalarWrong(), "pattern case Main.Second.Item does not belong to Int") && rejects(srcOptionScalarWrong(), "pattern case Option.Some does not belong to Int") && rejects(srcForScalarOwnerWrong(), "pattern case Main.Second.Item does not belong to Int")
 
 def srcQualifiedScalarWrong(): String =
   """enum Second:
@@ -1318,7 +1318,7 @@ def unknownPatternOwnerTypes(): Bool =
   rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing") && rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item") && rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing") && Check.check(srcKnownJsonCase()) == "[]" && rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result") && Check.check(srcNestedParsedJsonCase()) == "[]" && recordModulePatternTypes()
 
 def recordModulePatternTypes(): Bool =
-  rejects(srcUnknownRecordOwner(), "unknown pattern case Ghost.Point") && Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: []), "unknown pattern case Main.Point") && Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []), "unknown pattern case Point.Point") && Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []) == "[]" && Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordModule()) :: []) == "[]"
+  rejects(srcUnknownRecordOwner(), "unknown pattern case Ghost.Point") && Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: []), "unknown pattern case Main.Point") && Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []), "unknown pattern case PointMod.Point.Point") && Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []) == "[]" && Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordModule()) :: []) == "[]"
 
 def srcUnknownRecordOwner(): String =
   """record Point(n: Int)
@@ -1389,7 +1389,7 @@ def wrong(): Int =
 """
 
 def forPatternOwnerTypes(): Bool =
-  rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second") && rejects(srcForDrawOwnerWrong(), "pattern case First.Item does not belong to Second")
+  rejects(srcForPureOwnerWrong(), "pattern case Main.First.Item does not belong to Main.Second") && rejects(srcForDrawOwnerWrong(), "pattern case Main.First.Item does not belong to Main.Second")
 
 def srcForPureOwnerWrong(): String =
   """enum First:
@@ -1519,7 +1519,7 @@ def right(): E = A""") == "[]" && Check.check("""enum E:
 def right(): E = E.A""") == "[]" && recordModuleCtorTypes()
 
 def recordModuleCtorTypes(): Bool =
-  Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordCtorModule()) :: []), "unknown constructor Point.Point") && Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordCtorModule()) :: []) == "[]" && Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcWrongRecordCtorModule()) :: []) == "[]" && Check.checkFiles(("PointMod", "record Marker()") :: ("Main", "def right(): Marker = PointMod.Marker") :: []) == "[]" && Str.contains(Check.checkFiles(("PointMod", "record Marker()") :: ("Main", "def wrong(): Marker = Marker.Marker") :: []), "unknown constructor Marker.Marker") && Check.checkFiles(("A", "record RemoteMarker()") :: ("Main", """record Holder(RemoteMarker: Int)
+  Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordCtorModule()) :: []), "unknown constructor Point") && Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordCtorModule()) :: []) == "[]" && Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcWrongRecordCtorModule()) :: []) == "[]" && Check.checkFiles(("PointMod", "record Marker()") :: ("Main", "def right(): Marker = PointMod.Marker") :: []) == "[]" && Str.contains(Check.checkFiles(("PointMod", "record Marker()") :: ("Main", "def wrong(): Marker = Marker.Marker") :: []), "unknown constructor Marker") && Check.checkFiles(("A", "record RemoteMarker()") :: ("Main", """record Holder(RemoteMarker: Int)
 def read(A: Holder): Int = A.RemoteMarker""") :: []) == "[]"
 
 def srcWrongRecordCtorModule(): String =
@@ -1586,7 +1586,7 @@ def right(): E => Int = (x: E) => 0
 """) == "[]" && rejects("""enum E:
   case Ok
 def wrong(): E => Int = (x: Int) => x
-""", "lambda arg type mismatch: expected E, got Int")
+""", "lambda arg type mismatch: expected Main.E, got Int")
 
 def aliasTypes(): Bool =
   Check.check(srcAliasListOk()) == "[]" && rejects(srcAliasListMis(), "does not match declared") && Check.check(srcAliasBoxOk()) == "[]" && Check.check(srcAliasFunOk()) == "[]" && rejects(srcAliasFunMis(), "lambda arg type mismatch: expected Int, got String") && Check.check(srcAliasId()) == "[]"
@@ -1637,16 +1637,16 @@ def dumpBareScalarPattern(): String =
   if (!rejects(srcBareScalarWrong(), "pattern case Item does not belong to Int")) Str.concat("scalar:", Check.check(srcBareScalarWrong())) else if (!rejects(srcBareOptionScalarWrong(), "pattern case Some does not belong to Int")) Str.concat("option:", Check.check(srcBareOptionScalarWrong())) else if (!rejects(srcBareForScalarWrong(), "pattern case Item does not belong to Int")) Str.concat("for:", Check.check(srcBareForScalarWrong())) else Str.concat("variable:", Check.check(srcBareVariableRight()))
 
 def dumpPatternOwner(): String =
-  if (!rejects(srcQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case First.Item does not belong to Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else if (Check.check(srcQualifiedPatternRight()) != "[]") Str.concat("valid:", Check.check(srcQualifiedPatternRight())) else if (!rejects(srcForPureOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forPure:", Check.check(srcForPureOwnerWrong())) else if (!rejects(srcForDrawOwnerWrong(), "pattern case First.Item does not belong to Second")) Str.concat("forDraw:", Check.check(srcForDrawOwnerWrong())) else if (!scalarPatternOwnerTypes()) dumpScalarPatternOwner() else dumpUnknownPatternOwner()
+  if (!rejects(srcQualifiedPatternWrong(), "pattern case Main.First.Item does not belong to Main.Second")) Str.concat("qualified:", Check.check(srcQualifiedPatternWrong())) else if (!rejects(srcNestedQualifiedPatternWrong(), "pattern case Main.First.Item does not belong to Main.Second")) Str.concat("nestedQualified:", Check.check(srcNestedQualifiedPatternWrong())) else if (!rejects(srcUnqualifiedOtherCase(), "pattern case Only does not belong to Main.Second")) Str.concat("other:", Check.check(srcUnqualifiedOtherCase())) else if (Check.check(srcQualifiedPatternRight()) != "[]") Str.concat("valid:", Check.check(srcQualifiedPatternRight())) else if (!rejects(srcForPureOwnerWrong(), "pattern case Main.First.Item does not belong to Main.Second")) Str.concat("forPure:", Check.check(srcForPureOwnerWrong())) else if (!rejects(srcForDrawOwnerWrong(), "pattern case Main.First.Item does not belong to Main.Second")) Str.concat("forDraw:", Check.check(srcForDrawOwnerWrong())) else if (!scalarPatternOwnerTypes()) dumpScalarPatternOwner() else dumpUnknownPatternOwner()
 
 def dumpScalarPatternOwner(): String =
-  if (!rejects(srcQualifiedScalarWrong(), "pattern case Second.Item does not belong to Int")) Str.concat("scalar:", Check.check(srcQualifiedScalarWrong())) else if (!rejects(srcOptionScalarWrong(), "pattern case Option.Some does not belong to Int")) Str.concat("option:", Check.check(srcOptionScalarWrong())) else Str.concat("forScalar:", Check.check(srcForScalarOwnerWrong()))
+  if (!rejects(srcQualifiedScalarWrong(), "pattern case Main.Second.Item does not belong to Int")) Str.concat("scalar:", Check.check(srcQualifiedScalarWrong())) else if (!rejects(srcOptionScalarWrong(), "pattern case Option.Some does not belong to Int")) Str.concat("option:", Check.check(srcOptionScalarWrong())) else Str.concat("forScalar:", Check.check(srcForScalarOwnerWrong()))
 
 def dumpUnknownPatternOwner(): String =
   if (!rejects(srcUnknownPatternOwner(), "unknown pattern case Ghost.Item")) Str.concat("owner:", Check.check(srcUnknownPatternOwner())) else if (!rejects(srcUnknownPatternCase(), "unknown pattern case Second.Missing")) Str.concat("case:", Check.check(srcUnknownPatternCase())) else if (!rejects(srcUnknownJsonCase(), "unknown pattern case Json.Missing")) Str.concat("json:", Check.check(srcUnknownJsonCase())) else if (Check.check(srcKnownJsonCase()) != "[]") Str.concat("jsonValid:", Check.check(srcKnownJsonCase())) else if (!rejects(srcParsedJsonCase(), "pattern case Json.Obj does not belong to Result")) Str.concat("jsonParsed:", Check.check(srcParsedJsonCase())) else if (Check.check(srcNestedParsedJsonCase()) != "[]") Str.concat("jsonNested:", Check.check(srcNestedParsedJsonCase())) else if (!rejects(srcUnknownForOwner(), "unknown pattern case Ghost.Item")) Str.concat("for:", Check.check(srcUnknownForOwner())) else dumpRecordModulePattern()
 
 def dumpRecordModulePattern(): String =
-  if (!rejects(srcUnknownRecordOwner(), "unknown pattern case Ghost.Point")) Str.concat("ghost:", Check.check(srcUnknownRecordOwner())) else if (!Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: []), "unknown pattern case Main.Point")) Str.concat("wrongModule:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: [])) else if (!Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []), "unknown pattern case Point.Point")) Str.concat("recordName:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: [])) else if (Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []) != "[]") Str.concat("sameNameModule:", Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: [])) else Str.concat("rightModule:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordModule()) :: []))
+  if (!rejects(srcUnknownRecordOwner(), "unknown pattern case Ghost.Point")) Str.concat("ghost:", Check.check(srcUnknownRecordOwner())) else if (!Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: []), "unknown pattern case Main.Point")) Str.concat("wrongModule:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcWrongRecordModule()) :: [])) else if (!Str.contains(Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []), "unknown pattern case PointMod.Point.Point")) Str.concat("recordName:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: [])) else if (Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: []) != "[]") Str.concat("sameNameModule:", Check.checkFiles(("Point", "record Point(n: Int)") :: ("Main", srcRecordNameOwner()) :: [])) else Str.concat("rightModule:", Check.checkFiles(("PointMod", "record Point(n: Int)") :: ("Main", srcRightRecordModule()) :: []))
 
 def dumpNamedLetter(): String =
   if (Check.check("""enum E:
@@ -1684,7 +1684,7 @@ def wrong(): Option[E] = Option.Some(1)
 """)) else if (!rejects("""enum E:
   case Ok
 def wrong(): E => Int = (x: Int) => x
-""", "lambda arg type mismatch: expected E, got Int")) Str.concat("funEMis ", Check.check("""enum E:
+""", "lambda arg type mismatch: expected Main.E, got Int")) Str.concat("funEMis ", Check.check("""enum E:
   case Ok
 def wrong(): E => Int = (x: Int) => x
 """)) else "namedLetter-other"
@@ -1738,7 +1738,7 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage()
+  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
 
 def closedMatchCoverage(): Bool =
   List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()
@@ -1746,7 +1746,7 @@ def closedMatchCoverage(): Bool =
 def closedPatternCoverage(): Bool =
   Check.check("def choose(b: Bool): Int = b match { case true | false => 1 }") == "[]" && rejects("def choose(b: Bool): Int = b match { case true => 1 }", "non-exhaustive match on Bool") && rejects("def choose(b: Bool): Int = b match { case _ if true => 1 }", "non-exhaustive match on Bool") && Check.check("def choose(b: Bool): Int = b match { case _ if false => 0 case value => 1 }") == "[]" && Check.check("def choose(o: Option[Bool]): Int = o match { case whole @ Some(true | false) => 1 case None => 0 }") == "[]" && rejects("def choose(o: Option[Bool]): Int = o match { case Some(true) => 1 case None => 0 }", "non-exhaustive match on Option[Bool]") && Check.check("""record Pair(left: Bool, right: Bool)
 def choose(p: Pair): Int = p match { case Pair(right = true) => 1 case Pair(right = false) => 0 }""") == "[]" && rejects("""record Pair(left: Bool, right: Bool)
-def choose(p: Pair): Int = p match { case Pair(right = true) => 1 }""", "non-exhaustive match on Pair") && rejects("""record Pair(left: Bool)
+def choose(p: Pair): Int = p match { case Pair(right = true) => 1 }""", "non-exhaustive match on Main.Pair") && rejects("""record Pair(left: Bool)
 def choose(p: Pair): Int = p match { case Pair(missing = true) => 1 }""", "unknown pattern field missing") && rejects("""record Pair(left: Bool)
 def choose(p: Pair): Int = p match { case Pair(_, true) => 1 }""", "too many pattern fields") && Check.check("def choose(xs: List[Bool]): Int = xs match { case [] => 0 case true :: _ => 1 case false :: _ => 2 }") == "[]" && rejects("def choose(xs: List[Bool]): Int = xs match { case [] => 0 case true :: _ => 1 }", "non-exhaustive match on List[Bool]") && Check.check("""enum Tree:
   case Leaf(value: Int)
@@ -1760,7 +1760,7 @@ def closedAliasCoverage(): Bool =
 record Switch(value: Flag)
 def choose(s: Switch): Int = s match { case Switch(true) => 1 case Switch(false) => 0 }""") == "[]" && rejects("""type Flag = Bool
 record Switch(value: Flag)
-def choose(s: Switch): Int = s match { case Switch(true) => 1 }""", "non-exhaustive match on Switch") && Check.check("""type Wrapped[T] = Option[T]
+def choose(s: Switch): Int = s match { case Switch(true) => 1 }""", "non-exhaustive match on Main.Switch") && Check.check("""type Wrapped[T] = Option[T]
 record Switch(value: Wrapped[Bool])
 def choose(s: Switch): Int = s match { case Switch(Some(true | false)) => 1 case Switch(None) => 0 }""") == "[]"
 
@@ -1771,7 +1771,7 @@ def orderedListTypes(): Bool =
   Check.check("def right(): List[Int] = List.sort([2, 1])") == "[]" && Check.check("def right(): List[String] = List.sort([\"b\", \"a\"])") == "[]" && Check.check("def right(): Int = List.max([1, 2])") == "[]" && Check.check("def right(): String = List.min([\"b\", \"a\"])") == "[]" && Check.check("def right(): List[Float] = List.sort([2.0, 1.0])") == "[]" && Check.check("def right(): Float = List.max([1.0, 2.0])") == "[]" && Check.check("def right(): Float = List.min([1.0, 2.0])") == "[]" && rejects("def wrong(): Bool = List.min([true, false])", "List.min needs List[Int], List[Float], or List[String]")
 
 def dumpFail(): String =
-  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else "other"
+  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else if (!moduleIdentity()) Str.concat("moduleIdentity:", Check.checkFiles(Cases.moduleFiles(0, false))) else "other"
 
 def dumpTyckRes(): String =
   if (!nestedPatTypes()) dumpNestedPat() else if (!namedIoTypes()) dumpNamedIo() else "tyckRes"
@@ -2362,6 +2362,17 @@ def genericRecordFields(): Bool =
   Check.check("record Holder[A](item: A)\ndef right(): List[String] = List.flatMap([Holder([\"a\"])], holder => holder.item)") == "[]" && rejects("""record Holder[A](item: A)
 def wrong(holder: Holder[String]): Int = holder.item""", "does not match declared") && Check.check("""record Holder[A](item: A)
 def right(holder: Holder[Int]): Int = holder.item + 1""") == "[]"
+
+def moduleIdentity(): Bool =
+  List.forall(List.range(0, 6), seed => Cases.moduleChecked(seed)) && moduleRejected(false) && moduleRejected(true) && rejects("record __ScuzzType_1_A_Box(value: Int)", "reserved name") && rejects("""record Duplicate(value: Int)
+record Duplicate(text: String)""", "duplicate type Main.Duplicate") && rejects("""record Duplicate()
+type Duplicate = Int""", "duplicate type Main.Duplicate")
+
+def moduleRejected(reverse: Bool): Bool =
+  for {
+    defs = List.take(Cases.moduleFiles(0, reverse), 2)
+  } yield Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(): A.Box[String] = B.Box(\"b\", \"a\")"))), "does not match declared A.Box[String]") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(x: Box[String]): Int = 1"))), "ambiguous name Box") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(): Int = A.read(B.make())"))), "expected A.Choice[String]") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(c: A.Choice[String]): Int = c match { case B.Choice.End => 1 case _ => 0 }"))), "does not belong to A.Choice") && Str.contains(Check.checkFiles(List.append(defs, ("Main", "def wrong(c: B.Choice[Int]): Int = c match { case B.Choice.End => 0 }"))), "non-exhaustive match on B.Choice[Int]") && Str.contains(Check.checkFiles(List.append(defs, ("Main", """def accept(x: Any): Int = 1
+def wrong(): Int = accept(A.Marker())"""))), "expected Any")
 
 @main def main: IO[Unit] =
   IO.println(if (allOk()) "tyck-ok" else Str.concat("tyck-bad ", dumpFail()))
