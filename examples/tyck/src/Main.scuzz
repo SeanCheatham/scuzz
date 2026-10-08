@@ -1738,13 +1738,40 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes()
+  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage()
+
+def closedMatchCoverage(): Bool =
+  List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()
+
+def closedPatternCoverage(): Bool =
+  Check.check("def choose(b: Bool): Int = b match { case true | false => 1 }") == "[]" && rejects("def choose(b: Bool): Int = b match { case true => 1 }", "non-exhaustive match on Bool") && rejects("def choose(b: Bool): Int = b match { case _ if true => 1 }", "non-exhaustive match on Bool") && Check.check("def choose(b: Bool): Int = b match { case _ if false => 0 case value => 1 }") == "[]" && Check.check("def choose(o: Option[Bool]): Int = o match { case whole @ Some(true | false) => 1 case None => 0 }") == "[]" && rejects("def choose(o: Option[Bool]): Int = o match { case Some(true) => 1 case None => 0 }", "non-exhaustive match on Option[Bool]") && Check.check("""record Pair(left: Bool, right: Bool)
+def choose(p: Pair): Int = p match { case Pair(right = true) => 1 case Pair(right = false) => 0 }""") == "[]" && rejects("""record Pair(left: Bool, right: Bool)
+def choose(p: Pair): Int = p match { case Pair(right = true) => 1 }""", "non-exhaustive match on Pair") && rejects("""record Pair(left: Bool)
+def choose(p: Pair): Int = p match { case Pair(missing = true) => 1 }""", "unknown pattern field missing") && rejects("""record Pair(left: Bool)
+def choose(p: Pair): Int = p match { case Pair(_, true) => 1 }""", "too many pattern fields") && Check.check("def choose(xs: List[Bool]): Int = xs match { case [] => 0 case true :: _ => 1 case false :: _ => 2 }") == "[]" && rejects("def choose(xs: List[Bool]): Int = xs match { case [] => 0 case true :: _ => 1 }", "non-exhaustive match on List[Bool]") && Check.check("""enum Tree:
+  case Leaf(value: Int)
+  case Fork(left: Tree, right: Tree)
+def choose(t: Tree): Int = t match { case Tree.Leaf(_) => 0 case Tree.Fork(_, _) => 1 }""") == "[]" && Check.check("def choose(o: Option[Unit]): Int = o match { case Some(()) => 1 case None => 0 }") == "[]" && closedJsonCoverage() && rejects("""record Pair(left: Bool)
+def choose(p: Pair): Int = p match { case Pair(left = true, left = false) => 1 case Pair(left = false) => 0 }""", "duplicate pattern field left") && rejects("""record Pair(left: Bool, right: Bool)
+def choose(p: Pair): Int = p match { case Pair(true, left = false) => 1 case _ => 0 }""", "duplicate pattern field left") && rejects("def choose(p: (Bool, Bool)): Int = p match { case (_, _, _) => 1 }", "tuple pattern arity does not match") && rejects("def choose(p: (Bool, Bool)): Int = p match { case () => 1 case _ => 0 }", "unit pattern needs Unit") && closedAliasCoverage() && Check.check("def choose(b: Bool): Int = b match { case (true) => 1 case (false) => 0 }") == "[]"
+
+def closedAliasCoverage(): Bool =
+  Check.check("""type Flag = Bool
+record Switch(value: Flag)
+def choose(s: Switch): Int = s match { case Switch(true) => 1 case Switch(false) => 0 }""") == "[]" && rejects("""type Flag = Bool
+record Switch(value: Flag)
+def choose(s: Switch): Int = s match { case Switch(true) => 1 }""", "non-exhaustive match on Switch") && Check.check("""type Wrapped[T] = Option[T]
+record Switch(value: Wrapped[Bool])
+def choose(s: Switch): Int = s match { case Switch(Some(true | false)) => 1 case Switch(None) => 0 }""") == "[]"
+
+def closedJsonCoverage(): Bool =
+  Check.check("def choose(j: Json): Int = j match { case Json.Null => 0 case Json.Bool(true) => 1 case Json.Bool(false) => 2 case Json.Int(_) => 3 case Json.Float(_) => 4 case Json.Str(_) => 5 case Json.Arr(_) => 6 case Json.Obj(_) => 7 }") == "[]" && rejects("def choose(j: Json): Int = j match { case Json.Null => 0 case Json.Bool(true) => 1 case Json.Int(_) => 3 case Json.Float(_) => 4 case Json.Str(_) => 5 case Json.Arr(_) => 6 case Json.Obj(_) => 7 }", "non-exhaustive match on Json") && Check.check("def choose(j: Json): Bool = j match { case Json.Bool(b) => b case _ => false }") == "[]"
 
 def orderedListTypes(): Bool =
   Check.check("def right(): List[Int] = List.sort([2, 1])") == "[]" && Check.check("def right(): List[String] = List.sort([\"b\", \"a\"])") == "[]" && Check.check("def right(): Int = List.max([1, 2])") == "[]" && Check.check("def right(): String = List.min([\"b\", \"a\"])") == "[]" && Check.check("def right(): List[Float] = List.sort([2.0, 1.0])") == "[]" && Check.check("def right(): Float = List.max([1.0, 2.0])") == "[]" && Check.check("def right(): Float = List.min([1.0, 2.0])") == "[]" && rejects("def wrong(): Bool = List.min([true, false])", "List.min needs List[Int], List[Float], or List[String]")
 
 def dumpFail(): String =
-  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else "other"
+  if (!tyckCore()) dumpTyckCore() else if (!tyckFlow()) "tyckFlow" else if (!tyckRes()) dumpTyckRes() else if (!tyckFail()) dumpTyckFail() else if (!tyckParse()) "tyckParse" else if (!tyckLam()) dumpTyckLam() else if (!tyckAdt()) dumpTyckAdt() else if (!tyckClosed()) dumpClosed() else if (!tyckAny()) "tyckAny" else if (!factsTier()) "factsTier" else if (!concreteTyParity()) "concreteTyParity" else if (!closedMatchCoverage()) "closedMatchCoverage" else "other"
 
 def dumpTyckRes(): String =
   if (!nestedPatTypes()) dumpNestedPat() else if (!namedIoTypes()) dumpNamedIo() else "tyckRes"

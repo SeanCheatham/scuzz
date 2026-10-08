@@ -12,7 +12,7 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Proof.** Complete the session gates in `vision.md`. Run a human session on one small app and one objective. Measure retained acceptances per review minute, abstention reasons, Undo, and readiness latency. Record workload scope and the generator used. Controlled generator output proves the transport, not usefulness. Automated choices do not count as human evidence.
 
-**Priority.** Complete local choice feedback and the session summary first. Then add rule review and prove the complete session. General compiler idle cost work does not block these steps. Correct a compiler error or cost when it blocks a required application workload or proof.
+**Priority.** Complete the language and verification guarantees in `vision.md` first. Then resume local choice feedback, rule review, and the complete session proof. General compiler idle cost work does not block these steps.
 
 ### 2. Review latency and evaluator parity
 
@@ -67,6 +67,8 @@ There is no explicit claim suggestion or installation path from a preference. A 
 ### Supporting compiler and editor work
 
 - **Type names across files.** Constructor checking, field lookup, and native tags select the first matching declaration in file order. Fields from repeated short names stay separate. CI checks two declaration orders against fixed results. Short type names do not give repeated declarations separate module identities. Use distinct type names for separate layouts. Module type identity remains open.
+
+- **Unit effect binding.** `() <- IO.pure(())` passes checking. Native emission produces invalid LLVM IR. Reject the unsupported binding or emit it correctly. A Unit match and a nested Unit pattern execute on both engines.
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
 - **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.

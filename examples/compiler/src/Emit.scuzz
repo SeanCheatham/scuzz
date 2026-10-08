@@ -3902,7 +3902,7 @@ def caseFieldTy(ens: List[En], en: String, ctor: String): String =
   if (en == "Json") jsonFieldTy(ctor) else if (List.isEmpty(ens)) "" else caseFieldTy1(List.at(ens, 0), List.tail(ens), en, ctor)
 
 def jsonFieldTy(ctor: String): String =
-  if (ctor == "Int" || ctor == "Bool") "Int" else if (ctor == "Float") "Float" else if (ctor == "Str") "String" else if (ctor == "Obj") "List[(String, Json)]" else "List[Json]"
+  if (ctor == "Bool") "Bool" else if (ctor == "Int") "Int" else if (ctor == "Float") "Float" else if (ctor == "Str") "String" else if (ctor == "Obj") "List[(String, Json)]" else "List[Json]"
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
@@ -3989,7 +3989,7 @@ def qualifyMatchArm(arm: Arm, ty: String, ens: List[En]): Arm =
   }
 
 def qualifyMatchPat(pat: String, ty: String, ens: List[En]): String =
-  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) qualifyMatchAlt(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (Check.asAt(pat, 0) >= 0) Str.concat(Str.take(pat, Check.asAt(pat, 0) + 3), qualifyMatchPat(Str.drop(pat, Check.asAt(pat, 0) + 3), ty, ens)) else if (isConsPat(pat)) Str.concat(qualifyMatchPat(consHead(pat), Check.elemOf(ty), ens), Str.concat(" :: ", qualifyMatchPat(consTail(pat), ty, ens))) else if (isTuplePat(pat)) Str.concat("(", Str.concat(joinComma(qualifyMatchFields(splitPat(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(ty), noStr(), 0, ens)), ")")) else if (isStrPat(pat) || isIntPat(pat) || isBoolPat(pat)) pat else qualifyMatchCore(pat, ty, ens)
+  if (pat == "()") pat else if (isTuplePat(pat) && !hasComma(Str.slice(pat, 1, Str.len(pat) - 1))) qualifyMatchPat(Str.slice(pat, 1, Str.len(pat) - 1), ty, ens) else if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) qualifyMatchAlt(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (Check.asAt(pat, 0) >= 0) Str.concat(Str.take(pat, Check.asAt(pat, 0) + 3), qualifyMatchPat(Str.drop(pat, Check.asAt(pat, 0) + 3), ty, ens)) else if (isConsPat(pat)) Str.concat(qualifyMatchPat(consHead(pat), Check.elemOf(ty), ens), Str.concat(" :: ", qualifyMatchPat(consTail(pat), ty, ens))) else if (isTuplePat(pat)) Str.concat("(", Str.concat(joinComma(qualifyMatchFields(splitPat(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(ty), noStr(), 0, ens)), ")")) else if (isStrPat(pat) || isIntPat(pat) || isBoolPat(pat)) pat else qualifyMatchCore(pat, ty, ens)
 
 def qualifyMatchAlt(pat: String, ty: String, ens: List[En], i: Int): String =
   Str.concat(qualifyMatchPat(Str.take(pat, i), ty, ens), Str.concat(" | ", qualifyMatchPat(Str.drop(pat, i + 3), ty, ens)))
@@ -4092,7 +4092,7 @@ def emitTryPat(pat: String, prefix: String, i: Int, scrut: String, ens: List[En]
   if (isAsPat(pat)) emitTryPat(stripAs(pat), prefix, i, scrut, ens, strs, last, tys) else emitTryPat2(pat, prefix, i, scrut, ens, strs, last, tys)
 
 def emitTryPat2(pat: String, prefix: String, i: Int, scrut: String, ens: List[En], strs: Strs, last: Bool, tys: List[String]): String =
-  if (pat == "_") line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (pat == "[]") emitNilTry(prefix, i, scrut, last) else if (isConsPat(pat)) emitConsTry(prefix, i, scrut, last, slotInt(tys, 0), consTail(pat)) else if (isOrPat(pat)) emitOrTry(pat, prefix, i, scrut, ens, strs, last) else if (isStrPat(pat)) emitStrTry(pat, prefix, i, scrut, strs, last) else if (isIntPat(pat)) emitIntTry(pat, prefix, i, scrut, last) else if (isBoolPat(pat)) emitIntTry(boolPatLit(pat), prefix, i, scrut, last) else if (isTuplePat(pat)) emitTupleTry(pat, prefix, i, scrut, strs, last, tys, ens) else if (isVarPat(pat, ens)) line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (isConsPat(patBind(pat))) emitCtorConsTry(pat, prefix, i, scrut, ens, last, tys) else join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitLiteralMatchedPat(pat, prefix, i, scrut, ens, strs, last)))
+  if (pat == "_" || pat == "()") line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (pat == "[]") emitNilTry(prefix, i, scrut, last) else if (isConsPat(pat)) emitConsTry(prefix, i, scrut, last, slotInt(tys, 0), consTail(pat)) else if (isOrPat(pat)) emitOrTry(pat, prefix, i, scrut, ens, strs, last) else if (isStrPat(pat)) emitStrTry(pat, prefix, i, scrut, strs, last) else if (isIntPat(pat)) emitIntTry(pat, prefix, i, scrut, last) else if (isBoolPat(pat)) emitIntTry(boolPatLit(pat), prefix, i, scrut, last) else if (isTuplePat(pat)) emitTupleTry(pat, prefix, i, scrut, strs, last, tys, ens) else if (isVarPat(pat, ens)) line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i))))) else if (isConsPat(patBind(pat))) emitCtorConsTry(pat, prefix, i, scrut, ens, last, tys) else join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitLiteralMatchedPat(pat, prefix, i, scrut, ens, strs, last)))
 
 def emitCtorConsTry(pat: String, prefix: String, i: Int, scrut: String, ens: List[En], last: Bool, tys: List[String]): String =
   join(emitTag(prefix, i, scrut, patTag(pat, ens)), join(emitTagBr(prefix, i, last), emitCtorConsM(pat, prefix, i, scrut, last, tys)))
@@ -4140,7 +4140,7 @@ def emitConsOk(prefix: String, i: Int): String =
   line(Str.concat("br label %", Str.concat(prefix, Str.concat("_ok_0_", Str.fromInt(i)))))
 
 def isTuplePat(pat: String): Bool =
-  Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
+  pat != "()" && Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
 
 def emitTupleTry(pat: String, prefix: String, i: Int, scrut: String, strs: Strs, last: Bool, tys: List[String], ens: List[En]): String =
   emitTuplePeel(ppre(prefix, i), i + 1, scrut, tys, tupComps(pat), prefix, i, last, strs, true, ens)
@@ -4486,7 +4486,7 @@ def emitOks0(arm: Arm, rest: List[Arm], moff: Int, prefix: String, strs: Strs, d
   }
 
 def emitOkSlotPat(pat: String, body: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, asI64: Bool, fid: Int, borrow: Bool): Slot =
-  if (isAsPat(pat)) emitOkSlotPat(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), prefix, strs, defs, ens, ps, loc, i, tys, sv, asI64, fid, borrow) else if (isVarPat(pat, ens)) emitOkVar(pat, body, prefix, strs, defs, ens, ps, loc, i, sv, asI64, fid) else emitOkSlotPat2(pat, body, prefix, strs, defs, ens, ps, loc, i, tys, fid, borrow)
+  if (pat == "()") emitOkPatternBody(body, Str.concat(prefix, Str.concat("_a0_", Str.fromInt(i))), strs, defs, ens, ps, loc, fid, borrow) else if (isAsPat(pat)) emitOkSlotPat(stripAs(pat), rewriteBind(body, asName(pat), ssaName(sv)), prefix, strs, defs, ens, ps, loc, i, tys, sv, asI64, fid, borrow) else if (isVarPat(pat, ens)) emitOkVar(pat, body, prefix, strs, defs, ens, ps, loc, i, sv, asI64, fid) else emitOkSlotPat2(pat, body, prefix, strs, defs, ens, ps, loc, i, tys, fid, borrow)
 
 def isVarPat(pat: String, ens: List[En]): Bool =
   isSimpleBind(pat) && !isOrPat(pat) && !isTuplePat(pat) && dotAt(pat, 0) < 0 && pat != "_" && pat != "[]" && enOfCase(ens, patCore(pat)) == "" && !isIntPat(pat) && !isBoolPat(pat) && !isStrPat(pat)
@@ -5049,7 +5049,7 @@ def emitOkTailSlot2(pat: String, body: Expr, strs: Strs, defs: Ftab, ens: List[E
   if (isOrPat(pat)) emitOkTailSlot2(orLeft(pat), body, strs, defs, ens, ps, loc, i, tys, keep) else if (isConsPat(pat)) emitOkOwned(emitOkConsNest(consTail(pat), "body", i, tys, emitTailLeafTyped(rewriteCons(pat, body, "body", i, slotInt(tys, 0)), strs, defs, ens, ps, consPayloadParams(pat, "body", i, tys, ps), loc, i, keep)), ps) else emitOkTailSlot3(pat, body, strs, defs, ens, ps, loc, i, tys, keep)
 
 def emitOkTailSlot3(pat: String, body: Expr, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], keep: Bool): Slot =
-  if (isTuplePat(pat)) emitTailLeafTyped(rewriteTuple(pat, body, "body", i, tys, ens), strs, defs, ens, ps, stemBps(pat, "body", i, tys, ens, ps), loc, i, keep) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitTailLeafTyped(rewriteFields(splitPat(patBind(pat)), body, "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), ens), strs, defs, ens, ps, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), "body", i, 0, ens, ps), loc, i, keep) else emitTailLeafBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, strs, defs, ens, ps, patternPayloadParams(pat, "body", i, ens, ps), loc, i, keep)
+  if (pat == "()") emitTailLeafTyped(body, strs, defs, ens, ps, ps, loc, i, keep) else if (isTuplePat(pat)) emitTailLeafTyped(rewriteTuple(pat, body, "body", i, tys, ens), strs, defs, ens, ps, stemBps(pat, "body", i, tys, ens, ps), loc, i, keep) else if (hasComma(patBind(pat)) || namedMulti(pat, ens)) emitTailLeafTyped(rewriteFields(splitPat(patBind(pat)), body, "body", i, 0, payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), ens), strs, defs, ens, ps, fieldPayloadParams(splitPat(patBind(pat)), payloadTys(ens, patCore(pat)), payloadNames(ens, patCore(pat)), "body", i, 0, ens, ps), loc, i, keep) else emitTailLeafBind(fieldBind(patBind(pat)), bindIsInt(pat, ens), body, strs, defs, ens, ps, patternPayloadParams(pat, "body", i, ens, ps), loc, i, keep)
 
 def emitTailLeafTyped(body: Expr, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], bps: List[Param], loc: String, i: Int, keep: Bool): Slot =
   Slot(emitSelfTailTyped(body, Str.concat("body_a0_", Str.fromInt(i)), strs, defs, ens, ps, bps, loc, keep), "tco", false)
@@ -6103,7 +6103,7 @@ def kindOf(p: Param): Int =
   if (p.ty == "Bool") 2 else if (p.ty == "Int") 0 else 1
 
 def emitProg(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex]): String =
-  emitProgEns(p, strs, files, lidx, Parse.builtins(p.enums))
+  emitProgEns(p, strs, files, lidx, Parse.builtins(Check.expandEnums(p.enums, p.aliases)))
 
 def emitProgEns(p: Prog, strs: Strs, files: List[(String, String)], lidx: Map[String, LineIndex], ens: List[En]): String =
   emitBits(Check.expandExpr(p.body, p.aliases), emitFtab(prepDefs(p), ens), internReady(strs), ens, files, lidx)
@@ -6386,7 +6386,7 @@ def emitContSkip(bind: String, s: Slot, bty: String): Slot =
   if (bind == "_") emitContDrop(s, bty) else s
 
 def keepBind(bind: String): Bool =
-  bind != "" && bind != "_"
+  bind != "" && bind != "_" && bind != "()"
 
 def bindPsTy(bind: String, ps: List[Param], ty: String): List[Param] =
   if (isTuplePat(bind)) bindTupPsTy(tupBindNs(bind), tupSlots(ty), ps) else if (keepBind(bind)) Param(bind, ty, "", "") :: dropParam(ps, bind) else ps

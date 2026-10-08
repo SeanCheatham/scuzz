@@ -43,3 +43,9 @@ oracle genericRecordFields(): Bool =
 oracle fieldBeforeTupleBinding(): Bool =
   Main.fieldBeforeTupleBinding()
 
+oracle matchCoverage(seed: Int where seed >= 0 && seed < 128): Bool =
+  Cases.coverageChecked(seed)
+
+oracle closedPatternCoverage(): Bool =
+  Main.closedPatternCoverage()
+
