@@ -2190,10 +2190,19 @@ def patternCoreForEn(core: String, owner: String, ens: List[En]): String =
   if (dotAt(core, 0) >= 0 || !List.exists(ens, en => en.name == owner && hasCase(en.cases, core))) core else Str.concat(owner, Str.concat(".", core))
 
 def constructorFields(ens: List[En], core: String): List[Param] =
-  if (List.exists(ens, en => en.name == core)) List.flatMap(List.filter(ens, en => en.name == core), en => List.flatMap(en.cases, c => c.fields)) else List.flatMap(ens, en => constructorFieldsIn(en, core))
+  constructorFieldsOwned(List.filter(ens, en => en.name == core || Str.startsWith(core, Str.concat(en.name, ".")) || en.isRec && core == Str.concat(en.mod, Str.concat(".", en.name))), ens, core)
+
+def constructorFieldsOwned(owned: List[En], ens: List[En], core: String): List[Param] =
+  if (!List.isEmpty(owned)) constructorFieldsIn(List.at(owned, 0), core) else constructorFieldsCase(ens, core)
+
+def constructorFieldsCase(ens: List[En], core: String): List[Param] =
+  if (List.isEmpty(ens)) [] else if (hasCase(List.at(ens, 0).cases, core)) constructorFieldsIn(List.at(ens, 0), core) else constructorFieldsCase(List.tail(ens), core)
 
 def constructorFieldsIn(en: En, core: String): List[Param] =
-  List.flatMap(en.cases, c => if (core == Str.concat(en.name, Str.concat(".", c.name)) || core == Str.concat(en.mod, Str.concat(".", en.name)) && en.isRec || core == en.name && en.isRec || core == c.name) c.fields else [])
+  constructorFieldsHit(List.filter(en.cases, c => core == Str.concat(en.name, Str.concat(".", c.name)) || core == Str.concat(en.mod, Str.concat(".", en.name)) && en.isRec || core == en.name && en.isRec || core == c.name))
+
+def constructorFieldsHit(cases: List[EnCase]): List[Param] =
+  if (List.isEmpty(cases)) [] else List.at(cases, 0).fields
 
 def bindConstructorFields(names: List[String], fields: List[Param], i: Int, scope: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
   if (List.isEmpty(names)) scope else bindConstructorField(List.at(names, 0), List.tail(names), fields, i, scope, ens)

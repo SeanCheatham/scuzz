@@ -797,6 +797,59 @@ def sum(): Int = A.pick() + B.pick() + A.shadow() + B.global() + A.ref()
     model = List.forall(mods, mod => List.forall(names, name => Eval.funMod(p, mod, name) == Check.ftabGetMod(p.funs.tab, mod, name) && Eval.funPrefer(p, mod, name) == Check.findFunPrefer2(p.funs, name, mod)))
   } yield Check.checkFiles(p.files) == "[]" && model && Eval.show(Eval.callPure(p, "Main", "sum", [])) == "121"
 
+def evMapBalanced(m: EvMap): Bool =
+  m match {
+    case EvMap.MEmpty => true
+    case EvMap.MNode(_, _, l, r, h, n) => h == 1 + (if (Eval.mapHeight(l) > Eval.mapHeight(r)) Eval.mapHeight(l) else Eval.mapHeight(r)) && n == 1 + Eval.mapSize(l) + Eval.mapSize(r) && Eval.mapHeight(l) <= Eval.mapHeight(r) + 1 && Eval.mapHeight(r) <= Eval.mapHeight(l) + 1 && evMapBalanced(l) && evMapBalanced(r)
+  }
+
+def evConstructors(): Bool =
+  evConstructorOrder(false) && evConstructorOrder(true)
+
+def evConstructorOrder(reverse: Bool): Bool =
+  for {
+    a = ("A", """enum Packet:
+  case Wrap(value: Int = 7)
+  case Empty
+record Parcel(value: Int = 11)
+""")
+    b = ("B", """enum Packet:
+  case Wrap(value: Int, text: String)
+  case Empty
+record Parcel(value: Int, text: String)
+""")
+    body = if (reverse) "Packet.Wrap(text = \"b\", value = 9) match { case Packet.Wrap(text = label, value = n) => n + Str.len(label) + Parcel(text = \"cd\", value = 13).value case _ => 0 }" else "Packet.Wrap() match { case Packet.Wrap(value = n) => n + Parcel().value case _ => 0 }"
+    files = List.concat(if (reverse) [b, a] else [a, b], [("Main", Str.concat("""def result(): Int =
+  """, body))])
+    p = Eval.load(files)
+  } yield Check.checkFiles(files) == "[]" && Eval.show(Eval.callPure(p, "Main", "result", [])) == (if (reverse) "23" else "18")
+
+def evMapModelPairs(m: Map[Int, Int]): List[(Value, Value)] =
+  List.map(Map.toList(m), pr => (Value.VInt(pr._1), Value.VInt(pr._2)))
+
+def evMapState(m: EvMap, model: Map[Int, Int]): Bool =
+  evMapBalanced(m) && Eval.mapSize(m) == Map.size(model) && Eval.mapPairs(m, []) == evMapModelPairs(model)
+
+def evMapModelGo(i: Int, seed: Int, m: EvMap, model: Map[Int, Int]): Bool =
+  if (i >= 192) evMapDrain(Map.keys(model), m, model) else for {
+  key = (i * (if (seed == 0) 1 else if (seed == 1) 63 else 37) + i / 64 + seed) % 64
+  value = i * 3 + seed
+  remove = i % 4 == 0
+  next = if (remove) Eval.mapDel(m, Value.VInt(key), []) else Eval.mapPut(m, Value.VInt(key), Value.VInt(value), [])
+  expected = if (remove) Map.remove(model, key) else Map.set(model, key, value)
+  found = Value.VInt(Map.getOrElse(expected, key, 0 - 1))
+} yield evMapState(m, model) && evMapState(next, expected) && Eval.optOr(Eval.mapFind(next, Value.VInt(key), []), Value.VInt(0 - 1)) == found && evMapModelGo(i + 1, seed, next, expected)
+
+def evMapDrain(keys: List[Int], m: EvMap, model: Map[Int, Int]): Bool =
+  if (List.isEmpty(keys)) evMapState(m, model) && Eval.mapSize(m) == 0 else for {
+  key = List.at(keys, 0)
+  next = Eval.mapDel(m, Value.VInt(key), [])
+  expected = Map.remove(model, key)
+} yield evMapState(m, model) && evMapState(next, expected) && evMapDrain(List.tail(keys), next, expected)
+
+def evMapModel(seed: Int): Bool =
+  evMapModelGo(0, seed, Eval.emptyMap(), Map.empty())
+
 def evKitsCovered(): Bool =
   List.isEmpty(evKitsMissing())
 
@@ -804,7 +857,7 @@ def evKitsMissing(): List[String] =
   List.filter(List.filter(Kits.names(), k => !Eval.isExcludedKit(k)), k => Eval.isUnsupported(Eval.kitProbe(k, List.map(Kits.params(k), ty => evSample(ty)), evProg(srcAdd()))))
 
 def evSample(ty: String): Value =
-  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Eval.sigNew("", Value.VStr("a"), 0, false) else if (Str.startsWith(ty, "Signal")) Eval.sigNew("", Value.VInt(1), 0, false) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap([]) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
+  if (Str.contains(ty, "=>")) Value.VFun("Str.len", "") else if (Str.startsWith(ty, "Signal[String]")) Eval.sigNew("", Value.VStr("a"), 0, false) else if (Str.startsWith(ty, "Signal")) Eval.sigNew("", Value.VInt(1), 0, false) else if (ty == "View") Value.VView("View.text", [Value.VStr("a")]) else if (ty == "Int") Value.VInt(1) else if (ty == "String") Value.VStr("a") else if (ty == "Bool") Value.VBool(true) else if (ty == "Float") Value.VFloat(1.5) else if (Str.startsWith(ty, "List")) Value.VList([]) else if (Str.startsWith(ty, "Map")) Value.VMap(Eval.emptyMap()) else if (Str.startsWith(ty, "Set")) Value.VSet([]) else if (ty == "Json") Value.VCon("Json", "Null", []) else if (ty == "Builder") Value.VBuilder(Builder.empty()) else if (Str.startsWith(ty, "(")) Value.VTuple([Value.VInt(1), Value.VInt(2)]) else Value.VInt(1)
 
 def srcLive(): String =
   "def reads(): Int =\n  for {\n    n = Signal.makeN(\"count\", 4)\n    s = Signal.makeN(\"label\", \"hi\")\n    xs = Signal.makeN(\"items\", [\"a\", \"b\"])\n    _ = Signal.set(n, 9)\n    _ = Signal.set(xs, [\"a\", \"b\", \"c\"])\n    _ = Fuzz.hit(\"codegen:readers\")\n  } yield Property.signalInt(\"count\") + Str.len(Signal.get(s)) + Str.len(Property.signalStr(\"label\")) + Property.signalListLen(\"items\") + Str.len(Property.signalListAt(\"items\", 0)) + Str.len(Property.signalListAt(\"items\", 9)) + (if (Property.a11yHas(\"absent\")) 1 else 0)\n\ndef arm(): IO[Unit] =\n  Fuzz.setup(IO.pure(()))\n\ndef reg(): IO[Unit] =\n  Fuzz.driver(\"d\", 1, toks => IO.pure(()))\n\ndef watch(): IO[Unit] =\n  Fuzz.verify(\"c\", _ => Verdict.ok())\n\ndef rel(): IO[Unit] =\n  Fuzz.verifyRel(\"r\", __tup => __tup match {\n    case (_, _) => Verdict.ok()\n  })\n\ndef go(): IO[Unit] =\n  Fuzz.probe(IO.pure(()))\n\n@main def main: IO[Unit] =\n  IO.pure(())\n"
@@ -816,10 +869,10 @@ def evLive(): Bool =
   evExcluded() && Check.check(srcLive()) == "[]" && evCall(srcLive(), "reads", []) == "17" && evCall(srcLive(), "arm", []) == "<io>" && evCall(srcLive(), "reg", []) == "<io>" && evCall(srcLive(), "watch", []) == "<io>" && evCall(srcLive(), "rel", []) == "<io>" && evCall(srcLive(), "go", []) == "<io>"
 
 def evAllOk(): Bool =
-  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evQualified() && evLookup() && evKitsCovered() && evLive()
+  evAdd() && evTco() && evTcoMatch() && evGenerated(0) && evGenerated(13) && evMatch() && evQualified() && evLookup() && evConstructors() && evMapModel(0) && evMapModel(1) && evMapModel(2) && evKitsCovered() && evLive()
 
 def evDump(): String =
-  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evQualified()) "evQualified" else if (!evLookup()) "evLookup" else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
+  if (!evAdd()) evCall(srcAdd(), "add", [Value.VInt(1), Value.VInt(2)]) else if (!evTco()) "evTco" else if (!evTcoMatch()) "evTcoMatch" else if (!evGenerated(0) || !evGenerated(13)) "evGenerated" else if (!evMatch()) evCall(srcEvMatch(), "pick", [Value.VList([Value.VInt(5), Value.VInt(6), Value.VInt(7)]), Value.VCon("Shape", "Rect", [Value.VInt(2), Value.VInt(3)]), Value.VCon("Pt", "Pt", [Value.VInt(2), Value.VInt(5)]), Value.VStr("b")]) else if (!evQualified()) "evQualified" else if (!evLookup()) "evLookup" else if (!evConstructors()) "evConstructors" else if (!evMapModel(0) || !evMapModel(1) || !evMapModel(2)) "evMapModel" else if (!evKitsCovered()) List.join(evKitsMissing(), ",") else if (!evLive()) evLiveDump() else "ev-other"
 
 def evLiveDump(): String =
   if (!evExcluded()) "evExcluded" else if (Check.check(srcLive()) != "[]") Check.check(srcLive()) else if (evCall(srcLive(), "reads", []) != "17") evCall(srcLive(), "reads", []) else if (evCall(srcLive(), "arm", []) != "<io>") "arm" else if (evCall(srcLive(), "reg", []) != "<io>") "reg" else if (evCall(srcLive(), "watch", []) != "<io>") "watch" else if (evCall(srcLive(), "rel", []) != "<io>") "rel" else "go"
