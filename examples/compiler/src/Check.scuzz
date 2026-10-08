@@ -1946,10 +1946,84 @@ def inferMatch(s: Expr, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, en
   inferMatch2(infer(s, env, funs, ens), arms, env, funs, ens, span)
 
 def inferMatch2(o: Out, arms: List[Arm], env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(o)) o else if (List.isEmpty(arms)) o else andBinds(o, inferMatchNest(nestArmsErr(arms, span), arms, tyStr(o), env, funs, ens, span))
+  if (hasErr(o)) o else if (List.isEmpty(arms)) bad("match has no arms", span) else andBinds(o, inferMatchNest(nestArmsErr(arms, span), arms, tyStr(o), env, funs, ens, span))
 
 def inferMatchNest(v: Out, arms: List[Arm], scrutTy: String, env: List[(String, Ty)], funs: Ftab, ens: List[En], span: (String, Int)): Out =
-  if (hasErr(v)) v else inferMatchRest(inferMatchChecked(patternArmsErr(arms, scrutTy, ens, span), List.at(arms, 0), scrutTy, env, funs, ens), List.tail(arms), scrutTy, env, funs, ens)
+  if (hasErr(v)) v else inferMatchCovered(inferMatchRest(inferMatchChecked(patternArmsErr(arms, scrutTy, ens, span), List.at(arms, 0), scrutTy, env, funs, ens), List.tail(arms), scrutTy, env, funs, ens), arms, scrutTy, ens, span)
+
+def inferMatchCovered(o: Out, arms: List[Arm], ty: String, ens: List[En], span: (String, Int)): Out =
+  if (hasErr(o) || List.isEmpty(coverCases(ty, ens))) o else if (coverComplete(coverRows(arms), [ty], ens)) o else bad(Str.concat("non-exhaustive match on ", ty), span)
+
+def coverRows(arms: List[Arm]): List[List[String]] =
+  if (List.isEmpty(arms)) [] else coverArm(List.at(arms, 0), List.tail(arms))
+
+def coverArm(arm: Arm, rest: List[Arm]): List[List[String]] =
+  arm match {
+    case Arm(pat, guard, _) => if (guard == "") [pat] :: coverRows(rest) else coverRows(rest)
+  }
+
+def coverComplete(rows: List[List[String]], tys: List[String], ens: List[En]): Bool =
+  if (List.isEmpty(rows)) false else if (List.isEmpty(tys)) true else coverColumns(rows, List.at(tys, 0), List.tail(tys), ens)
+
+def coverColumns(rows: List[List[String]], ty: String, rest: List[String], ens: List[En]): Bool =
+  if (coverComplete(coverDefault(rows, ty, ens), rest, ens)) true else coverAllCases(coverCases(ty, ens), rows, ty, rest, ens)
+
+def coverAllCases(cases: List[EnCase], rows: List[List[String]], ty: String, rest: List[String], ens: List[En]): Bool =
+  if (List.isEmpty(cases)) false else coverCasesNext(cases, rows, ty, rest, ens)
+
+def coverCasesNext(cases: List[EnCase], rows: List[List[String]], ty: String, rest: List[String], ens: List[En]): Bool =
+  if (List.isEmpty(cases)) true else coverComplete(coverSpecialize(rows, ty, List.at(cases, 0), ens), List.concat(paramTys(List.at(cases, 0).fields), rest), ens) && coverCasesNext(List.tail(cases), rows, ty, rest, ens)
+
+def coverDefault(rows: List[List[String]], ty: String, ens: List[En]): List[List[String]] =
+  if (List.isEmpty(rows)) [] else List.concat(coverDefaultPat(List.at(List.at(rows, 0), 0), List.tail(List.at(rows, 0)), ty, ens), coverDefault(List.tail(rows), ty, ens))
+
+def coverDefaultPat(pat: String, rest: List[String], ty: String, ens: List[En]): List[List[String]] =
+  coverDefaultAt(coverClean(pat), rest, ty, ens, Parse.patternAlternativeAt(coverClean(pat), 0, 0))
+
+def coverDefaultAt(pat: String, rest: List[String], ty: String, ens: List[En], alt: Int): List[List[String]] =
+  if (alt >= 0) List.concat(coverDefaultPat(Str.take(pat, alt), rest, ty, ens), coverDefaultPat(Str.drop(pat, alt + 3), rest, ty, ens)) else if (coverWild(pat, ty, ens)) [rest] else []
+
+def coverClean(pat: String): String =
+  if (asAt(pat, 0) >= 0) coverClean(Str.drop(pat, asAt(pat, 0) + 3)) else if (isTuplePat(pat) && Str.len(pat) > 2 && !hasComma(Str.slice(pat, 1, Str.len(pat) - 1))) coverClean(Str.slice(pat, 1, Str.len(pat) - 1)) else pat
+
+def coverWild(pat: String, ty: String, ens: List[En]): Bool =
+  pat == "_" || isBareName(pat) && dotAt(pat, 0) < 0 && parenAt(pat, 0) < 0 && consAt(pat, 0) < 0 && pat != "true" && pat != "false" && !List.exists(coverCases(ty, ens), c => c.name == pat || c.name == patternCoreForTy(pat, ty, ens))
+
+def coverCases(ty: String, ens: List[En]): List[EnCase] =
+  if (ty == "Unit") [EnCase("()", [])] else if (ty == "Bool") [EnCase("true", []), EnCase("false", [])] else if (ty == "Json") List.map(["Null", "Bool", "Int", "Float", "Str", "Arr", "Obj"], name => EnCase(Str.concat("Json.", name), jsonPatternFields(Str.concat("Json.", name)))) else if (Type.isTupStr(ty)) [EnCase("#tuple", coverParams(Type.tupPartsStr(ty), 0))] else if (Str.startsWith(ty, "List[")) [EnCase("[]", []), EnCase("::", [Param("head", elemOf(ty), "", ""), Param("tail", ty, "", "")])] else coverEnums(List.filter(ens, en => en.name == tyHead(Type.parse(ty))), ty)
+
+def coverParams(tys: List[String], i: Int): List[Param] =
+  if (List.isEmpty(tys)) [] else Param(Str.fromInt(i), List.at(tys, 0), "", "") :: coverParams(List.tail(tys), i + 1)
+
+def coverEnums(ens: List[En], ty: String): List[EnCase] =
+  if (List.isEmpty(ens)) [] else coverEnum(specializeEnum(List.at(ens, 0), ty))
+
+def coverEnum(en: En): List[EnCase] =
+  List.map(en.cases, c => EnCase(if (en.isRec) en.name else Str.concat(en.name, Str.concat(".", c.name)), c.fields))
+
+def coverSpecialize(rows: List[List[String]], ty: String, c: EnCase, ens: List[En]): List[List[String]] =
+  if (List.isEmpty(rows)) [] else List.concat(coverSpecializePat(List.at(List.at(rows, 0), 0), List.tail(List.at(rows, 0)), ty, c, ens), coverSpecialize(List.tail(rows), ty, c, ens))
+
+def coverSpecializePat(pat: String, rest: List[String], ty: String, c: EnCase, ens: List[En]): List[List[String]] =
+  coverSpecializeAt(coverClean(pat), rest, ty, c, ens, Parse.patternAlternativeAt(coverClean(pat), 0, 0))
+
+def coverSpecializeAt(pat: String, rest: List[String], ty: String, c: EnCase, ens: List[En], alt: Int): List[List[String]] =
+  if (alt >= 0) List.concat(coverSpecializePat(Str.take(pat, alt), rest, ty, c, ens), coverSpecializePat(Str.drop(pat, alt + 3), rest, ty, c, ens)) else if (coverWild(pat, ty, ens)) [List.concat(List.map(c.fields, _ => "_"), rest)] else coverSpecializeHead(pat, rest, ty, c, ens)
+
+def coverSpecializeHead(pat: String, rest: List[String], ty: String, c: EnCase, ens: List[En]): List[List[String]] =
+  if (c.name == "()" && pat == "()") [rest] else if (c.name == "#tuple" && isTuplePat(pat)) [List.concat(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), rest)] else if (c.name == "::" && consAt(pat, 0) >= 0) [List.concat([Str.take(pat, consAt(pat, 0)), Str.drop(pat, consAt(pat, 0) + 4)], rest)] else if (coverCore(patCore(pat), ty, ens) == c.name) [List.concat(coverFields(if (patBind(pat) == "") [] else splitComma(patBind(pat)), c.fields, 0), rest)] else []
+
+def coverCore(core: String, ty: String, ens: List[En]): String =
+  if (List.exists(ens, en => en.isRec && en.name == tyHead(Type.parse(ty)) && (core == en.name || core == Str.concat(en.mod, Str.concat(".", en.name))))) tyHead(Type.parse(ty)) else patternCoreForTy(core, ty, ens)
+
+def coverFields(pats: List[String], fields: List[Param], i: Int): List[String] =
+  if (List.isEmpty(fields)) [] else coverField(pats, List.at(fields, 0).name, i) :: coverFields(pats, List.tail(fields), i + 1)
+
+def coverField(pats: List[String], name: String, i: Int): String =
+  coverFieldNamed(List.filter(pats, pat => eqAt(pat, 0) >= 0 && Str.take(pat, eqAt(pat, 0)) == name), pats, i)
+
+def coverFieldNamed(named: List[String], pats: List[String], i: Int): String =
+  if (!List.isEmpty(named)) Str.drop(List.at(named, 0), eqAt(List.at(named, 0), 0) + 3) else if (i < List.len(pats) && eqAt(List.at(pats, i), 0) < 0) List.at(pats, i) else "_"
 
 def patternArmsErr(arms: List[Arm], scrutTy: String, ens: List[En], span: (String, Int)): Out =
   patternArmsErr2(ownerArmsErr(arms, scrutTy, ens), arms, scrutTy, ens, span)
@@ -1969,7 +2043,7 @@ def ownerArmErr(arm: Arm, scrutTy: String, ens: List[En]): String =
   }
 
 def ownerPatErr(pat: String, ty: String, ens: List[En]): String =
-  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) ownerAltErr(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (asAt(pat, 0) >= 0) ownerPatErr(Str.drop(pat, asAt(pat, 0) + 3), ty, ens) else if (consAt(pat, 0) >= 0) ownerConsErr(pat, ty, ens) else if (isTuplePat(pat)) ownerTupleErr(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(ty), ens) else if (pat == "_" || pat == "[]" || altStrPat(pat) || altIntPat(pat) || altBoolPat(pat)) "" else ownerCtorErr(pat, ty, ens)
+  if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) ownerAltErr(pat, ty, ens, Parse.patternAlternativeAt(pat, 0, 0)) else if (asAt(pat, 0) >= 0) ownerPatErr(Str.drop(pat, asAt(pat, 0) + 3), ty, ens) else if (consAt(pat, 0) >= 0) ownerConsErr(pat, ty, ens) else if (isTuplePat(pat)) ownerTuplePatErr(pat, ty, ens) else if (pat == "_" || pat == "[]" || altStrPat(pat) || altIntPat(pat) || altBoolPat(pat)) "" else ownerCtorErr(pat, ty, ens)
 
 def ownerAltErr(pat: String, ty: String, ens: List[En], i: Int): String =
   ownerNextErr(ownerPatErr(Str.take(pat, i), ty, ens), Str.drop(pat, i + 3), ty, ens)
@@ -1979,6 +2053,12 @@ def ownerNextErr(err: String, pat: String, ty: String, ens: List[En]): String =
 
 def ownerConsErr(pat: String, ty: String, ens: List[En]): String =
   ownerNextErr(ownerPatErr(Str.take(pat, consAt(pat, 0)), elemOf(ty), ens), Str.drop(pat, consAt(pat, 0) + 4), ty, ens)
+
+def ownerTuplePatErr(pat: String, ty: String, ens: List[En]): String =
+  if (pat == "()") if (ty == "Unit") "" else "unit pattern needs Unit" else ownerTuplePartsErr(Str.slice(pat, 1, Str.len(pat) - 1), ty, ens)
+
+def ownerTuplePartsErr(pat: String, ty: String, ens: List[En]): String =
+  if (!hasComma(pat)) ownerPatErr(pat, ty, ens) else if (!Type.isTupStr(ty)) "tuple pattern needs a tuple" else if (List.len(splitComma(pat)) != List.len(Type.tupPartsStr(ty))) Str.concat("tuple pattern arity does not match ", ty) else ownerTupleErr(splitComma(pat), Type.tupPartsStr(ty), ens)
 
 def ownerTupleErr(pats: List[String], tys: List[String], ens: List[En]): String =
   if (List.isEmpty(pats)) "" else ownerTupleNext(ownerPatErr(List.at(pats, 0), if (List.isEmpty(tys)) "A" else List.at(tys, 0), ens), List.tail(pats), if (List.isEmpty(tys)) tys else List.tail(tys), ens)
@@ -2017,16 +2097,25 @@ def jsonPatternCase(name: String): Bool =
   name == "Null" || name == "Bool" || name == "Int" || name == "Float" || name == "Str" || name == "Arr" || name == "Obj"
 
 def ownerFieldsErr(pats: List[String], fields: List[Param], i: Int, ens: List[En]): String =
-  if (List.isEmpty(pats)) "" else ownerFieldsNext(ownerFieldErr(List.at(pats, 0), fields, i, ens), List.tail(pats), fields, i + 1, ens)
+  if (List.isEmpty(pats)) "" else ownerFieldsNext(ownerFieldChecked(List.at(pats, 0), List.tail(pats), fields, i, ens), List.tail(pats), fields, i + 1, ens)
+
+def ownerFieldChecked(pat: String, rest: List[String], fields: List[Param], i: Int, ens: List[En]): String =
+  ownerFieldDuplicate(ownerFieldErr(pat, fields, i, ens), patternFieldName(pat, fields, i), rest, fields, i + 1)
+
+def ownerFieldDuplicate(err: String, name: String, rest: List[String], fields: List[Param], i: Int): String =
+  if (err != "" || List.isEmpty(rest)) err else if (name == patternFieldName(List.at(rest, 0), fields, i)) Str.concat("duplicate pattern field ", name) else ownerFieldDuplicate(err, name, List.tail(rest), fields, i + 1)
+
+def patternFieldName(pat: String, fields: List[Param], i: Int): String =
+  if (eqAt(pat, 0) >= 0) Str.take(pat, eqAt(pat, 0)) else if (i < List.len(fields)) List.at(fields, i).name else ""
 
 def ownerFieldsNext(err: String, rest: List[String], fields: List[Param], i: Int, ens: List[En]): String =
   if (err != "") err else ownerFieldsErr(rest, fields, i, ens)
 
 def ownerFieldErr(pat: String, fields: List[Param], i: Int, ens: List[En]): String =
-  if (eqAt(pat, 0) >= 0) ownerNamedFieldErr(pat, fields, ens, List.filter(fields, p => p.name == Str.take(pat, eqAt(pat, 0)))) else ownerPatErr(pat, if (i < List.len(fields)) List.at(fields, i).ty else "A", ens)
+  if (eqAt(pat, 0) >= 0) ownerNamedFieldErr(pat, fields, ens, List.filter(fields, p => p.name == Str.take(pat, eqAt(pat, 0)))) else if (i >= List.len(fields)) "too many pattern fields" else ownerPatErr(pat, List.at(fields, i).ty, ens)
 
 def ownerNamedFieldErr(pat: String, fields: List[Param], ens: List[En], selected: List[Param]): String =
-  ownerPatErr(Str.drop(pat, eqAt(pat, 0) + 3), if (List.isEmpty(selected)) "A" else List.at(selected, 0).ty, ens)
+  if (List.isEmpty(selected)) Str.concat("unknown pattern field ", Str.take(pat, eqAt(pat, 0))) else ownerPatErr(Str.drop(pat, eqAt(pat, 0) + 3), List.at(selected, 0).ty, ens)
 
 def nestArmsErr(arms: List[Arm], span: (String, Int)): Out =
   if (List.isEmpty(arms)) ok("Unit") else nestArmsErr2(nestArmErr(List.at(arms, 0)), List.tail(arms), span)
@@ -2190,7 +2279,10 @@ def patternCoreForEn(core: String, owner: String, ens: List[En]): String =
   if (dotAt(core, 0) >= 0 || !List.exists(ens, en => en.name == owner && hasCase(en.cases, core))) core else Str.concat(owner, Str.concat(".", core))
 
 def constructorFields(ens: List[En], core: String): List[Param] =
-  constructorFieldsOwned(List.filter(ens, en => en.name == core || Str.startsWith(core, Str.concat(en.name, ".")) || en.isRec && core == Str.concat(en.mod, Str.concat(".", en.name))), ens, core)
+  if (Str.startsWith(core, "Json.")) jsonPatternFields(core) else constructorFieldsOwned(List.filter(ens, en => en.name == core || Str.startsWith(core, Str.concat(en.name, ".")) || en.isRec && core == Str.concat(en.mod, Str.concat(".", en.name))), ens, core)
+
+def jsonPatternFields(core: String): List[Param] =
+  if (core == "Json.Null") [] else [Param("value", if (core == "Json.Bool") "Bool" else if (core == "Json.Int") "Int" else if (core == "Json.Float") "Float" else if (core == "Json.Str") "String" else if (core == "Json.Arr") "List[Json]" else "List[(String, Json)]", "", "")]
 
 def constructorFieldsOwned(owned: List[En], ens: List[En], core: String): List[Param] =
   if (!List.isEmpty(owned)) constructorFieldsIn(List.at(owned, 0), core) else constructorFieldsCase(ens, core)
@@ -2265,7 +2357,7 @@ def isTuplePat(pat: String): Bool =
   Str.len(pat) > 0 && Str.charAt(pat, 0) == 40
 
 def bindTuple(pat: String, scrutTy: String, env: List[(String, Ty)], ens: List[En]): List[(String, Ty)] =
-  bindTuple2(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(scrutTy), env, ens)
+  if (pat == "()") env else if (!hasComma(Str.slice(pat, 1, Str.len(pat) - 1))) bindPat(Str.slice(pat, 1, Str.len(pat) - 1), scrutTy, env, ens) else bindTuple2(splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), Type.tupPartsStr(scrutTy), env, ens)
 
 def splitComma(s: String): List[String] =
   splitCommaAt(s, commaAt(s, 0))
@@ -2322,7 +2414,7 @@ def fieldTy2(dot: Int, core: String, ens: List[En]): String =
   if (dot < 0) caseFieldTy(ens, core, core) else caseFieldTy(ens, Str.slice(core, 0, dot), Str.slice(core, dot + 1, Str.len(core)))
 
 def caseFieldTy(ens: List[En], en: String, ctor: String): String =
-  if (List.isEmpty(ens)) "" else caseFieldTy1(List.at(ens, 0), List.tail(ens), en, ctor)
+  if (en == "Json") firstFieldTy(jsonPatternFields(Str.concat("Json.", ctor))) else if (List.isEmpty(ens)) "" else caseFieldTy1(List.at(ens, 0), List.tail(ens), en, ctor)
 
 def caseFieldTy1(h: En, rest: List[En], en: String, ctor: String): String =
   h match {
@@ -2973,7 +3065,7 @@ def checkProgTraits(o: Out, p: Prog, stems: List[String]): Out =
   if (hasErr(o)) o else checkProgImpls(checkImplHeaders(p.impls, p.traits, Parse.builtins(p.enums), p.aliases, aliasNames(p.aliases)), p, stems)
 
 def checkProgImpls(o: Out, p: Prog, stems: List[String]): Out =
-  if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(p.imps, implFuns(p.impls, p.defs)), p.aliases), Parse.builtins(p.enums), aliasNames(p.aliases), p.main, expandExpr(p.body, p.aliases), stems)
+  if (hasErr(o)) o else checkProgGo(expandDefs(withImportFuns(p.imps, implFuns(p.impls, p.defs)), p.aliases), Parse.builtins(expandEnums(p.enums, p.aliases)), aliasNames(p.aliases), p.main, expandExpr(p.body, p.aliases), stems)
 
 def aliasNames(aliases: List[Alias]): List[String] =
   if (List.isEmpty(aliases)) [] else aliasName(List.at(aliases, 0), List.tail(aliases))
@@ -3145,6 +3237,12 @@ def renameFun(d: Fun, alias: String): Fun =
   d match {
     case Fun(priv, ora, _, ts, ps, ret, body, mod, off) => Fun(priv, ora, alias, ts, ps, ret, body, mod, off)
   }
+
+def expandEnums(ens: List[En], als: List[Alias]): List[En] =
+  if (List.isEmpty(als)) ens else List.map(ens, en => expandEnum(en, List.filter(als, a => !List.contains(en.tparams, a.name))))
+
+def expandEnum(en: En, als: List[Alias]): En =
+  En(en.isRec, en.name, en.tparams, List.map(en.cases, c => EnCase(c.name, expandParams(c.fields, als))), en.mod)
 
 def expandDefs(defs: List[Fun], als: List[Alias]): List[Fun] =
   if (List.isEmpty(als)) defs else List.reverse(expandDefsGo(defs, als, []))

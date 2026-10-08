@@ -88,8 +88,9 @@ def noRefs(): List[Ref[Value]] =
 def loadProg(p: Prog, mainMod: String, files: List[(String, String)]): EvProg =
   p match {
     case Prog(_, enums, aliases, _, impls, imps, defs, _, body) => for {
+  ens = Parse.builtins(Check.expandEnums(enums, aliases))
   funs = Check.ftabOfList(Emit.withSelfFuns(Check.expandDefs(Check.withImportFuns(imps, Check.implFuns(impls, defs)), aliases)))
-} yield EvProg(funs, Parse.builtins(enums), Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(Parse.builtins(enums), Set.empty()), caseEnMap(Parse.builtins(enums), Map.empty()), Map.empty(), ctorFieldMap(Parse.builtins(enums), Parse.builtins(enums), Map.empty()), noRefs(), sigSlots(), noRefs(), noUi(), funIndex(funs.list, Map.empty()))
+} yield EvProg(funs, ens, Check.expandExpr(body, aliases), mainMod, files, Check.fileIndex(files), noRefs(), kitSet(Kits.names(), Set.empty()), Kits.paramCounts(), enNameSet(ens, Set.empty()), caseEnMap(ens, Map.empty()), Map.empty(), ctorFieldMap(ens, ens, Map.empty()), noRefs(), sigSlots(), noRefs(), noUi(), funIndex(funs.list, Map.empty()))
   }
 
 def funIndex(ds: List[Fun], acc: Map[String, Map[String, List[Fun]]]): Map[String, Map[String, List[Fun]]] =
@@ -1154,7 +1155,7 @@ def matchGuardVal(v: Value, gv: Value, benv: EvEnv, body: Expr, rest: List[Arm],
   }
 
 def tryPat(pat: String, v: Value, p: EvProg): Option[List[(String, Value)]] =
-  if (pat == "_") Some(noVars()) else if (pat == "[]") tryNil(v) else if (Emit.isIntPat(pat)) tryLit(valEq(v, Value.VInt(Str.toInt(pat, 0)))) else if (Emit.isBoolPat(pat)) tryLit(valEq(v, Value.VBool(pat == "true"))) else tryPatScan(pat, v, p)
+  if (pat == "_") Some(noVars()) else if (pat == "()") tryLit(isUnit(v)) else if (pat == "[]") tryNil(v) else if (Emit.isIntPat(pat)) tryLit(valEq(v, Value.VInt(Str.toInt(pat, 0)))) else if (Emit.isBoolPat(pat)) tryLit(valEq(v, Value.VBool(pat == "true"))) else tryPatScan(pat, v, p)
 
 def tryPatScan(pat: String, v: Value, p: EvProg): Option[List[(String, Value)]] =
   if (Parse.patternAlternativeAt(pat, 0, 0) >= 0) tryOr(pat, Parse.patternAlternativeAt(pat, 0, 0), v, p) else if (Check.asAt(pat, 0) >= 0) tryAs(pat, Check.asAt(pat, 0), v, p) else if (Check.consAt(pat, 0) >= 0) tryCons(pat, Check.consAt(pat, 0), v, p) else if (Emit.isStrPat(pat)) tryLit(valEq(v, Value.VStr(Emit.unquote(pat)))) else if (Check.isTuplePat(pat)) tryTuple(Check.splitComma(Str.slice(pat, 1, Str.len(pat) - 1)), v, p) else if (Check.patBind(pat) == "") tryBare(pat, v, p) else tryTag(Check.patCore(pat), v, p, Check.splitComma(Check.patBind(pat)))

@@ -60,9 +60,9 @@ def body(seed: Int): String =
 
 """))
     code = family(seed) match {
-  case 0 => "enum Packet:\n  case Wrap(value: Option[(Int, String)], skip: List[Int])\n  case Empty\n\ndef f(x: Int): String =\n  Packet.Wrap(Some((calculate(x), \"match\")), [x, x + 1]) match {\n    case Packet.Wrap(Some((n, label)), _) => s\"$label:$n\"\n    case _ => \"empty\"\n  }\n"
+  case 0 => "enum Packet:\n  case Wrap(value: Option[(Int, String)], skip: List[Int], unit: Unit)\n  case Empty\n\ndef f(x: Int): String =\n  Packet.Wrap(Some((calculate(x), \"match\")), [x, x + 1], ()) match {\n    case Packet.Wrap(Some((n, label)), _, (())) => s\"$label:$n\"\n    case _ => \"empty\"\n  }\n"
   case 1 => "def f(x: Int): String =\n  (x < 0) match {\n    case true => for {\n      n = calculate(x)\n      label = \"closure\"\n      add = (offset: Int) => s\"$label:${n + offset}\"\n      alias = add\n    } yield alias(3)\n    case false => for {\n      n = calculate(x)\n      label = \"closure\"\n      add = (offset: Int) => s\"$label:${n + offset}\"\n    } yield add(3)\n  }\n"
-  case 2 => "record Box[T](marker: Int, label: String, value: T)\n\ndef wrap[T](value: T): Box[T] =\n  Box(1, \"extra\", value)\n\ndef f(x: Int): String =\n  for {\n    box = wrap([s\"box:${calculate(x)}\", \"tail\"])\n    head :: tail = box.value\n    (text, size) = (head, List.len(tail))\n  } yield s\"$text:${size * box.marker}\"\n"
+  case 2 => "type BoxMarker = Int\ntype BoxLabel = String\nrecord Box[T](marker: BoxMarker, label: BoxLabel, value: T)\n\ndef wrap[T](value: T): Box[T] =\n  Box(1, \"extra\", value)\n\ndef f(x: Int): String =\n  for {\n    box = wrap([s\"box:${calculate(x)}\", \"tail\"])\n    head :: tail = box.value\n    (text, size) = (head, List.len(tail))\n  } yield s\"$text:${size * box.marker}\"\n"
   case 3 => "def pair(x: Int): (List[Int], String) =\n  (List.map([calculate(x), calculate(x) + 1], n => n), \"heap\")\n\ndef f(x: Int): String =\n  s\"${pair(x)._2}:${List.at(pair(x)._1, 0)}:${List.at(pair(x)._1, 1)}\"\n"
   case 4 => "def sum(values: List[Int]): Int =\n  values match {\n    case head :: tail => head + sum(tail)\n    case [] => 0\n  }\n\ndef f(x: Int): String =\n  for {\n    n = calculate(x)\n    values = List.map([n, n + 1, n + 2], item => item)\n  } yield s\"list:${sum(values)}\"\n"
   case _ => "def f(x: Int): String =\n  s\"io:${calculate(x)}\"\n"
@@ -116,6 +116,43 @@ def evaluated(seed: Int): Bool =
     program = Eval.load([("Main", source(seed))])
     got = Eval.show(Eval.callPure(program, "Main", "f", [Value.VInt(input(seed))]))
   } yield checked(seed) && got == Eval.show(Value.VStr(result(seed)))
+
+def coveragePair(i: Int): String =
+  Str.concat(if (i / 2 == 0) "false" else "true", Str.concat(", ", if (i % 2 == 0) "false" else "true"))
+
+def coveragePattern(kind: Int, i: Int): String =
+  if (kind == 0) Str.concat("(", Str.concat(coveragePair(i), ")")) else if (kind == 1) Str.concat("Some((", Str.concat(coveragePair(i), "))")) else if (kind == 2) Str.concat("Flags.Bits(", Str.concat(coveragePair(i), ")")) else Str.concat("Result.Ok((", Str.concat(coveragePair(i), "))"))
+
+def coverageArms(mask: Int, kind: Int, guarded: Bool, i: Int): String =
+  if (i == 4) "" else Str.concat(if (mask % 2 == 0) "" else Str.concat("    case ", Str.concat(coveragePattern(kind, i), Str.concat(if (guarded) " if true" else "", Str.concat(" => ", Str.concat(Str.fromInt(i), """
+"""))))), coverageArms(mask / 2, kind, guarded, i + 1))
+
+def coverageSource(seed: Int): String =
+  for {
+    kind = seed / 16 % 4
+    ty = if (kind == 0) "(Bool, Bool)" else if (kind == 1) "Option[(Bool, Bool)]" else if (kind == 2) "Flags" else "Result[String, (Bool, Bool)]"
+    prefix = if (kind == 2) """enum Flags:
+  case Bits(a: Bool, b: Bool)
+  case Empty
+
+""" else ""
+    extra = if (kind == 0) "" else if (kind == 1) """    case None => 4
+""" else if (kind == 2) """    case Flags.Empty => 4
+""" else """    case Result.Err(_) => 4
+"""
+  } yield Str.concat(prefix, Str.concat("def select(value: ", Str.concat(ty, Str.concat("""): Int =
+  value match {
+""", Str.concat(coverageArms(seed % 16, kind, seed / 64 % 2 == 1, 0), Str.concat(extra, """  }
+
+@main def main: IO[Unit] =
+  IO.pure(())
+"""))))))
+
+def coverageChecked(seed: Int): Bool =
+  for {
+    result = Check.check(coverageSource(seed))
+    complete = seed % 16 == 15 && seed / 64 % 2 == 0
+  } yield if (complete) result == "[]" else Str.contains(result, if (seed % 16 == 0 && seed / 16 % 4 == 0) "match has no arms" else "non-exhaustive match on")
 
 def caseSeeds(): List[Int] =
   List.flatMap([0, 102, 204], level => List.flatMap([0, 48, 96], arg => List.map([0, 1, 2, 3, 4, 5], kind => level + arg + kind)))

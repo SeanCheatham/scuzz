@@ -1102,6 +1102,7 @@ def unpackProof(): IO[Unit] =
     Opt.Some(m) = got
     xs = List.map([Opt.Some(1), Opt.Some(2)], __p => __p match {
   case Opt.Some(k) => k
+  case Opt.None => 0
 })
     _ <- IO.println(s"unpack:${Str.fromInt(x + y)}")
     _ <- IO.println(s"unpackSome:${Str.fromInt(n)}")

@@ -4,11 +4,13 @@ Open work and implementation order. Design locks: [`philosophy.md`](philosophy.m
 
 Edit this file when the order changes. Remove completed work. Keep only the next slice in `plans.md`.
 
-## First: complete the decision loop
+## First: language and verification guarantees
 
-Implement local choice feedback and the session summary in gate 5. Then add rule review and prove the complete session. Use one small application and one objective to assess the developer path. Measure useful results and time spent on review. Compiler idle costs do not block this order.
+Improve the ability to write correct applications before local choice feedback. First give module declarations separate type identities. Then make excluded verification workloads explicit. Keep production input validation separate from verification assumptions. Use small reference models to check application state and effects.
 
-Correct compiler errors that block a valid application or a required proof. Preserve exact timeline and claim comparisons for selected compiler and editor workloads. Keep probe deadlines, claims, corpus entries, and search scope. A compiled fallback does not prove evaluator parity. Resume cost work when a required application workload exceeds its deadline or measured review latency prevents use. Keep compiler idle costs and module type identity open in `gaps.md`.
+Keep one compiler, one verification command, and the existing simulation runtime. Preserve exact evaluator and native replay. Keep probe deadlines, claims, corpus entries, and search scope. General compiler speed work follows only from a demonstrated application or proof blocker.
+
+After these guarantees, resume the decision loop gates below. Keep useful generation and human review results unproven until a real application session measures them.
 
 ## Primary arc: development through decisions
 
