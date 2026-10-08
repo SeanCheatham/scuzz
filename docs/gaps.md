@@ -12,6 +12,8 @@ Remove closed gaps. Keep current measurements and their limits. Do not keep a hi
 
 **Proof.** Complete the session gates in `vision.md`. Run a human session on one small app and one objective. Measure retained acceptances per review minute, abstention reasons, Undo, and readiness latency. Record workload scope and the generator used. Controlled generator output proves the transport, not usefulness. Automated choices do not count as human evidence.
 
+**Priority.** Complete local choice feedback and the session summary first. Then add rule review and prove the complete session. General compiler idle cost work does not block these steps. Correct a compiler error or cost when it blocks a required application workload or proof.
+
 ### 2. Review latency and evaluator parity
 
 **Unproven.** Full corpus replay plus bounded search fits a frequent decision loop. Evaluator timelines remain equal to compiled timelines on new generated proposals. Index-based state alignment remains clear when a proposal adds or removes steps.

@@ -4,11 +4,11 @@ Open work and implementation order. Design locks: [`philosophy.md`](philosophy.m
 
 Edit this file when the order changes. Remove completed work. Keep only the next slice in `plans.md`.
 
-## First: evaluator reliability and parity
+## First: complete the decision loop
 
-Reduce the remaining compiler evaluator costs before local choice feedback. Measure server startup and probe execution separately. Preserve exact timeline and claim comparisons for selected compiler and editor workloads. Keep probe deadlines, claims, corpus entries, and search scope. A compiled fallback does not prove evaluator parity.
+Implement local choice feedback and the session summary in gate 5. Then add rule review and prove the complete session. Use one small application and one objective to assess the developer path. Measure useful results and time spent on review. Compiler idle costs do not block this order.
 
-Correct compiler errors that block a valid program or a required proof. Measure record field reads, coverage-key construction, value allocation, and release in compiler idle probes. Use fixed sources to compare each change. Correct the largest demonstrated cost first.
+Correct compiler errors that block a valid application or a required proof. Preserve exact timeline and claim comparisons for selected compiler and editor workloads. Keep probe deadlines, claims, corpus entries, and search scope. A compiled fallback does not prove evaluator parity. Resume cost work when a required application workload exceeds its deadline or measured review latency prevents use. Keep compiler idle costs and module type identity open in `gaps.md`.
 
 ## Primary arc: development through decisions
 
