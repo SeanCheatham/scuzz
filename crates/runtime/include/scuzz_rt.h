@@ -1185,6 +1185,7 @@ void sz_property_stash_a11y(const char *dump);
 int64_t sz_property_a11y_has(SzString *needle);
 SzIo *sz_property_assert(SzString *name, int64_t ok);
 void sz_property_check(SzString *name, int64_t ok);
+void sz_property_assume(SzString *name, int64_t ok);
 void sz_property_sometimes(SzString *name);
 void sz_property_sometimes_flush(void);
 void sz_timeline_varied_flush(void);

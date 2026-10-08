@@ -44,6 +44,189 @@ assert any(line.startswith(f"scuzz fuzz {status} ({summary['fuzz']['search']} se
 PY_CHECK
 }
 
+# Excluded inputs have separate results on both engines.
+python3 - <<'PY_SCOPE'
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+
+def command(args, env=None, ok=True):
+    result = subprocess.run([str(cli), *map(str, args)], env=env, capture_output=True, text=True, timeout=180)
+    assert (result.returncode == 0) == ok, (args, result.stdout[-4000:], result.stderr[-4000:])
+    return result
+
+with tempfile.TemporaryDirectory(prefix='scuzz-scope-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'corpus').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname = "scope"\n\n[fuzz]\nscore_floor = 0\n')
+    source = '''def accepts(n: Int): Bool =
+  guarded(Property.assume("nonnegative input", n >= 0), n)
+
+def guarded(_u: Unit, n: Int): Bool =
+  n >= 0
+
+@main def main: IO[Unit] =
+  IO.pure(())
+'''
+    main = root / 'src/Main.scuzz'
+    main.write_text(source)
+    verify = root / 'input.scuzz_verify'
+    verify.write_text('''oracle check(n: Int): Bool =
+  Main.accepts(n)
+
+def history(t: Timeline): Verdict =
+  Verdict.every(t, i => i >= 0)
+''')
+    command(['fmt', root])
+
+    def campaign(iterations, engine=None, ok=True, extra=()):
+        env = dict(os.environ)
+        env.pop('SCUZZ_FUZZ_ENGINE', None)
+        if engine:
+            env['SCUZZ_FUZZ_ENGINE'] = engine
+        result = command(['fuzz', '--iterations', iterations, '--seed', 41, *extra, root], env, ok)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        scope = report['scope']
+        for required, key in ((True, 'required'), (False, 'search')):
+            rows = [row for row in scope['workloads'] if row['required'] == required]
+            for status in ('passed', 'failed', 'excluded'):
+                assert scope[key][status] == sum(row['status'] == status for row in rows), scope
+            if required:
+                assert len(rows) + scope[key]['unrun'] == scope[key]['planned']
+        assert len([row for row in scope['workloads'] if not row['required']]) == report['fuzz']['search']
+        assert scope['search']['failed'] == report['fuzz']['search_failures']
+        assert 'scope: required ' in result.stdout
+        return report
+
+    # Both engines identify the same excluded search inputs.
+    reports = [campaign(16, engine) for engine in (None, 'compiled')]
+    for report in reports:
+        scope = report['scope']
+        assert scope['required']['excluded'] == 0
+        assert scope['search']['excluded'] > 0, scope
+        assert scope['search']['passed'] > 0, scope
+        assert scope['search']['failed'] == 0
+        assert scope['claims']['declared'] == ['history'], scope
+        assert scope['claims']['reached'] == ['history'], scope
+        assert scope['inputs'] == ['check i'], scope
+        excluded = [row for row in scope['workloads'] if row['status'] == 'excluded']
+        assert all(row['reason'] == 'nonnegative input' and 'drive check' in row['script'] for row in excluded)
+        assert report['mutate']['killed'] + report['mutate']['survived'] + report['mutate']['inert'] + report['mutate']['invalid'] + report['mutate']['excluded'] == report['mutate']['ran']
+    assert any(report['scope']['mutant_excluded'] for report in reports), reports
+    for report in reports:
+        mut = report['mutate']
+        assert mut['excluded'] == len(report['scope']['mutant_excluded'])
+        count = mut['ran'] - mut['invalid'] - mut['inert']
+        if count > 0:
+            assert abs(mut['score'] - mut['killed'] / count) < 0.001, mut
+    manifest = root / 'scuzz.toml'
+    saved_manifest = manifest.read_text()
+    manifest.write_text(saved_manifest.replace('score_floor = 0', 'score_floor = 1'))
+    strict = campaign(16, 'compiled', ok=False)
+    assert strict['mutate']['excluded'] > 0 and strict['mutate']['score'] < 1, strict
+    manifest.write_text(saved_manifest)
+
+    assert {row['engine'] for row in reports[0]['scope']['workloads'] if not row['required']} == {'evaluator'}
+    assert {row['engine'] for row in reports[1]['scope']['workloads']} == {'compiled'}
+    assert [(row['script'], row['status']) for row in reports[0]['scope']['workloads']] == [(row['script'], row['status']) for row in reports[1]['scope']['workloads']]
+
+    # A corpus exclusion blocks the campaign. Later entries stay unrun.
+    rejected = root / 'corpus/00-excluded.toml'
+    rejected.write_text('[fuzz]\nevents = ["drive check -1"]\n')
+    (root / 'corpus/01-pass.toml').write_text('[fuzz]\nevents = ["drive check 1"]\n')
+    report = campaign(0, ok=False)
+    assert report['scope']['required']['excluded'] == 1, report
+    assert report['scope']['required']['unrun'] > 0, report
+    assert report['corpus']['failures'] == 0, report
+    report = campaign(8, ok=False, extra=['--no-fail-fast'])
+    assert report['scope']['required']['excluded'] == 1
+    assert report['fuzz']['search'] == 5
+    assert report['fuzz']['ok'] is False
+    command(['fuzz', '--replay', rejected, root], ok=False)
+    for path in (root / 'corpus').iterdir():
+        path.unlink()
+
+    # Required seeds and idle probes cannot pass through an assumption.
+    main.write_text(source.replace('n >= 0), n)', 'n > 0), n)'))
+    command(['fmt', root])
+    report = campaign(0, ok=False)
+    assert report['scope']['required']['excluded'] == 1
+    assert report['scope']['search']['excluded'] == 0
+    main.write_text(source.replace('IO.pure(())', 'IO.println(Str.fromBool(accepts(-1)))'))
+    command(['fmt', root])
+    report = campaign(0, ok=False)
+    assert report['scope']['workloads'][0]['label'] == 'idle', report
+    assert report['scope']['workloads'][0]['status'] == 'excluded', report
+    assert report['scope']['claims']['reached'] == [], report
+    assert report['scope']['claims']['never'] == ['history'], report
+
+    # The assumption does not validate live input on either engine.
+    for action in ('run', 'eval'):
+        result = command([action, root])
+        assert 'false' in result.stdout, result
+
+    # Empty and unsupported generator bounds fail the source check.
+    saved_verify = verify.read_text()
+    for bounds in ('n > 4 && n < 3', 'n == 1 && n == 2', 'n > 9223372036854775807', 'n + 1 > n'):
+        verify.write_text('oracle check(n: Int where ' + bounds + '): Bool =\n  Main.accepts(n)\n')
+        command(['fmt', root])
+        result = command(['check', root], ok=False)
+        assert 'generator-friendly' in result.stdout + result.stderr, result
+    verify.write_text(saved_verify)
+
+    # Assertions remain failures. An excluded shrink cannot replace one.
+    main.write_text(source.replace('  n >= 0\n\n@main', '  n == 0\n\n@main'))
+    command(['fmt', root])
+    report = campaign(16, ok=False)
+    assert report['scope']['search']['failed'] == 1, report
+    repro = Path(report['fuzz']['repro'])
+    result = command(['fuzz', '--replay', repro, root], ok=False)
+    assert 'reproduced a failure' in result.stdout
+    assert 'excluded input' not in result.stderr
+    main.write_text(source.replace('Property.assume("nonnegative input", n >= 0)', 'Property.check("nonnegative input", n >= 0, ())'))
+    command(['fmt', root])
+    rejected.write_text('[fuzz]\nevents = ["drive check -1"]\n')
+    report = campaign(0, ok=False)
+    assert report['scope']['required']['failed'] == 1, report
+    assert report['scope']['required']['excluded'] == 0, report
+
+    # Headless UI search also separates assumptions from claim failures.
+    for path in (root / 'corpus').iterdir():
+        path.unlink()
+    (root / 'scuzz.toml').write_text('[package]\nname = "scope"\n\n[ui]\ndefault_runtime = "headless"\n\n[fuzz]\nscore_floor = 0\n')
+    main.write_text('''record CountA(value: Int)
+
+record CountB(value: Int)
+
+@main def main: IO[Unit] =
+  for {
+    count = Signal.make(CountB(0))
+    _ <- Ui.run(_ => View.button("Step", _ => for {
+  _ = Property.assume("one step per input", Signal.get(count).value == 0)
+  _ = Signal.set(count, CountB(Signal.get(count).value + 1))
+} yield ()))
+  } yield ()
+''')
+    verify.write_text('''def history(t: Timeline): Verdict =
+  Verdict.alwaysHas(t, "button:Step")
+''')
+    command(['fmt', root])
+    ui_reports = [campaign(8, engine) for engine in (None, 'compiled')]
+    for report in ui_reports:
+        assert report['scope']['search']['excluded'] > 0, report
+        assert report['scope']['claims']['reached'] == ['history'], report
+        assert all(row['reason'] == 'one step per input' for row in report['scope']['workloads'] if row['status'] == 'excluded')
+    assert {row['engine'] for row in ui_reports[0]['scope']['workloads'] if not row['required']} == {'evaluator'}
+    assert [(row['script'], row['status']) for row in ui_reports[0]['scope']['workloads']] == [(row['script'], row['status']) for row in ui_reports[1]['scope']['workloads']]
+
+print('Verification scope: search, corpus, seed, idle, Headless UI, live erasure, and failure replay pass')
+PY_SCOPE
+
 # Failed corpus entries and search iterations have separate counts.
 search_counts_dir="$(mktemp -d "${TMPDIR:-/tmp}/scuzz-search-counts.XXXXXX")"
 mkdir -p "$search_counts_dir/src" "$search_counts_dir/corpus"
@@ -821,9 +1004,10 @@ check_match_require '==' 0
 check_match_require '!=' 1
 rm -rf "$match_require_dir"
 
-# Both engines write the same summary. The default run is the evaluator; it
-# must not fall back to compiled probes. SCUZZ_FUZZ_ENGINE=compiled is the
-# control.
+# Both engines give the same campaign results and required inputs.
+# Evaluator feedback can select different search scripts.
+# Reports keep engine names, scripts, and recorded scheduler picks.
+# The default run must use the evaluator.
 fuzz_both_engines() {
   local dir="$1" iterations="$2" name="$3"
   fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-summary.log"
@@ -832,9 +1016,20 @@ fuzz_both_engines() {
   fi
   cp "$dir/build/fuzz/summary.json" "/tmp/scuzz-$name-ev.json"
   SCUZZ_FUZZ_ENGINE=compiled fuzz --iterations "$iterations" "$dir" | tee "/tmp/scuzz-$name-compiled.log"
-  if ! diff "/tmp/scuzz-$name-ev.json" "$dir/build/fuzz/summary.json"; then
-    echo "$dir: evaluator and compiled summaries differ" && exit 1
-  fi
+  python3 - "/tmp/scuzz-$name-ev.json" "$dir/build/fuzz/summary.json" <<'PY_ENGINE'
+import json, sys
+from pathlib import Path
+ev, compiled = [json.loads(Path(path).read_text()) for path in sys.argv[1:]]
+for report, engine in ((ev, "evaluator"), (compiled, "compiled")):
+    rows = report["scope"]["workloads"]
+    assert all(row["engine"] == ("compiled" if row["required"] else engine) for row in rows)
+    for row in rows:
+        row.pop("engine")
+        row.pop("schedule_picks")
+        if not row["required"]:
+            row.pop("script")
+assert ev == compiled, "evaluator and compiled results or required inputs differ"
+PY_ENGINE
 }
 
 fuzz_both_engines examples/webhook 160 webhook

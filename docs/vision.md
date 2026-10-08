@@ -6,7 +6,7 @@ Edit this file when the order changes. Remove completed work. Keep only the next
 
 ## First: language and verification guarantees
 
-Improve the ability to write correct applications before local choice feedback. Make excluded verification workloads explicit. Report reached claims and the checked input scope. An excluded workload does not count as a passing workload. Keep production input validation separate from verification assumptions. Use small reference models to check application state and effects.
+Improve the ability to write correct applications before local choice feedback. Give app authors explicit success and failure values for external input parsing and validation. Keep this validation active in live applications. Verification assumptions do not validate live input. Then use small reference models to check application state and effects.
 
 Keep one compiler, one verification command, and the existing simulation runtime. Preserve exact evaluator and native replay. Keep probe deadlines, claims, corpus entries, and search scope. General compiler speed work follows only from a demonstrated application or proof blocker.
 
