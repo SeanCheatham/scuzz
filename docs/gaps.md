@@ -66,7 +66,6 @@ There is no explicit claim suggestion or installation path from a preference. A 
 
 ### Verification scope and application correctness
 
-- **Excluded workloads.** A failed verification assumption can remove an input from the checked scope. Reports must identify excluded workloads and give their reasons. Keep excluded, failed, and passing workloads separate. Show claim reach and the checked input scope. An exclusion must not hide a failed required workload.
 - **Production validation.** Verification assumptions do not validate live input. Give app authors a clear path to parse and validate external data with explicit success and failure values. Keep live validation in the app.
 - **Application models.** Use a small reference model to check state changes and effect results. Add examples that check failure paths and recovery. Finite model checks do not prove every input correct.
 

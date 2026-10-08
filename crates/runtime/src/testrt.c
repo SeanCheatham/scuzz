@@ -2977,6 +2977,32 @@ SzIo *sz_property_assert(SzString *name, int64_t ok) {
   return sz_io_fail_cstr(buf);
 }
 
+/* An assumption ends this input. It cannot recover as an IO error. */
+void sz_property_assume(SzString *name, int64_t ok) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  const char *path;
+  const char *reason;
+  FILE *f;
+  if (!tr || tr[0] != '1' || ok)
+    return;
+  reason = name ? sz_string_cstr(name) : "unnamed assumption";
+  if (!reason[0])
+    reason = "unnamed assumption";
+  path = getenv("SCUZZ_EXCLUSION_DUMP");
+  if (path && path[0]) {
+    f = fopen(path, "w");
+    if (!f)
+      sz_panic("cannot write exclusion reason");
+    if (fwrite(reason, 1, strlen(reason), f) != strlen(reason))
+      sz_panic("cannot write exclusion reason");
+    if (fclose(f) != 0)
+      sz_panic("cannot write exclusion reason");
+  }
+  fprintf(stderr, "scuzz: excluded input: %s\n", reason);
+  fflush(stderr);
+  _exit(77);
+}
+
 void sz_property_check(SzString *name, int64_t ok) {
   const char *tr = getenv("SCUZZ_TESTRT");
   char buf[256];
@@ -5283,6 +5309,14 @@ void sz_property_session_end(void) {
       continue;
     v = g_verify[i].fn ? g_verify[i].fn(&frozen)
                        : g_verify[i].cfn(&frozen, g_verify[i].env);
+    {
+      const char *path = getenv("SCUZZ_CLAIM_DUMP");
+      FILE *f = path && path[0] ? fopen(path, "a") : NULL;
+      if (f) {
+        fprintf(f, "checked\t%s\n", g_verify[i].name);
+        fclose(f);
+      }
+    }
     if (!v || v->valid)
       continue;
     claim_fail_verdict(g_verify[i].name, v);

@@ -2340,7 +2340,7 @@ def seqUnit(_u: Unit): Value =
   Value.VUnit
 
 def propKit(f: String, vals: List[Value], env: EvEnv, p: EvProg, off: Int): Value =
-  if (Str.startsWith(f, "Property.signal") || f == "Property.a11yHas") propLive(f, vals, p) else if (f == "Property.sometimes") seqUnit(Property.sometimes(strAt(vals, 0))) else if (f == "Property.check") propCheck(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Property.assert") Value.VIo(unitIo(Property.assert(strAt(vals, 0), boolOf(List.at(vals, 1))))) else if (f == "Property.classify") Value.VBool(Property.classify(strAt(vals, 0), boolOf(List.at(vals, 1)))) else if (f == "Property.force") propForce(List.at(vals, 0), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
+  if (Str.startsWith(f, "Property.signal") || f == "Property.a11yHas") propLive(f, vals, p) else if (f == "Property.sometimes") seqUnit(Property.sometimes(strAt(vals, 0))) else if (f == "Property.check") propCheck(strAt(vals, 0), List.at(vals, 1), List.at(vals, 2), env, p, off) else if (f == "Property.assume") seqUnit(Property.assume(strAt(vals, 0), boolOf(List.at(vals, 1)))) else if (f == "Property.assert") Value.VIo(unitIo(Property.assert(strAt(vals, 0), boolOf(List.at(vals, 1))))) else if (f == "Property.classify") Value.VBool(Property.classify(strAt(vals, 0), boolOf(List.at(vals, 1)))) else if (f == "Property.force") propForce(List.at(vals, 0), env, p, off) else unsupported(Str.concat("kit ", f), env, p, off)
 
 def propLive(f: String, vals: List[Value], p: EvProg): Value =
   if (f == "Property.a11yHas") Value.VBool(Property.a11yHas(strAt(vals, 0))) else if (strAt(vals, 0) == "") propNative(f, vals) else propNamed(f, vals, p)
@@ -2582,11 +2582,14 @@ def sigTagText(ens: List[En]): String =
 """))
 
 def sigTagsGo(ens: List[En], acc: String): String =
-  if (List.isEmpty(ens)) acc else sigTagsEn(ens, List.at(ens, 0), List.tail(ens), acc)
+  sigTagsRest(ens, ens, acc)
+
+def sigTagsRest(all: List[En], ens: List[En], acc: String): String =
+  if (List.isEmpty(ens)) acc else sigTagsEn(all, List.at(ens, 0), List.tail(ens), acc)
 
 def sigTagsEn(all: List[En], en: En, rest: List[En], acc: String): String =
   en match {
-    case En(_, name, _, cases) => sigTagsGo(rest, sigTagsCases(all, name, cases, acc))
+    case En(_, name, _, cases) => sigTagsRest(all, rest, sigTagsCases(all, name, cases, acc))
   }
 
 def sigTagsCases(all: List[En], en: String, cases: List[EnCase], acc: String): String =

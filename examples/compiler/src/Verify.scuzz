@@ -1,3 +1,7 @@
+record Workload(label: String, required: Bool, script: String, schedule: String, fault: String, picks: List[String], engine: String, status: String, reason: String)
+
+record InputScope(planned: Int, workloads: List[Workload], mutantExcluded: List[Int], inputs: List[String], claims: List[String], checkedClaims: List[String])
+
 record Breadth(varied: List[String], signalInt: List[String], signalListLen: List[String], signalStrHas: List[String], a11yHas: List[String], lastHitHas: List[String], driveHas: List[String], effectHas: List[String], fileTextIs: List[String], fileSame: List[String], unclaimed: List[String])
 
 record IBound(lo: Int, hi: Int, onLo: Bool, onHi: Bool, eq: Int, onEq: Bool, ok: Bool)
@@ -475,8 +479,8 @@ def reproFault(fault: String): String =
 def jb(b: Bool): String =
   if (b) "true" else "false"
 
-def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth): String =
-  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), "}"))))))))))
+def summaryJson(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, corpFail: Int, promo: String, repro: String, killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, classRaw: String, invalid: Int, covRows: List[(String, Bool)], branchRows: List[(String, Bool)], somDec: List[String], somHit: List[String], trigDec: List[String], trigHit: List[String], claimDec: List[String], claimHit: List[String], br: Breadth, scope: InputScope): String =
+  Str.concat("{\"v\":1,\"kind\":\"fuzz\",\"fuzz\":", Str.concat(jFuzz(ok, seed, iterations, search, failures, corpus, repro), Str.concat(jCorpus(corpus, corpFail, promo), Str.concat(jClass(List.filter(linesOf(classRaw), l => l != "")), Str.concat(jMut(killed, survived, inert, ran, sites, oracles, invalid - List.len(scope.mutantExcluded), List.len(scope.mutantExcluded)), Str.concat(jCoverage(covRows, branchRows), Str.concat(jReachKey("sometimes", somDec, somHit), Str.concat(jReachKey("triggers", trigDec, trigHit), Str.concat(jReachKey("claim_drives", claimDec, claimHit), Str.concat(jBreadth(br), Str.concat(jScope(scope), "}")))))))))))
 
 def jFuzz(ok: Bool, seed: Int, iterations: Int, search: Int, failures: Int, corpus: Int, repro: String): String =
   Str.concat("{\"ok\":", Str.concat(jb(ok), Str.concat(",\"seed\":", Str.concat(Str.fromInt(seed), Str.concat(",\"iterations\":", Str.concat(Str.fromInt(iterations), Str.concat(",\"search\":", Str.concat(Str.fromInt(search), Str.concat(",\"search_failures\":", Str.concat(Str.fromInt(failures), Str.concat(",\"corpus\":", Str.concat(Str.fromInt(corpus), Str.concat(jRepro(repro), "}")))))))))))))
@@ -496,8 +500,8 @@ def jClassRest(lines: List[String]): String =
 def jClassOne(line: String): String =
   Str.concat("{\"name\":", Str.concat(Check.jsonStr(className(line)), Str.concat(",\"true\":", Str.concat(classYes(classNums(line)), Str.concat(",\"false\":", Str.concat(classNo(classNums(line)), "}"))))))
 
-def jMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int): String =
-  Str.concat(",\"mutate\":{\"killed\":", Str.concat(Str.fromInt(killed), Str.concat(",\"survived\":", Str.concat(Str.fromInt(survived), Str.concat(",\"inert\":", Str.concat(Str.fromInt(inert), Str.concat(",\"ran\":", Str.concat(Str.fromInt(ran), Str.concat(",\"sites\":", Str.concat(Str.fromInt(sites), Str.concat(",\"oracles\":", Str.concat(jb(oracles), Str.concat(",\"invalid\":", Str.concat(Str.fromInt(invalid), Str.concat(jScore(killed, ran - invalid - inert), "}")))))))))))))))
+def jMut(killed: Int, survived: Int, inert: Int, ran: Int, sites: Int, oracles: Bool, invalid: Int, excluded: Int): String =
+  Str.concat(",\"mutate\":{\"killed\":", Str.concat(Str.fromInt(killed), Str.concat(",\"survived\":", Str.concat(Str.fromInt(survived), Str.concat(",\"inert\":", Str.concat(Str.fromInt(inert), Str.concat(",\"ran\":", Str.concat(Str.fromInt(ran), Str.concat(",\"sites\":", Str.concat(Str.fromInt(sites), Str.concat(",\"oracles\":", Str.concat(jb(oracles), Str.concat(",\"invalid\":", Str.concat(Str.fromInt(invalid), Str.concat(Str.concat(",\"excluded\":", Str.fromInt(excluded)), Str.concat(jScore(killed, ran - invalid - inert), "}"))))))))))))))))
 
 def jScore(killed: Int, sites: Int): String =
   if (sites <= 0) "" else Str.concat(",\"score\":", score3(killed, sites))
@@ -2070,7 +2074,10 @@ def conjunctsBound(name: String, cs: List[Expr]): IBound =
   if (List.isEmpty(cs)) noBound() else boundMerge(conjunctBound(name, List.at(cs, 0)), conjunctsBound(name, List.tail(cs)))
 
 def boundMerge(a: IBound, b: IBound): IBound =
-  if (!a.ok || !b.ok) badBound() else IBound(if (a.onLo && b.onLo) maxInt(a.lo, b.lo) else if (a.onLo) a.lo else b.lo, if (a.onHi && b.onHi) minInt(a.hi, b.hi) else if (a.onHi) a.hi else b.hi, a.onLo || b.onLo, a.onHi || b.onHi, if (a.onEq) a.eq else b.eq, a.onEq || b.onEq, true)
+  if (!a.ok || !b.ok) badBound() else validBound(IBound(if (a.onLo && b.onLo) maxInt(a.lo, b.lo) else if (a.onLo) a.lo else b.lo, if (a.onHi && b.onHi) minInt(a.hi, b.hi) else if (a.onHi) a.hi else b.hi, a.onLo || b.onLo, a.onHi || b.onHi, if (a.onEq) a.eq else b.eq, a.onEq || b.onEq, true))
+
+def validBound(b: IBound): IBound =
+  if (b.onLo && b.onHi && b.lo > b.hi || b.onEq && (b.onLo && b.eq < b.lo || b.onHi && b.eq > b.hi)) badBound() else b
 
 def conjunctBound(name: String, e: Expr): IBound =
   e match {
@@ -2107,7 +2114,7 @@ def flipOp(op: String): String =
   if (op == "<") ">" else if (op == ">") "<" else if (op == "<=") ">=" else if (op == ">=") "<=" else op
 
 def boundOp(op: String, k: Int): IBound =
-  if (op == ">=") IBound(k, 0, true, false, 0, false, true) else if (op == ">") IBound(satAdd(k, 1), 0, true, false, 0, false, true) else if (op == "<=") IBound(0, k, false, true, 0, false, true) else if (op == "<") IBound(0, satAdd(k, 0 - 1), false, true, 0, false, true) else if (op == "==") IBound(k, k, true, true, k, true, true) else badBound()
+  if (op == ">=") IBound(k, 0, true, false, 0, false, true) else if (op == ">" && k == maxI64() || op == "<" && k == minI64()) badBound() else if (op == ">") IBound(satAdd(k, 1), 0, true, false, 0, false, true) else if (op == "<=") IBound(0, k, false, true, 0, false, true) else if (op == "<") IBound(0, satAdd(k, 0 - 1), false, true, 0, false, true) else if (op == "==") IBound(k, k, true, true, k, true, true) else badBound()
 
 def clampBound(v: Int, b: IBound): Int =
   if (b.onEq) b.eq else if (b.onLo && v < b.lo) b.lo else if (b.onHi && v > b.hi) b.hi else v
@@ -2219,4 +2226,28 @@ def generationCase(c: EnCase, rest: List[EnCase], ens: List[En], depth: Int): Li
 
 def generationParam(p: Param, ens: List[En], depth: Int): Bool =
   generationType(p.ty, ens, depth)
+
+def noScope(): InputScope =
+  InputScope(0, [], [], [], [], [])
+
+def scopeCount(s: InputScope, required: Bool, status: String): Int =
+  List.len(List.filter(s.workloads, w => w.required == required && w.status == status))
+
+def requiredBlocked(ws: List[Workload]): Bool =
+  List.exists(ws, w => w.required && w.status != "passed")
+
+def scopeLine(s: InputScope): String =
+  Str.concat("scope: required ", Str.concat(Str.fromInt(scopeCount(s, true, "passed")), Str.concat(" passed, ", Str.concat(Str.fromInt(scopeCount(s, true, "failed")), Str.concat(" failed, ", Str.concat(Str.fromInt(scopeCount(s, true, "excluded")), Str.concat(" excluded; search ", Str.concat(Str.fromInt(scopeCount(s, false, "passed")), Str.concat(" passed, ", Str.concat(Str.fromInt(scopeCount(s, false, "failed")), Str.concat(" failed, ", Str.concat(Str.fromInt(scopeCount(s, false, "excluded")), " excluded"))))))))))))
+
+def jScope(s: InputScope): String =
+  Str.concat(",\"scope\":{\"required\":", Str.concat(jScopeCounts(s, true), Str.concat(",\"search\":", Str.concat(jScopeCounts(s, false), Str.concat(",\"inputs\":", Str.concat(jStrList(s.inputs), Str.concat(jReachKey("claims", s.claims, s.checkedClaims), Str.concat(",\"mutant_excluded\":[", Str.concat(List.join(List.map(s.mutantExcluded, n => Str.fromInt(n)), ","), Str.concat("],\"workloads\":[", Str.concat(List.join(List.map(s.workloads, w => jWorkload(w)), ","), "]}")))))))))))
+
+def jScopeCounts(s: InputScope, required: Bool): String =
+  Str.concat("{\"passed\":", Str.concat(Str.fromInt(scopeCount(s, required, "passed")), Str.concat(",\"failed\":", Str.concat(Str.fromInt(scopeCount(s, required, "failed")), Str.concat(",\"excluded\":", Str.concat(Str.fromInt(scopeCount(s, required, "excluded")), Str.concat(if (required) Str.concat(",\"planned\":", Str.concat(Str.fromInt(s.planned), Str.concat(",\"unrun\":", Str.fromInt(s.planned - List.len(List.filter(s.workloads, w => w.required)))))) else "", "}")))))))
+
+def jWorkload(w: Workload): String =
+  Str.concat("{\"label\":", Str.concat(Check.jsonStr(w.label), Str.concat(",\"required\":", Str.concat(jb(w.required), Str.concat(jStrK("status", w.status), Str.concat(jStrK("engine", w.engine), Str.concat(jStrK("script", w.script), Str.concat(jStrK("schedule", w.schedule), Str.concat(jStrK("fault", w.fault), Str.concat(",\"schedule_picks\":", Str.concat(jStrList(w.picks), Str.concat(jStrK("reason", w.reason), "}"))))))))))))
+
+def checkedClaimNames(raw: String): List[String] =
+  sortStrs(List.distinct(List.map(List.filter(linesOf(raw), l => Str.startsWith(l, "checked\t")), l => Str.drop(l, 8))))
 
