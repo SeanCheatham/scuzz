@@ -1,22 +1,22 @@
-# Current slice: evaluator reliability and parity
+# Current slice: local choice feedback
 
-Status: the server uses separate startup and response waits. An index reduces measured function lookup costs. Evaluator maps use a balanced tree. Map model, API, compiler, generated program, startup, IO signal, Headless UI, and search-feedback checks pass. Constructor field selection and View signal dumps have equal timelines and claims on selected replays. The Docs corpus passes. Inline bindings use names from their expression scopes. Generated proofs check repeated local names and closure calls in separate match arms. Module type identity remains open. The compiler reads only selected record fields. Source-offset lookup avoids a tuple allocation. Fixed-source warm probes show a measured decrease. Completed values avoid temporary expressions and environments. A proof checks string and list results after 20,000 tail calls. Compiler idle costs remain open. Complete this slice before local choice feedback. Read `HUMANS.md` and the evaluator locks in `philosophy.md`.
+Status: review records store choices and Undo operations. Generation requests include recent automatic failures and exclusions. They do not include developer preferences. Abstention reasons, region controls, and the local session summary remain open. Compiler idle costs and module type identity remain open in `gaps.md`. They do not prevent this slice. Read `HUMANS.md` and the proposal review locks in `philosophy.md`.
 
 ## Outcome
 
-Selected compiler and editor workloads run on the evaluator with the same results and timelines as compiled execution. Separate incorrect execution from costs that exceed the probe deadline.
+The next suggestion uses bounded feedback from the developer's choices. A local summary shows the results and time costs of the session. Both local model requests and exported requests use the same feedback.
 
 ## Work order
 
-1. Profile the remaining compiler idle costs. Measure record field reads, coverage-key construction, value allocation, and release. Use fixed sources to compare each change. Measure startup and two probes separately. `scuzz fuzz --iterations 0 examples/tyck` and `scuzz fuzz --iterations 0 examples/codegen` preserve probe sources and requests under `build/fuzz/ev`.
-2. Correct demonstrated costs. Keep the 20-second probe deadline, memory limits, scheduler limits, claims, and workload scope. Add the smallest proof for each correction.
-3. Preserve exact IO and Headless UI parity, corpus replay, and bounded search.
-4. Restore the next local choice feedback plan when this slice is complete.
+1. Read preferences from the primary durable review records. Include recent choices, abstention reasons, and Undo results in generation requests. Bound record count and bytes. Preserve the request identity and frozen baseline. Keep automatic exclusions separate from developer choices.
+2. Add optional reasons for Can't decide. Show the reveal and a short result after a choice. Let the developer retain region focus or select another region. Keep the next card's lane mapping hidden.
+3. Add the local session summary. Count accepted choices, baseline choices, abstentions by reason, exclusions, duplicates, and Undo. Report readiness time, review time, and waiting time separately. Count an acceptance as retained only when it is not undone and its touched files still match its accepted bytes at session end. Derive totals from primary records. Do not add a second decision log.
+4. Prove request feedback, source retention, timing, pause, restart, and duplicate decision handling. Update `scuzz docs ide` to match the shipped controls.
 
 ## Required validation
 
-Rebuild the product CLI after compiler or runtime changes. Run formatting and type checks on changed packages. Run selected evaluator and compiled probes in sequence. Run the affected compiler, runtime, and editor proofs. Run the generated compiler slice if evaluator behavior changes. Run `git diff --check`.
+Run formatting and type checks on changed packages. Run the editor simulation campaign and the affected Headless review proofs in `./scripts/ci.sh ui` and `./scripts/ci.sh ui-test`. Preserve exact editor replay and existing acceptance, recovery, and request publication checks. Rebuild the product CLI if shared compiler code changes. Run `git diff --check`.
 
 ## Limits
 
-A finite comparison does not prove all programs equal. Keep human usefulness and unavailable platform evidence open. Do not start local choice feedback in this slice.
+Do not start general compiler speed work in this slice. Correct a demonstrated application or proof blocker when necessary. Keep the current probe limits and evidence requirements. Do not add telemetry or model training. Source retention does not prove that later edits preserve intended behavior. Automated choices do not establish human usefulness. Rule review follows this slice.
