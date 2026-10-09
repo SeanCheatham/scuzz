@@ -106,3 +106,6 @@ oracle evModule5(): Bool =
 oracle boundCallback(): Bool =
   Main.irBoundCallback()
 
+oracle pointerArguments(raw: String): Bool =
+  Main.pointerArguments(raw) == Str.concat(Str.concat(raw, "b"), Str.concat(raw, "o"))
+
