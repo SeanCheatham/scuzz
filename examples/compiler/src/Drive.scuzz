@@ -538,7 +538,7 @@ def srcJoinHd(h: (String, String), rest: List[(String, String)], b: Builder): Bu
   }
 
 def readSrcFiles(srcDir: String, ents: List[(String, Bool)]): IO[List[(String, String)]] =
-  readSrcAcc(srcDir, ents, Manifest.noPairs())
+  readSrcAcc(srcDir, ents, Manifest.noPairs()).map(files => List.map(List.sort(List.map(files, file => file._1)), stem => List.at(List.filter(files, file => file._1 == stem), 0)))
 
 def readSrcAcc(srcDir: String, ents: List[(String, Bool)], acc: List[(String, String)]): IO[List[(String, String)]] =
   if (List.isEmpty(ents)) IO.pure(acc) else readSrcAccGo(srcDir, ents, acc)
