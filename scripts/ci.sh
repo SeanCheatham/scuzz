@@ -2379,7 +2379,7 @@ def waitStopped(pid: Int): IO[Int] =
     server <- Sys.getenv("PROBE_SERVER")
     dir <- Sys.getenv("PROBE_DIR")
     mode <- Sys.getenv("PROBE_MODE")
-    srv <- Ref.of(("", 0))
+    srv <- Ref.of(("", 0, false))
     files = []: List[(String, String)]
     ens = []: List[En]
     faults = []: List[(Int, Int)]
@@ -2387,10 +2387,14 @@ def waitStopped(pid: Int): IO[Int] =
     first <- Drive.evProbe(job, dir, "KIT=sealed\\n")
     before <- Ref.get(srv)
     second <- if (mode == "slow") Drive.evProbe(job, dir, "KIT=sealed\\n") else IO.pure(1)
+    acc = Drive.FuzzAcc(0, 0, 0, "", Drive.climbNew(), [])
+    run = Drive.FuzzRun("", "", "drive startup 7", "2", "", [])
+    done <- if (mode == "fallback") Drive.fuzzSearchProbe(job.copy(exe = server, iterations = 2), "", [], [], acc, run, 124) else IO.pure(acc)
+    engine <- Drive.fuzzJobEngine(job)
     after <- Ref.get(srv)
     _ <- Drive.evStop(job)
     alive <- if (before._2 == 0) IO.pure(0) else IO.timeout(1000, waitStopped(before._2))
-    valid = if (mode == "slow") first == 0 && second == 124 && before._2 != 0 && before == after else first == (if (mode == "reject") 3 else 1) && before._2 == 0 && after._2 == 0
+    valid = if (mode == "fallback") first == 0 && before._2 != 0 && after._2 == 0 && after._3 && !engine.ev && done.search == 1 && List.len(done.workloads) == 1 && List.at(done.workloads, 0).engine == "compiled" && List.at(done.workloads, 0).status == "passed" && List.at(done.workloads, 0).script == run.script else if (mode == "slow") first == 0 && second == 124 && before._2 != 0 && before == after else first == (if (mode == "reject") 3 else 1) && before._2 == 0 && after._2 == 0
     _ <- if (valid && alive == 0) IO.println("probe-startup-ok") else IO.fail(s"probe startup differs: first=$first second=$second before=${before._2} after=${after._2} alive=$alive")
   } yield ()
 ''')
@@ -2405,7 +2409,11 @@ def waitStopped(pid: Int): IO[Int] =
     print('Probe startup: invalid source reports its check failure before a request', flush=True)
     server = target / 'server'
     server.write_text('''#!/usr/bin/env python3
-import os, sys, time
+import json, os, pathlib, sys, time
+if os.environ.get('SCUZZ_TESTRT') == '1':
+    data = json.loads(pathlib.Path(os.environ['SCUZZ_DRIVE_SCRIPT']).read_text())
+    assert data['events'] == [{'op': 'drive', 'name': 'startup', 'args': ['7']}], data
+    sys.exit(0)
 mode = os.environ['PROBE_MODE']
 if mode == 'closed':
     sys.exit(1)
@@ -2413,11 +2421,12 @@ if mode in ['bad', 'reject']:
     print('3' if mode == 'reject' else 'invalid', flush=True)
     time.sleep(60)
     sys.exit(1)
-time.sleep(12)
+if mode != 'fallback':
+    time.sleep(12)
 print('ready', flush=True)
 for number, line in enumerate(sys.stdin):
     assert line.strip() == 'probe'
-    if number == 0:
+    if number == 0 and mode != 'fallback':
         time.sleep(19)
     print('0' if number == 0 else '124', flush=True)
 ''')
@@ -2428,13 +2437,14 @@ for number, line in enumerate(sys.stdin):
     result = subprocess.run([str(cli), 'run', str(target)], env=native_env,
                             capture_output=True, text=True, timeout=180)
     assert result.returncode == 0 and 'probe-startup-ok' in result.stdout, result.stdout + result.stderr
-    for mode in ['bad', 'reject', 'slow']:
+    for mode in ['bad', 'reject', 'slow', 'fallback']:
         started = time.monotonic()
         native_env['PROBE_MODE'] = mode
         result = subprocess.run([str(target / 'build/probe-startup')], env=native_env,
                                 capture_output=True, text=True, timeout=45)
         seconds = time.monotonic() - started
-        assert result.returncode == 0 and result.stdout == 'probe-startup-ok\n', result.stdout + result.stderr
+        expected = ('evaluator probe reaches its deadline; probes run compiled\n' if mode == 'fallback' else '') + 'probe-startup-ok\n'
+        assert result.returncode == 0 and result.stdout == expected, result.stdout + result.stderr
         if mode == 'slow':
             assert seconds >= 30, seconds
         print(f'Probe startup {mode}: {seconds:.2f} s; separate waits, server reuse, and shutdown pass', flush=True)
