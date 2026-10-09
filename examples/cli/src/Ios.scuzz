@@ -83,7 +83,7 @@ def buildManifest(dir: String, out: String, m: Man): IO[Bool] =
   if (m.ok && !m.hasUi) IO.println("iOS run needs a [ui] package. Create one with scuzz new NAME --ui.").flatMap(_ => IO.pure(false)) else Drive.pkgIosMan(dir, out, m).map(_ => true)
 
 def consoleCommand(home: String, sim: Sim, out: String, watch: Bool): String =
-  Str.concat("bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-mobile/shells/ios/run_sim.sh")), Str.concat(" ", Str.concat(Drive.shQuote(sim.id), Str.concat(" ", Str.concat(Drive.shQuote(out), Str.concat(if (watch) " watch" else " run", " 1>&2")))))))
+  Str.concat("exec bash ", Str.concat(Drive.shQuote(Drive.crateAt(home, "crates/embedder-mobile/shells/ios/run_sim.sh")), Str.concat(" ", Str.concat(Drive.shQuote(sim.id), Str.concat(" ", Str.concat(Drive.shQuote(out), Str.concat(if (watch) " watch" else " run", " 1>&2")))))))
 
 def start(dir: String, out: String, sim: Sim, watch: Bool, before: String): IO[Unit] =
   prepareReload(dir, out, watch).flatMap(_ => Fs.read(Drive.joinSlash(dir, "scuzz.toml")).flatMap(toml => startConsole(dir, out, sim, watch, before, toml)))
