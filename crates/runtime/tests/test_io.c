@@ -9524,6 +9524,39 @@ int main(void) {
     (void)sz_io_unsafe_run(sz_sys_alive(pid));
   }
 
+  /* Cancellation releases unread output after the child exits. */
+  {
+    int round;
+    for (round = 0; round < 24; round++) {
+      SzIoResult r;
+      int64_t pid;
+      int i;
+      r = sz_io_unsafe_run(sz_sys_spawn(sz_string_from_cstr(
+          "trap 'sleep 0.02; exit 0' TERM; printf 'ready\\nleft\\n'; "
+          "while :; do :; done")));
+      assert(r.ok);
+      pid = sz_unbox_i64(r.value);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_sys_child_read(pid, 6));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr(r.value), "ready\n") == 0);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_sys_kill(pid));
+      assert(r.ok);
+      for (i = 0; i < 100; i++) {
+        r = sz_io_unsafe_run(sz_sys_alive(pid));
+        assert(r.ok);
+        if (sz_unbox_i64(r.value) == 0) {
+          sz_release(r.value);
+          break;
+        }
+        sz_release(r.value);
+        sleep_us(20000);
+      }
+      assert(i < 100);
+    }
+  }
+
   /* Sys.alive probes a non-child pid without a waitpid. */
   {
     SzIoResult r;
