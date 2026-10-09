@@ -126,6 +126,125 @@ oracle boundaries(): Bool =
 print('input validation and native parity ok')
 PY_INPUT
 
+# Result bindings retain an explicit failure policy.
+python3 - <<'PY_RESULT'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+
+cli = Path(os.environ.get('SCUZZ', 'examples/cli/build/cli')).resolve()
+
+def command(args, ok=True, env=None):
+    result = subprocess.run([str(cli), *map(str, args)], capture_output=True,
+                            text=True, timeout=180, env=env)
+    assert (result.returncode == 0) == ok, (args, result.stdout[-4000:], result.stderr[-4000:])
+    return result
+
+with tempfile.TemporaryDirectory(prefix='scuzz-result-') as directory:
+    root = Path(directory)
+    (root / 'src').mkdir()
+    (root / 'scuzz.toml').write_text('[package]\nname="result"\nversion="0.1.0"\n[fuzz]\nscore_floor=0\n')
+    shutil.copy('examples/kernel/src/Input.scuzz', root / 'src/Input.scuzz')
+    source = '''type Read = Result[String, Int]
+
+def identity[E, A](result: Result[E, A]): Result[E, A] =
+  for { copy = result } yield copy
+
+def consume(result: Read): Int =
+  result match {
+    case Result.Ok(n) => n
+    case Result.Err(_) => -1
+  }
+
+def handled(text: String): Int =
+  for {
+    result = Str.parseInt(text)
+    next = identity(result)
+    use = (_unused: Unit) => consume(next)
+  } yield use(())
+
+def guarded(text: String): Bool =
+  for { result = Str.parseInt(text) } yield true match {
+    case true if consume(result) >= 0 => true
+    case _ => false
+  }
+
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(handled("7")))
+    _ <- IO.println(Str.fromInt(handled("bad")))
+    _ <- IO.println(Str.fromBool(guarded("7")))
+    _ <- IO.println(Str.fromBool(guarded("bad")))
+    _ <- Input.attempt(true).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- Input.attempt(false).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- Input.unitBind(true).flatMap(n => IO.println(Str.fromInt(n)))
+    _ <- Input.unitBind(false).handleErrorWith(_ => IO.pure(-1)).flatMap(n => IO.println(Str.fromInt(n)))
+  } yield ()
+'''
+    (root / 'src/Main.scuzz').write_text(source)
+    command(['fmt', root])
+    for engine in ['run', 'eval']:
+        output = command([engine, root]).stdout.strip().splitlines()
+        if output and output[0] == 'ok':
+            output = output[1:]
+        assert output == ['7', '-1', 'true', 'false', '7', '-1', '7', '-1'], (engine, output)
+    bad = [('_ = Str.parseInt("7")', '()', 'discarded'),
+           ('result = Str.parseInt("7")', '()', 'discarded'),
+           ('_ignored = Str.parseInt("7")', '()', 'discarded'),
+           ('Result.Ok(n) = Str.parseInt("7")', '()', 'must cover success and failure'),
+           ('Result.Err(error) = Str.parseInt("bad")', '()', 'must cover success and failure'),
+           ('_ <- IO.attempt(IO.pure(7))', '()', 'discarded'),
+           ('result <- IO.attempt(IO.pure(7))', '()', 'discarded'),
+           ('Result.Ok(n) <- IO.attempt(IO.pure(7))', '()', 'must cover success and failure'),
+           ('result = Str.parseInt("7")\n    use = (result: Int) => result', '()', 'discarded'),
+           ('result = Str.parseInt("7")', 'true match { case result => () }', 'discarded'),
+           ('result = Str.parseInt("7")', 'for { result = 1 } yield ()', 'discarded'),
+           ('result = Str.parseInt("7")', 'for { copy = result } yield ()', 'discarded'),
+           ('result = (Str.parseInt("7"): Read)', '()', 'discarded'),
+           ('result = Str.parseInt("7")', '"result" match { case _ => () }', 'discarded'),
+           ('() <- IO.pure(7)', '()', 'unit pattern needs Unit')]
+    for bindings, body, message in bad:
+        effect = '<-' in bindings
+        declaration = 'IO[Unit]' if effect else 'Unit'
+        broken = f'type Read = Result[String, Int]\ndef broken(): {declaration} =\n  for {{\n    {bindings}\n  }} yield {body}\n'
+        (root / 'src/Bad.scuzz').write_text(broken)
+        command(['fmt', root])
+        result = command(['check', '--message-format=json', root], ok=False)
+        diagnostics = json.loads(result.stdout)
+        error = next(row for row in diagnostics if row['severity'] == 'error')
+        assert message in error['message'], error
+        assert error['file'].endswith('Bad.scuzz') and error['line'] >= 4 and error['column'] > 0, error
+        for entry in ['build', 'eval']:
+            result = command([entry, root], ok=False)
+            assert message in result.stdout + result.stderr, (entry, result.stdout, result.stderr)
+        (root / 'src/Bad.scuzz').unlink()
+    (root / 'result.scuzz_verify').write_text('''oracle handled(n: Int): Bool =
+  Input.resolved(Str.fromInt(n)) == n && Input.resolved("bad") == -1
+
+oracle attempts(flag: Bool): Bool =
+  Property.force(Input.attempt(flag)) == (if (flag) 7 else -1)
+
+oracle unitBinding(flag: Bool): Bool =
+  Property.force(Input.unitBind(flag).handleErrorWith(_ => IO.pure(-1))) == (if (flag) 7 else -1)
+''')
+    command(['fmt', root])
+    for compiled in [False, True]:
+        env = dict(os.environ)
+        if compiled:
+            env['SCUZZ_FUZZ_ENGINE'] = 'compiled'
+        else:
+            env.pop('SCUZZ_FUZZ_ENGINE', None)
+        command(['fuzz', '--iterations', '32', root], env=env)
+        report = json.loads((root / 'build/fuzz/summary.json').read_text())
+        assert report['fuzz']['ok'] and report['scope']['search']['failed'] == 0
+        engines = {row['engine'] for row in report['scope']['workloads'] if not row['required']}
+        assert engines == {'compiled' if compiled else 'evaluator'}, engines
+print('Result handling and source diagnostics ok')
+PY_RESULT
+
 "$SCUZZ" run examples/kernel | tee /tmp/kernel.out
 # Runner segvs here are flaky. On failure, rerun the exe under gdb so the log keeps a backtrace.
 if [ "${PIPESTATUS[0]}" -ne 0 ]; then

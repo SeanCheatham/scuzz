@@ -67,3 +67,9 @@ oracle integerRejectsSuffix(n: Int): Bool =
 oracle quantityRange(n: Int): Bool =
   Input.accepted(Input.parseQuantity(Str.fromInt(n))) == (n >= 1 && n <= 100) && Input.accepted(Input.decodeQuantity(s"{\"quantity\":$n}")) == (n >= 1 && n <= 100)
 
+oracle handledResults(n: Int): Bool =
+  Input.resolved(Str.fromInt(n)) == n && Input.resolved("bad input") == -1 && Property.force(Input.attempt(true)) == 7 && Property.force(Input.attempt(false)) == -1
+
+oracle unitResultBinding(flag: Bool): Bool =
+  Property.force(Input.unitBind(flag).handleErrorWith(_ => IO.pure(-1))) == (if (flag) 7 else -1)
+

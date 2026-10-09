@@ -67,11 +67,11 @@ There is no explicit claim suggestion or installation path from a preference. A 
 ### Verification scope and application correctness
 
 - **Input boundaries.** Strict integers and required JSON fields return explicit errors. The kernel checks field types and domain ranges in live code. General typed JSON decoding and nested field error paths remain open. Extend the kit when an application needs them. Verification assumptions do not validate live input.
-- **Application models.** Use a small reference model to check state changes and effect results. Add examples that check failure paths and recovery. Finite model checks do not prove every input correct.
+- **Failure handling.** Direct Result bindings reject discard and partial patterns. Results inside lists, tuples, and record fields need further checks when an application demonstrates loss. Passing a result to a function does not prove that the receiver handles its error. Keep expected errors explicit through input and effect boundaries.
+- **Behavior rules.** Make rules about state, effects, cancellation, duplicate requests, and recovery easy to express and diagnose. Check relationships between executions without a second app implementation.
+- **Reference models.** Deferred. A model is optional. It is not the default verification path.
 
 ### Supporting compiler and editor work
-
-- **Unit effect binding.** `() <- IO.pure(())` passes checking. Native emission produces invalid LLVM IR. Reject the unsupported binding or emit it correctly. A Unit match and a nested Unit pattern execute on both engines.
 
 - **Compile time.** `scuzz check examples/compiler` takes 4.63 s in one current sample. The CLI SHA-256 is `4bf1aeddc4148d4db8c674bffc2503bb70cd5405227483fcf1d896ba77d55c73`. The editor campaign, CLI corpus replay, and PR checks run at the same time. `scuzz build --full examples/tyck` is recorded at about 16 s. Refresh these and the editor measurements after compile-time changes. Reduce demonstrated checker or LLVM emission costs only when they block this arc.
 - **IDE subprocesses.** Run, Fuzz, and Diff use the CLI. Completion, formatting, code actions, semantic tokens, inlay hints, and folding use `scuzz lsp`. Removing these calls is not a gate for the stream.

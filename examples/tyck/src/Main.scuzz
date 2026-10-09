@@ -350,6 +350,9 @@ def tyckFail(): Bool =
 def tyckOra(): Bool =
   rejects("oracle hidden(): Int = 1", "oracle hidden must return Bool") && Check.check("oracle hidden(): Bool = true") == "[]" && rejects("private oracle hidden(): Bool = true", "unexpected token")
 
+def resultBindings(): Bool =
+  rejects("def drop(): Unit = for { _ = Str.parseInt(\"7\") } yield ()", "Result value is discarded") && rejects("def drop(): Unit = for { ignored = Str.parseInt(\"7\") } yield ()", "Result value is discarded") && rejects("def drop(): IO[Unit] = for { _ <- IO.attempt(IO.pure(7)) } yield ()", "Result value is discarded") && rejects("def drop(): Int = for { Result.Ok(n) = Str.parseInt(\"7\") } yield n", "Result binding must cover success and failure") && rejects("def drop(): Unit = for { result = Str.parseInt(\"7\")\n f = (result: Int) => result } yield ()", "Result value is discarded") && Check.check("def keep(): Result[String, Int] = for { result = Str.parseInt(\"7\") } yield result") == "[]" && Check.check("def keep(): IO[Result[String, Int]] = for { result <- IO.attempt(IO.pure(7)) } yield result") == "[]" && Check.check("def handle(): Int = for { result = Str.parseInt(\"7\") } yield result match { case Result.Ok(n) => n\ncase Result.Err(_) => 0 }") == "[]"
+
 def ioTypeArgs(): Bool =
   genericTypeArgs() && ioTypeCompatibility() && namedIoTypes() && signalTypes() && attemptTypes() && kitLookup() && resultTypes() && ioCombinators()
 
@@ -1738,7 +1741,7 @@ def concreteTyParity(): Bool =
   List.forall(["", "Any", "Int", "A", "List[A]", "Map[String, A]", "(Int, B)", "A => Bool", "List[Int] => Result[String, Bool]", "Foo.A", "A-B", "A, B", "A B", "A , B", "String"], t => Check.concreteTy(t) == (t != "" && t != "Any" && !Check.looseTy(Type.parse(t))))
 
 def allOk(): Bool =
-  tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
+  resultBindings() && tyckCore() && tyckFlow() && tyckRes() && tyckFail() && tyckParse() && tyckLam() && tyckAdt() && tyckClosed() && tyckAny() && factsTier() && concreteTyParity() && orderedListTypes() && closedMatchCoverage() && moduleIdentity()
 
 def closedMatchCoverage(): Bool =
   List.forall(List.range(0, 128), seed => Cases.coverageChecked(seed)) && closedPatternCoverage()

@@ -451,7 +451,7 @@ def wrapGuard(c: Expr, body: Expr): Expr =
   Expr.EIf(c, body, Expr.ECall("IO.fail", Expr.EStr("guard", 0) :: noExpr(), 0), 0)
 
 def wrapDraw(name: String, v: Expr, body: Expr): Expr =
-  if (isSimpleBind(name)) Expr.EMethod(v, "flatMap", Expr.ELam(name, "", body) :: noExpr(), 0) else wrapPatDraw(name, v, body)
+  if (name == "()") wrapDraw("_", v, body) else if (isSimpleBind(name)) Expr.EMethod(v, "flatMap", Expr.ELam(name, "", body) :: noExpr(), 0) else wrapPatDraw(name, v, body)
 
 def wrapPatDraw(pat: String, v: Expr, body: Expr): Expr =
   Expr.EMethod(Expr.EMethod(v, "flatMap", Expr.ELam("__p", "", Expr.ECall("IO.pure", Expr.EMatch(Expr.EVar("__p", 0), Arm(pat, "", patResult(pat)) :: noArm(), 0) :: noExpr(), 0)) :: noExpr(), 0), "flatMap", Expr.ELam(patBindName(pat), "", body) :: noExpr(), 0)
@@ -2018,8 +2018,8 @@ def emitPropClass(code: String, vals: List[String], owns: List[Bool], prefix: St
 def emitPropClass2(code: String, name: String, hit: String, drop: Bool, _prefix: String): Slot =
   Slot(join(code, join(line(Str.concat("call void @sz_property_classify(ptr ", Str.concat(name, Str.concat(", i64 ", Str.concat(hit, ")"))))), if (drop) relPtr(name) else "")), "1", false)
 
-def emitPropForce(arg: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String): Slot =
-  emitPropForce2(emitExpr(arg, Str.concat(prefix, "_arg0"), strs, defs, ens, ps, loc), prefix, isI64Ty(Check.ioPayload(exprRetTyEns(arg, defs, ens, ps, loc))))
+def emitPropForce(arg: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
+  emitPropForce2(emitExprFid(arg, Str.concat(prefix, "_arg0"), strs, defs, ens, ps, loc, fid), prefix, isI64Ty(Check.ioPayload(exprRetTyEns(arg, defs, ens, ps, loc))))
 
 def emitPropForce2(s: Slot, prefix: String, scalar: Bool): Slot =
   s match {
@@ -2320,7 +2320,7 @@ def emitCallKit(f: String, args: List[Expr], prefix: String, strs: Strs, defs: F
   if (Str.startsWith(f, "Signal.")) emitGenericSignal(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "IO.pure") emitIoPureCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "Net.serveOnce" || f == "Net.serve" || f == "Net.serveOnceTls" || f == "Net.serveTls" || f == "Net.serveOnceTlsFiles" || f == "Net.serveTlsFiles") emitNetServe(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Ui.run") emitUiRunCall(args, prefix, strs, defs, ens, ps, loc) else if (isLam2Kit(f)) emitKitLam2(f, args, prefix, strs, defs, ens, ps, loc) else if (tapViewRt(f) != "") emitTapViewCall(tapViewRt(f), args, prefix, strs, defs, ens, ps, loc) else if (f == "View.each") emitViewEachCall(args, prefix, strs, defs, ens, ps, loc) else if (f == "View.inkWell") emitInkWellCall(args, prefix, strs, defs, ens, ps, loc) else if (isMapKit(f)) emitMapKit(f, args, prefix, strs, defs, ens, ps, loc) else if (isFoldKit(f)) emitFoldKit(f, args, prefix, strs, defs, ens, ps, loc) else if (f == "Stream.iterate") emitIterKit(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.tabulate") emitTabulate(args, prefix, strs, defs, ens, ps, loc) else if (f == "List.segmentLength") emitSegLen(args, prefix, strs, defs, ens, ps, loc) else emitCallKit2(f, args, prefix, strs, defs, ens, ps, loc, fid)
 
 def emitCallKit2(f: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  if (f == "Property.force") emitPropForce(List.at(args, 0), prefix, strs, defs, ens, ps, loc) else if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps, loc) else emitCallKitAligned(f, alignCallArgs(f, args, defs, ens, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, fid)
+  if (f == "Property.force") emitPropForce(List.at(args, 0), prefix, strs, defs, ens, ps, loc, fid) else if (f == "Property.check") emitPropCheckCall(args, prefix, strs, defs, ens, ps, loc) else emitCallKitAligned(f, alignCallArgs(f, args, defs, ens, modOfLoc(loc)), prefix, strs, defs, ens, ps, loc, fid)
 
 def emitCallKitAligned(f: String, args: List[Expr], prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitCall2(f, emitArgList(callLambdaArgs(args, funParamsOf(defs, f, modOfLoc(loc))), prefix, strs, defs, ens, ps, loc, 0, "", noStr(), noBool(), fid), prefix, defs, args, ens, ps, modOfLoc(loc))
@@ -2440,45 +2440,6 @@ def exprHasVar(e: Expr, s: String): Bool =
     case Expr.EAscribe(inner, _, _) => exprHasVar(inner, s)
     case Expr.EFor(bs, body, _) => bindsHasVar(bs, s) || exprHasVar(body, s)
     case _ => false
-  }
-
-def patternBindsName(pat: String, name: String): Bool =
-  List.exists(Check.bindPat(pat, "", [], []), binding => binding._1 == name)
-
-def exprFreeVar(e: Expr, s: String): Bool =
-  e match {
-    case Expr.EVar(n, _) => n == s
-    case Expr.EPrint(inner, _) => exprFreeVar(inner, s)
-    case Expr.ECall(_, args, _) => listFreeVar(args, s)
-    case Expr.EMethod(recv, _, args, _) => exprFreeVar(recv, s) || listFreeVar(args, s)
-    case Expr.EField(recv, _, _) => exprFreeVar(recv, s)
-    case Expr.EBin(_, l, r, _) => exprFreeVar(l, s) || exprFreeVar(r, s)
-    case Expr.EUn(_, inner, _) => exprFreeVar(inner, s)
-    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprFreeVar(body, s)
-    case Expr.EIf(c, t, el, _) => exprFreeVar(c, s) || exprFreeVar(t, s) || exprFreeVar(el, s)
-    case Expr.EMatch(sc, arms, _) => exprFreeVar(sc, s) || List.exists(arms, arm => armFreeVar(arm, s))
-    case Expr.EList(xs) => listFreeVar(xs, s)
-    case Expr.ETuple(xs) => listFreeVar(xs, s)
-    case Expr.ENamed(_, inner) => exprFreeVar(inner, s)
-    case Expr.EAscribe(inner, _, _) => exprFreeVar(inner, s)
-    case Expr.EFor(bs, body, _) => forFreeVar(bs, body, s)
-    case _ => false
-  }
-
-def listFreeVar(xs: List[Expr], s: String): Bool =
-  List.exists(xs, e => exprFreeVar(e, s))
-
-def armFreeVar(arm: Arm, s: String): Bool =
-  arm match {
-    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprFreeVar(body, s) || guard != "" && exprFreeVar(parseGuard(guard), s))
-  }
-
-def forFreeVar(bs: List[Bind], body: Expr, s: String): Bool =
-  if (List.isEmpty(bs)) exprFreeVar(body, s) else forFreeBind(List.at(bs, 0), List.tail(bs), body, s)
-
-def forFreeBind(b: Bind, rest: List[Bind], body: Expr, s: String): Bool =
-  b match {
-    case Bind(_, pat, value) => exprFreeVar(value, s) || !patternBindsName(pat, s) && forFreeVar(rest, body, s)
   }
 
 def listHasVar(xs: List[Expr], s: String): Bool =
@@ -2615,7 +2576,7 @@ def emitApplyLam(p: String, body: Expr, args: List[Expr], prefix: String, strs: 
   emitApplyLamGo(p, body, applyScrut(args), prefix, strs, defs, ens, ps, loc, fid)
 
 def emitApplyLamGo(p: String, body: Expr, argE: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
-  emitApplyLamSlot(p, body, emitExprFid(argE, Str.concat(prefix, "_aa"), strs, defs, ens, ps, loc, fid), argE, prefix, strs, defs, ens, ps, loc, fid)
+  emitApplyLamSlot(p, body, emitExprFid(argE, Str.concat(prefix, "_aa"), strs, defs, ens, ps, loc, fid + fmCount(body)), argE, prefix, strs, defs, ens, ps, loc, fid)
 
 def emitApplyLamSlot(p: String, body: Expr, arg: Slot, argE: Expr, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, fid: Int): Slot =
   emitApplyLamTyped(p, body, arg, slotBindI64(arg, argE, ps, defs), applyBindTyPin(p, body, argE, defs, ens, ps, loc), prefix, strs, defs, ens, ps, loc, fid)
@@ -4737,7 +4698,7 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
     case Expr.EField(recv, name, off) => Expr.EField(rewriteBind(recv, from, to), name, off)
     case Expr.EBin(op, l, r, off) => Expr.EBin(op, rewriteBind(l, from, to), rewriteBind(r, from, to), off)
     case Expr.EUn(op, inner, off) => Expr.EUn(op, rewriteBind(inner, from, to), off)
-    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, if (patternBindsName(p, from)) body else rewriteBind(body, from, to))
+    case Expr.ELam(p, ty, body) => Expr.ELam(p, ty, if (Check.patternBindsName(p, from)) body else rewriteBind(body, from, to))
     case Expr.EIf(c, t, el, off) => Expr.EIf(rewriteBind(c, from, to), rewriteBind(t, from, to), rewriteBind(el, from, to), off)
     case Expr.EMatch(s, arms, off) => Expr.EMatch(rewriteBind(s, from, to), rewriteBindArms(arms, from, to), off)
     case Expr.EList(xs) => Expr.EList(rewriteBindList(xs, from, to))
@@ -4756,7 +4717,7 @@ def rewriteBind1(e: Expr, from: String, to: String): Expr =
 
 def bindShadows(b: Bind, name: String): Bool =
   b match {
-    case Bind(_, pat, _) => patternBindsName(pat, name)
+    case Bind(_, pat, _) => Check.patternBindsName(pat, name)
   }
 
 def rewriteBindBinds(bs: List[Bind], from: String, to: String): List[Bind] =
@@ -4767,7 +4728,7 @@ def rewriteBindBinds(bs: List[Bind], from: String, to: String): List[Bind] =
 
 def rewriteBindBinds1(b: Bind, rest: List[Bind], from: String, to: String): List[Bind] =
   b match {
-    case Bind(draw, pat, value) => Bind(draw, pat, rewriteBind(value, from, to)) :: (if (patternBindsName(pat, from)) rest else rewriteBindBinds(rest, from, to))
+    case Bind(draw, pat, value) => Bind(draw, pat, rewriteBind(value, from, to)) :: (if (Check.patternBindsName(pat, from)) rest else rewriteBindBinds(rest, from, to))
   }
 
 def rewriteInterpStr(s: String, from: String, to: String): String =
@@ -4825,7 +4786,7 @@ def rewriteBindArms2(h: Arm, t: List[Arm], from: String, to: String): List[Arm] 
 
 def rewriteBindArm(arm: Arm, from: String, to: String): Arm =
   arm match {
-    case Arm(pat, g, body) => if (patternBindsName(pat, from)) arm else Arm(pat, if (g == "") g else Parse.pretty0(rewriteBind(parseGuard(g), from, to)), rewriteBind(body, from, to))
+    case Arm(pat, g, body) => if (Check.patternBindsName(pat, from)) arm else Arm(pat, if (g == "") g else Parse.pretty0(rewriteBind(parseGuard(g), from, to)), rewriteBind(body, from, to))
   }
 
 def emitOks1g(g: String, pat: String, s: Slot, rest: List[Arm], moff: Int, prefix: String, strs: Strs, defs: Ftab, ens: List[En], ps: List[Param], loc: String, i: Int, tys: List[String], sv: String, last: Bool, asI64: Bool, fid: Int, borrow: Bool): (String, List[String], Bool, Bool) =
@@ -6153,7 +6114,7 @@ def withSelfFuns(ds: List[Fun]): List[Fun] =
 
 def withSelfFun(d: Fun): Fun =
   d match {
-    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => if (paramKnown(ps, "self") || !exprFreeVar(body, "self")) d else Fun(priv, ora, name, ts, Param("self", if (mod == "") "" else mod, "", "") :: ps, ret, body, mod, off)
+    case Fun(priv, ora, name, ts, ps, ret, body, mod, off) => if (paramKnown(ps, "self") || !Check.exprFreeVar(body, "self")) d else Fun(priv, ora, name, ts, Param("self", if (mod == "") "" else mod, "", "") :: ps, ret, body, mod, off)
   }
 
 def implFuns(impls: List[Im], defs: List[Fun]): List[Fun] =

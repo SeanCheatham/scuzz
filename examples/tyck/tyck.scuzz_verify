@@ -52,3 +52,6 @@ oracle closedPatternCoverage(): Bool =
 oracle moduleIdentity(): Bool =
   Main.moduleIdentity()
 
+oracle resultBindings(): Bool =
+  Main.resultBindings()
+

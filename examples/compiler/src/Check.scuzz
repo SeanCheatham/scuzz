@@ -1229,10 +1229,59 @@ def lamPinTyOf2(name: String, v: Expr, cont: Expr, vo: Out, defs: Ftab, ens: Lis
 def lamPinTyOf3(v: Expr, vo: Out, pin: String, env: List[(String, Ty)], defs: Ftab, ens: List[En]): String =
   if (pin == "") "" else tyStr(lamPinDo(pin, v, env, defs, ens, vo))
 
+def patternBindsName(pat: String, name: String): Bool =
+  List.exists(bindPat(pat, "", [], []), binding => binding._1 == name)
+
+def exprFreeVar(e: Expr, s: String): Bool =
+  e match {
+    case Expr.EVar(n, _) => n == s
+    case Expr.EPrint(inner, _) => exprFreeVar(inner, s)
+    case Expr.ECall(f, args, _) => f == s || listFreeVar(args, s)
+    case Expr.EMethod(recv, _, args, _) => exprFreeVar(recv, s) || listFreeVar(args, s)
+    case Expr.EField(recv, _, _) => exprFreeVar(recv, s)
+    case Expr.EBin(_, l, r, _) => exprFreeVar(l, s) || exprFreeVar(r, s)
+    case Expr.EUn(_, inner, _) => exprFreeVar(inner, s)
+    case Expr.ELam(p, _, body) => !patternBindsName(p, s) && exprFreeVar(body, s)
+    case Expr.EIf(c, t, el, _) => exprFreeVar(c, s) || exprFreeVar(t, s) || exprFreeVar(el, s)
+    case Expr.EMatch(sc, arms, _) => exprFreeVar(sc, s) || List.exists(arms, arm => armFreeVar(arm, s))
+    case Expr.EInterp(_, parts, _) => listFreeVar(parts, s)
+    case Expr.EList(xs) => listFreeVar(xs, s)
+    case Expr.ETuple(xs) => listFreeVar(xs, s)
+    case Expr.ENamed(_, inner) => exprFreeVar(inner, s)
+    case Expr.EAscribe(inner, _, _) => exprFreeVar(inner, s)
+    case Expr.EFor(bs, body, _) => forFreeVar(bs, body, s)
+    case _ => false
+  }
+
+def listFreeVar(xs: List[Expr], s: String): Bool =
+  List.exists(xs, e => exprFreeVar(e, s))
+
+def armFreeVar(arm: Arm, s: String): Bool =
+  arm match {
+    case Arm(pat, guard, body) => !patternBindsName(pat, s) && (exprFreeVar(body, s) || guard != "" && exprFreeVar(Parse.parseExprList(Lexer.lex(guard), 0)._1, s))
+  }
+
+def forFreeVar(bs: List[Bind], body: Expr, s: String): Bool =
+  if (List.isEmpty(bs)) exprFreeVar(body, s) else forFreeBind(List.at(bs, 0), List.tail(bs), body, s)
+
+def forFreeBind(b: Bind, rest: List[Bind], body: Expr, s: String): Bool =
+  b match {
+    case Bind(_, pat, value) => exprFreeVar(value, s) || !patternBindsName(pat, s) && forFreeVar(rest, body, s)
+  }
+
+def resultBindErr(name: String, ty: String, rest: List[Bind], body: Expr, ens: List[En]): String =
+  if (Type.appName(Type.parse(ty)) != "Result") "" else if (!coverComplete([[name]], [ty], ens)) "Result binding must cover success and failure; use match" else resultBindUse(bindPat(name, ty, [], ens), rest, body)
+
+def resultBindUse(bindings: List[(String, Ty)], rest: List[Bind], body: Expr): String =
+  if (List.exists(bindings, binding => Type.appName(binding._2) == "Result" && forFreeVar(rest, body, binding._1))) "" else "Result value is discarded; match it, return it, or pass it to a function"
+
 def inferForBind2(d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   if (hasErr(vo)) vo else inferForBindOwner(ownerPatErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
 
 def inferForBindOwner(err: String, d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
+  if (err != "") bad(err, span) else inferForBindResult(resultBindErr(name, if (d) ioPayload(tyStr(vo)) else tyStr(vo), rest, body, ens), d, name, vo, rest, body, env, funs, ens, errTy, span)
+
+def inferForBindResult(err: String, d: Bool, name: String, vo: Out, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
   if (err != "") bad(err, span) else if (d) andBinds(vo, inferForDraw(name, tyStr(vo), rest, body, env, funs, ens, errTy, span)) else andBinds(vo, inferForGo(rest, body, bindFor(false, name, tyStr(vo), env, ens), funs, ens, errTy))
 
 def inferForDraw(name: String, ty: String, rest: List[Bind], body: Expr, env: List[(String, Ty)], funs: Ftab, ens: List[En], errTy: String, span: (String, Int)): Out =
